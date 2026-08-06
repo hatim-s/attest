@@ -73,7 +73,7 @@ A trace is **optional**. Without one, attest still evaluates outputs; with one, 
 | `parent_span_id`         | string \| null | yes      | `null` for roots. Multiple roots allowed.                                             |
 | `name`                   | string         | yes      | Human-readable operation name.                                                        |
 | `kind`                   | string         | yes      | `agent` \| `llm` \| `tool` \| `retrieval` \| `other`.                                 |
-| `start_time`, `end_time` | string         | yes      | RFC 3339 with sub-second precision, UTC (`Z`). `end_time >= start_time`.              |
+| `start_time`, `end_time` | string         | yes      | RFC 3339 UTC (`Z`); sub-second precision recommended. `end_time >= start_time`.       |
 | `status`                 | object         | yes      | `{ "code": "ok" \| "error", "message"?: string }`.                                    |
 | `attributes`             | object         | no       | Flat map, dot-namespaced keys → string \| number \| boolean. See conventions.         |
 | `events`                 | array          | no       | `{ "name": string, "time": RFC3339, "attributes"?: object }` — point-in-time markers. |

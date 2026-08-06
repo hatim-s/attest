@@ -20,6 +20,7 @@
     "typecheck": "turbo run typecheck",
     "lint": "eslint .",
     "test": "turbo run test",
+    "generate:schemas": "bun scripts/generate-json-schema.ts",
     "format:check": "prettier --check .",
     "format": "prettier --write .",
     "lint:fix": "eslint --fix ."
