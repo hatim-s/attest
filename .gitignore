@@ -1,0 +1,5 @@
+PLAN.md
+.attest/
+.logs/
+node_modules/
+.DS_Store

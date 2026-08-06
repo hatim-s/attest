@@ -57,3 +57,16 @@ put them in `package.json`.
 ### Environment
 - Whenever adding, removing, or renaming an environment variable, secret, or Cloudflare binding,
 update `docs/ENV.md` in the same change.
+
+## Implementation plan protocol
+
+The build plan is `PLAN.md` (repo root, **gitignored** — local working copy). Canonical copy: planloft store `~/.planloft/docs/attest/attest-implementation-plan.md`; published view: https://hatim-s.github.io/planloft-plans/p/d6omNNpVrp/
+
+If `PLAN.md` is missing locally, restore it: `planloft copy attest-implementation-plan` (or `node /Users/admin/Projects/planloft/dist/cli.js copy attest-implementation-plan`), then move it to repo root as `PLAN.md`.
+
+Follow the **Agent protocol** section at the top of PLAN.md: claim items (⏳), respect dependencies, mark done ([x] + ✅ note), and after every status change rehost + redeploy so all agents and the human stay in sync:
+
+```bash
+node /Users/admin/Projects/planloft/dist/cli.js hoist PLAN.md --slug attest-implementation-plan --title "attest — Implementation Plan" --kind plan
+node /Users/admin/Projects/planloft/dist/cli.js deploy attest-implementation-plan
+```
