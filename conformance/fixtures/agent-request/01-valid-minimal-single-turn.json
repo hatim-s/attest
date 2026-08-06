@@ -1,0 +1,10 @@
+{
+  "description": "Accepts the minimal documented single-turn agent request.",
+  "expect": "valid",
+  "input": {
+    "protocol": "attest.agent/v1alpha1",
+    "run_id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+    "case_id": "greeting-basic",
+    "input": { "question": "What is the capital of France?" }
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "description": "Keeps a valid output response while disabling an invalid optional trace.",
+  "expect": "valid-with-warnings",
+  "warning_codes": ["invalid_trace"],
+  "input": {
+    "protocol": "attest.agent/v1alpha1",
+    "output": "Paris",
+    "trace": { "schema": "wrong-version" }
+  }
+}

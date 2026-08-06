@@ -1,0 +1,8 @@
+{
+  "description": "Accepts a well-formed agent-reported failure as a result rather than an invocation error.",
+  "expect": "valid",
+  "input": {
+    "protocol": "attest.agent/v1alpha1",
+    "error": { "message": "The upstream service timed out.", "code": "UPSTREAM_TIMEOUT" }
+  }
+}

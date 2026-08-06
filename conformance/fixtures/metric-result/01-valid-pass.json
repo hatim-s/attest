@@ -1,0 +1,5 @@
+{
+  "description": "Accepts a passing normalized metric result.",
+  "expect": "valid",
+  "input": { "score": 1, "pass": true }
+}

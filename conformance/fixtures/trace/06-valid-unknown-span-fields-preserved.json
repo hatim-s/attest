@@ -1,0 +1,21 @@
+{
+  "description": "Accepts and preserves unknown trace document and span extension fields through parsing.",
+  "expect": "valid",
+  "input": {
+    "schema": "attest.trace/v1alpha1",
+    "trace_id": "trace-extension",
+    "vendor_document": { "nested": ["alpha", { "beta": true }] },
+    "spans": [
+      {
+        "span_id": "span-1",
+        "parent_span_id": null,
+        "name": "agent.run",
+        "kind": "agent",
+        "start_time": "2026-08-06T10:15:03Z",
+        "end_time": "2026-08-06T10:15:09Z",
+        "status": { "code": "ok" },
+        "vendor_span": { "tuple": [1, "two", false], "nullable": null }
+      }
+    ]
+  }
+}

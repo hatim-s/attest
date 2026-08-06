@@ -1,0 +1,22 @@
+{
+  "description": "Rejects a config without the required version discriminator.",
+  "expect": "invalid",
+  "issue_paths": [["config_version"]],
+  "input": {
+    "agent": { "type": "cli", "command": ["bun", "run", "agent.ts"] },
+    "suites": [
+      {
+        "name": "smoke",
+        "metrics": ["output-exists"],
+        "cases": [{ "id": "greeting", "input": {} }]
+      }
+    ],
+    "metrics": [
+      {
+        "name": "output-exists",
+        "type": "assertion",
+        "assert": [{ "exists": { "path": "$.output" } }]
+      }
+    ]
+  }
+}

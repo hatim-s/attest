@@ -1,0 +1,11 @@
+{
+  "description": "Keeps unknown request fields valid so newer runners remain compatible with older agents.",
+  "expect": "valid",
+  "input": {
+    "protocol": "attest.agent/v1alpha1",
+    "run_id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+    "case_id": "greeting-basic",
+    "input": {},
+    "vendor_request": { "attempt": 2 }
+  }
+}

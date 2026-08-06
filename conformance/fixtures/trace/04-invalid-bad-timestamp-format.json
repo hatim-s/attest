@@ -1,0 +1,20 @@
+{
+  "description": "Rejects timestamps that are not RFC 3339 UTC timestamps with whole seconds.",
+  "expect": "invalid",
+  "issue_paths": [["spans", "0", "start_time"]],
+  "input": {
+    "schema": "attest.trace/v1alpha1",
+    "trace_id": "trace-bad-time",
+    "spans": [
+      {
+        "span_id": "span-1",
+        "parent_span_id": null,
+        "name": "agent.run",
+        "kind": "agent",
+        "start_time": "2026-08-06T10:15Z",
+        "end_time": "2026-08-06T10:15:09Z",
+        "status": { "code": "ok" }
+      }
+    ]
+  }
+}

@@ -1,0 +1,28 @@
+name: fuzz
+
+on:
+  schedule:
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+    inputs:
+      iterations:
+        description: Number of fuzz iterations per parser
+        required: false
+        default: 5000
+        type: number
+
+# Scheduled fuzzing is intentionally non-blocking and is not a required check.
+jobs:
+  fuzz:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: bun install --frozen-lockfile
+      - run: FUZZ=1 FUZZ_ITERATIONS=${{ inputs.iterations || 5000 }} bun run --cwd conformance test:fuzz
