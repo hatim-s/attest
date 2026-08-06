@@ -26,19 +26,24 @@ type MetricErrorInfo = {
   details?: JsonValue;
 };
 
-/** Models one metric's evaluated result XOR metric error so spec §Errors vs failures cannot be conflated. */
+/**
+ * Models one metric's evaluated result XOR metric error so spec §Errors vs failures cannot be conflated.
+ * Field names and the status discriminant mirror the store's StoredMetricEvaluation so persistence is a
+ * near-noop mapping at the Phase 1 gate; `judgeIo` records judge request/response separately from results.
+ */
 type MetricEvaluation =
   | {
       metricName: string;
       kind: 'assertion' | 'exec' | 'judge';
       status: 'evaluated';
       result: MetricResult;
+      judgeIo?: JsonValue;
       durationMs: number;
     }
   | {
       metricName: string;
       kind: 'assertion' | 'exec' | 'judge';
-      status: 'metric_error';
+      status: 'error';
       error: MetricErrorInfo;
       durationMs: number;
     };

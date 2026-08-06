@@ -256,10 +256,9 @@ describe('evaluateAssertionCheck', () => {
       all: [{ exists: { path: '$.output.answer' } }, { exists: { path: '$.output.missing' } }],
     };
 
-    expect(evaluateAssertionCheck(check, document)).toMatchObject({
-      passed: false,
-      reason: expect.stringContaining('$.output.missing'),
-    });
+    const outcome = evaluateAssertionCheck(check, document);
+    expect(outcome.passed).toBe(false);
+    expect(outcome.reason).toContain('$.output.missing');
   });
 });
 
@@ -277,13 +276,11 @@ describe('evaluateAssertionMetric', () => {
 
     const outcome = evaluateAssertionMetric(definition, document);
 
-    expect(outcome.result).toEqual({
-      score: 2 / 3,
-      pass: false,
-      details: {
-        checks: [{ passed: true }, { passed: false, reason: expect.any(String) }, { passed: true }],
-      },
-    });
+    expect(outcome.result.score).toBe(2 / 3);
+    expect(outcome.result.pass).toBe(false);
+    const checks = outcome.result.details as { checks: { passed: boolean; reason?: string }[] };
+    expect(checks.checks.map(({ passed }) => passed)).toEqual([true, false, true]);
+    expect(typeof checks.checks[1]?.reason).toBe('string');
     expect(outcome.outcomes.map(({ passed }) => passed)).toEqual([true, false, true]);
   });
 });
