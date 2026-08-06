@@ -1,0 +1,15 @@
+dist/
+.turbo/
+node_modules/
+coverage/
+bun.lock
+# strategy/decision docs keep their authored formatting
+AGENTS.md
+CLAUDE.md
+DECISIONS.md
+STACK.md
+ROADMAP.md
+TASTE.md
+docs/attest-foundation.html
+docs/scout-stack-report.md
+conformance/fixtures/
