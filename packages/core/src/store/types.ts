@@ -154,6 +154,7 @@ interface CaseSummary {
   verdict: 'pass' | 'fail' | 'error';
   startedAt: string;
   durationMs: number;
+  score?: number;
   metricCounts: { expected: number; evaluated: number; passed: number; errors: number };
 }
 

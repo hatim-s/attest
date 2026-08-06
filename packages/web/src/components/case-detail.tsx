@@ -1,5 +1,6 @@
 import type { CaseRecord, CaseSummary } from '../api/types.js';
 import { formatDuration } from '../lib/format.js';
+import { TraceWaterfall } from './trace-waterfall.js';
 import { Badge, Button, ErrorNotice, Loading } from './ui.js';
 
 const JsonBlock = ({ label, value }: { label: string; value: unknown }) => (
@@ -85,7 +86,10 @@ const CaseDetail = ({ caseRecord, error, isLoading, onClose, selected }: CaseDet
             }
           />
           {caseRecord.trace !== undefined ? (
-            <JsonBlock label="Trace" value={caseRecord.trace} />
+            <section className="detail-section">
+              <h4>Trace</h4>
+              <TraceWaterfall trace={caseRecord.trace} />
+            </section>
           ) : null}
           {caseRecord.warnings.length > 0 ? (
             <JsonBlock label="Warnings" value={caseRecord.warnings} />

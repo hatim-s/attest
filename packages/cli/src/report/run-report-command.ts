@@ -39,6 +39,16 @@ const metricCounts = (
   errors: metrics.filter(({ status }) => status === 'error').length,
 });
 
+/** Averages evaluated metric scores for the report's case-list projection. */
+const averageMetricScore = (metrics: StoredMetricEvaluation[]): number | undefined => {
+  const scores = metrics.flatMap((metric) =>
+    metric.status === 'evaluated' && metric.score !== undefined ? [metric.score] : [],
+  );
+  return scores.length === 0
+    ? undefined
+    : scores.reduce((total, score) => total + score, 0) / scores.length;
+};
+
 /** Applies the store's expected-metric verdict rule to a restored case record. */
 const caseVerdict = (record: CaseRecord): CaseSummary['verdict'] => {
   if (record.outcome !== 'completed') return 'error';
@@ -53,15 +63,19 @@ const caseVerdict = (record: CaseRecord): CaseSummary['verdict'] => {
 };
 
 /** Projects the full stored case into the same lightweight row shape used by the live API. */
-const toCaseSummary = (record: CaseRecord): CaseSummary => ({
-  caseId: record.caseId,
-  suiteName: record.suiteName,
-  outcome: record.outcome,
-  verdict: caseVerdict(record),
-  startedAt: record.startedAt,
-  durationMs: record.durationMs,
-  metricCounts: metricCounts(record.expectedMetrics, record.metrics),
-});
+const toCaseSummary = (record: CaseRecord): CaseSummary => {
+  const score = averageMetricScore(record.metrics);
+  return {
+    caseId: record.caseId,
+    suiteName: record.suiteName,
+    outcome: record.outcome,
+    verdict: caseVerdict(record),
+    startedAt: record.startedAt,
+    durationMs: record.durationMs,
+    ...(score === undefined ? {} : { score }),
+    metricCounts: metricCounts(record.expectedMetrics, record.metrics),
+  };
+};
 
 /** Applies the report evidence ceiling without mutating the store result. */
 const selectReportCases = <T>(cases: T[]): { cases: T[]; truncated: boolean } => ({

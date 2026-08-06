@@ -5,13 +5,14 @@ import type { CaseSummary } from './api/types.js';
 import { CaseDetail } from './components/case-detail.js';
 import { CaseTable } from './components/case-table.js';
 import { DiffPanel } from './components/diff-panel.js';
+import { DistributionCharts } from './components/distribution-charts.js';
 import { RunList } from './components/run-list.js';
 import { SummaryCards } from './components/summary-cards.js';
 import { Badge, Button, Card, ErrorNotice, Loading } from './components/ui.js';
 import { shortId } from './lib/format.js';
 import { getReportData } from './report/report-data.js';
 
-type DashboardTab = 'cases' | 'compare';
+type DashboardTab = 'cases' | 'compare' | 'distributions';
 type Theme = 'light' | 'dark';
 
 const getInitialTheme = (): Theme => {
@@ -63,6 +64,16 @@ const Dashboard = () => {
       current === selectedRunId ? runs.find((run) => run.id !== selectedRunId)?.id : current,
     );
   }, [runs, selectedRunId]);
+
+  useEffect(() => {
+    if (
+      tab === 'distributions' &&
+      casesQuery.hasNextPage === true &&
+      !casesQuery.isFetchingNextPage
+    ) {
+      void casesQuery.fetchNextPage();
+    }
+  }, [casesQuery, tab]);
 
   const run = runQuery.data;
 
@@ -125,6 +136,14 @@ const Dashboard = () => {
                 >
                   Cases <span>{run.summary?.totalCases ?? 0}</span>
                 </Button>
+                <Button
+                  aria-selected={tab === 'distributions'}
+                  onClick={() => setTab('distributions')}
+                  role="tab"
+                  tone={tab === 'distributions' ? 'primary' : 'ghost'}
+                >
+                  Distributions
+                </Button>
                 {runs.length > 1 ? (
                   <Button
                     aria-selected={tab === 'compare'}
@@ -153,7 +172,16 @@ const Dashboard = () => {
                     <div className="empty-compact">This run has no recorded cases.</div>
                   ) : null}
                 </section>
-              ) : (
+              ) : null}
+              {tab === 'distributions' ? (
+                <DistributionCharts
+                  cases={cases}
+                  isLoading={casesQuery.isFetchingNextPage}
+                  theme={theme}
+                  totalCases={run.summary?.totalCases ?? cases.length}
+                />
+              ) : null}
+              {tab === 'compare' ? (
                 <DiffPanel
                   baseRunId={baseRunId}
                   candidateRunId={run.id}
@@ -163,7 +191,7 @@ const Dashboard = () => {
                   onBaseChange={setBaseRunId}
                   runs={runs}
                 />
-              )}
+              ) : null}
             </>
           ) : null}
         </main>

@@ -30,6 +30,7 @@ type CaseSummary = {
   verdict: CaseVerdict;
   startedAt: string;
   durationMs: number;
+  score?: number;
   metricCounts: { expected: number; evaluated: number; passed: number; errors: number };
 };
 

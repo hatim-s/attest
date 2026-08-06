@@ -80,6 +80,7 @@ describe('runReportCommand', () => {
 
     expect(result).toMatchObject({ caseCount: 1, totalCaseCount: 1, truncated: false });
     expect(html).toContain('window.__ATTEST_REPORT__=');
+    expect(html).toContain('"score":1');
     expect(html).toContain('\\u003c/script>');
     await expect(
       runReportCommand({ outputPath, runId, workingDirectory: directory }),

@@ -53,6 +53,16 @@ const groupMetrics = (metrics: MetricResultsTable[]): Map<string, StoredMetricEv
   return grouped;
 };
 
+/** Averages finite evaluated metric scores for the lightweight dashboard projection. */
+const averageMetricScore = (metrics: MetricResultsTable[]): number | undefined => {
+  const scores = metrics.flatMap((metric) =>
+    metric.status === 'evaluated' && metric.score !== null ? [metric.score] : [],
+  );
+  return scores.length === 0
+    ? undefined
+    : scores.reduce((total, score) => total + score, 0) / scores.length;
+};
+
 class SqliteRunStore implements RunStore {
   readonly #database: Kysely<Database>;
 
@@ -268,6 +278,7 @@ class SqliteRunStore implements RunStore {
     const items = pageRows.map((row) => {
       const caseMetrics = metricsByCase.get(row.id) ?? [];
       const expected = JSON.parse(row.expected_metrics_json) as string[];
+      const score = averageMetricScore(caseMetrics);
       return {
         caseId: row.case_id,
         suiteName: row.suite_name,
@@ -275,6 +286,7 @@ class SqliteRunStore implements RunStore {
         verdict: computeCaseVerdict(row, caseMetrics),
         startedAt: row.started_at,
         durationMs: row.duration_ms,
+        ...(score === undefined ? {} : { score }),
         metricCounts: {
           expected: expected.length,
           evaluated: caseMetrics.filter((metric) => metric.status === 'evaluated').length,

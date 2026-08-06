@@ -271,10 +271,12 @@ describe('RunStore', () => {
     ]);
     expect(first.items[0]).toMatchObject({
       verdict: 'pass',
+      score: 1,
       metricCounts: { expected: 1, evaluated: 1, passed: 1, errors: 0 },
     });
     expect(first.items[1]).toMatchObject({
       verdict: 'fail',
+      score: 0,
       metricCounts: { expected: 1, evaluated: 1, passed: 0, errors: 0 },
     });
     expect(first.items[2]).toMatchObject({
