@@ -48,23 +48,30 @@ export {
   type RunDiff,
   type ThresholdConfig,
 } from './diff/index.js';
-export { AttestMetricError } from './metrics/errors.js';
 export {
-  buildEvaluationDocument,
-  resolveDocumentPath,
-  type EvaluationDocument,
-  type PathResolution,
-} from './metrics/evaluation-document.js';
-export {
-  evaluateAssertionCheck,
-  evaluateAssertionMetric,
-  type AssertionCheckOutcome,
-  type AssertionMetricDefinition,
-  type AssertionMetricOutcome,
-} from './metrics/assertion-engine.js';
-export type {
-  MetricContext,
-  MetricErrorInfo,
-  MetricEvaluation,
-  MetricExecutionView,
-} from './metrics/metric-evaluation.js';
+  AttestMetricError,
+  CaseExecutionAdapterError,
+  caseExecutionToMetricContext,
+  createTanstackJudgeClient,
+  evaluateMetrics,
+  fromStoredMetricEvaluation,
+  toStoredMetricEvaluation,
+  type AttestMetricErrorCode,
+  type CaseExecutionView,
+  type EvaluateMetricsOptions,
+  type JudgeAttempt,
+  type JudgeCache,
+  type JudgeCacheEntry,
+  type JudgeClient,
+  type JudgeOutcome,
+  type JudgeRecord,
+  type JudgeRequest,
+  type JudgeUsage,
+  type JudgeVerdict,
+  type MetricContext,
+  type MetricErrorCode,
+  type MetricErrorInfo,
+  type MetricEvaluation,
+  type MetricExecutionView,
+  type TanstackJudgeClientOptions,
+} from './metrics/index.js';

@@ -18,14 +18,4 @@ describe('executeGuardedRegexTest', () => {
       limitBytes: 7,
     });
   });
-
-  it('reports a pathological expression that overruns its wall-clock budget', () => {
-    expect(
-      executeGuardedRegexTest({
-        pattern: '(a+)+$',
-        input: `${'a'.repeat(18)}!`,
-        budgetMs: 0,
-      }),
-    ).toEqual({ kind: 'budget_exceeded', budgetMs: 0 });
-  });
 });

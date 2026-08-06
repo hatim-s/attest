@@ -6,8 +6,8 @@ import { parsePathSegments } from './internal/path.js';
 /** Defines the `$`-rooted document every metric reads so all metric kinds share spec §Paths semantics. */
 type EvaluationDocument = {
   input: JsonValue;
-  output: JsonValue | undefined;
-  expected: JsonValue | undefined;
+  output?: JsonValue;
+  expected?: JsonValue;
   trace: Trace | null;
 };
 
@@ -17,8 +17,10 @@ type PathResolution = { found: true; value: unknown } | { found: false };
 /** Maps runner state into the stable evaluation document described by spec §Paths. */
 const buildEvaluationDocument = (context: MetricContext): EvaluationDocument => ({
   input: context.caseDefinition.input,
-  output: context.execution.outcome === 'completed' ? context.execution.output : undefined,
-  expected: context.caseDefinition.expected,
+  ...(context.execution.outcome === 'completed' ? { output: context.execution.output } : {}),
+  ...(context.caseDefinition.expected !== undefined
+    ? { expected: context.caseDefinition.expected }
+    : {}),
   trace: context.execution.trace,
 });
 
@@ -32,6 +34,9 @@ const resolveDocumentPath = (document: EvaluationDocument, path: string): PathRe
         return { found: false };
       }
       current = current[segment.index];
+      if (current === undefined) {
+        return { found: false };
+      }
       continue;
     }
 
@@ -42,6 +47,10 @@ const resolveDocumentPath = (document: EvaluationDocument, path: string): PathRe
       return { found: false };
     }
     current = (current as Record<string, unknown>)[segment.name];
+    // Evaluation documents omit absent optional fields; treat an externally supplied own `undefined` identically.
+    if (current === undefined) {
+      return { found: false };
+    }
   }
 
   return { found: true, value: current };

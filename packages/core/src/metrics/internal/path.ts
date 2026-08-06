@@ -40,4 +40,10 @@ const parsePathSegments = (path: string): PathSegment[] => {
   return segments;
 };
 
-export { parsePathSegments };
+/** Builds the consistent failed-check evidence used when a valid path does not resolve in a document. */
+const pathNotFound = (path: string): { passed: false; reason: string } => ({
+  passed: false,
+  reason: `path ${path} was not found`,
+});
+
+export { parsePathSegments, pathNotFound };

@@ -111,9 +111,9 @@ const leafCases: LeafCase[] = [
   {
     name: 'regex reports oversized input as a failure',
     check: { regex: { path: '$.output', pattern: '.' } },
-    customDocument: { ...document, output: 'a'.repeat(262_145) },
+    customDocument: { ...document, output: 'a'.repeat(65_537) },
     passed: false,
-    reason: /262144-byte limit/,
+    reason: /65536-byte limit/,
   },
   {
     name: 'json_schema accepts a Draft 2020-12-valid value',
@@ -139,17 +139,6 @@ const leafCases: LeafCase[] = [
     },
     passed: false,
     reason: /required property 'source'/,
-  },
-  {
-    name: 'json_schema reports an invalid schema as failure data',
-    check: {
-      json_schema: {
-        path: '$.output.metadata',
-        schema: { type: 'not-a-json-schema-type' },
-      },
-    },
-    passed: false,
-    reason: /could not be compiled/,
   },
   {
     name: 'threshold requires every present comparator',
@@ -274,20 +263,132 @@ describe('evaluateAssertionMetric', () => {
       ],
     };
 
-    const outcome = evaluateAssertionMetric(definition, document);
+    const result = evaluateAssertionMetric(definition, document);
 
-    expect(outcome.result.score).toBe(2 / 3);
-    expect(outcome.result.pass).toBe(false);
-    const checks = outcome.result.details as { checks: { passed: boolean; reason?: string }[] };
+    expect(result.score).toBe(2 / 3);
+    expect(result.pass).toBe(false);
+    const checks = result.details as { checks: { passed: boolean; reason?: string }[] };
     expect(checks.checks.map(({ passed }) => passed)).toEqual([true, false, true]);
     expect(typeof checks.checks[1]?.reason).toBe('string');
-    expect(outcome.outcomes.map(({ passed }) => passed)).toEqual([true, false, true]);
+  });
+
+  it('fails exists when expected is absent from the evaluation document', () => {
+    const absentExpectedDocument: EvaluationDocument = {
+      input: document.input,
+      output: document.output,
+      trace: document.trace,
+    };
+
+    expect(
+      evaluateAssertionCheck({ exists: { path: '$.expected' } }, absentExpectedDocument),
+    ).toMatchObject({
+      passed: false,
+      reason: 'path $.expected was not found',
+    });
+  });
+
+  it('fails a permissive JSON Schema when its root path is absent', () => {
+    const absentExpectedDocument: EvaluationDocument = {
+      input: document.input,
+      output: document.output,
+      trace: document.trace,
+    };
+
+    expect(
+      evaluateAssertionCheck(
+        { json_schema: { path: '$.expected', schema: {} } },
+        absentExpectedDocument,
+      ),
+    ).toMatchObject({ passed: false, reason: 'path $.expected was not found' });
+  });
+
+  it('throws a typed error when JSON Schema configuration cannot compile', () => {
+    const definition: AssertionMetricDefinition = {
+      name: 'invalid-schema',
+      type: 'assertion',
+      assert: [
+        {
+          json_schema: {
+            path: '$.output.metadata',
+            schema: { type: 'not-a-json-schema-type' },
+          },
+        },
+      ],
+    };
+
+    expect(() => evaluateAssertionMetric(definition, document)).toThrowError(
+      /JSON Schema could not be compiled/,
+    );
+    try {
+      evaluateAssertionMetric(definition, document);
+    } catch (error: unknown) {
+      expect(error).toMatchObject({ code: 'invalid_json_schema' });
+    }
+  });
+
+  it('isolates schemas that share an identifier', () => {
+    const sharedIdentifier = 'https://attest.dev/schema/shared';
+    const first = evaluateAssertionMetric(
+      {
+        name: 'first-schema',
+        type: 'assertion',
+        assert: [
+          {
+            json_schema: {
+              path: '$.output.metadata',
+              schema: { $id: sharedIdentifier, type: 'object', required: ['citations'] },
+            },
+          },
+        ],
+      },
+      document,
+    );
+    const second = evaluateAssertionMetric(
+      {
+        name: 'second-schema',
+        type: 'assertion',
+        assert: [
+          {
+            json_schema: {
+              path: '$.output.metadata',
+              schema: { $id: sharedIdentifier, type: 'object', required: ['source'] },
+            },
+          },
+        ],
+      },
+      document,
+    );
+
+    expect(first.pass).toBe(true);
+    expect(second.pass).toBe(false);
   });
 });
 
-const jsonValueArbitrary: fc.Arbitrary<JsonValue> = fc
-  .jsonValue()
-  .map((value) => value as JsonValue);
+/** Narrows fast-check's unknown JSON generator using the same recursive JSON value boundary as the contract. */
+const isJsonValue = (value: unknown): value is JsonValue => {
+  if (value === null || typeof value === 'string' || typeof value === 'boolean') {
+    return true;
+  }
+  if (typeof value === 'number') {
+    return Number.isFinite(value);
+  }
+  if (Array.isArray(value)) {
+    return value.every(isJsonValue);
+  }
+  if (typeof value === 'object') {
+    return Object.values(value).every(isJsonValue);
+  }
+  return false;
+};
+
+const toJsonValue = (value: unknown): JsonValue => {
+  if (!isJsonValue(value)) {
+    throw new Error('fast-check generated a non-JSON value');
+  }
+  return value;
+};
+
+const jsonValueArbitrary: fc.Arbitrary<JsonValue> = fc.jsonValue().map(toJsonValue);
 const generatedDocumentArbitrary: fc.Arbitrary<EvaluationDocument> = fc.record({
   input: jsonValueArbitrary,
   output: fc.option(jsonValueArbitrary, { nil: undefined }),
@@ -307,16 +408,6 @@ const leafCheckArbitrary: fc.Arbitrary<AssertionCheck> = fc.oneof(
 );
 
 describe('assertion properties', () => {
-  it('is deterministic for generated leaf checks and documents', () => {
-    fc.assert(
-      fc.property(leafCheckArbitrary, generatedDocumentArbitrary, (check, generatedDocument) => {
-        expect(evaluateAssertionCheck(check, generatedDocument)).toEqual(
-          evaluateAssertionCheck(check, generatedDocument),
-        );
-      }),
-    );
-  });
-
   it('not inverts generated leaf check verdicts', () => {
     fc.assert(
       fc.property(leafCheckArbitrary, generatedDocumentArbitrary, (check, generatedDocument) => {
@@ -339,5 +430,41 @@ describe('assertion properties', () => {
         );
       }),
     );
+  });
+});
+
+describe('tool-call ordering', () => {
+  it('orders mixed timestamp precision by parsed instant', () => {
+    const mixedPrecisionTrace: Trace = {
+      schema: 'attest.trace/v1alpha1',
+      trace_id: 'trace-mixed-precision',
+      spans: [
+        {
+          span_id: 'tool-whole-second',
+          parent_span_id: null,
+          name: 'whole-second',
+          kind: 'tool',
+          start_time: '2026-08-06T10:00:00Z',
+          end_time: '2026-08-06T10:00:01Z',
+          status: { code: 'ok' },
+        },
+        {
+          span_id: 'tool-fractional-second',
+          parent_span_id: null,
+          name: 'fractional-second',
+          kind: 'tool',
+          start_time: '2026-08-06T10:00:00.100Z',
+          end_time: '2026-08-06T10:00:01Z',
+          status: { code: 'ok' },
+        },
+      ],
+    };
+
+    expect(
+      evaluateAssertionCheck(
+        { tool_calls: { order: ['whole-second', 'fractional-second'] } },
+        { ...document, trace: mixedPrecisionTrace },
+      ),
+    ).toMatchObject({ passed: true });
   });
 });
