@@ -12,15 +12,23 @@
   },
   "dependencies": {
     "@attest/contracts": "workspace:*",
+    "@tanstack/ai": "^0.43.0",
+    "@tanstack/ai-anthropic": "^0.16.4",
+    "@tanstack/ai-openai": "^0.18.0",
+    "ajv": "^8.20.0",
     "kysely": "^0.29.4",
     "ulid": "^3.0.2"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "vitest run"
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "optionalDependencies": {
     "@libsql/client": "^0.17.4"
+  },
+  "devDependencies": {
+    "fast-check": "^4.9.0",
+    "vitest": "^3"
   }
 }
