@@ -5,6 +5,8 @@ type CliErrorCode =
   | 'config_read_failed'
   | 'config_parse_failed'
   | 'config_invalid'
+  | 'init_conflict'
+  | 'init_failed'
   | 'output_write_failed'
   | 'run_failed';
 

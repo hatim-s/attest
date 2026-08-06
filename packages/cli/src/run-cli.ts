@@ -1,6 +1,6 @@
 import { createRequire } from 'node:module';
 import { mkdir, writeFile } from 'node:fs/promises';
-import { dirname, resolve } from 'node:path';
+import { dirname, relative, resolve } from 'node:path';
 
 import { AttestError } from '@attest/contracts';
 import { diffRuns, openStore, runToJUnitXml } from '@attest/core';
@@ -8,6 +8,7 @@ import { Command, CommanderError, Option } from 'commander';
 
 import { loadConfig } from './config/load-config.js';
 import { AttestCliError } from './errors.js';
+import { initProject } from './init/init-project.js';
 import {
   diffToJson,
   renderDiffSummary,
@@ -45,6 +46,10 @@ type RunCommandOptions = {
 type DiffCommandOptions = {
   format: 'human' | 'json';
   store?: string;
+};
+
+type InitCommandOptions = {
+  force?: boolean;
 };
 
 const defaultIo: CliIo = {
@@ -97,6 +102,21 @@ const createProgram = (
     .configureOutput({
       writeOut: io.output,
       writeErr: io.error,
+    });
+
+  program
+    .command('init')
+    .description('Create a runnable local quickstart without overwriting files by default.')
+    .argument('[directory]', 'target project directory', '.')
+    .option('--force', 'replace generated files that already exist')
+    .action(async (directory: string, options: InitCommandOptions) => {
+      const result = await initProject(directory, workingDirectory, { force: options.force });
+      const fileList = result.files
+        .map((filePath) => `  ${relative(result.targetDirectory, filePath)}`)
+        .join('\n');
+      io.output(
+        `Initialized Attest quickstart in ${result.targetDirectory}:\n${fileList}\n\nNext: cd ${result.targetDirectory} && attest run`,
+      );
     });
 
   program
