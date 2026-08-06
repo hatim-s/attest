@@ -45,6 +45,14 @@ metrics:
     assert:
       - tool_calls: { status: ok } # trace-based; see metric contract
 
+  - name: searched-france
+    type: assertion
+    assert:
+      - tool_calls:
+          name: search
+          arguments:
+            - contains: { path: '$.query', value: France }
+
   - name: brand-voice
     type: exec
     command: ['python3', 'metrics/brand_voice.py']

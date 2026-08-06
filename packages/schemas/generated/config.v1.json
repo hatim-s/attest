@@ -542,6 +542,88 @@
                 "tool_calls": {
                   "additionalProperties": false,
                   "properties": {
+                    "arguments": {
+                      "items": {
+                        "anyOf": [
+                          {
+                            "additionalProperties": false,
+                            "properties": {
+                              "equals": {
+                                "additionalProperties": false,
+                                "properties": {
+                                  "path": {
+                                    "pattern": "^\\$(?:\\.[A-Za-z_][A-Za-z0-9_]*|\\[\\d+\\])*$",
+                                    "type": "string"
+                                  },
+                                  "value": {
+                                    "$ref": "#/$defs/__schema4"
+                                  }
+                                },
+                                "required": [
+                                  "path",
+                                  "value"
+                                ],
+                                "type": "object"
+                              }
+                            },
+                            "required": [
+                              "equals"
+                            ],
+                            "type": "object"
+                          },
+                          {
+                            "additionalProperties": false,
+                            "properties": {
+                              "contains": {
+                                "additionalProperties": false,
+                                "properties": {
+                                  "path": {
+                                    "pattern": "^\\$(?:\\.[A-Za-z_][A-Za-z0-9_]*|\\[\\d+\\])*$",
+                                    "type": "string"
+                                  },
+                                  "value": {
+                                    "$ref": "#/$defs/__schema4"
+                                  }
+                                },
+                                "required": [
+                                  "path",
+                                  "value"
+                                ],
+                                "type": "object"
+                              }
+                            },
+                            "required": [
+                              "contains"
+                            ],
+                            "type": "object"
+                          },
+                          {
+                            "additionalProperties": false,
+                            "properties": {
+                              "exists": {
+                                "additionalProperties": false,
+                                "properties": {
+                                  "path": {
+                                    "pattern": "^\\$(?:\\.[A-Za-z_][A-Za-z0-9_]*|\\[\\d+\\])*$",
+                                    "type": "string"
+                                  }
+                                },
+                                "required": [
+                                  "path"
+                                ],
+                                "type": "object"
+                              }
+                            },
+                            "required": [
+                              "exists"
+                            ],
+                            "type": "object"
+                          }
+                        ]
+                      },
+                      "minItems": 1,
+                      "type": "array"
+                    },
                     "count": {
                       "maximum": 9007199254740991,
                       "minimum": 0,
@@ -569,6 +651,77 @@
               },
               "required": [
                 "tool_calls"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "spans": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "count": {
+                      "maximum": 9007199254740991,
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "filter": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "attributes": {
+                          "additionalProperties": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "boolean"
+                              }
+                            ]
+                          },
+                          "propertyNames": {
+                            "type": "string"
+                          },
+                          "type": "object"
+                        },
+                        "kind": {
+                          "enum": [
+                            "agent",
+                            "llm",
+                            "tool",
+                            "retrieval",
+                            "other"
+                          ],
+                          "type": "string"
+                        },
+                        "name": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "enum": [
+                            "ok",
+                            "error"
+                          ],
+                          "type": "string"
+                        }
+                      },
+                      "type": "object"
+                    },
+                    "order": {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "type": "object"
+                }
+              },
+              "required": [
+                "spans"
               ],
               "type": "object"
             }
