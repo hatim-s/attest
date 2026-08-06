@@ -9,6 +9,7 @@ type CliErrorCode =
   | 'init_failed'
   | 'output_exists'
   | 'output_write_failed'
+  | 'trace_convert_failed'
   | 'run_failed';
 
 /** Identifies expected CLI boundary failures without exposing internal stack traces. */

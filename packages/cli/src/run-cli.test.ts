@@ -39,6 +39,48 @@ describe('runCli', () => {
     expect(errors.join('\n')).toContain('config_not_found');
   });
 
+  it('converts OTLP JSON through the nested trace command', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'attest-cli-command-'));
+    temporaryDirectories.push(directory);
+    const traceId = '00112233445566778899aabbccddeeff';
+    await writeFile(
+      join(directory, 'trace.json'),
+      JSON.stringify({
+        resourceSpans: [
+          {
+            scopeSpans: [
+              {
+                spans: [
+                  {
+                    traceId,
+                    spanId: '0011223344556677',
+                    parentSpanId: '',
+                    name: 'agent.run',
+                    startTimeUnixNano: '1786059000000000000',
+                    endTimeUnixNano: '1786059001000000000',
+                    status: { code: 1 },
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      }),
+    );
+    const output: string[] = [];
+
+    const exitCode = await runCli(['trace', 'convert', 'trace.json'], {
+      workingDirectory: directory,
+      io: { output: (message) => output.push(message), error: () => undefined },
+    });
+
+    expect(exitCode).toBe(0);
+    expect(JSON.parse(output.at(-1) ?? '{}')).toMatchObject({
+      trace_id: traceId,
+      spans: [{ kind: 'agent' }],
+    });
+  });
+
   it('emits one machine-readable run document', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'attest-cli-command-'));
     temporaryDirectories.push(directory);

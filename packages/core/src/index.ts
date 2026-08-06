@@ -98,3 +98,13 @@ export {
   type ViewApp,
   type ViewServerHandle,
 } from './view-server/index.js';
+export {
+  TraceConversionError,
+  convertOtlpJson,
+  inferSpanKind,
+  nanosecondsToTimestamp,
+  normalizeGenAiAttributes,
+  selectConvertedTrace,
+  type ConvertOtlpJsonOptions,
+  type TraceConversionErrorCode,
+} from './trace-converter/index.js';

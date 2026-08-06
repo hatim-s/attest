@@ -18,6 +18,7 @@ import {
 } from './output/render-output.js';
 import { runConfiguration } from './run/run-configuration.js';
 import { runReportCommand } from './report/run-report-command.js';
+import { runTraceConvertCommand } from './trace/run-trace-convert-command.js';
 import { runViewCommand } from './view/run-view-command.js';
 
 const require = createRequire(import.meta.url);
@@ -64,6 +65,12 @@ type ReportCommandOptions = {
   force?: boolean;
   output?: string;
   store: string;
+};
+
+type TraceConvertCommandOptions = {
+  force?: boolean;
+  output?: string;
+  traceId?: string;
 };
 
 const defaultIo: CliIo = {
@@ -188,6 +195,29 @@ const createProgram = (
           `report_truncated: Included the first ${result.caseCount} of ${result.totalCaseCount} cases.`,
         );
       }
+    });
+
+  const traceCommand = program.command('trace').description('Convert and inspect trace data.');
+  traceCommand
+    .command('convert')
+    .description('Convert an OTLP/HTTP JSON export to attest.trace/v1alpha1 JSON.')
+    .argument('<input>', 'OTLP JSON input path')
+    .option('--trace-id <trace-id>', 'trace id to select from a multi-trace export')
+    .option('-o, --output <path>', 'Attest trace output path')
+    .option('--force', 'replace an existing output file')
+    .action(async (inputPath: string, options: TraceConvertCommandOptions) => {
+      const result = await runTraceConvertCommand({
+        force: options.force,
+        inputPath,
+        outputPath: options.output,
+        traceId: options.traceId,
+        workingDirectory,
+      });
+      io.output(
+        result.outputPath === undefined
+          ? result.json
+          : `Wrote ${result.spanCount}-span trace ${result.traceId} to ${result.outputPath}`,
+      );
     });
 
   program
