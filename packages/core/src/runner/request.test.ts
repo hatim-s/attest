@@ -24,9 +24,9 @@ describe('buildAgentRequest', () => {
 });
 
 describe('resolveInvocationEnv', () => {
-  it('forwards exactly the sanctioned base set, present allowlisted values, and mandatory attest values', () => {
+  it('synthesizes an isolated base, filters PATH, and forwards only allowlisted parent values', () => {
     const base: NodeJS.ProcessEnv = {
-      PATH: '/bin',
+      PATH: '/bin:relative::/usr/bin',
       HOME: '/home/test',
       TMPDIR: '/tmp/test',
       LANG: 'en_US.UTF-8',
@@ -34,16 +34,17 @@ describe('resolveInvocationEnv', () => {
       PRESENT_SECRET: 'present',
       BLOCKED_SECRET: 'blocked',
     };
-    const environment = resolveInvocationEnv(['PRESENT_SECRET', 'ABSENT_SECRET'], base, {
-      runId: 'run-1',
-      caseId: 'case-1',
-    });
+    const environment = resolveInvocationEnv(
+      ['PRESENT_SECRET', 'ABSENT_SECRET'],
+      base,
+      { runId: 'run-1', caseId: 'case-1' },
+      '/attempt',
+    );
 
     expect(environment).toEqual({
-      PATH: '/bin',
-      HOME: '/home/test',
-      TMPDIR: '/tmp/test',
-      LANG: 'en_US.UTF-8',
+      PATH: '/bin:/usr/bin',
+      HOME: '/attempt/home',
+      TMPDIR: '/attempt/tmp',
       LC_ALL: 'C',
       PRESENT_SECRET: 'present',
       ATTEST_RUN_ID: 'run-1',
@@ -52,6 +53,22 @@ describe('resolveInvocationEnv', () => {
     });
     expect(environment).not.toHaveProperty('ABSENT_SECRET');
     expect(environment).not.toHaveProperty('BLOCKED_SECRET');
+    expect(environment).not.toHaveProperty('LANG');
+  });
+
+  it('allows explicitly allowlisted host values to replace synthesized defaults', () => {
+    const environment = resolveInvocationEnv(
+      ['HOME', 'TMPDIR', 'LC_ALL'],
+      { HOME: '/host/home', TMPDIR: '/host/tmp', LC_ALL: 'fr_FR.UTF-8' },
+      { runId: 'run-1', caseId: 'case-1' },
+      '/attempt',
+    );
+
+    expect(environment).toMatchObject({
+      HOME: '/host/home',
+      TMPDIR: '/host/tmp',
+      LC_ALL: 'fr_FR.UTF-8',
+    });
   });
 
   it('lets mandatory attest values override colliding allowlisted values', () => {
@@ -59,6 +76,7 @@ describe('resolveInvocationEnv', () => {
       ['ATTEST_RUN_ID'],
       { ATTEST_RUN_ID: 'stale' },
       { runId: 'current', caseId: 'case-1' },
+      '/attempt',
     );
 
     expect(environment.ATTEST_RUN_ID).toBe('current');

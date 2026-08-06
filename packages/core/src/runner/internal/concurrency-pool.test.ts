@@ -146,4 +146,60 @@ describe('mapBounded', () => {
     await expect(nextResult).rejects.toBe(originalError);
     expect(startLog).toEqual([1, 2]);
   });
+
+  it('waits for in-flight mappers when the consumer returns early', async () => {
+    const firstCompletion = createDeferred<void>();
+    const secondCompletion = createDeferred<void>();
+    const secondStarted = createDeferred<void>();
+    let secondSettled = false;
+    const iterator = mapBounded([1, 2], 2, async (value, _index, signal) => {
+      if (value === 1) {
+        await firstCompletion.promise;
+        return value;
+      }
+
+      secondStarted.resolve();
+      await secondCompletion.promise;
+      secondSettled = true;
+      expect(signal.aborted).toBe(true);
+      return value;
+    })[Symbol.asyncIterator]();
+
+    const firstResult = iterator.next();
+    await secondStarted.promise;
+    firstCompletion.resolve();
+    await expect(firstResult).resolves.toMatchObject({ done: false });
+    const returnPromise = iterator.return?.();
+    await Promise.resolve();
+    expect(secondSettled).toBe(false);
+    secondCompletion.resolve();
+    await expect(returnPromise).resolves.toMatchObject({ done: true });
+    expect(secondSettled).toBe(true);
+  });
+
+  it('never buffers more than twice the limit for a slow consumer', async () => {
+    const limit = 2;
+    let completedCount = 0;
+    let consumedCount = 0;
+    let maximumUnconsumed = 0;
+    const iterable = mapBounded(
+      Array.from({ length: 20 }, (_, index) => index),
+      limit,
+      async (value) => {
+        await Promise.resolve();
+        completedCount += 1;
+        maximumUnconsumed = Math.max(maximumUnconsumed, completedCount - consumedCount);
+        return value;
+      },
+    );
+
+    for await (const entry of iterable) {
+      expect(entry.result).toBe(consumedCount);
+      await Promise.resolve();
+      consumedCount += 1;
+    }
+
+    expect(maximumUnconsumed).toBeLessThanOrEqual(2 * limit);
+    expect(consumedCount).toBe(20);
+  });
 });

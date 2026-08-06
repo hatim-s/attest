@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { AGENT_PROTOCOL, type AgentTarget, type Config } from '@attest/contracts';
 import { afterEach, describe, expect, it } from 'vitest';
 
+import { ConfigInvalidError } from './errors.js';
 import { collectExecutions } from './execute.js';
 import type { CaseExecution, RunProgressEvent } from './types.js';
 
@@ -64,7 +65,6 @@ const execute = async (
   return collectExecutions(config, {
     runId: RUN_ID,
     baseDirectory,
-    terminationGraceMs: 100,
     ...overrides,
   });
 };
@@ -168,7 +168,7 @@ describe.sequential('executeCases', () => {
         name: 'inline',
         metrics: ['suite-metric'],
         cases: [
-          { id: 'inline-default', input: { source: 'inline' } },
+          { id: 'inline-default', input: { source: 'inline' }, expected: { answer: 'ok' } },
           { id: 'inline-override', input: {}, metrics: ['case-metric'] },
         ],
       },
@@ -182,7 +182,12 @@ describe.sequential('executeCases', () => {
 
     expect(executions).toHaveLength(3);
     expect(executions.every(({ outcome }) => outcome === 'completed')).toBe(true);
-    expect(executions.every(({ trace }) => trace?.trace_id === 'fixture-trace')).toBe(true);
+    expect(
+      executions.every(
+        (execution) =>
+          execution.outcome === 'completed' && execution.trace?.trace_id === 'fixture-trace',
+      ),
+    ).toBe(true);
     expect(executions.every(({ attempts }) => attempts.length === 1)).toBe(true);
     expect(executions.find(({ caseId }) => caseId === 'inline-override')?.expectedMetrics).toEqual([
       'case-metric',
@@ -190,6 +195,11 @@ describe.sequential('executeCases', () => {
     expect(executions.find(({ caseId }) => caseId === 'dataset-case')?.expectedMetrics).toEqual([
       'suite-metric',
     ]);
+    expect(executions.find(({ caseId }) => caseId === 'inline-default')?.caseDefinition).toEqual({
+      id: 'inline-default',
+      input: { source: 'inline' },
+      expected: { answer: 'ok' },
+    });
     expect(progress.map(({ completed }) => completed)).toEqual([1, 2, 3]);
     expect(progress.every(({ total }) => total === 3)).toBe(true);
   });
@@ -256,7 +266,7 @@ describe.sequential('executeCases', () => {
     ]);
 
     const [execution] = await execute(config, directory);
-    const response = execution?.response;
+    const response = execution?.outcome === 'completed' ? execution.response : undefined;
     const workingDirectory =
       response !== undefined && 'output' in response ? response.output : undefined;
 
@@ -307,5 +317,54 @@ describe.sequential('executeCases', () => {
 
     await expect(execute(config, directory)).rejects.toMatchObject({ code: 'config_invalid' });
     await expect(access(sentinel)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('aggregates issues from every dataset suite before invocation', async () => {
+    const directory = await createTemporaryDirectory();
+    await Promise.all([
+      writeFile(join(directory, 'first.jsonl'), '{"id":3}\n'),
+      writeFile(join(directory, 'second.jsonl'), 'not-json\n'),
+    ]);
+    const config = createConfig(canonicalCliTarget('happy'), [
+      { name: 'first', metrics: ['suite-metric'], dataset: 'first.jsonl' },
+      { name: 'second', metrics: ['suite-metric'], dataset: 'second.jsonl' },
+    ]);
+
+    try {
+      await execute(config, directory);
+      throw new Error('Expected dataset validation to fail');
+    } catch (error) {
+      expect(error).toBeInstanceOf(ConfigInvalidError);
+      if (!(error instanceof ConfigInvalidError)) {
+        throw error;
+      }
+      expect(error.issues).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ path: 'suites[0].dataset line 1' }),
+          expect.objectContaining({ path: 'suites[1].dataset line 1' }),
+        ]),
+      );
+    }
+  });
+
+  it('rejects unknown dataset case metric references before invocation', async () => {
+    const directory = await createTemporaryDirectory();
+    await writeFile(
+      join(directory, 'metrics.jsonl'),
+      `${JSON.stringify({ id: 'dataset-case', input: {}, metrics: ['missing-metric'] })}\n`,
+    );
+    const config = createConfig(canonicalCliTarget('happy'), [
+      { name: 'dataset', metrics: ['suite-metric'], dataset: 'metrics.jsonl' },
+    ]);
+
+    await expect(execute(config, directory)).rejects.toMatchObject({
+      code: 'config_invalid',
+      issues: [
+        {
+          path: 'suites[0].dataset line 1.metrics.0',
+          message: 'metric is not defined: missing-metric',
+        },
+      ],
+    });
   });
 });

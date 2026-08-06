@@ -3,7 +3,9 @@ import {
   type AgentRequest,
   type AgentTarget,
   type ContractIssue,
+  type RawExcerpt,
 } from '@attest/contracts';
+import { createHash } from 'node:crypto';
 
 import { invokeCliAgent } from './cli-invoker.js';
 import {
@@ -15,23 +17,47 @@ import type {
   InvocationAttempt,
   InvocationDiagnostics,
   InvocationResult,
-  InvokeOptions,
+  InvokeAgentOptions,
 } from './types.js';
+
+const RAW_EXCERPT_CHARACTERS = 4096;
+
+type RunnerInvokeAgentOptions = Omit<InvokeAgentOptions, 'env'> & {
+  env?: Record<string, string>;
+  envAllowlist?: readonly string[];
+};
+
+const createRawExcerpt = (payload: string): RawExcerpt => {
+  const truncated = payload.length > RAW_EXCERPT_CHARACTERS;
+  return {
+    text: payload.slice(0, RAW_EXCERPT_CHARACTERS),
+    truncated,
+    ...(truncated ? { sha256: createHash('sha256').update(payload).digest('hex') } : {}),
+  };
+};
+
+const withAttemptEvidence = (attempt: InvocationAttempt): InvocationAttempt => {
+  if (attempt.rawExcerpt !== undefined) {
+    return attempt;
+  }
+
+  const payload = attempt.status === 'ok' ? JSON.stringify(attempt.raw) : '';
+  return { ...attempt, rawExcerpt: createRawExcerpt(payload), warnings: attempt.warnings ?? [] };
+};
 
 const invokeOnce = async (
   target: AgentTarget,
   request: AgentRequest,
-  options: InvokeOptions,
+  options: RunnerInvokeAgentOptions,
 ): Promise<InvocationAttempt> => {
   if (target.type === 'cli') {
     return invokeCliAgent(target, request, options);
   }
   if (target.type === 'http') {
-    return invokeHttpAgent(target, request, options);
+    return invokeHttpAgent(target, request, { ...options, env: options.env ?? {} });
   }
 
-  const unreachableTarget: never = target;
-  void unreachableTarget;
+  target satisfies never;
   throw new TypeError('Unsupported agent target');
 };
 
@@ -43,7 +69,7 @@ const requireValidRetryCount = (retries: number): void => {
   throw new TypeError('Retry count must be a non-negative integer');
 };
 
-/** Summarizes enough contract issues to identify a malformed envelope without obscuring retries. */
+/** Summarizes contract issues without obscuring the retry classification. */
 const summarizeContractIssues = (issues: ContractIssue[]): string => {
   const summary = issues
     .slice(0, 3)
@@ -53,15 +79,15 @@ const summarizeContractIssues = (issues: ContractIssue[]): string => {
 };
 
 /**
- * Validates a transport-successful raw response inside the retry boundary so invalid envelopes are
- * recorded and retried as invocation failures, while valid agent error envelopes remain case results.
+ * Validates transport output inside the retry boundary per docs/specs/agent-contract.md, retaining
+ * bounded evidence and parse warnings even when schema failure converts success into an invocation error.
  */
 const validateResponseEnvelope = (
   attempt: Extract<InvocationAttempt, { status: 'ok' }>,
 ): InvocationAttempt => {
   const report = parseAgentResponse(attempt.raw);
   if (report.ok) {
-    return { ...attempt, report };
+    return { ...attempt, report, warnings: report.warnings };
   }
 
   return {
@@ -72,13 +98,12 @@ const validateResponseEnvelope = (
     ),
     diagnostics: attempt.diagnostics,
     durationMs: attempt.durationMs,
+    rawExcerpt: attempt.rawExcerpt,
+    warnings: report.warnings,
   };
 };
 
-/**
- * Determines retry eligibility under docs/specs/agent-contract.md: cancellation and HTTP 4xx are
- * terminal, while timeouts and all other invocation failures may consume the configured retry budget.
- */
+/** Implements the invocation-error-only retry policy from docs/specs/agent-contract.md. */
 const isRetryableInvocationError = (
   error: AgentInvocationErrorType,
   diagnostics: InvocationDiagnostics,
@@ -94,20 +119,17 @@ const isRetryableInvocationError = (
   return status === undefined || status < 400 || status >= 500;
 };
 
-/**
- * Dispatches an agent target and records every retry attempt for deterministic execution history,
- * following the invocation-error-only retry semantics in docs/specs/agent-contract.md.
- */
+/** Dispatches one target and retains every validated retry attempt for deterministic recording. */
 const invokeAgent = async (
   target: AgentTarget,
   request: AgentRequest,
-  options: InvokeOptions & { retries: number },
+  options: RunnerInvokeAgentOptions,
 ): Promise<InvocationResult> => {
   requireValidRetryCount(options.retries);
   const attempts: InvocationAttempt[] = [];
   let attemptIndex = 0;
   while (true) {
-    const transportAttempt = await invokeOnce(target, request, options);
+    const transportAttempt = withAttemptEvidence(await invokeOnce(target, request, options));
     const attempt =
       transportAttempt.status === 'ok'
         ? validateResponseEnvelope(transportAttempt)

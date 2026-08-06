@@ -14,6 +14,7 @@ const createInvocationErrorAttempt = (
   error,
   diagnostics: { httpStatus },
   durationMs,
+  warnings: [],
 });
 
 const cancelReader = async (reader: ReadableStreamDefaultReader<Uint8Array>): Promise<void> => {
@@ -174,6 +175,7 @@ const invokeHttpAgent = async (
       raw,
       diagnostics: { httpStatus: response.status },
       durationMs: Date.now() - startedAt,
+      warnings: [],
     };
   } catch (error) {
     return createInvocationErrorAttempt(

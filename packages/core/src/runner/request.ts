@@ -1,6 +1,5 @@
 import { AGENT_PROTOCOL, type AgentRequest, type CaseDefinition } from '@attest/contracts';
-
-const BASE_ENV_KEYS = ['PATH', 'HOME', 'TMPDIR', 'LANG', 'LC_ALL'] as const;
+import { delimiter, isAbsolute, join } from 'node:path';
 
 const copyPresentEnvironmentKeys = (
   destination: Record<string, string>,
@@ -13,6 +12,14 @@ const copyPresentEnvironmentKeys = (
       destination[key] = value;
     }
   }
+};
+
+/** Removes relative and empty search entries so executable lookup cannot escape the opted-in host path. */
+const resolveSafePath = (parentPath: string | undefined): string => {
+  return (parentPath ?? '')
+    .split(delimiter)
+    .filter((entry) => isAbsolute(entry))
+    .join(delimiter);
 };
 
 /**
@@ -35,18 +42,22 @@ const buildAgentRequest = (runId: string, caseDefinition: CaseDefinition): Agent
 };
 
 /**
- * Resolves the CLI environment required by docs/specs/agent-contract.md. The minimal base set is
- * always forwarded so executable lookup, home discovery, temporary files, and locale-sensitive
- * runtimes keep working; configured keys remain an explicit allowlist and absent values are skipped.
+ * Resolves the isolated CLI environment required by docs/specs/agent-contract.md. Credentials and
+ * temporary state default beneath the attempt directory; only explicit allowlisting can replace them.
  */
 const resolveInvocationEnv = (
   allowlist: readonly string[] | undefined,
-  base: NodeJS.ProcessEnv,
+  parentEnv: NodeJS.ProcessEnv,
   attest: { runId: string; caseId: string },
+  attemptDirectory: string,
 ): Record<string, string> => {
-  const environment: Record<string, string> = {};
-  copyPresentEnvironmentKeys(environment, BASE_ENV_KEYS, base);
-  copyPresentEnvironmentKeys(environment, allowlist ?? [], base);
+  const environment: Record<string, string> = {
+    PATH: resolveSafePath(parentEnv.PATH),
+    HOME: join(attemptDirectory, 'home'),
+    TMPDIR: join(attemptDirectory, 'tmp'),
+    LC_ALL: 'C',
+  };
+  copyPresentEnvironmentKeys(environment, allowlist ?? [], parentEnv);
   environment.ATTEST_RUN_ID = attest.runId;
   environment.ATTEST_CASE_ID = attest.caseId;
   environment.ATTEST_PROTOCOL = AGENT_PROTOCOL;

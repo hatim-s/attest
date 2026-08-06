@@ -6,6 +6,9 @@ const CASE_FIELDS = new Set(['id', 'input', 'expected', 'params', 'metrics']);
 
 type UnknownRecord = Record<string, unknown>;
 
+type DatasetCaseRecord = { caseDefinition: CaseDefinition; lineNumber: number };
+type DatasetInspection = { records: DatasetCaseRecord[]; issues: ContractIssue[] };
+
 const isRecord = (value: unknown): value is UnknownRecord => {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 };
@@ -60,17 +63,17 @@ const readDataset = async (datasetPath: string): Promise<Result<string, Contract
  * docs/specs/config-format.md. All line diagnostics are collected before returning so configuration
  * failures remain actionable and no agent can be invoked from a partially valid dataset.
  */
-const loadDatasetCases = async (
+const inspectDatasetCases = async (
   datasetPath: string,
   baseDirectory: string,
-): Promise<Result<CaseDefinition[], ContractIssue[]>> => {
+): Promise<DatasetInspection> => {
   const resolvedPath = resolve(baseDirectory, datasetPath);
   const document = await readDataset(resolvedPath);
   if (!document.ok) {
-    return document;
+    return { records: [], issues: document.error };
   }
 
-  const cases: CaseDefinition[] = [];
+  const records: DatasetCaseRecord[] = [];
   const issues: ContractIssue[] = [];
   const seenCaseIds = new Set<string>();
   const lines = document.value.split(/\r?\n/);
@@ -97,12 +100,23 @@ const loadDatasetCases = async (
         issues.push(issue(lineNumber, `duplicate case id "${caseDefinition.id}"`));
       } else {
         seenCaseIds.add(caseDefinition.id);
-        cases.push(caseDefinition);
+        records.push({ caseDefinition, lineNumber });
       }
     }
   }
 
-  return issues.length === 0 ? { ok: true, value: cases } : { ok: false, error: issues };
+  return { records, issues };
 };
 
-export { loadDatasetCases };
+/** Preserves the public cases-only loader while execution uses line-aware inspection diagnostics. */
+const loadDatasetCases = async (
+  datasetPath: string,
+  baseDirectory: string,
+): Promise<Result<CaseDefinition[], ContractIssue[]>> => {
+  const inspection = await inspectDatasetCases(datasetPath, baseDirectory);
+  return inspection.issues.length === 0
+    ? { ok: true, value: inspection.records.map(({ caseDefinition }) => caseDefinition) }
+    : { ok: false, error: inspection.issues };
+};
+
+export { inspectDatasetCases, loadDatasetCases, type DatasetCaseRecord, type DatasetInspection };

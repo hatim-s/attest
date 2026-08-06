@@ -1,4 +1,6 @@
 import { spawn, type ChildProcess } from 'node:child_process';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -11,6 +13,10 @@ import type { InvokeOptions } from './types.js';
 const REPOSITORY_ROOT = fileURLToPath(new URL('../../../..', import.meta.url));
 const CLI_AGENT_PATH = join(REPOSITORY_ROOT, 'conformance/fake-agents/cli-agent.cjs');
 const HTTP_AGENT_PATH = join(REPOSITORY_ROOT, 'conformance/fake-agents/http-agent.cjs');
+const MARKER_PROBE_AGENT_PATH = join(
+  REPOSITORY_ROOT,
+  'packages/core/src/runner/fixtures/marker-probe-agent.cjs',
+);
 
 const request: AgentRequest = {
   protocol: AGENT_PROTOCOL,
@@ -128,7 +134,7 @@ describe('invokeAgent', () => {
   });
 
   it('retries schema-invalid envelopes and records them as invocation errors', async () => {
-    const program = `process.stdout.write(JSON.stringify({ protocol: '${AGENT_PROTOCOL}' }));`;
+    const program = `process.stdout.write(JSON.stringify({ protocol: '${AGENT_PROTOCOL}', vendor_field: true }));`;
     const result = await invokeAgent(
       { type: 'cli', command: [process.execPath, '-e', program] },
       request,
@@ -146,6 +152,36 @@ describe('invokeAgent', () => {
           attempt.status === 'invocation_error' && attempt.error.code === 'invalid_envelope',
       ),
     ).toBe(true);
+    expect(result.attempts.every((attempt) => attempt.rawExcerpt?.text.length)).toBeTruthy();
+    expect(result.attempts.every((attempt) => attempt.warnings[0]?.code === 'unknown_field')).toBe(
+      true,
+    );
+  });
+
+  it('creates a fresh working directory for every retry attempt', async () => {
+    const stateDirectory = await mkdtemp(join(tmpdir(), 'attest-marker-probe-'));
+    const statePath = join(stateDirectory, 'state');
+    try {
+      const result = await invokeAgent(
+        { type: 'cli', command: [process.execPath, MARKER_PROBE_AGENT_PATH] },
+        request,
+        {
+          outputCapBytes: options.outputCapBytes,
+          retries: 1,
+          terminationGraceMs: options.terminationGraceMs,
+          timeoutMs: options.timeoutMs,
+          env: { PATH: process.env.PATH ?? '', MARKER_PROBE_STATE_FILE: statePath },
+        },
+      );
+
+      expect(result).toMatchObject({
+        status: 'ok',
+        report: { ok: true, value: { output: 'attempt isolated' } },
+      });
+      expect(result.attempts).toHaveLength(2);
+    } finally {
+      await rm(stateDirectory, { recursive: true, force: true });
+    }
   });
 
   it('does not retry valid agent error envelopes', async () => {

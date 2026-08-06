@@ -247,6 +247,45 @@ describe('invokeCliAgent', { timeout: TEST_TIMEOUT_MS }, () => {
     });
   });
 
+  it('sweeps a detached descendant created by a SIGTERM handler', async () => {
+    await withHeartbeatFile(async (heartbeatFile) => {
+      const attempt = requireInvocationError(
+        await invokeCliAgent(
+          createPrivateFixtureTarget('sigterm-forks-setsid-agent.cjs'),
+          request,
+          createOptions({
+            timeoutMs: 300,
+            terminationGraceMs: 700,
+            env: createEnvironment({ ORPHAN_HEARTBEAT_FILE: heartbeatFile }),
+          }),
+        ),
+      );
+
+      expect(attempt.error.code).toBe('timeout');
+      const processId = parseHeartbeatProcessId(await readHeartbeat(heartbeatFile));
+      await expectHeartbeatStopped(heartbeatFile);
+      expect(await waitForMissingProcessError(processId)).toMatchObject({ code: 'ESRCH' });
+    });
+  });
+
+  it('sweeps a detached orphan after a normal zero exit', async () => {
+    await withHeartbeatFile(async (heartbeatFile) => {
+      const attempt = await invokeCliAgent(
+        createPrivateFixtureTarget('normal-exit-orphan-agent.cjs'),
+        request,
+        createOptions({
+          terminationGraceMs: 500,
+          env: createEnvironment({ ORPHAN_HEARTBEAT_FILE: heartbeatFile }),
+        }),
+      );
+
+      expect(attempt.status).toBe('ok');
+      const processId = parseHeartbeatProcessId(await readHeartbeat(heartbeatFile));
+      await expectHeartbeatStopped(heartbeatFile);
+      expect(await waitForMissingProcessError(processId)).toMatchObject({ code: 'ESRCH' });
+    });
+  });
+
   it('uses SIGKILL after the configured SIGTERM grace period', async () => {
     await withHeartbeatFile(async (heartbeatFile) => {
       const timeoutMs = 100;
@@ -289,6 +328,9 @@ describe('invokeCliAgent', { timeout: TEST_TIMEOUT_MS }, () => {
     );
 
     expect(attempt.error.code).toBe('output_cap_exceeded');
+    expect(attempt.rawExcerpt).toMatchObject({ truncated: true });
+    expect(attempt.rawExcerpt?.text.length).toBeLessThanOrEqual(4096);
+    expect(attempt.rawExcerpt?.sha256).toMatch(/^[a-f0-9]{64}$/);
     expect(performance.now() - startedAt).toBeLessThan(3_000);
   });
 
@@ -336,6 +378,8 @@ describe('invokeCliAgent', { timeout: TEST_TIMEOUT_MS }, () => {
       );
 
       expect(attempt.error.code).toBe('invalid_envelope');
+      expect(attempt.rawExcerpt?.text.length).toBeGreaterThan(0);
+      expect(attempt.warnings).toEqual([]);
     },
   );
 
@@ -391,6 +435,7 @@ describe('invokeCliAgent', { timeout: TEST_TIMEOUT_MS }, () => {
 
     expect(attempt.error.code).toBe('nonzero_exit');
     expect(attempt.diagnostics.exitCode).toBe(3);
+    expect(attempt.rawExcerpt?.text).toContain(request.protocol);
   });
 
   it('classifies a valid envelope followed by exit 23 as nonzero_exit', async () => {
@@ -433,6 +478,9 @@ describe('invokeCliAgent', { timeout: TEST_TIMEOUT_MS }, () => {
       access(join(PRIVATE_FIXTURE_DIRECTORY, 'session-escape-agent.cjs')),
       access(join(PRIVATE_FIXTURE_DIRECTORY, 'ignore-sigterm-agent.cjs')),
       access(join(PRIVATE_FIXTURE_DIRECTORY, 'envelope-then-exit-23-agent.cjs')),
+      access(join(PRIVATE_FIXTURE_DIRECTORY, 'sigterm-forks-setsid-agent.cjs')),
+      access(join(PRIVATE_FIXTURE_DIRECTORY, 'normal-exit-orphan-agent.cjs')),
+      access(join(PRIVATE_FIXTURE_DIRECTORY, 'marker-probe-agent.cjs')),
     ]);
   });
 });
