@@ -14,7 +14,14 @@ export {
   metricRequestSchema,
   metricResultSchema,
 } from './metric.js';
-export type { MetricDefinition, MetricRequest, MetricResult } from './metric.js';
+export type {
+  AssertionCheck,
+  JsonValue,
+  LeafAssertionCheck,
+  MetricDefinition,
+  MetricRequest,
+  MetricResult,
+} from './metric.js';
 export {
   parseAgentRequest,
   parseAgentResponse,

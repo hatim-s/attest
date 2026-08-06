@@ -48,3 +48,23 @@ export {
   type RunDiff,
   type ThresholdConfig,
 } from './diff/index.js';
+export { AttestMetricError } from './metrics/errors.js';
+export {
+  buildEvaluationDocument,
+  resolveDocumentPath,
+  type EvaluationDocument,
+  type PathResolution,
+} from './metrics/evaluation-document.js';
+export {
+  evaluateAssertionCheck,
+  evaluateAssertionMetric,
+  type AssertionCheckOutcome,
+  type AssertionMetricDefinition,
+  type AssertionMetricOutcome,
+} from './metrics/assertion-engine.js';
+export type {
+  MetricContext,
+  MetricErrorInfo,
+  MetricEvaluation,
+  MetricExecutionView,
+} from './metrics/metric-evaluation.js';
