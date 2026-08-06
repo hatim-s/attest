@@ -3,3 +3,7 @@ PLAN.md
 .logs/
 node_modules/
 .DS_Store
+dist/
+.turbo/
+coverage/
+*.tsbuildinfo

@@ -1,0 +1,17 @@
+{
+  "name": "@attest/cli",
+  "version": "0.0.0",
+  "type": "module",
+  "bin": {
+    "attest": "./dist/cli.js"
+  },
+  "dependencies": {
+    "@attest/contracts": "workspace:*",
+    "@attest/core": "workspace:*"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run --passWithNoTests"
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "name": "@attest/schemas",
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit --allowJs false --skipLibCheck true",
+    "test": "vitest run --passWithNoTests"
+  }
+}
