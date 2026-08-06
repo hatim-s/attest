@@ -15,10 +15,16 @@
   },
   "dependencies": {
     "@attest/contracts": "workspace:*",
-    "@attest/core": "workspace:*"
+    "@attest/core": "workspace:*",
+    "commander": "^15.0.0",
+    "yaml": "^2.9.0"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "test": "vitest run",
     "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "devDependencies": {
+    "vitest": "^3"
   }
 }

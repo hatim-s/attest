@@ -12,7 +12,7 @@ project: support-agent
 
 agent:
   type: cli # cli | http
-  command: ['bun', 'run', 'src/agent.ts']
+    command: ['bun', 'run', './src/agent.ts']
   # url: http://localhost:3000/invoke   (type: http)
   env: [ANTHROPIC_API_KEY] # allowlist forwarded to the agent
   timeout_ms: 60000
@@ -79,3 +79,4 @@ Inline `cases` and file-backed `dataset` are interchangeable per suite (a suite 
 3. **Environment interpolation** happens only in designated fields (`agent.env` names, judge `model` credentials resolution) — never arbitrary `${VAR}` templating in bodies. Secrets stay out of config files.
 4. **Determinism inputs.** The config's canonical hash (comments and formatting excluded) is recorded on every run and shown in diffs — "what changed between run A and B" always includes config identity.
 5. **Editor round-trip.** Tools that modify configs (the dashboard editor, `attest init`) patch the concrete syntax tree: comments, key order, quoting, and untouched lines survive. A file changed on disk since load is refused, never clobbered.
+6. **CLI paths.** Arguments written explicitly as relative paths (`./...` or `../...`) resolve from the config file's directory before the agent starts in its isolated per-attempt working directory. Bare command names still resolve through the filtered `PATH`.

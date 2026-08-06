@@ -19,6 +19,7 @@ export {
   openRunStore,
   openStore,
   readRunBundle,
+  toStoredCaseExecution,
   type AttestStore,
   type BundleCase,
   type BundleFooter,

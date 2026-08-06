@@ -20,7 +20,7 @@
     "build": "turbo run build",
     "typecheck": "turbo run typecheck",
     "lint": "eslint .",
-    "test": "turbo run test",
+    "test": "turbo run test --concurrency=1",
     "generate:schemas": "bun scripts/generate-json-schema.ts",
     "format:check": "prettier --check .",
     "format": "prettier --write .",
