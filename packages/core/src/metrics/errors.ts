@@ -1,7 +1,8 @@
 import { AttestError, type JsonValue } from '@attest/contracts';
 
 /** Enumerates stable metric-boundary failures without requiring callers to parse messages. */
-type AttestMetricErrorCode = 'invalid_path' | 'judge_provider_error' | 'judge_unparseable_response';
+type AttestMetricErrorCode =
+  'invalid_json_schema' | 'invalid_path' | 'judge_provider_error' | 'judge_unparseable_response';
 
 /** Carries optional JSON evidence while preserving the shared AttestError cause chain. */
 type AttestMetricErrorOptions = ErrorOptions & { details?: JsonValue };

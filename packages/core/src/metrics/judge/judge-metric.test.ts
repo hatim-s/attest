@@ -7,6 +7,7 @@ import type { MetricDefinition } from '@attest/contracts';
 import { evaluateMetrics } from '../evaluate-metrics.js';
 import { AttestMetricError } from '../errors.js';
 import type { MetricContext } from '../metric-evaluation.js';
+import type { JudgeCache, JudgeCacheEntry } from './judge-cache.js';
 import type { JudgeClient, JudgeOutcome, JudgeRecord, JudgeRequest } from './judge-client.js';
 import { evaluateJudgeMetric, type JudgeMetricDefinition } from './judge-metric.js';
 
@@ -29,6 +30,12 @@ const record: JudgeRecord = {
   },
   rawResponse: { score: 0.7, rationale: 'Acceptable.' },
   usage: { inputTokens: 10, outputTokens: 4 },
+  attempts: [
+    {
+      rawResponse: { score: 0.7, rationale: 'Acceptable.' },
+      usage: { inputTokens: 10, outputTokens: 4 },
+    },
+  ],
 };
 
 /** Produces a no-network JudgeClient whose scripted values make error paths deterministic. */
@@ -72,6 +79,34 @@ describe('evaluateJudgeMetric', () => {
     });
   });
 
+  it('serializes every judge retry attempt alongside the final raw response', async () => {
+    const retryRecord: JudgeRecord = {
+      ...record,
+      rawResponse: { score: 1, rationale: 'Recovered.' },
+      attempts: [
+        {
+          rawResponse: '{"score":"invalid"}',
+          usage: { inputTokens: 8, outputTokens: 2 },
+          error: 'Invalid score.',
+        },
+        {
+          rawResponse: { score: 1, rationale: 'Recovered.' },
+          usage: { inputTokens: 9, outputTokens: 3 },
+        },
+      ],
+    };
+    const { client } = createScriptedClient([
+      { verdict: { score: 1, rationale: 'Recovered.' }, record: retryRecord },
+    ]);
+
+    await expect(evaluateJudgeMetric(definition, context, { client })).resolves.toMatchObject({
+      judgeIo: {
+        rawResponse: { score: 1, rationale: 'Recovered.' },
+        attempts: retryRecord.attempts,
+      },
+    });
+  });
+
   it('honors an explicit threshold without inventing a passing score', async () => {
     const { client } = createScriptedClient([
       { verdict: { score: 0.7, rationale: 'Below target.' }, record },
@@ -82,6 +117,47 @@ describe('evaluateJudgeMetric', () => {
     });
 
     expect(evaluation).toMatchObject({ status: 'evaluated', result: { score: 0.7, pass: false } });
+  });
+
+  it('uses cached judge evidence without calling the provider', async () => {
+    let calls = 0;
+    const client: JudgeClient = {
+      scoreRubric: () => {
+        calls += 1;
+        return Promise.resolve({ verdict: { score: 1, rationale: 'unused' }, record });
+      },
+    };
+    const entries = new Map<string, JudgeCacheEntry>();
+    const cache: JudgeCache = {
+      get: (key) => Promise.resolve(entries.get(key)),
+      set: (key, entry) => {
+        entries.set(key, entry);
+        return Promise.resolve();
+      },
+    };
+    const seeded = await evaluateJudgeMetric(definition, context, { client, cache });
+    const cached = await evaluateJudgeMetric(definition, context, { client, cache });
+
+    expect(calls).toBe(1);
+    expect(seeded).toMatchObject({ status: 'evaluated', judgeIo: { cache: 'miss' } });
+    expect(cached).toMatchObject({ status: 'evaluated', judgeIo: { cache: 'hit' } });
+  });
+
+  it('continues with a provider result when advisory cache writes fail', async () => {
+    const { client } = createScriptedClient([
+      { verdict: { score: 0.7, rationale: 'Available.' }, record },
+    ]);
+    const cache: JudgeCache = {
+      get: () => Promise.resolve(undefined),
+      set: () => Promise.reject(new Error('cache offline')),
+    };
+
+    await expect(
+      evaluateJudgeMetric(definition, context, { client, cache }),
+    ).resolves.toMatchObject({
+      status: 'evaluated',
+      judgeIo: { cache: 'miss' },
+    });
   });
 
   it('maps provider failures to judge_provider_error without a fake score', async () => {
@@ -204,5 +280,51 @@ describe('evaluateMetrics', () => {
           evaluation.status === 'error' && evaluation.error.code === 'skipped_no_output',
       ),
     ).toBe(true);
+  });
+
+  it('isolates unexpected assertion exceptions and continues with later metrics', async () => {
+    const definitions: MetricDefinition[] = [
+      {
+        name: 'invalid-regex',
+        type: 'assertion',
+        assert: [{ regex: { path: '$.output', pattern: '[' } }],
+      },
+      {
+        name: 'later-assertion',
+        type: 'assertion',
+        assert: [{ equals: { path: '$.output', value: 'Paris' } }],
+      },
+    ];
+
+    const evaluations = await evaluateMetrics(definitions, context);
+
+    expect(evaluations).toMatchObject([
+      { metricName: 'invalid-regex', status: 'error', error: { code: 'internal_error' } },
+      { metricName: 'later-assertion', status: 'evaluated', result: { pass: true } },
+    ]);
+  });
+
+  it('maps invalid JSON Schema configuration to its typed metric error', async () => {
+    const evaluations = await evaluateMetrics(
+      [
+        {
+          name: 'invalid-schema',
+          type: 'assertion',
+          assert: [
+            {
+              json_schema: {
+                path: '$.output',
+                schema: { type: 'not-a-json-schema-type' },
+              },
+            },
+          ],
+        },
+      ],
+      context,
+    );
+
+    expect(evaluations).toMatchObject([
+      { status: 'error', error: { code: 'invalid_json_schema' } },
+    ]);
   });
 });

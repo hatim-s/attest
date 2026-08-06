@@ -1,7 +1,8 @@
-import Ajv2020, { type AnySchema, type ValidateFunction } from 'ajv/dist/2020.js';
+import Ajv2020, { type ValidateFunction } from 'ajv/dist/2020.js';
 import type { LeafAssertionCheck } from '@attest/contracts';
 
 import { resolveDocumentPath, type EvaluationDocument } from '../evaluation-document.js';
+import { AttestMetricError } from '../errors.js';
 import { executeGuardedRegexTest } from './regex-guard.js';
 
 type CheckEvaluation = { passed: boolean; reason?: string };
@@ -14,9 +15,14 @@ type ThresholdCheck = Extract<LeafAssertionCheck, { threshold: unknown }>['thres
 type ExistsCheck = Extract<LeafAssertionCheck, { exists: unknown }>['exists'];
 type ToolCallsCheck = Extract<LeafAssertionCheck, { tool_calls: unknown }>['tool_calls'];
 
-const ajv = new Ajv2020.Ajv2020({ allErrors: true, strict: false });
-const objectSchemaValidators = new WeakMap<object, ValidateFunction>();
-const booleanSchemaValidators = new Map<boolean, ValidateFunction>();
+type SchemaValidator = {
+  validate: ValidateFunction;
+  formatErrors: (errors: ValidateFunction['errors']) => string;
+};
+
+// Config validation freezes metric definitions before evaluation; object identity is therefore a safe cache key.
+const objectSchemaValidators = new WeakMap<object, SchemaValidator>();
+const booleanSchemaValidators = new Map<boolean, SchemaValidator>();
 
 const isDeepEqual = (left: unknown, right: unknown): boolean => {
   if (Object.is(left, right)) {
@@ -133,13 +139,34 @@ const evaluateRegexCheck = (check: RegexCheck, document: EvaluationDocument): Ch
   };
 };
 
-const getSchemaValidator = (schema: JsonSchemaCheck['schema']): ValidateFunction => {
+/** Compiles each root schema in an isolated Ajv registry so independent `$id` values cannot collide. */
+const compileSchemaValidator = (schema: JsonSchemaCheck['schema']): SchemaValidator => {
+  const ajv = new Ajv2020.Ajv2020({ allErrors: true, strict: false });
+  try {
+    const validate = ajv.compile(schema);
+    return {
+      validate,
+      formatErrors: (errors) => ajv.errorsText(errors, { separator: '; ' }),
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new AttestMetricError(
+      'invalid_json_schema',
+      `JSON Schema could not be compiled: ${message}`,
+      {
+        cause: error,
+      },
+    );
+  }
+};
+
+const getSchemaValidator = (schema: JsonSchemaCheck['schema']): SchemaValidator => {
   if (typeof schema === 'boolean') {
     const cached = booleanSchemaValidators.get(schema);
     if (cached !== undefined) {
       return cached;
     }
-    const validator = ajv.compile(schema);
+    const validator = compileSchemaValidator(schema);
     booleanSchemaValidators.set(schema, validator);
     return validator;
   }
@@ -148,12 +175,12 @@ const getSchemaValidator = (schema: JsonSchemaCheck['schema']): ValidateFunction
   if (cached !== undefined) {
     return cached;
   }
-  const validator = ajv.compile(schema as AnySchema);
+  const validator = compileSchemaValidator(schema);
   objectSchemaValidators.set(schema, validator);
   return validator;
 };
 
-/** Validates Draft 2020-12 schemas and exposes Ajv diagnostics as actionable assertion evidence. */
+/** Validates Draft 2020-12 data while invalid schemas remain typed evaluation errors per metric spec §Errors. */
 const evaluateJsonSchemaCheck = (
   check: JsonSchemaCheck,
   document: EvaluationDocument,
@@ -163,28 +190,19 @@ const evaluateJsonSchemaCheck = (
     return resolution;
   }
 
-  let validator: ValidateFunction;
-  try {
-    validator = getSchemaValidator(check.schema);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    return {
-      passed: false,
-      reason: `JSON Schema at ${check.path} could not be compiled: ${message}`,
-    };
-  }
-  if ('$async' in validator && validator.$async === true) {
+  const validator = getSchemaValidator(check.schema);
+  if ('$async' in validator.validate && validator.validate.$async === true) {
     return {
       passed: false,
       reason: `JSON Schema at ${check.path} must be synchronous`,
     };
   }
-  if (validator(resolution.value)) {
+  if (validator.validate(resolution.value)) {
     return { passed: true };
   }
   return {
     passed: false,
-    reason: `value at ${check.path} failed JSON Schema validation: ${ajv.errorsText(validator.errors, { separator: '; ' })}`,
+    reason: `value at ${check.path} failed JSON Schema validation: ${validator.formatErrors(validator.validate.errors)}`,
   };
 };
 

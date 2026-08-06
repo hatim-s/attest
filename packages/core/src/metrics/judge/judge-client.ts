@@ -18,6 +18,9 @@ type JudgeVerdict = { score: number; rationale: string };
 /** Retains portable token counts when the selected provider reports them. */
 type JudgeUsage = { inputTokens?: number; outputTokens?: number };
 
+/** Retains each provider attempt so retried structured responses remain reproducible under metric spec §3. */
+type JudgeAttempt = { rawResponse: JsonValue; usage?: JudgeUsage; error?: string };
+
 /**
  * Records everything needed to reproduce one rubric call per metric contract §3.
  * Provider credentials are deliberately absent so records remain safe to persist and render.
@@ -31,6 +34,7 @@ type JudgeRecord = {
   };
   rawResponse: JsonValue;
   usage?: JudgeUsage;
+  attempts: JudgeAttempt[];
 };
 
 /** Couples the semantic verdict with its reproducibility evidence. */
@@ -49,6 +53,7 @@ interface JudgeClient {
 
 export {
   type JudgeCallOptions,
+  type JudgeAttempt,
   type JudgeClient,
   type JudgeOutcome,
   type JudgeRecord,

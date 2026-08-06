@@ -48,7 +48,11 @@ export {
   type RunDiff,
   type ThresholdConfig,
 } from './diff/index.js';
-export { AttestMetricError } from './metrics/errors.js';
+export {
+  AttestMetricError,
+  type AttestMetricErrorCode,
+  type AttestMetricErrorOptions,
+} from './metrics/errors.js';
 export {
   buildEvaluationDocument,
   resolveDocumentPath,
@@ -68,3 +72,37 @@ export type {
   MetricEvaluation,
   MetricExecutionView,
 } from './metrics/metric-evaluation.js';
+export {
+  executeExecutableMetric,
+  type ExecutableMetricDefinition,
+  type ExecuteMetricOptions,
+} from './metrics/exec-metric.js';
+export { evaluateMetrics, type EvaluateMetricsOptions } from './metrics/evaluate-metrics.js';
+export type {
+  JudgeAttempt,
+  JudgeCallOptions,
+  JudgeClient,
+  JudgeOutcome,
+  JudgeRecord,
+  JudgeRequest,
+  JudgeUsage,
+  JudgeVerdict,
+} from './metrics/judge/judge-client.js';
+export {
+  computeJudgeCacheKey,
+  type JudgeCache,
+  type JudgeCacheEntry,
+} from './metrics/judge/judge-cache.js';
+export {
+  evaluateJudgeMetric,
+  type EvaluateJudgeMetricOptions,
+  type JudgeMetricDefinition,
+} from './metrics/judge/judge-metric.js';
+export {
+  createTanstackJudgeClient,
+  type TanstackJudgeClientOptions,
+} from './metrics/judge/tanstack-judge-client.js';
+export {
+  fromStoredMetricEvaluation,
+  toStoredMetricEvaluation,
+} from './metrics/stored-metric-evaluation.js';

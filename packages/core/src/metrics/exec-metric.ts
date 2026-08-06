@@ -9,6 +9,7 @@ import {
 } from '@attest/contracts';
 
 import type { MetricContext, MetricErrorInfo, MetricEvaluation } from './metric-evaluation.js';
+import { createAbortContext } from './internal/abort-context.js';
 import { buildMetricRequest } from './internal/metric-request.js';
 
 const DEFAULT_TIMEOUT_MS = 30_000;
@@ -198,23 +199,25 @@ const invokeCommandMetric = (
     child.stdin.end(requestBody);
   });
 
-/** Posts a metric envelope through the web-compatible HTTP boundary with a composed cancellation deadline. */
+/** Posts a metric envelope through the web-compatible HTTP boundary with owned timeout cleanup per metric spec §2. */
 const invokeHttpMetric = async (
   definition: ExecutableMetricDefinition & { url: string },
   requestBody: string,
   timeoutMs: number,
   signal: AbortSignal | undefined,
 ): Promise<InvocationOutcome> => {
-  const timeoutSignal = AbortSignal.timeout(timeoutMs);
-  const composedSignal =
-    signal === undefined ? timeoutSignal : AbortSignal.any([timeoutSignal, signal]);
+  const abortContext = createAbortContext({
+    signal,
+    timeoutMs,
+    timeoutMessage: `Metric execution exceeded ${timeoutMs} ms.`,
+  });
 
   try {
     const response = await fetch(definition.url, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: requestBody,
-      signal: composedSignal,
+      signal: abortContext.controller.signal,
     });
     if (response.status !== 200) {
       return {
@@ -229,7 +232,7 @@ const invokeHttpMetric = async (
 
     return { ok: true, text: await response.text() };
   } catch (error: unknown) {
-    if (composedSignal.aborted) {
+    if (abortContext.controller.signal.aborted) {
       return {
         ok: false,
         error: {
@@ -247,6 +250,8 @@ const invokeHttpMetric = async (
         message: `Could not call metric HTTP endpoint: ${error instanceof Error ? error.message : 'unknown error'}`,
       },
     };
+  } finally {
+    abortContext.dispose();
   }
 };
 

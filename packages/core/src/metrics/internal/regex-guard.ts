@@ -13,11 +13,13 @@ type GuardedRegexOptions = {
 };
 
 const defaultBudgetMs = 100;
-const defaultMaximumInputBytes = 262_144;
+const defaultMaximumInputBytes = 65_536;
 
 /**
- * Bounds regex risk because JavaScript cannot preempt a running expression: input is capped before execution,
- * while wall-clock overruns are reported after execution for deterministic assertion evidence.
+ * Bounds regex risk under metric contract §Assertions: patterns come from the user's own configuration, trusted
+ * project code under attest's v1 no-sandbox stance (STACK.md). JavaScript cannot preempt a running expression,
+ * so the guard caps input before execution and reports wall-clock overruns deterministically rather than claiming
+ * to stop them.
  */
 const executeGuardedRegexTest = (options: GuardedRegexOptions): GuardedRegexOutcome => {
   const maximumInputBytes = options.maxInputBytes ?? defaultMaximumInputBytes;

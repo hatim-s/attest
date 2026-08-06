@@ -18,6 +18,13 @@ describe('parseJudgeModel', () => {
     });
   });
 
+  it('accepts a provider-qualified model string that the SDK does not yet enumerate', () => {
+    expect(parseJudgeModel('anthropic/future-model-2027')).toEqual({
+      provider: 'anthropic',
+      model: 'future-model-2027',
+    });
+  });
+
   it.each(['model-only', '/model', 'openai/', 'unsupported/model'])(
     'rejects invalid model %s',
     (model) => {
@@ -40,19 +47,5 @@ describe('createTanstackJudgeClient', () => {
       'judge_provider_error',
     );
     await expect(client.scoreRubric(request)).rejects.toThrow('unsupported');
-  });
-
-  it('rejects models absent from the installed provider declaration', async () => {
-    const client = createTanstackJudgeClient();
-
-    const unsupportedModelRequest = {
-      ...request,
-      model: 'openai/not-in-this-sdk-version',
-    };
-    await expect(client.scoreRubric(unsupportedModelRequest)).rejects.toHaveProperty(
-      'code',
-      'judge_provider_error',
-    );
-    await expect(client.scoreRubric(unsupportedModelRequest)).rejects.toThrow('not supported');
   });
 });

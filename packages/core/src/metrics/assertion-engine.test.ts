@@ -111,9 +111,9 @@ const leafCases: LeafCase[] = [
   {
     name: 'regex reports oversized input as a failure',
     check: { regex: { path: '$.output', pattern: '.' } },
-    customDocument: { ...document, output: 'a'.repeat(262_145) },
+    customDocument: { ...document, output: 'a'.repeat(65_537) },
     passed: false,
-    reason: /262144-byte limit/,
+    reason: /65536-byte limit/,
   },
   {
     name: 'json_schema accepts a Draft 2020-12-valid value',
@@ -139,17 +139,6 @@ const leafCases: LeafCase[] = [
     },
     passed: false,
     reason: /required property 'source'/,
-  },
-  {
-    name: 'json_schema reports an invalid schema as failure data',
-    check: {
-      json_schema: {
-        path: '$.output.metadata',
-        schema: { type: 'not-a-json-schema-type' },
-      },
-    },
-    passed: false,
-    reason: /could not be compiled/,
   },
   {
     name: 'threshold requires every present comparator',
@@ -282,6 +271,67 @@ describe('evaluateAssertionMetric', () => {
     expect(checks.checks.map(({ passed }) => passed)).toEqual([true, false, true]);
     expect(typeof checks.checks[1]?.reason).toBe('string');
     expect(outcome.outcomes.map(({ passed }) => passed)).toEqual([true, false, true]);
+  });
+
+  it('throws a typed error when JSON Schema configuration cannot compile', () => {
+    const definition: AssertionMetricDefinition = {
+      name: 'invalid-schema',
+      type: 'assertion',
+      assert: [
+        {
+          json_schema: {
+            path: '$.output.metadata',
+            schema: { type: 'not-a-json-schema-type' },
+          },
+        },
+      ],
+    };
+
+    expect(() => evaluateAssertionMetric(definition, document)).toThrowError(
+      /JSON Schema could not be compiled/,
+    );
+    try {
+      evaluateAssertionMetric(definition, document);
+    } catch (error: unknown) {
+      expect(error).toMatchObject({ code: 'invalid_json_schema' });
+    }
+  });
+
+  it('isolates schemas that share an identifier', () => {
+    const sharedIdentifier = 'https://attest.dev/schema/shared';
+    const first = evaluateAssertionMetric(
+      {
+        name: 'first-schema',
+        type: 'assertion',
+        assert: [
+          {
+            json_schema: {
+              path: '$.output.metadata',
+              schema: { $id: sharedIdentifier, type: 'object', required: ['citations'] },
+            },
+          },
+        ],
+      },
+      document,
+    );
+    const second = evaluateAssertionMetric(
+      {
+        name: 'second-schema',
+        type: 'assertion',
+        assert: [
+          {
+            json_schema: {
+              path: '$.output.metadata',
+              schema: { $id: sharedIdentifier, type: 'object', required: ['source'] },
+            },
+          },
+        ],
+      },
+      document,
+    );
+
+    expect(first.result.pass).toBe(true);
+    expect(second.result.pass).toBe(false);
   });
 });
 

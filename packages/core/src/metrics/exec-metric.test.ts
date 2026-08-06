@@ -10,7 +10,9 @@ import type { MetricContext } from './metric-evaluation.js';
 import { executeExecutableMetric } from './exec-metric.js';
 import { buildMetricRequest } from './internal/metric-request.js';
 
-const fixturesDirectory = fileURLToPath(new URL('./exec-metric.fixtures/', import.meta.url));
+/** Resolves source fixtures from the repository root so conformance assets remain shared across tracks. */
+const fromRepositoryRoot = (relativePath: string): string =>
+  fileURLToPath(new URL(`../../../../${relativePath}`, import.meta.url));
 
 /** Builds a completed execution context so every transport test shares exact request evidence. */
 const metricContext = (): MetricContext => ({
@@ -26,8 +28,15 @@ const metricContext = (): MetricContext => ({
 /** Resolves a fixture command through the active Node executable to avoid shell-specific behavior. */
 const fixtureCommand = (fixtureName: string, ...arguments_: string[]) => [
   process.execPath,
-  join(fixturesDirectory, fixtureName),
+  fromRepositoryRoot(`packages/core/src/metrics/exec-metric.fixtures/${fixtureName}`),
   ...arguments_,
+];
+
+/** Uses the canonical hostile-agent behaviors wherever their transport shape already exercises the metric edge. */
+const conformanceAgentCommand = (behavior: string) => [
+  process.execPath,
+  fromRepositoryRoot('conformance/fake-agents/cli-agent.cjs'),
+  `--behavior=${behavior}`,
 ];
 
 /** Starts an in-process loopback endpoint and returns its base URL plus deterministic teardown. */
@@ -84,22 +93,22 @@ describe('executeExecutableMetric command metrics', () => {
 
   it('records non-zero exits with bounded stderr diagnostics', async () => {
     const evaluation = await executeExecutableMetric(
-      { name: 'fixture', type: 'exec', command: fixtureCommand('nonzero.mjs') },
+      { name: 'fixture', type: 'exec', command: conformanceAgentCommand('nonzero-exit') },
       metricContext(),
     );
 
     expect(evaluation).toMatchObject({
       status: 'error',
-      error: { code: 'exec_nonzero_exit', details: { stderr: 'fixture metric failed' } },
+      error: { code: 'exec_nonzero_exit' },
     });
   });
 
   it.each([
-    { fixtureName: 'malformed.mjs', message: 'Metric output was not valid JSON' },
-    { fixtureName: 'oversized.mjs', message: 'Metric stdout exceeded' },
-  ])('records $fixtureName output as malformed', async ({ fixtureName, message }) => {
+    { behavior: 'malformed-json', message: 'Metric output was not valid JSON' },
+    { behavior: 'huge-output', message: 'Metric stdout exceeded' },
+  ])('records canonical $behavior output as malformed', async ({ behavior, message }) => {
     const evaluation = await executeExecutableMetric(
-      { name: 'fixture', type: 'exec', command: fixtureCommand(fixtureName) },
+      { name: 'fixture', type: 'exec', command: conformanceAgentCommand(behavior) },
       metricContext(),
     );
 

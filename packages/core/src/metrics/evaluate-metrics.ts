@@ -3,9 +3,11 @@ import { performance } from 'node:perf_hooks';
 import type { MetricDefinition } from '@attest/contracts';
 
 import { evaluateAssertionMetric } from './assertion-engine.js';
+import { AttestMetricError } from './errors.js';
 import { buildEvaluationDocument } from './evaluation-document.js';
 import { executeExecutableMetric } from './exec-metric.js';
 import type { JudgeClient } from './judge/judge-client.js';
+import type { JudgeCache } from './judge/judge-cache.js';
 import { evaluateJudgeMetric } from './judge/judge-metric.js';
 import type { MetricContext, MetricEvaluation } from './metric-evaluation.js';
 
@@ -14,6 +16,7 @@ type EvaluateMetricsOptions = {
   judgeClient?: JudgeClient;
   execTimeoutMs?: number;
   judgeTimeoutMs?: number;
+  cache?: JudgeCache;
   signal?: AbortSignal;
 };
 
@@ -74,6 +77,7 @@ const evaluateMetric = async (
 
   return evaluateJudgeMetric(definition, context, {
     client: options.judgeClient,
+    cache: options.cache,
     timeoutMs: options.judgeTimeoutMs,
     signal: options.signal,
   });
@@ -96,7 +100,33 @@ const evaluateMetrics = async (
       evaluations.push(skippedMetricEvaluation(definition, performance.now() - startedAt));
       continue;
     }
-    evaluations.push(await evaluateMetric(definition, context, options));
+    const startedAt = performance.now();
+    try {
+      evaluations.push(await evaluateMetric(definition, context, options));
+    } catch (error: unknown) {
+      const metricError = error instanceof AttestMetricError ? error : undefined;
+      const isKnownMetricError =
+        metricError !== undefined &&
+        (metricError.code === 'invalid_json_schema' ||
+          metricError.code === 'invalid_path' ||
+          metricError.code === 'judge_provider_error' ||
+          metricError.code === 'judge_unparseable_response');
+      const message =
+        error instanceof Error ? error.message : 'Metric evaluation threw an unknown error.';
+      evaluations.push({
+        metricName: definition.name,
+        kind: definition.type,
+        status: 'error',
+        error: {
+          code: isKnownMetricError ? metricError.code : 'internal_error',
+          message,
+          ...(isKnownMetricError && metricError.details !== undefined
+            ? { details: metricError.details }
+            : {}),
+        },
+        durationMs: performance.now() - startedAt,
+      });
+    }
   }
 
   return evaluations;

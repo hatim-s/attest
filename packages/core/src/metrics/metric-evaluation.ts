@@ -21,6 +21,9 @@ type MetricErrorInfo = {
     | 'http_bad_status'
     | 'judge_provider_error'
     | 'judge_unparseable_response'
+    | 'internal_error'
+    | 'invalid_json_schema'
+    | 'invalid_path'
     | 'skipped_no_output';
   message: string;
   details?: JsonValue;

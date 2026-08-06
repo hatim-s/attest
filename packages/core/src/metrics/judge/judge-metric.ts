@@ -6,6 +6,7 @@ import { buildEvaluationDocument } from '../evaluation-document.js';
 import { AttestMetricError } from '../errors.js';
 import type { MetricContext, MetricEvaluation } from '../metric-evaluation.js';
 import type { JudgeClient, JudgeRecord, JudgeUsage } from './judge-client.js';
+import { computeJudgeCacheKey, type JudgeCache } from './judge-cache.js';
 import { summarizeTraceForJudge } from './rubric-prompt.js';
 
 const DEFAULT_JUDGE_TIMEOUT_MS = 60_000;
@@ -16,6 +17,7 @@ type JudgeMetricDefinition = Extract<MetricDefinition, { type: 'judge' }>;
 /** Supplies the provider boundary and resource controls owned by the enclosing run. */
 type EvaluateJudgeMetricOptions = {
   client: JudgeClient;
+  cache?: JudgeCache;
   timeoutMs?: number;
   signal?: AbortSignal;
 };
@@ -36,7 +38,55 @@ const serializeJudgeRecord = (record: JudgeRecord): JsonValue => ({
   },
   rawResponse: record.rawResponse,
   ...(record.usage === undefined ? {} : { usage: serializeJudgeUsage(record.usage) }),
+  attempts: record.attempts.map((attempt) => ({
+    rawResponse: attempt.rawResponse,
+    ...(attempt.usage === undefined ? {} : { usage: serializeJudgeUsage(attempt.usage) }),
+    ...(attempt.error === undefined ? {} : { error: attempt.error }),
+  })),
 });
+
+/** Reads persisted usage only when a trusted cache record retained the adapter's normalized shape. */
+const extractJudgeUsage = (record: JsonValue): JudgeUsage | undefined => {
+  if (record === null || Array.isArray(record) || typeof record !== 'object') {
+    return undefined;
+  }
+  const usage = record.usage;
+  if (usage === null || Array.isArray(usage) || typeof usage !== 'object') {
+    return undefined;
+  }
+  const inputTokens = usage.inputTokens;
+  const outputTokens = usage.outputTokens;
+  if (typeof inputTokens !== 'number' && typeof outputTokens !== 'number') {
+    return undefined;
+  }
+  return {
+    ...(typeof inputTokens === 'number' ? { inputTokens } : {}),
+    ...(typeof outputTokens === 'number' ? { outputTokens } : {}),
+  };
+};
+
+/** Builds metric result data identically for live and cached verdicts, preserving reported token evidence. */
+const createJudgeResult = (
+  definition: JudgeMetricDefinition,
+  verdict: { score: number; rationale: string },
+  usage: JudgeUsage | undefined,
+): MetricResult => {
+  const threshold = definition.threshold ?? 0.5;
+  return {
+    score: verdict.score,
+    pass: verdict.score >= threshold,
+    rationale: verdict.rationale,
+    ...(usage === undefined ? {} : { details: { usage: serializeJudgeUsage(usage) } }),
+  };
+};
+
+/** Adds cache provenance to judge evidence so stored results distinguish a replay from a provider call. */
+const withCacheProvenance = (record: JsonValue, cache: 'hit' | 'miss', key: string): JsonValue => {
+  if (record !== null && !Array.isArray(record) && typeof record === 'object') {
+    return { ...record, cache, key };
+  }
+  return { record, cache, key };
+};
 
 /** Creates the shared no-output short circuit without invoking a provider. */
 const skippedJudgeEvaluation = (
@@ -77,36 +127,51 @@ const evaluateJudgeMetric = async (
   }
 
   const document = buildEvaluationDocument(context);
+  const request = {
+    model: definition.model,
+    rubric: definition.rubric,
+    document: {
+      input: document.input,
+      output: document.output,
+      expected: document.expected,
+      traceSummary: summarizeTraceForJudge(document.trace),
+    },
+  };
+  const cacheKey = options.cache === undefined ? undefined : computeJudgeCacheKey(request);
   try {
-    const outcome = await options.client.scoreRubric(
-      {
-        model: definition.model,
-        rubric: definition.rubric,
-        document: {
-          input: document.input,
-          output: document.output,
-          expected: document.expected,
-          traceSummary: summarizeTraceForJudge(document.trace),
-        },
-      },
-      { timeoutMs: options.timeoutMs ?? DEFAULT_JUDGE_TIMEOUT_MS, signal: options.signal },
-    );
-    const threshold = definition.threshold ?? 0.5;
-    const result: MetricResult = {
-      score: outcome.verdict.score,
-      pass: outcome.verdict.score >= threshold,
-      rationale: outcome.verdict.rationale,
-      ...(outcome.record.usage === undefined
-        ? {}
-        : { details: { usage: serializeJudgeUsage(outcome.record.usage) } }),
-    };
+    const cached = cacheKey === undefined ? undefined : await options.cache?.get(cacheKey);
+    if (cacheKey !== undefined && cached !== undefined) {
+      return {
+        metricName: definition.name,
+        kind: 'judge',
+        status: 'evaluated',
+        result: createJudgeResult(definition, cached.verdict, extractJudgeUsage(cached.record)),
+        judgeIo: withCacheProvenance(cached.record, 'hit', cacheKey),
+        durationMs: performance.now() - startedAt,
+      };
+    }
+
+    const outcome = await options.client.scoreRubric(request, {
+      timeoutMs: options.timeoutMs ?? DEFAULT_JUDGE_TIMEOUT_MS,
+      signal: options.signal,
+    });
+    const serializedRecord = serializeJudgeRecord(outcome.record);
+    if (cacheKey !== undefined) {
+      try {
+        await options.cache?.set(cacheKey, { verdict: outcome.verdict, record: serializedRecord });
+      } catch {
+        // Cache persistence is advisory: a completed provider verdict remains the source of truth for this run.
+      }
+    }
 
     return {
       metricName: definition.name,
       kind: 'judge',
       status: 'evaluated',
-      result,
-      judgeIo: serializeJudgeRecord(outcome.record),
+      result: createJudgeResult(definition, outcome.verdict, outcome.record.usage),
+      ...(cacheKey === undefined
+        ? { judgeIo: serializedRecord }
+        : { judgeIo: withCacheProvenance(serializedRecord, 'miss', cacheKey) }),
       durationMs: performance.now() - startedAt,
     };
   } catch (error: unknown) {
