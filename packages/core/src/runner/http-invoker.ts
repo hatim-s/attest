@@ -1,4 +1,5 @@
 import type { AgentRequest, AgentTarget } from '@attest/contracts';
+import { createHash } from 'node:crypto';
 
 import { AgentInvocationError } from './errors.js';
 import { startTimer } from './internal/elapsed.js';
@@ -6,6 +7,8 @@ import { createRawExcerpt } from './internal/raw-excerpt.js';
 import type { InvocationAttempt, InvokeOptions } from './types.js';
 
 const HTTP_SUCCESS_STATUS = 200;
+const RAW_EXCERPT_CHARACTERS = 4096;
+const RAW_EVIDENCE_PREFIX_BYTES = RAW_EXCERPT_CHARACTERS * 4;
 
 const createInvocationErrorAttempt = (
   error: AgentInvocationError,
@@ -48,21 +51,33 @@ type BodyReadFailure = {
   rawExcerpt?: InvocationAttempt['rawExcerpt'];
 };
 
+const appendEvidencePrefix = (
+  chunks: Uint8Array[],
+  byteCount: number,
+  chunk: Uint8Array,
+): number => {
+  const retained = chunk.subarray(0, Math.max(0, RAW_EVIDENCE_PREFIX_BYTES - byteCount));
+  if (retained.byteLength > 0) {
+    chunks.push(retained);
+  }
+  return byteCount + retained.byteLength;
+};
+
+/** Creates cap evidence that is always marked truncated and hashes every byte received so far. */
+const createCappedRawExcerpt = (
+  evidenceChunks: readonly Uint8Array[],
+  evidenceByteCount: number,
+  digest: string,
+): NonNullable<InvocationAttempt['rawExcerpt']> => ({
+  ...createRawExcerpt(Buffer.concat(evidenceChunks, evidenceByteCount).toString('utf8')),
+  truncated: true,
+  sha256: digest,
+});
+
 const readCappedJson = async (
   response: Response,
   outputCapBytes: number,
 ): Promise<CappedJson | BodyReadFailure> => {
-  const contentLength = response.headers.get('content-length');
-  if (contentLength !== null && Number(contentLength) > outputCapBytes) {
-    await cancelResponseBody(response);
-    return {
-      error: new AgentInvocationError(
-        'output_cap_exceeded',
-        `HTTP agent response exceeds the ${outputCapBytes}-byte output cap.`,
-      ),
-    };
-  }
-
   const reader = response.body?.getReader();
   if (reader === undefined) {
     return {
@@ -74,7 +89,10 @@ const readCappedJson = async (
   }
 
   const chunks: Uint8Array[] = [];
+  const evidenceChunks: Uint8Array[] = [];
+  const payloadHash = createHash('sha256');
   let byteCount = 0;
+  let evidenceByteCount = 0;
 
   try {
     while (true) {
@@ -84,16 +102,21 @@ const readCappedJson = async (
       }
 
       byteCount += value.byteLength;
+      payloadHash.update(value);
+      evidenceByteCount = appendEvidencePrefix(evidenceChunks, evidenceByteCount, value);
       if (byteCount > outputCapBytes) {
         // Cancel immediately so an unbounded response is not fully downloaded before rejection.
         await cancelReader(reader);
-        const payload = Buffer.concat(chunks).toString('utf8');
         return {
           error: new AgentInvocationError(
             'output_cap_exceeded',
             `HTTP agent response exceeds the ${outputCapBytes}-byte output cap.`,
           ),
-          ...(payload.length === 0 ? {} : { rawExcerpt: createRawExcerpt(payload) }),
+          rawExcerpt: createCappedRawExcerpt(
+            evidenceChunks,
+            evidenceByteCount,
+            payloadHash.digest('hex'),
+          ),
         };
       }
       chunks.push(value);
@@ -182,16 +205,17 @@ const invokeHttpAgent = async (
     });
     httpStatus = response.status;
 
-    const parsed = await readCappedJson(response, options.outputCapBytes);
     if (response.status !== HTTP_SUCCESS_STATUS) {
+      // Status is authoritative at header receipt; body size and read failures cannot reclassify it.
+      void cancelResponseBody(response);
       return createInvocationErrorAttempt(
         new AgentInvocationError('http_status', `HTTP agent returned status ${response.status}.`),
         duration(),
         response.status,
-        parsed.rawExcerpt,
       );
     }
 
+    const parsed = await readCappedJson(response, options.outputCapBytes);
     if ('error' in parsed) {
       return createInvocationErrorAttempt(
         parsed.error,

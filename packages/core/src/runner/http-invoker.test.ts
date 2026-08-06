@@ -181,12 +181,34 @@ describe('invokeHttpAgent', () => {
       expect(attempt).toMatchObject({
         status: 'invocation_error',
         diagnostics: { httpStatus: status },
-        rawExcerpt: { text: JSON.stringify({ redirect: status }), truncated: false },
       });
       if (attempt.status === 'invocation_error') {
         expect(attempt.error).toMatchObject({ code: 'http_status' });
         expect(attempt.error.message).toContain(String(status));
       }
+    },
+  );
+
+  it.each([302, 404])(
+    'classifies oversized HTTP %i responses from headers before applying the 200 body cap',
+    async (status) => {
+      const payload = 'x'.repeat(options.outputCapBytes * 4);
+      const { url } = await startEdgeServer((response) => {
+        response.statusCode = status;
+        response.setHeader('content-length', String(Buffer.byteLength(payload)));
+        if (status === 302) {
+          response.setHeader('location', 'http://127.0.0.1:1/not-followed');
+        }
+        response.end(payload);
+      });
+
+      const attempt = await invoke(url);
+
+      expect(attempt).toMatchObject({
+        status: 'invocation_error',
+        error: { code: 'http_status' },
+        diagnostics: { httpStatus: status },
+      });
     },
   );
 
@@ -242,8 +264,29 @@ describe('invokeHttpAgent', () => {
     expect(attempt).toMatchObject({
       status: 'invocation_error',
       error: { code: 'output_cap_exceeded' },
+      rawExcerpt: { truncated: true },
     });
+    expect(attempt.rawExcerpt?.sha256).toMatch(/^[a-f0-9]{64}$/);
     expect(bytesServed).toBeLessThan(cap * 2);
+  });
+
+  it('retains forced-truncated digest evidence when Content-Length exceeds the cap', async () => {
+    const cap = 1_024;
+    const payload = JSON.stringify({ output: 'x'.repeat(cap * 2) });
+    const { url } = await startEdgeServer((response) => {
+      response.setHeader('content-length', String(Buffer.byteLength(payload)));
+      response.end(payload);
+    });
+
+    const attempt = await invoke(url, { outputCapBytes: cap });
+
+    expect(attempt).toMatchObject({
+      status: 'invocation_error',
+      error: { code: 'output_cap_exceeded' },
+      rawExcerpt: { truncated: true },
+    });
+    expect(attempt.rawExcerpt?.text.length).toBeLessThanOrEqual(4096);
+    expect(attempt.rawExcerpt?.sha256).toMatch(/^[a-f0-9]{64}$/);
   });
 
   it.each(['malformed-json', 'partial-stdout'])(

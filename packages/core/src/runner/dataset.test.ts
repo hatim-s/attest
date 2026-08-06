@@ -60,12 +60,12 @@ describe('loadDatasetCases', () => {
     if (!result.ok) {
       expect(result.error.map(({ path }) => path)).toEqual([
         'line 3',
-        'line 4',
-        'line 4',
-        'line 4',
+        'line 4: id',
+        'line 4: input',
+        'line 4: <root>',
       ]);
-      expect(result.error.map(({ message }) => message).join(' ')).toContain('input is required');
-      expect(result.error.map(({ message }) => message).join(' ')).toContain('unknown case field');
+      expect(result.error.map(({ message }) => message).join(' ')).toContain('expected string');
+      expect(result.error.map(({ message }) => message).join(' ')).toContain('Unrecognized key');
     }
   });
 

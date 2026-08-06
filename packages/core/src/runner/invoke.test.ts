@@ -18,6 +18,7 @@ const MARKER_PROBE_AGENT_PATH = join(
   REPOSITORY_ROOT,
   'packages/core/src/runner/fixtures/marker-probe-agent.cjs',
 );
+const READINESS_DEADLINE_MS = 30_000;
 
 const request: AgentRequest = {
   protocol: AGENT_PROTOCOL,
@@ -47,19 +48,47 @@ const startCanonicalServer = async (): Promise<CanonicalServer> => {
   const canonicalServer: CanonicalServer = { baseUrl: '', child, closed };
   canonicalServers.add(canonicalServer);
   let standardOutput = '';
-  const port = await new Promise<number>((resolve, reject) => {
-    child.once('error', reject);
-    child.once('close', (exitCode) =>
-      reject(new Error(`HTTP fixture exited before reporting readiness (${String(exitCode)}).`)),
-    );
-    child.stdout?.on('data', (chunk: Buffer) => {
-      standardOutput += chunk.toString('utf8');
-      const match = /LISTENING (\d+)/.exec(standardOutput);
-      if (match?.[1] !== undefined) {
-        resolve(Number(match[1]));
-      }
+  let port: number;
+  try {
+    port = await new Promise<number>((resolve, reject) => {
+      let settled = false;
+      const finish = (result: () => void): void => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(readinessTimer);
+        result();
+      };
+      const readinessTimer = setTimeout(
+        () =>
+          finish(() =>
+            reject(
+              new Error(
+                `Canonical HTTP fixture readiness exceeded ${String(READINESS_DEADLINE_MS)}ms.`,
+              ),
+            ),
+          ),
+        READINESS_DEADLINE_MS,
+      );
+      child.once('error', (error) => finish(() => reject(error)));
+      child.once('close', (exitCode) =>
+        finish(() =>
+          reject(
+            new Error(`HTTP fixture exited before reporting readiness (${String(exitCode)}).`),
+          ),
+        ),
+      );
+      child.stdout?.on('data', (chunk: Buffer) => {
+        standardOutput += chunk.toString('utf8');
+        const match = /LISTENING (\d+)/.exec(standardOutput);
+        if (match?.[1] !== undefined) {
+          finish(() => resolve(Number(match[1])));
+        }
+      });
     });
-  });
+  } catch (error) {
+    await stopCanonicalServer(canonicalServer);
+    throw error;
+  }
   canonicalServer.baseUrl = `http://127.0.0.1:${port}`;
   return canonicalServer;
 };
@@ -205,7 +234,7 @@ describe('invokeAgent', { timeout: 30_000 }, () => {
     );
   });
 
-  it('creates a fresh working directory for every retry attempt', async () => {
+  it('creates isolated retry directories beneath an explicit working-directory test seam', async () => {
     const stateDirectory = await mkdtemp(join(tmpdir(), 'attest-marker-probe-'));
     const statePath = join(stateDirectory, 'state');
     try {
@@ -218,6 +247,7 @@ describe('invokeAgent', { timeout: 30_000 }, () => {
           terminationGraceMs: options.terminationGraceMs,
           timeoutMs: options.timeoutMs,
           env: { PATH: process.env.PATH ?? '', MARKER_PROBE_STATE_FILE: statePath },
+          workingDirectory: stateDirectory,
         },
       );
 

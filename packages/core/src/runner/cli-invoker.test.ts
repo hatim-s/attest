@@ -209,7 +209,7 @@ describe('invokeCliAgent', { timeout: TEST_TIMEOUT_MS }, () => {
           createOptions({
             // Generous timeout: the orphan must exist and heartbeat before the kill,
             // even under parallel-suite load, or the test proves nothing.
-            timeoutMs: 1500,
+            timeoutMs: 5_000,
             terminationGraceMs: 500,
             env: createEnvironment({
               AGENT_BEHAVIOR: 'orphan-child',

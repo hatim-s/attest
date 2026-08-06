@@ -1,53 +1,25 @@
-import type { CaseDefinition, ContractIssue, Result } from '@attest/contracts';
+import {
+  caseSchema,
+  type CaseDefinition,
+  type ContractIssue,
+  type Result,
+} from '@attest/contracts';
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 
-const CASE_FIELDS = new Set(['id', 'input', 'expected', 'params', 'metrics']);
-
-type UnknownRecord = Record<string, unknown>;
-
 type DatasetCaseRecord = { caseDefinition: CaseDefinition; lineNumber: number };
 type DatasetInspection = { records: DatasetCaseRecord[]; issues: ContractIssue[] };
-
-const isRecord = (value: unknown): value is UnknownRecord => {
-  return value !== null && typeof value === 'object' && !Array.isArray(value);
-};
 
 const issue = (lineNumber: number, message: string): ContractIssue => ({
   path: `line ${lineNumber}`,
   message,
 });
 
-const validateStringArray = (value: unknown): boolean => {
-  return Array.isArray(value) && value.every((entry) => typeof entry === 'string');
-};
-
-const validateCase = (candidate: unknown, lineNumber: number): ContractIssue[] => {
-  if (!isRecord(candidate)) {
-    return [issue(lineNumber, 'case must be a JSON object')];
-  }
-
-  const issues: ContractIssue[] = [];
-  if (typeof candidate.id !== 'string') {
-    issues.push(issue(lineNumber, 'id must be a string'));
-  }
-  if (!Object.hasOwn(candidate, 'input')) {
-    issues.push(issue(lineNumber, 'input is required'));
-  }
-  if (candidate.params !== undefined && !isRecord(candidate.params)) {
-    issues.push(issue(lineNumber, 'params must be an object'));
-  }
-  if (candidate.metrics !== undefined && !validateStringArray(candidate.metrics)) {
-    issues.push(issue(lineNumber, 'metrics must be an array of strings'));
-  }
-
-  for (const fieldName of Object.keys(candidate)) {
-    if (!CASE_FIELDS.has(fieldName)) {
-      issues.push(issue(lineNumber, `unknown case field: ${fieldName}`));
-    }
-  }
-  return issues;
-};
+/** Maps canonical case-schema failures to physical JSONL line diagnostics. */
+const schemaIssue = (lineNumber: number, path: PropertyKey[], message: string): ContractIssue => ({
+  path: `line ${lineNumber}: ${path.length === 0 ? '<root>' : path.map(String).join('.')}`,
+  message,
+});
 
 const readDataset = async (datasetPath: string): Promise<Result<string, ContractIssue[]>> => {
   try {
@@ -92,10 +64,15 @@ const inspectDatasetCases = async (
       continue;
     }
 
-    const lineIssues = validateCase(candidate, lineNumber);
-    issues.push(...lineIssues);
-    if (lineIssues.length === 0) {
-      const caseDefinition = candidate as CaseDefinition;
+    const parsedCase = caseSchema.safeParse(candidate);
+    if (!parsedCase.success) {
+      issues.push(
+        ...parsedCase.error.issues.map((caseIssue) =>
+          schemaIssue(lineNumber, caseIssue.path, caseIssue.message),
+        ),
+      );
+    } else {
+      const caseDefinition = parsedCase.data;
       if (seenCaseIds.has(caseDefinition.id)) {
         issues.push(issue(lineNumber, `duplicate case id "${caseDefinition.id}"`));
       } else {

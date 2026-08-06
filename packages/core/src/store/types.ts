@@ -57,6 +57,7 @@ interface StoredDiagnostics {
   stderrExcerpt?: string;
   exitCode?: number;
   httpStatus?: number;
+  unreapedProcessIds?: number[];
 }
 
 /** Preserves one runner attempt for retry analysis required by the agent contract. */

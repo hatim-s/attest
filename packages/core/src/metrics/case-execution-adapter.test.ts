@@ -25,20 +25,8 @@ describe('caseExecutionToMetricContext', () => {
   it.each([
     ['completed', successResponse, undefined, 'completed', 'Paris'],
     ['completed', errorResponse, undefined, 'agent_error', undefined],
-    ['invocation_error', successResponse, undefined, 'invocation_error', undefined],
-    ['invocation_error', errorResponse, undefined, 'invocation_error', undefined],
-    ['timeout', successResponse, undefined, 'timeout', undefined],
-    ['timeout', errorResponse, undefined, 'timeout', undefined],
-    ['cancelled', successResponse, undefined, 'cancelled', undefined],
-    ['cancelled', errorResponse, undefined, 'cancelled', undefined],
     ['completed', successResponse, trace, 'completed', 'Paris'],
     ['completed', errorResponse, trace, 'agent_error', undefined],
-    ['invocation_error', successResponse, trace, 'invocation_error', undefined],
-    ['invocation_error', errorResponse, trace, 'invocation_error', undefined],
-    ['timeout', successResponse, trace, 'timeout', undefined],
-    ['timeout', errorResponse, trace, 'timeout', undefined],
-    ['cancelled', successResponse, trace, 'cancelled', undefined],
-    ['cancelled', errorResponse, trace, 'cancelled', undefined],
   ] as const)(
     'maps %s executions with %s envelopes and %s trace',
     (outcome, response, executionTrace, expectedOutcome, expectedOutput) => {
@@ -59,10 +47,18 @@ describe('caseExecutionToMetricContext', () => {
     },
   );
 
+  it.each(['invocation_error', 'timeout', 'cancelled'] as const)(
+    'maps %s executions without weakening the runner union',
+    (outcome) => {
+      const context = createMetricContext({ caseId: caseDefinition.id, outcome });
+
+      expect(context.execution).toEqual({ outcome, trace: null });
+    },
+  );
+
   it('rejects an impossible completed runner view that has no response', () => {
-    expect(() => createMetricContext({ caseId: caseDefinition.id, outcome: 'completed' })).toThrow(
-      'missing its agent response',
-    );
+    const impossibleView = { caseId: caseDefinition.id, outcome: 'completed' } as CaseExecutionView;
+    expect(() => createMetricContext(impossibleView)).toThrow('missing its agent response');
   });
 
   it('skips an assertion metric for an agent-error envelope through the dispatcher', async () => {

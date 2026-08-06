@@ -86,7 +86,7 @@ The runner spawns your command once per invocation:
 
 **Invocation error vs case failure**: invocation errors (spawn failure, timeout, bad envelope, non-zero exit, HTTP 5xx) mean attest could not evaluate the case and are reported as infrastructure problems. A well-formed `error` envelope or failing metric scores are results.
 
-**Containment**: CLI process-tree termination is **best-effort**. Processes that daemonize into a new session after the pre-kill snapshot, and children spawned after that snapshot, can escape. Identity-checked signalling prevents PID-reuse kills, and unreaped survivors are reported in diagnostics.
+**Containment**: CLI process-tree termination is **best-effort**. Processes that daemonize into a new session after the pre-kill snapshot, and children spawned after that snapshot, can escape. Batched start-time and command identity checks are best-effort **detection** that reduces PID-reuse risk, not a prevention guarantee: same-second reuse by the same command can match, and a process can change between the check and the signal. Unreaped or unverified candidates are reported in diagnostics.
 
 ## Versioning
 

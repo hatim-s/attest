@@ -22,9 +22,12 @@ const RAW_EXCERPT_CHARACTERS = 4096;
 const RAW_EVIDENCE_PREFIX_BYTES = RAW_EXCERPT_CHARACTERS * 4;
 const TERMINATION_GRACE_MS = 5000;
 
-type CliInvokeOptions = Omit<InvokeOptions, 'env'> & {
+type CliInvokeOptions = Omit<InvokeOptions, 'env' | 'workingDirectory'> & {
+  /** Test seam for injecting a controlled base environment; HOME and TMPDIR stay attempt-local. */
   env?: Record<string, string>;
   envAllowlist?: readonly string[];
+  /** Test seam selecting the parent beneath which a unique attempt directory is created. */
+  workingDirectory?: string;
 };
 
 type TerminalEvent =
@@ -203,7 +206,7 @@ const captureInvocation = (
 const createAttemptDirectory = async (override: string | undefined): Promise<AttemptDirectory> => {
   return override === undefined
     ? { path: await mkdtemp(join(tmpdir(), 'attest-')), remove: true }
-    : { path: override, remove: false };
+    : { path: await mkdtemp(join(override, 'attempt-')), remove: true };
 };
 
 const resolveCliEnvironment = async (
@@ -211,16 +214,16 @@ const resolveCliEnvironment = async (
   attemptDirectory: string,
   options: CliInvokeOptions,
 ): Promise<Record<string, string>> => {
-  if (options.env !== undefined) {
-    return options.env;
-  }
-
   const homeDirectory = join(attemptDirectory, 'home');
   const temporaryDirectory = join(attemptDirectory, 'tmp');
   await Promise.all([
     mkdir(homeDirectory, { recursive: true }),
     mkdir(temporaryDirectory, { recursive: true }),
   ]);
+  if (options.env !== undefined) {
+    return { ...options.env, HOME: homeDirectory, TMPDIR: temporaryDirectory };
+  }
+
   const environment = resolveInvocationEnv(
     options.envAllowlist,
     process.env,
@@ -245,10 +248,12 @@ const sweepProcessTree = async (
   close: Promise<void>,
   descendantSnapshots: readonly Promise<ProcessIdentity[]>[],
   terminationGraceMs: number,
+  signalProcessGroup: boolean,
 ): Promise<number[]> => {
   const unreapedProcessIds = await killProcessTree(child, {
     graceMs: terminationGraceMs,
     initialDescendants: (await Promise.all(descendantSnapshots)).flat(),
+    signalProcessGroup,
   });
   await close;
   return unreapedProcessIds;
@@ -256,7 +261,9 @@ const sweepProcessTree = async (
 
 /**
  * Performs one isolated CLI attempt under docs/specs/agent-contract.md. The invoker owns the fresh
- * cwd and applies the same identity-safe descendant sweep to every terminal transport path.
+ * cwd and applies the same best-effort identity-checked descendant sweep to every terminal path.
+ * `env` and `workingDirectory` are test seams; production configuration uses the allowlist and a
+ * system temporary parent. Every seam-provided parent still receives a unique attempt directory.
  */
 const invokeCliAgent = async (
   target: Extract<AgentTarget, { type: 'cli' }>,
@@ -298,6 +305,7 @@ const invokeCliAgent = async (
       capture.close,
       descendantSnapshots,
       options.terminationGraceMs ?? TERMINATION_GRACE_MS,
+      terminal.type !== 'close',
     );
     const stderrExcerpt = capture.readStderrExcerpt();
     const diagnostics = withUnreapedDiagnostics(stderrExcerpt, unreapedProcessIds);

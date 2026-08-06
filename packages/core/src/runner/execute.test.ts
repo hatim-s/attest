@@ -16,6 +16,7 @@ const REPOSITORY_ROOT = fileURLToPath(new URL('../../../..', import.meta.url));
 const CLI_AGENT_PATH = join(REPOSITORY_ROOT, 'conformance/fake-agents/cli-agent.cjs');
 const HTTP_AGENT_PATH = join(REPOSITORY_ROOT, 'conformance/fake-agents/http-agent.cjs');
 const RUN_ID = '01J9ZK7Q2M5X8W4V3T2R1QPN0M';
+const READINESS_DEADLINE_MS = 30_000;
 const temporaryDirectories: string[] = [];
 const canonicalServers = new Set<CanonicalServer>();
 
@@ -77,19 +78,47 @@ const startCanonicalServer = async (): Promise<CanonicalServer> => {
   const canonicalServer: CanonicalServer = { baseUrl: '', child, closed };
   canonicalServers.add(canonicalServer);
   let standardOutput = '';
-  const port = await new Promise<number>((resolve, reject) => {
-    child.once('error', reject);
-    child.once('close', (exitCode) =>
-      reject(new Error(`HTTP fixture exited before reporting readiness (${String(exitCode)}).`)),
-    );
-    child.stdout?.on('data', (chunk: Buffer) => {
-      standardOutput += chunk.toString('utf8');
-      const match = /LISTENING (\d+)/.exec(standardOutput);
-      if (match?.[1] !== undefined) {
-        resolve(Number(match[1]));
-      }
+  let port: number;
+  try {
+    port = await new Promise<number>((resolve, reject) => {
+      let settled = false;
+      const finish = (result: () => void): void => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(readinessTimer);
+        result();
+      };
+      const readinessTimer = setTimeout(
+        () =>
+          finish(() =>
+            reject(
+              new Error(
+                `Canonical HTTP fixture readiness exceeded ${String(READINESS_DEADLINE_MS)}ms.`,
+              ),
+            ),
+          ),
+        READINESS_DEADLINE_MS,
+      );
+      child.once('error', (error) => finish(() => reject(error)));
+      child.once('close', (exitCode) =>
+        finish(() =>
+          reject(
+            new Error(`HTTP fixture exited before reporting readiness (${String(exitCode)}).`),
+          ),
+        ),
+      );
+      child.stdout?.on('data', (chunk: Buffer) => {
+        standardOutput += chunk.toString('utf8');
+        const match = /LISTENING (\d+)/.exec(standardOutput);
+        if (match?.[1] !== undefined) {
+          finish(() => resolve(Number(match[1])));
+        }
+      });
     });
-  });
+  } catch (error) {
+    await stopCanonicalServer(canonicalServer);
+    throw error;
+  }
   canonicalServer.baseUrl = `http://127.0.0.1:${port}`;
   return canonicalServer;
 };
@@ -343,7 +372,7 @@ describe.sequential('executeCases', { timeout: 30_000 }, () => {
       }
       expect(error.issues).toEqual(
         expect.arrayContaining([
-          expect.objectContaining({ path: 'suites[0].dataset line 1' }),
+          expect.objectContaining({ path: 'suites[0].dataset line 1: id' }),
           expect.objectContaining({ path: 'suites[1].dataset line 1' }),
         ]),
       );

@@ -52,6 +52,15 @@ const collectDiagnosticsViolations = (value: unknown, path: string, violations: 
   ) {
     violations.push(`${path}.httpStatus must be an integer`);
   }
+  if (
+    value.unreapedProcessIds !== undefined &&
+    (!Array.isArray(value.unreapedProcessIds) ||
+      !value.unreapedProcessIds.every(
+        (processId) => Number.isSafeInteger(processId) && processId > 0,
+      ))
+  ) {
+    violations.push(`${path}.unreapedProcessIds must contain positive safe integers`);
+  }
 };
 
 /** Collects every structural violation in one stored execution union value. */

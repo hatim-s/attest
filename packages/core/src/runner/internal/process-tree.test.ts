@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { parseProcessSnapshot } from './process-tree.js';
+import { parseIdentitySnapshot, parseProcessSnapshot } from './process-tree.js';
 
 const row = (processId: number, parentProcessId: number, command: string): string => {
   return `${String(processId).padStart(5)} ${String(parentProcessId).padStart(5)} Thu Aug  6 19:00:00 2026 ${command}`;
@@ -37,6 +37,25 @@ describe('parseProcessSnapshot', () => {
 
     expect(parseProcessSnapshot(snapshot, 200)).toEqual([
       { processId: 201, startedAt: 'Thu Aug  6 19:00:00 2026', command: '/usr/bin/child' },
+    ]);
+  });
+});
+
+describe('parseIdentitySnapshot', () => {
+  it('parses every row returned by one batched ps identity query', () => {
+    const snapshot = [
+      '101 Thu Aug  6 19:00:00 2026 /usr/bin/child',
+      '102 Thu Aug  6 19:00:01 2026 /usr/bin/grandchild',
+      'malformed',
+    ].join('\n');
+
+    expect(parseIdentitySnapshot(snapshot)).toEqual([
+      { processId: 101, startedAt: 'Thu Aug  6 19:00:00 2026', command: '/usr/bin/child' },
+      {
+        processId: 102,
+        startedAt: 'Thu Aug  6 19:00:01 2026',
+        command: '/usr/bin/grandchild',
+      },
     ]);
   });
 });
