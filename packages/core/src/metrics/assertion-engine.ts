@@ -9,9 +9,6 @@ type AssertionMetricDefinition = Extract<MetricDefinition, { type: 'assertion' }
 /** Retains the source check beside its verdict so callers can render precise assertion evidence. */
 type AssertionCheckOutcome = { check: AssertionCheck; passed: boolean; reason?: string };
 
-/** Couples the normalized spec result with full check outcomes for richer internal consumers. */
-type AssertionMetricOutcome = { result: MetricResult; outcomes: AssertionCheckOutcome[] };
-
 const aggregateFailureReasons = (
   combinator: 'all' | 'any',
   outcomes: AssertionCheckOutcome[],
@@ -62,7 +59,7 @@ const evaluateAssertionCheck = (
 const evaluateAssertionMetric = (
   definition: AssertionMetricDefinition,
   document: EvaluationDocument,
-): AssertionMetricOutcome => {
+): MetricResult => {
   const outcomes = definition.assert.map((check) => evaluateAssertionCheck(check, document));
   const passedCount = outcomes.filter((outcome) => outcome.passed).length;
   const checks = outcomes.map<JsonValue>((outcome) => {
@@ -72,13 +69,11 @@ const evaluateAssertionMetric = (
     }
     return details;
   });
-  const result: MetricResult = {
+  return {
     score: passedCount / outcomes.length,
     pass: passedCount === outcomes.length,
     details: { checks },
   };
-
-  return { result, outcomes };
 };
 
 export {
@@ -86,5 +81,4 @@ export {
   evaluateAssertionMetric,
   type AssertionCheckOutcome,
   type AssertionMetricDefinition,
-  type AssertionMetricOutcome,
 };

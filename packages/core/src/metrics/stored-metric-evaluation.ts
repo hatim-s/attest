@@ -1,26 +1,80 @@
 import type { JsonValue } from '@attest/contracts';
 
 import type { StoredMetricEvaluation } from '../store/index.js';
-import {
-  METRIC_ERROR_CODES,
-  type MetricErrorInfo,
-  type MetricEvaluation,
-} from './metric-evaluation.js';
+import type { MetricEvaluation } from './metric-evaluation.js';
 
-/** Narrows persisted JSON blobs back to the metric contract's JSON-only evidence surface. */
-const asJsonValue = (value: unknown): JsonValue | undefined => value as JsonValue | undefined;
+/** Identifies a version mismatch at the trusted, versioned store-to-runtime boundary. */
+class StoredMetricEvaluationMappingError extends Error {
+  readonly code = 'INVALID_STORED_METRIC_EVALUATION';
 
-/** Restores a typed metric code while keeping malformed legacy storage evidence actionable. */
-const isMetricErrorCode = (kind: string): kind is MetricErrorInfo['code'] =>
-  (METRIC_ERROR_CODES as readonly string[]).includes(kind);
+  constructor(message: string) {
+    super(message);
+    this.name = 'StoredMetricEvaluationMappingError';
+  }
+}
 
-/** Restores a typed metric code while keeping malformed legacy storage evidence actionable. */
-const toMetricErrorCode = (kind: string): MetricErrorInfo['code'] =>
-  isMetricErrorCode(kind) ? kind : 'internal_error';
+/** Verifies that store evidence remains representable by the runtime's JSON-only result contract. */
+const isJsonValue = (value: unknown): value is JsonValue => {
+  if (
+    value === null ||
+    typeof value === 'string' ||
+    (typeof value === 'number' && Number.isFinite(value)) ||
+    typeof value === 'boolean'
+  ) {
+    return true;
+  }
+  if (Array.isArray(value)) return value.every(isJsonValue);
+  if (typeof value !== 'object') return false;
+  return Object.values(value).every(isJsonValue);
+};
 
-/**
- * Flattens runtime metric evidence for the existing store boundary so the Phase 1 gate can persist it losslessly.
- */
+/** Restores JSON evidence or fails loudly rather than silently corrupting a versioned store record. */
+const readJsonEvidence = (value: unknown, field: string): JsonValue => {
+  if (!isJsonValue(value)) {
+    throw new StoredMetricEvaluationMappingError(
+      `Stored metric evaluation ${field} must be a JSON value.`,
+    );
+  }
+  return value;
+};
+
+/** Requires a finite stored score because an evaluated result cannot be reconstructed without one. */
+const readScore = (stored: StoredMetricEvaluation): number => {
+  if (typeof stored.score !== 'number' || !Number.isFinite(stored.score)) {
+    throw new StoredMetricEvaluationMappingError(
+      'Stored evaluated metric record is missing a finite score.',
+    );
+  }
+  return stored.score;
+};
+
+/** Requires a stored pass discriminator because score alone cannot preserve metric verdict semantics. */
+const readPass = (stored: StoredMetricEvaluation): boolean => {
+  if (typeof stored.pass !== 'boolean') {
+    throw new StoredMetricEvaluationMappingError(
+      'Stored evaluated metric record is missing its boolean pass verdict.',
+    );
+  }
+  return stored.pass;
+};
+
+/** Requires the complete error envelope so forward-compatible failure kinds and messages remain exact. */
+const readError = (stored: StoredMetricEvaluation): { kind: string; message: string } => {
+  if (
+    stored.error === undefined ||
+    typeof stored.error.kind !== 'string' ||
+    stored.error.kind.length === 0 ||
+    typeof stored.error.message !== 'string' ||
+    stored.error.message.length === 0
+  ) {
+    throw new StoredMetricEvaluationMappingError(
+      'Stored error metric record is missing its error kind or message.',
+    );
+  }
+  return stored.error;
+};
+
+/** Flattens runtime metric evidence for the existing store boundary without rewriting any evidence. */
 const toStoredMetricEvaluation = (evaluation: MetricEvaluation): StoredMetricEvaluation => {
   if (evaluation.status === 'evaluated') {
     return {
@@ -34,7 +88,7 @@ const toStoredMetricEvaluation = (evaluation: MetricEvaluation): StoredMetricEva
         : { rationale: evaluation.result.rationale }),
       ...(evaluation.result.details === undefined ? {} : { details: evaluation.result.details }),
       ...(evaluation.judgeIo === undefined ? {} : { judgeIo: evaluation.judgeIo }),
-      durationMs: evaluation.durationMs,
+      ...(evaluation.durationMs === undefined ? {} : { durationMs: evaluation.durationMs }),
     };
   }
 
@@ -43,14 +97,14 @@ const toStoredMetricEvaluation = (evaluation: MetricEvaluation): StoredMetricEva
     kind: evaluation.kind,
     status: 'error',
     error: { kind: evaluation.error.code, message: evaluation.error.message },
+    ...(evaluation.rationale === undefined ? {} : { rationale: evaluation.rationale }),
     ...(evaluation.error.details === undefined ? {} : { details: evaluation.error.details }),
-    durationMs: evaluation.durationMs,
+    ...(evaluation.judgeIo === undefined ? {} : { judgeIo: evaluation.judgeIo }),
+    ...(evaluation.durationMs === undefined ? {} : { durationMs: evaluation.durationMs }),
   };
 };
 
-/**
- * Rehydrates stored metric evidence at the runtime boundary, preserving status discrimination for gate consumers.
- */
+/** Rehydrates a store record exactly; malformed versioned arms fail instead of acquiring invented defaults. */
 const fromStoredMetricEvaluation = (stored: StoredMetricEvaluation): MetricEvaluation => {
   if (stored.status === 'evaluated') {
     return {
@@ -58,27 +112,38 @@ const fromStoredMetricEvaluation = (stored: StoredMetricEvaluation): MetricEvalu
       kind: stored.kind,
       status: 'evaluated',
       result: {
-        score: stored.score ?? 0,
-        pass: stored.pass ?? false,
+        score: readScore(stored),
+        pass: readPass(stored),
         ...(stored.rationale === undefined ? {} : { rationale: stored.rationale }),
-        ...(stored.details === undefined ? {} : { details: asJsonValue(stored.details) }),
+        ...(stored.details === undefined
+          ? {}
+          : { details: readJsonEvidence(stored.details, 'details') }),
       },
-      ...(stored.judgeIo === undefined ? {} : { judgeIo: asJsonValue(stored.judgeIo) }),
-      durationMs: stored.durationMs ?? 0,
+      ...(stored.judgeIo === undefined
+        ? {}
+        : { judgeIo: readJsonEvidence(stored.judgeIo, 'judgeIo') }),
+      ...(stored.durationMs === undefined ? {} : { durationMs: stored.durationMs }),
     };
   }
 
+  const error = readError(stored);
   return {
     metricName: stored.metricName,
     kind: stored.kind,
     status: 'error',
     error: {
-      code: toMetricErrorCode(stored.error?.kind ?? 'internal_error'),
-      message: stored.error?.message ?? 'Stored metric error is missing its message.',
-      ...(stored.details === undefined ? {} : { details: asJsonValue(stored.details) }),
+      code: error.kind,
+      message: error.message,
+      ...(stored.details === undefined
+        ? {}
+        : { details: readJsonEvidence(stored.details, 'details') }),
     },
-    durationMs: stored.durationMs ?? 0,
+    ...(stored.rationale === undefined ? {} : { rationale: stored.rationale }),
+    ...(stored.judgeIo === undefined
+      ? {}
+      : { judgeIo: readJsonEvidence(stored.judgeIo, 'judgeIo') }),
+    ...(stored.durationMs === undefined ? {} : { durationMs: stored.durationMs }),
   };
 };
 
-export { fromStoredMetricEvaluation, toStoredMetricEvaluation };
+export { StoredMetricEvaluationMappingError, fromStoredMetricEvaluation, toStoredMetricEvaluation };

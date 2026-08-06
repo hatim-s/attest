@@ -20,19 +20,24 @@ const METRIC_ERROR_CODES = [
 /** Names the stable failure classes a metric may report without parsing messages. */
 type MetricErrorCode = (typeof METRIC_ERROR_CODES)[number];
 
-/** Keeps assertion evaluation decoupled from the richer runner result integrated at the Phase 1 gate. */
-type MetricExecutionView = {
-  outcome: 'completed' | 'invocation_error' | 'timeout' | 'cancelled';
-  output?: JsonValue;
-  trace: Trace | null;
-};
+/** Preserves forward-compatible persisted error kinds alongside the runtime's stable vocabulary. */
+type StoredErrorKind = MetricErrorCode | (string & {});
+
+/** Keeps metric evaluation decoupled from the richer runner result integrated at the Phase 1 gate. */
+type MetricExecutionView =
+  | { outcome: 'completed'; output: JsonValue; trace: Trace | null }
+  | {
+      outcome: 'agent_error' | 'invocation_error' | 'timeout' | 'cancelled';
+      output?: JsonValue;
+      trace: Trace | null;
+    };
 
 /** Carries only the case and execution data needed to build the spec evaluation document. */
 type MetricContext = { caseDefinition: CaseDefinition; execution: MetricExecutionView };
 
 /** Preserves actionable, diffable metric errors separately from assertion failures per spec §Errors vs failures. */
 type MetricErrorInfo = {
-  code: MetricErrorCode;
+  code: StoredErrorKind;
   message: string;
   details?: JsonValue;
 };
@@ -49,24 +54,33 @@ type MetricEvaluation =
       status: 'evaluated';
       result: MetricResult;
       judgeIo?: JsonValue;
-      durationMs: number;
+      durationMs?: number;
     }
   | {
       metricName: string;
       kind: 'assertion' | 'exec' | 'judge';
       status: 'error';
       error: MetricErrorInfo;
-      durationMs: number;
+      rationale?: string;
+      judgeIo?: JsonValue;
+      durationMs?: number;
     };
 
-/** Creates the canonical error evaluation when a completed case output is unavailable. */
-const skippedNoOutput = (metricName: string, kind: MetricEvaluation['kind']): MetricEvaluation => ({
+/** Creates the canonical error evaluation when a case has no scoreable agent output. */
+const skippedNoOutput = (
+  metricName: string,
+  kind: MetricEvaluation['kind'],
+  execution?: MetricExecutionView,
+): MetricEvaluation => ({
   metricName,
   kind,
   status: 'error',
   error: {
     code: 'skipped_no_output',
-    message: 'Metric was not evaluated because the case execution produced no completed output.',
+    message:
+      execution?.outcome === 'agent_error'
+        ? 'Metric was not evaluated because the agent returned an error envelope. Agent errors are diagnosable results, but metrics cannot score absent output.'
+        : 'Metric was not evaluated because the case execution produced no completed output.',
   },
   // This only constructs the shared result object; it does not perform measurable metric work.
   durationMs: 0,
@@ -80,4 +94,5 @@ export {
   type MetricErrorInfo,
   type MetricEvaluation,
   type MetricExecutionView,
+  type StoredErrorKind,
 };

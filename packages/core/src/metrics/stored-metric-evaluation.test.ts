@@ -1,98 +1,121 @@
-import { describe, expect, it } from 'vitest';
 import fc from 'fast-check';
+import { describe, expect, it } from 'vitest';
 
-import type { MetricErrorInfo, MetricEvaluation } from './metric-evaluation.js';
+import type { JsonValue } from '@attest/contracts';
+
+import type { StoredMetricEvaluation } from '../store/index.js';
 import {
+  METRIC_ERROR_CODES,
+  type MetricErrorCode,
+  type MetricEvaluation,
+} from './metric-evaluation.js';
+import {
+  StoredMetricEvaluationMappingError,
   fromStoredMetricEvaluation,
   toStoredMetricEvaluation,
 } from './stored-metric-evaluation.js';
 
-const evaluatedFixtures: MetricEvaluation[] = [
-  {
-    metricName: 'assertion-pass',
-    kind: 'assertion',
-    status: 'evaluated',
-    result: { score: 1, pass: true },
-    durationMs: 2,
-  },
-  {
-    metricName: 'judge-fail',
-    kind: 'judge',
-    status: 'evaluated',
-    result: {
-      score: 0.4,
-      pass: false,
-      rationale: 'Missing source.',
-      details: { usage: { inputTokens: 10 } },
-    },
-    judgeIo: { request: { model: 'openai/example' }, cache: 'miss' },
-    durationMs: 3,
-  },
-  {
-    metricName: 'assertion-rationale',
-    kind: 'assertion',
-    status: 'evaluated',
-    result: { score: 0.5, pass: false, rationale: 'One assertion did not hold.' },
-    durationMs: 3,
-  },
-  {
-    metricName: 'exec-details',
-    kind: 'exec',
-    status: 'evaluated',
-    result: { score: 0.75, pass: true, details: { source: 'custom metric' } },
-    durationMs: 4,
-  },
-  {
-    metricName: 'judge-evidence',
-    kind: 'judge',
-    status: 'evaluated',
-    result: { score: 1, pass: true },
-    judgeIo: { request: { model: 'openai/example' }, cache: 'hit' },
-    durationMs: 5,
-  },
-];
+const knownErrorCodes = METRIC_ERROR_CODES as readonly MetricErrorCode[];
+const jsonValueArbitrary = fc.jsonValue() as fc.Arbitrary<JsonValue>;
+const finiteNumberArbitrary = fc.double({ noDefaultInfinity: true, noNaN: true });
+const durationArbitrary = fc.double({ min: 0, noDefaultInfinity: true, noNaN: true });
+const metricNameArbitrary = fc.string({ minLength: 1 });
+const metricKindArbitrary = fc.constantFrom<StoredMetricEvaluation['kind']>(
+  'assertion',
+  'exec',
+  'judge',
+);
+const unknownErrorKindArbitrary = fc
+  .string({ minLength: 1 })
+  .filter((kind) => !knownErrorCodes.includes(kind as MetricErrorCode));
 
-const errorCodes: MetricErrorInfo['code'][] = [
-  'exec_spawn_failed',
-  'exec_timeout',
-  'exec_nonzero_exit',
-  'exec_malformed_output',
-  'http_request_failed',
-  'http_bad_status',
-  'judge_provider_error',
-  'judge_unparseable_response',
-  'internal_error',
-  'invalid_json_schema',
-  'invalid_path',
-  'skipped_no_output',
-];
+/** Adds only present optional store fields so the property covers absent fields as well as populated ones. */
+const withOptionalFields = <T extends object>(
+  required: T,
+  fields: { details?: JsonValue; judgeIo?: JsonValue; durationMs?: number; rationale?: string },
+): T &
+  Partial<Pick<StoredMetricEvaluation, 'details' | 'durationMs' | 'judgeIo' | 'rationale'>> => ({
+  ...required,
+  ...(fields.details === undefined ? {} : { details: fields.details }),
+  ...(fields.judgeIo === undefined ? {} : { judgeIo: fields.judgeIo }),
+  ...(fields.durationMs === undefined ? {} : { durationMs: fields.durationMs }),
+  ...(fields.rationale === undefined ? {} : { rationale: fields.rationale }),
+});
 
-const errorFixtures: MetricEvaluation[] = errorCodes.map((code, index) => ({
-  metricName: `error-${code}`,
-  kind: 'exec',
+const optionalStoredFieldsArbitrary = fc.record({
+  details: fc.option(jsonValueArbitrary, { nil: undefined }),
+  judgeIo: fc.option(jsonValueArbitrary, { nil: undefined }),
+  durationMs: fc.option(durationArbitrary, { nil: undefined }),
+  rationale: fc.option(fc.string(), { nil: undefined }),
+});
+
+const storedMetricEvaluationArbitrary: fc.Arbitrary<StoredMetricEvaluation> = fc.oneof(
+  fc
+    .tuple(
+      metricNameArbitrary,
+      metricKindArbitrary,
+      finiteNumberArbitrary,
+      fc.boolean(),
+      optionalStoredFieldsArbitrary,
+    )
+    .map(([metricName, kind, score, pass, fields]) =>
+      withOptionalFields({ metricName, kind, status: 'evaluated' as const, score, pass }, fields),
+    ),
+  fc
+    .tuple(
+      metricNameArbitrary,
+      metricKindArbitrary,
+      fc.oneof(fc.constantFrom(...knownErrorCodes), unknownErrorKindArbitrary),
+      fc.string({ minLength: 1 }),
+      optionalStoredFieldsArbitrary,
+    )
+    .map(([metricName, kind, errorKind, message, fields]) =>
+      withOptionalFields(
+        { metricName, kind, status: 'error' as const, error: { kind: errorKind, message } },
+        fields,
+      ),
+    ),
+);
+
+const runtimeError: MetricEvaluation = {
+  metricName: 'future-provider',
+  kind: 'judge',
   status: 'error',
-  error: { code, message: `message-${code}`, details: { index } },
-  durationMs: index,
-}));
+  error: { code: 'future_provider_error', message: 'Provider added a new failure class.' },
+  judgeIo: { request: { model: 'future/model' }, rawResponse: { status: 'unavailable' } },
+  durationMs: 4,
+};
 
 describe('stored metric evaluation mapping', () => {
-  it('round-trips every representative runtime arm losslessly', () => {
+  it('round-trips arbitrary valid store records without rewriting future error kinds or judge evidence', () => {
     fc.assert(
-      fc.property(fc.constantFrom(...evaluatedFixtures, ...errorFixtures), (evaluation) => {
-        expect(fromStoredMetricEvaluation(toStoredMetricEvaluation(evaluation))).toEqual(
-          evaluation,
-        );
+      fc.property(storedMetricEvaluationArbitrary, (stored) => {
+        expect(toStoredMetricEvaluation(fromStoredMetricEvaluation(stored))).toEqual(stored);
       }),
     );
   });
 
-  it('round-trips every representative stored arm losslessly', () => {
-    const storedFixtures = [...evaluatedFixtures, ...errorFixtures].map(toStoredMetricEvaluation);
-
-    fc.assert(
-      fc.property(fc.constantFrom(...storedFixtures), (stored) => {
-        expect(toStoredMetricEvaluation(fromStoredMetricEvaluation(stored))).toEqual(stored);
-      }),
+  it('round-trips unknown runtime error kinds and error-side judge I/O', () => {
+    expect(fromStoredMetricEvaluation(toStoredMetricEvaluation(runtimeError))).toEqual(
+      runtimeError,
     );
+  });
+
+  it.each([
+    {
+      metricName: 'missing-score',
+      kind: 'assertion' as const,
+      status: 'evaluated' as const,
+      pass: true,
+    },
+    {
+      metricName: 'missing-pass',
+      kind: 'exec' as const,
+      status: 'evaluated' as const,
+      score: 1,
+    },
+    { metricName: 'missing-error', kind: 'judge' as const, status: 'error' as const },
+  ])('rejects malformed store arms rather than inventing defaults', (stored) => {
+    expect(() => fromStoredMetricEvaluation(stored)).toThrow(StoredMetricEvaluationMappingError);
   });
 });

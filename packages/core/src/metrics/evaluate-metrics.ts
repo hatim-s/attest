@@ -27,12 +27,12 @@ const evaluateMetric = async (
   options: EvaluateMetricsOptions,
 ): Promise<MetricEvaluation> => {
   if (definition.type === 'assertion') {
-    const outcome = evaluateAssertionMetric(definition, buildEvaluationDocument(context));
+    const result = evaluateAssertionMetric(definition, buildEvaluationDocument(context));
     return {
       metricName: definition.name,
       kind: 'assertion',
       status: 'evaluated',
-      result: outcome.result,
+      result,
       // Assertion checks are in-process computation, not measurable external metric work.
       durationMs: 0,
     };
