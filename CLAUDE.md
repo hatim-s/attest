@@ -1,6 +1,5 @@
 # Shared Claude Code instructions
 
-<!-- Add cross-project Claude Code instructions below this line. -->
 ## Orchestration
 
 Your job is only to orchestrate the development process. Once a goal is created, you should
@@ -18,7 +17,7 @@ to Codex or smaller model (Opus 4.8) for implementation and review.
 Delegate brute implementation (pure logic, no UI/API-contract design) to Codex:
 `timeout <millis> codex exec --sandbox workspace-write -m <model> -c 'model_reasoning_effort="medium"' "<task>" > .logs/<step>.log 2>&1`
 — `gpt-5.6-sol` for larger tasks, `gpt-5.6-terra` for smaller ones and `gpt-5.6-luna`
-for straight forward implementations and fixes. Prefer Codex for implementation; 
+for straight forward implementations and fixes. Prefer Codex for implementation;
 review its output yourself.
 
 Observability rules (non-negotiable):
@@ -39,9 +38,12 @@ explaning non trivial logic and code
 - Always use single export statement and use named exports for everything - functions, hooks, components, classes etc.
 - Whenever a `package.json` script is added, removed, renamed, or its command changes, update `docs/SCRIPTS.md` in the same change.
 - Never write code inside index.js/index.ts - only use these as exports
+- Keep the code lean and avoid unnecessary complexity, prefer deep modules and narrow APIs
+- Keep a clean file structure, file and variable names should be readable
+- Do not shove unwanted tests everywhere, keep tests colocated together and only important functionality should be tested
 
 ### Incremental development
-Small increments; every commit compiles (`pnpm typecheck`) and passes owned
+Small increments; every commit compiles (typecheck, lint and format) and passes owned
 tests. Conventional commits. No massive dumps.
 
 ### Commands

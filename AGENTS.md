@@ -1,6 +1,5 @@
 # Shared project instructions
 
-<!-- Add cross-project Codex instructions below this line. -->
 ## Development Philosophy
 
 ### Writing code
@@ -9,9 +8,12 @@ explaning non trivial logic and code
 - Always use single export statement and use named exports for everything - functions, hooks, components, classes etc.
 - Whenever a `package.json` script is added, removed, renamed, or its command changes, update `docs/SCRIPTS.md` in the same change.
 - Never write code inside index.js/index.ts - only use these as exports
+- Keep the code lean and avoid unnecessary complexity, prefer deep modules and narrow APIs
+- Keep a clean file structure, file and variable names should be readable
+- Do not shove unwanted tests everywhere, keep tests colocated together and only important functionality should be tested
 
 ### Incremental development
-Small increments; every commit compiles (`pnpm typecheck`) and passes owned
+Small increments; every commit compiles (typecheck, lint and format) and passes owned
 tests. Conventional commits. No massive dumps.
 
 ### Commands
