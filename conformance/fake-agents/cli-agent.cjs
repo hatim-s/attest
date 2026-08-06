@@ -88,7 +88,7 @@ const spawnOrphanChild = () => {
     return;
   }
 
-  const childProgram = `const fs = require('node:fs'); const file = process.argv[1]; setInterval(() => fs.appendFileSync(file, new Date().toISOString() + '\\n'), 200);`;
+  const childProgram = `const fs = require('node:fs'); const file = process.argv[1]; fs.appendFileSync(file, 'PID ' + process.pid + '\\n'); setInterval(() => fs.appendFileSync(file, new Date().toISOString() + '\\n'), 200);`;
   const child = spawn(process.execPath, ['-e', childProgram, heartbeatFile], {
     detached: true,
     stdio: 'ignore',

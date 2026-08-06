@@ -270,30 +270,33 @@ const assertParserNeverThrows = (
   );
 };
 
-describe.skipIf(!process.env.FUZZ)('contract parser crash freedom', () => {
-  it('never throws while parsing agent requests', () => {
-    assertParserNeverThrows(parseAgentRequest, mutatedValidDocuments.agentRequest);
-  });
+describe.skipIf(process.env.FUZZ !== '1')(
+  'contract parser crash freedom (set FUZZ=1 to run)',
+  () => {
+    it('never throws while parsing agent requests', () => {
+      assertParserNeverThrows(parseAgentRequest, mutatedValidDocuments.agentRequest);
+    });
 
-  it('never throws while parsing agent responses', () => {
-    assertParserNeverThrows(parseAgentResponse, mutatedValidDocuments.agentResponse);
-  });
+    it('never throws while parsing agent responses', () => {
+      assertParserNeverThrows(parseAgentResponse, mutatedValidDocuments.agentResponse);
+    });
 
-  it('never throws while parsing configs', () => {
-    assertParserNeverThrows(parseConfig, mutatedValidDocuments.config);
-  });
+    it('never throws while parsing configs', () => {
+      assertParserNeverThrows(parseConfig, mutatedValidDocuments.config);
+    });
 
-  it('never throws while parsing traces', () => {
-    assertParserNeverThrows(parseTrace, mutatedValidDocuments.trace);
-  });
+    it('never throws while parsing traces', () => {
+      assertParserNeverThrows(parseTrace, mutatedValidDocuments.trace);
+    });
 
-  it('never throws while parsing metric requests', () => {
-    assertParserNeverThrows(parseMetricRequest, mutatedValidDocuments.metricRequest);
-  });
+    it('never throws while parsing metric requests', () => {
+      assertParserNeverThrows(parseMetricRequest, mutatedValidDocuments.metricRequest);
+    });
 
-  it('never throws while parsing metric results', () => {
-    assertParserNeverThrows(parseMetricResult, mutatedValidDocuments.metricResult);
-  });
-});
+    it('never throws while parsing metric results', () => {
+      assertParserNeverThrows(parseMetricResult, mutatedValidDocuments.metricResult);
+    });
+  },
+);
 
 export { deepStructures, hostileStrings, jsonNoise, mutatedValidDocuments };

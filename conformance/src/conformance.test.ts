@@ -6,6 +6,8 @@ import {
   parseMetricResult,
   parseTrace,
 } from '@attest/contracts';
+import { readdirSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -19,6 +21,7 @@ type FixtureParseResult =
   | { ok: false; issuePaths: string[]; warningCodes: string[] };
 
 const fixtures = loadFixtures();
+const fixtureRoot = join(import.meta.dirname, '../fixtures');
 
 /** Converts public parser results into the few assertions every fixture envelope shares. */
 const parseFixture = (fixture: LoadedFixture): FixtureParseResult => {
@@ -101,6 +104,21 @@ const contractDirectories = [
   'metric-request',
   'metric-result',
 ] as const;
+
+it('contains exactly the known contract directories with JSON fixtures', () => {
+  const actualDirectories = readdirSync(fixtureRoot, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name)
+    .sort();
+  expect(actualDirectories).toEqual([...contractDirectories].sort());
+
+  for (const contract of contractDirectories) {
+    const jsonFixtures = readdirSync(join(fixtureRoot, contract), { withFileTypes: true }).filter(
+      (entry) => entry.isFile() && entry.name.endsWith('.json'),
+    );
+    expect(jsonFixtures.length, `${contract} fixture count`).toBeGreaterThan(0);
+  }
+});
 
 for (const contract of contractDirectories) {
   const contractFixtures = fixtures.filter((fixture) => fixture.contract === contract);

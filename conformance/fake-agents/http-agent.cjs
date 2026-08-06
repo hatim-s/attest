@@ -91,7 +91,7 @@ const spawnOrphanChild = () => {
     return;
   }
 
-  const childProgram = `const fs = require('node:fs'); const file = process.argv[1]; setInterval(() => fs.appendFileSync(file, new Date().toISOString() + '\\n'), 200);`;
+  const childProgram = `const fs = require('node:fs'); const file = process.argv[1]; fs.appendFileSync(file, 'PID ' + process.pid + '\\n'); setInterval(() => fs.appendFileSync(file, new Date().toISOString() + '\\n'), 200);`;
   const child = spawn(process.execPath, ['-e', childProgram, heartbeatFile], {
     detached: true,
     stdio: 'ignore',
@@ -180,7 +180,7 @@ server.on('error', (error) => {
   process.stderr.write(`HTTP fixture failed: ${error.message}\n`);
   process.exitCode = 1;
 });
-server.listen(Number.parseInt(process.env.PORT ?? '0', 10) || 0, () => {
+server.listen(Number.parseInt(process.env.PORT ?? '0', 10) || 0, '127.0.0.1', () => {
   const address = server.address();
   if (!address || typeof address === 'string') {
     process.stderr.write('HTTP fixture did not expose a TCP port\n');
