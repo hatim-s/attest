@@ -6,8 +6,9 @@ export type {
   AgentResponse,
   AgentSuccessResponse,
 } from './agent.js';
-export { configSchema } from './config.js';
+export { caseSchema, configSchema } from './config.js';
 export type { AgentTarget, CaseDefinition, Config, RunSettings, Suite } from './config.js';
+export type { CaseOutcome, InvocationErrorCode, RawExcerpt } from './execution.js';
 export {
   assertionCheckSchema,
   metricDefinitionSchema,
