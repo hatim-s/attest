@@ -13,3 +13,4 @@ TASTE.md
 docs/attest-foundation.html
 docs/scout-stack-report.md
 conformance/fixtures/
+packages/schemas/generated/*.json

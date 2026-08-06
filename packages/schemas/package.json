@@ -2,8 +2,10 @@
   "name": "@attest/schemas",
   "version": "0.0.0",
   "type": "module",
+  "exports": {
+    "./generated/*": "./generated/*"
+  },
   "scripts": {
-    "typecheck": "tsc --noEmit --allowJs false --skipLibCheck true",
-    "test": "vitest run --passWithNoTests"
+    "test": "bun scripts/validate-artifacts.ts"
   }
 }

@@ -42,7 +42,7 @@ assert:
 
 **Paths** are a deliberate subset of JSONPath: `$` roots the evaluation document `{ input, output, expected, trace }`; dot fields and `[n]` indexing only — no wildcards, filters, or recursion in v0.
 
-**Check set v0**: `equals`, `contains` (string or array containment), `regex` (RE2-safe subset), `json_schema` (Draft 2020-12), `threshold` (`lt`/`lte`/`gt`/`gte` on numbers), `exists`, `tool_calls` (trace-based: filter by `name`, assert `status`, `count`, `order` — expanded in Phase 2), and combinators `all`, `any`, `not`.
+**Check set v0**: `equals`, `contains` (string or array containment), `regex` (JavaScript `RegExp` syntax as `{path, pattern, flags?}`; the engine executes patterns under a per-check time guard), `json_schema` (Draft 2020-12), `threshold` (`lt`/`lte`/`gt`/`gte` on numbers), `exists`, `tool_calls` (trace-based: filter by `name`, assert `status`, `count`, `order` — expanded in Phase 2), and combinators `all`, `any`, `not`. Combinator arrays and `assert` lists must be non-empty — vacuously-true metrics are rejected at config validation.
 
 ## 2. Exec metrics (`type: exec`)
 

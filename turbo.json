@@ -1,14 +1,18 @@
 {
   "$schema": "https://turbo.build/schema.json",
+  "globalDependencies": ["tsconfig.base.json", "eslint.config.mjs", ".prettierrc.json"],
   "tasks": {
     "build": {
+      "dependsOn": ["^build"],
       "outputs": ["dist/**"]
     },
     "typecheck": {
+      "dependsOn": ["^build"],
       "inputs": ["src/**", "tsconfig.json", "package.json"]
     },
     "test": {
-      "inputs": ["src/**", "package.json"]
+      "dependsOn": ["^build"],
+      "inputs": ["src/**", "package.json", "$TURBO_ROOT$/packages/schemas/generated/**"]
     }
   }
 }

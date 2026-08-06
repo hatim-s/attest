@@ -52,7 +52,9 @@ Multi-turn is **stateless by default**: each turn replays the full transcript, s
 | `trace`    | object | optional                  | An [`attest.trace/v1alpha1`](./trace-schema.md) document. Omitting it disables trajectory metrics for this case; output metrics still run.                              |
 | `state`    | JSON   | optional, HTTP multi-turn | Opaque token echoed back on the next turn's request as `state`.                                                                                                         |
 
-Exactly one of `output` / `error` must be present.
+Exactly one of `output` / `error` must be present — a response is either a **success** (`output`) or an **agent failure** (`error`), never both.
+
+A malformed or invalid `trace` never invalidates the response: the output is still evaluated, trajectory metrics are disabled for the case, and the trace problem is reported as a warning diagnostic.
 
 ## CLI transport
 
@@ -85,4 +87,4 @@ The runner spawns your command once per invocation:
 
 ## Versioning
 
-`v1alpha1` may gain optional fields without notice; fields are never removed or repurposed within a version. Agents should ignore unknown request fields and must not emit unknown top-level response fields (they are preserved but flagged).
+`v1alpha1` may gain optional fields without notice; fields are never removed or repurposed within a version. Agents should ignore unknown request fields. Unknown top-level response fields are **preserved and surfaced as warnings** — never errors — so newer agents keep working against older attest versions.

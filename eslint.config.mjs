@@ -2,8 +2,22 @@ import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
   {
-    ignores: ['dist/**', '.turbo/**', 'node_modules/**', 'coverage/**', 'conformance/fixtures/**'],
+    ignores: [
+      '**/dist/**',
+      '**/.turbo/**',
+      '**/node_modules/**',
+      '**/coverage/**',
+      'conformance/fixtures/**',
+    ],
   },
-  // Upgrade to recommendedTypeChecked once packages have meaningful TypeScript program boundaries.
   tseslint.configs.recommended,
+  {
+    files: ['packages/contracts/src/**/*.ts'],
+    extends: [tseslint.configs.recommendedTypeChecked],
+    languageOptions: {
+      parserOptions: {
+        projectService: true,
+      },
+    },
+  },
 );

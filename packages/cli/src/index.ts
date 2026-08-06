@@ -1,2 +1,1 @@
-/** Public CLI APIs land here (PLAN Phase 1). */
-export {};
+export { runCli } from './run-cli.js';
