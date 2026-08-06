@@ -1,0 +1,219 @@
+import { randomUUID } from 'node:crypto';
+import { createReadStream } from 'node:fs';
+import { rename, rm, writeFile } from 'node:fs/promises';
+import { createInterface } from 'node:readline';
+import { finished } from 'node:stream/promises';
+import type { Readable, Writable } from 'node:stream';
+
+import {
+  BUNDLE_VERSION,
+  createBundle,
+  createContentHasher,
+  type BundleCase,
+  type BundleFooter,
+  type BundleHeader,
+  type BundleLine,
+  type BundleManifest,
+} from './bundle-format.js';
+import { StoreError, type CaseRecord, type RunRecord, type RunStore } from './types.js';
+
+type JsonObject = Record<string, unknown>;
+
+const corruptBundle = (message: string, cause?: unknown): StoreError =>
+  new StoreError('CORRUPT_DATA', message, cause === undefined ? undefined : { cause });
+
+const isObject = (value: unknown): value is JsonObject =>
+  value !== null && typeof value === 'object' && !Array.isArray(value);
+
+const isRunRecord = (value: unknown): value is RunRecord =>
+  isObject(value) &&
+  typeof value.id === 'string' &&
+  typeof value.createdAt === 'string' &&
+  typeof value.status === 'string' &&
+  typeof value.configVersion === 'string' &&
+  typeof value.configHash === 'string' &&
+  typeof value.configJson === 'string';
+
+const isCaseRecord = (value: unknown): value is CaseRecord => {
+  if (
+    !isObject(value) ||
+    typeof value.rowId !== 'string' ||
+    typeof value.runId !== 'string' ||
+    typeof value.caseId !== 'string' ||
+    typeof value.suiteName !== 'string' ||
+    typeof value.startedAt !== 'string' ||
+    typeof value.durationMs !== 'number' ||
+    !Number.isFinite(value.durationMs) ||
+    value.durationMs < 0 ||
+    !isObject(value.request) ||
+    !Array.isArray(value.warnings) ||
+    !isObject(value.diagnostics) ||
+    !Array.isArray(value.attempts) ||
+    !Array.isArray(value.expectedMetrics) ||
+    !value.expectedMetrics.every((metric) => typeof metric === 'string') ||
+    !Array.isArray(value.metrics) ||
+    !value.metrics.every(
+      (metric) =>
+        isObject(metric) &&
+        typeof metric.metricName === 'string' &&
+        typeof metric.kind === 'string' &&
+        typeof metric.status === 'string',
+    ) ||
+    !value.attempts.every(
+      (attempt) =>
+        isObject(attempt) &&
+        typeof attempt.status === 'string' &&
+        typeof attempt.durationMs === 'number' &&
+        isObject(attempt.diagnostics),
+    )
+  ) {
+    return false;
+  }
+  if (value.outcome === 'completed') {
+    return Object.hasOwn(value, 'response') && !Object.hasOwn(value, 'errorCode');
+  }
+  return (
+    ['invocation_error', 'timeout', 'cancelled'].includes(String(value.outcome)) &&
+    typeof value.errorCode === 'string' &&
+    typeof value.errorMessage === 'string' &&
+    !Object.hasOwn(value, 'response') &&
+    !Object.hasOwn(value, 'trace')
+  );
+};
+
+const parseJsonLine = (line: string, index: number): JsonObject => {
+  try {
+    const parsed = JSON.parse(line) as unknown;
+    if (!isObject(parsed) || typeof parsed.type !== 'string') {
+      throw corruptBundle(`Run bundle line ${index + 1} is missing a string type.`);
+    }
+    return parsed;
+  } catch (error) {
+    if (error instanceof StoreError) throw error;
+    throw corruptBundle(`Run bundle line ${index + 1} contains invalid JSON.`, error);
+  }
+};
+
+/** Verifies all integrity and structural checks before returning any caller-visible records. */
+const verifyBundleLines = (lines: string[]): BundleLine[] => {
+  if (lines.length === 0) throw corruptBundle('Run bundle is empty.');
+  const parsedLines = lines.map(parseJsonLine);
+  const first = parsedLines[0];
+  if (
+    first?.type !== 'bundle_header' ||
+    first.bundle_version !== BUNDLE_VERSION ||
+    !isRunRecord(first.run)
+  ) {
+    throw corruptBundle('Run bundle must start with one well-formed, known-version header.');
+  }
+
+  const recognized: BundleLine[] = [first as unknown as BundleHeader];
+  const hasher = createContentHasher();
+  let caseCount = 0;
+  let headerCount = 0;
+  let footer: BundleFooter | undefined;
+  for (const [index, parsed] of parsedLines.entries()) {
+    if (parsed.type === 'bundle_footer') {
+      if (index !== parsedLines.length - 1 || footer) {
+        throw corruptBundle('Run bundle footer must appear exactly once and be final.');
+      }
+      if (!Number.isInteger(parsed.case_count) || typeof parsed.content_hash !== 'string') {
+        throw corruptBundle('Run bundle footer is malformed.');
+      }
+      footer = parsed as unknown as BundleFooter;
+      continue;
+    }
+
+    hasher.add(lines[index] ?? '');
+    if (parsed.type === 'bundle_header') {
+      headerCount += 1;
+      if (index !== 0 || headerCount !== 1) {
+        throw corruptBundle('Run bundle must contain exactly one header in the first position.');
+      }
+      continue;
+    }
+    if (parsed.type === 'case') {
+      if (!isCaseRecord(parsed.case)) {
+        throw corruptBundle(`Run bundle case line ${index + 1} is malformed.`);
+      }
+      caseCount += 1;
+      recognized.push(parsed as unknown as BundleCase);
+      continue;
+    }
+    // docs/specs/run-bundle.md §versioning: unknown records are hash-covered and skipped.
+  }
+
+  if (!footer) throw corruptBundle('Run bundle is missing its footer.');
+  if (footer.case_count !== caseCount) {
+    throw corruptBundle('Run bundle footer case count does not match its case records.');
+  }
+  if (footer.content_hash !== hasher.digest()) {
+    throw corruptBundle('Run bundle footer content hash does not match its contents.');
+  }
+  recognized.push(footer);
+  return recognized;
+};
+
+/** Writes a line to a generic destination and waits for backpressure to clear. */
+const writeToStream = async (destination: Writable, line: string): Promise<void> => {
+  if (!destination.write(`${line}\n`)) {
+    await new Promise<void>((resolve, reject) => {
+      destination.once('drain', resolve);
+      destination.once('error', reject);
+    });
+  }
+};
+
+/** Atomically replaces a file only after its complete PLAN 1S.4 bundle is available. */
+const writeAtomically = async (destination: string, contents: string): Promise<void> => {
+  const temporaryPath = `${destination}.${randomUUID()}.tmp`;
+  try {
+    await writeFile(temporaryPath, contents, 'utf8');
+    await rename(temporaryPath, destination);
+  } catch (error) {
+    await rm(temporaryPath, { force: true }).catch(() => undefined);
+    throw new StoreError('WRITE_FAILED', `Could not write run bundle to ${destination}.`, {
+      cause: error,
+    });
+  }
+};
+
+/** Exports a canonical PLAN 1S.4 bundle to an atomic file or caller-owned stream. */
+const exportRunBundle = async (
+  store: RunStore,
+  runId: string,
+  destination: Writable | string,
+): Promise<BundleManifest> => {
+  const bundle = createBundle(await store.getRun(runId), await store.getCaseResults(runId));
+  if (typeof destination === 'string') {
+    await writeAtomically(destination, `${bundle.lines.join('\n')}\n`);
+    return bundle.manifest;
+  }
+  try {
+    for (const line of bundle.lines) await writeToStream(destination, line);
+    destination.end();
+    await finished(destination);
+    return bundle.manifest;
+  } catch (error) {
+    throw new StoreError('WRITE_FAILED', 'Could not write run bundle to the destination stream.', {
+      cause: error,
+    });
+  }
+};
+
+/** Spools and verifies a single-run v1 bundle before exposing any recognized records. */
+async function* readRunBundle(source: Readable | string): AsyncIterable<BundleLine> {
+  const input = typeof source === 'string' ? createReadStream(source, 'utf8') : source;
+  const lines: string[] = [];
+  try {
+    // Integrity precedes exposure; v1 bundles are single-run sized, while cloud-scale streaming is future work.
+    for await (const line of createInterface({ input, crlfDelay: Infinity })) lines.push(line);
+    const verified = verifyBundleLines(lines);
+    for (const line of verified) yield line;
+  } catch (error) {
+    if (error instanceof StoreError) throw error;
+    throw corruptBundle('Could not read run bundle.', error);
+  }
+}
+
+export { exportRunBundle, readRunBundle, verifyBundleLines };

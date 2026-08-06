@@ -15,6 +15,7 @@
 | `test`             | `@attest/contracts` | Runs contract tests.                                         |
 | `build`            | `@attest/core`      | Compiles core artifacts to `dist/`.                          |
 | `typecheck`        | `@attest/core`      | Type-checks core source without emitting files.              |
+| `test`             | `@attest/core`      | Runs core tests with Vitest.                                 |
 | `build`            | `@attest/cli`       | Compiles CLI artifacts to `dist/`.                           |
 | `typecheck`        | `@attest/cli`       | Type-checks CLI source without emitting files.               |
 | `test`             | `@attest/schemas`   | Validates generated JSON Schema artifacts.                   |

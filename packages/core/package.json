@@ -11,10 +11,16 @@
     }
   },
   "dependencies": {
-    "@attest/contracts": "workspace:*"
+    "@attest/contracts": "workspace:*",
+    "kysely": "^0.29.4",
+    "ulid": "^3.0.2"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "typecheck": "tsc --noEmit -p tsconfig.json"
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "optionalDependencies": {
+    "@libsql/client": "^0.17.4"
   }
 }

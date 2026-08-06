@@ -1,0 +1,293 @@
+import { resolve } from 'node:path';
+
+import { Kysely } from 'kysely';
+import { monotonicFactory } from 'ulid';
+
+import { createCacheStore } from './cache.js';
+import { recordCaseTransaction } from './internal/case-recording.js';
+import { canonicalStringify } from './internal/canonical-json.js';
+import { createSqliteDialect } from './internal/kysely-sqlite-dialect.js';
+import { createLock } from './internal/promise-lock.js';
+import { toCaseRecord, toMetricEvaluation, toRunRecord } from './internal/row-mapping.js';
+import { computeCaseVerdict, computeSummary } from './internal/run-summary.js';
+import { openSqliteHandle, type SqliteHandle } from './internal/sqlite-handle.js';
+import { executeStoreOperation } from './internal/store-operation.js';
+import { migrateToLatest } from './migration-runner.js';
+import type { Database, MetricResultsTable } from './schema.js';
+import {
+  StoreError,
+  type AttestStore,
+  type CaseRecord,
+  type CaseSummary,
+  type RunMetadata,
+  type RunRecord,
+  type RunStatus,
+  type RunStore,
+  type StoredCaseExecution,
+  type StoredMetricEvaluation,
+} from './types.js';
+
+const createUlid = monotonicFactory();
+const migrationLocks = new Map<string, ReturnType<typeof createLock>>();
+
+const loadMetrics = async (
+  database: Kysely<Database>,
+  caseRowIds: string[],
+): Promise<MetricResultsTable[]> =>
+  caseRowIds.length === 0
+    ? []
+    : database
+        .selectFrom('metric_results')
+        .selectAll()
+        .where('case_row_id', 'in', caseRowIds)
+        .orderBy('id')
+        .execute();
+
+const groupMetrics = (metrics: MetricResultsTable[]): Map<string, StoredMetricEvaluation[]> => {
+  const grouped = new Map<string, StoredMetricEvaluation[]>();
+  for (const metric of metrics) {
+    const values = grouped.get(metric.case_row_id) ?? [];
+    values.push(toMetricEvaluation(metric));
+    grouped.set(metric.case_row_id, values);
+  }
+  return grouped;
+};
+
+class SqliteRunStore implements RunStore {
+  readonly #database: Kysely<Database>;
+
+  constructor(database: Kysely<Database>) {
+    this.#database = database;
+  }
+
+  /** Creates a running record with a UTC timestamp and ULID identity. */
+  async createRun(metadata: RunMetadata): Promise<RunRecord> {
+    return executeStoreOperation('WRITE_FAILED', 'Could not create the run.', async () => {
+      const record: RunRecord = {
+        ...metadata,
+        id: createUlid(),
+        createdAt: new Date().toISOString(),
+        status: 'running',
+      };
+      await this.#database
+        .insertInto('runs')
+        .values({
+          id: record.id,
+          created_at: record.createdAt,
+          finished_at: null,
+          status: record.status,
+          config_version: record.configVersion,
+          config_hash: record.configHash,
+          config_json: record.configJson,
+          git_sha: record.gitSha ?? null,
+          git_branch: record.gitBranch ?? null,
+          labels_json: record.labels ? canonicalStringify(record.labels) : null,
+          summary_json: null,
+        })
+        .execute();
+      return record;
+    });
+  }
+
+  /** Atomically persists one runtime-validated case and all of its child evidence. */
+  async recordCase(
+    runId: string,
+    execution: StoredCaseExecution,
+    evaluations: StoredMetricEvaluation[],
+  ): Promise<void> {
+    await executeStoreOperation('WRITE_FAILED', 'Could not record the case.', async () =>
+      this.#database
+        .transaction()
+        .execute((database) => recordCaseTransaction(database, runId, execution, evaluations)),
+    );
+  }
+
+  /** Finalizes once; same-status calls return the stored record for retry-safe acknowledgement. */
+  async finalizeRun(runId: string, status: Exclude<RunStatus, 'running'>): Promise<RunRecord> {
+    await executeStoreOperation('WRITE_FAILED', 'Could not finalize the run.', async () =>
+      this.#database.transaction().execute(async (database) => {
+        const run = await database
+          .selectFrom('runs')
+          .select('status')
+          .where('id', '=', runId)
+          .executeTakeFirst();
+        if (!run) throw new StoreError('RUN_NOT_FOUND', `Run ${runId} was not found.`);
+        if (run.status !== 'running') {
+          if (run.status === status) return;
+          throw new StoreError(
+            'RUN_FINALIZED',
+            `Run ${runId} is already finalized as ${run.status}.`,
+          );
+        }
+        const cases = await database
+          .selectFrom('cases')
+          .select(['id', 'outcome', 'expected_metrics_json'])
+          .where('run_id', '=', runId)
+          .execute();
+        const metrics = await loadMetrics(
+          database,
+          cases.map((caseRow) => caseRow.id),
+        );
+        await database
+          .updateTable('runs')
+          .set({
+            status,
+            finished_at: new Date().toISOString(),
+            summary_json: canonicalStringify(computeSummary(cases, metrics)),
+          })
+          .where('id', '=', runId)
+          .execute();
+      }),
+    );
+    return this.getRun(runId);
+  }
+
+  /** Loads one run while preserving optional metadata and summary fields. */
+  async getRun(runId: string): Promise<RunRecord> {
+    const row = await this.#database
+      .selectFrom('runs')
+      .selectAll()
+      .where('id', '=', runId)
+      .executeTakeFirst();
+    if (!row) throw new StoreError('RUN_NOT_FOUND', `Run ${runId} was not found.`);
+    return toRunRecord(row);
+  }
+
+  /** Lists runs in deterministic newest-first order. */
+  async listRuns(options: { limit?: number } = {}): Promise<RunRecord[]> {
+    let query = this.#database
+      .selectFrom('runs')
+      .selectAll()
+      .orderBy('created_at', 'desc')
+      .orderBy('id', 'desc');
+    if (options.limit !== undefined) query = query.limit(options.limit);
+    return (await query.execute()).map(toRunRecord);
+  }
+
+  /** Rehydrates all case blobs for export and detailed local consumers. */
+  async getCaseResults(runId: string): Promise<CaseRecord[]> {
+    await this.getRun(runId);
+    const cases = await this.#database
+      .selectFrom('cases')
+      .selectAll()
+      .where('run_id', '=', runId)
+      .orderBy('id')
+      .execute();
+    const metrics = groupMetrics(
+      await loadMetrics(
+        this.#database,
+        cases.map((row) => row.id),
+      ),
+    );
+    return cases.map((row) => toCaseRecord(row, metrics.get(row.id) ?? []));
+  }
+
+  /** Loads one case detail while preserving distinct missing-run and missing-case semantics. */
+  async getCase(runId: string, suiteName: string, caseId: string): Promise<CaseRecord> {
+    await this.getRun(runId);
+    const row = await this.#database
+      .selectFrom('cases')
+      .selectAll()
+      .where('run_id', '=', runId)
+      .where('suite_name', '=', suiteName)
+      .where('case_id', '=', caseId)
+      .executeTakeFirst();
+    if (!row)
+      throw new StoreError(
+        'CASE_NOT_FOUND',
+        `Case ${suiteName}/${caseId} was not found in run ${runId}.`,
+      );
+    const metrics = await loadMetrics(this.#database, [row.id]);
+    return toCaseRecord(row, metrics.map(toMetricEvaluation));
+  }
+
+  /** Returns a row-id cursor page without selecting request, response, trace, or diagnostic blobs. */
+  async listCaseSummaries(
+    runId: string,
+    options: { cursor?: string; limit?: number } = {},
+  ): Promise<{ items: CaseSummary[]; nextCursor?: string }> {
+    await this.getRun(runId);
+    const limit = options.limit ?? 100;
+    let query = this.#database
+      .selectFrom('cases')
+      .select([
+        'id',
+        'case_id',
+        'suite_name',
+        'outcome',
+        'started_at',
+        'duration_ms',
+        'expected_metrics_json',
+      ])
+      .where('run_id', '=', runId)
+      .orderBy('id')
+      .limit(limit + 1);
+    if (options.cursor !== undefined) query = query.where('id', '>', options.cursor);
+    const rows = await query.execute();
+    const pageRows = rows.slice(0, limit);
+    const metrics = await loadMetrics(
+      this.#database,
+      pageRows.map((row) => row.id),
+    );
+    const metricsByCase = new Map<string, MetricResultsTable[]>();
+    for (const metric of metrics) {
+      const values = metricsByCase.get(metric.case_row_id) ?? [];
+      values.push(metric);
+      metricsByCase.set(metric.case_row_id, values);
+    }
+    const items = pageRows.map((row) => {
+      const caseMetrics = metricsByCase.get(row.id) ?? [];
+      const expected = JSON.parse(row.expected_metrics_json) as string[];
+      return {
+        caseId: row.case_id,
+        suiteName: row.suite_name,
+        outcome: row.outcome,
+        verdict: computeCaseVerdict(row, caseMetrics),
+        startedAt: row.started_at,
+        durationMs: row.duration_ms,
+        metricCounts: {
+          expected: expected.length,
+          evaluated: caseMetrics.filter((metric) => metric.status === 'evaluated').length,
+          passed: caseMetrics.filter((metric) => metric.status === 'evaluated' && metric.pass === 1)
+            .length,
+          errors: caseMetrics.filter((metric) => metric.status === 'error').length,
+        },
+      } satisfies CaseSummary;
+    });
+    return rows.length > limit ? { items, nextCursor: pageRows.at(-1)?.id } : { items };
+  }
+
+  /** Closes Kysely and its owned SQLite handle. */
+  async close(): Promise<void> {
+    await this.#database.destroy();
+  }
+}
+
+/** Opens the explicit run/cache context while serializing schema setup by resolved path. */
+const openStore = async (path: string): Promise<AttestStore> => {
+  const resolvedPath = resolve(path);
+  const lock = migrationLocks.get(resolvedPath) ?? createLock();
+  migrationLocks.set(resolvedPath, lock);
+  const release = await lock.acquire();
+  let handle: SqliteHandle | undefined;
+  try {
+    handle = await openSqliteHandle(resolvedPath);
+    await migrateToLatest(handle);
+    const database = new Kysely<Database>({ dialect: createSqliteDialect(handle) });
+    const runs = new SqliteRunStore(database);
+    return { runs, cache: createCacheStore(database), close: () => runs.close() };
+  } catch (error) {
+    await handle?.close();
+    if (error instanceof StoreError) throw error;
+    throw new StoreError('OPEN_FAILED', `Could not open store at ${resolvedPath}.`, {
+      cause: error,
+    });
+  } finally {
+    release();
+  }
+};
+
+/** Compatibility wrapper retained until callers migrate to the explicit AttestStore context. */
+const openRunStore = async (path: string): Promise<RunStore> => (await openStore(path)).runs;
+
+export { openRunStore, openStore, type RunStore };
