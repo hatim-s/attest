@@ -1,20 +1,32 @@
-import type { AgentRequest, ContractWarning, Trace } from '@attest/contracts';
+import {
+  AttestError,
+  type AgentRequest,
+  type ContractWarning,
+  type Trace,
+} from '@attest/contracts';
+
+import type { CacheStore } from './cache.js';
 
 type StoreErrorCode =
   | 'SCHEMA_TOO_NEW'
   | 'RUN_NOT_FOUND'
+  | 'CASE_NOT_FOUND'
   | 'RUN_FINALIZED'
+  | 'CASE_CONFLICT'
   | 'OPEN_FAILED'
   | 'INVALID_JSON'
   | 'CORRUPT_DATA'
-  | 'WRITE_FAILED';
+  | 'WRITE_FAILED'
+  | 'READ_FAILED'
+  | 'DRIVER_MISUSE'
+  | 'INVALID_RECORD';
 
 /** Identifies exceptional store failures that callers can render without parsing messages. */
-class StoreError extends Error {
+class StoreError extends AttestError {
   readonly code: StoreErrorCode;
 
   constructor(code: StoreErrorCode, message: string, options?: ErrorOptions) {
-    super(message, options);
+    super(code, message, options);
     this.name = 'StoreError';
     this.code = code;
   }
@@ -36,28 +48,67 @@ interface RunMetadata {
   labels?: Record<string, string>;
 }
 
-/** Records why an agent invocation could not produce a usable response (PLAN 1R.1). */
-interface InvocationError {
-  kind:
-    'spawn_failure' | 'nonzero_exit' | 'invalid_output' | 'http_error' | 'timeout' | 'cancelled';
-  message: string;
-  exitCode?: number;
+/** Enumerates runner-aligned invocation failures persisted without translation loss. */
+type StoredInvocationErrorCode =
+  | 'spawn_failed'
+  | 'timeout'
+  | 'output_cap_exceeded'
+  | 'nonzero_exit'
+  | 'http_status'
+  | 'network'
+  | 'invalid_envelope'
+  | 'cancelled';
+
+/** Captures bounded process and transport diagnostics for one invocation attempt. */
+interface StoredDiagnostics {
   stderrExcerpt?: string;
+  exitCode?: number;
+  httpStatus?: number;
 }
 
-/** Captures one agent execution and its canonical request/response evidence (PLAN 1S.3). */
-interface StoredCaseExecution {
+/** Preserves one runner attempt for retry analysis required by the agent contract. */
+type StoredAttempt = {
+  diagnostics: StoredDiagnostics;
+  durationMs: number;
+} & (
+  | { status: 'ok' }
+  | {
+      status: 'invocation_error';
+      errorCode: StoredInvocationErrorCode;
+      errorMessage: string;
+    }
+);
+
+/** Carries fields shared by every persisted case execution (PLAN 1S.3). */
+interface StoredCaseBase {
   caseId: string;
   suiteName: string;
-  outcome: CaseOutcome;
+  request: AgentRequest;
   startedAt: string;
   durationMs: number;
-  request: AgentRequest;
-  response?: unknown;
-  responseWarnings?: ContractWarning[];
-  invocationError?: InvocationError;
-  trace?: Trace;
+  warnings: ContractWarning[];
+  diagnostics: StoredDiagnostics;
+  attempts: StoredAttempt[];
+  expectedMetrics: string[];
 }
+
+/** Captures one runner-aligned execution using a runtime-validated terminal discriminant. */
+type StoredCaseExecution = StoredCaseBase &
+  (
+    | { outcome: 'completed'; response: unknown; trace?: Trace }
+    | {
+        outcome: 'invocation_error' | 'timeout' | 'cancelled';
+        errorCode: StoredInvocationErrorCode;
+        errorMessage: string;
+      }
+  );
+
+/** @deprecated Use the discriminated fields on StoredCaseExecution directly. */
+type InvocationError = {
+  code: StoredInvocationErrorCode;
+  message: string;
+  diagnostics: StoredDiagnostics;
+};
 
 /** Captures one assertion, executable metric, or judge result (PLAN 1M.4 and 1S.3). */
 interface StoredMetricEvaluation {
@@ -92,10 +143,21 @@ interface RunRecord extends RunMetadata {
 }
 
 /** Represents one persisted case with all metric evaluations restored (PLAN 1S.3). */
-interface CaseRecord extends StoredCaseExecution {
+type CaseRecord = StoredCaseExecution & {
   rowId: string;
   runId: string;
   metrics: StoredMetricEvaluation[];
+};
+
+/** Provides the blob-free case list projection consumed by the PLAN 2V view server. */
+interface CaseSummary {
+  caseId: string;
+  suiteName: string;
+  outcome: CaseOutcome;
+  verdict: 'pass' | 'fail' | 'error';
+  startedAt: string;
+  durationMs: number;
+  metricCounts: { expected: number; evaluated: number; passed: number; errors: number };
 }
 
 /** Defines the durable run lifecycle and query surface required by PLAN 1S.3. */
@@ -110,19 +172,37 @@ interface RunStore {
   getRun(runId: string): Promise<RunRecord>;
   listRuns(options?: { limit?: number }): Promise<RunRecord[]>;
   getCaseResults(runId: string): Promise<CaseRecord[]>;
+  listCaseSummaries(
+    runId: string,
+    options?: { cursor?: string; limit?: number },
+  ): Promise<{ items: CaseSummary[]; nextCursor?: string }>;
+  getCase(runId: string, suiteName: string, caseId: string): Promise<CaseRecord>;
+  close(): Promise<void>;
+}
+
+/** Owns the shared database context for run and cache operations. */
+interface AttestStore {
+  runs: RunStore;
+  cache: CacheStore;
   close(): Promise<void>;
 }
 
 export {
   StoreError,
+  type AttestStore,
   type CaseOutcome,
   type CaseRecord,
+  type CaseSummary,
   type InvocationError,
   type RunMetadata,
   type RunRecord,
   type RunStore,
   type RunStatus,
   type RunSummary,
+  type StoreErrorCode,
   type StoredCaseExecution,
+  type StoredDiagnostics,
+  type StoredInvocationErrorCode,
   type StoredMetricEvaluation,
+  type StoredAttempt,
 };

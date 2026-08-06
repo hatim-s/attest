@@ -1,11 +1,13 @@
 import type { CasesTable, MetricResultsTable, RunsTable } from '../schema.js';
-import { StoreError } from '../types.js';
-import type {
-  CaseRecord,
-  RunRecord,
-  RunSummary,
-  StoredCaseExecution,
-  StoredMetricEvaluation,
+import {
+  StoreError,
+  type CaseRecord,
+  type RunRecord,
+  type RunSummary,
+  type StoredAttempt,
+  type StoredCaseExecution,
+  type StoredDiagnostics,
+  type StoredMetricEvaluation,
 } from '../types.js';
 
 const parseJson = <Value>(serialized: string | null): Value | undefined => {
@@ -18,6 +20,14 @@ const parseJson = <Value>(serialized: string | null): Value | undefined => {
   } catch (error) {
     throw new StoreError('CORRUPT_DATA', 'Stored JSON could not be rehydrated.', { cause: error });
   }
+};
+
+const parseRequiredJson = <Value>(serialized: string, field: string): Value => {
+  const value = parseJson<Value>(serialized);
+  if (value === undefined) {
+    throw new StoreError('CORRUPT_DATA', `Stored ${field} JSON is missing.`);
+  }
+  return value;
 };
 
 /** Restores a public run record from its schema-v1 row representation (PLAN 1S.3). */
@@ -49,59 +59,44 @@ const toMetricEvaluation = (row: MetricResultsTable): StoredMetricEvaluation => 
   durationMs: row.duration_ms ?? undefined,
 });
 
-/** Restores a public case record and its joined metrics from schema-v1 rows (PLAN 1S.3). */
-const toCaseRecord = (row: CasesTable, metrics: StoredMetricEvaluation[]): CaseRecord => ({
-  rowId: row.id,
-  runId: row.run_id,
-  caseId: row.case_id,
-  suiteName: row.suite_name,
-  outcome: row.outcome,
-  startedAt: row.started_at,
-  durationMs: row.duration_ms,
-  request: parseJson<StoredCaseExecution['request']>(row.request_json)!,
-  response: parseJson(row.response_json),
-  responseWarnings: parseJson(row.response_warnings_json),
-  invocationError: parseJson(row.invocation_error_json),
-  trace: parseJson(row.trace_json),
-  metrics,
-});
+/** Restores a discriminated public case and its metric evidence from schema-v1 rows. */
+const toCaseRecord = (row: CasesTable, metrics: StoredMetricEvaluation[]): CaseRecord => {
+  const shared = {
+    rowId: row.id,
+    runId: row.run_id,
+    caseId: row.case_id,
+    suiteName: row.suite_name,
+    startedAt: row.started_at,
+    durationMs: row.duration_ms,
+    request: parseRequiredJson<StoredCaseExecution['request']>(row.request_json, 'request'),
+    warnings: parseRequiredJson<StoredCaseExecution['warnings']>(row.warnings_json, 'warnings'),
+    diagnostics: parseRequiredJson<StoredDiagnostics>(row.diagnostics_json, 'diagnostics'),
+    attempts: parseRequiredJson<StoredAttempt[]>(row.attempts_json, 'attempts'),
+    expectedMetrics: parseRequiredJson<string[]>(row.expected_metrics_json, 'expected metrics'),
+    metrics,
+  };
 
-/**
- * Computes exclusive case totals using the PLAN 1S.3 verdict rule: a completed case passes only
- * when every metric is evaluated and explicitly true; non-completed outcomes are errors.
- */
-const computeSummary = (
-  cases: Pick<CasesTable, 'id' | 'outcome'>[],
-  metrics: Pick<MetricResultsTable, 'case_row_id' | 'status' | 'pass'>[],
-): RunSummary => {
-  const metricsByCase = new Map<string, typeof metrics>();
-  for (const metric of metrics) {
-    const caseMetrics = metricsByCase.get(metric.case_row_id) ?? [];
-    caseMetrics.push(metric);
-    metricsByCase.set(metric.case_row_id, caseMetrics);
-  }
-
-  let passedCases = 0;
-  let errorCases = 0;
-  for (const caseRow of cases) {
-    if (caseRow.outcome !== 'completed') {
-      errorCases += 1;
-      continue;
+  if (row.outcome === 'completed') {
+    if (row.response_json === null || row.error_code !== null) {
+      throw new StoreError('CORRUPT_DATA', 'Stored completed case violates its discriminant.');
     }
-
-    const passed = (metricsByCase.get(caseRow.id) ?? []).every(
-      (metric) => metric.status === 'evaluated' && metric.pass === 1,
-    );
-    passedCases += passed ? 1 : 0;
+    return {
+      ...shared,
+      outcome: 'completed',
+      response: parseRequiredJson(row.response_json, 'response'),
+      trace: parseJson(row.trace_json),
+    };
   }
 
+  if (row.error_code === null || row.error_message === null || row.trace_json !== null) {
+    throw new StoreError('CORRUPT_DATA', 'Stored failed case violates its discriminant.');
+  }
   return {
-    totalCases: cases.length,
-    passedCases,
-    failedCases: cases.length - passedCases - errorCases,
-    errorCases,
-    metricErrorCount: metrics.filter((metric) => metric.status === 'error').length,
+    ...shared,
+    outcome: row.outcome,
+    errorCode: row.error_code,
+    errorMessage: row.error_message,
   };
 };
 
-export { computeSummary, toCaseRecord, toMetricEvaluation, toRunRecord };
+export { parseJson, toCaseRecord, toMetricEvaluation, toRunRecord };

@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 
 import { StoreError } from '../types.js';
 
-const sortObjectKeys = (value: unknown, ancestors: Set<object>): unknown => {
+const toCanonicalValue = (value: unknown, ancestors: Set<object>): unknown => {
   if (typeof value === 'number' && !Number.isFinite(value)) {
     throw new StoreError('INVALID_JSON', 'JSON numbers must be finite.');
   }
@@ -24,7 +24,7 @@ const sortObjectKeys = (value: unknown, ancestors: Set<object>): unknown => {
     ancestors.add(value);
     try {
       return Array.from({ length: value.length }, (_, index) =>
-        sortObjectKeys(value[index], ancestors),
+        toCanonicalValue(value[index], ancestors),
       );
     } finally {
       ancestors.delete(value);
@@ -45,7 +45,7 @@ const sortObjectKeys = (value: unknown, ancestors: Set<object>): unknown => {
       Object.keys(value)
         .sort()
         .filter((key) => Reflect.get(value, key) !== undefined)
-        .map((key) => [key, sortObjectKeys(Reflect.get(value, key), ancestors)]),
+        .map((key) => [key, toCanonicalValue(Reflect.get(value, key), ancestors)]),
     );
   } finally {
     ancestors.delete(value);
@@ -59,7 +59,7 @@ const sortObjectKeys = (value: unknown, ancestors: Set<object>): unknown => {
  */
 const canonicalStringify = (value: unknown): string => {
   try {
-    return JSON.stringify(sortObjectKeys(value, new Set()));
+    return JSON.stringify(toCanonicalValue(value, new Set()));
   } catch (error) {
     if (error instanceof StoreError) {
       throw error;

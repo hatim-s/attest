@@ -15,45 +15,9 @@ import {
   type QueryResult,
 } from 'kysely';
 
-import { ConnectionMutex } from './internal/connection-mutex.js';
-import { openLibsqlHandle } from './internal/libsql-handle.js';
-import { openNodeSqliteHandle } from './internal/node-sqlite-handle.js';
-
-/** Minimal statement surface shared by node:sqlite and the libsql fallback (PLAN 1S.1). */
-interface SqliteStatement {
-  all(...parameters: unknown[]): Promise<unknown[]>;
-  run(...parameters: unknown[]): Promise<{ changes: number | bigint }>;
-}
-
-/** Minimal transaction-capable database surface used by migrations and the Kysely driver. */
-interface SqliteHandle {
-  prepare(sql: string): SqliteStatement;
-  exec(sql: string): Promise<void>;
-  begin(): Promise<void>;
-  commit(): Promise<void>;
-  rollback(): Promise<void>;
-  close(): Promise<void>;
-}
-
-const applyPragmas = async (handle: SqliteHandle): Promise<void> => {
-  await handle.exec('PRAGMA journal_mode=WAL');
-  await handle.exec('PRAGMA busy_timeout=5000');
-  await handle.exec('PRAGMA foreign_keys=ON');
-  await handle.exec('PRAGMA synchronous=NORMAL');
-};
-
-/** Opens the preferred local SQLite implementation and applies durability pragmas. */
-const openSqliteHandle = async (path: string): Promise<SqliteHandle> => {
-  const nodeHandle = await openNodeSqliteHandle(path);
-  const handle = nodeHandle ?? (await openLibsqlHandle(path));
-  try {
-    await applyPragmas(handle);
-    return handle;
-  } catch (error) {
-    await handle.close();
-    throw error;
-  }
-};
+import { StoreError } from '../types.js';
+import { createLock } from './promise-lock.js';
+import type { SqliteHandle } from './sqlite-handle.js';
 
 const returnsRows = (node: OperationNode): boolean =>
   SelectQueryNode.is(node) ||
@@ -83,7 +47,7 @@ class HandleConnection implements DatabaseConnection {
   /** Streams the single materialized select result produced by the portable handle. */
   async *streamQuery<Row>(compiledQuery: CompiledQuery): AsyncIterableIterator<QueryResult<Row>> {
     if (!SelectQueryNode.is(compiledQuery.query)) {
-      throw new TypeError('SQLite streaming is only supported for select queries.');
+      throw new StoreError('DRIVER_MISUSE', 'SQLite streaming only supports select queries.');
     }
 
     yield await this.executeQuery<Row>(compiledQuery);
@@ -93,7 +57,8 @@ class HandleConnection implements DatabaseConnection {
 class HandleDriver implements Driver {
   readonly #connection: HandleConnection;
   readonly #handle: SqliteHandle;
-  readonly #mutex = new ConnectionMutex();
+  readonly #lock = createLock();
+  #releaseConnection: (() => void) | undefined;
 
   constructor(handle: SqliteHandle) {
     this.#handle = handle;
@@ -102,12 +67,9 @@ class HandleDriver implements Driver {
 
   async init(): Promise<void> {}
 
-  /**
-   * SQLite has one writer and this driver has one shared connection, so exclusivity must live here
-   * to bracket both standalone queries and complete Kysely transactions.
-   */
+  /** Brackets both standalone statements and complete Kysely transactions on one connection. */
   async acquireConnection(): Promise<DatabaseConnection> {
-    await this.#mutex.acquire();
+    this.#releaseConnection = await this.#lock.acquire();
     return this.#connection;
   }
 
@@ -124,7 +86,12 @@ class HandleDriver implements Driver {
   }
 
   async releaseConnection(): Promise<void> {
-    this.#mutex.release();
+    const release = this.#releaseConnection;
+    if (!release) {
+      throw new StoreError('DRIVER_MISUSE', 'Cannot release an unacquired SQLite connection.');
+    }
+    this.#releaseConnection = undefined;
+    release();
   }
 
   async destroy(): Promise<void> {
@@ -140,4 +107,4 @@ const createSqliteDialect = (handle: SqliteHandle): Dialect => ({
   createQueryCompiler: () => new SqliteQueryCompiler(),
 });
 
-export { createSqliteDialect, openSqliteHandle, type SqliteHandle, type SqliteStatement };
+export { createSqliteDialect };

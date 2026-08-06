@@ -1,4 +1,4 @@
-import type { SqliteHandle } from '../database.js';
+import type { SqliteHandle } from './sqlite-handle.js';
 
 /** Opens node:sqlite lazily so unsupported Node runtimes can use the libsql fallback. */
 const openNodeSqliteHandle = async (path: string): Promise<SqliteHandle | undefined> => {

@@ -1,14 +1,30 @@
 import type { Client, InArgs, Transaction } from '@libsql/client';
 
-import type { SqliteHandle } from '../database.js';
+import { StoreError } from '../types.js';
+import type { SqliteHandle } from './sqlite-handle.js';
+
+/** Splits controlled migration SQL while retaining trigger bodies as one SQLite statement. */
+const splitMigrationStatements = (sql: string): string[] => {
+  const statements: string[] = [];
+  let buffer = '';
+  let insideTrigger = false;
+  for (const line of sql.split('\n')) {
+    const trimmed = line.trim();
+    buffer += `${line}\n`;
+    if (trimmed.startsWith('CREATE TRIGGER')) insideTrigger = true;
+    if ((insideTrigger && trimmed === 'END;') || (!insideTrigger && trimmed.endsWith(';'))) {
+      statements.push(buffer.trim());
+      buffer = '';
+      insideTrigger = false;
+    }
+  }
+  if (buffer.trim().length > 0) statements.push(buffer.trim());
+  return statements;
+};
 
 /** Executes a migration script statement-by-statement on the active interactive transaction. */
 const executeTransactionScript = async (transaction: Transaction, sql: string): Promise<void> => {
-  // Migration sources are controlled schema scripts whose statements do not contain semicolons in values.
-  const statements = sql
-    .split(';')
-    .map((statement) => statement.trim())
-    .filter((statement) => statement.length > 0);
+  const statements = splitMigrationStatements(sql);
   for (const statement of statements) {
     await transaction.execute(statement);
   }
@@ -38,14 +54,14 @@ const createLibsqlHandle = (client: Client): SqliteHandle => {
     },
     begin: async () => {
       if (activeTransaction) {
-        throw new Error('A libsql transaction is already active.');
+        throw new StoreError('DRIVER_MISUSE', 'A libsql transaction is already active.');
       }
 
       activeTransaction = await client.transaction('write');
     },
     commit: async () => {
       if (!activeTransaction) {
-        throw new Error('No libsql transaction is active.');
+        throw new StoreError('DRIVER_MISUSE', 'No libsql transaction is active.');
       }
 
       const transaction = activeTransaction;
@@ -57,7 +73,7 @@ const createLibsqlHandle = (client: Client): SqliteHandle => {
     },
     rollback: async () => {
       if (!activeTransaction) {
-        throw new Error('No libsql transaction is active.');
+        throw new StoreError('DRIVER_MISUSE', 'No libsql transaction is active.');
       }
 
       const transaction = activeTransaction;
@@ -86,4 +102,4 @@ const openLibsqlHandle = async (path: string): Promise<SqliteHandle> => {
   return createLibsqlHandle(createClient({ url: `file:${path}`, timeout: 5_000 }));
 };
 
-export { createLibsqlHandle, openLibsqlHandle };
+export { createLibsqlHandle, openLibsqlHandle, splitMigrationStatements };

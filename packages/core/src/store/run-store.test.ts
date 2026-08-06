@@ -10,20 +10,18 @@ import {
 } from '@attest/contracts';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { openSqliteHandle } from './database.js';
 import { openRunStore, type RunStore } from './run-store.js';
 import type { StoredCaseExecution, StoredMetricEvaluation } from './types.js';
 
 const stores: RunStore[] = [];
 const directories: string[] = [];
 
-const openTemporaryStore = async (): Promise<{ path: string; store: RunStore }> => {
+const openTemporaryStore = async (): Promise<RunStore> => {
   const directory = await mkdtemp(join(tmpdir(), 'attest-run-store-'));
-  const path = join(directory, 'runs.db');
-  const store = await openRunStore(path);
+  const store = await openRunStore(join(directory, 'runs.db'));
   directories.push(directory);
   stores.push(store);
-  return { path, store };
+  return store;
 };
 
 const request = (runId: string, caseId: string): AgentRequest => ({
@@ -31,7 +29,38 @@ const request = (runId: string, caseId: string): AgentRequest => ({
   run_id: runId,
   case_id: caseId,
   input: { zeta: 2, alpha: 'input' },
-  params: { temperature: 0 },
+});
+
+interface ExecutionOptions {
+  runId: string;
+  caseId: string;
+  expectedMetrics?: string[];
+  response?: unknown;
+  trace?: Trace;
+}
+
+/** Builds a runner-aligned completed execution with explicit empty diagnostic collections. */
+const completedExecution = (options: ExecutionOptions): StoredCaseExecution => ({
+  caseId: options.caseId,
+  suiteName: 'suite',
+  outcome: 'completed',
+  startedAt: '2026-08-06T00:00:00.000Z',
+  durationMs: 10,
+  request: request(options.runId, options.caseId),
+  response: options.response ?? { output: 'ok' },
+  warnings: [],
+  diagnostics: {},
+  attempts: [],
+  expectedMetrics: options.expectedMetrics ?? [],
+  trace: options.trace,
+});
+
+const evaluatedMetric = (metricName: string, pass: boolean): StoredMetricEvaluation => ({
+  metricName,
+  kind: 'assertion',
+  status: 'evaluated',
+  score: pass ? 1 : 0,
+  pass,
 });
 
 const trace: Trace = {
@@ -46,10 +75,6 @@ const trace: Trace = {
       start_time: '2026-08-06T01:02:03.000Z',
       end_time: '2026-08-06T01:02:04.000Z',
       status: { code: 'ok' },
-      attributes: {
-        'gen_ai.tool.name': 'web_search',
-        'gen_ai.request.model': 'attest-model',
-      },
     },
   ],
 };
@@ -62,158 +87,81 @@ afterEach(async () => {
 });
 
 describe('RunStore', () => {
-  it('round-trips all run, case, metric, warning, response, and trace fields', async () => {
-    const { store } = await openTemporaryStore();
+  it('round-trips runner diagnostics, attempts, warnings, expected metrics, response, and trace', async () => {
+    const store = await openTemporaryStore();
     const run = await store.createRun({
-      configVersion: 'attest.config/v1alpha1',
-      configHash: 'config-hash',
-      configJson: '{"suite":"round-trip"}',
-      gitSha: 'abc123',
-      gitBranch: 'main',
+      configVersion: 'v1',
+      configHash: 'hash',
+      configJson: '{}',
       labels: { environment: 'test' },
     });
     const execution: StoredCaseExecution = {
-      caseId: 'case-1',
-      suiteName: 'suite-1',
-      outcome: 'completed',
-      startedAt: '2026-08-06T01:02:03.000Z',
-      durationMs: 125,
-      request: request(run.id, 'case-1'),
-      response: { output: 'ok', vendor_extension: { nested: true } },
-      responseWarnings: [
-        { path: 'vendor_extension', message: 'unknown field preserved', code: 'unknown_field' },
+      ...completedExecution({
+        runId: run.id,
+        caseId: 'round-trip',
+        expectedMetrics: ['quality'],
+        trace,
+      }),
+      warnings: [{ path: 'output.extra', message: 'preserved', code: 'unknown_field' }],
+      diagnostics: { stderrExcerpt: 'diagnostic', exitCode: 0 },
+      attempts: [
+        {
+          status: 'invocation_error',
+          errorCode: 'network',
+          errorMessage: 'retry',
+          durationMs: 4,
+          diagnostics: { httpStatus: 503 },
+        },
+        { status: 'ok', durationMs: 6, diagnostics: {} },
       ],
-      invocationError: {
-        kind: 'nonzero_exit',
-        message: 'captured for diagnostics',
-        exitCode: 7,
-        stderrExcerpt: 'failure excerpt',
-      },
-      trace,
     };
-    const evaluation: StoredMetricEvaluation = {
-      metricName: 'quality',
-      kind: 'judge',
-      status: 'evaluated',
-      score: 0.9,
-      pass: true,
-      rationale: 'meets the rubric',
-      details: { dimensions: ['correctness'] },
-      error: { message: 'retained diagnostic', kind: 'judge_warning' },
-      judgeIo: { request: 'rubric', response: { unknown: 'preserved' } },
-      durationMs: 42,
-    };
+    const metric = evaluatedMetric('quality', true);
 
-    await store.recordCase(run.id, execution, [evaluation]);
+    await store.recordCase(run.id, execution, [metric]);
     const finalized = await store.finalizeRun(run.id, 'completed');
-    const [storedCase] = await store.getCaseResults(run.id);
+    const stored = await store.getCase(run.id, 'suite', 'round-trip');
 
-    expect(await store.getRun(run.id)).toEqual(finalized);
-    expect(finalized).toMatchObject({
-      ...run,
-      status: 'completed',
-      summary: {
-        totalCases: 1,
-        passedCases: 1,
-        failedCases: 0,
-        errorCases: 0,
-        metricErrorCount: 0,
-      },
-    });
-    expect(finalized.finishedAt).toBeDefined();
-    expect(storedCase).toMatchObject({ ...execution, runId: run.id, metrics: [evaluation] });
-    expect(storedCase?.rowId).toMatch(/^[0-9A-HJKMNP-TV-Z]{26}$/);
-  });
-
-  it('computes mixed pass, fail, invocation-error, and metric-error totals', async () => {
-    const { store } = await openTemporaryStore();
-    const run = await store.createRun({
-      configVersion: 'v1',
-      configHash: 'hash',
-      configJson: '{}',
-    });
-    const cases: Array<[StoredCaseExecution, StoredMetricEvaluation[]]> = [
-      [
-        {
-          caseId: 'pass',
-          suiteName: 'suite',
-          outcome: 'completed',
-          startedAt: '2026-08-06T00:00:00.000Z',
-          durationMs: 1,
-          request: request(run.id, 'pass'),
-        },
-        [{ metricName: 'metric', kind: 'assertion', status: 'evaluated', pass: true }],
-      ],
-      [
-        {
-          caseId: 'fail',
-          suiteName: 'suite',
-          outcome: 'completed',
-          startedAt: '2026-08-06T00:00:01.000Z',
-          durationMs: 1,
-          request: request(run.id, 'fail'),
-        },
-        [{ metricName: 'metric', kind: 'assertion', status: 'evaluated', pass: false }],
-      ],
-      [
-        {
-          caseId: 'error',
-          suiteName: 'suite',
-          outcome: 'timeout',
-          startedAt: '2026-08-06T00:00:02.000Z',
-          durationMs: 1,
-          request: request(run.id, 'error'),
-        },
-        [
-          {
-            metricName: 'metric',
-            kind: 'judge',
-            status: 'error',
-            error: { message: 'timeout', kind: 'timeout' },
-          },
-        ],
-      ],
-    ];
-    for (const [execution, evaluations] of cases) {
-      await store.recordCase(run.id, execution, evaluations);
-    }
-
-    const finalized = await store.finalizeRun(run.id, 'failed');
+    expect(stored).toMatchObject({ ...execution, runId: run.id, metrics: [metric] });
     expect(finalized.summary).toEqual({
-      totalCases: 3,
+      totalCases: 1,
       passedCases: 1,
-      failedCases: 1,
-      errorCases: 1,
-      metricErrorCount: 1,
+      failedCases: 0,
+      errorCases: 0,
+      metricErrorCount: 0,
     });
   });
 
-  it('rejects double finalization with RUN_FINALIZED', async () => {
-    const { store } = await openTemporaryStore();
+  it('requires the execution discriminant and required collection fields before writing', async () => {
+    const store = await openTemporaryStore();
     const run = await store.createRun({
       configVersion: 'v1',
       configHash: 'hash',
       configJson: '{}',
     });
-    await store.finalizeRun(run.id, 'completed');
-
-    await expect(store.finalizeRun(run.id, 'failed')).rejects.toMatchObject({
-      code: 'RUN_FINALIZED',
-    });
+    const valid = completedExecution({ runId: run.id, caseId: 'invalid' });
+    const matrix: unknown[] = [
+      { ...valid, errorCode: 'network' },
+      { ...valid, outcome: 'timeout', errorCode: 'timeout', errorMessage: 'late', response: {} },
+      {
+        ...valid,
+        outcome: 'timeout',
+        errorCode: 'timeout',
+        errorMessage: 'late',
+        trace: { schema: TRACE_SCHEMA_VERSION, trace_id: 'invalid', spans: [] },
+      },
+      { ...valid, attempts: undefined },
+    ];
+    for (const invalid of matrix) {
+      await expect(
+        store.recordCase(run.id, invalid as StoredCaseExecution, []),
+      ).rejects.toMatchObject({ code: 'INVALID_RECORD' });
+    }
+    await expect(store.getCaseResults(run.id)).resolves.toEqual([]);
+    await expect(store.recordCase(run.id, valid, [])).resolves.toBeUndefined();
   });
 
-  it('reports RUN_NOT_FOUND for unknown runs', async () => {
-    const { store } = await openTemporaryStore();
-    await expect(store.getRun('missing')).rejects.toMatchObject({
-      code: 'RUN_NOT_FOUND',
-    });
-    await expect(store.getCaseResults('missing')).rejects.toMatchObject({
-      code: 'RUN_NOT_FOUND',
-    });
-  });
-
-  it('denormalizes tool and model span attributes', async () => {
-    const { path, store } = await openTemporaryStore();
+  it('classifies missing expected rows as error and ignores extra rows for verdict semantics', async () => {
+    const store = await openTemporaryStore();
     const run = await store.createRun({
       configVersion: 'v1',
       configHash: 'hash',
@@ -221,51 +169,127 @@ describe('RunStore', () => {
     });
     await store.recordCase(
       run.id,
+      completedExecution({ runId: run.id, caseId: 'pass', expectedMetrics: ['expected'] }),
+      [evaluatedMetric('expected', true), evaluatedMetric('extra', false)],
+    );
+    await store.recordCase(
+      run.id,
+      completedExecution({ runId: run.id, caseId: 'missing', expectedMetrics: ['absent'] }),
+      [],
+    );
+    await store.recordCase(
+      run.id,
       {
-        caseId: 'traced',
+        caseId: 'timeout',
         suiteName: 'suite',
-        outcome: 'completed',
+        outcome: 'timeout',
+        errorCode: 'timeout',
+        errorMessage: 'late',
         startedAt: '2026-08-06T00:00:00.000Z',
-        durationMs: 1,
-        request: request(run.id, 'traced'),
-        trace,
+        durationMs: 10,
+        request: request(run.id, 'timeout'),
+        warnings: [],
+        diagnostics: {},
+        attempts: [],
+        expectedMetrics: [],
       },
       [],
     );
 
-    const handle = await openSqliteHandle(path);
-    const [span] = await handle
-      .prepare(
-        'SELECT span_id, kind, name, start_time, end_time, status, tool_name, model_name FROM spans',
-      )
-      .all();
-    await handle.close();
-    expect(span).toMatchObject({
-      span_id: 'span-1',
-      kind: 'tool',
-      name: 'search',
-      start_time: '2026-08-06T01:02:03.000Z',
-      end_time: '2026-08-06T01:02:04.000Z',
-      status: 'ok',
-      tool_name: 'web_search',
-      model_name: 'attest-model',
+    const finalized = await store.finalizeRun(run.id, 'failed');
+    expect(finalized.summary).toMatchObject({ passedCases: 1, failedCases: 0, errorCases: 2 });
+  });
+
+  it('accepts identical case replay and rejects a changed natural-key payload', async () => {
+    const store = await openTemporaryStore();
+    const run = await store.createRun({
+      configVersion: 'v1',
+      configHash: 'hash',
+      configJson: '{}',
+    });
+    const execution = completedExecution({ runId: run.id, caseId: 'retry' });
+    await store.recordCase(run.id, execution, []);
+    await expect(store.recordCase(run.id, execution, [])).resolves.toBeUndefined();
+    await expect(
+      store.recordCase(run.id, { ...execution, durationMs: 11 }, []),
+    ).rejects.toMatchObject({ code: 'CASE_CONFLICT' });
+    expect(await store.getCaseResults(run.id)).toHaveLength(1);
+  });
+
+  it('returns the existing finalization for same-status retry and rejects a different status', async () => {
+    const store = await openTemporaryStore();
+    const run = await store.createRun({
+      configVersion: 'v1',
+      configHash: 'hash',
+      configJson: '{}',
+    });
+    const first = await store.finalizeRun(run.id, 'completed');
+    await expect(store.finalizeRun(run.id, 'completed')).resolves.toEqual(first);
+    await expect(store.finalizeRun(run.id, 'failed')).rejects.toMatchObject({
+      code: 'RUN_FINALIZED',
     });
   });
 
-  it('lists runs newest first and respects limit', async () => {
-    const { store } = await openTemporaryStore();
-    const first = await store.createRun({ configVersion: 'v1', configHash: '1', configJson: '{}' });
-    const second = await store.createRun({
+  it('paginates stable blob-free summaries and resolves single-case absence distinctly', async () => {
+    const store = await openTemporaryStore();
+    const run = await store.createRun({
       configVersion: 'v1',
-      configHash: '2',
+      configHash: 'hash',
       configJson: '{}',
     });
-    const third = await store.createRun({ configVersion: 'v1', configHash: '3', configJson: '{}' });
-
-    expect((await store.listRuns()).map((run) => run.id)).toEqual([third.id, second.id, first.id]);
-    expect((await store.listRuns({ limit: 2 })).map((run) => run.id)).toEqual([
-      third.id,
-      second.id,
+    for (const caseId of ['one', 'two', 'three', 'four', 'five', 'six', 'seven']) {
+      await store.recordCase(
+        run.id,
+        completedExecution({
+          runId: run.id,
+          caseId,
+          expectedMetrics: caseId === 'three' ? ['missing'] : ['quality'],
+          response: { output: caseId },
+          trace,
+        }),
+        caseId === 'three' ? [] : [evaluatedMetric('quality', caseId !== 'two')],
+      );
+    }
+    const first = await store.listCaseSummaries(run.id, { limit: 3 });
+    const firstRetry = await store.listCaseSummaries(run.id, { limit: 3 });
+    const second = await store.listCaseSummaries(run.id, { limit: 3, cursor: first.nextCursor });
+    const third = await store.listCaseSummaries(run.id, { limit: 3, cursor: second.nextCursor });
+    expect(first).toEqual(firstRetry);
+    expect(first.items).toHaveLength(3);
+    expect(second.items).toHaveLength(3);
+    expect(third.items).toHaveLength(1);
+    expect([...first.items, ...second.items, ...third.items].map((item) => item.caseId)).toEqual([
+      'one',
+      'two',
+      'three',
+      'four',
+      'five',
+      'six',
+      'seven',
     ]);
+    expect(first.items[0]).toMatchObject({
+      verdict: 'pass',
+      metricCounts: { expected: 1, evaluated: 1, passed: 1, errors: 0 },
+    });
+    expect(first.items[1]).toMatchObject({
+      verdict: 'fail',
+      metricCounts: { expected: 1, evaluated: 1, passed: 0, errors: 0 },
+    });
+    expect(first.items[2]).toMatchObject({
+      verdict: 'error',
+      metricCounts: { expected: 1, evaluated: 0, passed: 0, errors: 0 },
+    });
+    for (const summary of [...first.items, ...second.items, ...third.items]) {
+      expect(summary).not.toHaveProperty('request');
+      expect(summary).not.toHaveProperty('response');
+      expect(summary).not.toHaveProperty('trace');
+    }
+    await expect(store.getCase(run.id, 'suite', 'one')).resolves.toMatchObject({ caseId: 'one' });
+    await expect(store.getCase(run.id, 'suite', 'missing')).rejects.toMatchObject({
+      code: 'CASE_NOT_FOUND',
+    });
+    await expect(store.getCase('missing-run', 'suite', 'one')).rejects.toMatchObject({
+      code: 'RUN_NOT_FOUND',
+    });
   });
 });

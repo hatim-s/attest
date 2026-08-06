@@ -1,3 +1,13 @@
+import type { SpanKind } from '@attest/contracts';
+
+import type { CacheKind } from './cache.js';
+import type {
+  CaseOutcome,
+  RunStatus,
+  StoredInvocationErrorCode,
+  StoredMetricEvaluation,
+} from './types.js';
+
 /** Kysely row shape for the schema-v1 runs table (PLAN 1S.2). */
 interface RunsTable {
   id: string;
@@ -25,8 +35,12 @@ interface CasesTable {
   input_hash: string;
   request_json: string;
   response_json: string | null;
-  response_warnings_json: string | null;
-  invocation_error_json: string | null;
+  error_code: StoredInvocationErrorCode | null;
+  error_message: string | null;
+  warnings_json: string;
+  diagnostics_json: string;
+  attempts_json: string;
+  expected_metrics_json: string;
   trace_json: string | null;
 }
 
@@ -61,10 +75,10 @@ interface SpansTable {
   model_name: string | null;
 }
 
-/** Kysely row shape for the schema-v1 response_cache table (PLAN 1S.2). */
+/** Kysely row shape for the schema-v1 response_cache table (PLAN 1D.4). */
 interface ResponseCacheTable {
   cache_key: string;
-  kind: 'agent' | 'judge';
+  kind: CacheKind;
   payload_json: string;
   created_at: string;
   last_used_at: string;
@@ -87,6 +101,3 @@ export {
   type RunsTable,
   type SpansTable,
 };
-import type { SpanKind } from '@attest/contracts';
-
-import type { CaseOutcome, RunStatus, StoredMetricEvaluation } from './types.js';

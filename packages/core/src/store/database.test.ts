@@ -1,16 +1,17 @@
-import { readFile, mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 import { Kysely } from 'kysely';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { createSqliteDialect, openSqliteHandle, type SqliteHandle } from './database.js';
+import { createSqliteDialect } from './internal/kysely-sqlite-dialect.js';
 import { openLibsqlHandle } from './internal/libsql-handle.js';
 import { openNodeSqliteHandle } from './internal/node-sqlite-handle.js';
-import { migrateToLatest } from './migrations.js';
+import { openSqliteHandle, type SqliteHandle } from './internal/sqlite-handle.js';
+import { migrateToLatest } from './migration-runner.js';
 import { openRunStore, type RunStore } from './run-store.js';
 
 const stores: RunStore[] = [];
@@ -55,46 +56,34 @@ const expectMutationReturning = async (handle: SqliteHandle): Promise<void> => {
 };
 
 const isLibsqlUnavailable = (error: unknown): boolean => {
-  const code = Reflect.get(Object(error), 'code');
+  const code = (error as { code?: unknown } | null)?.code;
   return code === 'ERR_MODULE_NOT_FOUND' || code === 'ERR_DLOPEN_FAILED';
 };
 
 /** Runs a Node subprocess and resolves with its intentional crash exit code. */
 const runCrashWriter = async (
   databasePath: string,
-  runIdPath: string,
-): Promise<{ code: number; standardError: string }> => {
+): Promise<{ code: number; standardError: string; standardOutput: string }> => {
   const loaderPath = fileURLToPath(
     new URL('./test-fixtures/typescript-loader.mjs', import.meta.url),
   );
-  const storePath = fileURLToPath(new URL('./run-store.ts', import.meta.url));
-  const source = `
-    import { register } from 'node:module';
-    import { writeFileSync } from 'node:fs';
-    register(${JSON.stringify(loaderPath)}, import.meta.url);
-    const { openRunStore } = await import(${JSON.stringify(storePath)});
-    const store = await openRunStore(${JSON.stringify(databasePath)});
-    const run = await store.createRun({ configVersion: 'v1', configHash: 'crash', configJson: '{}' });
-    await store.recordCase(run.id, {
-      caseId: 'crash-case', suiteName: 'suite', outcome: 'completed',
-      startedAt: '2026-08-06T00:00:00.000Z', durationMs: 1,
-      request: { protocol: 'attest.agent/v1alpha1', run_id: run.id, case_id: 'crash-case', input: {} }
-    }, []);
-    writeFileSync(${JSON.stringify(runIdPath)}, run.id);
-    process.exit(1);
-  `;
+  const writerPath = fileURLToPath(new URL('./test-fixtures/crash-writer.ts', import.meta.url));
 
   return new Promise((resolveExit, reject) => {
-    const child = spawn(process.execPath, [
-      '--experimental-strip-types',
-      '--input-type=module',
-      '-e',
-      source,
-    ]);
+    const child = spawn(
+      process.execPath,
+      ['--experimental-strip-types', '--experimental-loader', loaderPath, writerPath, databasePath],
+      { cwd: dirname(databasePath) },
+    );
     let standardError = '';
+    let standardOutput = '';
     child.stderr.setEncoding('utf8');
+    child.stdout.setEncoding('utf8');
     child.stderr.on('data', (chunk: string) => {
       standardError += chunk;
+    });
+    child.stdout.on('data', (chunk: string) => {
+      standardOutput += chunk;
     });
     child.once('error', reject);
     child.once('close', (code) => {
@@ -102,7 +91,7 @@ const runCrashWriter = async (
         reject(new Error(`Crash writer was terminated by a signal: ${standardError}`));
         return;
       }
-      resolveExit({ code, standardError });
+      resolveExit({ code, standardError, standardOutput });
     });
   });
 };
@@ -177,9 +166,10 @@ describe('SQLite store database', () => {
 
   it('recovers a run and case after a child process exits without close', async () => {
     const path = await temporaryDatabasePath();
-    const runIdPath = join(path, '..', 'run-id');
-    expect(await runCrashWriter(path, runIdPath)).toEqual({ code: 1, standardError: '' });
-    const runId = await readFile(runIdPath, 'utf8');
+    const result = await runCrashWriter(path);
+    expect(result.code).toBe(1);
+    expect(result.standardError).not.toContain('Error');
+    const runId = result.standardOutput;
 
     const reopened = await openRunStore(path);
     stores.push(reopened);
@@ -195,7 +185,7 @@ describe('SQLite store database', () => {
     const [row] = await handle.prepare('PRAGMA journal_mode').all();
     await handle.close();
 
-    expect(Reflect.get(row as object, 'journal_mode')).toBe('wal');
+    expect((row as { journal_mode: string }).journal_mode).toBe('wal');
   });
 
   it('returns inserted rows through the node:sqlite handle', async ({ skip }) => {
@@ -235,7 +225,8 @@ describe('SQLite store database', () => {
     await handle.rollback();
     expect(await handle.prepare('SELECT id FROM transaction_items').all()).toEqual([{ id: 1 }]);
     expect(
-      Reflect.get((await handle.prepare('PRAGMA journal_mode').all())[0] as object, 'journal_mode'),
+      ((await handle.prepare('PRAGMA journal_mode').all())[0] as { journal_mode: string })
+        .journal_mode,
     ).toBe('wal');
     await expectMutationReturning(handle);
   });

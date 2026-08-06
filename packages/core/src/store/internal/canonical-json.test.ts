@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { canonicalStringify } from './canonical-json.js';
+import { canonicalStringify, contentHash } from './canonical-json.js';
 
 describe('canonicalStringify', () => {
   it('treats undefined object properties as absent', () => {
@@ -31,5 +31,18 @@ describe('canonicalStringify', () => {
     expect(() => canonicalStringify(value)).toThrowError(
       expect.objectContaining({ code: 'INVALID_JSON' }),
     );
+  });
+
+  it('sorts object keys recursively without reordering arrays', () => {
+    expect(canonicalStringify({ zeta: { delta: 4, alpha: 1 }, alpha: [{ z: 2, a: 1 }] })).toBe(
+      '{"alpha":[{"a":1,"z":2}],"zeta":{"alpha":1,"delta":4}}',
+    );
+  });
+
+  it('produces identical hashes for recursively equivalent key orderings', () => {
+    expect(contentHash({ zeta: { beta: 2, alpha: 1 }, alpha: true })).toBe(
+      contentHash({ alpha: true, zeta: { alpha: 1, beta: 2 } }),
+    );
+    expect(contentHash({ alpha: 1 })).not.toBe(contentHash({ alpha: 2 }));
   });
 });
