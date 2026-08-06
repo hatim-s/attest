@@ -12,9 +12,17 @@ concurrency:
 jobs:
   checks:
     runs-on: ${{ matrix.os }}
+    # A hung process-heavy suite must fail visibly, not stall the queue.
+    timeout-minutes: 25
     strategy:
+      fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest]
+    env:
+      # Process-spawning suites overwhelm small CI runners at full parallelism;
+      # two workers keeps memory and process-table pressure bounded.
+      VITEST_MAX_THREADS: '2'
+      VITEST_MAX_FORKS: '2'
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
