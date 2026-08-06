@@ -6,9 +6,13 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { AGENT_PROTOCOL, type AgentRequest } from '@attest/contracts';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { invokeAgent } from './invoke.js';
+import {
+  acquireFixtureProcessSweepLock,
+  sweepFixtureProcesses,
+} from './test-support/fixture-processes.js';
 import type { InvokeOptions } from './types.js';
 
 const REPOSITORY_ROOT = fileURLToPath(new URL('../../../..', import.meta.url));
@@ -19,6 +23,12 @@ const MARKER_PROBE_AGENT_PATH = join(
   'packages/core/src/runner/fixtures/marker-probe-agent.cjs',
 );
 const READINESS_DEADLINE_MS = 30_000;
+const FIXTURE_MARKERS = [
+  CLI_AGENT_PATH,
+  HTTP_AGENT_PATH,
+  MARKER_PROBE_AGENT_PATH,
+  'attest-runner-',
+] as const;
 
 const request: AgentRequest = {
   protocol: AGENT_PROTOCOL,
@@ -39,6 +49,7 @@ const options: InvokeOptions = {
 type CanonicalServer = { baseUrl: string; child: ChildProcess; closed: Promise<void> };
 
 let server: CanonicalServer | undefined;
+let releaseFixtureProcessSweepLock: (() => Promise<void>) | undefined;
 const canonicalServers = new Set<CanonicalServer>();
 
 const startCanonicalServer = async (): Promise<CanonicalServer> => {
@@ -133,9 +144,24 @@ const requireServer = (): CanonicalServer => {
 };
 
 describe('invokeAgent', { timeout: 30_000 }, () => {
+  beforeEach(async () => {
+    releaseFixtureProcessSweepLock = await acquireFixtureProcessSweepLock();
+  }, 30_000);
+
   afterEach(async () => {
-    await Promise.all([...canonicalServers].map(stopCanonicalServer));
-    server = undefined;
+    try {
+      await Promise.all([...canonicalServers].map(stopCanonicalServer));
+      server = undefined;
+      const killedProcessIds = sweepFixtureProcesses(FIXTURE_MARKERS);
+      if (killedProcessIds.length > 0) {
+        throw new Error(
+          `Fixture teardown killed unexpected processes: ${killedProcessIds.join(', ')}`,
+        );
+      }
+    } finally {
+      await releaseFixtureProcessSweepLock?.();
+      releaseFixtureProcessSweepLock = undefined;
+    }
   });
 
   it('retries retryable HTTP 5xx and records every attempt', async () => {

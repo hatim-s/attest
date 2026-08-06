@@ -4,9 +4,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as wait } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { invokeCliAgent } from './cli-invoker.js';
+import {
+  acquireFixtureProcessSweepLock,
+  sweepFixtureProcesses,
+} from './test-support/fixture-processes.js';
 import type { InvocationAttempt, InvokeOptions } from './types.js';
 
 const REPOSITORY_ROOT = fileURLToPath(new URL('../../../../', import.meta.url));
@@ -14,6 +18,25 @@ const CANONICAL_AGENT_PATH = join(REPOSITORY_ROOT, 'conformance/fake-agents/cli-
 const PRIVATE_FIXTURE_DIRECTORY = fileURLToPath(new URL('./fixtures/', import.meta.url));
 const TEST_TIMEOUT_MS = 15_000;
 const HEARTBEAT_SETTLE_MS = 700;
+const FIXTURE_READINESS_TIMEOUT_MS = 30_000;
+const FIXTURE_MARKERS = [
+  CANONICAL_AGENT_PATH,
+  join(PRIVATE_FIXTURE_DIRECTORY, 'envelope-then-exit-23-agent.cjs'),
+  join(PRIVATE_FIXTURE_DIRECTORY, 'ignore-sigterm-agent.cjs'),
+  join(PRIVATE_FIXTURE_DIRECTORY, 'marker-probe-agent.cjs'),
+  join(PRIVATE_FIXTURE_DIRECTORY, 'normal-exit-orphan-agent.cjs'),
+  join(PRIVATE_FIXTURE_DIRECTORY, 'session-escape-agent.cjs'),
+  join(PRIVATE_FIXTURE_DIRECTORY, 'sigterm-forks-setsid-agent.cjs'),
+  'attest-runner-',
+] as const;
+
+let fixtureEscapeAllowance: string | undefined;
+let releaseFixtureProcessSweepLock: (() => Promise<void>) | undefined;
+
+/** Records the one fixture whose post-snapshot escape is intentionally best-effort. */
+const allowFixtureEscape = (reason: string): void => {
+  fixtureEscapeAllowance = reason;
+};
 
 const request: AgentRequest = {
   protocol: 'attest.agent/v1alpha1',
@@ -71,7 +94,7 @@ const isMissingProcessError = (error: unknown): boolean => {
 
 /** Polls kill(pid, 0) so process cleanup assertions tolerate asynchronous OS reaping. */
 const waitForMissingProcessError = async (processId: number): Promise<unknown> => {
-  const deadline = Date.now() + 2_000;
+  const deadline = Date.now() + FIXTURE_READINESS_TIMEOUT_MS;
   while (Date.now() < deadline) {
     try {
       process.kill(processId, 0);
@@ -96,7 +119,7 @@ const waitForMissingProcessError = async (processId: number): Promise<unknown> =
 
 /** Waits for a hostile fixture to publish its PID before inspecting cleanup behavior. */
 const readHeartbeat = async (heartbeatFile: string): Promise<string> => {
-  const deadline = Date.now() + 2_000;
+  const deadline = Date.now() + FIXTURE_READINESS_TIMEOUT_MS;
   while (Date.now() < deadline) {
     try {
       const contents = await readFile(heartbeatFile, 'utf8');
@@ -161,6 +184,26 @@ const createCanonicalOrphanTimeoutTarget = (): Extract<AgentTarget, { type: 'cli
     command: [process.execPath, '-e', wrapperProgram, CANONICAL_AGENT_PATH],
   };
 };
+
+beforeEach(async () => {
+  releaseFixtureProcessSweepLock = await acquireFixtureProcessSweepLock();
+}, 30_000);
+
+afterEach(async () => {
+  try {
+    const allowance = fixtureEscapeAllowance;
+    fixtureEscapeAllowance = undefined;
+    const killedProcessIds = sweepFixtureProcesses(FIXTURE_MARKERS);
+    if (killedProcessIds.length > 0 && allowance === undefined) {
+      throw new Error(
+        `Fixture teardown killed unexpected processes: ${killedProcessIds.join(', ')}`,
+      );
+    }
+  } finally {
+    await releaseFixtureProcessSweepLock?.();
+    releaseFixtureProcessSweepLock = undefined;
+  }
+});
 
 describe('invokeCliAgent', { timeout: TEST_TIMEOUT_MS }, () => {
   it('writes the request and returns canonical parsed output', async () => {
@@ -248,6 +291,7 @@ describe('invokeCliAgent', { timeout: TEST_TIMEOUT_MS }, () => {
   });
 
   it('sweeps a detached descendant created by a SIGTERM handler', async () => {
+    allowFixtureEscape('A descendant can fork after the process-tree snapshot.');
     await withHeartbeatFile(async (heartbeatFile) => {
       const attempt = requireInvocationError(
         await invokeCliAgent(

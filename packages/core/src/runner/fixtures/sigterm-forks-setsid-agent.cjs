@@ -10,7 +10,7 @@ if (!heartbeatFile) {
   throw new Error('ORPHAN_HEARTBEAT_FILE is required');
 }
 
-const detachedProgram = `const { appendFileSync } = require('node:fs'); const file = process.argv[1]; setInterval(() => appendFileSync(file, 'beat\\n'), 25);`;
+const detachedProgram = `const { appendFileSync } = require('node:fs'); const file = process.argv[1]; setInterval(() => appendFileSync(file, 'beat\\n'), 200);`;
 let handled = false;
 process.on('SIGTERM', () => {
   if (handled) {

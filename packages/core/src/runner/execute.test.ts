@@ -6,10 +6,14 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { AGENT_PROTOCOL, type AgentTarget, type Config } from '@attest/contracts';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { ConfigInvalidError } from './errors.js';
 import { collectExecutions } from './execute.js';
+import {
+  acquireFixtureProcessSweepLock,
+  sweepFixtureProcesses,
+} from './test-support/fixture-processes.js';
 import type { CaseExecution, RunProgressEvent } from './types.js';
 
 const REPOSITORY_ROOT = fileURLToPath(new URL('../../../..', import.meta.url));
@@ -17,8 +21,10 @@ const CLI_AGENT_PATH = join(REPOSITORY_ROOT, 'conformance/fake-agents/cli-agent.
 const HTTP_AGENT_PATH = join(REPOSITORY_ROOT, 'conformance/fake-agents/http-agent.cjs');
 const RUN_ID = '01J9ZK7Q2M5X8W4V3T2R1QPN0M';
 const READINESS_DEADLINE_MS = 30_000;
+const FIXTURE_MARKERS = [CLI_AGENT_PATH, HTTP_AGENT_PATH, 'attest-runner-'] as const;
 const temporaryDirectories: string[] = [];
 const canonicalServers = new Set<CanonicalServer>();
+let releaseFixtureProcessSweepLock: (() => Promise<void>) | undefined;
 
 type CanonicalServer = { baseUrl: string; child: ChildProcess; closed: Promise<void> };
 type CountingServer = {
@@ -183,13 +189,28 @@ const stopCountingServer = async (server: Server): Promise<void> => {
   });
 };
 
+beforeEach(async () => {
+  releaseFixtureProcessSweepLock = await acquireFixtureProcessSweepLock();
+}, 30_000);
+
 afterEach(async () => {
-  await Promise.all([
-    ...temporaryDirectories
-      .splice(0)
-      .map((directory) => rm(directory, { recursive: true, force: true })),
-    ...[...canonicalServers].map(stopCanonicalServer),
-  ]);
+  try {
+    await Promise.all([
+      ...temporaryDirectories
+        .splice(0)
+        .map((directory) => rm(directory, { recursive: true, force: true })),
+      ...[...canonicalServers].map(stopCanonicalServer),
+    ]);
+    const killedProcessIds = sweepFixtureProcesses(FIXTURE_MARKERS);
+    if (killedProcessIds.length > 0) {
+      throw new Error(
+        `Fixture teardown killed unexpected processes: ${killedProcessIds.join(', ')}`,
+      );
+    }
+  } finally {
+    await releaseFixtureProcessSweepLock?.();
+    releaseFixtureProcessSweepLock = undefined;
+  }
 });
 
 describe.sequential('executeCases', { timeout: 30_000 }, () => {

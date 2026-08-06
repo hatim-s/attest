@@ -17,7 +17,7 @@ process.stdin.on('data', (chunk) => {
 });
 process.stdin.on('end', () => {
   const request = JSON.parse(requestDocument);
-  const childProgram = `const { appendFileSync } = require('node:fs'); const file = process.argv[1]; appendFileSync(file, 'PID ' + process.pid + '\\n'); setInterval(() => appendFileSync(file, 'beat\\n'), 25);`;
+  const childProgram = `const { appendFileSync } = require('node:fs'); const file = process.argv[1]; appendFileSync(file, 'PID ' + process.pid + '\\n'); setInterval(() => appendFileSync(file, 'beat\\n'), 200);`;
   const child = spawn(process.execPath, ['-e', childProgram, heartbeatFile], {
     detached: true,
     stdio: 'ignore',

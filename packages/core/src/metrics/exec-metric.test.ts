@@ -4,10 +4,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import type { MetricContext } from './metric-evaluation.js';
 import { executeExecutableMetric } from './exec-metric.js';
+import { acquireFixtureProcessSweepLock } from '../runner/test-support/fixture-processes.js';
 
 /** Resolves source fixtures from the repository root so conformance assets remain shared across tracks. */
 const fromRepositoryRoot = (relativePath: string): string =>
@@ -80,7 +81,21 @@ const isProcessAlive = (processIdentifier: number): boolean => {
   }
 };
 
+let releaseFixtureProcessSweepLock: (() => Promise<void>) | undefined;
+
 describe('executeExecutableMetric command metrics', () => {
+  beforeAll(async () => {
+    releaseFixtureProcessSweepLock = await acquireFixtureProcessSweepLock();
+  }, 30_000);
+
+  afterAll(async () => {
+    try {
+      await releaseFixtureProcessSweepLock?.();
+    } finally {
+      releaseFixtureProcessSweepLock = undefined;
+    }
+  });
+
   it('normalizes a valid fixture result', async () => {
     const evaluation = await executeExecutableMetric(
       { name: 'fixture', type: 'exec', command: buildFixtureCommand('result.mjs') },

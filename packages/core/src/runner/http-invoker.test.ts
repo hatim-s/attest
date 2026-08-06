@@ -7,6 +7,7 @@ import { AGENT_PROTOCOL, type AgentRequest } from '@attest/contracts';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 
 import { invokeHttpAgent } from './http-invoker.js';
+import { acquireFixtureProcessSweepLock } from './test-support/fixture-processes.js';
 import type { InvokeOptions } from './types.js';
 
 const REPOSITORY_ROOT = fileURLToPath(new URL('../../../../', import.meta.url));
@@ -33,6 +34,7 @@ type CanonicalAgentServer = {
 };
 
 let canonicalAgentServer: CanonicalAgentServer | undefined;
+let releaseFixtureProcessSweepLock: (() => Promise<void>) | undefined;
 
 const closeServer = async (server: Server): Promise<void> => {
   await new Promise<void>((resolve, reject) => {
@@ -115,16 +117,28 @@ const canonicalUrl = (behavior: string): string => {
 };
 
 beforeAll(async () => {
-  canonicalAgentServer = await startCanonicalAgentServer();
-});
+  releaseFixtureProcessSweepLock = await acquireFixtureProcessSweepLock();
+  try {
+    canonicalAgentServer = await startCanonicalAgentServer();
+  } catch (error) {
+    await releaseFixtureProcessSweepLock();
+    releaseFixtureProcessSweepLock = undefined;
+    throw error;
+  }
+}, 30_000);
 
 afterEach(async () => {
   await Promise.all([...servers].map(closeServer));
 });
 
 afterAll(async () => {
-  if (canonicalAgentServer !== undefined) {
-    await stopCanonicalAgentServer(canonicalAgentServer);
+  try {
+    if (canonicalAgentServer !== undefined) {
+      await stopCanonicalAgentServer(canonicalAgentServer);
+    }
+  } finally {
+    await releaseFixtureProcessSweepLock?.();
+    releaseFixtureProcessSweepLock = undefined;
   }
 });
 
