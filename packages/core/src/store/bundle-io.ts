@@ -15,7 +15,8 @@ import {
   type BundleLine,
   type BundleManifest,
 } from './bundle-format.js';
-import { StoreError, type CaseRecord, type RunRecord, type RunStore } from './types.js';
+import { isCaseRecord, isRunRecord } from './internal/record-validation.js';
+import { StoreError, type RunStore } from './types.js';
 
 type JsonObject = Record<string, unknown>;
 
@@ -24,62 +25,6 @@ const corruptBundle = (message: string, cause?: unknown): StoreError =>
 
 const isObject = (value: unknown): value is JsonObject =>
   value !== null && typeof value === 'object' && !Array.isArray(value);
-
-const isRunRecord = (value: unknown): value is RunRecord =>
-  isObject(value) &&
-  typeof value.id === 'string' &&
-  typeof value.createdAt === 'string' &&
-  typeof value.status === 'string' &&
-  typeof value.configVersion === 'string' &&
-  typeof value.configHash === 'string' &&
-  typeof value.configJson === 'string';
-
-const isCaseRecord = (value: unknown): value is CaseRecord => {
-  if (
-    !isObject(value) ||
-    typeof value.rowId !== 'string' ||
-    typeof value.runId !== 'string' ||
-    typeof value.caseId !== 'string' ||
-    typeof value.suiteName !== 'string' ||
-    typeof value.startedAt !== 'string' ||
-    typeof value.durationMs !== 'number' ||
-    !Number.isFinite(value.durationMs) ||
-    value.durationMs < 0 ||
-    !isObject(value.request) ||
-    !Array.isArray(value.warnings) ||
-    !isObject(value.diagnostics) ||
-    !Array.isArray(value.attempts) ||
-    !Array.isArray(value.expectedMetrics) ||
-    !value.expectedMetrics.every((metric) => typeof metric === 'string') ||
-    !Array.isArray(value.metrics) ||
-    !value.metrics.every(
-      (metric) =>
-        isObject(metric) &&
-        typeof metric.metricName === 'string' &&
-        typeof metric.kind === 'string' &&
-        typeof metric.status === 'string',
-    ) ||
-    !value.attempts.every(
-      (attempt) =>
-        isObject(attempt) &&
-        typeof attempt.status === 'string' &&
-        typeof attempt.durationMs === 'number' &&
-        isObject(attempt.diagnostics),
-    )
-  ) {
-    return false;
-  }
-  if (value.outcome === 'completed') {
-    return Object.hasOwn(value, 'response') && !Object.hasOwn(value, 'errorCode');
-  }
-  return (
-    ['invocation_error', 'timeout', 'cancelled'].includes(String(value.outcome)) &&
-    typeof value.errorCode === 'string' &&
-    typeof value.errorMessage === 'string' &&
-    !Object.hasOwn(value, 'response') &&
-    !Object.hasOwn(value, 'trace')
-  );
-};
 
 const parseJsonLine = (line: string, index: number): JsonObject => {
   try {
@@ -108,6 +53,7 @@ const verifyBundleLines = (lines: string[]): BundleLine[] => {
   }
 
   const recognized: BundleLine[] = [first as unknown as BundleHeader];
+  const headerRunId = first.run.id;
   const hasher = createContentHasher();
   let caseCount = 0;
   let headerCount = 0;
@@ -133,7 +79,7 @@ const verifyBundleLines = (lines: string[]): BundleLine[] => {
       continue;
     }
     if (parsed.type === 'case') {
-      if (!isCaseRecord(parsed.case)) {
+      if (!isCaseRecord(parsed.case) || parsed.case.runId !== headerRunId) {
         throw corruptBundle(`Run bundle case line ${index + 1} is malformed.`);
       }
       caseCount += 1;
@@ -184,7 +130,8 @@ const exportRunBundle = async (
   runId: string,
   destination: Writable | string,
 ): Promise<BundleManifest> => {
-  const bundle = createBundle(await store.getRun(runId), await store.getCaseResults(runId));
+  const aggregate = await store.getRunWithCases(runId);
+  const bundle = createBundle(aggregate.run, aggregate.cases);
   if (typeof destination === 'string') {
     await writeAtomically(destination, `${bundle.lines.join('\n')}\n`);
     return bundle.manifest;

@@ -11,9 +11,10 @@ type StoreErrorCode =
   | 'SCHEMA_TOO_NEW'
   | 'RUN_NOT_FOUND'
   | 'CASE_NOT_FOUND'
+  | 'INVALID_CURSOR'
+  | 'INVALID_LIMIT'
   | 'RUN_FINALIZED'
   | 'CASE_CONFLICT'
-  | 'OPEN_FAILED'
   | 'INVALID_JSON'
   | 'CORRUPT_DATA'
   | 'WRITE_FAILED'
@@ -146,6 +147,7 @@ interface RunRecord extends RunMetadata {
 type CaseRecord = StoredCaseExecution & {
   rowId: string;
   runId: string;
+  inputHash: string;
   metrics: StoredMetricEvaluation[];
 };
 
@@ -172,6 +174,7 @@ interface RunStore {
   getRun(runId: string): Promise<RunRecord>;
   listRuns(options?: { limit?: number }): Promise<RunRecord[]>;
   getCaseResults(runId: string): Promise<CaseRecord[]>;
+  getRunWithCases(runId: string): Promise<{ run: RunRecord; cases: CaseRecord[] }>;
   listCaseSummaries(
     runId: string,
     options?: { cursor?: string; limit?: number },

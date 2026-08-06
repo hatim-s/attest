@@ -64,6 +64,7 @@ const toCaseRecord = (row: CasesTable, metrics: StoredMetricEvaluation[]): CaseR
   const shared = {
     rowId: row.id,
     runId: row.run_id,
+    inputHash: row.input_hash,
     caseId: row.case_id,
     suiteName: row.suite_name,
     startedAt: row.started_at,

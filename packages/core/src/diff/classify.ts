@@ -19,9 +19,6 @@ const transitionKinds = [
   'still_failing',
 ] as const satisfies readonly CaseTransitionKind[];
 
-/** Adds comparison-only case metadata without expanding the persisted store contract. */
-type ClassifiedCase = CaseRecord & { inputHash?: string };
-
 type ArrayWithToSorted<Value> = Value[] & {
   toSorted(compareFunction?: (left: Value, right: Value) => number): Value[];
 };
@@ -158,10 +155,10 @@ const computeMetricDeltas = (
   });
 };
 
-const indexCases = (cases: ClassifiedCase[]): Map<string, Map<string, ClassifiedCase>> => {
-  const suites = new Map<string, Map<string, ClassifiedCase>>();
+const indexCases = (cases: CaseRecord[]): Map<string, Map<string, CaseRecord>> => {
+  const suites = new Map<string, Map<string, CaseRecord>>();
   for (const caseRecord of cases) {
-    const suite = suites.get(caseRecord.suiteName) ?? new Map<string, ClassifiedCase>();
+    const suite = suites.get(caseRecord.suiteName) ?? new Map<string, CaseRecord>();
     suite.set(caseRecord.caseId, caseRecord);
     suites.set(caseRecord.suiteName, suite);
   }
@@ -173,11 +170,11 @@ const countPasses = (cases: CaseRecord[]): number =>
 
 /** Determines whether a verdict transition has sufficient identical evidence to flag flakiness. */
 const isFlakinessSuspected = (
-  base: ClassifiedCase | undefined,
-  candidate: ClassifiedCase | undefined,
+  base: CaseRecord | undefined,
+  candidate: CaseRecord | undefined,
   configHashes: { baseConfigHash: string; candidateConfigHash: string },
 ): boolean => {
-  if (!base || !candidate || base.inputHash === undefined || candidate.inputHash === undefined) {
+  if (!base || !candidate) {
     return false;
   }
   const baseVerdict = computeCaseVerdict(base);
@@ -194,8 +191,8 @@ const isFlakinessSuspected = (
 
 /** Classifies two case collections in stable suite-and-case order (PLAN 1D.1). */
 const classifyRuns = (
-  baseCases: ClassifiedCase[],
-  candidateCases: ClassifiedCase[],
+  baseCases: CaseRecord[],
+  candidateCases: CaseRecord[],
   comparison: {
     baseRunId: string;
     candidateRunId: string;

@@ -10,7 +10,7 @@ import {
 } from './classify.js';
 import type { CaseTransitionKind, CaseVerdict } from './types.js';
 
-type ClassifiedCase = CaseRecord & { inputHash?: string };
+type ClassifiedCase = CaseRecord;
 
 const comparison = {
   baseRunId: 'base',
@@ -54,16 +54,16 @@ const caseRecord = (
     expectedMetrics: ['quality'],
     metrics: [metric],
   };
-  const inputHash = options.inputHash === undefined ? {} : { inputHash: options.inputHash };
+  const inputHash = options.inputHash ?? 'default-input';
   return verdict === 'error'
     ? {
         ...shared,
-        ...inputHash,
+        inputHash,
         outcome: 'timeout' as const,
         errorCode: 'timeout' as const,
         errorMessage: 'invocation failed',
       }
-    : { ...shared, ...inputHash, outcome: 'completed' as const, response: {} };
+    : { ...shared, inputHash, outcome: 'completed' as const, response: {} };
 };
 
 /** Public verdict-pair contract: changes here must force the seeded oracle to fail. */
@@ -190,9 +190,7 @@ describe('classifyRuns', () => {
         ];
       });
 
-      expect(diff.transitions.map((transition) => transition.kind)).toEqual(
-        expectedKinds as CaseTransitionKind[],
-      );
+      expect(diff.transitions.map((transition) => transition.kind)).toEqual(expectedKinds);
     }
   });
 

@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { CaseRecord } from '../store/types.js';
 import { DiffConfigError, evaluateThresholds } from './thresholds.js';
-import type { RunDiff } from './types.js';
+import type { RunDiff, ThresholdConfig } from './types.js';
 
 const request: AgentRequest = {
   protocol: AGENT_PROTOCOL,
@@ -55,6 +55,7 @@ const makeCaseRecord = (overrides: Partial<CaseRecord> = {}): CaseRecord => {
   const shared = {
     rowId: 'row',
     runId: 'candidate',
+    inputHash: 'input',
     suiteName: 'suite',
     caseId: 'case',
     startedAt: '2026-08-06T00:00:00.000Z',
@@ -74,14 +75,14 @@ const makeCaseRecord = (overrides: Partial<CaseRecord> = {}): CaseRecord => {
     ],
   };
   return outcome === 'completed'
-    ? ({ ...shared, ...rest, outcome, response: {} } as CaseRecord)
-    : ({
+    ? { ...shared, ...rest, outcome, response: {} }
+    : {
         ...shared,
         outcome,
         errorCode: 'timeout',
         errorMessage: 'invocation failed',
         ...rest,
-      } as CaseRecord);
+      };
 };
 
 const candidate = makeCaseRecord();
@@ -151,6 +152,15 @@ describe('evaluateThresholds', () => {
     expect(() => evaluateThresholds(diff, [], { [key]: value })).toThrow(DiffConfigError);
     expect(() => evaluateThresholds(diff, [], { [key]: value })).toThrow(String(value));
   });
+
+  it.each(['failOnInvocationErrors', 'failOnMetricErrors'] as const)(
+    'rejects a non-boolean %s value',
+    (key) => {
+      const invalid = { [key]: 'false' } as unknown as ThresholdConfig;
+      expect(() => evaluateThresholds(diff, [], invalid)).toThrow(DiffConfigError);
+      expect(() => evaluateThresholds(diff, [], invalid)).toThrow(`${key} must be a boolean`);
+    },
+  );
 
   it('counts pass-to-error and flaky-annotated pass-to-fail transitions for maxRegressions', () => {
     const gatedDiff: RunDiff = {

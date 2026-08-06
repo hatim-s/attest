@@ -15,6 +15,12 @@ class DiffConfigError extends AttestError {
 
 /** Rejects threshold values whose comparisons would be misleading or silently disabled. */
 const validateThresholds = (thresholds: ThresholdConfig): void => {
+  for (const field of ['failOnInvocationErrors', 'failOnMetricErrors'] as const) {
+    const value = thresholds[field];
+    if (value !== undefined && typeof value !== 'boolean') {
+      throw new DiffConfigError(`${field} must be a boolean, received ${String(value)}`);
+    }
+  }
   if (
     thresholds.minPassRate !== undefined &&
     (!Number.isFinite(thresholds.minPassRate) ||

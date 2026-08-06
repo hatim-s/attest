@@ -12,7 +12,7 @@ export default tseslint.config(
   },
   tseslint.configs.recommended,
   {
-    files: ['packages/contracts/src/**/*.ts'],
+    files: ['packages/*/src/**/*.ts'],
     extends: [tseslint.configs.recommendedTypeChecked],
     languageOptions: {
       parserOptions: {

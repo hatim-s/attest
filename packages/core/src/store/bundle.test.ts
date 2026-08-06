@@ -51,6 +51,26 @@ const collect = async (source: Readable | string) => {
   return records;
 };
 
+/** Rehashes a deliberately malformed recognized record so structural checks are isolated. */
+const mutateAndRehashBundle = async (
+  destination: string,
+  mutate: (header: Record<string, unknown>, caseLine: Record<string, unknown>) => void,
+): Promise<Readable> => {
+  const originalLines = (await readFile(destination, 'utf8')).trimEnd().split('\n');
+  const header = JSON.parse(originalLines[0] ?? '') as Record<string, unknown>;
+  const caseLine = JSON.parse(originalLines[1] ?? '') as Record<string, unknown>;
+  mutate(header, caseLine);
+  const contentLines = [canonicalStringify(header), canonicalStringify(caseLine)];
+  const hasher = createContentHasher();
+  for (const line of contentLines) hasher.add(line);
+  const footer = canonicalStringify({
+    type: 'bundle_footer',
+    case_count: 1,
+    content_hash: hasher.digest(),
+  });
+  return Readable.from(`${[...contentLines, footer].join('\n')}\n`);
+};
+
 afterEach(async () => {
   await Promise.all(stores.splice(0).map(async (store) => store.close()));
   await Promise.all(
@@ -142,5 +162,47 @@ describe('run bundles', () => {
     await expect(
       collect(Readable.from(`${[...contentLines, footer].join('\n')}\n`)),
     ).rejects.toMatchObject({ code: 'CORRUPT_DATA' });
+  });
+
+  it.each([
+    [
+      'invalid run status',
+      (header: Record<string, unknown>) => {
+        (header.run as Record<string, unknown>).status = 'other';
+      },
+    ],
+    [
+      'invalid run timestamp',
+      (header: Record<string, unknown>) => {
+        (header.run as Record<string, unknown>).finishedAt = 'yesterday';
+      },
+    ],
+    [
+      'foreign case run id',
+      (_header: Record<string, unknown>, caseLine: Record<string, unknown>) => {
+        (caseLine.case as Record<string, unknown>).runId = 'other-run';
+      },
+    ],
+    [
+      'completed case error field',
+      (_header: Record<string, unknown>, caseLine: Record<string, unknown>) => {
+        (caseLine.case as Record<string, unknown>).errorMessage = 'forbidden';
+      },
+    ],
+    [
+      'malformed evaluated metric',
+      (_header: Record<string, unknown>, caseLine: Record<string, unknown>) => {
+        const caseRecord = caseLine.case as Record<string, unknown>;
+        const metrics = caseRecord.metrics as Array<Record<string, unknown>>;
+        delete metrics[0]?.pass;
+      },
+    ],
+  ] as const)('rejects a self-hashed bundle with %s', async (_, mutate) => {
+    const { directory, store } = await openTemporaryStore();
+    const run = await createStoredRun(store);
+    const destination = join(directory, 'structurally-invalid.ndjson');
+    await exportRunBundle(store, run.id, destination);
+    const source = await mutateAndRehashBundle(destination, mutate);
+    await expect(collect(source)).rejects.toMatchObject({ code: 'CORRUPT_DATA' });
   });
 });

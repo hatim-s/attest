@@ -292,4 +292,34 @@ describe('RunStore', () => {
       code: 'RUN_NOT_FOUND',
     });
   });
+
+  it('rejects unknown and foreign summary cursors plus invalid limits', async () => {
+    const store = await openTemporaryStore();
+    const firstRun = await store.createRun({
+      configVersion: 'v1',
+      configHash: 'hash',
+      configJson: '{}',
+    });
+    const secondRun = await store.createRun({
+      configVersion: 'v1',
+      configHash: 'hash',
+      configJson: '{}',
+    });
+    for (const caseId of ['one', 'two']) {
+      await store.recordCase(secondRun.id, completedExecution({ runId: secondRun.id, caseId }), []);
+    }
+    const foreignCursor = (await store.listCaseSummaries(secondRun.id, { limit: 1 })).nextCursor;
+    expect(foreignCursor).toBeDefined();
+    await expect(
+      store.listCaseSummaries(firstRun.id, { cursor: foreignCursor }),
+    ).rejects.toMatchObject({ code: 'INVALID_CURSOR' });
+    await expect(store.listCaseSummaries(firstRun.id, { cursor: 'unknown' })).rejects.toMatchObject(
+      { code: 'INVALID_CURSOR' },
+    );
+    for (const limit of [0, -1, 1.5, 1_001]) {
+      await expect(store.listCaseSummaries(firstRun.id, { limit })).rejects.toMatchObject({
+        code: 'INVALID_LIMIT',
+      });
+    }
+  });
 });
