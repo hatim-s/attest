@@ -20,7 +20,7 @@
 | `typecheck`        | `@attest/core`        | Type-checks core source without emitting files.                      |
 | `test`             | `@attest/core`        | Runs core tests in one worker because process sweeps are global.     |
 | `build`            | `@attest/cli`         | Compiles CLI artifacts to `dist/`.                                   |
-| `test`             | `@attest/cli`         | Runs CLI config, orchestration, and command tests.                   |
+| `test`             | `@attest/cli`         | Runs CLI config, orchestration, report, and command tests.           |
 | `typecheck`        | `@attest/cli`         | Type-checks CLI source without emitting files.                       |
 | `test`             | `@attest/schemas`     | Validates generated JSON Schema artifacts.                           |
 | `build`            | `@attest/web`         | Builds the self-contained dashboard HTML module for CLI embedding.   |

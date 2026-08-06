@@ -7,6 +7,7 @@ type CliErrorCode =
   | 'config_invalid'
   | 'init_conflict'
   | 'init_failed'
+  | 'output_exists'
   | 'output_write_failed'
   | 'run_failed';
 

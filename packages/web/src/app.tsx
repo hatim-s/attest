@@ -9,18 +9,25 @@ import { RunList } from './components/run-list.js';
 import { SummaryCards } from './components/summary-cards.js';
 import { Badge, Button, Card, ErrorNotice, Loading } from './components/ui.js';
 import { shortId } from './lib/format.js';
+import { getReportData } from './report/report-data.js';
 
 type DashboardTab = 'cases' | 'compare';
 type Theme = 'light' | 'dark';
 
 const getInitialTheme = (): Theme => {
-  const stored = localStorage.getItem('attest-theme');
+  let stored: string | null = null;
+  try {
+    stored = localStorage.getItem('attest-theme');
+  } catch {
+    // Some browsers disable local storage for file:// reports; system preference remains safe.
+  }
   if (stored === 'light' || stored === 'dark') return stored;
   return matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
 };
 
 /** Coordinates dashboard selection state while queries retain ownership of server data. */
 const Dashboard = () => {
+  const reportData = getReportData();
   const runsQuery = useRuns();
   const runs = runsQuery.data ?? [];
   const [selectedRunId, setSelectedRunId] = useState<string>();
@@ -43,7 +50,11 @@ const Dashboard = () => {
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
-    localStorage.setItem('attest-theme', theme);
+    try {
+      localStorage.setItem('attest-theme', theme);
+    } catch {
+      // Theme still applies for this session when file:// storage is unavailable.
+    }
   }, [theme]);
 
   useEffect(() => {
@@ -66,7 +77,7 @@ const Dashboard = () => {
           </div>
         </div>
         <div className="topbar-actions">
-          <Badge tone="local">127.0.0.1</Badge>
+          <Badge tone="local">{reportData === undefined ? '127.0.0.1' : 'static report'}</Badge>
           <Button onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} tone="ghost">
             {theme === 'dark' ? 'Light mode' : 'Dark mode'}
           </Button>
@@ -114,14 +125,16 @@ const Dashboard = () => {
                 >
                   Cases <span>{run.summary?.totalCases ?? 0}</span>
                 </Button>
-                <Button
-                  aria-selected={tab === 'compare'}
-                  onClick={() => setTab('compare')}
-                  role="tab"
-                  tone={tab === 'compare' ? 'primary' : 'ghost'}
-                >
-                  Compare
-                </Button>
+                {runs.length > 1 ? (
+                  <Button
+                    aria-selected={tab === 'compare'}
+                    onClick={() => setTab('compare')}
+                    role="tab"
+                    tone={tab === 'compare' ? 'primary' : 'ghost'}
+                  >
+                    Compare
+                  </Button>
+                ) : null}
               </div>
               {tab === 'cases' ? (
                 <section aria-label="Cases">

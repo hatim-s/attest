@@ -17,6 +17,7 @@ import {
   runExitCode,
 } from './output/render-output.js';
 import { runConfiguration } from './run/run-configuration.js';
+import { runReportCommand } from './report/run-report-command.js';
 import { runViewCommand } from './view/run-view-command.js';
 
 const require = createRequire(import.meta.url);
@@ -56,6 +57,12 @@ type InitCommandOptions = {
 type ViewCommandOptions = {
   open: boolean;
   port: number;
+  store: string;
+};
+
+type ReportCommandOptions = {
+  force?: boolean;
+  output?: string;
   store: string;
 };
 
@@ -157,6 +164,29 @@ const createProgram = (
       } finally {
         process.off('SIGINT', stop);
         process.off('SIGTERM', stop);
+      }
+    });
+
+  program
+    .command('report')
+    .description('Write a self-contained HTML report for one persisted run.')
+    .argument('<run-id>', 'run id to export')
+    .option('--store <path>', 'SQLite run store path', '.attest/runs.db')
+    .option('-o, --output <path>', 'HTML output path')
+    .option('--force', 'replace an existing report')
+    .action(async (runId: string, options: ReportCommandOptions) => {
+      const result = await runReportCommand({
+        force: options.force,
+        outputPath: options.output,
+        runId,
+        storePath: options.store,
+        workingDirectory,
+      });
+      io.output(`Wrote ${result.caseCount}-case report to ${result.outputPath}`);
+      if (result.truncated) {
+        io.error(
+          `report_truncated: Included the first ${result.caseCount} of ${result.totalCaseCount} cases.`,
+        );
       }
     });
 
