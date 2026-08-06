@@ -1,0 +1,15 @@
+{
+  "description": "Accepts a complete executable metric request without an agent trace.",
+  "expect": "valid",
+  "input": {
+    "protocol": "attest.metric/v1alpha1",
+    "case": {
+      "id": "greeting",
+      "input": { "question": "What is the capital of France?" },
+      "expected": { "answer": "Paris" },
+      "params": { "locale": "en" }
+    },
+    "output": "Paris",
+    "trace": null
+  }
+}

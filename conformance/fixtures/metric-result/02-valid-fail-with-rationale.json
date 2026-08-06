@@ -1,0 +1,10 @@
+{
+  "description": "Accepts a failing result with a human-readable rationale and structured details.",
+  "expect": "valid",
+  "input": {
+    "score": 0,
+    "pass": false,
+    "rationale": "The response did not identify Paris.",
+    "details": { "matched": [] }
+  }
+}

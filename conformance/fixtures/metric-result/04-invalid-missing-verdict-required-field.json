@@ -1,0 +1,6 @@
+{
+  "description": "Rejects a result without pass, the required explicit verdict field.",
+  "expect": "invalid",
+  "issue_paths": [["pass"]],
+  "input": { "score": 1 }
+}

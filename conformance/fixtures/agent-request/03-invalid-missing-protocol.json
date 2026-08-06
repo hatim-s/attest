@@ -1,0 +1,10 @@
+{
+  "description": "Rejects a request that omits the required protocol discriminator.",
+  "expect": "invalid",
+  "issue_paths": [["protocol"]],
+  "input": {
+    "run_id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+    "case_id": "greeting-basic",
+    "input": {}
+  }
+}

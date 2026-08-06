@@ -1,0 +1,18 @@
+{
+  "description": "Accepts a complete multi-turn request with its transcript and stable conversation identity.",
+  "expect": "valid",
+  "input": {
+    "protocol": "attest.agent/v1alpha1",
+    "run_id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+    "case_id": "follow-up",
+    "input": { "question": "And its population?" },
+    "params": { "locale": "en" },
+    "messages": [
+      { "role": "user", "content": "What is the capital of France?" },
+      { "role": "assistant", "content": "Paris." },
+      { "role": "user", "content": "And its population?" }
+    ],
+    "turn_index": 1,
+    "conversation_id": "conversation-france"
+  }
+}

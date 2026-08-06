@@ -1,0 +1,10 @@
+{
+  "description": "Preserves an unknown response extension and reports its compatibility warning.",
+  "expect": "valid-with-warnings",
+  "warning_codes": ["unknown_field"],
+  "input": {
+    "protocol": "attest.agent/v1alpha1",
+    "output": "Paris",
+    "vendor_response": { "cached": true }
+  }
+}

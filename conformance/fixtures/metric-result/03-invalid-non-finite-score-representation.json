@@ -1,0 +1,6 @@
+{
+  "description": "Rejects the string NaN as a score because score must be a finite number.",
+  "expect": "invalid",
+  "issue_paths": [["score"]],
+  "input": { "score": "NaN", "pass": false }
+}

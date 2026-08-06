@@ -1,0 +1,6 @@
+{
+  "description": "Rejects a response with no terminal outcome.",
+  "expect": "invalid",
+  "issue_paths": [["output"]],
+  "input": { "protocol": "attest.agent/v1alpha1" }
+}

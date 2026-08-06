@@ -1,0 +1,10 @@
+{
+  "description": "Rejects a response with both mutually exclusive outcomes.",
+  "expect": "invalid",
+  "issue_paths": [["output"]],
+  "input": {
+    "protocol": "attest.agent/v1alpha1",
+    "output": "Paris",
+    "error": { "message": "failed" }
+  }
+}

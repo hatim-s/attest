@@ -1,0 +1,9 @@
+{
+  "description": "Accepts the minimal trace document with no spans.",
+  "expect": "valid",
+  "input": {
+    "schema": "attest.trace/v1alpha1",
+    "trace_id": "trace-minimal",
+    "spans": []
+  }
+}

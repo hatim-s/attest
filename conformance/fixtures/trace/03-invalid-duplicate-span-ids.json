@@ -1,0 +1,29 @@
+{
+  "description": "Rejects a duplicate span identifier at the duplicate span.",
+  "expect": "invalid",
+  "issue_paths": [["spans", "1", "span_id"]],
+  "input": {
+    "schema": "attest.trace/v1alpha1",
+    "trace_id": "trace-duplicate",
+    "spans": [
+      {
+        "span_id": "same",
+        "parent_span_id": null,
+        "name": "first",
+        "kind": "agent",
+        "start_time": "2026-08-06T10:15:03Z",
+        "end_time": "2026-08-06T10:15:04Z",
+        "status": { "code": "ok" }
+      },
+      {
+        "span_id": "same",
+        "parent_span_id": null,
+        "name": "second",
+        "kind": "agent",
+        "start_time": "2026-08-06T10:15:05Z",
+        "end_time": "2026-08-06T10:15:06Z",
+        "status": { "code": "ok" }
+      }
+    ]
+  }
+}
