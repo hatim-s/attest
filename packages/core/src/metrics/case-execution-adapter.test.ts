@@ -76,7 +76,14 @@ describe('caseExecutionToMetricContext', () => {
       context,
     );
 
-    expect(evaluation).toMatchObject({ status: 'error', error: { code: 'skipped_no_output' } });
+    expect(evaluation).toMatchObject({
+      status: 'error',
+      error: {
+        code: 'skipped_no_output',
+        message:
+          'Metric was not evaluated because the agent returned an error envelope. Agent errors are diagnosable results, but metrics cannot score absent output.',
+      },
+    });
   });
 
   it('makes the agent-error skip distinct from a missing-output skip', () => {

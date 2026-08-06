@@ -1,4 +1,9 @@
 export { AttestMetricError, type AttestMetricErrorCode } from './errors.js';
+export {
+  CaseExecutionAdapterError,
+  caseExecutionToMetricContext,
+  type CaseExecutionView,
+} from './case-execution-adapter.js';
 export { evaluateMetrics, type EvaluateMetricsOptions } from './evaluate-metrics.js';
 export type {
   MetricContext,

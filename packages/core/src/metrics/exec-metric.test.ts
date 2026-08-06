@@ -200,14 +200,16 @@ describe('executeExecutableMetric command metrics', () => {
           ),
         },
         metricContext(),
-        { timeoutMs: 500 },
+        { timeoutMs: 100 },
       );
       const processIdentifier = Number(await readFile(processIdentifierPath, 'utf8'));
 
-      // A newly detached descendant is outside this local group boundary. Cross-platform containment
-      // is best-effort until the coordinator unifies this path with the runner's process-tree snapshot.
       expect(isProcessAlive(processIdentifier)).toBe(false);
       expect(evaluation).toMatchObject({ status: 'error', error: { code: 'exec_timeout' } });
+
+      // Wait beyond the fixture's marker delay so a surviving detached descendant cannot pass silently.
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      await expect(access(markerPath)).rejects.toThrow();
     } finally {
       await rm(directory, { recursive: true, force: true });
     }

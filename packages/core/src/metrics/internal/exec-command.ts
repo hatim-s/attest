@@ -1,4 +1,4 @@
-import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from 'node:child_process';
 
 import type { MetricDefinition } from '@attest/contracts';
 
@@ -49,6 +49,56 @@ const signalProcessGroup = (processIdentifier: number, signal: NodeJS.Signals): 
   }
 };
 
+/**
+ * Snapshots descendants from the operating system's process table before termination can detach them.
+ * The snapshot is best effort: a descendant forked between this walk and individual cleanup can escape,
+ * which is an accepted v0 race window for trusted project code.
+ */
+const snapshotDescendantProcessIds = (processIdentifier: number): number[] => {
+  const processTable = spawnSync('ps', ['-eo', 'pid=,ppid='], { encoding: 'utf8' });
+  if (processTable.error !== undefined || processTable.status !== 0) {
+    return [];
+  }
+
+  const childrenByParent = new Map<number, number[]>();
+  for (const line of processTable.stdout.split('\n')) {
+    const match = /^\s*(\d+)\s+(\d+)\s*$/.exec(line);
+    if (match === null) {
+      continue;
+    }
+    const descendantId = Number(match[1]);
+    const parentId = Number(match[2]);
+    const children = childrenByParent.get(parentId) ?? [];
+    children.push(descendantId);
+    childrenByParent.set(parentId, children);
+  }
+
+  const descendants: number[] = [];
+  const pending = [...(childrenByParent.get(processIdentifier) ?? [])];
+  while (pending.length > 0) {
+    const descendantId = pending.shift();
+    if (descendantId === undefined) {
+      continue;
+    }
+    descendants.push(descendantId);
+    pending.push(...(childrenByParent.get(descendantId) ?? []));
+  }
+  return descendants;
+};
+
+/** Kills a snapshotted process directly, tolerating descendants that exited during cleanup. */
+const signalProcessIds = (processIdentifiers: number[]): void => {
+  for (const processIdentifier of processIdentifiers) {
+    try {
+      process.kill(processIdentifier, 'SIGKILL');
+    } catch (error: unknown) {
+      if ((error as NodeJS.ErrnoException).code !== 'ESRCH') {
+        // Cleanup remains best effort when a process disappears or the platform rejects a PID.
+      }
+    }
+  }
+};
+
 /** Waits for Node to observe the direct child's exit, bounded so a broken platform cannot hang a run. */
 const waitForChildExit = (
   child: ChildProcessWithoutNullStreams,
@@ -77,8 +127,9 @@ const waitForChildExit = (
 
 /**
  * Terminates a detached process group, escalates after a grace period, and awaits direct-child reaping.
- * Descendants that create a new process group can escape this POSIX best-effort boundary; complete
- * containment requires the runner's process-tree snapshot and will be unified at the integration gate.
+ * Descendants are also killed from a pre-termination process-tree snapshot. A descendant forked between
+ * that snapshot and individual cleanup can escape; this best-effort race window is acceptable in v0 for
+ * trusted project code.
  */
 const killProcessGroupWithGrace = async (
   child: ChildProcessWithoutNullStreams,
@@ -89,13 +140,15 @@ const killProcessGroupWithGrace = async (
     return false;
   }
 
+  const descendantProcessIdentifiers = snapshotDescendantProcessIds(processIdentifier);
   signalProcessGroup(processIdentifier, 'SIGTERM');
-  if (await waitForChildExit(child, options.graceMs)) {
-    return true;
+  const exitedAfterGrace = await waitForChildExit(child, options.graceMs);
+  if (!exitedAfterGrace) {
+    signalProcessGroup(processIdentifier, 'SIGKILL');
   }
 
-  signalProcessGroup(processIdentifier, 'SIGKILL');
-  return waitForChildExit(child, options.reapWaitMs);
+  signalProcessIds(descendantProcessIdentifiers);
+  return exitedAfterGrace || (await waitForChildExit(child, options.reapWaitMs));
 };
 
 /** Builds the metric error that is returned only after termination and bounded reaping complete. */

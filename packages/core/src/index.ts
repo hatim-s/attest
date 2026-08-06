@@ -50,11 +50,14 @@ export {
 } from './diff/index.js';
 export {
   AttestMetricError,
+  CaseExecutionAdapterError,
+  caseExecutionToMetricContext,
   createTanstackJudgeClient,
   evaluateMetrics,
   fromStoredMetricEvaluation,
   toStoredMetricEvaluation,
   type AttestMetricErrorCode,
+  type CaseExecutionView,
   type EvaluateMetricsOptions,
   type JudgeAttempt,
   type JudgeCache,

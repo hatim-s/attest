@@ -81,7 +81,7 @@ const evaluateMetrics = async (
 
   for (const definition of definitions) {
     if (context.execution.outcome !== 'completed') {
-      evaluations.push(skippedNoOutput(definition.name, definition.type));
+      evaluations.push(skippedNoOutput(definition.name, definition.type, context.execution));
       continue;
     }
     const startedAt = performance.now();
