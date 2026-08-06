@@ -111,8 +111,9 @@ describe('RunStore', () => {
           errorMessage: 'retry',
           durationMs: 4,
           diagnostics: { httpStatus: 503 },
+          warnings: [],
         },
-        { status: 'ok', durationMs: 6, diagnostics: {} },
+        { status: 'ok', durationMs: 6, diagnostics: {}, warnings: [] },
       ],
     };
     const metric = evaluatedMetric('quality', true);

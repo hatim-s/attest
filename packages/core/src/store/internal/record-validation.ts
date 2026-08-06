@@ -101,6 +101,9 @@ const collectStoredCaseExecutionViolations = (value: unknown, path = 'execution'
         violations.push(`${attemptPath}.durationMs must be a nonnegative finite number`);
       }
       collectDiagnosticsViolations(attempt.diagnostics, `${attemptPath}.diagnostics`, violations);
+      if (!Array.isArray(attempt.warnings)) {
+        violations.push(`${attemptPath}.warnings must be an array`);
+      }
       if (attempt.status === 'ok') {
         if (Object.hasOwn(attempt, 'errorCode')) {
           violations.push(`${attemptPath} with ok status forbids errorCode`);
