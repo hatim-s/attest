@@ -29,8 +29,12 @@ describe('runViewCommand', () => {
         return Promise.resolve(true);
       },
       onReady: async ({ origin }) => {
-        const response = await fetch(`${origin}/api/v1/health`);
-        expect(response.status).toBe(200);
+        const [healthResponse, dashboardResponse] = await Promise.all([
+          fetch(`${origin}/api/v1/health`),
+          fetch(origin),
+        ]);
+        expect(healthResponse.status).toBe(200);
+        await expect(dashboardResponse.text()).resolves.toContain('<div id="root"></div>');
         abortController.abort();
       },
     });

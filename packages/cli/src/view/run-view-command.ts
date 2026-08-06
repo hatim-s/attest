@@ -1,6 +1,7 @@
 import { resolve } from 'node:path';
 
 import { startViewServer, type ViewServerHandle } from '@attest/core';
+import { dashboardHtml } from '@attest/web/embedded';
 
 import { openBrowser } from './open-browser.js';
 
@@ -17,6 +18,7 @@ type RunViewCommandOptions = {
 /** Starts the loopback dashboard, optionally opens it, and owns abort-driven shutdown. */
 const runViewCommand = async (options: RunViewCommandOptions): Promise<ViewServerHandle> => {
   const server = await startViewServer({
+    indexHtml: dashboardHtml,
     port: options.port,
     storePath: resolve(options.workingDirectory, options.storePath ?? '.attest/runs.db'),
   });

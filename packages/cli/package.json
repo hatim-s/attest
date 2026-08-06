@@ -16,6 +16,7 @@
   "dependencies": {
     "@attest/contracts": "workspace:*",
     "@attest/core": "workspace:*",
+    "@attest/web": "workspace:*",
     "commander": "^15.0.0",
     "yaml": "^2.9.0"
   },

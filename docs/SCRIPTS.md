@@ -23,4 +23,6 @@
 | `test`             | `@attest/cli`         | Runs CLI config, orchestration, and command tests.                   |
 | `typecheck`        | `@attest/cli`         | Type-checks CLI source without emitting files.                       |
 | `test`             | `@attest/schemas`     | Validates generated JSON Schema artifacts.                           |
+| `build`            | `@attest/web`         | Builds the self-contained dashboard HTML module for CLI embedding.   |
+| `test`             | `@attest/web`         | Runs focused dashboard unit tests.                                   |
 | `typecheck`        | `@attest/web`         | Type-checks web source without emitting files.                       |
