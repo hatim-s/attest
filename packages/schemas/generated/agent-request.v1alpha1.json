@@ -1,5 +1,5 @@
 {
-  "$comment": "Not expressible here: span time ordering, duplicate-id checks, and metric name references.",
+  "$comment": "Runtime-only invariants include span time ordering, duplicate identifiers, and metric references.",
   "$defs": {
     "__schema0": {
       "anyOf": [
@@ -97,6 +97,20 @@
   },
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": {},
+  "dependentRequired": {
+    "conversation_id": [
+      "messages",
+      "turn_index"
+    ],
+    "messages": [
+      "turn_index",
+      "conversation_id"
+    ],
+    "turn_index": [
+      "messages",
+      "conversation_id"
+    ]
+  },
   "properties": {
     "case_id": {
       "type": "string"

@@ -6,7 +6,7 @@ import {
   metricRequestSchema,
   metricResultSchema,
 } from './metric.js';
-import { parseMetricResult } from './parse.js';
+import { parseMetricRequest, parseMetricResult } from './parse.js';
 import { METRIC_PROTOCOL } from './versions.js';
 
 describe('metric schemas', () => {
@@ -19,6 +19,7 @@ describe('metric schemas', () => {
     });
 
     expect(result.success).toBe(true);
+    expect(parseMetricRequest(result.data).ok).toBe(true);
   });
 
   it('accepts a complete normalized result', () => {
@@ -59,7 +60,7 @@ describe('metric schemas', () => {
     expect(assertionCheckSchema.safeParse(check).success).toBe(true);
   });
 
-  it('validates JSON paths, JSON Schema booleans, and regex patterns', () => {
+  it('validates JSON paths, JSON Schema booleans, and regular expressions', () => {
     expect(assertionCheckSchema.safeParse({ exists: { path: '$.a.b[0]' } }).success).toBe(true);
     expect(assertionCheckSchema.safeParse({ exists: { path: '$..a' } }).success).toBe(false);
     expect(assertionCheckSchema.safeParse({ exists: { path: '$.items[*]' } }).success).toBe(false);
@@ -68,7 +69,17 @@ describe('metric schemas', () => {
       assertionCheckSchema.safeParse({ json_schema: { path: '$.value', schema: true } }).success,
     ).toBe(true);
     expect(
-      assertionCheckSchema.safeParse({ regex: { path: '$.value', pattern: '[' } }).success,
+      assertionCheckSchema.safeParse({
+        regex: { path: '$.value', pattern: 'capital', flags: 'i' },
+      }).success,
+    ).toBe(true);
+    expect(
+      assertionCheckSchema.safeParse({ regex: { path: '$.value', pattern: 'capital', flags: 'x' } })
+        .success,
+    ).toBe(false);
+    expect(
+      assertionCheckSchema.safeParse({ regex: { path: '$.value', pattern: '[', flags: 'i' } })
+        .success,
     ).toBe(false);
   });
 
@@ -95,5 +106,18 @@ describe('metric schemas', () => {
     for (const definition of definitions) {
       expect(metricDefinitionSchema.safeParse(definition).success).toBe(true);
     }
+  });
+
+  it.each([
+    { name: 'assert', value: { name: 'empty', type: 'assertion', assert: [] } },
+    { name: 'all', value: { all: [] } },
+    { name: 'any', value: { any: [] } },
+  ])('rejects an empty $name list', ({ name, value }) => {
+    const result =
+      name === 'assert'
+        ? metricDefinitionSchema.safeParse(value)
+        : assertionCheckSchema.safeParse(value);
+
+    expect(result.success).toBe(false);
   });
 });

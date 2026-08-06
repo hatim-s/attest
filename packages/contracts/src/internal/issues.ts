@@ -1,6 +1,7 @@
 import type { z } from 'zod';
 
-import type { ContractIssue } from '../parse.js';
+/** Describes one actionable contract violation without exposing Zod publicly. */
+type ContractIssue = { path: string; message: string };
 
 const formatPath = (path: PropertyKey[]): string => {
   if (path.length === 0) {
@@ -23,4 +24,4 @@ const formatContractIssues = (issues: z.core.$ZodIssue[]): ContractIssue[] =>
     return { path: formatPath(issue.path), message: issue.message };
   });
 
-export { formatContractIssues };
+export { formatContractIssues, type ContractIssue };

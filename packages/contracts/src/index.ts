@@ -1,12 +1,11 @@
 export { agentRequestSchema, agentResponseSchema } from './agent.js';
-export type { AgentRequest, AgentResponse } from './agent.js';
-export {
-  agentTargetSchema,
-  caseSchema,
-  configSchema,
-  runSettingsSchema,
-  suiteSchema,
-} from './config.js';
+export type {
+  AgentErrorResponse,
+  AgentRequest,
+  AgentResponse,
+  AgentSuccessResponse,
+} from './agent.js';
+export { configSchema } from './config.js';
 export type { AgentTarget, CaseDefinition, Config, RunSettings, Suite } from './config.js';
 export {
   assertionCheckSchema,
@@ -15,11 +14,17 @@ export {
   metricResultSchema,
 } from './metric.js';
 export type { MetricDefinition, MetricRequest, MetricResult } from './metric.js';
-export { parseAgentResponse, parseConfig, parseMetricResult, parseTrace } from './parse.js';
-export type { ContractIssue } from './parse.js';
-export { err, ok } from './result.js';
+export {
+  parseAgentRequest,
+  parseAgentResponse,
+  parseConfig,
+  parseMetricRequest,
+  parseMetricResult,
+  parseTrace,
+} from './parse.js';
+export type { ContractIssue, ContractWarning, ParseReport } from './parse.js';
 export type { Result } from './result.js';
-export { spanEventSchema, spanSchema, spanStatusSchema, traceSchema } from './trace.js';
+export { spanKindSchema, spanSchema, traceSchema } from './trace.js';
 export type { Span, SpanKind, Trace } from './trace.js';
 export {
   AGENT_PROTOCOL,

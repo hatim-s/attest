@@ -4,7 +4,9 @@ import { TRACE_SCHEMA_VERSION } from './versions.js';
 
 const attributeValueSchema = z.union([z.string(), z.number(), z.boolean()]);
 const attributesSchema = z.record(z.string(), attributeValueSchema);
-const timestampSchema = z.string().datetime({ offset: false });
+const timestampSchema = z.iso
+  .datetime({ offset: false })
+  .regex(/T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/, 'timestamp must include whole seconds');
 
 /** Encodes the span completion status from docs/specs/trace-schema.md. */
 const spanStatusSchema = z.looseObject({
@@ -19,8 +21,11 @@ const spanEventSchema = z.looseObject({
   attributes: attributesSchema.optional(),
 });
 
+/** Encodes the operation categories supported by docs/specs/trace-schema.md. */
+const spanKindSchema = z.enum(['agent', 'llm', 'tool', 'retrieval', 'other']);
+
 /** Names the operation categories supported by docs/specs/trace-schema.md. */
-type SpanKind = 'agent' | 'llm' | 'tool' | 'retrieval' | 'other';
+type SpanKind = z.infer<typeof spanKindSchema>;
 
 /**
  * Encodes an open trace span from docs/specs/trace-schema.md while retaining vendor fields.
@@ -30,7 +35,7 @@ const spanSchema = z
     span_id: z.string(),
     parent_span_id: z.string().nullable(),
     name: z.string(),
-    kind: z.enum(['agent', 'llm', 'tool', 'retrieval', 'other']),
+    kind: spanKindSchema,
     start_time: timestampSchema,
     end_time: timestampSchema,
     status: spanStatusSchema,
@@ -82,6 +87,7 @@ type Trace = z.infer<typeof traceSchema>;
 
 export {
   spanEventSchema,
+  spanKindSchema,
   spanSchema,
   spanStatusSchema,
   traceSchema,

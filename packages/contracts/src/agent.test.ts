@@ -1,7 +1,13 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, expectTypeOf, it } from 'vitest';
 
-import { agentRequestSchema, agentResponseSchema } from './agent.js';
-import { parseAgentResponse } from './parse.js';
+import {
+  agentRequestSchema,
+  agentResponseSchema,
+  type AgentErrorResponse,
+  type AgentResponse,
+  type AgentSuccessResponse,
+} from './agent.js';
+import { parseAgentRequest, parseAgentResponse } from './parse.js';
 import { AGENT_PROTOCOL } from './versions.js';
 
 describe('agentRequestSchema', () => {
@@ -55,6 +61,17 @@ describe('agentRequestSchema', () => {
       expect(result.data.vendor_request).toEqual({ attempt: 2 });
     }
   });
+
+  it('is exposed through the non-throwing request parser', () => {
+    const result = parseAgentRequest({
+      protocol: AGENT_PROTOCOL,
+      run_id: '01ARZ3NDEKTSV4RRFFQ69G5FAV',
+      case_id: 'greeting-basic',
+      input: {},
+    });
+
+    expect(result.ok).toBe(true);
+  });
 });
 
 describe('agentResponseSchema', () => {
@@ -76,9 +93,66 @@ describe('agentResponseSchema', () => {
       return;
     }
 
-    expect(result.error).toContainEqual({
+    expect(result.errors).toContainEqual({
       path: 'output',
       message: 'exactly one of output or error must be present',
     });
+  });
+
+  it('keeps a valid response and warns when its trace is malformed', () => {
+    const result = parseAgentResponse({
+      protocol: AGENT_PROTOCOL,
+      output: 'Paris',
+      trace: { schema: 'wrong-version' },
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) {
+      return;
+    }
+
+    expect(result.value.trace).toBeUndefined();
+    expect(result.warnings).toEqual([
+      expect.objectContaining({ code: 'invalid_trace', path: 'trace' }),
+    ]);
+    expect(result.warnings[0]?.message).toContain('schema');
+  });
+
+  it('preserves and warns for each unknown response field', () => {
+    const result = parseAgentResponse({
+      protocol: AGENT_PROTOCOL,
+      output: 'Paris',
+      vendor_response: { cached: true },
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) {
+      return;
+    }
+
+    expect(Reflect.get(result.value, 'vendor_response')).toEqual({ cached: true });
+    expect(result.warnings).toEqual([
+      {
+        code: 'unknown_field',
+        path: 'vendor_response',
+        message: 'unknown top-level response field preserved: vendor_response',
+      },
+    ]);
+  });
+
+  it('infers a response union that narrows to one terminal outcome', () => {
+    expectTypeOf<AgentResponse>().toEqualTypeOf<AgentSuccessResponse | AgentErrorResponse>();
+
+    const readOutcome = (response: AgentResponse): unknown => {
+      if ('output' in response) {
+        expectTypeOf(response).toEqualTypeOf<AgentSuccessResponse>();
+        return response.output;
+      }
+
+      expectTypeOf(response).toEqualTypeOf<AgentErrorResponse>();
+      return response.error;
+    };
+
+    expect(readOutcome({ protocol: AGENT_PROTOCOL, output: 'Paris' })).toBe('Paris');
   });
 });

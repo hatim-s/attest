@@ -1,5 +1,5 @@
 {
-  "$comment": "Not expressible here: span time ordering, duplicate-id checks, and metric name references.",
+  "$comment": "Runtime-only invariants include span time ordering, duplicate identifiers, and metric references.",
   "$defs": {
     "__schema0": {
       "anyOf": [

@@ -1,6 +1,289 @@
 {
-  "$comment": "Not expressible here: span time ordering, duplicate-id checks, and metric name references.",
+  "$comment": "Runtime-only invariants include span time ordering, duplicate identifiers, and metric references.",
   "$defs": {
+    "AllAssertionCheck": {
+      "additionalProperties": false,
+      "properties": {
+        "all": {
+          "items": {
+            "$ref": "#/$defs/__schema3"
+          },
+          "minItems": 1,
+          "type": "array"
+        }
+      },
+      "required": [
+        "all"
+      ],
+      "type": "object"
+    },
+    "AnyAssertionCheck": {
+      "additionalProperties": false,
+      "properties": {
+        "any": {
+          "items": {
+            "$ref": "#/$defs/__schema3"
+          },
+          "minItems": 1,
+          "type": "array"
+        }
+      },
+      "required": [
+        "any"
+      ],
+      "type": "object"
+    },
+    "AssertionMetricDefinition": {
+      "additionalProperties": false,
+      "properties": {
+        "assert": {
+          "items": {
+            "$ref": "#/$defs/__schema3"
+          },
+          "minItems": 1,
+          "type": "array"
+        },
+        "name": {
+          "type": "string"
+        },
+        "type": {
+          "const": "assertion",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "type",
+        "assert"
+      ],
+      "type": "object"
+    },
+    "ExecutableMetricDefinition": {
+      "anyOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "command": {
+              "items": {
+                "type": "string"
+              },
+              "minItems": 1,
+              "type": "array"
+            },
+            "name": {
+              "type": "string"
+            },
+            "type": {
+              "const": "exec",
+              "type": "string"
+            }
+          },
+          "required": [
+            "name",
+            "type",
+            "command"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "type": {
+              "const": "exec",
+              "type": "string"
+            },
+            "url": {
+              "format": "uri",
+              "type": "string"
+            }
+          },
+          "required": [
+            "name",
+            "type",
+            "url"
+          ],
+          "type": "object"
+        }
+      ],
+      "oneOf": [
+        {
+          "not": {
+            "required": [
+              "url"
+            ]
+          },
+          "required": [
+            "command"
+          ]
+        },
+        {
+          "not": {
+            "required": [
+              "command"
+            ]
+          },
+          "required": [
+            "url"
+          ]
+        }
+      ]
+    },
+    "Suite": {
+      "anyOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "cases": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "expected": {
+                    "$ref": "#/$defs/__schema1"
+                  },
+                  "id": {
+                    "type": "string"
+                  },
+                  "input": {
+                    "$ref": "#/$defs/__schema0"
+                  },
+                  "metrics": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "params": {
+                    "additionalProperties": {
+                      "$ref": "#/$defs/__schema2"
+                    },
+                    "propertyNames": {
+                      "type": "string"
+                    },
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "id",
+                  "input"
+                ],
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "metrics": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "name": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "name",
+            "metrics",
+            "cases"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "dataset": {
+              "type": "string"
+            },
+            "metrics": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "name": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "name",
+            "metrics",
+            "dataset"
+          ],
+          "type": "object"
+        }
+      ],
+      "oneOf": [
+        {
+          "not": {
+            "required": [
+              "dataset"
+            ]
+          },
+          "required": [
+            "cases"
+          ]
+        },
+        {
+          "not": {
+            "required": [
+              "cases"
+            ]
+          },
+          "required": [
+            "dataset"
+          ]
+        }
+      ]
+    },
+    "Threshold": {
+      "additionalProperties": false,
+      "anyOf": [
+        {
+          "required": [
+            "lt"
+          ]
+        },
+        {
+          "required": [
+            "lte"
+          ]
+        },
+        {
+          "required": [
+            "gt"
+          ]
+        },
+        {
+          "required": [
+            "gte"
+          ]
+        }
+      ],
+      "properties": {
+        "gt": {
+          "type": "number"
+        },
+        "gte": {
+          "type": "number"
+        },
+        "lt": {
+          "type": "number"
+        },
+        "lte": {
+          "type": "number"
+        },
+        "path": {
+          "pattern": "^\\$(?:\\.[A-Za-z_][A-Za-z0-9_]*|\\[\\d+\\])*$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "type": "object"
+    },
     "__schema0": {
       "anyOf": [
         {
@@ -97,265 +380,205 @@
     "__schema3": {
       "anyOf": [
         {
-          "additionalProperties": false,
-          "properties": {
-            "equals": {
+          "anyOf": [
+            {
               "additionalProperties": false,
               "properties": {
-                "path": {
-                  "pattern": "^\\$(?:\\.[A-Za-z_][A-Za-z0-9_]*|\\[\\d+\\])*$",
-                  "type": "string"
-                },
-                "value": {
-                  "$ref": "#/$defs/__schema4"
-                }
-              },
-              "required": [
-                "path",
-                "value"
-              ],
-              "type": "object"
-            }
-          },
-          "required": [
-            "equals"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "contains": {
-              "additionalProperties": false,
-              "properties": {
-                "path": {
-                  "pattern": "^\\$(?:\\.[A-Za-z_][A-Za-z0-9_]*|\\[\\d+\\])*$",
-                  "type": "string"
-                },
-                "value": {
-                  "$ref": "#/$defs/__schema5"
-                }
-              },
-              "required": [
-                "path",
-                "value"
-              ],
-              "type": "object"
-            }
-          },
-          "required": [
-            "contains"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "regex": {
-              "additionalProperties": false,
-              "properties": {
-                "path": {
-                  "pattern": "^\\$(?:\\.[A-Za-z_][A-Za-z0-9_]*|\\[\\d+\\])*$",
-                  "type": "string"
-                },
-                "pattern": {
-                  "type": "string"
-                }
-              },
-              "required": [
-                "path",
-                "pattern"
-              ],
-              "type": "object"
-            }
-          },
-          "required": [
-            "regex"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "json_schema": {
-              "additionalProperties": false,
-              "properties": {
-                "path": {
-                  "pattern": "^\\$(?:\\.[A-Za-z_][A-Za-z0-9_]*|\\[\\d+\\])*$",
-                  "type": "string"
-                },
-                "schema": {
-                  "anyOf": [
-                    {
-                      "type": "boolean"
+                "equals": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "path": {
+                      "pattern": "^\\$(?:\\.[A-Za-z_][A-Za-z0-9_]*|\\[\\d+\\])*$",
+                      "type": "string"
                     },
-                    {
-                      "additionalProperties": {
-                        "$ref": "#/$defs/__schema6"
-                      },
-                      "propertyNames": {
+                    "value": {
+                      "$ref": "#/$defs/__schema4"
+                    }
+                  },
+                  "required": [
+                    "path",
+                    "value"
+                  ],
+                  "type": "object"
+                }
+              },
+              "required": [
+                "equals"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "contains": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "path": {
+                      "pattern": "^\\$(?:\\.[A-Za-z_][A-Za-z0-9_]*|\\[\\d+\\])*$",
+                      "type": "string"
+                    },
+                    "value": {
+                      "$ref": "#/$defs/__schema4"
+                    }
+                  },
+                  "required": [
+                    "path",
+                    "value"
+                  ],
+                  "type": "object"
+                }
+              },
+              "required": [
+                "contains"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "regex": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "flags": {
+                      "pattern": "^[dimsuv]*$",
+                      "type": "string"
+                    },
+                    "path": {
+                      "pattern": "^\\$(?:\\.[A-Za-z_][A-Za-z0-9_]*|\\[\\d+\\])*$",
+                      "type": "string"
+                    },
+                    "pattern": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "path",
+                    "pattern"
+                  ],
+                  "type": "object"
+                }
+              },
+              "required": [
+                "regex"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "json_schema": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "path": {
+                      "pattern": "^\\$(?:\\.[A-Za-z_][A-Za-z0-9_]*|\\[\\d+\\])*$",
+                      "type": "string"
+                    },
+                    "schema": {
+                      "anyOf": [
+                        {
+                          "type": "boolean"
+                        },
+                        {
+                          "additionalProperties": {
+                            "$ref": "#/$defs/__schema4"
+                          },
+                          "propertyNames": {
+                            "type": "string"
+                          },
+                          "type": "object"
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "path",
+                    "schema"
+                  ],
+                  "type": "object"
+                }
+              },
+              "required": [
+                "json_schema"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "threshold": {
+                  "$ref": "#/$defs/Threshold"
+                }
+              },
+              "required": [
+                "threshold"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "exists": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "path": {
+                      "pattern": "^\\$(?:\\.[A-Za-z_][A-Za-z0-9_]*|\\[\\d+\\])*$",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "path"
+                  ],
+                  "type": "object"
+                }
+              },
+              "required": [
+                "exists"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "tool_calls": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "count": {
+                      "maximum": 9007199254740991,
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "order": {
+                      "items": {
                         "type": "string"
                       },
-                      "type": "object"
+                      "type": "array"
+                    },
+                    "status": {
+                      "enum": [
+                        "ok",
+                        "error"
+                      ],
+                      "type": "string"
                     }
-                  ]
-                }
-              },
-              "required": [
-                "path",
-                "schema"
-              ],
-              "type": "object"
-            }
-          },
-          "required": [
-            "json_schema"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "threshold": {
-              "additionalProperties": false,
-              "anyOf": [
-                {
-                  "required": [
-                    "lt"
-                  ]
-                },
-                {
-                  "required": [
-                    "lte"
-                  ]
-                },
-                {
-                  "required": [
-                    "gt"
-                  ]
-                },
-                {
-                  "required": [
-                    "gte"
-                  ]
-                }
-              ],
-              "properties": {
-                "gt": {
-                  "type": "number"
-                },
-                "gte": {
-                  "type": "number"
-                },
-                "lt": {
-                  "type": "number"
-                },
-                "lte": {
-                  "type": "number"
-                },
-                "path": {
-                  "pattern": "^\\$(?:\\.[A-Za-z_][A-Za-z0-9_]*|\\[\\d+\\])*$",
-                  "type": "string"
-                }
-              },
-              "required": [
-                "path"
-              ],
-              "type": "object"
-            }
-          },
-          "required": [
-            "threshold"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "exists": {
-              "additionalProperties": false,
-              "properties": {
-                "path": {
-                  "pattern": "^\\$(?:\\.[A-Za-z_][A-Za-z0-9_]*|\\[\\d+\\])*$",
-                  "type": "string"
-                }
-              },
-              "required": [
-                "path"
-              ],
-              "type": "object"
-            }
-          },
-          "required": [
-            "exists"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "tool_calls": {
-              "additionalProperties": false,
-              "properties": {
-                "count": {
-                  "maximum": 9007199254740991,
-                  "minimum": 0,
-                  "type": "integer"
-                },
-                "name": {
-                  "type": "string"
-                },
-                "order": {
-                  "items": {
-                    "type": "string"
                   },
-                  "type": "array"
-                },
-                "status": {
-                  "enum": [
-                    "ok",
-                    "error"
-                  ],
-                  "type": "string"
+                  "type": "object"
                 }
               },
+              "required": [
+                "tool_calls"
+              ],
               "type": "object"
             }
-          },
-          "required": [
-            "tool_calls"
-          ],
-          "type": "object"
+          ]
         },
         {
-          "additionalProperties": false,
-          "properties": {
-            "all": {
-              "items": {
-                "$ref": "#/$defs/__schema3"
-              },
-              "type": "array"
-            }
-          },
-          "required": [
-            "all"
-          ],
-          "type": "object"
+          "$ref": "#/$defs/AllAssertionCheck"
         },
         {
-          "additionalProperties": false,
-          "properties": {
-            "any": {
-              "items": {
-                "$ref": "#/$defs/__schema3"
-              },
-              "type": "array"
-            }
-          },
-          "required": [
-            "any"
-          ],
-          "type": "object"
+          "$ref": "#/$defs/AnyAssertionCheck"
         },
         {
           "additionalProperties": false,
@@ -401,72 +624,35 @@
           "type": "object"
         }
       ]
-    },
-    "__schema5": {
-      "anyOf": [
-        {
-          "type": "string"
-        },
-        {
-          "type": "number"
-        },
-        {
-          "type": "boolean"
-        },
-        {
-          "type": "null"
-        },
-        {
-          "items": {
-            "$ref": "#/$defs/__schema5"
-          },
-          "type": "array"
-        },
-        {
-          "additionalProperties": {
-            "$ref": "#/$defs/__schema5"
-          },
-          "propertyNames": {
-            "type": "string"
-          },
-          "type": "object"
-        }
-      ]
-    },
-    "__schema6": {
-      "anyOf": [
-        {
-          "type": "string"
-        },
-        {
-          "type": "number"
-        },
-        {
-          "type": "boolean"
-        },
-        {
-          "type": "null"
-        },
-        {
-          "items": {
-            "$ref": "#/$defs/__schema6"
-          },
-          "type": "array"
-        },
-        {
-          "additionalProperties": {
-            "$ref": "#/$defs/__schema6"
-          },
-          "propertyNames": {
-            "type": "string"
-          },
-          "type": "object"
-        }
-      ]
     }
   },
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
+  "allOf": [
+    {
+      "properties": {
+        "agent": {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "http"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "properties": {
+              "url": {
+                "pattern": "^https?://"
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
   "properties": {
     "agent": {
       "oneOf": [
@@ -549,80 +735,12 @@
     },
     "metrics": {
       "items": {
-        "oneOf": [
+        "anyOf": [
           {
-            "additionalProperties": false,
-            "properties": {
-              "assert": {
-                "items": {
-                  "$ref": "#/$defs/__schema3"
-                },
-                "type": "array"
-              },
-              "name": {
-                "type": "string"
-              },
-              "type": {
-                "const": "assertion",
-                "type": "string"
-              }
-            },
-            "required": [
-              "name",
-              "type",
-              "assert"
-            ],
-            "type": "object"
+            "$ref": "#/$defs/AssertionMetricDefinition"
           },
           {
-            "additionalProperties": false,
-            "oneOf": [
-              {
-                "not": {
-                  "required": [
-                    "url"
-                  ]
-                },
-                "required": [
-                  "command"
-                ]
-              },
-              {
-                "not": {
-                  "required": [
-                    "command"
-                  ]
-                },
-                "required": [
-                  "url"
-                ]
-              }
-            ],
-            "properties": {
-              "command": {
-                "items": {
-                  "type": "string"
-                },
-                "minItems": 1,
-                "type": "array"
-              },
-              "name": {
-                "type": "string"
-              },
-              "type": {
-                "const": "exec",
-                "type": "string"
-              },
-              "url": {
-                "format": "uri",
-                "type": "string"
-              }
-            },
-            "required": [
-              "name",
-              "type"
-            ],
-            "type": "object"
+            "$ref": "#/$defs/ExecutableMetricDefinition"
           },
           {
             "additionalProperties": false,
@@ -682,85 +800,7 @@
     },
     "suites": {
       "items": {
-        "additionalProperties": false,
-        "oneOf": [
-          {
-            "not": {
-              "required": [
-                "dataset"
-              ]
-            },
-            "required": [
-              "cases"
-            ]
-          },
-          {
-            "not": {
-              "required": [
-                "cases"
-              ]
-            },
-            "required": [
-              "dataset"
-            ]
-          }
-        ],
-        "properties": {
-          "cases": {
-            "items": {
-              "additionalProperties": false,
-              "properties": {
-                "expected": {
-                  "$ref": "#/$defs/__schema1"
-                },
-                "id": {
-                  "type": "string"
-                },
-                "input": {
-                  "$ref": "#/$defs/__schema0"
-                },
-                "metrics": {
-                  "items": {
-                    "type": "string"
-                  },
-                  "type": "array"
-                },
-                "params": {
-                  "additionalProperties": {
-                    "$ref": "#/$defs/__schema2"
-                  },
-                  "propertyNames": {
-                    "type": "string"
-                  },
-                  "type": "object"
-                }
-              },
-              "required": [
-                "id",
-                "input"
-              ],
-              "type": "object"
-            },
-            "type": "array"
-          },
-          "dataset": {
-            "type": "string"
-          },
-          "metrics": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          },
-          "name": {
-            "type": "string"
-          }
-        },
-        "required": [
-          "name",
-          "metrics"
-        ],
-        "type": "object"
+        "$ref": "#/$defs/Suite"
       },
       "minItems": 1,
       "type": "array"

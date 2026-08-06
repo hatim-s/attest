@@ -1,5 +1,5 @@
 {
-  "$comment": "Not expressible here: span time ordering, duplicate-id checks, and metric name references.",
+  "$comment": "Runtime-only invariants include span time ordering, duplicate identifiers, and metric references.",
   "$defs": {
     "__schema0": {
       "anyOf": [
@@ -93,41 +93,66 @@
           "type": "object"
         }
       ]
-    },
-    "__schema3": {
-      "anyOf": [
-        {
-          "type": "string"
-        },
-        {
-          "type": "number"
-        },
-        {
-          "type": "boolean"
-        },
-        {
-          "type": "null"
-        },
-        {
-          "items": {
-            "$ref": "#/$defs/__schema3"
-          },
-          "type": "array"
-        },
-        {
-          "additionalProperties": {
-            "$ref": "#/$defs/__schema3"
-          },
-          "propertyNames": {
-            "type": "string"
-          },
-          "type": "object"
-        }
-      ]
     }
   },
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "additionalProperties": false,
+  "additionalProperties": true,
+  "anyOf": [
+    {
+      "additionalProperties": {},
+      "properties": {
+        "output": {
+          "$ref": "#/$defs/__schema0"
+        },
+        "protocol": {
+          "const": "attest.agent/v1alpha1",
+          "type": "string"
+        },
+        "state": {
+          "$ref": "#/$defs/__schema1"
+        },
+        "trace": {}
+      },
+      "required": [
+        "protocol",
+        "output"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": {},
+      "properties": {
+        "error": {
+          "additionalProperties": false,
+          "properties": {
+            "code": {
+              "type": "string"
+            },
+            "message": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "message"
+          ],
+          "type": "object"
+        },
+        "protocol": {
+          "const": "attest.agent/v1alpha1",
+          "type": "string"
+        },
+        "state": {
+          "$ref": "#/$defs/__schema2"
+        },
+        "trace": {}
+      },
+      "required": [
+        "protocol",
+        "error"
+      ],
+      "type": "object"
+    }
+  ],
   "oneOf": [
     {
       "not": {
@@ -149,192 +174,5 @@
         "error"
       ]
     }
-  ],
-  "properties": {
-    "error": {
-      "additionalProperties": false,
-      "properties": {
-        "code": {
-          "type": "string"
-        },
-        "message": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "message"
-      ],
-      "type": "object"
-    },
-    "output": {
-      "$ref": "#/$defs/__schema0"
-    },
-    "protocol": {
-      "const": "attest.agent/v1alpha1",
-      "type": "string"
-    },
-    "state": {
-      "$ref": "#/$defs/__schema3"
-    },
-    "trace": {
-      "additionalProperties": {},
-      "properties": {
-        "schema": {
-          "const": "attest.trace/v1alpha1",
-          "type": "string"
-        },
-        "spans": {
-          "items": {
-            "additionalProperties": {},
-            "properties": {
-              "attributes": {
-                "additionalProperties": {
-                  "anyOf": [
-                    {
-                      "type": "string"
-                    },
-                    {
-                      "type": "number"
-                    },
-                    {
-                      "type": "boolean"
-                    }
-                  ]
-                },
-                "propertyNames": {
-                  "type": "string"
-                },
-                "type": "object"
-              },
-              "end_time": {
-                "format": "date-time",
-                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$",
-                "type": "string"
-              },
-              "events": {
-                "items": {
-                  "additionalProperties": {},
-                  "properties": {
-                    "attributes": {
-                      "additionalProperties": {
-                        "anyOf": [
-                          {
-                            "type": "string"
-                          },
-                          {
-                            "type": "number"
-                          },
-                          {
-                            "type": "boolean"
-                          }
-                        ]
-                      },
-                      "propertyNames": {
-                        "type": "string"
-                      },
-                      "type": "object"
-                    },
-                    "name": {
-                      "type": "string"
-                    },
-                    "time": {
-                      "format": "date-time",
-                      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$",
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "name",
-                    "time"
-                  ],
-                  "type": "object"
-                },
-                "type": "array"
-              },
-              "input": {
-                "$ref": "#/$defs/__schema1"
-              },
-              "kind": {
-                "enum": [
-                  "agent",
-                  "llm",
-                  "tool",
-                  "retrieval",
-                  "other"
-                ],
-                "type": "string"
-              },
-              "name": {
-                "type": "string"
-              },
-              "output": {
-                "$ref": "#/$defs/__schema2"
-              },
-              "parent_span_id": {
-                "anyOf": [
-                  {
-                    "type": "string"
-                  },
-                  {
-                    "type": "null"
-                  }
-                ]
-              },
-              "span_id": {
-                "type": "string"
-              },
-              "start_time": {
-                "format": "date-time",
-                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$",
-                "type": "string"
-              },
-              "status": {
-                "additionalProperties": {},
-                "properties": {
-                  "code": {
-                    "enum": [
-                      "ok",
-                      "error"
-                    ],
-                    "type": "string"
-                  },
-                  "message": {
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "code"
-                ],
-                "type": "object"
-              }
-            },
-            "required": [
-              "span_id",
-              "parent_span_id",
-              "name",
-              "kind",
-              "start_time",
-              "end_time",
-              "status"
-            ],
-            "type": "object"
-          },
-          "type": "array"
-        },
-        "trace_id": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "schema",
-        "trace_id",
-        "spans"
-      ],
-      "type": "object"
-    }
-  },
-  "required": [
-    "protocol"
-  ],
-  "type": "object"
+  ]
 }

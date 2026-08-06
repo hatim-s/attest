@@ -33,6 +33,7 @@ describe('traceSchema', () => {
       path: ['spans', 0, 'start_time'],
     },
     { field: 'kind', value: 'database', path: ['spans', 0, 'kind'] },
+    { field: 'start_time', value: '2026-08-06T10:15Z', path: ['spans', 0, 'start_time'] },
   ])('rejects an invalid $field at its source path', ({ field, value, path }) => {
     const trace = structuredClone(traceFixture) as Record<string, unknown>;
     const spans = trace.spans as Array<Record<string, unknown>>;
@@ -46,6 +47,15 @@ describe('traceSchema', () => {
     }
 
     expect(result.error.issues[0]?.path).toEqual(path);
+  });
+
+  it('accepts timestamps with whole seconds and optional sub-seconds', () => {
+    const wholeSeconds = structuredClone(traceFixture);
+    wholeSeconds.spans[0]!.start_time = '2026-08-06T10:15:03Z';
+    wholeSeconds.spans[0]!.end_time = '2026-08-06T10:15:09Z';
+
+    expect(traceSchema.safeParse(wholeSeconds).success).toBe(true);
+    expect(traceSchema.safeParse(traceFixture).success).toBe(true);
   });
 
   it('preserves exotic unknown document and span fields through parseTrace', () => {
