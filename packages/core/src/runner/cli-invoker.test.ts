@@ -45,7 +45,9 @@ const createEnvironment = (values: Record<string, string> = {}): Record<string, 
 });
 
 const createOptions = (overrides: Partial<InvokeOptions> = {}): InvokeOptions => ({
-  timeoutMs: 2_000,
+  // Node process startup can exceed 2s when the whole suite spawns in parallel;
+  // failure-classification tests override this with deliberately small values.
+  timeoutMs: 8_000,
   outputCapBytes: 1024 * 1024,
   env: createEnvironment(),
   workingDirectory: REPOSITORY_ROOT,
@@ -205,7 +207,9 @@ describe('invokeCliAgent', { timeout: TEST_TIMEOUT_MS }, () => {
           createCanonicalOrphanTimeoutTarget(),
           request,
           createOptions({
-            timeoutMs: 300,
+            // Generous timeout: the orphan must exist and heartbeat before the kill,
+            // even under parallel-suite load, or the test proves nothing.
+            timeoutMs: 1500,
             terminationGraceMs: 500,
             env: createEnvironment({
               AGENT_BEHAVIOR: 'orphan-child',
@@ -340,7 +344,6 @@ describe('invokeCliAgent', { timeout: TEST_TIMEOUT_MS }, () => {
       createCanonicalTarget('slow-drip'),
       request,
       createOptions({
-        timeoutMs: 2_000,
         env: createEnvironment({ AGENT_DRIP_MS: '1' }),
       }),
     );

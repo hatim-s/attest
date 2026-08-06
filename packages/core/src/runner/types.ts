@@ -1,4 +1,10 @@
-import type { AgentRequest, AgentResponse, ContractWarning, Trace } from '@attest/contracts';
+import type {
+  AgentRequest,
+  AgentResponse,
+  ContractWarning,
+  ParseReport,
+  Trace,
+} from '@attest/contracts';
 
 import type { AgentInvocationError } from './errors.js';
 
@@ -29,9 +35,16 @@ type InvocationDiagnostics = {
   httpStatus?: number;
 };
 
-/** One transport attempt: either a raw (unvalidated) envelope or an invocation error. */
+/** One transport attempt: either a raw envelope or an invocation error. */
 type InvocationAttempt =
-  | { status: 'ok'; raw: unknown; diagnostics: InvocationDiagnostics; durationMs: number }
+  | {
+      status: 'ok';
+      raw: unknown;
+      /** Populated by invokeAgent after envelope validation; transport invokers leave it unset. */
+      report?: ParseReport<AgentResponse>;
+      diagnostics: InvocationDiagnostics;
+      durationMs: number;
+    }
   | {
       status: 'invocation_error';
       error: AgentInvocationError;
@@ -82,9 +95,13 @@ type RunProgressEvent = {
 /** Controls a whole-config execution pass. */
 type ExecuteOptions = {
   runId: string;
+  /** Directory used to resolve dataset paths from the loaded config. */
+  baseDirectory: string;
   signal?: AbortSignal;
   /** Overrides `run.concurrency` from config (default 4). */
   concurrency?: number;
+  /** Optional CLI termination grace override, forwarded unchanged to each invocation. */
+  terminationGraceMs?: number;
   onProgress?: (event: RunProgressEvent) => void;
 };
 

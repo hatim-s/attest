@@ -64,7 +64,7 @@ The runner spawns your command once per invocation:
 - **stdout**: MUST be exactly one JSON response envelope. All logging goes to **stderr** (surfaced in reports, never parsed).
 - **exit code**: `0` when a valid envelope was written (even if it contains `error`). Any other exit code is an **invocation error**.
 - **cwd**: a fresh temporary directory per invocation. Do not rely on persistent local state.
-- **environment**: only variables allowlisted in config (`agent.env`) are forwarded, plus `ATTEST_RUN_ID`, `ATTEST_CASE_ID`, `ATTEST_PROTOCOL`.
+- **environment**: only variables allowlisted in config (`agent.env`) are forwarded, plus `ATTEST_RUN_ID`, `ATTEST_CASE_ID`, `ATTEST_PROTOCOL`, and a minimal base set required for processes to start at all (`PATH`, `HOME`, `TMPDIR`, `LANG`, `LC_ALL`). Nothing else from the parent environment leaks through.
 
 ## HTTP transport
 

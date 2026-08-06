@@ -1,4 +1,24 @@
-/** Public core runtime APIs (PLAN Phase 1): run store + run diffing. */
+/** Public core runtime APIs (PLAN Phase 1): agent runner + run store + run diffing. */
+export {
+  AgentInvocationError,
+  buildAgentRequest,
+  collectExecutions,
+  executeCases,
+  invokeAgent,
+  invokeCliAgent,
+  invokeHttpAgent,
+  isRetryableInvocationError,
+  loadDatasetCases,
+  resolveInvocationEnv,
+  type CaseExecution,
+  type ExecuteOptions,
+  type InvocationAttempt,
+  type InvocationDiagnostics,
+  type InvocationErrorCode,
+  type InvocationResult,
+  type InvokeOptions,
+  type RunProgressEvent,
+} from './runner/index.js';
 export {
   BUNDLE_VERSION,
   StoreError,
