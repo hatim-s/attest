@@ -69,7 +69,8 @@ const startCanonicalAgentServer = async (): Promise<CanonicalAgentServer> => {
   const port = await new Promise<number>((resolve, reject) => {
     const readinessTimer = setTimeout(
       () => reject(new Error('Canonical HTTP agent did not report a listening port')),
-      2_000,
+      // Whole-suite parallel spawn storms can delay agent boot well past 2s.
+      10_000,
     );
     const finish = (result: () => void): void => {
       clearTimeout(readinessTimer);

@@ -23,7 +23,8 @@ const options: InvokeOptions = {
   env: { PATH: process.env.PATH ?? '' },
   outputCapBytes: 1_024 * 1_024,
   terminationGraceMs: 100,
-  timeoutMs: 1_000,
+  // Generous: node startup under parallel-suite load must never eat the budget.
+  timeoutMs: 8_000,
   workingDirectory: REPOSITORY_ROOT,
 };
 
