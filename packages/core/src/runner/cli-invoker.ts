@@ -7,6 +7,7 @@ import { join } from 'node:path';
 
 import { AgentInvocationError, type InvocationErrorCode } from './errors.js';
 import { startTimer } from './internal/elapsed.js';
+import { createRawExcerpt as createPayloadRawExcerpt } from './internal/raw-excerpt.js';
 import {
   killProcessTree,
   listDescendantProcesses,
@@ -115,11 +116,10 @@ const createRawExcerpt = (
     forceTruncated ||
     payloadByteCount > evidenceByteCount ||
     evidence.length > RAW_EXCERPT_CHARACTERS;
-  return {
-    text: evidence.slice(0, RAW_EXCERPT_CHARACTERS),
-    truncated,
-    ...(truncated ? { sha256: payloadHash.digest('hex') } : {}),
-  };
+  const rawExcerpt = createPayloadRawExcerpt(evidence);
+  return truncated
+    ? { ...rawExcerpt, truncated: true, sha256: payloadHash.digest('hex') }
+    : rawExcerpt;
 };
 
 const captureInvocation = (
@@ -378,4 +378,4 @@ const invokeCliAgent = async (
   }
 };
 
-export { decodeUtf8Tail, invokeCliAgent };
+export { invokeCliAgent };

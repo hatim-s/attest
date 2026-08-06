@@ -167,6 +167,29 @@ describe('invokeHttpAgent', () => {
     }
   });
 
+  it.each([302, 307, 308])(
+    'does not follow HTTP %i redirects and preserves the terminal status diagnostics',
+    async (status) => {
+      const { url } = await startEdgeServer((response) => {
+        response.statusCode = status;
+        response.setHeader('location', 'http://127.0.0.1:1/not-followed');
+        response.end(JSON.stringify({ redirect: status }));
+      });
+
+      const attempt = await invoke(url);
+
+      expect(attempt).toMatchObject({
+        status: 'invocation_error',
+        diagnostics: { httpStatus: status },
+        rawExcerpt: { text: JSON.stringify({ redirect: status }), truncated: false },
+      });
+      if (attempt.status === 'invocation_error') {
+        expect(attempt.error).toMatchObject({ code: 'http_status' });
+        expect(attempt.error.message).toContain(String(status));
+      }
+    },
+  );
+
   it('returns network after a locally closed server refuses the connection', async () => {
     const { server, url } = await startEdgeServer((response) => response.end());
     await closeServer(server);

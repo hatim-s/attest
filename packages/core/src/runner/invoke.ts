@@ -3,16 +3,12 @@ import {
   type AgentRequest,
   type AgentTarget,
   type ContractIssue,
-  type RawExcerpt,
 } from '@attest/contracts';
-import { createHash } from 'node:crypto';
 
 import { invokeCliAgent } from './cli-invoker.js';
-import {
-  AgentInvocationError,
-  type AgentInvocationError as AgentInvocationErrorType,
-} from './errors.js';
+import { AgentInvocationError } from './errors.js';
 import { invokeHttpAgent } from './http-invoker.js';
+import { createRawExcerpt } from './internal/raw-excerpt.js';
 import type {
   InvocationAttempt,
   InvocationDiagnostics,
@@ -20,20 +16,9 @@ import type {
   InvokeAgentOptions,
 } from './types.js';
 
-const RAW_EXCERPT_CHARACTERS = 4096;
-
 type RunnerInvokeAgentOptions = Omit<InvokeAgentOptions, 'env'> & {
   env?: Record<string, string>;
   envAllowlist?: readonly string[];
-};
-
-const createRawExcerpt = (payload: string): RawExcerpt => {
-  const truncated = payload.length > RAW_EXCERPT_CHARACTERS;
-  return {
-    text: payload.slice(0, RAW_EXCERPT_CHARACTERS),
-    truncated,
-    ...(truncated ? { sha256: createHash('sha256').update(payload).digest('hex') } : {}),
-  };
 };
 
 const withAttemptEvidence = (attempt: InvocationAttempt): InvocationAttempt => {
@@ -105,7 +90,7 @@ const validateResponseEnvelope = (
 
 /** Implements the invocation-error-only retry policy from docs/specs/agent-contract.md. */
 const isRetryableInvocationError = (
-  error: AgentInvocationErrorType,
+  error: AgentInvocationError,
   diagnostics: InvocationDiagnostics,
 ): boolean => {
   if (error.code === 'cancelled') {
@@ -115,8 +100,7 @@ const isRetryableInvocationError = (
     return true;
   }
 
-  const status = diagnostics.httpStatus;
-  return status === undefined || status < 400 || status >= 500;
+  return diagnostics.httpStatus !== undefined && diagnostics.httpStatus >= 500;
 };
 
 /** Dispatches one target and retains every validated retry attempt for deterministic recording. */

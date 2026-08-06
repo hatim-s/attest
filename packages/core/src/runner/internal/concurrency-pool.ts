@@ -1,8 +1,7 @@
 type CompletedResult<R> = { index: number; result: R };
 
 type SettledResult<R> =
-  | { status: 'fulfilled'; index: number; value: CompletedResult<R> }
-  | { status: 'rejected'; index: number; reason: unknown };
+  { status: 'fulfilled'; value: CompletedResult<R> } | { status: 'rejected'; reason: unknown };
 
 const COMPLETION_BUFFER_FACTOR = 2;
 
@@ -23,11 +22,10 @@ const runMapper = async <T, R>(
   try {
     return {
       status: 'fulfilled',
-      index,
       value: { index, result: await mapper(item, index, signal) },
     };
   } catch (reason) {
-    return { status: 'rejected', index, reason };
+    return { status: 'rejected', reason };
   }
 };
 

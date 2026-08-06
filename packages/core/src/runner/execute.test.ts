@@ -17,6 +17,7 @@ const CLI_AGENT_PATH = join(REPOSITORY_ROOT, 'conformance/fake-agents/cli-agent.
 const HTTP_AGENT_PATH = join(REPOSITORY_ROOT, 'conformance/fake-agents/http-agent.cjs');
 const RUN_ID = '01J9ZK7Q2M5X8W4V3T2R1QPN0M';
 const temporaryDirectories: string[] = [];
+const canonicalServers = new Set<CanonicalServer>();
 
 type CanonicalServer = { baseUrl: string; child: ChildProcess; closed: Promise<void> };
 type CountingServer = {
@@ -72,20 +73,25 @@ const execute = async (
 const startCanonicalServer = async (): Promise<CanonicalServer> => {
   const child = spawn(process.execPath, [HTTP_AGENT_PATH], { stdio: ['ignore', 'pipe', 'pipe'] });
   const closed = new Promise<void>((resolve) => child.once('close', () => resolve()));
+  // Register before waiting so afterEach tears down a fixture whose handshake fails.
+  const canonicalServer: CanonicalServer = { baseUrl: '', child, closed };
+  canonicalServers.add(canonicalServer);
   let standardOutput = '';
   const port = await new Promise<number>((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error('HTTP fixture readiness timed out')), 2_000);
     child.once('error', reject);
+    child.once('close', (exitCode) =>
+      reject(new Error(`HTTP fixture exited before reporting readiness (${String(exitCode)}).`)),
+    );
     child.stdout?.on('data', (chunk: Buffer) => {
       standardOutput += chunk.toString('utf8');
       const match = /LISTENING (\d+)/.exec(standardOutput);
       if (match?.[1] !== undefined) {
-        clearTimeout(timer);
         resolve(Number(match[1]));
       }
     });
   });
-  return { baseUrl: `http://127.0.0.1:${port}`, child, closed };
+  canonicalServer.baseUrl = `http://127.0.0.1:${port}`;
+  return canonicalServer;
 };
 
 const stopCanonicalServer = async (server: CanonicalServer): Promise<void> => {
@@ -93,6 +99,7 @@ const stopCanonicalServer = async (server: CanonicalServer): Promise<void> => {
   server.child.kill('SIGTERM');
   await server.closed;
   clearTimeout(forceKill);
+  canonicalServers.delete(server);
 };
 
 /** Starts a manually released HTTP agent so concurrency is asserted without wall-clock timing. */
@@ -148,14 +155,15 @@ const stopCountingServer = async (server: Server): Promise<void> => {
 };
 
 afterEach(async () => {
-  await Promise.all(
-    temporaryDirectories
+  await Promise.all([
+    ...temporaryDirectories
       .splice(0)
       .map((directory) => rm(directory, { recursive: true, force: true })),
-  );
+    ...[...canonicalServers].map(stopCanonicalServer),
+  ]);
 });
 
-describe.sequential('executeCases', () => {
+describe.sequential('executeCases', { timeout: 30_000 }, () => {
   it('executes inline and dataset suites through the canonical traced CLI agent', async () => {
     const directory = await createTemporaryDirectory();
     await writeFile(
@@ -240,22 +248,17 @@ describe.sequential('executeCases', () => {
   it('retries canonical HTTP 500 responses and records both attempts', async () => {
     const directory = await createTemporaryDirectory();
     const server = await startCanonicalServer();
-    try {
-      const config = createConfig(
-        { type: 'http', url: `${server.baseUrl}/status-500`, retries: 1 },
-        [{ name: 'http', metrics: ['suite-metric'], cases: [{ id: 'http-case', input: {} }] }],
-      );
+    const config = createConfig({ type: 'http', url: `${server.baseUrl}/status-500`, retries: 1 }, [
+      { name: 'http', metrics: ['suite-metric'], cases: [{ id: 'http-case', input: {} }] },
+    ]);
 
-      const [execution] = await execute(config, directory);
+    const [execution] = await execute(config, directory);
 
-      expect(execution).toMatchObject({
-        outcome: 'invocation_error',
-        diagnostics: { httpStatus: 500 },
-      });
-      expect(execution?.attempts).toHaveLength(2);
-    } finally {
-      await stopCanonicalServer(server);
-    }
+    expect(execution).toMatchObject({
+      outcome: 'invocation_error',
+      diagnostics: { httpStatus: 500 },
+    });
+    expect(execution?.attempts).toHaveLength(2);
   });
 
   it('removes the fresh CLI working directory after completion', async () => {

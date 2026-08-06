@@ -1,6 +1,8 @@
 import type { AgentRequest, AgentTarget } from '@attest/contracts';
 
 import { AgentInvocationError } from './errors.js';
+import { startTimer } from './internal/elapsed.js';
+import { createRawExcerpt } from './internal/raw-excerpt.js';
 import type { InvocationAttempt, InvokeOptions } from './types.js';
 
 const HTTP_SUCCESS_STATUS = 200;
@@ -9,11 +11,13 @@ const createInvocationErrorAttempt = (
   error: AgentInvocationError,
   durationMs: number,
   httpStatus?: number,
+  rawExcerpt?: InvocationAttempt['rawExcerpt'],
 ): InvocationAttempt => ({
   status: 'invocation_error',
   error,
   diagnostics: { httpStatus },
   durationMs,
+  ...(rawExcerpt === undefined ? {} : { rawExcerpt }),
   warnings: [],
 });
 
@@ -37,22 +41,36 @@ const cancelResponseBody = async (response: Response): Promise<void> => {
   }
 };
 
-const readCappedJson = async (response: Response, outputCapBytes: number): Promise<unknown> => {
+type CappedJson = { raw: unknown; rawExcerpt: NonNullable<InvocationAttempt['rawExcerpt']> };
+
+type BodyReadFailure = {
+  error: AgentInvocationError;
+  rawExcerpt?: InvocationAttempt['rawExcerpt'];
+};
+
+const readCappedJson = async (
+  response: Response,
+  outputCapBytes: number,
+): Promise<CappedJson | BodyReadFailure> => {
   const contentLength = response.headers.get('content-length');
   if (contentLength !== null && Number(contentLength) > outputCapBytes) {
     await cancelResponseBody(response);
-    throw new AgentInvocationError(
-      'output_cap_exceeded',
-      `HTTP agent response exceeds the ${outputCapBytes}-byte output cap.`,
-    );
+    return {
+      error: new AgentInvocationError(
+        'output_cap_exceeded',
+        `HTTP agent response exceeds the ${outputCapBytes}-byte output cap.`,
+      ),
+    };
   }
 
   const reader = response.body?.getReader();
   if (reader === undefined) {
-    throw new AgentInvocationError(
-      'invalid_envelope',
-      'HTTP agent response body is not valid JSON.',
-    );
+    return {
+      error: new AgentInvocationError(
+        'invalid_envelope',
+        'HTTP agent response body is not valid JSON.',
+      ),
+    };
   }
 
   const chunks: Uint8Array[] = [];
@@ -69,10 +87,14 @@ const readCappedJson = async (response: Response, outputCapBytes: number): Promi
       if (byteCount > outputCapBytes) {
         // Cancel immediately so an unbounded response is not fully downloaded before rejection.
         await cancelReader(reader);
-        throw new AgentInvocationError(
-          'output_cap_exceeded',
-          `HTTP agent response exceeds the ${outputCapBytes}-byte output cap.`,
-        );
+        const payload = Buffer.concat(chunks).toString('utf8');
+        return {
+          error: new AgentInvocationError(
+            'output_cap_exceeded',
+            `HTTP agent response exceeds the ${outputCapBytes}-byte output cap.`,
+          ),
+          ...(payload.length === 0 ? {} : { rawExcerpt: createRawExcerpt(payload) }),
+        };
       }
       chunks.push(value);
     }
@@ -80,23 +102,20 @@ const readCappedJson = async (response: Response, outputCapBytes: number): Promi
     reader.releaseLock();
   }
 
-  const responseBytes = new Uint8Array(byteCount);
-  let offset = 0;
-  for (const chunk of chunks) {
-    responseBytes.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
+  const payload = Buffer.concat(chunks).toString('utf8');
+  const rawExcerpt = createRawExcerpt(payload);
 
   try {
-    return JSON.parse(new TextDecoder().decode(responseBytes));
+    return { raw: JSON.parse(payload) as unknown, rawExcerpt };
   } catch (error) {
-    throw new AgentInvocationError(
-      'invalid_envelope',
-      'HTTP agent response body is not valid JSON.',
-      {
-        cause: error,
-      },
-    );
+    return {
+      error: new AgentInvocationError(
+        'invalid_envelope',
+        'HTTP agent response body is not valid JSON.',
+        { cause: error },
+      ),
+      rawExcerpt,
+    };
   }
 };
 
@@ -138,13 +157,15 @@ const classifyFetchFailure = (error: unknown, options: InvokeOptions): AgentInvo
  *
  * The HTTP transport and execution-semantics sections of docs/specs/agent-contract.md require
  * infrastructure failures to remain distinct from agent response-envelope semantics downstream.
+ * Redirects are deliberately not followed: every 3xx is a terminal `http_status` error and is
+ * never retried, preventing request envelopes from being forwarded to an unconfigured endpoint.
  */
 const invokeHttpAgent = async (
   target: Extract<AgentTarget, { type: 'http' }>,
   request: AgentRequest,
   options: InvokeOptions,
 ): Promise<InvocationAttempt> => {
-  const startedAt = Date.now();
+  const duration = startTimer();
   const timeoutSignal = AbortSignal.timeout(options.timeoutMs);
   // One combined signal lets either the caller or deadline stop the underlying request.
   const signal =
@@ -156,31 +177,42 @@ const invokeHttpAgent = async (
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(request),
+      redirect: 'manual',
       signal,
     });
     httpStatus = response.status;
 
+    const parsed = await readCappedJson(response, options.outputCapBytes);
     if (response.status !== HTTP_SUCCESS_STATUS) {
-      await cancelResponseBody(response);
       return createInvocationErrorAttempt(
         new AgentInvocationError('http_status', `HTTP agent returned status ${response.status}.`),
-        Date.now() - startedAt,
+        duration(),
         response.status,
+        parsed.rawExcerpt,
       );
     }
 
-    const raw = await readCappedJson(response, options.outputCapBytes);
+    if ('error' in parsed) {
+      return createInvocationErrorAttempt(
+        parsed.error,
+        duration(),
+        response.status,
+        parsed.rawExcerpt,
+      );
+    }
+
     return {
       status: 'ok',
-      raw,
+      raw: parsed.raw,
       diagnostics: { httpStatus: response.status },
-      durationMs: Date.now() - startedAt,
+      durationMs: duration(),
+      rawExcerpt: parsed.rawExcerpt,
       warnings: [],
     };
   } catch (error) {
     return createInvocationErrorAttempt(
       classifyFetchFailure(error, options),
-      Date.now() - startedAt,
+      duration(),
       httpStatus,
     );
   }

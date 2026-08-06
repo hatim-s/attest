@@ -197,10 +197,13 @@ describe('executeExecutableMetric command metrics', () => {
             'descendant-new-process-group.mjs',
             processIdentifierPath,
             markerPath,
+            // Marker delay sits far beyond the kill window so the assertion is
+            // deterministic even when node startup eats most of the timeout.
+            '2500',
           ),
         },
         metricContext(),
-        { timeoutMs: 100 },
+        { timeoutMs: 1_000 },
       );
       const processIdentifier = Number(await readFile(processIdentifierPath, 'utf8'));
 
@@ -208,12 +211,12 @@ describe('executeExecutableMetric command metrics', () => {
       expect(evaluation).toMatchObject({ status: 'error', error: { code: 'exec_timeout' } });
 
       // Wait beyond the fixture's marker delay so a surviving detached descendant cannot pass silently.
-      await new Promise((resolve) => setTimeout(resolve, 500));
+      await new Promise((resolve) => setTimeout(resolve, 3_000));
       await expect(access(markerPath)).rejects.toThrow();
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
-  });
+  }, 15_000);
 
   it('skips metrics after an incomplete case without spawning the command', async () => {
     const context: MetricContext = {

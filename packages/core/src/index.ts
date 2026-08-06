@@ -1,22 +1,15 @@
 /** Public core runtime APIs (PLAN Phase 1): agent runner + run store + run diffing. */
 export {
   AgentInvocationError,
-  buildAgentRequest,
+  ConfigInvalidError,
   collectExecutions,
   executeCases,
   invokeAgent,
-  invokeCliAgent,
-  invokeHttpAgent,
-  isRetryableInvocationError,
   loadDatasetCases,
-  resolveInvocationEnv,
   type CaseExecution,
   type ExecuteOptions,
-  type InvocationAttempt,
-  type InvocationDiagnostics,
   type InvocationErrorCode,
-  type InvocationResult,
-  type InvokeOptions,
+  type InvokeAgentOptions,
   type RunProgressEvent,
 } from './runner/index.js';
 export {
