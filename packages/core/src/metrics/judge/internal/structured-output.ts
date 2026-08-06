@@ -1,4 +1,11 @@
-import { StandardSchemaValidationError, type ChatMiddleware } from '@tanstack/ai';
+import {
+  chat,
+  StandardSchemaValidationError,
+  type AnyTextAdapter,
+  type ChatMiddleware,
+} from '@tanstack/ai';
+
+import { judgeResponseSchema } from '../rubric-prompt.js';
 
 /** Captures one provider attempt without conflating its evidence with an earlier structured-output retry. */
 type JudgeAttemptObservation = {
@@ -7,6 +14,18 @@ type JudgeAttemptObservation = {
   usageObserved: boolean;
   rawResponse: string | undefined;
 };
+
+/** Defines the narrow SDK invocation seam used to test retry behavior without provider network calls. */
+type StructuredChatRequest = {
+  adapter: AnyTextAdapter;
+  system: string;
+  user: string;
+  abortController: AbortController;
+  observation: JudgeAttemptObservation;
+};
+
+/** Executes one schema-constrained TanStack chat call. */
+type StructuredChatExecutor = (request: StructuredChatRequest) => Promise<unknown>;
 
 /** Identifies SDK structured-output failures that metric spec §3 permits retrying exactly once. */
 const isUnparseableResponse = (error: unknown): boolean => {
@@ -58,4 +77,24 @@ const createRecordMiddleware = (observation: JudgeAttemptObservation): ChatMiddl
   },
 });
 
-export { createRecordMiddleware, isUnparseableResponse, type JudgeAttemptObservation };
+/** Keeps the SDK call at an injectable effect boundary while the scoring loop remains deterministic. */
+const executeStructuredChat: StructuredChatExecutor = async (request) =>
+  chat({
+    adapter: request.adapter,
+    systemPrompts: [request.system],
+    messages: [{ role: 'user', content: request.user }],
+    outputSchema: judgeResponseSchema,
+    stream: false,
+    abortController: request.abortController,
+    middleware: [createRecordMiddleware(request.observation)],
+    debug: false,
+  });
+
+export {
+  createRecordMiddleware,
+  executeStructuredChat,
+  isUnparseableResponse,
+  type JudgeAttemptObservation,
+  type StructuredChatExecutor,
+  type StructuredChatRequest,
+};

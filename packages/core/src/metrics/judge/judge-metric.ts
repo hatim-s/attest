@@ -4,7 +4,11 @@ import type { JsonValue, MetricDefinition, MetricResult } from '@attest/contract
 
 import { buildEvaluationDocument } from '../evaluation-document.js';
 import { AttestMetricError } from '../errors.js';
-import type { MetricContext, MetricEvaluation } from '../metric-evaluation.js';
+import {
+  skippedNoOutput,
+  type MetricContext,
+  type MetricEvaluation,
+} from '../metric-evaluation.js';
 import type { JudgeClient, JudgeRecord, JudgeUsage } from './judge-client.js';
 import { computeJudgeCacheKey, type JudgeCache } from './judge-cache.js';
 import { summarizeTraceForJudge } from './rubric-prompt.js';
@@ -45,26 +49,6 @@ const serializeJudgeRecord = (record: JudgeRecord): JsonValue => ({
   })),
 });
 
-/** Reads persisted usage only when a trusted cache record retained the adapter's normalized shape. */
-const extractJudgeUsage = (record: JsonValue): JudgeUsage | undefined => {
-  if (record === null || Array.isArray(record) || typeof record !== 'object') {
-    return undefined;
-  }
-  const usage = record.usage;
-  if (usage === null || Array.isArray(usage) || typeof usage !== 'object') {
-    return undefined;
-  }
-  const inputTokens = usage.inputTokens;
-  const outputTokens = usage.outputTokens;
-  if (typeof inputTokens !== 'number' && typeof outputTokens !== 'number') {
-    return undefined;
-  }
-  return {
-    ...(typeof inputTokens === 'number' ? { inputTokens } : {}),
-    ...(typeof outputTokens === 'number' ? { outputTokens } : {}),
-  };
-};
-
 /** Builds metric result data identically for live and cached verdicts, preserving reported token evidence. */
 const createJudgeResult = (
   definition: JudgeMetricDefinition,
@@ -88,24 +72,9 @@ const withCacheProvenance = (record: JsonValue, cache: 'hit' | 'miss', key: stri
   return { record, cache, key };
 };
 
-/** Creates the shared no-output short circuit without invoking a provider. */
-const skippedJudgeEvaluation = (
-  definition: JudgeMetricDefinition,
-  durationMs: number,
-): MetricEvaluation => ({
-  metricName: definition.name,
-  kind: 'judge',
-  status: 'error',
-  error: {
-    code: 'skipped_no_output',
-    message: 'Judge was not invoked because the case execution produced no completed output.',
-  },
-  durationMs,
-});
-
 /**
  * Evaluates one judge rubric according to metric contract §3 while keeping provider faults distinct
- * from genuine failing scores. Full prompt/response evidence is retained only on completed calls.
+ * from genuine failing scores. Full prompt/response evidence is retained for completed and attempted calls.
  */
 const evaluateJudgeMetric = async (
   definition: JudgeMetricDefinition,
@@ -114,14 +83,14 @@ const evaluateJudgeMetric = async (
 ): Promise<MetricEvaluation> => {
   const startedAt = performance.now();
   if (context.execution.outcome !== 'completed') {
-    return skippedJudgeEvaluation(definition, performance.now() - startedAt);
+    return skippedNoOutput(definition.name, definition.type);
   }
   if (options.signal?.aborted) {
     return {
       metricName: definition.name,
       kind: 'judge',
       status: 'error',
-      error: { code: 'judge_provider_error', message: 'Judge evaluation was cancelled.' },
+      error: { code: 'metric_cancelled', message: 'Judge evaluation was cancelled.' },
       durationMs: performance.now() - startedAt,
     };
   }
@@ -145,8 +114,8 @@ const evaluateJudgeMetric = async (
         metricName: definition.name,
         kind: 'judge',
         status: 'evaluated',
-        result: createJudgeResult(definition, cached.verdict, extractJudgeUsage(cached.record)),
-        judgeIo: withCacheProvenance(cached.record, 'hit', cacheKey),
+        result: createJudgeResult(definition, cached.verdict, cached.record.usage),
+        judgeIo: withCacheProvenance(serializeJudgeRecord(cached.record), 'hit', cacheKey),
         durationMs: performance.now() - startedAt,
       };
     }
@@ -158,7 +127,7 @@ const evaluateJudgeMetric = async (
     const serializedRecord = serializeJudgeRecord(outcome.record);
     if (cacheKey !== undefined) {
       try {
-        await options.cache?.set(cacheKey, { verdict: outcome.verdict, record: serializedRecord });
+        await options.cache?.set(cacheKey, { verdict: outcome.verdict, record: outcome.record });
       } catch {
         // Cache persistence is advisory: a completed provider verdict remains the source of truth for this run.
       }
@@ -175,8 +144,6 @@ const evaluateJudgeMetric = async (
       durationMs: performance.now() - startedAt,
     };
   } catch (error: unknown) {
-    const unparseable =
-      error instanceof AttestMetricError && error.code === 'judge_unparseable_response';
     const cancelled = options.signal?.aborted === true;
     const message = cancelled
       ? 'Judge evaluation was cancelled.'
@@ -189,9 +156,16 @@ const evaluateJudgeMetric = async (
       kind: 'judge',
       status: 'error',
       error: {
-        code: unparseable ? 'judge_unparseable_response' : 'judge_provider_error',
+        code:
+          error instanceof AttestMetricError
+            ? error.code
+            : cancelled
+              ? 'metric_cancelled'
+              : 'judge_provider_error',
         message,
-        ...(unparseable && error.details !== undefined ? { details: error.details } : {}),
+        ...(error instanceof AttestMetricError && error.details !== undefined
+          ? { details: error.details }
+          : {}),
       },
       durationMs: performance.now() - startedAt,
     };

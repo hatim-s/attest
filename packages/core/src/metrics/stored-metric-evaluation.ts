@@ -1,29 +1,18 @@
 import type { JsonValue } from '@attest/contracts';
 
 import type { StoredMetricEvaluation } from '../store/index.js';
-import type { MetricErrorInfo, MetricEvaluation } from './metric-evaluation.js';
-
-const metricErrorCodes = new Set<string>([
-  'exec_spawn_failed',
-  'exec_timeout',
-  'exec_nonzero_exit',
-  'exec_malformed_output',
-  'http_request_failed',
-  'http_bad_status',
-  'judge_provider_error',
-  'judge_unparseable_response',
-  'internal_error',
-  'invalid_json_schema',
-  'invalid_path',
-  'skipped_no_output',
-]);
+import {
+  METRIC_ERROR_CODES,
+  type MetricErrorInfo,
+  type MetricEvaluation,
+} from './metric-evaluation.js';
 
 /** Narrows persisted JSON blobs back to the metric contract's JSON-only evidence surface. */
 const asJsonValue = (value: unknown): JsonValue | undefined => value as JsonValue | undefined;
 
 /** Restores a typed metric code while keeping malformed legacy storage evidence actionable. */
 const isMetricErrorCode = (kind: string): kind is MetricErrorInfo['code'] =>
-  metricErrorCodes.has(kind);
+  (METRIC_ERROR_CODES as readonly string[]).includes(kind);
 
 /** Restores a typed metric code while keeping malformed legacy storage evidence actionable. */
 const toMetricErrorCode = (kind: string): MetricErrorInfo['code'] =>

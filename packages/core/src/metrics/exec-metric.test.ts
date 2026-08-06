@@ -1,5 +1,5 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
-import { mkdtemp, access } from 'node:fs/promises';
+import { access, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -8,7 +8,6 @@ import { describe, expect, it } from 'vitest';
 
 import type { MetricContext } from './metric-evaluation.js';
 import { executeExecutableMetric } from './exec-metric.js';
-import { buildMetricRequest } from './internal/metric-request.js';
 
 /** Resolves source fixtures from the repository root so conformance assets remain shared across tracks. */
 const fromRepositoryRoot = (relativePath: string): string =>
@@ -26,10 +25,10 @@ const metricContext = (): MetricContext => ({
 });
 
 /** Resolves a fixture command through the active Node executable to avoid shell-specific behavior. */
-const fixtureCommand = (fixtureName: string, ...arguments_: string[]) => [
+const buildFixtureCommand = (fixtureName: string, ...commandArguments: string[]) => [
   process.execPath,
   fromRepositoryRoot(`packages/core/src/metrics/exec-metric.fixtures/${fixtureName}`),
-  ...arguments_,
+  ...commandArguments,
 ];
 
 /** Uses the canonical hostile-agent behaviors wherever their transport shape already exercises the metric edge. */
@@ -60,26 +59,31 @@ const closeServer = async (server: Server): Promise<void> =>
     server.close((error) => (error === undefined ? resolve() : reject(error))),
   );
 
-describe('buildMetricRequest', () => {
-  it('creates the §2 envelope and represents an absent trace as null', () => {
-    expect(buildMetricRequest(metricContext())).toEqual({
-      protocol: 'attest.metric/v1alpha1',
-      case: {
-        id: 'greeting',
-        input: { locale: 'en' },
-        expected: { greeting: 'hello' },
-        params: { formal: false },
-      },
-      output: 'hello',
-      trace: null,
-    });
-  });
-});
+/** Polls an integration condition until it succeeds or a bounded deadline makes failure explicit. */
+const waitFor = async (condition: () => boolean, timeoutMs = 1_000): Promise<void> => {
+  const deadline = Date.now() + timeoutMs;
+  while (!condition()) {
+    if (Date.now() >= deadline) {
+      throw new Error(`Condition was not met within ${timeoutMs} ms.`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+};
+
+/** Checks a PID without mutating it; ESRCH means the direct child has been reaped. */
+const isProcessAlive = (processIdentifier: number): boolean => {
+  try {
+    process.kill(processIdentifier, 0);
+    return true;
+  } catch {
+    return false;
+  }
+};
 
 describe('executeExecutableMetric command metrics', () => {
   it('normalizes a valid fixture result', async () => {
     const evaluation = await executeExecutableMetric(
-      { name: 'fixture', type: 'exec', command: fixtureCommand('result.mjs') },
+      { name: 'fixture', type: 'exec', command: buildFixtureCommand('result.mjs') },
       metricContext(),
     );
 
@@ -103,25 +107,36 @@ describe('executeExecutableMetric command metrics', () => {
     });
   });
 
-  it.each([
-    { behavior: 'malformed-json', message: 'Metric output was not valid JSON' },
-    { behavior: 'huge-output', message: 'Metric stdout exceeded' },
-  ])('records canonical $behavior output as malformed', async ({ behavior, message }) => {
+  it('records canonical malformed JSON output as malformed', async () => {
     const evaluation = await executeExecutableMetric(
-      { name: 'fixture', type: 'exec', command: conformanceAgentCommand(behavior) },
+      { name: 'fixture', type: 'exec', command: conformanceAgentCommand('malformed-json') },
       metricContext(),
     );
 
     expect(evaluation.status).toBe('error');
     if (evaluation.status === 'error') {
       expect(evaluation.error.code).toBe('exec_malformed_output');
-      expect(evaluation.error.message).toContain(message);
+      expect(evaluation.error.message).toContain('Metric output was not valid JSON');
+    }
+  });
+
+  it('uses the shared output cap option for command stdout', async () => {
+    const evaluation = await executeExecutableMetric(
+      { name: 'capped', type: 'exec', command: conformanceAgentCommand('huge-output') },
+      metricContext(),
+      { outputCapBytes: 512 },
+    );
+
+    expect(evaluation.status).toBe('error');
+    if (evaluation.status === 'error') {
+      expect(evaluation.error.code).toBe('exec_malformed_output');
+      expect(evaluation.error.message).toContain('512-byte');
     }
   });
 
   it('records contract issue paths for a JSON result with missing fields', async () => {
     const evaluation = await executeExecutableMetric(
-      { name: 'fixture', type: 'exec', command: fixtureCommand('invalid-result.mjs') },
+      { name: 'fixture', type: 'exec', command: buildFixtureCommand('invalid-result.mjs') },
       metricContext(),
     );
 
@@ -141,22 +156,61 @@ describe('executeExecutableMetric command metrics', () => {
     expect(evaluation).toMatchObject({ status: 'error', error: { code: 'exec_spawn_failed' } });
   });
 
-  it('terminates the entire process group after a timeout', async () => {
+  it('awaits SIGKILL and direct-child reaping before resolving a timeout', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'attest-metric-'));
-    const markerPath = join(directory, 'orphan-marker');
-    const evaluation = await executeExecutableMetric(
-      {
-        name: 'sleeping',
-        type: 'exec',
-        command: fixtureCommand('sleep-with-child.mjs', markerPath),
-      },
-      metricContext(),
-      { timeoutMs: 100 },
-    );
+    const markerPath = join(directory, 'survival-marker');
+    const processIdentifierPath = join(directory, 'process-id');
+    const startedAt = Date.now();
+    try {
+      const evaluation = await executeExecutableMetric(
+        {
+          name: 'term-resistant',
+          type: 'exec',
+          command: buildFixtureCommand('term-resistant.mjs', processIdentifierPath, markerPath),
+        },
+        metricContext(),
+        { timeoutMs: 3_000 },
+      );
+      const elapsedMs = Date.now() - startedAt;
+      const processIdentifier = Number(await readFile(processIdentifierPath, 'utf8'));
 
-    await new Promise((resolve) => setTimeout(resolve, 400));
-    await expect(access(markerPath)).rejects.toThrow();
-    expect(evaluation).toMatchObject({ status: 'error', error: { code: 'exec_timeout' } });
+      expect(elapsedMs).toBeGreaterThanOrEqual(4_800);
+      expect(elapsedMs).toBeLessThan(9_500);
+      expect(isProcessAlive(processIdentifier)).toBe(false);
+      await expect(access(markerPath)).rejects.toThrow();
+      expect(evaluation).toMatchObject({ status: 'error', error: { code: 'exec_timeout' } });
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  }, 10_000);
+
+  it('reaps the direct child when a descendant creates a new process group', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'attest-metric-'));
+    const markerPath = join(directory, 'escaped-descendant-marker');
+    const processIdentifierPath = join(directory, 'process-id');
+    try {
+      const evaluation = await executeExecutableMetric(
+        {
+          name: 'new-process-group',
+          type: 'exec',
+          command: buildFixtureCommand(
+            'descendant-new-process-group.mjs',
+            processIdentifierPath,
+            markerPath,
+          ),
+        },
+        metricContext(),
+        { timeoutMs: 500 },
+      );
+      const processIdentifier = Number(await readFile(processIdentifierPath, 'utf8'));
+
+      // A newly detached descendant is outside this local group boundary. Cross-platform containment
+      // is best-effort until the coordinator unifies this path with the runner's process-tree snapshot.
+      expect(isProcessAlive(processIdentifier)).toBe(false);
+      expect(evaluation).toMatchObject({ status: 'error', error: { code: 'exec_timeout' } });
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
   });
 
   it('skips metrics after an incomplete case without spawning the command', async () => {
@@ -172,23 +226,28 @@ describe('executeExecutableMetric command metrics', () => {
     expect(evaluation).toMatchObject({ status: 'error', error: { code: 'skipped_no_output' } });
   });
 
-  it('reports caller cancellation as a timeout without a synthetic score', async () => {
+  it('reports caller cancellation distinctly without a synthetic score', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'attest-metric-'));
     const controller = new AbortController();
     setTimeout(() => controller.abort(), 50);
-    const evaluation = await executeExecutableMetric(
-      {
-        name: 'cancelled',
-        type: 'exec',
-        command: fixtureCommand('sleep-with-child.mjs', '/tmp/unused'),
-      },
-      metricContext(),
-      { signal: controller.signal },
-    );
+    try {
+      const evaluation = await executeExecutableMetric(
+        {
+          name: 'cancelled',
+          type: 'exec',
+          command: buildFixtureCommand('sleep-with-child.mjs', join(directory, 'unused')),
+        },
+        metricContext(),
+        { signal: controller.signal },
+      );
 
-    expect(evaluation).toMatchObject({
-      status: 'error',
-      error: { code: 'exec_timeout', message: 'Metric execution was cancelled.' },
-    });
+      expect(evaluation).toMatchObject({
+        status: 'error',
+        error: { code: 'metric_cancelled', message: 'Metric execution was cancelled.' },
+      });
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
   });
 });
 
@@ -207,20 +266,96 @@ describe('executeExecutableMetric HTTP metrics', () => {
         { name: 'http', type: 'exec', url },
         metricContext(),
       );
-      expect(JSON.parse(requestBody)).toEqual(buildMetricRequest(metricContext()));
+      expect(JSON.parse(requestBody)).toEqual({
+        protocol: 'attest.metric/v1alpha1',
+        case: {
+          id: 'greeting',
+          input: { locale: 'en' },
+          expected: { greeting: 'hello' },
+          params: { formal: false },
+        },
+        output: 'hello',
+        trace: null,
+      });
       expect(evaluation).toMatchObject({ status: 'evaluated', result: { score: 0.5, pass: true } });
     } finally {
       await closeServer(server);
     }
   });
 
-  it.each([
-    [503, JSON.stringify({ score: 1, pass: true }), 'http_bad_status'],
-    [200, 'not JSON', 'exec_malformed_output'],
-  ])('maps HTTP status and body failures', async (statusCode, body, errorCode) => {
+  it('cancels an oversized streaming response at the shared output cap', async () => {
+    let responseClosed = false;
+    let chunksWritten = 0;
     const { server, url } = await startMetricServer((_request, response) => {
-      response.statusCode = statusCode;
-      response.end(body);
+      response.on('close', () => {
+        responseClosed = true;
+      });
+      const interval = setInterval(() => {
+        chunksWritten += 1;
+        response.write('x'.repeat(256));
+        if (chunksWritten === 100) {
+          clearInterval(interval);
+          response.end();
+        }
+      }, 5);
+      response.on('close', () => clearInterval(interval));
+    });
+
+    try {
+      const evaluation = await executeExecutableMetric(
+        { name: 'http-capped', type: 'exec', url },
+        metricContext(),
+        { outputCapBytes: 512 },
+      );
+      await waitFor(() => responseClosed);
+
+      expect(chunksWritten).toBeLessThan(100);
+      expect(evaluation.status).toBe('error');
+      if (evaluation.status === 'error') {
+        expect(evaluation.error.code).toBe('exec_malformed_output');
+        expect(evaluation.error.message).toContain('512-byte');
+      }
+    } finally {
+      await closeServer(server);
+    }
+  });
+
+  it('cancels a non-200 response without reading its complete body', async () => {
+    let responseClosed = false;
+    let chunksWritten = 0;
+    const { server, url } = await startMetricServer((_request, response) => {
+      response.writeHead(503);
+      response.on('close', () => {
+        responseClosed = true;
+      });
+      const interval = setInterval(() => {
+        chunksWritten += 1;
+        response.write('unneeded response diagnostics');
+        if (chunksWritten === 100) {
+          clearInterval(interval);
+          response.end();
+        }
+      }, 5);
+      response.on('close', () => clearInterval(interval));
+    });
+
+    try {
+      const evaluation = await executeExecutableMetric(
+        { name: 'http-status', type: 'exec', url },
+        metricContext(),
+      );
+      await waitFor(() => responseClosed);
+
+      expect(chunksWritten).toBeLessThan(100);
+      expect(evaluation).toMatchObject({ status: 'error', error: { code: 'http_bad_status' } });
+    } finally {
+      await closeServer(server);
+    }
+  });
+
+  it('maps a malformed 200 body to a protocol error', async () => {
+    const { server, url } = await startMetricServer((_request, response) => {
+      response.end('not JSON');
     });
 
     try {
@@ -228,9 +363,25 @@ describe('executeExecutableMetric HTTP metrics', () => {
         { name: 'http', type: 'exec', url },
         metricContext(),
       );
-      expect(evaluation).toMatchObject({ status: 'error', error: { code: errorCode } });
+      expect(evaluation).toMatchObject({
+        status: 'error',
+        error: { code: 'exec_malformed_output' },
+      });
     } finally {
       await closeServer(server);
+    }
+  });
+
+  it('rejects non-HTTP URL schemes before invoking fetch', async () => {
+    const evaluation = await executeExecutableMetric(
+      { name: 'unsafe-scheme', type: 'exec', url: 'ftp://metrics.example/result' },
+      metricContext(),
+    );
+
+    expect(evaluation.status).toBe('error');
+    if (evaluation.status === 'error') {
+      expect(evaluation.error.code).toBe('http_request_failed');
+      expect(evaluation.error.message).toContain('must use http: or https:');
     }
   });
 

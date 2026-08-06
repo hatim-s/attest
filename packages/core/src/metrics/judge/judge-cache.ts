@@ -2,10 +2,11 @@ import { createHash } from 'node:crypto';
 
 import type { JsonValue } from '@attest/contracts';
 
-import type { JudgeRequest, JudgeVerdict } from './judge-client.js';
+import type { JudgeRecord, JudgeRequest, JudgeVerdict } from './judge-client.js';
+import { buildJudgePrompt, JUDGE_PROMPT_VERSION, JUDGE_REQUEST_PARAMS } from './rubric-prompt.js';
 
 /** Stores durable judge evidence behind an advisory content-addressed cache boundary. */
-type JudgeCacheEntry = { verdict: JudgeVerdict; record: JsonValue };
+type JudgeCacheEntry = { verdict: JudgeVerdict; record: JudgeRecord };
 
 /** Lets run stores avoid repeated provider calls when metric spec §3 inputs have not changed. */
 interface JudgeCache {
@@ -27,27 +28,33 @@ const stableStringify = (value: JsonValue): string => {
     .join(',')}}`;
 };
 
+/** Allows direct version-invalidation tests without mutating the production prompt constant. */
+type ComputeJudgeCacheKeyOptions = { promptVersion?: number };
+
 /**
- * Hashes exactly the judge inputs that make spec §3's case, output, and rubric unchanged, avoiding repeat calls.
+ * Hashes the exact rendered judge request, excluding threshold because callers recompute pass from score.
  */
-const computeJudgeCacheKey: (request: JudgeRequest) => string = (request) =>
-  createHash('sha256')
+const computeJudgeCacheKey = (
+  request: JudgeRequest,
+  options: ComputeJudgeCacheKeyOptions = {},
+): string => {
+  const prompt = buildJudgePrompt(request);
+  return createHash('sha256')
     .update(
       stableStringify({
+        promptVersion: options.promptVersion ?? JUDGE_PROMPT_VERSION,
         model: request.model,
-        rubric: request.rubric,
-        document: {
-          input: request.document.input,
-          ...(request.document.output === undefined ? {} : { output: request.document.output }),
-          ...(request.document.expected === undefined
-            ? {}
-            : { expected: request.document.expected }),
-          ...(request.document.traceSummary === undefined
-            ? {}
-            : { traceSummary: request.document.traceSummary }),
-        },
+        system: prompt.system,
+        user: prompt.user,
+        params: JUDGE_REQUEST_PARAMS,
       }),
     )
     .digest('hex');
+};
 
-export { computeJudgeCacheKey, type JudgeCache, type JudgeCacheEntry };
+export {
+  computeJudgeCacheKey,
+  type ComputeJudgeCacheKeyOptions,
+  type JudgeCache,
+  type JudgeCacheEntry,
+};

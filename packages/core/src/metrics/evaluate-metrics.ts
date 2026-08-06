@@ -9,7 +9,7 @@ import { executeExecutableMetric } from './exec-metric.js';
 import type { JudgeClient } from './judge/judge-client.js';
 import type { JudgeCache } from './judge/judge-cache.js';
 import { evaluateJudgeMetric } from './judge/judge-metric.js';
-import type { MetricContext, MetricEvaluation } from './metric-evaluation.js';
+import { skippedNoOutput, type MetricContext, type MetricEvaluation } from './metric-evaluation.js';
 
 /** Configures optional metric edges while keeping assertion evaluation dependency-free. */
 type EvaluateMetricsOptions = {
@@ -20,21 +20,6 @@ type EvaluateMetricsOptions = {
   signal?: AbortSignal;
 };
 
-/** Creates consistent no-output semantics before any metric kind performs work. */
-const skippedMetricEvaluation = (
-  definition: MetricDefinition,
-  durationMs: number,
-): MetricEvaluation => ({
-  metricName: definition.name,
-  kind: definition.type,
-  status: 'error',
-  error: {
-    code: 'skipped_no_output',
-    message: 'Metric was not evaluated because the case execution produced no completed output.',
-  },
-  durationMs,
-});
-
 /** Evaluates one definition after the shared execution-state guard has passed. */
 const evaluateMetric = async (
   definition: MetricDefinition,
@@ -42,14 +27,14 @@ const evaluateMetric = async (
   options: EvaluateMetricsOptions,
 ): Promise<MetricEvaluation> => {
   if (definition.type === 'assertion') {
-    const startedAt = performance.now();
     const outcome = evaluateAssertionMetric(definition, buildEvaluationDocument(context));
     return {
       metricName: definition.name,
       kind: 'assertion',
       status: 'evaluated',
       result: outcome.result,
-      durationMs: performance.now() - startedAt,
+      // Assertion checks are in-process computation, not measurable external metric work.
+      durationMs: 0,
     };
   }
 
@@ -61,7 +46,6 @@ const evaluateMetric = async (
   }
 
   if (options.judgeClient === undefined) {
-    const startedAt = performance.now();
     return {
       metricName: definition.name,
       kind: 'judge',
@@ -71,7 +55,8 @@ const evaluateMetric = async (
         message:
           'Judge metric requires a configured judgeClient; create one with createTanstackJudgeClient().',
       },
-      durationMs: performance.now() - startedAt,
+      // This only constructs the configuration error; no judge request was made.
+      durationMs: 0,
     };
   }
 
@@ -96,8 +81,7 @@ const evaluateMetrics = async (
 
   for (const definition of definitions) {
     if (context.execution.outcome !== 'completed') {
-      const startedAt = performance.now();
-      evaluations.push(skippedMetricEvaluation(definition, performance.now() - startedAt));
+      evaluations.push(skippedNoOutput(definition.name, definition.type));
       continue;
     }
     const startedAt = performance.now();
@@ -105,12 +89,6 @@ const evaluateMetrics = async (
       evaluations.push(await evaluateMetric(definition, context, options));
     } catch (error: unknown) {
       const metricError = error instanceof AttestMetricError ? error : undefined;
-      const isKnownMetricError =
-        metricError !== undefined &&
-        (metricError.code === 'invalid_json_schema' ||
-          metricError.code === 'invalid_path' ||
-          metricError.code === 'judge_provider_error' ||
-          metricError.code === 'judge_unparseable_response');
       const message =
         error instanceof Error ? error.message : 'Metric evaluation threw an unknown error.';
       evaluations.push({
@@ -118,11 +96,9 @@ const evaluateMetrics = async (
         kind: definition.type,
         status: 'error',
         error: {
-          code: isKnownMetricError ? metricError.code : 'internal_error',
+          code: metricError?.code ?? 'internal_error',
           message,
-          ...(isKnownMetricError && metricError.details !== undefined
-            ? { details: metricError.details }
-            : {}),
+          ...(metricError?.details !== undefined ? { details: metricError.details } : {}),
         },
         durationMs: performance.now() - startedAt,
       });

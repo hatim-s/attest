@@ -1,4 +1,4 @@
-import { chat, type AnyTextAdapter } from '@tanstack/ai';
+import type { AnyTextAdapter } from '@tanstack/ai';
 import {
   anthropicText,
   createAnthropicChat,
@@ -18,13 +18,17 @@ import type {
   JudgeUsage,
 } from './judge-client.js';
 import {
-  createRecordMiddleware,
+  executeStructuredChat,
   isUnparseableResponse,
   type JudgeAttemptObservation,
+  type StructuredChatExecutor,
 } from './internal/structured-output.js';
-import { buildJudgePrompt, judgeResponseSchema } from './rubric-prompt.js';
-
-const MAXIMUM_STRUCTURED_OUTPUT_ATTEMPTS = 2;
+import {
+  buildJudgePrompt,
+  JUDGE_REQUEST_PARAMS,
+  judgeResponseSchema,
+  MAXIMUM_STRUCTURED_OUTPUT_ATTEMPTS,
+} from './rubric-prompt.js';
 
 /** Supplies optional explicit credentials while leaving undefined keys to provider environment detection. */
 type TanstackJudgeClientOptions = { anthropicApiKey?: string; openaiApiKey?: string };
@@ -60,14 +64,13 @@ const selectAdapter = (
   options: TanstackJudgeClientOptions,
 ): AnyTextAdapter => {
   if (parsedModel.provider === 'anthropic') {
-    // SDK model unions age faster than provider APIs; provider failures surface as judge_provider_error.
+    // SDK model unions age faster than provider APIs; runtime provider failures retain their judge record.
     const model = parsedModel.model as AnthropicChatModel;
     return options.anthropicApiKey === undefined
       ? anthropicText(model)
       : createAnthropicChat(model, options.anthropicApiKey);
   }
 
-  // SDK model unions age faster than provider APIs; provider failures surface as judge_provider_error.
   const model = parsedModel.model as OpenAIChatModel;
   return options.openaiApiKey === undefined
     ? openaiText(model)
@@ -100,7 +103,7 @@ const buildJudgeRecord = (request: JudgeRequest, attempts: JudgeAttempt[]): Judg
       model: request.model,
       system: prompt.system,
       user: prompt.user,
-      params: { stream: false, structuredOutput: true, attempts: attempts.length },
+      params: JUDGE_REQUEST_PARAMS,
     },
     rawResponse: finalAttempt?.rawResponse ?? { error: 'No judge attempt completed.' },
     ...(recordedUsage === undefined ? {} : { usage: recordedUsage }),
@@ -119,6 +122,7 @@ const scoreWithTanStack = async (
   adapter: AnyTextAdapter,
   request: JudgeRequest,
   options: JudgeCallOptions,
+  executeChat: StructuredChatExecutor = executeStructuredChat,
 ): Promise<JudgeOutcome> => {
   const prompt = buildJudgePrompt(request);
   const abortContext = createAbortContext({
@@ -137,18 +141,16 @@ const scoreWithTanStack = async (
         rawResponse: undefined,
       };
       try {
-        const rawResponse = await chat({
+        const rawResponse = await executeChat({
           adapter,
-          systemPrompts: [prompt.system],
-          messages: [{ role: 'user', content: prompt.user }],
-          outputSchema: judgeResponseSchema,
-          stream: false,
+          system: prompt.system,
+          user: prompt.user,
           abortController: abortContext.controller,
-          middleware: [createRecordMiddleware(observation)],
-          debug: false,
+          observation,
         });
         const verdict = judgeResponseSchema.safeParse(rawResponse);
-        const rawEvidence = observation.rawResponse ?? JSON.stringify(rawResponse);
+        const rawEvidence =
+          observation.rawResponse ?? JSON.stringify(rawResponse) ?? String(rawResponse);
         if (verdict.success) {
           const usage = serializeAttemptUsage(observation);
           attempts.push({ rawResponse: rawEvidence, ...(usage === undefined ? {} : { usage }) });
@@ -173,23 +175,25 @@ const scoreWithTanStack = async (
           error: message,
         });
         const abortReason = abortContext.reason();
+        const record = buildJudgeRecord(request, attempts);
         if (abortReason === 'cancelled') {
-          throw new AttestMetricError('judge_provider_error', 'Judge request was cancelled.', {
+          throw new AttestMetricError('metric_cancelled', 'Judge request was cancelled.', {
             cause: error,
+            details: record,
           });
         }
         if (abortReason === 'timeout') {
           throw new AttestMetricError(
             'judge_provider_error',
             `Judge request exceeded ${options.timeoutMs} ms.`,
-            { cause: error },
+            { cause: error, details: record },
           );
         }
         if (!isUnparseableResponse(error)) {
           throw new AttestMetricError(
             'judge_provider_error',
             `Judge provider call failed: ${message}`,
-            { cause: error },
+            { cause: error, details: record },
           );
         }
         lastUnparseableMessage = error instanceof Error ? error.message : String(error);
@@ -215,6 +219,7 @@ const scoreWithTanStack = async (
 /**
  * Creates the TanStack AI implementation of the SDK-free JudgeClient boundary.
  * BYO keys come from explicit options or provider environment detection and never enter JudgeRecord.
+ * Scoring-loop tests inject the narrow structured-chat effect instead of mocking provider SDK internals.
  */
 const createTanstackJudgeClient = (options: TanstackJudgeClientOptions = {}): JudgeClient => ({
   scoreRubric: async (request, callOptions = {}) => {
@@ -224,11 +229,10 @@ const createTanstackJudgeClient = (options: TanstackJudgeClientOptions = {}): Ju
   },
 });
 
-// Provider SDK calls are covered by their contract plus JudgeClient double tests. We intentionally avoid
-// mocking SDK internals, and the installed adapters do not expose a cheap local-stub base URL uniformly.
 export {
   createTanstackJudgeClient,
   parseJudgeModel,
+  scoreWithTanStack,
   type ParsedJudgeModel,
   type TanstackJudgeClientOptions,
 };

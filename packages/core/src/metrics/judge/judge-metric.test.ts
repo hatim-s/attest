@@ -161,13 +161,16 @@ describe('evaluateJudgeMetric', () => {
   });
 
   it('maps provider failures to judge_provider_error without a fake score', async () => {
-    const { client } = createScriptedClient([new Error('provider unavailable')]);
+    const providerError = new AttestMetricError('judge_provider_error', 'provider unavailable', {
+      details: record,
+    });
+    const { client } = createScriptedClient([providerError]);
 
     const evaluation = await evaluateJudgeMetric(definition, context, { client });
 
     expect(evaluation).toMatchObject({
       status: 'error',
-      error: { code: 'judge_provider_error', message: 'provider unavailable' },
+      error: { code: 'judge_provider_error', message: 'provider unavailable', details: record },
     });
     expect(evaluation).not.toHaveProperty('result');
   });
@@ -203,7 +206,7 @@ describe('evaluateJudgeMetric', () => {
     expect(scripted.requests).toHaveLength(0);
   });
 
-  it('maps an aborted signal to an actionable provider error', async () => {
+  it('maps an aborted signal to metric_cancelled', async () => {
     const scripted = createScriptedClient([{ verdict: { score: 1, rationale: 'unused' }, record }]);
     const controller = new AbortController();
     controller.abort();
@@ -215,7 +218,7 @@ describe('evaluateJudgeMetric', () => {
 
     expect(evaluation).toMatchObject({
       status: 'error',
-      error: { code: 'judge_provider_error' },
+      error: { code: 'metric_cancelled' },
     });
     expect(evaluation.status === 'error' ? evaluation.error.message : '').toContain('cancelled');
     expect(scripted.requests).toHaveLength(0);
