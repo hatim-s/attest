@@ -17,6 +17,7 @@ import {
   runExitCode,
 } from './output/render-output.js';
 import { runConfiguration } from './run/run-configuration.js';
+import { runViewCommand } from './view/run-view-command.js';
 
 const require = createRequire(import.meta.url);
 
@@ -50,6 +51,12 @@ type DiffCommandOptions = {
 
 type InitCommandOptions = {
   force?: boolean;
+};
+
+type ViewCommandOptions = {
+  open: boolean;
+  port: number;
+  store: string;
 };
 
 const defaultIo: CliIo = {
@@ -86,6 +93,14 @@ const renderCliError = (error: unknown): string => {
   return 'internal_error: The command failed with an unknown error.';
 };
 
+const parsePort = (value: string): number => {
+  const port = Number(value);
+  if (!Number.isInteger(port) || port < 0 || port > 65_535) {
+    throw new AttestCliError('run_failed', 'View port must be an integer from 0 to 65535.');
+  }
+  return port;
+};
+
 /** Builds the public command tree while keeping command effects behind narrow action callbacks. */
 const createProgram = (
   io: CliIo,
@@ -117,6 +132,32 @@ const createProgram = (
       io.output(
         `Initialized Attest quickstart in ${result.targetDirectory}:\n${fileList}\n\nNext: cd ${result.targetDirectory} && attest run`,
       );
+    });
+
+  program
+    .command('view')
+    .description('Open the local dashboard over the project run store.')
+    .option('--store <path>', 'SQLite run store path', '.attest/runs.db')
+    .option('--port <port>', 'loopback port; 0 chooses a free port', parsePort, 0)
+    .option('--no-open', 'do not launch a browser')
+    .action(async (options: ViewCommandOptions) => {
+      const abortController = new AbortController();
+      const stop = (): void => abortController.abort();
+      process.once('SIGINT', stop);
+      process.once('SIGTERM', stop);
+      try {
+        await runViewCommand({
+          launchBrowser: options.open,
+          onReady: ({ url }) => io.output(`Attest view: ${url}\nPress Ctrl+C to stop.`),
+          port: options.port,
+          signal: abortController.signal,
+          storePath: options.store,
+          workingDirectory,
+        });
+      } finally {
+        process.off('SIGINT', stop);
+        process.off('SIGTERM', stop);
+      }
     });
 
   program
