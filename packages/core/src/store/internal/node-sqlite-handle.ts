@@ -14,15 +14,17 @@ const openNodeSqliteHandle = async (path: string): Promise<SqliteHandle | undefi
     prepare: (sql) => {
       const statement = database.prepare(sql);
       return {
-        all: async (...parameters) => statement.all(...(parameters as never[])),
-        run: async (...parameters) => statement.run(...(parameters as never[])),
+        all: (...parameters) =>
+          Promise.resolve().then(() => statement.all(...(parameters as never[]))),
+        run: (...parameters) =>
+          Promise.resolve().then(() => statement.run(...(parameters as never[]))),
       };
     },
-    exec: async (sql) => database.exec(sql),
-    begin: async () => database.exec('BEGIN IMMEDIATE'),
-    commit: async () => database.exec('COMMIT'),
-    rollback: async () => database.exec('ROLLBACK'),
-    close: async () => database.close(),
+    exec: (sql) => Promise.resolve().then(() => database.exec(sql)),
+    begin: () => Promise.resolve().then(() => database.exec('BEGIN IMMEDIATE')),
+    commit: () => Promise.resolve().then(() => database.exec('COMMIT')),
+    rollback: () => Promise.resolve().then(() => database.exec('ROLLBACK')),
+    close: () => Promise.resolve().then(() => database.close()),
   };
 };
 

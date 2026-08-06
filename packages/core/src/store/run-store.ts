@@ -4,7 +4,7 @@ import { Kysely } from 'kysely';
 import { monotonicFactory } from 'ulid';
 
 import { createCacheStore } from './cache.js';
-import { recordCaseTransaction } from './internal/case-recording.js';
+import { recordCaseTransaction, validateCaseRecordInput } from './internal/case-recording.js';
 import { canonicalStringify } from './internal/canonical-json.js';
 import { createSqliteDialect } from './internal/kysely-sqlite-dialect.js';
 import { createLock } from './internal/promise-lock.js';
@@ -95,6 +95,7 @@ class SqliteRunStore implements RunStore {
     execution: StoredCaseExecution,
     evaluations: StoredMetricEvaluation[],
   ): Promise<void> {
+    validateCaseRecordInput(execution, evaluations);
     await executeStoreOperation('WRITE_FAILED', 'Could not record the case.', async () =>
       this.#database
         .transaction()
@@ -164,9 +165,8 @@ class SqliteRunStore implements RunStore {
     return (await query.execute()).map(toRunRecord);
   }
 
-  /** Rehydrates all case blobs for export and detailed local consumers. */
-  async getCaseResults(runId: string): Promise<CaseRecord[]> {
-    await this.getRun(runId);
+  /** Rehydrates case blobs after the caller has established the parent run. */
+  async #loadCaseResults(runId: string): Promise<CaseRecord[]> {
     const cases = await this.#database
       .selectFrom('cases')
       .selectAll()
@@ -180,6 +180,17 @@ class SqliteRunStore implements RunStore {
       ),
     );
     return cases.map((row) => toCaseRecord(row, metrics.get(row.id) ?? []));
+  }
+
+  /** Loads a run and its cases with one parent lookup for aggregate consumers. */
+  async getRunWithCases(runId: string): Promise<{ run: RunRecord; cases: CaseRecord[] }> {
+    const run = await this.getRun(runId);
+    return { run, cases: await this.#loadCaseResults(runId) };
+  }
+
+  /** Rehydrates all case blobs while preserving missing-run semantics. */
+  async getCaseResults(runId: string): Promise<CaseRecord[]> {
+    return (await this.getRunWithCases(runId)).cases;
   }
 
   /** Loads one case detail while preserving distinct missing-run and missing-case semantics. */
@@ -208,6 +219,25 @@ class SqliteRunStore implements RunStore {
   ): Promise<{ items: CaseSummary[]; nextCursor?: string }> {
     await this.getRun(runId);
     const limit = options.limit ?? 100;
+    if (!Number.isInteger(limit) || limit <= 0 || limit > 1_000) {
+      throw new StoreError(
+        'INVALID_LIMIT',
+        'Case summary limit must be an integer from 1 to 1000.',
+      );
+    }
+    if (options.cursor !== undefined) {
+      const cursor = await this.#database
+        .selectFrom('cases')
+        .select('run_id')
+        .where('id', '=', options.cursor)
+        .executeTakeFirst();
+      if (cursor?.run_id !== runId) {
+        throw new StoreError(
+          'INVALID_CURSOR',
+          `Case summary cursor ${options.cursor} does not belong to run ${runId}.`,
+        );
+      }
+    }
     let query = this.#database
       .selectFrom('cases')
       .select([
@@ -278,10 +308,7 @@ const openStore = async (path: string): Promise<AttestStore> => {
     return { runs, cache: createCacheStore(database), close: () => runs.close() };
   } catch (error) {
     await handle?.close();
-    if (error instanceof StoreError) throw error;
-    throw new StoreError('OPEN_FAILED', `Could not open store at ${resolvedPath}.`, {
-      cause: error,
-    });
+    throw error;
   } finally {
     release();
   }

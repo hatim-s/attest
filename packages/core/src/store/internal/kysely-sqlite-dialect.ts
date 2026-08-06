@@ -85,13 +85,14 @@ class HandleDriver implements Driver {
     await this.#handle.rollback();
   }
 
-  async releaseConnection(): Promise<void> {
+  releaseConnection(): Promise<void> {
     const release = this.#releaseConnection;
     if (!release) {
       throw new StoreError('DRIVER_MISUSE', 'Cannot release an unacquired SQLite connection.');
     }
     this.#releaseConnection = undefined;
     release();
+    return Promise.resolve();
   }
 
   async destroy(): Promise<void> {

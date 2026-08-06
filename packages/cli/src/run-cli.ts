@@ -10,13 +10,13 @@ interface PackageMetadata {
 /**
  * Runs the temporary CLI entry point until Commander wiring arrives in Phase 1.
  */
-async function runCli(argv: string[]): Promise<number> {
+function runCli(argv: string[]): Promise<number> {
   void argv;
 
   const packageMetadata = require('../package.json') as PackageMetadata;
   console.log(`${packageMetadata.name} ${packageMetadata.version}`);
 
-  return 0;
+  return Promise.resolve(0);
 }
 
 export { runCli };

@@ -6,61 +6,33 @@ import {
   StoreError,
   type CaseRecord,
   type StoredCaseExecution,
-  type StoredInvocationErrorCode,
   type StoredMetricEvaluation,
 } from '../types.js';
 import { canonicalStringify, contentHash } from './canonical-json.js';
+import {
+  collectStoredCaseExecutionViolations,
+  collectStoredMetricEvaluationViolations,
+} from './record-validation.js';
 import { toCaseRecord, toMetricEvaluation } from './row-mapping.js';
 import { toSpanAttribute } from './span-attribute.js';
 
 const createUlid = monotonicFactory();
-const invocationErrorCodes: StoredInvocationErrorCode[] = [
-  'spawn_failed',
-  'timeout',
-  'output_cap_exceeded',
-  'nonzero_exit',
-  'http_status',
-  'network',
-  'invalid_envelope',
-  'cancelled',
-];
 
-/** Rejects contradictory runner terminal records before any durable write is attempted. */
-const validateStoredCaseExecution = (execution: StoredCaseExecution): void => {
-  const candidate = execution as unknown as Record<string, unknown>;
-  const violations: string[] = [];
-  if (!Array.isArray(candidate.warnings)) violations.push('warnings must be an array');
-  if (!candidate.diagnostics || typeof candidate.diagnostics !== 'object') {
-    violations.push('diagnostics must be an object');
-  }
-  if (!Array.isArray(candidate.attempts)) violations.push('attempts must be an array');
-  if (!Array.isArray(candidate.expectedMetrics))
-    violations.push('expectedMetrics must be an array');
-
-  if (candidate.outcome === 'completed') {
-    if (!Object.hasOwn(candidate, 'response') || candidate.response === undefined) {
-      violations.push('completed outcome requires response');
-    }
-    if (Object.hasOwn(candidate, 'errorCode'))
-      violations.push('completed outcome forbids errorCode');
-    if (Object.hasOwn(candidate, 'errorMessage')) {
-      violations.push('completed outcome forbids errorMessage');
-    }
+/** Aggregates execution and evaluation violations before a database transaction begins. */
+const validateCaseRecordInput = (
+  execution: StoredCaseExecution,
+  evaluations: StoredMetricEvaluation[],
+): void => {
+  const violations = collectStoredCaseExecutionViolations(execution);
+  if (!Array.isArray(evaluations)) {
+    violations.push('evaluations must be an array');
   } else {
-    if (!['invocation_error', 'timeout', 'cancelled'].includes(String(candidate.outcome))) {
-      violations.push('outcome must be a supported terminal discriminant');
-    }
-    if (!invocationErrorCodes.includes(candidate.errorCode as StoredInvocationErrorCode)) {
-      violations.push('non-completed outcome requires a valid errorCode');
-    }
-    if (typeof candidate.errorMessage !== 'string') {
-      violations.push('non-completed outcome requires errorMessage');
-    }
-    if (Object.hasOwn(candidate, 'response'))
-      violations.push('non-completed outcome forbids response');
-    if (Object.hasOwn(candidate, 'trace')) violations.push('non-completed outcome forbids trace');
+    evaluations.forEach((evaluation, index) => {
+      violations.push(
+        ...collectStoredMetricEvaluationViolations(evaluation, `evaluations[${index}]`),
+      );
+    });
   }
-
   if (violations.length > 0) {
     throw new StoreError('INVALID_RECORD', `Invalid case record: ${violations.join('; ')}.`);
   }
@@ -125,7 +97,6 @@ const recordCaseTransaction = async (
   execution: StoredCaseExecution,
   evaluations: StoredMetricEvaluation[],
 ): Promise<void> => {
-  validateStoredCaseExecution(execution);
   const run = await database
     .selectFrom('runs')
     .select('status')
@@ -135,7 +106,7 @@ const recordCaseTransaction = async (
 
   const existing = await readExistingCase(database, runId, execution);
   if (existing) {
-    const sameInput = existing.inputHash === contentHash(execution.request);
+    const sameInput = existing.inputHash === contentHash(execution.request.input);
     const sameExecution =
       executionHash(toExecution(existing.record), existing.record.metrics) ===
       executionHash(execution, evaluations);
@@ -160,7 +131,7 @@ const recordCaseTransaction = async (
       outcome: execution.outcome,
       started_at: execution.startedAt,
       duration_ms: execution.durationMs,
-      input_hash: contentHash(execution.request),
+      input_hash: contentHash(execution.request.input),
       request_json: canonicalStringify(execution.request),
       response_json: completed ? canonicalStringify(execution.response) : null,
       error_code: completed ? null : execution.errorCode,
@@ -220,4 +191,4 @@ const recordCaseTransaction = async (
   }
 };
 
-export { recordCaseTransaction, validateStoredCaseExecution };
+export { recordCaseTransaction, validateCaseRecordInput };

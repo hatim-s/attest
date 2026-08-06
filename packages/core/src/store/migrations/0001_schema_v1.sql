@@ -1,3 +1,4 @@
+-- mirrored in registry.ts — update both
 -- Pre-1.0 exception: schema v1 is revised in place during review; after 1.0 migrations are append-only.
 CREATE TABLE runs (
   id TEXT PRIMARY KEY,
@@ -80,6 +81,13 @@ CREATE TABLE response_cache (
 
 CREATE TRIGGER runs_no_terminal_update
 BEFORE UPDATE ON runs
+WHEN OLD.status != 'running'
+BEGIN
+  SELECT RAISE(ABORT, 'attest: finalized runs are immutable');
+END;
+
+CREATE TRIGGER runs_no_terminal_delete
+BEFORE DELETE ON runs
 WHEN OLD.status != 'running'
 BEGIN
   SELECT RAISE(ABORT, 'attest: finalized runs are immutable');

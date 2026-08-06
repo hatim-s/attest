@@ -41,7 +41,7 @@ const createLibsqlHandle = (client: Client): SqliteHandle => {
 
   return {
     prepare: (sql) => ({
-      all: async (...parameters) => (await execute(sql, parameters)).rows as unknown[],
+      all: async (...parameters) => (await execute(sql, parameters)).rows,
       run: async (...parameters) => ({ changes: (await execute(sql, parameters)).rowsAffected }),
     }),
     exec: async (sql) => {

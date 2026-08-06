@@ -2,12 +2,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import {
-  AGENT_PROTOCOL,
-  TRACE_SCHEMA_VERSION,
-  type AgentRequest,
-  type Trace,
-} from '@attest/contracts';
+import { AGENT_PROTOCOL, TRACE_SCHEMA_VERSION, type AgentRequest } from '@attest/contracts';
 import { afterEach, describe, expect, it } from 'vitest';
 import { Kysely } from 'kysely';
 
@@ -15,7 +10,7 @@ import { createSqliteDialect } from './internal/kysely-sqlite-dialect.js';
 import { openSqliteHandle } from './internal/sqlite-handle.js';
 import { openRunStore, type RunStore } from './run-store.js';
 import type { Database } from './schema.js';
-import type { StoredCaseExecution, StoredMetricEvaluation } from './types.js';
+import { StoreError, type StoredCaseExecution, type StoredMetricEvaluation } from './types.js';
 
 const stores: RunStore[] = [];
 const directories: string[] = [];
@@ -53,6 +48,16 @@ const completedExecution = (
   attempts: [],
   expectedMetrics: [],
 });
+
+/** Captures a rejected operation while keeping the failure type unknown until asserted. */
+const captureRejection = async (operation: Promise<unknown>): Promise<unknown> => {
+  try {
+    await operation;
+  } catch (error) {
+    return error;
+  }
+  throw new Error('Expected operation to reject.');
+};
 
 afterEach(async () => {
   await Promise.all(stores.splice(0).map(async (store) => store.close()));
@@ -104,58 +109,52 @@ describe('RunStore adversarial persistence', () => {
     await expect(store.getCaseResults(run.id)).resolves.toEqual([]);
   });
 
-  it('ignores non-scalar span attributes and stringifies numbers and booleans', async () => {
-    const { path, store } = await openTemporaryStore();
+  it('aggregates all execution and evaluation violations before persistence', async () => {
+    const { store } = await openTemporaryStore();
     const run = await store.createRun({
       configVersion: 'v1',
       configHash: 'hash',
       configJson: '{}',
     });
-    const baseSpan = {
-      span_id: 'base',
-      parent_span_id: null,
-      kind: 'tool',
-      name: 'search',
-      start_time: '2026-08-06T00:00:00.000Z',
-      end_time: '2026-08-06T00:00:01.000Z',
-    };
-    const defensiveTrace = {
-      schema: TRACE_SCHEMA_VERSION,
-      trace_id: 'defensive',
-      spans: [
-        {
-          ...baseSpan,
-          span_id: 'wrong-object',
-          attributes: { 'gen_ai.tool.name': {}, 'gen_ai.request.model': [] },
-        },
-        {
-          ...baseSpan,
-          span_id: 'wrong-null',
-          attributes: { 'gen_ai.tool.name': null, 'gen_ai.request.model': null },
-        },
-        {
-          ...baseSpan,
-          span_id: 'valid-scalars',
-          attributes: { 'gen_ai.tool.name': 42, 'gen_ai.request.model': false },
-        },
+    const invalid = {
+      ...completedExecution(run.id, 'invalid'),
+      caseId: '',
+      suiteName: '',
+      startedAt: 'yesterday',
+      durationMs: Number.NaN,
+      request: {},
+      warnings: [{ path: 1, message: false, code: 'other' }],
+      diagnostics: { exitCode: 1.5, httpStatus: 'bad', stderrExcerpt: 4 },
+      attempts: [
+        { status: 'ok', durationMs: -1, diagnostics: null, errorCode: 'timeout' },
+        { status: 'other', durationMs: Number.POSITIVE_INFINITY, diagnostics: {} },
       ],
-    } as unknown as Trace;
-    await store.recordCase(
-      run.id,
-      { ...completedExecution(run.id, 'defensive-trace'), trace: defensiveTrace },
-      [],
+      expectedMetrics: ['valid', 4],
+      trace: { schema: TRACE_SCHEMA_VERSION, trace_id: 'bad', spans: [{}] },
+    };
+    const evaluations = [
+      { metricName: '', kind: 'other', status: 'evaluated', score: Number.NaN, pass: 'yes' },
+      { metricName: 'error', kind: 'judge', status: 'error', error: { message: '', kind: 1 } },
+    ];
+    const failure = await captureRejection(
+      store.recordCase(
+        run.id,
+        invalid as unknown as StoredCaseExecution,
+        evaluations as unknown as StoredMetricEvaluation[],
+      ),
     );
-
-    const handle = await openSqliteHandle(path);
-    const rows = await handle
-      .prepare('SELECT span_id, tool_name, model_name FROM spans ORDER BY span_id')
-      .all();
-    await handle.close();
-    expect(rows).toEqual([
-      { span_id: 'valid-scalars', tool_name: '42', model_name: 'false' },
-      { span_id: 'wrong-null', tool_name: null, model_name: null },
-      { span_id: 'wrong-object', tool_name: null, model_name: null },
-    ]);
+    expect(failure).toMatchObject({ code: 'INVALID_RECORD' });
+    expect(failure).toHaveProperty('message', expect.stringContaining('caseId'));
+    expect(failure).toHaveProperty('message', expect.stringContaining('suiteName'));
+    expect(failure).toHaveProperty('message', expect.stringContaining('startedAt'));
+    expect(failure).toHaveProperty('message', expect.stringContaining('durationMs'));
+    expect(failure).toHaveProperty('message', expect.stringContaining('diagnostics.exitCode'));
+    expect(failure).toHaveProperty('message', expect.stringContaining('attempts[0]'));
+    expect(failure).toHaveProperty('message', expect.stringContaining('expectedMetrics[1]'));
+    expect(failure).toHaveProperty('message', expect.stringContaining('trace'));
+    expect(failure).toHaveProperty('message', expect.stringContaining('evaluations[0]'));
+    expect(failure).toHaveProperty('message', expect.stringContaining('evaluations[1]'));
+    await expect(store.getCaseResults(run.id)).resolves.toEqual([]);
   });
 
   it('serializes five concurrent case transactions without losing writes', async () => {
@@ -198,10 +197,10 @@ describe('RunStore adversarial persistence', () => {
       { metricName: 'duplicate', kind: 'assertion', status: 'evaluated', score: 0, pass: false },
     ];
 
-    const failure = await store
-      .recordCase(run.id, execution, duplicateMetrics)
-      .catch((error) => error);
-    expect(failure).toMatchObject({ code: 'WRITE_FAILED', cause: expect.anything() });
+    const failure = await captureRejection(store.recordCase(run.id, execution, duplicateMetrics));
+    expect(failure).toMatchObject({ code: 'WRITE_FAILED' });
+    expect(failure).toBeInstanceOf(StoreError);
+    if (failure instanceof StoreError) expect(failure.cause).toBeDefined();
     await expect(store.getCaseResults(run.id)).resolves.toEqual([]);
   });
 
@@ -217,11 +216,13 @@ describe('RunStore adversarial persistence', () => {
     await handle.prepare('UPDATE cases SET request_json = ? WHERE run_id = ?').run('{', run.id);
     await handle.close();
 
-    const failure = await store.getCaseResults(run.id).catch((error) => error);
-    expect(failure).toMatchObject({ code: 'CORRUPT_DATA', cause: expect.any(SyntaxError) });
+    const failure = await captureRejection(store.getCaseResults(run.id));
+    expect(failure).toMatchObject({ code: 'CORRUPT_DATA' });
+    expect(failure).toBeInstanceOf(StoreError);
+    if (failure instanceof StoreError) expect(failure.cause).toBeInstanceOf(SyntaxError);
   });
 
-  it('wraps schema CHECK violations as WRITE_FAILED with the driver cause', async () => {
+  it('rejects invalid scalar fields before reaching schema checks', async () => {
     const { store } = await openTemporaryStore();
     const run = await store.createRun({
       configVersion: 'v1',
@@ -229,14 +230,14 @@ describe('RunStore adversarial persistence', () => {
       configJson: '{}',
     });
 
-    const failure = await store
-      .recordCase(run.id, { ...completedExecution(run.id, 'negative'), durationMs: -1 }, [])
-      .catch((error: unknown) => error);
+    const failure = await captureRejection(
+      store.recordCase(run.id, { ...completedExecution(run.id, 'negative'), durationMs: -1 }, []),
+    );
 
-    expect(failure).toMatchObject({ code: 'WRITE_FAILED', cause: expect.anything() });
+    expect(failure).toMatchObject({ code: 'INVALID_RECORD' });
   });
 
-  it('wraps metric CHECK violations as WRITE_FAILED and rolls back the case', async () => {
+  it('rejects invalid metric branches before opening the case transaction', async () => {
     const { store } = await openTemporaryStore();
     const run = await store.createRun({
       configVersion: 'v1',
@@ -244,13 +245,13 @@ describe('RunStore adversarial persistence', () => {
       configJson: '{}',
     });
 
-    const failure = await store
-      .recordCase(run.id, completedExecution(run.id, 'invalid-metric'), [
+    const failure = await captureRejection(
+      store.recordCase(run.id, completedExecution(run.id, 'invalid-metric'), [
         { metricName: 'quality', kind: 'assertion', status: 'evaluated' },
-      ])
-      .catch((error: unknown) => error);
+      ]),
+    );
 
-    expect(failure).toMatchObject({ code: 'WRITE_FAILED', cause: expect.anything() });
+    expect(failure).toMatchObject({ code: 'INVALID_RECORD' });
     await expect(store.getCaseResults(run.id)).resolves.toEqual([]);
   });
 
@@ -271,6 +272,9 @@ describe('RunStore adversarial persistence', () => {
     await expect(
       database.updateTable('runs').set({ summary_json: '{}' }).where('id', '=', run.id).execute(),
     ).rejects.toThrow('attest: finalized runs are immutable');
+    await expect(database.deleteFrom('runs').where('id', '=', run.id).execute()).rejects.toThrow(
+      'attest: finalized runs are immutable',
+    );
     await expect(
       database
         .insertInto('cases')
