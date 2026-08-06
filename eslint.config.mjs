@@ -10,6 +10,14 @@ export default tseslint.config(
       'conformance/fixtures/**',
     ],
   },
-  // Upgrade to recommendedTypeChecked once packages have meaningful TypeScript program boundaries.
   tseslint.configs.recommended,
+  {
+    files: ['packages/contracts/src/**/*.ts'],
+    extends: [tseslint.configs.recommendedTypeChecked],
+    languageOptions: {
+      parserOptions: {
+        projectService: true,
+      },
+    },
+  },
 );
