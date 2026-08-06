@@ -1,0 +1,224 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>attest — Foundation: Decisions, Stack &amp; Roadmap</title>
+<style>
+  :root {
+    --bg: #faf9f7; --fg: #1a1a1c; --muted: #6b6b70; --line: #e4e2dd;
+    --card: #ffffff; --accent: #0e7490; --accent-soft: #e0f2f7;
+    --good: #15803d; --warn: #b45309; --chip: #f1efe9;
+    font-size: 16px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #16161a; --fg: #e8e6e3; --muted: #9a99a2; --line: #2c2c33;
+      --card: #1e1e24; --accent: #22b8d8; --accent-soft: #123a44;
+      --good: #4ade80; --warn: #fbbf24; --chip: #26262d;
+    }
+  }
+  * { box-sizing: border-box; margin: 0; }
+  body {
+    background: var(--bg); color: var(--fg);
+    font: 1rem/1.6 -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    padding: 3rem 1.25rem 5rem;
+  }
+  main { max-width: 46rem; margin: 0 auto; }
+  header { margin-bottom: 3rem; }
+  .kicker { color: var(--accent); font-weight: 600; text-transform: uppercase; letter-spacing: .08em; font-size: .75rem; }
+  h1 { font-size: 2.1rem; line-height: 1.2; margin: .4rem 0 .8rem; letter-spacing: -.02em; }
+  .lede { color: var(--muted); font-size: 1.05rem; max-width: 40rem; }
+  h2 { font-size: 1.35rem; margin: 3rem 0 1rem; padding-top: 1.5rem; border-top: 1px solid var(--line); letter-spacing: -.01em; }
+  h3 { font-size: 1.02rem; margin: 1.5rem 0 .5rem; }
+  p { margin: .6rem 0; }
+  .meta { color: var(--muted); font-size: .85rem; margin-top: 1rem; }
+  table { width: 100%; border-collapse: collapse; margin: 1rem 0; font-size: .92rem; }
+  th, td { text-align: left; padding: .55rem .75rem; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { font-size: .78rem; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); font-weight: 600; }
+  td:first-child { font-weight: 600; white-space: nowrap; }
+  .tablewrap { overflow-x: auto; }
+  .cards { display: grid; gap: .8rem; grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr)); margin: 1rem 0; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 1rem 1.1rem; }
+  .card b { display: block; margin-bottom: .3rem; }
+  .card p { color: var(--muted); font-size: .88rem; margin: 0; }
+  .chip { display: inline-block; background: var(--chip); border-radius: 999px; padding: .1rem .6rem; font-size: .78rem; margin: 0 .3rem .3rem 0; }
+  .chip.paid { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+  ul { padding-left: 1.2rem; margin: .6rem 0; }
+  li { margin: .3rem 0; }
+  .phase { border-left: 3px solid var(--accent); padding: .2rem 0 .2rem 1.1rem; margin: 1.4rem 0; }
+  .phase .when { color: var(--muted); font-size: .8rem; text-transform: uppercase; letter-spacing: .05em; }
+  .phase b.title { font-size: 1.05rem; }
+  .phase p, .phase li { font-size: .92rem; }
+  .cut { color: var(--warn); font-size: .85rem; }
+  .risk { background: var(--card); border: 1px solid var(--line); border-left: 3px solid var(--warn); border-radius: 8px; padding: .8rem 1rem; margin: .8rem 0; font-size: .92rem; }
+  .risk b { color: var(--warn); }
+  code { background: var(--chip); border-radius: 4px; padding: .1rem .35rem; font-size: .85em; font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+  footer { margin-top: 4rem; padding-top: 1rem; border-top: 1px solid var(--line); color: var(--muted); font-size: .82rem; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <div class="kicker">Foundation Document</div>
+    <h1>attest<span style="color:var(--muted); font-weight:400"> — CI/CD for AI agents</span></h1>
+    <p class="lede">A local-first eval runtime: bring any agent callable via CLI or HTTP, run it against test cases, score with deterministic and LLM-based metrics, diff runs, and get interactive dashboards and shareable reports. Open-core, cloud follows.</p>
+    <p class="meta">Decisions locked 2026-08-06 · working title (final name before launch) · solo founder + heavy AI-agent leverage · full startup attempt</p>
+  </header>
+
+  <h2>1 · Market &amp; Positioning</h2>
+  <div class="tablewrap"><table>
+    <tr><td>Beachhead</td><td>Startup AI product teams (2–20 engineers) shipping agents to production without a CI quality gate. Indie devs adopt the OSS core as a side effect; enterprise pulled in later via the pricing ladder.</td></tr>
+    <tr><td>Positioning</td><td>Wedge message: <b>“CI/CD for AI agents.”</b> Category vision: agent eval platform. Lead with the CI frame; grow into the platform story.</td></tr>
+    <tr><td>Why switch</td><td>vs Braintrust / LangSmith / Promptfoo / DeepEval — see wedge below.</td></tr>
+  </table></div>
+
+  <h3>The wedge</h3>
+  <div class="cards">
+    <div class="card"><b>Framework-agnostic</b><p>Agent contract is CLI or HTTP. Any language, any framework, zero SDK lock-in.</p></div>
+    <div class="card"><b>Agent-native</b><p>Trajectory &amp; tool-call assertions, multi-turn user simulation — built for agents, not prompt pairs.</p></div>
+    <div class="card"><b>Best-in-class reports</b><p>Run diffing, regression views, self-contained shareable HTML reports — where OSS rivals are weakest.</p></div>
+  </div>
+  <p class="meta">Local-first is a property of the product, not the lead pitch.</p>
+
+  <h2>2 · Core Product Contracts</h2>
+  <div class="tablewrap"><table>
+    <tr><td>Agent interface</td><td>CLI command or HTTP endpoint; the runtime invokes it per test case.</td></tr>
+    <tr><td>Trace contract</td><td>Open versioned JSON envelope <code>attest.trace/v1alpha1</code> — OTel GenAI-mapped attribute names, but insulated from upstream semconv churn. Optional: no trace → output-only eval still works. Framework adapters later are sugar over the same schema.</td></tr>
+    <tr><td>Test authoring</td><td>YAML/JSON files are the source of truth (git-versioned, CI-friendly). Local dashboard UI editor writes back via comment-preserving edits.</td></tr>
+    <tr><td>Metrics</td><td>Declarative assertions (contains, regex, JSON-schema, tool-called…) for the 80% case + executable contract: any executable/endpoint receiving <code>{case, output, trace}</code> and returning a score. LLM judges built in, <b>BYO keys</b> at launch.</td></tr>
+    <tr><td>Dashboard</td><td><code>attest view</code> = local web app; <code>attest report</code> = self-contained static HTML export (CI artifact, email, PR link).</td></tr>
+    <tr><td>v1 evals</td><td>Single-turn · trajectory/tool-call assertions · run diffing (mandatory) · multi-turn user simulation (flagship; ships v0.2 if not solid by launch). Human review queue &amp; judge calibration = v2.</td></tr>
+  </table></div>
+
+  <h2>3 · Open Source &amp; Moat</h2>
+  <p><b>Open-core, Apache 2.0.</b> The moat is accumulated run history + team workflow in the cloud, not the license. The open trace schema is a distribution asset.</p>
+  <p>
+    <span class="chip">OSS: runtime + CLI</span><span class="chip">OSS: all metric types</span><span class="chip">OSS: local dashboard</span><span class="chip">OSS: static reports</span><span class="chip">OSS: run diffing</span><span class="chip">OSS: scheduled runs + alerts</span>
+    <span class="chip paid">Paid: hosted dashboards + team sharing</span><span class="chip paid">Paid: CI history + cross-run analytics</span><span class="chip paid">Later: SSO / RBAC / audit / on-prem</span>
+  </p>
+
+  <h2>4 · Monetization</h2>
+  <div class="tablewrap"><table>
+    <tr><td>Structure</td><td>Seats + usage hybrid: per-seat base (collab, dashboards) + metered eval-runs/storage above a free quota.</td></tr>
+    <tr><td>Ladder</td><td>Free (indie / single-player) → Team (seats + usage) → Enterprise (custom: SSO, RBAC, on-prem).</td></tr>
+    <tr><td>Timing</td><td>Local-only OSS launch first; cloud beta ~3 months later, seeded by an in-product waitlist.</td></tr>
+  </table></div>
+
+  <h2>5 · GTM Sequence</h2>
+  <div class="tablewrap"><table>
+    <tr><td>1 · OSS launch</td><td>Show HN / GitHub / Product Hunt. One shot — repo must impress day one (&lt;5-min quickstart, demo video, example agents). Mitigation for launching pre-validation: cold-test quickstart on ~5 friendly devs.</td></tr>
+    <tr><td>2 · Design partners</td><td>Convert inbound + direct outreach into 10–20 startup teams; white-glove setup for feedback, logos, case studies. Their needs shape the cloud tier.</td></tr>
+    <tr><td>3 · Integrations</td><td>Adapters + example repos + docs PRs: LangGraph, OpenAI Agents SDK, Vercel AI SDK, CrewAI. Ride their distribution.</td></tr>
+    <tr><td>4 · Content / SEO</td><td>Agent-eval guides + public benchmark reports made with the tool. Compounding background channel; never blocks the others.</td></tr>
+  </table></div>
+
+  <h2>6 · Stack (scouted, founder-decided)</h2>
+  <div class="tablewrap"><table>
+    <tr><td>Language</td><td><b>TypeScript</b> on <b>Bun</b> (founder call, overriding scout's Go rec) — iteration speed, one language across runtime + dashboard, JS-native contributor pool. Bun's <code>--compile</code> + built-in SQLite recover the single-binary story.</td></tr>
+    <tr><td>Distribution</td><td>npm/npx for JS devs <i>and</i> Bun-compiled standalone binaries (GitHub Releases, brew, curl|sh) — keeps the dependency-free wedge. macOS + Linux at launch; Windows = first compat fast-follow.</td></tr>
+    <tr><td>Run store</td><td>SQLite (WAL), project-local <code>.attest/runs.db</code>; versioned migrations; immutable completed runs; exportable run bundles — cloud ingests bundles via API, never syncs SQLite.</td></tr>
+    <tr><td>Dashboard</td><td>React + Vite SPA embedded in the artifact; loopback-only server; static report = same components with the run bundle inlined into one HTML file. Virtualized tables + custom trace waterfall; tested at 10k cases.</td></tr>
+    <tr><td>Simulation</td><td>Simulator loop is runtime orchestration over the ordinary one-turn agent contract; stateless replay by default; deterministic termination policy.</td></tr>
+    <tr><td>Repos</td><td>One public OSS monorepo (CLI, runtime, web, schemas, docs, conformance fixtures); cloud in a separate private repo; DCO, SBOM, NOTICE hygiene.</td></tr>
+    <tr><td>Testing</td><td>Determinism, contract compatibility, hostile process behavior. Golden conformance fixtures per contract; fake hostile agents; required CI never calls a live LLM.</td></tr>
+    <tr><td>Philosophy</td><td>Novel only in contracts, eval semantics, diffing, report UX — boring everywhere else. No sandboxing v1 (trusted project code + process controls).</td></tr>
+  </table></div>
+
+  <div class="risk"><b>Top technical risks:</b> contract churn · unreproducible judge behavior · safe process supervision (timeouts, process-tree kill) · lossless YAML round-tripping · report performance at large trace volume · Bun ecosystem maturity. De-risk prototypes target exactly these before broad build-out.</div>
+
+  <h2>7 · Implementation Stack (locked)</h2>
+
+  <h3>Runtime &amp; core</h3>
+  <div class="tablewrap"><table>
+    <tr><td>SQLite driver</td><td>Portable: <code>node:sqlite</code> (Node 22+), libsql fallback — npm package runs under both Node and Bun; npx quickstart works for everyone. Resolves the flagged bun:sqlite tension.</td></tr>
+    <tr><td>Monorepo</td><td>Bun workspaces + Turborepo (task graph + caching across cli / web / schemas / docs).</td></tr>
+    <tr><td>Lint / format</td><td>ESLint + Prettier — contributor familiarity and rules ecosystem over Biome's speed.</td></tr>
+    <tr><td>CLI framework</td><td>Commander — boring on purpose; novelty budget stays in the contracts.</td></tr>
+    <tr><td>Validation</td><td>Zod as source of truth → TS types inferred + JSON Schema generated (Zod v4) and checked into <code>schemas/</code>; conversion guarded by golden tests.</td></tr>
+    <tr><td>DB access</td><td>Kysely — type-safe SQL over any driver dialect; migrations remain hand-written numbered SQL.</td></tr>
+    <tr><td>Local server</td><td>Hono — identical on Node + Bun, tiny, typed; ports to Cloudflare Workers for the cloud tier.</td></tr>
+    <tr><td>LLM judges</td><td>TanStack AI SDK behind attest's own thin judge interface. <b>Risk accepted:</b> very new SDK — contained, swappable (Vercel AI SDK fallback) without touching metric contracts.</td></tr>
+  </table></div>
+
+  <h3>Frontend</h3>
+  <div class="tablewrap"><table>
+    <tr><td>Data / routing</td><td>TanStack Router + Query — type-safe routes, polling/cache for live runs; consistent with TanStack Table + AI SDK.</td></tr>
+    <tr><td>Styling</td><td>Tailwind + shadcn/ui — owned components, fast build-out, clean CSS inlining for static reports.</td></tr>
+    <tr><td>Charts</td><td>Tree-shaken Apache ECharts — canvas perf at 10k cases, works inside self-contained report HTML.</td></tr>
+  </table></div>
+
+  <h3>Quality &amp; delivery</h3>
+  <div class="tablewrap"><table>
+    <tr><td>Testing</td><td>Vitest + Playwright; Node path is the required matrix; no live LLMs in required CI.</td></tr>
+    <tr><td>Releases</td><td>Changesets + GitHub Actions matrix: npm publish + Bun-compiled binaries (darwin/linux × arm64/x64) + checksums + Homebrew tap bump.</td></tr>
+    <tr><td>Docs site</td><td>Astro Starlight — Phase 0 contract specs land here as launch content.</td></tr>
+    <tr><td>Telemetry</td><td>Opt-out anonymous with loud disclosure — command counts / version / OS only, never payloads, prompts, or keys; <code>ATTEST_TELEMETRY=0</code>.</td></tr>
+  </table></div>
+
+  <h3>Cloud (directional — built months 5–7)</h3>
+  <div class="tablewrap"><table>
+    <tr><td>Compute</td><td>Cloudflare Workers (Hono ports as-is); heavy run-bundle ingest via Workers Queues.</td></tr>
+    <tr><td>Database</td><td><b>Cloudflare D1</b> (founder call; Neon excluded). SQLite semantics ≈ local schema/migrations reuse — strong symmetry. Accepted constraints: 10GB/db → per-org DB sharding from day one; analytics via scheduled rollups. Revisit trigger: cross-run analytics outgrowing D1.</td></tr>
+    <tr><td>Object storage</td><td>Cloudflare R2 — large immutable payloads (traces, outputs, report bundles); zero-egress shared reports.</td></tr>
+    <tr><td>Auth</td><td>Open — decided at cloud build time (candidates: Better Auth on Workers, Clerk, CF Access for early beta).</td></tr>
+  </table></div>
+
+  <h2>8 · Roadmap</h2>
+
+  <div class="phase">
+    <div class="when">Weeks 1–2</div><b class="title">Phase 0 — Contracts &amp; Name</b>
+    <ul>
+      <li>Spec agent contract (CLI + HTTP semantics), trace schema v0, config format, metric contract.</li>
+      <li>Final name: candidates + npm/PyPI/domain checks (blocks public README, not development).</li>
+      <li>Specs written as public-ready docs — they double as launch content.</li>
+    </ul>
+  </div>
+
+  <div class="phase">
+    <div class="when">Weeks 2–6</div><b class="title">Phase 1 — Core Runtime</b>
+    <ul>
+      <li>Runner (parallel CLI/HTTP invocation, timeouts, retries, caching) · assertions engine · executable metrics · LLM judges (Anthropic + OpenAI, BYO keys).</li>
+      <li>SQLite run store · <b>run diffing</b> · CI mode (exit codes, thresholds, JSON/JUnit output).</li>
+    </ul>
+    <p class="cut">Cut line: nothing — this is the minimum credible product.</p>
+  </div>
+
+  <div class="phase">
+    <div class="when">Weeks 6–10</div><b class="title">Phase 2 — Dashboard &amp; Agent-Native Evals</b>
+    <ul>
+      <li><code>attest view</code> (runs, drill-down, trace viewer, diff view) · <code>attest report</code> static export.</li>
+      <li>UI test-case editor (writes back to files) · trajectory/tool-call assertions.</li>
+    </ul>
+    <p class="cut">Cut line: UI editor slips before trace viewer or diff view do.</p>
+  </div>
+
+  <div class="phase">
+    <div class="when">Weeks 10–14</div><b class="title">Phase 3 — Simulation, Polish, Launch</b>
+    <ul>
+      <li>Multi-turn simulation (if not solid by week 12 → v0.2 headline; launch does not slip).</li>
+      <li>&lt;5-min quickstart cold-tested on ~5 devs · README + demo video + example agents · docs site · cloud waitlist.</li>
+      <li><b>Launch:</b> Show HN + Product Hunt, staged in advance.</li>
+    </ul>
+  </div>
+
+  <div class="phase">
+    <div class="when">Months 3.5–5</div><b class="title">Post-Launch — Partners &amp; Distribution</b>
+    <ul>
+      <li>10–20 design partners, weekly feedback loop · framework adapters + example repos · first guides + one public benchmark report.</li>
+    </ul>
+  </div>
+
+  <div class="phase">
+    <div class="when">Months 5–7</div><b class="title">Cloud Beta</b>
+    <ul>
+      <li>Hosted dashboards, shared links/comments, <code>attest push</code> · team history + cross-run analytics · auth, orgs, seats + usage metering · free/team pricing live, seeded with design partners.</li>
+    </ul>
+  </div>
+
+  <p><b>Deferred (pull-based):</b> enterprise SSO/RBAC/audit/self-hosted · managed judge inference · UI-first authoring for PM/QA · trace-schema governance.</p>
+
+  <footer>attest foundation · strategy + stack + implementation decisions locked 2026-08-06 · sources: DECISIONS.md, STACK.md (incl. implementation layer), ROADMAP.md, docs/scout-stack-report.md</footer>
+</main>
+</body>
+</html>
