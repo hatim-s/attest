@@ -1,3 +1,4 @@
+export { AttestError } from './error.js';
 export { agentRequestSchema, agentResponseSchema } from './agent.js';
 export type {
   AgentErrorResponse,
