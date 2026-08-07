@@ -39,4 +39,13 @@ const openSqliteHandle = async (path: string): Promise<SqliteHandle> => {
   }
 };
 
-export { openSqliteHandle, type SqliteHandle, type SqliteStatement };
+/** Opens an existing database without migrations, write pragmas, or a creating fallback. */
+const openReadonlySqliteHandle = async (path: string): Promise<SqliteHandle> => {
+  const handle = await openNodeSqliteHandle(path, { readOnly: true });
+  if (!handle) {
+    throw new Error('Read-only run-store inspection requires node:sqlite support.');
+  }
+  return handle;
+};
+
+export { openReadonlySqliteHandle, openSqliteHandle, type SqliteHandle, type SqliteStatement };

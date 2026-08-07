@@ -21,6 +21,38 @@ const readAppliedVersions = async (handle: SqliteHandle): Promise<number[]> => {
   return rows.map((row) => Number(row.version));
 };
 
+/** Verifies an existing store schema without creating tables or applying migrations. */
+const validateReadableSchema = async (handle: SqliteHandle): Promise<void> => {
+  const latestKnownVersion = migrations.at(-1)?.version ?? 0;
+  let appliedVersions: number[];
+  try {
+    appliedVersions = await readAppliedVersions(handle);
+  } catch (error) {
+    throw new StoreError(
+      'SCHEMA_OUTDATED',
+      'Run store schema is missing or unreadable; open it with a compatible attest writer first.',
+      { cause: error },
+    );
+  }
+  const newestAppliedVersion = appliedVersions.at(-1) ?? 0;
+  if (newestAppliedVersion > latestKnownVersion) {
+    throw new StoreError(
+      'SCHEMA_TOO_NEW',
+      `Run store schema version ${newestAppliedVersion} is newer than supported version ${latestKnownVersion}; upgrade attest to open it.`,
+    );
+  }
+  const knownVersions = migrations.map((migration) => migration.version);
+  if (
+    appliedVersions.length !== knownVersions.length ||
+    appliedVersions.some((version, index) => version !== knownVersions[index])
+  ) {
+    throw new StoreError(
+      'SCHEMA_OUTDATED',
+      `Run store schema version ${newestAppliedVersion} is older than supported version ${latestKnownVersion}; open it with a compatible attest writer first.`,
+    );
+  }
+};
+
 /** Applies numbered SQL atomically and rejects databases from newer attest versions (PLAN 1S.2). */
 const migrateToLatest = async (handle: SqliteHandle): Promise<void> => {
   await handle.exec(createMigrationTableSql);
@@ -54,4 +86,4 @@ const migrateToLatest = async (handle: SqliteHandle): Promise<void> => {
   }
 };
 
-export { migrateToLatest };
+export { migrateToLatest, validateReadableSchema };

@@ -10,9 +10,13 @@ import { createSqliteDialect } from './internal/kysely-sqlite-dialect.js';
 import { createLock } from './internal/promise-lock.js';
 import { toCaseRecord, toMetricEvaluation, toRunRecord } from './internal/row-mapping.js';
 import { computeCaseVerdict, computeSummary } from './internal/run-summary.js';
-import { openSqliteHandle, type SqliteHandle } from './internal/sqlite-handle.js';
+import {
+  openReadonlySqliteHandle,
+  openSqliteHandle,
+  type SqliteHandle,
+} from './internal/sqlite-handle.js';
 import { executeStoreOperation } from './internal/store-operation.js';
-import { migrateToLatest } from './migration-runner.js';
+import { migrateToLatest, validateReadableSchema } from './migration-runner.js';
 import type { Database, MetricResultsTable } from './schema.js';
 import {
   StoreError,
@@ -329,4 +333,17 @@ const openStore = async (path: string): Promise<AttestStore> => {
 /** Compatibility wrapper retained until callers migrate to the explicit AttestStore context. */
 const openRunStore = async (path: string): Promise<RunStore> => (await openStore(path)).runs;
 
-export { openRunStore, openStore, type RunStore };
+/** Opens an existing run store for inspection without creating or migrating any file. */
+const openReadonlyRunStore = async (path: string): Promise<RunStore> => {
+  let handle: SqliteHandle | undefined;
+  try {
+    handle = await openReadonlySqliteHandle(resolve(path));
+    await validateReadableSchema(handle);
+    return new SqliteRunStore(new Kysely<Database>({ dialect: createSqliteDialect(handle) }));
+  } catch (error) {
+    await handle?.close();
+    throw error;
+  }
+};
+
+export { openReadonlyRunStore, openRunStore, openStore, type RunStore };

@@ -12,6 +12,7 @@ import type { CacheStore } from './cache.js';
 
 type StoreErrorCode =
   | 'SCHEMA_TOO_NEW'
+  | 'SCHEMA_OUTDATED'
   | 'RUN_NOT_FOUND'
   | 'CASE_NOT_FOUND'
   | 'INVALID_CURSOR'

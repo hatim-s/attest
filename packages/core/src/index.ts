@@ -16,6 +16,7 @@ export {
   BUNDLE_VERSION,
   StoreError,
   exportRunBundle,
+  openReadonlyRunStore,
   openRunStore,
   openStore,
   readRunBundle,
