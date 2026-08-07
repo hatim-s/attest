@@ -7,6 +7,7 @@ import { AGENT_PROTOCOL, type AgentRequest } from '@attest/contracts';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 
 import { invokeHttpAgent } from './http-invoker.js';
+import { acquireFixtureProcessSweepLock } from './test-support/fixture-processes.js';
 import type { InvokeOptions } from './types.js';
 
 const REPOSITORY_ROOT = fileURLToPath(new URL('../../../../', import.meta.url));
@@ -33,6 +34,7 @@ type CanonicalAgentServer = {
 };
 
 let canonicalAgentServer: CanonicalAgentServer | undefined;
+let releaseFixtureProcessSweepLock: (() => Promise<void>) | undefined;
 
 const closeServer = async (server: Server): Promise<void> => {
   await new Promise<void>((resolve, reject) => {
@@ -69,7 +71,8 @@ const startCanonicalAgentServer = async (): Promise<CanonicalAgentServer> => {
   const port = await new Promise<number>((resolve, reject) => {
     const readinessTimer = setTimeout(
       () => reject(new Error('Canonical HTTP agent did not report a listening port')),
-      2_000,
+      // Whole-suite parallel spawn storms can delay agent boot well past 2s.
+      10_000,
     );
     const finish = (result: () => void): void => {
       clearTimeout(readinessTimer);
@@ -114,16 +117,28 @@ const canonicalUrl = (behavior: string): string => {
 };
 
 beforeAll(async () => {
-  canonicalAgentServer = await startCanonicalAgentServer();
-});
+  releaseFixtureProcessSweepLock = await acquireFixtureProcessSweepLock();
+  try {
+    canonicalAgentServer = await startCanonicalAgentServer();
+  } catch (error) {
+    await releaseFixtureProcessSweepLock();
+    releaseFixtureProcessSweepLock = undefined;
+    throw error;
+  }
+}, 30_000);
 
 afterEach(async () => {
   await Promise.all([...servers].map(closeServer));
 });
 
 afterAll(async () => {
-  if (canonicalAgentServer !== undefined) {
-    await stopCanonicalAgentServer(canonicalAgentServer);
+  try {
+    if (canonicalAgentServer !== undefined) {
+      await stopCanonicalAgentServer(canonicalAgentServer);
+    }
+  } finally {
+    await releaseFixtureProcessSweepLock?.();
+    releaseFixtureProcessSweepLock = undefined;
   }
 });
 
@@ -165,6 +180,51 @@ describe('invokeHttpAgent', () => {
       expect(attempt.error.message).toContain(String(status));
     }
   });
+
+  it.each([302, 307, 308])(
+    'does not follow HTTP %i redirects and preserves the terminal status diagnostics',
+    async (status) => {
+      const { url } = await startEdgeServer((response) => {
+        response.statusCode = status;
+        response.setHeader('location', 'http://127.0.0.1:1/not-followed');
+        response.end(JSON.stringify({ redirect: status }));
+      });
+
+      const attempt = await invoke(url);
+
+      expect(attempt).toMatchObject({
+        status: 'invocation_error',
+        diagnostics: { httpStatus: status },
+      });
+      if (attempt.status === 'invocation_error') {
+        expect(attempt.error).toMatchObject({ code: 'http_status' });
+        expect(attempt.error.message).toContain(String(status));
+      }
+    },
+  );
+
+  it.each([302, 404])(
+    'classifies oversized HTTP %i responses from headers before applying the 200 body cap',
+    async (status) => {
+      const payload = 'x'.repeat(options.outputCapBytes * 4);
+      const { url } = await startEdgeServer((response) => {
+        response.statusCode = status;
+        response.setHeader('content-length', String(Buffer.byteLength(payload)));
+        if (status === 302) {
+          response.setHeader('location', 'http://127.0.0.1:1/not-followed');
+        }
+        response.end(payload);
+      });
+
+      const attempt = await invoke(url);
+
+      expect(attempt).toMatchObject({
+        status: 'invocation_error',
+        error: { code: 'http_status' },
+        diagnostics: { httpStatus: status },
+      });
+    },
+  );
 
   it('returns network after a locally closed server refuses the connection', async () => {
     const { server, url } = await startEdgeServer((response) => response.end());
@@ -218,8 +278,29 @@ describe('invokeHttpAgent', () => {
     expect(attempt).toMatchObject({
       status: 'invocation_error',
       error: { code: 'output_cap_exceeded' },
+      rawExcerpt: { truncated: true },
     });
+    expect(attempt.rawExcerpt?.sha256).toMatch(/^[a-f0-9]{64}$/);
     expect(bytesServed).toBeLessThan(cap * 2);
+  });
+
+  it('retains forced-truncated digest evidence when Content-Length exceeds the cap', async () => {
+    const cap = 1_024;
+    const payload = JSON.stringify({ output: 'x'.repeat(cap * 2) });
+    const { url } = await startEdgeServer((response) => {
+      response.setHeader('content-length', String(Buffer.byteLength(payload)));
+      response.end(payload);
+    });
+
+    const attempt = await invoke(url, { outputCapBytes: cap });
+
+    expect(attempt).toMatchObject({
+      status: 'invocation_error',
+      error: { code: 'output_cap_exceeded' },
+      rawExcerpt: { truncated: true },
+    });
+    expect(attempt.rawExcerpt?.text.length).toBeLessThanOrEqual(4096);
+    expect(attempt.rawExcerpt?.sha256).toMatch(/^[a-f0-9]{64}$/);
   });
 
   it.each(['malformed-json', 'partial-stdout'])(

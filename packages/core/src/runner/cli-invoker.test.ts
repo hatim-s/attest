@@ -4,9 +4,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as wait } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { invokeCliAgent } from './cli-invoker.js';
+import {
+  acquireFixtureProcessSweepLock,
+  sweepFixtureProcesses,
+} from './test-support/fixture-processes.js';
 import type { InvocationAttempt, InvokeOptions } from './types.js';
 
 const REPOSITORY_ROOT = fileURLToPath(new URL('../../../../', import.meta.url));
@@ -14,6 +18,25 @@ const CANONICAL_AGENT_PATH = join(REPOSITORY_ROOT, 'conformance/fake-agents/cli-
 const PRIVATE_FIXTURE_DIRECTORY = fileURLToPath(new URL('./fixtures/', import.meta.url));
 const TEST_TIMEOUT_MS = 15_000;
 const HEARTBEAT_SETTLE_MS = 700;
+const FIXTURE_READINESS_TIMEOUT_MS = 30_000;
+const FIXTURE_MARKERS = [
+  CANONICAL_AGENT_PATH,
+  join(PRIVATE_FIXTURE_DIRECTORY, 'envelope-then-exit-23-agent.cjs'),
+  join(PRIVATE_FIXTURE_DIRECTORY, 'ignore-sigterm-agent.cjs'),
+  join(PRIVATE_FIXTURE_DIRECTORY, 'marker-probe-agent.cjs'),
+  join(PRIVATE_FIXTURE_DIRECTORY, 'normal-exit-orphan-agent.cjs'),
+  join(PRIVATE_FIXTURE_DIRECTORY, 'session-escape-agent.cjs'),
+  join(PRIVATE_FIXTURE_DIRECTORY, 'sigterm-forks-setsid-agent.cjs'),
+  'attest-runner-',
+] as const;
+
+let fixtureEscapeAllowance: string | undefined;
+let releaseFixtureProcessSweepLock: (() => Promise<void>) | undefined;
+
+/** Records the one fixture whose post-snapshot escape is intentionally best-effort. */
+const allowFixtureEscape = (reason: string): void => {
+  fixtureEscapeAllowance = reason;
+};
 
 const request: AgentRequest = {
   protocol: 'attest.agent/v1alpha1',
@@ -45,7 +68,9 @@ const createEnvironment = (values: Record<string, string> = {}): Record<string, 
 });
 
 const createOptions = (overrides: Partial<InvokeOptions> = {}): InvokeOptions => ({
-  timeoutMs: 2_000,
+  // Node process startup can exceed 2s when the whole suite spawns in parallel;
+  // failure-classification tests override this with deliberately small values.
+  timeoutMs: 8_000,
   outputCapBytes: 1024 * 1024,
   env: createEnvironment(),
   workingDirectory: REPOSITORY_ROOT,
@@ -69,7 +94,7 @@ const isMissingProcessError = (error: unknown): boolean => {
 
 /** Polls kill(pid, 0) so process cleanup assertions tolerate asynchronous OS reaping. */
 const waitForMissingProcessError = async (processId: number): Promise<unknown> => {
-  const deadline = Date.now() + 2_000;
+  const deadline = Date.now() + FIXTURE_READINESS_TIMEOUT_MS;
   while (Date.now() < deadline) {
     try {
       process.kill(processId, 0);
@@ -94,7 +119,7 @@ const waitForMissingProcessError = async (processId: number): Promise<unknown> =
 
 /** Waits for a hostile fixture to publish its PID before inspecting cleanup behavior. */
 const readHeartbeat = async (heartbeatFile: string): Promise<string> => {
-  const deadline = Date.now() + 2_000;
+  const deadline = Date.now() + FIXTURE_READINESS_TIMEOUT_MS;
   while (Date.now() < deadline) {
     try {
       const contents = await readFile(heartbeatFile, 'utf8');
@@ -160,6 +185,26 @@ const createCanonicalOrphanTimeoutTarget = (): Extract<AgentTarget, { type: 'cli
   };
 };
 
+beforeEach(async () => {
+  releaseFixtureProcessSweepLock = await acquireFixtureProcessSweepLock();
+}, 30_000);
+
+afterEach(async () => {
+  try {
+    const allowance = fixtureEscapeAllowance;
+    fixtureEscapeAllowance = undefined;
+    const killedProcessIds = sweepFixtureProcesses(FIXTURE_MARKERS);
+    if (killedProcessIds.length > 0 && allowance === undefined) {
+      throw new Error(
+        `Fixture teardown killed unexpected processes: ${killedProcessIds.join(', ')}`,
+      );
+    }
+  } finally {
+    await releaseFixtureProcessSweepLock?.();
+    releaseFixtureProcessSweepLock = undefined;
+  }
+});
+
 describe('invokeCliAgent', { timeout: TEST_TIMEOUT_MS }, () => {
   it('writes the request and returns canonical parsed output', async () => {
     const attempt = await invokeCliAgent(createCanonicalTarget('happy'), request, createOptions());
@@ -205,7 +250,9 @@ describe('invokeCliAgent', { timeout: TEST_TIMEOUT_MS }, () => {
           createCanonicalOrphanTimeoutTarget(),
           request,
           createOptions({
-            timeoutMs: 300,
+            // Generous timeout: the orphan must exist and heartbeat before the kill,
+            // even under parallel-suite load, or the test proves nothing.
+            timeoutMs: 5_000,
             terminationGraceMs: 500,
             env: createEnvironment({
               AGENT_BEHAVIOR: 'orphan-child',
@@ -238,6 +285,46 @@ describe('invokeCliAgent', { timeout: TEST_TIMEOUT_MS }, () => {
 
       expect(attempt.error.code).toBe('timeout');
       const processId = parseStderrProcessId(attempt.diagnostics.stderrExcerpt);
+      await expectHeartbeatStopped(heartbeatFile);
+      expect(await waitForMissingProcessError(processId)).toMatchObject({ code: 'ESRCH' });
+    });
+  });
+
+  it('sweeps a detached descendant created by a SIGTERM handler', async () => {
+    allowFixtureEscape('A descendant can fork after the process-tree snapshot.');
+    await withHeartbeatFile(async (heartbeatFile) => {
+      const attempt = requireInvocationError(
+        await invokeCliAgent(
+          createPrivateFixtureTarget('sigterm-forks-setsid-agent.cjs'),
+          request,
+          createOptions({
+            timeoutMs: 300,
+            terminationGraceMs: 700,
+            env: createEnvironment({ ORPHAN_HEARTBEAT_FILE: heartbeatFile }),
+          }),
+        ),
+      );
+
+      expect(attempt.error.code).toBe('timeout');
+      const processId = parseHeartbeatProcessId(await readHeartbeat(heartbeatFile));
+      await expectHeartbeatStopped(heartbeatFile);
+      expect(await waitForMissingProcessError(processId)).toMatchObject({ code: 'ESRCH' });
+    });
+  });
+
+  it('sweeps a detached orphan after a normal zero exit', async () => {
+    await withHeartbeatFile(async (heartbeatFile) => {
+      const attempt = await invokeCliAgent(
+        createPrivateFixtureTarget('normal-exit-orphan-agent.cjs'),
+        request,
+        createOptions({
+          terminationGraceMs: 500,
+          env: createEnvironment({ ORPHAN_HEARTBEAT_FILE: heartbeatFile }),
+        }),
+      );
+
+      expect(attempt.status).toBe('ok');
+      const processId = parseHeartbeatProcessId(await readHeartbeat(heartbeatFile));
       await expectHeartbeatStopped(heartbeatFile);
       expect(await waitForMissingProcessError(processId)).toMatchObject({ code: 'ESRCH' });
     });
@@ -285,6 +372,9 @@ describe('invokeCliAgent', { timeout: TEST_TIMEOUT_MS }, () => {
     );
 
     expect(attempt.error.code).toBe('output_cap_exceeded');
+    expect(attempt.rawExcerpt).toMatchObject({ truncated: true });
+    expect(attempt.rawExcerpt?.text.length).toBeLessThanOrEqual(4096);
+    expect(attempt.rawExcerpt?.sha256).toMatch(/^[a-f0-9]{64}$/);
     expect(performance.now() - startedAt).toBeLessThan(3_000);
   });
 
@@ -332,6 +422,8 @@ describe('invokeCliAgent', { timeout: TEST_TIMEOUT_MS }, () => {
       );
 
       expect(attempt.error.code).toBe('invalid_envelope');
+      expect(attempt.rawExcerpt?.text.length).toBeGreaterThan(0);
+      expect(attempt.warnings).toEqual([]);
     },
   );
 
@@ -340,7 +432,6 @@ describe('invokeCliAgent', { timeout: TEST_TIMEOUT_MS }, () => {
       createCanonicalTarget('slow-drip'),
       request,
       createOptions({
-        timeoutMs: 2_000,
         env: createEnvironment({ AGENT_DRIP_MS: '1' }),
       }),
     );
@@ -388,6 +479,7 @@ describe('invokeCliAgent', { timeout: TEST_TIMEOUT_MS }, () => {
 
     expect(attempt.error.code).toBe('nonzero_exit');
     expect(attempt.diagnostics.exitCode).toBe(3);
+    expect(attempt.rawExcerpt?.text).toContain(request.protocol);
   });
 
   it('classifies a valid envelope followed by exit 23 as nonzero_exit', async () => {
@@ -430,6 +522,9 @@ describe('invokeCliAgent', { timeout: TEST_TIMEOUT_MS }, () => {
       access(join(PRIVATE_FIXTURE_DIRECTORY, 'session-escape-agent.cjs')),
       access(join(PRIVATE_FIXTURE_DIRECTORY, 'ignore-sigterm-agent.cjs')),
       access(join(PRIVATE_FIXTURE_DIRECTORY, 'envelope-then-exit-23-agent.cjs')),
+      access(join(PRIVATE_FIXTURE_DIRECTORY, 'sigterm-forks-setsid-agent.cjs')),
+      access(join(PRIVATE_FIXTURE_DIRECTORY, 'normal-exit-orphan-agent.cjs')),
+      access(join(PRIVATE_FIXTURE_DIRECTORY, 'marker-probe-agent.cjs')),
     ]);
   });
 });

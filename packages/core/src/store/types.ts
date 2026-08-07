@@ -1,7 +1,10 @@
 import {
   AttestError,
   type AgentRequest,
+  type CaseOutcome,
   type ContractWarning,
+  type InvocationErrorCode,
+  type RawExcerpt,
   type Trace,
 } from '@attest/contracts';
 
@@ -36,9 +39,6 @@ class StoreError extends AttestError {
 /** Describes the lifecycle states persisted for a run (PLAN 1S.2). */
 type RunStatus = 'running' | 'completed' | 'failed' | 'cancelled';
 
-/** Describes the terminal invocation outcome persisted for a case (PLAN 1S.2). */
-type CaseOutcome = 'completed' | 'invocation_error' | 'timeout' | 'cancelled';
-
 /** Carries reproducibility metadata captured when a run begins (PLAN 1S.3). */
 interface RunMetadata {
   configVersion: string;
@@ -49,28 +49,23 @@ interface RunMetadata {
   labels?: Record<string, string>;
 }
 
-/** Enumerates runner-aligned invocation failures persisted without translation loss. */
-type StoredInvocationErrorCode =
-  | 'spawn_failed'
-  | 'timeout'
-  | 'output_cap_exceeded'
-  | 'nonzero_exit'
-  | 'http_status'
-  | 'network'
-  | 'invalid_envelope'
-  | 'cancelled';
+/** @deprecated Use InvocationErrorCode from @attest/contracts. */
+type StoredInvocationErrorCode = InvocationErrorCode;
 
 /** Captures bounded process and transport diagnostics for one invocation attempt. */
 interface StoredDiagnostics {
   stderrExcerpt?: string;
   exitCode?: number;
   httpStatus?: number;
+  unreapedProcessIds?: number[];
 }
 
 /** Preserves one runner attempt for retry analysis required by the agent contract. */
 type StoredAttempt = {
   diagnostics: StoredDiagnostics;
   durationMs: number;
+  rawExcerpt?: RawExcerpt;
+  warnings: ContractWarning[];
 } & (
   | { status: 'ok' }
   | {
@@ -93,7 +88,7 @@ interface StoredCaseBase {
   expectedMetrics: string[];
 }
 
-/** Captures one runner-aligned execution using a runtime-validated terminal discriminant. */
+/** Captures one runner-aligned execution using the terminal union canonically defined in contracts. */
 type StoredCaseExecution = StoredCaseBase &
   (
     | { outcome: 'completed'; response: unknown; trace?: Trace }

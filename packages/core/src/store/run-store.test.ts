@@ -103,16 +103,17 @@ describe('RunStore', () => {
         trace,
       }),
       warnings: [{ path: 'output.extra', message: 'preserved', code: 'unknown_field' }],
-      diagnostics: { stderrExcerpt: 'diagnostic', exitCode: 0 },
+      diagnostics: { stderrExcerpt: 'diagnostic', exitCode: 0, unreapedProcessIds: [1234] },
       attempts: [
         {
           status: 'invocation_error',
           errorCode: 'network',
           errorMessage: 'retry',
           durationMs: 4,
-          diagnostics: { httpStatus: 503 },
+          diagnostics: { httpStatus: 503, unreapedProcessIds: [5678] },
+          warnings: [],
         },
-        { status: 'ok', durationMs: 6, diagnostics: {} },
+        { status: 'ok', durationMs: 6, diagnostics: {}, warnings: [] },
       ],
     };
     const metric = evaluatedMetric('quality', true);
@@ -150,6 +151,7 @@ describe('RunStore', () => {
         trace: { schema: TRACE_SCHEMA_VERSION, trace_id: 'invalid', spans: [] },
       },
       { ...valid, attempts: undefined },
+      { ...valid, diagnostics: { unreapedProcessIds: [0, 1.5] } },
     ];
     for (const invalid of matrix) {
       await expect(

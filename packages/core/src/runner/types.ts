@@ -1,4 +1,13 @@
-import type { AgentRequest, AgentResponse, ContractWarning, Trace } from '@attest/contracts';
+import type {
+  AgentRequest,
+  AgentResponse,
+  CaseDefinition,
+  CaseOutcome,
+  ContractWarning,
+  ParseReport,
+  RawExcerpt,
+  Trace,
+} from '@attest/contracts';
 
 import type { AgentInvocationError } from './errors.js';
 
@@ -10,9 +19,9 @@ type InvokeOptions = {
   timeoutMs: number;
   /** Maximum stdout / response-body size in bytes (spec default 10 MB). */
   outputCapBytes: number;
-  /** Fully resolved environment for the child process: allowlist + ATTEST_* + base set. */
+  /** Fully resolved environment for the child process: allowlist + ATTEST_* + synthesized base. */
   env: Record<string, string>;
-  /** Fresh temporary directory the CLI transport uses as cwd; owned by the caller. */
+  /** Fresh per-attempt directory the CLI transport uses as cwd; owned by the invoker. */
   workingDirectory?: string;
   /**
    * SIGTERM→SIGKILL grace window in milliseconds (spec: 5 000). Overridable so
@@ -21,56 +30,79 @@ type InvokeOptions = {
   terminationGraceMs?: number;
 };
 
+/** Options for the retrying dispatch entry point, on top of single-attempt invocation. */
+type InvokeAgentOptions = InvokeOptions & {
+  /** Invocation-error retry budget (spec default 0); agent-reported errors never retry. */
+  retries: number;
+};
+
 /** Transport-level metadata recorded for one invocation attempt. */
 type InvocationDiagnostics = {
   /** Last 4 KB of stderr for CLI agents; surfaced in reports, never parsed. */
   stderrExcerpt?: string;
   exitCode?: number;
   httpStatus?: number;
+  /** Snapshotted descendants that survived SIGKILL verification, if any (best-effort containment). */
+  unreapedProcessIds?: number[];
 };
 
-/** One transport attempt: either a raw (unvalidated) envelope or an invocation error. */
-type InvocationAttempt =
-  | { status: 'ok'; raw: unknown; diagnostics: InvocationDiagnostics; durationMs: number }
+/**
+ * One transport attempt. Every attempt — including failures — retains bounded
+ * payload evidence and parse warnings so runs are deterministic and auditable
+ * per the agent contract's recording requirement.
+ */
+type InvocationAttempt = {
+  diagnostics: InvocationDiagnostics;
+  durationMs: number;
+  /** Bounded transport payload evidence; hash+prefix when the cap truncated it. */
+  rawExcerpt?: RawExcerpt;
+  warnings: ContractWarning[];
+} & (
   | {
-      status: 'invocation_error';
-      error: AgentInvocationError;
-      diagnostics: InvocationDiagnostics;
-      durationMs: number;
-    };
+      status: 'ok';
+      raw: unknown;
+      /** Populated by invokeAgent after envelope validation; transports leave it unset. */
+      report?: ParseReport<AgentResponse>;
+    }
+  | { status: 'invocation_error'; error: AgentInvocationError }
+);
 
 /** Final result of `invokeAgent` after retries; `attempts` preserves every try for determinism. */
 type InvocationResult = InvocationAttempt & { attempts: InvocationAttempt[] };
 
-/** Terminal classification of one case after invocation, ingestion, and retries. */
-type CaseOutcome = 'completed' | 'invocation_error' | 'timeout' | 'cancelled';
-
-/**
- * Everything downstream consumers (metrics, store, reports) need about one executed case.
- *
- * Field layout deliberately mirrors the store package's `StoredCaseExecution` so
- * persistence is a near-noop mapping (error object → code/message pair).
- */
-type CaseExecution = {
+/** Fields shared by every terminal case state; layout mirrors the store's persisted shape. */
+type CaseExecutionBase = {
   caseId: string;
   suiteName: string;
   request: AgentRequest;
-  outcome: CaseOutcome;
-  /** Present when outcome is `completed`; carries the validated envelope + contract warnings. */
-  response?: AgentResponse;
-  warnings: ContractWarning[];
-  /** Present when the completed response embedded a valid trace. */
-  trace?: Trace;
-  /** Present when outcome is not `completed`. */
-  invocationError?: AgentInvocationError;
-  diagnostics: InvocationDiagnostics;
-  /** Every transport attempt including retries, preserved for determinism per the agent contract. */
-  attempts: InvocationAttempt[];
+  /**
+   * Transient full case document (including `expected`) so metrics can run
+   * before persistence; the store adapter deliberately drops it.
+   */
+  caseDefinition: CaseDefinition;
   /** Metric names resolved for this case (per-case override, else suite metrics). */
   expectedMetrics: string[];
+  /** Every transport attempt including retries, preserved per the agent contract. */
+  attempts: InvocationAttempt[];
+  diagnostics: InvocationDiagnostics;
+  warnings: ContractWarning[];
   startedAt: string;
   durationMs: number;
 };
+
+/**
+ * Everything downstream consumers (metrics, store, reports) need about one
+ * executed case, discriminated on `outcome` so completed cases provably carry
+ * a response and failed ones provably carry the invocation error.
+ */
+type CaseExecution = CaseExecutionBase &
+  (
+    | { outcome: 'completed'; response: AgentResponse; trace?: Trace }
+    | {
+        outcome: Exclude<CaseOutcome, 'completed'>;
+        invocationError: AgentInvocationError;
+      }
+  );
 
 /** Progress signal emitted as cases finish; ordering follows completion, not config order. */
 type RunProgressEvent = {
@@ -82,6 +114,8 @@ type RunProgressEvent = {
 /** Controls a whole-config execution pass. */
 type ExecuteOptions = {
   runId: string;
+  /** Directory dataset paths resolve against (usually the config file's directory). */
+  baseDirectory: string;
   signal?: AbortSignal;
   /** Overrides `run.concurrency` from config (default 4). */
   concurrency?: number;
@@ -90,11 +124,12 @@ type ExecuteOptions = {
 
 export {
   type CaseExecution,
-  type CaseOutcome,
+  type CaseExecutionBase,
   type ExecuteOptions,
   type InvocationAttempt,
   type InvocationDiagnostics,
   type InvocationResult,
+  type InvokeAgentOptions,
   type InvokeOptions,
   type RunProgressEvent,
 };

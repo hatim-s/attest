@@ -64,26 +64,29 @@ The runner spawns your command once per invocation:
 - **stdout**: MUST be exactly one JSON response envelope. All logging goes to **stderr** (surfaced in reports, never parsed).
 - **exit code**: `0` when a valid envelope was written (even if it contains `error`). Any other exit code is an **invocation error**.
 - **cwd**: a fresh temporary directory per invocation. Do not rely on persistent local state.
-- **environment**: only variables allowlisted in config (`agent.env`) are forwarded, plus `ATTEST_RUN_ID`, `ATTEST_CASE_ID`, `ATTEST_PROTOCOL`.
+- **environment**: the runner synthesizes `HOME` and `TMPDIR` beneath the per-attempt directory, inherits `PATH` after filtering it to absolute entries, and sets `LC_ALL=C` for a stable locale. Only variables allowlisted in config (`agent.env`) forward their real host values as explicit opt-in; those values override synthesized values. It also sets `ATTEST_RUN_ID`, `ATTEST_CASE_ID`, and `ATTEST_PROTOCOL`. Nothing else from the parent environment leaks through.
 
 ## HTTP transport
 
 - `POST <agent.url>` with the request envelope as JSON body (`Content-Type: application/json`).
 - `200` with a response envelope body = success (including agent-reported `error`).
+- Redirects are not followed; any `3xx` is a terminal **invocation error**.
 - Any other status, malformed body, or network failure is an **invocation error**. `5xx` and network failures are retried per config; `4xx` is not.
 - Your endpoint must tolerate concurrent requests up to the run's configured concurrency.
 
 ## Execution semantics
 
-| Concern     | Behavior                                                                                                                                                                     |
-| ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Timeout     | `agent.timeout_ms` per invocation (default 60 000). CLI: SIGTERM, 5 s grace, then SIGKILL to the **entire process tree**. HTTP: request aborted. Timeout = invocation error. |
-| Retries     | `agent.retries` (default 0) applies to invocation errors only — never to agent-reported `error` envelopes.                                                                   |
-| Output cap  | stdout / response body capped (default 10 MB). Exceeding the cap = invocation error.                                                                                         |
-| Concurrency | Cases run in parallel (`run.concurrency`). No ordering guarantees between cases.                                                                                             |
-| Determinism | The runner records request, response, timing, and exit metadata for every invocation, including retries.                                                                     |
+| Concern     | Behavior                                                                                                                                                                                 |
+| ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Timeout     | `agent.timeout_ms` per invocation (default 60 000). CLI: SIGTERM, 5 s grace, then SIGKILL using best-effort process-tree termination. HTTP: request aborted. Timeout = invocation error. |
+| Retries     | `agent.retries` (default 0) applies to invocation errors only — never to agent-reported `error` envelopes.                                                                               |
+| Output cap  | stdout / response body capped (default 10 MB). Exceeding the cap = invocation error.                                                                                                     |
+| Concurrency | Cases run in parallel (`run.concurrency`). No ordering guarantees between cases.                                                                                                         |
+| Determinism | The runner records request, response, timing, and exit metadata for every invocation, including retries.                                                                                 |
 
 **Invocation error vs case failure**: invocation errors (spawn failure, timeout, bad envelope, non-zero exit, HTTP 5xx) mean attest could not evaluate the case and are reported as infrastructure problems. A well-formed `error` envelope or failing metric scores are results.
+
+**Containment**: CLI process-tree termination is **best-effort**. Processes that daemonize into a new session after the pre-kill snapshot, and children spawned after that snapshot, can escape. Batched start-time and command identity checks are best-effort **detection** that reduces PID-reuse risk, not a prevention guarantee: same-second reuse by the same command can match, and a process can change between the check and the signal. Unreaped or unverified candidates are reported in diagnostics.
 
 ## Versioning
 

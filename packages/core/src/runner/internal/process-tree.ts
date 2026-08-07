@@ -2,6 +2,21 @@ import { type ChildProcess, spawn } from 'node:child_process';
 import { setTimeout as wait } from 'node:timers/promises';
 
 const PROCESS_EXIT_POLL_INTERVAL_MS = 25;
+const PROCESS_SNAPSHOT_TIMEOUT_MS = 2000;
+const SWEEP_DEADLINE_MS = 5000;
+
+type ProcessIdentity = {
+  processId: number;
+  startedAt: string;
+  command: string;
+};
+
+type ProcessRow = ProcessIdentity & { parentProcessId: number };
+
+const PROCESS_ROW_PATTERN =
+  /^\s*(\d+)\s+(\d+)\s+(\w{3}\s+\w{3}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2}\s+\d{4})\s+(.+?)\s*$/;
+const PROCESS_IDENTITY_PATTERN =
+  /^\s*(\d+)\s+(\w{3}\s+\w{3}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2}\s+\d{4})\s+(.+?)\s*$/;
 
 const isMissingProcess = (error: unknown): boolean => {
   return error instanceof Error && 'code' in error && error.code === 'ESRCH';
@@ -16,7 +31,7 @@ const signalProcessGroup = (processId: number, signal: NodeJS.Signals): boolean 
     process.kill(-processId, signal);
     return true;
   } catch (error) {
-    if (isMissingProcess(error)) {
+    if (isMissingProcess(error) || isPermissionDenied(error)) {
       return false;
     }
 
@@ -29,7 +44,7 @@ const signalProcess = (processId: number, signal: NodeJS.Signals): boolean => {
     process.kill(processId, signal);
     return true;
   } catch (error) {
-    if (isMissingProcess(error)) {
+    if (isMissingProcess(error) || isPermissionDenied(error)) {
       return false;
     }
 
@@ -45,7 +60,6 @@ const isProcessGroupAlive = (processId: number): boolean => {
     if (isMissingProcess(error)) {
       return false;
     }
-
     if (isPermissionDenied(error)) {
       return true;
     }
@@ -54,111 +68,277 @@ const isProcessGroupAlive = (processId: number): boolean => {
   }
 };
 
-const isProcessAlive = (processId: number): boolean => {
+/**
+ * Runs one bounded ps query. A wedged ps must never stall agent termination, so expiry kills the
+ * snapshot child and deliberately degrades cleanup to process-group-only best effort.
+ */
+const readProcessListing = async (
+  argumentsList: readonly string[],
+  deadline = Date.now() + PROCESS_SNAPSHOT_TIMEOUT_MS,
+): Promise<string | undefined> => {
+  const timeoutMs = Math.min(PROCESS_SNAPSHOT_TIMEOUT_MS, deadline - Date.now());
+  if (timeoutMs <= 0) {
+    return undefined;
+  }
+
+  let processSnapshot: ChildProcess;
   try {
-    process.kill(processId, 0);
-    return true;
-  } catch (error) {
-    if (isMissingProcess(error)) {
-      return false;
-    }
-
-    if (isPermissionDenied(error)) {
-      return true;
-    }
-
-    throw error;
+    processSnapshot = spawn('ps', [...argumentsList], { stdio: ['ignore', 'pipe', 'ignore'] });
+  } catch {
+    // Sandboxes and exhausted hosts may reject ps synchronously; containment safely degrades.
+    return undefined;
   }
-};
-
-const haveAllProcessesExited = (processId: number, descendantProcessIds: number[]): boolean => {
-  return (
-    !isProcessGroupAlive(processId) &&
-    descendantProcessIds.every((descendantProcessId) => !isProcessAlive(descendantProcessId))
-  );
-};
-
-const waitForProcessTreeExit = async (
-  processId: number,
-  descendantProcessIds: number[],
-  graceMs: number,
-): Promise<boolean> => {
-  const deadline = Date.now() + graceMs;
-
-  while (Date.now() < deadline) {
-    if (haveAllProcessesExited(processId, descendantProcessIds)) {
-      return true;
-    }
-
-    await wait(Math.min(PROCESS_EXIT_POLL_INTERVAL_MS, deadline - Date.now()));
-  }
-
-  return haveAllProcessesExited(processId, descendantProcessIds);
-};
-
-const readProcessSnapshot = async (): Promise<string> => {
-  const processSnapshot = spawn('ps', ['-Ao', 'pid=,ppid='], {
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
   const standardOutputChunks: Buffer[] = [];
-  const standardErrorChunks: Buffer[] = [];
+  let timedOut = false;
+  processSnapshot.stdout?.on('data', (chunk: Buffer) => standardOutputChunks.push(chunk));
 
-  processSnapshot.stdout.on('data', (chunk: Buffer) => standardOutputChunks.push(chunk));
-  processSnapshot.stderr.on('data', (chunk: Buffer) => standardErrorChunks.push(chunk));
-
-  return await new Promise<string>((resolve, reject) => {
-    processSnapshot.once('error', reject);
+  return await new Promise<string | undefined>((resolve) => {
+    const timeout = setTimeout(() => {
+      timedOut = true;
+      processSnapshot.kill('SIGKILL');
+    }, timeoutMs);
+    processSnapshot.once('error', () => {
+      clearTimeout(timeout);
+      resolve(undefined);
+    });
     processSnapshot.once('close', (exitCode) => {
-      if (exitCode === 0) {
-        resolve(Buffer.concat(standardOutputChunks).toString('utf8'));
+      clearTimeout(timeout);
+      if (timedOut || exitCode !== 0) {
+        resolve(undefined);
         return;
       }
 
-      const standardError = Buffer.concat(standardErrorChunks).toString('utf8').trim();
-      reject(new Error(`Failed to snapshot processes with ps: ${standardError || exitCode}`));
+      resolve(Buffer.concat(standardOutputChunks).toString('utf8'));
     });
   });
 };
 
-/**
- * Snapshots the complete descendant closure using one POSIX process-table read.
- *
- * The execution semantics in docs/specs/agent-contract.md require full process-tree cleanup.
- * This snapshot must happen before SIGTERM because descendants reparent to init/launchd once
- * their parent dies, severing the parent-child relationship needed to discover escapees.
- */
-const listDescendantProcessIds = async (rootProcessId: number): Promise<number[]> => {
-  const processSnapshot = await readProcessSnapshot();
-  const childProcessIdsByParent = new Map<number, number[]>();
-
-  for (const line of processSnapshot.split('\n')) {
-    const [processIdText, parentProcessIdText] = line.trim().split(/\s+/);
-    const processId = Number(processIdText);
-    const parentProcessId = Number(parentProcessIdText);
-    if (!Number.isSafeInteger(processId) || !Number.isSafeInteger(parentProcessId)) {
-      continue;
+const parseProcessRows = (snapshotText: string): ProcessRow[] => {
+  return snapshotText.split('\n').flatMap((line) => {
+    const match = PROCESS_ROW_PATTERN.exec(line);
+    if (match === null) {
+      return [];
     }
 
-    const childProcessIds = childProcessIdsByParent.get(parentProcessId) ?? [];
-    childProcessIds.push(processId);
-    childProcessIdsByParent.set(parentProcessId, childProcessIds);
-  }
+    const processId = Number(match[1]);
+    const parentProcessId = Number(match[2]);
+    const startedAt = match[3];
+    const command = match[4];
+    if (
+      !Number.isSafeInteger(processId) ||
+      !Number.isSafeInteger(parentProcessId) ||
+      startedAt === undefined ||
+      command === undefined
+    ) {
+      return [];
+    }
 
-  const descendantProcessIds: number[] = [];
-  const pendingParentProcessIds = [rootProcessId];
-  for (let index = 0; index < pendingParentProcessIds.length; index += 1) {
-    const childProcessIds = childProcessIdsByParent.get(pendingParentProcessIds[index] ?? -1) ?? [];
-    descendantProcessIds.push(...childProcessIds);
-    pendingParentProcessIds.push(...childProcessIds);
-  }
-
-  return descendantProcessIds;
+    return [{ processId, parentProcessId, startedAt, command }];
+  });
 };
 
 /**
- * Starts a CLI agent in its own process group so the execution semantics in
- * docs/specs/agent-contract.md can terminate every process created by the agent.
+ * Parses one ps fixture into the complete descendant closure without performing I/O. Identity is
+ * retained for best-effort PID-reuse detection before descendant signalling.
  */
+const parseProcessSnapshot = (snapshotText: string, rootProcessId: number): ProcessIdentity[] => {
+  const childRowsByParent = new Map<number, ProcessRow[]>();
+  for (const row of parseProcessRows(snapshotText)) {
+    const childRows = childRowsByParent.get(row.parentProcessId) ?? [];
+    childRows.push(row);
+    childRowsByParent.set(row.parentProcessId, childRows);
+  }
+
+  const descendants: ProcessIdentity[] = [];
+  const visitedProcessIds = new Set([rootProcessId]);
+  const pendingParentProcessIds = [rootProcessId];
+  for (let index = 0; index < pendingParentProcessIds.length; index += 1) {
+    const parentProcessId = pendingParentProcessIds[index];
+    const childRows = childRowsByParent.get(parentProcessId ?? -1) ?? [];
+    for (const childRow of childRows) {
+      if (visitedProcessIds.has(childRow.processId)) {
+        continue;
+      }
+
+      visitedProcessIds.add(childRow.processId);
+      descendants.push({
+        processId: childRow.processId,
+        startedAt: childRow.startedAt,
+        command: childRow.command,
+      });
+      pendingParentProcessIds.push(childRow.processId);
+    }
+  }
+
+  return descendants;
+};
+
+const readProcessSnapshot = async (deadline?: number): Promise<string | undefined> => {
+  return readProcessListing(['-Ao', 'pid=,ppid=,lstart=,comm='], deadline);
+};
+
+const listDescendantProcesses = async (rootProcessId: number): Promise<ProcessIdentity[]> => {
+  const snapshotText = await readProcessSnapshot();
+  return snapshotText === undefined ? [] : parseProcessSnapshot(snapshotText, rootProcessId);
+};
+
+/** Parses the output of one batched identity query. */
+const parseIdentitySnapshot = (snapshotText: string): ProcessIdentity[] => {
+  return snapshotText.split('\n').flatMap((line) => {
+    const match = PROCESS_IDENTITY_PATTERN.exec(line);
+    const processId = Number(match?.[1]);
+    const startedAt = match?.[2];
+    const command = match?.[3];
+    return Number.isSafeInteger(processId) && startedAt !== undefined && command !== undefined
+      ? [{ processId, startedAt, command }]
+      : [];
+  });
+};
+
+const identityKey = (identity: ProcessIdentity): string => {
+  return `${String(identity.processId)}\u0000${identity.startedAt}\u0000${identity.command}`;
+};
+
+const mergeIdentities = (
+  identitiesByKey: Map<string, ProcessIdentity>,
+  identities: readonly ProcessIdentity[],
+): void => {
+  for (const identity of identities) {
+    identitiesByKey.set(identityKey(identity), identity);
+  }
+};
+
+const readMatchingIdentities = async (
+  identities: readonly ProcessIdentity[],
+  deadline: number,
+): Promise<ProcessIdentity[] | undefined> => {
+  if (identities.length === 0) {
+    return [];
+  }
+
+  const processIds = [...new Set(identities.map(({ processId }) => processId))];
+  const snapshotText = await readProcessListing(
+    ['-o', 'pid=,lstart=,comm=', '-p', processIds.join(',')],
+    deadline,
+  );
+  if (snapshotText === undefined) {
+    return undefined;
+  }
+
+  const currentByProcessId = new Map(
+    parseIdentitySnapshot(snapshotText).map((identity) => [identity.processId, identity]),
+  );
+  return identities.filter((identity) => {
+    const current = currentByProcessId.get(identity.processId);
+    return current?.startedAt === identity.startedAt && current.command === identity.command;
+  });
+};
+
+const discoverDescendants = async (
+  rootProcessId: number,
+  knownIdentities: readonly ProcessIdentity[],
+  deadline: number,
+): Promise<ProcessIdentity[] | undefined> => {
+  const snapshotText = await readProcessSnapshot(deadline);
+  if (snapshotText === undefined) {
+    return undefined;
+  }
+
+  const roots = [rootProcessId, ...knownIdentities.map(({ processId }) => processId)];
+  return roots.flatMap((processId) => parseProcessSnapshot(snapshotText, processId));
+};
+
+const waitThroughTerminationGrace = async (
+  rootProcessId: number,
+  identitiesByKey: Map<string, ProcessIdentity>,
+  graceDeadline: number,
+  sweepDeadline: number,
+): Promise<boolean> => {
+  while (Date.now() < graceDeadline && Date.now() < sweepDeadline) {
+    const identities = [...identitiesByKey.values()];
+    const discovered = await discoverDescendants(rootProcessId, identities, sweepDeadline);
+    if (discovered === undefined) {
+      return false;
+    }
+    const newIdentities = discovered.filter(
+      (identity) => !identitiesByKey.has(identityKey(identity)),
+    );
+    mergeIdentities(identitiesByKey, newIdentities);
+
+    const survivors = await readMatchingIdentities([...identitiesByKey.values()], sweepDeadline);
+    if (survivors === undefined) {
+      return false;
+    }
+    const newIdentityKeys = new Set(newIdentities.map(identityKey));
+    for (const identity of survivors) {
+      if (newIdentityKeys.has(identityKey(identity))) {
+        signalProcess(identity.processId, 'SIGTERM');
+      }
+    }
+    if (!isProcessGroupAlive(rootProcessId) && survivors.length === 0) {
+      return true;
+    }
+
+    await wait(
+      Math.min(
+        PROCESS_EXIT_POLL_INTERVAL_MS,
+        Math.max(0, graceDeadline - Date.now()),
+        Math.max(0, sweepDeadline - Date.now()),
+      ),
+    );
+  }
+  return true;
+};
+
+const verifyKilledIdentities = async (
+  identities: readonly ProcessIdentity[],
+  deadline: number,
+): Promise<number[]> => {
+  let survivors = await readMatchingIdentities(identities, deadline);
+  if (survivors === undefined) {
+    return identities.map(({ processId }) => processId);
+  }
+  while (survivors.length > 0 && Date.now() < deadline) {
+    await wait(Math.min(PROCESS_EXIT_POLL_INTERVAL_MS, deadline - Date.now()));
+    const nextSurvivors = await readMatchingIdentities(survivors, deadline);
+    if (nextSurvivors === undefined) {
+      return survivors.map(({ processId }) => processId);
+    }
+    survivors = nextSurvivors;
+  }
+  return survivors.map(({ processId }) => processId);
+};
+
+const waitForIdentityExit = async (
+  identities: readonly ProcessIdentity[],
+  graceDeadline: number,
+  sweepDeadline: number,
+): Promise<ProcessIdentity[] | undefined> => {
+  let survivors = await readMatchingIdentities(identities, sweepDeadline);
+  while (survivors !== undefined && survivors.length > 0 && Date.now() < graceDeadline) {
+    await wait(
+      Math.min(
+        PROCESS_EXIT_POLL_INTERVAL_MS,
+        Math.max(0, graceDeadline - Date.now()),
+        Math.max(0, sweepDeadline - Date.now()),
+      ),
+    );
+    survivors = await readMatchingIdentities(survivors, sweepDeadline);
+  }
+  return survivors;
+};
+
+const isDirectChildAlive = (child: ChildProcess): boolean => {
+  return child.exitCode === null && child.signalCode === null;
+};
+
+const signalIdentities = (identities: readonly ProcessIdentity[], signal: NodeJS.Signals): void => {
+  for (const identity of identities) {
+    signalProcess(identity.processId, signal);
+  }
+};
+
+/** Starts a CLI agent in its own process group for best-effort macOS/Linux tree containment. */
 const spawnInProcessGroup = (
   command: readonly string[],
   options: { cwd: string; env: Record<string, string> },
@@ -177,37 +357,102 @@ const spawnInProcessGroup = (
 };
 
 /**
- * Terminates and reaps an agent process tree with the grace period required by
- * docs/specs/agent-contract.md, including descendants that escaped into another session.
- *
- * Processes that both daemonize and are spawned after the snapshot can still escape. That
- * inherent race requires OS-level containment and should only be revisited with such containment.
+ * Performs the hardened best-effort cleanup sweep required by docs/specs/agent-contract.md on every
+ * terminal path. Batched identity checks are best-effort detection that reduces PID-reuse risk;
+ * same-second same-command reuse and check-to-kill races remain possible. Verified survivors and
+ * candidates left when the five-second sweep deadline expires are returned for diagnostics.
  */
 const killProcessTree = async (
   child: ChildProcess,
-  options: { graceMs: number },
-): Promise<void> => {
-  const processId = child.pid;
-  if (processId === undefined) {
-    return;
+  options: {
+    graceMs: number;
+    initialDescendants?: readonly ProcessIdentity[];
+    /** Whether the direct child is still owned and live, allowing process-group signalling. */
+    signalProcessGroup: boolean;
+  },
+): Promise<number[]> => {
+  const rootProcessId = child.pid;
+  if (rootProcessId === undefined) {
+    return [];
   }
 
-  const descendantProcessIds = await listDescendantProcessIds(processId);
-  signalProcessGroup(processId, 'SIGTERM');
-  for (const descendantProcessId of descendantProcessIds) {
-    signalProcess(descendantProcessId, 'SIGTERM');
-  }
-
-  if (await waitForProcessTreeExit(processId, descendantProcessIds, options.graceMs)) {
-    return;
-  }
-
-  signalProcessGroup(processId, 'SIGKILL');
-  for (const descendantProcessId of descendantProcessIds) {
-    if (isProcessAlive(descendantProcessId)) {
-      signalProcess(descendantProcessId, 'SIGKILL');
+  const sweepDeadline = Date.now() + SWEEP_DEADLINE_MS;
+  const graceDeadline = Math.min(sweepDeadline, Date.now() + options.graceMs);
+  const identitiesByKey = new Map<string, ProcessIdentity>();
+  mergeIdentities(identitiesByKey, options.initialDescendants ?? []);
+  let discoveryAvailable = true;
+  if (options.signalProcessGroup) {
+    const latestDescendants = await discoverDescendants(rootProcessId, [], sweepDeadline);
+    if (latestDescendants !== undefined) {
+      mergeIdentities(identitiesByKey, latestDescendants);
+    } else {
+      discoveryAvailable = false;
+    }
+    if (isDirectChildAlive(child)) {
+      signalProcessGroup(rootProcessId, 'SIGTERM');
     }
   }
+
+  const identities = [...identitiesByKey.values()];
+  if (!discoveryAvailable) {
+    await wait(Math.max(0, graceDeadline - Date.now()));
+    if (isDirectChildAlive(child)) {
+      signalProcessGroup(rootProcessId, 'SIGKILL');
+    }
+    return identities.map(({ processId }) => processId);
+  }
+  const termMatches = await readMatchingIdentities(identities, sweepDeadline);
+  if (termMatches === undefined) {
+    if (options.signalProcessGroup && isDirectChildAlive(child)) {
+      signalProcessGroup(rootProcessId, 'SIGKILL');
+    }
+    return identities.map(({ processId }) => processId);
+  }
+  signalIdentities(termMatches, 'SIGTERM');
+
+  if (options.signalProcessGroup) {
+    const snapshotsAvailable = await waitThroughTerminationGrace(
+      rootProcessId,
+      identitiesByKey,
+      graceDeadline,
+      sweepDeadline,
+    );
+    if (!snapshotsAvailable) {
+      if (isDirectChildAlive(child)) {
+        signalProcessGroup(rootProcessId, 'SIGKILL');
+      }
+      return [...identitiesByKey.values()].map(({ processId }) => processId);
+    }
+    if (isDirectChildAlive(child)) {
+      signalProcessGroup(rootProcessId, 'SIGKILL');
+    }
+  } else {
+    const normalExitSurvivors = await waitForIdentityExit(
+      termMatches,
+      graceDeadline,
+      sweepDeadline,
+    );
+    if (normalExitSurvivors === undefined) {
+      return termMatches.map(({ processId }) => processId);
+    }
+    identitiesByKey.clear();
+    mergeIdentities(identitiesByKey, normalExitSurvivors);
+  }
+
+  const killCandidates = [...identitiesByKey.values()];
+  const killMatches = await readMatchingIdentities(killCandidates, sweepDeadline);
+  if (killMatches === undefined) {
+    return killCandidates.map(({ processId }) => processId);
+  }
+  signalIdentities(killMatches, 'SIGKILL');
+  return verifyKilledIdentities(killMatches, sweepDeadline);
 };
 
-export { killProcessTree, listDescendantProcessIds, spawnInProcessGroup };
+export {
+  killProcessTree,
+  listDescendantProcesses,
+  parseIdentitySnapshot,
+  parseProcessSnapshot,
+  spawnInProcessGroup,
+  type ProcessIdentity,
+};

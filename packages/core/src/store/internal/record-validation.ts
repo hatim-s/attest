@@ -52,6 +52,15 @@ const collectDiagnosticsViolations = (value: unknown, path: string, violations: 
   ) {
     violations.push(`${path}.httpStatus must be an integer`);
   }
+  if (
+    value.unreapedProcessIds !== undefined &&
+    (!Array.isArray(value.unreapedProcessIds) ||
+      !value.unreapedProcessIds.every(
+        (processId) => Number.isSafeInteger(processId) && processId > 0,
+      ))
+  ) {
+    violations.push(`${path}.unreapedProcessIds must contain positive safe integers`);
+  }
 };
 
 /** Collects every structural violation in one stored execution union value. */
@@ -101,6 +110,9 @@ const collectStoredCaseExecutionViolations = (value: unknown, path = 'execution'
         violations.push(`${attemptPath}.durationMs must be a nonnegative finite number`);
       }
       collectDiagnosticsViolations(attempt.diagnostics, `${attemptPath}.diagnostics`, violations);
+      if (!Array.isArray(attempt.warnings)) {
+        violations.push(`${attemptPath}.warnings must be an array`);
+      }
       if (attempt.status === 'ok') {
         if (Object.hasOwn(attempt, 'errorCode')) {
           violations.push(`${attemptPath} with ok status forbids errorCode`);

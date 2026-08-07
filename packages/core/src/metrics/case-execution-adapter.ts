@@ -1,14 +1,14 @@
-import type { AgentResponse, CaseDefinition, Trace } from '@attest/contracts';
+import type { AgentResponse, CaseDefinition, CaseOutcome, Trace } from '@attest/contracts';
 
 import type { MetricContext } from './metric-evaluation.js';
 
 /** Structural view of the runner track's CaseExecution — field-compatible by construction, verified at the Phase 1 gate. */
 type CaseExecutionView = {
   caseId: string;
-  outcome: 'completed' | 'invocation_error' | 'timeout' | 'cancelled';
-  response?: AgentResponse;
   trace?: Trace;
-};
+} & (
+  { outcome: 'completed'; response: AgentResponse } | { outcome: Exclude<CaseOutcome, 'completed'> }
+);
 
 /** Reports an impossible completed runner view before metrics can mis-score its absent output. */
 class CaseExecutionAdapterError extends Error {
