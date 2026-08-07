@@ -9,6 +9,9 @@ type CliErrorCode =
   | 'init_failed'
   | 'output_exists'
   | 'output_write_failed'
+  | 'project_invalid'
+  | 'project_not_found'
+  | 'project_read_failed'
   | 'trace_convert_failed'
   | 'run_failed';
 
