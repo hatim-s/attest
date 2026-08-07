@@ -1,6 +1,10 @@
 # CLI North Star
 
-Status: proposed breaking v2 design contract Scope: local CLI and local files only Audience: implementers, documentation authors, humans using a terminal, and coding agents
+Status: ratified breaking v2 design contract
+
+Scope: local CLI and local files only
+
+Audience: implementers, documentation authors, humans using a terminal, and coding agents
 
 ## 1. Decision summary
 
@@ -28,26 +32,26 @@ The following decisions are normative for v2:
 3. **Tests replace v1 suites.** A test binds one agent, cases or datasets, metrics, and run defaults.
 4. **Datasets are project resources.** The nested `attest test dataset ...` commands create or attach them in the context where users need them; a dataset may be attached to more than one test.
 5. **All authoring operations have interactive and non-interactive forms.** Missing required values start a wizard only on a TTY unless `--non-interactive` is set. The same operation can always be expressed using flags or one JSON request document.
-6. **Users do not have to author YAML or JSON directly.** Attest owns canonical, inspectable JSON resource files and JSONL dataset files. The CLI is the supported mutation API; JSON Schema is the supported integration contract.
+6. **Users do not have to author YAML or JSON directly.** Attest generates and owns canonical, inspectable JSON resource files and JSONL dataset files. The CLI is the supported mutation API; JSON Schema is the supported integration contract.
 7. **Every mutation supports a preview and is atomic.** `--dry-run` validates the complete proposed project, reports a semantic diff, and writes nothing. A successful non-dry run either publishes the entire transaction or restores the prior state.
 8. **Human output and machine output have parity.** Every command supports `--output human|json`; streaming commands additionally support `jsonl`. JSON stdout is one versioned result envelope, progress goes to stderr, and secrets are never rendered.
-9. **v2 intentionally breaks v1 config and command contracts.** Execution does not discover or run `attest.config.yaml`, `.yml`, or `.json`. There is no permanent compatibility parser. A narrow, explicit, non-destructive v1 import is described in [Section 12](#12-breaking-v2-and-v1-stance).
+9. **v2 intentionally breaks v1 config and command contracts.** Execution does not discover, import, or run `attest.config.yaml`, `.yml`, or `.json`. There is no compatibility parser or v1 importer because the project has essentially zero users.
 10. **This initiative is CLI-first and local-only.** A web editor, hosted control plane, accounts, remote persistence, cloud secrets, and cloud execution are explicitly out of scope.
 
 ## 2. Source-grounded starting point
 
 This design preserves useful runtime contracts while replacing the authoring surface:
 
-| Current source | Contract worth retaining | v2 change |
-| --- | --- | --- |
-| `packages/cli/src/run-cli.ts` | Commander command tree, JSON run output, local run/diff/report/view operations | Replace top-level authoring and `run` grammar; make every command share one output/error contract |
-| `packages/contracts/src/config.ts` | Strict validation, aggregated cross-reference checks, typed agent/case/run settings | Split one `config_version: 1` document into versioned project resources |
-| `packages/cli/src/config/load-config.ts` | Validate before execution, canonical hashing, explicit path resolution | Discover a project root and load its generated manifest; no v1 YAML/JSON discovery |
-| `packages/core/src/runner/invoke.ts` | Validated envelopes, bounded evidence, invocation-error-only retries | Add transports behind the same invocation result boundary |
-| `packages/core/src/runner/dataset.ts` | Full-file validation and line-aware diagnostics before invoking an agent | Generalize from JSONL-only loading to transactional CSV/JSON/JSONL import |
-| `docs/specs/agent-contract.md` | Native request/response envelopes, timeouts, output caps, error classification | Keep as the native adapter and define lifecycle/extraction for imported integrations |
-| `docs/specs/metric-contract.md` | Assertion, executable/HTTP, judge, and trace/tool metric semantics | Make CLI wizards and importers produce those definitions |
-| `packages/core/src/store/` | Immutable completed runs, attempts, summaries, diffs, run bundles | Rename the user-facing record to eval run without forcing a storage rewrite |
+| Current source                           | Contract worth retaining                                                            | v2 change                                                                                         |
+| ---------------------------------------- | ----------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| `packages/cli/src/run-cli.ts`            | Commander command tree, JSON run output, local run/diff/report/view operations      | Replace top-level authoring and `run` grammar; make every command share one output/error contract |
+| `packages/contracts/src/config.ts`       | Strict validation, aggregated cross-reference checks, typed agent/case/run settings | Split one `config_version: 1` document into versioned project resources                           |
+| `packages/cli/src/config/load-config.ts` | Validate before execution, canonical hashing, explicit path resolution              | Discover a project root and load its generated manifest; no v1 YAML/JSON discovery                |
+| `packages/core/src/runner/invoke.ts`     | Validated envelopes, bounded evidence, invocation-error-only retries                | Add transports behind the same invocation result boundary                                         |
+| `packages/core/src/runner/dataset.ts`    | Full-file validation and line-aware diagnostics before invoking an agent            | Generalize from JSONL-only loading to transactional CSV/JSON/JSONL import                         |
+| `docs/specs/agent-contract.md`           | Native request/response envelopes, timeouts, output caps, error classification      | Keep as the native adapter and define lifecycle/extraction for imported integrations              |
+| `docs/specs/metric-contract.md`          | Assertion, executable/HTTP, judge, and trace/tool metric semantics                  | Make CLI wizards and importers produce those definitions                                          |
+| `packages/core/src/store/`               | Immutable completed runs, attempts, summaries, diffs, run bundles                   | Rename the user-facing record to eval run without forcing a storage rewrite                       |
 
 Current v1 has `attest init`, `run`, `diff`, `view`, `report`, and `trace convert`; it supports one agent per config, suites with inline cases or one JSONL dataset, CLI/HTTP invocation, and assertion/exec/judge metrics. It does not provide resource CRUD, CSV/JSON import, streaming agent transports, transactional multi-file authoring, or uniform structured errors. Those gaps are the scope of this design.
 
@@ -138,7 +142,7 @@ Common mutation flags:
 
 `--non-interactive` disables prompts and fails with `cli_missing_input` if required data is absent. It is implied when stdin or stdout is not a TTY, when `--output json|jsonl` is selected, or when `CI=true`. `--yes` answers confirmation prompts but does not invent missing values.
 
-There are no plural aliases and no one-letter namespace aliases. They are hard to discover, create ambiguous scripts, and save little typing. The only v2 compatibility aliases are listed below; help marks them deprecated and JSON help includes `alias_for` and `removal_version`.
+There are no plural aliases and no one-letter namespace aliases. They are hard to discover, create ambiguous scripts, and save little typing. The only v2 convenience alias is listed below; JSON help includes its `alias_for` value.
 
 ### 4.2 Project and inspection
 
@@ -146,7 +150,6 @@ There are no plural aliases and no one-letter namespace aliases. They are hard t
 attest project init [directory] [--name <name>]
 attest project show
 attest project validate
-attest project migrate-v1 --from <attest.config.*> [--into <directory>]
 attest list agents|tests|datasets|metrics|runs
 attest show agent|test|dataset|metric|run <id>
 attest schema list
@@ -154,7 +157,7 @@ attest schema print <schema-id>
 attest errors [--output human|json]
 ```
 
-`attest init` is an alias for `attest project init` through the v2 preview period. `list` and `show` are generic read-only commands so CRUD namespaces do not each grow slightly different inspection verbs.
+`attest init` is a convenience alias for `attest project init`. `list` and `show` are generic read-only commands so CRUD namespaces do not each grow slightly different inspection verbs.
 
 ### 4.3 Agent commands
 
@@ -269,7 +272,7 @@ Important eval flags:
 --output human|json|jsonl     final document or event stream
 ```
 
-`attest run` is a deprecated alias for `attest eval run --all` only when no test id is supplied. It must not silently guess a test. Remove it at the first stable major version. `attest eval run` is the canonical spelling in docs, errors, telemetry, and stored command metadata.
+There is no `attest run` alias. `attest eval run` is the only execution spelling in the command tree, docs, errors, telemetry, and stored command metadata.
 
 With `--output json`, stdout contains one `attest.cli-result/v1` document after completion. With `jsonl`, each line is an `attest.cli-event/v1` document containing `sequence`, `time`, `event`, and `data`; the final line is `event: "result"`. Event order is deterministic for orchestration events, while case completion events retain actual completion order and carry their configured case index.
 
@@ -338,15 +341,17 @@ Literal authorization headers, cookies, client certificates, shell expansions, `
 
 ### 7.4 CLI foreground, background, and JSONL bridge
 
-| Mode | Lifecycle | Contract | Concurrency |
-| --- | --- | --- | --- |
-| `foreground` | `per_case` | one request on stdin, one response on stdout | one process per case |
-| `background` | `per_run` | Attest starts a service, waits for readiness, invokes its HTTP endpoint, then stops it | endpoint-defined |
-| `jsonl` | `per_run` | persistent child; one correlated request and response per JSONL line | multiplexed or serial |
+| Mode         | Lifecycle  | Contract                                                                               | Concurrency           |
+| ------------ | ---------- | -------------------------------------------------------------------------------------- | --------------------- |
+| `foreground` | `per_case` | one request on stdin, one response on stdout                                           | one process per case  |
+| `background` | `per_run`  | Attest starts a service, waits for readiness, invokes its HTTP endpoint, then stops it | endpoint-defined      |
+| `jsonl`      | `per_run`  | persistent child; one correlated request and response per JSONL line                   | multiplexed or serial |
 
-Background configuration declares `start_argv`, readiness (`http`, `tcp`, or stderr regex), invoke URL, optional graceful shutdown request, and stop timeout. Readiness and shutdown share the run deadline. Attest owns the process group and always attempts TERM/grace/KILL. An agent that daemonizes, detaches, requires an interactive terminal, or needs a system service manager is unsupported; configure it as `external` HTTP instead.
+Background configuration declares `start_argv`, readiness (`http`, `tcp`, or stderr regex), invoke URL, optional graceful shutdown request, and stop timeout. Readiness and shutdown share the run deadline. Background agents are always run-scoped: Attest owns the process group and always attempts TERM/grace/KILL when that eval run ends. Persistent project daemons are deferred. An agent that daemonizes, detaches, requires an interactive terminal, or needs a system service manager is unsupported; configure it as `external` HTTP instead.
 
-The JSONL bridge uses envelopes containing `request_id` plus the native request/response. In `serial` mode Attest sends the next request only after a response. In `multiplexed` mode responses may arrive out of order and must echo unique ids. Blank lines are ignored; non-JSON stdout is a protocol error, so logs go to stderr. EOF fails all outstanding cases. On timeout, Attest cancels the whole bridge and classifies unfinished cases separately; v2 does not define an in-band per-request cancellation message.
+The JSONL bridge uses envelopes containing `request_id` plus the native request/response. In `serial` mode Attest sends the next request only after a response. In `multiplexed` mode responses may arrive out of order and must echo unique ids. Blank lines are ignored; non-JSON stdout is a protocol error, so logs go to stderr. EOF fails all outstanding cases.
+
+Per-request in-band cancellation is required. When one request is cancelled or times out, Attest writes a control envelope containing `{ "type": "cancel", "request_id": "..." }`; the peer stops that request without disturbing unrelated multiplexed work and may acknowledge with `{ "type": "cancelled", "request_id": "..." }`. If the bridge cannot accept the control message, violates the protocol, exits, or does not settle the request within the bounded cancellation grace period, Attest terminates the run-scoped process group and classifies every unfinished request separately. Process termination is therefore a mandatory fallback, not the primary cancellation protocol.
 
 ### 7.5 Polling
 
@@ -368,7 +373,7 @@ Comments/heartbeats reset the transport idle timeout but not the application idl
 
 ### 7.7 WebSockets
 
-WebSocket mode opens one connection per eval run by default, sends correlated JSON messages, and extracts result/error/trace pointers from messages that echo `request_id`. A `per_case` connection may be selected for servers without multiplexing. Configuration includes URL, headers, subprotocol, open timeout, message idle timeout, attempt timeout, ping interval, and close timeout.
+WebSocket support is required for the North Star, but implementation begins only after the first HTTP polling and SSE/server-stream vertical slice is green. WebSocket mode opens one connection per eval run by default, sends correlated JSON messages, and extracts result/error/trace pointers from messages that echo `request_id`. A `per_case` connection may be selected for servers without multiplexing. Configuration includes URL, headers, subprotocol, open timeout, message idle timeout, attempt timeout, ping interval, and close timeout.
 
 Only text JSON messages are supported. Binary frames, Socket.IO, GraphQL subscriptions, arbitrary bidirectional tool callbacks, browser cookies, interactive authentication, server-initiated work without correlation ids, and resume after disconnect are unsupported in v2. Reconnect is allowed only before any request acknowledgement; after acknowledgement, outstanding cases fail rather than risk duplicate side effects.
 
@@ -395,7 +400,7 @@ CSV dotted destinations build nested objects; escaping rules are documented and 
 
 The importer parses the complete source, applies mappings, and validates every normalized case before writing. Diagnostics include physical row/line, source field, destination path, code, and hint. The default error policy is all-or-nothing; `--allow-invalid` is not provided because silently dropping evaluation data makes CI untrustworthy.
 
-An explicit mapped id wins after slug validation. Without one, the id is `case-<first-16-base32-chars>` of SHA-256 over canonical JSON containing dataset id plus normalized `input`, `expected`, and `params`; tags and metrics are excluded. Identical logical records in the same dataset therefore receive the same id on every machine. A cryptographic prefix collision with different content is reported and requires an explicit id; the importer never adds order-based suffixes.
+An explicit mapped id wins after slug validation. Without one, the id is `case-<first-16-base32-chars>` of SHA-256 over canonical JSON containing normalized `input`, `expected`, and `params`; dataset identity, tags, and metrics are excluded. Identical logical records therefore receive the same id on every machine and retain it when moved between datasets. A cryptographic prefix collision with different content is reported and requires an explicit id; the importer never adds order-based suffixes.
 
 ### 8.3 Dedupe and incremental imports
 
@@ -476,15 +481,9 @@ Requirements:
 
 v2 does not execute v1 config files and does not preserve v1's “one config contains agent, suites, cases, and metrics” data model. `suites` become tests, the single agent becomes a reusable agent resource, datasets become named project resources, metrics become named files, and `attest run` becomes `attest eval run`.
 
-Because the repository has essentially no external users, the implementation should delete v1 authoring branches, fixtures, and docs once v2 reaches its vertical-slice gate. It must not carry a dual runtime, automatic discovery fallback, write both formats, or promise round-trip conversion.
+Because the repository has essentially no external users, this is an intentional breaking v2. The implementation deletes v1 authoring branches, fixtures, and docs once the v2 vertical-slice gate is green. It must not carry a dual runtime, automatic discovery fallback, write both formats, promise round-trip conversion, or build a v1 importer now. If real adoption evidence later justifies an importer, that work requires a separate design and is not part of this North Star.
 
-One narrow escape hatch is allowed:
-
-```text
-attest project migrate-v1 --from <attest.config.yaml|yml|json> --into <empty-directory>
-```
-
-It is a non-destructive import tool, not compatibility. It supports only currently valid v1, creates a new v2 project in an empty target, emits a report of every mapping and unsupported field, and never edits or deletes the source. The command should be implemented only after the v2 writer exists and may be omitted from the initial preview if maintaining it delays the North Star path. No migration of `.attest/runs.db` is required unless the storage schema must change; if it does, ordinary numbered transactional store migration rules apply independently from config migration.
+No migration of `.attest/runs.db` is required unless the storage schema must change; if it does, ordinary numbered transactional store migration rules apply independently from the removed config format.
 
 ## 13. Explicit exclusions
 
@@ -496,6 +495,7 @@ This design does not include:
 - automatic framework instrumentation or SDK-specific adapters;
 - Windows process supervision in the initial v2 gate;
 - arbitrary shell execution, browser-cookie capture, OAuth login flows, or secret persistence;
+- v1 config import or compatibility execution;
 - multipart/file-upload cURL import, binary WebSockets, Socket.IO, GraphQL subscriptions, remote polling cancellation, streaming resume, or bidirectional tool callbacks;
 - destructive dataset mirroring based on source absence;
 - editing canonical resource files as the documented happy path.
@@ -506,36 +506,35 @@ This design does not include:
 
 Each item is sized for one focused Codex task and names an owned seam to minimize overlapping edits. Every task must update colocated tests and public exports using the repository's single named-export statement convention. New or changed package scripts require the matching `docs/SCRIPTS.md` update.
 
-| Order | Task and owned files | Dependencies | Acceptance gate |
-| --- | --- | --- | --- |
-| 1 | **v2 domain contracts** — `packages/contracts/src/project*.ts`, resource schemas, versions, generated schema registry, contract fixtures | none | Zod and generated JSON Schema agree; strict unknown-field and cross-reference fixtures pass; no runtime mutation |
-| 2 | **CLI result/help/error contracts** — new CLI protocol contracts plus `packages/cli/src/help/`, `packages/cli/src/errors/` | 1 | JSON help snapshots cover every field; errors serialize identically from expected failures; stdout contains one valid document |
-| 3 | **project discovery and read model** — `packages/cli/src/project/discover-project.ts`, loader/validator, hash model | 1 | parent discovery boundaries, canonical hashing, aggregate diagnostics, and v1 rejection pass on macOS/Linux paths |
-| 4 | **transactional writer** — `packages/cli/src/project/transaction/` only | 1, 3 | fault-injection at every publish step proves rollback/recovery; stale hash and concurrent lock tests pass; dry run changes no bytes |
-| 5 | **project/resource command shell** — `packages/cli/src/commands/project/`, `list/`, `show/`, command registration only | 2–4 | init/list/show/validate work in human and JSON modes; compiled cold smoke from empty directory passes |
-| 6 | **agent resource authoring and native adapters** — `packages/cli/src/commands/agent/`, agent resource mapper; retain core native invokers | 4, 5 | add/import-native/test/rename/remove parity; secret redaction fixture; current hostile native agent suite remains green |
-| 7 | **test/case/dataset resource commands** — `packages/cli/src/commands/test/`, attachment resolution | 4, 5 | exact grammar, collision aggregation, cross-reference rename/remove, and >100 direct-case warning pass |
-| 8 | **tabular import engine** — `packages/core/src/import/` with CLI adapter under `commands/test/import/` | 1, 4, 7 | CSV/JSON/JSONL golden fixtures; mapping, full validation, deterministic ids, dedupe, append/upsert, and no-write-on-error tests pass |
-| 9 | **metric authoring/import** — `packages/cli/src/commands/metric/`, presets in `packages/contracts/src/metric-presets.ts` | 1, 4, 5 | every current assertion is authorable; judge/exec/HTTP round-trip; preset golden files and `metric test` pass without network |
-| 10 | **HTTP/cURL and polling adapters** — `packages/core/src/runner/adapters/http/`, cURL parser under `packages/cli/src/import/curl/` | 6 | cURL unsupported-flag/secret fixtures, extraction, retry/idempotency, poll timeout/cancellation, body caps, and same-origin tests pass |
-| 11 | **managed CLI and streaming adapters** — `packages/core/src/runner/adapters/process/` and `/stream/` | 6 | background readiness/shutdown hostile fixtures, JSONL correlation/EOF/cancellation, SSE/JSONL caps and terminal extraction pass |
-| 12 | **WebSocket adapter** — `packages/core/src/runner/adapters/websocket/` | 6, 11 | serial/multiplexed correlation, ping/idle/close, disconnect classification, and unsupported binary-frame tests pass with local fakes |
-| 13 | **eval orchestration cutover** — `packages/cli/src/commands/eval/`, v2 resolver, narrow changes to `run-configuration.ts` | 3, 6–12, 9 | v2 project to persisted eval run/diff/JSONL event stream passes; no v1 discovery; cancellation and exit-code matrix pass |
-| 14 | **v1 removal and optional import** — remove old config loader/templates/fixtures; isolated `commands/project/migrate-v1/` if retained | 13 | repository has one execution path; v1 files fail with migration hint; import is non-destructive and golden-tested if shipped |
-| 15 | **agent-first docs and examples** — documentation tree in Section 11, `llms.txt`, executable examples | 2, 5–14 | all links/schema ids resolve; examples run against packed CLI in clean temp dirs; human and coding-agent happy paths finish under five minutes |
+| Order | Task and owned files                                                                                                                      | Dependencies | Acceptance gate                                                                                                                                                                   |
+| ----- | ----------------------------------------------------------------------------------------------------------------------------------------- | ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1     | **v2 domain contracts** — `packages/contracts/src/project*.ts`, resource schemas, versions, generated schema registry, contract fixtures  | none         | Zod and generated JSON Schema agree; strict unknown-field and cross-reference fixtures pass; no runtime mutation                                                                  |
+| 2     | **CLI result/help/error contracts** — new CLI protocol contracts plus `packages/cli/src/help/`, `packages/cli/src/errors/`                | 1            | JSON help snapshots cover every field; errors serialize identically from expected failures; stdout contains one valid document                                                    |
+| 3     | **project discovery and read model** — `packages/cli/src/project/discover-project.ts`, loader/validator, hash model                       | 1            | parent discovery boundaries, canonical hashing, aggregate diagnostics, and v1 rejection pass on macOS/Linux paths                                                                 |
+| 4     | **transactional writer** — `packages/cli/src/project/transaction/` only                                                                   | 1, 3         | fault-injection at every publish step proves rollback/recovery; stale hash and concurrent lock tests pass; dry run changes no bytes                                               |
+| 5     | **project/resource command shell** — `packages/cli/src/commands/project/`, `list/`, `show/`, command registration only                    | 2–4          | init/list/show/validate work in human and JSON modes; compiled cold smoke from empty directory passes                                                                             |
+| 6     | **agent resource authoring and native adapters** — `packages/cli/src/commands/agent/`, agent resource mapper; retain core native invokers | 4, 5         | add/import-native/test/rename/remove parity; secret redaction fixture; current hostile native agent suite remains green                                                           |
+| 7     | **test/case/dataset resource commands** — `packages/cli/src/commands/test/`, attachment resolution                                        | 4, 5         | exact grammar, collision aggregation, cross-reference rename/remove, and >100 direct-case warning pass                                                                            |
+| 8     | **tabular import engine** — `packages/core/src/import/` with CLI adapter under `commands/test/import/`                                    | 1, 4, 7      | CSV/JSON/JSONL golden fixtures; mapping, full validation, move-stable deterministic ids, dedupe, append/upsert, and no-write-on-error tests pass                                  |
+| 9     | **metric authoring/import** — `packages/cli/src/commands/metric/`, presets in `packages/contracts/src/metric-presets.ts`                  | 1, 4, 5      | every current assertion is authorable; judge/exec/HTTP round-trip; preset golden files and `metric test` pass without network                                                     |
+| 10    | **HTTP/cURL and polling adapters** — `packages/core/src/runner/adapters/http/`, cURL parser under `packages/cli/src/import/curl/`         | 6            | cURL unsupported-flag/secret fixtures, extraction, retry/idempotency, poll timeout/cancellation, body caps, and same-origin tests pass                                            |
+| 11    | **managed CLI and streaming adapters** — `packages/core/src/runner/adapters/process/` and `/stream/`                                      | 6, 10        | run-scoped background readiness/shutdown hostile fixtures, JSONL correlation/EOF/in-band cancellation/process fallback, and SSE/JSONL caps and terminal extraction pass           |
+| 12    | **required WebSocket adapter** — `packages/core/src/runner/adapters/websocket/`                                                           | 6, 10, 11    | begins after the polling/SSE vertical slice; serial/multiplexed correlation, ping/idle/close, disconnect classification, and unsupported binary-frame tests pass with local fakes |
+| 13    | **eval orchestration cutover** — `packages/cli/src/commands/eval/`, v2 resolver, narrow changes to `run-configuration.ts`                 | 3, 6–12, 9   | v2 project to persisted eval run/diff/JSONL event stream passes; no v1 discovery; cancellation and exit-code matrix pass                                                          |
+| 14    | **v1 removal** — remove old config loader, templates, fixtures, docs, top-level `attest run`, and any importer surface                    | 13           | repository has one execution path; v1 files fail with a breaking-v2 explanation; only `attest init` aliases a v2 command                                                          |
+| 15    | **agent-first docs and examples** — documentation tree in Section 11, `llms.txt`, executable examples                                     | 2, 5–14      | all links/schema ids resolve; examples run against the packed CLI in clean temp directories                                                                                       |
+| 16    | **under-five-minute acceptance gate** — clean-environment human and coding-agent journeys                                                 | 13–15        | both actors discover commands, create/import resources, run an eval, and identify repairs from structured errors in under five minutes                                            |
 
-Parallel work is safe only after its dependency row lands. Tasks 6, 7, and 9 can proceed in parallel after the writer and command shell. Tasks 10, 11, and 12 own distinct adapter directories but should share contract fixtures established by task 6 rather than edit a common dispatcher in parallel. Task 13 alone owns the dispatcher cutover.
+Parallel work is safe only after its dependency row lands. Tasks 6, 7, and 9 can proceed in parallel after the writer and command shell. Tasks 10 and 11 own distinct adapter directories but share contract fixtures established by task 6. Task 12 starts only after tasks 10 and 11 establish the first polling/SSE vertical slice. Task 13 alone owns the dispatcher cutover.
 
-## 15. Open decisions requiring owner ratification
+## 15. Ratified owner decisions
 
-The design supplies a recommended default so implementation can be estimated, but these choices are not provable from the current source and should be ratified before the owning task starts:
+The owner ratified these design seams before implementation begins:
 
-1. **Canonical authored format.** Recommendation: generated JSON resources plus JSONL datasets as specified here. Alternative: SQLite-only or YAML resources. JSON best serves Git diffing, JSON Schema, and coding agents; it intentionally gives up comment-preserving manual authoring promised by v1.
-2. **Namespace aliases.** Recommendation: keep only temporary `attest init` and `attest run` compatibility aliases; do not add plurals or one-letter aliases. Confirm whether even those two are worth carrying with near-zero users.
-3. **Generated case-id fingerprint.** Recommendation: include dataset id, input, expected, and params; exclude tags and metric overrides. Confirm whether moving an otherwise identical row between datasets should preserve its id. If yes, remove dataset id before task 8 freezes fixtures.
-4. **Background agent scope.** Recommendation: run-scoped process ownership only. Project-persistent daemons would reduce startup cost but introduce service discovery, stale ownership, and cross-run state that the current isolated runner deliberately avoids.
-5. **WebSocket timing.** Recommendation: retain the contract in v2 but place implementation after polling and server streams. If design partners do not require it, task 12 can be cut without weakening the native/HTTP happy path.
-6. **v1 importer timing.** Recommendation: do not block the v2 vertical slice; ship the explicit importer only if internal real configs need it. There should be no long-lived dual runtime under either choice.
-7. **JSONL in-band cancellation.** Recommendation: omit it in v2 and terminate the run-scoped bridge on a case timeout. Per-request cancellation would improve multiplexed efficiency but needs a new peer protocol and conformance suite.
-
-Until ratified, implementation tasks should use the recommendations above and keep the decision seams narrow; they must not silently choose a different behavior.
+1. **Canonical authored format.** Generated JSON resources plus JSONL datasets are canonical.
+2. **Namespace aliases.** Keep `attest init` only as a convenience alias for `attest project init`; remove `attest run` in favor of `attest eval run`.
+3. **Generated case-id fingerprint.** Exclude dataset identity so generated case ids remain stable across dataset moves.
+4. **Background agent scope.** Background processes are owned by one eval run; persistent project daemons are deferred.
+5. **WebSocket timing.** WebSockets are required for the North Star and land after the first polling/SSE vertical slice.
+6. **v1 importer stance.** Do not build a v1 importer now; v2 is intentionally breaking because there are essentially zero users.
+7. **JSONL cancellation.** Require per-request in-band cancellation and retain run-scoped process termination as the fallback.
