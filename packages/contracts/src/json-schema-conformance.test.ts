@@ -6,8 +6,15 @@ import type { z } from 'zod';
 import { CONTRACT_JSON_SCHEMAS, serializeContractSchema } from './json-schema.js';
 import {
   AGENT_PROTOCOL,
+  AGENT_RESOURCE_SCHEMA_VERSION,
+  CASE_SCHEMA_VERSION,
+  COMMAND_REQUEST_SCHEMA_VERSION,
   CONFIG_VERSION,
+  DATASET_SCHEMA_VERSION,
   METRIC_PROTOCOL,
+  METRIC_RESOURCE_SCHEMA_VERSION,
+  PROJECT_SCHEMA_VERSION,
+  TEST_RESOURCE_SCHEMA_VERSION,
   TRACE_SCHEMA_VERSION,
 } from './versions.js';
 
@@ -45,6 +52,62 @@ const validConfig = {
       assert: [{ threshold: { path: '$.output.score', gte: 0.5 } }],
     },
   ],
+};
+
+const contentHash = 'a'.repeat(64);
+const validV2Agent = {
+  schema: AGENT_RESOURCE_SCHEMA_VERSION,
+  id: 'support',
+  name: 'Support',
+  transport: {
+    kind: 'native_cli',
+    lifecycle: 'per_case',
+    argv: ['node', 'agent.mjs'],
+  },
+};
+const validV2Case = { id: 'refund-basic', input: { question: 'Refund?' } };
+const validV2Dataset = {
+  schema: DATASET_SCHEMA_VERSION,
+  case_schema: CASE_SCHEMA_VERSION,
+  id: 'refunds',
+  name: 'Refunds',
+  case_count: 1,
+};
+const validV2Metric = {
+  schema: METRIC_RESOURCE_SCHEMA_VERSION,
+  id: 'correct',
+  name: 'Correct',
+  definition: {
+    kind: 'assertion',
+    assertions: [{ exists: { path: '$.output' } }],
+  },
+};
+const validV2Test = {
+  schema: TEST_RESOURCE_SCHEMA_VERSION,
+  id: 'refund',
+  name: 'Refund',
+  agent_id: validV2Agent.id,
+  cases: [validV2Case],
+  datasets: [],
+  metrics: [{ metric_id: validV2Metric.id }],
+};
+const validV2Project = {
+  schema: PROJECT_SCHEMA_VERSION,
+  project_id: '01ARZ3NDEKTSV4RRFFQ69G5FAV',
+  name: 'support',
+  resources: {
+    agents: [
+      {
+        id: validV2Agent.id,
+        schema: AGENT_RESOURCE_SCHEMA_VERSION,
+        path: 'attest/agents/support.json',
+        content_hash: contentHash,
+      },
+    ],
+    tests: [],
+    datasets: [],
+    metrics: [],
+  },
 };
 
 const fixtures: ConformanceFixture[] = [
@@ -145,29 +208,141 @@ const fixtures: ConformanceFixture[] = [
     candidate: { score: 1 },
     valid: false,
   },
+  {
+    name: 'v2 project accepts its generated manifest',
+    fileName: 'project.v2.json',
+    candidate: validV2Project,
+    valid: true,
+  },
+  {
+    name: 'v2 project rejects unknown manifest fields',
+    fileName: 'project.v2.json',
+    candidate: { ...validV2Project, unexpected: true },
+    valid: false,
+  },
+  {
+    name: 'v2 agent accepts a native transport',
+    fileName: 'agent.v2.json',
+    candidate: validV2Agent,
+    valid: true,
+  },
+  {
+    name: 'v2 agent rejects an invalid resource id',
+    fileName: 'agent.v2.json',
+    candidate: { ...validV2Agent, id: 'Support Agent' },
+    valid: false,
+  },
+  {
+    name: 'v2 test accepts direct cases and metric references',
+    fileName: 'test.v2.json',
+    candidate: validV2Test,
+    valid: true,
+  },
+  {
+    name: 'v2 test rejects unknown fields',
+    fileName: 'test.v2.json',
+    candidate: { ...validV2Test, unexpected: true },
+    valid: false,
+  },
+  {
+    name: 'v2 case accepts JSON scalar input',
+    fileName: 'case.v2.json',
+    candidate: { ...validV2Case, input: 'refund' },
+    valid: true,
+  },
+  {
+    name: 'v2 case rejects an invalid id slug',
+    fileName: 'case.v2.json',
+    candidate: { ...validV2Case, id: 'refund_basic' },
+    valid: false,
+  },
+  {
+    name: 'v2 dataset accepts metadata for JSONL cases',
+    fileName: 'dataset.v2.json',
+    candidate: validV2Dataset,
+    valid: true,
+  },
+  {
+    name: 'v2 dataset rejects a negative case count',
+    fileName: 'dataset.v2.json',
+    candidate: { ...validV2Dataset, case_count: -1 },
+    valid: false,
+  },
+  {
+    name: 'v2 metric accepts an assertion resource',
+    fileName: 'metric.v2.json',
+    candidate: validV2Metric,
+    valid: true,
+  },
+  {
+    name: 'v2 metric rejects an empty assertion list',
+    fileName: 'metric.v2.json',
+    candidate: {
+      ...validV2Metric,
+      definition: { kind: 'assertion', assertions: [] },
+    },
+    valid: false,
+  },
+  {
+    name: 'v2 command request accepts a normalized test add',
+    fileName: 'command-request.v2.json',
+    candidate: {
+      schema: COMMAND_REQUEST_SCHEMA_VERSION,
+      command: 'test.add',
+      test: validV2Test,
+    },
+    valid: true,
+  },
+  {
+    name: 'v2 command request rejects unknown command fields',
+    fileName: 'command-request.v2.json',
+    candidate: {
+      schema: COMMAND_REQUEST_SCHEMA_VERSION,
+      command: 'test.remove',
+      test_id: validV2Test.id,
+      detach: true,
+    },
+    valid: false,
+  },
 ];
 
 /** Documents deliberate runtime checks that Draft 2020-12 cannot represent directly. */
 const KNOWN_DIVERGENCES: Readonly<Record<string, string>> = {
   'trace rejects end time before start time':
     'Span ordering compares two parsed timestamps and remains a runtime-only invariant.',
+  'v2 project rejects a non-canonical resource path':
+    'Canonical paths depend on the sibling resource id and remain a runtime-only invariant.',
 } as const;
 
-const divergenceFixture: ConformanceFixture = {
-  name: 'trace rejects end time before start time',
-  fileName: 'trace.v1alpha1.json',
-  candidate: {
-    ...validTrace,
-    spans: [
-      {
-        ...validTrace.spans[0],
-        start_time: '2026-08-06T10:15:04Z',
-        end_time: '2026-08-06T10:15:03Z',
-      },
-    ],
+const divergenceFixtures: ConformanceFixture[] = [
+  {
+    name: 'trace rejects end time before start time',
+    fileName: 'trace.v1alpha1.json',
+    candidate: {
+      ...validTrace,
+      spans: [
+        {
+          ...validTrace.spans[0],
+          start_time: '2026-08-06T10:15:04Z',
+          end_time: '2026-08-06T10:15:03Z',
+        },
+      ],
+    },
+    valid: false,
   },
-  valid: false,
-};
+  {
+    name: 'v2 project rejects a non-canonical resource path',
+    fileName: 'project.v2.json',
+    candidate: {
+      ...validV2Project,
+      resources: {
+        ...validV2Project.resources,
+        agents: [{ ...validV2Project.resources.agents[0], path: 'agents/support.json' }],
+      },
+    },
+    valid: false,
+  },
+];
 
 const ajv = new Ajv2020({ allErrors: true, strict: false });
 formatsModule.default.default(ajv);
@@ -206,7 +381,7 @@ describe('Zod and generated JSON Schema conformance', () => {
     expect(jsonSchemaValid).toBe(valid);
   });
 
-  it.each([divergenceFixture])('$name is documented', ({ name, fileName, candidate }) => {
+  it.each(divergenceFixtures)('$name is documented', ({ name, fileName, candidate }) => {
     expect(KNOWN_DIVERGENCES[name]).toBeTruthy();
     expect(getZodSchema(fileName).safeParse(candidate).success).toBe(false);
     expect(getJsonSchemaValidator(fileName)(candidate)).toBe(true);

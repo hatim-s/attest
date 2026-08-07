@@ -1,8 +1,15 @@
 import { z } from 'zod';
 
 import { agentRequestSchema, agentResponseSchema } from './agent.js';
+import { agentResourceSchema } from './agent-resource-v2.js';
+import { testCaseSchema } from './case-v2.js';
+import { commandRequestSchema } from './command-request-v2.js';
 import { configSchema } from './config.js';
+import { datasetResourceSchema } from './dataset-resource-v2.js';
 import { metricRequestSchema, metricResultSchema } from './metric.js';
+import { metricResourceSchema } from './metric-resource-v2.js';
+import { projectManifestSchema } from './project-v2.js';
+import { testResourceSchema } from './test-resource-v2.js';
 import { traceSchema } from './trace.js';
 
 type JsonSchemaFragment = Readonly<Record<string, unknown>>;
@@ -15,6 +22,11 @@ const sharedComment =
   'Runtime-only invariants include span time ordering, duplicate identifiers, and metric references.';
 
 const noAdditionalInvariants = { $comment: sharedComment } satisfies JsonSchemaFragment;
+
+const v2RuntimeInvariants = {
+  $comment:
+    'Runtime-only invariants include canonical manifest paths, cross-resource references, duplicate identifiers, and resolved case-id collisions.',
+} satisfies JsonSchemaFragment;
 
 const agentRequestInvariants = {
   $comment: sharedComment,
@@ -101,6 +113,13 @@ const CONTRACT_JSON_SCHEMAS = new Map<string, ContractJsonSchemaDefinition>([
     'metric-result.v1alpha1.json',
     { schema: metricResultSchema, invariants: noAdditionalInvariants },
   ],
+  ['project.v2.json', { schema: projectManifestSchema, invariants: v2RuntimeInvariants }],
+  ['agent.v2.json', { schema: agentResourceSchema, invariants: v2RuntimeInvariants }],
+  ['test.v2.json', { schema: testResourceSchema, invariants: v2RuntimeInvariants }],
+  ['case.v2.json', { schema: testCaseSchema, invariants: v2RuntimeInvariants }],
+  ['dataset.v2.json', { schema: datasetResourceSchema, invariants: v2RuntimeInvariants }],
+  ['metric.v2.json', { schema: metricResourceSchema, invariants: v2RuntimeInvariants }],
+  ['command-request.v2.json', { schema: commandRequestSchema, invariants: v2RuntimeInvariants }],
 ]);
 
 const isJsonSchemaObject = (value: unknown): value is Record<string, unknown> =>
