@@ -2,12 +2,19 @@ import { createRequire } from 'node:module';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { dirname, relative, resolve } from 'node:path';
 
-import { AttestError } from '@attest/contracts';
+import { type CliExitCode } from '@attest/contracts';
 import { diffRuns, openStore, runToJUnitXml } from '@attest/core';
 import { Command, CommanderError, Option } from 'commander';
 
 import { loadConfig } from './config/load-config.js';
-import { AttestCliError } from './errors.js';
+import {
+  AttestCliError,
+  createCliErrorCatalog,
+  renderCliError,
+  renderCliErrorCatalog,
+  serializeCliError,
+} from './errors.js';
+import { createCliHelp, renderCliHelp, setCliCommandHelpMetadata } from './help/command-help.js';
 import { initProject } from './init/init-project.js';
 import {
   diffToJson,
@@ -16,6 +23,11 @@ import {
   renderRunSummary,
   runExitCode,
 } from './output/render-output.js';
+import {
+  createCliFailureResult,
+  createCliSuccessResult,
+  serializeCliResult,
+} from './output/cli-protocol.js';
 import { runConfiguration } from './run/run-configuration.js';
 import { runReportCommand } from './report/run-report-command.js';
 import { runTraceConvertCommand } from './trace/run-trace-convert-command.js';
@@ -73,6 +85,10 @@ type TraceConvertCommandOptions = {
   traceId?: string;
 };
 
+type ProtocolCommandOptions = {
+  output: 'human' | 'json';
+};
+
 const defaultIo: CliIo = {
   error: (message) => console.error(message),
   output: (message) => console.log(message),
@@ -97,20 +113,13 @@ const writeJUnit = async (
   }
 };
 
-const renderCliError = (error: unknown): string => {
-  if (error instanceof AttestError) {
-    return `${error.code}: ${error.message}`;
-  }
-  if (error instanceof Error) {
-    return `internal_error: ${error.message}`;
-  }
-  return 'internal_error: The command failed with an unknown error.';
-};
-
 const parsePort = (value: string): number => {
   const port = Number(value);
   if (!Number.isInteger(port) || port < 0 || port > 65_535) {
-    throw new AttestCliError('run_failed', 'View port must be an integer from 0 to 65535.');
+    throw new AttestCliError('cli_usage', 'View port must be an integer from 0 to 65535.', {
+      path: '--port',
+      hint: 'Pass an integer from 0 to 65535.',
+    });
   }
   return port;
 };
@@ -119,7 +128,7 @@ const parsePort = (value: string): number => {
 const createProgram = (
   io: CliIo,
   workingDirectory: string,
-  setExitCode: (exitCode: 0 | 1) => void,
+  setExitCode: (exitCode: CliExitCode) => void,
 ): Command => {
   const packageMetadata = require('../package.json') as PackageMetadata;
   const program = new Command()
@@ -267,15 +276,87 @@ const createProgram = (
       }
     });
 
+  const helpCommand = program
+    .command('help [command...]')
+    .description('Show human or machine-readable help for a registered command path.')
+    .addOption(
+      new Option('--output <format>', 'help output format')
+        .choices(['human', 'json'])
+        .default('human'),
+    )
+    .action((commandPath: string[], options: ProtocolCommandOptions) => {
+      const help = createCliHelp(program, commandPath);
+      io.output(
+        options.output === 'json'
+          ? serializeCliResult(createCliSuccessResult('help', help))
+          : renderCliHelp(help),
+      );
+    });
+  setCliCommandHelpMetadata(helpCommand, {
+    examples: ['attest help test case import --output json'],
+    options: { output: { implies: ['non-interactive'] } },
+  });
+
+  const errorsCommand = program
+    .command('errors')
+    .description('List stable CLI error identities, exit codes, and repairs.')
+    .addOption(
+      new Option('--output <format>', 'error catalog output format')
+        .choices(['human', 'json'])
+        .default('human'),
+    )
+    .action((options: ProtocolCommandOptions) => {
+      const catalog = createCliErrorCatalog();
+      io.output(
+        options.output === 'json'
+          ? serializeCliResult(createCliSuccessResult('errors', catalog))
+          : renderCliErrorCatalog(catalog),
+      );
+    });
+  setCliCommandHelpMetadata(errorsCommand, {
+    examples: ['attest errors --output json'],
+    options: { output: { implies: ['non-interactive'] } },
+  });
+
+  setCliCommandHelpMetadata(program, {
+    examples: ['attest help --output json', 'attest errors --output json'],
+  });
+
   return program;
+};
+
+const requestedStructuredOutput = (argv: readonly string[]): boolean => {
+  if (argv[0] !== 'help' && argv[0] !== 'errors') {
+    return false;
+  }
+
+  return argv.some(
+    (argument, index) =>
+      argument === '--output=json' ||
+      argument === '--output=jsonl' ||
+      (argument === '--output' && (argv[index + 1] === 'json' || argv[index + 1] === 'jsonl')),
+  );
+};
+
+const requestedCommand = (argv: readonly string[]): string => {
+  const first = argv[0];
+  if (first === undefined || first.startsWith('-')) {
+    return 'cli';
+  }
+  if (first === 'trace' && argv[1] === 'convert') {
+    return 'trace.convert';
+  }
+  return /^[a-z][a-z0-9-]*$/.test(first) ? first : 'cli';
 };
 
 /** Parses one CLI invocation and returns an exit code without terminating embedders or tests. */
 const runCli = async (argv: string[], options: RunCliOptions = {}): Promise<number> => {
   const io = options.io ?? defaultIo;
   const workingDirectory = options.workingDirectory ?? process.cwd();
-  let exitCode: 0 | 1 = 0;
-  const program = createProgram(io, workingDirectory, (nextExitCode) => {
+  const structuredOutput = requestedStructuredOutput(argv);
+  const commandIo: CliIo = structuredOutput ? { output: io.output, error: () => undefined } : io;
+  let exitCode: CliExitCode = 0;
+  const program = createProgram(commandIo, workingDirectory, (nextExitCode) => {
     exitCode = nextExitCode;
   });
 
@@ -286,10 +367,14 @@ const runCli = async (argv: string[], options: RunCliOptions = {}): Promise<numb
     if (error instanceof CommanderError && error.exitCode === 0) {
       return 0;
     }
-    if (!(error instanceof CommanderError)) {
-      io.error(renderCliError(error));
+
+    const failure = serializeCliError(error);
+    if (structuredOutput) {
+      io.output(serializeCliResult(createCliFailureResult(requestedCommand(argv), failure.error)));
+    } else if (!(error instanceof CommanderError)) {
+      io.error(renderCliError(failure.error));
     }
-    return 1;
+    return failure.exitCode;
   }
 };
 
