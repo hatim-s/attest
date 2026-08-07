@@ -1,13 +1,34 @@
-import { access, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import {
+  access,
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  rm,
+  symlink,
+  writeFile,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { cliResultSchema } from '@attest/contracts';
+import { openStore } from '@attest/core';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { runCli, type CliIo } from '../../run-cli.js';
 import { loadProject } from '../../project/load-project.js';
-import { writeFixtureProject } from '../../project/transaction/project-transaction.test-fixture.js';
+import { prepareProjectCandidate } from '../../project/transaction/candidate-project.js';
+import {
+  candidateFromLoadedProject,
+  writeFixtureProject,
+} from '../../project/transaction/project-transaction.test-fixture.js';
+import { acquireProjectLock, releaseProjectLock } from '../../project/transaction/project-lock.js';
+import { prepareTransaction } from '../../project/transaction/transaction-journal.js';
+import {
+  applyProjectMutation,
+  createFileChanges,
+  publishPreparedTransaction,
+} from '../../project/transaction/transactional-writer.js';
 import { runProjectInitCommand } from './project-init-command.js';
 
 const FIXED_PROJECT_ID = '01ARZ3NDEKTSV4RRFFQ69G5FAV';
@@ -307,6 +328,15 @@ describe('CLI2.5 project shell', () => {
     const agentPath = join(root, 'attest', 'agents', 'support.json');
     const original = JSON.parse(await readFile(agentPath, 'utf8')) as Record<string, unknown>;
     await writeFile(agentPath, `${JSON.stringify({ ...original, secret: 'must-not-render' })}\n`);
+    const metricPath = join(root, 'attest', 'metrics', 'correct.json');
+    const originalMetric = JSON.parse(await readFile(metricPath, 'utf8')) as Record<
+      string,
+      unknown
+    >;
+    await writeFile(
+      metricPath,
+      `${JSON.stringify({ ...originalMetric, secret: 'second-must-not-render' })}\n`,
+    );
     const validation = collectIo();
     expect(
       await runCli(['project', 'validate', '--output', 'json'], {
@@ -316,8 +346,241 @@ describe('CLI2.5 project shell', () => {
       }),
     ).toBe(1);
     expect(validation.output.join('')).not.toContain('must-not-render');
-    expect(JSON.parse(validation.output[0] ?? '{}')).toMatchObject({
-      error: { code: 'project_invalid' },
+    const failure = JSON.parse(validation.output[0] ?? '{}') as {
+      error: { code: string; details: { diagnostics: { source: string }[] } };
+    };
+    expect(failure.error.code).toBe('project_invalid');
+    expect(Array.isArray(failure.error.details.diagnostics)).toBe(true);
+    expect(failure.error.details.diagnostics.map(({ source }) => source)).toEqual(
+      [...failure.error.details.diagnostics.map(({ source }) => source)].sort(),
+    );
+    expect(failure.error.details.diagnostics.map(({ source }) => source)).toEqual(
+      expect.arrayContaining(['attest/agents/support.json', 'attest/metrics/correct.json']),
+    );
+  });
+
+  it('redacts authored transport credentials from human and JSON resource output', async () => {
+    const root = await createTemporaryDirectory();
+    await writeFixtureProject(root);
+    const loaded = await loadProject({ project: root });
+    const candidate = candidateFromLoadedProject(loaded);
+    candidate.agents[0]!.transport = {
+      kind: 'http',
+      lifecycle: 'external',
+      request: {
+        url: 'https://example.test/invoke',
+        method: 'POST',
+        headers: { Authorization: 'Bearer authored-agent-secret' },
+        query: { api_key: 'authored-query-secret' },
+      },
+      extraction: { result_pointer: '/result' },
+    };
+    candidate.agents.push({
+      ...structuredClone(candidate.agents[0]!),
+      id: 'worker',
+      name: 'Worker',
+      transport: {
+        kind: 'native_cli',
+        lifecycle: 'per_case',
+        argv: ['node', 'authored-argv-secret'],
+      },
+      redaction: { argv_positions: [1] },
     });
+    candidate.metrics[0]!.definition = {
+      kind: 'http',
+      request: {
+        url: 'https://example.test/metric',
+        method: 'POST',
+        headers: { 'X-Api-Key': 'authored-metric-secret' },
+      },
+      extraction: { score_pointer: '/score', pass_pointer: '/pass' },
+    };
+    await applyProjectMutation({ candidate, projectRoot: root });
+
+    for (const argv of [
+      ['show', 'agent', 'support'],
+      ['show', 'agent', 'worker', '--output', 'json'],
+      ['show', 'metric', 'correct', '--output', 'json'],
+    ]) {
+      const response = collectIo();
+      expect(
+        await runCli(argv, {
+          workingDirectory: root,
+          io: response.io,
+          interaction: nonInteractive,
+        }),
+      ).toBe(0);
+      const output = response.output.join('\n');
+      expect(output).toContain('[REDACTED]');
+      expect(output).not.toMatch(/authored-(?:agent|query|argv|metric)-secret/u);
+    }
+  });
+
+  it('inspects runs without creating, migrating, or changing project-local store files', async () => {
+    const root = await createTemporaryDirectory();
+    await writeFixtureProject(root);
+    const absent = collectIo();
+    expect(
+      await runCli(['list', 'runs', '--output', 'json'], {
+        workingDirectory: root,
+        io: absent.io,
+        interaction: nonInteractive,
+      }),
+    ).toBe(0);
+    await expect(access(join(root, '.attest'))).rejects.toBeDefined();
+
+    const storePath = join(root, '.attest', 'runs.db');
+    await mkdir(join(root, '.attest'));
+    const store = await openStore(storePath);
+    const run = await store.runs.createRun({
+      configVersion: 'v2',
+      configHash: 'safe-hash',
+      configJson: '{"secret":"must-not-render"}',
+    });
+    await store.close();
+    const beforeBytes = await readFile(storePath);
+    const beforeFiles = await readdir(join(root, '.attest'));
+
+    for (const argv of [
+      ['list', 'runs', '--output', 'json'],
+      ['show', 'run', run.id, '--output', 'json'],
+    ]) {
+      const response = collectIo();
+      expect(
+        await runCli(argv, {
+          workingDirectory: root,
+          io: response.io,
+          interaction: nonInteractive,
+        }),
+      ).toBe(0);
+      expect(response.output.join('')).not.toContain('must-not-render');
+    }
+    expect(await readFile(storePath)).toEqual(beforeBytes);
+    expect(await readdir(join(root, '.attest'))).toEqual(beforeFiles);
+
+    await rm(storePath);
+    const outside = join(await createTemporaryDirectory(), 'outside.db');
+    await writeFile(outside, beforeBytes);
+    await symlink(outside, storePath);
+    const unsafe = collectIo();
+    expect(
+      await runCli(['list', 'runs', '--output', 'json'], {
+        workingDirectory: root,
+        io: unsafe.io,
+        interaction: nonInteractive,
+      }),
+    ).toBe(1);
+    expect(JSON.parse(unsafe.output[0] ?? '{}')).toMatchObject({
+      error: { code: 'project_read_failed' },
+    });
+
+    await rm(join(root, '.attest'), { recursive: true });
+    const outsideDirectory = await createTemporaryDirectory();
+    const outsideStore = join(outsideDirectory, 'runs.db');
+    await writeFile(outsideStore, beforeBytes);
+    await symlink(outsideDirectory, join(root, '.attest'));
+    const outsideBefore = await readFile(outsideStore);
+    const escaped = collectIo();
+    expect(
+      await runCli(['list', 'runs', '--output', 'json'], {
+        workingDirectory: root,
+        io: escaped.io,
+        interaction: nonInteractive,
+      }),
+    ).toBe(1);
+    expect(JSON.parse(escaped.output[0] ?? '{}')).toMatchObject({
+      error: { code: 'project_read_failed' },
+    });
+    expect(await readFile(outsideStore)).toEqual(outsideBefore);
+  });
+
+  it('recovers pre-manifest and post-manifest journals before returning a project snapshot', async () => {
+    for (const publishManifest of [false, true]) {
+      const root = await createTemporaryDirectory();
+      await writeFixtureProject(root);
+      const loaded = await loadProject({ project: root });
+      const candidate = candidateFromLoadedProject(loaded);
+      candidate.agents[0]!.name = publishManifest ? 'Committed snapshot' : 'Rolled back snapshot';
+      candidate.metrics[0]!.name = 'Changed metric';
+      const preparedCandidate = prepareProjectCandidate(candidate);
+      const lock = await acquireProjectLock(root);
+      const prepared = await prepareTransaction(
+        root,
+        createFileChanges(loaded, preparedCandidate),
+        loaded.projectHash,
+        preparedCandidate.projectHash,
+      );
+      try {
+        if (publishManifest) {
+          await publishPreparedTransaction(root, prepared);
+        } else {
+          await expect(
+            publishPreparedTransaction(root, prepared, ({ index }) => {
+              if (index === 0) throw new Error('simulated interruption');
+            }),
+          ).rejects.toThrow('simulated interruption');
+        }
+      } finally {
+        await releaseProjectLock(lock);
+      }
+
+      const response = collectIo();
+      expect(
+        await runCli(['project', 'show', '--output', 'json'], {
+          workingDirectory: root,
+          io: response.io,
+          interaction: nonInteractive,
+        }),
+      ).toBe(0);
+      const result = JSON.parse(response.output[0] ?? '{}') as {
+        result: { project_hash: string };
+      };
+      expect(result.result.project_hash).toBe(
+        publishManifest ? preparedCandidate.projectHash : loaded.projectHash,
+      );
+      expect(await readdir(join(root, '.attest', 'transactions'))).toEqual([]);
+    }
+  });
+
+  it('returns a stable lock conflict instead of observing a paused publication', async () => {
+    const root = await createTemporaryDirectory();
+    await writeFixtureProject(root);
+    const loaded = await loadProject({ project: root });
+    const candidate = candidateFromLoadedProject(loaded);
+    candidate.agents[0]!.name = 'New snapshot';
+    let releasePublication!: () => void;
+    let signalPublished!: () => void;
+    const publicationPaused = new Promise<void>((resolve) => {
+      signalPublished = resolve;
+    });
+    const publicationGate = new Promise<void>((resolve) => {
+      releasePublication = resolve;
+    });
+    const mutation = applyProjectMutation(
+      { candidate, projectRoot: root },
+      {
+        publishObserver: async ({ index }) => {
+          if (index === 0) {
+            signalPublished();
+            await publicationGate;
+          }
+        },
+      },
+    );
+    await publicationPaused;
+
+    const response = collectIo();
+    expect(
+      await runCli(['project', 'show', '--output', 'json'], {
+        workingDirectory: root,
+        io: response.io,
+        interaction: nonInteractive,
+      }),
+    ).toBe(3);
+    expect(JSON.parse(response.output[0] ?? '{}')).toMatchObject({
+      error: { code: 'project_locked' },
+    });
+    releasePublication();
+    await mutation;
   });
 });

@@ -1,6 +1,6 @@
 import type { JsonValue } from '../../project/canonical-project.js';
-import { loadProject } from '../../project/load-project.js';
 import type { CommandResult } from '../command-result.js';
+import { loadCommandProject } from './load-command-project.js';
 
 type ProjectInspectionOptions = {
   project?: string;
@@ -9,7 +9,7 @@ type ProjectInspectionOptions = {
 
 /** Returns the canonical manifest and committed hash for project inspection. */
 const runProjectShowCommand = async (options: ProjectInspectionOptions): Promise<CommandResult> => {
-  const loaded = await loadProject({
+  const loaded = await loadCommandProject({
     project: options.project,
     workingDirectory: options.workingDirectory,
   });
@@ -38,7 +38,7 @@ const runProjectShowCommand = async (options: ProjectInspectionOptions): Promise
 const runProjectValidateCommand = async (
   options: ProjectInspectionOptions,
 ): Promise<CommandResult> => {
-  const loaded = await loadProject({
+  const loaded = await loadCommandProject({
     project: options.project,
     workingDirectory: options.workingDirectory,
   });

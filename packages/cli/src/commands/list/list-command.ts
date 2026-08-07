@@ -1,12 +1,10 @@
-import { lstat } from 'node:fs/promises';
-import { join } from 'node:path';
+import type { RunRecord } from '@attest/core';
 
-import { openStore, type RunRecord } from '@attest/core';
-
-import { AttestCliError } from '../../errors.js';
 import type { JsonValue } from '../../project/canonical-project.js';
-import { loadProject, type LoadedProject } from '../../project/load-project.js';
+import type { LoadedProject } from '../../project/load-project.js';
 import type { CommandResult } from '../command-result.js';
+import { loadCommandProject } from '../project/load-command-project.js';
+import { withReadonlyRunStore } from '../run-store/readonly-run-store.js';
 
 type ListResourceType = 'agents' | 'datasets' | 'metrics' | 'runs' | 'tests';
 
@@ -15,11 +13,6 @@ type ListCommandOptions = {
   resourceType: ListResourceType;
   workingDirectory: string;
 };
-
-const getErrorCode = (error: unknown): string | undefined =>
-  error instanceof Error && 'code' in error && typeof Reflect.get(error, 'code') === 'string'
-    ? (Reflect.get(error, 'code') as string)
-    : undefined;
 
 /** Removes the persisted config document from generic run inspection output. */
 const toSafeRunSummary = (run: RunRecord): JsonValue => ({
@@ -46,27 +39,11 @@ const toSafeRunSummary = (run: RunRecord): JsonValue => ({
 });
 
 const listRuns = async (project: LoadedProject): Promise<JsonValue[]> => {
-  const storePath = join(project.root, '.attest', 'runs.db');
-  try {
-    const metadata = await lstat(storePath);
-    if (!metadata.isFile() || metadata.isSymbolicLink()) {
-      throw new AttestCliError('project_read_failed', 'The project run store is not a safe file.', {
-        path: storePath,
-      });
-    }
-  } catch (error: unknown) {
-    if (getErrorCode(error) === 'ENOENT') {
-      return [];
-    }
-    throw error;
-  }
-
-  const store = await openStore(storePath);
-  try {
-    return (await store.runs.listRuns()).map(toSafeRunSummary);
-  } finally {
-    await store.close();
-  }
+  return (
+    (await withReadonlyRunStore(project.root, async (store) =>
+      (await store.listRuns()).map(toSafeRunSummary),
+    )) ?? []
+  );
 };
 
 const listResourceSummaries = async (
@@ -113,7 +90,7 @@ const listResourceSummaries = async (
 
 /** Lists deterministic resource summaries without creating missing local state. */
 const runListCommand = async (options: ListCommandOptions): Promise<CommandResult> => {
-  const project = await loadProject({
+  const project = await loadCommandProject({
     project: options.project,
     workingDirectory: options.workingDirectory,
   });

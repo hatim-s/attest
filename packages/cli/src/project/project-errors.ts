@@ -30,7 +30,22 @@ class ProjectLoadError extends AttestCliError {
     options?: ErrorOptions,
   ) {
     const detail = diagnostics.map(formatProjectDiagnostic).join('\n');
-    super(code, detail.length === 0 ? summary : `${summary}\n${detail}`, options);
+    const safeDiagnostics = [...diagnostics]
+      .sort((left, right) =>
+        [left.source, left.path ?? '', left.code, left.message]
+          .join('\0')
+          .localeCompare([right.source, right.path ?? '', right.code, right.message].join('\0')),
+      )
+      .map(({ code: diagnosticCode, message, path, source }) => ({
+        code: diagnosticCode,
+        message,
+        source,
+        ...(path === undefined ? {} : { path }),
+      }));
+    super(code, detail.length === 0 ? summary : `${summary}\n${detail}`, {
+      cause: options?.cause,
+      details: { diagnostics: safeDiagnostics },
+    });
     this.diagnostics = diagnostics;
   }
 }
