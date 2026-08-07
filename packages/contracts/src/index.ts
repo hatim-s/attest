@@ -41,7 +41,80 @@ export { spanKindSchema, spanSchema, traceSchema } from './trace.js';
 export type { Span, SpanKind, Trace } from './trace.js';
 export {
   AGENT_PROTOCOL,
+  AGENT_RESOURCE_SCHEMA_VERSION,
+  CASE_SCHEMA_VERSION,
+  COMMAND_REQUEST_SCHEMA_VERSION,
   CONFIG_VERSION,
+  DATASET_SCHEMA_VERSION,
   METRIC_PROTOCOL,
+  METRIC_RESOURCE_SCHEMA_VERSION,
+  PROJECT_SCHEMA_VERSION,
+  TEST_RESOURCE_SCHEMA_VERSION,
   TRACE_SCHEMA_VERSION,
 } from './versions.js';
+export {
+  agentEvidenceLimitsSchema,
+  agentResourceSchema,
+  agentTimeoutPolicySchema,
+  agentTransportSchema,
+  httpRequestTemplateSchema,
+  redactionPolicySchema,
+  responseExtractionSchema,
+} from './agent-resource-v2.js';
+export type {
+  AgentEvidenceLimits,
+  AgentResource,
+  AgentTimeoutPolicy,
+  AgentTransport,
+  HttpRequestTemplate,
+  RedactionPolicy,
+  ResponseExtraction,
+} from './agent-resource-v2.js';
+export { caseMetricOverrideSchema, testCaseSchema } from './case-v2.js';
+export type { CaseMetricOverride, TestCase } from './case-v2.js';
+export { caseImportOptionsSchema, commandRequestSchema } from './command-request-v2.js';
+export type { CaseImportOptions, CommandRequest } from './command-request-v2.js';
+export {
+  datasetImportDestinationSchema,
+  datasetImportMappingSchema,
+  datasetImportProvenanceSchema,
+  datasetResourceSchema,
+} from './dataset-resource-v2.js';
+export type {
+  DatasetImportMapping,
+  DatasetImportProvenance,
+  DatasetResource,
+} from './dataset-resource-v2.js';
+export { metricResourceSchema, metricResultExtractionSchema } from './metric-resource-v2.js';
+export type { MetricResource, MetricResultExtraction } from './metric-resource-v2.js';
+export {
+  datasetManifestEntrySchema,
+  loadedDatasetSchema,
+  projectManifestSchema,
+  projectResourcesSchema,
+} from './project-v2.js';
+export type { LoadedDataset, ProjectManifest, ProjectResources } from './project-v2.js';
+export {
+  datasetAttachmentSchema,
+  testMetricReferenceSchema,
+  testPassGateSchema,
+  testResourceSchema,
+} from './test-resource-v2.js';
+export type {
+  DatasetAttachment,
+  TestMetricReference,
+  TestPassGate,
+  TestResource,
+} from './test-resource-v2.js';
+export {
+  durationMillisecondsSchema,
+  executionDefaultsSchema,
+  jsonPointerSchema,
+  projectIdSchema,
+  relativePathSchema,
+  resourceIdSchema,
+  retryPolicySchema,
+  secretReferenceSchema,
+  sha256Schema,
+} from './v2-shared.js';
+export type { ExecutionDefaults, SecretReference } from './v2-shared.js';
