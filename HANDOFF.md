@@ -58,7 +58,7 @@ The generated quickstart includes CLI, HTTP, and traced example agents. Its
 ## Verification at handoff
 
 - `bun run build`, `bun run typecheck`, `bun run lint`, and `bun run format:check` pass.
-- Canonical `bun run test`: 436 tests pass; six opt-in fuzz tests are skipped unless `FUZZ=1`.
+- Canonical `bun run test`: 437 tests pass; six opt-in fuzz tests are skipped unless `FUZZ=1`.
 - Browser-controlled acceptance passed for a traced case, distribution charts, two-run verdict
   matrix, and expanded metric delta evidence in dark mode.
 - Compiled static-report smoke produced a self-contained two-case HTML file with no external

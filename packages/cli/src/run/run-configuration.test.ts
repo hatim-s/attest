@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
-import { openStore } from '@attest/core';
+import { openStore, type JudgeClient, type JudgeRecord } from '@attest/core';
 
 import { loadConfig } from '../config/load-config.js';
 import { runConfiguration } from './run-configuration.js';
@@ -92,5 +92,69 @@ describe('runConfiguration', () => {
     } finally {
       await store.close();
     }
+  });
+
+  it('wires judge metrics through the provider client and durable cache', async () => {
+    const { configPath, directory } = await createTestProject();
+    await writeFile(
+      configPath,
+      JSON.stringify({
+        config_version: 1,
+        agent: { type: 'cli', command: [process.execPath, './agent.mjs'] },
+        suites: [
+          {
+            name: 'smoke',
+            metrics: ['correctness'],
+            cases: [{ id: 'capital', input: { answer: 'Paris' }, expected: { answer: 'Paris' } }],
+          },
+        ],
+        metrics: [
+          {
+            name: 'correctness',
+            type: 'judge',
+            model: 'openai/test-model',
+            rubric: 'Score one when output matches expected.',
+            threshold: 0.8,
+          },
+        ],
+      }),
+    );
+    const loadedConfig = await loadConfig(configPath, directory);
+    let providerCalls = 0;
+    const record: JudgeRecord = {
+      request: {
+        model: 'openai/test-model',
+        system: 'system',
+        user: 'user',
+        params: { stream: false },
+      },
+      rawResponse: { score: 1, rationale: 'Matches.' },
+      attempts: [{ rawResponse: { score: 1, rationale: 'Matches.' } }],
+    };
+    const judgeClient: JudgeClient = {
+      scoreRubric: () => {
+        providerCalls += 1;
+        return Promise.resolve({ verdict: { score: 1, rationale: 'Matches.' }, record });
+      },
+    };
+
+    const first = await runConfiguration(loadedConfig, { judgeClient });
+    const second = await runConfiguration(loadedConfig, { judgeClient });
+
+    expect(first.cases[0]?.metrics[0]).toMatchObject({
+      metricName: 'correctness',
+      status: 'evaluated',
+      score: 1,
+      pass: true,
+      judgeIo: { cache: 'miss' },
+    });
+    expect(second.cases[0]?.metrics[0]).toMatchObject({
+      metricName: 'correctness',
+      status: 'evaluated',
+      score: 1,
+      pass: true,
+      judgeIo: { cache: 'hit' },
+    });
+    expect(providerCalls).toBe(1);
   });
 });
