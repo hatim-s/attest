@@ -135,6 +135,16 @@ const CLI_ERROR_DEFINITIONS = [
     repairs: ['Fix every source-addressed project diagnostic and rerun the command.'],
   },
   {
+    code: 'project_lock_stale',
+    meaning: 'A dead local process left the project mutation lock behind.',
+    likely_causes: ['A prior Attest mutation was interrupted before releasing its lock.'],
+    retryable: false,
+    exit_code: 3,
+    repairs: [
+      'Preview `attest project unlock --stale`, then explicitly unlock and recover the journal.',
+    ],
+  },
+  {
     code: 'project_locked',
     meaning: 'Another live process owns the project mutation lock.',
     likely_causes: ['A concurrent Attest mutation is still running.'],
@@ -157,6 +167,26 @@ const CLI_ERROR_DEFINITIONS = [
     retryable: false,
     exit_code: 1,
     repairs: ['Restore the reported project file and verify its permissions.'],
+  },
+  {
+    code: 'project_recovery_required',
+    meaning: 'An interrupted project transaction cannot be recovered without human repair.',
+    likely_causes: ['A project file changed outside Attest after the transaction was interrupted.'],
+    retryable: false,
+    exit_code: 3,
+    repairs: [
+      'Preserve the transaction journal and reconcile every reported path before retrying.',
+    ],
+  },
+  {
+    code: 'project_transaction_failed',
+    meaning: 'A project transaction failed while publishing local files.',
+    likely_causes: ['The filesystem became unavailable, full, or denied a write.'],
+    retryable: true,
+    exit_code: 4,
+    repairs: [
+      'Verify the rollback result, filesystem permissions, and free space before retrying.',
+    ],
   },
   {
     code: 'run_failed',

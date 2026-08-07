@@ -1,36 +1,21 @@
-type ProjectTransactionErrorCode =
-  | 'candidate_invalid'
+import { AttestCliError, type AttestCliErrorOptions, type CliErrorCode } from '../../errors.js';
+
+type ProjectTransactionErrorCode = Extract<
+  CliErrorCode,
   | 'project_changed'
-  | 'project_lock_invalid'
-  | 'project_lock_live'
+  | 'project_invalid'
+  | 'project_locked'
   | 'project_lock_stale'
-  | 'transaction_failed'
-  | 'transaction_recovery_conflict'
-  | 'transaction_recovery_required'
-  | 'unsafe_transaction_path';
+  | 'project_recovery_required'
+  | 'project_transaction_failed'
+>;
 
-type ProjectTransactionErrorDetails = Readonly<Record<string, unknown>>;
-
-/** Identifies an expected transactional authoring failure with machine-readable details. */
-class ProjectTransactionError extends Error {
-  readonly code: ProjectTransactionErrorCode;
-  readonly details: ProjectTransactionErrorDetails;
-
-  constructor(
-    code: ProjectTransactionErrorCode,
-    message: string,
-    details: ProjectTransactionErrorDetails = {},
-    options?: ErrorOptions,
-  ) {
-    super(message, options);
+/** Identifies an expected transactional authoring failure with stable CLI output semantics. */
+class ProjectTransactionError extends AttestCliError {
+  constructor(code: ProjectTransactionErrorCode, message: string, options?: AttestCliErrorOptions) {
+    super(code, message, options);
     this.name = 'ProjectTransactionError';
-    this.code = code;
-    this.details = details;
   }
 }
 
-export {
-  ProjectTransactionError,
-  type ProjectTransactionErrorCode,
-  type ProjectTransactionErrorDetails,
-};
+export { ProjectTransactionError, type ProjectTransactionErrorCode };

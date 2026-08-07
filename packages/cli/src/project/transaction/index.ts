@@ -8,8 +8,18 @@ export {
 export {
   ProjectTransactionError,
   type ProjectTransactionErrorCode,
-  type ProjectTransactionErrorDetails,
 } from './project-transaction-error.js';
+export {
+  PROJECT_LOCK_FILE,
+  PROJECT_LOCK_SCHEMA,
+  acquireProjectLock,
+  inspectProjectLock,
+  releaseProjectLock,
+  unlockStaleProjectLock,
+  type ProjectLockHandle,
+  type ProjectLockInspection,
+  type ProjectLockMetadata,
+} from './project-lock.js';
 export { createSemanticProjectDiff, diffJsonFields } from './semantic-project-diff.js';
 export {
   type FieldChangeKind,

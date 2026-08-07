@@ -163,11 +163,9 @@ const createSemanticProjectDiff = (
     const newValue = newValues.get(rename.to);
     if (oldValue === undefined || newValue === undefined || oldValues.has(rename.to)) {
       throw new ProjectTransactionError(
-        'candidate_invalid',
+        'project_invalid',
         'Rename hint does not match candidate.',
-        {
-          rename,
-        },
+        { details: { rename } },
       );
     }
     renameKeys.add(`${rename.type}:${rename.from}`);

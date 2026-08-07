@@ -138,13 +138,15 @@ const prepareProjectCandidate = (candidate: ProjectResources): PreparedProjectCa
   const validated = projectResourcesSchema.safeParse(project);
   if (!validated.success) {
     throw new ProjectTransactionError(
-      'candidate_invalid',
+      'project_invalid',
       `Candidate project validation failed with ${validated.error.issues.length} diagnostic(s).`,
       {
-        diagnostics: validated.error.issues.map(({ message, path }) => ({
-          message,
-          path: path.length === 0 ? '' : `/${path.join('/')}`,
-        })),
+        details: {
+          diagnostics: validated.error.issues.map(({ message, path }) => ({
+            message,
+            path: path.length === 0 ? '' : `/${path.join('/')}`,
+          })),
+        },
       },
     );
   }

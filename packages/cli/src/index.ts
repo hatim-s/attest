@@ -25,6 +25,15 @@ export {
   type ProjectContentHashes,
 } from './project/load-project.js';
 export {
+  PROJECT_LOCK_FILE,
+  ProjectTransactionError,
+  acquireProjectLock,
+  inspectProjectLock,
+  releaseProjectLock,
+  unlockStaleProjectLock,
+  type ProjectLockInspection,
+} from './project/transaction/index.js';
+export {
   AttestCliError,
   createCliErrorCatalog,
   getCliErrorDefinition,
