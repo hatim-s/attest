@@ -12,6 +12,7 @@ import { toCaseRecord, toMetricEvaluation, toRunRecord } from './internal/row-ma
 import { computeCaseVerdict, computeSummary } from './internal/run-summary.js';
 import {
   openReadonlySqliteHandle,
+  openSnapshotSqliteHandle,
   openSqliteHandle,
   type SqliteHandle,
 } from './internal/sqlite-handle.js';
@@ -346,4 +347,17 @@ const openReadonlyRunStore = async (path: string): Promise<RunStore> => {
   }
 };
 
-export { openReadonlyRunStore, openRunStore, openStore, type RunStore };
+/** Opens a disposable main/WAL snapshot without migrations or project-file writes. */
+const openRunStoreSnapshot = async (path: string): Promise<RunStore> => {
+  let handle: SqliteHandle | undefined;
+  try {
+    handle = await openSnapshotSqliteHandle(resolve(path));
+    await validateReadableSchema(handle);
+    return new SqliteRunStore(new Kysely<Database>({ dialect: createSqliteDialect(handle) }));
+  } catch (error) {
+    await handle?.close();
+    throw error;
+  }
+};
+
+export { openReadonlyRunStore, openRunStore, openRunStoreSnapshot, openStore, type RunStore };

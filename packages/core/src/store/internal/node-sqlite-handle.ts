@@ -3,6 +3,7 @@ import { pathToFileURL } from 'node:url';
 import type { SqliteHandle } from './sqlite-handle.js';
 
 interface NodeSqliteHandleOptions {
+  immutable?: boolean;
   readOnly?: boolean;
 }
 
@@ -18,8 +19,11 @@ const openNodeSqliteHandle = async (
     return undefined;
   }
 
-  // SQLite otherwise creates WAL bookkeeping sidecars even for a read-only connection.
-  const location = options.readOnly ? `${pathToFileURL(path).href}?immutable=1` : path;
+  // Immutable mode prevents sidecars for direct inspection; snapshots must retain WAL visibility.
+  const location =
+    options.readOnly === true && options.immutable !== false
+      ? `${pathToFileURL(path).href}?immutable=1`
+      : path;
   const database = new sqliteModule.DatabaseSync(location, { readOnly: options.readOnly });
   return {
     prepare: (sql) => {

@@ -18,6 +18,7 @@ export {
   exportRunBundle,
   openReadonlyRunStore,
   openRunStore,
+  openRunStoreSnapshot,
   openStore,
   readRunBundle,
   toStoredCaseExecution,

@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
+import { copyFile, mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { spawn } from 'node:child_process';
@@ -12,7 +12,12 @@ import { openLibsqlHandle } from './internal/libsql-handle.js';
 import { openNodeSqliteHandle } from './internal/node-sqlite-handle.js';
 import { openSqliteHandle, type SqliteHandle } from './internal/sqlite-handle.js';
 import { migrateToLatest } from './migration-runner.js';
-import { openReadonlyRunStore, openRunStore, type RunStore } from './run-store.js';
+import {
+  openReadonlyRunStore,
+  openRunStore,
+  openRunStoreSnapshot,
+  type RunStore,
+} from './run-store.js';
 
 const stores: RunStore[] = [];
 const directories: string[] = [];
@@ -173,6 +178,26 @@ describe('SQLite store database', () => {
       code: 'SCHEMA_OUTDATED',
     });
     expect(await readFile(emptyPath)).toEqual(beforeBytes);
+  });
+
+  it('reads committed rows from a copied WAL while the source writer remains open', async () => {
+    const sourcePath = await temporaryDatabasePath();
+    const writer = await openRunStore(sourcePath);
+    stores.push(writer);
+    const run = await writer.createRun({
+      configVersion: 'v2',
+      configHash: 'committed-in-wal',
+      configJson: '{}',
+    });
+    expect(await readdir(dirname(sourcePath))).toContain('runs.db-wal');
+
+    const snapshotPath = await temporaryDatabasePath();
+    await copyFile(sourcePath, snapshotPath);
+    await copyFile(`${sourcePath}-wal`, `${snapshotPath}-wal`);
+    const reader = await openRunStoreSnapshot(snapshotPath);
+    stores.push(reader);
+
+    await expect(reader.listRuns()).resolves.toMatchObject([{ id: run.id }]);
   });
 
   it('rolls back all schema changes when a migration fails partway', async () => {
