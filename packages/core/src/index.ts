@@ -19,6 +19,7 @@ export {
   openRunStore,
   openStore,
   readRunBundle,
+  toStoredCaseExecution,
   type AttestStore,
   type BundleCase,
   type BundleFooter,
@@ -88,3 +89,22 @@ export {
   type MetricExecutionView,
   type TanstackJudgeClientOptions,
 } from './metrics/index.js';
+export {
+  API_VERSION as VIEW_API_VERSION,
+  createViewApp,
+  startViewServer,
+  type CreateViewAppOptions,
+  type StartViewServerOptions,
+  type ViewApp,
+  type ViewServerHandle,
+} from './view-server/index.js';
+export {
+  TraceConversionError,
+  convertOtlpJson,
+  inferSpanKind,
+  nanosecondsToTimestamp,
+  normalizeGenAiAttributes,
+  selectConvertedTrace,
+  type ConvertOtlpJsonOptions,
+  type TraceConversionErrorCode,
+} from './trace-converter/index.js';

@@ -24,9 +24,9 @@ const buildEvaluationDocument = (context: MetricContext): EvaluationDocument => 
   trace: context.execution.trace,
 });
 
-/** Resolves only the intentionally narrow dot-field and array-index grammar from spec §Paths. */
-const resolveDocumentPath = (document: EvaluationDocument, path: string): PathResolution => {
-  let current: unknown = document;
+/** Resolves the narrow `$`-rooted path grammar against any JSON-compatible value. */
+const resolveValuePath = (value: unknown, path: string): PathResolution => {
+  let current: unknown = value;
 
   for (const segment of parsePathSegments(path)) {
     if (segment.kind === 'index') {
@@ -56,9 +56,14 @@ const resolveDocumentPath = (document: EvaluationDocument, path: string): PathRe
   return { found: true, value: current };
 };
 
+/** Resolves a metric path against the canonical evaluation document. */
+const resolveDocumentPath = (document: EvaluationDocument, path: string): PathResolution =>
+  resolveValuePath(document, path);
+
 export {
   buildEvaluationDocument,
   resolveDocumentPath,
+  resolveValuePath,
   type EvaluationDocument,
   type PathResolution,
 };

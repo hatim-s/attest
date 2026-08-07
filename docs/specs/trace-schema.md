@@ -110,4 +110,9 @@ Unknown attributes are always legal and always preserved.
 
 ## Converters
 
-`attest trace convert` (Phase 2) ingests OTLP/JSON exports and OTel GenAI spans into this envelope. Emitting natively is a ~30-line helper in most languages — see `examples/`.
+`attest trace convert export.json` ingests OTLP/HTTP JSON exports and emits this envelope. It
+groups spans by the OTLP hexadecimal `traceId`; pass `--trace-id` when an export contains multiple
+traces, and `--output trace.json` to write a file. Scalar resource, scope, and span attributes are
+preserved. Stable aliases normalize Vercel AI SDK and LangSmith tool/model/token attributes into the
+`gen_ai.*` names used by trajectory assertions. Emitting natively remains a small helper in any
+language because the Attest envelope is plain JSON.

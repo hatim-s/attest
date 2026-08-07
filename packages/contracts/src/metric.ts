@@ -56,9 +56,27 @@ const thresholdSchema = z
   })
   .meta({ id: 'Threshold' });
 
+const equalsCheckSchema = z.strictObject({ path: pathSchema, value: jsonValueSchema });
+const containsCheckSchema = z.strictObject({ path: pathSchema, value: jsonValueSchema });
+const existsCheckSchema = z.strictObject({ path: pathSchema });
+
+const toolArgumentMatcherSchema = z.union([
+  z.strictObject({ equals: equalsCheckSchema }),
+  z.strictObject({ contains: containsCheckSchema }),
+  z.strictObject({ exists: existsCheckSchema }),
+]);
+
+/** Matches trace spans through stable core fields and a partial attribute map. */
+const spanFilterSchema = z.strictObject({
+  kind: z.enum(['agent', 'llm', 'tool', 'retrieval', 'other']).optional(),
+  name: z.string().optional(),
+  status: z.enum(['ok', 'error']).optional(),
+  attributes: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).optional(),
+});
+
 const leafAssertionCheckSchema = z.union([
-  z.strictObject({ equals: z.strictObject({ path: pathSchema, value: jsonValueSchema }) }),
-  z.strictObject({ contains: z.strictObject({ path: pathSchema, value: jsonValueSchema }) }),
+  z.strictObject({ equals: equalsCheckSchema }),
+  z.strictObject({ contains: containsCheckSchema }),
   z.strictObject({ regex: regexCheckSchema }),
   z.strictObject({
     json_schema: z.strictObject({
@@ -67,11 +85,19 @@ const leafAssertionCheckSchema = z.union([
     }),
   }),
   z.strictObject({ threshold: thresholdSchema }),
-  z.strictObject({ exists: z.strictObject({ path: pathSchema }) }),
+  z.strictObject({ exists: existsCheckSchema }),
   z.strictObject({
     tool_calls: z.strictObject({
       name: z.string().optional(),
       status: z.enum(['ok', 'error']).optional(),
+      count: z.number().int().nonnegative().optional(),
+      order: z.array(z.string()).optional(),
+      arguments: z.array(toolArgumentMatcherSchema).nonempty().optional(),
+    }),
+  }),
+  z.strictObject({
+    spans: z.strictObject({
+      filter: spanFilterSchema.optional(),
       count: z.number().int().nonnegative().optional(),
       order: z.array(z.string()).optional(),
     }),
@@ -80,6 +106,12 @@ const leafAssertionCheckSchema = z.union([
 
 /** Represents a non-recursive assertion check inferred directly from its Zod union. */
 type LeafAssertionCheck = z.infer<typeof leafAssertionCheckSchema>;
+
+/** Represents one structural matcher applied to parsed tool-call arguments. */
+type ToolArgumentMatcher = z.infer<typeof toolArgumentMatcherSchema>;
+
+/** Represents the stable trace-span fields accepted by declarative filters. */
+type SpanFilter = z.infer<typeof spanFilterSchema>;
 
 /**
  * Represents recursive combinators whose self-reference requires an explicit TypeScript layer.
@@ -189,10 +221,14 @@ export {
   metricDefinitionSchema,
   metricRequestSchema,
   metricResultSchema,
+  spanFilterSchema,
+  toolArgumentMatcherSchema,
   type AssertionCheck,
   type JsonValue,
   type LeafAssertionCheck,
   type MetricDefinition,
   type MetricRequest,
   type MetricResult,
+  type SpanFilter,
+  type ToolArgumentMatcher,
 };

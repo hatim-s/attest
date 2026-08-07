@@ -16,11 +16,15 @@ const trace: Trace = {
     {
       span_id: 'tool-2',
       parent_span_id: null,
-      name: 'search',
+      name: 'tool.search',
       kind: 'tool',
       start_time: '2026-08-06T10:00:02Z',
       end_time: '2026-08-06T10:00:03Z',
       status: { code: 'error' },
+      attributes: {
+        'gen_ai.tool.name': 'search',
+        'gen_ai.tool.call.arguments': '{"query":"capital of France","limit":5}',
+      },
     },
     {
       span_id: 'agent-1',
@@ -39,6 +43,11 @@ const trace: Trace = {
       start_time: '2026-08-06T10:00:01Z',
       end_time: '2026-08-06T10:00:02Z',
       status: { code: 'ok' },
+      attributes: {
+        'gen_ai.tool.name': 'lookup',
+        'gen_ai.tool.call.arguments': '{"cities":["Paris","London"]}',
+        'attest.step.index': 1,
+      },
     },
   ],
 };
@@ -205,6 +214,54 @@ const leafCases: LeafCase[] = [
     check: { tool_calls: { order: ['search', 'lookup'] } },
     passed: false,
     reason: /order did not match/,
+  },
+  {
+    name: 'tool_calls matches structured argument equality and containment',
+    check: {
+      tool_calls: {
+        name: 'search',
+        arguments: [
+          { equals: { path: '$.limit', value: 5 } },
+          { contains: { path: '$.query', value: 'France' } },
+          { exists: { path: '$.query' } },
+        ],
+      },
+    },
+    passed: true,
+  },
+  {
+    name: 'tool_calls reports argument mismatches as assertion failures',
+    check: {
+      tool_calls: {
+        name: 'search',
+        arguments: [{ equals: { path: '$.limit', value: 10 } }],
+      },
+    },
+    passed: false,
+    reason: /arguments satisfied every argument matcher/,
+  },
+  {
+    name: 'spans filters by kind, status, and partial attributes',
+    check: {
+      spans: {
+        filter: { kind: 'tool', status: 'ok', attributes: { 'attest.step.index': 1 } },
+        count: 1,
+        order: ['lookup'],
+      },
+    },
+    passed: true,
+  },
+  {
+    name: 'spans reports filtered count mismatches',
+    check: { spans: { filter: { kind: 'tool', status: 'error' }, count: 0 } },
+    passed: false,
+    reason: /expected 0 matching spans but found 1/,
+  },
+  {
+    name: 'spans treats a filter-only check as an existence assertion',
+    check: { spans: { filter: { kind: 'retrieval' } } },
+    passed: false,
+    reason: /no spans matched the filter/,
   },
   {
     name: 'tool_calls fails when no trace was emitted',
@@ -405,6 +462,7 @@ const leafCheckArbitrary: fc.Arbitrary<AssertionCheck> = fc.oneof(
   })),
   fc.constant({ exists: { path: '$.input' } }),
   fc.constant({ tool_calls: { count: 0 } }),
+  fc.constant({ spans: { count: 0 } }),
 );
 
 describe('assertion properties', () => {

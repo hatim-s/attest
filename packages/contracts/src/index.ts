@@ -14,6 +14,8 @@ export {
   metricDefinitionSchema,
   metricRequestSchema,
   metricResultSchema,
+  spanFilterSchema,
+  toolArgumentMatcherSchema,
 } from './metric.js';
 export type {
   AssertionCheck,
@@ -22,6 +24,8 @@ export type {
   MetricDefinition,
   MetricRequest,
   MetricResult,
+  SpanFilter,
+  ToolArgumentMatcher,
 } from './metric.js';
 export {
   parseAgentRequest,

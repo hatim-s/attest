@@ -1,0 +1,72 @@
+{
+  "resourceSpans": [
+    {
+      "resource": {
+        "attributes": [{ "key": "service.name", "value": { "stringValue": "langchain-example" } }]
+      },
+      "scopeSpans": [
+        {
+          "scope": { "name": "langsmith.otel", "version": "0.4.0" },
+          "spans": [
+            {
+              "traceId": "8A7B6C5D4E3F20112233445566778899",
+              "spanId": "1000000000000001",
+              "parentSpanId": "",
+              "name": "research-agent",
+              "kind": 1,
+              "startTimeUnixNano": "1786059100000000000",
+              "endTimeUnixNano": "1786059104000000000",
+              "attributes": [
+                { "key": "langsmith.span.kind", "value": { "stringValue": "chain" } },
+                {
+                  "key": "input.value",
+                  "value": { "stringValue": "{\"question\":\"Capital of France?\"}" }
+                }
+              ],
+              "status": { "code": 1 }
+            },
+            {
+              "traceId": "8A7B6C5D4E3F20112233445566778899",
+              "spanId": "1000000000000002",
+              "parentSpanId": "1000000000000001",
+              "name": "ChatOpenAI",
+              "kind": 1,
+              "startTimeUnixNano": "1786059100100000000",
+              "endTimeUnixNano": "1786059101800000000",
+              "attributes": [
+                { "key": "langsmith.span.kind", "value": { "stringValue": "LLM" } },
+                { "key": "gen_ai.system", "value": { "stringValue": "openai" } },
+                { "key": "gen_ai.request.model", "value": { "stringValue": "gpt-5-mini" } },
+                { "key": "gen_ai.usage.input_tokens", "value": { "intValue": "41" } },
+                { "key": "gen_ai.usage.output_tokens", "value": { "intValue": "9" } }
+              ],
+              "status": { "code": 1 }
+            },
+            {
+              "traceId": "8A7B6C5D4E3F20112233445566778899",
+              "spanId": "1000000000000003",
+              "parentSpanId": "1000000000000001",
+              "name": "search",
+              "kind": 1,
+              "startTimeUnixNano": "1786059101900000000",
+              "endTimeUnixNano": "1786059102600000000",
+              "attributes": [
+                { "key": "langsmith.span.kind", "value": { "stringValue": "tool" } },
+                { "key": "tool.name", "value": { "stringValue": "search" } },
+                {
+                  "key": "tool_arguments",
+                  "value": { "stringValue": "{\"query\":\"capital of France\"}" }
+                },
+                {
+                  "key": "output.value",
+                  "value": { "stringValue": "{\"answer\":\"Paris\"}" }
+                }
+              ],
+              "status": { "code": 1 }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

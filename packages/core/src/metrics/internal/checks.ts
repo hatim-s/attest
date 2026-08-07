@@ -5,6 +5,7 @@ import { isDeepEqual } from './deep-equal.js';
 import { evaluateJsonSchemaCheck } from './json-schema-check.js';
 import { pathNotFound } from './path.js';
 import { executeGuardedRegexTest } from './regex-guard.js';
+import { evaluateSpansCheck } from './span-check.js';
 import { evaluateToolCallsCheck } from './tool-calls-check.js';
 
 type CheckEvaluation = { passed: boolean; reason?: string };
@@ -147,7 +148,10 @@ const evaluateLeafCheck = (
   if ('exists' in check) {
     return evaluateExistsCheck(check.exists, document);
   }
-  return evaluateToolCallsCheck(check.tool_calls, document.trace);
+  if ('tool_calls' in check) {
+    return evaluateToolCallsCheck(check.tool_calls, document.trace);
+  }
+  return evaluateSpansCheck(check.spans, document.trace);
 };
 
 export { evaluateLeafCheck };

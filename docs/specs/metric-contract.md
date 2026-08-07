@@ -34,6 +34,14 @@ assert:
   - json_schema: { path: '$.output', schema: { type: object, required: [answer] } }
   - threshold: { path: '$.trace.usage.output_tokens', lt: 500 }
   - tool_calls: { status: ok }
+  - tool_calls:
+      name: search
+      arguments:
+        - contains: { path: '$.query', value: 'France' }
+        - equals: { path: '$.limit', value: 5 }
+  - spans:
+      filter: { kind: llm, status: ok, attributes: { gen_ai.request.model: gpt-5 } }
+      count: 1
   - not: { contains: { path: '$.output', value: "I don't know" } }
   - any:
       - equals: { path: '$.output.answer', value: 'Paris' }
@@ -42,7 +50,11 @@ assert:
 
 **Paths** are a deliberate subset of JSONPath: `$` roots the evaluation document `{ input, output, expected, trace }`; dot fields and `[n]` indexing only — no wildcards, filters, or recursion in v0.
 
-**Check set v0**: `equals`, `contains` (string or array containment), `regex` (JavaScript `RegExp` syntax as `{path, pattern, flags?}`; the engine executes patterns under a per-check time guard), `json_schema` (Draft 2020-12), `threshold` (`lt`/`lte`/`gt`/`gte` on numbers), `exists`, `tool_calls` (trace-based: filter by `name`, assert `status`, `count`, `order` — expanded in Phase 2), and combinators `all`, `any`, `not`. Combinator arrays and `assert` lists must be non-empty — vacuously-true metrics are rejected at config validation.
+**Check set v0**: `equals`, `contains` (string or array containment), `regex` (JavaScript `RegExp` syntax as `{path, pattern, flags?}`; the engine executes patterns under a per-check time guard), `json_schema` (Draft 2020-12), `threshold` (`lt`/`lte`/`gt`/`gte` on numbers), `exists`, `tool_calls`, `spans`, and combinators `all`, `any`, `not`. Combinator arrays, argument matcher arrays, and `assert` lists must be non-empty — vacuously-true collections are rejected at config validation.
+
+`tool_calls.name` matches the `gen_ai.tool.name` attribute, falling back to the span name. `status` and exact `count` apply to the matching calls; `order` compares their semantic names chronologically. `arguments` requires at least one matching call whose `gen_ai.tool.call.arguments` JSON satisfies every `equals`, `contains`, and `exists` matcher. Structured span `input` is the fallback when the standardized argument attribute is absent.
+
+`spans.filter` can select by `kind`, span `name`, `status`, and a partial exact attribute map. A filter by itself requires at least one match; `count` and chronological `order` apply to the filtered span set when supplied. Missing or malformed trace evidence produces a normal failed assertion, never a metric-engine exception.
 
 ## 2. Exec metrics (`type: exec`)
 

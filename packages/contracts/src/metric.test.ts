@@ -96,6 +96,39 @@ describe('metric schemas', () => {
     ).toBe(false);
   });
 
+  it('accepts tool argument matchers and stable span filters', () => {
+    expect(
+      assertionCheckSchema.safeParse({
+        tool_calls: {
+          name: 'search',
+          arguments: [
+            { equals: { path: '$.limit', value: 5 } },
+            { contains: { path: '$.query', value: 'France' } },
+            { exists: { path: '$.query' } },
+          ],
+        },
+      }).success,
+    ).toBe(true);
+    expect(
+      assertionCheckSchema.safeParse({
+        spans: {
+          filter: {
+            kind: 'tool',
+            status: 'ok',
+            attributes: { 'attest.step.index': 1 },
+          },
+          count: 1,
+          order: ['tool.search'],
+        },
+      }).success,
+    ).toBe(true);
+    expect(
+      assertionCheckSchema.safeParse({
+        tool_calls: { arguments: [{ equals: { path: '$.*', value: 5 } }] },
+      }).success,
+    ).toBe(false);
+  });
+
   it('accepts all three metric definition variants', () => {
     const definitions = [
       { name: 'exists', type: 'assertion', assert: [{ exists: { path: '$.output' } }] },
@@ -112,6 +145,7 @@ describe('metric schemas', () => {
     { name: 'assert', value: { name: 'empty', type: 'assertion', assert: [] } },
     { name: 'all', value: { all: [] } },
     { name: 'any', value: { any: [] } },
+    { name: 'arguments', value: { tool_calls: { arguments: [] } } },
   ])('rejects an empty $name list', ({ name, value }) => {
     const result =
       name === 'assert'
