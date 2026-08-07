@@ -2,12 +2,17 @@ import { constants } from 'node:fs';
 import { lstat, open, realpath } from 'node:fs/promises';
 import { dirname, isAbsolute, join, relative, sep } from 'node:path';
 
-import { openReadonlyRunStore, StoreError, type RunStore } from '@attest/core';
+import { openRunStoreSnapshot, StoreError, type RunStore } from '@attest/core';
 
 import { AttestCliError } from '../../errors.js';
+import { captureRunStoreSnapshot, removeRunStoreSnapshot } from './run-store-snapshot.js';
 
 const RUN_STORE_DIRECTORY = '.attest';
 const RUN_STORE_FILE = 'runs.db';
+
+type ReadonlyRunStoreHooks = {
+  afterSnapshotCaptured?: () => Promise<void> | void;
+};
 
 const getErrorCode = (error: unknown): string | undefined =>
   error instanceof Error && 'code' in error && typeof Reflect.get(error, 'code') === 'string'
@@ -51,6 +56,7 @@ const toSafeStoreError = (error: unknown, path: string): AttestCliError => {
 const withReadonlyRunStore = async <T>(
   root: string,
   operation: (store: RunStore) => Promise<T>,
+  hooks: ReadonlyRunStoreHooks = {},
 ): Promise<T | undefined> => {
   const storeDirectory = join(root, RUN_STORE_DIRECTORY);
   const storePath = join(storeDirectory, RUN_STORE_FILE);
@@ -93,27 +99,25 @@ const withReadonlyRunStore = async <T>(
 
   let anchor;
   let store: RunStore | undefined;
+  let snapshot: Awaited<ReturnType<typeof captureRunStoreSnapshot>> | undefined;
   try {
     anchor = await open(resolvedStore, constants.O_RDONLY | constants.O_NOFOLLOW);
     const anchoredMetadata = await anchor.stat();
-    const openedStore = await openReadonlyRunStore(resolvedStore);
+    snapshot = await captureRunStoreSnapshot(resolvedStore, anchor);
+    await hooks.afterSnapshotCaptured?.();
+    const openedStore = await openRunStoreSnapshot(snapshot.path);
     store = openedStore;
-    const currentMetadata = await lstat(resolvedStore);
-    if (
-      currentMetadata.isSymbolicLink() ||
-      currentMetadata.dev !== anchoredMetadata.dev ||
-      currentMetadata.ino !== anchoredMetadata.ino
-    ) {
-      throw unsafeStore(storePath);
-    }
+    // The source identity was verified during capture; SQLite only sees the descriptor copy.
+    if (!anchoredMetadata.isFile()) throw unsafeStore(storePath);
     return await operation(openedStore);
   } catch (error: unknown) {
     if (error instanceof StoreError && error.code === 'RUN_NOT_FOUND') throw error;
     throw toSafeStoreError(error, storePath);
   } finally {
     await store?.close();
+    if (snapshot !== undefined) await removeRunStoreSnapshot(snapshot);
     await anchor?.close();
   }
 };
 
-export { withReadonlyRunStore };
+export { withReadonlyRunStore, type ReadonlyRunStoreHooks };

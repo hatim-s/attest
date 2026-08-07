@@ -4,6 +4,7 @@ import {
   mkdtemp,
   readFile,
   readdir,
+  rename,
   rm,
   symlink,
   writeFile,
@@ -29,6 +30,7 @@ import {
   createFileChanges,
   publishPreparedTransaction,
 } from '../../project/transaction/transactional-writer.js';
+import { withReadonlyRunStore } from '../run-store/readonly-run-store.js';
 import { runProjectInitCommand, type ProjectInitFileStep } from './project-init-command.js';
 
 const FIXED_PROJECT_ID = '01ARZ3NDEKTSV4RRFFQ69G5FAV';
@@ -59,6 +61,16 @@ const nonInteractive = {
   outputIsTTY: false,
   prompt: (): Promise<string> => Promise.reject(new Error('prompt must not be called')),
   readStdin: (): Promise<string> => Promise.resolve(''),
+};
+
+/** Captures exact file bytes for project-local no-write assertions. */
+const snapshotDirectory = async (directory: string): Promise<Record<string, Buffer>> => {
+  const entries = (await readdir(directory)).sort();
+  return Object.fromEntries(
+    await Promise.all(
+      entries.map(async (entry) => [entry, await readFile(join(directory, entry))] as const),
+    ),
+  );
 };
 
 afterEach(async () => {
@@ -624,6 +636,90 @@ describe('CLI2.5 project shell', () => {
       error: { code: 'project_read_failed' },
     });
     expect(await readFile(outsideStore)).toEqual(outsideBefore);
+  });
+
+  it('reads committed WAL rows from a live writer without changing source files', async () => {
+    const root = await createTemporaryDirectory();
+    await writeFixtureProject(root);
+    const storeDirectory = join(root, '.attest');
+    const storePath = join(storeDirectory, 'runs.db');
+    await mkdir(storeDirectory);
+    const writer = await openStore(storePath);
+    try {
+      const run = await writer.runs.createRun({
+        configVersion: 'v2',
+        configHash: 'live-wal',
+        configJson: '{}',
+      });
+      expect(await readdir(storeDirectory)).toContain('runs.db-wal');
+      const before = await snapshotDirectory(storeDirectory);
+
+      for (const argv of [
+        ['list', 'runs', '--output', 'json'],
+        ['show', 'run', run.id, '--output', 'json'],
+      ]) {
+        const response = collectIo();
+        expect(
+          await runCli(argv, {
+            workingDirectory: root,
+            io: response.io,
+            interaction: nonInteractive,
+          }),
+        ).toBe(0);
+        expect(response.output.join('')).toContain(run.id);
+      }
+      expect(await snapshotDirectory(storeDirectory)).toEqual(before);
+    } finally {
+      await writer.close();
+    }
+  });
+
+  it('queries the anchored snapshot when the source pathname is swapped after capture', async () => {
+    const root = await createTemporaryDirectory();
+    await writeFixtureProject(root);
+    const storeDirectory = join(root, '.attest');
+    const storePath = join(storeDirectory, 'runs.db');
+    await mkdir(storeDirectory);
+    const sourceWriter = await openStore(storePath);
+    const sourceRun = await sourceWriter.runs.createRun({
+      configVersion: 'v2',
+      configHash: 'anchored-source',
+      configJson: '{}',
+    });
+    await sourceWriter.close();
+
+    const outsideDirectory = await createTemporaryDirectory();
+    const outsidePath = join(outsideDirectory, 'outside.db');
+    const outsideWriter = await openStore(outsidePath);
+    const outsideRun = await outsideWriter.runs.createRun({
+      configVersion: 'v2',
+      configHash: 'outside-source',
+      configJson: '{}',
+    });
+    await outsideWriter.close();
+
+    const backupPath = join(storeDirectory, 'runs.db-original');
+    let swapped = false;
+    try {
+      const ids = await withReadonlyRunStore(
+        root,
+        async (store) => (await store.listRuns()).map(({ id }) => id),
+        {
+          afterSnapshotCaptured: async () => {
+            await rename(storePath, backupPath);
+            await symlink(outsidePath, storePath);
+            swapped = true;
+          },
+        },
+      );
+      expect(ids).toEqual([sourceRun.id]);
+      expect(ids).not.toContain(outsideRun.id);
+    } finally {
+      if (swapped) {
+        await rm(storePath);
+        await rename(backupPath, storePath);
+      }
+    }
   });
 
   it('recovers pre-manifest and post-manifest journals before returning a project snapshot', async () => {
