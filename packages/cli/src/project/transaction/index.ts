@@ -22,6 +22,21 @@ export {
 } from './project-lock.js';
 export { createSemanticProjectDiff, diffJsonFields } from './semantic-project-diff.js';
 export {
+  applyProjectMutation,
+  createFileChanges,
+  markTransactionCommitted,
+  publishPreparedTransaction,
+  type PublishEvent,
+  type PublishObserver,
+} from './transactional-writer.js';
+export {
+  JOURNAL_FILE,
+  TRANSACTIONS_DIRECTORY,
+  TRANSACTION_JOURNAL_SCHEMA,
+  recoverProjectTransactions,
+  type RecoveryResult,
+} from './transaction-journal.js';
+export {
   type FieldChangeKind,
   type ProjectMutationCandidate,
   type ProjectMutationRequest,
