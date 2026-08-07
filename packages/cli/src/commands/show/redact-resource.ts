@@ -4,6 +4,26 @@ import type { JsonValue } from '../../project/canonical-project.js';
 
 const REDACTED = '[REDACTED]';
 
+/** Removes userinfo and every literal query value from one display-only URL. */
+const redactUrl = (value: string): string => {
+  let parsed: URL;
+  try {
+    parsed = new URL(value);
+  } catch {
+    // Validated resources should never reach this branch; fail closed for display-only callers.
+    return REDACTED;
+  }
+  const hasUserInfo = parsed.username.length > 0 || parsed.password.length > 0;
+  const queryKeys = [...new Set(parsed.searchParams.keys())];
+  if (!hasUserInfo && queryKeys.length === 0) return value;
+  if (hasUserInfo) {
+    parsed.username = REDACTED;
+    parsed.password = '';
+  }
+  queryKeys.forEach((key) => parsed.searchParams.set(key, REDACTED));
+  return parsed.toString();
+};
+
 const redactStringRecord = (value: unknown): void => {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return;
   for (const [key, entry] of Object.entries(value)) {
@@ -20,6 +40,9 @@ const redactRequestTemplates = (value: unknown): void => {
   if (value === null || typeof value !== 'object') return;
   for (const [key, entry] of Object.entries(value)) {
     if (key === 'headers' || key === 'query') redactStringRecord(entry);
+    if ((key === 'url' || key === 'status_url_template') && typeof entry === 'string') {
+      Reflect.set(value, key, redactUrl(entry));
+    }
     redactRequestTemplates(entry);
   }
 };
@@ -45,4 +68,4 @@ const redactMetricResource = (resource: MetricResource): JsonValue => {
   return redacted;
 };
 
-export { REDACTED, redactAgentResource, redactMetricResource };
+export { REDACTED, redactAgentResource, redactMetricResource, redactUrl };

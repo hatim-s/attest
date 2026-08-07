@@ -498,7 +498,7 @@ describe('CLI2.5 project shell', () => {
       kind: 'http',
       lifecycle: 'external',
       request: {
-        url: 'https://example.test/invoke',
+        url: 'https://user:authored-url-password@example.test/invoke?token=authored-url-token',
         method: 'POST',
         headers: { Authorization: 'Bearer authored-agent-secret' },
         query: { api_key: 'authored-query-secret' },
@@ -519,7 +519,7 @@ describe('CLI2.5 project shell', () => {
     candidate.metrics[0]!.definition = {
       kind: 'http',
       request: {
-        url: 'https://example.test/metric',
+        url: 'https://user:authored-metric-url-password@example.test/metric?token=authored-metric-url-token',
         method: 'POST',
         headers: { 'X-Api-Key': 'authored-metric-secret' },
       },
@@ -542,7 +542,9 @@ describe('CLI2.5 project shell', () => {
       ).toBe(0);
       const output = response.output.join('\n');
       expect(output).toContain('[REDACTED]');
-      expect(output).not.toMatch(/authored-(?:agent|query|argv|metric)-secret/u);
+      expect(output).not.toMatch(
+        /authored-(?:agent|query|argv|metric)-secret|authored-(?:url|metric-url)-(?:password|token)/u,
+      );
     }
   });
 
