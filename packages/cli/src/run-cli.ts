@@ -1,12 +1,17 @@
 import { createRequire } from 'node:module';
 import { mkdir, writeFile } from 'node:fs/promises';
-import { dirname, relative, resolve } from 'node:path';
+import { dirname, resolve } from 'node:path';
 
 import { type CliExitCode } from '@attest/contracts';
 import { diffRuns, openStore, runToJUnitXml } from '@attest/core';
 import { Command, CommanderError, Option } from 'commander';
 
 import { loadConfig } from './config/load-config.js';
+import {
+  createDefaultCliInteraction,
+  registerProjectResourceCommands,
+  type CliInteraction,
+} from './commands/register-project-resource-commands.js';
 import {
   AttestCliError,
   createCliErrorCatalog,
@@ -15,7 +20,6 @@ import {
   serializeCliError,
 } from './errors.js';
 import { createCliHelp, renderCliHelp, setCliCommandHelpMetadata } from './help/command-help.js';
-import { initProject } from './init/init-project.js';
 import {
   diffToJson,
   renderDiffSummary,
@@ -46,6 +50,7 @@ type CliIo = {
 };
 
 type RunCliOptions = {
+  interaction?: Partial<CliInteraction>;
   io?: CliIo;
   workingDirectory?: string;
 };
@@ -61,10 +66,6 @@ type RunCommandOptions = {
 type DiffCommandOptions = {
   format: 'human' | 'json';
   store?: string;
-};
-
-type InitCommandOptions = {
-  force?: boolean;
 };
 
 type ViewCommandOptions = {
@@ -129,6 +130,7 @@ const createProgram = (
   io: CliIo,
   workingDirectory: string,
   setExitCode: (exitCode: CliExitCode) => void,
+  interaction: CliInteraction = createDefaultCliInteraction(),
 ): Command => {
   const packageMetadata = require('../package.json') as PackageMetadata;
   const program = new Command()
@@ -137,24 +139,14 @@ const createProgram = (
     .version(packageMetadata.version)
     .showHelpAfterError()
     .exitOverride()
+    .option('--project <dir>', 'explicit Attest project directory')
+    .addOption(
+      new Option('--output <format>', 'output format').choices(['human', 'json']).default('human'),
+    )
+    .option('--non-interactive', 'disable prompts and fail when required input is missing')
     .configureOutput({
       writeOut: io.output,
       writeErr: io.error,
-    });
-
-  program
-    .command('init')
-    .description('Create a runnable local quickstart without overwriting files by default.')
-    .argument('[directory]', 'target project directory', '.')
-    .option('--force', 'replace generated files that already exist')
-    .action(async (directory: string, options: InitCommandOptions) => {
-      const result = await initProject(directory, workingDirectory, { force: options.force });
-      const fileList = result.files
-        .map((filePath) => `  ${relative(result.targetDirectory, filePath)}`)
-        .join('\n');
-      io.output(
-        `Initialized Attest quickstart in ${result.targetDirectory}:\n${fileList}\n\nNext: cd ${result.targetDirectory} && attest run`,
-      );
     });
 
   program
@@ -286,8 +278,12 @@ const createProgram = (
     )
     .action((commandPath: string[], options: ProtocolCommandOptions) => {
       const help = createCliHelp(program, commandPath);
+      const output =
+        options.output === 'json' || program.opts<ProtocolCommandOptions>().output === 'json'
+          ? 'json'
+          : 'human';
       io.output(
-        options.output === 'json'
+        output === 'json'
           ? serializeCliResult(createCliSuccessResult('help', help))
           : renderCliHelp(help),
       );
@@ -307,8 +303,12 @@ const createProgram = (
     )
     .action((options: ProtocolCommandOptions) => {
       const catalog = createCliErrorCatalog();
+      const output =
+        options.output === 'json' || program.opts<ProtocolCommandOptions>().output === 'json'
+          ? 'json'
+          : 'human';
       io.output(
-        options.output === 'json'
+        output === 'json'
           ? serializeCliResult(createCliSuccessResult('errors', catalog))
           : renderCliErrorCatalog(catalog),
       );
@@ -318,18 +318,27 @@ const createProgram = (
     options: { output: { implies: ['non-interactive'] } },
   });
 
+  registerProjectResourceCommands({
+    interaction,
+    io,
+    program,
+    workingDirectory,
+  });
+
   setCliCommandHelpMetadata(program, {
-    examples: ['attest help --output json', 'attest errors --output json'],
+    examples: [
+      'attest help --output json',
+      'attest errors --output json',
+      'attest project init',
+      'attest list agents --output json',
+    ],
+    options: { output: { implies: ['non-interactive'] } },
   });
 
   return program;
 };
 
 const requestedStructuredOutput = (argv: readonly string[]): boolean => {
-  if (argv[0] !== 'help' && argv[0] !== 'errors') {
-    return false;
-  }
-
   return argv.some(
     (argument, index) =>
       argument === '--output=json' ||
@@ -339,12 +348,36 @@ const requestedStructuredOutput = (argv: readonly string[]): boolean => {
 };
 
 const requestedCommand = (argv: readonly string[]): string => {
-  const first = argv[0];
+  let commandIndex = 0;
+  while (commandIndex < argv.length) {
+    const argument = argv[commandIndex];
+    if (argument === '--project' || argument === '--output') {
+      commandIndex += 2;
+      continue;
+    }
+    if (
+      argument === '--non-interactive' ||
+      argument?.startsWith('--project=') === true ||
+      argument?.startsWith('--output=') === true
+    ) {
+      commandIndex += 1;
+      continue;
+    }
+    break;
+  }
+  const first = argv[commandIndex];
+  const second = argv[commandIndex + 1];
   if (first === undefined || first.startsWith('-')) {
     return 'cli';
   }
-  if (first === 'trace' && argv[1] === 'convert') {
+  if (first === 'trace' && second === 'convert') {
     return 'trace.convert';
+  }
+  if (first === 'init') {
+    return 'project.init';
+  }
+  if (first === 'project' && ['init', 'show', 'validate'].includes(second ?? '')) {
+    return `project.${second}`;
   }
   return /^[a-z][a-z0-9-]*$/.test(first) ? first : 'cli';
 };
@@ -356,9 +389,15 @@ const runCli = async (argv: string[], options: RunCliOptions = {}): Promise<numb
   const structuredOutput = requestedStructuredOutput(argv);
   const commandIo: CliIo = structuredOutput ? { output: io.output, error: () => undefined } : io;
   let exitCode: CliExitCode = 0;
-  const program = createProgram(commandIo, workingDirectory, (nextExitCode) => {
-    exitCode = nextExitCode;
-  });
+  const interaction = { ...createDefaultCliInteraction(), ...options.interaction };
+  const program = createProgram(
+    commandIo,
+    workingDirectory,
+    (nextExitCode) => {
+      exitCode = nextExitCode;
+    },
+    interaction,
+  );
 
   try {
     await program.parseAsync(argv, { from: 'user' });
