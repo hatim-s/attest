@@ -139,11 +139,6 @@ const createProgram = (
     .version(packageMetadata.version)
     .showHelpAfterError()
     .exitOverride()
-    .option('--project <dir>', 'explicit Attest project directory')
-    .addOption(
-      new Option('--output <format>', 'output format').choices(['human', 'json']).default('human'),
-    )
-    .option('--non-interactive', 'disable prompts and fail when required input is missing')
     .configureOutput({
       writeOut: io.output,
       writeErr: io.error,
@@ -278,10 +273,7 @@ const createProgram = (
     )
     .action((commandPath: string[], options: ProtocolCommandOptions) => {
       const help = createCliHelp(program, commandPath);
-      const output =
-        options.output === 'json' || program.opts<ProtocolCommandOptions>().output === 'json'
-          ? 'json'
-          : 'human';
+      const output = options.output;
       io.output(
         output === 'json'
           ? serializeCliResult(createCliSuccessResult('help', help))
@@ -303,10 +295,7 @@ const createProgram = (
     )
     .action((options: ProtocolCommandOptions) => {
       const catalog = createCliErrorCatalog();
-      const output =
-        options.output === 'json' || program.opts<ProtocolCommandOptions>().output === 'json'
-          ? 'json'
-          : 'human';
+      const output = options.output;
       io.output(
         output === 'json'
           ? serializeCliResult(createCliSuccessResult('errors', catalog))
@@ -332,41 +321,35 @@ const createProgram = (
       'attest project init',
       'attest list agents --output json',
     ],
-    options: { output: { implies: ['non-interactive'] } },
   });
 
   return program;
 };
 
 const requestedStructuredOutput = (argv: readonly string[]): boolean => {
-  return argv.some(
-    (argument, index) =>
-      argument === '--output=json' ||
-      argument === '--output=jsonl' ||
-      (argument === '--output' && (argv[index + 1] === 'json' || argv[index + 1] === 'jsonl')),
+  const command = requestedCommand(argv);
+  const supportsStructuredOutput =
+    command === 'help' ||
+    command === 'errors' ||
+    command === 'init' ||
+    command === 'list' ||
+    command === 'show' ||
+    command.startsWith('project.') ||
+    command.startsWith('schema.');
+  return (
+    supportsStructuredOutput &&
+    argv.some(
+      (argument, index) =>
+        argument === '--output=json' ||
+        argument === '--output=jsonl' ||
+        (argument === '--output' && (argv[index + 1] === 'json' || argv[index + 1] === 'jsonl')),
+    )
   );
 };
 
 const requestedCommand = (argv: readonly string[]): string => {
-  let commandIndex = 0;
-  while (commandIndex < argv.length) {
-    const argument = argv[commandIndex];
-    if (argument === '--project' || argument === '--output') {
-      commandIndex += 2;
-      continue;
-    }
-    if (
-      argument === '--non-interactive' ||
-      argument?.startsWith('--project=') === true ||
-      argument?.startsWith('--output=') === true
-    ) {
-      commandIndex += 1;
-      continue;
-    }
-    break;
-  }
-  const first = argv[commandIndex];
-  const second = argv[commandIndex + 1];
+  const first = argv[0];
+  const second = argv[1];
   if (first === undefined || first.startsWith('-')) {
     return 'cli';
   }
@@ -378,6 +361,9 @@ const requestedCommand = (argv: readonly string[]): string => {
   }
   if (first === 'project' && ['init', 'show', 'validate'].includes(second ?? '')) {
     return `project.${second}`;
+  }
+  if (first === 'schema' && ['list', 'print'].includes(second ?? '')) {
+    return `schema.${second}`;
   }
   return /^[a-z][a-z0-9-]*$/.test(first) ? first : 'cli';
 };

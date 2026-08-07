@@ -20,18 +20,33 @@ const ULID_ALPHABET = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
 
 type ProjectInitRequest = Extract<CommandRequest, { command: 'project.init' }>;
 
+type ProjectInitFileStep =
+  | 'directory_close'
+  | 'directory_open'
+  | 'directory_sync'
+  | 'manifest_link'
+  | 'rollback_manifest_unlink'
+  | 'temporary_close'
+  | 'temporary_open'
+  | 'temporary_sync'
+  | 'temporary_unlink'
+  | 'temporary_write';
+
 type ProjectInitCommandOptions = {
   createProjectId?: () => string;
   directory?: string;
   dryRun?: boolean;
   expectedProjectHash?: string;
+  faultInjector?: (step: ProjectInitFileStep) => Promise<void> | void;
   fromJson?: string;
   interactive: boolean;
   name?: string;
   prompt?: (question: string) => Promise<string>;
+  projectDirectory?: string;
   publishObserver?: () => Promise<void> | void;
   readStdin: () => Promise<string>;
   workingDirectory: string;
+  yes?: boolean;
 };
 
 const getErrorCode = (error: unknown): string | undefined =>
@@ -56,6 +71,37 @@ const createProjectId = (): string => {
 const requestDiagnostics = (
   issues: readonly { message: string; path: PropertyKey[] }[],
 ): JsonValue => issues.map(({ message, path }) => ({ message, path: `/${path.join('/')}` }));
+
+/** Rejects overlapping request sources before reading stdin or applying precedence. */
+const assertUnambiguousInitSources = (options: ProjectInitCommandOptions): void => {
+  const conflicts: string[] = [];
+  if (options.directory !== undefined && options.projectDirectory !== undefined) {
+    conflicts.push('directory', 'project');
+  }
+  if (options.fromJson !== undefined) {
+    const flagFields = [
+      ['directory', options.directory],
+      ['project', options.projectDirectory],
+      ['name', options.name],
+      ['dry-run', options.dryRun],
+      ['if-project-hash', options.expectedProjectHash],
+      ['yes', options.yes],
+    ] as const;
+    conflicts.push(
+      ...flagFields.filter(([, value]) => value !== undefined).map(([field]) => field),
+    );
+  }
+  if (conflicts.length === 0) return;
+  const conflictingFields = [...new Set(conflicts)].sort();
+  throw new AttestCliError('cli_usage', 'Project initialization inputs overlap.', {
+    path: options.fromJson === undefined ? 'directory' : '--from-json',
+    hint:
+      options.fromJson === undefined
+        ? 'Pass either the positional directory or `--project`, not both.'
+        : 'Pass project values in either the command request or CLI flags, not both.',
+    details: { conflicting_fields: conflictingFields },
+  });
+};
 
 /** Reads one request document without reflecting its source text into failures. */
 const readProjectInitRequest = async (
@@ -183,34 +229,90 @@ const emptyProject = (projectId: string, name: string): ProjectResources => ({
   tests: [],
 });
 
-/** Publishes the empty-project manifest as one atomic, no-overwrite filesystem commit. */
-const publishProjectManifest = async (root: string, contents: string): Promise<void> => {
-  const manifestPath = join(root, 'attest.project.json');
-  const temporaryPath = join(root, `.attest-project-${randomUUID()}.tmp`);
-  const handle = await open(temporaryPath, 'wx', 0o644);
+const injectFileFault = async (
+  faultInjector: ProjectInitCommandOptions['faultInjector'],
+  step: ProjectInitFileStep,
+): Promise<void> => {
+  await faultInjector?.(step);
+};
+
+/** Fsyncs a directory entry after manifest publication or rollback. */
+const syncDirectory = async (path: string): Promise<void> => {
+  const handle = await open(path, 'r');
   try {
-    await handle.writeFile(contents, 'utf8');
     await handle.sync();
   } finally {
     await handle.close();
   }
+};
 
-  let published = false;
+/** Publishes the empty-project manifest as one atomic, no-overwrite filesystem commit. */
+const publishProjectManifest = async (
+  root: string,
+  contents: string,
+  faultInjector?: ProjectInitCommandOptions['faultInjector'],
+): Promise<void> => {
+  const manifestPath = join(root, 'attest.project.json');
+  const temporaryPath = join(root, `.attest-project-${randomUUID()}.tmp`);
+  let temporaryHandle;
+  let directoryHandle;
+  let temporaryExists = false;
+  let manifestPublished = false;
   try {
+    await injectFileFault(faultInjector, 'temporary_open');
+    temporaryHandle = await open(temporaryPath, 'wx', 0o644);
+    temporaryExists = true;
+    await injectFileFault(faultInjector, 'temporary_write');
+    await temporaryHandle.writeFile(contents, 'utf8');
+    await injectFileFault(faultInjector, 'temporary_sync');
+    await temporaryHandle.sync();
+    await injectFileFault(faultInjector, 'temporary_close');
+    await temporaryHandle.close();
+    temporaryHandle = undefined;
     // Hard-link publication fails rather than replacing a manifest created by a racing process.
+    await injectFileFault(faultInjector, 'manifest_link');
     await link(temporaryPath, manifestPath);
-    published = true;
+    manifestPublished = true;
+    await injectFileFault(faultInjector, 'temporary_unlink');
     await unlink(temporaryPath);
-    const directoryHandle = await open(root, 'r');
-    try {
-      await directoryHandle.sync();
-    } finally {
-      await directoryHandle.close();
-    }
+    temporaryExists = false;
+    await injectFileFault(faultInjector, 'directory_open');
+    directoryHandle = await open(root, 'r');
+    await injectFileFault(faultInjector, 'directory_sync');
+    await directoryHandle.sync();
+    await injectFileFault(faultInjector, 'directory_close');
+    await directoryHandle.close();
+    directoryHandle = undefined;
   } catch (error: unknown) {
-    await unlink(temporaryPath).catch(() => undefined);
-    if (published) {
-      await unlink(manifestPath).catch(() => undefined);
+    await directoryHandle?.close().catch(() => undefined);
+    await temporaryHandle?.close().catch(() => undefined);
+    let cleanupFailure: unknown;
+    if (temporaryExists) {
+      try {
+        await unlink(temporaryPath);
+      } catch (unlinkError: unknown) {
+        if (getErrorCode(unlinkError) !== 'ENOENT') cleanupFailure = unlinkError;
+      }
+    }
+    if (manifestPublished) {
+      try {
+        await injectFileFault(faultInjector, 'rollback_manifest_unlink');
+        await unlink(manifestPath);
+        await syncDirectory(root);
+      } catch (rollbackError: unknown) {
+        cleanupFailure = rollbackError;
+      }
+    }
+    if (cleanupFailure !== undefined) {
+      throw new AttestCliError(
+        'project_recovery_required',
+        'Initialization failed and temporary publication state could not be removed.',
+        {
+          path: manifestPath,
+          hint: 'Preserve the target directory and reconcile its manifest and temporary files.',
+          cause: cleanupFailure,
+        },
+      );
     }
     if (getErrorCode(error) === 'EEXIST') {
       throw new AttestCliError('init_conflict', 'Another process initialized this project first.', {
@@ -223,12 +325,24 @@ const publishProjectManifest = async (root: string, contents: string): Promise<v
   }
 };
 
-const rollbackPublishedManifest = async (root: string, expectedContents: string): Promise<void> => {
+/** Removes only the exact manifest published by this initialization attempt. */
+const rollbackPublishedManifest = async (
+  root: string,
+  expectedContents: string,
+  faultInjector?: ProjectInitCommandOptions['faultInjector'],
+): Promise<void> => {
   const manifestPath = join(root, 'attest.project.json');
   try {
-    if ((await readFile(manifestPath, 'utf8')) === expectedContents) {
-      await unlink(manifestPath);
+    if ((await readFile(manifestPath, 'utf8')) !== expectedContents) {
+      throw new AttestCliError(
+        'project_recovery_required',
+        'The published manifest changed before initialization rollback.',
+        { path: manifestPath },
+      );
     }
+    await injectFileFault(faultInjector, 'rollback_manifest_unlink');
+    await unlink(manifestPath);
+    await syncDirectory(root);
   } catch (error: unknown) {
     if (getErrorCode(error) !== 'ENOENT') {
       throw error;
@@ -240,11 +354,13 @@ const rollbackPublishedManifest = async (root: string, expectedContents: string)
 const runProjectInitCommand = async (
   options: ProjectInitCommandOptions,
 ): Promise<CommandResult> => {
+  assertUnambiguousInitSources(options);
   const request =
     options.fromJson === undefined
       ? undefined
       : await readProjectInitRequest(options.fromJson, options.workingDirectory, options.readStdin);
-  const requestedDirectory = options.directory ?? request?.directory ?? '.';
+  const requestedDirectory =
+    options.directory ?? options.projectDirectory ?? request?.directory ?? '.';
   const inspected = await inspectTargetDirectory(
     resolve(options.workingDirectory, requestedDirectory),
   );
@@ -323,7 +439,7 @@ const runProjectInitCommand = async (
       createdDirectory = true;
     }
     await assertUninitialized(inspected.root);
-    await publishProjectManifest(inspected.root, manifest.contents);
+    await publishProjectManifest(inspected.root, manifest.contents, options.faultInjector);
     published = true;
     await options.publishObserver?.();
     const loaded = await loadProject({ project: inspected.root });
@@ -335,7 +451,7 @@ const runProjectInitCommand = async (
   } catch (error: unknown) {
     if (published) {
       try {
-        await rollbackPublishedManifest(inspected.root, manifest.contents);
+        await rollbackPublishedManifest(inspected.root, manifest.contents, options.faultInjector);
       } catch (rollbackError: unknown) {
         throw new AttestCliError(
           'project_recovery_required',
@@ -349,7 +465,19 @@ const runProjectInitCommand = async (
       }
     }
     if (createdDirectory) {
-      await rmdir(inspected.root).catch(() => undefined);
+      try {
+        await rmdir(inspected.root);
+      } catch (cleanupError: unknown) {
+        throw new AttestCliError(
+          'project_recovery_required',
+          'Initialization failed and the new target directory could not be removed.',
+          {
+            path: inspected.root,
+            hint: 'Preserve and inspect the target directory before retrying.',
+            cause: cleanupError,
+          },
+        );
+      }
     }
     if (error instanceof AttestCliError) {
       throw error;
@@ -370,4 +498,9 @@ const runProjectInitCommand = async (
   };
 };
 
-export { createProjectId, runProjectInitCommand, type ProjectInitCommandOptions };
+export {
+  createProjectId,
+  runProjectInitCommand,
+  type ProjectInitCommandOptions,
+  type ProjectInitFileStep,
+};

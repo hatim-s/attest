@@ -29,7 +29,7 @@ import {
   createFileChanges,
   publishPreparedTransaction,
 } from '../../project/transaction/transactional-writer.js';
-import { runProjectInitCommand } from './project-init-command.js';
+import { runProjectInitCommand, type ProjectInitFileStep } from './project-init-command.js';
 
 const FIXED_PROJECT_ID = '01ARZ3NDEKTSV4RRFFQ69G5FAV';
 const temporaryDirectories: string[] = [];
@@ -253,15 +253,15 @@ describe('CLI2.5 project shell', () => {
     });
     await expect(access(join(parent, 'conflict'))).rejects.toBeDefined();
 
-    const globalFirst = collectIo();
+    const localProject = collectIo();
     expect(
-      await runCli(['--output', 'json', '--project', 'missing', 'project', 'validate'], {
+      await runCli(['project', 'validate', '--output', 'json', '--project', 'missing'], {
         workingDirectory: parent,
-        io: globalFirst.io,
+        io: localProject.io,
         interaction: nonInteractive,
       }),
     ).toBe(1);
-    expect(JSON.parse(globalFirst.output[0] ?? '{}')).toMatchObject({
+    expect(JSON.parse(localProject.output[0] ?? '{}')).toMatchObject({
       ok: false,
       command: 'project.validate',
       error: { code: 'project_read_failed' },
@@ -287,6 +287,136 @@ describe('CLI2.5 project shell', () => {
     ).rejects.toMatchObject({ code: 'init_failed' });
     await expect(access(join(root, 'attest.project.json'))).rejects.toBeDefined();
     await expect(access(root)).rejects.toBeDefined();
+  });
+
+  it('cleans every preparation fault and surfaces manifest rollback failure as recovery', async () => {
+    const preparationSteps: ProjectInitFileStep[] = [
+      'temporary_open',
+      'temporary_write',
+      'temporary_sync',
+      'temporary_close',
+      'manifest_link',
+      'temporary_unlink',
+      'directory_open',
+      'directory_sync',
+      'directory_close',
+    ];
+    for (const step of preparationSteps) {
+      const root = join(await createTemporaryDirectory(), step);
+      await mkdir(root);
+      await writeFile(join(root, 'sentinel.txt'), 'unchanged\n');
+      await expect(
+        runProjectInitCommand({
+          createProjectId: () => FIXED_PROJECT_ID,
+          directory: root,
+          faultInjector: (currentStep) => {
+            if (currentStep === step) throw new Error(`injected ${step}`);
+          },
+          interactive: false,
+          name: 'Fault test',
+          readStdin: () => Promise.resolve(''),
+          workingDirectory: root,
+        }),
+      ).rejects.toMatchObject({ code: 'init_failed' });
+      expect(await readdir(root)).toEqual(['sentinel.txt']);
+      expect(await readFile(join(root, 'sentinel.txt'), 'utf8')).toBe('unchanged\n');
+    }
+
+    const parent = await createTemporaryDirectory();
+    const root = join(parent, 'recovery');
+    await expect(
+      runProjectInitCommand({
+        createProjectId: () => FIXED_PROJECT_ID,
+        directory: 'recovery',
+        faultInjector: (step) => {
+          if (step === 'rollback_manifest_unlink') throw new Error('injected rollback failure');
+        },
+        interactive: false,
+        name: 'Recovery',
+        publishObserver: () => {
+          throw new Error('injected verification failure');
+        },
+        readStdin: () => Promise.resolve(''),
+        workingDirectory: parent,
+      }),
+    ).rejects.toMatchObject({ code: 'project_recovery_required' });
+    expect(await readdir(root)).toEqual(['attest.project.json']);
+    await expect(loadProject({ project: root })).resolves.toMatchObject({
+      project: { name: 'Recovery' },
+    });
+  });
+
+  it('rejects every overlapping init request source before reading stdin or writing', async () => {
+    const parent = await createTemporaryDirectory();
+    const requestPath = join(parent, 'request.json');
+    await writeFile(
+      requestPath,
+      JSON.stringify({
+        schema: 'attest.command-request/v2',
+        command: 'project.init',
+        directory: 'request-project',
+        name: 'Request Project',
+      }),
+    );
+
+    const cases: { argv: string[]; expected: string[]; readStdin?: () => Promise<string> }[] = [
+      {
+        argv: ['project', 'init', 'positional', '--project', 'flag-project', '--output', 'json'],
+        expected: ['directory', 'project'],
+      },
+      {
+        argv: ['project', 'init', 'positional', '--from-json', requestPath, '--output', 'json'],
+        expected: ['directory'],
+      },
+      {
+        argv: [
+          'project',
+          'init',
+          '--from-json',
+          '-',
+          '--name',
+          'Flag Name',
+          '--dry-run',
+          '--output',
+          'json',
+        ],
+        expected: ['dry-run', 'name'],
+        readStdin: () => Promise.reject(new Error('stdin must not be consumed on conflict')),
+      },
+    ];
+    for (const testCase of cases) {
+      const response = collectIo();
+      expect(
+        await runCli(testCase.argv, {
+          workingDirectory: parent,
+          io: response.io,
+          interaction: {
+            ...nonInteractive,
+            ...(testCase.readStdin === undefined ? {} : { readStdin: testCase.readStdin }),
+          },
+        }),
+      ).toBe(2);
+      expect(JSON.parse(response.output[0] ?? '{}')).toMatchObject({
+        error: {
+          code: 'cli_usage',
+          details: { conflicting_fields: testCase.expected },
+        },
+      });
+    }
+    expect((await readdir(parent)).sort()).toEqual(['request.json']);
+
+    const help = collectIo();
+    await runCli(['help', 'project', 'init', '--output', 'json'], {
+      workingDirectory: parent,
+      io: help.io,
+      interaction: nonInteractive,
+    });
+    const helpDocument = JSON.parse(help.output[0] ?? '{}') as {
+      result: { command: { options: { conflicts: string[]; name: string }[] } };
+    };
+    expect(
+      helpDocument.result.command.options.find(({ name }) => name === 'from-json')?.conflicts,
+    ).toEqual(['directory', 'project', 'name', 'dry-run', 'yes', 'if-project-hash']);
   });
 
   it('lists and shows canonical resources, then returns aggregate validation diagnostics', async () => {
