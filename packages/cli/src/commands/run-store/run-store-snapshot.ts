@@ -16,6 +16,7 @@ type RunStoreSnapshot = {
 };
 
 type RunStoreSnapshotHooks = {
+  beforeWalOpen?: (path: string) => Promise<void> | void;
   closeWal?: (handle: FileHandle) => Promise<void>;
   removeSnapshot?: (snapshot: RunStoreSnapshot) => Promise<void>;
 };
@@ -68,21 +69,14 @@ const copyFileHandle = async (
   if (failure !== undefined) throw failure.error;
 };
 
-/** Opens an optional WAL with no-follow semantics and verifies its final directory entry. */
+/** Opens an optional WAL and binds its descriptor to both pre- and post-open identities. */
 const openWal = async (
   path: string,
+  hooks: RunStoreSnapshotHooks,
 ): Promise<{ handle: FileHandle; version: FileVersion } | undefined> => {
+  let metadata: FileVersion;
   try {
-    const metadata = await lstat(path, { bigint: true });
-    if (!metadata.isFile() || metadata.isSymbolicLink()) throw new SnapshotChangedError();
-    const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
-    const version = await handle.stat({ bigint: true });
-    const current = await lstat(path, { bigint: true });
-    if (current.dev !== version.dev || current.ino !== version.ino) {
-      await handle.close();
-      throw new SnapshotChangedError();
-    }
-    return { handle, version };
+    metadata = await lstat(path, { bigint: true });
   } catch (error: unknown) {
     if (
       error instanceof Error &&
@@ -94,6 +88,37 @@ const openWal = async (
     }
     throw error;
   }
+  if (!metadata.isFile() || metadata.isSymbolicLink()) throw new SnapshotChangedError();
+
+  let handle: FileHandle | undefined;
+  let version: FileVersion | undefined;
+  let failure: CleanupFailure | undefined;
+  try {
+    await hooks.beforeWalOpen?.(path);
+    handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+    version = await handle.stat({ bigint: true });
+    const current = await lstat(path, { bigint: true });
+    if (!sameIdentity(metadata, version) || !sameIdentity(version, current)) {
+      throw new SnapshotChangedError();
+    }
+  } catch (error: unknown) {
+    failure = captureCleanupFailure(
+      error instanceof Error && 'code' in error && Reflect.get(error, 'code') === 'ENOENT'
+        ? new SnapshotChangedError()
+        : error,
+    );
+  }
+  if (failure !== undefined) {
+    const firstFailure = failure;
+    const completedFailure = await runCleanupSteps(firstFailure, [
+      ...(handle === undefined
+        ? []
+        : [async () => (hooks.closeWal ?? ((value: FileHandle) => value.close()))(handle)]),
+    ]);
+    throw (completedFailure ?? firstFailure).error;
+  }
+  if (handle === undefined || version === undefined) throw new SnapshotChangedError();
+  return { handle, version };
 };
 
 const pathMatchesVersion = async (path: string, version: FileVersion): Promise<boolean> => {
@@ -119,7 +144,7 @@ const captureAttempt = async (
   try {
     const sourceBefore = await source.stat({ bigint: true });
     if (!(await pathMatchesVersion(sourcePath, sourceBefore))) throw new SnapshotChangedError();
-    wal = await openWal(walPath);
+    wal = await openWal(walPath, hooks);
     await copyFileHandle(source, snapshot.path, sourceBefore.size);
     if (wal !== undefined) {
       await copyFileHandle(wal.handle, `${snapshot.path}-wal`, wal.version.size);
