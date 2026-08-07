@@ -189,6 +189,14 @@ const CLI_ERROR_DEFINITIONS = [
     ],
   },
   {
+    code: 'resource_not_found',
+    meaning: 'The requested project resource or local run does not exist.',
+    likely_causes: ['The id is incorrect or the resource was removed.'],
+    retryable: false,
+    exit_code: 1,
+    repairs: ['List the resource collection and retry with an available id.'],
+  },
+  {
     code: 'run_failed',
     meaning: 'The evaluation command failed before producing a normal result.',
     likely_causes: ['The run store or orchestration infrastructure failed.'],
