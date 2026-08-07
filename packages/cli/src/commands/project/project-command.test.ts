@@ -31,6 +31,7 @@ import {
   publishPreparedTransaction,
 } from '../../project/transaction/transactional-writer.js';
 import { withReadonlyRunStore } from '../run-store/readonly-run-store.js';
+import { removeRunStoreSnapshot } from '../run-store/run-store-snapshot.js';
 import { runProjectInitCommand, type ProjectInitFileStep } from './project-init-command.js';
 
 const FIXED_PROJECT_ID = '01ARZ3NDEKTSV4RRFFQ69G5FAV';
@@ -719,6 +720,121 @@ describe('CLI2.5 project shell', () => {
         await rm(storePath);
         await rename(backupPath, storePath);
       }
+    }
+  });
+
+  it('rejects a parent-directory swap before capturing any outside database', async () => {
+    const root = await createTemporaryDirectory();
+    await writeFixtureProject(root);
+    const storeDirectory = join(root, '.attest');
+    await mkdir(storeDirectory);
+    const sourceWriter = await openStore(join(storeDirectory, 'runs.db'));
+    await sourceWriter.runs.createRun({
+      configVersion: 'v2',
+      configHash: 'intended-source',
+      configJson: '{}',
+    });
+    await sourceWriter.close();
+
+    const outsideDirectory = await createTemporaryDirectory();
+    const outsideWriter = await openStore(join(outsideDirectory, 'runs.db'));
+    await outsideWriter.runs.createRun({
+      configVersion: 'v2',
+      configHash: 'outside-source',
+      configJson: '{}',
+    });
+    await outsideWriter.close();
+
+    const backupDirectory = join(root, '.attest-original');
+    let swapped = false;
+    let queried = false;
+    try {
+      await expect(
+        withReadonlyRunStore(
+          root,
+          () => {
+            queried = true;
+            return Promise.resolve([]);
+          },
+          {
+            beforeAnchorOpen: async () => {
+              await rename(storeDirectory, backupDirectory);
+              await symlink(outsideDirectory, storeDirectory);
+              swapped = true;
+            },
+          },
+        ),
+      ).rejects.toMatchObject({ code: 'project_read_failed' });
+      expect(queried).toBe(false);
+    } finally {
+      if (swapped) {
+        await rm(storeDirectory);
+        await rename(backupDirectory, storeDirectory);
+      }
+    }
+  });
+
+  it('attempts every read cleanup while preserving the primary or first cleanup failure', async () => {
+    for (const primaryError of [undefined, new Error('injected operation failure')]) {
+      const root = await createTemporaryDirectory();
+      await writeFixtureProject(root);
+      const storeDirectory = join(root, '.attest');
+      await mkdir(storeDirectory);
+      const writer = await openStore(join(storeDirectory, 'runs.db'));
+      await writer.runs.createRun({
+        configVersion: 'v2',
+        configHash: 'cleanup-source',
+        configJson: '{}',
+      });
+      await writer.close();
+
+      const storeCloseError = new Error('injected store close failure');
+      const removalError = new Error('injected snapshot removal failure');
+      const anchorCloseError = new Error('injected anchor close failure');
+      const cleanupOrder: string[] = [];
+      let removedDirectory: string | undefined;
+      const inspection = withReadonlyRunStore(
+        root,
+        async (store) => {
+          if (primaryError !== undefined) throw primaryError;
+          return store.listRuns();
+        },
+        {
+          cleanup: {
+            closeStore: async (store) => {
+              cleanupOrder.push('store');
+              await store.close();
+              throw storeCloseError;
+            },
+            removeSnapshot: async (snapshot) => {
+              cleanupOrder.push('snapshot');
+              removedDirectory = snapshot.directory;
+              await removeRunStoreSnapshot(snapshot);
+              throw removalError;
+            },
+            closeAnchor: async (anchor) => {
+              cleanupOrder.push('anchor');
+              await anchor.close();
+              throw anchorCloseError;
+            },
+          },
+        },
+      );
+
+      const observedError = await inspection.then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+      if (primaryError === undefined) {
+        expect(observedError).toBe(storeCloseError);
+      } else {
+        expect(observedError).toMatchObject({
+          code: 'project_read_failed',
+          cause: primaryError,
+        });
+      }
+      expect(cleanupOrder).toEqual(['store', 'snapshot', 'anchor']);
+      await expect(access(removedDirectory as string)).rejects.toMatchObject({ code: 'ENOENT' });
     }
   });
 
