@@ -1,0 +1,273 @@
+{
+  "$comment": "Runtime-only invariants include span time ordering, duplicate identifiers, and metric references.",
+  "$defs": {
+    "__schema0": {
+      "additionalProperties": false,
+      "properties": {
+        "alias_for": {
+          "anyOf": [
+            {
+              "pattern": "^[a-z][a-z0-9-]*(?:\\.[a-z][a-z0-9-]*)*$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "aliases": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "arguments": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "choices": {
+                "items": {
+                  "$ref": "#/$defs/__schema1"
+                },
+                "type": "array"
+              },
+              "default": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/__schema1"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "description": {
+                "type": "string"
+              },
+              "name": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "required": {
+                "type": "boolean"
+              },
+              "usage": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "variadic": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "name",
+              "usage",
+              "description",
+              "required",
+              "variadic",
+              "choices",
+              "default"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "deprecated": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "examples": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "name": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "options": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "choices": {
+                "items": {
+                  "$ref": "#/$defs/__schema1"
+                },
+                "type": "array"
+              },
+              "conflicts": {
+                "items": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "default": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/__schema1"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "description": {
+                "type": "string"
+              },
+              "flags": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "implies": {
+                "items": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "name": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "repeatable": {
+                "type": "boolean"
+              },
+              "required": {
+                "type": "boolean"
+              },
+              "value_name": {
+                "anyOf": [
+                  {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "name",
+              "flags",
+              "description",
+              "value_name",
+              "required",
+              "repeatable",
+              "choices",
+              "default",
+              "conflicts",
+              "implies"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "path": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "request_schema": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "subcommands": {
+          "items": {
+            "$ref": "#/$defs/__schema0"
+          },
+          "type": "array"
+        },
+        "summary": {
+          "type": "string"
+        },
+        "usage": {
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "name",
+        "summary",
+        "usage",
+        "arguments",
+        "options",
+        "subcommands",
+        "aliases",
+        "alias_for",
+        "deprecated",
+        "request_schema",
+        "examples"
+      ],
+      "type": "object"
+    },
+    "__schema1": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        },
+        {
+          "items": {
+            "$ref": "#/$defs/__schema1"
+          },
+          "type": "array"
+        },
+        {
+          "additionalProperties": {
+            "$ref": "#/$defs/__schema1"
+          },
+          "propertyNames": {
+            "type": "string"
+          },
+          "type": "object"
+        }
+      ]
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "command": {
+      "$ref": "#/$defs/__schema0"
+    },
+    "schema": {
+      "const": "attest.cli-help/v1",
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema",
+    "command"
+  ],
+  "type": "object"
+}

@@ -3,6 +3,12 @@ import { z } from 'zod';
 import { agentRequestSchema, agentResponseSchema } from './agent.js';
 import { agentResourceSchema } from './agent-resource-v2.js';
 import { testCaseSchema } from './case-v2.js';
+import {
+  cliErrorCatalogSchema,
+  cliEventSchema,
+  cliHelpSchema,
+  cliResultSchema,
+} from './cli-protocol.js';
 import { commandRequestSchema } from './command-request-v2.js';
 import { configSchema } from './config.js';
 import { datasetResourceSchema } from './dataset-resource-v2.js';
@@ -120,6 +126,10 @@ const CONTRACT_JSON_SCHEMAS = new Map<string, ContractJsonSchemaDefinition>([
   ['dataset.v2.json', { schema: datasetResourceSchema, invariants: v2RuntimeInvariants }],
   ['metric.v2.json', { schema: metricResourceSchema, invariants: v2RuntimeInvariants }],
   ['command-request.v2.json', { schema: commandRequestSchema, invariants: v2RuntimeInvariants }],
+  ['cli-result.v1.json', { schema: cliResultSchema, invariants: noAdditionalInvariants }],
+  ['cli-event.v1.json', { schema: cliEventSchema, invariants: noAdditionalInvariants }],
+  ['cli-help.v1.json', { schema: cliHelpSchema, invariants: noAdditionalInvariants }],
+  ['cli-errors.v1.json', { schema: cliErrorCatalogSchema, invariants: noAdditionalInvariants }],
 ]);
 
 const isJsonSchemaObject = (value: unknown): value is Record<string, unknown> =>

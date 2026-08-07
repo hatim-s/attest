@@ -43,6 +43,10 @@ export {
   AGENT_PROTOCOL,
   AGENT_RESOURCE_SCHEMA_VERSION,
   CASE_SCHEMA_VERSION,
+  CLI_ERROR_CATALOG_SCHEMA_VERSION,
+  CLI_EVENT_SCHEMA_VERSION,
+  CLI_HELP_SCHEMA_VERSION,
+  CLI_RESULT_SCHEMA_VERSION,
   COMMAND_REQUEST_SCHEMA_VERSION,
   CONFIG_VERSION,
   DATASET_SCHEMA_VERSION,
@@ -72,6 +76,37 @@ export type {
 } from './agent-resource-v2.js';
 export { caseMetricOverrideSchema, testCaseSchema } from './case-v2.js';
 export type { CaseMetricOverride, TestCase } from './case-v2.js';
+export {
+  cliCommandSchema,
+  cliErrorCatalogSchema,
+  cliErrorDefinitionSchema,
+  cliErrorSchema,
+  cliEventSchema,
+  cliExitCodeSchema,
+  cliFailureResultSchema,
+  cliHelpArgumentSchema,
+  cliHelpCommandSchema,
+  cliHelpOptionSchema,
+  cliHelpSchema,
+  cliResultSchema,
+  cliSuccessResultSchema,
+  cliWarningSchema,
+} from './cli-protocol.js';
+export type {
+  CliError,
+  CliErrorCatalog,
+  CliErrorDefinition,
+  CliEvent,
+  CliExitCode,
+  CliFailureResult,
+  CliHelp,
+  CliHelpArgument,
+  CliHelpCommand,
+  CliHelpOption,
+  CliResult,
+  CliSuccessResult,
+  CliWarning,
+} from './cli-protocol.js';
 export { caseImportOptionsSchema, commandRequestSchema } from './command-request-v2.js';
 export type { CaseImportOptions, CommandRequest } from './command-request-v2.js';
 export {
