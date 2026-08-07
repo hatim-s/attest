@@ -4,6 +4,7 @@ import { dirname, resolve } from 'node:path';
 import type { MetricDefinition } from '@attest/contracts';
 import {
   caseExecutionToMetricContext,
+  createTanstackJudgeClient,
   diffRuns,
   evaluateMetrics,
   executeCases,
@@ -11,6 +12,10 @@ import {
   toStoredCaseExecution,
   toStoredMetricEvaluation,
   type CaseRecord,
+  type CacheStore,
+  type JudgeCache,
+  type JudgeCacheEntry,
+  type JudgeClient,
   type RunDiff,
   type RunRecord,
   type RunProgressEvent,
@@ -22,10 +27,17 @@ import { resolveAgentTarget } from '../config/resolve-agent-target.js';
 
 type RunConfigurationOptions = {
   baselineRunId?: string;
+  judgeClient?: JudgeClient;
   onProgress?: (event: RunProgressEvent) => void;
   signal?: AbortSignal;
   storePath?: string;
 };
+
+/** Adapts the shared SQLite response cache to the judge metric's typed cache boundary. */
+const createJudgeCache = (cacheStore: CacheStore): JudgeCache => ({
+  get: async (key) => (await cacheStore.get('judge', key)) as JudgeCacheEntry | undefined,
+  set: (key, entry) => cacheStore.put('judge', key, entry),
+});
 
 type RunExecutionResult = {
   cases: CaseRecord[];
@@ -72,6 +84,13 @@ const runConfiguration = async (
     const definitionsByName = new Map(
       loadedConfig.config.metrics.map((definition) => [definition.name, definition]),
     );
+    const hasJudgeMetrics = loadedConfig.config.metrics.some(
+      (definition) => definition.type === 'judge',
+    );
+    const judgeClient = hasJudgeMetrics
+      ? (options.judgeClient ?? createTanstackJudgeClient())
+      : undefined;
+    const judgeCache = hasJudgeMetrics ? createJudgeCache(store.cache) : undefined;
     const executionConfig = resolveAgentTarget(loadedConfig.config, loadedConfig.baseDirectory);
 
     for await (const execution of executeCases(executionConfig, {
@@ -84,7 +103,7 @@ const runConfiguration = async (
       const evaluations = await evaluateMetrics(
         definitions,
         caseExecutionToMetricContext(execution.caseDefinition, execution),
-        { signal: options.signal },
+        { cache: judgeCache, judgeClient, signal: options.signal },
       );
       await store.runs.recordCase(
         run.id,
