@@ -24,3 +24,22 @@ export {
   type LoadedProject,
   type ProjectContentHashes,
 } from './project/load-project.js';
+export {
+  AttestCliError,
+  createCliErrorCatalog,
+  getCliErrorDefinition,
+  renderCliError,
+  renderCliErrorCatalog,
+  serializeCliError,
+  type AttestCliErrorOptions,
+  type CliErrorCode,
+  type SerializedCliFailure,
+} from './errors.js';
+export {
+  CliEventSerializer,
+  createCliFailureResult,
+  createCliSuccessResult,
+  serializeCliResult,
+  type CliEventClock,
+  type CliResultOptions,
+} from './output/cli-protocol.js';

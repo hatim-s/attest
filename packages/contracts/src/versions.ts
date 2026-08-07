@@ -31,10 +31,26 @@ const METRIC_RESOURCE_SCHEMA_VERSION = 'attest.metric/v2' as const;
 /** Identifies normalized v2 mutation requests accepted by --from-json. */
 const COMMAND_REQUEST_SCHEMA_VERSION = 'attest.command-request/v2' as const;
 
+/** Identifies the single-document success and failure envelope written by the CLI. */
+const CLI_RESULT_SCHEMA_VERSION = 'attest.cli-result/v1' as const;
+
+/** Identifies one line in a streaming CLI JSONL response. */
+const CLI_EVENT_SCHEMA_VERSION = 'attest.cli-event/v1' as const;
+
+/** Identifies the machine-readable command tree returned by `attest help`. */
+const CLI_HELP_SCHEMA_VERSION = 'attest.cli-help/v1' as const;
+
+/** Identifies the stable CLI error registry returned by `attest errors`. */
+const CLI_ERROR_CATALOG_SCHEMA_VERSION = 'attest.cli-errors/v1' as const;
+
 export {
   AGENT_PROTOCOL,
   AGENT_RESOURCE_SCHEMA_VERSION,
   CASE_SCHEMA_VERSION,
+  CLI_ERROR_CATALOG_SCHEMA_VERSION,
+  CLI_EVENT_SCHEMA_VERSION,
+  CLI_HELP_SCHEMA_VERSION,
+  CLI_RESULT_SCHEMA_VERSION,
   COMMAND_REQUEST_SCHEMA_VERSION,
   CONFIG_VERSION,
   DATASET_SCHEMA_VERSION,

@@ -1,28 +1,13 @@
-import { AttestError } from '@attest/contracts';
-
-type CliErrorCode =
-  | 'config_not_found'
-  | 'config_read_failed'
-  | 'config_parse_failed'
-  | 'config_invalid'
-  | 'init_conflict'
-  | 'init_failed'
-  | 'output_exists'
-  | 'output_write_failed'
-  | 'project_invalid'
-  | 'project_not_found'
-  | 'project_read_failed'
-  | 'trace_convert_failed'
-  | 'run_failed';
-
-/** Identifies expected CLI boundary failures without exposing internal stack traces. */
-class AttestCliError extends AttestError {
-  readonly code: CliErrorCode;
-
-  constructor(code: CliErrorCode, message: string, options?: ErrorOptions) {
-    super(code, message, options);
-    this.code = code;
-  }
-}
-
-export { AttestCliError, type CliErrorCode };
+export { AttestCliError, type AttestCliErrorOptions } from './errors/attest-cli-error.js';
+export {
+  CLI_ERROR_DEFINITIONS,
+  createCliErrorCatalog,
+  getCliErrorDefinition,
+  type CliErrorCode,
+} from './errors/error-catalog.js';
+export {
+  renderCliError,
+  serializeCliError,
+  type SerializedCliFailure,
+} from './errors/serialize-error.js';
+export { renderCliErrorCatalog } from './errors/render-error-catalog.js';

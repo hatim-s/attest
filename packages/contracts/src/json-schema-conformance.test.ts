@@ -8,6 +8,10 @@ import {
   AGENT_PROTOCOL,
   AGENT_RESOURCE_SCHEMA_VERSION,
   CASE_SCHEMA_VERSION,
+  CLI_ERROR_CATALOG_SCHEMA_VERSION,
+  CLI_EVENT_SCHEMA_VERSION,
+  CLI_HELP_SCHEMA_VERSION,
+  CLI_RESULT_SCHEMA_VERSION,
   COMMAND_REQUEST_SCHEMA_VERSION,
   CONFIG_VERSION,
   DATASET_SCHEMA_VERSION,
@@ -108,6 +112,21 @@ const validV2Project = {
     datasets: [],
     metrics: [],
   },
+};
+
+const validCliHelpCommand = {
+  path: ['help'],
+  name: 'help',
+  summary: 'Show command help.',
+  usage: 'attest help [command...] [options]',
+  arguments: [],
+  options: [],
+  subcommands: [],
+  aliases: [],
+  alias_for: null,
+  deprecated: null,
+  request_schema: null,
+  examples: ['attest help --output json'],
 };
 
 const fixtures: ConformanceFixture[] = [
@@ -301,6 +320,107 @@ const fixtures: ConformanceFixture[] = [
       command: 'test.remove',
       test_id: validV2Test.id,
       detach: true,
+    },
+    valid: false,
+  },
+  {
+    name: 'CLI result accepts one strict success document',
+    fileName: 'cli-result.v1.json',
+    candidate: {
+      schema: CLI_RESULT_SCHEMA_VERSION,
+      ok: true,
+      command: 'help',
+      project_hash_before: null,
+      project_hash_after: null,
+      result: { found: true },
+      warnings: [],
+    },
+    valid: true,
+  },
+  {
+    name: 'CLI result rejects unknown envelope fields',
+    fileName: 'cli-result.v1.json',
+    candidate: {
+      schema: CLI_RESULT_SCHEMA_VERSION,
+      ok: false,
+      command: 'help',
+      error: { code: 'cli_usage', message: 'Bad input.', retryable: false },
+      unexpected: true,
+    },
+    valid: false,
+  },
+  {
+    name: 'CLI event accepts one JSONL event document',
+    fileName: 'cli-event.v1.json',
+    candidate: {
+      schema: CLI_EVENT_SCHEMA_VERSION,
+      sequence: 0,
+      time: '2026-08-07T12:00:00.000Z',
+      event: 'result',
+      data: { ok: true },
+    },
+    valid: true,
+  },
+  {
+    name: 'CLI event rejects a negative sequence',
+    fileName: 'cli-event.v1.json',
+    candidate: {
+      schema: CLI_EVENT_SCHEMA_VERSION,
+      sequence: -1,
+      time: '2026-08-07T12:00:00.000Z',
+      event: 'result',
+      data: { ok: true },
+    },
+    valid: false,
+  },
+  {
+    name: 'CLI help accepts every compatibility field',
+    fileName: 'cli-help.v1.json',
+    candidate: { schema: CLI_HELP_SCHEMA_VERSION, command: validCliHelpCommand },
+    valid: true,
+  },
+  {
+    name: 'CLI help rejects a missing deprecation field',
+    fileName: 'cli-help.v1.json',
+    candidate: {
+      schema: CLI_HELP_SCHEMA_VERSION,
+      command: { ...validCliHelpCommand, deprecated: undefined },
+    },
+    valid: false,
+  },
+  {
+    name: 'CLI error catalog accepts repair metadata',
+    fileName: 'cli-errors.v1.json',
+    candidate: {
+      schema: CLI_ERROR_CATALOG_SCHEMA_VERSION,
+      errors: [
+        {
+          code: 'cli_usage',
+          meaning: 'The command line is invalid.',
+          likely_causes: ['An option is missing.'],
+          retryable: false,
+          exit_code: 2,
+          repairs: ['attest help --output json'],
+        },
+      ],
+    },
+    valid: true,
+  },
+  {
+    name: 'CLI error catalog rejects success as an error exit code',
+    fileName: 'cli-errors.v1.json',
+    candidate: {
+      schema: CLI_ERROR_CATALOG_SCHEMA_VERSION,
+      errors: [
+        {
+          code: 'cli_usage',
+          meaning: 'The command line is invalid.',
+          likely_causes: [],
+          retryable: false,
+          exit_code: 0,
+          repairs: [],
+        },
+      ],
     },
     valid: false,
   },
