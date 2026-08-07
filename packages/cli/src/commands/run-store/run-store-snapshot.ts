@@ -3,6 +3,8 @@ import { lstat, mkdtemp, open, rm, type FileHandle } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+import { captureCleanupFailure, runCleanupSteps, type CleanupFailure } from './cleanup.js';
+
 const COPY_BUFFER_BYTES = 64 * 1024;
 const MAX_SNAPSHOT_ATTEMPTS = 4;
 
@@ -11,6 +13,11 @@ type FileVersion = BigIntStats;
 type RunStoreSnapshot = {
   directory: string;
   path: string;
+};
+
+type RunStoreSnapshotHooks = {
+  closeWal?: (handle: FileHandle) => Promise<void>;
+  removeSnapshot?: (snapshot: RunStoreSnapshot) => Promise<void>;
 };
 
 class SnapshotChangedError extends Error {
@@ -40,6 +47,7 @@ const copyFileHandle = async (
   const target = await open(destination, 'wx', 0o600);
   const buffer = Buffer.allocUnsafe(COPY_BUFFER_BYTES);
   let offset = 0;
+  let failure: CleanupFailure | undefined;
   try {
     while (offset < expectedSize) {
       const length = Math.min(buffer.length, expectedSize - offset);
@@ -53,9 +61,11 @@ const copyFileHandle = async (
       }
       offset += bytesRead;
     }
-  } finally {
-    await target.close();
+  } catch (error: unknown) {
+    failure = captureCleanupFailure(error);
   }
+  failure = await runCleanupSteps(failure, [async () => target.close()]);
+  if (failure !== undefined) throw failure.error;
 };
 
 /** Opens an optional WAL with no-follow semantics and verifies its final directory entry. */
@@ -99,18 +109,20 @@ const pathMatchesVersion = async (path: string, version: FileVersion): Promise<b
 const captureAttempt = async (
   sourcePath: string,
   source: FileHandle,
+  hooks: RunStoreSnapshotHooks,
 ): Promise<RunStoreSnapshot> => {
   const directory = await mkdtemp(join(tmpdir(), 'attest-run-store-snapshot-'));
-  const path = join(directory, 'runs.db');
+  const snapshot = { directory, path: join(directory, 'runs.db') };
   const walPath = `${sourcePath}-wal`;
   let wal: Awaited<ReturnType<typeof openWal>> = undefined;
+  let failure: CleanupFailure | undefined;
   try {
     const sourceBefore = await source.stat({ bigint: true });
     if (!(await pathMatchesVersion(sourcePath, sourceBefore))) throw new SnapshotChangedError();
     wal = await openWal(walPath);
-    await copyFileHandle(source, path, sourceBefore.size);
+    await copyFileHandle(source, snapshot.path, sourceBefore.size);
     if (wal !== undefined) {
-      await copyFileHandle(wal.handle, `${path}-wal`, wal.version.size);
+      await copyFileHandle(wal.handle, `${snapshot.path}-wal`, wal.version.size);
     }
 
     const sourceAfter = await source.stat({ bigint: true });
@@ -135,23 +147,35 @@ const captureAttempt = async (
         throw new SnapshotChangedError();
       }
     }
-    return { directory, path };
   } catch (error: unknown) {
-    await rm(directory, { force: true, recursive: true });
-    throw error;
-  } finally {
-    await wal?.handle.close();
+    failure = captureCleanupFailure(error);
   }
+
+  // A failed descriptor close invalidates the handoff, so remove the copied data too.
+  failure = await runCleanupSteps(failure, [
+    ...(wal === undefined
+      ? []
+      : [async () => (hooks.closeWal ?? ((handle: FileHandle) => handle.close()))(wal.handle)]),
+  ]);
+  if (failure !== undefined) {
+    const firstFailure = failure;
+    const completedFailure = await runCleanupSteps(firstFailure, [
+      async () => (hooks.removeSnapshot ?? removeRunStoreSnapshot)(snapshot),
+    ]);
+    throw (completedFailure ?? firstFailure).error;
+  }
+  return snapshot;
 };
 
 /** Retries bounded concurrent checkpoint changes while never querying a source pathname. */
 const captureRunStoreSnapshot = async (
   sourcePath: string,
   source: FileHandle,
+  hooks: RunStoreSnapshotHooks = {},
 ): Promise<RunStoreSnapshot> => {
   for (let attempt = 0; attempt < MAX_SNAPSHOT_ATTEMPTS; attempt += 1) {
     try {
-      return await captureAttempt(sourcePath, source);
+      return await captureAttempt(sourcePath, source, hooks);
     } catch (error: unknown) {
       if (!(error instanceof SnapshotChangedError) || attempt === MAX_SNAPSHOT_ATTEMPTS - 1) {
         throw error;
@@ -170,5 +194,6 @@ export {
   captureRunStoreSnapshot,
   removeRunStoreSnapshot,
   SnapshotChangedError,
+  type RunStoreSnapshotHooks,
   type RunStoreSnapshot,
 };
