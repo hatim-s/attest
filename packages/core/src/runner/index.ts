@@ -23,6 +23,12 @@ export {
   type StreamAgentResource,
   type StreamInvokeOptions,
 } from './adapters/stream/index.js';
+export {
+  WebSocketAgentSession,
+  startWebSocketAgent,
+  type WebSocketAgentResource,
+  type WebSocketSessionOptions,
+} from './adapters/websocket/index.js';
 export { loadDatasetCases } from './dataset.js';
 export { collectExecutions, executeCases } from './execute.js';
 export {

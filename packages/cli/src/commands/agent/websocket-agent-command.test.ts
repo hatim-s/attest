@@ -16,6 +16,7 @@ const CLI_PACKAGE_ROOT = fileURLToPath(new URL('../../../', import.meta.url));
 const CLI_BUILT = fileURLToPath(new URL('../../../dist/cli.js', import.meta.url));
 const execFileAsync = promisify(execFile);
 const temporaryDirectories: string[] = [];
+const webSocketFixtures: Array<{ close: () => Promise<void> }> = [];
 const originalSecret = process.env.ATTEST_WS_TOKEN;
 
 const nonInteractive = {
@@ -69,6 +70,34 @@ const run = async (
   return { ...collected, exitCode };
 };
 
+/** Starts the core hostile fixture without making test support part of the public package API. */
+const startLocalWebSocketFixture = async (): Promise<{
+  close: () => Promise<void>;
+  events: () => readonly {
+    headers?: Readonly<Record<string, string>>;
+    type: string;
+  }[];
+  url: string;
+}> => {
+  const fixtureModuleUrl = new URL(
+    '../../../../core/src/runner/fixtures/websocket-fake-server.ts',
+    import.meta.url,
+  ).href;
+  const fixtureModule = (await import(fixtureModuleUrl)) as {
+    startWebSocketFixtureServer: (scenario: 'serial_correlation') => Promise<{
+      close: () => Promise<void>;
+      events: () => readonly {
+        headers?: Readonly<Record<string, string>>;
+        type: string;
+      }[];
+      url: string;
+    }>;
+  };
+  const fixture = await fixtureModule.startWebSocketFixtureServer('serial_correlation');
+  webSocketFixtures.push(fixture);
+  return fixture;
+};
+
 /** Captures every authored project byte for cancellation and validation no-write assertions. */
 const snapshotTree = async (root: string, prefix = ''): Promise<Record<string, string>> => {
   const entries = await readdir(join(root, prefix), { withFileTypes: true });
@@ -118,6 +147,7 @@ const canonicalAgent = (id: string): AgentResource => ({
 afterEach(async () => {
   if (originalSecret === undefined) delete process.env.ATTEST_WS_TOKEN;
   else process.env.ATTEST_WS_TOKEN = originalSecret;
+  await Promise.all(webSocketFixtures.splice(0).map((fixture) => fixture.close()));
   await Promise.all(
     temporaryDirectories.splice(0).map((directory) => rm(directory, { recursive: true })),
   );
@@ -365,12 +395,21 @@ describe('CLI2.12 WebSocket agent UX', () => {
     expect(await snapshotTree(root)).toEqual(beforeUnsafeImport);
   });
 
-  it('keeps agent.test flag and JSON requests stable until runtime integration wires the adapter', async () => {
+  it('routes agent.test flag and JSON requests through the integrated runtime surface', async () => {
     const root = await createProject();
+    const fixture = await startLocalWebSocketFixture();
+    process.env.ATTEST_WS_TOKEN = 'websocket-probe-secret';
     const addRequest = {
       schema: 'attest.command-request/v2',
       command: 'agent.add',
-      agent: canonicalAgent('probe'),
+      agent: {
+        ...canonicalAgent('probe'),
+        transport: {
+          ...canonicalTransport(),
+          url: fixture.url,
+          result_pointer: '/result',
+        },
+      },
     };
     expect(
       (
@@ -389,18 +428,16 @@ describe('CLI2.12 WebSocket agent UX', () => {
       '--output',
       'json',
     ]);
-    expect(flagProbe.exitCode).toBe(4);
-    expect(JSON.parse(flagProbe.output[0] ?? '{}')).toMatchObject({
+    expect(flagProbe.exitCode).toBe(0);
+    const flagResult = JSON.parse(flagProbe.output[0] ?? '{}');
+    expect(flagResult).toMatchObject({
       command: 'agent.test',
-      error: {
-        code: 'invocation_failed',
-        details: {
-          diagnostic: 'websocket_runtime_not_wired',
-          framing: 'text_json',
-          transport: 'websocket',
-        },
+      result: {
+        response: { output: { echoed_request_id: expect.any(String) } },
+        transport: 'websocket',
       },
     });
+    expect(flagProbe.output.join('')).not.toContain('websocket-probe-secret');
 
     const testRequest = {
       schema: 'attest.command-request/v2',
@@ -413,11 +450,21 @@ describe('CLI2.12 WebSocket agent UX', () => {
       ['agent', 'test', '--from-json', '-', '--output', 'json'],
       () => Promise.resolve(JSON.stringify(testRequest)),
     );
-    expect(jsonProbe.exitCode).toBe(4);
-    expect(JSON.parse(jsonProbe.output[0] ?? '{}')).toMatchObject({
+    expect(jsonProbe.exitCode).toBe(0);
+    const jsonResult = JSON.parse(jsonProbe.output[0] ?? '{}');
+    expect(jsonResult).toMatchObject({
       command: 'agent.test',
-      error: { details: { diagnostic: 'websocket_runtime_not_wired' } },
+      result: {
+        response: { output: { echoed_request_id: expect.any(String) } },
+        transport: 'websocket',
+      },
     });
+    expect(jsonProbe.output.join('')).not.toContain('websocket-probe-secret');
+    const upgrades = fixture.events().filter((event) => event.type === 'upgrade_requested');
+    expect(upgrades).toHaveLength(2);
+    expect(
+      upgrades.every((event) => event.headers?.authorization === 'websocket-probe-secret'),
+    ).toBe(true);
   });
 
   it('publishes complete JSON help dependencies for WebSocket authoring', async () => {

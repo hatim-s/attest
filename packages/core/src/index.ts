@@ -10,7 +10,9 @@ export {
   redactEventEvidence,
   startBackgroundAgent,
   startJsonlBridgeAgent,
+  startWebSocketAgent,
   redactTransportText,
+  WebSocketAgentSession,
   loadDatasetCases,
   type CaseExecution,
   type ExecuteOptions,
@@ -26,6 +28,8 @@ export {
   type RunProgressEvent,
   type StreamAgentResource,
   type StreamInvokeOptions,
+  type WebSocketAgentResource,
+  type WebSocketSessionOptions,
 } from './runner/index.js';
 export {
   BUNDLE_VERSION,
