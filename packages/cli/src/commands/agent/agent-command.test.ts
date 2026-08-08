@@ -29,6 +29,12 @@ import { readSecretReference, REDACTED } from './native-agent-adapter.js';
 
 const FIXTURE = fileURLToPath(new URL('./fixtures/native-agent.cjs', import.meta.url));
 const PTY_FIXTURE = fileURLToPath(new URL('./fixtures/pty-agent-command.py', import.meta.url));
+const JSONL_BRIDGE_FIXTURE = fileURLToPath(
+  new URL('../../../../core/src/runner/fixtures/jsonl-bridge-agent.cjs', import.meta.url),
+);
+const BACKGROUND_FIXTURE = fileURLToPath(
+  new URL('../../../../core/src/runner/fixtures/background-agent.cjs', import.meta.url),
+);
 const CLI_PACKAGE_ROOT = fileURLToPath(new URL('../../../', import.meta.url));
 const CLI_BUILT = fileURLToPath(new URL('../../../dist/cli.js', import.meta.url));
 const execFileAsync = promisify(execFile);
@@ -360,7 +366,7 @@ describe('CLI2.6 agent authoring', () => {
     ).toBe(0);
     expect(questions.slice(0, 3)).toEqual([
       'Agent id: ',
-      'Transport [cli/http]: ',
+      'Transport [cli/http/background/jsonl/stream]: ',
       'Native command: ',
     ]);
     expect(questions[3]).toContain('Apply these changes? [y/N]');
@@ -1707,6 +1713,427 @@ describe('CLI2.6 agent authoring', () => {
       expect(observedBody).toBe('');
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+});
+
+describe('CLI2.11 managed and streaming agent UX', () => {
+  it('guides a TTY user through managed JSONL authoring', async () => {
+    const root = await createProject();
+    const collected = collectIo();
+    const answers = new Map<string, string>([
+      ['Agent id: ', 'guided-bridge'],
+      ['Transport [cli/http/background/jsonl/stream]: ', 'jsonl'],
+      ['JSONL bridge command: ', `${process.execPath} ${JSONL_BRIDGE_FIXTURE}`],
+      ['Bridge concurrency [serial]: ', 'multiplexed'],
+      ['Cancellation grace [1s]: ', '100ms'],
+    ]);
+    const exitCode = await runCli(['agent', 'add'], {
+      workingDirectory: root,
+      io: collected.io,
+      interaction: {
+        ci: false,
+        inputIsTTY: true,
+        outputIsTTY: true,
+        prompt: (question) =>
+          Promise.resolve(
+            question.includes('Apply these changes?') ? 'yes' : (answers.get(question) ?? ''),
+          ),
+        readStdin: () => Promise.resolve(''),
+      },
+    });
+    expect(exitCode).toBe(0);
+    expect((await loadProject({ project: root })).agents[0]?.transport).toMatchObject({
+      kind: 'jsonl_bridge',
+      concurrency: 'multiplexed',
+    });
+  });
+
+  it('authors and probes a correlated JSONL bridge without canonical-file editing', async () => {
+    const root = await createProject();
+    const added = await run(root, [
+      'agent',
+      'add',
+      'bridge',
+      '--jsonl-command',
+      `${process.execPath} ${JSONL_BRIDGE_FIXTURE}`,
+      '--bridge-concurrency',
+      'multiplexed',
+      '--cancel-grace',
+      '100ms',
+      '--output',
+      'json',
+    ]);
+    expect(added.exitCode).toBe(0);
+    const loaded = await loadProject({ project: root });
+    expect(loaded.agents[0]?.transport).toMatchObject({
+      kind: 'jsonl_bridge',
+      concurrency: 'multiplexed',
+      cancellation_grace_ms: 100,
+    });
+
+    const tested = await run(root, [
+      'agent',
+      'test',
+      'bridge',
+      '--input',
+      '{"message":"hello"}',
+      '--output',
+      'json',
+    ]);
+    expect(tested.exitCode).toBe(0);
+    expect(JSON.parse(tested.output[0] ?? '{}')).toMatchObject({
+      result: {
+        response: { output: { message: 'hello' } },
+        transport: 'jsonl_bridge',
+      },
+    });
+  });
+
+  it('authors, starts, tests, and shuts down a run-scoped background service', async () => {
+    const root = await createProject();
+    const reservation = createServer();
+    await new Promise<void>((resolve, reject) => {
+      reservation.once('error', reject);
+      reservation.listen(0, '127.0.0.1', resolve);
+    });
+    const address = reservation.address();
+    if (address === null || typeof address === 'string') throw new Error('Expected TCP fixture.');
+    const port = address.port;
+    await new Promise<void>((resolve) => reservation.close(() => resolve()));
+    const origin = `http://127.0.0.1:${String(port)}`;
+    const added = await run(root, [
+      'agent',
+      'add',
+      'background',
+      '--background-command',
+      `${process.execPath} ${BACKGROUND_FIXTURE} ${String(port)}`,
+      '--readiness-http',
+      `${origin}/ready`,
+      '--invoke-url',
+      `${origin}/invoke`,
+      '--shutdown-url',
+      `${origin}/shutdown`,
+      '--response-pointer',
+      '/output',
+      '--stop-timeout',
+      '100ms',
+      '--output',
+      'json',
+    ]);
+    expect(added.exitCode).toBe(0);
+    const tested = await run(root, [
+      'agent',
+      'test',
+      'background',
+      '--input',
+      '{"ping":true}',
+      '--output',
+      'json',
+    ]);
+    expect(tested.exitCode).toBe(0);
+    expect(JSON.parse(tested.output[0] ?? '{}')).toMatchObject({
+      result: { response: { output: { ping: true } }, transport: 'background_cli' },
+    });
+  });
+
+  it('authors and probes an SSE agent with explicit terminal extraction', async () => {
+    const root = await createProject();
+    const server = createServer((_request, response) => {
+      response.setHeader('content-type', 'text/event-stream');
+      response.end('data: {"type":"result","output":"streamed"}\n\n');
+    });
+    await new Promise<void>((resolve, reject) => {
+      server.once('error', reject);
+      server.listen(0, '127.0.0.1', resolve);
+    });
+    const address = server.address();
+    if (address === null || typeof address === 'string') throw new Error('Expected TCP fixture.');
+    try {
+      const added = await run(root, [
+        'agent',
+        'add',
+        'stream',
+        '--stream-url',
+        `http://127.0.0.1:${String(address.port)}/stream`,
+        '--stream-framing',
+        'sse',
+        '--terminal-pointer',
+        '/type',
+        '--terminal-value',
+        '"result"',
+        '--response-pointer',
+        '/output',
+        '--output',
+        'json',
+      ]);
+      expect(added.exitCode).toBe(0);
+      const tested = await run(root, ['agent', 'test', 'stream', '--output', 'json']);
+      expect(tested.exitCode).toBe(0);
+      expect(JSON.parse(tested.output[0] ?? '{}')).toMatchObject({
+        result: { response: { output: 'streamed' }, transport: 'stream' },
+      });
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it('imports a complete managed resource through the stable JSON request protocol', async () => {
+    const root = await createProject();
+    const request = {
+      schema: 'attest.command-request/v2',
+      command: 'agent.add',
+      agent: {
+        schema: 'attest.agent/v2',
+        id: 'imported-bridge',
+        name: 'Imported bridge',
+        transport: {
+          kind: 'jsonl_bridge',
+          lifecycle: 'per_run',
+          argv: [process.execPath, JSONL_BRIDGE_FIXTURE],
+          concurrency: 'serial',
+          cancellation_grace_ms: 100,
+        },
+      },
+    };
+    const added = await run(root, ['agent', 'add', '--from-json', '-', '--output', 'json'], () =>
+      Promise.resolve(JSON.stringify(request)),
+    );
+    expect(added.exitCode).toBe(0);
+    expect((await loadProject({ project: root })).agents[0]?.transport.kind).toBe('jsonl_bridge');
+  });
+
+  it('rejects discarded transport flags and publishes matching JSON help dependencies', async () => {
+    const root = await createProject();
+    const rejected = [
+      [
+        'bad-stream-env',
+        '--stream-url',
+        'http://127.0.0.1:1234/stream',
+        '--env',
+        'TOKEN=STREAM_TOKEN',
+      ],
+      [
+        'bad-bridge-header',
+        '--jsonl-command',
+        `${process.execPath} ${JSONL_BRIDGE_FIXTURE}`,
+        '--header-env',
+        'Authorization=BRIDGE_TOKEN',
+      ],
+      [
+        'bad-stream-mode',
+        '--stream-url',
+        'http://127.0.0.1:1234/stream',
+        '--incremental-output-mode',
+        'text',
+      ],
+    ];
+    for (const argumentsList of rejected) {
+      const result = await run(root, ['agent', 'add', ...argumentsList, '--output', 'json']);
+      expect(result.exitCode).toBe(2);
+      expect(JSON.parse(result.output[0] ?? '{}')).toMatchObject({
+        error: { code: 'cli_usage' },
+      });
+    }
+
+    expect(
+      (
+        await run(root, [
+          'agent',
+          'add',
+          'stream-auth',
+          '--stream-url',
+          'http://127.0.0.1:1234/stream',
+          '--header-env',
+          'Authorization=STREAM_TOKEN',
+          '--output',
+          'json',
+        ])
+      ).exitCode,
+    ).toBe(0);
+    expect(
+      (
+        await run(root, [
+          'agent',
+          'add',
+          'bridge-env',
+          '--jsonl-command',
+          `${process.execPath} ${JSONL_BRIDGE_FIXTURE}`,
+          '--env',
+          'TOKEN=BRIDGE_TOKEN',
+          '--output',
+          'json',
+        ])
+      ).exitCode,
+    ).toBe(0);
+    const loaded = await loadProject({ project: root });
+    expect(loaded.agents.find(({ id }) => id === 'stream-auth')?.transport).toMatchObject({
+      request: { headers: { Authorization: { from_env: 'STREAM_TOKEN' } } },
+    });
+    expect(loaded.agents.find(({ id }) => id === 'bridge-env')?.transport).toMatchObject({
+      env: { TOKEN: { from_env: 'BRIDGE_TOKEN' } },
+    });
+
+    const helpResult = await run(root, ['help', 'agent', 'add', '--output', 'json']);
+    const help = JSON.parse(helpResult.output[0] ?? '{}') as {
+      result: {
+        command: {
+          options: Array<{ conflicts: string[]; implies: string[]; name: string }>;
+        };
+      };
+    };
+    const options = new Map(help.result.command.options.map((option) => [option.name, option]));
+    expect(options.get('env')?.conflicts).toContain('stream-url');
+    expect(options.get('header-env')?.conflicts).toContain('jsonl-command');
+    expect(options.get('incremental-output-mode')?.implies).toContain('incremental-output-pointer');
+  });
+
+  it.each([
+    {
+      argv: ['/definitely/missing/attest-agent'],
+      connectMs: 1_000,
+      expectedCode: 'spawn_failed',
+      id: 'missing-startup',
+      readiness: 'READY',
+    },
+    {
+      argv: [process.execPath, BACKGROUND_FIXTURE, '0', 'silent'],
+      connectMs: 20,
+      expectedCode: 'timeout',
+      id: 'readiness-timeout',
+      readiness: 'NEVER',
+    },
+  ])('normalizes $expectedCode startup failures into the public CLI contract', async (fixture) => {
+    const root = await createProject();
+    const request = {
+      schema: 'attest.command-request/v2',
+      command: 'agent.add',
+      agent: {
+        schema: 'attest.agent/v2',
+        id: fixture.id,
+        name: fixture.id,
+        transport: {
+          kind: 'background_cli',
+          lifecycle: 'per_run',
+          start_argv: fixture.argv,
+          readiness: { kind: 'stderr', pattern: fixture.readiness },
+          invoke: { method: 'POST', url: 'http://127.0.0.1:41989/invoke' },
+          extraction: { result_pointer: '/output' },
+          stop_timeout_ms: 50,
+        },
+        timeouts: { connect_ms: fixture.connectMs, attempt_ms: 1_000 },
+      },
+    };
+    const added = await run(root, ['agent', 'add', '--from-json', '-', '--output', 'json'], () =>
+      Promise.resolve(JSON.stringify(request)),
+    );
+    expect(added.exitCode).toBe(0);
+    const tested = await run(root, ['agent', 'test', fixture.id, '--output', 'json']);
+    expect(tested.exitCode).toBe(4);
+    expect(JSON.parse(tested.output[0] ?? '{}')).toMatchObject({
+      error: {
+        code: 'invocation_failed',
+        details: { invocation_code: fixture.expectedCode },
+      },
+    });
+  });
+
+  it('keeps resolved invoke and shutdown secret references endpoint-scoped', async () => {
+    const root = await createProject();
+    const originalInvokeSecret = process.env.ATTEST_INVOKE_SECRET;
+    const originalShutdownSecret = process.env.ATTEST_SHUTDOWN_SECRET;
+    process.env.ATTEST_INVOKE_SECRET = 'invoke-only';
+    process.env.ATTEST_SHUTDOWN_SECRET = 'shutdown-only';
+    let invokeHeader = '';
+    let shutdownHeader = '';
+    let invokeReceivedShutdownHeader = false;
+    let shutdownReceivedInvokeHeader = false;
+    const invokeServer = createServer((_request, response) => {
+      invokeHeader = String(_request.headers['x-invoke'] ?? '');
+      invokeReceivedShutdownHeader = _request.headers['x-shutdown'] !== undefined;
+      response.setHeader('content-type', 'application/json');
+      response.end('{"output":{"ok":true}}');
+    });
+    const shutdownServer = createServer((_request, response) => {
+      shutdownHeader = String(_request.headers['x-shutdown'] ?? '');
+      shutdownReceivedInvokeHeader = _request.headers['x-invoke'] !== undefined;
+      response.writeHead(204).end();
+    });
+    const reservation = createServer();
+    await Promise.all(
+      [invokeServer, shutdownServer, reservation].map(
+        (server) =>
+          new Promise<void>((resolveListen, reject) => {
+            server.once('error', reject);
+            server.listen(0, '127.0.0.1', resolveListen);
+          }),
+      ),
+    );
+    const invokeAddress = invokeServer.address();
+    const shutdownAddress = shutdownServer.address();
+    const processAddress = reservation.address();
+    if (
+      invokeAddress === null ||
+      typeof invokeAddress === 'string' ||
+      shutdownAddress === null ||
+      typeof shutdownAddress === 'string' ||
+      processAddress === null ||
+      typeof processAddress === 'string'
+    ) {
+      throw new Error('Expected endpoint fixture addresses.');
+    }
+    await new Promise<void>((resolveClose) => reservation.close(() => resolveClose()));
+    const commandRequest = {
+      schema: 'attest.command-request/v2',
+      command: 'agent.add',
+      agent: {
+        schema: 'attest.agent/v2',
+        id: 'scoped-background',
+        name: 'Scoped background',
+        transport: {
+          kind: 'background_cli',
+          lifecycle: 'per_run',
+          start_argv: [process.execPath, BACKGROUND_FIXTURE, String(processAddress.port)],
+          readiness: { kind: 'stderr', pattern: `READY ${String(processAddress.port)}` },
+          invoke: {
+            method: 'POST',
+            url: `http://127.0.0.1:${String(invokeAddress.port)}/invoke`,
+            body: '{{request}}',
+            headers: { 'X-Invoke': { from_env: 'ATTEST_INVOKE_SECRET' } },
+          },
+          extraction: { result_pointer: '/output' },
+          shutdown: {
+            method: 'POST',
+            url: `http://127.0.0.1:${String(shutdownAddress.port)}/shutdown`,
+            headers: { 'X-Shutdown': { from_env: 'ATTEST_SHUTDOWN_SECRET' } },
+          },
+          stop_timeout_ms: 100,
+        },
+        timeouts: { connect_ms: 2_000, attempt_ms: 2_000 },
+      },
+    };
+    try {
+      const added = await run(root, ['agent', 'add', '--from-json', '-', '--output', 'json'], () =>
+        Promise.resolve(JSON.stringify(commandRequest)),
+      );
+      expect(added.exitCode).toBe(0);
+      expect(
+        (await run(root, ['agent', 'test', 'scoped-background', '--output', 'json'])).exitCode,
+      ).toBe(0);
+      expect(invokeHeader).toBe('invoke-only');
+      expect(shutdownHeader).toBe('shutdown-only');
+      expect(invokeReceivedShutdownHeader).toBe(false);
+      expect(shutdownReceivedInvokeHeader).toBe(false);
+    } finally {
+      if (originalInvokeSecret === undefined) delete process.env.ATTEST_INVOKE_SECRET;
+      else process.env.ATTEST_INVOKE_SECRET = originalInvokeSecret;
+      if (originalShutdownSecret === undefined) delete process.env.ATTEST_SHUTDOWN_SECRET;
+      else process.env.ATTEST_SHUTDOWN_SECRET = originalShutdownSecret;
+      await Promise.all(
+        [invokeServer, shutdownServer].map(
+          (server) => new Promise<void>((resolveClose) => server.close(() => resolveClose())),
+        ),
+      );
     }
   });
 });

@@ -1,6 +1,7 @@
 import { describe, expect, expectTypeOf, it } from 'vitest';
 
 import { agentResourceSchema, type AgentResource } from './agent-resource-v2.js';
+import { jsonlBridgeInputSchema, jsonlBridgeOutputSchema } from './managed-transport-v1.js';
 import { testCaseSchema, type TestCase } from './case-v2.js';
 import { commandRequestSchema, type CommandRequest } from './command-request-v2.js';
 import { datasetResourceSchema, type DatasetResource } from './dataset-resource-v2.js';
@@ -263,6 +264,15 @@ describe('v2 agent transport contract', () => {
     expect(agentResourceSchema.safeParse({ ...agent, transport }).success).toBe(true);
   });
 
+  it('accepts RFC 6901 redaction pointers to prototype-named JSON keys', () => {
+    expect(
+      agentResourceSchema.safeParse({
+        ...agent,
+        redaction: { event_pointers: ['/constructor', '/prototype', '/__proto__'] },
+      }).success,
+    ).toBe(true);
+  });
+
   it('defaults legacy HTTP response provenance without overriding explicit new modes', () => {
     const explicitMapped = transports.find((transport) => transport.kind === 'http');
     expect(explicitMapped).toBeDefined();
@@ -312,6 +322,39 @@ describe('v2 agent transport contract', () => {
         ...agent,
         transport: { ...polling, minimum_interval_ms: 6_000 },
       }).success,
+    ).toBe(false);
+  });
+});
+
+describe('managed JSONL bridge protocol', () => {
+  it('accepts correlated request, response, cancel, and cancellation acknowledgement frames', () => {
+    expect(
+      jsonlBridgeInputSchema.safeParse({
+        type: 'request',
+        request_id: 'request-1',
+        request: {
+          protocol: 'attest.agent/v1alpha1',
+          run_id: '01ARZ3NDEKTSV4RRFFQ69G5FAV',
+          case_id: 'one',
+          input: {},
+        },
+      }).success,
+    ).toBe(true);
+    expect(
+      jsonlBridgeInputSchema.safeParse({ type: 'cancel', request_id: 'request-1' }).success,
+    ).toBe(true);
+    expect(
+      jsonlBridgeOutputSchema.safeParse({
+        type: 'response',
+        request_id: 'request-1',
+        response: { protocol: 'attest.agent/v1alpha1', output: 'done' },
+      }).success,
+    ).toBe(true);
+    expect(
+      jsonlBridgeOutputSchema.safeParse({ type: 'cancelled', request_id: 'request-1' }).success,
+    ).toBe(true);
+    expect(
+      jsonlBridgeOutputSchema.safeParse({ type: 'response', request_id: 'request-1' }).success,
     ).toBe(false);
   });
 });

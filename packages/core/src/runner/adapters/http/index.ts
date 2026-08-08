@@ -3,4 +3,9 @@ export {
   type HttpAgentResource,
   type MappedHttpInvokeOptions,
 } from './mapped-http-adapter.js';
-export { REDACTED, redactTransportText, secretRepresentations } from './redaction.js';
+export {
+  REDACTED,
+  redactEventEvidence,
+  redactTransportText,
+  secretRepresentations,
+} from './redaction.js';

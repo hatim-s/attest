@@ -28,4 +28,38 @@ const redactTransportText = (value: string, secrets: readonly string[]): string 
     value,
   );
 
-export { REDACTED, redactTransportText, secretRepresentations };
+const pointerSegments = (pointer: string): string[] =>
+  pointer === ''
+    ? []
+    : pointer
+        .slice(1)
+        .split('/')
+        .map((segment) => segment.replaceAll('~1', '/').replaceAll('~0', '~'));
+
+/** Replaces authored sensitive event fields before an event becomes persisted evidence. */
+const redactEventEvidence = (
+  value: unknown,
+  pointers: readonly string[],
+  secrets: readonly string[],
+): string => {
+  const redacted = structuredClone(value);
+  for (const pointer of pointers) {
+    const segments = pointerSegments(pointer);
+    if (segments.length === 0) return REDACTED;
+    let parent: unknown = redacted;
+    for (const segment of segments.slice(0, -1)) {
+      if (parent === null || typeof parent !== 'object' || !Object.hasOwn(parent, segment)) {
+        parent = undefined;
+        break;
+      }
+      parent = Reflect.get(parent, segment);
+    }
+    if (parent !== null && typeof parent === 'object') {
+      const leaf = segments.at(-1);
+      if (leaf !== undefined && Object.hasOwn(parent, leaf)) Reflect.set(parent, leaf, REDACTED);
+    }
+  }
+  return redactTransportText(JSON.stringify(redacted), secrets);
+};
+
+export { REDACTED, redactEventEvidence, redactTransportText, secretRepresentations };

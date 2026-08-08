@@ -26,13 +26,34 @@ type ReadInput = () => Promise<string>;
 type AgentAddFields = {
   agentId: string;
   argvJson?: string;
+  backgroundCommand?: string;
+  bridgeConcurrency?: 'serial' | 'multiplexed';
+  cancellationGrace?: string;
+  cwd?: string;
   env?: readonly string[];
+  errorPointer?: string;
+  eventName?: string;
   headerEnv?: readonly string[];
+  incrementalOutputMode?: 'text' | 'array';
+  incrementalOutputPointer?: string;
+  invokeUrl?: string;
+  jsonlCommand?: string;
   name?: string;
   nativeCommand?: string;
   nativeHttp?: string;
+  readinessHttp?: string;
+  readinessStderr?: string;
+  readinessTcp?: string;
+  responsePointer?: string;
+  shutdownUrl?: string;
+  stopTimeout?: string;
+  streamFraming?: 'sse' | 'jsonl';
+  streamUrl?: string;
+  terminalPointer?: string;
+  terminalValues?: readonly string[];
   timeout?: string;
   trace?: boolean;
+  tracePointer?: string;
 };
 
 const requestDiagnostics = (
@@ -258,6 +279,31 @@ const parseDuration = (value: string, path = '--timeout'): number => {
   return milliseconds;
 };
 
+const parseJsonValues = (values: readonly string[], path: string): JsonValue[] =>
+  values.map((value) => {
+    try {
+      return JSON.parse(value) as JsonValue;
+    } catch (error: unknown) {
+      throw new AttestCliError('cli_usage', `${path} must contain valid JSON values.`, {
+        path,
+        hint: 'Quote strings as JSON, for example `--terminal-value \'"done"\'`.',
+        cause: error,
+      });
+    }
+  });
+
+const parseTcpReadiness = (value: string): { host: string; port: number } => {
+  const match = /^(\[[^\]]+\]|[^:]+):(\d+)$/u.exec(value);
+  const port = Number(match?.[2]);
+  if (match?.[1] === undefined || !Number.isInteger(port) || port < 1 || port > 65_535) {
+    throw new AttestCliError('cli_usage', '--readiness-tcp must be HOST:PORT.', {
+      path: '--readiness-tcp',
+      hint: 'Example: `--readiness-tcp 127.0.0.1:8787`.',
+    });
+  }
+  return { host: match[1].replace(/^\[|\]$/gu, ''), port };
+};
+
 const parseSecretBindings = (
   values: readonly string[],
   path: string,
@@ -279,10 +325,6 @@ const parseSecretBindings = (
 };
 
 const SENSITIVE_NAME = /authorization|cookie|password|secret|token|api[-_]?key/iu;
-
-const isNativeEnvelopeHttp = (
-  transport: Extract<AgentResource['transport'], { kind: 'http' }>,
-): boolean => transport.response_mode === 'attest_envelope';
 
 const findSensitiveBodyField = (value: JsonValue, path = ''): string | undefined => {
   if (Array.isArray(value)) {
@@ -372,52 +414,71 @@ const assertSafeHttpTemplate = (
 
 /** Rejects authored credentials and runtime policies outside the implemented adapter slice. */
 const assertSafeNativeAgentResource = (agent: AgentResource): void => {
-  const mappedHttp =
-    agent.transport.kind === 'polling' ||
-    (agent.transport.kind === 'http' && !isNativeEnvelopeHttp(agent.transport));
-  const unsupportedTimeout = (
-    mappedHttp ? ['run_ms'] : ['connect_ms', 'first_byte_ms', 'idle_ms', 'run_ms']
-  ).find(
+  const transport = agent.transport;
+  const kind = transport.kind;
+  const unsupportedTimeoutFields =
+    kind === 'native_cli' || (kind === 'http' && transport.response_mode === 'attest_envelope')
+      ? ['connect_ms', 'first_byte_ms', 'idle_ms', 'run_ms']
+      : kind === 'http' || kind === 'polling' || kind === 'stream'
+        ? ['run_ms']
+        : kind === 'jsonl_bridge'
+          ? ['connect_ms']
+          : [];
+  const unsupportedTimeout = unsupportedTimeoutFields.find(
     (field) =>
       agent.timeouts?.[field as keyof NonNullable<AgentResource['timeouts']>] !== undefined,
   );
-  const unsupportedLimit = (
-    mappedHttp
-      ? ['event_count', 'event_bytes', 'total_evidence_bytes']
-      : ['request_bytes', 'event_count', 'event_bytes', 'total_evidence_bytes']
-  ).find(
+  const unsupportedLimitFields =
+    kind === 'native_cli' || (kind === 'http' && transport.response_mode === 'attest_envelope')
+      ? ['request_bytes', 'event_count', 'event_bytes', 'total_evidence_bytes']
+      : kind === 'http' || kind === 'polling'
+        ? ['event_count', 'event_bytes', 'total_evidence_bytes']
+        : kind === 'background_cli'
+          ? ['event_count', 'event_bytes']
+          : kind === 'stream'
+            ? ['response_bytes']
+            : [];
+  const unsupportedLimit = unsupportedLimitFields.find(
     (field) => agent.limits?.[field as keyof NonNullable<AgentResource['limits']>] !== undefined,
   );
   if (unsupportedTimeout !== undefined || unsupportedLimit !== undefined) {
     const section = unsupportedTimeout === undefined ? 'limits' : 'timeouts';
     const field = unsupportedTimeout ?? unsupportedLimit!;
-    throw new AttestCliError('project_invalid', 'This native runtime policy is unsupported.', {
-      path: `/agent/${section}/${field}`,
-      hint: mappedHttp
-        ? 'Mapped HTTP probes support connect, first-byte, idle, attempt, request, and response caps.'
-        : 'Native probes support attempt_ms and response_bytes.',
-    });
-  }
-  if (!mappedHttp && agent.retry !== undefined && agent.retry.backoff.kind !== 'none') {
     throw new AttestCliError(
       'project_invalid',
-      'Retry backoff is not supported by native probes.',
+      'This runtime policy is unsupported by the adapter.',
       {
-        path: '/agent/retry/backoff',
-        hint: 'Use `{ "kind": "none" }` for a deterministic native connection probe.',
+        path: `/agent/${section}/${field}`,
+        hint: 'Remove the unsupported phase or select an adapter that enforces it.',
       },
     );
   }
-  const transport = agent.transport;
-  if (transport.kind === 'native_cli') {
+  if (
+    (kind === 'native_cli' && agent.retry !== undefined && agent.retry.backoff.kind !== 'none') ||
+    (kind === 'jsonl_bridge' && (agent.retry?.retries ?? 0) > 0)
+  ) {
+    throw new AttestCliError('project_invalid', 'This retry policy is unsafe for the adapter.', {
+      path: '/agent/retry',
+      hint:
+        kind === 'jsonl_bridge'
+          ? 'Set retries to zero; a sent bridge request is never replayed.'
+          : 'Use deterministic no-backoff retries for native per-case probes.',
+    });
+  }
+  if (
+    transport.kind === 'native_cli' ||
+    transport.kind === 'background_cli' ||
+    transport.kind === 'jsonl_bridge'
+  ) {
+    const argv = transport.kind === 'background_cli' ? transport.start_argv : transport.argv;
     for (const position of agent.redaction?.argv_positions ?? []) {
-      if (position >= transport.argv.length) {
+      if (position >= argv.length) {
         throw new AttestCliError('project_invalid', 'An argv redaction position is out of range.', {
           path: `/agent/redaction/argv_positions/${position}`,
         });
       }
     }
-    const sensitivePosition = transport.argv.findIndex((argument) => SENSITIVE_NAME.test(argument));
+    const sensitivePosition = argv.findIndex((argument) => SENSITIVE_NAME.test(argument));
     if (sensitivePosition >= 0) {
       throw new AttestCliError(
         'project_invalid',
@@ -428,16 +489,78 @@ const assertSafeNativeAgentResource = (agent: AgentResource): void => {
         },
       );
     }
+    if (transport.kind === 'jsonl_bridge') return;
+    if (transport.kind === 'native_cli') return;
+
+    let pattern: RegExp | undefined;
+    if (transport.readiness.kind === 'stderr') {
+      try {
+        pattern = new RegExp(transport.readiness.pattern, 'u');
+      } catch (error: unknown) {
+        throw new AttestCliError('project_invalid', 'Background readiness regex is invalid.', {
+          path: '/agent/transport/readiness/pattern',
+          cause: error,
+        });
+      }
+    }
+    void pattern;
+    const requests = [
+      { request: transport.invoke, path: '/agent/transport/invoke' },
+      ...(transport.shutdown === undefined
+        ? []
+        : [{ request: transport.shutdown, path: '/agent/transport/shutdown' }]),
+    ];
+    const readinessUrl =
+      transport.readiness.kind === 'http'
+        ? assertSafeHttpTemplate(
+            { url: transport.readiness.url, method: 'GET' },
+            '/agent/transport/readiness/url',
+          )
+        : undefined;
+    for (const { request, path } of requests) {
+      const url = assertSafeHttpTemplate(request, path);
+      if (!['localhost', '::1'].includes(url.hostname) && !url.hostname.startsWith('127.')) {
+        throw new AttestCliError(
+          'project_invalid',
+          'Background agents require loopback HTTP endpoints.',
+          {
+            path: `${path}/url`,
+          },
+        );
+      }
+    }
+    if (
+      readinessUrl !== undefined &&
+      !['localhost', '::1'].includes(readinessUrl.hostname) &&
+      !readinessUrl.hostname.startsWith('127.')
+    ) {
+      throw new AttestCliError('project_invalid', 'Background readiness requires a loopback URL.', {
+        path: '/agent/transport/readiness/url',
+      });
+    }
+    if (
+      transport.readiness.kind === 'tcp' &&
+      !['localhost', '::1'].includes(transport.readiness.host) &&
+      !transport.readiness.host.startsWith('127.')
+    ) {
+      throw new AttestCliError(
+        'project_invalid',
+        'Background TCP readiness requires a loopback host.',
+        {
+          path: '/agent/transport/readiness/host',
+        },
+      );
+    }
     return;
   }
-  if (transport.kind !== 'http' && transport.kind !== 'polling') {
+  if (transport.kind === 'websocket') {
     throw new AttestCliError('project_invalid', 'This transport belongs to a later CLI item.', {
       path: '/agent/transport/kind',
-      hint: 'CLI2.10 accepts native_cli, direct HTTP, and polling resources.',
+      hint: 'WebSockets are CLI2.12; CLI2.11 supports HTTP SSE and JSONL streams.',
     });
   }
-  const request = transport.kind === 'http' ? transport.request : transport.submit;
-  const requestPath = `/agent/transport/${transport.kind === 'http' ? 'request' : 'submit'}`;
+  const request = transport.kind === 'polling' ? transport.submit : transport.request;
+  const requestPath = `/agent/transport/${transport.kind === 'polling' ? 'submit' : 'request'}`;
   if (
     transport.kind === 'http' &&
     transport.response_mode === 'attest_envelope' &&
@@ -466,6 +589,19 @@ const assertSafeNativeAgentResource = (agent: AgentResource): void => {
       });
     }
   }
+  if (
+    transport.kind === 'stream' &&
+    transport.incremental_output_pointer !== undefined &&
+    transport.incremental_output_mode === undefined
+  ) {
+    throw new AttestCliError(
+      'project_invalid',
+      'Streaming accumulation requires an explicit mode.',
+      {
+        path: '/agent/transport/incremental_output_mode',
+      },
+    );
+  }
   for (const name of agent.redaction?.headers ?? []) {
     if (
       !Object.keys(request.headers ?? {}).some(
@@ -486,49 +622,258 @@ const assertSafeNativeAgentResource = (agent: AgentResource): void => {
   }
 };
 
-/** Normalizes non-interactive or wizard-populated add fields into one v2 resource. */
-const createAgentResource = (fields: AgentAddFields): AgentResource => {
-  const selected = [fields.argvJson, fields.nativeCommand, fields.nativeHttp].filter(
-    (value) => value !== undefined,
-  );
-  if (selected.length !== 1) {
+const AUTHORING_FLAG_BY_FIELD: Readonly<Record<keyof AgentAddFields, string>> = {
+  agentId: 'agent-id',
+  argvJson: 'argv-json',
+  backgroundCommand: 'background-command',
+  bridgeConcurrency: 'bridge-concurrency',
+  cancellationGrace: 'cancel-grace',
+  cwd: 'cwd',
+  env: 'env',
+  errorPointer: 'error-pointer',
+  eventName: 'event-name',
+  headerEnv: 'header-env',
+  incrementalOutputMode: 'incremental-output-mode',
+  incrementalOutputPointer: 'incremental-output-pointer',
+  invokeUrl: 'invoke-url',
+  jsonlCommand: 'jsonl-command',
+  name: 'name',
+  nativeCommand: 'native-command',
+  nativeHttp: 'native-http',
+  readinessHttp: 'readiness-http',
+  readinessStderr: 'readiness-stderr',
+  readinessTcp: 'readiness-tcp',
+  responsePointer: 'response-pointer',
+  shutdownUrl: 'shutdown-url',
+  stopTimeout: 'stop-timeout',
+  streamFraming: 'stream-framing',
+  streamUrl: 'stream-url',
+  terminalPointer: 'terminal-pointer',
+  terminalValues: 'terminal-value',
+  timeout: 'timeout',
+  trace: 'trace',
+  tracePointer: 'trace-pointer',
+};
+
+const COMMON_AUTHORING_FIELDS = new Set<keyof AgentAddFields>([
+  'agentId',
+  'name',
+  'timeout',
+  'trace',
+]);
+
+const TRANSPORT_AUTHORING_FIELDS: Readonly<
+  Record<
+    'background' | 'jsonl' | 'native_cli' | 'native_http' | 'stream',
+    Set<keyof AgentAddFields>
+  >
+> = {
+  native_cli: new Set(['argvJson', 'nativeCommand', 'cwd', 'env']),
+  native_http: new Set(['nativeHttp', 'headerEnv']),
+  background: new Set([
+    'backgroundCommand',
+    'cwd',
+    'env',
+    'errorPointer',
+    'headerEnv',
+    'invokeUrl',
+    'readinessHttp',
+    'readinessStderr',
+    'readinessTcp',
+    'responsePointer',
+    'shutdownUrl',
+    'stopTimeout',
+    'tracePointer',
+  ]),
+  jsonl: new Set(['jsonlCommand', 'cwd', 'env', 'bridgeConcurrency', 'cancellationGrace']),
+  stream: new Set([
+    'streamUrl',
+    'streamFraming',
+    'headerEnv',
+    'errorPointer',
+    'eventName',
+    'incrementalOutputMode',
+    'incrementalOutputPointer',
+    'responsePointer',
+    'terminalPointer',
+    'terminalValues',
+    'tracePointer',
+  ]),
+};
+
+const fieldIsProvided = (value: AgentAddFields[keyof AgentAddFields]): boolean =>
+  value !== undefined && (!Array.isArray(value) || value.length > 0);
+
+/** Rejects every flag that the selected transport would otherwise silently discard. */
+const assertApplicableAuthoringFlags = (
+  fields: AgentAddFields,
+  selected: keyof typeof TRANSPORT_AUTHORING_FIELDS,
+): void => {
+  const allowed = TRANSPORT_AUTHORING_FIELDS[selected];
+  for (const field of Object.keys(AUTHORING_FLAG_BY_FIELD) as (keyof AgentAddFields)[]) {
+    if (
+      fieldIsProvided(fields[field]) &&
+      !COMMON_AUTHORING_FIELDS.has(field) &&
+      !allowed.has(field)
+    ) {
+      const flag = AUTHORING_FLAG_BY_FIELD[field];
+      throw new AttestCliError('cli_usage', `Option --${flag} is not valid for this transport.`, {
+        path: `--${flag}`,
+        hint: 'Remove the incompatible option or select the transport that owns it.',
+      });
+    }
+  }
+  if (
+    selected === 'stream' &&
+    fields.incrementalOutputMode !== undefined &&
+    fields.incrementalOutputPointer === undefined
+  ) {
     throw new AttestCliError(
-      selected.length === 0 ? 'cli_missing_input' : 'cli_usage',
-      'Select exactly one native agent transport.',
+      'cli_usage',
+      'Option --incremental-output-mode requires --incremental-output-pointer.',
       {
-        path: '--argv-json',
-        hint: 'Pass one of `--argv-json`, `--native-command`, or `--native-http`.',
+        path: '--incremental-output-mode',
+        hint: 'Add the event JSON Pointer to accumulate or remove the mode option.',
       },
     );
   }
+};
+
+/** Normalizes non-interactive or wizard-populated add fields into one v2 resource. */
+const createAgentResource = (fields: AgentAddFields): AgentResource => {
+  const selections = [
+    fields.argvJson === undefined ? undefined : ('native_cli' as const),
+    fields.nativeCommand === undefined ? undefined : ('native_cli' as const),
+    fields.nativeHttp === undefined ? undefined : ('native_http' as const),
+    fields.backgroundCommand === undefined ? undefined : ('background' as const),
+    fields.jsonlCommand === undefined ? undefined : ('jsonl' as const),
+    fields.streamUrl === undefined ? undefined : ('stream' as const),
+  ].filter((value) => value !== undefined);
+  if (selections.length !== 1) {
+    throw new AttestCliError(
+      selections.length === 0 ? 'cli_missing_input' : 'cli_usage',
+      'Select exactly one agent transport.',
+      {
+        path: '--argv-json',
+        hint: 'Pass one of `--argv-json`, `--native-command`, `--native-http`, `--background-command`, `--jsonl-command`, or `--stream-url`.',
+      },
+    );
+  }
+  assertApplicableAuthoringFlags(fields, selections[0]!);
   const timeout = fields.timeout === undefined ? undefined : parseDuration(fields.timeout);
   const name = fields.name?.trim() || fields.agentId;
-  const transport =
-    fields.nativeHttp === undefined
-      ? {
-          kind: 'native_cli' as const,
-          lifecycle: 'per_case' as const,
-          argv:
-            fields.argvJson === undefined
-              ? tokenizeCommand(fields.nativeCommand ?? '')
-              : parseArgvJson(fields.argvJson),
-          ...(fields.env === undefined || fields.env.length === 0
-            ? {}
-            : { env: parseSecretBindings(fields.env, '--env') }),
-        }
-      : {
-          kind: 'http' as const,
-          lifecycle: 'external' as const,
-          response_mode: 'attest_envelope' as const,
-          request: {
-            url: fields.nativeHttp,
-            method: 'POST' as const,
-            ...(fields.headerEnv === undefined || fields.headerEnv.length === 0
-              ? {}
-              : { headers: parseSecretBindings(fields.headerEnv, '--header-env') }),
-          },
-          extraction: { result_pointer: '' },
-        };
+  const processEnvironment =
+    fields.env === undefined || fields.env.length === 0
+      ? {}
+      : { env: parseSecretBindings(fields.env, '--env') };
+  let transport: AgentResource['transport'];
+  if (fields.nativeHttp !== undefined) {
+    transport = {
+      kind: 'http',
+      lifecycle: 'external',
+      response_mode: 'attest_envelope',
+      request: {
+        url: fields.nativeHttp,
+        method: 'POST',
+        ...(fields.headerEnv === undefined || fields.headerEnv.length === 0
+          ? {}
+          : { headers: parseSecretBindings(fields.headerEnv, '--header-env') }),
+      },
+      extraction: { result_pointer: '' },
+    };
+  } else if (fields.backgroundCommand !== undefined) {
+    const readiness = [fields.readinessHttp, fields.readinessTcp, fields.readinessStderr].filter(
+      (value) => value !== undefined,
+    );
+    if (readiness.length !== 1 || fields.invokeUrl === undefined) {
+      throw new AttestCliError(
+        'cli_missing_input',
+        'Background agents require invoke URL and exactly one readiness probe.',
+        {
+          path: '--invoke-url',
+          hint: 'Pass --invoke-url plus one of --readiness-http, --readiness-tcp, or --readiness-stderr.',
+        },
+      );
+    }
+    const readinessDefinition =
+      fields.readinessHttp !== undefined
+        ? { kind: 'http' as const, url: fields.readinessHttp }
+        : fields.readinessTcp !== undefined
+          ? { kind: 'tcp' as const, ...parseTcpReadiness(fields.readinessTcp) }
+          : { kind: 'stderr' as const, pattern: fields.readinessStderr! };
+    transport = {
+      kind: 'background_cli',
+      lifecycle: 'per_run',
+      start_argv: tokenizeCommand(fields.backgroundCommand),
+      ...(fields.cwd === undefined ? {} : { cwd: fields.cwd }),
+      ...processEnvironment,
+      readiness: readinessDefinition,
+      invoke: {
+        url: fields.invokeUrl,
+        method: 'POST',
+        body: '{{request}}',
+        ...(fields.headerEnv === undefined || fields.headerEnv.length === 0
+          ? {}
+          : { headers: parseSecretBindings(fields.headerEnv, '--header-env') }),
+      },
+      extraction: {
+        result_pointer: fields.responsePointer ?? '/output',
+        ...(fields.errorPointer === undefined ? {} : { error_pointer: fields.errorPointer }),
+        ...(fields.tracePointer === undefined ? {} : { trace_pointer: fields.tracePointer }),
+      },
+      ...(fields.shutdownUrl === undefined
+        ? {}
+        : { shutdown: { url: fields.shutdownUrl, method: 'POST' } }),
+      stop_timeout_ms: parseDuration(fields.stopTimeout ?? '5s', '--stop-timeout'),
+    };
+  } else if (fields.jsonlCommand !== undefined) {
+    transport = {
+      kind: 'jsonl_bridge',
+      lifecycle: 'per_run',
+      argv: tokenizeCommand(fields.jsonlCommand),
+      ...(fields.cwd === undefined ? {} : { cwd: fields.cwd }),
+      ...processEnvironment,
+      concurrency: fields.bridgeConcurrency ?? 'serial',
+      cancellation_grace_ms: parseDuration(fields.cancellationGrace ?? '1s', '--cancel-grace'),
+    };
+  } else if (fields.streamUrl !== undefined) {
+    transport = {
+      kind: 'stream',
+      lifecycle: 'external',
+      framing: fields.streamFraming ?? 'sse',
+      request: {
+        url: fields.streamUrl,
+        method: 'POST',
+        body: '{{request}}',
+        ...(fields.headerEnv === undefined || fields.headerEnv.length === 0
+          ? {}
+          : { headers: parseSecretBindings(fields.headerEnv, '--header-env') }),
+      },
+      ...(fields.eventName === undefined ? {} : { event_name: fields.eventName }),
+      terminal_pointer: fields.terminalPointer ?? '/type',
+      terminal_values: parseJsonValues(fields.terminalValues ?? ['"result"'], '--terminal-value'),
+      result_pointer: fields.responsePointer ?? '/output',
+      ...(fields.errorPointer === undefined ? {} : { error_pointer: fields.errorPointer }),
+      ...(fields.tracePointer === undefined ? {} : { trace_pointer: fields.tracePointer }),
+      ...(fields.incrementalOutputPointer === undefined
+        ? {}
+        : {
+            incremental_output_pointer: fields.incrementalOutputPointer,
+            incremental_output_mode: fields.incrementalOutputMode ?? 'text',
+          }),
+    };
+  } else {
+    transport = {
+      kind: 'native_cli' as const,
+      lifecycle: 'per_case' as const,
+      argv:
+        fields.argvJson === undefined
+          ? tokenizeCommand(fields.nativeCommand ?? '')
+          : parseArgvJson(fields.argvJson),
+      ...(fields.cwd === undefined ? {} : { cwd: fields.cwd }),
+      ...processEnvironment,
+    };
+  }
   const parsed = agentResourceSchema.safeParse({
     schema: AGENT_RESOURCE_SCHEMA_VERSION,
     id: fields.agentId,
@@ -536,6 +881,13 @@ const createAgentResource = (fields: AgentAddFields): AgentResource => {
     transport,
     ...(timeout === undefined ? {} : { timeouts: { attempt_ms: timeout } }),
     ...(fields.trace === undefined ? {} : { capabilities: { trace: fields.trace } }),
+    ...(fields.headerEnv === undefined || fields.headerEnv.length === 0
+      ? {}
+      : {
+          redaction: {
+            headers: fields.headerEnv.map((binding) => binding.slice(0, binding.indexOf('='))),
+          },
+        }),
   });
   if (!parsed.success) {
     throw new AttestCliError('cli_usage', 'Agent values do not match the v2 resource schema.', {
