@@ -45,7 +45,13 @@ const createClock = (): (() => string) => {
 /** Builds a contract-shaped immutable run and its opaque already-resolved cases. */
 const createPlan = (
   caseIds: readonly string[],
-  options: { baseline?: boolean; junit?: boolean; concurrency?: number; timeoutMs?: number } = {},
+  options: {
+    baseline?: boolean;
+    junit?: boolean;
+    concurrency?: number;
+    testConcurrency?: number;
+    timeoutMs?: number;
+  } = {},
 ): ResolvedEvalPlan<string> => {
   const selectedCases = caseIds.map((caseId, configuredIndex) => ({
     configured_index: configuredIndex,
@@ -94,6 +100,9 @@ const createPlan = (
     run,
     cases: selectedCases.map((selectedCase) => ({
       ...selectedCase,
+      ...(options.testConcurrency === undefined
+        ? {}
+        : { test_concurrency: options.testConcurrency }),
       payload: selectedCase.case_id,
     })),
   };
@@ -270,6 +279,38 @@ describe('executeResolvedEvalPlan', () => {
     expect(cleanup).toHaveBeenCalledOnce();
   });
 
+  it('enforces the resolved per-test concurrency cap inside the global pool', async () => {
+    const plan = createPlan(['case-zero', 'case-one', 'case-two'], {
+      concurrency: 3,
+      testConcurrency: 1,
+    });
+    const pending = new Map<string, Deferred<ReturnType<typeof completedExecution>>>();
+    const starts: string[] = [];
+    const runner: EvalCaseRunner<string> = {
+      executeCase: async (_runId, resolvedCase) => {
+        starts.push(resolvedCase.case_id);
+        const completion = deferred<ReturnType<typeof completedExecution>>();
+        pending.set(resolvedCase.case_id, completion);
+        return completion.promise;
+      },
+    };
+    const persistence = createPersistence();
+
+    const execution = executeResolvedEvalPlan(plan, runner, persistence.adapter, {
+      now: createClock(),
+    });
+    await vi.waitFor(() => expect(starts).toEqual(['case-zero']));
+    pending.get('case-zero')!.resolve(completedExecution(plan.cases[0]!, [passingMetric()]));
+    await vi.waitFor(() => expect(starts).toEqual(['case-zero', 'case-one']));
+    pending.get('case-one')!.resolve(completedExecution(plan.cases[1]!, [passingMetric()]));
+    await vi.waitFor(() => expect(starts).toEqual(['case-zero', 'case-one', 'case-two']));
+    pending.get('case-two')!.resolve(completedExecution(plan.cases[2]!, [passingMetric()]));
+
+    const result = await execution;
+    expect(result).toMatchObject({ status: 'completed', exit_code: 0 });
+    expect(evalEventStreamSchema.safeParse(result.events).success).toBe(true);
+  });
+
   it('propagates cancellation to active and queued work, drains it, and cleans up once', async () => {
     const plan = createPlan(['case-zero', 'case-one', 'case-two'], { concurrency: 2 });
     const controller = new AbortController();
@@ -305,6 +346,74 @@ describe('executeResolvedEvalPlan', () => {
     expect(result.exit_code).toBe(130);
     expect(result.cases).toHaveLength(3);
     expect(cleanup).toHaveBeenCalledOnce();
+    expect(evalEventStreamSchema.safeParse(result.events).success).toBe(true);
+  });
+
+  it('reports cancellation cleanup failure as infrastructure and retains ownership', async () => {
+    const plan = createPlan(['case-zero']);
+    const controller = new AbortController();
+    const executeCase = vi.fn<EvalCaseRunner<string>['executeCase']>(
+      async (_runId, resolvedCase, signal) => {
+        if (!signal.aborted) {
+          await new Promise<void>((resolve) =>
+            signal.addEventListener('abort', () => resolve(), { once: true }),
+          );
+        }
+        return failedExecution(resolvedCase, 'cancelled');
+      },
+    );
+    const runner: EvalCaseRunner<string> = {
+      executeCase,
+      cleanup: () => Promise.reject(new Error('child still live')),
+    };
+    const persistence = createPersistence();
+    const execution = executeResolvedEvalPlan(plan, runner, persistence.adapter, {
+      signal: controller.signal,
+      now: createClock(),
+    });
+    await vi.waitFor(() => expect(executeCase).toHaveBeenCalledOnce());
+    controller.abort(new Error('user interrupted'));
+
+    const result = await execution;
+    expect(result).toMatchObject({
+      status: 'failed',
+      exit_code: 4,
+      can_release_cancellation_ownership: false,
+    });
+    expect(persistence.finalizeRun).toHaveBeenCalledWith(RUN_ID, 'failed', result.summary);
+    expect(evalEventStreamSchema.safeParse(result.events).success).toBe(true);
+  });
+
+  it('retries failed cancellation finalization as failed and retains ownership if it persists', async () => {
+    const plan = createPlan(['case-zero']);
+    const controller = new AbortController();
+    const executeCase = vi.fn<EvalCaseRunner<string>['executeCase']>(
+      async (_runId, resolvedCase, signal) => {
+        if (!signal.aborted) {
+          await new Promise<void>((resolve) =>
+            signal.addEventListener('abort', () => resolve(), { once: true }),
+          );
+        }
+        return failedExecution(resolvedCase, 'cancelled');
+      },
+    );
+    const persistence = createPersistence();
+    persistence.finalizeRun.mockRejectedValue(new Error('row remains running'));
+    const execution = executeResolvedEvalPlan(plan, { executeCase }, persistence.adapter, {
+      signal: controller.signal,
+      now: createClock(),
+    });
+    await vi.waitFor(() => expect(executeCase).toHaveBeenCalledOnce());
+    controller.abort(new Error('user interrupted'));
+
+    const result = await execution;
+    expect(result).toMatchObject({
+      status: 'failed',
+      exit_code: 4,
+      can_release_cancellation_ownership: false,
+    });
+    expect(persistence.finalizeRun).toHaveBeenNthCalledWith(1, RUN_ID, 'cancelled', result.summary);
+    expect(persistence.finalizeRun).toHaveBeenNthCalledWith(2, RUN_ID, 'failed', result.summary);
     expect(evalEventStreamSchema.safeParse(result.events).success).toBe(true);
   });
 

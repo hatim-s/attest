@@ -243,13 +243,15 @@ const evalEventStreamSchema = z
     }
 
     const summary = completedEvent.data.summary;
-    if (
-      startedCaseCount !== started.data.total_cases ||
-      completionIndex !== started.data.total_cases ||
-      startedCases.size !== 0 ||
-      summary.total_cases !== started.data.total_cases ||
-      summary.passed_cases + summary.failed_cases + summary.error_cases !== summary.total_cases
-    ) {
+    const summaryCountsMatch =
+      summary.total_cases === started.data.total_cases &&
+      summary.passed_cases + summary.failed_cases + summary.error_cases === summary.total_cases;
+    const caseLifecycleMatches =
+      completedEvent.data.status === 'failed'
+        ? startedCaseCount <= started.data.total_cases && completionIndex === startedCaseCount
+        : startedCaseCount === started.data.total_cases &&
+          completionIndex === started.data.total_cases;
+    if (startedCases.size !== 0 || !summaryCountsMatch || !caseLifecycleMatches) {
       context.addIssue({
         code: 'custom',
         path: [events.length - 2, 'data', 'summary'],

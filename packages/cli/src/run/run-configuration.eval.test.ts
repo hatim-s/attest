@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { access, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -144,7 +144,6 @@ describe('v2 eval dispatcher integration', () => {
       '--output',
       'json',
     ]);
-
     expect(first).toMatchObject({ exitCode: 0, errors: [] });
     expect(first.output).toHaveLength(1);
     const firstResult = JSON.parse(first.output[0] ?? '{}') as {
@@ -229,6 +228,42 @@ describe('v2 eval dispatcher integration', () => {
 
     expect(await readdir(join(root, '.attest', 'eval-runs'))).toEqual([]);
   }, 15_000);
+
+  it('rejects a missing baseline before agent, run-store, or registry side effects', async () => {
+    const root = await createEvalProject();
+    const markerPath = join(root, 'agent-invoked');
+    await writeFile(
+      join(root, 'agent.mjs'),
+      [
+        "import { writeFileSync } from 'node:fs';",
+        `writeFileSync(${JSON.stringify(markerPath)}, 'invoked');`,
+        "process.stdout.write(JSON.stringify({ protocol: 'attest.agent/v1alpha1', output: 'Paris' }));",
+      ].join('\n'),
+    );
+
+    const result = await invokeCli(root, [
+      'eval',
+      'run',
+      'smoke',
+      '--baseline',
+      '01ARZ3NDEKTSV4RRFFQ69G5FAA',
+      '--output',
+      'json',
+    ]);
+    expect(result.exitCode).toBe(1);
+    expect(JSON.parse(result.output[0] ?? '{}')).toMatchObject({
+      ok: false,
+      command: 'eval.run',
+      error: { code: 'resource_not_found' },
+    });
+    await expect(access(markerPath)).rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(access(join(root, '.attest', 'runs.db'))).rejects.toMatchObject({
+      code: 'ENOENT',
+    });
+    await expect(access(join(root, '.attest', 'eval-runs'))).rejects.toMatchObject({
+      code: 'ENOENT',
+    });
+  });
 
   it('cancels an active run through the registry and removes process signal listeners', async () => {
     const root = await createEvalProject();

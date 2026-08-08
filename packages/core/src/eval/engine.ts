@@ -76,6 +76,12 @@ const validateResolvedPlan = (
     ) {
       return `Resolved case at configured index ${String(index)} drifted from the immutable eval snapshot.`;
     }
+    if (
+      resolvedCase.test_concurrency !== undefined &&
+      (!Number.isInteger(resolvedCase.test_concurrency) || resolvedCase.test_concurrency < 1)
+    ) {
+      return `Resolved test concurrency at configured index ${String(index)} must be a positive integer.`;
+    }
   }
   return undefined;
 };
@@ -239,6 +245,7 @@ const preOrchestrationFailure = async <Payload, BaselineDiff>(
     cases: [],
     events: [event],
     final_result: finalResult,
+    can_release_cancellation_ownership: true,
   };
 };
 
@@ -299,6 +306,7 @@ const executeCases = async <Payload>(
 ): Promise<{ records: EvalCaseRecord<Payload>[]; infrastructureErrors: string[] }> => {
   const concurrency = run.effective_command.resolved.concurrency;
   const pending = new Map<number, Promise<SettledCase<Payload>>>();
+  const activeByTest = new Map<string, number>();
   const records: EvalCaseRecord<Payload>[] = [];
   const infrastructureErrors: string[] = [];
   let nextIndex = 0;
@@ -306,6 +314,11 @@ const executeCases = async <Payload>(
   const schedule = async (): Promise<void> => {
     while (pending.size < concurrency && nextIndex < cases.length) {
       const resolvedCase = cases[nextIndex] as ResolvedEvalCase<Payload>;
+      const testConcurrency = resolvedCase.test_concurrency ?? concurrency;
+      const activeForTest = activeByTest.get(resolvedCase.test_id) ?? 0;
+      // Case-start order is a frozen event-contract guarantee, so a saturated test pauses
+      // later configured cases until one of its own active cases has drained.
+      if (activeForTest >= testConcurrency) break;
       nextIndex += 1;
       await emit({
         event: 'case_started',
@@ -327,6 +340,7 @@ const executeCases = async <Payload>(
         }),
       );
       pending.set(resolvedCase.configured_index, task);
+      activeByTest.set(resolvedCase.test_id, activeForTest + 1);
     }
   };
 
@@ -334,6 +348,9 @@ const executeCases = async <Payload>(
   while (pending.size > 0) {
     const settled = await Promise.race(pending.values());
     pending.delete(settled.resolvedCase.configured_index);
+    const activeForTest = activeByTest.get(settled.resolvedCase.test_id) ?? 1;
+    if (activeForTest <= 1) activeByTest.delete(settled.resolvedCase.test_id);
+    else activeByTest.set(settled.resolvedCase.test_id, activeForTest - 1);
     const completionIndex = records.length;
     let record: EvalCaseRecord<Payload>;
 
@@ -477,6 +494,7 @@ const executeResolvedEvalPlan = async <Payload, BaselineDiff = unknown>(
   const infrastructureErrors: string[] = [];
   let baselineDiff: BaselineDiff | undefined;
   let junit: ReturnType<typeof createEvalJUnitPayload> | undefined;
+  let cleanupConfirmed = true;
 
   await collector.emit({
     event: 'run_started',
@@ -508,6 +526,7 @@ const executeResolvedEvalPlan = async <Payload, BaselineDiff = unknown>(
     try {
       await runner.cleanup?.(run.run_id);
     } catch (error: unknown) {
+      cleanupConfirmed = false;
       infrastructureErrors.push(safeErrorMessage(error, 'Eval runner cleanup failed.'));
     }
   }
@@ -550,13 +569,26 @@ const executeResolvedEvalPlan = async <Payload, BaselineDiff = unknown>(
   if (collector.sinkFailure() !== undefined) {
     infrastructureErrors.push(collector.sinkFailure()!.message);
   }
+  // A cancellation is not successful while its runner may still own live child processes.
+  if (!cleanupConfirmed) status = 'failed';
   if (status === 'completed' && infrastructureErrors.length > 0) status = 'failed';
 
+  let finalizationConfirmed = false;
   try {
     await persistence.finalizeRun(run.run_id, status, summary);
+    finalizationConfirmed = true;
   } catch (error: unknown) {
     infrastructureErrors.push(safeErrorMessage(error, 'Eval run finalization failed.'));
-    if (status !== 'cancelled') status = 'failed';
+    status = 'failed';
+    // Reconcile a transient or status-specific failure before releasing the live-run registry.
+    try {
+      await persistence.finalizeRun(run.run_id, 'failed', summary);
+      finalizationConfirmed = true;
+    } catch (retryError: unknown) {
+      infrastructureErrors.push(
+        safeErrorMessage(retryError, 'Eval run failure reconciliation failed.'),
+      );
+    }
   }
 
   const finalResult =
@@ -583,6 +615,7 @@ const executeResolvedEvalPlan = async <Payload, BaselineDiff = unknown>(
     cases: records,
     events: collector.events,
     final_result: finalResult,
+    can_release_cancellation_ownership: cleanupConfirmed && finalizationConfirmed,
     ...(baselineDiff === undefined ? {} : { baseline_diff: baselineDiff }),
     ...(junit === undefined ? {} : { junit }),
   };

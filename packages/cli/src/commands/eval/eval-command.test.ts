@@ -485,6 +485,29 @@ describe('eval output and sequencing', () => {
     expect(stream.at(-1)).toMatchObject({ event: 'result', data: { exit_code: 0 } });
   });
 
+  it('finishes a live JSONL prefix contiguously when its event source throws', async () => {
+    const run = async function* (): AsyncGenerator<EvalEvent> {
+      yield completedEvents()[0]!;
+      await Promise.resolve();
+      throw new Error('producer failed');
+    };
+    const harness = createHarness({ ...defaultServices(), run: () => Promise.resolve(run()) });
+
+    await parse(harness, ['eval', 'run', 'refund', '--output', 'jsonl']);
+
+    const stream = evalEventStreamSchema.parse(
+      harness.output.map((line): unknown => JSON.parse(line) as unknown),
+    );
+    expect(stream.map(({ sequence }) => sequence)).toEqual([0, 1, 2]);
+    expect(stream.map(({ event }) => event)).toEqual(['run_started', 'run_completed', 'result']);
+    expect(stream.at(-2)).toMatchObject({
+      event: 'run_completed',
+      data: { status: 'failed', summary: { total_cases: 2, error_cases: 2 } },
+    });
+    expect(stream.at(-1)).toMatchObject({ event: 'result', data: { exit_code: 4 } });
+    expect(harness.exitCode()).toBe(4);
+  });
+
   it('turns a sequence violation into one stable machine failure', async () => {
     const invalid = completedEvents();
     invalid[1] = { ...invalid[1]!, sequence: 7 };

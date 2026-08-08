@@ -190,6 +190,88 @@ const emitEvalFailure = (
   context.setExitCode(failure.exitCode);
 };
 
+/** Completes an already-live JSONL prefix without resetting its sequence or omitting run completion. */
+const recoverFailedJsonlStream = (
+  events: readonly EvalEvent[],
+  error: unknown,
+): EvalEventStream => {
+  const alreadyComplete = evalEventStreamSchema.safeParse(events);
+  if (alreadyComplete.success) return alreadyComplete.data;
+  const started = events[0];
+  if (started?.event !== 'run_started') throw error;
+
+  // Terminal events are buffered by the collector, so they can be replaced safely after failure.
+  const lifecycle = events.filter(
+    (event) => event.event !== 'run_completed' && event.event !== 'result',
+  );
+  const openCases = new Map<string, Extract<EvalEvent, { event: 'case_started' }>['data']>();
+  let completedCases = 0;
+  let passedCases = 0;
+  let failedCases = 0;
+  let errorCases = 0;
+  for (const event of lifecycle) {
+    if (event.event === 'case_started') {
+      openCases.set(`${event.data.test_id}\u0000${event.data.case_id}`, event.data);
+    } else if (event.event === 'case_completed') {
+      openCases.delete(`${event.data.test_id}\u0000${event.data.case_id}`);
+      completedCases += 1;
+      if (event.data.verdict === 'pass') passedCases += 1;
+      else if (event.data.verdict === 'fail') failedCases += 1;
+      else errorCases += 1;
+    }
+  }
+
+  const recovered: EvalEvent[] = [...lifecycle];
+  for (const openCase of openCases.values()) {
+    recovered.push({
+      schema: CLI_EVENT_SCHEMA_VERSION,
+      sequence: recovered.length,
+      time: new Date().toISOString(),
+      event: 'case_completed',
+      data: {
+        ...openCase,
+        completion_index: completedCases,
+        outcome: 'invocation_error',
+        verdict: 'error',
+      },
+    });
+    completedCases += 1;
+    errorCases += 1;
+  }
+  // Cases never started by the failed producer are represented in the terminal error total.
+  errorCases += Math.max(0, started.data.total_cases - completedCases);
+  const summary = {
+    total_cases: started.data.total_cases,
+    passed_cases: passedCases,
+    failed_cases: failedCases,
+    error_cases: errorCases,
+    metric_error_count: 0,
+  };
+  recovered.push({
+    schema: CLI_EVENT_SCHEMA_VERSION,
+    sequence: recovered.length,
+    time: new Date().toISOString(),
+    event: 'run_completed',
+    data: { run_id: started.data.run_id, status: 'failed', summary },
+  });
+  const failure = serializeCliError(
+    new AttestCliError('run_failed', 'Eval event source failed after orchestration started.', {
+      cause: error,
+    }),
+  );
+  recovered.push({
+    schema: CLI_EVENT_SCHEMA_VERSION,
+    sequence: recovered.length,
+    time: new Date().toISOString(),
+    event: 'result',
+    data: evalFinalResultDataSchema.parse({
+      exit_code: failure.exitCode,
+      result: createCliFailureResult('eval.run', failure.error),
+    }),
+  });
+  return evalEventStreamSchema.parse(recovered);
+};
+
 /** Collects and validates a complete event stream while optionally rendering human progress live. */
 const collectEvalEvents = async (
   source: EvalEventSource,
@@ -198,20 +280,40 @@ const collectEvalEvents = async (
   streamJsonl = false,
 ): Promise<EvalEventStream> => {
   const events: EvalEvent[] = [];
-  for await (const value of source) {
-    const event = evalEventSchema.parse(value);
-    if (event.sequence !== events.length) {
-      throw new AttestCliError('run_failed', 'Eval event sequence is not deterministic.', {
-        path: `/events/${events.length}/sequence`,
-        hint: `Expected sequence ${events.length}; the dispatcher must emit contiguous zero-based events.`,
-      });
+  let emittedJsonlEvents = 0;
+  try {
+    for await (const value of source) {
+      const event = evalEventSchema.parse(value);
+      if (event.sequence !== events.length) {
+        throw new AttestCliError('run_failed', 'Eval event sequence is not deterministic.', {
+          path: `/events/${events.length}/sequence`,
+          hint: `Expected sequence ${events.length}; the dispatcher must emit contiguous zero-based events.`,
+        });
+      }
+      events.push(event);
+      if (streamJsonl && event.event !== 'run_completed') {
+        if (event.event === 'result') {
+          const completed = events.at(-2);
+          if (completed?.event === 'run_completed') {
+            io.output(serializeEvalEvent(completed));
+            emittedJsonlEvents += 1;
+          }
+        }
+        io.output(serializeEvalEvent(event));
+        emittedJsonlEvents += 1;
+      }
+      if (watch && event.event !== 'result') {
+        const rendered = renderHumanProgress(event);
+        if (rendered !== undefined) io.output(rendered);
+      }
     }
-    events.push(event);
-    if (streamJsonl) io.output(serializeEvalEvent(event));
-    if (watch && event.event !== 'result') {
-      const rendered = renderHumanProgress(event);
-      if (rendered !== undefined) io.output(rendered);
+  } catch (error: unknown) {
+    if (!streamJsonl || events.length === 0) throw error;
+    const recovered = recoverFailedJsonlStream(events, error);
+    for (const event of recovered.slice(emittedJsonlEvents)) {
+      io.output(serializeEvalEvent(event));
     }
+    return recovered;
   }
   const parsed = evalEventStreamSchema.safeParse(events);
   if (!parsed.success) {

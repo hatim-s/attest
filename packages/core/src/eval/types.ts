@@ -23,6 +23,7 @@ type ImmutableEvalRun = DeepReadonly<EvalRun>;
 
 /** Carries one resolver-owned case payload without coupling orchestration to project discovery. */
 type ResolvedEvalCase<Payload = unknown> = EvalRunSelectedCase & {
+  test_concurrency?: number;
   payload: Payload;
 };
 
@@ -170,6 +171,8 @@ type EvalExecutionResult<Payload = unknown, BaselineDiff = JsonValue> = {
   cases: readonly EvalCaseRecord<Payload>[];
   events: readonly EvalEvent[];
   final_result: EvalFinalResultData;
+  /** Allows the CLI to remove its live-run registry only after cleanup and durability are confirmed. */
+  can_release_cancellation_ownership: boolean;
   baseline_diff?: BaselineDiff;
   junit?: EvalJUnitPayload;
 };

@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { mkdir } from 'node:fs/promises';
+import { access, mkdir } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 
@@ -23,6 +23,7 @@ import {
   executeCases,
   openReadonlyRunStore,
   openStore,
+  StoreError,
   toStoredCaseExecution,
   toStoredMetricEvaluation,
   type CaseRecord,
@@ -211,6 +212,35 @@ const readGitMetadata = async (projectRoot: string): Promise<EvalRun['git'] | un
   };
 };
 
+/** Confirms a requested baseline from a read-only store before any candidate side effects occur. */
+const preflightEvalBaseline = async (storePath: string, baselineRunId?: string): Promise<void> => {
+  if (baselineRunId === undefined) return;
+  try {
+    await access(storePath);
+  } catch (error: unknown) {
+    throw new AttestCliError('resource_not_found', `Eval run ${baselineRunId} was not found.`, {
+      path: baselineRunId,
+      cause: error,
+    });
+  }
+
+  let store: Awaited<ReturnType<typeof openReadonlyRunStore>> | undefined;
+  try {
+    store = await openReadonlyRunStore(storePath);
+    await store.getRun(baselineRunId);
+  } catch (error: unknown) {
+    if (error instanceof StoreError && error.code === 'RUN_NOT_FOUND') {
+      throw new AttestCliError('resource_not_found', `Eval run ${baselineRunId} was not found.`, {
+        path: baselineRunId,
+        cause: error,
+      });
+    }
+    throw error;
+  } finally {
+    await store?.close().catch(() => undefined);
+  }
+};
+
 /** Runs one immutable v2 snapshot through resolver, engine, adapters, store, artifacts, and events. */
 const runConfiguration = async (
   request: EvalRunRequest,
@@ -232,8 +262,10 @@ const runConfiguration = async (
     effective_command: resolved.effectiveCommand,
     ...(git === undefined ? {} : { git }),
   });
+  const storePath = join(project.root, '.attest', 'runs.db');
+  await preflightEvalBaseline(storePath, resolved.effectiveCommand.resolved.baseline_run_id);
   await mkdir(join(project.root, '.attest'), { recursive: true });
-  const store = await openStore(join(project.root, '.attest', 'runs.db'));
+  const store = await openStore(storePath);
   let registry: Awaited<ReturnType<typeof registerEvalRun>>;
   try {
     registry = await registerEvalRun(project.root, run.run_id);
@@ -250,23 +282,33 @@ const runConfiguration = async (
       test_id: payload.test_id,
       case_id: payload.case_id,
       source: payload.source,
+      test_concurrency: payload.concurrency,
       payload,
     })),
   };
   const runner = createEvalCaseRunner(project.root, store.cache);
   void (async () => {
+    let canReleaseCancellationOwnership = false;
     try {
-      await executeResolvedEvalPlan(plan, runner, createEvalPersistenceAdapter(store), {
-        artifacts: createEvalArtifactWriter(options.workingDirectory),
-        baseline: createEvalBaselineAdapter(store),
-        onEvent: (event) => queue.push(event),
-        signal: options.signal,
-      });
+      const result = await executeResolvedEvalPlan(
+        plan,
+        runner,
+        createEvalPersistenceAdapter(store),
+        {
+          artifacts: createEvalArtifactWriter(options.workingDirectory),
+          baseline: createEvalBaselineAdapter(store),
+          onEvent: (event) => queue.push(event),
+          signal: options.signal,
+        },
+      );
+      canReleaseCancellationOwnership = result.can_release_cancellation_ownership;
     } catch (error: unknown) {
       queue.fail(error);
     } finally {
-      // Do not let the consumer return while another process can still address this completed run.
-      await unregisterEvalRun(registry).catch(() => undefined);
+      // Preserve cancellation ownership when cleanup or durable finalization remains uncertain.
+      if (canReleaseCancellationOwnership) {
+        await unregisterEvalRun(registry).catch(() => undefined);
+      }
       await store.close().catch(() => undefined);
       queue.close();
     }
