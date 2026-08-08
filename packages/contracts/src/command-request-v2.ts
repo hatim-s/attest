@@ -15,6 +15,11 @@ const commonMutationFields = {
   if_project_hash: sha256Schema.optional(),
 };
 
+/** Accepts an optional id at the authoring boundary so every input route can generate one. */
+const authoringTestCaseSchema = testCaseSchema
+  .omit({ id: true })
+  .extend({ id: resourceIdSchema.optional() });
+
 /** Encodes deterministic case-import mapping and conflict policy shared by two commands. */
 const caseImportOptionsSchema = z
   .strictObject({
@@ -106,7 +111,7 @@ const testCaseAddRequestSchema = z.strictObject({
   ...commonMutationFields,
   command: z.literal('test.case.add'),
   test_id: resourceIdSchema,
-  case: testCaseSchema,
+  case: authoringTestCaseSchema,
 });
 
 const testCaseImportRequestSchema = z.strictObject({
@@ -117,9 +122,31 @@ const testCaseImportRequestSchema = z.strictObject({
   import: caseImportOptionsSchema,
 });
 
+const testCaseRenameRequestSchema = z.strictObject({
+  ...commonMutationFields,
+  command: z.literal('test.case.rename'),
+  test_id: resourceIdSchema,
+  case_id: resourceIdSchema,
+  new_id: resourceIdSchema,
+});
+
+const testCaseRemoveRequestSchema = z.strictObject({
+  ...commonMutationFields,
+  command: z.literal('test.case.remove'),
+  test_id: resourceIdSchema,
+  case_id: resourceIdSchema,
+});
+
 const testDatasetAddRequestSchema = z.strictObject({
   ...commonMutationFields,
   command: z.literal('test.dataset.add'),
+  test_id: resourceIdSchema,
+  dataset: datasetResourceSchema,
+});
+
+const testDatasetCreateRequestSchema = z.strictObject({
+  ...commonMutationFields,
+  command: z.literal('test.dataset.create'),
   test_id: resourceIdSchema,
   dataset: datasetResourceSchema,
 });
@@ -146,6 +173,19 @@ const testDatasetDetachRequestSchema = z.strictObject({
   ...commonMutationFields,
   command: z.literal('test.dataset.detach'),
   test_id: resourceIdSchema,
+  dataset_id: resourceIdSchema,
+});
+
+const testDatasetRenameRequestSchema = z.strictObject({
+  ...commonMutationFields,
+  command: z.literal('test.dataset.rename'),
+  dataset_id: resourceIdSchema,
+  new_id: resourceIdSchema,
+});
+
+const testDatasetRemoveRequestSchema = z.strictObject({
+  ...commonMutationFields,
+  command: z.literal('test.dataset.remove'),
   dataset_id: resourceIdSchema,
 });
 
@@ -217,10 +257,15 @@ const commandRequestSchema = z.discriminatedUnion('command', [
   testAddRequestSchema,
   testCaseAddRequestSchema,
   testCaseImportRequestSchema,
+  testCaseRenameRequestSchema,
+  testCaseRemoveRequestSchema,
   testDatasetAddRequestSchema,
+  testDatasetCreateRequestSchema,
   testDatasetImportRequestSchema,
   testDatasetAttachRequestSchema,
   testDatasetDetachRequestSchema,
+  testDatasetRenameRequestSchema,
+  testDatasetRemoveRequestSchema,
   testMetricAttachRequestSchema,
   testMetricDetachRequestSchema,
   testRenameRequestSchema,
