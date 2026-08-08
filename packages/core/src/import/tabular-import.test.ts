@@ -4,7 +4,8 @@ import type { DatasetImportMapping, TestCase } from '@attest/contracts';
 import { describe, expect, it } from 'vitest';
 
 import { createContentCaseId, createKeyedCaseId } from './canonical-import.js';
-import { TabularImportError } from './import-types.js';
+import { TabularImportError, type ImportDiagnostic } from './import-types.js';
+import { collectBoundedImportSource } from './parse-import-source.js';
 import { importTabularCases } from './tabular-import.js';
 
 const fixture = (name: string): Uint8Array =>
@@ -21,9 +22,7 @@ const mappings = (format: 'csv' | 'json' | 'jsonl'): DatasetImportMapping[] => {
   ];
 };
 
-const diagnosticsFrom = (
-  callback: () => unknown,
-): readonly { code: string; line?: number; row?: number }[] => {
+const diagnosticsFrom = (callback: () => unknown): readonly ImportDiagnostic[] => {
   try {
     callback();
   } catch (error: unknown) {
@@ -73,6 +72,22 @@ describe('tabular import golden formats', () => {
 });
 
 describe('tabular import validation and identity', () => {
+  it('stops bounded stream collection before consuming bytes beyond the hard cap', async () => {
+    let consumedPastLimit = false;
+    const chunks = async function* sourceChunks(): AsyncGenerator<Uint8Array> {
+      await Promise.resolve();
+      yield new Uint8Array([1, 2]);
+      yield new Uint8Array([3, 4]);
+      consumedPastLimit = true;
+      yield new Uint8Array([5]);
+    };
+
+    await expect(collectBoundedImportSource(chunks(), 3)).rejects.toMatchObject({
+      diagnostics: [{ code: 'import_size_limit' }],
+    });
+    expect(consumedPastLimit).toBe(false);
+  });
+
   it('aggregates malformed JSONL and normalized-row diagnostics in physical order', () => {
     const diagnostics = diagnosticsFrom(() =>
       importTabularCases({
@@ -183,6 +198,42 @@ describe('tabular import validation and identity', () => {
       ).map(({ code }) => code),
     ).toEqual(['duplicate_csv_header', 'csv_column_count']);
   });
+
+  it('rejects quotes inside unquoted CSV fields and caps JSONL before retaining excess rows', () => {
+    expect(
+      diagnosticsFrom(() =>
+        importTabularCases({
+          format: 'csv',
+          mappings: [{ destination: 'input', source: 'prompt' }],
+          source: 'prompt\nabc"def\n',
+        }),
+      ),
+    ).toMatchObject([{ code: 'malformed_csv', line: 2 }]);
+    expect(
+      diagnosticsFrom(() =>
+        importTabularCases({
+          format: 'jsonl',
+          limits: { maxRows: 2 },
+          source: '{"input":1}\n{"input":2}\n{"input":3}\n{"input":}\n',
+        }),
+      ),
+    ).toMatchObject([{ code: 'import_row_limit' }]);
+  });
+
+  it('reports authored mapping provenance without exposing source record values', () => {
+    const diagnostics = diagnosticsFrom(() =>
+      importTabularCases({
+        format: 'csv',
+        mappings: [{ destination: 'tags', source: 'parameters' }],
+        source: 'parameters,secret\nnot-an-array,private-prompt\n',
+      }),
+    );
+    expect(diagnostics).toContainEqual(
+      expect.objectContaining({ destination_path: '/tags', row: 2, source_field: 'parameters' }),
+    );
+    expect(JSON.stringify(diagnostics)).not.toContain('private-prompt');
+    expect(diagnostics.every((entry) => !Object.hasOwn(entry, 'value'))).toBe(true);
+  });
 });
 
 describe('tabular import reconciliation policies', () => {
@@ -218,6 +269,57 @@ describe('tabular import reconciliation policies', () => {
       { id: 'keep-first', input: 'new' },
       { id: 'absent-source', input: 'preserved' },
     ]);
+  });
+
+  it('records within-import dedupe skips and reports the actual matched identity', () => {
+    const deduped = importTabularCases({
+      dedupe: 'content',
+      format: 'jsonl',
+      source: '{"id":"first","input":"same"}\n{"id":"second","input":"same"}\n',
+    });
+    expect(deduped.decisions).toContainEqual({
+      action: 'skip',
+      case_id: 'first',
+      line: 2,
+      matched_by: 'content',
+    });
+
+    const updated = importTabularCases({
+      existingCases: [{ id: 'same', input: 'old' }],
+      format: 'json',
+      keySource: '/external',
+      mappings: [
+        { destination: 'id', source: '/id' },
+        { destination: 'input', source: '/input' },
+      ],
+      onConflict: 'update',
+      source: '[{"id":"same","external":"unrelated","input":"new"}]',
+    });
+    expect(updated.decisions).toContainEqual({
+      action: 'update',
+      case_id: 'same',
+      matched_by: 'id',
+      row: 1,
+    });
+  });
+
+  it('applies collision contexts only when imported tags satisfy the target attachment filter', () => {
+    const collisionCases = [{ id: 'collision-id', input: 'direct' }];
+    const allowed = importTabularCases({
+      collisionContexts: [{ cases: collisionCases, requiredTags: ['billing'] }],
+      format: 'json',
+      source: '[{"id":"collision-id","input":"dataset","tags":["support"]}]',
+    });
+    expect(allowed.counts.inserted).toBe(1);
+    expect(
+      diagnosticsFrom(() =>
+        importTabularCases({
+          collisionContexts: [{ cases: collisionCases, requiredTags: ['billing'] }],
+          format: 'json',
+          source: '[{"id":"collision-id","input":"dataset","tags":["billing"]}]',
+        }),
+      ),
+    ).toMatchObject([{ code: 'resolved_case_collision' }]);
   });
 
   it('uses an explicit source key for stable upserts and never deletes absent rows', () => {

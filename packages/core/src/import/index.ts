@@ -4,10 +4,15 @@ export {
   fingerprintCaseContent,
 } from './canonical-import.js';
 export { createImportPreview, importTabularCases } from './tabular-import.js';
-export { DEFAULT_IMPORT_LIMITS } from './parse-import-source.js';
+export {
+  collectBoundedImportSource,
+  DEFAULT_IMPORT_LIMITS,
+  discoverCsvHeaders,
+} from './parse-import-source.js';
 export {
   TabularImportError,
   type ImportConflictPolicy,
+  type ImportCollisionContext,
   type ImportCounts,
   type ImportDecision,
   type ImportDedupePolicy,

@@ -28,6 +28,7 @@ type NormalizedImportRow = {
   contentFingerprint: string;
   explicitId: boolean;
   generatedFromContent: boolean;
+  identitySource: 'content' | 'id' | 'key';
   location: ImportLocation;
   sourceKeyFingerprint?: string;
 };
@@ -63,6 +64,12 @@ const diagnostic = (
   message,
   source_field: sourceField,
   ...location,
+});
+
+/** Copies only public physical coordinates so authored row values can never leak. */
+const importLocation = (location: ImportLocation): ImportLocation => ({
+  ...(location.line === undefined ? {} : { line: location.line }),
+  ...(location.row === undefined ? {} : { row: location.row }),
 });
 
 const sortDiagnostics = (diagnostics: readonly ImportDiagnostic[]): ImportDiagnostic[] =>
@@ -181,7 +188,7 @@ const parseStructuredCsvFields = (
           'Use an exact CSV header name.',
           source,
           '',
-          record,
+          importLocation(record),
         ),
       );
       continue;
@@ -196,7 +203,7 @@ const parseStructuredCsvFields = (
           'Repair the cell or remove this --parse-json option.',
           source,
           '',
-          record,
+          importLocation(record),
         ),
       );
     }
@@ -260,7 +267,7 @@ const normalizeRecord = (
               : 'Use an RFC 6901 pointer that resolves in every record.',
             mapping.source,
             `/${splitDestination(mapping.destination).map(escapePointerSegment).join('/')}`,
-            sourceRecord,
+            importLocation(sourceRecord),
           ),
         );
       } else {
@@ -280,7 +287,7 @@ const normalizeRecord = (
           'Choose a key present in every imported record.',
           request.keySource,
           '/id',
-          sourceRecord,
+          importLocation(sourceRecord),
         ),
       );
     } else {
@@ -292,18 +299,32 @@ const normalizeRecord = (
   const placeholder = { ...candidate, id: explicitId ? candidate.id : 'case-pending' };
   const parsed = testCaseSchema.safeParse(placeholder);
   if (!parsed.success) {
+    const destinationSources = mappings.map((mapping) => {
+      const segments = splitDestination(mapping.destination);
+      const normalized = segments[0] === 'metrics' ? ['metric_overrides'] : segments;
+      return {
+        destination: `/${normalized.map(escapePointerSegment).join('/')}`,
+        source: mapping.source,
+      };
+    });
     diagnostics.push(
       ...parsed.error.issues.flatMap((issue) =>
-        destinationPathsForIssue(issue).map((destinationPath) =>
-          diagnostic(
+        destinationPathsForIssue(issue).map((destinationPath) => {
+          const authoredSource = destinationSources
+            .filter(
+              ({ destination }) =>
+                destinationPath === destination || destinationPath.startsWith(`${destination}/`),
+            )
+            .sort((left, right) => right.destination.length - left.destination.length)[0]?.source;
+          return diagnostic(
             issue.code,
             issue.message,
             `Repair this field to match ${CASE_SCHEMA_VERSION}.`,
-            destinationPath === '' ? '<record>' : destinationPath,
+            authoredSource ?? (destinationPath === '' ? '<record>' : destinationPath),
             destinationPath,
-            sourceRecord,
-          ),
-        ),
+            importLocation(sourceRecord),
+          );
+        }),
       ),
     );
   }
@@ -324,6 +345,7 @@ const normalizeRecord = (
       contentFingerprint: fingerprintCaseContent(testCase),
       explicitId,
       generatedFromContent,
+      identitySource: explicitId ? 'id' : sourceKey === undefined ? 'content' : 'key',
       location: {
         ...(sourceRecord.line === undefined ? {} : { line: sourceRecord.line }),
         ...(sourceRecord.row === undefined ? {} : { row: sourceRecord.row }),
@@ -338,8 +360,14 @@ const normalizeRecord = (
 const dedupeRows = (
   rows: readonly NormalizedImportRow[],
   request: TabularImportRequest,
-): { diagnostics: ImportDiagnostic[]; rows: NormalizedImportRow[]; skipped: number } => {
+): {
+  decisions: ImportDecision[];
+  diagnostics: ImportDiagnostic[];
+  rows: NormalizedImportRow[];
+  skipped: number;
+} => {
   const diagnostics: ImportDiagnostic[] = [];
+  const decisions: ImportDecision[] = [];
   if (request.dedupe === 'key' && request.keySource === undefined) {
     diagnostics.push(
       diagnostic(
@@ -352,9 +380,9 @@ const dedupeRows = (
     );
   }
   const seen = {
-    content: new Map<string, number>(),
-    id: new Map<string, number>(),
-    key: new Map<string, number>(),
+    content: new Map<string, { index: number; row: NormalizedImportRow }>(),
+    id: new Map<string, { index: number; row: NormalizedImportRow }>(),
+    key: new Map<string, { index: number; row: NormalizedImportRow }>(),
   };
   const kept: NormalizedImportRow[] = [];
   let skipped = 0;
@@ -365,19 +393,26 @@ const dedupeRows = (
       key:
         row.sourceKeyFingerprint === undefined ? undefined : seen.key.get(row.sourceKeyFingerprint),
     };
-    if (request.dedupe !== undefined && duplicates[request.dedupe] !== undefined) {
+    const selectedDuplicate = request.dedupe === undefined ? undefined : duplicates[request.dedupe];
+    if (request.dedupe !== undefined && selectedDuplicate !== undefined) {
       skipped += 1;
+      decisions.push({
+        action: 'skip',
+        case_id: selectedDuplicate.row.case.id,
+        matched_by: request.dedupe,
+        ...row.location,
+      });
       return;
     }
     for (const [basis, prior] of Object.entries(duplicates) as [
       keyof typeof duplicates,
-      number | undefined,
+      { index: number; row: NormalizedImportRow } | undefined,
     ][]) {
       if (prior !== undefined) {
         diagnostics.push(
           diagnostic(
             `duplicate_${basis}`,
-            `Imported record duplicates ${basis} from record ${prior + 1}.`,
+            `Imported record duplicates ${basis} from record ${prior.index + 1}.`,
             `Pass --dedupe ${basis} to keep the first record, or repair the duplicate.`,
             basis === 'key' ? (request.keySource ?? '<key>') : basis,
             basis === 'id' ? '/id' : '',
@@ -386,12 +421,14 @@ const dedupeRows = (
         );
       }
     }
-    seen.content.set(row.contentFingerprint, index);
-    seen.id.set(row.case.id, index);
-    if (row.sourceKeyFingerprint !== undefined) seen.key.set(row.sourceKeyFingerprint, index);
+    seen.content.set(row.contentFingerprint, { index, row });
+    seen.id.set(row.case.id, { index, row });
+    if (row.sourceKeyFingerprint !== undefined) {
+      seen.key.set(row.sourceKeyFingerprint, { index, row });
+    }
     kept.push(row);
   });
-  return { diagnostics, rows: kept, skipped };
+  return { decisions, diagnostics, rows: kept, skipped };
 };
 
 const redactValue = (value: unknown): unknown => {
@@ -416,13 +453,19 @@ const reconcileRows = (
   rows: readonly NormalizedImportRow[],
   request: TabularImportRequest,
   dedupeSkipped: number,
+  dedupeDecisions: readonly ImportDecision[],
 ): Omit<TabularImportResult, 'format' | 'importedCases' | 'preview' | 'sourceHash'> => {
   const sync = request.sync ?? 'append';
   const conflict = request.onConflict ?? (sync === 'upsert' ? 'update' : 'error');
   const cases: TestCase[] = structuredClone([...(request.existingCases ?? [])]);
-  const collisionIds = new Set((request.collisionCases ?? []).map(({ id }) => id));
+  const collisionContexts = [
+    ...((request.collisionCases ?? []).length === 0
+      ? []
+      : [{ cases: request.collisionCases ?? [] }]),
+    ...(request.collisionContexts ?? []),
+  ];
   const diagnostics: ImportDiagnostic[] = [];
-  const decisions: ImportDecision[] = [];
+  const decisions: ImportDecision[] = [...dedupeDecisions];
   let inserted = 0;
   let skipped = dedupeSkipped;
   let updated = 0;
@@ -445,10 +488,15 @@ const reconcileRows = (
   }
 
   for (const row of rows) {
-    if (collisionIds.has(row.case.id)) {
+    const collides = collisionContexts.some(
+      ({ cases: collisionCases, requiredTags }) =>
+        (requiredTags ?? []).every((tag) => (row.case.tags ?? []).includes(tag)) &&
+        collisionCases.some(({ id }) => id === row.case.id),
+    );
+    if (collides) {
       if (conflict === 'skip') {
         skipped += 1;
-        decisions.push({ action: 'skip', case_id: row.case.id, matched_by: 'id' });
+        decisions.push({ action: 'skip', case_id: row.case.id, matched_by: 'id', ...row.location });
       } else {
         diagnostics.push(
           diagnostic(
@@ -468,7 +516,7 @@ const reconcileRows = (
       (testCase) => fingerprintCaseContent(testCase) === row.contentFingerprint,
     );
     const matchIndex = idIndex >= 0 ? idIndex : contentIndex;
-    const matchedBy = idIndex >= 0 ? (request.keySource === undefined ? 'id' : 'key') : 'content';
+    const matchedBy = idIndex >= 0 ? (row.identitySource === 'key' ? 'key' : 'id') : 'content';
     if (matchIndex < 0) {
       cases.push(row.case);
       inserted += 1;
@@ -477,12 +525,22 @@ const reconcileRows = (
     }
     if (conflict === 'skip') {
       skipped += 1;
-      decisions.push({ action: 'skip', case_id: cases[matchIndex]!.id, matched_by: matchedBy });
+      decisions.push({
+        action: 'skip',
+        case_id: cases[matchIndex]!.id,
+        matched_by: matchedBy,
+        ...row.location,
+      });
     } else if (conflict === 'update') {
       const stableId = cases[matchIndex]!.id;
       cases[matchIndex] = { ...row.case, id: stableId };
       updated += 1;
-      decisions.push({ action: 'update', case_id: stableId, matched_by: matchedBy });
+      decisions.push({
+        action: 'update',
+        case_id: stableId,
+        matched_by: matchedBy,
+        ...row.location,
+      });
     } else {
       diagnostics.push(
         diagnostic(
@@ -550,7 +608,7 @@ const importTabularCases = (request: TabularImportRequest): TabularImportResult 
   if (diagnostics.length > 0) {
     throw new TabularImportError('Imported case validation failed.', sortDiagnostics(diagnostics));
   }
-  const reconciled = reconcileRows(deduped.rows, request, deduped.skipped);
+  const reconciled = reconcileRows(deduped.rows, request, deduped.skipped, deduped.decisions);
   return {
     ...reconciled,
     format: request.format,

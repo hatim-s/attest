@@ -6,6 +6,7 @@ import type {
   ImportLimits,
   ImportLocation,
 } from './import-types.js';
+import { TabularImportError } from './import-types.js';
 
 type SourceRecord = ImportLocation & { value: Record<string, unknown> };
 type ParsedImportSource = {
@@ -30,6 +31,36 @@ const diagnostic = (
   source_field: '<record>',
   ...location,
 });
+
+/** Collects an import stream with a hard byte ceiling before returning any materialized source. */
+const collectBoundedImportSource = async (
+  chunks: AsyncIterable<string | Uint8Array>,
+  maxBytes = DEFAULT_IMPORT_LIMITS.maxBytes,
+): Promise<Uint8Array> => {
+  const collected: Uint8Array[] = [];
+  let byteLength = 0;
+  for await (const chunk of chunks) {
+    const bytes = typeof chunk === 'string' ? new TextEncoder().encode(chunk) : chunk;
+    byteLength += bytes.byteLength;
+    if (byteLength > maxBytes) {
+      throw new TabularImportError('Import source validation failed.', [
+        diagnostic(
+          'import_size_limit',
+          `Import source exceeds the ${maxBytes}-byte limit.`,
+          'Split the source into smaller explicit imports.',
+        ),
+      ]);
+    }
+    collected.push(bytes);
+  }
+  const source = new Uint8Array(byteLength);
+  let offset = 0;
+  for (const chunk of collected) {
+    source.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return source;
+};
 
 /** Resolves an RFC 6901 pointer without interpreting dotted object keys. */
 const resolveJsonPointer = (
@@ -104,6 +135,7 @@ const objectRecord = (
 const parseJsonSource = (
   text: string,
   recordsPointer: string | undefined,
+  maxRows: number,
 ): Pick<ParsedImportSource, 'diagnostics' | 'records' | 'rowsSeen'> => {
   const diagnostics: ImportDiagnostic[] = [];
   let document: unknown;
@@ -152,7 +184,7 @@ const parseJsonSource = (
       rowsSeen: 0,
     };
   }
-  const records = selected.value.flatMap((value, index) => {
+  const records = selected.value.slice(0, maxRows).flatMap((value, index) => {
     const record = objectRecord(value, { row: index + 1 }, diagnostics);
     return record === undefined ? [] : [record];
   });
@@ -161,28 +193,38 @@ const parseJsonSource = (
 
 const parseJsonlSource = (
   text: string,
+  maxRows: number,
 ): Pick<ParsedImportSource, 'diagnostics' | 'records' | 'rowsSeen'> => {
   const diagnostics: ImportDiagnostic[] = [];
   const records: SourceRecord[] = [];
   let rowsSeen = 0;
-  for (const [index, line] of text.split(/\r?\n/u).entries()) {
-    if (line.trim().length === 0) continue;
-    rowsSeen += 1;
-    const lineNumber = index + 1;
-    try {
-      const record = objectRecord(JSON.parse(line) as unknown, { line: lineNumber }, diagnostics);
-      if (record !== undefined) records.push(record);
-    } catch {
-      diagnostics.push({
-        ...diagnostic(
-          'invalid_json',
-          'Line is not valid JSON.',
-          'Provide exactly one JSON object on this nonblank line.',
-          { line: lineNumber },
-        ),
-        source_field: '<line>',
-      });
+  let lineNumber = 1;
+  let start = 0;
+  while (start <= text.length) {
+    const newline = text.indexOf('\n', start);
+    const end = newline < 0 ? text.length : newline;
+    const line = text.slice(start, end).replace(/\r$/u, '');
+    if (line.trim().length > 0) {
+      rowsSeen += 1;
+      if (rowsSeen > maxRows) break;
+      try {
+        const record = objectRecord(JSON.parse(line) as unknown, { line: lineNumber }, diagnostics);
+        if (record !== undefined) records.push(record);
+      } catch {
+        diagnostics.push({
+          ...diagnostic(
+            'invalid_json',
+            'Line is not valid JSON.',
+            'Provide exactly one JSON object on this nonblank line.',
+            { line: lineNumber },
+          ),
+          source_field: '<line>',
+        });
+      }
     }
+    if (newline < 0) break;
+    start = newline + 1;
+    lineNumber += 1;
   }
   return { diagnostics, records, rowsSeen };
 };
@@ -192,6 +234,7 @@ type CsvRecord = { fields: string[]; line: number };
 /** Parses RFC 4180-style quoting, escaped quotes, CRLF, and quoted newlines deterministically. */
 const parseCsvRecords = (
   text: string,
+  maxRecords: number,
 ): { diagnostics: ImportDiagnostic[]; records: CsvRecord[] } => {
   const diagnostics: ImportDiagnostic[] = [];
   const records: CsvRecord[] = [];
@@ -239,8 +282,19 @@ const parseCsvRecords = (
       );
       closedQuote = false;
     }
-    if (character === '"' && field.length === 0 && !closedQuote) {
-      quoted = true;
+    if (character === '"' && !closedQuote) {
+      if (field.length === 0) {
+        quoted = true;
+      } else {
+        diagnostics.push(
+          diagnostic(
+            'malformed_csv',
+            'A CSV quote cannot begin inside an unquoted field.',
+            'Quote the complete field and escape embedded quotes by doubling them.',
+            { line },
+          ),
+        );
+      }
     } else if (character === ',') {
       fields.push(field);
       field = '';
@@ -248,6 +302,7 @@ const parseCsvRecords = (
     } else if (character === '\n' || character === '\r') {
       if (character === '\r' && text[index + 1] === '\n') index += 1;
       finishRecord();
+      if (records.length >= maxRecords) break;
       line += 1;
       recordLine = line;
     } else if (!closedQuote) {
@@ -273,8 +328,9 @@ const parseCsvRecords = (
 
 const parseCsvSource = (
   text: string,
+  maxRows: number,
 ): Pick<ParsedImportSource, 'diagnostics' | 'records' | 'rowsSeen'> => {
-  const parsed = parseCsvRecords(text);
+  const parsed = parseCsvRecords(text, maxRows + 2);
   const diagnostics = [...parsed.diagnostics];
   const [headerRecord, ...dataRecords] = parsed.records;
   if (headerRecord === undefined) {
@@ -326,6 +382,19 @@ const parseCsvSource = (
   return { diagnostics, records, rowsSeen: dataRecords.length };
 };
 
+/** Returns the authored CSV header after the same fatal UTF-8 and strict quote checks as import. */
+const discoverCsvHeaders = (source: Uint8Array): string[] => {
+  const decoded = decodeSource(source);
+  if (decoded.diagnostics.length > 0) {
+    throw new TabularImportError('Import source validation failed.', decoded.diagnostics);
+  }
+  const parsed = parseCsvRecords(decoded.text, 1);
+  if (parsed.diagnostics.length > 0) {
+    throw new TabularImportError('Import source validation failed.', parsed.diagnostics);
+  }
+  return parsed.records[0]?.fields ?? [];
+};
+
 /** Decodes and parses the complete bounded source before normalization or reconciliation begins. */
 const parseImportSource = (
   source: string | Uint8Array,
@@ -354,10 +423,10 @@ const parseImportSource = (
   }
   const parsed =
     format === 'csv'
-      ? parseCsvSource(decoded.text)
+      ? parseCsvSource(decoded.text, limits.maxRows)
       : format === 'json'
-        ? parseJsonSource(decoded.text, options.recordsPointer)
-        : parseJsonlSource(decoded.text);
+        ? parseJsonSource(decoded.text, options.recordsPointer, limits.maxRows)
+        : parseJsonlSource(decoded.text, limits.maxRows);
   if (parsed.rowsSeen > limits.maxRows) {
     parsed.diagnostics.push(
       diagnostic(
@@ -376,7 +445,9 @@ const parseImportSource = (
 };
 
 export {
+  collectBoundedImportSource,
   DEFAULT_IMPORT_LIMITS,
+  discoverCsvHeaders,
   parseImportSource,
   resolveJsonPointer,
   type ParsedImportSource,

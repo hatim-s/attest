@@ -23,6 +23,11 @@ type ImportDecision = {
   action: 'insert' | 'skip' | 'update';
   case_id: string;
   matched_by?: 'content' | 'id' | 'key';
+} & ImportLocation;
+
+type ImportCollisionContext = {
+  cases: readonly TestCase[];
+  requiredTags?: readonly string[];
 };
 
 type ImportCounts = {
@@ -34,6 +39,7 @@ type ImportCounts = {
 
 type TabularImportRequest = {
   collisionCases?: readonly TestCase[];
+  collisionContexts?: readonly ImportCollisionContext[];
   dedupe?: ImportDedupePolicy;
   existingCases?: readonly TestCase[];
   format: ImportFormat;
@@ -71,6 +77,7 @@ class TabularImportError extends Error {
 export {
   TabularImportError,
   type ImportConflictPolicy,
+  type ImportCollisionContext,
   type ImportCounts,
   type ImportDecision,
   type ImportDedupePolicy,
