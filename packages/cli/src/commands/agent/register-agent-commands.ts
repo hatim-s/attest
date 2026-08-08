@@ -36,13 +36,34 @@ type MutationOptions = CommonOptions & {
 
 type AddOptions = MutationOptions & {
   argvJson?: string;
+  backgroundCommand?: string;
+  bridgeConcurrency?: 'serial' | 'multiplexed';
+  cancelGrace?: string;
+  cwd?: string;
   env?: string[];
+  errorPointer?: string;
+  eventName?: string;
   headerEnv?: string[];
+  incrementalOutputMode?: 'text' | 'array';
+  incrementalOutputPointer?: string;
+  invokeUrl?: string;
+  jsonlCommand?: string;
   name?: string;
   nativeCommand?: string;
   nativeHttp?: string;
+  readinessHttp?: string;
+  readinessStderr?: string;
+  readinessTcp?: string;
+  responsePointer?: string;
+  shutdownUrl?: string;
+  stopTimeout?: string;
+  streamFraming?: 'sse' | 'jsonl';
+  streamUrl?: string;
+  terminalPointer?: string;
+  terminalValues?: string[];
   timeout?: string;
   trace?: boolean;
+  tracePointer?: string;
 };
 
 type ImportOptions = MutationOptions & {
@@ -95,6 +116,7 @@ const REPEATABLE_AGENT_OPTIONS = new Set([
   'poll-failure',
   'poll-success',
   'query-env',
+  'terminal-value',
 ]);
 
 const addCommonOptions = (command: Command): Command =>
@@ -190,13 +212,44 @@ const registerAgentCommands = (context: RegisterAgentCommandsOptions): void => {
   const add = addMutationOptions(
     agent
       .command('add')
-      .description('Add one native agent resource.')
+      .description('Add one native, managed-process, or streaming agent resource.')
       .argument('[agent-id]', 'agent id'),
   )
     .option('--name <name>', 'agent display name; defaults to the id')
     .option('--native-command <command>', 'native CLI command tokenized into an argv array')
     .option('--argv-json <json>', 'unambiguous native CLI argv JSON array')
     .option('--native-http <url>', 'external native-envelope HTTP endpoint')
+    .option('--background-command <command>', 'run-scoped background service command')
+    .option('--jsonl-command <command>', 'run-scoped correlated JSONL bridge command')
+    .option('--stream-url <url>', 'external SSE or JSONL stream endpoint')
+    .addOption(new Option('--stream-framing <framing>', 'stream framing').choices(['sse', 'jsonl']))
+    .addOption(
+      new Option('--bridge-concurrency <mode>', 'JSONL bridge concurrency').choices([
+        'serial',
+        'multiplexed',
+      ]),
+    )
+    .option('--cwd <path>', 'project-relative process working directory')
+    .option('--readiness-http <url>', 'background HTTP readiness endpoint')
+    .option('--readiness-tcp <host:port>', 'background TCP readiness endpoint')
+    .option('--readiness-stderr <regex>', 'background stderr readiness regex')
+    .option('--invoke-url <url>', 'background invocation endpoint')
+    .option('--shutdown-url <url>', 'optional background graceful shutdown endpoint')
+    .option('--stop-timeout <duration>', 'background TERM/grace/KILL timeout')
+    .option('--cancel-grace <duration>', 'JSONL in-band cancellation grace')
+    .option('--response-pointer <pointer>', 'mapped terminal result JSON Pointer')
+    .option('--error-pointer <pointer>', 'mapped error JSON Pointer')
+    .option('--trace-pointer <pointer>', 'mapped trace JSON Pointer')
+    .option('--event-name <name>', 'SSE application event filter')
+    .option('--terminal-pointer <pointer>', 'stream terminal-state JSON Pointer')
+    .option('--terminal-value <json>', 'stream terminal value as JSON; repeatable', collect)
+    .option('--incremental-output-pointer <pointer>', 'stream incremental output JSON Pointer')
+    .addOption(
+      new Option('--incremental-output-mode <mode>', 'stream accumulation mode').choices([
+        'text',
+        'array',
+      ]),
+    )
     .option('--env <target=source>', 'environment secret reference', collect)
     .option('--header-env <header=source>', 'HTTP header secret reference', collect)
     .option('--timeout <duration>', 'attempt timeout such as 500ms, 60s, or 2m')
@@ -207,15 +260,36 @@ const registerAgentCommands = (context: RegisterAgentCommandsOptions): void => {
         ...mutationArguments(options, context),
         agentId,
         argvJson: options.argvJson,
+        backgroundCommand: options.backgroundCommand,
+        bridgeConcurrency: options.bridgeConcurrency,
+        cancellationGrace: options.cancelGrace,
+        cwd: options.cwd,
         env: options.env,
+        errorPointer: options.errorPointer,
+        eventName: options.eventName,
         headerEnv: options.headerEnv,
+        incrementalOutputMode: options.incrementalOutputMode,
+        incrementalOutputPointer: options.incrementalOutputPointer,
+        invokeUrl: options.invokeUrl,
+        jsonlCommand: options.jsonlCommand,
         interactive: isInteractive(options, context.interaction, options.fromJson),
         name: options.name,
         nativeCommand: options.nativeCommand,
         nativeHttp: options.nativeHttp,
+        readinessHttp: options.readinessHttp,
+        readinessStderr: options.readinessStderr,
+        readinessTcp: options.readinessTcp,
+        responsePointer: options.responsePointer,
+        shutdownUrl: options.shutdownUrl,
+        stopTimeout: options.stopTimeout,
+        streamFraming: options.streamFraming,
+        streamUrl: options.streamUrl,
+        terminalPointer: options.terminalPointer,
+        terminalValues: options.terminalValues,
         prompt: context.interaction.prompt,
         timeout: options.timeout,
         trace: options.trace,
+        tracePointer: options.tracePointer,
       });
       context.io.output(renderCommandResult('agent.add', outputFormat(options), result));
     });
@@ -224,18 +298,72 @@ const registerAgentCommands = (context: RegisterAgentCommandsOptions): void => {
     [
       'attest agent add support --argv-json \'["node","./src/agent.mjs"]\' --timeout 60s',
       'attest agent add support --native-http https://localhost:8787/invoke',
+      'attest agent add support --background-command "node ./server.mjs" --readiness-http http://127.0.0.1:8787/ready --invoke-url http://127.0.0.1:8787/invoke',
+      'attest agent add support --jsonl-command "node ./bridge.mjs" --bridge-concurrency multiplexed',
+      'attest agent add support --stream-url https://example.com/events --stream-framing sse --terminal-pointer /type --terminal-value \'"result"\' --response-pointer /output',
       'attest agent add --from-json ./agent-add.json --output json',
     ],
     {
       'agent-id': [],
       'argv-json': ['native-command', 'native-http'],
+      'background-command': [
+        'argv-json',
+        'native-command',
+        'native-http',
+        'jsonl-command',
+        'stream-url',
+      ],
+      'bridge-concurrency': [],
+      'cancel-grace': [],
+      cwd: [],
       env: ['native-http'],
+      'error-pointer': [],
+      'event-name': [],
       'header-env': ['argv-json', 'native-command'],
+      'incremental-output-mode': [],
+      'incremental-output-pointer': [],
+      'invoke-url': [],
+      'jsonl-command': [
+        'argv-json',
+        'native-command',
+        'native-http',
+        'background-command',
+        'stream-url',
+      ],
       name: [],
-      'native-command': ['argv-json', 'native-http'],
-      'native-http': ['argv-json', 'native-command'],
+      'native-command': [
+        'argv-json',
+        'native-http',
+        'background-command',
+        'jsonl-command',
+        'stream-url',
+      ],
+      'native-http': [
+        'argv-json',
+        'native-command',
+        'background-command',
+        'jsonl-command',
+        'stream-url',
+      ],
+      'readiness-http': ['readiness-stderr', 'readiness-tcp'],
+      'readiness-stderr': ['readiness-http', 'readiness-tcp'],
+      'readiness-tcp': ['readiness-http', 'readiness-stderr'],
+      'response-pointer': [],
+      'shutdown-url': [],
+      'stop-timeout': [],
+      'stream-framing': [],
+      'stream-url': [
+        'argv-json',
+        'native-command',
+        'native-http',
+        'background-command',
+        'jsonl-command',
+      ],
+      'terminal-pointer': [],
+      'terminal-value': [],
       timeout: [],
       trace: [],
+      'trace-pointer': [],
     },
   );
 
@@ -363,7 +491,7 @@ const registerAgentCommands = (context: RegisterAgentCommandsOptions): void => {
   const test = addCommonOptions(
     agent
       .command('test')
-      .description('Probe one native, direct HTTP, or polling agent contract.')
+      .description('Probe one native, managed-process, HTTP, polling, or streaming agent contract.')
       .argument('[agent-id]', 'agent id'),
   )
     .option('--input <json>', 'test input as any JSON value')

@@ -14,11 +14,17 @@ import {
 import {
   invokeAgent,
   invokeMappedHttpAgent,
+  invokeStreamingAgent,
   redactTransportText,
+  startBackgroundAgent,
+  startJsonlBridgeAgent,
+  type BackgroundAgentResource,
   type HttpAgentResource,
   type InvocationResult,
+  type JsonlBridgeAgentResource,
   type StoredCaseExecution,
   type StoredAttempt,
+  type StreamAgentResource,
 } from '@attest/core';
 
 import { AttestCliError } from '../../errors.js';
@@ -40,11 +46,15 @@ type NativeAgentTestOptions = {
 };
 
 type ResolvedNativeAgent = {
+  backgroundAgent?: BackgroundAgentResource;
+  cwd?: string;
   env?: Record<string, string>;
   httpHeaders?: Record<string, string>;
   httpQuery?: Record<string, string>;
+  jsonlBridgeAgent?: JsonlBridgeAgentResource;
   mappedAgent?: HttpAgentResource;
   secrets: string[];
+  streamAgent?: StreamAgentResource;
   target?: AgentTarget;
 };
 
@@ -119,26 +129,100 @@ const createBaseEnvironment = (): Record<string, string> => ({
   TMPDIR: tmpdir(),
 });
 
+/** Resolves an authored cwd through realpath and rejects symlink escapes from the project. */
+const resolveProcessCwd = async (projectRoot: string, cwd = '.'): Promise<string> => {
+  const candidate = resolve(projectRoot, cwd);
+  try {
+    const resolved = await realpath(candidate);
+    if (!isContainedPath(projectRoot, resolved)) throw new Error('cwd escapes project');
+    return resolved;
+  } catch (error: unknown) {
+    throw new AttestCliError('invocation_failed', 'The managed process cwd is unavailable.', {
+      path: cwd,
+      hint: 'Use an existing project-contained directory without symlink traversal.',
+      cause: error,
+    });
+  }
+};
+
+/** Resolves only explicit relative argv paths against the authored cwd; no shell parsing occurs. */
+const resolveProcessArgv = (argv: readonly string[], cwd: string): string[] =>
+  argv.map((argument) =>
+    isAbsolute(argument) || !(argument === '.' || argument === '..' || /^\.\.?\//u.test(argument))
+      ? argument
+      : resolve(cwd, argument),
+  );
+
+/** Materializes runtime-only environment secret references for one managed child. */
+const resolveProcessEnvironment = async (
+  references: Readonly<Record<string, SecretReference>> | undefined,
+  projectRoot: string,
+  observer: ((path: string) => Promise<void>) | undefined,
+): Promise<{ env: Record<string, string>; secrets: string[] }> => {
+  const env = createBaseEnvironment();
+  const secrets: string[] = [];
+  for (const [name, reference] of Object.entries(references ?? {})) {
+    const value = await readSecretReference(reference, projectRoot, observer);
+    env[name] = value;
+    secrets.push(value);
+  }
+  return { env, secrets };
+};
+
+/** Resolves request-template secret references without changing the authored resource. */
+const resolveHttpSecrets = async (
+  requests: readonly {
+    headers?: Record<string, string | SecretReference>;
+    query?: Record<string, string | SecretReference>;
+  }[],
+  projectRoot: string,
+  observer: ((path: string) => Promise<void>) | undefined,
+): Promise<{
+  headers: Record<string, string>;
+  query: Record<string, string>;
+  secrets: string[];
+}> => {
+  const headers: Record<string, string> = {};
+  const query: Record<string, string> = {};
+  const secrets: string[] = [];
+  for (const request of requests) {
+    for (const [name, value] of Object.entries(request.headers ?? {})) {
+      const resolved =
+        typeof value === 'string' ? value : await readSecretReference(value, projectRoot, observer);
+      headers[name] = resolved;
+      if (typeof value !== 'string') secrets.push(resolved);
+    }
+    for (const [name, value] of Object.entries(request.query ?? {})) {
+      const resolved =
+        typeof value === 'string' ? value : await readSecretReference(value, projectRoot, observer);
+      query[name] = resolved;
+      if (typeof value !== 'string') secrets.push(resolved);
+    }
+  }
+  return { headers, query, secrets };
+};
+
 /** Resolves runtime-only secret references into an ephemeral native transport target. */
 const resolveNativeAgent = async (
   agent: AgentResource,
   projectRoot: string,
   observer?: (path: string) => Promise<void>,
 ): Promise<ResolvedNativeAgent> => {
-  if (agent.transport.kind === 'native_cli') {
+  if (
+    agent.transport.kind === 'native_cli' ||
+    agent.transport.kind === 'background_cli' ||
+    agent.transport.kind === 'jsonl_bridge'
+  ) {
     const transport = agent.transport;
-    const env = createBaseEnvironment();
-    const secrets: string[] = [];
-    for (const [name, reference] of Object.entries(transport.env ?? {})) {
-      const value = await readSecretReference(reference, projectRoot, observer);
-      env[name] = value;
-      secrets.push(value);
-    }
-    const argv = transport.argv.map((argument) =>
-      isAbsolute(argument) || !(argument === '.' || argument === '..' || /^\.\.?\//u.test(argument))
-        ? argument
-        : resolve(projectRoot, transport.cwd ?? '.', argument),
+    const cwd = await resolveProcessCwd(projectRoot, transport.cwd);
+    const resolvedEnvironment = await resolveProcessEnvironment(
+      transport.env,
+      projectRoot,
+      observer,
     );
+    const authoredArgv =
+      transport.kind === 'background_cli' ? transport.start_argv : transport.argv;
+    const argv = resolveProcessArgv(authoredArgv, cwd);
     for (const position of agent.redaction?.argv_positions ?? []) {
       const value = argv[position];
       if (value === undefined) {
@@ -146,14 +230,52 @@ const resolveNativeAgent = async (
           path: `/agents/${agent.id}/redaction/argv_positions`,
         });
       }
-      secrets.push(value);
+      resolvedEnvironment.secrets.push(value);
     }
-    return { env, secrets, target: { type: 'cli', command: argv } };
+    if (transport.kind === 'native_cli') {
+      return {
+        cwd,
+        env: resolvedEnvironment.env,
+        secrets: resolvedEnvironment.secrets,
+        target: { type: 'cli', command: argv },
+      };
+    }
+    if (transport.kind === 'jsonl_bridge') {
+      return {
+        cwd,
+        env: resolvedEnvironment.env,
+        jsonlBridgeAgent: {
+          ...agent,
+          transport: { ...transport, argv },
+        } as JsonlBridgeAgentResource,
+        secrets: resolvedEnvironment.secrets,
+      };
+    }
+    const http = await resolveHttpSecrets(
+      [transport.invoke, ...(transport.shutdown === undefined ? [] : [transport.shutdown])],
+      projectRoot,
+      observer,
+    );
+    return {
+      backgroundAgent: {
+        ...agent,
+        transport: { ...transport, start_argv: argv },
+      } as BackgroundAgentResource,
+      cwd,
+      env: resolvedEnvironment.env,
+      httpHeaders: http.headers,
+      httpQuery: http.query,
+      secrets: [...resolvedEnvironment.secrets, ...http.secrets],
+    };
   }
 
-  if (agent.transport.kind === 'http' || agent.transport.kind === 'polling') {
+  if (
+    agent.transport.kind === 'http' ||
+    agent.transport.kind === 'polling' ||
+    agent.transport.kind === 'stream'
+  ) {
     const transport = agent.transport;
-    const request = transport.kind === 'http' ? transport.request : transport.submit;
+    const request = transport.kind === 'polling' ? transport.submit : transport.request;
     const nativeEnvelope =
       transport.kind === 'http' && transport.response_mode === 'attest_envelope';
     const headers: Record<string, string> = {};
@@ -182,6 +304,14 @@ const resolveNativeAgent = async (
     if (nativeEnvelope) {
       return { httpHeaders: headers, secrets, target: { type: 'http', url: request.url } };
     }
+    if (transport.kind === 'stream') {
+      return {
+        httpHeaders: headers,
+        httpQuery: query,
+        secrets,
+        streamAgent: agent as StreamAgentResource,
+      };
+    }
     return {
       httpHeaders: headers,
       httpQuery: query,
@@ -195,19 +325,23 @@ const resolveNativeAgent = async (
     `Agent ${agent.id} uses a transport that belongs to a later CLI item.`,
     {
       path: `/agents/${agent.id}/transport/kind`,
-      hint: 'Use native_cli, direct HTTP, or polling for CLI2.10 connection tests.',
+      hint: 'CLI2.11 supports native_cli, background_cli, jsonl_bridge, HTTP, polling, and stream.',
     },
   );
 };
 
 /** Rejects authored policies that the selected bounded adapter cannot enforce. */
 const assertSupportedProbePolicy = (agent: AgentResource): void => {
-  const mappedHttp =
-    agent.transport.kind === 'polling' ||
-    (agent.transport.kind === 'http' && agent.transport.response_mode === 'mapped');
-  const unsupportedTimeout = (
-    mappedHttp ? ['run_ms'] : ['connect_ms', 'first_byte_ms', 'idle_ms', 'run_ms']
-  ).find(
+  const kind = agent.transport.kind;
+  const unsupportedTimeoutFields =
+    kind === 'native_cli'
+      ? ['connect_ms', 'first_byte_ms', 'idle_ms', 'run_ms']
+      : kind === 'http' || kind === 'polling' || kind === 'stream'
+        ? ['run_ms']
+        : kind === 'jsonl_bridge'
+          ? ['connect_ms']
+          : [];
+  const unsupportedTimeout = unsupportedTimeoutFields.find(
     (field) =>
       agent.timeouts?.[field as keyof NonNullable<AgentResource['timeouts']>] !== undefined,
   );
@@ -217,27 +351,37 @@ const assertSupportedProbePolicy = (agent: AgentResource): void => {
       'This timeout phase is not supported by the adapter.',
       {
         path: `/agents/${agent.id}/timeouts/${unsupportedTimeout}`,
-        hint: mappedHttp
-          ? 'Mapped HTTP probes support connect, first-byte, idle, and attempt timeouts.'
-          : 'Use attempt_ms for a bounded native connection probe.',
+        hint: 'Remove the unsupported phase or select a lifecycle that owns it.',
       },
     );
   }
-  if (!mappedHttp && agent.retry !== undefined && agent.retry.backoff.kind !== 'none') {
+  if (
+    (kind === 'native_cli' && agent.retry !== undefined && agent.retry.backoff.kind !== 'none') ||
+    (kind === 'jsonl_bridge' && (agent.retry?.retries ?? 0) > 0)
+  ) {
     throw new AttestCliError(
       'project_invalid',
       'Retry backoff is not supported by native probes.',
       {
         path: `/agents/${agent.id}/retry/backoff`,
-        hint: 'Use deterministic no-backoff retries for a native connection probe.',
+        hint:
+          kind === 'jsonl_bridge'
+            ? 'Set retries to zero; sent bridge requests are not replayed.'
+            : 'Use deterministic no-backoff retries for a native connection probe.',
       },
     );
   }
-  const unsupportedLimit = (
-    mappedHttp
-      ? ['event_count', 'event_bytes', 'total_evidence_bytes']
-      : ['request_bytes', 'event_count', 'event_bytes', 'total_evidence_bytes']
-  ).find(
+  const unsupportedLimitFields =
+    kind === 'native_cli'
+      ? ['request_bytes', 'event_count', 'event_bytes', 'total_evidence_bytes']
+      : kind === 'http' || kind === 'polling'
+        ? ['event_count', 'event_bytes', 'total_evidence_bytes']
+        : kind === 'background_cli'
+          ? ['event_count', 'event_bytes']
+          : kind === 'stream'
+            ? ['response_bytes']
+            : [];
+  const unsupportedLimit = unsupportedLimitFields.find(
     (field) => agent.limits?.[field as keyof NonNullable<AgentResource['limits']>] !== undefined,
   );
   if (unsupportedLimit !== undefined) {
@@ -246,9 +390,7 @@ const assertSupportedProbePolicy = (agent: AgentResource): void => {
       'This evidence limit is not supported by the adapter.',
       {
         path: `/agents/${agent.id}/limits/${unsupportedLimit}`,
-        hint: mappedHttp
-          ? 'Use request_bytes and response_bytes for mapped HTTP probes.'
-          : 'Use response_bytes for the bounded native connection probe.',
+        hint: 'Remove the limit or use the adapter-specific request, response, or event cap.',
       },
     );
   }
@@ -324,24 +466,59 @@ const testNativeAgentConnection = async (options: NativeAgentTestOptions): Promi
     input: options.input,
   };
   const startedAt = new Date().toISOString();
-  const invocation =
-    resolved.mappedAgent === undefined
-      ? resolved.target === undefined
-        ? await Promise.reject(new Error('Resolved agent omitted its invocation target.'))
-        : await invokeAgent(resolved.target, request, {
-            env: resolved.env,
-            httpHeaders: resolved.httpHeaders,
-            outputCapBytes: options.agent.limits?.response_bytes ?? DEFAULT_OUTPUT_CAP_BYTES,
-            retries: options.agent.retry?.retries ?? 0,
-            signal: options.signal,
-            timeoutMs: options.agent.timeouts?.attempt_ms ?? DEFAULT_TIMEOUT_MS,
-          })
-      : await invokeMappedHttpAgent(resolved.mappedAgent, request, {
-          headers: resolved.httpHeaders,
-          query: resolved.httpQuery,
-          secrets: resolved.secrets,
-          signal: options.signal,
-        });
+  let invocation: InvocationResult;
+  if (resolved.backgroundAgent !== undefined) {
+    const session = await startBackgroundAgent(resolved.backgroundAgent, {
+      cwd: resolved.cwd ?? options.projectRoot,
+      env: resolved.env ?? createBaseEnvironment(),
+      headers: resolved.httpHeaders,
+      query: resolved.httpQuery,
+      secrets: resolved.secrets,
+      signal: options.signal,
+    });
+    try {
+      invocation = await session.invoke(request, options.signal);
+    } finally {
+      await session.close();
+    }
+  } else if (resolved.jsonlBridgeAgent !== undefined) {
+    const session = await startJsonlBridgeAgent(resolved.jsonlBridgeAgent, {
+      cwd: resolved.cwd ?? options.projectRoot,
+      env: resolved.env ?? createBaseEnvironment(),
+      secrets: resolved.secrets,
+      signal: options.signal,
+    });
+    try {
+      invocation = await session.invoke(request, options.signal);
+    } finally {
+      await session.close();
+    }
+  } else if (resolved.streamAgent !== undefined) {
+    invocation = await invokeStreamingAgent(resolved.streamAgent, request, {
+      headers: resolved.httpHeaders,
+      query: resolved.httpQuery,
+      secrets: resolved.secrets,
+      signal: options.signal,
+    });
+  } else if (resolved.mappedAgent !== undefined) {
+    invocation = await invokeMappedHttpAgent(resolved.mappedAgent, request, {
+      headers: resolved.httpHeaders,
+      query: resolved.httpQuery,
+      secrets: resolved.secrets,
+      signal: options.signal,
+    });
+  } else if (resolved.target !== undefined) {
+    invocation = await invokeAgent(resolved.target, request, {
+      env: resolved.env,
+      httpHeaders: resolved.httpHeaders,
+      outputCapBytes: options.agent.limits?.response_bytes ?? DEFAULT_OUTPUT_CAP_BYTES,
+      retries: options.agent.retry?.retries ?? 0,
+      signal: options.signal,
+      timeoutMs: options.agent.timeouts?.attempt_ms ?? DEFAULT_TIMEOUT_MS,
+    });
+  } else {
+    throw new Error('Resolved agent omitted its invocation target.');
+  }
   if (invocation.status === 'invocation_error') {
     const code = invocation.error.code === 'cancelled' ? 'cancelled' : 'invocation_failed';
     await options.onExecution?.({

@@ -29,6 +29,12 @@ import { readSecretReference, REDACTED } from './native-agent-adapter.js';
 
 const FIXTURE = fileURLToPath(new URL('./fixtures/native-agent.cjs', import.meta.url));
 const PTY_FIXTURE = fileURLToPath(new URL('./fixtures/pty-agent-command.py', import.meta.url));
+const JSONL_BRIDGE_FIXTURE = fileURLToPath(
+  new URL('../../../../core/src/runner/fixtures/jsonl-bridge-agent.cjs', import.meta.url),
+);
+const BACKGROUND_FIXTURE = fileURLToPath(
+  new URL('../../../../core/src/runner/fixtures/background-agent.cjs', import.meta.url),
+);
 const CLI_PACKAGE_ROOT = fileURLToPath(new URL('../../../', import.meta.url));
 const CLI_BUILT = fileURLToPath(new URL('../../../dist/cli.js', import.meta.url));
 const execFileAsync = promisify(execFile);
@@ -360,7 +366,7 @@ describe('CLI2.6 agent authoring', () => {
     ).toBe(0);
     expect(questions.slice(0, 3)).toEqual([
       'Agent id: ',
-      'Transport [cli/http]: ',
+      'Transport [cli/http/background/jsonl/stream]: ',
       'Native command: ',
     ]);
     expect(questions[3]).toContain('Apply these changes? [y/N]');
@@ -1694,5 +1700,192 @@ describe('CLI2.6 agent authoring', () => {
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }
+  });
+});
+
+describe('CLI2.11 managed and streaming agent UX', () => {
+  it('guides a TTY user through managed JSONL authoring', async () => {
+    const root = await createProject();
+    const collected = collectIo();
+    const answers = new Map<string, string>([
+      ['Agent id: ', 'guided-bridge'],
+      ['Transport [cli/http/background/jsonl/stream]: ', 'jsonl'],
+      ['JSONL bridge command: ', `${process.execPath} ${JSONL_BRIDGE_FIXTURE}`],
+      ['Bridge concurrency [serial]: ', 'multiplexed'],
+      ['Cancellation grace [1s]: ', '100ms'],
+    ]);
+    const exitCode = await runCli(['agent', 'add'], {
+      workingDirectory: root,
+      io: collected.io,
+      interaction: {
+        ci: false,
+        inputIsTTY: true,
+        outputIsTTY: true,
+        prompt: (question) =>
+          Promise.resolve(
+            question.includes('Apply these changes?') ? 'yes' : (answers.get(question) ?? ''),
+          ),
+        readStdin: () => Promise.resolve(''),
+      },
+    });
+    expect(exitCode).toBe(0);
+    expect((await loadProject({ project: root })).agents[0]?.transport).toMatchObject({
+      kind: 'jsonl_bridge',
+      concurrency: 'multiplexed',
+    });
+  });
+
+  it('authors and probes a correlated JSONL bridge without canonical-file editing', async () => {
+    const root = await createProject();
+    const added = await run(root, [
+      'agent',
+      'add',
+      'bridge',
+      '--jsonl-command',
+      `${process.execPath} ${JSONL_BRIDGE_FIXTURE}`,
+      '--bridge-concurrency',
+      'multiplexed',
+      '--cancel-grace',
+      '100ms',
+      '--output',
+      'json',
+    ]);
+    expect(added.exitCode).toBe(0);
+    const loaded = await loadProject({ project: root });
+    expect(loaded.agents[0]?.transport).toMatchObject({
+      kind: 'jsonl_bridge',
+      concurrency: 'multiplexed',
+      cancellation_grace_ms: 100,
+    });
+
+    const tested = await run(root, [
+      'agent',
+      'test',
+      'bridge',
+      '--input',
+      '{"message":"hello"}',
+      '--output',
+      'json',
+    ]);
+    expect(tested.exitCode).toBe(0);
+    expect(JSON.parse(tested.output[0] ?? '{}')).toMatchObject({
+      result: {
+        response: { output: { message: 'hello' } },
+        transport: 'jsonl_bridge',
+      },
+    });
+  });
+
+  it('authors, starts, tests, and shuts down a run-scoped background service', async () => {
+    const root = await createProject();
+    const reservation = createServer();
+    await new Promise<void>((resolve, reject) => {
+      reservation.once('error', reject);
+      reservation.listen(0, '127.0.0.1', resolve);
+    });
+    const address = reservation.address();
+    if (address === null || typeof address === 'string') throw new Error('Expected TCP fixture.');
+    const port = address.port;
+    await new Promise<void>((resolve) => reservation.close(() => resolve()));
+    const origin = `http://127.0.0.1:${String(port)}`;
+    const added = await run(root, [
+      'agent',
+      'add',
+      'background',
+      '--background-command',
+      `${process.execPath} ${BACKGROUND_FIXTURE} ${String(port)}`,
+      '--readiness-http',
+      `${origin}/ready`,
+      '--invoke-url',
+      `${origin}/invoke`,
+      '--shutdown-url',
+      `${origin}/shutdown`,
+      '--response-pointer',
+      '/output',
+      '--stop-timeout',
+      '100ms',
+      '--output',
+      'json',
+    ]);
+    expect(added.exitCode).toBe(0);
+    const tested = await run(root, [
+      'agent',
+      'test',
+      'background',
+      '--input',
+      '{"ping":true}',
+      '--output',
+      'json',
+    ]);
+    expect(tested.exitCode).toBe(0);
+    expect(JSON.parse(tested.output[0] ?? '{}')).toMatchObject({
+      result: { response: { output: { ping: true } }, transport: 'background_cli' },
+    });
+  });
+
+  it('authors and probes an SSE agent with explicit terminal extraction', async () => {
+    const root = await createProject();
+    const server = createServer((_request, response) => {
+      response.setHeader('content-type', 'text/event-stream');
+      response.end('data: {"type":"result","output":"streamed"}\n\n');
+    });
+    await new Promise<void>((resolve, reject) => {
+      server.once('error', reject);
+      server.listen(0, '127.0.0.1', resolve);
+    });
+    const address = server.address();
+    if (address === null || typeof address === 'string') throw new Error('Expected TCP fixture.');
+    try {
+      const added = await run(root, [
+        'agent',
+        'add',
+        'stream',
+        '--stream-url',
+        `http://127.0.0.1:${String(address.port)}/stream`,
+        '--stream-framing',
+        'sse',
+        '--terminal-pointer',
+        '/type',
+        '--terminal-value',
+        '"result"',
+        '--response-pointer',
+        '/output',
+        '--output',
+        'json',
+      ]);
+      expect(added.exitCode).toBe(0);
+      const tested = await run(root, ['agent', 'test', 'stream', '--output', 'json']);
+      expect(tested.exitCode).toBe(0);
+      expect(JSON.parse(tested.output[0] ?? '{}')).toMatchObject({
+        result: { response: { output: 'streamed' }, transport: 'stream' },
+      });
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it('imports a complete managed resource through the stable JSON request protocol', async () => {
+    const root = await createProject();
+    const request = {
+      schema: 'attest.command-request/v2',
+      command: 'agent.add',
+      agent: {
+        schema: 'attest.agent/v2',
+        id: 'imported-bridge',
+        name: 'Imported bridge',
+        transport: {
+          kind: 'jsonl_bridge',
+          lifecycle: 'per_run',
+          argv: [process.execPath, JSONL_BRIDGE_FIXTURE],
+          concurrency: 'serial',
+          cancellation_grace_ms: 100,
+        },
+      },
+    };
+    const added = await run(root, ['agent', 'add', '--from-json', '-', '--output', 'json'], () =>
+      Promise.resolve(JSON.stringify(request)),
+    );
+    expect(added.exitCode).toBe(0);
+    expect((await loadProject({ project: root })).agents[0]?.transport.kind).toBe('jsonl_bridge');
   });
 });

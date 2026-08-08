@@ -44,15 +44,36 @@ type MutationFields = {
 type AgentAddCommandOptions = MutationFields & {
   agentId?: string;
   argvJson?: string;
+  backgroundCommand?: string;
+  bridgeConcurrency?: 'serial' | 'multiplexed';
+  cancellationGrace?: string;
+  cwd?: string;
   env?: readonly string[];
+  errorPointer?: string;
+  eventName?: string;
   headerEnv?: readonly string[];
+  incrementalOutputMode?: 'text' | 'array';
+  incrementalOutputPointer?: string;
   interactive: boolean;
+  invokeUrl?: string;
+  jsonlCommand?: string;
   name?: string;
   nativeCommand?: string;
   nativeHttp?: string;
   prompt?: Prompt;
+  readinessHttp?: string;
+  readinessStderr?: string;
+  readinessTcp?: string;
+  responsePointer?: string;
+  shutdownUrl?: string;
+  stopTimeout?: string;
+  streamFraming?: 'sse' | 'jsonl';
+  streamUrl?: string;
+  terminalPointer?: string;
+  terminalValues?: readonly string[];
   timeout?: string;
   trace?: boolean;
+  tracePointer?: string;
 };
 
 type AgentImportCommandOptions = MutationFields & {
@@ -742,13 +763,34 @@ const runAgentAddCommand = async (options: AgentAddCommandOptions): Promise<Comm
   assertNoFromJsonFlags(options.fromJson, {
     'agent-id': options.agentId,
     'argv-json': options.argvJson,
+    'background-command': options.backgroundCommand,
+    'bridge-concurrency': options.bridgeConcurrency,
+    'cancel-grace': options.cancellationGrace,
+    cwd: options.cwd,
     env: options.env,
+    'error-pointer': options.errorPointer,
+    'event-name': options.eventName,
     'header-env': options.headerEnv,
+    'incremental-output-mode': options.incrementalOutputMode,
+    'incremental-output-pointer': options.incrementalOutputPointer,
+    'invoke-url': options.invokeUrl,
+    'jsonl-command': options.jsonlCommand,
     name: options.name,
     'native-command': options.nativeCommand,
     'native-http': options.nativeHttp,
+    'readiness-http': options.readinessHttp,
+    'readiness-stderr': options.readinessStderr,
+    'readiness-tcp': options.readinessTcp,
+    'response-pointer': options.responsePointer,
+    'shutdown-url': options.shutdownUrl,
+    'stop-timeout': options.stopTimeout,
+    'stream-framing': options.streamFraming,
+    'stream-url': options.streamUrl,
+    'terminal-pointer': options.terminalPointer,
+    'terminal-value': options.terminalValues,
     timeout: options.timeout,
     trace: options.trace,
+    'trace-pointer': options.tracePointer,
     'dry-run': options.dryRun,
     'if-project-hash': options.expectedProjectHash,
     yes: options.yes,
@@ -771,13 +813,30 @@ const runAgentAddCommand = async (options: AgentAddCommandOptions): Promise<Comm
     );
     let nativeCommand = options.nativeCommand;
     let nativeHttp = options.nativeHttp;
+    let backgroundCommand = options.backgroundCommand;
+    let bridgeConcurrency = options.bridgeConcurrency;
+    let cancellationGrace = options.cancellationGrace;
+    let invokeUrl = options.invokeUrl;
+    let jsonlCommand = options.jsonlCommand;
+    let readinessHttp = options.readinessHttp;
+    let responsePointer = options.responsePointer;
+    let stopTimeout = options.stopTimeout;
+    let streamFraming = options.streamFraming;
+    let streamUrl = options.streamUrl;
+    let terminalPointer = options.terminalPointer;
+    let terminalValues = options.terminalValues;
     if (
       options.argvJson === undefined &&
       nativeCommand === undefined &&
       nativeHttp === undefined &&
+      options.backgroundCommand === undefined &&
+      options.jsonlCommand === undefined &&
+      options.streamUrl === undefined &&
       options.interactive
     ) {
-      const transport = (await options.prompt?.('Transport [cli/http]: '))?.trim().toLowerCase();
+      const transport = (await options.prompt?.('Transport [cli/http/background/jsonl/stream]: '))
+        ?.trim()
+        .toLowerCase();
       if (transport === 'http') {
         nativeHttp = await promptRequired(
           undefined,
@@ -794,10 +853,98 @@ const runAgentAddCommand = async (options: AgentAddCommandOptions): Promise<Comm
           true,
           options.prompt,
         );
+      } else if (transport === 'background') {
+        backgroundCommand = await promptRequired(
+          undefined,
+          'Background start command',
+          '--background-command',
+          true,
+          options.prompt,
+        );
+        readinessHttp = await promptRequired(
+          undefined,
+          'Readiness HTTP URL',
+          '--readiness-http',
+          true,
+          options.prompt,
+        );
+        invokeUrl = await promptRequired(
+          undefined,
+          'Invoke HTTP URL',
+          '--invoke-url',
+          true,
+          options.prompt,
+        );
+        responsePointer = await promptDefault(
+          undefined,
+          'Result JSON Pointer',
+          '/output',
+          true,
+          options.prompt,
+        );
+        stopTimeout = await promptDefault(undefined, 'Stop timeout', '5s', true, options.prompt);
+      } else if (transport === 'jsonl') {
+        jsonlCommand = await promptRequired(
+          undefined,
+          'JSONL bridge command',
+          '--jsonl-command',
+          true,
+          options.prompt,
+        );
+        bridgeConcurrency = (await promptDefault(
+          undefined,
+          'Bridge concurrency',
+          'serial',
+          true,
+          options.prompt,
+        )) as 'serial' | 'multiplexed';
+        cancellationGrace = await promptDefault(
+          undefined,
+          'Cancellation grace',
+          '1s',
+          true,
+          options.prompt,
+        );
+      } else if (transport === 'stream') {
+        streamUrl = await promptRequired(
+          undefined,
+          'Stream HTTP URL',
+          '--stream-url',
+          true,
+          options.prompt,
+        );
+        streamFraming = (await promptDefault(
+          undefined,
+          'Stream framing',
+          'sse',
+          true,
+          options.prompt,
+        )) as 'sse' | 'jsonl';
+        terminalPointer = await promptDefault(
+          undefined,
+          'Terminal JSON Pointer',
+          '/type',
+          true,
+          options.prompt,
+        );
+        terminalValues = [
+          await promptDefault(undefined, 'Terminal JSON value', '"result"', true, options.prompt),
+        ];
+        responsePointer = await promptDefault(
+          undefined,
+          'Result JSON Pointer',
+          '/output',
+          true,
+          options.prompt,
+        );
       } else {
-        throw new AttestCliError('cli_usage', 'Transport must be cli or http.', {
-          path: 'transport',
-        });
+        throw new AttestCliError(
+          'cli_usage',
+          'Transport must be cli, http, background, jsonl, or stream.',
+          {
+            path: 'transport',
+          },
+        );
       }
     }
     request = {
@@ -806,13 +953,34 @@ const runAgentAddCommand = async (options: AgentAddCommandOptions): Promise<Comm
       agent: createAgentResource({
         agentId,
         argvJson: options.argvJson,
+        backgroundCommand,
+        bridgeConcurrency,
+        cancellationGrace,
+        cwd: options.cwd,
         env: options.env,
+        errorPointer: options.errorPointer,
+        eventName: options.eventName,
         headerEnv: options.headerEnv,
+        incrementalOutputMode: options.incrementalOutputMode,
+        incrementalOutputPointer: options.incrementalOutputPointer,
+        invokeUrl,
+        jsonlCommand,
         name: options.name,
         nativeCommand,
         nativeHttp,
+        readinessHttp,
+        readinessStderr: options.readinessStderr,
+        readinessTcp: options.readinessTcp,
+        responsePointer,
+        shutdownUrl: options.shutdownUrl,
+        stopTimeout,
+        streamFraming,
+        streamUrl,
+        terminalPointer,
+        terminalValues,
         timeout: options.timeout,
         trace: options.trace,
+        tracePointer: options.tracePointer,
       }),
       ...(options.dryRun === undefined ? {} : { dry_run: options.dryRun }),
       ...(options.expectedProjectHash === undefined
