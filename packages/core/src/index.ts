@@ -5,11 +5,15 @@ export {
   collectExecutions,
   executeCases,
   invokeAgent,
+  invokeMappedHttpAgent,
   loadDatasetCases,
   type CaseExecution,
   type ExecuteOptions,
   type InvocationErrorCode,
   type InvokeAgentOptions,
+  type HttpAgentResource,
+  type InvocationResult,
+  type MappedHttpInvokeOptions,
   type RunProgressEvent,
 } from './runner/index.js';
 export {
