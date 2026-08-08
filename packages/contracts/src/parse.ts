@@ -7,15 +7,6 @@ import {
   type AgentRequest,
   type AgentResponse,
 } from './agent.js';
-import {
-  configSchema,
-  reportDuplicateCaseIds,
-  reportDuplicateMetricNames,
-  reportDuplicateSuiteNames,
-  reportUnknownCaseMetricReferences,
-  reportUnknownSuiteMetricReferences,
-  type Config,
-} from './config.js';
 import { formatContractIssues, type ContractIssue } from './internal/issues.js';
 import {
   metricRequestSchema,
@@ -87,20 +78,6 @@ const reportAgentOutcomeIssue = (candidate: unknown): ContractIssue[] | undefine
   return [{ path: 'output', message: 'exactly one of output or error must be present' }];
 };
 
-const deduplicateIssues = (issues: ContractIssue[]): ContractIssue[] => {
-  const seen = new Set<string>();
-
-  return issues.filter((issue) => {
-    const identity = `${issue.path}\u0000${issue.message}`;
-    if (seen.has(identity)) {
-      return false;
-    }
-
-    seen.add(identity);
-    return true;
-  });
-};
-
 const omitUnvalidatedTrace = <T extends { trace?: unknown }>(response: T): Omit<T, 'trace'> => {
   const responseWithoutTrace = { ...response };
   delete responseWithoutTrace.trace;
@@ -161,31 +138,6 @@ const parseAgentResponse = (candidate: unknown): ParseReport<AgentResponse> => {
 const parseTrace = (candidate: unknown): Result<Trace, ContractIssue[]> =>
   parseWithSchema(traceSchema, candidate);
 
-/**
- * Validates config structure and independently reports every defensive cross-reference issue.
- */
-const parseConfig = (candidate: unknown): Result<Config, ContractIssue[]> => {
-  const parsed = configSchema.safeParse(candidate);
-  const crossReferenceIssues = [
-    ...reportDuplicateMetricNames(candidate),
-    ...reportDuplicateSuiteNames(candidate),
-    ...reportUnknownSuiteMetricReferences(candidate),
-    ...reportDuplicateCaseIds(candidate),
-    ...reportUnknownCaseMetricReferences(candidate),
-  ];
-
-  if (!parsed.success) {
-    const structuralIssues = formatContractIssues(parsed.error.issues);
-    return err(deduplicateIssues([...structuralIssues, ...crossReferenceIssues]));
-  }
-
-  if (crossReferenceIssues.length > 0) {
-    return err(deduplicateIssues(crossReferenceIssues));
-  }
-
-  return ok(parsed.data);
-};
-
 /** Validates executable metric requests from docs/specs/metric-contract.md without throwing. */
 const parseMetricRequest = (candidate: unknown): Result<MetricRequest, ContractIssue[]> =>
   parseWithSchema(metricRequestSchema, candidate);
@@ -197,7 +149,6 @@ const parseMetricResult = (candidate: unknown): Result<MetricResult, ContractIss
 export {
   parseAgentRequest,
   parseAgentResponse,
-  parseConfig,
   parseMetricRequest,
   parseMetricResult,
   parseTrace,

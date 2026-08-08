@@ -7,9 +7,6 @@ const TRACE_SCHEMA_VERSION = 'attest.trace/v1alpha1' as const;
 /** Identifies executable metric envelopes described by the metric contract. */
 const METRIC_PROTOCOL = 'attest.metric/v1alpha1' as const;
 
-/** Identifies the configuration format described by the v1 config contract. */
-const CONFIG_VERSION = 1 as const;
-
 /** Identifies the generated v2 project manifest. */
 const PROJECT_SCHEMA_VERSION = 'attest.project/v2' as const;
 
@@ -70,7 +67,6 @@ export {
   CLI_HELP_SCHEMA_VERSION,
   CLI_RESULT_SCHEMA_VERSION,
   COMMAND_REQUEST_SCHEMA_VERSION,
-  CONFIG_VERSION,
   DATASET_SCHEMA_VERSION,
   EVAL_RUN_SCHEMA_VERSION,
   METRIC_PROTOCOL,

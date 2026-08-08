@@ -6,8 +6,6 @@ export type {
   AgentResponse,
   AgentSuccessResponse,
 } from './agent.js';
-export { caseSchema, configSchema } from './config.js';
-export type { AgentTarget, CaseDefinition, Config, RunSettings, Suite } from './config.js';
 export type { CaseOutcome, InvocationErrorCode, RawExcerpt } from './execution.js';
 export {
   assertionCheckSchema,
@@ -30,7 +28,6 @@ export type {
 export {
   parseAgentRequest,
   parseAgentResponse,
-  parseConfig,
   parseMetricRequest,
   parseMetricResult,
   parseTrace,
@@ -58,7 +55,6 @@ export {
   CLI_HELP_SCHEMA_VERSION,
   CLI_RESULT_SCHEMA_VERSION,
   COMMAND_REQUEST_SCHEMA_VERSION,
-  CONFIG_VERSION,
   DATASET_SCHEMA_VERSION,
   EVAL_RUN_SCHEMA_VERSION,
   METRIC_PROTOCOL,
