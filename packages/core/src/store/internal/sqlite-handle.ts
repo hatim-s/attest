@@ -39,4 +39,28 @@ const openSqliteHandle = async (path: string): Promise<SqliteHandle> => {
   }
 };
 
-export { openSqliteHandle, type SqliteHandle, type SqliteStatement };
+/** Opens an existing database without migrations, write pragmas, or a creating fallback. */
+const openReadonlySqliteHandle = async (path: string): Promise<SqliteHandle> => {
+  const handle = await openNodeSqliteHandle(path, { readOnly: true });
+  if (!handle) {
+    throw new Error('Read-only run-store inspection requires node:sqlite support.');
+  }
+  return handle;
+};
+
+/** Opens a disposable copied database read-only while allowing SQLite to consume its copied WAL. */
+const openSnapshotSqliteHandle = async (path: string): Promise<SqliteHandle> => {
+  const handle = await openNodeSqliteHandle(path, { immutable: false, readOnly: true });
+  if (!handle) {
+    throw new Error('Run-store snapshot inspection requires node:sqlite support.');
+  }
+  return handle;
+};
+
+export {
+  openReadonlySqliteHandle,
+  openSnapshotSqliteHandle,
+  openSqliteHandle,
+  type SqliteHandle,
+  type SqliteStatement,
+};

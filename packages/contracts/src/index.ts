@@ -37,6 +37,7 @@ export {
 } from './parse.js';
 export type { ContractIssue, ContractWarning, ParseReport } from './parse.js';
 export type { Result } from './result.js';
+export { CONTRACT_JSON_SCHEMAS, serializeContractSchema } from './json-schema.js';
 export { spanKindSchema, spanSchema, traceSchema } from './trace.js';
 export type { Span, SpanKind, Trace } from './trace.js';
 export {

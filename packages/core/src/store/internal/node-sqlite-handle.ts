@@ -1,7 +1,17 @@
+import { pathToFileURL } from 'node:url';
+
 import type { SqliteHandle } from './sqlite-handle.js';
 
+interface NodeSqliteHandleOptions {
+  immutable?: boolean;
+  readOnly?: boolean;
+}
+
 /** Opens node:sqlite lazily so unsupported Node runtimes can use the libsql fallback. */
-const openNodeSqliteHandle = async (path: string): Promise<SqliteHandle | undefined> => {
+const openNodeSqliteHandle = async (
+  path: string,
+  options: NodeSqliteHandleOptions = {},
+): Promise<SqliteHandle | undefined> => {
   let sqliteModule: typeof import('node:sqlite');
   try {
     sqliteModule = await import('node:sqlite');
@@ -9,7 +19,12 @@ const openNodeSqliteHandle = async (path: string): Promise<SqliteHandle | undefi
     return undefined;
   }
 
-  const database = new sqliteModule.DatabaseSync(path);
+  // Immutable mode prevents sidecars for direct inspection; snapshots must retain WAL visibility.
+  const location =
+    options.readOnly === true && options.immutable !== false
+      ? `${pathToFileURL(path).href}?immutable=1`
+      : path;
+  const database = new sqliteModule.DatabaseSync(location, { readOnly: options.readOnly });
   return {
     prepare: (sql) => {
       const statement = database.prepare(sql);
@@ -28,4 +43,4 @@ const openNodeSqliteHandle = async (path: string): Promise<SqliteHandle | undefi
   };
 };
 
-export { openNodeSqliteHandle };
+export { openNodeSqliteHandle, type NodeSqliteHandleOptions };

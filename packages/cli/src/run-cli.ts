@@ -1,12 +1,17 @@
 import { createRequire } from 'node:module';
 import { mkdir, writeFile } from 'node:fs/promises';
-import { dirname, relative, resolve } from 'node:path';
+import { dirname, resolve } from 'node:path';
 
 import { type CliExitCode } from '@attest/contracts';
 import { diffRuns, openStore, runToJUnitXml } from '@attest/core';
 import { Command, CommanderError, Option } from 'commander';
 
 import { loadConfig } from './config/load-config.js';
+import {
+  createDefaultCliInteraction,
+  registerProjectResourceCommands,
+  type CliInteraction,
+} from './commands/register-project-resource-commands.js';
 import {
   AttestCliError,
   createCliErrorCatalog,
@@ -15,7 +20,6 @@ import {
   serializeCliError,
 } from './errors.js';
 import { createCliHelp, renderCliHelp, setCliCommandHelpMetadata } from './help/command-help.js';
-import { initProject } from './init/init-project.js';
 import {
   diffToJson,
   renderDiffSummary,
@@ -46,6 +50,7 @@ type CliIo = {
 };
 
 type RunCliOptions = {
+  interaction?: Partial<CliInteraction>;
   io?: CliIo;
   workingDirectory?: string;
 };
@@ -61,10 +66,6 @@ type RunCommandOptions = {
 type DiffCommandOptions = {
   format: 'human' | 'json';
   store?: string;
-};
-
-type InitCommandOptions = {
-  force?: boolean;
 };
 
 type ViewCommandOptions = {
@@ -129,6 +130,7 @@ const createProgram = (
   io: CliIo,
   workingDirectory: string,
   setExitCode: (exitCode: CliExitCode) => void,
+  interaction: CliInteraction = createDefaultCliInteraction(),
 ): Command => {
   const packageMetadata = require('../package.json') as PackageMetadata;
   const program = new Command()
@@ -140,21 +142,6 @@ const createProgram = (
     .configureOutput({
       writeOut: io.output,
       writeErr: io.error,
-    });
-
-  program
-    .command('init')
-    .description('Create a runnable local quickstart without overwriting files by default.')
-    .argument('[directory]', 'target project directory', '.')
-    .option('--force', 'replace generated files that already exist')
-    .action(async (directory: string, options: InitCommandOptions) => {
-      const result = await initProject(directory, workingDirectory, { force: options.force });
-      const fileList = result.files
-        .map((filePath) => `  ${relative(result.targetDirectory, filePath)}`)
-        .join('\n');
-      io.output(
-        `Initialized Attest quickstart in ${result.targetDirectory}:\n${fileList}\n\nNext: cd ${result.targetDirectory} && attest run`,
-      );
     });
 
   program
@@ -286,8 +273,9 @@ const createProgram = (
     )
     .action((commandPath: string[], options: ProtocolCommandOptions) => {
       const help = createCliHelp(program, commandPath);
+      const output = options.output;
       io.output(
-        options.output === 'json'
+        output === 'json'
           ? serializeCliResult(createCliSuccessResult('help', help))
           : renderCliHelp(help),
       );
@@ -307,8 +295,9 @@ const createProgram = (
     )
     .action((options: ProtocolCommandOptions) => {
       const catalog = createCliErrorCatalog();
+      const output = options.output;
       io.output(
-        options.output === 'json'
+        output === 'json'
           ? serializeCliResult(createCliSuccessResult('errors', catalog))
           : renderCliErrorCatalog(catalog),
       );
@@ -318,33 +307,63 @@ const createProgram = (
     options: { output: { implies: ['non-interactive'] } },
   });
 
+  registerProjectResourceCommands({
+    interaction,
+    io,
+    program,
+    workingDirectory,
+  });
+
   setCliCommandHelpMetadata(program, {
-    examples: ['attest help --output json', 'attest errors --output json'],
+    examples: [
+      'attest help --output json',
+      'attest errors --output json',
+      'attest project init',
+      'attest list agents --output json',
+    ],
   });
 
   return program;
 };
 
 const requestedStructuredOutput = (argv: readonly string[]): boolean => {
-  if (argv[0] !== 'help' && argv[0] !== 'errors') {
-    return false;
-  }
-
-  return argv.some(
-    (argument, index) =>
-      argument === '--output=json' ||
-      argument === '--output=jsonl' ||
-      (argument === '--output' && (argv[index + 1] === 'json' || argv[index + 1] === 'jsonl')),
+  const command = requestedCommand(argv);
+  const supportsStructuredOutput =
+    command === 'help' ||
+    command === 'errors' ||
+    command === 'init' ||
+    command === 'list' ||
+    command === 'show' ||
+    command.startsWith('project.') ||
+    command.startsWith('schema.');
+  return (
+    supportsStructuredOutput &&
+    argv.some(
+      (argument, index) =>
+        argument === '--output=json' ||
+        argument === '--output=jsonl' ||
+        (argument === '--output' && (argv[index + 1] === 'json' || argv[index + 1] === 'jsonl')),
+    )
   );
 };
 
 const requestedCommand = (argv: readonly string[]): string => {
   const first = argv[0];
+  const second = argv[1];
   if (first === undefined || first.startsWith('-')) {
     return 'cli';
   }
-  if (first === 'trace' && argv[1] === 'convert') {
+  if (first === 'trace' && second === 'convert') {
     return 'trace.convert';
+  }
+  if (first === 'init') {
+    return 'project.init';
+  }
+  if (first === 'project' && ['init', 'show', 'validate'].includes(second ?? '')) {
+    return `project.${second}`;
+  }
+  if (first === 'schema' && ['list', 'print'].includes(second ?? '')) {
+    return `schema.${second}`;
   }
   return /^[a-z][a-z0-9-]*$/.test(first) ? first : 'cli';
 };
@@ -356,9 +375,15 @@ const runCli = async (argv: string[], options: RunCliOptions = {}): Promise<numb
   const structuredOutput = requestedStructuredOutput(argv);
   const commandIo: CliIo = structuredOutput ? { output: io.output, error: () => undefined } : io;
   let exitCode: CliExitCode = 0;
-  const program = createProgram(commandIo, workingDirectory, (nextExitCode) => {
-    exitCode = nextExitCode;
-  });
+  const interaction = { ...createDefaultCliInteraction(), ...options.interaction };
+  const program = createProgram(
+    commandIo,
+    workingDirectory,
+    (nextExitCode) => {
+      exitCode = nextExitCode;
+    },
+    interaction,
+  );
 
   try {
     await program.parseAsync(argv, { from: 'user' });
