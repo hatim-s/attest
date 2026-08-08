@@ -12,6 +12,7 @@ import {
 } from '@attest/contracts';
 import { afterEach, describe, expect, it } from 'vitest';
 
+import { serializeCliError } from '../../errors.js';
 import { hashCanonicalJson } from '../../project/canonical-project.js';
 import { loadProject } from '../../project/load-project.js';
 import {
@@ -23,7 +24,9 @@ import { prepareProjectCandidate } from '../../project/transaction/candidate-pro
 import { prepareTransaction } from '../../project/transaction/transaction-journal.js';
 import { createFileChanges } from '../../project/transaction/transactional-writer.js';
 import { runCli, type CliIo } from '../../run-cli.js';
+import { runConfirmedDatasetImport } from './register-test-commands.js';
 import { runTestMutationCommand } from './test-command.js';
+import { validateCommandRequest } from './test-command-input.js';
 
 const temporaryDirectories: string[] = [];
 
@@ -1142,6 +1145,148 @@ describe('CLI2.7/CLI2.8 test, case, dataset, and import authoring', { timeout: 2
     expect(
       (await loadProject({ project: root })).tests.find(({ id }) => id === 'guided')?.cases,
     ).toHaveLength(1);
+  });
+
+  it('binds the unshared fallback commit to its preview across a concurrent attachment', async () => {
+    const soloRoot = await createProject();
+    await runJson(soloRoot, ['test', 'add', 'solo-owner', '--agent', 'support']);
+    await runJson(soloRoot, ['test', 'dataset', 'add', 'solo-owner', 'solo']);
+    const soloSource = join(soloRoot, 'solo.jsonl');
+    await writeFile(soloSource, '{"id":"solo-case","input":"value"}\n');
+    const solo = await runJson(soloRoot, [
+      'test',
+      'dataset',
+      'import',
+      'solo-owner',
+      soloSource,
+      '--as',
+      'solo',
+      '--sync',
+      'upsert',
+      '--yes',
+    ]);
+    expect(solo.document).toMatchObject({ ok: true, result: { committed: true } });
+    if (!solo.document.ok) throw new Error('Expected normal unshared dataset update.');
+    expect(solo.document.result).not.toHaveProperty('shared_dataset_preview');
+
+    const root = await createProject();
+    await runJson(root, ['test', 'add', 'race-owner', '--agent', 'support']);
+    await runJson(root, ['test', 'add', 'race-reader', '--agent', 'support']);
+    await runJson(root, ['test', 'dataset', 'add', 'race-owner', 'race']);
+    const source = join(root, 'race.jsonl');
+    await writeFile(source, '{"id":"race-case","input":"must-not-publish"}\n');
+    const request = validateCommandRequest('test.dataset.import', {
+      schema: COMMAND_REQUEST_SCHEMA_VERSION,
+      command: 'test.dataset.import',
+      test_id: 'race-owner',
+      source,
+      as: 'race',
+      yes: true,
+      import: { format: 'jsonl', sync: 'upsert' },
+    });
+    const collected = collectIo();
+    let afterAttachment: Record<string, string> | undefined;
+    let previewHash: null | string | undefined;
+    let failure: unknown;
+    try {
+      await runConfirmedDatasetImport(
+        request,
+        { output: 'json', project: root },
+        {
+          interaction: {
+            ...nonInteractive(),
+            readImportStdin: async function* readImportStdin() {
+              await Promise.resolve();
+              yield '';
+            },
+          },
+          io: collected.io,
+          workingDirectory: root,
+        },
+        async (mutationRequest, _options, _context, preparedImportSource) => {
+          const result = await runTestMutationCommand({
+            preparedImportSource,
+            project: root,
+            readImportStdin: async function* readImportStdin() {
+              await Promise.resolve();
+              yield '';
+            },
+            readStdin: () => Promise.resolve(''),
+            request: mutationRequest,
+            workingDirectory: root,
+          });
+          if (mutationRequest.dry_run === true) {
+            previewHash = result.projectHashBefore;
+            await runJson(root, ['test', 'dataset', 'attach', 'race-reader', 'race']);
+            afterAttachment = await snapshotProject(root);
+          }
+          return result;
+        },
+      );
+    } catch (error: unknown) {
+      failure = error;
+    }
+
+    expect(previewHash).toEqual(expect.any(String));
+    expect(afterAttachment).toBeDefined();
+    expect(serializeCliError(failure)).toMatchObject({
+      exitCode: 3,
+      error: {
+        code: 'project_changed',
+        details: { expected_hash: previewHash },
+      },
+    });
+    expect(collected.output).toEqual([]);
+    expect(await snapshotProject(root)).toEqual(afterAttachment);
+    const loaded = await loadProject({ project: root });
+    expect(loaded.datasets.find(({ metadata }) => metadata.id === 'race')?.cases).toEqual([]);
+    expect(loaded.tests.map(({ id }) => id)).toEqual(
+      expect.arrayContaining(['race-owner', 'race-reader', 'refund']),
+    );
+    for (const testId of ['race-owner', 'race-reader']) {
+      expect(
+        loaded.tests
+          .find(({ id }) => id === testId)
+          ?.datasets.some(({ dataset_id: datasetId }) => datasetId === 'race'),
+      ).toBe(true);
+    }
+
+    await runJson(root, ['test', 'add', 'race-reader-2', '--agent', 'support']);
+    const prompted = collectIo();
+    let afterPromptAttachment: Record<string, string> | undefined;
+    let promptCount = 0;
+    const promptExitCode = await runCli(
+      ['test', 'dataset', 'import', 'race-owner', source, '--as', 'race', '--sync', 'upsert'],
+      {
+        interaction: {
+          ...nonInteractive(),
+          inputIsTTY: true,
+          outputIsTTY: true,
+          prompt: async (question) => {
+            expect(question).toBe('Apply this import? [y/N]: ');
+            promptCount += 1;
+            await runJson(root, ['test', 'dataset', 'attach', 'race-reader-2', 'race']);
+            afterPromptAttachment = await snapshotProject(root);
+            return 'yes';
+          },
+        },
+        io: prompted.io,
+        workingDirectory: root,
+      },
+    );
+    expect(promptCount).toBe(1);
+    expect(promptExitCode).toBe(3);
+    expect(prompted.errors.join('\n')).toContain(
+      'project_changed: The project changed after it was read.',
+    );
+    expect(await snapshotProject(root)).toEqual(afterPromptAttachment);
+    const afterPrompt = await loadProject({ project: root });
+    expect(afterPrompt.datasets.find(({ metadata }) => metadata.id === 'race')?.cases).toEqual([]);
+    expect(
+      afterPrompt.tests
+        .find(({ id }) => id === 'race-reader-2')
+        ?.datasets.some(({ dataset_id: datasetId }) => datasetId === 'race'),
+    ).toBe(true);
   });
 
   it('refuses silent shared dataset updates until previewed and explicitly confirmed', async () => {

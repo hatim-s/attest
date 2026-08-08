@@ -259,7 +259,7 @@ const confirmRemoval = async (
 const executeMutation = async (
   request: TestAuthoringCommand,
   options: MutationOptions,
-  context: RegisterTestCommandsOptions,
+  context: Pick<RegisterTestCommandsOptions, 'interaction' | 'workingDirectory'>,
   preparedImportSource?: Uint8Array,
 ): Promise<CommandResult> =>
   runTestMutationCommand({
@@ -270,6 +270,8 @@ const executeMutation = async (
     request,
     workingDirectory: context.workingDirectory,
   });
+
+type MutationExecutor = typeof executeMutation;
 
 const runMutation = async (
   command: TestAuthoringCommand['command'],
@@ -286,7 +288,8 @@ const runMutation = async (
 const runConfirmedDatasetImport = async (
   request: Extract<TestAuthoringCommand, { command: 'test.dataset.import' }>,
   options: MutationOptions,
-  context: RegisterTestCommandsOptions,
+  context: Pick<RegisterTestCommandsOptions, 'interaction' | 'io' | 'workingDirectory'>,
+  execute: MutationExecutor = executeMutation,
 ): Promise<void> => {
   const prepared = await prepareImportSource(
     request.source,
@@ -298,15 +301,11 @@ const runConfirmedDatasetImport = async (
     ...request,
     dry_run: true,
   });
-  const preview = await executeMutation(previewRequest, options, context, prepared.source);
+  const preview = await execute(previewRequest, options, context, prepared.source);
   const previewResult = preview.result as Record<string, JsonValue>;
   const affectedTests = Array.isArray(previewResult.affected_tests)
     ? previewResult.affected_tests.filter((value): value is string => typeof value === 'string')
     : [];
-  if (affectedTests.length < 2) {
-    await runMutation('test.dataset.import', request, options, context, prepared.source);
-    return;
-  }
   const previewProjectHash = preview.projectHashBefore;
   if (previewProjectHash === null || previewProjectHash === undefined) {
     throw new Error('Dataset import preview did not return its base project hash.');
@@ -318,7 +317,13 @@ const runConfirmedDatasetImport = async (
     if_project_hash: previewProjectHash,
     yes: true,
   });
-  const committed = await executeMutation(confirmedRequest, options, context, prepared.source);
+  if (affectedTests.length < 2) {
+    const committed = await execute(confirmedRequest, options, context, prepared.source);
+    context.io.output(renderCommandResult('test.dataset.import', outputFormat(options), committed));
+    return;
+  }
+
+  const committed = await execute(confirmedRequest, options, context, prepared.source);
   const committedResult = committed.result as Record<string, JsonValue>;
   const combined: CommandResult = {
     ...committed,
@@ -1089,4 +1094,4 @@ const registerTestCommands = (context: RegisterTestCommandsOptions): void => {
   });
 };
 
-export { registerTestCommands, type RegisterTestCommandsOptions };
+export { registerTestCommands, runConfirmedDatasetImport, type RegisterTestCommandsOptions };
