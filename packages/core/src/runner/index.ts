@@ -2,10 +2,27 @@ export { AgentInvocationError, ConfigInvalidError, type InvocationErrorCode } fr
 export { invokeAgent } from './invoke.js';
 export {
   invokeMappedHttpAgent,
+  redactEventEvidence,
   redactTransportText,
   type HttpAgentResource,
   type MappedHttpInvokeOptions,
 } from './adapters/http/index.js';
+export {
+  BackgroundAgentSession,
+  JsonlBridgeSession,
+  assertLoopbackUrl,
+  startBackgroundAgent,
+  startJsonlBridgeAgent,
+  type BackgroundAgentResource,
+  type BackgroundSessionOptions,
+  type JsonlBridgeAgentResource,
+  type JsonlBridgeSessionOptions,
+} from './adapters/process/index.js';
+export {
+  invokeStreamingAgent,
+  type StreamAgentResource,
+  type StreamInvokeOptions,
+} from './adapters/stream/index.js';
 export { loadDatasetCases } from './dataset.js';
 export { collectExecutions, executeCases } from './execute.js';
 export {
