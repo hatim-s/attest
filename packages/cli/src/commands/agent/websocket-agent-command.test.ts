@@ -302,6 +302,28 @@ describe('CLI2.12 WebSocket agent UX', () => {
     }
   });
 
+  it('derives a serial connection for per-case flags when the mode is omitted', async () => {
+    const root = await createProject();
+    const result = await run(root, [
+      'agent',
+      'add',
+      'per-case-default',
+      '--websocket-url',
+      'wss://agent.example/socket',
+      '--websocket-lifecycle',
+      'per_case',
+      '--output',
+      'json',
+    ]);
+    expect(result.exitCode, result.output.join('')).toBe(0);
+    const loaded = await loadProject({ project: root });
+    expect(loaded.agents[0]?.transport).toMatchObject({
+      kind: 'websocket',
+      lifecycle: 'per_case',
+      connection_mode: 'serial',
+    });
+  });
+
   it('aggregates inapplicable and conflicting flags before any project write', async () => {
     const root = await createProject();
     const before = await snapshotTree(root);
@@ -401,6 +423,79 @@ describe('CLI2.12 WebSocket agent UX', () => {
       },
     });
     expect(await snapshotTree(root)).toEqual(beforeUnsafeImport);
+  });
+
+  it('rejects and redacts recursive request-template credentials from flags and JSON import', async () => {
+    const root = await createProject();
+    const beforeFlags = await snapshotTree(root);
+    const flagSecret = 'flag-template-secret';
+    const unsafeFlags = await run(root, [
+      'agent',
+      'add',
+      'unsafe-flags',
+      '--websocket-url',
+      'wss://agent.example/socket',
+      '--request-template',
+      JSON.stringify({
+        request_id: '{{request_id}}',
+        nested: { api_key: flagSecret },
+      }),
+      '--output',
+      'json',
+    ]);
+    expect(unsafeFlags.exitCode).toBe(1);
+    expect(unsafeFlags.output.join('')).not.toContain(flagSecret);
+    const flagDocument = JSON.parse(unsafeFlags.output[0] ?? '{}') as {
+      error: { hint?: string; path?: string };
+    };
+    expect(flagDocument).toMatchObject({
+      error: {
+        code: 'project_invalid',
+        message: 'WebSocket request templates cannot contain credential-like fields.',
+        path: '/agent/transport/request_template/nested/api_key',
+      },
+    });
+    expect(flagDocument.error.hint).toContain('--header-env');
+    expect(await snapshotTree(root)).toEqual(beforeFlags);
+
+    const importSecret = 'json-template-secret';
+    await writeFile(
+      join(root, 'unsafe-template.json'),
+      JSON.stringify({
+        ...canonicalAgent('unsafe-template'),
+        transport: {
+          ...canonicalTransport(),
+          request_template: {
+            request_id: '{{request_id}}',
+            nested: [{ token: importSecret }],
+          },
+        },
+      }),
+    );
+    const beforeImport = await snapshotTree(root);
+    const unsafeImport = await run(root, [
+      'agent',
+      'import',
+      'unsafe-template.json',
+      '--as',
+      'unsafe-import',
+      '--output',
+      'json',
+    ]);
+    expect(unsafeImport.exitCode).toBe(1);
+    expect(unsafeImport.output.join('')).not.toContain(importSecret);
+    const importDocument = JSON.parse(unsafeImport.output[0] ?? '{}') as {
+      error: { hint?: string; path?: string };
+    };
+    expect(importDocument).toMatchObject({
+      error: {
+        code: 'project_invalid',
+        message: 'WebSocket request templates cannot contain credential-like fields.',
+        path: '/agent/transport/request_template/nested/0/token',
+      },
+    });
+    expect(importDocument.error.hint).toContain('--header-env');
+    expect(await snapshotTree(root)).toEqual(beforeImport);
   });
 
   it('routes agent.test flag and JSON requests through the integrated runtime surface', async () => {

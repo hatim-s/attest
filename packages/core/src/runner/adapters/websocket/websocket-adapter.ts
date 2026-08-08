@@ -379,10 +379,11 @@ class WebSocketAgentSession {
     const pending = this.newPending(request, requestId, resolveResult, signal);
     let connection: WebSocketConnection | undefined;
     const attemptController = new AbortController();
-    const signalCombined =
-      signal === undefined
-        ? attemptController.signal
-        : AbortSignal.any([signal, attemptController.signal]);
+    const signalCombined = AbortSignal.any([
+      attemptController.signal,
+      this.lifecycleController.signal,
+      ...(signal === undefined ? [] : [signal]),
+    ]);
     const lose = (error: AgentInvocationError): void => {
       if (!this.pending.has(requestId)) return;
       this.settleFailure(pending, error, errorClassification(error));
@@ -406,9 +407,14 @@ class WebSocketAgentSession {
         onPong: () => this.record(pending, 'pong_received'),
         onText: (text, bytes) => this.consumeMessage(text, bytes, new Set([requestId])),
       });
+      // Closing a session can settle the invocation while an HTTP upgrade is still racing.
+      if (this.closed || signalCombined.aborted || !this.pending.has(requestId)) {
+        connection.destroy();
+        return result;
+      }
       pending.connection = connection;
       this.record(pending, 'connection_opened');
-      this.send(pending, connection);
+      await this.send(pending, connection, signalCombined);
       const terminal = await result;
       const close = await connection.close(this.agent.transport.close_timeout_ms);
       this.recordClose(pending, close);
@@ -478,7 +484,7 @@ class WebSocketAgentSession {
     try {
       const connection = await this.ensureConnection();
       if (!this.pending.has(pending.requestId)) return;
-      this.send(pending, connection);
+      await this.send(pending, connection);
     } catch (error: unknown) {
       if (!this.pending.has(pending.requestId)) return;
       const normalized =
@@ -532,16 +538,22 @@ class WebSocketAgentSession {
         : { subprotocol: this.agent.transport.subprotocol }),
       openTimeoutMs: this.agent.transport.open_timeout_ms,
       maximumMessageBytes: this.agent.limits?.event_bytes ?? DEFAULT_EVENT_BYTES,
+      maximumPendingWriteBytes: this.agent.limits?.request_bytes ?? DEFAULT_REQUEST_BYTES,
       secrets: this.secrets,
       signal,
-      callerSignal: this.options.signal,
+      callerSignal: signal,
       callbacks,
     });
   }
 
-  private send(pending: PendingInvocation, connection: WebSocketConnection): void {
+  private async send(
+    pending: PendingInvocation,
+    connection: WebSocketConnection,
+    signal = pending.signal,
+  ): Promise<void> {
     const text = materializeRequest(this.agent, pending.request, pending.requestId);
-    connection.sendText(text);
+    await connection.sendText(text, signal);
+    if (!this.pending.has(pending.requestId)) return;
     this.record(pending, 'request_sent', Buffer.byteLength(text));
     this.resetIdle(pending);
   }
@@ -999,7 +1011,7 @@ class WebSocketAgentSession {
     if (this.pingTimer !== undefined) clearInterval(this.pingTimer);
     this.pingTimer = setInterval(() => {
       if (generation !== this.connectionGeneration || this.connection !== connection) return;
-      connection.ping();
+      if (!connection.ping()) return;
       for (const pending of this.pending.values()) this.record(pending, 'ping_sent');
     }, this.agent.transport.ping_interval_ms);
   }

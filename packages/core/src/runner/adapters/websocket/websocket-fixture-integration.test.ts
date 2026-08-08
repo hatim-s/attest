@@ -58,8 +58,11 @@ const request = (caseId: string): AgentRequest => ({
 });
 
 /** Starts and tracks one hostile endpoint so failures cannot leak local sockets. */
-const start = async (scenario: WebSocketFixtureScenarioName): Promise<WebSocketFixtureServer> => {
-  const fixture = await startWebSocketFixtureServer(scenario);
+const start = async (
+  scenario: WebSocketFixtureScenarioName,
+  options: Parameters<typeof startWebSocketFixtureServer>[1] = {},
+): Promise<WebSocketFixtureServer> => {
+  const fixture = await startWebSocketFixtureServer(scenario, options);
   fixtures.push(fixture);
   return fixture;
 };
@@ -182,6 +185,21 @@ describe('WebSocket runtime and hostile fixture integration', () => {
     expect(cancellationResult.status).toBe('invocation_error');
     expect(evidence(cancellationResult)).toMatchObject({ error_classification: 'cancelled' });
     await cancellationSession.close().catch(() => undefined);
+  });
+
+  it('cancels a delayed per-case open before a closed session can send', async () => {
+    const fixture = await start('delayed_open', { openDelayMs: 80 });
+    const session = await startWebSocketAgent(
+      agent(fixture.url, { connection_mode: 'serial', lifecycle: 'per_case' }),
+    );
+    const invocation = session.invoke(request('closed-during-open'));
+    await fixture.waitForEvent((event) => event.type === 'upgrade_requested');
+    await session.close();
+    const result = await invocation;
+    expect(result.status).toBe('invocation_error');
+    expect(evidence(result)).toMatchObject({ error_classification: 'cancelled' });
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(fixture.events().some((event) => event.type === 'request_received')).toBe(false);
   });
 
   it.each([

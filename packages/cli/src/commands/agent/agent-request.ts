@@ -590,6 +590,17 @@ const assertSafeNativeAgentResource = (agent: AgentResource): void => {
     return;
   }
   if (transport.kind === 'websocket') {
+    const sensitiveTemplateField = findSensitiveBodyField(transport.request_template);
+    if (sensitiveTemplateField !== undefined) {
+      throw new AttestCliError(
+        'project_invalid',
+        'WebSocket request templates cannot contain credential-like fields.',
+        {
+          path: `/agent/transport/request_template${sensitiveTemplateField}`,
+          hint: 'Move credentials to an environment-backed header reference such as `--header-env Authorization=TOKEN_ENV`.',
+        },
+      );
+    }
     let url: URL;
     try {
       url = new URL(transport.url.replaceAll(/\{\{[^}]+\}\}/gu, 'placeholder'));
@@ -984,10 +995,12 @@ const createAgentResource = (fields: AgentAddFields): AgentResource => {
           }),
     };
   } else if (fields.webSocketUrl !== undefined) {
+    const lifecycle = fields.webSocketLifecycle ?? 'per_run';
     transport = {
       kind: 'websocket',
-      lifecycle: fields.webSocketLifecycle ?? 'per_run',
-      connection_mode: fields.connectionMode ?? 'multiplexed',
+      lifecycle,
+      connection_mode:
+        fields.connectionMode ?? (lifecycle === 'per_case' ? 'serial' : 'multiplexed'),
       framing: 'text_json',
       url: fields.webSocketUrl,
       ...(fields.headerEnv === undefined || fields.headerEnv.length === 0
