@@ -60,6 +60,7 @@ export {
   COMMAND_REQUEST_SCHEMA_VERSION,
   CONFIG_VERSION,
   DATASET_SCHEMA_VERSION,
+  EVAL_RUN_SCHEMA_VERSION,
   METRIC_PROTOCOL,
   METRIC_PRESET_SCHEMA_VERSION,
   METRIC_RESOURCE_SCHEMA_VERSION,
@@ -177,6 +178,50 @@ export {
   sha256Schema,
 } from './v2-shared.js';
 export type { ExecutionDefaults, SecretReference } from './v2-shared.js';
+export {
+  evalOutputModeSchema,
+  evalRunEffectiveCommandSchema,
+  evalRunIdSchema,
+  evalRunRequestSchema,
+  evalRunSchema,
+  evalRunSelectedCaseSchema,
+  evalRunSnapshotSchema,
+} from './eval-run-v1.js';
+export type {
+  EvalOutputMode,
+  EvalRun,
+  EvalRunEffectiveCommand,
+  EvalRunRequest,
+  EvalRunSelectedCase,
+  EvalRunSnapshot,
+} from './eval-run-v1.js';
+export {
+  evalCancelRequestSchema,
+  evalCancelResultPayloadSchema,
+  evalCancelResultSchema,
+} from './eval-cancel-v1.js';
+export type {
+  EvalCancelRequest,
+  EvalCancelResult,
+  EvalCancelResultPayload,
+} from './eval-cancel-v1.js';
+export {
+  evalCaseCompletedEventSchema,
+  evalCaseStartedEventSchema,
+  evalEventSchema,
+  evalEventStreamSchema,
+  evalFinalResultDataSchema,
+  evalResultEventSchema,
+  evalRunCompletedEventSchema,
+  evalRunStartedEventSchema,
+  evalRunSummarySchema,
+} from './eval-event-v1.js';
+export type {
+  EvalEvent,
+  EvalEventStream,
+  EvalFinalResultData,
+  EvalRunSummary,
+} from './eval-event-v1.js';
 export {
   webSocketAttemptEvidenceSchema,
   webSocketConnectionModeSchema,

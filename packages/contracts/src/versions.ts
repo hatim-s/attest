@@ -37,6 +37,9 @@ const METRIC_TEST_FIXTURE_SCHEMA_VERSION = 'attest.metric-test-fixture/v1' as co
 /** Identifies normalized v2 mutation requests accepted by --from-json. */
 const COMMAND_REQUEST_SCHEMA_VERSION = 'attest.command-request/v2' as const;
 
+/** Identifies immutable v2 eval-run snapshot metadata persisted at orchestration start. */
+const EVAL_RUN_SCHEMA_VERSION = 'attest.eval-run/v1' as const;
+
 /** Identifies the single-document success and failure envelope written by the CLI. */
 const CLI_RESULT_SCHEMA_VERSION = 'attest.cli-result/v1' as const;
 
@@ -69,6 +72,7 @@ export {
   COMMAND_REQUEST_SCHEMA_VERSION,
   CONFIG_VERSION,
   DATASET_SCHEMA_VERSION,
+  EVAL_RUN_SCHEMA_VERSION,
   METRIC_PROTOCOL,
   METRIC_PRESET_SCHEMA_VERSION,
   METRIC_RESOURCE_SCHEMA_VERSION,
