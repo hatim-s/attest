@@ -12,6 +12,7 @@ import {
   registerProjectResourceCommands,
   type CliInteraction,
 } from './commands/register-project-resource-commands.js';
+import { registerMetricCommands } from './commands/metric/register-metric-commands.js';
 import { registerTestCommands } from './commands/test/register-test-commands.js';
 import {
   AttestCliError,
@@ -372,6 +373,7 @@ const createProgram = (
     program,
     workingDirectory,
   });
+  registerMetricCommands({ interaction, io, program, workingDirectory });
   registerTestCommands({ interaction, io, program, workingDirectory });
 
   setCliCommandHelpMetadata(program, {
@@ -396,6 +398,7 @@ const requestedStructuredOutput = (argv: readonly string[]): boolean => {
     command === 'show' ||
     command.startsWith('project.') ||
     command.startsWith('agent.') ||
+    command.startsWith('metric.') ||
     command.startsWith('schema.') ||
     command.startsWith('test.');
   return (
@@ -447,6 +450,12 @@ const requestedCommand = (argv: readonly string[]): string => {
   }
   if (first === 'agent' && ['add', 'import', 'test', 'rename', 'remove'].includes(second ?? '')) {
     return `agent.${second}`;
+  }
+  if (
+    first === 'metric' &&
+    ['add', 'import', 'list', 'show', 'test', 'rename', 'remove'].includes(second ?? '')
+  ) {
+    return `metric.${second}`;
   }
   if (first === 'schema' && ['list', 'print'].includes(second ?? '')) {
     return `schema.${second}`;
