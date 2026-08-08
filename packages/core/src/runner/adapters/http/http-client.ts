@@ -60,28 +60,39 @@ const readResponseBody = async (
     let byteCount = 0;
     let evidenceBytes = 0;
     let settled = false;
+    let terminating = false;
     let idleTimer: NodeJS.Timeout;
 
     const finish = (operation: () => void): void => {
-      if (settled) return;
+      if (settled || terminating) return;
       settled = true;
       clearTimeout(idleTimer);
       policy.attemptSignal.removeEventListener('abort', abort);
       operation();
     };
+    const destroyAndReject = (error: Error): void => {
+      if (settled || terminating) return;
+      terminating = true;
+      clearTimeout(idleTimer);
+      policy.attemptSignal.removeEventListener('abort', abort);
+      // Do not let an idle/capped response survive the invocation as background socket I/O.
+      response.once('close', () => {
+        if (settled) return;
+        settled = true;
+        reject(error);
+      });
+      response.destroy();
+    };
     const resetIdle = (): void => {
       clearTimeout(idleTimer);
-      idleTimer = setTimeout(
-        () =>
-          finish(() =>
-            reject(new AgentInvocationError('timeout', 'Mapped HTTP response body timed out.')),
-          ),
-        policy.responseBodyTimeoutMs,
-      );
+      idleTimer = setTimeout(() => {
+        destroyAndReject(
+          new AgentInvocationError('timeout', 'Mapped HTTP response body timed out.'),
+        );
+      }, policy.responseBodyTimeoutMs);
     };
     const abort = (): void => {
-      response.destroy();
-      finish(() => reject(abortError(policy)));
+      destroyAndReject(abortError(policy));
     };
 
     policy.attemptSignal.addEventListener('abort', abort, { once: true });
@@ -98,25 +109,22 @@ const readResponseBody = async (
         evidenceBytes += retained.byteLength;
       }
       if (byteCount > policy.responseCapBytes) {
-        response.destroy();
         const prefix = redactTransportText(
           Buffer.concat(evidence, evidenceBytes).toString('utf8'),
           policy.secrets,
         );
-        finish(() =>
-          reject(
-            Object.assign(
-              new AgentInvocationError(
-                'output_cap_exceeded',
-                `Mapped HTTP response exceeds the ${policy.responseCapBytes}-byte response cap.`,
-              ),
-              {
-                rawExcerpt: {
-                  ...createRawExcerpt(prefix),
-                  truncated: true,
-                },
-              },
+        destroyAndReject(
+          Object.assign(
+            new AgentInvocationError(
+              'output_cap_exceeded',
+              `Mapped HTTP response exceeds the ${policy.responseCapBytes}-byte response cap.`,
             ),
+            {
+              rawExcerpt: {
+                ...createRawExcerpt(prefix),
+                truncated: true,
+              },
+            },
           ),
         );
         return;

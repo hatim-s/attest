@@ -577,6 +577,10 @@ describe('CLI2.6 agent authoring', () => {
         ])
       ).exitCode,
     ).toBe(0);
+    expect((await loadProject({ project: root })).agents[0]?.transport).toMatchObject({
+      kind: 'http',
+      response_mode: 'attest_envelope',
+    });
     const tested = await run(root, ['agent', 'test', 'http-agent', '--output', 'json']);
     expect(observedAuthorization).toBe(secret);
     expect(tested.output.join('')).not.toContain(secret);
@@ -993,7 +997,6 @@ describe('CLI2.6 agent authoring', () => {
         transport: {
           kind: 'http',
           lifecycle: 'external',
-          response_mode: 'attest_envelope',
           request: {
             url: 'https://agent.example/invoke',
             method: 'POST',
@@ -1017,6 +1020,13 @@ describe('CLI2.6 agent authoring', () => {
         ])
       ).exitCode,
     ).toBe(0);
+    const legacyHttp = (await loadProject({ project: root })).agents.find(
+      ({ id }) => id === 'redacted-http',
+    );
+    expect(legacyHttp?.transport).toMatchObject({
+      kind: 'http',
+      response_mode: 'attest_envelope',
+    });
     const httpProbe = await run(root, ['agent', 'test', 'redacted-http', '--output', 'json']);
     expect(httpProbe.output.join('')).not.toContain(headerSecret);
     expect(httpProbe.output.join('')).toContain(REDACTED);
@@ -1693,6 +1703,10 @@ describe('CLI2.6 agent authoring', () => {
       ).toBe(0);
       const tested = await run(root, ['agent', 'test', 'root-map', '--output', 'json']);
       expect(tested.exitCode).toBe(0);
+      const imported = (await loadProject({ project: root })).agents.find(
+        ({ id }) => id === 'root-map',
+      );
+      expect(imported?.transport).toMatchObject({ kind: 'http', response_mode: 'mapped' });
       expect(JSON.parse(tested.output[0] ?? '{}')).toMatchObject({
         result: { response: { output: { answer: 'root-result' } } },
       });

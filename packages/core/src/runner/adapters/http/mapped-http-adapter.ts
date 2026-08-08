@@ -37,8 +37,13 @@ type MappedHttpInvokeOptions = {
 };
 
 type CompletedHttpResponse = {
+  durationMs: number;
   remoteJobId?: string | number;
   response: HttpJsonResponse;
+};
+
+type TimedInvocationError = AgentInvocationError & {
+  attemptDurationMs?: number;
 };
 
 const DEFAULT_ATTEMPT_MS = 60_000;
@@ -202,6 +207,12 @@ const attemptFromError = (
   warnings: [],
 });
 
+/** Carries request-local timing through terminal error normalization without exposing it publicly. */
+const withAttemptDuration = (
+  error: AgentInvocationError,
+  durationMs: number,
+): TimedInvocationError => Object.assign(error, { attemptDurationMs: durationMs });
+
 const normalizeFailure = (
   error: unknown,
   signal: AbortSignal,
@@ -257,32 +268,39 @@ const runDirect = async (
   policy: Parameters<typeof requestJson>[1],
   signal: AbortSignal,
   retryAttempts: InvocationAttempt[],
-): Promise<HttpJsonResponse> => {
+): Promise<CompletedHttpResponse> => {
   const retries = agent.retry?.retries ?? 0;
   for (let retry = 0; ; retry += 1) {
     const attemptDuration = startTimer();
+    let response: HttpJsonResponse;
     try {
-      const response = await requestJson(materialized, policy);
-      if (response.status >= 200 && response.status < 300) return response;
-      if (retry >= retries || !retryableStatus(response.status)) throw statusError(response);
-      retryAttempts.push(attemptFromError(statusError(response), attemptDuration()));
-      await wait(
-        parseRetryAfter(response.headers['retry-after']) ?? retryDelay(agent, retry),
-        signal,
-        policy.callerSignal,
-      );
+      response = await requestJson(materialized, policy);
     } catch (error: unknown) {
+      const durationMs = attemptDuration();
       const normalized = normalizeFailure(error, signal, policy.callerSignal);
       if (
         retry >= retries ||
         normalized.code === 'cancelled' ||
         !retryableTransportError(normalized)
       ) {
-        throw normalized;
+        throw withAttemptDuration(normalized, durationMs);
       }
-      retryAttempts.push(attemptFromError(normalized, attemptDuration()));
+      retryAttempts.push(attemptFromError(normalized, durationMs));
       await wait(retryDelay(agent, retry), signal, policy.callerSignal);
+      continue;
     }
+    const durationMs = attemptDuration();
+    if (response.status >= 200 && response.status < 300) return { durationMs, response };
+    const error = statusError(response);
+    if (retry >= retries || !retryableStatus(response.status)) {
+      throw withAttemptDuration(error, durationMs);
+    }
+    retryAttempts.push(attemptFromError(error, durationMs));
+    await wait(
+      parseRetryAfter(response.headers['retry-after']) ?? retryDelay(agent, retry),
+      signal,
+      policy.callerSignal,
+    );
   }
 };
 
@@ -430,43 +448,50 @@ const runPolling = async (
   }
 
   let submitted: HttpJsonResponse | undefined;
+  let submittedDurationMs = 0;
   for (let retry = 0; ; retry += 1) {
     const attemptDuration = startTimer();
+    let response: HttpJsonResponse;
     try {
-      const response = await requestJson(submission, policy);
-      if (response.status >= 200 && response.status < 300) {
-        submitted = response;
-        break;
-      }
-      if (
-        transport.idempotency_header === undefined ||
-        retry >= retries ||
-        !retryableStatus(response.status)
-      ) {
-        throw statusError(response);
-      }
-      retryAttempts.push(attemptFromError(statusError(response), attemptDuration()));
-      await wait(
-        boundedPollingDelay(transport, response.headers['retry-after'], retryDelay(agent, retry)),
-        signal,
-        policy.callerSignal,
-      );
+      response = await requestJson(submission, policy);
     } catch (error: unknown) {
+      const durationMs = attemptDuration();
       const normalized = normalizeFailure(error, signal, policy.callerSignal);
       if (
         transport.idempotency_header === undefined ||
         retry >= retries ||
         !retryableTransportError(normalized)
       ) {
-        throw normalized;
+        throw withAttemptDuration(normalized, durationMs);
       }
-      retryAttempts.push(attemptFromError(normalized, attemptDuration()));
+      retryAttempts.push(attemptFromError(normalized, durationMs));
       await wait(
         boundedPollingDelay(transport, undefined, retryDelay(agent, retry)),
         signal,
         policy.callerSignal,
       );
+      continue;
     }
+    const durationMs = attemptDuration();
+    if (response.status >= 200 && response.status < 300) {
+      submitted = response;
+      submittedDurationMs = durationMs;
+      break;
+    }
+    const error = statusError(response);
+    if (
+      transport.idempotency_header === undefined ||
+      retry >= retries ||
+      !retryableStatus(response.status)
+    ) {
+      throw withAttemptDuration(error, durationMs);
+    }
+    retryAttempts.push(attemptFromError(error, durationMs));
+    await wait(
+      boundedPollingDelay(transport, response.headers['retry-after'], retryDelay(agent, retry)),
+      signal,
+      policy.callerSignal,
+    );
   }
 
   const jobId = readJsonPointer(submitted.raw, transport.job_id_pointer);
@@ -491,39 +516,57 @@ const runPolling = async (
   for (;;) {
     await wait(interval, signal, policy.callerSignal);
     let polled: HttpJsonResponse;
+    let polledDurationMs = submittedDurationMs;
     for (let retry = 0; ; retry += 1) {
       const attemptDuration = startTimer();
+      let response: HttpJsonResponse;
       try {
-        polled = await requestJson(pollRequest, policy);
-        if (polled.status >= 200 && polled.status < 300) break;
-        if (retry >= retries || !retryableStatus(polled.status)) throw statusError(polled);
-        retryAttempts.push(attemptFromError(statusError(polled), attemptDuration()));
-        await wait(
-          boundedPollingDelay(transport, polled.headers['retry-after'], retryDelay(agent, retry)),
-          signal,
-          policy.callerSignal,
-        );
+        response = await requestJson(pollRequest, policy);
       } catch (error: unknown) {
+        const durationMs = attemptDuration();
         const normalized = normalizeFailure(error, signal, policy.callerSignal);
-        if (retry >= retries || !retryableTransportError(normalized)) throw normalized;
-        retryAttempts.push(attemptFromError(normalized, attemptDuration()));
+        if (retry >= retries || !retryableTransportError(normalized)) {
+          throw withAttemptDuration(normalized, durationMs);
+        }
+        retryAttempts.push(attemptFromError(normalized, durationMs));
         await wait(
           boundedPollingDelay(transport, undefined, retryDelay(agent, retry)),
           signal,
           policy.callerSignal,
         );
+        continue;
       }
+      const durationMs = attemptDuration();
+      if (response.status >= 200 && response.status < 300) {
+        polled = response;
+        polledDurationMs = durationMs;
+        break;
+      }
+      const error = statusError(response);
+      if (retry >= retries || !retryableStatus(response.status)) {
+        throw withAttemptDuration(error, durationMs);
+      }
+      retryAttempts.push(attemptFromError(error, durationMs));
+      await wait(
+        boundedPollingDelay(transport, response.headers['retry-after'], retryDelay(agent, retry)),
+        signal,
+        policy.callerSignal,
+      );
     }
     const status = readJsonPointer(polled.raw, transport.status_pointer);
     if (transport.success_values.some((value) => isDeepStrictEqual(value, status))) {
       return {
+        durationMs: polledDurationMs,
         response: polled,
         remoteJobId:
           extractRemoteJobId(polled.raw, transport.extraction.remote_job_id_pointer) ?? jobId,
       };
     }
     if (transport.failure_values.some((value) => isDeepStrictEqual(value, status))) {
-      throw pollingFailure(transport, polled, policy.secrets);
+      throw withAttemptDuration(
+        pollingFailure(transport, polled, policy.secrets),
+        polledDurationMs,
+      );
     }
     const retryAfter = parseRetryAfter(polled.headers['retry-after']);
     interval =
@@ -545,7 +588,7 @@ const invokeMappedHttpAgent = async (
   request: AgentRequest,
   options: MappedHttpInvokeOptions = {},
 ): Promise<InvocationResult> => {
-  const duration = startTimer();
+  const invocationDuration = startTimer();
   const timeoutSignal = AbortSignal.timeout(agent.timeouts?.attempt_ms ?? DEFAULT_ATTEMPT_MS);
   const signal =
     options.signal === undefined ? timeoutSignal : AbortSignal.any([options.signal, timeoutSignal]);
@@ -559,6 +602,7 @@ const invokeMappedHttpAgent = async (
     secrets: options.secrets ?? [],
   };
   const retryAttempts: InvocationAttempt[] = [];
+  let terminalAttemptDurationMs: number | undefined;
   try {
     if (signal.aborted) {
       throw new AgentInvocationError(
@@ -578,16 +622,14 @@ const invokeMappedHttpAgent = async (
     );
     const completed =
       agent.transport.kind === 'http'
-        ? {
-            response: await runDirect(
-              agent as Parameters<typeof runDirect>[0],
-              request,
-              materialized,
-              policy,
-              signal,
-              retryAttempts,
-            ),
-          }
+        ? await runDirect(
+            agent as Parameters<typeof runDirect>[0],
+            request,
+            materialized,
+            policy,
+            signal,
+            retryAttempts,
+          )
         : await runPolling(
             agent as Parameters<typeof runPolling>[0],
             request,
@@ -596,6 +638,7 @@ const invokeMappedHttpAgent = async (
             signal,
             retryAttempts,
           );
+    terminalAttemptDurationMs = completed.durationMs;
     const { response } = completed;
     requireSuccessfulStatus(response);
     const remoteJobId =
@@ -617,7 +660,7 @@ const invokeMappedHttpAgent = async (
         httpStatus: response.status,
         ...(remoteJobId === undefined ? {} : { remoteJobId }),
       },
-      durationMs: duration(),
+      durationMs: completed.durationMs,
       rawExcerpt: response.rawExcerpt,
       warnings: report.warnings,
     };
@@ -627,7 +670,12 @@ const invokeMappedHttpAgent = async (
       httpStatus?: number;
       rawExcerpt?: InvocationAttempt['rawExcerpt'];
     };
-    const attempt = attemptFromError(normalized, duration());
+    const attempt = attemptFromError(
+      normalized,
+      (normalized as TimedInvocationError).attemptDurationMs ??
+        terminalAttemptDurationMs ??
+        invocationDuration(),
+    );
     return { ...attempt, attempts: [...retryAttempts, attempt] };
   }
 };

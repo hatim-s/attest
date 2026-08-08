@@ -264,13 +264,29 @@ describe('v2 agent transport contract', () => {
     expect(agentResourceSchema.safeParse({ ...agent, transport }).success).toBe(true);
   });
 
-  it('requires explicit HTTP response provenance and validates all polling invariants', () => {
-    const http = transports.find((transport) => transport.kind === 'http');
-    expect(http).toBeDefined();
-    const withoutMode = structuredClone(http) as Record<string, unknown>;
+  it('defaults legacy HTTP response provenance without overriding explicit new modes', () => {
+    const explicitMapped = transports.find((transport) => transport.kind === 'http');
+    expect(explicitMapped).toBeDefined();
+    const explicitNative = {
+      kind: 'http',
+      lifecycle: 'external',
+      response_mode: 'attest_envelope',
+      request: { url: 'https://example.com/invoke', method: 'POST' },
+      extraction: { result_pointer: '' },
+    } as const;
+    const withoutMode = structuredClone(explicitNative) as Record<string, unknown>;
     Reflect.deleteProperty(withoutMode, 'response_mode');
-    expect(agentResourceSchema.safeParse({ ...agent, transport: withoutMode }).success).toBe(false);
+    const legacy = agentResourceSchema.parse({ ...agent, transport: withoutMode });
+    expect(legacy.transport).toMatchObject({ kind: 'http', response_mode: 'attest_envelope' });
+    expect(
+      agentResourceSchema.parse({ ...agent, transport: explicitNative }).transport,
+    ).toMatchObject({ kind: 'http', response_mode: 'attest_envelope' });
+    expect(
+      agentResourceSchema.parse({ ...agent, transport: explicitMapped }).transport,
+    ).toMatchObject({ kind: 'http', response_mode: 'mapped' });
+  });
 
+  it('validates all polling invariants', () => {
     const polling = transports.find((transport) => transport.kind === 'polling');
     expect(polling?.kind).toBe('polling');
     if (polling?.kind !== 'polling') throw new Error('Expected polling fixture.');
