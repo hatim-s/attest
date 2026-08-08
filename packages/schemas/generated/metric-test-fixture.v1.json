@@ -252,6 +252,9 @@
     "case": {
       "$ref": "#/$defs/V2TestCase"
     },
+    "expected_pass": {
+      "type": "boolean"
+    },
     "output": {
       "$ref": "#/$defs/__schema3"
     },
@@ -444,6 +447,7 @@
   "required": [
     "schema",
     "case",
+    "expected_pass",
     "output",
     "trace"
   ],

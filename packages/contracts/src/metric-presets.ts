@@ -27,11 +27,28 @@ const metricPresetSchema = z.strictObject({
   definition: metricResourceSchema.shape.definition,
 });
 
+type DeepReadonly<T> = T extends (...arguments_: never[]) => unknown
+  ? T
+  : T extends readonly (infer Item)[]
+    ? readonly DeepReadonly<Item>[]
+    : T extends object
+      ? { readonly [Key in keyof T]: DeepReadonly<T[Key]> }
+      : T;
+
+/** Freezes every preset field so stable catalog lookups cannot be mutated by consumers. */
+const deepFreeze = <T>(value: T): DeepReadonly<T> => {
+  if (value !== null && typeof value === 'object' && !Object.isFrozen(value)) {
+    for (const nested of Object.values(value)) deepFreeze(nested);
+    Object.freeze(value);
+  }
+  return value as DeepReadonly<T>;
+};
+
 /**
  * Publishes versioned defaults rather than hidden wizard prompts. Placeholder values are valid,
  * reviewable metric definitions and are always replaced by required author input before commit.
  */
-const METRIC_PRESETS = metricPresetSchema.array().parse([
+const parsedMetricPresets = metricPresetSchema.array().parse([
   {
     schema: METRIC_PRESET_SCHEMA_VERSION,
     id: 'output-equals',
@@ -39,14 +56,17 @@ const METRIC_PRESETS = metricPresetSchema.array().parse([
     description: 'Require one output or expected-data path to equal a JSON value.',
     required_inputs: ['value'],
     configurable_fields: ['path'],
-    definition: { kind: 'assertion', assertions: [{ equals: { path: '$.output', value: null } }] },
+    definition: {
+      kind: 'assertion',
+      assertions: [{ equals: { path: '$.output', value: null } }],
+    },
   },
   {
     schema: METRIC_PRESET_SCHEMA_VERSION,
     id: 'output-contains',
     name: 'Output contains',
     description:
-      'Require one output path to contain a JSON string, array member, or object subset.',
+      'Require one output path to contain a string substring or deep-equal array member.',
     required_inputs: ['value'],
     configurable_fields: ['path'],
     definition: {
@@ -142,14 +162,15 @@ const METRIC_PRESETS = metricPresetSchema.array().parse([
     configurable_fields: [],
     definition: {
       kind: 'assertion',
-      assertions: [{ tool_calls: { status: 'error', count: 0 } }],
+      assertions: [{ spans: { filter: { kind: 'tool', status: 'error' }, count: 0 } }],
     },
   },
   {
     schema: METRIC_PRESET_SCHEMA_VERSION,
     id: 'trace-span',
     name: 'Trace span',
-    description: 'Require spans matching stable trace fields, attributes, count, or order.',
+    description:
+      'Require a trace-capable fixture with spans matching stable fields, attributes, count, or order.',
     required_inputs: [],
     configurable_fields: ['filter', 'count', 'order'],
     definition: {
@@ -158,8 +179,9 @@ const METRIC_PRESETS = metricPresetSchema.array().parse([
     },
   },
 ]);
+const METRIC_PRESETS = deepFreeze(parsedMetricPresets);
 
-type MetricPreset = z.infer<typeof metricPresetSchema>;
+type MetricPreset = DeepReadonly<z.infer<typeof metricPresetSchema>>;
 type MetricPresetId = z.infer<typeof metricPresetIdSchema>;
 
 /** Resolves one stable preset id without exposing array-order assumptions to callers. */

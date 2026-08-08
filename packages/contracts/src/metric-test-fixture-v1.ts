@@ -9,6 +9,7 @@ const metricTestFixtureSchema = z
   .strictObject({
     schema: z.literal(METRIC_TEST_FIXTURE_SCHEMA_VERSION),
     case: testCaseSchema,
+    expected_pass: z.boolean(),
     output: z.json(),
     trace: traceSchema.nullable(),
   })

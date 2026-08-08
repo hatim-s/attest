@@ -1,6 +1,7 @@
 import {
   COMMAND_REQUEST_SCHEMA_VERSION,
   METRIC_PRESETS,
+  type MetricPreset,
   type MetricPresetId,
 } from '@attest/contracts';
 import { Command, Option } from 'commander';
@@ -51,6 +52,17 @@ type RemoveOptions = MutationOptions & { detach?: boolean };
 type TestOptions = CommonOptions & { fixture?: string; fromJson?: string };
 
 const PRESET_IDS = METRIC_PRESETS.map(({ id }) => id);
+const REPEATABLE_METRIC_FIELDS = new Set([
+  'arg-contains',
+  'arg-equals',
+  'arg-exists',
+  'assert-json',
+  'attribute',
+  'env',
+  'header-env',
+  'order',
+  'query-env',
+]);
 
 const collect = (value: string, previous: string[] | undefined): string[] => [
   ...(previous ?? []),
@@ -188,7 +200,19 @@ const guidedPreset = async (
     options.pattern !== undefined ||
     [options.lt, options.lte, options.gt, options.gte].some((value) => value !== undefined);
   if (!interactive || hasDirectAssertion) return undefined;
-  const answer = (await context.interaction.prompt(`Preset [${PRESET_IDS.join('|')}]: `)).trim();
+  const catalog = METRIC_PRESETS.map((preset, index) => {
+    const required =
+      preset.required_inputs.length === 0 ? 'none' : preset.required_inputs.join(', ');
+    const configurable =
+      preset.configurable_fields.length === 0 ? 'none' : preset.configurable_fields.join(', ');
+    return `  ${preset.id}${index === 0 ? ' (default)' : ''}: ${preset.description}\n    required: ${required}; configurable: ${configurable}`;
+  }).join('\n');
+  const answer = (
+    await context.interaction.prompt(
+      `Preset catalog (${METRIC_PRESETS[0]?.schema ?? 'unknown'}):\n${catalog}\nPreset [${PRESET_IDS[0]}]: `,
+    )
+  ).trim();
+  if (answer.length === 0) return PRESET_IDS[0];
   if (PRESET_IDS.includes(answer as MetricPresetId)) return answer as MetricPresetId;
   throw new AttestCliError('cli_usage', 'Unknown metric preset.', {
     path: '--preset',
@@ -277,9 +301,15 @@ const runMutation = async (
   context.io.output(renderCommandResult(request.command, outputFormat(options), result));
 };
 
-const markMutationHelp = (command: Command, examples: string[], fields: string[]): void => {
+const markMutationHelp = (
+  command: Command,
+  examples: string[],
+  fields: string[],
+  presets?: readonly MetricPreset[],
+): void => {
   setCliCommandHelpMetadata(command, {
     examples,
+    ...(presets === undefined ? {} : { presets }),
     requestSchema: COMMAND_REQUEST_SCHEMA_VERSION,
     options: {
       output: { implies: ['non-interactive'] },
@@ -287,7 +317,15 @@ const markMutationHelp = (command: Command, examples: string[], fields: string[]
         conflicts: ['dry-run', 'yes', 'if-project-hash', ...fields],
         implies: ['non-interactive'],
       },
-      ...Object.fromEntries(fields.map((field) => [field, { conflicts: ['from-json'] }])),
+      ...Object.fromEntries(
+        fields.map((field) => [
+          field,
+          {
+            conflicts: ['from-json'],
+            ...(REPEATABLE_METRIC_FIELDS.has(field) ? { repeatable: true } : {}),
+          },
+        ]),
+      ),
     },
   });
 };
@@ -446,6 +484,7 @@ const registerMetricCommands = (context: RegisterMetricCommandsOptions): void =>
       'attest metric add --from-json ./metric-add.json --output json',
     ],
     addFields,
+    METRIC_PRESETS,
   );
 
   const importCommand = addMutationOptions(
@@ -489,18 +528,25 @@ const registerMetricCommands = (context: RegisterMetricCommandsOptions): void =>
     ['path', 'as', 'type', 'name'],
   );
 
-  addCommonOptions(metric.command('list').description('List metrics.')).action(
-    async (raw: CommonOptions, command: Command) => {
-      const options = mergeCommonOptions(raw, command, context.program);
-      const result = await runMetricListCommand({
-        project: options.project,
-        workingDirectory: context.workingDirectory,
-      });
-      context.io.output(renderCommandResult('metric.list', outputFormat(options), result));
-    },
-  );
+  const listCompatibility = addCommonOptions(
+    metric.command('list').description('Compatibility alias for `attest list metrics`.'),
+  ).action(async (raw: CommonOptions, command: Command) => {
+    const options = mergeCommonOptions(raw, command, context.program);
+    const result = await runMetricListCommand({
+      project: options.project,
+      workingDirectory: context.workingDirectory,
+    });
+    context.io.output(renderCommandResult('list', outputFormat(options), result));
+  });
+  setCliCommandHelpMetadata(listCompatibility, {
+    aliasFor: 'list',
+    deprecated: 'Use `attest list metrics`; this compatibility path has the same result identity.',
+    examples: ['attest list metrics --output json'],
+  });
 
-  addCommonOptions(metric.command('show').description('Show one redacted metric resource.'))
+  const showCompatibility = addCommonOptions(
+    metric.command('show').description('Compatibility alias for `attest show metric <id>`.'),
+  )
     .argument('[metric-id]', 'metric id')
     .action(async (metricId: string | undefined, raw: CommonOptions, command: Command) => {
       const options = mergeCommonOptions(raw, command, context.program);
@@ -511,8 +557,14 @@ const registerMetricCommands = (context: RegisterMetricCommandsOptions): void =>
         project: options.project,
         workingDirectory: context.workingDirectory,
       });
-      context.io.output(renderCommandResult('metric.show', outputFormat(options), result));
+      context.io.output(renderCommandResult('show', outputFormat(options), result));
     });
+  setCliCommandHelpMetadata(showCompatibility, {
+    aliasFor: 'show',
+    deprecated:
+      'Use `attest show metric <id>`; this compatibility path has the same result identity.',
+    examples: ['attest show metric exact --output json'],
+  });
 
   const testCommand = addCommonOptions(
     metric.command('test').description('Test one metric against a local fixture.'),

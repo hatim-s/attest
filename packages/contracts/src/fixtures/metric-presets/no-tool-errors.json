@@ -7,6 +7,6 @@
   "configurable_fields": [],
   "definition": {
     "kind": "assertion",
-    "assertions": [{ "tool_calls": { "status": "error", "count": 0 } }]
+    "assertions": [{ "spans": { "filter": { "kind": "tool", "status": "error" }, "count": 0 } }]
   }
 }

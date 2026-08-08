@@ -1,3 +1,5 @@
+import { constants, type BigIntStats } from 'node:fs';
+import { lstat, open, realpath, type FileHandle } from 'node:fs/promises';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
 
 import {
@@ -17,12 +19,17 @@ import {
   type SemanticProjectOperation,
 } from '../../project/transaction/index.js';
 import type { CommandResult } from '../command-result.js';
-import { readSecretReference, redactProbeValue } from '../agent/native-agent-adapter.js';
+import {
+  createBaseEnvironment,
+  readSecretReference,
+  redactProbeValue,
+} from '../agent/native-agent-adapter.js';
 import { runListCommand } from '../list/list-command.js';
 import { loadCommandProject } from '../project/load-command-project.js';
 import { redactMetricResource } from '../show/redact-resource.js';
 import { runShowCommand } from '../show/show-command.js';
 import {
+  assertSafeMetricResource,
   readImportedMetricResource,
   readMetricTestFixture,
   type Prompt,
@@ -50,6 +57,7 @@ type MetricReadCommandOptions = {
 };
 
 type MetricTestCommandOptions = MetricReadCommandOptions & {
+  cwdObserver?: (path: string) => Promise<void>;
   fixture: string;
   readStdin: () => Promise<string>;
   signal?: AbortSignal;
@@ -165,6 +173,7 @@ const buildMetricMutation = async (
   const candidate = candidateFromLoadedProject(loaded);
   switch (request.command) {
     case 'metric.add':
+      assertSafeMetricResource(request.metric);
       assertNewMetricId(candidate.metrics, request.metric.id);
       candidate.metrics.push(request.metric);
       return { candidate, metric: request.metric };
@@ -303,16 +312,91 @@ const isContainedPath = (root: string, candidate: string): boolean => {
   );
 };
 
+type AnchoredMetricDirectory = {
+  handle: FileHandle;
+  identity: BigIntStats;
+  path: string;
+};
+
+const unsafeMetricDirectory = (path: string): AttestCliError =>
+  new AttestCliError('project_invalid', 'Metric cwd is not a safe project directory.', {
+    path,
+    hint: 'Use a real project-contained directory without a symlink escape.',
+  });
+
+/** Opens and identity-checks the executable cwd while retaining a descriptor through invocation. */
+const openMetricDirectory = async (
+  projectRoot: string,
+  configuredPath: string,
+): Promise<AnchoredMetricDirectory> => {
+  const resolvedRoot = await realpath(projectRoot);
+  const candidate = resolve(resolvedRoot, configuredPath);
+  if (!isContainedPath(resolvedRoot, candidate)) throw unsafeMetricDirectory(configuredPath);
+  let handle: FileHandle | undefined;
+  try {
+    handle = await open(candidate, constants.O_RDONLY | constants.O_NOFOLLOW);
+    const [identity, pathIdentity, resolvedPath] = await Promise.all([
+      handle.stat({ bigint: true }),
+      lstat(candidate, { bigint: true }),
+      realpath(candidate),
+    ]);
+    if (
+      !identity.isDirectory() ||
+      pathIdentity.isSymbolicLink() ||
+      identity.dev !== pathIdentity.dev ||
+      identity.ino !== pathIdentity.ino ||
+      !isContainedPath(resolvedRoot, resolvedPath)
+    ) {
+      throw unsafeMetricDirectory(configuredPath);
+    }
+    return { handle, identity, path: resolvedPath };
+  } catch (error: unknown) {
+    await handle?.close().catch(() => undefined);
+    if (error instanceof AttestCliError) throw error;
+    throw unsafeMetricDirectory(configuredPath);
+  }
+};
+
+/** Rechecks the pathname against its retained descriptor immediately before process creation. */
+const assertMetricDirectoryIdentity = async (directory: AnchoredMetricDirectory): Promise<void> => {
+  try {
+    const current = await lstat(directory.path, { bigint: true });
+    if (
+      current.isSymbolicLink() ||
+      !current.isDirectory() ||
+      current.dev !== directory.identity.dev ||
+      current.ino !== directory.identity.ino
+    ) {
+      throw unsafeMetricDirectory(directory.path);
+    }
+  } catch (error: unknown) {
+    if (error instanceof AttestCliError) throw error;
+    throw unsafeMetricDirectory(directory.path);
+  }
+};
+
 /** Resolves exec-only environment references immediately before starting the trusted fixture. */
 const resolveMetricEnvironment = async (
   env: Readonly<Record<string, SecretReference>> | undefined,
   projectRoot: string,
-): Promise<{ environment?: NodeJS.ProcessEnv; secrets: string[] }> => {
-  if (env === undefined) return { secrets: [] };
-  const environment: NodeJS.ProcessEnv = { ...process.env };
+): Promise<{ environment: NodeJS.ProcessEnv; secrets: string[] }> => {
+  const environment: NodeJS.ProcessEnv = createBaseEnvironment();
   const secrets: string[] = [];
-  for (const [target, reference] of Object.entries(env)) {
-    const value = await readSecretReference(reference, projectRoot);
+  for (const [target, reference] of Object.entries(env ?? {})) {
+    let value: string;
+    try {
+      value = await readSecretReference(reference, projectRoot);
+    } catch (error: unknown) {
+      throw new AttestCliError(
+        'metric_infrastructure_failed',
+        'A referenced metric secret is unavailable.',
+        {
+          path: target,
+          hint: 'Set the referenced secret and retry the local metric test.',
+          cause: error,
+        },
+      );
+    }
     environment[target] = value;
     secrets.push(value);
   }
@@ -363,39 +447,59 @@ const runMetricTestCommand = async (options: MetricTestCommandOptions): Promise<
       : { name: metric.id, type: 'exec' as const, command: metric.definition.argv };
   let execCwd: string | undefined;
   let execEnv: NodeJS.ProcessEnv | undefined;
+  let execDirectory: AnchoredMetricDirectory | undefined;
   let secrets: string[] = [];
   if (metric.definition.kind === 'exec') {
-    const configuredCwd = resolve(loaded.root, metric.definition.cwd ?? '.');
-    if (!isContainedPath(loaded.root, configuredCwd)) {
-      throw new AttestCliError('invocation_failed', 'Metric cwd resolves outside the project.', {
-        path: metric.definition.cwd,
-      });
-    }
-    execCwd = configuredCwd;
+    execDirectory = await openMetricDirectory(loaded.root, metric.definition.cwd ?? '.');
+    execCwd = execDirectory.path;
     const resolved = await resolveMetricEnvironment(metric.definition.env, loaded.root);
     execEnv = resolved.environment;
     secrets = resolved.secrets;
   }
-  const [evaluation] = await evaluateMetrics([definition], context, {
-    execCwd,
-    execEnv,
-    execTimeoutMs: metric.definition.kind === 'exec' ? metric.definition.timeout_ms : undefined,
-    signal: options.signal,
-  });
+  let evaluation: MetricEvaluation | undefined;
+  try {
+    if (execDirectory !== undefined) {
+      await options.cwdObserver?.(execDirectory.path);
+      await assertMetricDirectoryIdentity(execDirectory);
+    }
+    [evaluation] = await evaluateMetrics([definition], context, {
+      execCwd,
+      execEnv,
+      execTimeoutMs: metric.definition.kind === 'exec' ? metric.definition.timeout_ms : undefined,
+      signal: options.signal,
+    });
+  } finally {
+    await execDirectory?.handle.close().catch(() => undefined);
+  }
   if (evaluation === undefined) {
-    throw new AttestCliError('invocation_failed', 'Metric test produced no evaluation.');
+    throw new AttestCliError('metric_infrastructure_failed', 'Metric test produced no evaluation.');
   }
   const redacted = redactProbeValue(withoutDuration(evaluation), secrets);
   if (evaluation.status === 'error') {
-    throw new AttestCliError('invocation_failed', 'Metric fixture execution failed.', {
+    throw new AttestCliError('metric_infrastructure_failed', 'Metric fixture execution failed.', {
       path: metric.id,
       hint: 'Inspect the redacted local evaluation details and repair the executable fixture.',
       details: { evaluation: redacted },
     });
   }
   const passed = evaluation.status === 'evaluated' ? evaluation.result.pass : false;
+  if (passed !== fixture.expected_pass) {
+    throw new AttestCliError(
+      'metric_fixture_mismatch',
+      'Metric result did not match the fixture.',
+      {
+        path: metric.id,
+        hint: 'Inspect the deterministic evaluation and repair the metric or expected_pass value.',
+        details: {
+          actual_pass: passed,
+          expected_pass: fixture.expected_pass,
+          evaluation: redacted,
+        },
+      },
+    );
+  }
   return {
-    human: `Metric ${metric.id} ${passed ? 'passed' : 'failed'} its local fixture.`,
+    human: `Metric ${metric.id} matched expected_pass=${fixture.expected_pass}.`,
     projectHashBefore: loaded.projectHash,
     projectHashAfter: loaded.projectHash,
     result: {
@@ -408,11 +512,11 @@ const runMetricTestCommand = async (options: MetricTestCommandOptions): Promise<
   };
 };
 
-/** Lists canonical metrics through the deterministic generic resource projection. */
+/** Delegates the compatibility namespace to the generic deterministic metric list projection. */
 const runMetricListCommand = async (options: MetricReadCommandOptions): Promise<CommandResult> =>
   runListCommand({ ...options, resourceType: 'metrics' });
 
-/** Shows one canonical metric through the shared redacted inspection surface. */
+/** Delegates the compatibility namespace to the generic redacted metric inspection surface. */
 const runMetricShowCommand = async (
   options: Required<Pick<MetricReadCommandOptions, 'metricId' | 'workingDirectory'>> &
     Pick<MetricReadCommandOptions, 'project'>,

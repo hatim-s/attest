@@ -3,7 +3,7 @@ import { resolve } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-import { METRIC_PRESETS, metricPresetSchema } from './metric-presets.js';
+import { METRIC_PRESETS, findMetricPreset, metricPresetSchema } from './metric-presets.js';
 
 const FIXTURE_DIRECTORY = resolve(import.meta.dirname, 'fixtures/metric-presets');
 
@@ -29,5 +29,15 @@ describe('versioned metric presets', () => {
       metricPresetSchema.safeParse({ ...METRIC_PRESETS[0], hidden_prompt: 'not inspectable' })
         .success,
     ).toBe(false);
+  });
+
+  it('keeps catalog arrays, definitions, and lookup results deeply immutable', () => {
+    const preset = findMetricPreset('output-equals');
+    expect(Object.isFrozen(METRIC_PRESETS)).toBe(true);
+    expect(Object.isFrozen(preset)).toBe(true);
+    expect(Object.isFrozen(preset.definition)).toBe(true);
+    expect(Reflect.set(preset, 'name', 'tampered')).toBe(false);
+    expect(Reflect.set(preset.definition, 'kind', 'http')).toBe(false);
+    expect(findMetricPreset('output-equals').name).toBe('Output equals');
   });
 });

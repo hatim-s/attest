@@ -451,6 +451,8 @@ const requestedCommand = (argv: readonly string[]): string => {
   if (first === 'agent' && ['add', 'import', 'test', 'rename', 'remove'].includes(second ?? '')) {
     return `agent.${second}`;
   }
+  if (first === 'metric' && second === 'list') return 'list';
+  if (first === 'metric' && second === 'show') return 'show';
   if (
     first === 'metric' &&
     ['add', 'import', 'list', 'show', 'test', 'rename', 'remove'].includes(second ?? '')

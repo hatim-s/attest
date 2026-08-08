@@ -69,7 +69,24 @@ type MetricAddFields = {
   workingDirectory: string;
 };
 
-const SENSITIVE_NAME = /authorization|cookie|password|secret|token|api[-_]?key/iu;
+const SENSITIVE_FIELD_NAME =
+  /(?:^|[-_])(?:authorization|cookie|password|secret|token|api[-_]?key)(?:$|[-_])/iu;
+const AUTHORIZATION_VALUE = /^(?:basic|bearer)\s+\S/iu;
+
+/** Locates only actual credential values, not ordinary filenames or analysis option names. */
+const credentialArgumentPosition = (argv: readonly string[]): number => {
+  for (const [index, argument] of argv.entries()) {
+    if (AUTHORIZATION_VALUE.test(argument)) return index;
+    const assignment = /^(?:--)?([^=]+)=(.+)$/u.exec(argument);
+    if (assignment !== null && SENSITIVE_FIELD_NAME.test(assignment[1] ?? '')) return index;
+    if (!argument.startsWith('-') || !SENSITIVE_FIELD_NAME.test(argument.replace(/^-+/u, ''))) {
+      continue;
+    }
+    const next = argv[index + 1];
+    if (next !== undefined && !next.startsWith('-')) return index + 1;
+  }
+  return -1;
+};
 
 const AUTHORED_FIELD_FLAGS: Readonly<Partial<Record<keyof MetricAddFields, string>>> = {
   argContains: '--arg-contains',
@@ -444,7 +461,10 @@ const buildAssertionDefinition = async (
       }
       return { kind: 'assertion', assertions: [{ tool_calls: { order: [...fields.order] } }] };
     case 'no-tool-errors':
-      return { kind: 'assertion', assertions: [{ tool_calls: { status: 'error', count: 0 } }] };
+      return {
+        kind: 'assertion',
+        assertions: [{ spans: { filter: { kind: 'tool', status: 'error' }, count: 0 } }],
+      };
     case 'trace-span': {
       const attributes = parseAttributes(fields.attribute);
       const filter = {
@@ -648,9 +668,7 @@ const createMetricResource = async (fields: MetricAddFields): Promise<MetricReso
 /** Rejects credential-like literals while preserving secret references for runtime resolution. */
 const assertSafeMetricResource = (metric: MetricResource): void => {
   if (metric.definition.kind === 'exec') {
-    const sensitivePosition = metric.definition.argv.findIndex((argument) =>
-      SENSITIVE_NAME.test(argument),
-    );
+    const sensitivePosition = credentialArgumentPosition(metric.definition.argv);
     if (sensitivePosition >= 0) {
       throw new AttestCliError(
         'project_invalid',
@@ -685,7 +703,7 @@ const assertSafeMetricResource = (metric: MetricResource): void => {
     );
   }
   for (const name of url.searchParams.keys()) {
-    if (SENSITIVE_NAME.test(name)) {
+    if (SENSITIVE_FIELD_NAME.test(name)) {
       throw new AttestCliError(
         'project_invalid',
         'HTTP metric URLs cannot contain credential-like query values.',
@@ -701,7 +719,7 @@ const assertSafeMetricResource = (metric: MetricResource): void => {
     ['query', request.query],
   ] as const) {
     for (const [name, value] of Object.entries(values ?? {})) {
-      if (SENSITIVE_NAME.test(name) && typeof value === 'string') {
+      if (SENSITIVE_FIELD_NAME.test(name) && typeof value === 'string') {
         throw new AttestCliError(
           'project_invalid',
           'Sensitive HTTP values must use secret references.',
@@ -711,6 +729,35 @@ const assertSafeMetricResource = (metric: MetricResource): void => {
           },
         );
       }
+    }
+  }
+  const pending: Array<{ path: string; value: JsonValue }> =
+    request.body === undefined
+      ? []
+      : [{ path: '/metric/definition/request/body', value: request.body }];
+  while (pending.length > 0) {
+    const current = pending.shift();
+    if (current === undefined || current.value === null || typeof current.value !== 'object') {
+      continue;
+    }
+    if (Array.isArray(current.value)) {
+      current.value.forEach((value, index) =>
+        pending.push({ path: `${current.path}/${index}`, value }),
+      );
+      continue;
+    }
+    for (const [name, value] of Object.entries(current.value)) {
+      if (SENSITIVE_FIELD_NAME.test(name) && value !== null) {
+        throw new AttestCliError(
+          'project_invalid',
+          'HTTP metric bodies cannot contain credential-like authored values.',
+          {
+            path: `${current.path}/${name}`,
+            hint: 'Move credentials to a header or query environment secret reference.',
+          },
+        );
+      }
+      pending.push({ path: `${current.path}/${name}`, value });
     }
   }
 };

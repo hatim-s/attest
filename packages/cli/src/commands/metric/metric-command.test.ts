@@ -1,10 +1,21 @@
-import { access, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import {
+  access,
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  rename,
+  rm,
+  symlink,
+  writeFile,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import {
   COMMAND_REQUEST_SCHEMA_VERSION,
+  METRIC_PRESETS,
   METRIC_RESOURCE_SCHEMA_VERSION,
   METRIC_TEST_FIXTURE_SCHEMA_VERSION,
   cliResultSchema,
@@ -21,11 +32,12 @@ import {
 } from '../../project/transaction/project-transaction.test-fixture.js';
 import { runCli, type CliIo } from '../../run-cli.js';
 import { REDACTED } from '../agent/native-agent-adapter.js';
-import { runMetricMutationCommand } from './metric-command.js';
+import { runMetricMutationCommand, runMetricTestCommand } from './metric-command.js';
 
 const EXEC_FIXTURE = fileURLToPath(new URL('./fixtures/result-metric.cjs', import.meta.url));
 const temporaryDirectories: string[] = [];
 const originalSecret = process.env.ATTEST_METRIC_SOURCE_SECRET;
+const originalAmbientSecret = process.env.ATTEST_METRIC_AMBIENT_SECRET;
 
 const collectIo = (): { errors: string[]; io: CliIo; output: string[] } => {
   const errors: string[] = [];
@@ -105,6 +117,22 @@ const runJson = async (
   };
 };
 
+/** Extracts the controlled child environment keys without trusting arbitrary metric result JSON. */
+const evaluationEnvironmentKeys = (
+  document: ReturnType<typeof cliResultSchema.parse>,
+): string[] => {
+  if (!document.ok) throw new Error('Expected a successful metric result.');
+  const value = (
+    document.result as {
+      evaluation?: { result?: { details?: { env_keys?: unknown } } };
+    }
+  ).evaluation?.result?.details?.env_keys;
+  if (!Array.isArray(value) || !value.every((item): item is string => typeof item === 'string')) {
+    throw new Error('Expected metric environment key evidence.');
+  }
+  return value;
+};
+
 /** Captures sorted project bytes so zero-write and rollback checks include hidden journals. */
 const snapshotTree = async (root: string, prefix = ''): Promise<Record<string, string>> => {
   const snapshot: Record<string, string> = {};
@@ -118,10 +146,11 @@ const snapshotTree = async (root: string, prefix = ''): Promise<Record<string, s
   return snapshot;
 };
 
-const metricFixture = (output: unknown = { answer: 'Paris', score: 0.9 }) =>
+const metricFixture = (output: unknown = { answer: 'Paris', score: 0.9 }, expectedPass = true) =>
   JSON.stringify({
     schema: METRIC_TEST_FIXTURE_SCHEMA_VERSION,
     case: { id: 'local-case', input: { question: 'Capital?' }, expected: 'Paris' },
+    expected_pass: expectedPass,
     output,
     trace: {
       schema: 'attest.trace/v1alpha1',
@@ -155,6 +184,8 @@ afterEach(async () => {
   vi.unstubAllGlobals();
   if (originalSecret === undefined) delete process.env.ATTEST_METRIC_SOURCE_SECRET;
   else process.env.ATTEST_METRIC_SOURCE_SECRET = originalSecret;
+  if (originalAmbientSecret === undefined) delete process.env.ATTEST_METRIC_AMBIENT_SECRET;
+  else process.env.ATTEST_METRIC_AMBIENT_SECRET = originalAmbientSecret;
   await Promise.all(
     temporaryDirectories.splice(0).map((directory) => rm(directory, { recursive: true })),
   );
@@ -222,16 +253,55 @@ describe('CLI2.9 metric authoring and local tests', { timeout: 30_000 }, () => {
     expect(composition?.kind).toBe('assertion');
     if (composition?.kind !== 'assertion') throw new Error('Expected assertion composition.');
     expect(composition.assertions[0]).toHaveProperty('all');
-    const listed = await runJson(root, ['metric', 'list']);
-    expect(listed.document).toMatchObject({ ok: true, command: 'metric.list' });
+    const listed = await runJson(root, ['list', 'metrics']);
+    expect(listed.document).toMatchObject({ ok: true, command: 'list' });
     if (!listed.document.ok) throw new Error('Expected metric list success.');
     expect(
       (listed.document.result as { items: Array<{ id: string; kind: string }> }).items,
     ).toContainEqual(expect.objectContaining({ id: 'equals', kind: 'assertion' }));
+    expect((await runJson(root, ['show', 'metric', 'regex'])).document).toMatchObject({
+      ok: true,
+      command: 'show',
+      result: { resource: { id: 'regex', definition: { kind: 'assertion' } } },
+    });
+    expect((await runJson(root, ['metric', 'list'])).document).toMatchObject({
+      ok: true,
+      command: 'list',
+    });
     expect((await runJson(root, ['metric', 'show', 'regex'])).document).toMatchObject({
       ok: true,
-      command: 'metric.show',
-      result: { resource: { id: 'regex', definition: { kind: 'assertion' } } },
+      command: 'show',
+    });
+
+    const okTraceFixture = join(root, 'ok-tools.json');
+    await writeFile(okTraceFixture, metricFixture());
+    expect(
+      (await runJson(root, ['metric', 'test', 'no-errors', '--fixture', okTraceFixture])).document,
+    ).toMatchObject({
+      ok: true,
+      result: { evaluation: { status: 'evaluated', result: { pass: true } } },
+    });
+    const mixedFixture = JSON.parse(metricFixture({}, false)) as {
+      trace: { spans: Array<Record<string, unknown>> };
+    };
+    mixedFixture.trace.spans.push({
+      span_id: 'span-error',
+      parent_span_id: null,
+      name: 'write',
+      kind: 'tool',
+      start_time: '2026-08-08T00:00:02Z',
+      end_time: '2026-08-08T00:00:03Z',
+      status: { code: 'error' },
+      attributes: {},
+    });
+    const mixedTraceFixture = join(root, 'mixed-tools.json');
+    await writeFile(mixedTraceFixture, JSON.stringify(mixedFixture));
+    expect(
+      (await runJson(root, ['metric', 'test', 'no-errors', '--fixture', mixedTraceFixture]))
+        .document,
+    ).toMatchObject({
+      ok: true,
+      result: { evaluation: { status: 'evaluated', result: { pass: false } } },
     });
   });
 
@@ -259,6 +329,28 @@ describe('CLI2.9 metric authoring and local tests', { timeout: 30_000 }, () => {
       }),
     ).toBe(0);
     expect(questions.at(-1)).toContain('Apply these changes? [y/N]');
+    expect(questions[1]).toContain('attest.metric-preset/v1');
+    expect(questions[1]).toContain('trace-capable fixture');
+
+    const defaultGuided = collectIo();
+    expect(
+      await runCli(['metric', 'add'], {
+        workingDirectory: root,
+        io: defaultGuided.io,
+        interaction: {
+          ci: false,
+          inputIsTTY: true,
+          outputIsTTY: true,
+          prompt: (question) => {
+            if (question === 'Metric id: ') return Promise.resolve('guided-default');
+            if (question.startsWith('Preset catalog')) return Promise.resolve('');
+            if (question === 'JSON value: ') return Promise.resolve('null');
+            return Promise.resolve('yes');
+          },
+          readStdin: () => Promise.resolve(''),
+        },
+      }),
+    ).toBe(0);
 
     const requested = JSON.stringify({
       schema: COMMAND_REQUEST_SCHEMA_VERSION,
@@ -300,6 +392,7 @@ describe('CLI2.9 metric authoring and local tests', { timeout: 30_000 }, () => {
     ).toBe(0);
     expect((await loadProject({ project: root })).metrics.map(({ id }) => id).sort()).toEqual([
       'guided',
+      'guided-default',
       'imported',
       'judge',
       'requested',
@@ -345,7 +438,7 @@ describe('CLI2.9 metric authoring and local tests', { timeout: 30_000 }, () => {
         ])
       ).exitCode,
     ).toBe(0);
-    const shown = await runJson(root, ['metric', 'show', 'http']);
+    const shown = await runJson(root, ['show', 'metric', 'http']);
     expect(shown.output).not.toContain('metric-super-secret');
     expect(shown.output).toContain('ATTEST_METRIC_SOURCE_SECRET');
     const loaded = await loadProject({ project: root });
@@ -379,6 +472,31 @@ describe('CLI2.9 metric authoring and local tests', { timeout: 30_000 }, () => {
       result: { executed: true, evaluation: { status: 'evaluated', result: { pass: true } } },
     });
 
+    const mismatchPath = join(root, 'fixture-mismatch.json');
+    await writeFile(mismatchPath, metricFixture({ answer: 'London' }, true));
+    const mismatch = await runJson(root, ['metric', 'test', 'exact', '--fixture', mismatchPath]);
+    expect(mismatch.exitCode).toBe(1);
+    expect(mismatch.document).toMatchObject({
+      ok: false,
+      error: {
+        code: 'metric_fixture_mismatch',
+        details: { actual_pass: false, expected_pass: true },
+      },
+    });
+    await writeFile(mismatchPath, metricFixture({ answer: 'London' }, false));
+    expect(
+      (await runJson(root, ['metric', 'test', 'exact', '--fixture', mismatchPath])).document,
+    ).toMatchObject({
+      ok: true,
+      result: { evaluation: { status: 'evaluated', result: { pass: false } } },
+    });
+    const missingVerdict = JSON.parse(metricFixture()) as Record<string, unknown>;
+    Reflect.deleteProperty(missingVerdict, 'expected_pass');
+    await writeFile(mismatchPath, JSON.stringify(missingVerdict));
+    expect(
+      (await runJson(root, ['metric', 'test', 'exact', '--fixture', mismatchPath])).document,
+    ).toMatchObject({ ok: false, error: { code: 'project_invalid', path: '--fixture' } });
+
     const marker = join(root, 'must-not-exist');
     process.env.ATTEST_METRIC_SOURCE_SECRET = 'metric-super-secret';
     await runJson(root, [
@@ -396,7 +514,46 @@ describe('CLI2.9 metric authoring and local tests', { timeout: 30_000 }, () => {
     expect(tested.exitCode).toBe(0);
     expect(tested.output).not.toContain('metric-super-secret');
     expect(tested.output).toContain(REDACTED);
+    expect(
+      evaluationEnvironmentKeys(tested.document).filter((name) => !name.startsWith('__CF_')),
+    ).toEqual(['LC_ALL', 'METRIC_SECRET', 'PATH', 'TMPDIR']);
     await expect(access(marker)).rejects.toThrow();
+
+    process.env.ATTEST_METRIC_AMBIENT_SECRET = 'ambient-must-not-reach-child';
+    await runJson(root, [
+      'metric',
+      'add',
+      'isolated-env',
+      '--preset',
+      'command',
+      '--argv-json',
+      JSON.stringify([process.execPath, EXEC_FIXTURE, 'ambient']),
+    ]);
+    const isolated = await runJson(root, [
+      'metric',
+      'test',
+      'isolated-env',
+      '--fixture',
+      fixturePath,
+    ]);
+    expect(isolated.output).toContain('ambient-absent');
+    expect(isolated.output).not.toContain('ambient-must-not-reach-child');
+    expect(
+      evaluationEnvironmentKeys(isolated.document).filter((name) => !name.startsWith('__CF_')),
+    ).toEqual(['LC_ALL', 'PATH', 'TMPDIR']);
+
+    await runJson(root, [
+      'metric',
+      'add',
+      'token-counter',
+      '--preset',
+      'command',
+      '--argv-json',
+      JSON.stringify([process.execPath, EXEC_FIXTURE, 'pass', '--max-tokens', '100']),
+    ]);
+    expect(
+      (await runJson(root, ['metric', 'test', 'token-counter', '--fixture', fixturePath])).exitCode,
+    ).toBe(0);
 
     await runJson(root, [
       'metric',
@@ -412,7 +569,7 @@ describe('CLI2.9 metric authoring and local tests', { timeout: 30_000 }, () => {
     expect(failed.document).toMatchObject({
       ok: false,
       error: {
-        code: 'invocation_failed',
+        code: 'metric_infrastructure_failed',
         details: { evaluation: { status: 'error', error: { code: 'exec_spawn_failed' } } },
       },
     });
@@ -458,6 +615,66 @@ describe('CLI2.9 metric authoring and local tests', { timeout: 30_000 }, () => {
       });
     }
     expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it('rejects executable cwd symlinks that escape the descriptor-checked project root', async () => {
+    const root = await createProject();
+    const outside = await mkdtemp(join(tmpdir(), 'attest-metric-cwd-outside-'));
+    temporaryDirectories.push(outside);
+    await symlink(outside, join(root, 'linkout'));
+    const fixturePath = join(root, 'fixture.json');
+    await writeFile(fixturePath, metricFixture());
+    expect(
+      (
+        await runJson(root, [
+          'metric',
+          'add',
+          'escaped-cwd',
+          '--preset',
+          'command',
+          '--argv-json',
+          JSON.stringify([process.execPath, EXEC_FIXTURE]),
+          '--cwd',
+          'linkout',
+        ])
+      ).exitCode,
+    ).toBe(0);
+    const tested = await runJson(root, ['metric', 'test', 'escaped-cwd', '--fixture', fixturePath]);
+    expect(tested.exitCode).toBe(1);
+    expect(tested.document).toMatchObject({
+      ok: false,
+      error: { code: 'project_invalid', message: 'Metric cwd is not a safe project directory.' },
+    });
+
+    const anchoredPath = join(root, 'anchored-cwd');
+    await mkdir(anchoredPath);
+    await runJson(root, [
+      'metric',
+      'add',
+      'replaced-cwd',
+      '--preset',
+      'command',
+      '--argv-json',
+      JSON.stringify([process.execPath, EXEC_FIXTURE]),
+      '--cwd',
+      'anchored-cwd',
+    ]);
+    await expect(
+      runMetricTestCommand({
+        cwdObserver: async (path) => {
+          await rename(path, `${path}-replaced`);
+          await mkdir(path);
+        },
+        fixture: fixturePath,
+        metricId: 'replaced-cwd',
+        project: root,
+        readStdin: () => Promise.resolve(''),
+        workingDirectory: root,
+      }),
+    ).rejects.toMatchObject({
+      code: 'project_invalid',
+      message: 'Metric cwd is not a safe project directory.',
+    });
   });
 
   it('renames every reference and requires explicit detach before referenced removal', async () => {
@@ -593,6 +810,93 @@ describe('CLI2.9 metric authoring and local tests', { timeout: 30_000 }, () => {
     expect(before['attest.project.json']).toBe(withInput['attest.project.json']);
   });
 
+  it('applies identical secret safety to flags, stdin import, and from-json requests', async () => {
+    const root = await createProject();
+    const before = await snapshotTree(root);
+    const bodySecret = 'literal-body-secret';
+    const unsafeHttp: MetricResource = {
+      schema: METRIC_RESOURCE_SCHEMA_VERSION,
+      id: 'unsafe-http',
+      name: 'Unsafe HTTP',
+      definition: {
+        kind: 'http',
+        request: {
+          method: 'POST',
+          url: 'https://metric.example/evaluate',
+          body: { api_key: bodySecret },
+        },
+        extraction: { score_pointer: '/score', pass_pointer: '/pass' },
+      },
+    };
+    const flag = await runJson(root, [
+      'metric',
+      'add',
+      'flag-secret',
+      '--preset',
+      'http',
+      '--url',
+      'https://metric.example/evaluate',
+      '--body-json',
+      JSON.stringify({ api_key: bodySecret }),
+    ]);
+    const imported = await runJson(
+      root,
+      ['metric', 'import', '-', '--type', 'json', '--as', 'import-secret'],
+      JSON.stringify(unsafeHttp),
+    );
+    const requested = await runJson(
+      root,
+      ['metric', 'add', '--from-json', '-'],
+      JSON.stringify({
+        schema: COMMAND_REQUEST_SCHEMA_VERSION,
+        command: 'metric.add',
+        metric: {
+          ...unsafeHttp,
+          id: 'request-secret',
+          definition: {
+            ...unsafeHttp.definition,
+            request: {
+              method: 'POST',
+              url: 'https://metric.example/evaluate',
+              headers: { Authorization: 'Bearer literal-header-secret' },
+            },
+          },
+        },
+      }),
+    );
+    const unsafeExec = await runJson(
+      root,
+      ['metric', 'add', '--from-json', '-'],
+      JSON.stringify({
+        schema: COMMAND_REQUEST_SCHEMA_VERSION,
+        command: 'metric.add',
+        metric: {
+          schema: METRIC_RESOURCE_SCHEMA_VERSION,
+          id: 'exec-secret',
+          name: 'Exec secret',
+          definition: {
+            kind: 'exec',
+            argv: [process.execPath, EXEC_FIXTURE, '--api-key', 'literal-exec-secret'],
+          },
+        },
+      }),
+    );
+    for (const result of [flag, imported, requested, unsafeExec]) {
+      expect(result.exitCode).toBe(1);
+      expect(result.document).toMatchObject({ ok: false, error: { code: 'project_invalid' } });
+      expect(result.output).not.toContain(bodySecret);
+      expect(result.output).not.toContain('literal-header-secret');
+      expect(result.output).not.toContain('literal-exec-secret');
+    }
+    expect(unsafeExec.document).toMatchObject({
+      ok: false,
+      error: { path: '/metric/definition/argv/3' },
+    });
+    expect(await snapshotTree(root)).toEqual(before);
+    const shown = await runJson(root, ['show', 'metric', 'unsafe-http']);
+    expect(shown.output).not.toContain(bodySecret);
+  });
+
   it('publishes exact JSON help and generated fixture/request schemas', async () => {
     const root = await createProject();
     const help = await runJson(root, ['help', 'metric', 'add']);
@@ -600,7 +904,12 @@ describe('CLI2.9 metric authoring and local tests', { timeout: 30_000 }, () => {
     if (!help.document.ok) throw new Error('Expected metric help success.');
     const command = (
       help.document.result as {
-        command: { options: Array<{ name: string }>; path: string[]; request_schema: string };
+        command: {
+          options: Array<{ name: string; repeatable: boolean }>;
+          path: string[];
+          presets?: unknown;
+          request_schema: string;
+        };
       }
     ).command;
     expect(command.path).toEqual(['metric', 'add']);
@@ -608,6 +917,46 @@ describe('CLI2.9 metric authoring and local tests', { timeout: 30_000 }, () => {
     expect(command.options.map(({ name }) => name)).toEqual(
       expect.arrayContaining(['from-json', 'preset']),
     );
+    expect(command.presets).toEqual(METRIC_PRESETS);
+    const repeatability = new Map(
+      command.options.map(({ name, repeatable }) => [name, repeatable]),
+    );
+    expect(
+      [...repeatability.entries()]
+        .filter(([, repeatable]) => repeatable)
+        .map(([name]) => name)
+        .sort(),
+    ).toEqual([
+      'arg-contains',
+      'arg-equals',
+      'arg-exists',
+      'assert-json',
+      'attribute',
+      'env',
+      'header-env',
+      'order',
+      'query-env',
+    ]);
+    expect((await runJson(root, ['help', 'metric', 'list'])).document).toMatchObject({
+      ok: true,
+      result: {
+        command: {
+          alias_for: 'list',
+          deprecated:
+            'Use `attest list metrics`; this compatibility path has the same result identity.',
+        },
+      },
+    });
+    expect((await runJson(root, ['help', 'metric', 'show'])).document).toMatchObject({
+      ok: true,
+      result: {
+        command: {
+          alias_for: 'show',
+          deprecated:
+            'Use `attest show metric <id>`; this compatibility path has the same result identity.',
+        },
+      },
+    });
     expect(
       (await runJson(root, ['schema', 'print', METRIC_TEST_FIXTURE_SCHEMA_VERSION])).exitCode,
     ).toBe(0);
