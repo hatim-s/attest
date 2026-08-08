@@ -67,6 +67,9 @@ export {
   PROJECT_SCHEMA_VERSION,
   TEST_RESOURCE_SCHEMA_VERSION,
   TRACE_SCHEMA_VERSION,
+  WEBSOCKET_EVIDENCE_SCHEMA_VERSION,
+  WEBSOCKET_MESSAGE_PROTOCOL,
+  WEBSOCKET_REQUEST_PROTOCOL,
 } from './versions.js';
 export {
   agentEvidenceLimitsSchema,
@@ -174,3 +177,22 @@ export {
   sha256Schema,
 } from './v2-shared.js';
 export type { ExecutionDefaults, SecretReference } from './v2-shared.js';
+export {
+  webSocketAttemptEvidenceSchema,
+  webSocketConnectionModeSchema,
+  webSocketCorrelatedMessageSchema,
+  webSocketErrorClassificationSchema,
+  webSocketEvidenceClassificationSchema,
+  webSocketInvocationRequestSchema,
+  webSocketRequestIdSchema,
+  webSocketTransportSchema,
+} from './websocket-contract-v1.js';
+export type {
+  WebSocketAttemptEvidence,
+  WebSocketConnectionMode,
+  WebSocketCorrelatedMessage,
+  WebSocketErrorClassification,
+  WebSocketEvidenceClassification,
+  WebSocketInvocationRequest,
+  WebSocketTransport,
+} from './websocket-contract-v1.js';

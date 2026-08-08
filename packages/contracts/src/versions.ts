@@ -49,6 +49,15 @@ const CLI_HELP_SCHEMA_VERSION = 'attest.cli-help/v1' as const;
 /** Identifies the stable CLI error registry returned by `attest errors`. */
 const CLI_ERROR_CATALOG_SCHEMA_VERSION = 'attest.cli-errors/v1' as const;
 
+/** Identifies normalized WebSocket invocation requests at the adapter boundary. */
+const WEBSOCKET_REQUEST_PROTOCOL = 'attest.websocket-request/v1' as const;
+
+/** Identifies correlated WebSocket messages after authored pointer extraction. */
+const WEBSOCKET_MESSAGE_PROTOCOL = 'attest.websocket-message/v1' as const;
+
+/** Identifies persisted bounded/redacted evidence from one WebSocket attempt. */
+const WEBSOCKET_EVIDENCE_SCHEMA_VERSION = 'attest.websocket-evidence/v1' as const;
+
 export {
   AGENT_PROTOCOL,
   AGENT_RESOURCE_SCHEMA_VERSION,
@@ -67,4 +76,7 @@ export {
   PROJECT_SCHEMA_VERSION,
   TEST_RESOURCE_SCHEMA_VERSION,
   TRACE_SCHEMA_VERSION,
+  WEBSOCKET_EVIDENCE_SCHEMA_VERSION,
+  WEBSOCKET_MESSAGE_PROTOCOL,
+  WEBSOCKET_REQUEST_PROTOCOL,
 };

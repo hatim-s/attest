@@ -20,6 +20,11 @@ import { metricTestFixtureSchema } from './metric-test-fixture-v1.js';
 import { projectManifestSchema } from './project-v2.js';
 import { testResourceSchema } from './test-resource-v2.js';
 import { traceSchema } from './trace.js';
+import {
+  webSocketAttemptEvidenceSchema,
+  webSocketCorrelatedMessageSchema,
+  webSocketInvocationRequestSchema,
+} from './websocket-contract-v1.js';
 
 type JsonSchemaFragment = Readonly<Record<string, unknown>>;
 type ContractJsonSchemaDefinition = {
@@ -145,6 +150,18 @@ const CONTRACT_JSON_SCHEMAS = new Map<string, ContractJsonSchemaDefinition>([
   [
     'jsonl-bridge-output.v1.json',
     { schema: jsonlBridgeOutputSchema, invariants: noAdditionalInvariants },
+  ],
+  [
+    'websocket-request.v1.json',
+    { schema: webSocketInvocationRequestSchema, invariants: noAdditionalInvariants },
+  ],
+  [
+    'websocket-message.v1.json',
+    { schema: webSocketCorrelatedMessageSchema, invariants: noAdditionalInvariants },
+  ],
+  [
+    'websocket-evidence.v1.json',
+    { schema: webSocketAttemptEvidenceSchema, invariants: noAdditionalInvariants },
   ],
 ]);
 
