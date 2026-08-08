@@ -1,9 +1,6 @@
 /** Public core runtime APIs (PLAN Phase 1): agent runner + run store + run diffing. */
 export {
   AgentInvocationError,
-  ConfigInvalidError,
-  collectExecutions,
-  executeCases,
   invokeAgent,
   invokeMappedHttpAgent,
   invokeStreamingAgent,
@@ -13,9 +10,7 @@ export {
   startWebSocketAgent,
   redactTransportText,
   WebSocketAgentSession,
-  loadDatasetCases,
   type CaseExecution,
-  type ExecuteOptions,
   type InvocationErrorCode,
   type InvokeAgentOptions,
   type HttpAgentResource,
@@ -25,7 +20,6 @@ export {
   type MappedHttpInvokeOptions,
   type JsonlBridgeAgentResource,
   type JsonlBridgeSessionOptions,
-  type RunProgressEvent,
   type StreamAgentResource,
   type StreamInvokeOptions,
   type WebSocketAgentResource,

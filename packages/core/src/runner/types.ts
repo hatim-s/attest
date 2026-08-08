@@ -108,32 +108,12 @@ type CaseExecution = CaseExecutionBase &
       }
   );
 
-/** Progress signal emitted as cases finish; ordering follows completion, not config order. */
-type RunProgressEvent = {
-  completed: number;
-  total: number;
-  execution: CaseExecution;
-};
-
-/** Controls a whole-config execution pass. */
-type ExecuteOptions = {
-  runId: string;
-  /** Directory dataset paths resolve against (usually the config file's directory). */
-  baseDirectory: string;
-  signal?: AbortSignal;
-  /** Overrides `run.concurrency` from config (default 4). */
-  concurrency?: number;
-  onProgress?: (event: RunProgressEvent) => void;
-};
-
 export {
   type CaseExecution,
   type CaseExecutionBase,
-  type ExecuteOptions,
   type InvocationAttempt,
   type InvocationDiagnostics,
   type InvocationResult,
   type InvokeAgentOptions,
   type InvokeOptions,
-  type RunProgressEvent,
 };

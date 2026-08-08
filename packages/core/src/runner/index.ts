@@ -1,4 +1,4 @@
-export { AgentInvocationError, ConfigInvalidError, type InvocationErrorCode } from './errors.js';
+export { AgentInvocationError, type InvocationErrorCode } from './errors.js';
 export { invokeAgent } from './invoke.js';
 export {
   invokeMappedHttpAgent,
@@ -29,12 +29,4 @@ export {
   type WebSocketAgentResource,
   type WebSocketSessionOptions,
 } from './adapters/websocket/index.js';
-export { loadDatasetCases } from './dataset.js';
-export { collectExecutions, executeCases } from './execute.js';
-export {
-  type CaseExecution,
-  type ExecuteOptions,
-  type InvokeAgentOptions,
-  type InvocationResult,
-  type RunProgressEvent,
-} from './types.js';
+export { type CaseExecution, type InvokeAgentOptions, type InvocationResult } from './types.js';
