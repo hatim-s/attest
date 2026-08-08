@@ -61,11 +61,14 @@ export {
   generateCaseId,
   parseJsonFlag,
   readCommandRequest,
-  readNativeCases,
   validateCommandRequest,
-  type NativeCaseFormat,
   type TestCaseInput,
 } from './commands/test/test-command-input.js';
+export {
+  inferImportFormat,
+  runTabularImportAdapter,
+  type ImportCommandAdapterOptions,
+} from './commands/test/import/tabular-import-adapter.js';
 export {
   runTestCaseListCommand,
   runTestCaseShowCommand,

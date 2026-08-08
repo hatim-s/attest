@@ -76,6 +76,19 @@ const runJson = async (
   };
 };
 
+const runHuman = async (root: string, argv: string[], stdin = ''): Promise<string> => {
+  const collected = collectIo();
+  const exitCode = await runCli(argv, {
+    interaction: nonInteractive(stdin),
+    io: collected.io,
+    workingDirectory: root,
+  });
+  expect(exitCode).toBe(0);
+  expect(collected.errors).toEqual([]);
+  expect(collected.output).toHaveLength(1);
+  return collected.output[0] ?? '';
+};
+
 /** Captures every project byte using sorted project-relative names. */
 const snapshotProject = async (root: string): Promise<Record<string, string>> => {
   const snapshot: Record<string, string> = {};
@@ -112,7 +125,7 @@ afterEach(async () => {
   );
 });
 
-describe('CLI2.7 test, case, and dataset authoring', { timeout: 20_000 }, () => {
+describe('CLI2.7/CLI2.8 test, case, dataset, and import authoring', { timeout: 20_000 }, () => {
   it('supports canonical test and direct-case happy paths in human and JSON modes', async () => {
     const root = await createProject();
     expect((await runJson(root, ['test', 'add', 'smoke', '--agent', 'support'])).exitCode).toBe(0);
@@ -314,7 +327,7 @@ describe('CLI2.7 test, case, and dataset authoring', { timeout: 20_000 }, () => 
     expect(await snapshotProject(conflictRoot)).toEqual(conflictBefore);
   });
 
-  it('publishes versioned machine help and schema metadata for the native import surface', async () => {
+  it('publishes versioned machine help and schema metadata for the tabular import surface', async () => {
     const root = await createProject();
     const help = await runJson(root, ['help', 'test', 'case', 'import']);
     expect(help.document).toMatchObject({
@@ -328,7 +341,9 @@ describe('CLI2.7 test, case, and dataset authoring', { timeout: 20_000 }, () => 
       },
     });
     expect(help.output).toContain('jsonl');
-    expect(help.output).not.toContain('csv');
+    expect(help.output).toContain('csv');
+    expect(help.output).toContain('records-pointer');
+    expect(help.output).toContain('on-conflict');
 
     const datasetAddHelp = await runJson(root, ['help', 'test', 'dataset', 'add']);
     expect(datasetAddHelp.document).toMatchObject({
@@ -468,6 +483,168 @@ describe('CLI2.7 test, case, and dataset authoring', { timeout: 20_000 }, () => 
       source: 'attest/datasets/stable-import.meta.json',
     });
     expect(integrityDiagnostic?.message).toContain('canonical SHA-256');
+  });
+
+  it('provides redacted human/JSON dry-run parity and import-specific optimistic conflicts', async () => {
+    const root = await createProject();
+    await runJson(root, ['test', 'add', 'mapped', '--agent', 'support']);
+    await runJson(root, [
+      'test',
+      'case',
+      'add',
+      'mapped',
+      '--id',
+      'absent-source',
+      '--input',
+      '"preserved"',
+    ]);
+    const source = join(root, 'mapped.csv');
+    await writeFile(source, 'external_id,prompt,tags\none,hello,"[""smoke""]"\n');
+    const loaded = await loadProject({ project: root });
+    const command = [
+      'test',
+      'case',
+      'import',
+      'mapped',
+      source,
+      '--map',
+      'input.question=prompt',
+      '--map',
+      'tags=tags',
+      '--parse-json',
+      'tags',
+      '--key',
+      'external_id',
+      '--sync',
+      'upsert',
+      '--dry-run',
+      '--if-project-hash',
+      loaded.projectHash,
+    ];
+    const before = await snapshotProject(root);
+    const json = await runJson(root, command);
+    expect(json.document).toMatchObject({
+      ok: true,
+      result: {
+        committed: false,
+        import: {
+          counts: { inserted: 1, read: 1, skipped: 0, updated: 0 },
+          preview: [
+            {
+              input: { question: '<redacted:string>' },
+              tags: ['<redacted:string>'],
+            },
+          ],
+        },
+      },
+    });
+    const generatedId = json.document.ok
+      ? ((json.document.result as { import: { preview: Array<{ id: string }> } }).import.preview[0]
+          ?.id ?? '')
+      : '';
+    const human = await runHuman(root, command);
+    expect(human).toContain('Import: read 1, inserted 1, updated 0, skipped 0.');
+    expect(human).toContain(generatedId);
+    expect(human).toContain('<redacted:string>');
+    expect(await snapshotProject(root)).toEqual(before);
+
+    const conflict = await runJson(root, [
+      ...command.slice(0, -3),
+      '--if-project-hash',
+      'a'.repeat(64),
+    ]);
+    expect(conflict).toMatchObject({
+      exitCode: 3,
+      document: { ok: false, error: { code: 'project_changed' } },
+    });
+    expect(await snapshotProject(root)).toEqual(before);
+  });
+
+  it('upserts existing keyed datasets in order and never deletes rows absent from the source', async () => {
+    const root = await createProject();
+    await runJson(root, ['test', 'add', 'dataset-upsert', '--agent', 'support']);
+    const source = join(root, 'incremental.csv');
+    const baseCommand = [
+      'test',
+      'dataset',
+      'import',
+      'dataset-upsert',
+      source,
+      '--as',
+      'incremental',
+      '--map',
+      'input=prompt',
+      '--key',
+      'external_id',
+      '--sync',
+      'upsert',
+    ];
+    await writeFile(source, 'external_id,prompt\none,old\ntwo,preserved\n');
+    expect((await runJson(root, baseCommand)).exitCode).toBe(0);
+    const first = await loadProject({ project: root });
+    const initialCases = first.datasets.find(
+      ({ metadata }) => metadata.id === 'incremental',
+    )!.cases;
+
+    await writeFile(source, 'external_id,prompt\none,new\nthree,added\n');
+    const updated = await runJson(root, baseCommand);
+    expect(updated.document).toMatchObject({
+      ok: true,
+      result: {
+        import: { counts: { inserted: 1, read: 2, skipped: 0, updated: 1 } },
+      },
+    });
+    const loaded = await loadProject({ project: root });
+    const dataset = loaded.datasets.find(({ metadata }) => metadata.id === 'incremental')!;
+    expect(dataset.cases).toEqual([
+      { id: initialCases[0]!.id, input: 'new' },
+      initialCases[1],
+      expect.objectContaining({ input: 'added' }),
+    ]);
+    expect(dataset.metadata.provenance).toMatchObject({
+      source_type: 'csv',
+      key_field: 'external_id',
+      mapping: [{ destination: 'input', source: 'prompt' }],
+      counts: { inserted: 1, read: 2, skipped: 0, updated: 1 },
+    });
+    expect(JSON.stringify(dataset.metadata.provenance)).not.toContain(source);
+  });
+
+  it('rejects direct imports colliding with attached cases before any project write', async () => {
+    const root = await createProject();
+    await runJson(root, ['test', 'add', 'collision-target', '--agent', 'support']);
+    const datasetSource = join(root, 'attached.jsonl');
+    await writeFile(datasetSource, '{"id":"attached-id","input":"dataset"}\n');
+    await runJson(root, [
+      'test',
+      'dataset',
+      'import',
+      'collision-target',
+      datasetSource,
+      '--as',
+      'attached',
+    ]);
+    const directSource = join(root, 'direct.json');
+    await writeFile(directSource, '[{"id":"attached-id","input":"direct"}]');
+    const before = await snapshotProject(root);
+    const collision = await runJson(root, [
+      'test',
+      'case',
+      'import',
+      'collision-target',
+      directSource,
+    ]);
+    expect(collision).toMatchObject({
+      exitCode: 1,
+      document: {
+        ok: false,
+        error: {
+          code: 'project_invalid',
+          details: { diagnostics: [{ code: 'resolved_case_collision' }] },
+        },
+      },
+    });
+    expect(await snapshotProject(root)).toEqual(before);
   });
 
   it('aggregates every JSON and JSONL record error with physical source locations', async () => {
@@ -667,7 +844,7 @@ describe('CLI2.7 test, case, and dataset authoring', { timeout: 20_000 }, () => 
     ).not.toContain(casesPath);
   });
 
-  it('supports stdin and --from-json parity while rejecting generalized import options', async () => {
+  it('supports stdin and --from-json parity for generalized import options', async () => {
     const root = await createProject();
     const request = JSON.stringify(addTestRequest('stdin-test'));
     expect(
@@ -697,9 +874,19 @@ describe('CLI2.7 test, case, and dataset authoring', { timeout: 20_000 }, () => 
     };
     const path = join(root, 'mapped-request.json');
     await writeFile(path, JSON.stringify(mappedRequest));
-    const rejected = await runJson(root, ['test', 'case', 'import', '--from-json', path]);
-    expect(rejected.exitCode).toBe(2);
-    expect(rejected.document).toMatchObject({ ok: false, error: { code: 'cli_usage' } });
+    const imported = await runJson(
+      root,
+      ['test', 'case', 'import', '--from-json', path],
+      'prompt\nmapped\n',
+    );
+    expect(imported.exitCode).toBe(0);
+    expect(imported.document).toMatchObject({
+      ok: true,
+      result: {
+        imported_case_count: 1,
+        import: { format: 'csv', counts: { inserted: 1, read: 1 } },
+      },
+    });
   });
 
   it('rejects non-empty or provenance-bearing dataset add requests before writing', async () => {
