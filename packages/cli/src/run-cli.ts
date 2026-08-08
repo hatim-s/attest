@@ -1,12 +1,11 @@
 import { createRequire } from 'node:module';
-import { mkdir, writeFile } from 'node:fs/promises';
-import { dirname, resolve } from 'node:path';
+import { resolve } from 'node:path';
 
 import { type CliExitCode } from '@attest/contracts';
-import { diffRuns, openStore, runToJUnitXml } from '@attest/core';
+import { diffRuns, openStore } from '@attest/core';
 import { Command, CommanderError, Option } from 'commander';
 
-import { loadConfig } from './config/load-config.js';
+import { registerEvalCommands } from './commands/eval/eval-command.js';
 import {
   createDefaultCliInteraction,
   registerProjectResourceCommands,
@@ -22,19 +21,13 @@ import {
   serializeCliError,
 } from './errors.js';
 import { createCliHelp, renderCliHelp, setCliCommandHelpMetadata } from './help/command-help.js';
-import {
-  diffToJson,
-  renderDiffSummary,
-  renderRunJson,
-  renderRunSummary,
-  runExitCode,
-} from './output/render-output.js';
+import { diffToJson, renderDiffSummary } from './output/render-output.js';
 import {
   createCliFailureResult,
   createCliSuccessResult,
   serializeCliResult,
 } from './output/cli-protocol.js';
-import { runConfiguration } from './run/run-configuration.js';
+import { cancelConfiguration, runConfiguration } from './run/run-configuration.js';
 import { runReportCommand } from './report/run-report-command.js';
 import { runTraceConvertCommand } from './trace/run-trace-convert-command.js';
 import { runViewCommand } from './view/run-view-command.js';
@@ -55,14 +48,6 @@ type RunCliOptions = {
   interaction?: Partial<CliInteraction>;
   io?: CliIo;
   workingDirectory?: string;
-};
-
-type RunCommandOptions = {
-  baseline?: string;
-  config?: string;
-  format: 'human' | 'json';
-  junit?: string;
-  store?: string;
 };
 
 type DiffCommandOptions = {
@@ -97,25 +82,6 @@ const defaultIo: CliIo = {
   output: (message) => console.log(message),
 };
 
-const writeJUnit = async (
-  outputPath: string,
-  workingDirectory: string,
-  run: Parameters<typeof runToJUnitXml>[0],
-  cases: Parameters<typeof runToJUnitXml>[1],
-): Promise<void> => {
-  const resolvedPath = resolve(workingDirectory, outputPath);
-  try {
-    await mkdir(dirname(resolvedPath), { recursive: true });
-    await writeFile(resolvedPath, `${runToJUnitXml(run, cases)}\n`, 'utf8');
-  } catch (error: unknown) {
-    throw new AttestCliError(
-      'output_write_failed',
-      `Could not write JUnit output to ${resolvedPath}.`,
-      { cause: error },
-    );
-  }
-};
-
 const parsePort = (value: string): number => {
   const port = Number(value);
   if (!Number.isInteger(port) || port < 0 || port > 65_535) {
@@ -145,6 +111,7 @@ const createProgram = (
   workingDirectory: string,
   setExitCode: (exitCode: CliExitCode) => void,
   interaction: CliInteraction = createDefaultCliInteraction(),
+  argv: readonly string[] = process.argv.slice(2),
 ): Command => {
   const packageMetadata = require('../package.json') as PackageMetadata;
   const program = new Command()
@@ -255,31 +222,6 @@ const createProgram = (
     });
 
   program
-    .command('run')
-    .description('Execute a config, evaluate metrics, and persist the run.')
-    .option('-c, --config <path>', 'config path; otherwise use documented discovery order')
-    .option('--store <path>', 'SQLite run store path')
-    .option('--baseline <run-id>', 'include a diff against an earlier run')
-    .option('--junit <path>', 'write JUnit XML for CI')
-    .addOption(
-      new Option('--format <format>', 'terminal or machine-readable output')
-        .choices(['human', 'json'])
-        .default('human'),
-    )
-    .action(async (options: RunCommandOptions) => {
-      const loadedConfig = await loadConfig(options.config, workingDirectory);
-      const result = await runConfiguration(loadedConfig, {
-        baselineRunId: options.baseline,
-        storePath: options.store,
-      });
-      if (options.junit !== undefined) {
-        await writeJUnit(options.junit, workingDirectory, result.run, result.cases);
-      }
-      io.output(options.format === 'json' ? renderRunJson(result) : renderRunSummary(result));
-      setExitCode(runExitCode(result.run));
-    });
-
-  program
     .command('diff')
     .description('Compare two persisted runs.')
     .argument('<base-run-id>', 'baseline run id')
@@ -375,6 +317,15 @@ const createProgram = (
   });
   registerMetricCommands({ interaction, io, program, workingDirectory });
   registerTestCommands({ interaction, io, program, workingDirectory });
+  registerEvalCommands({
+    argv,
+    interaction,
+    io,
+    program,
+    services: { cancel: cancelConfiguration, run: runConfiguration },
+    setExitCode,
+    workingDirectory,
+  });
 
   setCliCommandHelpMetadata(program, {
     examples: [
@@ -382,6 +333,7 @@ const createProgram = (
       'attest errors --output json',
       'attest project init',
       'attest list agents --output json',
+      'attest eval run --all --output jsonl',
     ],
   });
 
@@ -399,6 +351,7 @@ const requestedStructuredOutput = (argv: readonly string[]): boolean => {
     command.startsWith('project.') ||
     command.startsWith('agent.') ||
     command.startsWith('metric.') ||
+    command.startsWith('eval.') ||
     command.startsWith('schema.') ||
     command.startsWith('test.');
   return (
@@ -457,6 +410,9 @@ const requestedCommand = (argv: readonly string[]): string => {
   if (first === 'schema' && ['list', 'print'].includes(second ?? '')) {
     return `schema.${second}`;
   }
+  if (first === 'eval' && ['run', 'cancel'].includes(second ?? '')) {
+    return `eval.${second}`;
+  }
   if (first === 'test') {
     const third = normalizedArguments[2];
     if (second === 'case' && third !== undefined && !third.startsWith('-')) {
@@ -495,6 +451,7 @@ const runCli = async (argv: string[], options: RunCliOptions = {}): Promise<numb
       exitCode = nextExitCode;
     },
     interaction,
+    argv,
   );
 
   try {

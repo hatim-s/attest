@@ -1,9 +1,9 @@
 import { diffToJson, type RunDiff, type RunRecord } from '@attest/core';
 
-import type { RunExecutionResult } from '../run/run-configuration.js';
+import type { LegacyRunExecutionResult } from '../run/run-configuration.js';
 
 /** Renders a compact terminal summary whose identifiers make follow-up diff commands copyable. */
-const renderRunSummary = (result: RunExecutionResult): string => {
+const renderRunSummary = (result: LegacyRunExecutionResult): string => {
   const summary = result.run.summary;
   if (summary === undefined) {
     return `Run ${result.run.id} completed without a persisted summary.`;
@@ -21,7 +21,7 @@ const renderRunSummary = (result: RunExecutionResult): string => {
 };
 
 /** Serializes a run result without leaking the internal store handle or transient execution state. */
-const renderRunJson = (result: RunExecutionResult): string =>
+const renderRunJson = (result: LegacyRunExecutionResult): string =>
   JSON.stringify({ run: result.run, cases: result.cases, diff: result.diff ?? null });
 
 /** Renders transition totals and pass-rate movement for human CLI diff output. */

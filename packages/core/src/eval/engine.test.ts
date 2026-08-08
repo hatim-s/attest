@@ -406,10 +406,12 @@ describe('executeResolvedEvalPlan', () => {
       Promise.resolve(completedExecution(resolvedCase, [passingMetric()])),
     );
     const runner: EvalCaseRunner<string> = { executeCase };
+    const onEvent = vi.fn();
 
     const result = await executeResolvedEvalPlan(plan, runner, persistence.adapter, {
       now: createClock(),
       event_limits: { max_events: 6 },
+      onEvent,
     });
 
     expect(result).toMatchObject({ status: 'failed', exit_code: 4, cases: [] });
@@ -418,6 +420,7 @@ describe('executeResolvedEvalPlan', () => {
       event: 'result',
       data: { exit_code: 4, result: { ok: false, error: { code: 'eval_event_limit_exceeded' } } },
     });
+    expect(onEvent).toHaveBeenCalledWith(result.events[0]);
     expect(executeCase).not.toHaveBeenCalled();
     expect(persistence.createRun).not.toHaveBeenCalled();
     expect(evalEventStreamSchema.safeParse(result.events).success).toBe(true);

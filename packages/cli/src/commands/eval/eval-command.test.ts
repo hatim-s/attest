@@ -454,9 +454,23 @@ describe('eval output and sequencing', () => {
     expect(harness.output.at(-1)?.split('\n').at(-1)).toBe('Result: PASS (exit 0)');
   });
 
-  it('buffers JSONL until the complete stream validates and preserves completion order', async () => {
-    const harness = createHarness();
-    await parse(harness, ['eval', 'run', 'refund', '--output', 'jsonl']);
+  it('streams validated JSONL live and preserves completion order', async () => {
+    let release: (() => void) | undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const run = async function* (): AsyncGenerator<EvalEvent> {
+      const events = completedEvents();
+      yield events[0]!;
+      await gate;
+      yield* events.slice(1);
+    };
+    const harness = createHarness({ ...defaultServices(), run: () => Promise.resolve(run()) });
+    const parsing = parse(harness, ['eval', 'run', 'refund', '--output', 'jsonl']);
+
+    await vi.waitFor(() => expect(harness.output).toHaveLength(1));
+    release?.();
+    await parsing;
 
     const stream = evalEventStreamSchema.parse(
       harness.output.map((line): unknown => JSON.parse(line) as unknown),

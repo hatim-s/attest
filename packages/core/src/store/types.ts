@@ -50,6 +50,12 @@ interface RunMetadata {
   labels?: Record<string, string>;
 }
 
+/** Supplies a preallocated immutable identity when another versioned record owns the run id. */
+interface RunIdentity {
+  id: string;
+  createdAt: string;
+}
+
 /** @deprecated Use InvocationErrorCode from @attest/contracts. */
 type StoredInvocationErrorCode = InvocationErrorCode;
 
@@ -162,7 +168,7 @@ interface CaseSummary {
 
 /** Defines the durable run lifecycle and query surface required by PLAN 1S.3. */
 interface RunStore {
-  createRun(metadata: RunMetadata): Promise<RunRecord>;
+  createRun(metadata: RunMetadata, identity?: RunIdentity): Promise<RunRecord>;
   recordCase(
     runId: string,
     execution: StoredCaseExecution,
@@ -196,6 +202,7 @@ export {
   type CaseSummary,
   type InvocationError,
   type RunMetadata,
+  type RunIdentity,
   type RunRecord,
   type RunStore,
   type RunStatus,

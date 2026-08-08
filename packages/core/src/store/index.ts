@@ -10,6 +10,7 @@ export {
 export { type CacheKind, type CacheStore } from './cache.js';
 export { toStoredCaseExecution } from './from-runner.js';
 export {
+  createRunIdentity,
   openReadonlyRunStore,
   openRunStore,
   openRunStoreSnapshot,
@@ -23,6 +24,7 @@ export {
   type CaseSummary,
   type InvocationError,
   type RunMetadata,
+  type RunIdentity,
   type RunRecord,
   type RunStatus,
   type RunSummary,

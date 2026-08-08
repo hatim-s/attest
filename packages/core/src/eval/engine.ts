@@ -213,11 +213,12 @@ const completedResult = (run: ImmutableEvalRun, summary: EvalRunSummary): EvalFi
 };
 
 /** Creates a contract-shaped result-only response for failures before orchestration starts. */
-const preOrchestrationFailure = <Payload, BaselineDiff>(
+const preOrchestrationFailure = async <Payload, BaselineDiff>(
   run: ImmutableEvalRun,
   now: () => string,
   finalResult: EvalFinalResultData,
-): EvalExecutionResult<Payload, BaselineDiff> => {
+  onEvent: ExecuteEvalOptions['onEvent'],
+): Promise<EvalExecutionResult<Payload, BaselineDiff>> => {
   const event: EvalEvent = {
     schema: CLI_EVENT_SCHEMA_VERSION,
     sequence: 0,
@@ -225,6 +226,11 @@ const preOrchestrationFailure = <Payload, BaselineDiff>(
     event: 'result',
     data: finalResult,
   };
+  try {
+    await onEvent?.(event);
+  } catch {
+    // The primary failure remains authoritative when its one result-event sink also fails.
+  }
   return {
     run,
     status: finalResult.exit_code === 130 ? 'cancelled' : 'failed',
@@ -425,6 +431,7 @@ const executeResolvedEvalPlan = async <Payload, BaselineDiff = unknown>(
         planError === undefined ? 'eval_event_limit_exceeded' : 'eval_plan_invalid',
         planError ?? 'Resolved eval plan exceeds the configured event count cap.',
       ),
+      options.onEvent,
     );
   }
   if (options.signal?.aborted === true) {
@@ -432,6 +439,7 @@ const executeResolvedEvalPlan = async <Payload, BaselineDiff = unknown>(
       run,
       now,
       failureResult(130, 'eval_cancelled', 'Eval run was cancelled before orchestration started.'),
+      options.onEvent,
     );
   }
 
@@ -446,6 +454,7 @@ const executeResolvedEvalPlan = async <Payload, BaselineDiff = unknown>(
         'eval_persistence_failed',
         safeErrorMessage(error, 'Eval run creation failed.'),
       ),
+      options.onEvent,
     );
   }
 

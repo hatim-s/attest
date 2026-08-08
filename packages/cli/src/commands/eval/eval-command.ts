@@ -195,6 +195,7 @@ const collectEvalEvents = async (
   source: EvalEventSource,
   watch: boolean,
   io: CliIo,
+  streamJsonl = false,
 ): Promise<EvalEventStream> => {
   const events: EvalEvent[] = [];
   for await (const value of source) {
@@ -206,6 +207,7 @@ const collectEvalEvents = async (
       });
     }
     events.push(event);
+    if (streamJsonl) io.output(serializeEvalEvent(event));
     if (watch && event.event !== 'result') {
       const rendered = renderHumanProgress(event);
       if (rendered !== undefined) io.output(rendered);
@@ -243,15 +245,14 @@ const executeEvalRun = async (
     source,
     request.output === 'human' && request.watch === true,
     context.io,
+    request.output === 'jsonl',
   );
   const final = events.at(-1);
   if (final?.event !== 'result') {
     throw new AttestCliError('run_failed', 'Eval stream did not produce a final result.');
   }
   if (request.output === 'json') context.io.output(serializeCliResult(final.data.result));
-  else if (request.output === 'jsonl') {
-    events.forEach((event) => context.io.output(serializeEvalEvent(event)));
-  } else {
+  else if (request.output !== 'jsonl') {
     if (!final.data.result.ok) context.io.error(renderCliError(final.data.result.error));
     context.io.output(renderHumanFinalResult(final.data));
   }

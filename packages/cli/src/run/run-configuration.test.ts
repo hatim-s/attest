@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { openStore, type JudgeClient, type JudgeRecord } from '@attest/core';
 
 import { loadConfig } from '../config/load-config.js';
-import { runConfiguration } from './run-configuration.js';
+import { runLegacyConfiguration } from './run-configuration.js';
 
 const temporaryDirectories: string[] = [];
 
@@ -56,12 +56,12 @@ afterEach(async () => {
   );
 });
 
-describe('runConfiguration', () => {
+describe('runLegacyConfiguration', () => {
   it('runs agent to metric to SQLite and can diff a second run', async () => {
     const { configPath, directory } = await createTestProject();
     const loadedConfig = await loadConfig(configPath, directory);
-    const first = await runConfiguration(loadedConfig);
-    const second = await runConfiguration(loadedConfig, { baselineRunId: first.run.id });
+    const first = await runLegacyConfiguration(loadedConfig);
+    const second = await runLegacyConfiguration(loadedConfig, { baselineRunId: first.run.id });
 
     expect(first.run.summary).toEqual({
       totalCases: 1,
@@ -83,7 +83,7 @@ describe('runConfiguration', () => {
     const loadedConfig = await loadConfig(configPath, directory);
 
     await expect(
-      runConfiguration(loadedConfig, { baselineRunId: 'missing-run' }),
+      runLegacyConfiguration(loadedConfig, { baselineRunId: 'missing-run' }),
     ).rejects.toMatchObject({ code: 'RUN_NOT_FOUND' });
 
     const store = await openStore(join(directory, '.attest/runs.db'));
@@ -138,8 +138,8 @@ describe('runConfiguration', () => {
       },
     };
 
-    const first = await runConfiguration(loadedConfig, { judgeClient });
-    const second = await runConfiguration(loadedConfig, { judgeClient });
+    const first = await runLegacyConfiguration(loadedConfig, { judgeClient });
+    const second = await runLegacyConfiguration(loadedConfig, { judgeClient });
 
     expect(first.cases[0]?.metrics[0]).toMatchObject({
       metricName: 'correctness',

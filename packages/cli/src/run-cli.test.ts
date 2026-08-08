@@ -24,7 +24,8 @@ describe('runCli', () => {
     });
 
     expect(exitCode).toBe(0);
-    expect(output.join('')).toContain('run [options]');
+    expect(output.join('')).toContain('eval');
+    expect(output.join('')).not.toContain('\n  run [options]');
   });
 
   it('emits one complete deterministic JSON help document', async () => {
@@ -187,18 +188,18 @@ describe('runCli', () => {
     expect(exitCode).toBe(2);
   });
 
-  it('returns an actionable config discovery error', async () => {
+  it('returns an actionable v2 project discovery error', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'attest-cli-command-'));
     temporaryDirectories.push(directory);
     const errors: string[] = [];
 
-    const exitCode = await runCli(['run'], {
+    const exitCode = await runCli(['eval', 'run', 'smoke'], {
       workingDirectory: directory,
       io: { output: () => undefined, error: (message) => errors.push(message) },
     });
 
     expect(exitCode).toBe(1);
-    expect(errors.join('\n')).toContain('config_not_found');
+    expect(errors.join('\n')).toContain('project_not_found');
   });
 
   it('converts OTLP JSON through the nested trace command', async () => {
@@ -267,7 +268,7 @@ describe('runCli', () => {
     });
   });
 
-  it('emits one machine-readable run document', async () => {
+  it('does not discover a v1 config or expose the removed top-level run alias', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'attest-cli-command-'));
     temporaryDirectories.push(directory);
     const agentPath = join(directory, 'agent.mjs');
@@ -285,15 +286,18 @@ describe('runCli', () => {
       }),
     );
     const output: string[] = [];
+    const errors: string[] = [];
 
     const exitCode = await runCli(['run', '--format', 'json'], {
       workingDirectory: directory,
-      io: { output: (message) => output.push(message), error: () => undefined },
+      io: { output: (message) => output.push(message), error: (message) => errors.push(message) },
     });
 
-    expect(exitCode).toBe(0);
-    expect(JSON.parse(output.at(-1) ?? '{}')).toMatchObject({
-      run: { status: 'completed', summary: { passedCases: 1 } },
+    expect(exitCode).toBe(2);
+    expect(output).toEqual([]);
+    expect(errors.join('')).toContain("unknown command 'run'");
+    await expect(readFile(join(directory, '.attest', 'runs.db'), 'utf8')).rejects.toMatchObject({
+      code: 'ENOENT',
     });
   });
 
@@ -362,7 +366,7 @@ describe('runCli', () => {
       }),
     ).toBe(2);
     expect(usageOutput).toEqual([]);
-    expect(usageErrors.join('')).toContain("unknown option '--output'");
+    expect(usageErrors.join('')).toContain("unknown command 'run'");
   });
 
   it('retrieves the schema id advertised by JSON help from the generated registry', async () => {
@@ -434,7 +438,8 @@ describe('runCli', () => {
     const subcommands = new Map(
       result.command.subcommands.map((command) => [command.name, command]),
     );
-    expect(subcommands.get('run')?.options.map(({ name }) => name)).toContain('format');
+    expect(subcommands.has('run')).toBe(false);
+    expect(subcommands.has('eval')).toBe(true);
     expect(subcommands.get('diff')?.options.map(({ name }) => name)).toContain('format');
     expect(subcommands.get('report')?.options.map(({ name }) => name)).toContain('output');
     expect(subcommands.get('trace')?.options.map(({ name }) => name)).not.toContain('output');

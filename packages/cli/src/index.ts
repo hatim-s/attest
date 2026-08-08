@@ -58,6 +58,38 @@ export {
   type CliResultOptions,
 } from './output/cli-protocol.js';
 export {
+  collectEvalEvents,
+  registerEvalCommands,
+  renderHumanFinalResult,
+  renderHumanProgress,
+  type EvalCancelExecutionContext,
+  type EvalCommandServices,
+  type EvalEventSource,
+  type EvalRunExecutionContext,
+  type RegisterEvalCommandsOptions,
+} from './commands/eval/eval-command.js';
+export {
+  DEFAULT_EVAL_CONCURRENCY,
+  DEFAULT_EVAL_TIMEOUT_MS,
+  createExecutionId,
+  resolveEvalRun,
+  type EvalResolverOptions,
+  type Immutable,
+  type ResolvedEvalCaseInput,
+  type ResolvedEvalMetric,
+  type ResolvedEvalRun,
+  type ResolvedEvalTestInput,
+} from './commands/eval/eval-resolver.js';
+export {
+  cancelConfiguration,
+  runConfiguration,
+  runLegacyConfiguration,
+  type CancelConfigurationOptions,
+  type LegacyRunConfigurationOptions,
+  type LegacyRunExecutionResult,
+  type RunConfigurationOptions,
+} from './run/run-configuration.js';
+export {
   generateCaseId,
   parseJsonFlag,
   readCommandRequest,

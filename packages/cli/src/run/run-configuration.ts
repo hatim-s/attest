@@ -1,13 +1,27 @@
+import { execFile } from 'node:child_process';
 import { mkdir } from 'node:fs/promises';
-import { dirname, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
+import { promisify } from 'node:util';
 
-import type { MetricDefinition } from '@attest/contracts';
+import {
+  EVAL_RUN_SCHEMA_VERSION,
+  evalRunSchema,
+  type EvalCancelRequest,
+  type EvalCancelResult,
+  type EvalEvent,
+  type EvalRun,
+  type EvalRunRequest,
+  type MetricDefinition,
+} from '@attest/contracts';
 import {
   caseExecutionToMetricContext,
+  createRunIdentity,
   createTanstackJudgeClient,
   diffRuns,
   evaluateMetrics,
+  executeResolvedEvalPlan,
   executeCases,
+  openReadonlyRunStore,
   openStore,
   toStoredCaseExecution,
   toStoredMetricEvaluation,
@@ -24,8 +38,25 @@ import {
 import { AttestCliError } from '../errors.js';
 import type { LoadedConfig } from '../config/load-config.js';
 import { resolveAgentTarget } from '../config/resolve-agent-target.js';
+import { createEvalCaseRunner } from '../commands/eval/eval-agent-runner.js';
+import {
+  registerEvalRun,
+  signalRegisteredEvalRun,
+  unregisterEvalRun,
+} from '../commands/eval/eval-cancellation.js';
+import { EvalEventQueue } from '../commands/eval/eval-event-source.js';
+import {
+  createEvalArtifactWriter,
+  createEvalBaselineAdapter,
+  createEvalPersistenceAdapter,
+} from '../commands/eval/eval-persistence.js';
+import { resolveEvalRun } from '../commands/eval/eval-resolver.js';
+import { loadCommandProject } from '../commands/project/load-command-project.js';
+import { createCliSuccessResult } from '../output/cli-protocol.js';
 
-type RunConfigurationOptions = {
+const execFileAsync = promisify(execFile);
+
+type LegacyRunConfigurationOptions = {
   baselineRunId?: string;
   judgeClient?: JudgeClient;
   onProgress?: (event: RunProgressEvent) => void;
@@ -39,7 +70,7 @@ const createJudgeCache = (cacheStore: CacheStore): JudgeCache => ({
   set: (key, entry) => cacheStore.put('judge', key, entry),
 });
 
-type RunExecutionResult = {
+type LegacyRunExecutionResult = {
   cases: CaseRecord[];
   diff?: RunDiff;
   run: RunRecord;
@@ -62,10 +93,10 @@ const selectMetricDefinitions = (
   });
 
 /** Executes one validated config through runner, metrics, durable store, and optional baseline diff. */
-const runConfiguration = async (
+const runLegacyConfiguration = async (
   loadedConfig: LoadedConfig,
-  options: RunConfigurationOptions = {},
-): Promise<RunExecutionResult> => {
+  options: LegacyRunConfigurationOptions = {},
+): Promise<LegacyRunExecutionResult> => {
   const storePath = resolve(loadedConfig.baseDirectory, options.storePath ?? '.attest/runs.db');
   await mkdir(dirname(storePath), { recursive: true });
 
@@ -141,4 +172,149 @@ const runConfiguration = async (
   }
 };
 
-export { runConfiguration, type RunConfigurationOptions, type RunExecutionResult };
+type RunConfigurationOptions = {
+  argv: readonly string[];
+  project?: string;
+  signal: AbortSignal;
+  workingDirectory: string;
+};
+
+type CancelConfigurationOptions = {
+  project?: string;
+  workingDirectory: string;
+};
+
+/** Captures bounded Git metadata when the project is in a repository, otherwise omitting it. */
+const readGitMetadata = async (projectRoot: string): Promise<EvalRun['git'] | undefined> => {
+  const runGit = async (arguments_: string[]): Promise<string | undefined> => {
+    try {
+      const { stdout } = await execFileAsync('git', ['-C', projectRoot, ...arguments_], {
+        encoding: 'utf8',
+        timeout: 2_000,
+      });
+      const value = stdout.trim();
+      return value.length === 0 ? undefined : value;
+    } catch {
+      return undefined;
+    }
+  };
+  const commit = await runGit(['rev-parse', '--verify', 'HEAD']);
+  if (commit === undefined || !/^[a-f0-9]{7,64}$/u.test(commit)) return undefined;
+  const [branch, status] = await Promise.all([
+    runGit(['symbolic-ref', '--quiet', '--short', 'HEAD']),
+    runGit(['status', '--porcelain=v1', '--untracked-files=normal']),
+  ]);
+  return {
+    commit,
+    ...(branch === undefined ? {} : { branch }),
+    dirty: status !== undefined && status.length > 0,
+  };
+};
+
+/** Runs one immutable v2 snapshot through resolver, engine, adapters, store, artifacts, and events. */
+const runConfiguration = async (
+  request: EvalRunRequest,
+  options: RunConfigurationOptions,
+): Promise<AsyncIterable<EvalEvent>> => {
+  const project = await loadCommandProject({
+    project: options.project,
+    workingDirectory: options.workingDirectory,
+  });
+  const resolved = resolveEvalRun(project, request, { argv: options.argv });
+  const identity = createRunIdentity();
+  const git = await readGitMetadata(project.root);
+  const run = evalRunSchema.parse({
+    schema: EVAL_RUN_SCHEMA_VERSION,
+    run_id: identity.id,
+    created_at: identity.createdAt,
+    snapshot_hash: resolved.snapshotHash,
+    snapshot: resolved.snapshot,
+    effective_command: resolved.effectiveCommand,
+    ...(git === undefined ? {} : { git }),
+  });
+  await mkdir(join(project.root, '.attest'), { recursive: true });
+  const store = await openStore(join(project.root, '.attest', 'runs.db'));
+  let registry: Awaited<ReturnType<typeof registerEvalRun>>;
+  try {
+    registry = await registerEvalRun(project.root, run.run_id);
+  } catch (error: unknown) {
+    await store.close();
+    throw error;
+  }
+
+  const queue = new EvalEventQueue();
+  const plan = {
+    run,
+    cases: resolved.cases.map((payload) => ({
+      configured_index: payload.configured_index,
+      test_id: payload.test_id,
+      case_id: payload.case_id,
+      source: payload.source,
+      payload,
+    })),
+  };
+  const runner = createEvalCaseRunner(project.root, store.cache);
+  void (async () => {
+    try {
+      await executeResolvedEvalPlan(plan, runner, createEvalPersistenceAdapter(store), {
+        artifacts: createEvalArtifactWriter(options.workingDirectory),
+        baseline: createEvalBaselineAdapter(store),
+        onEvent: (event) => queue.push(event),
+        signal: options.signal,
+      });
+    } catch (error: unknown) {
+      queue.fail(error);
+    } finally {
+      // Do not let the consumer return while another process can still address this completed run.
+      await unregisterEvalRun(registry).catch(() => undefined);
+      await store.close().catch(() => undefined);
+      queue.close();
+    }
+  })();
+  return queue;
+};
+
+/** Requests cancellation through the active registry, then reports persisted terminal state. */
+const cancelConfiguration = async (
+  request: EvalCancelRequest,
+  options: CancelConfigurationOptions,
+): Promise<EvalCancelResult> => {
+  const project = await loadCommandProject({
+    project: options.project,
+    workingDirectory: options.workingDirectory,
+  });
+  const requested = await signalRegisteredEvalRun(project.root, request.run_id);
+  let status: 'cancellation_requested' | 'already_cancelled' | 'already_terminal';
+  if (requested === 'cancellation_requested') status = requested;
+  else {
+    const storePath = join(project.root, '.attest', 'runs.db');
+    let store: Awaited<ReturnType<typeof openReadonlyRunStore>> | undefined;
+    try {
+      store = await openReadonlyRunStore(storePath);
+      const run = await store.getRun(request.run_id);
+      status = run.status === 'cancelled' ? 'already_cancelled' : 'already_terminal';
+    } catch (error: unknown) {
+      throw new AttestCliError('resource_not_found', `Eval run ${request.run_id} was not found.`, {
+        path: request.run_id,
+        cause: error,
+      });
+    } finally {
+      await store?.close().catch(() => undefined);
+    }
+  }
+  return createCliSuccessResult(
+    'eval.cancel',
+    { run_id: request.run_id, status },
+    { projectHashBefore: project.projectHash, projectHashAfter: project.projectHash },
+  ) as EvalCancelResult;
+};
+
+export {
+  cancelConfiguration,
+  runConfiguration,
+  runLegacyConfiguration,
+  type CancelConfigurationOptions,
+  type LegacyRunConfigurationOptions,
+  type LegacyRunExecutionResult,
+  type RunConfigurationOptions,
+};

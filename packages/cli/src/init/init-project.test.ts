@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { loadConfig } from '../config/load-config.js';
-import { runConfiguration } from '../run/run-configuration.js';
+import { runLegacyConfiguration } from '../run/run-configuration.js';
 import { initProject } from './init-project.js';
 
 const temporaryDirectories: string[] = [];
@@ -28,8 +28,8 @@ describe('initProject', () => {
     const parentDirectory = await createTemporaryDirectory();
     const initialized = await initProject('demo', parentDirectory);
     const loadedConfig = await loadConfig(undefined, initialized.targetDirectory);
-    const result = await runConfiguration(loadedConfig);
-    const tracedResult = await runConfiguration({
+    const result = await runLegacyConfiguration(loadedConfig);
+    const tracedResult = await runLegacyConfiguration({
       ...loadedConfig,
       config: {
         ...loadedConfig.config,
