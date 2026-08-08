@@ -6,7 +6,7 @@ import { CASE_SCHEMA_VERSION, DATASET_SCHEMA_VERSION } from './versions.js';
 const datasetImportDestinationSchema = z
   .string()
   .regex(
-    /^(?:id|input(?:\.[A-Za-z0-9_-]+)*|expected(?:\.[A-Za-z0-9_-]+)*|params(?:\.[A-Za-z0-9_-]+)+|tags|metrics)$/u,
+    /^(?:id|input(?:\.(?:[A-Za-z0-9_-]|\\[.\\])+)*|expected(?:\.(?:[A-Za-z0-9_-]|\\[.\\])+)*|params(?:\.(?:[A-Za-z0-9_-]|\\[.\\])+)+|tags|metrics)$/u,
     'must target id, input, expected, params, tags, or metrics',
   );
 

@@ -111,6 +111,7 @@ describe('runCli', () => {
           deprecated: null,
           request_schema: null,
           examples: [],
+          constraints: [],
         },
       },
       warnings: [],

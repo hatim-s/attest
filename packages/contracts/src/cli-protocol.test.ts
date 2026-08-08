@@ -49,6 +49,7 @@ const helpCommand = {
   deprecated: null,
   request_schema: 'attest.command-request/v2#test.case.import',
   examples: ['attest test case import smoke ./cases.jsonl --output json'],
+  constraints: [],
 };
 
 describe('CLI protocol contracts', () => {

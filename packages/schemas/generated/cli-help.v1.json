@@ -73,6 +73,13 @@
           },
           "type": "array"
         },
+        "constraints": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "type": "array"
+        },
         "deprecated": {
           "anyOf": [
             {
@@ -218,7 +225,8 @@
         "alias_for",
         "deprecated",
         "request_schema",
-        "examples"
+        "examples",
+        "constraints"
       ],
       "type": "object"
     },
