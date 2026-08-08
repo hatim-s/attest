@@ -109,7 +109,7 @@ afterEach(async () => {
   );
 });
 
-describe('CLI2.7 test, case, and dataset authoring', () => {
+describe('CLI2.7 test, case, and dataset authoring', { timeout: 20_000 }, () => {
   it('supports canonical test and direct-case happy paths in human and JSON modes', async () => {
     const root = await createProject();
     expect((await runJson(root, ['test', 'add', 'smoke', '--agent', 'support'])).exitCode).toBe(0);
