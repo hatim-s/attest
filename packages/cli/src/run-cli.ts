@@ -126,6 +126,18 @@ const parsePort = (value: string): number => {
   return port;
 };
 
+/** Distinguishes the common machine-output option from legacy artifact-path options. */
+const acceptsGlobalCommonOption = (command: Command, name: string): boolean => {
+  const option = command.options.find((candidate) => candidate.attributeName() === name);
+  if (option === undefined) return false;
+  if (name !== 'output') return true;
+  return (
+    option.argChoices?.length === 2 &&
+    option.argChoices.includes('human') &&
+    option.argChoices.includes('json')
+  );
+};
+
 /** Builds the public command tree while keeping command effects behind narrow action callbacks. */
 const createProgram = (
   io: CliIo,
@@ -159,7 +171,11 @@ const createProgram = (
     // Leaf commands retain a locally positioned value; otherwise inherit the normative global flag.
     for (const [name, value] of Object.entries(globalOptions)) {
       const localSource = actionCommand.getOptionValueSource(name);
-      if (value !== undefined && (localSource === undefined || localSource === 'default')) {
+      if (
+        value !== undefined &&
+        acceptsGlobalCommonOption(actionCommand, name) &&
+        (localSource === undefined || localSource === 'default')
+      ) {
         actionCommand.setOptionValueWithSource(name, value, 'implied');
       }
     }
