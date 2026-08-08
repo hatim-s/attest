@@ -25,6 +25,8 @@ type ExecutableMetricDefinition = Extract<MetricDefinition, { type: 'exec' }>;
 
 /** Applies one deadline, cancellation signal, and byte cap consistently across CLI and HTTP metrics. */
 type ExecuteMetricOptions = {
+  commandCwd?: string;
+  commandEnv?: NodeJS.ProcessEnv;
   outputCapBytes?: number;
   signal?: AbortSignal;
   timeoutMs?: number;
@@ -94,6 +96,8 @@ const executeExecutableMetric = async (
   }
 
   const invocationOptions = {
+    ...(options.commandCwd === undefined ? {} : { cwd: options.commandCwd }),
+    ...(options.commandEnv === undefined ? {} : { env: options.commandEnv }),
     outputCapBytes: options.outputCapBytes ?? DEFAULT_OUTPUT_CAP_BYTES,
     signal: options.signal,
     timeoutMs: options.timeoutMs ?? DEFAULT_TIMEOUT_MS,

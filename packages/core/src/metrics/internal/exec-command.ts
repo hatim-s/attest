@@ -16,6 +16,8 @@ type CommandMetricDefinition = Extract<MetricDefinition, { type: 'exec' }> & {
 
 /** Describes the limits and cancellation channel owned by one command invocation. */
 type InvokeCommandMetricOptions = {
+  cwd?: string;
+  env?: NodeJS.ProcessEnv;
   outputCapBytes: number;
   signal?: AbortSignal;
   timeoutMs: number;
@@ -194,7 +196,11 @@ const invokeCommandMetric = (
       return;
     }
 
-    const child = spawn(command, commandArguments, { detached: true });
+    const child = spawn(command, commandArguments, {
+      detached: true,
+      ...(options.cwd === undefined ? {} : { cwd: options.cwd }),
+      ...(options.env === undefined ? {} : { env: options.env }),
+    });
     const abortContext = createAbortContext({
       signal: options.signal,
       timeoutMs: options.timeoutMs,
