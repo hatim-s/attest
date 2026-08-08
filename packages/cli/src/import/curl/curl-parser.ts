@@ -213,6 +213,23 @@ const pointerTokens = (pointer: string): string[] =>
         .split('/')
         .map((token) => token.replaceAll('~1', '/').replaceAll('~0', '~'));
 
+/** Rejects credential-shaped JSON fields because body secret resolution is intentionally unsupported. */
+const assertNoSensitiveBodyFields = (value: JsonValue): void => {
+  if (Array.isArray(value)) {
+    for (const entry of value) assertNoSensitiveBodyFields(entry);
+    return;
+  }
+  if (value === null || typeof value !== 'object') return;
+  for (const [name, entry] of Object.entries(value)) {
+    if (SENSITIVE_NAME.test(name)) {
+      throw new CurlImportError('The cURL body contains an unsafe credential field.', [
+        `unsafe_body_field:${name.toLowerCase()}`,
+      ]);
+    }
+    assertNoSensitiveBodyFields(entry);
+  }
+};
+
 /** Replaces one existing JSON target with a typed input placeholder and never creates guessed paths. */
 const applyPlaceholder = (body: JsonValue, mapping: CurlPlaceholderMapping): void => {
   if (!/^(?:\/(?:[^~/]|~[01])*)*$/u.test(mapping.targetPointer) || mapping.targetPointer === '') {
@@ -367,6 +384,7 @@ const parseCurlCommand = (source: string, options: CurlParserOptions = {}): Pars
         error instanceof Error ? 'invalid_json_body' : 'invalid_body',
       ]);
     }
+    assertNoSensitiveBodyFields(body);
     for (const mapping of options.placeholders ?? []) applyPlaceholder(body, mapping);
   } else if ((options.placeholders?.length ?? 0) > 0) {
     throw new CurlImportError('Body mappings require a JSON cURL body.', ['missing_body']);

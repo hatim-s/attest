@@ -72,6 +72,11 @@ describe('CLI2.10 safe cURL parser', () => {
     ).toEqual(['unsafe_header:authorization']);
     expect(
       diagnostics(() =>
+        parseCurlCommand(`curl https://example.test --data '{"api_token":"unsafe"}'`),
+      ),
+    ).toEqual(['unsafe_body_field:api_token']);
+    expect(
+      diagnostics(() =>
         parseCurlCommand("curl 'https://example.test?a=1&a=2' -H 'X-A: 1' -H 'x-a: 2'"),
       ),
     ).toEqual(['duplicate_header:x-a']);
