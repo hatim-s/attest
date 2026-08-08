@@ -263,7 +263,7 @@ describe('v2 agent transport contract', () => {
 
 describe('v2 command request contract', () => {
   const base = { schema: COMMAND_REQUEST_SCHEMA_VERSION } as const;
-  const importOptions = { mapping: [], sync: 'append' as const };
+  const importOptions = { format: 'jsonl' as const };
   const requests: CommandRequest[] = [
     { ...base, command: 'project.init', name: 'Support' },
     { ...base, command: 'project.unlock', stale: true },
@@ -292,7 +292,7 @@ describe('v2 command request contract', () => {
       ...base,
       command: 'test.dataset.import',
       test_id: test.id,
-      source: 'cases.csv',
+      source: 'cases.jsonl',
       as: dataset.id,
       import: importOptions,
     },
@@ -350,26 +350,26 @@ describe('v2 command request contract', () => {
     ).toBe(false);
   });
 
-  it('requires a stable source identity for upsert and key dedupe', () => {
+  it('limits CLI2.7 imports to native JSON and JSONL without mapping policies', () => {
     const request = {
       ...base,
       command: 'test.case.import',
       test_id: test.id,
       source: 'cases.jsonl',
-      import: { mapping: [], sync: 'upsert' },
+      import: { format: 'jsonl' },
     };
 
-    expect(commandRequestSchema.safeParse(request).success).toBe(false);
+    expect(commandRequestSchema.safeParse(request).success).toBe(true);
     expect(
       commandRequestSchema.safeParse({
         ...request,
-        import: { mapping: [{ destination: 'id', source: '/id' }], sync: 'upsert' },
+        import: { format: 'csv' },
       }).success,
-    ).toBe(true);
+    ).toBe(false);
     expect(
       commandRequestSchema.safeParse({
         ...request,
-        import: { mapping: [], sync: 'append', dedupe: 'key' },
+        import: { format: 'jsonl', mapping: [], sync: 'append', dedupe: 'key' },
       }).success,
     ).toBe(false);
   });

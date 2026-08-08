@@ -451,8 +451,6 @@ const registerTestCommands = (context: RegisterTestCommandsOptions): void => {
           ),
           import: {
             ...(options.format === undefined ? {} : { format: options.format }),
-            mapping: [],
-            sync: 'append',
           },
         }),
       );
@@ -580,18 +578,18 @@ const registerTestCommands = (context: RegisterTestCommandsOptions): void => {
     ]);
   }
 
-  const dataset = test.command('dataset').description('Create, import, and attach datasets.');
-  const create = addMutationOptions(
-    dataset.command('create').description('Create an empty dataset and attach it atomically.'),
+  const dataset = test.command('dataset').description('Add, import, and attach datasets.');
+  const datasetAdd = addMutationOptions(
+    dataset.command('add').description('Add an empty dataset and attach it atomically.'),
   )
     .argument('[test-id]', 'test id')
     .argument('[dataset-id]', 'new dataset id')
     .option('--name <name>', 'dataset display name');
-  create.action(
+  datasetAdd.action(
     async (testId: string | undefined, datasetId: string | undefined, options: DatasetOptions) => {
       const interactive = isInteractive(options, context.interaction, options.fromJson);
       const request = await requestFromSource(
-        'test.dataset.create',
+        'test.dataset.add',
         options,
         { 'test-id': testId, 'dataset-id': datasetId, name: options.name },
         context,
@@ -604,7 +602,7 @@ const registerTestCommands = (context: RegisterTestCommandsOptions): void => {
             context.interaction,
           );
           return {
-            ...commonRequestFields('test.dataset.create', options),
+            ...commonRequestFields('test.dataset.add', options),
             test_id: await requiredInput(
               testId,
               '<test-id>',
@@ -622,10 +620,10 @@ const registerTestCommands = (context: RegisterTestCommandsOptions): void => {
           };
         },
       );
-      await runMutation('test.dataset.create', request, options, context);
+      await runMutation('test.dataset.add', request, options, context);
     },
   );
-  markMutationHelp(create, ['attest test dataset create smoke regression']);
+  markMutationHelp(datasetAdd, ['attest test dataset add smoke regression']);
 
   const datasetImport = addMutationOptions(
     dataset.command('import').description('Import a native JSON/JSONL dataset and attach it.'),
@@ -677,8 +675,6 @@ const registerTestCommands = (context: RegisterTestCommandsOptions): void => {
           ...(options.name === undefined ? {} : { name: options.name }),
           import: {
             ...(options.format === undefined ? {} : { format: options.format }),
-            mapping: [],
-            sync: 'append',
           },
         }),
       );

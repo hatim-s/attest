@@ -2,7 +2,7 @@ import { z } from 'zod';
 
 import { agentResourceSchema, responseExtractionSchema } from './agent-resource-v2.js';
 import { testCaseSchema } from './case-v2.js';
-import { datasetImportMappingSchema, datasetResourceSchema } from './dataset-resource-v2.js';
+import { datasetResourceSchema } from './dataset-resource-v2.js';
 import { metricResourceSchema } from './metric-resource-v2.js';
 import { testResourceSchema } from './test-resource-v2.js';
 import { jsonPointerSchema, resourceIdSchema, sha256Schema } from './v2-shared.js';
@@ -20,35 +20,10 @@ const authoringTestCaseSchema = testCaseSchema
   .omit({ id: true })
   .extend({ id: resourceIdSchema.optional() });
 
-/** Encodes deterministic case-import mapping and conflict policy shared by two commands. */
-const caseImportOptionsSchema = z
-  .strictObject({
-    format: z.enum(['csv', 'json', 'jsonl']).optional(),
-    records_pointer: jsonPointerSchema.optional(),
-    mapping: z.array(datasetImportMappingSchema),
-    parse_json: z.array(z.string().min(1)).optional(),
-    key: z.string().min(1).optional(),
-    dedupe: z.enum(['id', 'key', 'content']).optional(),
-    on_conflict: z.enum(['error', 'skip', 'update']).optional(),
-    sync: z.enum(['append', 'upsert']),
-  })
-  .superRefine((options, context) => {
-    const hasMappedId = options.mapping.some(({ destination }) => destination === 'id');
-    if (options.sync === 'upsert' && options.key === undefined && !hasMappedId) {
-      context.addIssue({
-        code: 'custom',
-        path: ['key'],
-        message: 'upsert requires a key or an explicit id mapping',
-      });
-    }
-    if (options.dedupe === 'key' && options.key === undefined) {
-      context.addIssue({
-        code: 'custom',
-        path: ['key'],
-        message: 'key dedupe requires a key source',
-      });
-    }
-  });
+/** Publishes only the native append-only import surface owned by CLI2.7. */
+const caseImportOptionsSchema = z.strictObject({
+  format: z.enum(['json', 'jsonl']).optional(),
+});
 
 const projectInitRequestSchema = z.strictObject({
   ...commonMutationFields,
@@ -140,13 +115,6 @@ const testCaseRemoveRequestSchema = z.strictObject({
 const testDatasetAddRequestSchema = z.strictObject({
   ...commonMutationFields,
   command: z.literal('test.dataset.add'),
-  test_id: resourceIdSchema,
-  dataset: datasetResourceSchema,
-});
-
-const testDatasetCreateRequestSchema = z.strictObject({
-  ...commonMutationFields,
-  command: z.literal('test.dataset.create'),
   test_id: resourceIdSchema,
   dataset: datasetResourceSchema,
 });
@@ -260,7 +228,6 @@ const commandRequestSchema = z.discriminatedUnion('command', [
   testCaseRenameRequestSchema,
   testCaseRemoveRequestSchema,
   testDatasetAddRequestSchema,
-  testDatasetCreateRequestSchema,
   testDatasetImportRequestSchema,
   testDatasetAttachRequestSchema,
   testDatasetDetachRequestSchema,

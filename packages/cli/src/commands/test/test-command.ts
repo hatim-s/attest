@@ -33,7 +33,6 @@ type TestAuthoringCommand = Extract<
       | 'test.case.rename'
       | 'test.dataset.add'
       | 'test.dataset.attach'
-      | 'test.dataset.create'
       | 'test.dataset.detach'
       | 'test.dataset.import'
       | 'test.dataset.remove'
@@ -110,33 +109,6 @@ const assertNewResourceId = (
   }
 };
 
-const assertNativeImportContract = (
-  request: Extract<TestAuthoringCommand, { command: 'test.case.import' | 'test.dataset.import' }>,
-): void => {
-  const options = request.import;
-  const unsupported = [
-    ...(options.mapping.length === 0 ? [] : ['mapping']),
-    ...(options.parse_json === undefined ? [] : ['parse_json']),
-    ...(options.key === undefined ? [] : ['key']),
-    ...(options.dedupe === undefined ? [] : ['dedupe']),
-    ...(options.on_conflict === undefined ? [] : ['on_conflict']),
-    ...(options.sync === 'append' ? [] : ['sync']),
-    ...(options.records_pointer === undefined ? [] : ['records_pointer']),
-  ];
-  if (options.format === 'csv') unsupported.push('format');
-  if (unsupported.length > 0) {
-    throw new AttestCliError(
-      'cli_usage',
-      'CLI2.7 accepts native JSON/JSONL cases without mapping or sync policies.',
-      {
-        path: '/import',
-        hint: 'Remove tabular mapping/dedupe options; the generalized importer lands separately.',
-        details: { unsupported_fields: unsupported.sort() },
-      },
-    );
-  }
-};
-
 const caseWithGeneratedId = (
   value: Extract<TestAuthoringCommand, { command: 'test.case.add' }>['case'],
 ): TestCase => ({ ...value, id: value.id ?? generateCaseId(value) });
@@ -176,7 +148,6 @@ const buildMutation = async (
       return { candidate, resource: { id: testCase.id, type: 'test_case' } };
     }
     case 'test.case.import': {
-      assertNativeImportContract(request);
       const test = findTest(candidate, request.test_id);
       const imported = await readNativeCases({
         format: request.import.format,
@@ -216,8 +187,7 @@ const buildMutation = async (
       test.cases = test.cases.filter(({ id }) => id !== request.case_id);
       return { candidate, resource: { id: request.case_id, type: 'test_case' } };
     }
-    case 'test.dataset.add':
-    case 'test.dataset.create': {
+    case 'test.dataset.add': {
       const test = findTest(candidate, request.test_id);
       assertNewResourceId(
         candidate.datasets.map(({ metadata }) => metadata),
@@ -235,7 +205,6 @@ const buildMutation = async (
       return { candidate, resource: { id: request.dataset.id, type: 'dataset' } };
     }
     case 'test.dataset.import': {
-      assertNativeImportContract(request);
       const test = findTest(candidate, request.test_id);
       assertNewResourceId(
         candidate.datasets.map(({ metadata }) => metadata),

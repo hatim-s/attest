@@ -210,7 +210,7 @@ describe('CLI2.7 test, case, and dataset authoring', { timeout: 20_000 }, () => 
 
   it('creates, detaches, and reattaches datasets without copying rows', async () => {
     const root = await createProject();
-    await runJson(root, ['test', 'dataset', 'create', 'refund', 'empty']);
+    await runJson(root, ['test', 'dataset', 'add', 'refund', 'empty']);
     let loaded = await loadProject({ project: root });
     expect(loaded.datasets.find(({ metadata }) => metadata.id === 'empty')?.cases).toEqual([]);
     expect(loaded.tests[0]?.datasets.map(({ dataset_id }) => dataset_id)).toContain('empty');
@@ -329,7 +329,8 @@ describe('CLI2.7 test, case, and dataset authoring', { timeout: 20_000 }, () => 
 
     const schema = await runJson(root, ['schema', 'print', COMMAND_REQUEST_SCHEMA_VERSION]);
     expect(schema.document).toMatchObject({ ok: true, command: 'schema.print' });
-    expect(schema.output).toContain('test.dataset.create');
+    expect(schema.output).toContain('test.dataset.add');
+    expect(schema.output).not.toContain('test.dataset.create');
     expect(schema.output).toContain('test.case.rename');
   });
 
@@ -422,7 +423,6 @@ describe('CLI2.7 test, case, and dataset authoring', { timeout: 20_000 }, () => 
       import: {
         format: 'csv',
         mapping: [{ destination: 'input', source: 'prompt' }],
-        sync: 'append',
       },
     };
     const path = join(root, 'mapped-request.json');

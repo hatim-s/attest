@@ -2622,78 +2622,14 @@
         "import": {
           "additionalProperties": false,
           "properties": {
-            "dedupe": {
-              "enum": [
-                "id",
-                "key",
-                "content"
-              ],
-              "type": "string"
-            },
             "format": {
               "enum": [
-                "csv",
                 "json",
                 "jsonl"
               ],
               "type": "string"
-            },
-            "key": {
-              "minLength": 1,
-              "type": "string"
-            },
-            "mapping": {
-              "items": {
-                "additionalProperties": false,
-                "properties": {
-                  "destination": {
-                    "pattern": "^(?:id|input(?:\\.[A-Za-z0-9_-]+)*|expected(?:\\.[A-Za-z0-9_-]+)*|params(?:\\.[A-Za-z0-9_-]+)+|tags|metrics)$",
-                    "type": "string"
-                  },
-                  "source": {
-                    "minLength": 1,
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "destination",
-                  "source"
-                ],
-                "type": "object"
-              },
-              "type": "array"
-            },
-            "on_conflict": {
-              "enum": [
-                "error",
-                "skip",
-                "update"
-              ],
-              "type": "string"
-            },
-            "parse_json": {
-              "items": {
-                "minLength": 1,
-                "type": "string"
-              },
-              "type": "array"
-            },
-            "records_pointer": {
-              "pattern": "^(?:\\/(?:[^~/]|~[01])*)*$",
-              "type": "string"
-            },
-            "sync": {
-              "enum": [
-                "append",
-                "upsert"
-              ],
-              "type": "string"
             }
           },
-          "required": [
-            "mapping",
-            "sync"
-          ],
           "type": "object"
         },
         "schema": {
@@ -2842,43 +2778,6 @@
     {
       "additionalProperties": false,
       "properties": {
-        "command": {
-          "const": "test.dataset.create",
-          "type": "string"
-        },
-        "dataset": {
-          "$ref": "#/$defs/V2DatasetResource"
-        },
-        "dry_run": {
-          "type": "boolean"
-        },
-        "if_project_hash": {
-          "pattern": "^[a-f0-9]{64}$",
-          "type": "string"
-        },
-        "schema": {
-          "const": "attest.command-request/v2",
-          "type": "string"
-        },
-        "test_id": {
-          "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
-          "type": "string"
-        },
-        "yes": {
-          "type": "boolean"
-        }
-      },
-      "required": [
-        "schema",
-        "command",
-        "test_id",
-        "dataset"
-      ],
-      "type": "object"
-    },
-    {
-      "additionalProperties": false,
-      "properties": {
         "as": {
           "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
           "type": "string"
@@ -2897,78 +2796,14 @@
         "import": {
           "additionalProperties": false,
           "properties": {
-            "dedupe": {
-              "enum": [
-                "id",
-                "key",
-                "content"
-              ],
-              "type": "string"
-            },
             "format": {
               "enum": [
-                "csv",
                 "json",
                 "jsonl"
               ],
               "type": "string"
-            },
-            "key": {
-              "minLength": 1,
-              "type": "string"
-            },
-            "mapping": {
-              "items": {
-                "additionalProperties": false,
-                "properties": {
-                  "destination": {
-                    "pattern": "^(?:id|input(?:\\.[A-Za-z0-9_-]+)*|expected(?:\\.[A-Za-z0-9_-]+)*|params(?:\\.[A-Za-z0-9_-]+)+|tags|metrics)$",
-                    "type": "string"
-                  },
-                  "source": {
-                    "minLength": 1,
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "destination",
-                  "source"
-                ],
-                "type": "object"
-              },
-              "type": "array"
-            },
-            "on_conflict": {
-              "enum": [
-                "error",
-                "skip",
-                "update"
-              ],
-              "type": "string"
-            },
-            "parse_json": {
-              "items": {
-                "minLength": 1,
-                "type": "string"
-              },
-              "type": "array"
-            },
-            "records_pointer": {
-              "pattern": "^(?:\\/(?:[^~/]|~[01])*)*$",
-              "type": "string"
-            },
-            "sync": {
-              "enum": [
-                "append",
-                "upsert"
-              ],
-              "type": "string"
             }
           },
-          "required": [
-            "mapping",
-            "sync"
-          ],
           "type": "object"
         },
         "name": {
