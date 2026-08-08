@@ -158,6 +158,7 @@ describe('CLI2.10 mapped HTTP adapter', () => {
 
     const result = await invokeMappedHttpAgent(agent, request);
     expect(result.status).toBe('ok');
+    expect(result.attempts.map(({ status }) => status)).toEqual(['invocation_error', 'ok']);
     expect(submissions).toBe(2);
     expect(polls).toBe(2);
     expect(keys[0]).toBe(keys[1]);
@@ -223,6 +224,13 @@ describe('CLI2.10 mapped HTTP adapter', () => {
 
     const rejected = await invokeMappedHttpAgent(makeAgent(true), request);
     expect(rejected.status).toBe('invocation_error');
+    const timedOut = await invokeMappedHttpAgent(
+      { ...makeAgent(false), timeouts: { attempt_ms: 10 } },
+      request,
+    );
+    expect(timedOut.status).toBe('invocation_error');
+    if (timedOut.status !== 'invocation_error') throw new Error('Expected timeout.');
+    expect(timedOut.error.code).toBe('timeout');
     const controller = new AbortController();
     setTimeout(() => controller.abort(), 10);
     const cancelled = await invokeMappedHttpAgent(makeAgent(false), request, {

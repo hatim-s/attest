@@ -10,6 +10,7 @@ import { requireSameOrigin, resolveSafeHttpUrl } from './url-security.js';
 
 type HttpClientPolicy = {
   attemptSignal: AbortSignal;
+  callerSignal?: AbortSignal;
   connectTimeoutMs: number;
   firstByteTimeoutMs: number;
   responseBodyTimeoutMs: number;
@@ -30,8 +31,8 @@ const EVIDENCE_PREFIX_BYTES = 16 * 1024;
 
 const abortError = (policy: HttpClientPolicy, cause?: unknown): AgentInvocationError =>
   new AgentInvocationError(
-    policy.attemptSignal.aborted ? 'cancelled' : 'timeout',
-    policy.attemptSignal.aborted
+    policy.callerSignal?.aborted === true ? 'cancelled' : 'timeout',
+    policy.callerSignal?.aborted === true
       ? 'Mapped HTTP invocation was cancelled.'
       : 'Mapped HTTP request timed out.',
     { cause },
@@ -153,6 +154,7 @@ const requestOnce = async (
     request.url,
     policy.connectTimeoutMs,
     policy.attemptSignal,
+    policy.callerSignal,
   );
   if (policy.secretsPresent && resolved.url.protocol !== 'https:' && !resolved.loopback) {
     throw new AgentInvocationError(
@@ -180,6 +182,8 @@ const requestOnce = async (
           callback(null, resolved.address, resolved.family),
       },
       (response) => {
+        // The response body owns its own idle deadline after headers arrive.
+        outgoing.setTimeout(0);
         if (timers.firstByte !== undefined) clearTimeout(timers.firstByte);
         const status = response.statusCode ?? 0;
         if (status < 200 || status >= 300) {

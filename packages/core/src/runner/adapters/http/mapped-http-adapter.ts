@@ -125,16 +125,32 @@ const parseRetryAfter = (value: string | undefined): number | undefined => {
     : undefined;
 };
 
-const wait = async (delayMs: number, signal: AbortSignal): Promise<void> => {
+const wait = async (
+  delayMs: number,
+  signal: AbortSignal,
+  callerSignal?: AbortSignal,
+): Promise<void> => {
   if (signal.aborted)
-    throw new AgentInvocationError('cancelled', 'Mapped HTTP invocation was cancelled.');
+    throw new AgentInvocationError(
+      callerSignal?.aborted === true ? 'cancelled' : 'timeout',
+      callerSignal?.aborted === true
+        ? 'Mapped HTTP invocation was cancelled.'
+        : 'Mapped HTTP invocation timed out.',
+    );
   if (delayMs <= 0) return;
   await new Promise<void>((resolve, reject) => {
     const timer = setTimeout(finish, delayMs);
     const cancel = (): void => {
       clearTimeout(timer);
       signal.removeEventListener('abort', cancel);
-      reject(new AgentInvocationError('cancelled', 'Mapped HTTP invocation was cancelled.'));
+      reject(
+        new AgentInvocationError(
+          callerSignal?.aborted === true ? 'cancelled' : 'timeout',
+          callerSignal?.aborted === true
+            ? 'Mapped HTTP invocation was cancelled.'
+            : 'Mapped HTTP invocation timed out.',
+        ),
+      );
     };
     function finish(): void {
       signal.removeEventListener('abort', cancel);
@@ -159,11 +175,23 @@ const attemptFromError = (
   warnings: [],
 });
 
-const normalizeFailure = (error: unknown, signal: AbortSignal): AgentInvocationError => {
-  if (error instanceof AgentInvocationError) return error;
+const normalizeFailure = (
+  error: unknown,
+  signal: AbortSignal,
+  callerSignal?: AbortSignal,
+): AgentInvocationError => {
+  if (error instanceof AgentInvocationError) {
+    return error.code === 'cancelled' && callerSignal?.aborted !== true
+      ? new AgentInvocationError('timeout', 'Mapped HTTP invocation timed out.', { cause: error })
+      : error;
+  }
   return new AgentInvocationError(
-    signal.aborted ? 'cancelled' : 'network',
-    signal.aborted ? 'Mapped HTTP invocation was cancelled.' : 'Mapped HTTP transport failed.',
+    callerSignal?.aborted === true ? 'cancelled' : signal.aborted ? 'timeout' : 'network',
+    callerSignal?.aborted === true
+      ? 'Mapped HTTP invocation was cancelled.'
+      : signal.aborted
+        ? 'Mapped HTTP invocation timed out.'
+        : 'Mapped HTTP transport failed.',
     { cause: error },
   );
 };
@@ -201,6 +229,7 @@ const runDirect = async (
   materialized: MaterializedHttpRequest,
   policy: Parameters<typeof requestJson>[1],
   signal: AbortSignal,
+  retryAttempts: InvocationAttempt[],
 ): Promise<HttpJsonResponse> => {
   const retries = agent.retry?.retries ?? 0;
   for (let retry = 0; ; retry += 1) {
@@ -208,12 +237,14 @@ const runDirect = async (
       const response = await requestJson(materialized, policy);
       if (response.status >= 200 && response.status < 300) return response;
       if (retry >= retries || !retryableStatus(response.status)) throw statusError(response);
+      retryAttempts.push(attemptFromError(statusError(response), 0));
       await wait(
         parseRetryAfter(response.headers['retry-after']) ?? retryDelay(agent, retry),
         signal,
+        policy.callerSignal,
       );
     } catch (error: unknown) {
-      const normalized = normalizeFailure(error, signal);
+      const normalized = normalizeFailure(error, signal, policy.callerSignal);
       if (
         retry >= retries ||
         normalized.code === 'cancelled' ||
@@ -225,7 +256,8 @@ const runDirect = async (
       ) {
         throw normalized;
       }
-      await wait(retryDelay(agent, retry), signal);
+      retryAttempts.push(attemptFromError(normalized, 0));
+      await wait(retryDelay(agent, retry), signal, policy.callerSignal);
     }
   }
 };
@@ -270,6 +302,7 @@ const runPolling = async (
   submission: MaterializedHttpRequest,
   policy: Parameters<typeof requestJson>[1],
   signal: AbortSignal,
+  retryAttempts: InvocationAttempt[],
 ): Promise<HttpJsonResponse> => {
   const { transport } = agent;
   const retries = agent.retry?.retries ?? 0;
@@ -303,12 +336,14 @@ const runPolling = async (
       ) {
         throw statusError(response);
       }
+      retryAttempts.push(attemptFromError(statusError(response), 0));
       await wait(
         parseRetryAfter(response.headers['retry-after']) ?? retryDelay(agent, retry),
         signal,
+        policy.callerSignal,
       );
     } catch (error: unknown) {
-      const normalized = normalizeFailure(error, signal);
+      const normalized = normalizeFailure(error, signal, policy.callerSignal);
       if (
         transport.idempotency_header === undefined ||
         retry >= retries ||
@@ -316,7 +351,8 @@ const runPolling = async (
       ) {
         throw normalized;
       }
-      await wait(retryDelay(agent, retry), signal);
+      retryAttempts.push(attemptFromError(normalized, 0));
+      await wait(retryDelay(agent, retry), signal, policy.callerSignal);
     }
   }
 
@@ -340,21 +376,24 @@ const runPolling = async (
 
   let interval = transport.minimum_interval_ms;
   for (;;) {
-    await wait(interval, signal);
+    await wait(interval, signal, policy.callerSignal);
     let polled: HttpJsonResponse;
     for (let retry = 0; ; retry += 1) {
       try {
         polled = await requestJson(pollRequest, policy);
         if (polled.status >= 200 && polled.status < 300) break;
         if (retry >= retries || !retryableStatus(polled.status)) throw statusError(polled);
+        retryAttempts.push(attemptFromError(statusError(polled), 0));
         await wait(
           parseRetryAfter(polled.headers['retry-after']) ?? retryDelay(agent, retry),
           signal,
+          policy.callerSignal,
         );
       } catch (error: unknown) {
-        const normalized = normalizeFailure(error, signal);
+        const normalized = normalizeFailure(error, signal, policy.callerSignal);
         if (retry >= retries || normalized.code === 'cancelled') throw normalized;
-        await wait(retryDelay(agent, retry), signal);
+        retryAttempts.push(attemptFromError(normalized, 0));
+        await wait(retryDelay(agent, retry), signal, policy.callerSignal);
       }
     }
     const status = readJsonPointer(polled.raw, transport.status_pointer);
@@ -393,12 +432,14 @@ const invokeMappedHttpAgent = async (
   );
   const policy = {
     attemptSignal: signal,
+    callerSignal: options.signal,
     connectTimeoutMs: agent.timeouts?.connect_ms ?? DEFAULT_CONNECT_MS,
     firstByteTimeoutMs: agent.timeouts?.first_byte_ms ?? DEFAULT_FIRST_BYTE_MS,
     responseBodyTimeoutMs: agent.timeouts?.idle_ms ?? DEFAULT_BODY_IDLE_MS,
     responseCapBytes: agent.limits?.response_bytes ?? DEFAULT_RESPONSE_CAP_BYTES,
     secretsPresent: (options.secrets?.length ?? 0) > 0,
   };
+  const retryAttempts: InvocationAttempt[] = [];
   try {
     const response =
       agent.transport.kind === 'http'
@@ -408,6 +449,7 @@ const invokeMappedHttpAgent = async (
             materialized,
             policy,
             signal,
+            retryAttempts,
           )
         : await runPolling(
             agent as Parameters<typeof runPolling>[0],
@@ -415,6 +457,7 @@ const invokeMappedHttpAgent = async (
             materialized,
             policy,
             signal,
+            retryAttempts,
           );
     requireSuccessfulStatus(response);
     const normalized = extractAgentResponse(response.raw, agent.transport.extraction);
@@ -434,14 +477,14 @@ const invokeMappedHttpAgent = async (
       rawExcerpt: response.rawExcerpt,
       warnings: report.warnings,
     };
-    return { ...attempt, attempts: [attempt] };
+    return { ...attempt, attempts: [...retryAttempts, attempt] };
   } catch (error: unknown) {
-    const normalized = normalizeFailure(error, signal) as AgentInvocationError & {
+    const normalized = normalizeFailure(error, signal, options.signal) as AgentInvocationError & {
       httpStatus?: number;
       rawExcerpt?: InvocationAttempt['rawExcerpt'];
     };
     const attempt = attemptFromError(normalized, duration());
-    return { ...attempt, attempts: [attempt] };
+    return { ...attempt, attempts: [...retryAttempts, attempt] };
   }
 };
 

@@ -15,7 +15,7 @@ const isIpv4Loopback = (address: string): boolean => address.startsWith('127.');
 /** Rejects private, link-local, unspecified, multicast, and carrier-grade IPv4 ranges. */
 const isSafeIpv4 = (address: string): boolean => {
   const octets = address.split('.').map(Number);
-  const [first = -1, second = -1] = octets;
+  const [first = -1, second = -1, third = -1] = octets;
   if (octets.length !== 4 || octets.some((octet) => octet < 0 || octet > 255)) return false;
   if (isIpv4Loopback(address)) return true;
   return !(
@@ -24,7 +24,12 @@ const isSafeIpv4 = (address: string): boolean => {
     (first === 100 && second >= 64 && second <= 127) ||
     (first === 169 && second === 254) ||
     (first === 172 && second >= 16 && second <= 31) ||
+    (first === 192 && second === 0 && [0, 2].includes(third)) ||
     (first === 192 && second === 168) ||
+    (first === 192 && second === 88 && third === 99) ||
+    (first === 198 && [18, 19].includes(second)) ||
+    (first === 198 && second === 51 && third === 100) ||
+    (first === 203 && second === 0 && third === 113) ||
     first >= 224
   );
 };
@@ -58,6 +63,7 @@ const resolveSafeHttpUrl = async (
   value: string,
   timeoutMs: number,
   signal?: AbortSignal,
+  callerSignal?: AbortSignal,
 ): Promise<ResolvedHttpUrl> => {
   let url: URL;
   try {
@@ -98,10 +104,16 @@ const resolveSafeHttpUrl = async (
     ])) as { address: string; family: 4 | 6 }[];
   } catch (error: unknown) {
     throw new AgentInvocationError(
-      signal?.aborted === true ? 'cancelled' : 'network',
-      signal?.aborted === true
+      callerSignal?.aborted === true
+        ? 'cancelled'
+        : signal?.aborted === true
+          ? 'timeout'
+          : 'network',
+      callerSignal?.aborted === true
         ? 'Mapped HTTP invocation was cancelled.'
-        : 'Mapped HTTP hostname could not be resolved safely.',
+        : signal?.aborted === true
+          ? 'Mapped HTTP hostname resolution timed out.'
+          : 'Mapped HTTP hostname could not be resolved safely.',
       { cause: error },
     );
   }
