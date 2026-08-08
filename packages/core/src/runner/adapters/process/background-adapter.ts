@@ -17,8 +17,10 @@ type BackgroundAgentResource = AgentResource & {
 type BackgroundSessionOptions = {
   cwd: string;
   env: Record<string, string>;
-  headers?: Record<string, string>;
-  query?: Record<string, string>;
+  invokeHeaders?: Record<string, string>;
+  invokeQuery?: Record<string, string>;
+  shutdownHeaders?: Record<string, string>;
+  shutdownQuery?: Record<string, string>;
   secrets?: readonly string[];
   signal?: AbortSignal;
 };
@@ -57,13 +59,20 @@ const assertLoopbackUrl = (value: string): URL => {
   return url;
 };
 
-const wait = (delayMs: number, signal: AbortSignal): Promise<void> =>
+const wait = (delayMs: number, signal: AbortSignal, callerSignal?: AbortSignal): Promise<void> =>
   new Promise((resolve, reject) => {
     const timer = setTimeout(finish, delayMs);
     const abort = (): void => {
       clearTimeout(timer);
       signal.removeEventListener('abort', abort);
-      reject(new AgentInvocationError('timeout', 'Background agent readiness timed out.'));
+      reject(
+        new AgentInvocationError(
+          callerSignal?.aborted === true ? 'cancelled' : 'timeout',
+          callerSignal?.aborted === true
+            ? 'Background agent startup was cancelled.'
+            : 'Background agent readiness timed out.',
+        ),
+      );
     };
     function finish(): void {
       signal.removeEventListener('abort', abort);
@@ -148,9 +157,24 @@ class BackgroundAgentSession {
       await session.waitForReadiness();
       return session;
     } catch (error: unknown) {
+      const diagnostics = session.startupDiagnostics();
       await session.close();
+      if (error instanceof AgentInvocationError) {
+        throw Object.assign(error, { diagnostics });
+      }
       throw error;
     }
+  }
+
+  /** Captures only bounded startup evidence for stable CLI error normalization. */
+  private startupDiagnostics(): { exitCode?: number; stderrExcerpt?: string } {
+    const stderr = this.process.stderrExcerpt();
+    return {
+      ...(this.process.child.exitCode === null ? {} : { exitCode: this.process.child.exitCode }),
+      ...(stderr === undefined
+        ? {}
+        : { stderrExcerpt: redactTransportText(stderr, this.options.secrets ?? []) }),
+    };
   }
 
   private async waitForReadiness(): Promise<void> {
@@ -176,7 +200,14 @@ class BackgroundAgentSession {
         let settled = false;
         const abort = (): void =>
           finish(() =>
-            reject(new AgentInvocationError('timeout', 'Background agent startup timed out.')),
+            reject(
+              new AgentInvocationError(
+                this.options.signal?.aborted === true ? 'cancelled' : 'timeout',
+                this.options.signal?.aborted === true
+                  ? 'Background agent startup was cancelled.'
+                  : 'Background agent startup timed out.',
+              ),
+            ),
           );
         const data = (chunk: Buffer): void => {
           retained = `${retained}${chunk.toString('utf8')}`.slice(-READINESS_BUFFER_CHARACTERS);
@@ -189,6 +220,16 @@ class BackgroundAgentSession {
           this.process.child.stderr.off('data', data);
           operation();
         };
+        void this.process.exit.then(({ code, signal }) =>
+          finish(() =>
+            reject(
+              new AgentInvocationError(
+                'nonzero_exit',
+                `Background agent exited before stderr readiness (code ${String(code)}, signal ${String(signal)}).`,
+              ),
+            ),
+          ),
+        );
         startupSignal.addEventListener('abort', abort, { once: true });
         this.process.child.stderr.on('data', data);
         if (startupSignal.aborted) abort();
@@ -216,7 +257,7 @@ class BackgroundAgentSession {
           ? await httpReady(readiness.url, startupSignal)
           : await tcpReady(readiness.host, readiness.port, startupSignal);
       if (ready) return;
-      await wait(READINESS_INTERVAL_MS, startupSignal);
+      await wait(READINESS_INTERVAL_MS, startupSignal, this.options.signal);
     }
   }
 
@@ -240,8 +281,8 @@ class BackgroundAgentSession {
       },
     };
     let result = await invokeMappedHttpAgent(mapped, request, {
-      headers: this.options.headers,
-      query: this.options.query,
+      headers: this.options.invokeHeaders,
+      query: this.options.invokeQuery,
       secrets: this.options.secrets,
       signal: combined,
     });
@@ -294,9 +335,12 @@ class BackgroundAgentSession {
         ...shutdown,
         headers: {
           ...(shutdown.headers as Record<string, string> | undefined),
-          ...this.options.headers,
+          ...this.options.shutdownHeaders,
         },
-        query: { ...(shutdown.query as Record<string, string> | undefined), ...this.options.query },
+        query: {
+          ...(shutdown.query as Record<string, string> | undefined),
+          ...this.options.shutdownQuery,
+        },
       },
       request,
       this.agent.limits?.request_bytes ?? 10 * 1024 * 1024,

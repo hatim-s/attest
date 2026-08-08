@@ -148,4 +148,101 @@ describe('HTTP streaming adapter', () => {
     expect((await invokeStreamingAgent(started, request)).status).toBe('invocation_error');
     expect(calls).toBe(1);
   });
+
+  it.each(['sse', 'jsonl'] as const)(
+    'preserves split multibyte UTF-8 for %s framing and rejects malformed bytes',
+    async (framing) => {
+      const terminal =
+        framing === 'sse'
+          ? 'data: {"type":"result","output":"💥"}\n\n'
+          : '{"type":"result","output":"💥"}\n';
+      const bytes = Buffer.from(terminal, 'utf8');
+      const split = bytes.indexOf(Buffer.from('💥', 'utf8')) + 2;
+      const origin = await listen((_request, response) => {
+        response.setHeader(
+          'content-type',
+          framing === 'sse' ? 'text/event-stream' : 'application/x-ndjson',
+        );
+        response.write(bytes.subarray(0, split));
+        setImmediate(() => response.end(bytes.subarray(split)));
+      });
+      const result = await invokeStreamingAgent(agent(origin, framing), request);
+      expect(result.status).toBe('ok');
+      if (result.status === 'ok' && result.report?.ok && 'output' in result.report.value) {
+        expect(result.report.value.output).toBe('💥');
+      }
+
+      const malformedOrigin = await listen((_request, response) => {
+        response.setHeader('content-type', 'application/x-ndjson');
+        response.end(
+          Buffer.concat([
+            Buffer.from('{"type":"result","output":"', 'utf8'),
+            Buffer.from([0xc3, 0x28]),
+            Buffer.from('"}\n', 'utf8'),
+          ]),
+        );
+      });
+      const malformed = await invokeStreamingAgent(agent(malformedOrigin, 'jsonl'), request);
+      expect(malformed.status).toBe('invocation_error');
+      if (malformed.status === 'invocation_error') {
+        expect(malformed.error.code).toBe('invalid_envelope');
+      }
+    },
+  );
+
+  it('gives each retry a fresh attempt deadline under a separate run deadline', async () => {
+    let calls = 0;
+    const origin = await listen((_request, response) => {
+      calls += 1;
+      const attempt = calls;
+      setTimeout(() => {
+        response.statusCode = attempt === 1 ? 500 : 200;
+        response.setHeader('content-type', 'application/x-ndjson');
+        response.end(attempt === 1 ? '{"error":"retry"}\n' : '{"type":"result","output":"done"}\n');
+      }, 60);
+    });
+    const configured = agent(origin, 'jsonl', {
+      retry: { retries: 1, backoff: { kind: 'none' } },
+      timeouts: { attempt_ms: 100, idle_ms: 100, run_ms: 500 },
+    });
+    const result = await invokeStreamingAgent(configured, request);
+    expect(result.status).toBe('ok');
+    expect(result.attempts).toHaveLength(2);
+    expect(calls).toBe(2);
+  });
+
+  it('honors bounded Retry-After for 429 and rejects an unbounded 429 retry', async () => {
+    let calls = 0;
+    const origin = await listen((_request, response) => {
+      calls += 1;
+      if (calls === 1) {
+        response.statusCode = 429;
+        response.setHeader('retry-after', '1');
+        response.end();
+        return;
+      }
+      response.setHeader('content-type', 'application/x-ndjson');
+      response.end('{"type":"result","output":"after-wait"}\n');
+    });
+    const configured = agent(origin, 'jsonl', {
+      retry: { retries: 1, backoff: { kind: 'none' } },
+      timeouts: { attempt_ms: 2_000, idle_ms: 500, run_ms: 3_000 },
+    });
+    const started = Date.now();
+    expect((await invokeStreamingAgent(configured, request)).status).toBe('ok');
+    expect(Date.now() - started).toBeGreaterThanOrEqual(900);
+    expect(calls).toBe(2);
+
+    let unboundedCalls = 0;
+    const unboundedOrigin = await listen((_request, response) => {
+      unboundedCalls += 1;
+      response.statusCode = 429;
+      response.end();
+    });
+    const unbounded = agent(unboundedOrigin, 'jsonl', {
+      retry: { retries: 1, backoff: { kind: 'none' } },
+    });
+    expect((await invokeStreamingAgent(unbounded, request)).status).toBe('invocation_error');
+    expect(unboundedCalls).toBe(1);
+  });
 });

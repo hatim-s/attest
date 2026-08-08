@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { StringDecoder } from 'node:string_decoder';
 
 import {
@@ -44,6 +45,17 @@ const DEFAULT_EVENT_BYTES = 1024 * 1024;
 const DEFAULT_TOTAL_EVIDENCE_BYTES = 10 * 1024 * 1024;
 const DEFAULT_STDERR_BYTES = 16 * 1024;
 const DEFAULT_TERMINATION_GRACE_MS = 5_000;
+
+/** Derives a bounded correlation token without embedding unbounded authored request identifiers. */
+const correlationId = (request: AgentRequest, sequence: number): string => {
+  const digest = createHash('sha256')
+    .update(request.run_id)
+    .update('\0')
+    .update(request.case_id)
+    .digest('hex')
+    .slice(0, 32);
+  return `req-${sequence.toString(36)}-${digest}`;
+};
 
 /** Runs one persistent, correlated native-agent JSONL bridge for exactly one eval run. */
 class JsonlBridgeSession {
@@ -135,7 +147,7 @@ class JsonlBridgeSession {
         0,
       );
     }
-    const requestId = `${request.run_id}:${request.case_id}:${String(++this.sequence)}`;
+    const requestId = correlationId(request, ++this.sequence);
     const frame = { type: 'request', request_id: requestId, request } as const;
     if (
       Buffer.byteLength(JSON.stringify(frame)) >
@@ -174,17 +186,16 @@ class JsonlBridgeSession {
       }
       this.pending.set(requestId, pending);
     });
-    try {
-      await this.process.writeLine(frame);
-    } catch (error: unknown) {
+    // Result settlement must remain independent of a peer that stops draining stdin.
+    void this.process.writeLine(frame).catch((error: unknown) =>
       this.failSession(
         error instanceof AgentInvocationError
           ? error
           : new AgentInvocationError('network', 'Could not write a JSONL bridge request.', {
               cause: error,
             }),
-      );
-    }
+      ),
+    );
     return result;
   }
 
@@ -362,16 +373,20 @@ class JsonlBridgeSession {
     pending.cancelled = true;
     pending.cancellationCode = code;
     clearTimeout(pending.timeoutTimer);
-    try {
-      await this.process.writeLine({ type: 'cancel', request_id: requestId });
-    } catch (error: unknown) {
-      this.fallbackAfterCancellation(requestId, code, error);
-      return;
-    }
+    const cancellationGrace = this.agent.transport.cancellation_grace_ms;
     pending.cancellationTimer = setTimeout(
       () => this.fallbackAfterCancellation(requestId, code),
-      this.agent.transport.cancellation_grace_ms,
+      cancellationGrace,
     );
+    try {
+      // The same grace bounds both stdin backpressure and the peer acknowledgement.
+      await this.process.writeLine(
+        { type: 'cancel', request_id: requestId },
+        AbortSignal.timeout(cancellationGrace),
+      );
+    } catch (error: unknown) {
+      this.fallbackAfterCancellation(requestId, code, error);
+    }
   }
 
   private fallbackAfterCancellation(

@@ -12,6 +12,7 @@ import {
   type SecretReference,
 } from '@attest/contracts';
 import {
+  AgentInvocationError,
   invokeAgent,
   invokeMappedHttpAgent,
   invokeStreamingAgent,
@@ -47,6 +48,10 @@ type NativeAgentTestOptions = {
 
 type ResolvedNativeAgent = {
   backgroundAgent?: BackgroundAgentResource;
+  backgroundInvokeHeaders?: Record<string, string>;
+  backgroundInvokeQuery?: Record<string, string>;
+  backgroundShutdownHeaders?: Record<string, string>;
+  backgroundShutdownQuery?: Record<string, string>;
   cwd?: string;
   env?: Record<string, string>;
   httpHeaders?: Record<string, string>;
@@ -251,11 +256,11 @@ const resolveNativeAgent = async (
         secrets: resolvedEnvironment.secrets,
       };
     }
-    const http = await resolveHttpSecrets(
-      [transport.invoke, ...(transport.shutdown === undefined ? [] : [transport.shutdown])],
-      projectRoot,
-      observer,
-    );
+    const invoke = await resolveHttpSecrets([transport.invoke], projectRoot, observer);
+    const shutdown =
+      transport.shutdown === undefined
+        ? { headers: {}, query: {}, secrets: [] }
+        : await resolveHttpSecrets([transport.shutdown], projectRoot, observer);
     return {
       backgroundAgent: {
         ...agent,
@@ -263,9 +268,11 @@ const resolveNativeAgent = async (
       },
       cwd,
       env: resolvedEnvironment.env,
-      httpHeaders: http.headers,
-      httpQuery: http.query,
-      secrets: [...resolvedEnvironment.secrets, ...http.secrets],
+      backgroundInvokeHeaders: invoke.headers,
+      backgroundInvokeQuery: invoke.query,
+      backgroundShutdownHeaders: shutdown.headers,
+      backgroundShutdownQuery: shutdown.query,
+      secrets: [...resolvedEnvironment.secrets, ...invoke.secrets, ...shutdown.secrets],
     };
   }
 
@@ -336,7 +343,7 @@ const assertSupportedProbePolicy = (agent: AgentResource): void => {
   const unsupportedTimeoutFields =
     kind === 'native_cli'
       ? ['connect_ms', 'first_byte_ms', 'idle_ms', 'run_ms']
-      : kind === 'http' || kind === 'polling' || kind === 'stream'
+      : kind === 'http' || kind === 'polling'
         ? ['run_ms']
         : kind === 'jsonl_bridge'
           ? ['connect_ms']
@@ -467,57 +474,81 @@ const testNativeAgentConnection = async (options: NativeAgentTestOptions): Promi
   };
   const startedAt = new Date().toISOString();
   let invocation: InvocationResult;
-  if (resolved.backgroundAgent !== undefined) {
-    const session = await startBackgroundAgent(resolved.backgroundAgent, {
-      cwd: resolved.cwd ?? options.projectRoot,
-      env: resolved.env ?? createBaseEnvironment(),
-      headers: resolved.httpHeaders,
-      query: resolved.httpQuery,
-      secrets: resolved.secrets,
-      signal: options.signal,
-    });
-    try {
-      invocation = await session.invoke(request, options.signal);
-    } finally {
-      await session.close();
+  const managedStartupStarted = performance.now();
+  try {
+    if (resolved.backgroundAgent !== undefined) {
+      const session = await startBackgroundAgent(resolved.backgroundAgent, {
+        cwd: resolved.cwd ?? options.projectRoot,
+        env: resolved.env ?? createBaseEnvironment(),
+        invokeHeaders: resolved.backgroundInvokeHeaders,
+        invokeQuery: resolved.backgroundInvokeQuery,
+        secrets: resolved.secrets,
+        shutdownHeaders: resolved.backgroundShutdownHeaders,
+        shutdownQuery: resolved.backgroundShutdownQuery,
+        signal: options.signal,
+      });
+      try {
+        invocation = await session.invoke(request, options.signal);
+      } finally {
+        await session.close();
+      }
+    } else if (resolved.jsonlBridgeAgent !== undefined) {
+      const session = await startJsonlBridgeAgent(resolved.jsonlBridgeAgent, {
+        cwd: resolved.cwd ?? options.projectRoot,
+        env: resolved.env ?? createBaseEnvironment(),
+        secrets: resolved.secrets,
+        signal: options.signal,
+      });
+      try {
+        invocation = await session.invoke(request, options.signal);
+      } finally {
+        await session.close();
+      }
+    } else if (resolved.streamAgent !== undefined) {
+      invocation = await invokeStreamingAgent(resolved.streamAgent, request, {
+        headers: resolved.httpHeaders,
+        query: resolved.httpQuery,
+        secrets: resolved.secrets,
+        signal: options.signal,
+      });
+    } else if (resolved.mappedAgent !== undefined) {
+      invocation = await invokeMappedHttpAgent(resolved.mappedAgent, request, {
+        headers: resolved.httpHeaders,
+        query: resolved.httpQuery,
+        secrets: resolved.secrets,
+        signal: options.signal,
+      });
+    } else if (resolved.target !== undefined) {
+      invocation = await invokeAgent(resolved.target, request, {
+        env: resolved.env,
+        httpHeaders: resolved.httpHeaders,
+        outputCapBytes: options.agent.limits?.response_bytes ?? DEFAULT_OUTPUT_CAP_BYTES,
+        retries: options.agent.retry?.retries ?? 0,
+        signal: options.signal,
+        timeoutMs: options.agent.timeouts?.attempt_ms ?? DEFAULT_TIMEOUT_MS,
+      });
+    } else {
+      throw new Error('Resolved agent omitted its invocation target.');
     }
-  } else if (resolved.jsonlBridgeAgent !== undefined) {
-    const session = await startJsonlBridgeAgent(resolved.jsonlBridgeAgent, {
-      cwd: resolved.cwd ?? options.projectRoot,
-      env: resolved.env ?? createBaseEnvironment(),
-      secrets: resolved.secrets,
-      signal: options.signal,
-    });
-    try {
-      invocation = await session.invoke(request, options.signal);
-    } finally {
-      await session.close();
+  } catch (error: unknown) {
+    if (
+      !(error instanceof AgentInvocationError) ||
+      (resolved.backgroundAgent === undefined && resolved.jsonlBridgeAgent === undefined)
+    ) {
+      throw error;
     }
-  } else if (resolved.streamAgent !== undefined) {
-    invocation = await invokeStreamingAgent(resolved.streamAgent, request, {
-      headers: resolved.httpHeaders,
-      query: resolved.httpQuery,
-      secrets: resolved.secrets,
-      signal: options.signal,
-    });
-  } else if (resolved.mappedAgent !== undefined) {
-    invocation = await invokeMappedHttpAgent(resolved.mappedAgent, request, {
-      headers: resolved.httpHeaders,
-      query: resolved.httpQuery,
-      secrets: resolved.secrets,
-      signal: options.signal,
-    });
-  } else if (resolved.target !== undefined) {
-    invocation = await invokeAgent(resolved.target, request, {
-      env: resolved.env,
-      httpHeaders: resolved.httpHeaders,
-      outputCapBytes: options.agent.limits?.response_bytes ?? DEFAULT_OUTPUT_CAP_BYTES,
-      retries: options.agent.retry?.retries ?? 0,
-      signal: options.signal,
-      timeoutMs: options.agent.timeouts?.attempt_ms ?? DEFAULT_TIMEOUT_MS,
-    });
-  } else {
-    throw new Error('Resolved agent omitted its invocation target.');
+    const diagnostics =
+      'diagnostics' in error && error.diagnostics !== null && typeof error.diagnostics === 'object'
+        ? (error.diagnostics as InvocationResult['diagnostics'])
+        : {};
+    const attempt = {
+      status: 'invocation_error' as const,
+      error,
+      diagnostics,
+      durationMs: performance.now() - managedStartupStarted,
+      warnings: [],
+    };
+    invocation = { ...attempt, attempts: [attempt] };
   }
   if (invocation.status === 'invocation_error') {
     const code = invocation.error.code === 'cancelled' ? 'cancelled' : 'invocation_failed';

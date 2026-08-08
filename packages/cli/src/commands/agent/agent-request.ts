@@ -622,19 +622,136 @@ const assertSafeNativeAgentResource = (agent: AgentResource): void => {
   }
 };
 
+const AUTHORING_FLAG_BY_FIELD: Readonly<Record<keyof AgentAddFields, string>> = {
+  agentId: 'agent-id',
+  argvJson: 'argv-json',
+  backgroundCommand: 'background-command',
+  bridgeConcurrency: 'bridge-concurrency',
+  cancellationGrace: 'cancel-grace',
+  cwd: 'cwd',
+  env: 'env',
+  errorPointer: 'error-pointer',
+  eventName: 'event-name',
+  headerEnv: 'header-env',
+  incrementalOutputMode: 'incremental-output-mode',
+  incrementalOutputPointer: 'incremental-output-pointer',
+  invokeUrl: 'invoke-url',
+  jsonlCommand: 'jsonl-command',
+  name: 'name',
+  nativeCommand: 'native-command',
+  nativeHttp: 'native-http',
+  readinessHttp: 'readiness-http',
+  readinessStderr: 'readiness-stderr',
+  readinessTcp: 'readiness-tcp',
+  responsePointer: 'response-pointer',
+  shutdownUrl: 'shutdown-url',
+  stopTimeout: 'stop-timeout',
+  streamFraming: 'stream-framing',
+  streamUrl: 'stream-url',
+  terminalPointer: 'terminal-pointer',
+  terminalValues: 'terminal-value',
+  timeout: 'timeout',
+  trace: 'trace',
+  tracePointer: 'trace-pointer',
+};
+
+const COMMON_AUTHORING_FIELDS = new Set<keyof AgentAddFields>([
+  'agentId',
+  'name',
+  'timeout',
+  'trace',
+]);
+
+const TRANSPORT_AUTHORING_FIELDS: Readonly<
+  Record<
+    'background' | 'jsonl' | 'native_cli' | 'native_http' | 'stream',
+    Set<keyof AgentAddFields>
+  >
+> = {
+  native_cli: new Set(['argvJson', 'nativeCommand', 'cwd', 'env']),
+  native_http: new Set(['nativeHttp', 'headerEnv']),
+  background: new Set([
+    'backgroundCommand',
+    'cwd',
+    'env',
+    'errorPointer',
+    'headerEnv',
+    'invokeUrl',
+    'readinessHttp',
+    'readinessStderr',
+    'readinessTcp',
+    'responsePointer',
+    'shutdownUrl',
+    'stopTimeout',
+    'tracePointer',
+  ]),
+  jsonl: new Set(['jsonlCommand', 'cwd', 'env', 'bridgeConcurrency', 'cancellationGrace']),
+  stream: new Set([
+    'streamUrl',
+    'streamFraming',
+    'headerEnv',
+    'errorPointer',
+    'eventName',
+    'incrementalOutputMode',
+    'incrementalOutputPointer',
+    'responsePointer',
+    'terminalPointer',
+    'terminalValues',
+    'tracePointer',
+  ]),
+};
+
+const fieldIsProvided = (value: AgentAddFields[keyof AgentAddFields]): boolean =>
+  value !== undefined && (!Array.isArray(value) || value.length > 0);
+
+/** Rejects every flag that the selected transport would otherwise silently discard. */
+const assertApplicableAuthoringFlags = (
+  fields: AgentAddFields,
+  selected: keyof typeof TRANSPORT_AUTHORING_FIELDS,
+): void => {
+  const allowed = TRANSPORT_AUTHORING_FIELDS[selected];
+  for (const field of Object.keys(AUTHORING_FLAG_BY_FIELD) as (keyof AgentAddFields)[]) {
+    if (
+      fieldIsProvided(fields[field]) &&
+      !COMMON_AUTHORING_FIELDS.has(field) &&
+      !allowed.has(field)
+    ) {
+      const flag = AUTHORING_FLAG_BY_FIELD[field];
+      throw new AttestCliError('cli_usage', `Option --${flag} is not valid for this transport.`, {
+        path: `--${flag}`,
+        hint: 'Remove the incompatible option or select the transport that owns it.',
+      });
+    }
+  }
+  if (
+    selected === 'stream' &&
+    fields.incrementalOutputMode !== undefined &&
+    fields.incrementalOutputPointer === undefined
+  ) {
+    throw new AttestCliError(
+      'cli_usage',
+      'Option --incremental-output-mode requires --incremental-output-pointer.',
+      {
+        path: '--incremental-output-mode',
+        hint: 'Add the event JSON Pointer to accumulate or remove the mode option.',
+      },
+    );
+  }
+};
+
 /** Normalizes non-interactive or wizard-populated add fields into one v2 resource. */
 const createAgentResource = (fields: AgentAddFields): AgentResource => {
-  const selected = [
-    fields.argvJson,
-    fields.nativeCommand,
-    fields.nativeHttp,
-    fields.backgroundCommand,
-    fields.jsonlCommand,
-    fields.streamUrl,
+  const selections = [
+    fields.argvJson === undefined ? undefined : ('native_cli' as const),
+    fields.nativeCommand === undefined ? undefined : ('native_cli' as const),
+    fields.nativeHttp === undefined ? undefined : ('native_http' as const),
+    fields.backgroundCommand === undefined ? undefined : ('background' as const),
+    fields.jsonlCommand === undefined ? undefined : ('jsonl' as const),
+    fields.streamUrl === undefined ? undefined : ('stream' as const),
   ].filter((value) => value !== undefined);
-  if (selected.length !== 1) {
+  if (selections.length !== 1) {
     throw new AttestCliError(
-      selected.length === 0 ? 'cli_missing_input' : 'cli_usage',
+      selections.length === 0 ? 'cli_missing_input' : 'cli_usage',
       'Select exactly one agent transport.',
       {
         path: '--argv-json',
@@ -642,6 +759,7 @@ const createAgentResource = (fields: AgentAddFields): AgentResource => {
       },
     );
   }
+  assertApplicableAuthoringFlags(fields, selections[0]!);
   const timeout = fields.timeout === undefined ? undefined : parseDuration(fields.timeout);
   const name = fields.name?.trim() || fields.agentId;
   const processEnvironment =

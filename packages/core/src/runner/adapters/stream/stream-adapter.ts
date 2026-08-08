@@ -40,6 +40,7 @@ type StreamFailure = AgentInvocationError & {
   applicationStarted?: boolean;
   httpStatus?: number;
   rawExcerpt?: InvocationAttempt['rawExcerpt'];
+  retryAfterMs?: number;
 };
 
 const DEFAULT_ATTEMPT_MS = 60_000;
@@ -50,6 +51,7 @@ const DEFAULT_REQUEST_BYTES = 10 * 1024 * 1024;
 const DEFAULT_EVENT_COUNT = 10_000;
 const DEFAULT_EVENT_BYTES = 1024 * 1024;
 const DEFAULT_TOTAL_BYTES = 10 * 1024 * 1024;
+const MAX_RETRY_AFTER_MS = 30_000;
 
 const isJsonValue = (value: unknown): value is JsonValue => {
   if (value === null || ['string', 'number', 'boolean'].includes(typeof value)) return true;
@@ -85,17 +87,34 @@ const retryDelay = (agent: StreamAgentResource, retryIndex: number): number => {
   return Math.floor((bounded * (75 + (jitter % 51))) / 100);
 };
 
+/** Parses standard Retry-After values while enforcing the common transport ceiling. */
+const parseRetryAfter = (value: string | undefined): number | undefined => {
+  if (value === undefined) return undefined;
+  if (/^\d+$/u.test(value.trim())) {
+    return Math.min(Number(value.trim()) * 1_000, MAX_RETRY_AFTER_MS);
+  }
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp)
+    ? Math.min(Math.max(0, timestamp - Date.now()), MAX_RETRY_AFTER_MS)
+    : undefined;
+};
+
 const wait = async (
   delayMs: number,
-  signal: AbortSignal,
+  signal: AbortSignal | undefined,
   callerSignal?: AbortSignal,
 ): Promise<void> => {
   if (delayMs <= 0) return;
+  if (signal === undefined) {
+    await new Promise<void>((resolve) => setTimeout(resolve, delayMs));
+    return;
+  }
+  const retrySignal = signal;
   await new Promise<void>((resolve, reject) => {
     const timer = setTimeout(finish, delayMs);
     const abort = (): void => {
       clearTimeout(timer);
-      signal.removeEventListener('abort', abort);
+      retrySignal.removeEventListener('abort', abort);
       reject(
         new AgentInvocationError(
           callerSignal?.aborted === true ? 'cancelled' : 'timeout',
@@ -104,11 +123,11 @@ const wait = async (
       );
     };
     function finish(): void {
-      signal.removeEventListener('abort', abort);
+      retrySignal.removeEventListener('abort', abort);
       resolve();
     }
-    signal.addEventListener('abort', abort, { once: true });
-    if (signal.aborted) abort();
+    retrySignal.addEventListener('abort', abort, { once: true });
+    if (retrySignal.aborted) abort();
   });
 };
 
@@ -160,6 +179,7 @@ const consumeResponse = async (
     const maximumTotalBytes = agent.limits?.total_evidence_bytes ?? DEFAULT_TOTAL_BYTES;
     const idleMs = agent.timeouts?.idle_ms ?? DEFAULT_IDLE_MS;
     const sse = transport.framing === 'sse' ? new SseParser() : undefined;
+    const decoder = new TextDecoder('utf-8', { fatal: true });
     let buffer = '';
     let evidence = '';
     let eventCount = 0;
@@ -304,7 +324,16 @@ const consumeResponse = async (
         );
         return;
       }
-      buffer += chunk.toString('utf8');
+      try {
+        buffer += decoder.decode(chunk, { stream: true });
+      } catch (error: unknown) {
+        fail(
+          new AgentInvocationError('invalid_envelope', 'Streaming response is not valid UTF-8.', {
+            cause: error,
+          }),
+        );
+        return;
+      }
       if (Buffer.byteLength(buffer) > maximumEventBytes && !buffer.includes('\n')) {
         fail(
           new AgentInvocationError(
@@ -327,6 +356,16 @@ const consumeResponse = async (
       fail(new AgentInvocationError('network', 'Streaming response failed.', { cause: error })),
     );
     response.once('end', () => {
+      try {
+        buffer += decoder.decode();
+      } catch (error: unknown) {
+        fail(
+          new AgentInvocationError('invalid_envelope', 'Streaming response is not valid UTF-8.', {
+            cause: error,
+          }),
+        );
+        return;
+      }
       if (buffer.length > 0) consumeLine(buffer.replace(/\r$/u, ''));
       if (!settled)
         fail(
@@ -412,7 +451,10 @@ const streamOnce = async (
               'http_status',
               `Streaming HTTP returned status ${String(status)}.`,
             ),
-            { httpStatus: status },
+            {
+              httpStatus: status,
+              retryAfterMs: parseRetryAfter(response.headersDistinct['retry-after']?.[0]),
+            },
           ) as StreamFailure;
           finish(() => reject(error));
           return;
@@ -547,9 +589,16 @@ const invokeStreamingAgent = async (
   request: AgentRequest,
   options: StreamInvokeOptions = {},
 ): Promise<InvocationResult> => {
-  const timeout = AbortSignal.timeout(agent.timeouts?.attempt_ms ?? DEFAULT_ATTEMPT_MS);
-  const signal =
-    options.signal === undefined ? timeout : AbortSignal.any([options.signal, timeout]);
+  const overallDeadline =
+    agent.timeouts?.run_ms === undefined ? undefined : Date.now() + agent.timeouts.run_ms;
+  const overallTimeout =
+    agent.timeouts?.run_ms === undefined ? undefined : AbortSignal.timeout(agent.timeouts.run_ms);
+  const overallSignal =
+    options.signal === undefined
+      ? overallTimeout
+      : overallTimeout === undefined
+        ? options.signal
+        : AbortSignal.any([options.signal, overallTimeout]);
   const template: ResolvedHttpRequestTemplate = {
     ...agent.transport.request,
     headers: {
@@ -563,6 +612,11 @@ const invokeStreamingAgent = async (
   };
   const attempts: InvocationAttempt[] = [];
   for (let retry = 0; ; retry += 1) {
+    const attemptTimeout = AbortSignal.timeout(agent.timeouts?.attempt_ms ?? DEFAULT_ATTEMPT_MS);
+    const attemptSignal =
+      overallSignal === undefined
+        ? attemptTimeout
+        : AbortSignal.any([overallSignal, attemptTimeout]);
     const duration = startTimer();
     try {
       const materialized = materializeHttpRequest(
@@ -570,7 +624,7 @@ const invokeStreamingAgent = async (
         request,
         agent.limits?.request_bytes ?? DEFAULT_REQUEST_BYTES,
       );
-      const completed = await streamOnce(agent, request, materialized, signal, options);
+      const completed = await streamOnce(agent, request, materialized, attemptSignal, options);
       const report = parseAgentResponse(completed.response);
       if (!report.ok)
         throw new AgentInvocationError(
@@ -607,7 +661,7 @@ const invokeStreamingAgent = async (
       };
       const retryableStatus =
         normalized.httpStatus === 408 ||
-        normalized.httpStatus === 429 ||
+        (normalized.httpStatus === 429 && normalized.retryAfterMs !== undefined) ||
         (normalized.httpStatus ?? 0) >= 500;
       const retryable =
         normalized.code === 'network' || normalized.code === 'timeout' || retryableStatus;
@@ -621,7 +675,20 @@ const invokeStreamingAgent = async (
       }
       attempts.push(attempt);
       try {
-        await wait(retryDelay(agent, retry), signal, options.signal);
+        const remainingOverall =
+          overallDeadline === undefined
+            ? Number.POSITIVE_INFINITY
+            : Math.max(0, overallDeadline - Date.now());
+        const authoredDelay = retryDelay(agent, retry);
+        const delay =
+          normalized.httpStatus === 429 && normalized.retryAfterMs !== undefined
+            ? Math.min(
+                normalized.retryAfterMs,
+                agent.timeouts?.attempt_ms ?? DEFAULT_ATTEMPT_MS,
+                remainingOverall,
+              )
+            : Math.min(authoredDelay, remainingOverall);
+        await wait(delay, overallSignal, options.signal);
       } catch (waitError: unknown) {
         const terminal = waitError instanceof AgentInvocationError ? waitError : normalized;
         const failed: InvocationAttempt = { ...attempt, error: terminal };

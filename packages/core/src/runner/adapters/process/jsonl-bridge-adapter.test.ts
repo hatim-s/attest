@@ -10,6 +10,7 @@ import { describe, expect, it } from 'vitest';
 import { startJsonlBridgeAgent, type JsonlBridgeAgentResource } from './jsonl-bridge-adapter.js';
 
 const fixture = resolve(import.meta.dirname, '../../fixtures/jsonl-bridge-agent.cjs');
+const noReadFixture = resolve(import.meta.dirname, '../../fixtures/jsonl-no-read-agent.cjs');
 const request = (caseId: string, input: unknown): AgentRequest => ({
   protocol: AGENT_PROTOCOL,
   run_id: '01ARZ3NDEKTSV4RRFFQ69G5FAV',
@@ -116,6 +117,51 @@ describe('JSONL bridge adapter', () => {
     const terminal = await result;
     expect(terminal.status).toBe('invocation_error');
     if (terminal.status === 'invocation_error') expect(terminal.error.code).toBe('cancelled');
+    await session.close();
+  });
+
+  it('derives a bounded correlation id from a valid unbounded case id', async () => {
+    const session = await startJsonlBridgeAgent(agent(), {
+      cwd: process.cwd(),
+      env: { PATH: process.env.PATH ?? '' },
+      terminationGraceMs: 50,
+    });
+    try {
+      const result = await session.invoke(request('case-'.repeat(1_000), { value: 'bounded' }));
+      expect(result.status).toBe('ok');
+      const evidence = result.rawExcerpt?.text ?? '';
+      const correlated = /"request_id":"([^"]+)"/u.exec(evidence)?.[1];
+      expect(correlated).toMatch(/^req-[0-9a-z]+-[0-9a-f]{32}$/u);
+      expect(correlated?.length).toBeLessThanOrEqual(256);
+    } finally {
+      await session.close();
+    }
+  });
+
+  it('bounds cancellation when the peer never drains stdin', async () => {
+    const configured = agent({
+      transport: {
+        kind: 'jsonl_bridge',
+        lifecycle: 'per_run',
+        argv: [process.execPath, noReadFixture],
+        concurrency: 'multiplexed',
+        cancellation_grace_ms: 50,
+      },
+      timeouts: { attempt_ms: 50 },
+    });
+    const session = await startJsonlBridgeAgent(configured, {
+      cwd: process.cwd(),
+      env: { PATH: process.env.PATH ?? '' },
+      terminationGraceMs: 50,
+    });
+    const terminal = await Promise.race([
+      session.invoke(request('blocked', { payload: 'x'.repeat(1024 * 1024) })),
+      new Promise<never>((_resolve, reject) =>
+        setTimeout(() => reject(new Error('backpressure cancellation did not settle')), 500),
+      ),
+    ]);
+    expect(terminal.status).toBe('invocation_error');
+    if (terminal.status === 'invocation_error') expect(terminal.error.code).toBe('timeout');
     await session.close();
   });
 });
