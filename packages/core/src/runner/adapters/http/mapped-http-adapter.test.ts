@@ -109,6 +109,23 @@ describe('CLI2.10 mapped HTTP adapter', () => {
     expect(result.rawExcerpt?.truncated).toBe(true);
   });
 
+  it('maps a foreign error branch without retrying it as infrastructure failure', async () => {
+    const fixture = await startServer((_incoming, response) => {
+      response.setHeader('content-type', 'application/json');
+      response.end(JSON.stringify({ error: { message: 'agent declined', code: 'DECLINED' } }));
+    });
+    const result = await invokeMappedHttpAgent(directAgent(fixture.origin), request);
+    expect(result.status).toBe('ok');
+    if (result.status !== 'ok' || result.report?.ok !== true) {
+      throw new Error('Expected an extracted agent error.');
+    }
+    expect(result.report.value).toMatchObject({
+      protocol: AGENT_PROTOCOL,
+      error: { message: 'agent declined', code: 'DECLINED' },
+    });
+    expect(result.attempts).toHaveLength(1);
+  });
+
   it('retries an idempotent submission, keeps one key, and polls with bounded Retry-After', async () => {
     let submissions = 0;
     let polls = 0;

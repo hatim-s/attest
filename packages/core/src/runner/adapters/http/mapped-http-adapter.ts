@@ -294,6 +294,16 @@ const pollingUrl = (
   return candidate;
 };
 
+const boundedPollingDelay = (
+  transport: Extract<HttpAgentResource['transport'], { kind: 'polling' }>,
+  retryAfter: string | undefined,
+  fallback: number,
+): number =>
+  Math.min(
+    Math.max(parseRetryAfter(retryAfter) ?? fallback, transport.minimum_interval_ms),
+    transport.maximum_interval_ms,
+  );
+
 const runPolling = async (
   agent: HttpAgentResource & {
     transport: Extract<HttpAgentResource['transport'], { kind: 'polling' }>;
@@ -338,7 +348,7 @@ const runPolling = async (
       }
       retryAttempts.push(attemptFromError(statusError(response), 0));
       await wait(
-        parseRetryAfter(response.headers['retry-after']) ?? retryDelay(agent, retry),
+        boundedPollingDelay(transport, response.headers['retry-after'], retryDelay(agent, retry)),
         signal,
         policy.callerSignal,
       );
@@ -352,7 +362,11 @@ const runPolling = async (
         throw normalized;
       }
       retryAttempts.push(attemptFromError(normalized, 0));
-      await wait(retryDelay(agent, retry), signal, policy.callerSignal);
+      await wait(
+        boundedPollingDelay(transport, undefined, retryDelay(agent, retry)),
+        signal,
+        policy.callerSignal,
+      );
     }
   }
 
@@ -385,7 +399,7 @@ const runPolling = async (
         if (retry >= retries || !retryableStatus(polled.status)) throw statusError(polled);
         retryAttempts.push(attemptFromError(statusError(polled), 0));
         await wait(
-          parseRetryAfter(polled.headers['retry-after']) ?? retryDelay(agent, retry),
+          boundedPollingDelay(transport, polled.headers['retry-after'], retryDelay(agent, retry)),
           signal,
           policy.callerSignal,
         );
@@ -393,7 +407,11 @@ const runPolling = async (
         const normalized = normalizeFailure(error, signal, policy.callerSignal);
         if (retry >= retries || normalized.code === 'cancelled') throw normalized;
         retryAttempts.push(attemptFromError(normalized, 0));
-        await wait(retryDelay(agent, retry), signal, policy.callerSignal);
+        await wait(
+          boundedPollingDelay(transport, undefined, retryDelay(agent, retry)),
+          signal,
+          policy.callerSignal,
+        );
       }
     }
     const status = readJsonPointer(polled.raw, transport.status_pointer);
