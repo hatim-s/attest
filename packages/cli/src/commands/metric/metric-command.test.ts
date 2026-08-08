@@ -1,3 +1,4 @@
+import { execFile } from 'node:child_process';
 import {
   access,
   mkdir,
@@ -11,6 +12,7 @@ import {
 } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 
 import {
@@ -35,6 +37,10 @@ import { REDACTED } from '../agent/native-agent-adapter.js';
 import { runMetricMutationCommand, runMetricTestCommand } from './metric-command.js';
 
 const EXEC_FIXTURE = fileURLToPath(new URL('./fixtures/result-metric.cjs', import.meta.url));
+const PTY_FIXTURE = fileURLToPath(new URL('./fixtures/pty-metric-authoring.py', import.meta.url));
+const CLI_PACKAGE_ROOT = fileURLToPath(new URL('../../../', import.meta.url));
+const CLI_BUILT = fileURLToPath(new URL('../../../dist/cli.js', import.meta.url));
+const execFileAsync = promisify(execFile);
 const temporaryDirectories: string[] = [];
 const originalSecret = process.env.ATTEST_METRIC_SOURCE_SECRET;
 const originalAmbientSecret = process.env.ATTEST_METRIC_AMBIENT_SECRET;
@@ -116,6 +122,28 @@ const runJson = async (
     output,
   };
 };
+
+/** Runs the compiled CLI while retaining structured stdout from expected nonzero exits. */
+const runBuiltCli = async (
+  argv: readonly string[],
+): Promise<{ exitCode: number; stderr: string; stdout: string }> =>
+  new Promise((resolveRun, rejectRun) => {
+    execFile(
+      process.execPath,
+      [CLI_BUILT, ...argv],
+      { timeout: 12_000 },
+      (error, stdout, stderr) => {
+        if (error !== null && typeof error.code !== 'number') {
+          rejectRun(error instanceof Error ? error : new Error('Compiled CLI execution failed.'));
+          return;
+        }
+        resolveRun({ exitCode: typeof error?.code === 'number' ? error.code : 0, stderr, stdout });
+      },
+    );
+  });
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  value !== null && typeof value === 'object' && !Array.isArray(value);
 
 /** Extracts the controlled child environment keys without trusting arbitrary metric result JSON. */
 const evaluationEnvironmentKeys = (
@@ -264,15 +292,6 @@ describe('CLI2.9 metric authoring and local tests', { timeout: 30_000 }, () => {
       command: 'show',
       result: { resource: { id: 'regex', definition: { kind: 'assertion' } } },
     });
-    expect((await runJson(root, ['metric', 'list'])).document).toMatchObject({
-      ok: true,
-      command: 'list',
-    });
-    expect((await runJson(root, ['metric', 'show', 'regex'])).document).toMatchObject({
-      ok: true,
-      command: 'show',
-    });
-
     const okTraceFixture = join(root, 'ok-tools.json');
     await writeFile(okTraceFixture, metricFixture());
     expect(
@@ -307,30 +326,51 @@ describe('CLI2.9 metric authoring and local tests', { timeout: 30_000 }, () => {
 
   it('keeps guided, flag, stdin, import, and from-json routes on canonical resources', async () => {
     const root = await createProject();
+    expect(
+      (
+        await runJson(root, [
+          'agent',
+          'add',
+          'traced',
+          '--argv-json',
+          JSON.stringify([process.execPath]),
+          '--trace',
+        ])
+      ).exitCode,
+    ).toBe(0);
     const questions: string[] = [];
     const guided = collectIo();
-    expect(
-      await runCli(['metric', 'add'], {
-        workingDirectory: root,
-        io: guided.io,
-        interaction: {
-          ci: false,
-          inputIsTTY: true,
-          outputIsTTY: true,
-          prompt: (question) => {
-            questions.push(question);
-            if (question === 'Metric id: ') return Promise.resolve('guided');
-            if (question.startsWith('Preset')) return Promise.resolve('output-contains');
-            if (question === 'JSON value: ') return Promise.resolve('"needle"');
-            return Promise.resolve('yes');
-          },
-          readStdin: () => Promise.resolve(''),
+    const guidedExit = await runCli(['metric', 'add'], {
+      workingDirectory: root,
+      io: guided.io,
+      interaction: {
+        ci: false,
+        inputIsTTY: true,
+        outputIsTTY: true,
+        prompt: (question) => {
+          questions.push(question);
+          if (question === 'Metric id: ') return Promise.resolve('guided');
+          if (question.startsWith('Metric catalog')) return Promise.resolve('assertion');
+          if (question.startsWith('Assertion evidence')) return Promise.resolve('expected');
+          if (question.startsWith('Assertion operator')) return Promise.resolve('contains');
+          if (question.includes('JSON value: ')) return Promise.resolve('"needle"');
+          return Promise.resolve('yes');
         },
-      }),
-    ).toBe(0);
+        readStdin: () => Promise.resolve(''),
+      },
+    });
+    expect(guided.errors).toEqual([]);
+    expect(guidedExit).toBe(0);
     expect(questions.at(-1)).toContain('Apply these changes? [y/N]');
     expect(questions[1]).toContain('attest.metric-preset/v1');
     expect(questions[1]).toContain('trace-capable fixture');
+    expect(questions).toContain('Assertion evidence [output] (input|output|expected|trace): ');
+    expect(questions).toContain(
+      'Assertion operator for $.expected [equals] (equals|contains|json-schema|regex|exists|lt|lte|gt|gte): ',
+    );
+    expect(questions).toContain(
+      'Assertion preview: evidence=$.expected; operator=contains.\nJSON value: ',
+    );
 
     const defaultGuided = collectIo();
     expect(
@@ -343,14 +383,47 @@ describe('CLI2.9 metric authoring and local tests', { timeout: 30_000 }, () => {
           outputIsTTY: true,
           prompt: (question) => {
             if (question === 'Metric id: ') return Promise.resolve('guided-default');
-            if (question.startsWith('Preset catalog')) return Promise.resolve('');
-            if (question === 'JSON value: ') return Promise.resolve('null');
+            if (question.startsWith('Metric catalog')) return Promise.resolve('');
+            if (question.startsWith('Assertion evidence')) return Promise.resolve('');
+            if (question.startsWith('Assertion operator')) return Promise.resolve('');
+            if (question.includes('JSON value: ')) return Promise.resolve('null');
             return Promise.resolve('yes');
           },
           readStdin: () => Promise.resolve(''),
         },
       }),
     ).toBe(0);
+
+    const traceQuestions: string[] = [];
+    const traceGuided = collectIo();
+    expect(
+      await runCli(['metric', 'add', 'guided-trace'], {
+        workingDirectory: root,
+        io: traceGuided.io,
+        interaction: {
+          ci: false,
+          inputIsTTY: true,
+          outputIsTTY: true,
+          prompt: (question) => {
+            traceQuestions.push(question);
+            if (question.startsWith('Metric catalog')) return Promise.resolve('assertion');
+            if (question.startsWith('Assertion evidence')) return Promise.resolve('trace');
+            if (question.startsWith('Agent trace capabilities')) return Promise.resolve('traced');
+            if (question.includes('Trace operator')) return Promise.resolve('tool-called');
+            if (question.includes('Tool name: ')) return Promise.resolve('search');
+            return Promise.resolve('yes');
+          },
+          readStdin: () => Promise.resolve(''),
+        },
+      }),
+    ).toBe(0);
+    expect(traceQuestions.join('\n')).toContain('traced: advertises trace support');
+    expect(traceQuestions.join('\n')).toContain(
+      'Agent traced advertises trace support. Creation remains available before trace evidence exists.',
+    );
+    expect(traceQuestions).toContain(
+      'Assertion preview: evidence=trace; operator=tool-called.\nTool name: ',
+    );
 
     const requested = JSON.stringify({
       schema: COMMAND_REQUEST_SCHEMA_VERSION,
@@ -390,13 +463,88 @@ describe('CLI2.9 metric authoring and local tests', { timeout: 30_000 }, () => {
         )
       ).exitCode,
     ).toBe(0);
-    expect((await loadProject({ project: root })).metrics.map(({ id }) => id).sort()).toEqual([
+    const loaded = await loadProject({ project: root });
+    expect(loaded.metrics.map(({ id }) => id).sort()).toEqual([
       'guided',
       'guided-default',
+      'guided-trace',
       'imported',
       'judge',
       'requested',
     ]);
+    expect(loaded.metrics.find(({ id }) => id === 'guided')?.definition).toMatchObject({
+      kind: 'assertion',
+      assertions: [{ contains: { path: '$.expected', value: 'needle' } }],
+    });
+    expect(loaded.metrics.find(({ id }) => id === 'guided-trace')?.definition).toMatchObject({
+      kind: 'assertion',
+      assertions: [{ tool_calls: { name: 'search' } }],
+    });
+  });
+
+  it('drives evidence, capability, operator, value, and preview through the packed CLI PTY', async () => {
+    const root = await createProject();
+    expect(
+      (
+        await runJson(root, [
+          'agent',
+          'add',
+          'traced',
+          '--argv-json',
+          JSON.stringify([process.execPath]),
+          '--trace',
+        ])
+      ).exitCode,
+    ).toBe(0);
+    await execFileAsync('bun', ['run', 'build'], { cwd: CLI_PACKAGE_ROOT, timeout: 30_000 });
+
+    const literal = 'packed-camel-secret';
+    const packedSecret = await runBuiltCli([
+      'metric',
+      'add',
+      'packed-secret',
+      '--preset',
+      'http',
+      '--url',
+      'https://metric.example/evaluate',
+      '--body-json',
+      JSON.stringify({ accessToken: literal }),
+      '--project',
+      root,
+      '--output',
+      'json',
+    ]);
+    expect(packedSecret.exitCode).toBe(1);
+    expect(packedSecret.stderr).toBe('');
+    expect(packedSecret.stdout).not.toContain(literal);
+    expect(cliResultSchema.parse(JSON.parse(packedSecret.stdout) as unknown)).toMatchObject({
+      ok: false,
+      command: 'metric.add',
+      error: { code: 'project_invalid' },
+    });
+
+    const { stderr, stdout } = await execFileAsync(
+      'python3',
+      [PTY_FIXTURE, process.execPath, CLI_BUILT, 'metric', 'add', 'pty-trace', '--project', root],
+      { timeout: 16_000 },
+    );
+    expect(stderr).toBe('');
+    const ptyEvidence: unknown = JSON.parse(stdout);
+    expect(isRecord(ptyEvidence)).toBe(true);
+    if (!isRecord(ptyEvidence)) throw new Error('Expected structured metric PTY evidence.');
+    expect(ptyEvidence).toMatchObject({
+      exit_code: 0,
+      prompts_seen: [true, true, true, true, true, true],
+      terminal_restored: true,
+    });
+    expect(typeof ptyEvidence.output).toBe('string');
+    if (typeof ptyEvidence.output !== 'string') throw new Error('Expected metric PTY output.');
+    expect(ptyEvidence.output).toContain('traced: advertises trace support');
+    expect(ptyEvidence.output).toContain('Assertion preview: evidence=trace; operator=tool-called');
+    const ptyMetric = (await loadProject({ project: root })).metrics.find(
+      ({ id }) => id === 'pty-trace',
+    );
+    expect(ptyMetric).toMatchObject({ id: 'pty-trace', definition: { kind: 'assertion' } });
   });
 
   it('round-trips judge, executable, and HTTP configs with secret references and redaction', async () => {
@@ -813,7 +961,11 @@ describe('CLI2.9 metric authoring and local tests', { timeout: 30_000 }, () => {
   it('applies identical secret safety to flags, stdin import, and from-json requests', async () => {
     const root = await createProject();
     const before = await snapshotTree(root);
-    const bodySecret = 'literal-body-secret';
+    const bodySecrets = {
+      accessToken: 'literal-camel-access-secret',
+      apiKey: 'literal-camel-api-secret',
+      authToken: 'literal-camel-auth-secret',
+    } as const;
     const unsafeHttp: MetricResource = {
       schema: METRIC_RESOURCE_SCHEMA_VERSION,
       id: 'unsafe-http',
@@ -823,7 +975,7 @@ describe('CLI2.9 metric authoring and local tests', { timeout: 30_000 }, () => {
         request: {
           method: 'POST',
           url: 'https://metric.example/evaluate',
-          body: { api_key: bodySecret },
+          body: { apiKey: bodySecrets.apiKey },
         },
         extraction: { score_pointer: '/score', pass_pointer: '/pass' },
       },
@@ -837,7 +989,7 @@ describe('CLI2.9 metric authoring and local tests', { timeout: 30_000 }, () => {
       '--url',
       'https://metric.example/evaluate',
       '--body-json',
-      JSON.stringify({ api_key: bodySecret }),
+      JSON.stringify({ accessToken: bodySecrets.accessToken }),
     ]);
     const imported = await runJson(
       root,
@@ -858,7 +1010,7 @@ describe('CLI2.9 metric authoring and local tests', { timeout: 30_000 }, () => {
             request: {
               method: 'POST',
               url: 'https://metric.example/evaluate',
-              headers: { Authorization: 'Bearer literal-header-secret' },
+              body: { nested: { authToken: bodySecrets.authToken } },
             },
           },
         },
@@ -884,8 +1036,7 @@ describe('CLI2.9 metric authoring and local tests', { timeout: 30_000 }, () => {
     for (const result of [flag, imported, requested, unsafeExec]) {
       expect(result.exitCode).toBe(1);
       expect(result.document).toMatchObject({ ok: false, error: { code: 'project_invalid' } });
-      expect(result.output).not.toContain(bodySecret);
-      expect(result.output).not.toContain('literal-header-secret');
+      for (const secret of Object.values(bodySecrets)) expect(result.output).not.toContain(secret);
       expect(result.output).not.toContain('literal-exec-secret');
     }
     expect(unsafeExec.document).toMatchObject({
@@ -894,7 +1045,7 @@ describe('CLI2.9 metric authoring and local tests', { timeout: 30_000 }, () => {
     });
     expect(await snapshotTree(root)).toEqual(before);
     const shown = await runJson(root, ['show', 'metric', 'unsafe-http']);
-    expect(shown.output).not.toContain(bodySecret);
+    for (const secret of Object.values(bodySecrets)) expect(shown.output).not.toContain(secret);
   });
 
   it('publishes exact JSON help and generated fixture/request schemas', async () => {
@@ -937,26 +1088,30 @@ describe('CLI2.9 metric authoring and local tests', { timeout: 30_000 }, () => {
       'order',
       'query-env',
     ]);
-    expect((await runJson(root, ['help', 'metric', 'list'])).document).toMatchObject({
+    const metricHelp = await runJson(root, ['help', 'metric']);
+    expect(metricHelp.document).toMatchObject({
       ok: true,
       result: {
         command: {
-          alias_for: 'list',
-          deprecated:
-            'Use `attest list metrics`; this compatibility path has the same result identity.',
+          subcommands: [
+            { name: 'add', aliases: [], alias_for: null },
+            { name: 'import', aliases: [], alias_for: null },
+            { name: 'remove', aliases: [], alias_for: null },
+            { name: 'rename', aliases: [], alias_for: null },
+            { name: 'test', aliases: [], alias_for: null },
+          ],
         },
       },
     });
-    expect((await runJson(root, ['help', 'metric', 'show'])).document).toMatchObject({
-      ok: true,
-      result: {
-        command: {
-          alias_for: 'show',
-          deprecated:
-            'Use `attest show metric <id>`; this compatibility path has the same result identity.',
-        },
-      },
-    });
+    for (const removed of ['list', 'show']) {
+      const removedHelp = await runJson(root, ['help', 'metric', removed]);
+      expect(removedHelp.exitCode).toBe(2);
+      expect(removedHelp.document).toMatchObject({
+        ok: false,
+        command: 'help',
+        error: { code: 'cli_usage', path: `metric.${removed}` },
+      });
+    }
     expect(
       (await runJson(root, ['schema', 'print', METRIC_TEST_FIXTURE_SCHEMA_VERSION])).exitCode,
     ).toBe(0);

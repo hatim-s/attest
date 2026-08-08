@@ -9,8 +9,9 @@ import { Command, Option } from 'commander';
 
 import { AttestCliError } from '../../errors.js';
 import { setCliCommandHelpMetadata } from '../../help/command-help.js';
+import type { JsonValue } from '../../project/canonical-project.js';
 import type { CliIo } from '../../run-cli.js';
-import { renderCommandResult } from '../command-result.js';
+import { renderCommandResult, type CommandResult } from '../command-result.js';
 import type { CliInteraction } from '../register-project-resource-commands.js';
 import { parseJsonFlag, readCommandRequest, validateCommandRequest } from './test-command-input.js';
 import { prepareImportSource, type PreparedImportSource } from './import/tabular-import-adapter.js';
@@ -255,14 +256,13 @@ const confirmRemoval = async (
   });
 };
 
-const runMutation = async (
-  command: TestAuthoringCommand['command'],
+const executeMutation = async (
   request: TestAuthoringCommand,
   options: MutationOptions,
-  context: RegisterTestCommandsOptions,
+  context: Pick<RegisterTestCommandsOptions, 'interaction' | 'workingDirectory'>,
   preparedImportSource?: Uint8Array,
-): Promise<void> => {
-  const result = await runTestMutationCommand({
+): Promise<CommandResult> =>
+  runTestMutationCommand({
     preparedImportSource,
     project: options.project,
     readImportStdin: context.interaction.readImportStdin,
@@ -270,7 +270,80 @@ const runMutation = async (
     request,
     workingDirectory: context.workingDirectory,
   });
+
+type MutationExecutor = typeof executeMutation;
+
+const runMutation = async (
+  command: TestAuthoringCommand['command'],
+  request: TestAuthoringCommand,
+  options: MutationOptions,
+  context: RegisterTestCommandsOptions,
+  preparedImportSource?: Uint8Array,
+): Promise<void> => {
+  const result = await executeMutation(request, options, context, preparedImportSource);
   context.io.output(renderCommandResult(command, outputFormat(options), result));
+};
+
+/** Runs the mandatory shared-dataset preview before treating yes as prompt bypass. */
+const runConfirmedDatasetImport = async (
+  request: Extract<TestAuthoringCommand, { command: 'test.dataset.import' }>,
+  options: MutationOptions,
+  context: Pick<RegisterTestCommandsOptions, 'interaction' | 'io' | 'workingDirectory'>,
+  execute: MutationExecutor = executeMutation,
+): Promise<void> => {
+  const prepared = await prepareImportSource(
+    request.source,
+    context.workingDirectory,
+    context.interaction.readImportStdin,
+    request.import.format,
+  );
+  const previewRequest = validateCommandRequest('test.dataset.import', {
+    ...request,
+    dry_run: true,
+  });
+  const preview = await execute(previewRequest, options, context, prepared.source);
+  const previewResult = preview.result as Record<string, JsonValue>;
+  const affectedTests = Array.isArray(previewResult.affected_tests)
+    ? previewResult.affected_tests.filter((value): value is string => typeof value === 'string')
+    : [];
+  const previewProjectHash = preview.projectHashBefore;
+  if (previewProjectHash === null || previewProjectHash === undefined) {
+    throw new Error('Dataset import preview did not return its base project hash.');
+  }
+
+  const confirmedRequest = validateCommandRequest('test.dataset.import', {
+    ...request,
+    dry_run: false,
+    if_project_hash: previewProjectHash,
+    yes: true,
+  });
+  if (affectedTests.length < 2) {
+    const committed = await execute(confirmedRequest, options, context, prepared.source);
+    context.io.output(renderCommandResult('test.dataset.import', outputFormat(options), committed));
+    return;
+  }
+
+  const committed = await execute(confirmedRequest, options, context, prepared.source);
+  const committedResult = committed.result as Record<string, JsonValue>;
+  const combined: CommandResult = {
+    ...committed,
+    human: [
+      'Shared dataset update preview:',
+      preview.human,
+      'Confirmed shared dataset update:',
+      committed.human,
+    ].join('\n\n'),
+    result: {
+      ...committedResult,
+      shared_dataset_preview: {
+        affected_tests: affectedTests,
+        import: previewResult.import ?? null,
+        operations: previewResult.operations ?? [],
+        project_hash_before: previewProjectHash,
+      },
+    },
+  };
+  context.io.output(renderCommandResult('test.dataset.import', outputFormat(options), combined));
 };
 
 /** Proposes conservative canonical mappings only from exact authored CSV headers. */
@@ -640,7 +713,7 @@ const registerTestCommands = (context: RegisterTestCommandsOptions): void => {
       'attest test case import smoke ./cases.jsonl',
       'attest test case import smoke ./cases.csv --map input.question=prompt --key external_id',
       'attest test case import smoke - --format jsonl --output json',
-      'attest test case import --from-json \'{"schema":"attest.command-request/v2","command":"test.case.import","test_id":"smoke","source":"./cases.csv","import":{"format":"csv","mapping":[{"destination":"input","source":"prompt"}],"sync":"append","on_conflict":"error"}}\'',
+      'printf \'%s\\n\' \'{"schema":"attest.command-request/v2","command":"test.case.import","test_id":"smoke","source":"./cases.csv","import":{"format":"csv","mapping":[{"destination":"input","source":"prompt"}],"sync":"append","on_conflict":"error"}}\' | attest test case import --from-json - --output json',
     ],
     {
       constraints: [
@@ -872,7 +945,9 @@ const registerTestCommands = (context: RegisterTestCommandsOptions): void => {
           import: importRequestFields(options),
         }),
       );
-      if (interactive && request.yes !== true && request.dry_run !== true) {
+      if (request.yes === true && request.dry_run !== true) {
+        await runConfirmedDatasetImport(request, options, context);
+      } else if (interactive && request.dry_run !== true) {
         await runGuidedImport('test.dataset.import', request, options, context);
       } else {
         await runMutation('test.dataset.import', request, options, context);
@@ -884,14 +959,14 @@ const registerTestCommands = (context: RegisterTestCommandsOptions): void => {
     [
       'attest test dataset import smoke ./cases.jsonl --as regression',
       'attest test dataset import smoke ./cases.csv --as regression --map input.question=prompt',
-      'attest test dataset import --from-json \'{"schema":"attest.command-request/v2","command":"test.dataset.import","test_id":"smoke","source":"./cases.jsonl","as":"regression","import":{"format":"jsonl","mapping":[{"destination":"input","source":"/prompt"}],"sync":"append","on_conflict":"error"}}\'',
+      'printf \'%s\\n\' \'{"schema":"attest.command-request/v2","command":"test.dataset.import","test_id":"smoke","source":"./cases.jsonl","as":"regression","import":{"format":"jsonl","mapping":[{"destination":"input","source":"/prompt"}],"sync":"append","on_conflict":"error"}}\' | attest test dataset import --from-json - --output json',
     ],
     {
       constraints: [
         'CSV mapping sources are exact header names; JSON and JSONL mapping sources are RFC 6901 pointers.',
         'sync defaults to append and on-conflict defaults to error.',
         'upsert requires an explicit mapped id or --key source.',
-        'An existing dataset id requires sync=upsert; shared updates require dry-run preview and yes=true.',
+        'An existing dataset id requires sync=upsert; shared updates always show a semantic dry-run preview, and yes=true bypasses only its confirmation prompt.',
       ],
       importOptions: true,
     },
@@ -1019,4 +1094,4 @@ const registerTestCommands = (context: RegisterTestCommandsOptions): void => {
   });
 };
 
-export { registerTestCommands, type RegisterTestCommandsOptions };
+export { registerTestCommands, runConfirmedDatasetImport, type RegisterTestCommandsOptions };

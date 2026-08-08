@@ -12,6 +12,7 @@ import {
 } from '@attest/contracts';
 import { afterEach, describe, expect, it } from 'vitest';
 
+import { serializeCliError } from '../../errors.js';
 import { hashCanonicalJson } from '../../project/canonical-project.js';
 import { loadProject } from '../../project/load-project.js';
 import {
@@ -23,7 +24,9 @@ import { prepareProjectCandidate } from '../../project/transaction/candidate-pro
 import { prepareTransaction } from '../../project/transaction/transaction-journal.js';
 import { createFileChanges } from '../../project/transaction/transactional-writer.js';
 import { runCli, type CliIo } from '../../run-cli.js';
+import { runConfirmedDatasetImport } from './register-test-commands.js';
 import { runTestMutationCommand } from './test-command.js';
+import { validateCommandRequest } from './test-command-input.js';
 
 const temporaryDirectories: string[] = [];
 
@@ -373,9 +376,50 @@ describe('CLI2.7/CLI2.8 test, case, dataset, and import authoring', { timeout: 2
     expect(
       importHelp.examples.some((example) => example.includes('attest.command-request/v2')),
     ).toBe(true);
+    const caseRequestExample = importHelp.examples.find((example) =>
+      example.includes('test case import --from-json - --output json'),
+    );
+    expect(caseRequestExample).not.toContain("--from-json '{");
+    const caseRequest = caseRequestExample?.match(
+      /^printf '%s\\n' '(.+)' \| attest test case import --from-json - --output json$/u,
+    )?.[1];
+    expect(caseRequest).toBeDefined();
+    if (caseRequest === undefined) throw new Error('Expected executable case request example.');
     expect(importHelp.constraints).toContain(
       'upsert requires an explicit mapped id or --key source.',
     );
+
+    await runJson(root, ['test', 'add', 'smoke', '--agent', 'support']);
+    await writeFile(join(root, 'cases.csv'), 'prompt\nhelp-case\n');
+    const caseImport = await runJson(
+      root,
+      ['test', 'case', 'import', '--from-json', '-'],
+      caseRequest,
+    );
+    expect(caseImport.document).toMatchObject({ ok: true, command: 'test.case.import' });
+
+    const datasetHelp = await runJson(root, ['help', 'test', 'dataset', 'import']);
+    if (!datasetHelp.document.ok) throw new Error('Expected structured dataset import help.');
+    const datasetRequestExample = (
+      datasetHelp.document.result as { command: { examples: string[] } }
+    ).command.examples.find((example) =>
+      example.includes('test dataset import --from-json - --output json'),
+    );
+    expect(datasetRequestExample).not.toContain("--from-json '{");
+    const datasetRequest = datasetRequestExample?.match(
+      /^printf '%s\\n' '(.+)' \| attest test dataset import --from-json - --output json$/u,
+    )?.[1];
+    expect(datasetRequest).toBeDefined();
+    if (datasetRequest === undefined) {
+      throw new Error('Expected executable dataset request example.');
+    }
+    await writeFile(join(root, 'cases.jsonl'), '{"prompt":"help-dataset"}\n');
+    const datasetImport = await runJson(
+      root,
+      ['test', 'dataset', 'import', '--from-json', '-'],
+      datasetRequest,
+    );
+    expect(datasetImport.document).toMatchObject({ ok: true, command: 'test.dataset.import' });
 
     const datasetAddHelp = await runJson(root, ['help', 'test', 'dataset', 'add']);
     expect(datasetAddHelp.document).toMatchObject({
@@ -1103,6 +1147,148 @@ describe('CLI2.7/CLI2.8 test, case, dataset, and import authoring', { timeout: 2
     ).toHaveLength(1);
   });
 
+  it('binds the unshared fallback commit to its preview across a concurrent attachment', async () => {
+    const soloRoot = await createProject();
+    await runJson(soloRoot, ['test', 'add', 'solo-owner', '--agent', 'support']);
+    await runJson(soloRoot, ['test', 'dataset', 'add', 'solo-owner', 'solo']);
+    const soloSource = join(soloRoot, 'solo.jsonl');
+    await writeFile(soloSource, '{"id":"solo-case","input":"value"}\n');
+    const solo = await runJson(soloRoot, [
+      'test',
+      'dataset',
+      'import',
+      'solo-owner',
+      soloSource,
+      '--as',
+      'solo',
+      '--sync',
+      'upsert',
+      '--yes',
+    ]);
+    expect(solo.document).toMatchObject({ ok: true, result: { committed: true } });
+    if (!solo.document.ok) throw new Error('Expected normal unshared dataset update.');
+    expect(solo.document.result).not.toHaveProperty('shared_dataset_preview');
+
+    const root = await createProject();
+    await runJson(root, ['test', 'add', 'race-owner', '--agent', 'support']);
+    await runJson(root, ['test', 'add', 'race-reader', '--agent', 'support']);
+    await runJson(root, ['test', 'dataset', 'add', 'race-owner', 'race']);
+    const source = join(root, 'race.jsonl');
+    await writeFile(source, '{"id":"race-case","input":"must-not-publish"}\n');
+    const request = validateCommandRequest('test.dataset.import', {
+      schema: COMMAND_REQUEST_SCHEMA_VERSION,
+      command: 'test.dataset.import',
+      test_id: 'race-owner',
+      source,
+      as: 'race',
+      yes: true,
+      import: { format: 'jsonl', sync: 'upsert' },
+    });
+    const collected = collectIo();
+    let afterAttachment: Record<string, string> | undefined;
+    let previewHash: null | string | undefined;
+    let failure: unknown;
+    try {
+      await runConfirmedDatasetImport(
+        request,
+        { output: 'json', project: root },
+        {
+          interaction: {
+            ...nonInteractive(),
+            readImportStdin: async function* readImportStdin() {
+              await Promise.resolve();
+              yield '';
+            },
+          },
+          io: collected.io,
+          workingDirectory: root,
+        },
+        async (mutationRequest, _options, _context, preparedImportSource) => {
+          const result = await runTestMutationCommand({
+            preparedImportSource,
+            project: root,
+            readImportStdin: async function* readImportStdin() {
+              await Promise.resolve();
+              yield '';
+            },
+            readStdin: () => Promise.resolve(''),
+            request: mutationRequest,
+            workingDirectory: root,
+          });
+          if (mutationRequest.dry_run === true) {
+            previewHash = result.projectHashBefore;
+            await runJson(root, ['test', 'dataset', 'attach', 'race-reader', 'race']);
+            afterAttachment = await snapshotProject(root);
+          }
+          return result;
+        },
+      );
+    } catch (error: unknown) {
+      failure = error;
+    }
+
+    expect(previewHash).toEqual(expect.any(String));
+    expect(afterAttachment).toBeDefined();
+    expect(serializeCliError(failure)).toMatchObject({
+      exitCode: 3,
+      error: {
+        code: 'project_changed',
+        details: { expected_hash: previewHash },
+      },
+    });
+    expect(collected.output).toEqual([]);
+    expect(await snapshotProject(root)).toEqual(afterAttachment);
+    const loaded = await loadProject({ project: root });
+    expect(loaded.datasets.find(({ metadata }) => metadata.id === 'race')?.cases).toEqual([]);
+    expect(loaded.tests.map(({ id }) => id)).toEqual(
+      expect.arrayContaining(['race-owner', 'race-reader', 'refund']),
+    );
+    for (const testId of ['race-owner', 'race-reader']) {
+      expect(
+        loaded.tests
+          .find(({ id }) => id === testId)
+          ?.datasets.some(({ dataset_id: datasetId }) => datasetId === 'race'),
+      ).toBe(true);
+    }
+
+    await runJson(root, ['test', 'add', 'race-reader-2', '--agent', 'support']);
+    const prompted = collectIo();
+    let afterPromptAttachment: Record<string, string> | undefined;
+    let promptCount = 0;
+    const promptExitCode = await runCli(
+      ['test', 'dataset', 'import', 'race-owner', source, '--as', 'race', '--sync', 'upsert'],
+      {
+        interaction: {
+          ...nonInteractive(),
+          inputIsTTY: true,
+          outputIsTTY: true,
+          prompt: async (question) => {
+            expect(question).toBe('Apply this import? [y/N]: ');
+            promptCount += 1;
+            await runJson(root, ['test', 'dataset', 'attach', 'race-reader-2', 'race']);
+            afterPromptAttachment = await snapshotProject(root);
+            return 'yes';
+          },
+        },
+        io: prompted.io,
+        workingDirectory: root,
+      },
+    );
+    expect(promptCount).toBe(1);
+    expect(promptExitCode).toBe(3);
+    expect(prompted.errors.join('\n')).toContain(
+      'project_changed: The project changed after it was read.',
+    );
+    expect(await snapshotProject(root)).toEqual(afterPromptAttachment);
+    const afterPrompt = await loadProject({ project: root });
+    expect(afterPrompt.datasets.find(({ metadata }) => metadata.id === 'race')?.cases).toEqual([]);
+    expect(
+      afterPrompt.tests
+        .find(({ id }) => id === 'race-reader-2')
+        ?.datasets.some(({ dataset_id: datasetId }) => datasetId === 'race'),
+    ).toBe(true);
+  });
+
   it('refuses silent shared dataset updates until previewed and explicitly confirmed', async () => {
     const root = await createProject();
     await runJson(root, ['test', 'add', 'shared-owner', '--agent', 'support']);
@@ -1155,7 +1341,13 @@ describe('CLI2.7/CLI2.8 test, case, dataset, and import authoring', { timeout: 2
       'upsert',
       '--dry-run',
     ]);
-    expect(preview.document).toMatchObject({ ok: true, result: { committed: false } });
+    expect(preview.document).toMatchObject({
+      ok: true,
+      result: {
+        affected_tests: ['shared-owner', 'shared-reader'],
+        committed: false,
+      },
+    });
     const confirmed = await runJson(root, [
       'test',
       'dataset',
@@ -1168,7 +1360,67 @@ describe('CLI2.7/CLI2.8 test, case, dataset, and import authoring', { timeout: 2
       'upsert',
       '--yes',
     ]);
-    expect(confirmed.document).toMatchObject({ ok: true, result: { committed: true } });
+    expect(confirmed.document).toMatchObject({
+      ok: true,
+      result: {
+        affected_tests: ['shared-owner', 'shared-reader'],
+        committed: true,
+        shared_dataset_preview: {
+          affected_tests: ['shared-owner', 'shared-reader'],
+          import: { format: 'jsonl' },
+        },
+      },
+    });
+    if (!confirmed.document.ok) throw new Error('Expected confirmed shared dataset update.');
+    const sharedPreview = (
+      confirmed.document.result as {
+        shared_dataset_preview: { operations: unknown; project_hash_before: unknown };
+      }
+    ).shared_dataset_preview;
+    expect(Array.isArray(sharedPreview.operations)).toBe(true);
+    expect(typeof sharedPreview.project_hash_before).toBe('string');
+
+    await writeFile(source, '{"id":"shared-case","input":"human-update"}\n');
+    const human = await runHuman(root, [
+      'test',
+      'dataset',
+      'import',
+      'shared-owner',
+      source,
+      '--as',
+      'shared',
+      '--sync',
+      'upsert',
+      '--yes',
+    ]);
+    expect(human).toContain('Shared dataset update preview:');
+    expect(human).toContain('Dry run: would update dataset shared.');
+    expect(human).toContain('Affected consumer tests: shared-owner, shared-reader.');
+    expect(human).toContain('Confirmed shared dataset update:');
+
+    await runJson(root, ['test', 'add', 'shared-new', '--agent', 'support']);
+    await writeFile(source, '{"id":"shared-case","input":"new-consumer-update"}\n');
+    const newConsumer = await runJson(root, [
+      'test',
+      'dataset',
+      'import',
+      'shared-new',
+      source,
+      '--as',
+      'shared',
+      '--sync',
+      'upsert',
+      '--yes',
+    ]);
+    expect(newConsumer.document).toMatchObject({
+      ok: true,
+      result: {
+        affected_tests: ['shared-new', 'shared-owner', 'shared-reader'],
+        shared_dataset_preview: {
+          affected_tests: ['shared-new', 'shared-owner', 'shared-reader'],
+        },
+      },
+    });
   });
 
   it('rejects non-empty or provenance-bearing dataset add requests before writing', async () => {
