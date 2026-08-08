@@ -1,0 +1,16 @@
+[
+  {
+    "id": "refund-1",
+    "input": { "question": "Refund, please" },
+    "expected": { "answer": "30 days" },
+    "params": { "locale": "en" },
+    "tags": ["billing"]
+  },
+  {
+    "id": "refund-2",
+    "input": { "question": "Contact\nsupport" },
+    "expected": { "answer": "contact us" },
+    "params": { "locale": "fr" },
+    "tags": ["support"]
+  }
+]

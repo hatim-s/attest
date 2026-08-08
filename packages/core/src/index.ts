@@ -110,3 +110,22 @@ export {
   type ConvertOtlpJsonOptions,
   type TraceConversionErrorCode,
 } from './trace-converter/index.js';
+export {
+  DEFAULT_IMPORT_LIMITS,
+  TabularImportError,
+  createContentCaseId,
+  createImportPreview,
+  createKeyedCaseId,
+  fingerprintCaseContent,
+  importTabularCases,
+  type ImportConflictPolicy,
+  type ImportCounts,
+  type ImportDecision,
+  type ImportDedupePolicy,
+  type ImportDiagnostic,
+  type ImportFormat,
+  type ImportLimits,
+  type ImportSyncPolicy,
+  type TabularImportRequest,
+  type TabularImportResult,
+} from './import/index.js';

@@ -1,0 +1,20 @@
+{
+  "payload": {
+    "rows": [
+      {
+        "external_id": "refund-1",
+        "prompt": "Refund, please",
+        "ideal": "30 days",
+        "tags": ["billing"],
+        "locale": "en"
+      },
+      {
+        "external_id": "refund-2",
+        "prompt": "Contact\nsupport",
+        "ideal": "contact us",
+        "tags": ["support"],
+        "locale": "fr"
+      }
+    ]
+  }
+}
