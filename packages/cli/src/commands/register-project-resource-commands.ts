@@ -6,6 +6,7 @@ import { Argument, Command, Option } from 'commander';
 import { setCliCommandHelpMetadata } from '../help/command-help.js';
 import type { CliIo } from '../run-cli.js';
 import { renderCommandResult } from './command-result.js';
+import { registerAgentCommands } from './agent/register-agent-commands.js';
 import { runListCommand, type ListResourceType } from './list/list-command.js';
 import { runProjectInitCommand } from './project/project-init-command.js';
 import {
@@ -265,6 +266,7 @@ const registerProjectResourceCommands = (context: RegisterProjectResourceCommand
   setCliCommandHelpMetadata(project, {
     examples: ['attest project init', 'attest project show --output json'],
   });
+  registerAgentCommands(context);
   setCliCommandHelpMetadata(context.program, {
     examples: ['attest help --output json', 'attest project init', 'attest list agents'],
   });

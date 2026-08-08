@@ -335,6 +335,7 @@ const requestedStructuredOutput = (argv: readonly string[]): boolean => {
     command === 'list' ||
     command === 'show' ||
     command.startsWith('project.') ||
+    command.startsWith('agent.') ||
     command.startsWith('schema.');
   return (
     supportsStructuredOutput &&
@@ -361,6 +362,9 @@ const requestedCommand = (argv: readonly string[]): string => {
   }
   if (first === 'project' && ['init', 'show', 'validate'].includes(second ?? '')) {
     return `project.${second}`;
+  }
+  if (first === 'agent' && ['add', 'import', 'test', 'rename', 'remove'].includes(second ?? '')) {
+    return `agent.${second}`;
   }
   if (first === 'schema' && ['list', 'print'].includes(second ?? '')) {
     return `schema.${second}`;
