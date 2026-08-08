@@ -115,6 +115,17 @@ const assertMappingShape = (
   }
   const destinations = mappings.map(({ destination }) => splitDestination(destination));
   destinations.forEach((path, index) => {
+    if (path.some((segment) => ['__proto__', 'constructor', 'prototype'].includes(segment))) {
+      diagnostics.push(
+        diagnostic(
+          'mapping_destination_unsafe',
+          'Mapping destinations cannot contain prototype-mutating path segments.',
+          'Rename the destination field to a plain data key.',
+          mappings[index]!.source,
+          `/${path.map(escapePointerSegment).join('/')}`,
+        ),
+      );
+    }
     destinations.slice(0, index).forEach((prior, priorIndex) => {
       const common = Math.min(path.length, prior.length);
       if (path.slice(0, common).join('\0') === prior.slice(0, common).join('\0')) {
@@ -199,6 +210,9 @@ const assignDestination = (
   value: unknown,
 ): void => {
   const segments = splitDestination(destination);
+  if (segments.some((segment) => ['__proto__', 'constructor', 'prototype'].includes(segment))) {
+    return;
+  }
   if (segments[0] === 'metrics') {
     target.metric_overrides = Array.isArray(value)
       ? value.map((entry) => (typeof entry === 'string' ? { metric_id: entry } : entry))
@@ -207,8 +221,12 @@ const assignDestination = (
   }
   let current = target;
   for (const segment of segments.slice(0, -1)) {
-    const child: Record<string, unknown> = {};
-    current[segment] = child;
+    const existing = Object.hasOwn(current, segment) ? current[segment] : undefined;
+    const child =
+      existing !== null && typeof existing === 'object' && !Array.isArray(existing)
+        ? (existing as Record<string, unknown>)
+        : {};
+    if (existing !== child) current[segment] = child;
     current = child;
   }
   current[segments.at(-1)!] = value;
@@ -224,7 +242,7 @@ const normalizeRecord = (
       : { diagnostics: [], value: sourceRecord.value };
   const diagnostics = [...parsedCsv.diagnostics];
   const mappings = request.mappings ?? [];
-  const candidate: Record<string, unknown> = {};
+  const candidate: Record<string, unknown> = Object.create(null) as Record<string, unknown>;
   if (mappings.length === 0) {
     Object.assign(candidate, parsedCsv.value);
   } else {
@@ -387,12 +405,10 @@ const redactValue = (value: unknown): unknown => {
 
 /** Returns a normalized five-row preview with authored scalar values redacted. */
 const createImportPreview = (rows: readonly NormalizedImportRow[]): unknown[] =>
-  rows
-    .slice(0, 5)
-    .map(({ case: testCase }) => ({
-      id: testCase.id,
-      ...(redactValue((({ id: _id, ...rest }) => rest)(testCase)) as Record<string, unknown>),
-    }));
+  rows.slice(0, 5).map(({ case: testCase }) => ({
+    id: testCase.id,
+    ...(redactValue((({ id: _id, ...rest }) => rest)(testCase)) as Record<string, unknown>),
+  }));
 
 const reconcileRows = (
   rows: readonly NormalizedImportRow[],

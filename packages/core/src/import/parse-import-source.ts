@@ -11,6 +11,7 @@ type SourceRecord = ImportLocation & { value: Record<string, unknown> };
 type ParsedImportSource = {
   diagnostics: ImportDiagnostic[];
   records: SourceRecord[];
+  rowsSeen: number;
   sourceHash: string;
 };
 
@@ -103,7 +104,7 @@ const objectRecord = (
 const parseJsonSource = (
   text: string,
   recordsPointer: string | undefined,
-): Pick<ParsedImportSource, 'diagnostics' | 'records'> => {
+): Pick<ParsedImportSource, 'diagnostics' | 'records' | 'rowsSeen'> => {
   const diagnostics: ImportDiagnostic[] = [];
   let document: unknown;
   try {
@@ -118,6 +119,7 @@ const parseJsonSource = (
         ),
       ],
       records: [],
+      rowsSeen: 0,
     };
   }
   const selected =
@@ -134,6 +136,7 @@ const parseJsonSource = (
         ),
       ],
       records: [],
+      rowsSeen: 0,
     };
   }
   if (!Array.isArray(selected.value)) {
@@ -146,36 +149,42 @@ const parseJsonSource = (
         ),
       ],
       records: [],
+      rowsSeen: 0,
     };
   }
   const records = selected.value.flatMap((value, index) => {
     const record = objectRecord(value, { row: index + 1 }, diagnostics);
     return record === undefined ? [] : [record];
   });
-  return { diagnostics, records };
+  return { diagnostics, records, rowsSeen: selected.value.length };
 };
 
-const parseJsonlSource = (text: string): Pick<ParsedImportSource, 'diagnostics' | 'records'> => {
+const parseJsonlSource = (
+  text: string,
+): Pick<ParsedImportSource, 'diagnostics' | 'records' | 'rowsSeen'> => {
   const diagnostics: ImportDiagnostic[] = [];
   const records: SourceRecord[] = [];
+  let rowsSeen = 0;
   for (const [index, line] of text.split(/\r?\n/u).entries()) {
     if (line.trim().length === 0) continue;
+    rowsSeen += 1;
     const lineNumber = index + 1;
     try {
       const record = objectRecord(JSON.parse(line) as unknown, { line: lineNumber }, diagnostics);
       if (record !== undefined) records.push(record);
     } catch {
-      diagnostics.push(
-        diagnostic(
+      diagnostics.push({
+        ...diagnostic(
           'invalid_json',
           'Line is not valid JSON.',
           'Provide exactly one JSON object on this nonblank line.',
           { line: lineNumber },
         ),
-      );
+        source_field: '<line>',
+      });
     }
   }
-  return { diagnostics, records };
+  return { diagnostics, records, rowsSeen };
 };
 
 type CsvRecord = { fields: string[]; line: number };
@@ -262,7 +271,9 @@ const parseCsvRecords = (
   return { diagnostics, records };
 };
 
-const parseCsvSource = (text: string): Pick<ParsedImportSource, 'diagnostics' | 'records'> => {
+const parseCsvSource = (
+  text: string,
+): Pick<ParsedImportSource, 'diagnostics' | 'records' | 'rowsSeen'> => {
   const parsed = parseCsvRecords(text);
   const diagnostics = [...parsed.diagnostics];
   const [headerRecord, ...dataRecords] = parsed.records;
@@ -274,7 +285,7 @@ const parseCsvSource = (text: string): Pick<ParsedImportSource, 'diagnostics' | 
         'Provide one unique header row.',
       ),
     );
-    return { diagnostics, records: [] };
+    return { diagnostics, records: [], rowsSeen: 0 };
   }
   const headers = headerRecord.fields;
   const seenHeaders = new Set<string>();
@@ -312,7 +323,7 @@ const parseCsvSource = (text: string): Pick<ParsedImportSource, 'diagnostics' | 
       },
     ];
   });
-  return { diagnostics, records };
+  return { diagnostics, records, rowsSeen: dataRecords.length };
 };
 
 /** Decodes and parses the complete bounded source before normalization or reconciliation begins. */
@@ -334,11 +345,12 @@ const parseImportSource = (
         ),
       ],
       records: [],
+      rowsSeen: 0,
       sourceHash,
     };
   }
   if (decoded.diagnostics.length > 0) {
-    return { diagnostics: decoded.diagnostics, records: [], sourceHash };
+    return { diagnostics: decoded.diagnostics, records: [], rowsSeen: 0, sourceHash };
   }
   const parsed =
     format === 'csv'
@@ -346,7 +358,7 @@ const parseImportSource = (
       : format === 'json'
         ? parseJsonSource(decoded.text, options.recordsPointer)
         : parseJsonlSource(decoded.text);
-  if (parsed.records.length > limits.maxRows) {
+  if (parsed.rowsSeen > limits.maxRows) {
     parsed.diagnostics.push(
       diagnostic(
         'import_row_limit',
@@ -358,6 +370,7 @@ const parseImportSource = (
   return {
     diagnostics: parsed.diagnostics,
     records: parsed.records.slice(0, limits.maxRows),
+    rowsSeen: parsed.rowsSeen,
     sourceHash,
   };
 };

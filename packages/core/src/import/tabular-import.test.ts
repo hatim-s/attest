@@ -107,6 +107,28 @@ describe('tabular import validation and identity', () => {
     expect(first.cases[0]!.id).toBe(createContentCaseId(first.cases[0]!));
   });
 
+  it('preserves sibling nested mappings and rejects prototype-mutating destinations', () => {
+    const mapped = importTabularCases({
+      format: 'json',
+      mappings: [
+        { destination: 'input.question', source: '/question' },
+        { destination: 'input.context', source: '/context' },
+      ],
+      source: '[{"question":"where","context":"billing"}]',
+    });
+    expect(mapped.cases[0]?.input).toEqual({ question: 'where', context: 'billing' });
+
+    const diagnostics = diagnosticsFrom(() =>
+      importTabularCases({
+        format: 'json',
+        mappings: [{ destination: 'input.__proto__.polluted', source: '/value' }],
+        source: '[{"value":true}]',
+      }),
+    );
+    expect(diagnostics).toContainEqual(expect.objectContaining({ code: 'mapping_destination_unsafe' }));
+    expect(Object.hasOwn(Object.prototype, 'polluted')).toBe(false);
+  });
+
   it('rejects duplicate content by default and deterministically keeps the first when explicit', () => {
     const source = JSON.stringify([
       { id: 'first', input: 'same' },
