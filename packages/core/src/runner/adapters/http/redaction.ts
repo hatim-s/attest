@@ -1,7 +1,4 @@
-import { AgentInvocationError } from '../../errors.js';
-
 const REDACTED = '[REDACTED]';
-const FORBIDDEN_POINTER_SEGMENTS = new Set(['__proto__', 'constructor', 'prototype']);
 
 /** Enumerates common transport encodings so reflected credentials cannot evade evidence redaction. */
 const secretRepresentations = (secret: string): string[] => {
@@ -49,12 +46,6 @@ const redactEventEvidence = (
   for (const pointer of pointers) {
     const segments = pointerSegments(pointer);
     if (segments.length === 0) return REDACTED;
-    if (segments.some((segment) => FORBIDDEN_POINTER_SEGMENTS.has(segment))) {
-      throw new AgentInvocationError(
-        'invalid_envelope',
-        'A redaction pointer contains a prototype-sensitive segment.',
-      );
-    }
     let parent: unknown = redacted;
     for (const segment of segments.slice(0, -1)) {
       if (parent === null || typeof parent !== 'object' || !Object.hasOwn(parent, segment)) {
