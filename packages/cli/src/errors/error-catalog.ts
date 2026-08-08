@@ -95,6 +95,14 @@ const CLI_ERROR_DEFINITIONS = [
     repairs: ['Run `attest agent test <agent-id>` and repair the reported transport failure.'],
   },
   {
+    code: 'metric_fixture_mismatch',
+    meaning: 'A metric result did not match the local fixture expectation.',
+    likely_causes: ['The metric behavior or the fixture expected verdict is incorrect.'],
+    retryable: false,
+    exit_code: 1,
+    repairs: ['Inspect the metric evidence and update either the metric or fixture expectation.'],
+  },
+  {
     code: 'metric_infrastructure_failed',
     meaning: 'A metric could not execute at the infrastructure boundary.',
     likely_causes: ['A judge provider, executable metric, or HTTP metric was unavailable.'],

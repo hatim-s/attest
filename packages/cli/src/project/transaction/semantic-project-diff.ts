@@ -127,7 +127,27 @@ const referencesForProject = (project: ProjectResources): SemanticReference[] =>
     test.datasets.forEach(({ dataset_id: id }, index) =>
       references.push({ id, path: `/tests/${test.id}/datasets/${index}`, type: 'dataset' }),
     );
+    test.cases.forEach((testCase, caseIndex) =>
+      testCase.metric_overrides?.forEach(({ metric_id: id }, overrideIndex) =>
+        references.push({
+          id,
+          path: `/tests/${test.id}/cases/${caseIndex}/metric_overrides/${overrideIndex}`,
+          type: 'metric',
+        }),
+      ),
+    );
   });
+  project.datasets.forEach((dataset) =>
+    dataset.cases.forEach((testCase, caseIndex) =>
+      testCase.metric_overrides?.forEach(({ metric_id: id }, overrideIndex) =>
+        references.push({
+          id,
+          path: `/datasets/${dataset.metadata.id}/cases/${caseIndex}/metric_overrides/${overrideIndex}`,
+          type: 'metric',
+        }),
+      ),
+    ),
+  );
   return references.sort((left, right) =>
     `${left.path}:${left.type}:${left.id}`.localeCompare(`${right.path}:${right.type}:${right.id}`),
   );

@@ -1,8 +1,10 @@
 import {
   CLI_HELP_SCHEMA_VERSION,
   cliHelpSchema,
+  metricPresetSchema,
   type CliHelp,
   type JsonValue,
+  type MetricPreset,
 } from '@attest/contracts';
 import { type Argument, type Command, type Option } from 'commander';
 
@@ -11,12 +13,14 @@ import { AttestCliError } from '../errors.js';
 type CliOptionHelpMetadata = {
   conflicts?: readonly string[];
   implies?: readonly string[];
+  repeatable?: boolean;
 };
 
 type CliCommandHelpMetadata = {
   aliasFor?: string;
   deprecated?: string;
   examples?: readonly string[];
+  presets?: readonly MetricPreset[];
   requestSchema?: string;
   options?: Readonly<Record<string, CliOptionHelpMetadata>>;
 };
@@ -67,7 +71,7 @@ const toOptionHelp = (
   description: option.description,
   value_name: optionValueName(option),
   required: option.mandatory,
-  repeatable: option.variadic,
+  repeatable: metadata?.repeatable ?? option.variadic,
   choices: option.argChoices ?? [],
   default: toJsonValue(option.defaultValue),
   conflicts: [...(metadata?.conflicts ?? [])],
@@ -124,6 +128,9 @@ const toCommandHelp = (command: Command): CliHelp['command'] => {
     deprecated: metadata?.deprecated ?? null,
     request_schema: metadata?.requestSchema ?? null,
     examples: [...(metadata?.examples ?? [])],
+    ...(metadata?.presets === undefined
+      ? {}
+      : { presets: metricPresetSchema.array().parse(metadata.presets) }),
   };
 };
 
@@ -162,6 +169,21 @@ const renderCliHelp = (help: CliHelp): string => {
   }
   if (command.examples.length > 0) {
     sections.push(`Examples:\n${command.examples.map((example) => `  ${example}`).join('\n')}`);
+  }
+  if (command.presets !== undefined) {
+    sections.push(
+      `Presets (${command.presets[0]?.schema ?? 'unknown'}):\n${command.presets
+        .map((preset, index) => {
+          const required =
+            preset.required_inputs.length === 0 ? 'none' : preset.required_inputs.join(', ');
+          const configurable =
+            preset.configurable_fields.length === 0
+              ? 'none'
+              : preset.configurable_fields.join(', ');
+          return `  ${preset.id}${index === 0 ? ' (default)' : ''}\n    ${preset.description}\n    required: ${required}; configurable: ${configurable}`;
+        })
+        .join('\n')}`,
+    );
   }
 
   return sections.filter((section) => section.length > 0).join('\n\n');

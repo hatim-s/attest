@@ -1,0 +1,12 @@
+{
+  "schema": "attest.metric-preset/v1",
+  "id": "output-schema",
+  "name": "Output schema",
+  "description": "Validate output against an authored Draft 2020-12 JSON Schema.",
+  "required_inputs": ["json_schema"],
+  "configurable_fields": ["path"],
+  "definition": {
+    "kind": "assertion",
+    "assertions": [{ "json_schema": { "path": "$.output", "schema": { "type": "object" } } }]
+  }
+}

@@ -1,6 +1,8 @@
 import {
   COMMAND_REQUEST_SCHEMA_VERSION,
   CONTRACT_JSON_SCHEMAS,
+  METRIC_PRESET_SCHEMA_VERSION,
+  METRIC_TEST_FIXTURE_SCHEMA_VERSION,
   serializeContractSchema,
 } from '@attest/contracts';
 
@@ -10,6 +12,8 @@ import type { CommandResult } from '../command-result.js';
 
 const schemaAliases = new Map<string, string>([
   [COMMAND_REQUEST_SCHEMA_VERSION, 'command-request.v2.json'],
+  [METRIC_PRESET_SCHEMA_VERSION, 'metric-preset.v1.json'],
+  [METRIC_TEST_FIXTURE_SCHEMA_VERSION, 'metric-test-fixture.v1.json'],
 ]);
 
 const schemaIdForFile = (file: string): string =>

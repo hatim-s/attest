@@ -1,5 +1,6 @@
 import { constants } from 'node:fs';
 import { lstat, open, realpath } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { delimiter, isAbsolute, relative, resolve, sep } from 'node:path';
 
 import {
@@ -105,6 +106,7 @@ const createBaseEnvironment = (): Record<string, string> => ({
     .filter((entry) => isAbsolute(entry))
     .join(delimiter),
   LC_ALL: 'C',
+  TMPDIR: tmpdir(),
 });
 
 /** Resolves runtime-only secret references into an ephemeral native transport target. */
@@ -384,6 +386,7 @@ export {
   CONNECTION_TEST_RUN_ID,
   REDACTED,
   assertSupportedProbePolicy,
+  createBaseEnvironment,
   readSecretReference,
   redactProbeValue,
   resolveNativeAgent,

@@ -14,6 +14,8 @@ import { configSchema } from './config.js';
 import { datasetResourceSchema } from './dataset-resource-v2.js';
 import { metricRequestSchema, metricResultSchema } from './metric.js';
 import { metricResourceSchema } from './metric-resource-v2.js';
+import { metricPresetSchema } from './metric-presets.js';
+import { metricTestFixtureSchema } from './metric-test-fixture-v1.js';
 import { projectManifestSchema } from './project-v2.js';
 import { testResourceSchema } from './test-resource-v2.js';
 import { traceSchema } from './trace.js';
@@ -125,6 +127,11 @@ const CONTRACT_JSON_SCHEMAS = new Map<string, ContractJsonSchemaDefinition>([
   ['case.v2.json', { schema: testCaseSchema, invariants: v2RuntimeInvariants }],
   ['dataset.v2.json', { schema: datasetResourceSchema, invariants: v2RuntimeInvariants }],
   ['metric.v2.json', { schema: metricResourceSchema, invariants: v2RuntimeInvariants }],
+  ['metric-preset.v1.json', { schema: metricPresetSchema, invariants: noAdditionalInvariants }],
+  [
+    'metric-test-fixture.v1.json',
+    { schema: metricTestFixtureSchema, invariants: noAdditionalInvariants },
+  ],
   ['command-request.v2.json', { schema: commandRequestSchema, invariants: v2RuntimeInvariants }],
   ['cli-result.v1.json', { schema: cliResultSchema, invariants: noAdditionalInvariants }],
   ['cli-event.v1.json', { schema: cliEventSchema, invariants: noAdditionalInvariants }],
