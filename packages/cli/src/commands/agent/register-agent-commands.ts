@@ -1,6 +1,7 @@
 import { COMMAND_REQUEST_SCHEMA_VERSION } from '@attest/contracts';
 import { Command, Option } from 'commander';
 
+import { AttestCliError } from '../../errors.js';
 import { setCliCommandHelpMetadata } from '../../help/command-help.js';
 import type { CliIo } from '../../run-cli.js';
 import { renderCommandResult } from '../command-result.js';
@@ -50,6 +51,7 @@ type TestOptions = CommonOptions & {
   fromJson?: string;
   input?: string;
   inputFile?: string;
+  record?: boolean;
   watch?: boolean;
 };
 
@@ -72,6 +74,28 @@ const addMutationOptions = (command: Command): Command =>
     .option('--if-project-hash <sha256>', 'fail if the project changed since it was read');
 
 const outputFormat = (options: CommonOptions): 'human' | 'json' => options.output ?? 'human';
+
+/** Merges root-position common options with command-position options and rejects ambiguity. */
+const mergeCommonOptions = <Options extends CommonOptions>(
+  options: Options,
+  command: Command,
+  program: Command,
+): Options => {
+  const root = program.opts<CommonOptions>();
+  for (const name of ['project', 'output', 'nonInteractive'] as const) {
+    if (
+      program.getOptionValueSource(name) === 'cli' &&
+      command.getOptionValueSource(name) === 'cli'
+    ) {
+      throw new AttestCliError(
+        'cli_usage',
+        `Common option --${name === 'nonInteractive' ? 'non-interactive' : name} was provided twice.`,
+        { path: `--${name === 'nonInteractive' ? 'non-interactive' : name}` },
+      );
+    }
+  }
+  return { ...root, ...options };
+};
 
 const isInteractive = (
   options: CommonOptions,
@@ -137,7 +161,8 @@ const registerAgentCommands = (context: RegisterAgentCommandsOptions): void => {
     .option('--header-env <header=source>', 'HTTP header secret reference', collect)
     .option('--timeout <duration>', 'attempt timeout such as 500ms, 60s, or 2m')
     .option('--trace', 'declare trace support')
-    .action(async (agentId: string | undefined, options: AddOptions) => {
+    .action(async (agentId: string | undefined, options: AddOptions, command: Command) => {
+      options = mergeCommonOptions(options, command, context.program);
       const result = await runAgentAddCommand({
         ...mutationArguments(options, context),
         agentId,
@@ -177,13 +202,14 @@ const registerAgentCommands = (context: RegisterAgentCommandsOptions): void => {
   const importCommand = addMutationOptions(
     agent
       .command('import')
-      .description('Import one canonical JSON native agent resource.')
-      .argument('[path|-]', 'JSON resource path or stdin'),
+      .description('Import one canonical JSON native agent resource from a file, URL, or stdin.')
+      .argument('[path|url|-]', 'JSON resource file, HTTP(S) URL, or stdin'),
   )
     .option('--as <agent-id>', 'imported agent id')
     .addOption(new Option('--type <type>', 'import type').choices(['json']))
     .option('--name <name>', 'override the imported display name')
-    .action(async (source: string | undefined, options: ImportOptions) => {
+    .action(async (source: string | undefined, options: ImportOptions, command: Command) => {
+      options = mergeCommonOptions(options, command, context.program);
       const result = await runAgentImportCommand({
         ...mutationArguments(options, context),
         agentId: options.as,
@@ -199,6 +225,7 @@ const registerAgentCommands = (context: RegisterAgentCommandsOptions): void => {
     importCommand,
     [
       'attest agent import ./agent.json --type json --as support',
+      'attest agent import https://catalog.example/agent.json --as support',
       'attest agent import --from-json ./agent-import.json --output json',
     ],
     { as: [], name: [], path: [], type: [] },
@@ -213,8 +240,23 @@ const registerAgentCommands = (context: RegisterAgentCommandsOptions): void => {
     .option('--input <json>', 'test input as any JSON value')
     .option('--input-file <path|->', 'read test input JSON from a file or stdin')
     .option('--from-json <path|->', 'read one versioned agent.test request')
+    .option('--record', 'persist this probe as an eval run')
     .option('--watch', 'show human transport progress')
-    .action(async (agentId: string | undefined, options: TestOptions) => {
+    .action(async (agentId: string | undefined, options: TestOptions, command: Command) => {
+      options = mergeCommonOptions(options, command, context.program);
+      if (options.watch === true && outputFormat(options) !== 'human') {
+        throw new AttestCliError('cli_usage', '--watch requires human output.', {
+          path: '--watch',
+        });
+      }
+      if (
+        options.watch === true &&
+        !isInteractive(options, context.interaction, options.fromJson)
+      ) {
+        throw new AttestCliError('cli_usage', '--watch requires an interactive human terminal.', {
+          path: '--watch',
+        });
+      }
       const controller = new AbortController();
       const cancel = (): void => controller.abort();
       process.once('SIGINT', cancel);
@@ -226,10 +268,13 @@ const registerAgentCommands = (context: RegisterAgentCommandsOptions): void => {
           input: options.input,
           inputFile: options.inputFile,
           interactive: isInteractive(options, context.interaction, options.fromJson),
+          onProgress: (message) => context.io.error(message),
           project: options.project,
           prompt: context.interaction.prompt,
           readStdin: context.interaction.readStdin,
+          record: options.record,
           signal: controller.signal,
+          watch: options.watch,
           workingDirectory: context.workingDirectory,
         });
         context.io.output(renderCommandResult('agent.test', outputFormat(options), result));
@@ -241,6 +286,8 @@ const registerAgentCommands = (context: RegisterAgentCommandsOptions): void => {
   setCliCommandHelpMetadata(test, {
     examples: [
       'attest agent test support --input \'{"question":"ping"}\' --output json',
+      'attest agent test support --watch',
+      'attest agent test support --record --output json',
       'attest agent test --from-json ./agent-test.json --output json',
     ],
     requestSchema: COMMAND_REQUEST_SCHEMA_VERSION,
@@ -248,7 +295,12 @@ const registerAgentCommands = (context: RegisterAgentCommandsOptions): void => {
       output: { implies: ['non-interactive'] },
       input: { conflicts: ['input-file', 'from-json'] },
       'input-file': { conflicts: ['input', 'from-json'] },
-      'from-json': { conflicts: ['agent-id', 'input', 'input-file'], implies: ['non-interactive'] },
+      'from-json': {
+        conflicts: ['agent-id', 'input', 'input-file', 'record'],
+        implies: ['non-interactive'],
+      },
+      record: { conflicts: ['from-json'] },
+      watch: { conflicts: ['output', 'non-interactive'] },
     },
   });
 
@@ -259,7 +311,13 @@ const registerAgentCommands = (context: RegisterAgentCommandsOptions): void => {
       .argument('[agent-id]', 'current agent id')
       .argument('[new-id]', 'new agent id'),
   ).action(
-    async (agentId: string | undefined, newId: string | undefined, options: MutationOptions) => {
+    async (
+      agentId: string | undefined,
+      newId: string | undefined,
+      options: MutationOptions,
+      command: Command,
+    ) => {
+      options = mergeCommonOptions(options, command, context.program);
       const result = await runAgentRenameCommand({
         ...mutationArguments(options, context),
         agentId,
@@ -282,7 +340,8 @@ const registerAgentCommands = (context: RegisterAgentCommandsOptions): void => {
       .argument('[agent-id]', 'agent id'),
   )
     .option('--detach', 'also remove tests that require this agent')
-    .action(async (agentId: string | undefined, options: RemoveOptions) => {
+    .action(async (agentId: string | undefined, options: RemoveOptions, command: Command) => {
+      options = mergeCommonOptions(options, command, context.program);
       const result = await runAgentRemoveCommand({
         ...mutationArguments(options, context),
         agentId,

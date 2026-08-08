@@ -26,6 +26,11 @@ process.stdin.on('end', () => {
     protocol: 'attest.agent/v1alpha1',
     output: {
       argv: process.argv.slice(3),
+      handshake: {
+        case_id: process.env.ATTEST_CASE_ID,
+        protocol: process.env.ATTEST_PROTOCOL,
+        run_id: process.env.ATTEST_RUN_ID,
+      },
       input: request.input,
       secret: process.env.ATTEST_TEST_SECRET,
     },

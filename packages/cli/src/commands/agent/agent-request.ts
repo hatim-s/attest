@@ -32,23 +32,81 @@ const requestDiagnostics = (
   issues: readonly { message: string; path: PropertyKey[] }[],
 ): JsonValue => issues.map(({ message, path }) => ({ message, path: `/${path.join('/')}` }));
 
+const MAX_REMOTE_JSON_BYTES = 1024 * 1024;
+const REMOTE_JSON_TIMEOUT_MS = 10_000;
+
+/** Fetches one bounded JSON document without following redirects or reflecting its URL. */
+const readRemoteJson = async (source: string, path: string): Promise<string> => {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), REMOTE_JSON_TIMEOUT_MS);
+  try {
+    const response = await fetch(source, { redirect: 'manual', signal: controller.signal });
+    if (!response.ok) {
+      throw new AttestCliError('cli_usage', 'The remote JSON source returned an error.', {
+        path,
+        details: { http_status: response.status },
+      });
+    }
+    if (response.body === null) return '';
+    const reader = response.body.getReader();
+    const chunks: Uint8Array[] = [];
+    let bytes = 0;
+    while (true) {
+      const chunk = await reader.read();
+      if (chunk.done) break;
+      bytes += chunk.value.byteLength;
+      if (bytes > MAX_REMOTE_JSON_BYTES) {
+        await reader.cancel();
+        throw new AttestCliError('cli_usage', 'The remote JSON source exceeds the size limit.', {
+          path,
+          details: { maximum_bytes: MAX_REMOTE_JSON_BYTES },
+        });
+      }
+      chunks.push(chunk.value);
+    }
+    const body = new Uint8Array(bytes);
+    let offset = 0;
+    for (const chunk of chunks) {
+      body.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    return new TextDecoder('utf-8', { fatal: true }).decode(body);
+  } catch (error: unknown) {
+    if (error instanceof AttestCliError) throw error;
+    throw new AttestCliError('cli_usage', 'Could not fetch the remote JSON source.', {
+      path,
+      hint: 'Use a reachable HTTP(S) JSON resource under 1 MiB.',
+      cause: error,
+    });
+  } finally {
+    clearTimeout(timeout);
+  }
+};
+
 /** Reads one JSON document while ensuring parse failures never echo sensitive source text. */
 const readJsonDocument = async (
   source: string,
   workingDirectory: string,
   readStdin: ReadInput,
   path: string,
+  allowRemote = false,
 ): Promise<unknown> => {
   let text: string;
   try {
-    text =
-      source === '-'
+    text = /^https?:\/\//u.test(source)
+      ? allowRemote
+        ? await readRemoteJson(source, path)
+        : await Promise.reject(new Error('remote source is not allowed here'))
+      : source === '-'
         ? await readStdin()
         : await readFile(resolve(workingDirectory, source), 'utf8');
   } catch (error: unknown) {
-    throw new AttestCliError('cli_usage', `Could not read JSON from ${source}.`, {
+    if (error instanceof AttestCliError) throw error;
+    throw new AttestCliError('cli_usage', 'Could not read the selected JSON source.', {
       path,
-      hint: 'Pass a readable JSON file or `-` for stdin.',
+      hint: allowRemote
+        ? 'Pass a readable JSON file, HTTP(S) URL, or `-` for stdin.'
+        : 'Pass a readable JSON file or `-` for stdin.',
       cause: error,
     });
   }
@@ -208,8 +266,41 @@ const SENSITIVE_NAME = /authorization|cookie|password|secret|token|api[-_]?key/i
 
 /** Rejects authored literal credentials and every transport deferred to later CLI items. */
 const assertSafeNativeAgentResource = (agent: AgentResource): void => {
+  const unsupportedTimeout = ['connect_ms', 'first_byte_ms', 'idle_ms', 'run_ms'].find(
+    (field) =>
+      agent.timeouts?.[field as keyof NonNullable<AgentResource['timeouts']>] !== undefined,
+  );
+  const unsupportedLimit = [
+    'request_bytes',
+    'event_count',
+    'event_bytes',
+    'total_evidence_bytes',
+  ].find(
+    (field) => agent.limits?.[field as keyof NonNullable<AgentResource['limits']>] !== undefined,
+  );
+  if (unsupportedTimeout !== undefined || unsupportedLimit !== undefined) {
+    const section = unsupportedTimeout === undefined ? 'limits' : 'timeouts';
+    const field = unsupportedTimeout ?? unsupportedLimit!;
+    throw new AttestCliError('project_invalid', 'This native runtime policy is unsupported.', {
+      path: `/agent/${section}/${field}`,
+      hint: 'CLI2.6 supports attempt_ms, response_bytes, and deterministic no-backoff retries.',
+    });
+  }
+  if (agent.retry !== undefined && agent.retry.backoff.kind !== 'none') {
+    throw new AttestCliError('project_invalid', 'Retry backoff is not supported by CLI2.6.', {
+      path: '/agent/retry/backoff',
+      hint: 'Use `{ "kind": "none" }` for a deterministic native connection probe.',
+    });
+  }
   const transport = agent.transport;
   if (transport.kind === 'native_cli') {
+    for (const position of agent.redaction?.argv_positions ?? []) {
+      if (position >= transport.argv.length) {
+        throw new AttestCliError('project_invalid', 'An argv redaction position is out of range.', {
+          path: `/agent/redaction/argv_positions/${position}`,
+        });
+      }
+    }
     const sensitivePosition = transport.argv.findIndex((argument) => SENSITIVE_NAME.test(argument));
     if (sensitivePosition >= 0) {
       throw new AttestCliError(
@@ -237,15 +328,15 @@ const assertSafeNativeAgentResource = (agent: AgentResource): void => {
       path: '/agent/transport/request/url',
     });
   }
-  if (
-    url.username.length > 0 ||
-    url.password.length > 0 ||
-    [...url.searchParams.keys()].some((key) => SENSITIVE_NAME.test(key))
-  ) {
-    throw new AttestCliError('project_invalid', 'Native HTTP URL contains literal credentials.', {
-      path: '/agent/transport/request/url',
-      hint: 'Move authentication to an environment-backed header reference.',
-    });
+  if (url.username.length > 0 || url.password.length > 0 || url.search.length > 0) {
+    throw new AttestCliError(
+      'project_invalid',
+      'Native HTTP URL cannot contain authored query values.',
+      {
+        path: '/agent/transport/request/url',
+        hint: 'Move authentication to an environment-backed header reference.',
+      },
+    );
   }
   for (const [name, value] of Object.entries(transport.request.headers ?? {})) {
     if (SENSITIVE_NAME.test(name) && typeof value === 'string') {
@@ -257,6 +348,17 @@ const assertSafeNativeAgentResource = (agent: AgentResource): void => {
           hint: 'Use `{ "from_env": "NAME" }` instead of a literal value.',
         },
       );
+    }
+  }
+  for (const name of agent.redaction?.headers ?? []) {
+    if (
+      !Object.keys(transport.request.headers ?? {}).some(
+        (header) => header.toLowerCase() === name.toLowerCase(),
+      )
+    ) {
+      throw new AttestCliError('project_invalid', 'A header redaction target does not exist.', {
+        path: `/agent/redaction/headers/${name}`,
+      });
     }
   }
 };
@@ -328,7 +430,7 @@ const readImportedAgentResource = async (
   workingDirectory: string,
   readStdin: ReadInput,
 ): Promise<AgentResource> => {
-  const value = await readJsonDocument(source, workingDirectory, readStdin, 'source');
+  const value = await readJsonDocument(source, workingDirectory, readStdin, 'source', true);
   const parsed = agentResourceSchema.safeParse(value);
   if (!parsed.success) {
     throw new AttestCliError('cli_usage', 'Imported agent JSON does not match its schema.', {

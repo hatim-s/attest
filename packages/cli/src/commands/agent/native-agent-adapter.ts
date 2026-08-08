@@ -1,4 +1,5 @@
-import { lstat, readFile, realpath } from 'node:fs/promises';
+import { constants } from 'node:fs';
+import { lstat, open, realpath } from 'node:fs/promises';
 import { delimiter, isAbsolute, relative, resolve, sep } from 'node:path';
 
 import {
@@ -9,7 +10,7 @@ import {
   type JsonValue,
   type SecretReference,
 } from '@attest/contracts';
-import { invokeAgent } from '@attest/core';
+import { invokeAgent, type StoredCaseExecution, type StoredAttempt } from '@attest/core';
 
 import { AttestCliError } from '../../errors.js';
 
@@ -21,7 +22,11 @@ const REDACTED = '[REDACTED]';
 type NativeAgentTestOptions = {
   agent: AgentResource;
   input: JsonValue;
+  onProgress?: (message: string) => void;
+  onExecution?: (execution: StoredCaseExecution) => Promise<void>;
   projectRoot: string;
+  runId?: string;
+  secretFileObserver?: (path: string) => Promise<void>;
   signal?: AbortSignal;
 };
 
@@ -44,6 +49,7 @@ const isContainedPath = (root: string, candidate: string): boolean => {
 const readSecretReference = async (
   reference: SecretReference,
   projectRoot: string,
+  observer?: (path: string) => Promise<void>,
 ): Promise<string> => {
   if ('from_env' in reference) {
     const value = process.env[reference.from_env];
@@ -57,27 +63,39 @@ const readSecretReference = async (
   }
 
   const candidate = resolve(projectRoot, reference.from_file);
-  let resolvedPath: string;
+  if (!isContainedPath(projectRoot, candidate)) {
+    throw new AttestCliError('invocation_failed', 'A secret file is outside the project.', {
+      path: reference.from_file,
+      hint: 'Use a project-contained secret file or an environment reference.',
+    });
+  }
+  let handle: Awaited<ReturnType<typeof open>> | undefined;
   try {
-    resolvedPath = await realpath(candidate);
-    const metadata = await lstat(resolvedPath);
+    handle = await open(candidate, constants.O_RDONLY | constants.O_NOFOLLOW);
+    const metadata = await handle.stat();
     if (!metadata.isFile() || (metadata.mode & 0o077) !== 0) {
       throw new Error('secret file must be a private regular file');
     }
+    await observer?.(reference.from_file);
+    const [resolvedPath, pathMetadata] = await Promise.all([realpath(candidate), lstat(candidate)]);
+    if (
+      !isContainedPath(projectRoot, resolvedPath) ||
+      pathMetadata.dev !== metadata.dev ||
+      pathMetadata.ino !== metadata.ino
+    ) {
+      throw new Error('secret file identity changed while opening');
+    }
+    // Read from the validated descriptor so a path replacement cannot redirect the secret read.
+    return await handle.readFile('utf8');
   } catch (error: unknown) {
     throw new AttestCliError('invocation_failed', 'A referenced secret file is unavailable.', {
       path: reference.from_file,
       hint: 'Use a project-contained regular file with group/world permissions removed.',
       cause: error,
     });
+  } finally {
+    await handle?.close().catch(() => undefined);
   }
-  if (!isContainedPath(projectRoot, resolvedPath)) {
-    throw new AttestCliError('invocation_failed', 'A secret file resolves outside the project.', {
-      path: reference.from_file,
-      hint: 'Use a project-contained secret file or an environment reference.',
-    });
-  }
-  return readFile(resolvedPath, 'utf8');
 };
 
 /** Builds the minimum safe inherited environment used by the hardened native CLI invoker. */
@@ -93,13 +111,14 @@ const createBaseEnvironment = (): Record<string, string> => ({
 const resolveNativeAgent = async (
   agent: AgentResource,
   projectRoot: string,
+  observer?: (path: string) => Promise<void>,
 ): Promise<ResolvedNativeAgent> => {
   if (agent.transport.kind === 'native_cli') {
     const transport = agent.transport;
     const env = createBaseEnvironment();
     const secrets: string[] = [];
     for (const [name, reference] of Object.entries(transport.env ?? {})) {
-      const value = await readSecretReference(reference, projectRoot);
+      const value = await readSecretReference(reference, projectRoot, observer);
       env[name] = value;
       secrets.push(value);
     }
@@ -108,6 +127,15 @@ const resolveNativeAgent = async (
         ? argument
         : resolve(projectRoot, transport.cwd ?? '.', argument),
     );
+    for (const position of agent.redaction?.argv_positions ?? []) {
+      const value = argv[position];
+      if (value === undefined) {
+        throw new AttestCliError('project_invalid', 'An argv redaction position is out of range.', {
+          path: `/agents/${agent.id}/redaction/argv_positions`,
+        });
+      }
+      secrets.push(value);
+    }
     return { env, secrets, target: { type: 'cli', command: argv } };
   }
 
@@ -137,9 +165,12 @@ const resolveNativeAgent = async (
       if (typeof value === 'string') {
         headers[name] = value;
       } else {
-        const resolved = await readSecretReference(value, projectRoot);
+        const resolved = await readSecretReference(value, projectRoot, observer);
         headers[name] = resolved;
         secrets.push(resolved);
+      }
+      if (agent.redaction?.headers?.some((header) => header.toLowerCase() === name.toLowerCase())) {
+        secrets.push(headers[name]!);
       }
     }
     return { httpHeaders: headers, secrets, target: { type: 'http', url: request.url } };
@@ -155,6 +186,40 @@ const resolveNativeAgent = async (
   );
 };
 
+/** Rejects authored policies that the bounded CLI2.6 native probe cannot enforce. */
+const assertSupportedProbePolicy = (agent: AgentResource): void => {
+  const unsupportedTimeout = ['connect_ms', 'first_byte_ms', 'idle_ms', 'run_ms'].find(
+    (field) =>
+      agent.timeouts?.[field as keyof NonNullable<AgentResource['timeouts']>] !== undefined,
+  );
+  if (unsupportedTimeout !== undefined) {
+    throw new AttestCliError('project_invalid', 'This timeout phase is not supported by CLI2.6.', {
+      path: `/agents/${agent.id}/timeouts/${unsupportedTimeout}`,
+      hint: 'Use attempt_ms for a bounded native connection probe.',
+    });
+  }
+  if (agent.retry !== undefined && agent.retry.backoff.kind !== 'none') {
+    throw new AttestCliError('project_invalid', 'Retry backoff is not supported by CLI2.6.', {
+      path: `/agents/${agent.id}/retry/backoff`,
+      hint: 'Use deterministic no-backoff retries for a native connection probe.',
+    });
+  }
+  const unsupportedLimit = [
+    'request_bytes',
+    'event_count',
+    'event_bytes',
+    'total_evidence_bytes',
+  ].find(
+    (field) => agent.limits?.[field as keyof NonNullable<AgentResource['limits']>] !== undefined,
+  );
+  if (unsupportedLimit !== undefined) {
+    throw new AttestCliError('project_invalid', 'This evidence limit is not supported by CLI2.6.', {
+      path: `/agents/${agent.id}/limits/${unsupportedLimit}`,
+      hint: 'Use response_bytes for the bounded native connection probe.',
+    });
+  }
+};
+
 const redactString = (value: string, secrets: readonly string[]): string =>
   secrets
     .filter((secret) => secret.length > 0)
@@ -167,24 +232,67 @@ const redactProbeValue = (value: unknown, secrets: readonly string[]): JsonValue
   if (Array.isArray(value)) return value.map((entry) => redactProbeValue(entry, secrets));
   if (typeof value !== 'object') return null;
   return Object.fromEntries(
-    Object.entries(value).map(([key, entry]) => [
-      key,
-      /authorization|cookie|password|secret|token|api[-_]?key/iu.test(key)
-        ? REDACTED
-        : redactProbeValue(entry, secrets),
-    ]),
+    Object.entries(value)
+      .filter(([, entry]) => entry !== undefined)
+      .map(([key, entry]) => [
+        key,
+        /authorization|cookie|password|secret|token|api[-_]?key/iu.test(key)
+          ? REDACTED
+          : redactProbeValue(entry, secrets),
+      ]),
   );
 };
 
+const redactStored = <Value>(value: Value, secrets: readonly string[]): Value =>
+  redactProbeValue(value, secrets) as unknown as Value;
+
+const invocationAttempts = (
+  attempts: Awaited<ReturnType<typeof invokeAgent>>['attempts'],
+): JsonValue =>
+  attempts.map((attempt, index) => ({
+    attempt: index + 1,
+    status: attempt.status,
+    ...(attempt.status === 'invocation_error' ? { invocation_code: attempt.error.code } : {}),
+    diagnostics: attempt.diagnostics,
+    raw_excerpt: attempt.rawExcerpt,
+    warnings: attempt.warnings,
+  })) as JsonValue;
+
+const storedAttempts = (
+  attempts: Awaited<ReturnType<typeof invokeAgent>>['attempts'],
+  secrets: readonly string[],
+): StoredAttempt[] =>
+  attempts.map((attempt) => ({
+    status: attempt.status,
+    diagnostics: redactStored(attempt.diagnostics, secrets),
+    durationMs: attempt.durationMs,
+    rawExcerpt:
+      attempt.rawExcerpt === undefined ? undefined : redactStored(attempt.rawExcerpt, secrets),
+    warnings: redactStored(attempt.warnings, secrets),
+    ...(attempt.status === 'invocation_error'
+      ? {
+          errorCode: attempt.error.code,
+          errorMessage: redactString(attempt.error.message, secrets),
+        }
+      : {}),
+  })) as unknown as StoredAttempt[];
+
 /** Runs one native contract probe and returns only bounded, redacted, deterministic evidence. */
 const testNativeAgentConnection = async (options: NativeAgentTestOptions): Promise<JsonValue> => {
-  const resolved = await resolveNativeAgent(options.agent, options.projectRoot);
+  assertSupportedProbePolicy(options.agent);
+  options.onProgress?.(`Testing agent ${options.agent.id}...`);
+  const resolved = await resolveNativeAgent(
+    options.agent,
+    options.projectRoot,
+    options.secretFileObserver,
+  );
   const request: AgentRequest = {
     protocol: AGENT_PROTOCOL,
-    run_id: CONNECTION_TEST_RUN_ID,
+    run_id: options.runId ?? CONNECTION_TEST_RUN_ID,
     case_id: 'connection-test',
     input: options.input,
   };
+  const startedAt = new Date().toISOString();
   const invocation = await invokeAgent(resolved.target, request, {
     env: resolved.env,
     httpHeaders: resolved.httpHeaders,
@@ -195,41 +303,88 @@ const testNativeAgentConnection = async (options: NativeAgentTestOptions): Promi
   });
   if (invocation.status === 'invocation_error') {
     const code = invocation.error.code === 'cancelled' ? 'cancelled' : 'invocation_failed';
-    throw new AttestCliError(code, `Agent connection test failed: ${invocation.error.message}`, {
-      hint:
-        code === 'cancelled'
-          ? 'Retry when cancellation is no longer required.'
-          : 'Repair the native agent contract and retry `attest agent test`.',
-      details: redactProbeValue(
-        {
-          attempt_count: invocation.attempts.length,
-          diagnostics: invocation.diagnostics,
-          invocation_code: invocation.error.code,
-          raw_excerpt: invocation.rawExcerpt,
-        },
-        resolved.secrets,
-      ),
+    await options.onExecution?.({
+      attempts: storedAttempts(invocation.attempts, resolved.secrets),
+      caseId: request.case_id,
+      diagnostics: redactStored(invocation.diagnostics, resolved.secrets),
+      durationMs: invocation.durationMs,
+      errorCode: invocation.error.code,
+      errorMessage: redactString(invocation.error.message, resolved.secrets),
+      expectedMetrics: [],
+      outcome:
+        invocation.error.code === 'cancelled'
+          ? 'cancelled'
+          : invocation.error.code === 'timeout'
+            ? 'timeout'
+            : 'invocation_error',
+      request: redactStored(request, resolved.secrets),
+      startedAt,
+      suiteName: `agent:${options.agent.id}`,
+      warnings: redactStored(invocation.warnings, resolved.secrets),
     });
+    throw new AttestCliError(
+      code,
+      `Agent connection test failed: ${redactString(invocation.error.message, resolved.secrets)}`,
+      {
+        hint:
+          code === 'cancelled'
+            ? 'Retry when cancellation is no longer required.'
+            : 'Repair the native agent contract and retry `attest agent test`.',
+        details: redactProbeValue(
+          {
+            attempt_count: invocation.attempts.length,
+            attempts: invocationAttempts(invocation.attempts),
+            diagnostics: invocation.diagnostics,
+            invocation_code: invocation.error.code,
+            raw_excerpt: invocation.rawExcerpt,
+          },
+          resolved.secrets,
+        ),
+      },
+    );
   }
   if (invocation.report === undefined || !invocation.report.ok) {
     throw new AttestCliError('internal_error', 'The native invoker omitted its parse report.');
   }
 
-  return redactProbeValue(
+  await options.onExecution?.({
+    attempts: storedAttempts(invocation.attempts, resolved.secrets),
+    caseId: request.case_id,
+    diagnostics: redactStored(invocation.diagnostics, resolved.secrets),
+    durationMs: invocation.durationMs,
+    expectedMetrics: [],
+    outcome: 'completed',
+    request: redactStored(request, resolved.secrets),
+    response: redactProbeValue(invocation.report.value, resolved.secrets),
+    startedAt,
+    suiteName: `agent:${options.agent.id}`,
+    trace:
+      invocation.report.value.trace === undefined
+        ? undefined
+        : redactStored(invocation.report.value.trace, resolved.secrets),
+    warnings: redactStored(invocation.warnings, resolved.secrets),
+  });
+
+  const result = redactProbeValue(
     {
       agent_id: options.agent.id,
       attempt_count: invocation.attempts.length,
+      attempts: invocationAttempts(invocation.attempts),
       response: invocation.report.value,
       transport: options.agent.transport.kind,
       warnings: invocation.report.warnings,
     },
     resolved.secrets,
   );
+  options.onProgress?.(`Agent ${options.agent.id} completed.`);
+  return result;
 };
 
 export {
   CONNECTION_TEST_RUN_ID,
   REDACTED,
+  assertSupportedProbePolicy,
+  readSecretReference,
   redactProbeValue,
   resolveNativeAgent,
   testNativeAgentConnection,

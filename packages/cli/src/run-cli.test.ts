@@ -390,7 +390,7 @@ describe('runCli', () => {
     });
   });
 
-  it('does not advertise a colliding root output option in machine help', async () => {
+  it('advertises the v2 common grammar at the root for prefix-position options', async () => {
     const output: string[] = [];
     await runCli(['help', '--output', 'json'], {
       io: { output: (message) => output.push(message), error: () => undefined },
@@ -403,7 +403,7 @@ describe('runCli', () => {
         subcommands: { name: string; options: { name: string }[] }[];
       };
     };
-    expect(result.command.options.map(({ name }) => name)).not.toEqual(
+    expect(result.command.options.map(({ name }) => name)).toEqual(
       expect.arrayContaining(['output', 'project', 'non-interactive']),
     );
     const subcommands = new Map(

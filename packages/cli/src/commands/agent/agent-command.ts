@@ -1,5 +1,5 @@
-import { readFile } from 'node:fs/promises';
-import { resolve } from 'node:path';
+import { mkdir, readFile } from 'node:fs/promises';
+import { join, resolve } from 'node:path';
 
 import {
   type AgentResource,
@@ -7,6 +7,7 @@ import {
   type JsonValue,
   type ProjectResources,
 } from '@attest/contracts';
+import { openStore } from '@attest/core';
 
 import { AttestCliError } from '../../errors.js';
 import { applyProjectMutation, type PublishObserver } from '../../project/transaction/index.js';
@@ -77,10 +78,13 @@ type AgentTestCommandOptions = {
   input?: string;
   inputFile?: string;
   interactive: boolean;
+  onProgress?: (message: string) => void;
   project?: string;
   prompt?: Prompt;
   readStdin: ReadInput;
   signal?: AbortSignal;
+  watch?: boolean;
+  record?: boolean;
   workingDirectory: string;
 };
 
@@ -106,15 +110,36 @@ const promptRequired = async (
   path: string,
   interactive: boolean,
   prompt: Prompt | undefined,
+  signal?: AbortSignal,
 ): Promise<string> => {
+  if (signal?.aborted === true) throw new AttestCliError('cancelled', 'Command cancelled.');
   if (value?.trim()) return value.trim();
   if (interactive && prompt !== undefined) {
-    const answer = (await prompt(`${label}: `)).trim();
+    const answer = (await promptWithSignal(prompt, `${label}: `, signal)).trim();
     if (answer.length > 0) return answer;
   }
   throw new AttestCliError('cli_missing_input', `${label} is required.`, {
     path,
     hint: `Pass ${path} or a complete \`--from-json\` request.`,
+  });
+};
+
+/** Makes every guided prompt terminate promptly when the command is cancelled. */
+const promptWithSignal = async (
+  prompt: Prompt,
+  question: string,
+  signal?: AbortSignal,
+): Promise<string> => {
+  if (signal === undefined) return prompt(question);
+  if (signal.aborted) throw new AttestCliError('cancelled', 'Command cancelled.');
+  return new Promise<string>((resolvePrompt, rejectPrompt) => {
+    const cancel = (): void => rejectPrompt(new AttestCliError('cancelled', 'Command cancelled.'));
+    signal.addEventListener('abort', cancel, { once: true });
+    void prompt(question)
+      .then(resolvePrompt, rejectPrompt)
+      .finally(() => {
+        signal.removeEventListener('abort', cancel);
+      });
   });
 };
 
@@ -154,21 +179,67 @@ const mutationResult = async (
   publishObserver?: PublishObserver,
   renames?: readonly { from: string; to: string; type: 'agent' }[],
   warnings?: readonly string[],
+  confirmation?: {
+    interactive: boolean;
+    nextCommand?: string;
+    prompt?: Prompt;
+    requireExplicit: boolean;
+    yes?: boolean;
+  },
 ): Promise<CommandResult> => {
-  const result = await applyProjectMutation(
-    {
-      candidate,
-      dryRun: request.dry_run,
-      expectedProjectHash: request.if_project_hash,
-      projectRoot: loaded.root,
-      renames,
-      warnings,
-    },
-    { publishObserver },
-  );
+  const apply = (dryRun: boolean) =>
+    applyProjectMutation(
+      {
+        candidate,
+        dryRun,
+        expectedProjectHash: request.if_project_hash,
+        projectRoot: loaded.root,
+        renames,
+        warnings,
+      },
+      { publishObserver },
+    );
+  const preview = await apply(true);
+  const operationLines = preview.diff.operations.map((operation) => {
+    const renamed = operation.previous_id === undefined ? '' : ` from ${operation.previous_id}`;
+    const changes = operation.changes.map(({ path }) => path).join(', ');
+    const references = [
+      ...operation.references_added.map(({ id }) => `+ref:${id}`),
+      ...operation.references_removed.map(({ id }) => `-ref:${id}`),
+    ].join(', ');
+    const details = [changes, references].filter((value) => value.length > 0).join('; ');
+    return `- ${operation.op} ${operation.resource.type} ${operation.resource.id}${renamed}${details.length === 0 ? '' : ` (${details})`}`;
+  });
+  const warningLines = preview.diff.warnings.map((warning) => `Warning: ${warning}`);
+  const previewText = [
+    `${command} ${request.dry_run === true ? 'preview' : 'changes'}:`,
+    ...(operationLines.length === 0 ? ['- no semantic changes'] : operationLines),
+    ...warningLines,
+  ].join('\n');
+  if (request.dry_run !== true && confirmation?.yes !== true) {
+    if (confirmation?.interactive === true && confirmation.prompt !== undefined) {
+      const answer = (
+        await confirmation.prompt(`${previewText}\nApply these changes? [y/N]: `)
+      ).trim();
+      if (!/^y(?:es)?$/iu.test(answer)) {
+        throw new AttestCliError('cancelled', 'Project mutation was not confirmed.');
+      }
+    } else if (confirmation?.requireExplicit === true) {
+      throw new AttestCliError('cli_usage', 'This destructive mutation requires confirmation.', {
+        path: '--yes',
+        hint: 'Review `--dry-run --output json`, then pass `--yes` to apply the exact cascade.',
+        details: { operations: preview.diff.operations as unknown as JsonValue },
+      });
+    }
+  }
+  const result = request.dry_run === true ? preview : await apply(false);
   const verb = request.dry_run === true ? 'would apply' : 'applied';
+  const next =
+    request.dry_run === true || confirmation?.nextCommand === undefined
+      ? ''
+      : `\nNext: ${confirmation.nextCommand}`;
   return {
-    human: `${command} ${verb} ${result.diff.operations.length} operation(s).\nProject hash: ${result.projectHashAfter}`,
+    human: `${previewText}\n${command} ${verb} ${result.diff.operations.length} operation(s).\nProject hash: ${result.projectHashAfter}${next}`,
     projectHashAfter: result.projectHashAfter,
     projectHashBefore: result.projectHashBefore,
     result: {
@@ -176,6 +247,9 @@ const mutationResult = async (
       dry_run: request.dry_run === true,
       operations: result.diff.operations as unknown as JsonValue,
       warnings: result.diff.warnings as unknown as JsonValue,
+      ...(request.dry_run === true || confirmation?.nextCommand === undefined
+        ? {}
+        : { next_command: confirmation.nextCommand }),
     },
   };
 };
@@ -267,6 +341,7 @@ const runAgentAddCommand = async (options: AgentAddCommandOptions): Promise<Comm
   assertSafeNativeAgentResource(request.agent);
   const loaded = await loadCommandProject({
     project: options.project,
+    recover: request.dry_run !== true,
     workingDirectory: options.workingDirectory,
   });
   if (loaded.agents.some(({ id }) => id === request.agent.id)) {
@@ -277,7 +352,22 @@ const runAgentAddCommand = async (options: AgentAddCommandOptions): Promise<Comm
   }
   const candidate = candidateFromLoaded(loaded);
   candidate.agents.push(request.agent);
-  return mutationResult('agent.add', loaded, candidate, request, options.publishObserver);
+  return mutationResult(
+    'agent.add',
+    loaded,
+    candidate,
+    request,
+    options.publishObserver,
+    undefined,
+    undefined,
+    {
+      interactive: options.interactive,
+      nextCommand: `attest agent test ${request.agent.id}`,
+      prompt: options.prompt,
+      requireExplicit: false,
+      yes: request.yes,
+    },
+  );
 };
 
 /** Imports one canonical JSON native agent resource without retaining its source contents. */
@@ -333,7 +423,7 @@ const runAgentImportCommand = async (
   source = await promptRequired(
     source,
     'Agent JSON source',
-    '<path|->',
+    '<path|url|->',
     options.interactive,
     options.prompt,
   );
@@ -353,6 +443,7 @@ const runAgentImportCommand = async (
   );
   const loaded = await loadCommandProject({
     project: options.project,
+    recover: (request?.dry_run ?? options.dryRun) !== true,
     workingDirectory: options.workingDirectory,
   });
   if (loaded.agents.some(({ id }) => id === agent.id)) {
@@ -371,6 +462,15 @@ const runAgentImportCommand = async (
       if_project_hash: request?.if_project_hash ?? options.expectedProjectHash,
     },
     options.publishObserver,
+    undefined,
+    undefined,
+    {
+      interactive: options.interactive,
+      nextCommand: `attest agent test ${agent.id}`,
+      prompt: options.prompt,
+      requireExplicit: false,
+      yes: request?.yes ?? options.yes,
+    },
   );
 };
 
@@ -418,6 +518,7 @@ const runAgentRenameCommand = async (
         );
   const loaded = await loadCommandProject({
     project: options.project,
+    recover: request.dry_run !== true,
     workingDirectory: options.workingDirectory,
   });
   const current = findAgent(loaded.agents, request.agent_id);
@@ -433,9 +534,22 @@ const runAgentRenameCommand = async (
   candidate.tests = candidate.tests.map((test) =>
     test.agent_id === current.id ? { ...test, agent_id: request.new_id } : test,
   );
-  return mutationResult('agent.rename', loaded, candidate, request, options.publishObserver, [
-    { from: request.agent_id, to: request.new_id, type: 'agent' },
-  ]);
+  return mutationResult(
+    'agent.rename',
+    loaded,
+    candidate,
+    request,
+    options.publishObserver,
+    [{ from: request.agent_id, to: request.new_id, type: 'agent' }],
+    undefined,
+    {
+      interactive: options.interactive,
+      nextCommand: `attest agent test ${request.new_id}`,
+      prompt: options.prompt,
+      requireExplicit: false,
+      yes: request.yes,
+    },
+  );
 };
 
 /** Removes an unreferenced agent, or explicitly cascades dependent tests with --detach. */
@@ -476,6 +590,7 @@ const runAgentRemoveCommand = async (
         );
   const loaded = await loadCommandProject({
     project: options.project,
+    recover: request.dry_run !== true,
     workingDirectory: options.workingDirectory,
   });
   findAgent(loaded.agents, request.agent_id);
@@ -504,6 +619,12 @@ const runAgentRemoveCommand = async (
     options.publishObserver,
     undefined,
     warnings,
+    {
+      interactive: options.interactive,
+      prompt: options.prompt,
+      requireExplicit: dependentTests.length > 0,
+      yes: request.yes,
+    },
   );
 };
 
@@ -545,19 +666,20 @@ const readTestInput = async (
   }
 };
 
-/** Probes one native adapter without mutating the project or creating an eval run. */
+/** Probes one native adapter without project writes and records one case only when requested. */
 const runAgentTestCommand = async (options: AgentTestCommandOptions): Promise<CommandResult> => {
   assertNoFromJsonFlags(options.fromJson, {
     'agent-id': options.agentId,
     input: options.input,
     'input-file': options.inputFile,
+    record: options.record,
   });
   if (options.fromJson === '-' && options.inputFile === '-') {
     throw new AttestCliError('cli_usage', 'Command request and test input cannot share stdin.', {
       path: '--input-file',
     });
   }
-  const request =
+  const request: { agent_id: string; input: JsonValue; record?: boolean } =
     options.fromJson === undefined
       ? {
           agent_id: await promptRequired(
@@ -566,6 +688,7 @@ const runAgentTestCommand = async (options: AgentTestCommandOptions): Promise<Co
             '<agent-id>',
             options.interactive,
             options.prompt,
+            options.signal,
           ),
           input: await readTestInput(
             options.input,
@@ -585,17 +708,57 @@ const runAgentTestCommand = async (options: AgentTestCommandOptions): Promise<Co
     workingDirectory: options.workingDirectory,
   });
   const agent = findAgent(loaded.agents, request.agent_id);
-  const result = await testNativeAgentConnection({
-    agent,
-    input: request.input,
-    projectRoot: loaded.root,
-    signal: options.signal,
-  });
+  const record = request.record ?? options.record ?? false;
+  let store: Awaited<ReturnType<typeof openStore>> | undefined;
+  let runId: string | undefined;
+  if (record) {
+    await mkdir(join(loaded.root, '.attest'), { recursive: true });
+    store = await openStore(join(loaded.root, '.attest', 'runs.db'));
+    const run = await store.runs.createRun({
+      configVersion: 'attest.agent-test/v1',
+      configHash: loaded.projectHash,
+      configJson: JSON.stringify({ agent_id: agent.id, project_hash: loaded.projectHash }),
+      labels: { agent_id: agent.id, kind: 'agent-probe' },
+    });
+    runId = run.id;
+  }
+  let result: JsonValue;
+  try {
+    result = await testNativeAgentConnection({
+      agent,
+      input: request.input,
+      onExecution:
+        store === undefined || runId === undefined
+          ? undefined
+          : (execution) => store.runs.recordCase(runId, execution, []),
+      onProgress: options.watch === true ? options.onProgress : undefined,
+      projectRoot: loaded.root,
+      runId,
+      signal: options.signal,
+    });
+    if (store !== undefined && runId !== undefined) {
+      await store.runs.finalizeRun(runId, 'completed');
+    }
+  } catch (error: unknown) {
+    if (store !== undefined && runId !== undefined) {
+      await store.runs.finalizeRun(
+        runId,
+        error instanceof AttestCliError && error.code === 'cancelled' ? 'cancelled' : 'failed',
+      );
+    }
+    throw error;
+  } finally {
+    await store?.close();
+  }
+  const resultWithRecord =
+    runId === undefined
+      ? result
+      : ({ ...(result as Record<string, JsonValue>), recorded_run_id: runId } as JsonValue);
   return {
-    human: `Agent ${agent.id} passed the native connection test.`,
+    human: `Agent ${agent.id} passed the native connection test.${runId === undefined ? '' : `\nRecorded run: ${runId}`}`,
     projectHashAfter: loaded.projectHash,
     projectHashBefore: loaded.projectHash,
-    result,
+    result: resultWithRecord,
   };
 };
 

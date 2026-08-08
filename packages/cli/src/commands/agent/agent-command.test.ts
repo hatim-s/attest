@@ -1,15 +1,26 @@
-import { access, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import {
+  access,
+  chmod,
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  rename,
+  rm,
+  writeFile,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { cliResultSchema } from '@attest/contracts';
+import { cliResultSchema, type AgentResource } from '@attest/contracts';
+import { openStore } from '@attest/core';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { loadProject } from '../../project/load-project.js';
 import { runCli, type CliIo } from '../../run-cli.js';
 import { runAgentAddCommand, runAgentTestCommand } from './agent-command.js';
-import { REDACTED } from './native-agent-adapter.js';
+import { readSecretReference, REDACTED } from './native-agent-adapter.js';
 
 const FIXTURE = fileURLToPath(new URL('./fixtures/native-agent.cjs', import.meta.url));
 const temporaryDirectories: string[] = [];
@@ -102,18 +113,25 @@ describe('CLI2.6 agent authoring', () => {
           prompt: (question) => {
             questions.push(question);
             return Promise.resolve(
-              question.startsWith('Agent id')
-                ? 'guided'
-                : question.startsWith('Transport')
-                  ? 'cli'
-                  : `${process.execPath} ${FIXTURE} echo`,
+              question.includes('Apply these changes?')
+                ? 'yes'
+                : question.startsWith('Agent id')
+                  ? 'guided'
+                  : question.startsWith('Transport')
+                    ? 'cli'
+                    : `${process.execPath} ${FIXTURE} echo`,
             );
           },
           readStdin: () => Promise.resolve(''),
         },
       }),
     ).toBe(0);
-    expect(questions).toEqual(['Agent id: ', 'Transport [cli/http]: ', 'Native command: ']);
+    expect(questions.slice(0, 3)).toEqual([
+      'Agent id: ',
+      'Transport [cli/http]: ',
+      'Native command: ',
+    ]);
+    expect(questions[3]).toContain('Apply these changes? [y/N]');
 
     const request = JSON.stringify({
       schema: 'attest.command-request/v2',
@@ -219,7 +237,17 @@ describe('CLI2.6 agent authoring', () => {
     expect(tested.exitCode).toBe(0);
     expect(JSON.parse(tested.output[0] ?? '{}')).toMatchObject({
       result: {
-        response: { output: { argv: [hostileArgument, '$(false)'], input: { ping: true } } },
+        response: {
+          output: {
+            argv: [hostileArgument, '$(false)'],
+            handshake: {
+              case_id: 'connection-test',
+              protocol: 'attest.agent/v1alpha1',
+              run_id: '01ARZ3NDEKTSV4RRFFQ69G5FAV',
+            },
+            input: { ping: true },
+          },
+        },
       },
     });
     await expect(access(marker)).rejects.toBeDefined();
@@ -460,11 +488,459 @@ describe('CLI2.6 agent authoring', () => {
     expect(JSON.parse(blocked.output[0] ?? '{}')).toMatchObject({
       error: { code: 'project_invalid' },
     });
-    expect(
-      (await run(root, ['agent', 'remove', 'support-v2', '--detach', '--output', 'json'])).exitCode,
-    ).toBe(0);
+    const humanPreview = await run(root, [
+      'agent',
+      'remove',
+      'support-v2',
+      '--detach',
+      '--dry-run',
+    ]);
+    expect(humanPreview.exitCode).toBe(0);
+    expect(humanPreview.output.join('\n')).toContain('Warning: Removed dependent tests: smoke');
+    const beforeCascade = await snapshotTree(root);
+    const confirmationRequired = await run(root, [
+      'agent',
+      'remove',
+      'support-v2',
+      '--detach',
+      '--output',
+      'json',
+    ]);
+    expect(confirmationRequired.exitCode).toBe(2);
+    expect(JSON.parse(confirmationRequired.output[0] ?? '{}')).toMatchObject({
+      error: { code: 'cli_usage', path: '--yes' },
+    });
+    expect(await snapshotTree(root)).toEqual(beforeCascade);
+    const removed = await run(root, [
+      'agent',
+      'remove',
+      'support-v2',
+      '--detach',
+      '--yes',
+      '--output',
+      'json',
+    ]);
+    expect(removed.exitCode).toBe(0);
+    expect(JSON.parse(removed.output[0] ?? '{}')).toMatchObject({
+      result: { warnings: ['Removed dependent tests: smoke'] },
+    });
     await expect(loadProject({ project: root })).resolves.toMatchObject({ agents: [], tests: [] });
   });
+
+  it('accepts common options before the namespace and rejects duplicate positions deterministically', async () => {
+    const root = await createProject();
+    const argv = JSON.stringify([process.execPath, FIXTURE, 'echo']);
+    const prefixed = await run(root, [
+      '--output',
+      'json',
+      '--non-interactive',
+      'agent',
+      'add',
+      'global-position',
+      '--argv-json',
+      argv,
+    ]);
+    expect(prefixed.exitCode).toBe(0);
+    expect(JSON.parse(prefixed.output[0] ?? '{}')).toMatchObject({
+      command: 'agent.add',
+      ok: true,
+    });
+
+    const duplicate = await run(root, [
+      '--output',
+      'json',
+      'agent',
+      'test',
+      'global-position',
+      '--output',
+      'json',
+    ]);
+    expect(duplicate.exitCode).toBe(2);
+    expect(JSON.parse(duplicate.output[0] ?? '{}')).toMatchObject({
+      command: 'agent.test',
+      error: { code: 'cli_usage', path: '--output' },
+    });
+  });
+
+  it('shows a guided semantic preview and defaults confirmation to no', async () => {
+    const root = await createProject();
+    const before = await snapshotTree(root);
+    const questions: string[] = [];
+    const collected = collectIo();
+    const exitCode = await runCli(['agent', 'add'], {
+      interaction: {
+        ci: false,
+        inputIsTTY: true,
+        outputIsTTY: true,
+        prompt: (question) => {
+          questions.push(question);
+          if (question.startsWith('Agent id')) return Promise.resolve('declined');
+          if (question.startsWith('Transport')) return Promise.resolve('cli');
+          if (question.startsWith('Native command')) {
+            return Promise.resolve(`${process.execPath} ${FIXTURE} echo`);
+          }
+          return Promise.resolve('');
+        },
+        readStdin: () => Promise.resolve(''),
+      },
+      io: collected.io,
+      workingDirectory: root,
+    });
+    expect(exitCode).toBe(130);
+    expect(questions.at(-1)).toContain('- add agent declined');
+    expect(questions.at(-1)).toContain('Apply these changes? [y/N]');
+    expect(await snapshotTree(root)).toEqual(before);
+  });
+
+  it('applies declared argv and header redaction policies to every attempt and response', async () => {
+    const root = await createProject();
+    const argvSecret = 's3cr3t-value';
+    const imported: AgentResource = {
+      schema: 'attest.agent/v2',
+      id: 'source',
+      name: 'Redacted CLI',
+      transport: {
+        kind: 'native_cli',
+        lifecycle: 'per_case',
+        argv: [process.execPath, FIXTURE, 'echo', argvSecret],
+      },
+      redaction: { argv_positions: [3] },
+    };
+    await writeFile(join(root, 'redacted-agent.json'), JSON.stringify(imported));
+    expect(
+      (
+        await run(root, [
+          'agent',
+          'import',
+          'redacted-agent.json',
+          '--as',
+          'redacted-cli',
+          '--output',
+          'json',
+        ])
+      ).exitCode,
+    ).toBe(0);
+    const cliProbe = await run(root, ['agent', 'test', 'redacted-cli', '--output', 'json']);
+    expect(cliProbe.output.join('')).not.toContain(argvSecret);
+    expect(cliProbe.output.join('')).toContain(REDACTED);
+
+    const headerSecret = 'opaque-header-value';
+    vi.stubGlobal('fetch', (_url: string, init: RequestInit) =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify({
+            protocol: 'attest.agent/v1alpha1',
+            output: { received: new Headers(init.headers).get('x-opaque') },
+          }),
+          { status: 200 },
+        ),
+      ),
+    );
+    await writeFile(
+      join(root, 'redacted-http.json'),
+      JSON.stringify({
+        schema: 'attest.agent/v2',
+        id: 'source-http',
+        name: 'Redacted HTTP',
+        transport: {
+          kind: 'http',
+          lifecycle: 'external',
+          request: {
+            url: 'https://agent.example/invoke',
+            method: 'POST',
+            headers: { 'X-Opaque': headerSecret },
+          },
+          extraction: { result_pointer: '' },
+        },
+        redaction: { headers: ['x-opaque'] },
+      }),
+    );
+    expect(
+      (
+        await run(root, [
+          'agent',
+          'import',
+          'redacted-http.json',
+          '--as',
+          'redacted-http',
+          '--output',
+          'json',
+        ])
+      ).exitCode,
+    ).toBe(0);
+    const httpProbe = await run(root, ['agent', 'test', 'redacted-http', '--output', 'json']);
+    expect(httpProbe.output.join('')).not.toContain(headerSecret);
+    expect(httpProbe.output.join('')).toContain(REDACTED);
+  });
+
+  it('imports bounded remote JSON while rejecting redirects and authored URL query values', async () => {
+    const root = await createProject();
+    const resource = {
+      schema: 'attest.agent/v2',
+      id: 'remote-source',
+      name: 'Remote',
+      transport: {
+        kind: 'native_cli',
+        lifecycle: 'per_case',
+        argv: [process.execPath, FIXTURE, 'echo'],
+      },
+    };
+    vi.stubGlobal('fetch', (url: string) =>
+      Promise.resolve(
+        url.endsWith('/redirect')
+          ? new Response(null, { status: 302 })
+          : new Response(JSON.stringify(resource), { status: 200 }),
+      ),
+    );
+    expect(
+      (
+        await run(root, [
+          'agent',
+          'import',
+          'https://catalog.example/agent.json',
+          '--as',
+          'remote',
+          '--output',
+          'json',
+        ])
+      ).exitCode,
+    ).toBe(0);
+    const redirected = await run(root, [
+      'agent',
+      'import',
+      'https://catalog.example/redirect',
+      '--as',
+      'redirected',
+      '--output',
+      'json',
+    ]);
+    expect(redirected.exitCode).toBe(2);
+    expect(redirected.output.join('')).not.toContain('catalog.example');
+
+    await writeFile(
+      join(root, 'query.json'),
+      JSON.stringify({
+        ...resource,
+        transport: {
+          kind: 'http',
+          lifecycle: 'external',
+          request: {
+            url: 'https://agent.example/invoke?credential=literal-value',
+            method: 'POST',
+          },
+          extraction: { result_pointer: '' },
+        },
+      }),
+    );
+    const query = await run(root, [
+      'agent',
+      'import',
+      'query.json',
+      '--as',
+      'query-agent',
+      '--output',
+      'json',
+    ]);
+    expect(query.exitCode).toBe(1);
+    expect(query.output.join('')).not.toContain('literal-value');
+  });
+
+  it('rejects unsupported native policies and emits ordered redacted retry evidence', async () => {
+    const root = await createProject();
+    await writeFile(
+      join(root, 'policy.json'),
+      JSON.stringify({
+        schema: 'attest.agent/v2',
+        id: 'source-policy',
+        name: 'Policy',
+        transport: {
+          kind: 'http',
+          lifecycle: 'external',
+          request: { url: 'https://agent.example/invoke', method: 'POST' },
+          extraction: { result_pointer: '' },
+        },
+        timeouts: { connect_ms: 10 },
+      }),
+    );
+    const unsupported = await run(root, [
+      'agent',
+      'import',
+      'policy.json',
+      '--as',
+      'unsupported-policy',
+      '--output',
+      'json',
+    ]);
+    expect(unsupported.exitCode).toBe(1);
+    expect(JSON.parse(unsupported.output[0] ?? '{}')).toMatchObject({
+      error: { code: 'project_invalid', path: '/agent/timeouts/connect_ms' },
+    });
+
+    await writeFile(
+      join(root, 'retry.json'),
+      JSON.stringify({
+        schema: 'attest.agent/v2',
+        id: 'source-retry',
+        name: 'Retry',
+        transport: {
+          kind: 'http',
+          lifecycle: 'external',
+          request: { url: 'https://agent.example/retry', method: 'POST' },
+          extraction: { result_pointer: '' },
+        },
+        retry: { retries: 1, backoff: { kind: 'none' } },
+      }),
+    );
+    expect(
+      (
+        await run(root, [
+          'agent',
+          'import',
+          'retry.json',
+          '--as',
+          'retry-agent',
+          '--output',
+          'json',
+        ])
+      ).exitCode,
+    ).toBe(0);
+    let attempt = 0;
+    vi.stubGlobal('fetch', () => {
+      attempt += 1;
+      return Promise.resolve(
+        attempt === 1
+          ? new Response('temporary', { status: 503 })
+          : new Response(
+              JSON.stringify({ protocol: 'attest.agent/v1alpha1', output: { ok: true } }),
+              { status: 200 },
+            ),
+      );
+    });
+    const retried = await run(root, ['agent', 'test', 'retry-agent', '--output', 'json']);
+    expect(JSON.parse(retried.output[0] ?? '{}')).toMatchObject({
+      result: {
+        attempt_count: 2,
+        attempts: [
+          { attempt: 1, invocation_code: 'http_status', status: 'invocation_error' },
+          { attempt: 2, status: 'ok' },
+        ],
+      },
+    });
+  });
+
+  it('cancels a pending guided test prompt and detects secret-file path replacement', async () => {
+    const root = await createProject();
+    const controller = new AbortController();
+    const pending = runAgentTestCommand({
+      interactive: true,
+      project: root,
+      prompt: () => new Promise<string>(() => undefined),
+      readStdin: () => Promise.resolve(''),
+      signal: controller.signal,
+      workingDirectory: root,
+    });
+    controller.abort();
+    await expect(pending).rejects.toMatchObject({ code: 'cancelled' });
+
+    const secretPath = join(root, 'secret.txt');
+    const originalPath = join(root, 'secret-original.txt');
+    await writeFile(secretPath, 'trusted-secret');
+    await chmod(secretPath, 0o600);
+    const read = readSecretReference({ from_file: 'secret.txt' }, root, async () => {
+      await rename(secretPath, originalPath);
+      await writeFile(secretPath, 'foreign-secret');
+      await chmod(secretPath, 0o600);
+    });
+    await expect(read).rejects.toMatchObject({ code: 'invocation_failed' });
+  });
+
+  it('keeps recovery dry-runs byte-identical and makes watch and record explicitly opt in', async () => {
+    const root = await createProject();
+    const argv = JSON.stringify([process.execPath, FIXTURE, 'echo']);
+    expect(
+      (await run(root, ['agent', 'add', 'probe', '--argv-json', argv, '--output', 'json']))
+        .exitCode,
+    ).toBe(0);
+    await writeFile(
+      join(root, 'dry-import.json'),
+      JSON.stringify({
+        schema: 'attest.agent/v2',
+        id: 'source',
+        name: 'Dry import',
+        transport: {
+          kind: 'native_cli',
+          lifecycle: 'per_case',
+          argv: [process.execPath, FIXTURE, 'echo'],
+        },
+      }),
+    );
+    await mkdir(join(root, '.attest', 'transactions', 'prepared'), { recursive: true });
+    await writeFile(join(root, '.attest', 'transactions', 'prepared', 'journal.json'), '{}');
+    const before = await snapshotTree(root);
+    const dryCommands = [
+      ['agent', 'add', 'new-agent', '--argv-json', argv],
+      ['agent', 'import', 'dry-import.json', '--as', 'imported-dry'],
+      ['agent', 'rename', 'probe', 'probe-v2'],
+      ['agent', 'remove', 'probe'],
+    ];
+    for (const command of dryCommands) {
+      const dryRun = await run(root, [...command, '--dry-run', '--output', 'json']);
+      expect(dryRun.exitCode).toBe(3);
+      expect(JSON.parse(dryRun.output[0] ?? '{}')).toMatchObject({
+        error: { code: 'project_recovery_required' },
+      });
+      expect(await snapshotTree(root)).toEqual(before);
+    }
+    await rm(join(root, '.attest', 'transactions'), { recursive: true });
+    await expect(access(join(root, '.attest', 'runs.db'))).rejects.toBeDefined();
+
+    const jsonWatch = await run(root, ['agent', 'test', 'probe', '--watch', '--output', 'json']);
+    expect(jsonWatch.exitCode).toBe(2);
+    expect(JSON.parse(jsonWatch.output[0] ?? '{}')).toMatchObject({
+      error: { code: 'cli_usage' },
+    });
+
+    const watched = collectIo();
+    expect(
+      await runCli(['agent', 'test', 'probe', '--watch'], {
+        interaction: {
+          ci: false,
+          inputIsTTY: true,
+          outputIsTTY: true,
+          prompt: () => Promise.reject(new Error('prompt must not be called')),
+          readStdin: () => Promise.resolve(''),
+        },
+        io: watched.io,
+        workingDirectory: root,
+      }),
+    ).toBe(0);
+    expect(watched.errors).toEqual(['Testing agent probe...', 'Agent probe completed.']);
+    await expect(access(join(root, '.attest', 'runs.db'))).rejects.toBeDefined();
+
+    const recorded = await run(root, ['agent', 'test', 'probe', '--record', '--output', 'json']);
+    expect(recorded.exitCode).toBe(0);
+    const recordedDocument = JSON.parse(recorded.output[0] ?? '{}') as {
+      result: { recorded_run_id: string };
+    };
+    const store = await openStore(join(root, '.attest', 'runs.db'));
+    await expect(store.runs.getRun(recordedDocument.result.recorded_run_id)).resolves.toMatchObject(
+      {
+        status: 'completed',
+        labels: { agent_id: 'probe', kind: 'agent-probe' },
+      },
+    );
+    await expect(
+      store.runs.getCaseResults(recordedDocument.result.recorded_run_id),
+    ).resolves.toMatchObject([
+      {
+        caseId: 'connection-test',
+        outcome: 'completed',
+        request: { run_id: recordedDocument.result.recorded_run_id },
+        suiteName: 'agent:probe',
+      },
+    ]);
+    await store.close();
+  }, 15_000);
 
   it('publishes deterministic JSON help and versioned results for every agent command', async () => {
     const root = await createProject();

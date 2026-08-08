@@ -111,6 +111,7 @@ const agentTestRequestSchema = z.strictObject({
   command: z.literal('agent.test'),
   agent_id: resourceIdSchema,
   input: z.json(),
+  record: z.boolean().optional(),
 });
 
 const testAddRequestSchema = z.strictObject({

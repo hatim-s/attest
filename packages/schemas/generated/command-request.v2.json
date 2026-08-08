@@ -2575,6 +2575,9 @@
         "input": {
           "$ref": "#/$defs/__schema5"
         },
+        "record": {
+          "type": "boolean"
+        },
         "schema": {
           "const": "attest.command-request/v2",
           "type": "string"

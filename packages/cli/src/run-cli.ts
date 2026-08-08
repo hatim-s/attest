@@ -135,8 +135,12 @@ const createProgram = (
   const packageMetadata = require('../package.json') as PackageMetadata;
   const program = new Command()
     .name('attest')
+    .enablePositionalOptions()
     .description('Run reproducible evaluations for CLI and HTTP AI agents.')
     .version(packageMetadata.version)
+    .option('--project <dir>', 'explicit Attest project directory')
+    .addOption(new Option('--output <format>', 'output format').choices(['human', 'json']))
+    .option('--non-interactive', 'disable prompts and fail when required input is missing')
     .showHelpAfterError()
     .exitOverride()
     .configureOutput({
@@ -271,9 +275,20 @@ const createProgram = (
         .choices(['human', 'json'])
         .default('human'),
     )
-    .action((commandPath: string[], options: ProtocolCommandOptions) => {
+    .action((commandPath: string[], options: ProtocolCommandOptions, action: Command) => {
       const help = createCliHelp(program, commandPath);
-      const output = options.output;
+      if (
+        program.getOptionValueSource('output') === 'cli' &&
+        action.getOptionValueSource('output') === 'cli'
+      ) {
+        throw new AttestCliError('cli_usage', 'Common option --output was provided twice.', {
+          path: '--output',
+        });
+      }
+      const output =
+        program.getOptionValueSource('output') === 'cli'
+          ? (program.opts<ProtocolCommandOptions>().output ?? options.output)
+          : options.output;
       io.output(
         output === 'json'
           ? serializeCliResult(createCliSuccessResult('help', help))
@@ -293,9 +308,20 @@ const createProgram = (
         .choices(['human', 'json'])
         .default('human'),
     )
-    .action((options: ProtocolCommandOptions) => {
+    .action((options: ProtocolCommandOptions, action: Command) => {
       const catalog = createCliErrorCatalog();
-      const output = options.output;
+      if (
+        program.getOptionValueSource('output') === 'cli' &&
+        action.getOptionValueSource('output') === 'cli'
+      ) {
+        throw new AttestCliError('cli_usage', 'Common option --output was provided twice.', {
+          path: '--output',
+        });
+      }
+      const output =
+        program.getOptionValueSource('output') === 'cli'
+          ? (program.opts<ProtocolCommandOptions>().output ?? options.output)
+          : options.output;
       io.output(
         output === 'json'
           ? serializeCliResult(createCliSuccessResult('errors', catalog))
@@ -349,8 +375,24 @@ const requestedStructuredOutput = (argv: readonly string[]): boolean => {
 };
 
 const requestedCommand = (argv: readonly string[]): string => {
-  const first = argv[0];
-  const second = argv[1];
+  const commandArguments: string[] = [];
+  for (let index = 0; index < argv.length; index += 1) {
+    const argument = argv[index]!;
+    if (commandArguments.length === 0 && argument === '--non-interactive') continue;
+    if (commandArguments.length === 0 && (argument === '--project' || argument === '--output')) {
+      index += 1;
+      continue;
+    }
+    if (
+      commandArguments.length === 0 &&
+      (argument.startsWith('--project=') || argument.startsWith('--output='))
+    ) {
+      continue;
+    }
+    commandArguments.push(argument);
+  }
+  const first = commandArguments[0];
+  const second = commandArguments[1];
   if (first === undefined || first.startsWith('-')) {
     return 'cli';
   }
