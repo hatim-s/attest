@@ -8,6 +8,8 @@ import {
 } from './agent-resource-v2.js';
 import { testCaseSchema } from './case-v2.js';
 import { datasetImportMappingSchema, datasetResourceSchema } from './dataset-resource-v2.js';
+import { evalCancelRequestSchema } from './eval-cancel-v1.js';
+import { evalRunRequestSchema } from './eval-run-v1.js';
 import { metricResourceSchema } from './metric-resource-v2.js';
 import { testResourceSchema } from './test-resource-v2.js';
 import {
@@ -329,6 +331,8 @@ const commandRequestSchema = z.union([
   metricTestRequestSchema,
   metricRenameRequestSchema,
   metricRemoveRequestSchema,
+  evalRunRequestSchema,
+  evalCancelRequestSchema,
 ]);
 
 type CaseImportOptions = z.infer<typeof caseImportOptionsSchema>;

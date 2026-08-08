@@ -3861,6 +3861,314 @@
         "metric_id"
       ],
       "type": "object"
+    },
+    {
+      "anyOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "baseline_run_id": {
+              "format": "ulid",
+              "pattern": "^[0-9A-HJKMNP-TV-Za-hjkmnp-tv-z]{26}$",
+              "type": "string"
+            },
+            "case_ids": {
+              "items": {
+                "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+                "type": "string"
+              },
+              "minItems": 1,
+              "type": "array"
+            },
+            "command": {
+              "const": "eval.run",
+              "type": "string"
+            },
+            "concurrency": {
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991,
+              "type": "integer"
+            },
+            "junit_path": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "output": {
+              "const": "human",
+              "type": "string"
+            },
+            "schema": {
+              "const": "attest.command-request/v2",
+              "type": "string"
+            },
+            "tags": {
+              "items": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "minItems": 1,
+              "type": "array"
+            },
+            "test_ids": {
+              "items": {
+                "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+                "type": "string"
+              },
+              "minItems": 1,
+              "type": "array"
+            },
+            "timeout_ms": {
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991,
+              "type": "integer"
+            },
+            "watch": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "schema",
+            "command",
+            "test_ids",
+            "output"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "baseline_run_id": {
+              "format": "ulid",
+              "pattern": "^[0-9A-HJKMNP-TV-Za-hjkmnp-tv-z]{26}$",
+              "type": "string"
+            },
+            "case_ids": {
+              "items": {
+                "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+                "type": "string"
+              },
+              "minItems": 1,
+              "type": "array"
+            },
+            "command": {
+              "const": "eval.run",
+              "type": "string"
+            },
+            "concurrency": {
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991,
+              "type": "integer"
+            },
+            "junit_path": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "output": {
+              "enum": [
+                "json",
+                "jsonl"
+              ],
+              "type": "string"
+            },
+            "schema": {
+              "const": "attest.command-request/v2",
+              "type": "string"
+            },
+            "tags": {
+              "items": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "minItems": 1,
+              "type": "array"
+            },
+            "test_ids": {
+              "items": {
+                "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+                "type": "string"
+              },
+              "minItems": 1,
+              "type": "array"
+            },
+            "timeout_ms": {
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "schema",
+            "command",
+            "test_ids",
+            "output"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "all": {
+              "const": true,
+              "type": "boolean"
+            },
+            "baseline_run_id": {
+              "format": "ulid",
+              "pattern": "^[0-9A-HJKMNP-TV-Za-hjkmnp-tv-z]{26}$",
+              "type": "string"
+            },
+            "case_ids": {
+              "items": {
+                "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+                "type": "string"
+              },
+              "minItems": 1,
+              "type": "array"
+            },
+            "command": {
+              "const": "eval.run",
+              "type": "string"
+            },
+            "concurrency": {
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991,
+              "type": "integer"
+            },
+            "junit_path": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "output": {
+              "const": "human",
+              "type": "string"
+            },
+            "schema": {
+              "const": "attest.command-request/v2",
+              "type": "string"
+            },
+            "tags": {
+              "items": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "minItems": 1,
+              "type": "array"
+            },
+            "timeout_ms": {
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991,
+              "type": "integer"
+            },
+            "watch": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "schema",
+            "command",
+            "all",
+            "output"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "all": {
+              "const": true,
+              "type": "boolean"
+            },
+            "baseline_run_id": {
+              "format": "ulid",
+              "pattern": "^[0-9A-HJKMNP-TV-Za-hjkmnp-tv-z]{26}$",
+              "type": "string"
+            },
+            "case_ids": {
+              "items": {
+                "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+                "type": "string"
+              },
+              "minItems": 1,
+              "type": "array"
+            },
+            "command": {
+              "const": "eval.run",
+              "type": "string"
+            },
+            "concurrency": {
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991,
+              "type": "integer"
+            },
+            "junit_path": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "output": {
+              "enum": [
+                "json",
+                "jsonl"
+              ],
+              "type": "string"
+            },
+            "schema": {
+              "const": "attest.command-request/v2",
+              "type": "string"
+            },
+            "tags": {
+              "items": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "minItems": 1,
+              "type": "array"
+            },
+            "timeout_ms": {
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "schema",
+            "command",
+            "all",
+            "output"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    {
+      "additionalProperties": false,
+      "properties": {
+        "command": {
+          "const": "eval.cancel",
+          "type": "string"
+        },
+        "output": {
+          "enum": [
+            "human",
+            "json"
+          ],
+          "type": "string"
+        },
+        "run_id": {
+          "format": "ulid",
+          "pattern": "^[0-9A-HJKMNP-TV-Za-hjkmnp-tv-z]{26}$",
+          "type": "string"
+        },
+        "schema": {
+          "const": "attest.command-request/v2",
+          "type": "string"
+        }
+      },
+      "required": [
+        "schema",
+        "command",
+        "run_id",
+        "output"
+      ],
+      "type": "object"
     }
   ]
 }

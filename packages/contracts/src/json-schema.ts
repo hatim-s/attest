@@ -12,6 +12,9 @@ import {
 import { commandRequestSchema } from './command-request-v2.js';
 import { configSchema } from './config.js';
 import { datasetResourceSchema } from './dataset-resource-v2.js';
+import { evalCancelRequestSchema, evalCancelResultSchema } from './eval-cancel-v1.js';
+import { evalEventSchema } from './eval-event-v1.js';
+import { evalRunRequestSchema, evalRunSchema } from './eval-run-v1.js';
 import { metricRequestSchema, metricResultSchema } from './metric.js';
 import { jsonlBridgeInputSchema, jsonlBridgeOutputSchema } from './managed-transport-v1.js';
 import { metricResourceSchema } from './metric-resource-v2.js';
@@ -139,6 +142,20 @@ const CONTRACT_JSON_SCHEMAS = new Map<string, ContractJsonSchemaDefinition>([
     { schema: metricTestFixtureSchema, invariants: noAdditionalInvariants },
   ],
   ['command-request.v2.json', { schema: commandRequestSchema, invariants: v2RuntimeInvariants }],
+  [
+    'eval-run-request.v2.json',
+    { schema: evalRunRequestSchema, invariants: noAdditionalInvariants },
+  ],
+  ['eval-run.v1.json', { schema: evalRunSchema, invariants: noAdditionalInvariants }],
+  ['eval-event.v1.json', { schema: evalEventSchema, invariants: noAdditionalInvariants }],
+  [
+    'eval-cancel-request.v2.json',
+    { schema: evalCancelRequestSchema, invariants: noAdditionalInvariants },
+  ],
+  [
+    'eval-cancel-result.v1.json',
+    { schema: evalCancelResultSchema, invariants: noAdditionalInvariants },
+  ],
   ['cli-result.v1.json', { schema: cliResultSchema, invariants: noAdditionalInvariants }],
   ['cli-event.v1.json', { schema: cliEventSchema, invariants: noAdditionalInvariants }],
   ['cli-help.v1.json', { schema: cliHelpSchema, invariants: noAdditionalInvariants }],
