@@ -226,6 +226,27 @@ describe('loadProject', () => {
     expect((failure as Error).message).not.toContain('DO-NOT-LEAK');
   });
 
+  it('rejects a v1-shaped manifest with the stable breaking-v2 diagnostic', async () => {
+    const root = await createTemporaryDirectory();
+    await writeProjectFile(
+      root,
+      'attest.project.json',
+      JSON.stringify({ config_version: 1, agent: {}, suites: [], metrics: [] }),
+    );
+
+    const failure = await captureProjectFailure(() => loadProject({ project: root }));
+
+    expect(failure).toMatchObject({
+      code: 'project_invalid',
+      message: 'Attest v2 does not execute v1 configuration or project inputs.',
+      hint: 'Create a v2 project with `attest project init`; use `attest eval run` as the only execution command.',
+      path: 'attest.project.json',
+    });
+    expect(failure.diagnostics).toEqual([
+      expect.objectContaining({ code: 'legacy_v1', source: 'attest.project.json' }),
+    ]);
+  });
+
   it('rejects manifest traversal before reading outside the project', async () => {
     const root = await createTemporaryDirectory();
     const manifest = await writeValidProject(root);

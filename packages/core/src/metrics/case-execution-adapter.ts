@@ -1,4 +1,4 @@
-import type { AgentResponse, CaseDefinition, CaseOutcome, Trace } from '@attest/contracts';
+import type { AgentResponse, CaseOutcome, TestCase, Trace } from '@attest/contracts';
 
 import type { MetricContext } from './metric-evaluation.js';
 
@@ -22,7 +22,7 @@ class CaseExecutionAdapterError extends Error {
 
 /** Maps the runner's terminal case shape to the narrow context every metric consumes. */
 const caseExecutionToMetricContext = (
-  caseDefinition: CaseDefinition,
+  caseDefinition: TestCase,
   execution: CaseExecutionView,
 ): MetricContext => {
   const trace = execution.trace ?? null;

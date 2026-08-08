@@ -7,7 +7,6 @@ import {
   AGENT_PROTOCOL,
   type AgentRequest,
   type AgentResource,
-  type AgentTarget,
   type JsonValue,
   type SecretReference,
 } from '@attest/contracts';
@@ -24,6 +23,7 @@ import {
   type HttpAgentResource,
   type InvocationResult,
   type JsonlBridgeAgentResource,
+  type NativeAgentTarget,
   type StoredCaseExecution,
   type StoredAttempt,
   type StreamAgentResource,
@@ -62,7 +62,7 @@ type ResolvedNativeAgent = {
   mappedAgent?: HttpAgentResource;
   secrets: string[];
   streamAgent?: StreamAgentResource;
-  target?: AgentTarget;
+  target?: NativeAgentTarget;
   webSocketAgent?: WebSocketAgentResource;
   webSocketHeaders?: Record<string, string>;
 };

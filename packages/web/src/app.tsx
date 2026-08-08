@@ -108,7 +108,7 @@ const Dashboard = () => {
               <p className="eyebrow">Ready</p>
               <h1>Run your first evaluation</h1>
               <p>
-                Use <code>attest run</code>, then this view will update automatically.
+                Use <code>attest eval run</code>, then this view will update automatically.
               </p>
             </Card>
           ) : null}

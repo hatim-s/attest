@@ -15,7 +15,7 @@ The contracts are the product; everything else is replaceable.
 
 ## Phase 1 — Core Runtime (week 2–6)
 
-- [ ] Runner: load config → invoke agent (CLI + HTTP) per case → collect outputs/traces; parallelism, timeouts, retries, caching.
+- [ ] Runner: resolve a v2 project → invoke its agent per case → collect outputs/traces; parallelism, timeouts, retries, caching.
 - [ ] Deterministic metrics: declarative assertions engine.
 - [ ] Executable-contract custom metrics.
 - [ ] LLM-judge metrics (BYO keys; Anthropic + OpenAI first), with judge prompt templates for common rubrics.

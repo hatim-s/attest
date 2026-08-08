@@ -1,4 +1,4 @@
-import type { AgentRequest, AgentTarget, RawExcerpt } from '@attest/contracts';
+import type { AgentRequest, RawExcerpt } from '@attest/contracts';
 import type { ChildProcess } from 'node:child_process';
 import { createHash, type Hash } from 'node:crypto';
 import { mkdir, mkdtemp, rm } from 'node:fs/promises';
@@ -15,7 +15,12 @@ import {
   type ProcessIdentity,
 } from './internal/process-tree.js';
 import { resolveInvocationEnv } from './request.js';
-import type { InvocationAttempt, InvocationDiagnostics, InvokeOptions } from './types.js';
+import type {
+  InvocationAttempt,
+  InvocationDiagnostics,
+  InvokeOptions,
+  NativeAgentTarget,
+} from './types.js';
 
 const STDERR_EXCERPT_BYTES = 4096;
 const RAW_EXCERPT_CHARACTERS = 4096;
@@ -262,7 +267,7 @@ const sweepProcessTree = async (
  * system temporary parent. Every seam-provided parent still receives a unique attempt directory.
  */
 const invokeCliAgent = async (
-  target: Extract<AgentTarget, { type: 'cli' }>,
+  target: Extract<NativeAgentTarget, { type: 'cli' }>,
   request: AgentRequest,
   options: CliInvokeOptions,
 ): Promise<InvocationAttempt> => {

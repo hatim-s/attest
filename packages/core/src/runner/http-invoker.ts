@@ -1,10 +1,10 @@
-import type { AgentRequest, AgentTarget } from '@attest/contracts';
+import type { AgentRequest } from '@attest/contracts';
 import { createHash } from 'node:crypto';
 
 import { AgentInvocationError } from './errors.js';
 import { startTimer } from './internal/elapsed.js';
 import { createRawExcerpt } from './internal/raw-excerpt.js';
-import type { InvocationAttempt, InvokeOptions } from './types.js';
+import type { InvocationAttempt, InvokeOptions, NativeAgentTarget } from './types.js';
 
 const HTTP_SUCCESS_STATUS = 200;
 const RAW_EXCERPT_CHARACTERS = 4096;
@@ -184,7 +184,7 @@ const classifyFetchFailure = (error: unknown, options: InvokeOptions): AgentInvo
  * never retried, preventing request envelopes from being forwarded to an unconfigured endpoint.
  */
 const invokeHttpAgent = async (
-  target: Extract<AgentTarget, { type: 'http' }>,
+  target: Extract<NativeAgentTarget, { type: 'http' }>,
   request: AgentRequest,
   options: InvokeOptions,
 ): Promise<InvocationAttempt> => {

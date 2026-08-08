@@ -29,4 +29,9 @@ export {
   type WebSocketAgentResource,
   type WebSocketSessionOptions,
 } from './adapters/websocket/index.js';
-export { type CaseExecution, type InvokeAgentOptions, type InvocationResult } from './types.js';
+export {
+  type CaseExecution,
+  type InvokeAgentOptions,
+  type InvocationResult,
+  type NativeAgentTarget,
+} from './types.js';

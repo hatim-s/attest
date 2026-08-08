@@ -301,6 +301,50 @@ describe('runCli', () => {
     });
   });
 
+  it('renders the same breaking-v2 rejection in human and JSON modes without writes', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'attest-cli-v1-rejection-'));
+    temporaryDirectories.push(directory);
+    await writeFile(join(directory, 'attest.config.yml'), 'config_version: 1\n');
+    const humanOutput: string[] = [];
+    const humanErrors: string[] = [];
+
+    expect(
+      await runCli(['eval', 'run', '--all'], {
+        workingDirectory: directory,
+        io: {
+          output: (message) => humanOutput.push(message),
+          error: (message) => humanErrors.push(message),
+        },
+      }),
+    ).toBe(1);
+    expect(humanOutput).toEqual(['Result: ERROR (exit 1)']);
+    expect(humanErrors.join('\n')).toBe(
+      'project_not_found: Attest v2 does not execute v1 configuration or project inputs.\n' +
+        'Path: attest.config.yml\n' +
+        'Hint: Create a v2 project with `attest project init`; use `attest eval run` as the only execution command.',
+    );
+
+    const jsonOutput: string[] = [];
+    expect(
+      await runCli(['eval', 'run', '--all', '--output', 'json'], {
+        workingDirectory: directory,
+        io: { output: (message) => jsonOutput.push(message), error: () => undefined },
+      }),
+    ).toBe(1);
+    expect(JSON.parse(jsonOutput[0] ?? '{}')).toMatchObject({
+      ok: false,
+      command: 'eval.run',
+      error: {
+        code: 'project_not_found',
+        message: 'Attest v2 does not execute v1 configuration or project inputs.',
+        hint: 'Create a v2 project with `attest project init`; use `attest eval run` as the only execution command.',
+      },
+    });
+    await expect(readFile(join(directory, '.attest', 'runs.db'), 'utf8')).rejects.toMatchObject({
+      code: 'ENOENT',
+    });
+  });
+
   it('keeps legacy output options scoped to their established artifact and format semantics', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'attest-cli-output-'));
     temporaryDirectories.push(directory);

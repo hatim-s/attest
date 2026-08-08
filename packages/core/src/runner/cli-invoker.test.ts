@@ -1,4 +1,4 @@
-import type { AgentRequest, AgentTarget } from '@attest/contracts';
+import type { AgentRequest } from '@attest/contracts';
 import { access, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { invokeCliAgent } from './cli-invoker.js';
+import type { NativeAgentTarget } from './types.js';
 import {
   acquireFixtureProcessSweepLock,
   sweepFixtureProcesses,
@@ -45,19 +46,19 @@ const request: AgentRequest = {
   input: { question: 'hello' },
 };
 
-const createCanonicalTarget = (behavior: string): Extract<AgentTarget, { type: 'cli' }> => ({
+const createCanonicalTarget = (behavior: string): Extract<NativeAgentTarget, { type: 'cli' }> => ({
   type: 'cli',
   command: [process.execPath, CANONICAL_AGENT_PATH, `--behavior=${behavior}`],
 });
 
 const createPrivateFixtureTarget = (
   fixtureName: string,
-): Extract<AgentTarget, { type: 'cli' }> => ({
+): Extract<NativeAgentTarget, { type: 'cli' }> => ({
   type: 'cli',
   command: [process.execPath, join(PRIVATE_FIXTURE_DIRECTORY, fixtureName)],
 });
 
-const createInlineTarget = (program: string): Extract<AgentTarget, { type: 'cli' }> => ({
+const createInlineTarget = (program: string): Extract<NativeAgentTarget, { type: 'cli' }> => ({
   type: 'cli',
   command: [process.execPath, '-e', program],
 });
@@ -177,7 +178,7 @@ const parseStderrProcessId = (stderrExcerpt: string | undefined): number => {
  * behavior intentionally lets its detached child outlive a normal parent exit; holding the
  * parent open makes that same behavior exercise timeout-tree cleanup without a duplicate fixture.
  */
-const createCanonicalOrphanTimeoutTarget = (): Extract<AgentTarget, { type: 'cli' }> => {
+const createCanonicalOrphanTimeoutTarget = (): Extract<NativeAgentTarget, { type: 'cli' }> => {
   const wrapperProgram = `const originalWrite = process.stdout.write.bind(process.stdout); process.stdout.write = (...argumentsList) => { const result = originalWrite(...argumentsList); setInterval(() => undefined, 60000); return result; }; require(process.argv[1]);`;
   return {
     type: 'cli',
@@ -497,7 +498,7 @@ describe('invokeCliAgent', { timeout: TEST_TIMEOUT_MS }, () => {
   });
 
   it('returns spawn_failed when the executable does not exist', async () => {
-    const target: Extract<AgentTarget, { type: 'cli' }> = {
+    const target: Extract<NativeAgentTarget, { type: 'cli' }> = {
       type: 'cli',
       command: [join(PRIVATE_FIXTURE_DIRECTORY, 'missing-agent.cjs')],
     };

@@ -66,8 +66,7 @@ const evaluateRegexCheck = (check: RegexCheck, document: EvaluationDocument): Ch
     return { passed: false, reason: `regex target at ${check.path} must be a string` };
   }
 
-  // Catastrophic backtracking can block the event loop. Patterns are the user's trusted v1 config (STACK.md);
-  // a linear-engine option is deliberately tracked in the PLAN backlog rather than changing v1 semantics here.
+  // Catastrophic backtracking can block the event loop, so authored metric patterns run behind a guard.
   const outcome = executeGuardedRegexTest({
     pattern: check.pattern,
     flags: check.flags,

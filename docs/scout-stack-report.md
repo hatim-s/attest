@@ -63,11 +63,7 @@ Bind only to `127.0.0.1`, require an unguessable session token for writes, valid
 
 ## 5. Config format
 
-**Recommendation: YAML as the documented authoring format, JSON as an exactly equivalent accepted format; reject TOML and typed DSLs in v1.** YAML fits nested suites and multiline prompts, while JSON preserves machine generation and gives JSON Schema a natural canonical model without forcing users to install Pkl or CUE.
-
-Publish a Draft 2020-12 JSON Schema and require a top-level `config_version`. Validation should reject unknown fields, aggregate errors with source locations, and run before any agent process starts.
-
-For UI editing, use a comment-aware concrete-syntax tree and patch only the selected nodes; never decode and re-emit the whole document. Preserve comments, ordering, quote style, and untouched byte ranges, reject writable YAML anchors/merge keys, use atomic rename, and refuse the write if the file changed since it was loaded. Golden round-trip tests are mandatory.
+**Current direction: generated JSON resources plus JSONL datasets are the canonical authored format.** Draft 2020-12 JSON Schemas reject unknown fields, aggregate errors with source locations, and run before any agent process starts. Transactional writes use canonical hashes, atomic publication, and stale-project protection.
 
 ## 6. Trace schema
 
@@ -113,7 +109,7 @@ The public root should contain `LICENSE`, `NOTICE`, dependency attribution, an S
 The test pyramid should include:
 
 - Pure unit/property tests for assertions, thresholds, diff classification, hashing, retries, and redaction.
-- Golden conformance fixtures for config, agent, metric, trace, JUnit, and report contracts.
+- Golden conformance fixtures for project resources, agent, metric, trace, JUnit, and report contracts.
 - Fake CLI and HTTP agents covering hangs, malformed output, huge output, partial stdout, stderr, non-zero exit, child processes, retries, and cancellation.
 - SQLite crash/reopen and migration tests.
 - Fuzzing for parsers, trace ingestion, and diffing.
@@ -130,7 +126,7 @@ Do not sandbox arbitrary executables in v1: declare agents and custom metrics tr
 
 Prototype these before broad implementation:
 
-1. A vertical slice: config → concurrent CLI/HTTP execution → SQLite → diff → single-file report.
+1. A vertical slice: v2 project → concurrent agent execution → SQLite → diff → single-file report.
 2. Cross-platform timeout and process-tree termination.
 3. Lossless YAML edits under comments, multiline strings, and concurrent file modification.
 4. A large traced run rendered from both localhost and self-contained HTML.

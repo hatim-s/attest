@@ -62,12 +62,18 @@ describe('discoverProject', () => {
     ).rejects.toMatchObject({ code: 'project_not_found' });
   });
 
-  it('does not treat a legacy v1 config as a v2 project', async () => {
-    const root = await createTemporaryDirectory();
-    await writeFile(join(root, 'attest.config.json'), '{}');
+  it.each(['attest.config.json', 'attest.config.yaml', 'attest.config.yml'])(
+    'rejects legacy v1 config %s with stable migration guidance',
+    async (fileName) => {
+      const root = await createTemporaryDirectory();
+      await writeFile(join(root, fileName), 'config_version: 1');
 
-    await expect(discoverProject({ workingDirectory: root })).rejects.toMatchObject({
-      code: 'project_not_found',
-    });
-  });
+      await expect(discoverProject({ workingDirectory: root })).rejects.toMatchObject({
+        code: 'project_not_found',
+        message: 'Attest v2 does not execute v1 configuration or project inputs.',
+        hint: 'Create a v2 project with `attest project init`; use `attest eval run` as the only execution command.',
+        path: fileName,
+      });
+    },
+  );
 });

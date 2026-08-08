@@ -1,4 +1,4 @@
-import type { CaseDefinition, JsonValue, MetricResult, Trace } from '@attest/contracts';
+import type { JsonValue, MetricResult, TestCase, Trace } from '@attest/contracts';
 
 /** Defines the stable error vocabulary shared by metric evaluation and persistence. */
 const METRIC_ERROR_CODES = [
@@ -33,7 +33,7 @@ type MetricExecutionView =
     };
 
 /** Carries only the case and execution data needed to build the spec evaluation document. */
-type MetricContext = { caseDefinition: CaseDefinition; execution: MetricExecutionView };
+type MetricContext = { caseDefinition: TestCase; execution: MetricExecutionView };
 
 /** Preserves actionable, diffable metric errors separately from assertion failures per spec §Errors vs failures. */
 type MetricErrorInfo = {

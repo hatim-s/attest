@@ -17,6 +17,7 @@ export {
   type BackgroundAgentResource,
   type BackgroundSessionOptions,
   type InvocationResult,
+  type NativeAgentTarget,
   type MappedHttpInvokeOptions,
   type JsonlBridgeAgentResource,
   type JsonlBridgeSessionOptions,
