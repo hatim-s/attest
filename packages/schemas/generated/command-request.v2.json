@@ -582,11 +582,19 @@
                 },
                 "request": {
                   "$ref": "#/$defs/V2HttpRequestTemplate"
+                },
+                "response_mode": {
+                  "enum": [
+                    "attest_envelope",
+                    "mapped"
+                  ],
+                  "type": "string"
                 }
               },
               "required": [
                 "kind",
                 "lifecycle",
+                "response_mode",
                 "request",
                 "extraction"
               ],
@@ -862,6 +870,13 @@
       "properties": {
         "body": {
           "$ref": "#/$defs/__schema0"
+        },
+        "body_encoding": {
+          "enum": [
+            "json",
+            "raw"
+          ],
+          "type": "string"
         },
         "headers": {
           "additionalProperties": {
