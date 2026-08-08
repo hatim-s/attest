@@ -13,6 +13,7 @@ import type { CliIo } from '../../run-cli.js';
 import { renderCommandResult } from '../command-result.js';
 import type { CliInteraction } from '../register-project-resource-commands.js';
 import { parseJsonFlag, readCommandRequest, validateCommandRequest } from './test-command-input.js';
+import { prepareImportSource, type PreparedImportSource } from './import/tabular-import-adapter.js';
 import {
   runTestCaseListCommand,
   runTestCaseShowCommand,
@@ -259,9 +260,12 @@ const runMutation = async (
   request: TestAuthoringCommand,
   options: MutationOptions,
   context: RegisterTestCommandsOptions,
+  preparedImportSource?: Uint8Array,
 ): Promise<void> => {
   const result = await runTestMutationCommand({
+    preparedImportSource,
     project: options.project,
+    readImportStdin: context.interaction.readImportStdin,
     readStdin: context.interaction.readStdin,
     request,
     workingDirectory: context.workingDirectory,
@@ -269,12 +273,113 @@ const runMutation = async (
   context.io.output(renderCommandResult(command, outputFormat(options), result));
 };
 
-const markMutationHelp = (command: Command, examples: string[]): void => {
+/** Proposes conservative canonical mappings only from exact authored CSV headers. */
+const suggestedCsvMappings = (headers: readonly string[]): DatasetImportMapping[] => {
+  const sourceFor = (...candidates: string[]): string | undefined =>
+    candidates.find((candidate) => headers.includes(candidate));
+  return [
+    ['id', sourceFor('id', 'external_id')],
+    ['input', sourceFor('input', 'prompt', 'question')],
+    ['expected', sourceFor('expected', 'ideal', 'answer')],
+    ['params', sourceFor('params', 'parameters')],
+    ['tags', sourceFor('tags')],
+  ].flatMap(([destination, source]) =>
+    destination === undefined || source === undefined ? [] : [{ destination, source }],
+  );
+};
+
+/** Shows a bounded dry-run preview and applies only after an explicit default-no confirmation. */
+const runGuidedImport = async (
+  command: 'test.case.import' | 'test.dataset.import',
+  request: Extract<TestAuthoringCommand, { command: 'test.case.import' | 'test.dataset.import' }>,
+  options: MutationOptions,
+  context: RegisterTestCommandsOptions,
+): Promise<void> => {
+  const prepared: PreparedImportSource = await prepareImportSource(
+    request.source,
+    context.workingDirectory,
+    context.interaction.readImportStdin,
+    request.import.format,
+  );
+  let guidedRequest = request;
+  if (prepared.format === 'csv' && (request.import.mapping?.length ?? 0) === 0) {
+    const suggestions = suggestedCsvMappings(prepared.csvHeaders);
+    if (suggestions.length === 0) {
+      throw new AttestCliError('cli_missing_input', 'No safe CSV field mappings were detected.', {
+        path: '--map',
+        hint: `Detected headers: ${prepared.csvHeaders.join(', ') || '<none>'}. Pass explicit --map destination=header options.`,
+      });
+    }
+    const proposal = suggestions
+      .map(({ destination, source }) => `${destination}=${source}`)
+      .join(', ');
+    const answer = (
+      await context.interaction.prompt(
+        `Detected CSV headers: ${prepared.csvHeaders.join(', ')}. Use mappings ${proposal}? [Y/n]: `,
+      )
+    )
+      .trim()
+      .toLowerCase();
+    if (answer === 'n' || answer === 'no') {
+      context.io.output(
+        'No changes made; pass explicit --map options to choose different mappings.',
+      );
+      return;
+    }
+    guidedRequest = validateCommandRequest(command, {
+      ...request,
+      import: { ...request.import, mapping: suggestions },
+    });
+  }
+
+  const previewRequest = validateCommandRequest(command, { ...guidedRequest, dry_run: true });
+  const preview = await runTestMutationCommand({
+    preparedImportSource: prepared.source,
+    project: options.project,
+    readImportStdin: context.interaction.readImportStdin,
+    readStdin: context.interaction.readStdin,
+    request: previewRequest,
+    workingDirectory: context.workingDirectory,
+  });
+  context.io.output(renderCommandResult(command, 'human', preview));
+  const answer = (await context.interaction.prompt('Apply this import? [y/N]: '))
+    .trim()
+    .toLowerCase();
+  if (answer !== 'y' && answer !== 'yes') {
+    context.io.output('No changes made; import was not applied.');
+    return;
+  }
+  const confirmed = validateCommandRequest(command, {
+    ...guidedRequest,
+    dry_run: false,
+    if_project_hash: preview.projectHashBefore,
+    yes: true,
+  });
+  await runMutation(command, confirmed, options, context, prepared.source);
+};
+
+const markMutationHelp = (
+  command: Command,
+  examples: string[],
+  metadata: {
+    constraints?: readonly string[];
+    importOptions?: boolean;
+  } = {},
+): void => {
   setCliCommandHelpMetadata(command, {
     examples,
+    constraints: [...(metadata.constraints ?? [])],
     requestSchema: COMMAND_REQUEST_SCHEMA_VERSION,
     options: {
       output: { implies: ['non-interactive'] },
+      ...(metadata.importOptions === true
+        ? {
+            map: { repeatable: true },
+            'parse-json': { repeatable: true },
+            'on-conflict': { default: 'error' },
+            sync: { default: 'append' },
+          }
+        : {}),
       'from-json': {
         conflicts: ['command arguments', 'command flags', 'dry-run', 'yes', 'if-project-hash'],
         implies: ['non-interactive'],
@@ -522,14 +627,30 @@ const registerTestCommands = (context: RegisterTestCommandsOptions): void => {
           import: importRequestFields(options),
         }),
       );
-      await runMutation('test.case.import', request, options, context);
+      if (interactive && request.yes !== true && request.dry_run !== true) {
+        await runGuidedImport('test.case.import', request, options, context);
+      } else {
+        await runMutation('test.case.import', request, options, context);
+      }
     },
   );
-  markMutationHelp(caseImport, [
-    'attest test case import smoke ./cases.jsonl',
-    'attest test case import smoke ./cases.csv --map input.question=prompt --key external_id',
-    'attest test case import smoke - --format jsonl --output json',
-  ]);
+  markMutationHelp(
+    caseImport,
+    [
+      'attest test case import smoke ./cases.jsonl',
+      'attest test case import smoke ./cases.csv --map input.question=prompt --key external_id',
+      'attest test case import smoke - --format jsonl --output json',
+      'attest test case import --from-json \'{"schema":"attest.command-request/v2","command":"test.case.import","test_id":"smoke","source":"./cases.csv","import":{"format":"csv","mapping":[{"destination":"input","source":"prompt"}],"sync":"append","on_conflict":"error"}}\'',
+    ],
+    {
+      constraints: [
+        'CSV mapping sources are exact header names; JSON and JSONL mapping sources are RFC 6901 pointers.',
+        'sync defaults to append and on-conflict defaults to error.',
+        'upsert requires an explicit mapped id or --key source.',
+      ],
+      importOptions: true,
+    },
+  );
 
   addCommonOptions(testCase.command('list').description('List direct cases.'))
     .argument('[test-id]', 'test id')
@@ -751,13 +872,30 @@ const registerTestCommands = (context: RegisterTestCommandsOptions): void => {
           import: importRequestFields(options),
         }),
       );
-      await runMutation('test.dataset.import', request, options, context);
+      if (interactive && request.yes !== true && request.dry_run !== true) {
+        await runGuidedImport('test.dataset.import', request, options, context);
+      } else {
+        await runMutation('test.dataset.import', request, options, context);
+      }
     },
   );
-  markMutationHelp(datasetImport, [
-    'attest test dataset import smoke ./cases.jsonl --as regression',
-    'attest test dataset import smoke ./cases.csv --as regression --map input.question=prompt',
-  ]);
+  markMutationHelp(
+    datasetImport,
+    [
+      'attest test dataset import smoke ./cases.jsonl --as regression',
+      'attest test dataset import smoke ./cases.csv --as regression --map input.question=prompt',
+      'attest test dataset import --from-json \'{"schema":"attest.command-request/v2","command":"test.dataset.import","test_id":"smoke","source":"./cases.jsonl","as":"regression","import":{"format":"jsonl","mapping":[{"destination":"input","source":"/prompt"}],"sync":"append","on_conflict":"error"}}\'',
+    ],
+    {
+      constraints: [
+        'CSV mapping sources are exact header names; JSON and JSONL mapping sources are RFC 6901 pointers.',
+        'sync defaults to append and on-conflict defaults to error.',
+        'upsert requires an explicit mapped id or --key source.',
+        'An existing dataset id requires sync=upsert; shared updates require dry-run preview and yes=true.',
+      ],
+      importOptions: true,
+    },
+  );
 
   for (const verb of ['attach', 'detach'] as const) {
     const command = addMutationOptions(

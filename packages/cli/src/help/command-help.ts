@@ -10,13 +10,16 @@ import { AttestCliError } from '../errors.js';
 
 type CliOptionHelpMetadata = {
   conflicts?: readonly string[];
+  default?: JsonValue | null;
   implies?: readonly string[];
+  repeatable?: boolean;
 };
 
 type CliCommandHelpMetadata = {
   aliasFor?: string;
   deprecated?: string;
   examples?: readonly string[];
+  constraints?: readonly string[];
   requestSchema?: string;
   options?: Readonly<Record<string, CliOptionHelpMetadata>>;
 };
@@ -67,9 +70,9 @@ const toOptionHelp = (
   description: option.description,
   value_name: optionValueName(option),
   required: option.mandatory,
-  repeatable: option.variadic,
+  repeatable: metadata?.repeatable ?? option.variadic,
   choices: option.argChoices ?? [],
-  default: toJsonValue(option.defaultValue),
+  default: metadata?.default ?? toJsonValue(option.defaultValue),
   conflicts: [...(metadata?.conflicts ?? [])],
   implies: [...(metadata?.implies ?? [])],
 });
@@ -124,6 +127,7 @@ const toCommandHelp = (command: Command): CliHelp['command'] => {
     deprecated: metadata?.deprecated ?? null,
     request_schema: metadata?.requestSchema ?? null,
     examples: [...(metadata?.examples ?? [])],
+    constraints: [...(metadata?.constraints ?? [])],
   };
 };
 

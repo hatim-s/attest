@@ -271,6 +271,10 @@ describe('CLI2.7/CLI2.8 test, case, dataset, and import authoring', { timeout: 2
         publishObserver: () => {
           throw new Error('injected publication failure');
         },
+        readImportStdin: async function* readImportStdin() {
+          await Promise.resolve();
+          yield '';
+        },
         readStdin: () => Promise.resolve(''),
         request: addTestRequest('rollback'),
         workingDirectory: root,
@@ -344,6 +348,34 @@ describe('CLI2.7/CLI2.8 test, case, dataset, and import authoring', { timeout: 2
     expect(help.output).toContain('csv');
     expect(help.output).toContain('records-pointer');
     expect(help.output).toContain('on-conflict');
+    if (!help.document.ok) throw new Error('Expected structured import help.');
+    const importHelp = (
+      help.document.result as {
+        command: {
+          constraints: string[];
+          examples: string[];
+          options: Array<{ default: unknown; name: string; repeatable: boolean }>;
+        };
+      }
+    ).command;
+    expect(importHelp.options.find(({ name }) => name === 'map')).toMatchObject({
+      repeatable: true,
+    });
+    expect(importHelp.options.find(({ name }) => name === 'parse-json')).toMatchObject({
+      repeatable: true,
+    });
+    expect(importHelp.options.find(({ name }) => name === 'sync')).toMatchObject({
+      default: 'append',
+    });
+    expect(importHelp.options.find(({ name }) => name === 'on-conflict')).toMatchObject({
+      default: 'error',
+    });
+    expect(
+      importHelp.examples.some((example) => example.includes('attest.command-request/v2')),
+    ).toBe(true);
+    expect(importHelp.constraints).toContain(
+      'upsert requires an explicit mapped id or --key source.',
+    );
 
     const datasetAddHelp = await runJson(root, ['help', 'test', 'dataset', 'add']);
     expect(datasetAddHelp.document).toMatchObject({
@@ -887,6 +919,256 @@ describe('CLI2.7/CLI2.8 test, case, dataset, and import authoring', { timeout: 2
         import: { format: 'csv', counts: { inserted: 1, read: 1 } },
       },
     });
+  });
+
+  it('rejects malformed UTF-8 and byte-limit stdin before any project write', async () => {
+    const root = await createProject();
+    const before = await snapshotProject(root);
+    const invalid = collectIo();
+    expect(
+      await runCli(
+        ['test', 'case', 'import', 'refund', '-', '--format', 'jsonl', '--output', 'json'],
+        {
+          interaction: {
+            ...nonInteractive(),
+            readImportStdin: async function* readInvalidStdin() {
+              await Promise.resolve();
+              yield new Uint8Array([123, 34, 105, 110, 112, 117, 116, 34, 58, 34, 255, 34, 125]);
+            },
+          },
+          io: invalid.io,
+          workingDirectory: root,
+        },
+      ),
+    ).toBe(1);
+    expect(invalid.output.join('\n')).toContain('invalid_utf8');
+    expect(await snapshotProject(root)).toEqual(before);
+
+    let consumedPastLimit = false;
+    const oversized = collectIo();
+    expect(
+      await runCli(
+        ['test', 'case', 'import', 'refund', '-', '--format', 'jsonl', '--output', 'json'],
+        {
+          interaction: {
+            ...nonInteractive(),
+            readImportStdin: async function* readOversizedStdin() {
+              await Promise.resolve();
+              yield new Uint8Array(6 * 1024 * 1024);
+              yield new Uint8Array(6 * 1024 * 1024);
+              consumedPastLimit = true;
+              yield new Uint8Array([1]);
+            },
+          },
+          io: oversized.io,
+          workingDirectory: root,
+        },
+      ),
+    ).toBe(1);
+    expect(oversized.output.join('\n')).toContain('import_size_limit');
+    expect(consumedPastLimit).toBe(false);
+    expect(await snapshotProject(root)).toEqual(before);
+  });
+
+  it('shows redacted aggregate diagnostics in human mode', async () => {
+    const root = await createProject();
+    const source = join(root, 'invalid-private.csv');
+    await writeFile(source, 'parameters,secret\nnot-an-array,private-prompt\n');
+    const collected = collectIo();
+    expect(
+      await runCli(['test', 'case', 'import', 'refund', source, '--map', 'tags=parameters'], {
+        interaction: nonInteractive(),
+        io: collected.io,
+        workingDirectory: root,
+      }),
+    ).toBe(1);
+    const rendered = collected.errors.join('\n');
+    expect(rendered).toContain('row 2, source parameters, destination /tags');
+    expect(rendered).toContain('invalid_type');
+    expect(rendered).not.toContain('private-prompt');
+  });
+
+  it('honors target attachment tags when checking dataset import collisions', async () => {
+    const root = await createProject();
+    await runJson(root, ['test', 'add', 'filtered-target', '--agent', 'support']);
+    await runJson(root, [
+      'test',
+      'case',
+      'add',
+      'filtered-target',
+      '--id',
+      'collision-id',
+      '--input',
+      '"direct"',
+    ]);
+    await runJson(root, ['test', 'dataset', 'add', 'filtered-target', 'filtered']);
+    await runJson(root, ['test', 'dataset', 'detach', 'filtered-target', 'filtered']);
+    await runJson(root, [
+      'test',
+      'dataset',
+      'attach',
+      'filtered-target',
+      'filtered',
+      '--tag',
+      'billing',
+    ]);
+    const source = join(root, 'filtered.json');
+    await writeFile(source, '[{"id":"collision-id","input":"dataset","tags":["support"]}]');
+    const imported = await runJson(root, [
+      'test',
+      'dataset',
+      'import',
+      'filtered-target',
+      source,
+      '--as',
+      'filtered',
+      '--sync',
+      'upsert',
+    ]);
+    expect(imported).toMatchObject({ exitCode: 0, document: { ok: true } });
+  });
+
+  it('reports retained import counts and addressable dedupe decisions', async () => {
+    const root = await createProject();
+    const source = join(root, 'dedupe.jsonl');
+    await writeFile(source, '{"id":"first","input":"same"}\n{"id":"second","input":"same"}\n');
+    const imported = await runJson(root, [
+      'test',
+      'case',
+      'import',
+      'refund',
+      source,
+      '--dedupe',
+      'content',
+    ]);
+    expect(imported.document).toMatchObject({
+      ok: true,
+      result: {
+        imported_case_count: 1,
+        import: {
+          counts: { inserted: 1, read: 2, skipped: 1, updated: 0 },
+          decisions: [
+            { action: 'skip', case_id: 'first', line: 2, matched_by: 'content' },
+            { action: 'insert', case_id: 'first' },
+          ],
+        },
+      },
+    });
+  });
+
+  it('previews guided imports, defaults confirmation to no, and lets --yes bypass prompts', async () => {
+    const root = await createProject();
+    await runJson(root, ['test', 'add', 'guided', '--agent', 'support']);
+    const source = join(root, 'guided.csv');
+    await writeFile(source, 'prompt\nhello\n');
+    const before = await snapshotProject(root);
+    const declined = collectIo();
+    const answers = ['', ''];
+    expect(
+      await runCli(['test', 'case', 'import', 'guided', source], {
+        interaction: {
+          ...nonInteractive(),
+          inputIsTTY: true,
+          outputIsTTY: true,
+          prompt: () => Promise.resolve(answers.shift() ?? ''),
+        },
+        io: declined.io,
+        workingDirectory: root,
+      }),
+    ).toBe(0);
+    expect(declined.output.join('\n')).toContain('Redacted normalized preview');
+    expect(declined.output).toContain('No changes made; import was not applied.');
+    expect(await snapshotProject(root)).toEqual(before);
+
+    let promptCount = 0;
+    const accepted = collectIo();
+    expect(
+      await runCli(['test', 'case', 'import', 'guided', source, '--map', 'input=prompt', '--yes'], {
+        interaction: {
+          ...nonInteractive(),
+          inputIsTTY: true,
+          outputIsTTY: true,
+          prompt: () => {
+            promptCount += 1;
+            return Promise.resolve('no');
+          },
+        },
+        io: accepted.io,
+        workingDirectory: root,
+      }),
+    ).toBe(0);
+    expect(promptCount).toBe(0);
+    expect(
+      (await loadProject({ project: root })).tests.find(({ id }) => id === 'guided')?.cases,
+    ).toHaveLength(1);
+  });
+
+  it('refuses silent shared dataset updates until previewed and explicitly confirmed', async () => {
+    const root = await createProject();
+    await runJson(root, ['test', 'add', 'shared-owner', '--agent', 'support']);
+    await runJson(root, ['test', 'add', 'shared-reader', '--agent', 'support']);
+    await runJson(root, ['test', 'dataset', 'add', 'shared-owner', 'shared']);
+    await runJson(root, ['test', 'dataset', 'attach', 'shared-reader', 'shared']);
+    const source = join(root, 'shared.jsonl');
+    await writeFile(source, '{"id":"shared-case","input":"value"}\n');
+    const before = await snapshotProject(root);
+
+    const implicit = await runJson(root, [
+      'test',
+      'dataset',
+      'import',
+      'shared-owner',
+      source,
+      '--as',
+      'shared',
+    ]);
+    expect(implicit.document).toMatchObject({ ok: false, error: { code: 'project_invalid' } });
+    const refused = await runJson(root, [
+      'test',
+      'dataset',
+      'import',
+      'shared-owner',
+      source,
+      '--as',
+      'shared',
+      '--sync',
+      'upsert',
+    ]);
+    expect(refused.document).toMatchObject({
+      ok: false,
+      error: {
+        code: 'cli_missing_input',
+        details: { affected_tests: ['shared-owner', 'shared-reader'] },
+      },
+    });
+    expect(await snapshotProject(root)).toEqual(before);
+
+    const preview = await runJson(root, [
+      'test',
+      'dataset',
+      'import',
+      'shared-owner',
+      source,
+      '--as',
+      'shared',
+      '--sync',
+      'upsert',
+      '--dry-run',
+    ]);
+    expect(preview.document).toMatchObject({ ok: true, result: { committed: false } });
+    const confirmed = await runJson(root, [
+      'test',
+      'dataset',
+      'import',
+      'shared-owner',
+      source,
+      '--as',
+      'shared',
+      '--sync',
+      'upsert',
+      '--yes',
+    ]);
+    expect(confirmed.document).toMatchObject({ ok: true, result: { committed: true } });
   });
 
   it('rejects non-empty or provenance-bearing dataset add requests before writing', async () => {

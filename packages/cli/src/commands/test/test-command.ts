@@ -7,7 +7,7 @@ import {
   type TestCase,
   type TestResource,
 } from '@attest/contracts';
-import type { TabularImportResult } from '@attest/core';
+import type { ImportCollisionContext, TabularImportResult } from '@attest/core';
 
 import { AttestCliError } from '../../errors.js';
 import type { JsonValue } from '../../project/canonical-project.js';
@@ -49,6 +49,8 @@ type TestMutationCommandOptions = {
   clock?: () => Date;
   project?: string;
   publishObserver?: PublishObserver;
+  preparedImportSource?: Uint8Array;
+  readImportStdin: () => AsyncIterable<string | Uint8Array>;
   readStdin: () => Promise<string>;
   request: TestAuthoringCommand;
   workingDirectory: string;
@@ -144,18 +146,26 @@ const directImportCollisionCases = (candidate: ProjectResources, test: TestResou
   attachmentCases(candidate, test);
 
 /** Collects direct/attached cases that an imported dataset must not collide with in any test. */
-const datasetImportCollisionCases = (
+const datasetImportCollisionContexts = (
   candidate: ProjectResources,
   datasetId: string,
   importingTestId: string,
-): TestCase[] =>
+): ImportCollisionContext[] =>
   candidate.tests
     .filter(
       (test) =>
         test.id === importingTestId ||
         test.datasets.some((attachment) => attachment.dataset_id === datasetId),
     )
-    .flatMap((test) => [...test.cases, ...attachmentCases(candidate, test, datasetId)]);
+    .map((test) => {
+      const targetAttachment = test.datasets.find(
+        (attachment) => attachment.dataset_id === datasetId,
+      );
+      return {
+        cases: [...test.cases, ...attachmentCases(candidate, test, datasetId)],
+        ...(targetAttachment?.tags === undefined ? {} : { requiredTags: targetAttachment.tags }),
+      };
+    });
 
 /** Rejects dataset removal with copy-paste detach commands for every blocking test. */
 const assertDatasetRemovable = (candidate: ProjectResources, datasetId: string): void => {
@@ -212,7 +222,8 @@ const buildMutation = async (
         collisionCases: directImportCollisionCases(candidate, test),
         existingCases: test.cases,
         importOptions: request.import,
-        readStdin: options.readStdin,
+        preparedSource: options.preparedImportSource,
+        readImportStdin: options.readImportStdin,
         source: request.source,
         workingDirectory: options.workingDirectory,
       });
@@ -228,7 +239,7 @@ const buildMutation = async (
           : [];
       return {
         candidate,
-        importedCaseCount: imported.counts.read,
+        importedCaseCount: imported.counts.inserted + imported.counts.updated,
         importResult: imported,
         resource: { id: request.test_id, type: 'test' },
         warnings,
@@ -263,11 +274,40 @@ const buildMutation = async (
     case 'test.dataset.import': {
       const test = findTest(candidate, request.test_id);
       const existing = candidate.datasets.find(({ metadata }) => metadata.id === request.as);
+      const affectedTests = attachedDatasetTests(candidate, request.as);
+      if (existing !== undefined && request.import.sync !== 'upsert') {
+        throw new AttestCliError(
+          'project_invalid',
+          `Dataset ${request.as} already exists; import will not silently replace it.`,
+          {
+            path: '--sync',
+            hint: 'Pass --sync upsert to select explicit dataset update semantics.',
+            details: { affected_tests: affectedTests },
+          },
+        );
+      }
+      if (
+        existing !== undefined &&
+        affectedTests.some((id) => id !== request.test_id) &&
+        request.dry_run !== true &&
+        request.yes !== true
+      ) {
+        throw new AttestCliError(
+          'cli_missing_input',
+          'Shared dataset updates require confirmation.',
+          {
+            path: '--yes',
+            hint: 'Preview with --dry-run, then pass --yes to update every affected test.',
+            details: { affected_tests: affectedTests },
+          },
+        );
+      }
       const imported = await runTabularImportAdapter({
-        collisionCases: datasetImportCollisionCases(candidate, request.as, request.test_id),
+        collisionContexts: datasetImportCollisionContexts(candidate, request.as, request.test_id),
         existingCases: existing?.cases,
         importOptions: request.import,
-        readStdin: options.readStdin,
+        preparedSource: options.preparedImportSource,
+        readImportStdin: options.readImportStdin,
         source: request.source,
         workingDirectory: options.workingDirectory,
       });
@@ -296,7 +336,7 @@ const buildMutation = async (
       }
       return {
         candidate,
-        importedCaseCount: imported.counts.read,
+        importedCaseCount: imported.counts.inserted + imported.counts.updated,
         importResult: imported,
         resource: { id: request.as, type: 'dataset' },
       };
