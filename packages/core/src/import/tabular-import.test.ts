@@ -125,7 +125,9 @@ describe('tabular import validation and identity', () => {
         source: '[{"value":true}]',
       }),
     );
-    expect(diagnostics).toContainEqual(expect.objectContaining({ code: 'mapping_destination_unsafe' }));
+    expect(diagnostics).toContainEqual(
+      expect.objectContaining({ code: 'mapping_destination_unsafe' }),
+    );
     expect(Object.hasOwn(Object.prototype, 'polluted')).toBe(false);
   });
 

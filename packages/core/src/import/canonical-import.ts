@@ -41,12 +41,22 @@ const encodeBase32 = (bytes: Uint8Array): string => {
   return encoded;
 };
 
-const logicalIdContent = (testCase: Omit<TestCase, 'id'>): JsonValue =>
-  ({
-    input: testCase.input,
-    ...(testCase.expected === undefined ? {} : { expected: testCase.expected }),
-    ...(testCase.params === undefined ? {} : { params: testCase.params }),
-  }) as JsonValue;
+const logicalIdContent = (testCase: Omit<TestCase, 'id'>): JsonValue => ({
+  input: testCase.input,
+  ...(testCase.expected === undefined ? {} : { expected: testCase.expected }),
+  ...(testCase.params === undefined ? {} : { params: testCase.params }),
+});
+
+/** Removes only the stable id while retaining every normalized content field. */
+const caseContentWithoutId = (testCase: TestCase): Omit<TestCase, 'id'> => ({
+  input: testCase.input,
+  ...(testCase.expected === undefined ? {} : { expected: testCase.expected }),
+  ...(testCase.params === undefined ? {} : { params: testCase.params }),
+  ...(testCase.tags === undefined ? {} : { tags: testCase.tags }),
+  ...(testCase.metric_overrides === undefined
+    ? {}
+    : { metric_overrides: testCase.metric_overrides }),
+});
 
 /** Generates the ratified move-stable id from input, expected, and params only. */
 const createContentCaseId = (testCase: Omit<TestCase, 'id'>): string => {
@@ -65,10 +75,11 @@ const createKeyedCaseId = (sourceKey: JsonValue): string => {
 };
 
 /** Fingerprints every normalized case field except its mutable stable id. */
-const fingerprintCaseContent = ({ id: _id, ...testCase }: TestCase): string =>
-  hashImportJson(testCase as JsonValue);
+const fingerprintCaseContent = (testCase: TestCase): string =>
+  hashImportJson(caseContentWithoutId(testCase));
 
 export {
+  caseContentWithoutId,
   createContentCaseId,
   createKeyedCaseId,
   fingerprintCaseContent,

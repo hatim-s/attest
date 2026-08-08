@@ -6,11 +6,11 @@ import {
 } from '@attest/contracts';
 
 import {
+  caseContentWithoutId,
   createContentCaseId,
   createKeyedCaseId,
   fingerprintCaseContent,
   hashImportJson,
-  serializeImportJson,
   type JsonValue,
 } from './canonical-import.js';
 import {
@@ -215,7 +215,9 @@ const assignDestination = (
   }
   if (segments[0] === 'metrics') {
     target.metric_overrides = Array.isArray(value)
-      ? value.map((entry) => (typeof entry === 'string' ? { metric_id: entry } : entry))
+      ? (value as unknown[]).map((entry) =>
+          typeof entry === 'string' ? { metric_id: entry } : entry,
+        )
       : value;
     return;
   }
@@ -307,7 +309,7 @@ const normalizeRecord = (
   }
   if (diagnostics.length > 0 || !parsed.success) return { diagnostics };
 
-  const withoutPlaceholder = (({ id: _id, ...rest }) => rest)(parsed.data);
+  const withoutPlaceholder = caseContentWithoutId(parsed.data);
   const generatedFromContent = !explicitId && request.keySource === undefined;
   const id = explicitId
     ? parsed.data.id
@@ -407,7 +409,7 @@ const redactValue = (value: unknown): unknown => {
 const createImportPreview = (rows: readonly NormalizedImportRow[]): unknown[] =>
   rows.slice(0, 5).map(({ case: testCase }) => ({
     id: testCase.id,
-    ...(redactValue((({ id: _id, ...rest }) => rest)(testCase)) as Record<string, unknown>),
+    ...(redactValue(caseContentWithoutId(testCase)) as Record<string, unknown>),
   }));
 
 const reconcileRows = (
