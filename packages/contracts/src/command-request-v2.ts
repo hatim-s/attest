@@ -225,9 +225,16 @@ const metricImportRequestSchema = z.strictObject({
   ...commonMutationFields,
   command: z.literal('metric.import'),
   source: z.string().min(1),
-  source_type: z.enum(['json', 'curl']),
+  source_type: z.literal('json'),
   as: resourceIdSchema,
   name: z.string().min(1).optional(),
+});
+
+const metricTestRequestSchema = z.strictObject({
+  schema: z.literal(COMMAND_REQUEST_SCHEMA_VERSION),
+  command: z.literal('metric.test'),
+  metric_id: resourceIdSchema,
+  fixture: z.string().min(1),
 });
 
 const metricRenameRequestSchema = z.strictObject({
@@ -270,6 +277,7 @@ const commandRequestSchema = z.union([
   testRemoveRequestSchema,
   metricAddRequestSchema,
   metricImportRequestSchema,
+  metricTestRequestSchema,
   metricRenameRequestSchema,
   metricRemoveRequestSchema,
 ]);

@@ -1,5 +1,6 @@
 import { z } from 'zod';
 
+import { metricPresetSchema } from './metric-presets.js';
 import { sha256Schema } from './v2-shared.js';
 import {
   CLI_ERROR_CATALOG_SCHEMA_VERSION,
@@ -116,6 +117,7 @@ type CliHelpCommand = {
   request_schema: string | null;
   examples: string[];
   constraints: string[];
+  presets?: z.infer<typeof metricPresetSchema>[];
 };
 
 /** Recursively describes one command and every currently registered child command. */
@@ -134,6 +136,7 @@ const cliHelpCommandSchema: z.ZodType<CliHelpCommand> = z.lazy(() =>
     request_schema: z.string().min(1).nullable(),
     examples: z.array(z.string().min(1)),
     constraints: z.array(z.string().min(1)),
+    presets: z.array(metricPresetSchema).optional(),
   }),
 );
 

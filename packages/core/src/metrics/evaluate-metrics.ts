@@ -13,6 +13,8 @@ import { skippedNoOutput, type MetricContext, type MetricEvaluation } from './me
 
 /** Configures optional metric edges while keeping assertion evaluation dependency-free. */
 type EvaluateMetricsOptions = {
+  execCwd?: string;
+  execEnv?: NodeJS.ProcessEnv;
   judgeClient?: JudgeClient;
   execTimeoutMs?: number;
   judgeTimeoutMs?: number;
@@ -40,6 +42,8 @@ const evaluateMetric = async (
 
   if (definition.type === 'exec') {
     return executeExecutableMetric(definition, context, {
+      commandCwd: options.execCwd,
+      commandEnv: options.execEnv,
       timeoutMs: options.execTimeoutMs,
       signal: options.signal,
     });

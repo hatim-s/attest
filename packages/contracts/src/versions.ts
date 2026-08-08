@@ -28,6 +28,12 @@ const DATASET_SCHEMA_VERSION = 'attest.dataset/v2' as const;
 /** Identifies a canonical v2 metric resource. */
 const METRIC_RESOURCE_SCHEMA_VERSION = 'attest.metric/v2' as const;
 
+/** Identifies the inspectable built-in metric preset catalog. */
+const METRIC_PRESET_SCHEMA_VERSION = 'attest.metric-preset/v1' as const;
+
+/** Identifies local fixture documents accepted by `attest metric test`. */
+const METRIC_TEST_FIXTURE_SCHEMA_VERSION = 'attest.metric-test-fixture/v1' as const;
+
 /** Identifies normalized v2 mutation requests accepted by --from-json. */
 const COMMAND_REQUEST_SCHEMA_VERSION = 'attest.command-request/v2' as const;
 
@@ -55,7 +61,9 @@ export {
   CONFIG_VERSION,
   DATASET_SCHEMA_VERSION,
   METRIC_PROTOCOL,
+  METRIC_PRESET_SCHEMA_VERSION,
   METRIC_RESOURCE_SCHEMA_VERSION,
+  METRIC_TEST_FIXTURE_SCHEMA_VERSION,
   PROJECT_SCHEMA_VERSION,
   TEST_RESOURCE_SCHEMA_VERSION,
   TRACE_SCHEMA_VERSION,
