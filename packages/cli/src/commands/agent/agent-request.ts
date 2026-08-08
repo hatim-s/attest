@@ -24,11 +24,16 @@ import type { JsonValue } from '../../project/canonical-project.js';
 type ReadInput = () => Promise<string>;
 
 type AgentAddFields = {
+  acknowledgementPointer?: string;
+  acknowledgementValues?: readonly string[];
   agentId: string;
   argvJson?: string;
+  attemptTimeout?: string;
   backgroundCommand?: string;
   bridgeConcurrency?: 'serial' | 'multiplexed';
   cancellationGrace?: string;
+  closeTimeout?: string;
+  connectionMode?: 'serial' | 'multiplexed';
   cwd?: string;
   env?: readonly string[];
   errorPointer?: string;
@@ -36,14 +41,19 @@ type AgentAddFields = {
   headerEnv?: readonly string[];
   incrementalOutputMode?: 'text' | 'array';
   incrementalOutputPointer?: string;
+  idleTimeout?: string;
   invokeUrl?: string;
   jsonlCommand?: string;
   name?: string;
   nativeCommand?: string;
   nativeHttp?: string;
+  openTimeout?: string;
+  pingInterval?: string;
   readinessHttp?: string;
   readinessStderr?: string;
   readinessTcp?: string;
+  requestIdPointer?: string;
+  requestTemplate?: string;
   responsePointer?: string;
   shutdownUrl?: string;
   stopTimeout?: string;
@@ -54,6 +64,9 @@ type AgentAddFields = {
   timeout?: string;
   trace?: boolean;
   tracePointer?: string;
+  webSocketLifecycle?: 'per_case' | 'per_run';
+  webSocketSubprotocol?: string;
+  webSocketUrl?: string;
 };
 
 const requestDiagnostics = (
@@ -292,6 +305,27 @@ const parseJsonValues = (values: readonly string[], path: string): JsonValue[] =
     }
   });
 
+/** Parses one WebSocket text-JSON request template without retaining its source string. */
+const parseRequestTemplate = (value: string): Record<string, JsonValue> => {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value) as unknown;
+  } catch (error: unknown) {
+    throw new AttestCliError('cli_usage', '`--request-template` is not valid JSON.', {
+      path: '--request-template',
+      hint: 'Pass one JSON object containing exactly one `{{request_id}}` value.',
+      cause: error,
+    });
+  }
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new AttestCliError('cli_usage', '`--request-template` must be a JSON object.', {
+      path: '--request-template',
+      hint: 'Example: `{"request_id":"{{request_id}}","request":"{{request}}"}`.',
+    });
+  }
+  return parsed as Record<string, JsonValue>;
+};
+
 const parseTcpReadiness = (value: string): { host: string; port: number } => {
   const match = /^(\[[^\]]+\]|[^:]+):(\d+)$/u.exec(value);
   const port = Number(match?.[2]);
@@ -417,13 +451,15 @@ const assertSafeNativeAgentResource = (agent: AgentResource): void => {
   const transport = agent.transport;
   const kind = transport.kind;
   const unsupportedTimeoutFields =
-    kind === 'native_cli' || (kind === 'http' && transport.response_mode === 'attest_envelope')
-      ? ['connect_ms', 'first_byte_ms', 'idle_ms', 'run_ms']
-      : kind === 'http' || kind === 'polling' || kind === 'stream'
-        ? ['run_ms']
-        : kind === 'jsonl_bridge'
-          ? ['connect_ms']
-          : [];
+    kind === 'websocket'
+      ? ['connect_ms', 'first_byte_ms', 'idle_ms', 'attempt_ms', 'run_ms']
+      : kind === 'native_cli' || (kind === 'http' && transport.response_mode === 'attest_envelope')
+        ? ['connect_ms', 'first_byte_ms', 'idle_ms', 'run_ms']
+        : kind === 'http' || kind === 'polling' || kind === 'stream'
+          ? ['run_ms']
+          : kind === 'jsonl_bridge'
+            ? ['connect_ms']
+            : [];
   const unsupportedTimeout = unsupportedTimeoutFields.find(
     (field) =>
       agent.timeouts?.[field as keyof NonNullable<AgentResource['timeouts']>] !== undefined,
@@ -554,10 +590,46 @@ const assertSafeNativeAgentResource = (agent: AgentResource): void => {
     return;
   }
   if (transport.kind === 'websocket') {
-    throw new AttestCliError('project_invalid', 'This transport belongs to a later CLI item.', {
-      path: '/agent/transport/kind',
-      hint: 'WebSockets are CLI2.12; CLI2.11 supports HTTP SSE and JSONL streams.',
-    });
+    let url: URL;
+    try {
+      url = new URL(transport.url.replaceAll(/\{\{[^}]+\}\}/gu, 'placeholder'));
+    } catch (error: unknown) {
+      throw new AttestCliError('project_invalid', 'WebSocket URL template is invalid.', {
+        path: '/agent/transport/url',
+        cause: error,
+      });
+    }
+    if (url.username.length > 0 || url.password.length > 0) {
+      throw new AttestCliError('project_invalid', 'WebSocket URLs cannot contain credentials.', {
+        path: '/agent/transport/url',
+        hint: 'Move credentials to an environment-backed header reference.',
+      });
+    }
+    for (const [name, value] of Object.entries(transport.headers ?? {})) {
+      if (SENSITIVE_NAME.test(name) && typeof value === 'string') {
+        throw new AttestCliError(
+          'project_invalid',
+          'Sensitive WebSocket headers must use references.',
+          {
+            path: `/agent/transport/headers/${name}`,
+            hint: 'Use `{ "from_env": "VARIABLE_NAME" }`; literal secrets are never authored.',
+          },
+        );
+      }
+    }
+    for (const [name, value] of url.searchParams) {
+      if (SENSITIVE_NAME.test(name) && value.length > 0) {
+        throw new AttestCliError(
+          'project_invalid',
+          'Sensitive WebSocket query values are unsupported.',
+          {
+            path: '/agent/transport/url',
+            hint: 'Move credentials to an environment-backed header reference.',
+          },
+        );
+      }
+    }
+    return;
   }
   const request = transport.kind === 'polling' ? transport.submit : transport.request;
   const requestPath = `/agent/transport/${transport.kind === 'polling' ? 'submit' : 'request'}`;
@@ -623,11 +695,16 @@ const assertSafeNativeAgentResource = (agent: AgentResource): void => {
 };
 
 const AUTHORING_FLAG_BY_FIELD: Readonly<Record<keyof AgentAddFields, string>> = {
+  acknowledgementPointer: 'acknowledgement-pointer',
+  acknowledgementValues: 'acknowledgement-value',
   agentId: 'agent-id',
   argvJson: 'argv-json',
+  attemptTimeout: 'attempt-timeout',
   backgroundCommand: 'background-command',
   bridgeConcurrency: 'bridge-concurrency',
   cancellationGrace: 'cancel-grace',
+  closeTimeout: 'close-timeout',
+  connectionMode: 'connection-mode',
   cwd: 'cwd',
   env: 'env',
   errorPointer: 'error-pointer',
@@ -635,14 +712,19 @@ const AUTHORING_FLAG_BY_FIELD: Readonly<Record<keyof AgentAddFields, string>> = 
   headerEnv: 'header-env',
   incrementalOutputMode: 'incremental-output-mode',
   incrementalOutputPointer: 'incremental-output-pointer',
+  idleTimeout: 'idle-timeout',
   invokeUrl: 'invoke-url',
   jsonlCommand: 'jsonl-command',
   name: 'name',
   nativeCommand: 'native-command',
   nativeHttp: 'native-http',
+  openTimeout: 'open-timeout',
+  pingInterval: 'ping-interval',
   readinessHttp: 'readiness-http',
   readinessStderr: 'readiness-stderr',
   readinessTcp: 'readiness-tcp',
+  requestIdPointer: 'request-id-pointer',
+  requestTemplate: 'request-template',
   responsePointer: 'response-pointer',
   shutdownUrl: 'shutdown-url',
   stopTimeout: 'stop-timeout',
@@ -653,23 +735,21 @@ const AUTHORING_FLAG_BY_FIELD: Readonly<Record<keyof AgentAddFields, string>> = 
   timeout: 'timeout',
   trace: 'trace',
   tracePointer: 'trace-pointer',
+  webSocketLifecycle: 'websocket-lifecycle',
+  webSocketSubprotocol: 'subprotocol',
+  webSocketUrl: 'websocket-url',
 };
 
-const COMMON_AUTHORING_FIELDS = new Set<keyof AgentAddFields>([
-  'agentId',
-  'name',
-  'timeout',
-  'trace',
-]);
+const COMMON_AUTHORING_FIELDS = new Set<keyof AgentAddFields>(['agentId', 'name', 'trace']);
 
 const TRANSPORT_AUTHORING_FIELDS: Readonly<
   Record<
-    'background' | 'jsonl' | 'native_cli' | 'native_http' | 'stream',
+    'background' | 'jsonl' | 'native_cli' | 'native_http' | 'stream' | 'websocket',
     Set<keyof AgentAddFields>
   >
 > = {
-  native_cli: new Set(['argvJson', 'nativeCommand', 'cwd', 'env']),
-  native_http: new Set(['nativeHttp', 'headerEnv']),
+  native_cli: new Set(['argvJson', 'nativeCommand', 'cwd', 'env', 'timeout']),
+  native_http: new Set(['nativeHttp', 'headerEnv', 'timeout']),
   background: new Set([
     'backgroundCommand',
     'cwd',
@@ -684,8 +764,16 @@ const TRANSPORT_AUTHORING_FIELDS: Readonly<
     'shutdownUrl',
     'stopTimeout',
     'tracePointer',
+    'timeout',
   ]),
-  jsonl: new Set(['jsonlCommand', 'cwd', 'env', 'bridgeConcurrency', 'cancellationGrace']),
+  jsonl: new Set([
+    'jsonlCommand',
+    'cwd',
+    'env',
+    'bridgeConcurrency',
+    'cancellationGrace',
+    'timeout',
+  ]),
   stream: new Set([
     'streamUrl',
     'streamFraming',
@@ -698,6 +786,26 @@ const TRANSPORT_AUTHORING_FIELDS: Readonly<
     'terminalPointer',
     'terminalValues',
     'tracePointer',
+    'timeout',
+  ]),
+  websocket: new Set([
+    'acknowledgementPointer',
+    'acknowledgementValues',
+    'attemptTimeout',
+    'closeTimeout',
+    'connectionMode',
+    'errorPointer',
+    'headerEnv',
+    'idleTimeout',
+    'openTimeout',
+    'pingInterval',
+    'requestIdPointer',
+    'requestTemplate',
+    'responsePointer',
+    'tracePointer',
+    'webSocketLifecycle',
+    'webSocketSubprotocol',
+    'webSocketUrl',
   ]),
 };
 
@@ -710,18 +818,27 @@ const assertApplicableAuthoringFlags = (
   selected: keyof typeof TRANSPORT_AUTHORING_FIELDS,
 ): void => {
   const allowed = TRANSPORT_AUTHORING_FIELDS[selected];
+  const incompatibleOptions: string[] = [];
   for (const field of Object.keys(AUTHORING_FLAG_BY_FIELD) as (keyof AgentAddFields)[]) {
     if (
       fieldIsProvided(fields[field]) &&
       !COMMON_AUTHORING_FIELDS.has(field) &&
       !allowed.has(field)
     ) {
-      const flag = AUTHORING_FLAG_BY_FIELD[field];
-      throw new AttestCliError('cli_usage', `Option --${flag} is not valid for this transport.`, {
-        path: `--${flag}`,
-        hint: 'Remove the incompatible option or select the transport that owns it.',
-      });
+      incompatibleOptions.push(`--${AUTHORING_FLAG_BY_FIELD[field]}`);
     }
+  }
+  if (incompatibleOptions.length > 0) {
+    incompatibleOptions.sort();
+    throw new AttestCliError(
+      'cli_usage',
+      `Options ${incompatibleOptions.join(', ')} are not valid for this transport.`,
+      {
+        path: incompatibleOptions[0],
+        hint: 'Remove the incompatible options or select the transport that owns them.',
+        details: { incompatible_options: incompatibleOptions },
+      },
+    );
   }
   if (
     selected === 'stream' &&
@@ -748,6 +865,7 @@ const createAgentResource = (fields: AgentAddFields): AgentResource => {
     fields.backgroundCommand === undefined ? undefined : ('background' as const),
     fields.jsonlCommand === undefined ? undefined : ('jsonl' as const),
     fields.streamUrl === undefined ? undefined : ('stream' as const),
+    fields.webSocketUrl === undefined ? undefined : ('websocket' as const),
   ].filter((value) => value !== undefined);
   if (selections.length !== 1) {
     throw new AttestCliError(
@@ -755,7 +873,10 @@ const createAgentResource = (fields: AgentAddFields): AgentResource => {
       'Select exactly one agent transport.',
       {
         path: '--argv-json',
-        hint: 'Pass one of `--argv-json`, `--native-command`, `--native-http`, `--background-command`, `--jsonl-command`, or `--stream-url`.',
+        hint: 'Pass one of `--argv-json`, `--native-command`, `--native-http`, `--background-command`, `--jsonl-command`, `--stream-url`, or `--websocket-url`.',
+        details: {
+          selected_transports: selections,
+        },
       },
     );
   }
@@ -861,6 +982,39 @@ const createAgentResource = (fields: AgentAddFields): AgentResource => {
             incremental_output_pointer: fields.incrementalOutputPointer,
             incremental_output_mode: fields.incrementalOutputMode ?? 'text',
           }),
+    };
+  } else if (fields.webSocketUrl !== undefined) {
+    transport = {
+      kind: 'websocket',
+      lifecycle: fields.webSocketLifecycle ?? 'per_run',
+      connection_mode: fields.connectionMode ?? 'multiplexed',
+      framing: 'text_json',
+      url: fields.webSocketUrl,
+      ...(fields.headerEnv === undefined || fields.headerEnv.length === 0
+        ? {}
+        : { headers: parseSecretBindings(fields.headerEnv, '--header-env') }),
+      ...(fields.webSocketSubprotocol === undefined
+        ? {}
+        : { subprotocol: fields.webSocketSubprotocol }),
+      request_template: parseRequestTemplate(
+        fields.requestTemplate ?? '{"request_id":"{{request_id}}","request":"{{request}}"}',
+      ),
+      request_id_pointer: fields.requestIdPointer ?? '/request_id',
+      acknowledgement_pointer: fields.acknowledgementPointer ?? '/type',
+      acknowledgement_values: parseJsonValues(
+        fields.acknowledgementValues ?? ['"acknowledgement"'],
+        '--acknowledgement-value',
+      ),
+      result_pointer: fields.responsePointer ?? '/output',
+      error_pointer: fields.errorPointer ?? '/error',
+      ...(fields.tracePointer === undefined ? {} : { trace_pointer: fields.tracePointer }),
+      open_timeout_ms: parseDuration(fields.openTimeout ?? '10s', '--open-timeout'),
+      message_idle_timeout_ms: parseDuration(fields.idleTimeout ?? '30s', '--idle-timeout'),
+      attempt_timeout_ms: parseDuration(fields.attemptTimeout ?? '60s', '--attempt-timeout'),
+      ping_interval_ms: parseDuration(fields.pingInterval ?? '15s', '--ping-interval'),
+      close_timeout_ms: parseDuration(fields.closeTimeout ?? '5s', '--close-timeout'),
+      retry_boundary: 'before_acknowledgement',
+      replay_after_acknowledgement: false,
     };
   } else {
     transport = {

@@ -327,6 +327,22 @@ const resolveNativeAgent = async (
     };
   }
 
+  if (agent.transport.kind === 'websocket') {
+    throw new AttestCliError(
+      'invocation_failed',
+      'WebSocket connection testing requires the CLI2.12 runtime integration.',
+      {
+        path: `/agents/${agent.id}/transport/kind`,
+        hint: 'The authored resource and test request are valid; connect the frozen WebSocket adapter before probing it.',
+        details: {
+          diagnostic: 'websocket_runtime_not_wired',
+          framing: agent.transport.framing,
+          transport: agent.transport.kind,
+        },
+      },
+    );
+  }
+
   throw new AttestCliError(
     'project_invalid',
     `Agent ${agent.id} uses a transport that belongs to a later CLI item.`,
