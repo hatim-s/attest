@@ -545,13 +545,36 @@ describe('CLI2.6 agent authoring', () => {
       command: 'agent.add',
       ok: true,
     });
+    await writeFile(
+      join(root, 'prefix-import.json'),
+      JSON.stringify({
+        schema: 'attest.agent/v2',
+        id: 'source',
+        name: 'Prefix import',
+        transport: {
+          kind: 'native_cli',
+          lifecycle: 'per_case',
+          argv: [process.execPath, FIXTURE, 'echo'],
+        },
+      }),
+    );
+    for (const command of [
+      ['agent', 'import', 'prefix-import.json', '--as', 'prefix-import'],
+      ['agent', 'rename', 'global-position', 'renamed-global'],
+      ['agent', 'test', 'renamed-global'],
+      ['agent', 'remove', 'prefix-import'],
+    ]) {
+      const result = await run(root, ['--output', 'json', '--non-interactive', ...command]);
+      expect(result.exitCode).toBe(0);
+      expect(JSON.parse(result.output[0] ?? '{}')).toMatchObject({ ok: true });
+    }
 
     const duplicate = await run(root, [
       '--output',
       'json',
       'agent',
       'test',
-      'global-position',
+      'renamed-global',
       '--output',
       'json',
     ]);
