@@ -138,6 +138,7 @@ const createProgram = (
     .name('attest')
     .description('Run reproducible evaluations for CLI and HTTP AI agents.')
     .version(packageMetadata.version)
+    .enablePositionalOptions()
     .showHelpAfterError()
     .exitOverride()
     .configureOutput({
