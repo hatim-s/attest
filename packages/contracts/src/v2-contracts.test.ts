@@ -360,7 +360,7 @@ describe('v2 command request contract', () => {
     ).toBe(false);
   });
 
-  it('limits CLI2.7 imports to native JSON and JSONL without mapping policies', () => {
+  it('accepts the complete CLI2.8 tabular import policy and rejects unknown fields', () => {
     const request = {
       ...base,
       command: 'test.case.import',
@@ -373,13 +373,30 @@ describe('v2 command request contract', () => {
     expect(
       commandRequestSchema.safeParse({
         ...request,
-        import: { format: 'csv' },
+        import: {
+          format: 'csv',
+          mapping: [
+            { destination: 'input.question', source: 'prompt' },
+            { destination: 'expected.answer', source: 'ideal' },
+          ],
+          parse_json: ['tags'],
+          key: 'external_id',
+          dedupe: 'key',
+          on_conflict: 'update',
+          sync: 'upsert',
+        },
+      }).success,
+    ).toBe(true);
+    expect(
+      commandRequestSchema.safeParse({
+        ...request,
+        import: { format: 'jsonl', destructive_replace: true },
       }).success,
     ).toBe(false);
     expect(
       commandRequestSchema.safeParse({
         ...request,
-        import: { format: 'jsonl', mapping: [], sync: 'append', dedupe: 'key' },
+        import: { mapping: [{ destination: 'unsupported', source: '/value' }] },
       }).success,
     ).toBe(false);
   });
