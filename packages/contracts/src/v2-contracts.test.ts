@@ -264,6 +264,15 @@ describe('v2 agent transport contract', () => {
     expect(agentResourceSchema.safeParse({ ...agent, transport }).success).toBe(true);
   });
 
+  it('accepts RFC 6901 redaction pointers to prototype-named JSON keys', () => {
+    expect(
+      agentResourceSchema.safeParse({
+        ...agent,
+        redaction: { event_pointers: ['/constructor', '/prototype', '/__proto__'] },
+      }).success,
+    ).toBe(true);
+  });
+
   it('defaults legacy HTTP response provenance without overriding explicit new modes', () => {
     const explicitMapped = transports.find((transport) => transport.kind === 'http');
     expect(explicitMapped).toBeDefined();
