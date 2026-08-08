@@ -11,7 +11,14 @@ import {
   type JsonValue,
   type SecretReference,
 } from '@attest/contracts';
-import { invokeAgent, type StoredCaseExecution, type StoredAttempt } from '@attest/core';
+import {
+  invokeAgent,
+  invokeMappedHttpAgent,
+  type HttpAgentResource,
+  type InvocationResult,
+  type StoredCaseExecution,
+  type StoredAttempt,
+} from '@attest/core';
 
 import { AttestCliError } from '../../errors.js';
 
@@ -34,8 +41,10 @@ type NativeAgentTestOptions = {
 type ResolvedNativeAgent = {
   env?: Record<string, string>;
   httpHeaders?: Record<string, string>;
+  httpQuery?: Record<string, string>;
+  mappedAgent?: HttpAgentResource;
   secrets: string[];
-  target: AgentTarget;
+  target?: AgentTarget;
 };
 
 const isContainedPath = (root: string, candidate: string): boolean => {
@@ -141,27 +150,20 @@ const resolveNativeAgent = async (
     return { env, secrets, target: { type: 'cli', command: argv } };
   }
 
-  if (agent.transport.kind === 'http') {
-    const { extraction, request } = agent.transport;
-    if (
-      request.method !== 'POST' ||
-      request.body !== undefined ||
-      request.query !== undefined ||
-      extraction.result_pointer !== '' ||
-      extraction.error_pointer !== undefined ||
-      extraction.trace_pointer !== undefined ||
-      extraction.remote_job_id_pointer !== undefined
-    ) {
-      throw new AttestCliError(
-        'project_invalid',
-        'CLI2.6 supports only native-envelope HTTP agent resources.',
-        {
-          path: `/agents/${agent.id}/transport`,
-          hint: 'Use POST with the native request body and an empty result pointer.',
-        },
-      );
-    }
+  if (agent.transport.kind === 'http' || agent.transport.kind === 'polling') {
+    const transport = agent.transport;
+    const request = transport.kind === 'http' ? transport.request : transport.submit;
+    const nativeEnvelope =
+      transport.kind === 'http' &&
+      request.method === 'POST' &&
+      request.body === undefined &&
+      request.query === undefined &&
+      transport.extraction.result_pointer === '' &&
+      transport.extraction.error_pointer === undefined &&
+      transport.extraction.trace_pointer === undefined &&
+      transport.extraction.remote_job_id_pointer === undefined;
     const headers: Record<string, string> = {};
+    const query: Record<string, string> = {};
     const secrets: string[] = [];
     for (const [name, value] of Object.entries(request.headers ?? {})) {
       if (typeof value === 'string') {
@@ -175,7 +177,23 @@ const resolveNativeAgent = async (
         secrets.push(headers[name]);
       }
     }
-    return { httpHeaders: headers, secrets, target: { type: 'http', url: request.url } };
+    for (const [name, value] of Object.entries(request.query ?? {})) {
+      if (typeof value === 'string') query[name] = value;
+      else {
+        query[name] = await readSecretReference(value, projectRoot, observer);
+        secrets.push(query[name]);
+      }
+      if (agent.redaction?.query?.includes(name)) secrets.push(query[name]);
+    }
+    if (nativeEnvelope) {
+      return { httpHeaders: headers, secrets, target: { type: 'http', url: request.url } };
+    }
+    return {
+      httpHeaders: headers,
+      httpQuery: query,
+      mappedAgent: agent as HttpAgentResource,
+      secrets,
+    };
   }
 
   throw new AttestCliError(
@@ -183,42 +201,71 @@ const resolveNativeAgent = async (
     `Agent ${agent.id} uses a transport that belongs to a later CLI item.`,
     {
       path: `/agents/${agent.id}/transport/kind`,
-      hint: 'Use native_cli or native-envelope http for CLI2.6 connection tests.',
+      hint: 'Use native_cli, direct HTTP, or polling for CLI2.10 connection tests.',
     },
   );
 };
 
-/** Rejects authored policies that the bounded CLI2.6 native probe cannot enforce. */
+/** Rejects authored policies that the selected bounded adapter cannot enforce. */
 const assertSupportedProbePolicy = (agent: AgentResource): void => {
-  const unsupportedTimeout = ['connect_ms', 'first_byte_ms', 'idle_ms', 'run_ms'].find(
+  const mappedHttp =
+    agent.transport.kind === 'polling' ||
+    (agent.transport.kind === 'http' &&
+      !(
+        agent.transport.request.method === 'POST' &&
+        agent.transport.request.body === undefined &&
+        agent.transport.request.query === undefined &&
+        agent.transport.extraction.result_pointer === '' &&
+        agent.transport.extraction.error_pointer === undefined &&
+        agent.transport.extraction.trace_pointer === undefined &&
+        agent.transport.extraction.remote_job_id_pointer === undefined
+      ));
+  const unsupportedTimeout = (
+    mappedHttp ? ['run_ms'] : ['connect_ms', 'first_byte_ms', 'idle_ms', 'run_ms']
+  ).find(
     (field) =>
       agent.timeouts?.[field as keyof NonNullable<AgentResource['timeouts']>] !== undefined,
   );
   if (unsupportedTimeout !== undefined) {
-    throw new AttestCliError('project_invalid', 'This timeout phase is not supported by CLI2.6.', {
-      path: `/agents/${agent.id}/timeouts/${unsupportedTimeout}`,
-      hint: 'Use attempt_ms for a bounded native connection probe.',
-    });
+    throw new AttestCliError(
+      'project_invalid',
+      'This timeout phase is not supported by the adapter.',
+      {
+        path: `/agents/${agent.id}/timeouts/${unsupportedTimeout}`,
+        hint: mappedHttp
+          ? 'Mapped HTTP probes support connect, first-byte, idle, and attempt timeouts.'
+          : 'Use attempt_ms for a bounded native connection probe.',
+      },
+    );
   }
-  if (agent.retry !== undefined && agent.retry.backoff.kind !== 'none') {
-    throw new AttestCliError('project_invalid', 'Retry backoff is not supported by CLI2.6.', {
-      path: `/agents/${agent.id}/retry/backoff`,
-      hint: 'Use deterministic no-backoff retries for a native connection probe.',
-    });
+  if (!mappedHttp && agent.retry !== undefined && agent.retry.backoff.kind !== 'none') {
+    throw new AttestCliError(
+      'project_invalid',
+      'Retry backoff is not supported by native probes.',
+      {
+        path: `/agents/${agent.id}/retry/backoff`,
+        hint: 'Use deterministic no-backoff retries for a native connection probe.',
+      },
+    );
   }
-  const unsupportedLimit = [
-    'request_bytes',
-    'event_count',
-    'event_bytes',
-    'total_evidence_bytes',
-  ].find(
+  const unsupportedLimit = (
+    mappedHttp
+      ? ['event_count', 'event_bytes', 'total_evidence_bytes']
+      : ['request_bytes', 'event_count', 'event_bytes', 'total_evidence_bytes']
+  ).find(
     (field) => agent.limits?.[field as keyof NonNullable<AgentResource['limits']>] !== undefined,
   );
   if (unsupportedLimit !== undefined) {
-    throw new AttestCliError('project_invalid', 'This evidence limit is not supported by CLI2.6.', {
-      path: `/agents/${agent.id}/limits/${unsupportedLimit}`,
-      hint: 'Use response_bytes for the bounded native connection probe.',
-    });
+    throw new AttestCliError(
+      'project_invalid',
+      'This evidence limit is not supported by the adapter.',
+      {
+        path: `/agents/${agent.id}/limits/${unsupportedLimit}`,
+        hint: mappedHttp
+          ? 'Use request_bytes and response_bytes for mapped HTTP probes.'
+          : 'Use response_bytes for the bounded native connection probe.',
+      },
+    );
   }
 };
 
@@ -248,9 +295,7 @@ const redactProbeValue = (value: unknown, secrets: readonly string[]): JsonValue
 const redactStored = <Value>(value: Value, secrets: readonly string[]): Value =>
   redactProbeValue(value, secrets) as unknown as Value;
 
-const invocationAttempts = (
-  attempts: Awaited<ReturnType<typeof invokeAgent>>['attempts'],
-): JsonValue =>
+const invocationAttempts = (attempts: InvocationResult['attempts']): JsonValue =>
   attempts.map((attempt, index) => ({
     attempt: index + 1,
     status: attempt.status,
@@ -261,7 +306,7 @@ const invocationAttempts = (
   })) as JsonValue;
 
 const storedAttempts = (
-  attempts: Awaited<ReturnType<typeof invokeAgent>>['attempts'],
+  attempts: InvocationResult['attempts'],
   secrets: readonly string[],
 ): StoredAttempt[] =>
   attempts.map((attempt) => ({
@@ -279,7 +324,7 @@ const storedAttempts = (
       : {}),
   })) as unknown as StoredAttempt[];
 
-/** Runs one native contract probe and returns only bounded, redacted, deterministic evidence. */
+/** Runs one supported adapter probe and returns only bounded, redacted evidence. */
 const testNativeAgentConnection = async (options: NativeAgentTestOptions): Promise<JsonValue> => {
   assertSupportedProbePolicy(options.agent);
   options.onProgress?.(`Testing agent ${options.agent.id}...`);
@@ -295,14 +340,24 @@ const testNativeAgentConnection = async (options: NativeAgentTestOptions): Promi
     input: options.input,
   };
   const startedAt = new Date().toISOString();
-  const invocation = await invokeAgent(resolved.target, request, {
-    env: resolved.env,
-    httpHeaders: resolved.httpHeaders,
-    outputCapBytes: options.agent.limits?.response_bytes ?? DEFAULT_OUTPUT_CAP_BYTES,
-    retries: options.agent.retry?.retries ?? 0,
-    signal: options.signal,
-    timeoutMs: options.agent.timeouts?.attempt_ms ?? DEFAULT_TIMEOUT_MS,
-  });
+  const invocation =
+    resolved.mappedAgent === undefined
+      ? resolved.target === undefined
+        ? await Promise.reject(new Error('Resolved agent omitted its invocation target.'))
+        : await invokeAgent(resolved.target, request, {
+            env: resolved.env,
+            httpHeaders: resolved.httpHeaders,
+            outputCapBytes: options.agent.limits?.response_bytes ?? DEFAULT_OUTPUT_CAP_BYTES,
+            retries: options.agent.retry?.retries ?? 0,
+            signal: options.signal,
+            timeoutMs: options.agent.timeouts?.attempt_ms ?? DEFAULT_TIMEOUT_MS,
+          })
+      : await invokeMappedHttpAgent(resolved.mappedAgent, request, {
+          headers: resolved.httpHeaders,
+          query: resolved.httpQuery,
+          secrets: resolved.secrets,
+          signal: options.signal,
+        });
   if (invocation.status === 'invocation_error') {
     const code = invocation.error.code === 'cancelled' ? 'cancelled' : 'invocation_failed';
     await options.onExecution?.({
@@ -331,7 +386,7 @@ const testNativeAgentConnection = async (options: NativeAgentTestOptions): Promi
         hint:
           code === 'cancelled'
             ? 'Retry when cancellation is no longer required.'
-            : 'Repair the native agent contract and retry `attest agent test`.',
+            : 'Repair the agent mapping or transport and retry `attest agent test`.',
         details: redactProbeValue(
           {
             attempt_count: invocation.attempts.length,
@@ -346,7 +401,7 @@ const testNativeAgentConnection = async (options: NativeAgentTestOptions): Promi
     );
   }
   if (invocation.report === undefined || !invocation.report.ok) {
-    throw new AttestCliError('internal_error', 'The native invoker omitted its parse report.');
+    throw new AttestCliError('internal_error', 'The adapter omitted its parse report.');
   }
 
   await options.onExecution?.({

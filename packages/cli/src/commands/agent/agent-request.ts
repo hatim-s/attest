@@ -12,6 +12,11 @@ import {
 } from '@attest/contracts';
 
 import { AttestCliError } from '../../errors.js';
+import {
+  CurlImportError,
+  parseCurlCommand,
+  type CurlImportPreview,
+} from '../../import/curl/index.js';
 import type { JsonValue } from '../../project/canonical-project.js';
 
 type ReadInput = () => Promise<string>;
@@ -33,6 +38,7 @@ const requestDiagnostics = (
 ): JsonValue => issues.map(({ message, path }) => ({ message, path: `/${path.join('/')}` }));
 
 const MAX_REMOTE_JSON_BYTES = 1024 * 1024;
+const MAX_CURL_BYTES = 1024 * 1024;
 const REMOTE_JSON_TIMEOUT_MS = 10_000;
 
 /** Fetches one bounded JSON document without following redirects or reflecting its URL. */
@@ -264,18 +270,101 @@ const parseSecretBindings = (
 
 const SENSITIVE_NAME = /authorization|cookie|password|secret|token|api[-_]?key/iu;
 
-/** Rejects authored literal credentials and every transport deferred to later CLI items. */
+const isNativeEnvelopeHttp = (
+  transport: Extract<AgentResource['transport'], { kind: 'http' }>,
+): boolean =>
+  transport.request.method === 'POST' &&
+  transport.request.body === undefined &&
+  transport.request.query === undefined &&
+  transport.extraction.result_pointer === '' &&
+  transport.extraction.error_pointer === undefined &&
+  transport.extraction.trace_pointer === undefined &&
+  transport.extraction.remote_job_id_pointer === undefined;
+
+const findSensitiveBodyField = (value: JsonValue, path = ''): string | undefined => {
+  if (Array.isArray(value)) {
+    for (let index = 0; index < value.length; index += 1) {
+      const found = findSensitiveBodyField(value[index]!, `${path}/${String(index)}`);
+      if (found !== undefined) return found;
+    }
+    return undefined;
+  }
+  if (value === null || typeof value !== 'object') return undefined;
+  for (const [name, entry] of Object.entries(value)) {
+    if (SENSITIVE_NAME.test(name)) return `${path}/${name}`;
+    const found = findSensitiveBodyField(entry, `${path}/${name}`);
+    if (found !== undefined) return found;
+  }
+  return undefined;
+};
+
+const assertSafeHttpTemplate = (
+  request: Extract<AgentResource['transport'], { kind: 'http' }>['request'],
+  path: string,
+): URL => {
+  let url: URL;
+  try {
+    url = new URL(request.url.replaceAll(/\{\{[^}]+\}\}/gu, 'placeholder'));
+  } catch {
+    throw new AttestCliError('project_invalid', 'Mapped HTTP URL is invalid.', { path });
+  }
+  if (
+    !['http:', 'https:'].includes(url.protocol) ||
+    url.username.length > 0 ||
+    url.password.length > 0 ||
+    url.hash.length > 0 ||
+    url.search.length > 0
+  ) {
+    throw new AttestCliError('project_invalid', 'Mapped HTTP URL contains an unsafe component.', {
+      path,
+      hint: 'Keep query mappings separate and remove credentials or fragments from the URL.',
+    });
+  }
+  for (const [name, value] of Object.entries(request.headers ?? {})) {
+    if (SENSITIVE_NAME.test(name) && typeof value === 'string') {
+      throw new AttestCliError('project_invalid', 'Sensitive HTTP headers must use references.', {
+        path: `${path}/headers/${name}`,
+      });
+    }
+  }
+  for (const [name, value] of Object.entries(request.query ?? {})) {
+    if (SENSITIVE_NAME.test(name) && typeof value === 'string') {
+      throw new AttestCliError(
+        'project_invalid',
+        'Sensitive HTTP query values must use references.',
+        {
+          path: `${path}/query/${name}`,
+        },
+      );
+    }
+  }
+  const sensitiveBody =
+    request.body === undefined ? undefined : findSensitiveBodyField(request.body);
+  if (sensitiveBody !== undefined) {
+    throw new AttestCliError('project_invalid', 'Mapped HTTP bodies cannot contain credentials.', {
+      path: `${path}/body${sensitiveBody}`,
+      hint: 'Move credentials to an environment-backed header or query reference.',
+    });
+  }
+  return url;
+};
+
+/** Rejects authored credentials and runtime policies outside the implemented adapter slice. */
 const assertSafeNativeAgentResource = (agent: AgentResource): void => {
-  const unsupportedTimeout = ['connect_ms', 'first_byte_ms', 'idle_ms', 'run_ms'].find(
+  const mappedHttp =
+    agent.transport.kind === 'polling' ||
+    (agent.transport.kind === 'http' && !isNativeEnvelopeHttp(agent.transport));
+  const unsupportedTimeout = (
+    mappedHttp ? ['run_ms'] : ['connect_ms', 'first_byte_ms', 'idle_ms', 'run_ms']
+  ).find(
     (field) =>
       agent.timeouts?.[field as keyof NonNullable<AgentResource['timeouts']>] !== undefined,
   );
-  const unsupportedLimit = [
-    'request_bytes',
-    'event_count',
-    'event_bytes',
-    'total_evidence_bytes',
-  ].find(
+  const unsupportedLimit = (
+    mappedHttp
+      ? ['event_count', 'event_bytes', 'total_evidence_bytes']
+      : ['request_bytes', 'event_count', 'event_bytes', 'total_evidence_bytes']
+  ).find(
     (field) => agent.limits?.[field as keyof NonNullable<AgentResource['limits']>] !== undefined,
   );
   if (unsupportedTimeout !== undefined || unsupportedLimit !== undefined) {
@@ -283,14 +372,20 @@ const assertSafeNativeAgentResource = (agent: AgentResource): void => {
     const field = unsupportedTimeout ?? unsupportedLimit!;
     throw new AttestCliError('project_invalid', 'This native runtime policy is unsupported.', {
       path: `/agent/${section}/${field}`,
-      hint: 'CLI2.6 supports attempt_ms, response_bytes, and deterministic no-backoff retries.',
+      hint: mappedHttp
+        ? 'Mapped HTTP probes support connect, first-byte, idle, attempt, request, and response caps.'
+        : 'Native probes support attempt_ms and response_bytes.',
     });
   }
-  if (agent.retry !== undefined && agent.retry.backoff.kind !== 'none') {
-    throw new AttestCliError('project_invalid', 'Retry backoff is not supported by CLI2.6.', {
-      path: '/agent/retry/backoff',
-      hint: 'Use `{ "kind": "none" }` for a deterministic native connection probe.',
-    });
+  if (!mappedHttp && agent.retry !== undefined && agent.retry.backoff.kind !== 'none') {
+    throw new AttestCliError(
+      'project_invalid',
+      'Retry backoff is not supported by native probes.',
+      {
+        path: '/agent/retry/backoff',
+        hint: 'Use `{ "kind": "none" }` for a deterministic native connection probe.',
+      },
+    );
   }
   const transport = agent.transport;
   if (transport.kind === 'native_cli') {
@@ -314,50 +409,41 @@ const assertSafeNativeAgentResource = (agent: AgentResource): void => {
     }
     return;
   }
-  if (transport.kind !== 'http') {
+  if (transport.kind !== 'http' && transport.kind !== 'polling') {
     throw new AttestCliError('project_invalid', 'This transport belongs to a later CLI item.', {
       path: '/agent/transport/kind',
-      hint: 'CLI2.6 accepts only native_cli and native-envelope http resources.',
+      hint: 'CLI2.10 accepts native_cli, direct HTTP, and polling resources.',
     });
   }
-  let url: URL;
-  try {
-    url = new URL(transport.request.url);
-  } catch {
-    throw new AttestCliError('project_invalid', 'Native HTTP URL is invalid.', {
-      path: '/agent/transport/request/url',
-    });
-  }
-  if (url.username.length > 0 || url.password.length > 0 || url.search.length > 0) {
-    throw new AttestCliError(
-      'project_invalid',
-      'Native HTTP URL cannot contain authored query values.',
-      {
-        path: '/agent/transport/request/url',
-        hint: 'Move authentication to an environment-backed header reference.',
-      },
+  const request = transport.kind === 'http' ? transport.request : transport.submit;
+  const requestPath = `/agent/transport/${transport.kind === 'http' ? 'request' : 'submit'}`;
+  const origin = assertSafeHttpTemplate(request, requestPath);
+  if (transport.kind === 'polling' && transport.status_url_template !== undefined) {
+    const status = assertSafeHttpTemplate(
+      { url: transport.status_url_template.replaceAll('{{job_id}}', 'job'), method: 'GET' },
+      '/agent/transport/status_url_template',
     );
-  }
-  for (const [name, value] of Object.entries(transport.request.headers ?? {})) {
-    if (SENSITIVE_NAME.test(name) && typeof value === 'string') {
-      throw new AttestCliError(
-        'project_invalid',
-        'Sensitive HTTP headers must use secret references.',
-        {
-          path: `/agent/transport/request/headers/${name}`,
-          hint: 'Use `{ "from_env": "NAME" }` instead of a literal value.',
-        },
-      );
+    if (status.origin !== origin.origin) {
+      throw new AttestCliError('project_invalid', 'Polling status URL must retain submit origin.', {
+        path: '/agent/transport/status_url_template',
+      });
     }
   }
   for (const name of agent.redaction?.headers ?? []) {
     if (
-      !Object.keys(transport.request.headers ?? {}).some(
+      !Object.keys(request.headers ?? {}).some(
         (header) => header.toLowerCase() === name.toLowerCase(),
       )
     ) {
       throw new AttestCliError('project_invalid', 'A header redaction target does not exist.', {
         path: `/agent/redaction/headers/${name}`,
+      });
+    }
+  }
+  for (const name of agent.redaction?.query ?? []) {
+    if (!Object.hasOwn(request.query ?? {}, name)) {
+      throw new AttestCliError('project_invalid', 'A query redaction target does not exist.', {
+        path: `/agent/redaction/query/${name}`,
       });
     }
   }
@@ -443,12 +529,124 @@ const readImportedAgentResource = async (
   return resource;
 };
 
+type CurlAgentImportRequest = Extract<
+  CommandRequest,
+  { command: 'agent.import'; source_type: 'curl' }
+>;
+
+/** Reads one bounded local/stdin cURL document without permitting remote source indirection. */
+const readCurlDocument = async (
+  source: string,
+  workingDirectory: string,
+  readStdin: ReadInput,
+): Promise<string> => {
+  let text: string;
+  try {
+    if (/^https?:\/\//u.test(source)) throw new Error('remote cURL sources are not supported');
+    text =
+      source === '-'
+        ? await readStdin()
+        : await readFile(resolve(workingDirectory, source), 'utf8');
+  } catch (error: unknown) {
+    throw new AttestCliError('cli_usage', 'Could not read the selected cURL source.', {
+      path: 'source',
+      hint: 'Pass a local cURL file or `-` for stdin.',
+      cause: error,
+    });
+  }
+  if (Buffer.byteLength(text) > MAX_CURL_BYTES) {
+    throw new AttestCliError('cli_usage', 'The cURL source exceeds the size limit.', {
+      path: 'source',
+      details: { maximum_bytes: MAX_CURL_BYTES },
+    });
+  }
+  return text;
+};
+
+/** Converts one inert cURL request into a canonical direct or polling agent resource. */
+const createImportedCurlAgentResource = (
+  request: CurlAgentImportRequest,
+  source: string,
+): { agent: AgentResource; preview: CurlImportPreview } => {
+  if (request.extraction.result_pointer === '') {
+    throw new AttestCliError('cli_usage', 'cURL imports require a non-root result pointer.', {
+      path: '/extraction/result_pointer',
+      hint: 'Select the foreign response field that becomes the Attest output.',
+    });
+  }
+  let parsedCurl: ReturnType<typeof parseCurlCommand>;
+  try {
+    parsedCurl = parseCurlCommand(source, {
+      headerSecrets: request.header_env,
+      querySecrets: request.query_env,
+      placeholders: request.placeholders?.map((mapping) => ({
+        targetPointer: mapping.target_pointer,
+        inputPointer: mapping.input_pointer,
+      })),
+    });
+  } catch (error: unknown) {
+    if (error instanceof CurlImportError) {
+      throw new AttestCliError('cli_usage', error.message, {
+        path: 'source',
+        hint: 'Use literal HTTP request data and explicit environment-backed secret mappings.',
+        details: { diagnostics: error.diagnostics },
+      });
+    }
+    throw error;
+  }
+  const transport =
+    request.polling === undefined
+      ? {
+          kind: 'http' as const,
+          lifecycle: 'external' as const,
+          request: parsedCurl.request,
+          extraction: request.extraction,
+        }
+      : {
+          kind: 'polling' as const,
+          lifecycle: 'external' as const,
+          submit: parsedCurl.request,
+          extraction: request.extraction,
+          ...request.polling,
+        };
+  const parsed = agentResourceSchema.safeParse({
+    schema: AGENT_RESOURCE_SCHEMA_VERSION,
+    id: request.as,
+    name: request.name?.trim() || request.as,
+    transport,
+    ...(request.timeouts === undefined ? {} : { timeouts: request.timeouts }),
+    ...(request.retry === undefined ? {} : { retry: request.retry }),
+    ...(request.limits === undefined ? {} : { limits: request.limits }),
+    ...((request.header_env === undefined || Object.keys(request.header_env).length === 0) &&
+    (request.query_env === undefined || Object.keys(request.query_env).length === 0)
+      ? {}
+      : {
+          redaction: {
+            ...(request.header_env === undefined
+              ? {}
+              : { headers: Object.keys(request.header_env) }),
+            ...(request.query_env === undefined ? {} : { query: Object.keys(request.query_env) }),
+          },
+        }),
+  });
+  if (!parsed.success) {
+    throw new AttestCliError('cli_usage', 'The cURL mapping does not match the agent schema.', {
+      path: 'source',
+      details: { diagnostics: requestDiagnostics(parsed.error.issues) },
+    });
+  }
+  assertSafeNativeAgentResource(parsed.data);
+  return { agent: parsed.data, preview: parsedCurl.preview };
+};
+
 export {
   assertSafeNativeAgentResource,
+  createImportedCurlAgentResource,
   createAgentResource,
   parseArgvJson,
   parseDuration,
   readAgentCommandRequest,
+  readCurlDocument,
   readImportedAgentResource,
   tokenizeCommand,
   type AgentAddFields,

@@ -11,6 +11,7 @@ import {
   writeFile,
 } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
+import { createServer } from 'node:http';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
@@ -122,6 +123,138 @@ afterEach(async () => {
 });
 
 describe('CLI2.6 agent authoring', () => {
+  it('imports and probes a redacted cURL polling adapter through the public CLI', async () => {
+    const root = await createProject();
+    const secret = 'curl-polling-super-secret';
+    process.env.ATTEST_CURL_POLLING_SECRET = secret;
+    let submissions = 0;
+    let polls = 0;
+    let observedAuthorization = '';
+    let observedPrompt: unknown;
+    const server = createServer((request, response) => {
+      const chunks: Buffer[] = [];
+      request.on('data', (chunk: Buffer) => chunks.push(chunk));
+      request.on('end', () => {
+        response.setHeader('content-type', 'application/json');
+        observedAuthorization = String(request.headers.authorization);
+        if (request.url === '/submit') {
+          submissions += 1;
+          observedPrompt = (
+            JSON.parse(Buffer.concat(chunks).toString('utf8')) as { prompt: unknown }
+          ).prompt;
+          response.end(JSON.stringify({ job_id: 'job-1', status_url: '/jobs/job-1' }));
+          return;
+        }
+        polls += 1;
+        response.end(JSON.stringify({ status: 'done', answer: { secret, value: 'ok' } }));
+      });
+    });
+    await new Promise<void>((resolve, reject) => {
+      server.once('error', reject);
+      server.listen(0, '127.0.0.1', resolve);
+    });
+    const address = server.address();
+    if (address === null || typeof address === 'string') throw new Error('Expected TCP fixture.');
+    const source = join(root, 'polling.curl');
+    await writeFile(
+      source,
+      `curl 'http://127.0.0.1:${String(address.port)}/submit' -H 'Authorization: Bearer ${secret}' -H 'Content-Type: application/json' --data-raw '{"prompt":"replace-me"}'`,
+    );
+    try {
+      const imported = await run(root, [
+        'agent',
+        'import',
+        source,
+        '--type',
+        'curl',
+        '--as',
+        'polling-curl',
+        '--header-env',
+        'Authorization=ATTEST_CURL_POLLING_SECRET',
+        '--map-body',
+        '/prompt=/question',
+        '--response-pointer',
+        '/answer',
+        '--error-pointer',
+        '/error',
+        '--trace-pointer',
+        '/trace',
+        '--poll-job-id-pointer',
+        '/job_id',
+        '--poll-status-url-pointer',
+        '/status_url',
+        '--poll-status-pointer',
+        '/status',
+        '--poll-success',
+        '"done"',
+        '--poll-failure',
+        '"failed"',
+        '--poll-minimum-interval',
+        '1ms',
+        '--poll-maximum-interval',
+        '5ms',
+        '--idempotency-header',
+        'Idempotency-Key',
+        '--attempt-timeout',
+        '2s',
+        '--response-cap-bytes',
+        '4096',
+        '--retries',
+        '1',
+        '--output',
+        'json',
+      ]);
+      expect(imported.exitCode).toBe(0);
+      expect(imported.output.join('')).not.toContain(secret);
+      expect(JSON.parse(imported.output[0] ?? '{}')).toMatchObject({
+        ok: true,
+        result: {
+          import_preview: {
+            extraction: {
+              result_pointer: '/answer',
+              error_pointer: '/error',
+              trace_pointer: '/trace',
+            },
+            request: { headers: { Authorization: '[from_env:ATTEST_CURL_POLLING_SECRET]' } },
+          },
+        },
+      });
+
+      const loaded = await loadProject({ project: root });
+      expect(loaded.agents[0]).toMatchObject({
+        id: 'polling-curl',
+        transport: {
+          kind: 'polling',
+          submit: {
+            headers: { Authorization: { from_env: 'ATTEST_CURL_POLLING_SECRET' } },
+            body: { prompt: '{{input/question}}' },
+          },
+        },
+      });
+      expect(JSON.stringify(loaded.agents[0])).not.toContain(secret);
+
+      const tested = await run(root, [
+        'agent',
+        'test',
+        'polling-curl',
+        '--input',
+        '{"question":"hello"}',
+        '--output',
+        'json',
+      ]);
+      expect(tested.exitCode).toBe(0);
+      expect(tested.output.join('')).not.toContain(secret);
+      expect(tested.output.join('')).toContain(REDACTED);
+      expect(submissions).toBe(1);
+      expect(polls).toBe(1);
+      expect(observedAuthorization).toBe(secret);
+      expect(observedPrompt).toBe('hello');
+    } finally {
+      delete process.env.ATTEST_CURL_POLLING_SECRET;
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
   it('keeps guided, flag, stdin, and from-json add/import paths on canonical resources', async () => {
     const root = await createProject();
     const questions: string[] = [];
