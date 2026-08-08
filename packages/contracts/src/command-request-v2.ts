@@ -2,7 +2,7 @@ import { z } from 'zod';
 
 import { agentResourceSchema, responseExtractionSchema } from './agent-resource-v2.js';
 import { testCaseSchema } from './case-v2.js';
-import { datasetResourceSchema } from './dataset-resource-v2.js';
+import { datasetImportMappingSchema, datasetResourceSchema } from './dataset-resource-v2.js';
 import { metricResourceSchema } from './metric-resource-v2.js';
 import { testResourceSchema } from './test-resource-v2.js';
 import { jsonPointerSchema, resourceIdSchema, sha256Schema } from './v2-shared.js';
@@ -20,9 +20,16 @@ const authoringTestCaseSchema = testCaseSchema
   .omit({ id: true })
   .extend({ id: resourceIdSchema.optional() });
 
-/** Publishes only the native append-only import surface owned by CLI2.7. */
+/** Encodes the complete deterministic CSV/JSON/JSONL import policy owned by CLI2.8. */
 const caseImportOptionsSchema = z.strictObject({
-  format: z.enum(['json', 'jsonl']).optional(),
+  format: z.enum(['csv', 'json', 'jsonl']).optional(),
+  mapping: z.array(datasetImportMappingSchema).optional(),
+  parse_json: z.array(z.string().min(1)).optional(),
+  records_pointer: jsonPointerSchema.optional(),
+  key: z.string().min(1).optional(),
+  dedupe: z.enum(['id', 'key', 'content']).optional(),
+  on_conflict: z.enum(['error', 'skip', 'update']).optional(),
+  sync: z.enum(['append', 'upsert']).optional(),
 });
 
 const projectInitRequestSchema = z.strictObject({

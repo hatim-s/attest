@@ -22,6 +22,7 @@ type CliInteraction = {
   inputIsTTY: boolean;
   outputIsTTY: boolean;
   prompt: (question: string, options?: { signal?: AbortSignal }) => Promise<string>;
+  readImportStdin: () => AsyncIterable<string | Uint8Array>;
   readStdin: () => Promise<string>;
 };
 
@@ -63,6 +64,7 @@ const createDefaultCliInteraction = (): CliInteraction => ({
   ci: process.env.CI === 'true',
   inputIsTTY: process.stdin.isTTY === true,
   outputIsTTY: process.stdout.isTTY === true,
+  readImportStdin: () => process.stdin as AsyncIterable<Uint8Array>,
   readStdin,
   prompt: async (question: string, options?: { signal?: AbortSignal }) => {
     const prompt = createInterface({ input: process.stdin, output: process.stdout });

@@ -116,6 +116,7 @@ type CliHelpCommand = {
   deprecated: string | null;
   request_schema: string | null;
   examples: string[];
+  constraints: string[];
   presets?: z.infer<typeof metricPresetSchema>[];
 };
 
@@ -134,6 +135,7 @@ const cliHelpCommandSchema: z.ZodType<CliHelpCommand> = z.lazy(() =>
     deprecated: z.string().min(1).nullable(),
     request_schema: z.string().min(1).nullable(),
     examples: z.array(z.string().min(1)),
+    constraints: z.array(z.string().min(1)),
     presets: z.array(metricPresetSchema).optional(),
   }),
 );

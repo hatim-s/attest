@@ -7,6 +7,7 @@ import {
   type TestCase,
   type TestResource,
 } from '@attest/contracts';
+import type { ImportCollisionContext, TabularImportResult } from '@attest/core';
 
 import { AttestCliError } from '../../errors.js';
 import type { JsonValue } from '../../project/canonical-project.js';
@@ -21,7 +22,8 @@ import type { CommandResult } from '../command-result.js';
 import { runListCommand } from '../list/list-command.js';
 import { loadCommandProject } from '../project/load-command-project.js';
 import { runShowCommand } from '../show/show-command.js';
-import { generateCaseId, readNativeCases } from './test-command-input.js';
+import { runTabularImportAdapter } from './import/tabular-import-adapter.js';
+import { generateCaseId } from './test-command-input.js';
 
 type TestAuthoringCommand = Extract<
   CommandRequest,
@@ -47,6 +49,8 @@ type TestMutationCommandOptions = {
   clock?: () => Date;
   project?: string;
   publishObserver?: PublishObserver;
+  preparedImportSource?: Uint8Array;
+  readImportStdin: () => AsyncIterable<string | Uint8Array>;
   readStdin: () => Promise<string>;
   request: TestAuthoringCommand;
   workingDirectory: string;
@@ -60,7 +64,9 @@ type TestReadCommandOptions = {
 };
 
 type MutationBuildResult = {
+  affectedTests?: string[];
   candidate: ProjectResources;
+  importResult?: TabularImportResult;
   importedCaseCount?: number;
   renames?: ProjectMutationRequest['renames'];
   resource: { id: string; type: 'dataset' | 'test' | 'test_case' };
@@ -122,6 +128,46 @@ const attachedDatasetTests = (candidate: ProjectResources, datasetId: string): s
     .map(({ id }) => id)
     .sort();
 
+const attachmentCases = (
+  candidate: ProjectResources,
+  test: TestResource,
+  excludedDatasetId?: string,
+): TestCase[] =>
+  test.datasets.flatMap((attachment) => {
+    if (attachment.dataset_id === excludedDatasetId) return [];
+    const dataset = findDataset(candidate, attachment.dataset_id);
+    return dataset.cases.filter((testCase) => {
+      const tags = new Set(testCase.tags ?? []);
+      return attachment.tags?.some((tag) => !tags.has(tag)) !== true;
+    });
+  });
+
+/** Collects cases outside a direct import target that already resolve into its test. */
+const directImportCollisionCases = (candidate: ProjectResources, test: TestResource): TestCase[] =>
+  attachmentCases(candidate, test);
+
+/** Collects direct/attached cases that an imported dataset must not collide with in any test. */
+const datasetImportCollisionContexts = (
+  candidate: ProjectResources,
+  datasetId: string,
+  importingTestId: string,
+): ImportCollisionContext[] =>
+  candidate.tests
+    .filter(
+      (test) =>
+        test.id === importingTestId ||
+        test.datasets.some((attachment) => attachment.dataset_id === datasetId),
+    )
+    .map((test) => {
+      const targetAttachment = test.datasets.find(
+        (attachment) => attachment.dataset_id === datasetId,
+      );
+      return {
+        cases: [...test.cases, ...attachmentCases(candidate, test, datasetId)],
+        ...(targetAttachment?.tags === undefined ? {} : { requiredTags: targetAttachment.tags }),
+      };
+    });
+
 /** Rejects dataset removal with copy-paste detach commands for every blocking test. */
 const assertDatasetRemovable = (candidate: ProjectResources, datasetId: string): void => {
   findDataset(candidate, datasetId);
@@ -173,15 +219,18 @@ const buildMutation = async (
     }
     case 'test.case.import': {
       const test = findTest(candidate, request.test_id);
-      const imported = await readNativeCases({
-        format: request.import.format,
-        readStdin: options.readStdin,
+      const imported = await runTabularImportAdapter({
+        collisionCases: directImportCollisionCases(candidate, test),
+        existingCases: test.cases,
+        importOptions: request.import,
+        preparedSource: options.preparedImportSource,
+        readImportStdin: options.readImportStdin,
         source: request.source,
         workingDirectory: options.workingDirectory,
       });
-      test.cases.push(...imported.cases);
+      test.cases = imported.cases;
       const warnings: CliWarning[] =
-        imported.cases.length > 100
+        imported.counts.read > 100
           ? [
               {
                 code: 'direct_case_count_high',
@@ -191,7 +240,8 @@ const buildMutation = async (
           : [];
       return {
         candidate,
-        importedCaseCount: imported.cases.length,
+        importedCaseCount: imported.counts.inserted + imported.counts.updated,
+        importResult: imported,
         resource: { id: request.test_id, type: 'test' },
         warnings,
       };
@@ -224,43 +274,75 @@ const buildMutation = async (
     }
     case 'test.dataset.import': {
       const test = findTest(candidate, request.test_id);
-      assertNewResourceId(
-        candidate.datasets.map(({ metadata }) => metadata),
-        'dataset',
-        request.as,
-      );
-      const imported = await readNativeCases({
-        format: request.import.format,
-        readStdin: options.readStdin,
+      const existing = candidate.datasets.find(({ metadata }) => metadata.id === request.as);
+      const affectedTests = attachedDatasetTests(candidate, request.as);
+      const consumerTests = [...new Set([...affectedTests, request.test_id])].sort();
+      if (existing !== undefined && request.import.sync !== 'upsert') {
+        throw new AttestCliError(
+          'project_invalid',
+          `Dataset ${request.as} already exists; import will not silently replace it.`,
+          {
+            path: '--sync',
+            hint: 'Pass --sync upsert to select explicit dataset update semantics.',
+            details: { affected_tests: consumerTests },
+          },
+        );
+      }
+      if (
+        existing !== undefined &&
+        affectedTests.some((id) => id !== request.test_id) &&
+        request.dry_run !== true &&
+        request.yes !== true
+      ) {
+        throw new AttestCliError(
+          'cli_missing_input',
+          'Shared dataset updates require confirmation.',
+          {
+            path: '--yes',
+            hint: 'Preview with --dry-run, then pass --yes to update every affected test.',
+            details: { affected_tests: consumerTests },
+          },
+        );
+      }
+      const imported = await runTabularImportAdapter({
+        collisionContexts: datasetImportCollisionContexts(candidate, request.as, request.test_id),
+        existingCases: existing?.cases,
+        importOptions: request.import,
+        preparedSource: options.preparedImportSource,
+        readImportStdin: options.readImportStdin,
         source: request.source,
         workingDirectory: options.workingDirectory,
       });
-      candidate.datasets.push({
+      const importedDataset = {
         cases: imported.cases,
         metadata: {
           schema: DATASET_SCHEMA_VERSION,
           case_schema: CASE_SCHEMA_VERSION,
           id: request.as,
-          name: request.name ?? request.as,
+          name: request.name ?? existing?.metadata.name ?? request.as,
           case_count: imported.cases.length,
           provenance: {
             source_type: imported.format,
-            mapping: [],
+            mapping: request.import.mapping ?? [],
+            ...(request.import.key === undefined ? {} : { key_field: request.import.key }),
             imported_at: (options.clock ?? (() => new Date()))().toISOString(),
             source_content_hash: imported.sourceHash,
-            counts: {
-              read: imported.cases.length,
-              inserted: imported.cases.length,
-              updated: 0,
-              skipped: 0,
-            },
+            counts: imported.counts,
           },
         },
-      });
-      test.datasets.push({ dataset_id: request.as });
+      };
+      if (existing === undefined) candidate.datasets.push(importedDataset);
+      else Object.assign(existing, importedDataset);
+      if (!test.datasets.some(({ dataset_id }) => dataset_id === request.as)) {
+        test.datasets.push({ dataset_id: request.as });
+      }
       return {
+        ...(existing !== undefined && consumerTests.length > 1
+          ? { affectedTests: consumerTests }
+          : {}),
         candidate,
-        importedCaseCount: imported.cases.length,
+        importedCaseCount: imported.counts.inserted + imported.counts.updated,
+        importResult: imported,
         resource: { id: request.as, type: 'dataset' },
       };
     }
@@ -335,6 +417,18 @@ const renderDryRunOperations = (operations: readonly SemanticProjectOperation[])
     ])
     .join('\n');
 
+const renderImportSummary = (result: TabularImportResult, includePreview: boolean): string[] => [
+  `Import: read ${result.counts.read}, inserted ${result.counts.inserted}, updated ${result.counts.updated}, skipped ${result.counts.skipped}.`,
+  ...(includePreview
+    ? [
+        'Redacted normalized preview (up to 5 rows):',
+        ...(result.preview.length === 0
+          ? ['  <empty>']
+          : result.preview.map((row) => `  ${JSON.stringify(row)}`)),
+      ]
+    : []),
+];
+
 /** Executes one normalized authoring request through the shared hash-guarded transaction writer. */
 const runTestMutationCommand = async (
   options: TestMutationCommandOptions,
@@ -364,6 +458,10 @@ const runTestMutationCommand = async (
   const verb = dryRun ? 'would update' : 'updated';
   const human = [
     `${dryRun ? 'Dry run: ' : ''}${verb} ${built.resource.type} ${built.resource.id}.`,
+    ...(built.affectedTests === undefined
+      ? []
+      : [`Affected consumer tests: ${built.affectedTests.join(', ')}.`]),
+    ...(built.importResult === undefined ? [] : renderImportSummary(built.importResult, dryRun)),
     ...(dryRun
       ? [
           'Semantic diff:',
@@ -382,9 +480,21 @@ const runTestMutationCommand = async (
       dry_run: dryRun,
       resource: built.resource,
       operations: mutation.diff.operations as unknown as JsonValue,
+      ...(built.affectedTests === undefined ? {} : { affected_tests: built.affectedTests }),
       ...(built.importedCaseCount === undefined
         ? {}
         : { imported_case_count: built.importedCaseCount }),
+      ...(built.importResult === undefined
+        ? {}
+        : {
+            import: {
+              format: built.importResult.format,
+              counts: built.importResult.counts,
+              decisions: built.importResult.decisions,
+              preview: built.importResult.preview,
+              source_content_hash: built.importResult.sourceHash,
+            } as JsonValue,
+          }),
     },
     warnings: built.warnings,
   };

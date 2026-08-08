@@ -477,7 +477,17 @@ const runCli = async (argv: string[], options: RunCliOptions = {}): Promise<numb
   const structuredOutput = requestedStructuredOutput(argv);
   const commandIo: CliIo = structuredOutput ? { output: io.output, error: () => undefined } : io;
   let exitCode: CliExitCode = 0;
-  const interaction = { ...createDefaultCliInteraction(), ...options.interaction };
+  const defaultInteraction = createDefaultCliInteraction();
+  const interaction = { ...defaultInteraction, ...options.interaction };
+  if (
+    options.interaction?.readStdin !== undefined &&
+    options.interaction.readImportStdin === undefined
+  ) {
+    // Test and embedding callers with a text stdin override retain parity without touching process stdin.
+    interaction.readImportStdin = async function* readImportStdin() {
+      yield await options.interaction!.readStdin!();
+    };
+  }
   const program = createProgram(
     commandIo,
     workingDirectory,

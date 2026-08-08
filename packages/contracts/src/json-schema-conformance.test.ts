@@ -127,6 +127,7 @@ const validCliHelpCommand = {
   deprecated: null,
   request_schema: null,
   examples: ['attest help --output json'],
+  constraints: [],
 };
 
 const fixtures: ConformanceFixture[] = [
