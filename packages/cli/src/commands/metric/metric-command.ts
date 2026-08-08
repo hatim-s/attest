@@ -24,10 +24,8 @@ import {
   readSecretReference,
   redactProbeValue,
 } from '../agent/native-agent-adapter.js';
-import { runListCommand } from '../list/list-command.js';
 import { loadCommandProject } from '../project/load-command-project.js';
 import { redactMetricResource } from '../show/redact-resource.js';
-import { runShowCommand } from '../show/show-command.js';
 import {
   assertSafeMetricResource,
   readImportedMetricResource,
@@ -84,7 +82,7 @@ const findMetric = (metrics: readonly MetricResource[], id: string): MetricResou
   if (metric === undefined) {
     throw new AttestCliError('resource_not_found', `Metric ${id} was not found.`, {
       path: id,
-      hint: 'Run `attest metric list` to inspect available metric ids.',
+      hint: 'Run `attest list metrics` to inspect available metric ids.',
     });
   }
   return metric;
@@ -512,23 +510,10 @@ const runMetricTestCommand = async (options: MetricTestCommandOptions): Promise<
   };
 };
 
-/** Delegates the compatibility namespace to the generic deterministic metric list projection. */
-const runMetricListCommand = async (options: MetricReadCommandOptions): Promise<CommandResult> =>
-  runListCommand({ ...options, resourceType: 'metrics' });
-
-/** Delegates the compatibility namespace to the generic redacted metric inspection surface. */
-const runMetricShowCommand = async (
-  options: Required<Pick<MetricReadCommandOptions, 'metricId' | 'workingDirectory'>> &
-    Pick<MetricReadCommandOptions, 'project'>,
-): Promise<CommandResult> =>
-  runShowCommand({ ...options, id: options.metricId, resourceType: 'metric' });
-
 export {
   metricReferencePaths,
   rewriteMetricReferences,
-  runMetricListCommand,
   runMetricMutationCommand,
-  runMetricShowCommand,
   runMetricTestCommand,
   type MetricAuthoringRequest,
   type MetricMutationCommandOptions,

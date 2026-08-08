@@ -10,6 +10,7 @@ import { AttestCliError } from '../../errors.js';
 import { setCliCommandHelpMetadata } from '../../help/command-help.js';
 import type { CliIo } from '../../run-cli.js';
 import { renderCommandResult } from '../command-result.js';
+import { loadCommandProject } from '../project/load-command-project.js';
 import type { CliInteraction } from '../register-project-resource-commands.js';
 import {
   createMetricResource,
@@ -18,9 +19,7 @@ import {
   type MetricAddFields,
 } from './metric-command-input.js';
 import {
-  runMetricListCommand,
   runMetricMutationCommand,
-  runMetricShowCommand,
   runMetricTestCommand,
   type MetricAuthoringRequest,
 } from './metric-command.js';
@@ -188,18 +187,89 @@ const readOrBuildMutation = async <TCommand extends MetricAuthoringRequest['comm
   return validateMetricCommandRequest(command, await build());
 };
 
-const guidedPreset = async (
+const ASSERTION_EVIDENCE = ['input', 'output', 'expected', 'trace'] as const;
+const VALUE_OPERATORS = [
+  'equals',
+  'contains',
+  'json-schema',
+  'regex',
+  'exists',
+  'lt',
+  'lte',
+  'gt',
+  'gte',
+] as const;
+const TRACE_OPERATORS = ['tool-called', 'tool-order', 'no-tool-errors', 'span'] as const;
+
+/** Reads one guided choice without silently accepting an unrecognized value. */
+const guidedChoice = async <Choice extends string>(
+  question: string,
+  choices: readonly Choice[],
+  defaultChoice: Choice,
+  path: string,
+  context: RegisterMetricCommandsOptions,
+): Promise<Choice> => {
+  const answer = (await context.interaction.prompt(question)).trim() || defaultChoice;
+  if (choices.includes(answer as Choice)) return answer as Choice;
+  throw new AttestCliError('cli_usage', `Unknown guided metric choice for ${path}.`, {
+    path,
+    hint: `Choose one of: ${choices.join(', ')}.`,
+  });
+};
+
+/** Describes the selected project's trace capability without blocking pre-trace authoring. */
+const guidedTraceCapability = async (
+  options: AddOptions,
+  context: RegisterMetricCommandsOptions,
+): Promise<string> => {
+  const loaded = await loadCommandProject({
+    project: options.project,
+    recover: options.dryRun !== true,
+    workingDirectory: context.workingDirectory,
+  });
+  if (loaded.agents.length === 0) {
+    return 'No authored agent is available to verify trace support. Creation remains available before trace evidence exists.';
+  }
+  const catalog = loaded.agents
+    .map(
+      (agent) =>
+        `  ${agent.id}: ${agent.capabilities?.trace === true ? 'advertises trace support' : 'does not advertise trace support'}`,
+    )
+    .join('\n');
+  const defaultAgent = loaded.agents[0]!.id;
+  const selectedId =
+    (
+      await context.interaction.prompt(
+        `Agent trace capabilities:\n${catalog}\nAgent for capability guidance [${defaultAgent}]: `,
+      )
+    ).trim() || defaultAgent;
+  const selected = loaded.agents.find(({ id }) => id === selectedId);
+  if (selected === undefined) {
+    throw new AttestCliError('cli_usage', 'Unknown agent selected for trace guidance.', {
+      path: '<agent-id>',
+      hint: `Choose one of: ${loaded.agents.map(({ id }) => id).join(', ')}.`,
+    });
+  }
+  return `Agent ${selected.id} ${
+    selected.capabilities?.trace === true
+      ? 'advertises trace support'
+      : 'does not advertise trace support'
+  }. Creation remains available before trace evidence exists.`;
+};
+
+/** Collects metric kind, assertion evidence, and operator before any operator value. */
+const guidedMetricFields = async (
   options: AddOptions,
   interactive: boolean,
   context: RegisterMetricCommandsOptions,
-): Promise<MetricPresetId | undefined> => {
-  if (options.preset !== undefined) return options.preset;
+): Promise<AddOptions> => {
+  if (options.preset !== undefined) return options;
   const hasDirectAssertion =
     options.assertJson !== undefined ||
     options.path !== undefined ||
     options.pattern !== undefined ||
     [options.lt, options.lte, options.gt, options.gte].some((value) => value !== undefined);
-  if (!interactive || hasDirectAssertion) return undefined;
+  if (!interactive || hasDirectAssertion) return options;
   const catalog = METRIC_PRESETS.map((preset, index) => {
     const required =
       preset.required_inputs.length === 0 ? 'none' : preset.required_inputs.join(', ');
@@ -207,20 +277,84 @@ const guidedPreset = async (
       preset.configurable_fields.length === 0 ? 'none' : preset.configurable_fields.join(', ');
     return `  ${preset.id}${index === 0 ? ' (default)' : ''}: ${preset.description}\n    required: ${required}; configurable: ${configurable}`;
   }).join('\n');
-  const answer = (
-    await context.interaction.prompt(
-      `Preset catalog (${METRIC_PRESETS[0]?.schema ?? 'unknown'}):\n${catalog}\nPreset [${PRESET_IDS[0]}]: `,
-    )
-  ).trim();
-  if (answer.length === 0) return PRESET_IDS[0];
-  if (PRESET_IDS.includes(answer as MetricPresetId)) return answer as MetricPresetId;
-  throw new AttestCliError('cli_usage', 'Unknown metric preset.', {
-    path: '--preset',
-    hint: `Choose one of: ${PRESET_IDS.join(', ')}.`,
-  });
+  const kind = await guidedChoice(
+    `Metric catalog (${METRIC_PRESETS[0]?.schema ?? 'unknown'}):\n${catalog}\nMetric kind [assertion] (assertion|judge|command|http): `,
+    ['assertion', 'judge', 'command', 'http'] as const,
+    'assertion',
+    'kind',
+    context,
+  );
+  if (kind !== 'assertion') {
+    const presetByKind = {
+      judge: 'judge-rubric',
+      command: 'command',
+      http: 'http',
+    } as const;
+    return { ...options, preset: presetByKind[kind] };
+  }
+
+  const evidence = await guidedChoice(
+    'Assertion evidence [output] (input|output|expected|trace): ',
+    ASSERTION_EVIDENCE,
+    'output',
+    'evidence',
+    context,
+  );
+  if (evidence === 'trace') {
+    const capability = await guidedTraceCapability(options, context);
+    const operator = await guidedChoice(
+      `${capability}\nTrace operator [tool-called] (tool-called|tool-order|no-tool-errors|span): `,
+      TRACE_OPERATORS,
+      'tool-called',
+      'operator',
+      context,
+    );
+    const presetByOperator: Record<(typeof TRACE_OPERATORS)[number], MetricPresetId> = {
+      'tool-called': 'tool-called',
+      'tool-order': 'tool-order',
+      'no-tool-errors': 'no-tool-errors',
+      span: 'trace-span',
+    };
+    return { ...options, preset: presetByOperator[operator] };
+  }
+
+  const operator = await guidedChoice(
+    `Assertion operator for $.${evidence} [equals] (${VALUE_OPERATORS.join('|')}): `,
+    VALUE_OPERATORS,
+    'equals',
+    'operator',
+    context,
+  );
+  const guided: AddOptions = { ...options, path: `$.${evidence}` };
+  if (operator === 'equals') return { ...guided, preset: 'output-equals' };
+  if (operator === 'contains') return { ...guided, preset: 'output-contains' };
+  if (operator === 'json-schema') return { ...guided, preset: 'output-schema' };
+  if (operator === 'exists') return guided;
+  if (operator === 'regex') {
+    return {
+      ...guided,
+      pattern: await requiredInput(
+        undefined,
+        '--pattern',
+        `Assertion preview: evidence=$.${evidence}; operator=regex.\nRegular expression: `,
+        true,
+        context,
+      ),
+    };
+  }
+  return {
+    ...guided,
+    [operator]: await requiredInput(
+      undefined,
+      `--${operator}`,
+      `Assertion preview: evidence=$.${evidence}; operator=${operator}.\nNumeric threshold: `,
+      true,
+      context,
+    ),
+  };
 };
 
-/** Fills only missing required preset inputs; every answer enters the same flag-built resource. */
+/** Fills only missing operator values; every answer enters the same flag-built resource. */
 const guidedAddFields = async (
   options: AddOptions,
   preset: MetricPresetId | undefined,
@@ -230,7 +364,13 @@ const guidedAddFields = async (
   if (!interactive || preset === undefined) return { ...options, preset };
   const guided: AddOptions = { ...options, preset };
   if ((preset === 'output-equals' || preset === 'output-contains') && guided.value === undefined) {
-    guided.value = await requiredInput(undefined, '--value', 'JSON value: ', true, context);
+    guided.value = await requiredInput(
+      undefined,
+      '--value',
+      `Assertion preview: evidence=${guided.path ?? '$.output'}; operator=${preset === 'output-equals' ? 'equals' : 'contains'}.\nJSON value: `,
+      true,
+      context,
+    );
   } else if (
     preset === 'output-schema' &&
     guided.jsonSchema === undefined &&
@@ -239,7 +379,7 @@ const guidedAddFields = async (
     guided.jsonSchema = await requiredInput(
       undefined,
       '--json-schema',
-      'JSON Schema: ',
+      `Assertion preview: evidence=${guided.path ?? '$.output'}; operator=json-schema.\nJSON Schema: `,
       true,
       context,
     );
@@ -259,12 +399,18 @@ const guidedAddFields = async (
   } else if (preset === 'http') {
     guided.url = await requiredInput(guided.url, '--url', 'Metric URL: ', true, context);
   } else if (preset === 'tool-called') {
-    guided.tool = await requiredInput(guided.tool, '--tool', 'Tool name: ', true, context);
+    guided.tool = await requiredInput(
+      guided.tool,
+      '--tool',
+      'Assertion preview: evidence=trace; operator=tool-called.\nTool name: ',
+      true,
+      context,
+    );
   } else if (preset === 'tool-order' && (guided.order === undefined || guided.order.length === 0)) {
     const order = await requiredInput(
       undefined,
       '--order',
-      'Tool names in order (comma-separated): ',
+      'Assertion preview: evidence=trace; operator=tool-order.\nTool names in order (comma-separated): ',
       true,
       context,
     );
@@ -279,7 +425,12 @@ const guidedAddFields = async (
     guided.spanStatus === undefined &&
     guided.attribute === undefined
   ) {
-    guided.spanKind = (await context.interaction.prompt('Span kind [other]: ')).trim() || 'other';
+    guided.spanKind =
+      (
+        await context.interaction.prompt(
+          'Assertion preview: evidence=trace; operator=span.\nSpan kind [other]: ',
+        )
+      ).trim() || 'other';
   }
   return guided;
 };
@@ -419,12 +570,12 @@ const registerMetricCommands = (context: RegisterMetricCommandsOptions): void =>
           interactive,
           context,
         );
-        const preset = await guidedPreset(options, interactive, context);
-        const guided = await guidedAddFields(options, preset, interactive, context);
+        const selected = await guidedMetricFields(options, interactive, context);
+        const guided = await guidedAddFields(selected, selected.preset, interactive, context);
         const resource = await createMetricResource({
           ...guided,
           metricId: id,
-          preset,
+          preset: guided.preset,
           readStdin: context.interaction.readStdin,
           workingDirectory: context.workingDirectory,
         });
@@ -527,44 +678,6 @@ const registerMetricCommands = (context: RegisterMetricCommandsOptions): void =>
     ],
     ['path', 'as', 'type', 'name'],
   );
-
-  const listCompatibility = addCommonOptions(
-    metric.command('list').description('Compatibility alias for `attest list metrics`.'),
-  ).action(async (raw: CommonOptions, command: Command) => {
-    const options = mergeCommonOptions(raw, command, context.program);
-    const result = await runMetricListCommand({
-      project: options.project,
-      workingDirectory: context.workingDirectory,
-    });
-    context.io.output(renderCommandResult('list', outputFormat(options), result));
-  });
-  setCliCommandHelpMetadata(listCompatibility, {
-    aliasFor: 'list',
-    deprecated: 'Use `attest list metrics`; this compatibility path has the same result identity.',
-    examples: ['attest list metrics --output json'],
-  });
-
-  const showCompatibility = addCommonOptions(
-    metric.command('show').description('Compatibility alias for `attest show metric <id>`.'),
-  )
-    .argument('[metric-id]', 'metric id')
-    .action(async (metricId: string | undefined, raw: CommonOptions, command: Command) => {
-      const options = mergeCommonOptions(raw, command, context.program);
-      const interactive = isInteractive(options, context.interaction);
-      const id = await requiredInput(metricId, '<metric-id>', 'Metric id: ', interactive, context);
-      const result = await runMetricShowCommand({
-        metricId: id,
-        project: options.project,
-        workingDirectory: context.workingDirectory,
-      });
-      context.io.output(renderCommandResult('show', outputFormat(options), result));
-    });
-  setCliCommandHelpMetadata(showCompatibility, {
-    aliasFor: 'show',
-    deprecated:
-      'Use `attest show metric <id>`; this compatibility path has the same result identity.',
-    examples: ['attest show metric exact --output json'],
-  });
 
   const testCommand = addCommonOptions(
     metric.command('test').description('Test one metric against a local fixture.'),
@@ -710,7 +823,8 @@ const registerMetricCommands = (context: RegisterMetricCommandsOptions): void =>
     examples: [
       'attest metric add correct --preset output-equals --value \'"Paris"\'',
       'attest metric test correct --fixture ./fixtures/result.json',
-      'attest metric list --output json',
+      'attest list metrics --output json',
+      'attest show metric correct --output json',
     ],
   });
 };

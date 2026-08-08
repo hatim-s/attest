@@ -73,13 +73,27 @@ const SENSITIVE_FIELD_NAME =
   /(?:^|[-_])(?:authorization|cookie|password|secret|token|api[-_]?key)(?:$|[-_])/iu;
 const AUTHORIZATION_VALUE = /^(?:basic|bearer)\s+\S/iu;
 
+/** Normalizes common identifier styles before credential-field classification. */
+const canonicalFieldName = (name: string): string =>
+  name
+    .normalize('NFKC')
+    .replace(/([A-Z]+)([A-Z][a-z])/gu, '$1-$2')
+    .replace(/([a-z\d])([A-Z])/gu, '$1-$2')
+    .replace(/[^\p{L}\p{N}]+/gu, '-')
+    .replace(/^-+|-+$/gu, '')
+    .toLowerCase();
+
+/** Matches credential fields consistently across casing and separator conventions. */
+const isSensitiveFieldName = (name: string): boolean =>
+  SENSITIVE_FIELD_NAME.test(canonicalFieldName(name));
+
 /** Locates only actual credential values, not ordinary filenames or analysis option names. */
 const credentialArgumentPosition = (argv: readonly string[]): number => {
   for (const [index, argument] of argv.entries()) {
     if (AUTHORIZATION_VALUE.test(argument)) return index;
     const assignment = /^(?:--)?([^=]+)=(.+)$/u.exec(argument);
-    if (assignment !== null && SENSITIVE_FIELD_NAME.test(assignment[1] ?? '')) return index;
-    if (!argument.startsWith('-') || !SENSITIVE_FIELD_NAME.test(argument.replace(/^-+/u, ''))) {
+    if (assignment !== null && isSensitiveFieldName(assignment[1] ?? '')) return index;
+    if (!argument.startsWith('-') || !isSensitiveFieldName(argument.replace(/^-+/u, ''))) {
       continue;
     }
     const next = argv[index + 1];
@@ -703,7 +717,7 @@ const assertSafeMetricResource = (metric: MetricResource): void => {
     );
   }
   for (const name of url.searchParams.keys()) {
-    if (SENSITIVE_FIELD_NAME.test(name)) {
+    if (isSensitiveFieldName(name)) {
       throw new AttestCliError(
         'project_invalid',
         'HTTP metric URLs cannot contain credential-like query values.',
@@ -719,7 +733,7 @@ const assertSafeMetricResource = (metric: MetricResource): void => {
     ['query', request.query],
   ] as const) {
     for (const [name, value] of Object.entries(values ?? {})) {
-      if (SENSITIVE_FIELD_NAME.test(name) && typeof value === 'string') {
+      if (isSensitiveFieldName(name) && typeof value === 'string') {
         throw new AttestCliError(
           'project_invalid',
           'Sensitive HTTP values must use secret references.',
@@ -747,7 +761,7 @@ const assertSafeMetricResource = (metric: MetricResource): void => {
       continue;
     }
     for (const [name, value] of Object.entries(current.value)) {
-      if (SENSITIVE_FIELD_NAME.test(name) && value !== null) {
+      if (isSensitiveFieldName(name) && value !== null) {
         throw new AttestCliError(
           'project_invalid',
           'HTTP metric bodies cannot contain credential-like authored values.',
