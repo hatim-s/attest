@@ -15,6 +15,7 @@ import {
 
 type LoadCommandProjectOptions = {
   project?: string;
+  recover?: boolean;
   workingDirectory: string;
 };
 
@@ -92,7 +93,17 @@ const recoverBeforeRead = async (root: string): Promise<void> => {
 /** Loads a hash-verified old or new snapshot while rejecting a concurrent publication window. */
 const loadCommandProject = async (options: LoadCommandProjectOptions): Promise<LoadedProject> => {
   const discovered = await discoverProject(options);
-  await recoverBeforeRead(discovered.root);
+  if (options.recover === false && (await hasRecoveryArtifacts(discovered.root))) {
+    throw new ProjectTransactionError(
+      'project_recovery_required',
+      'The project has an interrupted transaction that requires recovery.',
+      {
+        path: TRANSACTIONS_DIRECTORY,
+        hint: 'Run a non-dry-run project command to recover before previewing changes.',
+      },
+    );
+  }
+  if (options.recover !== false) await recoverBeforeRead(discovered.root);
 
   for (let attempt = 0; attempt < 3; attempt += 1) {
     const before = await inspectProjectLock(discovered.root);

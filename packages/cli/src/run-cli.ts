@@ -148,9 +148,9 @@ const createProgram = (
   const packageMetadata = require('../package.json') as PackageMetadata;
   const program = new Command()
     .name('attest')
+    .enablePositionalOptions()
     .description('Run reproducible evaluations for CLI and HTTP AI agents.')
     .version(packageMetadata.version)
-    .enablePositionalOptions()
     .showHelpAfterError()
     .exitOverride()
     .configureOutput({
@@ -308,9 +308,20 @@ const createProgram = (
         .choices(['human', 'json'])
         .default('human'),
     )
-    .action((commandPath: string[], options: ProtocolCommandOptions) => {
+    .action((commandPath: string[], options: ProtocolCommandOptions, action: Command) => {
       const help = createCliHelp(program, commandPath);
-      const output = options.output;
+      if (
+        program.getOptionValueSource('output') === 'cli' &&
+        action.getOptionValueSource('output') === 'cli'
+      ) {
+        throw new AttestCliError('cli_usage', 'Common option --output was provided twice.', {
+          path: '--output',
+        });
+      }
+      const output =
+        program.getOptionValueSource('output') === 'cli'
+          ? (program.opts<ProtocolCommandOptions>().output ?? options.output)
+          : options.output;
       io.output(
         output === 'json'
           ? serializeCliResult(createCliSuccessResult('help', help))
@@ -330,9 +341,20 @@ const createProgram = (
         .choices(['human', 'json'])
         .default('human'),
     )
-    .action((options: ProtocolCommandOptions) => {
+    .action((options: ProtocolCommandOptions, action: Command) => {
       const catalog = createCliErrorCatalog();
-      const output = options.output;
+      if (
+        program.getOptionValueSource('output') === 'cli' &&
+        action.getOptionValueSource('output') === 'cli'
+      ) {
+        throw new AttestCliError('cli_usage', 'Common option --output was provided twice.', {
+          path: '--output',
+        });
+      }
+      const output =
+        program.getOptionValueSource('output') === 'cli'
+          ? (program.opts<ProtocolCommandOptions>().output ?? options.output)
+          : options.output;
       io.output(
         output === 'json'
           ? serializeCliResult(createCliSuccessResult('errors', catalog))
@@ -373,6 +395,7 @@ const requestedStructuredOutput = (argv: readonly string[]): boolean => {
     command === 'list' ||
     command === 'show' ||
     command.startsWith('project.') ||
+    command.startsWith('agent.') ||
     command.startsWith('schema.') ||
     command.startsWith('test.');
   return (
@@ -421,6 +444,9 @@ const requestedCommand = (argv: readonly string[]): string => {
   }
   if (first === 'project' && ['init', 'show', 'validate'].includes(second ?? '')) {
     return `project.${second}`;
+  }
+  if (first === 'agent' && ['add', 'import', 'test', 'rename', 'remove'].includes(second ?? '')) {
+    return `agent.${second}`;
   }
   if (first === 'schema' && ['list', 'print'].includes(second ?? '')) {
     return `schema.${second}`;

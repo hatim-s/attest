@@ -414,7 +414,7 @@ describe('runCli', () => {
     });
   });
 
-  it('advertises positional global common options without changing legacy leaf semantics', async () => {
+  it('advertises positional v2 common options without changing legacy leaf semantics', async () => {
     const output: string[] = [];
     await runCli(['help', '--output', 'json'], {
       io: { output: (message) => output.push(message), error: () => undefined },
