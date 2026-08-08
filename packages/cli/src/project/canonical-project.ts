@@ -1,5 +1,7 @@
 import { createHash } from 'node:crypto';
 
+import type { DatasetResource, ProjectManifest } from '@attest/contracts';
+
 type JsonPrimitive = boolean | null | number | string;
 type JsonValue = JsonPrimitive | JsonValue[] | { [key: string]: JsonValue };
 
@@ -55,6 +57,31 @@ const datasetMetadataForHash = (value: JsonValue): JsonValue => {
 const hashDatasetMetadata = (value: JsonValue): string =>
   hashCanonicalJson(datasetMetadataForHash(value));
 
+/** Hashes a manifest projection whose dataset metadata hashes exclude only volatile import time. */
+const hashProjectManifest = (
+  manifest: ProjectManifest,
+  datasets: readonly DatasetResource[],
+): string => {
+  const metadataById = new Map(datasets.map((metadata) => [metadata.id, metadata]));
+  const projectedManifest: ProjectManifest = {
+    ...manifest,
+    resources: {
+      ...manifest.resources,
+      datasets: manifest.resources.datasets.map((entry) => {
+        const metadata = metadataById.get(entry.id);
+        if (metadata === undefined) {
+          throw new Error(`Missing metadata for dataset ${entry.id}.`);
+        }
+        return {
+          ...entry,
+          metadata_content_hash: hashDatasetMetadata(metadata),
+        };
+      }),
+    },
+  };
+  return hashCanonicalJson(projectedManifest);
+};
+
 /** Computes a formatting-independent hash for ordered parsed JSONL records. */
 const hashCanonicalJsonLines = (values: readonly JsonValue[]): string =>
   hashCanonicalContent(serializeCanonicalJsonLines(values));
@@ -65,6 +92,7 @@ export {
   hashDatasetMetadata,
   hashCanonicalJson,
   hashCanonicalJsonLines,
+  hashProjectManifest,
   serializeCanonicalJson,
   serializeCanonicalJsonLines,
   type JsonValue,

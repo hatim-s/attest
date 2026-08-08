@@ -7,9 +7,12 @@ import {
   TEST_RESOURCE_SCHEMA_VERSION,
   cliResultSchema,
   type CommandRequest,
+  type DatasetResource,
+  type ProjectManifest,
 } from '@attest/contracts';
 import { afterEach, describe, expect, it } from 'vitest';
 
+import { hashCanonicalJson } from '../../project/canonical-project.js';
 import { loadProject } from '../../project/load-project.js';
 import {
   fixtureAgent,
@@ -384,7 +387,7 @@ describe('CLI2.7 test, case, and dataset authoring', { timeout: 20_000 }, () => 
     expect(secondHuman.output).toEqual(firstHuman.output);
   });
 
-  it('keeps imported dataset preview hashes deterministic and renders the human semantic diff', async () => {
+  it('keeps import results deterministic while manifest integrity binds the real timestamp', async () => {
     const root = await createProject();
     const source = join(root, 'deterministic-import.jsonl');
     await writeFile(source, JSON.stringify({ input: { prompt: 'same bytes' } }));
@@ -428,13 +431,43 @@ describe('CLI2.7 test, case, and dataset authoring', { timeout: 20_000 }, () => 
       project_hash_after: first.document.project_hash_after,
       result: { operations: (first.document.result as { operations: unknown[] }).operations },
     });
-    const importedAt = (await loadProject({ project: root })).datasets.find(
-      ({ metadata }) => metadata.id === 'stable-import',
-    )?.metadata.provenance?.imported_at;
+    const loaded = await loadProject({ project: root });
+    const importedAt = loaded.datasets.find(({ metadata }) => metadata.id === 'stable-import')
+      ?.metadata.provenance?.imported_at;
     expect(importedAt).toBeDefined();
     expect(Date.parse(importedAt ?? '')).toBeGreaterThanOrEqual(beforeCommit);
     expect(Date.parse(importedAt ?? '')).toBeLessThanOrEqual(afterCommit);
-    expect((await loadProject({ project: root })).datasets).toHaveLength(2);
+    expect(loaded.datasets).toHaveLength(2);
+
+    const metadataPath = join(root, 'attest/datasets/stable-import.meta.json');
+    const metadata = JSON.parse(await readFile(metadataPath, 'utf8')) as DatasetResource;
+    const manifest = JSON.parse(
+      await readFile(join(root, 'attest.project.json'), 'utf8'),
+    ) as ProjectManifest;
+    expect(
+      manifest.resources.datasets.find(({ id }) => id === 'stable-import')?.metadata_content_hash,
+    ).toBe(hashCanonicalJson(metadata));
+    if (metadata.provenance === undefined) throw new Error('Expected import provenance.');
+    metadata.provenance.imported_at = '2001-02-03T04:05:06.000Z';
+    await writeFile(metadataPath, `${JSON.stringify(metadata, undefined, 2)}\n`);
+
+    const validation = await runJson(root, ['project', 'validate']);
+    expect(validation.exitCode).toBe(1);
+    if (validation.document.ok) throw new Error('Expected metadata integrity failure.');
+    const diagnostics = (
+      validation.document.error.details as {
+        diagnostics: Array<{ code: string; message: string; source: string }>;
+      }
+    ).diagnostics;
+    const integrityDiagnostic = diagnostics.find(
+      ({ code, source }) =>
+        code === 'content_hash_mismatch' && source === 'attest/datasets/stable-import.meta.json',
+    );
+    expect(integrityDiagnostic).toMatchObject({
+      code: 'content_hash_mismatch',
+      source: 'attest/datasets/stable-import.meta.json',
+    });
+    expect(integrityDiagnostic?.message).toContain('canonical SHA-256');
   });
 
   it('aggregates every JSON and JSONL record error with physical source locations', async () => {

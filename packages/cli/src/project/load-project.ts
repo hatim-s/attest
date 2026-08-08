@@ -21,7 +21,7 @@ import {
 import {
   hashCanonicalJson,
   hashCanonicalJsonLines,
-  hashDatasetMetadata,
+  hashProjectManifest,
   type JsonValue,
 } from './canonical-project.js';
 import {
@@ -245,7 +245,6 @@ const loadDataset = async (
     entry.metadata_path,
     entry.metadata_content_hash,
     datasetResourceSchema,
-    hashDatasetMetadata,
   );
   const loadedData = await readProjectSource(root, entry.data_path);
   const diagnostics = [...metadata.diagnostics, ...loadedData.diagnostics];
@@ -449,8 +448,11 @@ const loadProject = async (options: DiscoverProjectOptions = {}): Promise<Loaded
     ...validated.data,
     contentHashes,
     manifestPath: discovered.manifestPath,
-    // A valid manifest commits every verified resource hash, so its canonical hash is the project hash.
-    projectHash: manifest.hash,
+    // Integrity hashes bind every persisted byte; this projection excludes only volatile import time.
+    projectHash: hashProjectManifest(
+      validated.data.project,
+      validated.data.datasets.map(({ metadata }) => metadata),
+    ),
     root: discovered.root,
   };
 };
