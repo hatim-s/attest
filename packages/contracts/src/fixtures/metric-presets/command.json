@@ -1,0 +1,13 @@
+{
+  "schema": "attest.metric-preset/v1",
+  "id": "command",
+  "name": "Command metric",
+  "description": "Run a trusted local argv array using the native metric envelope.",
+  "required_inputs": ["argv"],
+  "configurable_fields": ["cwd", "env", "timeout_ms"],
+  "definition": {
+    "kind": "exec",
+    "argv": ["node", "./metrics/metric.mjs"],
+    "timeout_ms": 30000
+  }
+}

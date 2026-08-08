@@ -52,7 +52,9 @@ export {
   CONFIG_VERSION,
   DATASET_SCHEMA_VERSION,
   METRIC_PROTOCOL,
+  METRIC_PRESET_SCHEMA_VERSION,
   METRIC_RESOURCE_SCHEMA_VERSION,
+  METRIC_TEST_FIXTURE_SCHEMA_VERSION,
   PROJECT_SCHEMA_VERSION,
   TEST_RESOURCE_SCHEMA_VERSION,
   TRACE_SCHEMA_VERSION,
@@ -123,6 +125,15 @@ export type {
 } from './dataset-resource-v2.js';
 export { metricResourceSchema, metricResultExtractionSchema } from './metric-resource-v2.js';
 export type { MetricResource, MetricResultExtraction } from './metric-resource-v2.js';
+export {
+  METRIC_PRESETS,
+  findMetricPreset,
+  metricPresetIdSchema,
+  metricPresetSchema,
+} from './metric-presets.js';
+export type { MetricPreset, MetricPresetId } from './metric-presets.js';
+export { metricTestFixtureSchema } from './metric-test-fixture-v1.js';
+export type { MetricTestFixture } from './metric-test-fixture-v1.js';
 export {
   datasetManifestEntrySchema,
   loadedDatasetSchema,

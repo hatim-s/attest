@@ -3216,10 +3216,7 @@
           "type": "string"
         },
         "source_type": {
-          "enum": [
-            "json",
-            "curl"
-          ],
+          "const": "json",
           "type": "string"
         },
         "yes": {
@@ -3232,6 +3229,34 @@
         "source",
         "source_type",
         "as"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "properties": {
+        "command": {
+          "const": "metric.test",
+          "type": "string"
+        },
+        "fixture": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "metric_id": {
+          "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+          "type": "string"
+        },
+        "schema": {
+          "const": "attest.command-request/v2",
+          "type": "string"
+        }
+      },
+      "required": [
+        "schema",
+        "command",
+        "metric_id",
+        "fixture"
       ],
       "type": "object"
     },

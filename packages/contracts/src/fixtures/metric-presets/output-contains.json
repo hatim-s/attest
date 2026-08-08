@@ -1,0 +1,12 @@
+{
+  "schema": "attest.metric-preset/v1",
+  "id": "output-contains",
+  "name": "Output contains",
+  "description": "Require one output path to contain a JSON string, array member, or object subset.",
+  "required_inputs": ["value"],
+  "configurable_fields": ["path"],
+  "definition": {
+    "kind": "assertion",
+    "assertions": [{ "contains": { "path": "$.output", "value": "" } }]
+  }
+}
