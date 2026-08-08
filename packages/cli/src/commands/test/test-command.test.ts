@@ -401,6 +401,7 @@ describe('CLI2.7 test, case, and dataset authoring', { timeout: 20_000 }, () => 
     const first = await runJson(root, argv);
     const second = await runJson(root, argv);
     expect(second.output).toBe(first.output);
+    if (!first.document.ok) throw new Error('Expected dataset import preview.');
 
     const human = collectIo();
     expect(
@@ -414,7 +415,26 @@ describe('CLI2.7 test, case, and dataset authoring', { timeout: 20_000 }, () => 
     expect(human.output.join('\n')).toContain('add dataset stable-import');
     expect(human.output.join('\n')).toContain('reference added: dataset stable-import');
     expect(human.output.join('\n')).toContain('remove `--dry-run`');
-    expect((await loadProject({ project: root })).datasets).toHaveLength(1);
+
+    const beforeCommit = Date.now();
+    const committed = await runJson(
+      root,
+      argv.filter((argument) => argument !== '--dry-run'),
+    );
+    const afterCommit = Date.now();
+    if (!committed.document.ok) throw new Error('Expected dataset import commit.');
+    expect(committed.document).toMatchObject({
+      ok: true,
+      project_hash_after: first.document.project_hash_after,
+      result: { operations: (first.document.result as { operations: unknown[] }).operations },
+    });
+    const importedAt = (await loadProject({ project: root })).datasets.find(
+      ({ metadata }) => metadata.id === 'stable-import',
+    )?.metadata.provenance?.imported_at;
+    expect(importedAt).toBeDefined();
+    expect(Date.parse(importedAt ?? '')).toBeGreaterThanOrEqual(beforeCommit);
+    expect(Date.parse(importedAt ?? '')).toBeLessThanOrEqual(afterCommit);
+    expect((await loadProject({ project: root })).datasets).toHaveLength(2);
   });
 
   it('aggregates every JSON and JSONL record error with physical source locations', async () => {
@@ -422,7 +442,12 @@ describe('CLI2.7 test, case, and dataset authoring', { timeout: 20_000 }, () => 
     const jsonlSource = join(root, 'invalid-cases.jsonl');
     await writeFile(
       jsonlSource,
-      ['not-json', '', '{"input":"ok","extra":true}', '{"expected":"missing-input"}'].join('\n'),
+      [
+        'not-json',
+        '',
+        '{"input":"ok","extra":true,"slash/key":true,"tilde~key":true}',
+        '{"expected":"missing-input"}',
+      ].join('\n'),
     );
     const jsonlBefore = await snapshotProject(root);
     const jsonl = await runJson(root, ['test', 'case', 'import', 'refund', jsonlSource]);
@@ -436,18 +461,22 @@ describe('CLI2.7 test, case, and dataset authoring', { timeout: 20_000 }, () => 
       line: number;
       source_field: string;
     }>;
-    expect(jsonlDiagnostics.map(({ line }) => line)).toEqual([1, 3, 4]);
+    expect(jsonlDiagnostics.map(({ line }) => line)).toEqual([1, 3, 3, 3, 4]);
     expect(jsonlDiagnostics.every(({ code, hint }) => code.length > 0 && hint.length > 0)).toBe(
       true,
     );
     expect(jsonlDiagnostics.map(({ destination_path }) => destination_path)).toEqual([
       '',
-      '/',
+      '/extra',
+      '/slash~1key',
+      '/tilde~0key',
       '/input',
     ]);
     expect(jsonlDiagnostics.map(({ source_field }) => source_field)).toEqual([
       '<line>',
-      '<record>',
+      '/extra',
+      '/slash~1key',
+      '/tilde~0key',
       '/input',
     ]);
     expect(await snapshotProject(root)).toEqual(jsonlBefore);
@@ -638,5 +667,52 @@ describe('CLI2.7 test, case, and dataset authoring', { timeout: 20_000 }, () => 
     const rejected = await runJson(root, ['test', 'case', 'import', '--from-json', path]);
     expect(rejected.exitCode).toBe(2);
     expect(rejected.document).toMatchObject({ ok: false, error: { code: 'cli_usage' } });
+  });
+
+  it('rejects non-empty or provenance-bearing dataset add requests before writing', async () => {
+    const root = await createProject();
+    const before = await snapshotProject(root);
+    const emptyDataset = {
+      schema: 'attest.dataset/v2',
+      case_schema: 'attest.case/v2',
+      id: 'new-data',
+      name: 'New data',
+      case_count: 0,
+    };
+    const base = {
+      schema: COMMAND_REQUEST_SCHEMA_VERSION,
+      command: 'test.dataset.add',
+      test_id: 'refund',
+    };
+    const requests = [
+      { ...base, dataset: { ...emptyDataset, case_count: 1 } },
+      {
+        ...base,
+        dataset: {
+          ...emptyDataset,
+          provenance: {
+            source_type: 'csv',
+            mapping: [{ source: 'prompt', destination: 'input' }],
+            imported_at: '2026-08-08T00:00:00.000Z',
+            source_content_hash: 'a'.repeat(64),
+            counts: { read: 0, inserted: 0, updated: 0, skipped: 0 },
+          },
+        },
+      },
+    ];
+
+    for (const [index, request] of requests.entries()) {
+      const path = join(root, `invalid-dataset-add-${index}.json`);
+      await writeFile(path, JSON.stringify(request));
+      const rejected = await runJson(root, ['test', 'dataset', 'add', '--from-json', path]);
+      expect(rejected).toMatchObject({
+        exitCode: 2,
+        document: { ok: false, error: { code: 'cli_usage' } },
+      });
+    }
+    const after = await snapshotProject(root);
+    expect(
+      Object.fromEntries(Object.entries(after).filter(([path]) => !path.startsWith('invalid-'))),
+    ).toEqual(before);
   });
 });

@@ -44,6 +44,7 @@ type TestAuthoringCommand = Extract<
 >;
 
 type TestMutationCommandOptions = {
+  clock?: () => Date;
   project?: string;
   publishObserver?: PublishObserver;
   readStdin: () => Promise<string>;
@@ -114,14 +115,6 @@ const assertNewResourceId = (
 const caseWithGeneratedId = (
   value: Extract<TestAuthoringCommand, { command: 'test.case.add' }>['case'],
 ): TestCase => ({ ...value, id: value.id ?? generateCaseId(value) });
-
-/** Derives a reproducible provenance timestamp from immutable source content. */
-const deterministicImportTimestamp = (sourceHash: string): string => {
-  const start = Date.UTC(2000, 0, 1);
-  const oneHundredYears = 100 * 365 * 24 * 60 * 60 * 1_000;
-  const contentOffset = Number.parseInt(sourceHash.slice(0, 12), 16) % oneHundredYears;
-  return new Date(start + contentOffset).toISOString();
-};
 
 const attachedDatasetTests = (candidate: ProjectResources, datasetId: string): string[] =>
   candidate.tests
@@ -225,12 +218,6 @@ const buildMutation = async (
         'dataset',
         request.dataset.id,
       );
-      if (request.dataset.case_count !== 0) {
-        throw new AttestCliError('cli_usage', 'A newly created dataset must be empty.', {
-          path: '/dataset/case_count',
-          hint: 'Set `case_count` to 0 or use `test dataset import`.',
-        });
-      }
       candidate.datasets.push({ cases: [], metadata: request.dataset });
       test.datasets.push({ dataset_id: request.dataset.id });
       return { candidate, resource: { id: request.dataset.id, type: 'dataset' } };
@@ -259,7 +246,7 @@ const buildMutation = async (
           provenance: {
             source_type: imported.format,
             mapping: [],
-            imported_at: deterministicImportTimestamp(imported.sourceHash),
+            imported_at: (options.clock ?? (() => new Date()))().toISOString(),
             source_content_hash: imported.sourceHash,
             counts: {
               read: imported.cases.length,

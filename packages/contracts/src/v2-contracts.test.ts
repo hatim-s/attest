@@ -49,6 +49,8 @@ const dataset: DatasetResource = {
   case_count: 1,
 };
 
+const emptyDataset = { ...dataset, case_count: 0 as const };
+
 const metric: MetricResource = {
   schema: METRIC_RESOURCE_SCHEMA_VERSION,
   id: 'correct',
@@ -287,7 +289,7 @@ describe('v2 command request contract', () => {
       source: 'cases.jsonl',
       import: importOptions,
     },
-    { ...base, command: 'test.dataset.add', test_id: test.id, dataset },
+    { ...base, command: 'test.dataset.add', test_id: test.id, dataset: emptyDataset },
     {
       ...base,
       command: 'test.dataset.import',
@@ -372,5 +374,36 @@ describe('v2 command request contract', () => {
         import: { format: 'jsonl', mapping: [], sync: 'append', dedupe: 'key' },
       }).success,
     ).toBe(false);
+  });
+
+  it('limits dataset add requests to empty metadata without import provenance', () => {
+    const request = {
+      ...base,
+      command: 'test.dataset.add',
+      test_id: test.id,
+      dataset: emptyDataset,
+    };
+
+    expect(commandRequestSchema.safeParse(request).success).toBe(true);
+    expect(
+      commandRequestSchema.safeParse({ ...request, dataset: { ...emptyDataset, case_count: 1 } })
+        .success,
+    ).toBe(false);
+    expect(
+      commandRequestSchema.safeParse({
+        ...request,
+        dataset: {
+          ...emptyDataset,
+          provenance: {
+            source_type: 'csv',
+            mapping: [{ source: 'prompt', destination: 'input' }],
+            imported_at: '2026-08-08T00:00:00.000Z',
+            source_content_hash: contentHash,
+            counts: { read: 0, inserted: 0, updated: 0, skipped: 0 },
+          },
+        },
+      }).success,
+    ).toBe(false);
+    expect(datasetResourceSchema.safeParse(dataset).success).toBe(true);
   });
 });

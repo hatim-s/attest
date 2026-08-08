@@ -112,11 +112,16 @@ const testCaseRemoveRequestSchema = z.strictObject({
   case_id: resourceIdSchema,
 });
 
+/** Accepts only the empty native dataset shape that `test dataset add` can author. */
+const testDatasetAddResourceSchema = datasetResourceSchema
+  .omit({ case_count: true, provenance: true })
+  .extend({ case_count: z.literal(0) });
+
 const testDatasetAddRequestSchema = z.strictObject({
   ...commonMutationFields,
   command: z.literal('test.dataset.add'),
   test_id: resourceIdSchema,
-  dataset: datasetResourceSchema,
+  dataset: testDatasetAddResourceSchema,
 });
 
 const testDatasetImportRequestSchema = z.strictObject({

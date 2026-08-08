@@ -1,6 +1,6 @@
 import type { ProjectResources } from '@attest/contracts';
 
-import { hashCanonicalJson, type JsonValue } from '../canonical-project.js';
+import { datasetMetadataForHash, hashCanonicalJson, type JsonValue } from '../canonical-project.js';
 import type { LoadedProject } from '../load-project.js';
 import { ProjectTransactionError } from './project-transaction-error.js';
 import type {
@@ -160,7 +160,11 @@ const valuesByKind = (
         ? project.tests
         : kind === 'metric'
           ? project.metrics
-          : project.datasets.map(({ cases, metadata }) => ({ ...metadata, cases }));
+          : project.datasets.map(({ cases, metadata }) => ({
+              ...(datasetMetadataForHash(metadata as JsonValue) as Record<string, JsonValue>),
+              id: metadata.id,
+              cases,
+            }));
   return new Map(values.map((value) => [value.id, value as ResourceValue]));
 };
 

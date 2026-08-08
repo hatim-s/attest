@@ -130,6 +130,24 @@ const diagnosticLocation = (
 ): Pick<NativeCaseDiagnostic, 'line' | 'row'> =>
   location.kind === 'line' ? { line: location.number } : { row: location.number };
 
+const escapePointerSegment = (segment: PropertyKey): string =>
+  String(segment).replaceAll('~', '~0').replaceAll('/', '~1');
+
+/** Expands aggregate unknown-key issues into one addressable JSON Pointer per source field. */
+const destinationPathsForIssue = (issue: {
+  code: string;
+  keys?: readonly string[];
+  path: PropertyKey[];
+}): string[] => {
+  const paths =
+    issue.code === 'unrecognized_keys' && issue.keys !== undefined
+      ? issue.keys.map((key) => [...issue.path, key])
+      : [issue.path];
+  return paths
+    .map((path) => (path.length === 0 ? '' : `/${path.map(escapePointerSegment).join('/')}`))
+    .sort();
+};
+
 /** Validates one native record without short-circuiting validation of later records. */
 const normalizeCase = (
   value: unknown,
@@ -145,17 +163,16 @@ const normalizeCase = (
   );
   if (!parsed.success) {
     return {
-      diagnostics: parsed.error.issues.map((issue) => {
-        const destinationPath = `/${issue.path.map(String).join('/')}`;
-        return {
+      diagnostics: parsed.error.issues.flatMap((issue) =>
+        destinationPathsForIssue(issue).map((destinationPath) => ({
           code: issue.code,
           destination_path: destinationPath,
           hint: `Repair this field to match ${CASE_SCHEMA_VERSION}.`,
           message: issue.message,
-          source_field: destinationPath === '/' ? '<record>' : destinationPath,
+          source_field: destinationPath === '' ? '<record>' : destinationPath,
           ...diagnosticLocation(location),
-        };
-      }),
+        })),
+      ),
     };
   }
   return {

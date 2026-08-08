@@ -18,7 +18,12 @@ import {
   type TestResource,
 } from '@attest/contracts';
 
-import { hashCanonicalJson, hashCanonicalJsonLines, type JsonValue } from './canonical-project.js';
+import {
+  hashCanonicalJson,
+  hashCanonicalJsonLines,
+  hashDatasetMetadata,
+  type JsonValue,
+} from './canonical-project.js';
 import {
   PROJECT_MANIFEST_FILE,
   discoverProject,
@@ -201,6 +206,7 @@ const loadJsonResource = async <T>(
   source: string,
   expectedHash: string | undefined,
   schema: RuntimeSchema<T>,
+  hashValue: (value: JsonValue) => string = hashCanonicalJson,
 ): Promise<LoadedJsonResource<T>> => {
   const loaded = await readProjectSource(root, source);
   if (loaded.text === undefined) {
@@ -211,7 +217,7 @@ const loadJsonResource = async <T>(
     return { diagnostics: parsed.diagnostics, source };
   }
 
-  const hash = hashCanonicalJson(parsed.value);
+  const hash = hashValue(parsed.value);
   const diagnostics = [...parsed.diagnostics];
   if (expectedHash !== undefined && expectedHash !== hash) {
     diagnostics.push({
@@ -239,6 +245,7 @@ const loadDataset = async (
     entry.metadata_path,
     entry.metadata_content_hash,
     datasetResourceSchema,
+    hashDatasetMetadata,
   );
   const loadedData = await readProjectSource(root, entry.data_path);
   const diagnostics = [...metadata.diagnostics, ...loadedData.diagnostics];

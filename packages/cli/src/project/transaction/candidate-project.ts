@@ -10,6 +10,7 @@ import {
 } from '@attest/contracts';
 
 import {
+  hashDatasetMetadata,
   hashCanonicalJson,
   hashCanonicalJsonLines,
   serializeCanonicalJson,
@@ -67,7 +68,7 @@ const addDataset = (
   const dataPath = `attest/datasets/${metadata.id}.jsonl`;
   const metadataValue = metadata as JsonValue;
   const caseValues = cases as unknown as readonly JsonValue[];
-  const metadataHash = hashCanonicalJson(metadataValue);
+  const metadataHash = hashDatasetMetadata(metadataValue);
   const dataHash = hashCanonicalJsonLines(caseValues);
   files.set(metadataPath, {
     canonicalHash: metadataHash,

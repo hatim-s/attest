@@ -36,12 +36,33 @@ const hashCanonicalContent = (canonicalContent: string): string =>
 const hashCanonicalJson = (value: JsonValue): string =>
   hashCanonicalContent(serializeCanonicalJson(value));
 
+/** Excludes volatile import time from dataset reproducibility hashes while retaining provenance. */
+const datasetMetadataForHash = (value: JsonValue): JsonValue => {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return value;
+  const provenance = value.provenance;
+  if (provenance === null || typeof provenance !== 'object' || Array.isArray(provenance)) {
+    return value;
+  }
+
+  // imported_at records the real write time; source identity fields remain hash-significant.
+  const stableProvenance = Object.fromEntries(
+    Object.entries(provenance).filter(([key]) => key !== 'imported_at'),
+  );
+  return { ...value, provenance: stableProvenance };
+};
+
+/** Computes the dataset metadata hash defined by the reproducible authoring contract. */
+const hashDatasetMetadata = (value: JsonValue): string =>
+  hashCanonicalJson(datasetMetadataForHash(value));
+
 /** Computes a formatting-independent hash for ordered parsed JSONL records. */
 const hashCanonicalJsonLines = (values: readonly JsonValue[]): string =>
   hashCanonicalContent(serializeCanonicalJsonLines(values));
 
 export {
+  datasetMetadataForHash,
   hashCanonicalContent,
+  hashDatasetMetadata,
   hashCanonicalJson,
   hashCanonicalJsonLines,
   serializeCanonicalJson,
