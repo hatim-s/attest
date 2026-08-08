@@ -1,0 +1,191 @@
+{
+  "lanes": [
+    {
+      "id": "cli-legacy-loader-template-and-facade",
+      "proposed_owner": "task14-cli-legacy-facade",
+      "whole_files": [
+        "packages/cli/src/config/canonical-config.ts",
+        "packages/cli/src/config/load-config.test.ts",
+        "packages/cli/src/config/load-config.ts",
+        "packages/cli/src/config/resolve-agent-target.ts",
+        "packages/cli/src/init/init-project.test.ts",
+        "packages/cli/src/init/init-project.ts",
+        "packages/cli/src/init/templates.ts",
+        "packages/cli/src/run/run-configuration.test.ts"
+      ],
+      "shared_markers": [
+        {
+          "path": "packages/cli/src/index.ts",
+          "markers": [
+            "runLegacyConfiguration",
+            "LegacyRunConfigurationOptions",
+            "LegacyRunExecutionResult"
+          ]
+        },
+        {
+          "path": "packages/cli/src/output/render-output.ts",
+          "markers": ["renderRunJson", "renderRunSummary", "runExitCode"]
+        },
+        {
+          "path": "packages/cli/src/run/run-configuration.ts",
+          "markers": [
+            "runLegacyConfiguration",
+            "LegacyRunConfigurationOptions",
+            "LegacyRunExecutionResult",
+            "LoadedConfig"
+          ]
+        },
+        {
+          "path": "packages/cli/src/errors/error-catalog.ts",
+          "markers": [
+            "code: 'config_invalid'",
+            "code: 'config_not_found'",
+            "code: 'config_parse_failed'",
+            "code: 'config_read_failed'"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "core-single-execution-path",
+      "proposed_owner": "task14-core-config-execution",
+      "whole_files": [
+        "packages/core/src/runner/dataset.test.ts",
+        "packages/core/src/runner/dataset.ts",
+        "packages/core/src/runner/execute.test.ts",
+        "packages/core/src/runner/execute.ts"
+      ],
+      "shared_markers": [
+        {
+          "path": "packages/core/src/index.ts",
+          "markers": [
+            "collectExecutions",
+            "executeCases",
+            "loadDatasetCases",
+            "type ExecuteOptions",
+            "type RunProgressEvent"
+          ]
+        },
+        {
+          "path": "packages/core/src/runner/errors.ts",
+          "markers": ["ConfigInvalidError"]
+        },
+        {
+          "path": "packages/core/src/runner/index.ts",
+          "markers": [
+            "collectExecutions",
+            "executeCases",
+            "loadDatasetCases",
+            "type ExecuteOptions",
+            "type RunProgressEvent"
+          ]
+        },
+        {
+          "path": "packages/core/src/runner/request.test.ts",
+          "markers": ["buildAgentRequest"]
+        },
+        {
+          "path": "packages/core/src/runner/request.ts",
+          "markers": ["buildAgentRequest"]
+        },
+        {
+          "path": "packages/core/src/runner/types.ts",
+          "markers": ["type ExecuteOptions", "type RunProgressEvent"]
+        }
+      ]
+    },
+    {
+      "id": "contracts-schema-and-conformance",
+      "proposed_owner": "task14-contract-schema-conformance",
+      "whole_files": [
+        "conformance/fixtures/config/01-valid-minimal-cli-agent-inline-cases.json",
+        "conformance/fixtures/config/02-valid-full-suites-dataset-judges-thresholds-http-agent.json",
+        "conformance/fixtures/config/03-invalid-duplicate-case-ids.json",
+        "conformance/fixtures/config/04-invalid-dangling-metric-reference.json",
+        "conformance/fixtures/config/05-invalid-empty-assert-array.json",
+        "conformance/fixtures/config/06-invalid-non-http-agent-url.json",
+        "conformance/fixtures/config/07-invalid-unknown-top-level-field.json",
+        "conformance/fixtures/config/08-invalid-missing-config-version.json",
+        "packages/contracts/src/config.test.ts",
+        "packages/contracts/src/config.ts",
+        "packages/schemas/generated/config.v1.json"
+      ],
+      "shared_markers": [
+        {
+          "path": "conformance/src/conformance.test.ts",
+          "markers": ["parseConfig", "fixture.contract === 'config'", "'config',"]
+        },
+        {
+          "path": "conformance/src/fuzz/parser-fuzz.test.ts",
+          "markers": ["parseConfig", "validConfig", "mutatedValidDocuments.config"]
+        },
+        {
+          "path": "packages/contracts/src/index.ts",
+          "markers": [
+            "configSchema",
+            "parseConfig",
+            "CONFIG_VERSION",
+            "type Config",
+            "RunSettings",
+            "Suite"
+          ]
+        },
+        {
+          "path": "packages/contracts/src/json-schema-conformance.test.ts",
+          "markers": ["CONFIG_VERSION", "validConfig", "config.v1.json"]
+        },
+        {
+          "path": "packages/contracts/src/json-schema.ts",
+          "markers": ["configSchema", "configInvariants", "config.v1.json"]
+        },
+        {
+          "path": "packages/contracts/src/parse.ts",
+          "markers": ["parseConfig", "from './config.js'"]
+        },
+        {
+          "path": "packages/contracts/src/versions.ts",
+          "markers": ["CONFIG_VERSION"]
+        }
+      ]
+    },
+    {
+      "id": "legacy-docs-and-user-facing-copy",
+      "proposed_owner": "task14-docs-ui-copy",
+      "whole_files": ["docs/specs/config-format.md"],
+      "shared_markers": [
+        {
+          "path": "ROADMAP.md",
+          "markers": ["load config → invoke agent"]
+        },
+        {
+          "path": "STACK.md",
+          "markers": [
+            "required `config_version`",
+            "config → concurrent CLI+HTTP agent execution",
+            "Golden conformance fixtures for every contract: config"
+          ]
+        },
+        {
+          "path": "docs/scout-stack-report.md",
+          "markers": [
+            "top-level `config_version`",
+            "config → concurrent CLI/HTTP execution",
+            "Golden conformance fixtures for config"
+          ]
+        },
+        {
+          "path": "packages/core/src/metrics/internal/checks.ts",
+          "markers": ["trusted v1 config"]
+        },
+        {
+          "path": "packages/web/src/app.tsx",
+          "markers": ["attest run"]
+        },
+        {
+          "path": "packages/web/src/components/run-list.tsx",
+          "markers": ["attest run"]
+        }
+      ]
+    }
+  ]
+}
