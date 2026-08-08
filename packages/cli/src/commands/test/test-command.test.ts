@@ -1,0 +1,751 @@
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+import {
+  COMMAND_REQUEST_SCHEMA_VERSION,
+  TEST_RESOURCE_SCHEMA_VERSION,
+  cliResultSchema,
+  type CommandRequest,
+  type DatasetResource,
+  type ProjectManifest,
+} from '@attest/contracts';
+import { afterEach, describe, expect, it } from 'vitest';
+
+import { hashCanonicalJson } from '../../project/canonical-project.js';
+import { loadProject } from '../../project/load-project.js';
+import {
+  fixtureAgent,
+  candidateFromLoadedProject,
+  writeFixtureProject,
+} from '../../project/transaction/project-transaction.test-fixture.js';
+import { prepareProjectCandidate } from '../../project/transaction/candidate-project.js';
+import { prepareTransaction } from '../../project/transaction/transaction-journal.js';
+import { createFileChanges } from '../../project/transaction/transactional-writer.js';
+import { runCli, type CliIo } from '../../run-cli.js';
+import { runTestMutationCommand } from './test-command.js';
+
+const temporaryDirectories: string[] = [];
+
+const createProject = async (): Promise<string> => {
+  const root = await mkdtemp(join(tmpdir(), 'attest-cli2-test-authoring-'));
+  temporaryDirectories.push(root);
+  await writeFixtureProject(root);
+  return root;
+};
+
+const collectIo = (): { errors: string[]; io: CliIo; output: string[] } => {
+  const errors: string[] = [];
+  const output: string[] = [];
+  return {
+    errors,
+    output,
+    io: { error: (message) => errors.push(message), output: (message) => output.push(message) },
+  };
+};
+
+const nonInteractive = (stdin = '') => ({
+  ci: false,
+  inputIsTTY: false,
+  outputIsTTY: false,
+  prompt: (): Promise<string> => Promise.reject(new Error('prompt must not be called')),
+  readStdin: (): Promise<string> => Promise.resolve(stdin),
+});
+
+const runJson = async (
+  root: string,
+  argv: string[],
+  stdin = '',
+): Promise<{
+  document: ReturnType<typeof cliResultSchema.parse>;
+  exitCode: number;
+  output: string;
+}> => {
+  const collected = collectIo();
+  const exitCode = await runCli([...argv, '--output', 'json'], {
+    interaction: nonInteractive(stdin),
+    io: collected.io,
+    workingDirectory: root,
+  });
+  expect(collected.errors).toEqual([]);
+  expect(collected.output).toHaveLength(1);
+  return {
+    document: cliResultSchema.parse(JSON.parse(collected.output[0] ?? '{}') as unknown),
+    exitCode,
+    output: collected.output[0] ?? '',
+  };
+};
+
+/** Captures every project byte using sorted project-relative names. */
+const snapshotProject = async (root: string): Promise<Record<string, string>> => {
+  const snapshot: Record<string, string> = {};
+  const visit = async (directory: string, prefix = ''): Promise<void> => {
+    const entries = await readdir(directory, { withFileTypes: true });
+    for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name))) {
+      const relative = prefix.length === 0 ? entry.name : `${prefix}/${entry.name}`;
+      const path = join(directory, entry.name);
+      if (entry.isDirectory()) await visit(path, relative);
+      else snapshot[relative] = (await readFile(path)).toString('base64');
+    }
+  };
+  await visit(root);
+  return snapshot;
+};
+
+const addTestRequest = (id: string): Extract<CommandRequest, { command: 'test.add' }> => ({
+  schema: COMMAND_REQUEST_SCHEMA_VERSION,
+  command: 'test.add',
+  test: {
+    schema: TEST_RESOURCE_SCHEMA_VERSION,
+    id,
+    name: id,
+    agent_id: fixtureAgent.id,
+    cases: [],
+    datasets: [],
+    metrics: [],
+  },
+});
+
+afterEach(async () => {
+  await Promise.all(
+    temporaryDirectories.splice(0).map((directory) => rm(directory, { recursive: true })),
+  );
+});
+
+describe('CLI2.7 test, case, and dataset authoring', { timeout: 20_000 }, () => {
+  it('supports canonical test and direct-case happy paths in human and JSON modes', async () => {
+    const root = await createProject();
+    expect((await runJson(root, ['test', 'add', 'smoke', '--agent', 'support'])).exitCode).toBe(0);
+    expect(
+      (
+        await runJson(root, [
+          'test',
+          'case',
+          'add',
+          'smoke',
+          '--id',
+          'ping',
+          '--input',
+          '{"question":"ping"}',
+        ])
+      ).exitCode,
+    ).toBe(0);
+
+    const listed = await runJson(root, ['test', 'case', 'list', 'smoke']);
+    expect(listed.document).toMatchObject({
+      ok: true,
+      command: 'test.case.list',
+      result: { test_id: 'smoke', items: [{ id: 'ping' }] },
+    });
+    expect((await runJson(root, ['test', 'case', 'show', 'smoke', 'ping'])).document).toMatchObject(
+      {
+        ok: true,
+        result: { case: { id: 'ping', input: { question: 'ping' } } },
+      },
+    );
+    expect(
+      (await runJson(root, ['test', 'case', 'rename', 'smoke', 'ping', 'pong'])).exitCode,
+    ).toBe(0);
+    expect((await runJson(root, ['test', 'rename', 'smoke', 'smoke-v2'])).exitCode).toBe(0);
+    expect(
+      (await runJson(root, ['test', 'case', 'remove', 'smoke-v2', 'pong', '--yes'])).exitCode,
+    ).toBe(0);
+    expect((await runJson(root, ['test', 'remove', 'smoke-v2', '--yes'])).exitCode).toBe(0);
+    expect((await loadProject({ project: root })).tests.map(({ id }) => id)).toEqual(['refund']);
+  });
+
+  it('validates the exact-one existing agent cross-reference before writing', async () => {
+    const root = await createProject();
+    const before = await snapshotProject(root);
+    const response = await runJson(root, ['test', 'add', 'broken', '--agent', 'missing']);
+    expect(response.exitCode).toBe(1);
+    expect(response.document).toMatchObject({ ok: false, error: { code: 'project_invalid' } });
+    expect(await snapshotProject(root)).toEqual(before);
+  });
+
+  it('keeps generated ids stable between direct cases, datasets, and dataset renames', async () => {
+    const root = await createProject();
+    const source = join(root, 'native.json');
+    await writeFile(source, JSON.stringify([{ input: { prompt: 'same' }, expected: 'ok' }]));
+    await runJson(root, ['test', 'add', 'direct', '--agent', 'support']);
+    await runJson(root, ['test', 'add', 'dataset-owner', '--agent', 'support']);
+    await runJson(root, ['test', 'case', 'import', 'direct', source]);
+    await runJson(root, ['test', 'dataset', 'import', 'dataset-owner', source, '--as', 'native']);
+    let loaded = await loadProject({ project: root });
+    const directId = loaded.tests.find(({ id }) => id === 'direct')?.cases[0]?.id;
+    expect(loaded.datasets.find(({ metadata }) => metadata.id === 'native')?.cases[0]?.id).toBe(
+      directId,
+    );
+
+    await runJson(root, ['test', 'dataset', 'rename', 'native', 'native-v2']);
+    loaded = await loadProject({ project: root });
+    expect(loaded.datasets.find(({ metadata }) => metadata.id === 'native-v2')?.cases[0]?.id).toBe(
+      directId,
+    );
+    expect(loaded.tests.find(({ id }) => id === 'dataset-owner')?.datasets[0]?.dataset_id).toBe(
+      'native-v2',
+    );
+  });
+
+  it('aggregates every collision across direct and attached cases', async () => {
+    const root = await createProject();
+    const source = join(root, 'collisions.jsonl');
+    await writeFile(
+      source,
+      [
+        JSON.stringify({ id: 'collision-one', input: 1 }),
+        JSON.stringify({ id: 'collision-two', input: 2 }),
+      ].join('\n'),
+    );
+    await runJson(root, ['test', 'add', 'holding', '--agent', 'support']);
+    await runJson(root, ['test', 'dataset', 'import', 'holding', source, '--as', 'collisions']);
+    for (const id of ['collision-one', 'collision-two']) {
+      await runJson(root, ['test', 'case', 'add', 'refund', '--id', id, '--input', 'null']);
+    }
+    const before = await snapshotProject(root);
+    const response = await runJson(root, ['test', 'dataset', 'attach', 'refund', 'collisions']);
+    expect(response.exitCode).toBe(1);
+    if (response.document.ok) throw new Error('Expected collision failure.');
+    const details = response.document.error.details as { diagnostics?: unknown[] };
+    expect(details.diagnostics).toHaveLength(2);
+    expect(await snapshotProject(root)).toEqual(before);
+  }, 15_000);
+
+  it('creates, detaches, and reattaches datasets without copying rows', async () => {
+    const root = await createProject();
+    await runJson(root, ['test', 'dataset', 'add', 'refund', 'empty']);
+    let loaded = await loadProject({ project: root });
+    expect(loaded.datasets.find(({ metadata }) => metadata.id === 'empty')?.cases).toEqual([]);
+    expect(loaded.tests[0]?.datasets.map(({ dataset_id }) => dataset_id)).toContain('empty');
+
+    await runJson(root, ['test', 'dataset', 'detach', 'refund', 'empty']);
+    await runJson(root, ['test', 'dataset', 'attach', 'refund', 'empty', '--tag', 'smoke']);
+    loaded = await loadProject({ project: root });
+    expect(loaded.tests[0]?.datasets.find(({ dataset_id }) => dataset_id === 'empty')).toEqual({
+      dataset_id: 'empty',
+      tags: ['smoke'],
+    });
+  });
+
+  it('reports non-TTY missing input and rejects overlapping request sources', async () => {
+    const root = await createProject();
+    expect((await runJson(root, ['test', 'add', 'missing-agent'])).document).toMatchObject({
+      ok: false,
+      error: { code: 'cli_missing_input', path: '--agent' },
+    });
+
+    const requestPath = join(root, 'request.json');
+    await writeFile(requestPath, JSON.stringify(addTestRequest('from-json')));
+    const overlap = await runJson(root, [
+      'test',
+      'add',
+      'flag-id',
+      '--agent',
+      'support',
+      '--from-json',
+      requestPath,
+    ]);
+    expect(overlap.exitCode).toBe(2);
+    expect(overlap.document).toMatchObject({ ok: false, error: { code: 'cli_usage' } });
+  });
+
+  it('rolls back the complete transaction when publication fails', async () => {
+    const root = await createProject();
+    const before = await snapshotProject(root);
+    await expect(
+      runTestMutationCommand({
+        project: root,
+        publishObserver: () => {
+          throw new Error('injected publication failure');
+        },
+        readStdin: () => Promise.resolve(''),
+        request: addTestRequest('rollback'),
+        workingDirectory: root,
+      }),
+    ).rejects.toMatchObject({ code: 'project_transaction_failed' });
+    expect(await snapshotProject(root)).toEqual(before);
+    expect((await loadProject({ project: root })).tests.some(({ id }) => id === 'rollback')).toBe(
+      false,
+    );
+  });
+
+  it('keeps dry runs byte-free and hash conflicts write-free', async () => {
+    const root = await createProject();
+    const loaded = await loadProject({ project: root });
+    const interruptedCandidate = candidateFromLoadedProject(loaded);
+    interruptedCandidate.tests.push(addTestRequest('interrupted').test);
+    const preparedCandidate = prepareProjectCandidate(interruptedCandidate);
+    await prepareTransaction(
+      root,
+      createFileChanges(loaded, preparedCandidate),
+      loaded.projectHash,
+      preparedCandidate.projectHash,
+    );
+    const before = await snapshotProject(root);
+    const preview = await runJson(root, [
+      'test',
+      'add',
+      'preview',
+      '--agent',
+      'support',
+      '--dry-run',
+      '--if-project-hash',
+      loaded.projectHash,
+    ]);
+    expect(preview.document).toMatchObject({
+      ok: true,
+      result: { committed: false, dry_run: true },
+    });
+    expect(await snapshotProject(root)).toEqual(before);
+
+    const conflictRoot = await createProject();
+    const conflictBefore = await snapshotProject(conflictRoot);
+    const conflict = await runJson(conflictRoot, [
+      'test',
+      'add',
+      'conflict',
+      '--agent',
+      'support',
+      '--if-project-hash',
+      'a'.repeat(64),
+    ]);
+    expect(conflict.exitCode).toBe(3);
+    expect(conflict.document).toMatchObject({ ok: false, error: { code: 'project_changed' } });
+    expect(await snapshotProject(conflictRoot)).toEqual(conflictBefore);
+  });
+
+  it('publishes versioned machine help and schema metadata for the native import surface', async () => {
+    const root = await createProject();
+    const help = await runJson(root, ['help', 'test', 'case', 'import']);
+    expect(help.document).toMatchObject({
+      ok: true,
+      command: 'help',
+      result: {
+        command: {
+          path: ['test', 'case', 'import'],
+          request_schema: COMMAND_REQUEST_SCHEMA_VERSION,
+        },
+      },
+    });
+    expect(help.output).toContain('jsonl');
+    expect(help.output).not.toContain('csv');
+
+    const datasetAddHelp = await runJson(root, ['help', 'test', 'dataset', 'add']);
+    expect(datasetAddHelp.document).toMatchObject({
+      ok: true,
+      result: {
+        command: {
+          path: ['test', 'dataset', 'add'],
+          request_schema: COMMAND_REQUEST_SCHEMA_VERSION,
+        },
+      },
+    });
+    const datasetCreateHelp = await runJson(root, ['help', 'test', 'dataset', 'create']);
+    expect(datasetCreateHelp).toMatchObject({
+      exitCode: 2,
+      document: { ok: false, error: { code: 'cli_usage' } },
+    });
+
+    const schema = await runJson(root, ['schema', 'print', COMMAND_REQUEST_SCHEMA_VERSION]);
+    expect(schema.document).toMatchObject({ ok: true, command: 'schema.print' });
+    expect(schema.output).toContain('test.dataset.add');
+    expect(schema.output).not.toContain('test.dataset.create');
+    expect(schema.output).toContain('test.case.rename');
+  });
+
+  it('serializes repeated human and JSON dry runs deterministically', async () => {
+    const root = await createProject();
+    const first = await runJson(root, [
+      'test',
+      'add',
+      'deterministic',
+      '--agent',
+      'support',
+      '--dry-run',
+    ]);
+    const second = await runJson(root, [
+      'test',
+      'add',
+      'deterministic',
+      '--agent',
+      'support',
+      '--dry-run',
+    ]);
+    expect(second.output).toBe(first.output);
+
+    const firstHuman = collectIo();
+    const secondHuman = collectIo();
+    for (const io of [firstHuman.io, secondHuman.io]) {
+      expect(
+        await runCli(['test', 'add', 'deterministic', '--agent', 'support', '--dry-run'], {
+          interaction: nonInteractive(),
+          io,
+          workingDirectory: root,
+        }),
+      ).toBe(0);
+    }
+    expect(secondHuman.output).toEqual(firstHuman.output);
+  });
+
+  it('keeps import results deterministic while manifest integrity binds the real timestamp', async () => {
+    const root = await createProject();
+    const source = join(root, 'deterministic-import.jsonl');
+    await writeFile(source, JSON.stringify({ input: { prompt: 'same bytes' } }));
+    const argv = [
+      'test',
+      'dataset',
+      'import',
+      'refund',
+      source,
+      '--as',
+      'stable-import',
+      '--dry-run',
+    ];
+    const first = await runJson(root, argv);
+    const second = await runJson(root, argv);
+    expect(second.output).toBe(first.output);
+    if (!first.document.ok) throw new Error('Expected dataset import preview.');
+
+    const human = collectIo();
+    expect(
+      await runCli(argv, {
+        interaction: nonInteractive(),
+        io: human.io,
+        workingDirectory: root,
+      }),
+    ).toBe(0);
+    expect(human.output.join('\n')).toContain('Semantic diff:');
+    expect(human.output.join('\n')).toContain('add dataset stable-import');
+    expect(human.output.join('\n')).toContain('reference added: dataset stable-import');
+    expect(human.output.join('\n')).toContain('remove `--dry-run`');
+
+    const beforeCommit = Date.now();
+    const committed = await runJson(
+      root,
+      argv.filter((argument) => argument !== '--dry-run'),
+    );
+    const afterCommit = Date.now();
+    if (!committed.document.ok) throw new Error('Expected dataset import commit.');
+    expect(committed.document).toMatchObject({
+      ok: true,
+      project_hash_after: first.document.project_hash_after,
+      result: { operations: (first.document.result as { operations: unknown[] }).operations },
+    });
+    const loaded = await loadProject({ project: root });
+    const importedAt = loaded.datasets.find(({ metadata }) => metadata.id === 'stable-import')
+      ?.metadata.provenance?.imported_at;
+    expect(importedAt).toBeDefined();
+    expect(Date.parse(importedAt ?? '')).toBeGreaterThanOrEqual(beforeCommit);
+    expect(Date.parse(importedAt ?? '')).toBeLessThanOrEqual(afterCommit);
+    expect(loaded.datasets).toHaveLength(2);
+
+    const metadataPath = join(root, 'attest/datasets/stable-import.meta.json');
+    const metadata = JSON.parse(await readFile(metadataPath, 'utf8')) as DatasetResource;
+    const manifest = JSON.parse(
+      await readFile(join(root, 'attest.project.json'), 'utf8'),
+    ) as ProjectManifest;
+    expect(
+      manifest.resources.datasets.find(({ id }) => id === 'stable-import')?.metadata_content_hash,
+    ).toBe(hashCanonicalJson(metadata));
+    if (metadata.provenance === undefined) throw new Error('Expected import provenance.');
+    metadata.provenance.imported_at = '2001-02-03T04:05:06.000Z';
+    await writeFile(metadataPath, `${JSON.stringify(metadata, undefined, 2)}\n`);
+
+    const validation = await runJson(root, ['project', 'validate']);
+    expect(validation.exitCode).toBe(1);
+    if (validation.document.ok) throw new Error('Expected metadata integrity failure.');
+    const diagnostics = (
+      validation.document.error.details as {
+        diagnostics: Array<{ code: string; message: string; source: string }>;
+      }
+    ).diagnostics;
+    const integrityDiagnostic = diagnostics.find(
+      ({ code, source }) =>
+        code === 'content_hash_mismatch' && source === 'attest/datasets/stable-import.meta.json',
+    );
+    expect(integrityDiagnostic).toMatchObject({
+      code: 'content_hash_mismatch',
+      source: 'attest/datasets/stable-import.meta.json',
+    });
+    expect(integrityDiagnostic?.message).toContain('canonical SHA-256');
+  });
+
+  it('aggregates every JSON and JSONL record error with physical source locations', async () => {
+    const root = await createProject();
+    const jsonlSource = join(root, 'invalid-cases.jsonl');
+    await writeFile(
+      jsonlSource,
+      [
+        'not-json',
+        '',
+        '{"input":"ok","extra":true,"slash/key":true,"tilde~key":true}',
+        '{"expected":"missing-input"}',
+      ].join('\n'),
+    );
+    const jsonlBefore = await snapshotProject(root);
+    const jsonl = await runJson(root, ['test', 'case', 'import', 'refund', jsonlSource]);
+    expect(jsonl.exitCode).toBe(1);
+    if (jsonl.document.ok) throw new Error('Expected JSONL validation failure.');
+    const jsonlDetails = jsonl.document.error.details as { diagnostics: unknown[] };
+    const jsonlDiagnostics = jsonlDetails.diagnostics as Array<{
+      code: string;
+      destination_path: string;
+      hint: string;
+      line: number;
+      source_field: string;
+    }>;
+    expect(jsonlDiagnostics.map(({ line }) => line)).toEqual([1, 3, 3, 3, 4]);
+    expect(jsonlDiagnostics.every(({ code, hint }) => code.length > 0 && hint.length > 0)).toBe(
+      true,
+    );
+    expect(jsonlDiagnostics.map(({ destination_path }) => destination_path)).toEqual([
+      '',
+      '/extra',
+      '/slash~1key',
+      '/tilde~0key',
+      '/input',
+    ]);
+    expect(jsonlDiagnostics.map(({ source_field }) => source_field)).toEqual([
+      '<line>',
+      '/extra',
+      '/slash~1key',
+      '/tilde~0key',
+      '/input',
+    ]);
+    expect(await snapshotProject(root)).toEqual(jsonlBefore);
+
+    const jsonSource = join(root, 'invalid-cases.json');
+    await writeFile(
+      jsonSource,
+      JSON.stringify([{ input: 'ok', extra: true }, { expected: 'missing-input' }]),
+    );
+    const json = await runJson(root, ['test', 'case', 'import', 'refund', jsonSource]);
+    expect(json.exitCode).toBe(1);
+    if (json.document.ok) throw new Error('Expected JSON validation failure.');
+    const jsonDetails = json.document.error.details as { diagnostics: unknown[] };
+    const jsonDiagnostics = jsonDetails.diagnostics as Array<{ row: number }>;
+    expect(jsonDiagnostics.map(({ row }) => row)).toEqual([1, 2]);
+  });
+
+  it('supports global common flags before the namespace with structured errors', async () => {
+    const root = await createProject();
+    const collected = collectIo();
+    expect(
+      await runCli(['--output', 'json', '--non-interactive', 'test', 'list'], {
+        interaction: nonInteractive(),
+        io: collected.io,
+        workingDirectory: root,
+      }),
+    ).toBe(0);
+    expect(collected.errors).toEqual([]);
+    expect(cliResultSchema.parse(JSON.parse(collected.output[0] ?? '{}'))).toMatchObject({
+      ok: true,
+      command: 'test.list',
+    });
+
+    const missing = collectIo();
+    expect(
+      await runCli(['--output=json', 'test', 'dataset', 'attach', 'refund', 'absent'], {
+        interaction: nonInteractive(),
+        io: missing.io,
+        workingDirectory: root,
+      }),
+    ).toBe(1);
+    expect(cliResultSchema.parse(JSON.parse(missing.output[0] ?? '{}'))).toMatchObject({
+      ok: false,
+      command: 'test.dataset.attach',
+      error: { hint: 'Run `attest list datasets` to inspect available ids.' },
+    });
+  });
+
+  it('previews removals without confirmation and treats a guided no as a clean no-op', async () => {
+    const root = await createProject();
+    const before = await snapshotProject(root);
+    const preview = await runJson(root, ['test', 'remove', 'refund', '--dry-run']);
+    expect(preview).toMatchObject({
+      exitCode: 0,
+      document: { ok: true, result: { committed: false, dry_run: true } },
+    });
+    expect(await snapshotProject(root)).toEqual(before);
+
+    const declined = collectIo();
+    expect(
+      await runCli(['test', 'remove', 'refund'], {
+        interaction: {
+          ci: false,
+          inputIsTTY: true,
+          outputIsTTY: true,
+          prompt: () => Promise.resolve('n'),
+          readStdin: () => Promise.resolve(''),
+        },
+        io: declined.io,
+        workingDirectory: root,
+      }),
+    ).toBe(0);
+    expect(declined.errors).toEqual([]);
+    expect(declined.output).toEqual(['No changes made; test refund was not removed.']);
+    expect(await snapshotProject(root)).toEqual(before);
+  });
+
+  it('reports attached dataset blockers before prompting with exact detach commands', async () => {
+    const root = await createProject();
+    const collected = collectIo();
+    let promptCount = 0;
+    expect(
+      await runCli(['test', 'dataset', 'remove', 'refunds'], {
+        interaction: {
+          ci: false,
+          inputIsTTY: true,
+          outputIsTTY: true,
+          prompt: () => {
+            promptCount += 1;
+            return Promise.resolve('yes');
+          },
+          readStdin: () => Promise.resolve(''),
+        },
+        io: collected.io,
+        workingDirectory: root,
+      }),
+    ).toBe(1);
+    expect(promptCount).toBe(0);
+    expect(collected.errors.join('\n')).toContain('attest test dataset detach refund refunds');
+  });
+
+  it('diffs direct-case removals by stable case id instead of shifted positions', async () => {
+    const root = await createProject();
+    for (const id of ['case-one', 'case-two', 'case-three', 'case-four']) {
+      await runJson(root, ['test', 'case', 'add', 'refund', '--id', id, '--input', `"${id}"`]);
+    }
+    const preview = await runJson(root, [
+      'test',
+      'case',
+      'remove',
+      'refund',
+      'case-one',
+      '--dry-run',
+    ]);
+    expect(preview.exitCode).toBe(0);
+    if (!preview.document.ok) throw new Error('Expected case removal preview.');
+    const result = preview.document.result as { operations: unknown[] };
+    const operations = result.operations as Array<{
+      changes: Array<{ change: string; path: string }>;
+      resource: { id: string; type: string };
+    }>;
+    const testUpdate = operations.find(
+      ({ resource }) => resource.type === 'test' && resource.id === 'refund',
+    );
+    expect(testUpdate?.changes).toContainEqual({ change: 'remove', path: '/cases/case-one' });
+    expect(testUpdate?.changes.some(({ path }) => /^\/cases\/\d/u.test(path))).toBe(false);
+  });
+
+  it('keeps request paths, authored secrets, and absolute import paths out of results', async () => {
+    const root = await createProject();
+    const secret = 'super-secret-auth-token';
+    const requestPath = join(root, 'private', 'request-with-secret.json');
+    await mkdir(join(root, 'private'));
+    await writeFile(requestPath, `{not-json:${secret}}`);
+    const invalidRequest = await runJson(root, ['test', 'add', '--from-json', requestPath]);
+    expect(invalidRequest.output).not.toContain(secret);
+    expect(invalidRequest.output).not.toContain(requestPath);
+
+    const casesPath = join(root, 'private', 'native-cases.jsonl');
+    await writeFile(casesPath, JSON.stringify({ input: { value: 'safe' } }));
+    await runJson(root, ['test', 'add', 'owner', '--agent', 'support']);
+    const imported = await runJson(root, [
+      'test',
+      'dataset',
+      'import',
+      'owner',
+      casesPath,
+      '--as',
+      'safe-data',
+    ]);
+    expect(imported.output).not.toContain(casesPath);
+    const loaded = await loadProject({ project: root });
+    expect(
+      JSON.stringify(loaded.datasets.find(({ metadata }) => metadata.id === 'safe-data')),
+    ).not.toContain(casesPath);
+  });
+
+  it('supports stdin and --from-json parity while rejecting generalized import options', async () => {
+    const root = await createProject();
+    const request = JSON.stringify(addTestRequest('stdin-test'));
+    expect(
+      (await runJson(root, ['test', 'add', '--from-json', '-'], request)).document,
+    ).toMatchObject({ ok: true, command: 'test.add' });
+
+    const cases = `${JSON.stringify({ input: 'one' })}\n${JSON.stringify({ input: 'two' })}\n`;
+    expect(
+      (
+        await runJson(
+          root,
+          ['test', 'case', 'import', 'stdin-test', '-', '--format', 'jsonl'],
+          cases,
+        )
+      ).document,
+    ).toMatchObject({ ok: true, result: { imported_case_count: 2 } });
+
+    const mappedRequest = {
+      schema: COMMAND_REQUEST_SCHEMA_VERSION,
+      command: 'test.case.import',
+      test_id: 'stdin-test',
+      source: '-',
+      import: {
+        format: 'csv',
+        mapping: [{ destination: 'input', source: 'prompt' }],
+      },
+    };
+    const path = join(root, 'mapped-request.json');
+    await writeFile(path, JSON.stringify(mappedRequest));
+    const rejected = await runJson(root, ['test', 'case', 'import', '--from-json', path]);
+    expect(rejected.exitCode).toBe(2);
+    expect(rejected.document).toMatchObject({ ok: false, error: { code: 'cli_usage' } });
+  });
+
+  it('rejects non-empty or provenance-bearing dataset add requests before writing', async () => {
+    const root = await createProject();
+    const before = await snapshotProject(root);
+    const emptyDataset = {
+      schema: 'attest.dataset/v2',
+      case_schema: 'attest.case/v2',
+      id: 'new-data',
+      name: 'New data',
+      case_count: 0,
+    };
+    const base = {
+      schema: COMMAND_REQUEST_SCHEMA_VERSION,
+      command: 'test.dataset.add',
+      test_id: 'refund',
+    };
+    const requests = [
+      { ...base, dataset: { ...emptyDataset, case_count: 1 } },
+      {
+        ...base,
+        dataset: {
+          ...emptyDataset,
+          provenance: {
+            source_type: 'csv',
+            mapping: [{ source: 'prompt', destination: 'input' }],
+            imported_at: '2026-08-08T00:00:00.000Z',
+            source_content_hash: 'a'.repeat(64),
+            counts: { read: 0, inserted: 0, updated: 0, skipped: 0 },
+          },
+        },
+      },
+    ];
+
+    for (const [index, request] of requests.entries()) {
+      const path = join(root, `invalid-dataset-add-${index}.json`);
+      await writeFile(path, JSON.stringify(request));
+      const rejected = await runJson(root, ['test', 'dataset', 'add', '--from-json', path]);
+      expect(rejected).toMatchObject({
+        exitCode: 2,
+        document: { ok: false, error: { code: 'cli_usage' } },
+      });
+    }
+    const after = await snapshotProject(root);
+    expect(
+      Object.fromEntries(Object.entries(after).filter(([path]) => !path.startsWith('invalid-'))),
+    ).toEqual(before);
+  });
+});

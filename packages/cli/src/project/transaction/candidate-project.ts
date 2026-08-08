@@ -12,6 +12,7 @@ import {
 import {
   hashCanonicalJson,
   hashCanonicalJsonLines,
+  hashProjectManifest,
   serializeCanonicalJson,
   serializeCanonicalJsonLines,
   type JsonValue,
@@ -62,15 +63,15 @@ const addDataset = (
   files: Map<string, CandidateFile>,
   metadata: DatasetResource,
   cases: readonly TestCase[],
-): { dataHash: string; metadataHash: string } => {
+): { dataHash: string; metadataIntegrityHash: string } => {
   const metadataPath = `attest/datasets/${metadata.id}.meta.json`;
   const dataPath = `attest/datasets/${metadata.id}.jsonl`;
   const metadataValue = metadata as JsonValue;
   const caseValues = cases as unknown as readonly JsonValue[];
-  const metadataHash = hashCanonicalJson(metadataValue);
+  const metadataIntegrityHash = hashCanonicalJson(metadataValue);
   const dataHash = hashCanonicalJsonLines(caseValues);
   files.set(metadataPath, {
-    canonicalHash: metadataHash,
+    canonicalHash: metadataIntegrityHash,
     contents: renderCanonicalJsonFile(metadataValue),
     path: metadataPath,
   });
@@ -79,7 +80,7 @@ const addDataset = (
     contents: renderCanonicalJsonLinesFile(caseValues),
     path: dataPath,
   });
-  return { dataHash, metadataHash };
+  return { dataHash, metadataIntegrityHash };
 };
 
 /** Rebuilds a complete canonical project snapshot and validates every aggregate invariant. */
@@ -112,7 +113,7 @@ const prepareProjectCandidate = (candidate: ProjectResources): PreparedProjectCa
       data_path: `attest/datasets/${metadata.id}.jsonl`,
       data_content_hash: hashes.dataHash,
       metadata_path: `attest/datasets/${metadata.id}.meta.json`,
-      metadata_content_hash: hashes.metadataHash,
+      metadata_content_hash: hashes.metadataIntegrityHash,
     };
   });
   const metricEntries = metrics.map((metric) => ({
@@ -152,9 +153,12 @@ const prepareProjectCandidate = (candidate: ProjectResources): PreparedProjectCa
   }
 
   const manifestValue = validated.data.project as JsonValue;
-  const projectHash = hashCanonicalJson(manifestValue);
+  const projectHash = hashProjectManifest(
+    validated.data.project,
+    validated.data.datasets.map(({ metadata }) => metadata),
+  );
   files.set('attest.project.json', {
-    canonicalHash: projectHash,
+    canonicalHash: hashCanonicalJson(manifestValue),
     contents: renderCanonicalJsonFile(manifestValue),
     path: 'attest.project.json',
   });

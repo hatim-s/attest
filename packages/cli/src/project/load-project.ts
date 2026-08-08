@@ -18,7 +18,12 @@ import {
   type TestResource,
 } from '@attest/contracts';
 
-import { hashCanonicalJson, hashCanonicalJsonLines, type JsonValue } from './canonical-project.js';
+import {
+  hashCanonicalJson,
+  hashCanonicalJsonLines,
+  hashProjectManifest,
+  type JsonValue,
+} from './canonical-project.js';
 import {
   PROJECT_MANIFEST_FILE,
   discoverProject,
@@ -201,6 +206,7 @@ const loadJsonResource = async <T>(
   source: string,
   expectedHash: string | undefined,
   schema: RuntimeSchema<T>,
+  hashValue: (value: JsonValue) => string = hashCanonicalJson,
 ): Promise<LoadedJsonResource<T>> => {
   const loaded = await readProjectSource(root, source);
   if (loaded.text === undefined) {
@@ -211,7 +217,7 @@ const loadJsonResource = async <T>(
     return { diagnostics: parsed.diagnostics, source };
   }
 
-  const hash = hashCanonicalJson(parsed.value);
+  const hash = hashValue(parsed.value);
   const diagnostics = [...parsed.diagnostics];
   if (expectedHash !== undefined && expectedHash !== hash) {
     diagnostics.push({
@@ -442,8 +448,11 @@ const loadProject = async (options: DiscoverProjectOptions = {}): Promise<Loaded
     ...validated.data,
     contentHashes,
     manifestPath: discovered.manifestPath,
-    // A valid manifest commits every verified resource hash, so its canonical hash is the project hash.
-    projectHash: manifest.hash,
+    // Integrity hashes bind every persisted byte; this projection excludes only volatile import time.
+    projectHash: hashProjectManifest(
+      validated.data.project,
+      validated.data.datasets.map(({ metadata }) => metadata),
+    ),
     root: discovered.root,
   };
 };

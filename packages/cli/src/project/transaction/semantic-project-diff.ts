@@ -1,6 +1,6 @@
 import type { ProjectResources } from '@attest/contracts';
 
-import { hashCanonicalJson, type JsonValue } from '../canonical-project.js';
+import { datasetMetadataForHash, hashCanonicalJson, type JsonValue } from '../canonical-project.js';
 import type { LoadedProject } from '../load-project.js';
 import { ProjectTransactionError } from './project-transaction-error.js';
 import type {
@@ -13,9 +13,61 @@ import type {
 } from './transaction-types.js';
 
 type ResourceValue = JsonValue & { id: string };
+type IdentityValue = Record<string, JsonValue> & { id: string };
 
 const escapePointerSegment = (segment: string): string =>
   segment.replaceAll('~', '~0').replaceAll('/', '~1');
+
+const identityValues = (values: readonly JsonValue[]): IdentityValue[] | undefined => {
+  const records: IdentityValue[] = [];
+  const ids = new Set<string>();
+  for (const value of values) {
+    if (
+      value === null ||
+      typeof value !== 'object' ||
+      Array.isArray(value) ||
+      typeof value.id !== 'string' ||
+      ids.has(value.id)
+    ) {
+      return undefined;
+    }
+    ids.add(value.id);
+    records.push(value as IdentityValue);
+  }
+  return records;
+};
+
+/** Diffs case arrays by stable ids so removals do not masquerade as positional rewrites. */
+const diffIdentityArray = (
+  before: readonly JsonValue[],
+  after: readonly JsonValue[],
+  path: string,
+): SemanticFieldChange[] | undefined => {
+  if (!path.endsWith('/cases') || before.length + after.length === 0) return undefined;
+  const beforeRecords = identityValues(before);
+  const afterRecords = identityValues(after);
+  if (beforeRecords === undefined || afterRecords === undefined) return undefined;
+  const beforeById = new Map(beforeRecords.map((value) => [value.id, value]));
+  const afterById = new Map(afterRecords.map((value) => [value.id, value]));
+  const ids = [...new Set([...beforeById.keys(), ...afterById.keys()])].sort();
+  const changes = ids.flatMap((id) => {
+    const childPath = `${path}/${escapePointerSegment(id)}`;
+    const oldValue = beforeById.get(id);
+    const newValue = afterById.get(id);
+    if (oldValue === undefined) return [{ change: 'add' as const, path: childPath }];
+    if (newValue === undefined) return [{ change: 'remove' as const, path: childPath }];
+    return diffJsonFields(oldValue, newValue, childPath);
+  });
+  // Preserve order semantics only when the membership itself is unchanged.
+  if (
+    beforeById.size === afterById.size &&
+    ids.every((id) => beforeById.has(id) && afterById.has(id)) &&
+    beforeRecords.some((value, index) => value.id !== afterRecords[index]?.id)
+  ) {
+    changes.push({ change: 'update', path: `${path}/@order` });
+  }
+  return changes;
+};
 
 /** Produces deterministic field-level changes without including authored values. */
 const diffJsonFields = (before: JsonValue, after: JsonValue, path = ''): SemanticFieldChange[] => {
@@ -23,6 +75,8 @@ const diffJsonFields = (before: JsonValue, after: JsonValue, path = ''): Semanti
     return [];
   }
   if (Array.isArray(before) && Array.isArray(after)) {
+    const identityChanges = diffIdentityArray(before, after, path);
+    if (identityChanges !== undefined) return identityChanges;
     const changes: SemanticFieldChange[] = [];
     const length = Math.max(before.length, after.length);
     for (let index = 0; index < length; index += 1) {
@@ -106,7 +160,11 @@ const valuesByKind = (
         ? project.tests
         : kind === 'metric'
           ? project.metrics
-          : project.datasets.map(({ cases, metadata }) => ({ ...metadata, cases }));
+          : project.datasets.map(({ cases, metadata }) => ({
+              ...(datasetMetadataForHash(metadata as JsonValue) as Record<string, JsonValue>),
+              id: metadata.id,
+              cases,
+            }));
   return new Map(values.map((value) => [value.id, value as ResourceValue]));
 };
 

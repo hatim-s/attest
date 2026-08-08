@@ -12,6 +12,7 @@ import {
   registerProjectResourceCommands,
   type CliInteraction,
 } from './commands/register-project-resource-commands.js';
+import { registerTestCommands } from './commands/test/register-test-commands.js';
 import {
   AttestCliError,
   createCliErrorCatalog,
@@ -125,6 +126,18 @@ const parsePort = (value: string): number => {
   return port;
 };
 
+/** Distinguishes the common machine-output option from legacy artifact-path options. */
+const acceptsGlobalCommonOption = (command: Command, name: string): boolean => {
+  const option = command.options.find((candidate) => candidate.attributeName() === name);
+  if (option === undefined) return false;
+  if (name !== 'output') return true;
+  return (
+    option.argChoices?.length === 2 &&
+    option.argChoices.includes('human') &&
+    option.argChoices.includes('json')
+  );
+};
+
 /** Builds the public command tree while keeping command effects behind narrow action callbacks. */
 const createProgram = (
   io: CliIo,
@@ -138,15 +151,35 @@ const createProgram = (
     .enablePositionalOptions()
     .description('Run reproducible evaluations for CLI and HTTP AI agents.')
     .version(packageMetadata.version)
-    .option('--project <dir>', 'explicit Attest project directory')
-    .addOption(new Option('--output <format>', 'output format').choices(['human', 'json']))
-    .option('--non-interactive', 'disable prompts and fail when required input is missing')
     .showHelpAfterError()
     .exitOverride()
     .configureOutput({
       writeOut: io.output,
       writeErr: io.error,
     });
+
+  program
+    .option('--project <dir>', 'explicit Attest project directory')
+    .addOption(new Option('--output <format>', 'output format').choices(['human', 'json']))
+    .option('--non-interactive', 'disable prompts and fail when required input is missing');
+  program.hook('preAction', (_rootCommand, actionCommand) => {
+    const globalOptions = program.opts<{
+      nonInteractive?: boolean;
+      output?: 'human' | 'json';
+      project?: string;
+    }>();
+    // Leaf commands retain a locally positioned value; otherwise inherit the normative global flag.
+    for (const [name, value] of Object.entries(globalOptions)) {
+      const localSource = actionCommand.getOptionValueSource(name);
+      if (
+        value !== undefined &&
+        acceptsGlobalCommonOption(actionCommand, name) &&
+        (localSource === undefined || localSource === 'default')
+      ) {
+        actionCommand.setOptionValueWithSource(name, value, 'implied');
+      }
+    }
+  });
 
   program
     .command('view')
@@ -339,6 +372,7 @@ const createProgram = (
     program,
     workingDirectory,
   });
+  registerTestCommands({ interaction, io, program, workingDirectory });
 
   setCliCommandHelpMetadata(program, {
     examples: [
@@ -362,7 +396,8 @@ const requestedStructuredOutput = (argv: readonly string[]): boolean => {
     command === 'show' ||
     command.startsWith('project.') ||
     command.startsWith('agent.') ||
-    command.startsWith('schema.');
+    command.startsWith('schema.') ||
+    command.startsWith('test.');
   return (
     supportsStructuredOutput &&
     argv.some(
@@ -374,25 +409,30 @@ const requestedStructuredOutput = (argv: readonly string[]): boolean => {
   );
 };
 
-const requestedCommand = (argv: readonly string[]): string => {
-  const commandArguments: string[] = [];
+/** Removes only recognized global common options before identifying the requested command. */
+const commandArguments = (argv: readonly string[]): string[] => {
+  const argumentsWithoutGlobals: string[] = [];
   for (let index = 0; index < argv.length; index += 1) {
     const argument = argv[index]!;
-    if (commandArguments.length === 0 && argument === '--non-interactive') continue;
-    if (commandArguments.length === 0 && (argument === '--project' || argument === '--output')) {
+    if (argument === '--project' || argument === '--output') {
       index += 1;
-      continue;
-    }
-    if (
-      commandArguments.length === 0 &&
-      (argument.startsWith('--project=') || argument.startsWith('--output='))
+    } else if (
+      argument === '--non-interactive' ||
+      argument.startsWith('--project=') ||
+      argument.startsWith('--output=')
     ) {
       continue;
+    } else {
+      argumentsWithoutGlobals.push(argument);
     }
-    commandArguments.push(argument);
   }
-  const first = commandArguments[0];
-  const second = commandArguments[1];
+  return argumentsWithoutGlobals;
+};
+
+const requestedCommand = (argv: readonly string[]): string => {
+  const normalizedArguments = commandArguments(argv);
+  const first = normalizedArguments[0];
+  const second = normalizedArguments[1];
   if (first === undefined || first.startsWith('-')) {
     return 'cli';
   }
@@ -410,6 +450,16 @@ const requestedCommand = (argv: readonly string[]): string => {
   }
   if (first === 'schema' && ['list', 'print'].includes(second ?? '')) {
     return `schema.${second}`;
+  }
+  if (first === 'test') {
+    const third = normalizedArguments[2];
+    if (second === 'case' && third !== undefined && !third.startsWith('-')) {
+      return `test.case.${third}`;
+    }
+    if (second === 'dataset' && third !== undefined && !third.startsWith('-')) {
+      return `test.dataset.${third}`;
+    }
+    if (second !== undefined && !second.startsWith('-')) return `test.${second}`;
   }
   return /^[a-z][a-z0-9-]*$/.test(first) ? first : 'cli';
 };

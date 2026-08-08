@@ -241,6 +241,18 @@ describe('runCli', () => {
       spans: [{ kind: 'agent' }],
     });
 
+    const globalOutput: string[] = [];
+    expect(
+      await runCli(['--output', 'json', 'trace', 'convert', 'trace.json'], {
+        workingDirectory: directory,
+        io: { output: (message) => globalOutput.push(message), error: () => undefined },
+      }),
+    ).toBe(0);
+    expect(JSON.parse(globalOutput.at(-1) ?? '{}')).toMatchObject({ trace_id: traceId });
+    await expect(readFile(join(directory, 'json'), 'utf8')).rejects.toMatchObject({
+      code: 'ENOENT',
+    });
+
     const fileOutput: string[] = [];
     expect(
       await runCli(['trace', 'convert', 'trace.json', '--output', 'converted.json'], {
@@ -303,6 +315,18 @@ describe('runCli', () => {
     });
     await store.runs.finalizeRun(second.id, 'completed');
     await store.close();
+
+    const globalReportOutput: string[] = [];
+    expect(
+      await runCli(['--output', 'json', 'report', first.id, '--store', storePath], {
+        workingDirectory: directory,
+        io: { output: (message) => globalReportOutput.push(message), error: () => undefined },
+      }),
+    ).toBe(0);
+    expect(globalReportOutput.join('')).toContain(`${first.id}.html`);
+    await expect(readFile(join(directory, 'json'), 'utf8')).rejects.toMatchObject({
+      code: 'ENOENT',
+    });
 
     const reportOutput: string[] = [];
     expect(
@@ -390,7 +414,7 @@ describe('runCli', () => {
     });
   });
 
-  it('advertises the v2 common grammar at the root for prefix-position options', async () => {
+  it('advertises positional v2 common options without changing legacy leaf semantics', async () => {
     const output: string[] = [];
     await runCli(['help', '--output', 'json'], {
       io: { output: (message) => output.push(message), error: () => undefined },
