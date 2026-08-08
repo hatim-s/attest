@@ -83,10 +83,7 @@ export {
 export {
   cancelConfiguration,
   runConfiguration,
-  runLegacyConfiguration,
   type CancelConfigurationOptions,
-  type LegacyRunConfigurationOptions,
-  type LegacyRunExecutionResult,
   type RunConfigurationOptions,
 } from './run/run-configuration.js';
 export {
