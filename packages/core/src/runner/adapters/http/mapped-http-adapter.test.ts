@@ -360,15 +360,51 @@ describe('CLI2.10 mapped HTTP adapter', () => {
     });
 
     requests = 0;
+    const retryStartedAt = performance.now();
     const retried = await invokeMappedHttpAgent(
       directAgent(fixture.origin, {
-        retry: { retries: 1, backoff: { kind: 'none' } },
+        retry: { retries: 1, backoff: { kind: 'fixed', delay_ms: 200 } },
         limits: { response_bytes: 1_024 },
       }),
       request,
     );
+    const retryElapsedMs = performance.now() - retryStartedAt;
     expect(retried.status).toBe('ok');
     expect(retried.attempts[0]?.durationMs).toBeGreaterThanOrEqual(15);
+    expect(retried.attempts).toHaveLength(2);
+    const terminalDurationMs = retried.attempts[1]?.durationMs ?? Number.POSITIVE_INFINITY;
+    // The fixed backoff is intentionally much larger than either local request.
+    expect(retryElapsedMs - terminalDurationMs).toBeGreaterThanOrEqual(150);
+  });
+
+  it('closes a stalled non-2xx response socket before returning its idle timeout', async () => {
+    let peerSocket: IncomingMessage['socket'] | undefined;
+    let observePeerClose: (() => void) | undefined;
+    const peerClosed = new Promise<void>((resolve) => {
+      observePeerClose = resolve;
+    });
+    const fixture = await startServer((incoming, response) => {
+      peerSocket = incoming.socket;
+      incoming.socket.once('close', () => observePeerClose?.());
+      response.statusCode = 503;
+      response.flushHeaders();
+    });
+
+    try {
+      const stalled = await invokeMappedHttpAgent(
+        directAgent(fixture.origin, { timeouts: { idle_ms: 25, attempt_ms: 500 } }),
+        request,
+      );
+      expect(stalled).toMatchObject({
+        status: 'invocation_error',
+        error: { code: 'timeout' },
+      });
+      await peerClosed;
+      expect(peerSocket?.destroyed).toBe(true);
+    } finally {
+      peerSocket?.destroy();
+      if (peerSocket !== undefined) await peerClosed;
+    }
   });
 
   it('validates polling before submit and fails authored terminal failures', async () => {

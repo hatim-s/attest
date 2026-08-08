@@ -152,7 +152,9 @@ const jsonlBridgeTransportSchema = z.strictObject({
 const httpTransportSchema = z.strictObject({
   kind: z.literal('http'),
   lifecycle: z.literal('external'),
-  response_mode: z.enum(['attest_envelope', 'mapped']),
+  // Pre-discriminator attest.agent/v2 HTTP resources were always native envelopes. Parse that
+  // same-version legacy shape deterministically while keeping every newly authored mode explicit.
+  response_mode: z.enum(['attest_envelope', 'mapped']).default('attest_envelope'),
   request: httpRequestTemplateSchema,
   extraction: responseExtractionSchema,
 });
