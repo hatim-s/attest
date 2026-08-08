@@ -3,6 +3,7 @@ import type { HttpRequestTemplate, JsonValue, SecretReference } from '@attest/co
 type CurlPlaceholderMapping = { inputPointer: string; targetPointer: string };
 
 type CurlParserOptions = {
+  bodyFile?: { path: string; text: string };
   headerSecrets?: Readonly<Record<string, string>>;
   placeholders?: readonly CurlPlaceholderMapping[];
   querySecrets?: Readonly<Record<string, string>>;
@@ -10,6 +11,7 @@ type CurlParserOptions = {
 
 type CurlImportPreview = {
   body: JsonValue | null;
+  body_encoding: 'json' | 'raw' | null;
   headers: Record<string, string>;
   method: HttpRequestTemplate['method'];
   query: Record<string, string>;
@@ -275,6 +277,58 @@ const applyPlaceholder = (body: JsonValue, mapping: CurlPlaceholderMapping): voi
   }
 };
 
+/** Locates the one cURL data file reference without reading or executing it. */
+const findCurlBodyFilePath = (source: string): string | undefined => {
+  const tokens = tokenizeCurl(source.trim());
+  for (let index = 1; index < tokens.length; index += 1) {
+    const token = tokens[index]!;
+    if (['-d', '--data', '--data-ascii'].includes(token)) {
+      const value = optionValue(tokens, index, token);
+      if (value.startsWith('@')) return value.slice(1);
+      index += 1;
+      continue;
+    }
+    if (
+      UNSUPPORTED_VALUE_FLAGS.has(token) ||
+      ['-X', '--request', '-H', '--header', '--data-raw', '--url'].includes(token)
+    ) {
+      index += 1;
+    }
+  }
+  return undefined;
+};
+
+const contentType = (headers: Readonly<Record<string, string | SecretReference>>): string => {
+  const entry = Object.entries(headers).find(([name]) => name.toLowerCase() === 'content-type');
+  return typeof entry?.[1] === 'string' ? entry[1].toLowerCase() : '';
+};
+
+/** Applies pointer-shaped mappings to unique form fields while preserving form wire encoding. */
+const mapFormBody = (body: string, mappings: readonly CurlPlaceholderMapping[]): string => {
+  const form = new URLSearchParams(body);
+  for (const name of form.keys()) {
+    if (SENSITIVE_NAME.test(name)) {
+      throw new CurlImportError('The cURL form body contains an unsafe credential field.', [
+        `unsafe_body_field:${name.toLowerCase()}`,
+      ]);
+    }
+  }
+  if (mappings.length === 0) return body;
+  for (const mapping of mappings) {
+    const tokens = pointerTokens(mapping.targetPointer);
+    if (tokens.length !== 1 || !form.has(tokens[0]!) || form.getAll(tokens[0]!).length !== 1) {
+      throw new CurlImportError('A form body mapping target is missing or ambiguous.', [
+        'invalid_form_target',
+      ]);
+    }
+    form.set(tokens[0]!, `{{input${mapping.inputPointer}}}`);
+  }
+  return mappings.reduce((serialized, mapping) => {
+    const placeholder = `{{input${mapping.inputPointer}}}`;
+    return serialized.replaceAll(encodeURIComponent(placeholder), placeholder);
+  }, form.toString());
+};
+
 /** Parses one cURL command into a strict, secret-reference-only HTTP request template. */
 const parseCurlCommand = (source: string, options: CurlParserOptions = {}): ParsedCurlCommand => {
   const tokens = tokenizeCurl(source.trim());
@@ -288,6 +342,7 @@ const parseCurlCommand = (source: string, options: CurlParserOptions = {}): Pars
   const secretHeaders = normalizedSecretMap(options.headerSecrets);
   let method: HttpRequestTemplate['method'] | undefined;
   let rawBody: string | undefined;
+  let bodyFilePath: string | undefined;
   let rawUrl: string | undefined;
 
   for (let index = 1; index < tokens.length; index += 1) {
@@ -320,7 +375,8 @@ const parseCurlCommand = (source: string, options: CurlParserOptions = {}): Pars
       const value = optionValue(tokens, index, token);
       index += 1;
       if (rawBody !== undefined) unsupported.push('ambiguous_body');
-      else if (value.startsWith('@')) unsupported.push('file_body');
+      else if (bodyFilePath !== undefined) unsupported.push('ambiguous_body');
+      else if (token !== '--data-raw' && value.startsWith('@')) bodyFilePath = value.slice(1);
       else rawBody = value;
       continue;
     }
@@ -345,6 +401,14 @@ const parseCurlCommand = (source: string, options: CurlParserOptions = {}): Pars
   }
   if (rawUrl === undefined)
     throw new CurlImportError('The cURL input has no URL.', ['missing_url']);
+  if (bodyFilePath !== undefined) {
+    if (options.bodyFile?.path !== bodyFilePath) {
+      throw new CurlImportError('The cURL body file must be resolved by the importer.', [
+        `file_body:${bodyFilePath}`,
+      ]);
+    }
+    rawBody = options.bodyFile.text;
+  }
 
   let url: URL;
   try {
@@ -376,18 +440,45 @@ const parseCurlCommand = (source: string, options: CurlParserOptions = {}): Pars
   url.search = '';
 
   let body: JsonValue | undefined;
+  let bodyEncoding: 'json' | 'raw' | undefined;
   if (rawBody !== undefined) {
-    try {
-      body = JSON.parse(rawBody) as JsonValue;
-    } catch (error: unknown) {
-      throw new CurlImportError('The cURL body must be one literal JSON value.', [
-        error instanceof Error ? 'invalid_json_body' : 'invalid_body',
-      ]);
+    const mediaType = contentType(headers);
+    const formEncoded = mediaType.startsWith('application/x-www-form-urlencoded');
+    let parsedJson: JsonValue | undefined;
+    if (!formEncoded) {
+      try {
+        parsedJson = JSON.parse(rawBody) as JsonValue;
+      } catch {
+        parsedJson = undefined;
+      }
     }
-    assertNoSensitiveBodyFields(body);
-    for (const mapping of options.placeholders ?? []) applyPlaceholder(body, mapping);
+    if (
+      parsedJson !== undefined &&
+      (mediaType.length === 0 || /(?:\/|\+)json(?:;|$)/u.test(mediaType))
+    ) {
+      body = parsedJson;
+      assertNoSensitiveBodyFields(body);
+      for (const mapping of options.placeholders ?? []) applyPlaceholder(body, mapping);
+      bodyEncoding = 'json';
+    } else if (formEncoded) {
+      body = mapFormBody(rawBody, options.placeholders ?? []);
+      bodyEncoding = 'raw';
+    } else {
+      if ((options.placeholders?.length ?? 0) > 0) {
+        throw new CurlImportError('Raw cURL bodies do not support JSON Pointer mappings.', [
+          'raw_body_mapping',
+        ]);
+      }
+      if (SENSITIVE_NAME.test(rawBody)) {
+        throw new CurlImportError('The raw cURL body may contain an unsafe credential.', [
+          'unsafe_raw_body',
+        ]);
+      }
+      body = rawBody;
+      bodyEncoding = 'raw';
+    }
   } else if ((options.placeholders?.length ?? 0) > 0) {
-    throw new CurlImportError('Body mappings require a JSON cURL body.', ['missing_body']);
+    throw new CurlImportError('Body mappings require a cURL body.', ['missing_body']);
   }
 
   const resolvedMethod = method ?? (body === undefined ? 'GET' : 'POST');
@@ -397,6 +488,7 @@ const parseCurlCommand = (source: string, options: CurlParserOptions = {}): Pars
     ...(Object.keys(headers).length === 0 ? {} : { headers }),
     ...(Object.keys(query).length === 0 ? {} : { query }),
     ...(body === undefined ? {} : { body }),
+    ...(bodyEncoding === undefined ? {} : { body_encoding: bodyEncoding }),
   };
   const redactTemplateValue = (value: string | SecretReference): string =>
     typeof value === 'string'
@@ -416,12 +508,14 @@ const parseCurlCommand = (source: string, options: CurlParserOptions = {}): Pars
         Object.entries(query).map(([name, value]) => [name, redactTemplateValue(value)]),
       ),
       body: body ?? null,
+      body_encoding: bodyEncoding ?? null,
     },
   };
 };
 
 export {
   CurlImportError,
+  findCurlBodyFilePath,
   parseCurlCommand,
   type CurlImportPreview,
   type CurlParserOptions,

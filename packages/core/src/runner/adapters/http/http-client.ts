@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import { request as httpRequest } from 'node:http';
 import { request as httpsRequest } from 'node:https';
 
@@ -6,6 +5,7 @@ import { AgentInvocationError } from '../../errors.js';
 import { createRawExcerpt } from '../../internal/raw-excerpt.js';
 import type { InvocationAttempt } from '../../types.js';
 import type { MaterializedHttpRequest } from './request-template.js';
+import { redactTransportText } from './redaction.js';
 import { requireSameOrigin, resolveSafeHttpUrl } from './url-security.js';
 
 type HttpClientPolicy = {
@@ -15,7 +15,7 @@ type HttpClientPolicy = {
   firstByteTimeoutMs: number;
   responseBodyTimeoutMs: number;
   responseCapBytes: number;
-  secretsPresent: boolean;
+  secrets: readonly string[];
 };
 
 type HttpJsonResponse = {
@@ -48,15 +48,15 @@ const normalizeHeaders = (headers: NodeJS.Dict<string | string[]>): Record<strin
       ]),
   );
 
-/** Reads and hashes a JSON body while enforcing both idle and aggregate byte caps. */
-const readJsonBody = async (
+/** Reads one response body while enforcing cancellation, idle, and aggregate byte caps. */
+const readResponseBody = async (
   response: import('node:http').IncomingMessage,
   policy: HttpClientPolicy,
+  parseJson: boolean,
 ): Promise<{ raw: unknown; rawExcerpt: NonNullable<InvocationAttempt['rawExcerpt']> }> =>
   new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
     const evidence: Buffer[] = [];
-    const digest = createHash('sha256');
     let byteCount = 0;
     let evidenceBytes = 0;
     let settled = false;
@@ -85,10 +85,13 @@ const readJsonBody = async (
     };
 
     policy.attemptSignal.addEventListener('abort', abort, { once: true });
+    if (policy.attemptSignal.aborted) {
+      abort();
+      return;
+    }
     response.on('data', (chunk: Buffer) => {
       resetIdle();
       byteCount += chunk.byteLength;
-      digest.update(chunk);
       if (evidenceBytes < EVIDENCE_PREFIX_BYTES) {
         const retained = chunk.subarray(0, EVIDENCE_PREFIX_BYTES - evidenceBytes);
         evidence.push(retained);
@@ -96,7 +99,10 @@ const readJsonBody = async (
       }
       if (byteCount > policy.responseCapBytes) {
         response.destroy();
-        const prefix = Buffer.concat(evidence, evidenceBytes).toString('utf8');
+        const prefix = redactTransportText(
+          Buffer.concat(evidence, evidenceBytes).toString('utf8'),
+          policy.secrets,
+        );
         finish(() =>
           reject(
             Object.assign(
@@ -108,7 +114,6 @@ const readJsonBody = async (
                 rawExcerpt: {
                   ...createRawExcerpt(prefix),
                   truncated: true,
-                  sha256: digest.digest('hex'),
                 },
               },
             ),
@@ -121,7 +126,11 @@ const readJsonBody = async (
     response.once('error', (error) => finish(() => reject(error)));
     response.once('end', () => {
       const text = Buffer.concat(chunks, byteCount).toString('utf8');
-      const rawExcerpt = createRawExcerpt(text);
+      const rawExcerpt = createRawExcerpt(redactTransportText(text, policy.secrets));
+      if (!parseJson) {
+        finish(() => resolve({ raw: null, rawExcerpt }));
+        return;
+      }
       try {
         const raw = JSON.parse(text) as unknown;
         finish(() => resolve({ raw, rawExcerpt }));
@@ -150,13 +159,15 @@ const requestOnce = async (
   request: MaterializedHttpRequest,
   policy: HttpClientPolicy,
 ): Promise<HttpJsonResponse> => {
+  if (policy.attemptSignal.aborted) throw abortError(policy);
   const resolved = await resolveSafeHttpUrl(
     request.url,
     policy.connectTimeoutMs,
     policy.attemptSignal,
     policy.callerSignal,
   );
-  if (policy.secretsPresent && resolved.url.protocol !== 'https:' && !resolved.loopback) {
+  if (policy.attemptSignal.aborted) throw abortError(policy);
+  if (policy.secrets.length > 0 && resolved.url.protocol !== 'https:' && !resolved.loopback) {
     throw new AgentInvocationError(
       'network',
       'Mapped HTTP secrets require HTTPS except for explicit loopback endpoints.',
@@ -164,6 +175,10 @@ const requestOnce = async (
   }
   const transport = resolved.url.protocol === 'https:' ? httpsRequest : httpRequest;
   return new Promise<HttpJsonResponse>((resolve, reject) => {
+    if (policy.attemptSignal.aborted) {
+      reject(abortError(policy));
+      return;
+    }
     let settled = false;
     const timers: { firstByte?: NodeJS.Timeout } = {};
     const finish = (operation: () => void): void => {
@@ -186,20 +201,7 @@ const requestOnce = async (
         outgoing.setTimeout(0);
         if (timers.firstByte !== undefined) clearTimeout(timers.firstByte);
         const status = response.statusCode ?? 0;
-        if (status < 200 || status >= 300) {
-          response.resume();
-          finish(() =>
-            resolve({
-              headers: normalizeHeaders(response.headers),
-              raw: null,
-              rawExcerpt: createRawExcerpt(''),
-              status,
-              url: resolved.url,
-            }),
-          );
-          return;
-        }
-        void readJsonBody(response, policy).then(
+        void readResponseBody(response, policy, status >= 200 && status < 300).then(
           ({ raw, rawExcerpt }) =>
             finish(() =>
               resolve({

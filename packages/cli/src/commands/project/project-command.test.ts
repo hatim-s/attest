@@ -510,6 +510,7 @@ describe('CLI2.5 project shell', () => {
     candidate.agents[0]!.transport = {
       kind: 'http',
       lifecycle: 'external',
+      response_mode: 'mapped',
       request: {
         url: 'https://user:authored-url-password@example.test/invoke?token=authored-url-token',
         method: 'POST',

@@ -25,6 +25,7 @@ describe('CLI2.10 safe cURL parser', () => {
       headers: { 'Content-Type': 'application/json' },
       query: { locale: 'en' },
       body: { prompt: '{{input/question}}', count: 2 },
+      body_encoding: 'json',
     });
   });
 
@@ -85,5 +86,44 @@ describe('CLI2.10 safe cURL parser', () => {
         parseCurlCommand('curl -X POST -X PUT -d {} -d {} https://one.test https://two.test'),
       ),
     ).toEqual(['ambiguous_method', 'ambiguous_body', 'ambiguous_url']);
+  });
+
+  it('preserves raw/form bytes and applies explicit form-field mappings', () => {
+    expect(
+      parseCurlCommand(
+        "curl https://example.test -H 'Content-Type: text/plain' --data-raw 'hello world'",
+      ).request,
+    ).toMatchObject({ body: 'hello world', body_encoding: 'raw' });
+    expect(
+      parseCurlCommand(
+        "curl https://example.test -H 'Content-Type: application/x-www-form-urlencoded' --data 'prompt=hello%20world&mode=fast'",
+      ).request,
+    ).toMatchObject({
+      body: 'prompt=hello%20world&mode=fast',
+      body_encoding: 'raw',
+    });
+    expect(
+      parseCurlCommand(
+        "curl https://example.test -H 'Content-Type: application/x-www-form-urlencoded' --data 'prompt=old&mode=fast'",
+        { placeholders: [{ targetPointer: '/prompt', inputPointer: '/question' }] },
+      ).request,
+    ).toMatchObject({
+      body: 'prompt={{input/question}}&mode=fast',
+      body_encoding: 'raw',
+    });
+  });
+
+  it('accepts a separately resolved file body and never treats binary upload flags as data', () => {
+    expect(
+      diagnostics(() => parseCurlCommand('curl https://example.test --data @request.json')),
+    ).toEqual(['file_body:request.json']);
+    expect(
+      parseCurlCommand('curl https://example.test --data @request.json', {
+        bodyFile: { path: 'request.json', text: '{"prompt":"hello"}' },
+      }).request,
+    ).toMatchObject({ body: { prompt: 'hello' }, body_encoding: 'json' });
+    expect(
+      diagnostics(() => parseCurlCommand('curl https://example.test --data-binary @request.json')),
+    ).toEqual(['--data-binary']);
   });
 });

@@ -6,6 +6,7 @@ export {
   executeCases,
   invokeAgent,
   invokeMappedHttpAgent,
+  redactTransportText,
   loadDatasetCases,
   type CaseExecution,
   type ExecuteOptions,

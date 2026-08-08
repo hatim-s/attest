@@ -11,6 +11,8 @@ import {
 import { openStore } from '@attest/core';
 
 import { AttestCliError } from '../../errors.js';
+import { CurlImportError, parseCurlCommand } from '../../import/curl/index.js';
+import { discoverProject } from '../../project/discover-project.js';
 import { applyProjectMutation, type PublishObserver } from '../../project/transaction/index.js';
 import type { CommandResult } from '../command-result.js';
 import { loadCommandProject } from '../project/load-command-project.js';
@@ -152,6 +154,40 @@ const promptRequired = async (
     path,
     hint: `Pass ${path} or a complete \`--from-json\` request.`,
   });
+};
+
+/** Reads one optional guided value while preserving a documented default. */
+const promptDefault = async (
+  value: string | undefined,
+  question: string,
+  fallback: string,
+  interactive: boolean,
+  prompt: Prompt | undefined,
+): Promise<string> => {
+  if (value?.trim()) return value.trim();
+  if (!interactive || prompt === undefined) return fallback;
+  return (await prompt(`${question} [${fallback}]: `)).trim() || fallback;
+};
+
+/** Reads one optional guided value, returning undefined for an empty answer. */
+const promptOptional = async (
+  value: string | undefined,
+  question: string,
+  interactive: boolean,
+  prompt: Prompt | undefined,
+): Promise<string | undefined> => {
+  if (value?.trim()) return value.trim();
+  if (!interactive || prompt === undefined) return undefined;
+  const answer = (await prompt(`${question} [none]: `)).trim();
+  return answer.length === 0 ? undefined : answer;
+};
+
+const commaSeparated = (value: string): string[] | undefined => {
+  const entries = value
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0);
+  return entries.length === 0 ? undefined : entries;
 };
 
 /** Makes every guided prompt terminate promptly when the command is cancelled. */
@@ -306,7 +342,9 @@ const createCurlImportRequest = (fields: {
   const failures = parseJsonValues(options.pollFailure, '--poll-failure');
   const retries = parseRetryCount(options.retries);
   const retryDelay =
-    options.retryDelay === undefined ? undefined : parseDuration(options.retryDelay);
+    options.retryDelay === undefined
+      ? undefined
+      : parseDuration(options.retryDelay, '--retry-delay');
   if (retryDelay !== undefined && retries === undefined) {
     throw new AttestCliError('cli_usage', '--retry-delay requires --retries.', {
       path: '--retry-delay',
@@ -350,11 +388,11 @@ const createCurlImportRequest = (fields: {
             minimum_interval_ms:
               options.pollMinimumInterval === undefined
                 ? undefined
-                : parseDuration(options.pollMinimumInterval),
+                : parseDuration(options.pollMinimumInterval, '--poll-minimum-interval'),
             maximum_interval_ms:
               options.pollMaximumInterval === undefined
                 ? undefined
-                : parseDuration(options.pollMaximumInterval),
+                : parseDuration(options.pollMaximumInterval, '--poll-maximum-interval'),
             ...(options.idempotencyHeader === undefined
               ? {}
               : { idempotency_header: options.idempotencyHeader }),
@@ -372,16 +410,16 @@ const createCurlImportRequest = (fields: {
           timeouts: {
             ...(options.connectTimeout === undefined
               ? {}
-              : { connect_ms: parseDuration(options.connectTimeout) }),
+              : { connect_ms: parseDuration(options.connectTimeout, '--connect-timeout') }),
             ...(options.firstByteTimeout === undefined
               ? {}
-              : { first_byte_ms: parseDuration(options.firstByteTimeout) }),
+              : { first_byte_ms: parseDuration(options.firstByteTimeout, '--first-byte-timeout') }),
             ...(options.bodyTimeout === undefined
               ? {}
-              : { idle_ms: parseDuration(options.bodyTimeout) }),
+              : { idle_ms: parseDuration(options.bodyTimeout, '--body-timeout') }),
             ...(options.attemptTimeout === undefined
               ? {}
-              : { attempt_ms: parseDuration(options.attemptTimeout) }),
+              : { attempt_ms: parseDuration(options.attemptTimeout, '--attempt-timeout') }),
           },
         }),
     ...(retries === undefined
@@ -443,6 +481,160 @@ const createCurlImportRequest = (fields: {
   return parsed.data;
 };
 
+/** Completes the human cURL happy path without retaining any captured credential literal. */
+const prepareGuidedCurlOptions = async (
+  options: AgentImportCommandOptions,
+  source: string,
+): Promise<AgentImportCommandOptions> => {
+  if (!options.interactive || options.prompt === undefined) return options;
+  const guided: AgentImportCommandOptions = {
+    ...options,
+    headerEnv: [...(options.headerEnv ?? [])],
+    queryEnv: [...(options.queryEnv ?? [])],
+  };
+  // Reparse after each discovered credential name; the literal value is never copied into a prompt.
+  for (let attempt = 0; attempt < 32; attempt += 1) {
+    try {
+      parseCurlCommand(source, {
+        headerSecrets: parseEnvironmentBindings(guided.headerEnv, '--header-env'),
+        querySecrets: parseEnvironmentBindings(guided.queryEnv, '--query-env'),
+      });
+      break;
+    } catch (error: unknown) {
+      if (!(error instanceof CurlImportError)) throw error;
+      const unsafe = error.diagnostics.find(
+        (diagnostic) =>
+          diagnostic.startsWith('unsafe_header:') || diagnostic.startsWith('unsafe_query:'),
+      );
+      if (unsafe === undefined) break;
+      const [kind, name] = unsafe.split(':') as [string, string];
+      const environment = await promptRequired(
+        undefined,
+        `${kind === 'unsafe_header' ? 'Header' : 'Query'} ${name} environment variable`,
+        kind === 'unsafe_header' ? '--header-env' : '--query-env',
+        true,
+        options.prompt,
+      );
+      const binding = `${name}=${environment}`;
+      if (kind === 'unsafe_header') guided.headerEnv = [...(guided.headerEnv ?? []), binding];
+      else guided.queryEnv = [...(guided.queryEnv ?? []), binding];
+    }
+  }
+  if (options.mapBody === undefined) {
+    guided.mapBody = commaSeparated(
+      await options.prompt('Body mappings TARGET_POINTER=INPUT_POINTER, comma-separated [none]: '),
+    );
+  }
+  guided.errorPointer = await promptOptional(
+    options.errorPointer,
+    'Error JSON Pointer',
+    true,
+    options.prompt,
+  );
+  guided.tracePointer = await promptOptional(
+    options.tracePointer,
+    'Trace JSON Pointer',
+    true,
+    options.prompt,
+  );
+  guided.remoteJobIdPointer = await promptOptional(
+    options.remoteJobIdPointer,
+    'Remote job id JSON Pointer',
+    true,
+    options.prompt,
+  );
+  const pollingSelected =
+    options.pollJobIdPointer !== undefined ||
+    options.pollStatusPointer !== undefined ||
+    options.pollStatusUrlPointer !== undefined ||
+    options.pollStatusUrlTemplate !== undefined ||
+    options.pollSuccess !== undefined ||
+    options.pollFailure !== undefined;
+  const transport = pollingSelected
+    ? 'polling'
+    : await promptDefault(undefined, 'Transport', 'direct', true, options.prompt);
+  if (!['direct', 'polling'].includes(transport)) {
+    throw new AttestCliError('cli_usage', 'Transport must be direct or polling.', {
+      path: 'transport',
+    });
+  }
+  if (transport === 'polling') {
+    guided.pollJobIdPointer = await promptDefault(
+      options.pollJobIdPointer,
+      'Submission job id JSON Pointer',
+      '/job_id',
+      true,
+      options.prompt,
+    );
+    if (options.pollStatusUrlPointer === undefined && options.pollStatusUrlTemplate === undefined) {
+      const sourceChoice = await promptDefault(
+        undefined,
+        'Status URL source',
+        'pointer',
+        true,
+        options.prompt,
+      );
+      if (sourceChoice === 'pointer') {
+        guided.pollStatusUrlPointer = await promptDefault(
+          undefined,
+          'Submission status URL JSON Pointer',
+          '/status_url',
+          true,
+          options.prompt,
+        );
+      } else if (sourceChoice === 'template') {
+        guided.pollStatusUrlTemplate = await promptRequired(
+          undefined,
+          'Same-origin status URL template with {{job_id}}',
+          '--poll-status-url-template',
+          true,
+          options.prompt,
+        );
+      } else {
+        throw new AttestCliError('cli_usage', 'Status URL source must be pointer or template.', {
+          path: 'status-url-source',
+        });
+      }
+    }
+    guided.pollStatusPointer = await promptDefault(
+      options.pollStatusPointer,
+      'Polling status JSON Pointer',
+      '/status',
+      true,
+      options.prompt,
+    );
+    guided.pollSuccess = options.pollSuccess ??
+      commaSeparated(
+        await options.prompt('Polling success JSON values, comma-separated ["done"]: '),
+      ) ?? ['"done"'];
+    guided.pollFailure = options.pollFailure ??
+      commaSeparated(
+        await options.prompt('Polling failure JSON values, comma-separated ["failed"]: '),
+      ) ?? ['"failed"'];
+    guided.pollMinimumInterval = await promptDefault(
+      options.pollMinimumInterval,
+      'Minimum polling interval',
+      '1s',
+      true,
+      options.prompt,
+    );
+    guided.pollMaximumInterval = await promptDefault(
+      options.pollMaximumInterval,
+      'Maximum polling interval',
+      '5s',
+      true,
+      options.prompt,
+    );
+    guided.idempotencyHeader = await promptOptional(
+      options.idempotencyHeader,
+      'Submission idempotency header',
+      true,
+      options.prompt,
+    );
+  }
+  return guided;
+};
+
 const findAgent = (agents: readonly AgentResource[], id: string): AgentResource => {
   const agent = agents.find((candidate) => candidate.id === id);
   if (agent === undefined) {
@@ -463,6 +655,7 @@ const mutationResult = async (
   renames?: readonly { from: string; to: string; type: 'agent' }[],
   warnings?: readonly string[],
   confirmation?: {
+    definitionPreview?: JsonValue;
     interactive: boolean;
     nextCommand?: string;
     prompt?: Prompt;
@@ -498,6 +691,9 @@ const mutationResult = async (
     `${command} ${request.dry_run === true ? 'preview' : 'changes'}:`,
     ...(operationLines.length === 0 ? ['- no semantic changes'] : operationLines),
     ...warningLines,
+    ...(confirmation?.definitionPreview === undefined
+      ? []
+      : [`Redacted definition preview: ${JSON.stringify(confirmation.definitionPreview)}`]),
   ].join('\n');
   if (request.dry_run !== true && confirmation?.yes !== true) {
     if (confirmation?.interactive === true && confirmation.prompt !== undefined) {
@@ -531,6 +727,9 @@ const mutationResult = async (
       dry_run: request.dry_run === true,
       operations: result.diff.operations as unknown as JsonValue,
       warnings: result.diff.warnings as unknown as JsonValue,
+      ...(confirmation?.definitionPreview === undefined
+        ? {}
+        : { import_preview: confirmation.definitionPreview }),
       ...(request.dry_run === true || confirmation?.nextCommand === undefined
         ? {}
         : { next_command: confirmation.nextCommand }),
@@ -735,22 +934,55 @@ const runAgentImportCommand = async (
   let agent: AgentResource;
   let importPreview: JsonValue | undefined;
   if (sourceType === 'curl') {
+    const curlSource = await readCurlDocument(source, options.workingDirectory, options.readStdin);
+    options = await prepareGuidedCurlOptions(options, curlSource);
     const responsePointer =
       request?.source_type === 'curl'
         ? request.extraction.result_pointer
-        : await promptRequired(
-            options.responsePointer,
-            'Response JSON Pointer',
-            '--response-pointer',
-            options.interactive,
-            options.prompt,
-          );
-    const curlRequest =
+        : options.responsePointer !== undefined
+          ? options.responsePointer
+          : await promptDefault(
+              undefined,
+              'Response JSON Pointer',
+              '/answer',
+              options.interactive,
+              options.prompt,
+            );
+    let curlRequest =
       request?.source_type === 'curl'
         ? request
         : createCurlImportRequest({ agentId, name, options, responsePointer, source });
-    const curlSource = await readCurlDocument(source, options.workingDirectory, options.readStdin);
-    const imported = createImportedCurlAgentResource(curlRequest, curlSource);
+    const projectRoot = (
+      await discoverProject({
+        project: options.project,
+        workingDirectory: options.workingDirectory,
+      })
+    ).root;
+    let imported: Awaited<ReturnType<typeof createImportedCurlAgentResource>> | undefined;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        imported = await createImportedCurlAgentResource(curlRequest, curlSource, projectRoot);
+        break;
+      } catch (error: unknown) {
+        if (
+          request !== undefined ||
+          !options.interactive ||
+          options.prompt === undefined ||
+          !(error instanceof AttestCliError) ||
+          !/mapping|target/iu.test(error.message) ||
+          attempt === 2
+        ) {
+          throw error;
+        }
+        options.mapBody = commaSeparated(
+          await options.prompt(
+            'Body mapping was invalid. Re-enter TARGET_POINTER=INPUT_POINTER values [none]: ',
+          ),
+        );
+        curlRequest = createCurlImportRequest({ agentId, name, options, responsePointer, source });
+      }
+    }
+    if (imported === undefined) throw new Error('Guided cURL import did not settle.');
     agent = imported.agent;
     importPreview = {
       request: imported.preview,
@@ -782,7 +1014,7 @@ const runAgentImportCommand = async (
   }
   const candidate = candidateFromLoaded(loaded);
   candidate.agents.push(agent);
-  const result = await mutationResult(
+  return mutationResult(
     'agent.import',
     loaded,
     candidate,
@@ -794,6 +1026,7 @@ const runAgentImportCommand = async (
     undefined,
     undefined,
     {
+      definitionPreview: importPreview,
       interactive: options.interactive,
       nextCommand: `attest agent test ${agent.id}`,
       prompt: options.prompt,
@@ -801,14 +1034,6 @@ const runAgentImportCommand = async (
       yes: request?.yes ?? options.yes,
     },
   );
-  if (importPreview !== undefined) {
-    result.human = `${result.human}\nRedacted import preview: ${JSON.stringify(importPreview)}`;
-    result.result = {
-      ...(result.result as Record<string, JsonValue>),
-      import_preview: importPreview,
-    };
-  }
-  return result;
 };
 
 /** Renames an agent and every test reference in one atomic transaction. */

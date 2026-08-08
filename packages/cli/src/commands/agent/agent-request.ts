@@ -1,5 +1,6 @@
-import { readFile } from 'node:fs/promises';
-import { resolve } from 'node:path';
+import { constants } from 'node:fs';
+import { lstat, open, readFile, realpath } from 'node:fs/promises';
+import { isAbsolute, relative, resolve, sep } from 'node:path';
 
 import {
   AGENT_RESOURCE_SCHEMA_VERSION,
@@ -14,6 +15,7 @@ import {
 import { AttestCliError } from '../../errors.js';
 import {
   CurlImportError,
+  findCurlBodyFilePath,
   parseCurlCommand,
   type CurlImportPreview,
 } from '../../import/curl/index.js';
@@ -40,6 +42,14 @@ const requestDiagnostics = (
 const MAX_REMOTE_JSON_BYTES = 1024 * 1024;
 const MAX_CURL_BYTES = 1024 * 1024;
 const REMOTE_JSON_TIMEOUT_MS = 10_000;
+
+const isContainedPath = (root: string, candidate: string): boolean => {
+  const pathFromRoot = relative(root, candidate);
+  return (
+    pathFromRoot === '' ||
+    (!isAbsolute(pathFromRoot) && pathFromRoot !== '..' && !pathFromRoot.startsWith(`..${sep}`))
+  );
+};
 
 /** Fetches one bounded JSON document without following redirects or reflecting its URL. */
 const readRemoteJson = async (source: string, path: string): Promise<string> => {
@@ -233,15 +243,15 @@ const parseArgvJson = (value: string): string[] => {
   return parsed as string[];
 };
 
-const parseDuration = (value: string): number => {
+const parseDuration = (value: string, path = '--timeout'): number => {
   const match = /^(\d+)(ms|s|m)$/u.exec(value);
   const amount = match?.[1] === undefined ? 0 : Number(match[1]);
   const unit = match?.[2];
   const multiplier = unit === 'm' ? 60_000 : unit === 's' ? 1_000 : 1;
   const milliseconds = amount * multiplier;
   if (!Number.isSafeInteger(milliseconds) || milliseconds <= 0) {
-    throw new AttestCliError('cli_usage', 'Timeout must be a positive duration.', {
-      path: '--timeout',
+    throw new AttestCliError('cli_usage', 'Duration must be a positive value.', {
+      path,
       hint: 'Use an integer followed by ms, s, or m, such as `60s`.',
     });
   }
@@ -272,14 +282,7 @@ const SENSITIVE_NAME = /authorization|cookie|password|secret|token|api[-_]?key/i
 
 const isNativeEnvelopeHttp = (
   transport: Extract<AgentResource['transport'], { kind: 'http' }>,
-): boolean =>
-  transport.request.method === 'POST' &&
-  transport.request.body === undefined &&
-  transport.request.query === undefined &&
-  transport.extraction.result_pointer === '' &&
-  transport.extraction.error_pointer === undefined &&
-  transport.extraction.trace_pointer === undefined &&
-  transport.extraction.remote_job_id_pointer === undefined;
+): boolean => transport.response_mode === 'attest_envelope';
 
 const findSensitiveBodyField = (value: JsonValue, path = ''): string | undefined => {
   if (Array.isArray(value)) {
@@ -302,6 +305,24 @@ const assertSafeHttpTemplate = (
   request: Extract<AgentResource['transport'], { kind: 'http' }>['request'],
   path: string,
 ): URL => {
+  const separator = request.url.indexOf('://');
+  const authorityStart = separator + 3;
+  const authorityEnd = request.url.slice(authorityStart).search(/[/?#]/u);
+  const authority = request.url.slice(
+    authorityStart,
+    authorityEnd < 0 ? undefined : authorityStart + authorityEnd,
+  );
+  if (
+    separator <= 0 ||
+    request.url.slice(0, authorityStart).includes('{{') ||
+    authority.includes('{{')
+  ) {
+    throw new AttestCliError(
+      'project_invalid',
+      'Mapped HTTP URL placeholders are allowed only in path or query components.',
+      { path },
+    );
+  }
   let url: URL;
   try {
     url = new URL(request.url.replaceAll(/\{\{[^}]+\}\}/gu, 'placeholder'));
@@ -417,6 +438,22 @@ const assertSafeNativeAgentResource = (agent: AgentResource): void => {
   }
   const request = transport.kind === 'http' ? transport.request : transport.submit;
   const requestPath = `/agent/transport/${transport.kind === 'http' ? 'request' : 'submit'}`;
+  if (
+    transport.kind === 'http' &&
+    transport.response_mode === 'attest_envelope' &&
+    (request.method !== 'POST' ||
+      request.body !== undefined ||
+      request.query !== undefined ||
+      transport.extraction.result_pointer !== '' ||
+      transport.extraction.error_pointer !== undefined ||
+      transport.extraction.trace_pointer !== undefined ||
+      transport.extraction.remote_job_id_pointer !== undefined)
+  ) {
+    throw new AttestCliError('project_invalid', 'Native-envelope HTTP mapping is inconsistent.', {
+      path: '/agent/transport/response_mode',
+      hint: 'Use the canonical POST envelope shape or select mapped response mode.',
+    });
+  }
   const origin = assertSafeHttpTemplate(request, requestPath);
   if (transport.kind === 'polling' && transport.status_url_template !== undefined) {
     const status = assertSafeHttpTemplate(
@@ -482,6 +519,7 @@ const createAgentResource = (fields: AgentAddFields): AgentResource => {
       : {
           kind: 'http' as const,
           lifecycle: 'external' as const,
+          response_mode: 'attest_envelope' as const,
           request: {
             url: fields.nativeHttp,
             method: 'POST' as const,
@@ -563,20 +601,79 @@ const readCurlDocument = async (
   return text;
 };
 
-/** Converts one inert cURL request into a canonical direct or polling agent resource. */
-const createImportedCurlAgentResource = (
-  request: CurlAgentImportRequest,
-  source: string,
-): { agent: AgentResource; preview: CurlImportPreview } => {
-  if (request.extraction.result_pointer === '') {
-    throw new AttestCliError('cli_usage', 'cURL imports require a non-root result pointer.', {
-      path: '/extraction/result_pointer',
-      hint: 'Select the foreign response field that becomes the Attest output.',
+/** Reads one project-contained cURL data file through a no-follow bounded descriptor. */
+const readCurlBodyFile = async (
+  path: string,
+  projectRoot: string,
+  maximumBytes: number,
+): Promise<string> => {
+  const candidate = resolve(projectRoot, path);
+  if (path.length === 0 || isAbsolute(path) || !isContainedPath(projectRoot, candidate)) {
+    throw new AttestCliError('cli_usage', 'The cURL body file must be inside the project.', {
+      path: 'source',
+      details: { diagnostic: 'file_body_outside_project' },
     });
   }
+  let handle: Awaited<ReturnType<typeof open>> | undefined;
+  try {
+    handle = await open(candidate, constants.O_RDONLY | constants.O_NOFOLLOW);
+    const metadata = await handle.stat();
+    const [resolvedPath, pathMetadata] = await Promise.all([realpath(candidate), lstat(candidate)]);
+    if (
+      !metadata.isFile() ||
+      !isContainedPath(projectRoot, resolvedPath) ||
+      pathMetadata.isSymbolicLink() ||
+      pathMetadata.dev !== metadata.dev ||
+      pathMetadata.ino !== metadata.ino
+    ) {
+      throw new Error('body file must retain one project-contained regular-file identity');
+    }
+    if (metadata.size > maximumBytes) throw new Error('body file exceeds the request cap');
+    const chunks: Buffer[] = [];
+    let bytes = 0;
+    for (;;) {
+      const chunk = Buffer.allocUnsafe(Math.min(64 * 1024, maximumBytes + 1 - bytes));
+      const read = await handle.read(chunk, 0, chunk.length, bytes);
+      if (read.bytesRead === 0) break;
+      bytes += read.bytesRead;
+      if (bytes > maximumBytes) throw new Error('body file exceeds the request cap');
+      chunks.push(chunk.subarray(0, read.bytesRead));
+    }
+    return new TextDecoder('utf-8', { fatal: true }).decode(Buffer.concat(chunks, bytes));
+  } catch (error: unknown) {
+    throw new AttestCliError('cli_usage', 'Could not safely read the cURL body file.', {
+      path: 'source',
+      hint: 'Use one project-contained regular UTF-8 file within the request byte cap.',
+      details: { diagnostic: 'unsafe_file_body' },
+      cause: error,
+    });
+  } finally {
+    await handle?.close().catch(() => undefined);
+  }
+};
+
+/** Converts one inert cURL request into a canonical direct or polling agent resource. */
+const createImportedCurlAgentResource = async (
+  request: CurlAgentImportRequest,
+  source: string,
+  projectRoot: string,
+): Promise<{ agent: AgentResource; preview: CurlImportPreview }> => {
   let parsedCurl: ReturnType<typeof parseCurlCommand>;
   try {
+    const bodyFilePath = findCurlBodyFilePath(source);
+    const bodyFile =
+      bodyFilePath === undefined
+        ? undefined
+        : {
+            path: bodyFilePath,
+            text: await readCurlBodyFile(
+              bodyFilePath,
+              projectRoot,
+              Math.min(request.limits?.request_bytes ?? MAX_CURL_BYTES, MAX_CURL_BYTES),
+            ),
+          };
     parsedCurl = parseCurlCommand(source, {
+      bodyFile,
       headerSecrets: request.header_env,
       querySecrets: request.query_env,
       placeholders: request.placeholders?.map((mapping) => ({
@@ -599,6 +696,7 @@ const createImportedCurlAgentResource = (
       ? {
           kind: 'http' as const,
           lifecycle: 'external' as const,
+          response_mode: 'mapped' as const,
           request: parsedCurl.request,
           extraction: request.extraction,
         }
@@ -647,6 +745,7 @@ export {
   parseDuration,
   readAgentCommandRequest,
   readCurlDocument,
+  readCurlBodyFile,
   readImportedAgentResource,
   tokenizeCommand,
   type AgentAddFields,

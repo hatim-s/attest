@@ -14,6 +14,7 @@ import {
 import {
   invokeAgent,
   invokeMappedHttpAgent,
+  redactTransportText,
   type HttpAgentResource,
   type InvocationResult,
   type StoredCaseExecution,
@@ -154,14 +155,7 @@ const resolveNativeAgent = async (
     const transport = agent.transport;
     const request = transport.kind === 'http' ? transport.request : transport.submit;
     const nativeEnvelope =
-      transport.kind === 'http' &&
-      request.method === 'POST' &&
-      request.body === undefined &&
-      request.query === undefined &&
-      transport.extraction.result_pointer === '' &&
-      transport.extraction.error_pointer === undefined &&
-      transport.extraction.trace_pointer === undefined &&
-      transport.extraction.remote_job_id_pointer === undefined;
+      transport.kind === 'http' && transport.response_mode === 'attest_envelope';
     const headers: Record<string, string> = {};
     const query: Record<string, string> = {};
     const secrets: string[] = [];
@@ -210,16 +204,7 @@ const resolveNativeAgent = async (
 const assertSupportedProbePolicy = (agent: AgentResource): void => {
   const mappedHttp =
     agent.transport.kind === 'polling' ||
-    (agent.transport.kind === 'http' &&
-      !(
-        agent.transport.request.method === 'POST' &&
-        agent.transport.request.body === undefined &&
-        agent.transport.request.query === undefined &&
-        agent.transport.extraction.result_pointer === '' &&
-        agent.transport.extraction.error_pointer === undefined &&
-        agent.transport.extraction.trace_pointer === undefined &&
-        agent.transport.extraction.remote_job_id_pointer === undefined
-      ));
+    (agent.transport.kind === 'http' && agent.transport.response_mode === 'mapped');
   const unsupportedTimeout = (
     mappedHttp ? ['run_ms'] : ['connect_ms', 'first_byte_ms', 'idle_ms', 'run_ms']
   ).find(
@@ -270,9 +255,7 @@ const assertSupportedProbePolicy = (agent: AgentResource): void => {
 };
 
 const redactString = (value: string, secrets: readonly string[]): string =>
-  secrets
-    .filter((secret) => secret.length > 0)
-    .reduce((redacted, secret) => redacted.replaceAll(secret, REDACTED), value);
+  redactTransportText(value, secrets);
 
 /** Recursively removes runtime secret values and sensitive named fields from probe evidence. */
 const redactProbeValue = (value: unknown, secrets: readonly string[]): JsonValue => {
@@ -298,6 +281,7 @@ const redactStored = <Value>(value: Value, secrets: readonly string[]): Value =>
 const invocationAttempts = (attempts: InvocationResult['attempts']): JsonValue =>
   attempts.map((attempt, index) => ({
     attempt: index + 1,
+    duration_ms: attempt.durationMs,
     status: attempt.status,
     ...(attempt.status === 'invocation_error' ? { invocation_code: attempt.error.code } : {}),
     diagnostics: attempt.diagnostics,

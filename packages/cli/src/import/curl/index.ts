@@ -1,5 +1,6 @@
 export {
   CurlImportError,
+  findCurlBodyFilePath,
   parseCurlCommand,
   type CurlImportPreview,
   type CurlParserOptions,

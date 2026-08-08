@@ -41,6 +41,7 @@ const directAgent = (origin: string, overrides: Partial<AgentResource> = {}): Ht
     transport: {
       kind: 'http',
       lifecycle: 'external',
+      response_mode: 'mapped',
       request: {
         url: `${origin}/invoke/{{input/question}}`,
         method: 'POST',
@@ -281,5 +282,155 @@ describe('CLI2.10 mapped HTTP adapter', () => {
 
     const prohibited = await invokeMappedHttpAgent(directAgent('http://169.254.169.254'), request);
     expect(prohibited.status).toBe('invocation_error');
+  });
+
+  it('redacts escaped response evidence and records an authored remote job id', async () => {
+    const secret = 'quote"\\secret';
+    const fixture = await startServer((_incoming, response) => {
+      response.setHeader('content-type', 'application/json');
+      response.end(JSON.stringify({ data: { result: 'ok' }, echo: secret, job: 'remote-7' }));
+    });
+    const agent = directAgent(fixture.origin);
+    agent.transport.extraction.remote_job_id_pointer = '/job';
+    const result = await invokeMappedHttpAgent(agent, request, { secrets: [secret] });
+    expect(result.status).toBe('ok');
+    expect(result.rawExcerpt?.text).toContain('[REDACTED]');
+    expect(result.rawExcerpt?.text).not.toContain(secret);
+    expect(result.rawExcerpt?.text).not.toContain(JSON.stringify(secret).slice(1, -1));
+    expect(result.diagnostics).toMatchObject({ remoteJobId: 'remote-7' });
+
+    agent.transport.extraction.remote_job_id_pointer = '/missing';
+    expect((await invokeMappedHttpAgent(agent, request)).diagnostics).not.toHaveProperty(
+      'remoteJobId',
+    );
+    agent.transport.extraction.remote_job_id_pointer = '/data';
+    expect(await invokeMappedHttpAgent(agent, request)).toMatchObject({
+      status: 'invocation_error',
+      error: { code: 'invalid_envelope' },
+    });
+  });
+
+  it('performs zero network I/O for pre-cancelled, authority-templated, and oversized requests', async () => {
+    let requests = 0;
+    const fixture = await startServer((_incoming, response) => {
+      requests += 1;
+      response.end(JSON.stringify({ data: { result: 'unexpected' } }));
+    });
+    const controller = new AbortController();
+    controller.abort();
+    const cancelled = await invokeMappedHttpAgent(directAgent(fixture.origin), request, {
+      signal: controller.signal,
+    });
+    expect(cancelled).toMatchObject({ status: 'invocation_error', error: { code: 'cancelled' } });
+
+    const authority = directAgent(fixture.origin);
+    if (authority.transport.kind !== 'http') throw new Error('Expected direct HTTP transport.');
+    authority.transport.request.url = `http://{{input/question}}:${new URL(fixture.origin).port}/x`;
+    expect((await invokeMappedHttpAgent(authority, request)).status).toBe('invocation_error');
+
+    const oversized = directAgent(fixture.origin, { limits: { request_bytes: 80 } });
+    if (oversized.transport.kind !== 'http') throw new Error('Expected direct HTTP transport.');
+    oversized.transport.request.body = undefined;
+    oversized.transport.request.query = { large: '{{input/question}}'.repeat(30) };
+    expect((await invokeMappedHttpAgent(oversized, request)).status).toBe('invocation_error');
+    expect(requests).toBe(0);
+  });
+
+  it('caps hostile non-2xx bodies and records real retry durations', async () => {
+    let requests = 0;
+    const fixture = await startServer((_incoming, response) => {
+      requests += 1;
+      setTimeout(() => {
+        response.statusCode = requests === 1 ? 503 : 200;
+        response.setHeader('content-type', 'application/json');
+        response.end(
+          requests === 1
+            ? JSON.stringify({ error: 'x'.repeat(256) })
+            : JSON.stringify({ data: { result: 'ok' } }),
+        );
+      }, 20);
+    });
+    const capped = await invokeMappedHttpAgent(
+      directAgent(fixture.origin, { limits: { response_bytes: 64 } }),
+      request,
+    );
+    expect(capped).toMatchObject({
+      status: 'invocation_error',
+      error: { code: 'output_cap_exceeded' },
+    });
+
+    requests = 0;
+    const retried = await invokeMappedHttpAgent(
+      directAgent(fixture.origin, {
+        retry: { retries: 1, backoff: { kind: 'none' } },
+        limits: { response_bytes: 1_024 },
+      }),
+      request,
+    );
+    expect(retried.status).toBe('ok');
+    expect(retried.attempts[0]?.durationMs).toBeGreaterThanOrEqual(15);
+  });
+
+  it('validates polling before submit and fails authored terminal failures', async () => {
+    let submissions = 0;
+    const fixture = await startServer((incoming, response) => {
+      response.setHeader('content-type', 'application/json');
+      if (incoming.url === '/submit') {
+        submissions += 1;
+        response.end(JSON.stringify({ job: 'job-9', status_url: '/jobs/job-9' }));
+        return;
+      }
+      response.end(JSON.stringify({ status: 'failed', error: { message: 'provider failed' } }));
+    });
+    const invalid = {
+      schema: AGENT_RESOURCE_SCHEMA_VERSION,
+      id: 'invalid-poller',
+      name: 'Invalid poller',
+      transport: {
+        kind: 'polling',
+        lifecycle: 'external',
+        submit: { url: `${fixture.origin}/submit`, method: 'POST' },
+        job_id_pointer: '/job',
+        status_pointer: '/status',
+        success_values: ['done'],
+        failure_values: ['failed'],
+        extraction: { result_pointer: '/answer' },
+        minimum_interval_ms: 1,
+        maximum_interval_ms: 2,
+      },
+    } as HttpAgentResource;
+    expect((await invokeMappedHttpAgent(invalid, request)).status).toBe('invocation_error');
+    expect(submissions).toBe(0);
+
+    const valid = structuredClone(invalid);
+    if (valid.transport.kind !== 'polling') throw new Error('Expected polling transport.');
+    valid.transport.status_url_pointer = '/status_url';
+    valid.transport.extraction.error_pointer = '/error';
+    const failed = await invokeMappedHttpAgent(valid, request);
+    expect(failed).toMatchObject({
+      status: 'invocation_error',
+      error: { message: 'provider failed' },
+    });
+    expect(failed.diagnostics).not.toHaveProperty('remoteJobId');
+    expect(submissions).toBe(1);
+  });
+
+  it('serializes authored raw/form bodies byte for byte', async () => {
+    let observed = '';
+    const fixture = await startServer((incoming, response) => {
+      const chunks: Buffer[] = [];
+      incoming.on('data', (chunk: Buffer) => chunks.push(chunk));
+      incoming.on('end', () => {
+        observed = Buffer.concat(chunks).toString('utf8');
+        response.end(JSON.stringify({ data: { result: 'ok' } }));
+      });
+    });
+    const agent = directAgent(fixture.origin);
+    if (agent.transport.kind !== 'http') throw new Error('Expected direct HTTP transport.');
+    agent.transport.request.body = 'prompt={{input/question}}&mode=fast';
+    agent.transport.request.body_encoding = 'raw';
+    agent.transport.request.headers = { 'content-type': 'application/x-www-form-urlencoded' };
+    expect((await invokeMappedHttpAgent(agent, request)).status).toBe('ok');
+    expect(observed).toBe('prompt=hello world&mode=fast');
   });
 });

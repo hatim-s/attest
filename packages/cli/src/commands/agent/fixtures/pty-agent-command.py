@@ -133,6 +133,56 @@ def race(project_root: str, argv_json: str, command_prefix: list[str]) -> dict[s
     }
 
 
+def guided_curl_decline(
+    project_root: str, command_prefix: list[str]
+) -> dict[str, object]:
+    """Complete the real cURL wizard, observe its preview, and decline publication."""
+    command = command_prefix + [
+        "agent",
+        "import",
+        os.path.join(project_root, "guided-pty.curl"),
+        "--type",
+        "curl",
+        "--as",
+        "guided-pty",
+        "--project",
+        project_root,
+    ]
+    child_pid, master_fd = spawn_pty(command)
+    deadline = time.monotonic() + 10
+    output = b""
+    transcript = [
+        (b"Header authorization environment variable: ", b"ATTEST_PTY_TOKEN\n"),
+        (
+            b"Body mappings TARGET_POINTER=INPUT_POINTER, comma-separated [none]: ",
+            b"/prompt=/question\n",
+        ),
+        (b"Error JSON Pointer [none]: ", b"\n"),
+        (b"Trace JSON Pointer [none]: ", b"\n"),
+        (b"Remote job id JSON Pointer [none]: ", b"\n"),
+        (b"Transport [direct]: ", b"\n"),
+        (b"Response JSON Pointer [/answer]: ", b"\n"),
+        (b"Apply these changes? [y/N]: ", b"no\n"),
+    ]
+    prompts_seen = True
+    for expected, answer in transcript:
+        chunk, seen = read_until(master_fd, expected, deadline)
+        output += chunk
+        prompts_seen = prompts_seen and seen
+        if not seen:
+            break
+        os.write(master_fd, answer)
+    exit_code, output, terminal_restored = finish_child(
+        child_pid, master_fd, output, deadline
+    )
+    return {
+        "exit_code": exit_code,
+        "output": output.decode("utf-8", errors="replace"),
+        "prompts_seen": prompts_seen,
+        "terminal_restored": terminal_restored,
+    }
+
+
 def main() -> None:
     """Dispatch one bounded PTY scenario and print its evidence as JSON."""
     mode = sys.argv[1]
@@ -140,6 +190,8 @@ def main() -> None:
         result = interrupt(sys.argv[2:])
     elif mode == "race":
         result = race(sys.argv[2], sys.argv[3], sys.argv[4:])
+    elif mode == "guided-curl-decline":
+        result = guided_curl_decline(sys.argv[2], sys.argv[3:])
     else:
         raise ValueError(f"Unknown PTY probe mode: {mode}")
     print(json.dumps(result))

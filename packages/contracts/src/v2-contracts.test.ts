@@ -223,6 +223,7 @@ describe('v2 agent transport contract', () => {
     {
       kind: 'http',
       lifecycle: 'external',
+      response_mode: 'mapped',
       request: { url: 'https://example.com/invoke', method: 'POST' },
       extraction: { result_pointer: '/answer' },
     },
@@ -260,6 +261,42 @@ describe('v2 agent transport contract', () => {
 
   it.each(transports)('accepts the $kind transport definition', (transport) => {
     expect(agentResourceSchema.safeParse({ ...agent, transport }).success).toBe(true);
+  });
+
+  it('requires explicit HTTP response provenance and validates all polling invariants', () => {
+    const http = transports.find((transport) => transport.kind === 'http');
+    expect(http).toBeDefined();
+    const withoutMode = structuredClone(http) as Record<string, unknown>;
+    Reflect.deleteProperty(withoutMode, 'response_mode');
+    expect(agentResourceSchema.safeParse({ ...agent, transport: withoutMode }).success).toBe(false);
+
+    const polling = transports.find((transport) => transport.kind === 'polling');
+    expect(polling?.kind).toBe('polling');
+    if (polling?.kind !== 'polling') throw new Error('Expected polling fixture.');
+    expect(
+      agentResourceSchema.safeParse({
+        ...agent,
+        transport: { ...polling, status_url_template: undefined },
+      }).success,
+    ).toBe(false);
+    expect(
+      agentResourceSchema.safeParse({
+        ...agent,
+        transport: { ...polling, status_url_pointer: '/url' },
+      }).success,
+    ).toBe(false);
+    expect(
+      agentResourceSchema.safeParse({
+        ...agent,
+        transport: { ...polling, failure_values: ['done'] },
+      }).success,
+    ).toBe(false);
+    expect(
+      agentResourceSchema.safeParse({
+        ...agent,
+        transport: { ...polling, minimum_interval_ms: 6_000 },
+      }).success,
+    ).toBe(false);
   });
 });
 

@@ -58,6 +58,8 @@ const isLoopbackAddress = (address: string): boolean =>
 const isSafeAddress = (address: string): boolean =>
   isIP(address) === 4 ? isSafeIpv4(address) : isIP(address) === 6 && isSafeIpv6(address);
 
+const isAborted = (signal: AbortSignal | undefined): boolean => signal?.aborted === true;
+
 /** Validates an HTTP URL and pins a previously validated DNS result for the ensuing connection. */
 const resolveSafeHttpUrl = async (
   value: string,
@@ -65,6 +67,14 @@ const resolveSafeHttpUrl = async (
   signal?: AbortSignal,
   callerSignal?: AbortSignal,
 ): Promise<ResolvedHttpUrl> => {
+  if (isAborted(signal)) {
+    throw new AgentInvocationError(
+      isAborted(callerSignal) ? 'cancelled' : 'timeout',
+      isAborted(callerSignal)
+        ? 'Mapped HTTP invocation was cancelled.'
+        : 'Mapped HTTP hostname resolution timed out.',
+    );
+  }
   let url: URL;
   try {
     url = new URL(value);
@@ -85,6 +95,14 @@ const resolveSafeHttpUrl = async (
 
   const timeoutSignal = AbortSignal.timeout(timeoutMs);
   const combined = signal === undefined ? timeoutSignal : AbortSignal.any([signal, timeoutSignal]);
+  if (combined.aborted) {
+    throw new AgentInvocationError(
+      isAborted(callerSignal) ? 'cancelled' : 'timeout',
+      isAborted(callerSignal)
+        ? 'Mapped HTTP invocation was cancelled.'
+        : 'Mapped HTTP hostname resolution timed out.',
+    );
+  }
   let addresses: { address: string; family: 4 | 6 }[];
   try {
     addresses = (await Promise.race([
@@ -104,14 +122,10 @@ const resolveSafeHttpUrl = async (
     ])) as { address: string; family: 4 | 6 }[];
   } catch (error: unknown) {
     throw new AgentInvocationError(
-      callerSignal?.aborted === true
-        ? 'cancelled'
-        : signal?.aborted === true
-          ? 'timeout'
-          : 'network',
-      callerSignal?.aborted === true
+      isAborted(callerSignal) ? 'cancelled' : isAborted(signal) ? 'timeout' : 'network',
+      isAborted(callerSignal)
         ? 'Mapped HTTP invocation was cancelled.'
-        : signal?.aborted === true
+        : isAborted(signal)
           ? 'Mapped HTTP hostname resolution timed out.'
           : 'Mapped HTTP hostname could not be resolved safely.',
       { cause: error },

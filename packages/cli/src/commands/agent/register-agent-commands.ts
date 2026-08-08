@@ -88,6 +88,15 @@ const collect = (value: string, previous: string[] | undefined): string[] => [
   value,
 ];
 
+const REPEATABLE_AGENT_OPTIONS = new Set([
+  'env',
+  'header-env',
+  'map-body',
+  'poll-failure',
+  'poll-success',
+  'query-env',
+]);
+
 const addCommonOptions = (command: Command): Command =>
   command
     .option('--project <dir>', 'explicit Attest project directory')
@@ -164,7 +173,10 @@ const registerMutationHelp = (
       ...Object.fromEntries(
         Object.entries(extraConflicts).map(([name, conflicts]) => [
           name,
-          { conflicts: ['from-json', ...conflicts] },
+          {
+            conflicts: ['from-json', ...conflicts],
+            ...(REPEATABLE_AGENT_OPTIONS.has(name) ? { repeatable: true } : {}),
+          },
         ]),
       ),
     },

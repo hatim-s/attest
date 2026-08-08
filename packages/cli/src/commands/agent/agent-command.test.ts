@@ -8,6 +8,7 @@ import {
   readdir,
   rename,
   rm,
+  symlink,
   writeFile,
 } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -245,12 +246,86 @@ describe('CLI2.6 agent authoring', () => {
       expect(tested.exitCode).toBe(0);
       expect(tested.output.join('')).not.toContain(secret);
       expect(tested.output.join('')).toContain(REDACTED);
+      expect(JSON.parse(tested.output[0] ?? '{}')).toMatchObject({
+        result: {
+          attempts: [{ diagnostics: { remoteJobId: 'job-1' } }],
+        },
+      });
       expect(submissions).toBe(1);
       expect(polls).toBe(1);
       expect(observedAuthorization).toBe(secret);
       expect(observedPrompt).toBe('hello');
     } finally {
       delete process.env.ATTEST_CURL_POLLING_SECRET;
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it('reports a configured polling failure as a failed public CLI probe', async () => {
+    const root = await createProject();
+    const server = createServer((request, response) => {
+      response.setHeader('content-type', 'application/json');
+      response.end(
+        request.url === '/submit'
+          ? JSON.stringify({ job: 'failure-job', url: '/jobs/failure-job' })
+          : JSON.stringify({ status: 'failed', error: { message: 'remote failure' } }),
+      );
+    });
+    await new Promise<void>((resolve, reject) => {
+      server.once('error', reject);
+      server.listen(0, '127.0.0.1', resolve);
+    });
+    const address = server.address();
+    if (address === null || typeof address === 'string') throw new Error('Expected TCP fixture.');
+    await writeFile(
+      join(root, 'failure.curl'),
+      `curl http://127.0.0.1:${String(address.port)}/submit -X POST`,
+    );
+    try {
+      expect(
+        (
+          await run(root, [
+            'agent',
+            'import',
+            'failure.curl',
+            '--type',
+            'curl',
+            '--as',
+            'failure-poller',
+            '--response-pointer',
+            '/answer',
+            '--error-pointer',
+            '/error',
+            '--poll-job-id-pointer',
+            '/job',
+            '--poll-status-url-pointer',
+            '/url',
+            '--poll-status-pointer',
+            '/status',
+            '--poll-success',
+            '"done"',
+            '--poll-failure',
+            '"failed"',
+            '--poll-minimum-interval',
+            '1ms',
+            '--poll-maximum-interval',
+            '2ms',
+            '--output',
+            'json',
+          ])
+        ).exitCode,
+      ).toBe(0);
+      const tested = await run(root, ['agent', 'test', 'failure-poller', '--output', 'json']);
+      expect(tested.exitCode).toBe(4);
+      expect(tested.output.join('')).toContain('remote failure');
+      expect(JSON.parse(tested.output[0] ?? '{}')).toMatchObject({
+        ok: false,
+        error: {
+          code: 'invocation_failed',
+          details: { invocation_code: 'invalid_envelope' },
+        },
+      });
+    } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }
   });
@@ -461,7 +536,8 @@ describe('CLI2.6 agent authoring', () => {
 
   it('passes runtime HTTP headers but redacts hostile HTTP responses and traces', async () => {
     const root = await createProject();
-    process.env.ATTEST_SOURCE_SECRET = 'http-super-secret';
+    const secret = 'http"\\super-secret';
+    process.env.ATTEST_SOURCE_SECRET = secret;
     let observedAuthorization: string | null = null;
     vi.stubGlobal('fetch', (_url: string, init: RequestInit) => {
       observedAuthorization = new Headers(init.headers).get('authorization');
@@ -469,7 +545,7 @@ describe('CLI2.6 agent authoring', () => {
         new Response(
           JSON.stringify({
             protocol: 'attest.agent/v1alpha1',
-            output: { authorization: observedAuthorization, echoed: 'http-super-secret' },
+            output: { authorization: observedAuthorization, echoed: secret },
             trace: {
               schema: 'attest.trace/v1alpha1',
               trace_id: 'http-trace',
@@ -496,8 +572,9 @@ describe('CLI2.6 agent authoring', () => {
       ).exitCode,
     ).toBe(0);
     const tested = await run(root, ['agent', 'test', 'http-agent', '--output', 'json']);
-    expect(observedAuthorization).toBe('http-super-secret');
-    expect(tested.output.join('')).not.toContain('http-super-secret');
+    expect(observedAuthorization).toBe(secret);
+    expect(tested.output.join('')).not.toContain(secret);
+    expect(tested.output.join('')).not.toContain(JSON.stringify(secret).slice(1, -1));
     expect(JSON.parse(tested.output[0] ?? '{}')).toMatchObject({
       result: {
         response: {
@@ -910,6 +987,7 @@ describe('CLI2.6 agent authoring', () => {
         transport: {
           kind: 'http',
           lifecycle: 'external',
+          response_mode: 'attest_envelope',
           request: {
             url: 'https://agent.example/invoke',
             method: 'POST',
@@ -989,6 +1067,7 @@ describe('CLI2.6 agent authoring', () => {
         transport: {
           kind: 'http',
           lifecycle: 'external',
+          response_mode: 'mapped',
           request: {
             url: 'https://agent.example/invoke?credential=literal-value',
             method: 'POST',
@@ -1021,6 +1100,7 @@ describe('CLI2.6 agent authoring', () => {
         transport: {
           kind: 'http',
           lifecycle: 'external',
+          response_mode: 'attest_envelope',
           request: { url: 'https://agent.example/invoke', method: 'POST' },
           extraction: { result_pointer: '' },
         },
@@ -1050,6 +1130,7 @@ describe('CLI2.6 agent authoring', () => {
         transport: {
           kind: 'http',
           lifecycle: 'external',
+          response_mode: 'attest_envelope',
           request: { url: 'https://agent.example/retry', method: 'POST' },
           extraction: { result_pointer: '' },
         },
@@ -1309,6 +1390,309 @@ describe('CLI2.6 agent authoring', () => {
         ok: true,
         result: { command: { request_schema: 'attest.command-request/v2' } },
       });
+    }
+    const imported = await run(root, ['help', 'agent', 'import', '--output', 'json']);
+    const help = JSON.parse(imported.output[0] ?? '{}') as {
+      result: { command: { options: Array<{ name: string; repeatable: boolean }> } };
+    };
+    const repeatable = new Map(
+      help.result.command.options.map(({ name, repeatable }) => [name, repeatable]),
+    );
+    for (const name of ['header-env', 'query-env', 'map-body', 'poll-success', 'poll-failure']) {
+      expect(repeatable.get(name)).toBe(true);
+    }
+  });
+
+  it('imports bounded project-contained file/raw/form bodies and rejects hostile file paths', async () => {
+    const root = await createProject();
+    await writeFile(join(root, 'request.json'), '{"prompt":"hello"}');
+    await writeFile(join(root, 'file.curl'), 'curl https://agent.example --data @request.json');
+    const fileImport = await run(root, [
+      'agent',
+      'import',
+      'file.curl',
+      '--type',
+      'curl',
+      '--as',
+      'file-body',
+      '--response-pointer',
+      '',
+      '--output',
+      'json',
+    ]);
+    expect(fileImport.exitCode).toBe(0);
+    expect((await loadProject({ project: root })).agents[0]).toMatchObject({
+      transport: {
+        response_mode: 'mapped',
+        request: { body: { prompt: 'hello' }, body_encoding: 'json' },
+      },
+    });
+
+    await writeFile(
+      join(root, 'form.curl'),
+      "curl https://agent.example -H 'Content-Type: application/x-www-form-urlencoded' --data 'prompt=hello%20world&mode=fast'",
+    );
+    const formImport = await run(root, [
+      'agent',
+      'import',
+      'form.curl',
+      '--type',
+      'curl',
+      '--as',
+      'form-body',
+      '--response-pointer',
+      '',
+      '--output',
+      'json',
+    ]);
+    expect(formImport.exitCode).toBe(0);
+    expect((await loadProject({ project: root })).agents[1]).toMatchObject({
+      transport: {
+        request: { body: 'prompt=hello%20world&mode=fast', body_encoding: 'raw' },
+      },
+    });
+
+    const outside = join(root, '..', 'outside-body.json');
+    await writeFile(outside, '{}');
+    await writeFile(
+      join(root, 'outside.curl'),
+      'curl https://agent.example --data @../outside-body.json',
+    );
+    const beforeOutside = await snapshotTree(root);
+    expect(
+      (
+        await run(root, [
+          'agent',
+          'import',
+          'outside.curl',
+          '--type',
+          'curl',
+          '--as',
+          'outside',
+          '--response-pointer',
+          '',
+          '--output',
+          'json',
+        ])
+      ).exitCode,
+    ).not.toBe(0);
+    expect(await snapshotTree(root)).toEqual(beforeOutside);
+
+    await symlink('request.json', join(root, 'linked.json'));
+    await writeFile(join(root, 'linked.curl'), 'curl https://agent.example --data @linked.json');
+    const beforeLink = await snapshotTree(root);
+    expect(
+      (
+        await run(root, [
+          'agent',
+          'import',
+          'linked.curl',
+          '--type',
+          'curl',
+          '--as',
+          'linked',
+          '--response-pointer',
+          '',
+          '--output',
+          'json',
+        ])
+      ).exitCode,
+    ).not.toBe(0);
+    expect(await snapshotTree(root)).toEqual(beforeLink);
+
+    await writeFile(join(root, 'large.txt'), 'x'.repeat(128));
+    await writeFile(join(root, 'large.curl'), 'curl https://agent.example --data @large.txt');
+    const beforeLarge = await snapshotTree(root);
+    expect(
+      (
+        await run(root, [
+          'agent',
+          'import',
+          'large.curl',
+          '--type',
+          'curl',
+          '--as',
+          'large',
+          '--response-pointer',
+          '',
+          '--request-cap-bytes',
+          '64',
+          '--output',
+          'json',
+        ])
+      ).exitCode,
+    ).not.toBe(0);
+    expect(await snapshotTree(root)).toEqual(beforeLarge);
+  });
+
+  it('shows the complete redacted guided cURL preview before decline and recovers one mapping error', async () => {
+    const root = await createProject();
+    const secret = 'never-preview-this';
+    await writeFile(
+      join(root, 'guided.curl'),
+      `curl https://agent.example -H 'Authorization: Bearer ${secret}' -H 'Content-Type: application/json' --data '{"prompt":"old"}'`,
+    );
+    const before = await snapshotTree(root);
+    const questions: string[] = [];
+    const responses = [
+      'ATTEST_GUIDED_TOKEN',
+      '/missing=/question',
+      '',
+      '',
+      '',
+      'direct',
+      '/answer',
+    ];
+    const collected = collectIo();
+    expect(
+      await runCli(['agent', 'import', 'guided.curl', '--type', 'curl', '--as', 'guided'], {
+        workingDirectory: root,
+        io: collected.io,
+        interaction: {
+          ci: false,
+          inputIsTTY: true,
+          outputIsTTY: true,
+          prompt: (question) => {
+            questions.push(question);
+            if (question.startsWith('Body mapping was invalid'))
+              return Promise.resolve('/prompt=/question');
+            if (question.includes('Apply these changes?')) return Promise.resolve('no');
+            return Promise.resolve(responses.shift() ?? '');
+          },
+          readStdin: () => Promise.resolve(''),
+        },
+      }),
+    ).toBe(130);
+    const confirmation = questions.find((question) => question.includes('Apply these changes?'));
+    expect(confirmation).toContain('Redacted definition preview:');
+    expect(confirmation).toContain('[from_env:ATTEST_GUIDED_TOKEN]');
+    expect(confirmation).toContain('{{input/question}}');
+    expect(confirmation).not.toContain(secret);
+    expect(await snapshotTree(root)).toEqual(before);
+  });
+
+  it('drives the complete redacted cURL wizard through the compiled CLI PTY', async () => {
+    const root = await createProject();
+    const secret = 'pty-captured-secret';
+    await writeFile(
+      join(root, 'guided-pty.curl'),
+      `curl https://agent.example -H 'Authorization: Bearer ${secret}' -H 'Content-Type: application/json' --data '{"prompt":"old"}'`,
+    );
+    const before = await snapshotTree(root);
+    await execFileAsync('bun', ['run', 'build'], { cwd: CLI_PACKAGE_ROOT, timeout: 30_000 });
+    const { stderr, stdout } = await execFileAsync(
+      'python3',
+      [PTY_FIXTURE, 'guided-curl-decline', root, process.execPath, CLI_BUILT],
+      { timeout: 15_000 },
+    );
+    expect(stderr).toBe('');
+    const result = JSON.parse(stdout) as {
+      exit_code: number;
+      output: string;
+      prompts_seen: boolean;
+      terminal_restored: boolean;
+    };
+    if (!result.prompts_seen) throw new Error(result.output);
+    expect(result).toMatchObject({
+      exit_code: 130,
+      prompts_seen: true,
+      terminal_restored: true,
+    });
+    expect(result.output).toContain('Redacted definition preview:');
+    expect(result.output).toContain('[from_env:ATTEST_PTY_TOKEN]');
+    expect(result.output).toContain('{{input/question}}');
+    expect(result.output).not.toContain(secret);
+    expect(await snapshotTree(root)).toEqual(before);
+  }, 20_000);
+
+  it('reports the exact duration option path in structured failures', async () => {
+    const root = await createProject();
+    await writeFile(join(root, 'duration.curl'), 'curl https://agent.example');
+    for (const [option, extra] of [
+      ['--connect-timeout', []],
+      [
+        '--poll-minimum-interval',
+        [
+          '--poll-job-id-pointer',
+          '/job',
+          '--poll-status-url-pointer',
+          '/url',
+          '--poll-status-pointer',
+          '/status',
+          '--poll-success',
+          '"done"',
+          '--poll-failure',
+          '"failed"',
+          '--poll-maximum-interval',
+          '1s',
+        ],
+      ],
+    ] as const) {
+      const result = await run(root, [
+        'agent',
+        'import',
+        'duration.curl',
+        '--type',
+        'curl',
+        '--as',
+        `bad-${option.slice(2)}`,
+        '--response-pointer',
+        '',
+        ...extra,
+        option,
+        'nope',
+        '--output',
+        'json',
+      ]);
+      expect(result.exitCode).not.toBe(0);
+      expect(JSON.parse(result.output[0] ?? '{}')).toMatchObject({ error: { path: option } });
+    }
+  });
+
+  it('dispatches a foreign root mapping without injecting the native Attest envelope', async () => {
+    const root = await createProject();
+    let observedBody = '';
+    const server = createServer((request, response) => {
+      const chunks: Buffer[] = [];
+      request.on('data', (chunk: Buffer) => chunks.push(chunk));
+      request.on('end', () => {
+        observedBody = Buffer.concat(chunks).toString('utf8');
+        response.end(JSON.stringify({ answer: 'root-result' }));
+      });
+    });
+    await new Promise<void>((resolve, reject) => {
+      server.once('error', reject);
+      server.listen(0, '127.0.0.1', resolve);
+    });
+    const address = server.address();
+    if (address === null || typeof address === 'string') throw new Error('Expected TCP fixture.');
+    await writeFile(join(root, 'root.curl'), `curl http://127.0.0.1:${String(address.port)}/root`);
+    try {
+      expect(
+        (
+          await run(root, [
+            'agent',
+            'import',
+            'root.curl',
+            '--type',
+            'curl',
+            '--as',
+            'root-map',
+            '--response-pointer',
+            '',
+            '--output',
+            'json',
+          ])
+        ).exitCode,
+      ).toBe(0);
+      const tested = await run(root, ['agent', 'test', 'root-map', '--output', 'json']);
+      expect(tested.exitCode).toBe(0);
+      expect(JSON.parse(tested.output[0] ?? '{}')).toMatchObject({
+        result: { response: { output: { answer: 'root-result' } } },
+      });
+      expect(observedBody).toBe('');
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
     }
   });
 });

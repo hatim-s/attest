@@ -17,10 +17,12 @@ import type { InvocationAttempt, InvocationResult } from '../../types.js';
 import { requestJson, type HttpJsonResponse } from './http-client.js';
 import { readJsonPointer } from './json-pointer.js';
 import {
+  assertStaticUrlAuthority,
   materializeHttpRequest,
   type MaterializedHttpRequest,
   type ResolvedHttpRequestTemplate,
 } from './request-template.js';
+import { redactTransportText } from './redaction.js';
 import { requireSameOrigin } from './url-security.js';
 
 type HttpAgentResource = AgentResource & {
@@ -32,6 +34,11 @@ type MappedHttpInvokeOptions = {
   query?: Record<string, string>;
   secrets?: readonly string[];
   signal?: AbortSignal;
+};
+
+type CompletedHttpResponse = {
+  remoteJobId?: string | number;
+  response: HttpJsonResponse;
 };
 
 const DEFAULT_ATTEMPT_MS = 60_000;
@@ -62,6 +69,23 @@ const errorFromExtracted = (value: unknown): AgentErrorResponse['error'] => {
     }
   }
   return { message: 'The mapped HTTP agent reported an error.' };
+};
+
+/** Extracts an optional provider correlation id without accepting structured secret-bearing data. */
+const extractRemoteJobId = (
+  raw: unknown,
+  pointer: string | undefined,
+): string | number | undefined => {
+  if (pointer === undefined) return undefined;
+  const value = readJsonPointer(raw, pointer);
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== 'string' && typeof value !== 'number') {
+    throw new AgentInvocationError(
+      'invalid_envelope',
+      'Mapped HTTP remote job id extraction must produce a string or number.',
+    );
+  }
+  return value;
 };
 
 /** Converts a foreign JSON response into the native Attest response envelope. */
@@ -100,6 +124,9 @@ const extractAgentResponse = (
 
 const retryableStatus = (status: number): boolean =>
   status === 408 || status === 429 || status >= 500;
+
+const retryableTransportError = (error: AgentInvocationError): boolean =>
+  error.code === 'network' || error.code === 'timeout';
 
 const retryDelay = (agent: HttpAgentResource, retryIndex: number): number => {
   const backoff = agent.retry?.backoff;
@@ -233,11 +260,12 @@ const runDirect = async (
 ): Promise<HttpJsonResponse> => {
   const retries = agent.retry?.retries ?? 0;
   for (let retry = 0; ; retry += 1) {
+    const attemptDuration = startTimer();
     try {
       const response = await requestJson(materialized, policy);
       if (response.status >= 200 && response.status < 300) return response;
       if (retry >= retries || !retryableStatus(response.status)) throw statusError(response);
-      retryAttempts.push(attemptFromError(statusError(response), 0));
+      retryAttempts.push(attemptFromError(statusError(response), attemptDuration()));
       await wait(
         parseRetryAfter(response.headers['retry-after']) ?? retryDelay(agent, retry),
         signal,
@@ -248,15 +276,11 @@ const runDirect = async (
       if (
         retry >= retries ||
         normalized.code === 'cancelled' ||
-        normalized.code === 'invalid_envelope' ||
-        (normalized.code === 'http_status' &&
-          !retryableStatus(
-            (normalized as typeof normalized & { httpStatus?: number }).httpStatus ?? 0,
-          ))
+        !retryableTransportError(normalized)
       ) {
         throw normalized;
       }
-      retryAttempts.push(attemptFromError(normalized, 0));
+      retryAttempts.push(attemptFromError(normalized, attemptDuration()));
       await wait(retryDelay(agent, retry), signal, policy.callerSignal);
     }
   }
@@ -304,6 +328,79 @@ const boundedPollingDelay = (
     transport.maximum_interval_ms,
   );
 
+/** Validates every polling invariant before a submission can create remote work. */
+const assertPollingConfiguration = (
+  transport: Extract<HttpAgentResource['transport'], { kind: 'polling' }>,
+): void => {
+  if (
+    (transport.status_url_pointer === undefined) ===
+    (transport.status_url_template === undefined)
+  ) {
+    throw new AgentInvocationError(
+      'invalid_envelope',
+      'Polling requires exactly one status URL pointer or template.',
+    );
+  }
+  if (transport.minimum_interval_ms > transport.maximum_interval_ms) {
+    throw new AgentInvocationError(
+      'invalid_envelope',
+      'Polling maximum interval must be at least its minimum interval.',
+    );
+  }
+  if (
+    transport.success_values.some((success) =>
+      transport.failure_values.some((failure) => isDeepStrictEqual(success, failure)),
+    )
+  ) {
+    throw new AgentInvocationError(
+      'invalid_envelope',
+      'Polling success and failure terminal values must not overlap.',
+    );
+  }
+  if (transport.status_url_template !== undefined) {
+    assertStaticUrlAuthority(transport.status_url_template);
+    const rendered = transport.status_url_template.replaceAll('{{job_id}}', 'job');
+    if (rendered.includes('{{')) {
+      throw new AgentInvocationError(
+        'invalid_envelope',
+        'Polling status URL template contains an unsupported placeholder.',
+      );
+    }
+    let submit: URL;
+    let status: URL;
+    try {
+      submit = new URL(transport.submit.url);
+      status = new URL(rendered, submit);
+    } catch (error: unknown) {
+      throw new AgentInvocationError('invalid_envelope', 'Polling status URL is invalid.', {
+        cause: error,
+      });
+    }
+    requireSameOrigin(status, submit);
+  }
+};
+
+/** Converts an authored polling failure state into a failed probe with bounded response evidence. */
+const pollingFailure = (
+  transport: Extract<HttpAgentResource['transport'], { kind: 'polling' }>,
+  response: HttpJsonResponse,
+  secrets: readonly string[],
+): AgentInvocationError & { rawExcerpt: InvocationAttempt['rawExcerpt'] } => {
+  const extracted =
+    transport.extraction.error_pointer === undefined
+      ? undefined
+      : readJsonPointer(response.raw, transport.extraction.error_pointer);
+  return Object.assign(
+    new AgentInvocationError(
+      'invalid_envelope',
+      extracted === undefined || extracted === null
+        ? 'Mapped HTTP polling reached a configured failure state.'
+        : redactTransportText(errorFromExtracted(extracted).message, secrets),
+    ),
+    { rawExcerpt: response.rawExcerpt },
+  );
+};
+
 const runPolling = async (
   agent: HttpAgentResource & {
     transport: Extract<HttpAgentResource['transport'], { kind: 'polling' }>;
@@ -313,8 +410,9 @@ const runPolling = async (
   policy: Parameters<typeof requestJson>[1],
   signal: AbortSignal,
   retryAttempts: InvocationAttempt[],
-): Promise<HttpJsonResponse> => {
+): Promise<CompletedHttpResponse> => {
   const { transport } = agent;
+  assertPollingConfiguration(transport);
   const retries = agent.retry?.retries ?? 0;
   if (transport.idempotency_header !== undefined) {
     const duplicate = Object.keys(submission.headers).find(
@@ -333,6 +431,7 @@ const runPolling = async (
 
   let submitted: HttpJsonResponse | undefined;
   for (let retry = 0; ; retry += 1) {
+    const attemptDuration = startTimer();
     try {
       const response = await requestJson(submission, policy);
       if (response.status >= 200 && response.status < 300) {
@@ -346,7 +445,7 @@ const runPolling = async (
       ) {
         throw statusError(response);
       }
-      retryAttempts.push(attemptFromError(statusError(response), 0));
+      retryAttempts.push(attemptFromError(statusError(response), attemptDuration()));
       await wait(
         boundedPollingDelay(transport, response.headers['retry-after'], retryDelay(agent, retry)),
         signal,
@@ -357,11 +456,11 @@ const runPolling = async (
       if (
         transport.idempotency_header === undefined ||
         retry >= retries ||
-        normalized.code === 'cancelled'
+        !retryableTransportError(normalized)
       ) {
         throw normalized;
       }
-      retryAttempts.push(attemptFromError(normalized, 0));
+      retryAttempts.push(attemptFromError(normalized, attemptDuration()));
       await wait(
         boundedPollingDelay(transport, undefined, retryDelay(agent, retry)),
         signal,
@@ -393,11 +492,12 @@ const runPolling = async (
     await wait(interval, signal, policy.callerSignal);
     let polled: HttpJsonResponse;
     for (let retry = 0; ; retry += 1) {
+      const attemptDuration = startTimer();
       try {
         polled = await requestJson(pollRequest, policy);
         if (polled.status >= 200 && polled.status < 300) break;
         if (retry >= retries || !retryableStatus(polled.status)) throw statusError(polled);
-        retryAttempts.push(attemptFromError(statusError(polled), 0));
+        retryAttempts.push(attemptFromError(statusError(polled), attemptDuration()));
         await wait(
           boundedPollingDelay(transport, polled.headers['retry-after'], retryDelay(agent, retry)),
           signal,
@@ -405,8 +505,8 @@ const runPolling = async (
         );
       } catch (error: unknown) {
         const normalized = normalizeFailure(error, signal, policy.callerSignal);
-        if (retry >= retries || normalized.code === 'cancelled') throw normalized;
-        retryAttempts.push(attemptFromError(normalized, 0));
+        if (retry >= retries || !retryableTransportError(normalized)) throw normalized;
+        retryAttempts.push(attemptFromError(normalized, attemptDuration()));
         await wait(
           boundedPollingDelay(transport, undefined, retryDelay(agent, retry)),
           signal,
@@ -415,8 +515,16 @@ const runPolling = async (
       }
     }
     const status = readJsonPointer(polled.raw, transport.status_pointer);
-    if (transport.success_values.some((value) => isDeepStrictEqual(value, status))) return polled;
-    if (transport.failure_values.some((value) => isDeepStrictEqual(value, status))) return polled;
+    if (transport.success_values.some((value) => isDeepStrictEqual(value, status))) {
+      return {
+        response: polled,
+        remoteJobId:
+          extractRemoteJobId(polled.raw, transport.extraction.remote_job_id_pointer) ?? jobId,
+      };
+    }
+    if (transport.failure_values.some((value) => isDeepStrictEqual(value, status))) {
+      throw pollingFailure(transport, polled, policy.secrets);
+    }
     const retryAfter = parseRetryAfter(polled.headers['retry-after']);
     interval =
       retryAfter === undefined
@@ -441,13 +549,6 @@ const invokeMappedHttpAgent = async (
   const timeoutSignal = AbortSignal.timeout(agent.timeouts?.attempt_ms ?? DEFAULT_ATTEMPT_MS);
   const signal =
     options.signal === undefined ? timeoutSignal : AbortSignal.any([options.signal, timeoutSignal]);
-  const requestTemplate =
-    agent.transport.kind === 'http' ? agent.transport.request : agent.transport.submit;
-  const materialized = materializeHttpRequest(
-    withResolvedValues(requestTemplate as ResolvedHttpRequestTemplate, options),
-    request,
-    agent.limits?.request_bytes ?? DEFAULT_REQUEST_CAP_BYTES,
-  );
   const policy = {
     attemptSignal: signal,
     callerSignal: options.signal,
@@ -455,20 +556,38 @@ const invokeMappedHttpAgent = async (
     firstByteTimeoutMs: agent.timeouts?.first_byte_ms ?? DEFAULT_FIRST_BYTE_MS,
     responseBodyTimeoutMs: agent.timeouts?.idle_ms ?? DEFAULT_BODY_IDLE_MS,
     responseCapBytes: agent.limits?.response_bytes ?? DEFAULT_RESPONSE_CAP_BYTES,
-    secretsPresent: (options.secrets?.length ?? 0) > 0,
+    secrets: options.secrets ?? [],
   };
   const retryAttempts: InvocationAttempt[] = [];
   try {
-    const response =
+    if (signal.aborted) {
+      throw new AgentInvocationError(
+        options.signal?.aborted === true ? 'cancelled' : 'timeout',
+        options.signal?.aborted === true
+          ? 'Mapped HTTP invocation was cancelled.'
+          : 'Mapped HTTP invocation timed out.',
+      );
+    }
+    if (agent.transport.kind === 'polling') assertPollingConfiguration(agent.transport);
+    const requestTemplate =
+      agent.transport.kind === 'http' ? agent.transport.request : agent.transport.submit;
+    const materialized = materializeHttpRequest(
+      withResolvedValues(requestTemplate as ResolvedHttpRequestTemplate, options),
+      request,
+      agent.limits?.request_bytes ?? DEFAULT_REQUEST_CAP_BYTES,
+    );
+    const completed =
       agent.transport.kind === 'http'
-        ? await runDirect(
-            agent as Parameters<typeof runDirect>[0],
-            request,
-            materialized,
-            policy,
-            signal,
-            retryAttempts,
-          )
+        ? {
+            response: await runDirect(
+              agent as Parameters<typeof runDirect>[0],
+              request,
+              materialized,
+              policy,
+              signal,
+              retryAttempts,
+            ),
+          }
         : await runPolling(
             agent as Parameters<typeof runPolling>[0],
             request,
@@ -477,7 +596,11 @@ const invokeMappedHttpAgent = async (
             signal,
             retryAttempts,
           );
+    const { response } = completed;
     requireSuccessfulStatus(response);
+    const remoteJobId =
+      completed.remoteJobId ??
+      extractRemoteJobId(response.raw, agent.transport.extraction.remote_job_id_pointer);
     const normalized = extractAgentResponse(response.raw, agent.transport.extraction);
     const report = parseAgentResponse(normalized);
     if (!report.ok) {
@@ -490,7 +613,10 @@ const invokeMappedHttpAgent = async (
       status: 'ok',
       raw: normalized,
       report,
-      diagnostics: { httpStatus: response.status },
+      diagnostics: {
+        httpStatus: response.status,
+        ...(remoteJobId === undefined ? {} : { remoteJobId }),
+      },
       durationMs: duration(),
       rawExcerpt: response.rawExcerpt,
       warnings: report.warnings,

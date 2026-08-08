@@ -2,6 +2,7 @@ export { AgentInvocationError, ConfigInvalidError, type InvocationErrorCode } fr
 export { invokeAgent } from './invoke.js';
 export {
   invokeMappedHttpAgent,
+  redactTransportText,
   type HttpAgentResource,
   type MappedHttpInvokeOptions,
 } from './adapters/http/index.js';

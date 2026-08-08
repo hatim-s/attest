@@ -17,6 +17,27 @@ type MaterializedHttpRequest = {
 
 const PLACEHOLDER = /\{\{(input|request)((?:\/(?:[^~/]|~[01])*)*)\}\}/gu;
 
+/** Rejects case-controlled URL origins before any placeholder materialization occurs. */
+const assertStaticUrlAuthority = (template: string): void => {
+  const separator = template.indexOf('://');
+  const authorityStart = separator + 3;
+  const authorityEnd = template.slice(authorityStart).search(/[/?#]/u);
+  const authority = template.slice(
+    authorityStart,
+    authorityEnd < 0 ? undefined : authorityStart + authorityEnd,
+  );
+  if (
+    separator <= 0 ||
+    template.slice(0, authorityStart).includes('{{') ||
+    authority.includes('{{')
+  ) {
+    throw new AgentInvocationError(
+      'invalid_envelope',
+      'HTTP URL placeholders are allowed only in path or query components.',
+    );
+  }
+};
+
 const placeholderValue = (request: AgentRequest, root: string, pointer: string): unknown =>
   readJsonPointer(root === 'input' ? request.input : request, pointer);
 
@@ -66,6 +87,7 @@ const materializeHttpRequest = (
   request: AgentRequest,
   requestCapBytes: number,
 ): MaterializedHttpRequest => {
+  assertStaticUrlAuthority(template.url);
   const url = new URL(interpolateText(template.url, request, true));
   for (const [name, value] of Object.entries(template.query ?? {})) {
     if (url.searchParams.has(name)) {
@@ -80,18 +102,39 @@ const materializeHttpRequest = (
     ]),
   );
   const bodyValue = template.body === undefined ? undefined : mapBodyValue(template.body, request);
-  const body = bodyValue === undefined ? undefined : JSON.stringify(bodyValue);
-  if (body !== undefined && Buffer.byteLength(body) > requestCapBytes) {
-    throw new AgentInvocationError(
-      'output_cap_exceeded',
-      `Mapped HTTP request exceeds the ${requestCapBytes}-byte request cap.`,
-    );
+  let body: string | undefined;
+  if (bodyValue !== undefined) {
+    if (template.body_encoding === 'raw') {
+      if (typeof bodyValue !== 'string') {
+        throw new AgentInvocationError(
+          'invalid_envelope',
+          'Raw HTTP request bodies must be strings.',
+        );
+      }
+      body = bodyValue;
+    } else {
+      body = JSON.stringify(bodyValue);
+    }
   }
   if (
     body !== undefined &&
     !Object.keys(headers).some((name) => name.toLowerCase() === 'content-type')
   ) {
     headers['content-type'] = 'application/json';
+  }
+  const requestBytes =
+    Buffer.byteLength(`${template.method} ${url.pathname}${url.search} HTTP/1.1\r\n`) +
+    Object.entries(headers).reduce(
+      (total, [name, value]) => total + Buffer.byteLength(`${name}: ${value}\r\n`),
+      0,
+    ) +
+    Buffer.byteLength('\r\n') +
+    (body === undefined ? 0 : Buffer.byteLength(body));
+  if (requestBytes > requestCapBytes) {
+    throw new AgentInvocationError(
+      'output_cap_exceeded',
+      `Mapped HTTP request exceeds the ${requestCapBytes}-byte request cap.`,
+    );
   }
   return {
     method: template.method,
@@ -101,4 +144,9 @@ const materializeHttpRequest = (
   };
 };
 
-export { materializeHttpRequest, type MaterializedHttpRequest, type ResolvedHttpRequestTemplate };
+export {
+  assertStaticUrlAuthority,
+  materializeHttpRequest,
+  type MaterializedHttpRequest,
+  type ResolvedHttpRequestTemplate,
+};

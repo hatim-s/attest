@@ -26,6 +26,23 @@ const httpRequestTemplateSchema = z
     headers: z.record(z.string(), templateValueSchema).optional(),
     query: z.record(z.string(), templateValueSchema).optional(),
     body: z.json().optional(),
+    body_encoding: z.enum(['json', 'raw']).optional(),
+  })
+  .superRefine((request, context) => {
+    if (request.body_encoding === 'raw' && typeof request.body !== 'string') {
+      context.addIssue({
+        code: 'custom',
+        path: ['body'],
+        message: 'must be a string when body_encoding is raw',
+      });
+    }
+    if (request.body === undefined && request.body_encoding !== undefined) {
+      context.addIssue({
+        code: 'custom',
+        path: ['body_encoding'],
+        message: 'requires a body',
+      });
+    }
   })
   .meta({ id: 'V2HttpRequestTemplate' });
 
@@ -66,6 +83,30 @@ const redactionPolicySchema = z.strictObject({
 });
 
 const processEnvironmentSchema = z.record(z.string(), secretReferenceSchema);
+
+/** Compares JSON terminal values without treating object key insertion order as semantic. */
+const jsonValuesEqual = (left: unknown, right: unknown): boolean => {
+  if (Object.is(left, right)) return true;
+  if (Array.isArray(left) || Array.isArray(right)) {
+    return (
+      Array.isArray(left) &&
+      Array.isArray(right) &&
+      left.length === right.length &&
+      left.every((value, index) => jsonValuesEqual(value, right[index]))
+    );
+  }
+  if (left === null || right === null || typeof left !== 'object' || typeof right !== 'object') {
+    return false;
+  }
+  const leftEntries = Object.entries(left);
+  const rightObject = right as Record<string, unknown>;
+  return (
+    leftEntries.length === Object.keys(rightObject).length &&
+    leftEntries.every(
+      ([key, value]) => Object.hasOwn(rightObject, key) && jsonValuesEqual(value, rightObject[key]),
+    )
+  );
+};
 
 const nativeForegroundTransportSchema = z.strictObject({
   kind: z.literal('native_cli'),
@@ -111,6 +152,7 @@ const jsonlBridgeTransportSchema = z.strictObject({
 const httpTransportSchema = z.strictObject({
   kind: z.literal('http'),
   lifecycle: z.literal('external'),
+  response_mode: z.enum(['attest_envelope', 'mapped']),
   request: httpRequestTemplateSchema,
   extraction: responseExtractionSchema,
 });
@@ -185,6 +227,38 @@ const agentResourceSchema = z
     limits: agentEvidenceLimitsSchema.optional(),
     redaction: redactionPolicySchema.optional(),
     capabilities: z.strictObject({ trace: z.boolean() }).optional(),
+  })
+  .superRefine((agent, context) => {
+    if (agent.transport.kind !== 'polling') return;
+    const polling = agent.transport;
+    if (
+      (polling.status_url_pointer === undefined) ===
+      (polling.status_url_template === undefined)
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['transport', 'status_url_pointer'],
+        message: 'provide exactly one status URL pointer or template',
+      });
+    }
+    if (polling.minimum_interval_ms > polling.maximum_interval_ms) {
+      context.addIssue({
+        code: 'custom',
+        path: ['transport', 'maximum_interval_ms'],
+        message: 'must be greater than or equal to minimum_interval_ms',
+      });
+    }
+    if (
+      polling.success_values.some((success) =>
+        polling.failure_values.some((failure) => jsonValuesEqual(success, failure)),
+      )
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['transport', 'failure_values'],
+        message: 'must not overlap success_values',
+      });
+    }
   })
   .meta({ id: 'V2AgentResource' });
 
