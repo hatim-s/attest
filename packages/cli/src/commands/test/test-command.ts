@@ -64,6 +64,7 @@ type TestReadCommandOptions = {
 };
 
 type MutationBuildResult = {
+  affectedTests?: string[];
   candidate: ProjectResources;
   importResult?: TabularImportResult;
   importedCaseCount?: number;
@@ -275,6 +276,7 @@ const buildMutation = async (
       const test = findTest(candidate, request.test_id);
       const existing = candidate.datasets.find(({ metadata }) => metadata.id === request.as);
       const affectedTests = attachedDatasetTests(candidate, request.as);
+      const consumerTests = [...new Set([...affectedTests, request.test_id])].sort();
       if (existing !== undefined && request.import.sync !== 'upsert') {
         throw new AttestCliError(
           'project_invalid',
@@ -282,7 +284,7 @@ const buildMutation = async (
           {
             path: '--sync',
             hint: 'Pass --sync upsert to select explicit dataset update semantics.',
-            details: { affected_tests: affectedTests },
+            details: { affected_tests: consumerTests },
           },
         );
       }
@@ -298,7 +300,7 @@ const buildMutation = async (
           {
             path: '--yes',
             hint: 'Preview with --dry-run, then pass --yes to update every affected test.',
-            details: { affected_tests: affectedTests },
+            details: { affected_tests: consumerTests },
           },
         );
       }
@@ -335,6 +337,9 @@ const buildMutation = async (
         test.datasets.push({ dataset_id: request.as });
       }
       return {
+        ...(existing !== undefined && consumerTests.length > 1
+          ? { affectedTests: consumerTests }
+          : {}),
         candidate,
         importedCaseCount: imported.counts.inserted + imported.counts.updated,
         importResult: imported,
@@ -453,6 +458,9 @@ const runTestMutationCommand = async (
   const verb = dryRun ? 'would update' : 'updated';
   const human = [
     `${dryRun ? 'Dry run: ' : ''}${verb} ${built.resource.type} ${built.resource.id}.`,
+    ...(built.affectedTests === undefined
+      ? []
+      : [`Affected consumer tests: ${built.affectedTests.join(', ')}.`]),
     ...(built.importResult === undefined ? [] : renderImportSummary(built.importResult, dryRun)),
     ...(dryRun
       ? [
@@ -472,6 +480,7 @@ const runTestMutationCommand = async (
       dry_run: dryRun,
       resource: built.resource,
       operations: mutation.diff.operations as unknown as JsonValue,
+      ...(built.affectedTests === undefined ? {} : { affected_tests: built.affectedTests }),
       ...(built.importedCaseCount === undefined
         ? {}
         : { imported_case_count: built.importedCaseCount }),
