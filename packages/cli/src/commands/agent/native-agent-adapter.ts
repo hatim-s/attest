@@ -170,7 +170,7 @@ const resolveNativeAgent = async (
         secrets.push(resolved);
       }
       if (agent.redaction?.headers?.some((header) => header.toLowerCase() === name.toLowerCase())) {
-        secrets.push(headers[name]!);
+        secrets.push(headers[name]);
       }
     }
     return { httpHeaders: headers, secrets, target: { type: 'http', url: request.url } };
