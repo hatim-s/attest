@@ -64,23 +64,33 @@ const agentAddRequestSchema = z.strictObject({
   agent: agentResourceSchema,
 });
 
-const agentImportRequestSchema = z.strictObject({
-  ...commonMutationFields,
-  command: z.literal('agent.import'),
-  source: z.string().min(1),
-  source_type: z.enum(['curl', 'json']),
-  as: resourceIdSchema,
-  name: z.string().min(1).optional(),
-  placeholders: z
-    .array(
-      z.strictObject({
-        target_pointer: jsonPointerSchema,
-        input_pointer: jsonPointerSchema,
-      }),
-    )
-    .optional(),
-  extraction: responseExtractionSchema,
-});
+const agentImportRequestSchema = z.union([
+  z.strictObject({
+    ...commonMutationFields,
+    command: z.literal('agent.import'),
+    source: z.string().min(1),
+    source_type: z.literal('json'),
+    as: resourceIdSchema,
+    name: z.string().min(1).optional(),
+  }),
+  z.strictObject({
+    ...commonMutationFields,
+    command: z.literal('agent.import'),
+    source: z.string().min(1),
+    source_type: z.literal('curl'),
+    as: resourceIdSchema,
+    name: z.string().min(1).optional(),
+    placeholders: z
+      .array(
+        z.strictObject({
+          target_pointer: jsonPointerSchema,
+          input_pointer: jsonPointerSchema,
+        }),
+      )
+      .optional(),
+    extraction: responseExtractionSchema,
+  }),
+]);
 
 const agentRenameRequestSchema = z.strictObject({
   ...commonMutationFields,
@@ -94,6 +104,14 @@ const agentRemoveRequestSchema = z.strictObject({
   command: z.literal('agent.remove'),
   agent_id: resourceIdSchema,
   detach: z.boolean().optional(),
+});
+
+const agentTestRequestSchema = z.strictObject({
+  schema: z.literal(COMMAND_REQUEST_SCHEMA_VERSION),
+  command: z.literal('agent.test'),
+  agent_id: resourceIdSchema,
+  input: z.json(),
+  record: z.boolean().optional(),
 });
 
 const testAddRequestSchema = z.strictObject({
@@ -207,13 +225,14 @@ const metricRemoveRequestSchema = z.strictObject({
 });
 
 /** Encodes every normalized v2 project-authoring request accepted through --from-json. */
-const commandRequestSchema = z.discriminatedUnion('command', [
+const commandRequestSchema = z.union([
   projectInitRequestSchema,
   projectUnlockRequestSchema,
   agentAddRequestSchema,
   agentImportRequestSchema,
   agentRenameRequestSchema,
   agentRemoveRequestSchema,
+  agentTestRequestSchema,
   testAddRequestSchema,
   testCaseAddRequestSchema,
   testCaseImportRequestSchema,

@@ -6,7 +6,7 @@
       "properties": {
         "all": {
           "items": {
-            "$ref": "#/$defs/__schema8"
+            "$ref": "#/$defs/__schema9"
           },
           "minItems": 1,
           "type": "array"
@@ -22,7 +22,7 @@
       "properties": {
         "any": {
           "items": {
-            "$ref": "#/$defs/__schema8"
+            "$ref": "#/$defs/__schema9"
           },
           "minItems": 1,
           "type": "array"
@@ -1108,7 +1108,7 @@
               "properties": {
                 "assertions": {
                   "items": {
-                    "$ref": "#/$defs/__schema8"
+                    "$ref": "#/$defs/__schema9"
                   },
                   "minItems": 1,
                   "type": "array"
@@ -1402,14 +1402,14 @@
       "additionalProperties": false,
       "properties": {
         "expected": {
-          "$ref": "#/$defs/__schema6"
+          "$ref": "#/$defs/__schema7"
         },
         "id": {
           "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
           "type": "string"
         },
         "input": {
-          "$ref": "#/$defs/__schema5"
+          "$ref": "#/$defs/__schema6"
         },
         "metric_overrides": {
           "items": {
@@ -1435,7 +1435,7 @@
         },
         "params": {
           "additionalProperties": {
-            "$ref": "#/$defs/__schema7"
+            "$ref": "#/$defs/__schema8"
           },
           "propertyNames": {
             "type": "string"
@@ -1642,6 +1642,37 @@
         }
       ]
     },
+    "__schema10": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        },
+        {
+          "items": {
+            "$ref": "#/$defs/__schema10"
+          },
+          "type": "array"
+        },
+        {
+          "additionalProperties": {
+            "$ref": "#/$defs/__schema10"
+          },
+          "propertyNames": {
+            "type": "string"
+          },
+          "type": "object"
+        }
+      ]
+    },
     "__schema2": {
       "anyOf": [
         {
@@ -1831,6 +1862,37 @@
     "__schema8": {
       "anyOf": [
         {
+          "type": "string"
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        },
+        {
+          "items": {
+            "$ref": "#/$defs/__schema8"
+          },
+          "type": "array"
+        },
+        {
+          "additionalProperties": {
+            "$ref": "#/$defs/__schema8"
+          },
+          "propertyNames": {
+            "type": "string"
+          },
+          "type": "object"
+        }
+      ]
+    },
+    "__schema9": {
+      "anyOf": [
+        {
           "anyOf": [
             {
               "additionalProperties": false,
@@ -1843,7 +1905,7 @@
                       "type": "string"
                     },
                     "value": {
-                      "$ref": "#/$defs/__schema9"
+                      "$ref": "#/$defs/__schema10"
                     }
                   },
                   "required": [
@@ -1869,7 +1931,7 @@
                       "type": "string"
                     },
                     "value": {
-                      "$ref": "#/$defs/__schema9"
+                      "$ref": "#/$defs/__schema10"
                     }
                   },
                   "required": [
@@ -1931,7 +1993,7 @@
                         },
                         {
                           "additionalProperties": {
-                            "$ref": "#/$defs/__schema9"
+                            "$ref": "#/$defs/__schema10"
                           },
                           "propertyNames": {
                             "type": "string"
@@ -2007,7 +2069,7 @@
                                     "type": "string"
                                   },
                                   "value": {
-                                    "$ref": "#/$defs/__schema9"
+                                    "$ref": "#/$defs/__schema10"
                                   }
                                 },
                                 "required": [
@@ -2033,7 +2095,7 @@
                                     "type": "string"
                                   },
                                   "value": {
-                                    "$ref": "#/$defs/__schema9"
+                                    "$ref": "#/$defs/__schema10"
                                   }
                                 },
                                 "required": [
@@ -2188,7 +2250,7 @@
           "additionalProperties": false,
           "properties": {
             "not": {
-              "$ref": "#/$defs/__schema8"
+              "$ref": "#/$defs/__schema9"
             }
           },
           "required": [
@@ -2197,41 +2259,10 @@
           "type": "object"
         }
       ]
-    },
-    "__schema9": {
-      "anyOf": [
-        {
-          "type": "string"
-        },
-        {
-          "type": "number"
-        },
-        {
-          "type": "boolean"
-        },
-        {
-          "type": "null"
-        },
-        {
-          "items": {
-            "$ref": "#/$defs/__schema9"
-          },
-          "type": "array"
-        },
-        {
-          "additionalProperties": {
-            "$ref": "#/$defs/__schema9"
-          },
-          "propertyNames": {
-            "type": "string"
-          },
-          "type": "object"
-        }
-      ]
     }
   },
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "oneOf": [
+  "anyOf": [
     {
       "additionalProperties": false,
       "properties": {
@@ -2334,79 +2365,127 @@
       "type": "object"
     },
     {
-      "additionalProperties": false,
-      "properties": {
-        "as": {
-          "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
-          "type": "string"
-        },
-        "command": {
-          "const": "agent.import",
-          "type": "string"
-        },
-        "dry_run": {
-          "type": "boolean"
-        },
-        "extraction": {
-          "$ref": "#/$defs/V2ResponseExtraction"
-        },
-        "if_project_hash": {
-          "pattern": "^[a-f0-9]{64}$",
-          "type": "string"
-        },
-        "name": {
-          "minLength": 1,
-          "type": "string"
-        },
-        "placeholders": {
-          "items": {
-            "additionalProperties": false,
-            "properties": {
-              "input_pointer": {
-                "pattern": "^(?:\\/(?:[^~/]|~[01])*)*$",
-                "type": "string"
-              },
-              "target_pointer": {
-                "pattern": "^(?:\\/(?:[^~/]|~[01])*)*$",
-                "type": "string"
-              }
+      "anyOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "as": {
+              "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+              "type": "string"
             },
-            "required": [
-              "target_pointer",
-              "input_pointer"
-            ],
-            "type": "object"
+            "command": {
+              "const": "agent.import",
+              "type": "string"
+            },
+            "dry_run": {
+              "type": "boolean"
+            },
+            "if_project_hash": {
+              "pattern": "^[a-f0-9]{64}$",
+              "type": "string"
+            },
+            "name": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "schema": {
+              "const": "attest.command-request/v2",
+              "type": "string"
+            },
+            "source": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "source_type": {
+              "const": "json",
+              "type": "string"
+            },
+            "yes": {
+              "type": "boolean"
+            }
           },
-          "type": "array"
-        },
-        "schema": {
-          "const": "attest.command-request/v2",
-          "type": "string"
-        },
-        "source": {
-          "minLength": 1,
-          "type": "string"
-        },
-        "source_type": {
-          "enum": [
-            "curl",
-            "json"
+          "required": [
+            "schema",
+            "command",
+            "source",
+            "source_type",
+            "as"
           ],
-          "type": "string"
+          "type": "object"
         },
-        "yes": {
-          "type": "boolean"
+        {
+          "additionalProperties": false,
+          "properties": {
+            "as": {
+              "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+              "type": "string"
+            },
+            "command": {
+              "const": "agent.import",
+              "type": "string"
+            },
+            "dry_run": {
+              "type": "boolean"
+            },
+            "extraction": {
+              "$ref": "#/$defs/V2ResponseExtraction"
+            },
+            "if_project_hash": {
+              "pattern": "^[a-f0-9]{64}$",
+              "type": "string"
+            },
+            "name": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "placeholders": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "input_pointer": {
+                    "pattern": "^(?:\\/(?:[^~/]|~[01])*)*$",
+                    "type": "string"
+                  },
+                  "target_pointer": {
+                    "pattern": "^(?:\\/(?:[^~/]|~[01])*)*$",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "target_pointer",
+                  "input_pointer"
+                ],
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "schema": {
+              "const": "attest.command-request/v2",
+              "type": "string"
+            },
+            "source": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "source_type": {
+              "const": "curl",
+              "type": "string"
+            },
+            "yes": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "schema",
+            "command",
+            "source",
+            "source_type",
+            "as",
+            "extraction"
+          ],
+          "type": "object"
         }
-      },
-      "required": [
-        "schema",
-        "command",
-        "source",
-        "source_type",
-        "as",
-        "extraction"
-      ],
-      "type": "object"
+      ]
     },
     {
       "additionalProperties": false,
@@ -2479,6 +2558,36 @@
         "schema",
         "command",
         "agent_id"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "properties": {
+        "agent_id": {
+          "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+          "type": "string"
+        },
+        "command": {
+          "const": "agent.test",
+          "type": "string"
+        },
+        "input": {
+          "$ref": "#/$defs/__schema5"
+        },
+        "record": {
+          "type": "boolean"
+        },
+        "schema": {
+          "const": "attest.command-request/v2",
+          "type": "string"
+        }
+      },
+      "required": [
+        "schema",
+        "command",
+        "agent_id",
+        "input"
       ],
       "type": "object"
     },

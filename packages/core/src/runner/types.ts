@@ -21,6 +21,8 @@ type InvokeOptions = {
   outputCapBytes: number;
   /** Fully resolved environment for the child process: allowlist + ATTEST_* + synthesized base. */
   env: Record<string, string>;
+  /** Runtime-only native HTTP headers resolved from authored secret references. */
+  httpHeaders?: Record<string, string>;
   /** Fresh per-attempt directory the CLI transport uses as cwd; owned by the invoker. */
   workingDirectory?: string;
   /**

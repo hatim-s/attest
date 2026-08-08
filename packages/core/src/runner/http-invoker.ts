@@ -198,7 +198,7 @@ const invokeHttpAgent = async (
   try {
     const response = await fetch(target.url, {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json', ...options.httpHeaders },
       body: JSON.stringify(request),
       redirect: 'manual',
       signal,

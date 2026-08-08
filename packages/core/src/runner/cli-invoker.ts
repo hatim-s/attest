@@ -220,13 +220,9 @@ const resolveCliEnvironment = async (
     mkdir(homeDirectory, { recursive: true }),
     mkdir(temporaryDirectory, { recursive: true }),
   ]);
-  if (options.env !== undefined) {
-    return { ...options.env, HOME: homeDirectory, TMPDIR: temporaryDirectory };
-  }
-
   const environment = resolveInvocationEnv(
-    options.envAllowlist,
-    process.env,
+    options.env === undefined ? options.envAllowlist : Object.keys(options.env),
+    options.env ?? process.env,
     { runId: request.run_id, caseId: request.case_id },
     attemptDirectory,
   );
