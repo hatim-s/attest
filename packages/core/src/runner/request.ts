@@ -1,4 +1,4 @@
-import { AGENT_PROTOCOL, type AgentRequest, type CaseDefinition } from '@attest/contracts';
+import { AGENT_PROTOCOL } from '@attest/contracts';
 import { delimiter, isAbsolute, join } from 'node:path';
 
 const copyPresentEnvironmentKeys = (
@@ -20,25 +20,6 @@ const resolveSafePath = (parentPath: string | undefined): string => {
     .split(delimiter)
     .filter((entry) => isAbsolute(entry))
     .join(delimiter);
-};
-
-/**
- * Builds the Phase 1 single-turn request envelope from docs/specs/agent-contract.md, deliberately
- * omitting all conversation fields until the multi-turn phase owns their lifecycle.
- */
-const buildAgentRequest = (runId: string, caseDefinition: CaseDefinition): AgentRequest => {
-  const request: AgentRequest = {
-    protocol: AGENT_PROTOCOL,
-    run_id: runId,
-    case_id: caseDefinition.id,
-    input: caseDefinition.input,
-  };
-
-  if (caseDefinition.params !== undefined) {
-    request.params = caseDefinition.params;
-  }
-
-  return request;
 };
 
 /**
@@ -64,4 +45,4 @@ const resolveInvocationEnv = (
   return environment;
 };
 
-export { buildAgentRequest, resolveInvocationEnv };
+export { resolveInvocationEnv };

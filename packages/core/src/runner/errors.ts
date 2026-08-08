@@ -1,4 +1,4 @@
-import { AttestError, type ContractIssue, type InvocationErrorCode } from '@attest/contracts';
+import { AttestError, type InvocationErrorCode } from '@attest/contracts';
 
 /**
  * Raised when attest could not obtain a valid response envelope from an agent.
@@ -15,18 +15,4 @@ class AgentInvocationError extends AttestError {
   }
 }
 
-/**
- * Raised before any agent is invoked when the resolved configuration cannot be
- * executed (unreadable or invalid datasets, dangling metric references). Fails
- * the whole run fast per docs/specs/config-format.md's all-errors-at-once rule.
- */
-class ConfigInvalidError extends AttestError {
-  readonly issues: ContractIssue[];
-
-  constructor(message: string, issues: ContractIssue[], options?: ErrorOptions) {
-    super('config_invalid', message, options);
-    this.issues = issues;
-  }
-}
-
-export { AgentInvocationError, ConfigInvalidError, type InvocationErrorCode };
+export { AgentInvocationError, type InvocationErrorCode };
