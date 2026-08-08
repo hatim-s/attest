@@ -247,7 +247,7 @@ const resolveNativeAgent = async (
         jsonlBridgeAgent: {
           ...agent,
           transport: { ...transport, argv },
-        } as JsonlBridgeAgentResource,
+        },
         secrets: resolvedEnvironment.secrets,
       };
     }
@@ -260,7 +260,7 @@ const resolveNativeAgent = async (
       backgroundAgent: {
         ...agent,
         transport: { ...transport, start_argv: argv },
-      } as BackgroundAgentResource,
+      },
       cwd,
       env: resolvedEnvironment.env,
       httpHeaders: http.headers,

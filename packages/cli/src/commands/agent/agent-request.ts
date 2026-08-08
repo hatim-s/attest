@@ -326,10 +326,6 @@ const parseSecretBindings = (
 
 const SENSITIVE_NAME = /authorization|cookie|password|secret|token|api[-_]?key/iu;
 
-const isNativeEnvelopeHttp = (
-  transport: Extract<AgentResource['transport'], { kind: 'http' }>,
-): boolean => transport.response_mode === 'attest_envelope';
-
 const findSensitiveBodyField = (value: JsonValue, path = ''): string | undefined => {
   if (Array.isArray(value)) {
     for (let index = 0; index < value.length; index += 1) {

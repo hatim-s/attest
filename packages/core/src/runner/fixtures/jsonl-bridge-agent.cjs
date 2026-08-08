@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-require-imports */
 const readline = require('node:readline');
 
 const pending = new Map();

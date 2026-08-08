@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-require-imports */
 const http = require('node:http');
 
 const port = Number(process.argv[2]);

@@ -254,7 +254,7 @@ const consumeResponse = async (
         return;
       }
       if (terminal !== undefined)
-        finish(() => resolve({ response: terminal!, evidence, applicationStarted }));
+        finish(() => resolve({ response: terminal, evidence, applicationStarted }));
     };
     const consumeLine = (line: string): void => {
       if (Buffer.byteLength(line) > maximumEventBytes) {
@@ -373,11 +373,11 @@ const streamOnce = async (
   const transport = resolved.url.protocol === 'https:' ? httpsRequest : httpRequest;
   return new Promise((resolve, reject) => {
     let settled = false;
-    let firstByte: NodeJS.Timeout;
+    const timers: { firstByte?: NodeJS.Timeout } = {};
     const finish = (operation: () => void): void => {
       if (settled) return;
       settled = true;
-      clearTimeout(firstByte);
+      if (timers.firstByte !== undefined) clearTimeout(timers.firstByte);
       signal.removeEventListener('abort', abort);
       operation();
     };
@@ -403,7 +403,7 @@ const streamOnce = async (
           callback(null, resolved.address, resolved.family),
       },
       (response) => {
-        clearTimeout(firstByte);
+        if (timers.firstByte !== undefined) clearTimeout(timers.firstByte);
         const status = response.statusCode ?? 0;
         if (status < 200 || status >= 300) {
           response.destroy();
@@ -433,7 +433,8 @@ const streamOnce = async (
           );
           return;
         }
-        let incremental: JsonValue = agent.transport.incremental_output_mode === 'array' ? [] : '';
+        let incrementalText = '';
+        const incrementalArray: JsonValue[] = [];
         void consumeResponse(
           response,
           agent,
@@ -463,9 +464,9 @@ const streamOnce = async (
                     'invalid_envelope',
                     'Streaming text accumulation requires string chunks.',
                   );
-                incremental = `${String(incremental)}${chunk}`;
+                incrementalText += chunk;
               } else {
-                (incremental as JsonValue[]).push(chunk as JsonValue);
+                incrementalArray.push(chunk as JsonValue);
               }
             }
             const terminal = readJsonPointer(payload, agent.transport.terminal_pointer);
@@ -491,7 +492,9 @@ const streamOnce = async (
             const extracted = readJsonPointer(payload, agent.transport.result_pointer);
             const output =
               extracted === undefined && agent.transport.incremental_output_pointer !== undefined
-                ? incremental
+                ? agent.transport.incremental_output_mode === 'array'
+                  ? incrementalArray
+                  : incrementalText
                 : extracted;
             if (!isJsonValue(output))
               throw new AgentInvocationError(
@@ -506,12 +509,15 @@ const streamOnce = async (
           },
         ).then(
           (completed) => finish(() => resolve({ ...completed, status })),
-          (error: unknown) => finish(() => reject(error)),
+          (error: unknown) =>
+            finish(() =>
+              reject(error instanceof Error ? error : new Error('Streaming response failed.')),
+            ),
         );
       },
     );
     signal.addEventListener('abort', abort, { once: true });
-    firstByte = setTimeout(() => {
+    timers.firstByte = setTimeout(() => {
       outgoing.destroy();
       finish(() =>
         reject(new AgentInvocationError('timeout', 'Streaming HTTP first byte timed out.')),

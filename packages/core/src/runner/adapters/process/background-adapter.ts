@@ -5,15 +5,8 @@ import { AGENT_PROTOCOL, type AgentRequest, type AgentResource } from '@attest/c
 
 import { AgentInvocationError } from '../../errors.js';
 import type { InvocationResult } from '../../types.js';
-import {
-  invokeMappedHttpAgent,
-  type HttpAgentResource,
-  type MappedHttpInvokeOptions,
-} from '../http/mapped-http-adapter.js';
-import {
-  materializeHttpRequest,
-  type ResolvedHttpRequestTemplate,
-} from '../http/request-template.js';
+import { invokeMappedHttpAgent, type HttpAgentResource } from '../http/mapped-http-adapter.js';
+import { materializeHttpRequest } from '../http/request-template.js';
 import { redactTransportText } from '../http/redaction.js';
 import { ManagedChild } from './managed-child.js';
 
@@ -304,7 +297,7 @@ class BackgroundAgentSession {
           ...this.options.headers,
         },
         query: { ...(shutdown.query as Record<string, string> | undefined), ...this.options.query },
-      } as ResolvedHttpRequestTemplate,
+      },
       request,
       this.agent.limits?.request_bytes ?? 10 * 1024 * 1024,
     );
