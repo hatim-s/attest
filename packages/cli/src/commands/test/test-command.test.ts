@@ -13,8 +13,12 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { loadProject } from '../../project/load-project.js';
 import {
   fixtureAgent,
+  candidateFromLoadedProject,
   writeFixtureProject,
 } from '../../project/transaction/project-transaction.test-fixture.js';
+import { prepareProjectCandidate } from '../../project/transaction/candidate-project.js';
+import { prepareTransaction } from '../../project/transaction/transaction-journal.js';
+import { createFileChanges } from '../../project/transaction/transactional-writer.js';
 import { runCli, type CliIo } from '../../run-cli.js';
 import { runTestMutationCommand } from './test-command.js';
 
@@ -264,8 +268,17 @@ describe('CLI2.7 test, case, and dataset authoring', () => {
 
   it('keeps dry runs byte-free and hash conflicts write-free', async () => {
     const root = await createProject();
-    const before = await snapshotProject(root);
     const loaded = await loadProject({ project: root });
+    const interruptedCandidate = candidateFromLoadedProject(loaded);
+    interruptedCandidate.tests.push(addTestRequest('interrupted').test);
+    const preparedCandidate = prepareProjectCandidate(interruptedCandidate);
+    await prepareTransaction(
+      root,
+      createFileChanges(loaded, preparedCandidate),
+      loaded.projectHash,
+      preparedCandidate.projectHash,
+    );
+    const before = await snapshotProject(root);
     const preview = await runJson(root, [
       'test',
       'add',
@@ -282,7 +295,9 @@ describe('CLI2.7 test, case, and dataset authoring', () => {
     });
     expect(await snapshotProject(root)).toEqual(before);
 
-    const conflict = await runJson(root, [
+    const conflictRoot = await createProject();
+    const conflictBefore = await snapshotProject(conflictRoot);
+    const conflict = await runJson(conflictRoot, [
       'test',
       'add',
       'conflict',
@@ -293,7 +308,29 @@ describe('CLI2.7 test, case, and dataset authoring', () => {
     ]);
     expect(conflict.exitCode).toBe(3);
     expect(conflict.document).toMatchObject({ ok: false, error: { code: 'project_changed' } });
-    expect(await snapshotProject(root)).toEqual(before);
+    expect(await snapshotProject(conflictRoot)).toEqual(conflictBefore);
+  });
+
+  it('publishes versioned machine help and schema metadata for the native import surface', async () => {
+    const root = await createProject();
+    const help = await runJson(root, ['help', 'test', 'case', 'import']);
+    expect(help.document).toMatchObject({
+      ok: true,
+      command: 'help',
+      result: {
+        command: {
+          path: ['test', 'case', 'import'],
+          request_schema: COMMAND_REQUEST_SCHEMA_VERSION,
+        },
+      },
+    });
+    expect(help.output).toContain('jsonl');
+    expect(help.output).not.toContain('csv');
+
+    const schema = await runJson(root, ['schema', 'print', COMMAND_REQUEST_SCHEMA_VERSION]);
+    expect(schema.document).toMatchObject({ ok: true, command: 'schema.print' });
+    expect(schema.output).toContain('test.dataset.create');
+    expect(schema.output).toContain('test.case.rename');
   });
 
   it('serializes repeated human and JSON dry runs deterministically', async () => {

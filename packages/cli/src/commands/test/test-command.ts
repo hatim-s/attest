@@ -10,7 +10,7 @@ import {
 
 import { AttestCliError } from '../../errors.js';
 import type { JsonValue } from '../../project/canonical-project.js';
-import type { LoadedProject } from '../../project/load-project.js';
+import { loadProject, type LoadedProject } from '../../project/load-project.js';
 import {
   applyProjectMutation,
   type ProjectMutationRequest,
@@ -338,16 +338,21 @@ const buildMutation = async (
 const runTestMutationCommand = async (
   options: TestMutationCommandOptions,
 ): Promise<CommandResult> => {
-  const loaded = await loadCommandProject({
-    project: options.project,
-    workingDirectory: options.workingDirectory,
-  });
+  // A preview must not recover journals or acquire a reader lock because that would write locally.
+  const loaded =
+    options.request.dry_run === true
+      ? await loadProject({ project: options.project, workingDirectory: options.workingDirectory })
+      : await loadCommandProject({
+          project: options.project,
+          workingDirectory: options.workingDirectory,
+        });
   const built = await buildMutation(loaded, options.request, options);
   const mutation = await applyProjectMutation(
     {
       candidate: built.candidate,
       dryRun: options.request.dry_run,
-      expectedProjectHash: options.request.if_project_hash,
+      // Always bind the candidate to its loaded base; an explicit caller hash is stricter still.
+      expectedProjectHash: options.request.if_project_hash ?? loaded.projectHash,
       projectRoot: loaded.root,
       renames: built.renames,
       warnings: built.warnings?.map(({ message }) => message),
