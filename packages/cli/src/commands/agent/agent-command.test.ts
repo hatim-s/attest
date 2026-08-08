@@ -366,7 +366,7 @@ describe('CLI2.6 agent authoring', () => {
     ).toBe(0);
     expect(questions.slice(0, 3)).toEqual([
       'Agent id: ',
-      'Transport [cli/http/background/jsonl/stream]: ',
+      'Transport [cli/http/background/jsonl/stream/websocket]: ',
       'Native command: ',
     ]);
     expect(questions[3]).toContain('Apply these changes? [y/N]');
@@ -1723,7 +1723,7 @@ describe('CLI2.11 managed and streaming agent UX', () => {
     const collected = collectIo();
     const answers = new Map<string, string>([
       ['Agent id: ', 'guided-bridge'],
-      ['Transport [cli/http/background/jsonl/stream]: ', 'jsonl'],
+      ['Transport [cli/http/background/jsonl/stream/websocket]: ', 'jsonl'],
       ['JSONL bridge command: ', `${process.execPath} ${JSONL_BRIDGE_FIXTURE}`],
       ['Bridge concurrency [serial]: ', 'multiplexed'],
       ['Cancellation grace [1s]: ', '100ms'],

@@ -16,6 +16,7 @@ import { discoverProject } from '../../project/discover-project.js';
 import { applyProjectMutation, type PublishObserver } from '../../project/transaction/index.js';
 import type { CommandResult } from '../command-result.js';
 import { loadCommandProject } from '../project/load-command-project.js';
+import { redactAgentResource } from '../show/redact-resource.js';
 import {
   assertSafeNativeAgentResource,
   createImportedCurlAgentResource,
@@ -42,11 +43,16 @@ type MutationFields = {
 };
 
 type AgentAddCommandOptions = MutationFields & {
+  acknowledgementPointer?: string;
+  acknowledgementValues?: readonly string[];
   agentId?: string;
   argvJson?: string;
+  attemptTimeout?: string;
   backgroundCommand?: string;
   bridgeConcurrency?: 'serial' | 'multiplexed';
   cancellationGrace?: string;
+  closeTimeout?: string;
+  connectionMode?: 'serial' | 'multiplexed';
   cwd?: string;
   env?: readonly string[];
   errorPointer?: string;
@@ -54,16 +60,21 @@ type AgentAddCommandOptions = MutationFields & {
   headerEnv?: readonly string[];
   incrementalOutputMode?: 'text' | 'array';
   incrementalOutputPointer?: string;
+  idleTimeout?: string;
   interactive: boolean;
   invokeUrl?: string;
   jsonlCommand?: string;
   name?: string;
   nativeCommand?: string;
   nativeHttp?: string;
+  openTimeout?: string;
+  pingInterval?: string;
   prompt?: Prompt;
   readinessHttp?: string;
   readinessStderr?: string;
   readinessTcp?: string;
+  requestIdPointer?: string;
+  requestTemplate?: string;
   responsePointer?: string;
   shutdownUrl?: string;
   stopTimeout?: string;
@@ -74,6 +85,9 @@ type AgentAddCommandOptions = MutationFields & {
   timeout?: string;
   trace?: boolean;
   tracePointer?: string;
+  webSocketLifecycle?: 'per_case' | 'per_run';
+  webSocketSubprotocol?: string;
+  webSocketUrl?: string;
 };
 
 type AgentImportCommandOptions = MutationFields & {
@@ -761,11 +775,16 @@ const mutationResult = async (
 /** Adds one native agent resource through the shared transactional project writer. */
 const runAgentAddCommand = async (options: AgentAddCommandOptions): Promise<CommandResult> => {
   assertNoFromJsonFlags(options.fromJson, {
+    'acknowledgement-pointer': options.acknowledgementPointer,
+    'acknowledgement-value': options.acknowledgementValues,
     'agent-id': options.agentId,
     'argv-json': options.argvJson,
+    'attempt-timeout': options.attemptTimeout,
     'background-command': options.backgroundCommand,
     'bridge-concurrency': options.bridgeConcurrency,
     'cancel-grace': options.cancellationGrace,
+    'close-timeout': options.closeTimeout,
+    'connection-mode': options.connectionMode,
     cwd: options.cwd,
     env: options.env,
     'error-pointer': options.errorPointer,
@@ -773,14 +792,19 @@ const runAgentAddCommand = async (options: AgentAddCommandOptions): Promise<Comm
     'header-env': options.headerEnv,
     'incremental-output-mode': options.incrementalOutputMode,
     'incremental-output-pointer': options.incrementalOutputPointer,
+    'idle-timeout': options.idleTimeout,
     'invoke-url': options.invokeUrl,
     'jsonl-command': options.jsonlCommand,
     name: options.name,
     'native-command': options.nativeCommand,
     'native-http': options.nativeHttp,
+    'open-timeout': options.openTimeout,
+    'ping-interval': options.pingInterval,
     'readiness-http': options.readinessHttp,
     'readiness-stderr': options.readinessStderr,
     'readiness-tcp': options.readinessTcp,
+    'request-id-pointer': options.requestIdPointer,
+    'request-template': options.requestTemplate,
     'response-pointer': options.responsePointer,
     'shutdown-url': options.shutdownUrl,
     'stop-timeout': options.stopTimeout,
@@ -791,6 +815,9 @@ const runAgentAddCommand = async (options: AgentAddCommandOptions): Promise<Comm
     timeout: options.timeout,
     trace: options.trace,
     'trace-pointer': options.tracePointer,
+    subprotocol: options.webSocketSubprotocol,
+    'websocket-lifecycle': options.webSocketLifecycle,
+    'websocket-url': options.webSocketUrl,
     'dry-run': options.dryRun,
     'if-project-hash': options.expectedProjectHash,
     yes: options.yes,
@@ -811,20 +838,36 @@ const runAgentAddCommand = async (options: AgentAddCommandOptions): Promise<Comm
       options.interactive,
       options.prompt,
     );
-    let nativeCommand = options.nativeCommand;
-    let nativeHttp = options.nativeHttp;
+    let acknowledgementPointer = options.acknowledgementPointer;
+    let acknowledgementValues = options.acknowledgementValues;
+    let attemptTimeout = options.attemptTimeout;
     let backgroundCommand = options.backgroundCommand;
     let bridgeConcurrency = options.bridgeConcurrency;
     let cancellationGrace = options.cancellationGrace;
+    let closeTimeout = options.closeTimeout;
+    let connectionMode = options.connectionMode;
+    let errorPointer = options.errorPointer;
+    let headerEnv = options.headerEnv;
+    let idleTimeout = options.idleTimeout;
     let invokeUrl = options.invokeUrl;
     let jsonlCommand = options.jsonlCommand;
+    let nativeCommand = options.nativeCommand;
+    let nativeHttp = options.nativeHttp;
+    let openTimeout = options.openTimeout;
+    let pingInterval = options.pingInterval;
     let readinessHttp = options.readinessHttp;
+    let requestIdPointer = options.requestIdPointer;
+    let requestTemplate = options.requestTemplate;
     let responsePointer = options.responsePointer;
     let stopTimeout = options.stopTimeout;
     let streamFraming = options.streamFraming;
     let streamUrl = options.streamUrl;
     let terminalPointer = options.terminalPointer;
     let terminalValues = options.terminalValues;
+    let tracePointer = options.tracePointer;
+    let webSocketLifecycle = options.webSocketLifecycle;
+    let webSocketSubprotocol = options.webSocketSubprotocol;
+    let webSocketUrl = options.webSocketUrl;
     if (
       options.argvJson === undefined &&
       nativeCommand === undefined &&
@@ -832,9 +875,12 @@ const runAgentAddCommand = async (options: AgentAddCommandOptions): Promise<Comm
       options.backgroundCommand === undefined &&
       options.jsonlCommand === undefined &&
       options.streamUrl === undefined &&
+      options.webSocketUrl === undefined &&
       options.interactive
     ) {
-      const transport = (await options.prompt?.('Transport [cli/http/background/jsonl/stream]: '))
+      const transport = (
+        await options.prompt?.('Transport [cli/http/background/jsonl/stream/websocket]: ')
+      )
         ?.trim()
         .toLowerCase();
       if (transport === 'http') {
@@ -937,10 +983,105 @@ const runAgentAddCommand = async (options: AgentAddCommandOptions): Promise<Comm
           true,
           options.prompt,
         );
+      } else if (transport === 'websocket') {
+        webSocketUrl = await promptRequired(
+          undefined,
+          'WebSocket URL',
+          '--websocket-url',
+          true,
+          options.prompt,
+        );
+        webSocketLifecycle = (await promptDefault(
+          undefined,
+          'WebSocket lifecycle',
+          'per_run',
+          true,
+          options.prompt,
+        )) as 'per_case' | 'per_run';
+        connectionMode = (await promptDefault(
+          undefined,
+          'Connection mode',
+          webSocketLifecycle === 'per_case' ? 'serial' : 'multiplexed',
+          true,
+          options.prompt,
+        )) as 'serial' | 'multiplexed';
+        headerEnv = commaSeparated(
+          (await options.prompt?.(
+            'Header environment references HEADER=ENV, comma-separated [none]: ',
+          )) ?? '',
+        );
+        webSocketSubprotocol = await promptOptional(
+          undefined,
+          'WebSocket subprotocol',
+          true,
+          options.prompt,
+        );
+        requestTemplate = await promptDefault(
+          undefined,
+          'Request template JSON',
+          '{"request_id":"{{request_id}}","request":"{{request}}"}',
+          true,
+          options.prompt,
+        );
+        requestIdPointer = await promptDefault(
+          undefined,
+          'Request id JSON Pointer',
+          '/request_id',
+          true,
+          options.prompt,
+        );
+        acknowledgementPointer = await promptDefault(
+          undefined,
+          'Acknowledgement JSON Pointer',
+          '/type',
+          true,
+          options.prompt,
+        );
+        acknowledgementValues = [
+          await promptDefault(
+            undefined,
+            'Acknowledgement JSON value',
+            '"acknowledgement"',
+            true,
+            options.prompt,
+          ),
+        ];
+        responsePointer = await promptDefault(
+          undefined,
+          'Result JSON Pointer',
+          '/output',
+          true,
+          options.prompt,
+        );
+        errorPointer = await promptDefault(
+          undefined,
+          'Error JSON Pointer',
+          '/error',
+          true,
+          options.prompt,
+        );
+        tracePointer = await promptOptional(undefined, 'Trace JSON Pointer', true, options.prompt);
+        openTimeout = await promptDefault(undefined, 'Open timeout', '10s', true, options.prompt);
+        idleTimeout = await promptDefault(
+          undefined,
+          'Message idle timeout',
+          '30s',
+          true,
+          options.prompt,
+        );
+        attemptTimeout = await promptDefault(
+          undefined,
+          'Attempt timeout',
+          '60s',
+          true,
+          options.prompt,
+        );
+        pingInterval = await promptDefault(undefined, 'Ping interval', '15s', true, options.prompt);
+        closeTimeout = await promptDefault(undefined, 'Close timeout', '5s', true, options.prompt);
       } else {
         throw new AttestCliError(
           'cli_usage',
-          'Transport must be cli, http, background, jsonl, or stream.',
+          'Transport must be cli, http, background, jsonl, stream, or websocket.',
           {
             path: 'transport',
           },
@@ -951,26 +1092,36 @@ const runAgentAddCommand = async (options: AgentAddCommandOptions): Promise<Comm
       schema: 'attest.command-request/v2',
       command: 'agent.add',
       agent: createAgentResource({
+        acknowledgementPointer,
+        acknowledgementValues,
         agentId,
         argvJson: options.argvJson,
+        attemptTimeout,
         backgroundCommand,
         bridgeConcurrency,
         cancellationGrace,
+        closeTimeout,
+        connectionMode,
         cwd: options.cwd,
         env: options.env,
-        errorPointer: options.errorPointer,
+        errorPointer,
         eventName: options.eventName,
-        headerEnv: options.headerEnv,
+        headerEnv,
         incrementalOutputMode: options.incrementalOutputMode,
         incrementalOutputPointer: options.incrementalOutputPointer,
+        idleTimeout,
         invokeUrl,
         jsonlCommand,
         name: options.name,
         nativeCommand,
         nativeHttp,
+        openTimeout,
+        pingInterval,
         readinessHttp,
         readinessStderr: options.readinessStderr,
         readinessTcp: options.readinessTcp,
+        requestIdPointer,
+        requestTemplate,
         responsePointer,
         shutdownUrl: options.shutdownUrl,
         stopTimeout,
@@ -980,7 +1131,10 @@ const runAgentAddCommand = async (options: AgentAddCommandOptions): Promise<Comm
         terminalValues,
         timeout: options.timeout,
         trace: options.trace,
-        tracePointer: options.tracePointer,
+        tracePointer,
+        webSocketLifecycle,
+        webSocketSubprotocol,
+        webSocketUrl,
       }),
       ...(options.dryRun === undefined ? {} : { dry_run: options.dryRun }),
       ...(options.expectedProjectHash === undefined
@@ -1012,6 +1166,10 @@ const runAgentAddCommand = async (options: AgentAddCommandOptions): Promise<Comm
     undefined,
     undefined,
     {
+      definitionPreview:
+        request.agent.transport.kind === 'websocket'
+          ? redactAgentResource(request.agent)
+          : undefined,
       interactive: options.interactive,
       nextCommand: `attest agent test ${request.agent.id}`,
       prompt: options.prompt,
@@ -1165,6 +1323,7 @@ const runAgentImportCommand = async (
       options.workingDirectory,
       options.readStdin,
     );
+    if (agent.transport.kind === 'websocket') importPreview = redactAgentResource(agent);
   } else {
     throw new AttestCliError('cli_usage', 'Agent import type must be json or curl.', {
       path: '--type',
