@@ -223,6 +223,7 @@ describe('v2 agent transport contract', () => {
     {
       kind: 'http',
       lifecycle: 'external',
+      response_mode: 'mapped',
       request: { url: 'https://example.com/invoke', method: 'POST' },
       extraction: { result_pointer: '/answer' },
     },
@@ -260,6 +261,58 @@ describe('v2 agent transport contract', () => {
 
   it.each(transports)('accepts the $kind transport definition', (transport) => {
     expect(agentResourceSchema.safeParse({ ...agent, transport }).success).toBe(true);
+  });
+
+  it('defaults legacy HTTP response provenance without overriding explicit new modes', () => {
+    const explicitMapped = transports.find((transport) => transport.kind === 'http');
+    expect(explicitMapped).toBeDefined();
+    const explicitNative = {
+      kind: 'http',
+      lifecycle: 'external',
+      response_mode: 'attest_envelope',
+      request: { url: 'https://example.com/invoke', method: 'POST' },
+      extraction: { result_pointer: '' },
+    } as const;
+    const withoutMode = structuredClone(explicitNative) as Record<string, unknown>;
+    Reflect.deleteProperty(withoutMode, 'response_mode');
+    const legacy = agentResourceSchema.parse({ ...agent, transport: withoutMode });
+    expect(legacy.transport).toMatchObject({ kind: 'http', response_mode: 'attest_envelope' });
+    expect(
+      agentResourceSchema.parse({ ...agent, transport: explicitNative }).transport,
+    ).toMatchObject({ kind: 'http', response_mode: 'attest_envelope' });
+    expect(
+      agentResourceSchema.parse({ ...agent, transport: explicitMapped }).transport,
+    ).toMatchObject({ kind: 'http', response_mode: 'mapped' });
+  });
+
+  it('validates all polling invariants', () => {
+    const polling = transports.find((transport) => transport.kind === 'polling');
+    expect(polling?.kind).toBe('polling');
+    if (polling?.kind !== 'polling') throw new Error('Expected polling fixture.');
+    expect(
+      agentResourceSchema.safeParse({
+        ...agent,
+        transport: { ...polling, status_url_template: undefined },
+      }).success,
+    ).toBe(false);
+    expect(
+      agentResourceSchema.safeParse({
+        ...agent,
+        transport: { ...polling, status_url_pointer: '/url' },
+      }).success,
+    ).toBe(false);
+    expect(
+      agentResourceSchema.safeParse({
+        ...agent,
+        transport: { ...polling, failure_values: ['done'] },
+      }).success,
+    ).toBe(false);
+    expect(
+      agentResourceSchema.safeParse({
+        ...agent,
+        transport: { ...polling, minimum_interval_ms: 6_000 },
+      }).success,
+    ).toBe(false);
   });
 });
 
@@ -397,6 +450,46 @@ describe('v2 command request contract', () => {
       commandRequestSchema.safeParse({
         ...request,
         import: { mapping: [{ destination: 'unsupported', source: '/value' }] },
+      }).success,
+    ).toBe(false);
+  });
+
+  it('accepts one strict CLI2.10 cURL polling import and rejects ambiguous status URLs', () => {
+    const request = {
+      ...base,
+      command: 'agent.import',
+      source: 'request.curl',
+      source_type: 'curl',
+      as: 'polling-agent',
+      header_env: { Authorization: 'ATTEST_API_TOKEN' },
+      placeholders: [{ target_pointer: '/prompt', input_pointer: '/question' }],
+      extraction: { result_pointer: '/answer', error_pointer: '/error' },
+      polling: {
+        idempotency_header: 'Idempotency-Key',
+        job_id_pointer: '/job_id',
+        status_url_template: 'https://api.example.test/jobs/{{job_id}}',
+        status_pointer: '/status',
+        success_values: ['done'],
+        failure_values: ['failed'],
+        minimum_interval_ms: 100,
+        maximum_interval_ms: 1_000,
+      },
+      timeouts: { connect_ms: 2_000, attempt_ms: 60_000 },
+      retry: { retries: 2, backoff: { kind: 'fixed', delay_ms: 100 } },
+      limits: { request_bytes: 10_000, response_bytes: 20_000 },
+    };
+
+    expect(commandRequestSchema.safeParse(request).success).toBe(true);
+    expect(
+      commandRequestSchema.safeParse({
+        ...request,
+        polling: { ...request.polling, status_url_pointer: '/url' },
+      }).success,
+    ).toBe(false);
+    expect(
+      commandRequestSchema.safeParse({
+        ...request,
+        polling: { ...request.polling, minimum_interval_ms: 2_000 },
       }).success,
     ).toBe(false);
   });

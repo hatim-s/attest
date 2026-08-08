@@ -2,6 +2,7 @@ import { mkdir, readFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 
 import {
+  commandRequestSchema,
   type AgentResource,
   type CommandRequest,
   type JsonValue,
@@ -10,13 +11,18 @@ import {
 import { openStore } from '@attest/core';
 
 import { AttestCliError } from '../../errors.js';
+import { CurlImportError, parseCurlCommand } from '../../import/curl/index.js';
+import { discoverProject } from '../../project/discover-project.js';
 import { applyProjectMutation, type PublishObserver } from '../../project/transaction/index.js';
 import type { CommandResult } from '../command-result.js';
 import { loadCommandProject } from '../project/load-command-project.js';
 import {
   assertSafeNativeAgentResource,
+  createImportedCurlAgentResource,
   createAgentResource,
+  parseDuration,
   readAgentCommandRequest,
+  readCurlDocument,
   readImportedAgentResource,
   type ReadInput,
 } from './agent-request.js';
@@ -51,11 +57,35 @@ type AgentAddCommandOptions = MutationFields & {
 
 type AgentImportCommandOptions = MutationFields & {
   agentId?: string;
+  attemptTimeout?: string;
+  bodyTimeout?: string;
+  connectTimeout?: string;
+  errorPointer?: string;
+  firstByteTimeout?: string;
+  headerEnv?: readonly string[];
+  idempotencyHeader?: string;
   interactive: boolean;
+  mapBody?: readonly string[];
   name?: string;
+  pollFailure?: readonly string[];
+  pollJobIdPointer?: string;
+  pollMaximumInterval?: string;
+  pollMinimumInterval?: string;
+  pollStatusPointer?: string;
+  pollStatusUrlPointer?: string;
+  pollStatusUrlTemplate?: string;
+  pollSuccess?: readonly string[];
   prompt?: Prompt;
+  queryEnv?: readonly string[];
+  requestCapBytes?: string;
+  responseCapBytes?: string;
+  responsePointer?: string;
+  retries?: string;
+  retryDelay?: string;
+  remoteJobIdPointer?: string;
   source?: string;
   sourceType?: string;
+  tracePointer?: string;
 };
 
 type AgentRenameCommandOptions = MutationFields & {
@@ -93,6 +123,8 @@ type AgentMutationRequest = Extract<
   { command: 'agent.add' | 'agent.import' | 'agent.remove' | 'agent.rename' }
 >;
 
+type CurlImportRequest = Extract<CommandRequest, { command: 'agent.import'; source_type: 'curl' }>;
+
 const candidateFromLoaded = (
   loaded: Awaited<ReturnType<typeof loadCommandProject>>,
 ): ProjectResources =>
@@ -122,6 +154,40 @@ const promptRequired = async (
     path,
     hint: `Pass ${path} or a complete \`--from-json\` request.`,
   });
+};
+
+/** Reads one optional guided value while preserving a documented default. */
+const promptDefault = async (
+  value: string | undefined,
+  question: string,
+  fallback: string,
+  interactive: boolean,
+  prompt: Prompt | undefined,
+): Promise<string> => {
+  if (value?.trim()) return value.trim();
+  if (!interactive || prompt === undefined) return fallback;
+  return (await prompt(`${question} [${fallback}]: `)).trim() || fallback;
+};
+
+/** Reads one optional guided value, returning undefined for an empty answer. */
+const promptOptional = async (
+  value: string | undefined,
+  question: string,
+  interactive: boolean,
+  prompt: Prompt | undefined,
+): Promise<string | undefined> => {
+  if (value?.trim()) return value.trim();
+  if (!interactive || prompt === undefined) return undefined;
+  const answer = (await prompt(`${question} [none]: `)).trim();
+  return answer.length === 0 ? undefined : answer;
+};
+
+const commaSeparated = (value: string): string[] | undefined => {
+  const entries = value
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0);
+  return entries.length === 0 ? undefined : entries;
 };
 
 /** Makes every guided prompt terminate promptly when the command is cancelled. */
@@ -177,6 +243,398 @@ const assertNoFromJsonFlags = (
   });
 };
 
+const parseEnvironmentBindings = (
+  values: readonly string[] | undefined,
+  path: string,
+): Record<string, string> | undefined => {
+  if (values === undefined || values.length === 0) return undefined;
+  const bindings: Record<string, string> = {};
+  for (const value of values) {
+    const separator = value.indexOf('=');
+    const target = value.slice(0, separator).trim();
+    const environment = value.slice(separator + 1).trim();
+    if (separator <= 0 || target.length === 0 || environment.length === 0) {
+      throw new AttestCliError('cli_usage', 'A cURL secret binding is invalid.', {
+        path,
+        hint: 'Use TARGET_NAME=SOURCE_ENV; the captured value is discarded.',
+      });
+    }
+    if (Object.keys(bindings).some((name) => name.toLowerCase() === target.toLowerCase())) {
+      throw new AttestCliError('cli_usage', 'A cURL secret binding is duplicated.', { path });
+    }
+    bindings[target] = environment;
+  }
+  return bindings;
+};
+
+const parseBodyMappings = (
+  values: readonly string[] | undefined,
+): CurlImportRequest['placeholders'] =>
+  values?.map((value) => {
+    const separator = value.indexOf('=');
+    if (separator <= 0) {
+      throw new AttestCliError('cli_usage', 'A cURL body mapping is invalid.', {
+        path: '--map-body',
+        hint: 'Use TARGET_JSON_POINTER=INPUT_JSON_POINTER.',
+      });
+    }
+    return {
+      target_pointer: value.slice(0, separator),
+      input_pointer: value.slice(separator + 1),
+    };
+  });
+
+const parsePositiveInteger = (value: string | undefined, path: string): number | undefined => {
+  if (value === undefined) return undefined;
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed <= 0) {
+    throw new AttestCliError('cli_usage', 'Value must be a positive integer.', { path });
+  }
+  return parsed;
+};
+
+const parseRetryCount = (value: string | undefined): number | undefined => {
+  if (value === undefined) return undefined;
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed < 0) {
+    throw new AttestCliError('cli_usage', 'Retry count must be a non-negative integer.', {
+      path: '--retries',
+    });
+  }
+  return parsed;
+};
+
+const parseJsonValues = (
+  values: readonly string[] | undefined,
+  path: string,
+): JsonValue[] | undefined =>
+  values?.map((value) => {
+    try {
+      return JSON.parse(value) as JsonValue;
+    } catch (error: unknown) {
+      throw new AttestCliError('cli_usage', 'Polling terminal value is not valid JSON.', {
+        path,
+        cause: error,
+      });
+    }
+  });
+
+/** Normalizes cURL import flags through the same versioned request schema as --from-json. */
+const createCurlImportRequest = (fields: {
+  agentId: string;
+  name?: string;
+  options: AgentImportCommandOptions;
+  responsePointer: string;
+  source: string;
+}): CurlImportRequest => {
+  const { options } = fields;
+  const pollingSelected =
+    options.pollJobIdPointer !== undefined ||
+    options.pollStatusPointer !== undefined ||
+    options.pollStatusUrlPointer !== undefined ||
+    options.pollStatusUrlTemplate !== undefined ||
+    options.pollSuccess !== undefined ||
+    options.pollFailure !== undefined ||
+    options.pollMinimumInterval !== undefined ||
+    options.pollMaximumInterval !== undefined ||
+    options.idempotencyHeader !== undefined;
+  const successes = parseJsonValues(options.pollSuccess, '--poll-success');
+  const failures = parseJsonValues(options.pollFailure, '--poll-failure');
+  const retries = parseRetryCount(options.retries);
+  const retryDelay =
+    options.retryDelay === undefined
+      ? undefined
+      : parseDuration(options.retryDelay, '--retry-delay');
+  if (retryDelay !== undefined && retries === undefined) {
+    throw new AttestCliError('cli_usage', '--retry-delay requires --retries.', {
+      path: '--retry-delay',
+    });
+  }
+  const candidate = {
+    schema: 'attest.command-request/v2',
+    command: 'agent.import',
+    source: fields.source,
+    source_type: 'curl',
+    as: fields.agentId,
+    ...(fields.name === undefined ? {} : { name: fields.name }),
+    ...(options.mapBody === undefined ? {} : { placeholders: parseBodyMappings(options.mapBody) }),
+    ...(options.headerEnv === undefined
+      ? {}
+      : { header_env: parseEnvironmentBindings(options.headerEnv, '--header-env') }),
+    ...(options.queryEnv === undefined
+      ? {}
+      : { query_env: parseEnvironmentBindings(options.queryEnv, '--query-env') }),
+    extraction: {
+      result_pointer: fields.responsePointer,
+      ...(options.errorPointer === undefined ? {} : { error_pointer: options.errorPointer }),
+      ...(options.tracePointer === undefined ? {} : { trace_pointer: options.tracePointer }),
+      ...(options.remoteJobIdPointer === undefined
+        ? {}
+        : { remote_job_id_pointer: options.remoteJobIdPointer }),
+    },
+    ...(pollingSelected
+      ? {
+          polling: {
+            job_id_pointer: options.pollJobIdPointer,
+            ...(options.pollStatusUrlPointer === undefined
+              ? {}
+              : { status_url_pointer: options.pollStatusUrlPointer }),
+            ...(options.pollStatusUrlTemplate === undefined
+              ? {}
+              : { status_url_template: options.pollStatusUrlTemplate }),
+            status_pointer: options.pollStatusPointer,
+            success_values: successes,
+            failure_values: failures,
+            minimum_interval_ms:
+              options.pollMinimumInterval === undefined
+                ? undefined
+                : parseDuration(options.pollMinimumInterval, '--poll-minimum-interval'),
+            maximum_interval_ms:
+              options.pollMaximumInterval === undefined
+                ? undefined
+                : parseDuration(options.pollMaximumInterval, '--poll-maximum-interval'),
+            ...(options.idempotencyHeader === undefined
+              ? {}
+              : { idempotency_header: options.idempotencyHeader }),
+          },
+        }
+      : {}),
+    ...([
+      options.connectTimeout,
+      options.firstByteTimeout,
+      options.bodyTimeout,
+      options.attemptTimeout,
+    ].every((value) => value === undefined)
+      ? {}
+      : {
+          timeouts: {
+            ...(options.connectTimeout === undefined
+              ? {}
+              : { connect_ms: parseDuration(options.connectTimeout, '--connect-timeout') }),
+            ...(options.firstByteTimeout === undefined
+              ? {}
+              : { first_byte_ms: parseDuration(options.firstByteTimeout, '--first-byte-timeout') }),
+            ...(options.bodyTimeout === undefined
+              ? {}
+              : { idle_ms: parseDuration(options.bodyTimeout, '--body-timeout') }),
+            ...(options.attemptTimeout === undefined
+              ? {}
+              : { attempt_ms: parseDuration(options.attemptTimeout, '--attempt-timeout') }),
+          },
+        }),
+    ...(retries === undefined
+      ? {}
+      : {
+          retry: {
+            retries,
+            backoff:
+              retryDelay === undefined ? { kind: 'none' } : { kind: 'fixed', delay_ms: retryDelay },
+          },
+        }),
+    ...(options.requestCapBytes === undefined && options.responseCapBytes === undefined
+      ? {}
+      : {
+          limits: {
+            ...(options.requestCapBytes === undefined
+              ? {}
+              : {
+                  request_bytes: parsePositiveInteger(
+                    options.requestCapBytes,
+                    '--request-cap-bytes',
+                  ),
+                }),
+            ...(options.responseCapBytes === undefined
+              ? {}
+              : {
+                  response_bytes: parsePositiveInteger(
+                    options.responseCapBytes,
+                    '--response-cap-bytes',
+                  ),
+                }),
+          },
+        }),
+    ...(options.dryRun === undefined ? {} : { dry_run: options.dryRun }),
+    ...(options.expectedProjectHash === undefined
+      ? {}
+      : { if_project_hash: options.expectedProjectHash }),
+    ...(options.yes === undefined ? {} : { yes: options.yes }),
+  };
+  const parsed = commandRequestSchema.safeParse(candidate);
+  if (
+    !parsed.success ||
+    parsed.data.command !== 'agent.import' ||
+    parsed.data.source_type !== 'curl'
+  ) {
+    throw new AttestCliError('cli_usage', 'cURL import flags are incomplete or inconsistent.', {
+      path: '--type',
+      hint: 'Provide extraction pointers and every required polling field.',
+      details: {
+        diagnostics: parsed.success
+          ? []
+          : parsed.error.issues.map(({ message, path }) => ({
+              message,
+              path: `/${path.join('/')}`,
+            })),
+      },
+    });
+  }
+  return parsed.data;
+};
+
+/** Completes the human cURL happy path without retaining any captured credential literal. */
+const prepareGuidedCurlOptions = async (
+  options: AgentImportCommandOptions,
+  source: string,
+): Promise<AgentImportCommandOptions> => {
+  if (!options.interactive || options.prompt === undefined) return options;
+  const guided: AgentImportCommandOptions = {
+    ...options,
+    headerEnv: [...(options.headerEnv ?? [])],
+    queryEnv: [...(options.queryEnv ?? [])],
+  };
+  // Reparse after each discovered credential name; the literal value is never copied into a prompt.
+  for (let attempt = 0; attempt < 32; attempt += 1) {
+    try {
+      parseCurlCommand(source, {
+        headerSecrets: parseEnvironmentBindings(guided.headerEnv, '--header-env'),
+        querySecrets: parseEnvironmentBindings(guided.queryEnv, '--query-env'),
+      });
+      break;
+    } catch (error: unknown) {
+      if (!(error instanceof CurlImportError)) throw error;
+      const unsafe = error.diagnostics.find(
+        (diagnostic) =>
+          diagnostic.startsWith('unsafe_header:') || diagnostic.startsWith('unsafe_query:'),
+      );
+      if (unsafe === undefined) break;
+      const [kind, name] = unsafe.split(':') as [string, string];
+      const environment = await promptRequired(
+        undefined,
+        `${kind === 'unsafe_header' ? 'Header' : 'Query'} ${name} environment variable`,
+        kind === 'unsafe_header' ? '--header-env' : '--query-env',
+        true,
+        options.prompt,
+      );
+      const binding = `${name}=${environment}`;
+      if (kind === 'unsafe_header') guided.headerEnv = [...(guided.headerEnv ?? []), binding];
+      else guided.queryEnv = [...(guided.queryEnv ?? []), binding];
+    }
+  }
+  if (options.mapBody === undefined) {
+    guided.mapBody = commaSeparated(
+      await options.prompt('Body mappings TARGET_POINTER=INPUT_POINTER, comma-separated [none]: '),
+    );
+  }
+  guided.errorPointer = await promptOptional(
+    options.errorPointer,
+    'Error JSON Pointer',
+    true,
+    options.prompt,
+  );
+  guided.tracePointer = await promptOptional(
+    options.tracePointer,
+    'Trace JSON Pointer',
+    true,
+    options.prompt,
+  );
+  guided.remoteJobIdPointer = await promptOptional(
+    options.remoteJobIdPointer,
+    'Remote job id JSON Pointer',
+    true,
+    options.prompt,
+  );
+  const pollingSelected =
+    options.pollJobIdPointer !== undefined ||
+    options.pollStatusPointer !== undefined ||
+    options.pollStatusUrlPointer !== undefined ||
+    options.pollStatusUrlTemplate !== undefined ||
+    options.pollSuccess !== undefined ||
+    options.pollFailure !== undefined;
+  const transport = pollingSelected
+    ? 'polling'
+    : await promptDefault(undefined, 'Transport', 'direct', true, options.prompt);
+  if (!['direct', 'polling'].includes(transport)) {
+    throw new AttestCliError('cli_usage', 'Transport must be direct or polling.', {
+      path: 'transport',
+    });
+  }
+  if (transport === 'polling') {
+    guided.pollJobIdPointer = await promptDefault(
+      options.pollJobIdPointer,
+      'Submission job id JSON Pointer',
+      '/job_id',
+      true,
+      options.prompt,
+    );
+    if (options.pollStatusUrlPointer === undefined && options.pollStatusUrlTemplate === undefined) {
+      const sourceChoice = await promptDefault(
+        undefined,
+        'Status URL source',
+        'pointer',
+        true,
+        options.prompt,
+      );
+      if (sourceChoice === 'pointer') {
+        guided.pollStatusUrlPointer = await promptDefault(
+          undefined,
+          'Submission status URL JSON Pointer',
+          '/status_url',
+          true,
+          options.prompt,
+        );
+      } else if (sourceChoice === 'template') {
+        guided.pollStatusUrlTemplate = await promptRequired(
+          undefined,
+          'Same-origin status URL template with {{job_id}}',
+          '--poll-status-url-template',
+          true,
+          options.prompt,
+        );
+      } else {
+        throw new AttestCliError('cli_usage', 'Status URL source must be pointer or template.', {
+          path: 'status-url-source',
+        });
+      }
+    }
+    guided.pollStatusPointer = await promptDefault(
+      options.pollStatusPointer,
+      'Polling status JSON Pointer',
+      '/status',
+      true,
+      options.prompt,
+    );
+    guided.pollSuccess = options.pollSuccess ??
+      commaSeparated(
+        await options.prompt('Polling success JSON values, comma-separated ["done"]: '),
+      ) ?? ['"done"'];
+    guided.pollFailure = options.pollFailure ??
+      commaSeparated(
+        await options.prompt('Polling failure JSON values, comma-separated ["failed"]: '),
+      ) ?? ['"failed"'];
+    guided.pollMinimumInterval = await promptDefault(
+      options.pollMinimumInterval,
+      'Minimum polling interval',
+      '1s',
+      true,
+      options.prompt,
+    );
+    guided.pollMaximumInterval = await promptDefault(
+      options.pollMaximumInterval,
+      'Maximum polling interval',
+      '5s',
+      true,
+      options.prompt,
+    );
+    guided.idempotencyHeader = await promptOptional(
+      options.idempotencyHeader,
+      'Submission idempotency header',
+      true,
+      options.prompt,
+    );
+  }
+  return guided;
+};
+
 const findAgent = (agents: readonly AgentResource[], id: string): AgentResource => {
   const agent = agents.find((candidate) => candidate.id === id);
   if (agent === undefined) {
@@ -197,6 +655,7 @@ const mutationResult = async (
   renames?: readonly { from: string; to: string; type: 'agent' }[],
   warnings?: readonly string[],
   confirmation?: {
+    definitionPreview?: JsonValue;
     interactive: boolean;
     nextCommand?: string;
     prompt?: Prompt;
@@ -232,6 +691,9 @@ const mutationResult = async (
     `${command} ${request.dry_run === true ? 'preview' : 'changes'}:`,
     ...(operationLines.length === 0 ? ['- no semantic changes'] : operationLines),
     ...warningLines,
+    ...(confirmation?.definitionPreview === undefined
+      ? []
+      : [`Redacted definition preview: ${JSON.stringify(confirmation.definitionPreview)}`]),
   ].join('\n');
   if (request.dry_run !== true && confirmation?.yes !== true) {
     if (confirmation?.interactive === true && confirmation.prompt !== undefined) {
@@ -265,6 +727,9 @@ const mutationResult = async (
       dry_run: request.dry_run === true,
       operations: result.diff.operations as unknown as JsonValue,
       warnings: result.diff.warnings as unknown as JsonValue,
+      ...(confirmation?.definitionPreview === undefined
+        ? {}
+        : { import_preview: confirmation.definitionPreview }),
       ...(request.dry_run === true || confirmation?.nextCommand === undefined
         ? {}
         : { next_command: confirmation.nextCommand }),
@@ -388,14 +853,38 @@ const runAgentAddCommand = async (options: AgentAddCommandOptions): Promise<Comm
   );
 };
 
-/** Imports one canonical JSON native agent resource without retaining its source contents. */
+/** Imports one canonical JSON resource or inert cURL mapping without retaining source contents. */
 const runAgentImportCommand = async (
   options: AgentImportCommandOptions,
 ): Promise<CommandResult> => {
   assertNoFromJsonFlags(options.fromJson, {
     'agent-id': options.agentId,
+    'attempt-timeout': options.attemptTimeout,
+    'body-timeout': options.bodyTimeout,
+    'connect-timeout': options.connectTimeout,
+    'error-pointer': options.errorPointer,
+    'first-byte-timeout': options.firstByteTimeout,
+    'header-env': options.headerEnv,
+    'idempotency-header': options.idempotencyHeader,
+    'map-body': options.mapBody,
     name: options.name,
+    'poll-failure': options.pollFailure,
+    'poll-job-id-pointer': options.pollJobIdPointer,
+    'poll-maximum-interval': options.pollMaximumInterval,
+    'poll-minimum-interval': options.pollMinimumInterval,
+    'poll-status-pointer': options.pollStatusPointer,
+    'poll-status-url-pointer': options.pollStatusUrlPointer,
+    'poll-status-url-template': options.pollStatusUrlTemplate,
+    'poll-success': options.pollSuccess,
+    'query-env': options.queryEnv,
+    'request-cap-bytes': options.requestCapBytes,
+    'response-cap-bytes': options.responseCapBytes,
+    'response-pointer': options.responsePointer,
+    retries: options.retries,
+    'retry-delay': options.retryDelay,
+    'remote-job-id-pointer': options.remoteJobIdPointer,
     source: options.source,
+    'trace-pointer': options.tracePointer,
     type: options.sourceType,
     'dry-run': options.dryRun,
     'if-project-hash': options.expectedProjectHash,
@@ -412,12 +901,6 @@ const runAgentImportCommand = async (
       options.workingDirectory,
       options.readStdin,
     );
-    if (request.source_type !== 'json') {
-      throw new AttestCliError('cli_usage', 'cURL import belongs to CLI2.10.', {
-        path: '/source_type',
-        hint: 'Import one canonical JSON native agent resource in CLI2.6.',
-      });
-    }
     if (options.fromJson === '-' && request.source === '-') {
       throw new AttestCliError(
         'cli_usage',
@@ -432,15 +915,9 @@ const runAgentImportCommand = async (
     agentId = request.as;
     name = request.name;
   }
-  if (options.sourceType !== undefined && options.sourceType !== 'json') {
-    throw new AttestCliError('cli_usage', 'Only JSON native-agent import is available in CLI2.6.', {
-      path: '--type',
-      hint: 'Use `--type json`; cURL mapping lands in CLI2.10.',
-    });
-  }
   source = await promptRequired(
     source,
-    'Agent JSON source',
+    'Agent import source',
     '<path|url|->',
     options.interactive,
     options.prompt,
@@ -452,13 +929,79 @@ const runAgentImportCommand = async (
     options.interactive,
     options.prompt,
   );
-  const agent = await readImportedAgentResource(
-    source,
-    agentId,
-    name,
-    options.workingDirectory,
-    options.readStdin,
-  );
+  const sourceType =
+    request?.source_type ?? options.sourceType ?? (/\.curl$/iu.test(source) ? 'curl' : 'json');
+  let agent: AgentResource;
+  let importPreview: JsonValue | undefined;
+  if (sourceType === 'curl') {
+    const curlSource = await readCurlDocument(source, options.workingDirectory, options.readStdin);
+    options = await prepareGuidedCurlOptions(options, curlSource);
+    const responsePointer =
+      request?.source_type === 'curl'
+        ? request.extraction.result_pointer
+        : options.responsePointer !== undefined
+          ? options.responsePointer
+          : await promptDefault(
+              undefined,
+              'Response JSON Pointer',
+              '/answer',
+              options.interactive,
+              options.prompt,
+            );
+    let curlRequest =
+      request?.source_type === 'curl'
+        ? request
+        : createCurlImportRequest({ agentId, name, options, responsePointer, source });
+    const projectRoot = (
+      await discoverProject({
+        project: options.project,
+        workingDirectory: options.workingDirectory,
+      })
+    ).root;
+    let imported: Awaited<ReturnType<typeof createImportedCurlAgentResource>> | undefined;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        imported = await createImportedCurlAgentResource(curlRequest, curlSource, projectRoot);
+        break;
+      } catch (error: unknown) {
+        if (
+          request !== undefined ||
+          !options.interactive ||
+          options.prompt === undefined ||
+          !(error instanceof AttestCliError) ||
+          !/mapping|target/iu.test(error.message) ||
+          attempt === 2
+        ) {
+          throw error;
+        }
+        options.mapBody = commaSeparated(
+          await options.prompt(
+            'Body mapping was invalid. Re-enter TARGET_POINTER=INPUT_POINTER values [none]: ',
+          ),
+        );
+        curlRequest = createCurlImportRequest({ agentId, name, options, responsePointer, source });
+      }
+    }
+    if (imported === undefined) throw new Error('Guided cURL import did not settle.');
+    agent = imported.agent;
+    importPreview = {
+      request: imported.preview,
+      extraction: curlRequest.extraction,
+      ...(curlRequest.polling === undefined ? {} : { polling: curlRequest.polling }),
+    };
+  } else if (sourceType === 'json') {
+    agent = await readImportedAgentResource(
+      source,
+      agentId,
+      name,
+      options.workingDirectory,
+      options.readStdin,
+    );
+  } else {
+    throw new AttestCliError('cli_usage', 'Agent import type must be json or curl.', {
+      path: '--type',
+    });
+  }
   const loaded = await loadCommandProject({
     project: options.project,
     recover: (request?.dry_run ?? options.dryRun) !== true,
@@ -483,6 +1026,7 @@ const runAgentImportCommand = async (
     undefined,
     undefined,
     {
+      definitionPreview: importPreview,
       interactive: options.interactive,
       nextCommand: `attest agent test ${agent.id}`,
       prompt: options.prompt,
@@ -684,7 +1228,7 @@ const readTestInput = async (
   }
 };
 
-/** Probes one native adapter without project writes and records one case only when requested. */
+/** Probes one supported adapter without project writes and records one case only when requested. */
 const runAgentTestCommand = async (options: AgentTestCommandOptions): Promise<CommandResult> => {
   assertNoFromJsonFlags(options.fromJson, {
     'agent-id': options.agentId,
@@ -773,7 +1317,7 @@ const runAgentTestCommand = async (options: AgentTestCommandOptions): Promise<Co
       ? result
       : ({ ...(result as Record<string, JsonValue>), recorded_run_id: runId } as JsonValue);
   return {
-    human: `Agent ${agent.id} passed the native connection test.${runId === undefined ? '' : `\nRecorded run: ${runId}`}`,
+    human: `Agent ${agent.id} passed the connection test.${runId === undefined ? '' : `\nRecorded run: ${runId}`}`,
     projectHashAfter: loaded.projectHash,
     projectHashBefore: loaded.projectHash,
     result: resultWithRecord,

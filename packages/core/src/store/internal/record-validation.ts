@@ -53,6 +53,13 @@ const collectDiagnosticsViolations = (value: unknown, path: string, violations: 
     violations.push(`${path}.httpStatus must be an integer`);
   }
   if (
+    value.remoteJobId !== undefined &&
+    typeof value.remoteJobId !== 'string' &&
+    (typeof value.remoteJobId !== 'number' || !Number.isFinite(value.remoteJobId))
+  ) {
+    violations.push(`${path}.remoteJobId must be a string or finite number`);
+  }
+  if (
     value.unreapedProcessIds !== undefined &&
     (!Array.isArray(value.unreapedProcessIds) ||
       !value.unreapedProcessIds.every(

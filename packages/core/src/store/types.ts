@@ -58,6 +58,7 @@ interface StoredDiagnostics {
   stderrExcerpt?: string;
   exitCode?: number;
   httpStatus?: number;
+  remoteJobId?: string | number;
   unreapedProcessIds?: number[];
 }
 

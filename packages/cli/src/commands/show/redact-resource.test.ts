@@ -26,6 +26,7 @@ describe('resource output URL redaction', () => {
     validAgent('http-agent', {
       kind: 'http',
       lifecycle: 'external',
+      response_mode: 'mapped',
       request: { method: 'POST', url: credentialUrl('http') },
       extraction: { result_pointer: '/result' },
     }),

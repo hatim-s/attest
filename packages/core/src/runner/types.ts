@@ -44,6 +44,8 @@ type InvocationDiagnostics = {
   stderrExcerpt?: string;
   exitCode?: number;
   httpStatus?: number;
+  /** Bounded provider correlation id extracted from an authored response mapping. */
+  remoteJobId?: string | number;
   /** Snapshotted descendants that survived SIGKILL verification, if any (best-effort containment). */
   unreapedProcessIds?: number[];
 };

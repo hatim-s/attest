@@ -64,6 +64,13 @@
         "body": {
           "$ref": "#/$defs/__schema4"
         },
+        "body_encoding": {
+          "enum": [
+            "json",
+            "raw"
+          ],
+          "type": "string"
+        },
         "headers": {
           "additionalProperties": {
             "anyOf": [

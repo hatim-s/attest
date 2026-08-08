@@ -1,11 +1,21 @@
 import { z } from 'zod';
 
-import { agentResourceSchema, responseExtractionSchema } from './agent-resource-v2.js';
+import {
+  agentEvidenceLimitsSchema,
+  agentResourceSchema,
+  agentTimeoutPolicySchema,
+  responseExtractionSchema,
+} from './agent-resource-v2.js';
 import { testCaseSchema } from './case-v2.js';
 import { datasetImportMappingSchema, datasetResourceSchema } from './dataset-resource-v2.js';
 import { metricResourceSchema } from './metric-resource-v2.js';
 import { testResourceSchema } from './test-resource-v2.js';
-import { jsonPointerSchema, resourceIdSchema, sha256Schema } from './v2-shared.js';
+import {
+  jsonPointerSchema,
+  resourceIdSchema,
+  retryPolicySchema,
+  sha256Schema,
+} from './v2-shared.js';
 import { COMMAND_REQUEST_SCHEMA_VERSION } from './versions.js';
 
 const commonMutationFields = {
@@ -51,6 +61,39 @@ const agentAddRequestSchema = z.strictObject({
   agent: agentResourceSchema,
 });
 
+/** Encodes the optional asynchronous polling mapping selected during one cURL import. */
+const curlPollingImportSchema = z
+  .strictObject({
+    idempotency_header: z.string().min(1).optional(),
+    job_id_pointer: jsonPointerSchema,
+    status_url_pointer: jsonPointerSchema.optional(),
+    status_url_template: z.string().min(1).optional(),
+    status_pointer: jsonPointerSchema,
+    success_values: z.array(z.json()).nonempty(),
+    failure_values: z.array(z.json()).nonempty(),
+    minimum_interval_ms: z.number().int().positive(),
+    maximum_interval_ms: z.number().int().positive(),
+  })
+  .superRefine((polling, context) => {
+    if (
+      (polling.status_url_pointer === undefined) ===
+      (polling.status_url_template === undefined)
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['status_url_pointer'],
+        message: 'provide exactly one status URL pointer or template',
+      });
+    }
+    if (polling.minimum_interval_ms > polling.maximum_interval_ms) {
+      context.addIssue({
+        code: 'custom',
+        path: ['maximum_interval_ms'],
+        message: 'must be greater than or equal to minimum_interval_ms',
+      });
+    }
+  });
+
 const agentImportRequestSchema = z.union([
   z.strictObject({
     ...commonMutationFields,
@@ -75,7 +118,13 @@ const agentImportRequestSchema = z.union([
         }),
       )
       .optional(),
+    header_env: z.record(z.string(), z.string().min(1)).optional(),
+    query_env: z.record(z.string(), z.string().min(1)).optional(),
     extraction: responseExtractionSchema,
+    polling: curlPollingImportSchema.optional(),
+    timeouts: agentTimeoutPolicySchema.optional(),
+    retry: retryPolicySchema.optional(),
+    limits: agentEvidenceLimitsSchema.optional(),
   }),
 ]);
 
