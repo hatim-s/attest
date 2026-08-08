@@ -19,6 +19,14 @@ const temporaryDirectories: string[] = [];
 const webSocketFixtures: Array<{ close: () => Promise<void> }> = [];
 const originalSecret = process.env.ATTEST_WS_TOKEN;
 
+type WebSocketProbeDocument = {
+  command: string;
+  result: {
+    response: { output: { echoed_request_id: string } };
+    transport: string;
+  };
+};
+
 const nonInteractive = {
   ci: false,
   inputIsTTY: false,
@@ -429,14 +437,14 @@ describe('CLI2.12 WebSocket agent UX', () => {
       'json',
     ]);
     expect(flagProbe.exitCode).toBe(0);
-    const flagResult = JSON.parse(flagProbe.output[0] ?? '{}');
+    const flagResult = JSON.parse(flagProbe.output[0] ?? '{}') as WebSocketProbeDocument;
     expect(flagResult).toMatchObject({
       command: 'agent.test',
       result: {
-        response: { output: { echoed_request_id: expect.any(String) } },
         transport: 'websocket',
       },
     });
+    expect(flagResult.result.response.output.echoed_request_id).toMatch(/^ws-/u);
     expect(flagProbe.output.join('')).not.toContain('websocket-probe-secret');
 
     const testRequest = {
@@ -451,14 +459,14 @@ describe('CLI2.12 WebSocket agent UX', () => {
       () => Promise.resolve(JSON.stringify(testRequest)),
     );
     expect(jsonProbe.exitCode).toBe(0);
-    const jsonResult = JSON.parse(jsonProbe.output[0] ?? '{}');
+    const jsonResult = JSON.parse(jsonProbe.output[0] ?? '{}') as WebSocketProbeDocument;
     expect(jsonResult).toMatchObject({
       command: 'agent.test',
       result: {
-        response: { output: { echoed_request_id: expect.any(String) } },
         transport: 'websocket',
       },
     });
+    expect(jsonResult.result.response.output.echoed_request_id).toMatch(/^ws-/u);
     expect(jsonProbe.output.join('')).not.toContain('websocket-probe-secret');
     const upgrades = fixture.events().filter((event) => event.type === 'upgrade_requested');
     expect(upgrades).toHaveLength(2);
