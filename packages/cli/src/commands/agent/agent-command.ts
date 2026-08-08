@@ -22,7 +22,7 @@ import {
 } from './agent-request.js';
 import { testNativeAgentConnection } from './native-agent-adapter.js';
 
-type Prompt = (question: string) => Promise<string>;
+type Prompt = (question: string, options?: { signal?: AbortSignal }) => Promise<string>;
 
 type MutationFields = {
   dryRun?: boolean;
@@ -133,13 +133,30 @@ const promptWithSignal = async (
   if (signal === undefined) return prompt(question);
   if (signal.aborted) throw new AttestCliError('cancelled', 'Command cancelled.');
   return new Promise<string>((resolvePrompt, rejectPrompt) => {
-    const cancel = (): void => rejectPrompt(new AttestCliError('cancelled', 'Command cancelled.'));
+    let settled = false;
+    const finish = (action: () => void): void => {
+      if (settled) return;
+      settled = true;
+      signal.removeEventListener('abort', cancel);
+      action();
+    };
+    const cancel = (): void =>
+      finish(() => rejectPrompt(new AttestCliError('cancelled', 'Command cancelled.')));
     signal.addEventListener('abort', cancel, { once: true });
-    void prompt(question)
-      .then(resolvePrompt, rejectPrompt)
-      .finally(() => {
-        signal.removeEventListener('abort', cancel);
-      });
+    // The signal closes the real readline question; the outer race also supports injected prompts.
+    void prompt(question, { signal }).then(
+      (answer) => finish(() => resolvePrompt(answer)),
+      (error: unknown) =>
+        finish(() =>
+          rejectPrompt(
+            signal.aborted || (error instanceof Error && error.name === 'AbortError')
+              ? new AttestCliError('cancelled', 'Command cancelled.')
+              : error instanceof Error
+                ? error
+                : new Error('Prompt failed with a non-error rejection.', { cause: error }),
+          ),
+        ),
+    );
   });
 };
 
@@ -187,12 +204,12 @@ const mutationResult = async (
     yes?: boolean;
   },
 ): Promise<CommandResult> => {
-  const apply = (dryRun: boolean) =>
+  const apply = (dryRun: boolean, expectedProjectHash = request.if_project_hash) =>
     applyProjectMutation(
       {
         candidate,
         dryRun,
-        expectedProjectHash: request.if_project_hash,
+        expectedProjectHash,
         projectRoot: loaded.root,
         renames,
         warnings,
@@ -232,7 +249,8 @@ const mutationResult = async (
       });
     }
   }
-  const result = request.dry_run === true ? preview : await apply(false);
+  // Publish only the operation set the caller reviewed; the writer rechecks this under its lock.
+  const result = request.dry_run === true ? preview : await apply(false, preview.projectHashBefore);
   const verb = request.dry_run === true ? 'would apply' : 'applied';
   const next =
     request.dry_run === true || confirmation?.nextCommand === undefined

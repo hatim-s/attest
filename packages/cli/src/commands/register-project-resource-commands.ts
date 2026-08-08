@@ -21,7 +21,7 @@ type CliInteraction = {
   ci: boolean;
   inputIsTTY: boolean;
   outputIsTTY: boolean;
-  prompt: (question: string) => Promise<string>;
+  prompt: (question: string, options?: { signal?: AbortSignal }) => Promise<string>;
   readStdin: () => Promise<string>;
 };
 
@@ -64,10 +64,13 @@ const createDefaultCliInteraction = (): CliInteraction => ({
   inputIsTTY: process.stdin.isTTY === true,
   outputIsTTY: process.stdout.isTTY === true,
   readStdin,
-  prompt: async (question: string) => {
+  prompt: async (question: string, options?: { signal?: AbortSignal }) => {
     const prompt = createInterface({ input: process.stdin, output: process.stdout });
     try {
-      return await prompt.question(question);
+      // Bind process cancellation to readline so its terminal listeners are closed in finally.
+      return options?.signal === undefined
+        ? await prompt.question(question)
+        : await prompt.question(question, { signal: options.signal });
     } finally {
       prompt.close();
     }

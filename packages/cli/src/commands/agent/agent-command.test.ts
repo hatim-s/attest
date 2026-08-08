@@ -1,3 +1,4 @@
+import { execFile } from 'node:child_process';
 import {
   access,
   chmod,
@@ -11,18 +12,24 @@ import {
 } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 
 import { cliResultSchema, type AgentResource } from '@attest/contracts';
 import { openStore } from '@attest/core';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { AttestCliError } from '../../errors.js';
 import { loadProject } from '../../project/load-project.js';
 import { runCli, type CliIo } from '../../run-cli.js';
-import { runAgentAddCommand, runAgentTestCommand } from './agent-command.js';
+import { runAgentAddCommand, runAgentRemoveCommand, runAgentTestCommand } from './agent-command.js';
 import { readSecretReference, REDACTED } from './native-agent-adapter.js';
 
 const FIXTURE = fileURLToPath(new URL('./fixtures/native-agent.cjs', import.meta.url));
+const PTY_FIXTURE = fileURLToPath(new URL('./fixtures/pty-agent-command.py', import.meta.url));
+const CLI_PACKAGE_ROOT = fileURLToPath(new URL('../../../', import.meta.url));
+const CLI_BUILT = fileURLToPath(new URL('../../../dist/cli.js', import.meta.url));
+const execFileAsync = promisify(execFile);
 const temporaryDirectories: string[] = [];
 const originalSecret = process.env.ATTEST_SOURCE_SECRET;
 
@@ -45,6 +52,23 @@ const collectIo = (): { errors: string[]; io: CliIo; output: string[] } => {
       output: (message) => output.push(message),
     },
   };
+};
+
+/** Narrows parsed JSON and structured error details without trusting their runtime shape. */
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  value !== null && typeof value === 'object' && !Array.isArray(value);
+
+/** Verifies the stable repair-bearing conflict contract returned after prompt-time drift. */
+const expectProjectConflict = (error: unknown): void => {
+  expect(error).toBeInstanceOf(AttestCliError);
+  if (!(error instanceof AttestCliError)) throw new Error('Expected an Attest CLI error.');
+  expect(error.code).toBe('project_changed');
+  expect(error.hint).toBe('Read the current project hash, rebuild the candidate, and retry.');
+  expect(isRecord(error.details)).toBe(true);
+  if (!isRecord(error.details)) throw new Error('Expected project conflict hash details.');
+  expect(typeof error.details.current_hash).toBe('string');
+  expect(typeof error.details.expected_hash).toBe('string');
+  expect(error.details.current_hash).not.toBe(error.details.expected_hash);
 };
 
 /** Creates an isolated empty v2 project through the public command path. */
@@ -429,6 +453,91 @@ describe('CLI2.6 agent authoring', () => {
       error: { code: 'project_changed', details: { expected_hash: 'a'.repeat(64) } },
     });
     expect(await snapshotTree(root)).toEqual(before);
+  });
+
+  it('rejects prompt-time project drift without replacing concurrent authored resources', async () => {
+    const root = await createProject();
+    const argvJson = JSON.stringify([process.execPath, FIXTURE, 'echo']);
+    let addConflict: unknown;
+    try {
+      await runAgentAddCommand({
+        agentId: 'previewed',
+        argvJson,
+        interactive: true,
+        project: root,
+        prompt: async (question) => {
+          expect(question).toContain('- add agent previewed');
+          await runAgentAddCommand({
+            agentId: 'racer',
+            argvJson,
+            interactive: false,
+            project: root,
+            readStdin: () => Promise.resolve(''),
+            workingDirectory: root,
+          });
+          return 'yes';
+        },
+        readStdin: () => Promise.resolve(''),
+        workingDirectory: root,
+      });
+    } catch (error: unknown) {
+      addConflict = error;
+    }
+    expectProjectConflict(addConflict);
+    await expect(loadProject({ project: root })).resolves.toMatchObject({
+      agents: [{ id: 'racer' }],
+    });
+
+    const loaded = await loadProject({ project: root });
+    const candidate = structuredClone({
+      agents: loaded.agents,
+      datasets: loaded.datasets,
+      metrics: loaded.metrics,
+      project: loaded.project,
+      tests: loaded.tests,
+    });
+    candidate.tests.push({
+      schema: 'attest.test/v2',
+      id: 'racer-smoke',
+      name: 'Racer smoke',
+      agent_id: 'racer',
+      cases: [],
+      datasets: [],
+      metrics: [],
+    });
+    const { applyProjectMutation } = await import('../../project/transaction/index.js');
+    await applyProjectMutation({ candidate, projectRoot: root });
+
+    let removeConflict: unknown;
+    try {
+      await runAgentRemoveCommand({
+        agentId: 'racer',
+        detach: true,
+        interactive: true,
+        project: root,
+        prompt: async (question) => {
+          expect(question).toContain('- remove test racer-smoke');
+          await runAgentAddCommand({
+            agentId: 'concurrent',
+            argvJson,
+            interactive: false,
+            project: root,
+            readStdin: () => Promise.resolve(''),
+            workingDirectory: root,
+          });
+          return 'yes';
+        },
+        readStdin: () => Promise.resolve(''),
+        workingDirectory: root,
+      });
+    } catch (error: unknown) {
+      removeConflict = error;
+    }
+    expectProjectConflict(removeConflict);
+    await expect(loadProject({ project: root })).resolves.toMatchObject({
+      agents: [{ id: 'concurrent' }, { id: 'racer' }],
+      tests: [{ agent_id: 'racer', id: 'racer-smoke' }],
+    });
   });
 
   it('rolls back an injected publication failure and preserves the prior project', async () => {
@@ -876,6 +985,96 @@ describe('CLI2.6 agent authoring', () => {
     });
     await expect(read).rejects.toMatchObject({ code: 'invocation_failed' });
   });
+
+  it('removes command signal handlers after cancelling a guided test prompt', async () => {
+    const root = await createProject();
+    const before = await snapshotTree(root);
+    const sigintBefore = process.listeners('SIGINT');
+    const sigtermBefore = process.listeners('SIGTERM');
+    let markPromptStarted = (): void => undefined;
+    const promptStarted = new Promise<void>((resolveStarted) => {
+      markPromptStarted = resolveStarted;
+    });
+    const collected = collectIo();
+    const pending = runCli(['agent', 'test', '--project', root], {
+      interaction: {
+        ci: false,
+        inputIsTTY: true,
+        outputIsTTY: true,
+        prompt: (_question, options) =>
+          new Promise<string>((_resolvePrompt, rejectPrompt) => {
+            markPromptStarted();
+            options?.signal?.addEventListener(
+              'abort',
+              () => {
+                const error = new Error('Prompt aborted.');
+                error.name = 'AbortError';
+                rejectPrompt(error);
+              },
+              { once: true },
+            );
+          }),
+        readStdin: () => Promise.resolve(''),
+      },
+      io: collected.io,
+      workingDirectory: root,
+    });
+    await promptStarted;
+    const commandSigintListeners = process
+      .listeners('SIGINT')
+      .filter((listener) => !sigintBefore.includes(listener));
+    expect(commandSigintListeners).toHaveLength(1);
+    commandSigintListeners[0]?.('SIGINT');
+    await expect(pending).resolves.toBe(130);
+    expect(collected.errors.join('\n')).toContain('cancelled: Command cancelled.');
+    expect(process.listeners('SIGINT')).toEqual(sigintBefore);
+    expect(process.listeners('SIGTERM')).toEqual(sigtermBefore);
+    expect(await snapshotTree(root)).toEqual(before);
+  });
+
+  it('cancels a real built-CLI PTY and rejects its prompt-time mutation race', async () => {
+    const root = await createProject();
+    const before = await snapshotTree(root);
+    // Compile this package so the PTY probe exercises the shipped Node entry point.
+    await execFileAsync('bun', ['run', 'build'], { cwd: CLI_PACKAGE_ROOT, timeout: 30_000 });
+    const { stderr, stdout } = await execFileAsync(
+      'python3',
+      [PTY_FIXTURE, 'interrupt', process.execPath, CLI_BUILT, 'agent', 'test', '--project', root],
+      { timeout: 12_000 },
+    );
+    expect(stderr).toBe('');
+    const ptyResult: unknown = JSON.parse(stdout);
+    expect(isRecord(ptyResult)).toBe(true);
+    if (!isRecord(ptyResult)) throw new Error('Expected structured PTY evidence.');
+    expect(ptyResult.exit_code).toBe(130);
+    expect(ptyResult.prompt_seen).toBe(true);
+    expect(ptyResult.terminal_restored).toBe(true);
+    expect(typeof ptyResult.output).toBe('string');
+    if (typeof ptyResult.output !== 'string') throw new Error('Expected PTY output text.');
+    expect(ptyResult.output).toContain('cancelled: Command cancelled.');
+    expect(await snapshotTree(root)).toEqual(before);
+
+    const argvJson = JSON.stringify([process.execPath, FIXTURE, 'echo']);
+    const race = await execFileAsync(
+      'python3',
+      [PTY_FIXTURE, 'race', root, argvJson, process.execPath, CLI_BUILT],
+      { timeout: 12_000 },
+    );
+    expect(race.stderr).toBe('');
+    const raceResult: unknown = JSON.parse(race.stdout);
+    expect(isRecord(raceResult)).toBe(true);
+    if (!isRecord(raceResult)) throw new Error('Expected structured PTY race evidence.');
+    expect(raceResult.concurrent_exit_code).toBe(0);
+    expect(raceResult.exit_code).toBe(3);
+    expect(raceResult.prompt_seen).toBe(true);
+    expect(raceResult.terminal_restored).toBe(true);
+    expect(typeof raceResult.output).toBe('string');
+    if (typeof raceResult.output !== 'string') throw new Error('Expected PTY race output.');
+    expect(raceResult.output).toContain('project_changed: The project changed after it was read.');
+    await expect(loadProject({ project: root })).resolves.toMatchObject({
+      agents: [{ id: 'racer' }],
+    });
+  }, 15_000);
 
   it('keeps recovery dry-runs byte-identical and makes watch and record explicitly opt in', async () => {
     const root = await createProject();
