@@ -10,7 +10,6 @@ import {
   cliResultSchema,
 } from './cli-protocol.js';
 import { commandRequestSchema } from './command-request-v2.js';
-import { configSchema } from './config.js';
 import { datasetResourceSchema } from './dataset-resource-v2.js';
 import { evalCancelRequestSchema, evalCancelResultSchema } from './eval-cancel-v1.js';
 import { evalEventSchema } from './eval-event-v1.js';
@@ -63,54 +62,6 @@ const agentResponseInvariants = {
   ],
 } satisfies JsonSchemaFragment;
 
-const configInvariants = {
-  $comment: sharedComment,
-  allOf: [
-    {
-      properties: {
-        agent: {
-          if: { properties: { type: { const: 'http' } }, required: ['type'] },
-          then: { properties: { url: { pattern: '^https?://' } } },
-        },
-      },
-    },
-  ],
-  properties: {
-    suites: { minItems: 1 },
-  },
-  $defs: {
-    Suite: {
-      oneOf: [
-        { required: ['cases'], not: { required: ['dataset'] } },
-        { required: ['dataset'], not: { required: ['cases'] } },
-      ],
-    },
-    ExecutableMetricDefinition: {
-      oneOf: [
-        { required: ['command'], not: { required: ['url'] } },
-        { required: ['url'], not: { required: ['command'] } },
-      ],
-    },
-    Threshold: {
-      anyOf: [
-        { required: ['lt'] },
-        { required: ['lte'] },
-        { required: ['gt'] },
-        { required: ['gte'] },
-      ],
-    },
-    AssertionMetricDefinition: {
-      properties: { assert: { minItems: 1 } },
-    },
-    AllAssertionCheck: {
-      properties: { all: { minItems: 1 } },
-    },
-    AnyAssertionCheck: {
-      properties: { any: { minItems: 1 } },
-    },
-  },
-} satisfies JsonSchemaFragment;
-
 const CONTRACT_JSON_SCHEMAS = new Map<string, ContractJsonSchemaDefinition>([
   [
     'agent-request.v1alpha1.json',
@@ -121,7 +72,6 @@ const CONTRACT_JSON_SCHEMAS = new Map<string, ContractJsonSchemaDefinition>([
     { schema: agentResponseSchema, invariants: agentResponseInvariants },
   ],
   ['trace.v1alpha1.json', { schema: traceSchema, invariants: noAdditionalInvariants }],
-  ['config.v1.json', { schema: configSchema, invariants: configInvariants }],
   [
     'metric-request.v1alpha1.json',
     { schema: metricRequestSchema, invariants: noAdditionalInvariants },

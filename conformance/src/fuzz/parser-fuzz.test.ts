@@ -1,7 +1,6 @@
 import {
   parseAgentRequest,
   parseAgentResponse,
-  parseConfig,
   parseMetricRequest,
   parseMetricResult,
   parseTrace,
@@ -37,24 +36,6 @@ const validAgentRequest = {
   run_id: '01J9ZK7Q2M5X8W4V3T2R1QPN0M',
   case_id: 'greeting-basic',
   input: { question: 'What is the capital of France?', tags: ['geography'] },
-};
-const validConfig = {
-  config_version: 1,
-  agent: { type: 'cli', command: ['node', 'agent.js'] },
-  suites: [
-    {
-      name: 'smoke',
-      metrics: ['answer-exists'],
-      cases: [{ id: 'greeting', input: { question: 'Capital of France?' } }],
-    },
-  ],
-  metrics: [
-    {
-      name: 'answer-exists',
-      type: 'assertion',
-      assert: [{ exists: { path: '$.output' } }],
-    },
-  ],
 };
 const validTrace = {
   schema: 'attest.trace/v1alpha1',
@@ -229,7 +210,6 @@ const mutatedValidDocument = (seed: MutableRecord) =>
 const mutatedValidDocuments = {
   agentRequest: mutatedValidDocument(validAgentRequest),
   agentResponse: mutatedValidDocument(validAgentResponse),
-  config: mutatedValidDocument(validConfig),
   metricRequest: mutatedValidDocument(validMetricRequest),
   metricResult: mutatedValidDocument(validMetricResult),
   trace: mutatedValidDocument(validTrace),
@@ -279,10 +259,6 @@ describe.skipIf(process.env.FUZZ !== '1')(
 
     it('never throws while parsing agent responses', () => {
       assertParserNeverThrows(parseAgentResponse, mutatedValidDocuments.agentResponse);
-    });
-
-    it('never throws while parsing configs', () => {
-      assertParserNeverThrows(parseConfig, mutatedValidDocuments.config);
     });
 
     it('never throws while parsing traces', () => {

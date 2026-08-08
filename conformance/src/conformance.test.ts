@@ -1,7 +1,6 @@
 import {
   parseAgentRequest,
   parseAgentResponse,
-  parseConfig,
   parseMetricRequest,
   parseMetricResult,
   parseTrace,
@@ -38,13 +37,6 @@ const parseFixture = (fixture: LoadedFixture): FixtureParseResult => {
     return result.ok
       ? { ok: true, warningCodes }
       : { ok: false, issuePaths: result.errors.map((issue) => issue.path), warningCodes };
-  }
-
-  if (fixture.contract === 'config') {
-    const result = parseConfig(fixture.envelope.input);
-    return result.ok
-      ? { ok: true, warningCodes: [] }
-      : { ok: false, issuePaths: result.error.map((issue) => issue.path), warningCodes: [] };
   }
 
   if (fixture.contract === 'metric-request') {
@@ -99,7 +91,6 @@ const expectFixtureOutcome = (envelope: FixtureEnvelope, result: FixtureParseRes
 const contractDirectories = [
   'agent-request',
   'agent-response',
-  'config',
   'trace',
   'metric-request',
   'metric-result',
