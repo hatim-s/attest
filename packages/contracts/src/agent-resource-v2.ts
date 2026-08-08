@@ -123,7 +123,7 @@ const backgroundReadinessSchema = z.discriminatedUnion('kind', [
     host: z.string().min(1),
     port: z.number().int().min(1).max(65_535),
   }),
-  z.strictObject({ kind: z.literal('stderr'), pattern: z.string().min(1) }),
+  z.strictObject({ kind: z.literal('stderr'), pattern: z.string().min(1).max(512) }),
 ]);
 
 const nativeBackgroundTransportSchema = z.strictObject({
@@ -173,21 +173,35 @@ const pollingTransportSchema = z.strictObject({
   maximum_interval_ms: durationMillisecondsSchema,
 });
 
-const streamTransportSchema = z.strictObject({
-  kind: z.literal('stream'),
-  lifecycle: z.literal('external'),
-  framing: z.enum(['sse', 'jsonl']),
-  request: httpRequestTemplateSchema,
-  event_name: z.string().min(1).optional(),
-  event_data_pointer: jsonPointerSchema.optional(),
-  terminal_pointer: jsonPointerSchema,
-  terminal_values: z.array(z.json()).nonempty(),
-  result_pointer: jsonPointerSchema,
-  error_pointer: jsonPointerSchema.optional(),
-  trace_pointer: jsonPointerSchema.optional(),
-  incremental_output_pointer: jsonPointerSchema.optional(),
-  heartbeat_resets_application_idle: z.boolean().optional(),
-});
+const streamTransportSchema = z
+  .strictObject({
+    kind: z.literal('stream'),
+    lifecycle: z.literal('external'),
+    framing: z.enum(['sse', 'jsonl']),
+    request: httpRequestTemplateSchema,
+    event_name: z.string().min(1).optional(),
+    event_data_pointer: jsonPointerSchema.optional(),
+    terminal_pointer: jsonPointerSchema,
+    terminal_values: z.array(z.json()).nonempty(),
+    result_pointer: jsonPointerSchema,
+    error_pointer: jsonPointerSchema.optional(),
+    trace_pointer: jsonPointerSchema.optional(),
+    incremental_output_pointer: jsonPointerSchema.optional(),
+    incremental_output_mode: z.enum(['text', 'array']).optional(),
+    heartbeat_resets_application_idle: z.boolean().optional(),
+  })
+  .superRefine((stream, context) => {
+    if (
+      (stream.incremental_output_pointer === undefined) !==
+      (stream.incremental_output_mode === undefined)
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['incremental_output_mode'],
+        message: 'must be provided together with incremental_output_pointer',
+      });
+    }
+  });
 
 const webSocketTransportSchema = z.strictObject({
   kind: z.literal('websocket'),

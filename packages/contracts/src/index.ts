@@ -37,6 +37,15 @@ export {
 } from './parse.js';
 export type { ContractIssue, ContractWarning, ParseReport } from './parse.js';
 export type { Result } from './result.js';
+export {
+  jsonlBridgeCancelSchema,
+  jsonlBridgeCancelledSchema,
+  jsonlBridgeInputSchema,
+  jsonlBridgeOutputSchema,
+  jsonlBridgeRequestSchema,
+  jsonlBridgeResponseSchema,
+} from './managed-transport-v1.js';
+export type { JsonlBridgeInput, JsonlBridgeOutput } from './managed-transport-v1.js';
 export { CONTRACT_JSON_SCHEMAS, serializeContractSchema } from './json-schema.js';
 export { spanKindSchema, spanSchema, traceSchema } from './trace.js';
 export type { Span, SpanKind, Trace } from './trace.js';

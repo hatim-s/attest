@@ -445,6 +445,7 @@
                           "type": "string"
                         },
                         "pattern": {
+                          "maxLength": 512,
                           "minLength": 1,
                           "type": "string"
                         }
@@ -700,6 +701,13 @@
                 },
                 "heartbeat_resets_application_idle": {
                   "type": "boolean"
+                },
+                "incremental_output_mode": {
+                  "enum": [
+                    "text",
+                    "array"
+                  ],
+                  "type": "string"
                 },
                 "incremental_output_pointer": {
                   "pattern": "^(?:\\/(?:[^~/]|~[01])*)*$",

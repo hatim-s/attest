@@ -13,6 +13,7 @@ import { commandRequestSchema } from './command-request-v2.js';
 import { configSchema } from './config.js';
 import { datasetResourceSchema } from './dataset-resource-v2.js';
 import { metricRequestSchema, metricResultSchema } from './metric.js';
+import { jsonlBridgeInputSchema, jsonlBridgeOutputSchema } from './managed-transport-v1.js';
 import { metricResourceSchema } from './metric-resource-v2.js';
 import { metricPresetSchema } from './metric-presets.js';
 import { metricTestFixtureSchema } from './metric-test-fixture-v1.js';
@@ -137,6 +138,14 @@ const CONTRACT_JSON_SCHEMAS = new Map<string, ContractJsonSchemaDefinition>([
   ['cli-event.v1.json', { schema: cliEventSchema, invariants: noAdditionalInvariants }],
   ['cli-help.v1.json', { schema: cliHelpSchema, invariants: noAdditionalInvariants }],
   ['cli-errors.v1.json', { schema: cliErrorCatalogSchema, invariants: noAdditionalInvariants }],
+  [
+    'jsonl-bridge-input.v1.json',
+    { schema: jsonlBridgeInputSchema, invariants: noAdditionalInvariants },
+  ],
+  [
+    'jsonl-bridge-output.v1.json',
+    { schema: jsonlBridgeOutputSchema, invariants: noAdditionalInvariants },
+  ],
 ]);
 
 const isJsonSchemaObject = (value: unknown): value is Record<string, unknown> =>
