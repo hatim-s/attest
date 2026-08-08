@@ -57,3 +57,22 @@ export {
   type CliEventClock,
   type CliResultOptions,
 } from './output/cli-protocol.js';
+export {
+  generateCaseId,
+  parseJsonFlag,
+  readCommandRequest,
+  readNativeCases,
+  validateCommandRequest,
+  type NativeCaseFormat,
+  type TestCaseInput,
+} from './commands/test/test-command-input.js';
+export {
+  runTestCaseListCommand,
+  runTestCaseShowCommand,
+  runTestListCommand,
+  runTestMutationCommand,
+  runTestShowCommand,
+  type TestAuthoringCommand,
+  type TestMutationCommandOptions,
+  type TestReadCommandOptions,
+} from './commands/test/test-command.js';

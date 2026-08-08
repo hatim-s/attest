@@ -12,6 +12,7 @@ import {
   registerProjectResourceCommands,
   type CliInteraction,
 } from './commands/register-project-resource-commands.js';
+import { registerTestCommands } from './commands/test/register-test-commands.js';
 import {
   AttestCliError,
   createCliErrorCatalog,
@@ -313,6 +314,7 @@ const createProgram = (
     program,
     workingDirectory,
   });
+  registerTestCommands({ interaction, io, program, workingDirectory });
 
   setCliCommandHelpMetadata(program, {
     examples: [
@@ -335,7 +337,8 @@ const requestedStructuredOutput = (argv: readonly string[]): boolean => {
     command === 'list' ||
     command === 'show' ||
     command.startsWith('project.') ||
-    command.startsWith('schema.');
+    command.startsWith('schema.') ||
+    command.startsWith('test.');
   return (
     supportsStructuredOutput &&
     argv.some(
@@ -364,6 +367,16 @@ const requestedCommand = (argv: readonly string[]): string => {
   }
   if (first === 'schema' && ['list', 'print'].includes(second ?? '')) {
     return `schema.${second}`;
+  }
+  if (first === 'test') {
+    const third = argv[2];
+    if (second === 'case' && third !== undefined && !third.startsWith('-')) {
+      return `test.case.${third}`;
+    }
+    if (second === 'dataset' && third !== undefined && !third.startsWith('-')) {
+      return `test.dataset.${third}`;
+    }
+    if (second !== undefined && !second.startsWith('-')) return `test.${second}`;
   }
   return /^[a-z][a-z0-9-]*$/.test(first) ? first : 'cli';
 };
