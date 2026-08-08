@@ -3,7 +3,6 @@ import {
   COMMAND_REQUEST_SCHEMA_VERSION,
   DATASET_SCHEMA_VERSION,
   TEST_RESOURCE_SCHEMA_VERSION,
-  type CommandRequest,
 } from '@attest/contracts';
 import { Command, Option } from 'commander';
 
@@ -141,7 +140,7 @@ const requestFromSource = async <TCommand extends TestAuthoringCommand['command'
   options: MutationOptions,
   fields: Readonly<Record<string, unknown>>,
   context: RegisterTestCommandsOptions,
-  build: () => Promise<unknown> | unknown,
+  build: () => Promise<unknown>,
 ): Promise<Extract<TestAuthoringCommand, { command: TCommand }>> => {
   assertUnambiguousRequestSource(options, fields);
   if (options.fromJson !== undefined) {
@@ -160,12 +159,9 @@ const requestFromSource = async <TCommand extends TestAuthoringCommand['command'
         hint: 'Put either the command request or native cases in a file.',
       });
     }
-    return request as Extract<TestAuthoringCommand, { command: TCommand }>;
+    return request;
   }
-  return validateCommandRequest(command, await build()) as Extract<
-    TestAuthoringCommand,
-    { command: TCommand }
-  >;
+  return validateCommandRequest(command, await build());
 };
 
 const commonRequestFields = (command: string, options: MutationOptions) => ({

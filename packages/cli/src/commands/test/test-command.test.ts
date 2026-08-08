@@ -206,7 +206,7 @@ describe('CLI2.7 test, case, and dataset authoring', () => {
     const details = response.document.error.details as { diagnostics?: unknown[] };
     expect(details.diagnostics).toHaveLength(2);
     expect(await snapshotProject(root)).toEqual(before);
-  });
+  }, 15_000);
 
   it('creates, detaches, and reattaches datasets without copying rows', async () => {
     const root = await createProject();

@@ -172,7 +172,8 @@ const readNativeCases = async (options: {
   if (format === 'json') {
     try {
       const parsed = JSON.parse(text) as unknown;
-      records.push(...(Array.isArray(parsed) ? parsed : [parsed]));
+      const parsedRecords: readonly unknown[] = Array.isArray(parsed) ? parsed : [parsed];
+      for (const record of parsedRecords) records.push(record);
     } catch (error: unknown) {
       throw new AttestCliError('project_invalid', 'The native JSON case source is invalid.', {
         path: '<source>',
