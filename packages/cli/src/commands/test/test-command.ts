@@ -15,6 +15,7 @@ import {
   applyProjectMutation,
   type ProjectMutationRequest,
   type PublishObserver,
+  type SemanticProjectOperation,
 } from '../../project/transaction/index.js';
 import type { CommandResult } from '../command-result.js';
 import { runListCommand } from '../list/list-command.js';
@@ -43,7 +44,6 @@ type TestAuthoringCommand = Extract<
 >;
 
 type TestMutationCommandOptions = {
-  clock?: () => Date;
   project?: string;
   publishObserver?: PublishObserver;
   readStdin: () => Promise<string>;
@@ -81,7 +81,9 @@ const missingResource = (type: 'case' | 'dataset' | 'test', id: string): AttestC
     hint:
       type === 'case'
         ? 'Run `attest test case list <test-id>` to inspect direct case ids.'
-        : `Run \`attest ${type} list\` to inspect available ids.`,
+        : type === 'dataset'
+          ? 'Run `attest list datasets` to inspect available ids.'
+          : 'Run `attest list tests` to inspect available ids.',
   });
 
 const findTest = (candidate: ProjectResources, id: string): TestResource => {
@@ -112,6 +114,35 @@ const assertNewResourceId = (
 const caseWithGeneratedId = (
   value: Extract<TestAuthoringCommand, { command: 'test.case.add' }>['case'],
 ): TestCase => ({ ...value, id: value.id ?? generateCaseId(value) });
+
+/** Derives a reproducible provenance timestamp from immutable source content. */
+const deterministicImportTimestamp = (sourceHash: string): string => {
+  const start = Date.UTC(2000, 0, 1);
+  const oneHundredYears = 100 * 365 * 24 * 60 * 60 * 1_000;
+  const contentOffset = Number.parseInt(sourceHash.slice(0, 12), 16) % oneHundredYears;
+  return new Date(start + contentOffset).toISOString();
+};
+
+const attachedDatasetTests = (candidate: ProjectResources, datasetId: string): string[] =>
+  candidate.tests
+    .filter((test) => test.datasets.some(({ dataset_id }) => dataset_id === datasetId))
+    .map(({ id }) => id)
+    .sort();
+
+/** Rejects dataset removal with copy-paste detach commands for every blocking test. */
+const assertDatasetRemovable = (candidate: ProjectResources, datasetId: string): void => {
+  findDataset(candidate, datasetId);
+  const references = attachedDatasetTests(candidate, datasetId);
+  if (references.length === 0) return;
+  const detachCommands = references.map(
+    (testId) => `attest test dataset detach ${testId} ${datasetId}`,
+  );
+  throw new AttestCliError('project_invalid', 'Attached datasets cannot be removed.', {
+    path: datasetId,
+    hint: `Run ${detachCommands.map((command) => `\`${command}\``).join(', ')}, then retry.`,
+    details: { attached_tests: references, detach_commands: detachCommands },
+  });
+};
 
 /** Builds the complete candidate for one test/case/dataset command before any write occurs. */
 const buildMutation = async (
@@ -228,7 +259,7 @@ const buildMutation = async (
           provenance: {
             source_type: imported.format,
             mapping: [],
-            imported_at: (options.clock ?? (() => new Date()))().toISOString(),
+            imported_at: deterministicImportTimestamp(imported.sourceHash),
             source_content_hash: imported.sourceHash,
             counts: {
               read: imported.cases.length,
@@ -283,18 +314,7 @@ const buildMutation = async (
       };
     }
     case 'test.dataset.remove': {
-      findDataset(candidate, request.dataset_id);
-      const references = candidate.tests
-        .filter((test) => test.datasets.some(({ dataset_id }) => dataset_id === request.dataset_id))
-        .map(({ id }) => id)
-        .sort();
-      if (references.length > 0) {
-        throw new AttestCliError('project_invalid', 'Attached datasets cannot be removed.', {
-          path: request.dataset_id,
-          hint: 'Detach the dataset from every listed test, then retry.',
-          details: { attached_tests: references },
-        });
-      }
+      assertDatasetRemovable(candidate, request.dataset_id);
       candidate.datasets = candidate.datasets.filter(
         ({ metadata }) => metadata.id !== request.dataset_id,
       );
@@ -302,6 +322,31 @@ const buildMutation = async (
     }
   }
 };
+
+/** Performs reference validation before a destructive dataset confirmation prompt. */
+const runTestDatasetRemovePreflight = async (
+  options: TestReadCommandOptions & { datasetId: string },
+): Promise<void> => {
+  const loaded = await loadCommandProject(options);
+  assertDatasetRemovable(loaded, options.datasetId);
+};
+
+const renderReferenceChanges = (
+  label: 'added' | 'removed',
+  references: SemanticProjectOperation['references_added'],
+): string[] =>
+  references.map(({ id, path, type }) => `    reference ${label}: ${type} ${id} at ${path}`);
+
+/** Renders the complete redacted semantic operation model for a human preview. */
+const renderDryRunOperations = (operations: readonly SemanticProjectOperation[]): string =>
+  operations
+    .flatMap((operation) => [
+      `  ${operation.op} ${operation.resource.type} ${operation.resource.id}`,
+      ...operation.changes.map(({ change, path }) => `    ${change} ${path || '/'}`),
+      ...renderReferenceChanges('added', operation.references_added),
+      ...renderReferenceChanges('removed', operation.references_removed),
+    ])
+    .join('\n');
 
 /** Executes one normalized authoring request through the shared hash-guarded transaction writer. */
 const runTestMutationCommand = async (
@@ -330,8 +375,19 @@ const runTestMutationCommand = async (
   );
   const dryRun = options.request.dry_run === true;
   const verb = dryRun ? 'would update' : 'updated';
+  const human = [
+    `${dryRun ? 'Dry run: ' : ''}${verb} ${built.resource.type} ${built.resource.id}.`,
+    ...(dryRun
+      ? [
+          'Semantic diff:',
+          renderDryRunOperations(mutation.diff.operations),
+          'Next: remove `--dry-run` from this command to apply these changes.',
+        ]
+      : []),
+    `Project hash: ${mutation.projectHashAfter}`,
+  ].join('\n');
   return {
-    human: `${dryRun ? 'Dry run: ' : ''}${verb} ${built.resource.type} ${built.resource.id}.\nProject hash: ${mutation.projectHashAfter}`,
+    human,
     projectHashBefore: mutation.projectHashBefore,
     projectHashAfter: mutation.projectHashAfter,
     result: {
@@ -391,6 +447,7 @@ const runTestCaseShowCommand = async (
 export {
   runTestCaseListCommand,
   runTestCaseShowCommand,
+  runTestDatasetRemovePreflight,
   runTestListCommand,
   runTestMutationCommand,
   runTestShowCommand,

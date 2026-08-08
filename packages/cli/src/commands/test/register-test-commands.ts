@@ -15,6 +15,7 @@ import { parseJsonFlag, readCommandRequest, validateCommandRequest } from './tes
 import {
   runTestCaseListCommand,
   runTestCaseShowCommand,
+  runTestDatasetRemovePreflight,
   runTestListCommand,
   runTestMutationCommand,
   runTestShowCommand,
@@ -177,14 +178,15 @@ const confirmRemoval = async (
   label: string,
   options: MutationOptions,
   context: RegisterTestCommandsOptions,
-): Promise<void> => {
-  if (request.yes === true || options.yes === true) return;
+): Promise<boolean> => {
+  if (request.dry_run === true || request.yes === true || options.yes === true) return true;
   if (isInteractive(options, context.interaction, options.fromJson)) {
     const answer = (await context.interaction.prompt(`Remove ${label}? [y/N]: `))
       .trim()
       .toLowerCase();
-    if (answer === 'y' || answer === 'yes') return;
-    throw new AttestCliError('cancelled', 'The removal was cancelled.');
+    if (answer === 'y' || answer === 'yes') return true;
+    context.io.output(`No changes made; ${label} was not removed.`);
+    return false;
   }
   throw new AttestCliError('cli_missing_input', 'Destructive removal requires confirmation.', {
     path: '--yes',
@@ -355,7 +357,7 @@ const registerTestCommands = (context: RegisterTestCommandsOptions): void => {
         ),
       }),
     );
-    await confirmRemoval(request, `test ${request.test_id}`, options, context);
+    if (!(await confirmRemoval(request, `test ${request.test_id}`, options, context))) return;
     await runMutation('test.remove', request, options, context);
   });
   markMutationHelp(remove, ['attest test remove smoke --yes']);
@@ -566,7 +568,7 @@ const registerTestCommands = (context: RegisterTestCommandsOptions): void => {
           }),
         );
         if (verb === 'remove') {
-          await confirmRemoval(request, `case ${request.case_id}`, options, context);
+          if (!(await confirmRemoval(request, `case ${request.case_id}`, options, context))) return;
         }
         await runMutation(commandName, request, options, context);
       },
@@ -786,7 +788,14 @@ const registerTestCommands = (context: RegisterTestCommandsOptions): void => {
         ),
       }),
     );
-    await confirmRemoval(request, `dataset ${request.dataset_id}`, options, context);
+    if (request.dry_run !== true) {
+      await runTestDatasetRemovePreflight({
+        datasetId: request.dataset_id,
+        project: options.project,
+        workingDirectory: context.workingDirectory,
+      });
+    }
+    if (!(await confirmRemoval(request, `dataset ${request.dataset_id}`, options, context))) return;
     await runMutation('test.dataset.remove', request, options, context);
   });
   markMutationHelp(datasetRemove, ['attest test dataset remove regression --yes']);

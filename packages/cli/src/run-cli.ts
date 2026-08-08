@@ -146,6 +146,25 @@ const createProgram = (
     });
 
   program
+    .option('--project <dir>', 'explicit Attest project directory')
+    .addOption(new Option('--output <format>', 'output format').choices(['human', 'json']))
+    .option('--non-interactive', 'disable prompts and fail when required input is missing');
+  program.hook('preAction', (_rootCommand, actionCommand) => {
+    const globalOptions = program.opts<{
+      nonInteractive?: boolean;
+      output?: 'human' | 'json';
+      project?: string;
+    }>();
+    // Leaf commands retain a locally positioned value; otherwise inherit the normative global flag.
+    for (const [name, value] of Object.entries(globalOptions)) {
+      const localSource = actionCommand.getOptionValueSource(name);
+      if (value !== undefined && (localSource === undefined || localSource === 'default')) {
+        actionCommand.setOptionValueWithSource(name, value, 'implied');
+      }
+    }
+  });
+
+  program
     .command('view')
     .description('Open the local dashboard over the project run store.')
     .option('--store <path>', 'SQLite run store path', '.attest/runs.db')
@@ -350,9 +369,30 @@ const requestedStructuredOutput = (argv: readonly string[]): boolean => {
   );
 };
 
+/** Removes only recognized global common options before identifying the requested command. */
+const commandArguments = (argv: readonly string[]): string[] => {
+  const argumentsWithoutGlobals: string[] = [];
+  for (let index = 0; index < argv.length; index += 1) {
+    const argument = argv[index]!;
+    if (argument === '--project' || argument === '--output') {
+      index += 1;
+    } else if (
+      argument === '--non-interactive' ||
+      argument.startsWith('--project=') ||
+      argument.startsWith('--output=')
+    ) {
+      continue;
+    } else {
+      argumentsWithoutGlobals.push(argument);
+    }
+  }
+  return argumentsWithoutGlobals;
+};
+
 const requestedCommand = (argv: readonly string[]): string => {
-  const first = argv[0];
-  const second = argv[1];
+  const normalizedArguments = commandArguments(argv);
+  const first = normalizedArguments[0];
+  const second = normalizedArguments[1];
   if (first === undefined || first.startsWith('-')) {
     return 'cli';
   }
@@ -369,7 +409,7 @@ const requestedCommand = (argv: readonly string[]): string => {
     return `schema.${second}`;
   }
   if (first === 'test') {
-    const third = argv[2];
+    const third = normalizedArguments[2];
     if (second === 'case' && third !== undefined && !third.startsWith('-')) {
       return `test.case.${third}`;
     }

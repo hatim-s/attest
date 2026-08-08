@@ -327,6 +327,22 @@ describe('CLI2.7 test, case, and dataset authoring', { timeout: 20_000 }, () => 
     expect(help.output).toContain('jsonl');
     expect(help.output).not.toContain('csv');
 
+    const datasetAddHelp = await runJson(root, ['help', 'test', 'dataset', 'add']);
+    expect(datasetAddHelp.document).toMatchObject({
+      ok: true,
+      result: {
+        command: {
+          path: ['test', 'dataset', 'add'],
+          request_schema: COMMAND_REQUEST_SCHEMA_VERSION,
+        },
+      },
+    });
+    const datasetCreateHelp = await runJson(root, ['help', 'test', 'dataset', 'create']);
+    expect(datasetCreateHelp).toMatchObject({
+      exitCode: 2,
+      document: { ok: false, error: { code: 'cli_usage' } },
+    });
+
     const schema = await runJson(root, ['schema', 'print', COMMAND_REQUEST_SCHEMA_VERSION]);
     expect(schema.document).toMatchObject({ ok: true, command: 'schema.print' });
     expect(schema.output).toContain('test.dataset.add');
@@ -366,6 +382,198 @@ describe('CLI2.7 test, case, and dataset authoring', { timeout: 20_000 }, () => 
       ).toBe(0);
     }
     expect(secondHuman.output).toEqual(firstHuman.output);
+  });
+
+  it('keeps imported dataset preview hashes deterministic and renders the human semantic diff', async () => {
+    const root = await createProject();
+    const source = join(root, 'deterministic-import.jsonl');
+    await writeFile(source, JSON.stringify({ input: { prompt: 'same bytes' } }));
+    const argv = [
+      'test',
+      'dataset',
+      'import',
+      'refund',
+      source,
+      '--as',
+      'stable-import',
+      '--dry-run',
+    ];
+    const first = await runJson(root, argv);
+    const second = await runJson(root, argv);
+    expect(second.output).toBe(first.output);
+
+    const human = collectIo();
+    expect(
+      await runCli(argv, {
+        interaction: nonInteractive(),
+        io: human.io,
+        workingDirectory: root,
+      }),
+    ).toBe(0);
+    expect(human.output.join('\n')).toContain('Semantic diff:');
+    expect(human.output.join('\n')).toContain('add dataset stable-import');
+    expect(human.output.join('\n')).toContain('reference added: dataset stable-import');
+    expect(human.output.join('\n')).toContain('remove `--dry-run`');
+    expect((await loadProject({ project: root })).datasets).toHaveLength(1);
+  });
+
+  it('aggregates every JSON and JSONL record error with physical source locations', async () => {
+    const root = await createProject();
+    const jsonlSource = join(root, 'invalid-cases.jsonl');
+    await writeFile(
+      jsonlSource,
+      ['not-json', '', '{"input":"ok","extra":true}', '{"expected":"missing-input"}'].join('\n'),
+    );
+    const jsonlBefore = await snapshotProject(root);
+    const jsonl = await runJson(root, ['test', 'case', 'import', 'refund', jsonlSource]);
+    expect(jsonl.exitCode).toBe(1);
+    if (jsonl.document.ok) throw new Error('Expected JSONL validation failure.');
+    const jsonlDetails = jsonl.document.error.details as { diagnostics: unknown[] };
+    const jsonlDiagnostics = jsonlDetails.diagnostics as Array<{
+      code: string;
+      destination_path: string;
+      hint: string;
+      line: number;
+      source_field: string;
+    }>;
+    expect(jsonlDiagnostics.map(({ line }) => line)).toEqual([1, 3, 4]);
+    expect(jsonlDiagnostics.every(({ code, hint }) => code.length > 0 && hint.length > 0)).toBe(
+      true,
+    );
+    expect(jsonlDiagnostics.map(({ destination_path }) => destination_path)).toEqual([
+      '',
+      '/',
+      '/input',
+    ]);
+    expect(jsonlDiagnostics.map(({ source_field }) => source_field)).toEqual([
+      '<line>',
+      '<record>',
+      '/input',
+    ]);
+    expect(await snapshotProject(root)).toEqual(jsonlBefore);
+
+    const jsonSource = join(root, 'invalid-cases.json');
+    await writeFile(
+      jsonSource,
+      JSON.stringify([{ input: 'ok', extra: true }, { expected: 'missing-input' }]),
+    );
+    const json = await runJson(root, ['test', 'case', 'import', 'refund', jsonSource]);
+    expect(json.exitCode).toBe(1);
+    if (json.document.ok) throw new Error('Expected JSON validation failure.');
+    const jsonDetails = json.document.error.details as { diagnostics: unknown[] };
+    const jsonDiagnostics = jsonDetails.diagnostics as Array<{ row: number }>;
+    expect(jsonDiagnostics.map(({ row }) => row)).toEqual([1, 2]);
+  });
+
+  it('supports global common flags before the namespace with structured errors', async () => {
+    const root = await createProject();
+    const collected = collectIo();
+    expect(
+      await runCli(['--output', 'json', '--non-interactive', 'test', 'list'], {
+        interaction: nonInteractive(),
+        io: collected.io,
+        workingDirectory: root,
+      }),
+    ).toBe(0);
+    expect(collected.errors).toEqual([]);
+    expect(cliResultSchema.parse(JSON.parse(collected.output[0] ?? '{}'))).toMatchObject({
+      ok: true,
+      command: 'test.list',
+    });
+
+    const missing = collectIo();
+    expect(
+      await runCli(['--output=json', 'test', 'dataset', 'attach', 'refund', 'absent'], {
+        interaction: nonInteractive(),
+        io: missing.io,
+        workingDirectory: root,
+      }),
+    ).toBe(1);
+    expect(cliResultSchema.parse(JSON.parse(missing.output[0] ?? '{}'))).toMatchObject({
+      ok: false,
+      command: 'test.dataset.attach',
+      error: { hint: 'Run `attest list datasets` to inspect available ids.' },
+    });
+  });
+
+  it('previews removals without confirmation and treats a guided no as a clean no-op', async () => {
+    const root = await createProject();
+    const before = await snapshotProject(root);
+    const preview = await runJson(root, ['test', 'remove', 'refund', '--dry-run']);
+    expect(preview).toMatchObject({
+      exitCode: 0,
+      document: { ok: true, result: { committed: false, dry_run: true } },
+    });
+    expect(await snapshotProject(root)).toEqual(before);
+
+    const declined = collectIo();
+    expect(
+      await runCli(['test', 'remove', 'refund'], {
+        interaction: {
+          ci: false,
+          inputIsTTY: true,
+          outputIsTTY: true,
+          prompt: () => Promise.resolve('n'),
+          readStdin: () => Promise.resolve(''),
+        },
+        io: declined.io,
+        workingDirectory: root,
+      }),
+    ).toBe(0);
+    expect(declined.errors).toEqual([]);
+    expect(declined.output).toEqual(['No changes made; test refund was not removed.']);
+    expect(await snapshotProject(root)).toEqual(before);
+  });
+
+  it('reports attached dataset blockers before prompting with exact detach commands', async () => {
+    const root = await createProject();
+    const collected = collectIo();
+    let promptCount = 0;
+    expect(
+      await runCli(['test', 'dataset', 'remove', 'refunds'], {
+        interaction: {
+          ci: false,
+          inputIsTTY: true,
+          outputIsTTY: true,
+          prompt: () => {
+            promptCount += 1;
+            return Promise.resolve('yes');
+          },
+          readStdin: () => Promise.resolve(''),
+        },
+        io: collected.io,
+        workingDirectory: root,
+      }),
+    ).toBe(1);
+    expect(promptCount).toBe(0);
+    expect(collected.errors.join('\n')).toContain('attest test dataset detach refund refunds');
+  });
+
+  it('diffs direct-case removals by stable case id instead of shifted positions', async () => {
+    const root = await createProject();
+    for (const id of ['case-one', 'case-two', 'case-three', 'case-four']) {
+      await runJson(root, ['test', 'case', 'add', 'refund', '--id', id, '--input', `"${id}"`]);
+    }
+    const preview = await runJson(root, [
+      'test',
+      'case',
+      'remove',
+      'refund',
+      'case-one',
+      '--dry-run',
+    ]);
+    expect(preview.exitCode).toBe(0);
+    if (!preview.document.ok) throw new Error('Expected case removal preview.');
+    const result = preview.document.result as { operations: unknown[] };
+    const operations = result.operations as Array<{
+      changes: Array<{ change: string; path: string }>;
+      resource: { id: string; type: string };
+    }>;
+    const testUpdate = operations.find(
+      ({ resource }) => resource.type === 'test' && resource.id === 'refund',
+    );
+    expect(testUpdate?.changes).toContainEqual({ change: 'remove', path: '/cases/case-one' });
+    expect(testUpdate?.changes.some(({ path }) => /^\/cases\/\d/u.test(path))).toBe(false);
   });
 
   it('keeps request paths, authored secrets, and absolute import paths out of results', async () => {

@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { extname, resolve } from 'node:path';
 
 import {
+  CASE_SCHEMA_VERSION,
   COMMAND_REQUEST_SCHEMA_VERSION,
   commandRequestSchema,
   testCaseSchema,
@@ -15,6 +16,16 @@ import { serializeCanonicalJson, type JsonValue } from '../../project/canonical-
 
 type NativeCaseFormat = 'json' | 'jsonl';
 type TestCaseInput = Omit<TestCase, 'id'> & { id?: string };
+type NativeCaseLocation = { kind: 'line' | 'row'; number: number };
+type NativeCaseDiagnostic = {
+  code: string;
+  destination_path: string;
+  hint: string;
+  line?: number;
+  message: string;
+  row?: number;
+  source_field: string;
+};
 
 type ReadTextOptions = {
   pathLabel: string;
@@ -114,26 +125,44 @@ const generateCaseId = (testCase: TestCaseInput): string => {
   return `case-${encodeBase32(digest).slice(0, 16)}`;
 };
 
-/** Normalizes one native case record and reports only source-safe schema diagnostics. */
-const normalizeCase = (value: unknown, record: number): TestCase => {
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
-    throw new AttestCliError('project_invalid', 'Imported case validation failed.', {
-      path: `record ${record}`,
-      details: {
-        diagnostics: [{ message: 'case must be a JSON object', path: `/${record}` }],
-      },
-    });
-  }
-  const input = value as TestCaseInput;
-  // Validate required logical fields before hashing so malformed records stay expected user errors.
-  const parsed = testCaseSchema.safeParse({ ...input, id: input.id ?? 'case-pending' });
+const diagnosticLocation = (
+  location: NativeCaseLocation,
+): Pick<NativeCaseDiagnostic, 'line' | 'row'> =>
+  location.kind === 'line' ? { line: location.number } : { row: location.number };
+
+/** Validates one native record without short-circuiting validation of later records. */
+const normalizeCase = (
+  value: unknown,
+  location: NativeCaseLocation,
+): { diagnostics: NativeCaseDiagnostic[]; testCase?: TestCase } => {
+  const input =
+    value !== null && typeof value === 'object' && !Array.isArray(value)
+      ? (value as TestCaseInput)
+      : undefined;
+  // A placeholder allows strict case validation to report authored fields before id generation.
+  const parsed = testCaseSchema.safeParse(
+    input === undefined ? value : { ...input, id: input.id ?? 'case-pending' },
+  );
   if (!parsed.success) {
-    throw new AttestCliError('project_invalid', 'Imported case validation failed.', {
-      path: `record ${record}`,
-      details: { diagnostics: requestDiagnostics(parsed.error.issues) },
-    });
+    return {
+      diagnostics: parsed.error.issues.map((issue) => {
+        const destinationPath = `/${issue.path.map(String).join('/')}`;
+        return {
+          code: issue.code,
+          destination_path: destinationPath,
+          hint: `Repair this field to match ${CASE_SCHEMA_VERSION}.`,
+          message: issue.message,
+          source_field: destinationPath === '/' ? '<record>' : destinationPath,
+          ...diagnosticLocation(location),
+        };
+      }),
+    };
   }
-  return input.id === undefined ? { ...parsed.data, id: generateCaseId(parsed.data) } : parsed.data;
+  return {
+    diagnostics: [],
+    testCase:
+      input?.id === undefined ? { ...parsed.data, id: generateCaseId(parsed.data) } : parsed.data,
+  };
 };
 
 const inferNativeCaseFormat = (source: string, explicit?: string): NativeCaseFormat => {
@@ -168,12 +197,15 @@ const readNativeCases = async (options: {
 }): Promise<{ cases: TestCase[]; format: NativeCaseFormat; sourceHash: string }> => {
   const format = inferNativeCaseFormat(options.source, options.format);
   const text = await readTextSource({ ...options, pathLabel: '<source>' });
-  const records: unknown[] = [];
+  const records: { location: NativeCaseLocation; value: unknown }[] = [];
+  const diagnostics: NativeCaseDiagnostic[] = [];
   if (format === 'json') {
     try {
       const parsed = JSON.parse(text) as unknown;
       const parsedRecords: readonly unknown[] = Array.isArray(parsed) ? parsed : [parsed];
-      for (const record of parsedRecords) records.push(record);
+      parsedRecords.forEach((value, index) =>
+        records.push({ location: { kind: 'row', number: index + 1 }, value }),
+      );
     } catch (error: unknown) {
       throw new AttestCliError('project_invalid', 'The native JSON case source is invalid.', {
         path: '<source>',
@@ -185,18 +217,37 @@ const readNativeCases = async (options: {
     for (const [index, line] of text.split(/\r?\n/u).entries()) {
       if (line.trim().length === 0) continue;
       try {
-        records.push(JSON.parse(line) as unknown);
-      } catch (error: unknown) {
-        throw new AttestCliError('project_invalid', 'The native JSONL case source is invalid.', {
-          path: `line ${index + 1}`,
-          hint: 'Provide exactly one case object per nonblank line.',
-          cause: error,
+        records.push({
+          location: { kind: 'line', number: index + 1 },
+          value: JSON.parse(line) as unknown,
+        });
+      } catch {
+        diagnostics.push({
+          code: 'invalid_json',
+          destination_path: '',
+          hint: 'Provide exactly one JSON case object on this nonblank line.',
+          line: index + 1,
+          message: 'Line is not valid JSON.',
+          source_field: '<line>',
         });
       }
     }
   }
+  const cases: TestCase[] = [];
+  for (const record of records) {
+    const normalized = normalizeCase(record.value, record.location);
+    diagnostics.push(...normalized.diagnostics);
+    if (normalized.testCase !== undefined) cases.push(normalized.testCase);
+  }
+  if (diagnostics.length > 0) {
+    throw new AttestCliError('project_invalid', 'Imported case validation failed.', {
+      path: '<source>',
+      hint: 'Repair every listed native case diagnostic, then retry the all-or-nothing import.',
+      details: { diagnostics },
+    });
+  }
   return {
-    cases: records.map((record, index) => normalizeCase(record, index + 1)),
+    cases,
     format,
     sourceHash: createHash('sha256').update(text).digest('hex'),
   };
