@@ -20,6 +20,7 @@ import { Command } from 'commander';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createCliHelp } from '../../help/command-help.js';
+import { getCliErrorDefinition } from '../../errors.js';
 import type { CliIo } from '../../run-cli.js';
 import {
   registerEvalCommands,
@@ -183,6 +184,60 @@ const defaultServices = (): EvalCommandServices => ({
   cancel: () => Promise.resolve(cancellationSuccess()),
   run: () => Promise.resolve(completedEvents()),
 });
+
+/** Builds one catalog-shaped terminal infrastructure failure for renderer parity checks. */
+const failedEvents = (): EvalEvent[] =>
+  evalEventStreamSchema.parse([
+    {
+      schema: CLI_EVENT_SCHEMA_VERSION,
+      sequence: 0,
+      time: TIME,
+      event: 'run_started',
+      data: {
+        run_id: RUN_ID,
+        snapshot_hash: SNAPSHOT_HASH,
+        total_cases: 0,
+        concurrency: 1,
+        timeout_ms: 60_000,
+      },
+    },
+    {
+      schema: CLI_EVENT_SCHEMA_VERSION,
+      sequence: 1,
+      time: TIME,
+      event: 'run_completed',
+      data: {
+        run_id: RUN_ID,
+        status: 'failed',
+        summary: {
+          total_cases: 0,
+          passed_cases: 0,
+          failed_cases: 0,
+          error_cases: 0,
+          metric_error_count: 0,
+        },
+      },
+    },
+    {
+      schema: CLI_EVENT_SCHEMA_VERSION,
+      sequence: 2,
+      time: TIME,
+      event: 'result',
+      data: {
+        exit_code: 4,
+        result: {
+          schema: CLI_RESULT_SCHEMA_VERSION,
+          ok: false,
+          command: 'eval.run',
+          error: {
+            code: 'run_failed',
+            message: 'Eval run encountered an infrastructure error.',
+            retryable: true,
+          },
+        },
+      },
+    },
+  ]);
 
 /** Creates the isolated command tree used by integration without mutating root registration. */
 const createHarness = (
@@ -441,6 +496,22 @@ describe('eval errors and no-write preflight', () => {
 });
 
 describe('eval output and sequencing', () => {
+  it('preserves catalog identity and retryability across human, JSON, and JSONL terminals', async () => {
+    const definition = getCliErrorDefinition('run_failed');
+    expect(definition).toMatchObject({ exit_code: 4, retryable: true });
+    for (const output of ['human', 'json', 'jsonl'] as const) {
+      const harness = createHarness({
+        ...defaultServices(),
+        run: () => Promise.resolve(failedEvents()),
+      });
+      await parse(harness, ['eval', 'run', 'refund', '--output', output]);
+      expect(harness.exitCode()).toBe(definition?.exit_code);
+      const serialized = [...harness.errors, ...harness.output].join('\n');
+      expect(serialized).toContain('run_failed');
+      if (output !== 'human') expect(serialized).toContain('"retryable":true');
+    }
+  });
+
   it('renders watch progress live only for human output and retains one final result line', async () => {
     const harness = createHarness();
     await parse(harness, ['eval', 'run', 'refund', '--watch']);

@@ -16,6 +16,7 @@ import type {
   EvalEventLimits,
   EvalExecutionResult,
   EvalPersistenceAdapter,
+  EvalTerminalFailureFactory,
   ExecuteEvalOptions,
   ImmutableEvalRun,
   ResolvedEvalCase,
@@ -91,6 +92,7 @@ const eventBytesFit = (
   plan: ResolvedEvalPlan,
   run: ImmutableEvalRun,
   limits: EvalEventLimits,
+  terminalFailure: EvalTerminalFailureFactory,
 ): boolean => {
   const envelopeBytes = (event: Omit<EvalEvent, 'schema' | 'sequence' | 'time'>): number =>
     Buffer.byteLength(
@@ -128,7 +130,7 @@ const eventBytesFit = (
     { event: 'result' as const, data: completedResult(run, maximumSummary) },
     {
       event: 'result' as const,
-      data: failureResult(4, 'eval_infrastructure_error', 'Eval run encountered an error.'),
+      data: terminalFailure('run_failed', 'Eval run encountered an error.'),
     },
   ].every((event) => envelopeBytes(event) <= limits.max_event_bytes);
 
@@ -174,13 +176,13 @@ const resolveEventLimits = (options: {
 };
 
 /** Builds the shared failure envelope without leaking raw adapter evidence. */
-const failureResult = (exitCode: 4 | 130, code: string, message: string): EvalFinalResultData => ({
-  exit_code: exitCode,
+const defaultTerminalFailure: EvalTerminalFailureFactory = (code, message) => ({
+  exit_code: code === 'cancelled' ? 130 : 4,
   result: {
     schema: CLI_RESULT_SCHEMA_VERSION,
     ok: false,
     command: 'eval.run',
-    error: { code, message, retryable: false },
+    error: { code, message, retryable: true },
   },
 });
 
@@ -435,17 +437,17 @@ const executeResolvedEvalPlan = async <Payload, BaselineDiff = unknown>(
   const run = freezeEvalRun(plan.run);
   const now = options.now ?? (() => new Date().toISOString());
   const limits = resolveEventLimits(options);
+  const terminalFailure = options.terminalFailure ?? defaultTerminalFailure;
   const expectedEventCount = plan.cases.length * 2 + 3;
   const planError = validateResolvedPlan(plan, run);
   const eventLimitExceeded =
-    expectedEventCount > limits.max_events || !eventBytesFit(plan, run, limits);
+    expectedEventCount > limits.max_events || !eventBytesFit(plan, run, limits, terminalFailure);
   if (planError !== undefined || eventLimitExceeded) {
     return preOrchestrationFailure(
       run,
       now,
-      failureResult(
-        4,
-        planError === undefined ? 'eval_event_limit_exceeded' : 'eval_plan_invalid',
+      terminalFailure(
+        'run_failed',
         planError ?? 'Resolved eval plan exceeds the configured event count cap.',
       ),
       options.onEvent,
@@ -455,7 +457,7 @@ const executeResolvedEvalPlan = async <Payload, BaselineDiff = unknown>(
     return preOrchestrationFailure(
       run,
       now,
-      failureResult(130, 'eval_cancelled', 'Eval run was cancelled before orchestration started.'),
+      terminalFailure('cancelled', 'Eval run was cancelled before orchestration started.'),
       options.onEvent,
     );
   }
@@ -466,11 +468,7 @@ const executeResolvedEvalPlan = async <Payload, BaselineDiff = unknown>(
     return preOrchestrationFailure(
       run,
       now,
-      failureResult(
-        4,
-        'eval_persistence_failed',
-        safeErrorMessage(error, 'Eval run creation failed.'),
-      ),
+      terminalFailure('run_failed', safeErrorMessage(error, 'Eval run creation failed.')),
       options.onEvent,
     );
   }
@@ -595,10 +593,9 @@ const executeResolvedEvalPlan = async <Payload, BaselineDiff = unknown>(
     status === 'completed'
       ? completedResult(run, summary)
       : status === 'cancelled'
-        ? failureResult(130, 'eval_cancelled', 'Eval run was cancelled.')
-        : failureResult(
-            4,
-            'eval_infrastructure_error',
+        ? terminalFailure('cancelled', 'Eval run was cancelled.')
+        : terminalFailure(
+            'run_failed',
             timedOut
               ? 'Eval run deadline exceeded.'
               : 'Eval run encountered an invocation, metric, persistence, or artifact error.',

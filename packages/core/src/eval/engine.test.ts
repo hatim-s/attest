@@ -443,7 +443,7 @@ describe('executeResolvedEvalPlan', () => {
     expect(result.exit_code).toBe(4);
     expect(result.final_result).toMatchObject({
       exit_code: 4,
-      result: { ok: false, error: { code: 'eval_infrastructure_error' } },
+      result: { ok: false, error: { code: 'run_failed', retryable: true } },
     });
     expect(cleanup).toHaveBeenCalledOnce();
   });
@@ -527,7 +527,10 @@ describe('executeResolvedEvalPlan', () => {
     expect(result.events).toHaveLength(1);
     expect(result.events[0]).toMatchObject({
       event: 'result',
-      data: { exit_code: 4, result: { ok: false, error: { code: 'eval_event_limit_exceeded' } } },
+      data: {
+        exit_code: 4,
+        result: { ok: false, error: { code: 'run_failed', retryable: true } },
+      },
     });
     expect(onEvent).toHaveBeenCalledWith(result.events[0]);
     expect(executeCase).not.toHaveBeenCalled();

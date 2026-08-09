@@ -28,6 +28,7 @@ import { AttestCliError } from '../../errors.js';
 import {
   createBaseEnvironment,
   readSecretReference,
+  redactProbeValue,
   resolveNativeAgent,
 } from '../agent/native-agent-adapter.js';
 import type { ResolvedEvalCaseInput, ResolvedEvalMetric } from './eval-resolver.js';
@@ -50,7 +51,7 @@ const createJudgeCache = (cacheStore: CacheStore): JudgeCache => ({
 const resolveExecutableMetric = async (
   metric: Extract<MetricResource['definition'], { kind: 'exec' }>,
   projectRoot: string,
-): Promise<{ cwd: string; env: NodeJS.ProcessEnv }> => {
+): Promise<{ cwd: string; env: NodeJS.ProcessEnv; secrets: string[] }> => {
   const cwd = await realpath(resolve(projectRoot, metric.cwd ?? '.'));
   if (!isContainedPath(projectRoot, cwd)) {
     throw new AttestCliError('metric_infrastructure_failed', 'Metric cwd escapes the project.', {
@@ -58,11 +59,23 @@ const resolveExecutableMetric = async (
     });
   }
   const env: NodeJS.ProcessEnv = createBaseEnvironment();
+  const secrets: string[] = [];
   for (const [name, reference] of Object.entries(metric.env ?? {})) {
-    env[name] = await readSecretReference(reference, projectRoot);
+    const value = await readSecretReference(reference, projectRoot);
+    env[name] = value;
+    secrets.push(value);
   }
-  return { cwd, env };
+  return { cwd, env, secrets };
 };
+
+/** Applies the metric-test secret contract before evidence reaches results or persistence. */
+const redactMetricEvaluation = (
+  evaluation: MetricEvaluation,
+  secrets: readonly string[],
+): MetricEvaluation =>
+  secrets.length === 0
+    ? evaluation
+    : (redactProbeValue(evaluation, secrets) as unknown as MetricEvaluation);
 
 const decodePointerSegment = (segment: string): string | undefined => {
   if (/~(?:[^01]|$)/u.test(segment)) return undefined;
@@ -203,23 +216,29 @@ const evaluateHttpMetric = async (
   );
   const durationMs = performance.now() - startedAt;
   if (invocation.status === 'invocation_error') {
-    return {
-      metricName: metric.metric.id,
-      kind: 'exec',
-      status: 'error',
-      error: {
-        code: invocation.error.code === 'timeout' ? 'exec_timeout' : 'http_request_failed',
-        message: invocation.error.message,
+    return redactMetricEvaluation(
+      {
+        metricName: metric.metric.id,
+        kind: 'exec',
+        status: 'error',
+        error: {
+          code: invocation.error.code === 'timeout' ? 'exec_timeout' : 'http_request_failed',
+          message: invocation.error.message,
+        },
+        durationMs,
       },
-      durationMs,
-    };
+      resolved.secrets,
+    );
   }
   const response = invocation.report?.ok === true ? invocation.report.value : undefined;
-  return extractHttpMetricResult(
-    metric.metric.id,
-    definition,
-    response !== undefined && 'output' in response ? response.output : undefined,
-    durationMs,
+  return redactMetricEvaluation(
+    extractHttpMetricResult(
+      metric.metric.id,
+      definition,
+      response !== undefined && 'output' in response ? response.output : undefined,
+      durationMs,
+    ),
+    resolved.secrets,
   );
 };
 
@@ -258,6 +277,7 @@ const createEvalMetricEvaluator = (projectRoot: string, cacheStore: CacheStore) 
     for (const resolvedMetric of payload.metrics) {
       const { definition } = resolvedMetric.metric;
       let evaluation: MetricEvaluation;
+      let secrets: readonly string[] = [];
       if (definition.kind === 'http') {
         evaluation = await evaluateHttpMetric(
           resolvedMetric,
@@ -287,6 +307,7 @@ const createEvalMetricEvaluator = (projectRoot: string, cacheStore: CacheStore) 
           options = { cache: judgeCache, judgeClient, signal };
         } else {
           const runtime = await resolveExecutableMetric(definition, projectRoot);
+          secrets = runtime.secrets;
           metricDefinition = {
             name: resolvedMetric.metric.id,
             type: 'exec',
@@ -304,7 +325,12 @@ const createEvalMetricEvaluator = (projectRoot: string, cacheStore: CacheStore) 
         if (first === undefined) throw new Error('Metric engine returned no evaluation.');
         evaluation = first;
       }
-      evaluations.push(applyAttachedThreshold(evaluation, resolvedMetric.threshold));
+      evaluations.push(
+        redactMetricEvaluation(
+          applyAttachedThreshold(evaluation, resolvedMetric.threshold),
+          secrets,
+        ),
+      );
     }
     return evaluations;
   };
@@ -312,4 +338,9 @@ const createEvalMetricEvaluator = (projectRoot: string, cacheStore: CacheStore) 
   return { evaluate };
 };
 
-export { createEvalMetricEvaluator, extractHttpMetricResult, readJsonPointer };
+export {
+  createEvalMetricEvaluator,
+  extractHttpMetricResult,
+  readJsonPointer,
+  redactMetricEvaluation,
+};

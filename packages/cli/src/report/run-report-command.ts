@@ -1,8 +1,8 @@
-import { mkdir, writeFile } from 'node:fs/promises';
-import { dirname, resolve } from 'node:path';
+import { randomUUID } from 'node:crypto';
+import { link, open, rename, unlink } from 'node:fs/promises';
 
 import {
-  openStore,
+  openReadonlyRunStore,
   type CaseRecord,
   type CaseSummary,
   type StoredMetricEvaluation,
@@ -10,6 +10,7 @@ import {
 import { dashboardHtml } from '@attest/web/embedded';
 
 import { AttestCliError } from '../errors.js';
+import { prepareEvalProjectFile } from '../commands/eval/eval-project-path.js';
 import { createReportHtml } from './create-report-html.js';
 
 const MAX_REPORT_CASES = 10_000;
@@ -89,11 +90,18 @@ const isNodeError = (error: unknown): error is NodeJS.ErrnoException => error in
 const runReportCommand = async (
   options: RunReportCommandOptions,
 ): Promise<RunReportCommandResult> => {
-  const storePath = resolve(options.workingDirectory, options.storePath ?? '.attest/runs.db');
-  const store = await openStore(storePath);
-  let runWithCases: Awaited<ReturnType<typeof store.runs.getRunWithCases>>;
+  const storePath = await prepareEvalProjectFile(
+    options.workingDirectory,
+    options.storePath ?? '.attest/runs.db',
+    {
+      errorCode: 'project_read_failed',
+      message: 'The report run store is not a safe project file.',
+    },
+  );
+  const store = await openReadonlyRunStore(storePath);
+  let runWithCases: Awaited<ReturnType<typeof store.getRunWithCases>>;
   try {
-    runWithCases = await store.runs.getRunWithCases(options.runId);
+    runWithCases = await store.getRunWithCases(options.runId);
   } finally {
     await store.close();
   }
@@ -106,18 +114,32 @@ const runReportCommand = async (
     cases: selection.cases.map((record) => ({ record, summary: toCaseSummary(record) })),
     truncated: selection.truncated,
   };
-  const outputPath = resolve(
+  const outputPath = await prepareEvalProjectFile(
     options.workingDirectory,
     options.outputPath ?? `attest-report-${options.runId}.html`,
+    {
+      createDirectories: true,
+      errorCode: 'output_write_failed',
+      message: 'The report output path is not a safe project file.',
+    },
   );
 
+  const temporaryPath = `${outputPath}.${randomUUID()}.tmp`;
+  let handle: Awaited<ReturnType<typeof open>> | undefined;
   try {
-    await mkdir(dirname(outputPath), { recursive: true });
-    await writeFile(outputPath, createReportHtml(dashboardHtml, reportData), {
-      encoding: 'utf8',
-      flag: options.force === true ? 'w' : 'wx',
-    });
+    handle = await open(temporaryPath, 'wx', 0o600);
+    await handle.writeFile(createReportHtml(dashboardHtml, reportData), 'utf8');
+    await handle.sync();
+    await handle.close();
+    handle = undefined;
+    if (options.force === true) await rename(temporaryPath, outputPath);
+    else {
+      await link(temporaryPath, outputPath);
+      await unlink(temporaryPath);
+    }
   } catch (error: unknown) {
+    await handle?.close().catch(() => undefined);
+    await unlink(temporaryPath).catch(() => undefined);
     if (isNodeError(error) && error.code === 'EEXIST') {
       throw new AttestCliError(
         'output_exists',

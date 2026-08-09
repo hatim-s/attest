@@ -168,6 +168,8 @@ export {
   type EvalExecutionResult,
   type EvalJUnitPayload,
   type EvalPersistenceAdapter,
+  type EvalTerminalErrorCode,
+  type EvalTerminalFailureFactory,
   type ExecuteEvalOptions,
   type ImmutableEvalRun,
   type NormalizedEvalAttempt,

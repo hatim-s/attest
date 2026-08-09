@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
+import { access, mkdir, mkdtemp, readFile, readdir, rm, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -88,5 +88,26 @@ describe('runReportCommand', () => {
     await expect(
       runReportCommand({ force: true, outputPath, runId, workingDirectory: directory }),
     ).resolves.toMatchObject({ caseCount: 1 });
+  });
+
+  it('rejects a symlinked report output directory before outside-boundary writes', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'attest-report-command-'));
+    const outside = await mkdtemp(join(tmpdir(), 'attest-report-outside-'));
+    directories.push(directory, outside);
+    const runId = await createRunFixture(directory);
+    await symlink(outside, join(directory, 'reports'));
+
+    await expect(
+      runReportCommand({ outputPath: 'reports/run.html', runId, workingDirectory: directory }),
+    ).rejects.toMatchObject({ code: 'output_write_failed', path: 'reports/run.html' });
+    await expect(
+      runReportCommand({
+        outputPath: 'reports/../escaped.html',
+        runId,
+        workingDirectory: directory,
+      }),
+    ).rejects.toMatchObject({ code: 'output_write_failed' });
+    expect(await readdir(outside)).toEqual([]);
+    await expect(access(join(directory, 'escaped.html'))).rejects.toMatchObject({ code: 'ENOENT' });
   });
 });

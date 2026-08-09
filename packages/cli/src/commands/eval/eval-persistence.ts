@@ -1,6 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdir, open, rename, unlink } from 'node:fs/promises';
-import { dirname, resolve } from 'node:path';
+import { open, rename, unlink } from 'node:fs/promises';
 
 import { AGENT_PROTOCOL, EVAL_RUN_SCHEMA_VERSION } from '@attest/contracts';
 import {
@@ -16,6 +15,7 @@ import {
 } from '@attest/core';
 
 import { AttestCliError } from '../../errors.js';
+import { prepareEvalProjectFile } from './eval-project-path.js';
 import type { ResolvedEvalCaseInput } from './eval-resolver.js';
 
 /** Binds immutable eval records and raw runner evidence to the existing SQLite run-store schema. */
@@ -105,12 +105,14 @@ const verifyJUnitPayload = (payload: EvalJUnitPayload): void => {
 };
 
 /** Publishes JUnit through a synced sibling temporary file and one atomic rename. */
-const createEvalArtifactWriter = (workingDirectory: string): EvalArtifactWriter => ({
+const createEvalArtifactWriter = (projectRoot: string): EvalArtifactWriter => ({
   writeJUnitAtomically: async (path, payload) => {
     verifyJUnitPayload(payload);
-    const outputPath = resolve(workingDirectory, path);
-    const outputDirectory = dirname(outputPath);
-    await mkdir(outputDirectory, { recursive: true });
+    const outputPath = await prepareEvalProjectFile(projectRoot, path, {
+      createDirectories: true,
+      errorCode: 'output_write_failed',
+      message: 'The JUnit output path is not a safe project file.',
+    });
     const temporaryPath = `${outputPath}.${randomUUID()}.tmp`;
     let handle: Awaited<ReturnType<typeof open>> | undefined;
     try {

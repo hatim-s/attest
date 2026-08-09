@@ -152,6 +152,14 @@ type EvalEventLimits = {
   max_event_bytes: number;
 };
 
+type EvalTerminalErrorCode = 'cancelled' | 'run_failed';
+
+/** Builds a terminal eval failure from the caller's canonical public error catalog. */
+type EvalTerminalFailureFactory = (
+  code: EvalTerminalErrorCode,
+  message: string,
+) => EvalFinalResultData;
+
 /** Injects deterministic time and optional event delivery without changing stored results. */
 type ExecuteEvalOptions<BaselineDiff = JsonValue> = {
   signal?: AbortSignal;
@@ -160,6 +168,7 @@ type ExecuteEvalOptions<BaselineDiff = JsonValue> = {
   onEvent?: (event: EvalEvent) => void | Promise<void>;
   baseline?: EvalBaselineAdapter<BaselineDiff>;
   artifacts?: EvalArtifactWriter;
+  terminalFailure?: EvalTerminalFailureFactory;
 };
 
 /** Returns all auditable outputs needed by the CLI adapter without performing CLI rendering. */
@@ -189,6 +198,8 @@ export {
   type EvalExecutionResult,
   type EvalJUnitPayload,
   type EvalPersistenceAdapter,
+  type EvalTerminalErrorCode,
+  type EvalTerminalFailureFactory,
   type ExecuteEvalOptions,
   type ImmutableEvalRun,
   type NormalizedEvalAttempt,

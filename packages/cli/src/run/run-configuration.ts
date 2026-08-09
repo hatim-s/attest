@@ -1,10 +1,11 @@
 import { execFile } from 'node:child_process';
-import { access, mkdir } from 'node:fs/promises';
+import { access } from 'node:fs/promises';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 
 import {
   EVAL_RUN_SCHEMA_VERSION,
+  evalFinalResultDataSchema,
   evalRunSchema,
   type EvalCancelRequest,
   type EvalCancelResult,
@@ -20,13 +21,15 @@ import {
   StoreError,
 } from '@attest/core';
 
-import { AttestCliError } from '../errors.js';
+import { AttestCliError, serializeCliError } from '../errors.js';
 import { createEvalCaseRunner } from '../commands/eval/eval-agent-runner.js';
 import {
+  detachEvalRun,
   registerEvalRun,
   signalRegisteredEvalRun,
   unregisterEvalRun,
 } from '../commands/eval/eval-cancellation.js';
+import { prepareEvalProjectFile } from '../commands/eval/eval-project-path.js';
 import { EvalEventQueue } from '../commands/eval/eval-event-source.js';
 import {
   createEvalArtifactWriter,
@@ -35,7 +38,7 @@ import {
 } from '../commands/eval/eval-persistence.js';
 import { resolveEvalRun } from '../commands/eval/eval-resolver.js';
 import { loadCommandProject } from '../commands/project/load-command-project.js';
-import { createCliSuccessResult } from '../output/cli-protocol.js';
+import { createCliFailureResult, createCliSuccessResult } from '../output/cli-protocol.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -128,9 +131,17 @@ const runConfiguration = async (
     effective_command: resolved.effectiveCommand,
     ...(git === undefined ? {} : { git }),
   });
-  const storePath = join(project.root, '.attest', 'runs.db');
+  const configuredStorePath = join('.attest', 'runs.db');
+  let storePath = await prepareEvalProjectFile(project.root, configuredStorePath, {
+    errorCode: 'run_failed',
+    message: 'The eval run store is not a safe project file.',
+  });
   await preflightEvalBaseline(storePath, resolved.effectiveCommand.resolved.baseline_run_id);
-  await mkdir(join(project.root, '.attest'), { recursive: true });
+  storePath = await prepareEvalProjectFile(project.root, configuredStorePath, {
+    createDirectories: true,
+    errorCode: 'run_failed',
+    message: 'The eval run store is not a safe project file.',
+  });
   const store = await openStore(storePath);
   let registry: Awaited<ReturnType<typeof registerEvalRun>>;
   try {
@@ -161,10 +172,17 @@ const runConfiguration = async (
         runner,
         createEvalPersistenceAdapter(store),
         {
-          artifacts: createEvalArtifactWriter(options.workingDirectory),
+          artifacts: createEvalArtifactWriter(project.root),
           baseline: createEvalBaselineAdapter(store),
           onEvent: (event) => queue.push(event),
-          signal: options.signal,
+          signal: AbortSignal.any([options.signal, registry.signal]),
+          terminalFailure: (code, message) => {
+            const failure = serializeCliError(new AttestCliError(code, message));
+            return evalFinalResultDataSchema.parse({
+              exit_code: failure.exitCode,
+              result: createCliFailureResult('eval.run', failure.error),
+            });
+          },
         },
       );
       canReleaseCancellationOwnership = result.can_release_cancellation_ownership;
@@ -174,6 +192,8 @@ const runConfiguration = async (
       // Preserve cancellation ownership when cleanup or durable finalization remains uncertain.
       if (canReleaseCancellationOwnership) {
         await unregisterEvalRun(registry).catch(() => undefined);
+      } else {
+        detachEvalRun(registry);
       }
       await store.close().catch(() => undefined);
       queue.close();

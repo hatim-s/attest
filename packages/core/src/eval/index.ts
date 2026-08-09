@@ -19,6 +19,8 @@ export type {
   EvalExecutionResult,
   EvalJUnitPayload,
   EvalPersistenceAdapter,
+  EvalTerminalErrorCode,
+  EvalTerminalFailureFactory,
   ExecuteEvalOptions,
   ImmutableEvalRun,
   NormalizedEvalAttempt,
