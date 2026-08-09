@@ -107,8 +107,16 @@
           "exit_code": 0,
           "ok": true,
           "command": "project.init",
+          "artifact_documents": {
+            "attest.project.json": {
+              "schema": "attest.project/v2",
+              "name": "support",
+              "resources": { "agents": [], "datasets": [], "metrics": [], "tests": [] }
+            }
+          },
           "artifacts_present": ["attest.project.json"],
-          "artifacts_absent": ["attest.config.json", ".attest/runs.db"]
+          "artifacts_absent": ["attest.config.json", ".attest/runs.db"],
+          "tree_changes": ["attest.project.json"]
         },
         {
           "display": "attest agent add support --argv-json '[\"node\",\"./agent.mjs\"]' --timeout 5s --output json",
@@ -126,8 +134,20 @@
           "exit_code": 0,
           "ok": true,
           "command": "agent.add",
+          "artifact_documents": {
+            "attest.project.json": { "schema": "attest.project/v2", "name": "support" },
+            "attest/agents/support.json": { "schema": "attest.agent/v2", "id": "support" }
+          },
           "artifacts_present": ["attest/agents/support.json"],
-          "artifacts_absent": [".attest/runs.db"]
+          "artifacts_absent": [".attest/runs.db"],
+          "tree_changes": [
+            ".attest/",
+            ".attest/transactions/",
+            "attest.project.json",
+            "attest/",
+            "attest/agents/",
+            "attest/agents/support.json"
+          ]
         },
         {
           "display": "attest agent test support --input '\"ping\"' --output json",
@@ -135,8 +155,13 @@
           "exit_code": 0,
           "ok": true,
           "command": "agent.test",
+          "artifact_documents": {
+            "attest.project.json": { "schema": "attest.project/v2", "name": "support" },
+            "attest/agents/support.json": { "schema": "attest.agent/v2", "id": "support" }
+          },
           "artifacts_present": ["attest/agents/support.json"],
-          "artifacts_absent": [".attest/runs.db"]
+          "artifacts_absent": [".attest/runs.db"],
+          "tree_changes": []
         },
         {
           "display": "attest metric add exact --preset output-equals --value '\"refund policy\"' --output json",
@@ -154,8 +179,13 @@
           "exit_code": 0,
           "ok": true,
           "command": "metric.add",
+          "artifact_documents": {
+            "attest.project.json": { "schema": "attest.project/v2", "name": "support" },
+            "attest/metrics/exact.json": { "schema": "attest.metric/v2", "id": "exact" }
+          },
           "artifacts_present": ["attest/metrics/exact.json"],
-          "artifacts_absent": [".attest/runs.db"]
+          "artifacts_absent": [".attest/runs.db"],
+          "tree_changes": ["attest.project.json", "attest/metrics/", "attest/metrics/exact.json"]
         },
         {
           "display": "attest test add smoke --agent support --metric exact --output json",
@@ -173,8 +203,13 @@
           "exit_code": 0,
           "ok": true,
           "command": "test.add",
+          "artifact_documents": {
+            "attest.project.json": { "schema": "attest.project/v2", "name": "support" },
+            "attest/tests/smoke.json": { "schema": "attest.test/v2", "id": "smoke" }
+          },
           "artifacts_present": ["attest/tests/smoke.json"],
-          "artifacts_absent": [".attest/runs.db"]
+          "artifacts_absent": [".attest/runs.db"],
+          "tree_changes": ["attest.project.json", "attest/tests/", "attest/tests/smoke.json"]
         },
         {
           "display": "attest test case import smoke ./cases.jsonl --output json",
@@ -182,8 +217,13 @@
           "exit_code": 0,
           "ok": true,
           "command": "test.case.import",
+          "artifact_documents": {
+            "attest.project.json": { "schema": "attest.project/v2", "name": "support" },
+            "attest/tests/smoke.json": { "schema": "attest.test/v2", "id": "smoke" }
+          },
           "artifacts_present": ["attest/tests/smoke.json"],
-          "artifacts_absent": [".attest/runs.db"]
+          "artifacts_absent": [".attest/runs.db"],
+          "tree_changes": ["attest.project.json", "attest/tests/smoke.json"]
         },
         {
           "display": "attest eval run smoke --output json",
@@ -191,8 +231,10 @@
           "exit_code": 0,
           "ok": true,
           "command": "eval.run",
+          "artifact_documents": {},
           "artifacts_present": [".attest/runs.db"],
-          "artifacts_absent": ["attest.config.json"]
+          "artifacts_absent": ["attest.config.json"],
+          "tree_changes": [".attest/eval-runs/", ".attest/runs.db"]
         }
       ]
     },
@@ -208,8 +250,10 @@
           "ok": true,
           "command": "help",
           "result_schema": "attest.cli-help/v1",
+          "artifact_documents": {},
           "artifacts_present": [],
-          "artifacts_absent": ["attest.project.json", ".attest/runs.db"]
+          "artifacts_absent": ["attest.project.json", ".attest/runs.db"],
+          "tree_changes": []
         },
         {
           "display": "attest schema print attest.command-request/v2 --output json",
@@ -217,8 +261,10 @@
           "exit_code": 0,
           "ok": true,
           "command": "schema.print",
+          "artifact_documents": {},
           "artifacts_present": [],
-          "artifacts_absent": ["attest.project.json", ".attest/runs.db"]
+          "artifacts_absent": ["attest.project.json", ".attest/runs.db"],
+          "tree_changes": []
         },
         {
           "display": "attest errors --output json",
@@ -227,8 +273,10 @@
           "ok": true,
           "command": "errors",
           "result_schema": "attest.cli-errors/v1",
+          "artifact_documents": {},
           "artifacts_present": [],
-          "artifacts_absent": ["attest.project.json", ".attest/runs.db"]
+          "artifacts_absent": ["attest.project.json", ".attest/runs.db"],
+          "tree_changes": []
         },
         {
           "display": "attest project init . --name repair --non-interactive --output json",
@@ -245,8 +293,16 @@
           "exit_code": 0,
           "ok": true,
           "command": "project.init",
+          "artifact_documents": {
+            "attest.project.json": {
+              "schema": "attest.project/v2",
+              "name": "repair",
+              "resources": { "agents": [], "datasets": [], "metrics": [], "tests": [] }
+            }
+          },
           "artifacts_present": ["attest.project.json"],
-          "artifacts_absent": [".attest/runs.db"]
+          "artifacts_absent": [".attest/runs.db"],
+          "tree_changes": ["attest.project.json"]
         },
         {
           "display": "attest agent add incomplete --output json",
@@ -255,8 +311,16 @@
           "ok": false,
           "command": "agent.add",
           "error_code": "cli_missing_input",
+          "artifact_documents": {
+            "attest.project.json": {
+              "schema": "attest.project/v2",
+              "name": "repair",
+              "resources": { "agents": [], "datasets": [], "metrics": [], "tests": [] }
+            }
+          },
           "artifacts_present": ["attest.project.json"],
-          "artifacts_absent": ["attest/agents/incomplete.json", ".attest/runs.db"]
+          "artifacts_absent": ["attest/agents/incomplete.json", ".attest/runs.db"],
+          "tree_changes": []
         }
       ]
     }
