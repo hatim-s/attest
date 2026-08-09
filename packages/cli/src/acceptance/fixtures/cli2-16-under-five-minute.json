@@ -4,26 +4,26 @@
   "per_command_timeout_ms": 30000,
   "timing": {
     "clock": "performance.now monotonic wall time",
-    "start": "Immediately before the actor's first CLI discovery command.",
-    "stop": "After the actor has inspected the persisted run, written and inspected the HTML report, and correlated a structured failure with the error catalog repair.",
+    "start": "Immediately before each actor CLI process starts; the actor total is the sum of those process intervals.",
+    "stop": "When each actor CLI process exits, or when the long-running view command reports loopback readiness.",
     "included": [
       "Every Attest process startup and execution in the actor journey",
       "Native agent probes and eval execution",
-      "Run inspection, report generation, deliberate failure, and error-catalog lookup"
+      "Run inspection, report generation, view startup through loopback readiness, deliberate failure, and error-catalog lookup"
     ],
     "excluded": [
       "Installing Node and the already-packed Attest CLI",
       "Building or packing the repository checkout",
       "Staging the actor's pre-existing agent and case or dataset fixtures",
-      "Test assertions performed after the stopwatch stops"
+      "Snapshot hashing, structured-output parsing, HTML and readiness reads, process cleanup, and test assertions performed outside each CLI interval"
     ],
     "retries": 0,
-    "aggregation": "Each actor must pass independently on every required operating system; averages and pooled times are forbidden."
+    "aggregation": "Sum only the independently measured CLI process intervals for each actor; each actor must pass independently on every required operating system, and averages or pooled times are forbidden."
   },
   "prerequisites": {
     "warm": [
       "Node.js 22 or newer is on PATH.",
-      "A production-packed Attest CLI and all of its production dependencies are installed before timing starts.",
+      "A pristine production-packed Attest CLI runtime and all of its production dependencies are installed separately for each actor before timing starts.",
       "The actor starts with the documented quickstart and the versioned CLI help, schema, and error surfaces available.",
       "No network access, credentials, provider SDK, repository source import, or ambient workspace link is required."
     ],
@@ -153,7 +153,12 @@
           "output": "human",
           "capture_run_id": true,
           "required_stdout": ["Result: PASS (exit 0)"],
-          "acceptance_stdout": ["attest diff", "attest report $RUN_ID", "attest view"],
+          "acceptance_stdout": [
+            "attest report $RUN_ID",
+            "attest view --no-open",
+            "Compare with a baseline run:",
+            "attest diff <base-run-id> $RUN_ID"
+          ],
           "artifacts_present": [".attest/runs.db"]
         },
         {
@@ -166,12 +171,31 @@
           "no_write": true
         },
         {
+          "id": "validate-comparison-template",
+          "argv": ["help", "diff", "--output", "json"],
+          "exit_code": 0,
+          "output": "json",
+          "command": "help",
+          "result_schema": "attest.cli-help/v1",
+          "help_usage": "attest diff [options] <base-run-id> <candidate-run-id>",
+          "help_arguments": ["base-run-id", "candidate-run-id"],
+          "no_write": true
+        },
+        {
           "id": "write-report",
-          "argv": ["report", "$RUN_ID", "--output", "artifacts/human-run.html"],
+          "argv": ["report", "$RUN_ID"],
           "exit_code": 0,
           "output": "human",
-          "required_stdout": ["2-case report", "artifacts/human-run.html"],
-          "artifacts_present": ["artifacts/human-run.html"]
+          "required_stdout": ["2-case report", "attest-report-$RUN_ID.html"],
+          "artifacts_present": ["attest-report-$RUN_ID.html"]
+        },
+        {
+          "id": "open-view",
+          "argv": ["view", "--no-open"],
+          "exit_code": 0,
+          "output": "human",
+          "readiness_probe": "view",
+          "required_stdout": ["Attest view: http://127.0.0.1:", "Press Ctrl+C to stop."]
         },
         {
           "id": "structured-failure",

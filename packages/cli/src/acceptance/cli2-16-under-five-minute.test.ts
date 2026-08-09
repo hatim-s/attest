@@ -1,4 +1,4 @@
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { constants } from 'node:fs';
 import {
@@ -30,9 +30,12 @@ type CommandExpectation = {
   command?: string;
   error_code?: string;
   exit_code: number;
+  help_arguments?: string[];
+  help_usage?: string;
   id: string;
   no_write?: boolean;
   output: 'human' | 'json' | 'jsonl';
+  readiness_probe?: 'view';
   required_error_fields?: string[];
   required_stdout?: string[];
   result_schema?: string;
@@ -88,7 +91,13 @@ type CliEvent = {
 };
 
 type CommandResult = {
+  elapsedMs: number;
   exitCode: number;
+  readiness?: {
+    body: string;
+    status: number;
+    url: string;
+  };
   stderr: string;
   stdout: string;
 };
@@ -127,7 +136,7 @@ const PACKED_PACKAGE_NAMES = [
 ] as const;
 const RUN_ID_PATTERN = /\b[0-9A-HJKMNP-TV-Z]{26}\b/u;
 const temporaryDirectories: string[] = [];
-let packedCliPromise: Promise<PackedCli> | undefined;
+const claimedPackedRuntimeRoots = new Set<string>();
 
 /** Reads the task-owned CLI2.16 acceptance contract without importing production contracts. */
 const readContract = async (): Promise<Contract> =>
@@ -223,19 +232,85 @@ const createPackedCli = async (): Promise<PackedCli> => {
   return { cliPath, root: runtime };
 };
 
-/** Reuses one immutable clean installation while keeping its creation outside both actor clocks. */
-const getPackedCli = (): Promise<PackedCli> => {
-  packedCliPromise ??= createPackedCli();
-  return packedCliPromise;
-};
-
-/** Executes one installed CLI command without a shell and preserves non-zero contract evidence. */
-const runCommand = async (
+/** Starts the long-running view command, proves loopback readiness, then stops it cleanly. */
+const runViewReadinessProbe = async (
   packed: PackedCli,
   argv: readonly string[],
   workingDirectory: string,
   timeout: number,
 ): Promise<CommandResult> => {
+  const started = performance.now();
+  const child = spawn(process.execPath, ['--no-warnings', packed.cliPath, ...argv], {
+    cwd: workingDirectory,
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  let stdout = '';
+  let stderr = '';
+  let elapsedMs = 0;
+  child.stdout.setEncoding('utf8');
+  child.stderr.setEncoding('utf8');
+  child.stderr.on('data', (chunk: string) => {
+    stderr += chunk;
+  });
+  const exited = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve) => {
+    child.once('exit', (code, signal) => resolve({ code, signal }));
+  });
+  const readinessUrl = await new Promise<string>((resolveReadiness, rejectReadiness) => {
+    const timer = setTimeout(() => {
+      child.kill('SIGKILL');
+      rejectReadiness(new Error(`View readiness exceeded ${String(timeout)}ms.`));
+    }, timeout);
+    const finish = (action: () => void): void => {
+      clearTimeout(timer);
+      action();
+    };
+    child.once('error', (error) => finish(() => rejectReadiness(error)));
+    child.once('exit', (code, signal) => {
+      if (elapsedMs === 0) {
+        finish(() =>
+          rejectReadiness(
+            new Error(`View exited before readiness with ${String(code ?? signal)}.`),
+          ),
+        );
+      }
+    });
+    child.stdout.on('data', (chunk: string) => {
+      stdout += chunk;
+      const match = stdout.match(/Attest view: (http:\/\/127\.0\.0\.1:\d+\/#token=\S+)/u);
+      if (match?.[1] !== undefined && elapsedMs === 0) {
+        // Only process startup through the ready signal belongs to the frozen CLI interval.
+        elapsedMs = performance.now() - started;
+        finish(() => resolveReadiness(match[1]!));
+      }
+    });
+  });
+
+  let readiness: CommandResult['readiness'];
+  try {
+    // HTTP parsing and body assertions are harness instrumentation outside the measured interval.
+    const response = await fetch(readinessUrl);
+    readiness = { body: await response.text(), status: response.status, url: readinessUrl };
+  } finally {
+    child.kill('SIGINT');
+    const forceStop = setTimeout(() => child.kill('SIGKILL'), 5_000);
+    await exited;
+    clearTimeout(forceStop);
+  }
+  return { elapsedMs, exitCode: child.exitCode ?? 1, readiness, stderr, stdout };
+};
+
+/** Executes one installed CLI command and times only its process interval. */
+const runCommand = async (
+  packed: PackedCli,
+  argv: readonly string[],
+  workingDirectory: string,
+  timeout: number,
+  readinessProbe?: CommandExpectation['readiness_probe'],
+): Promise<CommandResult> => {
+  if (readinessProbe === 'view') {
+    return runViewReadinessProbe(packed, argv, workingDirectory, timeout);
+  }
+  const started = performance.now();
   try {
     const result = await execFileAsync(
       process.execPath,
@@ -247,10 +322,16 @@ const runCommand = async (
         timeout,
       },
     );
-    return { exitCode: 0, stderr: result.stderr, stdout: result.stdout };
+    return {
+      elapsedMs: performance.now() - started,
+      exitCode: 0,
+      stderr: result.stderr,
+      stdout: result.stdout,
+    };
   } catch (error: unknown) {
     const failure = error as { code?: number; stderr?: string; stdout?: string };
     return {
+      elapsedMs: performance.now() - started,
       exitCode: typeof failure.code === 'number' ? failure.code : 1,
       stderr: failure.stderr ?? '',
       stdout: failure.stdout ?? '',
@@ -319,6 +400,15 @@ const assertCommand = async (
       const catalogEntry = errors.find(({ code }) => code === expectation.catalog_error_code);
       expect(catalogEntry?.repairs?.length, expectation.id).toBeGreaterThan(0);
     }
+    if (expectation.help_usage !== undefined) {
+      const helpCommand = document.result?.command as
+        { arguments?: Array<{ name?: string }>; usage?: string } | undefined;
+      expect(helpCommand?.usage, expectation.id).toBe(expectation.help_usage);
+      expect(
+        helpCommand?.arguments?.map(({ name }) => name),
+        `${expectation.id}: registered arguments`,
+      ).toEqual(expectation.help_arguments);
+    }
   }
 
   let runId = priorRunId;
@@ -339,28 +429,43 @@ const assertCommand = async (
       acceptanceGaps.push(`${expectation.id} stdout omitted ${materialized}`);
     }
   }
+  if (expectation.readiness_probe === 'view') {
+    expect(result.readiness?.url, expectation.id).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/#token=/u);
+    expect(result.readiness?.status, expectation.id).toBe(200);
+    expect(result.readiness?.body, expectation.id).toContain('<!doctype html>');
+  }
 
   const after = await snapshotFiles(root);
   if (expectation.no_write === true) expect(after, expectation.id).toEqual(before);
   for (const path of expectation.artifacts_present ?? []) {
-    await expect(access(join(root, path)), `${expectation.id}: ${path}`).resolves.toBeUndefined();
-    if (path.endsWith('.html')) {
-      const report = await readFile(join(root, path), 'utf8');
+    const materializedPath = materialize(path, runId);
+    await expect(
+      access(join(root, materializedPath)),
+      `${expectation.id}: ${materializedPath}`,
+    ).resolves.toBeUndefined();
+    if (materializedPath.endsWith('.html')) {
+      const report = await readFile(join(root, materializedPath), 'utf8');
       expect(report, expectation.id).toContain('<!doctype html>');
       expect(report, expectation.id).toContain(runId);
     }
   }
   for (const path of expectation.artifacts_absent ?? []) {
-    await expect(access(join(root, path)), `${expectation.id}: ${path}`).rejects.toMatchObject({
-      code: 'ENOENT',
-    });
+    const materializedPath = materialize(path, runId);
+    await expect(
+      access(join(root, materializedPath)),
+      `${expectation.id}: ${materializedPath}`,
+    ).rejects.toMatchObject({ code: 'ENOENT' });
   }
   return runId;
 };
 
 /** Runs one cold actor journey and returns stopwatch evidence without averaging actors or OSes. */
 const runJourney = async (actor: Actor, contract: Contract): Promise<JourneyEvidence> => {
-  const packed = await getPackedCli();
+  const packed = await createPackedCli();
+  expect(claimedPackedRuntimeRoots.has(packed.root), `${actor.id}: packed runtime reused`).toBe(
+    false,
+  );
+  claimedPackedRuntimeRoots.add(packed.root);
   const root = await mkdtemp(join(tmpdir(), `attest-cli2-16-${actor.id}-`));
   temporaryDirectories.push(root);
   await cp(FIXTURE_ROOT, root, { recursive: true });
@@ -373,16 +478,20 @@ const runJourney = async (actor: Actor, contract: Contract): Promise<JourneyEvid
   let runId: string | undefined;
   const acceptanceGaps: string[] = [];
   const stepMilliseconds: Record<string, number> = {};
-  const started = performance.now();
   for (const command of actor.commands) {
     const argv = command.argv.map((argument) => materialize(argument, runId));
     const before = await snapshotFiles(root);
-    const stepStarted = performance.now();
-    const result = await runCommand(packed, argv, root, contract.per_command_timeout_ms);
-    stepMilliseconds[command.id] = performance.now() - stepStarted;
+    const result = await runCommand(
+      packed,
+      argv,
+      root,
+      contract.per_command_timeout_ms,
+      command.readiness_probe,
+    );
+    stepMilliseconds[command.id] = result.elapsedMs;
     runId = await assertCommand(command, result, root, before, runId, acceptanceGaps);
   }
-  const elapsedMs = performance.now() - started;
+  const elapsedMs = Object.values(stepMilliseconds).reduce((total, elapsed) => total + elapsed, 0);
 
   // Inputs represent pre-existing user assets; the CLI must never rewrite them.
   const finalSnapshot = await snapshotFiles(root);
@@ -391,6 +500,9 @@ const runJourney = async (actor: Actor, contract: Contract): Promise<JourneyEvid
     [...finalSnapshot.keys()].some((path) => /attest\.config\.(?:json|ya?ml)$/u.test(path)),
   ).toBe(false);
   expect([...finalSnapshot.keys()].some((path) => /\.ya?ml$/u.test(path))).toBe(false);
+  expect(elapsedMs, `${actor.id}: instrumentation entered stopwatch`).toBe(
+    Object.values(stepMilliseconds).reduce((total, elapsed) => total + elapsed, 0),
+  );
   expect(elapsedMs, `${actor.id}: ${JSON.stringify(stepMilliseconds)}`).toBeLessThanOrEqual(
     contract.budget_ms,
   );
@@ -415,9 +527,14 @@ describe('CLI2.16 under-five-minute acceptance contract', () => {
     expect(contract.budget_ms).toBe(300_000);
     expect(contract.per_command_timeout_ms).toBe(30_000);
     expect(contract.timing).toMatchObject({
+      aggregation:
+        'Sum only the independently measured CLI process intervals for each actor; each actor must pass independently on every required operating system, and averages or pooled times are forbidden.',
       clock: 'performance.now monotonic wall time',
       retries: 0,
     });
+    expect(contract.timing.excluded).toContain(
+      'Snapshot hashing, structured-output parsing, HTML and readiness reads, process cleanup, and test assertions performed outside each CLI interval',
+    );
     expect(contract.timing.included.length).toBeGreaterThanOrEqual(3);
     expect(contract.timing.excluded.length).toBeGreaterThanOrEqual(3);
     expect(contract.prerequisites.warm.length).toBeGreaterThanOrEqual(4);
@@ -426,6 +543,22 @@ describe('CLI2.16 under-five-minute acceptance contract', () => {
       'human-copy-paste',
       'coding-agent-non-interactive',
     ]);
+    const human = contract.actors.find(({ id }) => id === 'human-copy-paste');
+    expect(human?.commands.find(({ id }) => id === 'run-eval')?.acceptance_stdout).not.toContain(
+      'attest diff',
+    );
+    expect(human?.commands.find(({ id }) => id === 'validate-comparison-template')).toMatchObject({
+      argv: ['help', 'diff', '--output', 'json'],
+      help_arguments: ['base-run-id', 'candidate-run-id'],
+    });
+    expect(human?.commands.find(({ id }) => id === 'write-report')?.argv).toEqual([
+      'report',
+      '$RUN_ID',
+    ]);
+    expect(human?.commands.find(({ id }) => id === 'open-view')).toMatchObject({
+      argv: ['view', '--no-open'],
+      readiness_probe: 'view',
+    });
 
     const workflow = await readFile(CI_WORKFLOW_PATH, 'utf8');
     for (const operatingSystem of contract.cross_platform.required_ci_operating_systems) {
