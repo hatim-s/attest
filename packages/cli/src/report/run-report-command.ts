@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import { link, open, rename, unlink } from 'node:fs/promises';
+import { link, open, realpath, rename, unlink } from 'node:fs/promises';
+import { basename, dirname, isAbsolute, join, relative } from 'node:path';
 
 import {
   openReadonlyRunStore,
@@ -86,18 +87,33 @@ const selectReportCases = <T>(cases: T[]): { cases: T[]; truncated: boolean } =>
 
 const isNodeError = (error: unknown): error is NodeJS.ErrnoException => error instanceof Error;
 
+/** Normalizes only absolute store ancestors so platform path aliases retain containment semantics. */
+const normalizeReportStorePath = async (
+  workingDirectory: string,
+  configuredStorePath: string,
+): Promise<string> => {
+  if (!isAbsolute(configuredStorePath)) return configuredStorePath;
+  const [resolvedRoot, resolvedDirectory] = await Promise.all([
+    realpath(workingDirectory),
+    realpath(dirname(configuredStorePath)),
+  ]);
+  return relative(resolvedRoot, join(resolvedDirectory, basename(configuredStorePath)));
+};
+
 /** Materializes one bounded, self-contained run report without overwriting by default. */
 const runReportCommand = async (
   options: RunReportCommandOptions,
 ): Promise<RunReportCommandResult> => {
-  const storePath = await prepareEvalProjectFile(
+  const configuredStorePath = options.storePath ?? '.attest/runs.db';
+  // Commander preserves --store as an absolute path in established report invocations.
+  const projectStorePath = await normalizeReportStorePath(
     options.workingDirectory,
-    options.storePath ?? '.attest/runs.db',
-    {
-      errorCode: 'project_read_failed',
-      message: 'The report run store is not a safe project file.',
-    },
+    configuredStorePath,
   );
+  const storePath = await prepareEvalProjectFile(options.workingDirectory, projectStorePath, {
+    errorCode: 'project_read_failed',
+    message: 'The report run store is not a safe project file.',
+  });
   const store = await openReadonlyRunStore(storePath);
   let runWithCases: Awaited<ReturnType<typeof store.getRunWithCases>>;
   try {
