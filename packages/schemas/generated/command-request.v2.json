@@ -6,7 +6,7 @@
       "properties": {
         "all": {
           "items": {
-            "$ref": "#/$defs/__schema11"
+            "$ref": "#/$defs/__schema12"
           },
           "minItems": 1,
           "type": "array"
@@ -22,7 +22,7 @@
       "properties": {
         "any": {
           "items": {
-            "$ref": "#/$defs/__schema11"
+            "$ref": "#/$defs/__schema12"
           },
           "minItems": 1,
           "type": "array"
@@ -757,111 +757,7 @@
               "type": "object"
             },
             {
-              "additionalProperties": false,
-              "properties": {
-                "close_timeout_ms": {
-                  "exclusiveMinimum": 0,
-                  "maximum": 9007199254740991,
-                  "type": "integer"
-                },
-                "extraction": {
-                  "$ref": "#/$defs/V2ResponseExtraction"
-                },
-                "headers": {
-                  "additionalProperties": {
-                    "anyOf": [
-                      {
-                        "type": "string"
-                      },
-                      {
-                        "anyOf": [
-                          {
-                            "additionalProperties": false,
-                            "properties": {
-                              "from_env": {
-                                "minLength": 1,
-                                "type": "string"
-                              }
-                            },
-                            "required": [
-                              "from_env"
-                            ],
-                            "type": "object"
-                          },
-                          {
-                            "additionalProperties": false,
-                            "properties": {
-                              "from_file": {
-                                "minLength": 1,
-                                "pattern": "^(?![\\\\/])(?!(?:.*[\\\\/])?\\.\\.(?:[\\\\/]|$)).+$",
-                                "type": "string"
-                              }
-                            },
-                            "required": [
-                              "from_file"
-                            ],
-                            "type": "object"
-                          }
-                        ]
-                      }
-                    ]
-                  },
-                  "propertyNames": {
-                    "type": "string"
-                  },
-                  "type": "object"
-                },
-                "kind": {
-                  "const": "websocket",
-                  "type": "string"
-                },
-                "lifecycle": {
-                  "enum": [
-                    "per_case",
-                    "per_run"
-                  ],
-                  "type": "string"
-                },
-                "message_idle_timeout_ms": {
-                  "exclusiveMinimum": 0,
-                  "maximum": 9007199254740991,
-                  "type": "integer"
-                },
-                "open_timeout_ms": {
-                  "exclusiveMinimum": 0,
-                  "maximum": 9007199254740991,
-                  "type": "integer"
-                },
-                "ping_interval_ms": {
-                  "exclusiveMinimum": 0,
-                  "maximum": 9007199254740991,
-                  "type": "integer"
-                },
-                "request_id_pointer": {
-                  "pattern": "^(?:\\/(?:[^~/]|~[01])*)*$",
-                  "type": "string"
-                },
-                "request_template": {
-                  "$ref": "#/$defs/__schema4"
-                },
-                "subprotocol": {
-                  "minLength": 1,
-                  "type": "string"
-                },
-                "url": {
-                  "pattern": "^wss?:\\/\\/\\S+$",
-                  "type": "string"
-                }
-              },
-              "required": [
-                "kind",
-                "lifecycle",
-                "url",
-                "request_template",
-                "request_id_pointer",
-                "extraction"
-              ],
-              "type": "object"
+              "$ref": "#/$defs/V2WebSocketTransport"
             }
           ]
         }
@@ -1006,7 +902,7 @@
               "properties": {
                 "assertions": {
                   "items": {
-                    "$ref": "#/$defs/__schema11"
+                    "$ref": "#/$defs/__schema12"
                   },
                   "minItems": 1,
                   "type": "array"
@@ -1300,14 +1196,14 @@
       "additionalProperties": false,
       "properties": {
         "expected": {
-          "$ref": "#/$defs/__schema9"
+          "$ref": "#/$defs/__schema10"
         },
         "id": {
           "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
           "type": "string"
         },
         "input": {
-          "$ref": "#/$defs/__schema8"
+          "$ref": "#/$defs/__schema9"
         },
         "metric_overrides": {
           "items": {
@@ -1333,7 +1229,7 @@
         },
         "params": {
           "additionalProperties": {
-            "$ref": "#/$defs/__schema10"
+            "$ref": "#/$defs/__schema11"
           },
           "propertyNames": {
             "type": "string"
@@ -1478,6 +1374,179 @@
       ],
       "type": "object"
     },
+    "V2WebSocketTransport": {
+      "additionalProperties": false,
+      "properties": {
+        "acknowledgement_pointer": {
+          "pattern": "^(?:\\/(?:[^~/]|~[01])*)*$",
+          "type": "string"
+        },
+        "acknowledgement_values": {
+          "items": {
+            "$ref": "#/$defs/__schema5"
+          },
+          "minItems": 1,
+          "type": "array"
+        },
+        "attempt_timeout_ms": {
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991,
+          "type": "integer"
+        },
+        "close_timeout_ms": {
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991,
+          "type": "integer"
+        },
+        "connection_mode": {
+          "enum": [
+            "serial",
+            "multiplexed"
+          ],
+          "type": "string"
+        },
+        "error_pointer": {
+          "pattern": "^(?:\\/(?:[^~/]|~[01])*)*$",
+          "type": "string"
+        },
+        "framing": {
+          "const": "text_json",
+          "type": "string"
+        },
+        "headers": {
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "anyOf": [
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "from_env": {
+                        "minLength": 1,
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "from_env"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "from_file": {
+                        "minLength": 1,
+                        "pattern": "^(?![\\\\/])(?!(?:.*[\\\\/])?\\.\\.(?:[\\\\/]|$)).+$",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "from_file"
+                    ],
+                    "type": "object"
+                  }
+                ]
+              }
+            ]
+          },
+          "propertyNames": {
+            "minLength": 1,
+            "pattern": "^[!#$%&'*+\\-.^_`|~0-9A-Za-z]+$",
+            "type": "string"
+          },
+          "type": "object"
+        },
+        "kind": {
+          "const": "websocket",
+          "type": "string"
+        },
+        "lifecycle": {
+          "enum": [
+            "per_case",
+            "per_run"
+          ],
+          "type": "string"
+        },
+        "message_idle_timeout_ms": {
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991,
+          "type": "integer"
+        },
+        "open_timeout_ms": {
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991,
+          "type": "integer"
+        },
+        "ping_interval_ms": {
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991,
+          "type": "integer"
+        },
+        "replay_after_acknowledgement": {
+          "const": false,
+          "type": "boolean"
+        },
+        "request_id_pointer": {
+          "pattern": "^(?:\\/(?:[^~/]|~[01])*)*$",
+          "type": "string"
+        },
+        "request_template": {
+          "additionalProperties": {
+            "$ref": "#/$defs/__schema4"
+          },
+          "propertyNames": {
+            "type": "string"
+          },
+          "type": "object"
+        },
+        "result_pointer": {
+          "pattern": "^(?:\\/(?:[^~/]|~[01])*)*$",
+          "type": "string"
+        },
+        "retry_boundary": {
+          "const": "before_acknowledgement",
+          "type": "string"
+        },
+        "subprotocol": {
+          "maxLength": 123,
+          "minLength": 1,
+          "pattern": "^[!#$%&'*+\\-.^_`|~0-9A-Za-z]+$",
+          "type": "string"
+        },
+        "trace_pointer": {
+          "pattern": "^(?:\\/(?:[^~/]|~[01])*)*$",
+          "type": "string"
+        },
+        "url": {
+          "pattern": "^wss?:\\/\\/\\S+$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "lifecycle",
+        "connection_mode",
+        "framing",
+        "url",
+        "request_template",
+        "request_id_pointer",
+        "acknowledgement_pointer",
+        "acknowledgement_values",
+        "result_pointer",
+        "error_pointer",
+        "open_timeout_ms",
+        "message_idle_timeout_ms",
+        "attempt_timeout_ms",
+        "ping_interval_ms",
+        "close_timeout_ms",
+        "retry_boundary",
+        "replay_after_acknowledgement"
+      ],
+      "type": "object"
+    },
     "__schema0": {
       "anyOf": [
         {
@@ -1574,6 +1643,37 @@
     "__schema11": {
       "anyOf": [
         {
+          "type": "string"
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        },
+        {
+          "items": {
+            "$ref": "#/$defs/__schema11"
+          },
+          "type": "array"
+        },
+        {
+          "additionalProperties": {
+            "$ref": "#/$defs/__schema11"
+          },
+          "propertyNames": {
+            "type": "string"
+          },
+          "type": "object"
+        }
+      ]
+    },
+    "__schema12": {
+      "anyOf": [
+        {
           "anyOf": [
             {
               "additionalProperties": false,
@@ -1586,7 +1686,7 @@
                       "type": "string"
                     },
                     "value": {
-                      "$ref": "#/$defs/__schema12"
+                      "$ref": "#/$defs/__schema13"
                     }
                   },
                   "required": [
@@ -1612,7 +1712,7 @@
                       "type": "string"
                     },
                     "value": {
-                      "$ref": "#/$defs/__schema12"
+                      "$ref": "#/$defs/__schema13"
                     }
                   },
                   "required": [
@@ -1674,7 +1774,7 @@
                         },
                         {
                           "additionalProperties": {
-                            "$ref": "#/$defs/__schema12"
+                            "$ref": "#/$defs/__schema13"
                           },
                           "propertyNames": {
                             "type": "string"
@@ -1750,7 +1850,7 @@
                                     "type": "string"
                                   },
                                   "value": {
-                                    "$ref": "#/$defs/__schema12"
+                                    "$ref": "#/$defs/__schema13"
                                   }
                                 },
                                 "required": [
@@ -1776,7 +1876,7 @@
                                     "type": "string"
                                   },
                                   "value": {
-                                    "$ref": "#/$defs/__schema12"
+                                    "$ref": "#/$defs/__schema13"
                                   }
                                 },
                                 "required": [
@@ -1931,7 +2031,7 @@
           "additionalProperties": false,
           "properties": {
             "not": {
-              "$ref": "#/$defs/__schema11"
+              "$ref": "#/$defs/__schema12"
             }
           },
           "required": [
@@ -1941,7 +2041,7 @@
         }
       ]
     },
-    "__schema12": {
+    "__schema13": {
       "anyOf": [
         {
           "type": "string"
@@ -1957,13 +2057,13 @@
         },
         {
           "items": {
-            "$ref": "#/$defs/__schema12"
+            "$ref": "#/$defs/__schema13"
           },
           "type": "array"
         },
         {
           "additionalProperties": {
-            "$ref": "#/$defs/__schema12"
+            "$ref": "#/$defs/__schema13"
           },
           "propertyNames": {
             "type": "string"
@@ -2465,7 +2565,7 @@
               "properties": {
                 "failure_values": {
                   "items": {
-                    "$ref": "#/$defs/__schema6"
+                    "$ref": "#/$defs/__schema7"
                   },
                   "minItems": 1,
                   "type": "array"
@@ -2502,7 +2602,7 @@
                 },
                 "success_values": {
                   "items": {
-                    "$ref": "#/$defs/__schema5"
+                    "$ref": "#/$defs/__schema6"
                   },
                   "minItems": 1,
                   "type": "array"
@@ -2755,7 +2855,7 @@
           "type": "string"
         },
         "input": {
-          "$ref": "#/$defs/__schema7"
+          "$ref": "#/$defs/__schema8"
         },
         "record": {
           "type": "boolean"
@@ -2812,14 +2912,14 @@
           "additionalProperties": false,
           "properties": {
             "expected": {
-              "$ref": "#/$defs/__schema9"
+              "$ref": "#/$defs/__schema10"
             },
             "id": {
               "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
               "type": "string"
             },
             "input": {
-              "$ref": "#/$defs/__schema8"
+              "$ref": "#/$defs/__schema9"
             },
             "metric_overrides": {
               "items": {
@@ -2845,7 +2945,7 @@
             },
             "params": {
               "additionalProperties": {
-                "$ref": "#/$defs/__schema10"
+                "$ref": "#/$defs/__schema11"
               },
               "propertyNames": {
                 "type": "string"
@@ -3759,6 +3859,314 @@
         "schema",
         "command",
         "metric_id"
+      ],
+      "type": "object"
+    },
+    {
+      "anyOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "baseline_run_id": {
+              "format": "ulid",
+              "pattern": "^[0-9A-HJKMNP-TV-Za-hjkmnp-tv-z]{26}$",
+              "type": "string"
+            },
+            "case_ids": {
+              "items": {
+                "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+                "type": "string"
+              },
+              "minItems": 1,
+              "type": "array"
+            },
+            "command": {
+              "const": "eval.run",
+              "type": "string"
+            },
+            "concurrency": {
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991,
+              "type": "integer"
+            },
+            "junit_path": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "output": {
+              "const": "human",
+              "type": "string"
+            },
+            "schema": {
+              "const": "attest.command-request/v2",
+              "type": "string"
+            },
+            "tags": {
+              "items": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "minItems": 1,
+              "type": "array"
+            },
+            "test_ids": {
+              "items": {
+                "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+                "type": "string"
+              },
+              "minItems": 1,
+              "type": "array"
+            },
+            "timeout_ms": {
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991,
+              "type": "integer"
+            },
+            "watch": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "schema",
+            "command",
+            "test_ids",
+            "output"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "baseline_run_id": {
+              "format": "ulid",
+              "pattern": "^[0-9A-HJKMNP-TV-Za-hjkmnp-tv-z]{26}$",
+              "type": "string"
+            },
+            "case_ids": {
+              "items": {
+                "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+                "type": "string"
+              },
+              "minItems": 1,
+              "type": "array"
+            },
+            "command": {
+              "const": "eval.run",
+              "type": "string"
+            },
+            "concurrency": {
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991,
+              "type": "integer"
+            },
+            "junit_path": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "output": {
+              "enum": [
+                "json",
+                "jsonl"
+              ],
+              "type": "string"
+            },
+            "schema": {
+              "const": "attest.command-request/v2",
+              "type": "string"
+            },
+            "tags": {
+              "items": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "minItems": 1,
+              "type": "array"
+            },
+            "test_ids": {
+              "items": {
+                "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+                "type": "string"
+              },
+              "minItems": 1,
+              "type": "array"
+            },
+            "timeout_ms": {
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "schema",
+            "command",
+            "test_ids",
+            "output"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "all": {
+              "const": true,
+              "type": "boolean"
+            },
+            "baseline_run_id": {
+              "format": "ulid",
+              "pattern": "^[0-9A-HJKMNP-TV-Za-hjkmnp-tv-z]{26}$",
+              "type": "string"
+            },
+            "case_ids": {
+              "items": {
+                "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+                "type": "string"
+              },
+              "minItems": 1,
+              "type": "array"
+            },
+            "command": {
+              "const": "eval.run",
+              "type": "string"
+            },
+            "concurrency": {
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991,
+              "type": "integer"
+            },
+            "junit_path": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "output": {
+              "const": "human",
+              "type": "string"
+            },
+            "schema": {
+              "const": "attest.command-request/v2",
+              "type": "string"
+            },
+            "tags": {
+              "items": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "minItems": 1,
+              "type": "array"
+            },
+            "timeout_ms": {
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991,
+              "type": "integer"
+            },
+            "watch": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "schema",
+            "command",
+            "all",
+            "output"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "all": {
+              "const": true,
+              "type": "boolean"
+            },
+            "baseline_run_id": {
+              "format": "ulid",
+              "pattern": "^[0-9A-HJKMNP-TV-Za-hjkmnp-tv-z]{26}$",
+              "type": "string"
+            },
+            "case_ids": {
+              "items": {
+                "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+                "type": "string"
+              },
+              "minItems": 1,
+              "type": "array"
+            },
+            "command": {
+              "const": "eval.run",
+              "type": "string"
+            },
+            "concurrency": {
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991,
+              "type": "integer"
+            },
+            "junit_path": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "output": {
+              "enum": [
+                "json",
+                "jsonl"
+              ],
+              "type": "string"
+            },
+            "schema": {
+              "const": "attest.command-request/v2",
+              "type": "string"
+            },
+            "tags": {
+              "items": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "minItems": 1,
+              "type": "array"
+            },
+            "timeout_ms": {
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "schema",
+            "command",
+            "all",
+            "output"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    {
+      "additionalProperties": false,
+      "properties": {
+        "command": {
+          "const": "eval.cancel",
+          "type": "string"
+        },
+        "output": {
+          "enum": [
+            "human",
+            "json"
+          ],
+          "type": "string"
+        },
+        "run_id": {
+          "format": "ulid",
+          "pattern": "^[0-9A-HJKMNP-TV-Za-hjkmnp-tv-z]{26}$",
+          "type": "string"
+        },
+        "schema": {
+          "const": "attest.command-request/v2",
+          "type": "string"
+        }
+      },
+      "required": [
+        "schema",
+        "command",
+        "run_id",
+        "output"
       ],
       "type": "object"
     }

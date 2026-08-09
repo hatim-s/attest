@@ -1,27 +1,7 @@
 import { AGENT_PROTOCOL } from '@attest/contracts';
 import { describe, expect, it } from 'vitest';
 
-import { buildAgentRequest, resolveInvocationEnv } from './request.js';
-
-describe('buildAgentRequest', () => {
-  it('builds a single-turn request and includes params only when present', () => {
-    const withoutParams = buildAgentRequest('run-1', { id: 'case-1', input: { value: 1 } });
-    const withParams = buildAgentRequest('run-1', {
-      id: 'case-2',
-      input: 'hello',
-      params: { locale: 'en' },
-    });
-
-    expect(withoutParams).toEqual({
-      protocol: AGENT_PROTOCOL,
-      run_id: 'run-1',
-      case_id: 'case-1',
-      input: { value: 1 },
-    });
-    expect(withParams.params).toEqual({ locale: 'en' });
-    expect(withParams).not.toHaveProperty('messages');
-  });
-});
+import { resolveInvocationEnv } from './request.js';
 
 describe('resolveInvocationEnv', () => {
   it('synthesizes an isolated base, filters PATH, and forwards only allowlisted parent values', () => {

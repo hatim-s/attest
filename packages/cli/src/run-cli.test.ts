@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -24,7 +24,8 @@ describe('runCli', () => {
     });
 
     expect(exitCode).toBe(0);
-    expect(output.join('')).toContain('run [options]');
+    expect(output.join('')).toContain('eval');
+    expect(output.join('')).not.toContain('\n  run [options]');
   });
 
   it('emits one complete deterministic JSON help document', async () => {
@@ -187,18 +188,18 @@ describe('runCli', () => {
     expect(exitCode).toBe(2);
   });
 
-  it('returns an actionable config discovery error', async () => {
+  it('returns an actionable v2 project discovery error', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'attest-cli-command-'));
     temporaryDirectories.push(directory);
     const errors: string[] = [];
 
-    const exitCode = await runCli(['run'], {
+    const exitCode = await runCli(['eval', 'run', 'smoke'], {
       workingDirectory: directory,
       io: { output: () => undefined, error: (message) => errors.push(message) },
     });
 
     expect(exitCode).toBe(1);
-    expect(errors.join('\n')).toContain('config_not_found');
+    expect(errors.join('\n')).toContain('project_not_found');
   });
 
   it('converts OTLP JSON through the nested trace command', async () => {
@@ -267,7 +268,7 @@ describe('runCli', () => {
     });
   });
 
-  it('emits one machine-readable run document', async () => {
+  it('does not discover a v1 config or expose the removed top-level run alias', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'attest-cli-command-'));
     temporaryDirectories.push(directory);
     const agentPath = join(directory, 'agent.mjs');
@@ -285,15 +286,62 @@ describe('runCli', () => {
       }),
     );
     const output: string[] = [];
+    const errors: string[] = [];
 
     const exitCode = await runCli(['run', '--format', 'json'], {
       workingDirectory: directory,
-      io: { output: (message) => output.push(message), error: () => undefined },
+      io: { output: (message) => output.push(message), error: (message) => errors.push(message) },
     });
 
-    expect(exitCode).toBe(0);
-    expect(JSON.parse(output.at(-1) ?? '{}')).toMatchObject({
-      run: { status: 'completed', summary: { passedCases: 1 } },
+    expect(exitCode).toBe(2);
+    expect(output).toEqual([]);
+    expect(errors.join('')).toContain("unknown command 'run'");
+    await expect(readFile(join(directory, '.attest', 'runs.db'), 'utf8')).rejects.toMatchObject({
+      code: 'ENOENT',
+    });
+  });
+
+  it('renders the same breaking-v2 rejection in human and JSON modes without writes', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'attest-cli-v1-rejection-'));
+    temporaryDirectories.push(directory);
+    await writeFile(join(directory, 'attest.config.yml'), 'config_version: 1\n');
+    const humanOutput: string[] = [];
+    const humanErrors: string[] = [];
+
+    expect(
+      await runCli(['eval', 'run', '--all'], {
+        workingDirectory: directory,
+        io: {
+          output: (message) => humanOutput.push(message),
+          error: (message) => humanErrors.push(message),
+        },
+      }),
+    ).toBe(1);
+    expect(humanOutput).toEqual(['Result: ERROR (exit 1)']);
+    expect(humanErrors.join('\n')).toBe(
+      'project_not_found: Attest v2 does not execute v1 configuration or project inputs.\n' +
+        'Path: attest.config.yml\n' +
+        'Hint: Create a v2 project with `attest project init`; use `attest eval run` as the only execution command.',
+    );
+
+    const jsonOutput: string[] = [];
+    expect(
+      await runCli(['eval', 'run', '--all', '--output', 'json'], {
+        workingDirectory: directory,
+        io: { output: (message) => jsonOutput.push(message), error: () => undefined },
+      }),
+    ).toBe(1);
+    expect(JSON.parse(jsonOutput[0] ?? '{}')).toMatchObject({
+      ok: false,
+      command: 'eval.run',
+      error: {
+        code: 'project_not_found',
+        message: 'Attest v2 does not execute v1 configuration or project inputs.',
+        hint: 'Create a v2 project with `attest project init`; use `attest eval run` as the only execution command.',
+      },
+    });
+    await expect(readFile(join(directory, '.attest', 'runs.db'), 'utf8')).rejects.toMatchObject({
+      code: 'ENOENT',
     });
   });
 
@@ -330,14 +378,16 @@ describe('runCli', () => {
     });
 
     const reportOutput: string[] = [];
+    const absoluteReportPath = join(directory, 'report.json');
     expect(
-      await runCli(['report', first.id, '--store', storePath, '--output', 'report.json'], {
-        workingDirectory: directory,
+      await runCli(['report', first.id, '--store', storePath, '--output', absoluteReportPath], {
+        // On macOS this pairs a /var-authored destination with its /private/var project alias.
+        workingDirectory: await realpath(directory),
         io: { output: (message) => reportOutput.push(message), error: () => undefined },
       }),
     ).toBe(0);
     expect(reportOutput.join('')).toContain('report.json');
-    expect(await readFile(join(directory, 'report.json'), 'utf8')).toContain('<!doctype html>');
+    expect(await readFile(absoluteReportPath, 'utf8')).toContain('<!doctype html>');
 
     const diffOutput: string[] = [];
     expect(
@@ -362,7 +412,7 @@ describe('runCli', () => {
       }),
     ).toBe(2);
     expect(usageOutput).toEqual([]);
-    expect(usageErrors.join('')).toContain("unknown option '--output'");
+    expect(usageErrors.join('')).toContain("unknown command 'run'");
   });
 
   it('retrieves the schema id advertised by JSON help from the generated registry', async () => {
@@ -434,7 +484,8 @@ describe('runCli', () => {
     const subcommands = new Map(
       result.command.subcommands.map((command) => [command.name, command]),
     );
-    expect(subcommands.get('run')?.options.map(({ name }) => name)).toContain('format');
+    expect(subcommands.has('run')).toBe(false);
+    expect(subcommands.has('eval')).toBe(true);
     expect(subcommands.get('diff')?.options.map(({ name }) => name)).toContain('format');
     expect(subcommands.get('report')?.options.map(({ name }) => name)).toContain('output');
     expect(subcommands.get('trace')?.options.map(({ name }) => name)).not.toContain('output');

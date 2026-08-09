@@ -7,7 +7,6 @@ import {
   AGENT_PROTOCOL,
   type AgentRequest,
   type AgentResource,
-  type AgentTarget,
   type JsonValue,
   type SecretReference,
 } from '@attest/contracts';
@@ -19,13 +18,16 @@ import {
   redactTransportText,
   startBackgroundAgent,
   startJsonlBridgeAgent,
+  startWebSocketAgent,
   type BackgroundAgentResource,
   type HttpAgentResource,
   type InvocationResult,
   type JsonlBridgeAgentResource,
+  type NativeAgentTarget,
   type StoredCaseExecution,
   type StoredAttempt,
   type StreamAgentResource,
+  type WebSocketAgentResource,
 } from '@attest/core';
 
 import { AttestCliError } from '../../errors.js';
@@ -60,7 +62,9 @@ type ResolvedNativeAgent = {
   mappedAgent?: HttpAgentResource;
   secrets: string[];
   streamAgent?: StreamAgentResource;
-  target?: AgentTarget;
+  target?: NativeAgentTarget;
+  webSocketAgent?: WebSocketAgentResource;
+  webSocketHeaders?: Record<string, string>;
 };
 
 const isContainedPath = (root: string, candidate: string): boolean => {
@@ -327,6 +331,24 @@ const resolveNativeAgent = async (
     };
   }
 
+  if (agent.transport.kind === 'websocket') {
+    const resolved = await resolveHttpSecrets(
+      [{ headers: agent.transport.headers }],
+      projectRoot,
+      observer,
+    );
+    for (const [name, value] of Object.entries(resolved.headers)) {
+      if (agent.redaction?.headers?.some((header) => header.toLowerCase() === name.toLowerCase())) {
+        resolved.secrets.push(value);
+      }
+    }
+    return {
+      secrets: [...new Set(resolved.secrets)],
+      webSocketAgent: agent as WebSocketAgentResource,
+      webSocketHeaders: resolved.headers,
+    };
+  }
+
   throw new AttestCliError(
     'project_invalid',
     `Agent ${agent.id} uses a transport that belongs to a later CLI item.`,
@@ -511,6 +533,17 @@ const testNativeAgentConnection = async (options: NativeAgentTestOptions): Promi
         secrets: resolved.secrets,
         signal: options.signal,
       });
+    } else if (resolved.webSocketAgent !== undefined) {
+      const session = await startWebSocketAgent(resolved.webSocketAgent, {
+        headers: resolved.webSocketHeaders,
+        secrets: resolved.secrets,
+        signal: options.signal,
+      });
+      try {
+        invocation = await session.invoke(request, options.signal);
+      } finally {
+        await session.close();
+      }
     } else if (resolved.mappedAgent !== undefined) {
       invocation = await invokeMappedHttpAgent(resolved.mappedAgent, request, {
         headers: resolved.httpHeaders,
@@ -533,7 +566,9 @@ const testNativeAgentConnection = async (options: NativeAgentTestOptions): Promi
   } catch (error: unknown) {
     if (
       !(error instanceof AgentInvocationError) ||
-      (resolved.backgroundAgent === undefined && resolved.jsonlBridgeAgent === undefined)
+      (resolved.backgroundAgent === undefined &&
+        resolved.jsonlBridgeAgent === undefined &&
+        resolved.webSocketAgent === undefined)
     ) {
       throw error;
     }

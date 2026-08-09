@@ -1,9 +1,4 @@
-import {
-  parseAgentResponse,
-  type AgentRequest,
-  type AgentTarget,
-  type ContractIssue,
-} from '@attest/contracts';
+import { parseAgentResponse, type AgentRequest, type ContractIssue } from '@attest/contracts';
 
 import { invokeCliAgent } from './cli-invoker.js';
 import { AgentInvocationError } from './errors.js';
@@ -14,6 +9,7 @@ import type {
   InvocationDiagnostics,
   InvocationResult,
   InvokeAgentOptions,
+  NativeAgentTarget,
 } from './types.js';
 
 type RunnerInvokeAgentOptions = Omit<InvokeAgentOptions, 'env'> & {
@@ -31,7 +27,7 @@ const withAttemptEvidence = (attempt: InvocationAttempt): InvocationAttempt => {
 };
 
 const invokeOnce = async (
-  target: AgentTarget,
+  target: NativeAgentTarget,
   request: AgentRequest,
   options: RunnerInvokeAgentOptions,
 ): Promise<InvocationAttempt> => {
@@ -105,7 +101,7 @@ const isRetryableInvocationError = (
 
 /** Dispatches one target and retains every validated retry attempt for deterministic recording. */
 const invokeAgent = async (
-  target: AgentTarget,
+  target: NativeAgentTarget,
   request: AgentRequest,
   options: RunnerInvokeAgentOptions,
 ): Promise<InvocationResult> => {

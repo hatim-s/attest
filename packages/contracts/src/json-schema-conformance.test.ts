@@ -13,7 +13,6 @@ import {
   CLI_HELP_SCHEMA_VERSION,
   CLI_RESULT_SCHEMA_VERSION,
   COMMAND_REQUEST_SCHEMA_VERSION,
-  CONFIG_VERSION,
   DATASET_SCHEMA_VERSION,
   METRIC_PROTOCOL,
   METRIC_RESOURCE_SCHEMA_VERSION,
@@ -41,19 +40,6 @@ const validTrace = {
       start_time: '2026-08-06T10:15:03Z',
       end_time: '2026-08-06T10:15:04.120Z',
       status: { code: 'ok' },
-    },
-  ],
-};
-
-const validConfig = {
-  config_version: CONFIG_VERSION,
-  agent: { type: 'http', url: 'https://example.com/invoke' },
-  suites: [{ name: 'smoke', metrics: ['quality'], cases: [{ id: 'one', input: {} }] }],
-  metrics: [
-    {
-      name: 'quality',
-      type: 'assertion',
-      assert: [{ threshold: { path: '$.output.score', gte: 0.5 } }],
     },
   ],
 };
@@ -181,21 +167,6 @@ const fixtures: ConformanceFixture[] = [
     candidate: {
       ...validTrace,
       spans: [{ ...validTrace.spans[0], kind: undefined }],
-    },
-    valid: false,
-  },
-  {
-    name: 'config accepts union and threshold invariants',
-    fileName: 'config.v1.json',
-    candidate: validConfig,
-    valid: true,
-  },
-  {
-    name: 'config rejects empty assertion lists',
-    fileName: 'config.v1.json',
-    candidate: {
-      ...validConfig,
-      metrics: [{ name: 'quality', type: 'assertion', assert: [] }],
     },
     valid: false,
   },

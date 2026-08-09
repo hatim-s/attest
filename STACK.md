@@ -19,7 +19,7 @@
 - **LLM judges**: thin provider adapters behind one interface (Anthropic + OpenAI SDKs first). The runtime never becomes a universal provider SDK — agents and custom metrics stay language-neutral by contract.
 - **Run store**: SQLite (WAL mode), one serialized writer, concurrent readers. Project-local `.attest/runs.db`. Normalized runs/cases/metric-results + searchable span metadata, with canonical raw JSON retained for inputs/outputs/traces/judge responses. Numbered transactional migrations; every persisted contract independently versioned; ULID ids, UTC timestamps, immutable completed runs. Exportable versioned run bundle (JSON/NDJSON) — the cloud ingests bundles via API, never syncs SQLite.
 - **Dashboard**: React + Vite SPA embedded in the shipped artifact. `attest view` = loopback-only HTTP server (127.0.0.1, session token for writes, Origin validation). `attest report` = same components, second build entry point, run bundle inlined into one self-contained HTML file (no network requests). TanStack Table + virtualized lists; tree-shaken ECharts for distributions/trends; custom virtualized trace-waterfall component. Test at 10k cases.
-- **Config**: YAML documented, JSON accepted as exact equivalent. Draft 2020-12 JSON Schema, required `config_version`, unknown-field rejection, aggregated errors with source locations, validation before any agent runs. UI editor edits via comment-preserving CST patches (never decode/re-emit whole docs); atomic rename; refuse write if file changed since load; golden round-trip tests mandatory.
+- **Project resources**: generated JSON resources plus JSONL datasets are canonical. Draft 2020-12 JSON Schemas reject unknown fields and aggregate source-addressed errors before any agent runs; transactional writes use canonical hashes, atomic publication, and stale-project protection.
 - **Multi-turn simulation**: simulator loop lives in the runtime as an orchestration layer over the ordinary one-turn agent contract (`messages`, `turn_index`, `conversation_id` in the request envelope; stateless replay default, optional opaque state token for HTTP agents). Deterministic termination policy (max_turns / timeout / agent failure / simulator `finished`). Simulator prompts, params, and usage recorded separately from the tested agent.
 - **Repo layout**: one public OSS monorepo — CLI, runtime, web app, schemas, docs, examples, conformance fixtures. `LICENSE`, `NOTICE`, SBOM release step, DCO sign-off (no CLA at launch), trademark policy once the name is final.
 
@@ -28,7 +28,7 @@
 Primary test surfaces: determinism, contract compatibility, hostile process behavior. Required CI never calls a live LLM; provider smoke tests are scheduled, budget-capped, non-blocking.
 
 - Unit/property tests: assertions, thresholds, diff classification, hashing, retries, redaction.
-- Golden conformance fixtures for every contract: config, agent, metric, trace, JUnit output, report bundle.
+- Golden conformance fixtures for every current contract: project resources, agent, metric, trace, JUnit output, report bundle.
 - Fake CLI/HTTP agents covering hangs, malformed output, huge output, partial stdout, stderr noise, non-zero exits, child processes, cancellation.
 - SQLite crash/reopen + migration tests; fuzzing for parsers, trace ingestion, diffing.
 - Component tests + Playwright flows for trace/diff/report views and editor round-trips.
@@ -42,7 +42,7 @@ No sandboxing of user executables in v1: agents and custom metrics are trusted p
 
 ## De-risking prototypes (before broad build-out — feeds Roadmap Phase 0/1)
 
-1. Vertical slice: config → concurrent CLI+HTTP agent execution → SQLite → diff → single-file HTML report.
+1. Vertical slice: v2 project → concurrent agent execution → SQLite → diff → single-file HTML report.
 2. Cross-platform (macOS/Linux) timeout + process-tree termination under Bun.
 3. Lossless YAML editing under comments, multiline strings, concurrent modification.
 4. One large traced run rendered from both localhost and self-contained HTML.

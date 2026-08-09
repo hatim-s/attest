@@ -1,0 +1,1073 @@
+{
+  "$comment": "Runtime-only invariants include span time ordering, duplicate identifiers, and metric references.",
+  "$defs": {
+    "__schema0": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        },
+        {
+          "items": {
+            "$ref": "#/$defs/__schema0"
+          },
+          "type": "array"
+        },
+        {
+          "additionalProperties": {
+            "$ref": "#/$defs/__schema0"
+          },
+          "propertyNames": {
+            "type": "string"
+          },
+          "type": "object"
+        }
+      ]
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "oneOf": [
+    {
+      "additionalProperties": false,
+      "properties": {
+        "data": {
+          "additionalProperties": false,
+          "properties": {
+            "concurrency": {
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991,
+              "type": "integer"
+            },
+            "run_id": {
+              "format": "ulid",
+              "pattern": "^[0-9A-HJKMNP-TV-Za-hjkmnp-tv-z]{26}$",
+              "type": "string"
+            },
+            "snapshot_hash": {
+              "pattern": "^[a-f0-9]{64}$",
+              "type": "string"
+            },
+            "timeout_ms": {
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991,
+              "type": "integer"
+            },
+            "total_cases": {
+              "maximum": 9007199254740991,
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "run_id",
+            "snapshot_hash",
+            "total_cases",
+            "concurrency",
+            "timeout_ms"
+          ],
+          "type": "object"
+        },
+        "event": {
+          "const": "run_started",
+          "type": "string"
+        },
+        "schema": {
+          "const": "attest.cli-event/v1",
+          "type": "string"
+        },
+        "sequence": {
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "time": {
+          "format": "date-time",
+          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "schema",
+        "sequence",
+        "time",
+        "event",
+        "data"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "properties": {
+        "data": {
+          "additionalProperties": false,
+          "properties": {
+            "case_id": {
+              "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+              "type": "string"
+            },
+            "configured_index": {
+              "maximum": 9007199254740991,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "run_id": {
+              "format": "ulid",
+              "pattern": "^[0-9A-HJKMNP-TV-Za-hjkmnp-tv-z]{26}$",
+              "type": "string"
+            },
+            "test_id": {
+              "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "run_id",
+            "test_id",
+            "case_id",
+            "configured_index"
+          ],
+          "type": "object"
+        },
+        "event": {
+          "const": "case_started",
+          "type": "string"
+        },
+        "schema": {
+          "const": "attest.cli-event/v1",
+          "type": "string"
+        },
+        "sequence": {
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "time": {
+          "format": "date-time",
+          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "schema",
+        "sequence",
+        "time",
+        "event",
+        "data"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "properties": {
+        "data": {
+          "additionalProperties": false,
+          "properties": {
+            "case_id": {
+              "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+              "type": "string"
+            },
+            "completion_index": {
+              "maximum": 9007199254740991,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "configured_index": {
+              "maximum": 9007199254740991,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "outcome": {
+              "enum": [
+                "completed",
+                "invocation_error",
+                "timeout",
+                "cancelled"
+              ],
+              "type": "string"
+            },
+            "run_id": {
+              "format": "ulid",
+              "pattern": "^[0-9A-HJKMNP-TV-Za-hjkmnp-tv-z]{26}$",
+              "type": "string"
+            },
+            "test_id": {
+              "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+              "type": "string"
+            },
+            "verdict": {
+              "enum": [
+                "pass",
+                "fail",
+                "error"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "run_id",
+            "test_id",
+            "case_id",
+            "configured_index",
+            "completion_index",
+            "outcome",
+            "verdict"
+          ],
+          "type": "object"
+        },
+        "event": {
+          "const": "case_completed",
+          "type": "string"
+        },
+        "schema": {
+          "const": "attest.cli-event/v1",
+          "type": "string"
+        },
+        "sequence": {
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "time": {
+          "format": "date-time",
+          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "schema",
+        "sequence",
+        "time",
+        "event",
+        "data"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "properties": {
+        "data": {
+          "additionalProperties": false,
+          "properties": {
+            "run_id": {
+              "format": "ulid",
+              "pattern": "^[0-9A-HJKMNP-TV-Za-hjkmnp-tv-z]{26}$",
+              "type": "string"
+            },
+            "status": {
+              "enum": [
+                "completed",
+                "failed",
+                "cancelled"
+              ],
+              "type": "string"
+            },
+            "summary": {
+              "additionalProperties": false,
+              "properties": {
+                "error_cases": {
+                  "maximum": 9007199254740991,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "failed_cases": {
+                  "maximum": 9007199254740991,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "metric_error_count": {
+                  "maximum": 9007199254740991,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "passed_cases": {
+                  "maximum": 9007199254740991,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "total_cases": {
+                  "maximum": 9007199254740991,
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "total_cases",
+                "passed_cases",
+                "failed_cases",
+                "error_cases",
+                "metric_error_count"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "run_id",
+            "status",
+            "summary"
+          ],
+          "type": "object"
+        },
+        "event": {
+          "const": "run_completed",
+          "type": "string"
+        },
+        "schema": {
+          "const": "attest.cli-event/v1",
+          "type": "string"
+        },
+        "sequence": {
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "time": {
+          "format": "date-time",
+          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "schema",
+        "sequence",
+        "time",
+        "event",
+        "data"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "properties": {
+        "data": {
+          "anyOf": [
+            {
+              "additionalProperties": false,
+              "properties": {
+                "exit_code": {
+                  "const": 0,
+                  "type": "number"
+                },
+                "result": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "command": {
+                      "const": "eval.run",
+                      "type": "string"
+                    },
+                    "ok": {
+                      "const": true,
+                      "type": "boolean"
+                    },
+                    "project_hash_after": {
+                      "anyOf": [
+                        {
+                          "pattern": "^[a-f0-9]{64}$",
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "project_hash_before": {
+                      "anyOf": [
+                        {
+                          "pattern": "^[a-f0-9]{64}$",
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "result": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "baseline_run_id": {
+                          "format": "ulid",
+                          "pattern": "^[0-9A-HJKMNP-TV-Za-hjkmnp-tv-z]{26}$",
+                          "type": "string"
+                        },
+                        "junit_path": {
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "run_id": {
+                          "format": "ulid",
+                          "pattern": "^[0-9A-HJKMNP-TV-Za-hjkmnp-tv-z]{26}$",
+                          "type": "string"
+                        },
+                        "snapshot_hash": {
+                          "pattern": "^[a-f0-9]{64}$",
+                          "type": "string"
+                        },
+                        "status": {
+                          "const": "completed",
+                          "type": "string"
+                        },
+                        "summary": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "error_cases": {
+                              "maximum": 9007199254740991,
+                              "minimum": 0,
+                              "type": "integer"
+                            },
+                            "failed_cases": {
+                              "maximum": 9007199254740991,
+                              "minimum": 0,
+                              "type": "integer"
+                            },
+                            "metric_error_count": {
+                              "maximum": 9007199254740991,
+                              "minimum": 0,
+                              "type": "integer"
+                            },
+                            "passed_cases": {
+                              "maximum": 9007199254740991,
+                              "minimum": 0,
+                              "type": "integer"
+                            },
+                            "total_cases": {
+                              "maximum": 9007199254740991,
+                              "minimum": 0,
+                              "type": "integer"
+                            }
+                          },
+                          "required": [
+                            "total_cases",
+                            "passed_cases",
+                            "failed_cases",
+                            "error_cases",
+                            "metric_error_count"
+                          ],
+                          "type": "object"
+                        },
+                        "verdict": {
+                          "const": "pass",
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "run_id",
+                        "snapshot_hash",
+                        "status",
+                        "summary",
+                        "verdict"
+                      ],
+                      "type": "object"
+                    },
+                    "schema": {
+                      "const": "attest.cli-result/v1",
+                      "type": "string"
+                    },
+                    "warnings": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "code": {
+                            "minLength": 1,
+                            "type": "string"
+                          },
+                          "details": {
+                            "$ref": "#/$defs/__schema0"
+                          },
+                          "message": {
+                            "minLength": 1,
+                            "type": "string"
+                          },
+                          "path": {
+                            "minLength": 1,
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "code",
+                          "message"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "schema",
+                    "ok",
+                    "command",
+                    "project_hash_before",
+                    "project_hash_after",
+                    "result",
+                    "warnings"
+                  ],
+                  "type": "object"
+                }
+              },
+              "required": [
+                "exit_code",
+                "result"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "exit_code": {
+                  "const": 1,
+                  "type": "number"
+                },
+                "result": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "command": {
+                      "const": "eval.run",
+                      "type": "string"
+                    },
+                    "ok": {
+                      "const": true,
+                      "type": "boolean"
+                    },
+                    "project_hash_after": {
+                      "anyOf": [
+                        {
+                          "pattern": "^[a-f0-9]{64}$",
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "project_hash_before": {
+                      "anyOf": [
+                        {
+                          "pattern": "^[a-f0-9]{64}$",
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "result": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "baseline_run_id": {
+                          "format": "ulid",
+                          "pattern": "^[0-9A-HJKMNP-TV-Za-hjkmnp-tv-z]{26}$",
+                          "type": "string"
+                        },
+                        "junit_path": {
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "run_id": {
+                          "format": "ulid",
+                          "pattern": "^[0-9A-HJKMNP-TV-Za-hjkmnp-tv-z]{26}$",
+                          "type": "string"
+                        },
+                        "snapshot_hash": {
+                          "pattern": "^[a-f0-9]{64}$",
+                          "type": "string"
+                        },
+                        "status": {
+                          "const": "completed",
+                          "type": "string"
+                        },
+                        "summary": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "error_cases": {
+                              "maximum": 9007199254740991,
+                              "minimum": 0,
+                              "type": "integer"
+                            },
+                            "failed_cases": {
+                              "maximum": 9007199254740991,
+                              "minimum": 0,
+                              "type": "integer"
+                            },
+                            "metric_error_count": {
+                              "maximum": 9007199254740991,
+                              "minimum": 0,
+                              "type": "integer"
+                            },
+                            "passed_cases": {
+                              "maximum": 9007199254740991,
+                              "minimum": 0,
+                              "type": "integer"
+                            },
+                            "total_cases": {
+                              "maximum": 9007199254740991,
+                              "minimum": 0,
+                              "type": "integer"
+                            }
+                          },
+                          "required": [
+                            "total_cases",
+                            "passed_cases",
+                            "failed_cases",
+                            "error_cases",
+                            "metric_error_count"
+                          ],
+                          "type": "object"
+                        },
+                        "verdict": {
+                          "const": "fail",
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "run_id",
+                        "snapshot_hash",
+                        "status",
+                        "summary",
+                        "verdict"
+                      ],
+                      "type": "object"
+                    },
+                    "schema": {
+                      "const": "attest.cli-result/v1",
+                      "type": "string"
+                    },
+                    "warnings": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "code": {
+                            "minLength": 1,
+                            "type": "string"
+                          },
+                          "details": {
+                            "$ref": "#/$defs/__schema0"
+                          },
+                          "message": {
+                            "minLength": 1,
+                            "type": "string"
+                          },
+                          "path": {
+                            "minLength": 1,
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "code",
+                          "message"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    }
+                  },
+                  "required": [
+                    "schema",
+                    "ok",
+                    "command",
+                    "project_hash_before",
+                    "project_hash_after",
+                    "result",
+                    "warnings"
+                  ],
+                  "type": "object"
+                }
+              },
+              "required": [
+                "exit_code",
+                "result"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "exit_code": {
+                  "const": 1,
+                  "type": "number"
+                },
+                "result": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "command": {
+                      "const": "eval.run",
+                      "type": "string"
+                    },
+                    "error": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "code": {
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "details": {
+                          "$ref": "#/$defs/__schema0"
+                        },
+                        "hint": {
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "message": {
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "path": {
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "retryable": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "retryable"
+                      ],
+                      "type": "object"
+                    },
+                    "ok": {
+                      "const": false,
+                      "type": "boolean"
+                    },
+                    "schema": {
+                      "const": "attest.cli-result/v1",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "schema",
+                    "ok",
+                    "command",
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              },
+              "required": [
+                "exit_code",
+                "result"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "exit_code": {
+                  "const": 2,
+                  "type": "number"
+                },
+                "result": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "command": {
+                      "const": "eval.run",
+                      "type": "string"
+                    },
+                    "error": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "code": {
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "details": {
+                          "$ref": "#/$defs/__schema0"
+                        },
+                        "hint": {
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "message": {
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "path": {
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "retryable": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "retryable"
+                      ],
+                      "type": "object"
+                    },
+                    "ok": {
+                      "const": false,
+                      "type": "boolean"
+                    },
+                    "schema": {
+                      "const": "attest.cli-result/v1",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "schema",
+                    "ok",
+                    "command",
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              },
+              "required": [
+                "exit_code",
+                "result"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "exit_code": {
+                  "const": 3,
+                  "type": "number"
+                },
+                "result": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "command": {
+                      "const": "eval.run",
+                      "type": "string"
+                    },
+                    "error": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "code": {
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "details": {
+                          "$ref": "#/$defs/__schema0"
+                        },
+                        "hint": {
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "message": {
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "path": {
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "retryable": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "retryable"
+                      ],
+                      "type": "object"
+                    },
+                    "ok": {
+                      "const": false,
+                      "type": "boolean"
+                    },
+                    "schema": {
+                      "const": "attest.cli-result/v1",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "schema",
+                    "ok",
+                    "command",
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              },
+              "required": [
+                "exit_code",
+                "result"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "exit_code": {
+                  "const": 4,
+                  "type": "number"
+                },
+                "result": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "command": {
+                      "const": "eval.run",
+                      "type": "string"
+                    },
+                    "error": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "code": {
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "details": {
+                          "$ref": "#/$defs/__schema0"
+                        },
+                        "hint": {
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "message": {
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "path": {
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "retryable": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "retryable"
+                      ],
+                      "type": "object"
+                    },
+                    "ok": {
+                      "const": false,
+                      "type": "boolean"
+                    },
+                    "schema": {
+                      "const": "attest.cli-result/v1",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "schema",
+                    "ok",
+                    "command",
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              },
+              "required": [
+                "exit_code",
+                "result"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "exit_code": {
+                  "const": 130,
+                  "type": "number"
+                },
+                "result": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "command": {
+                      "const": "eval.run",
+                      "type": "string"
+                    },
+                    "error": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "code": {
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "details": {
+                          "$ref": "#/$defs/__schema0"
+                        },
+                        "hint": {
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "message": {
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "path": {
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "retryable": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "code",
+                        "message",
+                        "retryable"
+                      ],
+                      "type": "object"
+                    },
+                    "ok": {
+                      "const": false,
+                      "type": "boolean"
+                    },
+                    "schema": {
+                      "const": "attest.cli-result/v1",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "schema",
+                    "ok",
+                    "command",
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              },
+              "required": [
+                "exit_code",
+                "result"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "event": {
+          "const": "result",
+          "type": "string"
+        },
+        "schema": {
+          "const": "attest.cli-event/v1",
+          "type": "string"
+        },
+        "sequence": {
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "time": {
+          "format": "date-time",
+          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "schema",
+        "sequence",
+        "time",
+        "event",
+        "data"
+      ],
+      "type": "object"
+    }
+  ]
+}

@@ -1,15 +1,18 @@
 import type {
   AgentRequest,
   AgentResponse,
-  CaseDefinition,
   CaseOutcome,
   ContractWarning,
   ParseReport,
   RawExcerpt,
+  TestCase,
   Trace,
 } from '@attest/contracts';
 
 import type { AgentInvocationError } from './errors.js';
+
+/** Describes the two native v2 transports that still use the shared envelope invoker. */
+type NativeAgentTarget = { type: 'cli'; command: string[] } | { type: 'http'; url: string };
 
 /** Controls a single agent invocation; timeouts and caps come from resolved config defaults. */
 type InvokeOptions = {
@@ -83,7 +86,7 @@ type CaseExecutionBase = {
    * Transient full case document (including `expected`) so metrics can run
    * before persistence; the store adapter deliberately drops it.
    */
-  caseDefinition: CaseDefinition;
+  caseDefinition: TestCase;
   /** Metric names resolved for this case (per-case override, else suite metrics). */
   expectedMetrics: string[];
   /** Every transport attempt including retries, preserved per the agent contract. */
@@ -108,32 +111,13 @@ type CaseExecution = CaseExecutionBase &
       }
   );
 
-/** Progress signal emitted as cases finish; ordering follows completion, not config order. */
-type RunProgressEvent = {
-  completed: number;
-  total: number;
-  execution: CaseExecution;
-};
-
-/** Controls a whole-config execution pass. */
-type ExecuteOptions = {
-  runId: string;
-  /** Directory dataset paths resolve against (usually the config file's directory). */
-  baseDirectory: string;
-  signal?: AbortSignal;
-  /** Overrides `run.concurrency` from config (default 4). */
-  concurrency?: number;
-  onProgress?: (event: RunProgressEvent) => void;
-};
-
 export {
   type CaseExecution,
   type CaseExecutionBase,
-  type ExecuteOptions,
   type InvocationAttempt,
   type InvocationDiagnostics,
   type InvocationResult,
   type InvokeAgentOptions,
   type InvokeOptions,
-  type RunProgressEvent,
+  type NativeAgentTarget,
 };

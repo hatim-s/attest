@@ -35,10 +35,15 @@ type MutationOptions = CommonOptions & {
 };
 
 type AddOptions = MutationOptions & {
+  acknowledgementPointer?: string;
+  acknowledgementValues?: string[];
   argvJson?: string;
+  attemptTimeout?: string;
   backgroundCommand?: string;
   bridgeConcurrency?: 'serial' | 'multiplexed';
   cancelGrace?: string;
+  closeTimeout?: string;
+  connectionMode?: 'serial' | 'multiplexed';
   cwd?: string;
   env?: string[];
   errorPointer?: string;
@@ -46,14 +51,19 @@ type AddOptions = MutationOptions & {
   headerEnv?: string[];
   incrementalOutputMode?: 'text' | 'array';
   incrementalOutputPointer?: string;
+  idleTimeout?: string;
   invokeUrl?: string;
   jsonlCommand?: string;
   name?: string;
   nativeCommand?: string;
   nativeHttp?: string;
+  openTimeout?: string;
+  pingInterval?: string;
   readinessHttp?: string;
   readinessStderr?: string;
   readinessTcp?: string;
+  requestIdPointer?: string;
+  requestTemplate?: string;
   responsePointer?: string;
   shutdownUrl?: string;
   stopTimeout?: string;
@@ -64,6 +74,9 @@ type AddOptions = MutationOptions & {
   timeout?: string;
   trace?: boolean;
   tracePointer?: string;
+  subprotocol?: string;
+  websocketLifecycle?: 'per_case' | 'per_run';
+  websocketUrl?: string;
 };
 
 type ImportOptions = MutationOptions & {
@@ -110,6 +123,7 @@ const collect = (value: string, previous: string[] | undefined): string[] => [
 ];
 
 const REPEATABLE_AGENT_OPTIONS = new Set([
+  'acknowledgement-value',
   'env',
   'header-env',
   'map-body',
@@ -207,14 +221,14 @@ const registerMutationHelp = (
   });
 };
 
-/** Registers agent authoring plus native and mapped HTTP connection-test commands. */
+/** Registers agent authoring plus native, HTTP, streaming, and WebSocket UX commands. */
 const registerAgentCommands = (context: RegisterAgentCommandsOptions): void => {
   const agent = context.program.command('agent').description('Author and test agent adapters.');
 
   const add = addMutationOptions(
     agent
       .command('add')
-      .description('Add one native, managed-process, or streaming agent resource.')
+      .description('Add one native, managed-process, streaming, or WebSocket agent resource.')
       .argument('[agent-id]', 'agent id'),
   )
     .option('--name <name>', 'agent display name; defaults to the id')
@@ -224,12 +238,34 @@ const registerAgentCommands = (context: RegisterAgentCommandsOptions): void => {
     .option('--background-command <command>', 'run-scoped background service command')
     .option('--jsonl-command <command>', 'run-scoped correlated JSONL bridge command')
     .option('--stream-url <url>', 'external SSE or JSONL stream endpoint')
+    .option('--websocket-url <url>', 'plain ws:// or wss:// text-JSON endpoint')
     .addOption(new Option('--stream-framing <framing>', 'stream framing').choices(['sse', 'jsonl']))
     .addOption(
       new Option('--bridge-concurrency <mode>', 'JSONL bridge concurrency').choices([
         'serial',
         'multiplexed',
       ]),
+    )
+    .addOption(
+      new Option('--websocket-lifecycle <lifecycle>', 'WebSocket connection lifecycle').choices([
+        'per_case',
+        'per_run',
+      ]),
+    )
+    .addOption(
+      new Option('--connection-mode <mode>', 'WebSocket request concurrency').choices([
+        'serial',
+        'multiplexed',
+      ]),
+    )
+    .option('--subprotocol <token>', 'one plain WebSocket subprotocol token')
+    .option('--request-template <json>', 'text-JSON request template with one {{request_id}} slot')
+    .option('--request-id-pointer <pointer>', 'correlated response request-id JSON Pointer')
+    .option('--acknowledgement-pointer <pointer>', 'acknowledgement JSON Pointer')
+    .option(
+      '--acknowledgement-value <json>',
+      'accepted acknowledgement JSON value; repeatable',
+      collect,
     )
     .option('--cwd <path>', 'project-relative process working directory')
     .option('--readiness-http <url>', 'background HTTP readiness endpoint')
@@ -255,16 +291,26 @@ const registerAgentCommands = (context: RegisterAgentCommandsOptions): void => {
     .option('--env <target=source>', 'environment secret reference', collect)
     .option('--header-env <header=source>', 'HTTP header secret reference', collect)
     .option('--timeout <duration>', 'attempt timeout such as 500ms, 60s, or 2m')
+    .option('--open-timeout <duration>', 'WebSocket handshake timeout')
+    .option('--idle-timeout <duration>', 'WebSocket message idle timeout')
+    .option('--attempt-timeout <duration>', 'whole WebSocket attempt timeout')
+    .option('--ping-interval <duration>', 'WebSocket ping interval')
+    .option('--close-timeout <duration>', 'WebSocket graceful close timeout')
     .option('--trace', 'declare trace support')
     .action(async (agentId: string | undefined, options: AddOptions, command: Command) => {
       options = mergeCommonOptions(options, command, context.program);
       const result = await runAgentAddCommand({
         ...mutationArguments(options, context),
+        acknowledgementPointer: options.acknowledgementPointer,
+        acknowledgementValues: options.acknowledgementValues,
         agentId,
         argvJson: options.argvJson,
+        attemptTimeout: options.attemptTimeout,
         backgroundCommand: options.backgroundCommand,
         bridgeConcurrency: options.bridgeConcurrency,
         cancellationGrace: options.cancelGrace,
+        closeTimeout: options.closeTimeout,
+        connectionMode: options.connectionMode,
         cwd: options.cwd,
         env: options.env,
         errorPointer: options.errorPointer,
@@ -272,15 +318,20 @@ const registerAgentCommands = (context: RegisterAgentCommandsOptions): void => {
         headerEnv: options.headerEnv,
         incrementalOutputMode: options.incrementalOutputMode,
         incrementalOutputPointer: options.incrementalOutputPointer,
+        idleTimeout: options.idleTimeout,
         invokeUrl: options.invokeUrl,
         jsonlCommand: options.jsonlCommand,
         interactive: isInteractive(options, context.interaction, options.fromJson),
         name: options.name,
         nativeCommand: options.nativeCommand,
         nativeHttp: options.nativeHttp,
+        openTimeout: options.openTimeout,
+        pingInterval: options.pingInterval,
         readinessHttp: options.readinessHttp,
         readinessStderr: options.readinessStderr,
         readinessTcp: options.readinessTcp,
+        requestIdPointer: options.requestIdPointer,
+        requestTemplate: options.requestTemplate,
         responsePointer: options.responsePointer,
         shutdownUrl: options.shutdownUrl,
         stopTimeout: options.stopTimeout,
@@ -292,6 +343,9 @@ const registerAgentCommands = (context: RegisterAgentCommandsOptions): void => {
         timeout: options.timeout,
         trace: options.trace,
         tracePointer: options.tracePointer,
+        webSocketLifecycle: options.websocketLifecycle,
+        webSocketSubprotocol: options.subprotocol,
+        webSocketUrl: options.websocketUrl,
       });
       context.io.output(renderCommandResult('agent.add', outputFormat(options), result));
     });
@@ -303,11 +357,37 @@ const registerAgentCommands = (context: RegisterAgentCommandsOptions): void => {
       'attest agent add support --background-command "node ./server.mjs" --readiness-http http://127.0.0.1:8787/ready --invoke-url http://127.0.0.1:8787/invoke',
       'attest agent add support --jsonl-command "node ./bridge.mjs" --bridge-concurrency multiplexed',
       'attest agent add support --stream-url https://example.com/events --stream-framing sse --terminal-pointer /type --terminal-value \'"result"\' --response-pointer /output',
+      'attest agent add support --websocket-url wss://example.com/agent --header-env Authorization=AGENT_TOKEN --connection-mode multiplexed --response-pointer /output',
       'attest agent add --from-json ./agent-add.json --output json',
     ],
     {
       'agent-id': [],
       'argv-json': [
+        'native-command',
+        'native-http',
+        'background-command',
+        'jsonl-command',
+        'stream-url',
+        'websocket-url',
+      ],
+      'acknowledgement-pointer': [
+        'argv-json',
+        'native-command',
+        'native-http',
+        'background-command',
+        'jsonl-command',
+        'stream-url',
+      ],
+      'acknowledgement-value': [
+        'argv-json',
+        'native-command',
+        'native-http',
+        'background-command',
+        'jsonl-command',
+        'stream-url',
+      ],
+      'attempt-timeout': [
+        'argv-json',
         'native-command',
         'native-http',
         'background-command',
@@ -320,6 +400,7 @@ const registerAgentCommands = (context: RegisterAgentCommandsOptions): void => {
         'native-http',
         'jsonl-command',
         'stream-url',
+        'websocket-url',
       ],
       'bridge-concurrency': [
         'argv-json',
@@ -327,6 +408,7 @@ const registerAgentCommands = (context: RegisterAgentCommandsOptions): void => {
         'native-http',
         'background-command',
         'stream-url',
+        'websocket-url',
       ],
       'cancel-grace': [
         'argv-json',
@@ -334,9 +416,26 @@ const registerAgentCommands = (context: RegisterAgentCommandsOptions): void => {
         'native-http',
         'background-command',
         'stream-url',
+        'websocket-url',
       ],
-      cwd: ['native-http', 'stream-url'],
-      env: ['native-http', 'stream-url'],
+      'close-timeout': [
+        'argv-json',
+        'native-command',
+        'native-http',
+        'background-command',
+        'jsonl-command',
+        'stream-url',
+      ],
+      'connection-mode': [
+        'argv-json',
+        'native-command',
+        'native-http',
+        'background-command',
+        'jsonl-command',
+        'stream-url',
+      ],
+      cwd: ['native-http', 'stream-url', 'websocket-url'],
+      env: ['native-http', 'stream-url', 'websocket-url'],
       'error-pointer': ['argv-json', 'native-command', 'native-http', 'jsonl-command'],
       'event-name': [
         'argv-json',
@@ -344,6 +443,7 @@ const registerAgentCommands = (context: RegisterAgentCommandsOptions): void => {
         'native-http',
         'background-command',
         'jsonl-command',
+        'websocket-url',
       ],
       'header-env': ['argv-json', 'native-command', 'jsonl-command'],
       'incremental-output-mode': [
@@ -352,6 +452,7 @@ const registerAgentCommands = (context: RegisterAgentCommandsOptions): void => {
         'native-http',
         'background-command',
         'jsonl-command',
+        'websocket-url',
       ],
       'incremental-output-pointer': [
         'argv-json',
@@ -359,14 +460,31 @@ const registerAgentCommands = (context: RegisterAgentCommandsOptions): void => {
         'native-http',
         'background-command',
         'jsonl-command',
+        'websocket-url',
       ],
-      'invoke-url': ['argv-json', 'native-command', 'native-http', 'jsonl-command', 'stream-url'],
+      'idle-timeout': [
+        'argv-json',
+        'native-command',
+        'native-http',
+        'background-command',
+        'jsonl-command',
+        'stream-url',
+      ],
+      'invoke-url': [
+        'argv-json',
+        'native-command',
+        'native-http',
+        'jsonl-command',
+        'stream-url',
+        'websocket-url',
+      ],
       'jsonl-command': [
         'argv-json',
         'native-command',
         'native-http',
         'background-command',
         'stream-url',
+        'websocket-url',
       ],
       name: [],
       'native-command': [
@@ -375,10 +493,28 @@ const registerAgentCommands = (context: RegisterAgentCommandsOptions): void => {
         'background-command',
         'jsonl-command',
         'stream-url',
+        'websocket-url',
       ],
       'native-http': [
         'argv-json',
         'native-command',
+        'background-command',
+        'jsonl-command',
+        'stream-url',
+        'websocket-url',
+      ],
+      'open-timeout': [
+        'argv-json',
+        'native-command',
+        'native-http',
+        'background-command',
+        'jsonl-command',
+        'stream-url',
+      ],
+      'ping-interval': [
+        'argv-json',
+        'native-command',
+        'native-http',
         'background-command',
         'jsonl-command',
         'stream-url',
@@ -389,6 +525,7 @@ const registerAgentCommands = (context: RegisterAgentCommandsOptions): void => {
         'native-http',
         'jsonl-command',
         'stream-url',
+        'websocket-url',
         'readiness-stderr',
         'readiness-tcp',
       ],
@@ -398,6 +535,7 @@ const registerAgentCommands = (context: RegisterAgentCommandsOptions): void => {
         'native-http',
         'jsonl-command',
         'stream-url',
+        'websocket-url',
         'readiness-http',
         'readiness-tcp',
       ],
@@ -407,18 +545,50 @@ const registerAgentCommands = (context: RegisterAgentCommandsOptions): void => {
         'native-http',
         'jsonl-command',
         'stream-url',
+        'websocket-url',
         'readiness-http',
         'readiness-stderr',
       ],
       'response-pointer': ['argv-json', 'native-command', 'native-http', 'jsonl-command'],
-      'shutdown-url': ['argv-json', 'native-command', 'native-http', 'jsonl-command', 'stream-url'],
-      'stop-timeout': ['argv-json', 'native-command', 'native-http', 'jsonl-command', 'stream-url'],
+      'request-id-pointer': [
+        'argv-json',
+        'native-command',
+        'native-http',
+        'background-command',
+        'jsonl-command',
+        'stream-url',
+      ],
+      'request-template': [
+        'argv-json',
+        'native-command',
+        'native-http',
+        'background-command',
+        'jsonl-command',
+        'stream-url',
+      ],
+      'shutdown-url': [
+        'argv-json',
+        'native-command',
+        'native-http',
+        'jsonl-command',
+        'stream-url',
+        'websocket-url',
+      ],
+      'stop-timeout': [
+        'argv-json',
+        'native-command',
+        'native-http',
+        'jsonl-command',
+        'stream-url',
+        'websocket-url',
+      ],
       'stream-framing': [
         'argv-json',
         'native-command',
         'native-http',
         'background-command',
         'jsonl-command',
+        'websocket-url',
       ],
       'stream-url': [
         'argv-json',
@@ -426,6 +596,15 @@ const registerAgentCommands = (context: RegisterAgentCommandsOptions): void => {
         'native-http',
         'background-command',
         'jsonl-command',
+        'websocket-url',
+      ],
+      subprotocol: [
+        'argv-json',
+        'native-command',
+        'native-http',
+        'background-command',
+        'jsonl-command',
+        'stream-url',
       ],
       'terminal-pointer': [
         'argv-json',
@@ -433,6 +612,7 @@ const registerAgentCommands = (context: RegisterAgentCommandsOptions): void => {
         'native-http',
         'background-command',
         'jsonl-command',
+        'websocket-url',
       ],
       'terminal-value': [
         'argv-json',
@@ -440,12 +620,43 @@ const registerAgentCommands = (context: RegisterAgentCommandsOptions): void => {
         'native-http',
         'background-command',
         'jsonl-command',
+        'websocket-url',
       ],
-      timeout: [],
+      timeout: ['websocket-url'],
       trace: [],
       'trace-pointer': ['argv-json', 'native-command', 'native-http', 'jsonl-command'],
+      'websocket-lifecycle': [
+        'argv-json',
+        'native-command',
+        'native-http',
+        'background-command',
+        'jsonl-command',
+        'stream-url',
+      ],
+      'websocket-url': [
+        'argv-json',
+        'native-command',
+        'native-http',
+        'background-command',
+        'jsonl-command',
+        'stream-url',
+      ],
     },
-    { 'incremental-output-mode': ['incremental-output-pointer'] },
+    {
+      'acknowledgement-pointer': ['websocket-url'],
+      'acknowledgement-value': ['websocket-url'],
+      'attempt-timeout': ['websocket-url'],
+      'close-timeout': ['websocket-url'],
+      'connection-mode': ['websocket-url'],
+      'idle-timeout': ['websocket-url'],
+      'incremental-output-mode': ['incremental-output-pointer'],
+      'open-timeout': ['websocket-url'],
+      'ping-interval': ['websocket-url'],
+      'request-id-pointer': ['websocket-url'],
+      'request-template': ['websocket-url'],
+      subprotocol: ['websocket-url'],
+      'websocket-lifecycle': ['websocket-url'],
+    },
   );
 
   const importCommand = addMutationOptions(
@@ -572,7 +783,9 @@ const registerAgentCommands = (context: RegisterAgentCommandsOptions): void => {
   const test = addCommonOptions(
     agent
       .command('test')
-      .description('Probe one native, managed-process, HTTP, polling, or streaming agent contract.')
+      .description(
+        'Probe one native, managed-process, HTTP, polling, streaming, or WebSocket agent contract.',
+      )
       .argument('[agent-id]', 'agent id'),
   )
     .option('--input <json>', 'test input as any JSON value')

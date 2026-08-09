@@ -6,8 +6,6 @@ export type {
   AgentResponse,
   AgentSuccessResponse,
 } from './agent.js';
-export { caseSchema, configSchema } from './config.js';
-export type { AgentTarget, CaseDefinition, Config, RunSettings, Suite } from './config.js';
 export type { CaseOutcome, InvocationErrorCode, RawExcerpt } from './execution.js';
 export {
   assertionCheckSchema,
@@ -30,7 +28,6 @@ export type {
 export {
   parseAgentRequest,
   parseAgentResponse,
-  parseConfig,
   parseMetricRequest,
   parseMetricResult,
   parseTrace,
@@ -58,8 +55,8 @@ export {
   CLI_HELP_SCHEMA_VERSION,
   CLI_RESULT_SCHEMA_VERSION,
   COMMAND_REQUEST_SCHEMA_VERSION,
-  CONFIG_VERSION,
   DATASET_SCHEMA_VERSION,
+  EVAL_RUN_SCHEMA_VERSION,
   METRIC_PROTOCOL,
   METRIC_PRESET_SCHEMA_VERSION,
   METRIC_RESOURCE_SCHEMA_VERSION,
@@ -67,6 +64,9 @@ export {
   PROJECT_SCHEMA_VERSION,
   TEST_RESOURCE_SCHEMA_VERSION,
   TRACE_SCHEMA_VERSION,
+  WEBSOCKET_EVIDENCE_SCHEMA_VERSION,
+  WEBSOCKET_MESSAGE_PROTOCOL,
+  WEBSOCKET_REQUEST_PROTOCOL,
 } from './versions.js';
 export {
   agentEvidenceLimitsSchema,
@@ -174,3 +174,66 @@ export {
   sha256Schema,
 } from './v2-shared.js';
 export type { ExecutionDefaults, SecretReference } from './v2-shared.js';
+export {
+  evalOutputModeSchema,
+  evalRunEffectiveCommandSchema,
+  evalRunIdSchema,
+  evalRunRequestSchema,
+  evalRunSchema,
+  evalRunSelectedCaseSchema,
+  evalRunSnapshotSchema,
+} from './eval-run-v1.js';
+export type {
+  EvalOutputMode,
+  EvalRun,
+  EvalRunEffectiveCommand,
+  EvalRunRequest,
+  EvalRunSelectedCase,
+  EvalRunSnapshot,
+} from './eval-run-v1.js';
+export {
+  evalCancelRequestSchema,
+  evalCancelResultPayloadSchema,
+  evalCancelResultSchema,
+} from './eval-cancel-v1.js';
+export type {
+  EvalCancelRequest,
+  EvalCancelResult,
+  EvalCancelResultPayload,
+} from './eval-cancel-v1.js';
+export {
+  evalCaseCompletedEventSchema,
+  evalCaseStartedEventSchema,
+  evalEventSchema,
+  evalEventStreamSchema,
+  evalFinalResultDataSchema,
+  evalResultEventSchema,
+  evalRunCompletedEventSchema,
+  evalRunStartedEventSchema,
+  evalRunSummarySchema,
+} from './eval-event-v1.js';
+export type {
+  EvalEvent,
+  EvalEventStream,
+  EvalFinalResultData,
+  EvalRunSummary,
+} from './eval-event-v1.js';
+export {
+  webSocketAttemptEvidenceSchema,
+  webSocketConnectionModeSchema,
+  webSocketCorrelatedMessageSchema,
+  webSocketErrorClassificationSchema,
+  webSocketEvidenceClassificationSchema,
+  webSocketInvocationRequestSchema,
+  webSocketRequestIdSchema,
+  webSocketTransportSchema,
+} from './websocket-contract-v1.js';
+export type {
+  WebSocketAttemptEvidence,
+  WebSocketConnectionMode,
+  WebSocketCorrelatedMessage,
+  WebSocketErrorClassification,
+  WebSocketEvidenceClassification,
+  WebSocketInvocationRequest,
+  WebSocketTransport,
+} from './websocket-contract-v1.js';

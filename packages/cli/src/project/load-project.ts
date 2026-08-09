@@ -29,7 +29,11 @@ import {
   discoverProject,
   type DiscoverProjectOptions,
 } from './discover-project.js';
-import { ProjectLoadError, type ProjectDiagnostic } from './project-errors.js';
+import {
+  ProjectLoadError,
+  createLegacyV1ProjectError,
+  type ProjectDiagnostic,
+} from './project-errors.js';
 
 type ProjectContentHashes = {
   agents: Readonly<Record<string, string>>;
@@ -60,6 +64,7 @@ type RuntimeSchema<T> = {
 type LoadedJsonResource<T> = {
   diagnostics: ProjectDiagnostic[];
   hash?: string;
+  rawValue?: JsonValue;
   source: string;
   value?: T;
 };
@@ -200,6 +205,13 @@ const schemaDiagnostics = (
     source,
   }));
 
+/** Recognizes the removed v1 manifest shape without accepting or importing it. */
+const isLegacyV1Manifest = (value: JsonValue): boolean =>
+  value !== null &&
+  typeof value === 'object' &&
+  !Array.isArray(value) &&
+  Reflect.get(value, 'config_version') === 1;
+
 /** Loads, validates, and hashes one canonical JSON resource while retaining every issue. */
 const loadJsonResource = async <T>(
   root: string,
@@ -230,9 +242,9 @@ const loadJsonResource = async <T>(
   const validated = schema.safeParse(parsed.value);
   if (!validated.success) {
     diagnostics.push(...schemaDiagnostics(source, validated.error.issues));
-    return { diagnostics, hash, source };
+    return { diagnostics, hash, rawValue: parsed.value, source };
   }
-  return { diagnostics, hash, source, value: validated.data };
+  return { diagnostics, hash, rawValue: parsed.value, source, value: validated.data };
 };
 
 /** Loads an ordered JSONL dataset and preserves physical line context for every row failure. */
@@ -355,6 +367,9 @@ const loadProject = async (options: DiscoverProjectOptions = {}): Promise<Loaded
     undefined,
     projectManifestSchema,
   );
+  if (manifest.rawValue !== undefined && isLegacyV1Manifest(manifest.rawValue)) {
+    throw createLegacyV1ProjectError('project_invalid', PROJECT_MANIFEST_FILE);
+  }
   if (manifest.value === undefined || manifest.hash === undefined) {
     throw new ProjectLoadError(
       'project_invalid',

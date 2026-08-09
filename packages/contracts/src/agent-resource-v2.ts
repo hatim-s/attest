@@ -9,13 +9,11 @@ import {
   secretReferenceSchema,
 } from './v2-shared.js';
 import { AGENT_RESOURCE_SCHEMA_VERSION } from './versions.js';
+import { webSocketTransportSchema } from './websocket-contract-v1.js';
 
 const httpUrlTemplateSchema = z
   .string()
   .regex(/^https?:\/\/\S+$/u, 'must be an HTTP or HTTPS URL template');
-const webSocketUrlTemplateSchema = z
-  .string()
-  .regex(/^wss?:\/\/\S+$/u, 'must be a WebSocket URL template');
 const templateValueSchema = z.union([z.string(), secretReferenceSchema]);
 
 /** Builds a foreign HTTP request before normalization at the runner boundary. */
@@ -204,21 +202,6 @@ const streamTransportSchema = z
       });
     }
   });
-
-const webSocketTransportSchema = z.strictObject({
-  kind: z.literal('websocket'),
-  lifecycle: z.enum(['per_case', 'per_run']),
-  url: webSocketUrlTemplateSchema,
-  headers: z.record(z.string(), templateValueSchema).optional(),
-  subprotocol: z.string().min(1).optional(),
-  request_template: z.json(),
-  request_id_pointer: jsonPointerSchema,
-  extraction: responseExtractionSchema,
-  open_timeout_ms: durationMillisecondsSchema.optional(),
-  message_idle_timeout_ms: durationMillisecondsSchema.optional(),
-  ping_interval_ms: durationMillisecondsSchema.optional(),
-  close_timeout_ms: durationMillisecondsSchema.optional(),
-});
 
 /** Encodes every transport definition required by the ratified v2 North Star. */
 const agentTransportSchema = z.discriminatedUnion('kind', [

@@ -1,4 +1,4 @@
-import type { CaseDefinition, JsonValue } from '@attest/contracts';
+import type { JsonValue, TestCase } from '@attest/contracts';
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 
@@ -7,7 +7,7 @@ import { buildEvaluationDocument, resolveDocumentPath } from './evaluation-docum
 import type { EvaluationDocument } from './evaluation-document.js';
 import type { MetricContext } from './metric-evaluation.js';
 
-const caseDefinition: CaseDefinition = {
+const caseDefinition: TestCase = {
   id: 'capital',
   input: { question: 'Capital of France?' },
   expected: { answer: 'Paris' },

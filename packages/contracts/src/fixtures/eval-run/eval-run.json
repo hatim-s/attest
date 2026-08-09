@@ -1,0 +1,103 @@
+{
+  "schema": "attest.eval-run/v1",
+  "run_id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+  "created_at": "2026-08-08T10:00:00.000Z",
+  "snapshot_hash": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+  "snapshot": {
+    "project_id": "01ARZ3NDEKTSV4RRFFQ69G5FAB",
+    "project_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "resource_hashes": {
+      "agents": [
+        {
+          "id": "support",
+          "content_hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      ],
+      "tests": [
+        {
+          "id": "refund",
+          "content_hash": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+        }
+      ],
+      "datasets": [
+        {
+          "id": "refund-regression",
+          "data_content_hash": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "metadata_content_hash": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+        }
+      ],
+      "metrics": [
+        {
+          "id": "correct",
+          "content_hash": "abababababababababababababababababababababababababababababababab"
+        }
+      ]
+    },
+    "selected_test_ids": ["refund"],
+    "selected_cases": [
+      {
+        "configured_index": 0,
+        "test_id": "refund",
+        "case_id": "refund-basic",
+        "source": { "kind": "direct" }
+      },
+      {
+        "configured_index": 1,
+        "test_id": "refund",
+        "case_id": "refund-delayed",
+        "source": { "kind": "dataset", "dataset_id": "refund-regression" }
+      }
+    ]
+  },
+  "effective_command": {
+    "command_path": ["eval", "run"],
+    "argv": [
+      "eval",
+      "run",
+      "refund",
+      "--case",
+      "refund-basic",
+      "--case",
+      "refund-delayed",
+      "--tag",
+      "smoke",
+      "--tag",
+      "api",
+      "--concurrency",
+      "2",
+      "--timeout",
+      "60s",
+      "--baseline",
+      "01ARZ3NDEKTSV4RRFFQ69G5FAA",
+      "--junit",
+      "artifacts/refund.xml",
+      "--output",
+      "jsonl"
+    ],
+    "request": {
+      "schema": "attest.command-request/v2",
+      "command": "eval.run",
+      "test_ids": ["refund"],
+      "case_ids": ["refund-basic", "refund-delayed"],
+      "tags": ["smoke", "api"],
+      "concurrency": 2,
+      "timeout_ms": 60000,
+      "baseline_run_id": "01ARZ3NDEKTSV4RRFFQ69G5FAA",
+      "junit_path": "artifacts/refund.xml",
+      "output": "jsonl"
+    },
+    "resolved": {
+      "concurrency": 2,
+      "timeout_ms": 60000,
+      "output": "jsonl",
+      "watch": false,
+      "baseline_run_id": "01ARZ3NDEKTSV4RRFFQ69G5FAA",
+      "junit_path": "artifacts/refund.xml"
+    }
+  },
+  "git": {
+    "commit": "c25394a527624885e56d36ab2dbe1cd64458c2c5",
+    "branch": "phase/cli2-eval-integration",
+    "dirty": false
+  }
+}

@@ -1,11 +1,11 @@
-import type { AgentResponse, CaseDefinition, Trace } from '@attest/contracts';
+import type { AgentResponse, TestCase, Trace } from '@attest/contracts';
 import { describe, expect, it } from 'vitest';
 
 import { evaluateMetrics } from './evaluate-metrics.js';
 import { skippedNoOutput, type MetricContext } from './metric-evaluation.js';
 import { caseExecutionToMetricContext, type CaseExecutionView } from './case-execution-adapter.js';
 
-const caseDefinition: CaseDefinition = {
+const caseDefinition: TestCase = {
   id: 'capital',
   input: { question: 'What is the capital of France?' },
   expected: 'Paris',

@@ -25,6 +25,7 @@ import {
   type CaseRecord,
   type CaseSummary,
   type RunMetadata,
+  type RunIdentity,
   type RunRecord,
   type RunStatus,
   type RunStore,
@@ -34,6 +35,12 @@ import {
 
 const createUlid = monotonicFactory();
 const migrationLocks = new Map<string, ReturnType<typeof createLock>>();
+
+/** Allocates the shared ULID/timestamp pair used by immutable eval metadata and the run store. */
+const createRunIdentity = (now: () => Date = () => new Date()): RunIdentity => ({
+  id: createUlid(),
+  createdAt: now().toISOString(),
+});
 
 const loadMetrics = async (
   database: Kysely<Database>,
@@ -76,12 +83,15 @@ class SqliteRunStore implements RunStore {
   }
 
   /** Creates a running record with a UTC timestamp and ULID identity. */
-  async createRun(metadata: RunMetadata): Promise<RunRecord> {
+  async createRun(
+    metadata: RunMetadata,
+    identity: RunIdentity = createRunIdentity(),
+  ): Promise<RunRecord> {
     return executeStoreOperation('WRITE_FAILED', 'Could not create the run.', async () => {
       const record: RunRecord = {
         ...metadata,
-        id: createUlid(),
-        createdAt: new Date().toISOString(),
+        id: identity.id,
+        createdAt: identity.createdAt,
         status: 'running',
       };
       await this.#database
@@ -360,4 +370,11 @@ const openRunStoreSnapshot = async (path: string): Promise<RunStore> => {
   }
 };
 
-export { openReadonlyRunStore, openRunStore, openRunStoreSnapshot, openStore, type RunStore };
+export {
+  createRunIdentity,
+  openReadonlyRunStore,
+  openRunStore,
+  openRunStoreSnapshot,
+  openStore,
+  type RunStore,
+};

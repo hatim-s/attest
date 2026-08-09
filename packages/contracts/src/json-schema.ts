@@ -10,8 +10,10 @@ import {
   cliResultSchema,
 } from './cli-protocol.js';
 import { commandRequestSchema } from './command-request-v2.js';
-import { configSchema } from './config.js';
 import { datasetResourceSchema } from './dataset-resource-v2.js';
+import { evalCancelRequestSchema, evalCancelResultSchema } from './eval-cancel-v1.js';
+import { evalEventSchema } from './eval-event-v1.js';
+import { evalRunRequestSchema, evalRunSchema } from './eval-run-v1.js';
 import { metricRequestSchema, metricResultSchema } from './metric.js';
 import { jsonlBridgeInputSchema, jsonlBridgeOutputSchema } from './managed-transport-v1.js';
 import { metricResourceSchema } from './metric-resource-v2.js';
@@ -20,6 +22,11 @@ import { metricTestFixtureSchema } from './metric-test-fixture-v1.js';
 import { projectManifestSchema } from './project-v2.js';
 import { testResourceSchema } from './test-resource-v2.js';
 import { traceSchema } from './trace.js';
+import {
+  webSocketAttemptEvidenceSchema,
+  webSocketCorrelatedMessageSchema,
+  webSocketInvocationRequestSchema,
+} from './websocket-contract-v1.js';
 
 type JsonSchemaFragment = Readonly<Record<string, unknown>>;
 type ContractJsonSchemaDefinition = {
@@ -55,54 +62,6 @@ const agentResponseInvariants = {
   ],
 } satisfies JsonSchemaFragment;
 
-const configInvariants = {
-  $comment: sharedComment,
-  allOf: [
-    {
-      properties: {
-        agent: {
-          if: { properties: { type: { const: 'http' } }, required: ['type'] },
-          then: { properties: { url: { pattern: '^https?://' } } },
-        },
-      },
-    },
-  ],
-  properties: {
-    suites: { minItems: 1 },
-  },
-  $defs: {
-    Suite: {
-      oneOf: [
-        { required: ['cases'], not: { required: ['dataset'] } },
-        { required: ['dataset'], not: { required: ['cases'] } },
-      ],
-    },
-    ExecutableMetricDefinition: {
-      oneOf: [
-        { required: ['command'], not: { required: ['url'] } },
-        { required: ['url'], not: { required: ['command'] } },
-      ],
-    },
-    Threshold: {
-      anyOf: [
-        { required: ['lt'] },
-        { required: ['lte'] },
-        { required: ['gt'] },
-        { required: ['gte'] },
-      ],
-    },
-    AssertionMetricDefinition: {
-      properties: { assert: { minItems: 1 } },
-    },
-    AllAssertionCheck: {
-      properties: { all: { minItems: 1 } },
-    },
-    AnyAssertionCheck: {
-      properties: { any: { minItems: 1 } },
-    },
-  },
-} satisfies JsonSchemaFragment;
-
 const CONTRACT_JSON_SCHEMAS = new Map<string, ContractJsonSchemaDefinition>([
   [
     'agent-request.v1alpha1.json',
@@ -113,7 +72,6 @@ const CONTRACT_JSON_SCHEMAS = new Map<string, ContractJsonSchemaDefinition>([
     { schema: agentResponseSchema, invariants: agentResponseInvariants },
   ],
   ['trace.v1alpha1.json', { schema: traceSchema, invariants: noAdditionalInvariants }],
-  ['config.v1.json', { schema: configSchema, invariants: configInvariants }],
   [
     'metric-request.v1alpha1.json',
     { schema: metricRequestSchema, invariants: noAdditionalInvariants },
@@ -134,6 +92,20 @@ const CONTRACT_JSON_SCHEMAS = new Map<string, ContractJsonSchemaDefinition>([
     { schema: metricTestFixtureSchema, invariants: noAdditionalInvariants },
   ],
   ['command-request.v2.json', { schema: commandRequestSchema, invariants: v2RuntimeInvariants }],
+  [
+    'eval-run-request.v2.json',
+    { schema: evalRunRequestSchema, invariants: noAdditionalInvariants },
+  ],
+  ['eval-run.v1.json', { schema: evalRunSchema, invariants: noAdditionalInvariants }],
+  ['eval-event.v1.json', { schema: evalEventSchema, invariants: noAdditionalInvariants }],
+  [
+    'eval-cancel-request.v2.json',
+    { schema: evalCancelRequestSchema, invariants: noAdditionalInvariants },
+  ],
+  [
+    'eval-cancel-result.v1.json',
+    { schema: evalCancelResultSchema, invariants: noAdditionalInvariants },
+  ],
   ['cli-result.v1.json', { schema: cliResultSchema, invariants: noAdditionalInvariants }],
   ['cli-event.v1.json', { schema: cliEventSchema, invariants: noAdditionalInvariants }],
   ['cli-help.v1.json', { schema: cliHelpSchema, invariants: noAdditionalInvariants }],
@@ -145,6 +117,18 @@ const CONTRACT_JSON_SCHEMAS = new Map<string, ContractJsonSchemaDefinition>([
   [
     'jsonl-bridge-output.v1.json',
     { schema: jsonlBridgeOutputSchema, invariants: noAdditionalInvariants },
+  ],
+  [
+    'websocket-request.v1.json',
+    { schema: webSocketInvocationRequestSchema, invariants: noAdditionalInvariants },
+  ],
+  [
+    'websocket-message.v1.json',
+    { schema: webSocketCorrelatedMessageSchema, invariants: noAdditionalInvariants },
+  ],
+  [
+    'websocket-evidence.v1.json',
+    { schema: webSocketAttemptEvidenceSchema, invariants: noAdditionalInvariants },
   ],
 ]);
 
