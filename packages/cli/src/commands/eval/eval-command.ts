@@ -138,7 +138,7 @@ const renderHumanProgress = (event: EvalEvent): string | undefined => {
   }
 };
 
-/** Renders the terminal result with one stable final line suitable for logs and CI summaries. */
+/** Renders truthful runnable follow-ups, a labeled comparison template, and the final result. */
 const renderHumanFinalResult = (data: EvalFinalResultData): string => {
   const result = data.result;
   const lines = result.ok
@@ -149,6 +149,12 @@ const renderHumanFinalResult = (data: EvalFinalResultData): string => {
         `  failed: ${result.result.summary.failed_cases}`,
         `  errors: ${result.result.summary.error_cases}`,
         `  metric errors: ${result.result.summary.metric_error_count}`,
+        'Next:',
+        `  attest report ${result.result.run_id}`,
+        '  attest view --no-open',
+        'Compare with a baseline run:',
+        // A successful eval has only the candidate id, so the required baseline stays explicit.
+        `  attest diff <base-run-id> ${result.result.run_id}`,
       ]
     : [];
   lines.push(`Result: ${verdictLabel(data.exit_code, result)} (exit ${data.exit_code})`);

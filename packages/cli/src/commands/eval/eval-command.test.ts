@@ -375,8 +375,9 @@ describe('eval request normalization', () => {
       test_ids: ['refund', 'returns'],
     });
     expect(harness.output.at(-1)).toBe(
-      'Run 01ARZ3NDEKTSV4RRFFQ69G5FAV\n  cases: 2\n  passed: 2\n  failed: 0\n  errors: 0\n  metric errors: 0\nResult: PASS (exit 0)',
+      'Run 01ARZ3NDEKTSV4RRFFQ69G5FAV\n  cases: 2\n  passed: 2\n  failed: 0\n  errors: 0\n  metric errors: 0\nNext:\n  attest report 01ARZ3NDEKTSV4RRFFQ69G5FAV\n  attest view --no-open\nCompare with a baseline run:\n  attest diff <base-run-id> 01ARZ3NDEKTSV4RRFFQ69G5FAV\nResult: PASS (exit 0)',
     );
+    expect(harness.output.at(-1)).not.toContain('\n  attest diff\n');
   });
 
   it('uses all as the guided default and validates direct normalization independently', async () => {
@@ -522,6 +523,10 @@ describe('eval output and sequencing', () => {
       '[1] refund/basic started.',
       '[2] refund/delayed started.',
     ]);
+    expect(harness.output.at(-1)).toContain(
+      `Next:\n  attest report ${RUN_ID}\n  attest view --no-open\nCompare with a baseline run:\n  attest diff <base-run-id> ${RUN_ID}`,
+    );
+    expect(harness.output.at(-1)).not.toContain('\n  attest diff\n');
     expect(harness.output.at(-1)?.split('\n').at(-1)).toBe('Result: PASS (exit 0)');
   });
 
