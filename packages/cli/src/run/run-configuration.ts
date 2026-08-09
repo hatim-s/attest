@@ -17,7 +17,6 @@ import {
   createRunIdentity,
   executeResolvedEvalPlan,
   openReadonlyRunStore,
-  openStore,
   StoreError,
 } from '@attest/core';
 
@@ -29,7 +28,10 @@ import {
   signalRegisteredEvalRun,
   unregisterEvalRun,
 } from '../commands/eval/eval-cancellation.js';
-import { prepareEvalProjectFile } from '../commands/eval/eval-project-path.js';
+import {
+  openEvalProjectStore,
+  prepareEvalProjectFile,
+} from '../commands/eval/eval-project-path.js';
 import { EvalEventQueue } from '../commands/eval/eval-event-source.js';
 import {
   createEvalArtifactWriter,
@@ -132,17 +134,12 @@ const runConfiguration = async (
     ...(git === undefined ? {} : { git }),
   });
   const configuredStorePath = join('.attest', 'runs.db');
-  let storePath = await prepareEvalProjectFile(project.root, configuredStorePath, {
+  const storePath = await prepareEvalProjectFile(project.root, configuredStorePath, {
     errorCode: 'run_failed',
     message: 'The eval run store is not a safe project file.',
   });
   await preflightEvalBaseline(storePath, resolved.effectiveCommand.resolved.baseline_run_id);
-  storePath = await prepareEvalProjectFile(project.root, configuredStorePath, {
-    createDirectories: true,
-    errorCode: 'run_failed',
-    message: 'The eval run store is not a safe project file.',
-  });
-  const store = await openStore(storePath);
+  const store = await openEvalProjectStore(project.root);
   let registry: Awaited<ReturnType<typeof registerEvalRun>>;
   try {
     registry = await registerEvalRun(project.root, run.run_id);

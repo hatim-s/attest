@@ -109,6 +109,7 @@ const createEvalArtifactWriter = (projectRoot: string): EvalArtifactWriter => ({
   writeJUnitAtomically: async (path, payload) => {
     verifyJUnitPayload(payload);
     const outputPath = await prepareEvalProjectFile(projectRoot, path, {
+      allowAbsolute: true,
       createDirectories: true,
       errorCode: 'output_write_failed',
       message: 'The JUnit output path is not a safe project file.',

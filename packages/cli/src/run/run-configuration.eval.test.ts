@@ -154,12 +154,13 @@ afterEach(async () => {
 describe('v2 eval dispatcher integration', () => {
   it('bridges public commands through resolver, engine, runner, store, diff, and JUnit', async () => {
     const root = await createEvalProject();
+    const junitPath = join(root, 'artifacts', 'first.xml');
     const first = await invokeCli(root, [
       'eval',
       'run',
       'smoke',
       '--junit',
-      'artifacts/first.xml',
+      junitPath,
       '--output',
       'json',
     ]);
@@ -184,7 +185,7 @@ describe('v2 eval dispatcher integration', () => {
       },
     });
 
-    const junit = await readFile(join(root, 'artifacts', 'first.xml'), 'utf8');
+    const junit = await readFile(junitPath, 'utf8');
     expect(junit).toContain('<testsuite name="smoke" tests="1"');
     expect(junit).not.toMatch(/\n\n$/u);
 

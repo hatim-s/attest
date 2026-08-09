@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -378,14 +378,16 @@ describe('runCli', () => {
     });
 
     const reportOutput: string[] = [];
+    const absoluteReportPath = join(directory, 'report.json');
     expect(
-      await runCli(['report', first.id, '--store', storePath, '--output', 'report.json'], {
-        workingDirectory: directory,
+      await runCli(['report', first.id, '--store', storePath, '--output', absoluteReportPath], {
+        // On macOS this pairs a /var-authored destination with its /private/var project alias.
+        workingDirectory: await realpath(directory),
         io: { output: (message) => reportOutput.push(message), error: () => undefined },
       }),
     ).toBe(0);
     expect(reportOutput.join('')).toContain('report.json');
-    expect(await readFile(join(directory, 'report.json'), 'utf8')).toContain('<!doctype html>');
+    expect(await readFile(absoluteReportPath, 'utf8')).toContain('<!doctype html>');
 
     const diffOutput: string[] = [];
     expect(
