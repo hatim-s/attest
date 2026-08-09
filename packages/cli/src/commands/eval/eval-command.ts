@@ -138,7 +138,7 @@ const renderHumanProgress = (event: EvalEvent): string | undefined => {
   }
 };
 
-/** Renders the terminal result with one stable final line suitable for logs and CI summaries. */
+/** Renders a successful run's copy-paste follow-ups and one stable final result line. */
 const renderHumanFinalResult = (data: EvalFinalResultData): string => {
   const result = data.result;
   const lines = result.ok
@@ -149,6 +149,11 @@ const renderHumanFinalResult = (data: EvalFinalResultData): string => {
         `  failed: ${result.result.summary.failed_cases}`,
         `  errors: ${result.result.summary.error_cases}`,
         `  metric errors: ${result.result.summary.metric_error_count}`,
+        'Next:',
+        '  attest diff',
+        // The persisted run id makes the report command immediately executable as printed.
+        `  attest report ${result.result.run_id}`,
+        '  attest view',
       ]
     : [];
   lines.push(`Result: ${verdictLabel(data.exit_code, result)} (exit ${data.exit_code})`);
