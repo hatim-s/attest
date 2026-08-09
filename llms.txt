@@ -1,0 +1,59 @@
+# Attest documentation map
+
+Attest is a local-first CLI for authored agent-evaluation resources and immutable runs.
+Use canonical pages and machine contracts; do not infer shapes from examples.
+
+Start:
+
+- docs/index.md — human and coding-agent navigation
+- docs/quickstart.md — complete native agent to eval journey
+- docs/cli/index.md — CLI workflow and machine-output contract
+
+Concepts:
+
+- docs/concepts/resource-model.md — project, resources, references, hashes, paths
+- docs/concepts/eval-lifecycle.md — resolve, invoke, score, persist, render
+
+Machine discovery:
+
+- `attest help --output json` — versioned command tree
+- `attest help <namespace> <verb> --output json` — focused command contract
+- `attest schema list --output json` — available schema ids
+- `attest schema print <schema-id> --output json` — authoritative JSON Schema
+- `attest errors --output json` — stable error registry and repairs
+
+Reference:
+
+- docs/reference/schemas.md — schema ids and generated artifacts
+- docs/reference/errors.md — meaning, causes, retryability, exit codes, repairs
+- docs/reference/exit-codes.md — process status contract
+- docs/reference/file-layout.md — authored and runtime paths
+
+CLI guides:
+
+- docs/cli/agents.md
+- docs/cli/tests-and-datasets.md
+- docs/cli/metrics.md
+- docs/cli/eval-runs.md
+
+Integration guides:
+
+- docs/integrations/native.md
+- docs/integrations/curl-and-http.md
+- docs/integrations/cli-processes.md
+- docs/integrations/polling-and-streams.md
+- docs/integrations/websockets.md
+
+Protocols:
+
+- docs/specs/agent-contract.md — attest.agent/v1alpha1
+- docs/specs/metric-contract.md — attest.metric/v1alpha1
+- docs/specs/run-bundle.md — portable eval evidence
+- docs/specs/trace-schema.md — attest.trace/v1alpha1
+
+Machine output:
+
+- JSON is one attest.cli-result/v1 document.
+- JSONL is attest.cli-event/v1 per line; the final event is `result`.
+- Mutation requests use attest.command-request/v2.
+- Prefer `error.code`, schema ids, and project hashes over prose parsing.
