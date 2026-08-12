@@ -17,7 +17,7 @@ import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 
-import { cliResultSchema, type AgentResource } from '@attest/contracts';
+import { AGENT_PROTOCOL, cliResultSchema, type AgentResource } from '@attest/contracts';
 import { openStore } from '@attest/core';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -484,7 +484,7 @@ describe('agent authoring', () => {
             argv: [hostileArgument, '$(false)'],
             handshake: {
               case_id: 'connection-test',
-              protocol: 'attest.agent-invocation',
+              protocol: AGENT_PROTOCOL,
               run_id: '01ARZ3NDEKTSV4RRFFQ69G5FAV',
             },
             input: { ping: true },
