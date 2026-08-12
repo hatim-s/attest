@@ -1,6 +1,6 @@
 import {
-  CLI_EVENT_SCHEMA_ID,
-  CLI_RESULT_SCHEMA_ID,
+  CLI_EVENT_SCHEMA_VERSION,
+  CLI_RESULT_SCHEMA_VERSION,
   type EvalEvent,
   type EvalFinalResultData,
   type EvalRunSummary,
@@ -44,7 +44,7 @@ const safeErrorMessage = (error: unknown, fallback: string): string => {
 const defaultTerminalFailure: EvalTerminalFailureFactory = (code, message) => ({
   exit_code: code === 'cancelled' ? 130 : 4,
   result: {
-    schema: CLI_RESULT_SCHEMA_ID,
+    schema: CLI_RESULT_SCHEMA_VERSION,
     ok: false,
     command: 'eval.run',
     error: { code, message, retryable: true },
@@ -55,7 +55,7 @@ const defaultTerminalFailure: EvalTerminalFailureFactory = (code, message) => ({
 const completedResult = (run: ImmutableEvalRun, summary: EvalRunSummary): EvalFinalResultData => {
   const verdict = summary.failed_cases === 0 ? 'pass' : 'fail';
   const sharedResult = {
-    schema: CLI_RESULT_SCHEMA_ID,
+    schema: CLI_RESULT_SCHEMA_VERSION,
     ok: true as const,
     command: 'eval.run' as const,
     project_hash_before: run.snapshot.project_hash,
@@ -87,7 +87,7 @@ const preOrchestrationFailure = async <Payload, BaselineDiff>(
   onEvent: ExecuteEvalOptions['onEvent'],
 ): Promise<EvalExecutionResult<Payload, BaselineDiff>> => {
   const event: EvalEvent = {
-    schema: CLI_EVENT_SCHEMA_ID,
+    schema: CLI_EVENT_SCHEMA_VERSION,
     sequence: 0,
     time: now(),
     event: 'result',
