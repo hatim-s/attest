@@ -12,10 +12,7 @@ export type {
   MetricEvaluation,
   MetricExecutionView,
 } from './metric-evaluation.js';
-export {
-  fromStoredMetricEvaluation,
-  toStoredMetricEvaluation,
-} from './stored-metric-evaluation.js';
+export { toStoredMetricEvaluation } from './stored-metric-evaluation.js';
 export {
   createTanstackJudgeClient,
   type JudgeAttempt,

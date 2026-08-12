@@ -20,7 +20,7 @@ const METRIC_ERROR_CODES = [
 /** Names the stable failure classes a metric may report without parsing messages. */
 type MetricErrorCode = (typeof METRIC_ERROR_CODES)[number];
 
-/** Preserves forward-compatible persisted error kinds alongside the runtime's stable vocabulary. */
+/** Preserves persisted error kinds alongside the runtime's stable vocabulary. */
 type StoredErrorKind = MetricErrorCode | (string & {});
 
 /** Keeps metric evaluation decoupled from the richer runner result integrated at the Phase 1 gate. */

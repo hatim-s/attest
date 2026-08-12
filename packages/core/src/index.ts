@@ -27,12 +27,10 @@ export {
   type WebSocketSessionOptions,
 } from './runner/index.js';
 export {
-  BUNDLE_VERSION,
   StoreError,
   exportRunBundle,
   openReadonlyRunStore,
   createRunIdentity,
-  openRunStore,
   openRunStoreSnapshot,
   openStore,
   readRunBundle,
@@ -48,7 +46,6 @@ export {
   type CaseOutcome,
   type CaseRecord,
   type CaseSummary,
-  type InvocationError,
   type RunMetadata,
   type RunIdentity,
   type RunRecord,
@@ -58,7 +55,6 @@ export {
   type StoredAttempt,
   type StoredCaseExecution,
   type StoredDiagnostics,
-  type StoredInvocationErrorCode,
   type StoredMetricEvaluation,
 } from './store/index.js';
 export {
@@ -86,7 +82,6 @@ export {
   caseExecutionToMetricContext,
   createTanstackJudgeClient,
   evaluateMetrics,
-  fromStoredMetricEvaluation,
   toStoredMetricEvaluation,
   type AttestMetricErrorCode,
   type CaseExecutionView,
@@ -108,7 +103,6 @@ export {
   type TanstackJudgeClientOptions,
 } from './metrics/index.js';
 export {
-  API_VERSION as VIEW_API_VERSION,
   createViewApp,
   startViewServer,
   type CreateViewAppOptions,

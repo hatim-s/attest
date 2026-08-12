@@ -1,15 +1,15 @@
 /** Identifies the agent invocation request and response envelopes. */
-// Stack slices keep the previous producer value until downstream emitters migrate.
-const AGENT_PROTOCOL = 'attest.agent/v1alpha1' as const;
+const AGENT_PROTOCOL = 'attest.agent-invocation' as const;
 const CURRENT_AGENT_PROTOCOL = 'attest.agent-invocation' as const;
+const LEGACY_AGENT_PROTOCOL = 'attest.agent/v1alpha1' as const;
 
 /** Identifies trace documents described by the trace schema contract. */
 const TRACE_SCHEMA_ID = 'attest.trace' as const;
 
 /** Identifies executable metric envelopes described by the metric contract. */
-// Stack slices keep the previous producer value until downstream emitters migrate.
-const METRIC_PROTOCOL = 'attest.metric/v1alpha1' as const;
+const METRIC_PROTOCOL = 'attest.metric-evaluation' as const;
 const CURRENT_METRIC_PROTOCOL = 'attest.metric-evaluation' as const;
+const LEGACY_METRIC_PROTOCOL = 'attest.metric/v1alpha1' as const;
 
 /** Identifies the generated project manifest. */
 const PROJECT_SCHEMA_ID = 'attest.project' as const;
@@ -110,6 +110,8 @@ export {
   DATASET_SCHEMA_VERSION,
   EVAL_RUN_SCHEMA_ID,
   EVAL_RUN_SCHEMA_VERSION,
+  LEGACY_AGENT_PROTOCOL,
+  LEGACY_METRIC_PROTOCOL,
   METRIC_PROTOCOL,
   METRIC_PRESET_SCHEMA_ID,
   METRIC_PRESET_SCHEMA_VERSION,

@@ -3,8 +3,8 @@ import { z } from 'zod';
 import { requireExactlyOne } from '../internal/exactly-one.js';
 import { traceSchema } from '../trace/protocol.js';
 import {
-  AGENT_PROTOCOL,
   CURRENT_AGENT_PROTOCOL,
+  LEGACY_AGENT_PROTOCOL,
   currentOrLegacyIdentifier,
 } from '../schema/identifiers.js';
 
@@ -20,7 +20,7 @@ const conversationMessageSchema = z.strictObject({
  */
 const agentRequestSchema = z
   .looseObject({
-    protocol: currentOrLegacyIdentifier(CURRENT_AGENT_PROTOCOL, AGENT_PROTOCOL),
+    protocol: currentOrLegacyIdentifier(CURRENT_AGENT_PROTOCOL, LEGACY_AGENT_PROTOCOL),
     run_id: z.ulid(),
     case_id: z.string(),
     input: z.json(),
@@ -54,7 +54,7 @@ type AgentRequest = z.infer<typeof agentRequestSchema>;
 /** Encodes the successful response branch from docs/specs/agent-contract.md. */
 const agentSuccessResponseSchema = z
   .looseObject({
-    protocol: currentOrLegacyIdentifier(CURRENT_AGENT_PROTOCOL, AGENT_PROTOCOL),
+    protocol: currentOrLegacyIdentifier(CURRENT_AGENT_PROTOCOL, LEGACY_AGENT_PROTOCOL),
     output: z.json(),
     state: z.json().optional(),
     trace: z.unknown().optional(),
@@ -64,7 +64,7 @@ const agentSuccessResponseSchema = z
 /** Encodes the agent-reported failure branch from docs/specs/agent-contract.md. */
 const agentErrorResponseSchema = z
   .looseObject({
-    protocol: currentOrLegacyIdentifier(CURRENT_AGENT_PROTOCOL, AGENT_PROTOCOL),
+    protocol: currentOrLegacyIdentifier(CURRENT_AGENT_PROTOCOL, LEGACY_AGENT_PROTOCOL),
     error: z.strictObject({
       message: z.string(),
       code: z.string().optional(),
@@ -78,14 +78,14 @@ const agentErrorResponseSchema = z
 const agentResponseSchema = z.union([agentSuccessResponseSchema, agentErrorResponseSchema]);
 
 const agentSuccessResponseValueSchema = z.object({
-  protocol: currentOrLegacyIdentifier(CURRENT_AGENT_PROTOCOL, AGENT_PROTOCOL),
+  protocol: currentOrLegacyIdentifier(CURRENT_AGENT_PROTOCOL, LEGACY_AGENT_PROTOCOL),
   output: z.json(),
   state: z.json().optional(),
   trace: traceSchema.optional(),
 });
 
 const agentErrorResponseValueSchema = z.object({
-  protocol: currentOrLegacyIdentifier(CURRENT_AGENT_PROTOCOL, AGENT_PROTOCOL),
+  protocol: currentOrLegacyIdentifier(CURRENT_AGENT_PROTOCOL, LEGACY_AGENT_PROTOCOL),
   error: z.strictObject({
     message: z.string(),
     code: z.string().optional(),

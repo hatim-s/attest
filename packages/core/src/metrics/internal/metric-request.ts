@@ -3,7 +3,7 @@ import { METRIC_PROTOCOL, type MetricRequest } from '@attest/contracts';
 import type { MetricContext } from '../metric-evaluation.js';
 
 /**
- * Assembles the attest.metric/v1alpha1 request envelope from the evaluation document (spec §2).
+ * Assembles the attest.metric-evaluation request envelope from the evaluation document (spec §2).
  * Keeping this pure lets every executable transport send precisely the same case evidence.
  */
 const buildMetricRequest = (context: MetricContext): MetricRequest => ({

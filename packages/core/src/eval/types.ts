@@ -117,7 +117,7 @@ type EvalCaseRunner<Payload = unknown> = {
 
 /**
  * Defines the narrow persistence seam integration can bind to the existing RunStore mappings.
- * The engine never opens a database or imports the v1 configuration model directly.
+ * The engine never opens a database or imports the old configuration model directly.
  */
 type EvalPersistenceAdapter<Payload = unknown> = {
   createRun(run: ImmutableEvalRun): Promise<void>;
