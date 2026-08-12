@@ -20,8 +20,8 @@ In non-interactive mode, omitting both test ids and `--all` returns
 
 ## 2. Resolve an immutable snapshot
 
-Attest discovers and validates `attest.project/v2`, then resolves each selected
-`attest.test/v2` through its agent, dataset, and metric references. It expands direct
+Attest discovers and validates `attest.project`, then resolves each selected
+`attest.test` through its agent, dataset, and metric references. It expands direct
 cases and attached dataset rows, applies defaults and case overrides, and captures the
 effective command plus resource content hashes.
 
@@ -31,7 +31,7 @@ case ids, or integrity mismatches fail without creating a partial run. The
 
 ## 3. Invoke the agent
 
-Every transport normalizes one case to an `attest.agent/v1alpha1` request and response at
+Every transport normalizes one case to an `attest.agent-invocation` request and response at
 the runner boundary. Native processes exchange one JSON document over stdin/stdout;
 HTTP, polling, streaming, managed-process, and WebSocket adapters map their wire formats
 to the same envelope.
@@ -47,7 +47,7 @@ evidence, timing, and extraction decision. See the
 ## 4. Evaluate metrics
 
 Assertions score normalized output or trace data directly. Judge metrics call their
-configured model. Executable metrics exchange the `attest.metric/v1alpha1` request and
+configured model. Executable metrics exchange the `attest.metric-evaluation` request and
 result envelope; HTTP metrics map an equivalent request and result. Thresholds,
 per-case overrides, and the test pass gate determine case and run outcomes.
 
@@ -78,7 +78,7 @@ diffing, and reports.
 
 ## 6. Consume output
 
-With `--output json`, stdout contains exactly one `attest.cli-result/v1` document after
+With `--output json`, stdout contains exactly one `attest.cli-result` document after
 completion. Success includes `ok: true`, `command: "eval.run"`, project hashes, a
 command-specific result, and warnings. Failure includes `ok: false`, `command`, and a
 structured error with stable `code`, `message`, and `retryable` fields.
@@ -89,7 +89,7 @@ Use `--output jsonl` for live machine events:
 attest eval run smoke --output jsonl
 ```
 
-Each line is one `attest.cli-event/v1` document containing `sequence`, `time`, `event`,
+Each line is one `attest.cli-event` document containing `sequence`, `time`, `event`,
 and `data`. Orchestration event ordering is deterministic. Case-completion events retain
 actual completion order and carry their configured case index. The final line has
 `event: "result"` and wraps the terminal CLI result.

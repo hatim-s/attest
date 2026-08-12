@@ -7,12 +7,12 @@ the packed `attest` executable on `PATH`.
 
 ## Inspect the contract
 
-Read the versioned command help, request schema, and error registry before mutating a
+Read the command help, request schema, and error registry before mutating a
 project:
 
 ```bash
 attest help agent add --output json
-attest schema print attest.command-request/v2 --output json
+attest schema print attest.command-request --output json
 attest errors --output json
 ```
 
@@ -31,14 +31,14 @@ attest project init . --name repair --non-interactive --output json
 attest agent add incomplete --output json
 ```
 
-The command exits with code `2` and returns an `attest.cli-result/v1` failure whose
+The command exits with code `2` and returns an `attest.cli-result` failure whose
 command is `agent.add` and whose error code is `cli_missing_input`. It does not write
 `attest/agents/incomplete.json` or `.attest/runs.db`.
 
 ## Repair rule
 
 Treat the structured error together with the previously fetched JSON help and
-`attest.command-request/v2` schema as the source of truth. Supply one complete
+`attest.command-request` schema as the source of truth. Supply one complete
 transport configuration described there, then retry the same agent id. Because the
 failed transaction wrote no agent resource, the retry starts from a clean project
 state and needs no rollback.

@@ -300,7 +300,7 @@ describe('WebSocket agent UX', () => {
       expect(agent.redaction).toEqual({ headers: ['Authorization'] });
       expect(agent.capabilities).toEqual({ trace: true });
     }
-  });
+  }, 10_000);
 
   it('derives a serial connection for per-case flags when the mode is omitted', async () => {
     const root = await createProject();

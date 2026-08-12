@@ -118,9 +118,9 @@ type JourneyEvidence = {
 
 const execFileAsync = promisify(execFile);
 const TEST_DIRECTORY = dirname(fileURLToPath(import.meta.url));
-const REPOSITORY_ROOT = resolve(TEST_DIRECTORY, '../../../..');
-const CONTRACT_PATH = join(TEST_DIRECTORY, 'fixtures/cli2-16-under-five-minute.json');
-const FIXTURE_ROOT = join(TEST_DIRECTORY, 'fixtures/cli2-16');
+const REPOSITORY_ROOT = resolve(TEST_DIRECTORY, '../../../../..');
+const CONTRACT_PATH = join(TEST_DIRECTORY, 'fixtures/quickstart-time-budget.json');
+const FIXTURE_ROOT = join(TEST_DIRECTORY, 'fixtures/quickstart');
 const CI_WORKFLOW_PATH = join(REPOSITORY_ROOT, '.github/workflows/ci.yml');
 const PACKED_PACKAGE_ROOTS = [
   'packages/contracts',
@@ -138,7 +138,7 @@ const RUN_ID_PATTERN = /\b[0-9A-HJKMNP-TV-Z]{26}\b/u;
 const temporaryDirectories: string[] = [];
 const claimedPackedRuntimeRoots = new Set<string>();
 
-/** Reads the task-owned CLI2.16 acceptance contract without importing production contracts. */
+/** Reads the task-owned acceptance contract without importing production contracts. */
 const readContract = async (): Promise<Contract> =>
   JSON.parse(await readFile(CONTRACT_PATH, 'utf8')) as Contract;
 
@@ -174,7 +174,7 @@ const snapshotFiles = async (root: string): Promise<FileSnapshot> => {
 /** Creates the production-packed CLI prerequisite outside the measured actor stopwatch. */
 const createPackedCli = async (): Promise<PackedCli> => {
   await execFileAsync('bun', ['run', 'build'], { cwd: REPOSITORY_ROOT, timeout: 120_000 });
-  const runtime = await mkdtemp(join(tmpdir(), 'attest-cli2-16-packed-'));
+  const runtime = await mkdtemp(join(tmpdir(), 'attest-quickstart-packed-'));
   temporaryDirectories.push(runtime);
   const archiveDirectory = join(runtime, 'archives');
   await mkdir(archiveDirectory);
@@ -347,7 +347,7 @@ const parseEvalStream = (stdout: string, expectedExitCode: number): CliDocument 
     .map((line) => JSON.parse(line) as CliEvent);
   expect(events.length).toBeGreaterThanOrEqual(3);
   expect(events.map((event) => event.sequence)).toEqual(events.map((_, index) => index));
-  for (const event of events) expect(event.schema).toBe('attest.cli-event/v1');
+  for (const event of events) expect(event.schema).toBe('attest.cli-event');
   const terminal = events.at(-1);
   expect(terminal).toMatchObject({ event: 'result', data: { exit_code: expectedExitCode } });
   const document = terminal?.data?.result;
@@ -380,7 +380,7 @@ const assertCommand = async (
     document = parseEvalStream(result.stdout, expectation.exit_code);
   }
   if (document !== undefined) {
-    expect(document.schema, expectation.id).toBe('attest.cli-result/v1');
+    expect(document.schema, expectation.id).toBe('attest.cli-result');
     if (expectation.command !== undefined) {
       expect(document.command, expectation.id).toBe(expectation.command);
     }
@@ -466,7 +466,7 @@ const runJourney = async (actor: Actor, contract: Contract): Promise<JourneyEvid
     false,
   );
   claimedPackedRuntimeRoots.add(packed.root);
-  const root = await mkdtemp(join(tmpdir(), `attest-cli2-16-${actor.id}-`));
+  const root = await mkdtemp(join(tmpdir(), `attest-quickstart-${actor.id}-`));
   temporaryDirectories.push(root);
   await cp(FIXTURE_ROOT, root, { recursive: true });
   const fixtureSnapshot = await snapshotFiles(root);
@@ -520,10 +520,10 @@ afterAll(async () => {
   );
 });
 
-describe('CLI2.16 under-five-minute acceptance contract', () => {
+describe('under-five-minute acceptance contract', () => {
   it('freezes exact timing, prerequisite, fixture, and cross-platform rules', async () => {
     const contract = await readContract();
-    expect(contract.schema).toBe('attest.cli2-16-under-five-minute/v1');
+    expect(contract.schema).toBe('attest.acceptance.quickstart');
     expect(contract.budget_ms).toBe(300_000);
     expect(contract.per_command_timeout_ms).toBe(30_000);
     expect(contract.timing).toMatchObject({

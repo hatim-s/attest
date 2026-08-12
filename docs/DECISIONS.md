@@ -1,6 +1,8 @@
 # attest — Foundation Decisions
 
-> Product: a general eval runtime for AI agents. Users bring agents callable via CLI or HTTP; the runtime executes them against test cases, scores with deterministic and LLM-based metrics, and produces run diffs, reports, and interactive dashboards. Local-first, cloud later.
+> Product: a general eval runtime for AI agents. Users connect agents through a supported adapter;
+> the runtime executes them against test cases, scores with deterministic and LLM-based metrics,
+> and produces run diffs, reports, and interactive dashboards. Local-first, cloud later.
 >
 > Status: strategic foundation locked (2026-08-06). Implementation-level decisions deferred.
 
@@ -22,7 +24,7 @@
 
 ## 3. Product Wedge (why switch from Braintrust / LangSmith / Promptfoo / DeepEval)
 
-1. **Framework-agnostic** — the agent contract is CLI or HTTP. Any language, any framework, no SDK lock-in.
+1. **Framework-agnostic** — native modules, managed processes, HTTP, polling, streams, and WebSockets normalize to one agent contract. Any language, any framework, no SDK lock-in.
 2. **Agent-native** — trajectory and tool-call assertions, multi-turn user simulation; built for agents, not prompt pairs.
 3. **Best-in-class reports & dashboards** — run diffing, regression views, shareable self-contained reports. The area where OSS competitors are weakest.
 
@@ -32,13 +34,13 @@ Local-first is a property of the product but not the lead pitch.
 
 | Decision | Choice |
 |---|---|
-| Agent interface | CLI command or HTTP endpoint. Runtime invokes it per test case. |
+| Agent interface | Native module, managed process, HTTP, polling, stream, or WebSocket adapter. Every transport normalizes to the same request/response protocol and the runtime invokes it per test case. |
 | Trace contract | **Open trace schema** (JSON, aligned with OTel GenAI semantic conventions where sensible). Agents optionally emit a trace alongside the final output. No trace → output-only eval still works (progressive disclosure). Framework adapters come later as convenience wrappers that emit the same schema — the schema is the contract, adapters are sugar. |
-| Test authoring | Files are the source of truth (YAML/JSON, git-versioned, CI-friendly). Local dashboard includes a UI editor that writes back to the files. |
-| Metrics | Two layers: (a) **declarative assertions** in config (contains, regex, JSON-schema, tool-called, etc.) for the 80% case; (b) **executable contract** — a custom metric is any executable or HTTP endpoint receiving `{case, output, trace}` JSON and returning a score JSON. Any language; mirrors the agent contract. LLM-judge metrics built in. |
+| Test authoring | Generated JSON resources and JSONL datasets are the source of truth (git-versioned and CI-friendly). The CLI is the supported mutation API; direct file editing is inspectable but not the primary authoring path. |
+| Metrics | Two layers: (a) **declarative assertions** in metric resources (contains, regex, JSON-schema, tool-called, etc.) for the 80% case; (b) **executable contract** — a custom metric is any executable or HTTP endpoint receiving `{case, output, trace}` JSON and returning a score JSON. Any language; mirrors the agent contract. LLM-judge metrics built in. |
 | LLM judges | BYO API keys only at launch (local and cloud). Managed inference is a later cloud upsell. |
 | Dashboard | `attest view` — local web app over a local run store. `attest report` — self-contained static HTML export (CI artifact, email, PR link). |
-| Eval capabilities (v1 target) | Single-turn evals; trajectory/tool-call assertions; **run diffing / regression compare** (mandatory — core of the reports wedge); multi-turn user simulation (flagship differentiator — ship at launch if ready, otherwise first fast-follow). Human review queue / judge calibration is v2. |
+| Eval capabilities (launch target) | Single-turn evals; trajectory/tool-call assertions; **run diffing / regression compare** (mandatory — core of the reports wedge); multi-turn user simulation (flagship differentiator — ship at launch if ready, otherwise first fast-follow). Human review queue and judge calibration follow later. |
 
 ## 5. Open Source & Moat
 

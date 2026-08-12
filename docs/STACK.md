@@ -10,14 +10,14 @@
 | Runtime | **Bun** | Native `bun build --compile` single-file binaries, built-in SQLite, fast CLI startup, first-class TS. Risk accepted: younger ecosystem, occasional Node-compat gaps. |
 | Distribution | **npm package + compiled binaries** | npm/npx for the JS-native majority; Bun-compiled standalone binaries via GitHub Releases, Homebrew tap, and `curl \| sh` for no-runtime installs and CI. Keeps the dependency-free wedge. ~~Open item~~ **Resolved 2026-08-06**: portable SQLite driver (`node:sqlite`, libsql fallback) so the npm package runs under both Node and Bun — see Implementation decisions below. |
 | Launch platforms | **macOS + Linux; Windows as first compat fast-follow** | Beachhead is CI (Linux runners) + dev laptops. Windows process-tree/signal/quoting work deferred. |
-| Trace schema | **attest envelope, OTel-mapped** | Own small versioned JSON schema (`attest.trace/v1alpha1`); reuse OTel GenAI attribute names where semantics match; ship an OTLP converter. Insulates the core contract from OTel GenAI semconv churn (still marked development) while keeping the open-standard story. |
-| Cloud code location | **Separate private repo** | Unambiguous Apache boundary. Contracts/schemas published as versioned packages from the OSS repo. |
+| Trace schema | **attest envelope, OTel-mapped** | Own small JSON schema (`attest.trace`); reuse OTel GenAI attribute names where semantics match; ship an OTLP converter. Insulates the core contract from OTel GenAI semconv churn while keeping the open-standard story. |
+| Cloud code location | **Separate private repo** | Unambiguous Apache boundary. Contracts and schemas are published from the OSS repo. |
 
 ## Stack summary
 
 - **CLI + runtime**: TypeScript on Bun. Concurrency via async pools for parallel agent invocation; explicit timeout/retry/cancellation and full process-tree kill for CLI agents.
 - **LLM judges**: thin provider adapters behind one interface (Anthropic + OpenAI SDKs first). The runtime never becomes a universal provider SDK — agents and custom metrics stay language-neutral by contract.
-- **Run store**: SQLite (WAL mode), one serialized writer, concurrent readers. Project-local `.attest/runs.db`. Normalized runs/cases/metric-results + searchable span metadata, with canonical raw JSON retained for inputs/outputs/traces/judge responses. Numbered transactional migrations; every persisted contract independently versioned; ULID ids, UTC timestamps, immutable completed runs. Exportable versioned run bundle (JSON/NDJSON) — the cloud ingests bundles via API, never syncs SQLite.
+- **Run store**: SQLite (WAL mode), one serialized writer, concurrent readers. Project-local `.attest/runs.db`. Normalized runs/cases/metric-results + searchable span metadata, with canonical raw JSON retained for inputs/outputs/traces/judge responses. Numbered transactional migrations; persisted records carry explicit schema ids; ULID ids, UTC timestamps, immutable completed runs. Exportable run bundle (JSON/NDJSON) — the cloud ingests bundles through its interface, never syncs SQLite.
 - **Dashboard**: React + Vite SPA embedded in the shipped artifact. `attest view` = loopback-only HTTP server (127.0.0.1, session token for writes, Origin validation). `attest report` = same components, second build entry point, run bundle inlined into one self-contained HTML file (no network requests). TanStack Table + virtualized lists; tree-shaken ECharts for distributions/trends; custom virtualized trace-waterfall component. Test at 10k cases.
 - **Project resources**: generated JSON resources plus JSONL datasets are canonical. Draft 2020-12 JSON Schemas reject unknown fields and aggregate source-addressed errors before any agent runs; transactional writes use canonical hashes, atomic publication, and stale-project protection.
 - **Multi-turn simulation**: simulator loop lives in the runtime as an orchestration layer over the ordinary one-turn agent contract (`messages`, `turn_index`, `conversation_id` in the request envelope; stateless replay default, optional opaque state token for HTTP agents). Deterministic termination policy (max_turns / timeout / agent failure / simulator `finished`). Simulator prompts, params, and usage recorded separately from the tested agent.
@@ -25,7 +25,7 @@
 
 ## Testing philosophy
 
-Primary test surfaces: determinism, contract compatibility, hostile process behavior. Required CI never calls a live LLM; provider smoke tests are scheduled, budget-capped, non-blocking.
+Primary test surfaces: determinism, contract conformance, hostile process behavior. Required CI never calls a live LLM; provider smoke tests are scheduled, budget-capped, non-blocking.
 
 - Unit/property tests: assertions, thresholds, diff classification, hashing, retries, redaction.
 - Golden conformance fixtures for every current contract: project resources, agent, metric, trace, JUnit output, report bundle.
@@ -38,11 +38,11 @@ Primary test surfaces: determinism, contract compatibility, hostile process beha
 
 Novel **only** where the wedge is: the contracts, agent-native eval semantics, run diffing, and report UX. Boring everywhere else — buy/vendor SQLite, YAML CST parsing, JSON Schema validation, HTTP, tables, charts.
 
-No sandboxing of user executables in v1: agents and custom metrics are trusted project code. Controls instead: temp working directory, env-var allowlist, output caps, deadlines, full process-tree kill. Cloud never executes uploaded metrics in the control plane; future remote execution goes to isolated disposable workers.
+User executables are not sandboxed: agents and custom metrics are trusted project code. Controls instead: temp working directory, env-var allowlist, output caps, deadlines, full process-tree kill. Cloud never executes uploaded metrics in the control plane; future remote execution goes to isolated disposable workers.
 
-## De-risking prototypes (before broad build-out — feeds Roadmap Phase 0/1)
+## De-risking prototypes (historical build-order rationale)
 
-1. Vertical slice: v2 project → concurrent agent execution → SQLite → diff → single-file HTML report.
+1. Vertical slice: project → concurrent agent execution → SQLite → diff → single-file HTML report.
 2. Cross-platform (macOS/Linux) timeout + process-tree termination under Bun.
 3. Lossless YAML editing under comments, multiline strings, concurrent modification.
 4. One large traced run rendered from both localhost and self-contained HTML.

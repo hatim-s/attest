@@ -22,7 +22,7 @@ import { fileURLToPath } from 'node:url';
 
 import { afterAll, describe, expect, it } from 'vitest';
 
-import { runCli } from '../run-cli.js';
+import { runCli } from '../../run-cli.js';
 
 type CommandExpectation = {
   argv: string[];
@@ -77,8 +77,8 @@ type PackedCliRuntime = {
 
 const execFileAsync = promisify(execFile);
 const TEST_DIRECTORY = dirname(fileURLToPath(import.meta.url));
-const REPOSITORY_ROOT = resolve(TEST_DIRECTORY, '../../../..');
-const CONTRACT_PATH = join(TEST_DIRECTORY, 'fixtures/cli2-15-contract.json');
+const REPOSITORY_ROOT = resolve(TEST_DIRECTORY, '../../../../..');
+const CONTRACT_PATH = join(TEST_DIRECTORY, 'fixtures/documentation-contract.json');
 const PACKED_PACKAGE_ROOTS = [
   'packages/contracts',
   'packages/core',
@@ -94,7 +94,7 @@ const PACKED_PACKAGE_NAMES = [
 const temporaryDirectories: string[] = [];
 let packedCliRuntimePromise: Promise<PackedCliRuntime> | undefined;
 
-/** Reads the frozen CLI2.15 acceptance matrix without coupling it to production exports. */
+/** Reads the frozen acceptance matrix without coupling it to production exports. */
 const readContract = async (): Promise<Contract> =>
   JSON.parse(await readFile(CONTRACT_PATH, 'utf8')) as Contract;
 
@@ -189,7 +189,7 @@ const seedJourney = async (journey: Journey): Promise<string> => {
   if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/u.test(journey.id)) {
     throw new Error(`Journey id ${journey.id} is not a safe slug.`);
   }
-  const root = await mkdtemp(join(tmpdir(), `attest-cli2-15-${journey.id}-`));
+  const root = await mkdtemp(join(tmpdir(), `attest-documentation-${journey.id}-`));
   temporaryDirectories.push(root);
   for (const [path, contents] of Object.entries(journey.seed_files)) {
     const destination = await resolveOwnedPath(root, root, path, `seed file ${path}`);
@@ -253,7 +253,7 @@ const assertCommandResult = async (
   expect(stderr, expectation.display).toBe('');
   const document = JSON.parse(stdout.trim()) as CliDocument;
   expect(document, expectation.display).toMatchObject({
-    schema: 'attest.cli-result/v1',
+    schema: 'attest.cli-result',
     ok: expectation.ok,
     command: expectation.command,
   });
@@ -337,7 +337,7 @@ const localMarkdownLinks = (markdown: string): string[] =>
         !target.startsWith('mailto:'),
     );
 
-/** Collects every versioned Attest schema discriminator published by generated artifacts. */
+/** Collects every Attest schema identifier published by generated artifacts. */
 const generatedSchemaReferences = async (): Promise<Set<string>> => {
   const schemaDirectory = join(REPOSITORY_ROOT, 'packages/schemas/generated');
   const contract = await readContract();
@@ -355,7 +355,7 @@ const generatedSchemaReferences = async (): Promise<Set<string>> => {
 /** Packs every runtime workspace and installs the CLI into a dependency-clean production prefix. */
 const createPackedCli = async (): Promise<PackedCliRuntime> => {
   await execFileAsync('bun', ['run', 'build'], { cwd: REPOSITORY_ROOT, timeout: 120_000 });
-  const runtime = await mkdtemp(join(tmpdir(), 'attest-cli2-15-packed-'));
+  const runtime = await mkdtemp(join(tmpdir(), 'attest-documentation-packed-'));
   temporaryDirectories.push(runtime);
   const archiveDirectory = join(runtime, 'archives');
   await mkdir(archiveDirectory);
@@ -463,14 +463,14 @@ afterAll(async () => {
   );
 });
 
-describe('CLI2.15 agent-first documentation and executable-example contract', () => {
-  it('proves the fixed-base v2 runtime supports the frozen example commands', async () => {
+describe('agent-first documentation and executable-example contract', () => {
+  it('proves the runtime supports the frozen example commands', async () => {
     const contract = await readContract();
-    expect(contract.schema).toBe('attest.cli2-15-acceptance/v1');
+    expect(contract.schema).toBe('attest.acceptance.documentation');
     for (const journey of contract.journeys) await runSupportedJourney(journey);
   }, 30_000);
 
-  it('keeps the completed CLI2.14 top-level run removal intact', async () => {
+  it('keeps the completed top-level run removal intact', async () => {
     const stdout: string[] = [];
     const stderr: string[] = [];
     const exitCode = await runCli(['run', '--output', 'json'], {
@@ -485,9 +485,9 @@ describe('CLI2.15 agent-first documentation and executable-example contract', ()
   });
 
   it('detects changed artifact bytes and unexpected no-write residue', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'attest-cli2-15-tree-hostile-'));
+    const root = await mkdtemp(join(tmpdir(), 'attest-documentation-tree-hostile-'));
     temporaryDirectories.push(root);
-    await writeFile(join(root, 'attest.project.json'), '{"schema":"attest.project/v2"}\n');
+    await writeFile(join(root, 'attest.project.json'), '{"schema":"attest.project"}\n');
     const before = await snapshotTree(root);
     await writeFile(join(root, 'attest.project.json'), '{"schema":"corrupted"}\n');
     await writeFile(join(root, '.attest.lock'), 'unexpected residue\n');
@@ -496,8 +496,8 @@ describe('CLI2.15 agent-first documentation and executable-example contract', ()
   });
 
   it('rejects fixture traversal, absolute paths, and symlink escapes', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'attest-cli2-15-path-hostile-'));
-    const outside = await mkdtemp(join(tmpdir(), 'attest-cli2-15-path-outside-'));
+    const root = await mkdtemp(join(tmpdir(), 'attest-documentation-path-hostile-'));
+    const outside = await mkdtemp(join(tmpdir(), 'attest-documentation-path-outside-'));
     temporaryDirectories.push(root, outside);
     await symlink(outside, join(root, 'escape'), 'dir');
     await expect(
@@ -610,7 +610,7 @@ describe('CLI2.15 agent-first documentation and executable-example contract', ()
     expect(result.exitCode).toBe(0);
     expect(result.stderr).toBe('');
     expect(JSON.parse(result.stdout) as CliDocument).toMatchObject({
-      schema: 'attest.cli-result/v1',
+      schema: 'attest.cli-result',
       ok: true,
       command: 'help',
     });
@@ -628,7 +628,7 @@ describe('CLI2.15 agent-first documentation and executable-example contract', ()
     const packed = await getPackedCli();
     for (const journey of contract.journeys) {
       const workingDirectory = await mkdtemp(
-        join(tmpdir(), `attest-cli2-15-packed-${journey.id}-`),
+        join(tmpdir(), `attest-documentation-packed-${journey.id}-`),
       );
       temporaryDirectories.push(workingDirectory);
       const exampleRoot = await resolveOwnedPath(

@@ -43,7 +43,7 @@ Every orchestrating agent MUST inline the relevant parts of this guide into code
 
 ## Tests
 
-- Colocated `*.test.ts` next to the source. Only meaningful behavior gets tested — no snapshot spam, no testing mocks.
+- Tests live under a local `_tests/` directory beside the source module they exercise. Only meaningful behavior gets tested — no snapshot spam, no testing mocks.
 - Deterministic: no timers without fake clocks, no network, no live LLMs. Fixtures over inline blobs when shared.
 - Property tests for pure logic where inputs are combinatorial (assertions, diffing).
 

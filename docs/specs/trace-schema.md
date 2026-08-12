@@ -1,6 +1,6 @@
-# Trace Schema — `attest.trace/v1alpha1`
+# Trace Schema — `attest.trace`
 
-The open trace format attest uses for agent-native evaluation: trajectory assertions, tool-call checks, and trace visualization. Emit it from any language — it is plain JSON, aligned with OpenTelemetry GenAI semantic conventions where semantics match, but versioned independently so agent authors are insulated from upstream churn.
+The open trace format Attest uses for agent-native evaluation: trajectory assertions, tool-call checks, and trace visualization. Emit it from any language — it is plain JSON and aligned with OpenTelemetry GenAI semantic conventions where semantics match, while the Attest contract insulates agent authors from upstream churn.
 
 A trace is **optional**. Without one, attest still evaluates outputs; with one, trajectory metrics and the trace waterfall unlock.
 
@@ -8,7 +8,7 @@ A trace is **optional**. Without one, attest still evaluates outputs; with one, 
 
 ```json
 {
-  "schema": "attest.trace/v1alpha1",
+  "schema": "attest.trace",
   "trace_id": "01J9ZKA3F8Q2T7R6S5P4N3M2L1",
   "spans": [
     {
@@ -61,7 +61,7 @@ A trace is **optional**. Without one, attest still evaluates outputs; with one, 
 
 | Field      | Type   | Required | Notes                                                                        |
 | ---------- | ------ | -------- | ---------------------------------------------------------------------------- |
-| `schema`   | string | yes      | Exactly `attest.trace/v1alpha1`.                                             |
+| `schema`   | string | yes      | Exactly `attest.trace`.                                                      |
 | `trace_id` | string | yes      | Unique per invocation. Any stable string; ULID recommended.                  |
 | `spans`    | array  | yes      | May be empty. Order is not significant; time and parentage define structure. |
 
@@ -99,14 +99,12 @@ Unknown attributes are always legal and always preserved.
 
 1. **Unknown fields are preserved**, stored, and round-tripped — never stripped.
 2. **Submitted traces are immutable**: attest never rewrites the original document; normalization happens on read into an internal representation.
-3. **Older versions up-convert**: when `v1alpha2`+ exists, readers accept every published prior version.
-4. Validation failures degrade gracefully: a malformed trace disables trajectory metrics for that case (recorded as a trace error) but never fails the invocation by itself.
+3. Validation failures degrade gracefully: a malformed trace disables trajectory metrics for that case (recorded as a trace error) but never fails the invocation by itself.
 
-## Versioning policy
+## External semantic conventions
 
-- Within `v1alpha1`: additive optional fields only; no removals, no meaning changes.
-- Breaking changes bump the version (`v1alpha2`, …, `v1`); the `schema` field is the sole discriminator.
-- Each attest release documents which OTel GenAI semconv snapshot the attribute mapping was checked against.
+Each Attest release documents which OTel GenAI semantic-convention snapshot the attribute mapping
+was checked against.
 
 ## Converters
 

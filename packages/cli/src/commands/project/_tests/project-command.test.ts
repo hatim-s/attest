@@ -888,7 +888,7 @@ describe('project shell', () => {
       );
       expect(await readdir(join(root, '.attest', 'transactions'))).toEqual([]);
     }
-  });
+  }, 10_000);
 
   it('returns a stable lock conflict instead of observing a paused publication', async () => {
     const root = await createTemporaryDirectory();

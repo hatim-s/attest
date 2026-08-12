@@ -1,5 +1,5 @@
 {
-  "schema": "attest.cli2-15-acceptance/v1",
+  "schema": "attest.acceptance.documentation",
   "required_docs": [
     "docs/index.md",
     "docs/quickstart.md",
@@ -71,24 +71,24 @@
     "docs/specs/run-bundle.md"
   ],
   "required_schema_references": [
-    "attest.project/v2",
-    "attest.agent/v2",
-    "attest.test/v2",
-    "attest.dataset/v2",
-    "attest.metric/v2",
-    "attest.command-request/v2",
-    "attest.cli-result/v1",
-    "attest.cli-event/v1",
-    "attest.agent/v1alpha1",
-    "attest.metric/v1alpha1",
-    "attest.trace/v1alpha1"
+    "attest.project",
+    "attest.agent",
+    "attest.test",
+    "attest.dataset",
+    "attest.metric",
+    "attest.command-request",
+    "attest.cli-result",
+    "attest.cli-event",
+    "attest.agent-invocation",
+    "attest.metric-evaluation",
+    "attest.trace"
   ],
   "journeys": [
     {
       "id": "native-author-import-evaluate",
       "example_root": "examples/native-cli",
       "seed_files": {
-        "agent.mjs": "let input = '';\nprocess.stdin.setEncoding('utf8');\nfor await (const chunk of process.stdin) input += chunk;\nconst request = JSON.parse(input);\nprocess.stdout.write(JSON.stringify({ protocol: 'attest.agent/v1alpha1', output: request.input }));\n",
+        "agent.mjs": "let input = '';\nprocess.stdin.setEncoding('utf8');\nfor await (const chunk of process.stdin) input += chunk;\nconst request = JSON.parse(input);\nprocess.stdout.write(\n  JSON.stringify({ protocol: 'attest.agent-invocation', output: request.input }),\n);\n",
         "cases.jsonl": "{\"id\":\"refund-basic\",\"input\":\"refund policy\",\"expected\":\"refund policy\"}\n"
       },
       "commands": [
@@ -109,7 +109,7 @@
           "command": "project.init",
           "artifact_documents": {
             "attest.project.json": {
-              "schema": "attest.project/v2",
+              "schema": "attest.project",
               "name": "support",
               "resources": { "agents": [], "datasets": [], "metrics": [], "tests": [] }
             }
@@ -135,8 +135,8 @@
           "ok": true,
           "command": "agent.add",
           "artifact_documents": {
-            "attest.project.json": { "schema": "attest.project/v2", "name": "support" },
-            "attest/agents/support.json": { "schema": "attest.agent/v2", "id": "support" }
+            "attest.project.json": { "schema": "attest.project", "name": "support" },
+            "attest/agents/support.json": { "schema": "attest.agent", "id": "support" }
           },
           "artifacts_present": ["attest/agents/support.json"],
           "artifacts_absent": [".attest/runs.db"],
@@ -156,8 +156,8 @@
           "ok": true,
           "command": "agent.test",
           "artifact_documents": {
-            "attest.project.json": { "schema": "attest.project/v2", "name": "support" },
-            "attest/agents/support.json": { "schema": "attest.agent/v2", "id": "support" }
+            "attest.project.json": { "schema": "attest.project", "name": "support" },
+            "attest/agents/support.json": { "schema": "attest.agent", "id": "support" }
           },
           "artifacts_present": ["attest/agents/support.json"],
           "artifacts_absent": [".attest/runs.db"],
@@ -180,8 +180,8 @@
           "ok": true,
           "command": "metric.add",
           "artifact_documents": {
-            "attest.project.json": { "schema": "attest.project/v2", "name": "support" },
-            "attest/metrics/exact.json": { "schema": "attest.metric/v2", "id": "exact" }
+            "attest.project.json": { "schema": "attest.project", "name": "support" },
+            "attest/metrics/exact.json": { "schema": "attest.metric", "id": "exact" }
           },
           "artifacts_present": ["attest/metrics/exact.json"],
           "artifacts_absent": [".attest/runs.db"],
@@ -204,8 +204,8 @@
           "ok": true,
           "command": "test.add",
           "artifact_documents": {
-            "attest.project.json": { "schema": "attest.project/v2", "name": "support" },
-            "attest/tests/smoke.json": { "schema": "attest.test/v2", "id": "smoke" }
+            "attest.project.json": { "schema": "attest.project", "name": "support" },
+            "attest/tests/smoke.json": { "schema": "attest.test", "id": "smoke" }
           },
           "artifacts_present": ["attest/tests/smoke.json"],
           "artifacts_absent": [".attest/runs.db"],
@@ -218,8 +218,8 @@
           "ok": true,
           "command": "test.case.import",
           "artifact_documents": {
-            "attest.project.json": { "schema": "attest.project/v2", "name": "support" },
-            "attest/tests/smoke.json": { "schema": "attest.test/v2", "id": "smoke" }
+            "attest.project.json": { "schema": "attest.project", "name": "support" },
+            "attest/tests/smoke.json": { "schema": "attest.test", "id": "smoke" }
           },
           "artifacts_present": ["attest/tests/smoke.json"],
           "artifacts_absent": [".attest/runs.db"],
@@ -249,15 +249,15 @@
           "exit_code": 0,
           "ok": true,
           "command": "help",
-          "result_schema": "attest.cli-help/v1",
+          "result_schema": "attest.cli-help",
           "artifact_documents": {},
           "artifacts_present": [],
           "artifacts_absent": ["attest.project.json", ".attest/runs.db"],
           "tree_changes": []
         },
         {
-          "display": "attest schema print attest.command-request/v2 --output json",
-          "argv": ["schema", "print", "attest.command-request/v2", "--output", "json"],
+          "display": "attest schema print attest.command-request --output json",
+          "argv": ["schema", "print", "attest.command-request", "--output", "json"],
           "exit_code": 0,
           "ok": true,
           "command": "schema.print",
@@ -272,7 +272,7 @@
           "exit_code": 0,
           "ok": true,
           "command": "errors",
-          "result_schema": "attest.cli-errors/v1",
+          "result_schema": "attest.cli-errors",
           "artifact_documents": {},
           "artifacts_present": [],
           "artifacts_absent": ["attest.project.json", ".attest/runs.db"],
@@ -295,7 +295,7 @@
           "command": "project.init",
           "artifact_documents": {
             "attest.project.json": {
-              "schema": "attest.project/v2",
+              "schema": "attest.project",
               "name": "repair",
               "resources": { "agents": [], "datasets": [], "metrics": [], "tests": [] }
             }
@@ -313,7 +313,7 @@
           "error_code": "cli_missing_input",
           "artifact_documents": {
             "attest.project.json": {
-              "schema": "attest.project/v2",
+              "schema": "attest.project",
               "name": "repair",
               "resources": { "agents": [], "datasets": [], "metrics": [], "tests": [] }
             }

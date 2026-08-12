@@ -1,4 +1,4 @@
-# Agent Contract — `attest.agent/v1alpha1`
+# Agent Contract — `attest.agent-invocation`
 
 How attest invokes your agent. Any language, any framework: expose either a **CLI command** or an **HTTP endpoint** that speaks this envelope, and attest can evaluate it.
 
@@ -10,7 +10,7 @@ attest treats your agent as a black box invoked once per test case (once per _tu
 
 ```json
 {
-  "protocol": "attest.agent/v1alpha1",
+  "protocol": "attest.agent-invocation",
   "run_id": "01J9ZK7Q2M5X8W4V3T2R1QPN0M",
   "case_id": "greeting-basic",
   "input": { "question": "What is the capital of France?" },
@@ -38,9 +38,9 @@ Multi-turn is **stateless by default**: each turn replays the full transcript, s
 
 ```json
 {
-  "protocol": "attest.agent/v1alpha1",
+  "protocol": "attest.agent-invocation",
   "output": "Paris is the capital of France.",
-  "trace": { "schema": "attest.trace/v1alpha1", "trace_id": "…", "spans": [] }
+  "trace": { "schema": "attest.trace", "trace_id": "…", "spans": [] }
 }
 ```
 
@@ -49,7 +49,7 @@ Multi-turn is **stateless by default**: each turn replays the full transcript, s
 | `protocol` | string | always                    | Must match the request protocol.                                                                                                                                        |
 | `output`   | JSON   | xor `error`               | The agent's final answer. String or structured — metrics decide how to read it.                                                                                         |
 | `error`    | object | xor `output`              | `{ "message": string, "code"?: string }` — the agent understood the request but failed to produce an answer. Counts as a **case failure**, not an infrastructure error. |
-| `trace`    | object | optional                  | An [`attest.trace/v1alpha1`](./trace-schema.md) document. Omitting it disables trajectory metrics for this case; output metrics still run.                              |
+| `trace`    | object | optional                  | An [`attest.trace`](./trace-schema.md) document. Omitting it disables trajectory metrics for this case; output metrics still run.                                       |
 | `state`    | JSON   | optional, HTTP multi-turn | Opaque token echoed back on the next turn's request as `state`.                                                                                                         |
 
 Exactly one of `output` / `error` must be present — a response is either a **success** (`output`) or an **agent failure** (`error`), never both.
@@ -88,6 +88,5 @@ The runner spawns your command once per invocation:
 
 **Containment**: CLI process-tree termination is **best-effort**. Processes that daemonize into a new session after the pre-kill snapshot, and children spawned after that snapshot, can escape. Batched start-time and command identity checks are best-effort **detection** that reduces PID-reuse risk, not a prevention guarantee: same-second reuse by the same command can match, and a process can change between the check and the signal. Unreaped or unverified candidates are reported in diagnostics.
 
-## Versioning
-
-`v1alpha1` may gain optional fields without notice; fields are never removed or repurposed within a version. Agents should ignore unknown request fields. Unknown top-level response fields are **preserved and surfaced as warnings** — never errors — so newer agents keep working against older attest versions.
+Unknown request fields are extensions. Unknown top-level response fields are preserved and surfaced
+as warnings so vendor-specific evidence remains inspectable.

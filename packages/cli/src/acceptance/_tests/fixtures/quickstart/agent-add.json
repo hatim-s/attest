@@ -1,8 +1,8 @@
 {
-  "schema": "attest.command-request/v2",
+  "schema": "attest.command-request",
   "command": "agent.add",
   "agent": {
-    "schema": "attest.agent/v2",
+    "schema": "attest.agent",
     "id": "support",
     "name": "Support",
     "transport": {
