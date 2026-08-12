@@ -1,5 +1,5 @@
 {
-  "schema": "attest.metric-preset/v1",
+  "schema": "attest.metric-preset",
   "id": "tool-order",
   "name": "Tool order",
   "description": "Require tool-call names to appear in one chronological order.",

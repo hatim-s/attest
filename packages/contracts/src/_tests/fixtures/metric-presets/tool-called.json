@@ -1,5 +1,5 @@
 {
-  "schema": "attest.metric-preset/v1",
+  "schema": "attest.metric-preset",
   "id": "tool-called",
   "name": "Tool called",
   "description": "Require matching tool calls, optionally including status, count, and arguments.",

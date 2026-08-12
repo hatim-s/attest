@@ -1,5 +1,5 @@
 {
-  "schema": "attest.metric-preset/v1",
+  "schema": "attest.metric-preset",
   "id": "command",
   "name": "Command metric",
   "description": "Run a trusted local argv array using the native metric envelope.",

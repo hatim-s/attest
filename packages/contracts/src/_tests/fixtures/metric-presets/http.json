@@ -1,5 +1,5 @@
 {
-  "schema": "attest.metric-preset/v1",
+  "schema": "attest.metric-preset",
   "id": "http",
   "name": "HTTP metric",
   "description": "Describe a trusted HTTP metric and normalized result extraction without executing it.",

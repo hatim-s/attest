@@ -1,5 +1,5 @@
 {
-  "schema": "attest.metric-preset/v1",
+  "schema": "attest.metric-preset",
   "id": "judge-rubric",
   "name": "Judge rubric",
   "description": "Score a local fixture later with a provider/model identifier and explicit rubric.",
