@@ -1,5 +1,5 @@
 /** Identifies the agent invocation request and response envelopes. */
-const AGENT_PROTOCOL = 'attest.agent-invocation' as const;
+const AGENT_PROTOCOL = 'attest.agent/v1alpha1' as const;
 const CURRENT_AGENT_PROTOCOL = 'attest.agent-invocation' as const;
 const LEGACY_AGENT_PROTOCOL = 'attest.agent/v1alpha1' as const;
 
@@ -7,7 +7,7 @@ const LEGACY_AGENT_PROTOCOL = 'attest.agent/v1alpha1' as const;
 const TRACE_SCHEMA_ID = 'attest.trace' as const;
 
 /** Identifies executable metric envelopes described by the metric contract. */
-const METRIC_PROTOCOL = 'attest.metric-evaluation' as const;
+const METRIC_PROTOCOL = 'attest.metric/v1alpha1' as const;
 const CURRENT_METRIC_PROTOCOL = 'attest.metric-evaluation' as const;
 const LEGACY_METRIC_PROTOCOL = 'attest.metric/v1alpha1' as const;
 

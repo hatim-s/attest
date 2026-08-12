@@ -3,12 +3,12 @@ import { createHash } from 'node:crypto';
 import { canonicalStringify } from './internal/canonical-json.js';
 import type { CaseRecord, RunRecord } from './types.js';
 
-const BUNDLE_VERSION = 'attest.bundle/v1alpha1';
+const BUNDLE_SCHEMA_ID = 'attest.bundle';
 
 /** Describes the run metadata line that starts every PLAN 1S.4 cloud-ingest bundle. */
 interface BundleHeader {
   type: 'bundle_header';
-  bundle_version: typeof BUNDLE_VERSION;
+  schema: typeof BUNDLE_SCHEMA_ID;
   run: RunRecord;
 }
 
@@ -29,7 +29,7 @@ type BundleLine = BundleHeader | BundleCase | BundleFooter;
 
 /** Summarizes a completed PLAN 1S.4 export for future cloud-ingest callers. */
 interface BundleManifest {
-  bundleVersion: typeof BUNDLE_VERSION;
+  schemaId: typeof BUNDLE_SCHEMA_ID;
   runId: string;
   caseCount: number;
   contentHash: string;
@@ -57,7 +57,7 @@ const createBundle = (
   const hasher = createContentHasher();
   const headerLine = canonicalStringify({
     type: 'bundle_header',
-    bundle_version: BUNDLE_VERSION,
+    schema: BUNDLE_SCHEMA_ID,
     run,
   });
   const lines = [headerLine];
@@ -80,7 +80,7 @@ const createBundle = (
   return {
     lines,
     manifest: {
-      bundleVersion: BUNDLE_VERSION,
+      schemaId: BUNDLE_SCHEMA_ID,
       runId: run.id,
       caseCount: cases.length,
       contentHash,
@@ -89,7 +89,7 @@ const createBundle = (
 };
 
 export {
-  BUNDLE_VERSION,
+  BUNDLE_SCHEMA_ID,
   createBundle,
   createContentHasher,
   type BundleCase,

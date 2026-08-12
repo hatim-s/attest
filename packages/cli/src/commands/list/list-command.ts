@@ -2,7 +2,7 @@ import type { RunRecord } from '@attest/core';
 
 import type { JsonValue } from '../../project/canonical-project.js';
 import type { LoadedProject } from '../../project/load-project.js';
-import type { CommandResult } from '../command-result.js';
+import type { CommandResult } from '../shared/command-result.js';
 import { loadCommandProject } from '../project/load-command-project.js';
 import { withReadonlyRunStore } from '../run-store/readonly-run-store.js';
 
@@ -19,7 +19,7 @@ const toSafeRunSummary = (run: RunRecord): JsonValue => ({
   id: run.id,
   createdAt: run.createdAt,
   status: run.status,
-  configVersion: run.configVersion,
+  schemaId: run.schemaId,
   configHash: run.configHash,
   ...(run.finishedAt === undefined ? {} : { finishedAt: run.finishedAt }),
   ...(run.gitSha === undefined ? {} : { gitSha: run.gitSha }),

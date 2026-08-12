@@ -6,7 +6,7 @@ import { finished } from 'node:stream/promises';
 import type { Readable, Writable } from 'node:stream';
 
 import {
-  BUNDLE_VERSION,
+  BUNDLE_SCHEMA_ID,
   createBundle,
   createContentHasher,
   type BundleCase,
@@ -46,10 +46,10 @@ const verifyBundleLines = (lines: string[]): BundleLine[] => {
   const first = parsedLines[0];
   if (
     first?.type !== 'bundle_header' ||
-    first.bundle_version !== BUNDLE_VERSION ||
+    first.schema !== BUNDLE_SCHEMA_ID ||
     !isRunRecord(first.run)
   ) {
-    throw corruptBundle('Run bundle must start with one well-formed, known-version header.');
+    throw corruptBundle('Run bundle must start with one well-formed header.');
   }
 
   const recognized: BundleLine[] = [first as unknown as BundleHeader];
@@ -86,7 +86,7 @@ const verifyBundleLines = (lines: string[]): BundleLine[] => {
       recognized.push(parsed as unknown as BundleCase);
       continue;
     }
-    // docs/specs/run-bundle.md §versioning: unknown records are hash-covered and skipped.
+    throw corruptBundle(`Run bundle line ${index + 1} has an unknown record type.`);
   }
 
   if (!footer) throw corruptBundle('Run bundle is missing its footer.');
@@ -148,12 +148,12 @@ const exportRunBundle = async (
   }
 };
 
-/** Spools and verifies a single-run v1 bundle before exposing any recognized records. */
+/** Spools and verifies a single-run bundle before exposing any records. */
 async function* readRunBundle(source: Readable | string): AsyncIterable<BundleLine> {
   const input = typeof source === 'string' ? createReadStream(source, 'utf8') : source;
   const lines: string[] = [];
   try {
-    // Integrity precedes exposure; v1 bundles are single-run sized, while cloud-scale streaming is future work.
+    // Integrity precedes exposure; bundles are single-run sized, while cloud-scale streaming is future work.
     for await (const line of createInterface({ input, crlfDelay: Infinity })) lines.push(line);
     const verified = verifyBundleLines(lines);
     for (const line of verified) yield line;

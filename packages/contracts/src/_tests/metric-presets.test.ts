@@ -4,6 +4,7 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import { METRIC_PRESETS, findMetricPreset, metricPresetSchema } from '../metric/presets.js';
+import { METRIC_PRESET_SCHEMA_ID } from '../schema/identifiers.js';
 
 const FIXTURE_DIRECTORY = resolve(import.meta.dirname, 'fixtures/metric-presets');
 
@@ -20,7 +21,9 @@ describe('metric presets', () => {
 
     expect(fixtureNames).toEqual(METRIC_PRESETS.map(({ id }) => `${id}.json`).sort());
     expect(fixtures).toEqual(
-      [...METRIC_PRESETS].sort(({ id: left }, { id: right }) => left.localeCompare(right)),
+      [...METRIC_PRESETS]
+        .map((preset) => ({ ...preset, schema: METRIC_PRESET_SCHEMA_ID }))
+        .sort(({ id: left }, { id: right }) => left.localeCompare(right)),
     );
   });
 

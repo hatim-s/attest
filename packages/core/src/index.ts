@@ -27,6 +27,7 @@ export {
   type WebSocketSessionOptions,
 } from './runner/index.js';
 export {
+  BUNDLE_SCHEMA_ID,
   StoreError,
   exportRunBundle,
   openReadonlyRunStore,
@@ -103,6 +104,7 @@ export {
   type TanstackJudgeClientOptions,
 } from './metrics/index.js';
 export {
+  API_SCHEMA_ID as VIEW_API_SCHEMA_ID,
   createViewApp,
   startViewServer,
   type CreateViewAppOptions,

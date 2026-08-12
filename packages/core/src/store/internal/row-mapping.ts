@@ -1,3 +1,5 @@
+import type { JsonValue } from '@attest/contracts';
+
 import type { CasesTable, MetricResultsTable, RunsTable } from '../schema.js';
 import {
   StoreError,
@@ -30,36 +32,58 @@ const parseRequiredJson = <Value>(serialized: string, field: string): Value => {
   return value;
 };
 
-/** Restores a public run record from its schema-v1 row representation (PLAN 1S.3). */
-const toRunRecord = (row: RunsTable): RunRecord => ({
-  id: row.id,
-  createdAt: row.created_at,
-  finishedAt: row.finished_at ?? undefined,
-  status: row.status,
-  configVersion: row.config_version,
-  configHash: row.config_hash,
-  configJson: row.config_json,
-  gitSha: row.git_sha ?? undefined,
-  gitBranch: row.git_branch ?? undefined,
-  labels: parseJson<Record<string, string>>(row.labels_json),
-  summary: parseJson<RunSummary>(row.summary_json),
-});
+/** Restores a public run record from its initial schema row representation (PLAN 1S.3). */
+const toRunRecord = (row: RunsTable): RunRecord => {
+  const record: RunRecord = {
+    id: row.id,
+    createdAt: row.created_at,
+    finishedAt: row.finished_at ?? undefined,
+    status: row.status,
+    schemaId: row.schema_id,
+    configHash: row.config_hash,
+    configJson: row.config_json,
+    gitSha: row.git_sha ?? undefined,
+    gitBranch: row.git_branch ?? undefined,
+    labels: parseJson<Record<string, string>>(row.labels_json),
+    summary: parseJson<RunSummary>(row.summary_json),
+  };
+  Object.defineProperty(record, 'configVersion', {
+    configurable: true,
+    get: () => record.schemaId,
+  });
+  return record;
+};
 
-/** Restores a public metric evaluation from its schema-v1 row representation (PLAN 1S.3). */
-const toMetricEvaluation = (row: MetricResultsTable): StoredMetricEvaluation => ({
-  metricName: row.metric_name,
-  kind: row.kind,
-  status: row.status,
-  score: row.score ?? undefined,
-  pass: row.pass === null ? undefined : row.pass === 1,
-  rationale: row.rationale ?? undefined,
-  details: parseJson(row.details_json),
-  error: parseJson<StoredMetricEvaluation['error']>(row.error_json),
-  judgeIo: parseJson(row.judge_io_json),
-  durationMs: row.duration_ms ?? undefined,
-});
+/** Restores a metric evaluation while enforcing its persisted status discriminant. */
+const toMetricEvaluation = (row: MetricResultsTable): StoredMetricEvaluation => {
+  const shared = {
+    metricName: row.metric_name,
+    kind: row.kind,
+    rationale: row.rationale ?? undefined,
+    details: parseJson<JsonValue>(row.details_json),
+    judgeIo: parseJson<JsonValue>(row.judge_io_json),
+    durationMs: row.duration_ms ?? undefined,
+  };
+  if (row.status === 'evaluated') {
+    if (row.score === null || row.pass === null || row.error_json !== null) {
+      throw new StoreError('CORRUPT_DATA', 'Stored evaluated metric violates its discriminant.');
+    }
+    return { ...shared, status: 'evaluated', score: row.score, pass: row.pass === 1 };
+  }
+  if (row.error_json === null || row.score !== null || row.pass !== null) {
+    throw new StoreError('CORRUPT_DATA', 'Stored errored metric violates its discriminant.');
+  }
+  return {
+    ...shared,
+    status: 'error',
+    error: parseRequiredJson<Extract<StoredMetricEvaluation, { status: 'error' }>['error']>(
+      row.error_json,
+      'metric error',
+    ),
+  };
+};
 
-/** Restores a discriminated public case and its metric evidence from schema-v1 rows. */
+/** Restores a discriminated public case and its metric evidence from initial schema rows. */
 const toCaseRecord = (row: CasesTable, metrics: StoredMetricEvaluation[]): CaseRecord => {
   const shared = {
     rowId: row.id,

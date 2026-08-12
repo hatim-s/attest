@@ -1,4 +1,4 @@
-import { METRIC_PROTOCOL, type MetricRequest } from '@attest/contracts';
+import type { MetricRequest } from '@attest/contracts';
 
 import type { MetricContext } from '../metric-evaluation.js';
 
@@ -7,7 +7,7 @@ import type { MetricContext } from '../metric-evaluation.js';
  * Keeping this pure lets every executable transport send precisely the same case evidence.
  */
 const buildMetricRequest = (context: MetricContext): MetricRequest => ({
-  protocol: METRIC_PROTOCOL,
+  protocol: 'attest.metric-evaluation',
   case: {
     id: context.caseDefinition.id,
     input: context.caseDefinition.input,

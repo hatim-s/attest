@@ -2,13 +2,13 @@ import { useEffect, useMemo, useState } from 'react';
 
 import { useCase, useCases, useDiff, useRun, useRuns } from './api/queries.js';
 import type { CaseSummary } from './api/types.js';
-import { CaseDetail } from './components/case-detail.js';
-import { CaseTable } from './components/case-table.js';
-import { DiffPanel } from './components/diff-panel.js';
-import { DistributionCharts } from './components/distribution-charts.js';
-import { RunList } from './components/run-list.js';
-import { SummaryCards } from './components/summary-cards.js';
-import { Badge, Button, Card, ErrorNotice, Loading } from './components/ui.js';
+import { CaseDetail } from './components/cases/case-detail.js';
+import { CaseTable } from './components/cases/case-table.js';
+import { DiffPanel } from './components/cases/diff-panel.js';
+import { DistributionCharts } from './components/runs/distribution-charts.js';
+import { RunList } from './components/runs/run-list.js';
+import { SummaryCards } from './components/runs/summary-cards.js';
+import { Badge, Button, Card, ErrorNotice, Loading } from './components/shared/ui.js';
 import { shortId } from './lib/format.js';
 import { getReportData } from './report/report-data.js';
 
@@ -121,7 +121,7 @@ const Dashboard = () => {
                   <p className="eyebrow">Evaluation run</p>
                   <h1>{shortId(run.id, 12)}</h1>
                   <p>
-                    {run.configHash.slice(0, 12)} · config v{run.configVersion}
+                    {run.configHash.slice(0, 12)} · {run.schemaId}
                   </p>
                 </div>
                 <Badge tone={run.status}>{run.status}</Badge>

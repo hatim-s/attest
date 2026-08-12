@@ -263,7 +263,7 @@ const convertOtlpJson = (candidate: unknown): Trace[] => {
   }
   return [...groups.entries()].map(([traceId, spans]) => {
     const parsed = traceSchema.safeParse({
-      schema: 'attest.trace/v1alpha1',
+      schema: 'attest.trace',
       trace_id: traceId,
       spans,
     });

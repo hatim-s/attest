@@ -1,14 +1,16 @@
-import {
-  AttestError,
-  type AgentRequest,
-  type CaseOutcome,
-  type ContractWarning,
-  type InvocationErrorCode,
-  type RawExcerpt,
-  type Trace,
-} from '@attest/contracts';
+import { AttestError, type CaseOutcome } from '@attest/contracts';
 
 import type { CacheStore } from './cache.js';
+import type {
+  CaseRecord,
+  RunMetadata,
+  RunRecord,
+  RunSummary,
+  StoredAttempt,
+  StoredCaseExecution,
+  StoredDiagnostics,
+  StoredMetricEvaluation,
+} from './internal/record-schema.js';
 
 type StoreErrorCode =
   | 'SCHEMA_TOO_NEW'
@@ -37,122 +39,14 @@ class StoreError extends AttestError {
   }
 }
 
-/** Describes the lifecycle states persisted for a run (PLAN 1S.2). */
-type RunStatus = 'running' | 'completed' | 'failed' | 'cancelled';
+/** Describes lifecycle states persisted for a run. */
+type RunStatus = RunRecord['status'];
 
-/** Carries reproducibility metadata captured when a run begins (PLAN 1S.3). */
-interface RunMetadata {
-  configVersion: string;
-  configHash: string;
-  configJson: string;
-  gitSha?: string;
-  gitBranch?: string;
-  labels?: Record<string, string>;
-}
-
-/** Supplies a preallocated immutable identity when another versioned record owns the run id. */
+/** Supplies a preallocated immutable identity when another record owns the run id. */
 interface RunIdentity {
   id: string;
   createdAt: string;
 }
-
-/** @deprecated Use InvocationErrorCode from @attest/contracts. */
-type StoredInvocationErrorCode = InvocationErrorCode;
-
-/** Captures bounded process and transport diagnostics for one invocation attempt. */
-interface StoredDiagnostics {
-  stderrExcerpt?: string;
-  exitCode?: number;
-  httpStatus?: number;
-  remoteJobId?: string | number;
-  unreapedProcessIds?: number[];
-}
-
-/** Preserves one runner attempt for retry analysis required by the agent contract. */
-type StoredAttempt = {
-  diagnostics: StoredDiagnostics;
-  durationMs: number;
-  rawExcerpt?: RawExcerpt;
-  warnings: ContractWarning[];
-} & (
-  | { status: 'ok' }
-  | {
-      status: 'invocation_error';
-      errorCode: StoredInvocationErrorCode;
-      errorMessage: string;
-    }
-);
-
-/** Carries fields shared by every persisted case execution (PLAN 1S.3). */
-interface StoredCaseBase {
-  caseId: string;
-  suiteName: string;
-  request: AgentRequest;
-  startedAt: string;
-  durationMs: number;
-  warnings: ContractWarning[];
-  diagnostics: StoredDiagnostics;
-  attempts: StoredAttempt[];
-  expectedMetrics: string[];
-}
-
-/** Captures one runner-aligned execution using the terminal union canonically defined in contracts. */
-type StoredCaseExecution = StoredCaseBase &
-  (
-    | { outcome: 'completed'; response: unknown; trace?: Trace }
-    | {
-        outcome: 'invocation_error' | 'timeout' | 'cancelled';
-        errorCode: StoredInvocationErrorCode;
-        errorMessage: string;
-      }
-  );
-
-/** @deprecated Use the discriminated fields on StoredCaseExecution directly. */
-type InvocationError = {
-  code: StoredInvocationErrorCode;
-  message: string;
-  diagnostics: StoredDiagnostics;
-};
-
-/** Captures one assertion, executable metric, or judge result (PLAN 1M.4 and 1S.3). */
-interface StoredMetricEvaluation {
-  metricName: string;
-  kind: 'assertion' | 'exec' | 'judge';
-  status: 'evaluated' | 'error';
-  score?: number;
-  pass?: boolean;
-  rationale?: string;
-  details?: unknown;
-  error?: { message: string; kind: string };
-  judgeIo?: unknown;
-  durationMs?: number;
-}
-
-/** Summarizes mutually exclusive pass, fail, and invocation-error case totals (PLAN 1S.3). */
-interface RunSummary {
-  totalCases: number;
-  passedCases: number;
-  failedCases: number;
-  errorCases: number;
-  metricErrorCount: number;
-}
-
-/** Represents persisted run metadata and its current lifecycle state (PLAN 1S.3). */
-interface RunRecord extends RunMetadata {
-  id: string;
-  createdAt: string;
-  finishedAt?: string;
-  status: RunStatus;
-  summary?: RunSummary;
-}
-
-/** Represents one persisted case with all metric evaluations restored (PLAN 1S.3). */
-type CaseRecord = StoredCaseExecution & {
-  rowId: string;
-  runId: string;
-  inputHash: string;
-  metrics: StoredMetricEvaluation[];
-};
 
 /** Provides the blob-free case list projection consumed by the PLAN 2V view server. */
 interface CaseSummary {
@@ -200,7 +94,6 @@ export {
   type CaseOutcome,
   type CaseRecord,
   type CaseSummary,
-  type InvocationError,
   type RunMetadata,
   type RunIdentity,
   type RunRecord,
@@ -210,7 +103,6 @@ export {
   type StoreErrorCode,
   type StoredCaseExecution,
   type StoredDiagnostics,
-  type StoredInvocationErrorCode,
   type StoredMetricEvaluation,
   type StoredAttempt,
 };

@@ -75,6 +75,18 @@ const averageMetricScore = (metrics: MetricResultsTable[]): number | undefined =
     : scores.reduce((total, score) => total + score, 0) / scores.length;
 };
 
+/** Normalizes the previous metadata input name while downstream stack slices migrate. */
+const normalizeRunMetadata = (
+  metadata: RunMetadata,
+): Omit<RunRecord, 'id' | 'createdAt' | 'status'> => {
+  if ('schemaId' in metadata) {
+    return metadata;
+  }
+
+  const { configVersion, ...rest } = metadata;
+  return { ...rest, schemaId: configVersion };
+};
+
 class SqliteRunStore implements RunStore {
   readonly #database: Kysely<Database>;
 
@@ -89,11 +101,15 @@ class SqliteRunStore implements RunStore {
   ): Promise<RunRecord> {
     return executeStoreOperation('WRITE_FAILED', 'Could not create the run.', async () => {
       const record: RunRecord = {
-        ...metadata,
+        ...normalizeRunMetadata(metadata),
         id: identity.id,
         createdAt: identity.createdAt,
         status: 'running',
       };
+      Object.defineProperty(record, 'configVersion', {
+        configurable: true,
+        get: () => record.schemaId,
+      });
       await this.#database
         .insertInto('runs')
         .values({
@@ -101,7 +117,7 @@ class SqliteRunStore implements RunStore {
           created_at: record.createdAt,
           finished_at: null,
           status: record.status,
-          config_version: record.configVersion,
+          schema_id: record.schemaId,
           config_hash: record.configHash,
           config_json: record.configJson,
           git_sha: record.gitSha ?? null,
@@ -341,9 +357,6 @@ const openStore = async (path: string): Promise<AttestStore> => {
   }
 };
 
-/** Compatibility wrapper retained until callers migrate to the explicit AttestStore context. */
-const openRunStore = async (path: string): Promise<RunStore> => (await openStore(path)).runs;
-
 /** Opens an existing run store for inspection without creating or migrating any file. */
 const openReadonlyRunStore = async (path: string): Promise<RunStore> => {
   let handle: SqliteHandle | undefined;
@@ -370,11 +383,4 @@ const openRunStoreSnapshot = async (path: string): Promise<RunStore> => {
   }
 };
 
-export {
-  createRunIdentity,
-  openReadonlyRunStore,
-  openRunStore,
-  openRunStoreSnapshot,
-  openStore,
-  type RunStore,
-};
+export { createRunIdentity, openReadonlyRunStore, openRunStoreSnapshot, openStore, type RunStore };

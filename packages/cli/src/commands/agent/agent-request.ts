@@ -1074,7 +1074,19 @@ const readImportedAgentResource = async (
   readStdin: ReadInput,
 ): Promise<AgentResource> => {
   const value = await readJsonDocument(source, workingDirectory, readStdin, 'source', true);
-  const parsed = agentResourceSchema.safeParse(value);
+  // Stack compatibility only: old imported HTTP resources predate the explicit response mode.
+  const normalizedValue =
+    typeof value === 'object' &&
+    value !== null &&
+    'transport' in value &&
+    typeof value.transport === 'object' &&
+    value.transport !== null &&
+    'kind' in value.transport &&
+    value.transport.kind === 'http' &&
+    !('response_mode' in value.transport)
+      ? { ...value, transport: { ...value.transport, response_mode: 'attest_envelope' } }
+      : value;
+  const parsed = agentResourceSchema.safeParse(normalizedValue);
   if (!parsed.success) {
     throw new AttestCliError('cli_usage', 'Imported agent JSON does not match its schema.', {
       path: 'source',
