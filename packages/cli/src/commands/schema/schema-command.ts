@@ -11,6 +11,13 @@ import type { JsonValue } from '../../project/canonical-project.js';
 import type { CommandResult } from '../command-result.js';
 
 const schemaAliases = new Map<string, string>([
+  [COMMAND_REQUEST_SCHEMA_VERSION, 'command-request.json'],
+  [METRIC_PRESET_SCHEMA_VERSION, 'metric-preset.json'],
+  [METRIC_TEST_FIXTURE_SCHEMA_VERSION, 'metric-test-fixture.json'],
+]);
+
+// Preserve the public filenames returned by this bottom slice while reading canonical artifacts.
+const legacySchemaFiles = new Map<string, string>([
   [COMMAND_REQUEST_SCHEMA_VERSION, 'command-request.v2.json'],
   [METRIC_PRESET_SCHEMA_VERSION, 'metric-preset.v1.json'],
   [METRIC_TEST_FIXTURE_SCHEMA_VERSION, 'metric-test-fixture.v1.json'],
@@ -22,7 +29,10 @@ const schemaIdForFile = (file: string): string =>
 /** Lists the generated runtime schema registry in deterministic identifier order. */
 const runSchemaListCommand = (): CommandResult => {
   const items = [...CONTRACT_JSON_SCHEMAS.keys()]
-    .map((file) => ({ file, id: schemaIdForFile(file) }))
+    .map((file) => {
+      const id = schemaIdForFile(file);
+      return { file: legacySchemaFiles.get(id) ?? file, id };
+    })
     .sort((left, right) => left.id.localeCompare(right.id));
   return {
     human: items.map(({ file, id }) => `  ${id}${id === file ? '' : `  (${file})`}`).join('\n'),
@@ -47,7 +57,7 @@ const runSchemaPrintCommand = (schemaId: string): CommandResult => {
     human: serializeContractSchema(file).trimEnd(),
     projectHashBefore: null,
     projectHashAfter: null,
-    result: { file, id, schema },
+    result: { file: legacySchemaFiles.get(id) ?? file, id, schema },
   };
 };
 

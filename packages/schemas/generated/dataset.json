@@ -94,8 +94,15 @@
           "type": "array"
         },
         "project_relative_source_path": {
+          "allOf": [
+            {
+              "pattern": "^(?![A-Za-z]:)"
+            },
+            {
+              "pattern": "^(?![\\\\/])(?!(?:.*[\\\\/])?\\.\\.(?:[\\\\/]|$)).+$"
+            }
+          ],
           "minLength": 1,
-          "pattern": "^(?![\\\\/])(?!(?:.*[\\\\/])?\\.\\.(?:[\\\\/]|$)).+$",
           "type": "string"
         },
         "source_content_hash": {
