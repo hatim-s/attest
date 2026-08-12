@@ -362,7 +362,7 @@ describe('CLI2.9 metric authoring and local tests', { timeout: 30_000 }, () => {
     expect(guided.errors).toEqual([]);
     expect(guidedExit).toBe(0);
     expect(questions.at(-1)).toContain('Apply these changes? [y/N]');
-    expect(questions[1]).toContain('attest.metric-preset/v1');
+    expect(questions[1]).toContain('attest.metric-preset');
     expect(questions[1]).toContain('trace-capable fixture');
     expect(questions).toContain('Assertion evidence [output] (input|output|expected|trace): ');
     expect(questions).toContain(
