@@ -8,7 +8,7 @@ import {
 } from '@attest/contracts';
 import { type Argument, type Command, type Option } from 'commander';
 
-import { AttestCliError } from '../errors.js';
+import { AttestCliError } from '../errors/index.js';
 
 type CliOptionHelpMetadata = {
   conflicts?: readonly string[];
@@ -29,7 +29,7 @@ type CliCommandHelpMetadata = {
 
 const metadataByCommand = new WeakMap<Command, CliCommandHelpMetadata>();
 
-/** Associates compatibility metadata that Commander does not retain on public fields. */
+/** Associates structured metadata that Commander does not retain on public fields. */
 const setCliCommandHelpMetadata = (command: Command, metadata: CliCommandHelpMetadata): Command => {
   metadataByCommand.set(command, metadata);
   return command;

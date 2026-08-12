@@ -6,7 +6,7 @@ import { AGENT_PROTOCOL } from '@attest/contracts';
 import { openStore } from '@attest/core';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { MAX_REPORT_CASES, runReportCommand, selectReportCases } from './run-report-command.js';
+import { MAX_REPORT_CASES, runReportCommand, selectReportCases } from '../run-report-command.js';
 
 const directories: string[] = [];
 
@@ -16,7 +16,7 @@ const createRunFixture = async (directory: string): Promise<string> => {
   const store = await openStore(join(directory, '.attest', 'runs.db'));
   try {
     const run = await store.runs.createRun({
-      configVersion: '1',
+      schemaId: 'attest.project',
       configHash: 'sha256:test',
       configJson: '{}',
     });

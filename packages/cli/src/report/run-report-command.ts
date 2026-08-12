@@ -9,7 +9,7 @@ import {
 } from '@attest/core';
 import { dashboardHtml } from '@attest/web/embedded';
 
-import { AttestCliError } from '../errors.js';
+import { AttestCliError } from '../errors/index.js';
 import { prepareEvalProjectFile } from '../commands/eval/eval-project-path.js';
 import { createReportHtml } from './create-report-html.js';
 
@@ -106,7 +106,7 @@ const runReportCommand = async (
 
   const selection = selectReportCases(runWithCases.cases);
   const reportData = {
-    api_version: 'attest.report/v1',
+    schema: 'attest.report',
     generatedAt: new Date().toISOString(),
     run: runWithCases.run,
     cases: selection.cases.map((record) => ({ record, summary: toCaseSummary(record) })),

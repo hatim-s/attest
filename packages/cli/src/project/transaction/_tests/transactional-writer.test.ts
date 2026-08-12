@@ -4,24 +4,21 @@ import { join, relative } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { serializeCliError } from '../../errors.js';
-import { loadProject } from '../load-project.js';
-import { prepareProjectCandidate } from './candidate-project.js';
-import { acquireProjectLock, releaseProjectLock } from './project-lock.js';
-import {
-  candidateFromLoadedProject,
-  writeFixtureProject,
-} from './project-transaction.test-fixture.js';
+import { serializeCliError } from '../../../errors/index.js';
+import { loadProject } from '../../load-project.js';
+import { prepareProjectCandidate } from '../candidate-project.js';
+import { acquireProjectLock, releaseProjectLock } from '../project-lock.js';
+import { candidateFromLoadedProject, writeFixtureProject } from './support/project-transaction.js';
 import {
   TRANSACTIONS_DIRECTORY,
   prepareTransaction,
   recoverProjectTransactions,
-} from './transaction-journal.js';
+} from '../transaction-journal.js';
 import {
   applyProjectMutation,
   createFileChanges,
   publishPreparedTransaction,
-} from './transactional-writer.js';
+} from '../transactional-writer.js';
 
 const temporaryDirectories: string[] = [];
 

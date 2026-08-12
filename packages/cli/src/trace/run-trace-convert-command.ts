@@ -3,7 +3,7 @@ import { dirname, resolve } from 'node:path';
 
 import { convertOtlpJson, selectConvertedTrace } from '@attest/core';
 
-import { AttestCliError } from '../errors.js';
+import { AttestCliError } from '../errors/index.js';
 
 type RunTraceConvertCommandOptions = {
   force?: boolean;

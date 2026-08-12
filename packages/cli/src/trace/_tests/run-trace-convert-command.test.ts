@@ -4,7 +4,7 @@ import { join } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { runTraceConvertCommand } from './run-trace-convert-command.js';
+import { runTraceConvertCommand } from '../run-trace-convert-command.js';
 
 const directories: string[] = [];
 const traceId = '00112233445566778899aabbccddeeff';

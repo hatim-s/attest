@@ -4,13 +4,10 @@ import { join } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { loadProject } from '../load-project.js';
-import { prepareProjectCandidate } from './candidate-project.js';
-import {
-  candidateFromLoadedProject,
-  writeFixtureProject,
-} from './project-transaction.test-fixture.js';
-import { createSemanticProjectDiff } from './semantic-project-diff.js';
+import { loadProject } from '../../load-project.js';
+import { prepareProjectCandidate } from '../candidate-project.js';
+import { candidateFromLoadedProject, writeFixtureProject } from './support/project-transaction.js';
+import { createSemanticProjectDiff } from '../semantic-project-diff.js';
 
 const temporaryDirectories: string[] = [];
 

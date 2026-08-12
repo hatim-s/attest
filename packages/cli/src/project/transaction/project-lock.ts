@@ -8,7 +8,7 @@ import { promisify } from 'node:util';
 import { ProjectTransactionError } from './project-transaction-error.js';
 
 const PROJECT_LOCK_FILE = '.attest/project.lock';
-const PROJECT_LOCK_SCHEMA = 'attest.project-lock/v1';
+const PROJECT_LOCK_SCHEMA = 'attest.project-lock';
 const execFileAsync = promisify(execFile);
 
 type ProjectLockMetadata = {

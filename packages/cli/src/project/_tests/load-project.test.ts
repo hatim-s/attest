@@ -3,12 +3,12 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
 import {
-  AGENT_RESOURCE_SCHEMA_VERSION,
-  CASE_SCHEMA_VERSION,
-  DATASET_SCHEMA_VERSION,
-  METRIC_RESOURCE_SCHEMA_VERSION,
-  PROJECT_SCHEMA_VERSION,
-  TEST_RESOURCE_SCHEMA_VERSION,
+  AGENT_RESOURCE_SCHEMA_ID,
+  CASE_SCHEMA_ID,
+  DATASET_SCHEMA_ID,
+  METRIC_RESOURCE_SCHEMA_ID,
+  PROJECT_SCHEMA_ID,
+  TEST_RESOURCE_SCHEMA_ID,
   type AgentResource,
   type DatasetResource,
   type MetricResource,
@@ -18,14 +18,14 @@ import {
 } from '@attest/contracts';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { hashCanonicalJson, hashCanonicalJsonLines } from './canonical-project.js';
-import { loadProject } from './load-project.js';
-import { ProjectLoadError } from './project-errors.js';
+import { hashCanonicalJson, hashCanonicalJsonLines } from '../canonical-project.js';
+import { loadProject } from '../load-project.js';
+import { ProjectLoadError } from '../project-errors.js';
 
 const temporaryDirectories: string[] = [];
 
 const agent: AgentResource = {
-  schema: AGENT_RESOURCE_SCHEMA_VERSION,
+  schema: AGENT_RESOURCE_SCHEMA_ID,
   id: 'support',
   name: 'Support',
   transport: {
@@ -35,7 +35,7 @@ const agent: AgentResource = {
   },
 };
 const metric: MetricResource = {
-  schema: METRIC_RESOURCE_SCHEMA_VERSION,
+  schema: METRIC_RESOURCE_SCHEMA_ID,
   id: 'correct',
   name: 'Correct',
   definition: {
@@ -49,14 +49,14 @@ const testCase: TestCase = {
   expected: 'expected',
 };
 const dataset: DatasetResource = {
-  schema: DATASET_SCHEMA_VERSION,
-  case_schema: CASE_SCHEMA_VERSION,
+  schema: DATASET_SCHEMA_ID,
+  case_schema: CASE_SCHEMA_ID,
   id: 'refunds',
   name: 'Refunds',
   case_count: 1,
 };
 const test: TestResource = {
-  schema: TEST_RESOURCE_SCHEMA_VERSION,
+  schema: TEST_RESOURCE_SCHEMA_ID,
   id: 'refund',
   name: 'Refund',
   agent_id: agent.id,
@@ -79,7 +79,7 @@ const writeProjectFile = async (root: string, path: string, contents: string): P
   await writeFile(destination, contents);
 };
 
-/** Writes a complete valid v2 project and returns its generated manifest. */
+/** Writes a complete valid project and returns its generated manifest. */
 const writeValidProject = async (
   root: string,
   formatting: 'compact' | 'pretty' = 'compact',
@@ -98,14 +98,14 @@ const writeValidProject = async (
   await writeProjectFile(root, 'attest/metrics/correct.json', render(metric));
 
   const manifest: ProjectManifest = {
-    schema: PROJECT_SCHEMA_VERSION,
+    schema: PROJECT_SCHEMA_ID,
     project_id: '01ARZ3NDEKTSV4RRFFQ69G5FAV',
     name: 'support',
     resources: {
       agents: [
         {
           id: agent.id,
-          schema: AGENT_RESOURCE_SCHEMA_VERSION,
+          schema: AGENT_RESOURCE_SCHEMA_ID,
           path: 'attest/agents/support.json',
           content_hash: hashCanonicalJson(agent),
         },
@@ -113,7 +113,7 @@ const writeValidProject = async (
       tests: [
         {
           id: test.id,
-          schema: TEST_RESOURCE_SCHEMA_VERSION,
+          schema: TEST_RESOURCE_SCHEMA_ID,
           path: 'attest/tests/refund.json',
           content_hash: hashCanonicalJson(test),
         },
@@ -121,7 +121,7 @@ const writeValidProject = async (
       datasets: [
         {
           id: dataset.id,
-          schema: DATASET_SCHEMA_VERSION,
+          schema: DATASET_SCHEMA_ID,
           data_path: 'attest/datasets/refunds.jsonl',
           data_content_hash: hashCanonicalJsonLines(dataRecords),
           metadata_path: 'attest/datasets/refunds.meta.json',
@@ -131,7 +131,7 @@ const writeValidProject = async (
       metrics: [
         {
           id: metric.id,
-          schema: METRIC_RESOURCE_SCHEMA_VERSION,
+          schema: METRIC_RESOURCE_SCHEMA_ID,
           path: 'attest/metrics/correct.json',
           content_hash: hashCanonicalJson(metric),
         },
@@ -226,25 +226,22 @@ describe('loadProject', () => {
     expect((failure as Error).message).not.toContain('DO-NOT-LEAK');
   });
 
-  it('rejects a v1-shaped manifest with the stable breaking-v2 diagnostic', async () => {
+  it('rejects a document that does not match the project contract', async () => {
     const root = await createTemporaryDirectory();
     await writeProjectFile(
       root,
       'attest.project.json',
-      JSON.stringify({ config_version: 1, agent: {}, suites: [], metrics: [] }),
+      JSON.stringify({ schema: 'not-attest-project', resources: {} }),
     );
 
     const failure = await captureProjectFailure(() => loadProject({ project: root }));
 
-    expect(failure).toMatchObject({
-      code: 'project_invalid',
-      message: 'Attest v2 does not execute v1 configuration or project inputs.',
-      hint: 'Create a v2 project with `attest project init`; use `attest eval run` as the only execution command.',
-      path: 'attest.project.json',
-    });
-    expect(failure.diagnostics).toEqual([
-      expect.objectContaining({ code: 'legacy_v1', source: 'attest.project.json' }),
-    ]);
+    expect(failure.code).toBe('project_invalid');
+    expect(failure.diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ code: 'schema_invalid', source: 'attest.project.json' }),
+      ]),
+    );
   });
 
   it('rejects manifest traversal before reading outside the project', async () => {

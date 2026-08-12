@@ -4,7 +4,7 @@ import { join } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { runViewCommand } from './run-view-command.js';
+import { runViewCommand } from '../run-view-command.js';
 
 const directories: string[] = [];
 
@@ -30,7 +30,7 @@ describe('runViewCommand', () => {
       },
       onReady: async ({ origin }) => {
         const [healthResponse, dashboardResponse] = await Promise.all([
-          fetch(`${origin}/api/v1/health`),
+          fetch(`${origin}/api/health`),
           fetch(origin),
         ]);
         expect(healthResponse.status).toBe(200);

@@ -2,12 +2,12 @@ import { access, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { EVAL_RUN_SCHEMA_VERSION, evalEventStreamSchema, evalRunSchema } from '@attest/contracts';
+import { EVAL_RUN_SCHEMA_ID, evalEventStreamSchema, evalRunSchema } from '@attest/contracts';
 import { openStore } from '@attest/core';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { runCli } from '../run-cli.js';
-import { REDACTED } from '../commands/agent/native-agent-adapter.js';
+import { runCli } from '../../run-cli.js';
+import { REDACTED } from '../../commands/agent/native-agent-adapter.js';
 
 const temporaryDirectories: string[] = [];
 const originalEvalMetricSecret = process.env.ATTEST_EVAL_METRIC_SECRET;
@@ -42,7 +42,7 @@ const author = async (root: string, argv: readonly string[]): Promise<void> => {
   }
 };
 
-/** Authors the smallest complete v2 project through the registered public mutation surface. */
+/** Authors the smallest complete project through the registered public mutation surface. */
 const createEvalProject = async (): Promise<string> => {
   const root = await mkdtemp(join(tmpdir(), 'attest-eval-integration-'));
   temporaryDirectories.push(root);
@@ -63,7 +63,7 @@ const createEvalProject = async (): Promise<string> => {
       "process.stdin.setEncoding('utf8');",
       'for await (const chunk of process.stdin) source += chunk;',
       'const request = JSON.parse(source);',
-      "process.stdout.write(JSON.stringify({ protocol: 'attest.agent/v1alpha1', output: request.input }));",
+      "process.stdout.write(JSON.stringify({ protocol: 'attest.agent-invocation', output: request.input }));",
     ].join('\n'),
   );
   await author(root, [
@@ -151,7 +151,7 @@ afterEach(async () => {
   );
 });
 
-describe('v2 eval dispatcher integration', () => {
+describe('eval dispatcher integration', () => {
   it('bridges public commands through resolver, engine, runner, store, diff, and JUnit', async () => {
     const root = await createEvalProject();
     const junitPath = join(root, 'artifacts', 'first.xml');
@@ -224,7 +224,7 @@ describe('v2 eval dispatcher integration', () => {
       expect(firstRun).toMatchObject({
         id: firstResult.result.run_id,
         status: 'completed',
-        configVersion: EVAL_RUN_SCHEMA_VERSION,
+        schemaId: EVAL_RUN_SCHEMA_ID,
         configHash: firstResult.result.snapshot_hash,
         labels: { kind: 'eval', snapshot_hash: firstResult.result.snapshot_hash },
       });
@@ -257,7 +257,7 @@ describe('v2 eval dispatcher integration', () => {
       [
         "import { writeFileSync } from 'node:fs';",
         `writeFileSync(${JSON.stringify(markerPath)}, 'invoked');`,
-        "process.stdout.write(JSON.stringify({ protocol: 'attest.agent/v1alpha1', output: 'Paris' }));",
+        "process.stdout.write(JSON.stringify({ protocol: 'attest.agent-invocation', output: 'Paris' }));",
       ].join('\n'),
     );
 
@@ -295,7 +295,7 @@ describe('v2 eval dispatcher integration', () => {
       [
         "import { writeFileSync } from 'node:fs';",
         `writeFileSync(${JSON.stringify(markerPath)}, 'invoked');`,
-        "process.stdout.write(JSON.stringify({ protocol: 'attest.agent/v1alpha1', output: 'Paris' }));",
+        "process.stdout.write(JSON.stringify({ protocol: 'attest.agent-invocation', output: 'Paris' }));",
       ].join('\n'),
     );
     await rm(join(root, '.attest'), { recursive: true });
@@ -440,7 +440,7 @@ describe('v2 eval dispatcher integration', () => {
         `while (!existsSync(${JSON.stringify(releasePath)})) {`,
         '  await new Promise((resolve) => setTimeout(resolve, 10));',
         '}',
-        "process.stdout.write(JSON.stringify({ protocol: 'attest.agent/v1alpha1', output: request.input }));",
+        "process.stdout.write(JSON.stringify({ protocol: 'attest.agent-invocation', output: request.input }));",
       ].join('\n'),
     );
     const sigintListeners = process.listenerCount('SIGINT');

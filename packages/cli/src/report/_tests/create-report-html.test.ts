@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { createReportHtml, serializeForInlineScript } from './create-report-html.js';
+import { createReportHtml, serializeForInlineScript } from '../create-report-html.js';
 
 describe('createReportHtml', () => {
   it('injects data before the deferred dashboard module', () => {

@@ -6,7 +6,7 @@ import {
   hashCanonicalJsonLines,
   serializeCanonicalJson,
   serializeCanonicalJsonLines,
-} from './canonical-project.js';
+} from '../canonical-project.js';
 
 describe('canonical project content', () => {
   it('sorts object keys recursively without reordering arrays', () => {

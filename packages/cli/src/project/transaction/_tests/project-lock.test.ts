@@ -4,7 +4,7 @@ import { dirname, join } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { serializeCliError } from '../../errors.js';
+import { serializeCliError } from '../../../errors/index.js';
 import {
   PROJECT_LOCK_FILE,
   PROJECT_LOCK_SCHEMA,
@@ -13,7 +13,7 @@ import {
   releaseProjectLock,
   unlockStaleProjectLock,
   type ProjectLockMetadata,
-} from './project-lock.js';
+} from '../project-lock.js';
 
 const temporaryDirectories: string[] = [];
 

@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { open, rename, unlink } from 'node:fs/promises';
 
-import { AGENT_PROTOCOL, EVAL_RUN_SCHEMA_VERSION } from '@attest/contracts';
+import { AGENT_PROTOCOL, EVAL_RUN_SCHEMA_ID } from '@attest/contracts';
 import {
   diffRuns,
   toStoredCaseExecution,
@@ -25,7 +25,7 @@ const createEvalPersistenceAdapter = (
   createRun: async (run) => {
     const created = await store.runs.createRun(
       {
-        configVersion: EVAL_RUN_SCHEMA_VERSION,
+        schemaId: EVAL_RUN_SCHEMA_ID,
         configHash: run.snapshot_hash,
         configJson: JSON.stringify(run),
         ...(run.git?.commit === undefined ? {} : { gitSha: run.git.commit }),

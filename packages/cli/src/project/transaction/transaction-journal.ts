@@ -19,7 +19,7 @@ import { resolveSafeProjectPath } from './project-path.js';
 import { ProjectTransactionError } from './project-transaction-error.js';
 
 const TRANSACTIONS_DIRECTORY = '.attest/transactions';
-const TRANSACTION_JOURNAL_SCHEMA = 'attest.project-transaction/v1';
+const TRANSACTION_JOURNAL_SCHEMA = 'attest.project-transaction';
 const JOURNAL_FILE = 'journal.json';
 
 type TransactionFileChange = {

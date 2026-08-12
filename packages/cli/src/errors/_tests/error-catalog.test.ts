@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
-import { AttestCliError } from './attest-cli-error.js';
-import { createCliErrorCatalog } from './error-catalog.js';
-import { renderCliError, serializeCliError } from './serialize-error.js';
+import { AttestCliError } from '../attest-cli-error.js';
+import { createCliErrorCatalog } from '../error-catalog.js';
+import { renderCliError, serializeCliError } from '../serialize-error.js';
 
 describe('CLI error contracts', () => {
   it('publishes deterministic definitions for every stable exit-code class', () => {
