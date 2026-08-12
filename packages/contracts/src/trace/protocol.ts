@@ -1,6 +1,10 @@
 import { z } from 'zod';
 
-import { TRACE_SCHEMA_ID, currentOrLegacyIdentifier } from '../schema/identifiers.js';
+import {
+  TRACE_SCHEMA_ID,
+  TRACE_SCHEMA_VERSION,
+  currentOrLegacyIdentifier,
+} from '../schema/identifiers.js';
 
 const attributeValueSchema = z.union([z.string(), z.number(), z.boolean()]);
 const attributesSchema = z.record(z.string(), attributeValueSchema);
@@ -64,7 +68,7 @@ type Span = z.infer<typeof spanSchema>;
  */
 const traceSchema = z
   .looseObject({
-    schema: currentOrLegacyIdentifier(TRACE_SCHEMA_ID, 'attest.trace/v1alpha1'),
+    schema: currentOrLegacyIdentifier(TRACE_SCHEMA_ID, TRACE_SCHEMA_VERSION),
     trace_id: z.string(),
     spans: z.array(spanSchema),
   })

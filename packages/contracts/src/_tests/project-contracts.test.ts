@@ -12,6 +12,7 @@ import {
   type ProjectManifest,
 } from '../project/manifest.js';
 import { testResourceSchema, type TestResource } from '../project/resources/test.js';
+import { relativePathSchema } from '../project/shared.js';
 import {
   AGENT_RESOURCE_SCHEMA_ID,
   CASE_SCHEMA_ID,
@@ -160,6 +161,14 @@ describe('authored resource contracts', () => {
     });
   });
 
+  it.each(['C:\\secret', 'C:/secret', 'C:secret'])(
+    'rejects the Windows drive-qualified relative path %s',
+    (path) => {
+      expect(relativePathSchema.safeParse(path).success).toBe(false);
+      expect(relativePathSchema.safeParse('secrets/token.txt').success).toBe(true);
+    },
+  );
+
   it('rejects duplicate generated manifest ids before loading resources', () => {
     const candidate = structuredClone(project);
     candidate.resources.agents.push(structuredClone(candidate.resources.agents[0]!));
@@ -286,7 +295,7 @@ describe('agent transport contract', () => {
     ).toBe(true);
   });
 
-  it('requires explicit HTTP response provenance', () => {
+  it('defaults legacy HTTP resources to native envelope response provenance', () => {
     const explicitMapped = transports.find((transport) => transport.kind === 'http');
     expect(explicitMapped).toBeDefined();
     const explicitNative = {
@@ -298,7 +307,9 @@ describe('agent transport contract', () => {
     } as const;
     const withoutMode = structuredClone(explicitNative) as Record<string, unknown>;
     Reflect.deleteProperty(withoutMode, 'response_mode');
-    expect(agentResourceSchema.safeParse({ ...agent, transport: withoutMode }).success).toBe(false);
+    expect(agentResourceSchema.parse({ ...agent, transport: withoutMode }).transport).toMatchObject(
+      { kind: 'http', response_mode: 'attest_envelope' },
+    );
     expect(
       agentResourceSchema.parse({ ...agent, transport: explicitNative }).transport,
     ).toMatchObject({ kind: 'http', response_mode: 'attest_envelope' });
