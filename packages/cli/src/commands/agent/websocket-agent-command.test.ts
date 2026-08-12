@@ -88,7 +88,7 @@ const startLocalWebSocketFixture = async (): Promise<{
   url: string;
 }> => {
   const fixtureModuleUrl = new URL(
-    '../../../../core/src/runner/fixtures/websocket-fake-server.ts',
+    '../../../../core/src/runner/_tests/fixtures/websocket-fake-server.ts',
     import.meta.url,
   ).href;
   const fixtureModule = (await import(fixtureModuleUrl)) as {
