@@ -17,7 +17,7 @@ import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 
-import { cliResultSchema, type AgentResource } from '@attest/contracts';
+import { AGENT_PROTOCOL, cliResultSchema, type AgentResource } from '@attest/contracts';
 import { openStore } from '@attest/core';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -30,10 +30,10 @@ import { readSecretReference, REDACTED } from './native-agent-adapter.js';
 const FIXTURE = fileURLToPath(new URL('./fixtures/native-agent.cjs', import.meta.url));
 const PTY_FIXTURE = fileURLToPath(new URL('./fixtures/pty-agent-command.py', import.meta.url));
 const JSONL_BRIDGE_FIXTURE = fileURLToPath(
-  new URL('../../../../core/src/runner/fixtures/jsonl-bridge-agent.cjs', import.meta.url),
+  new URL('../../../../core/src/runner/_tests/fixtures/jsonl-bridge-agent.cjs', import.meta.url),
 );
 const BACKGROUND_FIXTURE = fileURLToPath(
-  new URL('../../../../core/src/runner/fixtures/background-agent.cjs', import.meta.url),
+  new URL('../../../../core/src/runner/_tests/fixtures/background-agent.cjs', import.meta.url),
 );
 const CLI_PACKAGE_ROOT = fileURLToPath(new URL('../../../', import.meta.url));
 const CLI_BUILT = fileURLToPath(new URL('../../../dist/cli.js', import.meta.url));
@@ -480,7 +480,7 @@ describe('CLI2.6 agent authoring', () => {
             argv: [hostileArgument, '$(false)'],
             handshake: {
               case_id: 'connection-test',
-              protocol: 'attest.agent/v1alpha1',
+              protocol: AGENT_PROTOCOL,
               run_id: '01ARZ3NDEKTSV4RRFFQ69G5FAV',
             },
             input: { ping: true },

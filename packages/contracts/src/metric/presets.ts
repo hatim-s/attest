@@ -22,7 +22,7 @@ const metricPresetIdSchema = z.enum([
 
 /** Encodes one stable, inspectable starting point used by metric authoring wizards. */
 const metricPresetSchema = z.strictObject({
-  schema: currentOrLegacyIdentifier(METRIC_PRESET_SCHEMA_ID, 'attest.metric-preset/v1'),
+  schema: currentOrLegacyIdentifier(METRIC_PRESET_SCHEMA_ID, METRIC_PRESET_SCHEMA_VERSION),
   id: metricPresetIdSchema,
   name: z.string().min(1),
   description: z.string().min(1),
@@ -49,8 +49,8 @@ const deepFreeze = <T>(value: T): DeepReadonly<T> => {
 };
 
 /**
- * Publishes defaults rather than hidden wizard prompts. Placeholder values are valid,
- * reviewable metric definitions and are always replaced by required author input before commit.
+ * Publishes defaults rather than hidden wizard prompts. This slice retains the previous producer
+ * marker until downstream consumers migrate, while the parser accepts both identifiers.
  */
 const parsedMetricPresets = metricPresetSchema.array().parse([
   {
