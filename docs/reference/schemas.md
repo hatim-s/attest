@@ -9,7 +9,7 @@ does not replace validation.
 ```sh
 attest schema list --output json
 attest schema print attest.command-request/v2 --output json
-attest schema print agent.v2.json --output json
+attest schema print agent.json --output json
 ```
 
 `schema list` returns one `attest.cli-result/v1` whose `result.items` entries contain the printable
@@ -22,14 +22,14 @@ by generated filename even when their in-document `schema` discriminator is an `
 
 ## Canonical authored resources
 
-| Document discriminator | Generated schema                                                    | Authored location                    |
-| ---------------------- | ------------------------------------------------------------------- | ------------------------------------ |
-| `attest.project/v2`    | [project.v2.json](../../packages/schemas/generated/project.v2.json) | `attest.project.json`                |
-| `attest.agent/v2`      | [agent.v2.json](../../packages/schemas/generated/agent.v2.json)     | `attest/agents/<id>.json`            |
-| `attest.test/v2`       | [test.v2.json](../../packages/schemas/generated/test.v2.json)       | `attest/tests/<id>.json`             |
-| `attest.case/v2`       | [case.v2.json](../../packages/schemas/generated/case.v2.json)       | Direct case or one dataset JSONL row |
-| `attest.dataset/v2`    | [dataset.v2.json](../../packages/schemas/generated/dataset.v2.json) | `attest/datasets/<id>.meta.json`     |
-| `attest.metric/v2`     | [metric.v2.json](../../packages/schemas/generated/metric.v2.json)   | `attest/metrics/<id>.json`           |
+| Document discriminator | Generated schema                                              | Authored location                    |
+| ---------------------- | ------------------------------------------------------------- | ------------------------------------ |
+| `attest.project/v2`    | [project.json](../../packages/schemas/generated/project.json) | `attest.project.json`                |
+| `attest.agent/v2`      | [agent.json](../../packages/schemas/generated/agent.json)     | `attest/agents/<id>.json`            |
+| `attest.test/v2`       | [test.json](../../packages/schemas/generated/test.json)       | `attest/tests/<id>.json`             |
+| `attest.case/v2`       | [case.json](../../packages/schemas/generated/case.json)       | Direct case or one dataset JSONL row |
+| `attest.dataset/v2`    | [dataset.json](../../packages/schemas/generated/dataset.json) | `attest/datasets/<id>.meta.json`     |
+| `attest.metric/v2`     | [metric.json](../../packages/schemas/generated/metric.json)   | `attest/metrics/<id>.json`           |
 
 The manifest contains canonical paths and SHA-256 content hashes. Dataset entries bind both JSONL
 data bytes and metadata bytes. Runtime loading validates strict shapes, canonical paths, hash
@@ -38,15 +38,15 @@ command acts.
 
 ## Command and CLI protocols
 
-| Document discriminator          | Generated schema                                                                            | Contract                                                                                |
-| ------------------------------- | ------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
-| `attest.command-request/v2`     | [command-request.v2.json](../../packages/schemas/generated/command-request.v2.json)         | Strict `--from-json` union for project, agent, test/dataset, metric, and eval commands. |
-| `attest.cli-result/v1`          | [cli-result.v1.json](../../packages/schemas/generated/cli-result.v1.json)                   | Exactly one success/failure document for non-streaming machine output.                  |
-| `attest.cli-event/v1`           | [cli-event.v1.json](../../packages/schemas/generated/cli-event.v1.json)                     | One sequenced JSONL event line.                                                         |
-| `attest.cli-help/v1`            | [cli-help.v1.json](../../packages/schemas/generated/cli-help.v1.json)                       | Versioned command tree returned inside a CLI result.                                    |
-| `attest.cli-errors/v1`          | [cli-errors.v1.json](../../packages/schemas/generated/cli-errors.v1.json)                   | Stable error catalog returned inside a CLI result.                                      |
-| `attest.metric-preset/v1`       | [metric-preset.v1.json](../../packages/schemas/generated/metric-preset.v1.json)             | One authoring preset included by metric JSON help.                                      |
-| `attest.metric-test-fixture/v1` | [metric-test-fixture.v1.json](../../packages/schemas/generated/metric-test-fixture.v1.json) | Strict local fixture for `metric test`.                                                 |
+| Document discriminator          | Generated schema                                                                      | Contract                                                                                |
+| ------------------------------- | ------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| `attest.command-request/v2`     | [command-request.json](../../packages/schemas/generated/command-request.json)         | Strict `--from-json` union for project, agent, test/dataset, metric, and eval commands. |
+| `attest.cli-result/v1`          | [cli-result.json](../../packages/schemas/generated/cli-result.json)                   | Exactly one success/failure document for non-streaming machine output.                  |
+| `attest.cli-event/v1`           | [cli-event.json](../../packages/schemas/generated/cli-event.json)                     | One sequenced JSONL event line.                                                         |
+| `attest.cli-help/v1`            | [cli-help.json](../../packages/schemas/generated/cli-help.json)                       | Versioned command tree returned inside a CLI result.                                    |
+| `attest.cli-errors/v1`          | [cli-errors.json](../../packages/schemas/generated/cli-errors.json)                   | Stable error catalog returned inside a CLI result.                                      |
+| `attest.metric-preset/v1`       | [metric-preset.json](../../packages/schemas/generated/metric-preset.json)             | One authoring preset included by metric JSON help.                                      |
+| `attest.metric-test-fixture/v1` | [metric-test-fixture.json](../../packages/schemas/generated/metric-test-fixture.json) | Strict local fixture for `metric test`.                                                 |
 
 ### `attest.cli-result/v1`
 
@@ -96,13 +96,13 @@ presets where applicable.
 
 ## Agent and metric execution protocols
 
-| Document discriminator   | Generated schema                                                                              | Producer to consumer                             |
-| ------------------------ | --------------------------------------------------------------------------------------------- | ------------------------------------------------ |
-| `attest.agent/v1alpha1`  | [agent-request.v1alpha1.json](../../packages/schemas/generated/agent-request.v1alpha1.json)   | Attest to a native or normalized agent adapter.  |
-| `attest.agent/v1alpha1`  | [agent-response.v1alpha1.json](../../packages/schemas/generated/agent-response.v1alpha1.json) | Agent adapter back to Attest.                    |
-| `attest.metric/v1alpha1` | [metric-request.v1alpha1.json](../../packages/schemas/generated/metric-request.v1alpha1.json) | Attest to an executable or normalized metric.    |
-| `attest.metric/v1alpha1` | [metric-result.v1alpha1.json](../../packages/schemas/generated/metric-result.v1alpha1.json)   | Metric back to Attest with score/pass evidence.  |
-| `attest.trace/v1alpha1`  | [trace.v1alpha1.json](../../packages/schemas/generated/trace.v1alpha1.json)                   | Normalized trace evidence used by trace metrics. |
+| Document discriminator   | Generated schema                                                            | Producer to consumer                             |
+| ------------------------ | --------------------------------------------------------------------------- | ------------------------------------------------ |
+| `attest.agent/v1alpha1`  | [agent-request.json](../../packages/schemas/generated/agent-request.json)   | Attest to a native or normalized agent adapter.  |
+| `attest.agent/v1alpha1`  | [agent-response.json](../../packages/schemas/generated/agent-response.json) | Agent adapter back to Attest.                    |
+| `attest.metric/v1alpha1` | [metric-request.json](../../packages/schemas/generated/metric-request.json) | Attest to an executable or normalized metric.    |
+| `attest.metric/v1alpha1` | [metric-result.json](../../packages/schemas/generated/metric-result.json)   | Metric back to Attest with score/pass evidence.  |
+| `attest.trace/v1alpha1`  | [trace.json](../../packages/schemas/generated/trace.json)                   | Normalized trace evidence used by trace metrics. |
 
 The shared discriminator names a protocol family; request and response/result schemas remain
 separate generated files. Native processes exchange one JSON document on stdin/stdout. JSONL and
@@ -111,23 +111,23 @@ agent request/response semantics.
 
 ## Streaming and WebSocket transport schemas
 
-| Generated schema                                                                            | Purpose                                                                   |
-| ------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
-| [jsonl-bridge-input.v1.json](../../packages/schemas/generated/jsonl-bridge-input.v1.json)   | Correlated invocation/cancellation input lines for managed JSONL bridges. |
-| [jsonl-bridge-output.v1.json](../../packages/schemas/generated/jsonl-bridge-output.v1.json) | Correlated result/error output lines.                                     |
-| [websocket-request.v1.json](../../packages/schemas/generated/websocket-request.v1.json)     | WebSocket invocation request mapping.                                     |
-| [websocket-message.v1.json](../../packages/schemas/generated/websocket-message.v1.json)     | Accepted text-JSON WebSocket message vocabulary.                          |
-| [websocket-evidence.v1.json](../../packages/schemas/generated/websocket-evidence.v1.json)   | Bounded WebSocket protocol evidence.                                      |
+| Generated schema                                                                      | Purpose                                                                   |
+| ------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| [jsonl-bridge-input.json](../../packages/schemas/generated/jsonl-bridge-input.json)   | Correlated invocation/cancellation input lines for managed JSONL bridges. |
+| [jsonl-bridge-output.json](../../packages/schemas/generated/jsonl-bridge-output.json) | Correlated result/error output lines.                                     |
+| [websocket-request.json](../../packages/schemas/generated/websocket-request.json)     | WebSocket invocation request mapping.                                     |
+| [websocket-message.json](../../packages/schemas/generated/websocket-message.json)     | Accepted text-JSON WebSocket message vocabulary.                          |
+| [websocket-evidence.json](../../packages/schemas/generated/websocket-evidence.json)   | Bounded WebSocket protocol evidence.                                      |
 
 ## Eval schemas
 
-| Generated schema                                                                            | Purpose                                                                                |
-| ------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
-| [eval-run-request.v2.json](../../packages/schemas/generated/eval-run-request.v2.json)       | Strict test/all selection, filters, concurrency, timeout, baseline, JUnit, and output. |
-| [eval-cancel-request.v2.json](../../packages/schemas/generated/eval-cancel-request.v2.json) | Run-scoped cancellation request.                                                       |
-| [eval-cancel-result.v1.json](../../packages/schemas/generated/eval-cancel-result.v1.json)   | Cancellation success/failure result.                                                   |
-| [eval-run.v1.json](../../packages/schemas/generated/eval-run.v1.json)                       | Immutable persisted run snapshot and effective command.                                |
-| [eval-event.v1.json](../../packages/schemas/generated/eval-event.v1.json)                   | Eval-specific `attest.cli-event/v1` union and final result compatibility.              |
+| Generated schema                                                                      | Purpose                                                                                |
+| ------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| [eval-run-request.json](../../packages/schemas/generated/eval-run-request.json)       | Strict test/all selection, filters, concurrency, timeout, baseline, JUnit, and output. |
+| [eval-cancel-request.json](../../packages/schemas/generated/eval-cancel-request.json) | Run-scoped cancellation request.                                                       |
+| [eval-cancel-result.json](../../packages/schemas/generated/eval-cancel-result.json)   | Cancellation success/failure result.                                                   |
+| [eval-run.json](../../packages/schemas/generated/eval-run.json)                       | Immutable persisted run snapshot and effective command.                                |
+| [eval-event.json](../../packages/schemas/generated/eval-event.json)                   | Eval-specific `attest.cli-event/v1` union and final result compatibility.              |
 
 ## Validation rules for agents
 
