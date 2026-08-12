@@ -1,4 +1,4 @@
-import { CLI_EVENT_SCHEMA_ID, type EvalEvent, type EvalRunSummary } from '@attest/contracts';
+import { CLI_EVENT_SCHEMA_VERSION, type EvalEvent, type EvalRunSummary } from '@attest/contracts';
 
 import type {
   EvalEventLimits,
@@ -57,7 +57,7 @@ const eventBytesFit = (
   const envelopeBytes = (event: Omit<EvalEvent, 'schema' | 'sequence' | 'time'>): number =>
     Buffer.byteLength(
       JSON.stringify({
-        schema: CLI_EVENT_SCHEMA_ID,
+        schema: CLI_EVENT_SCHEMA_VERSION,
         sequence: plan.cases.length * 2 + 2,
         time: run.created_at,
         ...event,
