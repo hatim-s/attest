@@ -1,5 +1,5 @@
 {
-  "schema": "attest.metric-preset",
+  "schema": "attest.metric-preset/v1",
   "id": "trace-span",
   "name": "Trace span",
   "description": "Require a trace-capable fixture with spans matching stable fields, attributes, count, or order.",
