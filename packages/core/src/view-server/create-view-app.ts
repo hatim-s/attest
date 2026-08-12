@@ -60,8 +60,6 @@ const createViewApp = (options: CreateViewAppOptions): ViewApp => {
   });
 
   app.get('/', (context) => context.html(options.indexHtml ?? DEFAULT_INDEX_HTML));
-  // Stack compatibility only: the final CLI slice removes the previous health route.
-  app.get('/api/v1/health', (context) => context.json({ schema: API_SCHEMA_ID, ok: true }));
   app.get('/api/health', (context) => context.json({ schema: API_SCHEMA_ID, ok: true }));
   app.get('/api/runs', async (context) => {
     const runs = await options.store.runs.listRuns({

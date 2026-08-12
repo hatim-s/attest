@@ -3,7 +3,7 @@
   "expect": "valid-with-warnings",
   "warning_codes": ["invalid_trace"],
   "input": {
-    "protocol": "attest.agent/v1alpha1",
+    "protocol": "attest.agent-invocation",
     "output": "Paris",
     "trace": { "schema": "wrong-version" }
   }

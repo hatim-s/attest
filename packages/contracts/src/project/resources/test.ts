@@ -2,11 +2,7 @@ import { z } from 'zod';
 
 import { testCaseSchema } from './case.js';
 import { executionDefaultsSchema, resourceIdSchema } from '../shared.js';
-import {
-  TEST_RESOURCE_SCHEMA_ID,
-  TEST_RESOURCE_SCHEMA_VERSION,
-  currentOrLegacyIdentifier,
-} from '../../schema/identifiers.js';
+import { TEST_RESOURCE_SCHEMA_ID } from '../../schema/identifiers.js';
 
 /** References one reusable dataset and an optional all-tags attachment filter. */
 const datasetAttachmentSchema = z.strictObject({
@@ -30,7 +26,7 @@ const testPassGateSchema = z.strictObject({
 /** Encodes one canonical test resource and its direct case definitions. */
 const testResourceSchema = z
   .strictObject({
-    schema: currentOrLegacyIdentifier(TEST_RESOURCE_SCHEMA_ID, TEST_RESOURCE_SCHEMA_VERSION),
+    schema: z.literal(TEST_RESOURCE_SCHEMA_ID),
     id: resourceIdSchema,
     name: z.string().min(1),
     agent_id: resourceIdSchema,

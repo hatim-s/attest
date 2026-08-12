@@ -2,5 +2,5 @@
   "description": "Rejects a trace without its required stable trace identifier.",
   "expect": "invalid",
   "issue_paths": [["trace_id"]],
-  "input": { "schema": "attest.trace/v1alpha1", "spans": [] }
+  "input": { "schema": "attest.trace", "spans": [] }
 }

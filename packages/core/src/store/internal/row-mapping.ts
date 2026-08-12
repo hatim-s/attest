@@ -33,26 +33,19 @@ const parseRequiredJson = <Value>(serialized: string, field: string): Value => {
 };
 
 /** Restores a public run record from its initial schema row representation (PLAN 1S.3). */
-const toRunRecord = (row: RunsTable): RunRecord => {
-  const record: RunRecord = {
-    id: row.id,
-    createdAt: row.created_at,
-    finishedAt: row.finished_at ?? undefined,
-    status: row.status,
-    schemaId: row.schema_id,
-    configHash: row.config_hash,
-    configJson: row.config_json,
-    gitSha: row.git_sha ?? undefined,
-    gitBranch: row.git_branch ?? undefined,
-    labels: parseJson<Record<string, string>>(row.labels_json),
-    summary: parseJson<RunSummary>(row.summary_json),
-  };
-  Object.defineProperty(record, 'configVersion', {
-    configurable: true,
-    get: () => record.schemaId,
-  });
-  return record;
-};
+const toRunRecord = (row: RunsTable): RunRecord => ({
+  id: row.id,
+  createdAt: row.created_at,
+  finishedAt: row.finished_at ?? undefined,
+  status: row.status,
+  schemaId: row.schema_id,
+  configHash: row.config_hash,
+  configJson: row.config_json,
+  gitSha: row.git_sha ?? undefined,
+  gitBranch: row.git_branch ?? undefined,
+  labels: parseJson<Record<string, string>>(row.labels_json),
+  summary: parseJson<RunSummary>(row.summary_json),
+});
 
 /** Restores a metric evaluation while enforcing its persisted status discriminant. */
 const toMetricEvaluation = (row: MetricResultsTable): StoredMetricEvaluation => {

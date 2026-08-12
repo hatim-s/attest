@@ -151,7 +151,7 @@ describe('invokeHttpAgent', () => {
 
     expect(attempt).toMatchObject({
       status: 'ok',
-      raw: { protocol: 'attest.agent-invocation', output: 'ok:http-invoker-test' },
+      raw: { protocol: AGENT_PROTOCOL, output: 'ok:http-invoker-test' },
       diagnostics: { httpStatus: 200 },
     });
   });
@@ -324,7 +324,7 @@ describe('invokeHttpAgent', () => {
 
     expect(attempt).toMatchObject({
       status: 'ok',
-      raw: { protocol: 'attest.agent-invocation', output: 'ok:http-invoker-test' },
+      raw: { protocol: AGENT_PROTOCOL, output: 'ok:http-invoker-test' },
     });
   });
 

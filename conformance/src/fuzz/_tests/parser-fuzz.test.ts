@@ -32,13 +32,13 @@ const iterationCount =
     : defaultIterationCount;
 
 const validAgentRequest = {
-  protocol: 'attest.agent/v1alpha1',
+  protocol: 'attest.agent-invocation',
   run_id: '01J9ZK7Q2M5X8W4V3T2R1QPN0M',
   case_id: 'greeting-basic',
   input: { question: 'What is the capital of France?', tags: ['geography'] },
 };
 const validTrace = {
-  schema: 'attest.trace/v1alpha1',
+  schema: 'attest.trace',
   trace_id: 'trace-1',
   spans: [
     {
@@ -53,12 +53,12 @@ const validTrace = {
   ],
 };
 const validAgentResponse = {
-  protocol: 'attest.agent/v1alpha1',
+  protocol: 'attest.agent-invocation',
   output: ['Paris'],
   trace: validTrace,
 };
 const validMetricRequest = {
-  protocol: 'attest.metric/v1alpha1',
+  protocol: 'attest.metric-evaluation',
   case: { id: 'greeting', input: ['Capital of France?'] },
   output: 'Paris',
   trace: validTrace,

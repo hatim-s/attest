@@ -20,16 +20,8 @@
       "type": "string"
     },
     "schema": {
-      "anyOf": [
-        {
-          "const": "attest.command-request",
-          "type": "string"
-        },
-        {
-          "const": "attest.command-request/v2",
-          "type": "string"
-        }
-      ]
+      "const": "attest.command-request",
+      "type": "string"
     }
   },
   "required": [

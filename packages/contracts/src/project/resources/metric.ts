@@ -10,11 +10,7 @@ import {
   retryPolicySchema,
   secretReferenceSchema,
 } from '../shared.js';
-import {
-  METRIC_RESOURCE_SCHEMA_ID,
-  METRIC_RESOURCE_SCHEMA_VERSION,
-  currentOrLegacyIdentifier,
-} from '../../schema/identifiers.js';
+import { METRIC_RESOURCE_SCHEMA_ID } from '../../schema/identifiers.js';
 
 const assertionMetricSchema = z.strictObject({
   kind: z.literal('assertion'),
@@ -55,7 +51,7 @@ const httpMetricSchema = z.strictObject({
 /** Encodes one canonical assertion, judge, executable, or HTTP metric resource. */
 const metricResourceSchema = z
   .strictObject({
-    schema: currentOrLegacyIdentifier(METRIC_RESOURCE_SCHEMA_ID, METRIC_RESOURCE_SCHEMA_VERSION),
+    schema: z.literal(METRIC_RESOURCE_SCHEMA_ID),
     id: resourceIdSchema,
     name: z.string().min(1),
     definition: z.discriminatedUnion('kind', [

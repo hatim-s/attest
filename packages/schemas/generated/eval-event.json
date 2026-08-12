@@ -80,16 +80,8 @@
           "type": "string"
         },
         "schema": {
-          "anyOf": [
-            {
-              "const": "attest.cli-event",
-              "type": "string"
-            },
-            {
-              "const": "attest.cli-event/v1",
-              "type": "string"
-            }
-          ]
+          "const": "attest.cli-event",
+          "type": "string"
         },
         "sequence": {
           "maximum": 9007199254740991,
@@ -149,16 +141,8 @@
           "type": "string"
         },
         "schema": {
-          "anyOf": [
-            {
-              "const": "attest.cli-event",
-              "type": "string"
-            },
-            {
-              "const": "attest.cli-event/v1",
-              "type": "string"
-            }
-          ]
+          "const": "attest.cli-event",
+          "type": "string"
         },
         "sequence": {
           "maximum": 9007199254740991,
@@ -243,16 +227,8 @@
           "type": "string"
         },
         "schema": {
-          "anyOf": [
-            {
-              "const": "attest.cli-event",
-              "type": "string"
-            },
-            {
-              "const": "attest.cli-event/v1",
-              "type": "string"
-            }
-          ]
+          "const": "attest.cli-event",
+          "type": "string"
         },
         "sequence": {
           "maximum": 9007199254740991,
@@ -344,16 +320,8 @@
           "type": "string"
         },
         "schema": {
-          "anyOf": [
-            {
-              "const": "attest.cli-event",
-              "type": "string"
-            },
-            {
-              "const": "attest.cli-event/v1",
-              "type": "string"
-            }
-          ]
+          "const": "attest.cli-event",
+          "type": "string"
         },
         "sequence": {
           "maximum": 9007199254740991,
@@ -498,16 +466,8 @@
                       "type": "object"
                     },
                     "schema": {
-                      "anyOf": [
-                        {
-                          "const": "attest.cli-result",
-                          "type": "string"
-                        },
-                        {
-                          "const": "attest.cli-result/v1",
-                          "type": "string"
-                        }
-                      ]
+                      "const": "attest.cli-result",
+                      "type": "string"
                     },
                     "warnings": {
                       "items": {
@@ -674,16 +634,8 @@
                       "type": "object"
                     },
                     "schema": {
-                      "anyOf": [
-                        {
-                          "const": "attest.cli-result",
-                          "type": "string"
-                        },
-                        {
-                          "const": "attest.cli-result/v1",
-                          "type": "string"
-                        }
-                      ]
+                      "const": "attest.cli-result",
+                      "type": "string"
                     },
                     "warnings": {
                       "items": {
@@ -784,16 +736,8 @@
                       "type": "boolean"
                     },
                     "schema": {
-                      "anyOf": [
-                        {
-                          "const": "attest.cli-result",
-                          "type": "string"
-                        },
-                        {
-                          "const": "attest.cli-result/v1",
-                          "type": "string"
-                        }
-                      ]
+                      "const": "attest.cli-result",
+                      "type": "string"
                     }
                   },
                   "required": [
@@ -863,16 +807,8 @@
                       "type": "boolean"
                     },
                     "schema": {
-                      "anyOf": [
-                        {
-                          "const": "attest.cli-result",
-                          "type": "string"
-                        },
-                        {
-                          "const": "attest.cli-result/v1",
-                          "type": "string"
-                        }
-                      ]
+                      "const": "attest.cli-result",
+                      "type": "string"
                     }
                   },
                   "required": [
@@ -942,16 +878,8 @@
                       "type": "boolean"
                     },
                     "schema": {
-                      "anyOf": [
-                        {
-                          "const": "attest.cli-result",
-                          "type": "string"
-                        },
-                        {
-                          "const": "attest.cli-result/v1",
-                          "type": "string"
-                        }
-                      ]
+                      "const": "attest.cli-result",
+                      "type": "string"
                     }
                   },
                   "required": [
@@ -1021,16 +949,8 @@
                       "type": "boolean"
                     },
                     "schema": {
-                      "anyOf": [
-                        {
-                          "const": "attest.cli-result",
-                          "type": "string"
-                        },
-                        {
-                          "const": "attest.cli-result/v1",
-                          "type": "string"
-                        }
-                      ]
+                      "const": "attest.cli-result",
+                      "type": "string"
                     }
                   },
                   "required": [
@@ -1100,16 +1020,8 @@
                       "type": "boolean"
                     },
                     "schema": {
-                      "anyOf": [
-                        {
-                          "const": "attest.cli-result",
-                          "type": "string"
-                        },
-                        {
-                          "const": "attest.cli-result/v1",
-                          "type": "string"
-                        }
-                      ]
+                      "const": "attest.cli-result",
+                      "type": "string"
                     }
                   },
                   "required": [
@@ -1134,16 +1046,8 @@
           "type": "string"
         },
         "schema": {
-          "anyOf": [
-            {
-              "const": "attest.cli-event",
-              "type": "string"
-            },
-            {
-              "const": "attest.cli-event/v1",
-              "type": "string"
-            }
-          ]
+          "const": "attest.cli-event",
+          "type": "string"
         },
         "sequence": {
           "maximum": 9007199254740991,

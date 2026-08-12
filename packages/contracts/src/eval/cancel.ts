@@ -2,11 +2,11 @@ import { z } from 'zod';
 
 import { cliFailureResultSchema, cliSuccessResultSchema } from '../cli/protocol.js';
 import { evalRunIdSchema } from './run.js';
-import { COMMAND_REQUEST_SCHEMA_ID, currentOrLegacyIdentifier } from '../schema/identifiers.js';
+import { COMMAND_REQUEST_SCHEMA_ID } from '../schema/identifiers.js';
 
 /** Encodes the only JSON request accepted by `attest eval cancel`. */
 const evalCancelRequestSchema = z.strictObject({
-  schema: currentOrLegacyIdentifier(COMMAND_REQUEST_SCHEMA_ID, 'attest.command-request/v2'),
+  schema: z.literal(COMMAND_REQUEST_SCHEMA_ID),
   command: z.literal('eval.cancel'),
   run_id: evalRunIdSchema,
   output: z.enum(['human', 'json']),

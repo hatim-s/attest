@@ -2,7 +2,7 @@
   "description": "Accepts an opaque state token on a successful response.",
   "expect": "valid",
   "input": {
-    "protocol": "attest.agent/v1alpha1",
+    "protocol": "attest.agent-invocation",
     "output": "Paris",
     "state": { "cursor": 1, "opaque": ["next-turn"] }
   }

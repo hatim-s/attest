@@ -132,16 +132,8 @@
       "additionalProperties": false,
       "properties": {
         "protocol": {
-          "anyOf": [
-            {
-              "const": "attest.websocket-message",
-              "type": "string"
-            },
-            {
-              "const": "attest.websocket-message/v1",
-              "type": "string"
-            }
-          ]
+          "const": "attest.websocket-message",
+          "type": "string"
         },
         "request_id": {
           "maxLength": 128,
@@ -169,16 +161,8 @@
       "additionalProperties": false,
       "properties": {
         "protocol": {
-          "anyOf": [
-            {
-              "const": "attest.websocket-message",
-              "type": "string"
-            },
-            {
-              "const": "attest.websocket-message/v1",
-              "type": "string"
-            }
-          ]
+          "const": "attest.websocket-message",
+          "type": "string"
         },
         "request_id": {
           "maxLength": 128,
@@ -206,16 +190,8 @@
       "additionalProperties": false,
       "properties": {
         "protocol": {
-          "anyOf": [
-            {
-              "const": "attest.websocket-message",
-              "type": "string"
-            },
-            {
-              "const": "attest.websocket-message/v1",
-              "type": "string"
-            }
-          ]
+          "const": "attest.websocket-message",
+          "type": "string"
         },
         "request_id": {
           "maxLength": 128,
@@ -243,16 +219,8 @@
       "additionalProperties": false,
       "properties": {
         "protocol": {
-          "anyOf": [
-            {
-              "const": "attest.websocket-message",
-              "type": "string"
-            },
-            {
-              "const": "attest.websocket-message/v1",
-              "type": "string"
-            }
-          ]
+          "const": "attest.websocket-message",
+          "type": "string"
         },
         "request_id": {
           "maxLength": 128,

@@ -54,16 +54,8 @@
                 "type": "string"
               },
               "schema": {
-                "anyOf": [
-                  {
-                    "const": "attest.agent",
-                    "type": "string"
-                  },
-                  {
-                    "const": "attest.agent/v2",
-                    "type": "string"
-                  }
-                ]
+                "const": "attest.agent",
+                "type": "string"
               }
             },
             "required": [
@@ -103,16 +95,8 @@
                 "type": "string"
               },
               "schema": {
-                "anyOf": [
-                  {
-                    "const": "attest.dataset",
-                    "type": "string"
-                  },
-                  {
-                    "const": "attest.dataset/v2",
-                    "type": "string"
-                  }
-                ]
+                "const": "attest.dataset",
+                "type": "string"
               }
             },
             "required": [
@@ -145,16 +129,8 @@
                 "type": "string"
               },
               "schema": {
-                "anyOf": [
-                  {
-                    "const": "attest.metric",
-                    "type": "string"
-                  },
-                  {
-                    "const": "attest.metric/v2",
-                    "type": "string"
-                  }
-                ]
+                "const": "attest.metric",
+                "type": "string"
               }
             },
             "required": [
@@ -185,16 +161,8 @@
                 "type": "string"
               },
               "schema": {
-                "anyOf": [
-                  {
-                    "const": "attest.test",
-                    "type": "string"
-                  },
-                  {
-                    "const": "attest.test/v2",
-                    "type": "string"
-                  }
-                ]
+                "const": "attest.test",
+                "type": "string"
               }
             },
             "required": [
@@ -217,16 +185,8 @@
       "type": "object"
     },
     "schema": {
-      "anyOf": [
-        {
-          "const": "attest.project",
-          "type": "string"
-        },
-        {
-          "const": "attest.project/v2",
-          "type": "string"
-        }
-      ]
+      "const": "attest.project",
+      "type": "string"
     }
   },
   "required": [

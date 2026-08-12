@@ -7,7 +7,6 @@ import {
   CLI_EVENT_SCHEMA_ID,
   CLI_HELP_SCHEMA_ID,
   CLI_RESULT_SCHEMA_ID,
-  currentOrLegacyIdentifier,
 } from '../schema/identifiers.js';
 
 const jsonValueSchema = z.json();
@@ -50,7 +49,7 @@ const cliErrorSchema = z.strictObject({
 });
 
 const cliSuccessResultSchema = z.strictObject({
-  schema: currentOrLegacyIdentifier(CLI_RESULT_SCHEMA_ID, 'attest.cli-result/v1'),
+  schema: z.literal(CLI_RESULT_SCHEMA_ID),
   ok: z.literal(true),
   command: cliCommandSchema,
   project_hash_before: sha256Schema.nullable(),
@@ -60,7 +59,7 @@ const cliSuccessResultSchema = z.strictObject({
 });
 
 const cliFailureResultSchema = z.strictObject({
-  schema: currentOrLegacyIdentifier(CLI_RESULT_SCHEMA_ID, 'attest.cli-result/v1'),
+  schema: z.literal(CLI_RESULT_SCHEMA_ID),
   ok: z.literal(false),
   command: cliCommandSchema,
   error: cliErrorSchema,
@@ -74,7 +73,7 @@ const cliResultSchema = z.discriminatedUnion('ok', [
 
 /** Defines one deterministic line in a CLI JSONL stream. */
 const cliEventSchema = z.strictObject({
-  schema: currentOrLegacyIdentifier(CLI_EVENT_SCHEMA_ID, 'attest.cli-event/v1'),
+  schema: z.literal(CLI_EVENT_SCHEMA_ID),
   sequence: z.number().int().nonnegative(),
   time: z.iso.datetime({ offset: true }),
   event: z.string().regex(/^[a-z][a-z0-9_]*$/, 'must be a lowercase event name'),
@@ -117,7 +116,6 @@ type CliHelpCommand = {
   request_schema: string | null;
   examples: string[];
   constraints: string[];
-  deprecated?: string | null;
   presets?: z.infer<typeof metricPresetSchema>[];
 };
 
@@ -136,14 +134,13 @@ const cliHelpCommandSchema: z.ZodType<CliHelpCommand> = z.lazy(() =>
     request_schema: z.string().min(1).nullable(),
     examples: z.array(z.string().min(1)),
     constraints: z.array(z.string().min(1)),
-    deprecated: z.string().min(1).nullable().optional(),
     presets: z.array(metricPresetSchema).optional(),
   }),
 );
 
 /** Defines the command tree carried by a successful help result. */
 const cliHelpSchema = z.strictObject({
-  schema: currentOrLegacyIdentifier(CLI_HELP_SCHEMA_ID, 'attest.cli-help/v1'),
+  schema: z.literal(CLI_HELP_SCHEMA_ID),
   command: cliHelpCommandSchema,
 });
 
@@ -159,7 +156,7 @@ const cliErrorDefinitionSchema = z.strictObject({
 
 /** Defines the error registry returned by `attest errors`. */
 const cliErrorCatalogSchema = z.strictObject({
-  schema: currentOrLegacyIdentifier(CLI_ERROR_CATALOG_SCHEMA_ID, 'attest.cli-errors/v1'),
+  schema: z.literal(CLI_ERROR_CATALOG_SCHEMA_ID),
   errors: z.array(cliErrorDefinitionSchema),
 });
 

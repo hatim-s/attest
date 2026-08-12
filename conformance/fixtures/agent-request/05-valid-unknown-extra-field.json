@@ -2,7 +2,7 @@
   "description": "Keeps unknown request fields valid so newer runners remain compatible with older agents.",
   "expect": "valid",
   "input": {
-    "protocol": "attest.agent/v1alpha1",
+    "protocol": "attest.agent-invocation",
     "run_id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
     "case_id": "greeting-basic",
     "input": {},

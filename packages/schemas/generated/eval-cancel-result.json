@@ -92,16 +92,8 @@
           "type": "object"
         },
         "schema": {
-          "anyOf": [
-            {
-              "const": "attest.cli-result",
-              "type": "string"
-            },
-            {
-              "const": "attest.cli-result/v1",
-              "type": "string"
-            }
-          ]
+          "const": "attest.cli-result",
+          "type": "string"
         },
         "warnings": {
           "items": {
@@ -188,16 +180,8 @@
           "type": "boolean"
         },
         "schema": {
-          "anyOf": [
-            {
-              "const": "attest.cli-result",
-              "type": "string"
-            },
-            {
-              "const": "attest.cli-result/v1",
-              "type": "string"
-            }
-          ]
+          "const": "attest.cli-result",
+          "type": "string"
         }
       },
       "required": [

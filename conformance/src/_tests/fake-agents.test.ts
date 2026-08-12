@@ -8,10 +8,14 @@ import { parseAgentRequest, parseAgentResponse } from '@attest/contracts';
 import { describe, expect, it } from 'vitest';
 
 const fixtureTimeoutMilliseconds = 5_000;
-const cliAgentPath = fileURLToPath(new URL('../fake-agents/cli-agent.cjs', import.meta.url));
-const httpAgentPath = fileURLToPath(new URL('../fake-agents/http-agent.cjs', import.meta.url));
+const cliAgentPath = fileURLToPath(
+  new URL('./fixtures/fake-agents/cli-agent.cjs', import.meta.url),
+);
+const httpAgentPath = fileURLToPath(
+  new URL('./fixtures/fake-agents/http-agent.cjs', import.meta.url),
+);
 const requestEnvelope = {
-  protocol: 'attest.agent/v1alpha1',
+  protocol: 'attest.agent-invocation',
   run_id: '01ARZ3NDEKTSV4RRFFQ69G5FAV',
   case_id: 'greeting-basic',
   input: { question: 'What is the capital of France?' },

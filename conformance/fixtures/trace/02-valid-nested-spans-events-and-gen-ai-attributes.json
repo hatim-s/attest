@@ -2,7 +2,7 @@
   "description": "Accepts nested agent, LLM, and tool spans with events and GenAI semantic attributes.",
   "expect": "valid",
   "input": {
-    "schema": "attest.trace/v1alpha1",
+    "schema": "attest.trace",
     "trace_id": "trace-nested",
     "spans": [
       {

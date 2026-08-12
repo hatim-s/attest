@@ -114,16 +114,8 @@
                   "$ref": "#/$defs/__schema0"
                 },
                 "protocol": {
-                  "anyOf": [
-                    {
-                      "const": "attest.agent-invocation",
-                      "type": "string"
-                    },
-                    {
-                      "const": "attest.agent/v1alpha1",
-                      "type": "string"
-                    }
-                  ]
+                  "const": "attest.agent-invocation",
+                  "type": "string"
                 },
                 "state": {
                   "$ref": "#/$defs/__schema1"
@@ -155,16 +147,8 @@
                   "type": "object"
                 },
                 "protocol": {
-                  "anyOf": [
-                    {
-                      "const": "attest.agent-invocation",
-                      "type": "string"
-                    },
-                    {
-                      "const": "attest.agent/v1alpha1",
-                      "type": "string"
-                    }
-                  ]
+                  "const": "attest.agent-invocation",
+                  "type": "string"
                 },
                 "state": {
                   "$ref": "#/$defs/__schema2"

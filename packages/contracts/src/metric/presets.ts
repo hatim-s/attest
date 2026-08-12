@@ -1,11 +1,7 @@
 import { z } from 'zod';
 
 import { metricResourceSchema } from '../project/resources/metric.js';
-import {
-  METRIC_PRESET_SCHEMA_ID,
-  METRIC_PRESET_SCHEMA_VERSION,
-  currentOrLegacyIdentifier,
-} from '../schema/identifiers.js';
+import { METRIC_PRESET_SCHEMA_ID } from '../schema/identifiers.js';
 
 const metricPresetIdSchema = z.enum([
   'output-equals',
@@ -22,7 +18,7 @@ const metricPresetIdSchema = z.enum([
 
 /** Encodes one stable, inspectable starting point used by metric authoring wizards. */
 const metricPresetSchema = z.strictObject({
-  schema: currentOrLegacyIdentifier(METRIC_PRESET_SCHEMA_ID, 'attest.metric-preset/v1'),
+  schema: z.literal(METRIC_PRESET_SCHEMA_ID),
   id: metricPresetIdSchema,
   name: z.string().min(1),
   description: z.string().min(1),
@@ -54,7 +50,7 @@ const deepFreeze = <T>(value: T): DeepReadonly<T> => {
  */
 const parsedMetricPresets = metricPresetSchema.array().parse([
   {
-    schema: METRIC_PRESET_SCHEMA_VERSION,
+    schema: METRIC_PRESET_SCHEMA_ID,
     id: 'output-equals',
     name: 'Output equals',
     description: 'Require one output or expected-data path to equal a JSON value.',
@@ -66,7 +62,7 @@ const parsedMetricPresets = metricPresetSchema.array().parse([
     },
   },
   {
-    schema: METRIC_PRESET_SCHEMA_VERSION,
+    schema: METRIC_PRESET_SCHEMA_ID,
     id: 'output-contains',
     name: 'Output contains',
     description:
@@ -79,7 +75,7 @@ const parsedMetricPresets = metricPresetSchema.array().parse([
     },
   },
   {
-    schema: METRIC_PRESET_SCHEMA_VERSION,
+    schema: METRIC_PRESET_SCHEMA_ID,
     id: 'output-schema',
     name: 'Output schema',
     description: 'Validate output against an authored Draft 2020-12 JSON Schema.',
@@ -91,7 +87,7 @@ const parsedMetricPresets = metricPresetSchema.array().parse([
     },
   },
   {
-    schema: METRIC_PRESET_SCHEMA_VERSION,
+    schema: METRIC_PRESET_SCHEMA_ID,
     id: 'judge-rubric',
     name: 'Judge rubric',
     description:
@@ -106,7 +102,7 @@ const parsedMetricPresets = metricPresetSchema.array().parse([
     },
   },
   {
-    schema: METRIC_PRESET_SCHEMA_VERSION,
+    schema: METRIC_PRESET_SCHEMA_ID,
     id: 'command',
     name: 'Command metric',
     description: 'Run a trusted local argv array using the native metric envelope.',
@@ -119,7 +115,7 @@ const parsedMetricPresets = metricPresetSchema.array().parse([
     },
   },
   {
-    schema: METRIC_PRESET_SCHEMA_VERSION,
+    schema: METRIC_PRESET_SCHEMA_ID,
     id: 'http',
     name: 'HTTP metric',
     description:
@@ -134,7 +130,7 @@ const parsedMetricPresets = metricPresetSchema.array().parse([
     },
   },
   {
-    schema: METRIC_PRESET_SCHEMA_VERSION,
+    schema: METRIC_PRESET_SCHEMA_ID,
     id: 'tool-called',
     name: 'Tool called',
     description: 'Require matching tool calls, optionally including status, count, and arguments.',
@@ -146,7 +142,7 @@ const parsedMetricPresets = metricPresetSchema.array().parse([
     },
   },
   {
-    schema: METRIC_PRESET_SCHEMA_VERSION,
+    schema: METRIC_PRESET_SCHEMA_ID,
     id: 'tool-order',
     name: 'Tool order',
     description: 'Require tool-call names to appear in one chronological order.',
@@ -158,7 +154,7 @@ const parsedMetricPresets = metricPresetSchema.array().parse([
     },
   },
   {
-    schema: METRIC_PRESET_SCHEMA_VERSION,
+    schema: METRIC_PRESET_SCHEMA_ID,
     id: 'no-tool-errors',
     name: 'No tool errors',
     description: 'Reject traces containing failed tool spans.',
@@ -170,7 +166,7 @@ const parsedMetricPresets = metricPresetSchema.array().parse([
     },
   },
   {
-    schema: METRIC_PRESET_SCHEMA_VERSION,
+    schema: METRIC_PRESET_SCHEMA_ID,
     id: 'trace-span',
     name: 'Trace span',
     description:

@@ -75,20 +75,11 @@ const CONTRACT_JSON_SCHEMAS = new Map<string, ContractJsonSchemaDefinition>([
   ['dataset.json', { schema: datasetResourceSchema, invariants: projectRuntimeInvariants }],
   ['metric.json', { schema: metricResourceSchema, invariants: projectRuntimeInvariants }],
   ['metric-preset.json', { schema: metricPresetSchema, invariants: noAdditionalInvariants }],
-  ['metric-preset.v1.json', { schema: metricPresetSchema, invariants: noAdditionalInvariants }],
   [
     'metric-test-fixture.json',
     { schema: metricTestFixtureSchema, invariants: noAdditionalInvariants },
   ],
-  [
-    'metric-test-fixture.v1.json',
-    { schema: metricTestFixtureSchema, invariants: noAdditionalInvariants },
-  ],
   ['command-request.json', { schema: commandRequestSchema, invariants: projectRuntimeInvariants }],
-  [
-    'command-request.v2.json',
-    { schema: commandRequestSchema, invariants: projectRuntimeInvariants },
-  ],
   ['eval-run-request.json', { schema: evalRunRequestSchema, invariants: noAdditionalInvariants }],
   ['eval-run.json', { schema: evalRunSchema, invariants: noAdditionalInvariants }],
   ['eval-event.json', { schema: evalEventSchema, invariants: noAdditionalInvariants }],

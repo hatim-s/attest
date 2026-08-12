@@ -876,16 +876,8 @@
       "type": "string"
     },
     "schema": {
-      "anyOf": [
-        {
-          "const": "attest.metric",
-          "type": "string"
-        },
-        {
-          "const": "attest.metric/v2",
-          "type": "string"
-        }
-      ]
+      "const": "attest.metric",
+      "type": "string"
     }
   },
   "required": [

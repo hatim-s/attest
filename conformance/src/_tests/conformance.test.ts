@@ -9,18 +9,14 @@ import { readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-import {
-  loadFixtures,
-  type FixtureEnvelope,
-  type LoadedFixture,
-} from './internal/load-fixtures.js';
+import { loadFixtures, type FixtureEnvelope, type LoadedFixture } from './support/load-fixtures.js';
 
 type FixtureParseResult =
   | { ok: true; warningCodes: string[] }
   | { ok: false; issuePaths: string[]; warningCodes: string[] };
 
 const fixtures = loadFixtures();
-const fixtureRoot = join(import.meta.dirname, '../fixtures');
+const fixtureRoot = join(import.meta.dirname, '../../fixtures');
 
 /** Converts public parser results into the few assertions every fixture envelope shares. */
 const parseFixture = (fixture: LoadedFixture): FixtureParseResult => {

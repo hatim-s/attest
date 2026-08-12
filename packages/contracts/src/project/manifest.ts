@@ -14,16 +14,10 @@ import {
 } from './shared.js';
 import {
   AGENT_RESOURCE_SCHEMA_ID,
-  AGENT_RESOURCE_SCHEMA_VERSION,
   DATASET_SCHEMA_ID,
-  DATASET_SCHEMA_VERSION,
   METRIC_RESOURCE_SCHEMA_ID,
-  METRIC_RESOURCE_SCHEMA_VERSION,
   PROJECT_SCHEMA_ID,
-  PROJECT_SCHEMA_VERSION,
   TEST_RESOURCE_SCHEMA_ID,
-  TEST_RESOURCE_SCHEMA_VERSION,
-  currentOrLegacyIdentifier,
 } from '../schema/identifiers.js';
 
 const authoredResourceManifestEntrySchema = z.strictObject({
@@ -33,17 +27,17 @@ const authoredResourceManifestEntrySchema = z.strictObject({
 });
 
 const agentManifestEntrySchema = authoredResourceManifestEntrySchema.extend({
-  schema: currentOrLegacyIdentifier(AGENT_RESOURCE_SCHEMA_ID, AGENT_RESOURCE_SCHEMA_VERSION),
+  schema: z.literal(AGENT_RESOURCE_SCHEMA_ID),
 });
 const testManifestEntrySchema = authoredResourceManifestEntrySchema.extend({
-  schema: currentOrLegacyIdentifier(TEST_RESOURCE_SCHEMA_ID, TEST_RESOURCE_SCHEMA_VERSION),
+  schema: z.literal(TEST_RESOURCE_SCHEMA_ID),
 });
 const metricManifestEntrySchema = authoredResourceManifestEntrySchema.extend({
-  schema: currentOrLegacyIdentifier(METRIC_RESOURCE_SCHEMA_ID, METRIC_RESOURCE_SCHEMA_VERSION),
+  schema: z.literal(METRIC_RESOURCE_SCHEMA_ID),
 });
 const datasetManifestEntrySchema = z.strictObject({
   id: resourceIdSchema,
-  schema: currentOrLegacyIdentifier(DATASET_SCHEMA_ID, DATASET_SCHEMA_VERSION),
+  schema: z.literal(DATASET_SCHEMA_ID),
   data_path: relativePathSchema,
   data_content_hash: sha256Schema,
   metadata_path: relativePathSchema,
@@ -92,7 +86,7 @@ const reportDuplicateManifestIds = (
 /** Encodes the generated project index at attest.project.json. */
 const projectManifestSchema = z
   .strictObject({
-    schema: currentOrLegacyIdentifier(PROJECT_SCHEMA_ID, PROJECT_SCHEMA_VERSION),
+    schema: z.literal(PROJECT_SCHEMA_ID),
     project_id: projectIdSchema,
     name: z.string().min(1),
     defaults: projectDefaultsSchema.optional(),

@@ -202,16 +202,8 @@
           "type": "string"
         },
         "schema": {
-          "anyOf": [
-            {
-              "const": "attest.websocket-evidence",
-              "type": "string"
-            },
-            {
-              "const": "attest.websocket-evidence/v1",
-              "type": "string"
-            }
-          ]
+          "const": "attest.websocket-evidence",
+          "type": "string"
         }
       },
       "required": [
@@ -452,16 +444,8 @@
           "type": "string"
         },
         "schema": {
-          "anyOf": [
-            {
-              "const": "attest.websocket-evidence",
-              "type": "string"
-            },
-            {
-              "const": "attest.websocket-evidence/v1",
-              "type": "string"
-            }
-          ]
+          "const": "attest.websocket-evidence",
+          "type": "string"
         }
       },
       "required": [
@@ -680,16 +664,8 @@
           "type": "string"
         },
         "schema": {
-          "anyOf": [
-            {
-              "const": "attest.websocket-evidence",
-              "type": "string"
-            },
-            {
-              "const": "attest.websocket-evidence/v1",
-              "type": "string"
-            }
-          ]
+          "const": "attest.websocket-evidence",
+          "type": "string"
         }
       },
       "required": [

@@ -680,16 +680,8 @@
       "type": "object"
     },
     "schema": {
-      "anyOf": [
-        {
-          "const": "attest.agent",
-          "type": "string"
-        },
-        {
-          "const": "attest.agent/v2",
-          "type": "string"
-        }
-      ]
+      "const": "attest.agent",
+      "type": "string"
     },
     "timeouts": {
       "additionalProperties": false,

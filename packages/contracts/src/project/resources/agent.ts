@@ -8,11 +8,7 @@ import {
   retryPolicySchema,
   secretReferenceSchema,
 } from '../shared.js';
-import {
-  AGENT_RESOURCE_SCHEMA_ID,
-  AGENT_RESOURCE_SCHEMA_VERSION,
-  currentOrLegacyIdentifier,
-} from '../../schema/identifiers.js';
+import { AGENT_RESOURCE_SCHEMA_ID } from '../../schema/identifiers.js';
 import { webSocketTransportSchema } from '../../agent/websocket-contract.js';
 
 const httpUrlTemplateSchema = z
@@ -219,7 +215,7 @@ const agentTransportSchema = z.discriminatedUnion('kind', [
 /** Encodes one canonical agent resource without secret values. */
 const agentResourceSchema = z
   .strictObject({
-    schema: currentOrLegacyIdentifier(AGENT_RESOURCE_SCHEMA_ID, AGENT_RESOURCE_SCHEMA_VERSION),
+    schema: z.literal(AGENT_RESOURCE_SCHEMA_ID),
     id: resourceIdSchema,
     name: z.string().min(1),
     transport: agentTransportSchema,

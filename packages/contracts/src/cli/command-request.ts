@@ -18,10 +18,10 @@ import {
   retryPolicySchema,
   sha256Schema,
 } from '../project/shared.js';
-import { COMMAND_REQUEST_SCHEMA_ID, currentOrLegacyIdentifier } from '../schema/identifiers.js';
+import { COMMAND_REQUEST_SCHEMA_ID } from '../schema/identifiers.js';
 
 const commonMutationFields = {
-  schema: currentOrLegacyIdentifier(COMMAND_REQUEST_SCHEMA_ID, 'attest.command-request/v2'),
+  schema: z.literal(COMMAND_REQUEST_SCHEMA_ID),
   dry_run: z.boolean().optional(),
   yes: z.boolean().optional(),
   if_project_hash: sha256Schema.optional(),
@@ -145,7 +145,7 @@ const agentRemoveRequestSchema = z.strictObject({
 });
 
 const agentTestRequestSchema = z.strictObject({
-  schema: currentOrLegacyIdentifier(COMMAND_REQUEST_SCHEMA_ID, 'attest.command-request/v2'),
+  schema: z.literal(COMMAND_REQUEST_SCHEMA_ID),
   command: z.literal('agent.test'),
   agent_id: resourceIdSchema,
   input: z.json(),
@@ -282,7 +282,7 @@ const metricImportRequestSchema = z.strictObject({
 });
 
 const metricTestRequestSchema = z.strictObject({
-  schema: currentOrLegacyIdentifier(COMMAND_REQUEST_SCHEMA_ID, 'attest.command-request/v2'),
+  schema: z.literal(COMMAND_REQUEST_SCHEMA_ID),
   command: z.literal('metric.test'),
   metric_id: resourceIdSchema,
   fixture: z.string().min(1),

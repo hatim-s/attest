@@ -2,7 +2,7 @@
   "description": "Accepts and preserves unknown trace document and span extension fields through parsing.",
   "expect": "valid",
   "input": {
-    "schema": "attest.trace/v1alpha1",
+    "schema": "attest.trace",
     "trace_id": "trace-extension",
     "vendor_document": { "nested": ["alpha", { "beta": true }] },
     "spans": [

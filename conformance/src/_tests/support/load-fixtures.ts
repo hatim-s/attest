@@ -43,9 +43,9 @@ const parseFixtureEnvelope = (value: unknown, path: string): FixtureEnvelope => 
   return envelope as FixtureEnvelope;
 };
 
-const fixtureRoot = join(import.meta.dirname, '../..', 'fixtures');
+const fixtureRoot = join(import.meta.dirname, '../../..', 'fixtures');
 
-/** Loads every JSON fixture at test startup so new files automatically join the compatibility gate. */
+/** Loads every JSON fixture at test startup so new files automatically join the conformance gate. */
 const loadFixtures = (): LoadedFixture[] =>
   readdirSync(fixtureRoot, { withFileTypes: true })
     .filter((entry) => entry.isDirectory())

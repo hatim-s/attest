@@ -6,17 +6,13 @@ import {
   resourceIdSchema,
   sha256Schema,
 } from '../project/shared.js';
-import {
-  COMMAND_REQUEST_SCHEMA_ID,
-  EVAL_RUN_SCHEMA_ID,
-  currentOrLegacyIdentifier,
-} from '../schema/identifiers.js';
+import { COMMAND_REQUEST_SCHEMA_ID, EVAL_RUN_SCHEMA_ID } from '../schema/identifiers.js';
 
 const evalOutputModeSchema = z.enum(['human', 'json', 'jsonl']);
 const evalRunIdSchema = z.ulid();
 
 const evalRunCommonRequestFields = {
-  schema: currentOrLegacyIdentifier(COMMAND_REQUEST_SCHEMA_ID, 'attest.command-request/v2'),
+  schema: z.literal(COMMAND_REQUEST_SCHEMA_ID),
   command: z.literal('eval.run'),
   case_ids: z.array(resourceIdSchema).nonempty().optional(),
   tags: z.array(z.string().min(1)).nonempty().optional(),
@@ -134,7 +130,7 @@ const evalRunGitMetadataSchema = z.strictObject({
  * Mutable lifecycle state and case results remain in the run store rather than changing this snapshot.
  */
 const evalRunSchema = z.strictObject({
-  schema: currentOrLegacyIdentifier(EVAL_RUN_SCHEMA_ID, 'attest.eval-run/v1'),
+  schema: z.literal(EVAL_RUN_SCHEMA_ID),
   run_id: evalRunIdSchema,
   created_at: z.iso.datetime({ offset: true }),
   snapshot_hash: sha256Schema,

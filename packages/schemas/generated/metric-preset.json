@@ -905,16 +905,8 @@
       "type": "array"
     },
     "schema": {
-      "anyOf": [
-        {
-          "const": "attest.metric-preset",
-          "type": "string"
-        },
-        {
-          "const": "attest.metric-preset/v1",
-          "type": "string"
-        }
-      ]
+      "const": "attest.metric-preset",
+      "type": "string"
     }
   },
   "required": [

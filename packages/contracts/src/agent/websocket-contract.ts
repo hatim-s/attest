@@ -9,12 +9,8 @@ import {
 } from '../project/shared.js';
 import {
   WEBSOCKET_EVIDENCE_SCHEMA_ID,
-  WEBSOCKET_EVIDENCE_SCHEMA_VERSION,
   WEBSOCKET_MESSAGE_PROTOCOL,
-  WEBSOCKET_MESSAGE_PROTOCOL_VERSION,
   WEBSOCKET_REQUEST_PROTOCOL,
-  WEBSOCKET_REQUEST_PROTOCOL_VERSION,
-  currentOrLegacyIdentifier,
 } from '../schema/identifiers.js';
 
 const webSocketRequestIdSchema = z
@@ -186,10 +182,7 @@ const webSocketTransportSchema = z
 
 /** Normalizes one adapter invocation before the authored request template is rendered. */
 const webSocketInvocationRequestSchema = z.strictObject({
-  protocol: currentOrLegacyIdentifier(
-    WEBSOCKET_REQUEST_PROTOCOL,
-    WEBSOCKET_REQUEST_PROTOCOL_VERSION,
-  ),
+  protocol: z.literal(WEBSOCKET_REQUEST_PROTOCOL),
   request_id: webSocketRequestIdSchema,
   request: agentRequestSchema,
 });
@@ -197,37 +190,25 @@ const webSocketInvocationRequestSchema = z.strictObject({
 /** Classifies a correlated text-JSON message after configured pointer extraction. */
 const webSocketCorrelatedMessageSchema = z.discriminatedUnion('type', [
   z.strictObject({
-    protocol: currentOrLegacyIdentifier(
-      WEBSOCKET_MESSAGE_PROTOCOL,
-      WEBSOCKET_MESSAGE_PROTOCOL_VERSION,
-    ),
+    protocol: z.literal(WEBSOCKET_MESSAGE_PROTOCOL),
     type: z.literal('acknowledgement'),
     request_id: webSocketRequestIdSchema,
     value: z.json(),
   }),
   z.strictObject({
-    protocol: currentOrLegacyIdentifier(
-      WEBSOCKET_MESSAGE_PROTOCOL,
-      WEBSOCKET_MESSAGE_PROTOCOL_VERSION,
-    ),
+    protocol: z.literal(WEBSOCKET_MESSAGE_PROTOCOL),
     type: z.literal('result'),
     request_id: webSocketRequestIdSchema,
     value: z.json(),
   }),
   z.strictObject({
-    protocol: currentOrLegacyIdentifier(
-      WEBSOCKET_MESSAGE_PROTOCOL,
-      WEBSOCKET_MESSAGE_PROTOCOL_VERSION,
-    ),
+    protocol: z.literal(WEBSOCKET_MESSAGE_PROTOCOL),
     type: z.literal('error'),
     request_id: webSocketRequestIdSchema,
     value: z.json(),
   }),
   z.strictObject({
-    protocol: currentOrLegacyIdentifier(
-      WEBSOCKET_MESSAGE_PROTOCOL,
-      WEBSOCKET_MESSAGE_PROTOCOL_VERSION,
-    ),
+    protocol: z.literal(WEBSOCKET_MESSAGE_PROTOCOL),
     type: z.literal('trace'),
     request_id: webSocketRequestIdSchema,
     value: z.json(),
@@ -315,10 +296,7 @@ const webSocketCloseEvidenceSchema = z.strictObject({
 });
 
 const webSocketEvidenceBaseFields = {
-  schema: currentOrLegacyIdentifier(
-    WEBSOCKET_EVIDENCE_SCHEMA_ID,
-    WEBSOCKET_EVIDENCE_SCHEMA_VERSION,
-  ),
+  schema: z.literal(WEBSOCKET_EVIDENCE_SCHEMA_ID),
   request_id: webSocketRequestIdSchema,
   lifecycle: z.enum(['per_case', 'per_run']),
   connection_mode: webSocketConnectionModeSchema,

@@ -70,16 +70,8 @@
       "type": "array"
     },
     "schema": {
-      "anyOf": [
-        {
-          "const": "attest.cli-errors",
-          "type": "string"
-        },
-        {
-          "const": "attest.cli-errors/v1",
-          "type": "string"
-        }
-      ]
+      "const": "attest.cli-errors",
+      "type": "string"
     }
   },
   "required": [

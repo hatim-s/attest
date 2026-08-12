@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { cliFailureResultSchema, cliSuccessResultSchema } from '../cli/protocol.js';
 import { evalRunIdSchema } from './run.js';
 import { resourceIdSchema, sha256Schema } from '../project/shared.js';
-import { CLI_EVENT_SCHEMA_ID, currentOrLegacyIdentifier } from '../schema/identifiers.js';
+import { CLI_EVENT_SCHEMA_ID } from '../schema/identifiers.js';
 
 const evalRunSummarySchema = z.strictObject({
   total_cases: z.number().int().nonnegative(),
@@ -14,7 +14,7 @@ const evalRunSummarySchema = z.strictObject({
 });
 
 const evalEventBaseFields = {
-  schema: currentOrLegacyIdentifier(CLI_EVENT_SCHEMA_ID, 'attest.cli-event/v1'),
+  schema: z.literal(CLI_EVENT_SCHEMA_ID),
   sequence: z.number().int().nonnegative(),
   time: z.iso.datetime({ offset: true }),
 };

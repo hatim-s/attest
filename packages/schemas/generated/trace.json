@@ -68,16 +68,8 @@
   "additionalProperties": {},
   "properties": {
     "schema": {
-      "anyOf": [
-        {
-          "const": "attest.trace",
-          "type": "string"
-        },
-        {
-          "const": "attest.trace/v1alpha1",
-          "type": "string"
-        }
-      ]
+      "const": "attest.trace",
+      "type": "string"
     },
     "spans": {
       "items": {

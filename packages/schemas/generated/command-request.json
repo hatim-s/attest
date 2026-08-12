@@ -173,16 +173,8 @@
           "type": "object"
         },
         "schema": {
-          "anyOf": [
-            {
-              "const": "attest.agent",
-              "type": "string"
-            },
-            {
-              "const": "attest.agent/v2",
-              "type": "string"
-            }
-          ]
+          "const": "attest.agent",
+          "type": "string"
         },
         "timeouts": {
           "additionalProperties": false,
@@ -1137,16 +1129,8 @@
           "type": "string"
         },
         "schema": {
-          "anyOf": [
-            {
-              "const": "attest.metric",
-              "type": "string"
-            },
-            {
-              "const": "attest.metric/v2",
-              "type": "string"
-            }
-          ]
+          "const": "attest.metric",
+          "type": "string"
         }
       },
       "required": [
@@ -1349,16 +1333,8 @@
           "type": "object"
         },
         "schema": {
-          "anyOf": [
-            {
-              "const": "attest.test",
-              "type": "string"
-            },
-            {
-              "const": "attest.test/v2",
-              "type": "string"
-            }
-          ]
+          "const": "attest.test",
+          "type": "string"
         }
       },
       "required": [
@@ -2369,16 +2345,8 @@
           "type": "string"
         },
         "schema": {
-          "anyOf": [
-            {
-              "const": "attest.command-request",
-              "type": "string"
-            },
-            {
-              "const": "attest.command-request/v2",
-              "type": "string"
-            }
-          ]
+          "const": "attest.command-request",
+          "type": "string"
         },
         "yes": {
           "type": "boolean"
@@ -2405,16 +2373,8 @@
           "type": "string"
         },
         "schema": {
-          "anyOf": [
-            {
-              "const": "attest.command-request",
-              "type": "string"
-            },
-            {
-              "const": "attest.command-request/v2",
-              "type": "string"
-            }
-          ]
+          "const": "attest.command-request",
+          "type": "string"
         },
         "stale": {
           "const": true,
@@ -2449,16 +2409,8 @@
           "type": "string"
         },
         "schema": {
-          "anyOf": [
-            {
-              "const": "attest.command-request",
-              "type": "string"
-            },
-            {
-              "const": "attest.command-request/v2",
-              "type": "string"
-            }
-          ]
+          "const": "attest.command-request",
+          "type": "string"
         },
         "yes": {
           "type": "boolean"
@@ -2496,16 +2448,8 @@
               "type": "string"
             },
             "schema": {
-              "anyOf": [
-                {
-                  "const": "attest.command-request",
-                  "type": "string"
-                },
-                {
-                  "const": "attest.command-request/v2",
-                  "type": "string"
-                }
-              ]
+              "const": "attest.command-request",
+              "type": "string"
             },
             "source": {
               "minLength": 1,
@@ -2766,16 +2710,8 @@
               "type": "object"
             },
             "schema": {
-              "anyOf": [
-                {
-                  "const": "attest.command-request",
-                  "type": "string"
-                },
-                {
-                  "const": "attest.command-request/v2",
-                  "type": "string"
-                }
-              ]
+              "const": "attest.command-request",
+              "type": "string"
             },
             "source": {
               "minLength": 1,
@@ -2855,16 +2791,8 @@
           "type": "string"
         },
         "schema": {
-          "anyOf": [
-            {
-              "const": "attest.command-request",
-              "type": "string"
-            },
-            {
-              "const": "attest.command-request/v2",
-              "type": "string"
-            }
-          ]
+          "const": "attest.command-request",
+          "type": "string"
         },
         "yes": {
           "type": "boolean"
@@ -2900,16 +2828,8 @@
           "type": "string"
         },
         "schema": {
-          "anyOf": [
-            {
-              "const": "attest.command-request",
-              "type": "string"
-            },
-            {
-              "const": "attest.command-request/v2",
-              "type": "string"
-            }
-          ]
+          "const": "attest.command-request",
+          "type": "string"
         },
         "yes": {
           "type": "boolean"
@@ -2940,16 +2860,8 @@
           "type": "boolean"
         },
         "schema": {
-          "anyOf": [
-            {
-              "const": "attest.command-request",
-              "type": "string"
-            },
-            {
-              "const": "attest.command-request/v2",
-              "type": "string"
-            }
-          ]
+          "const": "attest.command-request",
+          "type": "string"
         }
       },
       "required": [
@@ -2975,16 +2887,8 @@
           "type": "string"
         },
         "schema": {
-          "anyOf": [
-            {
-              "const": "attest.command-request",
-              "type": "string"
-            },
-            {
-              "const": "attest.command-request/v2",
-              "type": "string"
-            }
-          ]
+          "const": "attest.command-request",
+          "type": "string"
         },
         "test": {
           "$ref": "#/$defs/TestResource"
@@ -3072,16 +2976,8 @@
           "type": "string"
         },
         "schema": {
-          "anyOf": [
-            {
-              "const": "attest.command-request",
-              "type": "string"
-            },
-            {
-              "const": "attest.command-request/v2",
-              "type": "string"
-            }
-          ]
+          "const": "attest.command-request",
+          "type": "string"
         },
         "test_id": {
           "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
@@ -3187,16 +3083,8 @@
           "type": "object"
         },
         "schema": {
-          "anyOf": [
-            {
-              "const": "attest.command-request",
-              "type": "string"
-            },
-            {
-              "const": "attest.command-request/v2",
-              "type": "string"
-            }
-          ]
+          "const": "attest.command-request",
+          "type": "string"
         },
         "source": {
           "minLength": 1,
@@ -3242,16 +3130,8 @@
           "type": "string"
         },
         "schema": {
-          "anyOf": [
-            {
-              "const": "attest.command-request",
-              "type": "string"
-            },
-            {
-              "const": "attest.command-request/v2",
-              "type": "string"
-            }
-          ]
+          "const": "attest.command-request",
+          "type": "string"
         },
         "test_id": {
           "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
@@ -3289,16 +3169,8 @@
           "type": "string"
         },
         "schema": {
-          "anyOf": [
-            {
-              "const": "attest.command-request",
-              "type": "string"
-            },
-            {
-              "const": "attest.command-request/v2",
-              "type": "string"
-            }
-          ]
+          "const": "attest.command-request",
+          "type": "string"
         },
         "test_id": {
           "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
@@ -3331,16 +3203,8 @@
               "type": "number"
             },
             "case_schema": {
-              "anyOf": [
-                {
-                  "const": "attest.case",
-                  "type": "string"
-                },
-                {
-                  "const": "attest.case/v2",
-                  "type": "string"
-                }
-              ]
+              "const": "attest.case",
+              "type": "string"
             },
             "id": {
               "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
@@ -3351,16 +3215,8 @@
               "type": "string"
             },
             "schema": {
-              "anyOf": [
-                {
-                  "const": "attest.dataset",
-                  "type": "string"
-                },
-                {
-                  "const": "attest.dataset/v2",
-                  "type": "string"
-                }
-              ]
+              "const": "attest.dataset",
+              "type": "string"
             }
           },
           "required": [
@@ -3380,16 +3236,8 @@
           "type": "string"
         },
         "schema": {
-          "anyOf": [
-            {
-              "const": "attest.command-request",
-              "type": "string"
-            },
-            {
-              "const": "attest.command-request/v2",
-              "type": "string"
-            }
-          ]
+          "const": "attest.command-request",
+          "type": "string"
         },
         "test_id": {
           "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
@@ -3503,16 +3351,8 @@
           "type": "string"
         },
         "schema": {
-          "anyOf": [
-            {
-              "const": "attest.command-request",
-              "type": "string"
-            },
-            {
-              "const": "attest.command-request/v2",
-              "type": "string"
-            }
-          ]
+          "const": "attest.command-request",
+          "type": "string"
         },
         "source": {
           "minLength": 1,
@@ -3555,16 +3395,8 @@
           "type": "string"
         },
         "schema": {
-          "anyOf": [
-            {
-              "const": "attest.command-request",
-              "type": "string"
-            },
-            {
-              "const": "attest.command-request/v2",
-              "type": "string"
-            }
-          ]
+          "const": "attest.command-request",
+          "type": "string"
         },
         "tags": {
           "items": {
@@ -3608,16 +3440,8 @@
           "type": "string"
         },
         "schema": {
-          "anyOf": [
-            {
-              "const": "attest.command-request",
-              "type": "string"
-            },
-            {
-              "const": "attest.command-request/v2",
-              "type": "string"
-            }
-          ]
+          "const": "attest.command-request",
+          "type": "string"
         },
         "test_id": {
           "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
@@ -3658,16 +3482,8 @@
           "type": "string"
         },
         "schema": {
-          "anyOf": [
-            {
-              "const": "attest.command-request",
-              "type": "string"
-            },
-            {
-              "const": "attest.command-request/v2",
-              "type": "string"
-            }
-          ]
+          "const": "attest.command-request",
+          "type": "string"
         },
         "yes": {
           "type": "boolean"
@@ -3700,16 +3516,8 @@
           "type": "string"
         },
         "schema": {
-          "anyOf": [
-            {
-              "const": "attest.command-request",
-              "type": "string"
-            },
-            {
-              "const": "attest.command-request/v2",
-              "type": "string"
-            }
-          ]
+          "const": "attest.command-request",
+          "type": "string"
         },
         "yes": {
           "type": "boolean"
@@ -3741,16 +3549,8 @@
           "type": "string"
         },
         "schema": {
-          "anyOf": [
-            {
-              "const": "attest.command-request",
-              "type": "string"
-            },
-            {
-              "const": "attest.command-request/v2",
-              "type": "string"
-            }
-          ]
+          "const": "attest.command-request",
+          "type": "string"
         },
         "test_id": {
           "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
@@ -3790,16 +3590,8 @@
           "type": "string"
         },
         "schema": {
-          "anyOf": [
-            {
-              "const": "attest.command-request",
-              "type": "string"
-            },
-            {
-              "const": "attest.command-request/v2",
-              "type": "string"
-            }
-          ]
+          "const": "attest.command-request",
+          "type": "string"
         },
         "test_id": {
           "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
@@ -3836,16 +3628,8 @@
           "type": "string"
         },
         "schema": {
-          "anyOf": [
-            {
-              "const": "attest.command-request",
-              "type": "string"
-            },
-            {
-              "const": "attest.command-request/v2",
-              "type": "string"
-            }
-          ]
+          "const": "attest.command-request",
+          "type": "string"
         },
         "test_id": {
           "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
@@ -3878,16 +3662,8 @@
           "type": "string"
         },
         "schema": {
-          "anyOf": [
-            {
-              "const": "attest.command-request",
-              "type": "string"
-            },
-            {
-              "const": "attest.command-request/v2",
-              "type": "string"
-            }
-          ]
+          "const": "attest.command-request",
+          "type": "string"
         },
         "test_id": {
           "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
@@ -3922,16 +3698,8 @@
           "$ref": "#/$defs/MetricResource"
         },
         "schema": {
-          "anyOf": [
-            {
-              "const": "attest.command-request",
-              "type": "string"
-            },
-            {
-              "const": "attest.command-request/v2",
-              "type": "string"
-            }
-          ]
+          "const": "attest.command-request",
+          "type": "string"
         },
         "yes": {
           "type": "boolean"
@@ -3967,16 +3735,8 @@
           "type": "string"
         },
         "schema": {
-          "anyOf": [
-            {
-              "const": "attest.command-request",
-              "type": "string"
-            },
-            {
-              "const": "attest.command-request/v2",
-              "type": "string"
-            }
-          ]
+          "const": "attest.command-request",
+          "type": "string"
         },
         "source": {
           "minLength": 1,
@@ -4015,16 +3775,8 @@
           "type": "string"
         },
         "schema": {
-          "anyOf": [
-            {
-              "const": "attest.command-request",
-              "type": "string"
-            },
-            {
-              "const": "attest.command-request/v2",
-              "type": "string"
-            }
-          ]
+          "const": "attest.command-request",
+          "type": "string"
         }
       },
       "required": [
@@ -4058,16 +3810,8 @@
           "type": "string"
         },
         "schema": {
-          "anyOf": [
-            {
-              "const": "attest.command-request",
-              "type": "string"
-            },
-            {
-              "const": "attest.command-request/v2",
-              "type": "string"
-            }
-          ]
+          "const": "attest.command-request",
+          "type": "string"
         },
         "yes": {
           "type": "boolean"
@@ -4103,16 +3847,8 @@
           "type": "string"
         },
         "schema": {
-          "anyOf": [
-            {
-              "const": "attest.command-request",
-              "type": "string"
-            },
-            {
-              "const": "attest.command-request/v2",
-              "type": "string"
-            }
-          ]
+          "const": "attest.command-request",
+          "type": "string"
         },
         "yes": {
           "type": "boolean"
@@ -4161,16 +3897,8 @@
               "type": "string"
             },
             "schema": {
-              "anyOf": [
-                {
-                  "const": "attest.command-request",
-                  "type": "string"
-                },
-                {
-                  "const": "attest.command-request/v2",
-                  "type": "string"
-                }
-              ]
+              "const": "attest.command-request",
+              "type": "string"
             },
             "tags": {
               "items": {
@@ -4242,16 +3970,8 @@
               "type": "string"
             },
             "schema": {
-              "anyOf": [
-                {
-                  "const": "attest.command-request",
-                  "type": "string"
-                },
-                {
-                  "const": "attest.command-request/v2",
-                  "type": "string"
-                }
-              ]
+              "const": "attest.command-request",
+              "type": "string"
             },
             "tags": {
               "items": {
@@ -4321,16 +4041,8 @@
               "type": "string"
             },
             "schema": {
-              "anyOf": [
-                {
-                  "const": "attest.command-request",
-                  "type": "string"
-                },
-                {
-                  "const": "attest.command-request/v2",
-                  "type": "string"
-                }
-              ]
+              "const": "attest.command-request",
+              "type": "string"
             },
             "tags": {
               "items": {
@@ -4398,16 +4110,8 @@
               "type": "string"
             },
             "schema": {
-              "anyOf": [
-                {
-                  "const": "attest.command-request",
-                  "type": "string"
-                },
-                {
-                  "const": "attest.command-request/v2",
-                  "type": "string"
-                }
-              ]
+              "const": "attest.command-request",
+              "type": "string"
             },
             "tags": {
               "items": {
@@ -4453,16 +4157,8 @@
           "type": "string"
         },
         "schema": {
-          "anyOf": [
-            {
-              "const": "attest.command-request",
-              "type": "string"
-            },
-            {
-              "const": "attest.command-request/v2",
-              "type": "string"
-            }
-          ]
+          "const": "attest.command-request",
+          "type": "string"
         }
       },
       "required": [

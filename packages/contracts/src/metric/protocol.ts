@@ -1,11 +1,7 @@
 import { z } from 'zod';
 
 import { traceSchema } from '../trace/protocol.js';
-import {
-  CURRENT_METRIC_PROTOCOL,
-  LEGACY_METRIC_PROTOCOL,
-  currentOrLegacyIdentifier,
-} from '../schema/identifiers.js';
+import { METRIC_PROTOCOL } from '../schema/identifiers.js';
 
 const jsonValueSchema = z.json();
 
@@ -165,7 +161,7 @@ const metricCaseSchema = z.strictObject({
 
 /** Encodes the executable metric request envelope in docs/specs/metric-contract.md. */
 const metricRequestSchema = z.looseObject({
-  protocol: currentOrLegacyIdentifier(CURRENT_METRIC_PROTOCOL, LEGACY_METRIC_PROTOCOL),
+  protocol: z.literal(METRIC_PROTOCOL),
   case: metricCaseSchema,
   output: jsonValueSchema,
   trace: traceSchema.nullable(),

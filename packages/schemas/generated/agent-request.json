@@ -154,16 +154,8 @@
       "type": "object"
     },
     "protocol": {
-      "anyOf": [
-        {
-          "const": "attest.agent-invocation",
-          "type": "string"
-        },
-        {
-          "const": "attest.agent/v1alpha1",
-          "type": "string"
-        }
-      ]
+      "const": "attest.agent-invocation",
+      "type": "string"
     },
     "run_id": {
       "format": "ulid",

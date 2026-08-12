@@ -213,10 +213,8 @@ const caseRecordSchema = z.intersection(
 );
 
 type CaseRecord = z.infer<typeof caseRecordSchema>;
-type CanonicalRunMetadata = z.infer<typeof runMetadataSchema>;
-type RunMetadata =
-  CanonicalRunMetadata | (Omit<CanonicalRunMetadata, 'schemaId'> & { configVersion: string });
-type RunRecord = z.infer<typeof runRecordSchema> & { readonly configVersion?: string };
+type RunMetadata = z.infer<typeof runMetadataSchema>;
+type RunRecord = z.infer<typeof runRecordSchema>;
 type RunSummary = z.infer<typeof summarySchema>;
 type StoredAttempt = z.infer<typeof storedAttemptSchema>;
 type StoredCaseExecution = z.infer<typeof storedCaseExecutionSchema>;

@@ -259,16 +259,8 @@
       "$ref": "#/$defs/__schema3"
     },
     "schema": {
-      "anyOf": [
-        {
-          "const": "attest.metric-test-fixture",
-          "type": "string"
-        },
-        {
-          "const": "attest.metric-test-fixture/v1",
-          "type": "string"
-        }
-      ]
+      "const": "attest.metric-test-fixture",
+      "type": "string"
     },
     "trace": {
       "anyOf": [
@@ -276,16 +268,8 @@
           "additionalProperties": {},
           "properties": {
             "schema": {
-              "anyOf": [
-                {
-                  "const": "attest.trace",
-                  "type": "string"
-                },
-                {
-                  "const": "attest.trace/v1alpha1",
-                  "type": "string"
-                }
-              ]
+              "const": "attest.trace",
+              "type": "string"
             },
             "spans": {
               "items": {

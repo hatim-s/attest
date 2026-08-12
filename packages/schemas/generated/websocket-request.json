@@ -99,16 +99,8 @@
   "additionalProperties": false,
   "properties": {
     "protocol": {
-      "anyOf": [
-        {
-          "const": "attest.websocket-request",
-          "type": "string"
-        },
-        {
-          "const": "attest.websocket-request/v1",
-          "type": "string"
-        }
-      ]
+      "const": "attest.websocket-request",
+      "type": "string"
     },
     "request": {
       "additionalProperties": {},
@@ -155,16 +147,8 @@
           "type": "object"
         },
         "protocol": {
-          "anyOf": [
-            {
-              "const": "attest.agent-invocation",
-              "type": "string"
-            },
-            {
-              "const": "attest.agent/v1alpha1",
-              "type": "string"
-            }
-          ]
+          "const": "attest.agent-invocation",
+          "type": "string"
         },
         "run_id": {
           "format": "ulid",

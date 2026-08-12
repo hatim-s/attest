@@ -1,13 +1,7 @@
 import { z } from 'zod';
 
 import { relativePathSchema, resourceIdSchema, sha256Schema } from '../shared.js';
-import {
-  CASE_SCHEMA_ID,
-  CASE_SCHEMA_VERSION,
-  DATASET_SCHEMA_ID,
-  DATASET_SCHEMA_VERSION,
-  currentOrLegacyIdentifier,
-} from '../../schema/identifiers.js';
+import { CASE_SCHEMA_ID, DATASET_SCHEMA_ID } from '../../schema/identifiers.js';
 
 const datasetImportDestinationSchema = z
   .string()
@@ -41,8 +35,8 @@ const datasetImportProvenanceSchema = z.strictObject({
 /** Encodes metadata for one canonical, ordered current dataset JSONL file. */
 const datasetResourceSchema = z
   .strictObject({
-    schema: currentOrLegacyIdentifier(DATASET_SCHEMA_ID, DATASET_SCHEMA_VERSION),
-    case_schema: currentOrLegacyIdentifier(CASE_SCHEMA_ID, CASE_SCHEMA_VERSION),
+    schema: z.literal(DATASET_SCHEMA_ID),
+    case_schema: z.literal(CASE_SCHEMA_ID),
     id: resourceIdSchema,
     name: z.string().min(1),
     case_count: z.number().int().nonnegative(),

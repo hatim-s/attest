@@ -44,16 +44,8 @@
       "type": "string"
     },
     "schema": {
-      "anyOf": [
-        {
-          "const": "attest.cli-event",
-          "type": "string"
-        },
-        {
-          "const": "attest.cli-event/v1",
-          "type": "string"
-        }
-      ]
+      "const": "attest.cli-event",
+      "type": "string"
     },
     "sequence": {
       "maximum": 9007199254740991,
