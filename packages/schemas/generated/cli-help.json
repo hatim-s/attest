@@ -71,8 +71,15 @@
                     "additionalProperties": false,
                     "properties": {
                       "from_file": {
+                        "allOf": [
+                          {
+                            "pattern": "^(?![A-Za-z]:)"
+                          },
+                          {
+                            "pattern": "^(?![\\\\/])(?!(?:.*[\\\\/])?\\.\\.(?:[\\\\/]|$)).+$"
+                          }
+                        ],
                         "minLength": 1,
-                        "pattern": "^(?![\\\\/])(?!(?:.*[\\\\/])?\\.\\.(?:[\\\\/]|$)).+$",
                         "type": "string"
                       }
                     },
@@ -125,8 +132,15 @@
                     "additionalProperties": false,
                     "properties": {
                       "from_file": {
+                        "allOf": [
+                          {
+                            "pattern": "^(?![A-Za-z]:)"
+                          },
+                          {
+                            "pattern": "^(?![\\\\/])(?!(?:.*[\\\\/])?\\.\\.(?:[\\\\/]|$)).+$"
+                          }
+                        ],
                         "minLength": 1,
-                        "pattern": "^(?![\\\\/])(?!(?:.*[\\\\/])?\\.\\.(?:[\\\\/]|$)).+$",
                         "type": "string"
                       }
                     },
@@ -428,8 +442,15 @@
                         "type": "array"
                       },
                       "cwd": {
+                        "allOf": [
+                          {
+                            "pattern": "^(?![A-Za-z]:)"
+                          },
+                          {
+                            "pattern": "^(?![\\\\/])(?!(?:.*[\\\\/])?\\.\\.(?:[\\\\/]|$)).+$"
+                          }
+                        ],
                         "minLength": 1,
-                        "pattern": "^(?![\\\\/])(?!(?:.*[\\\\/])?\\.\\.(?:[\\\\/]|$)).+$",
                         "type": "string"
                       },
                       "env": {
@@ -452,8 +473,15 @@
                               "additionalProperties": false,
                               "properties": {
                                 "from_file": {
+                                  "allOf": [
+                                    {
+                                      "pattern": "^(?![A-Za-z]:)"
+                                    },
+                                    {
+                                      "pattern": "^(?![\\\\/])(?!(?:.*[\\\\/])?\\.\\.(?:[\\\\/]|$)).+$"
+                                    }
+                                  ],
                                   "minLength": 1,
-                                  "pattern": "^(?![\\\\/])(?!(?:.*[\\\\/])?\\.\\.(?:[\\\\/]|$)).+$",
                                   "type": "string"
                                 }
                               },
