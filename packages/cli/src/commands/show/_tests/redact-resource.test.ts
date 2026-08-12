@@ -1,21 +1,21 @@
 import {
-  AGENT_RESOURCE_SCHEMA_VERSION,
-  METRIC_RESOURCE_SCHEMA_VERSION,
+  AGENT_RESOURCE_SCHEMA_ID,
+  METRIC_RESOURCE_SCHEMA_ID,
   agentResourceSchema,
   metricResourceSchema,
   type AgentResource,
 } from '@attest/contracts';
 import { describe, expect, it } from 'vitest';
 
-import { redactAgentResource, redactMetricResource } from './redact-resource.js';
+import { redactAgentResource, redactMetricResource } from '../redact-resource.js';
 
 const credentialUrl = (label: string, scheme = 'https'): string =>
   `${scheme}://user:${label}-password@example.test/path?token=${label}-token&key=${label}-key`;
 
-/** Parses first so every redaction case is proven valid under the authored v2 schema. */
+/** Parses first so every redaction case is proven valid under the authored schema. */
 const validAgent = (id: string, transport: AgentResource['transport']): AgentResource =>
   agentResourceSchema.parse({
-    schema: AGENT_RESOURCE_SCHEMA_VERSION,
+    schema: AGENT_RESOURCE_SCHEMA_ID,
     id,
     name: id,
     transport,
@@ -94,7 +94,7 @@ describe('resource output URL redaction', () => {
 
   it('redacts schema-valid HTTP metric URL credentials', () => {
     const metric = metricResourceSchema.parse({
-      schema: METRIC_RESOURCE_SCHEMA_VERSION,
+      schema: METRIC_RESOURCE_SCHEMA_ID,
       id: 'remote-metric',
       name: 'Remote metric',
       definition: {

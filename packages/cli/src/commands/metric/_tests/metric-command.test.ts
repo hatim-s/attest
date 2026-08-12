@@ -16,30 +16,30 @@ import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 
 import {
-  COMMAND_REQUEST_SCHEMA_VERSION,
+  COMMAND_REQUEST_SCHEMA_ID,
   METRIC_PRESETS,
-  METRIC_RESOURCE_SCHEMA_VERSION,
-  METRIC_TEST_FIXTURE_SCHEMA_VERSION,
+  METRIC_RESOURCE_SCHEMA_ID,
+  METRIC_TEST_FIXTURE_SCHEMA_ID,
   cliResultSchema,
   type CommandRequest,
   type MetricResource,
 } from '@attest/contracts';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { loadProject } from '../../project/load-project.js';
-import { applyProjectMutation } from '../../project/transaction/index.js';
+import { loadProject } from '../../../project/load-project.js';
+import { applyProjectMutation } from '../../../project/transaction/index.js';
 import {
   candidateFromLoadedProject,
   writeFixtureProject,
-} from '../../project/transaction/project-transaction.test-fixture.js';
-import { runCli, type CliIo } from '../../run-cli.js';
-import { REDACTED } from '../agent/native-agent-adapter.js';
-import { runMetricMutationCommand, runMetricTestCommand } from './metric-command.js';
+} from '../../../project/transaction/_tests/support/project-transaction.js';
+import { runCli, type CliIo } from '../../../run-cli.js';
+import { REDACTED } from '../../agent/native-agent-adapter.js';
+import { runMetricMutationCommand, runMetricTestCommand } from '../metric-command.js';
 
 const EXEC_FIXTURE = fileURLToPath(new URL('./fixtures/result-metric.cjs', import.meta.url));
 const PTY_FIXTURE = fileURLToPath(new URL('./fixtures/pty-metric-authoring.py', import.meta.url));
-const CLI_PACKAGE_ROOT = fileURLToPath(new URL('../../../', import.meta.url));
-const CLI_BUILT = fileURLToPath(new URL('../../../dist/cli.js', import.meta.url));
+const CLI_PACKAGE_ROOT = fileURLToPath(new URL('../../../../', import.meta.url));
+const CLI_BUILT = fileURLToPath(new URL('../../../../dist/cli.js', import.meta.url));
 const execFileAsync = promisify(execFile);
 const temporaryDirectories: string[] = [];
 const originalSecret = process.env.ATTEST_METRIC_SOURCE_SECRET;
@@ -176,12 +176,12 @@ const snapshotTree = async (root: string, prefix = ''): Promise<Record<string, s
 
 const metricFixture = (output: unknown = { answer: 'Paris', score: 0.9 }, expectedPass = true) =>
   JSON.stringify({
-    schema: METRIC_TEST_FIXTURE_SCHEMA_VERSION,
+    schema: METRIC_TEST_FIXTURE_SCHEMA_ID,
     case: { id: 'local-case', input: { question: 'Capital?' }, expected: 'Paris' },
     expected_pass: expectedPass,
     output,
     trace: {
-      schema: 'attest.trace/v1alpha1',
+      schema: 'attest.trace',
       trace_id: 'trace-local',
       spans: [
         {
@@ -199,7 +199,7 @@ const metricFixture = (output: unknown = { answer: 'Paris', score: 0.9 }, expect
   });
 
 const assertionMetric = (id: string): MetricResource => ({
-  schema: METRIC_RESOURCE_SCHEMA_VERSION,
+  schema: METRIC_RESOURCE_SCHEMA_ID,
   id,
   name: id,
   definition: {
@@ -219,7 +219,7 @@ afterEach(async () => {
   );
 });
 
-describe('CLI2.9 metric authoring and local tests', { timeout: 30_000 }, () => {
+describe('metric authoring and local tests', { timeout: 30_000 }, () => {
   it('authors every deterministic assertion through presets or complete assertion JSON', async () => {
     const root = await createProject();
     const commands: string[][] = [
@@ -362,7 +362,7 @@ describe('CLI2.9 metric authoring and local tests', { timeout: 30_000 }, () => {
     expect(guided.errors).toEqual([]);
     expect(guidedExit).toBe(0);
     expect(questions.at(-1)).toContain('Apply these changes? [y/N]');
-    expect(questions[1]).toContain('attest.metric-preset/v1');
+    expect(questions[1]).toContain('attest.metric-preset');
     expect(questions[1]).toContain('trace-capable fixture');
     expect(questions).toContain('Assertion evidence [output] (input|output|expected|trace): ');
     expect(questions).toContain(
@@ -426,7 +426,7 @@ describe('CLI2.9 metric authoring and local tests', { timeout: 30_000 }, () => {
     );
 
     const requested = JSON.stringify({
-      schema: COMMAND_REQUEST_SCHEMA_VERSION,
+      schema: COMMAND_REQUEST_SCHEMA_ID,
       command: 'metric.add',
       metric: assertionMetric('requested'),
     });
@@ -897,7 +897,7 @@ describe('CLI2.9 metric authoring and local tests', { timeout: 30_000 }, () => {
         },
         readStdin: () => Promise.resolve(''),
         request: {
-          schema: COMMAND_REQUEST_SCHEMA_VERSION,
+          schema: COMMAND_REQUEST_SCHEMA_ID,
           command: 'metric.add',
           metric: assertionMetric('rollback'),
         },
@@ -916,7 +916,7 @@ describe('CLI2.9 metric authoring and local tests', { timeout: 30_000 }, () => {
     });
     const requestPath = join(root, 'request.json');
     const request: Extract<CommandRequest, { command: 'metric.add' }> = {
-      schema: COMMAND_REQUEST_SCHEMA_VERSION,
+      schema: COMMAND_REQUEST_SCHEMA_ID,
       command: 'metric.add',
       metric: assertionMetric('requested'),
     };
@@ -967,7 +967,7 @@ describe('CLI2.9 metric authoring and local tests', { timeout: 30_000 }, () => {
       authToken: 'literal-camel-auth-secret',
     } as const;
     const unsafeHttp: MetricResource = {
-      schema: METRIC_RESOURCE_SCHEMA_VERSION,
+      schema: METRIC_RESOURCE_SCHEMA_ID,
       id: 'unsafe-http',
       name: 'Unsafe HTTP',
       definition: {
@@ -1000,7 +1000,7 @@ describe('CLI2.9 metric authoring and local tests', { timeout: 30_000 }, () => {
       root,
       ['metric', 'add', '--from-json', '-'],
       JSON.stringify({
-        schema: COMMAND_REQUEST_SCHEMA_VERSION,
+        schema: COMMAND_REQUEST_SCHEMA_ID,
         command: 'metric.add',
         metric: {
           ...unsafeHttp,
@@ -1020,10 +1020,10 @@ describe('CLI2.9 metric authoring and local tests', { timeout: 30_000 }, () => {
       root,
       ['metric', 'add', '--from-json', '-'],
       JSON.stringify({
-        schema: COMMAND_REQUEST_SCHEMA_VERSION,
+        schema: COMMAND_REQUEST_SCHEMA_ID,
         command: 'metric.add',
         metric: {
-          schema: METRIC_RESOURCE_SCHEMA_VERSION,
+          schema: METRIC_RESOURCE_SCHEMA_ID,
           id: 'exec-secret',
           name: 'Exec secret',
           definition: {
@@ -1064,7 +1064,7 @@ describe('CLI2.9 metric authoring and local tests', { timeout: 30_000 }, () => {
       }
     ).command;
     expect(command.path).toEqual(['metric', 'add']);
-    expect(command.request_schema).toBe(COMMAND_REQUEST_SCHEMA_VERSION);
+    expect(command.request_schema).toBe(COMMAND_REQUEST_SCHEMA_ID);
     expect(command.options.map(({ name }) => name)).toEqual(
       expect.arrayContaining(['from-json', 'preset']),
     );
@@ -1112,11 +1112,11 @@ describe('CLI2.9 metric authoring and local tests', { timeout: 30_000 }, () => {
         error: { code: 'cli_usage', path: `metric.${removed}` },
       });
     }
-    expect(
-      (await runJson(root, ['schema', 'print', METRIC_TEST_FIXTURE_SCHEMA_VERSION])).exitCode,
-    ).toBe(0);
-    expect(
-      (await runJson(root, ['schema', 'print', COMMAND_REQUEST_SCHEMA_VERSION])).output,
-    ).toContain('metric.test');
+    expect((await runJson(root, ['schema', 'print', METRIC_TEST_FIXTURE_SCHEMA_ID])).exitCode).toBe(
+      0,
+    );
+    expect((await runJson(root, ['schema', 'print', COMMAND_REQUEST_SCHEMA_ID])).output).toContain(
+      'metric.test',
+    );
   });
 });

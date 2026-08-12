@@ -1,5 +1,5 @@
 import {
-  CLI_ERROR_CATALOG_SCHEMA_VERSION,
+  CLI_ERROR_CATALOG_SCHEMA_ID,
   cliErrorCatalogSchema,
   type CliErrorCatalog,
   type CliErrorDefinition,
@@ -205,7 +205,7 @@ const getCliErrorDefinition = (code: string): CliErrorDefinition | undefined =>
 /** Builds and validates the deterministically ordered public CLI error registry. */
 const createCliErrorCatalog = (): CliErrorCatalog =>
   cliErrorCatalogSchema.parse({
-    schema: CLI_ERROR_CATALOG_SCHEMA_VERSION,
+    schema: CLI_ERROR_CATALOG_SCHEMA_ID,
     errors: CLI_ERROR_DEFINITIONS,
   });
 

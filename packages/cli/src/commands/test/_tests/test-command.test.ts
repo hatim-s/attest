@@ -3,8 +3,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import {
-  COMMAND_REQUEST_SCHEMA_VERSION,
-  TEST_RESOURCE_SCHEMA_VERSION,
+  COMMAND_REQUEST_SCHEMA_ID,
+  TEST_RESOURCE_SCHEMA_ID,
   cliResultSchema,
   type CommandRequest,
   type DatasetResource,
@@ -12,26 +12,26 @@ import {
 } from '@attest/contracts';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { serializeCliError } from '../../errors.js';
-import { hashCanonicalJson } from '../../project/canonical-project.js';
-import { loadProject } from '../../project/load-project.js';
+import { serializeCliError } from '../../../errors/index.js';
+import { hashCanonicalJson } from '../../../project/canonical-project.js';
+import { loadProject } from '../../../project/load-project.js';
 import {
   fixtureAgent,
   candidateFromLoadedProject,
   writeFixtureProject,
-} from '../../project/transaction/project-transaction.test-fixture.js';
-import { prepareProjectCandidate } from '../../project/transaction/candidate-project.js';
-import { prepareTransaction } from '../../project/transaction/transaction-journal.js';
-import { createFileChanges } from '../../project/transaction/transactional-writer.js';
-import { runCli, type CliIo } from '../../run-cli.js';
-import { runConfirmedDatasetImport } from './register-test-commands.js';
-import { runTestMutationCommand } from './test-command.js';
-import { validateCommandRequest } from './test-command-input.js';
+} from '../../../project/transaction/_tests/support/project-transaction.js';
+import { prepareProjectCandidate } from '../../../project/transaction/candidate-project.js';
+import { prepareTransaction } from '../../../project/transaction/transaction-journal.js';
+import { createFileChanges } from '../../../project/transaction/transactional-writer.js';
+import { runCli, type CliIo } from '../../../run-cli.js';
+import { runConfirmedDatasetImport } from '../register-test-commands.js';
+import { runTestMutationCommand } from '../test-command.js';
+import { validateCommandRequest } from '../test-command-input.js';
 
 const temporaryDirectories: string[] = [];
 
 const createProject = async (): Promise<string> => {
-  const root = await mkdtemp(join(tmpdir(), 'attest-cli2-test-authoring-'));
+  const root = await mkdtemp(join(tmpdir(), 'attest-test-authoring-'));
   temporaryDirectories.push(root);
   await writeFixtureProject(root);
   return root;
@@ -109,10 +109,10 @@ const snapshotProject = async (root: string): Promise<Record<string, string>> =>
 };
 
 const addTestRequest = (id: string): Extract<CommandRequest, { command: 'test.add' }> => ({
-  schema: COMMAND_REQUEST_SCHEMA_VERSION,
+  schema: COMMAND_REQUEST_SCHEMA_ID,
   command: 'test.add',
   test: {
-    schema: TEST_RESOURCE_SCHEMA_VERSION,
+    schema: TEST_RESOURCE_SCHEMA_ID,
     id,
     name: id,
     agent_id: fixtureAgent.id,
@@ -128,7 +128,7 @@ afterEach(async () => {
   );
 });
 
-describe('CLI2.7/CLI2.8 test, case, dataset, and import authoring', { timeout: 20_000 }, () => {
+describe('CLI test, case, dataset, and import authoring', { timeout: 20_000 }, () => {
   it('supports canonical test and direct-case happy paths in human and JSON modes', async () => {
     const root = await createProject();
     expect((await runJson(root, ['test', 'add', 'smoke', '--agent', 'support'])).exitCode).toBe(0);
@@ -162,11 +162,11 @@ describe('CLI2.7/CLI2.8 test, case, dataset, and import authoring', { timeout: 2
     expect(
       (await runJson(root, ['test', 'case', 'rename', 'smoke', 'ping', 'pong'])).exitCode,
     ).toBe(0);
-    expect((await runJson(root, ['test', 'rename', 'smoke', 'smoke-v2'])).exitCode).toBe(0);
+    expect((await runJson(root, ['test', 'rename', 'smoke', 'smoke-renamed'])).exitCode).toBe(0);
     expect(
-      (await runJson(root, ['test', 'case', 'remove', 'smoke-v2', 'pong', '--yes'])).exitCode,
+      (await runJson(root, ['test', 'case', 'remove', 'smoke-renamed', 'pong', '--yes'])).exitCode,
     ).toBe(0);
-    expect((await runJson(root, ['test', 'remove', 'smoke-v2', '--yes'])).exitCode).toBe(0);
+    expect((await runJson(root, ['test', 'remove', 'smoke-renamed', '--yes'])).exitCode).toBe(0);
     expect((await loadProject({ project: root })).tests.map(({ id }) => id)).toEqual(['refund']);
   });
 
@@ -193,13 +193,13 @@ describe('CLI2.7/CLI2.8 test, case, dataset, and import authoring', { timeout: 2
       directId,
     );
 
-    await runJson(root, ['test', 'dataset', 'rename', 'native', 'native-v2']);
+    await runJson(root, ['test', 'dataset', 'rename', 'native', 'native-renamed']);
     loaded = await loadProject({ project: root });
-    expect(loaded.datasets.find(({ metadata }) => metadata.id === 'native-v2')?.cases[0]?.id).toBe(
-      directId,
-    );
+    expect(
+      loaded.datasets.find(({ metadata }) => metadata.id === 'native-renamed')?.cases[0]?.id,
+    ).toBe(directId);
     expect(loaded.tests.find(({ id }) => id === 'dataset-owner')?.datasets[0]?.dataset_id).toBe(
-      'native-v2',
+      'native-renamed',
     );
   });
 
@@ -334,7 +334,7 @@ describe('CLI2.7/CLI2.8 test, case, dataset, and import authoring', { timeout: 2
     expect(await snapshotProject(conflictRoot)).toEqual(conflictBefore);
   });
 
-  it('publishes versioned machine help and schema metadata for the tabular import surface', async () => {
+  it('publishes machine help and schema metadata for the tabular import surface', async () => {
     const root = await createProject();
     const help = await runJson(root, ['help', 'test', 'case', 'import']);
     expect(help.document).toMatchObject({
@@ -343,7 +343,7 @@ describe('CLI2.7/CLI2.8 test, case, dataset, and import authoring', { timeout: 2
       result: {
         command: {
           path: ['test', 'case', 'import'],
-          request_schema: COMMAND_REQUEST_SCHEMA_VERSION,
+          request_schema: COMMAND_REQUEST_SCHEMA_ID,
         },
       },
     });
@@ -373,9 +373,9 @@ describe('CLI2.7/CLI2.8 test, case, dataset, and import authoring', { timeout: 2
     expect(importHelp.options.find(({ name }) => name === 'on-conflict')).toMatchObject({
       default: 'error',
     });
-    expect(
-      importHelp.examples.some((example) => example.includes('attest.command-request/v2')),
-    ).toBe(true);
+    expect(importHelp.examples.some((example) => example.includes('attest.command-request'))).toBe(
+      true,
+    );
     const caseRequestExample = importHelp.examples.find((example) =>
       example.includes('test case import --from-json - --output json'),
     );
@@ -427,7 +427,7 @@ describe('CLI2.7/CLI2.8 test, case, dataset, and import authoring', { timeout: 2
       result: {
         command: {
           path: ['test', 'dataset', 'add'],
-          request_schema: COMMAND_REQUEST_SCHEMA_VERSION,
+          request_schema: COMMAND_REQUEST_SCHEMA_ID,
         },
       },
     });
@@ -437,7 +437,7 @@ describe('CLI2.7/CLI2.8 test, case, dataset, and import authoring', { timeout: 2
       document: { ok: false, error: { code: 'cli_usage' } },
     });
 
-    const schema = await runJson(root, ['schema', 'print', COMMAND_REQUEST_SCHEMA_VERSION]);
+    const schema = await runJson(root, ['schema', 'print', COMMAND_REQUEST_SCHEMA_ID]);
     expect(schema.document).toMatchObject({ ok: true, command: 'schema.print' });
     expect(schema.output).toContain('test.dataset.add');
     expect(schema.output).not.toContain('test.dataset.create');
@@ -939,7 +939,7 @@ describe('CLI2.7/CLI2.8 test, case, dataset, and import authoring', { timeout: 2
     ).toMatchObject({ ok: true, result: { imported_case_count: 2 } });
 
     const mappedRequest = {
-      schema: COMMAND_REQUEST_SCHEMA_VERSION,
+      schema: COMMAND_REQUEST_SCHEMA_ID,
       command: 'test.case.import',
       test_id: 'stdin-test',
       source: '-',
@@ -1176,7 +1176,7 @@ describe('CLI2.7/CLI2.8 test, case, dataset, and import authoring', { timeout: 2
     const source = join(root, 'race.jsonl');
     await writeFile(source, '{"id":"race-case","input":"must-not-publish"}\n');
     const request = validateCommandRequest('test.dataset.import', {
-      schema: COMMAND_REQUEST_SCHEMA_VERSION,
+      schema: COMMAND_REQUEST_SCHEMA_ID,
       command: 'test.dataset.import',
       test_id: 'race-owner',
       source,
@@ -1427,14 +1427,14 @@ describe('CLI2.7/CLI2.8 test, case, dataset, and import authoring', { timeout: 2
     const root = await createProject();
     const before = await snapshotProject(root);
     const emptyDataset = {
-      schema: 'attest.dataset/v2',
-      case_schema: 'attest.case/v2',
+      schema: 'attest.dataset',
+      case_schema: 'attest.case',
       id: 'new-data',
       name: 'New data',
       case_count: 0,
     };
     const base = {
-      schema: COMMAND_REQUEST_SCHEMA_VERSION,
+      schema: COMMAND_REQUEST_SCHEMA_ID,
       command: 'test.dataset.add',
       test_id: 'refund',
     };

@@ -16,29 +16,32 @@ import { cliResultSchema } from '@attest/contracts';
 import { openStore } from '@attest/core';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { runCli, type CliIo } from '../../run-cli.js';
-import { loadProject } from '../../project/load-project.js';
-import { prepareProjectCandidate } from '../../project/transaction/candidate-project.js';
+import { runCli, type CliIo } from '../../../run-cli.js';
+import { loadProject } from '../../../project/load-project.js';
+import { prepareProjectCandidate } from '../../../project/transaction/candidate-project.js';
 import {
   candidateFromLoadedProject,
   writeFixtureProject,
-} from '../../project/transaction/project-transaction.test-fixture.js';
-import { acquireProjectLock, releaseProjectLock } from '../../project/transaction/project-lock.js';
-import { prepareTransaction } from '../../project/transaction/transaction-journal.js';
+} from '../../../project/transaction/_tests/support/project-transaction.js';
+import {
+  acquireProjectLock,
+  releaseProjectLock,
+} from '../../../project/transaction/project-lock.js';
+import { prepareTransaction } from '../../../project/transaction/transaction-journal.js';
 import {
   applyProjectMutation,
   createFileChanges,
   publishPreparedTransaction,
-} from '../../project/transaction/transactional-writer.js';
-import { withReadonlyRunStore } from '../run-store/readonly-run-store.js';
-import { removeRunStoreSnapshot } from '../run-store/run-store-snapshot.js';
-import { runProjectInitCommand, type ProjectInitFileStep } from './project-init-command.js';
+} from '../../../project/transaction/transactional-writer.js';
+import { withReadonlyRunStore } from '../../run-store/readonly-run-store.js';
+import { removeRunStoreSnapshot } from '../../run-store/run-store-snapshot.js';
+import { runProjectInitCommand, type ProjectInitFileStep } from '../project-init-command.js';
 
 const FIXED_PROJECT_ID = '01ARZ3NDEKTSV4RRFFQ69G5FAV';
 const temporaryDirectories: string[] = [];
 
 const createTemporaryDirectory = async (): Promise<string> => {
-  const directory = await mkdtemp(join(tmpdir(), 'attest-cli2-project-'));
+  const directory = await mkdtemp(join(tmpdir(), 'attest-project-'));
   temporaryDirectories.push(directory);
   return directory;
 };
@@ -80,8 +83,8 @@ afterEach(async () => {
   );
 });
 
-describe('CLI2.5 project shell', () => {
-  it('initializes, shows, validates, and deterministically lists an empty v2 project', async () => {
+describe('project shell', () => {
+  it('initializes, shows, validates, and deterministically lists an empty project', async () => {
     const parent = await createTemporaryDirectory();
     const initialized = collectIo();
 
@@ -168,7 +171,7 @@ describe('CLI2.5 project shell', () => {
   it('accepts a complete project.init request from stdin and preserves the init alias', async () => {
     const parent = await createTemporaryDirectory();
     const request = JSON.stringify({
-      schema: 'attest.command-request/v2',
+      schema: 'attest.command-request',
       command: 'project.init',
       directory: 'stdin-project',
       name: 'Stdin Project',
@@ -365,7 +368,7 @@ describe('CLI2.5 project shell', () => {
     await writeFile(
       requestPath,
       JSON.stringify({
-        schema: 'attest.command-request/v2',
+        schema: 'attest.command-request',
         command: 'project.init',
         directory: 'request-project',
         name: 'Request Project',
@@ -579,7 +582,7 @@ describe('CLI2.5 project shell', () => {
     await mkdir(join(root, '.attest'));
     const store = await openStore(storePath);
     const run = await store.runs.createRun({
-      configVersion: 'v2',
+      schemaId: 'attest.project',
       configHash: 'safe-hash',
       configJson: '{"secret":"must-not-render"}',
     });
@@ -649,7 +652,7 @@ describe('CLI2.5 project shell', () => {
     const writer = await openStore(storePath);
     try {
       const run = await writer.runs.createRun({
-        configVersion: 'v2',
+        schemaId: 'attest.project',
         configHash: 'live-wal',
         configJson: '{}',
       });
@@ -684,7 +687,7 @@ describe('CLI2.5 project shell', () => {
     await mkdir(storeDirectory);
     const sourceWriter = await openStore(storePath);
     const sourceRun = await sourceWriter.runs.createRun({
-      configVersion: 'v2',
+      schemaId: 'attest.project',
       configHash: 'anchored-source',
       configJson: '{}',
     });
@@ -694,7 +697,7 @@ describe('CLI2.5 project shell', () => {
     const outsidePath = join(outsideDirectory, 'outside.db');
     const outsideWriter = await openStore(outsidePath);
     const outsideRun = await outsideWriter.runs.createRun({
-      configVersion: 'v2',
+      schemaId: 'attest.project',
       configHash: 'outside-source',
       configJson: '{}',
     });
@@ -731,7 +734,7 @@ describe('CLI2.5 project shell', () => {
     await mkdir(storeDirectory);
     const sourceWriter = await openStore(join(storeDirectory, 'runs.db'));
     await sourceWriter.runs.createRun({
-      configVersion: 'v2',
+      schemaId: 'attest.project',
       configHash: 'intended-source',
       configJson: '{}',
     });
@@ -740,7 +743,7 @@ describe('CLI2.5 project shell', () => {
     const outsideDirectory = await createTemporaryDirectory();
     const outsideWriter = await openStore(join(outsideDirectory, 'runs.db'));
     await outsideWriter.runs.createRun({
-      configVersion: 'v2',
+      schemaId: 'attest.project',
       configHash: 'outside-source',
       configJson: '{}',
     });
@@ -783,7 +786,7 @@ describe('CLI2.5 project shell', () => {
       await mkdir(storeDirectory);
       const writer = await openStore(join(storeDirectory, 'runs.db'));
       await writer.runs.createRun({
-        configVersion: 'v2',
+        schemaId: 'attest.project',
         configHash: 'cleanup-source',
         configJson: '{}',
       });

@@ -8,7 +8,7 @@ import {
   captureRunStoreSnapshot,
   removeRunStoreSnapshot,
   SnapshotChangedError,
-} from './run-store-snapshot.js';
+} from '../run-store-snapshot.js';
 
 it('removes copied data and preserves the first failure when WAL cleanup fails', async () => {
   const sourceDirectory = await mkdtemp(join(tmpdir(), 'attest-snapshot-cleanup-'));

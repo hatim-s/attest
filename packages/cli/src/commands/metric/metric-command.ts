@@ -1,6 +1,6 @@
 import { constants, type BigIntStats } from 'node:fs';
 import { lstat, open, realpath, type FileHandle } from 'node:fs/promises';
-import { isAbsolute, relative, resolve, sep } from 'node:path';
+import { resolve } from 'node:path';
 
 import {
   type CommandRequest,
@@ -11,14 +11,15 @@ import {
 } from '@attest/contracts';
 import { evaluateMetrics, type MetricContext, type MetricEvaluation } from '@attest/core';
 
-import { AttestCliError } from '../../errors.js';
+import { AttestCliError } from '../../errors/index.js';
 import { loadProject, type LoadedProject } from '../../project/load-project.js';
+import { isProjectPath } from '../../project/project-path.js';
 import {
-  applyProjectMutation,
   type PublishObserver,
   type SemanticProjectOperation,
 } from '../../project/transaction/index.js';
-import type { CommandResult } from '../command-result.js';
+import type { CommandResult } from '../shared/command-result.js';
+import { executeProjectMutation } from '../shared/project-mutation.js';
 import {
   createBaseEnvironment,
   readSecretReference,
@@ -249,34 +250,35 @@ const runMetricMutationCommand = async (
     renames: built.renames,
     warnings: built.warnings,
   };
-  const preview = await applyProjectMutation({ ...mutationOptions, dryRun: true });
   const destructive = options.request.command === 'metric.remove';
-  if (options.request.dry_run !== true && options.request.yes !== true) {
-    if (options.interactive && options.prompt !== undefined) {
-      const resourcePreview = destructive
-        ? `Remove metric ${built.metric.id}`
-        : JSON.stringify(redactMetricResource(built.metric), undefined, 2);
-      const answer = (
-        await options.prompt(
-          `${resourcePreview}\nSemantic diff:\n${renderOperations(preview.diff.operations)}\nApply these changes? [y/N]: `,
+  const mutation = await executeProjectMutation({
+    dryRun: options.request.dry_run === true,
+    mutation: mutationOptions,
+    publishObserver: options.publishObserver,
+    confirm: async (preview) => {
+      if (options.request.yes === true) return;
+      if (options.interactive && options.prompt !== undefined) {
+        const resourcePreview = destructive
+          ? `Remove metric ${built.metric.id}`
+          : JSON.stringify(redactMetricResource(built.metric), undefined, 2);
+        const answer = (
+          await options.prompt(
+            `${resourcePreview}\nSemantic diff:\n${renderOperations(preview.diff.operations)}\nApply these changes? [y/N]: `,
+          )
         )
-      )
-        .trim()
-        .toLowerCase();
-      if (answer !== 'y' && answer !== 'yes') {
-        throw new AttestCliError('cancelled', 'Metric mutation was not confirmed.');
+          .trim()
+          .toLowerCase();
+        if (answer !== 'y' && answer !== 'yes') {
+          throw new AttestCliError('cancelled', 'Metric mutation was not confirmed.');
+        }
+      } else if (destructive) {
+        throw new AttestCliError('cli_missing_input', 'Metric removal requires confirmation.', {
+          path: '--yes',
+          hint: 'Pass --yes, set `yes: true`, or preview with --dry-run.',
+        });
       }
-    } else if (destructive) {
-      throw new AttestCliError('cli_missing_input', 'Metric removal requires confirmation.', {
-        path: '--yes',
-        hint: 'Pass --yes, set `yes: true`, or preview with --dry-run.',
-      });
-    }
-  }
-  const mutation =
-    options.request.dry_run === true
-      ? preview
-      : await applyProjectMutation(mutationOptions, { publishObserver: options.publishObserver });
+    },
+  });
   const dryRun = options.request.dry_run === true;
   return {
     human: [
@@ -302,14 +304,6 @@ const runMetricMutationCommand = async (
   };
 };
 
-const isContainedPath = (root: string, candidate: string): boolean => {
-  const pathFromRoot = relative(root, candidate);
-  return (
-    pathFromRoot === '' ||
-    (!isAbsolute(pathFromRoot) && pathFromRoot !== '..' && !pathFromRoot.startsWith(`..${sep}`))
-  );
-};
-
 type AnchoredMetricDirectory = {
   handle: FileHandle;
   identity: BigIntStats;
@@ -329,7 +323,7 @@ const openMetricDirectory = async (
 ): Promise<AnchoredMetricDirectory> => {
   const resolvedRoot = await realpath(projectRoot);
   const candidate = resolve(resolvedRoot, configuredPath);
-  if (!isContainedPath(resolvedRoot, candidate)) throw unsafeMetricDirectory(configuredPath);
+  if (!isProjectPath(resolvedRoot, candidate)) throw unsafeMetricDirectory(configuredPath);
   let handle: FileHandle | undefined;
   try {
     handle = await open(candidate, constants.O_RDONLY | constants.O_NOFOLLOW);
@@ -343,7 +337,7 @@ const openMetricDirectory = async (
       pathIdentity.isSymbolicLink() ||
       identity.dev !== pathIdentity.dev ||
       identity.ino !== pathIdentity.ino ||
-      !isContainedPath(resolvedRoot, resolvedPath)
+      !isProjectPath(resolvedRoot, resolvedPath)
     ) {
       throw unsafeMetricDirectory(configuredPath);
     }

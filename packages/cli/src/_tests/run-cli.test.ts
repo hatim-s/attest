@@ -6,7 +6,7 @@ import { cliErrorCatalogSchema, cliResultSchema } from '@attest/contracts';
 import { openStore } from '@attest/core';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { runCli } from './run-cli.js';
+import { runCli } from '../run-cli.js';
 
 const temporaryDirectories: string[] = [];
 
@@ -55,7 +55,7 @@ describe('runCli', () => {
         command: {
           path: ['trace', 'convert'],
           name: 'convert',
-          summary: 'Convert an OTLP/HTTP JSON export to attest.trace/v1alpha1 JSON.',
+          summary: 'Convert an OTLP/HTTP JSON export to attest.trace JSON.',
           usage: 'attest trace convert [options] <input>',
           arguments: [
             {
@@ -109,7 +109,6 @@ describe('runCli', () => {
           subcommands: [],
           aliases: [],
           alias_for: null,
-          deprecated: null,
           request_schema: null,
           examples: [],
           constraints: [],
@@ -188,7 +187,7 @@ describe('runCli', () => {
     expect(exitCode).toBe(2);
   });
 
-  it('returns an actionable v2 project discovery error', async () => {
+  it('returns an actionable project discovery error', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'attest-cli-command-'));
     temporaryDirectories.push(directory);
     const errors: string[] = [];
@@ -268,23 +267,9 @@ describe('runCli', () => {
     });
   });
 
-  it('does not discover a v1 config or expose the removed top-level run alias', async () => {
+  it('does not expose the removed top-level run alias', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'attest-cli-command-'));
     temporaryDirectories.push(directory);
-    const agentPath = join(directory, 'agent.mjs');
-    await writeFile(
-      agentPath,
-      "let s='';process.stdin.setEncoding('utf8');for await(const c of process.stdin)s+=c;const r=JSON.parse(s);process.stdout.write(JSON.stringify({protocol:'attest.agent/v1alpha1',output:r.input}));\n",
-    );
-    await writeFile(
-      join(directory, 'attest.config.json'),
-      JSON.stringify({
-        config_version: 1,
-        agent: { type: 'cli', command: [process.execPath, './agent.mjs'] },
-        suites: [{ name: 'smoke', metrics: [], cases: [{ id: 'one', input: 'ok' }] }],
-        metrics: [],
-      }),
-    );
     const output: string[] = [];
     const errors: string[] = [];
 
@@ -301,64 +286,20 @@ describe('runCli', () => {
     });
   });
 
-  it('renders the same breaking-v2 rejection in human and JSON modes without writes', async () => {
-    const directory = await mkdtemp(join(tmpdir(), 'attest-cli-v1-rejection-'));
-    temporaryDirectories.push(directory);
-    await writeFile(join(directory, 'attest.config.yml'), 'config_version: 1\n');
-    const humanOutput: string[] = [];
-    const humanErrors: string[] = [];
-
-    expect(
-      await runCli(['eval', 'run', '--all'], {
-        workingDirectory: directory,
-        io: {
-          output: (message) => humanOutput.push(message),
-          error: (message) => humanErrors.push(message),
-        },
-      }),
-    ).toBe(1);
-    expect(humanOutput).toEqual(['Result: ERROR (exit 1)']);
-    expect(humanErrors.join('\n')).toBe(
-      'project_not_found: Attest v2 does not execute v1 configuration or project inputs.\n' +
-        'Path: attest.config.yml\n' +
-        'Hint: Create a v2 project with `attest project init`; use `attest eval run` as the only execution command.',
-    );
-
-    const jsonOutput: string[] = [];
-    expect(
-      await runCli(['eval', 'run', '--all', '--output', 'json'], {
-        workingDirectory: directory,
-        io: { output: (message) => jsonOutput.push(message), error: () => undefined },
-      }),
-    ).toBe(1);
-    expect(JSON.parse(jsonOutput[0] ?? '{}')).toMatchObject({
-      ok: false,
-      command: 'eval.run',
-      error: {
-        code: 'project_not_found',
-        message: 'Attest v2 does not execute v1 configuration or project inputs.',
-        hint: 'Create a v2 project with `attest project init`; use `attest eval run` as the only execution command.',
-      },
-    });
-    await expect(readFile(join(directory, '.attest', 'runs.db'), 'utf8')).rejects.toMatchObject({
-      code: 'ENOENT',
-    });
-  });
-
-  it('keeps legacy output options scoped to their established artifact and format semantics', async () => {
+  it('keeps command output options scoped to their artifact and format semantics', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'attest-cli-output-'));
     temporaryDirectories.push(directory);
     await mkdir(join(directory, '.attest'));
     const storePath = join(directory, '.attest', 'runs.db');
     const store = await openStore(storePath);
     const first = await store.runs.createRun({
-      configVersion: '1',
+      schemaId: 'attest.project',
       configHash: 'first',
       configJson: '{}',
     });
     await store.runs.finalizeRun(first.id, 'completed');
     const second = await store.runs.createRun({
-      configVersion: '1',
+      schemaId: 'attest.project',
       configHash: 'second',
       configJson: '{}',
     });
@@ -426,14 +367,14 @@ describe('runCli', () => {
     if (!listed.ok) throw new Error('Expected schema.list success.');
     expect(listed.command).toBe('schema.list');
     const listResult = listed.result as { items: { file: string; id: string }[] };
-    expect(listResult.items.find(({ id }) => id === 'attest.command-request/v2')).toEqual({
-      file: 'command-request.v2.json',
-      id: 'attest.command-request/v2',
+    expect(listResult.items.find(({ id }) => id === 'attest.command-request')).toEqual({
+      file: 'command-request.json',
+      id: 'attest.command-request',
     });
 
     const printOutput: string[] = [];
     expect(
-      await runCli(['schema', 'print', 'attest.command-request/v2', '--output', 'json'], {
+      await runCli(['schema', 'print', 'attest.command-request', '--output', 'json'], {
         io: { output: (message) => printOutput.push(message), error: () => undefined },
       }),
     ).toBe(0);
@@ -441,14 +382,14 @@ describe('runCli', () => {
       ok: true,
       command: 'schema.print',
       result: {
-        file: 'command-request.v2.json',
-        id: 'attest.command-request/v2',
+        file: 'command-request.json',
+        id: 'attest.command-request',
         schema: { $schema: 'https://json-schema.org/draft/2020-12/schema' },
       },
     });
 
     const repeatedOutput: string[] = [];
-    await runCli(['schema', 'print', 'attest.command-request/v2', '--output', 'json'], {
+    await runCli(['schema', 'print', 'attest.command-request', '--output', 'json'], {
       io: { output: (message) => repeatedOutput.push(message), error: () => undefined },
     });
     expect(repeatedOutput).toEqual(printOutput);
@@ -465,7 +406,7 @@ describe('runCli', () => {
     });
   });
 
-  it('advertises positional v2 common options without changing legacy leaf semantics', async () => {
+  it('advertises positional common options without changing command-specific semantics', async () => {
     const output: string[] = [];
     await runCli(['help', '--output', 'json'], {
       io: { output: (message) => output.push(message), error: () => undefined },

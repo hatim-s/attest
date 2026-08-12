@@ -1,19 +1,19 @@
 import {
-  COMMAND_REQUEST_SCHEMA_VERSION,
+  COMMAND_REQUEST_SCHEMA_ID,
   CONTRACT_JSON_SCHEMAS,
-  METRIC_PRESET_SCHEMA_VERSION,
-  METRIC_TEST_FIXTURE_SCHEMA_VERSION,
+  METRIC_PRESET_SCHEMA_ID,
+  METRIC_TEST_FIXTURE_SCHEMA_ID,
   serializeContractSchema,
 } from '@attest/contracts';
 
-import { AttestCliError } from '../../errors.js';
+import { AttestCliError } from '../../errors/index.js';
 import type { JsonValue } from '../../project/canonical-project.js';
-import type { CommandResult } from '../command-result.js';
+import type { CommandResult } from '../shared/command-result.js';
 
 const schemaAliases = new Map<string, string>([
-  [COMMAND_REQUEST_SCHEMA_VERSION, 'command-request.v2.json'],
-  [METRIC_PRESET_SCHEMA_VERSION, 'metric-preset.v1.json'],
-  [METRIC_TEST_FIXTURE_SCHEMA_VERSION, 'metric-test-fixture.v1.json'],
+  [COMMAND_REQUEST_SCHEMA_ID, 'command-request.json'],
+  [METRIC_PRESET_SCHEMA_ID, 'metric-preset.json'],
+  [METRIC_TEST_FIXTURE_SCHEMA_ID, 'metric-test-fixture.json'],
 ]);
 
 const schemaIdForFile = (file: string): string =>

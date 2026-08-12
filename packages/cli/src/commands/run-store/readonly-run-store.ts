@@ -1,10 +1,11 @@
 import { constants, type BigIntStats } from 'node:fs';
 import { lstat, open, realpath, type FileHandle } from 'node:fs/promises';
-import { dirname, isAbsolute, join, relative, sep } from 'node:path';
+import { dirname, join } from 'node:path';
 
 import { openRunStoreSnapshot, StoreError, type RunStore } from '@attest/core';
 
-import { AttestCliError } from '../../errors.js';
+import { AttestCliError } from '../../errors/index.js';
+import { isProjectPath } from '../../project/project-path.js';
 import { captureCleanupFailure, runCleanupSteps, type CleanupFailure } from './cleanup.js';
 import {
   captureRunStoreSnapshot,
@@ -31,14 +32,6 @@ const getErrorCode = (error: unknown): string | undefined =>
   error instanceof Error && 'code' in error && typeof Reflect.get(error, 'code') === 'string'
     ? (Reflect.get(error, 'code') as string)
     : undefined;
-
-const isContainedPath = (root: string, candidate: string): boolean => {
-  const pathFromRoot = relative(root, candidate);
-  return (
-    pathFromRoot === '' ||
-    (!isAbsolute(pathFromRoot) && pathFromRoot !== '..' && !pathFromRoot.startsWith(`..${sep}`))
-  );
-};
 
 const unsafeStore = (path: string): AttestCliError =>
   new AttestCliError('project_read_failed', 'The project run store is not a safe file.', {
@@ -104,7 +97,7 @@ const withReadonlyRunStore = async <T>(
     throw toSafeStoreError(error, storePath);
   }
   if (
-    !isContainedPath(resolvedRoot, resolvedDirectory) ||
+    !isProjectPath(resolvedRoot, resolvedDirectory) ||
     dirname(resolvedStore) !== resolvedDirectory
   ) {
     throw unsafeStore(storePath);

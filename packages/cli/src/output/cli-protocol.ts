@@ -1,6 +1,6 @@
 import {
-  CLI_EVENT_SCHEMA_VERSION,
-  CLI_RESULT_SCHEMA_VERSION,
+  CLI_EVENT_SCHEMA_ID,
+  CLI_RESULT_SCHEMA_ID,
   cliEventSchema,
   cliResultSchema,
   type CliError,
@@ -26,7 +26,7 @@ const createCliSuccessResult = (
   options: CliResultOptions = {},
 ): CliSuccessResult =>
   cliResultSchema.parse({
-    schema: CLI_RESULT_SCHEMA_VERSION,
+    schema: CLI_RESULT_SCHEMA_ID,
     ok: true,
     command,
     project_hash_before: options.projectHashBefore ?? null,
@@ -38,7 +38,7 @@ const createCliSuccessResult = (
 /** Builds a validated failure document from an already sanitized CLI error. */
 const createCliFailureResult = (command: string, error: CliError): CliFailureResult =>
   cliResultSchema.parse({
-    schema: CLI_RESULT_SCHEMA_VERSION,
+    schema: CLI_RESULT_SCHEMA_ID,
     ok: false,
     command,
     error,
@@ -57,7 +57,7 @@ class CliEventSerializer {
   /** Serializes the next event as exactly one JSON document without a trailing newline. */
   serialize(event: string, data: JsonValue): string {
     const document: CliEvent = cliEventSchema.parse({
-      schema: CLI_EVENT_SCHEMA_VERSION,
+      schema: CLI_EVENT_SCHEMA_ID,
       sequence: this.sequence,
       time: this.clock().toISOString(),
       event,

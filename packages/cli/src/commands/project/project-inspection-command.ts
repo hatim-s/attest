@@ -1,5 +1,5 @@
 import type { JsonValue } from '../../project/canonical-project.js';
-import type { CommandResult } from '../command-result.js';
+import type { CommandResult } from '../shared/command-result.js';
 import { loadCommandProject } from './load-command-project.js';
 
 type ProjectInspectionOptions = {

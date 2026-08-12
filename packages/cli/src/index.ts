@@ -48,7 +48,7 @@ export {
   type AttestCliErrorOptions,
   type CliErrorCode,
   type SerializedCliFailure,
-} from './errors.js';
+} from './errors/index.js';
 export {
   CliEventSerializer,
   createCliFailureResult,

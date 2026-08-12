@@ -1,6 +1,6 @@
 import {
-  CASE_SCHEMA_VERSION,
-  DATASET_SCHEMA_VERSION,
+  CASE_SCHEMA_ID,
+  DATASET_SCHEMA_ID,
   type CliWarning,
   type CommandRequest,
   type ProjectResources,
@@ -9,16 +9,16 @@ import {
 } from '@attest/contracts';
 import type { ImportCollisionContext, TabularImportResult } from '@attest/core';
 
-import { AttestCliError } from '../../errors.js';
+import { AttestCliError } from '../../errors/index.js';
 import type { JsonValue } from '../../project/canonical-project.js';
 import { loadProject, type LoadedProject } from '../../project/load-project.js';
 import {
-  applyProjectMutation,
   type ProjectMutationRequest,
   type PublishObserver,
   type SemanticProjectOperation,
 } from '../../project/transaction/index.js';
-import type { CommandResult } from '../command-result.js';
+import type { CommandResult } from '../shared/command-result.js';
+import { executeProjectMutation } from '../shared/project-mutation.js';
 import { runListCommand } from '../list/list-command.js';
 import { loadCommandProject } from '../project/load-command-project.js';
 import { runShowCommand } from '../show/show-command.js';
@@ -316,8 +316,8 @@ const buildMutation = async (
       const importedDataset = {
         cases: imported.cases,
         metadata: {
-          schema: DATASET_SCHEMA_VERSION,
-          case_schema: CASE_SCHEMA_VERSION,
+          schema: DATASET_SCHEMA_ID,
+          case_schema: CASE_SCHEMA_ID,
           id: request.as,
           name: request.name ?? existing?.metadata.name ?? request.as,
           case_count: imported.cases.length,
@@ -442,18 +442,18 @@ const runTestMutationCommand = async (
           workingDirectory: options.workingDirectory,
         });
   const built = await buildMutation(loaded, options.request, options);
-  const mutation = await applyProjectMutation(
-    {
+  const mutation = await executeProjectMutation({
+    dryRun: options.request.dry_run === true,
+    mutation: {
       candidate: built.candidate,
-      dryRun: options.request.dry_run,
       // Always bind the candidate to its loaded base; an explicit caller hash is stricter still.
       expectedProjectHash: options.request.if_project_hash ?? loaded.projectHash,
       projectRoot: loaded.root,
       renames: built.renames,
       warnings: built.warnings?.map(({ message }) => message),
     },
-    { publishObserver: options.publishObserver },
-  );
+    publishObserver: options.publishObserver,
+  });
   const dryRun = options.request.dry_run === true;
   const verb = dryRun ? 'would update' : 'updated';
   const human = [

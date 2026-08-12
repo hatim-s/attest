@@ -2,14 +2,14 @@ import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 
 import {
-  COMMAND_REQUEST_SCHEMA_VERSION,
+  COMMAND_REQUEST_SCHEMA_ID,
   commandRequestSchema,
   type CommandRequest,
   type TestCase,
 } from '@attest/contracts';
 import { createContentCaseId } from '@attest/core';
 
-import { AttestCliError } from '../../errors.js';
+import { AttestCliError } from '../../errors/index.js';
 import type { JsonValue } from '../../project/canonical-project.js';
 
 type TestCaseInput = Omit<TestCase, 'id'> & { id?: string };
@@ -60,7 +60,7 @@ const readTextSource = async (options: ReadTextOptions): Promise<string> => {
   }
 };
 
-/** Parses one strict versioned mutation request for the expected command. */
+/** Parses one strict mutation request for the expected command. */
 const readCommandRequest = async <TCommand extends CommandRequest['command']>(
   command: TCommand,
   source: string,
@@ -73,7 +73,7 @@ const readCommandRequest = async <TCommand extends CommandRequest['command']>(
   } catch (error: unknown) {
     throw new AttestCliError('cli_usage', 'The command request is not valid JSON.', {
       path: '--from-json',
-      hint: `Provide one ${COMMAND_REQUEST_SCHEMA_VERSION} document.`,
+      hint: `Provide one ${COMMAND_REQUEST_SCHEMA_ID} document.`,
       cause: error,
     });
   }

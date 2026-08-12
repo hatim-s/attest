@@ -3,18 +3,18 @@ import { lstat, link, mkdir, open, readFile, realpath, rmdir, unlink } from 'nod
 import { basename, dirname, join, resolve } from 'node:path';
 
 import {
-  COMMAND_REQUEST_SCHEMA_VERSION,
-  PROJECT_SCHEMA_VERSION,
+  COMMAND_REQUEST_SCHEMA_ID,
+  PROJECT_SCHEMA_ID,
   commandRequestSchema,
   type CommandRequest,
   type ProjectResources,
 } from '@attest/contracts';
 
-import { AttestCliError } from '../../errors.js';
+import { AttestCliError } from '../../errors/index.js';
 import { hashCanonicalContent, type JsonValue } from '../../project/canonical-project.js';
 import { loadProject } from '../../project/load-project.js';
 import { prepareProjectCandidate } from '../../project/transaction/index.js';
-import type { CommandResult } from '../command-result.js';
+import type { CommandResult } from '../shared/command-result.js';
 
 const ULID_ALPHABET = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
 
@@ -129,7 +129,7 @@ const readProjectInitRequest = async (
   } catch (error: unknown) {
     throw new AttestCliError('cli_usage', 'The command request is not valid JSON.', {
       path: '--from-json',
-      hint: `Provide one ${COMMAND_REQUEST_SCHEMA_VERSION} document.`,
+      hint: `Provide one ${COMMAND_REQUEST_SCHEMA_ID} document.`,
       cause: error,
     });
   }
@@ -137,7 +137,7 @@ const readProjectInitRequest = async (
   if (!parsed.success) {
     throw new AttestCliError('cli_usage', 'The command request does not match its schema.', {
       path: '--from-json',
-      hint: `Provide one ${COMMAND_REQUEST_SCHEMA_VERSION} project.init document.`,
+      hint: `Provide one ${COMMAND_REQUEST_SCHEMA_ID} project.init document.`,
       details: { diagnostics: requestDiagnostics(parsed.error.issues) },
     });
   }
@@ -221,7 +221,7 @@ const emptyProject = (projectId: string, name: string): ProjectResources => ({
   datasets: [],
   metrics: [],
   project: {
-    schema: PROJECT_SCHEMA_VERSION,
+    schema: PROJECT_SCHEMA_ID,
     project_id: projectId,
     name,
     resources: { agents: [], datasets: [], metrics: [], tests: [] },
@@ -350,7 +350,7 @@ const rollbackPublishedManifest = async (
   }
 };
 
-/** Initializes one canonical v2 project from flags, stdin, or a guided TTY prompt. */
+/** Initializes one canonical project from flags, stdin, or a guided TTY prompt. */
 const runProjectInitCommand = async (
   options: ProjectInitCommandOptions,
 ): Promise<CommandResult> => {

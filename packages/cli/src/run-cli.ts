@@ -19,7 +19,7 @@ import {
   renderCliError,
   renderCliErrorCatalog,
   serializeCliError,
-} from './errors.js';
+} from './errors/index.js';
 import { createCliHelp, renderCliHelp, setCliCommandHelpMetadata } from './help/command-help.js';
 import { diffToJson, renderDiffSummary } from './output/render-output.js';
 import {
@@ -93,7 +93,7 @@ const parsePort = (value: string): number => {
   return port;
 };
 
-/** Distinguishes the common machine-output option from legacy artifact-path options. */
+/** Distinguishes the common machine-output option from command-specific artifact paths. */
 const acceptsGlobalCommonOption = (command: Command, name: string): boolean => {
   const option = command.options.find((candidate) => candidate.attributeName() === name);
   if (option === undefined) return false;
@@ -201,7 +201,7 @@ const createProgram = (
   const traceCommand = program.command('trace').description('Convert and inspect trace data.');
   traceCommand
     .command('convert')
-    .description('Convert an OTLP/HTTP JSON export to attest.trace/v1alpha1 JSON.')
+    .description('Convert an OTLP/HTTP JSON export to attest.trace JSON.')
     .argument('<input>', 'OTLP JSON input path')
     .option('--trace-id <trace-id>', 'trace id to select from a multi-trace export')
     .option('-o, --output <path>', 'Attest trace output path')

@@ -1,5 +1,5 @@
 import {
-  CLI_HELP_SCHEMA_VERSION,
+  CLI_HELP_SCHEMA_ID,
   cliHelpSchema,
   metricPresetSchema,
   type CliHelp,
@@ -19,7 +19,6 @@ type CliOptionHelpMetadata = {
 
 type CliCommandHelpMetadata = {
   aliasFor?: string;
-  deprecated?: string;
   examples?: readonly string[];
   constraints?: readonly string[];
   presets?: readonly MetricPreset[];
@@ -127,7 +126,6 @@ const toCommandHelp = (command: Command): CliHelp['command'] => {
       .map(toCommandHelp),
     aliases: command.aliases(),
     alias_for: metadata?.aliasFor ?? null,
-    deprecated: metadata?.deprecated ?? null,
     request_schema: metadata?.requestSchema ?? null,
     examples: [...(metadata?.examples ?? [])],
     constraints: [...(metadata?.constraints ?? [])],
@@ -140,7 +138,7 @@ const toCommandHelp = (command: Command): CliHelp['command'] => {
 /** Builds a validated machine-readable tree for the selected registered command path. */
 const createCliHelp = (program: Command, path: readonly string[] = []): CliHelp =>
   cliHelpSchema.parse({
-    schema: CLI_HELP_SCHEMA_VERSION,
+    schema: CLI_HELP_SCHEMA_ID,
     command: toCommandHelp(findCommand(program, path)),
   });
 
