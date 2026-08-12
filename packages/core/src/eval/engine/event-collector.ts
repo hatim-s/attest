@@ -1,4 +1,4 @@
-import { CLI_EVENT_SCHEMA_ID, type CliError, type EvalEvent } from '@attest/contracts';
+import { CLI_EVENT_SCHEMA_VERSION, type CliError, type EvalEvent } from '@attest/contracts';
 
 import type { EvalEventLimits, ExecuteEvalOptions } from '../types.js';
 import { safeErrorMessage } from './run-model.js';
@@ -20,7 +20,7 @@ const createEventCollector = (
   const emit = async (event: Omit<EvalEvent, 'schema' | 'sequence' | 'time'>): Promise<void> => {
     if (events.length >= limits.max_events) throw new Error('Eval event count cap was exceeded.');
     const completeEvent = {
-      schema: CLI_EVENT_SCHEMA_ID,
+      schema: CLI_EVENT_SCHEMA_VERSION,
       sequence: events.length,
       time: now(),
       ...event,
