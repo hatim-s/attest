@@ -1,10 +1,10 @@
 import {
-  AGENT_RESOURCE_SCHEMA_VERSION,
-  COMMAND_REQUEST_SCHEMA_VERSION,
-  DATASET_SCHEMA_VERSION,
-  METRIC_RESOURCE_SCHEMA_VERSION,
-  PROJECT_SCHEMA_VERSION,
-  TEST_RESOURCE_SCHEMA_VERSION,
+  AGENT_RESOURCE_SCHEMA_ID,
+  COMMAND_REQUEST_SCHEMA_ID,
+  DATASET_SCHEMA_ID,
+  METRIC_RESOURCE_SCHEMA_ID,
+  PROJECT_SCHEMA_ID,
+  TEST_RESOURCE_SCHEMA_ID,
   type AgentResource,
   type EvalRunRequest,
   type MetricResource,
@@ -14,14 +14,14 @@ import {
 } from '@attest/contracts';
 import { describe, expect, it } from 'vitest';
 
-import { AttestCliError } from '../../errors.js';
+import { AttestCliError } from '../../../errors/index.js';
 import {
   hashCanonicalJson,
   hashCanonicalJsonLines,
   type JsonValue,
-} from '../../project/canonical-project.js';
-import type { LoadedProject } from '../../project/load-project.js';
-import { resolveEvalRun } from './eval-resolver.js';
+} from '../../../project/canonical-project.js';
+import type { LoadedProject } from '../../../project/load-project.js';
+import { resolveEvalRun } from '../eval-resolver.js';
 
 const PROJECT_ID = '01ARZ3NDEKTSV4RRFFQ69G5FAB';
 const BASELINE_RUN_ID = '01ARZ3NDEKTSV4RRFFQ69G5FAA';
@@ -29,7 +29,7 @@ const BASELINE_RUN_ID = '01ARZ3NDEKTSV4RRFFQ69G5FAA';
 const canonicalHash = (value: unknown): string => hashCanonicalJson(value as JsonValue);
 
 const createAgent = (id: string): AgentResource => ({
-  schema: AGENT_RESOURCE_SCHEMA_VERSION,
+  schema: AGENT_RESOURCE_SCHEMA_ID,
   id,
   name: `${id} agent`,
   transport: { kind: 'native_cli', lifecycle: 'per_case', argv: ['node', 'agent.mjs'] },
@@ -37,7 +37,7 @@ const createAgent = (id: string): AgentResource => ({
 });
 
 const createMetric = (id: string): MetricResource => ({
-  schema: METRIC_RESOURCE_SCHEMA_VERSION,
+  schema: METRIC_RESOURCE_SCHEMA_ID,
   id,
   name: `${id} metric`,
   definition: { kind: 'judge', model: 'local/test', rubric: 'Be correct.', threshold: 0.5 },
@@ -59,7 +59,7 @@ const datasetCases = (): TestCase[] => [
 ];
 
 const createTest = (id: string, agentId: string, cases: TestCase[]): TestResource => ({
-  schema: TEST_RESOURCE_SCHEMA_VERSION,
+  schema: TEST_RESOURCE_SCHEMA_ID,
   id,
   name: `${id} test`,
   agent_id: agentId,
@@ -113,15 +113,15 @@ const refreshHashes = (project: LoadedProject): LoadedProject => {
   return project;
 };
 
-/** Builds an in-memory loaded v2 project so resolver tests perform no filesystem I/O. */
+/** Builds an in-memory loaded project so resolver tests perform no filesystem I/O. */
 const createProject = (): LoadedProject => {
   const agents = [createAgent('support'), createAgent('secondary')];
   const metrics = [createMetric('quality')];
   const datasets: LoadedProject['datasets'] = [
     {
       metadata: {
-        schema: DATASET_SCHEMA_VERSION,
-        case_schema: 'attest.case/v2',
+        schema: DATASET_SCHEMA_ID,
+        case_schema: 'attest.case',
         id: 'shared',
         name: 'Shared cases',
         case_count: 2,
@@ -136,25 +136,25 @@ const createProject = (): LoadedProject => {
     ]),
   ];
   const manifest: ProjectManifest = {
-    schema: PROJECT_SCHEMA_VERSION,
+    schema: PROJECT_SCHEMA_ID,
     project_id: PROJECT_ID,
     name: 'Resolver fixture',
     defaults: { concurrency: 6, eval_timeout_ms: 120_000 },
     resources: {
       agents: agents.map(({ id }) => ({
-        schema: AGENT_RESOURCE_SCHEMA_VERSION,
+        schema: AGENT_RESOURCE_SCHEMA_ID,
         id,
         path: `attest/agents/${id}.json`,
         content_hash: '0'.repeat(64),
       })),
       tests: tests.map(({ id }) => ({
-        schema: TEST_RESOURCE_SCHEMA_VERSION,
+        schema: TEST_RESOURCE_SCHEMA_ID,
         id,
         path: `attest/tests/${id}.json`,
         content_hash: '0'.repeat(64),
       })),
       datasets: datasets.map(({ metadata: { id } }) => ({
-        schema: DATASET_SCHEMA_VERSION,
+        schema: DATASET_SCHEMA_ID,
         id,
         data_path: `attest/datasets/${id}.jsonl`,
         data_content_hash: '0'.repeat(64),
@@ -162,7 +162,7 @@ const createProject = (): LoadedProject => {
         metadata_content_hash: '0'.repeat(64),
       })),
       metrics: metrics.map(({ id }) => ({
-        schema: METRIC_RESOURCE_SCHEMA_VERSION,
+        schema: METRIC_RESOURCE_SCHEMA_ID,
         id,
         path: `attest/metrics/${id}.json`,
         content_hash: '0'.repeat(64),
@@ -190,7 +190,7 @@ const createProject = (): LoadedProject => {
 
 const request = (fields: Partial<EvalRunRequest> = {}): EvalRunRequest =>
   ({
-    schema: COMMAND_REQUEST_SCHEMA_VERSION,
+    schema: COMMAND_REQUEST_SCHEMA_ID,
     command: 'eval.run',
     test_ids: ['alpha'],
     output: 'json',
@@ -211,7 +211,7 @@ const captureCliError = (operation: () => unknown): AttestCliError => {
   throw new Error('Expected resolver to throw an AttestCliError.');
 };
 
-describe('v2 eval resolver', () => {
+describe('eval resolver', () => {
   it('expands direct and dataset cases with stable configured indexes and selected hashes', () => {
     const project = createProject();
     const resolved = resolveEvalRun(project, request(), options);
@@ -269,7 +269,7 @@ describe('v2 eval resolver', () => {
   it('resolves all tests plus command, project, test, and built-in execution defaults', () => {
     const project = createProject();
     const allRequest = {
-      schema: COMMAND_REQUEST_SCHEMA_VERSION,
+      schema: COMMAND_REQUEST_SCHEMA_ID,
       command: 'eval.run',
       all: true,
       concurrency: 8,
@@ -402,7 +402,7 @@ describe('v2 eval resolver', () => {
     emptyProject.project.resources.tests = [];
     emptyProject.contentHashes = { ...emptyProject.contentHashes, tests: {} };
     const allRequest = {
-      schema: COMMAND_REQUEST_SCHEMA_VERSION,
+      schema: COMMAND_REQUEST_SCHEMA_ID,
       command: 'eval.run',
       all: true,
       output: 'json',
@@ -421,7 +421,7 @@ describe('v2 eval resolver', () => {
       resolveEvalRun(
         createProject(),
         {
-          schema: COMMAND_REQUEST_SCHEMA_VERSION,
+          schema: COMMAND_REQUEST_SCHEMA_ID,
           command: 'eval.run',
           output: 'json',
         } as EvalRunRequest,
@@ -468,26 +468,17 @@ describe('v2 eval resolver', () => {
     });
   });
 
-  it('explicitly rejects v1 project shapes and the removed run alias', () => {
-    const v1Project = {
-      config_version: 1,
-      suites: [],
-      projectHash: 'a'.repeat(64),
-    } as unknown as LoadedProject;
-    const v1Error = captureCliError(() => resolveEvalRun(v1Project, request(), options));
-    expect(v1Error.code).toBe('project_invalid');
-    expect(v1Error.message).toContain('v1 configs are not discovered');
-
-    const aliasRequest = {
-      schema: COMMAND_REQUEST_SCHEMA_VERSION,
+  it('rejects unknown command request variants', () => {
+    const unknownRequest = {
+      schema: COMMAND_REQUEST_SCHEMA_ID,
       command: 'run',
       test_ids: ['alpha'],
       output: 'json',
     } as unknown as EvalRunRequest;
-    const aliasError = captureCliError(() =>
-      resolveEvalRun(createProject(), aliasRequest, options),
+    const requestError = captureCliError(() =>
+      resolveEvalRun(createProject(), unknownRequest, options),
     );
-    expect(aliasError.code).toBe('cli_usage');
-    expect(aliasError.message).toContain('`attest run`');
+    expect(requestError.code).toBe('cli_usage');
+    expect(requestError.message).toBe('Expected a canonical `attest eval run` request.');
   });
 });

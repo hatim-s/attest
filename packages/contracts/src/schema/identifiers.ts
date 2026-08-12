@@ -1,5 +1,5 @@
 /** Identifies the agent invocation request and response envelopes. */
-const AGENT_PROTOCOL = 'attest.agent/v1alpha1' as const;
+const AGENT_PROTOCOL = 'attest.agent-invocation' as const;
 const CURRENT_AGENT_PROTOCOL = 'attest.agent-invocation' as const;
 const LEGACY_AGENT_PROTOCOL = 'attest.agent/v1alpha1' as const;
 
@@ -65,10 +65,10 @@ const WEBSOCKET_EVIDENCE_SCHEMA_ID = 'attest.websocket-evidence' as const;
 // Transitional identifiers keep downstream stack slices buildable. The final slice removes them.
 const AGENT_RESOURCE_SCHEMA_VERSION = 'attest.agent/v2' as const;
 const CASE_SCHEMA_VERSION = 'attest.case/v2' as const;
-const CLI_ERROR_CATALOG_SCHEMA_VERSION = 'attest.cli-errors/v1' as const;
-const CLI_EVENT_SCHEMA_VERSION = 'attest.cli-event/v1' as const;
-const CLI_HELP_SCHEMA_VERSION = 'attest.cli-help/v1' as const;
-const CLI_RESULT_SCHEMA_VERSION = 'attest.cli-result/v1' as const;
+const CLI_ERROR_CATALOG_SCHEMA_VERSION = CLI_ERROR_CATALOG_SCHEMA_ID;
+const CLI_EVENT_SCHEMA_VERSION = CLI_EVENT_SCHEMA_ID;
+const CLI_HELP_SCHEMA_VERSION = CLI_HELP_SCHEMA_ID;
+const CLI_RESULT_SCHEMA_VERSION = CLI_RESULT_SCHEMA_ID;
 const COMMAND_REQUEST_SCHEMA_VERSION = 'attest.command-request/v2' as const;
 const DATASET_SCHEMA_VERSION = 'attest.dataset/v2' as const;
 const EVAL_RUN_SCHEMA_VERSION = 'attest.eval-run/v1' as const;

@@ -8,12 +8,12 @@ import { fileURLToPath } from 'node:url';
 import { type AgentResource } from '@attest/contracts';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { loadProject } from '../../project/load-project.js';
-import { runCli, type CliIo } from '../../run-cli.js';
+import { loadProject } from '../../../project/load-project.js';
+import { runCli, type CliIo } from '../../../run-cli.js';
 
 const PTY_FIXTURE = fileURLToPath(new URL('./fixtures/pty-agent-command.py', import.meta.url));
-const CLI_PACKAGE_ROOT = fileURLToPath(new URL('../../../', import.meta.url));
-const CLI_BUILT = fileURLToPath(new URL('../../../dist/cli.js', import.meta.url));
+const CLI_PACKAGE_ROOT = fileURLToPath(new URL('../../../../', import.meta.url));
+const CLI_BUILT = fileURLToPath(new URL('../../../../dist/cli.js', import.meta.url));
 const execFileAsync = promisify(execFile);
 const temporaryDirectories: string[] = [];
 const webSocketFixtures: Array<{ close: () => Promise<void> }> = [];
@@ -48,7 +48,7 @@ const collectIo = (): { errors: string[]; io: CliIo; output: string[] } => {
   };
 };
 
-/** Creates an isolated v2 project through the same public CLI used by the assertions. */
+/** Creates an isolated project through the same public CLI used by the assertions. */
 const createProject = async (): Promise<string> => {
   const parent = await mkdtemp(join(tmpdir(), 'attest-websocket-cli-'));
   temporaryDirectories.push(parent);
@@ -88,7 +88,7 @@ const startLocalWebSocketFixture = async (): Promise<{
   url: string;
 }> => {
   const fixtureModuleUrl = new URL(
-    '../../../../core/src/runner/fixtures/websocket-fake-server.ts',
+    '../../../../../core/src/runner/_tests/fixtures/websocket-fake-server.ts',
     import.meta.url,
   ).href;
   const fixtureModule = (await import(fixtureModuleUrl)) as {
@@ -126,7 +126,7 @@ const canonicalTransport = (): Extract<AgentResource['transport'], { kind: 'webs
   framing: 'text_json',
   url: 'wss://agent.example/socket',
   headers: { Authorization: { from_env: 'ATTEST_WS_TOKEN' } },
-  subprotocol: 'attest.v1',
+  subprotocol: 'attest',
   request_template: { request_id: '{{request_id}}', request: '{{request}}' },
   request_id_pointer: '/request_id',
   acknowledgement_pointer: '/type',
@@ -144,7 +144,7 @@ const canonicalTransport = (): Extract<AgentResource['transport'], { kind: 'webs
 });
 
 const canonicalAgent = (id: string): AgentResource => ({
-  schema: 'attest.agent/v2',
+  schema: 'attest.agent',
   id,
   name: id,
   transport: canonicalTransport(),
@@ -161,7 +161,7 @@ afterEach(async () => {
   );
 });
 
-describe('CLI2.12 WebSocket agent UX', () => {
+describe('WebSocket agent UX', () => {
   it('normalizes flags, command JSON, imported JSON, and the wizard to one resource shape', async () => {
     const root = await createProject();
     process.env.ATTEST_WS_TOKEN = 'websocket-super-secret';
@@ -174,7 +174,7 @@ describe('CLI2.12 WebSocket agent UX', () => {
       '--header-env',
       'Authorization=ATTEST_WS_TOKEN',
       '--subprotocol',
-      'attest.v1',
+      'attest',
       '--websocket-lifecycle',
       'per_run',
       '--connection-mode',
@@ -222,7 +222,7 @@ describe('CLI2.12 WebSocket agent UX', () => {
     });
 
     const commandRequest = {
-      schema: 'attest.command-request/v2',
+      schema: 'attest.command-request',
       command: 'agent.add',
       agent: canonicalAgent('json'),
     };
@@ -262,7 +262,7 @@ describe('CLI2.12 WebSocket agent UX', () => {
         'Header environment references HEADER=ENV, comma-separated [none]: ',
         'Authorization=ATTEST_WS_TOKEN',
       ],
-      ['WebSocket subprotocol [none]: ', 'attest.v1'],
+      ['WebSocket subprotocol [none]: ', 'attest'],
       ['Request template JSON [{"request_id":"{{request_id}}","request":"{{request}}"}]: ', ''],
       ['Request id JSON Pointer [/request_id]: ', ''],
       ['Acknowledgement JSON Pointer [/type]: ', ''],
@@ -503,7 +503,7 @@ describe('CLI2.12 WebSocket agent UX', () => {
     const fixture = await startLocalWebSocketFixture();
     process.env.ATTEST_WS_TOKEN = 'websocket-probe-secret';
     const addRequest = {
-      schema: 'attest.command-request/v2',
+      schema: 'attest.command-request',
       command: 'agent.add',
       agent: {
         ...canonicalAgent('probe'),
@@ -543,7 +543,7 @@ describe('CLI2.12 WebSocket agent UX', () => {
     expect(flagProbe.output.join('')).not.toContain('websocket-probe-secret');
 
     const testRequest = {
-      schema: 'attest.command-request/v2',
+      schema: 'attest.command-request',
       command: 'agent.test',
       agent_id: 'probe',
       input: { question: 'ping' },

@@ -203,7 +203,7 @@ def guided_websocket_decline(
             b"Header environment references HEADER=ENV, comma-separated [none]: ",
             b"Authorization=ATTEST_PTY_WS_TOKEN\n",
         ),
-        (b"WebSocket subprotocol [none]: ", b"attest.v1\n"),
+        (b"WebSocket subprotocol [none]: ", b"attest\n"),
         (b"Request template JSON [", b"\n"),
         (b"Request id JSON Pointer [/request_id]: ", b"\n"),
         (b"Acknowledgement JSON Pointer [/type]: ", b"\n"),

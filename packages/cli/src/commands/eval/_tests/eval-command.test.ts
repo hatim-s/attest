@@ -6,9 +6,9 @@ import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 
 import {
-  CLI_EVENT_SCHEMA_VERSION,
-  CLI_RESULT_SCHEMA_VERSION,
-  COMMAND_REQUEST_SCHEMA_VERSION,
+  CLI_EVENT_SCHEMA_ID,
+  CLI_RESULT_SCHEMA_ID,
+  COMMAND_REQUEST_SCHEMA_ID,
   cliResultSchema,
   evalCancelResultSchema,
   evalEventStreamSchema,
@@ -19,15 +19,15 @@ import {
 import { Command } from 'commander';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { createCliHelp } from '../../help/command-help.js';
-import { getCliErrorDefinition } from '../../errors.js';
-import type { CliIo } from '../../run-cli.js';
+import { createCliHelp } from '../../../help/command-help.js';
+import { getCliErrorDefinition } from '../../../errors/index.js';
+import type { CliIo } from '../../../run-cli.js';
 import {
   registerEvalCommands,
   type EvalCommandServices,
   type RegisterEvalCommandsOptions,
-} from './eval-command.js';
-import { createEvalRunRequest } from './eval-request.js';
+} from '../eval-command.js';
+import { createEvalRunRequest } from '../eval-request.js';
 
 const RUN_ID = '01ARZ3NDEKTSV4RRFFQ69G5FAV';
 const BASELINE_ID = '01ARZ3NDEKTSV4RRFFQ69G5FAA';
@@ -69,7 +69,7 @@ const interaction = (
 
 const cancellationSuccess = () =>
   evalCancelResultSchema.parse({
-    schema: CLI_RESULT_SCHEMA_VERSION,
+    schema: CLI_RESULT_SCHEMA_ID,
     ok: true,
     command: 'eval.cancel',
     project_hash_before: null,
@@ -90,7 +90,7 @@ const completedEvents = (verdict: 'fail' | 'pass' = 'pass'): EvalEvent[] => {
   const exitCode = verdict === 'pass' ? 0 : 1;
   return evalEventStreamSchema.parse([
     {
-      schema: CLI_EVENT_SCHEMA_VERSION,
+      schema: CLI_EVENT_SCHEMA_ID,
       sequence: 0,
       time: TIME,
       event: 'run_started',
@@ -103,21 +103,21 @@ const completedEvents = (verdict: 'fail' | 'pass' = 'pass'): EvalEvent[] => {
       },
     },
     {
-      schema: CLI_EVENT_SCHEMA_VERSION,
+      schema: CLI_EVENT_SCHEMA_ID,
       sequence: 1,
       time: TIME,
       event: 'case_started',
       data: { run_id: RUN_ID, test_id: 'refund', case_id: 'basic', configured_index: 0 },
     },
     {
-      schema: CLI_EVENT_SCHEMA_VERSION,
+      schema: CLI_EVENT_SCHEMA_ID,
       sequence: 2,
       time: TIME,
       event: 'case_started',
       data: { run_id: RUN_ID, test_id: 'refund', case_id: 'delayed', configured_index: 1 },
     },
     {
-      schema: CLI_EVENT_SCHEMA_VERSION,
+      schema: CLI_EVENT_SCHEMA_ID,
       sequence: 3,
       time: TIME,
       event: 'case_completed',
@@ -132,7 +132,7 @@ const completedEvents = (verdict: 'fail' | 'pass' = 'pass'): EvalEvent[] => {
       },
     },
     {
-      schema: CLI_EVENT_SCHEMA_VERSION,
+      schema: CLI_EVENT_SCHEMA_ID,
       sequence: 4,
       time: TIME,
       event: 'case_completed',
@@ -147,21 +147,21 @@ const completedEvents = (verdict: 'fail' | 'pass' = 'pass'): EvalEvent[] => {
       },
     },
     {
-      schema: CLI_EVENT_SCHEMA_VERSION,
+      schema: CLI_EVENT_SCHEMA_ID,
       sequence: 5,
       time: TIME,
       event: 'run_completed',
       data: { run_id: RUN_ID, status: 'completed', summary },
     },
     {
-      schema: CLI_EVENT_SCHEMA_VERSION,
+      schema: CLI_EVENT_SCHEMA_ID,
       sequence: 6,
       time: TIME,
       event: 'result',
       data: {
         exit_code: exitCode,
         result: {
-          schema: CLI_RESULT_SCHEMA_VERSION,
+          schema: CLI_RESULT_SCHEMA_ID,
           ok: true,
           command: 'eval.run',
           project_hash_before: PROJECT_HASH,
@@ -189,7 +189,7 @@ const defaultServices = (): EvalCommandServices => ({
 const failedEvents = (): EvalEvent[] =>
   evalEventStreamSchema.parse([
     {
-      schema: CLI_EVENT_SCHEMA_VERSION,
+      schema: CLI_EVENT_SCHEMA_ID,
       sequence: 0,
       time: TIME,
       event: 'run_started',
@@ -202,7 +202,7 @@ const failedEvents = (): EvalEvent[] =>
       },
     },
     {
-      schema: CLI_EVENT_SCHEMA_VERSION,
+      schema: CLI_EVENT_SCHEMA_ID,
       sequence: 1,
       time: TIME,
       event: 'run_completed',
@@ -219,14 +219,14 @@ const failedEvents = (): EvalEvent[] =>
       },
     },
     {
-      schema: CLI_EVENT_SCHEMA_VERSION,
+      schema: CLI_EVENT_SCHEMA_ID,
       sequence: 2,
       time: TIME,
       event: 'result',
       data: {
         exit_code: 4,
         result: {
-          schema: CLI_RESULT_SCHEMA_VERSION,
+          schema: CLI_RESULT_SCHEMA_ID,
           ok: false,
           command: 'eval.run',
           error: {
@@ -309,7 +309,7 @@ describe('eval request normalization', () => {
     ]);
 
     expect(run.mock.calls[0]?.[0]).toEqual({
-      schema: COMMAND_REQUEST_SCHEMA_VERSION,
+      schema: COMMAND_REQUEST_SCHEMA_ID,
       command: 'eval.run',
       test_ids: ['refund', 'returns'],
       case_ids: ['basic', 'delayed'],
@@ -332,7 +332,7 @@ describe('eval request normalization', () => {
 
   it('normalizes a complete stdin JSON request without mixing flag values', async () => {
     const request: EvalRunRequest = {
-      schema: COMMAND_REQUEST_SCHEMA_VERSION,
+      schema: COMMAND_REQUEST_SCHEMA_ID,
       command: 'eval.run',
       all: true,
       concurrency: 3,
@@ -392,7 +392,7 @@ describe('eval request normalization', () => {
         },
       ),
     ).resolves.toEqual({
-      schema: COMMAND_REQUEST_SCHEMA_VERSION,
+      schema: COMMAND_REQUEST_SCHEMA_ID,
       command: 'eval.run',
       all: true,
       output: 'human',
@@ -476,7 +476,7 @@ describe('eval errors and no-write preflight', () => {
         readStdin: () =>
           Promise.resolve(
             JSON.stringify({
-              schema: COMMAND_REQUEST_SCHEMA_VERSION,
+              schema: COMMAND_REQUEST_SCHEMA_ID,
               command: 'eval.run',
               all: true,
               output: 'jsonl',
@@ -613,7 +613,7 @@ describe('eval cancellation command', () => {
 
     expect(cancel).toHaveBeenCalledWith(
       {
-        schema: COMMAND_REQUEST_SCHEMA_VERSION,
+        schema: COMMAND_REQUEST_SCHEMA_ID,
         command: 'eval.cancel',
         run_id: RUN_ID,
         output: 'json',
@@ -631,7 +631,7 @@ describe('eval cancellation command', () => {
     await writeFile(
       join(root, 'cancel.json'),
       JSON.stringify({
-        schema: COMMAND_REQUEST_SCHEMA_VERSION,
+        schema: COMMAND_REQUEST_SCHEMA_ID,
         command: 'eval.cancel',
         run_id: RUN_ID,
         output: 'human',
@@ -687,7 +687,7 @@ describe('eval command grammar and terminal behavior', () => {
     expect(harness.program.commands.some((command) => command.name() === 'run')).toBe(false);
     expect(help.command).toMatchObject({
       path: ['eval', 'run'],
-      request_schema: COMMAND_REQUEST_SCHEMA_VERSION,
+      request_schema: COMMAND_REQUEST_SCHEMA_ID,
       arguments: [{ name: 'test-id', variadic: true, required: false }],
     });
     expect(help.command.options.find(({ name }) => name === 'case')).toMatchObject({

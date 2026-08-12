@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { openStore } from '@attest/core';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { openEvalProjectStore } from './eval-project-path.js';
+import { openEvalProjectStore } from '../eval-project-path.js';
 
 const directories: string[] = [];
 
@@ -62,7 +62,7 @@ describe('openEvalProjectStore', () => {
       const run = await store.runs.createRun({
         configHash: 'sha256:boundary',
         configJson: '{}',
-        configVersion: 'attest.eval-run/v2',
+        schemaId: 'attest.eval-run',
       });
       runId = run.id;
       await store.runs.finalizeRun(run.id, 'completed');

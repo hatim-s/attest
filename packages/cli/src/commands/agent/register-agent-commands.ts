@@ -1,11 +1,21 @@
-import { COMMAND_REQUEST_SCHEMA_VERSION } from '@attest/contracts';
+import { COMMAND_REQUEST_SCHEMA_ID } from '@attest/contracts';
 import { Command, Option } from 'commander';
 
-import { AttestCliError } from '../../errors.js';
+import { AttestCliError } from '../../errors/index.js';
 import { setCliCommandHelpMetadata } from '../../help/command-help.js';
 import type { CliIo } from '../../run-cli.js';
-import { renderCommandResult } from '../command-result.js';
-import type { CliInteraction } from '../register-project-resource-commands.js';
+import { renderCommandResult } from '../shared/command-result.js';
+import {
+  addCommonOptions,
+  addMutationOptions,
+  collectOption as collect,
+  isInteractive,
+  mergeCommonOptions,
+  outputFormat,
+  type CommonCliOptions as CommonOptions,
+  type MutationCliOptions as MutationOptions,
+} from '../shared/cli-options.js';
+import type { CliInteraction } from '../shared/cli-interaction.js';
 import {
   runAgentAddCommand,
   runAgentImportCommand,
@@ -19,19 +29,6 @@ type RegisterAgentCommandsOptions = {
   io: CliIo;
   program: Command;
   workingDirectory: string;
-};
-
-type CommonOptions = {
-  nonInteractive?: boolean;
-  output?: 'human' | 'json';
-  project?: string;
-};
-
-type MutationOptions = CommonOptions & {
-  dryRun?: boolean;
-  fromJson?: string;
-  ifProjectHash?: string;
-  yes?: boolean;
 };
 
 type AddOptions = MutationOptions & {
@@ -117,11 +114,6 @@ type TestOptions = CommonOptions & {
   watch?: boolean;
 };
 
-const collect = (value: string, previous: string[] | undefined): string[] => [
-  ...(previous ?? []),
-  value,
-];
-
 const REPEATABLE_AGENT_OPTIONS = new Set([
   'acknowledgement-value',
   'env',
@@ -132,55 +124,6 @@ const REPEATABLE_AGENT_OPTIONS = new Set([
   'query-env',
   'terminal-value',
 ]);
-
-const addCommonOptions = (command: Command): Command =>
-  command
-    .option('--project <dir>', 'explicit Attest project directory')
-    .addOption(new Option('--output <format>', 'output format').choices(['human', 'json']))
-    .option('--non-interactive', 'disable prompts and fail when required input is missing');
-
-const addMutationOptions = (command: Command): Command =>
-  addCommonOptions(command)
-    .option('--dry-run', 'validate and show the semantic diff without writing')
-    .option('--yes', 'accept confirmation prompts without inventing missing values')
-    .option('--from-json <path|->', 'read one versioned command request from a file or stdin')
-    .option('--if-project-hash <sha256>', 'fail if the project changed since it was read');
-
-const outputFormat = (options: CommonOptions): 'human' | 'json' => options.output ?? 'human';
-
-/** Merges root-position common options with command-position options and rejects ambiguity. */
-const mergeCommonOptions = <Options extends CommonOptions>(
-  options: Options,
-  command: Command,
-  program: Command,
-): Options => {
-  const root = program.opts<CommonOptions>();
-  for (const name of ['project', 'output', 'nonInteractive'] as const) {
-    if (
-      program.getOptionValueSource(name) === 'cli' &&
-      command.getOptionValueSource(name) === 'cli'
-    ) {
-      throw new AttestCliError(
-        'cli_usage',
-        `Common option --${name === 'nonInteractive' ? 'non-interactive' : name} was provided twice.`,
-        { path: `--${name === 'nonInteractive' ? 'non-interactive' : name}` },
-      );
-    }
-  }
-  return { ...root, ...options };
-};
-
-const isInteractive = (
-  options: CommonOptions,
-  interaction: CliInteraction,
-  fromJson?: string,
-): boolean =>
-  options.nonInteractive !== true &&
-  outputFormat(options) === 'human' &&
-  fromJson === undefined &&
-  !interaction.ci &&
-  interaction.inputIsTTY &&
-  interaction.outputIsTTY;
 
 const mutationArguments = (options: MutationOptions, context: RegisterAgentCommandsOptions) => ({
   dryRun: options.dryRun,
@@ -200,7 +143,7 @@ const registerMutationHelp = (
 ): void => {
   setCliCommandHelpMetadata(command, {
     examples,
-    requestSchema: COMMAND_REQUEST_SCHEMA_VERSION,
+    requestSchema: COMMAND_REQUEST_SCHEMA_ID,
     options: {
       output: { implies: ['non-interactive'] },
       'from-json': {
@@ -790,7 +733,7 @@ const registerAgentCommands = (context: RegisterAgentCommandsOptions): void => {
   )
     .option('--input <json>', 'test input as any JSON value')
     .option('--input-file <path|->', 'read test input JSON from a file or stdin')
-    .option('--from-json <path|->', 'read one versioned agent.test request')
+    .option('--from-json <path|->', 'read one agent.test request')
     .option('--record', 'persist this probe as an eval run')
     .option('--watch', 'show human transport progress')
     .action(async (agentId: string | undefined, options: TestOptions, command: Command) => {
@@ -841,7 +784,7 @@ const registerAgentCommands = (context: RegisterAgentCommandsOptions): void => {
       'attest agent test support --record --output json',
       'attest agent test --from-json ./agent-test.json --output json',
     ],
-    requestSchema: COMMAND_REQUEST_SCHEMA_VERSION,
+    requestSchema: COMMAND_REQUEST_SCHEMA_ID,
     options: {
       output: { implies: ['non-interactive'] },
       input: { conflicts: ['input-file', 'from-json'] },
@@ -879,7 +822,7 @@ const registerAgentCommands = (context: RegisterAgentCommandsOptions): void => {
       context.io.output(renderCommandResult('agent.rename', outputFormat(options), result));
     },
   );
-  registerMutationHelp(rename, ['attest agent rename support support-v2'], {
+  registerMutationHelp(rename, ['attest agent rename support support-renamed'], {
     'agent-id': [],
     'new-id': [],
   });

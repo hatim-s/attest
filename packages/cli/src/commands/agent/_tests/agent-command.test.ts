@@ -21,22 +21,26 @@ import { cliResultSchema, type AgentResource } from '@attest/contracts';
 import { openStore } from '@attest/core';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { AttestCliError } from '../../errors.js';
-import { loadProject } from '../../project/load-project.js';
-import { runCli, type CliIo } from '../../run-cli.js';
-import { runAgentAddCommand, runAgentRemoveCommand, runAgentTestCommand } from './agent-command.js';
-import { readSecretReference, REDACTED } from './native-agent-adapter.js';
+import { AttestCliError } from '../../../errors/index.js';
+import { loadProject } from '../../../project/load-project.js';
+import { runCli, type CliIo } from '../../../run-cli.js';
+import {
+  runAgentAddCommand,
+  runAgentRemoveCommand,
+  runAgentTestCommand,
+} from '../agent-command.js';
+import { readSecretReference, REDACTED } from '../native-agent-adapter.js';
 
 const FIXTURE = fileURLToPath(new URL('./fixtures/native-agent.cjs', import.meta.url));
 const PTY_FIXTURE = fileURLToPath(new URL('./fixtures/pty-agent-command.py', import.meta.url));
 const JSONL_BRIDGE_FIXTURE = fileURLToPath(
-  new URL('../../../../core/src/runner/fixtures/jsonl-bridge-agent.cjs', import.meta.url),
+  new URL('../../../../../core/src/runner/_tests/fixtures/jsonl-bridge-agent.cjs', import.meta.url),
 );
 const BACKGROUND_FIXTURE = fileURLToPath(
-  new URL('../../../../core/src/runner/fixtures/background-agent.cjs', import.meta.url),
+  new URL('../../../../../core/src/runner/_tests/fixtures/background-agent.cjs', import.meta.url),
 );
-const CLI_PACKAGE_ROOT = fileURLToPath(new URL('../../../', import.meta.url));
-const CLI_BUILT = fileURLToPath(new URL('../../../dist/cli.js', import.meta.url));
+const CLI_PACKAGE_ROOT = fileURLToPath(new URL('../../../../', import.meta.url));
+const CLI_BUILT = fileURLToPath(new URL('../../../../dist/cli.js', import.meta.url));
 const execFileAsync = promisify(execFile);
 const temporaryDirectories: string[] = [];
 const originalSecret = process.env.ATTEST_SOURCE_SECRET;
@@ -79,7 +83,7 @@ const expectProjectConflict = (error: unknown): void => {
   expect(error.details.current_hash).not.toBe(error.details.expected_hash);
 };
 
-/** Creates an isolated empty v2 project through the public command path. */
+/** Creates an isolated empty project through the public command path. */
 const createProject = async (): Promise<string> => {
   const parent = await mkdtemp(join(tmpdir(), 'attest-agent-command-'));
   temporaryDirectories.push(parent);
@@ -129,7 +133,7 @@ afterEach(async () => {
   );
 });
 
-describe('CLI2.6 agent authoring', () => {
+describe('agent authoring', () => {
   it('imports and probes a redacted cURL polling adapter through the public CLI', async () => {
     const root = await createProject();
     const secret = 'curl-polling-super-secret';
@@ -372,10 +376,10 @@ describe('CLI2.6 agent authoring', () => {
     expect(questions[3]).toContain('Apply these changes? [y/N]');
 
     const request = JSON.stringify({
-      schema: 'attest.command-request/v2',
+      schema: 'attest.command-request',
       command: 'agent.add',
       agent: {
-        schema: 'attest.agent/v2',
+        schema: 'attest.agent',
         id: 'requested',
         name: 'Requested',
         transport: {
@@ -396,7 +400,7 @@ describe('CLI2.6 agent authoring', () => {
     await writeFile(
       join(root, 'import.json'),
       JSON.stringify({
-        schema: 'attest.agent/v2',
+        schema: 'attest.agent',
         id: 'source-id',
         name: 'Imported',
         transport: {
@@ -437,7 +441,7 @@ describe('CLI2.6 agent authoring', () => {
     });
 
     const request = JSON.stringify({
-      schema: 'attest.command-request/v2',
+      schema: 'attest.command-request',
       command: 'agent.import',
       source: '-',
       source_type: 'json',
@@ -480,7 +484,7 @@ describe('CLI2.6 agent authoring', () => {
             argv: [hostileArgument, '$(false)'],
             handshake: {
               case_id: 'connection-test',
-              protocol: 'attest.agent/v1alpha1',
+              protocol: 'attest.agent-invocation',
               run_id: '01ARZ3NDEKTSV4RRFFQ69G5FAV',
             },
             input: { ping: true },
@@ -550,10 +554,10 @@ describe('CLI2.6 agent authoring', () => {
       return Promise.resolve(
         new Response(
           JSON.stringify({
-            protocol: 'attest.agent/v1alpha1',
+            protocol: 'attest.agent-invocation',
             output: { authorization: observedAuthorization, echoed: secret },
             trace: {
-              schema: 'attest.trace/v1alpha1',
+              schema: 'attest.trace',
               trace_id: 'http-trace',
               spans: [],
             },
@@ -675,7 +679,7 @@ describe('CLI2.6 agent authoring', () => {
     expect(await snapshotTree(root)).toEqual(before);
   });
 
-  it('rejects prompt-time project drift without replacing concurrent authored resources', async () => {
+  it('rejects prompt-time project drift without replacing conauthored resources', async () => {
     const root = await createProject();
     const argvJson = JSON.stringify([process.execPath, FIXTURE, 'echo']);
     let addConflict: unknown;
@@ -717,7 +721,7 @@ describe('CLI2.6 agent authoring', () => {
       tests: loaded.tests,
     });
     candidate.tests.push({
-      schema: 'attest.test/v2',
+      schema: 'attest.test',
       id: 'racer-smoke',
       name: 'Racer smoke',
       agent_id: 'racer',
@@ -725,7 +729,7 @@ describe('CLI2.6 agent authoring', () => {
       datasets: [],
       metrics: [],
     });
-    const { applyProjectMutation } = await import('../../project/transaction/index.js');
+    const { applyProjectMutation } = await import('../../../project/transaction/index.js');
     await applyProjectMutation({ candidate, projectRoot: root });
 
     let removeConflict: unknown;
@@ -795,7 +799,7 @@ describe('CLI2.6 agent authoring', () => {
       tests: loaded.tests,
     });
     candidate.tests.push({
-      schema: 'attest.test/v2',
+      schema: 'attest.test',
       id: 'smoke',
       name: 'Smoke',
       agent_id: 'support',
@@ -803,16 +807,17 @@ describe('CLI2.6 agent authoring', () => {
       datasets: [],
       metrics: [],
     });
-    const { applyProjectMutation } = await import('../../project/transaction/index.js');
+    const { applyProjectMutation } = await import('../../../project/transaction/index.js');
     await applyProjectMutation({ candidate, projectRoot: root });
 
     expect(
-      (await run(root, ['agent', 'rename', 'support', 'support-v2', '--output', 'json'])).exitCode,
+      (await run(root, ['agent', 'rename', 'support', 'support-renamed', '--output', 'json']))
+        .exitCode,
     ).toBe(0);
     await expect(loadProject({ project: root })).resolves.toMatchObject({
-      tests: [{ agent_id: 'support-v2' }],
+      tests: [{ agent_id: 'support-renamed' }],
     });
-    const blocked = await run(root, ['agent', 'remove', 'support-v2', '--output', 'json']);
+    const blocked = await run(root, ['agent', 'remove', 'support-renamed', '--output', 'json']);
     expect(blocked.exitCode).toBe(1);
     expect(JSON.parse(blocked.output[0] ?? '{}')).toMatchObject({
       error: { code: 'project_invalid' },
@@ -820,7 +825,7 @@ describe('CLI2.6 agent authoring', () => {
     const humanPreview = await run(root, [
       'agent',
       'remove',
-      'support-v2',
+      'support-renamed',
       '--detach',
       '--dry-run',
     ]);
@@ -830,7 +835,7 @@ describe('CLI2.6 agent authoring', () => {
     const confirmationRequired = await run(root, [
       'agent',
       'remove',
-      'support-v2',
+      'support-renamed',
       '--detach',
       '--output',
       'json',
@@ -843,7 +848,7 @@ describe('CLI2.6 agent authoring', () => {
     const removed = await run(root, [
       'agent',
       'remove',
-      'support-v2',
+      'support-renamed',
       '--detach',
       '--yes',
       '--output',
@@ -877,7 +882,7 @@ describe('CLI2.6 agent authoring', () => {
     await writeFile(
       join(root, 'prefix-import.json'),
       JSON.stringify({
-        schema: 'attest.agent/v2',
+        schema: 'attest.agent',
         id: 'source',
         name: 'Prefix import',
         transport: {
@@ -948,7 +953,7 @@ describe('CLI2.6 agent authoring', () => {
     const root = await createProject();
     const argvSecret = 's3cr3t-value';
     const imported: AgentResource = {
-      schema: 'attest.agent/v2',
+      schema: 'attest.agent',
       id: 'source',
       name: 'Redacted CLI',
       transport: {
@@ -981,7 +986,7 @@ describe('CLI2.6 agent authoring', () => {
       Promise.resolve(
         new Response(
           JSON.stringify({
-            protocol: 'attest.agent/v1alpha1',
+            protocol: 'attest.agent-invocation',
             output: { received: new Headers(init.headers).get('x-opaque') },
           }),
           { status: 200 },
@@ -991,12 +996,13 @@ describe('CLI2.6 agent authoring', () => {
     await writeFile(
       join(root, 'redacted-http.json'),
       JSON.stringify({
-        schema: 'attest.agent/v2',
+        schema: 'attest.agent',
         id: 'source-http',
         name: 'Redacted HTTP',
         transport: {
           kind: 'http',
           lifecycle: 'external',
+          response_mode: 'attest_envelope',
           request: {
             url: 'https://agent.example/invoke',
             method: 'POST',
@@ -1020,10 +1026,10 @@ describe('CLI2.6 agent authoring', () => {
         ])
       ).exitCode,
     ).toBe(0);
-    const legacyHttp = (await loadProject({ project: root })).agents.find(
+    const importedHttp = (await loadProject({ project: root })).agents.find(
       ({ id }) => id === 'redacted-http',
     );
-    expect(legacyHttp?.transport).toMatchObject({
+    expect(importedHttp?.transport).toMatchObject({
       kind: 'http',
       response_mode: 'attest_envelope',
     });
@@ -1035,7 +1041,7 @@ describe('CLI2.6 agent authoring', () => {
   it('imports bounded remote JSON while rejecting redirects and authored URL query values', async () => {
     const root = await createProject();
     const resource = {
-      schema: 'attest.agent/v2',
+      schema: 'attest.agent',
       id: 'remote-source',
       name: 'Remote',
       transport: {
@@ -1110,7 +1116,7 @@ describe('CLI2.6 agent authoring', () => {
     await writeFile(
       join(root, 'policy.json'),
       JSON.stringify({
-        schema: 'attest.agent/v2',
+        schema: 'attest.agent',
         id: 'source-policy',
         name: 'Policy',
         transport: {
@@ -1140,7 +1146,7 @@ describe('CLI2.6 agent authoring', () => {
     await writeFile(
       join(root, 'retry.json'),
       JSON.stringify({
-        schema: 'attest.agent/v2',
+        schema: 'attest.agent',
         id: 'source-retry',
         name: 'Retry',
         transport: {
@@ -1173,7 +1179,7 @@ describe('CLI2.6 agent authoring', () => {
         attempt === 1
           ? new Response('temporary', { status: 503 })
           : new Response(
-              JSON.stringify({ protocol: 'attest.agent/v1alpha1', output: { ok: true } }),
+              JSON.stringify({ protocol: 'attest.agent-invocation', output: { ok: true } }),
               { status: 200 },
             ),
       );
@@ -1316,7 +1322,7 @@ describe('CLI2.6 agent authoring', () => {
     await writeFile(
       join(root, 'dry-import.json'),
       JSON.stringify({
-        schema: 'attest.agent/v2',
+        schema: 'attest.agent',
         id: 'source',
         name: 'Dry import',
         transport: {
@@ -1332,7 +1338,7 @@ describe('CLI2.6 agent authoring', () => {
     const dryCommands = [
       ['agent', 'add', 'new-agent', '--argv-json', argv],
       ['agent', 'import', 'dry-import.json', '--as', 'imported-dry'],
-      ['agent', 'rename', 'probe', 'probe-v2'],
+      ['agent', 'rename', 'probe', 'probe-renamed'],
       ['agent', 'remove', 'probe'],
     ];
     for (const command of dryCommands) {
@@ -1394,7 +1400,7 @@ describe('CLI2.6 agent authoring', () => {
     await store.close();
   }, 15_000);
 
-  it('publishes deterministic JSON help and versioned results for every agent command', async () => {
+  it('publishes deterministic JSON help and results for every agent command', async () => {
     const root = await createProject();
     for (const command of ['add', 'import', 'test', 'rename', 'remove']) {
       const first = await run(root, ['help', 'agent', command, '--output', 'json']);
@@ -1402,9 +1408,9 @@ describe('CLI2.6 agent authoring', () => {
       expect(second.output).toEqual(first.output);
       const result = cliResultSchema.parse(JSON.parse(first.output[0] ?? '{}') as unknown);
       expect(result).toMatchObject({
-        schema: 'attest.cli-result/v1',
+        schema: 'attest.cli-result',
         ok: true,
-        result: { command: { request_schema: 'attest.command-request/v2' } },
+        result: { command: { request_schema: 'attest.command-request' } },
       });
     }
     const imported = await run(root, ['help', 'agent', 'import', '--output', 'json']);
@@ -1717,7 +1723,7 @@ describe('CLI2.6 agent authoring', () => {
   });
 });
 
-describe('CLI2.11 managed and streaming agent UX', () => {
+describe('managed and streaming agent UX', () => {
   it('guides a TTY user through managed JSONL authoring', async () => {
     const root = await createProject();
     const collected = collectIo();
@@ -1881,10 +1887,10 @@ describe('CLI2.11 managed and streaming agent UX', () => {
   it('imports a complete managed resource through the stable JSON request protocol', async () => {
     const root = await createProject();
     const request = {
-      schema: 'attest.command-request/v2',
+      schema: 'attest.command-request',
       command: 'agent.add',
       agent: {
-        schema: 'attest.agent/v2',
+        schema: 'attest.agent',
         id: 'imported-bridge',
         name: 'Imported bridge',
         transport: {
@@ -2006,10 +2012,10 @@ describe('CLI2.11 managed and streaming agent UX', () => {
   ])('normalizes $expectedCode startup failures into the public CLI contract', async (fixture) => {
     const root = await createProject();
     const request = {
-      schema: 'attest.command-request/v2',
+      schema: 'attest.command-request',
       command: 'agent.add',
       agent: {
-        schema: 'attest.agent/v2',
+        schema: 'attest.agent',
         id: fixture.id,
         name: fixture.id,
         transport: {
@@ -2084,10 +2090,10 @@ describe('CLI2.11 managed and streaming agent UX', () => {
     }
     await new Promise<void>((resolveClose) => reservation.close(() => resolveClose()));
     const commandRequest = {
-      schema: 'attest.command-request/v2',
+      schema: 'attest.command-request',
       command: 'agent.add',
       agent: {
-        schema: 'attest.agent/v2',
+        schema: 'attest.agent',
         id: 'scoped-background',
         name: 'Scoped background',
         transport: {

@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 
 import {
-  COMMAND_REQUEST_SCHEMA_VERSION,
+  COMMAND_REQUEST_SCHEMA_ID,
   evalCancelRequestSchema,
   evalRunRequestSchema,
   type EvalCancelRequest,
@@ -11,7 +11,7 @@ import {
   type JsonValue,
 } from '@attest/contracts';
 
-import { AttestCliError } from '../../errors.js';
+import { AttestCliError } from '../../errors/index.js';
 import { parseDuration } from '../agent/agent-request.js';
 
 type EvalPrompt = (question: string, options?: { signal?: AbortSignal }) => Promise<string>;
@@ -72,7 +72,7 @@ const readRequestSource = async (source: string, context: EvalRequestContext): P
   } catch (error: unknown) {
     throw new AttestCliError('cli_usage', 'The eval command request is not valid JSON.', {
       path: '--from-json',
-      hint: `Provide one ${COMMAND_REQUEST_SCHEMA_VERSION} document.`,
+      hint: `Provide one ${COMMAND_REQUEST_SCHEMA_ID} document.`,
       cause: error,
     });
   }
@@ -186,7 +186,7 @@ const createEvalRunRequest = async (
   }
 
   return validateEvalRunRequest({
-    schema: COMMAND_REQUEST_SCHEMA_VERSION,
+    schema: COMMAND_REQUEST_SCHEMA_ID,
     command: 'eval.run',
     ...selection,
     ...(fields.caseIds === undefined ? {} : { case_ids: [...fields.caseIds] }),
@@ -236,7 +236,7 @@ const createEvalCancelRequest = async (
   const output = fields.output ?? 'human';
   context.onOutputMode?.(output);
   return validateEvalCancelRequest({
-    schema: COMMAND_REQUEST_SCHEMA_VERSION,
+    schema: COMMAND_REQUEST_SCHEMA_ID,
     command: 'eval.cancel',
     run_id: runId,
     output,

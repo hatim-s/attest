@@ -14,7 +14,7 @@ import {
   type RunDiff,
 } from '@attest/core';
 
-import { AttestCliError } from '../../errors.js';
+import { AttestCliError } from '../../errors/index.js';
 import { prepareEvalProjectFile } from './eval-project-path.js';
 import type { ResolvedEvalCaseInput } from './eval-resolver.js';
 

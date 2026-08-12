@@ -1,13 +1,9 @@
 import { createInterface } from 'node:readline/promises';
 
-import {
-  CLI_EVENT_SCHEMA_VERSION,
-  CLI_RESULT_SCHEMA_VERSION,
-  type EvalEvent,
-} from '@attest/contracts';
+import { CLI_EVENT_SCHEMA_ID, CLI_RESULT_SCHEMA_ID, type EvalEvent } from '@attest/contracts';
 import { Command } from 'commander';
 
-import { registerEvalCommands } from '../eval-command.js';
+import { registerEvalCommands } from '../../eval-command.js';
 
 const RUN_ID = '01ARZ3NDEKTSV4RRFFQ69G5FAV';
 const SNAPSHOT_HASH = 'f'.repeat(64);
@@ -15,7 +11,7 @@ const SNAPSHOT_HASH = 'f'.repeat(64);
 /** Waits for the command signal so the PTY driver can verify cancellation and terminal cleanup. */
 const cancellationEvents = async function* (signal: AbortSignal): AsyncGenerator<EvalEvent> {
   yield {
-    schema: CLI_EVENT_SCHEMA_VERSION,
+    schema: CLI_EVENT_SCHEMA_ID,
     sequence: 0,
     time: new Date().toISOString(),
     event: 'run_started',
@@ -40,21 +36,21 @@ const cancellationEvents = async function* (signal: AbortSignal): AsyncGenerator
     metric_error_count: 0,
   };
   yield {
-    schema: CLI_EVENT_SCHEMA_VERSION,
+    schema: CLI_EVENT_SCHEMA_ID,
     sequence: 1,
     time: new Date().toISOString(),
     event: 'run_completed',
     data: { run_id: RUN_ID, status: 'cancelled', summary },
   };
   yield {
-    schema: CLI_EVENT_SCHEMA_VERSION,
+    schema: CLI_EVENT_SCHEMA_ID,
     sequence: 2,
     time: new Date().toISOString(),
     event: 'result',
     data: {
       exit_code: 130,
       result: {
-        schema: CLI_RESULT_SCHEMA_VERSION,
+        schema: CLI_RESULT_SCHEMA_ID,
         ok: false,
         command: 'eval.run',
         error: {

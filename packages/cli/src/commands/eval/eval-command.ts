@@ -1,6 +1,6 @@
 import {
-  CLI_EVENT_SCHEMA_VERSION,
-  COMMAND_REQUEST_SCHEMA_VERSION,
+  CLI_EVENT_SCHEMA_ID,
+  COMMAND_REQUEST_SCHEMA_ID,
   evalCancelResultSchema,
   evalEventSchema,
   evalEventStreamSchema,
@@ -21,7 +21,7 @@ import {
   getCliErrorDefinition,
   renderCliError,
   serializeCliError,
-} from '../../errors.js';
+} from '../../errors/index.js';
 import { setCliCommandHelpMetadata } from '../../help/command-help.js';
 import { createCliFailureResult, serializeCliResult } from '../../output/cli-protocol.js';
 import type { CliIo } from '../../run-cli.js';
@@ -180,7 +180,7 @@ const emitEvalFailure = (
     const data = evalFinalResultDataSchema.parse({ exit_code: failure.exitCode, result });
     context.io.output(
       serializeEvalEvent({
-        schema: CLI_EVENT_SCHEMA_VERSION,
+        schema: CLI_EVENT_SCHEMA_ID,
         sequence: 0,
         time: new Date().toISOString(),
         event: 'result',
@@ -230,7 +230,7 @@ const recoverFailedJsonlStream = (
   const recovered: EvalEvent[] = [...lifecycle];
   for (const openCase of openCases.values()) {
     recovered.push({
-      schema: CLI_EVENT_SCHEMA_VERSION,
+      schema: CLI_EVENT_SCHEMA_ID,
       sequence: recovered.length,
       time: new Date().toISOString(),
       event: 'case_completed',
@@ -254,7 +254,7 @@ const recoverFailedJsonlStream = (
     metric_error_count: 0,
   };
   recovered.push({
-    schema: CLI_EVENT_SCHEMA_VERSION,
+    schema: CLI_EVENT_SCHEMA_ID,
     sequence: recovered.length,
     time: new Date().toISOString(),
     event: 'run_completed',
@@ -266,7 +266,7 @@ const recoverFailedJsonlStream = (
     }),
   );
   recovered.push({
-    schema: CLI_EVENT_SCHEMA_VERSION,
+    schema: CLI_EVENT_SCHEMA_ID,
     sequence: recovered.length,
     time: new Date().toISOString(),
     event: 'result',
@@ -391,9 +391,9 @@ const emitEvalCancellation = (
   context.setExitCode(exitCode);
 };
 
-/** Registers only the v2 eval namespace; integration owns root wiring and dispatcher services. */
+/** Registers only the eval namespace; integration owns root wiring and dispatcher services. */
 const registerEvalCommands = (context: RegisterEvalCommandsOptions): void => {
-  const evalCommand = context.program.command('eval').description('Run and cancel v2 evaluations.');
+  const evalCommand = context.program.command('eval').description('Run and cancel evaluations.');
   const run = evalCommand
     .command('run')
     .description('Run selected tests and persist one immutable evaluation.')
@@ -406,7 +406,7 @@ const registerEvalCommands = (context: RegisterEvalCommandsOptions): void => {
     .option('--baseline <run-id>', 'include a persisted diff against a prior run')
     .option('--junit <path>', 'write JUnit XML atomically')
     .option('--watch', 'render live human progress')
-    .option('--from-json <path|->', 'read one versioned eval run request from a file or stdin')
+    .option('--from-json <path|->', 'read one eval run request from a file or stdin')
     .option('--project <dir>', 'explicit Attest project directory')
     .addOption(new Option('--output <format>', 'output format').choices(['human', 'json', 'jsonl']))
     .option('--non-interactive', 'disable prompts and fail when selection is missing')
@@ -455,7 +455,7 @@ const registerEvalCommands = (context: RegisterEvalCommandsOptions): void => {
       },
     );
   setCliCommandHelpMetadata(run, {
-    requestSchema: COMMAND_REQUEST_SCHEMA_VERSION,
+    requestSchema: COMMAND_REQUEST_SCHEMA_ID,
     examples: [
       'attest eval run refund --case refund-basic --output human',
       'attest eval run --all --concurrency 4 --timeout 2m --output json',
@@ -499,7 +499,7 @@ const registerEvalCommands = (context: RegisterEvalCommandsOptions): void => {
     .command('cancel')
     .description('Request cancellation of one immutable eval run.')
     .argument('[run-id]', 'eval run id')
-    .option('--from-json <path|->', 'read one versioned cancellation request from a file or stdin')
+    .option('--from-json <path|->', 'read one cancellation request from a file or stdin')
     .option('--project <dir>', 'explicit Attest project directory')
     .addOption(new Option('--output <format>', 'output format').choices(['human', 'json']))
     .option('--non-interactive', 'disable prompts and fail when the run id is missing')
@@ -535,7 +535,7 @@ const registerEvalCommands = (context: RegisterEvalCommandsOptions): void => {
       },
     );
   setCliCommandHelpMetadata(cancel, {
-    requestSchema: COMMAND_REQUEST_SCHEMA_VERSION,
+    requestSchema: COMMAND_REQUEST_SCHEMA_ID,
     examples: [
       'attest eval cancel 01ARZ3NDEKTSV4RRFFQ69G5FAV --output json',
       'attest eval cancel --from-json ./eval-cancel.json',

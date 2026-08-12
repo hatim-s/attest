@@ -17,7 +17,6 @@ import {
 
 import {
   assertSupportedProbePolicy,
-  createBaseEnvironment,
   redactProbeValue,
   resolveNativeAgent,
   type ResolvedNativeAgent,
@@ -33,10 +32,14 @@ type RunScopedSession = {
   invoke(request: AgentRequest, signal?: AbortSignal): Promise<InvocationResult>;
 };
 
-type EvalAgentRuntime = {
-  resolved: ResolvedNativeAgent;
-  session?: RunScopedSession;
-};
+type SessionAgent = Extract<
+  ResolvedNativeAgent,
+  { kind: 'background' | 'jsonl_bridge' | 'websocket' }
+>;
+type DirectAgent = Exclude<ResolvedNativeAgent, SessionAgent>;
+type EvalAgentRuntime =
+  | { kind: 'session'; resolved: SessionAgent; session: RunScopedSession }
+  | { kind: 'direct'; resolved: DirectAgent };
 
 const invocationOutcome = (
   result: Extract<InvocationResult, { status: 'invocation_error' }>,
@@ -117,33 +120,46 @@ const startRuntime = async (
 ): Promise<EvalAgentRuntime> => {
   assertSupportedProbePolicy(payload.agent);
   const resolved = await resolveNativeAgent(payload.agent, projectRoot);
-  let session: RunScopedSession | undefined;
-  if (resolved.backgroundAgent !== undefined) {
-    session = await startBackgroundAgent(resolved.backgroundAgent, {
-      cwd: resolved.cwd ?? projectRoot,
-      env: resolved.env ?? createBaseEnvironment(),
-      invokeHeaders: resolved.backgroundInvokeHeaders,
-      invokeQuery: resolved.backgroundInvokeQuery,
-      secrets: resolved.secrets,
-      shutdownHeaders: resolved.backgroundShutdownHeaders,
-      shutdownQuery: resolved.backgroundShutdownQuery,
-      signal,
-    });
-  } else if (resolved.jsonlBridgeAgent !== undefined) {
-    session = await startJsonlBridgeAgent(resolved.jsonlBridgeAgent, {
-      cwd: resolved.cwd ?? projectRoot,
-      env: resolved.env ?? createBaseEnvironment(),
-      secrets: resolved.secrets,
-      signal,
-    });
-  } else if (resolved.webSocketAgent !== undefined) {
-    session = await startWebSocketAgent(resolved.webSocketAgent, {
-      headers: resolved.webSocketHeaders,
-      secrets: resolved.secrets,
-      signal,
-    });
+  switch (resolved.kind) {
+    case 'background':
+      return {
+        kind: 'session',
+        resolved,
+        session: await startBackgroundAgent(resolved.agent, {
+          cwd: resolved.cwd,
+          env: resolved.env,
+          invokeHeaders: resolved.invokeHeaders,
+          invokeQuery: resolved.invokeQuery,
+          secrets: resolved.secrets,
+          shutdownHeaders: resolved.shutdownHeaders,
+          shutdownQuery: resolved.shutdownQuery,
+          signal,
+        }),
+      };
+    case 'jsonl_bridge':
+      return {
+        kind: 'session',
+        resolved,
+        session: await startJsonlBridgeAgent(resolved.agent, {
+          cwd: resolved.cwd,
+          env: resolved.env,
+          secrets: resolved.secrets,
+          signal,
+        }),
+      };
+    case 'websocket':
+      return {
+        kind: 'session',
+        resolved,
+        session: await startWebSocketAgent(resolved.agent, {
+          headers: resolved.headers,
+          secrets: resolved.secrets,
+          signal,
+        }),
+      };
+    default:
+      return { kind: 'direct', resolved };
   }
-  return { resolved, ...(session === undefined ? {} : { session }) };
 };
 
 /** Invokes the exact existing transport selected by the resolved immutable agent resource. */
@@ -153,41 +169,36 @@ const invokeRuntime = async (
   signal: AbortSignal,
   payload: ResolvedEvalCaseInput,
 ): Promise<InvocationResult> => {
+  if (runtime.kind === 'session') return runtime.session.invoke(request, signal);
   const { resolved } = runtime;
-  if (runtime.session !== undefined) return runtime.session.invoke(request, signal);
-  if (resolved.streamAgent !== undefined) {
-    return invokeStreamingAgent(resolved.streamAgent, request, {
-      headers: resolved.httpHeaders,
-      query: resolved.httpQuery,
-      secrets: resolved.secrets,
-      signal,
-    });
+  switch (resolved.kind) {
+    case 'stream':
+      return invokeStreamingAgent(resolved.agent, request, {
+        headers: resolved.headers,
+        query: resolved.query,
+        secrets: resolved.secrets,
+        signal,
+      });
+    case 'mapped_http':
+      return invokeMappedHttpAgent(resolved.agent, request, {
+        headers: resolved.headers,
+        query: resolved.query,
+        secrets: resolved.secrets,
+        signal,
+      });
+    case 'direct':
+      return invokeAgent(resolved.target, request, {
+        env: resolved.env,
+        httpHeaders: resolved.headers,
+        outputCapBytes: payload.agent.limits?.response_bytes ?? DEFAULT_OUTPUT_CAP_BYTES,
+        retries: payload.agent.retry?.retries ?? 0,
+        signal,
+        timeoutMs: payload.attempt_timeout_ms ?? DEFAULT_TIMEOUT_MS,
+      });
   }
-  if (resolved.mappedAgent !== undefined) {
-    return invokeMappedHttpAgent(resolved.mappedAgent, request, {
-      headers: resolved.httpHeaders,
-      query: resolved.httpQuery,
-      secrets: resolved.secrets,
-      signal,
-    });
-  }
-  if (resolved.target !== undefined) {
-    return invokeAgent(resolved.target, request, {
-      env: resolved.env,
-      httpHeaders: resolved.httpHeaders,
-      outputCapBytes: payload.agent.limits?.response_bytes ?? DEFAULT_OUTPUT_CAP_BYTES,
-      retries: payload.agent.retry?.retries ?? 0,
-      signal,
-      timeoutMs: payload.attempt_timeout_ms ?? DEFAULT_TIMEOUT_MS,
-    });
-  }
-  throw new AgentInvocationError(
-    'invalid_envelope',
-    'Resolved agent omitted its invocation target.',
-  );
 };
 
-/** Builds the engine runner that reuses per-run transports and evaluates v2 metrics per completed case. */
+/** Builds the engine runner that reuses per-run transports and evaluates current metrics per completed case. */
 const createEvalCaseRunner = (
   projectRoot: string,
   cacheStore: CacheStore,
@@ -271,7 +282,7 @@ const createEvalCaseRunner = (
   const cleanup = async (): Promise<void> => {
     const settledRuntimes = await Promise.allSettled(runtimes.values());
     const sessions = settledRuntimes.flatMap((result) =>
-      result.status === 'fulfilled' && result.value.session !== undefined
+      result.status === 'fulfilled' && result.value.kind === 'session'
         ? [result.value.session]
         : [],
     );

@@ -23,7 +23,7 @@ process.stdin.on('end', () => {
 
   const request = JSON.parse(input);
   const response = {
-    protocol: 'attest.agent/v1alpha1',
+    protocol: 'attest.agent-invocation',
     output: {
       argv: process.argv.slice(3),
       handshake: {
@@ -37,7 +37,7 @@ process.stdin.on('end', () => {
   };
   if (behavior === 'trace') {
     response.trace = {
-      schema: 'attest.trace/v1alpha1',
+      schema: 'attest.trace',
       trace_id: 'connection-trace',
       spans: [
         {

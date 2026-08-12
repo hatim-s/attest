@@ -45,13 +45,13 @@ describe('runCli', () => {
     });
     expect(repeatedOutput).toEqual(output);
     expect(JSON.parse(output[0] ?? '{}')).toEqual({
-      schema: 'attest.cli-result/v1',
+      schema: 'attest.cli-result',
       ok: true,
       command: 'help',
       project_hash_before: null,
       project_hash_after: null,
       result: {
-        schema: 'attest.cli-help/v1',
+        schema: 'attest.cli-help',
         command: {
           path: ['trace', 'convert'],
           name: 'convert',
@@ -131,7 +131,7 @@ describe('runCli', () => {
     expect(errors).toEqual([]);
     expect(output).toHaveLength(1);
     expect(JSON.parse(output[0] ?? '{}')).toEqual({
-      schema: 'attest.cli-result/v1',
+      schema: 'attest.cli-result',
       ok: false,
       command: 'help',
       error: {
@@ -155,11 +155,11 @@ describe('runCli', () => {
     expect(output).toHaveLength(1);
     const document = cliResultSchema.parse(JSON.parse(output[0] ?? '{}') as unknown);
     expect(document).toMatchObject({
-      schema: 'attest.cli-result/v1',
+      schema: 'attest.cli-result',
       ok: true,
       command: 'errors',
       result: {
-        schema: 'attest.cli-errors/v1',
+        schema: 'attest.cli-errors',
       },
     });
     if (!document.ok) {

@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 
-import { AttestCliError } from '../../errors.js';
+import { AttestCliError } from '../../errors/index.js';
 import { prepareEvalProjectFile } from './eval-project-path.js';
 
 const EVAL_REGISTRY_DIRECTORY = join('.attest', 'eval-runs');
