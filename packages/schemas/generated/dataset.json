@@ -1,0 +1,144 @@
+{
+  "$comment": "Runtime-only invariants include canonical manifest paths, cross-resource references, duplicate identifiers, and resolved case-id collisions.",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "case_count": {
+      "maximum": 9007199254740991,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "case_schema": {
+      "anyOf": [
+        {
+          "const": "attest.case",
+          "type": "string"
+        },
+        {
+          "const": "attest.case/v2",
+          "type": "string"
+        }
+      ]
+    },
+    "id": {
+      "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+      "type": "string"
+    },
+    "name": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "provenance": {
+      "additionalProperties": false,
+      "properties": {
+        "counts": {
+          "additionalProperties": false,
+          "properties": {
+            "inserted": {
+              "maximum": 9007199254740991,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "read": {
+              "maximum": 9007199254740991,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "skipped": {
+              "maximum": 9007199254740991,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "updated": {
+              "maximum": 9007199254740991,
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "read",
+            "inserted",
+            "updated",
+            "skipped"
+          ],
+          "type": "object"
+        },
+        "imported_at": {
+          "format": "date-time",
+          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
+          "type": "string"
+        },
+        "key_field": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "mapping": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "destination": {
+                "pattern": "^(?:id|input(?:\\.(?:[A-Za-z0-9_-]|\\\\[.\\\\])+)*|expected(?:\\.(?:[A-Za-z0-9_-]|\\\\[.\\\\])+)*|params(?:\\.(?:[A-Za-z0-9_-]|\\\\[.\\\\])+)+|tags|metrics)$",
+                "type": "string"
+              },
+              "source": {
+                "minLength": 1,
+                "type": "string"
+              }
+            },
+            "required": [
+              "destination",
+              "source"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "project_relative_source_path": {
+          "minLength": 1,
+          "pattern": "^(?![\\\\/])(?!(?:.*[\\\\/])?\\.\\.(?:[\\\\/]|$)).+$",
+          "type": "string"
+        },
+        "source_content_hash": {
+          "pattern": "^[a-f0-9]{64}$",
+          "type": "string"
+        },
+        "source_type": {
+          "enum": [
+            "csv",
+            "json",
+            "jsonl"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "source_type",
+        "mapping",
+        "imported_at",
+        "source_content_hash",
+        "counts"
+      ],
+      "type": "object"
+    },
+    "schema": {
+      "anyOf": [
+        {
+          "const": "attest.dataset",
+          "type": "string"
+        },
+        {
+          "const": "attest.dataset/v2",
+          "type": "string"
+        }
+      ]
+    }
+  },
+  "required": [
+    "schema",
+    "case_schema",
+    "id",
+    "name",
+    "case_count"
+  ],
+  "type": "object"
+}

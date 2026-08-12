@@ -5,7 +5,12 @@
   "exports": {
     "./generated/*": "./generated/*"
   },
+  "dependencies": {
+    "@attest/contracts": "workspace:*"
+  },
   "scripts": {
-    "test": "bun scripts/validate-artifacts.ts"
+    "generate": "bun src/generate-json-schema.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "bun src/_tests/validate-artifacts.ts"
   }
 }

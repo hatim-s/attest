@@ -1,0 +1,42 @@
+{
+  "$comment": "Runtime-only invariants include span time ordering, duplicate identifiers, and metric references.",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "command": {
+      "const": "eval.cancel",
+      "type": "string"
+    },
+    "output": {
+      "enum": [
+        "human",
+        "json"
+      ],
+      "type": "string"
+    },
+    "run_id": {
+      "format": "ulid",
+      "pattern": "^[0-9A-HJKMNP-TV-Za-hjkmnp-tv-z]{26}$",
+      "type": "string"
+    },
+    "schema": {
+      "anyOf": [
+        {
+          "const": "attest.command-request",
+          "type": "string"
+        },
+        {
+          "const": "attest.command-request/v2",
+          "type": "string"
+        }
+      ]
+    }
+  },
+  "required": [
+    "schema",
+    "command",
+    "run_id",
+    "output"
+  ],
+  "type": "object"
+}

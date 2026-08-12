@@ -1,0 +1,12 @@
+{
+  "schema": "attest.metric-preset",
+  "id": "trace-span",
+  "name": "Trace span",
+  "description": "Require a trace-capable fixture with spans matching stable fields, attributes, count, or order.",
+  "required_inputs": [],
+  "configurable_fields": ["filter", "count", "order"],
+  "definition": {
+    "kind": "assertion",
+    "assertions": [{ "spans": { "filter": { "kind": "other" }, "count": 1 } }]
+  }
+}

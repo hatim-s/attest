@@ -1,0 +1,12 @@
+{
+  "schema": "attest.metric-preset",
+  "id": "no-tool-errors",
+  "name": "No tool errors",
+  "description": "Reject traces containing failed tool spans.",
+  "required_inputs": [],
+  "configurable_fields": [],
+  "definition": {
+    "kind": "assertion",
+    "assertions": [{ "spans": { "filter": { "kind": "tool", "status": "error" }, "count": 0 } }]
+  }
+}

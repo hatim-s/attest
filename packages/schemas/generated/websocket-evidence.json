@@ -1,0 +1,708 @@
+{
+  "$comment": "Runtime-only invariants include span time ordering, duplicate identifiers, and metric references.",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "oneOf": [
+    {
+      "additionalProperties": false,
+      "properties": {
+        "acknowledgement": {
+          "oneOf": [
+            {
+              "additionalProperties": false,
+              "properties": {
+                "reconnect": {
+                  "const": "allowed",
+                  "type": "string"
+                },
+                "replay": {
+                  "const": "allowed",
+                  "type": "string"
+                },
+                "retry": {
+                  "const": "allowed",
+                  "type": "string"
+                },
+                "state": {
+                  "const": "not_acknowledged",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "state",
+                "retry",
+                "reconnect",
+                "replay"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "reconnect": {
+                  "const": "forbidden",
+                  "type": "string"
+                },
+                "replay": {
+                  "const": "forbidden",
+                  "type": "string"
+                },
+                "retry": {
+                  "const": "forbidden",
+                  "type": "string"
+                },
+                "state": {
+                  "const": "acknowledged",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "state",
+                "retry",
+                "reconnect",
+                "replay"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "close": {
+          "additionalProperties": false,
+          "properties": {
+            "clean": {
+              "type": "boolean"
+            },
+            "code": {
+              "maximum": 4999,
+              "minimum": 1000,
+              "type": "integer"
+            },
+            "reason": {
+              "maxLength": 123,
+              "type": "string"
+            }
+          },
+          "required": [
+            "clean"
+          ],
+          "type": "object"
+        },
+        "connection_mode": {
+          "enum": [
+            "serial",
+            "multiplexed"
+          ],
+          "type": "string"
+        },
+        "events": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "classification": {
+                "enum": [
+                  "connection_opened",
+                  "request_sent",
+                  "acknowledgement_received",
+                  "trace_received",
+                  "result_received",
+                  "error_received",
+                  "ping_sent",
+                  "pong_received",
+                  "retry_scheduled",
+                  "reconnect_started",
+                  "connection_closed"
+                ],
+                "type": "string"
+              },
+              "elapsed_ms": {
+                "maximum": 9007199254740991,
+                "minimum": 0,
+                "type": "integer"
+              },
+              "excerpt": {
+                "oneOf": [
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "text": {
+                        "maxLength": 4096,
+                        "type": "string"
+                      },
+                      "truncated": {
+                        "const": false,
+                        "type": "boolean"
+                      }
+                    },
+                    "required": [
+                      "text",
+                      "truncated"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "sha256": {
+                        "pattern": "^[a-f0-9]{64}$",
+                        "type": "string"
+                      },
+                      "text": {
+                        "maxLength": 4096,
+                        "type": "string"
+                      },
+                      "truncated": {
+                        "const": true,
+                        "type": "boolean"
+                      }
+                    },
+                    "required": [
+                      "text",
+                      "truncated",
+                      "sha256"
+                    ],
+                    "type": "object"
+                  }
+                ]
+              },
+              "message_bytes": {
+                "maximum": 9007199254740991,
+                "minimum": 0,
+                "type": "integer"
+              },
+              "request_id": {
+                "maxLength": 128,
+                "minLength": 1,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+                "type": "string"
+              }
+            },
+            "required": [
+              "classification",
+              "elapsed_ms"
+            ],
+            "type": "object"
+          },
+          "maxItems": 1024,
+          "type": "array"
+        },
+        "lifecycle": {
+          "enum": [
+            "per_case",
+            "per_run"
+          ],
+          "type": "string"
+        },
+        "outcome": {
+          "const": "completed",
+          "type": "string"
+        },
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+          "type": "string"
+        },
+        "schema": {
+          "anyOf": [
+            {
+              "const": "attest.websocket-evidence",
+              "type": "string"
+            },
+            {
+              "const": "attest.websocket-evidence/v1",
+              "type": "string"
+            }
+          ]
+        }
+      },
+      "required": [
+        "schema",
+        "request_id",
+        "lifecycle",
+        "connection_mode",
+        "acknowledgement",
+        "events",
+        "outcome"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "properties": {
+        "acknowledgement": {
+          "oneOf": [
+            {
+              "additionalProperties": false,
+              "properties": {
+                "reconnect": {
+                  "const": "allowed",
+                  "type": "string"
+                },
+                "replay": {
+                  "const": "allowed",
+                  "type": "string"
+                },
+                "retry": {
+                  "const": "allowed",
+                  "type": "string"
+                },
+                "state": {
+                  "const": "not_acknowledged",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "state",
+                "retry",
+                "reconnect",
+                "replay"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "reconnect": {
+                  "const": "forbidden",
+                  "type": "string"
+                },
+                "replay": {
+                  "const": "forbidden",
+                  "type": "string"
+                },
+                "retry": {
+                  "const": "forbidden",
+                  "type": "string"
+                },
+                "state": {
+                  "const": "acknowledged",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "state",
+                "retry",
+                "reconnect",
+                "replay"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "close": {
+          "additionalProperties": false,
+          "properties": {
+            "clean": {
+              "type": "boolean"
+            },
+            "code": {
+              "maximum": 4999,
+              "minimum": 1000,
+              "type": "integer"
+            },
+            "reason": {
+              "maxLength": 123,
+              "type": "string"
+            }
+          },
+          "required": [
+            "clean"
+          ],
+          "type": "object"
+        },
+        "connection_mode": {
+          "enum": [
+            "serial",
+            "multiplexed"
+          ],
+          "type": "string"
+        },
+        "error_classification": {
+          "enum": [
+            "open_timeout",
+            "message_idle_timeout",
+            "attempt_timeout",
+            "close_timeout",
+            "handshake_failed",
+            "connection_failed",
+            "unexpected_close",
+            "invalid_json",
+            "binary_frame_unsupported",
+            "uncorrelated_server_work",
+            "duplicate_terminal_message",
+            "acknowledgement_extraction_failed",
+            "result_extraction_failed",
+            "error_extraction_failed",
+            "trace_extraction_failed",
+            "remote_error",
+            "socket_io_unsupported",
+            "graphql_subscription_unsupported",
+            "interactive_auth_unsupported",
+            "resume_unsupported",
+            "bidirectional_callback_unsupported",
+            "cancelled"
+          ],
+          "type": "string"
+        },
+        "events": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "classification": {
+                "enum": [
+                  "connection_opened",
+                  "request_sent",
+                  "acknowledgement_received",
+                  "trace_received",
+                  "result_received",
+                  "error_received",
+                  "ping_sent",
+                  "pong_received",
+                  "retry_scheduled",
+                  "reconnect_started",
+                  "connection_closed"
+                ],
+                "type": "string"
+              },
+              "elapsed_ms": {
+                "maximum": 9007199254740991,
+                "minimum": 0,
+                "type": "integer"
+              },
+              "excerpt": {
+                "oneOf": [
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "text": {
+                        "maxLength": 4096,
+                        "type": "string"
+                      },
+                      "truncated": {
+                        "const": false,
+                        "type": "boolean"
+                      }
+                    },
+                    "required": [
+                      "text",
+                      "truncated"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "sha256": {
+                        "pattern": "^[a-f0-9]{64}$",
+                        "type": "string"
+                      },
+                      "text": {
+                        "maxLength": 4096,
+                        "type": "string"
+                      },
+                      "truncated": {
+                        "const": true,
+                        "type": "boolean"
+                      }
+                    },
+                    "required": [
+                      "text",
+                      "truncated",
+                      "sha256"
+                    ],
+                    "type": "object"
+                  }
+                ]
+              },
+              "message_bytes": {
+                "maximum": 9007199254740991,
+                "minimum": 0,
+                "type": "integer"
+              },
+              "request_id": {
+                "maxLength": 128,
+                "minLength": 1,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+                "type": "string"
+              }
+            },
+            "required": [
+              "classification",
+              "elapsed_ms"
+            ],
+            "type": "object"
+          },
+          "maxItems": 1024,
+          "type": "array"
+        },
+        "lifecycle": {
+          "enum": [
+            "per_case",
+            "per_run"
+          ],
+          "type": "string"
+        },
+        "outcome": {
+          "const": "failed",
+          "type": "string"
+        },
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+          "type": "string"
+        },
+        "schema": {
+          "anyOf": [
+            {
+              "const": "attest.websocket-evidence",
+              "type": "string"
+            },
+            {
+              "const": "attest.websocket-evidence/v1",
+              "type": "string"
+            }
+          ]
+        }
+      },
+      "required": [
+        "schema",
+        "request_id",
+        "lifecycle",
+        "connection_mode",
+        "acknowledgement",
+        "events",
+        "outcome",
+        "error_classification"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "properties": {
+        "acknowledgement": {
+          "oneOf": [
+            {
+              "additionalProperties": false,
+              "properties": {
+                "reconnect": {
+                  "const": "allowed",
+                  "type": "string"
+                },
+                "replay": {
+                  "const": "allowed",
+                  "type": "string"
+                },
+                "retry": {
+                  "const": "allowed",
+                  "type": "string"
+                },
+                "state": {
+                  "const": "not_acknowledged",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "state",
+                "retry",
+                "reconnect",
+                "replay"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "reconnect": {
+                  "const": "forbidden",
+                  "type": "string"
+                },
+                "replay": {
+                  "const": "forbidden",
+                  "type": "string"
+                },
+                "retry": {
+                  "const": "forbidden",
+                  "type": "string"
+                },
+                "state": {
+                  "const": "acknowledged",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "state",
+                "retry",
+                "reconnect",
+                "replay"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "close": {
+          "additionalProperties": false,
+          "properties": {
+            "clean": {
+              "type": "boolean"
+            },
+            "code": {
+              "maximum": 4999,
+              "minimum": 1000,
+              "type": "integer"
+            },
+            "reason": {
+              "maxLength": 123,
+              "type": "string"
+            }
+          },
+          "required": [
+            "clean"
+          ],
+          "type": "object"
+        },
+        "connection_mode": {
+          "enum": [
+            "serial",
+            "multiplexed"
+          ],
+          "type": "string"
+        },
+        "error_classification": {
+          "const": "cancelled",
+          "type": "string"
+        },
+        "events": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "classification": {
+                "enum": [
+                  "connection_opened",
+                  "request_sent",
+                  "acknowledgement_received",
+                  "trace_received",
+                  "result_received",
+                  "error_received",
+                  "ping_sent",
+                  "pong_received",
+                  "retry_scheduled",
+                  "reconnect_started",
+                  "connection_closed"
+                ],
+                "type": "string"
+              },
+              "elapsed_ms": {
+                "maximum": 9007199254740991,
+                "minimum": 0,
+                "type": "integer"
+              },
+              "excerpt": {
+                "oneOf": [
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "text": {
+                        "maxLength": 4096,
+                        "type": "string"
+                      },
+                      "truncated": {
+                        "const": false,
+                        "type": "boolean"
+                      }
+                    },
+                    "required": [
+                      "text",
+                      "truncated"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "sha256": {
+                        "pattern": "^[a-f0-9]{64}$",
+                        "type": "string"
+                      },
+                      "text": {
+                        "maxLength": 4096,
+                        "type": "string"
+                      },
+                      "truncated": {
+                        "const": true,
+                        "type": "boolean"
+                      }
+                    },
+                    "required": [
+                      "text",
+                      "truncated",
+                      "sha256"
+                    ],
+                    "type": "object"
+                  }
+                ]
+              },
+              "message_bytes": {
+                "maximum": 9007199254740991,
+                "minimum": 0,
+                "type": "integer"
+              },
+              "request_id": {
+                "maxLength": 128,
+                "minLength": 1,
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+                "type": "string"
+              }
+            },
+            "required": [
+              "classification",
+              "elapsed_ms"
+            ],
+            "type": "object"
+          },
+          "maxItems": 1024,
+          "type": "array"
+        },
+        "lifecycle": {
+          "enum": [
+            "per_case",
+            "per_run"
+          ],
+          "type": "string"
+        },
+        "outcome": {
+          "const": "cancelled",
+          "type": "string"
+        },
+        "request_id": {
+          "maxLength": 128,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+          "type": "string"
+        },
+        "schema": {
+          "anyOf": [
+            {
+              "const": "attest.websocket-evidence",
+              "type": "string"
+            },
+            {
+              "const": "attest.websocket-evidence/v1",
+              "type": "string"
+            }
+          ]
+        }
+      },
+      "required": [
+        "schema",
+        "request_id",
+        "lifecycle",
+        "connection_mode",
+        "acknowledgement",
+        "events",
+        "outcome",
+        "error_classification"
+      ],
+      "type": "object"
+    }
+  ]
+}

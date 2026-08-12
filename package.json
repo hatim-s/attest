@@ -21,7 +21,7 @@
     "typecheck": "turbo run typecheck",
     "lint": "eslint .",
     "test": "turbo run test --concurrency=1",
-    "generate:schemas": "bun scripts/generate-json-schema.ts",
+    "generate:schemas": "bun run --cwd packages/schemas generate",
     "format:check": "prettier --check .",
     "format": "prettier --write .",
     "lint:fix": "eslint --fix ."

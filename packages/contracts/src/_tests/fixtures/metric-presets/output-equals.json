@@ -1,0 +1,12 @@
+{
+  "schema": "attest.metric-preset",
+  "id": "output-equals",
+  "name": "Output equals",
+  "description": "Require one output or expected-data path to equal a JSON value.",
+  "required_inputs": ["value"],
+  "configurable_fields": ["path"],
+  "definition": {
+    "kind": "assertion",
+    "assertions": [{ "equals": { "path": "$.output", "value": null } }]
+  }
+}
