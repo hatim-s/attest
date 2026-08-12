@@ -22,7 +22,10 @@ const schemaIdForFile = (file: string): string =>
 /** Lists the generated runtime schema registry in deterministic identifier order. */
 const runSchemaListCommand = (): CommandResult => {
   const items = [...CONTRACT_JSON_SCHEMAS.keys()]
-    .map((file) => ({ file, id: schemaIdForFile(file) }))
+    .map((file) => {
+      const id = schemaIdForFile(file);
+      return { file, id };
+    })
     .sort((left, right) => left.id.localeCompare(right.id));
   return {
     human: items.map(({ file, id }) => `  ${id}${id === file ? '' : `  (${file})`}`).join('\n'),

@@ -45,8 +45,7 @@ const deepFreeze = <T>(value: T): DeepReadonly<T> => {
 };
 
 /**
- * Publishes defaults rather than hidden wizard prompts. Placeholder values are valid,
- * reviewable metric definitions and are always replaced by required author input before commit.
+ * Publishes defaults rather than hidden wizard prompts while accepting the transitional marker.
  */
 const parsedMetricPresets = metricPresetSchema.array().parse([
   {

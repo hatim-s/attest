@@ -150,7 +150,8 @@ const jsonlBridgeTransportSchema = z.strictObject({
 const httpTransportSchema = z.strictObject({
   kind: z.literal('http'),
   lifecycle: z.literal('external'),
-  response_mode: z.enum(['attest_envelope', 'mapped']),
+  // This slice still accepts the pre-discriminator HTTP shape until downstream emitters migrate.
+  response_mode: z.enum(['attest_envelope', 'mapped']).default('attest_envelope'),
   request: httpRequestTemplateSchema,
   extraction: responseExtractionSchema,
 });

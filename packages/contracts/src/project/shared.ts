@@ -5,10 +5,11 @@ const resourceIdSchema = z
   .regex(/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/, 'must be a lowercase slug');
 const projectIdSchema = z.ulid();
 const sha256Schema = z.string().regex(/^[a-f0-9]{64}$/, 'must be a lowercase SHA-256 digest');
-// Reject absolute paths and any complete `..` segment on POSIX or Windows separators.
+// Reject drive-qualified/absolute paths and complete `..` segments on either path separator.
 const relativePathSchema = z
   .string()
   .min(1)
+  .regex(/^(?![A-Za-z]:)/u, 'must not use a Windows drive-qualified path')
   .regex(
     /^(?![\\/])(?!(?:.*[\\/])?\.\.(?:[\\/]|$)).+$/u,
     'must be a project-relative path without parent traversal',
