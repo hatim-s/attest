@@ -16,7 +16,7 @@
 | `test`             | `@attest/conformance` | Runs cross-package contract fixtures + fake-agent smoke tests.             |
 | `typecheck`        | `@attest/conformance` | Type-checks conformance source without emitting files.                     |
 | `test:fuzz`        | `@attest/conformance` | Fuzzes contract parsers when `FUZZ=1` is set.                              |
-| `build`            | `@attest/core`        | Compiles production core artifacts to `dist/`, excluding tests.            |
+| `build`            | `@attest/core`        | Builds referenced contracts and production core artifacts.                 |
 | `typecheck`        | `@attest/core`        | Type-checks core source without emitting files.                            |
 | `test`             | `@attest/core`        | Runs core tests in one worker because process sweeps are global.           |
 | `build`            | `@attest/cli`         | Compiles production CLI artifacts to `dist/`, excluding tests.             |

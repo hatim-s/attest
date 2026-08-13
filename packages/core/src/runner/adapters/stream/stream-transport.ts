@@ -14,6 +14,7 @@ import { createRawExcerpt } from '../../internal/raw-excerpt.js';
 import { readJsonPointer } from '../http/json-pointer.js';
 import { materializeHttpRequest } from '../http/request-template.js';
 import { redactEventEvidence, redactTransportText } from '../http/redaction.js';
+import { parseRetryAfter } from '../http/retry-after.js';
 import { resolveSafeHttpUrl } from '../http/url-security.js';
 import { SseParser } from './sse-parser.js';
 import type {
@@ -29,7 +30,6 @@ const DEFAULT_IDLE_MS = 30_000;
 const DEFAULT_EVENT_COUNT = 10_000;
 const DEFAULT_EVENT_BYTES = 1024 * 1024;
 const DEFAULT_TOTAL_BYTES = 10 * 1024 * 1024;
-const MAX_RETRY_AFTER_MS = 30_000;
 
 const isJsonValue = (value: unknown): value is JsonValue => {
   if (value === null || ['string', 'number', 'boolean'].includes(typeof value)) return true;
@@ -51,18 +51,6 @@ const extractedError = (value: unknown): { code?: string; message: string } => {
     }
   }
   return { message: 'The streaming agent reported an error.' };
-};
-
-/** Parses standard Retry-After values while enforcing the common transport ceiling. */
-const parseRetryAfter = (value: string | undefined): number | undefined => {
-  if (value === undefined) return undefined;
-  if (/^\d+$/u.test(value.trim())) {
-    return Math.min(Number(value.trim()) * 1_000, MAX_RETRY_AFTER_MS);
-  }
-  const timestamp = Date.parse(value);
-  return Number.isFinite(timestamp)
-    ? Math.min(Math.max(0, timestamp - Date.now()), MAX_RETRY_AFTER_MS)
-    : undefined;
 };
 
 /** Reads one HTTP stream with separate transport/application idle clocks and hard event caps. */
@@ -189,6 +177,15 @@ const consumeResponse = async (
         return;
       }
       if (sse !== undefined) {
+        if (line === '' && sse.bufferedDataBytes > maximumEventBytes) {
+          fail(
+            new AgentInvocationError(
+              'output_cap_exceeded',
+              'Streaming response event exceeds its event byte cap.',
+            ),
+          );
+          return;
+        }
         try {
           const event = sse.push(line);
           if (event !== undefined) accept(event);
@@ -345,6 +342,7 @@ const streamOnce = async (
       },
       (response) => {
         if (timers.firstByte !== undefined) clearTimeout(timers.firstByte);
+        outgoing.setTimeout(0);
         const status = response.statusCode ?? 0;
         if (status < 200 || status >= 300) {
           response.destroy();
@@ -460,7 +458,18 @@ const streamOnce = async (
         );
       },
     );
+    outgoing.once('error', (error) =>
+      finish(() =>
+        reject(
+          new AgentInvocationError('network', 'Streaming HTTP transport failed.', { cause: error }),
+        ),
+      ),
+    );
     signal.addEventListener('abort', abort, { once: true });
+    if (signal.aborted) {
+      abort();
+      return;
+    }
     timers.firstByte = setTimeout(() => {
       outgoing.destroy();
       finish(() =>
@@ -473,13 +482,6 @@ const streamOnce = async (
         reject(new AgentInvocationError('timeout', 'Streaming HTTP connection timed out.')),
       );
     });
-    outgoing.once('error', (error) =>
-      finish(() =>
-        reject(
-          new AgentInvocationError('network', 'Streaming HTTP transport failed.', { cause: error }),
-        ),
-      ),
-    );
     if (materialized.body !== undefined) outgoing.write(materialized.body);
     outgoing.end();
   });

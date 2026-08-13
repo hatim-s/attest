@@ -19,6 +19,10 @@ const validateResolvedPlan = (
   plan: ResolvedEvalPlan,
   run: ImmutableEvalRun,
 ): string | undefined => {
+  const concurrency = run.effective_command.resolved.concurrency;
+  if (!Number.isInteger(concurrency) || concurrency < 1) {
+    return 'Resolved eval concurrency must be a positive integer.';
+  }
   const selectedCases = run.snapshot.selected_cases;
   if (selectedCases.length !== plan.cases.length) {
     return 'Resolved case count does not match the immutable eval snapshot.';
