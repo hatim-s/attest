@@ -16,7 +16,7 @@ attest eval run smoke --timeout 60s --output jsonl
 
 ## Prerequisites
 
-- Run inside a valid Attest v2 project with at least one test, agent, metric, and resolved case.
+- Run inside a valid Attest project with at least one test, agent, metric, and resolved case.
 - Ensure every environment variable referenced by the selected agent and metrics is present.
 - The project-local `.attest` path and requested JUnit parent must be safe, writable paths.
 
@@ -29,11 +29,11 @@ under `.attest/eval-runs/`; owned registry files are removed after termination.
 
 ## Expected stdout
 
-`--output json` emits one `attest.cli-result/v1` document after completion. A completed run has
+`--output json` emits one `attest.cli-result` document after completion. A completed run has
 `command: "eval.run"`, run and snapshot ids, status, summary, optional baseline/JUnit fields, and a
 `verdict` of `pass` or `fail`. A failing verdict is still `ok: true` but exits 1.
 
-`--output jsonl` emits one `attest.cli-event/v1` document per line with contiguous zero-based
+`--output jsonl` emits one `attest.cli-event` document per line with contiguous zero-based
 `sequence` values. It begins with `run_started`, emits ordered case starts and observed-order case
 completions, then exactly one `run_completed` and exactly one final `result`. A failure before
 orchestration is a single `result` event.
@@ -73,7 +73,7 @@ For a strict command request:
 
 ```json
 {
-  "schema": "attest.command-request/v2",
+  "schema": "attest.command-request",
   "command": "eval.run",
   "test_ids": ["smoke"],
   "case_ids": ["refund-basic"],
@@ -89,7 +89,7 @@ attest eval run --from-json ./eval-run.json
 
 `--from-json` conflicts with test arguments and every run-selection/output flag. The document must
 choose exactly one of non-empty `test_ids` or `all: true`; `watch` is valid only with human output.
-Use `attest schema print attest.command-request/v2 --output json` for the complete strict union.
+Use `attest schema print attest.command-request --output json` for the complete strict union.
 
 ## Exit and result semantics
 
@@ -123,7 +123,7 @@ The strict request is:
 
 ```json
 {
-  "schema": "attest.command-request/v2",
+  "schema": "attest.command-request",
   "command": "eval.cancel",
   "run_id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
   "output": "json"
@@ -161,10 +161,10 @@ stable artifact error identities.
 ## Agent-readable contract
 
 1. Read `attest help eval run --output json` and honor every conflict, implication, repeatability
-   marker, constraint, and the `attest.command-request/v2` request schema.
+   marker, constraint, and the `attest.command-request` request schema.
 2. Select JSON for one terminal envelope or JSONL for progress; never scrape human output.
 3. In JSONL, verify `schema`, exact sequence continuity, one final `result`, and
-   `result.data.exit_code` compatibility with its nested `attest.cli-result/v1`.
+   `result.data.exit_code` consistency with its nested `attest.cli-result`.
 4. Persist `run_id` and `snapshot_hash` as opaque values. Do not derive either from display text.
 5. On error, branch on stable `error.code` and `retryable`; use the catalog in
    [Errors](../reference/errors.md).

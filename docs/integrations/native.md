@@ -1,6 +1,6 @@
 # Native agent integrations
 
-Use the native `attest.agent/v1alpha1` envelope when you control the agent process or HTTP endpoint. It is the smallest integration surface: Attest sends one JSON request and expects one JSON response.
+Use the native `attest.agent-invocation` envelope when you control the agent process or HTTP endpoint. It is the smallest integration surface: Attest sends one JSON request and expects one JSON response.
 
 ## Copy-paste example
 
@@ -14,7 +14,7 @@ for await (const chunk of process.stdin) source += chunk;
 const request = JSON.parse(source);
 process.stderr.write(`handling ${request.case_id}\n`);
 process.stdout.write(JSON.stringify({
-  protocol: 'attest.agent/v1alpha1',
+  protocol: 'attest.agent-invocation',
   output: { echoed: request.input }
 }));
 EOF
@@ -46,7 +46,7 @@ attest-native-guide/
 
 ## Expected stdout
 
-Each command using `--output json` writes one `attest.cli-result/v1` document. The final document has `ok: true`, `command: "agent.test"`, and a `result.response.output` equivalent to:
+Each command using `--output json` writes one `attest.cli-result` document. The final document has `ok: true`, `command: "agent.test"`, and a `result.response.output` equivalent to:
 
 ```json
 { "echoed": { "question": "hello" } }
@@ -69,7 +69,7 @@ Write exactly one response document to stdout:
 
 ```json
 {
-  "protocol": "attest.agent/v1alpha1",
+  "protocol": "attest.agent-invocation",
   "output": "the final answer"
 }
 ```
@@ -78,7 +78,7 @@ Use `error` instead of `output` when the agent handled the request but could not
 
 ```json
 {
-  "protocol": "attest.agent/v1alpha1",
+  "protocol": "attest.agent-invocation",
   "error": { "code": "tool_unavailable", "message": "Search is unavailable." }
 }
 ```

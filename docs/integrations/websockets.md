@@ -11,7 +11,7 @@ attest agent add support-ws \
   --websocket-url ws://127.0.0.1:8790/agent \
   --websocket-lifecycle per_run \
   --connection-mode multiplexed \
-  --subprotocol attest-agent-v1 \
+  --subprotocol attest-agent \
   --header-env Authorization=SUPPORT_WS_TOKEN \
   --request-template '{"request_id":"{{request_id}}","kind":"invoke"}' \
   --request-id-pointer /request_id \
@@ -45,7 +45,7 @@ The resource stores an environment reference for `Authorization`; it never store
 
 ## Expected stdout
 
-`agent add` emits one `attest.cli-result/v1` document with `ok: true`, `command: "agent.add"`, and a redacted `definition_preview`. `show` reports transport `kind: "websocket"`, `framing: "text_json"`, `retry_boundary: "before_acknowledgement"`, and `replay_after_acknowledgement: false`.
+`agent add` emits one `attest.cli-result` document with `ok: true`, `command: "agent.add"`, and a redacted `definition_preview`. `show` reports transport `kind: "websocket"`, `framing: "text_json"`, `retry_boundary: "before_acknowledgement"`, and `replay_after_acknowledgement: false`.
 
 After starting the endpoint and exporting the token, probe it with:
 
@@ -69,9 +69,9 @@ Attest renders the one `{{request_id}}` slot, then supplies the normalized proto
 {
   "request_id": "ws-…",
   "kind": "invoke",
-  "protocol": "attest.websocket-request/v1",
+  "protocol": "attest.websocket-request",
   "request": {
-    "protocol": "attest.agent/v1alpha1",
+    "protocol": "attest.agent-invocation",
     "run_id": "…",
     "case_id": "…",
     "input": { "question": "hello" }
@@ -106,7 +106,7 @@ Optional trace messages may arrive before the terminal message when `--trace-poi
 - Network and timeout failures may retry only before an accepted acknowledgement. After acknowledgement, Attest never reconnects or replays because remote side effects may already exist.
 - The ping interval must be shorter than message idle timeout. Open and idle timeouts must not exceed the whole attempt timeout. The close timeout bounds the graceful close handshake.
 
-Ctrl-C cancels pending work, closes or destroys the connection, and returns top-level `cancelled` with exit `130`. The v2 adapter does not define an application-level remote cancellation message.
+Ctrl-C cancels pending work, closes or destroys the connection, and returns top-level `cancelled` with exit `130`. The current adapter does not define an application-level remote cancellation message.
 
 ## Security and redaction
 

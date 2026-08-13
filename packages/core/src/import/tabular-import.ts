@@ -1,5 +1,5 @@
 import {
-  CASE_SCHEMA_VERSION,
+  CASE_SCHEMA_ID,
   testCaseSchema,
   type DatasetImportMapping,
   type TestCase,
@@ -319,7 +319,7 @@ const normalizeRecord = (
           return diagnostic(
             issue.code,
             issue.message,
-            `Repair this field to match ${CASE_SCHEMA_VERSION}.`,
+            `Repair this field to match ${CASE_SCHEMA_ID}.`,
             authoredSource ?? (destinationPath === '' ? '<record>' : destinationPath),
             destinationPath,
             importLocation(sourceRecord),

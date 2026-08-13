@@ -1,6 +1,6 @@
 # cURL import and mapped HTTP
 
-Import a captured cURL request when an existing JSON HTTP API does not speak the native Attest envelope. Import parses the command as inert data, replaces selected values with typed input or secret references, and writes a normal `attest.agent/v2` resource.
+Import a captured cURL request when an existing JSON HTTP API does not speak the native Attest envelope. Import parses the command as inert data, replaces selected values with typed input or secret references, and writes a normal `attest.agent` resource.
 
 ## Copy-paste example
 
@@ -52,7 +52,7 @@ The original cURL bytes and captured bearer value are not copied into the resour
 
 ## Expected stdout
 
-Import emits one `attest.cli-result/v1` document with `ok: true`, `command: "agent.import"`, and a redacted definition preview. `show` emits the persisted resource; its header is a reference:
+Import emits one `attest.cli-result` document with `ok: true`, `command: "agent.import"`, and a redacted definition preview. `show` emits the persisted resource; its header is a reference:
 
 ```json
 "Authorization": { "from_env": "SUPPORT_API_TOKEN" }
@@ -117,7 +117,7 @@ Ctrl-C aborts DNS, connect, response, retry waits, and body reads. The CLI retur
 
 Retries cover safe transport failures and retryable HTTP statuses; agent-reported errors are results and are not retried. Use `--retries 0` for a non-idempotent direct endpoint unless the endpoint itself makes duplicate requests safe.
 
-Automation should inspect `attest.cli-result/v1`. Top-level transport failures use `invocation_failed` with exit code `4`; `details.invocation_code` distinguishes `network`, `timeout`, `http_status`, `output_cap_exceeded`, and `invalid_envelope`. Discover the current grammar and catalog with:
+Automation should inspect `attest.cli-result`. Top-level transport failures use `invocation_failed` with exit code `4`; `details.invocation_code` distinguishes `network`, `timeout`, `http_status`, `output_cap_exceeded`, and `invalid_envelope`. Discover the current grammar and catalog with:
 
 ```sh
 attest help agent import --output json

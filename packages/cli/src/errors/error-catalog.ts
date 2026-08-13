@@ -1,5 +1,5 @@
 import {
-  CLI_ERROR_CATALOG_SCHEMA_VERSION,
+  CLI_ERROR_CATALOG_SCHEMA_ID,
   cliErrorCatalogSchema,
   type CliErrorCatalog,
   type CliErrorDefinition,
@@ -104,7 +104,7 @@ const CLI_ERROR_DEFINITIONS = [
   },
   {
     code: 'project_invalid',
-    meaning: 'The discovered v2 project contains invalid authored data.',
+    meaning: 'The discovered project contains invalid authored data.',
     likely_causes: ['A resource schema, path, hash, or cross-reference check failed.'],
     retryable: false,
     exit_code: 1,
@@ -130,15 +130,15 @@ const CLI_ERROR_DEFINITIONS = [
   },
   {
     code: 'project_not_found',
-    meaning: 'No v2 project manifest was discovered within the allowed boundaries.',
+    meaning: 'No project manifest was discovered within the allowed boundaries.',
     likely_causes: ['The command is outside a project or the explicit project path is incorrect.'],
     retryable: false,
     exit_code: 1,
-    repairs: ['Run from a v2 project or pass the correct `--project <path>`.'],
+    repairs: ['Run from a project or pass the correct `--project <path>`.'],
   },
   {
     code: 'project_read_failed',
-    meaning: 'A discovered v2 project resource could not be read.',
+    meaning: 'A discovered project resource could not be read.',
     likely_causes: ['A project file is missing, unreadable, or changed during loading.'],
     retryable: false,
     exit_code: 1,
@@ -205,7 +205,7 @@ const getCliErrorDefinition = (code: string): CliErrorDefinition | undefined =>
 /** Builds and validates the deterministically ordered public CLI error registry. */
 const createCliErrorCatalog = (): CliErrorCatalog =>
   cliErrorCatalogSchema.parse({
-    schema: CLI_ERROR_CATALOG_SCHEMA_VERSION,
+    schema: CLI_ERROR_CATALOG_SCHEMA_ID,
     errors: CLI_ERROR_DEFINITIONS,
   });
 

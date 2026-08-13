@@ -101,7 +101,7 @@ class SqliteRunStore implements RunStore {
           created_at: record.createdAt,
           finished_at: null,
           status: record.status,
-          config_version: record.configVersion,
+          schema_id: record.schemaId,
           config_hash: record.configHash,
           config_json: record.configJson,
           git_sha: record.gitSha ?? null,
@@ -341,9 +341,6 @@ const openStore = async (path: string): Promise<AttestStore> => {
   }
 };
 
-/** Compatibility wrapper retained until callers migrate to the explicit AttestStore context. */
-const openRunStore = async (path: string): Promise<RunStore> => (await openStore(path)).runs;
-
 /** Opens an existing run store for inspection without creating or migrating any file. */
 const openReadonlyRunStore = async (path: string): Promise<RunStore> => {
   let handle: SqliteHandle | undefined;
@@ -370,11 +367,4 @@ const openRunStoreSnapshot = async (path: string): Promise<RunStore> => {
   }
 };
 
-export {
-  createRunIdentity,
-  openReadonlyRunStore,
-  openRunStore,
-  openRunStoreSnapshot,
-  openStore,
-  type RunStore,
-};
+export { createRunIdentity, openReadonlyRunStore, openRunStoreSnapshot, openStore, type RunStore };

@@ -11,7 +11,7 @@ type RunSummary = {
 
 type RunRecord = {
   id: string;
-  configVersion: string;
+  schemaId: string;
   configHash: string;
   configJson: string;
   createdAt: string;

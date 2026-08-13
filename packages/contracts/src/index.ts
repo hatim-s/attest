@@ -1,12 +1,12 @@
-export { AttestError } from './error.js';
-export { agentRequestSchema, agentResponseSchema } from './agent.js';
+export { AttestError } from './errors/attest-error.js';
+export { agentRequestSchema, agentResponseSchema } from './agent/protocol.js';
 export type {
   AgentErrorResponse,
   AgentRequest,
   AgentResponse,
   AgentSuccessResponse,
-} from './agent.js';
-export type { CaseOutcome, InvocationErrorCode, RawExcerpt } from './execution.js';
+} from './agent/protocol.js';
+export type { CaseOutcome, InvocationErrorCode, RawExcerpt } from './eval/execution.js';
 export {
   assertionCheckSchema,
   metricDefinitionSchema,
@@ -14,7 +14,7 @@ export {
   metricResultSchema,
   spanFilterSchema,
   toolArgumentMatcherSchema,
-} from './metric.js';
+} from './metric/protocol.js';
 export type {
   AssertionCheck,
   JsonValue,
@@ -24,16 +24,16 @@ export type {
   MetricResult,
   SpanFilter,
   ToolArgumentMatcher,
-} from './metric.js';
+} from './metric/protocol.js';
 export {
   parseAgentRequest,
   parseAgentResponse,
   parseMetricRequest,
   parseMetricResult,
   parseTrace,
-} from './parse.js';
-export type { ContractIssue, ContractWarning, ParseReport } from './parse.js';
-export type { Result } from './result.js';
+} from './schema/parse.js';
+export type { ContractIssue, ContractWarning, ParseReport } from './schema/parse.js';
+export type { Result } from './cli/result.js';
 export {
   jsonlBridgeCancelSchema,
   jsonlBridgeCancelledSchema,
@@ -41,33 +41,33 @@ export {
   jsonlBridgeOutputSchema,
   jsonlBridgeRequestSchema,
   jsonlBridgeResponseSchema,
-} from './managed-transport-v1.js';
-export type { JsonlBridgeInput, JsonlBridgeOutput } from './managed-transport-v1.js';
-export { CONTRACT_JSON_SCHEMAS, serializeContractSchema } from './json-schema.js';
-export { spanKindSchema, spanSchema, traceSchema } from './trace.js';
-export type { Span, SpanKind, Trace } from './trace.js';
+} from './agent/managed-transport.js';
+export type { JsonlBridgeInput, JsonlBridgeOutput } from './agent/managed-transport.js';
+export { CONTRACT_JSON_SCHEMAS, serializeContractSchema } from './schema/json-schema.js';
+export { spanKindSchema, spanSchema, traceSchema } from './trace/protocol.js';
+export type { Span, SpanKind, Trace } from './trace/protocol.js';
 export {
   AGENT_PROTOCOL,
-  AGENT_RESOURCE_SCHEMA_VERSION,
-  CASE_SCHEMA_VERSION,
-  CLI_ERROR_CATALOG_SCHEMA_VERSION,
-  CLI_EVENT_SCHEMA_VERSION,
-  CLI_HELP_SCHEMA_VERSION,
-  CLI_RESULT_SCHEMA_VERSION,
-  COMMAND_REQUEST_SCHEMA_VERSION,
-  DATASET_SCHEMA_VERSION,
-  EVAL_RUN_SCHEMA_VERSION,
+  AGENT_RESOURCE_SCHEMA_ID,
+  CASE_SCHEMA_ID,
+  CLI_ERROR_CATALOG_SCHEMA_ID,
+  CLI_EVENT_SCHEMA_ID,
+  CLI_HELP_SCHEMA_ID,
+  CLI_RESULT_SCHEMA_ID,
+  COMMAND_REQUEST_SCHEMA_ID,
+  DATASET_SCHEMA_ID,
+  EVAL_RUN_SCHEMA_ID,
   METRIC_PROTOCOL,
-  METRIC_PRESET_SCHEMA_VERSION,
-  METRIC_RESOURCE_SCHEMA_VERSION,
-  METRIC_TEST_FIXTURE_SCHEMA_VERSION,
-  PROJECT_SCHEMA_VERSION,
-  TEST_RESOURCE_SCHEMA_VERSION,
-  TRACE_SCHEMA_VERSION,
-  WEBSOCKET_EVIDENCE_SCHEMA_VERSION,
+  METRIC_PRESET_SCHEMA_ID,
+  METRIC_RESOURCE_SCHEMA_ID,
+  METRIC_TEST_FIXTURE_SCHEMA_ID,
+  PROJECT_SCHEMA_ID,
+  TEST_RESOURCE_SCHEMA_ID,
+  TRACE_SCHEMA_ID,
+  WEBSOCKET_EVIDENCE_SCHEMA_ID,
   WEBSOCKET_MESSAGE_PROTOCOL,
   WEBSOCKET_REQUEST_PROTOCOL,
-} from './versions.js';
+} from './schema/identifiers.js';
 export {
   agentEvidenceLimitsSchema,
   agentResourceSchema,
@@ -76,7 +76,7 @@ export {
   httpRequestTemplateSchema,
   redactionPolicySchema,
   responseExtractionSchema,
-} from './agent-resource-v2.js';
+} from './project/resources/agent.js';
 export type {
   AgentEvidenceLimits,
   AgentResource,
@@ -85,9 +85,9 @@ export type {
   HttpRequestTemplate,
   RedactionPolicy,
   ResponseExtraction,
-} from './agent-resource-v2.js';
-export { caseMetricOverrideSchema, testCaseSchema } from './case-v2.js';
-export type { CaseMetricOverride, TestCase } from './case-v2.js';
+} from './project/resources/agent.js';
+export { caseMetricOverrideSchema, testCaseSchema } from './project/resources/case.js';
+export type { CaseMetricOverride, TestCase } from './project/resources/case.js';
 export {
   cliCommandSchema,
   cliErrorCatalogSchema,
@@ -103,7 +103,7 @@ export {
   cliResultSchema,
   cliSuccessResultSchema,
   cliWarningSchema,
-} from './cli-protocol.js';
+} from './cli/protocol.js';
 export type {
   CliError,
   CliErrorCatalog,
@@ -118,50 +118,50 @@ export type {
   CliResult,
   CliSuccessResult,
   CliWarning,
-} from './cli-protocol.js';
-export { caseImportOptionsSchema, commandRequestSchema } from './command-request-v2.js';
-export type { CaseImportOptions, CommandRequest } from './command-request-v2.js';
+} from './cli/protocol.js';
+export { caseImportOptionsSchema, commandRequestSchema } from './cli/command-request.js';
+export type { CaseImportOptions, CommandRequest } from './cli/command-request.js';
 export {
   datasetImportDestinationSchema,
   datasetImportMappingSchema,
   datasetImportProvenanceSchema,
   datasetResourceSchema,
-} from './dataset-resource-v2.js';
+} from './project/resources/dataset.js';
 export type {
   DatasetImportMapping,
   DatasetImportProvenance,
   DatasetResource,
-} from './dataset-resource-v2.js';
-export { metricResourceSchema, metricResultExtractionSchema } from './metric-resource-v2.js';
-export type { MetricResource, MetricResultExtraction } from './metric-resource-v2.js';
+} from './project/resources/dataset.js';
+export { metricResourceSchema, metricResultExtractionSchema } from './project/resources/metric.js';
+export type { MetricResource, MetricResultExtraction } from './project/resources/metric.js';
 export {
   METRIC_PRESETS,
   findMetricPreset,
   metricPresetIdSchema,
   metricPresetSchema,
-} from './metric-presets.js';
-export type { MetricPreset, MetricPresetId } from './metric-presets.js';
-export { metricTestFixtureSchema } from './metric-test-fixture-v1.js';
-export type { MetricTestFixture } from './metric-test-fixture-v1.js';
+} from './metric/presets.js';
+export type { MetricPreset, MetricPresetId } from './metric/presets.js';
+export { metricTestFixtureSchema } from './metric/test-fixture.js';
+export type { MetricTestFixture } from './metric/test-fixture.js';
 export {
   datasetManifestEntrySchema,
   loadedDatasetSchema,
   projectManifestSchema,
   projectResourcesSchema,
-} from './project-v2.js';
-export type { LoadedDataset, ProjectManifest, ProjectResources } from './project-v2.js';
+} from './project/manifest.js';
+export type { LoadedDataset, ProjectManifest, ProjectResources } from './project/manifest.js';
 export {
   datasetAttachmentSchema,
   testMetricReferenceSchema,
   testPassGateSchema,
   testResourceSchema,
-} from './test-resource-v2.js';
+} from './project/resources/test.js';
 export type {
   DatasetAttachment,
   TestMetricReference,
   TestPassGate,
   TestResource,
-} from './test-resource-v2.js';
+} from './project/resources/test.js';
 export {
   durationMillisecondsSchema,
   executionDefaultsSchema,
@@ -172,8 +172,8 @@ export {
   retryPolicySchema,
   secretReferenceSchema,
   sha256Schema,
-} from './v2-shared.js';
-export type { ExecutionDefaults, SecretReference } from './v2-shared.js';
+} from './project/shared.js';
+export type { ExecutionDefaults, SecretReference } from './project/shared.js';
 export {
   evalOutputModeSchema,
   evalRunEffectiveCommandSchema,
@@ -182,7 +182,7 @@ export {
   evalRunSchema,
   evalRunSelectedCaseSchema,
   evalRunSnapshotSchema,
-} from './eval-run-v1.js';
+} from './eval/run.js';
 export type {
   EvalOutputMode,
   EvalRun,
@@ -190,17 +190,17 @@ export type {
   EvalRunRequest,
   EvalRunSelectedCase,
   EvalRunSnapshot,
-} from './eval-run-v1.js';
+} from './eval/run.js';
 export {
   evalCancelRequestSchema,
   evalCancelResultPayloadSchema,
   evalCancelResultSchema,
-} from './eval-cancel-v1.js';
+} from './eval/cancel.js';
 export type {
   EvalCancelRequest,
   EvalCancelResult,
   EvalCancelResultPayload,
-} from './eval-cancel-v1.js';
+} from './eval/cancel.js';
 export {
   evalCaseCompletedEventSchema,
   evalCaseStartedEventSchema,
@@ -211,13 +211,13 @@ export {
   evalRunCompletedEventSchema,
   evalRunStartedEventSchema,
   evalRunSummarySchema,
-} from './eval-event-v1.js';
+} from './eval/event.js';
 export type {
   EvalEvent,
   EvalEventStream,
   EvalFinalResultData,
   EvalRunSummary,
-} from './eval-event-v1.js';
+} from './eval/event.js';
 export {
   webSocketAttemptEvidenceSchema,
   webSocketConnectionModeSchema,
@@ -227,7 +227,7 @@ export {
   webSocketInvocationRequestSchema,
   webSocketRequestIdSchema,
   webSocketTransportSchema,
-} from './websocket-contract-v1.js';
+} from './agent/websocket-contract.js';
 export type {
   WebSocketAttemptEvidence,
   WebSocketConnectionMode,
@@ -236,4 +236,4 @@ export type {
   WebSocketEvidenceClassification,
   WebSocketInvocationRequest,
   WebSocketTransport,
-} from './websocket-contract-v1.js';
+} from './agent/websocket-contract.js';

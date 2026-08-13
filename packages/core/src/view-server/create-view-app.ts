@@ -6,7 +6,7 @@ import { diffRuns } from '../diff/index.js';
 import { StoreError } from '../store/index.js';
 import type { CreateViewAppOptions, ViewApp } from './types.js';
 
-const API_VERSION = 'attest.view/v1';
+const API_SCHEMA_ID = 'attest.view';
 const DEFAULT_INDEX_HTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Attest</title></head><body><main><h1>Attest</h1><p>The dashboard bundle is not installed.</p></main></body></html>`;
 
 const parseLimit = (value: string | undefined): number | undefined => {
@@ -25,7 +25,7 @@ const tokenMatches = (presented: string | undefined, expected: string): boolean 
   return candidate.length === expectedBuffer.length && timingSafeEqual(candidate, expectedBuffer);
 };
 
-/** Creates the versioned loopback API without owning sockets or the SQLite lifecycle. */
+/** Creates the loopback dashboard interface without owning sockets or the SQLite lifecycle. */
 const createViewApp = (options: CreateViewAppOptions): ViewApp => {
   const app = new Hono();
 
@@ -36,7 +36,7 @@ const createViewApp = (options: CreateViewAppOptions): ViewApp => {
     await next();
   });
 
-  app.use('/api/v1/*', async (context, next) => {
+  app.use('/api/*', async (context, next) => {
     if (['GET', 'HEAD', 'OPTIONS'].includes(context.req.method)) {
       await next();
       return;
@@ -60,41 +60,41 @@ const createViewApp = (options: CreateViewAppOptions): ViewApp => {
   });
 
   app.get('/', (context) => context.html(options.indexHtml ?? DEFAULT_INDEX_HTML));
-  app.get('/api/v1/health', (context) => context.json({ api_version: API_VERSION, ok: true }));
-  app.get('/api/v1/runs', async (context) => {
+  app.get('/api/health', (context) => context.json({ schema: API_SCHEMA_ID, ok: true }));
+  app.get('/api/runs', async (context) => {
     const runs = await options.store.runs.listRuns({
       limit: parseLimit(context.req.query('limit')),
     });
-    return context.json({ api_version: API_VERSION, runs });
+    return context.json({ schema: API_SCHEMA_ID, runs });
   });
-  app.get('/api/v1/runs/:runId', async (context) => {
+  app.get('/api/runs/:runId', async (context) => {
     const run = await options.store.runs.getRun(context.req.param('runId'));
-    return context.json({ api_version: API_VERSION, run });
+    return context.json({ schema: API_SCHEMA_ID, run });
   });
-  app.get('/api/v1/runs/:runId/cases', async (context) => {
+  app.get('/api/runs/:runId/cases', async (context) => {
     const page = await options.store.runs.listCaseSummaries(context.req.param('runId'), {
       cursor: context.req.query('cursor'),
       limit: parseLimit(context.req.query('limit')),
     });
-    return context.json({ api_version: API_VERSION, ...page });
+    return context.json({ schema: API_SCHEMA_ID, ...page });
   });
-  app.get('/api/v1/runs/:runId/cases/:suiteName/:caseId', async (context) => {
+  app.get('/api/runs/:runId/cases/:suiteName/:caseId', async (context) => {
     const caseRecord = await options.store.runs.getCase(
       context.req.param('runId'),
       context.req.param('suiteName'),
       context.req.param('caseId'),
     );
-    return context.json({ api_version: API_VERSION, case: caseRecord });
+    return context.json({ schema: API_SCHEMA_ID, case: caseRecord });
   });
-  app.get('/api/v1/diffs/:baseRunId/:candidateRunId', async (context) => {
+  app.get('/api/diffs/:baseRunId/:candidateRunId', async (context) => {
     const diff = await diffRuns(
       options.store.runs,
       context.req.param('baseRunId'),
       context.req.param('candidateRunId'),
     );
-    return context.json({ api_version: API_VERSION, diff });
+    return context.json({ schema: API_SCHEMA_ID, diff });
   });
-  app.post('/api/v1/shutdown', (context) => {
+  app.post('/api/shutdown', (context) => {
     options.onShutdown?.();
     return context.body(null, 204);
   });
@@ -121,4 +121,4 @@ const createViewApp = (options: CreateViewAppOptions): ViewApp => {
   return app;
 };
 
-export { API_VERSION, createViewApp };
+export { API_SCHEMA_ID, createViewApp };

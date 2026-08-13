@@ -1,18 +1,9 @@
 import { lstat, realpath, stat } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
 
-import {
-  ProjectLoadError,
-  createLegacyV1ProjectError,
-  type ProjectDiagnostic,
-} from './project-errors.js';
+import { ProjectLoadError, type ProjectDiagnostic } from './project-errors.js';
 
 const PROJECT_MANIFEST_FILE = 'attest.project.json' as const;
-const LEGACY_CONFIG_FILES = [
-  'attest.config.json',
-  'attest.config.yaml',
-  'attest.config.yml',
-] as const;
 
 type DiscoverProjectOptions = {
   project?: string;
@@ -87,14 +78,6 @@ const pathExists = async (path: string, source: string): Promise<boolean> => {
   }
 };
 
-/** Finds the first historical v1 config name in deterministic precedence order. */
-const findLegacyConfig = async (directory: string): Promise<string | undefined> => {
-  for (const fileName of LEGACY_CONFIG_FILES) {
-    if (await pathExists(join(directory, fileName), fileName)) return fileName;
-  }
-  return undefined;
-};
-
 /** Compares mount identities without leaking raw filesystem errors through discovery. */
 const sharesDevice = async (directory: string, parent: string): Promise<boolean> => {
   try {
@@ -111,7 +94,7 @@ const sharesDevice = async (directory: string, parent: string): Promise<boolean>
   }
 };
 
-/** Discovers a v2 project without crossing a mount or Git worktree boundary implicitly. */
+/** Discovers a project without crossing a mount or Git worktree boundary implicitly. */
 const discoverProject = async (
   options: DiscoverProjectOptions = {},
 ): Promise<DiscoveredProject> => {
@@ -123,11 +106,7 @@ const discoverProject = async (
     );
     const manifestPath = join(requestedRoot, PROJECT_MANIFEST_FILE);
     if (!(await pathExists(manifestPath, PROJECT_MANIFEST_FILE))) {
-      const legacyConfig = await findLegacyConfig(requestedRoot);
-      if (legacyConfig !== undefined) {
-        throw createLegacyV1ProjectError('project_not_found', legacyConfig);
-      }
-      throw new ProjectLoadError('project_not_found', 'No Attest v2 project was found.', [
+      throw new ProjectLoadError('project_not_found', 'No Attest project was found.', [
         missingDiagnostic(PROJECT_MANIFEST_FILE, 'manifest does not exist in the explicit project'),
       ]);
     }
@@ -140,11 +119,6 @@ const discoverProject = async (
     if (await pathExists(manifestPath, PROJECT_MANIFEST_FILE)) {
       return { manifestPath, root: current };
     }
-    const legacyConfig = await findLegacyConfig(current);
-    if (legacyConfig !== undefined) {
-      throw createLegacyV1ProjectError('project_not_found', legacyConfig);
-    }
-
     // A .git file denotes a linked worktree or submodule; a directory denotes a regular worktree.
     if (await pathExists(join(current, '.git'), '.git')) {
       break;
@@ -160,7 +134,7 @@ const discoverProject = async (
     current = parent;
   }
 
-  throw new ProjectLoadError('project_not_found', 'No Attest v2 project was found.', [
+  throw new ProjectLoadError('project_not_found', 'No Attest project was found.', [
     missingDiagnostic(
       PROJECT_MANIFEST_FILE,
       `manifest was not found from ${basename(workingDirectory)} to the discovery boundary`,
@@ -169,7 +143,6 @@ const discoverProject = async (
 };
 
 export {
-  LEGACY_CONFIG_FILES,
   PROJECT_MANIFEST_FILE,
   discoverProject,
   type DiscoverProjectOptions,

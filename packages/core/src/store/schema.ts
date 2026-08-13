@@ -1,20 +1,15 @@
-import type { SpanKind } from '@attest/contracts';
+import type { InvocationErrorCode, SpanKind } from '@attest/contracts';
 
 import type { CacheKind } from './cache.js';
-import type {
-  CaseOutcome,
-  RunStatus,
-  StoredInvocationErrorCode,
-  StoredMetricEvaluation,
-} from './types.js';
+import type { CaseOutcome, StoredMetricEvaluation, RunStatus } from './types.js';
 
-/** Kysely row shape for the schema-v1 runs table (PLAN 1S.2). */
+/** Kysely row shape for the initial schema runs table (PLAN 1S.2). */
 interface RunsTable {
   id: string;
   created_at: string;
   finished_at: string | null;
   status: RunStatus;
-  config_version: string;
+  schema_id: string;
   config_hash: string;
   config_json: string;
   git_sha: string | null;
@@ -23,7 +18,7 @@ interface RunsTable {
   summary_json: string | null;
 }
 
-/** Kysely row shape for the schema-v1 cases table (PLAN 1S.2). */
+/** Kysely row shape for the initial schema cases table (PLAN 1S.2). */
 interface CasesTable {
   id: string;
   run_id: string;
@@ -35,7 +30,7 @@ interface CasesTable {
   input_hash: string;
   request_json: string;
   response_json: string | null;
-  error_code: StoredInvocationErrorCode | null;
+  error_code: InvocationErrorCode | null;
   error_message: string | null;
   warnings_json: string;
   diagnostics_json: string;
@@ -44,7 +39,7 @@ interface CasesTable {
   trace_json: string | null;
 }
 
-/** Kysely row shape for the schema-v1 metric_results table (PLAN 1S.2). */
+/** Kysely row shape for the initial schema metric_results table (PLAN 1S.2). */
 interface MetricResultsTable {
   id: string;
   case_row_id: string;
@@ -60,7 +55,7 @@ interface MetricResultsTable {
   duration_ms: number | null;
 }
 
-/** Kysely row shape for the schema-v1 spans table (PLAN 1S.2). */
+/** Kysely row shape for the initial schema spans table (PLAN 1S.2). */
 interface SpansTable {
   id: string;
   case_row_id: string;
@@ -75,7 +70,7 @@ interface SpansTable {
   model_name: string | null;
 }
 
-/** Kysely row shape for the schema-v1 response_cache table (PLAN 1D.4). */
+/** Kysely row shape for the initial schema response_cache table (PLAN 1D.4). */
 interface ResponseCacheTable {
   cache_key: string;
   kind: CacheKind;
@@ -84,7 +79,7 @@ interface ResponseCacheTable {
   last_used_at: string;
 }
 
-/** Defines the complete schema-v1 database surface consumed by Kysely (PLAN 1S.2). */
+/** Defines the complete initial schema database surface consumed by Kysely (PLAN 1S.2). */
 interface Database {
   runs: RunsTable;
   cases: CasesTable;

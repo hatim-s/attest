@@ -1,6 +1,6 @@
 # File layout
 
-An Attest v2 project separates inspectable authored resources from local runtime state:
+An Attest project separates inspectable authored resources from local runtime state:
 
 ```text
 project/
@@ -32,7 +32,7 @@ probe or evaluation creates `.attest/runs.db`.
 
 ## `attest.project.json`
 
-This generated `attest.project/v2` manifest is the project discovery root and content-addressed
+This generated `attest.project` manifest is the project discovery root and content-addressed
 index. It contains the project id/name/defaults and deterministic lists of agents, tests, datasets,
 and metrics. Non-dataset entries contain id, schema, canonical path, and content hash. Dataset
 entries separately bind JSONL data and metadata paths/hashes.
@@ -46,32 +46,31 @@ The canonical paths are fixed:
 - `attest/datasets/<id>.meta.json`
 
 Project discovery walks parent directories only within its allowed filesystem boundary. Pass
-`--project <dir>` to choose an explicit root. A v1 `attest.config.json`, YAML variant, or legacy
-manifest shape is rejected; it is never executed or converted and does not create `.attest` state.
+`--project <dir>` to choose an explicit root.
 
 ## Authored resource files
 
 ### Agents
 
-`attest/agents/<id>.json` is one strict `attest.agent/v2` resource. It describes exactly one
+`attest/agents/<id>.json` is one strict `attest.agent` resource. It describes exactly one
 transport, lifecycle, capabilities, retry/time/limit policies, extraction, redaction, and
 environment-variable references. Secret values are not an authored format.
 
 ### Tests and direct cases
 
-`attest/tests/<id>.json` is one strict `attest.test/v2` resource. It contains its agent reference,
-metric references, direct `attest.case/v2` objects, and dataset attachments. Direct cases remain in
+`attest/tests/<id>.json` is one strict `attest.test` resource. It contains its agent reference,
+metric references, direct `attest.case` objects, and dataset attachments. Direct cases remain in
 this JSON resource; they are not separate files.
 
 ### Metrics
 
-`attest/metrics/<id>.json` is one strict `attest.metric/v2` assertion, judge, executable, or HTTP
+`attest/metrics/<id>.json` is one strict `attest.metric` assertion, judge, executable, or HTTP
 definition. Test-specific metric thresholds are references in the test resource.
 
 ### Datasets
 
-`attest/datasets/<id>.jsonl` stores one canonical `attest.case/v2` object per line in deterministic
-order. `attest/datasets/<id>.meta.json` stores the `attest.dataset/v2` identity, case count, case
+`attest/datasets/<id>.jsonl` stores one canonical `attest.case` object per line in deterministic
+order. `attest/datasets/<id>.meta.json` stores the `attest.dataset` identity, case count, case
 schema, name, and import provenance: source type/content hash, mappings, optional key field, real
 import timestamp, and read/insert/update/skip counts.
 
@@ -96,7 +95,7 @@ validates that `.attest` and the database are not unsafe symlink escapes.
 
 ### Mutation lock
 
-`.attest/project.lock` is an exclusive `attest.project-lock/v1` record containing hostname, pid,
+`.attest/project.lock` is an exclusive `attest.project-lock` record containing hostname, pid,
 process-start identity, creation time, and an unguessable owner token. Writers never steal an
 existing lock. A live lock means wait; an unprovable or malformed lock is not safe to delete. The
 fixed-base CLI can classify a proven-stale lock but does not register a `project unlock` command,
@@ -107,7 +106,7 @@ Dry runs do not create `.attest`, acquire this lock, recover journals, or write 
 ### Transaction journals
 
 `.attest/transactions/<transaction-id>/journal.json` is a durable
-`attest.project-transaction/v1` recovery record. Its directory may also contain exact backups and
+`attest.project-transaction` recovery record. Its directory may also contain exact backups and
 staged next bytes. Resource files publish before the manifest, so the manifest is the commit point.
 A later mutation/read that permits recovery either completes a manifest-committed transaction or
 rolls back a pre-manifest transaction when ownership can be proven.
@@ -130,7 +129,7 @@ Artifacts selected by a caller are outside the fixed authored tree:
 - `attest eval run --junit <path>` writes JUnit XML atomically.
 - `attest report <run-id> --output <path>` writes a self-contained HTML report and refuses to
   replace it without `--force`.
-- `attest trace convert <input> --output <path>` writes normalized `attest.trace/v1alpha1` JSON and
+- `attest trace convert <input> --output <path>` writes normalized `attest.trace` JSON and
   also refuses replacement without `--force`.
 - `attest view` serves a read snapshot; it does not author project resources.
 

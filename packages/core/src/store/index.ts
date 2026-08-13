@@ -1,6 +1,6 @@
 export { exportRunBundle, readRunBundle } from './bundle-io.js';
 export {
-  BUNDLE_VERSION,
+  BUNDLE_SCHEMA_ID,
   type BundleCase,
   type BundleFooter,
   type BundleHeader,
@@ -12,7 +12,6 @@ export { toStoredCaseExecution } from './from-runner.js';
 export {
   createRunIdentity,
   openReadonlyRunStore,
-  openRunStore,
   openRunStoreSnapshot,
   openStore,
 } from './run-store.js';
@@ -22,7 +21,6 @@ export {
   type CaseOutcome,
   type CaseRecord,
   type CaseSummary,
-  type InvocationError,
   type RunMetadata,
   type RunIdentity,
   type RunRecord,
@@ -31,7 +29,6 @@ export {
   type RunStore,
   type StoredCaseExecution,
   type StoredDiagnostics,
-  type StoredInvocationErrorCode,
   type StoredMetricEvaluation,
   type StoredAttempt,
 } from './types.js';

@@ -1,9 +1,8 @@
-import { AttestCliError, type CliErrorCode } from '../errors.js';
+import { AttestCliError, type CliErrorCode } from '../errors/index.js';
 
 type ProjectDiagnosticCode =
   | 'content_hash_mismatch'
   | 'json_invalid'
-  | 'legacy_v1'
   | 'path_unsafe'
   | 'source_missing'
   | 'source_unreadable'
@@ -22,15 +21,11 @@ type ProjectLoadErrorOptions = ErrorOptions & {
   summaryOnly?: boolean;
 };
 
-const BREAKING_V2_MESSAGE = 'Attest v2 does not execute v1 configuration or project inputs.';
-const BREAKING_V2_HINT =
-  'Create a v2 project with `attest project init`; use `attest eval run` as the only execution command.';
-
 /** Formats one diagnostic without including authored values or parser excerpts. */
 const formatProjectDiagnostic = ({ code, message, path, source }: ProjectDiagnostic): string =>
   `${source}${path === undefined ? '' : `:${path}`} [${code}] ${message}`;
 
-/** Carries every safe, source-addressed failure found while reading one v2 project. */
+/** Carries every safe, source-addressed failure found while reading one project. */
 class ProjectLoadError extends AttestCliError {
   readonly diagnostics: readonly ProjectDiagnostic[];
 
@@ -63,23 +58,8 @@ class ProjectLoadError extends AttestCliError {
   }
 }
 
-/** Creates the single stable rejection used for every recognized v1 project input. */
-const createLegacyV1ProjectError = (
-  code: Extract<CliErrorCode, 'project_invalid' | 'project_not_found'>,
-  source: string,
-): ProjectLoadError =>
-  new ProjectLoadError(
-    code,
-    BREAKING_V2_MESSAGE,
-    [{ code: 'legacy_v1', message: 'legacy v1 input is not supported', source }],
-    { hint: BREAKING_V2_HINT, path: source, summaryOnly: true },
-  );
-
 export {
-  BREAKING_V2_HINT,
-  BREAKING_V2_MESSAGE,
   ProjectLoadError,
-  createLegacyV1ProjectError,
   formatProjectDiagnostic,
   type ProjectDiagnostic,
   type ProjectDiagnosticCode,

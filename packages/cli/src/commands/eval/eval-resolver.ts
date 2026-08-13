@@ -13,7 +13,7 @@ import {
   type TestResource,
 } from '@attest/contracts';
 
-import { AttestCliError } from '../../errors.js';
+import { AttestCliError } from '../../errors/index.js';
 import { hashCanonicalJson, type JsonValue } from '../../project/canonical-project.js';
 import type { LoadedProject } from '../../project/load-project.js';
 
@@ -102,7 +102,7 @@ const duplicateValues = (values: readonly string[]): string[] => {
 const formatSchemaPath = (path: readonly PropertyKey[]): string =>
   path.length === 0 ? '<root>' : path.map(String).join('.');
 
-/** Revalidates the v2 read model and its hash coverage without discovering any v1 config. */
+/** Revalidates the project read model and its hash coverage. */
 const validateLoadedProject = (project: LoadedProject): LoadedProject => {
   const candidate = project as Partial<LoadedProject>;
   const parsed = projectResourcesSchema.safeParse({
@@ -119,7 +119,7 @@ const validateLoadedProject = (project: LoadedProject): LoadedProject => {
     }));
     throw new AttestCliError(
       'project_invalid',
-      'Eval resolution requires a complete attest.project/v2 project; v1 configs are not discovered or accepted.',
+      'Eval resolution requires a complete attest.project project.',
       { details: { diagnostics } },
     );
   }
@@ -127,7 +127,7 @@ const validateLoadedProject = (project: LoadedProject): LoadedProject => {
   if (typeof candidate.projectHash !== 'string' || !SHA256_PATTERN.test(candidate.projectHash)) {
     throw new AttestCliError(
       'project_invalid',
-      'The loaded v2 project is missing its canonical project hash.',
+      'The loaded project is missing its canonical project hash.',
     );
   }
 
@@ -157,7 +157,7 @@ const validateLoadedProject = (project: LoadedProject): LoadedProject => {
   if (hashFailures.length > 0) {
     throw new AttestCliError(
       'project_invalid',
-      'The loaded v2 project is missing canonical content hashes required for an eval snapshot.',
+      'The loaded project is missing canonical content hashes required for an eval snapshot.',
       { details: { resources: hashFailures } },
     );
   }
@@ -165,7 +165,7 @@ const validateLoadedProject = (project: LoadedProject): LoadedProject => {
   return project;
 };
 
-/** Parses only the canonical eval.run request and rejects the removed top-level run alias. */
+/** Parses only the canonical eval.run request. */
 const parseEvalRequest = (request: EvalRunRequest): EvalRunRequest => {
   if (
     request !== null &&
@@ -175,23 +175,19 @@ const parseEvalRequest = (request: EvalRunRequest): EvalRunRequest => {
   ) {
     throw new AttestCliError(
       'cli_missing_input',
-      'Select one or more exact test ids or pass `--all`; eval never falls back to v1 discovery.',
+      'Select one or more exact test ids or pass `--all`.',
     );
   }
   const parsed = evalRunRequestSchema.safeParse(request);
   if (!parsed.success) {
-    throw new AttestCliError(
-      'cli_usage',
-      'Expected a canonical `attest eval run` v2 request; `attest run` and v1 aliases are not supported.',
-      {
-        details: {
-          issues: parsed.error.issues.map((issue) => ({
-            message: issue.message,
-            path: formatSchemaPath(issue.path),
-          })),
-        },
+    throw new AttestCliError('cli_usage', 'Expected a canonical `attest eval run` request.', {
+      details: {
+        issues: parsed.error.issues.map((issue) => ({
+          message: issue.message,
+          path: formatSchemaPath(issue.path),
+        })),
       },
-    );
+    });
   }
   return parsed.data;
 };
@@ -306,7 +302,7 @@ const positiveInteger = (value: number | undefined, fallback: number, label: str
 };
 
 /**
- * Resolves one validated v2 project and canonical eval request into immutable, execution-ready
+ * Resolves one validated project and canonical eval request into immutable, execution-ready
  * resource/case inputs plus the content-addressed snapshot metadata. It performs no I/O or writes.
  */
 const resolveEvalRun = (
@@ -342,13 +338,9 @@ const resolveEvalRun = (
   const selectedTestIds =
     'all' in request ? project.project.resources.tests.map(({ id }) => id) : [...request.test_ids];
   if (selectedTestIds.length === 0) {
-    throw new AttestCliError(
-      'resource_not_found',
-      'No v2 tests are defined for `--all` selection.',
-      {
-        details: { resource_type: 'test' },
-      },
-    );
+    throw new AttestCliError('resource_not_found', 'No tests are defined for `--all` selection.', {
+      details: { resource_type: 'test' },
+    });
   }
   const missingTestIds = selectedTestIds.filter((id) => !testsById.has(id));
   if (missingTestIds.length > 0) {

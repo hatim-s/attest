@@ -1,20 +1,13 @@
 import { lstat, realpath } from 'node:fs/promises';
-import { isAbsolute, relative, resolve, sep } from 'node:path';
+import { isAbsolute, resolve } from 'node:path';
 
+import { isProjectPath } from '../project-path.js';
 import { ProjectTransactionError } from './project-transaction-error.js';
 
 const getErrorCode = (error: unknown): string | undefined =>
   error instanceof Error && 'code' in error && typeof Reflect.get(error, 'code') === 'string'
     ? (Reflect.get(error, 'code') as string)
     : undefined;
-
-const isContainedPath = (root: string, candidate: string): boolean => {
-  const fromRoot = relative(root, candidate);
-  return (
-    fromRoot === '' ||
-    (!isAbsolute(fromRoot) && fromRoot !== '..' && !fromRoot.startsWith(`..${sep}`))
-  );
-};
 
 /** Rejects absolute, normalized-ambiguous, and internal transaction destination paths. */
 const assertProjectRelativePath = (path: string): void => {
@@ -39,7 +32,7 @@ const resolveSafeProjectPath = async (root: string, path: string): Promise<strin
   assertProjectRelativePath(path);
   const resolvedRoot = await realpath(root);
   const destination = resolve(resolvedRoot, path);
-  if (!isContainedPath(resolvedRoot, destination)) {
+  if (!isProjectPath(resolvedRoot, destination)) {
     throw new ProjectTransactionError('project_invalid', 'Transaction path leaves the project.', {
       path,
     });

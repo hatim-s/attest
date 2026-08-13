@@ -1,12 +1,12 @@
 # Resource model
 
-Attest v2 keeps authored intent in reviewable files and execution history in a separate
+Attest keeps authored intent in reviewable files and execution history in a separate
 local run store. The project manifest indexes four reusable resource types: agents,
 tests, datasets, and metrics.
 
 ## Project manifest
 
-`attest.project.json` is an `attest.project/v2` document. It contains the project id and
+`attest.project.json` is an `attest.project` document. It contains the project id and
 name, optional execution defaults, and four resource lists. Each list entry records a
 stable resource id, canonical project-relative path, schema id, and integrity hash.
 Dataset entries separately hash metadata and JSONL data.
@@ -23,13 +23,13 @@ references, hashes, canonical paths, and duplicate ids.
 
 ## Authored resources
 
-| Resource         | Schema              | Canonical path                   | Purpose                                                                    |
-| ---------------- | ------------------- | -------------------------------- | -------------------------------------------------------------------------- |
-| Agent            | `attest.agent/v2`   | `attest/agents/<id>.json`        | Transport and invocation policy for one reusable agent                     |
-| Test             | `attest.test/v2`    | `attest/tests/<id>.json`         | Agent reference, direct cases, dataset attachments, metrics, and pass gate |
-| Dataset metadata | `attest.dataset/v2` | `attest/datasets/<id>.meta.json` | Dataset identity, case schema, provenance, and row count                   |
-| Dataset cases    | `attest.case/v2`    | `attest/datasets/<id>.jsonl`     | One case document per line                                                 |
-| Metric           | `attest.metric/v2`  | `attest/metrics/<id>.json`       | Assertion, judge, executable, or HTTP scoring definition                   |
+| Resource         | Schema           | Canonical path                   | Purpose                                                                    |
+| ---------------- | ---------------- | -------------------------------- | -------------------------------------------------------------------------- |
+| Agent            | `attest.agent`   | `attest/agents/<id>.json`        | Transport and invocation policy for one reusable agent                     |
+| Test             | `attest.test`    | `attest/tests/<id>.json`         | Agent reference, direct cases, dataset attachments, metrics, and pass gate |
+| Dataset metadata | `attest.dataset` | `attest/datasets/<id>.meta.json` | Dataset identity, case schema, provenance, and row count                   |
+| Dataset cases    | `attest.case`    | `attest/datasets/<id>.jsonl`     | One case document per line                                                 |
+| Metric           | `attest.metric`  | `attest/metrics/<id>.json`       | Assertion, judge, executable, or HTTP scoring definition                   |
 
 Ids use lower-case kebab case and are unique within a resource type. References use ids,
 not filesystem paths: a test names one `agent_id`, attaches datasets by `dataset_id`, and
@@ -46,7 +46,7 @@ JSON-valued `input`; it may also define JSON-valued `expected`, parameters, tags
 per-case metric overrides. Direct cases are convenient for small sets. Imports above
 100 direct cases remain valid but warn that a named dataset is easier to reuse.
 
-A dataset separates `attest.dataset/v2` metadata from `attest.case/v2` JSONL rows. Its
+A dataset separates `attest.dataset` metadata from `attest.case` JSONL rows. Its
 provenance can record source type, field mapping, source hash, key field, import time,
 and read/insert/update/skip counts. Generated case ids exclude dataset identity, so an
 unchanged source row keeps its id when the dataset moves.
@@ -73,12 +73,12 @@ Useful controls are:
 
 ```text
 --dry-run                    return the semantic diff and write nothing
---from-json <path|->         read an attest.command-request/v2 document
+--from-json <path|->         read an attest.command-request document
 --if-project-hash <sha256>   reject the mutation if the project changed
 ```
 
 For coding agents, retain `project_hash_after` from the last successful
-`attest.cli-result/v1` document and pass it to the next mutation. A stale hash returns
+`attest.cli-result` document and pass it to the next mutation. A stale hash returns
 `project_changed`, exit code `3`, and current-state repair context rather than
 overwriting another actor's work.
 
@@ -89,22 +89,21 @@ from the runtime definitions. Discover them without browsing the repository:
 
 ```bash
 attest schema list --output json
-attest schema print attest.project/v2 --output json
-attest schema print attest.agent/v2 --output json
-attest schema print attest.test/v2 --output json
-attest schema print attest.dataset/v2 --output json
-attest schema print attest.metric/v2 --output json
-attest schema print attest.command-request/v2 --output json
+attest schema print attest.project --output json
+attest schema print attest.agent --output json
+attest schema print attest.test --output json
+attest schema print attest.dataset --output json
+attest schema print attest.metric --output json
+attest schema print attest.command-request --output json
 ```
 
 The [schema reference](../reference/schemas.md) maps all ids to files, including
-`attest.cli-result/v1`, `attest.cli-event/v1`, `attest.agent/v1alpha1`,
-`attest.metric/v1alpha1`, and `attest.trace/v1alpha1`. Runtime validation additionally
+`attest.cli-result`, `attest.cli-event`, `attest.agent-invocation`,
+`attest.metric-evaluation`, and `attest.trace`. Runtime validation additionally
 enforces invariants that JSON Schema alone cannot express, such as reference resolution,
 canonical paths, hash integrity, and collision checks.
 
-## v2 boundary
+## Execution
 
-The legacy single-file `attest.config.json` model is not executed or imported. v2 uses
-one project manifest plus reusable resource files, calls suites “tests,” and runs them
-only with `attest eval run`. There is no top-level `attest run` alias.
+Attest uses one project manifest plus reusable resource files and runs tests only with
+`attest eval run`. There is no top-level `attest run` alias.

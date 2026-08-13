@@ -11,7 +11,7 @@ process.stdin.setEncoding('utf8');
 for await (const chunk of process.stdin) input += chunk;
 const request = JSON.parse(input);
 // Echo the normalized request input through the native agent response protocol.
-process.stdout.write(JSON.stringify({ protocol: 'attest.agent/v1alpha1', output: request.input }));
+process.stdout.write(JSON.stringify({ protocol: 'attest.agent-invocation', output: request.input }));
 EOF
 printf '%s\n' '{"id":"refund-basic","input":"refund policy","expected":"refund policy"}' > cases.jsonl
 
@@ -43,7 +43,7 @@ is created only by `attest eval run smoke --output json`.
 ## Expected stdout
 
 Each `--output json` command writes exactly one JSON document and no progress prose to
-stdout. Every document has `"schema":"attest.cli-result/v1"`, `ok`, and the exact
+stdout. Every document has `"schema":"attest.cli-result"`, `ok`, and the exact
 command id. In order, the ids are `project.init`, `agent.add`, `agent.test`, `metric.add`,
 `test.add`, `test.case.import`, and `eval.run`. Successful documents also contain
 `project_hash_before`, `project_hash_after`, `result`, and `warnings`.
@@ -60,9 +60,9 @@ journey.
 
 ## What the commands created
 
-`attest.project.json` is the `attest.project/v2` manifest. It indexes canonical resource
+`attest.project.json` is the `attest.project` manifest. It indexes canonical resource
 files and their content hashes. The `support` agent uses the native
-`attest.agent/v1alpha1` stdin/stdout protocol. The `exact` metric compares output with
+`attest.agent-invocation` stdin/stdout protocol. The `exact` metric compares output with
 the literal expected value. The `smoke` test binds the agent and metric, and the JSONL
 import adds the `refund-basic` case.
 

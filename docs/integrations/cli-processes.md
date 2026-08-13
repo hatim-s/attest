@@ -23,7 +23,7 @@ for await (const line of lines) {
   send({
     type: 'response',
     request_id: frame.request_id,
-    response: { protocol: 'attest.agent/v1alpha1', output: frame.request.input }
+    response: { protocol: 'attest.agent-invocation', output: frame.request.input }
   });
 }
 EOF
@@ -57,7 +57,7 @@ The generated transport has `kind: "jsonl_bridge"`, `lifecycle: "per_run"`, `con
 
 ## Expected stdout
 
-The final `attest.cli-result/v1` document has `ok: true`, `command: "agent.test"`, `result.transport: "jsonl_bridge"`, and `result.response.output: "hello"`.
+The final `attest.cli-result` document has `ok: true`, `command: "agent.test"`, `result.transport: "jsonl_bridge"`, and `result.response.output: "hello"`.
 
 The bridge itself writes one JSON object per line to stdout. Its logs must go to stderr.
 
@@ -77,7 +77,7 @@ Attest sends one of these input frames per line:
   "type": "request",
   "request_id": "req-…",
   "request": {
-    "protocol": "attest.agent/v1alpha1",
+    "protocol": "attest.agent-invocation",
     "run_id": "…",
     "case_id": "…",
     "input": "hello"
@@ -95,7 +95,7 @@ Reply with the same `request_id`:
 {
   "type": "response",
   "request_id": "req-…",
-  "response": { "protocol": "attest.agent/v1alpha1", "output": "hello" }
+  "response": { "protocol": "attest.agent-invocation", "output": "hello" }
 }
 ```
 
@@ -111,7 +111,7 @@ Choose `--bridge-concurrency serial` unless the bridge deliberately supports cor
 
 On case timeout or cancellation, Attest sends the in-band `cancel` frame and waits `--cancel-grace`. A bridge should stop the corresponding work and answer `cancelled` promptly. If it does not settle in-band cancellation, Attest fails the session and terminates the process tree as the fallback. Closing the eval run always closes the run-scoped process.
 
-Use `--timeout` to bound an individual request. A complete `attest.agent/v2` JSON import can additionally set `timeouts.run_ms` and evidence limits when the run-scoped defaults need tightening.
+Use `--timeout` to bound an individual request. A complete `attest.agent` JSON import can additionally set `timeouts.run_ms` and evidence limits when the run-scoped defaults need tightening.
 
 ## Background CLI service
 

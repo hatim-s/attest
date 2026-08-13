@@ -1,7 +1,7 @@
 import type { CaseRecord, CaseSummary, RunDiff, RunRecord } from './types.js';
 import { getReportData } from '../report/report-data.js';
 
-type ApiEnvelope = { api_version: 'attest.view/v1' };
+type ApiEnvelope = { schema: 'attest.view' };
 type ApiErrorEnvelope = { error?: { code?: string; message?: string } };
 
 /** Reads one JSON response and turns the server error envelope into a useful exception. */
@@ -20,7 +20,7 @@ const segment = (value: string): string => encodeURIComponent(value);
 const listRuns = async (): Promise<RunRecord[]> => {
   const report = getReportData();
   if (report !== undefined) return [report.run];
-  const body = await fetchJson<ApiEnvelope & { runs: RunRecord[] }>('/api/v1/runs?limit=100');
+  const body = await fetchJson<ApiEnvelope & { runs: RunRecord[] }>('/api/runs?limit=100');
   return body.runs;
 };
 
@@ -30,7 +30,7 @@ const getRun = async (runId: string): Promise<RunRecord> => {
     if (report.run.id === runId) return report.run;
     throw new Error(`Run ${runId} is not included in this static report.`);
   }
-  const body = await fetchJson<ApiEnvelope & { run: RunRecord }>(`/api/v1/runs/${segment(runId)}`);
+  const body = await fetchJson<ApiEnvelope & { run: RunRecord }>(`/api/runs/${segment(runId)}`);
   return body.run;
 };
 
@@ -59,7 +59,7 @@ const listCases = async (
   const query = new URLSearchParams({ limit: '250' });
   if (cursor !== undefined) query.set('cursor', cursor);
   const body = await fetchJson<ApiEnvelope & { items: CaseSummary[]; nextCursor?: string }>(
-    `/api/v1/runs/${segment(runId)}/cases?${query.toString()}`,
+    `/api/runs/${segment(runId)}/cases?${query.toString()}`,
   );
   return { items: body.items, nextCursor: body.nextCursor };
 };
@@ -75,7 +75,7 @@ const getCase = async (runId: string, suiteName: string, caseId: string): Promis
     throw new Error(`Case ${suiteName}/${caseId} is not included in this static report.`);
   }
   const body = await fetchJson<ApiEnvelope & { case: CaseRecord }>(
-    `/api/v1/runs/${segment(runId)}/cases/${segment(suiteName)}/${segment(caseId)}`,
+    `/api/runs/${segment(runId)}/cases/${segment(suiteName)}/${segment(caseId)}`,
   );
   return body.case;
 };
@@ -85,7 +85,7 @@ const getDiff = async (baseRunId: string, candidateRunId: string): Promise<RunDi
     throw new Error('Run comparisons require the live Attest dashboard.');
   }
   const body = await fetchJson<ApiEnvelope & { diff: RunDiff }>(
-    `/api/v1/diffs/${segment(baseRunId)}/${segment(candidateRunId)}`,
+    `/api/diffs/${segment(baseRunId)}/${segment(candidateRunId)}`,
   );
   return body.diff;
 };

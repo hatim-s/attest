@@ -12,7 +12,7 @@ attest show metric exact --output json
 
 ## Prerequisites
 
-- Run inside an Attest v2 project.
+- Run inside an Attest project.
 - The test example expects agent `support` to exist.
 - Values passed to `--value`, `--assert-json`, schemas, bodies, and pointer terminal values are JSON,
   not shell strings with implicit conversion.
@@ -25,7 +25,7 @@ created by authoring or inspection.
 
 ## Expected stdout
 
-`--output json` emits one `attest.cli-result/v1` document. A successful mutation reports
+`--output json` emits one `attest.cli-result` document. A successful mutation reports
 `project_hash_before`, `project_hash_after`, the authored resource identity, and semantic
 operations. Inspection redacts environment-backed secret references where appropriate.
 
@@ -38,7 +38,7 @@ attest metric remove exact --yes --output json
 
 ## Interactive authoring
 
-With a human TTY, `attest metric add` asks for the metric id, then shows the versioned preset
+With a human TTY, `attest metric add` asks for the metric id, then shows the preset
 catalog. The default kind is assertion. Assertion guidance selects `input`, `output`, `expected`,
 or `trace` evidence and an operator; trace guidance also displays whether authored agents advertise
 trace support. Judge, command, and HTTP kinds select their matching preset. Missing required values
@@ -66,7 +66,7 @@ attest metric add rubric \
   --output json
 ```
 
-All mutations accept a complete `attest.command-request/v2` document through `--from-json`:
+All mutations accept a complete `attest.command-request` document through `--from-json`:
 
 ```sh
 attest metric add --from-json ./metric-add.json --output json
@@ -78,7 +78,7 @@ The request source conflicts with metric arguments, definition flags, `--dry-run
 
 ```sh
 attest help metric add --output json
-attest schema print attest.command-request/v2 --output json
+attest schema print attest.command-request --output json
 ```
 
 ## Presets
@@ -92,7 +92,7 @@ required inputs, configurable fields, and normalized definitions.
 | `output-contains` | `--value <json>`                         | String substring or deep-equal array member.                    |
 | `output-schema`   | `--json-schema` or `--json-schema-file`  | Draft 2020-12 validation.                                       |
 | `judge-rubric`    | `--model`, `--rubric` or `--rubric-file` | Provider/model judge with optional threshold (default 0.8).     |
-| `command`         | `--argv-json`                            | Trusted local executable using `attest.metric/v1alpha1`.        |
+| `command`         | `--argv-json`                            | Trusted local executable using `attest.metric-evaluation`.      |
 | `http`            | `--url`                                  | Trusted HTTP metric with score/pass extraction pointers.        |
 | `tool-called`     | `--tool`                                 | Match tool name, status, count, and optional argument matchers. |
 | `tool-order`      | repeated `--order`                       | Require chronological tool names.                               |
@@ -138,7 +138,7 @@ evaluation as supported by the selected metric runner.
 
 ## Import and local fixture tests
 
-Import a canonical `attest.metric/v2` resource from a file or stdin:
+Import a canonical `attest.metric` resource from a file or stdin:
 
 ```sh
 attest metric import ./metric.json --type json --as correct --output json
@@ -149,7 +149,7 @@ Test a metric against a strict local fixture:
 
 ```json
 {
-  "schema": "attest.metric-test-fixture/v1",
+  "schema": "attest.metric-test-fixture",
   "case": { "id": "refund-basic", "input": "refund policy" },
   "expected_pass": true,
   "output": "refund policy",
@@ -161,8 +161,8 @@ Test a metric against a strict local fixture:
 attest metric test exact --fixture ./fixture.json --output json
 ```
 
-The fixture contains a canonical v2 case, expected verdict, arbitrary JSON output, and either an
-`attest.trace/v1alpha1` document or `null`. A verdict mismatch is
+The fixture contains a canonical case, expected verdict, arbitrary JSON output, and either an
+`attest.trace` document or `null`. A verdict mismatch is
 `metric_fixture_mismatch` (exit 1). A judge, executable, or HTTP boundary failure is
 `metric_infrastructure_failed` (exit 4). `--from-json -` and `--fixture -` cannot share the same
 stdin stream.
@@ -173,9 +173,9 @@ Renaming updates every test metric reference atomically. Removal is blocked whil
 unless `--detach` removes those references explicitly:
 
 ```sh
-attest metric rename exact exact-v2 --dry-run
-attest metric remove exact-v2 --dry-run
-attest metric remove exact-v2 --detach --yes --output json
+attest metric rename exact exact-renamed --dry-run
+attest metric remove exact-renamed --dry-run
+attest metric remove exact-renamed --detach --yes --output json
 ```
 
 The implemented command tree attaches a metric when a test is created with `test add --metric`; it
@@ -190,8 +190,8 @@ can explicitly remove references before deleting a metric.
 2. Select one input route: flags or `--from-json`. Parse JSON-valued flags before constructing the
    command.
 3. Use `--dry-run`, then bind the reviewed state with `--if-project-hash` for the write.
-4. Parse one `attest.cli-result/v1` from stdout and branch on `ok` and stable `error.code`.
-5. Retrieve `attest.metric/v2`, `attest.metric/v1alpha1`, and fixture schemas through
+4. Parse one `attest.cli-result` from stdout and branch on `ok` and stable `error.code`.
+5. Retrieve `attest.metric`, `attest.metric-evaluation`, and fixture schemas through
    `attest schema list --output json` and `attest schema print`.
 
 See [Schemas](../reference/schemas.md), [Errors](../reference/errors.md),

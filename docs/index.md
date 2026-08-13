@@ -29,12 +29,12 @@ For a complete local journey, follow the [five-minute quickstart](./quickstart.m
 
 1. Discover commands with `attest help --output json` or a narrower command such as
    `attest help agent add --output json`.
-2. Read the versioned request shape with
-   `attest schema print attest.command-request/v2 --output json`.
+2. Read the request shape with
+   `attest schema print attest.command-request --output json`.
 3. Read machine-repairable failures with `attest errors --output json` and the
    [error catalog](./reference/errors.md).
-4. Use `--output json` for one `attest.cli-result/v1` document or `--output jsonl` for
-   an `attest.cli-event/v1` stream when a command supports streaming.
+4. Use `--output json` for one `attest.cli-result` document or `--output jsonl` for
+   an `attest.cli-event` stream when a command supports streaming.
 5. Send mutations with `--if-project-hash <sha256>` when another actor may edit the
    project concurrently.
 
@@ -66,7 +66,7 @@ The [CLI index](./cli/index.md) maps every workflow to its canonical guide:
 - [WebSockets](./integrations/websockets.md)
 
 All transports normalize to the same
-[`attest.agent/v1alpha1`](./specs/agent-contract.md) runner boundary.
+[`attest.agent-invocation`](./specs/agent-contract.md) runner boundary.
 
 ## Reference
 
@@ -77,6 +77,15 @@ All transports normalize to the same
 - [Agent protocol](./specs/agent-contract.md)
 - [Metric protocol](./specs/metric-contract.md)
 - [Run bundle](./specs/run-bundle.md)
+- [Trace protocol](./specs/trace-schema.md)
 
-The [CLI North Star](./design/cli-north-star.md) is the design rationale. The command
-tree, generated schemas, and error registry remain the executable sources of truth.
+The command tree, generated schemas, and error registry are the executable sources of truth.
+
+## Project and contributor context
+
+- [Foundation decisions](./DECISIONS.md)
+- [Stack and implementation philosophy](./STACK.md)
+- [Code taste and conventions](./TASTE.md)
+- [Testing policy](./TESTING.md)
+- [Package scripts](./SCRIPTS.md)
+- [Telemetry policy](./TELEMETRY.md)

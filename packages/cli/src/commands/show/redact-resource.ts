@@ -31,7 +31,7 @@ const redactStringRecord = (value: unknown): void => {
   }
 };
 
-/** Redacts literal HTTP credentials wherever a v2 request template can be nested. */
+/** Redacts literal HTTP credentials wherever a request template can be nested. */
 const redactRequestTemplates = (value: unknown): void => {
   if (Array.isArray(value)) {
     value.forEach(redactRequestTemplates);

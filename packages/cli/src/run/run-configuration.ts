@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { promisify } from 'node:util';
 
 import {
-  EVAL_RUN_SCHEMA_VERSION,
+  EVAL_RUN_SCHEMA_ID,
   evalFinalResultDataSchema,
   evalRunSchema,
   type EvalCancelRequest,
@@ -20,7 +20,7 @@ import {
   StoreError,
 } from '@attest/core';
 
-import { AttestCliError, serializeCliError } from '../errors.js';
+import { AttestCliError, serializeCliError } from '../errors/index.js';
 import { createEvalCaseRunner } from '../commands/eval/eval-agent-runner.js';
 import {
   detachEvalRun,
@@ -112,7 +112,7 @@ const preflightEvalBaseline = async (storePath: string, baselineRunId?: string):
   }
 };
 
-/** Runs one immutable v2 snapshot through resolver, engine, adapters, store, artifacts, and events. */
+/** Runs one immutable snapshot through resolver, engine, adapters, store, artifacts, and events. */
 const runConfiguration = async (
   request: EvalRunRequest,
   options: RunConfigurationOptions,
@@ -125,7 +125,7 @@ const runConfiguration = async (
   const identity = createRunIdentity();
   const git = await readGitMetadata(project.root);
   const run = evalRunSchema.parse({
-    schema: EVAL_RUN_SCHEMA_VERSION,
+    schema: EVAL_RUN_SCHEMA_ID,
     run_id: identity.id,
     created_at: identity.createdAt,
     snapshot_hash: resolved.snapshotHash,

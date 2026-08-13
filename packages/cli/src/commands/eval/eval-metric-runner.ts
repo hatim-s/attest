@@ -1,9 +1,9 @@
 import { realpath } from 'node:fs/promises';
-import { isAbsolute, relative, resolve, sep } from 'node:path';
+import { resolve } from 'node:path';
 
 import {
   AGENT_PROTOCOL,
-  AGENT_RESOURCE_SCHEMA_VERSION,
+  AGENT_RESOURCE_SCHEMA_ID,
   METRIC_PROTOCOL,
   type AgentRequest,
   type AgentResource,
@@ -24,7 +24,8 @@ import {
   type MetricEvaluation,
 } from '@attest/core';
 
-import { AttestCliError } from '../../errors.js';
+import { AttestCliError } from '../../errors/index.js';
+import { isProjectPath } from '../../project/project-path.js';
 import {
   createBaseEnvironment,
   readSecretReference,
@@ -32,14 +33,6 @@ import {
   resolveNativeAgent,
 } from '../agent/native-agent-adapter.js';
 import type { ResolvedEvalCaseInput, ResolvedEvalMetric } from './eval-resolver.js';
-
-const isContainedPath = (root: string, candidate: string): boolean => {
-  const fromRoot = relative(root, candidate);
-  return (
-    fromRoot === '' ||
-    (!isAbsolute(fromRoot) && fromRoot !== '..' && !fromRoot.startsWith(`..${sep}`))
-  );
-};
 
 /** Adapts the shared SQLite response cache to the judge metric cache contract. */
 const createJudgeCache = (cacheStore: CacheStore): JudgeCache => ({
@@ -53,7 +46,7 @@ const resolveExecutableMetric = async (
   projectRoot: string,
 ): Promise<{ cwd: string; env: NodeJS.ProcessEnv; secrets: string[] }> => {
   const cwd = await realpath(resolve(projectRoot, metric.cwd ?? '.'));
-  if (!isContainedPath(projectRoot, cwd)) {
+  if (!isProjectPath(projectRoot, cwd)) {
     throw new AttestCliError('metric_infrastructure_failed', 'Metric cwd escapes the project.', {
       path: metric.cwd ?? '.',
     });
@@ -108,7 +101,7 @@ const isJsonValue = (value: unknown): value is JsonValue => {
   return typeof value === 'object' && Object.values(value).every(isJsonValue);
 };
 
-/** Converts a v2 HTTP metric response mapping into the existing metric result evidence shape. */
+/** Converts a HTTP metric response mapping into the existing metric result evidence shape. */
 const extractHttpMetricResult = (
   metricId: string,
   definition: Extract<MetricResource['definition'], { kind: 'http' }>,
@@ -182,7 +175,7 @@ const evaluateHttpMetric = async (
     trace: context.execution.trace as unknown as JsonValue,
   } as JsonValue;
   const syntheticAgent: AgentResource = {
-    schema: AGENT_RESOURCE_SCHEMA_VERSION,
+    schema: AGENT_RESOURCE_SCHEMA_ID,
     id: metric.metric.id,
     name: metric.metric.name,
     transport: {
@@ -202,14 +195,16 @@ const evaluateHttpMetric = async (
     ...(definition.retry === undefined ? {} : { retry: definition.retry }),
   };
   const resolved = await resolveNativeAgent(syntheticAgent, projectRoot);
-  if (resolved.mappedAgent === undefined) throw new Error('HTTP metric adapter was not resolved.');
+  if (resolved.kind !== 'mapped_http') {
+    throw new Error('HTTP metric adapter was not resolved.');
+  }
   const startedAt = performance.now();
   const invocation = await invokeMappedHttpAgent(
-    resolved.mappedAgent,
+    resolved.agent,
     { ...request, input: metricRequest },
     {
-      headers: resolved.httpHeaders,
-      query: resolved.httpQuery,
+      headers: resolved.headers,
+      query: resolved.query,
       secrets: resolved.secrets,
       signal,
     },
@@ -253,7 +248,7 @@ const applyAttachedThreshold = (
         result: { ...evaluation.result, pass: evaluation.result.score >= threshold },
       };
 
-/** Creates the per-run metric bridge from v2 resources to existing assertion/exec/judge engines. */
+/** Creates the per-run metric bridge from resources to existing assertion/exec/judge engines. */
 const createEvalMetricEvaluator = (projectRoot: string, cacheStore: CacheStore) => {
   const judgeCache = createJudgeCache(cacheStore);
   let judgeClient: ReturnType<typeof createTanstackJudgeClient> | undefined;

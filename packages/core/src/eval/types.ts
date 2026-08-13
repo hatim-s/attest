@@ -117,7 +117,7 @@ type EvalCaseRunner<Payload = unknown> = {
 
 /**
  * Defines the narrow persistence seam integration can bind to the existing RunStore mappings.
- * The engine never opens a database or imports the v1 configuration model directly.
+ * The engine never opens a database or imports the old configuration model directly.
  */
 type EvalPersistenceAdapter<Payload = unknown> = {
   createRun(run: ImmutableEvalRun): Promise<void>;
@@ -175,7 +175,7 @@ type ExecuteEvalOptions<BaselineDiff = JsonValue> = {
 type EvalExecutionResult<Payload = unknown, BaselineDiff = JsonValue> = {
   run: ImmutableEvalRun;
   status: 'completed' | 'failed' | 'cancelled';
-  exit_code: 0 | 1 | 4 | 130;
+  exit_code: EvalFinalResultData['exit_code'];
   summary: EvalRunSummary;
   cases: readonly EvalCaseRecord<Payload>[];
   events: readonly EvalEvent[];

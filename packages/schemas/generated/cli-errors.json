@@ -1,0 +1,82 @@
+{
+  "$comment": "Runtime-only invariants include span time ordering, duplicate identifiers, and metric references.",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "errors": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "exit_code": {
+            "anyOf": [
+              {
+                "const": 1,
+                "type": "number"
+              },
+              {
+                "const": 2,
+                "type": "number"
+              },
+              {
+                "const": 3,
+                "type": "number"
+              },
+              {
+                "const": 4,
+                "type": "number"
+              },
+              {
+                "const": 130,
+                "type": "number"
+              }
+            ]
+          },
+          "likely_causes": {
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "meaning": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "repairs": {
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "retryable": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "code",
+          "meaning",
+          "likely_causes",
+          "retryable",
+          "exit_code",
+          "repairs"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
+    "schema": {
+      "const": "attest.cli-errors",
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema",
+    "errors"
+  ],
+  "type": "object"
+}

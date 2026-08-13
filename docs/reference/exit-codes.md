@@ -18,7 +18,7 @@ A normal evaluated failure is a successful protocol result with a failing verdic
 
 ```json
 {
-  "schema": "attest.cli-result/v1",
+  "schema": "attest.cli-result",
   "ok": true,
   "command": "eval.run",
   "project_hash_before": "<sha256>",
@@ -45,16 +45,16 @@ Therefore automation must inspect both `ok` and, for successful eval results, `r
 
 ## JSON and JSONL
 
-Non-streaming `--output json` prints exactly one `attest.cli-result/v1`. Success omits `error`;
+Non-streaming `--output json` prints exactly one `attest.cli-result`. Success omits `error`;
 failure omits project hashes, `result`, and `warnings`.
 
-Eval `--output jsonl` ends with one `attest.cli-event/v1` result line whose data is:
+Eval `--output jsonl` ends with one `attest.cli-event` result line whose data is:
 
 ```json
 {
   "exit_code": 1,
   "result": {
-    "schema": "attest.cli-result/v1",
+    "schema": "attest.cli-result",
     "ok": true,
     "command": "eval.run",
     "project_hash_before": "<sha256>",
@@ -66,7 +66,7 @@ Eval `--output jsonl` ends with one `attest.cli-event/v1` result line whose data
 ```
 
 The actual nested eval result includes the full run identity and summary. The final event's
-`data.exit_code` equals the process exit. Result compatibility is strict:
+`data.exit_code` equals the process exit. Result consistency is strict:
 
 - exit 0 requires `ok: true` and verdict `pass`;
 - exit 1 allows `ok: true` with verdict `fail` or an exit-1 failure envelope;

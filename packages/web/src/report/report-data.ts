@@ -6,7 +6,7 @@ type ReportCase = {
 };
 
 type ReportData = {
-  api_version: 'attest.report/v1';
+  schema: 'attest.report';
   cases: ReportCase[];
   generatedAt: string;
   run: RunRecord;

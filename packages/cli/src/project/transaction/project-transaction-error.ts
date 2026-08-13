@@ -1,4 +1,8 @@
-import { AttestCliError, type AttestCliErrorOptions, type CliErrorCode } from '../../errors.js';
+import {
+  AttestCliError,
+  type AttestCliErrorOptions,
+  type CliErrorCode,
+} from '../../errors/index.js';
 
 type ProjectTransactionErrorCode = Extract<
   CliErrorCode,

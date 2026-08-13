@@ -1,0 +1,14 @@
+{
+  "schema": "attest.metric-preset",
+  "id": "judge-rubric",
+  "name": "Judge rubric",
+  "description": "Score a local fixture later with a provider/model identifier and explicit rubric.",
+  "required_inputs": ["model", "rubric"],
+  "configurable_fields": ["threshold"],
+  "definition": {
+    "kind": "judge",
+    "model": "provider/model",
+    "rubric": "Score the output against the expected behavior.",
+    "threshold": 0.8
+  }
+}

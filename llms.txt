@@ -16,7 +16,7 @@ Concepts:
 
 Machine discovery:
 
-- `attest help --output json` — versioned command tree
+- `attest help --output json` — command tree
 - `attest help <namespace> <verb> --output json` — focused command contract
 - `attest schema list --output json` — available schema ids
 - `attest schema print <schema-id> --output json` — authoritative JSON Schema
@@ -46,14 +46,14 @@ Integration guides:
 
 Protocols:
 
-- docs/specs/agent-contract.md — attest.agent/v1alpha1
-- docs/specs/metric-contract.md — attest.metric/v1alpha1
+- docs/specs/agent-contract.md — attest.agent-invocation
+- docs/specs/metric-contract.md — attest.metric-evaluation
 - docs/specs/run-bundle.md — portable eval evidence
-- docs/specs/trace-schema.md — attest.trace/v1alpha1
+- docs/specs/trace-schema.md — attest.trace
 
 Machine output:
 
-- JSON is one attest.cli-result/v1 document.
-- JSONL is attest.cli-event/v1 per line; the final event is `result`.
-- Mutation requests use attest.command-request/v2.
+- JSON is one `attest.cli-result` document.
+- JSONL uses `attest.cli-event` per line; the final event is `result`.
+- Mutation requests use `attest.command-request`.
 - Prefer `error.code`, schema ids, and project hashes over prose parsing.

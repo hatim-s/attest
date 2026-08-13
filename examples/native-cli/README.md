@@ -39,7 +39,7 @@ Run the evaluation:
 attest eval run smoke --output json
 ```
 
-Every command writes one `attest.cli-result/v1` JSON document to stdout. The final
+Every command writes one `attest.cli-result` JSON document to stdout. The final
 command creates `.attest/runs.db`; the authoring commands create the project manifest
 and resources under `attest/`.
 

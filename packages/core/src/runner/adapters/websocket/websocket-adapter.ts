@@ -3,7 +3,7 @@ import { isDeepStrictEqual } from 'node:util';
 
 import {
   AGENT_PROTOCOL,
-  WEBSOCKET_EVIDENCE_SCHEMA_VERSION,
+  WEBSOCKET_EVIDENCE_SCHEMA_ID,
   WEBSOCKET_REQUEST_PROTOCOL,
   parseAgentResponse,
   webSocketTransportSchema,
@@ -832,7 +832,7 @@ class WebSocketAgentSession {
     close?: WebSocketClose,
   ): WebSocketAttemptEvidence {
     const base = {
-      schema: WEBSOCKET_EVIDENCE_SCHEMA_VERSION,
+      schema: WEBSOCKET_EVIDENCE_SCHEMA_ID,
       request_id: pending.requestId,
       lifecycle: this.agent.transport.lifecycle,
       connection_mode: this.agent.transport.connection_mode,

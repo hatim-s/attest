@@ -4,20 +4,13 @@ import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'nod
 
 import { openStore, type AttestStore } from '@attest/core';
 
-import { AttestCliError, type CliErrorCode } from '../../errors.js';
+import { AttestCliError, type CliErrorCode } from '../../errors/index.js';
+import { isProjectPath } from '../../project/project-path.js';
 
 const getErrorCode = (error: unknown): string | undefined =>
   error instanceof Error && 'code' in error && typeof Reflect.get(error, 'code') === 'string'
     ? (Reflect.get(error, 'code') as string)
     : undefined;
-
-const isContainedPath = (root: string, candidate: string): boolean => {
-  const fromRoot = relative(root, candidate);
-  return (
-    fromRoot === '' ||
-    (!isAbsolute(fromRoot) && fromRoot !== '..' && !fromRoot.startsWith(`..${sep}`))
-  );
-};
 
 type PrepareEvalProjectFileOptions = {
   allowAbsolute?: boolean;
@@ -53,7 +46,7 @@ const normalizeAbsoluteProjectFile = async (
     }
   }
   const candidate = resolve(resolvedAncestor, ...suffix);
-  if (!isContainedPath(resolvedRoot, candidate)) throw unsafe();
+  if (!isProjectPath(resolvedRoot, candidate)) throw unsafe();
   return relative(resolvedRoot, candidate);
 };
 
@@ -80,7 +73,7 @@ const prepareEvalProjectFile = async (
     projectPath.includes('\0') ||
     projectPath.includes('\\') ||
     isAbsolute(projectPath) ||
-    !isContainedPath(resolvedRoot, candidate) ||
+    !isProjectPath(resolvedRoot, candidate) ||
     authoredSegments.some(
       (segment) => segment.length === 0 || segment === '.' || segment === '..',
     ) ||

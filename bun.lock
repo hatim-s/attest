@@ -76,6 +76,9 @@
     "packages/schemas": {
       "name": "@attest/schemas",
       "version": "0.0.0",
+      "dependencies": {
+        "@attest/contracts": "workspace:*",
+      },
     },
     "packages/web": {
       "name": "@attest/web",

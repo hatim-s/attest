@@ -13,7 +13,7 @@ attest test case list smoke --output json
 
 ## Prerequisites
 
-- Run inside an Attest v2 project.
+- Run inside an Attest project.
 - The example expects existing agent `support` and metric `exact` resources.
 - Use UTF-8 CSV, JSON, or JSONL input. Stdin imports must include `--format` when the format cannot
   be inferred from a filename.
@@ -27,7 +27,7 @@ create `.attest/runs.db`.
 
 ## Expected stdout
 
-With `--output json`, each command emits one `attest.cli-result/v1` document. Import success
+With `--output json`, each command emits one `attest.cli-result` document. Import success
 includes deterministic counts such as read, inserted, updated, and skipped rows plus addressable
 dedupe decisions when applicable. Warnings are structured; importing more than 100 direct cases
 adds `direct_case_count_high` without changing success into failure.
@@ -84,11 +84,11 @@ attest test case import smoke ./cases.csv \
   --output json
 ```
 
-For an agent-authored request, use one strict `attest.command-request/v2` document:
+For an agent-authored request, use one strict `attest.command-request` document:
 
 ```json
 {
-  "schema": "attest.command-request/v2",
+  "schema": "attest.command-request",
   "command": "test.dataset.import",
   "test_id": "smoke",
   "source": "./cases.jsonl",
@@ -162,13 +162,13 @@ hand before reading the full aggregate diagnostic list.
 
 ```sh
 attest test case show smoke refund-basic --output json
-attest test case rename smoke refund-basic refund-v2 --dry-run
-attest test case remove smoke refund-v2 --yes --output json
+attest test case rename smoke refund-basic refund-renamed --dry-run
+attest test case remove smoke refund-renamed --yes --output json
 
 attest test dataset import smoke ./cases.jsonl --as regression --output json
 attest test dataset detach smoke regression --output json
-attest test dataset rename regression regression-v2 --dry-run
-attest test dataset remove regression-v2 --yes --output json
+attest test dataset rename regression regression-renamed --dry-run
+attest test dataset remove regression-renamed --yes --output json
 ```
 
 Dataset removal is blocked while any test remains attached and returns copy-paste detach commands.
@@ -183,7 +183,7 @@ Test, case, and dataset mutations accept `--dry-run`, `--yes`, `--from-json`, an
    `request_schema`; do not infer a field name.
 3. Preview before a write and bind the write to `project_hash_before` with `--if-project-hash`.
 4. Treat an import as all-or-nothing. On failure, iterate through every structured diagnostic.
-5. Parse stdout as one `attest.cli-result/v1` document and branch on stable error codes documented
+5. Parse stdout as one `attest.cli-result` document and branch on stable error codes documented
    in [Errors](../reference/errors.md).
 
 See also [Schemas](../reference/schemas.md), [Exit codes](../reference/exit-codes.md), and

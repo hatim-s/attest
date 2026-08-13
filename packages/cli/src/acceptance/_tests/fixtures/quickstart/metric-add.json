@@ -1,0 +1,13 @@
+{
+  "schema": "attest.command-request",
+  "command": "metric.add",
+  "metric": {
+    "schema": "attest.metric",
+    "id": "exact",
+    "name": "Exact",
+    "definition": {
+      "kind": "assertion",
+      "assertions": [{ "contains": { "path": "$.output", "value": "policy" } }]
+    }
+  }
+}

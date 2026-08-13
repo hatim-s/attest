@@ -23,7 +23,7 @@
     "zod": "^4"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc --build tsconfig.build.json",
     "test": "vitest run --maxWorkers=1",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },

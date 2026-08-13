@@ -1,0 +1,12 @@
+{
+  "schema": "attest.cli-result",
+  "ok": true,
+  "command": "eval.cancel",
+  "project_hash_before": null,
+  "project_hash_after": null,
+  "result": {
+    "run_id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+    "status": "cancellation_requested"
+  },
+  "warnings": []
+}

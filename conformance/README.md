@@ -28,5 +28,5 @@ Fixtures live in six directories, each routed to its matching public parser:
 
 To add a fixture, choose the contract directory, create the next numbered JSON file with the
 envelope above, and run the conformance test. The synchronous directory loader automatically finds
-new JSON fixtures, so no registry needs updating. `fake-agents/` holds hostile agent executables
-used to harden the runner.
+new JSON fixtures, so no registry needs updating. `src/_tests/fixtures/fake-agents/` holds hostile
+agent executables used to harden the runner.

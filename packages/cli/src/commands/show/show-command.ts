@@ -1,9 +1,9 @@
 import { StoreError } from '@attest/core';
 
-import { AttestCliError } from '../../errors.js';
+import { AttestCliError } from '../../errors/index.js';
 import type { JsonValue } from '../../project/canonical-project.js';
 import type { LoadedProject } from '../../project/load-project.js';
-import type { CommandResult } from '../command-result.js';
+import type { CommandResult } from '../shared/command-result.js';
 import { toSafeRunSummary } from '../list/list-command.js';
 import { loadCommandProject } from '../project/load-command-project.js';
 import { withReadonlyRunStore } from '../run-store/readonly-run-store.js';

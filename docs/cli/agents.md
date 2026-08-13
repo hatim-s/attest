@@ -11,7 +11,7 @@ process.stdin.setEncoding('utf8');
 for await (const chunk of process.stdin) input += chunk;
 const request = JSON.parse(input);
 process.stdout.write(JSON.stringify({
-  protocol: 'attest.agent/v1alpha1',
+  protocol: 'attest.agent-invocation',
   output: request.input,
 }));
 EOF
@@ -23,7 +23,7 @@ attest agent test support --input '"ping"' --output json
 
 ## Prerequisites
 
-- Attest v2 is installed and `attest help agent add --output json` succeeds.
+- Attest is installed and `attest help agent add --output json` succeeds.
 - Node.js 22 or newer is available for the example agent.
 - Run the commands from an empty directory. An existing project may omit `project init`.
 
@@ -35,7 +35,7 @@ unless `--record` is present. None of the three commands creates `attest.config.
 
 ## Expected stdout
 
-Each command using `--output json` prints exactly one `attest.cli-result/v1` document. Success has
+Each command using `--output json` prints exactly one `attest.cli-result` document. Success has
 `ok: true`, a dotted `command`, project hashes, a `result`, and `warnings`. For the probe, the
 command is `agent.test` and the result contains the normalized agent response. Do not scrape human
 sentences; select fields from the JSON document.
@@ -67,14 +67,14 @@ For scripts, prefer unambiguous `--argv-json` over the convenience tokenizer in
 
 ```sh
 PROJECT_HASH=$(attest project show --output json | jq -r '.project_hash_after')
-attest agent add support-v2 \
+attest agent add support-renamed \
   --argv-json '["node","./agent.mjs"]' \
   --timeout 5s \
   --if-project-hash "$PROJECT_HASH" \
   --output json
 ```
 
-All authoring mutations accept one complete `attest.command-request/v2` document from a file or
+All authoring mutations accept one complete `attest.command-request` document from a file or
 stdin:
 
 ```sh
@@ -88,7 +88,7 @@ constructing it:
 
 ```sh
 attest help agent add --output json
-attest schema print attest.command-request/v2 --output json
+attest schema print attest.command-request --output json
 ```
 
 ## Transport entry points
@@ -97,7 +97,7 @@ Only one transport selector may be supplied to `agent add`:
 
 | Transport | Entry point | Essential contract |
 | --- | --- | --- |
-| Native process | `--argv-json` or `--native-command` | One process per case; stdin request and stdout response use `attest.agent/v1alpha1`. |
+| Native process | `--argv-json` or `--native-command` | One process per case; stdin request and stdout response use `attest.agent-invocation`. |
 | Native HTTP | `--native-http` | External POST endpoint using the native envelope. |
 | Managed process | `--background-command` | Run-scoped process plus exactly one readiness method and `--invoke-url`. |
 | JSONL bridge | `--jsonl-command` | Run-scoped, correlated lines; serial or multiplexed; in-band cancellation with process fallback. |
@@ -164,9 +164,9 @@ updates every test reference atomically. Removal is blocked while tests referenc
 `--detach` explicitly removes those dependent tests:
 
 ```sh
-attest agent rename support support-v2 --dry-run
-attest agent remove support-v2 --dry-run
-attest agent remove support-v2 --detach --yes --output json
+attest agent rename support support-renamed --dry-run
+attest agent remove support-renamed --dry-run
+attest agent remove support-renamed --detach --yes --output json
 ```
 
 ## Agent-readable contract
@@ -177,7 +177,7 @@ attest agent remove support-v2 --detach --yes --output json
 3. Use one input route: flags/arguments or `--from-json`, never both.
 4. Preview mutations with `--dry-run`; bind the returned project hash with `--if-project-hash` on
    the eventual write.
-5. Parse one `attest.cli-result/v1` document from stdout and branch on `ok`. On failure, use
+5. Parse one `attest.cli-result` document from stdout and branch on `ok`. On failure, use
    `error.code`, `retryable`, `path`, `hint`, and `details`; do not match message text.
 6. List stable repairs with `attest errors --output json` or see [Errors](../reference/errors.md).
 

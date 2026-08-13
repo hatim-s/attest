@@ -1,12 +1,12 @@
-/** Emitted schema-v1 asset; migrations/0001_schema_v1.sql is its reviewable mirror. */
-const schemaVersionOneSql = `-- mirrored in registry.ts — update both
--- Pre-1.0 exception: schema v1 is revised in place during review; after 1.0 migrations are append-only.
+/** Emitted initial schema asset; migrations/0001_initial.sql is its reviewable mirror. */
+const initialSchemaSql = `-- mirrored in registry.ts — update both
+-- This initial schema is the only supported database layout.
 CREATE TABLE runs (
   id TEXT PRIMARY KEY,
   created_at TEXT NOT NULL,
   finished_at TEXT,
   status TEXT NOT NULL CHECK (status IN ('running', 'completed', 'failed', 'cancelled')),
-  config_version TEXT NOT NULL,
+  schema_id TEXT NOT NULL,
   config_hash TEXT NOT NULL,
   config_json TEXT NOT NULL,
   git_sha TEXT,
@@ -166,7 +166,7 @@ CREATE INDEX idx_spans_case ON spans(case_row_id);
 CREATE INDEX idx_runs_created ON runs(created_at DESC);
 `;
 
-/** Registers the pre-1.0 schema history consumed by the transactional migration runner. */
-const migrations = [{ version: 1, name: 'schema_v1', sql: schemaVersionOneSql }] as const;
+/** Registers the single supported initial schema consumed by the migration runner. */
+const migrations = [{ version: 1, name: 'initial', sql: initialSchemaSql }] as const;
 
-export { migrations, schemaVersionOneSql };
+export { migrations, initialSchemaSql };

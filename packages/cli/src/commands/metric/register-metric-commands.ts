@@ -1,17 +1,27 @@
 import {
-  COMMAND_REQUEST_SCHEMA_VERSION,
+  COMMAND_REQUEST_SCHEMA_ID,
   METRIC_PRESETS,
   type MetricPreset,
   type MetricPresetId,
 } from '@attest/contracts';
 import { Command, Option } from 'commander';
 
-import { AttestCliError } from '../../errors.js';
+import { AttestCliError } from '../../errors/index.js';
 import { setCliCommandHelpMetadata } from '../../help/command-help.js';
 import type { CliIo } from '../../run-cli.js';
-import { renderCommandResult } from '../command-result.js';
+import { renderCommandResult } from '../shared/command-result.js';
+import {
+  addCommonOptions,
+  addMutationOptions,
+  collectOption as collect,
+  isInteractive,
+  mergeCommonOptions,
+  outputFormat,
+  type CommonCliOptions as CommonOptions,
+  type MutationCliOptions as MutationOptions,
+} from '../shared/cli-options.js';
 import { loadCommandProject } from '../project/load-command-project.js';
-import type { CliInteraction } from '../register-project-resource-commands.js';
+import type { CliInteraction } from '../shared/cli-interaction.js';
 import {
   createMetricResource,
   readMetricCommandRequest,
@@ -29,19 +39,6 @@ type RegisterMetricCommandsOptions = {
   io: CliIo;
   program: Command;
   workingDirectory: string;
-};
-
-type CommonOptions = {
-  nonInteractive?: boolean;
-  output?: 'human' | 'json';
-  project?: string;
-};
-
-type MutationOptions = CommonOptions & {
-  dryRun?: boolean;
-  fromJson?: string;
-  ifProjectHash?: string;
-  yes?: boolean;
 };
 
 type AddOptions = MutationOptions &
@@ -63,59 +60,6 @@ const REPEATABLE_METRIC_FIELDS = new Set([
   'query-env',
 ]);
 
-const collect = (value: string, previous: string[] | undefined): string[] => [
-  ...(previous ?? []),
-  value,
-];
-
-const addCommonOptions = (command: Command): Command =>
-  command
-    .option('--project <dir>', 'explicit Attest project directory')
-    .addOption(new Option('--output <format>', 'output format').choices(['human', 'json']))
-    .option('--non-interactive', 'disable prompts and fail when required input is missing');
-
-const addMutationOptions = (command: Command): Command =>
-  addCommonOptions(command)
-    .option('--dry-run', 'validate and show the semantic diff without writing')
-    .option('--yes', 'accept confirmation prompts without inventing missing values')
-    .option('--from-json <path|->', 'read one versioned command request from a file or stdin')
-    .option('--if-project-hash <sha256>', 'fail if the project changed since it was read');
-
-/** Merges root-position common options while rejecting duplicate local ownership. */
-const mergeCommonOptions = <Options extends CommonOptions>(
-  options: Options,
-  command: Command,
-  program: Command,
-): Options => {
-  const root = program.opts<CommonOptions>();
-  for (const name of ['project', 'output', 'nonInteractive'] as const) {
-    if (
-      program.getOptionValueSource(name) === 'cli' &&
-      command.getOptionValueSource(name) === 'cli'
-    ) {
-      const flag = name === 'nonInteractive' ? 'non-interactive' : name;
-      throw new AttestCliError('cli_usage', `Common option --${flag} was provided twice.`, {
-        path: `--${flag}`,
-      });
-    }
-  }
-  return { ...root, ...options };
-};
-
-const outputFormat = (options: CommonOptions): 'human' | 'json' => options.output ?? 'human';
-
-const isInteractive = (
-  options: CommonOptions,
-  interaction: CliInteraction,
-  fromJson?: string,
-): boolean =>
-  options.nonInteractive !== true &&
-  outputFormat(options) === 'human' &&
-  fromJson === undefined &&
-  !interaction.ci &&
-  interaction.inputIsTTY &&
-  interaction.outputIsTTY;
-
 const requiredInput = async (
   value: string | undefined,
   path: string,
@@ -135,7 +79,7 @@ const requiredInput = async (
 };
 
 const mutationFields = (command: string, options: MutationOptions) => ({
-  schema: COMMAND_REQUEST_SCHEMA_VERSION,
+  schema: COMMAND_REQUEST_SCHEMA_ID,
   command,
   ...(options.dryRun === undefined ? {} : { dry_run: options.dryRun }),
   ...(options.yes === undefined ? {} : { yes: options.yes }),
@@ -461,7 +405,7 @@ const markMutationHelp = (
   setCliCommandHelpMetadata(command, {
     examples,
     ...(presets === undefined ? {} : { presets }),
-    requestSchema: COMMAND_REQUEST_SCHEMA_VERSION,
+    requestSchema: COMMAND_REQUEST_SCHEMA_ID,
     options: {
       output: { implies: ['non-interactive'] },
       'from-json': {
@@ -481,7 +425,7 @@ const markMutationHelp = (
   });
 };
 
-/** Registers CLI2.9 metric CRUD, local fixture tests, and redacted inspection commands. */
+/** Registers metric CRUD, local fixture tests, and redacted inspection commands. */
 const registerMetricCommands = (context: RegisterMetricCommandsOptions): void => {
   const metric = context.program.command('metric').description('Author and test metric resources.');
 
@@ -684,7 +628,7 @@ const registerMetricCommands = (context: RegisterMetricCommandsOptions): void =>
   )
     .argument('[metric-id]', 'metric id')
     .option('--fixture <path|->', 'strict local metric-test fixture')
-    .option('--from-json <path|->', 'read one versioned metric.test request')
+    .option('--from-json <path|->', 'read one metric.test request')
     .action(async (metricId: string | undefined, raw: TestOptions, command: Command) => {
       const options = mergeCommonOptions(raw, command, context.program);
       if (
@@ -699,7 +643,7 @@ const registerMetricCommands = (context: RegisterMetricCommandsOptions): void =>
       const request =
         options.fromJson === undefined
           ? validateMetricCommandRequest('metric.test', {
-              schema: COMMAND_REQUEST_SCHEMA_VERSION,
+              schema: COMMAND_REQUEST_SCHEMA_ID,
               command: 'metric.test',
               metric_id: await requiredInput(
                 metricId,
@@ -756,7 +700,7 @@ const registerMetricCommands = (context: RegisterMetricCommandsOptions): void =>
       'attest metric test exact --fixture - --output json',
       'attest metric test --from-json ./metric-test.json --output json',
     ],
-    requestSchema: COMMAND_REQUEST_SCHEMA_VERSION,
+    requestSchema: COMMAND_REQUEST_SCHEMA_ID,
     options: {
       output: { implies: ['non-interactive'] },
       fixture: { conflicts: ['from-json'] },

@@ -30,7 +30,7 @@ const serializeCanonicalJson = (value: JsonValue): string =>
 const serializeCanonicalJsonLines = (values: readonly JsonValue[]): string =>
   values.map(serializeCanonicalJson).join('\n');
 
-/** Computes the lowercase SHA-256 content hash used by v2 project manifests. */
+/** Computes the lowercase SHA-256 content hash used by project manifests. */
 const hashCanonicalContent = (canonicalContent: string): string =>
   createHash('sha256').update(canonicalContent, 'utf8').digest('hex');
 

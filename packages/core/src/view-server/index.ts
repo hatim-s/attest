@@ -1,4 +1,4 @@
-export { API_VERSION, createViewApp } from './create-view-app.js';
+export { API_SCHEMA_ID, createViewApp } from './create-view-app.js';
 export { startViewServer } from './start-view-server.js';
 export {
   type CreateViewAppOptions,

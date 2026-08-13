@@ -9,14 +9,14 @@ command contract.
 ```bash
 attest help --output json
 attest help agent add --output json
-attest schema print attest.command-request/v2 --output json
+attest schema print attest.command-request --output json
 attest errors --output json
 ```
 
-Structured help returns `attest.cli-help/v1`; it describes arguments, options, defaults,
+Structured help returns `attest.cli-help`; it describes arguments, options, defaults,
 conflicts, implied flags, request schema ids, examples, aliases, and deprecations.
 `schema print` returns the generated schema requested by id. `errors` returns the
-`attest.cli-errors/v1` registry. These read-only commands do not create a project or a
+`attest.cli-errors` registry. These read-only commands do not create a project or a
 run database.
 
 ## Workflow map
@@ -36,13 +36,13 @@ maps to `attest project init`. The removed `attest run` spelling is not accepted
 
 ## Global machine contract
 
-Use `--output json` for exactly one `attest.cli-result/v1` document on stdout. A success
+Use `--output json` for exactly one `attest.cli-result` document on stdout. A success
 document contains `ok: true`, `command`, `project_hash_before`, `project_hash_after`, a
 command-specific `result`, and `warnings`. A failure document contains `ok: false`,
 `command`, and `error`, whose stable fields include `code`, `message`, and `retryable`.
 
 Commands that support streaming accept `--output jsonl`. Every line is one
-`attest.cli-event/v1` document with `sequence`, `time`, `event`, and `data`; the final
+`attest.cli-event` document with `sequence`, `time`, `event`, and `data`; the final
 line has `event: "result"`. See [evaluation lifecycle](../concepts/eval-lifecycle.md)
 and [schemas](../reference/schemas.md).
 
@@ -57,7 +57,7 @@ All authored-resource mutations share these controls:
 ```text
 --dry-run                    validate and return the semantic diff without writing
 --yes                        accept confirmation; never invent missing values
---from-json <path|->         read one attest.command-request/v2 document
+--from-json <path|->         read one attest.command-request document
 --if-project-hash <sha256>   reject a stale write instead of overwriting it
 ```
 
@@ -89,6 +89,6 @@ paths and references, use the [resource model](../concepts/resource-model.md).
 - [Polling and streams](../integrations/polling-and-streams.md)
 - [WebSockets](../integrations/websockets.md)
 
-Each transport ultimately exchanges the versioned
+Each transport ultimately exchanges the
 [agent protocol](../specs/agent-contract.md); executable metrics use the
 [metric protocol](../specs/metric-contract.md).

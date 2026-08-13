@@ -53,7 +53,7 @@ Authoring does not contact either endpoint and does not create `.attest/runs.db`
 
 ## Expected stdout
 
-Both authoring commands emit one `attest.cli-result/v1` document with `ok: true`. Their `command` values are `agent.import` and `agent.add`. The persisted transport kinds are `polling` and `stream`.
+Both authoring commands emit one `attest.cli-result` document with `ok: true`. Their `command` values are `agent.import` and `agent.add`. The persisted transport kinds are `polling` and `stream`.
 
 When the endpoints are running, probe with:
 
@@ -109,7 +109,7 @@ SSE comment lines are heartbeats. They reset transport idle time; they reset app
 
 - Use `--header-env HEADER=SOURCE_ENV` for credentials. Resolved secrets require HTTPS except on explicit loopback and are redacted from event evidence and errors.
 - HTTP destinations are DNS-pinned and reject private or special-use addresses except loopback. Redirects and polling status URLs must stay same-origin.
-- Streams are bounded by request bytes, event count, event bytes, and total evidence bytes. A complete `attest.agent/v2` JSON import can set `limits` and `redaction.event_pointers`.
+- Streams are bounded by request bytes, event count, event bytes, and total evidence bytes. A complete `attest.agent` JSON import can set `limits` and `redaction.event_pointers`.
 - An event above a cap produces `output_cap_exceeded`; malformed UTF-8/JSON or EOF without a terminal event produces `invalid_envelope`.
 
 ## Cancellation, testing, and stable errors

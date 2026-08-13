@@ -4,6 +4,7 @@
     { "path": "./packages/contracts" },
     { "path": "./packages/core" },
     { "path": "./packages/cli" },
-    { "path": "./packages/web" }
+    { "path": "./packages/web" },
+    { "path": "./packages/schemas" }
   ]
 }

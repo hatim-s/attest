@@ -7,8 +7,8 @@ but are not an API. Read the installed registry when automating repairs:
 attest errors --output json
 ```
 
-The command succeeds with one `attest.cli-result/v1`; `result.schema` is
-`attest.cli-errors/v1`, and `result.errors` contains `code`, `meaning`, `likely_causes`,
+The command succeeds with one `attest.cli-result`; `result.schema` is
+`attest.cli-errors`, and `result.errors` contains `code`, `meaning`, `likely_causes`,
 `retryable`, `exit_code`, and one or more `repairs`.
 
 ## Catalog
@@ -30,7 +30,7 @@ The command succeeds with one `attest.cli-result/v1`; `result.schema` is
 | `project_invalid`              |    1 |    no     | Authored schemas, paths, hashes, imports, ids, or cross-references are invalid.       | Fix every source-addressed diagnostic before rerunning.                                                                         |
 | `project_lock_stale`           |    3 |    no     | A dead local process left the mutation lock behind.                                   | Stop for human repair. The registry mentions `attest project unlock --stale`, but that command is not registered in this build. |
 | `project_locked`               |    3 |    yes    | Another live process owns the mutation lock, or lock safety cannot be established.    | Wait for the owner; never remove a live or unclassified lock.                                                                   |
-| `project_not_found`            |    1 |    no     | No v2 manifest was found within discovery boundaries.                                 | Run inside a v2 project or pass the correct `--project <path>`.                                                                 |
+| `project_not_found`            |    1 |    no     | No project manifest was found within discovery boundaries.                            | Run inside a project or pass the correct `--project <path>`.                                                                    |
 | `project_read_failed`          |    1 |    no     | A project file is missing, unreadable, or changed during loading.                     | Restore the reported path and verify permissions.                                                                               |
 | `project_recovery_required`    |    3 |    no     | An interrupted transaction diverged and cannot be recovered automatically.            | Preserve its journal and reconcile every reported path before retrying.                                                         |
 | `project_transaction_failed`   |    4 |    yes    | The filesystem failed while publishing a project transaction.                         | Verify rollback, permissions, and free space before retrying.                                                                   |
@@ -44,7 +44,7 @@ JSON-mode failures are printed to stdout as one document:
 
 ```json
 {
-  "schema": "attest.cli-result/v1",
+  "schema": "attest.cli-result",
   "ok": false,
   "command": "agent.add",
   "error": {

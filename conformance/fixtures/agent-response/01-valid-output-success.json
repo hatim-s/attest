@@ -2,7 +2,7 @@
   "description": "Accepts a successful agent response with JSON output.",
   "expect": "valid",
   "input": {
-    "protocol": "attest.agent/v1alpha1",
+    "protocol": "attest.agent-invocation",
     "output": { "answer": "Paris" }
   }
 }

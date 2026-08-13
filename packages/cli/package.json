@@ -21,8 +21,8 @@
     "yaml": "^2.9.0"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
-    "test": "vitest run",
+    "build": "tsc -p tsconfig.build.json",
+    "test": "vitest run --maxWorkers=1",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "devDependencies": {

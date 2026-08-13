@@ -3,7 +3,7 @@
   "expect": "invalid",
   "issue_paths": [["spans", "1", "span_id"]],
   "input": {
-    "schema": "attest.trace/v1alpha1",
+    "schema": "attest.trace",
     "trace_id": "trace-duplicate",
     "spans": [
       {

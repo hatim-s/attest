@@ -3,7 +3,7 @@
   "expect": "invalid",
   "issue_paths": [["output"]],
   "input": {
-    "protocol": "attest.agent/v1alpha1",
+    "protocol": "attest.agent-invocation",
     "output": "Paris",
     "error": { "message": "failed" }
   }

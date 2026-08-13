@@ -1,4 +1,4 @@
-# Metric Contract — `attest.metric/v1alpha1`
+# Metric Contract — `attest.metric-evaluation`
 
 Three kinds of metrics score every case: **assertions** (declarative, deterministic), **exec metrics** (your code, any language), and **judges** (LLM-scored rubrics). All three normalize to the same result shape, so reports, diffs, and CI thresholds treat them uniformly.
 
@@ -67,10 +67,10 @@ Request body:
 
 ```json
 {
-  "protocol": "attest.metric/v1alpha1",
+  "protocol": "attest.metric-evaluation",
   "case": { "id": "greeting", "input": {}, "expected": {}, "params": {} },
   "output": "…the agent's output…",
-  "trace": { "schema": "attest.trace/v1alpha1", "spans": [] }
+  "trace": { "schema": "attest.trace", "spans": [] }
 }
 ```
 
@@ -100,6 +100,4 @@ Semantics:
 
 `pass: false` is a _result_. A **metric error** (crash, timeout, malformed envelope, provider failure) means the case's metric could not be evaluated: it is reported separately, never silently coerced to a failing score, and is itself diffable between runs.
 
-## Versioning
-
-Same policy as the agent contract: additive-only within `v1alpha1`; the `protocol` field discriminates. Exec metrics should ignore unknown request fields.
+Executable metrics should ignore unknown request fields so vendor-specific extensions remain usable.

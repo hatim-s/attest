@@ -1,6 +1,6 @@
 import { type CliErrorCatalog } from '@attest/contracts';
 
-/** Renders the versioned error registry as concise human repair guidance. */
+/** Renders the error registry as concise human repair guidance. */
 const renderCliErrorCatalog = (catalog: CliErrorCatalog): string =>
   catalog.errors
     .map(

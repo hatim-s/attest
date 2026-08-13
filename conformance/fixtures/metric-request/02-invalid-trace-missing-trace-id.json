@@ -3,9 +3,9 @@
   "expect": "invalid",
   "issue_paths": [["trace", "trace_id"]],
   "input": {
-    "protocol": "attest.metric/v1alpha1",
+    "protocol": "attest.metric-evaluation",
     "case": { "id": "greeting", "input": {} },
     "output": "Paris",
-    "trace": { "schema": "attest.trace/v1alpha1", "spans": [] }
+    "trace": { "schema": "attest.trace", "spans": [] }
   }
 }

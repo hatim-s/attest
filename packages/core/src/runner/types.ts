@@ -11,7 +11,7 @@ import type {
 
 import type { AgentInvocationError } from './errors.js';
 
-/** Describes the two native v2 transports that still use the shared envelope invoker. */
+/** Describes the two native transports that still use the shared envelope invoker. */
 type NativeAgentTarget = { type: 'cli'; command: string[] } | { type: 'http'; url: string };
 
 /** Controls a single agent invocation; timeouts and caps come from resolved config defaults. */

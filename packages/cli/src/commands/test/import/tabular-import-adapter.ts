@@ -12,7 +12,7 @@ import {
   type TabularImportResult,
 } from '@attest/core';
 
-import { AttestCliError } from '../../../errors.js';
+import { AttestCliError } from '../../../errors/index.js';
 
 type ImportCommandAdapterOptions = {
   collisionCases?: readonly TestCase[];
@@ -104,7 +104,7 @@ const prepareImportSource = async (
   }
 };
 
-/** Adapts a versioned CLI request to the reusable all-in-memory import engine. */
+/** Adapts a CLI request to the reusable all-in-memory import engine. */
 const runTabularImportAdapter = async (
   options: ImportCommandAdapterOptions,
 ): Promise<TabularImportResult> => {

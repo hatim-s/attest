@@ -1,0 +1,12 @@
+{
+  "schema": "attest.metric-preset",
+  "id": "tool-order",
+  "name": "Tool order",
+  "description": "Require tool-call names to appear in one chronological order.",
+  "required_inputs": ["tool_order"],
+  "configurable_fields": [],
+  "definition": {
+    "kind": "assertion",
+    "assertions": [{ "tool_calls": { "order": ["first-tool", "second-tool"] } }]
+  }
+}
