@@ -1,6 +1,5 @@
 import { createHash } from 'node:crypto';
 import { createServer, type IncomingMessage, type Server } from 'node:http';
-import type { AddressInfo } from 'node:net';
 import type { Duplex } from 'node:stream';
 
 const WEBSOCKET_GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11';
@@ -177,7 +176,7 @@ const startWebSocketFixtureServer = async (
   const waiters = new Set<EventWaiter>();
   const sockets = new Set<Duplex>();
   const scheduledTasks = new Set<ReturnType<typeof setTimeout>>();
-  const multiplexedRequests: Array<{ connection: FixtureConnection; request: FixtureRequest }> = [];
+  const multiplexedRequests = new Map<FixtureConnection, FixtureRequest[]>();
   let connectionCount = 0;
 
   /** Records observable behavior and resolves matching integration-lane waiters. */
@@ -328,17 +327,22 @@ const startWebSocketFixtureServer = async (
         return;
       case 'multiplexed_out_of_order':
         connection.sendJson(acknowledgement);
-        multiplexedRequests.push({ connection, request });
-        if (multiplexedRequests.length === 2) {
-          // Reverse completion order proves consumers correlate instead of using FIFO position.
-          const completionBatch = multiplexedRequests.splice(0, 2).reverse();
-          for (const pending of completionBatch) {
-            pending.connection.sendJson({
-              request_id: pending.request.request_id,
-              type: 'result',
-              result: { completion_order: 'reverse' },
-            });
+        {
+          const pending = multiplexedRequests.get(connection) ?? [];
+          pending.push(request);
+          multiplexedRequests.set(connection, pending);
+          // This scenario intentionally completes requests in connection-local pairs.
+          while (pending.length >= 2) {
+            const completionBatch = pending.splice(0, 2).reverse();
+            for (const pendingRequest of completionBatch) {
+              connection.sendJson({
+                request_id: pendingRequest.request_id,
+                type: 'result',
+                result: { completion_order: 'reverse' },
+              });
+            }
           }
+          if (pending.length === 0) multiplexedRequests.delete(connection);
         }
         return;
       case 'ack_then_disconnect':
@@ -445,7 +449,10 @@ const startWebSocketFixtureServer = async (
       resolve();
     });
   });
-  const address = server.address() as AddressInfo;
+  const address = server.address();
+  if (address === null || typeof address === 'string') {
+    throw new Error('WebSocket fixture did not expose a TCP address.');
+  }
 
   return {
     url: `ws://127.0.0.1:${String(address.port)}`,

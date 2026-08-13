@@ -38,6 +38,7 @@ const executeResolvedEvalPlan = async <Payload, BaselineDiff = unknown>(
     return preOrchestrationFailure(
       run,
       now,
+      'failed',
       terminalFailure(
         'run_failed',
         planError ?? 'Resolved eval plan exceeds the configured event count cap.',
@@ -49,6 +50,7 @@ const executeResolvedEvalPlan = async <Payload, BaselineDiff = unknown>(
     return preOrchestrationFailure(
       run,
       now,
+      'cancelled',
       terminalFailure('cancelled', 'Eval run was cancelled before orchestration started.'),
       options.onEvent,
     );
@@ -60,6 +62,7 @@ const executeResolvedEvalPlan = async <Payload, BaselineDiff = unknown>(
     return preOrchestrationFailure(
       run,
       now,
+      'failed',
       terminalFailure('run_failed', safeErrorMessage(error, 'Eval run creation failed.')),
       options.onEvent,
     );
@@ -74,6 +77,7 @@ const executeResolvedEvalPlan = async <Payload, BaselineDiff = unknown>(
     runController.abort(options.signal?.reason);
   };
   options.signal?.addEventListener('abort', onCallerAbort, { once: true });
+  if (Boolean(options.signal?.aborted)) onCallerAbort();
   const timeout = setTimeout(() => {
     timedOut = true;
     runController.abort(new Error('Eval run deadline exceeded.'));
@@ -179,7 +183,7 @@ const executeResolvedEvalPlan = async <Payload, BaselineDiff = unknown>(
     }
   }
 
-  const finalResult =
+  let finalResult =
     status === 'completed'
       ? completedResult(run, summary)
       : status === 'cancelled'
@@ -191,8 +195,33 @@ const executeResolvedEvalPlan = async <Payload, BaselineDiff = unknown>(
               : 'Eval run encountered an invocation, metric, persistence, or artifact error.',
           );
 
-  await collector.emit({ event: 'run_completed', data: { run_id: run.run_id, status, summary } });
-  await collector.emit({ event: 'result', data: finalResult });
+  try {
+    await collector.emit({ event: 'run_completed', data: { run_id: run.run_id, status, summary } });
+    await collector.emit({ event: 'result', data: finalResult });
+  } catch (error: unknown) {
+    infrastructureErrors.push(safeErrorMessage(error, 'Eval terminal event emission failed.'));
+    status = 'failed';
+    finalResult = terminalFailure('run_failed', 'Eval terminal event emission failed.');
+    try {
+      await persistence.finalizeRun(run.run_id, 'failed', summary);
+      finalizationConfirmed = true;
+    } catch (finalizationError: unknown) {
+      finalizationConfirmed = false;
+      infrastructureErrors.push(
+        safeErrorMessage(finalizationError, 'Eval terminal failure reconciliation failed.'),
+      );
+    }
+    if (collector.events.at(-1)?.event === 'run_completed') collector.events.pop();
+    try {
+      await collector.emit({
+        event: 'run_completed',
+        data: { run_id: run.run_id, status, summary },
+      });
+      await collector.emit({ event: 'result', data: finalResult });
+    } catch {
+      // The bounded result object below remains authoritative when the event cap is exhausted.
+    }
+  }
 
   return {
     run,

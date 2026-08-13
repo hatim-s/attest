@@ -9,11 +9,11 @@ const descendantSource = `
   setInterval(() => {}, 1_000);
 `;
 
+process.on('SIGTERM', () => {
+  // The fixture deliberately requires the invoker's SIGKILL escalation.
+});
 writeFileSync(processIdentifierPath, String(process.pid));
 spawn(process.execPath, ['--input-type=module', '--eval', descendantSource, markerPath], {
   stdio: 'ignore',
-});
-process.on('SIGTERM', () => {
-  // The fixture deliberately requires the invoker's SIGKILL escalation.
 });
 setInterval(() => {}, 1_000);

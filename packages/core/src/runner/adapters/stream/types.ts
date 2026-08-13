@@ -1,6 +1,6 @@
 import type { AgentResource } from '@attest/contracts';
 
-import { AgentInvocationError } from '../../errors.js';
+import type { AgentInvocationError } from '../../errors.js';
 import type { InvocationAttempt } from '../../types.js';
 
 type StreamAgentResource = AgentResource & {
