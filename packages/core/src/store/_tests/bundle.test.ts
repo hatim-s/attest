@@ -84,6 +84,7 @@ afterEach(async () => {
 
 describe('run bundles', () => {
   it('round-trips a structurally verified run and case', async () => {
+    expect(BUNDLE_SCHEMA_ID).toBe('attest.bundle');
     const { directory, store } = await openTemporaryStore();
     const run = await createStoredRun(store);
     const destination = join(directory, 'run.ndjson');
