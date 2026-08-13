@@ -171,10 +171,19 @@ const server = http.createServer(async (request, response) => {
     return;
   }
 
-  await behavior(envelope, response);
+  try {
+    await behavior(envelope, response);
+  } catch (error) {
+    process.stderr.write(`HTTP fixture behavior ${behaviorName} failed: ${error.message}\n`);
+    response.destroy();
+  }
 });
 
-const shutdown = () => server.close(() => process.exit(0));
+const shutdown = () => {
+  server.closeAllConnections();
+  server.close(() => process.exit(0));
+  setTimeout(() => process.exit(0), 1_000).unref();
+};
 
 server.on('error', (error) => {
   process.stderr.write(`HTTP fixture failed: ${error.message}\n`);

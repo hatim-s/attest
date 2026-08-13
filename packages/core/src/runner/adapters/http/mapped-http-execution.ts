@@ -20,6 +20,7 @@ import {
   type ResolvedHttpRequestTemplate,
 } from './request-template.js';
 import { redactTransportText } from './redaction.js';
+import { parseRetryAfter } from './retry-after.js';
 import { requireSameOrigin } from './url-security.js';
 import type {
   CompletedHttpResponse,
@@ -27,8 +28,6 @@ import type {
   MappedHttpInvokeOptions,
   TimedInvocationError,
 } from './mapped-http-types.js';
-
-const MAX_RETRY_AFTER_MS = 30_000;
 
 const isJsonValue = (value: unknown): value is JsonValue => {
   if (value === null || ['string', 'number', 'boolean'].includes(typeof value)) return true;
@@ -52,6 +51,10 @@ const errorFromExtracted = (value: unknown): AgentErrorResponse['error'] => {
   return { message: 'The mapped HTTP agent reported an error.' };
 };
 
+/** Redacts secret representations from extracted JSON before it becomes persisted evidence. */
+const redactExtractedJson = (value: unknown, secrets: readonly string[]): unknown =>
+  JSON.parse(redactTransportText(JSON.stringify(value), secrets)) as unknown;
+
 /** Extracts an optional provider correlation id without accepting structured secret-bearing data. */
 const extractRemoteJobId = (
   raw: unknown,
@@ -73,6 +76,7 @@ const extractRemoteJobId = (
 const extractAgentResponse = (
   raw: unknown,
   extraction: Extract<HttpAgentResource['transport'], { kind: 'http' }>['extraction'],
+  secrets: readonly string[],
 ): AgentResponse => {
   const error =
     extraction.error_pointer === undefined
@@ -83,10 +87,17 @@ const extractAgentResponse = (
       ? undefined
       : readJsonPointer(raw, extraction.trace_pointer);
   if (error !== undefined && error !== null) {
+    const extractedError = errorFromExtracted(error);
     return {
       protocol: AGENT_PROTOCOL,
-      error: errorFromExtracted(error),
-      ...(trace === undefined ? {} : { trace }),
+      error: {
+        ...extractedError,
+        message: redactTransportText(extractedError.message, secrets),
+        ...(extractedError.code === undefined
+          ? {}
+          : { code: redactTransportText(extractedError.code, secrets) }),
+      },
+      ...(trace === undefined ? {} : { trace: redactExtractedJson(trace, secrets) }),
     } as AgentResponse;
   }
   const result = readJsonPointer(raw, extraction.result_pointer);
@@ -99,7 +110,7 @@ const extractAgentResponse = (
   return {
     protocol: AGENT_PROTOCOL,
     output: result,
-    ...(trace === undefined ? {} : { trace }),
+    ...(trace === undefined ? {} : { trace: redactExtractedJson(trace, secrets) }),
   } as AgentResponse;
 };
 
@@ -121,16 +132,6 @@ const retryDelay = (agent: HttpAgentResource, retryIndex: number): number => {
     .digest()
     .readUInt32BE(0);
   return Math.floor((bounded * (75 + (digest % 51))) / 100);
-};
-
-const parseRetryAfter = (value: string | undefined): number | undefined => {
-  if (value === undefined) return undefined;
-  if (/^\d+$/u.test(value.trim()))
-    return Math.min(Number(value.trim()) * 1_000, MAX_RETRY_AFTER_MS);
-  const timestamp = Date.parse(value);
-  return Number.isFinite(timestamp)
-    ? Math.min(Math.max(0, timestamp - Date.now()), MAX_RETRY_AFTER_MS)
-    : undefined;
 };
 
 const wait = async (
