@@ -15,7 +15,7 @@ import {
   type BundleLine,
   type BundleManifest,
 } from './bundle-format.js';
-import { isCaseRecord, isRunRecord } from './internal/record-validation.js';
+import { collectRunRecordViolations, isCaseRecord } from './internal/record-validation.js';
 import { StoreError, type RunStore } from './types.js';
 
 type JsonObject = Record<string, unknown>;
@@ -44,16 +44,22 @@ const verifyBundleLines = (lines: string[]): BundleLine[] => {
   if (lines.length === 0) throw corruptBundle('Run bundle is empty.');
   const parsedLines = lines.map(parseJsonLine);
   const first = parsedLines[0];
-  if (
-    first?.type !== 'bundle_header' ||
-    first.schema !== BUNDLE_SCHEMA_ID ||
-    !isRunRecord(first.run)
-  ) {
-    throw corruptBundle('Run bundle must start with one well-formed header.');
+  if (first?.type !== 'bundle_header') {
+    throw corruptBundle('Run bundle must start with a bundle_header record.');
+  }
+  if (first.schema !== BUNDLE_SCHEMA_ID) {
+    throw corruptBundle(
+      `Run bundle header uses unsupported schema ${JSON.stringify(first.schema)}; expected ${JSON.stringify(BUNDLE_SCHEMA_ID)}.`,
+    );
+  }
+  const runViolations = collectRunRecordViolations(first.run, 'header.run');
+  if (runViolations.length > 0) {
+    throw corruptBundle(`Run bundle header contains a malformed run: ${runViolations.join('; ')}`);
   }
 
-  const recognized: BundleLine[] = [first as unknown as BundleHeader];
-  const headerRunId = first.run.id;
+  const header = first as unknown as BundleHeader;
+  const recognized: BundleLine[] = [header];
+  const headerRunId = header.run.id;
   const hasher = createContentHasher();
   let caseCount = 0;
   let headerCount = 0;
@@ -86,7 +92,9 @@ const verifyBundleLines = (lines: string[]): BundleLine[] => {
       recognized.push(parsed as unknown as BundleCase);
       continue;
     }
-    throw corruptBundle(`Run bundle line ${index + 1} has an unknown record type.`);
+    throw corruptBundle(
+      `Run bundle line ${index + 1} has an unknown record type for schema ${JSON.stringify(first.schema)}.`,
+    );
   }
 
   if (!footer) throw corruptBundle('Run bundle is missing its footer.');

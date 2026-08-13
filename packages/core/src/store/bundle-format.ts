@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { canonicalStringify } from './internal/canonical-json.js';
 import type { CaseRecord, RunRecord } from './types.js';
 
-const BUNDLE_SCHEMA_ID = 'attest.bundle';
+const BUNDLE_SCHEMA_ID = 'attest.bundle/v1alpha1';
 
 /** Describes the run metadata line that starts every PLAN 1S.4 cloud-ingest bundle. */
 interface BundleHeader {

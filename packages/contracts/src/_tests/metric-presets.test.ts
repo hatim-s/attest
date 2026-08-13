@@ -4,7 +4,7 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import { METRIC_PRESETS, findMetricPreset, metricPresetSchema } from '../metric/presets.js';
-import { METRIC_PRESET_SCHEMA_ID } from '../schema/identifiers.js';
+import { METRIC_PRESET_SCHEMA_ID, METRIC_PRESET_SCHEMA_VERSION } from '../schema/identifiers.js';
 
 const FIXTURE_DIRECTORY = resolve(import.meta.dirname, 'fixtures/metric-presets');
 
@@ -32,6 +32,13 @@ describe('metric presets', () => {
       metricPresetSchema.safeParse({ ...METRIC_PRESETS[0], hidden_prompt: 'not inspectable' })
         .success,
     ).toBe(false);
+  });
+
+  it('accepts the legacy schema identifier without publishing it in current presets', () => {
+    expect(
+      metricPresetSchema.parse({ ...METRIC_PRESETS[0], schema: METRIC_PRESET_SCHEMA_VERSION }),
+    ).toMatchObject({ schema: METRIC_PRESET_SCHEMA_VERSION });
+    expect(METRIC_PRESETS.every(({ schema }) => schema === METRIC_PRESET_SCHEMA_ID)).toBe(true);
   });
 
   it('keeps catalog arrays, definitions, and lookup results deeply immutable', () => {

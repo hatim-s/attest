@@ -6,7 +6,7 @@ import { Readable } from 'node:stream';
 import { AGENT_PROTOCOL } from '@attest/contracts';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { createContentHasher } from '../bundle-format.js';
+import { BUNDLE_SCHEMA_ID, createContentHasher } from '../bundle-format.js';
 import { exportRunBundle, readRunBundle } from '../bundle-io.js';
 import { canonicalStringify } from '../internal/canonical-json.js';
 import { openStore, type RunStore } from '../run-store.js';
@@ -89,10 +89,11 @@ describe('run bundles', () => {
     const destination = join(directory, 'run.ndjson');
     const manifest = await exportRunBundle(store, run.id, destination);
     await expect(collect(destination)).resolves.toMatchObject([
-      { type: 'bundle_header', run: { id: run.id } },
+      { type: 'bundle_header', schema: BUNDLE_SCHEMA_ID, run: { id: run.id } },
       { type: 'case', case: { caseId: 'case-1' } },
       { type: 'bundle_footer', content_hash: manifest.contentHash },
     ]);
+    expect(manifest.schemaId).toBe(BUNDLE_SCHEMA_ID);
   });
 
   it('rejects a tampered case before yielding any record', async () => {
@@ -163,6 +164,34 @@ describe('run bundles', () => {
     await expect(
       collect(Readable.from(`${[...contentLines, footer].join('\n')}\n`)),
     ).rejects.toMatchObject({ code: 'CORRUPT_DATA' });
+  });
+
+  it('reports an unsupported bundle schema separately from malformed headers', async () => {
+    const { directory, store } = await openTemporaryStore();
+    const run = await createStoredRun(store);
+    const destination = join(directory, 'unsupported-schema.ndjson');
+    await exportRunBundle(store, run.id, destination);
+    const source = await mutateAndRehashBundle(destination, (header) => {
+      header.schema = 'attest.bundle/future';
+    });
+
+    await expect(collect(source)).rejects.toThrow(
+      'Run bundle header uses unsupported schema "attest.bundle/future"',
+    );
+  });
+
+  it('reports field-level violations for malformed header runs', async () => {
+    const { directory, store } = await openTemporaryStore();
+    const run = await createStoredRun(store);
+    const destination = join(directory, 'malformed-run.ndjson');
+    await exportRunBundle(store, run.id, destination);
+    const source = await mutateAndRehashBundle(destination, (header) => {
+      (header.run as Record<string, unknown>).status = 'other';
+    });
+
+    await expect(collect(source)).rejects.toThrow(
+      'Run bundle header contains a malformed run: header.run.status',
+    );
   });
 
   it.each([
