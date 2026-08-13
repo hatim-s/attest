@@ -5,6 +5,11 @@ class SseParser {
   private data: string[] = [];
   private eventName?: string;
 
+  /** Reports buffered event data before JSON parsing so authored caps apply first. */
+  get bufferedDataBytes(): number {
+    return Buffer.byteLength(this.data.join('\n'));
+  }
+
   push(line: string): StreamEvent | undefined {
     if (line === '') {
       if (this.data.length === 0) {
