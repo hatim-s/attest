@@ -415,6 +415,7 @@ const startWebSocketFixtureServer = async (
         return;
       }
 
+      // RFC 6455 requires SHA-1 for this handshake value; it is not a security control.
       const accept = createHash('sha1').update(`${key}${WEBSOCKET_GUID}`).digest('base64');
       const requestedProtocol = request.headers['sec-websocket-protocol']?.split(',')[0]?.trim();
       const protocolHeader =

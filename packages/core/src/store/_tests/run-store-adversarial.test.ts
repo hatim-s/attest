@@ -109,6 +109,66 @@ describe('RunStore adversarial persistence', () => {
     await expect(store.getCaseResults(run.id)).resolves.toEqual([]);
   });
 
+  it('treats explicitly undefined forbidden fields like omitted JSON properties', async () => {
+    const { store } = await openTemporaryStore();
+    const run = await store.createRun({
+      schemaId: 'attest.project',
+      configHash: 'hash',
+      configJson: '{}',
+    });
+    const completed = {
+      ...completedExecution(run.id, 'completed-with-undefined'),
+      errorCode: undefined,
+      errorMessage: undefined,
+      attempts: [
+        {
+          status: 'ok',
+          durationMs: 1,
+          diagnostics: {},
+          warnings: [],
+          errorCode: undefined,
+          errorMessage: undefined,
+        },
+      ],
+    };
+    const evaluated = {
+      metricName: 'quality',
+      kind: 'assertion',
+      status: 'evaluated',
+      score: 1,
+      pass: true,
+      error: undefined,
+    };
+    const failed = {
+      ...completedExecution(run.id, 'failed-with-undefined'),
+      outcome: 'timeout',
+      errorCode: 'timeout',
+      errorMessage: 'late',
+      response: undefined,
+      trace: undefined,
+    };
+    const errored = {
+      metricName: 'quality',
+      kind: 'assertion',
+      status: 'error',
+      error: { message: 'late', kind: 'timeout' },
+      score: undefined,
+      pass: undefined,
+    };
+
+    await store.recordCase(
+      run.id,
+      completed as unknown as StoredCaseExecution,
+      [evaluated] as unknown as StoredMetricEvaluation[],
+    );
+    await store.recordCase(
+      run.id,
+      failed as unknown as StoredCaseExecution,
+      [errored] as unknown as StoredMetricEvaluation[],
+    );
+    await expect(store.getCaseResults(run.id)).resolves.toHaveLength(2);
+  });
+
   it('aggregates all execution and evaluation violations before persistence', async () => {
     const { store } = await openTemporaryStore();
     const run = await store.createRun({
