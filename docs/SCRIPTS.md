@@ -20,7 +20,7 @@
 | `typecheck`        | `@attest/core`        | Type-checks core source without emitting files.                      |
 | `test`             | `@attest/core`        | Runs core tests in one worker because process sweeps are global.     |
 | `build`            | `@attest/cli`         | Compiles production CLI artifacts to `dist/`, excluding tests.       |
-| `test`             | `@attest/cli`         | Runs CLI config, orchestration, report, and command tests.           |
+| `test`             | `@attest/cli`         | Runs CLI and acceptance tests in one worker to isolate processes.    |
 | `typecheck`        | `@attest/cli`         | Type-checks CLI source without emitting files.                       |
 | `generate`         | `@attest/schemas`     | Regenerates published schemas from the contract source.              |
 | `typecheck`        | `@attest/schemas`     | Type-checks schema generation and artifact validation source.        |
