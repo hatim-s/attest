@@ -60,8 +60,9 @@ const isFileExistsError = (error: unknown): boolean =>
  * refusing to clean up is not) and takes the stale lock over.
  */
 const acquireFixtureProcessSweepLock = async (): Promise<() => Promise<void>> => {
+  let ownsLock = false;
   const releaseLock = async (): Promise<void> => {
-    await rm(FIXTURE_PROCESS_SWEEP_LOCK_PATH, { force: true });
+    if (ownsLock) await rm(FIXTURE_PROCESS_SWEEP_LOCK_PATH, { force: true });
   };
 
   const deadline = Date.now() + FIXTURE_PROCESS_SWEEP_LOCK_TIMEOUT_MS;
@@ -69,6 +70,7 @@ const acquireFixtureProcessSweepLock = async (): Promise<() => Promise<void>> =>
     try {
       const lock = await open(FIXTURE_PROCESS_SWEEP_LOCK_PATH, 'wx');
       await lock.close();
+      ownsLock = true;
       return releaseLock;
     } catch (error) {
       if (!isFileExistsError(error)) {

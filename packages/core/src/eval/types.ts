@@ -175,7 +175,7 @@ type ExecuteEvalOptions<BaselineDiff = JsonValue> = {
 type EvalExecutionResult<Payload = unknown, BaselineDiff = JsonValue> = {
   run: ImmutableEvalRun;
   status: 'completed' | 'failed' | 'cancelled';
-  exit_code: 0 | 1 | 4 | 130;
+  exit_code: EvalFinalResultData['exit_code'];
   summary: EvalRunSummary;
   cases: readonly EvalCaseRecord<Payload>[];
   events: readonly EvalEvent[];

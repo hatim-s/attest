@@ -223,6 +223,48 @@ const createPersistence = () => {
 };
 
 describe('executeResolvedEvalPlan', () => {
+  it('rejects invalid global concurrency before persistence or case scheduling', async () => {
+    const plan = createPlan(['case-zero'], { concurrency: 0 });
+    const persistence = createPersistence();
+    const executeCase = vi.fn<EvalCaseRunner<string>['executeCase']>();
+
+    const result = await executeResolvedEvalPlan(plan, { executeCase }, persistence.adapter, {
+      now: createClock(),
+    });
+
+    expect(result).toMatchObject({ status: 'failed', exit_code: 4, cases: [] });
+    expect(persistence.createRun).not.toHaveBeenCalled();
+    expect(executeCase).not.toHaveBeenCalled();
+  });
+
+  it('observes cancellation that arrives while run creation is in flight', async () => {
+    const plan = createPlan(['case-zero']);
+    const persistence = createPersistence();
+    const creation = deferred<void>();
+    persistence.createRun.mockReturnValueOnce(creation.promise);
+    const controller = new AbortController();
+    const executeCase = vi.fn<EvalCaseRunner<string>['executeCase']>(
+      (_runId, resolvedCase, signal) =>
+        Promise.resolve(
+          signal.aborted
+            ? failedExecution(resolvedCase, 'cancelled')
+            : completedExecution(resolvedCase, [passingMetric()]),
+        ),
+    );
+
+    const pending = executeResolvedEvalPlan(plan, { executeCase }, persistence.adapter, {
+      now: createClock(),
+      signal: controller.signal,
+    });
+    await vi.waitFor(() => expect(persistence.createRun).toHaveBeenCalledOnce());
+    controller.abort(new Error('cancel during create'));
+    creation.resolve(undefined);
+    const result = await pending;
+
+    expect(result.status).toBe('cancelled');
+    expect(executeCase).toHaveBeenCalledOnce();
+  });
+
   it('bounds concurrency while retaining actual completion order and configured indexes', async () => {
     const plan = createPlan(['case-zero', 'case-one', 'case-two']);
     const pending = new Map<string, Deferred<ReturnType<typeof completedExecution>>>();
@@ -536,6 +578,30 @@ describe('executeResolvedEvalPlan', () => {
     expect(executeCase).not.toHaveBeenCalled();
     expect(persistence.createRun).not.toHaveBeenCalled();
     expect(evalEventStreamSchema.safeParse(result.events).success).toBe(true);
+  });
+
+  it('returns finalized failure state when a terminal event exceeds the runtime byte cap', async () => {
+    const plan = createPlan(['case-zero']);
+    const persistence = createPersistence();
+    const runner: EvalCaseRunner<string> = {
+      executeCase: (_runId, resolvedCase) =>
+        Promise.resolve(completedExecution(resolvedCase, [passingMetric()])),
+    };
+    let clockCalls = 0;
+    const now = (): string => {
+      clockCalls += 1;
+      return clockCalls === 4 ? 'x'.repeat(2_000) : '2026-08-08T10:00:00.000Z';
+    };
+
+    const result = await executeResolvedEvalPlan(plan, runner, persistence.adapter, {
+      now,
+      event_limits: { max_event_bytes: 1_024 },
+    });
+
+    expect(result.status).toBe('failed');
+    expect(result.exit_code).toBe(4);
+    expect(result.can_release_cancellation_ownership).toBe(true);
+    expect(persistence.finalizeRun).toHaveBeenLastCalledWith(RUN_ID, 'failed', result.summary);
   });
 
   it('returns the baseline diff and atomically publishes deterministic JUnit payload bytes', async () => {
