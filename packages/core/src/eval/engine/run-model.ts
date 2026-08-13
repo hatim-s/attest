@@ -83,6 +83,7 @@ const completedResult = (run: ImmutableEvalRun, summary: EvalRunSummary): EvalFi
 const preOrchestrationFailure = async <Payload, BaselineDiff>(
   run: ImmutableEvalRun,
   now: () => string,
+  status: 'cancelled' | 'failed',
   finalResult: EvalFinalResultData,
   onEvent: ExecuteEvalOptions['onEvent'],
 ): Promise<EvalExecutionResult<Payload, BaselineDiff>> => {
@@ -100,8 +101,8 @@ const preOrchestrationFailure = async <Payload, BaselineDiff>(
   }
   return {
     run,
-    status: finalResult.exit_code === 130 ? 'cancelled' : 'failed',
-    exit_code: finalResult.exit_code as 4 | 130,
+    status,
+    exit_code: finalResult.exit_code,
     summary: EMPTY_SUMMARY,
     cases: [],
     events: [event],

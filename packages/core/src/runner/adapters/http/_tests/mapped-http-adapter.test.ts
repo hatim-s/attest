@@ -127,6 +127,28 @@ describe('mapped HTTP adapter', () => {
     expect(result.attempts).toHaveLength(1);
   });
 
+  it('redacts secrets from extracted provider errors and traces before persistence', async () => {
+    const secret = 'provider-secret';
+    const fixture = await startServer((_incoming, response) => {
+      response.setHeader('content-type', 'application/json');
+      response.end(
+        JSON.stringify({
+          error: { message: `declined ${secret}`, code: `CODE_${secret}` },
+          trace: { schema: 'attest.trace', trace_id: secret, spans: [] },
+        }),
+      );
+    });
+    const agent = directAgent(fixture.origin);
+    if (agent.transport.kind !== 'http') throw new Error('Expected direct HTTP transport.');
+    agent.transport.extraction.trace_pointer = '/trace';
+
+    const result = await invokeMappedHttpAgent(agent, request, { secrets: [secret] });
+
+    expect(result.status).toBe('ok');
+    expect(JSON.stringify(result)).not.toContain(secret);
+    expect(JSON.stringify(result)).toContain('[REDACTED]');
+  });
+
   it('retries an idempotent submission, keeps one key, and polls with bounded Retry-After', async () => {
     let submissions = 0;
     let polls = 0;
