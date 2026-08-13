@@ -22,10 +22,32 @@ process.stdin.on('end', () => {
     detached: true,
     stdio: 'ignore',
   });
+  child.on('error', (error) => {
+    process.stderr.write(`orphan child spawn failed: ${error.message}\n`);
+    process.stdout.write(
+      JSON.stringify({
+        protocol: request.protocol,
+        error: { message: 'orphan child spawn failed' },
+      }),
+      () => process.exit(1),
+    );
+  });
   child.unref();
 
+  const deadline = Date.now() + 5_000;
   const publishAfterHeartbeat = () => {
     if (!existsSync(heartbeatFile)) {
+      if (Date.now() > deadline) {
+        process.stderr.write('orphan heartbeat file never appeared\n');
+        process.stdout.write(
+          JSON.stringify({
+            protocol: request.protocol,
+            error: { message: 'orphan heartbeat file never appeared' },
+          }),
+          () => process.exit(1),
+        );
+        return;
+      }
       setTimeout(publishAfterHeartbeat, 10);
       return;
     }

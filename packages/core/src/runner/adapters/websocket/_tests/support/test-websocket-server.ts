@@ -41,6 +41,9 @@ class TestWebSocketPeer {
     private readonly ignoreClientClose: boolean,
   ) {
     socket.on('data', (chunk: Buffer) => this.consume(chunk));
+    socket.on('error', () => {
+      // Hostile close and drop tests intentionally surface connection resets.
+    });
   }
 
   sendJson(value: unknown): void {
@@ -100,7 +103,11 @@ class TestWebSocketPeer {
       }
       this.buffer = this.buffer.subarray(headerBytes + maskBytes + payloadBytes);
       if (opcode === 0x1) {
-        this.onMessage(this, JSON.parse(payload.toString('utf8')) as unknown);
+        try {
+          this.onMessage(this, JSON.parse(payload.toString('utf8')) as unknown);
+        } catch {
+          // Malformed client frames must not crash the Vitest worker.
+        }
       } else if (opcode === 0x8 && !this.ignoreClientClose) {
         this.socket.write(serverFrame(0x8, payload));
         this.socket.end();

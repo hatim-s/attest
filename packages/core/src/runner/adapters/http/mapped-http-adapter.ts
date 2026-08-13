@@ -90,7 +90,11 @@ const invokeMappedHttpAgent = async (
     const remoteJobId =
       completed.remoteJobId ??
       extractRemoteJobId(response.raw, agent.transport.extraction.remote_job_id_pointer);
-    const normalized = extractAgentResponse(response.raw, agent.transport.extraction);
+    const normalized = extractAgentResponse(
+      response.raw,
+      agent.transport.extraction,
+      options.secrets ?? [],
+    );
     const report = parseAgentResponse(normalized);
     if (!report.ok) {
       throw new AgentInvocationError(
