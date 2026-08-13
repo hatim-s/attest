@@ -37,7 +37,7 @@ const diagnosticsSchema = z.object({
   exitCode: z.number().int().optional(),
   httpStatus: z.number().int().optional(),
   remoteJobId: z.union([z.string(), z.number().finite()]).optional(),
-  unreapedProcessIds: z.array(z.number().int().positive().safe()).optional(),
+  unreapedProcessIds: z.array(z.number().int().positive()).optional(),
 });
 const attemptBase = {
   diagnostics: diagnosticsSchema,
@@ -63,7 +63,7 @@ const storedAttemptSchema = z
   .superRefine((attempt, context) => {
     if (attempt.status !== 'ok') return;
     for (const field of ['errorCode', 'errorMessage'] as const) {
-      if (Object.hasOwn(attempt, field)) {
+      if (Object.hasOwn(attempt, field) && attempt[field] !== undefined) {
         context.addIssue({ code: 'custom', path: [field], message: `ok status forbids ${field}` });
       }
     }
@@ -103,7 +103,7 @@ const storedCaseExecutionSchema = z
         context.addIssue({ code: 'custom', path: ['response'], message: 'is required' });
       }
       for (const field of ['errorCode', 'errorMessage'] as const) {
-        if (Object.hasOwn(execution, field)) {
+        if (Object.hasOwn(execution, field) && execution[field] !== undefined) {
           context.addIssue({
             code: 'custom',
             path: [field],
@@ -114,7 +114,7 @@ const storedCaseExecutionSchema = z
       return;
     }
     for (const field of ['response', 'trace'] as const) {
-      if (Object.hasOwn(execution, field)) {
+      if (Object.hasOwn(execution, field) && execution[field] !== undefined) {
         context.addIssue({
           code: 'custom',
           path: [field],
@@ -152,7 +152,10 @@ const storedMetricEvaluationSchema = z
   .superRefine((evaluation, context) => {
     const forbidden = evaluation.status === 'evaluated' ? ['error'] : ['score', 'pass'];
     for (const field of forbidden) {
-      if (Object.hasOwn(evaluation, field)) {
+      if (
+        Object.hasOwn(evaluation, field) &&
+        evaluation[field as keyof typeof evaluation] !== undefined
+      ) {
         context.addIssue({
           code: 'custom',
           path: [field],

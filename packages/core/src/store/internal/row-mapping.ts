@@ -58,12 +58,17 @@ const toMetricEvaluation = (row: MetricResultsTable): StoredMetricEvaluation => 
     durationMs: row.duration_ms ?? undefined,
   };
   if (row.status === 'evaluated') {
-    if (row.score === null || row.pass === null || row.error_json !== null) {
+    if (row.score === null || (row.pass !== 0 && row.pass !== 1) || row.error_json !== null) {
       throw new StoreError('CORRUPT_DATA', 'Stored evaluated metric violates its discriminant.');
     }
     return { ...shared, status: 'evaluated', score: row.score, pass: row.pass === 1 };
   }
-  if (row.error_json === null || row.score !== null || row.pass !== null) {
+  if (
+    row.status !== 'error' ||
+    row.error_json === null ||
+    row.score !== null ||
+    row.pass !== null
+  ) {
     throw new StoreError('CORRUPT_DATA', 'Stored errored metric violates its discriminant.');
   }
   return {
