@@ -1,4 +1,4 @@
-import { readFile, readdir } from 'node:fs/promises';
+import { readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 
 const generatedDirectory = new URL('../../generated/', import.meta.url);
@@ -14,7 +14,7 @@ async function validateArtifacts(): Promise<void> {
     }
 
     const artifactUrl = new URL(join(artifact.name), generatedDirectory);
-    const document = JSON.parse(await readFile(artifactUrl, 'utf8')) as {
+    const document = (await Bun.file(artifactUrl).json()) as {
       $schema?: unknown;
     };
 

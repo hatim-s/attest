@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -17,8 +17,8 @@ const writeEmbeddedDashboard = async (html: string): Promise<void> => {
   const declaration = 'declare const dashboardHtml: string;\n\nexport { dashboardHtml };\n';
   await mkdir(outputDirectory, { recursive: true });
   await Promise.all([
-    writeFile(resolve(outputDirectory, 'embedded-dashboard.js'), source, 'utf8'),
-    writeFile(resolve(outputDirectory, 'embedded-dashboard.d.ts'), declaration, 'utf8'),
+    Bun.write(resolve(outputDirectory, 'embedded-dashboard.js'), source),
+    Bun.write(resolve(outputDirectory, 'embedded-dashboard.d.ts'), declaration),
   ]);
 };
 
@@ -37,7 +37,7 @@ const buildDashboard = async (): Promise<void> => {
       },
       plugins: [react(), tailwindcss(), viteSingleFile()],
     });
-    const html = await readFile(resolve(temporaryDirectory, 'index.html'), 'utf8');
+    const html = await Bun.file(resolve(temporaryDirectory, 'index.html')).text();
     await writeEmbeddedDashboard(html);
   } finally {
     await rm(temporaryDirectory, { recursive: true });
