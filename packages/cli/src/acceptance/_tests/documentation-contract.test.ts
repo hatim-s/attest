@@ -607,7 +607,7 @@ describe('agent-first documentation and executable-example contract', () => {
       ['help', 'agent', 'add', '--output', 'json'],
       packed.root,
     );
-    expect(result.exitCode).toBe(0);
+    expect(result.exitCode, result.stderr || result.stdout).toBe(0);
     expect(result.stderr).toBe('');
     expect(JSON.parse(result.stdout) as CliDocument).toMatchObject({
       schema: 'attest.cli-result',

@@ -371,7 +371,9 @@ const assertCommand = async (
   priorRunId: string | undefined,
   acceptanceGaps: string[],
 ): Promise<string | undefined> => {
-  expect(result.exitCode, `${expectation.id}: ${result.stdout}`).toBe(expectation.exit_code);
+  expect(result.exitCode, `${expectation.id}: ${result.stderr || result.stdout}`).toBe(
+    expectation.exit_code,
+  );
   expect(result.stderr, expectation.id).toBe('');
 
   let document: CliDocument | undefined;

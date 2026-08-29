@@ -56,9 +56,9 @@
       "dependencies": {
         "@attest/contracts": "workspace:*",
         "@hono/node-server": "^2.1.0",
-        "@tanstack/ai": "^0.43.0",
-        "@tanstack/ai-anthropic": "^0.16.4",
-        "@tanstack/ai-openai": "^0.18.0",
+        "@tanstack/ai": "0.43.0",
+        "@tanstack/ai-anthropic": "0.16.4",
+        "@tanstack/ai-openai": "0.18.0",
         "ajv": "^8.20.0",
         "hono": "^4.13.0",
         "kysely": "^0.29.4",
