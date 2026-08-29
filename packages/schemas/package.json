@@ -12,5 +12,8 @@
     "generate": "bun src/generate-json-schema.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "bun src/_tests/validate-artifacts.ts"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.4.0"
   }
 }
