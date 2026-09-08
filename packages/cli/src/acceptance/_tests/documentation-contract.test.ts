@@ -22,6 +22,8 @@ import { fileURLToPath } from 'node:url';
 
 import { afterAll, describe, expect, it } from 'vitest';
 
+import { materializePackedRuntime } from './packed-runtime.js';
+
 import { runCli } from '../../run-cli.js';
 
 type CommandExpectation = {
@@ -352,7 +354,7 @@ const generatedSchemaReferences = async (): Promise<Set<string>> => {
   );
 };
 
-/** Packs every runtime workspace and installs the CLI into a dependency-clean production prefix. */
+/** Packs runtime workspaces and materializes their installed dependencies in an owned prefix. */
 const createPackedCli = async (): Promise<PackedCliRuntime> => {
   await execFileAsync('bun', ['run', 'build'], { cwd: REPOSITORY_ROOT, timeout: 120_000 });
   const runtime = await mkdtemp(join(tmpdir(), 'attest-documentation-packed-'));
@@ -393,35 +395,15 @@ const createPackedCli = async (): Promise<PackedCliRuntime> => {
     throw new Error('Packed runtime workspace set is incomplete.');
   }
 
-  const archiveReference = (packageName: (typeof PACKED_PACKAGE_NAMES)[number]): string =>
-    `./archives/${basename(archivePaths[packageName] ?? '')}`;
-  const installManifest = {
-    private: true,
-    dependencies: { '@attest/cli': archiveReference('@attest/cli') },
-    overrides: {
-      '@attest/contracts': archiveReference('@attest/contracts'),
-      '@attest/core': archiveReference('@attest/core'),
-      '@attest/web': archiveReference('@attest/web'),
-    },
-  };
-  await writeFile(join(runtime, 'package.json'), `${JSON.stringify(installManifest, null, 2)}\n`);
-  await execFileAsync(
-    'bun',
-    [
-      'install',
-      '--production',
-      '--ignore-scripts',
-      '--no-save',
-      // Ambient isolated/global-store settings must not link outside this owned runtime.
-      '--linker',
-      'hoisted',
-      // The frozen repository install primes Bun's cache; offline mode forbids registry access.
-      '--offline',
-    ],
-    { cwd: runtime, timeout: 120_000 },
+  const cliPath = await materializePackedRuntime(
+    runtime,
+    Object.fromEntries(
+      PACKED_PACKAGE_ROOTS.map((packageRoot) => {
+        const name = `@attest/${basename(packageRoot)}`;
+        return [name, { archive: archivePaths[name]!, source: join(REPOSITORY_ROOT, packageRoot) }];
+      }),
+    ),
   );
-
-  const cliPath = join(runtime, 'node_modules/.bin/attest');
   await access(cliPath, constants.X_OK);
   return { archivePaths, cliPath, root: runtime };
 };
@@ -595,7 +577,7 @@ describe('agent-first documentation and executable-example contract', () => {
     for (const reference of contract.llms_required_references) expect(llms).toContain(reference);
   });
 
-  it('installs packed workspace dependencies without ambient repository links', async () => {
+  it('materializes packed workspace dependencies without ambient repository links', async () => {
     const packed = await getPackedCli();
     const realRuntime = await realpath(packed.root);
     const realRepository = await realpath(REPOSITORY_ROOT);

@@ -1,17 +1,7 @@
 import { execFile, spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { constants } from 'node:fs';
-import {
-  access,
-  cp,
-  mkdir,
-  mkdtemp,
-  readFile,
-  readdir,
-  realpath,
-  rm,
-  writeFile,
-} from 'node:fs/promises';
+import { access, cp, mkdir, mkdtemp, readFile, readdir, realpath, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, relative, resolve, sep } from 'node:path';
 import { performance } from 'node:perf_hooks';
@@ -20,6 +10,8 @@ import { fileURLToPath } from 'node:url';
 
 import { afterAll, describe, expect, it } from 'vitest';
 import { parse as parseYaml } from 'yaml';
+
+import { materializePackedRuntime } from './packed-runtime.js';
 
 type CommandExpectation = {
   acceptance_stdout?: string[];
@@ -172,7 +164,7 @@ const snapshotFiles = async (root: string): Promise<FileSnapshot> => {
   return snapshot;
 };
 
-/** Creates the production-packed CLI prerequisite outside the measured actor stopwatch. */
+/** Materializes the production-packed CLI prerequisite outside the measured actor stopwatch. */
 const createPackedCli = async (): Promise<PackedCli> => {
   await execFileAsync('bun', ['run', 'build'], { cwd: REPOSITORY_ROOT, timeout: 120_000 });
   const runtime = await mkdtemp(join(tmpdir(), 'attest-quickstart-packed-'));
@@ -200,35 +192,15 @@ const createPackedCli = async (): Promise<PackedCli> => {
     archivePaths[packageName] = archivePath;
   }
 
-  const archiveReference = (packageName: (typeof PACKED_PACKAGE_NAMES)[number]): string =>
-    `./archives/${basename(archivePaths[packageName] ?? '')}`;
-  const manifest = {
-    private: true,
-    dependencies: { '@attest/cli': archiveReference('@attest/cli') },
-    overrides: {
-      '@attest/contracts': archiveReference('@attest/contracts'),
-      '@attest/core': archiveReference('@attest/core'),
-      '@attest/web': archiveReference('@attest/web'),
-    },
-  };
-  await writeFile(join(runtime, 'package.json'), `${JSON.stringify(manifest, null, 2)}\n`);
-  await execFileAsync(
-    'bun',
-    [
-      'install',
-      '--production',
-      '--ignore-scripts',
-      '--no-save',
-      // Ambient isolated/global-store settings must not link outside this owned runtime.
-      '--linker',
-      'hoisted',
-      // The frozen repository install primes Bun's cache; offline mode forbids registry access.
-      '--offline',
-    ],
-    { cwd: runtime, timeout: 120_000 },
+  const cliPath = await materializePackedRuntime(
+    runtime,
+    Object.fromEntries(
+      PACKED_PACKAGE_ROOTS.map((packageRoot) => {
+        const name = `@attest/${basename(packageRoot)}`;
+        return [name, { archive: archivePaths[name]!, source: join(REPOSITORY_ROOT, packageRoot) }];
+      }),
+    ),
   );
-
-  const cliPath = join(runtime, 'node_modules/.bin/attest');
   await access(cliPath, constants.X_OK);
   const installedRoot = await realpath(join(runtime, 'node_modules/@attest/cli'));
   expect(installedRoot.startsWith(`${await realpath(runtime)}${sep}`)).toBe(true);

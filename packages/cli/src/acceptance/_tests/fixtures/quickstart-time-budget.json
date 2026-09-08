@@ -12,7 +12,7 @@
       "Run inspection, report generation, view startup through loopback readiness, deliberate failure, and error-catalog lookup"
     ],
     "excluded": [
-      "Installing Node and the already-packed Attest CLI",
+      "Installing Node and materializing the packed Attest CLI with its installed dependency closure",
       "Building or packing the repository checkout",
       "Staging the actor's pre-existing agent and case or dataset fixtures",
       "Snapshot hashing, structured-output parsing, HTML and readiness reads, process cleanup, and test assertions performed outside each CLI interval"
@@ -22,8 +22,8 @@
   },
   "prerequisites": {
     "warm": [
-      "Node.js 22 or newer is on PATH.",
-      "A pristine production-packed Attest CLI runtime and all of its production dependencies are installed separately for each actor before timing starts.",
+      "Node.js 22.15 or newer is on PATH.",
+      "A pristine runtime is materialized separately for each actor from packed Attest archives and copied installed production dependencies before timing starts. Package-manager installation is verified separately by release:check.",
       "The actor starts with the documented quickstart and the CLI help, schema, and error surfaces available.",
       "No network access, credentials, provider SDK, repository source import, or ambient workspace link is required."
     ],
