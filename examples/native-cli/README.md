@@ -4,6 +4,11 @@ This minimal project exercises the complete local authoring path with Attest's n
 stdin/stdout agent protocol. Run the commands from this directory with the packed
 `attest` executable on `PATH`.
 
+See the [setup instructions](../../README.md#try-it-from-source) to build or install
+the CLI. Copy this example outside the checkout before running it. With a local
+archive installation, copy `agent.mjs` and `cases.jsonl` into that installation
+directory and replace `attest` with `npx attest` below.
+
 ## Prerequisites
 
 - Node.js is available as `node`.

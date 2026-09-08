@@ -19,6 +19,7 @@ import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 
 import { afterAll, describe, expect, it } from 'vitest';
+import { parse as parseYaml } from 'yaml';
 
 type CommandExpectation = {
   acceptance_stdout?: string[];
@@ -218,6 +219,9 @@ const createPackedCli = async (): Promise<PackedCli> => {
       '--production',
       '--ignore-scripts',
       '--no-save',
+      // Ambient isolated/global-store settings must not link outside this owned runtime.
+      '--linker',
+      'hoisted',
       // The frozen repository install primes Bun's cache; offline mode forbids registry access.
       '--offline',
     ],
@@ -562,11 +566,31 @@ describe('under-five-minute acceptance contract', () => {
       readiness_probe: 'view',
     });
 
-    const workflow = await readFile(CI_WORKFLOW_PATH, 'utf8');
+    const workflow = parseYaml(await readFile(CI_WORKFLOW_PATH, 'utf8')) as {
+      jobs: {
+        checks: {
+          strategy: { matrix: { include: Array<{ os: string; node: number | string }> } };
+          steps: Array<{ uses?: string; with?: Record<string, unknown> }>;
+        };
+      };
+    };
+    const checks = workflow.jobs.checks;
     for (const operatingSystem of contract.cross_platform.required_ci_operating_systems) {
-      expect(workflow).toContain(operatingSystem);
+      expect(
+        checks.strategy.matrix.include.some(
+          (entry) =>
+            entry.os === operatingSystem &&
+            Number(String(entry.node).split('.')[0]) === contract.cross_platform.node_major,
+        ),
+        `${operatingSystem}: required Node.js major`,
+      ).toBe(true);
     }
-    expect(workflow).toContain(`node-version: ${contract.cross_platform.node_major}`);
+    const setupNode = checks.steps.find((step) => step.uses?.startsWith('actions/setup-node@'));
+    expect(setupNode?.with?.['node-version']).toBe('${{ matrix.node }}');
+    expect(checks.strategy.matrix.include).toContainEqual({
+      os: 'ubuntu-latest',
+      node: '22.15.0',
+    });
     expect(contract.cross_platform).toMatchObject({ windows_required: false });
     for (const fixture of contract.fixture_files) {
       await expect(access(join(FIXTURE_ROOT, fixture)), fixture).resolves.toBeUndefined();

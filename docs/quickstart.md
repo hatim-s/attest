@@ -2,7 +2,17 @@
 
 ## Copy-paste example
 
-Run this in an empty directory with `attest` and `node` on `PATH`:
+First [build the CLI or install an alpha archive](../README.md#try-it-from-source).
+The source setup defines `attest` as a shell function in your current terminal.
+Create an isolated directory with the source setup, then run the example:
+
+```bash
+ATTEST_EXAMPLE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/attest-quickstart.XXXXXX")"
+cd "$ATTEST_EXAMPLE_DIR"
+```
+
+If you installed the archives locally, stay in that installation directory and use
+`npx attest` in place of `attest` below.
 
 ```bash
 cat > agent.mjs <<'EOF'
@@ -26,10 +36,10 @@ attest eval run smoke --output json
 
 ## Prerequisites
 
-- Node.js 22 or newer.
-- The compiled `attest` executable on `PATH`.
+- Node.js 22.15 or newer.
+- The built or installed CLI from the [setup instructions](../README.md#try-it-from-source).
 - An empty writable directory. Do not run the example inside an existing Attest project.
-- No credentials or network access are required.
+- No credentials or network access are required for the evaluation.
 
 ## Expected files
 
@@ -52,6 +62,10 @@ The full envelope is defined in [schema reference](./reference/schemas.md). If a
 fails, inspect `error.code` and use the [error catalog](./reference/errors.md); do not
 parse `error.message` as an API.
 
+The evaluation should exit `0`, with `result.verdict: "pass"` and a
+`result.run_id`. A completed evaluation with a failing score exits `1` even though
+the envelope has `ok: true`.
+
 ## Cleanup
 
 Leave the directory, then remove the example directory you created. Cleanup removes the
@@ -72,6 +86,10 @@ and [evaluation lifecycle](./concepts/eval-lifecycle.md) for those boundaries.
 
 ## Next steps
 
+- Run `attest list runs --output json` and inspect a returned id with
+  `attest show run <run-id> --output json`.
+- Open the local dashboard with `attest view --no-open`, then open its printed URL
+  in your browser. Stop the server with Ctrl+C.
 - [Connect other agent transports](./cli/agents.md).
 - [Import CSV, JSON, or JSONL tests and datasets](./cli/tests-and-datasets.md).
 - [Create assertion, judge, and executable metrics](./cli/metrics.md).

@@ -1,6 +1,6 @@
 {
   "name": "@attest/core",
-  "version": "0.0.0",
+  "version": "0.1.0-alpha.0",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -25,7 +25,8 @@
   "scripts": {
     "build": "tsc --build tsconfig.build.json",
     "test": "vitest run --maxWorkers=1",
-    "typecheck": "tsc --noEmit -p tsconfig.json"
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "prepublishOnly": "node ../../scripts/block-source-publish.mjs"
   },
   "optionalDependencies": {
     "@libsql/client": "^0.17.4"
@@ -33,5 +34,28 @@
   "devDependencies": {
     "fast-check": "^4.9.0",
     "vitest": "^3"
+  },
+  "description": "Agent evaluation execution, metrics, traces, and local persistence.",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hatim-s/attest.git",
+    "directory": "packages/core"
+  },
+  "homepage": "https://github.com/hatim-s/attest#readme",
+  "bugs": {
+    "url": "https://github.com/hatim-s/attest/issues"
+  },
+  "engines": {
+    "node": ">=22.15.0"
+  },
+  "files": [
+    "dist",
+    "LICENSE",
+    "NOTICE"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "tag": "alpha"
   }
 }

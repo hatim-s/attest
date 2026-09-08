@@ -24,7 +24,7 @@
     },
     "packages/cli": {
       "name": "@attest/cli",
-      "version": "0.0.0",
+      "version": "0.1.0-alpha.0",
       "bin": {
         "attest": "./dist/cli.js",
       },
@@ -41,7 +41,7 @@
     },
     "packages/contracts": {
       "name": "@attest/contracts",
-      "version": "0.0.0",
+      "version": "0.1.0-alpha.0",
       "dependencies": {
         "zod": "^4",
       },
@@ -52,7 +52,7 @@
     },
     "packages/core": {
       "name": "@attest/core",
-      "version": "0.0.0",
+      "version": "0.1.0-alpha.0",
       "dependencies": {
         "@attest/contracts": "workspace:*",
         "@hono/node-server": "^2.1.0",
@@ -75,7 +75,7 @@
     },
     "packages/schemas": {
       "name": "@attest/schemas",
-      "version": "0.0.0",
+      "version": "0.1.0-alpha.0",
       "dependencies": {
         "@attest/contracts": "workspace:*",
       },
@@ -85,21 +85,19 @@
     },
     "packages/web": {
       "name": "@attest/web",
-      "version": "0.0.0",
-      "dependencies": {
+      "version": "0.1.0-alpha.0",
+      "devDependencies": {
+        "@tailwindcss/vite": "^4.3.3",
         "@tanstack/react-query": "^5.101.4",
         "@tanstack/react-router": "^1.170.21",
         "@tanstack/react-table": "^9.0.0",
         "@tanstack/react-virtual": "^3.14.9",
-        "echarts": "^6.1.0",
-        "react": "^19.2.8",
-        "react-dom": "^19.2.8",
-      },
-      "devDependencies": {
-        "@tailwindcss/vite": "^4.3.3",
         "@types/react": "^19.2.18",
         "@types/react-dom": "^19.2.4",
         "@vitejs/plugin-react": "^6.0.5",
+        "echarts": "^6.1.0",
+        "react": "^19.2.8",
+        "react-dom": "^19.2.8",
         "tailwindcss": "^4.3.3",
         "vite": "^8.2.1",
         "vite-plugin-singlefile": "^2.3.3",
@@ -562,7 +560,7 @@
 
     "fast-sha256": ["fast-sha256@1.3.0", "", {}, "sha512-n11RGP/lrWEFI/bWdygLxhI+pVeo1ZYIVwvvPkW7azl/rOy+F3HYRZ2K5zeE9mmkhQppyv9sQFx0JM9UabnpPQ=="],
 
-    "fast-uri": ["fast-uri@3.1.5", "", {}, "sha512-gHwA1O9LDIcKunMKhObS/HimwtehO1nPUECKAu5TpKgaO19fcWEl4bliWe1jWxVFvIXztJjjQ4L8XQ1EU9f7Jw=="],
+    "fast-uri": ["fast-uri@3.1.7", "", {}, "sha512-dOvZVzjdZdz7phd9v6jCbwxrBW3fK6n8Rc0CtdmM4bumzMnxywBYhuph6J819RRw/ku+rLbelwfMunktuzVVHg=="],
 
     "fdir": ["fdir@6.5.0", "", { "peerDependencies": { "picomatch": "^3 || ^4" }, "optionalPeers": ["picomatch"] }, "sha512-tIbYtZbucOs0BRGqPJkshJUYdL+SDH7dVM8gjy+ERp3WAUjLEFJE+02kanyHtwjWOnwrKYBiwAmM0p4kLJAnXg=="],
 
@@ -666,7 +664,7 @@
 
     "ms": ["ms@2.1.3", "", {}, "sha512-6FlzubTLZG3J2a/NVCAleEhjzq5oxgHyaCU9yYXvcLsvoVaHJq/s5xXI6/XXP6tz7R9xAOtHnSO/tXtF3WRTlA=="],
 
-    "nanoid": ["nanoid@3.3.17", "", { "bin": { "nanoid": "bin/nanoid.cjs" } }, "sha512-xQLf0A3HOMlgHq0n247/LRuAOYmB7dXJ/DvAxGvsSBij45XtBSmQycu+F8ODbHwns/XyFZagyL1+J0Offw1E0g=="],
+    "nanoid": ["nanoid@3.3.18", "", { "bin": { "nanoid": "bin/nanoid.cjs" } }, "sha512-DTg4MJbGMWkfi6VZFdNt2/caMbQy4Ou+Op/hJQvGEWcnVfoA1QA+xzRKAzw9jD6+GVOOeYr/mIcuDSdug6F6+w=="],
 
     "natural-compare": ["natural-compare@1.4.0", "", {}, "sha512-OWND8ei3VtNC9h7V60qff3SVobHr996CTwgxubgyQYEpg290h9J0buyECNNJexkFm5sOajh5G116RYA1c8ZMSw=="],
 

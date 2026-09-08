@@ -412,6 +412,9 @@ const createPackedCli = async (): Promise<PackedCliRuntime> => {
       '--production',
       '--ignore-scripts',
       '--no-save',
+      // Ambient isolated/global-store settings must not link outside this owned runtime.
+      '--linker',
+      'hoisted',
       // The frozen repository install primes Bun's cache; offline mode forbids registry access.
       '--offline',
     ],
@@ -480,8 +483,14 @@ describe('agent-first documentation and executable-example contract', () => {
       },
     });
     expect(exitCode).toBe(2);
-    expect(stdout).toEqual([]);
-    expect(stderr.join('')).toContain("unknown command 'run'");
+    expect(stderr).toEqual([]);
+    expect(stdout).toHaveLength(1);
+    expect(JSON.parse(stdout[0]!)).toMatchObject({
+      schema: 'attest.cli-result',
+      ok: false,
+      command: 'run',
+      error: { code: 'cli_usage', message: "error: unknown command 'run'" },
+    });
   });
 
   it('detects changed artifact bytes and unexpected no-write residue', async () => {

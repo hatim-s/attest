@@ -1,6 +1,6 @@
 {
   "name": "@attest/cli",
-  "version": "0.0.0",
+  "version": "0.1.0-alpha.0",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -23,9 +23,33 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "test": "vitest run --maxWorkers=1",
-    "typecheck": "tsc --noEmit -p tsconfig.json"
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "prepublishOnly": "node ../../scripts/block-source-publish.mjs"
   },
   "devDependencies": {
     "vitest": "^3"
+  },
+  "description": "Command-line agent evaluation and local results dashboard.",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hatim-s/attest.git",
+    "directory": "packages/cli"
+  },
+  "homepage": "https://github.com/hatim-s/attest#readme",
+  "bugs": {
+    "url": "https://github.com/hatim-s/attest/issues"
+  },
+  "engines": {
+    "node": ">=22.15.0"
+  },
+  "files": [
+    "dist",
+    "LICENSE",
+    "NOTICE"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "tag": "alpha"
   }
 }

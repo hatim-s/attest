@@ -5,6 +5,10 @@ trigger a deliberate missing-input error, and identify the safe repair without
 guessing at files or flags. Run the commands from a clean copy of this directory with
 the packed `attest` executable on `PATH`.
 
+See the [setup instructions](../../README.md#try-it-from-source) to build or install
+the CLI. With a local archive installation, run in that installation directory and
+replace `attest` with `npx attest` below.
+
 ## Inspect the contract
 
 Read the command help, request schema, and error registry before mutating a

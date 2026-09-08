@@ -13,6 +13,11 @@
     "test": {
       "dependsOn": ["^build"],
       "inputs": ["src/**", "package.json", "$TURBO_ROOT$/packages/schemas/generated/**"]
+    },
+    "test:fuzz": {
+      "dependsOn": ["^build"],
+      "cache": false,
+      "env": ["FUZZ_ITERATIONS"]
     }
   }
 }
