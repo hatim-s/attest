@@ -17,7 +17,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        include:
+          - os: ubuntu-latest
+            node: 22.15.0
+          - os: macos-latest
+            node: 22
     env:
       # Process-spawning suites overwhelm small CI runners at full parallelism;
       # two workers keeps memory and process-table pressure bounded.
@@ -30,10 +34,17 @@ jobs:
           bun-version: 1.4.x
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: ${{ matrix.node }}
       - run: bun install --frozen-lockfile
       - run: bun run typecheck
       - run: bun run lint
       - run: bun run format:check
       - run: bun run test
-      - run: bun run build && node packages/cli/dist/cli.js --help
+      - run: bun run release:check
+      - uses: actions/upload-artifact@v4
+        with:
+          name: alpha-packages-${{ matrix.os }}
+          path: |
+            dist/release/*.tgz
+            dist/release/SHA256SUMS
+          if-no-files-found: error

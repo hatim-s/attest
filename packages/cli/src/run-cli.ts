@@ -23,6 +23,7 @@ import {
 import { createCliHelp, renderCliHelp, setCliCommandHelpMetadata } from './help/command-help.js';
 import { diffToJson, renderDiffSummary } from './output/render-output.js';
 import {
+  CliEventSerializer,
   createCliFailureResult,
   createCliSuccessResult,
   serializeCliResult,
@@ -340,29 +341,18 @@ const createProgram = (
   return program;
 };
 
-const requestedStructuredOutput = (argv: readonly string[]): boolean => {
-  const command = requestedCommand(argv);
-  const supportsStructuredOutput =
-    command === 'help' ||
-    command === 'errors' ||
-    command === 'init' ||
-    command === 'list' ||
-    command === 'show' ||
-    command.startsWith('project.') ||
-    command.startsWith('agent.') ||
-    command.startsWith('metric.') ||
-    command.startsWith('eval.') ||
-    command.startsWith('schema.') ||
-    command.startsWith('test.');
-  return (
-    supportsStructuredOutput &&
-    argv.some(
-      (argument, index) =>
-        argument === '--output=json' ||
-        argument === '--output=jsonl' ||
-        (argument === '--output' && (argv[index + 1] === 'json' || argv[index + 1] === 'jsonl')),
-    )
-  );
+/** Honors machine output even when an agent misspells a command before parsing succeeds. */
+const requestedStructuredOutput = (argv: readonly string[]): 'json' | 'jsonl' | undefined => {
+  // These commands retain artifact-path or legacy --format semantics.
+  if (['view', 'report', 'trace.convert', 'diff'].includes(requestedCommand(argv))) return;
+  let output: string | undefined;
+  for (let index = 0; index < argv.length; index += 1) {
+    const argument = argv[index]!;
+    if (argument === '--') break;
+    if (argument === '--output') output = argv[++index];
+    else if (argument.startsWith('--output=')) output = argument.slice('--output='.length);
+  }
+  return output === 'json' || output === 'jsonl' ? output : undefined;
 };
 
 /** Removes only recognized global common options before identifying the requested command. */
@@ -464,7 +454,16 @@ const runCli = async (argv: string[], options: RunCliOptions = {}): Promise<numb
 
     const failure = serializeCliError(error);
     if (structuredOutput) {
-      io.output(serializeCliResult(createCliFailureResult(requestedCommand(argv), failure.error)));
+      const command = requestedCommand(argv);
+      const result = createCliFailureResult(command, failure.error);
+      io.output(
+        structuredOutput === 'jsonl' && command === 'eval.run'
+          ? new CliEventSerializer().serialize('result', {
+              exit_code: failure.exitCode,
+              result,
+            })
+          : serializeCliResult(result),
+      );
     } else if (!(error instanceof CommanderError)) {
       io.error(renderCliError(failure.error));
     }

@@ -1,17 +1,7 @@
 import { execFile, spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { constants } from 'node:fs';
-import {
-  access,
-  cp,
-  mkdir,
-  mkdtemp,
-  readFile,
-  readdir,
-  realpath,
-  rm,
-  writeFile,
-} from 'node:fs/promises';
+import { access, cp, mkdir, mkdtemp, readFile, readdir, realpath, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, relative, resolve, sep } from 'node:path';
 import { performance } from 'node:perf_hooks';
@@ -19,6 +9,9 @@ import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 
 import { afterAll, describe, expect, it } from 'vitest';
+import { parse as parseYaml } from 'yaml';
+
+import { materializePackedRuntime } from './packed-runtime.js';
 
 type CommandExpectation = {
   acceptance_stdout?: string[];
@@ -171,7 +164,7 @@ const snapshotFiles = async (root: string): Promise<FileSnapshot> => {
   return snapshot;
 };
 
-/** Creates the production-packed CLI prerequisite outside the measured actor stopwatch. */
+/** Materializes the production-packed CLI prerequisite outside the measured actor stopwatch. */
 const createPackedCli = async (): Promise<PackedCli> => {
   await execFileAsync('bun', ['run', 'build'], { cwd: REPOSITORY_ROOT, timeout: 120_000 });
   const runtime = await mkdtemp(join(tmpdir(), 'attest-quickstart-packed-'));
@@ -199,32 +192,15 @@ const createPackedCli = async (): Promise<PackedCli> => {
     archivePaths[packageName] = archivePath;
   }
 
-  const archiveReference = (packageName: (typeof PACKED_PACKAGE_NAMES)[number]): string =>
-    `./archives/${basename(archivePaths[packageName] ?? '')}`;
-  const manifest = {
-    private: true,
-    dependencies: { '@attest/cli': archiveReference('@attest/cli') },
-    overrides: {
-      '@attest/contracts': archiveReference('@attest/contracts'),
-      '@attest/core': archiveReference('@attest/core'),
-      '@attest/web': archiveReference('@attest/web'),
-    },
-  };
-  await writeFile(join(runtime, 'package.json'), `${JSON.stringify(manifest, null, 2)}\n`);
-  await execFileAsync(
-    'bun',
-    [
-      'install',
-      '--production',
-      '--ignore-scripts',
-      '--no-save',
-      // The frozen repository install primes Bun's cache; offline mode forbids registry access.
-      '--offline',
-    ],
-    { cwd: runtime, timeout: 120_000 },
+  const cliPath = await materializePackedRuntime(
+    runtime,
+    Object.fromEntries(
+      PACKED_PACKAGE_ROOTS.map((packageRoot) => {
+        const name = `@attest/${basename(packageRoot)}`;
+        return [name, { archive: archivePaths[name]!, source: join(REPOSITORY_ROOT, packageRoot) }];
+      }),
+    ),
   );
-
-  const cliPath = join(runtime, 'node_modules/.bin/attest');
   await access(cliPath, constants.X_OK);
   const installedRoot = await realpath(join(runtime, 'node_modules/@attest/cli'));
   expect(installedRoot.startsWith(`${await realpath(runtime)}${sep}`)).toBe(true);
@@ -562,11 +538,31 @@ describe('under-five-minute acceptance contract', () => {
       readiness_probe: 'view',
     });
 
-    const workflow = await readFile(CI_WORKFLOW_PATH, 'utf8');
+    const workflow = parseYaml(await readFile(CI_WORKFLOW_PATH, 'utf8')) as {
+      jobs: {
+        checks: {
+          strategy: { matrix: { include: Array<{ os: string; node: number | string }> } };
+          steps: Array<{ uses?: string; with?: Record<string, unknown> }>;
+        };
+      };
+    };
+    const checks = workflow.jobs.checks;
     for (const operatingSystem of contract.cross_platform.required_ci_operating_systems) {
-      expect(workflow).toContain(operatingSystem);
+      expect(
+        checks.strategy.matrix.include.some(
+          (entry) =>
+            entry.os === operatingSystem &&
+            Number(String(entry.node).split('.')[0]) === contract.cross_platform.node_major,
+        ),
+        `${operatingSystem}: required Node.js major`,
+      ).toBe(true);
     }
-    expect(workflow).toContain(`node-version: ${contract.cross_platform.node_major}`);
+    const setupNode = checks.steps.find((step) => step.uses?.startsWith('actions/setup-node@'));
+    expect(setupNode?.with?.['node-version']).toBe('${{ matrix.node }}');
+    expect(checks.strategy.matrix.include).toContainEqual({
+      os: 'ubuntu-latest',
+      node: '22.15.0',
+    });
     expect(contract.cross_platform).toMatchObject({ windows_required: false });
     for (const fixture of contract.fixture_files) {
       await expect(access(join(FIXTURE_ROOT, fixture)), fixture).resolves.toBeUndefined();

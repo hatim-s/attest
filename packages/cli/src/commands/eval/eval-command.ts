@@ -297,14 +297,8 @@ const collectEvalEvents = async (
         });
       }
       events.push(event);
-      if (streamJsonl && event.event !== 'run_completed') {
-        if (event.event === 'result') {
-          const completed = events.at(-2);
-          if (completed?.event === 'run_completed') {
-            io.output(serializeEvalEvent(completed));
-            emittedJsonlEvents += 1;
-          }
-        }
+      // Keep terminal events private until the complete stream passes its contract.
+      if (streamJsonl && event.event !== 'run_completed' && event.event !== 'result') {
         io.output(serializeEvalEvent(event));
         emittedJsonlEvents += 1;
       }
@@ -313,6 +307,25 @@ const collectEvalEvents = async (
         if (rendered !== undefined) io.output(rendered);
       }
     }
+
+    const parsed = evalEventStreamSchema.safeParse(events);
+    if (!parsed.success) {
+      throw new AttestCliError('run_failed', 'Eval event stream violates the frozen contract.', {
+        hint: 'Repair dispatcher event ordering and terminal result metadata.',
+        details: {
+          diagnostics: parsed.error.issues.map(({ message, path }) => ({
+            message,
+            path: `/${path.join('/')}`,
+          })),
+        },
+      });
+    }
+    if (streamJsonl) {
+      for (const event of parsed.data.slice(emittedJsonlEvents)) {
+        io.output(serializeEvalEvent(event));
+      }
+    }
+    return parsed.data;
   } catch (error: unknown) {
     if (!streamJsonl || events.length === 0) throw error;
     const recovered = recoverFailedJsonlStream(events, error);
@@ -321,19 +334,6 @@ const collectEvalEvents = async (
     }
     return recovered;
   }
-  const parsed = evalEventStreamSchema.safeParse(events);
-  if (!parsed.success) {
-    throw new AttestCliError('run_failed', 'Eval event stream violates the frozen contract.', {
-      hint: 'Repair dispatcher event ordering and terminal result metadata.',
-      details: {
-        diagnostics: parsed.error.issues.map(({ message, path }) => ({
-          message,
-          path: `/${path.join('/')}`,
-        })),
-      },
-    });
-  }
-  return parsed.data;
 };
 
 /** Executes one normalized eval request and renders its validated final result. */

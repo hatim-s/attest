@@ -1,0 +1,19 @@
+{
+  "$schema": "https://turbo.build/schema.json",
+  "extends": ["//"],
+  "tasks": {
+    "test": {
+      "inputs": [
+        "src/**",
+        "package.json",
+        "$TURBO_ROOT$/packages/schemas/generated/**",
+        "$TURBO_ROOT$/docs/**",
+        "$TURBO_ROOT$/examples/**",
+        "$TURBO_ROOT$/.github/workflows/**",
+        "$TURBO_ROOT$/README.md",
+        "$TURBO_ROOT$/CONTRIBUTING.md",
+        "$TURBO_ROOT$/llms.txt"
+      ]
+    }
+  }
+}

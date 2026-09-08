@@ -1,5 +1,9 @@
 const REDACTED = '[REDACTED]';
 
+/** Normalizes escape digits while preserving case-sensitive credential characters. */
+const lowercasePercentEscapes = (value: string): string =>
+  value.replace(/%[0-9A-F]{2}/gu, (escape) => escape.toLowerCase());
+
 /** Enumerates common transport encodings so reflected credentials cannot evade evidence redaction. */
 const secretRepresentations = (secret: string): string[] => {
   if (secret.length === 0) return [];
@@ -11,8 +15,9 @@ const secretRepresentations = (secret: string): string[] => {
     secret,
     jsonEscaped,
     percentEncoded,
-    percentEncoded.toLowerCase(),
+    lowercasePercentEscapes(percentEncoded),
     formEncoded,
+    lowercasePercentEscapes(formEncoded),
     bytes.toString('base64'),
     bytes.toString('base64url'),
     bytes.toString('hex'),
@@ -23,10 +28,10 @@ const secretRepresentations = (secret: string): string[] => {
 
 /** Redacts literal, escaped, percent/form encoded, and common byte encodings of runtime secrets. */
 const redactTransportText = (value: string, secrets: readonly string[]): string =>
-  [...new Set(secrets.flatMap(secretRepresentations))].reduce(
-    (redacted, secret) => redacted.replaceAll(secret, REDACTED),
-    value,
-  );
+  [...new Set(secrets.flatMap(secretRepresentations))]
+    // Replace longer credentials first so a shared prefix cannot expose their remaining bytes.
+    .sort((left, right) => right.length - left.length)
+    .reduce((redacted, secret) => redacted.replaceAll(secret, REDACTED), value);
 
 const pointerSegments = (pointer: string): string[] =>
   pointer === ''

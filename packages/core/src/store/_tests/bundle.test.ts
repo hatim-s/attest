@@ -1,7 +1,8 @@
 import { readFile, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { Readable } from 'node:stream';
+import { Readable, Writable } from 'node:stream';
+import { setTimeout as delay } from 'node:timers/promises';
 
 import { AGENT_PROTOCOL } from '@attest/contracts';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -95,6 +96,24 @@ describe('run bundles', () => {
       { type: 'bundle_footer', content_hash: manifest.contentHash },
     ]);
     expect(manifest.schemaId).toBe(BUNDLE_SCHEMA_ID);
+  });
+
+  it('rejects a destination closed during backpressure without hanging the export', async () => {
+    const { store } = await openTemporaryStore();
+    const run = await createStoredRun(store);
+    const destination = new Writable({
+      highWaterMark: 1,
+      write() {
+        this.destroy();
+      },
+    });
+
+    const result = await Promise.race([
+      exportRunBundle(store, run.id, destination).catch((error: unknown) => error),
+      delay(100).then(() => 'export did not settle'),
+    ]);
+
+    expect(result).toMatchObject({ code: 'WRITE_FAILED' });
   });
 
   it('rejects a tampered case before yielding any record', async () => {

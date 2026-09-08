@@ -27,7 +27,7 @@ const RunList = ({ error, isLoading, onSelect, runs, selectedRunId }: RunListPro
     </div>
     {isLoading ? <Loading label="Loading runs" /> : null}
     {error !== null && error !== undefined ? <ErrorNotice error={error} /> : null}
-    {!isLoading && runs.length === 0 ? (
+    {!isLoading && error == null && runs.length === 0 ? (
       <div className="empty-compact">No evaluations yet. Run `attest eval run` to create one.</div>
     ) : null}
     <div className="run-list">

@@ -526,6 +526,32 @@ describe('executeResolvedEvalPlan', () => {
     expect(evalEventStreamSchema.safeParse(result.events).success).toBe(true);
   });
 
+  it('records synchronous runner failures while draining the remaining case pool', async () => {
+    const plan = createPlan(['passes', 'throws', 'also-passes'], { concurrency: 2 });
+    const persistence = createPersistence();
+    const cleanup = vi.fn(() => Promise.resolve());
+    const executeCase = vi.fn<EvalCaseRunner<string>['executeCase']>((_runId, resolvedCase) => {
+      if (resolvedCase.case_id === 'throws') throw new Error('adapter setup failed');
+      return Promise.resolve(completedExecution(resolvedCase, [passingMetric()]));
+    });
+
+    const result = await executeResolvedEvalPlan(
+      plan,
+      { executeCase, cleanup },
+      persistence.adapter,
+      { now: createClock() },
+    );
+
+    expect(result).toMatchObject({
+      status: 'failed',
+      exit_code: 4,
+      summary: { total_cases: 3, passed_cases: 2, error_cases: 1 },
+    });
+    expect(persistence.recordCase).toHaveBeenCalledTimes(3);
+    expect(cleanup).toHaveBeenCalledOnce();
+    expect(evalEventStreamSchema.safeParse(result.events).success).toBe(true);
+  });
+
   it.each([
     ['evaluated metric failure', failingMetric(), 'completed', 1, 1, 0],
     ['metric execution error', errorMetric(), 'failed', 4, 0, 1],

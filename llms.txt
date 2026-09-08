@@ -53,7 +53,12 @@ Protocols:
 
 Machine output:
 
-- JSON is one `attest.cli-result` document.
-- JSONL uses `attest.cli-event` per line; the final event is `result`.
+- Discovery, project, resource, and eval JSON is one `attest.cli-result` document.
+- JSON help is in `result`; a printed JSON Schema is in `result.schema`.
+- Use `help --output json` for machine discovery; `--help` prints terminal text.
+- Eval JSONL uses `attest.cli-event` per line; the final event is `result`.
+- Eval JSONL parser and preflight failures emit one result event, including `data.exit_code`.
+- `diff --format json` prints a raw diff; `trace convert` prints a raw trace when no file is selected.
+- `report --output` and `trace convert --output` select artifact paths, not output formats.
 - Mutation requests use `attest.command-request`.
 - Prefer `error.code`, schema ids, and project hashes over prose parsing.

@@ -7,7 +7,7 @@
     "conformance"
   ],
   "engines": {
-    "node": ">=22",
+    "node": ">=22.15.0",
     "bun": ">=1.4"
   },
   "devEngines": {
@@ -18,13 +18,17 @@
   },
   "scripts": {
     "build": "turbo run build",
-    "typecheck": "turbo run typecheck",
+    "typecheck": "turbo run typecheck && bun run typecheck:scripts",
     "lint": "eslint .",
     "test": "turbo run test --concurrency=1",
     "generate:schemas": "bun run --cwd packages/schemas generate",
     "format:check": "prettier --check .",
     "format": "prettier --write .",
-    "lint:fix": "eslint --fix ."
+    "lint:fix": "eslint --fix .",
+    "test:fuzz": "turbo run test:fuzz --filter=@attest/conformance",
+    "release:pack": "bun run build && bun run generate:schemas && bun scripts/pack-release.ts",
+    "release:check": "bun run release:pack && bun scripts/check-release.ts",
+    "typecheck:scripts": "tsc --noEmit -p scripts/tsconfig.json"
   },
   "devDependencies": {
     "@types/node": "^22",

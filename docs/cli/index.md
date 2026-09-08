@@ -13,10 +13,10 @@ attest schema print attest.command-request --output json
 attest errors --output json
 ```
 
-Structured help returns `attest.cli-help`; it describes arguments, options, defaults,
-conflicts, implied flags, request schema ids, examples, aliases, and deprecations.
-`schema print` returns the generated schema requested by id. `errors` returns the
-`attest.cli-errors` registry. These read-only commands do not create a project or a
+Structured help puts an `attest.cli-help` document in the `attest.cli-result` envelope's
+`result` field. It describes arguments, options, defaults, conflicts, implied flags,
+request schema ids, examples, and aliases. `schema print` puts the generated JSON Schema
+in `result.schema`; `errors` puts the `attest.cli-errors` registry in `result`. These read-only commands do not create a project or a
 run database.
 
 ## Workflow map
@@ -36,19 +36,28 @@ maps to `attest project init`. The removed `attest run` spelling is not accepted
 
 ## Global machine contract
 
-Use `--output json` for exactly one `attest.cli-result` document on stdout. A success
+Use `--output json` on discovery, project, resource, and eval commands for exactly one
+`attest.cli-result` document on stdout. Unknown commands and invalid options also return
+this envelope when JSON output is requested. A success
 document contains `ok: true`, `command`, `project_hash_before`, `project_hash_after`, a
 command-specific `result`, and `warnings`. A failure document contains `ok: false`,
 `command`, and `error`, whose stable fields include `code`, `message`, and `retryable`.
 
 Commands that support streaming accept `--output jsonl`. Every line is one
 `attest.cli-event` document with `sequence`, `time`, `event`, and `data`; the final
-line has `event: "result"`. See [evaluation lifecycle](../concepts/eval-lifecycle.md)
+line has `event: "result"`. Parser and preflight failures produce one result event at
+sequence `0`, with `data.exit_code` and a failure envelope in `data.result`. See [evaluation lifecycle](../concepts/eval-lifecycle.md)
 and [schemas](../reference/schemas.md).
 
 Structured output implies non-interactive operation. Missing required input returns the
 stable `cli_missing_input` error instead of prompting. For explicit non-interactive human
 output, add `--non-interactive`.
+
+The artifact commands have separate output options. `diff --format json` emits a raw
+diff document. `report --output <path>` and `trace convert --output <path>` select files;
+without a path, `trace convert` prints the raw trace document. `view` prints its local
+URL and stays running. The root `--output json` flag does not change these commands.
+`--help` and `--version` retain terminal text; use `attest help --output json` for discovery.
 
 ## Mutation controls
 
@@ -61,9 +70,10 @@ All authored-resource mutations share these controls:
 --if-project-hash <sha256>   reject a stale write instead of overwriting it
 ```
 
-Use `--if-project-hash` with the hash returned by the prior read or mutation. A mismatch
-returns `project_changed` and exit code `3`; refresh the project state and rebuild the
-request before retrying.
+Use `--if-project-hash` with `project_hash_after` from a read or a committed mutation.
+A dry-run's `project_hash_after` describes the proposed state; use its
+`project_hash_before` when committing that proposal. A mismatch returns `project_changed`
+and exit code `3`; refresh the project state and rebuild the request before retrying.
 
 ## Project and inspection commands
 

@@ -1,6 +1,6 @@
 {
   "name": "@attest/contracts",
-  "version": "0.0.0",
+  "version": "0.1.0-alpha.0",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -13,7 +13,8 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "vitest run"
+    "test": "vitest run",
+    "prepublishOnly": "node ../../scripts/block-source-publish.mjs"
   },
   "dependencies": {
     "zod": "^4"
@@ -21,5 +22,28 @@
   "devDependencies": {
     "ajv": "^8",
     "ajv-formats": "^3"
+  },
+  "description": "Typed contracts and parsers for Attest agent evaluations.",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hatim-s/attest.git",
+    "directory": "packages/contracts"
+  },
+  "homepage": "https://github.com/hatim-s/attest#readme",
+  "bugs": {
+    "url": "https://github.com/hatim-s/attest/issues"
+  },
+  "engines": {
+    "node": ">=22.15.0"
+  },
+  "files": [
+    "dist",
+    "LICENSE",
+    "NOTICE"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "tag": "alpha"
   }
 }

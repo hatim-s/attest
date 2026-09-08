@@ -1,4 +1,5 @@
 import { mkdtemp, rm } from 'node:fs/promises';
+import { get } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -105,6 +106,25 @@ describe('view server', () => {
         (response) => response.json(),
       ),
     ).resolves.toMatchObject({ diff: { summary: { counts: { regressed: 1 } } } });
+  });
+
+  it('rejects requests addressed to foreign hosts before exposing stored runs', async () => {
+    const fixture = await createStoreFixture();
+    const server = await startViewServer({ storePath: fixture.storePath });
+    servers.push(server);
+
+    const status = await new Promise<number | undefined>((resolve, reject) => {
+      get(
+        `${server.origin}/api/runs`,
+        { headers: { Host: 'rebound.example.test' } },
+        (response) => {
+          response.resume();
+          resolve(response.statusCode);
+        },
+      ).on('error', reject);
+    });
+
+    expect(status).toBe(403);
   });
 
   it('requires both exact origin and session token for shutdown writes', async () => {

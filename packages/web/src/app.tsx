@@ -37,7 +37,7 @@ const Dashboard = () => {
   const [tab, setTab] = useState<DashboardTab>('cases');
   const [theme, setTheme] = useState<Theme>(getInitialTheme);
   const runQuery = useRun(selectedRunId);
-  const casesQuery = useCases(selectedRunId);
+  const casesQuery = useCases(selectedRunId, runQuery.data?.status);
   const caseQuery = useCase(selectedRunId, selectedCase?.suiteName, selectedCase?.caseId);
   const diffQuery = useDiff(baseRunId, selectedRunId);
   const cases = useMemo(
@@ -59,7 +59,6 @@ const Dashboard = () => {
   }, [theme]);
 
   useEffect(() => {
-    setSelectedCase(undefined);
     setBaseRunId((current) =>
       current === selectedRunId ? runs.find((run) => run.id !== selectedRunId)?.id : current,
     );
@@ -69,11 +68,18 @@ const Dashboard = () => {
     if (
       tab === 'distributions' &&
       casesQuery.hasNextPage === true &&
-      !casesQuery.isFetchingNextPage
+      !casesQuery.isFetching &&
+      !casesQuery.isFetchNextPageError
     ) {
       void casesQuery.fetchNextPage();
     }
   }, [casesQuery, tab]);
+
+  /** Resets case evidence only when the user switches to a different run. */
+  const selectRun = (runId: string) => {
+    if (runId !== selectedRunId) setSelectedCase(undefined);
+    setSelectedRunId(runId);
+  };
 
   const run = runQuery.data;
 
@@ -98,12 +104,12 @@ const Dashboard = () => {
         <RunList
           error={runsQuery.error}
           isLoading={runsQuery.isLoading}
-          onSelect={setSelectedRunId}
+          onSelect={selectRun}
           runs={runs}
           selectedRunId={selectedRunId}
         />
         <main className="main-content">
-          {selectedRunId === undefined ? (
+          {selectedRunId === undefined && runsQuery.isSuccess && runs.length === 0 ? (
             <Card className="welcome-card">
               <p className="eyebrow">Ready</p>
               <h1>Run your first evaluation</h1>
@@ -134,7 +140,7 @@ const Dashboard = () => {
                   role="tab"
                   tone={tab === 'cases' ? 'primary' : 'ghost'}
                 >
-                  Cases <span>{run.summary?.totalCases ?? 0}</span>
+                  Cases <span>{run.summary?.totalCases ?? cases.length}</span>
                 </Button>
                 <Button
                   aria-selected={tab === 'distributions'}
@@ -168,18 +174,25 @@ const Dashboard = () => {
                       onSelect={setSelectedCase}
                     />
                   ) : null}
-                  {!casesQuery.isLoading && cases.length === 0 ? (
-                    <div className="empty-compact">This run has no recorded cases.</div>
+                  {casesQuery.isSuccess && cases.length === 0 ? (
+                    <div className="empty-compact">
+                      {run.status === 'running'
+                        ? 'Waiting for the first case. Results update automatically.'
+                        : 'This run has no recorded cases.'}
+                    </div>
                   ) : null}
                 </section>
               ) : null}
               {tab === 'distributions' ? (
-                <DistributionCharts
-                  cases={cases}
-                  isLoading={casesQuery.isFetchingNextPage}
-                  theme={theme}
-                  totalCases={run.summary?.totalCases ?? cases.length}
-                />
+                <>
+                  {casesQuery.error !== null ? <ErrorNotice error={casesQuery.error} /> : null}
+                  <DistributionCharts
+                    cases={cases}
+                    isLoading={casesQuery.isFetching}
+                    theme={theme}
+                    totalCases={run.summary?.totalCases ?? cases.length}
+                  />
+                </>
               ) : null}
               {tab === 'compare' ? (
                 <DiffPanel

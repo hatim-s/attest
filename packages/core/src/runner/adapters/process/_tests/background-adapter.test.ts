@@ -46,6 +46,33 @@ const agent = (
 });
 
 describe('background process adapter', () => {
+  it.each(['before', 'during'] as const)(
+    'rejects cancellation %s service startup',
+    async (timing) => {
+      const port = await freePort();
+      let session: Awaited<ReturnType<typeof startBackgroundAgent>> | undefined;
+      const controller = new AbortController();
+      if (timing === 'before') controller.abort();
+      try {
+        const startup = startBackgroundAgent(
+          agent(port, { kind: 'stderr', pattern: `READY ${String(port)}` }),
+          {
+            cwd: process.cwd(),
+            env: { PATH: process.env.PATH ?? '' },
+            signal: controller.signal,
+          },
+        ).then((started) => {
+          session = started;
+          return started;
+        });
+        controller.abort();
+        await expect(startup).rejects.toMatchObject({ code: 'cancelled' });
+      } finally {
+        await session?.close();
+      }
+    },
+  );
+
   it.each(['http', 'tcp', 'stderr'] as const)(
     'waits for %s readiness, invokes, and shuts down',
     async (kind) => {

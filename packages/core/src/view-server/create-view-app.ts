@@ -33,6 +33,14 @@ const createViewApp = (options: CreateViewAppOptions): ViewApp => {
     context.header('Cache-Control', 'no-store');
     context.header('X-Content-Type-Options', 'nosniff');
     context.header('Referrer-Policy', 'no-referrer');
+    // Loopback binding alone does not stop a browser using a rebound external hostname.
+    const allowedOrigin = options.allowedOrigin();
+    if (allowedOrigin === undefined || new URL(context.req.url).origin !== allowedOrigin) {
+      return context.json(
+        { error: { code: 'origin_forbidden', message: 'Request origin is not allowed.' } },
+        403,
+      );
+    }
     await next();
   });
 

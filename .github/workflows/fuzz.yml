@@ -25,4 +25,6 @@ jobs:
         with:
           node-version: 22
       - run: bun install --frozen-lockfile
-      - run: FUZZ=1 FUZZ_ITERATIONS=${{ inputs.iterations || 5000 }} bun run --cwd conformance test:fuzz
+      - run: bun run test:fuzz
+        env:
+          FUZZ_ITERATIONS: ${{ inputs.iterations || 5000 }}

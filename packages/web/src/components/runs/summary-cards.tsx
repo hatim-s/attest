@@ -15,17 +15,26 @@ const SummaryCards = ({ run }: { run: RunRecord }) => {
     {
       label: 'Pass rate',
       value: formatPercent(runPassRate(run)),
-      detail: `${summary?.passedCases ?? 0} passing`,
+      detail:
+        summary === undefined
+          ? 'Available when the run finishes'
+          : `${summary.passedCases} passing`,
     },
     {
       label: 'Cases',
-      value: String(summary?.totalCases ?? 0),
-      detail: `${summary?.failedCases ?? 0} failed`,
+      value: summary === undefined ? 'Pending' : String(summary.totalCases),
+      detail:
+        summary === undefined
+          ? 'Results appear below as they arrive'
+          : `${summary.failedCases} failed`,
     },
     {
       label: 'Errors',
-      value: String(summary?.errorCases ?? 0),
-      detail: `${summary?.metricErrorCount ?? 0} metric errors`,
+      value: summary === undefined ? 'Pending' : String(summary.errorCases),
+      detail:
+        summary === undefined
+          ? 'Available when the run finishes'
+          : `${summary.metricErrorCount} metric errors`,
     },
     {
       label: 'Finished',

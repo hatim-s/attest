@@ -2,8 +2,8 @@ import { randomUUID } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { rename, rm, writeFile } from 'node:fs/promises';
 import { createInterface } from 'node:readline';
-import { finished } from 'node:stream/promises';
-import type { Readable, Writable } from 'node:stream';
+import { Readable, type Writable } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 
 import {
   BUNDLE_SCHEMA_ID,
@@ -108,16 +108,6 @@ const verifyBundleLines = (lines: string[]): BundleLine[] => {
   return recognized;
 };
 
-/** Writes a line to a generic destination and waits for backpressure to clear. */
-const writeToStream = async (destination: Writable, line: string): Promise<void> => {
-  if (!destination.write(`${line}\n`)) {
-    await new Promise<void>((resolve, reject) => {
-      destination.once('drain', resolve);
-      destination.once('error', reject);
-    });
-  }
-};
-
 /** Atomically replaces a file only after its complete PLAN 1S.4 bundle is available. */
 const writeAtomically = async (destination: string, contents: string): Promise<void> => {
   const temporaryPath = `${destination}.${randomUUID()}.tmp`;
@@ -145,9 +135,7 @@ const exportRunBundle = async (
     return bundle.manifest;
   }
   try {
-    for (const line of bundle.lines) await writeToStream(destination, line);
-    destination.end();
-    await finished(destination);
+    await pipeline(Readable.from(bundle.lines.map((line) => `${line}\n`)), destination);
     return bundle.manifest;
   } catch (error) {
     throw new StoreError('WRITE_FAILED', 'Could not write run bundle to the destination stream.', {
