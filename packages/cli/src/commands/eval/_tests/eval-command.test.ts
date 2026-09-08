@@ -584,6 +584,39 @@ describe('eval output and sequencing', () => {
     expect(harness.exitCode()).toBe(4);
   });
 
+  it.each([1, 3, 6])('repairs a JSONL source that ends after %i events', async (length) => {
+    const harness = createHarness({
+      ...defaultServices(),
+      run: () => Promise.resolve(completedEvents().slice(0, length)),
+    });
+
+    await parse(harness, ['eval', 'run', 'refund', '--output', 'jsonl']);
+
+    const stream = evalEventStreamSchema.parse(
+      harness.output.map((line): unknown => JSON.parse(line) as unknown),
+    );
+    expect(stream.at(-1)).toMatchObject({ event: 'result', data: { exit_code: 4 } });
+    expect(stream.filter(({ event }) => event === 'result')).toHaveLength(1);
+    expect(harness.exitCode()).toBe(4);
+  });
+
+  it('validates terminal metadata before publishing a JSONL success', async () => {
+    const events = completedEvents();
+    const final = events.at(-1)!;
+    if (final.event !== 'result' || !final.data.result.ok) throw new Error('Expected success.');
+    final.data.result.result.snapshot_hash = 'b'.repeat(64);
+    const harness = createHarness({ ...defaultServices(), run: () => Promise.resolve(events) });
+
+    await parse(harness, ['eval', 'run', 'refund', '--output', 'jsonl']);
+
+    const stream = evalEventStreamSchema.parse(
+      harness.output.map((line): unknown => JSON.parse(line) as unknown),
+    );
+    expect(stream.filter(({ event }) => event === 'result')).toHaveLength(1);
+    expect(stream.at(-1)).toMatchObject({ event: 'result', data: { exit_code: 4 } });
+    expect(harness.exitCode()).toBe(4);
+  });
+
   it('turns a sequence violation into one stable machine failure', async () => {
     const invalid = completedEvents();
     invalid[1] = { ...invalid[1]!, sequence: 7 };

@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promi
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { cliErrorCatalogSchema, cliResultSchema } from '@attest/contracts';
+import { cliErrorCatalogSchema, cliResultSchema, evalEventStreamSchema } from '@attest/contracts';
 import { openStore } from '@attest/core';
 import { afterEach, describe, expect, it } from 'vitest';
 
@@ -187,6 +187,47 @@ describe('runCli', () => {
     expect(exitCode).toBe(2);
   });
 
+  it.each([
+    ['unknown-command', '--output', 'json'],
+    ['project', 'unknown-command', '--output', 'json'],
+    ['agent', 'unknown-command', '--output=json'],
+    ['--output', 'json', 'schema', 'unknown-command'],
+  ])('keeps unknown command failures machine-readable for %j', async (...args) => {
+    const output: string[] = [];
+    const errors: string[] = [];
+    const exitCode = await runCli(args, {
+      io: { output: (message) => output.push(message), error: (message) => errors.push(message) },
+    });
+
+    expect(exitCode).toBe(2);
+    expect(errors).toEqual([]);
+    expect(output).toHaveLength(1);
+    expect(cliResultSchema.parse(JSON.parse(output[0]!))).toMatchObject({
+      ok: false,
+      error: { code: 'cli_usage', retryable: false },
+    });
+  });
+
+  it('wraps JSONL parser failures in one terminal event', async () => {
+    const output: string[] = [];
+    const errors: string[] = [];
+    const exitCode = await runCli(['eval', 'run', '--unknown', '--output', 'jsonl'], {
+      io: { output: (message) => output.push(message), error: (message) => errors.push(message) },
+    });
+
+    expect(exitCode).toBe(2);
+    expect(errors).toEqual([]);
+    const stream = evalEventStreamSchema.parse(
+      output.map((line): unknown => JSON.parse(line) as unknown),
+    );
+    expect(stream).toHaveLength(1);
+    expect(stream[0]).toMatchObject({
+      event: 'result',
+      sequence: 0,
+      data: { exit_code: 2, result: { ok: false, error: { code: 'cli_usage' } } },
+    });
+  });
+
   it('returns an actionable project discovery error', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'attest-cli-command-'));
     temporaryDirectories.push(directory);
@@ -352,8 +393,13 @@ describe('runCli', () => {
         },
       }),
     ).toBe(2);
-    expect(usageOutput).toEqual([]);
-    expect(usageErrors.join('')).toContain("unknown command 'run'");
+    expect(usageErrors).toEqual([]);
+    expect(usageOutput).toHaveLength(1);
+    expect(JSON.parse(usageOutput[0]!)).toMatchObject({
+      ok: false,
+      command: 'run',
+      error: { code: 'cli_usage' },
+    });
   });
 
   it('retrieves the schema id advertised by JSON help from the generated registry', async () => {
