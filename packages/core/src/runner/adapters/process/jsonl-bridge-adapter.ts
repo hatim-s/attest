@@ -112,6 +112,9 @@ class JsonlBridgeSession {
     agent: JsonlBridgeAgentResource,
     options: JsonlBridgeSessionOptions,
   ): Promise<JsonlBridgeSession> {
+    if (options.signal?.aborted === true) {
+      throw new AgentInvocationError('cancelled', 'JSONL bridge run was cancelled.');
+    }
     const process = await ManagedChild.start({
       argv: agent.transport.argv,
       cwd: options.cwd,
@@ -121,6 +124,11 @@ class JsonlBridgeSession {
         DEFAULT_STDERR_BYTES,
       ),
     });
+    // Cancellation can arrive while the OS is spawning the process, before session listeners exist.
+    if (options.signal?.aborted) {
+      await process.terminate(options.terminationGraceMs ?? DEFAULT_TERMINATION_GRACE_MS);
+      throw new AgentInvocationError('cancelled', 'JSONL bridge run was cancelled.');
+    }
     return new JsonlBridgeSession(agent, process, options);
   }
 

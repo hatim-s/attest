@@ -50,16 +50,19 @@ const executeCases = async <Payload>(
           configured_index: resolvedCase.configured_index,
         },
       });
-      const task = runner.executeCase(run.run_id, resolvedCase, signal).then(
-        (value): SettledCase<Payload> => ({
-          resolvedCase,
-          result: { status: 'fulfilled', value },
-        }),
-        (reason: unknown): SettledCase<Payload> => ({
-          resolvedCase,
-          result: { status: 'rejected', reason },
-        }),
-      );
+      // Adapters may throw during setup before returning their promise.
+      const task = Promise.resolve()
+        .then(() => runner.executeCase(run.run_id, resolvedCase, signal))
+        .then(
+          (value): SettledCase<Payload> => ({
+            resolvedCase,
+            result: { status: 'fulfilled', value },
+          }),
+          (reason: unknown): SettledCase<Payload> => ({
+            resolvedCase,
+            result: { status: 'rejected', reason },
+          }),
+        );
       pending.set(resolvedCase.configured_index, task);
       activeByTest.set(resolvedCase.test_id, activeForTest + 1);
     }

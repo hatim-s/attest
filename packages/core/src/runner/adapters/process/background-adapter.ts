@@ -134,6 +134,9 @@ class BackgroundAgentSession {
     agent: BackgroundAgentResource,
     options: BackgroundSessionOptions,
   ): Promise<BackgroundAgentSession> {
+    if (options.signal?.aborted === true) {
+      throw new AgentInvocationError('cancelled', 'Background agent run was cancelled.');
+    }
     assertLoopbackUrl(agent.transport.invoke.url);
     if (agent.transport.shutdown !== undefined) assertLoopbackUrl(agent.transport.shutdown.url);
     if (agent.transport.readiness.kind === 'http') assertLoopbackUrl(agent.transport.readiness.url);
@@ -152,6 +155,11 @@ class BackgroundAgentSession {
         DEFAULT_STDERR_BYTES,
       ),
     });
+    // Cancellation during spawn precedes the session's run-abort listener.
+    if (options.signal?.aborted) {
+      await process.terminate(agent.transport.stop_timeout_ms);
+      throw new AgentInvocationError('cancelled', 'Background agent run was cancelled.');
+    }
     const session = new BackgroundAgentSession(agent, process, options);
     try {
       await session.waitForReadiness();
