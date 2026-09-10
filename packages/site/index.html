@@ -1,0 +1,940 @@
+<!doctype html>
+<!-- Attest sorter variant. The full-height trunk joins the final t; case chips
+     resolve into adjacent pass/fail stacks. Section branches explain saved runs
+     and case outcomes. Both the page and terminal follow the selected theme. -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>attest: CI for AI agents</title>
+<meta name="description" content="attest is a local-first CLI for evaluating AI agents. Immutable runs, trajectory assertions, run diffs, and a single-file HTML report you can attach to a PR.">
+<script>
+  // Apply a saved theme before first paint so there is no flash.
+  (() => { const t = localStorage.getItem('attest-theme'); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; })();
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500&family=Inter+Tight:wght@500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+<style>
+  :root {
+    --white: #FFFFFF;
+    --black: #000000;
+    --fail: #FF5C00;
+    --grey: #5F5F5F;
+    --term: #F7F7F8;
+    --term-fg: #171719;
+    --term-dim: #62626B;
+    --term-hot: #B34300;
+    --term-edge: rgba(0, 0, 0, .16);
+    --line-x: 58vw;
+    --stroke: 2px;
+    --text-x: 8vw;
+    --gutter: 12vw;
+    --gap: 24vh;
+    --top-h: 72px;
+    color-scheme: light;
+  }
+  :root[data-theme="dark"] {
+    --white: #0C0C0D;
+    --black: #F4F4F2;
+    --fail: #FF6A1A;
+    --grey: #9C9C9C;
+    --term: #141416;
+      --term-fg: #F2F2F0;
+      --term-dim: #A2A2AB;
+      --term-hot: #FFA36B;
+    --term-edge: rgba(255, 255, 255, .1);
+    color-scheme: dark;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --white: #0C0C0D;
+      --black: #F4F4F2;
+      --fail: #FF6A1A;
+      --grey: #9C9C9C;
+      --term: #141416;
+      --term-fg: #F2F2F0;
+      --term-dim: #A2A2AB;
+      --term-hot: #FFA36B;
+      --term-edge: rgba(255, 255, 255, .1);
+      color-scheme: dark;
+    }
+  }
+  /* Mobile: the trunk runs down the left edge, branches open to the right, and there
+     is no machine. */
+  @media (max-width: 720px) {
+    :root { --line-x: 24px; --text-x: 56px; --gutter: 32px; --gap: 14vh; --top-h: 60px; }
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { background: var(--white); color: var(--black); scroll-padding-top: var(--top-h); }
+  body {
+    position: relative;
+    font-family: Inter, system-ui, sans-serif;
+    font-size: 17px;
+    line-height: 1.6;
+    overflow-x: clip;
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: inherit; text-decoration: none; cursor: pointer; }
+  a:hover { text-decoration: underline; text-underline-offset: 4px; }
+  :focus-visible { outline: 2px solid var(--black); outline-offset: 4px; }
+
+  /* the machine: fixed behind everything */
+  #sorter {
+    position: fixed;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 0;
+    pointer-events: none;
+  }
+
+  /* the lines: scroll with the document, drawn by scrolling */
+  #line, #spine {
+    position: absolute;
+    top: 0; left: 0;
+    width: 100%;
+    overflow: visible;
+    pointer-events: none;
+    z-index: 3;
+  }
+  #spine { z-index: 6; }
+  :is(#line, #spine) path {
+    fill: none;
+    stroke: var(--black);
+    stroke-width: var(--stroke);
+    vector-effect: non-scaling-stroke;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    animation: none;
+  }
+  :is(#line, #spine) path.trunk { stroke-width: var(--stroke); animation: none; }
+  :is(#line, #spine) path.tail { stroke: var(--grey); animation: none; }
+  :is(#line, #spine) path.bad { stroke: var(--fail); }
+  :is(#line, #spine) path.halo { stroke: var(--white); stroke-width: 8; }
+  :is(#line, #spine) path.axis { stroke: var(--grey); stroke-width: 1; opacity: .5; }
+  :is(#line, #spine) path.halo.trunk { display: none; }
+  @media (prefers-reduced-motion: reduce) {
+    :is(#line, #spine) path { animation: none; stroke-dashoffset: 0 !important; }
+  }
+
+  /* fixed top bar */
+  .top {
+    position: fixed;
+    top: 0; left: 0; right: 0;
+    height: var(--top-h);
+    z-index: 5;
+    display: flex;
+    align-items: center;
+    gap: 28px;
+    padding: 0 28px 0 var(--text-x);
+    background: var(--white);
+  }
+
+  .top .wm {
+    font-family: "Inter Tight", Inter, system-ui, sans-serif;
+    font-weight: 600;
+    letter-spacing: -.04em;
+    font-size: 22px;
+    line-height: 1;
+  }
+  .top nav { margin-left: auto; display: flex; gap: 22px; font-size: 14px; }
+  .theme {
+    width: 28px; height: 28px;
+    display: grid;
+    place-items: center;
+    color: var(--black);
+    background: var(--white);
+    border: 0;
+    border-radius: 0;
+    cursor: pointer;
+  }
+  .theme svg { display: none; width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+  .theme[data-mode="system"] .ico-system,
+  .theme[data-mode="light"] .ico-light,
+  .theme[data-mode="dark"] .ico-dark { display: block; }
+  .theme.spin svg { animation: spin .4s cubic-bezier(.2, .7, .2, 1); }
+  @keyframes spin { from { transform: rotate(-120deg) scale(.6); opacity: 0; } to { transform: none; opacity: 1; } }
+  @media (prefers-reduced-motion: reduce) { .theme.spin svg { animation: none; } }
+
+  /* hero */
+  .hero {
+    position: relative;
+    z-index: 4;
+    height: 100vh;
+    min-height: 560px;
+  }
+  .hero .lede {
+    position: absolute;
+    top: calc(var(--top-h) + 32px); left: var(--text-x);
+    font-size: 20px;
+    line-height: 1.4;
+    max-width: 24ch;
+    color: var(--black);
+  }
+  .hero .mark {
+    position: absolute;
+    right: calc(100% - var(--line-x) - .14em);
+    top: calc(58vh - .76em);
+    font-family: "Inter Tight", Inter, system-ui, sans-serif;
+    font-size: 20vw;
+    font-weight: 600;
+    letter-spacing: -.05em;
+    line-height: 1;
+    white-space: nowrap;
+  }
+  .hero .start {
+    position: absolute;
+    left: var(--line-x);
+    top: calc(58vh + 12px);
+    width: 0; height: 0;
+  }
+  @media (max-width: 720px) {
+    #sorter { display: none; }                    /* the machine is desktop only */
+    .top { gap: 16px; padding: 0 12px 0 var(--text-x); }
+    .top nav { gap: 14px; font-size: 13px; }
+    .hero { min-height: 520px; }
+    .hero .lede { top: calc(var(--top-h) + 24px); max-width: 18ch; font-size: 17px; }
+    .hero .mark { right: auto; left: calc(var(--text-x) - .06em); font-size: 26vw; top: calc(46vh - .76em); }
+    .hero .start { top: calc(46vh + 12px); }
+  }
+
+  /* sections: content runs from the text column to the gutter, the trunk is past the gutter */
+  section {
+    position: relative;
+    padding: var(--gap) calc(100% - var(--line-x) + var(--gutter)) var(--gap) var(--text-x);
+    z-index: 2;
+  }
+  h2 {
+    font-family: "Inter Tight", Inter, system-ui, sans-serif;
+    font-size: 40px;
+    font-weight: 500;
+    letter-spacing: -.02em;
+    line-height: 1.1;
+    margin-bottom: 30px;
+  }
+  @media (max-width: 720px) { h2 { font-size: 30px; } }
+  p, li { color: var(--grey); max-width: 52ch; }
+  p + p { margin-top: 12px; }
+  code { font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: .9em; color: var(--black); }
+
+  /* anything hanging off the trunk: its right edge sits on the trunk, content ends at the gutter */
+  .hang {
+    position: relative;
+    margin-right: calc(-1 * var(--gutter));
+    padding-right: var(--gutter);
+    list-style: none;
+  }
+  .hang .lab {
+    position: absolute;
+    font-size: 15px;
+    line-height: 20px;
+    color: var(--black);
+    white-space: nowrap;
+    background: var(--white);
+    padding: 0 6px;
+  }
+  .hang i[data-branch] { position: absolute; inset: 0; }
+
+  .transports { height: 270px; margin-top: 36px; }
+  .transports .lab { right: calc(var(--gutter) + 4px); }
+
+  .trace { margin-top: 36px; padding: 24px; background: var(--white); border: var(--stroke) solid var(--term-edge); }
+  .trace .rule { color: var(--black); font-size: 15px; margin-bottom: 24px; }
+  .trace ol { list-style: none; border-left: var(--stroke) solid var(--black); margin-left: 5px; }
+  .trace li { position: relative; padding: 0 0 24px 24px; font-size: 14px; }
+  .trace li:last-child { padding-bottom: 0; }
+  .trace li::before { content: ""; position: absolute; left: -6px; top: 7px; width: 10px; height: 10px; border-radius: 50%; background: var(--black); }
+  .trace li span { display: block; color: var(--grey); font-size: 13px; }
+  .trace .verdict { margin-top: 24px; padding-top: 16px; border-top: var(--stroke) solid var(--black); color: var(--black); font-size: 14px; }
+  .store { margin-top: 36px; padding-right: 24px; }
+  .snapshot { padding: 24px; background: var(--white); border: var(--stroke) solid var(--term-edge); }
+  .snapshot header { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px; margin-bottom: 20px; }
+  .snapshot dl { display: grid; grid-template-columns: auto 1fr; gap: 10px 24px; font-size: 14px; }
+  .snapshot dt { color: var(--grey); }
+  .snapshot dd { margin: 0; overflow-wrap: anywhere; }
+  .snapshot footer { display: block; padding: 18px 0 0; margin-top: 20px; border-top: var(--stroke) solid var(--black); font-size: 12px; color: var(--grey); }
+  .diff { height: 330px; margin-top: 36px; }
+  .diff .lab { top: 265px; font-size: 12px; white-space: normal; max-width: 30%; }
+  .diff .lab small { display: block; color: var(--grey); font-size: 12px; }
+  .diff .lab.imp { left: 0; }
+  .diff .lab.same { left: 35%; }
+  .diff .lab.bad { left: 70%; color: var(--fail); }
+  .diff .caption { position: absolute; bottom: 0; left: 0; font-size: 12px; color: var(--grey); background: var(--white); }
+
+  .file { height: 110px; margin-top: 36px; }
+
+  /* the terminal */
+  .term-wrap { margin-top: 36px; padding-right: 40px; }
+  .term {
+    background: var(--term);
+    color: var(--term-fg);
+    border: 1px solid var(--term-edge);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  .term .tbar {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    height: 34px;
+    padding: 0 14px;
+    border-bottom: 1px solid var(--term-edge);
+    font-size: 12px;
+    color: var(--term-dim);
+  }
+  .term .tbar i { width: 10px; height: 10px; border-radius: 50%; background: var(--term-edge); }
+  .term .tbar span { margin-left: 8px; }
+  .term pre {
+    padding: 16px 18px 18px;
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 13px;
+    line-height: 1.75;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    color: var(--term-fg);
+  }
+  .term b { font-weight: 500; }
+  .term .p { color: var(--term-dim); user-select: none; }
+  .term .f { color: var(--term-dim); }
+  .term .s { color: var(--term-hot); }
+  .term .n { font-weight: 500; }
+  .term .out { display: block; margin-top: 10px; }
+
+  .facts { margin-top: 20px; }
+  .facts li { padding: 10px 0; }
+
+  .wait { margin-top: 36px; height: 156px; }
+  .wait input {
+    display: block;
+    width: min(320px, 100%);
+    height: 28px;
+    font: inherit;
+    color: var(--black);
+    background: none;
+    border: 0;
+    outline-offset: 6px;
+  }
+  .wait input::placeholder { color: var(--grey); }
+  .wait button {
+    position: absolute;
+    left: 0;
+    top: 56px;
+    height: 40px;
+    padding: 0 18px;
+    font: inherit;
+    font-weight: 500;
+    color: var(--white);
+    background: var(--black);
+    border: 0;
+    cursor: pointer;
+  }
+  .wait .end {
+    position: absolute;
+    right: -5px; bottom: -17px;
+    width: 10px; height: 10px;
+    background: var(--black);
+  }
+
+  footer {
+    position: relative;
+    z-index: 2;
+    display: flex;
+    align-items: baseline;
+    gap: 28px;
+    padding: 14vh 24px 40px var(--text-x);
+  }
+  footer .mark { font-family: "Inter Tight", Inter, system-ui, sans-serif; font-weight: 600; letter-spacing: -.04em; font-size: 22px; margin-right: 8px; }
+  footer a { color: var(--grey); }
+
+  @media (max-width: 720px) {
+    section { padding: var(--gap) 20px var(--gap) var(--text-x); }
+    .hang { margin-right: 0; padding-right: 0; margin-left: calc(-1 * var(--gutter)); padding-left: var(--gutter); }
+    .transports .lab { right: auto; left: calc(var(--gutter) + 4px); }
+    .trace, .snapshot { padding: 16px; }
+    .snapshot dl { grid-template-columns: 1fr; gap: 4px; }
+    .snapshot dd { margin-bottom: 10px; }
+    .store { padding-right: 0; padding-left: 24px; }
+    .diff { height: 360px; }
+    .diff .lab { font-size: 11px; max-width: 32%; }
+    .diff .lab small { display: none; }
+    .diff .lab.imp { left: var(--gutter); }
+    .diff .lab.same { left: calc(var(--gutter) + 36%); }
+    .diff .lab.bad { left: auto; right: 0; text-align: right; }
+    .diff .caption { left: var(--gutter); max-width: calc(100% - var(--gutter)); }
+    .term-wrap { padding-right: 0; padding-left: 40px; }
+    .facts li { padding-left: var(--gutter); }
+    .term pre { padding: 12px 14px 14px; font-size: 12px; }
+    .wait .end { right: auto; left: -5px; }
+    footer { flex-wrap: wrap; padding: 8vh 20px 24px var(--text-x); }
+  }
+</style>
+</head>
+<body id="top">
+
+<canvas id="sorter" aria-hidden="true"></canvas>
+<svg id="line" aria-hidden="true"></svg>
+<svg id="spine" aria-hidden="true"></svg>
+
+<div class="top">
+  <a class="wm" href="#top">attest</a>
+  <nav aria-label="Site">
+    <a href="#quickstart">Quickstart</a>
+    <a href="https://github.com/hatim-s/attest/tree/main/docs">Docs</a>
+    <a href="https://github.com/hatim-s/attest">GitHub</a>
+  </nav>
+  <button class="theme" type="button" data-mode="system" aria-label="Theme follows the system. Click to change.">
+    <svg class="ico-system" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 4a8 8 0 0 1 0 16z" fill="currentColor" stroke="none"/></svg>
+    <svg class="ico-light" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1"/></svg>
+    <svg class="ico-dark" viewBox="0 0 24 24"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg>
+  </button>
+</div>
+
+<header class="hero">
+  <p class="lede">CI for AI agents. Local, immutable, diffable.</p>
+  <h1 class="mark">attest</h1>
+  <div class="start"></div>
+</header>
+
+<section>
+  <h2 class="hang" data-at="{H+12}" data-branch="h-{C+W+12}">Six transports, one contract.</h2>
+  <p>Native module, managed process, HTTP, polling, stream, and WebSocket all normalize to one agent contract. Any language, no SDK.</p>
+  <div class="hang transports" aria-hidden="true">
+    <i data-at="135" data-branch="c-{W*.4} 0 -{W*.6} -125 -{W} -125 m3 0 a3 3 0 1 0 -6 0 a3 3 0 1 0 6 0"></i>
+    <i data-at="135" data-branch="c-{W*.4} 0 -{W*.6} -75 -{W} -75 m3 0 a3 3 0 1 0 -6 0 a3 3 0 1 0 6 0"></i>
+    <i data-at="135" data-branch="c-{W*.4} 0 -{W*.6} -25 -{W} -25 m3 0 a3 3 0 1 0 -6 0 a3 3 0 1 0 6 0"></i>
+    <i data-at="135" data-branch="c-{W*.4} 0 -{W*.6} 25 -{W} 25 m3 0 a3 3 0 1 0 -6 0 a3 3 0 1 0 6 0"></i>
+    <i data-at="135" data-branch="c-{W*.4} 0 -{W*.6} 75 -{W} 75 m3 0 a3 3 0 1 0 -6 0 a3 3 0 1 0 6 0"></i>
+    <i data-at="135" data-branch="c-{W*.4} 0 -{W*.6} 125 -{W} 125 m3 0 a3 3 0 1 0 -6 0 a3 3 0 1 0 6 0"></i>
+    <span class="lab" style="top:0">native module</span>
+    <span class="lab" style="top:50px">managed process</span>
+    <span class="lab" style="top:100px">HTTP</span>
+    <span class="lab" style="top:150px">polling</span>
+    <span class="lab" style="top:200px">stream</span>
+    <span class="lab" style="top:250px">WebSocket</span>
+  </div>
+</section>
+
+<section>
+  <h2 class="hang" data-at="{H+12}" data-branch="h-{C+W+12}">Assert on the trajectory.</h2>
+  <p>Check which tools your agent called and in what order. For a refund request, require a policy check before the agent responds.</p>
+  <div class="hang" data-at="60" data-frame=".trace" data-branch="h-{W+12}">
+    <div class="trace">
+      <p class="rule">Rule: <code>policy_check</code> must run before <code>respond</code>.</p>
+      <ol aria-label="Example refund agent trace, in execution order">
+        <li><code>search_docs</code><span>Find the refund policy</span></li>
+        <li><code>policy_check</code><span>Confirm this request is eligible</span></li>
+        <li><code>respond</code><span>Send the customer an answer</span></li>
+      </ol>
+      <p class="verdict">✓ Passed. The policy check ran before the response.</p>
+    </div>
+  </div>
+  <p style="margin-top:24px">Use an open JSON trace to check tool calls, or evaluate the final output on its own.</p>
+</section>
+
+<section>
+  <h2 class="hang" data-at="{H+12}" data-branch="h-{C+W+12}">Runs are immutable.</h2>
+  <p>A run resolves your agents, tests, datasets, and metrics into a snapshot before anything executes. Results land in a project-local SQLite store, and a completed run never changes.</p>
+  <div class="hang store" data-frame=".snapshot" data-at="30" data-branch="h-24">
+    <article class="snapshot" aria-label="Example saved run">
+      <header><code>run 0413</code><span>Completed · locked</span></header>
+      <dl><dt>Snapshot</dt><dd>Agent, tests, dataset, metrics</dd><dt>Results</dt><dd>24 cases · 22 passed · 2 failed</dd><dt>Stored with the run</dt><dd>Inputs, outputs and traces</dd></dl>
+      <footer>Saved locally in <code>.attest/runs.db</code>. Future edits apply to the next run.</footer>
+    </article>
+  </div>
+</section>
+
+<section>
+  <h2 class="hang" data-at="{H+12}" data-branch="h-{C+W+12}">Diff any two runs.</h2>
+  <p>Pick two runs and every case is classified as improved, regressed, or unchanged. Nothing is re-executed, so the comparison is exact.</p>
+  <div class="hang diff" role="img" aria-label="Example run comparison: 3 cases improved from fail to pass, 19 unchanged, 2 regressed from pass to fail." data-at="80" data-axes="40 258" data-branch="{D.diff(C+W+12)}">
+    <i class="bad" data-at="80" data-branch="{D.regressed(C+W+12)}"></i>
+    <span class="lab imp">3 improved<small>Failed → passed</small></span>
+    <span class="lab same">19 unchanged<small>Same outcome</small></span>
+    <span class="lab bad">2 regressed<small>Passed → failed</small></span>
+    <span class="caption">Example comparison · run 0412 → run 0413</span>
+  </div>
+</section>
+
+<section>
+  <h2 class="hang" data-at="{H+12}" data-branch="h-{C+W+12}">One file, attached to the PR.</h2>
+  <p><code>attest view</code> opens a local dashboard. <code>attest report</code> writes one self-contained HTML file with every case, trace, and diff inside, so the reviewer needs nothing installed.</p>
+  <div class="hang file" aria-hidden="true" data-at="12"
+       data-branch="h-52 v84 h68 v-66 l-16 -18 m0 0 v18 h16"></div>
+</section>
+
+<section id="quickstart">
+  <h2 class="hang" data-at="{H+12}" data-branch="h-{C+W+12}">Quickstart.</h2>
+  <p>Seven commands. No credentials, no network.</p>
+  <div class="hang term-wrap" data-at="17" data-branch="h-39">
+    <div class="term" role="figure" aria-label="The quickstart commands in a terminal">
+      <div class="tbar" aria-hidden="true"><i></i><i></i><i></i><span>attest quickstart</span></div>
+<pre><span class="p">❯</span> <b>attest</b> project init . <span class="f">--name</span> support <span class="f">--non-interactive</span> <span class="f">--output</span> json
+<span class="p">❯</span> <b>attest</b> agent add support <span class="f">--argv-json</span> <span class="s">'["node","./agent.mjs"]'</span> <span class="f">--timeout</span> 5s <span class="f">--output</span> json
+<span class="p">❯</span> <b>attest</b> agent test support <span class="f">--input</span> <span class="s">'"ping"'</span> <span class="f">--output</span> json
+<span class="p">❯</span> <b>attest</b> metric add exact <span class="f">--preset</span> output-equals <span class="f">--value</span> <span class="s">'"refund policy"'</span> <span class="f">--output</span> json
+<span class="p">❯</span> <b>attest</b> test add smoke <span class="f">--agent</span> support <span class="f">--metric</span> exact <span class="f">--output</span> json
+<span class="p">❯</span> <b>attest</b> test case import smoke ./cases.jsonl <span class="f">--output</span> json
+<span class="p">❯</span> <b>attest</b> eval run smoke <span class="f">--output</span> json
+<span class="out">{
+  <span class="f">"schema"</span>: <span class="s">"attest.cli-result"</span>,
+  <span class="f">"ok"</span>: <span class="n">true</span>,
+  <span class="f">"command"</span>: <span class="s">"eval.run"</span>,
+  <span class="f">"result"</span>: { <span class="f">"run_id"</span>: <span class="s">"01J9Q4…"</span>, <span class="f">"cases"</span>: <span class="n">24</span>, <span class="f">"passed"</span>: <span class="n">22</span>, <span class="f">"failed"</span>: <span class="n">2</span> }
+}</span></pre>
+    </div>
+  </div>
+</section>
+
+<section>
+  <h2 class="hang" data-at="{H+12}" data-branch="h-{C+W+12}">Speaks JSON.</h2>
+  <p>Built for coding agents as much as for you.</p>
+  <ul class="facts">
+    <li class="hang" data-at="{H/2}" data-branch="h-{W-16} m-3 0 a3 3 0 1 0 6 0 a3 3 0 1 0 -6 0">Every command accepts <code>--output json</code>, one <code>attest.cli-result</code> document, or <code>--output jsonl</code>.</li>
+    <li class="hang" data-at="{H/2}" data-branch="h-{W-16} m-3 0 a3 3 0 1 0 6 0 a3 3 0 1 0 -6 0"><code>attest help --output json</code> returns the command tree. <code>attest schema print &lt;id&gt;</code> returns the JSON Schema.</li>
+    <li class="hang" data-at="{H/2}" data-branch="h-{W-16} m-3 0 a3 3 0 1 0 6 0 a3 3 0 1 0 -6 0"><code>attest errors --output json</code> lists stable error codes, each with a repair command.</li>
+    <li class="hang" data-at="{H/2}" data-branch="h-{W-16} m-3 0 a3 3 0 1 0 6 0 a3 3 0 1 0 -6 0"><code>--if-project-hash &lt;sha256&gt;</code> guards a mutation when another actor may be editing the project.</li>
+  </ul>
+</section>
+
+<section>
+  <h2 class="hang" data-at="{H+12}" data-branch="h-{C+W+12}">Apache 2.0.</h2>
+  <p>Runtime, CLI, trace schema, every metric type, dashboard, reports, and diffing are free. Cloud, with hosted dashboards, team sharing, and long-horizon CI history, comes later.</p>
+  <p>Leave an email and we will write when cloud opens.</p>
+  <form class="hang wait" data-at="-14" data-branch="h-{C+W+28} v{H+28} h{C+W+28}" onsubmit="event.preventDefault()">
+    <label for="email" hidden>Email</label>
+    <input id="email" type="email" name="email" placeholder="you@company.com" autocomplete="email">
+    <button type="submit">Join the waitlist</button>
+    <i class="end" aria-hidden="true"></i>
+  </form>
+</section>
+
+<footer>
+  <span class="mark">attest</span>
+  <a href="https://github.com/hatim-s/attest/tree/main/docs">Docs</a>
+  <a href="https://github.com/hatim-s/attest">GitHub</a>
+</footer>
+
+<script>
+  /* Theme. Three modes, cycled by the button: follow the system, light, dark. */
+  (() => {
+    const btn = document.querySelector('.theme');
+    const root = document.documentElement;
+    const KEY = 'attest-theme';
+    const order = ['system', 'light', 'dark'];
+    const label = { system: 'Theme follows the system', light: 'Theme is light', dark: 'Theme is dark' };
+    const apply = mode => {
+      if (mode === 'system') { delete root.dataset.theme; localStorage.removeItem(KEY); }
+      else { root.dataset.theme = mode; localStorage.setItem(KEY, mode); }
+      btn.dataset.mode = mode;
+      btn.setAttribute('aria-label', label[mode] + '. Click to change.');
+      dispatchEvent(new Event('themechange'));
+    };
+    btn.addEventListener('click', () => {
+      apply(order[(order.indexOf(btn.dataset.mode) + 1) % order.length]);
+      btn.classList.remove('spin'); void btn.offsetWidth; btn.classList.add('spin');
+    });
+    apply(root.dataset.theme || 'system');
+    matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => dispatchEvent(new Event('themechange')));
+  })();
+
+  /* The lines. The trunk is one straight path from the top of the page to the end of the
+     waitlist form. Every [data-branch] element spawns its own path off the trunk: the path
+     starts on the trunk at data-at pixels below the element's top and is written relative to
+     that point, with x negative toward the text. Expressions in braces are evaluated with
+     W (gutter minus 12), C (content width), H (element height), I (input width) and the D
+     helpers, which build longer shapes. Each path gets its own scroll interval, so a branch
+     draws itself out as the trunk passes its spawn point. Paint order is every halo, then the
+     branches, then the trunk, so a branch halo never cuts the trunk at the joint. */
+  (() => {
+    const NS = 'http://www.w3.org/2000/svg';
+    const svg = document.getElementById('line');
+    const spine = document.getElementById('spine');
+    const start = document.querySelector('.start');
+    const els = [...document.querySelectorAll('[data-branch]')];
+    const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+    const mk = cls => { const p = document.createElementNS(NS, 'path'); p.setAttribute('class', cls); (cls.includes('trunk') || cls === 'tail' ? spine : svg).appendChild(p); return p; };
+    const axes = els.filter(el => el.dataset.axes).map(el => ({ el, path: mk('axis') }));
+    const trunkHalo = mk('halo trunk');
+    const branches = els.map(el => ({ el, bad: el.classList.contains('bad') }));
+    branches.forEach(b => b.halo = mk('halo' + (b.bad ? ' bad' : '')));
+    branches.forEach(b => b.path = mk(b.bad ? 'bad' : ''));
+    const tailPath = mk('tail');
+    const trunkPath = mk('trunk');
+
+    // Three independent curves follow the sketch, with peaks, troughs and crossings.
+    // Coordinates are relative to the trunk, with width scaled to the content column.
+    const D = {
+      diff(R) {
+        return `c${-R*.16} 0 ${-R*.16} 90 ${-R*.32} 90 s${-R*.16} -30 ${-R*.32} -30 s${-R*.16} -40 ${-R*.34} 50 m${R*.98} -110 m0 60 c${-R*.16} -90 ${-R*.16} -90 ${-R*.32} 0 s${-R*.16} 100 ${-R*.32} 100 s${-R*.16} -75 ${-R*.34} -100`;
+      },
+      regressed(R) {
+        return `m0 40 c${-R*.12} -45 ${-R*.12} 75 ${-R*.28} 75 s${-R*.16} -40 ${-R*.32} -10 s${-R*.16} -30 ${-R*.24} -10 s${-R*.08} 40 ${-R*.14} 35`;
+      },
+    };
+    const fill = (s, v) => s.replace(/\{([^}]+)\}/g, (_, e) => {
+      const r = new Function('W', 'C', 'H', 'I', 'D', 'max', 'min', `return (${e})`)(v.W, v.C, v.H, v.I, D, Math.max, Math.min);
+      return typeof r === 'string' ? r : r.toFixed(1);
+    });
+
+    let lastY = -1;
+    const build = () => {
+      const doc = document.documentElement, vh = innerHeight, PH = Math.max(vh, document.body.offsetHeight), sy = scrollY;
+      svg.setAttribute('width', doc.clientWidth);
+      svg.setAttribute('height', PH);
+      spine.setAttribute('width', doc.clientWidth);
+      spine.setAttribute('height', PH);
+      const x = start.getBoundingClientRect().left;
+      // On mobile the trunk is on the left, so every branch is mirrored across it.
+      const narrow = matchMedia('(max-width: 720px)').matches;
+      const cs0 = getComputedStyle(els[0]);
+      const gutter = parseFloat(narrow ? cs0.paddingLeft : cs0.paddingRight);
+      const mirror = narrow ? `matrix(-1 0 0 1 ${(2 * x).toFixed(1)} 0)` : null;
+      // Static axes under a graph: a y axis at the far edge on desktop, an x axis with
+      // ticks running to the trunk. These never animate.
+      for (const a of axes) {
+        const r = a.el.getBoundingClientRect(), top = r.top + sy;
+        const [y0, y1] = a.el.dataset.axes.split(' ').map(Number);
+        const far = narrow ? r.right - 4 : r.left, base = (top + y1).toFixed(1);
+        let d = narrow ? `M${x} ${base} H${far.toFixed(1)}` : `M${far.toFixed(1)} ${(top + y0).toFixed(1)} V${base} H${x}`;
+        for (let i = 1; i < 10; i++) d += ` M${(far + (x - far) * i / 10).toFixed(1)} ${base} v5`;
+        a.path.setAttribute('d', d);
+      }
+      const W = gutter - 12;
+      const I = document.querySelector('.wait input').offsetWidth;
+      const range = Math.max(1, PH - vh);
+
+      const y0 = 0;
+      const y1 = els[els.length - 1].getBoundingClientRect().bottom + sy + 12;
+      tailPath.setAttribute('d', `M${x} ${y1} V${PH}`);
+      for (const p of [trunkPath, trunkHalo]) {
+        p.setAttribute('d', `M${x} 0 V${y1.toFixed(1)}`);
+        p.style.strokeDasharray = 'none';
+        p.style.animationName = 'none';
+      }
+
+      branches.forEach((b, i) => {
+        const r = b.el.getBoundingClientRect(), top = r.top + sy, bottom = r.bottom + sy;
+        const v = { W, C: r.width - gutter, H: r.height, I };
+        const at = parseFloat(fill(b.el.dataset.at || '0', v));
+        let d = `M${x} ${(top + at).toFixed(1)} ` + fill(b.el.dataset.branch, v);
+        // The connector and perimeter are one path, so the outline draws after contact.
+        // Frames are absolute, so they are written for the side the trunk is on.
+        if (b.el.dataset.frame) {
+          const box = b.el.querySelector(b.el.dataset.frame).getBoundingClientRect();
+          const left = box.left + 1, right = box.right - 1;
+          const near = narrow ? left : right, far = narrow ? right : left;
+          const upper = box.top + sy + 1, lower = box.bottom + sy - 1;
+          const join = clamp(top + at, upper, lower);
+          d = `M${x} ${join} H${near} V${upper} H${far} V${lower} H${near} V${join}`;
+        }
+        for (const p of [b.path, b.halo]) {
+          p.setAttribute('d', d);
+          if (mirror && !b.el.dataset.frame) p.setAttribute('transform', mirror); else p.removeAttribute('transform');
+        }
+        const len = b.path.getTotalLength();
+        // Finish when the animated element's center reaches the viewport center.
+        // A shared 65vh draw interval prevents small diagrams from flashing into view.
+        const s1 = clamp((top + bottom) / 2 - vh * .5 - 2, 1, range);
+        const s0 = Math.max(0, s1 - vh * .65);
+        b.length = len; b.start = s0; b.end = s1;
+        for (const p of [b.path, b.halo]) { p.style.strokeDasharray = len; p.style.animationName = 'none'; }
+      });
+      lastY = -1; paintBranches();
+    };
+    // Derive drawing progress directly from scroll pixels, including after viewport changes.
+    function paintBranches() {
+      const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+      for (const b of branches) {
+        const progress = reduced ? 1 : clamp((scrollY - b.start) / (b.end - b.start), 0, 1);
+        for (const p of [b.path, b.halo]) p.style.strokeDashoffset = b.length * (1 - progress);
+      }
+    }
+    // Repaint on any frame where the scroll position moved. This also covers anchor
+    // jumps, scroll restoration and smooth scrolling, which do not all fire scroll events on time.
+    const tick = () => { if (scrollY !== lastY) { lastY = scrollY; paintBranches(); } requestAnimationFrame(tick); };
+    requestAnimationFrame(tick);
+    matchMedia('(prefers-reduced-motion: reduce)').addEventListener('change', paintBranches);
+
+    let t;
+    addEventListener('resize', () => { clearTimeout(t); t = setTimeout(build, 80); });
+    addEventListener('load', build);
+    document.fonts.ready.then(build);
+    build();
+  })();
+
+  /* Chips flow left to right and resolve at the trunk into two stacks side by side:
+     fails just past the gate, passes beside them. A run is 50 to 70 cases. When it is
+     complete the stacks blink to outlines and fade where they stand while the new
+     record blinks in at the column and glows for a moment, and a fresh run starts at
+     once, so nothing waits at the gate. When the column is full it drops off the
+     page. Below 720px the machine does not run. Pointer movement pushes nearby chips
+     aside and a click scatters them. */
+  (() => {
+    const cv = document.getElementById('sorter');
+    const ctx = cv.getContext('2d');
+    const gate = document.querySelector('.start');
+    const reduced = matchMedia('(prefers-reduced-motion: reduce)');
+    let INK = 'rgba(0,0,0,', FAIL = 'rgba(255,92,0,', GREY = 'rgba(95,95,95,';
+    const PASS_RATE = 0.9, RADIUS = 150, BURST = 260;
+    const BLINK = 1.2, DROP = 1.4;                   // seconds: a run's commit; the column off the page
+    const HINT = 'Move the pointer through the field. Click to scatter.';
+    let W = 0, H = 0, gateX = 0, topPad = 96, narrow = false;
+    const CW = 14, CH = 8, GAP = 4;
+    let RUN = 60, passCols = 4, passX = 0, failX = 0, stackBottom = 0;
+    let lanes = [], chips = [];
+    let run = { pass: 0, fail: 0 };                 // cases assigned to the current run, landed or in flight
+    let count = { pass: 0, fail: 0 }, runId = 412;  // cases landed, for the counters
+    let commit = null, records = 0, capacity = 1, drop = null;
+    let mouse = { x: -1e4, y: -1e4 }, inField = false, fieldT = 0, hint = 1;
+    let running = false, raf = 0, last = 0;
+    let textRects = [];
+    // Cache document-space text bounds on layout, rather than measure during animation.
+    function measureText() {
+      textRects = [...document.querySelectorAll('h1, h2, p, .facts li, .lab, .caption')].map(el => {
+        const r = el.getBoundingClientRect();
+        return { left: r.left - 8, right: r.right + 8, top: r.top + scrollY - 6, bottom: r.bottom + scrollY + 6 };
+      });
+    }
+
+    const rand = (a, b) => a + Math.random() * (b - a);
+    const ease = t => t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2;
+    const bez = (a, b, c, t) => (1 - t) * (1 - t) * a + 2 * (1 - t) * t * b + t * t * c;
+    const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+    const runSize = () => Math.round(rand(50, 70));
+
+    function palette() {
+      const cs = getComputedStyle(document.documentElement);
+      const rgba = name => {
+        let h = cs.getPropertyValue(name).trim().replace('#', '');
+        if (h.length === 3) h = h.split('').map(c => c + c).join('');
+        const n = parseInt(h, 16);
+        return `rgba(${n >> 16 & 255},${n >> 8 & 255},${n & 255},`;
+      };
+      INK = rgba('--black'); FAIL = rgba('--fail'); GREY = rgba('--grey');
+    }
+
+    // Each stack fills bottom-up in arrival order: cell k of the pass stack or the fail stack.
+    const cellIn = (x0, cols, k) => ({ x: x0 + (k % cols) * (CW + GAP), y: stackBottom - Math.floor(k / cols) * (CH + GAP) });
+    const target = ch => ch.pass ? cellIn(passX, passCols, ch.k) : cellIn(failX, 2, ch.k);
+
+    // The record column: one bar per committed run, growing upward from its base.
+    const REC = { w: 40, h: 16, step: 22 };
+    const recordAt = i => ({ x: W - 60, y: H - 80 - i * REC.step });
+
+    function spawn(ch, initial) {
+      ch.state = 0; ch.t = 0; ch.pass = false; ch.k = 0; ch.kx = 0; ch.ky = 0;
+      const r = Math.random();
+      ch.w = r < 0.08 ? CW * 3 + GAP * 2 : r < 0.3 ? CW * 2 + GAP : CW;
+      ch.h = CH;
+      ch.x = initial ? rand(-60, gateX - 40) : rand(-400, -30);
+      ch.lane = lanes[Math.floor(Math.random() * lanes.length)] + rand(-6, 6);
+      ch.y = ch.lane;
+      ch.v = rand(30, 52);
+      return ch;
+    }
+
+    function layout() {
+      W = innerWidth; H = innerHeight;
+      measureText();
+      const dpr = Math.min(devicePixelRatio || 1, 2);
+      cv.width = W * dpr; cv.height = H * dpr;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      narrow = W <= 720;
+      if (narrow) { ctx.clearRect(0, 0, W, H); return; }
+      gateX = Math.round(gate.getBoundingClientRect().left);
+      failX = gateX + 12;
+      passX = failX + 2 * (CW + GAP) + 16;
+      stackBottom = H - 56 - CH;
+      capacity = Math.max(4, Math.floor((H - 80 - H * 0.42) / REC.step));
+      records = Math.min(records, capacity - 1);
+      const n = 22;
+      lanes = Array.from({ length: n }, (_, i) => topPad + (i + 0.5) * (H - 72 - topPad) / n);
+      chips = Array.from({ length: 150 }, () => spawn({}, true));
+      RUN = runSize(); run = { pass: 0, fail: 0 }; count = { pass: 0, fail: 0 }; commit = null; drop = null;
+      // Pre-warm until the run is about 60 percent in, so the first paint shows a run in progress.
+      for (let i = 0; i < 3000 && count.pass + count.fail < RUN * 0.6; i++) step(1 / 30);
+      draw();
+    }
+
+    // Resolve at the gate and fly into the matching stack. A chip that completes the run
+    // count first commits the previous run, then starts the next one at the bottom.
+    function judge(ch) {
+      if (run.pass + run.fail >= RUN) flush();
+      ch.pass = Math.random() < PASS_RATE;
+      ch.k = ch.pass ? run.pass++ : run.fail++;
+      ch.state = 1; ch.t = 0; ch.sx = ch.x; ch.sy = ch.y;
+    }
+
+    // Every case in the run, landed or still in flight, freezes where it is and blinks
+    // out, while the record for the run blinks in at the column.
+    function flush() {
+      for (const ch of chips) if (ch.state === 1 || ch.state === 2) ch.state = 3;
+      commit = { t: 0, to: recordAt(drop ? 0 : records) };
+      RUN = runSize(); run = { pass: 0, fail: 0 }; count = { pass: 0, fail: 0 }; runId++;
+    }
+
+    function burst(x, y) {
+      for (const ch of chips) {
+        if (ch.state !== 0) continue;
+        const dx = ch.x + ch.w / 2 - x, dy = ch.y + ch.h / 2 - y, d = Math.hypot(dx, dy) || 1;
+        if (d > BURST) continue;
+        const f = (1 - d / BURST) * 520;
+        ch.kx += dx / d * f; ch.ky += dy / d * f;
+      }
+    }
+
+    function step(dt) {
+      if (commit) {
+        commit.t += dt;
+        if (commit.t >= BLINK) {
+          for (const ch of chips) if (ch.state === 3) spawn(ch, false);
+          commit = null;
+          if (!drop && ++records >= capacity) drop = { t: 0 };
+        }
+      }
+      if (drop && (drop.t += dt) >= DROP) { drop = null; records = 0; }
+      if (inField) fieldT += dt;
+      if (fieldT > 2.5 && hint > 0) hint = Math.max(0, hint - dt);
+      for (const ch of chips) {
+        if (ch.state === 0) {
+          ch.x += ch.v * dt;
+          const dx = ch.x + ch.w / 2 - mouse.x, dy = ch.y + ch.h / 2 - mouse.y, d2 = dx * dx + dy * dy;
+          ch.near = d2 < RADIUS * RADIUS;
+          if (ch.near) {
+            const d = Math.sqrt(d2) || 1, f = (RADIUS - d) / RADIUS;
+            ch.x += dx / d * f * 140 * dt; ch.y += dy / d * f * 320 * dt;
+          }
+          ch.x += ch.kx * dt; ch.y += ch.ky * dt;
+          const k = Math.min(1, 3 * dt); ch.kx -= ch.kx * k; ch.ky -= ch.ky * k;
+          ch.y += (ch.lane - ch.y) * Math.min(1, (ch.near ? 0.4 : 1.2) * dt);
+          if (ch.x + ch.w >= gateX - 1) judge(ch);
+        } else if (ch.state === 1) {
+          ch.t = Math.min(1, ch.t + dt / 1.2);
+          const e = ease(ch.t), tg = target(ch);
+          ch.x = bez(ch.sx, tg.x + 30, tg.x, e);
+          ch.y = bez(ch.sy, ch.sy, tg.y, e);
+          ch.w += (CW - ch.w) * Math.min(1, 4 * dt);
+          if (ch.t === 1) {
+            ch.state = 2; ch.x = tg.x; ch.y = tg.y; ch.w = CW;
+            count[ch.pass ? 'pass' : 'fail']++;
+          }
+        }
+      }
+    }
+
+    function draw() {
+      ctx.clearRect(0, 0, W, H);
+      ctx.lineWidth = 1;
+      // The commit: the old run flashes twice, then its outlines fade out where they stand.
+      const p = commit ? commit.t / BLINK : 1;
+      const flash = p < 0.2 && Math.floor(p / 0.07) % 2 === 0;
+      const fade = clamp((p - 0.2) / 0.3, 0, 1);
+      for (const ch of chips) {
+        const x = Math.round(ch.x), y = Math.round(ch.y);
+        if (ch.state === 3) {
+          ctx.globalAlpha = 1;
+          if (flash) { ctx.fillStyle = (ch.pass ? INK : FAIL) + '1)'; ctx.fillRect(x, y, ch.w, ch.h); }
+          else if (fade < 1) { ctx.strokeStyle = (ch.pass ? INK : FAIL) + (0.6 * (1 - fade)) + ')'; ctx.strokeRect(x + 0.5, y + 0.5, ch.w - 1, ch.h - 1); }
+          continue;
+        }
+        const documentY = y + scrollY;
+        ctx.globalAlpha = textRects.some(r => x + ch.w > r.left && x < r.right && documentY + ch.h > r.top && documentY < r.bottom) ? .16 : 1;
+        if (ch.state === 2) {
+          ctx.fillStyle = (ch.pass ? INK : FAIL) + '1)';
+          ctx.fillRect(x, y, ch.w, ch.h);
+        } else if (ch.state === 0 && ch.near) {
+          ctx.fillStyle = INK + '0.22)';
+          ctx.fillRect(x, y, ch.w, ch.h);
+          ctx.strokeStyle = INK + '0.7)';
+          ctx.strokeRect(x + 0.5, y + 0.5, ch.w - 1, ch.h - 1);
+        } else {
+          ctx.strokeStyle = ch.state === 1 ? (ch.pass ? INK + '0.6)' : FAIL + '0.8)') : INK + '0.22)';
+          ctx.strokeRect(x + 0.5, y + 0.5, ch.w - 1, ch.h - 1);
+        }
+      }
+      ctx.globalAlpha = 1;
+      // The new record: two blinks, then solid with a glow that swells and settles.
+      if (commit) {
+        const on = p >= 0.3 && !(p >= 0.36 && p < 0.42) && !(p >= 0.48 && p < 0.54);
+        if (on) {
+          const glow = Math.sin(Math.PI * clamp((p - 0.42) / 0.58, 0, 1));
+          ctx.save();
+          ctx.shadowColor = INK + (0.9 * glow) + ')'; ctx.shadowBlur = 22 * glow;
+          ctx.fillStyle = INK + '1)';
+          ctx.fillRect(commit.to.x, commit.to.y, REC.w, REC.h);
+          ctx.restore();
+        }
+      }
+      // Stored runs. When the column is full the floor gives way and the bars fall, lowest first.
+      ctx.fillStyle = INK + '1)';
+      for (let i = 0; i < records; i++) {
+        const r = recordAt(i);
+        const fall = drop ? 1300 * Math.max(0, drop.t - i * 0.03) ** 2 : 0;
+        ctx.fillRect(r.x, r.y + fall, REC.w, REC.h);
+      }
+      if (records) {
+        ctx.font = '400 11px Inter, system-ui, sans-serif';
+        ctx.textAlign = 'right'; ctx.fillStyle = GREY + (drop ? Math.max(0, 1 - drop.t * 2).toFixed(3) : '1') + ')';
+        ctx.fillText(`${records} ${records === 1 ? 'run' : 'runs'} stored`, W - 20, H - 48);
+      }
+      // Counters under the stacks, then the run id, and the hint until the field has been used.
+      const base = H - 34, foot = H - 18;
+      ctx.textBaseline = 'alphabetic';
+      ctx.textAlign = 'left';
+      ctx.font = '500 12px Inter, system-ui, sans-serif';
+      ctx.fillStyle = FAIL + '1)';
+      const failText = `${count.fail} failed`;
+      ctx.fillText(failText, failX, base);
+      ctx.fillStyle = INK + '1)';
+      ctx.fillText(`${count.pass} passed`, Math.max(passX, failX + ctx.measureText(failText).width + 10), base);
+      ctx.font = '400 12px Inter, system-ui, sans-serif';
+      ctx.fillStyle = GREY + '1)';
+      ctx.fillText(`run ${String(runId).padStart(4, '0')} · ${RUN} cases`, failX, foot);
+      if (hint > 0 && !reduced.matches) {
+        ctx.font = '400 12px Inter, system-ui, sans-serif';
+        ctx.fillStyle = GREY + hint.toFixed(3) + ')';
+        ctx.fillText(HINT, gateX + 10, topPad + 12);
+      }
+    }
+
+    function frame(now) {
+      if (!running) return;
+      const dt = Math.min((now - last) / 1000, 0.05); last = now;
+      step(dt); draw();
+      raf = requestAnimationFrame(frame);
+    }
+
+    function update() {
+      const want = !document.hidden && !reduced.matches && !narrow;
+      if (want && !running) { running = true; last = performance.now(); raf = requestAnimationFrame(frame); }
+      if (!want && running) { running = false; cancelAnimationFrame(raf); }
+      if (!want && !narrow) draw();                   // one settled frame for reduced motion or a hidden tab
+    }
+
+    addEventListener('pointermove', e => {
+      mouse.x = e.clientX; mouse.y = e.clientY;
+      inField = e.clientX > gateX + 20 && e.clientY > topPad - 20 && !e.target.closest('a, button, input');
+      document.body.style.cursor = inField && !narrow ? 'crosshair' : '';
+    });
+    addEventListener('pointerleave', () => { mouse.x = mouse.y = -1e4; inField = false; });
+    addEventListener('pointerdown', e => {
+      if (!inField) return;
+      burst(e.clientX, e.clientY);
+      fieldT = Math.max(fieldT, 2.5);
+    });
+    addEventListener('themechange', () => { palette(); draw(); });
+    document.addEventListener('visibilitychange', update);
+    reduced.addEventListener('change', update);
+    let rt; addEventListener('resize', () => { clearTimeout(rt); rt = setTimeout(() => { layout(); update(); }, 120); });
+    if (document.fonts) document.fonts.ready.then(() => { if (!narrow) { measureText(); draw(); } });
+
+    palette();
+    layout();
+    update();
+  })();
+</script>
+</body>
+</html>

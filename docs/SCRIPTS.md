@@ -1,5 +1,14 @@
 # Package scripts
 
+The marketing site commands run from the root with `bun run --cwd packages/site <name>`.
+
+| Name        | Package        | What it does                                                 |
+| ----------- | -------------- | ------------------------------------------------------------ |
+| `dev`       | `@attest/site` | Serves the authored landing page at `http://127.0.0.1:8735`. |
+| `build`     | `@attest/site` | Copies the unchanged landing page into `dist/index.html`.    |
+| `preview`   | `@attest/site` | Serves the built landing page at `http://127.0.0.1:8735`.    |
+| `typecheck` | `@attest/site` | Type-checks the site build and preview scripts.              |
+
 | Name               | Package               | What it does                                                         |
 | ------------------ | --------------------- | -------------------------------------------------------------------- |
 | `build`            | root                  | Runs each package build task through Turborepo.                      |

@@ -1,0 +1,12 @@
+{
+  "name": "@attest/site",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "bun --watch src/serve.ts",
+    "build": "bun src/build.ts",
+    "preview": "bun src/serve.ts --built",
+    "typecheck": "tsc --noEmit"
+  }
+}
