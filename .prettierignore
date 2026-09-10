@@ -14,3 +14,5 @@ docs/attest-foundation.html
 docs/scout-stack-report.md
 conformance/fixtures/
 packages/schemas/generated/*.json
+# Preserve the approved marketing HTML exactly as supplied.
+packages/site/index.html

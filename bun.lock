@@ -83,6 +83,10 @@
         "@types/bun": "^1.4.0",
       },
     },
+    "packages/site": {
+      "name": "@attest/site",
+      "version": "0.0.0",
+    },
     "packages/web": {
       "name": "@attest/web",
       "version": "0.0.0",
@@ -121,6 +125,8 @@
     "@attest/core": ["@attest/core@workspace:packages/core"],
 
     "@attest/schemas": ["@attest/schemas@workspace:packages/schemas"],
+
+    "@attest/site": ["@attest/site@workspace:packages/site"],
 
     "@attest/web": ["@attest/web@workspace:packages/web"],
 
