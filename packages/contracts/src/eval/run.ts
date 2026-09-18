@@ -6,6 +6,7 @@ import {
   resourceIdSchema,
   sha256Schema,
 } from '../project/shared.js';
+import { evalExecutionConfigSchema } from '../project/eval-execution.js';
 import { COMMAND_REQUEST_SCHEMA_ID, EVAL_RUN_SCHEMA_ID } from '../schema/identifiers.js';
 
 const evalOutputModeSchema = z.enum(['human', 'json', 'jsonl']);
@@ -114,6 +115,7 @@ const evalRunEffectiveCommandSchema = z.strictObject({
     timeout_ms: durationMillisecondsSchema,
     output: evalOutputModeSchema,
     watch: z.boolean(),
+    execution: evalExecutionConfigSchema.optional(),
     baseline_run_id: evalRunIdSchema.optional(),
     junit_path: z.string().min(1).optional(),
   }),

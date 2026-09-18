@@ -38,6 +38,7 @@ const diagnosticsSchema = z.object({
   httpStatus: z.number().int().optional(),
   remoteJobId: z.union([z.string(), z.number().finite()]).optional(),
   unreapedProcessIds: z.array(z.number().int().positive()).optional(),
+  lifecycleError: z.string().max(4096).optional(),
 });
 const attemptBase = {
   diagnostics: diagnosticsSchema,

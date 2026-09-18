@@ -23,6 +23,10 @@ const validateResolvedPlan = (
   if (!Number.isInteger(concurrency) || concurrency < 1) {
     return 'Resolved eval concurrency must be a positive integer.';
   }
+  const workerCount = run.effective_command.resolved.execution?.workers?.count;
+  if (workerCount !== undefined && workerCount !== concurrency) {
+    return 'Resolved eval worker count must equal resolved concurrency.';
+  }
   const selectedCases = run.snapshot.selected_cases;
   if (selectedCases.length !== plan.cases.length) {
     return 'Resolved case count does not match the immutable eval snapshot.';
@@ -46,6 +50,13 @@ const validateResolvedPlan = (
       (!Number.isInteger(resolvedCase.test_concurrency) || resolvedCase.test_concurrency < 1)
     ) {
       return `Resolved test concurrency at configured index ${String(index)} must be a positive integer.`;
+    }
+    if (
+      workerCount !== undefined &&
+      resolvedCase.test_concurrency !== undefined &&
+      resolvedCase.test_concurrency !== workerCount
+    ) {
+      return `Resolved test concurrency at configured index ${String(index)} must equal the worker count.`;
     }
   }
   return undefined;

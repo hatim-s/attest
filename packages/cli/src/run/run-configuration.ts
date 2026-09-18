@@ -160,7 +160,7 @@ const runConfiguration = async (
       payload,
     })),
   };
-  const runner = createEvalCaseRunner(project.root, store.cache);
+  const runner = createEvalCaseRunner(project.root, store.cache, run);
   void (async () => {
     let canReleaseCancellationOwnership = false;
     try {

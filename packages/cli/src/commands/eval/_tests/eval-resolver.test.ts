@@ -212,6 +212,23 @@ const captureCliError = (operation: () => unknown): AttestCliError => {
 };
 
 describe('eval resolver', () => {
+  it('rejects shared session agents when local worker directories are configured', () => {
+    const project = createProject();
+    project.project.defaults = {
+      eval: { workers: { count: 4, directory: 'workers/{run_id}/{worker_index}' } },
+    };
+    project.agents[0]!.transport = {
+      kind: 'jsonl_bridge',
+      lifecycle: 'per_run',
+      argv: ['node', './agent.mjs'],
+      concurrency: 'multiplexed',
+      cancellation_grace_ms: 1000,
+    };
+    expect(() => resolveEvalRun(refreshHashes(project), request(), options)).toThrow(
+      'Eval worker directories require native_cli agents.',
+    );
+  });
+
   it('expands direct and dataset cases with stable configured indexes and selected hashes', () => {
     const project = createProject();
     const resolved = resolveEvalRun(project, request(), options);

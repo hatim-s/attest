@@ -91,6 +91,27 @@
       "timeout_ms": 60000,
       "output": "jsonl",
       "watch": false,
+      "execution": {
+        "workers": {
+          "count": 4,
+          "directory": ".attest/runs/{run_id}/workers/{worker_index}"
+        },
+        "hooks": {
+          "before_run": {
+            "argv": ["node", "scripts/prepare-run.mjs"],
+            "timeout_ms": 30000
+          },
+          "before_case": {
+            "argv": ["node", "scripts/prepare-case.mjs"]
+          },
+          "after_case": {
+            "argv": ["node", "scripts/archive-case.mjs"]
+          },
+          "after_run": {
+            "argv": ["node", "scripts/archive-run.mjs"]
+          }
+        }
+      },
       "baseline_run_id": "01ARZ3NDEKTSV4RRFFQ69G5FAA",
       "junit_path": "artifacts/refund.xml"
     }

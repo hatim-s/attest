@@ -5,6 +5,7 @@ import { testCaseSchema } from './resources/case.js';
 import { datasetResourceSchema } from './resources/dataset.js';
 import { metricResourceSchema } from './resources/metric.js';
 import { testResourceSchema } from './resources/test.js';
+import { evalExecutionConfigSchema } from './eval-execution.js';
 import {
   durationMillisecondsSchema,
   projectIdSchema,
@@ -48,6 +49,7 @@ const projectDefaultsSchema = z.strictObject({
   concurrency: z.number().int().positive().optional(),
   output_cap_bytes: z.number().int().positive().optional(),
   eval_timeout_ms: durationMillisecondsSchema.optional(),
+  eval: evalExecutionConfigSchema.optional(),
 });
 
 /** Reports a path when a manifest entry does not use the canonical inspectable layout. */

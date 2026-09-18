@@ -151,6 +151,12 @@ describe('immutable eval run metadata contract', () => {
       timeout_ms: 60_000,
       output: 'jsonl',
       watch: false,
+      execution: {
+        workers: {
+          count: 4,
+          directory: '.attest/runs/{run_id}/workers/{worker_index}',
+        },
+      },
     });
     expect(compileGeneratedSchema('eval-run.json')(fixture)).toBe(true);
     expectTypeOf(parsed).toMatchTypeOf<EvalRun>();
@@ -191,17 +197,20 @@ describe('eval event conformance and sequencing', () => {
     expectTypeOf(stream).toMatchTypeOf<EvalEventStream>();
   });
 
-  it('rejects nondeterministic sequence, start-order drift, and a non-final result', async () => {
+  it('rejects nondeterministic sequence, duplicate configured indexes, and a non-final result', async () => {
     const events = evalEventStreamSchema.parse(await readJsonlFixture('eval-run/events.jsonl'));
     const badSequence = events.map((event) => ({ ...event }));
     badSequence[3] = { ...badSequence[3]!, sequence: 9 };
-    const badStartOrder = events.map((event) => ({ ...event }));
-    const secondStart = badStartOrder[2];
+    const duplicateStartIndex = events.map((event) => ({ ...event }));
+    const secondStart = duplicateStartIndex[2];
     if (secondStart?.event !== 'case_started') throw new Error('Golden case-start event drifted.');
-    badStartOrder[2] = { ...secondStart, data: { ...secondStart.data, configured_index: 0 } };
+    duplicateStartIndex[2] = {
+      ...secondStart,
+      data: { ...secondStart.data, configured_index: 0 },
+    };
 
     expect(evalEventStreamSchema.safeParse(badSequence).success).toBe(false);
-    expect(evalEventStreamSchema.safeParse(badStartOrder).success).toBe(false);
+    expect(evalEventStreamSchema.safeParse(duplicateStartIndex).success).toBe(false);
     expect(evalEventStreamSchema.safeParse(events.slice(0, -1)).success).toBe(false);
   });
 

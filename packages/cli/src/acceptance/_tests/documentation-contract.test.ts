@@ -412,8 +412,12 @@ const createPackedCli = async (): Promise<PackedCliRuntime> => {
       '--production',
       '--ignore-scripts',
       '--no-save',
-      // The frozen repository install primes Bun's cache; offline mode forbids registry access.
-      '--offline',
+      '--linker',
+      'hoisted',
+      '--backend',
+      'copyfile',
+      // Prefer the cache primed by the frozen repository install, but allow a clean runner to fetch.
+      '--prefer-offline',
     ],
     { cwd: runtime, timeout: 120_000 },
   );

@@ -13,6 +13,7 @@ import {
 } from '../project/manifest.js';
 import { testResourceSchema, type TestResource } from '../project/resources/test.js';
 import { relativePathSchema } from '../project/shared.js';
+import { evalExecutionConfigSchema, type EvalExecutionConfig } from '../project/eval-execution.js';
 import {
   AGENT_RESOURCE_SCHEMA_ID,
   CASE_SCHEMA_ID,
@@ -77,6 +78,20 @@ const project: ProjectManifest = {
   schema: PROJECT_SCHEMA_ID,
   project_id: '01ARZ3NDEKTSV4RRFFQ69G5FAV',
   name: 'support',
+  defaults: {
+    eval: {
+      workers: {
+        count: 4,
+        directory: '.attest/runs/{run_id}/workers/{worker_index}',
+      },
+      hooks: {
+        before_run: { argv: ['node', 'scripts/prepare-run.mjs'], timeout_ms: 30_000 },
+        before_case: { argv: ['node', 'scripts/prepare-case.mjs'] },
+        after_case: { argv: ['node', 'scripts/archive-case.mjs'] },
+        after_run: { argv: ['node', 'scripts/archive-run.mjs'] },
+      },
+    },
+  },
   resources: {
     agents: [
       {
@@ -208,6 +223,32 @@ describe('authored resource contracts', () => {
         ['tests', 0, 'datasets', 0, 'dataset_id'],
       ]),
     );
+  });
+});
+
+describe('eval execution defaults contract', () => {
+  const execution = project.defaults?.eval;
+
+  it('accepts strict worker isolation and every lifecycle hook', () => {
+    expect(execution).toBeDefined();
+    expect(evalExecutionConfigSchema.safeParse(execution).success).toBe(true);
+    expectTypeOf(execution).toMatchTypeOf<EvalExecutionConfig | undefined>();
+  });
+
+  it.each([
+    { workers: { count: 0, directory: 'work/{worker_index}' } },
+    { workers: { count: 2.5, directory: 'work/{worker_index}' } },
+    { workers: { count: 2, directory: '/tmp/work/{worker_index}' } },
+    { workers: { count: 2, directory: 'work/../{worker_index}' } },
+    { workers: { count: 2, directory: 'work/{case_id}' } },
+    { workers: { count: 1, directory: '.' } },
+    { workers: { count: 1, directory: './.' } },
+    { hooks: { before_run: { argv: [] } } },
+    { hooks: { before_case: { argv: [''] } } },
+    { hooks: { after_case: { argv: ['node'], timeout_ms: 0 } } },
+    { hooks: { after_run: { argv: ['node'], shell: true } } },
+  ])('rejects invalid or unknown eval execution fields in %#', (candidate) => {
+    expect(evalExecutionConfigSchema.safeParse(candidate).success).toBe(false);
   });
 });
 

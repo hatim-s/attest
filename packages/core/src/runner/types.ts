@@ -28,6 +28,8 @@ type InvokeOptions = {
   httpHeaders?: Record<string, string>;
   /** Fresh per-attempt directory the CLI transport uses as cwd; owned by the invoker. */
   workingDirectory?: string;
+  /** Uses workingDirectory itself as cwd and preserves its contents for lifecycle hooks. */
+  preserveWorkingDirectory?: boolean;
   /**
    * SIGTERM→SIGKILL grace window in milliseconds (spec: 5 000). Overridable so
    * kill-escalation tests do not wait out the full production grace period.
@@ -51,6 +53,8 @@ type InvocationDiagnostics = {
   remoteJobId?: string | number;
   /** Snapshotted descendants that survived SIGKILL verification, if any (best-effort containment). */
   unreapedProcessIds?: number[];
+  /** Bounded post-case lifecycle failure retained without discarding invocation evidence. */
+  lifecycleError?: string;
 };
 
 /**

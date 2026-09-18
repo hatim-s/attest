@@ -51,6 +51,7 @@ const createPlan = (
     concurrency?: number;
     testConcurrency?: number;
     timeoutMs?: number;
+    workers?: number;
   } = {},
 ): ResolvedEvalPlan<string> => {
   const selectedCases = caseIds.map((caseId, configuredIndex) => ({
@@ -91,6 +92,16 @@ const createPlan = (
         timeout_ms: timeoutMs,
         output: 'jsonl',
         watch: false,
+        ...(options.workers === undefined
+          ? {}
+          : {
+              execution: {
+                workers: {
+                  count: options.workers,
+                  directory: '.attest/runs/{run_id}/workers/{worker_index}',
+                },
+              },
+            }),
         ...(baselineRunId === undefined ? {} : { baseline_run_id: baselineRunId }),
         ...(junitPath === undefined ? {} : { junit_path: junitPath }),
       },
@@ -318,7 +329,68 @@ describe('executeResolvedEvalPlan', () => {
     expect(Object.isFrozen(result.run)).toBe(true);
     expect(Object.isFrozen(result.run.snapshot)).toBe(true);
     expect(persistence.recordCase).toHaveBeenCalledTimes(3);
+    expect(executeCase.mock.calls.map(([, , , context]) => context.worker_index)).toEqual([
+      0, 1, 1,
+    ]);
     expect(cleanup).toHaveBeenCalledOnce();
+  });
+
+  it('runs balanced contiguous batches concurrently and each worker batch sequentially', async () => {
+    const caseIds = Array.from({ length: 7 }, (_, index) => `case-${String(index)}`);
+    const plan = createPlan(caseIds, { concurrency: 3, workers: 3 });
+    const pending = new Map<string, Deferred<ReturnType<typeof completedExecution>>>();
+    const starts: { caseId: string; workerIndex: number }[] = [];
+    const runner: EvalCaseRunner<string> = {
+      executeCase: async (_runId, resolvedCase, _signal, context) => {
+        starts.push({ caseId: resolvedCase.case_id, workerIndex: context.worker_index });
+        const completion = deferred<ReturnType<typeof completedExecution>>();
+        pending.set(resolvedCase.case_id, completion);
+        return completion.promise;
+      },
+    };
+    const persistence = createPersistence();
+    const execution = executeResolvedEvalPlan(plan, runner, persistence.adapter, {
+      now: createClock(),
+    });
+    const complete = (configuredIndex: number): void => {
+      const resolvedCase = plan.cases[configuredIndex]!;
+      pending
+        .get(resolvedCase.case_id)!
+        .resolve(completedExecution(resolvedCase, [passingMetric()]));
+    };
+
+    await vi.waitFor(() =>
+      expect(starts).toEqual([
+        { caseId: 'case-0', workerIndex: 0 },
+        { caseId: 'case-3', workerIndex: 1 },
+        { caseId: 'case-5', workerIndex: 2 },
+      ]),
+    );
+    complete(3);
+    await vi.waitFor(() => expect(starts.at(-1)).toEqual({ caseId: 'case-4', workerIndex: 1 }));
+    expect(starts.some(({ caseId }) => caseId === 'case-1')).toBe(false);
+    complete(5);
+    await vi.waitFor(() => expect(starts.at(-1)).toEqual({ caseId: 'case-6', workerIndex: 2 }));
+    complete(4);
+    complete(6);
+    complete(0);
+    await vi.waitFor(() => expect(starts.at(-1)).toEqual({ caseId: 'case-1', workerIndex: 0 }));
+    complete(1);
+    await vi.waitFor(() => expect(starts.at(-1)).toEqual({ caseId: 'case-2', workerIndex: 0 }));
+    complete(2);
+
+    const result = await execution;
+    expect(starts).toEqual([
+      { caseId: 'case-0', workerIndex: 0 },
+      { caseId: 'case-3', workerIndex: 1 },
+      { caseId: 'case-5', workerIndex: 2 },
+      { caseId: 'case-4', workerIndex: 1 },
+      { caseId: 'case-6', workerIndex: 2 },
+      { caseId: 'case-1', workerIndex: 0 },
+      { caseId: 'case-2', workerIndex: 0 },
+    ]);
+    expect(result).toMatchObject({ status: 'completed', exit_code: 0 });
+    expect(evalEventStreamSchema.safeParse(result.events).success).toBe(true);
   });
 
   it('enforces the resolved per-test concurrency cap inside the global pool', async () => {
@@ -424,6 +496,28 @@ describe('executeResolvedEvalPlan', () => {
     });
     expect(persistence.finalizeRun).toHaveBeenCalledWith(RUN_ID, 'failed', result.summary);
     expect(evalEventStreamSchema.safeParse(result.events).success).toBe(true);
+  });
+
+  it('retains ownership when after_run reports uncertain hook cleanup', async () => {
+    const plan = createPlan(['case-zero']);
+    const cleanupError = Object.assign(new Error('hook child may still be live'), {
+      cleanupConfirmed: false,
+    });
+    const runner: EvalCaseRunner<string> = {
+      executeCase: (_runId, resolvedCase) =>
+        Promise.resolve(completedExecution(resolvedCase, [passingMetric()])),
+      afterRun: () => Promise.reject(cleanupError),
+    };
+
+    const result = await executeResolvedEvalPlan(plan, runner, createPersistence().adapter, {
+      now: createClock(),
+    });
+
+    expect(result).toMatchObject({
+      status: 'failed',
+      exit_code: 4,
+      can_release_cancellation_ownership: false,
+    });
   });
 
   it('retries failed cancellation finalization as failed and retains ownership if it persists', async () => {
