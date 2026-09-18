@@ -360,7 +360,20 @@ const resolveEvalRun = (
     'Default eval timeout',
   );
   const projectConcurrency = project.project.defaults?.concurrency ?? defaultConcurrency;
-  const concurrency = request.concurrency ?? projectConcurrency;
+  const execution = project.project.defaults?.eval;
+  const workerCount = execution?.workers?.count;
+  if (
+    workerCount !== undefined &&
+    request.concurrency !== undefined &&
+    request.concurrency !== workerCount
+  ) {
+    throw new AttestCliError(
+      'cli_usage',
+      '`--concurrency` must equal the configured eval worker count.',
+      { details: { concurrency: request.concurrency, worker_count: workerCount } },
+    );
+  }
+  const concurrency = workerCount ?? request.concurrency ?? projectConcurrency;
   const timeoutMs =
     request.timeout_ms ?? project.project.defaults?.eval_timeout_ms ?? defaultTimeoutMs;
   const agentsById = new Map(project.agents.map((agent) => [agent.id, agent]));
@@ -382,7 +395,18 @@ const resolveEvalRun = (
         { details: { agent_id: test.agent_id, test_id: test.id } },
       );
     }
-    const testConcurrency = request.concurrency ?? test.defaults?.concurrency ?? projectConcurrency;
+    if (workerCount !== undefined && agent.transport.kind !== 'native_cli') {
+      throw new AttestCliError(
+        'project_invalid',
+        'Eval worker directories require native_cli agents.',
+        {
+          path: `/agents/${agent.id}/transport/kind`,
+          hint: 'Use a native_cli agent, or omit workers to use lifecycle hooks with this transport.',
+        },
+      );
+    }
+    const testConcurrency =
+      workerCount ?? request.concurrency ?? test.defaults?.concurrency ?? projectConcurrency;
     selectedTests.push({ agent, concurrency: testConcurrency, test });
 
     expandTestCases(test, datasetsById).forEach((expanded) => {
@@ -475,6 +499,7 @@ const resolveEvalRun = (
       timeout_ms: timeoutMs,
       output: request.output,
       watch: 'watch' in request ? (request.watch ?? false) : false,
+      ...(execution === undefined ? {} : { execution }),
       ...(request.baseline_run_id === undefined
         ? {}
         : { baseline_run_id: request.baseline_run_id }),

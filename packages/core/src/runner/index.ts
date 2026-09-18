@@ -1,6 +1,12 @@
 export { AgentInvocationError, type InvocationErrorCode } from './errors.js';
 export { invokeAgent } from './invoke.js';
 export {
+  killProcessTree,
+  listDescendantProcesses,
+  spawnInProcessGroup,
+  type ProcessIdentity,
+} from './internal/process-tree.js';
+export {
   invokeMappedHttpAgent,
   redactEventEvidence,
   redactTransportText,

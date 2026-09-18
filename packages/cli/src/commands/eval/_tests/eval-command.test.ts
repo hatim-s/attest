@@ -578,7 +578,7 @@ describe('eval output and sequencing', () => {
     expect(stream.map(({ event }) => event)).toEqual(['run_started', 'run_completed', 'result']);
     expect(stream.at(-2)).toMatchObject({
       event: 'run_completed',
-      data: { status: 'failed', summary: { total_cases: 2, error_cases: 2 } },
+      data: { status: 'failed', summary: { total_cases: 0, error_cases: 0 } },
     });
     expect(stream.at(-1)).toMatchObject({ event: 'result', data: { exit_code: 4 } });
     expect(harness.exitCode()).toBe(4);

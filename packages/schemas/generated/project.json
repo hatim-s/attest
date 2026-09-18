@@ -11,6 +11,136 @@
           "maximum": 9007199254740991,
           "type": "integer"
         },
+        "eval": {
+          "additionalProperties": false,
+          "properties": {
+            "hooks": {
+              "additionalProperties": false,
+              "properties": {
+                "after_case": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "argv": {
+                      "items": {
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "minItems": 1,
+                      "type": "array"
+                    },
+                    "timeout_ms": {
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991,
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "argv"
+                  ],
+                  "type": "object"
+                },
+                "after_run": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "argv": {
+                      "items": {
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "minItems": 1,
+                      "type": "array"
+                    },
+                    "timeout_ms": {
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991,
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "argv"
+                  ],
+                  "type": "object"
+                },
+                "before_case": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "argv": {
+                      "items": {
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "minItems": 1,
+                      "type": "array"
+                    },
+                    "timeout_ms": {
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991,
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "argv"
+                  ],
+                  "type": "object"
+                },
+                "before_run": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "argv": {
+                      "items": {
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "minItems": 1,
+                      "type": "array"
+                    },
+                    "timeout_ms": {
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991,
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "argv"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "object"
+            },
+            "workers": {
+              "additionalProperties": false,
+              "properties": {
+                "count": {
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991,
+                  "type": "integer"
+                },
+                "directory": {
+                  "allOf": [
+                    {
+                      "pattern": "^(?![A-Za-z]:)"
+                    },
+                    {
+                      "pattern": "^(?![\\\\/])(?!(?:.*[\\\\/])?\\.\\.(?:[\\\\/]|$)).+$"
+                    },
+                    {
+                      "pattern": "^(?:[^{}]|\\{(?:run_id|worker_index)\\})+$"
+                    }
+                  ],
+                  "minLength": 1,
+                  "type": "string"
+                }
+              },
+              "required": [
+                "count",
+                "directory"
+              ],
+              "type": "object"
+            }
+          },
+          "type": "object"
+        },
         "eval_timeout_ms": {
           "exclusiveMinimum": 0,
           "maximum": 9007199254740991,

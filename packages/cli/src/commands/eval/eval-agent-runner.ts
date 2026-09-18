@@ -1,6 +1,11 @@
 import { performance } from 'node:perf_hooks';
 
-import { AGENT_PROTOCOL, type AgentRequest, type AgentResponse } from '@attest/contracts';
+import {
+  AGENT_PROTOCOL,
+  type AgentRequest,
+  type AgentResponse,
+  type EvalRun,
+} from '@attest/contracts';
 import {
   AgentInvocationError,
   invokeAgent,
@@ -23,6 +28,7 @@ import {
 } from '../agent/native-agent-adapter.js';
 import type { ResolvedEvalCaseInput } from './eval-resolver.js';
 import { createEvalMetricEvaluator } from './eval-metric-runner.js';
+import { createEvalLifecycle } from './eval-lifecycle.js';
 
 const DEFAULT_OUTPUT_CAP_BYTES = 10 * 1024 * 1024;
 const DEFAULT_TIMEOUT_MS = 60_000;
@@ -168,6 +174,7 @@ const invokeRuntime = async (
   request: AgentRequest,
   signal: AbortSignal,
   payload: ResolvedEvalCaseInput,
+  workerDirectory?: string,
 ): Promise<InvocationResult> => {
   if (runtime.kind === 'session') return runtime.session.invoke(request, signal);
   const { resolved } = runtime;
@@ -194,6 +201,9 @@ const invokeRuntime = async (
         retries: payload.agent.retry?.retries ?? 0,
         signal,
         timeoutMs: payload.attempt_timeout_ms ?? DEFAULT_TIMEOUT_MS,
+        ...(workerDirectory === undefined
+          ? {}
+          : { preserveWorkingDirectory: true, workingDirectory: workerDirectory }),
       });
   }
 };
@@ -202,9 +212,11 @@ const invokeRuntime = async (
 const createEvalCaseRunner = (
   projectRoot: string,
   cacheStore: CacheStore,
+  run: EvalRun,
 ): EvalCaseRunner<ResolvedEvalCaseInput> => {
   const runtimes = new Map<string, Promise<EvalAgentRuntime>>();
   const metricEvaluator = createEvalMetricEvaluator(projectRoot, cacheStore);
+  const lifecycle = createEvalLifecycle(projectRoot, run);
 
   const runtimeFor = (
     payload: ResolvedEvalCaseInput,
@@ -222,60 +234,96 @@ const createEvalCaseRunner = (
     runId: string,
     resolvedCase: Parameters<EvalCaseRunner<ResolvedEvalCaseInput>['executeCase']>[1],
     signal: AbortSignal,
+    context: { worker_index: number },
   ) => {
     const payload = resolvedCase.payload;
-    const request: AgentRequest = {
-      protocol: AGENT_PROTOCOL,
-      run_id: runId,
+    const hookContext = {
       case_id: payload.case_id,
-      input: payload.case.input,
-      ...(payload.case.params === undefined ? {} : { params: payload.case.params }),
+      test_id: payload.test_id,
+      worker_index: context.worker_index,
     };
-    const startedAt = new Date().toISOString();
-    const started = performance.now();
-    let runtime: EvalAgentRuntime | undefined;
-    let invocation: InvocationResult;
+    const workerDirectory = await lifecycle.prepareCase(hookContext);
     try {
-      runtime = await runtimeFor(payload, signal);
-      invocation = await invokeRuntime(runtime, request, signal, payload);
+      await lifecycle.beforeCase(hookContext, workerDirectory, signal);
+      const request: AgentRequest = {
+        protocol: AGENT_PROTOCOL,
+        run_id: runId,
+        case_id: payload.case_id,
+        input: payload.case.input,
+        ...(payload.case.params === undefined ? {} : { params: payload.case.params }),
+      };
+      const startedAt = new Date().toISOString();
+      const started = performance.now();
+      let runtime: EvalAgentRuntime | undefined;
+      let invocation: InvocationResult;
+      try {
+        runtime = await runtimeFor(payload, signal);
+        invocation = await invokeRuntime(runtime, request, signal, payload, workerDirectory);
+      } catch (error: unknown) {
+        invocation = startupFailure(error, performance.now() - started);
+      }
+      const redacted = redactInvocation(invocation, runtime?.resolved.secrets ?? []);
+      const common = {
+        attempts: redacted.attempts,
+        caseDefinition: payload.case,
+        caseId: payload.case_id,
+        diagnostics: redacted.diagnostics,
+        durationMs: performance.now() - started,
+        expectedMetrics: payload.metrics.map(({ metric }) => metric.id),
+        request: redactProbeValue(request, runtime?.resolved.secrets ?? []) as AgentRequest,
+        startedAt,
+        suiteName: payload.test_id,
+        warnings: redacted.warnings,
+      };
+      let execution: CaseExecution;
+      if (redacted.status === 'invocation_error') {
+        execution = {
+          ...common,
+          invocationError: redacted.error,
+          outcome: invocationOutcome(redacted),
+        };
+      } else if (redacted.report?.ok === true) {
+        execution = {
+          ...common,
+          outcome: 'completed',
+          response: redacted.report.value,
+          ...('trace' in redacted.report.value && redacted.report.value.trace !== undefined
+            ? { trace: redacted.report.value.trace }
+            : {}),
+          warnings: redacted.report.warnings,
+        };
+      } else {
+        throw new Error('Agent adapter returned an unvalidated successful response.');
+      }
+      const metrics = await metricEvaluator.evaluate(runId, payload, execution, signal);
+      const result: {
+        execution: CaseExecution;
+        metrics: typeof metrics;
+        lifecycle_error?: string;
+      } = { execution, metrics };
+      try {
+        return result;
+      } finally {
+        try {
+          await lifecycle.afterCase(hookContext, workerDirectory, execution.outcome);
+        } catch (error: unknown) {
+          result.lifecycle_error = (
+            error instanceof Error ? error.message : 'The after_case hook failed.'
+          ).slice(0, 4096);
+          execution.diagnostics = {
+            ...execution.diagnostics,
+            lifecycleError: result.lifecycle_error,
+          };
+        }
+      }
     } catch (error: unknown) {
-      invocation = startupFailure(error, performance.now() - started);
+      try {
+        await lifecycle.afterCase(hookContext, workerDirectory, 'infrastructure_error');
+      } catch (hookError: unknown) {
+        throw new AggregateError([error, hookError], 'Case execution and after_case hook failed.');
+      }
+      throw error;
     }
-    const redacted = redactInvocation(invocation, runtime?.resolved.secrets ?? []);
-    const common = {
-      attempts: redacted.attempts,
-      caseDefinition: payload.case,
-      caseId: payload.case_id,
-      diagnostics: redacted.diagnostics,
-      durationMs: performance.now() - started,
-      expectedMetrics: payload.metrics.map(({ metric }) => metric.id),
-      request: redactProbeValue(request, runtime?.resolved.secrets ?? []) as AgentRequest,
-      startedAt,
-      suiteName: payload.test_id,
-      warnings: redacted.warnings,
-    };
-    let execution: CaseExecution;
-    if (redacted.status === 'invocation_error') {
-      execution = {
-        ...common,
-        invocationError: redacted.error,
-        outcome: invocationOutcome(redacted),
-      };
-    } else if (redacted.report?.ok === true) {
-      execution = {
-        ...common,
-        outcome: 'completed',
-        response: redacted.report.value,
-        ...('trace' in redacted.report.value && redacted.report.value.trace !== undefined
-          ? { trace: redacted.report.value.trace }
-          : {}),
-        warnings: redacted.report.warnings,
-      };
-    } else {
-      throw new Error('Agent adapter returned an unvalidated successful response.');
-    }
-    const metrics = await metricEvaluator.evaluate(runId, payload, execution, signal);
-    return { execution, metrics };
   };
 
   /** Closes every started per-run transport and reports all cleanup failures together. */
@@ -294,10 +342,20 @@ const createEvalCaseRunner = (
     for (const result of closed) {
       if (result.status === 'rejected') failures.push(result.reason as unknown);
     }
+    try {
+      lifecycle.assertCleanup();
+    } catch (error: unknown) {
+      failures.push(error);
+    }
     if (failures.length > 0) throw new AggregateError(failures, 'Eval agent cleanup failed.');
   };
 
-  return { cleanup, executeCase };
+  return {
+    afterRun: (_runId, status, summary) => lifecycle.afterRun(status, summary),
+    beforeRun: (_runId, signal) => lifecycle.beforeRun(signal),
+    cleanup,
+    executeCase,
+  };
 };
 
 export { createEvalCaseRunner, redactInvocation };

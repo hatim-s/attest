@@ -173,7 +173,7 @@ const evalEventStreamSchema = z
 
     const runId = started.data.run_id;
     const startedCases = new Map<string, number>();
-    let lastConfiguredIndex = -1;
+    const startedIndexes = new Set<number>();
     let startedCaseCount = 0;
     let completionIndex = 0;
     let completedEvent: EvalRunCompletedEvent | undefined;
@@ -193,14 +193,14 @@ const evalEventStreamSchema = z
 
       if (event.event === 'case_started') {
         const key = caseKey(event.data.test_id, event.data.case_id);
-        if (event.data.configured_index <= lastConfiguredIndex || startedCases.has(key)) {
+        if (startedIndexes.has(event.data.configured_index) || startedCases.has(key)) {
           context.addIssue({
             code: 'custom',
             path: [index, 'data', 'configured_index'],
-            message: 'case starts must be unique and follow configured index order',
+            message: 'case starts must have unique identities and configured indexes',
           });
         }
-        lastConfiguredIndex = event.data.configured_index;
+        startedIndexes.add(event.data.configured_index);
         startedCases.set(key, event.data.configured_index);
         startedCaseCount += 1;
       }
@@ -244,8 +244,10 @@ const evalEventStreamSchema = z
 
     const summary = completedEvent.data.summary;
     const summaryCountsMatch =
-      summary.total_cases === started.data.total_cases &&
-      summary.passed_cases + summary.failed_cases + summary.error_cases === summary.total_cases;
+      summary.passed_cases + summary.failed_cases + summary.error_cases === summary.total_cases &&
+      (completedEvent.data.status === 'failed'
+        ? summary.total_cases === completionIndex
+        : summary.total_cases === started.data.total_cases);
     const caseLifecycleMatches =
       completedEvent.data.status === 'failed'
         ? startedCaseCount <= started.data.total_cases && completionIndex === startedCaseCount

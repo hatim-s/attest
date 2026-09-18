@@ -11,6 +11,7 @@ export type {
   DeepReadonly,
   EvalArtifactWriter,
   EvalBaselineAdapter,
+  EvalCaseExecutionContext,
   EvalCaseInfrastructureFailure,
   EvalCaseRecord,
   EvalCaseRunner,

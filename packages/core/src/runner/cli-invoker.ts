@@ -208,7 +208,14 @@ const captureInvocation = (
   };
 };
 
-const createAttemptDirectory = async (override: string | undefined): Promise<AttemptDirectory> => {
+const createAttemptDirectory = async (
+  override: string | undefined,
+  preserve: boolean,
+): Promise<AttemptDirectory> => {
+  if (override !== undefined && preserve) {
+    await mkdir(override, { recursive: true });
+    return { path: override, remove: false };
+  }
   return override === undefined
     ? { path: await mkdtemp(join(tmpdir(), 'attest-')), remove: true }
     : { path: await mkdtemp(join(override, 'attempt-')), remove: true };
@@ -272,7 +279,10 @@ const invokeCliAgent = async (
   options: CliInvokeOptions,
 ): Promise<InvocationAttempt> => {
   const duration = startTimer();
-  const attemptDirectory = await createAttemptDirectory(options.workingDirectory);
+  const attemptDirectory = await createAttemptDirectory(
+    options.workingDirectory,
+    options.preserveWorkingDirectory ?? false,
+  );
   let capture: InvocationCapture | undefined;
 
   try {

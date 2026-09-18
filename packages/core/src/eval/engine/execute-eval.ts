@@ -101,6 +101,7 @@ const executeResolvedEvalPlan = async <Payload, BaselineDiff = unknown>(
   });
 
   try {
+    await runner.beforeRun?.(run.run_id, runController.signal);
     const execution = await executeCases(
       run,
       plan.cases,
@@ -179,6 +180,26 @@ const executeResolvedEvalPlan = async <Payload, BaselineDiff = unknown>(
     } catch (retryError: unknown) {
       infrastructureErrors.push(
         safeErrorMessage(retryError, 'Eval run failure reconciliation failed.'),
+      );
+    }
+  }
+
+  try {
+    await runner.afterRun?.(run.run_id, status, summary);
+  } catch (error: unknown) {
+    // Cross-package hook errors expose cleanup certainty without coupling core to the CLI class.
+    if (error instanceof Error && 'cleanupConfirmed' in error && error.cleanupConfirmed === false) {
+      cleanupConfirmed = false;
+    }
+    infrastructureErrors.push(safeErrorMessage(error, 'The after_run hook failed.'));
+    status = 'failed';
+    try {
+      await persistence.finalizeRun(run.run_id, 'failed', summary);
+      finalizationConfirmed = true;
+    } catch (finalizeError: unknown) {
+      finalizationConfirmed = false;
+      infrastructureErrors.push(
+        safeErrorMessage(finalizeError, 'Eval hook failure finalization failed.'),
       );
     }
   }

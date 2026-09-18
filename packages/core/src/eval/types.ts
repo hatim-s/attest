@@ -106,13 +106,29 @@ type EvalCaseRecord<Payload = unknown> =
     };
 
 /** Runs one already-resolved case through the existing runner and metric result interfaces. */
+type EvalCaseExecutionContext = {
+  /** Identifies the stable worker directory or transient concurrency slot assigned to this case. */
+  worker_index: number;
+};
+
 type EvalCaseRunner<Payload = unknown> = {
+  beforeRun?(runId: string, signal: AbortSignal): Promise<void>;
   executeCase(
     runId: string,
     resolvedCase: ResolvedEvalCase<Payload>,
     signal: AbortSignal,
-  ): Promise<{ execution: CaseExecution; metrics: readonly MetricEvaluation[] }>;
+    context: EvalCaseExecutionContext,
+  ): Promise<{
+    execution: CaseExecution;
+    metrics: readonly MetricEvaluation[];
+    lifecycle_error?: string;
+  }>;
   cleanup?(runId: string): Promise<void>;
+  afterRun?(
+    runId: string,
+    status: 'completed' | 'failed' | 'cancelled',
+    summary: EvalRunSummary,
+  ): Promise<void>;
 };
 
 /**
@@ -191,6 +207,7 @@ export {
   type EvalArtifactWriter,
   type EvalBaselineAdapter,
   type EvalCaseInfrastructureFailure,
+  type EvalCaseExecutionContext,
   type EvalCaseRecord,
   type EvalCaseRunner,
   type EvalCaseVerdict,
