@@ -44,6 +44,16 @@ const projectRuntimeInvariants = {
     'Runtime-only invariants include canonical manifest paths, cross-resource references, duplicate identifiers, and resolved case-id collisions.',
 } satisfies JsonSchemaFragment;
 
+const agentRuntimeInvariants = {
+  $comment:
+    'Runtime-only invariants include polling status URL exclusivity, polling interval ordering, disjoint polling terminal values, and duplicate sandbox file and artifact destinations after platform-independent relative-path normalization.',
+} satisfies JsonSchemaFragment;
+
+const commandRequestRuntimeInvariants = {
+  $comment:
+    'Runtime-only invariants include canonical manifest paths, cross-resource references, duplicate identifiers, resolved case-id collisions, polling constraints, and duplicate sandbox destinations after platform-independent relative-path normalization.',
+} satisfies JsonSchemaFragment;
+
 const agentRequestInvariants = {
   $comment: sharedComment,
   dependentRequired: {
@@ -69,7 +79,7 @@ const CONTRACT_JSON_SCHEMAS = new Map<string, ContractJsonSchemaDefinition>([
   ['metric-request.json', { schema: metricRequestSchema, invariants: noAdditionalInvariants }],
   ['metric-result.json', { schema: metricResultSchema, invariants: noAdditionalInvariants }],
   ['project.json', { schema: projectManifestSchema, invariants: projectRuntimeInvariants }],
-  ['agent.json', { schema: agentResourceSchema, invariants: projectRuntimeInvariants }],
+  ['agent.json', { schema: agentResourceSchema, invariants: agentRuntimeInvariants }],
   ['test.json', { schema: testResourceSchema, invariants: projectRuntimeInvariants }],
   ['case.json', { schema: testCaseSchema, invariants: projectRuntimeInvariants }],
   ['dataset.json', { schema: datasetResourceSchema, invariants: projectRuntimeInvariants }],
@@ -79,7 +89,10 @@ const CONTRACT_JSON_SCHEMAS = new Map<string, ContractJsonSchemaDefinition>([
     'metric-test-fixture.json',
     { schema: metricTestFixtureSchema, invariants: noAdditionalInvariants },
   ],
-  ['command-request.json', { schema: commandRequestSchema, invariants: projectRuntimeInvariants }],
+  [
+    'command-request.json',
+    { schema: commandRequestSchema, invariants: commandRequestRuntimeInvariants },
+  ],
   ['eval-run-request.json', { schema: evalRunRequestSchema, invariants: noAdditionalInvariants }],
   ['eval-run.json', { schema: evalRunSchema, invariants: noAdditionalInvariants }],
   ['eval-event.json', { schema: evalEventSchema, invariants: noAdditionalInvariants }],

@@ -1,5 +1,5 @@
 {
-  "$comment": "Runtime-only invariants include canonical manifest paths, cross-resource references, duplicate identifiers, and resolved case-id collisions.",
+  "$comment": "Runtime-only invariants include canonical manifest paths, cross-resource references, duplicate identifiers, resolved case-id collisions, polling constraints, and duplicate sandbox destinations after platform-independent relative-path normalization.",
   "$defs": {
     "AgentResource": {
       "additionalProperties": false,
@@ -282,6 +282,127 @@
                 "lifecycle": {
                   "const": "per_case",
                   "type": "string"
+                },
+                "sandbox": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "artifact_directory": {
+                      "allOf": [
+                        {
+                          "pattern": "^(?![A-Za-z]:)"
+                        },
+                        {
+                          "pattern": "^(?![\\\\/])(?!(?:.*[\\\\/])?\\.\\.(?:[\\\\/]|$)).+$"
+                        }
+                      ],
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "artifacts": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "destination": {
+                            "allOf": [
+                              {
+                                "pattern": "^(?![A-Za-z]:)"
+                              },
+                              {
+                                "pattern": "^(?![\\\\/])(?!(?:.*[\\\\/])?\\.\\.(?:[\\\\/]|$)).+$"
+                              },
+                              {
+                                "pattern": "^[^*?\\[\\]{}]+$"
+                              }
+                            ],
+                            "minLength": 1,
+                            "type": "string"
+                          },
+                          "source": {
+                            "allOf": [
+                              {
+                                "pattern": "^(?![A-Za-z]:)"
+                              },
+                              {
+                                "pattern": "^(?![\\\\/])(?!(?:.*[\\\\/])?\\.\\.(?:[\\\\/]|$)).+$"
+                              },
+                              {
+                                "pattern": "^[^*?\\[\\]{}]+$"
+                              }
+                            ],
+                            "minLength": 1,
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "source",
+                          "destination"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "files": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "destination": {
+                            "allOf": [
+                              {
+                                "pattern": "^(?![A-Za-z]:)"
+                              },
+                              {
+                                "pattern": "^(?![\\\\/])(?!(?:.*[\\\\/])?\\.\\.(?:[\\\\/]|$)).+$"
+                              },
+                              {
+                                "pattern": "^[^*?\\[\\]{}]+$"
+                              }
+                            ],
+                            "minLength": 1,
+                            "type": "string"
+                          },
+                          "mode": {
+                            "maximum": 511,
+                            "minimum": 0,
+                            "type": "integer"
+                          },
+                          "source": {
+                            "allOf": [
+                              {
+                                "pattern": "^(?![A-Za-z]:)"
+                              },
+                              {
+                                "pattern": "^(?![\\\\/])(?!(?:.*[\\\\/])?\\.\\.(?:[\\\\/]|$)).+$"
+                              },
+                              {
+                                "pattern": "^[^*?\\[\\]{}]+$"
+                              }
+                            ],
+                            "minLength": 1,
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "source",
+                          "destination"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "image": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "kind": {
+                      "const": "vercel",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "files"
+                  ],
+                  "type": "object"
                 }
               },
               "required": [

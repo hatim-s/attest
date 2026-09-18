@@ -405,6 +405,22 @@ const resolveEvalRun = (
         },
       );
     }
+    if (
+      agent.transport.kind === 'native_cli' &&
+      agent.transport.sandbox !== undefined &&
+      (agent.transport.sandbox.artifacts?.length ?? 0) > 0 &&
+      workerCount === undefined &&
+      agent.transport.sandbox.artifact_directory === undefined
+    ) {
+      throw new AttestCliError(
+        'project_invalid',
+        'Sandbox artifacts require eval workers or artifact_directory.',
+        {
+          path: `/agents/${agent.id}/transport/sandbox/artifact_directory`,
+          hint: 'Configure eval workers or a project-relative artifact directory.',
+        },
+      );
+    }
     const testConcurrency =
       workerCount ?? request.concurrency ?? test.defaults?.concurrency ?? projectConcurrency;
     selectedTests.push({ agent, concurrency: testConcurrency, test });

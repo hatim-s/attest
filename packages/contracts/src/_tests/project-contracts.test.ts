@@ -256,6 +256,18 @@ describe('agent transport contract', () => {
   const transports: AgentResource['transport'][] = [
     agent.transport,
     {
+      kind: 'native_cli',
+      lifecycle: 'per_case',
+      argv: ['node', 'agent.mjs'],
+      sandbox: {
+        kind: 'vercel',
+        image: 'node:22',
+        files: [{ source: 'src/agent.mjs', destination: 'workspace/agent.mjs', mode: 0o755 }],
+        artifacts: [{ source: 'workspace/output.json', destination: 'artifacts/output.json' }],
+        artifact_directory: '.attest/artifacts',
+      },
+    },
+    {
       kind: 'background_cli',
       lifecycle: 'per_run',
       start_argv: ['node', 'server.mjs'],
@@ -325,6 +337,100 @@ describe('agent transport contract', () => {
 
   it.each(transports)('accepts the $kind transport definition', (transport) => {
     expect(agentResourceSchema.safeParse({ ...agent, transport }).success).toBe(true);
+  });
+
+  it('accepts a Vercel sandbox without uploads', () => {
+    const transport = {
+      kind: 'native_cli',
+      lifecycle: 'per_case',
+      argv: ['node', 'agent.mjs'],
+      sandbox: { kind: 'vercel', files: [], artifacts: [] },
+    };
+
+    expect(agentResourceSchema.safeParse({ ...agent, transport }).success).toBe(true);
+  });
+
+  it.each([
+    { kind: 'vercel', files: [{ source: '../agent.mjs', destination: 'agent.mjs' }] },
+    { kind: 'vercel', files: [{ source: 'agent.mjs', destination: '/agent.mjs' }] },
+    { kind: 'vercel', files: [{ source: 'agent.mjs', destination: 'agent.mjs', mode: 0o1000 }] },
+    { kind: 'vercel', image: '', files: [] },
+    { kind: 'vercel', files: [{ source: 'src/*.mjs', destination: 'agent.mjs' }] },
+    {
+      kind: 'vercel',
+      files: [
+        { source: 'src/agent.mjs', destination: 'agent.mjs' },
+        { source: 'src/helper.mjs', destination: 'agent.mjs' },
+      ],
+    },
+    {
+      kind: 'vercel',
+      files: [],
+      artifacts: [
+        { source: 'one.json', destination: 'output.json' },
+        { source: 'two.json', destination: 'output.json' },
+      ],
+    },
+    { kind: 'vercel', files: [], unexpected: true },
+  ])('rejects an invalid Vercel sandbox definition in %#', (sandbox) => {
+    const transport = {
+      kind: 'native_cli',
+      lifecycle: 'per_case',
+      argv: ['node', 'agent.mjs'],
+      sandbox,
+    };
+
+    expect(agentResourceSchema.safeParse({ ...agent, transport }).success).toBe(false);
+  });
+
+  it.each([
+    ['./output.json', 'output.json'],
+    ['artifacts//output.json', 'artifacts/output.json'],
+    ['artifacts\\output.json', 'artifacts/output.json'],
+    ['artifacts/./output.json', 'artifacts/output.json'],
+  ])('rejects aliased sandbox file destinations %s and %s', (first, second) => {
+    const transport = {
+      kind: 'native_cli',
+      lifecycle: 'per_case',
+      argv: ['node', 'agent.mjs'],
+      sandbox: {
+        kind: 'vercel',
+        files: [
+          { source: 'src/agent.mjs', destination: first },
+          { source: 'src/helper.mjs', destination: second },
+        ],
+      },
+    };
+
+    const result = agentResourceSchema.safeParse({ ...agent, transport });
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues).toContainEqual(
+      expect.objectContaining({ path: ['transport', 'sandbox', 'files', 1, 'destination'] }),
+    );
+  });
+
+  it('rejects aliased sandbox artifact destinations', () => {
+    const transport = {
+      kind: 'native_cli',
+      lifecycle: 'per_case',
+      argv: ['node', 'agent.mjs'],
+      sandbox: {
+        kind: 'vercel',
+        files: [],
+        artifacts: [
+          { source: 'one.json', destination: 'results\\output.json' },
+          { source: 'two.json', destination: 'results/output.json' },
+        ],
+      },
+    };
+
+    const result = agentResourceSchema.safeParse({ ...agent, transport });
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues).toContainEqual(
+      expect.objectContaining({ path: ['transport', 'sandbox', 'artifacts', 1, 'destination'] }),
+    );
   });
 
   it('accepts RFC 6901 redaction pointers to prototype-named JSON keys', () => {

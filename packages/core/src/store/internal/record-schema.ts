@@ -39,6 +39,9 @@ const diagnosticsSchema = z.object({
   remoteJobId: z.union([z.string(), z.number().finite()]).optional(),
   unreapedProcessIds: z.array(z.number().int().positive()).optional(),
   lifecycleError: z.string().max(4096).optional(),
+  sandboxError: z.string().max(4096).optional(),
+  sandboxCleanupConfirmed: z.boolean().optional(),
+  sandboxCompletionConfirmed: z.boolean().optional(),
 });
 const attemptBase = {
   diagnostics: diagnosticsSchema,

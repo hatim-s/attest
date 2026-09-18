@@ -38,7 +38,7 @@ Primary test surfaces: determinism, contract conformance, hostile process behavi
 
 Novel **only** where the wedge is: the contracts, agent-native eval semantics, run diffing, and report UX. Boring everywhere else — buy/vendor SQLite, YAML CST parsing, JSON Schema validation, HTTP, tables, charts.
 
-User executables are not sandboxed: agents and custom metrics are trusted project code. Controls instead: temp working directory, env-var allowlist, output caps, deadlines, full process-tree kill. Cloud never executes uploaded metrics in the control plane; future remote execution goes to isolated disposable workers.
+Local agents and custom metrics are trusted project code. Controls include a temp working directory, env-var allowlist, output caps, deadlines, and full process-tree kill. A `native_cli` agent may opt into a fresh remote Vercel Sandbox for each case with explicit file upload and artifact mappings. Custom metrics still run locally.
 
 ## De-risking prototypes (historical build-order rationale)
 

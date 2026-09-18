@@ -2,6 +2,7 @@
 export {
   AgentInvocationError,
   invokeAgent,
+  invokeVercelSandboxAgent,
   killProcessTree,
   listDescendantProcesses,
   invokeMappedHttpAgent,
@@ -20,6 +21,10 @@ export {
   type BackgroundAgentResource,
   type BackgroundSessionOptions,
   type InvocationResult,
+  type VercelSandboxCaseOptions,
+  type VercelSandboxFactory,
+  type VercelSandboxInvocation,
+  type VercelSandboxSdk,
   type NativeAgentTarget,
   type ProcessIdentity,
   type MappedHttpInvokeOptions,

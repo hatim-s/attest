@@ -158,12 +158,41 @@ const resolveNativeAgent = async (
     agent.transport.kind === 'jsonl_bridge'
   ) {
     const transport = agent.transport;
-    const cwd = await resolveProcessCwd(projectRoot, transport.cwd);
     const resolvedEnvironment = await resolveProcessEnvironment(
       transport.env,
       projectRoot,
       observer,
     );
+    if (transport.kind === 'native_cli' && transport.sandbox !== undefined) {
+      for (const position of agent.redaction?.argv_positions ?? []) {
+        const value = transport.argv[position];
+        if (value === undefined) {
+          throw new AttestCliError(
+            'project_invalid',
+            'An argv redaction position is out of range.',
+            {
+              path: `/agents/${agent.id}/redaction/argv_positions`,
+            },
+          );
+        }
+        resolvedEnvironment.secrets.push(value);
+      }
+      const sandboxEnvironment = Object.fromEntries(
+        Object.keys(transport.env ?? {}).flatMap((name) => {
+          const value = resolvedEnvironment.env[name];
+          return value === undefined ? [] : [[name, value]];
+        }),
+      );
+      return {
+        argv: [transport.argv[0]!, ...transport.argv.slice(1)],
+        ...(transport.cwd === undefined ? {} : { cwd: transport.cwd }),
+        env: sandboxEnvironment,
+        kind: 'vercel_sandbox',
+        sandbox: transport.sandbox,
+        secrets: resolvedEnvironment.secrets,
+      };
+    }
+    const cwd = await resolveProcessCwd(projectRoot, transport.cwd);
     const authoredArgv =
       transport.kind === 'background_cli' ? transport.start_argv : transport.argv;
     const argv = resolveProcessArgv(authoredArgv, cwd);

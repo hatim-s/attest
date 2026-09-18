@@ -217,6 +217,33 @@ const fixtures: ConformanceFixture[] = [
     valid: true,
   },
   {
+    name: 'current agent accepts a Vercel sandbox with no uploads',
+    fileName: 'agent.json',
+    candidate: {
+      ...validAgent,
+      transport: {
+        ...validAgent.transport,
+        sandbox: { kind: 'vercel', files: [], artifacts: [] },
+      },
+    },
+    valid: true,
+  },
+  {
+    name: 'current agent rejects an out-of-range sandbox file mode',
+    fileName: 'agent.json',
+    candidate: {
+      ...validAgent,
+      transport: {
+        ...validAgent.transport,
+        sandbox: {
+          kind: 'vercel',
+          files: [{ source: 'agent.mjs', destination: 'agent.mjs', mode: 0o1000 }],
+        },
+      },
+    },
+    valid: false,
+  },
+  {
     name: 'current agent rejects an invalid resource id',
     fileName: 'agent.json',
     candidate: { ...validAgent, id: 'Support Agent' },
@@ -403,6 +430,8 @@ const KNOWN_DIVERGENCES: Readonly<Record<string, string>> = {
     'Span ordering compares two parsed timestamps and remains a runtime-only invariant.',
   'project rejects a non-canonical resource path':
     'Canonical paths depend on the sibling resource id and remain a runtime-only invariant.',
+  'agent rejects aliased sandbox destinations':
+    'Destination uniqueness requires platform-independent relative-path normalization and remains a runtime-only invariant.',
 } as const;
 
 const divergenceFixtures: ConformanceFixture[] = [
@@ -429,6 +458,24 @@ const divergenceFixtures: ConformanceFixture[] = [
       resources: {
         ...validProject.resources,
         agents: [{ ...validProject.resources.agents[0], path: 'agents/support.json' }],
+      },
+    },
+    valid: false,
+  },
+  {
+    name: 'agent rejects aliased sandbox destinations',
+    fileName: 'agent.json',
+    candidate: {
+      ...validAgent,
+      transport: {
+        ...validAgent.transport,
+        sandbox: {
+          kind: 'vercel',
+          files: [
+            { source: 'src/agent.mjs', destination: './agent.mjs' },
+            { source: 'src/helper.mjs', destination: 'agent.mjs' },
+          ],
+        },
       },
     },
     valid: false,
@@ -476,6 +523,14 @@ describe('Zod and generated JSON Schema conformance', () => {
     expect(KNOWN_DIVERGENCES[name]).toBeTruthy();
     expect(getZodSchema(fileName).safeParse(candidate).success).toBe(false);
     expect(getJsonSchemaValidator(fileName)(candidate)).toBe(true);
+  });
+
+  it('publishes the sandbox destination runtime invariant', () => {
+    for (const fileName of ['agent.json', 'command-request.json']) {
+      const schema = JSON.parse(serializeContractSchema(fileName)) as { $comment?: string };
+      expect(schema.$comment).toContain('duplicate sandbox');
+      expect(schema.$comment).toContain('platform-independent relative-path normalization');
+    }
   });
 });
 

@@ -62,6 +62,7 @@ type AddOptions = MutationOptions & {
   requestIdPointer?: string;
   requestTemplate?: string;
   responsePointer?: string;
+  sandboxJson?: string;
   shutdownUrl?: string;
   stopTimeout?: string;
   streamFraming?: 'sse' | 'jsonl';
@@ -177,6 +178,7 @@ const registerAgentCommands = (context: RegisterAgentCommandsOptions): void => {
     .option('--name <name>', 'agent display name; defaults to the id')
     .option('--native-command <command>', 'native CLI command tokenized into an argv array')
     .option('--argv-json <json>', 'unambiguous native CLI argv JSON array')
+    .option('--sandbox-json <json>', 'Vercel sandbox JSON for a native CLI agent')
     .option('--native-http <url>', 'external native-envelope HTTP endpoint')
     .option('--background-command <command>', 'run-scoped background service command')
     .option('--jsonl-command <command>', 'run-scoped correlated JSONL bridge command')
@@ -276,6 +278,7 @@ const registerAgentCommands = (context: RegisterAgentCommandsOptions): void => {
         requestIdPointer: options.requestIdPointer,
         requestTemplate: options.requestTemplate,
         responsePointer: options.responsePointer,
+        sandboxJson: options.sandboxJson,
         shutdownUrl: options.shutdownUrl,
         stopTimeout: options.stopTimeout,
         streamFraming: options.streamFraming,
@@ -296,6 +299,7 @@ const registerAgentCommands = (context: RegisterAgentCommandsOptions): void => {
     add,
     [
       'attest agent add support --argv-json \'["node","./src/agent.mjs"]\' --timeout 60s',
+      'attest agent add support --native-command "node ./src/agent.mjs" --sandbox-json \'{"kind":"vercel","files":[]}\'',
       'attest agent add support --native-http https://localhost:8787/invoke',
       'attest agent add support --background-command "node ./server.mjs" --readiness-http http://127.0.0.1:8787/ready --invoke-url http://127.0.0.1:8787/invoke',
       'attest agent add support --jsonl-command "node ./bridge.mjs" --bridge-concurrency multiplexed',
@@ -342,6 +346,7 @@ const registerAgentCommands = (context: RegisterAgentCommandsOptions): void => {
         'native-command',
         'native-http',
         'jsonl-command',
+        'sandbox-json',
         'stream-url',
         'websocket-url',
       ],
@@ -426,6 +431,7 @@ const registerAgentCommands = (context: RegisterAgentCommandsOptions): void => {
         'native-command',
         'native-http',
         'background-command',
+        'sandbox-json',
         'stream-url',
         'websocket-url',
       ],
@@ -443,6 +449,7 @@ const registerAgentCommands = (context: RegisterAgentCommandsOptions): void => {
         'native-command',
         'background-command',
         'jsonl-command',
+        'sandbox-json',
         'stream-url',
         'websocket-url',
       ],
@@ -493,6 +500,13 @@ const registerAgentCommands = (context: RegisterAgentCommandsOptions): void => {
         'readiness-stderr',
       ],
       'response-pointer': ['argv-json', 'native-command', 'native-http', 'jsonl-command'],
+      'sandbox-json': [
+        'native-http',
+        'background-command',
+        'jsonl-command',
+        'stream-url',
+        'websocket-url',
+      ],
       'request-id-pointer': [
         'argv-json',
         'native-command',
@@ -539,6 +553,7 @@ const registerAgentCommands = (context: RegisterAgentCommandsOptions): void => {
         'native-http',
         'background-command',
         'jsonl-command',
+        'sandbox-json',
         'websocket-url',
       ],
       subprotocol: [
@@ -582,6 +597,7 @@ const registerAgentCommands = (context: RegisterAgentCommandsOptions): void => {
         'native-http',
         'background-command',
         'jsonl-command',
+        'sandbox-json',
         'stream-url',
       ],
     },

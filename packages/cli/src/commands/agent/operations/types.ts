@@ -50,6 +50,7 @@ type AgentAddCommandOptions = MutationFields & {
   requestIdPointer?: string;
   requestTemplate?: string;
   responsePointer?: string;
+  sandboxJson?: string;
   shutdownUrl?: string;
   stopTimeout?: string;
   streamFraming?: 'sse' | 'jsonl';
