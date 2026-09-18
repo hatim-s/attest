@@ -244,10 +244,9 @@ const recoverFailedJsonlStream = (
     completedCases += 1;
     errorCases += 1;
   }
-  // Cases never started by the failed producer are represented in the terminal error total.
-  errorCases += Math.max(0, started.data.total_cases - completedCases);
   const summary = {
-    total_cases: started.data.total_cases,
+    // The summary accounts only for emitted case completions. Selection size remains on run_started.
+    total_cases: completedCases,
     passed_cases: passedCases,
     failed_cases: failedCases,
     error_cases: errorCases,
