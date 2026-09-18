@@ -1,4 +1,5 @@
 import { performance } from 'node:perf_hooks';
+import { resolve } from 'node:path';
 
 import {
   AGENT_PROTOCOL,
@@ -11,6 +12,7 @@ import {
   invokeAgent,
   invokeMappedHttpAgent,
   invokeStreamingAgent,
+  invokeVercelSandboxAgent,
   startBackgroundAgent,
   startJsonlBridgeAgent,
   startWebSocketAgent,
@@ -175,10 +177,47 @@ const invokeRuntime = async (
   signal: AbortSignal,
   payload: ResolvedEvalCaseInput,
   workerDirectory?: string,
+  configuredIndex?: number,
+  projectRoot?: string,
 ): Promise<InvocationResult> => {
   if (runtime.kind === 'session') return runtime.session.invoke(request, signal);
   const { resolved } = runtime;
   switch (resolved.kind) {
+    case 'vercel_sandbox': {
+      const attemptTimeoutMs = payload.attempt_timeout_ms ?? DEFAULT_TIMEOUT_MS;
+      const retries = payload.agent.retry?.retries ?? 0;
+      const artifactRoot =
+        workerDirectory ??
+        (resolved.sandbox.artifact_directory === undefined || projectRoot === undefined
+          ? undefined
+          : resolve(
+              projectRoot,
+              resolved.sandbox.artifact_directory,
+              request.run_id,
+              String(configuredIndex ?? 0),
+            ));
+      return invokeVercelSandboxAgent(
+        resolved.sandbox,
+        {
+          argv: resolved.argv,
+          ...(resolved.cwd === undefined ? {} : { cwd: resolved.cwd }),
+          env: resolved.env,
+          attemptTimeoutMs,
+          retries,
+          responseBytes: payload.agent.limits?.response_bytes ?? DEFAULT_OUTPUT_CAP_BYTES,
+          sandboxTimeoutMs: Math.min(
+            Number.MAX_SAFE_INTEGER,
+            attemptTimeoutMs * (retries + 1) + 60_000,
+          ),
+        },
+        request,
+        {
+          projectRoot: projectRoot ?? process.cwd(),
+          ...(artifactRoot === undefined ? {} : { artifactRoot }),
+          signal,
+        },
+      );
+    }
     case 'stream':
       return invokeStreamingAgent(resolved.agent, request, {
         headers: resolved.headers,
@@ -217,6 +256,7 @@ const createEvalCaseRunner = (
   const runtimes = new Map<string, Promise<EvalAgentRuntime>>();
   const metricEvaluator = createEvalMetricEvaluator(projectRoot, cacheStore);
   const lifecycle = createEvalLifecycle(projectRoot, run);
+  let sandboxCleanupUncertain = false;
 
   const runtimeFor = (
     payload: ResolvedEvalCaseInput,
@@ -258,7 +298,15 @@ const createEvalCaseRunner = (
       let invocation: InvocationResult;
       try {
         runtime = await runtimeFor(payload, signal);
-        invocation = await invokeRuntime(runtime, request, signal, payload, workerDirectory);
+        invocation = await invokeRuntime(
+          runtime,
+          request,
+          signal,
+          payload,
+          workerDirectory,
+          resolvedCase.configured_index,
+          projectRoot,
+        );
       } catch (error: unknown) {
         invocation = startupFailure(error, performance.now() - started);
       }
@@ -301,6 +349,10 @@ const createEvalCaseRunner = (
         metrics: typeof metrics;
         lifecycle_error?: string;
       } = { execution, metrics };
+      if (execution.diagnostics.sandboxCleanupConfirmed === false) {
+        sandboxCleanupUncertain = true;
+        result.lifecycle_error = 'Vercel sandbox cleanup was not confirmed.';
+      }
       try {
         return result;
       } finally {
@@ -346,6 +398,9 @@ const createEvalCaseRunner = (
       lifecycle.assertCleanup();
     } catch (error: unknown) {
       failures.push(error);
+    }
+    if (sandboxCleanupUncertain) {
+      failures.push(new Error('One or more Vercel sandbox cleanups were not confirmed.'));
     }
     if (failures.length > 0) throw new AggregateError(failures, 'Eval agent cleanup failed.');
   };

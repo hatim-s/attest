@@ -9,6 +9,7 @@ import {
   invokeAgent,
   invokeMappedHttpAgent,
   invokeStreamingAgent,
+  invokeVercelSandboxAgent,
   redactTransportText,
   startBackgroundAgent,
   startJsonlBridgeAgent,
@@ -16,6 +17,7 @@ import {
   type InvocationResult,
   type StoredAttempt,
 } from '@attest/core';
+import { resolve } from 'node:path';
 
 import { AttestCliError } from '../../../errors/index.js';
 import { resolveNativeAgent } from './resolve-native-agent.js';
@@ -226,6 +228,51 @@ const testNativeAgentConnection = async (options: NativeAgentTestOptions): Promi
           signal: options.signal,
         });
         break;
+      case 'vercel_sandbox': {
+        if (
+          (resolved.sandbox.artifacts?.length ?? 0) > 0 &&
+          resolved.sandbox.artifact_directory === undefined
+        ) {
+          throw new AttestCliError(
+            'project_invalid',
+            'Sandbox artifacts require artifact_directory outside an eval worker.',
+            { path: `/agents/${options.agent.id}/transport/sandbox/artifact_directory` },
+          );
+        }
+        const attemptTimeoutMs = options.agent.timeouts?.attempt_ms ?? DEFAULT_TIMEOUT_MS;
+        const retries = options.agent.retry?.retries ?? 0;
+        invocation = await invokeVercelSandboxAgent(
+          resolved.sandbox,
+          {
+            argv: resolved.argv,
+            ...(resolved.cwd === undefined ? {} : { cwd: resolved.cwd }),
+            env: resolved.env,
+            attemptTimeoutMs,
+            retries,
+            responseBytes: options.agent.limits?.response_bytes ?? DEFAULT_OUTPUT_CAP_BYTES,
+            sandboxTimeoutMs: Math.min(
+              Number.MAX_SAFE_INTEGER,
+              attemptTimeoutMs * (retries + 1) + 60_000,
+            ),
+          },
+          request,
+          {
+            projectRoot: options.projectRoot,
+            ...(resolved.sandbox.artifact_directory === undefined
+              ? {}
+              : {
+                  artifactRoot: resolve(
+                    options.projectRoot,
+                    resolved.sandbox.artifact_directory,
+                    request.run_id,
+                    'connection-test',
+                  ),
+                }),
+            ...(options.signal === undefined ? {} : { signal: options.signal }),
+          },
+        );
+        break;
+      }
       case 'direct':
         invocation = await invokeAgent(resolved.target, request, {
           env: resolved.env,

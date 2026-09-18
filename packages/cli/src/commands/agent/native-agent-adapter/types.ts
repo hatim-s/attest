@@ -29,6 +29,14 @@ type ResolvedNativeAgent =
       target: NativeAgentTarget;
     }
   | {
+      argv: readonly [string, ...string[]];
+      cwd?: string;
+      env: Record<string, string>;
+      kind: 'vercel_sandbox';
+      sandbox: NonNullable<Extract<AgentResource['transport'], { kind: 'native_cli' }>['sandbox']>;
+      secrets: string[];
+    }
+  | {
       agent: BackgroundAgentResource;
       cwd: string;
       env: Record<string, string>;

@@ -495,6 +495,93 @@ describe('agent authoring', () => {
     await expect(access(marker)).rejects.toBeDefined();
   });
 
+  it('authors and validates Vercel sandbox configuration for native CLI agents', async () => {
+    const root = await createProject();
+    const sandbox = JSON.stringify({
+      kind: 'vercel',
+      image: 'node:22',
+      files: [{ source: 'src/agent.mjs', destination: 'workspace/agent.mjs', mode: 0o755 }],
+      artifacts: [{ source: 'workspace/output.json', destination: 'artifacts/output.json' }],
+      artifact_directory: '.attest/artifacts',
+    });
+    const added = await run(root, [
+      'agent',
+      'add',
+      'sandboxed',
+      '--native-command',
+      'node workspace/agent.mjs',
+      '--sandbox-json',
+      sandbox,
+      '--output',
+      'json',
+    ]);
+
+    expect(added.exitCode).toBe(0);
+    expect((await loadProject({ project: root })).agents[0]?.transport).toMatchObject({
+      kind: 'native_cli',
+      sandbox: JSON.parse(sandbox) as unknown,
+    });
+
+    const argvSandbox = JSON.stringify({ kind: 'vercel', files: [] });
+    const argvAdded = await run(root, [
+      'agent',
+      'add',
+      'sandboxed-argv',
+      '--argv-json',
+      '["node","agent.mjs"]',
+      '--sandbox-json',
+      argvSandbox,
+      '--output',
+      'json',
+    ]);
+    expect(argvAdded.exitCode).toBe(0);
+    expect(
+      (await loadProject({ project: root })).agents.find(({ id }) => id === 'sandboxed-argv')
+        ?.transport,
+    ).toMatchObject({ kind: 'native_cli', sandbox: JSON.parse(argvSandbox) as unknown });
+
+    for (const invalidSandbox of [
+      '{',
+      JSON.stringify({ kind: 'vercel' }),
+      JSON.stringify({
+        kind: 'vercel',
+        files: [{ source: '../agent.mjs', destination: 'agent.mjs' }],
+      }),
+    ]) {
+      const rejected = await run(root, [
+        'agent',
+        'add',
+        'invalid-sandbox',
+        '--argv-json',
+        '["node","agent.mjs"]',
+        '--sandbox-json',
+        invalidSandbox,
+        '--output',
+        'json',
+      ]);
+      expect(rejected.exitCode).toBe(2);
+      expect(JSON.parse(rejected.output[0] ?? '{}')).toMatchObject({
+        error: { code: 'cli_usage', path: '--sandbox-json' },
+      });
+    }
+
+    const foreignTransport = await run(root, [
+      'agent',
+      'add',
+      'invalid-transport',
+      '--native-http',
+      'https://example.com/invoke',
+      '--sandbox-json',
+      JSON.stringify({ kind: 'vercel', files: [] }),
+      '--output',
+      'json',
+    ]);
+    expect(foreignTransport.exitCode).toBe(2);
+    expect(JSON.parse(foreignTransport.output[0] ?? '{}')).toMatchObject({
+      error: { code: 'cli_usage', path: '--sandbox-json' },
+    });
+  });
+
   it('redacts CLI secrets from successful and hostile process evidence', async () => {
     const root = await createProject();
     process.env.ATTEST_SOURCE_SECRET = 'literal-super-secret';
@@ -1992,6 +2079,15 @@ describe('managed and streaming agent UX', () => {
     expect(options.get('env')?.conflicts).toContain('stream-url');
     expect(options.get('header-env')?.conflicts).toContain('jsonl-command');
     expect(options.get('incremental-output-mode')?.implies).toContain('incremental-output-pointer');
+    expect(options.get('sandbox-json')?.conflicts).toEqual([
+      'from-json',
+      'native-http',
+      'background-command',
+      'jsonl-command',
+      'stream-url',
+      'websocket-url',
+    ]);
+    expect(options.get('native-http')?.conflicts).toContain('sandbox-json');
   });
 
   it.each([

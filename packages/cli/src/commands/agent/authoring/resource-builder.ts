@@ -10,6 +10,7 @@ import {
   parseDuration,
   parseJsonValues,
   parseRequestTemplate,
+  parseSandboxJson,
   parseSecretBindings,
   parseTcpReadiness,
   tokenizeCommand,
@@ -50,6 +51,7 @@ const AUTHORING_FLAG_BY_FIELD: Readonly<Record<keyof AgentAddFields, string>> = 
   requestIdPointer: 'request-id-pointer',
   requestTemplate: 'request-template',
   responsePointer: 'response-pointer',
+  sandboxJson: 'sandbox-json',
   shutdownUrl: 'shutdown-url',
   stopTimeout: 'stop-timeout',
   streamFraming: 'stream-framing',
@@ -72,7 +74,7 @@ const TRANSPORT_AUTHORING_FIELDS: Readonly<
     Set<keyof AgentAddFields>
   >
 > = {
-  native_cli: new Set(['argvJson', 'nativeCommand', 'cwd', 'env', 'timeout']),
+  native_cli: new Set(['argvJson', 'nativeCommand', 'cwd', 'env', 'sandboxJson', 'timeout']),
   native_http: new Set(['nativeHttp', 'headerEnv', 'timeout']),
   background: new Set([
     'backgroundCommand',
@@ -352,6 +354,9 @@ const createAgentResource = (fields: AgentAddFields): AgentResource => {
           : parseArgvJson(fields.argvJson),
       ...(fields.cwd === undefined ? {} : { cwd: fields.cwd }),
       ...processEnvironment,
+      ...(fields.sandboxJson === undefined
+        ? {}
+        : { sandbox: parseSandboxJson(fields.sandboxJson) }),
     };
   }
   const parsed = agentResourceSchema.safeParse({

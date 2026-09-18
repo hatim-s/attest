@@ -4,6 +4,7 @@ export {
   createImportedCurlAgentResource,
   parseArgvJson,
   parseDuration,
+  parseSandboxJson,
   readAgentCommandRequest,
   readCurlBodyFile,
   readCurlDocument,

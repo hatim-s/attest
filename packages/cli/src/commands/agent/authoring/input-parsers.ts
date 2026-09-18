@@ -1,4 +1,9 @@
-import type { JsonValue, SecretReference } from '@attest/contracts';
+import {
+  vercelSandboxSchema,
+  type JsonValue,
+  type SecretReference,
+  type VercelSandbox,
+} from '@attest/contracts';
 
 import { AttestCliError } from '../../../errors/index.js';
 
@@ -82,6 +87,34 @@ const parseArgvJson = (value: string): string[] => {
     });
   }
   return parsed as string[];
+};
+
+/** Parses and validates one Vercel sandbox definition. */
+const parseSandboxJson = (value: string): VercelSandbox => {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value) as unknown;
+  } catch (error: unknown) {
+    throw new AttestCliError('cli_usage', '`--sandbox-json` is not valid JSON.', {
+      path: '--sandbox-json',
+      hint: 'Pass one Vercel sandbox JSON object.',
+      cause: error,
+    });
+  }
+  const sandbox = vercelSandboxSchema.safeParse(parsed);
+  if (!sandbox.success) {
+    throw new AttestCliError('cli_usage', '`--sandbox-json` does not match the sandbox schema.', {
+      path: '--sandbox-json',
+      hint: 'Pass kind, files, and optional image, artifacts, or artifact_directory fields.',
+      details: {
+        diagnostics: sandbox.error.issues.map(({ message, path }) => ({
+          message,
+          path: `/${path.join('/')}`,
+        })),
+      },
+    });
+  }
+  return sandbox.data;
 };
 
 /** Parses a positive duration expressed as milliseconds, seconds, or minutes. */
@@ -174,6 +207,7 @@ export {
   parseDuration,
   parseJsonValues,
   parseRequestTemplate,
+  parseSandboxJson,
   parseSecretBindings,
   parseTcpReadiness,
   tokenizeCommand,

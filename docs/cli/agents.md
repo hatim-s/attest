@@ -108,6 +108,32 @@ Use `attest help agent add --output json` for the current options, conflicts, im
 examples, and request schema. Environment mappings such as `--env TARGET=SOURCE_ENV` and
 `--header-env Authorization=AGENT_TOKEN` persist only the source environment-variable name.
 
+### Vercel Sandbox for native processes
+
+Add `--sandbox-json` to run a `native_cli` command in a remote Vercel Sandbox:
+
+```sh
+attest agent add support-remote \
+  --argv-json '["node","./agent.mjs"]' \
+  --sandbox-json '{"kind":"vercel","files":[{"source":"agent.mjs","destination":"agent.mjs"}]}' \
+  --timeout 30s \
+  --output json
+```
+
+The JSON accepts `kind`, optional `image`, `files`, optional `artifacts`, and optional
+`artifact_directory`. File mappings accept `source`, `destination`, and optional numeric `mode`.
+Artifact mappings accept `source` and `destination`. The default image is
+`vercel/sandbox/universal`.
+
+This is remote execution from a local or CI Attest process. It requires network access and either
+`VERCEL_OIDC_TOKEN` or all of `VERCEL_TOKEN`, `VERCEL_TEAM_ID`, and `VERCEL_PROJECT_ID`. The agent
+resource stores no credential values.
+
+All transfers are explicit fixed-file mappings. Globs, directories, symbolic links, and implicit
+uploads are rejected. If artifacts are configured, set `artifact_directory` unless the eval uses
+worker directories. See [Native agent integrations](../integrations/native.md) for transfer limits,
+artifact paths, and lifecycle details.
+
 ## Import JSON or cURL
 
 Canonical JSON may come from a local file, stdin, or a bounded HTTP(S) URL:

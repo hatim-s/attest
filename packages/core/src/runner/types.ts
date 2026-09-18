@@ -53,6 +53,12 @@ type InvocationDiagnostics = {
   remoteJobId?: string | number;
   /** Snapshotted descendants that survived SIGKILL verification, if any (best-effort containment). */
   unreapedProcessIds?: number[];
+  /** Bounded sandbox setup, artifact, or cleanup failure retained beside the primary outcome. */
+  sandboxError?: string;
+  /** False when a remote sandbox could not be stopped and its case worker must not be reused. */
+  sandboxCleanupConfirmed?: boolean;
+  /** False when an SDK transport failure did not confirm that the remote command stopped. */
+  sandboxCompletionConfirmed?: boolean;
   /** Bounded post-case lifecycle failure retained without discarding invocation evidence. */
   lifecycleError?: string;
 };

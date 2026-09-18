@@ -3,6 +3,7 @@ export {
   parseDuration,
   parseJsonValues,
   parseRequestTemplate,
+  parseSandboxJson,
   parseSecretBindings,
   parseTcpReadiness,
   tokenizeCommand,
