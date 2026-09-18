@@ -54,6 +54,13 @@ Each command using `--output json` writes one `attest.cli-result` document. The 
 
 The example log is written to stderr, so it never corrupts the response envelope.
 
+## Cleanup
+
+```sh
+cd ..
+rm -rf ./attest-native-guide
+```
+
 ## Run a native agent in Vercel Sandbox
 
 Vercel Sandbox is an opt-in remote execution mode for `native_cli`. Attest can run locally while
@@ -121,13 +128,6 @@ retries for the same case.
 Set either `VERCEL_OIDC_TOKEN` or the complete `VERCEL_TOKEN`, `VERCEL_TEAM_ID`, and
 `VERCEL_PROJECT_ID` set in the environment that launches Attest. See [Environment
 variables](../ENV.md). Never put their values in the agent resource.
-
-## Cleanup
-
-```sh
-cd ..
-rm -rf ./attest-native-guide
-```
 
 ## Request and response contract
 
