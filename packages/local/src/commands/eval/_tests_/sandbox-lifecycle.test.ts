@@ -34,7 +34,10 @@ const cache: CacheStore = { get: () => Promise.resolve(undefined), put: () => Pr
 /** Uses the canonical run fixture while setting only the lifecycle configuration under test. */
 const createRun = async (execution: EvalRun['effective_command']['resolved']['execution']) => {
   const fixture = await readFile(
-    new URL('../../../../../contracts/src/_tests_/fixtures/eval-run/eval-run.json', import.meta.url),
+    new URL(
+      '../../../../../contracts/src/_tests_/fixtures/eval-run/eval-run.json',
+      import.meta.url,
+    ),
     'utf8',
   );
   const run = evalRunSchema.parse(JSON.parse(fixture));
