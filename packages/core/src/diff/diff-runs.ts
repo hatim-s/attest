@@ -3,7 +3,7 @@ import { canonicalStringify } from '../store/internal/canonical-json.js';
 import { classifyRuns } from './classify.js';
 import type { RunDiff } from './types.js';
 
-/** Loads two runs and delegates their cases to the pure PLAN 1D.1 classifier. */
+/** Loads two runs and delegates their cases to the pure classifier. */
 const diffRuns = async (
   baseStore: RunStore,
   baseRunId: string,

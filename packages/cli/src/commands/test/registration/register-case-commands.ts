@@ -1,4 +1,5 @@
 import type { Command } from 'commander';
+import { parseJsonFlag, runTestCaseListCommand, runTestCaseShowCommand } from '@attest/local/test';
 
 import {
   addCommonOptions,
@@ -21,8 +22,6 @@ import {
   type MutationOptions,
   type RegisterTestCommandsOptions,
 } from './support.js';
-import { parseJsonFlag } from '../test-command-input.js';
-import { runTestCaseListCommand, runTestCaseShowCommand } from '../test-command.js';
 
 /** Registers direct case authoring, import, and inspection commands. */
 const registerTestCaseCommands = (test: Command, context: RegisterTestCommandsOptions): void => {

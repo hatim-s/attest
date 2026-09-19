@@ -1,11 +1,11 @@
-/** Case-level verdict derived from invocation and metric outcomes (PLAN 1D.1). */
+/** Case-level verdict derived from invocation and metric outcomes. */
 type CaseVerdict = 'pass' | 'fail' | 'error';
 
-/** Exhaustive transition classification for a case across two runs (PLAN 1D.1). */
+/** Exhaustive transition classification for a case across two runs. */
 type CaseTransitionKind =
   'added' | 'removed' | 'fixed' | 'regressed' | 'still_passing' | 'still_failing';
 
-/** Describes score and pass movement for one metric (PLAN 1D.1). */
+/** Describes score and pass movement for one metric. */
 interface MetricDelta {
   metricName: string;
   baseScore?: number;
@@ -14,7 +14,7 @@ interface MetricDelta {
   passTransition: 'unchanged' | 'gained' | 'lost';
 }
 
-/** Describes one case's presence, verdict, and metric changes (PLAN 1D.1). */
+/** Describes one case's presence, verdict, and metric changes. */
 interface CaseTransition {
   suiteName: string;
   caseId: string;
@@ -26,7 +26,7 @@ interface CaseTransition {
   metricDeltas: MetricDelta[];
 }
 
-/** Aggregates deterministic case transition and pass-rate totals (PLAN 1D.1). */
+/** Aggregates deterministic case transition and pass-rate totals. */
 interface DiffSummary {
   baseRunId: string;
   candidateRunId: string;
@@ -38,13 +38,13 @@ interface DiffSummary {
   candidatePassRate: number;
 }
 
-/** Represents the complete comparison between two persisted runs (PLAN 1D.1). */
+/** Represents the complete comparison between two persisted runs. */
 interface RunDiff {
   summary: DiffSummary;
   transitions: CaseTransition[];
 }
 
-/** Configures optional CI failure gates over a run diff (PLAN 1D.3). */
+/** Configures optional CI failure gates over a run diff. */
 interface ThresholdConfig {
   minPassRate?: number;
   maxRegressions?: number;
@@ -52,7 +52,7 @@ interface ThresholdConfig {
   failOnMetricErrors?: boolean;
 }
 
-/** Reports the CI-compatible decision and human-actionable failures (PLAN 1D.3). */
+/** Reports the CI-compatible decision and human-actionable failures. */
 interface CiVerdict {
   pass: boolean;
   exitCode: 0 | 1;

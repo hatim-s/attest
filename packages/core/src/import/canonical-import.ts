@@ -1,28 +1,13 @@
 import { createHash } from 'node:crypto';
 
-import type { TestCase } from '@attest/contracts';
+import type { JsonValue, TestCase } from '@attest/contracts';
 
-type JsonValue = boolean | null | number | string | JsonValue[] | { [key: string]: JsonValue };
+import {
+  canonicalStringify as serializeImportJson,
+  contentHash as hashImportJson,
+} from '../store/internal/canonical-json.js';
 
 const BASE32_ALPHABET = 'abcdefghijklmnopqrstuvwxyz234567';
-
-/** Recursively canonicalizes JSON objects while retaining semantically ordered arrays. */
-const canonicalizeJson = (value: JsonValue): JsonValue => {
-  if (Array.isArray(value)) return value.map(canonicalizeJson);
-  if (value === null || typeof value !== 'object') return value;
-  return Object.fromEntries(
-    Object.entries(value)
-      .sort(([left], [right]) => (left > right ? 1 : 0) - (left < right ? 1 : 0))
-      .map(([key, entry]) => [key, canonicalizeJson(entry)]),
-  );
-};
-
-/** Serializes JSON independently from authored formatting or object insertion order. */
-const serializeImportJson = (value: JsonValue): string => JSON.stringify(canonicalizeJson(value));
-
-/** Computes the stable lowercase SHA-256 fingerprint used by import identities and dedupe. */
-const hashImportJson = (value: JsonValue): string =>
-  createHash('sha256').update(serializeImportJson(value), 'utf8').digest('hex');
 
 /** Encodes digest bytes with unpadded lowercase RFC 4648 base32. */
 const encodeBase32 = (bytes: Uint8Array): string => {

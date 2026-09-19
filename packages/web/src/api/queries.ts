@@ -2,8 +2,10 @@ import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 
 import { getCase, getDiff, getRun, listCases, listRuns } from './client.js';
 
+/** Polls the recent-run navigator while the dashboard stays open. */
 const useRuns = () => useQuery({ queryKey: ['runs'], queryFn: listRuns, refetchInterval: 5_000 });
 
+/** Loads one run and keeps polling only while it is still executing. */
 const useRun = (runId: string | undefined) =>
   useQuery({
     queryKey: ['run', runId],
@@ -12,6 +14,7 @@ const useRun = (runId: string | undefined) =>
     refetchInterval: (query) => (query.state.data?.status === 'running' ? 2_000 : false),
   });
 
+/** Pages case summaries for the selected run through cursor pagination. */
 const useCases = (runId: string | undefined) =>
   useInfiniteQuery({
     queryKey: ['cases', runId],
@@ -21,6 +24,7 @@ const useCases = (runId: string | undefined) =>
     enabled: runId !== undefined,
   });
 
+/** Loads the full evidence record for the case opened in the detail drawer. */
 const useCase = (
   runId: string | undefined,
   suiteName: string | undefined,
@@ -32,6 +36,7 @@ const useCase = (
     enabled: runId !== undefined && suiteName !== undefined && caseId !== undefined,
   });
 
+/** Compares two distinct runs once both sides of the comparison are chosen. */
 const useDiff = (baseRunId: string | undefined, candidateRunId: string | undefined) =>
   useQuery({
     queryKey: ['diff', baseRunId, candidateRunId],

@@ -22,7 +22,7 @@ type CliEventClock = () => Date;
 /** Builds a validated success document with explicit hashes for non-project commands. */
 const createCliSuccessResult = (
   command: string,
-  result: JsonValue,
+  result: unknown,
   options: CliResultOptions = {},
 ): CliSuccessResult =>
   cliResultSchema.parse({

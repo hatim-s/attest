@@ -5,5 +5,15 @@
     "rootDir": "src"
   },
   "include": ["src"],
-  "references": [{ "path": "../contracts" }, { "path": "../core" }, { "path": "../web" }]
+  "references": [
+    {
+      "path": "../contracts/tsconfig.build.json"
+    },
+    {
+      "path": "../core/tsconfig.build.json"
+    },
+    {
+      "path": "../local/tsconfig.build.json"
+    }
+  ]
 }

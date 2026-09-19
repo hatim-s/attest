@@ -1,5 +1,6 @@
 import type { RunRecord } from '../../api/types.js';
 import { formatDateTime, formatPercent, shortId } from '../../lib/format.js';
+import { runPassRate } from '../../lib/run-stats.js';
 import { Badge, Button, ErrorNotice, Loading } from '../shared/ui.js';
 
 type RunListProps = {
@@ -8,11 +9,6 @@ type RunListProps = {
   onSelect: (runId: string) => void;
   runs: RunRecord[];
   selectedRunId?: string;
-};
-
-const passRate = (run: RunRecord): number | undefined => {
-  if (run.summary === undefined || run.summary.totalCases === 0) return undefined;
-  return run.summary.passedCases / run.summary.totalCases;
 };
 
 /** Renders recent evaluations as a keyboard-operable local run navigator. */
@@ -45,7 +41,7 @@ const RunList = ({ error, isLoading, onSelect, runs, selectedRunId }: RunListPro
           </span>
           <span className="run-list-row run-list-meta">
             <span>{formatDateTime(run.createdAt)}</span>
-            <span>{formatPercent(passRate(run))}</span>
+            <span>{formatPercent(runPassRate(run))}</span>
           </span>
         </Button>
       ))}

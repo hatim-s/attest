@@ -1,8 +1,17 @@
 import { createRequire } from 'node:module';
-import { resolve } from 'node:path';
 
-import { type CliExitCode } from '@attest/contracts';
-import { diffRuns, openStore } from '@attest/core';
+import {
+  evalCancelResultSchema,
+  evalFinalResultDataSchema,
+  type CliExitCode,
+} from '@attest/contracts';
+import { cancelConfiguration, runConfiguration } from '@attest/local/eval';
+import {
+  compareLocalRuns,
+  runReportCommand,
+  runTraceConvertCommand,
+  runViewCommand,
+} from '@attest/local/runs';
 import { Command, CommanderError, Option } from 'commander';
 
 import { registerEvalCommands } from './commands/eval/eval-command.js';
@@ -12,7 +21,7 @@ import {
   type CliInteraction,
 } from './commands/register-project-resource-commands.js';
 import { registerMetricCommands } from './commands/metric/register-metric-commands.js';
-import { registerTestCommands } from './commands/test/register-test-commands.js';
+import { registerTestCommands } from './commands/test/registration/index.js';
 import {
   AttestCliError,
   createCliErrorCatalog,
@@ -27,10 +36,7 @@ import {
   createCliSuccessResult,
   serializeCliResult,
 } from './output/cli-protocol.js';
-import { cancelConfiguration, runConfiguration } from './run/run-configuration.js';
-import { runReportCommand } from './report/run-report-command.js';
-import { runTraceConvertCommand } from './trace/run-trace-convert-command.js';
-import { runViewCommand } from './view/run-view-command.js';
+import { openBrowser } from './view/open-browser.js';
 
 const require = createRequire(import.meta.url);
 
@@ -162,8 +168,10 @@ const createProgram = (
       process.once('SIGTERM', stop);
       try {
         await runViewCommand({
-          launchBrowser: options.open,
-          onReady: ({ url }) => io.output(`Attest view: ${url}\nPress Ctrl+C to stop.`),
+          onReady: async ({ url }) => {
+            io.output(`Attest view: ${url}\nPress Ctrl+C to stop.`);
+            if (options.open) await openBrowser(url);
+          },
           port: options.port,
           signal: abortController.signal,
           storePath: options.store,
@@ -233,14 +241,13 @@ const createProgram = (
         .default('human'),
     )
     .action(async (baseRunId: string, candidateRunId: string, options: DiffCommandOptions) => {
-      const storePath = resolve(workingDirectory, options.store ?? '.attest/runs.db');
-      const store = await openStore(storePath);
-      try {
-        const diff = await diffRuns(store.runs, baseRunId, candidateRunId);
-        io.output(options.format === 'json' ? diffToJson(diff) : renderDiffSummary(diff));
-      } finally {
-        await store.close();
-      }
+      const diff = await compareLocalRuns({
+        baseRunId,
+        candidateRunId,
+        storePath: options.store,
+        workingDirectory,
+      });
+      io.output(options.format === 'json' ? diffToJson(diff) : renderDiffSummary(diff));
     });
 
   const helpCommand = program
@@ -322,7 +329,32 @@ const createProgram = (
     interaction,
     io,
     program,
-    services: { cancel: cancelConfiguration, run: runConfiguration },
+    services: {
+      cancel: async (request, context) => {
+        const result = await cancelConfiguration(request, context);
+        return evalCancelResultSchema.parse(
+          createCliSuccessResult(
+            'eval.cancel',
+            { run_id: result.runId, status: result.status },
+            {
+              projectHashBefore: result.projectHash,
+              projectHashAfter: result.projectHash,
+            },
+          ),
+        );
+      },
+      run: (request, context) =>
+        runConfiguration(request, {
+          ...context,
+          terminalFailure: (code, message) => {
+            const failure = serializeCliError(new AttestCliError(code, message));
+            return evalFinalResultDataSchema.parse({
+              exit_code: failure.exitCode,
+              result: createCliFailureResult('eval.run', failure.error),
+            });
+          },
+        }),
+    },
     setExitCode,
     workingDirectory,
   });

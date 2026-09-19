@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 import { agentResourceSchema } from './resources/agent.js';
-import { testCaseSchema } from './resources/case.js';
+import { testCaseSchema, type CaseMetricOverride } from './resources/case.js';
 import { datasetResourceSchema } from './resources/dataset.js';
 import { metricResourceSchema } from './resources/metric.js';
 import { testResourceSchema } from './resources/test.js';
@@ -66,22 +66,23 @@ const reportNonCanonicalManifestPath = (
   context.addIssue({ code: 'custom', path, message: `must equal canonical path ${expected}` });
 };
 
-/** Reports duplicate ids inside one generated manifest resource list. */
-const reportDuplicateManifestIds = (
-  entries: ReadonlyArray<{ id: string }>,
-  resourceType: string,
+/** Reports repeated ids once per duplicate, appending the trailing id key to each issue path. */
+const reportDuplicateIds = (
+  ids: ReadonlyArray<string>,
+  basePath: PropertyKey[],
+  label: string,
   context: z.RefinementCtx,
 ): void => {
   const seen = new Set<string>();
-  entries.forEach((entry, index) => {
-    if (seen.has(entry.id)) {
+  ids.forEach((id, index) => {
+    if (seen.has(id)) {
       context.addIssue({
         code: 'custom',
-        path: ['resources', resourceType, index, 'id'],
-        message: `duplicate manifest resource id: ${entry.id}`,
+        path: [...basePath, index, 'id'],
+        message: `duplicate ${label}: ${id}`,
       });
     }
-    seen.add(entry.id);
+    seen.add(id);
   });
 };
 
@@ -100,35 +101,25 @@ const projectManifestSchema = z
     }),
   })
   .superRefine((project, context) => {
-    reportDuplicateManifestIds(project.resources.agents, 'agents', context);
-    reportDuplicateManifestIds(project.resources.tests, 'tests', context);
-    reportDuplicateManifestIds(project.resources.datasets, 'datasets', context);
-    reportDuplicateManifestIds(project.resources.metrics, 'metrics', context);
+    for (const resourceType of ['agents', 'tests', 'datasets', 'metrics'] as const) {
+      reportDuplicateIds(
+        project.resources[resourceType].map(({ id }) => id),
+        ['resources', resourceType],
+        'manifest resource id',
+        context,
+      );
+    }
 
-    project.resources.agents.forEach((entry, index) =>
-      reportNonCanonicalManifestPath(entry.path, `attest/agents/${entry.id}.json`, context, [
-        'resources',
-        'agents',
-        index,
-        'path',
-      ]),
-    );
-    project.resources.tests.forEach((entry, index) =>
-      reportNonCanonicalManifestPath(entry.path, `attest/tests/${entry.id}.json`, context, [
-        'resources',
-        'tests',
-        index,
-        'path',
-      ]),
-    );
-    project.resources.metrics.forEach((entry, index) =>
-      reportNonCanonicalManifestPath(entry.path, `attest/metrics/${entry.id}.json`, context, [
-        'resources',
-        'metrics',
-        index,
-        'path',
-      ]),
-    );
+    for (const resourceType of ['agents', 'tests', 'metrics'] as const) {
+      project.resources[resourceType].forEach((entry, index) => {
+        reportNonCanonicalManifestPath(
+          entry.path,
+          `attest/${resourceType}/${entry.id}.json`,
+          context,
+          ['resources', resourceType, index, 'path'],
+        );
+      });
+    }
     project.resources.datasets.forEach((entry, index) => {
       reportNonCanonicalManifestPath(
         entry.data_path,
@@ -150,24 +141,6 @@ const loadedDatasetSchema = z.strictObject({
   metadata: datasetResourceSchema,
   cases: z.array(testCaseSchema),
 });
-
-const reportDuplicateIds = (
-  values: ReadonlyArray<{ id: string }>,
-  path: string,
-  context: z.RefinementCtx,
-): void => {
-  const seen = new Set<string>();
-  values.forEach((value, index) => {
-    if (seen.has(value.id)) {
-      context.addIssue({
-        code: 'custom',
-        path: [path, index, 'id'],
-        message: `duplicate resource id: ${value.id}`,
-      });
-    }
-    seen.add(value.id);
-  });
-};
 
 const reportDuplicateFieldValues = (
   values: ReadonlyArray<string>,
@@ -216,6 +189,48 @@ const reportManifestParity = (
   });
 };
 
+/** Selects the metric override validation shared by dataset rows and resolved test cases. */
+type MetricOverrideCheck = {
+  overrides: ReadonlyArray<CaseMetricOverride>;
+  path: PropertyKey[];
+  context: z.RefinementCtx;
+  metricIds: ReadonlySet<string>;
+  /** When present, every known override must also be attached to the named test. */
+  attachment?: { testId: string; metricIds: ReadonlySet<string> };
+  /** Dataset-attached rows skip unknown-metric reports; attachment still applies. */
+  reportUnknownMetric?: boolean;
+};
+
+/** Validates one metric_overrides list for duplicates, known metrics, and test attachment. */
+const reportMetricOverrides = (check: MetricOverrideCheck): void => {
+  const { overrides, path, context, metricIds, attachment, reportUnknownMetric = true } = check;
+  reportDuplicateFieldValues(
+    overrides.map(({ metric_id }) => metric_id),
+    [...path, 'metric_overrides'],
+    'metric override',
+    context,
+  );
+  overrides.forEach(({ metric_id }, overrideIndex) => {
+    if (!metricIds.has(metric_id)) {
+      if (reportUnknownMetric) {
+        context.addIssue({
+          code: 'custom',
+          path: [...path, 'metric_overrides', overrideIndex, 'metric_id'],
+          message: `metric is not defined: ${metric_id}`,
+        });
+      }
+      return;
+    }
+    if (attachment !== undefined && !attachment.metricIds.has(metric_id)) {
+      context.addIssue({
+        code: 'custom',
+        path: [...path, 'metric_overrides', overrideIndex, 'metric_id'],
+        message: `metric is not attached to test ${attachment.testId}: ${metric_id}`,
+      });
+    }
+  });
+};
+
 /**
  * Encodes the loader-facing project snapshot and aggregates every reference invariant.
  * This is a runtime validation shape rather than another authored file format.
@@ -229,40 +244,24 @@ const projectResourcesSchema = z
     metrics: z.array(metricResourceSchema),
   })
   .superRefine((resources, context) => {
-    reportDuplicateIds(resources.agents, 'agents', context);
-    reportDuplicateIds(resources.tests, 'tests', context);
-    reportDuplicateIds(
-      resources.datasets.map(({ metadata }) => metadata),
-      'datasets',
-      context,
-    );
-    reportDuplicateIds(resources.metrics, 'metrics', context);
-
-    const datasetIds = resources.datasets.map(({ metadata }) => metadata.id);
-    reportManifestParity(
-      resources.project.resources.agents.map(({ id }) => id),
-      resources.agents.map(({ id }) => id),
-      'agents',
-      context,
-    );
-    reportManifestParity(
-      resources.project.resources.tests.map(({ id }) => id),
-      resources.tests.map(({ id }) => id),
-      'tests',
-      context,
-    );
-    reportManifestParity(
-      resources.project.resources.datasets.map(({ id }) => id),
-      datasetIds,
-      'datasets',
-      context,
-    );
-    reportManifestParity(
-      resources.project.resources.metrics.map(({ id }) => id),
-      resources.metrics.map(({ id }) => id),
-      'metrics',
-      context,
-    );
+    const resourceIds = {
+      agents: resources.agents.map(({ id }) => id),
+      tests: resources.tests.map(({ id }) => id),
+      datasets: resources.datasets.map(({ metadata }) => metadata.id),
+      metrics: resources.metrics.map(({ id }) => id),
+    };
+    const resourceTypes = ['agents', 'tests', 'datasets', 'metrics'] as const;
+    for (const resourceType of resourceTypes) {
+      reportDuplicateIds(resourceIds[resourceType], [resourceType], 'resource id', context);
+    }
+    for (const resourceType of resourceTypes) {
+      reportManifestParity(
+        resources.project.resources[resourceType].map(({ id }) => id),
+        resourceIds[resourceType],
+        resourceType,
+        context,
+      );
+    }
 
     const agentIds = new Set(resources.agents.map(({ id }) => id));
     const metricIds = new Set(resources.metrics.map(({ id }) => id));
@@ -283,29 +282,11 @@ const projectResourcesSchema = z
         context,
       );
       dataset.cases.forEach((testCase, caseIndex) => {
-        const overrides = testCase.metric_overrides ?? [];
-        reportDuplicateFieldValues(
-          overrides.map(({ metric_id }) => metric_id),
-          ['datasets', datasetIndex, 'cases', caseIndex, 'metric_overrides'],
-          'metric override',
+        reportMetricOverrides({
+          overrides: testCase.metric_overrides ?? [],
+          path: ['datasets', datasetIndex, 'cases', caseIndex],
           context,
-        );
-        overrides.forEach(({ metric_id }, overrideIndex) => {
-          if (!metricIds.has(metric_id)) {
-            context.addIssue({
-              code: 'custom',
-              path: [
-                'datasets',
-                datasetIndex,
-                'cases',
-                caseIndex,
-                'metric_overrides',
-                overrideIndex,
-                'metric_id',
-              ],
-              message: `metric is not defined: ${metric_id}`,
-            });
-          }
+          metricIds,
         });
       });
     });
@@ -336,36 +317,7 @@ const projectResourcesSchema = z
       });
 
       const testMetricIds = new Set(test.metrics.map(({ metric_id }) => metric_id));
-      const reportCaseMetricOverrides = (
-        testCase: z.infer<typeof testCaseSchema>,
-        path: PropertyKey[],
-        reportUnknownMetric = true,
-      ): void => {
-        const overrides = testCase.metric_overrides ?? [];
-        reportDuplicateFieldValues(
-          overrides.map(({ metric_id }) => metric_id),
-          [...path, 'metric_overrides'],
-          'metric override',
-          context,
-        );
-        overrides.forEach(({ metric_id }, overrideIndex) => {
-          if (!metricIds.has(metric_id)) {
-            if (reportUnknownMetric) {
-              context.addIssue({
-                code: 'custom',
-                path: [...path, 'metric_overrides', overrideIndex, 'metric_id'],
-                message: `metric is not defined: ${metric_id}`,
-              });
-            }
-          } else if (!testMetricIds.has(metric_id)) {
-            context.addIssue({
-              code: 'custom',
-              path: [...path, 'metric_overrides', overrideIndex, 'metric_id'],
-              message: `metric is not attached to test ${test.id}: ${metric_id}`,
-            });
-          }
-        });
-      };
+      const testAttachment = { testId: test.id, metricIds: testMetricIds };
 
       const resolvedCaseIds = new Set<string>();
       test.cases.forEach((testCase, caseIndex) => {
@@ -377,7 +329,13 @@ const projectResourcesSchema = z
           });
         }
         resolvedCaseIds.add(testCase.id);
-        reportCaseMetricOverrides(testCase, ['tests', testIndex, 'cases', caseIndex]);
+        reportMetricOverrides({
+          overrides: testCase.metric_overrides ?? [],
+          path: ['tests', testIndex, 'cases', caseIndex],
+          context,
+          metricIds,
+          attachment: testAttachment,
+        });
       });
 
       reportDuplicateFieldValues(
@@ -411,11 +369,14 @@ const projectResourcesSchema = z
             });
           }
           resolvedCaseIds.add(testCase.id);
-          reportCaseMetricOverrides(
-            testCase,
-            ['datasets', resources.datasets.indexOf(dataset), 'cases', caseIndex],
-            false,
-          );
+          reportMetricOverrides({
+            overrides: testCase.metric_overrides ?? [],
+            path: ['datasets', resources.datasets.indexOf(dataset), 'cases', caseIndex],
+            context,
+            metricIds,
+            attachment: testAttachment,
+            reportUnknownMetric: false,
+          });
         });
       });
     });

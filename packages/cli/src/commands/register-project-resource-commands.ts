@@ -1,16 +1,19 @@
 import { COMMAND_REQUEST_SCHEMA_ID } from '@attest/contracts';
+import {
+  runListCommand,
+  runProjectInitCommand,
+  runProjectShowCommand,
+  runProjectValidateCommand,
+  runShowCommand,
+  type ListResourceType,
+  type ShowResourceType,
+} from '@attest/local/project';
 import { Argument, Command, Option } from 'commander';
 
 import { setCliCommandHelpMetadata } from '../help/command-help.js';
 import type { CliIo } from '../run-cli.js';
 import { renderCommandResult } from './shared/command-result.js';
 import { registerAgentCommands } from './agent/register-agent-commands.js';
-import { runListCommand, type ListResourceType } from './list/list-command.js';
-import { runProjectInitCommand } from './project/project-init-command.js';
-import {
-  runProjectShowCommand,
-  runProjectValidateCommand,
-} from './project/project-inspection-command.js';
 import { runSchemaListCommand, runSchemaPrintCommand } from './schema/schema-command.js';
 import { createDefaultCliInteraction, type CliInteraction } from './shared/cli-interaction.js';
 import {
@@ -22,7 +25,6 @@ import {
   type CommonCliOptions as CommonCommandOptions,
   type MutationCliOptions,
 } from './shared/cli-options.js';
-import { runShowCommand, type ShowResourceType } from './show/show-command.js';
 
 type RegisterProjectResourceCommandsOptions = {
   interaction: CliInteraction;

@@ -1,12 +1,19 @@
 import { COMMAND_REQUEST_SCHEMA_ID, type DatasetImportMapping } from '@attest/contracts';
+import {
+  prepareImportSource,
+  readCommandRequest,
+  runTestMutationCommand,
+  validateCommandRequest,
+  type PreparedImportSource,
+  type TestAuthoringCommand,
+} from '@attest/local/test';
 import { Command, Option } from 'commander';
 
 import { AttestCliError } from '../../../errors/index.js';
 import { setCliCommandHelpMetadata } from '../../../help/command-help.js';
-import type { JsonValue } from '../../../project/canonical-project.js';
 import type { CliIo } from '../../../run-cli.js';
 import type { CliInteraction } from '../../shared/cli-interaction.js';
-import { renderCommandResult, type CommandResult } from '../../shared/command-result.js';
+import { renderCommandResult } from '../../shared/command-result.js';
 import {
   addCommonOptions,
   addMutationOptions as addSharedMutationOptions,
@@ -16,12 +23,6 @@ import {
   type CommonCliOptions as CommonOptions,
   type MutationCliOptions as MutationOptions,
 } from '../../shared/cli-options.js';
-import {
-  prepareImportSource,
-  type PreparedImportSource,
-} from '../import/tabular-import-adapter.js';
-import { readCommandRequest, validateCommandRequest } from '../test-command-input.js';
-import { runTestMutationCommand, type TestAuthoringCommand } from '../test-command.js';
 
 type RegisterTestCommandsOptions = {
   interaction: CliInteraction;
@@ -217,7 +218,7 @@ const executeMutation = async (
   options: MutationOptions,
   context: Pick<RegisterTestCommandsOptions, 'interaction' | 'workingDirectory'>,
   preparedImportSource?: Uint8Array,
-): Promise<CommandResult> =>
+): Promise<Awaited<ReturnType<typeof runTestMutationCommand>>> =>
   runTestMutationCommand({
     preparedImportSource,
     project: options.project,
@@ -258,13 +259,16 @@ const runConfirmedDatasetImport = async (
     dry_run: true,
   });
   const preview = await execute(previewRequest, options, context, prepared.source);
-  const previewResult = preview.result as Record<string, JsonValue>;
-  const affectedTests = Array.isArray(previewResult.affected_tests)
-    ? previewResult.affected_tests.filter((value): value is string => typeof value === 'string')
-    : [];
+  const affectedTests = preview.result.affected_tests ?? [];
   const previewProjectHash = preview.projectHashBefore;
-  if (previewProjectHash === null || previewProjectHash === undefined) {
-    throw new Error('Dataset import preview did not return its base project hash.');
+  const previewProjectHashAfter = preview.projectHashAfter;
+  if (
+    previewProjectHash === null ||
+    previewProjectHash === undefined ||
+    previewProjectHashAfter === null ||
+    previewProjectHashAfter === undefined
+  ) {
+    throw new Error('Dataset import preview did not return its project hashes.');
   }
 
   const confirmedRequest = validateCommandRequest('test.dataset.import', {
@@ -280,21 +284,15 @@ const runConfirmedDatasetImport = async (
   }
 
   const committed = await execute(confirmedRequest, options, context, prepared.source);
-  const committedResult = committed.result as Record<string, JsonValue>;
-  const combined: CommandResult = {
+  const combined: Awaited<ReturnType<typeof runTestMutationCommand>> = {
     ...committed,
-    human: [
-      'Shared dataset update preview:',
-      preview.human,
-      'Confirmed shared dataset update:',
-      committed.human,
-    ].join('\n\n'),
     result: {
-      ...committedResult,
+      ...committed.result,
       shared_dataset_preview: {
         affected_tests: affectedTests,
-        import: previewResult.import ?? null,
-        operations: previewResult.operations ?? [],
+        import: preview.result.import ?? null,
+        operations: preview.result.operations,
+        project_hash_after: previewProjectHashAfter,
         project_hash_before: previewProjectHash,
       },
     },

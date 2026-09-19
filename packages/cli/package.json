@@ -16,9 +16,8 @@
   "dependencies": {
     "@attest/contracts": "workspace:*",
     "@attest/core": "workspace:*",
-    "@attest/web": "workspace:*",
-    "commander": "^15.0.0",
-    "yaml": "^2.9.0"
+    "@attest/local": "workspace:*",
+    "commander": "^15.0.0"
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
@@ -27,5 +26,8 @@
   },
   "devDependencies": {
     "vitest": "^3"
-  }
+  },
+  "files": [
+    "dist"
+  ]
 }

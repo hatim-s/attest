@@ -1,6 +1,12 @@
 import { useState } from 'react';
 
-import type { CaseTransition, CaseVerdict, RunDiff, RunRecord } from '../../api/types.js';
+import type {
+  CaseTransition,
+  CaseTransitionKind,
+  CaseVerdict,
+  RunDiff,
+  RunRecord,
+} from '../../api/types.js';
 import { formatPercent, shortId } from '../../lib/format.js';
 import { Badge, Card, ErrorNotice, Loading } from '../shared/ui.js';
 
@@ -14,7 +20,7 @@ type DiffPanelProps = {
   runs: RunRecord[];
 };
 
-const transitionTone = (kind: string): string => {
+const transitionTone = (kind: CaseTransitionKind): string => {
   if (kind === 'regressed' || kind === 'still_failing') return 'fail';
   if (kind === 'fixed' || kind === 'still_passing') return 'pass';
   return 'neutral';

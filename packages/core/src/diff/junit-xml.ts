@@ -1,16 +1,6 @@
 import type { CaseRecord, RunRecord, StoredMetricEvaluation } from '../store/types.js';
 import { computeCaseVerdict } from './classify.js';
 
-type ArrayWithToSorted<Value> = Value[] & {
-  toSorted(compareFunction?: (left: Value, right: Value) => number): Value[];
-};
-
-/** Uses Bun's immutable sort while the repository's TypeScript lib target catches up. */
-const immutableSort = <Value>(
-  values: Value[],
-  compareFunction?: (left: Value, right: Value) => number,
-): Value[] => (values as ArrayWithToSorted<Value>).toSorted(compareFunction);
-
 /** Retains only XML 1.0-permitted Unicode code points before escaping markup. */
 const stripInvalidXmlCodePoints = (value: string): string =>
   [...value]
@@ -39,21 +29,19 @@ const compareText = (left: string, right: string): number =>
   (left > right ? 1 : 0) - (left < right ? 1 : 0);
 
 const failingMetricNames = (caseRecord: CaseRecord): string[] =>
-  immutableSort(
-    caseRecord.metrics
-      .filter((metric) => metric.status === 'evaluated' && metric.pass !== true)
-      .map((metric) => metric.metricName),
-  );
+  caseRecord.metrics
+    .filter((metric) => metric.status === 'evaluated' && metric.pass !== true)
+    .map((metric) => metric.metricName)
+    .toSorted();
 
 const metricErrorMessages = (metrics: StoredMetricEvaluation[]): string[] =>
-  immutableSort(
-    metrics
-      .filter((metric) => metric.status === 'error')
-      .map(
-        (metric) =>
-          `${metric.metricName}: ${metric.error?.message ?? 'metric evaluation failed without a message'}`,
-      ),
-  );
+  metrics
+    .filter((metric) => metric.status === 'error')
+    .map(
+      (metric) =>
+        `${metric.metricName}: ${metric.error?.message ?? 'metric evaluation failed without a message'}`,
+    )
+    .toSorted();
 
 const errorMessage = (caseRecord: CaseRecord): string => {
   const messages: string[] = [];
@@ -81,7 +69,7 @@ const serializeTestCase = (caseRecord: CaseRecord): string => {
   return `    <testcase ${attributes}><error message="${escapeXml(message)}">${escapeXml(message)}</error></testcase>`;
 };
 
-/** Emits deterministic dependency-free JUnit XML for a run (PLAN 1D.3). */
+/** Emits deterministic dependency-free JUnit XML for a run. */
 const runToJUnitXml = (run: RunRecord, cases: CaseRecord[]): string => {
   const suites = new Map<string, CaseRecord[]>();
   for (const caseRecord of cases) {
@@ -94,8 +82,8 @@ const runToJUnitXml = (run: RunRecord, cases: CaseRecord[]): string => {
     '<?xml version="1.0" encoding="UTF-8"?>',
     `<testsuites name="${escapeXml(run.id)}">`,
   ];
-  for (const suiteName of immutableSort([...suites.keys()])) {
-    const suiteCases = immutableSort(suites.get(suiteName) ?? [], (left, right) =>
+  for (const suiteName of [...suites.keys()].toSorted()) {
+    const suiteCases = (suites.get(suiteName) ?? []).toSorted((left, right) =>
       compareText(left.caseId, right.caseId),
     );
     const failures = suiteCases.filter(

@@ -32,7 +32,7 @@ const authoringTestCaseSchema = testCaseSchema
   .omit({ id: true })
   .extend({ id: resourceIdSchema.optional() });
 
-/** Encodes the complete deterministic CSV/JSON/JSONL import policy owned by . */
+/** Encodes the complete deterministic CSV/JSON/JSONL import policy shared by case and dataset imports. */
 const caseImportOptionsSchema = z.strictObject({
   format: z.enum(['csv', 'json', 'jsonl']).optional(),
   mapping: z.array(datasetImportMappingSchema).optional(),

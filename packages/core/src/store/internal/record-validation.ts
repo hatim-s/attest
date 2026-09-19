@@ -17,9 +17,14 @@ const formatPath = (prefix: string, path: readonly PropertyKey[]): string =>
 
 const collectViolations = (schema: z.ZodType, value: unknown, path: string): string[] => {
   const parsed = schema.safeParse(value);
-  return parsed.success
-    ? []
-    : parsed.error.issues.map((issue) => `${formatPath(path, issue.path)} ${issue.message}`);
+  if (parsed.success) return [];
+  return parsed.error.issues.map((issue) => {
+    const field = issue.path.at(-1);
+    if (issue.code === 'invalid_type' && issue.expected === 'never' && field !== undefined) {
+      return `${formatPath(path, issue.path.slice(0, -1))} forbids ${String(field)}`;
+    }
+    return `${formatPath(path, issue.path)} ${issue.message}`;
+  });
 };
 
 /** Collects complete structural violations in one persisted execution. */

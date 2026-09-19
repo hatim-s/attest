@@ -43,7 +43,7 @@ const validateThresholds = (thresholds: ThresholdConfig): void => {
   }
 };
 
-/** Evaluates only explicitly configured PLAN 1D.3 CI gates. */
+/** Evaluates only explicitly configured CI gates. */
 const evaluateThresholds = (
   diff: RunDiff,
   candidateCases: CaseRecord[],

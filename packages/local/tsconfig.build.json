@@ -1,0 +1,16 @@
+{
+  "extends": "./tsconfig.json",
+  "files": ["src/_tests_/support/index.ts", "src/_tests_/support/project-transaction.ts"],
+  "exclude": ["src/**/_tests_/**", "src/**/*.test.ts"],
+  "references": [
+    {
+      "path": "../contracts/tsconfig.build.json"
+    },
+    {
+      "path": "../core/tsconfig.build.json"
+    },
+    {
+      "path": "../runtime/tsconfig.build.json"
+    }
+  ]
+}
