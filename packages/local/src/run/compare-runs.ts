@@ -1,6 +1,7 @@
+import { resolve } from 'node:path';
+
 import { diffRuns, StoreError, type RunDiff } from '@attest/core';
 
-import { prepareEvalProjectFile } from '../commands/eval/eval-project-path.js';
 import { withReadonlyRunStoreFile } from '../commands/run-store/readonly-run-store.js';
 import { LocalError } from '../errors/index.js';
 
@@ -13,15 +14,8 @@ type CompareLocalRunsOptions = {
 
 /** Compares a consistent store snapshot without creating or migrating the source database. */
 const compareLocalRuns = async (options: CompareLocalRunsOptions): Promise<RunDiff> => {
-  const storePath = await prepareEvalProjectFile(
-    options.workingDirectory,
-    options.storePath ?? '.attest/runs.db',
-    {
-      allowAbsolute: true,
-      errorCode: 'project_read_failed',
-      message: 'The comparison run store is not a safe file.',
-    },
-  );
+  const configuredStorePath = options.storePath ?? '.attest/runs.db';
+  const storePath = resolve(options.workingDirectory, configuredStorePath);
   let diff: RunDiff | undefined;
   try {
     diff = await withReadonlyRunStoreFile(storePath, (store) =>

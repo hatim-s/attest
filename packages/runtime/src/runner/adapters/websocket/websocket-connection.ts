@@ -54,10 +54,19 @@ class WebSocketConnection {
       onClose: (close) => this.acceptClose(close),
       onFailure: (error) => this.fail(error),
       onPing: (payload) => this.writeControlFrame(0x0a, payload),
-      onPong: callbacks.onPong,
-      onText: callbacks.onText,
+      onPong: () => {
+        if (!this.failed && !this.receivedClose && !this.socket.destroyed) callbacks.onPong();
+      },
+      onText: (text, bytes) => {
+        if (!this.failed && !this.receivedClose && !this.socket.destroyed) {
+          callbacks.onText(text, bytes);
+        }
+      },
     });
-    socket.on('data', (chunk: Buffer) => this.frameDecoder.accept(chunk));
+    socket.on('data', (chunk: Buffer) => {
+      if (this.failed || this.receivedClose || this.socket.destroyed) return;
+      this.frameDecoder.accept(chunk);
+    });
     socket.once('error', (error) =>
       this.fail(
         new AgentInvocationError('network', 'WebSocket connection failed.', { cause: error }),

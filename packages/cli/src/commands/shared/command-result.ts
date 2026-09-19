@@ -2,6 +2,7 @@ import type {
   ApplicationCommandResult,
   CommandResult as LocalCommandResult,
   MutationResult,
+  ResourceListResult,
 } from '@attest/local';
 import type { JsonValue } from '@attest/contracts';
 
@@ -154,6 +155,26 @@ const unreachableOperation = (operation: never): never => {
   throw new Error(`Unsupported command result operation: ${String(operation)}`);
 };
 
+const unreachableResourceList = (result: never): never => {
+  throw new Error(`Unsupported resource list: ${JSON.stringify(result)}`);
+};
+
+/** Renders the compact human list while retaining richer fields in structured output. */
+const renderResourceList = (result: ResourceListResult): string => {
+  if (result.items.length === 0) return `No ${result.resource_type}.`;
+  switch (result.resource_type) {
+    case 'agents':
+    case 'datasets':
+    case 'metrics':
+    case 'tests':
+      return result.items.map(({ id, name }) => `  ${id}  ${name}`).join('\n');
+    case 'runs':
+      return result.items.map(({ id }) => `  ${id}`).join('\n');
+    default:
+      return unreachableResourceList(result);
+  }
+};
+
 /** Renders one typed application result without moving terminal prose into the local package. */
 const renderHumanCommandResult = (command: string, commandResult: CommandResult): string => {
   switch (commandResult.operation) {
@@ -178,13 +199,8 @@ const renderHumanCommandResult = (command: string, commandResult: CommandResult)
       const { counts, project_hash: projectHash } = commandResult.result;
       return `Project is valid.\nHash: ${projectHash}\nResources: ${counts.agents} agents, ${counts.tests} tests, ${counts.datasets} datasets, ${counts.metrics} metrics`;
     }
-    case 'list': {
-      const { items, resource_type: resourceType } = commandResult.result;
-      if (items.length === 0) return `No ${resourceType}.`;
-      return items
-        .map((item) => `  ${item.id}${item.name === undefined ? '' : `  ${item.name}`}`)
-        .join('\n');
-    }
+    case 'list':
+      return renderResourceList(commandResult.result);
     case 'test-case-list': {
       const { items } = commandResult.result;
       if (items.length === 0) return 'No direct cases.';
@@ -201,7 +217,7 @@ const renderHumanCommandResult = (command: string, commandResult: CommandResult)
     case 'metric-test': {
       const result = commandResult.result;
       return result.executed
-        ? `Metric ${result.metric_id} matched the fixture expectation.`
+        ? `Metric ${result.metric_id} matched expected_pass=${result.expected_pass}.`
         : `Metric ${result.metric_id} fixture is valid; ${result.kind} execution was not started.`;
     }
     case 'mutation':

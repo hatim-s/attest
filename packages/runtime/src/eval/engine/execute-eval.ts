@@ -19,16 +19,6 @@ import {
   safeErrorMessage,
 } from './run-model.js';
 
-/** Keeps the terminal failure actionable without allowing unbounded adapter text into CLI output. */
-const describeInfrastructureFailure = (errors: readonly string[]): string => {
-  const detail = errors.find((message) => message.trim().length > 0);
-  if (detail === undefined) {
-    return 'Eval run encountered an invocation, metric, persistence, or artifact error.';
-  }
-  const bounded = detail.length > 512 ? `${detail.slice(0, 509)}...` : detail;
-  return `Eval run encountered an invocation, metric, persistence, or artifact error: ${bounded}`;
-};
-
 /** Executes a resolved eval plan through persistence, artifacts, and one bounded event stream. */
 const executeResolvedEvalPlan = async <Payload, BaselineDiff = unknown>(
   plan: ResolvedEvalPlan<Payload>,
@@ -223,7 +213,7 @@ const executeResolvedEvalPlan = async <Payload, BaselineDiff = unknown>(
             'run_failed',
             timedOut
               ? 'Eval run deadline exceeded.'
-              : describeInfrastructureFailure(infrastructureErrors),
+              : 'Eval run encountered an invocation, metric, persistence, or artifact error.',
           );
 
   try {

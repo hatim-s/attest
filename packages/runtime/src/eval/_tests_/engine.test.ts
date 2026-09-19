@@ -620,6 +620,35 @@ describe('executeResolvedEvalPlan', () => {
     expect(evalEventStreamSchema.safeParse(result.events).success).toBe(true);
   });
 
+  it('keeps runner failure details in case evidence and out of the public terminal result', async () => {
+    const sensitiveMessage =
+      'provider failed for https://alice:super-secret@example.test/api?token=top-secret';
+    const plan = createPlan(['case-zero']);
+    const runner: EvalCaseRunner<string> = {
+      executeCase: () => Promise.reject(new Error(sensitiveMessage)),
+    };
+
+    const result = await executeResolvedEvalPlan(plan, runner, createPersistence().adapter, {
+      now: createClock(),
+    });
+
+    expect(result.cases).toMatchObject([
+      { kind: 'infrastructure_error', error: { message: sensitiveMessage } },
+    ]);
+    expect(result.final_result).toMatchObject({
+      exit_code: 4,
+      result: {
+        ok: false,
+        error: {
+          code: 'run_failed',
+          message: 'Eval run encountered an invocation, metric, persistence, or artifact error.',
+        },
+      },
+    });
+    expect(JSON.stringify(result.final_result)).not.toContain('super-secret');
+    expect(JSON.stringify(result.final_result)).not.toContain('top-secret');
+  });
+
   it.each([
     ['evaluated metric failure', failingMetric(), 'completed', 1, 1, 0],
     ['metric execution error', errorMetric(), 'failed', 4, 0, 1],
