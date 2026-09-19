@@ -63,6 +63,28 @@ const callbacks = (
 const advance = (): Promise<void> => new Promise((resolve) => setImmediate(resolve));
 
 describe('WebSocket connection bounds', () => {
+  it('ignores buffered text after connection failure while completing socket close', async () => {
+    const socket = new ControlledSocket();
+    const events: string[] = [];
+    new WebSocketConnection(
+      socket,
+      1_024,
+      {
+        onClose: () => events.push('close'),
+        onFailure: () => events.push('failure'),
+        onPong: () => undefined,
+        onText: (text) => events.push(`text:${text}`),
+      },
+      Buffer.alloc(0),
+    );
+
+    socket.emit('error', new Error('connection lost'));
+    socket.receive(serverFrame(0x1, true, 'late'));
+    await advance();
+
+    expect(events).toEqual(['failure', 'close']);
+  });
+
   it('enforces the aggregate message cap on the final continuation frame', () => {
     const boundarySocket = new ControlledSocket();
     const boundaryTexts: string[] = [];

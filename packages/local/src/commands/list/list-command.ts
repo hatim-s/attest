@@ -1,11 +1,7 @@
 import type { RunRecord } from '@attest/core';
 
 import type { LoadedProject } from '../../project/project-loader/index.js';
-import type {
-  CommandListItem,
-  CommandResult,
-  ResourceListResult,
-} from '../shared/command-result.js';
+import type { CommandResult, ResourceListResult, RunListItem } from '../shared/command-result.js';
 import { loadCommandProject } from '../project/load-command-project.js';
 import { withReadonlyRunStore } from '../run-store/readonly-run-store.js';
 
@@ -41,7 +37,7 @@ const toSafeRunSummary = (run: RunRecord) => ({
       }),
 });
 
-const listRuns = async (project: LoadedProject): Promise<CommandListItem[]> => {
+const listRuns = async (project: LoadedProject): Promise<RunListItem[]> => {
   return (
     (await withReadonlyRunStore(project.root, async (store) =>
       (await store.listRuns()).map(toSafeRunSummary),
@@ -52,43 +48,55 @@ const listRuns = async (project: LoadedProject): Promise<CommandListItem[]> => {
 const listResourceSummaries = async (
   project: LoadedProject,
   resourceType: ListResourceType,
-): Promise<CommandListItem[]> => {
+): Promise<ResourceListResult> => {
   if (resourceType === 'runs') {
-    return await listRuns(project);
+    return { resource_type: 'runs', items: await listRuns(project) };
   }
   if (resourceType === 'agents') {
-    return project.agents.map(({ id, name, schema, transport }) => ({
-      id,
-      name,
-      schema,
-      transport: transport.kind,
-    }));
+    return {
+      resource_type: 'agents',
+      items: project.agents.map(({ id, name, schema, transport }) => ({
+        id,
+        name,
+        schema,
+        transport: transport.kind,
+      })),
+    };
   }
   if (resourceType === 'tests') {
-    return project.tests.map(({ agent_id, cases, datasets, id, metrics, name, schema }) => ({
+    return {
+      resource_type: 'tests',
+      items: project.tests.map(({ agent_id, cases, datasets, id, metrics, name, schema }) => ({
+        id,
+        name,
+        schema,
+        agent_id,
+        case_count: cases.length,
+        dataset_count: datasets.length,
+        metric_count: metrics.length,
+      })),
+    };
+  }
+  if (resourceType === 'datasets') {
+    return {
+      resource_type: 'datasets',
+      items: project.datasets.map(({ metadata }) => ({
+        id: metadata.id,
+        name: metadata.name,
+        schema: metadata.schema,
+        case_count: metadata.case_count,
+      })),
+    };
+  }
+  return {
+    resource_type: 'metrics',
+    items: project.metrics.map(({ definition, id, name, schema }) => ({
       id,
       name,
       schema,
-      agent_id,
-      case_count: cases.length,
-      dataset_count: datasets.length,
-      metric_count: metrics.length,
-    }));
-  }
-  if (resourceType === 'datasets') {
-    return project.datasets.map(({ metadata }) => ({
-      id: metadata.id,
-      name: metadata.name,
-      schema: metadata.schema,
-      case_count: metadata.case_count,
-    }));
-  }
-  return project.metrics.map(({ definition, id, name, schema }) => ({
-    id,
-    name,
-    schema,
-    kind: definition.kind,
-  }));
+      kind: definition.kind,
+    })),
+  };
 };
 
 /** Lists deterministic resource summaries without creating missing local state. */
@@ -99,12 +107,12 @@ const runListCommand = async (
     project: options.project,
     workingDirectory: options.workingDirectory,
   });
-  const items = await listResourceSummaries(project, options.resourceType);
+  const result = await listResourceSummaries(project, options.resourceType);
   return {
     operation: 'list',
     projectHashBefore: project.projectHash,
     projectHashAfter: project.projectHash,
-    result: { resource_type: options.resourceType, items },
+    result,
   };
 };
 

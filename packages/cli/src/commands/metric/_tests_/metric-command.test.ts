@@ -118,6 +118,19 @@ const runJson = async (
   };
 };
 
+const runHuman = async (root: string, argv: string[], stdin = ''): Promise<string> => {
+  const collected = collectIo();
+  const exitCode = await runCli(argv, {
+    interaction: nonInteractive(stdin),
+    io: collected.io,
+    workingDirectory: root,
+  });
+  expect(exitCode).toBe(0);
+  expect(collected.errors).toEqual([]);
+  expect(collected.output).toHaveLength(1);
+  return collected.output[0] ?? '';
+};
+
 /** Runs the compiled CLI while retaining structured stdout from expected nonzero exits. */
 const runBuiltCli = async (
   argv: readonly string[],
@@ -613,8 +626,15 @@ describe('metric authoring and local tests', { timeout: 30_000 }, () => {
     expect(first.output).toBe(second.output);
     expect(first.document).toMatchObject({
       ok: true,
-      result: { executed: true, evaluation: { status: 'evaluated', result: { pass: true } } },
+      result: {
+        executed: true,
+        expected_pass: true,
+        evaluation: { status: 'evaluated', result: { pass: true } },
+      },
     });
+    expect(await runHuman(root, ['metric', 'test', 'exact', '--fixture', fixturePath])).toBe(
+      'Metric exact matched expected_pass=true.',
+    );
 
     const mismatchPath = join(root, 'fixture-mismatch.json');
     await writeFile(mismatchPath, metricFixture({ answer: 'London' }, true));
@@ -632,7 +652,10 @@ describe('metric authoring and local tests', { timeout: 30_000 }, () => {
       (await runJson(root, ['metric', 'test', 'exact', '--fixture', mismatchPath])).document,
     ).toMatchObject({
       ok: true,
-      result: { evaluation: { status: 'evaluated', result: { pass: false } } },
+      result: {
+        expected_pass: false,
+        evaluation: { status: 'evaluated', result: { pass: false } },
+      },
     });
     const missingVerdict = JSON.parse(metricFixture()) as Record<string, unknown>;
     Reflect.deleteProperty(missingVerdict, 'expected_pass');

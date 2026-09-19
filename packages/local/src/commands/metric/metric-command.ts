@@ -487,6 +487,7 @@ const runMetricTestCommand = async (
       kind: metric.definition.kind,
       fixture_valid: true,
       executed: true,
+      expected_pass: fixture.expected_pass,
       evaluation: redacted,
     },
   };
