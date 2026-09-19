@@ -73,7 +73,15 @@ describe('redactAgentRequest', () => {
         },
         warnings: [warning],
       },
-      diagnostics: { stderrExcerpt: 'secret-value', httpStatus: 200, remoteJobId: 'ok' },
+      diagnostics: {
+        stderrExcerpt: 'secret-value',
+        httpStatus: 200,
+        remoteJobId: 'ok',
+        sandboxError: 'secret-value',
+        lifecycleError: 'secret-value',
+        sandboxCleanupConfirmed: false,
+        sandboxCompletionConfirmed: false,
+      },
       durationMs: 1,
       rawExcerpt: { text: 'secret-value', truncated: false },
       warnings: [warning],
@@ -94,6 +102,10 @@ describe('redactAgentRequest', () => {
       stderrExcerpt: '[REDACTED]',
       httpStatus: 200,
       remoteJobId: 'ok',
+      sandboxError: '[REDACTED]',
+      lifecycleError: '[REDACTED]',
+      sandboxCleanupConfirmed: false,
+      sandboxCompletionConfirmed: false,
     });
     expect(redacted.rawExcerpt).toEqual({ text: '[REDACTED]', truncated: false });
     expect(redacted.warnings).toEqual([

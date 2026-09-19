@@ -193,6 +193,18 @@ const redactInvocationDiagnostics = (
   ...(diagnostics.stderrExcerpt === undefined
     ? {}
     : { stderrExcerpt: redactString(diagnostics.stderrExcerpt, secrets) }),
+  ...(diagnostics.sandboxError === undefined
+    ? {}
+    : { sandboxError: redactString(diagnostics.sandboxError, secrets) }),
+  ...(diagnostics.lifecycleError === undefined
+    ? {}
+    : { lifecycleError: redactString(diagnostics.lifecycleError, secrets) }),
+  ...(diagnostics.sandboxCleanupConfirmed === undefined
+    ? {}
+    : { sandboxCleanupConfirmed: diagnostics.sandboxCleanupConfirmed }),
+  ...(diagnostics.sandboxCompletionConfirmed === undefined
+    ? {}
+    : { sandboxCompletionConfirmed: diagnostics.sandboxCompletionConfirmed }),
   ...(diagnostics.exitCode === undefined ? {} : { exitCode: diagnostics.exitCode }),
   ...(diagnostics.httpStatus === undefined ? {} : { httpStatus: diagnostics.httpStatus }),
   ...(diagnostics.remoteJobId === undefined ? {} : { remoteJobId: diagnostics.remoteJobId }),
