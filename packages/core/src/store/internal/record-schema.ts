@@ -11,7 +11,7 @@ const isoTimestampSchema = z
   );
 const nonemptyStringSchema = z.string().min(1);
 const durationSchema = z.number().finite().nonnegative();
-const forbiddenValueSchema = z.custom<never>(() => true);
+const forbiddenValueSchema = z.never();
 const invocationErrorCodeSchema = z.enum([
   'spawn_failed',
   'timeout',
@@ -49,29 +49,20 @@ const attemptBase = {
   rawExcerpt: rawExcerptSchema.optional(),
   warnings: z.array(warningSchema),
 };
-const storedAttemptSchema = z
-  .discriminatedUnion('status', [
-    z.object({
-      ...attemptBase,
-      status: z.literal('ok'),
-      errorCode: forbiddenValueSchema.optional(),
-      errorMessage: forbiddenValueSchema.optional(),
-    }),
-    z.object({
-      ...attemptBase,
-      status: z.literal('invocation_error'),
-      errorCode: invocationErrorCodeSchema,
-      errorMessage: z.string(),
-    }),
-  ])
-  .superRefine((attempt, context) => {
-    if (attempt.status !== 'ok') return;
-    for (const field of ['errorCode', 'errorMessage'] as const) {
-      if (Object.hasOwn(attempt, field) && attempt[field] !== undefined) {
-        context.addIssue({ code: 'custom', path: [field], message: `ok status forbids ${field}` });
-      }
-    }
-  });
+const storedAttemptSchema = z.discriminatedUnion('status', [
+  z.object({
+    ...attemptBase,
+    status: z.literal('ok'),
+    errorCode: forbiddenValueSchema.optional(),
+    errorMessage: forbiddenValueSchema.optional(),
+  }),
+  z.object({
+    ...attemptBase,
+    status: z.literal('invocation_error'),
+    errorCode: invocationErrorCodeSchema,
+    errorMessage: z.string(),
+  }),
+]);
 const executionBase = {
   caseId: nonemptyStringSchema,
   suiteName: nonemptyStringSchema,
@@ -102,29 +93,11 @@ const failedExecutionSchema = z.object({
 const storedCaseExecutionSchema = z
   .discriminatedUnion('outcome', [completedExecutionSchema, failedExecutionSchema])
   .superRefine((execution, context) => {
-    if (execution.outcome === 'completed') {
-      if (!Object.hasOwn(execution, 'response') || execution.response === undefined) {
-        context.addIssue({ code: 'custom', path: ['response'], message: 'is required' });
-      }
-      for (const field of ['errorCode', 'errorMessage'] as const) {
-        if (Object.hasOwn(execution, field) && execution[field] !== undefined) {
-          context.addIssue({
-            code: 'custom',
-            path: [field],
-            message: `with completed outcome forbids ${field}`,
-          });
-        }
-      }
-      return;
-    }
-    for (const field of ['response', 'trace'] as const) {
-      if (Object.hasOwn(execution, field) && execution[field] !== undefined) {
-        context.addIssue({
-          code: 'custom',
-          path: [field],
-          message: `with non-completed outcome forbids ${field}`,
-        });
-      }
+    if (
+      execution.outcome === 'completed' &&
+      (!Object.hasOwn(execution, 'response') || execution.response === undefined)
+    ) {
+      context.addIssue({ code: 'custom', path: ['response'], message: 'is required' });
     }
   });
 
@@ -136,38 +109,22 @@ const metricBase = {
   judgeIo: z.json().optional(),
   durationMs: durationSchema.optional(),
 };
-const storedMetricEvaluationSchema = z
-  .discriminatedUnion('status', [
-    z.object({
-      ...metricBase,
-      status: z.literal('evaluated'),
-      score: z.number().finite(),
-      pass: z.boolean(),
-      error: forbiddenValueSchema.optional(),
-    }),
-    z.object({
-      ...metricBase,
-      status: z.literal('error'),
-      error: z.object({ message: nonemptyStringSchema, kind: nonemptyStringSchema }),
-      score: forbiddenValueSchema.optional(),
-      pass: forbiddenValueSchema.optional(),
-    }),
-  ])
-  .superRefine((evaluation, context) => {
-    const forbidden = evaluation.status === 'evaluated' ? ['error'] : ['score', 'pass'];
-    for (const field of forbidden) {
-      if (
-        Object.hasOwn(evaluation, field) &&
-        evaluation[field as keyof typeof evaluation] !== undefined
-      ) {
-        context.addIssue({
-          code: 'custom',
-          path: [field],
-          message: `with ${evaluation.status} status forbids ${field}`,
-        });
-      }
-    }
-  });
+const storedMetricEvaluationSchema = z.discriminatedUnion('status', [
+  z.object({
+    ...metricBase,
+    status: z.literal('evaluated'),
+    score: z.number().finite(),
+    pass: z.boolean(),
+    error: forbiddenValueSchema.optional(),
+  }),
+  z.object({
+    ...metricBase,
+    status: z.literal('error'),
+    error: z.object({ message: nonemptyStringSchema, kind: nonemptyStringSchema }),
+    score: forbiddenValueSchema.optional(),
+    pass: forbiddenValueSchema.optional(),
+  }),
+]);
 
 const summarySchema = z.object({
   totalCases: z.number().int().nonnegative(),

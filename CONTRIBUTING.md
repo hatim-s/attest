@@ -1,7 +1,8 @@
 # Contributing
 
 Install dependencies with `bun install`. The available development commands are documented in
-[docs/SCRIPTS.md](docs/SCRIPTS.md).
+[docs/SCRIPTS.md](docs/SCRIPTS.md). Read the [package architecture](docs/ARCHITECTURE.md)
+before adding dependencies or moving public APIs.
 
 Use [Conventional Commits](https://www.conventionalcommits.org/) for commit messages, such as
 `feat(core): add a run reader` or `fix(cli): report malformed input`.

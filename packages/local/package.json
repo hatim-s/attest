@@ -1,0 +1,74 @@
+{
+  "name": "@attest/local",
+  "version": "0.0.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./agent": {
+      "types": "./dist/agent/index.d.ts",
+      "import": "./dist/agent/index.js"
+    },
+    "./eval": {
+      "types": "./dist/eval/index.d.ts",
+      "import": "./dist/eval/index.js"
+    },
+    "./metric": {
+      "types": "./dist/metric/index.d.ts",
+      "import": "./dist/metric/index.js"
+    },
+    "./project": {
+      "types": "./dist/project/index.d.ts",
+      "import": "./dist/project/index.js"
+    },
+    "./runs": {
+      "types": "./dist/run/index.d.ts",
+      "import": "./dist/run/index.js"
+    },
+    "./store": {
+      "types": "./dist/store/index.d.ts",
+      "import": "./dist/store/index.js"
+    },
+    "./test": {
+      "types": "./dist/test/index.d.ts",
+      "import": "./dist/test/index.js"
+    },
+    "./testing": {
+      "types": "./dist/_tests_/support/index.d.ts",
+      "import": "./dist/_tests_/support/index.js"
+    },
+    "./view-server": {
+      "types": "./dist/view-server/index.d.ts",
+      "import": "./dist/view-server/index.js"
+    }
+  },
+  "dependencies": {
+    "@attest/contracts": "workspace:*",
+    "@attest/core": "workspace:*",
+    "@attest/runtime": "workspace:*",
+    "@attest/web": "workspace:*",
+    "@hono/node-server": "^2.1.0",
+    "hono": "^4.13.0",
+    "kysely": "^0.29.4",
+    "ulid": "^3.0.2",
+    "zod": "^4"
+  },
+  "optionalDependencies": {
+    "@libsql/client": "^0.17.4"
+  },
+  "scripts": {
+    "build": "tsc --build tsconfig.build.json",
+    "test": "vitest run --maxWorkers=1",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "devDependencies": {
+    "vitest": "^3"
+  },
+  "files": [
+    "dist"
+  ]
+}

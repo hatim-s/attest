@@ -1,0 +1,32 @@
+export { executeResolvedEvalPlan, freezeEvalRun } from './engine/index.js';
+export { createEvalJUnitPayload } from './junit.js';
+export {
+  classifyCaseVerdict,
+  normalizeAttempts,
+  normalizeCaseResult,
+  normalizeMetricResults,
+  summarizeEvalCases,
+} from './normalization.js';
+export type {
+  DeepReadonly,
+  EvalArtifactWriter,
+  EvalBaselineAdapter,
+  EvalCaseExecutionContext,
+  EvalCaseInfrastructureFailure,
+  EvalCaseRecord,
+  EvalCaseRunner,
+  EvalCaseVerdict,
+  EvalEventLimits,
+  EvalExecutionResult,
+  EvalJUnitPayload,
+  EvalPersistenceAdapter,
+  EvalTerminalErrorCode,
+  EvalTerminalFailureFactory,
+  ExecuteEvalOptions,
+  ImmutableEvalRun,
+  NormalizedEvalAttempt,
+  NormalizedEvalCaseResult,
+  NormalizedEvalMetricResult,
+  ResolvedEvalCase,
+  ResolvedEvalPlan,
+} from './types.js';

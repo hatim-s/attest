@@ -1,11 +1,6 @@
+import { classifyStoredCase as computeCaseVerdict } from '../store/case-summary.js';
 import type { CaseRecord, StoredMetricEvaluation } from '../store/types.js';
-import type {
-  CaseTransition,
-  CaseTransitionKind,
-  CaseVerdict,
-  MetricDelta,
-  RunDiff,
-} from './types.js';
+import type { CaseTransition, CaseTransitionKind, MetricDelta, RunDiff } from './types.js';
 
 /** Float-noise tolerance: 1e-9 dwarfs f64 ULPs at score scale but not meaningful score deltas. */
 const SCORE_EQUALITY_EPSILON = 1e-9;
@@ -18,35 +13,6 @@ const transitionKinds = [
   'still_passing',
   'still_failing',
 ] as const satisfies readonly CaseTransitionKind[];
-
-type ArrayWithToSorted<Value> = Value[] & {
-  toSorted(compareFunction?: (left: Value, right: Value) => number): Value[];
-};
-
-/** Uses Bun's immutable sort while the repository's TypeScript lib target catches up. */
-const immutableSort = <Value>(
-  values: Value[],
-  compareFunction?: (left: Value, right: Value) => number,
-): Value[] => (values as ArrayWithToSorted<Value>).toSorted(compareFunction);
-
-/** Computes the exclusive case verdict defined by PLAN 1D.1. */
-const computeCaseVerdict = (caseRecord: CaseRecord): CaseVerdict => {
-  if (caseRecord.outcome !== 'completed') {
-    return 'error';
-  }
-
-  // mirrors store/internal/run-summary.ts — gate reconciliation owns unification
-  const metricsByExpectedName = metricsByName(caseRecord);
-  let failed = false;
-  for (const metricName of caseRecord.expectedMetrics) {
-    const metric = metricsByExpectedName.get(metricName);
-    if (!metric || metric.status !== 'evaluated' || metric.pass === undefined) {
-      return 'error';
-    }
-    failed ||= metric.pass !== true;
-  }
-  return failed ? 'fail' : 'pass';
-};
 
 const metricsByName = (caseRecord: CaseRecord | undefined): Map<string, StoredMetricEvaluation> =>
   new Map(caseRecord?.metrics.map((metric) => [metric.metricName, metric]) ?? []);
@@ -86,7 +52,7 @@ const hasIdenticalMetricScores = (base: CaseRecord, candidate: CaseRecord): bool
 };
 
 /**
- * Classifies a case pair using PLAN 1D.1 transition semantics.
+ * Classifies a case pair using transition semantics.
  * Primary verdict transitions remain independent from flakiness annotations.
  */
 const classifyTransition = (
@@ -129,16 +95,14 @@ const computePassTransition = (
   return 'unchanged';
 };
 
-/** Computes name-ordered metric score and pass movement for PLAN 1D.1. */
+/** Computes metric score and pass changes, ordered by name. */
 const computeMetricDeltas = (
   base: CaseRecord | undefined,
   candidate: CaseRecord | undefined,
 ): MetricDelta[] => {
   const baseMetrics = metricsByName(base);
   const candidateMetrics = metricsByName(candidate);
-  const metricNames = immutableSort([
-    ...new Set([...baseMetrics.keys(), ...candidateMetrics.keys()]),
-  ]);
+  const metricNames = [...new Set([...baseMetrics.keys(), ...candidateMetrics.keys()])].toSorted();
   return metricNames.map((metricName) => {
     const baseMetric = baseMetrics.get(metricName);
     const candidateMetric = candidateMetrics.get(metricName);
@@ -189,7 +153,7 @@ const isFlakinessSuspected = (
   );
 };
 
-/** Classifies two case collections in stable suite-and-case order (PLAN 1D.1). */
+/** Classifies two case collections in stable suite-and-case order. */
 const classifyRuns = (
   baseCases: CaseRecord[],
   candidateCases: CaseRecord[],
@@ -202,14 +166,14 @@ const classifyRuns = (
 ): RunDiff => {
   const baseIndex = indexCases(baseCases);
   const candidateIndex = indexCases(candidateCases);
-  const suiteNames = immutableSort([...new Set([...baseIndex.keys(), ...candidateIndex.keys()])]);
+  const suiteNames = [...new Set([...baseIndex.keys(), ...candidateIndex.keys()])].toSorted();
   const transitions: CaseTransition[] = [];
   for (const suiteName of suiteNames) {
     const baseSuite = baseIndex.get(suiteName);
     const candidateSuite = candidateIndex.get(suiteName);
-    const caseIds = immutableSort([
+    const caseIds = [
       ...new Set([...(baseSuite?.keys() ?? []), ...(candidateSuite?.keys() ?? [])]),
-    ]);
+    ].toSorted();
     for (const caseId of caseIds) {
       const base = baseSuite?.get(caseId);
       const candidate = candidateSuite?.get(caseId);

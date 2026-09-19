@@ -1,10 +1,20 @@
 {
   "files": [],
   "references": [
-    { "path": "./packages/contracts" },
-    { "path": "./packages/core" },
-    { "path": "./packages/cli" },
-    { "path": "./packages/web" },
-    { "path": "./packages/schemas" }
+    {
+      "path": "./packages/contracts/tsconfig.build.json"
+    },
+    {
+      "path": "./packages/core/tsconfig.build.json"
+    },
+    {
+      "path": "./packages/runtime/tsconfig.build.json"
+    },
+    {
+      "path": "./packages/local/tsconfig.build.json"
+    },
+    {
+      "path": "./packages/cli/tsconfig.build.json"
+    }
   ]
 }

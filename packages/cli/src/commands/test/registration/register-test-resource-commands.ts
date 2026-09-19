@@ -1,4 +1,5 @@
 import { TEST_RESOURCE_SCHEMA_ID } from '@attest/contracts';
+import { runTestListCommand, runTestShowCommand } from '@attest/local/test';
 import type { Command } from 'commander';
 
 import {
@@ -19,7 +20,6 @@ import {
   type RegisterTestCommandsOptions,
   type TestOptions,
 } from './support.js';
-import { runTestListCommand, runTestShowCommand } from '../test-command.js';
 
 /** Registers test resource authoring and inspection commands. */
 const registerTestResourceCommands = (

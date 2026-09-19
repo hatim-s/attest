@@ -10,9 +10,9 @@ import {
   type EvalRunRequest,
   type JsonValue,
 } from '@attest/contracts';
+import { parseDuration } from '@attest/local/agent';
 
 import { AttestCliError } from '../../errors/index.js';
-import { parseDuration } from '../agent/agent-request.js';
 
 type EvalPrompt = (question: string, options?: { signal?: AbortSignal }) => Promise<string>;
 

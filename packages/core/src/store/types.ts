@@ -48,7 +48,7 @@ interface RunIdentity {
   createdAt: string;
 }
 
-/** Provides the blob-free case list projection consumed by the PLAN 2V view server. */
+/** Provides the blob-free case list projection consumed by the view server. */
 interface CaseSummary {
   caseId: string;
   suiteName: string;
@@ -60,7 +60,7 @@ interface CaseSummary {
   metricCounts: { expected: number; evaluated: number; passed: number; errors: number };
 }
 
-/** Defines the durable run lifecycle and query surface required by PLAN 1S.3. */
+/** Defines durable run writes and queries. */
 interface RunStore {
   createRun(metadata: RunMetadata, identity?: RunIdentity): Promise<RunRecord>;
   recordCase(

@@ -1,5 +1,15 @@
 {
   "extends": "./tsconfig.json",
-  "exclude": ["src/**/_tests/**"],
-  "references": [{ "path": "../contracts" }, { "path": "../core" }, { "path": "../web" }]
+  "exclude": ["src/**/_tests_/**"],
+  "references": [
+    {
+      "path": "../contracts/tsconfig.build.json"
+    },
+    {
+      "path": "../core/tsconfig.build.json"
+    },
+    {
+      "path": "../local/tsconfig.build.json"
+    }
+  ]
 }

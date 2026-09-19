@@ -1,4 +1,5 @@
 import { AttestError, type CliError, type CliExitCode } from '@attest/contracts';
+import { LocalError } from '@attest/local';
 import { CommanderError } from 'commander';
 
 import { AttestCliError } from './attest-cli-error.js';
@@ -14,7 +15,7 @@ const definedFields = <T extends Record<string, unknown>>(fields: T): T =>
 
 /** Converts any thrown value to a safe stable CLI error and process exit code. */
 const serializeCliError = (error: unknown): SerializedCliFailure => {
-  if (error instanceof AttestCliError) {
+  if (error instanceof AttestCliError || error instanceof LocalError) {
     const definition = getCliErrorDefinition(error.code);
     if (definition === undefined) {
       throw new Error(`Unregistered CLI error code: ${error.code}`);
