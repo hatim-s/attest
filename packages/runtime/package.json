@@ -18,12 +18,14 @@
     "@tanstack/ai-openai": "0.18.0",
     "ajv": "^8.20.0",
     "zod": "^4",
-    "@vercel/sandbox": "3.3.0"
+    "@attest/executor": "workspace:*"
   },
   "scripts": {
     "build": "tsc --build tsconfig.build.json",
     "test": "vitest run --maxWorkers=1",
-    "typecheck": "tsc --noEmit -p tsconfig.json"
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test:node": "node --test src/eval/_tests_/portability.check.mjs",
+    "test:bun": "bun test ./src/eval/_tests_/portability.check.mjs"
   },
   "devDependencies": {
     "fast-check": "^4.9.0",

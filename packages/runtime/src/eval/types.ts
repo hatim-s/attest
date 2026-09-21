@@ -7,8 +7,15 @@ import type {
   JsonValue,
 } from '@attest/contracts';
 
+import type { EvalHooks } from './hooks.js';
+
 import type { MetricEvaluation } from '../metrics/metric-evaluation.js';
-import type { CaseExecution, InvocationDiagnostics } from '../runner/types.js';
+import type {
+  CaseEnvironment,
+  CaseEnvironmentFactory,
+  CaseExecution,
+  InvocationDiagnostics,
+} from '@attest/executor';
 
 /** Recursively marks the immutable eval-run metadata handed to execution and persistence. */
 type DeepReadonly<Value> = Value extends (...arguments_: never[]) => unknown
@@ -109,6 +116,15 @@ type EvalCaseRecord<Payload = unknown> =
 type EvalCaseExecutionContext = {
   /** Identifies the stable worker directory or transient concurrency slot assigned to this case. */
   worker_index: number;
+  environment?: CaseEnvironment;
+  afterAgent?(execution: CaseExecution): Promise<void>;
+  afterEvaluation?(execution: CaseExecution, metrics: readonly MetricEvaluation[]): Promise<void>;
+};
+
+type EvalCaseRunnerResult = {
+  execution: CaseExecution;
+  metrics: readonly MetricEvaluation[];
+  lifecycle_error?: string;
 };
 
 type EvalCaseRunner<Payload = unknown> = {
@@ -118,11 +134,7 @@ type EvalCaseRunner<Payload = unknown> = {
     resolvedCase: ResolvedEvalCase<Payload>,
     signal: AbortSignal,
     context: EvalCaseExecutionContext,
-  ): Promise<{
-    execution: CaseExecution;
-    metrics: readonly MetricEvaluation[];
-    lifecycle_error?: string;
-  }>;
+  ): Promise<EvalCaseRunnerResult>;
   cleanup?(runId: string): Promise<void>;
   afterRun?(
     runId: string,
@@ -177,7 +189,9 @@ type EvalTerminalFailureFactory = (
 ) => EvalFinalResultData;
 
 /** Injects deterministic time and optional event delivery without changing stored results. */
-type ExecuteEvalOptions<BaselineDiff = JsonValue> = {
+type ExecuteEvalOptions<BaselineDiff = JsonValue, Payload = unknown> = {
+  hooks?: readonly EvalHooks<Payload>[];
+  isolation?: CaseEnvironmentFactory;
   signal?: AbortSignal;
   now?: () => string;
   event_limits?: Partial<EvalEventLimits>;
@@ -210,6 +224,7 @@ export {
   type EvalCaseExecutionContext,
   type EvalCaseRecord,
   type EvalCaseRunner,
+  type EvalCaseRunnerResult,
   type EvalCaseVerdict,
   type EvalEventLimits,
   type EvalExecutionResult,

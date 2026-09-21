@@ -16,7 +16,7 @@ import {
 const DEFAULT_HOOK_TIMEOUT_MS = 30_000;
 
 type LifecycleConfig = {
-  hooks?: Partial<Record<'before_run' | 'before_case' | 'after_case' | 'after_run', HookCommand>>;
+  hooks?: Partial<Record<HookPhase, HookCommand>>;
   workers?: { count: number; directory: string };
 };
 
@@ -167,6 +167,34 @@ const createEvalLifecycle = (projectRoot: string, run: EvalRun) => {
   };
 
   return {
+    afterAgent: (
+      context: CaseHookContext,
+      directory: string | undefined,
+      outcome: string,
+      signal: AbortSignal,
+    ): Promise<void> =>
+      trackedRunHook(
+        config?.hooks?.after_agent,
+        directory ?? projectRoot,
+        { ...caseEnvironment(context, directory), ATTEST_CASE_OUTCOME: outcome },
+        'after_agent',
+        projectRoot,
+        signal,
+      ),
+    afterEvaluation: (
+      context: CaseHookContext,
+      directory: string | undefined,
+      outcome: string,
+      signal: AbortSignal,
+    ): Promise<void> =>
+      trackedRunHook(
+        config?.hooks?.after_evaluation,
+        directory ?? projectRoot,
+        { ...caseEnvironment(context, directory), ATTEST_CASE_OUTCOME: outcome },
+        'after_evaluation',
+        projectRoot,
+        signal,
+      ),
     afterCase: async (
       context: CaseHookContext,
       workerDirectory: string | undefined,

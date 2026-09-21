@@ -3,9 +3,13 @@ import { evalEventStreamSchema } from '@attest/contracts';
 import { describe, expect, it, vi } from 'vitest';
 
 import type { MetricEvaluation } from '../../metrics/metric-evaluation.js';
-import { AgentInvocationError } from '../../runner/errors.js';
-import type { CaseExecution } from '../../runner/types.js';
+import { AgentInvocationError } from '@attest/executor';
+import type { CaseExecution } from '@attest/executor';
+import { createStagedCaseRunner } from '../staged-runner.js';
+import { justBashIsolation } from '@attest/executor';
+
 import { executeResolvedEvalPlan } from '../engine/index.js';
+import { withEvalHooks } from '../hooks.js';
 import type {
   EvalCaseRunner,
   EvalPersistenceAdapter,
@@ -273,7 +277,7 @@ describe('executeResolvedEvalPlan', () => {
     const result = await pending;
 
     expect(result.status).toBe('cancelled');
-    expect(executeCase).toHaveBeenCalledOnce();
+    expect(executeCase).not.toHaveBeenCalled();
   });
 
   it('bounds concurrency while retaining actual completion order and configured indexes', async () => {
@@ -454,7 +458,7 @@ describe('executeResolvedEvalPlan', () => {
     controller.abort(new Error('user interrupted'));
     const result = await execution;
 
-    expect(observedSignals).toHaveLength(3);
+    expect(observedSignals).toHaveLength(2);
     expect(observedSignals.every(({ aborted }) => aborted)).toBe(true);
     expect(result.status).toBe('cancelled');
     expect(result.exit_code).toBe(130);
@@ -780,5 +784,296 @@ describe('executeResolvedEvalPlan', () => {
     expect(result.events.at(-1)).toMatchObject({ event: 'result', data: { exit_code: 4 } });
     expect(persistence.finalizeRun).toHaveBeenCalledWith(RUN_ID, 'failed', result.summary);
     expect(evalEventStreamSchema.safeParse(result.events).success).toBe(true);
+  });
+});
+
+describe('runtime hooks and isolated stages', () => {
+  it('keeps the environment alive through all stages and isolates concurrent cases', async () => {
+    const stages = new Map<string, string[]>();
+    const runStages: string[] = [];
+    const plan = createPlan(['one', 'two']);
+    const runner = createStagedCaseRunner<string>({
+      invoke: async ({ resolvedCase, environment }) => {
+        stages.get(resolvedCase.case_id)!.push('invoke');
+        expect(await environment!.readFile('case.txt')).toBe(resolvedCase.case_id);
+        return completedExecution(resolvedCase, []).execution;
+      },
+      evaluate: async ({ resolvedCase, environment }) => {
+        stages.get(resolvedCase.case_id)!.push('evaluate');
+        expect(await environment!.readFile('after-agent.txt')).toBe('ready');
+        return [];
+      },
+    });
+    const result = await executeResolvedEvalPlan(plan, runner, createPersistence().adapter, {
+      isolation: justBashIsolation(),
+      hooks: [
+        {
+          before_run: () => {
+            runStages.push('before');
+          },
+          before_case: async ({ resolvedCase, environment, caseState }) => {
+            stages.set(resolvedCase.case_id, ['before']);
+            caseState.set('id', resolvedCase.case_id);
+            await environment!.writeFile('case.txt', resolvedCase.case_id);
+          },
+          after_agent: async ({ resolvedCase, environment }) => {
+            stages.get(resolvedCase.case_id)!.push('after_agent');
+            await environment!.writeFile('after-agent.txt', 'ready');
+          },
+          after_evaluation: ({ resolvedCase }) => {
+            stages.get(resolvedCase.case_id)!.push('after_evaluation');
+          },
+          after_case: async ({ resolvedCase, environment, caseState }) => {
+            expect(caseState.get('id')).toBe(resolvedCase.case_id);
+            expect(await environment!.readFile('case.txt')).toBe(resolvedCase.case_id);
+            stages.get(resolvedCase.case_id)!.push('after');
+          },
+          after_run: ({ status }) => {
+            runStages.push(status);
+          },
+        },
+      ],
+    });
+    expect(result.status).toBe('completed');
+    expect([...stages.values()]).toEqual(
+      Array.from({ length: 2 }, () => [
+        'before',
+        'invoke',
+        'after_agent',
+        'evaluate',
+        'after_evaluation',
+        'after',
+      ]),
+    );
+    expect(runStages).toEqual(['before', 'completed']);
+  });
+
+  it('runs all final hooks and disposes the environment when setup throws', async () => {
+    const dispose = vi.fn(() => Promise.resolve());
+    const after = vi.fn();
+    const executeCase = vi.fn<EvalCaseRunner<string>['executeCase']>();
+    const result = await executeResolvedEvalPlan(
+      createPlan(['one']),
+      { executeCase },
+      createPersistence().adapter,
+      {
+        isolation: () =>
+          Promise.resolve({
+            kind: 'fake',
+            exec: vi.fn(),
+            readFile: vi.fn(),
+            writeFile: vi.fn(),
+            dispose,
+          }),
+        hooks: [
+          {
+            before_case: () => {
+              throw new Error('setup failed');
+            },
+            after_case: () => {
+              throw new Error('teardown failed');
+            },
+          },
+          { after_case: after },
+        ],
+      },
+    );
+    expect(result.status).toBe('failed');
+    expect(executeCase).not.toHaveBeenCalled();
+    expect(after).toHaveBeenCalledOnce();
+    expect(dispose).toHaveBeenCalledOnce();
+  });
+
+  it('latches uncertain setup cleanup and aggregates the runner cleanup failure', async () => {
+    const plan = createPlan(['one']);
+    const setupFailure = Object.assign(new Error('setup child may be live'), {
+      cleanupConfirmed: false,
+    });
+    const runnerCleanupFailure = new Error('runner cleanup failed');
+    const wrapped = withEvalHooks<string>(
+      plan.run,
+      {
+        beforeRun: () => Promise.reject(setupFailure),
+        executeCase: (_runId, resolvedCase) =>
+          Promise.resolve(completedExecution(resolvedCase, [])),
+        cleanup: () => Promise.reject(runnerCleanupFailure),
+      },
+      [],
+    );
+
+    await expect(wrapped.beforeRun?.(RUN_ID, new AbortController().signal)).rejects.toBe(
+      setupFailure,
+    );
+    const cleanup = await wrapped.cleanup?.(RUN_ID).catch((error: unknown) => error);
+    expect(cleanup).toBeInstanceOf(AggregateError);
+    expect((cleanup as AggregateError).errors).toEqual([setupFailure, runnerCleanupFailure]);
+    expect(cleanup).toMatchObject({ cleanupConfirmed: false });
+  });
+
+  it('clones frozen evidence and retains every finalization failure before disposal', async () => {
+    const plan = createPlan(['one']);
+    const finalization: string[] = [];
+    const original = completedExecution(plan.cases[0]!, [passingMetric()]);
+    Object.freeze(original.execution.diagnostics);
+    Object.freeze(original.execution);
+    Object.freeze(original.metrics);
+    Object.freeze(original);
+    const persistence = createPersistence();
+    const result = await executeResolvedEvalPlan(
+      plan,
+      { executeCase: () => Promise.resolve(original) },
+      persistence.adapter,
+      {
+        isolation: () =>
+          Promise.resolve({
+            kind: 'fake',
+            exec: vi.fn(),
+            readFile: vi.fn(),
+            writeFile: vi.fn(),
+            beginFinalization: () => {
+              finalization.push('begin');
+              return Promise.reject(
+                new Error(`finalization transition failed ${'x'.repeat(5000)}`),
+              );
+            },
+            dispose: () => {
+              finalization.push('dispose');
+              return Promise.reject(new Error('environment disposal failed'));
+            },
+          }),
+        hooks: [
+          {
+            after_case: () => {
+              finalization.push('after_case_one');
+              throw new Error('first after_case failed');
+            },
+          },
+          { after_case: () => void finalization.push('after_case_two') },
+        ],
+      },
+    );
+
+    expect(finalization).toEqual(['begin', 'after_case_one', 'after_case_two', 'dispose']);
+    expect(result.status).toBe('failed');
+    const record = result.cases[0]!;
+    if (record.kind !== 'executed') throw new Error('Expected executed evidence.');
+    expect(record.normalized.verdict).toBe('error');
+    expect(record.execution).not.toBe(original.execution);
+    expect(record.metrics).not.toBe(original.metrics);
+    expect(record.execution.diagnostics.lifecycleError).toContain('finalization transition failed');
+    expect(record.execution.diagnostics.lifecycleError).toContain('first after_case failed');
+    expect(record.execution.diagnostics.lifecycleError).toContain('environment disposal failed');
+    expect(record.execution.diagnostics.lifecycleError).toHaveLength(4096);
+    expect(record.execution.diagnostics.lifecycleError?.endsWith(' [truncated]')).toBe(true);
+    expect(persistence.recordCase).toHaveBeenCalledWith(RUN_ID, record);
+    expect(result.can_release_cancellation_ownership).toBe(false);
+    expect(result.summary.error_cases).toBe(1);
+  });
+
+  it('releases cleanup ownership when disposal confirms a failed finalization transition', async () => {
+    const plan = createPlan(['one']);
+    const dispose = vi.fn(() => Promise.resolve());
+    const result = await executeResolvedEvalPlan(
+      plan,
+      {
+        executeCase: (_runId, resolvedCase) =>
+          Promise.resolve(completedExecution(resolvedCase, [])),
+      },
+      createPersistence().adapter,
+      {
+        isolation: () =>
+          Promise.resolve({
+            kind: 'fake',
+            exec: vi.fn(),
+            readFile: vi.fn(),
+            writeFile: vi.fn(),
+            beginFinalization: () => Promise.reject(new Error('transition failed')),
+            dispose,
+          }),
+      },
+    );
+
+    expect(result.status).toBe('failed');
+    expect(result.can_release_cancellation_ownership).toBe(true);
+    expect(dispose).toHaveBeenCalledOnce();
+    expect(result.cases[0]).toMatchObject({
+      kind: 'executed',
+      normalized: { verdict: 'error' },
+      execution: { diagnostics: { lifecycleError: 'transition failed' } },
+    });
+  });
+
+  it.each([
+    { stage: 'after_agent' as const, expectedMetrics: 0 },
+    { stage: 'after_evaluation' as const, expectedMetrics: 1 },
+  ])('preserves completed evidence when $stage fails', async ({ stage, expectedMetrics }) => {
+    const plan = createPlan(['one']);
+    const evaluate = vi.fn(() => Promise.resolve([passingMetric()]));
+    const persistence = createPersistence();
+    const runner = createStagedCaseRunner<string>({
+      invoke: ({ resolvedCase }) => Promise.resolve(completedExecution(resolvedCase, []).execution),
+      evaluate,
+    });
+    const result = await executeResolvedEvalPlan(plan, runner, persistence.adapter, {
+      hooks: [
+        {
+          [stage]: () => {
+            throw new Error(`${stage} failed`);
+          },
+        },
+      ],
+    });
+
+    expect(result.status).toBe('failed');
+    const record = result.cases[0]!;
+    expect(record.kind).toBe('executed');
+    if (record.kind !== 'executed') throw new Error('Expected executed evidence.');
+    expect(record.execution.attempts).toHaveLength(1);
+    expect(record.metrics).toHaveLength(expectedMetrics);
+    expect(record.execution.diagnostics.lifecycleError).toContain(`${stage} failed`);
+    expect(evaluate).toHaveBeenCalledTimes(stage === 'after_agent' ? 0 : 1);
+    expect(persistence.recordCase).toHaveBeenCalledWith(RUN_ID, record);
+    expect(record.normalized.verdict).toBe('error');
+    expect(result.summary.error_cases).toBe(1);
+  });
+
+  it('admits another test while an earlier test is at its cap', async () => {
+    const plan = createPlan(['a1', 'a2', 'b1'], { concurrency: 2, testConcurrency: 1 });
+    plan.cases[2]!.test_id = 'other';
+    plan.run.snapshot.selected_cases[2]!.test_id = 'other';
+    const first = deferred<ReturnType<typeof completedExecution>>();
+    const starts: string[] = [];
+    const execution = executeResolvedEvalPlan(
+      plan,
+      {
+        executeCase: async (_runId, resolvedCase) => {
+          starts.push(resolvedCase.case_id);
+          return resolvedCase.case_id === 'a1'
+            ? first.promise
+            : completedExecution(resolvedCase, []);
+        },
+      },
+      createPersistence().adapter,
+    );
+    await vi.waitFor(() => expect(starts).toEqual(['a1', 'b1']));
+    first.resolve(completedExecution(plan.cases[0]!, []));
+    expect((await execution).status).toBe('completed');
+    expect(starts).toEqual(['a1', 'b1', 'a2']);
+  });
+
+  it('contains synchronous runner throws and preserves other case results', async () => {
+    const result = await executeResolvedEvalPlan(
+      createPlan(['bad', 'good']),
+      {
+        executeCase: (_runId, resolvedCase) => {
+          if (resolvedCase.case_id === 'bad') throw new Error('synchronous');
+          return Promise.resolve(completedExecution(resolvedCase, []));
+        },
+      },
+      createPersistence().adapter,
+    );
+    expect(result.cases).toHaveLength(2);
+    expect(result.cases.some((record) => record.kind === 'executed')).toBe(true);
+    expect(result.status).toBe('failed');
   });
 });

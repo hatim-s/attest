@@ -34,16 +34,10 @@ import { runCli, type CliIo } from '../../../run-cli.js';
 const FIXTURE = fileURLToPath(new URL('./fixtures/native-agent.cjs', import.meta.url));
 const PTY_FIXTURE = fileURLToPath(new URL('./fixtures/pty-agent-command.py', import.meta.url));
 const JSONL_BRIDGE_FIXTURE = fileURLToPath(
-  new URL(
-    '../../../../../runtime/src/runner/_tests_/fixtures/jsonl-bridge-agent.cjs',
-    import.meta.url,
-  ),
+  new URL('../../../../../executor/src/_tests_/fixtures/jsonl-bridge-agent.cjs', import.meta.url),
 );
 const BACKGROUND_FIXTURE = fileURLToPath(
-  new URL(
-    '../../../../../runtime/src/runner/_tests_/fixtures/background-agent.cjs',
-    import.meta.url,
-  ),
+  new URL('../../../../../executor/src/_tests_/fixtures/background-agent.cjs', import.meta.url),
 );
 const CLI_PACKAGE_ROOT = fileURLToPath(new URL('../../../../', import.meta.url));
 const CLI_BUILT = fileURLToPath(new URL('../../../../dist/cli.js', import.meta.url));

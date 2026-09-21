@@ -18,7 +18,7 @@ import {
   startJsonlBridgeAgent,
   startWebSocketAgent,
   type InvocationResult,
-} from '@attest/runtime';
+} from '@attest/executor';
 
 import { LocalError } from '../../../errors/index.js';
 import {

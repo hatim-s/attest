@@ -1,0 +1,9 @@
+{
+  "extends": "./tsconfig.json",
+  "exclude": ["src/**/_tests_/**"],
+  "references": [
+    {
+      "path": "../contracts/tsconfig.build.json"
+    }
+  ]
+}

@@ -28,6 +28,8 @@ const evalHookCommandSchema = z.strictObject({
 const evalHooksSchema = z.strictObject({
   before_run: evalHookCommandSchema.optional(),
   before_case: evalHookCommandSchema.optional(),
+  after_agent: evalHookCommandSchema.optional(),
+  after_evaluation: evalHookCommandSchema.optional(),
   after_case: evalHookCommandSchema.optional(),
   after_run: evalHookCommandSchema.optional(),
 });

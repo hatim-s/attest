@@ -225,7 +225,8 @@ const readRemoteFile = async (
     file: { path: string },
     options: { signal: AbortSignal },
   ) => Promise<NodeJS.ReadableStream | null> = sandbox.readFile;
-  const stream = await readFile({ path }, { signal });
+  // The SDK method uses its Sandbox instance to resume a suspended VM.
+  const stream = await readFile.call(sandbox, { path }, { signal });
   if (stream === null) return null;
   const chunks: Buffer[] = [];
   let bytes = 0;
@@ -312,6 +313,7 @@ const publishTerminalArtifacts = async (
 };
 
 export {
+  readRemoteFile,
   loadExplicitUploads,
   publishTerminalArtifacts,
   resolveArtifactDestination,

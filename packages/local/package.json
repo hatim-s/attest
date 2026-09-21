@@ -55,7 +55,8 @@
     "hono": "^4.13.0",
     "kysely": "^0.29.4",
     "ulid": "^3.0.2",
-    "zod": "^4"
+    "zod": "^4",
+    "@attest/executor": "workspace:*"
   },
   "optionalDependencies": {
     "@libsql/client": "^0.17.4"

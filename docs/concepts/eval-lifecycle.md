@@ -51,6 +51,8 @@ configured model. Executable metrics exchange the `attest.metric-evaluation` req
 result envelope; HTTP metrics map an equivalent request and result. Thresholds,
 per-case overrides, and the test pass gate determine case and run outcomes.
 
+Concurrent identical judge requests share one provider call when they use the same cache, client, cancellation signal, and timeout. Evidence marks the originating call as `miss` and concurrent reuse as `coalesced`; later durable cache reads remain `hit`. Each case applies its own threshold. Calls without a cache remain independent.
+
 Metric failure and metric infrastructure failure are distinct. A completed evaluation
 that fails its quality gate exits `1`; an invocation or metric infrastructure failure
 exits `4`. See the [metric protocol](../specs/metric-contract.md) and
@@ -196,3 +198,58 @@ finalization is attempted.
 Runs without `defaults.eval.workers` retain the existing per-attempt temporary-directory behavior.
 Worker directories currently require `native_cli` agents. Lifecycle hooks without workers remain
 available to other transports.
+
+## Runtime hooks and case environments
+
+The runtime SDK accepts an ordered `hooks` array on `executeResolvedEvalPlan`. Each callback is awaited. Hooks within one stage run in registration order; separate cases can run concurrently. Callback code is trusted application code and must honor its `signal` for cancellation. Hooks can read and modify agent evidence before evaluation; later hooks observe those changes. Cleanup hooks still run after a failure and receive the aborted signal when the run was cancelled.
+
+| Stage              | Context and timing                                                                                                     |
+| ------------------ | ---------------------------------------------------------------------------------------------------------------------- |
+| `before_run`       | Immutable run metadata, run state, and cancellation signal, after run creation.                                        |
+| `before_case`      | Resolved case, worker index, case state, and prepared environment, before agent execution.                             |
+| `after_agent`      | Agent execution evidence, before metric evaluation.                                                                    |
+| `after_evaluation` | Execution and metric results, before case persistence.                                                                 |
+| `after_case`       | Result or error, before environment disposal and persistence. All registered final hooks are attempted.                |
+| `after_run`        | Status and summary after runner cleanup and initial finalization. Hook failure reconciles the stored status to failed. |
+
+Use `createStagedCaseRunner` to wire the agent/evaluation stages automatically. Custom `EvalCaseRunner` implementations call `context.afterAgent(execution)` and `context.afterEvaluation(execution, metrics)` at those boundaries. The CLI's built-in runner does this. Project JSON also accepts `after_agent` and `after_evaluation` argv hooks with the same timeout and environment rules as existing case hooks. Project command hooks execute on the host in the worker directory.
+
+```ts
+import { justBashIsolation } from '@attest/executor';
+import { createStagedCaseRunner, executeResolvedEvalPlan } from '@attest/runtime';
+
+const runner = createStagedCaseRunner({
+  invoke: async ({ resolvedCase, environment, signal }) => {
+    // Give the coding agent environment.exec/readFile/writeFile as its tools.
+    return runCodingAgent(resolvedCase, environment, signal);
+  },
+  evaluate: async ({ execution, environment, signal }) => {
+    return evaluateCase(execution, environment, signal);
+  },
+});
+
+await executeResolvedEvalPlan(plan, runner, persistence, {
+  isolation: justBashIsolation({ files: { 'input.txt': 'seed' } }),
+  hooks: [
+    {
+      before_case: async ({ environment }) => {
+        await environment!.exec('mkdir -p output');
+      },
+      after_agent: async ({ environment }) => {
+        const check = await environment!.exec('test -f output/result.txt');
+        if (check.exitCode !== 0) throw new Error('Agent did not write output/result.txt');
+      },
+    },
+  ],
+});
+```
+
+The factory creates a fresh environment per case. Hooks, agent tools, and evaluators share it until `after_case` finishes. Before final case hooks, environments enter a bounded finalization phase with `finalizationTimeoutMs`, defaulting to the configured command timeout or 60 seconds, so hooks can inspect partial files after cancellation. If a remote command failed without confirmed completion, its environment is stopped and cannot be reused. Disposal drains owned operations; a cleanup failure fails the run and retains cancellation ownership. A setup failure still runs final case hooks with an absent environment. Use the per-case `caseState` map for hook data. The run-level `state` map is shared, so callers must coordinate concurrent writes.
+
+`justBashIsolation` uses the portable just-bash 3.4.2 browser build on both Node and Bun. This avoids Node-specific global monkey-patches and uses an in-memory filesystem, no host filesystem mount, no network configuration, and no custom host commands. Shell calls within one case are serialized. It supports built-in shell commands, not arbitrary host executables such as Node or Git. Default limits are 60 seconds per command, 1 MiB output, and 16 MiB filesystem storage. This is a virtual shell, not a VM boundary for arbitrary untrusted JavaScript.
+
+For coding agents that need real executables, pass `vercelSandboxIsolation({ files, env })`. It creates one Vercel VM per case and retains it through evaluation. Both providers use workspace-relative paths for file methods and initial file maps. Shell commands run in their workspace. Existing `native_cli` resources with `sandbox.kind: "vercel"` continue to run each invocation in a VM with explicit uploads and artifact export. The SDK factory supports environment-aware agent tools and evaluators; the native CLI transport retains its invocation-scoped sandbox lifetime.
+
+Concurrent scheduling honors both the global limit and each test's limit without blocking unrelated tests behind a capped test. Explicit workers retain their balanced, contiguous batches and stable indexes. Queued cases cancelled before admission are recorded as cancelled without invoking agent or case hooks. Completed tasks enter one ordered, bounded queue, and persistence remains serial.
+
+Lifecycle failures give the case an error verdict while preserving its agent outcome. Stage failures retain any agent attempts and metrics already produced. Their aggregated diagnostics are stored with the case. A failure to persist a case is a durability failure even if the caller also cancels; the run fails and retains cancellation ownership.

@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   loadExplicitUploads,
   publishTerminalArtifacts,
+  readRemoteFile,
   resolveArtifactDestination,
   resolveRemotePath,
   SANDBOX_WORKSPACE,
@@ -44,6 +45,20 @@ afterEach(async () => {
 });
 
 describe('sandbox file transfers', () => {
+  it('preserves the SDK receiver when reading a remote file', async () => {
+    const sandbox = {
+      marker: 'bound',
+      readFile(this: { marker: string }) {
+        if (this.marker !== 'bound') throw new Error('lost SDK receiver');
+        return Promise.resolve(Readable.from(['contents']));
+      },
+    } as unknown as VercelSandboxSdk;
+
+    await expect(
+      readRemoteFile(sandbox, `${SANDBOX_WORKSPACE}/result.txt`, 32, AbortSignal.timeout(1_000)),
+    ).resolves.toEqual(Buffer.from('contents'));
+  });
+
   it('resolves literal relative paths below the fixed remote workspace', () => {
     expect(resolveRemotePath('inputs/case.json')).toBe(`${SANDBOX_WORKSPACE}/inputs/case.json`);
     for (const path of ['', '/tmp/file', '../file', 'inputs/*.json', 'inputs/{a,b}.json']) {

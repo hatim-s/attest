@@ -15,7 +15,7 @@ import {
 } from './support/fixture-processes.js';
 import type { InvokeOptions } from '../types.js';
 
-const REPOSITORY_ROOT = fileURLToPath(new URL('../../../../..', import.meta.url));
+const REPOSITORY_ROOT = fileURLToPath(new URL('../../../..', import.meta.url));
 const CLI_AGENT_PATH = join(
   REPOSITORY_ROOT,
   'conformance/src/_tests_/fixtures/fake-agents/cli-agent.cjs',
@@ -26,7 +26,7 @@ const HTTP_AGENT_PATH = join(
 );
 const MARKER_PROBE_AGENT_PATH = join(
   REPOSITORY_ROOT,
-  'packages/runtime/src/runner/_tests_/fixtures/marker-probe-agent.cjs',
+  'packages/executor/src/_tests_/fixtures/marker-probe-agent.cjs',
 );
 const READINESS_DEADLINE_MS = 30_000;
 const FIXTURE_MARKERS = [

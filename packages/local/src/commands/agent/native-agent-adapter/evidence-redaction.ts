@@ -8,7 +8,7 @@ import type {
   Trace,
 } from '@attest/contracts';
 import type { StoredAttempt } from '@attest/core';
-import { AgentInvocationError, redactTransportText, type InvocationResult } from '@attest/runtime';
+import { AgentInvocationError, redactTransportText, type InvocationResult } from '@attest/executor';
 
 const REDACTED = '[REDACTED]';
 const SENSITIVE_KEY = /authorization|cookie|password|secret|token|api[-_]?key/iu;

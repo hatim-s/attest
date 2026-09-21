@@ -16,15 +16,18 @@ Run workspace commands from the repository root. To run one package script, use
 
 ## Application packages
 
-| Script      | Packages                             | Behavior                                                                                                             |
-| ----------- | ------------------------------------ | -------------------------------------------------------------------------------------------------------------------- |
-| `build`     | contracts, core, runtime, local, cli | Compiles production artifacts into `dist`, excluding tests. Runtime and local build their referenced packages first. |
-| `typecheck` | contracts, core, runtime, local, cli | Checks source and test types without emitting files.                                                                 |
-| `test`      | contracts                            | Runs protocol and schema tests.                                                                                      |
-| `test`      | core                                 | Runs domain comparison, import, trace, and record tests.                                                             |
-| `test`      | runtime                              | Runs execution, metric, cancellation, and transport tests with one worker.                                           |
-| `test`      | local                                | Runs project, transaction, SQLite, application, and local server tests with one worker.                              |
-| `test`      | cli                                  | Runs terminal command and packed-install acceptance tests with one worker.                                           |
+| Script      | Packages                                       | Behavior                                                                                                             |
+| ----------- | ---------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `build`     | contracts, core, executor, runtime, local, cli | Compiles production artifacts into `dist`, excluding tests. Runtime and local build their referenced packages first. |
+| `typecheck` | contracts, core, executor, runtime, local, cli | Checks source and test types without emitting files.                                                                 |
+| `test`      | contracts                                      | Runs protocol and schema tests.                                                                                      |
+| `test`      | core                                           | Runs domain comparison, import, trace, and record tests.                                                             |
+| `test`      | executor                                       | Runs invocation, transport, and process-cleanup tests with one worker.                                               |
+| `test:node` | executor                                       | Runs compiled executor acceptance checks on Node. Build executor first.                                              |
+| `test:bun`  | executor                                       | Runs the same compiled executor checks on Bun. Build executor first.                                                 |
+| `test`      | runtime                                        | Runs scheduling, lifecycle, isolation, metric, and cancellation tests with one worker.                               |
+| `test`      | local                                          | Runs project, transaction, SQLite, application, and local server tests with one worker.                              |
+| `test`      | cli                                            | Runs terminal command and packed-install acceptance tests with one worker.                                           |
 
 ## Supporting packages
 
@@ -45,3 +48,5 @@ Run workspace commands from the repository root. To run one package script, use
 | `typecheck` | conformance | Checks conformance source.                                                |
 
 Conformance commands run with `bun run --cwd conformance <script>`.
+
+Runtime also provides `test:node` and `test:bun`. They run the same compiled eval pipeline on each host, including isolated case files, all case stages, and persistence. Build runtime first.

@@ -10,7 +10,7 @@ import { invokeHttpAgent } from '../http-invoker.js';
 import { acquireFixtureProcessSweepLock } from './support/fixture-processes.js';
 import type { InvokeOptions } from '../types.js';
 
-const REPOSITORY_ROOT = fileURLToPath(new URL('../../../../../', import.meta.url));
+const REPOSITORY_ROOT = fileURLToPath(new URL('../../../../', import.meta.url));
 const CANONICAL_AGENT_PATH = join(
   REPOSITORY_ROOT,
   'conformance/src/_tests_/fixtures/fake-agents/http-agent.cjs',

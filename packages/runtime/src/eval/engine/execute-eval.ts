@@ -1,3 +1,5 @@
+import { withEvalHooks } from '../hooks.js';
+
 import { createEvalJUnitPayload } from '../junit.js';
 import { summarizeEvalCases } from '../normalization.js';
 import type {
@@ -22,22 +24,25 @@ import {
 /** Executes a resolved eval plan through persistence, artifacts, and one bounded event stream. */
 const executeResolvedEvalPlan = async <Payload, BaselineDiff = unknown>(
   plan: ResolvedEvalPlan<Payload>,
-  runner: EvalCaseRunner<Payload>,
+  caseRunner: EvalCaseRunner<Payload>,
   persistence: EvalPersistenceAdapter<Payload>,
-  options: ExecuteEvalOptions<BaselineDiff> = {},
+  options: ExecuteEvalOptions<BaselineDiff, Payload> = {},
 ): Promise<EvalExecutionResult<Payload, BaselineDiff>> => {
   const run = freezeEvalRun(plan.run);
+  const runner = withEvalHooks(run, caseRunner, options.hooks ?? [], options.isolation);
   const now = options.now ?? (() => new Date().toISOString());
   const limits = resolveEventLimits(options);
   const terminalFailure = options.terminalFailure ?? defaultTerminalFailure;
   const expectedEventCount = plan.cases.length * 2 + 3;
   const planError = validateResolvedPlan(plan, run);
+  const preflightEventTime = now();
   const eventLimitExceeded =
-    expectedEventCount > limits.max_events || !eventBytesFit(plan, run, limits, terminalFailure);
+    expectedEventCount > limits.max_events ||
+    !eventBytesFit(plan, run, limits, terminalFailure, preflightEventTime);
   if (planError !== undefined || eventLimitExceeded) {
     return preOrchestrationFailure(
       run,
-      now,
+      eventLimitExceeded ? () => run.created_at : now,
       'failed',
       terminalFailure(
         'run_failed',
@@ -68,7 +73,7 @@ const executeResolvedEvalPlan = async <Payload, BaselineDiff = unknown>(
     );
   }
 
-  const collector = createEventCollector(now, limits, options.onEvent);
+  const collector = createEventCollector(now, limits, options.onEvent, preflightEventTime);
   const runController = new AbortController();
   let timedOut = false;
   let callerCancelled = false;
@@ -88,6 +93,7 @@ const executeResolvedEvalPlan = async <Payload, BaselineDiff = unknown>(
   let baselineDiff: BaselineDiff | undefined;
   let junit: ReturnType<typeof createEvalJUnitPayload> | undefined;
   let cleanupConfirmed = true;
+  let casePersistenceConfirmed = true;
 
   await collector.emit({
     event: 'run_started',
@@ -112,6 +118,7 @@ const executeResolvedEvalPlan = async <Payload, BaselineDiff = unknown>(
     );
     records = execution.records;
     infrastructureErrors.push(...execution.infrastructureErrors);
+    casePersistenceConfirmed = execution.persistenceConfirmed;
   } catch (error: unknown) {
     infrastructureErrors.push(safeErrorMessage(error, 'Eval orchestration failed.'));
   } finally {
@@ -132,6 +139,7 @@ const executeResolvedEvalPlan = async <Payload, BaselineDiff = unknown>(
   let status: EvalExecutionResult['status'] =
     callerCancelled || (!timedOut && hasCancelledCase) ? 'cancelled' : 'completed';
 
+  if (!casePersistenceConfirmed) status = 'failed';
   if (status === 'completed' && (timedOut || hasCaseInfrastructureError)) status = 'failed';
   if (status === 'completed' && infrastructureErrors.length === 0) {
     const baselineRunId = run.effective_command.resolved.baseline_run_id;
@@ -252,7 +260,8 @@ const executeResolvedEvalPlan = async <Payload, BaselineDiff = unknown>(
     cases: records,
     events: collector.events,
     final_result: finalResult,
-    can_release_cancellation_ownership: cleanupConfirmed && finalizationConfirmed,
+    can_release_cancellation_ownership:
+      cleanupConfirmed && finalizationConfirmed && casePersistenceConfirmed,
     ...(baselineDiff === undefined ? {} : { baseline_diff: baselineDiff }),
     ...(junit === undefined ? {} : { junit }),
   };
