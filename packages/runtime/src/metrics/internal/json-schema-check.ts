@@ -16,6 +16,7 @@ type SchemaValidator = {
 // Config validation freezes metric definitions before evaluation, so object identity is a safe cache key.
 // Keep this cache here: compiling schemas is the only stateful assertion concern.
 const objectSchemaValidators = new WeakMap<object, SchemaValidator>();
+const booleanSchemaValidators = new Map<boolean, SchemaValidator>();
 
 /** Compiles one root schema in an isolated Ajv registry so independent `$id` values cannot collide. */
 const compileSchemaValidator = (schema: JsonSchemaCheck['schema']): SchemaValidator => {
@@ -40,8 +41,13 @@ const compileSchemaValidator = (schema: JsonSchemaCheck['schema']): SchemaValida
 
 const getSchemaValidator = (schema: JsonSchemaCheck['schema']): SchemaValidator => {
   if (typeof schema === 'boolean') {
-    // Boolean schemas are trivial; compiling per evaluation avoids a separate mutable cache for two values.
-    return compileSchemaValidator(schema);
+    const cached = booleanSchemaValidators.get(schema);
+    if (cached !== undefined) {
+      return cached;
+    }
+    const validator = compileSchemaValidator(schema);
+    booleanSchemaValidators.set(schema, validator);
+    return validator;
   }
 
   const cached = objectSchemaValidators.get(schema);
