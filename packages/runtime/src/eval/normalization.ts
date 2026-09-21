@@ -1,7 +1,7 @@
 import type { EvalRunSummary } from '@attest/contracts';
 
 import type { MetricEvaluation } from '../metrics/metric-evaluation.js';
-import type { CaseExecution } from '../runner/types.js';
+import type { CaseExecution } from '@attest/executor';
 import type {
   NormalizedEvalAttempt,
   NormalizedEvalCaseResult,
@@ -65,7 +65,11 @@ const classifyCaseVerdict = (
   execution: CaseExecution,
   metrics: readonly MetricEvaluation[],
 ): NormalizedEvalCaseResult['verdict'] => {
-  if (execution.outcome !== 'completed' || !('output' in execution.response)) {
+  if (
+    execution.diagnostics.lifecycleError !== undefined ||
+    execution.outcome !== 'completed' ||
+    !('output' in execution.response)
+  ) {
     return 'error';
   }
 

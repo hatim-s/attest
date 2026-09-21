@@ -9,24 +9,45 @@ type EventCollector = {
   sinkFailure: () => CliError | undefined;
 };
 
-/** Collects bounded eval events and records the first delivery failure without losing the stream. */
+/** Collects bounded eval events and records the first clock or delivery failure. */
 const createEventCollector = (
   now: () => string,
   limits: EvalEventLimits,
   onEvent: ExecuteEvalOptions['onEvent'],
+  preflightTime: string,
 ): EventCollector => {
   const events: EvalEvent[] = [];
+  let collectorFailure: CliError | undefined;
   let deliveryFailure: CliError | undefined;
   const emit = async (event: Omit<EvalEvent, 'schema' | 'sequence' | 'time'>): Promise<void> => {
     if (events.length >= limits.max_events) throw new Error('Eval event count cap was exceeded.');
-    const completeEvent = {
+    let eventTime: string;
+    try {
+      eventTime = now();
+    } catch (error: unknown) {
+      eventTime = preflightTime;
+      collectorFailure ??= {
+        code: 'eval_event_delivery_failed',
+        message: safeErrorMessage(error, 'Eval event clock failed.'),
+        retryable: false,
+      };
+    }
+    let completeEvent = {
       schema: CLI_EVENT_SCHEMA_ID,
       sequence: events.length,
-      time: now(),
+      time: eventTime,
       ...event,
     } as EvalEvent;
     if (Buffer.byteLength(JSON.stringify(completeEvent), 'utf8') > limits.max_event_bytes) {
-      throw new Error('Eval event byte cap was exceeded.');
+      completeEvent = { ...completeEvent, time: preflightTime };
+      if (Buffer.byteLength(JSON.stringify(completeEvent), 'utf8') > limits.max_event_bytes) {
+        throw new Error('Eval event byte cap was exceeded.');
+      }
+      collectorFailure ??= {
+        code: 'eval_event_delivery_failed',
+        message: 'Eval event clock exceeded the configured byte cap.',
+        retryable: false,
+      };
     }
     events.push(completeEvent);
     if (onEvent !== undefined && deliveryFailure === undefined) {
@@ -41,7 +62,7 @@ const createEventCollector = (
       }
     }
   };
-  return { events, emit, sinkFailure: () => deliveryFailure };
+  return { events, emit, sinkFailure: () => collectorFailure ?? deliveryFailure };
 };
 
 export { createEventCollector, type EventCollector };

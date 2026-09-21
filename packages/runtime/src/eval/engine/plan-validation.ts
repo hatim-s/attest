@@ -68,13 +68,14 @@ const eventBytesFit = (
   run: ImmutableEvalRun,
   limits: EvalEventLimits,
   terminalFailure: EvalTerminalFailureFactory,
+  eventTime: string,
 ): boolean => {
   const envelopeBytes = (event: Omit<EvalEvent, 'schema' | 'sequence' | 'time'>): number =>
     Buffer.byteLength(
       JSON.stringify({
         schema: CLI_EVENT_SCHEMA_ID,
         sequence: plan.cases.length * 2 + 2,
-        time: run.created_at,
+        time: eventTime,
         ...event,
       }),
       'utf8',

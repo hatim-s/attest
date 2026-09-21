@@ -125,6 +125,7 @@ const CI_WORKFLOW_PATH = join(REPOSITORY_ROOT, '.github/workflows/ci.yml');
 const PACKED_PACKAGE_ROOTS = [
   'packages/contracts',
   'packages/core',
+  'packages/executor',
   'packages/runtime',
   'packages/local',
   'packages/web',
@@ -134,6 +135,7 @@ const PACKED_PACKAGE_NAMES = [
   '@attest/cli',
   '@attest/contracts',
   '@attest/core',
+  '@attest/executor',
   '@attest/runtime',
   '@attest/local',
   '@attest/web',
@@ -202,6 +204,7 @@ const createPackedCli = async (): Promise<PackedCli> => {
     }
     archivePaths[packageName] = archivePath;
   }
+  expect(Object.keys(archivePaths).sort()).toEqual([...PACKED_PACKAGE_NAMES].sort());
 
   const archiveReference = (packageName: (typeof PACKED_PACKAGE_NAMES)[number]): string =>
     `./archives/${basename(archivePaths[packageName] ?? '')}`;
@@ -211,6 +214,7 @@ const createPackedCli = async (): Promise<PackedCli> => {
     overrides: {
       '@attest/contracts': archiveReference('@attest/contracts'),
       '@attest/core': archiveReference('@attest/core'),
+      '@attest/executor': archiveReference('@attest/executor'),
       '@attest/runtime': archiveReference('@attest/runtime'),
       '@attest/local': archiveReference('@attest/local'),
       '@attest/web': archiveReference('@attest/web'),
@@ -241,9 +245,13 @@ const createPackedCli = async (): Promise<PackedCli> => {
 
   const cliPath = join(runtime, 'node_modules/.bin/attest');
   await access(cliPath, constants.X_OK);
-  const installedRoot = await realpath(join(runtime, 'node_modules/@attest/cli'));
-  expect(installedRoot.startsWith(`${await realpath(runtime)}${sep}`)).toBe(true);
-  expect(installedRoot.startsWith(`${await realpath(REPOSITORY_ROOT)}${sep}`)).toBe(false);
+  const realRuntime = await realpath(runtime);
+  const realRepository = await realpath(REPOSITORY_ROOT);
+  for (const packageName of PACKED_PACKAGE_NAMES) {
+    const installedRoot = await realpath(join(runtime, 'node_modules', packageName));
+    expect(installedRoot.startsWith(`${realRuntime}${sep}`), packageName).toBe(true);
+    expect(installedRoot.startsWith(`${realRepository}${sep}`), packageName).toBe(false);
+  }
   return { cliPath, root: runtime };
 };
 

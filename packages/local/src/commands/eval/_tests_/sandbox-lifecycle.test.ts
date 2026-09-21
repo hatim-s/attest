@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -12,19 +12,16 @@ import {
   type EvalRun,
 } from '@attest/contracts';
 import { type CacheStore } from '@attest/core';
-import {
-  AgentInvocationError,
-  type InvocationResult,
-  type ResolvedEvalCase,
-} from '@attest/runtime';
+import { AgentInvocationError, type InvocationResult } from '@attest/executor';
+import { EvalCaseStageError, type ResolvedEvalCase } from '@attest/runtime';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 
 import { createEvalCaseRunner } from '../eval-agent-runner.js';
 import type { ResolvedEvalCaseInput } from '../eval-resolver.js';
 
 const sandboxInvoke = vi.hoisted(() => vi.fn<(...args: unknown[]) => Promise<InvocationResult>>());
-vi.mock('@attest/runtime', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@attest/runtime')>()),
+vi.mock('@attest/executor', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@attest/executor')>()),
   invokeVercelSandboxAgent: sandboxInvoke,
 }));
 
@@ -122,6 +119,147 @@ afterEach(async () => {
 });
 
 describe('sandbox eval lifecycle integration', () => {
+  test('runs post-agent lifecycle hooks in order with case and worker environment', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'attest-sandbox-stage-hooks-'));
+    directories.push(root);
+    await writeFile(
+      join(root, 'record-stage.mjs'),
+      `
+      import { appendFile } from 'node:fs/promises';
+      import { join } from 'node:path';
+      await appendFile(join(process.env.ATTEST_PROJECT_ROOT, 'stages.jsonl'), JSON.stringify({
+        phase: process.argv[2],
+        caseId: process.env.ATTEST_CASE_ID,
+        testId: process.env.ATTEST_TEST_ID,
+        workerIndex: process.env.ATTEST_WORKER_INDEX,
+        workerDirectory: process.env.ATTEST_WORKER_DIRECTORY,
+        outcome: process.env.ATTEST_CASE_OUTCOME,
+      }) + '\\n');
+    `,
+    );
+    const hook = (phase: string) => ({
+      argv: [process.execPath, './record-stage.mjs', phase],
+    });
+    const run = await createRun({
+      workers: { count: 1, directory: 'workers/{worker_index}' },
+      hooks: {
+        after_agent: hook('after_agent'),
+        after_evaluation: hook('after_evaluation'),
+        after_case: hook('after_case'),
+      },
+    });
+    sandboxInvoke.mockImplementation(publishArtifact);
+    const runner = createEvalCaseRunner(root, cache, run);
+
+    const result = await runner.executeCase(
+      run.run_id,
+      createCase(0),
+      new AbortController().signal,
+      { worker_index: 0 },
+    );
+    const stages = (await readFile(join(root, 'stages.jsonl'), 'utf8'))
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line) as Record<string, string>);
+    const resolvedRoot = await realpath(root);
+
+    expect(result.execution.outcome).toBe('completed');
+    expect(stages.map(({ phase }) => phase)).toEqual([
+      'after_agent',
+      'after_evaluation',
+      'after_case',
+    ]);
+    expect(stages).toEqual(
+      stages.map((stage) => ({
+        ...stage,
+        caseId: 'case-0',
+        testId: 'sandbox-test',
+        workerIndex: '0',
+        workerDirectory: join(resolvedRoot, 'workers/0'),
+        outcome: 'completed',
+      })),
+    );
+    await runner.cleanup?.(run.run_id);
+  });
+
+  test.each(['after_agent', 'after_evaluation'] as const)(
+    'retains agent evidence when the local %s hook fails',
+    async (stage) => {
+      const root = await mkdtemp(join(tmpdir(), `attest-sandbox-${stage}-`));
+      directories.push(root);
+      await writeFile(join(root, 'fail-hook.mjs'), 'process.exit(7);\n');
+      const run = await createRun({
+        hooks: { [stage]: { argv: [process.execPath, './fail-hook.mjs'] } },
+      });
+      sandboxInvoke.mockImplementation(publishArtifact);
+      const runner = createEvalCaseRunner(root, cache, run);
+
+      const failure = await runner
+        .executeCase(run.run_id, createCase(0), new AbortController().signal, {
+          worker_index: 0,
+        })
+        .catch((error: unknown) => error);
+
+      expect(failure).toBeInstanceOf(EvalCaseStageError);
+      expect(failure).toMatchObject({
+        stage,
+        execution: { caseId: 'case-0', outcome: 'completed', attempts: [{ status: 'ok' }] },
+        metrics: [],
+      });
+      expect((failure as EvalCaseStageError).cause).toMatchObject({
+        message: `Eval ${stage} hook exited with code 7.`,
+      });
+      await runner.cleanup?.(run.run_id);
+    },
+  );
+
+  test('latches sandbox cleanup uncertainty before a failing after_agent hook', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'attest-sandbox-after-agent-cleanup-'));
+    directories.push(root);
+    await writeFile(join(root, 'fail-hook.mjs'), 'process.exit(7);\n');
+    const run = await createRun({
+      hooks: { after_agent: { argv: [process.execPath, './fail-hook.mjs'] } },
+    });
+    const attempt = {
+      status: 'invocation_error' as const,
+      error: new AgentInvocationError('network', 'Sandbox stop failed.'),
+      diagnostics: { sandboxCleanupConfirmed: false },
+      durationMs: 1,
+      warnings: [],
+    };
+    sandboxInvoke.mockResolvedValue({ ...attempt, attempts: [attempt] });
+    const runner = createEvalCaseRunner(root, cache, run);
+
+    const failure = await runner
+      .executeCase(run.run_id, createCase(0), new AbortController().signal, {
+        worker_index: 0,
+      })
+      .catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(EvalCaseStageError);
+    expect(failure).toMatchObject({
+      stage: 'after_agent',
+      execution: {
+        caseId: 'case-0',
+        diagnostics: {
+          sandboxCleanupConfirmed: false,
+          lifecycleError: 'Vercel sandbox cleanup was not confirmed.',
+        },
+      },
+    });
+    expect((failure as EvalCaseStageError).cause).toMatchObject({
+      message: 'Eval after_agent hook exited with code 7.',
+    });
+    const cleanupFailure = await runner.cleanup?.(run.run_id).catch((error: unknown) => error);
+    expect(cleanupFailure).toBeInstanceOf(AggregateError);
+    if (!(cleanupFailure instanceof AggregateError)) throw new Error('Expected cleanup failure.');
+    expect(
+      (cleanupFailure.errors as unknown[]).map((error) =>
+        error instanceof Error ? error.message : '',
+      ),
+    ).toContain('One or more Vercel sandbox cleanups were not confirmed.');
+  });
+
   test('publishes artifacts before after_case and reuses the emptied worker directory', async () => {
     const root = await mkdtemp(join(tmpdir(), 'attest-sandbox-hooks-'));
     directories.push(root);
@@ -179,7 +317,11 @@ describe('sandbox eval lifecycle integration', () => {
   test('blocks worker reuse and retains cleanup ownership when the VM stop fails', async () => {
     const root = await mkdtemp(join(tmpdir(), 'attest-sandbox-cleanup-'));
     directories.push(root);
-    const run = await createRun({ workers: { count: 1, directory: 'workers/{worker_index}' } });
+    await writeFile(join(root, 'fail-after-case.mjs'), 'process.exit(7);\n');
+    const run = await createRun({
+      workers: { count: 1, directory: 'workers/{worker_index}' },
+      hooks: { after_case: { argv: [process.execPath, './fail-after-case.mjs'] } },
+    });
     const attempt = {
       status: 'invocation_error' as const,
       error: new AgentInvocationError('network', 'Sandbox stop failed.'),
@@ -195,7 +337,9 @@ describe('sandbox eval lifecycle integration', () => {
       new AbortController().signal,
       { worker_index: 0 },
     );
-    expect(result.lifecycle_error).toBeDefined();
+    expect(result.lifecycle_error).toContain('Vercel sandbox cleanup was not confirmed.');
+    expect(result.lifecycle_error).toContain('Eval after_case hook exited with code 7.');
+    expect(result.execution.diagnostics.lifecycleError).toBe(result.lifecycle_error);
     expect(result.execution.diagnostics.sandboxCleanupConfirmed).toBe(false);
     await expect(runner.cleanup?.(run.run_id)).rejects.toThrow('cleanup');
   });

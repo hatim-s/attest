@@ -46,5 +46,16 @@ export {
   type CaseExecution,
   type InvokeAgentOptions,
   type InvocationResult,
+  type InvocationAttempt,
+  type InvocationDiagnostics,
+  type InvokeOptions,
   type NativeAgentTarget,
 } from './types.js';
+
+export { justBashIsolation, type JustBashIsolationOptions } from './isolation/just-bash.js';
+export {
+  type CaseEnvironment,
+  type CaseEnvironmentContext,
+  type CaseEnvironmentFactory,
+} from './isolation/types.js';
+export { vercelSandboxIsolation, type VercelIsolationOptions } from './isolation/vercel.js';

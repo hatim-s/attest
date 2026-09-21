@@ -1,5 +1,5 @@
 import { AGENT_PROTOCOL, TRACE_SCHEMA_ID, type AgentRequest } from '@attest/contracts';
-import type { InvocationResult } from '@attest/runtime';
+import type { InvocationResult } from '@attest/executor';
 import { describe, expect, it } from 'vitest';
 
 import { redactAgentRequest, redactInvocation } from '../eval-agent-runner.js';

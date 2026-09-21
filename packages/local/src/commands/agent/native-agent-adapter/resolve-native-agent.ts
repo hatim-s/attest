@@ -8,7 +8,7 @@ import type {
   HttpAgentResource,
   StreamAgentResource,
   WebSocketAgentResource,
-} from '@attest/runtime';
+} from '@attest/executor';
 
 import { LocalError } from '../../../errors/index.js';
 import { isProjectPath } from '../../../project/project-path.js';

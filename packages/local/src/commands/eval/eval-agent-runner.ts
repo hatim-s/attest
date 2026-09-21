@@ -12,9 +12,14 @@ import {
   startBackgroundAgent,
   startJsonlBridgeAgent,
   startWebSocketAgent,
-  type EvalCaseRunner,
   type CaseExecution,
   type InvocationResult,
+} from '@attest/executor';
+import {
+  EvalCaseStageError,
+  type EvalCaseExecutionContext,
+  type EvalCaseRunner,
+  type EvalCaseRunnerResult,
 } from '@attest/runtime';
 
 import { LocalError } from '../../errors/index.js';
@@ -33,6 +38,8 @@ import { createEvalLifecycle } from './eval-lifecycle.js';
 
 const DEFAULT_OUTPUT_CAP_BYTES = 10 * 1024 * 1024;
 const DEFAULT_TIMEOUT_MS = 60_000;
+const LIFECYCLE_ERROR_LIMIT = 4096;
+const TRUNCATED_SUFFIX = ' [truncated]';
 
 type RunScopedSession = {
   close(): Promise<void>;
@@ -54,6 +61,52 @@ const invocationOutcome = (
   result.error.code === 'timeout' || result.error.code === 'cancelled'
     ? result.error.code
     : 'invocation_error';
+
+/** Appends a local lifecycle failure to fresh result and diagnostics objects. */
+const appendLifecycleFailure = (
+  result: EvalCaseRunnerResult,
+  failure: unknown,
+): EvalCaseRunnerResult => {
+  const message = failure instanceof Error ? failure.message : 'The eval case lifecycle failed.';
+  const messages = [
+    ...new Set(
+      [result.execution.diagnostics.lifecycleError, result.lifecycle_error, message].filter(
+        (value): value is string => value !== undefined && value.length > 0,
+      ),
+    ),
+  ];
+  const combined = messages.join(' ');
+  const contentLimit = LIFECYCLE_ERROR_LIMIT - TRUNCATED_SUFFIX.length;
+  const separatorLength = Math.max(0, messages.length - 1);
+  const contentBudget = Math.max(0, contentLimit - separatorLength);
+  let minimum = 0;
+  let maximum = contentBudget;
+  while (minimum < maximum) {
+    const candidate = Math.ceil((minimum + maximum) / 2);
+    const used = messages.reduce((total, entry) => total + Math.min(entry.length, candidate), 0);
+    if (used <= contentBudget) minimum = candidate;
+    else maximum = candidate - 1;
+  }
+  const lengths = messages.map((entry) => Math.min(entry.length, minimum));
+  let remaining = contentBudget - lengths.reduce((total, length) => total + length, 0);
+  for (const [index, entry] of messages.entries()) {
+    const extra = Math.min(remaining, entry.length - lengths[index]!);
+    lengths[index]! += extra;
+    remaining -= extra;
+  }
+  const lifecycleError =
+    combined.length <= LIFECYCLE_ERROR_LIMIT
+      ? combined
+      : `${messages.map((entry, index) => entry.slice(0, lengths[index])).join(' ')}${TRUNCATED_SUFFIX}`;
+  return {
+    execution: {
+      ...result.execution,
+      diagnostics: { ...result.execution.diagnostics, lifecycleError },
+    },
+    metrics: [...result.metrics],
+    lifecycle_error: lifecycleError,
+  };
+};
 
 /** Converts startup throws into one bounded invocation attempt so persistence retains the failure. */
 const startupFailure = (error: unknown, durationMs: number): InvocationResult => {
@@ -233,7 +286,7 @@ const createEvalCaseRunner = (
     runId: string,
     resolvedCase: Parameters<EvalCaseRunner<ResolvedEvalCaseInput>['executeCase']>[1],
     signal: AbortSignal,
-    context: { worker_index: number },
+    context: EvalCaseExecutionContext,
   ) => {
     const payload = resolvedCase.payload;
     const hookContext = {
@@ -241,8 +294,12 @@ const createEvalCaseRunner = (
       test_id: payload.test_id,
       worker_index: context.worker_index,
     };
-    const workerDirectory = await lifecycle.prepareCase(hookContext);
+    let workerDirectory: string | undefined;
+    let outcome = 'infrastructure_error';
+    let result: EvalCaseRunnerResult | undefined;
+    let failure: unknown;
     try {
+      workerDirectory = await lifecycle.prepareCase(hookContext);
       await lifecycle.beforeCase(hookContext, workerDirectory, signal);
       const request: AgentRequest = {
         protocol: AGENT_PROTOCOL,
@@ -305,39 +362,65 @@ const createEvalCaseRunner = (
           'Agent adapter returned an unvalidated successful response.',
         );
       }
-      const metrics = await metricEvaluator.evaluate(runId, payload, execution, signal);
-      const result: {
-        execution: CaseExecution;
-        metrics: typeof metrics;
-        lifecycle_error?: string;
-      } = { execution, metrics };
+      outcome = execution.outcome;
+      let lifecycleError: string | undefined;
       if (execution.diagnostics.sandboxCleanupConfirmed === false) {
         sandboxCleanupUncertain = true;
-        result.lifecycle_error = 'Vercel sandbox cleanup was not confirmed.';
+        const uncertainCleanup = appendLifecycleFailure(
+          { execution, metrics: [] },
+          new Error('Vercel sandbox cleanup was not confirmed.'),
+        );
+        execution = uncertainCleanup.execution;
+        lifecycleError = uncertainCleanup.lifecycle_error;
       }
       try {
-        return result;
-      } finally {
-        try {
-          await lifecycle.afterCase(hookContext, workerDirectory, execution.outcome);
-        } catch (error: unknown) {
-          result.lifecycle_error = (
-            error instanceof Error ? error.message : 'The after_case hook failed.'
-          ).slice(0, 4096);
-          execution.diagnostics = {
-            ...execution.diagnostics,
-            lifecycleError: result.lifecycle_error,
-          };
-        }
+        await lifecycle.afterAgent(hookContext, workerDirectory, execution.outcome, signal);
+        await context.afterAgent?.(execution);
+      } catch (error: unknown) {
+        throw new EvalCaseStageError('after_agent', execution, [], error);
       }
+      const metrics = await metricEvaluator.evaluate(runId, payload, execution, signal);
+      try {
+        await lifecycle.afterEvaluation(hookContext, workerDirectory, execution.outcome, signal);
+        await context.afterEvaluation?.(execution, metrics);
+      } catch (error: unknown) {
+        throw new EvalCaseStageError('after_evaluation', execution, metrics, error);
+      }
+      result = {
+        execution,
+        metrics,
+        ...(lifecycleError === undefined ? {} : { lifecycle_error: lifecycleError }),
+      };
     } catch (error: unknown) {
-      try {
-        await lifecycle.afterCase(hookContext, workerDirectory, 'infrastructure_error');
-      } catch (hookError: unknown) {
-        throw new AggregateError([error, hookError], 'Case execution and after_case hook failed.');
-      }
-      throw error;
+      failure = error;
     }
+
+    try {
+      await lifecycle.afterCase(hookContext, workerDirectory, outcome);
+    } catch (hookError: unknown) {
+      if (result !== undefined) {
+        result = appendLifecycleFailure(result, hookError);
+      } else if (failure instanceof EvalCaseStageError) {
+        failure = new EvalCaseStageError(
+          failure.stage,
+          failure.execution,
+          failure.metrics,
+          new AggregateError([failure.cause, hookError], 'Eval case lifecycle hooks failed.'),
+        );
+      } else {
+        failure = new AggregateError(
+          failure === undefined ? [hookError] : [failure, hookError],
+          'Case execution and after_case hook failed.',
+        );
+      }
+    }
+
+    if (failure instanceof Error) throw failure;
+    if (failure !== undefined) {
+      throw new Error('Eval case execution failed.', { cause: failure });
+    }
+    if (result === undefined) throw new Error('Eval runner returned no case result.');
+    return result;
   };
 
   /** Closes every started per-run transport and reports all cleanup failures together. */

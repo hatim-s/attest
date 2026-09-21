@@ -82,6 +82,7 @@ const CONTRACT_PATH = join(TEST_DIRECTORY, 'fixtures/documentation-contract.json
 const PACKED_PACKAGE_ROOTS = [
   'packages/contracts',
   'packages/core',
+  'packages/executor',
   'packages/runtime',
   'packages/local',
   'packages/web',
@@ -91,6 +92,7 @@ const PACKED_PACKAGE_NAMES = [
   '@attest/cli',
   '@attest/contracts',
   '@attest/core',
+  '@attest/executor',
   '@attest/runtime',
   '@attest/local',
   '@attest/web',
@@ -405,6 +407,7 @@ const createPackedCli = async (): Promise<PackedCliRuntime> => {
     overrides: {
       '@attest/contracts': archiveReference('@attest/contracts'),
       '@attest/core': archiveReference('@attest/core'),
+      '@attest/executor': archiveReference('@attest/executor'),
       '@attest/runtime': archiveReference('@attest/runtime'),
       '@attest/local': archiveReference('@attest/local'),
       '@attest/web': archiveReference('@attest/web'),

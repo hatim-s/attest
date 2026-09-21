@@ -4,7 +4,8 @@ import { join } from 'node:path';
 
 import { AGENT_PROTOCOL, TRACE_SCHEMA_ID, type CaseOutcome } from '@attest/contracts';
 import type { CaseRecord, RunStore, StoredCaseExecution } from '@attest/core';
-import { AgentInvocationError, toStoredCaseExecution, type CaseExecution } from '@attest/runtime';
+import { AgentInvocationError, type CaseExecution } from '@attest/executor';
+import { toStoredCaseExecution } from '@attest/runtime';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { openStore } from '../run-store.js';

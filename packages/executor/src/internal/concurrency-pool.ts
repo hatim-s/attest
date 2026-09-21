@@ -56,7 +56,7 @@ async function* mapBounded<T, R>(
   const completed: SettledResult<R>[] = [];
   const pending = new Map<number, Promise<void>>();
   let nextIndex = 0;
-  let mapperFailure: unknown;
+  let mapperFailed = false;
   let notifyCompletion: (() => void) | undefined;
 
   const scheduleAvailable = (): void => {
@@ -65,7 +65,7 @@ async function* mapBounded<T, R>(
       completed.length + pending.size < maximumBufferedCompletions &&
       nextIndex < items.length &&
       !signal.aborted &&
-      mapperFailure === undefined
+      !mapperFailed
     ) {
       const index = nextIndex;
       const item = items[index] as T;
@@ -74,7 +74,7 @@ async function* mapBounded<T, R>(
         pending.delete(index);
         completed.push(settled);
         if (settled.status === 'rejected') {
-          mapperFailure = settled.reason;
+          mapperFailed = true;
           poolController.abort(settled.reason);
         }
         notifyCompletion?.();

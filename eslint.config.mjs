@@ -30,6 +30,8 @@ export default tseslint.config(
           patterns: [
             {
               group: [
+                '@attest/executor',
+                '@attest/executor/*',
                 '@attest/runtime',
                 '@attest/runtime/*',
                 '@attest/local',
@@ -54,7 +56,7 @@ export default tseslint.config(
                 '@tanstack/ai*',
               ],
               message:
-                'Core owns domain logic and interfaces. Put execution in runtime and local I/O in local.',
+                'Core owns domain logic and interfaces. Put transport execution in executor, evaluation execution in runtime, and local I/O in local.',
             },
           ],
         },
@@ -62,7 +64,7 @@ export default tseslint.config(
     },
   },
   {
-    files: ['packages/runtime/src/**/*.ts'],
+    files: ['packages/runtime/src/**/*.ts', 'packages/executor/src/**/*.ts'],
     rules: {
       'no-restricted-imports': [
         'error',
@@ -72,6 +74,28 @@ export default tseslint.config(
               group: ['@attest/local', '@attest/local/*', '@attest/cli', '@attest/cli/*'],
               message: 'Runtime must work without the local application or CLI.',
             },
+          ],
+        },
+      ],
+    },
+  },
+  {
+    files: ['packages/executor/src/**/*.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            '@attest/core',
+            '@attest/core/*',
+            '@attest/runtime',
+            '@attest/runtime/*',
+            '@attest/local',
+            '@attest/local/*',
+            '@attest/cli',
+            '@attest/cli/*',
+            '@attest/web',
+            '@attest/web/*',
           ],
         },
       ],
@@ -103,6 +127,8 @@ export default tseslint.config(
           patterns: [
             {
               group: [
+                '@attest/executor',
+                '@attest/executor/*',
                 '@attest/runtime',
                 '@attest/runtime/*',
                 '@attest/local',

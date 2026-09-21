@@ -16,14 +16,15 @@ Use Node 22 or later and Bun 1.4 or later. See the [quickstart](docs/quickstart.
 | ------------------- | ---------------------------------------------------------------------------- |
 | `@attest/contracts` | Versioned protocols and resource schemas                                     |
 | `@attest/core`      | Domain records, comparison, import, trace conversion, and storage interfaces |
-| `@attest/runtime`   | Agent execution, metrics, and evaluation scheduling                          |
+| `@attest/executor`  | Agent invocation, transport cleanup, and isolated case environments          |
+| `@attest/runtime`   | Metrics, lifecycle hooks, and evaluation scheduling                          |
 | `@attest/local`     | Project files, SQLite, local evaluation, reports, and dashboard server       |
 | `@attest/cli`       | Terminal commands, prompts, and output                                       |
 | `@attest/web`       | Dashboard and embedded report UI                                             |
 | `@attest/schemas`   | Generated JSON schemas for non-TypeScript consumers                          |
 | `@attest/site`      | Marketing page                                                               |
 
-The [architecture guide](docs/ARCHITECTURE.md) explains the dependency rules and where new code belongs. Cloud code can reuse contracts, core, and runtime without importing the CLI or local application.
+The [architecture guide](docs/ARCHITECTURE.md) explains the dependency rules and where new code belongs. Cloud code can reuse contracts, core, executor, and runtime without importing the CLI or local application.
 
 ## Development
 

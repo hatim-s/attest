@@ -7,7 +7,7 @@ import type {
   NativeAgentTarget,
   StreamAgentResource,
   WebSocketAgentResource,
-} from '@attest/runtime';
+} from '@attest/executor';
 
 type NativeAgentTestOptions = {
   agent: AgentResource;

@@ -8,7 +8,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import type { MetricContext } from '../metric-evaluation.js';
 import { executeExecutableMetric } from '../exec-metric.js';
-import { acquireFixtureProcessSweepLock } from '../../runner/_tests_/support/fixture-processes.js';
+import { acquireFixtureProcessSweepLock } from './support/fixture-processes.js';
 
 /** Resolves source fixtures from the repository root so conformance assets remain shared across tracks. */
 const fromRepositoryRoot = (relativePath: string): string =>

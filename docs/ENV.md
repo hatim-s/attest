@@ -22,3 +22,5 @@ Use one of these credential routes in the environment of the `attest` process:
 The three variables in the second route form one credential set. Attest rejects an incomplete set.
 Do not put credential values in `attest/agents/*.json`, `--sandbox-json`, argv, or checked-in shell
 scripts.
+
+The `after_agent` and `after_evaluation` command hooks receive the same case identifiers, worker directory, and `ATTEST_CASE_OUTCOME` as `after_case`. `after_agent` runs before metric evaluation, and `after_evaluation` runs after metrics.

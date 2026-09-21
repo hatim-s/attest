@@ -14,7 +14,7 @@ import {
 } from './support/fixture-processes.js';
 import type { InvocationAttempt, InvokeOptions } from '../types.js';
 
-const REPOSITORY_ROOT = fileURLToPath(new URL('../../../../../', import.meta.url));
+const REPOSITORY_ROOT = fileURLToPath(new URL('../../../../', import.meta.url));
 const CANONICAL_AGENT_PATH = join(
   REPOSITORY_ROOT,
   'conformance/src/_tests_/fixtures/fake-agents/cli-agent.cjs',

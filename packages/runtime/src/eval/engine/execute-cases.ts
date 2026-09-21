@@ -13,6 +13,7 @@ import { safeErrorMessage } from './run-model.js';
 type SettledCase<Payload> = {
   resolvedCase: ResolvedEvalCase<Payload>;
   workerIndex: number;
+  cancelledAtSettlement: boolean;
   result:
     | { status: 'fulfilled'; value: Awaited<ReturnType<EvalCaseRunner<Payload>['executeCase']>> }
     | { status: 'rejected'; reason: unknown };
@@ -21,6 +22,14 @@ type SettledCase<Payload> = {
 type CaseExecutionState<Payload> = {
   records: EvalCaseRecord<Payload>[];
   infrastructureErrors: string[];
+  persistenceConfirmed: boolean;
+};
+
+type TestQueue<Payload> = {
+  cases: ResolvedEvalCase<Payload>[];
+  next: number;
+  active: number;
+  limit: number;
 };
 
 /** Starts one runner task with the worker identity that remains stable for its full execution. */
@@ -31,25 +40,31 @@ const startCase = <Payload>(
   signal: AbortSignal,
   workerIndex: number,
 ): Promise<SettledCase<Payload>> =>
-  runner.executeCase(run.run_id, resolvedCase, signal, { worker_index: workerIndex }).then(
-    (value): SettledCase<Payload> => ({
-      resolvedCase,
-      workerIndex,
-      result: { status: 'fulfilled', value },
-    }),
-    (reason: unknown): SettledCase<Payload> => ({
-      resolvedCase,
-      workerIndex,
-      result: { status: 'rejected', reason },
-    }),
-  );
+  Promise.resolve()
+    .then(() => {
+      signal.throwIfAborted();
+      return runner.executeCase(run.run_id, resolvedCase, signal, { worker_index: workerIndex });
+    })
+    .then(
+      (value) => ({
+        resolvedCase,
+        workerIndex,
+        cancelledAtSettlement: signal.aborted,
+        result: { status: 'fulfilled' as const, value },
+      }),
+      (reason: unknown) => ({
+        resolvedCase,
+        workerIndex,
+        cancelledAtSettlement: signal.aborted,
+        result: { status: 'rejected' as const, reason },
+      }),
+    );
 
 /** Normalizes, persists, and emits one settled case in observed completion order. */
 const recordSettledCase = async <Payload>(
   run: ImmutableEvalRun,
   settled: SettledCase<Payload>,
   persistence: EvalPersistenceAdapter<Payload>,
-  signal: AbortSignal,
   emit: EventCollector['emit'],
   state: CaseExecutionState<Payload>,
 ): Promise<void> => {
@@ -72,7 +87,6 @@ const recordSettledCase = async <Payload>(
       normalized: normalizeCaseResult(settled.resolvedCase, execution, metrics, completionIndex),
     };
   } else {
-    const cancellation = signal.aborted;
     const reason =
       settled.result.status === 'rejected'
         ? settled.result.reason
@@ -93,7 +107,7 @@ const recordSettledCase = async <Payload>(
         case_id: settled.resolvedCase.case_id,
         configured_index: settled.resolvedCase.configured_index,
         completion_index: completionIndex,
-        outcome: cancellation ? 'cancelled' : 'invocation_error',
+        outcome: settled.cancelledAtSettlement ? 'cancelled' : 'invocation_error',
         verdict: 'error',
         started_at: run.created_at,
         duration_ms: 0,
@@ -107,20 +121,25 @@ const recordSettledCase = async <Payload>(
   try {
     await persistence.recordCase(run.run_id, record);
   } catch (error: unknown) {
+    state.persistenceConfirmed = false;
     state.infrastructureErrors.push(safeErrorMessage(error, 'Eval case persistence failed.'));
   }
-  await emit({
-    event: 'case_completed',
-    data: {
-      run_id: run.run_id,
-      test_id: record.normalized.test_id,
-      case_id: record.normalized.case_id,
-      configured_index: record.normalized.configured_index,
-      completion_index: record.normalized.completion_index,
-      outcome: record.normalized.outcome,
-      verdict: record.normalized.verdict,
-    },
-  });
+  try {
+    await emit({
+      event: 'case_completed',
+      data: {
+        run_id: run.run_id,
+        test_id: record.normalized.test_id,
+        case_id: record.normalized.case_id,
+        configured_index: record.normalized.configured_index,
+        completion_index: record.normalized.completion_index,
+        outcome: record.normalized.outcome,
+        verdict: record.normalized.verdict,
+      },
+    });
+  } catch (error: unknown) {
+    state.infrastructureErrors.push(safeErrorMessage(error, 'Eval case event emission failed.'));
+  }
 };
 
 /** Divides configured cases into balanced contiguous batches, assigning extra cases from the front. */
@@ -141,138 +160,83 @@ const createWorkerBatches = <Payload>(
   });
 };
 
-/** Runs one serial queue per explicit worker while processing completions through one ordered sink. */
-const executeWorkerBatches = async <Payload>(
-  run: ImmutableEvalRun,
-  cases: readonly ResolvedEvalCase<Payload>[],
-  runner: EvalCaseRunner<Payload>,
-  persistence: EvalPersistenceAdapter<Payload>,
-  signal: AbortSignal,
-  emit: EventCollector['emit'],
-  requestedWorkers: number,
-): Promise<CaseExecutionState<Payload>> => {
-  const batches = createWorkerBatches(cases, requestedWorkers);
-  const pending = new Map<number, Promise<SettledCase<Payload>>>();
-  const nextIndexByWorker = batches.map(() => 0);
-  const workerFailures = new Map<number, string>();
-  const state: CaseExecutionState<Payload> = { records: [], infrastructureErrors: [] };
-
-  const scheduleWorker = async (workerIndex: number): Promise<void> => {
-    const batch = batches[workerIndex];
-    const batchIndex = nextIndexByWorker[workerIndex] ?? 0;
-    const resolvedCase = batch?.[batchIndex];
-    if (resolvedCase === undefined) return;
-    nextIndexByWorker[workerIndex] = batchIndex + 1;
-    await emit({
-      event: 'case_started',
-      data: {
-        run_id: run.run_id,
-        test_id: resolvedCase.test_id,
-        case_id: resolvedCase.case_id,
-        configured_index: resolvedCase.configured_index,
-      },
-    });
-    const workerFailure = workerFailures.get(workerIndex);
-    pending.set(
-      workerIndex,
-      workerFailure === undefined
-        ? startCase(run, resolvedCase, runner, signal, workerIndex)
-        : Promise.resolve({
-            resolvedCase,
-            workerIndex,
-            result: { status: 'rejected' as const, reason: new Error(workerFailure) },
-          }),
-    );
+/** Queues each completion once, preserving finish order without attaching repeated race listeners. */
+const createCompletionQueue = <Value>() => {
+  const completed: Value[] = [];
+  let wake: (() => void) | undefined;
+  return {
+    push(value: Value): void {
+      completed.push(value);
+      wake?.();
+      wake = undefined;
+    },
+    async next(): Promise<Value> {
+      if (completed.length === 0)
+        await new Promise<void>((resolve) => {
+          wake = resolve;
+        });
+      const value = completed.shift();
+      if (value === undefined) throw new Error('Missing eval completion.');
+      return value;
+    },
   };
-
-  // Launch the first case in configured worker order so simultaneous starts remain deterministic.
-  for (let workerIndex = 0; workerIndex < batches.length; workerIndex += 1) {
-    await scheduleWorker(workerIndex);
-  }
-  while (pending.size > 0) {
-    const settled = await Promise.race(pending.values());
-    pending.delete(settled.workerIndex);
-    await recordSettledCase(run, settled, persistence, signal, emit, state);
-    if (settled.result.status === 'rejected') {
-      workerFailures.set(
-        settled.workerIndex,
-        safeErrorMessage(settled.result.reason, 'The worker case failed.'),
-      );
-    } else if (settled.result.value.lifecycle_error !== undefined) {
-      workerFailures.set(settled.workerIndex, settled.result.value.lifecycle_error);
-    }
-    await scheduleWorker(settled.workerIndex);
-  }
-
-  return state;
 };
 
-/** Runs the existing bounded case pool and assigns each active task a transient worker slot. */
-const executeConcurrentCases = async <Payload>(
-  run: ImmutableEvalRun,
-  cases: readonly ResolvedEvalCase<Payload>[],
-  runner: EvalCaseRunner<Payload>,
-  persistence: EvalPersistenceAdapter<Payload>,
-  signal: AbortSignal,
-  emit: EventCollector['emit'],
-): Promise<CaseExecutionState<Payload>> => {
-  const concurrency = run.effective_command.resolved.concurrency;
-  const pending = new Map<number, Promise<SettledCase<Payload>>>();
-  const activeByTest = new Map<string, number>();
-  const activeWorkerIndexes = new Set<number>();
-  const state: CaseExecutionState<Payload> = { records: [], infrastructureErrors: [] };
-  let nextIndex = 0;
+/** Maintains eligible test queues by their next configured case without rescanning all tests. */
+const createEligibleQueueHeap = <Payload>() => {
+  const heap: TestQueue<Payload>[] = [];
+  const enqueued = new Set<TestQueue<Payload>>();
+  const configuredIndex = (queue: TestQueue<Payload>): number => {
+    const resolvedCase = queue.cases[queue.next];
+    if (resolvedCase === undefined) throw new Error('Eligible eval queue has no next case.');
+    return resolvedCase.configured_index;
+  };
+  const enqueue = (queue: TestQueue<Payload>): void => {
+    if (enqueued.has(queue) || queue.active >= queue.limit || queue.cases[queue.next] === undefined)
+      return;
 
-  const acquireWorkerIndex = (): number => {
-    for (let workerIndex = 0; workerIndex < concurrency; workerIndex += 1) {
-      if (!activeWorkerIndexes.has(workerIndex)) {
-        activeWorkerIndexes.add(workerIndex);
-        return workerIndex;
+    enqueued.add(queue);
+    let index = heap.length;
+    heap.push(queue);
+    while (index > 0) {
+      const parentIndex = (index - 1) >> 1;
+      const parent = heap[parentIndex]!;
+      if (configuredIndex(parent) <= configuredIndex(queue)) break;
+      heap[index] = parent;
+      index = parentIndex;
+    }
+    heap[index] = queue;
+  };
+  const dequeue = (): TestQueue<Payload> | undefined => {
+    const first = heap[0];
+    if (first === undefined) return undefined;
+
+    const last = heap.pop()!;
+    enqueued.delete(first);
+    if (heap.length > 0) {
+      let index = 0;
+      while (true) {
+        let childIndex = index * 2 + 1;
+        if (childIndex >= heap.length) break;
+        if (
+          childIndex + 1 < heap.length &&
+          configuredIndex(heap[childIndex + 1]!) < configuredIndex(heap[childIndex]!)
+        )
+          childIndex += 1;
+        const child = heap[childIndex]!;
+        if (configuredIndex(last) <= configuredIndex(child)) break;
+        heap[index] = child;
+        index = childIndex;
       }
+      heap[index] = last;
     }
-    throw new Error('Eval concurrency slot accounting drifted.');
+    return first;
   };
 
-  const schedule = async (): Promise<void> => {
-    while (pending.size < concurrency && nextIndex < cases.length) {
-      const resolvedCase = cases[nextIndex] as ResolvedEvalCase<Payload>;
-      const testConcurrency = resolvedCase.test_concurrency ?? concurrency;
-      const activeForTest = activeByTest.get(resolvedCase.test_id) ?? 0;
-      // Retain legacy scheduling when one test reaches its narrower concurrency cap.
-      if (activeForTest >= testConcurrency) break;
-      nextIndex += 1;
-      const workerIndex = acquireWorkerIndex();
-      await emit({
-        event: 'case_started',
-        data: {
-          run_id: run.run_id,
-          test_id: resolvedCase.test_id,
-          case_id: resolvedCase.case_id,
-          configured_index: resolvedCase.configured_index,
-        },
-      });
-      const task = startCase(run, resolvedCase, runner, signal, workerIndex);
-      pending.set(resolvedCase.configured_index, task);
-      activeByTest.set(resolvedCase.test_id, activeForTest + 1);
-    }
-  };
-
-  await schedule();
-  while (pending.size > 0) {
-    const settled = await Promise.race(pending.values());
-    pending.delete(settled.resolvedCase.configured_index);
-    activeWorkerIndexes.delete(settled.workerIndex);
-    const activeForTest = activeByTest.get(settled.resolvedCase.test_id) ?? 1;
-    if (activeForTest <= 1) activeByTest.delete(settled.resolvedCase.test_id);
-    else activeByTest.set(settled.resolvedCase.test_id, activeForTest - 1);
-    await recordSettledCase(run, settled, persistence, signal, emit, state);
-    await schedule();
-  }
-
-  return state;
+  return { dequeue, enqueue };
 };
 
-/** Selects explicit stable workers or the legacy bounded concurrency scheduler. */
+/** Admits eligible cases into bounded slots and drains every admitted task before returning. */
 const executeCases = async <Payload>(
   run: ImmutableEvalRun,
   cases: readonly ResolvedEvalCase<Payload>[],
@@ -281,10 +245,119 @@ const executeCases = async <Payload>(
   signal: AbortSignal,
   emit: EventCollector['emit'],
 ): Promise<CaseExecutionState<Payload>> => {
+  const concurrency = Math.min(run.effective_command.resolved.concurrency, cases.length);
   const workers = run.effective_command.resolved.execution?.workers;
-  return workers === undefined
-    ? executeConcurrentCases(run, cases, runner, persistence, signal, emit)
-    : executeWorkerBatches(run, cases, runner, persistence, signal, emit, workers.count);
+  const batches = workers === undefined ? undefined : createWorkerBatches(cases, workers.count);
+  const queues = new Map<string, TestQueue<Payload>>();
+  for (const resolvedCase of cases) {
+    let queue = queues.get(resolvedCase.test_id);
+    if (queue === undefined) {
+      queue = {
+        cases: [],
+        next: 0,
+        active: 0,
+        limit: resolvedCase.test_concurrency ?? concurrency,
+      };
+      queues.set(resolvedCase.test_id, queue);
+    }
+    queue.limit = Math.min(queue.limit, resolvedCase.test_concurrency ?? concurrency);
+    queue.cases.push(resolvedCase);
+  }
+  const nextByWorker = Array.from({ length: concurrency }, () => 0);
+  const failures = new Map<number, string>();
+  const pending = new Map<number, Promise<void>>();
+  const completions = createCompletionQueue<SettledCase<Payload>>();
+  const state: CaseExecutionState<Payload> = {
+    records: [],
+    infrastructureErrors: [],
+    persistenceConfirmed: true,
+  };
+  const eligibleQueues = createEligibleQueueHeap<Payload>();
+  if (batches === undefined) {
+    for (const queue of queues.values()) eligibleQueues.enqueue(queue);
+  }
+
+  const takeCase = (workerIndex: number): ResolvedEvalCase<Payload> | undefined => {
+    if (batches !== undefined) {
+      const next = nextByWorker[workerIndex] ?? 0;
+      nextByWorker[workerIndex] = next + 1;
+      return batches[workerIndex]?.[next];
+    }
+    const queue = eligibleQueues.dequeue();
+    if (queue === undefined) return undefined;
+    const selected = queue.cases[queue.next];
+    if (selected === undefined) throw new Error('Selected eval queue has no next case.');
+    queue.next += 1;
+    queue.active += 1;
+    eligibleQueues.enqueue(queue);
+    return selected;
+  };
+  const schedule = async (): Promise<void> => {
+    for (let workerIndex = 0; workerIndex < concurrency; workerIndex += 1) {
+      if (pending.has(workerIndex)) continue;
+      const resolvedCase = takeCase(workerIndex);
+      if (resolvedCase === undefined) continue;
+      try {
+        await emit({
+          event: 'case_started',
+          data: {
+            run_id: run.run_id,
+            test_id: resolvedCase.test_id,
+            case_id: resolvedCase.case_id,
+            configured_index: resolvedCase.configured_index,
+          },
+        });
+      } catch (error: unknown) {
+        state.infrastructureErrors.push(
+          safeErrorMessage(error, 'Eval case event emission failed.'),
+        );
+      }
+      const failure = failures.get(workerIndex);
+      const task =
+        failure === undefined
+          ? startCase(run, resolvedCase, runner, signal, workerIndex)
+          : Promise.resolve<SettledCase<Payload>>({
+              resolvedCase,
+              workerIndex,
+              cancelledAtSettlement: signal.aborted,
+              result: { status: 'rejected', reason: new Error(failure) },
+            });
+      pending.set(
+        workerIndex,
+        task.then((settled) => completions.push(settled)),
+      );
+    }
+  };
+  try {
+    await schedule();
+    while (pending.size > 0) {
+      const settled = await completions.next();
+      pending.delete(settled.workerIndex);
+      if (batches === undefined) {
+        const queue = queues.get(settled.resolvedCase.test_id);
+        if (queue === undefined || queue.active < 1) {
+          throw new Error('Eval test queue accounting drifted.');
+        }
+        queue.active -= 1;
+        eligibleQueues.enqueue(queue);
+      } else {
+        if (settled.result.status === 'rejected')
+          failures.set(
+            settled.workerIndex,
+            safeErrorMessage(settled.result.reason, 'The worker case failed.'),
+          );
+        else if (settled.result.value.lifecycle_error !== undefined)
+          failures.set(settled.workerIndex, settled.result.value.lifecycle_error);
+      }
+      // Refill before awaiting the ordered persistence sink. The completion queue remains bounded
+      // by the slot count, including settled tasks whose results have not been consumed yet.
+      await schedule();
+      await recordSettledCase(run, settled, persistence, emit, state);
+    }
+  } finally {
+    await Promise.all(pending.values());
+  }
+  return state;
 };
 
 export { executeCases };
