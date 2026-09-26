@@ -7,6 +7,10 @@
         "expected": {
           "$ref": "#/$defs/__schema1"
         },
+        "folder": {
+          "minLength": 1,
+          "type": "string"
+        },
         "id": {
           "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
           "type": "string"

@@ -162,12 +162,17 @@ const classifyRuns = (
     candidateRunId: string;
     baseConfigHash: string;
     candidateConfigHash: string;
+    sharedOnly?: boolean;
   },
 ): RunDiff => {
   const baseIndex = indexCases(baseCases);
   const candidateIndex = indexCases(candidateCases);
   const suiteNames = [...new Set([...baseIndex.keys(), ...candidateIndex.keys()])].toSorted();
   const transitions: CaseTransition[] = [];
+  let baseOnlyCases = 0;
+  let candidateOnlyCases = 0;
+  const comparedBase: CaseRecord[] = [];
+  const comparedCandidate: CaseRecord[] = [];
   for (const suiteName of suiteNames) {
     const baseSuite = baseIndex.get(suiteName);
     const candidateSuite = candidateIndex.get(suiteName);
@@ -177,6 +182,12 @@ const classifyRuns = (
     for (const caseId of caseIds) {
       const base = baseSuite?.get(caseId);
       const candidate = candidateSuite?.get(caseId);
+      if (base === undefined) candidateOnlyCases += 1;
+      if (candidate === undefined) baseOnlyCases += 1;
+      if (comparison.sharedOnly === true && (base === undefined || candidate === undefined))
+        continue;
+      if (base !== undefined) comparedBase.push(base);
+      if (candidate !== undefined) comparedCandidate.push(candidate);
       const flakiness = isFlakinessSuspected(base, candidate, comparison) ? 'suspected' : undefined;
       transitions.push({
         suiteName,
@@ -207,9 +218,20 @@ const classifyRuns = (
       counts,
       flakySuspectCount: transitions.filter((transition) => transition.flakiness === 'suspected')
         .length,
-      basePassRate: baseCases.length === 0 ? 0 : countPasses(baseCases) / baseCases.length,
+      ...(comparison.sharedOnly === true
+        ? {
+            coverage: {
+              sharedCases: transitions.length,
+              baseOnlyCases,
+              candidateOnlyCases,
+            },
+          }
+        : {}),
+      basePassRate: comparedBase.length === 0 ? 0 : countPasses(comparedBase) / comparedBase.length,
       candidatePassRate:
-        candidateCases.length === 0 ? 0 : countPasses(candidateCases) / candidateCases.length,
+        comparedCandidate.length === 0
+          ? 0
+          : countPasses(comparedCandidate) / comparedCandidate.length,
     },
     transitions,
   };

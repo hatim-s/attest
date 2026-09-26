@@ -72,9 +72,14 @@ type CommonEvalOptions = {
 };
 
 type EvalRunCliOptions = CommonEvalOptions &
-  Omit<EvalRunRequestFields, 'caseIds' | 'output' | 'tags' | 'testIds'> & {
+  Omit<
+    EvalRunRequestFields,
+    'caseIds' | 'output' | 'tags' | 'testIds' | 'folders' | 'datasetIds'
+  > & {
     case?: string[];
     tag?: string[];
+    folder?: string[];
+    dataset?: string[];
   };
 type EvalCancelCliOptions = Omit<CommonEvalOptions, 'output'> &
   Omit<EvalCancelRequestFields, 'output' | 'runId'> & {
@@ -145,6 +150,14 @@ const renderHumanFinalResult = (data: EvalFinalResultData): string => {
     ? [
         `Run ${result.result.run_id}`,
         `  cases: ${result.result.summary.total_cases}`,
+        ...(result.result.selection === undefined
+          ? []
+          : [
+              `  selection: ${result.result.selection.selected_cases} of ${result.result.selection.total_cases} cases, ${result.result.selection.matched_cases} matched`,
+              ...(result.result.selection.sample === undefined
+                ? []
+                : [`  sample seed: ${result.result.selection.sample.seed}`]),
+            ]),
         `  passed: ${result.result.summary.passed_cases}`,
         `  failed: ${result.result.summary.failed_cases}`,
         `  errors: ${result.result.summary.error_cases}`,
@@ -400,6 +413,13 @@ const registerEvalCommands = (context: RegisterEvalCommandsOptions): void => {
     .option('--all', 'run every test')
     .option('--case <case-id>', 'select an exact case id; repeatable', collect)
     .option('--tag <tag>', 'select cases with every repeated tag; repeatable', collect)
+    .option('--folder <folder>', 'select a logical folder and descendants; repeatable', collect)
+    .option('--dataset <dataset-id>', 'select cases from an attached dataset; repeatable', collect)
+    .option('--sample <n>', 'sample up to n matching cases across selected tests')
+    .option(
+      '--seed <seed>',
+      'reproduce sample membership for an unchanged population; requires --sample',
+    )
     .option('--concurrency <n>', 'override project and test concurrency')
     .option('--timeout <duration>', 'cap the complete eval run, such as 60s or 2m')
     .option('--baseline <run-id>', 'include a persisted diff against a prior run')
@@ -428,6 +448,8 @@ const registerEvalCommands = (context: RegisterEvalCommandsOptions): void => {
               caseIds: options.case,
               output: options.output,
               tags: options.tag,
+              folders: options.folder,
+              datasetIds: options.dataset,
               testIds,
             },
             {
@@ -464,12 +486,17 @@ const registerEvalCommands = (context: RegisterEvalCommandsOptions): void => {
       'Provide one or more test ids or --all; the interactive wizard may supply the selection.',
       '--all and explicit test ids are mutually exclusive.',
       '--watch is available only with human output.',
+      '--seed requires --sample; filters apply before sampling across selected tests.',
       'JSONL ends with exactly one result event and uses contiguous zero-based sequences.',
     ],
     options: {
       all: { conflicts: ['test-id', 'from-json'] },
       case: { conflicts: ['from-json'], repeatable: true },
       tag: { conflicts: ['from-json'], repeatable: true },
+      folder: { conflicts: ['from-json'], repeatable: true },
+      dataset: { conflicts: ['from-json'], repeatable: true },
+      sample: { conflicts: ['from-json'] },
+      seed: { conflicts: ['from-json'], implies: ['sample'] },
       concurrency: { conflicts: ['from-json'] },
       timeout: { conflicts: ['from-json'] },
       baseline: { conflicts: ['from-json'] },
@@ -482,6 +509,10 @@ const registerEvalCommands = (context: RegisterEvalCommandsOptions): void => {
           'all',
           'case',
           'tag',
+          'folder',
+          'dataset',
+          'sample',
+          'seed',
           'concurrency',
           'timeout',
           'baseline',

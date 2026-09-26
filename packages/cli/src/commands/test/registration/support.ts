@@ -39,6 +39,7 @@ type TestOptions = MutationOptions & {
 
 type CaseOptions = MutationOptions & {
   dedupe?: 'content' | 'id' | 'key';
+  folder?: string;
   expected?: string;
   format?: 'csv' | 'json' | 'jsonl';
   id?: string;

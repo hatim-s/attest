@@ -113,6 +113,13 @@ const DiffPanel = ({
                 <h3>Baseline → candidate</h3>
               </div>
               <span>{diff.summary.flakySuspectCount} flaky suspects</span>
+              {diff.summary.coverage !== undefined && (
+                <span>
+                  {diff.summary.coverage.sharedCases} shared cases compared;{' '}
+                  {diff.summary.coverage.baseOnlyCases} baseline-only,{' '}
+                  {diff.summary.coverage.candidateOnlyCases} candidate-only
+                </span>
+              )}
             </div>
             <div className="verdict-matrix">
               <span />

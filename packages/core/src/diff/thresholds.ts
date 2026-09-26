@@ -51,6 +51,9 @@ const evaluateThresholds = (
 ): CiVerdict => {
   validateThresholds(thresholds);
   const reasons: string[] = [];
+  if (diff.summary.coverage?.sharedCases === 0) {
+    reasons.push('Partial runs have no shared cases to compare.');
+  }
   if (
     thresholds.minPassRate !== undefined &&
     diff.summary.candidatePassRate < thresholds.minPassRate

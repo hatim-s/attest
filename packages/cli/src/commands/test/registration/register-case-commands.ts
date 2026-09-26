@@ -32,6 +32,7 @@ const registerTestCaseCommands = (test: Command, context: RegisterTestCommandsOp
     .option('--input <json>', 'case input JSON')
     .option('--expected <json>', 'optional expected JSON')
     .option('--params <json>', 'optional params object JSON')
+    .option('--folder <folder>', 'logical case folder, such as billing/refunds')
     .option('--tag <tag>', 'case tag', collect);
   caseAdd.action(async (testId: string | undefined, options: CaseOptions) => {
     const interactive = isInteractive(options, context.interaction, options.fromJson);
@@ -45,6 +46,7 @@ const registerTestCaseCommands = (test: Command, context: RegisterTestCommandsOp
         expected: options.expected,
         params: options.params,
         tag: options.tag,
+        folder: options.folder,
       },
       context,
       async () => {
@@ -74,6 +76,7 @@ const registerTestCaseCommands = (test: Command, context: RegisterTestCommandsOp
               ? {}
               : { params: parseJsonFlag(options.params, '--params') }),
             ...(options.tag === undefined ? {} : { tags: options.tag }),
+            ...(options.folder === undefined ? {} : { folder: options.folder }),
           },
         };
       },

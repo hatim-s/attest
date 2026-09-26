@@ -13,6 +13,8 @@ import {
   type TestResource,
 } from '@attest/contracts';
 
+import { selectCases, CaseSelectionError } from '@attest/core';
+
 import { LocalError } from '../../errors/index.js';
 import { hashCanonicalJson, type JsonValue } from '../../project/canonical-project.js';
 import type { LoadedProject } from '../../project/project-loader/index.js';
@@ -369,11 +371,8 @@ const resolveEvalRun = (
   const agentsById = new Map(project.agents.map((agent) => [agent.id, agent]));
   const datasetsById = new Map(project.datasets.map((dataset) => [dataset.metadata.id, dataset]));
   const metricsById = new Map(project.metrics.map((metric) => [metric.id, metric]));
-  const caseFilter = request.case_ids === undefined ? undefined : new Set(request.case_ids);
-  const tagFilter = request.tags ?? [];
-  const foundCaseIds = new Set<string>();
   const selectedTests: ResolvedEvalTestInput[] = [];
-  const cases: ResolvedEvalCaseInput[] = [];
+  const candidates: ResolvedEvalCaseInput[] = [];
 
   selectedTestIds.forEach((testId) => {
     const test = testsById.get(testId)!;
@@ -416,20 +415,15 @@ const resolveEvalRun = (
     selectedTests.push({ agent, concurrency: testConcurrency, test });
 
     expandTestCases(test, datasetsById).forEach((expanded) => {
-      if (caseFilter?.has(expanded.case.id) === true) foundCaseIds.add(expanded.case.id);
-      if (caseFilter !== undefined && !caseFilter.has(expanded.case.id)) return;
-      const tags = new Set(expanded.case.tags ?? []);
-      if (tagFilter.some((tag) => !tags.has(tag))) return;
-      const metrics = resolveMetrics(test, expanded.case, metricsById);
-      cases.push({
+      candidates.push({
         agent,
         attempt_timeout_ms: test.defaults?.timeout_ms ?? agent.timeouts?.attempt_ms ?? 60_000,
         case: expanded.case,
         case_id: expanded.case.id,
         concurrency: testConcurrency,
-        configured_index: cases.length,
+        configured_index: candidates.length,
         execution_id: createExecutionId(project.project.project_id, test.id, expanded.case.id),
-        metrics,
+        metrics: [],
         source: expanded.source,
         test,
         test_id: test.id,
@@ -437,19 +431,22 @@ const resolveEvalRun = (
     });
   });
 
-  const missingCaseIds = (request.case_ids ?? []).filter((id) => !foundCaseIds.has(id));
-  if (missingCaseIds.length > 0) {
+  let selection: ReturnType<typeof selectCases<ResolvedEvalCaseInput>>;
+  try {
+    selection = selectCases(candidates, request);
+  } catch (error) {
+    if (!(error instanceof CaseSelectionError)) throw error;
     throw new LocalError(
-      'resource_not_found',
-      'One or more selected case ids do not exist in the selected tests.',
-      { details: { missing_ids: missingCaseIds, resource_type: 'case' } },
+      error.code === 'invalid_selection' ? 'cli_usage' : 'resource_not_found',
+      error.message,
+      { details: error.details },
     );
   }
-  if (cases.length === 0) {
-    throw new LocalError('resource_not_found', 'No cases matched the eval selection.', {
-      details: { case_ids: request.case_ids ?? [], tags: request.tags ?? [] },
-    });
-  }
+  const cases = selection.cases.map((candidate, configured_index) => ({
+    ...candidate,
+    configured_index,
+    metrics: resolveMetrics(candidate.test, candidate.case, metricsById),
+  }));
 
   const selectedAgentIds = new Set(selectedTests.map(({ agent }) => agent.id));
   const selectedDatasetIds = new Set(
@@ -489,6 +486,7 @@ const resolveEvalRun = (
       })),
     },
     selected_test_ids: selectedTestIds,
+    selection: selection.summary,
     selected_cases: cases.map(({ configured_index, test_id, case_id, source }) => ({
       configured_index,
       test_id,
