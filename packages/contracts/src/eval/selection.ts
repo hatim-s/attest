@@ -1,19 +1,15 @@
 import { z } from 'zod';
 import { resourceIdSchema } from '../project/shared.js';
 
-/** Logical case folder, independent of the host filesystem. */
+// Segments allow internal spaces but exclude whitespace at either end and dot traversal.
+const folderSegment = String.raw`(?!\.{1,2}(?:/|$))[^\s/\\](?:[^/\\]*[^\s/\\])?`;
+
+/** Logical folder validation is also emitted in the public JSON schemas. */
 const caseFolderSchema = z
   .string()
   .min(1)
-  .refine(
-    (value) =>
-      !value.includes('\\') &&
-      value
-        .split('/')
-        .every(
-          (segment) =>
-            segment.length > 0 && segment !== '.' && segment !== '..' && segment.trim() === segment,
-        ),
+  .regex(
+    new RegExp(String.raw`^${folderSegment}(?:/${folderSegment})*(?![\s\S])`, 'u'),
     'Use non-empty slash-separated folder names without dot segments or backslashes.',
   );
 

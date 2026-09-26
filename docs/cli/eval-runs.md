@@ -93,7 +93,8 @@ include `selection` with total, matched, and selected counts plus resolved sampl
 The total counts cases in the selected tests after dataset attachment filters. Excluded cases
 are not skipped executions. A passing subset run describes only its selected cases.
 
-When either run is partial, baseline comparisons use shared recorded test/case identities for
+When either run selects a subset of cases or the runs select different tests, baseline comparisons
+use shared recorded test/case identities for
 verdicts and pass rates. Coverage reports shared, baseline-only, and candidate-only counts;
 unmatched cases do not become added/removed regressions. CI gates reject comparisons with no
 shared cases. Historical snapshots without selection metadata remain readable.

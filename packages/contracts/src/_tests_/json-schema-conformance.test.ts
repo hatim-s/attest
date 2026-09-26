@@ -511,6 +511,39 @@ const getJsonSchemaValidator = (fileName: string): ValidateFunction => {
 };
 
 describe('Zod and generated JSON Schema conformance', () => {
+  it.each([
+    ['billing/refunds', true],
+    ['billing group/refunds', true],
+    ['.hidden/...', true],
+    ['/billing', false],
+    ['billing/', false],
+    ['billing//refunds', false],
+    ['billing/../refunds', false],
+    ['billing/./refunds', false],
+    ['billing\\refunds', false],
+    ['billing/ refunds', false],
+    ['billing /refunds', false],
+    ['billing\n', false],
+  ])('agrees on folder %j in case and selection schemas', (folder, valid) => {
+    const candidates = [
+      ['case.json', { ...validCase, folder }],
+      [
+        'eval-run-request.json',
+        {
+          schema: COMMAND_REQUEST_SCHEMA_ID,
+          command: 'eval.run',
+          test_ids: ['refund'],
+          output: 'json',
+          folders: [folder],
+        },
+      ],
+    ] as const;
+    for (const [fileName, candidate] of candidates) {
+      expect(getZodSchema(fileName).safeParse(candidate).success).toBe(valid);
+      expect(getJsonSchemaValidator(fileName)(candidate)).toBe(valid);
+    }
+  });
+
   it.each(fixtures)('$name', ({ fileName, candidate, valid }) => {
     const zodValid = getZodSchema(fileName).safeParse(candidate).success;
     const jsonSchemaValid = getJsonSchemaValidator(fileName)(candidate);
