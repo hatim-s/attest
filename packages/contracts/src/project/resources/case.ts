@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { caseFolderSchema } from '../../eval/selection.js';
 
 import { resourceIdSchema } from '../shared.js';
 
@@ -17,6 +18,7 @@ const testCaseSchema = z
     expected: z.json().optional(),
     params: z.record(z.string(), z.json()).optional(),
     tags: z.array(z.string().min(1)).optional(),
+    folder: caseFolderSchema.optional(),
     metric_overrides: z.array(caseMetricOverrideSchema).optional(),
   })
   .meta({ id: 'TestCase' });

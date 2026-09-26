@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { EVAL_RUN_SCHEMA_ID, evalEventStreamSchema, evalRunSchema } from '@attest/contracts';
+import { diffRuns } from '@attest/core';
 import { openStore } from '@attest/local/store';
 import { afterEach, describe, expect, it } from 'vitest';
 
@@ -152,6 +153,147 @@ afterEach(async () => {
 });
 
 describe('eval dispatcher integration', () => {
+  it('treats unselected tests as coverage differences when every case in the selected test runs', async () => {
+    const root = await createEvalProject();
+    await author(root, [
+      'test',
+      'add',
+      'other',
+      '--agent',
+      'support',
+      '--metric',
+      'exact',
+      '--non-interactive',
+      '--output',
+      'json',
+    ]);
+    await author(root, [
+      'test',
+      'case',
+      'add',
+      'other',
+      '--id',
+      'other-case',
+      '--input',
+      '"Paris"',
+      '--non-interactive',
+      '--output',
+      'json',
+    ]);
+    const runIds: string[] = [];
+    for (const selection of [['--all'], ['smoke']]) {
+      const result = await invokeCli(root, ['eval', 'run', ...selection, '--output', 'jsonl']);
+      expect(result.exitCode).toBe(0);
+      const started = evalEventStreamSchema.parse(
+        result.output.map((line): unknown => JSON.parse(line)),
+      )[0];
+      if (started?.event !== 'run_started') throw new Error('Expected run start.');
+      runIds.push(started.data.run_id);
+    }
+    const store = await openStore(join(root, '.attest', 'runs.db'));
+    try {
+      const diff = await diffRuns(store.runs, runIds[0]!, runIds[1]!);
+      expect(diff.summary.coverage).toEqual({
+        sharedCases: 1,
+        baseOnlyCases: 1,
+        candidateOnlyCases: 0,
+      });
+      expect(diff.summary.counts.removed).toBe(0);
+      expect(diff.transitions).toHaveLength(1);
+    } finally {
+      await store.close();
+    }
+  });
+
+  it('executes and persists only sampled folder/tag matches and compares their shared baseline cases', async () => {
+    const root = await createEvalProject();
+    const source = join(root, 'cases.jsonl');
+    await writeFile(
+      source,
+      Array.from({ length: 100 }, (_, index) =>
+        JSON.stringify({
+          id: `sample-${index}`,
+          input: 'Paris',
+          params: { index },
+          tags: [index % 2 === 0 ? 'smoke' : 'slow'],
+          folder: 'billing/refunds',
+        }),
+      ).join('\n'),
+    );
+    await author(root, [
+      'test',
+      'case',
+      'import',
+      'smoke',
+      source,
+      '--non-interactive',
+      '--output',
+      'json',
+    ]);
+    const full = await invokeCli(root, ['eval', 'run', 'smoke', '--output', 'jsonl']);
+    expect(full.exitCode).toBe(0);
+    const baseline = evalEventStreamSchema.parse(
+      full.output.map((line): unknown => JSON.parse(line)),
+    )[0];
+    if (baseline?.event !== 'run_started') throw new Error('Expected baseline run start.');
+    const selected = await invokeCli(root, [
+      'eval',
+      'run',
+      'smoke',
+      '--folder',
+      'billing',
+      '--tag',
+      'smoke',
+      '--sample',
+      '25',
+      '--seed',
+      'integration',
+      '--baseline',
+      baseline.data.run_id,
+      '--output',
+      'jsonl',
+    ]);
+    expect(selected.exitCode).toBe(0);
+    const events = evalEventStreamSchema.parse(
+      selected.output.map((line): unknown => JSON.parse(line)),
+    );
+    const started = events[0];
+    if (started?.event !== 'run_started') throw new Error('Expected sampled run start.');
+    expect(started.data.selection).toMatchObject({
+      total_cases: 101,
+      matched_cases: 50,
+      selected_cases: 25,
+    });
+    expect(events.filter((event) => event.event === 'case_started')).toHaveLength(25);
+    expect(events.at(-1)).toMatchObject({
+      data: {
+        result: { result: { selection: started.data.selection, summary: { total_cases: 25 } } },
+      },
+    });
+    const store = await openStore(join(root, '.attest', 'runs.db'));
+    try {
+      const stored = await store.runs.getRunWithCases(started.data.run_id);
+      const snapshot = evalRunSchema.parse(JSON.parse(stored.run.configJson)).snapshot;
+      expect(stored.cases).toHaveLength(25);
+      expect(snapshot.selected_cases.map(({ case_id }) => case_id).sort()).toEqual(
+        stored.cases.map(({ caseId }) => caseId).sort(),
+      );
+      expect(
+        stored.cases.every(({ caseId }) => Number(caseId.replace('sample-', '')) % 2 === 0),
+      ).toBe(true);
+      const diff = await diffRuns(store.runs, baseline.data.run_id, started.data.run_id);
+      expect(diff.summary.coverage).toEqual({
+        sharedCases: 25,
+        baseOnlyCases: 76,
+        candidateOnlyCases: 0,
+      });
+      expect(diff.summary.counts.removed).toBe(0);
+      expect(diff.transitions).toHaveLength(25);
+    } finally {
+      await store.close();
+    }
+  }, 30_000);
+
   it('bridges public commands through resolver, engine, runner, store, diff, and JUnit', async () => {
     const root = await createEvalProject();
     const junitPath = join(root, 'artifacts', 'first.xml');

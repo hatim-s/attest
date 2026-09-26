@@ -51,6 +51,56 @@
               "pattern": "^[0-9A-HJKMNP-TV-Za-hjkmnp-tv-z]{26}$",
               "type": "string"
             },
+            "selection": {
+              "additionalProperties": false,
+              "properties": {
+                "matched_cases": {
+                  "maximum": 9007199254740991,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "sample": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "algorithm": {
+                      "const": "hash-rank-v1",
+                      "type": "string"
+                    },
+                    "count": {
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991,
+                      "type": "integer"
+                    },
+                    "seed": {
+                      "minLength": 1,
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "count",
+                    "seed",
+                    "algorithm"
+                  ],
+                  "type": "object"
+                },
+                "selected_cases": {
+                  "maximum": 9007199254740991,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "total_cases": {
+                  "maximum": 9007199254740991,
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "total_cases",
+                "matched_cases",
+                "selected_cases"
+              ],
+              "type": "object"
+            },
             "snapshot_hash": {
               "pattern": "^[a-f0-9]{64}$",
               "type": "string"
@@ -405,6 +455,56 @@
                           "pattern": "^[0-9A-HJKMNP-TV-Za-hjkmnp-tv-z]{26}$",
                           "type": "string"
                         },
+                        "selection": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "matched_cases": {
+                              "maximum": 9007199254740991,
+                              "minimum": 0,
+                              "type": "integer"
+                            },
+                            "sample": {
+                              "additionalProperties": false,
+                              "properties": {
+                                "algorithm": {
+                                  "const": "hash-rank-v1",
+                                  "type": "string"
+                                },
+                                "count": {
+                                  "exclusiveMinimum": 0,
+                                  "maximum": 9007199254740991,
+                                  "type": "integer"
+                                },
+                                "seed": {
+                                  "minLength": 1,
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "count",
+                                "seed",
+                                "algorithm"
+                              ],
+                              "type": "object"
+                            },
+                            "selected_cases": {
+                              "maximum": 9007199254740991,
+                              "minimum": 0,
+                              "type": "integer"
+                            },
+                            "total_cases": {
+                              "maximum": 9007199254740991,
+                              "minimum": 0,
+                              "type": "integer"
+                            }
+                          },
+                          "required": [
+                            "total_cases",
+                            "matched_cases",
+                            "selected_cases"
+                          ],
+                          "type": "object"
+                        },
                         "snapshot_hash": {
                           "pattern": "^[a-f0-9]{64}$",
                           "type": "string"
@@ -572,6 +672,56 @@
                           "format": "ulid",
                           "pattern": "^[0-9A-HJKMNP-TV-Za-hjkmnp-tv-z]{26}$",
                           "type": "string"
+                        },
+                        "selection": {
+                          "additionalProperties": false,
+                          "properties": {
+                            "matched_cases": {
+                              "maximum": 9007199254740991,
+                              "minimum": 0,
+                              "type": "integer"
+                            },
+                            "sample": {
+                              "additionalProperties": false,
+                              "properties": {
+                                "algorithm": {
+                                  "const": "hash-rank-v1",
+                                  "type": "string"
+                                },
+                                "count": {
+                                  "exclusiveMinimum": 0,
+                                  "maximum": 9007199254740991,
+                                  "type": "integer"
+                                },
+                                "seed": {
+                                  "minLength": 1,
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "count",
+                                "seed",
+                                "algorithm"
+                              ],
+                              "type": "object"
+                            },
+                            "selected_cases": {
+                              "maximum": 9007199254740991,
+                              "minimum": 0,
+                              "type": "integer"
+                            },
+                            "total_cases": {
+                              "maximum": 9007199254740991,
+                              "minimum": 0,
+                              "type": "integer"
+                            }
+                          },
+                          "required": [
+                            "total_cases",
+                            "matched_cases",
+                            "selected_cases"
+                          ],
+                          "type": "object"
                         },
                         "snapshot_hash": {
                           "pattern": "^[a-f0-9]{64}$",

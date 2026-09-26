@@ -249,3 +249,25 @@ describe('classifyRuns', () => {
     expect(fixed.summary.flakySuspectCount).toBe(1);
   });
 });
+
+describe('partial run comparisons', () => {
+  it('compares shared identities and reports unmatched coverage without removals', () => {
+    const base = [
+      caseRecord('pass', { caseId: 'shared' }),
+      caseRecord('fail', { caseId: 'excluded' }),
+    ];
+    const candidate = [
+      caseRecord('fail', { caseId: 'shared' }),
+      caseRecord('pass', { caseId: 'new-sample' }),
+    ];
+    const result = classifyRuns(base, candidate, { ...comparison, sharedOnly: true });
+    expect(result.transitions.map(({ kind }) => kind)).toEqual(['regressed']);
+    expect(result.summary).toMatchObject({
+      basePassRate: 1,
+      candidatePassRate: 0,
+      coverage: { sharedCases: 1, baseOnlyCases: 1, candidateOnlyCases: 1 },
+    });
+    expect(result.summary.counts.removed).toBe(0);
+    expect(result.summary.counts.added).toBe(0);
+  });
+});

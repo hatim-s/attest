@@ -67,6 +67,7 @@ const completedResult = (run: ImmutableEvalRun, summary: EvalRunSummary): EvalFi
     snapshot_hash: run.snapshot_hash,
     status: 'completed' as const,
     summary,
+    ...(run.snapshot.selection === undefined ? {} : { selection: run.snapshot.selection }),
     ...(run.effective_command.resolved.baseline_run_id === undefined
       ? {}
       : { baseline_run_id: run.effective_command.resolved.baseline_run_id }),

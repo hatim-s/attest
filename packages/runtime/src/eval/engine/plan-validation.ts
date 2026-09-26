@@ -28,6 +28,12 @@ const validateResolvedPlan = (
     return 'Resolved eval worker count must equal resolved concurrency.';
   }
   const selectedCases = run.snapshot.selected_cases;
+  if (
+    run.snapshot.selection !== undefined &&
+    run.snapshot.selection.selected_cases !== selectedCases.length
+  ) {
+    return 'Selection coverage does not match the immutable eval snapshot.';
+  }
   if (selectedCases.length !== plan.cases.length) {
     return 'Resolved case count does not match the immutable eval snapshot.';
   }
@@ -95,6 +101,7 @@ const eventBytesFit = (
         run_id: run.run_id,
         snapshot_hash: run.snapshot_hash,
         total_cases: plan.cases.length,
+        ...(run.snapshot.selection === undefined ? {} : { selection: run.snapshot.selection }),
         concurrency: run.effective_command.resolved.concurrency,
         timeout_ms: run.effective_command.resolved.timeout_ms,
       },

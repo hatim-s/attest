@@ -60,6 +60,45 @@ Repeat `--case <case-id>` to select exact case ids. Repeat `--tag <tag>` to requ
 tag. The resolver freezes selected tests and cases, resource hashes, project hash, configured
 order, effective concurrency/timeout/output, and optional Git metadata before execution.
 
+### Sample and organize cases
+
+```sh
+attest eval run support --sample 25
+attest eval run support --tag smoke --sample 25 --seed review-42
+attest eval run support --folder billing/refunds --dataset historical --sample 25
+attest test case add support --input '{"message":"Refund please"}' --folder billing/refunds
+```
+
+`--folder` matches a logical case folder and descendants. Folders use slash-separated segments,
+without leading/trailing slashes, empty segments, dot segments, or backslashes. They are case
+metadata, independent of filesystem paths. JSON/JSONL imports preserve `folder`; CSV mappings
+can use `--map folder=category`. Moving a case to another folder preserves its generated id.
+
+`--dataset` selects cases from an attached dataset. Both flags are repeatable. Values within
+case-id, folder, and dataset filters match any supplied value; repeated tags require every value.
+Different filters intersect, then sampling runs once across the combined population of selected
+tests. Dataset attachment tag filters still apply before this population is formed.
+
+`--sample N` selects up to N cases without replacement. If fewer match, all matching cases run.
+Zero matches fail before execution. `--seed` requires `--sample`; an omitted seed is generated
+and recorded. The versioned `hash-rank-v1` algorithm ranks SHA-256 hashes of the JSON tuple
+`[algorithm, seed, test_id, case_id]`, takes the lowest N, and restores configured case order.
+The same seed and candidate identities reproduce membership regardless of input enumeration.
+Changing the population can change membership; the persisted selected identities are the record
+of exactly what ran.
+
+JSON requests use `folders`, `dataset_ids`, and `sample: {"count":25,"seed":"review-42"}`
+alongside existing `case_ids` and `tags`. Snapshots, run-start events, and successful results
+include `selection` with total, matched, and selected counts plus resolved sampling metadata.
+The total counts cases in the selected tests after dataset attachment filters. Excluded cases
+are not skipped executions. A passing subset run describes only its selected cases.
+
+When either run selects a subset of cases or the runs select different tests, baseline comparisons
+use shared recorded test/case identities for
+verdicts and pass rates. Coverage reports shared, baseline-only, and candidate-only counts;
+unmatched cases do not become added/removed regressions. CI gates reject comparisons with no
+shared cases. Historical snapshots without selection metadata remain readable.
+
 ## Interactive, non-interactive, and JSON output
 
 Human output prints a stable final line: `Result: PASS|FAIL|ERROR|CANCELLED (exit N)`. Add

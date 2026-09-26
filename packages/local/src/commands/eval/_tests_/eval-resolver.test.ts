@@ -266,6 +266,30 @@ describe('eval resolver', () => {
     expect(resolved.snapshotHash).toHaveLength(64);
   });
 
+  it('freezes sampling coverage and dense execution indexes after dataset filtering', () => {
+    const resolved = resolveEvalRun(
+      createProject(),
+      request({ dataset_ids: ['shared'], sample: { count: 1, seed: 'review' } }),
+      options,
+    );
+    expect(resolved.cases).toHaveLength(1);
+    expect(resolved.cases[0]?.configured_index).toBe(0);
+    expect(resolved.snapshot.selection).toEqual({
+      total_cases: 4,
+      matched_cases: 2,
+      selected_cases: 1,
+      sample: { count: 1, seed: 'review', algorithm: 'hash-rank-v1' },
+    });
+    expect(resolved.snapshot.selected_cases).toHaveLength(1);
+    expect(
+      resolveEvalRun(
+        createProject(),
+        request({ dataset_ids: ['shared'], sample: { count: 1, seed: 'review' } }),
+        options,
+      ).snapshotHash,
+    ).toBe(resolved.snapshotHash);
+  });
+
   it('intersects repeated exact-case and all-tag filters', () => {
     const resolved = resolveEvalRun(
       createProject(),

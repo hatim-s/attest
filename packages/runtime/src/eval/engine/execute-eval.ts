@@ -101,6 +101,7 @@ const executeResolvedEvalPlan = async <Payload, BaselineDiff = unknown>(
       run_id: run.run_id,
       snapshot_hash: run.snapshot_hash,
       total_cases: plan.cases.length,
+      ...(run.snapshot.selection === undefined ? {} : { selection: run.snapshot.selection }),
       concurrency: run.effective_command.resolved.concurrency,
       timeout_ms: run.effective_command.resolved.timeout_ms,
     },

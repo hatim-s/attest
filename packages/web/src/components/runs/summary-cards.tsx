@@ -15,7 +15,11 @@ const SummaryCards = ({ run }: { run: RunRecord }) => {
     {
       label: 'Cases',
       value: String(summary?.totalCases ?? 0),
-      detail: `${summary?.failedCases ?? 0} failed`,
+      detail:
+        run.labels?.selection_total === undefined ||
+        run.labels.selection_selected === run.labels.selection_total
+          ? `${summary?.failedCases ?? 0} failed`
+          : `${summary?.failedCases ?? 0} failed; ${run.labels.selection_selected} of ${run.labels.selection_total} selected`,
     },
     {
       label: 'Errors',

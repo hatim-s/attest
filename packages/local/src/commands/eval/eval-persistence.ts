@@ -28,7 +28,16 @@ const createEvalPersistenceAdapter = (
         configJson: JSON.stringify(run),
         ...(run.git?.commit === undefined ? {} : { gitSha: run.git.commit }),
         ...(run.git?.branch === undefined ? {} : { gitBranch: run.git.branch }),
-        labels: { kind: 'eval', snapshot_hash: run.snapshot_hash },
+        labels: {
+          kind: 'eval',
+          snapshot_hash: run.snapshot_hash,
+          ...(run.snapshot.selection === undefined
+            ? {}
+            : {
+                selection_total: String(run.snapshot.selection.total_cases),
+                selection_selected: String(run.snapshot.selection.selected_cases),
+              }),
+        },
       },
       { id: run.run_id, createdAt: run.created_at },
     );

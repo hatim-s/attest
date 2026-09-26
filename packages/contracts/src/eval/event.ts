@@ -2,6 +2,7 @@ import { z } from 'zod';
 
 import { cliFailureResultSchema, cliSuccessResultSchema } from '../cli/protocol.js';
 import { evalRunIdSchema } from './run.js';
+import { caseSelectionSummarySchema } from './selection.js';
 import { resourceIdSchema, sha256Schema } from '../project/shared.js';
 import { CLI_EVENT_SCHEMA_ID } from '../schema/identifiers.js';
 
@@ -25,6 +26,7 @@ const evalRunStartedEventSchema = z.strictObject({
   data: z.strictObject({
     run_id: evalRunIdSchema,
     snapshot_hash: sha256Schema,
+    selection: caseSelectionSummarySchema.optional(),
     total_cases: z.number().int().nonnegative(),
     concurrency: z.number().int().positive(),
     timeout_ms: z.number().int().positive(),
@@ -71,6 +73,7 @@ const evalRunResultPayloadFields = {
   snapshot_hash: sha256Schema,
   status: z.literal('completed'),
   summary: evalRunSummarySchema,
+  selection: caseSelectionSummarySchema.optional(),
   baseline_run_id: evalRunIdSchema.optional(),
   junit_path: z.string().min(1).optional(),
 };

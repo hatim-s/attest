@@ -1364,6 +1364,11 @@
         "expected": {
           "$ref": "#/$defs/__schema10"
         },
+        "folder": {
+          "minLength": 1,
+          "pattern": "^(?!\\.{1,2}(?:\\/|$))[^\\s/\\\\](?:[^/\\\\]*[^\\s/\\\\])?(?:\\/(?!\\.{1,2}(?:\\/|$))[^\\s/\\\\](?:[^/\\\\]*[^\\s/\\\\])?)*(?![\\s\\S])",
+          "type": "string"
+        },
         "id": {
           "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
           "type": "string"
@@ -3112,6 +3117,11 @@
             "expected": {
               "$ref": "#/$defs/__schema10"
             },
+            "folder": {
+              "minLength": 1,
+              "pattern": "^(?!\\.{1,2}(?:\\/|$))[^\\s/\\\\](?:[^/\\\\]*[^\\s/\\\\])?(?:\\/(?!\\.{1,2}(?:\\/|$))[^\\s/\\\\](?:[^/\\\\]*[^\\s/\\\\])?)*(?![\\s\\S])",
+              "type": "string"
+            },
             "id": {
               "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
               "type": "string"
@@ -3236,7 +3246,7 @@
                 "additionalProperties": false,
                 "properties": {
                   "destination": {
-                    "pattern": "^(?:id|input(?:\\.(?:[A-Za-z0-9_-]|\\\\[.\\\\])+)*|expected(?:\\.(?:[A-Za-z0-9_-]|\\\\[.\\\\])+)*|params(?:\\.(?:[A-Za-z0-9_-]|\\\\[.\\\\])+)+|tags|metrics)$",
+                    "pattern": "^(?:id|input(?:\\.(?:[A-Za-z0-9_-]|\\\\[.\\\\])+)*|expected(?:\\.(?:[A-Za-z0-9_-]|\\\\[.\\\\])+)*|params(?:\\.(?:[A-Za-z0-9_-]|\\\\[.\\\\])+)+|tags|folder|metrics)$",
                     "type": "string"
                   },
                   "source": {
@@ -3500,7 +3510,7 @@
                 "additionalProperties": false,
                 "properties": {
                   "destination": {
-                    "pattern": "^(?:id|input(?:\\.(?:[A-Za-z0-9_-]|\\\\[.\\\\])+)*|expected(?:\\.(?:[A-Za-z0-9_-]|\\\\[.\\\\])+)*|params(?:\\.(?:[A-Za-z0-9_-]|\\\\[.\\\\])+)+|tags|metrics)$",
+                    "pattern": "^(?:id|input(?:\\.(?:[A-Za-z0-9_-]|\\\\[.\\\\])+)*|expected(?:\\.(?:[A-Za-z0-9_-]|\\\\[.\\\\])+)*|params(?:\\.(?:[A-Za-z0-9_-]|\\\\[.\\\\])+)+|tags|folder|metrics)$",
                     "type": "string"
                   },
                   "source": {
@@ -4087,6 +4097,23 @@
               "maximum": 9007199254740991,
               "type": "integer"
             },
+            "dataset_ids": {
+              "items": {
+                "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+                "type": "string"
+              },
+              "minItems": 1,
+              "type": "array"
+            },
+            "folders": {
+              "items": {
+                "minLength": 1,
+                "pattern": "^(?!\\.{1,2}(?:\\/|$))[^\\s/\\\\](?:[^/\\\\]*[^\\s/\\\\])?(?:\\/(?!\\.{1,2}(?:\\/|$))[^\\s/\\\\](?:[^/\\\\]*[^\\s/\\\\])?)*(?![\\s\\S])",
+                "type": "string"
+              },
+              "minItems": 1,
+              "type": "array"
+            },
             "junit_path": {
               "minLength": 1,
               "type": "string"
@@ -4094,6 +4121,24 @@
             "output": {
               "const": "human",
               "type": "string"
+            },
+            "sample": {
+              "additionalProperties": false,
+              "properties": {
+                "count": {
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991,
+                  "type": "integer"
+                },
+                "seed": {
+                  "minLength": 1,
+                  "type": "string"
+                }
+              },
+              "required": [
+                "count"
+              ],
+              "type": "object"
             },
             "schema": {
               "const": "attest.command-request",
@@ -4157,6 +4202,23 @@
               "maximum": 9007199254740991,
               "type": "integer"
             },
+            "dataset_ids": {
+              "items": {
+                "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+                "type": "string"
+              },
+              "minItems": 1,
+              "type": "array"
+            },
+            "folders": {
+              "items": {
+                "minLength": 1,
+                "pattern": "^(?!\\.{1,2}(?:\\/|$))[^\\s/\\\\](?:[^/\\\\]*[^\\s/\\\\])?(?:\\/(?!\\.{1,2}(?:\\/|$))[^\\s/\\\\](?:[^/\\\\]*[^\\s/\\\\])?)*(?![\\s\\S])",
+                "type": "string"
+              },
+              "minItems": 1,
+              "type": "array"
+            },
             "junit_path": {
               "minLength": 1,
               "type": "string"
@@ -4167,6 +4229,24 @@
                 "jsonl"
               ],
               "type": "string"
+            },
+            "sample": {
+              "additionalProperties": false,
+              "properties": {
+                "count": {
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991,
+                  "type": "integer"
+                },
+                "seed": {
+                  "minLength": 1,
+                  "type": "string"
+                }
+              },
+              "required": [
+                "count"
+              ],
+              "type": "object"
             },
             "schema": {
               "const": "attest.command-request",
@@ -4231,6 +4311,23 @@
               "maximum": 9007199254740991,
               "type": "integer"
             },
+            "dataset_ids": {
+              "items": {
+                "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+                "type": "string"
+              },
+              "minItems": 1,
+              "type": "array"
+            },
+            "folders": {
+              "items": {
+                "minLength": 1,
+                "pattern": "^(?!\\.{1,2}(?:\\/|$))[^\\s/\\\\](?:[^/\\\\]*[^\\s/\\\\])?(?:\\/(?!\\.{1,2}(?:\\/|$))[^\\s/\\\\](?:[^/\\\\]*[^\\s/\\\\])?)*(?![\\s\\S])",
+                "type": "string"
+              },
+              "minItems": 1,
+              "type": "array"
+            },
             "junit_path": {
               "minLength": 1,
               "type": "string"
@@ -4238,6 +4335,24 @@
             "output": {
               "const": "human",
               "type": "string"
+            },
+            "sample": {
+              "additionalProperties": false,
+              "properties": {
+                "count": {
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991,
+                  "type": "integer"
+                },
+                "seed": {
+                  "minLength": 1,
+                  "type": "string"
+                }
+              },
+              "required": [
+                "count"
+              ],
+              "type": "object"
             },
             "schema": {
               "const": "attest.command-request",
@@ -4297,6 +4412,23 @@
               "maximum": 9007199254740991,
               "type": "integer"
             },
+            "dataset_ids": {
+              "items": {
+                "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+                "type": "string"
+              },
+              "minItems": 1,
+              "type": "array"
+            },
+            "folders": {
+              "items": {
+                "minLength": 1,
+                "pattern": "^(?!\\.{1,2}(?:\\/|$))[^\\s/\\\\](?:[^/\\\\]*[^\\s/\\\\])?(?:\\/(?!\\.{1,2}(?:\\/|$))[^\\s/\\\\](?:[^/\\\\]*[^\\s/\\\\])?)*(?![\\s\\S])",
+                "type": "string"
+              },
+              "minItems": 1,
+              "type": "array"
+            },
             "junit_path": {
               "minLength": 1,
               "type": "string"
@@ -4307,6 +4439,24 @@
                 "jsonl"
               ],
               "type": "string"
+            },
+            "sample": {
+              "additionalProperties": false,
+              "properties": {
+                "count": {
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991,
+                  "type": "integer"
+                },
+                "seed": {
+                  "minLength": 1,
+                  "type": "string"
+                }
+              },
+              "required": [
+                "count"
+              ],
+              "type": "object"
             },
             "schema": {
               "const": "attest.command-request",

@@ -252,3 +252,11 @@ export type {
   WebSocketInvocationRequest,
   WebSocketTransport,
 } from './agent/websocket-contract.js';
+
+export {
+  caseFolderSchema,
+  caseSelectionSchema,
+  caseSelectionSummarySchema,
+  type CaseSelection,
+  type CaseSelectionSummary,
+} from './eval/selection.js';

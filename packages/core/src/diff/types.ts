@@ -36,6 +36,8 @@ interface DiffSummary {
   flakySuspectCount: number;
   basePassRate: number;
   candidatePassRate: number;
+  /** Partial runs compare only shared recorded identities; unmatched cases are coverage differences. */
+  coverage?: { sharedCases: number; baseOnlyCases: number; candidateOnlyCases: number };
 }
 
 /** Represents the complete comparison between two persisted runs. */

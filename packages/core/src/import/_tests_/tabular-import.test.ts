@@ -114,11 +114,13 @@ describe('tabular import validation and identity', () => {
       source: `${JSON.stringify({
         ...logical,
         tags: ['two'],
+        folder: 'billing/refunds',
         metric_overrides: [{ metric_id: 'quality', threshold: 0.8 }],
       })}\n`,
     });
 
     expect(first.cases[0]!.id).toBe(second.cases[0]!.id);
+    expect(second.cases[0]!.folder).toBe('billing/refunds');
     expect(first.cases[0]!.id).toBe(createContentCaseId(first.cases[0]!));
   });
 

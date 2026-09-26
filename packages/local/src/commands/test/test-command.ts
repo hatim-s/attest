@@ -474,7 +474,11 @@ const runTestCaseListCommand = async (
 ): Promise<CommandResult<'test-case-list', TestCaseListResult>> => {
   const loaded = await loadCommandProject(options);
   const test = findTest(loaded, options.testId);
-  const items = test.cases.map(({ id, tags }) => ({ id, ...(tags === undefined ? {} : { tags }) }));
+  const items = test.cases.map(({ id, tags, folder }) => ({
+    id,
+    ...(tags === undefined ? {} : { tags }),
+    ...(folder === undefined ? {} : { folder }),
+  }));
   return {
     operation: 'test-case-list',
     projectHashBefore: loaded.projectHash,

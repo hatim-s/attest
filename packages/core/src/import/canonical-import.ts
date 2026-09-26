@@ -38,6 +38,7 @@ const caseContentWithoutId = (testCase: TestCase): Omit<TestCase, 'id'> => ({
   ...(testCase.expected === undefined ? {} : { expected: testCase.expected }),
   ...(testCase.params === undefined ? {} : { params: testCase.params }),
   ...(testCase.tags === undefined ? {} : { tags: testCase.tags }),
+  ...(testCase.folder === undefined ? {} : { folder: testCase.folder }),
   ...(testCase.metric_overrides === undefined
     ? {}
     : { metric_overrides: testCase.metric_overrides }),
