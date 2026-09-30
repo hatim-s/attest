@@ -5,6 +5,8 @@ import { hostname } from 'node:os';
 import { dirname, join } from 'node:path';
 import { promisify } from 'node:util';
 
+import { z } from 'zod';
+
 import { errnoCode } from '../../internal/errno-code.js';
 import { isProcessPresent } from '../../internal/process-presence.js';
 import { syncPath } from '../../internal/sync-path.js';
@@ -14,14 +16,17 @@ const PROJECT_LOCK_FILE = '.attest/project.lock';
 const PROJECT_LOCK_SCHEMA = 'attest.project-lock';
 const execFileAsync = promisify(execFile);
 
-type ProjectLockMetadata = {
-  created_at: string;
-  hostname: string;
-  owner_token: string;
-  pid: number;
-  process_start_identity: string | null;
-  schema: typeof PROJECT_LOCK_SCHEMA;
-};
+/** The lock file's contents: who owns the project mutation lock and how to prove it is stale. */
+const projectLockSchema = z.object({
+  created_at: z.string(),
+  hostname: z.string(),
+  owner_token: z.string(),
+  pid: z.number().int().positive(),
+  process_start_identity: z.string().nullable(),
+  schema: z.literal(PROJECT_LOCK_SCHEMA),
+});
+
+type ProjectLockMetadata = z.infer<typeof projectLockSchema>;
 
 type ProjectLockInspection =
   | { state: 'absent' }
@@ -58,22 +63,8 @@ const parseLockMetadata = (raw: string): ProjectLockMetadata | undefined => {
   } catch {
     return undefined;
   }
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
-    return undefined;
-  }
-  const record = value as Record<string, unknown>;
-  if (
-    record.schema !== PROJECT_LOCK_SCHEMA ||
-    !Number.isSafeInteger(record.pid) ||
-    (record.pid as number) <= 0 ||
-    typeof record.hostname !== 'string' ||
-    typeof record.owner_token !== 'string' ||
-    typeof record.created_at !== 'string' ||
-    (record.process_start_identity !== null && typeof record.process_start_identity !== 'string')
-  ) {
-    return undefined;
-  }
-  return value as ProjectLockMetadata;
+  const parsed = projectLockSchema.safeParse(value);
+  return parsed.success ? parsed.data : undefined;
 };
 
 /** Classifies the project lock without mutating or stealing it. */
