@@ -6,8 +6,8 @@ import { CASE_SCHEMA_ID, DATASET_SCHEMA_ID } from '../../schema/identifiers.js';
 const datasetImportDestinationSchema = z
   .string()
   .regex(
-    /^(?:id|input(?:\.(?:[A-Za-z0-9_-]|\\[.\\])+)*|expected(?:\.(?:[A-Za-z0-9_-]|\\[.\\])+)*|params(?:\.(?:[A-Za-z0-9_-]|\\[.\\])+)+|tags|folder|metrics)$/u,
-    'must target id, input, expected, params, tags, folder, or metrics',
+    /^(?:id|input(?:\.(?:[A-Za-z0-9_-]|\\[.\\])+)*|expected(?:\.(?:[A-Za-z0-9_-]|\\[.\\])+)*|params(?:\.(?:[A-Za-z0-9_-]|\\[.\\])+)+|tags|folder|metric_overrides)$/u,
+    'must target id, input, expected, params, tags, folder, or metric_overrides',
   );
 
 /** Records one source-to-case mapping used by a deterministic dataset import. */

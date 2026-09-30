@@ -3245,7 +3245,7 @@
                 "additionalProperties": false,
                 "properties": {
                   "destination": {
-                    "pattern": "^(?:id|input(?:\\.(?:[A-Za-z0-9_-]|\\\\[.\\\\])+)*|expected(?:\\.(?:[A-Za-z0-9_-]|\\\\[.\\\\])+)*|params(?:\\.(?:[A-Za-z0-9_-]|\\\\[.\\\\])+)+|tags|folder|metrics)$",
+                    "pattern": "^(?:id|input(?:\\.(?:[A-Za-z0-9_-]|\\\\[.\\\\])+)*|expected(?:\\.(?:[A-Za-z0-9_-]|\\\\[.\\\\])+)*|params(?:\\.(?:[A-Za-z0-9_-]|\\\\[.\\\\])+)+|tags|folder|metric_overrides)$",
                     "type": "string"
                   },
                   "source": {
@@ -3509,7 +3509,7 @@
                 "additionalProperties": false,
                 "properties": {
                   "destination": {
-                    "pattern": "^(?:id|input(?:\\.(?:[A-Za-z0-9_-]|\\\\[.\\\\])+)*|expected(?:\\.(?:[A-Za-z0-9_-]|\\\\[.\\\\])+)*|params(?:\\.(?:[A-Za-z0-9_-]|\\\\[.\\\\])+)+|tags|folder|metrics)$",
+                    "pattern": "^(?:id|input(?:\\.(?:[A-Za-z0-9_-]|\\\\[.\\\\])+)*|expected(?:\\.(?:[A-Za-z0-9_-]|\\\\[.\\\\])+)*|params(?:\\.(?:[A-Za-z0-9_-]|\\\\[.\\\\])+)+|tags|folder|metric_overrides)$",
                     "type": "string"
                   },
                   "source": {
