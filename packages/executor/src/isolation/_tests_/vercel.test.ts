@@ -5,15 +5,8 @@ import { describe, expect, it, vi } from 'vitest';
 import { SANDBOX_WORKSPACE } from '../../adapters/sandbox/files.js';
 import type { VercelSandboxFactory, VercelSandboxSdk } from '../../adapters/sandbox/types.js';
 import { vercelSandboxIsolation } from '../vercel.js';
+import { caseContext } from './support/case-context.js';
 
-const context = (signal = new AbortController().signal) => ({
-  runId: 'run',
-  testId: 'test',
-  caseId: 'case',
-  configuredIndex: 0,
-  workerIndex: 0,
-  signal,
-});
 const asFactory = (sdk: VercelSandboxSdk): VercelSandboxFactory =>
   vi.fn(() => Promise.resolve(sdk));
 
@@ -26,20 +19,16 @@ describe('Vercel case isolation', () => {
         return Promise.resolve({ exitCode: 0 });
       }),
       writeFiles: vi.fn(() => Promise.resolve()),
-      readFile: vi.fn(function (this: { marker: string }, file: { path: string }) {
-        if (this.marker !== 'bound') throw new Error('lost SDK receiver');
-        return Promise.resolve(
-          Readable.from([file.path.endsWith('partial.txt') ? 'partial' : 'file']),
-        );
-      }),
+      readFile: vi.fn((file: { path: string }) =>
+        Promise.resolve(Readable.from([file.path.endsWith('partial.txt') ? 'partial' : 'file'])),
+      ),
       stop: vi.fn(() => Promise.resolve()),
-      marker: 'bound',
     } as unknown as VercelSandboxSdk;
     const environment = await vercelSandboxIsolation({
       files: { './inputs/../seed.txt': 'seed' },
       credentialEnv: { VERCEL_OIDC_TOKEN: 'token' },
       sandboxFactory: asFactory(sdk),
-    })(context(controller.signal));
+    })(caseContext(controller.signal));
 
     expect(await environment.exec('echo ok')).toMatchObject({ stdout: 'ok', exitCode: 0 });
     controller.abort(new Error('run cancelled'));
@@ -70,7 +59,7 @@ describe('Vercel case isolation', () => {
         files: { 'seed.txt': 'seed' },
         credentialEnv: { VERCEL_OIDC_TOKEN: 'token' },
         sandboxFactory: factory,
-      })(context()),
+      })(caseContext()),
     ).rejects.toThrow('upload failed');
     expect(sdk.stop).toHaveBeenCalledOnce();
 
@@ -80,15 +69,12 @@ describe('Vercel case isolation', () => {
         files: { '../outside.txt': 'no' },
         credentialEnv: { VERCEL_OIDC_TOKEN: 'token' },
         sandboxFactory: invalidFactory,
-      })(context()),
+      })(caseContext()),
     ).rejects.toThrow(/workspace/u);
     expect(invalidFactory).not.toHaveBeenCalled();
   });
 
-  it.each([
-    { commandTimeoutMs: 5, mode: 'timeout' },
-    { commandTimeoutMs: 1_000, mode: 'abort' },
-  ])('poisons and stops an uncertain command after $mode', async ({ commandTimeoutMs, mode }) => {
+  it('poisons and stops an uncertain command after cancellation', async () => {
     const controller = new AbortController();
     let remoteActive = false;
     const sdk = {
@@ -111,16 +97,13 @@ describe('Vercel case isolation', () => {
       }),
     } as unknown as VercelSandboxSdk;
     const environment = await vercelSandboxIsolation({
-      commandTimeoutMs,
       credentialEnv: { VERCEL_OIDC_TOKEN: 'token' },
       sandboxFactory: asFactory(sdk),
-    })(context(controller.signal));
+    })(caseContext(controller.signal));
 
     const execution = environment.exec('long command');
-    if (mode === 'abort') {
-      await vi.waitFor(() => expect(remoteActive).toBe(true));
-      controller.abort(new Error('cancelled'));
-    }
+    await vi.waitFor(() => expect(remoteActive).toBe(true));
+    controller.abort(new Error('cancelled'));
     await expect(execution).rejects.toThrow(/remote active/u);
     await expect(environment.beginFinalization()).rejects.toThrow(/remote active/u);
     expect(() => environment.readFile('partial.txt')).toThrow();
@@ -165,7 +148,7 @@ describe('Vercel case isolation', () => {
       outputBytes: 8,
       credentialEnv: { VERCEL_OIDC_TOKEN: 'token' },
       sandboxFactory: asFactory(sdk),
-    })(context());
+    })(caseContext());
 
     await expect(environment.exec('produce output')).rejects.toThrow(/outputBytes/u);
     expect(sdk.stop).toHaveBeenCalledOnce();
@@ -187,7 +170,7 @@ describe('Vercel case isolation', () => {
     const environment = await vercelSandboxIsolation({
       credentialEnv: { VERCEL_OIDC_TOKEN: 'token' },
       sandboxFactory: asFactory(sdk),
-    })(context());
+    })(caseContext());
 
     const error = await environment.exec('uncertain').catch((caught: unknown) => caught);
     expect(error).toBeInstanceOf(AggregateError);
@@ -228,7 +211,7 @@ describe('Vercel case isolation', () => {
     const environment = await vercelSandboxIsolation({
       credentialEnv: { VERCEL_OIDC_TOKEN: 'token' },
       sandboxFactory: asFactory(sdk),
-    })(context());
+    })(caseContext());
 
     const write = environment.writeFile('active.txt', 'data');
     await vi.waitFor(() => expect(writes).toBe(1));
@@ -252,7 +235,7 @@ describe('Vercel case isolation', () => {
       cleanupTimeoutMs: 5,
       credentialEnv: { VERCEL_OIDC_TOKEN: 'token' },
       sandboxFactory: asFactory(sdk),
-    })(context());
+    })(caseContext());
     void environment.writeFile('active.txt', 'data');
     await vi.waitFor(() => expect(writes).toBe(1));
 

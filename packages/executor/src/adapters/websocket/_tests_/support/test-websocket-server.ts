@@ -4,6 +4,8 @@ import type { Duplex } from 'node:stream';
 
 type TestWebSocketServerOptions = {
   ignoreUpgrade?: boolean;
+  /** Holds the 101 response back so tests can act while the client is still opening. */
+  upgradeDelayMs?: number;
   ignoreClientClose?: boolean;
   onConnection?: (peer: TestWebSocketPeer, request: IncomingMessage) => void;
   onMessage: (peer: TestWebSocketPeer, value: unknown) => void;
@@ -125,6 +127,7 @@ const startTestWebSocketServer = async (
 ): Promise<{
   close: () => Promise<void>;
   connectionCount: () => number;
+  upgradeRequests: () => number;
   peers: TestWebSocketPeer[];
   url: string;
 }> => {
@@ -133,10 +136,9 @@ const startTestWebSocketServer = async (
   const server: Server = createServer((_request, response) => {
     response.writeHead(426).end();
   });
-  server.on('upgrade', (request, socket) => {
-    sockets.add(socket);
-    socket.once('close', () => sockets.delete(socket));
-    if (options.ignoreUpgrade === true) return;
+  let upgradeRequests = 0;
+  const acceptUpgrade = (request: IncomingMessage, socket: Duplex): void => {
+    if (socket.destroyed) return;
     const key = request.headers['sec-websocket-key'];
     if (typeof key !== 'string') {
       socket.destroy();
@@ -163,6 +165,17 @@ const startTestWebSocketServer = async (
     );
     peers.push(peer);
     options.onConnection?.(peer, request);
+  };
+  server.on('upgrade', (request, socket) => {
+    upgradeRequests += 1;
+    sockets.add(socket);
+    socket.once('close', () => sockets.delete(socket));
+    if (options.ignoreUpgrade === true) return;
+    if (options.upgradeDelayMs === undefined) {
+      acceptUpgrade(request, socket);
+      return;
+    }
+    setTimeout(() => acceptUpgrade(request, socket), options.upgradeDelayMs);
   });
   await new Promise<void>((resolve, reject) => {
     server.once('error', reject);
@@ -181,6 +194,7 @@ const startTestWebSocketServer = async (
       );
     },
     connectionCount: () => peers.length,
+    upgradeRequests: () => upgradeRequests,
     peers,
     url: `ws://127.0.0.1:${String(address.port)}`,
   };

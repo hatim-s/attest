@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process';
 import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import type { IncomingMessage } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
@@ -78,32 +79,41 @@ const run = async (
   return { ...collected, exitCode };
 };
 
-/** Starts the core hostile fixture without making test support part of the public package API. */
+type WebSocketTestPeer = { sendJson: (value: unknown) => void };
+
+/** Starts the executor's loopback WebSocket peer without making test support a package export. */
 const startLocalWebSocketFixture = async (): Promise<{
   close: () => Promise<void>;
-  events: () => readonly {
-    headers?: Readonly<Record<string, string>>;
-    type: string;
-  }[];
+  upgradeAuthorizations: readonly (string | undefined)[];
   url: string;
 }> => {
   const fixtureModuleUrl = new URL(
-    '../../../../../executor/src/_tests_/fixtures/websocket-fake-server.ts',
+    '../../../../../executor/src/adapters/websocket/_tests_/support/test-websocket-server.ts',
     import.meta.url,
   ).href;
   const fixtureModule = (await import(fixtureModuleUrl)) as {
-    startWebSocketFixtureServer: (scenario: 'serial_correlation') => Promise<{
-      close: () => Promise<void>;
-      events: () => readonly {
-        headers?: Readonly<Record<string, string>>;
-        type: string;
-      }[];
-      url: string;
-    }>;
+    startTestWebSocketServer: (options: {
+      subprotocol?: string;
+      onConnection?: (peer: WebSocketTestPeer, request: IncomingMessage) => void;
+      onMessage: (peer: WebSocketTestPeer, value: unknown) => void;
+    }) => Promise<{ close: () => Promise<void>; url: string }>;
   };
-  const fixture = await fixtureModule.startWebSocketFixtureServer('serial_correlation');
+  const upgradeAuthorizations: (string | undefined)[] = [];
+  const fixture = await fixtureModule.startTestWebSocketServer({
+    subprotocol: 'attest',
+    onConnection: (_peer, upgrade) => upgradeAuthorizations.push(upgrade.headers.authorization),
+    onMessage: (peer, raw) => {
+      const { request_id: requestId } = raw as { request_id: string };
+      peer.sendJson({ request_id: requestId, type: 'acknowledgement' });
+      peer.sendJson({
+        request_id: requestId,
+        type: 'result',
+        result: { echoed_request_id: requestId },
+      });
+    },
+  });
   webSocketFixtures.push(fixture);
-  return fixture;
+  return { ...fixture, upgradeAuthorizations };
 };
 
 /** Captures every authored project byte for cancellation and validation no-write assertions. */
@@ -563,11 +573,10 @@ describe('WebSocket agent UX', () => {
     });
     expect(jsonResult.result.response.output.echoed_request_id).toMatch(/^ws-/u);
     expect(jsonProbe.output.join('')).not.toContain('websocket-probe-secret');
-    const upgrades = fixture.events().filter((event) => event.type === 'upgrade_requested');
-    expect(upgrades).toHaveLength(2);
-    expect(
-      upgrades.every((event) => event.headers?.authorization === 'websocket-probe-secret'),
-    ).toBe(true);
+    expect(fixture.upgradeAuthorizations).toEqual([
+      'websocket-probe-secret',
+      'websocket-probe-secret',
+    ]);
   });
 
   it('publishes complete JSON help dependencies for WebSocket authoring', async () => {

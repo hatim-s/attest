@@ -1,5 +1,4 @@
-/* eslint-disable @typescript-eslint/no-require-imports */
-const readline = require('node:readline');
+const readline = process.getBuiltinModule('node:readline');
 
 const pending = new Map();
 const input = readline.createInterface({ input: process.stdin });

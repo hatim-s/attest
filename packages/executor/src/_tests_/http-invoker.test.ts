@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from 'node:child_process';
-import { createServer, type Server, type ServerResponse } from 'node:http';
+import type { ServerResponse } from 'node:http';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -7,15 +7,15 @@ import { AGENT_PROTOCOL, type AgentRequest } from '@attest/contracts';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 
 import { invokeHttpAgent } from '../http-invoker.js';
-import { acquireFixtureProcessSweepLock } from './support/fixture-processes.js';
 import type { InvokeOptions } from '../types.js';
+import { startLoopbackServer, type LoopbackServer } from './support/loopback-server.js';
 
 const REPOSITORY_ROOT = fileURLToPath(new URL('../../../../', import.meta.url));
 const CANONICAL_AGENT_PATH = join(
   REPOSITORY_ROOT,
   'conformance/src/_tests_/fixtures/fake-agents/http-agent.cjs',
 );
-const servers = new Set<Server>();
+const servers = new Set<LoopbackServer>();
 
 const request: AgentRequest = {
   protocol: AGENT_PROTOCOL,
@@ -37,30 +37,14 @@ type CanonicalAgentServer = {
 };
 
 let canonicalAgentServer: CanonicalAgentServer | undefined;
-let releaseFixtureProcessSweepLock: (() => Promise<void>) | undefined;
-
-const closeServer = async (server: Server): Promise<void> => {
-  await new Promise<void>((resolve, reject) => {
-    server.close((error) => (error === undefined ? resolve() : reject(error)));
-  });
-  servers.delete(server);
-};
 
 /** Starts a private edge server only for behavior absent from the canonical HTTP fixture. */
 const startEdgeServer = async (
   handler: (response: ServerResponse) => void,
-): Promise<{ server: Server; url: string }> => {
-  const server = createServer((_incomingRequest, response) => handler(response));
+): Promise<LoopbackServer> => {
+  const server = await startLoopbackServer((_incomingRequest, response) => handler(response));
   servers.add(server);
-  await new Promise<void>((resolve, reject) => {
-    server.once('error', reject);
-    server.listen(0, '127.0.0.1', resolve);
-  });
-  const address = server.address();
-  if (address === null || typeof address === 'string') {
-    throw new Error('Expected an ephemeral TCP server address.');
-  }
-  return { server, url: `http://127.0.0.1:${address.port}` };
+  return server;
 };
 
 /** Spawns the shared conformance HTTP agent and parses its LISTENING readiness line. */
@@ -120,29 +104,16 @@ const canonicalUrl = (behavior: string): string => {
 };
 
 beforeAll(async () => {
-  releaseFixtureProcessSweepLock = await acquireFixtureProcessSweepLock();
-  try {
-    canonicalAgentServer = await startCanonicalAgentServer();
-  } catch (error) {
-    await releaseFixtureProcessSweepLock();
-    releaseFixtureProcessSweepLock = undefined;
-    throw error;
-  }
+  canonicalAgentServer = await startCanonicalAgentServer();
 }, 30_000);
 
 afterEach(async () => {
-  await Promise.all([...servers].map(closeServer));
+  await Promise.all([...servers].map((server) => server.close()));
+  servers.clear();
 });
 
 afterAll(async () => {
-  try {
-    if (canonicalAgentServer !== undefined) {
-      await stopCanonicalAgentServer(canonicalAgentServer);
-    }
-  } finally {
-    await releaseFixtureProcessSweepLock?.();
-    releaseFixtureProcessSweepLock = undefined;
-  }
+  if (canonicalAgentServer !== undefined) await stopCanonicalAgentServer(canonicalAgentServer);
 });
 
 describe('invokeHttpAgent', () => {
@@ -171,51 +142,22 @@ describe('invokeHttpAgent', () => {
     });
   });
 
-  it.each([404, 500])('returns http_status for canonical HTTP %i', async (status) => {
-    const attempt = await invoke(canonicalUrl(`status-${status}`));
-
-    expect(attempt).toMatchObject({
-      status: 'invocation_error',
-      diagnostics: { httpStatus: status },
-    });
-    if (attempt.status === 'invocation_error') {
-      expect(attempt.error.code).toBe('http_status');
-      expect(attempt.error.message).toContain(String(status));
-    }
-  });
-
-  it.each([302, 307, 308])(
-    'does not follow HTTP %i redirects and preserves the terminal status diagnostics',
-    async (status) => {
-      const { url } = await startEdgeServer((response) => {
-        response.statusCode = status;
-        response.setHeader('location', 'http://127.0.0.1:1/not-followed');
-        response.end(JSON.stringify({ redirect: status }));
-      });
-
-      const attempt = await invoke(url);
-
-      expect(attempt).toMatchObject({
-        status: 'invocation_error',
-        diagnostics: { httpStatus: status },
-      });
-      if (attempt.status === 'invocation_error') {
-        expect(attempt.error).toMatchObject({ code: 'http_status' });
-        expect(attempt.error.message).toContain(String(status));
-      }
-    },
-  );
-
-  it.each([302, 404])(
-    'classifies oversized HTTP %i responses from headers before applying the 200 body cap',
-    async (status) => {
-      const payload = 'x'.repeat(options.outputCapBytes * 4);
+  it.each([
+    [404, false],
+    [500, false],
+    [302, false],
+    [307, false],
+    [308, false],
+    [302, true],
+    [404, true],
+  ])(
+    'classifies HTTP %i (oversized body: %s) from headers without following redirects',
+    async (status, oversized) => {
+      const payload = oversized ? 'x'.repeat(options.outputCapBytes * 4) : '{}';
       const { url } = await startEdgeServer((response) => {
         response.statusCode = status;
         response.setHeader('content-length', String(Buffer.byteLength(payload)));
-        if (status === 302) {
-          response.setHeader('location', 'http://127.0.0.1:1/not-followed');
-        }
+        response.setHeader('location', 'http://127.0.0.1:1/not-followed');
         response.end(payload);
       });
 
@@ -226,34 +168,46 @@ describe('invokeHttpAgent', () => {
         error: { code: 'http_status' },
         diagnostics: { httpStatus: status },
       });
+      if (attempt.status === 'invocation_error') {
+        expect(attempt.error.message).toContain(String(status));
+      }
     },
   );
 
   it('returns network after a locally closed server refuses the connection', async () => {
-    const { server, url } = await startEdgeServer((response) => response.end());
-    await closeServer(server);
+    const server = await startEdgeServer((response) => response.end());
+    await server.close();
+    servers.delete(server);
+    const { url } = server;
 
     const attempt = await invoke(url);
 
     expect(attempt).toMatchObject({ status: 'invocation_error', error: { code: 'network' } });
   });
 
-  it('returns timeout for canonical /hang', async () => {
-    const attempt = await invoke(canonicalUrl('hang'), { timeoutMs: 25 });
-
-    expect(attempt).toMatchObject({ status: 'invocation_error', error: { code: 'timeout' } });
-  });
-
-  it('gives caller cancellation precedence when timeout also expires', async () => {
-    const controller = new AbortController();
-    const invocation = invoke(canonicalUrl('hang'), {
+  it.each([
+    { name: 'times out', timeoutMs: 25, abortAfterMs: undefined, code: 'timeout' },
+    { name: 'cancels', timeoutMs: 1_000, abortAfterMs: 25, code: 'cancelled' },
+    {
+      name: 'prefers cancellation over an expired deadline',
       timeoutMs: 1,
-      signal: controller.signal,
-    });
-    controller.abort();
-
-    const attempt = await invocation;
-    expect(attempt).toMatchObject({ status: 'invocation_error', error: { code: 'cancelled' } });
+      abortAfterMs: 0,
+      code: 'cancelled',
+    },
+  ])('$name a hanging canonical request', async ({ timeoutMs, abortAfterMs, code }) => {
+    const controller = new AbortController();
+    const invocation = invoke(canonicalUrl('hang'), { timeoutMs, signal: controller.signal });
+    // A zero delay aborts synchronously, before the one-millisecond deadline can fire.
+    if (abortAfterMs === 0) controller.abort();
+    const abortTimer =
+      abortAfterMs === undefined || abortAfterMs === 0
+        ? undefined
+        : setTimeout(() => controller.abort(), abortAfterMs);
+    try {
+      expect(await invocation).toMatchObject({ status: 'invocation_error', error: { code } });
+    } finally {
+      clearTimeout(abortTimer);
+    }
   });
 
   it('aborts a streamed response as soon as its byte budget is exceeded', async () => {
@@ -326,17 +280,5 @@ describe('invokeHttpAgent', () => {
       status: 'ok',
       raw: { protocol: AGENT_PROTOCOL, output: 'ok:http-invoker-test' },
     });
-  });
-
-  it('returns cancelled when the caller aborts canonical /hang', async () => {
-    const controller = new AbortController();
-    const abortTimer = setTimeout(() => controller.abort(), 25);
-
-    try {
-      const attempt = await invoke(canonicalUrl('hang'), { signal: controller.signal });
-      expect(attempt).toMatchObject({ status: 'invocation_error', error: { code: 'cancelled' } });
-    } finally {
-      clearTimeout(abortTimer);
-    }
   });
 });

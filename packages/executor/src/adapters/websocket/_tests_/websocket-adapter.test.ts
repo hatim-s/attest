@@ -4,7 +4,7 @@ import {
   type AgentRequest,
   type WebSocketAttemptEvidence,
 } from '@attest/contracts';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { startWebSocketAgent, type WebSocketAgentResource } from '../websocket-adapter.js';
 import { startTestWebSocketServer } from './support/test-websocket-server.js';
@@ -370,6 +370,82 @@ describe('WebSocket adapter', () => {
     expect(result.status).toBe('invocation_error');
     expect(failureClassification(result)).toBe('close_timeout');
     await session.close();
+  });
+
+  it('cancels a delayed per-case open before a closed session can send', async () => {
+    let messages = 0;
+    const fixture = await startTestWebSocketServer({
+      upgradeDelayMs: 80,
+      onMessage: () => {
+        messages += 1;
+      },
+    });
+    fixtures.push(fixture);
+    const session = await startWebSocketAgent(
+      agent(fixture.url, {
+        transport: {
+          ...agent(fixture.url).transport,
+          lifecycle: 'per_case',
+          connection_mode: 'serial',
+        },
+      }),
+    );
+    const invocation = session.invoke(request('closed-during-open', null));
+    await vi.waitFor(() => expect(fixture.upgradeRequests()).toBe(1));
+    await session.close();
+    const result = await invocation;
+    expect(result.status).toBe('invocation_error');
+    expect(failureClassification(result)).toBe('cancelled');
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(messages).toBe(0);
+  });
+
+  it('fails a message larger than the event byte cap', async () => {
+    const fixture = await startTestWebSocketServer({
+      onMessage: (peer, raw) => {
+        const message = raw as { request_id: string };
+        peer.sendJson({ request_id: message.request_id, ack: true, result: 'x'.repeat(2_000) });
+      },
+    });
+    fixtures.push(fixture);
+    const session = await startWebSocketAgent(
+      agent(fixture.url, { limits: { event_bytes: 1_024 } }),
+    );
+    try {
+      const result = await session.invoke(request('oversized', null));
+      expect(result.status).toBe('invocation_error');
+      if (result.status === 'invocation_error') {
+        expect(result.error.code).toBe('output_cap_exceeded');
+      }
+    } finally {
+      await session.close().catch(() => undefined);
+    }
+  });
+
+  it('redacts secrets nested in result and trace evidence', async () => {
+    const secret = 'fixture-websocket-secret-never-persist';
+    const fixture = await startTestWebSocketServer({
+      onMessage: (peer, raw) => {
+        const message = raw as { request_id: string };
+        peer.sendJson({ request_id: message.request_id, ack: true });
+        peer.sendJson({
+          request_id: message.request_id,
+          result: { authorization: `Bearer ${secret}`, nested: { api_key: secret } },
+          trace: { token: secret },
+        });
+      },
+    });
+    fixtures.push(fixture);
+    const session = await startWebSocketAgent(agent(fixture.url), { secrets: [secret] });
+    try {
+      const result = await session.invoke(request('secret', null));
+      expect(result.attempts.length).toBeGreaterThan(0);
+      for (const attempt of result.attempts) {
+        expect(attempt.rawExcerpt?.text).not.toContain(secret);
+      }
+    } finally {
+      await session.close();
+    }
   });
 
   it('rejects prohibited network targets, literal credentials, and unsupported runtime modes', async () => {

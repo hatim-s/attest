@@ -37,13 +37,9 @@ const writeSuccess = (stdout: NodeJS.WritableStream, output = 'ok'): void => {
   stdout.write(JSON.stringify({ protocol: AGENT_PROTOCOL, output }));
 };
 
-/** Builds the narrow SDK fake and a factory spy without loading credentials or making live calls. */
-const createSdkFactory = (
-  sdk: VercelSandboxSdk,
-): { factory: VercelSandboxFactory; factorySpy: ReturnType<typeof vi.fn> } => {
-  const factorySpy = vi.fn(() => Promise.resolve(sdk));
-  return { factory: factorySpy, factorySpy };
-};
+/** Builds a factory spy for the narrow SDK fake without loading credentials or making live calls. */
+const createSdkFactory = (sdk: VercelSandboxSdk) =>
+  vi.fn<VercelSandboxFactory>(() => Promise.resolve(sdk));
 
 afterEach(async () => {
   vi.useRealTimers();
@@ -79,7 +75,7 @@ describe('Vercel sandbox lifecycle', () => {
         return Promise.resolve();
       }),
     } as unknown as VercelSandboxSdk;
-    const { factory, factorySpy } = createSdkFactory(sdk);
+    const factory = createSdkFactory(sdk);
 
     const result = await invokeVercelSandboxAgent(
       {
@@ -97,7 +93,7 @@ describe('Vercel sandbox lifecycle', () => {
       },
     );
 
-    expect(factorySpy).toHaveBeenCalledOnce();
+    expect(factory).toHaveBeenCalledOnce();
     expect(result).toMatchObject({
       status: 'ok',
       attempts: [{ status: 'invocation_error' }, { status: 'ok' }],
@@ -129,7 +125,7 @@ describe('Vercel sandbox lifecycle', () => {
       readFile: vi.fn(),
       stop: vi.fn(() => Promise.resolve()),
     } as unknown as VercelSandboxSdk;
-    const { factory } = createSdkFactory(sdk);
+    const factory = createSdkFactory(sdk);
 
     const result = await invokeVercelSandboxAgent(
       {
@@ -222,7 +218,7 @@ describe('Vercel sandbox lifecycle', () => {
         readFile: vi.fn(),
         stop: vi.fn(() => Promise.resolve()),
       } as unknown as VercelSandboxSdk;
-      const { factory } = createSdkFactory(sdk);
+      const factory = createSdkFactory(sdk);
 
       const result = await invokeVercelSandboxAgent(
         { kind: 'vercel', files: [], artifacts: [] },
@@ -256,7 +252,7 @@ describe('Vercel sandbox lifecycle', () => {
       readFile: vi.fn(),
       stop: vi.fn(() => Promise.reject(new Error('stop failed'))),
     } as unknown as VercelSandboxSdk;
-    const { factory } = createSdkFactory(sdk);
+    const factory = createSdkFactory(sdk);
 
     const result = await invokeVercelSandboxAgent(
       { kind: 'vercel', files: [], artifacts: [] },
@@ -288,7 +284,7 @@ describe('Vercel sandbox lifecycle', () => {
       readFile: vi.fn(),
       stop: vi.fn(() => Promise.resolve()),
     } as unknown as VercelSandboxSdk;
-    const { factory } = createSdkFactory(sdk);
+    const factory = createSdkFactory(sdk);
 
     const result = await invokeVercelSandboxAgent(
       { kind: 'vercel', files: [], artifacts: [] },

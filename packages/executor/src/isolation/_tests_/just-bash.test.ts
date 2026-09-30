@@ -1,21 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
 import { justBashIsolation } from '../just-bash.js';
-
-const context = (signal = new AbortController().signal) => ({
-  runId: 'run',
-  testId: 'test',
-  caseId: 'case',
-  configuredIndex: 0,
-  workerIndex: 0,
-  signal,
-});
+import { caseContext } from './support/case-context.js';
 
 describe('just-bash case isolation', () => {
   it('uses workspace-relative paths for seeds and file operations', async () => {
     const environment = await justBashIsolation({
       files: { './inputs/../input.txt': 'seed' },
-    })(context());
+    })(caseContext());
 
     try {
       await expect(environment.readFile('input.txt')).resolves.toBe('seed');
@@ -28,12 +20,12 @@ describe('just-bash case isolation', () => {
     }
 
     await expect(
-      justBashIsolation({ files: { '../outside.txt': 'no' } })(context()),
+      justBashIsolation({ files: { '../outside.txt': 'no' } })(caseContext()),
     ).rejects.toThrow(/workspace/u);
   });
 
   it('serializes commands inside one environment', async () => {
-    const environment = await justBashIsolation()(context());
+    const environment = await justBashIsolation()(caseContext());
 
     try {
       const first = environment.exec('sleep 0.02; echo first >> order.txt');
@@ -49,7 +41,7 @@ describe('just-bash case isolation', () => {
   it('drains run work and permits bounded final reads after run cancellation', async () => {
     const controller = new AbortController();
     const environment = await justBashIsolation({ files: { 'partial.txt': 'partial' } })(
-      context(controller.signal),
+      caseContext(controller.signal),
     );
     const pending = environment.exec('sleep 10; echo late > late.txt');
     controller.abort(new Error('run cancelled'));
@@ -65,7 +57,7 @@ describe('just-bash case isolation', () => {
   });
 
   it('expires the separate finalization lifetime', async () => {
-    const environment = await justBashIsolation({ finalizationTimeoutMs: 5 })(context());
+    const environment = await justBashIsolation({ finalizationTimeoutMs: 5 })(caseContext());
     await environment.beginFinalization();
     await new Promise((resolve) => setTimeout(resolve, 20));
 
