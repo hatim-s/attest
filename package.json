@@ -21,6 +21,7 @@
     "typecheck": "turbo run typecheck",
     "lint": "eslint .",
     "test": "turbo run test --concurrency=1",
+    "test:portability": "bun run --cwd packages/executor test:node && bun run --cwd packages/executor test:bun && bun run --cwd packages/runtime test:node && bun run --cwd packages/runtime test:bun",
     "generate:schemas": "bun run --cwd packages/schemas generate",
     "format:check": "prettier --check .",
     "format": "prettier --write .",
