@@ -8,7 +8,7 @@ export {
   tokenizeCommand,
 } from './input-parsers.js';
 export { assertSafeNativeAgentResource } from './resource-validation.js';
-export { createAgentResource } from './resource-builder.js';
+export { AGENT_ADD_FLAGS, createAgentResource } from './resource-builder.js';
 export {
   createImportedCurlAgentResource,
   readCurlBodyFile,

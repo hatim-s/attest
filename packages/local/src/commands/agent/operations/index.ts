@@ -1,11 +1,16 @@
 export { runAgentAddCommand } from './add-command.js';
+export {
+  CURL_MAPPING_DIAGNOSTICS,
+  createCurlImportRequest,
+  findUnboundCurlCredential,
+  pollingFlagsPresent,
+  type CurlImportFields,
+} from './curl-import-request.js';
 export { runAgentImportCommand } from './import-command.js';
 export { runAgentRemoveCommand, runAgentRenameCommand } from './lifecycle-command.js';
-export { runAgentTestCommand } from './test-command.js';
+export { readAgentTestInput, runAgentTestCommand } from './test-command.js';
 export {
-  type AgentAddCommandOptions,
   type AgentImportCommandOptions,
-  type AgentRemoveCommandOptions,
-  type AgentRenameCommandOptions,
+  type AgentMutationCommandOptions,
   type AgentTestCommandOptions,
 } from './types.js';

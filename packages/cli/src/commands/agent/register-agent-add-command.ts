@@ -1,4 +1,11 @@
-import { runAgentAddCommand } from '@attest/local/agent';
+import {
+  AGENT_ADD_FLAGS,
+  createAgentResource,
+  readCommandRequest,
+  runAgentAddCommand,
+  validateCommandRequest,
+  type AgentAddFields,
+} from '@attest/local/agent';
 import { Option, type Command } from 'commander';
 
 import { renderCommandResult } from '../shared/command-result.js';
@@ -10,9 +17,12 @@ import {
   outputFormat,
   type MutationCliOptions,
 } from '../shared/cli-options.js';
+import { promptRequired } from './agent-prompts.js';
+import { promptTransportFields } from './guided-agent-add.js';
 import {
+  agentMutationFields,
+  assertNoAgentRequestOverlap,
   markAgentMutationHelp,
-  mutationArguments,
   type RegisterAgentCommandsOptions,
 } from './registration-support.js';
 
@@ -161,6 +171,17 @@ const ADD_IMPLIES = {
   'websocket-lifecycle': ['websocket-url'],
 };
 
+/** Fills the agent id and transport from guided answers when the flags left them out. */
+const guidedAgentAddFields = async (
+  fields: Omit<AgentAddFields, 'agentId'> & { agentId?: string },
+  interactive: boolean,
+  context: RegisterAgentCommandsOptions,
+): Promise<AgentAddFields> => {
+  const promptContext = { interactive, prompt: context.interaction.prompt };
+  const agentId = await promptRequired(fields.agentId, 'Agent id', '<agent-id>', promptContext);
+  return promptTransportFields({ ...fields, agentId }, promptContext);
+};
+
 /** Registers the transport-rich `agent add` command without owning application behavior. */
 const registerAgentAddCommand = (agent: Command, context: RegisterAgentCommandsOptions): void => {
   const add = addMutationOptions(
@@ -238,11 +259,9 @@ const registerAgentAddCommand = (agent: Command, context: RegisterAgentCommandsO
     .option('--trace', 'declare trace support')
     .action(async (agentId: string | undefined, raw: AddOptions, command: Command) => {
       const options = mergeCommonOptions(raw, command, context.program);
-      const result = await runAgentAddCommand({
-        ...mutationArguments(options, context),
+      const flags: Omit<AgentAddFields, 'agentId'> = {
         acknowledgementPointer: options.acknowledgementPointer,
         acknowledgementValues: options.acknowledgementValues,
-        agentId,
         argvJson: options.argvJson,
         attemptTimeout: options.attemptTimeout,
         backgroundCommand: options.backgroundCommand,
@@ -260,7 +279,6 @@ const registerAgentAddCommand = (agent: Command, context: RegisterAgentCommandsO
         idleTimeout: options.idleTimeout,
         invokeUrl: options.invokeUrl,
         jsonlCommand: options.jsonlCommand,
-        interactive: isInteractive(options, context.interaction, options.fromJson),
         name: options.name,
         nativeCommand: options.nativeCommand,
         nativeHttp: options.nativeHttp,
@@ -279,13 +297,40 @@ const registerAgentAddCommand = (agent: Command, context: RegisterAgentCommandsO
         streamUrl: options.streamUrl,
         terminalPointer: options.terminalPointer,
         terminalValues: options.terminalValues,
-        prompt: context.interaction.prompt,
         timeout: options.timeout,
         trace: options.trace,
         tracePointer: options.tracePointer,
         webSocketLifecycle: options.websocketLifecycle,
         webSocketSubprotocol: options.subprotocol,
         webSocketUrl: options.websocketUrl,
+      };
+      const fields = { ...flags, agentId };
+      assertNoAgentRequestOverlap(
+        options,
+        Object.fromEntries(
+          (Object.keys(AGENT_ADD_FLAGS) as (keyof AgentAddFields)[]).map((field) => [
+            AGENT_ADD_FLAGS[field],
+            fields[field],
+          ]),
+        ),
+      );
+      const interactive = isInteractive(options, context.interaction, options.fromJson);
+      const request =
+        options.fromJson === undefined
+          ? validateCommandRequest('agent.add', {
+              ...agentMutationFields('agent.add', options),
+              agent: createAgentResource(await guidedAgentAddFields(fields, interactive, context)),
+            })
+          : await readCommandRequest('agent.add', options.fromJson, {
+              readStdin: context.interaction.readStdin,
+              workingDirectory: context.workingDirectory,
+            });
+      const result = await runAgentAddCommand({
+        interactive,
+        project: options.project,
+        prompt: context.interaction.prompt,
+        request,
+        workingDirectory: context.workingDirectory,
       });
       context.io.output(renderCommandResult('agent.add', outputFormat(options), result));
     });

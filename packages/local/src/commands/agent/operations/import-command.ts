@@ -1,4 +1,4 @@
-import type { AgentResource, CommandRequest, JsonValue } from '@attest/contracts';
+import type { AgentResource, JsonValue } from '@attest/contracts';
 
 import { LocalError } from '../../../errors/index.js';
 import { discoverProject } from '../../../project/discover-project.js';
@@ -6,171 +6,61 @@ import {
   candidateFromLoadedProject,
   loadCommandProject,
 } from '../../project/load-command-project.js';
-import { readCommandRequest } from '../../shared/command-request.js';
-import { redactAgentResource } from '../../show/redact-resource.js';
 import type { CommandResult, MutationResult } from '../../shared/command-result.js';
+import { redactAgentResource } from '../../show/redact-resource.js';
 import {
   createImportedCurlAgentResource,
   readCurlDocument,
   readImportedAgentResource,
 } from '../authoring/index.js';
-import { createCurlImportRequest, prepareGuidedCurlOptions } from './curl-import-request.js';
-import {
-  assertNoFromJsonFlags,
-  commaSeparated,
-  mutationResult,
-  promptDefault,
-  promptRequired,
-} from './command-support.js';
-import type { AgentImportCommandOptions } from './types.js';
+import { mutationResult } from './agent-mutation.js';
+import type { AgentImportCommandOptions, AgentRequest } from './types.js';
+
+/** Builds the imported agent and the redacted preview shown before confirmation. */
+const importAgentResource = async (
+  request: AgentRequest<'agent.import'>,
+  options: AgentImportCommandOptions,
+): Promise<{ agent: AgentResource; preview?: JsonValue }> => {
+  if (request.source_type === 'json') {
+    const agent = await readImportedAgentResource(
+      request.source,
+      request.as,
+      request.name,
+      options.workingDirectory,
+      options.readStdin,
+    );
+    return {
+      agent,
+      preview: agent.transport.kind === 'websocket' ? redactAgentResource(agent) : undefined,
+    };
+  }
+  const curlSource =
+    options.sourceText ??
+    (await readCurlDocument(request.source, options.workingDirectory, options.readStdin));
+  const { root } = await discoverProject({
+    project: options.project,
+    workingDirectory: options.workingDirectory,
+  });
+  const imported = await createImportedCurlAgentResource(request, curlSource, root);
+  return {
+    agent: imported.agent,
+    preview: {
+      request: imported.preview,
+      extraction: request.extraction,
+      ...(request.polling === undefined ? {} : { polling: request.polling }),
+    },
+  };
+};
 
 /** Imports one canonical JSON resource or inert cURL mapping without retaining source contents. */
 const runAgentImportCommand = async (
   options: AgentImportCommandOptions,
 ): Promise<CommandResult<'mutation', MutationResult>> => {
-  assertNoFromJsonFlags(options.fromJson, {
-    'agent-id': options.agentId,
-    'attempt-timeout': options.attemptTimeout,
-    'body-timeout': options.bodyTimeout,
-    'connect-timeout': options.connectTimeout,
-    'error-pointer': options.errorPointer,
-    'first-byte-timeout': options.firstByteTimeout,
-    'header-env': options.headerEnv,
-    'idempotency-header': options.idempotencyHeader,
-    'map-body': options.mapBody,
-    name: options.name,
-    'poll-failure': options.pollFailure,
-    'poll-job-id-pointer': options.pollJobIdPointer,
-    'poll-maximum-interval': options.pollMaximumInterval,
-    'poll-minimum-interval': options.pollMinimumInterval,
-    'poll-status-pointer': options.pollStatusPointer,
-    'poll-status-url-pointer': options.pollStatusUrlPointer,
-    'poll-status-url-template': options.pollStatusUrlTemplate,
-    'poll-success': options.pollSuccess,
-    'query-env': options.queryEnv,
-    'request-cap-bytes': options.requestCapBytes,
-    'response-cap-bytes': options.responseCapBytes,
-    'response-pointer': options.responsePointer,
-    retries: options.retries,
-    'retry-delay': options.retryDelay,
-    'remote-job-id-pointer': options.remoteJobIdPointer,
-    source: options.source,
-    'trace-pointer': options.tracePointer,
-    type: options.sourceType,
-    'dry-run': options.dryRun,
-    'if-project-hash': options.expectedProjectHash,
-    yes: options.yes,
-  });
-  let source = options.source;
-  let agentId = options.agentId;
-  let name = options.name;
-  let request: Extract<CommandRequest, { command: 'agent.import' }> | undefined;
-  if (options.fromJson !== undefined) {
-    request = await readCommandRequest('agent.import', options.fromJson, {
-      readStdin: options.readStdin,
-      workingDirectory: options.workingDirectory,
-    });
-    if (options.fromJson === '-' && request.source === '-') {
-      throw new LocalError('cli_usage', 'Command request and agent source cannot share stdin.', {
-        path: '/source',
-        hint: 'Put either the request document or imported resource in a file.',
-      });
-    }
-    source = request.source;
-    agentId = request.as;
-    name = request.name;
-  }
-  source = await promptRequired(
-    source,
-    'Agent import source',
-    '<path|url|->',
-    options.interactive,
-    options.prompt,
-  );
-  agentId = await promptRequired(
-    agentId,
-    'Imported agent id',
-    '--as',
-    options.interactive,
-    options.prompt,
-  );
-  const sourceType =
-    request?.source_type ?? options.sourceType ?? (/\.curl$/iu.test(source) ? 'curl' : 'json');
-  let agent: AgentResource;
-  let importPreview: JsonValue | undefined;
-  if (sourceType === 'curl') {
-    const curlSource = await readCurlDocument(source, options.workingDirectory, options.readStdin);
-    options = await prepareGuidedCurlOptions(options, curlSource);
-    const responsePointer =
-      request?.source_type === 'curl'
-        ? request.extraction.result_pointer
-        : options.responsePointer !== undefined
-          ? options.responsePointer
-          : await promptDefault(
-              undefined,
-              'Response JSON Pointer',
-              '/answer',
-              options.interactive,
-              options.prompt,
-            );
-    let curlRequest =
-      request?.source_type === 'curl'
-        ? request
-        : createCurlImportRequest({ agentId, name, options, responsePointer, source });
-    const projectRoot = (
-      await discoverProject({
-        project: options.project,
-        workingDirectory: options.workingDirectory,
-      })
-    ).root;
-    let imported: Awaited<ReturnType<typeof createImportedCurlAgentResource>> | undefined;
-    for (let attempt = 0; attempt < 3; attempt += 1) {
-      try {
-        imported = await createImportedCurlAgentResource(curlRequest, curlSource, projectRoot);
-        break;
-      } catch (error: unknown) {
-        if (
-          request !== undefined ||
-          !options.interactive ||
-          options.prompt === undefined ||
-          !(error instanceof LocalError) ||
-          !/mapping|target/iu.test(error.message) ||
-          attempt === 2
-        ) {
-          throw error;
-        }
-        options.mapBody = commaSeparated(
-          await options.prompt(
-            'Body mapping was invalid. Re-enter TARGET_POINTER=INPUT_POINTER values [none]: ',
-          ),
-        );
-        curlRequest = createCurlImportRequest({ agentId, name, options, responsePointer, source });
-      }
-    }
-    if (imported === undefined) throw new Error('Guided cURL import did not settle.');
-    agent = imported.agent;
-    importPreview = {
-      request: imported.preview,
-      extraction: curlRequest.extraction,
-      ...(curlRequest.polling === undefined ? {} : { polling: curlRequest.polling }),
-    };
-  } else if (sourceType === 'json') {
-    agent = await readImportedAgentResource(
-      source,
-      agentId,
-      name,
-      options.workingDirectory,
-      options.readStdin,
-    );
-    if (agent.transport.kind === 'websocket') importPreview = redactAgentResource(agent);
-  } else {
-    throw new LocalError('cli_usage', 'Agent import type must be json or curl.', {
-      path: '--type',
-    });
-  }
+  const { request } = options;
+  const { agent, preview } = await importAgentResource(request, options);
   const loaded = await loadCommandProject({
     project: options.project,
-    recover: (request?.dry_run ?? options.dryRun) !== true,
+    recover: request.dry_run !== true,
     workingDirectory: options.workingDirectory,
   });
   if (loaded.agents.some(({ id }) => id === agent.id)) {
@@ -184,17 +74,14 @@ const runAgentImportCommand = async (
     command: 'agent.import',
     loaded,
     candidate,
-    request: {
-      dry_run: request?.dry_run ?? options.dryRun,
-      if_project_hash: request?.if_project_hash ?? options.expectedProjectHash,
-    },
+    request,
     confirmation: {
-      definitionPreview: importPreview,
+      definitionPreview: preview,
       interactive: options.interactive,
       nextCommand: `attest agent test ${agent.id}`,
       prompt: options.prompt,
       requireExplicit: false,
-      yes: request?.yes ?? options.yes,
+      yes: request.yes,
     },
   });
 };

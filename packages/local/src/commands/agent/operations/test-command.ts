@@ -2,134 +2,116 @@ import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import type { JsonValue } from '@attest/contracts';
+import type { StoredCaseExecution } from '@attest/core';
 
 import { LocalError } from '../../../errors/index.js';
 import { parseJsonText, readSourceText } from '../../../internal/source-text.js';
 import { openStore } from '../../../store/index.js';
 import { loadCommandProject } from '../../project/load-command-project.js';
-import { readCommandRequest } from '../../shared/command-request.js';
 import type { AgentTestResult, CommandResult } from '../../shared/command-result.js';
 import type { ReadInput } from '../authoring/index.js';
 import { testNativeAgentConnection } from '../native-agent-adapter/index.js';
-import { assertNoFromJsonFlags, findAgent, promptRequired } from './command-support.js';
+import { findAgent } from './agent-mutation.js';
 import type { AgentTestCommandOptions } from './types.js';
 
-const readTestInput = async (
-  input: string | undefined,
-  inputFile: string | undefined,
-  workingDirectory: string,
-  readStdin: ReadInput,
-): Promise<JsonValue> => {
-  if (input !== undefined && inputFile !== undefined) {
+type AgentTestInputOptions = {
+  input?: string;
+  inputFile?: string;
+  readStdin: ReadInput;
+  workingDirectory: string;
+};
+
+/** Reads the probe input from `--input` or `--input-file`; with neither, the input is `{}`. */
+const readAgentTestInput = async (options: AgentTestInputOptions): Promise<JsonValue> => {
+  if (options.input !== undefined && options.inputFile !== undefined) {
     throw new LocalError('cli_usage', 'Agent test input sources overlap.', {
       path: '--input',
       hint: 'Pass either `--input` or `--input-file`, not both.',
     });
   }
   const hint = 'Pass any valid JSON scalar, array, or object.';
-  if (inputFile !== undefined) {
-    const text = await readSourceText(inputFile, {
+  if (options.inputFile !== undefined) {
+    const text = await readSourceText(options.inputFile, {
       path: '--input-file',
-      readStdin,
-      workingDirectory,
+      readStdin: options.readStdin,
+      workingDirectory: options.workingDirectory,
     });
     return parseJsonText(text, { path: '--input-file', hint });
   }
-  if (input === undefined) return {};
-  return parseJsonText(input, { path: '--input', hint });
+  if (options.input === undefined) return {};
+  return parseJsonText(options.input, { path: '--input', hint });
+};
+
+type ProbeRecording = {
+  finish: (status: 'cancelled' | 'completed' | 'failed') => Promise<void>;
+  record: (execution: StoredCaseExecution) => Promise<void>;
+  runId: string;
+};
+
+/** Opens the project run store and one run that captures a single probe case. */
+const startProbeRecording = async (
+  root: string,
+  agentId: string,
+  projectHash: string,
+): Promise<ProbeRecording> => {
+  await mkdir(join(root, '.attest'), { recursive: true });
+  const store = await openStore(join(root, '.attest', 'runs.db'));
+  const run = await store.runs.createRun({
+    schemaId: 'attest.agent-test',
+    configHash: projectHash,
+    configJson: JSON.stringify({ agent_id: agentId, project_hash: projectHash }),
+    labels: { agent_id: agentId, kind: 'agent-probe' },
+  });
+  return {
+    finish: async (status) => {
+      try {
+        await store.runs.finalizeRun(run.id, status);
+      } finally {
+        await store.close();
+      }
+    },
+    record: (execution) => store.runs.recordCase(run.id, execution, []),
+    runId: run.id,
+  };
 };
 
 /** Probes one supported adapter without project writes and records one case only when requested. */
 const runAgentTestCommand = async (
   options: AgentTestCommandOptions,
 ): Promise<CommandResult<'agent-test', AgentTestResult>> => {
-  assertNoFromJsonFlags(options.fromJson, {
-    'agent-id': options.agentId,
-    input: options.input,
-    'input-file': options.inputFile,
-    record: options.record,
-  });
-  if (options.fromJson === '-' && options.inputFile === '-') {
-    throw new LocalError('cli_usage', 'Command request and test input cannot share stdin.', {
-      path: '--input-file',
-    });
-  }
-  const request: { agent_id: string; input: JsonValue; record?: boolean } =
-    options.fromJson === undefined
-      ? {
-          agent_id: await promptRequired(
-            options.agentId,
-            'Agent id',
-            '<agent-id>',
-            options.interactive,
-            options.prompt,
-            options.signal,
-          ),
-          input: await readTestInput(
-            options.input,
-            options.inputFile,
-            options.workingDirectory,
-            options.readStdin,
-          ),
-        }
-      : await readCommandRequest('agent.test', options.fromJson, {
-          readStdin: options.readStdin,
-          workingDirectory: options.workingDirectory,
-        });
+  const { request } = options;
   const loaded = await loadCommandProject({
     project: options.project,
     workingDirectory: options.workingDirectory,
   });
   const agent = findAgent(loaded.agents, request.agent_id);
-  const record = request.record ?? options.record ?? false;
-  let store: Awaited<ReturnType<typeof openStore>> | undefined;
-  let runId: string | undefined;
-  if (record) {
-    await mkdir(join(loaded.root, '.attest'), { recursive: true });
-    store = await openStore(join(loaded.root, '.attest', 'runs.db'));
-    const run = await store.runs.createRun({
-      schemaId: 'attest.agent-test',
-      configHash: loaded.projectHash,
-      configJson: JSON.stringify({ agent_id: agent.id, project_hash: loaded.projectHash }),
-      labels: { agent_id: agent.id, kind: 'agent-probe' },
-    });
-    runId = run.id;
-  }
+  const recording =
+    request.record === true
+      ? await startProbeRecording(loaded.root, agent.id, loaded.projectHash)
+      : undefined;
   let result: Awaited<ReturnType<typeof testNativeAgentConnection>>;
   try {
     result = await testNativeAgentConnection({
       agent,
       input: request.input,
-      onExecution:
-        store === undefined || runId === undefined
-          ? undefined
-          : (execution) => store.runs.recordCase(runId, execution, []),
+      onExecution: recording?.record,
       onProgress: options.watch === true ? options.onProgress : undefined,
       projectRoot: loaded.root,
-      runId,
+      runId: recording?.runId,
       signal: options.signal,
     });
-    if (store !== undefined && runId !== undefined) {
-      await store.runs.finalizeRun(runId, 'completed');
-    }
   } catch (error: unknown) {
-    if (store !== undefined && runId !== undefined) {
-      await store.runs.finalizeRun(
-        runId,
-        error instanceof LocalError && error.code === 'cancelled' ? 'cancelled' : 'failed',
-      );
-    }
+    const cancelled = error instanceof LocalError && error.code === 'cancelled';
+    await recording?.finish(cancelled ? 'cancelled' : 'failed');
     throw error;
-  } finally {
-    await store?.close();
   }
-  const resultWithRecord = runId === undefined ? result : { ...result, recorded_run_id: runId };
+  await recording?.finish('completed');
   return {
     operation: 'agent-test',
     projectHashAfter: loaded.projectHash,
     projectHashBefore: loaded.projectHash,
-    result: resultWithRecord,
+    result: recording === undefined ? result : { ...result, recorded_run_id: recording.runId },
   };
 };
 
-export { runAgentTestCommand };
+export { readAgentTestInput, runAgentTestCommand };

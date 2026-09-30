@@ -19,7 +19,8 @@ import { parseSecretBindings } from '../../shared/secret-bindings.js';
 import { assertSafeNativeAgentResource } from './resource-validation.js';
 import type { AgentAddFields } from './types.js';
 
-const AUTHORING_FLAG_BY_FIELD: Readonly<Record<keyof AgentAddFields, string>> = {
+/** The CLI flag, without dashes, that sets each agent add field. */
+const AGENT_ADD_FLAGS: Readonly<Record<keyof AgentAddFields, string>> = {
   acknowledgementPointer: 'acknowledgement-pointer',
   acknowledgementValues: 'acknowledgement-value',
   agentId: 'agent-id',
@@ -155,13 +156,13 @@ const assertApplicableAuthoringFlags = (
 ): void => {
   const allowed = TRANSPORT_AUTHORING_FIELDS[selected];
   const incompatibleOptions: string[] = [];
-  for (const field of Object.keys(AUTHORING_FLAG_BY_FIELD) as (keyof AgentAddFields)[]) {
+  for (const field of Object.keys(AGENT_ADD_FLAGS) as (keyof AgentAddFields)[]) {
     if (
       fieldIsProvided(fields[field]) &&
       !COMMON_AUTHORING_FIELDS.has(field) &&
       !allowed.has(field)
     ) {
-      incompatibleOptions.push(`--${AUTHORING_FLAG_BY_FIELD[field]}`);
+      incompatibleOptions.push(`--${AGENT_ADD_FLAGS[field]}`);
     }
   }
   if (incompatibleOptions.length > 0) {
@@ -388,4 +389,4 @@ const createAgentResource = (fields: AgentAddFields): AgentResource => {
   return parsed.data;
 };
 
-export { createAgentResource };
+export { AGENT_ADD_FLAGS, createAgentResource };

@@ -15,8 +15,14 @@ import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 
-import { AGENT_PROTOCOL, cliResultSchema, type AgentResource } from '@attest/contracts';
 import {
+  AGENT_PROTOCOL,
+  COMMAND_REQUEST_SCHEMA_ID,
+  cliResultSchema,
+  type AgentResource,
+} from '@attest/contracts';
+import {
+  createAgentResource,
   runAgentAddCommand,
   runAgentRemoveCommand,
   runAgentTestCommand,
@@ -50,6 +56,13 @@ const nonInteractive = {
   prompt: (): Promise<string> => Promise.reject(new Error('prompt must not be called')),
   readStdin: (): Promise<string> => Promise.resolve(''),
 };
+
+/** Builds a complete agent.add request for a native CLI agent. */
+const addAgentRequest = (agentId: string, argvJson: string) => ({
+  schema: COMMAND_REQUEST_SCHEMA_ID,
+  command: 'agent.add' as const,
+  agent: createAgentResource({ agentId, argvJson }),
+});
 
 const collectIo = (): { errors: string[]; io: CliIo; output: string[] } => {
   const output: string[] = [];
@@ -711,10 +724,13 @@ describe('agent authoring', () => {
 
     const controller = new AbortController();
     const pending = runAgentTestCommand({
-      agentId: 'slow',
-      interactive: false,
       project: root,
-      readStdin: () => Promise.resolve(''),
+      request: {
+        schema: COMMAND_REQUEST_SCHEMA_ID,
+        command: 'agent.test',
+        agent_id: 'slow',
+        input: {},
+      },
       signal: controller.signal,
       workingDirectory: root,
     });
@@ -770,23 +786,19 @@ describe('agent authoring', () => {
     let addConflict: unknown;
     try {
       await runAgentAddCommand({
-        agentId: 'previewed',
-        argvJson,
         interactive: true,
         project: root,
         prompt: async (question) => {
           expect(question).toContain('- add agent previewed');
           await runAgentAddCommand({
-            agentId: 'racer',
-            argvJson,
             interactive: false,
             project: root,
-            readStdin: () => Promise.resolve(''),
+            request: addAgentRequest('racer', argvJson),
             workingDirectory: root,
           });
           return 'yes';
         },
-        readStdin: () => Promise.resolve(''),
+        request: addAgentRequest('previewed', argvJson),
         workingDirectory: root,
       });
     } catch (error: unknown) {
@@ -819,23 +831,24 @@ describe('agent authoring', () => {
     let removeConflict: unknown;
     try {
       await runAgentRemoveCommand({
-        agentId: 'racer',
-        detach: true,
         interactive: true,
         project: root,
         prompt: async (question) => {
           expect(question).toContain('- remove test racer-smoke');
           await runAgentAddCommand({
-            agentId: 'concurrent',
-            argvJson,
             interactive: false,
             project: root,
-            readStdin: () => Promise.resolve(''),
+            request: addAgentRequest('concurrent', argvJson),
             workingDirectory: root,
           });
           return 'yes';
         },
-        readStdin: () => Promise.resolve(''),
+        request: {
+          schema: COMMAND_REQUEST_SCHEMA_ID,
+          command: 'agent.remove',
+          agent_id: 'racer',
+          detach: true,
+        },
         workingDirectory: root,
       });
     } catch (error: unknown) {
@@ -1258,21 +1271,6 @@ describe('agent authoring', () => {
         ],
       },
     });
-  });
-
-  it('cancels a pending guided test prompt', async () => {
-    const root = await createProject();
-    const controller = new AbortController();
-    const pending = runAgentTestCommand({
-      interactive: true,
-      project: root,
-      prompt: () => new Promise<string>(() => undefined),
-      readStdin: () => Promise.resolve(''),
-      signal: controller.signal,
-      workingDirectory: root,
-    });
-    controller.abort();
-    await expect(pending).rejects.toMatchObject({ code: 'cancelled' });
   });
 
   it('removes command signal handlers after cancelling a guided test prompt', async () => {

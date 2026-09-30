@@ -1,5 +1,10 @@
 import { COMMAND_REQUEST_SCHEMA_ID } from '@attest/contracts';
-import { runAgentTestCommand } from '@attest/local/agent';
+import {
+  readAgentTestInput,
+  readCommandRequest,
+  runAgentTestCommand,
+  validateCommandRequest,
+} from '@attest/local/agent';
 import type { Command } from 'commander';
 
 import { AttestCliError } from '../../errors/index.js';
@@ -12,7 +17,11 @@ import {
   outputFormat,
   type CommonCliOptions,
 } from '../shared/cli-options.js';
-import type { RegisterAgentCommandsOptions } from './registration-support.js';
+import { promptRequired } from './agent-prompts.js';
+import {
+  assertNoAgentRequestOverlap,
+  type RegisterAgentCommandsOptions,
+} from './registration-support.js';
 
 type TestOptions = CommonCliOptions & {
   fromJson?: string;
@@ -53,22 +62,56 @@ const registerAgentTestCommand = (agent: Command, context: RegisterAgentCommands
         });
       }
 
+      assertNoAgentRequestOverlap(
+        { fromJson: options.fromJson },
+        {
+          'agent-id': agentId,
+          input: options.input,
+          'input-file': options.inputFile,
+          record: options.record,
+        },
+      );
+      if (options.fromJson === '-' && options.inputFile === '-') {
+        throw new AttestCliError(
+          'cli_usage',
+          'Command request and test input cannot share stdin.',
+          {
+            path: '--input-file',
+          },
+        );
+      }
+
       const controller = new AbortController();
       const cancel = (): void => controller.abort();
       process.once('SIGINT', cancel);
       process.once('SIGTERM', cancel);
       try {
+        const readRequest = {
+          readStdin: context.interaction.readStdin,
+          workingDirectory: context.workingDirectory,
+        };
+        const request =
+          options.fromJson === undefined
+            ? validateCommandRequest('agent.test', {
+                schema: COMMAND_REQUEST_SCHEMA_ID,
+                command: 'agent.test',
+                agent_id: await promptRequired(agentId, 'Agent id', '<agent-id>', {
+                  interactive: isInteractive(options, context.interaction, options.fromJson),
+                  prompt: context.interaction.prompt,
+                  signal: controller.signal,
+                }),
+                input: await readAgentTestInput({
+                  input: options.input,
+                  inputFile: options.inputFile,
+                  ...readRequest,
+                }),
+                ...(options.record === undefined ? {} : { record: options.record }),
+              })
+            : await readCommandRequest('agent.test', options.fromJson, readRequest);
         const result = await runAgentTestCommand({
-          agentId,
-          fromJson: options.fromJson,
-          input: options.input,
-          inputFile: options.inputFile,
-          interactive: isInteractive(options, context.interaction, options.fromJson),
           onProgress: (message) => context.io.error(message),
           project: options.project,
-          prompt: context.interaction.prompt,
-          readStdin: context.interaction.readStdin,
-          record: options.record,
+          request,
           signal: controller.signal,
           watch: options.watch,
           workingDirectory: context.workingDirectory,

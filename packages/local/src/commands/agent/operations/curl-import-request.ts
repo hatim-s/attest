@@ -5,13 +5,53 @@ import { schemaIssueDiagnostics } from '../../../internal/schema-issue-diagnosti
 import { parseSecretBindings } from '../../shared/secret-bindings.js';
 import { parseDuration, parseJsonValues } from '../authoring/index.js';
 import { CurlImportError, parseCurlCommand } from '../import/curl/index.js';
-import {
-  commaSeparated,
-  promptDefault,
-  promptOptional,
-  promptRequired,
-} from './command-support.js';
-import type { AgentImportCommandOptions, CurlImportRequest } from './types.js';
+import type { AgentRequest } from './types.js';
+
+type CurlImportRequest = Extract<AgentRequest<'agent.import'>, { source_type: 'curl' }>;
+
+/** cURL import flags, before they become one validated agent.import request. */
+type CurlImportFields = {
+  agentId: string;
+  attemptTimeout?: string;
+  bodyTimeout?: string;
+  connectTimeout?: string;
+  dryRun?: boolean;
+  errorPointer?: string;
+  expectedProjectHash?: string;
+  firstByteTimeout?: string;
+  headerEnv?: readonly string[];
+  idempotencyHeader?: string;
+  mapBody?: readonly string[];
+  name?: string;
+  pollFailure?: readonly string[];
+  pollJobIdPointer?: string;
+  pollMaximumInterval?: string;
+  pollMinimumInterval?: string;
+  pollStatusPointer?: string;
+  pollStatusUrlPointer?: string;
+  pollStatusUrlTemplate?: string;
+  pollSuccess?: readonly string[];
+  queryEnv?: readonly string[];
+  remoteJobIdPointer?: string;
+  requestCapBytes?: string;
+  responseCapBytes?: string;
+  responsePointer: string;
+  retries?: string;
+  retryDelay?: string;
+  source: string;
+  tracePointer?: string;
+  yes?: boolean;
+};
+
+/** Parser diagnostics a user can fix by re-entering `--map-body` values. */
+const CURL_MAPPING_DIAGNOSTICS: ReadonlySet<string> = new Set([
+  'invalid_form_target',
+  'invalid_input_pointer',
+  'invalid_target_pointer',
+  'missing_body',
+  'missing_target_pointer',
+  'raw_body_mapping',
+]);
 
 /** Maps header or query secret bindings to environment names; names match case-insensitively. */
 const parseEnvironmentBindings = (
@@ -55,7 +95,9 @@ const parseInteger = (value: string, path: string, options: { min: number }): nu
 };
 
 /** True when any polling flag was passed, which selects the polling transport. */
-const pollingFlagsPresent = (options: AgentImportCommandOptions): boolean =>
+const pollingFlagsPresent = (
+  options: Omit<CurlImportFields, 'agentId' | 'responsePointer' | 'source'>,
+): boolean =>
   [
     options.pollJobIdPointer,
     options.pollStatusPointer,
@@ -69,14 +111,8 @@ const pollingFlagsPresent = (options: AgentImportCommandOptions): boolean =>
   ].some((value) => value !== undefined);
 
 /** Normalizes cURL import flags through the same request schema as --from-json. */
-const createCurlImportRequest = (fields: {
-  agentId: string;
-  name?: string;
-  options: AgentImportCommandOptions;
-  responsePointer: string;
-  source: string;
-}): CurlImportRequest => {
-  const { options } = fields;
+const createCurlImportRequest = (fields: CurlImportFields): CurlImportRequest => {
+  const options = fields;
   const pollingSelected = pollingFlagsPresent(options);
   const successes =
     options.pollSuccess === undefined
@@ -221,151 +257,37 @@ const createCurlImportRequest = (fields: {
   return parsed.data;
 };
 
-/** Completes the human cURL happy path without retaining any captured credential literal. */
-const prepareGuidedCurlOptions = async (
-  options: AgentImportCommandOptions,
+/**
+ * Finds the first sensitive header or query value in a cURL source that has no environment
+ * binding yet, so a guided import can ask for one. Returns the name only; the captured value
+ * never leaves the parser.
+ */
+const findUnboundCurlCredential = (
   source: string,
-): Promise<AgentImportCommandOptions> => {
-  if (!options.interactive || options.prompt === undefined) return options;
-  const guided: AgentImportCommandOptions = {
-    ...options,
-    headerEnv: [...(options.headerEnv ?? [])],
-    queryEnv: [...(options.queryEnv ?? [])],
-  };
-  // Reparse after each discovered credential name; the literal value is never copied into a prompt.
-  for (let attempt = 0; attempt < 32; attempt += 1) {
-    try {
-      parseCurlCommand(source, {
-        headerSecrets: parseEnvironmentBindings(guided.headerEnv, '--header-env'),
-        querySecrets: parseEnvironmentBindings(guided.queryEnv, '--query-env'),
-      });
-      break;
-    } catch (error: unknown) {
-      if (!(error instanceof CurlImportError)) throw error;
-      const unsafe = error.diagnostics.find(
-        (diagnostic) =>
-          diagnostic.startsWith('unsafe_header:') || diagnostic.startsWith('unsafe_query:'),
-      );
-      if (unsafe === undefined) break;
-      const [kind, name] = unsafe.split(':') as [string, string];
-      const environment = await promptRequired(
-        undefined,
-        `${kind === 'unsafe_header' ? 'Header' : 'Query'} ${name} environment variable`,
-        kind === 'unsafe_header' ? '--header-env' : '--query-env',
-        true,
-        options.prompt,
-      );
-      const binding = `${name}=${environment}`;
-      if (kind === 'unsafe_header') guided.headerEnv = [...(guided.headerEnv ?? []), binding];
-      else guided.queryEnv = [...(guided.queryEnv ?? []), binding];
-    }
-  }
-  if (options.mapBody === undefined) {
-    guided.mapBody = commaSeparated(
-      await options.prompt('Body mappings TARGET_POINTER=INPUT_POINTER, comma-separated [none]: '),
-    );
-  }
-  guided.errorPointer = await promptOptional(
-    options.errorPointer,
-    'Error JSON Pointer',
-    true,
-    options.prompt,
-  );
-  guided.tracePointer = await promptOptional(
-    options.tracePointer,
-    'Trace JSON Pointer',
-    true,
-    options.prompt,
-  );
-  guided.remoteJobIdPointer = await promptOptional(
-    options.remoteJobIdPointer,
-    'Remote job id JSON Pointer',
-    true,
-    options.prompt,
-  );
-  const transport = pollingFlagsPresent(options)
-    ? 'polling'
-    : await promptDefault(undefined, 'Transport', 'direct', true, options.prompt);
-  if (!['direct', 'polling'].includes(transport)) {
-    throw new LocalError('cli_usage', 'Transport must be direct or polling.', {
-      path: 'transport',
+  bindings: Pick<CurlImportFields, 'headerEnv' | 'queryEnv'>,
+): { kind: 'header' | 'query'; name: string } | undefined => {
+  try {
+    parseCurlCommand(source, {
+      headerSecrets: parseEnvironmentBindings(bindings.headerEnv, '--header-env'),
+      querySecrets: parseEnvironmentBindings(bindings.queryEnv, '--query-env'),
     });
-  }
-  if (transport === 'polling') {
-    guided.pollJobIdPointer = await promptDefault(
-      options.pollJobIdPointer,
-      'Submission job id JSON Pointer',
-      '/job_id',
-      true,
-      options.prompt,
-    );
-    if (options.pollStatusUrlPointer === undefined && options.pollStatusUrlTemplate === undefined) {
-      const sourceChoice = await promptDefault(
-        undefined,
-        'Status URL source',
-        'pointer',
-        true,
-        options.prompt,
-      );
-      if (sourceChoice === 'pointer') {
-        guided.pollStatusUrlPointer = await promptDefault(
-          undefined,
-          'Submission status URL JSON Pointer',
-          '/status_url',
-          true,
-          options.prompt,
-        );
-      } else if (sourceChoice === 'template') {
-        guided.pollStatusUrlTemplate = await promptRequired(
-          undefined,
-          'Same-origin status URL template with {{job_id}}',
-          '--poll-status-url-template',
-          true,
-          options.prompt,
-        );
-      } else {
-        throw new LocalError('cli_usage', 'Status URL source must be pointer or template.', {
-          path: 'status-url-source',
-        });
-      }
+    return undefined;
+  } catch (error: unknown) {
+    if (!(error instanceof CurlImportError)) throw error;
+    for (const diagnostic of error.diagnostics) {
+      const [kind, name] = diagnostic.split(':');
+      if (name === undefined) continue;
+      if (kind === 'unsafe_header') return { kind: 'header', name };
+      if (kind === 'unsafe_query') return { kind: 'query', name };
     }
-    guided.pollStatusPointer = await promptDefault(
-      options.pollStatusPointer,
-      'Polling status JSON Pointer',
-      '/status',
-      true,
-      options.prompt,
-    );
-    guided.pollSuccess = options.pollSuccess ??
-      commaSeparated(
-        await options.prompt('Polling success JSON values, comma-separated ["done"]: '),
-      ) ?? ['"done"'];
-    guided.pollFailure = options.pollFailure ??
-      commaSeparated(
-        await options.prompt('Polling failure JSON values, comma-separated ["failed"]: '),
-      ) ?? ['"failed"'];
-    guided.pollMinimumInterval = await promptDefault(
-      options.pollMinimumInterval,
-      'Minimum polling interval',
-      '1s',
-      true,
-      options.prompt,
-    );
-    guided.pollMaximumInterval = await promptDefault(
-      options.pollMaximumInterval,
-      'Maximum polling interval',
-      '5s',
-      true,
-      options.prompt,
-    );
-    guided.idempotencyHeader = await promptOptional(
-      options.idempotencyHeader,
-      'Submission idempotency header',
-      true,
-      options.prompt,
-    );
+    return undefined;
   }
-  return guided;
 };
 
-export { createCurlImportRequest, prepareGuidedCurlOptions };
+export {
+  CURL_MAPPING_DIAGNOSTICS,
+  createCurlImportRequest,
+  findUnboundCurlCredential,
+  pollingFlagsPresent,
+  type CurlImportFields,
+};

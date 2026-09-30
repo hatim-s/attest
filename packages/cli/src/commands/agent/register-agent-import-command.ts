@@ -1,6 +1,13 @@
-import { runAgentImportCommand } from '@attest/local/agent';
+import {
+  createCurlImportRequest,
+  readCommandRequest,
+  readCurlDocument,
+  runAgentImportCommand,
+  validateCommandRequest,
+} from '@attest/local/agent';
 import { Option, type Command } from 'commander';
 
+import { AttestCliError } from '../../errors/index.js';
 import { renderCommandResult } from '../shared/command-result.js';
 import {
   addMutationOptions,
@@ -10,9 +17,16 @@ import {
   outputFormat,
   type MutationCliOptions,
 } from '../shared/cli-options.js';
+import { promptRequired } from './agent-prompts.js';
 import {
+  isCurlMappingError,
+  promptBodyMappings,
+  promptCurlImportFields,
+} from './guided-agent-import.js';
+import {
+  agentMutationFields,
+  assertNoAgentRequestOverlap,
   markAgentMutationHelp,
-  mutationArguments,
   type RegisterAgentCommandsOptions,
 } from './registration-support.js';
 
@@ -98,40 +112,121 @@ const registerAgentImportCommand = (
     .option('--retry-delay <duration>', 'fixed transport retry delay')
     .action(async (source: string | undefined, raw: ImportOptions, command: Command) => {
       const options = mergeCommonOptions(raw, command, context.program);
-      const result = await runAgentImportCommand({
-        ...mutationArguments(options, context),
-        agentId: options.as,
-        attemptTimeout: options.attemptTimeout,
-        bodyTimeout: options.bodyTimeout,
-        connectTimeout: options.connectTimeout,
-        errorPointer: options.errorPointer,
-        firstByteTimeout: options.firstByteTimeout,
-        headerEnv: options.headerEnv,
-        idempotencyHeader: options.idempotencyHeader,
-        interactive: isInteractive(options, context.interaction, options.fromJson),
-        mapBody: options.mapBody,
-        name: options.name,
-        pollFailure: options.pollFailure,
-        pollJobIdPointer: options.pollJobIdPointer,
-        pollMaximumInterval: options.pollMaximumInterval,
-        pollMinimumInterval: options.pollMinimumInterval,
-        pollStatusPointer: options.pollStatusPointer,
-        pollStatusUrlPointer: options.pollStatusUrlPointer,
-        pollStatusUrlTemplate: options.pollStatusUrlTemplate,
-        pollSuccess: options.pollSuccess,
-        prompt: context.interaction.prompt,
-        queryEnv: options.queryEnv,
-        requestCapBytes: options.requestCapBytes,
-        responseCapBytes: options.responseCapBytes,
-        responsePointer: options.responsePointer,
-        retries: options.retries,
-        retryDelay: options.retryDelay,
-        remoteJobIdPointer: options.remoteJobIdPointer,
+      const { as: agentId, type: sourceType, ...flags } = options;
+      assertNoAgentRequestOverlap(options, {
+        'agent-id': agentId,
+        'attempt-timeout': flags.attemptTimeout,
+        'body-timeout': flags.bodyTimeout,
+        'connect-timeout': flags.connectTimeout,
+        'error-pointer': flags.errorPointer,
+        'first-byte-timeout': flags.firstByteTimeout,
+        'header-env': flags.headerEnv,
+        'idempotency-header': flags.idempotencyHeader,
+        'map-body': flags.mapBody,
+        name: flags.name,
+        'poll-failure': flags.pollFailure,
+        'poll-job-id-pointer': flags.pollJobIdPointer,
+        'poll-maximum-interval': flags.pollMaximumInterval,
+        'poll-minimum-interval': flags.pollMinimumInterval,
+        'poll-status-pointer': flags.pollStatusPointer,
+        'poll-status-url-pointer': flags.pollStatusUrlPointer,
+        'poll-status-url-template': flags.pollStatusUrlTemplate,
+        'poll-success': flags.pollSuccess,
+        'query-env': flags.queryEnv,
+        'request-cap-bytes': flags.requestCapBytes,
+        'response-cap-bytes': flags.responseCapBytes,
+        'response-pointer': flags.responsePointer,
+        retries: flags.retries,
+        'retry-delay': flags.retryDelay,
+        'remote-job-id-pointer': flags.remoteJobIdPointer,
         source,
-        sourceType: options.type,
-        tracePointer: options.tracePointer,
+        'trace-pointer': flags.tracePointer,
+        type: sourceType,
       });
-      context.io.output(renderCommandResult('agent.import', outputFormat(options), result));
+      const interactive = isInteractive(options, context.interaction, options.fromJson);
+      const promptContext = { interactive, prompt: context.interaction.prompt };
+      const readRequest = {
+        readStdin: context.interaction.readStdin,
+        workingDirectory: context.workingDirectory,
+      };
+      const runImport = async (
+        request: Parameters<typeof runAgentImportCommand>[0]['request'],
+        sourceText?: string,
+      ) =>
+        runAgentImportCommand({
+          interactive,
+          project: options.project,
+          prompt: context.interaction.prompt,
+          readStdin: context.interaction.readStdin,
+          request,
+          sourceText,
+          workingDirectory: context.workingDirectory,
+        });
+      const output = (result: Awaited<ReturnType<typeof runAgentImportCommand>>): void =>
+        context.io.output(renderCommandResult('agent.import', outputFormat(options), result));
+
+      if (options.fromJson !== undefined) {
+        const request = await readCommandRequest('agent.import', options.fromJson, readRequest);
+        if (options.fromJson === '-' && request.source === '-') {
+          throw new AttestCliError(
+            'cli_usage',
+            'Command request and agent source cannot share stdin.',
+            {
+              path: '/source',
+              hint: 'Put either the request document or imported resource in a file.',
+            },
+          );
+        }
+        output(await runImport(request));
+        return;
+      }
+
+      const importSource = await promptRequired(
+        source,
+        'Agent import source',
+        '<path|url|->',
+        promptContext,
+      );
+      const importId = await promptRequired(agentId, 'Imported agent id', '--as', promptContext);
+      if ((sourceType ?? (/\.curl$/iu.test(importSource) ? 'curl' : 'json')) === 'json') {
+        const request = validateCommandRequest('agent.import', {
+          ...agentMutationFields('agent.import', options),
+          source: importSource,
+          source_type: 'json',
+          as: importId,
+          ...(flags.name === undefined ? {} : { name: flags.name }),
+        });
+        output(await runImport(request));
+        return;
+      }
+
+      const curlSource = await readCurlDocument(
+        importSource,
+        context.workingDirectory,
+        context.interaction.readStdin,
+      );
+      let fields = await promptCurlImportFields(
+        {
+          ...flags,
+          agentId: importId,
+          expectedProjectHash: flags.ifProjectHash,
+          source: importSource,
+        },
+        curlSource,
+        promptContext,
+      );
+      const MAX_IMPORT_ATTEMPTS = 3;
+      for (let attempt = 1; ; attempt += 1) {
+        try {
+          output(await runImport(createCurlImportRequest(fields), curlSource));
+          return;
+        } catch (error: unknown) {
+          if (!interactive || attempt === MAX_IMPORT_ATTEMPTS || !isCurlMappingError(error)) {
+            throw error;
+          }
+          fields = { ...fields, mapBody: await promptBodyMappings(promptContext) };
+        }
+      }
     });
 
   markAgentMutationHelp(

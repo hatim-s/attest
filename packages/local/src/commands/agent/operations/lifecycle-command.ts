@@ -3,56 +3,15 @@ import {
   candidateFromLoadedProject,
   loadCommandProject,
 } from '../../project/load-command-project.js';
-import { readCommandRequest } from '../../shared/command-request.js';
 import type { CommandResult, MutationResult } from '../../shared/command-result.js';
-import {
-  assertNoFromJsonFlags,
-  findAgent,
-  mutationResult,
-  promptRequired,
-} from './command-support.js';
-import type { AgentRemoveCommandOptions, AgentRenameCommandOptions } from './types.js';
+import { findAgent, mutationResult } from './agent-mutation.js';
+import type { AgentMutationCommandOptions, AgentRequest } from './types.js';
 
 /** Renames an agent and every test reference in one atomic transaction. */
 const runAgentRenameCommand = async (
-  options: AgentRenameCommandOptions,
+  options: AgentMutationCommandOptions<AgentRequest<'agent.rename'>>,
 ): Promise<CommandResult<'mutation', MutationResult>> => {
-  assertNoFromJsonFlags(options.fromJson, {
-    'agent-id': options.agentId,
-    'new-id': options.newId,
-    'dry-run': options.dryRun,
-    'if-project-hash': options.expectedProjectHash,
-    yes: options.yes,
-  });
-  const request =
-    options.fromJson === undefined
-      ? {
-          schema: 'attest.command-request' as const,
-          command: 'agent.rename' as const,
-          agent_id: await promptRequired(
-            options.agentId,
-            'Agent id',
-            '<agent-id>',
-            options.interactive,
-            options.prompt,
-          ),
-          new_id: await promptRequired(
-            options.newId,
-            'New agent id',
-            '<new-id>',
-            options.interactive,
-            options.prompt,
-          ),
-          ...(options.dryRun === undefined ? {} : { dry_run: options.dryRun }),
-          ...(options.expectedProjectHash === undefined
-            ? {}
-            : { if_project_hash: options.expectedProjectHash }),
-          ...(options.yes === undefined ? {} : { yes: options.yes }),
-        }
-      : await readCommandRequest('agent.rename', options.fromJson, {
-          readStdin: options.readStdin,
-          workingDirectory: options.workingDirectory,
-        });
+  const { request } = options;
   const loaded = await loadCommandProject({
     project: options.project,
     recover: request.dry_run !== true,
@@ -89,38 +48,9 @@ const runAgentRenameCommand = async (
 
 /** Removes an unreferenced agent, or explicitly cascades dependent tests with --detach. */
 const runAgentRemoveCommand = async (
-  options: AgentRemoveCommandOptions,
+  options: AgentMutationCommandOptions<AgentRequest<'agent.remove'>>,
 ): Promise<CommandResult<'mutation', MutationResult>> => {
-  assertNoFromJsonFlags(options.fromJson, {
-    'agent-id': options.agentId,
-    detach: options.detach,
-    'dry-run': options.dryRun,
-    'if-project-hash': options.expectedProjectHash,
-    yes: options.yes,
-  });
-  const request =
-    options.fromJson === undefined
-      ? {
-          schema: 'attest.command-request' as const,
-          command: 'agent.remove' as const,
-          agent_id: await promptRequired(
-            options.agentId,
-            'Agent id',
-            '<agent-id>',
-            options.interactive,
-            options.prompt,
-          ),
-          ...(options.detach === undefined ? {} : { detach: options.detach }),
-          ...(options.dryRun === undefined ? {} : { dry_run: options.dryRun }),
-          ...(options.expectedProjectHash === undefined
-            ? {}
-            : { if_project_hash: options.expectedProjectHash }),
-          ...(options.yes === undefined ? {} : { yes: options.yes }),
-        }
-      : await readCommandRequest('agent.remove', options.fromJson, {
-          readStdin: options.readStdin,
-          workingDirectory: options.workingDirectory,
-        });
+  const { request } = options;
   const loaded = await loadCommandProject({
     project: options.project,
     recover: request.dry_run !== true,

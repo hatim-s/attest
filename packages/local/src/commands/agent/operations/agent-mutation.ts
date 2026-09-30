@@ -2,119 +2,13 @@ import type { AgentResource, JsonValue, ProjectResources } from '@attest/contrac
 import { z } from 'zod';
 
 import { LocalError } from '../../../errors/index.js';
-import { loadCommandProject } from '../../project/load-command-project.js';
+import type { LoadedProject } from '../../../project/project-loader/index.js';
 import type { CommandResult, MutationResult } from '../../shared/command-result.js';
 import { executeProjectMutation } from '../../shared/project-mutation.js';
 import type { Prompt } from '../../shared/prompt.js';
 import type { AgentMutationRequest } from './types.js';
 
-const promptRequired = async (
-  value: string | undefined,
-  label: string,
-  path: string,
-  interactive: boolean,
-  prompt: Prompt | undefined,
-  signal?: AbortSignal,
-): Promise<string> => {
-  if (signal?.aborted === true) throw new LocalError('cancelled', 'Command cancelled.');
-  if (value?.trim()) return value.trim();
-  if (interactive && prompt !== undefined) {
-    const answer = (await promptWithSignal(prompt, `${label}: `, signal)).trim();
-    if (answer.length > 0) return answer;
-  }
-  throw new LocalError('cli_missing_input', `${label} is required.`, {
-    path,
-    hint: `Pass ${path} or a complete \`--from-json\` request.`,
-  });
-};
-
-/** Reads one optional guided value while preserving a documented default. */
-const promptDefault = async (
-  value: string | undefined,
-  question: string,
-  fallback: string,
-  interactive: boolean,
-  prompt: Prompt | undefined,
-): Promise<string> => {
-  if (value?.trim()) return value.trim();
-  if (!interactive || prompt === undefined) return fallback;
-  return (await prompt(`${question} [${fallback}]: `)).trim() || fallback;
-};
-
-/** Reads one optional guided value, returning undefined for an empty answer. */
-const promptOptional = async (
-  value: string | undefined,
-  question: string,
-  interactive: boolean,
-  prompt: Prompt | undefined,
-): Promise<string | undefined> => {
-  if (value?.trim()) return value.trim();
-  if (!interactive || prompt === undefined) return undefined;
-  const answer = (await prompt(`${question} [none]: `)).trim();
-  return answer.length === 0 ? undefined : answer;
-};
-
-const commaSeparated = (value: string): string[] | undefined => {
-  const entries = value
-    .split(',')
-    .map((entry) => entry.trim())
-    .filter((entry) => entry.length > 0);
-  return entries.length === 0 ? undefined : entries;
-};
-
-/** Makes every guided prompt terminate promptly when the command is cancelled. */
-const promptWithSignal = async (
-  prompt: Prompt,
-  question: string,
-  signal?: AbortSignal,
-): Promise<string> => {
-  if (signal === undefined) return prompt(question);
-  if (signal.aborted) throw new LocalError('cancelled', 'Command cancelled.');
-  return new Promise<string>((resolvePrompt, rejectPrompt) => {
-    let settled = false;
-    const finish = (action: () => void): void => {
-      if (settled) return;
-      settled = true;
-      signal.removeEventListener('abort', cancel);
-      action();
-    };
-    const cancel = (): void =>
-      finish(() => rejectPrompt(new LocalError('cancelled', 'Command cancelled.')));
-    signal.addEventListener('abort', cancel, { once: true });
-    // The signal closes the real readline question; the outer race also supports injected prompts.
-    void prompt(question, { signal }).then(
-      (answer) => finish(() => resolvePrompt(answer)),
-      (error: unknown) =>
-        finish(() =>
-          rejectPrompt(
-            signal.aborted || (error instanceof Error && error.name === 'AbortError')
-              ? new LocalError('cancelled', 'Command cancelled.')
-              : error instanceof Error
-                ? error
-                : new Error('Prompt failed with a non-error rejection.', { cause: error }),
-          ),
-        ),
-    );
-  });
-};
-
-const assertNoFromJsonFlags = (
-  fromJson: string | undefined,
-  fields: Readonly<Record<string, unknown>>,
-): void => {
-  if (fromJson === undefined) return;
-  const conflicts = Object.entries(fields)
-    .filter(([, value]) => value !== undefined && value !== false)
-    .map(([name]) => name)
-    .sort();
-  if (conflicts.length === 0) return;
-  throw new LocalError('cli_usage', 'Command request input overlaps with CLI values.', {
-    path: '--from-json',
-    hint: 'Pass command values in either the request document or flags, not both.',
-    details: { conflicting_fields: conflicts },
-  });
-};
-
+/** Finds one authored agent or reports the missing id with a way to list them. */
 const findAgent = (agents: readonly AgentResource[], id: string): AgentResource => {
   const agent = agents.find((candidate) => candidate.id === id);
   if (agent === undefined) {
@@ -137,7 +31,7 @@ type AgentMutationOptions = {
     requireExplicit: boolean;
     yes?: boolean;
   };
-  loaded: Awaited<ReturnType<typeof loadCommandProject>>;
+  loaded: LoadedProject;
   renames?: readonly { from: string; to: string; type: 'agent' }[];
   request: Pick<AgentMutationRequest, 'dry_run' | 'if_project_hash'>;
   warnings?: readonly string[];
@@ -220,12 +114,4 @@ const mutationResult = async ({
   };
 };
 
-export {
-  assertNoFromJsonFlags,
-  commaSeparated,
-  findAgent,
-  mutationResult,
-  promptDefault,
-  promptOptional,
-  promptRequired,
-};
+export { findAgent, mutationResult };
