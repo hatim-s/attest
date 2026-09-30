@@ -20,7 +20,6 @@
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "devDependencies": {
-    "fast-check": "^4.9.0",
     "vitest": "^3"
   },
   "files": [

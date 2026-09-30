@@ -1,1 +1,1 @@
-export { CaseSelectionError, selectCases, type SelectableCase } from './select-cases.js';
+export { CaseSelectionError, selectCases } from './select-cases.js';
