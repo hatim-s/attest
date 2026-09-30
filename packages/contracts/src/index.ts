@@ -33,7 +33,7 @@ export {
   parseTrace,
 } from './schema/parse.js';
 export type { ContractIssue, ContractWarning, ParseReport } from './schema/parse.js';
-export type { Result } from './cli/result.js';
+export type { Result } from './result.js';
 export {
   jsonlBridgeCancelSchema,
   jsonlBridgeCancelledSchema,

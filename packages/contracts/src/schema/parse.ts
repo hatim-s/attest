@@ -14,7 +14,7 @@ import {
   type MetricRequest,
   type MetricResult,
 } from '../metric/protocol.js';
-import { err, ok, type Result } from '../cli/result.js';
+import { err, ok, type Result } from '../result.js';
 import { traceSchema, type Trace } from '../trace/protocol.js';
 
 const AGENT_RESPONSE_FIELDS = new Set(['protocol', 'output', 'error', 'state', 'trace']);
