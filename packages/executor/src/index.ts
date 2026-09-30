@@ -37,7 +37,7 @@ export {
   type StreamInvokeOptions,
 } from './adapters/stream/index.js';
 export {
-  WebSocketAgentSession,
+  type WebSocketAgentSession,
   startWebSocketAgent,
   type WebSocketAgentResource,
   type WebSocketSessionOptions,
