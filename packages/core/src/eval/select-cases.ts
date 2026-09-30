@@ -97,9 +97,8 @@ const selectCases = <T extends SelectableCase>(
       { missing_ids: missing, resource_type: 'case' },
     );
   }
-  const matched = candidates.filter((candidate) =>
-    selectionFilters(selection).every((matches) => matches(candidate)),
-  );
+  const filters = selectionFilters(selection);
+  const matched = candidates.filter((candidate) => filters.every((matches) => matches(candidate)));
   if (matched.length === 0)
     throw new CaseSelectionError('no_matching_cases', 'No cases matched the eval selection.');
   let cases = matched;

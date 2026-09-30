@@ -13,10 +13,10 @@ import type {
 const SCORE_EQUALITY_EPSILON = 1e-9;
 
 /** One side of a case pair with its verdict computed once. */
-interface JudgedCase {
+type JudgedCase = {
   record: CaseRecord;
   verdict: CaseVerdict;
-}
+};
 
 const judgeCase = (record: CaseRecord | undefined): JudgedCase | undefined =>
   record === undefined ? undefined : { record, verdict: computeCaseVerdict(record) };
