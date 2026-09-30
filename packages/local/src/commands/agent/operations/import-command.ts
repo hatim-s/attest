@@ -180,18 +180,15 @@ const runAgentImportCommand = async (
   }
   const candidate = candidateFromLoaded(loaded);
   candidate.agents.push(agent);
-  return mutationResult(
-    'agent.import',
+  return mutationResult({
+    command: 'agent.import',
     loaded,
     candidate,
-    {
+    request: {
       dry_run: request?.dry_run ?? options.dryRun,
       if_project_hash: request?.if_project_hash ?? options.expectedProjectHash,
     },
-    options.publishObserver,
-    undefined,
-    undefined,
-    {
+    confirmation: {
       definitionPreview: importPreview,
       interactive: options.interactive,
       nextCommand: `attest agent test ${agent.id}`,
@@ -199,7 +196,7 @@ const runAgentImportCommand = async (
       requireExplicit: false,
       yes: request?.yes ?? options.yes,
     },
-  );
+  });
 };
 
 export { runAgentImportCommand };

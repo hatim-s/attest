@@ -16,10 +16,6 @@ type PrepareEvalProjectFileOptions = {
   message: string;
 };
 
-type EvalStoreBoundaryHooks = {
-  beforeCapture?: () => Promise<void> | void;
-};
-
 /** Maps an absolute output through its nearest existing ancestor without resolving the final file. */
 const normalizeAbsoluteProjectFile = async (
   resolvedRoot: string,
@@ -160,10 +156,7 @@ const retainCapturedStoreAlias = (
 };
 
 /** Atomically captures the validated .attest directory through SQLite open and migration. */
-const openEvalProjectStore = async (
-  projectRoot: string,
-  hooks: EvalStoreBoundaryHooks = {},
-): Promise<AttestStore> => {
+const openEvalProjectStore = async (projectRoot: string): Promise<AttestStore> => {
   const storePath = await prepareEvalProjectFile(projectRoot, '.attest/runs.db', {
     createDirectories: true,
     errorCode: 'run_failed',
@@ -179,7 +172,6 @@ const openEvalProjectStore = async (
   let store: AttestStore | undefined;
   let failure: unknown;
   try {
-    await hooks.beforeCapture?.();
     // Atomic rename converts the validated directory identity into the path SQLite actually opens.
     await rename(directory, capturedDirectory);
     moved = true;
@@ -216,9 +208,4 @@ const openEvalProjectStore = async (
   throw asError(failure);
 };
 
-export {
-  openEvalProjectStore,
-  prepareEvalProjectFile,
-  type EvalStoreBoundaryHooks,
-  type PrepareEvalProjectFileOptions,
-};
+export { openEvalProjectStore, prepareEvalProjectFile, type PrepareEvalProjectFileOptions };

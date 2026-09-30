@@ -18,7 +18,6 @@ import type { ResolvedNativeAgent } from './types.js';
 const readSecretReference = async (
   reference: SecretReference,
   projectRoot: string,
-  observer?: (path: string) => Promise<void>,
 ): Promise<string> => {
   if ('from_env' in reference) {
     const value = process.env[reference.from_env];
@@ -45,7 +44,6 @@ const readSecretReference = async (
     if (!metadata.isFile() || (metadata.mode & 0o077) !== 0) {
       throw new Error('secret file must be a private regular file');
     }
-    await observer?.(reference.from_file);
     const [resolvedPath, pathMetadata] = await Promise.all([realpath(candidate), lstat(candidate)]);
     if (
       !isProjectPath(projectRoot, resolvedPath) ||
@@ -105,12 +103,11 @@ const resolveProcessArgv = (argv: readonly string[], cwd: string): string[] =>
 const resolveProcessEnvironment = async (
   references: Readonly<Record<string, SecretReference>> | undefined,
   projectRoot: string,
-  observer: ((path: string) => Promise<void>) | undefined,
 ): Promise<{ env: Record<string, string>; secrets: string[] }> => {
   const env = createBaseEnvironment();
   const secrets: string[] = [];
   for (const [name, reference] of Object.entries(references ?? {})) {
-    const value = await readSecretReference(reference, projectRoot, observer);
+    const value = await readSecretReference(reference, projectRoot);
     env[name] = value;
     secrets.push(value);
   }
@@ -124,7 +121,6 @@ const resolveHttpSecrets = async (
     query?: Record<string, string | SecretReference>;
   }[],
   projectRoot: string,
-  observer: ((path: string) => Promise<void>) | undefined,
 ): Promise<{
   headers: Record<string, string>;
   query: Record<string, string>;
@@ -136,13 +132,13 @@ const resolveHttpSecrets = async (
   for (const request of requests) {
     for (const [name, value] of Object.entries(request.headers ?? {})) {
       const resolved =
-        typeof value === 'string' ? value : await readSecretReference(value, projectRoot, observer);
+        typeof value === 'string' ? value : await readSecretReference(value, projectRoot);
       headers[name] = resolved;
       if (typeof value !== 'string') secrets.push(resolved);
     }
     for (const [name, value] of Object.entries(request.query ?? {})) {
       const resolved =
-        typeof value === 'string' ? value : await readSecretReference(value, projectRoot, observer);
+        typeof value === 'string' ? value : await readSecretReference(value, projectRoot);
       query[name] = resolved;
       if (typeof value !== 'string') secrets.push(resolved);
     }
@@ -154,7 +150,6 @@ const resolveHttpSecrets = async (
 const resolveNativeAgent = async (
   agent: AgentResource,
   projectRoot: string,
-  observer?: (path: string) => Promise<void>,
 ): Promise<ResolvedNativeAgent> => {
   if (
     agent.transport.kind === 'native_cli' ||
@@ -162,11 +157,7 @@ const resolveNativeAgent = async (
     agent.transport.kind === 'jsonl_bridge'
   ) {
     const transport = agent.transport;
-    const resolvedEnvironment = await resolveProcessEnvironment(
-      transport.env,
-      projectRoot,
-      observer,
-    );
+    const resolvedEnvironment = await resolveProcessEnvironment(transport.env, projectRoot);
     if (transport.kind === 'native_cli' && transport.sandbox !== undefined) {
       for (const position of agent.redaction?.argv_positions ?? []) {
         const value = transport.argv[position];
@@ -225,11 +216,11 @@ const resolveNativeAgent = async (
         secrets: resolvedEnvironment.secrets,
       };
     }
-    const invoke = await resolveHttpSecrets([transport.invoke], projectRoot, observer);
+    const invoke = await resolveHttpSecrets([transport.invoke], projectRoot);
     const shutdown =
       transport.shutdown === undefined
         ? { headers: {}, query: {}, secrets: [] }
-        : await resolveHttpSecrets([transport.shutdown], projectRoot, observer);
+        : await resolveHttpSecrets([transport.shutdown], projectRoot);
     return {
       agent: {
         ...agent,
@@ -262,7 +253,7 @@ const resolveNativeAgent = async (
       if (typeof value === 'string') {
         headers[name] = value;
       } else {
-        const resolved = await readSecretReference(value, projectRoot, observer);
+        const resolved = await readSecretReference(value, projectRoot);
         headers[name] = resolved;
         secrets.push(resolved);
       }
@@ -273,7 +264,7 @@ const resolveNativeAgent = async (
     for (const [name, value] of Object.entries(request.query ?? {})) {
       if (typeof value === 'string') query[name] = value;
       else {
-        query[name] = await readSecretReference(value, projectRoot, observer);
+        query[name] = await readSecretReference(value, projectRoot);
         secrets.push(query[name]);
       }
       if (agent.redaction?.query?.includes(name)) secrets.push(query[name]);
@@ -305,11 +296,7 @@ const resolveNativeAgent = async (
   }
 
   if (agent.transport.kind === 'websocket') {
-    const resolved = await resolveHttpSecrets(
-      [{ headers: agent.transport.headers }],
-      projectRoot,
-      observer,
-    );
+    const resolved = await resolveHttpSecrets([{ headers: agent.transport.headers }], projectRoot);
     for (const [name, value] of Object.entries(resolved.headers)) {
       if (agent.redaction?.headers?.some((header) => header.toLowerCase() === name.toLowerCase())) {
         resolved.secrets.push(value);

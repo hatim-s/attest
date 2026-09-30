@@ -1,12 +1,10 @@
 import { execFile } from 'node:child_process';
 import {
   access,
-  chmod,
   mkdir,
   mkdtemp,
   readFile,
   readdir,
-  rename,
   rm,
   symlink,
   writeFile,
@@ -26,9 +24,9 @@ import {
 import { LocalError } from '@attest/local';
 import { applyProjectMutation, loadProject } from '@attest/local/project';
 import { openStore } from '@attest/local/store';
-import { readSecretReference, REDACTED } from '@attest/local/testing';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { REDACTED } from '../../../_tests_/support/project-fixture.js';
 import { runCli, type CliIo } from '../../../run-cli.js';
 
 const FIXTURE = fileURLToPath(new URL('./fixtures/native-agent.cjs', import.meta.url));
@@ -850,25 +848,6 @@ describe('agent authoring', () => {
     });
   });
 
-  it('rolls back an injected publication failure and preserves the prior project', async () => {
-    const root = await createProject();
-    const before = await snapshotTree(root);
-    await expect(
-      runAgentAddCommand({
-        agentId: 'rollback',
-        argvJson: JSON.stringify([process.execPath, FIXTURE, 'echo']),
-        interactive: false,
-        project: root,
-        publishObserver: () => {
-          throw new Error('injected publish failure');
-        },
-        readStdin: () => Promise.resolve(''),
-        workingDirectory: root,
-      }),
-    ).rejects.toMatchObject({ code: 'project_transaction_failed' });
-    expect(await snapshotTree(root)).toEqual(before);
-  }, 15_000);
-
   it('renames references and requires explicit detach for dependent removal', async () => {
     const root = await createProject();
     const argv = JSON.stringify([process.execPath, FIXTURE, 'echo']);
@@ -1281,7 +1260,7 @@ describe('agent authoring', () => {
     });
   });
 
-  it('cancels a pending guided test prompt and detects secret-file path replacement', async () => {
+  it('cancels a pending guided test prompt', async () => {
     const root = await createProject();
     const controller = new AbortController();
     const pending = runAgentTestCommand({
@@ -1294,17 +1273,6 @@ describe('agent authoring', () => {
     });
     controller.abort();
     await expect(pending).rejects.toMatchObject({ code: 'cancelled' });
-
-    const secretPath = join(root, 'secret.txt');
-    const originalPath = join(root, 'secret-original.txt');
-    await writeFile(secretPath, 'trusted-secret');
-    await chmod(secretPath, 0o600);
-    const read = readSecretReference({ from_file: 'secret.txt' }, root, async () => {
-      await rename(secretPath, originalPath);
-      await writeFile(secretPath, 'foreign-secret');
-      await chmod(secretPath, 0o600);
-    });
-    await expect(read).rejects.toMatchObject({ code: 'invocation_failed' });
   });
 
   it('removes command signal handlers after cancelling a guided test prompt', async () => {

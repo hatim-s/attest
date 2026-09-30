@@ -1,6 +1,5 @@
 import type { CommandRequest } from '@attest/contracts';
 
-import type { PublishObserver } from '../../../project/transaction/index.js';
 import type { ReadInput } from '../authoring/index.js';
 
 type Prompt = (question: string, options?: { signal?: AbortSignal }) => Promise<string>;
@@ -10,7 +9,6 @@ type MutationFields = {
   expectedProjectHash?: string;
   fromJson?: string;
   project?: string;
-  publishObserver?: PublishObserver;
   readStdin: ReadInput;
   workingDirectory: string;
   yes?: boolean;

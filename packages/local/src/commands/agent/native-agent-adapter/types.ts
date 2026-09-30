@@ -16,7 +16,6 @@ type NativeAgentTestOptions = {
   onExecution?: (execution: StoredCaseExecution) => Promise<void>;
   projectRoot: string;
   runId?: string;
-  secretFileObserver?: (path: string) => Promise<void>;
   signal?: AbortSignal;
 };
 

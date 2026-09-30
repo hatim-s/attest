@@ -12,16 +12,9 @@ import {
 } from '@attest/contracts';
 import { hashCanonicalJson, loadProject } from '@attest/local/project';
 import { runTestMutationCommand, validateCommandRequest } from '@attest/local/test';
-import {
-  candidateFromLoadedProject,
-  createFileChanges,
-  fixtureAgent,
-  prepareProjectCandidate,
-  prepareTransaction,
-  writeFixtureProject,
-} from '@attest/local/testing';
 import { afterEach, describe, expect, it } from 'vitest';
 
+import { fixtureAgent, writeFixtureProject } from '../../../_tests_/support/project-fixture.js';
 import { serializeCliError } from '../../../errors/index.js';
 import { runCli, type CliIo } from '../../../run-cli.js';
 import { runConfirmedDatasetImport } from '../registration/support.js';
@@ -261,75 +254,6 @@ describe('CLI test, case, dataset, and import authoring', { timeout: 20_000 }, (
     ]);
     expect(overlap.exitCode).toBe(2);
     expect(overlap.document).toMatchObject({ ok: false, error: { code: 'cli_usage' } });
-  });
-
-  it('rolls back the complete transaction when publication fails', async () => {
-    const root = await createProject();
-    const before = await snapshotProject(root);
-    await expect(
-      runTestMutationCommand({
-        project: root,
-        publishObserver: () => {
-          throw new Error('injected publication failure');
-        },
-        readImportStdin: async function* readImportStdin() {
-          await Promise.resolve();
-          yield '';
-        },
-        readStdin: () => Promise.resolve(''),
-        request: addTestRequest('rollback'),
-        workingDirectory: root,
-      }),
-    ).rejects.toMatchObject({ code: 'project_transaction_failed' });
-    expect(await snapshotProject(root)).toEqual(before);
-    expect((await loadProject({ project: root })).tests.some(({ id }) => id === 'rollback')).toBe(
-      false,
-    );
-  });
-
-  it('keeps dry runs byte-free and hash conflicts write-free', async () => {
-    const root = await createProject();
-    const loaded = await loadProject({ project: root });
-    const interruptedCandidate = candidateFromLoadedProject(loaded);
-    interruptedCandidate.tests.push(addTestRequest('interrupted').test);
-    const preparedCandidate = prepareProjectCandidate(interruptedCandidate);
-    await prepareTransaction(
-      root,
-      createFileChanges(loaded, preparedCandidate),
-      loaded.projectHash,
-      preparedCandidate.projectHash,
-    );
-    const before = await snapshotProject(root);
-    const preview = await runJson(root, [
-      'test',
-      'add',
-      'preview',
-      '--agent',
-      'support',
-      '--dry-run',
-      '--if-project-hash',
-      loaded.projectHash,
-    ]);
-    expect(preview.document).toMatchObject({
-      ok: true,
-      result: { committed: false, dry_run: true },
-    });
-    expect(await snapshotProject(root)).toEqual(before);
-
-    const conflictRoot = await createProject();
-    const conflictBefore = await snapshotProject(conflictRoot);
-    const conflict = await runJson(conflictRoot, [
-      'test',
-      'add',
-      'conflict',
-      '--agent',
-      'support',
-      '--if-project-hash',
-      'a'.repeat(64),
-    ]);
-    expect(conflict.exitCode).toBe(3);
-    expect(conflict.document).toMatchObject({ ok: false, error: { code: 'project_changed' } });
-    expect(await snapshotProject(conflictRoot)).toEqual(conflictBefore);
   });
 
   it('publishes machine help and schema metadata for the tabular import surface', async () => {

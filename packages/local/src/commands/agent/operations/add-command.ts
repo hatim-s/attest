@@ -409,15 +409,12 @@ const runAgentAddCommand = async (
   }
   const candidate = candidateFromLoaded(loaded);
   candidate.agents.push(request.agent);
-  return mutationResult(
-    'agent.add',
+  return mutationResult({
+    command: 'agent.add',
     loaded,
     candidate,
     request,
-    options.publishObserver,
-    undefined,
-    undefined,
-    {
+    confirmation: {
       definitionPreview:
         request.agent.transport.kind === 'websocket'
           ? redactAgentResource(request.agent)
@@ -428,7 +425,7 @@ const runAgentAddCommand = async (
       requireExplicit: false,
       yes: request.yes,
     },
-  );
+  });
 };
 
 export { runAgentAddCommand };

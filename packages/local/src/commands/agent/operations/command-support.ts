@@ -2,7 +2,6 @@ import type { AgentResource, JsonValue, ProjectResources } from '@attest/contrac
 import { z } from 'zod';
 
 import { LocalError } from '../../../errors/index.js';
-import type { PublishObserver } from '../../../project/transaction/index.js';
 import { loadCommandProject } from '../../project/load-command-project.js';
 import type { CommandResult, MutationResult } from '../../shared/command-result.js';
 import { executeProjectMutation } from '../../shared/project-mutation.js';
@@ -137,23 +136,33 @@ const findAgent = (agents: readonly AgentResource[], id: string): AgentResource 
   return agent;
 };
 
-const mutationResult = async (
-  command: string,
-  loaded: Awaited<ReturnType<typeof loadCommandProject>>,
-  candidate: ProjectResources,
-  request: Pick<AgentMutationRequest, 'dry_run' | 'if_project_hash'>,
-  publishObserver?: PublishObserver,
-  renames?: readonly { from: string; to: string; type: 'agent' }[],
-  warnings?: readonly string[],
-  confirmation?: {
+type AgentMutationOptions = {
+  candidate: ProjectResources;
+  command: string;
+  confirmation: {
     definitionPreview?: JsonValue;
     interactive: boolean;
     nextCommand?: string;
     prompt?: Prompt;
     requireExplicit: boolean;
     yes?: boolean;
-  },
-): Promise<CommandResult<'mutation', MutationResult>> => {
+  };
+  loaded: Awaited<ReturnType<typeof loadCommandProject>>;
+  renames?: readonly { from: string; to: string; type: 'agent' }[];
+  request: Pick<AgentMutationRequest, 'dry_run' | 'if_project_hash'>;
+  warnings?: readonly string[];
+};
+
+/** Previews, confirms, and publishes one agent mutation with the rendered semantic diff. */
+const mutationResult = async ({
+  candidate,
+  command,
+  confirmation,
+  loaded,
+  renames,
+  request,
+  warnings,
+}: AgentMutationOptions): Promise<CommandResult<'mutation', MutationResult>> => {
   const renderPreview = (preview: Awaited<ReturnType<typeof executeProjectMutation>>): string => {
     const operationLines = preview.diff.operations.map((operation) => {
       const renamed = operation.previous_id === undefined ? '' : ` from ${operation.previous_id}`;
@@ -169,7 +178,7 @@ const mutationResult = async (
       `${command} ${request.dry_run === true ? 'preview' : 'changes'}:`,
       ...(operationLines.length === 0 ? ['- no semantic changes'] : operationLines),
       ...preview.diff.warnings.map((warning) => `Warning: ${warning}`),
-      ...(confirmation?.definitionPreview === undefined
+      ...(confirmation.definitionPreview === undefined
         ? []
         : [`Redacted definition preview: ${JSON.stringify(confirmation.definitionPreview)}`]),
     ].join('\n');
@@ -183,18 +192,17 @@ const mutationResult = async (
       renames,
       warnings,
     },
-    publishObserver,
     confirm: async (preview) => {
-      if (confirmation?.yes === true) return;
+      if (confirmation.yes === true) return;
       const previewText = renderPreview(preview);
-      if (confirmation?.interactive === true && confirmation.prompt !== undefined) {
+      if (confirmation.interactive === true && confirmation.prompt !== undefined) {
         const answer = (
           await confirmation.prompt(`${previewText}\nApply these changes? [y/N]: `)
         ).trim();
         if (!/^y(?:es)?$/iu.test(answer)) {
           throw new LocalError('cancelled', 'Project mutation was not confirmed.');
         }
-      } else if (confirmation?.requireExplicit === true) {
+      } else if (confirmation.requireExplicit === true) {
         throw new LocalError('cli_usage', 'This destructive mutation requires confirmation.', {
           path: '--yes',
           hint: 'Review `--dry-run --output json`, then pass `--yes` to apply the exact cascade.',
@@ -212,10 +220,10 @@ const mutationResult = async (
       dry_run: request.dry_run === true,
       operations: result.diff.operations,
       warnings: result.diff.warnings,
-      ...(confirmation?.definitionPreview === undefined
+      ...(confirmation.definitionPreview === undefined
         ? {}
         : { import_preview: confirmation.definitionPreview }),
-      ...(request.dry_run === true || confirmation?.nextCommand === undefined
+      ...(request.dry_run === true || confirmation.nextCommand === undefined
         ? {}
         : { next_command: confirmation.nextCommand }),
     },

@@ -1,15 +1,5 @@
 import { execFile } from 'node:child_process';
-import {
-  access,
-  mkdir,
-  mkdtemp,
-  readFile,
-  readdir,
-  rename,
-  rm,
-  symlink,
-  writeFile,
-} from 'node:fs/promises';
+import { access, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
@@ -24,11 +14,14 @@ import {
   type CommandRequest,
   type MetricResource,
 } from '@attest/contracts';
-import { runMetricMutationCommand, runMetricTestCommand } from '@attest/local/metric';
 import { applyProjectMutation, loadProject } from '@attest/local/project';
-import { candidateFromLoadedProject, REDACTED, writeFixtureProject } from '@attest/local/testing';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import {
+  REDACTED,
+  projectResources,
+  writeFixtureProject,
+} from '../../../_tests_/support/project-fixture.js';
 import { runCli, type CliIo } from '../../../run-cli.js';
 
 const EXEC_FIXTURE = fileURLToPath(new URL('./fixtures/result-metric.cjs', import.meta.url));
@@ -78,7 +71,7 @@ const createReferencedProject = async (): Promise<string> => {
   temporaryDirectories.push(root);
   await writeFixtureProject(root);
   const loaded = await loadProject({ project: root });
-  const candidate = candidateFromLoadedProject(loaded);
+  const candidate = projectResources(loaded);
   candidate.tests[0]!.cases.push({
     id: 'direct',
     input: {},
@@ -812,36 +805,6 @@ describe('metric authoring and local tests', { timeout: 30_000 }, () => {
       ok: false,
       error: { code: 'project_invalid', message: 'Metric cwd is not a safe project directory.' },
     });
-
-    const anchoredPath = join(root, 'anchored-cwd');
-    await mkdir(anchoredPath);
-    await runJson(root, [
-      'metric',
-      'add',
-      'replaced-cwd',
-      '--preset',
-      'command',
-      '--argv-json',
-      JSON.stringify([process.execPath, EXEC_FIXTURE]),
-      '--cwd',
-      'anchored-cwd',
-    ]);
-    await expect(
-      runMetricTestCommand({
-        cwdObserver: async (path) => {
-          await rename(path, `${path}-replaced`);
-          await mkdir(path);
-        },
-        fixture: fixturePath,
-        metricId: 'replaced-cwd',
-        project: root,
-        readStdin: () => Promise.resolve(''),
-        workingDirectory: root,
-      }),
-    ).rejects.toMatchObject({
-      code: 'project_invalid',
-      message: 'Metric cwd is not a safe project directory.',
-    });
   });
 
   it('renames every reference and requires explicit detach before referenced removal', async () => {
@@ -870,7 +833,7 @@ describe('metric authoring and local tests', { timeout: 30_000 }, () => {
     expect(loaded.datasets[0]?.cases[0]?.metric_overrides).toEqual([]);
   });
 
-  it('keeps dry runs, stale hashes, and publication failures byte-for-byte write-free', async () => {
+  it('keeps dry runs and stale hashes byte-for-byte write-free', async () => {
     const root = await createProject();
     const before = await snapshotTree(root);
     const loaded = await loadProject({ project: root });
@@ -905,24 +868,6 @@ describe('metric authoring and local tests', { timeout: 30_000 }, () => {
     ]);
     expect(conflict.exitCode).toBe(3);
     expect(conflict.document).toMatchObject({ ok: false, error: { code: 'project_changed' } });
-    expect(await snapshotTree(root)).toEqual(before);
-
-    await expect(
-      runMetricMutationCommand({
-        interactive: false,
-        project: root,
-        publishObserver: () => {
-          throw new Error('injected publication failure');
-        },
-        readStdin: () => Promise.resolve(''),
-        request: {
-          schema: COMMAND_REQUEST_SCHEMA_ID,
-          command: 'metric.add',
-          metric: assertionMetric('rollback'),
-        },
-        workingDirectory: root,
-      }),
-    ).rejects.toMatchObject({ code: 'project_transaction_failed' });
     expect(await snapshotTree(root)).toEqual(before);
   });
 

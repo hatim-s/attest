@@ -1,26 +1,31 @@
-type CleanupFailure = {
-  error: unknown;
-};
-
 type CleanupStep = () => Promise<void>;
 
-/** Captures a thrown value without losing explicit undefined failures. */
-const captureCleanupFailure = (error: unknown): CleanupFailure => ({ error });
-
-/** Attempts every cleanup step while retaining the primary or first cleanup failure. */
-const runCleanupSteps = async (
-  initialFailure: CleanupFailure | undefined,
-  steps: readonly CleanupStep[],
-): Promise<CleanupFailure | undefined> => {
-  let failure = initialFailure;
+/**
+ * Attempts every cleanup step even after one fails, so a failed close never leaves copied data
+ * or an open descriptor behind, then throws the first cleanup failure.
+ */
+const runCleanupSteps = async (steps: readonly CleanupStep[]): Promise<void> => {
+  const failures: unknown[] = [];
   for (const step of steps) {
     try {
       await step();
     } catch (error: unknown) {
-      failure ??= captureCleanupFailure(error);
+      failures.push(error);
     }
   }
-  return failure;
+  if (failures.length > 0) throw failures[0];
 };
 
-export { captureCleanupFailure, runCleanupSteps, type CleanupFailure, type CleanupStep };
+/**
+ * Attempts every cleanup step after a primary failure and rethrows that primary failure. Cleanup
+ * failures are dropped because the primary failure explains why the operation stopped.
+ */
+const rethrowAfterCleanup = async (
+  failure: unknown,
+  steps: readonly CleanupStep[],
+): Promise<never> => {
+  await runCleanupSteps(steps).catch(() => undefined);
+  throw failure;
+};
+
+export { rethrowAfterCleanup, runCleanupSteps, type CleanupStep };

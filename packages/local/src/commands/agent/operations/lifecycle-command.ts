@@ -71,22 +71,20 @@ const runAgentRenameCommand = async (
   candidate.tests = candidate.tests.map((test) =>
     test.agent_id === current.id ? { ...test, agent_id: request.new_id } : test,
   );
-  return mutationResult(
-    'agent.rename',
+  return mutationResult({
+    command: 'agent.rename',
     loaded,
     candidate,
     request,
-    options.publishObserver,
-    [{ from: request.agent_id, to: request.new_id, type: 'agent' }],
-    undefined,
-    {
+    renames: [{ from: request.agent_id, to: request.new_id, type: 'agent' }],
+    confirmation: {
       interactive: options.interactive,
       nextCommand: `attest agent test ${request.new_id}`,
       prompt: options.prompt,
       requireExplicit: false,
       yes: request.yes,
     },
-  );
+  });
 };
 
 /** Removes an unreferenced agent, or explicitly cascades dependent tests with --detach. */
@@ -148,21 +146,19 @@ const runAgentRemoveCommand = async (
     dependentTests.length === 0
       ? []
       : [`Removed dependent tests: ${dependentTests.map(({ id }) => id).join(', ')}`];
-  return mutationResult(
-    'agent.remove',
+  return mutationResult({
+    command: 'agent.remove',
     loaded,
     candidate,
     request,
-    options.publishObserver,
-    undefined,
     warnings,
-    {
+    confirmation: {
       interactive: options.interactive,
       prompt: options.prompt,
       requireExplicit: dependentTests.length > 0,
       yes: request.yes,
     },
-  );
+  });
 };
 
 export { runAgentRemoveCommand, runAgentRenameCommand };

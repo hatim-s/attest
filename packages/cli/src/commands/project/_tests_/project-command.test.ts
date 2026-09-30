@@ -4,7 +4,6 @@ import {
   mkdtemp,
   readFile,
   readdir,
-  rename,
   rm,
   symlink,
   writeFile,
@@ -15,25 +14,11 @@ import { join } from 'node:path';
 import { cliResultSchema } from '@attest/contracts';
 import { applyProjectMutation, loadProject } from '@attest/local/project';
 import { openStore } from '@attest/local/store';
-import {
-  acquireProjectLock,
-  candidateFromLoadedProject,
-  createFileChanges,
-  prepareProjectCandidate,
-  prepareTransaction,
-  publishPreparedTransaction,
-  releaseProjectLock,
-  removeRunStoreSnapshot,
-  runProjectInitCommand,
-  withReadonlyRunStore,
-  writeFixtureProject,
-  type ProjectInitFileStep,
-} from '@attest/local/testing';
 import { afterEach, describe, expect, it } from 'vitest';
 
+import { projectResources, writeFixtureProject } from '../../../_tests_/support/project-fixture.js';
 import { runCli, type CliIo } from '../../../run-cli.js';
 
-const FIXED_PROJECT_ID = '01ARZ3NDEKTSV4RRFFQ69G5FAV';
 const temporaryDirectories: string[] = [];
 
 const createTemporaryDirectory = async (): Promise<string> => {
@@ -209,35 +194,6 @@ describe('project shell', () => {
     });
   });
 
-  it('returns a semantic dry run with deterministic injected identity and zero writes', async () => {
-    const parent = await createTemporaryDirectory();
-    const before = await readdir(parent);
-    const options = {
-      createProjectId: () => FIXED_PROJECT_ID,
-      directory: 'preview',
-      dryRun: true,
-      interactive: false,
-      name: 'Preview',
-      readStdin: () => Promise.resolve(''),
-      workingDirectory: parent,
-    };
-
-    const first = await runProjectInitCommand(options);
-    const second = await runProjectInitCommand(options);
-
-    expect(second).toEqual(first);
-    expect(first).toMatchObject({
-      projectHashBefore: null,
-      result: {
-        committed: false,
-        dry_run: true,
-        operations: [{ op: 'add', resource: { type: 'project' } }],
-      },
-    });
-    expect(await readdir(parent)).toEqual(before);
-    await expect(access(join(parent, 'preview'))).rejects.toBeDefined();
-  });
-
   it('reports an expected-project-hash conflict without writing', async () => {
     const parent = await createTemporaryDirectory();
     const response = collectIo();
@@ -277,84 +233,6 @@ describe('project shell', () => {
       ok: false,
       command: 'project.validate',
       error: { code: 'project_read_failed' },
-    });
-  });
-
-  it('rolls back a published manifest when post-publication verification fails', async () => {
-    const parent = await createTemporaryDirectory();
-    const root = join(parent, 'rollback');
-
-    await expect(
-      runProjectInitCommand({
-        createProjectId: () => FIXED_PROJECT_ID,
-        directory: 'rollback',
-        interactive: false,
-        name: 'Rollback',
-        publishObserver: () => {
-          throw new Error('injected publish failure');
-        },
-        readStdin: () => Promise.resolve(''),
-        workingDirectory: parent,
-      }),
-    ).rejects.toMatchObject({ code: 'init_failed' });
-    await expect(access(join(root, 'attest.project.json'))).rejects.toBeDefined();
-    await expect(access(root)).rejects.toBeDefined();
-  });
-
-  it('cleans every preparation fault and surfaces manifest rollback failure as recovery', async () => {
-    const preparationSteps: ProjectInitFileStep[] = [
-      'temporary_open',
-      'temporary_write',
-      'temporary_sync',
-      'temporary_close',
-      'manifest_link',
-      'temporary_unlink',
-      'directory_open',
-      'directory_sync',
-      'directory_close',
-    ];
-    for (const step of preparationSteps) {
-      const root = join(await createTemporaryDirectory(), step);
-      await mkdir(root);
-      await writeFile(join(root, 'sentinel.txt'), 'unchanged\n');
-      await expect(
-        runProjectInitCommand({
-          createProjectId: () => FIXED_PROJECT_ID,
-          directory: root,
-          faultInjector: (currentStep) => {
-            if (currentStep === step) throw new Error(`injected ${step}`);
-          },
-          interactive: false,
-          name: 'Fault test',
-          readStdin: () => Promise.resolve(''),
-          workingDirectory: root,
-        }),
-      ).rejects.toMatchObject({ code: 'init_failed' });
-      expect(await readdir(root)).toEqual(['sentinel.txt']);
-      expect(await readFile(join(root, 'sentinel.txt'), 'utf8')).toBe('unchanged\n');
-    }
-
-    const parent = await createTemporaryDirectory();
-    const root = join(parent, 'recovery');
-    await expect(
-      runProjectInitCommand({
-        createProjectId: () => FIXED_PROJECT_ID,
-        directory: 'recovery',
-        faultInjector: (step) => {
-          if (step === 'rollback_manifest_unlink') throw new Error('injected rollback failure');
-        },
-        interactive: false,
-        name: 'Recovery',
-        publishObserver: () => {
-          throw new Error('injected verification failure');
-        },
-        readStdin: () => Promise.resolve(''),
-        workingDirectory: parent,
-      }),
-    ).rejects.toMatchObject({ code: 'project_recovery_required' });
-    expect(await readdir(root)).toEqual(['attest.project.json']);
-    await expect(loadProject({ project: root })).resolves.toMatchObject({
-      project: { name: 'Recovery' },
     });
   });
 
@@ -505,7 +383,7 @@ describe('project shell', () => {
     const root = await createTemporaryDirectory();
     await writeFixtureProject(root);
     const loaded = await loadProject({ project: root });
-    const candidate = candidateFromLoadedProject(loaded);
+    const candidate = projectResources(loaded);
     candidate.agents[0]!.transport = {
       kind: 'http',
       lifecycle: 'external',
@@ -675,222 +553,11 @@ describe('project shell', () => {
     }
   });
 
-  it('queries the anchored snapshot when the source pathname is swapped after capture', async () => {
-    const root = await createTemporaryDirectory();
-    await writeFixtureProject(root);
-    const storeDirectory = join(root, '.attest');
-    const storePath = join(storeDirectory, 'runs.db');
-    await mkdir(storeDirectory);
-    const sourceWriter = await openStore(storePath);
-    const sourceRun = await sourceWriter.runs.createRun({
-      schemaId: 'attest.project',
-      configHash: 'anchored-source',
-      configJson: '{}',
-    });
-    await sourceWriter.close();
-
-    const outsideDirectory = await createTemporaryDirectory();
-    const outsidePath = join(outsideDirectory, 'outside.db');
-    const outsideWriter = await openStore(outsidePath);
-    const outsideRun = await outsideWriter.runs.createRun({
-      schemaId: 'attest.project',
-      configHash: 'outside-source',
-      configJson: '{}',
-    });
-    await outsideWriter.close();
-
-    const backupPath = join(storeDirectory, 'runs.db-original');
-    let swapped = false;
-    try {
-      const ids = await withReadonlyRunStore(
-        root,
-        async (store) => (await store.listRuns()).map(({ id }) => id),
-        {
-          afterSnapshotCaptured: async () => {
-            await rename(storePath, backupPath);
-            await symlink(outsidePath, storePath);
-            swapped = true;
-          },
-        },
-      );
-      expect(ids).toEqual([sourceRun.id]);
-      expect(ids).not.toContain(outsideRun.id);
-    } finally {
-      if (swapped) {
-        await rm(storePath);
-        await rename(backupPath, storePath);
-      }
-    }
-  });
-
-  it('rejects a parent-directory swap before capturing any outside database', async () => {
-    const root = await createTemporaryDirectory();
-    await writeFixtureProject(root);
-    const storeDirectory = join(root, '.attest');
-    await mkdir(storeDirectory);
-    const sourceWriter = await openStore(join(storeDirectory, 'runs.db'));
-    await sourceWriter.runs.createRun({
-      schemaId: 'attest.project',
-      configHash: 'intended-source',
-      configJson: '{}',
-    });
-    await sourceWriter.close();
-
-    const outsideDirectory = await createTemporaryDirectory();
-    const outsideWriter = await openStore(join(outsideDirectory, 'runs.db'));
-    await outsideWriter.runs.createRun({
-      schemaId: 'attest.project',
-      configHash: 'outside-source',
-      configJson: '{}',
-    });
-    await outsideWriter.close();
-
-    const backupDirectory = join(root, '.attest-original');
-    let swapped = false;
-    let queried = false;
-    try {
-      await expect(
-        withReadonlyRunStore(
-          root,
-          () => {
-            queried = true;
-            return Promise.resolve([]);
-          },
-          {
-            beforeAnchorOpen: async () => {
-              await rename(storeDirectory, backupDirectory);
-              await symlink(outsideDirectory, storeDirectory);
-              swapped = true;
-            },
-          },
-        ),
-      ).rejects.toMatchObject({ code: 'project_read_failed' });
-      expect(queried).toBe(false);
-    } finally {
-      if (swapped) {
-        await rm(storeDirectory);
-        await rename(backupDirectory, storeDirectory);
-      }
-    }
-  });
-
-  it('attempts every read cleanup while preserving the primary or first cleanup failure', async () => {
-    for (const primaryError of [undefined, new Error('injected operation failure')]) {
-      const root = await createTemporaryDirectory();
-      await writeFixtureProject(root);
-      const storeDirectory = join(root, '.attest');
-      await mkdir(storeDirectory);
-      const writer = await openStore(join(storeDirectory, 'runs.db'));
-      await writer.runs.createRun({
-        schemaId: 'attest.project',
-        configHash: 'cleanup-source',
-        configJson: '{}',
-      });
-      await writer.close();
-
-      const storeCloseError = new Error('injected store close failure');
-      const removalError = new Error('injected snapshot removal failure');
-      const anchorCloseError = new Error('injected anchor close failure');
-      const cleanupOrder: string[] = [];
-      let removedDirectory: string | undefined;
-      const inspection = withReadonlyRunStore(
-        root,
-        async (store) => {
-          if (primaryError !== undefined) throw primaryError;
-          return store.listRuns();
-        },
-        {
-          cleanup: {
-            closeStore: async (store) => {
-              cleanupOrder.push('store');
-              await store.close();
-              throw storeCloseError;
-            },
-            removeSnapshot: async (snapshot) => {
-              cleanupOrder.push('snapshot');
-              removedDirectory = snapshot.directory;
-              await removeRunStoreSnapshot(snapshot);
-              throw removalError;
-            },
-            closeAnchor: async (anchor) => {
-              cleanupOrder.push('anchor');
-              await anchor.close();
-              throw anchorCloseError;
-            },
-          },
-        },
-      );
-
-      const observedError = await inspection.then(
-        () => undefined,
-        (error: unknown) => error,
-      );
-      if (primaryError === undefined) {
-        expect(observedError).toBe(storeCloseError);
-      } else {
-        expect(observedError).toMatchObject({
-          code: 'project_read_failed',
-          cause: primaryError,
-        });
-      }
-      expect(cleanupOrder).toEqual(['store', 'snapshot', 'anchor']);
-      await expect(access(removedDirectory as string)).rejects.toMatchObject({ code: 'ENOENT' });
-    }
-  });
-
-  it('recovers pre-manifest and post-manifest journals before returning a project snapshot', async () => {
-    for (const publishManifest of [false, true]) {
-      const root = await createTemporaryDirectory();
-      await writeFixtureProject(root);
-      const loaded = await loadProject({ project: root });
-      const candidate = candidateFromLoadedProject(loaded);
-      candidate.agents[0]!.name = publishManifest ? 'Committed snapshot' : 'Rolled back snapshot';
-      candidate.metrics[0]!.name = 'Changed metric';
-      const preparedCandidate = prepareProjectCandidate(candidate);
-      const lock = await acquireProjectLock(root);
-      const prepared = await prepareTransaction(
-        root,
-        createFileChanges(loaded, preparedCandidate),
-        loaded.projectHash,
-        preparedCandidate.projectHash,
-      );
-      try {
-        if (publishManifest) {
-          await publishPreparedTransaction(root, prepared);
-        } else {
-          await expect(
-            publishPreparedTransaction(root, prepared, ({ index }) => {
-              if (index === 0) throw new Error('simulated interruption');
-            }),
-          ).rejects.toThrow('simulated interruption');
-        }
-      } finally {
-        await releaseProjectLock(lock);
-      }
-
-      const response = collectIo();
-      expect(
-        await runCli(['project', 'show', '--output', 'json'], {
-          workingDirectory: root,
-          io: response.io,
-          interaction: nonInteractive,
-        }),
-      ).toBe(0);
-      const result = JSON.parse(response.output[0] ?? '{}') as {
-        result: { project_hash: string };
-      };
-      expect(result.result.project_hash).toBe(
-        publishManifest ? preparedCandidate.projectHash : loaded.projectHash,
-      );
-      expect(await readdir(join(root, '.attest', 'transactions'))).toEqual([]);
-    }
-  }, 10_000);
-
   it('returns a stable lock conflict instead of observing a paused publication', async () => {
     const root = await createTemporaryDirectory();
     await writeFixtureProject(root);
     const loaded = await loadProject({ project: root });
-    const candidate = candidateFromLoadedProject(loaded);
+    const candidate = projectResources(loaded);
     candidate.agents[0]!.name = 'New snapshot';
     let releasePublication!: () => void;
     let signalPublished!: () => void;

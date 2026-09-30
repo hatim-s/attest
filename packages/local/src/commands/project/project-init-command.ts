@@ -1,4 +1,4 @@
-import { randomBytes, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { lstat, link, mkdir, open, readFile, realpath, rmdir, unlink } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
 
@@ -9,6 +9,7 @@ import {
   type CommandRequest,
   type ProjectResources,
 } from '@attest/contracts';
+import { ulid } from 'ulid';
 
 import { errnoCode } from '../../internal/errno-code.js';
 import { LocalError } from '../../errors/index.js';
@@ -17,51 +18,20 @@ import { loadProject } from '../../project/project-loader/index.js';
 import { prepareProjectCandidate } from '../../project/transaction/index.js';
 import type { CommandResult, ProjectInitResult } from '../shared/command-result.js';
 
-const ULID_ALPHABET = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
-
 type ProjectInitRequest = Extract<CommandRequest, { command: 'project.init' }>;
 
-type ProjectInitFileStep =
-  | 'directory_close'
-  | 'directory_open'
-  | 'directory_sync'
-  | 'manifest_link'
-  | 'rollback_manifest_unlink'
-  | 'temporary_close'
-  | 'temporary_open'
-  | 'temporary_sync'
-  | 'temporary_unlink'
-  | 'temporary_write';
-
 type ProjectInitCommandOptions = {
-  createProjectId?: () => string;
   directory?: string;
   dryRun?: boolean;
   expectedProjectHash?: string;
-  faultInjector?: (step: ProjectInitFileStep) => Promise<void> | void;
   fromJson?: string;
   interactive: boolean;
   name?: string;
   prompt?: (question: string) => Promise<string>;
   projectDirectory?: string;
-  publishObserver?: () => Promise<void> | void;
   readStdin: () => Promise<string>;
   workingDirectory: string;
   yes?: boolean;
-};
-
-/** Generates a standards-compliant time-sortable identity without adding a runtime package. */
-const createProjectId = (): string => {
-  const bytes = Buffer.alloc(16);
-  bytes.writeUIntBE(Date.now(), 0, 6);
-  randomBytes(10).copy(bytes, 6);
-  let value = BigInt(`0x${bytes.toString('hex')}`);
-  let encoded = '';
-  for (let index = 0; index < 26; index += 1) {
-    encoded = `${ULID_ALPHABET[Number(value & 31n)]}${encoded}`;
-    value >>= 5n;
-  }
-  return encoded;
 };
 
 const requestDiagnostics = (
@@ -217,13 +187,6 @@ const emptyProject = (projectId: string, name: string): ProjectResources => ({
   tests: [],
 });
 
-const injectFileFault = async (
-  faultInjector: ProjectInitCommandOptions['faultInjector'],
-  step: ProjectInitFileStep,
-): Promise<void> => {
-  await faultInjector?.(step);
-};
-
 /** Fsyncs a directory entry after manifest publication or rollback. */
 const syncDirectory = async (path: string): Promise<void> => {
   const handle = await open(path, 'r');
@@ -235,11 +198,7 @@ const syncDirectory = async (path: string): Promise<void> => {
 };
 
 /** Publishes the empty-project manifest as one atomic, no-overwrite filesystem commit. */
-const publishProjectManifest = async (
-  root: string,
-  contents: string,
-  faultInjector?: ProjectInitCommandOptions['faultInjector'],
-): Promise<void> => {
+const publishProjectManifest = async (root: string, contents: string): Promise<void> => {
   const manifestPath = join(root, 'attest.project.json');
   const temporaryPath = join(root, `.attest-project-${randomUUID()}.tmp`);
   let temporaryHandle;
@@ -247,28 +206,19 @@ const publishProjectManifest = async (
   let temporaryExists = false;
   let manifestPublished = false;
   try {
-    await injectFileFault(faultInjector, 'temporary_open');
     temporaryHandle = await open(temporaryPath, 'wx', 0o644);
     temporaryExists = true;
-    await injectFileFault(faultInjector, 'temporary_write');
     await temporaryHandle.writeFile(contents, 'utf8');
-    await injectFileFault(faultInjector, 'temporary_sync');
     await temporaryHandle.sync();
-    await injectFileFault(faultInjector, 'temporary_close');
     await temporaryHandle.close();
     temporaryHandle = undefined;
     // Hard-link publication fails rather than replacing a manifest created by a racing process.
-    await injectFileFault(faultInjector, 'manifest_link');
     await link(temporaryPath, manifestPath);
     manifestPublished = true;
-    await injectFileFault(faultInjector, 'temporary_unlink');
     await unlink(temporaryPath);
     temporaryExists = false;
-    await injectFileFault(faultInjector, 'directory_open');
     directoryHandle = await open(root, 'r');
-    await injectFileFault(faultInjector, 'directory_sync');
     await directoryHandle.sync();
-    await injectFileFault(faultInjector, 'directory_close');
     await directoryHandle.close();
     directoryHandle = undefined;
   } catch (error: unknown) {
@@ -284,7 +234,6 @@ const publishProjectManifest = async (
     }
     if (manifestPublished) {
       try {
-        await injectFileFault(faultInjector, 'rollback_manifest_unlink');
         await unlink(manifestPath);
         await syncDirectory(root);
       } catch (rollbackError: unknown) {
@@ -314,11 +263,7 @@ const publishProjectManifest = async (
 };
 
 /** Removes only the exact manifest published by this initialization attempt. */
-const rollbackPublishedManifest = async (
-  root: string,
-  expectedContents: string,
-  faultInjector?: ProjectInitCommandOptions['faultInjector'],
-): Promise<void> => {
+const rollbackPublishedManifest = async (root: string, expectedContents: string): Promise<void> => {
   const manifestPath = join(root, 'attest.project.json');
   try {
     if ((await readFile(manifestPath, 'utf8')) !== expectedContents) {
@@ -328,7 +273,6 @@ const rollbackPublishedManifest = async (
         { path: manifestPath },
       );
     }
-    await injectFileFault(faultInjector, 'rollback_manifest_unlink');
     await unlink(manifestPath);
     await syncDirectory(root);
   } catch (error: unknown) {
@@ -384,9 +328,7 @@ const runProjectInitCommand = async (
     await assertUninitialized(inspected.root);
   }
 
-  const prepared = prepareProjectCandidate(
-    emptyProject((options.createProjectId ?? createProjectId)(), name),
-  );
+  const prepared = prepareProjectCandidate(emptyProject(ulid(), name));
   const manifest = prepared.files.get('attest.project.json');
   if (manifest === undefined) {
     throw new LocalError('internal_error', 'The project candidate omitted its manifest.');
@@ -427,9 +369,8 @@ const runProjectInitCommand = async (
       createdDirectory = true;
     }
     await assertUninitialized(inspected.root);
-    await publishProjectManifest(inspected.root, manifest.contents, options.faultInjector);
+    await publishProjectManifest(inspected.root, manifest.contents);
     published = true;
-    await options.publishObserver?.();
     const loaded = await loadProject({ project: inspected.root });
     if (loaded.projectHash !== prepared.projectHash) {
       throw new LocalError('init_failed', 'Published project verification failed.', {
@@ -439,7 +380,7 @@ const runProjectInitCommand = async (
   } catch (error: unknown) {
     if (published) {
       try {
-        await rollbackPublishedManifest(inspected.root, manifest.contents, options.faultInjector);
+        await rollbackPublishedManifest(inspected.root, manifest.contents);
       } catch (rollbackError: unknown) {
         throw new LocalError(
           'project_recovery_required',
@@ -486,9 +427,4 @@ const runProjectInitCommand = async (
   };
 };
 
-export {
-  createProjectId,
-  runProjectInitCommand,
-  type ProjectInitCommandOptions,
-  type ProjectInitFileStep,
-};
+export { runProjectInitCommand, type ProjectInitCommandOptions };

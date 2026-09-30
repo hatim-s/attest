@@ -11,10 +11,7 @@ import type { ImportCollisionContext, TabularImportResult } from '@attest/core';
 
 import { LocalError } from '../../errors/index.js';
 import { loadProject, type LoadedProject } from '../../project/project-loader/index.js';
-import {
-  type ProjectMutationRequest,
-  type PublishObserver,
-} from '../../project/transaction/index.js';
+import type { ProjectMutationRequest } from '../../project/transaction/index.js';
 import type {
   CommandResult,
   MutationResult,
@@ -51,9 +48,7 @@ type TestAuthoringCommand = Extract<
 >;
 
 type TestMutationCommandOptions = {
-  clock?: () => Date;
   project?: string;
-  publishObserver?: PublishObserver;
   preparedImportSource?: Uint8Array;
   readImportStdin: () => AsyncIterable<string | Uint8Array>;
   readStdin: () => Promise<string>;
@@ -326,7 +321,7 @@ const buildMutation = async (
             source_type: imported.format,
             mapping: request.import.mapping ?? [],
             ...(request.import.key === undefined ? {} : { key_field: request.import.key }),
-            imported_at: (options.clock ?? (() => new Date()))().toISOString(),
+            imported_at: new Date().toISOString(),
             source_content_hash: imported.sourceHash,
             counts: imported.counts,
           },
@@ -424,7 +419,6 @@ const runTestMutationCommand = async (
       renames: built.renames,
       warnings: built.warnings?.map(({ message }) => message),
     },
-    publishObserver: options.publishObserver,
   });
   const dryRun = options.request.dry_run === true;
   return {

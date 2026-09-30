@@ -14,10 +14,7 @@ import { evaluateMetrics, type MetricContext, type MetricEvaluation } from '@att
 import { LocalError } from '../../errors/index.js';
 import { loadProject, type LoadedProject } from '../../project/project-loader/index.js';
 import { isProjectPath } from '../../project/project-path.js';
-import {
-  type PublishObserver,
-  type SemanticProjectOperation,
-} from '../../project/transaction/index.js';
+import type { SemanticProjectOperation } from '../../project/transaction/index.js';
 import type { CommandResult, MetricTestResult, MutationResult } from '../shared/command-result.js';
 import { executeProjectMutation } from '../shared/project-mutation.js';
 import {
@@ -43,7 +40,6 @@ type MetricMutationCommandOptions = {
   interactive: boolean;
   project?: string;
   prompt?: Prompt;
-  publishObserver?: PublishObserver;
   readStdin: () => Promise<string>;
   request: MetricAuthoringRequest;
   workingDirectory: string;
@@ -56,7 +52,6 @@ type MetricReadCommandOptions = {
 };
 
 type MetricTestCommandOptions = MetricReadCommandOptions & {
-  cwdObserver?: (path: string) => Promise<void>;
   fixture: string;
   readStdin: () => Promise<string>;
   signal?: AbortSignal;
@@ -254,7 +249,6 @@ const runMetricMutationCommand = async (
   const mutation = await executeProjectMutation({
     dryRun: options.request.dry_run === true,
     mutation: mutationOptions,
-    publishObserver: options.publishObserver,
     confirm: async (preview) => {
       if (options.request.yes === true) return;
       if (options.interactive && options.prompt !== undefined) {
@@ -443,7 +437,6 @@ const runMetricTestCommand = async (
   let evaluation: MetricEvaluation | undefined;
   try {
     if (execDirectory !== undefined) {
-      await options.cwdObserver?.(execDirectory.path);
       await assertMetricDirectoryIdentity(execDirectory);
     }
     [evaluation] = await evaluateMetrics([definition], context, {

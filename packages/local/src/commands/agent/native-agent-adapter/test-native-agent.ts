@@ -129,11 +129,7 @@ const testNativeAgentConnection = async (
 ): Promise<NativeAgentConnectionResult> => {
   assertSupportedProbePolicy(options.agent);
   options.onProgress?.(`Testing agent ${options.agent.id}...`);
-  const resolved = await resolveNativeAgent(
-    options.agent,
-    options.projectRoot,
-    options.secretFileObserver,
-  );
+  const resolved = await resolveNativeAgent(options.agent, options.projectRoot);
   const request: AgentRequest = {
     protocol: AGENT_PROTOCOL,
     run_id: options.runId ?? CONNECTION_TEST_RUN_ID,
