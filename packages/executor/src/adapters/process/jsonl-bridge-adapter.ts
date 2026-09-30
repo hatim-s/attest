@@ -3,6 +3,7 @@ import { StringDecoder } from 'node:string_decoder';
 import {
   jsonlBridgeOutputSchema,
   parseAgentResponse,
+  type JsonlBridgeOutput,
   type AgentRequest,
   type AgentResource,
 } from '@attest/contracts';
@@ -18,6 +19,7 @@ import {
   DEFAULT_TOTAL_EVIDENCE_BYTES,
 } from '../../internal/agent-defaults.js';
 import { correlationId } from '../../internal/correlation-id.js';
+import { LineSplitter, type SplitLines } from '../../internal/line-splitter.js';
 import { startTimer } from '../../internal/elapsed.js';
 import { createSerialQueue } from '../../internal/serial-queue.js';
 import { createRawExcerpt } from '../../internal/raw-excerpt.js';
@@ -51,6 +53,11 @@ type PendingInvocation = {
   timeoutTimer: NodeJS.Timeout;
 };
 
+type ParsedOutput = { output: JsonlBridgeOutput; raw: unknown };
+
+const capError = (message: string): AgentInvocationError =>
+  new AgentInvocationError('output_cap_exceeded', message);
+
 /** Reports a request that attest stopped, either on caller cancellation or on its deadline. */
 const cancellationError = (code: CancellationCode, cause?: unknown): AgentInvocationError =>
   new AgentInvocationError(
@@ -64,7 +71,7 @@ class JsonlBridgeSession {
   private readonly pending = new Map<string, PendingInvocation>();
   private readonly decoder = new StringDecoder('utf8');
   private readonly secrets: readonly string[];
-  private buffer = '';
+  private readonly lines: LineSplitter;
   private closed = false;
   private closePromise?: Promise<void>;
   private eventCount = 0;
@@ -79,6 +86,7 @@ class JsonlBridgeSession {
     private readonly options: JsonlBridgeSessionOptions,
   ) {
     this.secrets = options.secrets ?? [];
+    this.lines = new LineSplitter(agent.limits?.event_bytes ?? DEFAULT_EVENT_BYTES);
     process.stdout.on('data', (chunk: Buffer) => this.consume(chunk));
     process.stdout.once('end', () => this.consumeEnd());
     void process.exit.then(({ code, signal }) => {
@@ -192,93 +200,74 @@ class JsonlBridgeSession {
 
   private consume(chunk: Buffer): void {
     if (this.closed) return;
-    this.buffer += this.decoder.write(chunk);
-    const maximumLineBytes = this.agent.limits?.event_bytes ?? DEFAULT_EVENT_BYTES;
-    if (Buffer.byteLength(this.buffer) > maximumLineBytes && !this.buffer.includes('\n')) {
-      this.failSession(
-        new AgentInvocationError(
-          'output_cap_exceeded',
-          'JSONL bridge line exceeds its event byte cap.',
-        ),
-      );
-      return;
-    }
-    for (;;) {
-      const newline = this.buffer.indexOf('\n');
-      if (newline < 0) break;
-      const line = this.buffer.slice(0, newline).replace(/\r$/u, '');
-      this.buffer = this.buffer.slice(newline + 1);
-      if (line.trim().length === 0) continue;
-      this.consumeLine(line);
-      if (this.closed) return;
-    }
+    this.consumeLines(this.lines.push(this.decoder.write(chunk)));
   }
 
   private consumeEnd(): void {
     if (this.closed) return;
-    this.buffer += this.decoder.end();
-    if (this.buffer.trim().length > 0) this.consumeLine(this.buffer.replace(/\r$/u, ''));
-    this.buffer = '';
+    this.consumeLines(this.lines.push(this.decoder.end()));
+    if (!this.closed) this.consumeLines(this.lines.end());
   }
 
-  private consumeLine(line: string): void {
-    const bytes = Buffer.byteLength(line);
+  private consumeLines({ lines, overflow }: SplitLines): void {
+    for (const line of lines) {
+      if (line.trim().length > 0) this.consumeLine(line);
+      if (this.closed) return;
+    }
+    if (overflow) {
+      this.failSession(capError('JSONL bridge line exceeds its event byte cap.'));
+    }
+  }
+
+  /** Counts one output line against the session caps; returns the cap it broke, if any. */
+  private checkCaps(line: string): AgentInvocationError | undefined {
     this.eventCount += 1;
-    this.totalEvidenceBytes += bytes;
-    if (bytes > (this.agent.limits?.event_bytes ?? DEFAULT_EVENT_BYTES)) {
-      this.failSession(
-        new AgentInvocationError(
-          'output_cap_exceeded',
-          'JSONL bridge line exceeds its event byte cap.',
-        ),
-      );
-      return;
-    }
+    this.totalEvidenceBytes += Buffer.byteLength(line);
     if (this.eventCount > (this.agent.limits?.event_count ?? DEFAULT_EVENT_COUNT)) {
-      this.failSession(
-        new AgentInvocationError(
-          'output_cap_exceeded',
-          'JSONL bridge exceeds its event count cap.',
-        ),
-      );
-      return;
+      return capError('JSONL bridge exceeds its event count cap.');
     }
-    if (
-      this.totalEvidenceBytes >
-      (this.agent.limits?.total_evidence_bytes ?? DEFAULT_TOTAL_EVIDENCE_BYTES)
-    ) {
-      this.failSession(
-        new AgentInvocationError(
-          'output_cap_exceeded',
-          'JSONL bridge exceeds its aggregate evidence cap.',
-        ),
-      );
-      return;
+    const totalCap = this.agent.limits?.total_evidence_bytes ?? DEFAULT_TOTAL_EVIDENCE_BYTES;
+    if (this.totalEvidenceBytes > totalCap) {
+      return capError('JSONL bridge exceeds its aggregate evidence cap.');
     }
+    return undefined;
+  }
+
+  /** Parses one line into a bridge output envelope, or the protocol error that ends the session. */
+  private parseOutput(line: string): ParsedOutput | AgentInvocationError {
     let raw: unknown;
     try {
       raw = JSON.parse(line) as unknown;
     } catch (error: unknown) {
-      this.failSession(
-        new AgentInvocationError(
-          'invalid_envelope',
-          'JSONL bridge stdout contains non-JSON data.',
-          { cause: error },
-        ),
+      return new AgentInvocationError(
+        'invalid_envelope',
+        'JSONL bridge stdout contains non-JSON data.',
+        { cause: error },
       );
-      return;
     }
     const parsed = jsonlBridgeOutputSchema.safeParse(raw);
     if (!parsed.success) {
-      this.failSession(
-        new AgentInvocationError(
-          'invalid_envelope',
-          'JSONL bridge emitted an invalid output envelope.',
-        ),
+      return new AgentInvocationError(
+        'invalid_envelope',
+        'JSONL bridge emitted an invalid output envelope.',
       );
+    }
+    return { output: parsed.data, raw };
+  }
+
+  private consumeLine(line: string): void {
+    const capFailure = this.checkCaps(line);
+    if (capFailure !== undefined) {
+      this.failSession(capFailure);
       return;
     }
-    const pending = this.pending.get(parsed.data.request_id);
+    const parsed = this.parseOutput(line);
+    if (parsed instanceof AgentInvocationError) {
+      this.failSession(parsed);
+      return;
+    }
+    const { output, raw } = parsed;
+    const pending = this.pending.get(output.request_id);
     if (pending === undefined) {
       this.failSession(
         new AgentInvocationError(
@@ -288,41 +277,24 @@ class JsonlBridgeSession {
       );
       return;
     }
-    if (parsed.data.type === 'cancelled') {
-      if (!pending.cancelled) {
-        this.failSession(
-          new AgentInvocationError(
-            'invalid_envelope',
-            'JSONL bridge acknowledged cancellation that was not requested.',
-          ),
-        );
-        return;
-      }
-      this.settle(
-        parsed.data.request_id,
-        this.failure(
-          cancellationError(pending.cancellationCode ?? 'cancelled'),
-          pending.duration(),
-          line,
+    if (output.type === 'cancelled' && !pending.cancelled) {
+      this.failSession(
+        new AgentInvocationError(
+          'invalid_envelope',
+          'JSONL bridge acknowledged cancellation that was not requested.',
         ),
       );
       return;
     }
-    if (pending.cancelled) {
-      this.settle(
-        parsed.data.request_id,
-        this.failure(
-          cancellationError(pending.cancellationCode ?? 'cancelled'),
-          pending.duration(),
-          line,
-        ),
-      );
+    // After attest cancels, both the acknowledgement and a late response settle as cancelled.
+    if (output.type === 'cancelled' || pending.cancelled) {
+      this.settleCancellation(output.request_id, pending, line);
       return;
     }
-    const report = parseAgentResponse(parsed.data.response);
+    const report = parseAgentResponse(output.response);
     if (!report.ok) {
       this.settle(
-        parsed.data.request_id,
+        output.request_id,
         this.failure(
           new AgentInvocationError(
             'invalid_envelope',
@@ -336,7 +308,7 @@ class JsonlBridgeSession {
     }
     const attempt: InvocationAttempt = {
       status: 'ok',
-      raw: parsed.data.response,
+      raw: output.response,
       report,
       diagnostics: this.diagnostics(),
       durationMs: pending.duration(),
@@ -345,7 +317,18 @@ class JsonlBridgeSession {
       ),
       warnings: report.warnings,
     };
-    this.settle(parsed.data.request_id, { ...attempt, attempts: [attempt] });
+    this.settle(output.request_id, { ...attempt, attempts: [attempt] });
+  }
+
+  private settleCancellation(requestId: string, pending: PendingInvocation, line: string): void {
+    this.settle(
+      requestId,
+      this.failure(
+        cancellationError(pending.cancellationCode ?? 'cancelled'),
+        pending.duration(),
+        line,
+      ),
+    );
   }
 
   private async cancel(requestId: string, code: CancellationCode): Promise<void> {
