@@ -249,9 +249,4 @@ const createImportedCurlAgentResource = async (
   return { agent: parsed.data, preview: parsedCurl.preview };
 };
 
-export {
-  createImportedCurlAgentResource,
-  readCurlBodyFile,
-  readCurlDocument,
-  readImportedAgentResource,
-};
+export { createImportedCurlAgentResource, readCurlDocument, readImportedAgentResource };

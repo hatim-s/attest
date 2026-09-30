@@ -330,10 +330,4 @@ const parseCurlCommand = (source: string, options: CurlParserOptions = {}): Pars
   };
 };
 
-export {
-  findCurlBodyFilePath,
-  parseCurlCommand,
-  type CurlImportPreview,
-  type CurlParserOptions,
-  type ParsedCurlCommand,
-};
+export { findCurlBodyFilePath, parseCurlCommand, type CurlImportPreview };

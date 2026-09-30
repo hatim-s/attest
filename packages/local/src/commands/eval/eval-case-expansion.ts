@@ -169,7 +169,6 @@ const createExecutionId = (projectId: string, testId: string, caseId: string): s
 export {
   assertSnapshotHashes,
   createExecutionId,
-  duplicateValues,
   expandTestCases,
   requireUniqueSelection,
   resolveMetrics,
