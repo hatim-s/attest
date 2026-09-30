@@ -1,5 +1,4 @@
-/** Case-level verdict derived from invocation and metric outcomes. */
-type CaseVerdict = 'pass' | 'fail' | 'error';
+import type { CaseVerdict } from '../store/types.js';
 
 /** Exhaustive transition classification for a case across two runs. */
 type CaseTransitionKind =
@@ -40,6 +39,16 @@ interface DiffSummary {
   coverage?: { sharedCases: number; baseOnlyCases: number; candidateOnlyCases: number };
 }
 
+/** Identifies the two runs being compared and whether only shared cases count. */
+interface RunComparison {
+  baseRunId: string;
+  candidateRunId: string;
+  baseConfigHash: string;
+  candidateConfigHash: string;
+  /** Partial selections compare only cases both runs recorded. */
+  sharedOnly?: boolean;
+}
+
 /** Represents the complete comparison between two persisted runs. */
 interface RunDiff {
   summary: DiffSummary;
@@ -49,8 +58,8 @@ interface RunDiff {
 export {
   type CaseTransition,
   type CaseTransitionKind,
-  type CaseVerdict,
   type DiffSummary,
   type MetricDelta,
+  type RunComparison,
   type RunDiff,
 };

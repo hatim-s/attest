@@ -48,12 +48,15 @@ interface RunIdentity {
   createdAt: string;
 }
 
+/** Case-level verdict derived from invocation and metric outcomes. */
+type CaseVerdict = 'pass' | 'fail' | 'error';
+
 /** Provides the blob-free case list projection consumed by the view server. */
 interface CaseSummary {
   caseId: string;
   suiteName: string;
   outcome: CaseOutcome;
-  verdict: 'pass' | 'fail' | 'error';
+  verdict: CaseVerdict;
   startedAt: string;
   durationMs: number;
   score?: number;
@@ -94,6 +97,7 @@ export {
   type CaseOutcome,
   type CaseRecord,
   type CaseSummary,
+  type CaseVerdict,
   type RunMetadata,
   type RunIdentity,
   type RunRecord,
