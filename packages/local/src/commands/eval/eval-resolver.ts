@@ -1,8 +1,6 @@
 import {
   evalRunEffectiveCommandSchema,
-  evalRunRequestSchema,
   evalRunSnapshotSchema,
-  projectResourcesSchema,
   type AgentResource,
   type EvalRunEffectiveCommand,
   type EvalRunRequest,
@@ -11,7 +9,6 @@ import {
   type MetricResource,
   type TestCase,
   type TestResource,
-  type JsonValue,
 } from '@attest/contracts';
 
 import { selectCases, CaseSelectionError, contentHash } from '@attest/core';
@@ -22,14 +19,6 @@ import type { LoadedProject } from '../../project/project-loader/index.js';
 const DEFAULT_EVAL_CONCURRENCY = 4;
 const DEFAULT_EVAL_TIMEOUT_MS = 60_000;
 const SHA256_PATTERN = /^[a-f0-9]{64}$/u;
-
-type Immutable<T> = T extends (...args: never[]) => unknown
-  ? T
-  : T extends readonly (infer Item)[]
-    ? readonly Immutable<Item>[]
-    : T extends object
-      ? { readonly [Key in keyof T]: Immutable<T[Key]> }
-      : T;
 
 type EvalResolverOptions = {
   argv: readonly string[];
@@ -63,8 +52,8 @@ type ResolvedEvalTestInput = {
   test: TestResource;
 };
 
-type ResolvedEvalRun = Immutable<{
-  cases: ResolvedEvalCaseInput[];
+type ResolvedEvalRun = Readonly<{
+  cases: readonly ResolvedEvalCaseInput[];
   effectiveCommand: EvalRunEffectiveCommand;
   resources: {
     agents: AgentResource[];
@@ -82,18 +71,6 @@ type ExpandedCase = {
   source: EvalRunSelectedCase['source'];
 };
 
-/** Recursively freezes a structured clone so later project mutation cannot alter a run input. */
-const immutableClone = <T>(value: T): Immutable<T> => {
-  const clone = structuredClone(value);
-  const freeze = (candidate: unknown): void => {
-    if (candidate === null || typeof candidate !== 'object' || Object.isFrozen(candidate)) return;
-    Object.values(candidate).forEach(freeze);
-    Object.freeze(candidate);
-  };
-  freeze(clone);
-  return clone as Immutable<T>;
-};
-
 const duplicateValues = (values: readonly string[]): string[] => {
   const seen = new Set<string>();
   const duplicates = new Set<string>();
@@ -101,53 +78,29 @@ const duplicateValues = (values: readonly string[]): string[] => {
   return [...duplicates].sort();
 };
 
-const formatSchemaPath = (path: readonly PropertyKey[]): string =>
-  path.length === 0 ? '<root>' : path.map(String).join('.');
-
-/** Revalidates the project read model and its hash coverage. */
-const validateLoadedProject = (project: LoadedProject): LoadedProject => {
-  const candidate = project as Partial<LoadedProject>;
-  const parsed = projectResourcesSchema.safeParse({
-    agents: candidate.agents,
-    datasets: candidate.datasets,
-    metrics: candidate.metrics,
-    project: candidate.project,
-    tests: candidate.tests,
-  });
-  if (!parsed.success) {
-    const diagnostics = parsed.error.issues.map((issue) => ({
-      message: issue.message,
-      path: formatSchemaPath(issue.path),
-    }));
-    throw new LocalError(
-      'project_invalid',
-      'Eval resolution requires a complete attest.project project.',
-      { details: { diagnostics } },
-    );
-  }
-
-  if (typeof candidate.projectHash !== 'string' || !SHA256_PATTERN.test(candidate.projectHash)) {
+/** Confirms the loaded project carries every hash an eval snapshot records. */
+const assertSnapshotHashes = (project: LoadedProject): void => {
+  if (!SHA256_PATTERN.test(project.projectHash)) {
     throw new LocalError(
       'project_invalid',
       'The loaded project is missing its canonical project hash.',
     );
   }
-
   const hashFailures: { id: string; resource_type: string }[] = [];
-  const contentHashes = candidate.contentHashes;
+  const { contentHashes } = project;
   const hasAuthoredHash = (resourceType: 'agents' | 'metrics' | 'tests', id: string): boolean =>
-    SHA256_PATTERN.test(contentHashes?.[resourceType]?.[id] ?? '');
-  parsed.data.agents.forEach(({ id }) => {
+    SHA256_PATTERN.test(contentHashes[resourceType][id] ?? '');
+  project.agents.forEach(({ id }) => {
     if (!hasAuthoredHash('agents', id)) hashFailures.push({ id, resource_type: 'agent' });
   });
-  parsed.data.tests.forEach(({ id }) => {
+  project.tests.forEach(({ id }) => {
     if (!hasAuthoredHash('tests', id)) hashFailures.push({ id, resource_type: 'test' });
   });
-  parsed.data.metrics.forEach(({ id }) => {
+  project.metrics.forEach(({ id }) => {
     if (!hasAuthoredHash('metrics', id)) hashFailures.push({ id, resource_type: 'metric' });
   });
-  parsed.data.datasets.forEach(({ metadata: { id } }) => {
-    const hashes = contentHashes?.datasets[id];
+  project.datasets.forEach(({ metadata: { id } }) => {
+    const hashes = contentHashes.datasets[id];
     if (
       hashes === undefined ||
       !SHA256_PATTERN.test(hashes.data) ||
@@ -163,32 +116,6 @@ const validateLoadedProject = (project: LoadedProject): LoadedProject => {
       { details: { resources: hashFailures } },
     );
   }
-
-  return project;
-};
-
-/** Parses only the canonical eval.run request. */
-const parseEvalRequest = (request: EvalRunRequest): EvalRunRequest => {
-  if (
-    request !== null &&
-    typeof request === 'object' &&
-    !('test_ids' in request) &&
-    !('all' in request)
-  ) {
-    throw new LocalError('cli_missing_input', 'Select one or more exact test ids or pass `--all`.');
-  }
-  const parsed = evalRunRequestSchema.safeParse(request);
-  if (!parsed.success) {
-    throw new LocalError('cli_usage', 'Expected a canonical `attest eval run` request.', {
-      details: {
-        issues: parsed.error.issues.map((issue) => ({
-          message: issue.message,
-          path: formatSchemaPath(issue.path),
-        })),
-      },
-    });
-  }
-  return parsed.data;
 };
 
 const requireUniqueSelection = (label: string, values: readonly string[] | undefined): void => {
@@ -297,16 +224,15 @@ const positiveInteger = (value: number | undefined, fallback: number, label: str
 };
 
 /**
- * Resolves one validated project and canonical eval request into immutable, execution-ready
+ * Resolves one loaded project and validated eval request into execution-ready
  * resource/case inputs plus the content-addressed snapshot metadata. It performs no I/O or writes.
  */
 const resolveEvalRun = (
-  loadedProject: LoadedProject,
-  rawRequest: EvalRunRequest,
+  project: LoadedProject,
+  request: EvalRunRequest,
   options: EvalResolverOptions,
 ): ResolvedEvalRun => {
-  const project = validateLoadedProject(loadedProject);
-  const request = parseEvalRequest(rawRequest);
+  assertSnapshotHashes(project);
   if (
     options.expectedProjectHash !== undefined &&
     options.expectedProjectHash !== project.projectHash
@@ -417,7 +343,7 @@ const resolveEvalRun = (
     expandTestCases(test, datasetsById).forEach((expanded) => {
       candidates.push({
         agent,
-        attempt_timeout_ms: test.defaults?.timeout_ms ?? agent.timeouts?.attempt_ms ?? 60_000,
+        attempt_timeout_ms: test.defaults?.timeout_ms ?? agent.timeouts?.attempt_ms ?? timeoutMs,
         case: expanded.case,
         case_id: expanded.case.id,
         concurrency: testConcurrency,
@@ -511,7 +437,7 @@ const resolveEvalRun = (
     },
   });
 
-  return immutableClone({
+  return {
     cases,
     effectiveCommand,
     resources: {
@@ -522,8 +448,8 @@ const resolveEvalRun = (
     },
     selectedTests,
     snapshot,
-    snapshotHash: contentHash(snapshot as JsonValue),
-  });
+    snapshotHash: contentHash(snapshot),
+  };
 };
 
-export { resolveEvalRun, type Immutable, type ResolvedEvalCaseInput, type ResolvedEvalMetric };
+export { resolveEvalRun, type ResolvedEvalCaseInput, type ResolvedEvalMetric };
