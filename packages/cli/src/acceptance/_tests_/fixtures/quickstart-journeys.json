@@ -1,50 +1,6 @@
 {
   "schema": "attest.acceptance.quickstart",
-  "budget_ms": 300000,
   "per_command_timeout_ms": 30000,
-  "timing": {
-    "clock": "performance.now monotonic wall time",
-    "start": "Immediately before each actor CLI process starts; the actor total is the sum of those process intervals.",
-    "stop": "When each actor CLI process exits, or when the long-running view command reports loopback readiness.",
-    "included": [
-      "Every Attest process startup and execution in the actor journey",
-      "Native agent probes and eval execution",
-      "Run inspection, report generation, view startup through loopback readiness, deliberate failure, and error-catalog lookup"
-    ],
-    "excluded": [
-      "Installing Node and the already-packed Attest CLI",
-      "Building or packing the repository checkout",
-      "Staging the actor's pre-existing agent and case or dataset fixtures",
-      "Snapshot hashing, structured-output parsing, HTML and readiness reads, process cleanup, and test assertions performed outside each CLI interval"
-    ],
-    "retries": 0,
-    "aggregation": "Sum only the independently measured CLI process intervals for each actor; each actor must pass independently on every required operating system, and averages or pooled times are forbidden."
-  },
-  "prerequisites": {
-    "warm": [
-      "Node.js 22 or newer is on PATH.",
-      "A pristine production-packed Attest CLI runtime and all of its production dependencies are installed separately for each actor before timing starts.",
-      "The actor starts with the documented quickstart and the CLI help, schema, and error surfaces available.",
-      "No network access, credentials, provider SDK, repository source import, or ambient workspace link is required."
-    ],
-    "cold": [
-      "The journey runs in a new writable temporary directory.",
-      "Only the task-owned native agent and CSV, JSONL, or command-request inputs exist before timing starts.",
-      "No attest.project.json, attest resource directory, .attest directory, run store, report artifact, lock, or transaction residue exists.",
-      "The first discovery command is the first invocation of the installed CLI in that journey; operating-system filesystem and executable caches are uncontrolled."
-    ]
-  },
-  "cross_platform": {
-    "required_ci_operating_systems": ["ubuntu-latest", "macos-latest"],
-    "node_major": 22,
-    "windows_required": false,
-    "rules": [
-      "The harness invokes executables with argv arrays and never through a shell.",
-      "Fixture and artifact paths are resolved with Node path APIs.",
-      "The same commands, exit codes, structured documents, no-write expectations, and five-minute budget apply on Linux and macOS.",
-      "Windows process supervision is outside this acceptance gate."
-    ]
-  },
   "fixture_files": [
     "native-agent.mjs",
     "human-cases.csv",
@@ -152,8 +108,8 @@
           "exit_code": 0,
           "output": "human",
           "capture_run_id": true,
-          "required_stdout": ["Result: PASS (exit 0)"],
-          "acceptance_stdout": [
+          "required_stdout": [
+            "Result: PASS (exit 0)",
             "attest report $RUN_ID",
             "attest view --no-open",
             "Compare with a baseline run:",

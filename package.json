@@ -21,6 +21,7 @@
     "typecheck": "turbo run typecheck",
     "lint": "eslint .",
     "test": "turbo run test --concurrency=1",
+    "test:acceptance": "turbo run test:acceptance",
     "generate:schemas": "bun run --cwd packages/schemas generate",
     "format:check": "prettier --check .",
     "format": "prettier --write .",

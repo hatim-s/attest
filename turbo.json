@@ -13,6 +13,10 @@
     "test": {
       "dependsOn": ["^build"],
       "inputs": ["src/**", "package.json", "$TURBO_ROOT$/packages/schemas/generated/**"]
+    },
+    "test:acceptance": {
+      "dependsOn": ["^build", "build"],
+      "cache": false
     }
   }
 }

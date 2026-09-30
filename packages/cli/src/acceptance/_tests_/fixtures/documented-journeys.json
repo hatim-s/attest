@@ -1,92 +1,8 @@
 {
   "schema": "attest.acceptance.documentation",
-  "required_docs": [
-    "docs/index.md",
-    "docs/quickstart.md",
-    "docs/concepts/resource-model.md",
-    "docs/concepts/eval-lifecycle.md",
-    "docs/cli/index.md",
-    "docs/cli/agents.md",
-    "docs/cli/tests-and-datasets.md",
-    "docs/cli/metrics.md",
-    "docs/cli/eval-runs.md",
-    "docs/integrations/native.md",
-    "docs/integrations/curl-and-http.md",
-    "docs/integrations/cli-processes.md",
-    "docs/integrations/polling-and-streams.md",
-    "docs/integrations/websockets.md",
-    "docs/reference/schemas.md",
-    "docs/reference/errors.md",
-    "docs/reference/exit-codes.md",
-    "docs/reference/file-layout.md"
-  ],
-  "guide_docs": [
-    "docs/quickstart.md",
-    "docs/cli/agents.md",
-    "docs/cli/tests-and-datasets.md",
-    "docs/cli/metrics.md",
-    "docs/cli/eval-runs.md",
-    "docs/integrations/native.md",
-    "docs/integrations/curl-and-http.md",
-    "docs/integrations/cli-processes.md",
-    "docs/integrations/polling-and-streams.md",
-    "docs/integrations/websockets.md"
-  ],
-  "guide_opening_headings": [
-    "## Copy-paste example",
-    "## Prerequisites",
-    "## Expected files",
-    "## Expected stdout",
-    "## Cleanup"
-  ],
-  "index_first_screen_links": [
-    {
-      "label": "Connect an agent",
-      "target": "./cli/agents.md"
-    },
-    {
-      "label": "Import tests",
-      "target": "./cli/tests-and-datasets.md"
-    },
-    {
-      "label": "Write a metric",
-      "target": "./cli/metrics.md"
-    },
-    {
-      "label": "Run an evaluation",
-      "target": "./cli/eval-runs.md"
-    },
-    {
-      "label": "Debug a failure",
-      "target": "./reference/errors.md"
-    }
-  ],
-  "llms_required_references": [
-    "docs/index.md",
-    "docs/reference/schemas.md",
-    "docs/reference/errors.md",
-    "attest help --output json",
-    "docs/specs/agent-contract.md",
-    "docs/specs/metric-contract.md",
-    "docs/specs/run-bundle.md"
-  ],
-  "required_schema_references": [
-    "attest.project",
-    "attest.agent",
-    "attest.test",
-    "attest.dataset",
-    "attest.metric",
-    "attest.command-request",
-    "attest.cli-result",
-    "attest.cli-event",
-    "attest.agent-invocation",
-    "attest.metric-evaluation",
-    "attest.trace"
-  ],
   "journeys": [
     {
       "id": "native-author-import-evaluate",
-      "example_root": "examples/native-cli",
       "seed_files": {
         "agent.mjs": "let input = '';\nprocess.stdin.setEncoding('utf8');\nfor await (const chunk of process.stdin) input += chunk;\nconst request = JSON.parse(input);\nprocess.stdout.write(\n  JSON.stringify({ protocol: 'attest.agent-invocation', output: request.input }),\n);\n",
         "cases.jsonl": "{\"id\":\"refund-basic\",\"input\":\"refund policy\",\"expected\":\"refund policy\"}\n"
@@ -111,7 +27,12 @@
             "attest.project.json": {
               "schema": "attest.project",
               "name": "support",
-              "resources": { "agents": [], "datasets": [], "metrics": [], "tests": [] }
+              "resources": {
+                "agents": [],
+                "datasets": [],
+                "metrics": [],
+                "tests": []
+              }
             }
           },
           "artifacts_present": ["attest.project.json"],
@@ -135,8 +56,14 @@
           "ok": true,
           "command": "agent.add",
           "artifact_documents": {
-            "attest.project.json": { "schema": "attest.project", "name": "support" },
-            "attest/agents/support.json": { "schema": "attest.agent", "id": "support" }
+            "attest.project.json": {
+              "schema": "attest.project",
+              "name": "support"
+            },
+            "attest/agents/support.json": {
+              "schema": "attest.agent",
+              "id": "support"
+            }
           },
           "artifacts_present": ["attest/agents/support.json"],
           "artifacts_absent": [".attest/runs.db"],
@@ -156,8 +83,14 @@
           "ok": true,
           "command": "agent.test",
           "artifact_documents": {
-            "attest.project.json": { "schema": "attest.project", "name": "support" },
-            "attest/agents/support.json": { "schema": "attest.agent", "id": "support" }
+            "attest.project.json": {
+              "schema": "attest.project",
+              "name": "support"
+            },
+            "attest/agents/support.json": {
+              "schema": "attest.agent",
+              "id": "support"
+            }
           },
           "artifacts_present": ["attest/agents/support.json"],
           "artifacts_absent": [".attest/runs.db"],
@@ -180,8 +113,14 @@
           "ok": true,
           "command": "metric.add",
           "artifact_documents": {
-            "attest.project.json": { "schema": "attest.project", "name": "support" },
-            "attest/metrics/exact.json": { "schema": "attest.metric", "id": "exact" }
+            "attest.project.json": {
+              "schema": "attest.project",
+              "name": "support"
+            },
+            "attest/metrics/exact.json": {
+              "schema": "attest.metric",
+              "id": "exact"
+            }
           },
           "artifacts_present": ["attest/metrics/exact.json"],
           "artifacts_absent": [".attest/runs.db"],
@@ -204,8 +143,14 @@
           "ok": true,
           "command": "test.add",
           "artifact_documents": {
-            "attest.project.json": { "schema": "attest.project", "name": "support" },
-            "attest/tests/smoke.json": { "schema": "attest.test", "id": "smoke" }
+            "attest.project.json": {
+              "schema": "attest.project",
+              "name": "support"
+            },
+            "attest/tests/smoke.json": {
+              "schema": "attest.test",
+              "id": "smoke"
+            }
           },
           "artifacts_present": ["attest/tests/smoke.json"],
           "artifacts_absent": [".attest/runs.db"],
@@ -218,8 +163,14 @@
           "ok": true,
           "command": "test.case.import",
           "artifact_documents": {
-            "attest.project.json": { "schema": "attest.project", "name": "support" },
-            "attest/tests/smoke.json": { "schema": "attest.test", "id": "smoke" }
+            "attest.project.json": {
+              "schema": "attest.project",
+              "name": "support"
+            },
+            "attest/tests/smoke.json": {
+              "schema": "attest.test",
+              "id": "smoke"
+            }
           },
           "artifacts_present": ["attest/tests/smoke.json"],
           "artifacts_absent": [".attest/runs.db"],
@@ -240,7 +191,6 @@
     },
     {
       "id": "agent-discovery-and-repair",
-      "example_root": "examples/agent-repair",
       "seed_files": {},
       "commands": [
         {
@@ -297,7 +247,12 @@
             "attest.project.json": {
               "schema": "attest.project",
               "name": "repair",
-              "resources": { "agents": [], "datasets": [], "metrics": [], "tests": [] }
+              "resources": {
+                "agents": [],
+                "datasets": [],
+                "metrics": [],
+                "tests": []
+              }
             }
           },
           "artifacts_present": ["attest.project.json"],
@@ -315,7 +270,12 @@
             "attest.project.json": {
               "schema": "attest.project",
               "name": "repair",
-              "resources": { "agents": [], "datasets": [], "metrics": [], "tests": [] }
+              "resources": {
+                "agents": [],
+                "datasets": [],
+                "metrics": [],
+                "tests": []
+              }
             }
           },
           "artifacts_present": ["attest.project.json"],

@@ -21,7 +21,8 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
-    "test": "vitest run --maxWorkers=1",
+    "test": "vitest run --maxWorkers=1 --exclude 'src/acceptance/**'",
+    "test:acceptance": "vitest run --config vitest.acceptance.config.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "devDependencies": {
