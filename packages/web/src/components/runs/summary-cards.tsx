@@ -1,25 +1,28 @@
 import type { RunRecord } from '../../api/types.js';
-import { formatDateTime, formatPercent } from '../../lib/format.js';
-import { runPassRate } from '../../lib/run-stats.js';
-import { Card } from '../shared/ui.js';
+import { formatDateTime, formatPassRate } from '../../lib/format.js';
 
-/** Shows the four values most useful for deciding whether to inspect a run. */
+/** Describes failed cases, plus the selection size when the run covered a subset. */
+const describeCaseCounts = (run: RunRecord): string => {
+  const failed = `${run.summary?.failedCases ?? 0} failed`;
+  const labels = run.labels;
+  if (labels?.selection_total === undefined) return failed;
+  if (labels.selection_selected === labels.selection_total) return failed;
+  return `${failed}; ${labels.selection_selected} of ${labels.selection_total} selected`;
+};
+
+/** Shows pass rate, case count, error count, and finish time for one run. */
 const SummaryCards = ({ run }: { run: RunRecord }) => {
   const summary = run.summary;
   const values = [
     {
       label: 'Pass rate',
-      value: formatPercent(runPassRate(run)),
+      value: formatPassRate(run),
       detail: `${summary?.passedCases ?? 0} passing`,
     },
     {
       label: 'Cases',
       value: String(summary?.totalCases ?? 0),
-      detail:
-        run.labels?.selection_total === undefined ||
-        run.labels.selection_selected === run.labels.selection_total
-          ? `${summary?.failedCases ?? 0} failed`
-          : `${summary?.failedCases ?? 0} failed; ${run.labels.selection_selected} of ${run.labels.selection_total} selected`,
+      detail: describeCaseCounts(run),
     },
     {
       label: 'Errors',
@@ -36,11 +39,11 @@ const SummaryCards = ({ run }: { run: RunRecord }) => {
   return (
     <div className="summary-grid">
       {values.map((item) => (
-        <Card className="summary-card" key={item.label}>
+        <div className="card summary-card" key={item.label}>
           <span className="summary-label">{item.label}</span>
           <strong>{item.value}</strong>
           <span className="summary-detail">{item.detail}</span>
-        </Card>
+        </div>
       ))}
     </div>
   );

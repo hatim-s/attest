@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, type RefObject } from 'react';
+import { useCallback, useEffect, useMemo, useRef, type RefObject } from 'react';
 
 import { BarChart, PieChart } from 'echarts/charts';
 import { GridComponent, LegendComponent, TooltipComponent } from 'echarts/components';
@@ -12,7 +12,6 @@ use([BarChart, PieChart, GridComponent, LegendComponent, TooltipComponent, Canva
 type DistributionChartsProps = {
   cases: CaseSummary[];
   isLoading: boolean;
-  theme: 'light' | 'dark';
   totalCases: number;
 };
 
@@ -21,9 +20,11 @@ type ScoreBin = {
   label: string;
 };
 
+type ChartPalette = Record<'accent' | 'border' | 'danger' | 'muted' | 'text' | 'warning', string>;
+
 const SCORE_LABELS = ['0–0.2', '0.2–0.4', '0.4–0.6', '0.6–0.8', '0.8–1.0'];
 
-/** Buckets normalized average case scores while ignoring cases without numeric metric scores. */
+/** Buckets average case scores into fifths. Cases without a numeric score are skipped. */
 const createScoreHistogram = (cases: CaseSummary[]): ScoreBin[] => {
   const counts = SCORE_LABELS.map(() => 0);
   for (const { score } of cases) {
@@ -35,27 +36,47 @@ const createScoreHistogram = (cases: CaseSummary[]): ScoreBin[] => {
   return SCORE_LABELS.map((label, index) => ({ count: counts[index]!, label }));
 };
 
-/** Owns one ECharts instance and keeps it aligned with responsive container changes. */
+/** Reads chart colors from the theme variables in styles.css. */
+const readPalette = (): ChartPalette => {
+  const styles = getComputedStyle(document.documentElement);
+  const read = (name: keyof ChartPalette) => styles.getPropertyValue(`--${name}`).trim();
+  return {
+    accent: read('accent'),
+    border: read('border'),
+    danger: read('danger'),
+    muted: read('muted'),
+    text: read('text'),
+    warning: read('warning'),
+  };
+};
+
+/**
+ * Owns one ECharts instance. Resizes with its container and recolors when the dashboard
+ * changes `data-theme` on the root element.
+ */
 const useChart = (
   containerRef: RefObject<HTMLDivElement | null>,
-  option: EChartsCoreOption,
+  createOption: (palette: ChartPalette) => EChartsCoreOption,
 ): void => {
   useEffect(() => {
     const container = containerRef.current;
     if (container === null) return;
     const chart = init(container);
-    chart.setOption(option);
+    chart.setOption(createOption(readPalette()));
     const resizeObserver = new ResizeObserver(() => chart.resize());
     resizeObserver.observe(container);
+    const themeObserver = new MutationObserver(() => chart.setOption(createOption(readPalette())));
+    themeObserver.observe(document.documentElement, { attributeFilter: ['data-theme'] });
     return () => {
+      themeObserver.disconnect();
       resizeObserver.disconnect();
       chart.dispose();
     };
-  }, [containerRef, option]);
+  }, [containerRef, createOption]);
 };
 
-/** Renders score and verdict distributions with only the ECharts modules used by the dashboard. */
-const DistributionCharts = ({ cases, isLoading, theme, totalCases }: DistributionChartsProps) => {
+/** Renders the score histogram and verdict pie for the loaded cases. */
+const DistributionCharts = ({ cases, isLoading, totalCases }: DistributionChartsProps) => {
   const scoreChartRef = useRef<HTMLDivElement>(null);
   const verdictChartRef = useRef<HTMLDivElement>(null);
   const histogram = useMemo(() => createScoreHistogram(cases), [cases]);
@@ -67,26 +88,8 @@ const DistributionCharts = ({ cases, isLoading, theme, totalCases }: Distributio
     }),
     [cases],
   );
-  const { accent, border, danger, muted, text, warning } =
-    theme === 'dark'
-      ? {
-          accent: '#a9d5af',
-          border: '#323a32',
-          danger: '#ffaaa3',
-          muted: '#9da69b',
-          text: '#f2f5ef',
-          warning: '#f3c66d',
-        }
-      : {
-          accent: '#385b3f',
-          border: '#dfe2da',
-          danger: '#a53a35',
-          muted: '#687067',
-          text: '#171b16',
-          warning: '#9a6814',
-        };
-  const scoreOption = useMemo<EChartsCoreOption>(
-    () => ({
+  const scoreOption = useCallback(
+    ({ accent, border, muted, text }: ChartPalette): EChartsCoreOption => ({
       animationDuration: 250,
       grid: { left: 38, right: 16, top: 18, bottom: 35 },
       tooltip: { trigger: 'axis' },
@@ -111,10 +114,10 @@ const DistributionCharts = ({ cases, isLoading, theme, totalCases }: Distributio
       ],
       textStyle: { color: text },
     }),
-    [accent, border, histogram, muted, text],
+    [histogram],
   );
-  const verdictOption = useMemo<EChartsCoreOption>(
-    () => ({
+  const verdictOption = useCallback(
+    ({ accent, danger, muted, text, warning }: ChartPalette): EChartsCoreOption => ({
       animationDuration: 250,
       legend: { bottom: 2, textStyle: { color: muted, fontSize: 10 } },
       series: [
@@ -132,7 +135,7 @@ const DistributionCharts = ({ cases, isLoading, theme, totalCases }: Distributio
       ],
       tooltip: { trigger: 'item' },
     }),
-    [accent, danger, muted, text, verdicts, warning],
+    [verdicts],
   );
 
   useChart(scoreChartRef, scoreOption);

@@ -1,6 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { getCase, getRun, listCases, listRuns } from '../client.js';
 import type { CaseRecord, CaseSummary, RunRecord } from '../types.js';
 import type { ReportData } from '../../report/report-data.js';
 
@@ -52,15 +51,17 @@ const report: ReportData = {
 };
 
 afterEach(() => {
-  Reflect.deleteProperty(globalThis, 'window');
   vi.unstubAllGlobals();
+  vi.resetModules();
 });
 
 describe('static report data client', () => {
   it('serves every report read without touching the network', async () => {
-    Object.assign(globalThis, { window: { __ATTEST_REPORT__: report } });
+    vi.stubGlobal('window', { __ATTEST_REPORT__: report });
     const fetch = vi.fn(() => Promise.reject(new Error('network must stay unused')));
     vi.stubGlobal('fetch', fetch);
+    // The client picks its data source at module load, so import after stubbing window.
+    const { getCase, getRun, listCases, listRuns } = await import('../client.js');
 
     await expect(listRuns()).resolves.toEqual([run]);
     await expect(getRun(run.id)).resolves.toEqual(run);

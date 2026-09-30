@@ -8,12 +8,18 @@ import { DiffPanel } from './components/cases/diff-panel.js';
 import { DistributionCharts } from './components/runs/distribution-charts.js';
 import { RunList } from './components/runs/run-list.js';
 import { SummaryCards } from './components/runs/summary-cards.js';
-import { Badge, Button, Card, ErrorNotice, Loading } from './components/shared/ui.js';
+import { Badge, Button, ErrorNotice, Loading } from './components/shared/ui.js';
 import { shortId } from './lib/format.js';
 import { getReportData } from './report/report-data.js';
 
 type DashboardTab = 'cases' | 'compare' | 'distributions';
 type Theme = 'light' | 'dark';
+
+const DASHBOARD_TABS: { id: DashboardTab; label: string }[] = [
+  { id: 'cases', label: 'Cases' },
+  { id: 'distributions', label: 'Distributions' },
+  { id: 'compare', label: 'Compare' },
+];
 
 const getInitialTheme = (): Theme => {
   let stored: string | null = null;
@@ -26,7 +32,6 @@ const getInitialTheme = (): Theme => {
   return matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
 };
 
-/** Coordinates dashboard selection state while queries retain ownership of server data. */
 const Dashboard = () => {
   const reportData = getReportData();
   const runsQuery = useRuns();
@@ -58,12 +63,15 @@ const Dashboard = () => {
     }
   }, [theme]);
 
+  // Runs by selection change only. Depending on `runs` would reset the open case on every poll.
   useEffect(() => {
     setSelectedCase(undefined);
     setBaseRunId((current) =>
-      current === selectedRunId ? runs.find((run) => run.id !== selectedRunId)?.id : current,
+      current === undefined || current === selectedRunId
+        ? runs.find((run) => run.id !== selectedRunId)?.id
+        : current,
     );
-  }, [runs, selectedRunId]);
+  }, [selectedRunId]);
 
   useEffect(() => {
     if (
@@ -104,13 +112,13 @@ const Dashboard = () => {
         />
         <main className="main-content">
           {selectedRunId === undefined ? (
-            <Card className="welcome-card">
+            <div className="card welcome-card">
               <p className="eyebrow">Ready</p>
               <h1>Run your first evaluation</h1>
               <p>
                 Use <code>attest eval run</code>, then this view will update automatically.
               </p>
-            </Card>
+            </div>
           ) : null}
           {runQuery.isLoading ? <Loading label="Loading run" /> : null}
           {runQuery.error !== null ? <ErrorNotice error={runQuery.error} /> : null}
@@ -128,32 +136,20 @@ const Dashboard = () => {
               </section>
               <SummaryCards run={run} />
               <div className="tabs" role="tablist">
-                <Button
-                  aria-selected={tab === 'cases'}
-                  onClick={() => setTab('cases')}
-                  role="tab"
-                  tone={tab === 'cases' ? 'primary' : 'ghost'}
-                >
-                  Cases <span>{run.summary?.totalCases ?? 0}</span>
-                </Button>
-                <Button
-                  aria-selected={tab === 'distributions'}
-                  onClick={() => setTab('distributions')}
-                  role="tab"
-                  tone={tab === 'distributions' ? 'primary' : 'ghost'}
-                >
-                  Distributions
-                </Button>
-                {runs.length > 1 ? (
-                  <Button
-                    aria-selected={tab === 'compare'}
-                    onClick={() => setTab('compare')}
-                    role="tab"
-                    tone={tab === 'compare' ? 'primary' : 'ghost'}
-                  >
-                    Compare
-                  </Button>
-                ) : null}
+                {DASHBOARD_TABS.filter(({ id }) => id !== 'compare' || runs.length > 1).map(
+                  ({ id, label }) => (
+                    <Button
+                      aria-selected={tab === id}
+                      key={id}
+                      onClick={() => setTab(id)}
+                      role="tab"
+                      tone={tab === id ? 'primary' : 'ghost'}
+                    >
+                      {label}
+                      {id === 'cases' ? <span>{run.summary?.totalCases ?? 0}</span> : null}
+                    </Button>
+                  ),
+                )}
               </div>
               {tab === 'cases' ? (
                 <section aria-label="Cases">
@@ -177,7 +173,6 @@ const Dashboard = () => {
                 <DistributionCharts
                   cases={cases}
                   isLoading={casesQuery.isFetchingNextPage}
-                  theme={theme}
                   totalCases={run.summary?.totalCases ?? cases.length}
                 />
               ) : null}

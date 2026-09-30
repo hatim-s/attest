@@ -66,18 +66,24 @@ const readTraceSpans = (trace: unknown): TraceSpan[] => {
   });
 };
 
-/** Builds bounded tree depths and normalized timeline positions for virtualized rendering. */
-const createTraceWaterfallRows = (trace: unknown): TraceWaterfallRow[] => {
+type TraceWaterfallLayout = {
+  durationMs: number;
+  rows: TraceWaterfallRow[];
+};
+
+/** Computes each span's tree depth and timeline position, plus the whole trace's duration. */
+const createTraceWaterfall = (trace: unknown): TraceWaterfallLayout => {
   const spans = readTraceSpans(trace).sort(
     (left, right) => left.startTime - right.startTime || left.spanId.localeCompare(right.spanId),
   );
-  if (spans.length === 0) return [];
+  if (spans.length === 0) return { durationMs: 0, rows: [] };
   const byId = new Map(spans.map((span) => [span.spanId, span]));
   const traceStart = Math.min(...spans.map(({ startTime }) => startTime));
   const traceEnd = Math.max(...spans.map(({ endTime }) => endTime));
+  // Zero-length traces still need a nonzero divisor for percentage positions.
   const traceDuration = Math.max(1, traceEnd - traceStart);
 
-  return spans.map((span) => {
+  const rows = spans.map((span) => {
     let depth = 0;
     let parentSpanId = span.parentSpanId;
     const visited = new Set([span.spanId]);
@@ -101,11 +107,12 @@ const createTraceWaterfallRows = (trace: unknown): TraceWaterfallRow[] => {
       widthPercent: Math.max(0.7, (durationMs / traceDuration) * 100),
     };
   });
+  return { durationMs: traceEnd - traceStart, rows };
 };
 
-/** Renders a large trace as a virtualized hierarchy aligned to a shared duration axis. */
+/** Renders a trace as a virtualized span tree on a shared timeline. */
 const TraceWaterfall = ({ trace }: TraceWaterfallProps) => {
-  const rows = useMemo(() => createTraceWaterfallRows(trace), [trace]);
+  const { durationMs, rows } = useMemo(() => createTraceWaterfall(trace), [trace]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const virtualizer = useVirtualizer({
     count: rows.length,
@@ -113,11 +120,6 @@ const TraceWaterfall = ({ trace }: TraceWaterfallProps) => {
     getScrollElement: () => scrollRef.current,
     overscan: 8,
   });
-  const totalDuration =
-    rows.length === 0
-      ? 0
-      : Math.max(...rows.map(({ endTime }) => endTime)) -
-        Math.min(...rows.map(({ startTime }) => startTime));
 
   if (rows.length === 0) {
     return <div className="empty-compact">No renderable spans were recorded for this case.</div>;
@@ -131,7 +133,7 @@ const TraceWaterfall = ({ trace }: TraceWaterfallProps) => {
           <span>spans</span>
         </div>
         <div>
-          <strong>{formatDuration(totalDuration)}</strong>
+          <strong>{formatDuration(durationMs)}</strong>
           <span>trace duration</span>
         </div>
         <div className="trace-kind-legend">
@@ -183,10 +185,4 @@ const TraceWaterfall = ({ trace }: TraceWaterfallProps) => {
   );
 };
 
-export {
-  TraceWaterfall,
-  createTraceWaterfallRows,
-  readTraceSpans,
-  type TraceWaterfallProps,
-  type TraceWaterfallRow,
-};
+export { TraceWaterfall, createTraceWaterfall, readTraceSpans, type TraceWaterfallProps };

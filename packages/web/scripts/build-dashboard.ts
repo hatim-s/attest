@@ -39,5 +39,3 @@ const buildDashboard = async (): Promise<void> => {
 };
 
 await buildDashboard();
-
-export { buildDashboard, writeEmbeddedDashboard };

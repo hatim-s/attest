@@ -1,4 +1,49 @@
-@import 'tailwindcss';
+/* Element reset. Unlayered rules below always win over this layer. */
+@layer base {
+  *,
+  ::before,
+  ::after {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+    border: 0 solid;
+  }
+  html {
+    line-height: 1.5;
+    -webkit-text-size-adjust: 100%;
+    tab-size: 4;
+    -webkit-tap-highlight-color: transparent;
+  }
+  h1,
+  h2,
+  h3,
+  h4 {
+    font-size: inherit;
+    font-weight: inherit;
+  }
+  b,
+  strong {
+    font-weight: bolder;
+  }
+  code,
+  pre {
+    font-size: 1em;
+  }
+  small {
+    font-size: 80%;
+  }
+  canvas {
+    display: block;
+    vertical-align: middle;
+  }
+  button,
+  select {
+    letter-spacing: inherit;
+    opacity: 1;
+    background-color: transparent;
+    border-radius: 0;
+  }
+}
 
 :root {
   color-scheme: light;
@@ -10,6 +55,7 @@
     BlinkMacSystemFont,
     'Segoe UI',
     sans-serif;
+  --mono: 'SFMono-Regular', Consolas, monospace;
   --bg: #f4f5f2;
   --surface: #ffffff;
   --surface-muted: #f7f8f5;
@@ -64,7 +110,7 @@ button {
 code,
 pre,
 .mono {
-  font-family: 'SFMono-Regular', Consolas, monospace;
+  font-family: var(--mono);
 }
 
 .app-shell {
@@ -150,15 +196,26 @@ pre,
 }
 .run-list-item {
   width: 100%;
-  padding: 10px !important;
-  display: grid !important;
-  gap: 8px;
+  display: grid;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 10px;
+  border: 1px solid transparent;
+  border-radius: 9px;
   text-align: left;
-  border: 1px solid transparent !important;
+  cursor: pointer;
+  transition:
+    background-color 0.15s,
+    border-color 0.15s,
+    transform 0.15s;
+}
+.run-list-item:active {
+  transform: translateY(1px);
 }
 .run-list-item[aria-current='page'] {
   background: var(--accent-soft);
-  border-color: color-mix(in srgb, var(--accent) 35%, var(--border)) !important;
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
 }
 .run-list-row {
   display: flex;
@@ -168,7 +225,7 @@ pre,
   gap: 8px;
 }
 .run-id {
-  font-family: 'SFMono-Regular', Consolas, monospace;
+  font-family: var(--mono);
   font-size: 12px;
   font-weight: 700;
 }
@@ -190,7 +247,7 @@ pre,
   margin-bottom: 25px;
 }
 .run-heading h1 {
-  font-family: 'SFMono-Regular', Consolas, monospace;
+  font-family: var(--mono);
   font-size: clamp(25px, 4vw, 38px);
   letter-spacing: -0.04em;
   margin: 5px 0;
@@ -269,6 +326,8 @@ pre,
   transform: translateY(1px);
 }
 .button:focus-visible,
+.run-list-item:focus-visible,
+.case-table-row:focus-visible,
 select:focus-visible {
   outline: 3px solid color-mix(in srgb, var(--accent) 32%, transparent);
   outline-offset: 2px;
@@ -306,7 +365,6 @@ select:focus-visible {
 }
 .badge-pass,
 .badge-completed,
-.badge-fixed,
 .badge-local {
   color: var(--accent-strong);
   background: var(--accent-soft);
@@ -314,13 +372,13 @@ select:focus-visible {
 }
 .badge-fail,
 .badge-failed,
-.badge-error,
-.badge-regressed {
+.badge-error {
   color: var(--danger);
   background: var(--danger-soft);
   border-color: color-mix(in srgb, var(--danger) 28%, var(--border));
 }
-.badge-running {
+.badge-running,
+.badge-cancelled {
   color: var(--warning);
   background: var(--warning-soft);
   border-color: color-mix(in srgb, var(--warning) 28%, var(--border));
@@ -333,7 +391,7 @@ select:focus-visible {
 }
 .case-table-header,
 .case-table-row {
-  display: grid !important;
+  display: grid;
   grid-template-columns: minmax(180px, 2fr) minmax(120px, 1.2fr) 100px 100px 90px;
   align-items: center;
   width: 100%;
@@ -361,12 +419,16 @@ select:focus-visible {
   position: absolute;
   top: 0;
   left: 0;
-  padding: 0 14px !important;
-  border: 0 !important;
-  border-bottom: 1px solid var(--border) !important;
-  border-radius: 0 !important;
+  gap: 6px;
+  padding: 0 14px;
+  border-bottom: 1px solid var(--border);
   text-align: left;
   font-size: 12px;
+  cursor: pointer;
+  transition:
+    background-color 0.15s,
+    border-color 0.15s,
+    transform 0.15s;
 }
 .case-table-row:hover {
   background: var(--surface-muted);
@@ -616,7 +678,7 @@ select:focus-visible {
   gap: 2px;
 }
 .candidate-label strong {
-  font-family: 'SFMono-Regular', Consolas, monospace;
+  font-family: var(--mono);
   font-size: 12px;
 }
 .diff-summary-grid {
