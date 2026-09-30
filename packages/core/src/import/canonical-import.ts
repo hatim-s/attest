@@ -2,10 +2,7 @@ import { createHash } from 'node:crypto';
 
 import type { JsonValue, TestCase } from '@attest/contracts';
 
-import {
-  canonicalStringify as serializeImportJson,
-  contentHash as hashImportJson,
-} from '../store/internal/canonical-json.js';
+import { canonicalStringify, contentHash } from '../store/internal/canonical-json.js';
 
 const BASE32_ALPHABET = 'abcdefghijklmnopqrstuvwxyz234567';
 
@@ -26,50 +23,24 @@ const encodeBase32 = (bytes: Uint8Array): string => {
   return encoded;
 };
 
-const logicalIdContent = (testCase: Omit<TestCase, 'id'>): JsonValue => ({
-  input: testCase.input,
-  ...(testCase.expected === undefined ? {} : { expected: testCase.expected }),
-  ...(testCase.params === undefined ? {} : { params: testCase.params }),
-});
-
-/** Removes only the stable id while retaining every normalized content field. */
-const caseContentWithoutId = (testCase: TestCase): Omit<TestCase, 'id'> => ({
-  input: testCase.input,
-  ...(testCase.expected === undefined ? {} : { expected: testCase.expected }),
-  ...(testCase.params === undefined ? {} : { params: testCase.params }),
-  ...(testCase.tags === undefined ? {} : { tags: testCase.tags }),
-  ...(testCase.folder === undefined ? {} : { folder: testCase.folder }),
-  ...(testCase.metric_overrides === undefined
-    ? {}
-    : { metric_overrides: testCase.metric_overrides }),
-});
-
-/** Generates the ratified move-stable id from input, expected, and params only. */
-const createContentCaseId = (testCase: Omit<TestCase, 'id'>): string => {
-  const digest = createHash('sha256')
-    .update(serializeImportJson(logicalIdContent(testCase)))
-    .digest();
+const caseIdFromDigest = (identity: unknown): string => {
+  const digest = createHash('sha256').update(canonicalStringify(identity)).digest();
   return `case-${encodeBase32(digest).slice(0, 16)}`;
 };
 
-/** Generates an opaque stable identity for an explicit incremental source key. */
-const createKeyedCaseId = (sourceKey: JsonValue): string => {
-  const digest = createHash('sha256')
-    .update(serializeImportJson({ source_key: sourceKey }))
-    .digest();
-  return `case-${encodeBase32(digest).slice(0, 16)}`;
-};
+/**
+ * Derives a case id from input, expected, and params only, so moving a case between folders or
+ * retagging it keeps its id. Canonical JSON drops the undefined optional fields.
+ */
+const createContentCaseId = ({ input, expected, params }: Omit<TestCase, 'id'>): string =>
+  caseIdFromDigest({ input, expected, params });
 
-/** Fingerprints every normalized case field except its mutable stable id. */
+/** Derives an opaque case id from an explicit source key, so edited rows keep their identity. */
+const createKeyedCaseId = (sourceKey: JsonValue): string =>
+  caseIdFromDigest({ source_key: sourceKey });
+
+/** Fingerprints every case field except the id, which an update may preserve from the target. */
 const fingerprintCaseContent = (testCase: TestCase): string =>
-  hashImportJson(caseContentWithoutId(testCase));
+  contentHash({ ...testCase, id: undefined });
 
-export {
-  caseContentWithoutId,
-  createContentCaseId,
-  createKeyedCaseId,
-  fingerprintCaseContent,
-  hashImportJson,
-  serializeImportJson,
-  type JsonValue,
-};
+export { createContentCaseId, createKeyedCaseId, fingerprintCaseContent };

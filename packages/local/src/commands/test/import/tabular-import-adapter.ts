@@ -3,11 +3,10 @@ import { extname, resolve } from 'node:path';
 
 import type { CaseImportOptions, TestCase } from '@attest/contracts';
 import {
-  TabularImportError,
-  collectBoundedImportSource,
   DEFAULT_IMPORT_LIMITS,
   discoverCsvHeaders,
   importTabularCases,
+  TabularImportError,
   type ImportFormat,
   type TabularImportResult,
 } from '@attest/core';
@@ -15,7 +14,6 @@ import {
 import { LocalError } from '../../../errors/index.js';
 
 type ImportCommandAdapterOptions = {
-  collisionCases?: readonly TestCase[];
   collisionContexts?: Parameters<typeof importTabularCases>[0]['collisionContexts'];
   existingCases?: readonly TestCase[];
   importOptions: CaseImportOptions;
@@ -23,6 +21,41 @@ type ImportCommandAdapterOptions = {
   readImportStdin: () => AsyncIterable<string | Uint8Array>;
   source: string;
   workingDirectory: string;
+};
+
+/**
+ * Collects an import stream and stops reading as soon as it passes the byte limit, so an
+ * oversized file or stdin pipe is never fully buffered.
+ */
+const collectBoundedImportSource = async (
+  chunks: AsyncIterable<string | Uint8Array>,
+  maxBytes = DEFAULT_IMPORT_LIMITS.maxBytes,
+): Promise<Uint8Array> => {
+  const collected: Uint8Array[] = [];
+  let byteLength = 0;
+  for await (const chunk of chunks) {
+    const bytes = typeof chunk === 'string' ? new TextEncoder().encode(chunk) : chunk;
+    byteLength += bytes.byteLength;
+    if (byteLength > maxBytes) {
+      throw new TabularImportError('Import source validation failed.', [
+        {
+          code: 'import_size_limit',
+          destination_path: '',
+          hint: 'Split the source into smaller explicit imports.',
+          message: `Import source exceeds the ${maxBytes}-byte limit.`,
+          source_field: '<record>',
+        },
+      ]);
+    }
+    collected.push(bytes);
+  }
+  const source = new Uint8Array(byteLength);
+  let offset = 0;
+  for (const chunk of collected) {
+    source.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return source;
 };
 
 const inferImportFormat = (source: string, explicit?: ImportFormat): ImportFormat => {
@@ -54,7 +87,7 @@ const readImportSource = async (
       source === '-'
         ? readImportStdin()
         : (createReadStream(resolve(workingDirectory, source)) as AsyncIterable<Uint8Array>);
-    return await collectBoundedImportSource(chunks, DEFAULT_IMPORT_LIMITS.maxBytes);
+    return await collectBoundedImportSource(chunks);
   } catch (error: unknown) {
     if (error instanceof TabularImportError) throw error;
     throw new LocalError('cli_usage', 'Could not read the requested import source.', {
@@ -114,7 +147,6 @@ const runTabularImportAdapter = async (
       options.preparedSource ??
       (await readImportSource(options.source, options.workingDirectory, options.readImportStdin));
     return importTabularCases({
-      collisionCases: options.collisionCases,
       collisionContexts: options.collisionContexts,
       dedupe: options.importOptions.dedupe,
       existingCases: options.existingCases,
@@ -136,6 +168,7 @@ const runTabularImportAdapter = async (
 };
 
 export {
+  collectBoundedImportSource,
   inferImportFormat,
   prepareImportSource,
   runTabularImportAdapter,
