@@ -1,37 +1,69 @@
 import { createHash, randomUUID } from 'node:crypto';
+
 import {
   AttestError,
   type CaseSelection,
   type CaseSelectionSummary,
   type EvalRunSelectedCase,
+  type TestCase,
 } from '@attest/contracts';
 
-type SelectableCase = {
-  test_id: string;
-  case: { id: string; tags?: readonly string[]; folder?: string };
-  source: EvalRunSelectedCase['source'];
+/** The fields of an authored case that selection filters and sampling read. */
+type SelectableCase = Pick<EvalRunSelectedCase, 'test_id' | 'source'> & {
+  case: Pick<TestCase, 'id' | 'tags' | 'folder'>;
 };
+
+type CaseSelectionErrorCode = 'invalid_selection' | 'case_not_found' | 'no_matching_cases';
 
 /** Identifies invalid or empty selections independently of any host or CLI. */
 class CaseSelectionError extends AttestError {
-  readonly code: 'invalid_selection' | 'case_not_found' | 'no_matching_cases';
+  declare readonly code: CaseSelectionErrorCode;
   readonly details: { missing_ids?: string[]; resource_type?: 'case' };
 
   constructor(
-    code: CaseSelectionError['code'],
+    code: CaseSelectionErrorCode,
     message: string,
     details: CaseSelectionError['details'] = {},
   ) {
     super(code, message);
-    this.code = code;
     this.details = details;
   }
 }
 
+/** One predicate per filter the selection sets; unset filters match everything. */
+const selectionFilters = (
+  selection: CaseSelection,
+): Array<(candidate: SelectableCase) => boolean> => {
+  const filters: Array<(candidate: SelectableCase) => boolean> = [];
+  const { case_ids: caseIds, tags, folders, dataset_ids: datasetIds } = selection;
+  if (caseIds !== undefined) filters.push(({ case: testCase }) => caseIds.includes(testCase.id));
+  if (tags !== undefined) {
+    filters.push(({ case: testCase }) => tags.every((tag) => testCase.tags?.includes(tag)));
+  }
+  if (folders !== undefined) {
+    // Folder filters match whole path segments, so `billing` never matches `billing-other`.
+    filters.push(({ case: testCase }) =>
+      folders.some(
+        (folder) => testCase.folder === folder || testCase.folder?.startsWith(`${folder}/`),
+      ),
+    );
+  }
+  if (datasetIds !== undefined) {
+    filters.push(
+      ({ source }) => source.kind === 'dataset' && datasetIds.includes(source.dataset_id),
+    );
+  }
+  return filters;
+};
+
 const identity = (candidate: SelectableCase): string =>
   JSON.stringify([candidate.test_id, candidate.case.id]);
 
-/** Selects cases without mutation, retaining input order after seeded sampling without replacement. */
+/**
+ * Applies case, tag, folder, and dataset filters, then samples by seeded hash rank so the same
+ * seed selects the same cases on any host. Selected cases keep their configured order. The
+ * selection is assumed to be validated by `caseSelectionSchema`.
+ */
 const selectCases = <T extends SelectableCase>(
   candidates: readonly T[],
   selection: CaseSelection = {},
@@ -65,33 +97,15 @@ const selectCases = <T extends SelectableCase>(
       { missing_ids: missing, resource_type: 'case' },
     );
   }
-  const matched = candidates.filter((candidate) => {
-    const testCase = candidate.case;
-    return (
-      (selection.case_ids === undefined || selection.case_ids.includes(testCase.id)) &&
-      (selection.tags === undefined ||
-        selection.tags.every((tag) => testCase.tags?.includes(tag))) &&
-      (selection.folders === undefined ||
-        selection.folders.some(
-          (folder) => testCase.folder === folder || testCase.folder?.startsWith(`${folder}/`),
-        )) &&
-      (selection.dataset_ids === undefined ||
-        (candidate.source.kind === 'dataset' &&
-          selection.dataset_ids.includes(candidate.source.dataset_id)))
-    );
-  });
+  const matched = candidates.filter((candidate) =>
+    selectionFilters(selection).every((matches) => matches(candidate)),
+  );
   if (matched.length === 0)
     throw new CaseSelectionError('no_matching_cases', 'No cases matched the eval selection.');
   let cases = matched;
   let sample: CaseSelectionSummary['sample'];
   if (selection.sample !== undefined) {
     const { count } = selection.sample;
-    if (!Number.isSafeInteger(count) || count <= 0) {
-      throw new CaseSelectionError(
-        'invalid_selection',
-        'Sample count must be a positive safe integer.',
-      );
-    }
     sample = { count, seed: selection.sample.seed ?? randomUUID(), algorithm: 'hash-rank-v1' };
     const seed = sample.seed;
     const ranked = matched
@@ -101,9 +115,7 @@ const selectCases = <T extends SelectableCase>(
           .update(JSON.stringify(['hash-rank-v1', seed, candidate.test_id, candidate.case.id]))
           .digest('hex'),
       }))
-      .sort((a, b) =>
-        a.rank < b.rank ? -1 : a.rank > b.rank ? 1 : a.key < b.key ? -1 : a.key > b.key ? 1 : 0,
-      );
+      .sort((a, b) => a.rank.localeCompare(b.rank) || a.key.localeCompare(b.key));
     const selected = new Set(ranked.slice(0, count).map(({ key }) => key));
     cases = matched.filter((candidate) => selected.has(identity(candidate)));
   }
@@ -118,4 +130,4 @@ const selectCases = <T extends SelectableCase>(
   };
 };
 
-export { selectCases, CaseSelectionError, type SelectableCase };
+export { CaseSelectionError, selectCases, type SelectableCase };
