@@ -70,6 +70,7 @@ const isProcessGroupAlive = (processId: number): boolean => {
 const readProcessListing = async (
   argumentsList: readonly string[],
   deadline = Date.now() + PROCESS_SNAPSHOT_TIMEOUT_MS,
+  options: { emptyWhenNoMatch?: boolean } = {},
 ): Promise<string | undefined> => {
   const timeoutMs = Math.min(PROCESS_SNAPSHOT_TIMEOUT_MS, deadline - Date.now());
   if (timeoutMs <= 0) {
@@ -98,12 +99,15 @@ const readProcessListing = async (
     });
     processSnapshot.once('close', (exitCode) => {
       clearTimeout(timeout);
-      if (timedOut || exitCode !== 0) {
+      const output = Buffer.concat(standardOutputChunks).toString('utf8');
+      // `ps -p` exits 1 with no rows when none of the queried pids exist: every process is gone.
+      const noMatch = options.emptyWhenNoMatch === true && exitCode === 1 && output.trim() === '';
+      if (timedOut || (exitCode !== 0 && !noMatch)) {
         resolve(undefined);
         return;
       }
 
-      resolve(Buffer.concat(standardOutputChunks).toString('utf8'));
+      resolve(output);
     });
   });
 };
@@ -212,10 +216,11 @@ const readMatchingIdentities = async (
     return [];
   }
 
-  const processIds = [...new Set(identities.map(({ processId }) => processId))];
+  const queriedIds = [...new Set(processIds(identities))];
   const snapshotText = await readProcessListing(
-    ['-o', 'pid=,lstart=,comm=', '-p', processIds.join(',')],
+    ['-o', 'pid=,lstart=,comm=', '-p', queriedIds.join(',')],
     deadline,
+    { emptyWhenNoMatch: true },
   );
   if (snapshotText === undefined) {
     return undefined;

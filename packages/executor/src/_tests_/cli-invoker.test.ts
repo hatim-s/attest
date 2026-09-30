@@ -207,6 +207,7 @@ describe('invokeCliAgent', { timeout: TEST_TIMEOUT_MS }, () => {
       );
 
       expect(attempt.error.code).toBe('timeout');
+      expect(attempt.diagnostics.unreapedProcessIds).toBeUndefined();
       const processId = parseStderrProcessId(attempt.diagnostics.stderrExcerpt);
       await expectHeartbeatStopped(heartbeatFile);
       expect(await waitForMissingProcessError(processId)).toMatchObject({ code: 'ESRCH' });
@@ -228,6 +229,7 @@ describe('invokeCliAgent', { timeout: TEST_TIMEOUT_MS }, () => {
       );
 
       expect(attempt.error.code).toBe('timeout');
+      expect(attempt.diagnostics.unreapedProcessIds).toBeUndefined();
       const processId = parseHeartbeatProcessId(await readHeartbeat(heartbeatFile));
       await expectHeartbeatStopped(heartbeatFile);
       expect(await waitForMissingProcessError(processId)).toMatchObject({ code: 'ESRCH' });
