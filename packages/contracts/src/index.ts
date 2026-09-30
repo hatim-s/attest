@@ -9,7 +9,6 @@ export type {
 export type { CaseOutcome, InvocationErrorCode } from './eval/execution.js';
 export {
   assertionCheckSchema,
-  metricDefinitionSchema,
   metricRequestSchema,
   metricResultSchema,
   spanFilterSchema,
@@ -17,7 +16,6 @@ export {
 } from './metric/protocol.js';
 export type {
   AssertionCheck,
-  JsonValue,
   LeafAssertionCheck,
   MetricDefinition,
   MetricRequest,
@@ -177,7 +175,12 @@ export {
   secretReferenceSchema,
   sha256Schema,
 } from './project/shared.js';
-export type { ExecutionDefaults, RawExcerpt, SecretReference } from './project/shared.js';
+export type {
+  ExecutionDefaults,
+  JsonValue,
+  RawExcerpt,
+  SecretReference,
+} from './project/shared.js';
 export {
   evalExecutionConfigSchema,
   evalHookCommandSchema,

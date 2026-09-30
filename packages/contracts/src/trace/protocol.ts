@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { reportDuplicates } from '../internal/duplicates.js';
 import { TRACE_SCHEMA_ID } from '../schema/identifiers.js';
 
+/** Span attribute values; filters match against the same scalar set. */
 const attributeValueSchema = z.union([z.string(), z.number(), z.boolean()]);
 const attributesSchema = z.record(z.string(), attributeValueSchema);
 const timestampSchema = z.iso
@@ -82,7 +83,7 @@ const traceSchema = z
 type Trace = z.infer<typeof traceSchema>;
 
 export {
-  spanEventSchema,
+  attributeValueSchema,
   spanKindSchema,
   spanSchema,
   spanStatusSchema,

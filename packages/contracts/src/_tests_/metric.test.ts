@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 
 import {
   assertionCheckSchema,
-  metricDefinitionSchema,
   metricRequestSchema,
   metricResultSchema,
 } from '../metric/protocol.js';
@@ -83,17 +82,8 @@ describe('metric schemas', () => {
     ).toBe(false);
   });
 
-  it('requires threshold comparisons and exactly one executable target', () => {
+  it('requires at least one threshold comparison', () => {
     expect(assertionCheckSchema.safeParse({ threshold: { path: '$.score' } }).success).toBe(false);
-    expect(metricDefinitionSchema.safeParse({ name: 'custom', type: 'exec' }).success).toBe(false);
-    expect(
-      metricDefinitionSchema.safeParse({
-        name: 'custom',
-        type: 'exec',
-        command: ['bun'],
-        url: 'https://example.com/metric',
-      }).success,
-    ).toBe(false);
   });
 
   it('accepts tool argument matchers and stable span filters', () => {
@@ -129,29 +119,11 @@ describe('metric schemas', () => {
     ).toBe(false);
   });
 
-  it('accepts all three metric definition variants', () => {
-    const definitions = [
-      { name: 'exists', type: 'assertion', assert: [{ exists: { path: '$.output' } }] },
-      { name: 'custom', type: 'exec', command: ['python3', 'metric.py'] },
-      { name: 'judge', type: 'judge', model: 'openai/gpt-5', rubric: 'Score it.' },
-    ];
-
-    for (const definition of definitions) {
-      expect(metricDefinitionSchema.safeParse(definition).success).toBe(true);
-    }
-  });
-
   it.each([
-    { name: 'assert', value: { name: 'empty', type: 'assertion', assert: [] } },
     { name: 'all', value: { all: [] } },
     { name: 'any', value: { any: [] } },
     { name: 'arguments', value: { tool_calls: { arguments: [] } } },
-  ])('rejects an empty $name list', ({ name, value }) => {
-    const result =
-      name === 'assert'
-        ? metricDefinitionSchema.safeParse(value)
-        : assertionCheckSchema.safeParse(value);
-
-    expect(result.success).toBe(false);
+  ])('rejects an empty $name list', ({ value }) => {
+    expect(assertionCheckSchema.safeParse(value).success).toBe(false);
   });
 });
