@@ -18,6 +18,7 @@ export {
 export { parseDuration } from '../commands/agent/authoring/input-parsers.js';
 export {
   AGENT_ADD_FLAGS,
+  agentAddFlagConflicts,
   createAgentResource,
 } from '../commands/agent/authoring/resource-builder.js';
 export { readCurlDocument } from '../commands/agent/authoring/resource-import.js';

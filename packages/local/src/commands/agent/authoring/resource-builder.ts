@@ -146,6 +146,35 @@ const TRANSPORT_AUTHORING_FIELDS: Readonly<Record<TransportSelection, Set<keyof 
     ]),
   };
 
+/**
+ * Lists, per `agent add` flag, the transport-selecting flags it cannot be combined with; a
+ * selector also conflicts with the other selectors and with every flag its transport rejects.
+ * Help publishes this so callers learn the matrix `createAgentResource` enforces.
+ */
+const agentAddFlagConflicts = (): Record<string, string[]> => {
+  const selectors = new Set(TRANSPORT_SELECTORS.map(([field]) => field));
+  const conflicts = new Map<keyof AgentAddFields, (keyof AgentAddFields)[]>();
+  const add = (field: keyof AgentAddFields, other: keyof AgentAddFields): void => {
+    const existing = conflicts.get(field) ?? [];
+    if (!existing.includes(other)) conflicts.set(field, [...existing, other]);
+  };
+  for (const [selector, transport] of TRANSPORT_SELECTORS) {
+    for (const [other] of TRANSPORT_SELECTORS) if (other !== selector) add(selector, other);
+    for (const field of Object.keys(AGENT_ADD_FLAGS) as (keyof AgentAddFields)[]) {
+      if (selectors.has(field) || COMMON_AUTHORING_FIELDS.has(field)) continue;
+      if (TRANSPORT_AUTHORING_FIELDS[transport].has(field)) continue;
+      add(field, selector);
+      add(selector, field);
+    }
+  }
+  return Object.fromEntries(
+    [...conflicts].map(([field, others]) => [
+      AGENT_ADD_FLAGS[field],
+      others.map((other) => AGENT_ADD_FLAGS[other]),
+    ]),
+  );
+};
+
 const fieldIsProvided = (value: AgentAddFields[keyof AgentAddFields]): boolean =>
   value !== undefined && (!Array.isArray(value) || value.length > 0);
 
@@ -389,4 +418,4 @@ const createAgentResource = (fields: AgentAddFields): AgentResource => {
   return parsed.data;
 };
 
-export { AGENT_ADD_FLAGS, createAgentResource };
+export { AGENT_ADD_FLAGS, agentAddFlagConflicts, createAgentResource };

@@ -2,6 +2,7 @@ import {
   COMMAND_REQUEST_SCHEMA_ID,
   commandRequestSchema,
   type CommandRequest,
+  type JsonValue,
 } from '@attest/contracts';
 
 import { LocalError } from '../../errors/index.js';
@@ -16,6 +17,11 @@ type CommandRequestFor<TCommand extends CommandRequest['command']> = Extract<
 type ReadCommandRequestOptions = {
   readStdin: () => Promise<string>;
   workingDirectory: string;
+};
+
+type ReadRequestDocumentOptions = ReadCommandRequestOptions & {
+  /** Repair hint for a document that is not valid JSON. */
+  hint: string;
 };
 
 const parseCommandRequest = <TCommand extends CommandRequest['command']>(
@@ -49,18 +55,29 @@ const validateCommandRequest = <TCommand extends CommandRequest['command']>(
   value: unknown,
 ): CommandRequestFor<TCommand> => parseCommandRequest(command, value, undefined);
 
+/**
+ * Reads one `--from-json` document from a file or stdin without validating it, for callers that
+ * inspect the document before choosing a schema.
+ */
+const readRequestDocument = async (
+  source: string,
+  options: ReadRequestDocumentOptions,
+): Promise<JsonValue> => {
+  const text = await readSourceText(source, { ...options, path: '--from-json' });
+  return parseJsonText(text, { path: '--from-json', hint: options.hint });
+};
+
 /** Reads one `--from-json` request document from a file or stdin and validates it. */
 const readCommandRequest = async <TCommand extends CommandRequest['command']>(
   command: TCommand,
   source: string,
   options: ReadCommandRequestOptions,
 ): Promise<CommandRequestFor<TCommand>> => {
-  const text = await readSourceText(source, { ...options, path: '--from-json' });
-  const value = parseJsonText(text, {
-    path: '--from-json',
+  const value = await readRequestDocument(source, {
+    ...options,
     hint: `Provide one ${COMMAND_REQUEST_SCHEMA_ID} ${command} document.`,
   });
   return parseCommandRequest(command, value, '--from-json');
 };
 
-export { readCommandRequest, validateCommandRequest };
+export { readCommandRequest, readRequestDocument, validateCommandRequest };
