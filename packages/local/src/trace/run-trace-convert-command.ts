@@ -36,7 +36,7 @@ const runTraceConvertCommand = async (
     });
   }
 
-  const trace = selectConvertedTrace(convertOtlpJson(candidate), { traceId: options.traceId });
+  const trace = selectConvertedTrace(convertOtlpJson(candidate), options.traceId);
   const json = `${JSON.stringify(trace, null, 2)}\n`;
   if (options.outputPath === undefined) {
     return { json, spanCount: trace.spans.length, traceId: trace.trace_id };
