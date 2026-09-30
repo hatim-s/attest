@@ -8,6 +8,8 @@ export {
   summarizeEvalCases,
 } from './normalization.js';
 export type {
+  CaseExecution,
+  CaseExecutionBase,
   DeepReadonly,
   EvalArtifactWriter,
   EvalBaselineAdapter,

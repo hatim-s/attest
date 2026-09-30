@@ -4,13 +4,13 @@ import { describe, expect, it, vi } from 'vitest';
 
 import type { MetricEvaluation } from '../../metrics/metric-evaluation.js';
 import { AgentInvocationError } from '@attest/executor';
-import type { CaseExecution } from '@attest/executor';
 import { createStagedCaseRunner } from '../staged-runner.js';
 import { justBashIsolation } from '@attest/executor';
 
 import { executeResolvedEvalPlan } from '../engine/index.js';
 import { withEvalHooks } from '../hooks.js';
 import type {
+  CaseExecution,
   EvalCaseRunner,
   EvalPersistenceAdapter,
   ResolvedEvalCase,
@@ -863,6 +863,7 @@ describe('runtime hooks and isolated stages', () => {
             exec: vi.fn(),
             readFile: vi.fn(),
             writeFile: vi.fn(),
+            beginFinalization: vi.fn(() => Promise.resolve()),
             dispose,
           }),
         hooks: [

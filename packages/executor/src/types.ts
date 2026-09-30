@@ -1,13 +1,4 @@
-import type {
-  AgentRequest,
-  AgentResponse,
-  CaseOutcome,
-  ContractWarning,
-  ParseReport,
-  RawExcerpt,
-  TestCase,
-  Trace,
-} from '@attest/contracts';
+import type { AgentResponse, ContractWarning, ParseReport, RawExcerpt } from '@attest/contracts';
 
 import type { AgentInvocationError } from './errors.js';
 
@@ -87,43 +78,7 @@ type InvocationAttempt = {
 /** Final result of `invokeAgent` after retries; `attempts` preserves every try for determinism. */
 type InvocationResult = InvocationAttempt & { attempts: InvocationAttempt[] };
 
-/** Fields shared by every terminal case state; layout mirrors the store's persisted shape. */
-type CaseExecutionBase = {
-  caseId: string;
-  suiteName: string;
-  request: AgentRequest;
-  /**
-   * Transient full case document (including `expected`) so metrics can run
-   * before persistence; the store adapter deliberately drops it.
-   */
-  caseDefinition: TestCase;
-  /** Metric names resolved for this case (per-case override, else suite metrics). */
-  expectedMetrics: string[];
-  /** Every transport attempt including retries, preserved per the agent contract. */
-  attempts: InvocationAttempt[];
-  diagnostics: InvocationDiagnostics;
-  warnings: ContractWarning[];
-  startedAt: string;
-  durationMs: number;
-};
-
-/**
- * Everything downstream consumers (metrics, store, reports) need about one
- * executed case, discriminated on `outcome` so completed cases provably carry
- * a response and failed ones provably carry the invocation error.
- */
-type CaseExecution = CaseExecutionBase &
-  (
-    | { outcome: 'completed'; response: AgentResponse; trace?: Trace }
-    | {
-        outcome: Exclude<CaseOutcome, 'completed'>;
-        invocationError: AgentInvocationError;
-      }
-  );
-
 export {
-  type CaseExecution,
-  type CaseExecutionBase,
   type InvocationAttempt,
   type InvocationDiagnostics,
   type InvocationResult,

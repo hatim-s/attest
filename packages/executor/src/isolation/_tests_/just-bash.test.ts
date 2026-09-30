@@ -54,7 +54,7 @@ describe('just-bash case isolation', () => {
     const pending = environment.exec('sleep 10; echo late > late.txt');
     controller.abort(new Error('run cancelled'));
 
-    await environment.beginFinalization?.();
+    await environment.beginFinalization();
     await expect(pending).rejects.toThrow();
     await expect(environment.readFile('partial.txt')).resolves.toBe('partial');
     await environment.writeFile('final.txt', 'recovered');
@@ -66,7 +66,7 @@ describe('just-bash case isolation', () => {
 
   it('expires the separate finalization lifetime', async () => {
     const environment = await justBashIsolation({ finalizationTimeoutMs: 5 })(context());
-    await environment.beginFinalization?.();
+    await environment.beginFinalization();
     await new Promise((resolve) => setTimeout(resolve, 20));
 
     expect(() => environment.readFile('missing.txt')).toThrow();

@@ -1,7 +1,7 @@
-import type { CaseEnvironment, CaseExecution } from '@attest/executor';
+import type { CaseEnvironment } from '@attest/executor';
 
 import type { MetricEvaluation } from '../metrics/metric-evaluation.js';
-import type { EvalCaseRunner, ResolvedEvalCase } from './types.js';
+import type { CaseExecution, EvalCaseRunner, ResolvedEvalCase } from './types.js';
 
 type CaseStageContext<Payload> = {
   runId: string;

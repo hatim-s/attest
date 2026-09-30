@@ -1,8 +1,8 @@
 import type { EvalRunSummary } from '@attest/contracts';
 
 import type { MetricEvaluation } from '../metrics/metric-evaluation.js';
-import type { CaseExecution } from '@attest/executor';
 import type {
+  CaseExecution,
   NormalizedEvalAttempt,
   NormalizedEvalCaseResult,
   NormalizedEvalMetricResult,

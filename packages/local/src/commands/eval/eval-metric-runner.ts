@@ -12,10 +12,11 @@ import {
   type MetricResource,
 } from '@attest/contracts';
 import { type CacheStore } from '@attest/core';
-import { invokeMappedHttpAgent, redactTransportText, type CaseExecution } from '@attest/executor';
+import { invokeMappedHttpAgent, redactTransportText } from '@attest/executor';
 import {
   caseExecutionToMetricContext,
   createTanstackJudgeClient,
+  type CaseExecution,
   evaluateMetrics,
   type JudgeCache,
   type JudgeCacheEntry,

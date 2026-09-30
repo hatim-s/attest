@@ -66,4 +66,4 @@ Authentication, tenant boundaries, queues, and object storage belong to that dep
 
 ESLint rejects runtime/application dependencies in executor, execution and local infrastructure imports in core, local or CLI imports in runtime, CLI or Commander imports in local, and server imports in web. Workspace manifests and TypeScript references make the dependency graph explicit. Run the root build, typecheck, lint, and tests after moving an API across packages.
 
-Executor APIs such as `invokeAgent`, transport sessions, process cleanup, and `CaseExecution` are imported from `@attest/executor`. Runtime does not re-export them. Consumers using their former runtime exports must update imports and add the executor dependency.
+Executor APIs such as `invokeAgent`, transport sessions, and process cleanup are imported from `@attest/executor`. Runtime does not re-export them. Consumers using their former runtime exports must update imports and add the executor dependency. `CaseExecution` is imported from `@attest/runtime`, which assembles it from invocation results.

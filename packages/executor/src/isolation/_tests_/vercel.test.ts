@@ -43,7 +43,7 @@ describe('Vercel case isolation', () => {
 
     expect(await environment.exec('echo ok')).toMatchObject({ stdout: 'ok', exitCode: 0 });
     controller.abort(new Error('run cancelled'));
-    await environment.beginFinalization?.();
+    await environment.beginFinalization();
     await expect(environment.readFile('partial.txt')).resolves.toBe('partial');
     await environment.writeFile('results/../final.txt', 'done');
     expect(sdk.writeFiles).toHaveBeenCalledWith(
@@ -122,7 +122,7 @@ describe('Vercel case isolation', () => {
       controller.abort(new Error('cancelled'));
     }
     await expect(execution).rejects.toThrow(/remote active/u);
-    await expect(environment.beginFinalization?.()).rejects.toThrow(/remote active/u);
+    await expect(environment.beginFinalization()).rejects.toThrow(/remote active/u);
     expect(() => environment.readFile('partial.txt')).toThrow();
     expect(() => environment.writeFile('late.txt', 'no')).toThrow();
     expect(() => environment.exec('late')).toThrow();

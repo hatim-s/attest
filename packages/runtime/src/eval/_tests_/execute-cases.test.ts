@@ -1,11 +1,11 @@
 import type { EvalRun } from '@attest/contracts';
-import type { CaseExecution } from '@attest/executor';
 import { describe, expect, it, vi } from 'vitest';
 
 import { executeCases } from '../engine/execute-cases.js';
 import { executeResolvedEvalPlan } from '../engine/execute-eval.js';
 import { freezeEvalRun } from '../engine/run-model.js';
 import type {
+  CaseExecution,
   EvalCaseRunner,
   EvalPersistenceAdapter,
   ResolvedEvalCase,

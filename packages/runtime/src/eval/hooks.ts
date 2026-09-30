@@ -1,9 +1,9 @@
 import type { EvalRunSummary } from '@attest/contracts';
-import type { CaseEnvironment, CaseEnvironmentFactory, CaseExecution } from '@attest/executor';
+import type { CaseEnvironment, CaseEnvironmentFactory } from '@attest/executor';
 
 import type { MetricEvaluation } from '../metrics/metric-evaluation.js';
 import { EvalCaseStageError } from './staged-runner.js';
-import type { EvalCaseRunner, ImmutableEvalRun, ResolvedEvalCase } from './types.js';
+import type { CaseExecution, EvalCaseRunner, ImmutableEvalRun, ResolvedEvalCase } from './types.js';
 
 type EvalRunHookContext = {
   run: ImmutableEvalRun;
@@ -199,7 +199,7 @@ const withEvalHooks = <Payload>(
       }
 
       try {
-        await context.environment?.beginFinalization?.();
+        await context.environment?.beginFinalization();
       } catch (error: unknown) {
         latchCleanupFailure(error);
         lifecycleFailures.push(error);

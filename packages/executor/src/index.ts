@@ -43,7 +43,6 @@ export {
   type WebSocketSessionOptions,
 } from './adapters/websocket/index.js';
 export {
-  type CaseExecution,
   type InvokeAgentOptions,
   type InvocationResult,
   type InvocationAttempt,
