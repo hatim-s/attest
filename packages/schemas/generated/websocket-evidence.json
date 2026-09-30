@@ -1,5 +1,5 @@
 {
-  "$comment": "Runtime-only invariants include span time ordering, duplicate identifiers, and metric references.",
+  "$comment": "Runtime-only invariants: a truncated excerpt carries the sha256 of the full payload.",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "oneOf": [
     {

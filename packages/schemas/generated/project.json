@@ -1,5 +1,5 @@
 {
-  "$comment": "Runtime-only invariants include canonical manifest paths, cross-resource references, duplicate identifiers, and resolved case-id collisions.",
+  "$comment": "Runtime-only invariants: resource paths must be canonical for their id, and resource ids must be unique per type.",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "properties": {

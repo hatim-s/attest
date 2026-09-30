@@ -1,5 +1,5 @@
 {
-  "$comment": "Runtime-only invariants include canonical manifest paths, cross-resource references, duplicate identifiers, and resolved case-id collisions.",
+  "$comment": "Runtime-only invariants: agent, metric, and dataset references and resolved case ids are checked when the project loads.",
   "$defs": {
     "TestCase": {
       "additionalProperties": false,

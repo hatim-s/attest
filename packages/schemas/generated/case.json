@@ -1,5 +1,4 @@
 {
-  "$comment": "Runtime-only invariants include canonical manifest paths, cross-resource references, duplicate identifiers, and resolved case-id collisions.",
   "$defs": {
     "__schema0": {
       "anyOf": [

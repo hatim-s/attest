@@ -1,5 +1,5 @@
 {
-  "$comment": "Runtime-only invariants include canonical manifest paths, cross-resource references, duplicate identifiers, resolved case-id collisions, polling constraints, and duplicate sandbox destinations after platform-independent relative-path normalization.",
+  "$comment": "Runtime-only invariants: polling needs exactly one status URL source, ordered intervals, and disjoint terminal values; sandbox destinations are unique after relative-path normalization; HTTP body_encoding requires a body, and raw bodies are strings; stream incremental output pointer and mode appear together; WebSocket timeouts nest, pointers are distinct, and authorization headers use secret references; regex checks must compile, and threshold checks need at least one comparison.",
   "$defs": {
     "AgentResource": {
       "additionalProperties": false,

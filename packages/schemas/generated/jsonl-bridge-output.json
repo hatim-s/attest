@@ -1,5 +1,5 @@
 {
-  "$comment": "Runtime-only invariants include span time ordering, duplicate identifiers, and metric references.",
+  "$comment": "Runtime-only invariants: the agent response carries exactly one of output or error.",
   "$defs": {
     "__schema0": {
       "anyOf": [
