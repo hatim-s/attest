@@ -447,9 +447,11 @@ const runMetricTestCommand = async (
       await assertMetricDirectoryIdentity(execDirectory);
     }
     [evaluation] = await evaluateMetrics([definition], context, {
-      execCwd,
-      execEnv,
-      execTimeoutMs: metric.definition.kind === 'exec' ? metric.definition.timeout_ms : undefined,
+      exec: {
+        cwd: execCwd,
+        env: execEnv,
+        timeoutMs: metric.definition.kind === 'exec' ? metric.definition.timeout_ms : undefined,
+      },
       signal: options.signal,
     });
   } finally {

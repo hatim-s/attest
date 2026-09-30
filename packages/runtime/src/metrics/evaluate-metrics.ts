@@ -5,7 +5,7 @@ import type { MetricDefinition } from '@attest/contracts';
 import { evaluateAssertionMetric } from './assertion-engine.js';
 import { AttestMetricError } from './errors.js';
 import { buildEvaluationDocument } from './evaluation-document.js';
-import { executeExecutableMetric } from './exec-metric.js';
+import { executeExecutableMetric, type ExecMetricOptions } from './exec-metric.js';
 import type { JudgeClient } from './judge/judge-client.js';
 import type { JudgeCache } from './judge/judge-cache.js';
 import { evaluateJudgeMetric } from './judge/judge-metric.js';
@@ -13,10 +13,8 @@ import { skippedNoOutput, type MetricContext, type MetricEvaluation } from './me
 
 /** Configures optional metric edges while keeping assertion evaluation dependency-free. */
 type EvaluateMetricsOptions = {
-  execCwd?: string;
-  execEnv?: NodeJS.ProcessEnv;
+  exec?: Omit<ExecMetricOptions, 'signal'>;
   judgeClient?: JudgeClient;
-  execTimeoutMs?: number;
   judgeTimeoutMs?: number;
   cache?: JudgeCache;
   signal?: AbortSignal;
@@ -42,9 +40,7 @@ const evaluateMetric = async (
 
   if (definition.type === 'exec') {
     return executeExecutableMetric(definition, context, {
-      commandCwd: options.execCwd,
-      commandEnv: options.execEnv,
-      timeoutMs: options.execTimeoutMs,
+      ...options.exec,
       signal: options.signal,
     });
   }

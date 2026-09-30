@@ -344,9 +344,7 @@ const createEvalMetricEvaluator = (projectRoot: string, cacheStore: CacheStore) 
             command: definition.argv,
           };
           options = {
-            execCwd: runtime.cwd,
-            execEnv: runtime.env,
-            execTimeoutMs: definition.timeout_ms,
+            exec: { cwd: runtime.cwd, env: runtime.env, timeoutMs: definition.timeout_ms },
             signal,
           };
         }
