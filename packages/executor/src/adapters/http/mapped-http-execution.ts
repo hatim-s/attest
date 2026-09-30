@@ -1,7 +1,4 @@
-import { createHash } from 'node:crypto';
-import { isDeepStrictEqual } from 'node:util';
-
-import { AGENT_PROTOCOL, type AgentRequest } from '@attest/contracts';
+import { AGENT_PROTOCOL } from '@attest/contracts';
 
 import { AgentInvocationError, abortedError } from '../../errors.js';
 import { abortableWait } from '../../internal/abortable-wait.js';
@@ -13,10 +10,9 @@ import { retryBackoffDelay } from '../../internal/retry-backoff.js';
 import type { InvocationAttempt } from '../../types.js';
 import { requestJson, type HttpClientPolicy, type HttpJsonResponse } from './http-client.js';
 import { readJsonPointer } from './json-pointer.js';
-import { assertStaticUrlAuthority, type MaterializedHttpRequest } from './request-template.js';
+import type { MaterializedHttpRequest } from './request-template.js';
 import { redactTransportText } from './redaction.js';
 import { parseRetryAfter } from './retry-after.js';
-import { requireSameOrigin } from './url-security.js';
 import type { HttpAgentResource } from './mapped-http-adapter.js';
 
 /** The successful response that ends a direct or polling exchange, with its request timing. */
@@ -25,8 +21,6 @@ type CompletedHttpResponse = {
   remoteJobId?: string | number;
   response: HttpJsonResponse;
 };
-
-type PollingTransport = Extract<HttpAgentResource['transport'], { kind: 'polling' }>;
 
 /** Shared state of one mapped exchange: retry budget, deadlines, and retained failed attempts. */
 type ExchangeContext = {
@@ -153,327 +147,86 @@ const requireSuccessfulStatus = (response: HttpJsonResponse): void => {
   throw statusError(response);
 };
 
-/** Sends a direct request, retrying transient transport failures and retryable statuses. */
-const runDirect = async (
+type RetryRules = {
+  /** Whether a retryable failure may be retried at all; submits need an idempotency key. */
+  allowRetry: boolean;
+  /** Delay before retry `retry`, given the failed response's Retry-After header if any. */
+  delayFor: (retry: number, retryAfter: string | undefined) => number;
+};
+
+const isSuccessStatus = (status: number): boolean => status >= 200 && status < 300;
+
+/**
+ * Sends one request until it succeeds, retrying transient transport failures and retryable
+ * statuses within the authored budget. Failed tries are kept as attempts on the context.
+ */
+const requestWithRetries = async (
+  request: MaterializedHttpRequest,
+  context: ExchangeContext,
+  rules: RetryRules,
+): Promise<{ durationMs: number; response: HttpJsonResponse }> => {
+  const { policy, retryAttempts, signal } = context;
+  const retries = context.retry?.retries ?? 0;
+  const retryOrThrow = async (
+    error: AgentInvocationError,
+    durationMs: number,
+    retryable: boolean,
+    retry: number,
+    retryAfter: string | undefined,
+  ): Promise<void> => {
+    if (!rules.allowRetry || retry >= retries || !retryable) {
+      throw withAttemptDuration(error, durationMs);
+    }
+    retryAttempts.push(attemptFromError(error, durationMs));
+    await wait(rules.delayFor(retry, retryAfter), signal, policy.callerSignal);
+  };
+  for (let retry = 0; ; retry += 1) {
+    const attemptDuration = startTimer();
+    let response: HttpJsonResponse;
+    try {
+      response = await requestJson(request, policy);
+    } catch (error: unknown) {
+      const normalized = normalizeFailure(error, signal, policy.callerSignal);
+      const retryable = retryableTransportError(normalized);
+      await retryOrThrow(normalized, attemptDuration(), retryable, retry, undefined);
+      continue;
+    }
+    const durationMs = attemptDuration();
+    if (isSuccessStatus(response.status)) return { durationMs, response };
+    const retryAfter = response.headers['retry-after'];
+    await retryOrThrow(
+      statusError(response),
+      durationMs,
+      retryableStatus(response.status),
+      retry,
+      retryAfter,
+    );
+  }
+};
+
+/** Sends a direct request, honoring Retry-After before the authored backoff. */
+const runDirect = (
   materialized: MaterializedHttpRequest,
   context: ExchangeContext,
-): Promise<CompletedHttpResponse> => {
-  const { policy, retry: retryPolicy, retryAttempts, signal } = context;
-  const retries = retryPolicy?.retries ?? 0;
-  for (let retry = 0; ; retry += 1) {
-    const attemptDuration = startTimer();
-    let response: HttpJsonResponse;
-    try {
-      response = await requestJson(materialized, policy);
-    } catch (error: unknown) {
-      const durationMs = attemptDuration();
-      const normalized = normalizeFailure(error, signal, policy.callerSignal);
-      if (
-        retry >= retries ||
-        normalized.code === 'cancelled' ||
-        !retryableTransportError(normalized)
-      ) {
-        throw withAttemptDuration(normalized, durationMs);
-      }
-      retryAttempts.push(attemptFromError(normalized, durationMs));
-      await wait(retryDelay(retryPolicy, retry), signal, policy.callerSignal);
-      continue;
-    }
-    const durationMs = attemptDuration();
-    if (response.status >= 200 && response.status < 300) return { durationMs, response };
-    const error = statusError(response);
-    if (retry >= retries || !retryableStatus(response.status)) {
-      throw withAttemptDuration(error, durationMs);
-    }
-    retryAttempts.push(attemptFromError(error, durationMs));
-    await wait(
-      parseRetryAfter(response.headers['retry-after']) ?? retryDelay(retryPolicy, retry),
-      signal,
-      policy.callerSignal,
-    );
-  }
-};
-
-/** Renders the status URL from the submit response or the authored template. */
-const renderStatusUrl = (
-  transport: PollingTransport,
-  response: HttpJsonResponse,
-  jobId: string | number,
-): string => {
-  const extracted = readJsonPointer(response.raw, transport.status_url_pointer);
-  if (typeof extracted === 'string') return extracted;
-  if (extracted !== undefined) {
-    throw new AgentInvocationError(
-      'invalid_envelope',
-      'Polling status URL extraction must be a string.',
-    );
-  }
-  const template = transport.status_url_template;
-  if (template === undefined) {
-    throw new AgentInvocationError('invalid_envelope', 'Polling requires a status URL.');
-  }
-  return template.replaceAll('{{job_id}}', encodeURIComponent(String(jobId)));
-};
-
-const pollingUrl = (
-  transport: PollingTransport,
-  response: HttpJsonResponse,
-  jobId: string | number,
-): URL => {
-  const rendered = renderStatusUrl(transport, response, jobId);
-  if (rendered.includes('{{')) {
-    throw new AgentInvocationError(
-      'invalid_envelope',
-      'Polling status URL has an unresolved placeholder.',
-    );
-  }
-  const candidate = new URL(rendered, response.url);
-  requireSameOrigin(candidate, response.url);
-  return candidate;
-};
-
-/** Keeps a polling or retry delay inside the authored polling interval bounds. */
-const clampInterval = (transport: PollingTransport, delayMs: number): number =>
-  Math.min(Math.max(delayMs, transport.minimum_interval_ms), transport.maximum_interval_ms);
-
-const boundedPollingDelay = (
-  transport: PollingTransport,
-  retryAfter: string | undefined,
-  fallback: number,
-): number => clampInterval(transport, parseRetryAfter(retryAfter) ?? fallback);
-
-/** Validates every polling invariant before a submission can create remote work. */
-const assertPollingConfiguration = (transport: PollingTransport): void => {
-  if (
-    (transport.status_url_pointer === undefined) ===
-    (transport.status_url_template === undefined)
-  ) {
-    throw new AgentInvocationError(
-      'invalid_envelope',
-      'Polling requires exactly one status URL pointer or template.',
-    );
-  }
-  if (transport.minimum_interval_ms > transport.maximum_interval_ms) {
-    throw new AgentInvocationError(
-      'invalid_envelope',
-      'Polling maximum interval must be at least its minimum interval.',
-    );
-  }
-  if (
-    transport.success_values.some((success) =>
-      transport.failure_values.some((failure) => isDeepStrictEqual(success, failure)),
-    )
-  ) {
-    throw new AgentInvocationError(
-      'invalid_envelope',
-      'Polling success and failure terminal values must not overlap.',
-    );
-  }
-  if (transport.status_url_template !== undefined) {
-    assertStaticUrlAuthority(transport.status_url_template);
-    const rendered = transport.status_url_template.replaceAll('{{job_id}}', 'job');
-    if (rendered.includes('{{')) {
-      throw new AgentInvocationError(
-        'invalid_envelope',
-        'Polling status URL template contains an unsupported placeholder.',
-      );
-    }
-    let submit: URL;
-    let status: URL;
-    try {
-      submit = new URL(transport.submit.url);
-      status = new URL(rendered, submit);
-    } catch (error: unknown) {
-      throw new AgentInvocationError('invalid_envelope', 'Polling status URL is invalid.', {
-        cause: error,
-      });
-    }
-    requireSameOrigin(status, submit);
-  }
-};
-
-/** Converts an authored polling failure state into a failed probe with bounded response evidence. */
-const pollingFailure = (
-  transport: PollingTransport,
-  response: HttpJsonResponse,
-  secrets: readonly string[],
-): AgentInvocationError => {
-  const extracted = readJsonPointer(response.raw, transport.extraction.error_pointer);
-  return new AgentInvocationError(
-    'invalid_envelope',
-    extracted === undefined || extracted === null
-      ? 'Mapped HTTP polling reached a configured failure state.'
-      : redactTransportText(extractRemoteError(extracted, REMOTE_ERROR_FALLBACK).message, secrets),
-    { rawExcerpt: response.rawExcerpt },
-  );
-};
-
-/** Submits remote work, then polls its status URL until an authored terminal value appears. */
-const runPolling = async (
-  transport: PollingTransport,
-  request: AgentRequest,
-  submission: MaterializedHttpRequest,
-  context: ExchangeContext,
-): Promise<CompletedHttpResponse> => {
-  const { policy, retry: retryPolicy, retryAttempts, signal } = context;
-  assertPollingConfiguration(transport);
-  const retries = retryPolicy?.retries ?? 0;
-  const idempotencyHeader = transport.idempotency_header;
-  if (idempotencyHeader !== undefined) {
-    const duplicate = Object.keys(submission.headers).find(
-      (name) => name.toLowerCase() === idempotencyHeader.toLowerCase(),
-    );
-    if (duplicate !== undefined) {
-      throw new AgentInvocationError(
-        'invalid_envelope',
-        'Idempotency header mapping is ambiguous.',
-      );
-    }
-    submission.headers[idempotencyHeader] = createHash('sha256')
-      .update(`${request.run_id}:${request.case_id}`)
-      .digest('hex');
-  }
-
-  let submitted: HttpJsonResponse | undefined;
-  let submittedDurationMs = 0;
-  for (let retry = 0; ; retry += 1) {
-    const attemptDuration = startTimer();
-    let response: HttpJsonResponse;
-    try {
-      response = await requestJson(submission, policy);
-    } catch (error: unknown) {
-      const durationMs = attemptDuration();
-      const normalized = normalizeFailure(error, signal, policy.callerSignal);
-      if (
-        transport.idempotency_header === undefined ||
-        retry >= retries ||
-        !retryableTransportError(normalized)
-      ) {
-        throw withAttemptDuration(normalized, durationMs);
-      }
-      retryAttempts.push(attemptFromError(normalized, durationMs));
-      await wait(
-        boundedPollingDelay(transport, undefined, retryDelay(retryPolicy, retry)),
-        signal,
-        policy.callerSignal,
-      );
-      continue;
-    }
-    const durationMs = attemptDuration();
-    if (response.status >= 200 && response.status < 300) {
-      submitted = response;
-      submittedDurationMs = durationMs;
-      break;
-    }
-    const error = statusError(response);
-    if (
-      transport.idempotency_header === undefined ||
-      retry >= retries ||
-      !retryableStatus(response.status)
-    ) {
-      throw withAttemptDuration(error, durationMs);
-    }
-    retryAttempts.push(attemptFromError(error, durationMs));
-    await wait(
-      boundedPollingDelay(
-        transport,
-        response.headers['retry-after'],
-        retryDelay(retryPolicy, retry),
-      ),
-      signal,
-      policy.callerSignal,
-    );
-  }
-
-  const jobId = readJsonPointer(submitted.raw, transport.job_id_pointer);
-  if (typeof jobId !== 'string' && typeof jobId !== 'number') {
-    throw new AgentInvocationError('invalid_envelope', 'Polling job id extraction failed.');
-  }
-  const statusUrl = pollingUrl(transport, submitted, jobId);
-  const pollRequest: MaterializedHttpRequest = {
-    method: 'GET',
-    url: statusUrl.toString(),
-    headers: Object.fromEntries(
-      Object.entries(submission.headers).filter(
-        ([name]) =>
-          !['content-length', 'content-type', transport.idempotency_header?.toLowerCase()].includes(
-            name.toLowerCase(),
-          ),
-      ),
-    ),
-  };
-
-  let interval = transport.minimum_interval_ms;
-  for (;;) {
-    await wait(interval, signal, policy.callerSignal);
-    let polled: HttpJsonResponse;
-    let polledDurationMs = submittedDurationMs;
-    for (let retry = 0; ; retry += 1) {
-      const attemptDuration = startTimer();
-      let response: HttpJsonResponse;
-      try {
-        response = await requestJson(pollRequest, policy);
-      } catch (error: unknown) {
-        const durationMs = attemptDuration();
-        const normalized = normalizeFailure(error, signal, policy.callerSignal);
-        if (retry >= retries || !retryableTransportError(normalized)) {
-          throw withAttemptDuration(normalized, durationMs);
-        }
-        retryAttempts.push(attemptFromError(normalized, durationMs));
-        await wait(
-          boundedPollingDelay(transport, undefined, retryDelay(retryPolicy, retry)),
-          signal,
-          policy.callerSignal,
-        );
-        continue;
-      }
-      const durationMs = attemptDuration();
-      if (response.status >= 200 && response.status < 300) {
-        polled = response;
-        polledDurationMs = durationMs;
-        break;
-      }
-      const error = statusError(response);
-      if (retry >= retries || !retryableStatus(response.status)) {
-        throw withAttemptDuration(error, durationMs);
-      }
-      retryAttempts.push(attemptFromError(error, durationMs));
-      await wait(
-        boundedPollingDelay(
-          transport,
-          response.headers['retry-after'],
-          retryDelay(retryPolicy, retry),
-        ),
-        signal,
-        policy.callerSignal,
-      );
-    }
-    const status = readJsonPointer(polled.raw, transport.status_pointer);
-    if (transport.success_values.some((value) => isDeepStrictEqual(value, status))) {
-      return {
-        durationMs: polledDurationMs,
-        response: polled,
-        remoteJobId:
-          extractRemoteJobId(polled.raw, transport.extraction.remote_job_id_pointer) ?? jobId,
-      };
-    }
-    if (transport.failure_values.some((value) => isDeepStrictEqual(value, status))) {
-      throw withAttemptDuration(
-        pollingFailure(transport, polled, policy.secrets),
-        polledDurationMs,
-      );
-    }
-    const next = parseRetryAfter(polled.headers['retry-after']) ?? interval * 2;
-    interval = clampInterval(transport, next);
-  }
-};
+): Promise<CompletedHttpResponse> =>
+  requestWithRetries(materialized, context, {
+    allowRetry: true,
+    delayFor: (retry, retryAfter) =>
+      parseRetryAfter(retryAfter) ?? retryDelay(context.retry, retry),
+  });
 
 export {
+  REMOTE_ERROR_FALLBACK,
   attemptFromError,
   extractAgentResponse,
   extractRemoteJobId,
   normalizeFailure,
+  requestWithRetries,
   requireSuccessfulStatus,
+  retryDelay,
   runDirect,
-  runPolling,
+  wait,
+  withAttemptDuration,
+  type CompletedHttpResponse,
+  type ExchangeContext,
 };

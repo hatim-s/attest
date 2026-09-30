@@ -19,8 +19,8 @@ import {
   normalizeFailure,
   requireSuccessfulStatus,
   runDirect,
-  runPolling,
 } from './mapped-http-execution.js';
+import { runPolling } from './mapped-http-polling.js';
 
 /** An agent reached over plain HTTP, either answering directly or through submit-and-poll. */
 type HttpAgentResource = AgentResource & {
