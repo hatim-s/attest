@@ -1,6 +1,6 @@
 # Managed CLI and JSONL process integrations
 
-Use a foreground native CLI for isolated cases, a JSONL bridge for one persistent correlated process per eval run, or a background CLI when a run-scoped local HTTP service is the natural boundary.
+A foreground native CLI starts one process per case. A JSONL bridge keeps one process for the whole eval run and correlates requests by id. A background CLI starts a local HTTP service once per run and sends each case to it.
 
 ## Copy-paste example
 
@@ -141,9 +141,6 @@ Exactly one readiness mode is allowed: repeat the command with either `--readine
 
 ## Testing and stable errors
 
-Run `attest agent test ID --input JSON --output json` before evaluation. JSONL protocol failures become top-level `invocation_failed`, exit `4`, with `details.invocation_code: "invalid_envelope"`. Spawn and exit failures use `spawn_failed` or `nonzero_exit`; deadlines use `timeout`. Ctrl-C uses top-level `cancelled` and exit `130`.
-
-```sh
-attest help agent add --output json
-attest errors --output json
-```
+Run `attest agent test ID --input JSON --output json` before evaluation. A malformed JSONL line
+fails with `details.invocation_code: "invalid_envelope"`. See
+[Agent transport failures](../reference/errors.md#agent-transport-failures) for the other codes.

@@ -1,8 +1,7 @@
 # CLI guide
 
-The Attest CLI separates authored resources from immutable evaluation records. Use this
-page to find the canonical workflow, then use structured help for the exact installed
-command contract.
+This page maps each workflow to its guide and holds the rules every command shares. Structured
+help is the exact contract for the installed version.
 
 ## Discover commands without prose
 
@@ -13,8 +12,8 @@ attest schema print attest.command-request --output json
 attest errors --output json
 ```
 
-Structured help returns `attest.cli-help`; it describes arguments, options, defaults,
-conflicts, implied flags, request schema ids, examples, aliases, and deprecations.
+Structured help returns `attest.cli-help`. It lists arguments, options, defaults, conflicts,
+implied flags, the request schema id, examples, aliases, and constraints.
 `schema print` returns the generated schema requested by id. `errors` returns the
 `attest.cli-errors` registry. These read-only commands do not create a project or a
 run database.
@@ -34,25 +33,23 @@ There are no plural namespace aliases. `attest init` is the only convenience ali
 maps to `attest project init`. The removed `attest run` spelling is not accepted; use
 `attest eval run`.
 
-## Global machine contract
+## Machine output
 
-Use `--output json` for exactly one `attest.cli-result` document on stdout. A success
-document contains `ok: true`, `command`, `project_hash_before`, `project_hash_after`, a
-command-specific `result`, and `warnings`. A failure document contains `ok: false`,
-`command`, and `error`, whose stable fields include `code`, `message`, and `retryable`.
+`--output json` prints one [`attest.cli-result`](../reference/schemas.md#attestcli-result)
+document on stdout. `attest eval run` also accepts `--output jsonl`, which prints one
+[`attest.cli-event`](../reference/schemas.md#attestcli-event) per line and ends with a `result`
+event.
 
-Commands that support streaming accept `--output jsonl`. Every line is one
-`attest.cli-event` document with `sequence`, `time`, `event`, and `data`; the final
-line has `event: "result"`. See [evaluation lifecycle](../concepts/eval-lifecycle.md)
-and [schemas](../reference/schemas.md).
+## Prompts and non-interactive runs
 
-Structured output implies non-interactive operation. Missing required input returns the
-stable `cli_missing_input` error instead of prompting. For explicit non-interactive human
-output, add `--non-interactive`.
+A command prompts only when stdin and stdout are TTYs, output is `human`, CI is not detected, and
+neither `--non-interactive` nor `--from-json` is present. `--output json` implies
+`--non-interactive`. Without prompts, missing required input fails with `cli_missing_input`
+(exit 2), and conflicting flags or an invalid value fail with `cli_usage` (exit 2).
 
 ## Mutation controls
 
-All authored-resource mutations share these controls:
+Every authoring mutation accepts these flags:
 
 ```text
 --dry-run                    validate and return the semantic diff without writing
@@ -61,9 +58,28 @@ All authored-resource mutations share these controls:
 --if-project-hash <sha256>   reject a stale write instead of overwriting it
 ```
 
-Use `--if-project-hash` with the hash returned by the prior read or mutation. A mismatch
-returns `project_changed` and exit code `3`; refresh the project state and rebuild the
-request before retrying.
+`--yes` accepts the confirmation prompt. It never fills in a missing id, command, URL, mapping, or
+secret reference. `--dry-run` returns the same semantic diff without taking the lock, writing a
+journal, or touching files.
+
+`--from-json -` reads the request from stdin. A request must carry the whole command, so it
+conflicts with positional values and authoring flags. Print its schema with
+`attest schema print attest.command-request --output json`.
+
+Pass `--if-project-hash` the `project_hash_after` from a prior read or mutation. A mismatch fails
+with `project_changed` (exit 3). Reload the project, rebuild the request, then retry.
+
+## Rename and remove
+
+`rename` updates every reference to the resource in one transaction. `remove` fails while anything
+references the resource. `agent remove --detach` also removes the tests that use the agent.
+`metric remove --detach` removes every test and case reference to the metric.
+
+```sh
+attest agent rename support support-renamed --dry-run
+attest agent remove support-renamed --detach --yes --output json
+attest metric remove exact --detach --yes --output json
+```
 
 ## Project and inspection commands
 
@@ -89,6 +105,5 @@ paths and references, use the [resource model](../concepts/resource-model.md).
 - [Polling and streams](../integrations/polling-and-streams.md)
 - [WebSockets](../integrations/websockets.md)
 
-Each transport ultimately exchanges the
-[agent protocol](../specs/agent-contract.md); executable metrics use the
-[metric protocol](../specs/metric-contract.md).
+Every transport carries the [agent protocol](../specs/agent-contract.md). Executable metrics use
+the [metric protocol](../specs/metric-contract.md).

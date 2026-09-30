@@ -107,19 +107,13 @@ SSE comment lines are heartbeats. They reset transport idle time; they reset app
 
 ## Security, caps, and redaction
 
-- Use `--header-env HEADER=SOURCE_ENV` for credentials. Resolved secrets require HTTPS except on explicit loopback and are redacted from event evidence and errors.
-- HTTP destinations are DNS-pinned and reject private or special-use addresses except loopback. Redirects and polling status URLs must stay same-origin.
+- Use `--header-env HEADER=SOURCE_ENV` for credentials. Attest redacts resolved secrets from event evidence and errors.
+- The [network rules](./curl-and-http.md#security-and-redaction) for HTTP transports apply.
 - Streams are bounded by request bytes, event count, event bytes, and total evidence bytes. A complete `attest.agent` JSON import can set `limits` and `redaction.event_pointers`.
 - An event above a cap produces `output_cap_exceeded`; malformed UTF-8/JSON or EOF without a terminal event produces `invalid_envelope`.
 
 ## Cancellation, testing, and stable errors
 
-Ctrl-C closes the active request and returns stable top-level error `cancelled` with exit `130`. Idle or attempt deadlines return `invocation_failed`, exit `4`, with `details.invocation_code: "timeout"`. Network, HTTP, extraction, and framing failures keep their stable inner code in the same field.
+Ctrl-C closes the active request. See [Agent transport failures](../reference/errors.md#agent-transport-failures) for the `details.invocation_code` values.
 
 Test terminal success, configured failure, retryable status, `Retry-After`, idle timeout, malformed event, cap overflow, and cancellation against a local fake before using production credentials.
-
-```sh
-attest help agent import --output json
-attest help agent add --output json
-attest errors --output json
-```

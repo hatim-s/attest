@@ -98,9 +98,9 @@ validates that `.attest` and the database are not unsafe symlink escapes.
 
 `.attest/project.lock` is an exclusive `attest.project-lock` record containing hostname, pid,
 process-start identity, creation time, and an unguessable owner token. Writers never steal an
-existing lock. A live lock means wait; an unprovable or malformed lock is not safe to delete. The
-fixed-base CLI can classify a proven-stale lock but does not register a `project unlock` command,
-so automated repair must stop for a human rather than deleting it directly.
+existing lock. A live lock means wait. A lock whose owner cannot be proven dead, or a malformed lock,
+is not safe to delete. When the CLI reports `project_lock_stale`, automated repair stops and a human
+decides.
 
 Dry runs do not create `.attest`, acquire this lock, recover journals, or write files.
 

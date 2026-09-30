@@ -1,6 +1,6 @@
 # cURL import and mapped HTTP
 
-Import a captured cURL request when an existing JSON HTTP API does not speak the native Attest envelope. Import parses the command as inert data, replaces selected values with typed input or secret references, and writes a normal `attest.agent` resource.
+Import a captured cURL request when a JSON HTTP API does not use the native Attest envelope. Import parses the command as data without running it, replaces selected values with case input or secret references, and writes an `attest.agent` resource.
 
 ## Copy-paste example
 
@@ -107,8 +107,11 @@ Unsupported or unsafe flags are reported together before any project write. This
 - Import never executes cURL or a shell. Semicolons, pipes, redirects, backticks, `$()` and `${}` are rejected.
 - Credential-shaped header/query names require an environment binding. Credential-shaped JSON or form fields are rejected because body-secret substitution is not implemented.
 - File-backed bodies must be regular, project-contained files and cannot traverse or escape through symlinks.
-- At runtime, secrets require HTTPS except on explicit loopback endpoints. DNS is resolved and pinned; private and special-use destinations are rejected except loopback.
-- Mapped HTTP follows only bounded, method-preserving, same-origin redirects. Polling URLs must also keep the submission origin.
+  These network rules apply to every HTTP-based transport, including native HTTP, polling, and streams:
+
+- Resolved secrets require HTTPS, except on loopback endpoints.
+- Attest resolves DNS once and pins the address. It rejects private and special-use addresses, except loopback.
+- Mapped HTTP follows only bounded, method-preserving, same-origin redirects. Polling status URLs must keep the submission origin.
 - Captured secrets are discarded at import. Probe output, persisted evidence, response excerpts, and errors redact resolved secret values.
 
 ## Cancellation, retries, and stable errors
@@ -117,9 +120,5 @@ Ctrl-C aborts DNS, connect, response, retry waits, and body reads. The CLI retur
 
 Retries cover safe transport failures and retryable HTTP statuses; agent-reported errors are results and are not retried. Use `--retries 0` for a non-idempotent direct endpoint unless the endpoint itself makes duplicate requests safe.
 
-Automation should inspect `attest.cli-result`. Top-level transport failures use `invocation_failed` with exit code `4`; `details.invocation_code` distinguishes `network`, `timeout`, `http_status`, `output_cap_exceeded`, and `invalid_envelope`. Discover the current grammar and catalog with:
-
-```sh
-attest help agent import --output json
-attest errors --output json
-```
+See [Agent transport failures](../reference/errors.md#agent-transport-failures) for the
+`details.invocation_code` values.

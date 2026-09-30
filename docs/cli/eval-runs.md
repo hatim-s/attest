@@ -17,7 +17,7 @@ attest eval run smoke --timeout 60s --output jsonl
 ## Prerequisites
 
 - Run inside a valid Attest project with at least one test, agent, metric, and resolved case.
-- Ensure every environment variable referenced by the selected agent and metrics is present.
+- Set every environment variable that the selected agents and metrics reference.
 - The project-local `.attest` path and requested JUnit parent must be safe, writable paths.
 
 ## Expected files
@@ -29,9 +29,9 @@ under `.attest/eval-runs/`; owned registry files are removed after termination.
 
 ## Expected stdout
 
-`--output json` emits one `attest.cli-result` document after completion. A completed run has
-`command: "eval.run"`, run and snapshot ids, status, summary, optional baseline/JUnit fields, and a
-`verdict` of `pass` or `fail`. A failing verdict is still `ok: true` but exits 1.
+`--output json` prints one [`attest.cli-result`](../reference/schemas.md#attestcli-result) when
+the run ends. Its `result` holds the run and snapshot ids, status, summary, optional baseline and
+JUnit fields, and a `verdict` of `pass` or `fail`. A failing verdict is still `ok: true` but exits 1.
 
 `--output jsonl` emits one `attest.cli-event` document per line with contiguous zero-based
 `sequence` values. It begins with `run_started`, emits ordered case starts and observed-order case
@@ -104,9 +104,8 @@ shared cases. Historical snapshots without selection metadata remain readable.
 Human output prints a stable final line: `Result: PASS|FAIL|ERROR|CANCELLED (exit N)`. Add
 `--watch` to print run/case lifecycle progress; `--watch` conflicts with JSON and JSONL output.
 
-Structured output disables prompts. `--output json` waits for the terminal envelope. JSONL streams
-events as work proceeds and always terminates with a result event, including after a producer
-failure. Do not mix human status parsing with machine modes.
+`--output json` prints once, after the run ends. `--output jsonl` prints events as cases finish and
+always ends with a `result` event, even when the run fails.
 
 For a strict command request:
 
@@ -126,23 +125,14 @@ For a strict command request:
 attest eval run --from-json ./eval-run.json
 ```
 
-`--from-json` conflicts with test arguments and every run-selection/output flag. The document must
-choose exactly one of non-empty `test_ids` or `all: true`; `watch` is valid only with human output.
-Use `attest schema print attest.command-request --output json` for the complete strict union.
+The request must set exactly one of a non-empty `test_ids` or `all: true`. `watch` is valid only with
+human output.
 
 ## Exit and result semantics
 
-| Exit | Eval meaning                                                                          |
-| ---: | ------------------------------------------------------------------------------------- |
-|    0 | Completed with verdict `pass`; final result has `ok: true`.                           |
-|    1 | Completed with verdict `fail` and `ok: true`, or failed user/project data validation. |
-|    2 | Invalid command grammar or missing non-interactive input.                             |
-|    3 | Project concurrency, lock, stale-lock, or recovery conflict.                          |
-|    4 | Invocation, metric, run-store, artifact, or unexpected infrastructure failure.        |
-|  130 | Cancelled by SIGINT/SIGTERM or a run cancellation request.                            |
-
-Always inspect both the process exit and final result. Exit 1 is deliberately not synonymous with a
-malformed JSON response: a normal evaluated test failure has `ok: true` and `verdict: "fail"`.
+Exit 1 covers both a completed run with verdict `fail` and invalid project data. Check `ok` and
+`result.verdict`, not the exit code alone. [Exit codes](../reference/exit-codes.md) lists every
+code and the JSONL consistency rules.
 
 ## Cancel a run
 
@@ -199,14 +189,7 @@ stable artifact error identities.
 
 ## Agent-readable contract
 
-1. Read `attest help eval run --output json` and honor every conflict, implication, repeatability
-   marker, constraint, and the `attest.command-request` request schema.
-2. Select JSON for one terminal envelope or JSONL for progress; never scrape human output.
-3. In JSONL, verify `schema`, exact sequence continuity, one final `result`, and
-   `result.data.exit_code` consistency with its nested `attest.cli-result`.
-4. Persist `run_id` and `snapshot_hash` as opaque values. Do not derive either from display text.
-5. On error, branch on stable `error.code` and `retryable`; use the catalog in
-   [Errors](../reference/errors.md).
-
-See [Schemas](../reference/schemas.md), [Exit codes](../reference/exit-codes.md), and
-[File layout](../reference/file-layout.md).
+In JSONL, check that `sequence` values are contiguous, that exactly one `result` event ends the
+stream, and that its `data.exit_code` matches the process exit. Store `run_id` and `snapshot_hash`
+as opaque strings. For the general steps, see
+[Repair steps for agents](../reference/errors.md#repair-steps-for-agents).
