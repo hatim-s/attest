@@ -24,7 +24,7 @@ Use Node 22 or later and Bun 1.4 or later. See the [quickstart](docs/quickstart.
 | `@attest/schemas`   | Generated JSON schemas for non-TypeScript consumers                          |
 | `@attest/site`      | Marketing page                                                               |
 
-The [architecture guide](docs/ARCHITECTURE.md) explains the dependency rules and where new code belongs. Cloud code can reuse contracts, core, executor, and runtime without importing the CLI or local application.
+The [architecture guide](docs/ARCHITECTURE.md) explains the dependency rules and where new code belongs.
 
 ## Development
 
@@ -35,7 +35,7 @@ bun run test
 bun run format:check
 ```
 
-The test command runs packages serially because process cleanup tests inspect the operating system's process table. Avoid running those suites concurrently. Tests use temporary projects and fake agents; they do not require provider credentials.
+`bun run test` runs one package at a time because the process-cleanup tests inspect the OS process table. Tests use temporary projects and fake agents, so they need no provider credentials.
 
 Run `bun run generate:schemas` after changing a public contract. Schema tests compare generated files with the authoritative definitions and fail when they differ.
 

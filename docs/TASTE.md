@@ -39,7 +39,7 @@ Every orchestrating agent MUST inline the relevant parts of this guide into code
 ## Dependencies
 
 - Boring and few. Before adding a dep, ask: does the standard library / an existing dep do this? A left-pad-class dep is an automatic reject.
-- Locked stack (do not re-litigate in code): Commander, Zod, Kysely, Hono, TanStack (Router/Query/Table/AI), Tailwind + shadcn/ui, ECharts, Vitest, Playwright.
+- Locked stack, do not re-litigate in code: Commander, Zod, Kysely, Hono, React, TanStack (Query, Virtual, AI), ECharts, Vitest, fast-check.
 
 ## Tests
 

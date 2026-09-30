@@ -13,7 +13,3 @@ Conformance fixtures in `conformance/fixtures/<contract>/` are golden input-and-
 shared across packages. They protect conformance at the contract seam and should change only
 with an intentional contract change. Use property tests for pure logic with combinatorial inputs,
 such as assertion evaluation and diffing.
-
-Browser acceptance is required for dashboard behavior that cannot be established by unit tests.
-Keep required CI deterministic and use the repository's available browser tooling for focused
-local validation until an automated browser suite is added.
