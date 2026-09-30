@@ -1,385 +1,96 @@
-import { execFile } from 'node:child_process';
-import {
-  access,
-  mkdir,
-  mkdtemp,
-  readFile,
-  readdir,
-  rm,
-  symlink,
-  writeFile,
-} from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { createServer } from 'node:http';
+import { access, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 
-import {
-  AGENT_PROTOCOL,
-  COMMAND_REQUEST_SCHEMA_ID,
-  cliResultSchema,
-  type AgentResource,
-} from '@attest/contracts';
-import {
-  createAgentResource,
-  runAgentAddCommand,
-  runAgentRemoveCommand,
-  runAgentTestCommand,
-} from '@attest/local/agent';
-import { LocalError } from '@attest/local';
-import { applyProjectMutation, loadProject } from '@attest/local/project';
+import { AGENT_PROTOCOL, cliHelpSchema, type AgentResource } from '@attest/contracts';
+import { loadProject } from '@attest/local/project';
 import { openStore } from '@attest/local/store';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 
-import { REDACTED } from '../../../_tests_/support/project-fixture.js';
-import type { CliIo } from '../../../commands/shared/command-context.js';
-import { runCli } from '../../../run-cli.js';
+import {
+  createEmptyProject,
+  createFixtureProject,
+  runCommand,
+  runJson,
+  snapshotTree,
+} from '../../../_tests_/support/cli-test-support.js';
+import type { CliInteraction } from '../../shared/cli-interaction.js';
 
 const FIXTURE = fileURLToPath(new URL('./fixtures/native-agent.cjs', import.meta.url));
-const PTY_FIXTURE = fileURLToPath(new URL('./fixtures/pty-agent-command.py', import.meta.url));
-const JSONL_BRIDGE_FIXTURE = fileURLToPath(
-  new URL('../../../../../executor/src/_tests_/fixtures/jsonl-bridge-agent.cjs', import.meta.url),
-);
-const BACKGROUND_FIXTURE = fileURLToPath(
-  new URL('../../../../../executor/src/_tests_/fixtures/background-agent.cjs', import.meta.url),
-);
-const CLI_PACKAGE_ROOT = fileURLToPath(new URL('../../../../', import.meta.url));
-const CLI_BUILT = fileURLToPath(new URL('../../../../dist/cli.js', import.meta.url));
-const execFileAsync = promisify(execFile);
-const temporaryDirectories: string[] = [];
-const originalSecret = process.env.ATTEST_SOURCE_SECRET;
+const WEBSOCKET_SERVER = new URL(
+  '../../../../../executor/src/_tests_/fixtures/websocket-fake-server.ts',
+  import.meta.url,
+).href;
+const originalWebSocketToken = process.env.ATTEST_WS_TOKEN;
 
-const nonInteractive = {
-  ci: false,
-  inputIsTTY: false,
-  outputIsTTY: false,
-  prompt: (): Promise<string> => Promise.reject(new Error('prompt must not be called')),
-  readStdin: (): Promise<string> => Promise.resolve(''),
+type WebSocketFixtureServer = {
+  close: () => Promise<void>;
+  events: () => readonly { headers?: Readonly<Record<string, string>>; type: string }[];
+  url: string;
 };
 
-/** Builds a complete agent.add request for a native CLI agent. */
-const addAgentRequest = (agentId: string, argvJson: string) => ({
-  schema: COMMAND_REQUEST_SCHEMA_ID,
-  command: 'agent.add' as const,
-  agent: createAgentResource({ agentId, argvJson }),
+/** A TTY terminal whose prompt answers come from `answer`. */
+const tty = (answer: (question: string) => string): Partial<CliInteraction> => ({
+  inputIsTTY: true,
+  outputIsTTY: true,
+  prompt: (question) => Promise.resolve(answer(question)),
 });
 
-const collectIo = (): { errors: string[]; io: CliIo; output: string[] } => {
-  const output: string[] = [];
-  const errors: string[] = [];
-  return {
-    errors,
-    output,
-    io: {
-      error: (message) => errors.push(message),
-      output: (message) => output.push(message),
-    },
-  };
-};
+const echoArgv = JSON.stringify([process.execPath, FIXTURE, 'echo']);
 
-/** Narrows parsed JSON and structured error details without trusting their runtime shape. */
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  value !== null && typeof value === 'object' && !Array.isArray(value);
-
-/** Verifies the stable repair-bearing conflict contract returned after prompt-time drift. */
-const expectProjectConflict = (error: unknown): void => {
-  expect(error).toBeInstanceOf(LocalError);
-  if (!(error instanceof LocalError)) throw new Error('Expected a local application error.');
-  expect(error.code).toBe('project_changed');
-  expect(error.hint).toBe('Read the current project hash, rebuild the candidate, and retry.');
-  expect(isRecord(error.details)).toBe(true);
-  if (!isRecord(error.details)) throw new Error('Expected project conflict hash details.');
-  expect(typeof error.details.current_hash).toBe('string');
-  expect(typeof error.details.expected_hash).toBe('string');
-  expect(error.details.current_hash).not.toBe(error.details.expected_hash);
-};
-
-/** Creates an isolated empty project through the public command path. */
-const createProject = async (): Promise<string> => {
-  const parent = await mkdtemp(join(tmpdir(), 'attest-agent-command-'));
-  temporaryDirectories.push(parent);
-  const io = collectIo();
-  expect(
-    await runCli(['project', 'init', 'demo', '--name', 'Demo', '--output', 'json'], {
-      interaction: nonInteractive,
-      io: io.io,
-      workingDirectory: parent,
-    }),
-  ).toBe(0);
-  return join(parent, 'demo');
-};
-
-const run = async (
-  root: string,
-  argv: string[],
-  readStdin: () => Promise<string> = () => Promise.resolve(''),
-) => {
-  const collected = collectIo();
-  const exitCode = await runCli(argv, {
-    interaction: { ...nonInteractive, readStdin },
-    io: collected.io,
-    workingDirectory: root,
-  });
-  return { ...collected, exitCode };
-};
-
-/** Captures every project byte recursively for zero-write and rollback assertions. */
-const snapshotTree = async (root: string, prefix = ''): Promise<Record<string, string>> => {
-  const entries = await readdir(join(root, prefix), { withFileTypes: true });
-  const snapshot: Record<string, string> = {};
-  for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name))) {
-    const relativePath = join(prefix, entry.name);
-    if (entry.isDirectory()) Object.assign(snapshot, await snapshotTree(root, relativePath));
-    else snapshot[relativePath] = await readFile(join(root, relativePath), 'utf8');
-  }
-  return snapshot;
-};
-
-afterEach(async () => {
-  vi.unstubAllGlobals();
-  if (originalSecret === undefined) delete process.env.ATTEST_SOURCE_SECRET;
-  else process.env.ATTEST_SOURCE_SECRET = originalSecret;
-  await Promise.all(
-    temporaryDirectories.splice(0).map((directory) => rm(directory, { recursive: true })),
-  );
+/** The WebSocket transport every authoring route must produce for the same inputs. */
+const canonicalTransport = (): Extract<AgentResource['transport'], { kind: 'websocket' }> => ({
+  kind: 'websocket',
+  lifecycle: 'per_run',
+  connection_mode: 'multiplexed',
+  framing: 'text_json',
+  url: 'wss://agent.example/socket',
+  headers: { Authorization: { from_env: 'ATTEST_WS_TOKEN' } },
+  subprotocol: 'attest',
+  request_template: { request_id: '{{request_id}}', request: '{{request}}' },
+  request_id_pointer: '/request_id',
+  acknowledgement_pointer: '/type',
+  acknowledgement_values: ['acknowledgement'],
+  result_pointer: '/output',
+  error_pointer: '/error',
+  trace_pointer: '/trace',
+  open_timeout_ms: 1_000,
+  message_idle_timeout_ms: 4_000,
+  attempt_timeout_ms: 10_000,
+  ping_interval_ms: 2_000,
+  close_timeout_ms: 500,
+  retry_boundary: 'before_acknowledgement',
+  replay_after_acknowledgement: false,
 });
 
-describe('agent authoring', () => {
-  it('imports and probes a redacted cURL polling adapter through the public CLI', async () => {
-    const root = await createProject();
-    const secret = 'curl-polling-super-secret';
-    process.env.ATTEST_CURL_POLLING_SECRET = secret;
-    let submissions = 0;
-    let polls = 0;
-    let observedAuthorization = '';
-    let observedPrompt: unknown;
-    const server = createServer((request, response) => {
-      const chunks: Buffer[] = [];
-      request.on('data', (chunk: Buffer) => chunks.push(chunk));
-      request.on('end', () => {
-        response.setHeader('content-type', 'application/json');
-        observedAuthorization = String(request.headers.authorization);
-        if (request.url === '/submit') {
-          submissions += 1;
-          observedPrompt = (
-            JSON.parse(Buffer.concat(chunks).toString('utf8')) as { prompt: unknown }
-          ).prompt;
-          response.end(JSON.stringify({ job_id: 'job-1', status_url: '/jobs/job-1' }));
-          return;
-        }
-        polls += 1;
-        response.end(JSON.stringify({ status: 'done', answer: { secret, value: 'ok' } }));
-      });
-    });
-    await new Promise<void>((resolve, reject) => {
-      server.once('error', reject);
-      server.listen(0, '127.0.0.1', resolve);
-    });
-    const address = server.address();
-    if (address === null || typeof address === 'string') throw new Error('Expected TCP fixture.');
-    const source = join(root, 'polling.curl');
-    await writeFile(
-      source,
-      `curl 'http://127.0.0.1:${String(address.port)}/submit' -H 'Authorization: Bearer ${secret}' -H 'Content-Type: application/json' --data-raw '{"prompt":"replace-me"}'`,
-    );
-    try {
-      const imported = await run(root, [
-        'agent',
-        'import',
-        source,
-        '--type',
-        'curl',
-        '--as',
-        'polling-curl',
-        '--header-env',
-        'Authorization=ATTEST_CURL_POLLING_SECRET',
-        '--map-body',
-        '/prompt=/question',
-        '--response-pointer',
-        '/answer',
-        '--error-pointer',
-        '/error',
-        '--trace-pointer',
-        '/trace',
-        '--poll-job-id-pointer',
-        '/job_id',
-        '--poll-status-url-pointer',
-        '/status_url',
-        '--poll-status-pointer',
-        '/status',
-        '--poll-success',
-        '"done"',
-        '--poll-failure',
-        '"failed"',
-        '--poll-minimum-interval',
-        '1ms',
-        '--poll-maximum-interval',
-        '5ms',
-        '--idempotency-header',
-        'Idempotency-Key',
-        '--attempt-timeout',
-        '2s',
-        '--response-cap-bytes',
-        '4096',
-        '--retries',
-        '1',
-        '--output',
-        'json',
-      ]);
-      expect(imported.exitCode).toBe(0);
-      expect(imported.output.join('')).not.toContain(secret);
-      expect(JSON.parse(imported.output[0] ?? '{}')).toMatchObject({
-        ok: true,
-        result: {
-          import_preview: {
-            extraction: {
-              result_pointer: '/answer',
-              error_pointer: '/error',
-              trace_pointer: '/trace',
-            },
-            request: { headers: { Authorization: '[from_env:ATTEST_CURL_POLLING_SECRET]' } },
-          },
-        },
-      });
+const canonicalWebSocketAgent = (id: string): AgentResource => ({
+  schema: 'attest.agent',
+  id,
+  name: id,
+  transport: canonicalTransport(),
+  redaction: { headers: ['Authorization'] },
+  capabilities: { trace: true },
+});
 
-      const loaded = await loadProject({ project: root });
-      expect(loaded.agents[0]).toMatchObject({
-        id: 'polling-curl',
-        transport: {
-          kind: 'polling',
-          submit: {
-            headers: { Authorization: { from_env: 'ATTEST_CURL_POLLING_SECRET' } },
-            body: { prompt: '{{input/question}}' },
-          },
-        },
-      });
-      expect(JSON.stringify(loaded.agents[0])).not.toContain(secret);
+afterEach(() => {
+  if (originalWebSocketToken === undefined) delete process.env.ATTEST_WS_TOKEN;
+  else process.env.ATTEST_WS_TOKEN = originalWebSocketToken;
+});
 
-      const tested = await run(root, [
-        'agent',
-        'test',
-        'polling-curl',
-        '--input',
-        '{"question":"hello"}',
-        '--output',
-        'json',
-      ]);
-      expect(tested.exitCode).toBe(0);
-      expect(tested.output.join('')).not.toContain(secret);
-      expect(tested.output.join('')).toContain(REDACTED);
-      expect(JSON.parse(tested.output[0] ?? '{}')).toMatchObject({
-        result: {
-          attempts: [{ diagnostics: { remoteJobId: 'job-1' } }],
-        },
-      });
-      expect(submissions).toBe(1);
-      expect(polls).toBe(1);
-      expect(observedAuthorization).toBe(secret);
-      expect(observedPrompt).toBe('hello');
-    } finally {
-      delete process.env.ATTEST_CURL_POLLING_SECRET;
-      await new Promise<void>((resolve) => server.close(() => resolve()));
-    }
-  });
-
-  it('reports a configured polling failure as a failed public CLI probe', async () => {
-    const root = await createProject();
-    const server = createServer((request, response) => {
-      response.setHeader('content-type', 'application/json');
-      response.end(
-        request.url === '/submit'
-          ? JSON.stringify({ job: 'failure-job', url: '/jobs/failure-job' })
-          : JSON.stringify({ status: 'failed', error: { message: 'remote failure' } }),
-      );
-    });
-    await new Promise<void>((resolve, reject) => {
-      server.once('error', reject);
-      server.listen(0, '127.0.0.1', resolve);
-    });
-    const address = server.address();
-    if (address === null || typeof address === 'string') throw new Error('Expected TCP fixture.');
-    await writeFile(
-      join(root, 'failure.curl'),
-      `curl http://127.0.0.1:${String(address.port)}/submit -X POST`,
-    );
-    try {
-      expect(
-        (
-          await run(root, [
-            'agent',
-            'import',
-            'failure.curl',
-            '--type',
-            'curl',
-            '--as',
-            'failure-poller',
-            '--response-pointer',
-            '/answer',
-            '--error-pointer',
-            '/error',
-            '--poll-job-id-pointer',
-            '/job',
-            '--poll-status-url-pointer',
-            '/url',
-            '--poll-status-pointer',
-            '/status',
-            '--poll-success',
-            '"done"',
-            '--poll-failure',
-            '"failed"',
-            '--poll-minimum-interval',
-            '1ms',
-            '--poll-maximum-interval',
-            '2ms',
-            '--output',
-            'json',
-          ])
-        ).exitCode,
-      ).toBe(0);
-      const tested = await run(root, ['agent', 'test', 'failure-poller', '--output', 'json']);
-      expect(tested.exitCode).toBe(4);
-      expect(tested.output.join('')).toContain('remote failure');
-      expect(JSON.parse(tested.output[0] ?? '{}')).toMatchObject({
-        ok: false,
-        error: {
-          code: 'invocation_failed',
-          details: { invocation_code: 'invalid_envelope' },
-        },
-      });
-    } finally {
-      await new Promise<void>((resolve) => server.close(() => resolve()));
-    }
-  });
-
-  it('keeps guided, flag, stdin, and from-json add/import paths on canonical resources', async () => {
-    const root = await createProject();
+describe('agent commands', () => {
+  it('routes guided, --from-json, and import requests to canonical resources', async () => {
+    const root = await createEmptyProject();
     const questions: string[] = [];
-    const guided = collectIo();
-    expect(
-      await runCli(['agent', 'add'], {
-        workingDirectory: root,
-        io: guided.io,
-        interaction: {
-          ci: false,
-          inputIsTTY: true,
-          outputIsTTY: true,
-          prompt: (question) => {
-            questions.push(question);
-            return Promise.resolve(
-              question.includes('Apply these changes?')
-                ? 'yes'
-                : question.startsWith('Agent id')
-                  ? 'guided'
-                  : question.startsWith('Transport')
-                    ? 'cli'
-                    : `${process.execPath} ${FIXTURE} echo`,
-            );
-          },
-          readStdin: () => Promise.resolve(''),
-        },
+    const guided = await runCommand(root, ['agent', 'add'], {
+      interaction: tty((question) => {
+        questions.push(question);
+        if (question.includes('Apply these changes?')) return 'yes';
+        if (question.startsWith('Agent id')) return 'guided';
+        if (question.startsWith('Transport')) return 'cli';
+        return 'node agent.mjs';
       }),
-    ).toBe(0);
+    });
+    expect(guided.exitCode).toBe(0);
     expect(questions.slice(0, 3)).toEqual([
       'Agent id: ',
       'Transport [cli/http/background/jsonl/stream/websocket]: ',
@@ -387,66 +98,44 @@ describe('agent authoring', () => {
     ]);
     expect(questions[3]).toContain('Apply these changes? [y/N]');
 
+    const agent = (id: string): AgentResource => ({
+      schema: 'attest.agent',
+      id,
+      name: id,
+      transport: { kind: 'native_cli', lifecycle: 'per_case', argv: ['node', 'agent.mjs'] },
+    });
     const request = JSON.stringify({
       schema: 'attest.command-request',
       command: 'agent.add',
-      agent: {
-        schema: 'attest.agent',
-        id: 'requested',
-        name: 'Requested',
-        transport: {
-          kind: 'native_cli',
-          lifecycle: 'per_case',
-          argv: [process.execPath, FIXTURE, 'echo'],
-        },
-      },
+      agent: agent('requested'),
     });
-    expect(
-      (
-        await run(root, ['agent', 'add', '--from-json', '-', '--output', 'json'], () =>
-          Promise.resolve(request),
-        )
-      ).exitCode,
-    ).toBe(0);
+    const fromJson = await runJson(root, ['agent', 'add', '--from-json', '-'], { stdin: request });
+    expect(fromJson.exitCode).toBe(0);
 
-    await writeFile(
-      join(root, 'import.json'),
-      JSON.stringify({
-        schema: 'attest.agent',
-        id: 'source-id',
-        name: 'Imported',
-        transport: {
-          kind: 'native_cli',
-          lifecycle: 'per_case',
-          argv: [process.execPath, FIXTURE, 'echo'],
-        },
-      }),
-    );
-    expect(
-      (
-        await run(root, [
-          'agent',
-          'import',
-          'import.json',
-          '--type',
-          'json',
-          '--as',
-          'imported',
-          '--output',
-          'json',
-        ])
-      ).exitCode,
-    ).toBe(0);
+    await writeFile(join(root, 'import.json'), JSON.stringify(agent('source-id')));
+    const imported = await runJson(root, [
+      'agent',
+      'import',
+      'import.json',
+      '--type',
+      'json',
+      '--as',
+      'imported',
+    ]);
+    expect(imported.exitCode).toBe(0);
+
     const loaded = await loadProject({ project: root });
     expect(loaded.agents.map(({ id }) => id)).toEqual(['guided', 'imported', 'requested']);
+    expect(loaded.agents.find(({ id }) => id === 'guided')?.transport).toEqual(
+      agent('guided').transport,
+    );
   });
 
-  it('returns non-TTY missing-input and stdin/request conflicts as one structured failure', async () => {
-    const root = await createProject();
-    const missing = await run(root, ['agent', 'add', '--output', 'json']);
+  it('reports missing non-TTY input and a request that shares stdin with its source', async () => {
+    const root = await createEmptyProject();
+    const missing = await runJson(root, ['agent', 'add']);
     expect(missing.exitCode).toBe(2);
-    expect(missing.errors).toEqual([]);
-    expect(JSON.parse(missing.output[0] ?? '{}')).toMatchObject({
+    expect(missing.document).toMatchObject({
       ok: false,
       command: 'agent.add',
       error: { code: 'cli_missing_input' },
@@ -459,46 +148,33 @@ describe('agent authoring', () => {
       source_type: 'json',
       as: 'stdin-agent',
     });
-    const conflict = await run(
-      root,
-      ['agent', 'import', '--from-json', '-', '--output', 'json'],
-      () => Promise.resolve(request),
-    );
+    const conflict = await runJson(root, ['agent', 'import', '--from-json', '-'], {
+      stdin: request,
+    });
     expect(conflict.exitCode).toBe(2);
-    expect(conflict.output[0]).toContain('share stdin');
-    expect(JSON.parse(conflict.output[0] ?? '{}')).toMatchObject({
-      error: { code: 'cli_usage' },
+    expect(conflict.document).toMatchObject({
+      error: {
+        code: 'cli_usage',
+        message: 'The command request and its source cannot share stdin.',
+      },
     });
   });
 
-  it('uses argv arrays literally and never gives shell metacharacters execution semantics', async () => {
-    const root = await createProject();
+  it('passes --argv-json elements literally without shell semantics', async () => {
+    const root = await createEmptyProject();
     const marker = join(root, 'must-not-exist');
     const hostileArgument = `;touch ${marker}`;
     const argv = JSON.stringify([process.execPath, FIXTURE, 'echo', hostileArgument, '$(false)']);
-    expect(
-      (await run(root, ['agent', 'add', 'safe', '--argv-json', argv, '--output', 'json'])).exitCode,
-    ).toBe(0);
-    const tested = await run(root, [
-      'agent',
-      'test',
-      'safe',
-      '--input',
-      '{"ping":true}',
-      '--output',
-      'json',
-    ]);
+    expect((await runJson(root, ['agent', 'add', 'safe', '--argv-json', argv])).exitCode).toBe(0);
+
+    const tested = await runJson(root, ['agent', 'test', 'safe', '--input', '{"ping":true}']);
     expect(tested.exitCode).toBe(0);
-    expect(JSON.parse(tested.output[0] ?? '{}')).toMatchObject({
+    expect(tested.document).toMatchObject({
       result: {
         response: {
           output: {
             argv: [hostileArgument, '$(false)'],
-            handshake: {
-              case_id: 'connection-test',
-              protocol: AGENT_PROTOCOL,
-              run_id: '01ARZ3NDEKTSV4RRFFQ69G5FAV',
-            },
+            handshake: { case_id: 'connection-test', protocol: AGENT_PROTOCOL },
             input: { ping: true },
           },
         },
@@ -507,400 +183,102 @@ describe('agent authoring', () => {
     await expect(access(marker)).rejects.toBeDefined();
   });
 
-  it('authors and validates Vercel sandbox configuration for native CLI agents', async () => {
-    const root = await createProject();
-    const sandbox = JSON.stringify({
+  it('maps --sandbox-json onto native CLI agents and rejects it elsewhere', async () => {
+    const root = await createEmptyProject();
+    const sandbox = {
       kind: 'vercel',
       image: 'node:22',
       files: [{ source: 'src/agent.mjs', destination: 'workspace/agent.mjs', mode: 0o755 }],
       artifacts: [{ source: 'workspace/output.json', destination: 'artifacts/output.json' }],
       artifact_directory: '.attest/artifacts',
-    });
-    const added = await run(root, [
+    };
+    const added = await runJson(root, [
       'agent',
       'add',
       'sandboxed',
       '--native-command',
       'node workspace/agent.mjs',
       '--sandbox-json',
-      sandbox,
-      '--output',
-      'json',
+      JSON.stringify(sandbox),
     ]);
-
     expect(added.exitCode).toBe(0);
     expect((await loadProject({ project: root })).agents[0]?.transport).toMatchObject({
       kind: 'native_cli',
-      sandbox: JSON.parse(sandbox) as unknown,
+      sandbox,
     });
 
-    const argvSandbox = JSON.stringify({ kind: 'vercel', files: [] });
-    const argvAdded = await run(root, [
-      'agent',
-      'add',
-      'sandboxed-argv',
-      '--argv-json',
-      '["node","agent.mjs"]',
-      '--sandbox-json',
-      argvSandbox,
-      '--output',
-      'json',
-    ]);
-    expect(argvAdded.exitCode).toBe(0);
-    expect(
-      (await loadProject({ project: root })).agents.find(({ id }) => id === 'sandboxed-argv')
-        ?.transport,
-    ).toMatchObject({ kind: 'native_cli', sandbox: JSON.parse(argvSandbox) as unknown });
-
-    for (const invalidSandbox of [
-      '{',
-      JSON.stringify({ kind: 'vercel' }),
-      JSON.stringify({
-        kind: 'vercel',
-        files: [{ source: '../agent.mjs', destination: 'agent.mjs' }],
-      }),
-    ]) {
-      const rejected = await run(root, [
+    const traversal = JSON.stringify({
+      kind: 'vercel',
+      files: [{ source: '../agent.mjs', destination: 'agent.mjs' }],
+    });
+    for (const [selector, value, invalidSandbox] of [
+      ['--argv-json', '["node","agent.mjs"]', '{'],
+      ['--argv-json', '["node","agent.mjs"]', traversal],
+      [
+        '--native-http',
+        'https://example.com/invoke',
+        JSON.stringify({ kind: 'vercel', files: [] }),
+      ],
+    ] as const) {
+      const rejected = await runJson(root, [
         'agent',
         'add',
         'invalid-sandbox',
-        '--argv-json',
-        '["node","agent.mjs"]',
+        selector,
+        value,
         '--sandbox-json',
         invalidSandbox,
-        '--output',
-        'json',
       ]);
       expect(rejected.exitCode).toBe(2);
-      expect(JSON.parse(rejected.output[0] ?? '{}')).toMatchObject({
+      expect(rejected.document).toMatchObject({
         error: { code: 'cli_usage', path: '--sandbox-json' },
       });
     }
-
-    const foreignTransport = await run(root, [
-      'agent',
-      'add',
-      'invalid-transport',
-      '--native-http',
-      'https://example.com/invoke',
-      '--sandbox-json',
-      JSON.stringify({ kind: 'vercel', files: [] }),
-      '--output',
-      'json',
-    ]);
-    expect(foreignTransport.exitCode).toBe(2);
-    expect(JSON.parse(foreignTransport.output[0] ?? '{}')).toMatchObject({
-      error: { code: 'cli_usage', path: '--sandbox-json' },
-    });
   });
 
-  it('redacts CLI secrets from successful and hostile process evidence', async () => {
-    const root = await createProject();
-    process.env.ATTEST_SOURCE_SECRET = 'literal-super-secret';
-    for (const [id, behavior] of [
-      ['success', 'trace'],
-      ['hostile', 'invalid'],
-    ] as const) {
-      const argv = JSON.stringify([process.execPath, FIXTURE, behavior]);
-      expect(
-        (
-          await run(root, [
-            'agent',
-            'add',
-            id,
-            '--argv-json',
-            argv,
-            '--env',
-            'ATTEST_TEST_SECRET=ATTEST_SOURCE_SECRET',
-            '--trace',
-            '--output',
-            'json',
-          ])
-        ).exitCode,
-      ).toBe(0);
-    }
-
-    const success = await run(root, ['agent', 'test', 'success', '--output', 'json']);
-    expect(success.exitCode).toBe(0);
-    expect(success.output.join('')).not.toContain('literal-super-secret');
-    expect(JSON.parse(success.output[0] ?? '{}')).toMatchObject({
-      result: {
-        response: { output: { secret: REDACTED }, trace: { trace_id: 'connection-trace' } },
-      },
-    });
-
-    const hostile = await run(root, ['agent', 'test', 'hostile', '--output', 'json']);
-    expect(hostile.exitCode).toBe(4);
-    expect(hostile.output.join('')).not.toContain('literal-super-secret');
-    expect(hostile.output.join('')).toContain(REDACTED);
-    expect(JSON.parse(hostile.output[0] ?? '{}')).toMatchObject({
-      error: {
-        code: 'invocation_failed',
-        details: {
-          invocation_code: 'invalid_envelope',
-        },
-      },
-    });
-  });
-
-  it('passes runtime HTTP headers but redacts hostile HTTP responses and traces', async () => {
-    const root = await createProject();
-    const secret = 'http"\\super-secret';
-    process.env.ATTEST_SOURCE_SECRET = secret;
-    let observedAuthorization: string | null = null;
-    vi.stubGlobal('fetch', (_url: string, init: RequestInit) => {
-      observedAuthorization = new Headers(init.headers).get('authorization');
-      return Promise.resolve(
-        new Response(
-          JSON.stringify({
-            protocol: 'attest.agent-invocation',
-            output: { authorization: observedAuthorization, echoed: secret },
-            trace: {
-              schema: 'attest.trace',
-              trace_id: 'http-trace',
-              spans: [],
-            },
-          }),
-          { status: 200 },
-        ),
-      );
-    });
-    expect(
-      (
-        await run(root, [
-          'agent',
-          'add',
-          'http-agent',
-          '--native-http',
-          'https://agent.example/invoke',
-          '--header-env',
-          'Authorization=ATTEST_SOURCE_SECRET',
-          '--output',
-          'json',
-        ])
-      ).exitCode,
-    ).toBe(0);
-    expect((await loadProject({ project: root })).agents[0]?.transport).toMatchObject({
-      kind: 'http',
-      response_mode: 'attest_envelope',
-    });
-    const tested = await run(root, ['agent', 'test', 'http-agent', '--output', 'json']);
-    expect(observedAuthorization).toBe(secret);
-    expect(tested.output.join('')).not.toContain(secret);
-    expect(tested.output.join('')).not.toContain(JSON.stringify(secret).slice(1, -1));
-    expect(JSON.parse(tested.output[0] ?? '{}')).toMatchObject({
-      result: {
-        response: {
-          output: { authorization: REDACTED, echoed: REDACTED },
-          trace: { trace_id: 'http-trace' },
-        },
-      },
-    });
-  });
-
-  it('classifies timeout and cancellation without writing project bytes', async () => {
-    const root = await createProject();
-    const argv = JSON.stringify([process.execPath, FIXTURE, 'hang']);
-    expect(
-      (
-        await run(root, [
-          'agent',
-          'add',
-          'slow',
-          '--argv-json',
-          argv,
-          '--timeout',
-          '20ms',
-          '--output',
-          'json',
-        ])
-      ).exitCode,
-    ).toBe(0);
+  it('keeps dry runs deterministic and write-free and reports a stale --if-project-hash', async () => {
+    const root = await createEmptyProject();
     const before = await snapshotTree(root);
-    const timeout = await run(root, ['agent', 'test', 'slow', '--output', 'json']);
-    expect(timeout.exitCode).toBe(4);
-    expect(JSON.parse(timeout.output[0] ?? '{}')).toMatchObject({
-      error: { code: 'invocation_failed', details: { invocation_code: 'timeout' } },
-    });
-
-    const controller = new AbortController();
-    const pending = runAgentTestCommand({
-      project: root,
-      request: {
-        schema: COMMAND_REQUEST_SCHEMA_ID,
-        command: 'agent.test',
-        agent_id: 'slow',
-        input: {},
-      },
-      signal: controller.signal,
-      workingDirectory: root,
-    });
-    setTimeout(() => controller.abort(), 5);
-    await expect(pending).rejects.toMatchObject({ code: 'cancelled' });
-    expect(await snapshotTree(root)).toEqual(before);
-  }, 15_000);
-
-  it('keeps dry-run deterministic and write-free and reports stale project hashes', async () => {
-    const root = await createProject();
-    const before = await snapshotTree(root);
-    const argv = JSON.stringify([process.execPath, FIXTURE, 'echo']);
-    const command = [
-      'agent',
-      'add',
-      'preview',
-      '--argv-json',
-      argv,
-      '--dry-run',
-      '--output',
-      'json',
-    ];
-    const first = await run(root, command);
-    const second = await run(root, command);
+    const command = ['agent', 'add', 'preview', '--argv-json', echoArgv, '--dry-run'];
+    const first = await runJson(root, command);
+    const second = await runJson(root, command);
     expect(second.output).toEqual(first.output);
-    expect(JSON.parse(first.output[0] ?? '{}')).toMatchObject({
+    expect(first.document).toMatchObject({
       ok: true,
       result: { committed: false, dry_run: true, operations: [{ op: 'add' }] },
     });
     expect(await snapshotTree(root)).toEqual(before);
 
-    const conflict = await run(root, [
+    const staleHash = 'a'.repeat(64);
+    const conflict = await runJson(root, [
       'agent',
       'add',
       'conflict',
       '--argv-json',
-      argv,
+      echoArgv,
       '--if-project-hash',
-      'a'.repeat(64),
-      '--output',
-      'json',
+      staleHash,
     ]);
     expect(conflict.exitCode).toBe(3);
-    expect(JSON.parse(conflict.output[0] ?? '{}')).toMatchObject({
-      error: { code: 'project_changed', details: { expected_hash: 'a'.repeat(64) } },
+    expect(conflict.document).toMatchObject({
+      error: { code: 'project_changed', details: { expected_hash: staleHash } },
     });
     expect(await snapshotTree(root)).toEqual(before);
   });
 
-  it('rejects prompt-time project drift without replacing conauthored resources', async () => {
-    const root = await createProject();
-    const argvJson = JSON.stringify([process.execPath, FIXTURE, 'echo']);
-    let addConflict: unknown;
-    try {
-      await runAgentAddCommand({
-        interactive: true,
-        project: root,
-        prompt: async (question) => {
-          expect(question).toContain('- add agent previewed');
-          await runAgentAddCommand({
-            interactive: false,
-            project: root,
-            request: addAgentRequest('racer', argvJson),
-            workingDirectory: root,
-          });
-          return 'yes';
-        },
-        request: addAgentRequest('previewed', argvJson),
-        workingDirectory: root,
-      });
-    } catch (error: unknown) {
-      addConflict = error;
-    }
-    expectProjectConflict(addConflict);
-    await expect(loadProject({ project: root })).resolves.toMatchObject({
-      agents: [{ id: 'racer' }],
-    });
-
-    const loaded = await loadProject({ project: root });
-    const candidate = structuredClone({
-      agents: loaded.agents,
-      datasets: loaded.datasets,
-      metrics: loaded.metrics,
-      project: loaded.project,
-      tests: loaded.tests,
-    });
-    candidate.tests.push({
-      schema: 'attest.test',
-      id: 'racer-smoke',
-      name: 'Racer smoke',
-      agent_id: 'racer',
-      cases: [],
-      datasets: [],
-      metrics: [],
-    });
-    await applyProjectMutation({ candidate, projectRoot: root });
-
-    let removeConflict: unknown;
-    try {
-      await runAgentRemoveCommand({
-        interactive: true,
-        project: root,
-        prompt: async (question) => {
-          expect(question).toContain('- remove test racer-smoke');
-          await runAgentAddCommand({
-            interactive: false,
-            project: root,
-            request: addAgentRequest('concurrent', argvJson),
-            workingDirectory: root,
-          });
-          return 'yes';
-        },
-        request: {
-          schema: COMMAND_REQUEST_SCHEMA_ID,
-          command: 'agent.remove',
-          agent_id: 'racer',
-          detach: true,
-        },
-        workingDirectory: root,
-      });
-    } catch (error: unknown) {
-      removeConflict = error;
-    }
-    expectProjectConflict(removeConflict);
-    await expect(loadProject({ project: root })).resolves.toMatchObject({
-      agents: [{ id: 'concurrent' }, { id: 'racer' }],
-      tests: [{ agent_id: 'racer', id: 'racer-smoke' }],
-    });
-  });
-
-  it('renames references and requires explicit detach for dependent removal', async () => {
-    const root = await createProject();
-    const argv = JSON.stringify([process.execPath, FIXTURE, 'echo']);
-    expect(
-      (await run(root, ['agent', 'add', 'support', '--argv-json', argv, '--output', 'json']))
-        .exitCode,
-    ).toBe(0);
-    const loaded = await loadProject({ project: root });
-    const candidate = structuredClone({
-      agents: loaded.agents,
-      datasets: loaded.datasets,
-      metrics: loaded.metrics,
-      project: loaded.project,
-      tests: loaded.tests,
-    });
-    candidate.tests.push({
-      schema: 'attest.test',
-      id: 'smoke',
-      name: 'Smoke',
-      agent_id: 'support',
-      cases: [],
-      datasets: [],
-      metrics: [],
-    });
-    await applyProjectMutation({ candidate, projectRoot: root });
-
-    expect(
-      (await run(root, ['agent', 'rename', 'support', 'support-renamed', '--output', 'json']))
-        .exitCode,
-    ).toBe(0);
+  it('renames references and removes a referenced agent only with --detach and --yes', async () => {
+    const root = await createFixtureProject();
+    const renamed = await runJson(root, ['agent', 'rename', 'support', 'support-renamed']);
+    expect(renamed.exitCode).toBe(0);
     await expect(loadProject({ project: root })).resolves.toMatchObject({
       tests: [{ agent_id: 'support-renamed' }],
     });
-    const blocked = await run(root, ['agent', 'remove', 'support-renamed', '--output', 'json']);
+
+    const blocked = await runJson(root, ['agent', 'remove', 'support-renamed']);
     expect(blocked.exitCode).toBe(1);
-    expect(JSON.parse(blocked.output[0] ?? '{}')).toMatchObject({
-      error: { code: 'project_invalid' },
-    });
-    const humanPreview = await run(root, [
+    expect(blocked.document).toMatchObject({ error: { code: 'project_invalid' } });
+
+    const humanPreview = await runCommand(root, [
       'agent',
       'remove',
       'support-renamed',
@@ -908,55 +286,31 @@ describe('agent authoring', () => {
       '--dry-run',
     ]);
     expect(humanPreview.exitCode).toBe(0);
-    expect(humanPreview.output.join('\n')).toContain('Warning: Removed dependent tests: smoke');
-    const beforeCascade = await snapshotTree(root);
-    const confirmationRequired = await run(root, [
-      'agent',
-      'remove',
-      'support-renamed',
-      '--detach',
-      '--output',
-      'json',
-    ]);
-    expect(confirmationRequired.exitCode).toBe(2);
-    expect(JSON.parse(confirmationRequired.output[0] ?? '{}')).toMatchObject({
-      error: { code: 'cli_usage', path: '--yes' },
-    });
-    expect(await snapshotTree(root)).toEqual(beforeCascade);
-    const removed = await run(root, [
+    expect(humanPreview.output.join('\n')).toContain('Warning: Removed dependent tests: refund');
+
+    const before = await snapshotTree(root);
+    const unconfirmed = await runJson(root, ['agent', 'remove', 'support-renamed', '--detach']);
+    expect(unconfirmed.exitCode).toBe(2);
+    expect(unconfirmed.document).toMatchObject({ error: { code: 'cli_usage', path: '--yes' } });
+    expect(await snapshotTree(root)).toEqual(before);
+
+    const removed = await runJson(root, [
       'agent',
       'remove',
       'support-renamed',
       '--detach',
       '--yes',
-      '--output',
-      'json',
     ]);
     expect(removed.exitCode).toBe(0);
-    expect(JSON.parse(removed.output[0] ?? '{}')).toMatchObject({
-      result: { warnings: ['Removed dependent tests: smoke'] },
+    expect(removed.document).toMatchObject({
+      result: { warnings: ['Removed dependent tests: refund'] },
     });
     await expect(loadProject({ project: root })).resolves.toMatchObject({ agents: [], tests: [] });
   });
 
-  it('accepts common options before the namespace and rejects duplicate positions deterministically', async () => {
-    const root = await createProject();
-    const argv = JSON.stringify([process.execPath, FIXTURE, 'echo']);
-    const prefixed = await run(root, [
-      '--output',
-      'json',
-      '--non-interactive',
-      'agent',
-      'add',
-      'global-position',
-      '--argv-json',
-      argv,
-    ]);
-    expect(prefixed.exitCode).toBe(0);
-    expect(JSON.parse(prefixed.output[0] ?? '{}')).toMatchObject({
-      command: 'agent.add',
-      ok: true,
-    });
+  it('accepts common options before the namespace and rejects a repeated --output', async () => {
+    const root = await createEmptyProject();
+    const prefix = ['--output', 'json', '--non-interactive'];
     await writeFile(
       join(root, 'prefix-import.json'),
       JSON.stringify({
@@ -970,18 +324,19 @@ describe('agent authoring', () => {
         },
       }),
     );
-    for (const command of [
-      ['agent', 'import', 'prefix-import.json', '--as', 'prefix-import'],
-      ['agent', 'rename', 'global-position', 'renamed-global'],
-      ['agent', 'test', 'renamed-global'],
-      ['agent', 'remove', 'prefix-import'],
-    ]) {
-      const result = await run(root, ['--output', 'json', '--non-interactive', ...command]);
+    for (const [command, argv] of [
+      ['agent.add', ['agent', 'add', 'global-position', '--argv-json', echoArgv]],
+      ['agent.import', ['agent', 'import', 'prefix-import.json', '--as', 'prefix-import']],
+      ['agent.rename', ['agent', 'rename', 'global-position', 'renamed-global']],
+      ['agent.test', ['agent', 'test', 'renamed-global']],
+      ['agent.remove', ['agent', 'remove', 'prefix-import']],
+    ] as const) {
+      const result = await runCommand(root, [...prefix, ...argv]);
       expect(result.exitCode).toBe(0);
-      expect(JSON.parse(result.output[0] ?? '{}')).toMatchObject({ ok: true });
+      expect(JSON.parse(result.output[0] ?? '')).toMatchObject({ command, ok: true });
     }
 
-    const duplicate = await run(root, [
+    const duplicate = await runCommand(root, [
       '--output',
       'json',
       'agent',
@@ -991,616 +346,33 @@ describe('agent authoring', () => {
       'json',
     ]);
     expect(duplicate.exitCode).toBe(2);
-    expect(JSON.parse(duplicate.output[0] ?? '{}')).toMatchObject({
+    expect(JSON.parse(duplicate.output[0] ?? '')).toMatchObject({
       command: 'agent.test',
       error: { code: 'cli_usage', path: '--output' },
     });
   });
 
-  it('shows a guided semantic preview and defaults confirmation to no', async () => {
-    const root = await createProject();
+  it('shows the guided semantic preview and treats an empty confirmation as no', async () => {
+    const root = await createEmptyProject();
     const before = await snapshotTree(root);
     const questions: string[] = [];
-    const collected = collectIo();
-    const exitCode = await runCli(['agent', 'add'], {
-      interaction: {
-        ci: false,
-        inputIsTTY: true,
-        outputIsTTY: true,
-        prompt: (question) => {
-          questions.push(question);
-          if (question.startsWith('Agent id')) return Promise.resolve('declined');
-          if (question.startsWith('Transport')) return Promise.resolve('cli');
-          if (question.startsWith('Native command')) {
-            return Promise.resolve(`${process.execPath} ${FIXTURE} echo`);
-          }
-          return Promise.resolve('');
-        },
-        readStdin: () => Promise.resolve(''),
-      },
-      io: collected.io,
-      workingDirectory: root,
+    const declined = await runCommand(root, ['agent', 'add'], {
+      interaction: tty((question) => {
+        questions.push(question);
+        if (question.startsWith('Agent id')) return 'declined';
+        if (question.startsWith('Transport')) return 'cli';
+        if (question.startsWith('Native command')) return 'node agent.mjs';
+        return '';
+      }),
     });
-    expect(exitCode).toBe(130);
+    expect(declined.exitCode).toBe(130);
     expect(questions.at(-1)).toContain('- add agent declined');
     expect(questions.at(-1)).toContain('Apply these changes? [y/N]');
     expect(await snapshotTree(root)).toEqual(before);
   });
 
-  it('applies declared argv and header redaction policies to every attempt and response', async () => {
-    const root = await createProject();
-    const argvSecret = 's3cr3t-value';
-    const imported: AgentResource = {
-      schema: 'attest.agent',
-      id: 'source',
-      name: 'Redacted CLI',
-      transport: {
-        kind: 'native_cli',
-        lifecycle: 'per_case',
-        argv: [process.execPath, FIXTURE, 'echo', argvSecret],
-      },
-      redaction: { argv_positions: [3] },
-    };
-    await writeFile(join(root, 'redacted-agent.json'), JSON.stringify(imported));
-    expect(
-      (
-        await run(root, [
-          'agent',
-          'import',
-          'redacted-agent.json',
-          '--as',
-          'redacted-cli',
-          '--output',
-          'json',
-        ])
-      ).exitCode,
-    ).toBe(0);
-    const cliProbe = await run(root, ['agent', 'test', 'redacted-cli', '--output', 'json']);
-    expect(cliProbe.output.join('')).not.toContain(argvSecret);
-    expect(cliProbe.output.join('')).toContain(REDACTED);
-
-    const headerSecret = 'opaque-header-value';
-    vi.stubGlobal('fetch', (_url: string, init: RequestInit) =>
-      Promise.resolve(
-        new Response(
-          JSON.stringify({
-            protocol: 'attest.agent-invocation',
-            output: { received: new Headers(init.headers).get('x-opaque') },
-          }),
-          { status: 200 },
-        ),
-      ),
-    );
-    await writeFile(
-      join(root, 'redacted-http.json'),
-      JSON.stringify({
-        schema: 'attest.agent',
-        id: 'source-http',
-        name: 'Redacted HTTP',
-        transport: {
-          kind: 'http',
-          lifecycle: 'external',
-          response_mode: 'attest_envelope',
-          request: {
-            url: 'https://agent.example/invoke',
-            method: 'POST',
-            headers: { 'X-Opaque': headerSecret },
-          },
-          extraction: { result_pointer: '' },
-        },
-        redaction: { headers: ['x-opaque'] },
-      }),
-    );
-    expect(
-      (
-        await run(root, [
-          'agent',
-          'import',
-          'redacted-http.json',
-          '--as',
-          'redacted-http',
-          '--output',
-          'json',
-        ])
-      ).exitCode,
-    ).toBe(0);
-    const importedHttp = (await loadProject({ project: root })).agents.find(
-      ({ id }) => id === 'redacted-http',
-    );
-    expect(importedHttp?.transport).toMatchObject({
-      kind: 'http',
-      response_mode: 'attest_envelope',
-    });
-    const httpProbe = await run(root, ['agent', 'test', 'redacted-http', '--output', 'json']);
-    expect(httpProbe.output.join('')).not.toContain(headerSecret);
-    expect(httpProbe.output.join('')).toContain(REDACTED);
-  });
-
-  it('imports bounded remote JSON while rejecting redirects and authored URL query values', async () => {
-    const root = await createProject();
-    const resource = {
-      schema: 'attest.agent',
-      id: 'remote-source',
-      name: 'Remote',
-      transport: {
-        kind: 'native_cli',
-        lifecycle: 'per_case',
-        argv: [process.execPath, FIXTURE, 'echo'],
-      },
-    };
-    vi.stubGlobal('fetch', (url: string) =>
-      Promise.resolve(
-        url.endsWith('/redirect')
-          ? new Response(null, { status: 302 })
-          : new Response(JSON.stringify(resource), { status: 200 }),
-      ),
-    );
-    expect(
-      (
-        await run(root, [
-          'agent',
-          'import',
-          'https://catalog.example/agent.json',
-          '--as',
-          'remote',
-          '--output',
-          'json',
-        ])
-      ).exitCode,
-    ).toBe(0);
-    const redirected = await run(root, [
-      'agent',
-      'import',
-      'https://catalog.example/redirect',
-      '--as',
-      'redirected',
-      '--output',
-      'json',
-    ]);
-    expect(redirected.exitCode).toBe(2);
-    expect(redirected.output.join('')).not.toContain('catalog.example');
-
-    await writeFile(
-      join(root, 'query.json'),
-      JSON.stringify({
-        ...resource,
-        transport: {
-          kind: 'http',
-          lifecycle: 'external',
-          response_mode: 'mapped',
-          request: {
-            url: 'https://agent.example/invoke?credential=literal-value',
-            method: 'POST',
-          },
-          extraction: { result_pointer: '' },
-        },
-      }),
-    );
-    const query = await run(root, [
-      'agent',
-      'import',
-      'query.json',
-      '--as',
-      'query-agent',
-      '--output',
-      'json',
-    ]);
-    expect(query.exitCode).toBe(1);
-    expect(query.output.join('')).not.toContain('literal-value');
-  });
-
-  it('rejects unsupported native policies and emits ordered redacted retry evidence', async () => {
-    const root = await createProject();
-    await writeFile(
-      join(root, 'policy.json'),
-      JSON.stringify({
-        schema: 'attest.agent',
-        id: 'source-policy',
-        name: 'Policy',
-        transport: {
-          kind: 'http',
-          lifecycle: 'external',
-          response_mode: 'attest_envelope',
-          request: { url: 'https://agent.example/invoke', method: 'POST' },
-          extraction: { result_pointer: '' },
-        },
-        timeouts: { connect_ms: 10 },
-      }),
-    );
-    const unsupported = await run(root, [
-      'agent',
-      'import',
-      'policy.json',
-      '--as',
-      'unsupported-policy',
-      '--output',
-      'json',
-    ]);
-    expect(unsupported.exitCode).toBe(1);
-    expect(JSON.parse(unsupported.output[0] ?? '{}')).toMatchObject({
-      error: { code: 'project_invalid', path: '/agent/timeouts/connect_ms' },
-    });
-
-    await writeFile(
-      join(root, 'retry.json'),
-      JSON.stringify({
-        schema: 'attest.agent',
-        id: 'source-retry',
-        name: 'Retry',
-        transport: {
-          kind: 'http',
-          lifecycle: 'external',
-          response_mode: 'attest_envelope',
-          request: { url: 'https://agent.example/retry', method: 'POST' },
-          extraction: { result_pointer: '' },
-        },
-        retry: { retries: 1, backoff: { kind: 'none' } },
-      }),
-    );
-    expect(
-      (
-        await run(root, [
-          'agent',
-          'import',
-          'retry.json',
-          '--as',
-          'retry-agent',
-          '--output',
-          'json',
-        ])
-      ).exitCode,
-    ).toBe(0);
-    let attempt = 0;
-    vi.stubGlobal('fetch', () => {
-      attempt += 1;
-      return Promise.resolve(
-        attempt === 1
-          ? new Response('temporary', { status: 503 })
-          : new Response(
-              JSON.stringify({ protocol: 'attest.agent-invocation', output: { ok: true } }),
-              { status: 200 },
-            ),
-      );
-    });
-    const retried = await run(root, ['agent', 'test', 'retry-agent', '--output', 'json']);
-    expect(JSON.parse(retried.output[0] ?? '{}')).toMatchObject({
-      result: {
-        attempt_count: 2,
-        attempts: [
-          { attempt: 1, invocation_code: 'http_status', status: 'invocation_error' },
-          { attempt: 2, status: 'ok' },
-        ],
-      },
-    });
-  });
-
-  it('removes command signal handlers after cancelling a guided test prompt', async () => {
-    const root = await createProject();
-    const before = await snapshotTree(root);
-    const sigintBefore = process.listeners('SIGINT');
-    const sigtermBefore = process.listeners('SIGTERM');
-    let markPromptStarted = (): void => undefined;
-    const promptStarted = new Promise<void>((resolveStarted) => {
-      markPromptStarted = resolveStarted;
-    });
-    const collected = collectIo();
-    const pending = runCli(['agent', 'test', '--project', root], {
-      interaction: {
-        ci: false,
-        inputIsTTY: true,
-        outputIsTTY: true,
-        prompt: (_question, options) =>
-          new Promise<string>((_resolvePrompt, rejectPrompt) => {
-            markPromptStarted();
-            options?.signal?.addEventListener(
-              'abort',
-              () => {
-                const error = new Error('Prompt aborted.');
-                error.name = 'AbortError';
-                rejectPrompt(error);
-              },
-              { once: true },
-            );
-          }),
-        readStdin: () => Promise.resolve(''),
-      },
-      io: collected.io,
-      workingDirectory: root,
-    });
-    await promptStarted;
-    const commandSigintListeners = process
-      .listeners('SIGINT')
-      .filter((listener) => !sigintBefore.includes(listener));
-    expect(commandSigintListeners).toHaveLength(1);
-    commandSigintListeners[0]?.('SIGINT');
-    await expect(pending).resolves.toBe(130);
-    expect(collected.errors.join('\n')).toContain('cancelled: Command cancelled.');
-    expect(process.listeners('SIGINT')).toEqual(sigintBefore);
-    expect(process.listeners('SIGTERM')).toEqual(sigtermBefore);
-    expect(await snapshotTree(root)).toEqual(before);
-  });
-
-  it('cancels a real built-CLI PTY and rejects its prompt-time mutation race', async () => {
-    const root = await createProject();
-    const before = await snapshotTree(root);
-    // Compile this package so the PTY probe exercises the shipped Node entry point.
-    await execFileAsync('bun', ['run', 'build'], { cwd: CLI_PACKAGE_ROOT, timeout: 30_000 });
-    const { stderr, stdout } = await execFileAsync(
-      'python3',
-      [PTY_FIXTURE, 'interrupt', process.execPath, CLI_BUILT, 'agent', 'test', '--project', root],
-      { timeout: 12_000 },
-    );
-    expect(stderr).toBe('');
-    const ptyResult: unknown = JSON.parse(stdout);
-    expect(isRecord(ptyResult)).toBe(true);
-    if (!isRecord(ptyResult)) throw new Error('Expected structured PTY evidence.');
-    expect(ptyResult.exit_code).toBe(130);
-    expect(ptyResult.prompt_seen).toBe(true);
-    expect(ptyResult.terminal_restored).toBe(true);
-    expect(typeof ptyResult.output).toBe('string');
-    if (typeof ptyResult.output !== 'string') throw new Error('Expected PTY output text.');
-    expect(ptyResult.output).toContain('cancelled: Command cancelled.');
-    expect(await snapshotTree(root)).toEqual(before);
-
-    const argvJson = JSON.stringify([process.execPath, FIXTURE, 'echo']);
-    const race = await execFileAsync(
-      'python3',
-      [PTY_FIXTURE, 'race', root, argvJson, process.execPath, CLI_BUILT],
-      { timeout: 12_000 },
-    );
-    expect(race.stderr).toBe('');
-    const raceResult: unknown = JSON.parse(race.stdout);
-    expect(isRecord(raceResult)).toBe(true);
-    if (!isRecord(raceResult)) throw new Error('Expected structured PTY race evidence.');
-    expect(raceResult.concurrent_exit_code).toBe(0);
-    expect(raceResult.exit_code).toBe(3);
-    expect(raceResult.prompt_seen).toBe(true);
-    expect(raceResult.terminal_restored).toBe(true);
-    expect(typeof raceResult.output).toBe('string');
-    if (typeof raceResult.output !== 'string') throw new Error('Expected PTY race output.');
-    expect(raceResult.output).toContain('project_changed: The project changed after it was read.');
-    await expect(loadProject({ project: root })).resolves.toMatchObject({
-      agents: [{ id: 'racer' }],
-    });
-  }, 15_000);
-
-  it('keeps recovery dry-runs byte-identical and makes watch and record explicitly opt in', async () => {
-    const root = await createProject();
-    const argv = JSON.stringify([process.execPath, FIXTURE, 'echo']);
-    expect(
-      (await run(root, ['agent', 'add', 'probe', '--argv-json', argv, '--output', 'json']))
-        .exitCode,
-    ).toBe(0);
-    await writeFile(
-      join(root, 'dry-import.json'),
-      JSON.stringify({
-        schema: 'attest.agent',
-        id: 'source',
-        name: 'Dry import',
-        transport: {
-          kind: 'native_cli',
-          lifecycle: 'per_case',
-          argv: [process.execPath, FIXTURE, 'echo'],
-        },
-      }),
-    );
-    await mkdir(join(root, '.attest', 'transactions', 'prepared'), { recursive: true });
-    await writeFile(join(root, '.attest', 'transactions', 'prepared', 'journal.json'), '{}');
-    const before = await snapshotTree(root);
-    const dryCommands = [
-      ['agent', 'add', 'new-agent', '--argv-json', argv],
-      ['agent', 'import', 'dry-import.json', '--as', 'imported-dry'],
-      ['agent', 'rename', 'probe', 'probe-renamed'],
-      ['agent', 'remove', 'probe'],
-    ];
-    for (const command of dryCommands) {
-      const dryRun = await run(root, [...command, '--dry-run', '--output', 'json']);
-      expect(dryRun.exitCode).toBe(3);
-      expect(JSON.parse(dryRun.output[0] ?? '{}')).toMatchObject({
-        error: { code: 'project_recovery_required' },
-      });
-      expect(await snapshotTree(root)).toEqual(before);
-    }
-    await rm(join(root, '.attest', 'transactions'), { recursive: true });
-    await expect(access(join(root, '.attest', 'runs.db'))).rejects.toBeDefined();
-
-    const jsonWatch = await run(root, ['agent', 'test', 'probe', '--watch', '--output', 'json']);
-    expect(jsonWatch.exitCode).toBe(2);
-    expect(JSON.parse(jsonWatch.output[0] ?? '{}')).toMatchObject({
-      error: { code: 'cli_usage' },
-    });
-
-    const watched = collectIo();
-    expect(
-      await runCli(['agent', 'test', 'probe', '--watch'], {
-        interaction: {
-          ci: false,
-          inputIsTTY: true,
-          outputIsTTY: true,
-          prompt: () => Promise.reject(new Error('prompt must not be called')),
-          readStdin: () => Promise.resolve(''),
-        },
-        io: watched.io,
-        workingDirectory: root,
-      }),
-    ).toBe(0);
-    expect(watched.errors).toEqual(['Testing agent probe...', 'Agent probe completed.']);
-    await expect(access(join(root, '.attest', 'runs.db'))).rejects.toBeDefined();
-
-    const recorded = await run(root, ['agent', 'test', 'probe', '--record', '--output', 'json']);
-    expect(recorded.exitCode).toBe(0);
-    const recordedDocument = JSON.parse(recorded.output[0] ?? '{}') as {
-      result: { recorded_run_id: string };
-    };
-    const store = await openStore(join(root, '.attest', 'runs.db'));
-    await expect(store.runs.getRun(recordedDocument.result.recorded_run_id)).resolves.toMatchObject(
-      {
-        status: 'completed',
-        labels: { agent_id: 'probe', kind: 'agent-probe' },
-      },
-    );
-    await expect(
-      store.runs.getCaseResults(recordedDocument.result.recorded_run_id),
-    ).resolves.toMatchObject([
-      {
-        caseId: 'connection-test',
-        outcome: 'completed',
-        request: { run_id: recordedDocument.result.recorded_run_id },
-        suiteName: 'agent:probe',
-      },
-    ]);
-    await store.close();
-  }, 15_000);
-
-  it('publishes deterministic JSON help and results for every agent command', async () => {
-    const root = await createProject();
-    for (const command of ['add', 'import', 'test', 'rename', 'remove']) {
-      const first = await run(root, ['help', 'agent', command, '--output', 'json']);
-      const second = await run(root, ['help', 'agent', command, '--output', 'json']);
-      expect(second.output).toEqual(first.output);
-      const result = cliResultSchema.parse(JSON.parse(first.output[0] ?? '{}') as unknown);
-      expect(result).toMatchObject({
-        schema: 'attest.cli-result',
-        ok: true,
-        result: { command: { request_schema: 'attest.command-request' } },
-      });
-    }
-    const imported = await run(root, ['help', 'agent', 'import', '--output', 'json']);
-    const help = JSON.parse(imported.output[0] ?? '{}') as {
-      result: { command: { options: Array<{ name: string; repeatable: boolean }> } };
-    };
-    const repeatable = new Map(
-      help.result.command.options.map(({ name, repeatable }) => [name, repeatable]),
-    );
-    for (const name of ['header-env', 'query-env', 'map-body', 'poll-success', 'poll-failure']) {
-      expect(repeatable.get(name)).toBe(true);
-    }
-  });
-
-  it('imports bounded project-contained file/raw/form bodies and rejects hostile file paths', async () => {
-    const root = await createProject();
-    await writeFile(join(root, 'request.json'), '{"prompt":"hello"}');
-    await writeFile(join(root, 'file.curl'), 'curl https://agent.example --data @request.json');
-    const fileImport = await run(root, [
-      'agent',
-      'import',
-      'file.curl',
-      '--type',
-      'curl',
-      '--as',
-      'file-body',
-      '--response-pointer',
-      '',
-      '--output',
-      'json',
-    ]);
-    expect(fileImport.exitCode).toBe(0);
-    expect((await loadProject({ project: root })).agents[0]).toMatchObject({
-      transport: {
-        response_mode: 'mapped',
-        request: { body: { prompt: 'hello' }, body_encoding: 'json' },
-      },
-    });
-
-    await writeFile(
-      join(root, 'form.curl'),
-      "curl https://agent.example -H 'Content-Type: application/x-www-form-urlencoded' --data 'prompt=hello%20world&mode=fast'",
-    );
-    const formImport = await run(root, [
-      'agent',
-      'import',
-      'form.curl',
-      '--type',
-      'curl',
-      '--as',
-      'form-body',
-      '--response-pointer',
-      '',
-      '--output',
-      'json',
-    ]);
-    expect(formImport.exitCode).toBe(0);
-    expect((await loadProject({ project: root })).agents[1]).toMatchObject({
-      transport: {
-        request: { body: 'prompt=hello%20world&mode=fast', body_encoding: 'raw' },
-      },
-    });
-
-    const outside = join(root, '..', 'outside-body.json');
-    await writeFile(outside, '{}');
-    await writeFile(
-      join(root, 'outside.curl'),
-      'curl https://agent.example --data @../outside-body.json',
-    );
-    const beforeOutside = await snapshotTree(root);
-    expect(
-      (
-        await run(root, [
-          'agent',
-          'import',
-          'outside.curl',
-          '--type',
-          'curl',
-          '--as',
-          'outside',
-          '--response-pointer',
-          '',
-          '--output',
-          'json',
-        ])
-      ).exitCode,
-    ).not.toBe(0);
-    expect(await snapshotTree(root)).toEqual(beforeOutside);
-
-    await symlink('request.json', join(root, 'linked.json'));
-    await writeFile(join(root, 'linked.curl'), 'curl https://agent.example --data @linked.json');
-    const beforeLink = await snapshotTree(root);
-    expect(
-      (
-        await run(root, [
-          'agent',
-          'import',
-          'linked.curl',
-          '--type',
-          'curl',
-          '--as',
-          'linked',
-          '--response-pointer',
-          '',
-          '--output',
-          'json',
-        ])
-      ).exitCode,
-    ).not.toBe(0);
-    expect(await snapshotTree(root)).toEqual(beforeLink);
-
-    await writeFile(join(root, 'large.txt'), 'x'.repeat(128));
-    await writeFile(join(root, 'large.curl'), 'curl https://agent.example --data @large.txt');
-    const beforeLarge = await snapshotTree(root);
-    expect(
-      (
-        await run(root, [
-          'agent',
-          'import',
-          'large.curl',
-          '--type',
-          'curl',
-          '--as',
-          'large',
-          '--response-pointer',
-          '',
-          '--request-cap-bytes',
-          '64',
-          '--output',
-          'json',
-        ])
-      ).exitCode,
-    ).not.toBe(0);
-    expect(await snapshotTree(root)).toEqual(beforeLarge);
-  });
-
-  it('shows the complete redacted guided cURL preview before decline and recovers one mapping error', async () => {
-    const root = await createProject();
+  it('shows the redacted guided cURL preview before decline and re-asks one bad body mapping', async () => {
+    const root = await createEmptyProject();
     const secret = 'never-preview-this';
     await writeFile(
       join(root, 'guided.curl'),
@@ -1617,26 +389,19 @@ describe('agent authoring', () => {
       'direct',
       '/answer',
     ];
-    const collected = collectIo();
-    expect(
-      await runCli(['agent', 'import', 'guided.curl', '--type', 'curl', '--as', 'guided'], {
-        workingDirectory: root,
-        io: collected.io,
-        interaction: {
-          ci: false,
-          inputIsTTY: true,
-          outputIsTTY: true,
-          prompt: (question) => {
-            questions.push(question);
-            if (question.startsWith('Body mapping was invalid'))
-              return Promise.resolve('/prompt=/question');
-            if (question.includes('Apply these changes?')) return Promise.resolve('no');
-            return Promise.resolve(responses.shift() ?? '');
-          },
-          readStdin: () => Promise.resolve(''),
-        },
-      }),
-    ).toBe(130);
+    const declined = await runCommand(
+      root,
+      ['agent', 'import', 'guided.curl', '--type', 'curl', '--as', 'guided'],
+      {
+        interaction: tty((question) => {
+          questions.push(question);
+          if (question.startsWith('Body mapping was invalid')) return '/prompt=/question';
+          if (question.includes('Apply these changes?')) return 'no';
+          return responses.shift() ?? '';
+        }),
+      },
+    );
+    expect(declined.exitCode).toBe(130);
     const confirmation = questions.find((question) => question.includes('Apply these changes?'));
     expect(confirmation).toContain('Redacted definition preview:');
     expect(confirmation).toContain('[from_env:ATTEST_GUIDED_TOKEN]');
@@ -1645,406 +410,179 @@ describe('agent authoring', () => {
     expect(await snapshotTree(root)).toEqual(before);
   });
 
-  it('drives the complete redacted cURL wizard through the compiled CLI PTY', async () => {
-    const root = await createProject();
-    const secret = 'pty-captured-secret';
-    await writeFile(
-      join(root, 'guided-pty.curl'),
-      `curl https://agent.example -H 'Authorization: Bearer ${secret}' -H 'Content-Type: application/json' --data '{"prompt":"old"}'`,
-    );
+  it('removes its signal handlers after SIGINT cancels a guided test prompt', async () => {
+    const root = await createEmptyProject();
     const before = await snapshotTree(root);
-    await execFileAsync('bun', ['run', 'build'], { cwd: CLI_PACKAGE_ROOT, timeout: 30_000 });
-    const { stderr, stdout } = await execFileAsync(
-      'python3',
-      [PTY_FIXTURE, 'guided-curl-decline', root, process.execPath, CLI_BUILT],
-      { timeout: 15_000 },
-    );
-    expect(stderr).toBe('');
-    const result = JSON.parse(stdout) as {
-      exit_code: number;
-      output: string;
-      prompts_seen: boolean;
-      terminal_restored: boolean;
-    };
-    if (!result.prompts_seen) throw new Error(result.output);
-    expect(result).toMatchObject({
-      exit_code: 130,
-      prompts_seen: true,
-      terminal_restored: true,
+    const sigintBefore = process.listeners('SIGINT');
+    const sigtermBefore = process.listeners('SIGTERM');
+    let markPromptStarted = (): void => undefined;
+    const promptStarted = new Promise<void>((resolve) => {
+      markPromptStarted = resolve;
     });
-    expect(result.output).toContain('Redacted definition preview:');
-    expect(result.output).toContain('[from_env:ATTEST_PTY_TOKEN]');
-    expect(result.output).toContain('{{input/question}}');
-    expect(result.output).not.toContain(secret);
-    expect(await snapshotTree(root)).toEqual(before);
-  }, 20_000);
+    const pending = runCommand(root, ['agent', 'test', '--project', root], {
+      interaction: {
+        inputIsTTY: true,
+        outputIsTTY: true,
+        prompt: (_question, options) =>
+          new Promise<string>((_resolve, reject) => {
+            markPromptStarted();
+            options?.signal?.addEventListener(
+              'abort',
+              () => reject(Object.assign(new Error('Prompt aborted.'), { name: 'AbortError' })),
+              { once: true },
+            );
+          }),
+      },
+    });
+    await promptStarted;
+    const commandListeners = process
+      .listeners('SIGINT')
+      .filter((listener) => !sigintBefore.includes(listener));
+    expect(commandListeners).toHaveLength(1);
+    commandListeners[0]?.('SIGINT');
 
-  it('reports the exact duration option path in structured failures', async () => {
-    const root = await createProject();
+    const cancelled = await pending;
+    expect(cancelled.exitCode).toBe(130);
+    expect(cancelled.errors.join('\n')).toContain('cancelled: Command cancelled.');
+    expect(process.listeners('SIGINT')).toEqual(sigintBefore);
+    expect(process.listeners('SIGTERM')).toEqual(sigtermBefore);
+    expect(await snapshotTree(root)).toEqual(before);
+  });
+
+  it('keeps --watch human-only and records a probe run only with --record', async () => {
+    const root = await createEmptyProject();
+    expect((await runJson(root, ['agent', 'add', 'probe', '--argv-json', echoArgv])).exitCode).toBe(
+      0,
+    );
+    const store = join(root, '.attest', 'runs.db');
+
+    const jsonWatch = await runJson(root, ['agent', 'test', 'probe', '--watch']);
+    expect(jsonWatch.exitCode).toBe(2);
+    expect(jsonWatch.document).toMatchObject({ error: { code: 'cli_usage' } });
+
+    const watched = await runCommand(root, ['agent', 'test', 'probe', '--watch'], {
+      interaction: { inputIsTTY: true, outputIsTTY: true },
+    });
+    expect(watched.exitCode).toBe(0);
+    expect(watched.errors).toEqual(['Testing agent probe...', 'Agent probe completed.']);
+    await expect(access(store)).rejects.toBeDefined();
+
+    const recorded = await runJson(root, ['agent', 'test', 'probe', '--record']);
+    expect(recorded.exitCode).toBe(0);
+    const probe = recorded.document.ok ? recorded.document.result : undefined;
+    if (typeof probe !== 'object' || probe === null || Array.isArray(probe)) {
+      throw new Error('Expected a recorded probe result.');
+    }
+    const runId = probe.recorded_run_id;
+    if (typeof runId !== 'string') throw new Error('Expected a recorded run id.');
+    const runs = await openStore(store);
+    try {
+      await expect(runs.runs.getRun(runId)).resolves.toMatchObject({
+        status: 'completed',
+        labels: { agent_id: 'probe', kind: 'agent-probe' },
+      });
+    } finally {
+      await runs.close();
+    }
+  });
+
+  it('reports the exact duration option in a structured failure', async () => {
+    const root = await createEmptyProject();
     await writeFile(join(root, 'duration.curl'), 'curl https://agent.example');
+    const polling = [
+      '--poll-job-id-pointer',
+      '/job',
+      '--poll-status-url-pointer',
+      '/url',
+      '--poll-status-pointer',
+      '/status',
+      '--poll-success',
+      '"done"',
+      '--poll-failure',
+      '"failed"',
+      '--poll-maximum-interval',
+      '1s',
+    ];
     for (const [option, extra] of [
       ['--connect-timeout', []],
-      [
-        '--poll-minimum-interval',
-        [
-          '--poll-job-id-pointer',
-          '/job',
-          '--poll-status-url-pointer',
-          '/url',
-          '--poll-status-pointer',
-          '/status',
-          '--poll-success',
-          '"done"',
-          '--poll-failure',
-          '"failed"',
-          '--poll-maximum-interval',
-          '1s',
-        ],
-      ],
+      ['--poll-minimum-interval', polling],
     ] as const) {
-      const result = await run(root, [
+      const result = await runJson(root, [
         'agent',
         'import',
         'duration.curl',
         '--type',
         'curl',
         '--as',
-        `bad-${option.slice(2)}`,
+        'bad-duration',
         '--response-pointer',
         '',
         ...extra,
         option,
         'nope',
-        '--output',
-        'json',
       ]);
-      expect(result.exitCode).not.toBe(0);
-      expect(JSON.parse(result.output[0] ?? '{}')).toMatchObject({ error: { path: option } });
-    }
-  });
-
-  it('dispatches a foreign root mapping without injecting the native Attest envelope', async () => {
-    const root = await createProject();
-    let observedBody = '';
-    const server = createServer((request, response) => {
-      const chunks: Buffer[] = [];
-      request.on('data', (chunk: Buffer) => chunks.push(chunk));
-      request.on('end', () => {
-        observedBody = Buffer.concat(chunks).toString('utf8');
-        response.end(JSON.stringify({ answer: 'root-result' }));
-      });
-    });
-    await new Promise<void>((resolve, reject) => {
-      server.once('error', reject);
-      server.listen(0, '127.0.0.1', resolve);
-    });
-    const address = server.address();
-    if (address === null || typeof address === 'string') throw new Error('Expected TCP fixture.');
-    await writeFile(join(root, 'root.curl'), `curl http://127.0.0.1:${String(address.port)}/root`);
-    try {
-      expect(
-        (
-          await run(root, [
-            'agent',
-            'import',
-            'root.curl',
-            '--type',
-            'curl',
-            '--as',
-            'root-map',
-            '--response-pointer',
-            '',
-            '--output',
-            'json',
-          ])
-        ).exitCode,
-      ).toBe(0);
-      const tested = await run(root, ['agent', 'test', 'root-map', '--output', 'json']);
-      expect(tested.exitCode).toBe(0);
-      const imported = (await loadProject({ project: root })).agents.find(
-        ({ id }) => id === 'root-map',
-      );
-      expect(imported?.transport).toMatchObject({ kind: 'http', response_mode: 'mapped' });
-      expect(JSON.parse(tested.output[0] ?? '{}')).toMatchObject({
-        result: { response: { output: { answer: 'root-result' } } },
-      });
-      expect(observedBody).toBe('');
-    } finally {
-      await new Promise<void>((resolve) => server.close(() => resolve()));
-    }
-  });
-});
-
-describe('managed and streaming agent UX', () => {
-  it('guides a TTY user through managed JSONL authoring', async () => {
-    const root = await createProject();
-    const collected = collectIo();
-    const answers = new Map<string, string>([
-      ['Agent id: ', 'guided-bridge'],
-      ['Transport [cli/http/background/jsonl/stream/websocket]: ', 'jsonl'],
-      ['JSONL bridge command: ', `${process.execPath} ${JSONL_BRIDGE_FIXTURE}`],
-      ['Bridge concurrency [serial]: ', 'multiplexed'],
-      ['Cancellation grace [1s]: ', '100ms'],
-    ]);
-    const exitCode = await runCli(['agent', 'add'], {
-      workingDirectory: root,
-      io: collected.io,
-      interaction: {
-        ci: false,
-        inputIsTTY: true,
-        outputIsTTY: true,
-        prompt: (question) =>
-          Promise.resolve(
-            question.includes('Apply these changes?') ? 'yes' : (answers.get(question) ?? ''),
-          ),
-        readStdin: () => Promise.resolve(''),
-      },
-    });
-    expect(exitCode).toBe(0);
-    expect((await loadProject({ project: root })).agents[0]?.transport).toMatchObject({
-      kind: 'jsonl_bridge',
-      concurrency: 'multiplexed',
-    });
-  });
-
-  it('authors and probes a correlated JSONL bridge without canonical-file editing', async () => {
-    const root = await createProject();
-    const added = await run(root, [
-      'agent',
-      'add',
-      'bridge',
-      '--jsonl-command',
-      `${process.execPath} ${JSONL_BRIDGE_FIXTURE}`,
-      '--bridge-concurrency',
-      'multiplexed',
-      '--cancel-grace',
-      '100ms',
-      '--output',
-      'json',
-    ]);
-    expect(added.exitCode).toBe(0);
-    const loaded = await loadProject({ project: root });
-    expect(loaded.agents[0]?.transport).toMatchObject({
-      kind: 'jsonl_bridge',
-      concurrency: 'multiplexed',
-      cancellation_grace_ms: 100,
-    });
-
-    const tested = await run(root, [
-      'agent',
-      'test',
-      'bridge',
-      '--input',
-      '{"message":"hello"}',
-      '--output',
-      'json',
-    ]);
-    expect(tested.exitCode).toBe(0);
-    expect(JSON.parse(tested.output[0] ?? '{}')).toMatchObject({
-      result: {
-        response: { output: { message: 'hello' } },
-        transport: 'jsonl_bridge',
-      },
-    });
-  });
-
-  it('authors, starts, tests, and shuts down a run-scoped background service', async () => {
-    const root = await createProject();
-    const reservation = createServer();
-    await new Promise<void>((resolve, reject) => {
-      reservation.once('error', reject);
-      reservation.listen(0, '127.0.0.1', resolve);
-    });
-    const address = reservation.address();
-    if (address === null || typeof address === 'string') throw new Error('Expected TCP fixture.');
-    const port = address.port;
-    await new Promise<void>((resolve) => reservation.close(() => resolve()));
-    const origin = `http://127.0.0.1:${String(port)}`;
-    const added = await run(root, [
-      'agent',
-      'add',
-      'background',
-      '--background-command',
-      `${process.execPath} ${BACKGROUND_FIXTURE} ${String(port)}`,
-      '--readiness-http',
-      `${origin}/ready`,
-      '--invoke-url',
-      `${origin}/invoke`,
-      '--shutdown-url',
-      `${origin}/shutdown`,
-      '--response-pointer',
-      '/output',
-      '--stop-timeout',
-      '100ms',
-      '--output',
-      'json',
-    ]);
-    expect(added.exitCode).toBe(0);
-    const tested = await run(root, [
-      'agent',
-      'test',
-      'background',
-      '--input',
-      '{"ping":true}',
-      '--output',
-      'json',
-    ]);
-    expect(tested.exitCode).toBe(0);
-    expect(JSON.parse(tested.output[0] ?? '{}')).toMatchObject({
-      result: { response: { output: { ping: true } }, transport: 'background_cli' },
-    });
-  });
-
-  it('authors and probes an SSE agent with explicit terminal extraction', async () => {
-    const root = await createProject();
-    const server = createServer((_request, response) => {
-      response.setHeader('content-type', 'text/event-stream');
-      response.end('data: {"type":"result","output":"streamed"}\n\n');
-    });
-    await new Promise<void>((resolve, reject) => {
-      server.once('error', reject);
-      server.listen(0, '127.0.0.1', resolve);
-    });
-    const address = server.address();
-    if (address === null || typeof address === 'string') throw new Error('Expected TCP fixture.');
-    try {
-      const added = await run(root, [
-        'agent',
-        'add',
-        'stream',
-        '--stream-url',
-        `http://127.0.0.1:${String(address.port)}/stream`,
-        '--stream-framing',
-        'sse',
-        '--terminal-pointer',
-        '/type',
-        '--terminal-value',
-        '"result"',
-        '--response-pointer',
-        '/output',
-        '--output',
-        'json',
-      ]);
-      expect(added.exitCode).toBe(0);
-      const tested = await run(root, ['agent', 'test', 'stream', '--output', 'json']);
-      expect(tested.exitCode).toBe(0);
-      expect(JSON.parse(tested.output[0] ?? '{}')).toMatchObject({
-        result: { response: { output: 'streamed' }, transport: 'stream' },
-      });
-    } finally {
-      await new Promise<void>((resolve) => server.close(() => resolve()));
-    }
-  });
-
-  it('imports a complete managed resource through the stable JSON request protocol', async () => {
-    const root = await createProject();
-    const request = {
-      schema: 'attest.command-request',
-      command: 'agent.add',
-      agent: {
-        schema: 'attest.agent',
-        id: 'imported-bridge',
-        name: 'Imported bridge',
-        transport: {
-          kind: 'jsonl_bridge',
-          lifecycle: 'per_run',
-          argv: [process.execPath, JSONL_BRIDGE_FIXTURE],
-          concurrency: 'serial',
-          cancellation_grace_ms: 100,
-        },
-      },
-    };
-    const added = await run(root, ['agent', 'add', '--from-json', '-', '--output', 'json'], () =>
-      Promise.resolve(JSON.stringify(request)),
-    );
-    expect(added.exitCode).toBe(0);
-    expect((await loadProject({ project: root })).agents[0]?.transport.kind).toBe('jsonl_bridge');
-  });
-
-  it('rejects discarded transport flags and publishes matching JSON help dependencies', async () => {
-    const root = await createProject();
-    const rejected = [
-      [
-        'bad-stream-env',
-        '--stream-url',
-        'http://127.0.0.1:1234/stream',
-        '--env',
-        'TOKEN=STREAM_TOKEN',
-      ],
-      [
-        'bad-bridge-header',
-        '--jsonl-command',
-        `${process.execPath} ${JSONL_BRIDGE_FIXTURE}`,
-        '--header-env',
-        'Authorization=BRIDGE_TOKEN',
-      ],
-      [
-        'bad-stream-mode',
-        '--stream-url',
-        'http://127.0.0.1:1234/stream',
-        '--incremental-output-mode',
-        'text',
-      ],
-    ];
-    for (const argumentsList of rejected) {
-      const result = await run(root, ['agent', 'add', ...argumentsList, '--output', 'json']);
       expect(result.exitCode).toBe(2);
-      expect(JSON.parse(result.output[0] ?? '{}')).toMatchObject({
-        error: { code: 'cli_usage' },
-      });
+      expect(result.document).toMatchObject({ error: { path: option } });
+    }
+  });
+
+  it('rejects flags the selected transport would discard and publishes the matrix in help', async () => {
+    const root = await createEmptyProject();
+    for (const flags of [
+      ['--stream-url', 'http://127.0.0.1:1234/stream', '--env', 'TOKEN=STREAM_TOKEN'],
+      ['--jsonl-command', 'node bridge.mjs', '--header-env', 'Authorization=BRIDGE_TOKEN'],
+      ['--stream-url', 'http://127.0.0.1:1234/stream', '--incremental-output-mode', 'text'],
+    ]) {
+      const result = await runJson(root, ['agent', 'add', 'rejected', ...flags]);
+      expect(result.exitCode).toBe(2);
+      expect(result.document).toMatchObject({ error: { code: 'cli_usage' } });
     }
 
-    expect(
-      (
-        await run(root, [
-          'agent',
-          'add',
-          'stream-auth',
-          '--stream-url',
-          'http://127.0.0.1:1234/stream',
-          '--header-env',
-          'Authorization=STREAM_TOKEN',
-          '--output',
-          'json',
-        ])
-      ).exitCode,
-    ).toBe(0);
-    expect(
-      (
-        await run(root, [
-          'agent',
-          'add',
-          'bridge-env',
-          '--jsonl-command',
-          `${process.execPath} ${JSONL_BRIDGE_FIXTURE}`,
-          '--env',
-          'TOKEN=BRIDGE_TOKEN',
-          '--output',
-          'json',
-        ])
-      ).exitCode,
-    ).toBe(0);
+    const stream = await runJson(root, [
+      'agent',
+      'add',
+      'stream-auth',
+      '--stream-url',
+      'http://127.0.0.1:1234/stream',
+      '--header-env',
+      'Authorization=STREAM_TOKEN',
+      '--terminal-pointer',
+      '/state',
+      '--terminal-value',
+      '"done"',
+    ]);
+    expect(stream.exitCode).toBe(0);
+    const bridge = await runJson(root, [
+      'agent',
+      'add',
+      'bridge-env',
+      '--jsonl-command',
+      'node bridge.mjs',
+      '--env',
+      'TOKEN=BRIDGE_TOKEN',
+    ]);
+    expect(bridge.exitCode).toBe(0);
     const loaded = await loadProject({ project: root });
     expect(loaded.agents.find(({ id }) => id === 'stream-auth')?.transport).toMatchObject({
       request: { headers: { Authorization: { from_env: 'STREAM_TOKEN' } } },
+      terminal_pointer: '/state',
+      terminal_values: ['done'],
     });
     expect(loaded.agents.find(({ id }) => id === 'bridge-env')?.transport).toMatchObject({
       env: { TOKEN: { from_env: 'BRIDGE_TOKEN' } },
     });
 
-    const helpResult = await run(root, ['help', 'agent', 'add', '--output', 'json']);
-    const help = JSON.parse(helpResult.output[0] ?? '{}') as {
-      result: {
-        command: {
-          options: Array<{ conflicts: string[]; implies: string[]; name: string }>;
-        };
-      };
+    const helpOptions = async (command: string) => {
+      const help = await runJson(root, ['help', 'agent', command]);
+      if (!help.document.ok) throw new Error(`Expected agent ${command} help.`);
+      const { options } = cliHelpSchema.parse(help.document.result).command;
+      return new Map(options.map((option) => [option.name, option]));
     };
-    const options = new Map(help.result.command.options.map((option) => [option.name, option]));
-    expect(options.get('env')?.conflicts).toContain('stream-url');
-    expect(options.get('header-env')?.conflicts).toContain('jsonl-command');
-    expect(options.get('incremental-output-mode')?.implies).toContain('incremental-output-pointer');
-    expect(options.get('sandbox-json')?.conflicts).toEqual([
+    const add = await helpOptions('add');
+    expect(add.get('env')?.conflicts).toContain('stream-url');
+    expect(add.get('header-env')?.conflicts).toContain('jsonl-command');
+    expect(add.get('incremental-output-mode')?.implies).toContain('incremental-output-pointer');
+    expect(add.get('sandbox-json')?.conflicts).toEqual([
       'from-json',
       'native-http',
       'background-command',
@@ -2052,155 +590,239 @@ describe('managed and streaming agent UX', () => {
       'stream-url',
       'websocket-url',
     ]);
-    expect(options.get('native-http')?.conflicts).toContain('sandbox-json');
-  });
-
-  it.each([
-    {
-      argv: ['/definitely/missing/attest-agent'],
-      connectMs: 1_000,
-      expectedCode: 'spawn_failed',
-      id: 'missing-startup',
-      readiness: 'READY',
-    },
-    {
-      argv: [process.execPath, BACKGROUND_FIXTURE, '0', 'silent'],
-      connectMs: 20,
-      expectedCode: 'timeout',
-      id: 'readiness-timeout',
-      readiness: 'NEVER',
-    },
-  ])('normalizes $expectedCode startup failures into the public CLI contract', async (fixture) => {
-    const root = await createProject();
-    const request = {
-      schema: 'attest.command-request',
-      command: 'agent.add',
-      agent: {
-        schema: 'attest.agent',
-        id: fixture.id,
-        name: fixture.id,
-        transport: {
-          kind: 'background_cli',
-          lifecycle: 'per_run',
-          start_argv: fixture.argv,
-          readiness: { kind: 'stderr', pattern: fixture.readiness },
-          invoke: { method: 'POST', url: 'http://127.0.0.1:41989/invoke' },
-          extraction: { result_pointer: '/output' },
-          stop_timeout_ms: 50,
-        },
-        timeouts: { connect_ms: fixture.connectMs, attempt_ms: 1_000 },
-      },
-    };
-    const added = await run(root, ['agent', 'add', '--from-json', '-', '--output', 'json'], () =>
-      Promise.resolve(JSON.stringify(request)),
+    expect(add.get('native-http')?.conflicts).toContain('sandbox-json');
+    expect(add.get('websocket-url')?.conflicts).toEqual(
+      expect.arrayContaining([
+        'argv-json',
+        'native-command',
+        'native-http',
+        'background-command',
+        'jsonl-command',
+        'stream-url',
+      ]),
     );
-    expect(added.exitCode).toBe(0);
-    const tested = await run(root, ['agent', 'test', fixture.id, '--output', 'json']);
-    expect(tested.exitCode).toBe(4);
-    expect(JSON.parse(tested.output[0] ?? '{}')).toMatchObject({
-      error: {
-        code: 'invocation_failed',
-        details: { invocation_code: fixture.expectedCode },
-      },
-    });
-  });
+    expect(add.get('connection-mode')?.choices).toEqual(['serial', 'multiplexed']);
+    expect(add.get('connection-mode')?.implies).toContain('websocket-url');
+    expect(add.get('acknowledgement-value')?.repeatable).toBe(true);
+    expect(add.get('attempt-timeout')?.implies).toContain('websocket-url');
 
-  it('keeps resolved invoke and shutdown secret references endpoint-scoped', async () => {
-    const root = await createProject();
-    const originalInvokeSecret = process.env.ATTEST_INVOKE_SECRET;
-    const originalShutdownSecret = process.env.ATTEST_SHUTDOWN_SECRET;
-    process.env.ATTEST_INVOKE_SECRET = 'invoke-only';
-    process.env.ATTEST_SHUTDOWN_SECRET = 'shutdown-only';
-    let invokeHeader = '';
-    let shutdownHeader = '';
-    let invokeReceivedShutdownHeader = false;
-    let shutdownReceivedInvokeHeader = false;
-    const invokeServer = createServer((_request, response) => {
-      invokeHeader = String(_request.headers['x-invoke'] ?? '');
-      invokeReceivedShutdownHeader = _request.headers['x-shutdown'] !== undefined;
-      response.setHeader('content-type', 'application/json');
-      response.end('{"output":{"ok":true}}');
-    });
-    const shutdownServer = createServer((_request, response) => {
-      shutdownHeader = String(_request.headers['x-shutdown'] ?? '');
-      shutdownReceivedInvokeHeader = _request.headers['x-invoke'] !== undefined;
-      response.writeHead(204).end();
-    });
-    const reservation = createServer();
-    await Promise.all(
-      [invokeServer, shutdownServer, reservation].map(
-        (server) =>
-          new Promise<void>((resolveListen, reject) => {
-            server.once('error', reject);
-            server.listen(0, '127.0.0.1', resolveListen);
-          }),
-      ),
-    );
-    const invokeAddress = invokeServer.address();
-    const shutdownAddress = shutdownServer.address();
-    const processAddress = reservation.address();
-    if (
-      invokeAddress === null ||
-      typeof invokeAddress === 'string' ||
-      shutdownAddress === null ||
-      typeof shutdownAddress === 'string' ||
-      processAddress === null ||
-      typeof processAddress === 'string'
-    ) {
-      throw new Error('Expected endpoint fixture addresses.');
+    const importOptions = await helpOptions('import');
+    for (const name of ['header-env', 'query-env', 'map-body', 'poll-success', 'poll-failure']) {
+      expect(importOptions.get(name)?.repeatable).toBe(true);
     }
-    await new Promise<void>((resolveClose) => reservation.close(() => resolveClose()));
-    const commandRequest = {
+  });
+});
+
+describe('WebSocket agent commands', () => {
+  it('builds one resource shape from flags, --from-json, JSON import, and the wizard', async () => {
+    const root = await createEmptyProject();
+    process.env.ATTEST_WS_TOKEN = 'websocket-super-secret';
+    const flags = await runJson(root, [
+      'agent',
+      'add',
+      'flags',
+      '--websocket-url',
+      'wss://agent.example/socket',
+      '--header-env',
+      'Authorization=ATTEST_WS_TOKEN',
+      '--subprotocol',
+      'attest',
+      '--websocket-lifecycle',
+      'per_run',
+      '--connection-mode',
+      'multiplexed',
+      '--request-template',
+      '{"request_id":"{{request_id}}","request":"{{request}}"}',
+      '--request-id-pointer',
+      '/request_id',
+      '--acknowledgement-pointer',
+      '/type',
+      '--acknowledgement-value',
+      '"acknowledgement"',
+      '--response-pointer',
+      '/output',
+      '--error-pointer',
+      '/error',
+      '--trace-pointer',
+      '/trace',
+      '--open-timeout',
+      '1s',
+      '--idle-timeout',
+      '4s',
+      '--attempt-timeout',
+      '10s',
+      '--ping-interval',
+      '2s',
+      '--close-timeout',
+      '500ms',
+      '--trace',
+    ]);
+    expect(flags.exitCode).toBe(0);
+    expect(flags.output.join('')).not.toContain('websocket-super-secret');
+
+    const request = JSON.stringify({
       schema: 'attest.command-request',
       command: 'agent.add',
-      agent: {
-        schema: 'attest.agent',
-        id: 'scoped-background',
-        name: 'Scoped background',
-        transport: {
-          kind: 'background_cli',
-          lifecycle: 'per_run',
-          start_argv: [process.execPath, BACKGROUND_FIXTURE, String(processAddress.port)],
-          readiness: { kind: 'stderr', pattern: `READY ${String(processAddress.port)}` },
-          invoke: {
-            method: 'POST',
-            url: `http://127.0.0.1:${String(invokeAddress.port)}/invoke`,
-            body: '{{request}}',
-            headers: { 'X-Invoke': { from_env: 'ATTEST_INVOKE_SECRET' } },
-          },
-          extraction: { result_pointer: '/output' },
-          shutdown: {
-            method: 'POST',
-            url: `http://127.0.0.1:${String(shutdownAddress.port)}/shutdown`,
-            headers: { 'X-Shutdown': { from_env: 'ATTEST_SHUTDOWN_SECRET' } },
-          },
-          stop_timeout_ms: 100,
-        },
-        timeouts: { connect_ms: 2_000, attempt_ms: 2_000 },
+      agent: canonicalWebSocketAgent('json'),
+    });
+    const fromJson = await runJson(root, ['agent', 'add', '--from-json', '-'], { stdin: request });
+    expect(fromJson.exitCode).toBe(0);
+
+    await writeFile(
+      join(root, 'websocket-agent.json'),
+      JSON.stringify(canonicalWebSocketAgent('source')),
+    );
+    const imported = await runJson(root, [
+      'agent',
+      'import',
+      'websocket-agent.json',
+      '--type',
+      'json',
+      '--as',
+      'imported',
+    ]);
+    expect(imported.exitCode).toBe(0);
+
+    const answers = new Map<string, string>([
+      ['Agent id: ', 'wizard'],
+      ['Transport [cli/http/background/jsonl/stream/websocket]: ', 'websocket'],
+      ['WebSocket URL: ', 'wss://agent.example/socket'],
+      [
+        'Header environment references HEADER=ENV, comma-separated [none]: ',
+        'Authorization=ATTEST_WS_TOKEN',
+      ],
+      ['WebSocket subprotocol [none]: ', 'attest'],
+      ['Trace JSON Pointer [none]: ', '/trace'],
+      ['Open timeout [10s]: ', '1s'],
+      ['Message idle timeout [30s]: ', '4s'],
+      ['Attempt timeout [60s]: ', '10s'],
+      ['Ping interval [15s]: ', '2s'],
+      ['Close timeout [5s]: ', '500ms'],
+    ]);
+    const wizard = await runCommand(root, ['agent', 'add', '--trace'], {
+      interaction: tty((question) =>
+        question.includes('Apply these changes?') ? 'yes' : (answers.get(question) ?? ''),
+      ),
+    });
+    expect(wizard.exitCode).toBe(0);
+
+    const loaded = await loadProject({ project: root });
+    expect(loaded.agents.map(({ id }) => id)).toEqual(['flags', 'imported', 'json', 'wizard']);
+    for (const agent of loaded.agents) {
+      expect(agent.transport).toEqual(canonicalTransport());
+      expect(agent.redaction).toEqual({ headers: ['Authorization'] });
+      expect(agent.capabilities).toEqual({ trace: true });
+    }
+  }, 10_000);
+
+  it('derives a serial connection for per-case flags when the mode is omitted', async () => {
+    const root = await createEmptyProject();
+    const added = await runJson(root, [
+      'agent',
+      'add',
+      'per-case-default',
+      '--websocket-url',
+      'wss://agent.example/socket',
+      '--websocket-lifecycle',
+      'per_case',
+    ]);
+    expect(added.exitCode).toBe(0);
+    expect((await loadProject({ project: root })).agents[0]?.transport).toMatchObject({
+      kind: 'websocket',
+      lifecycle: 'per_case',
+      connection_mode: 'serial',
+    });
+  });
+
+  it('aggregates inapplicable and conflicting flags before any project write', async () => {
+    const root = await createEmptyProject();
+    const before = await snapshotTree(root);
+    const inapplicable = await runJson(root, [
+      'agent',
+      'add',
+      'invalid',
+      '--websocket-url',
+      'wss://agent.example/socket',
+      '--cwd',
+      './agent',
+      '--env',
+      'TOKEN=TOKEN_ENV',
+      '--stream-framing',
+      'sse',
+      '--timeout',
+      '1s',
+    ]);
+    expect(inapplicable.exitCode).toBe(2);
+    expect(inapplicable.document).toMatchObject({
+      error: {
+        code: 'cli_usage',
+        details: { incompatible_options: ['--cwd', '--env', '--stream-framing', '--timeout'] },
       },
+    });
+
+    const conflicting = await runJson(root, [
+      'agent',
+      'add',
+      'conflicting',
+      '--websocket-url',
+      'wss://agent.example/socket',
+      '--stream-url',
+      'https://agent.example/events',
+    ]);
+    expect(conflicting.exitCode).toBe(2);
+    expect(conflicting.document).toMatchObject({
+      error: { code: 'cli_usage', details: { selected_transports: ['stream', 'websocket'] } },
+    });
+    expect(await snapshotTree(root)).toEqual(before);
+  });
+
+  it('routes agent.test flag and --from-json requests to the WebSocket runtime', async () => {
+    const root = await createEmptyProject();
+    const { startWebSocketFixtureServer } = (await import(WEBSOCKET_SERVER)) as {
+      startWebSocketFixtureServer: (
+        scenario: 'serial_correlation',
+      ) => Promise<WebSocketFixtureServer>;
     };
+    const server = await startWebSocketFixtureServer('serial_correlation');
     try {
-      const added = await run(root, ['agent', 'add', '--from-json', '-', '--output', 'json'], () =>
-        Promise.resolve(JSON.stringify(commandRequest)),
-      );
-      expect(added.exitCode).toBe(0);
+      process.env.ATTEST_WS_TOKEN = 'websocket-probe-secret';
+      const addRequest = JSON.stringify({
+        schema: 'attest.command-request',
+        command: 'agent.add',
+        agent: {
+          ...canonicalWebSocketAgent('probe'),
+          transport: { ...canonicalTransport(), url: server.url, result_pointer: '/result' },
+        },
+      });
       expect(
-        (await run(root, ['agent', 'test', 'scoped-background', '--output', 'json'])).exitCode,
+        (await runJson(root, ['agent', 'add', '--from-json', '-'], { stdin: addRequest })).exitCode,
       ).toBe(0);
-      expect(invokeHeader).toBe('invoke-only');
-      expect(shutdownHeader).toBe('shutdown-only');
-      expect(invokeReceivedShutdownHeader).toBe(false);
-      expect(shutdownReceivedInvokeHeader).toBe(false);
+
+      const testRequest = JSON.stringify({
+        schema: 'attest.command-request',
+        command: 'agent.test',
+        agent_id: 'probe',
+        input: { question: 'ping' },
+      });
+      for (const probe of [
+        await runJson(root, ['agent', 'test', 'probe', '--input', '{"question":"ping"}']),
+        await runJson(root, ['agent', 'test', '--from-json', '-'], { stdin: testRequest }),
+      ]) {
+        expect(probe.exitCode).toBe(0);
+        expect(probe.document).toMatchObject({
+          command: 'agent.test',
+          result: { transport: 'websocket' },
+        });
+        expect(probe.output[0]).toMatch(/"echoed_request_id":"ws-/u);
+        expect(probe.output.join('')).not.toContain('websocket-probe-secret');
+      }
+      const upgrades = server.events().filter((event) => event.type === 'upgrade_requested');
+      expect(upgrades.map((event) => event.headers?.authorization)).toEqual([
+        'websocket-probe-secret',
+        'websocket-probe-secret',
+      ]);
     } finally {
-      if (originalInvokeSecret === undefined) delete process.env.ATTEST_INVOKE_SECRET;
-      else process.env.ATTEST_INVOKE_SECRET = originalInvokeSecret;
-      if (originalShutdownSecret === undefined) delete process.env.ATTEST_SHUTDOWN_SECRET;
-      else process.env.ATTEST_SHUTDOWN_SECRET = originalShutdownSecret;
-      await Promise.all(
-        [invokeServer, shutdownServer].map(
-          (server) => new Promise<void>((resolveClose) => server.close(() => resolveClose())),
-        ),
-      );
+      await server.close();
     }
   });
 });
