@@ -1,15 +1,11 @@
 import { readFile, realpath, stat } from 'node:fs/promises';
 import { resolve } from 'node:path';
 
+import { errnoCode } from '../../internal/errno-code.js';
 import { hashCanonicalJson, type JsonValue } from '../canonical-project.js';
 import type { ProjectDiagnostic } from '../project-errors.js';
 import { isProjectPath } from '../project-path.js';
 import type { LoadedJsonResource, RuntimeSchema, SchemaIssue } from './types.js';
-
-const getErrorCode = (error: unknown): string | undefined =>
-  error instanceof Error && 'code' in error && typeof Reflect.get(error, 'code') === 'string'
-    ? (Reflect.get(error, 'code') as string)
-    : undefined;
 
 const pointerEscape = (segment: PropertyKey): string =>
   String(segment).replaceAll('~', '~0').replaceAll('/', '~1');
@@ -35,7 +31,7 @@ const readProjectSource = async (
   try {
     resolvedSource = await realpath(candidate);
   } catch (error: unknown) {
-    const missing = getErrorCode(error) === 'ENOENT';
+    const missing = errnoCode(error) === 'ENOENT';
     return {
       diagnostics: [
         {

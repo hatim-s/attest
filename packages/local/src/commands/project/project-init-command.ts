@@ -10,6 +10,7 @@ import {
   type ProjectResources,
 } from '@attest/contracts';
 
+import { errnoCode } from '../../internal/errno-code.js';
 import { LocalError } from '../../errors/index.js';
 import { hashCanonicalContent, type JsonValue } from '../../project/canonical-project.js';
 import { loadProject } from '../../project/project-loader/index.js';
@@ -48,11 +49,6 @@ type ProjectInitCommandOptions = {
   workingDirectory: string;
   yes?: boolean;
 };
-
-const getErrorCode = (error: unknown): string | undefined =>
-  error instanceof Error && 'code' in error && typeof Reflect.get(error, 'code') === 'string'
-    ? (Reflect.get(error, 'code') as string)
-    : undefined;
 
 /** Generates a standards-compliant time-sortable identity without adding a runtime package. */
 const createProjectId = (): string => {
@@ -166,7 +162,7 @@ const inspectTargetDirectory = async (
     if (error instanceof LocalError) {
       throw error;
     }
-    if (getErrorCode(error) !== 'ENOENT') {
+    if (errnoCode(error) !== 'ENOENT') {
       throw new LocalError('init_failed', 'Could not inspect the initialization target.', {
         path: targetDirectory,
         cause: error,
@@ -191,7 +187,7 @@ const pathExists = async (path: string): Promise<boolean> => {
     await lstat(path);
     return true;
   } catch (error: unknown) {
-    if (getErrorCode(error) === 'ENOENT') {
+    if (errnoCode(error) === 'ENOENT') {
       return false;
     }
     throw error;
@@ -283,7 +279,7 @@ const publishProjectManifest = async (
       try {
         await unlink(temporaryPath);
       } catch (unlinkError: unknown) {
-        if (getErrorCode(unlinkError) !== 'ENOENT') cleanupFailure = unlinkError;
+        if (errnoCode(unlinkError) !== 'ENOENT') cleanupFailure = unlinkError;
       }
     }
     if (manifestPublished) {
@@ -306,7 +302,7 @@ const publishProjectManifest = async (
         },
       );
     }
-    if (getErrorCode(error) === 'EEXIST') {
+    if (errnoCode(error) === 'EEXIST') {
       throw new LocalError('init_conflict', 'Another process initialized this project first.', {
         path: manifestPath,
         hint: 'Inspect the existing project before retrying.',
@@ -336,7 +332,7 @@ const rollbackPublishedManifest = async (
     await unlink(manifestPath);
     await syncDirectory(root);
   } catch (error: unknown) {
-    if (getErrorCode(error) !== 'ENOENT') {
+    if (errnoCode(error) !== 'ENOENT') {
       throw error;
     }
   }

@@ -4,14 +4,10 @@ import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'nod
 
 import type { AttestStore } from '@attest/core';
 
+import { errnoCode } from '../../internal/errno-code.js';
 import { LocalError, type LocalErrorCode } from '../../errors/index.js';
 import { openStore } from '../../store/index.js';
 import { isProjectPath } from '../../project/project-path.js';
-
-const getErrorCode = (error: unknown): string | undefined =>
-  error instanceof Error && 'code' in error && typeof Reflect.get(error, 'code') === 'string'
-    ? (Reflect.get(error, 'code') as string)
-    : undefined;
 
 type PrepareEvalProjectFileOptions = {
   allowAbsolute?: boolean;
@@ -39,7 +35,7 @@ const normalizeAbsoluteProjectFile = async (
     try {
       resolvedAncestor = await realpath(ancestor);
     } catch (error: unknown) {
-      if (getErrorCode(error) !== 'ENOENT') throw unsafe();
+      if (errnoCode(error) !== 'ENOENT') throw unsafe();
       const parent = dirname(ancestor);
       if (parent === ancestor) throw unsafe();
       suffix.unshift(basename(ancestor));
@@ -91,7 +87,7 @@ const prepareEvalProjectFile = async (
     try {
       metadata = await lstat(current);
     } catch (error: unknown) {
-      if (getErrorCode(error) !== 'ENOENT') throw unsafe();
+      if (errnoCode(error) !== 'ENOENT') throw unsafe();
       if (destination || options.createDirectories !== true) break;
       try {
         await mkdir(current, { mode: 0o700 });

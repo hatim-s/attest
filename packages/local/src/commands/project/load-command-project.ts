@@ -1,6 +1,7 @@
 import { lstat, readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 
+import { errnoCode } from '../../internal/errno-code.js';
 import { discoverProject } from '../../project/discover-project.js';
 import { loadProject, type LoadedProject } from '../../project/project-loader/index.js';
 import {
@@ -18,11 +19,6 @@ type LoadCommandProjectOptions = {
   recover?: boolean;
   workingDirectory: string;
 };
-
-const getErrorCode = (error: unknown): string | undefined =>
-  error instanceof Error && 'code' in error && typeof Reflect.get(error, 'code') === 'string'
-    ? (Reflect.get(error, 'code') as string)
-    : undefined;
 
 const throwForReaderLock = (
   inspection: Exclude<ProjectLockInspection, { state: 'absent' }>,
@@ -60,7 +56,7 @@ const hasRecoveryArtifacts = async (root: string): Promise<boolean> => {
     }
     return (await readdir(path)).length > 0;
   } catch (error: unknown) {
-    if (getErrorCode(error) === 'ENOENT') return false;
+    if (errnoCode(error) === 'ENOENT') return false;
     throw error;
   }
 };

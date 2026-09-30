@@ -4,6 +4,7 @@ import { dirname, join } from 'node:path';
 
 import { StoreError, type RunStore } from '@attest/core';
 
+import { errnoCode } from '../../internal/errno-code.js';
 import { LocalError } from '../../errors/index.js';
 import { openRunStoreSnapshot } from '../../store/index.js';
 import { isProjectPath } from '../../project/project-path.js';
@@ -33,11 +34,6 @@ type ReadonlyRunStoreFileOptions = {
   containmentRoot?: string;
   hooks?: ReadonlyRunStoreHooks;
 };
-
-const getErrorCode = (error: unknown): string | undefined =>
-  error instanceof Error && 'code' in error && typeof Reflect.get(error, 'code') === 'string'
-    ? (Reflect.get(error, 'code') as string)
-    : undefined;
 
 const unsafeStore = (path: string): LocalError =>
   new LocalError('project_read_failed', 'The project run store is not a safe file.', {
@@ -78,7 +74,7 @@ const withReadonlyRunStoreFile = async <T>(
     directoryMetadata = await lstat(storeDirectory, { bigint: true });
     storeMetadata = await lstat(storePath, { bigint: true });
   } catch (error: unknown) {
-    if (getErrorCode(error) === 'ENOENT') return undefined;
+    if (errnoCode(error) === 'ENOENT') return undefined;
     throw toSafeStoreError(error, storePath);
   }
   if (

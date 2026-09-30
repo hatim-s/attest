@@ -14,6 +14,7 @@ import {
 } from 'node:fs/promises';
 import { dirname, join, relative } from 'node:path';
 
+import { errnoCode } from '../../internal/errno-code.js';
 import type { ProjectLockHandle } from './project-lock.js';
 import { resolveSafeProjectPath } from './project-path.js';
 import { ProjectTransactionError } from './project-transaction-error.js';
@@ -64,11 +65,6 @@ type RecoveryResult = {
   transactionId: string;
 };
 
-const getErrorCode = (error: unknown): string | undefined =>
-  error instanceof Error && 'code' in error && typeof Reflect.get(error, 'code') === 'string'
-    ? (Reflect.get(error, 'code') as string)
-    : undefined;
-
 const hashBytes = (contents: string | Buffer): string =>
   createHash('sha256').update(contents).digest('hex');
 
@@ -86,7 +82,7 @@ const readByteHash = async (path: string): Promise<string | null> => {
   try {
     return hashBytes(await readFile(path));
   } catch (error: unknown) {
-    if (getErrorCode(error) === 'ENOENT') {
+    if (errnoCode(error) === 'ENOENT') {
       return null;
     }
     throw error;
@@ -129,7 +125,7 @@ const missingParentDirectories = async (
           );
         }
       } catch (error: unknown) {
-        if (getErrorCode(error) !== 'ENOENT') {
+        if (errnoCode(error) !== 'ENOENT') {
           throw error;
         }
         missing.add(current);
@@ -304,7 +300,7 @@ const removeCreatedDirectories = async (root: string, paths: readonly string[]):
       await rmdir(join(root, path));
     } catch (error: unknown) {
       // A non-empty directory now contains authored data and must always be preserved.
-      if (!['ENOENT', 'ENOTEMPTY', 'EEXIST'].includes(getErrorCode(error) ?? '')) {
+      if (!['ENOENT', 'ENOTEMPTY', 'EEXIST'].includes(errnoCode(error) ?? '')) {
         throw error;
       }
     }
@@ -388,7 +384,7 @@ const recoverProjectTransactions = async (
   try {
     names = await readdir(transactionsRoot);
   } catch (error: unknown) {
-    if (getErrorCode(error) === 'ENOENT') {
+    if (errnoCode(error) === 'ENOENT') {
       return [];
     }
     throw error;

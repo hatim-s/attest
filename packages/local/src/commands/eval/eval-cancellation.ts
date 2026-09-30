@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 
+import { errnoCode } from '../../internal/errno-code.js';
 import { LocalError } from '../../errors/index.js';
 import { prepareEvalProjectFile } from './eval-project-path.js';
 
@@ -29,18 +30,13 @@ type EvalCancellationRequest = {
 const localControllers = new Map<string, { controller: AbortController; token: string }>();
 const registryKey = (projectRoot: string, runId: string): string => `${projectRoot}\0${runId}`;
 
-const getErrorCode = (error: unknown): string | undefined =>
-  error instanceof Error && 'code' in error && typeof Reflect.get(error, 'code') === 'string'
-    ? (Reflect.get(error, 'code') as string)
-    : undefined;
-
 /** Checks liveness without delivering a process-wide cancellation signal. */
 const isProcessPresent = (pid: number): boolean => {
   try {
     process.kill(pid, 0);
     return true;
   } catch (error: unknown) {
-    return getErrorCode(error) === 'EPERM';
+    return errnoCode(error) === 'EPERM';
   }
 };
 
@@ -94,7 +90,7 @@ const registerEvalRun = async (projectRoot: string, runId: string): Promise<Eval
         return;
       }
     } catch (error: unknown) {
-      if (getErrorCode(error) !== 'ENOENT') {
+      if (errnoCode(error) !== 'ENOENT') {
         // A malformed request cannot authenticate, so leave the owned run active.
       }
     }
@@ -126,12 +122,12 @@ const unregisterEvalRun = async (handle: EvalRegistryHandle): Promise<void> => {
       await Promise.all([
         unlink(handle.path),
         unlink(handle.requestPath).catch((error: unknown) => {
-          if (getErrorCode(error) !== 'ENOENT') throw error;
+          if (errnoCode(error) !== 'ENOENT') throw error;
         }),
       ]);
     }
   } catch (error: unknown) {
-    if (getErrorCode(error) !== 'ENOENT') {
+    if (errnoCode(error) !== 'ENOENT') {
       throw new LocalError('run_failed', 'Could not clean the eval cancellation registry.', {
         path: EVAL_REGISTRY_DIRECTORY,
         cause: error,
@@ -172,7 +168,7 @@ const signalRegisteredEvalRun = async (
   try {
     record = parseRegistryRecord(JSON.parse(await readFile(path, 'utf8')) as unknown, runId);
   } catch (error: unknown) {
-    if (getErrorCode(error) === 'ENOENT') return 'not_active';
+    if (errnoCode(error) === 'ENOENT') return 'not_active';
   }
   if (record === undefined) return 'not_active';
   if (!isProcessPresent(record.pid)) {

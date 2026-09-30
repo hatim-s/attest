@@ -4,6 +4,7 @@ import { link, open, rename, unlink } from 'node:fs/promises';
 import { StoreError, summarizeCaseRecord, type RunStore } from '@attest/core';
 import { dashboardHtml } from '@attest/web/embedded';
 
+import { errnoCode } from '../internal/errno-code.js';
 import { LocalError } from '../errors/index.js';
 import { prepareEvalProjectFile } from '../commands/eval/eval-project-path.js';
 import { withReadonlyRunStoreFile } from '../commands/run-store/readonly-run-store.js';
@@ -31,8 +32,6 @@ const selectReportCases = <T>(cases: T[]): { cases: T[]; truncated: boolean } =>
   cases: cases.slice(0, MAX_REPORT_CASES),
   truncated: cases.length > MAX_REPORT_CASES,
 });
-
-const isNodeError = (error: unknown): error is NodeJS.ErrnoException => error instanceof Error;
 
 /** Materializes one bounded, self-contained run report without overwriting by default. */
 const runReportCommand = async (
@@ -99,7 +98,7 @@ const runReportCommand = async (
   } catch (error: unknown) {
     await handle?.close().catch(() => undefined);
     await unlink(temporaryPath).catch(() => undefined);
-    if (isNodeError(error) && error.code === 'EEXIST') {
+    if (errnoCode(error) === 'EEXIST') {
       throw new LocalError(
         'output_exists',
         `Report already exists at ${outputPath}; pass --force to replace it.`,

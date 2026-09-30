@@ -5,6 +5,7 @@ import { hostname } from 'node:os';
 import { dirname, join } from 'node:path';
 import { promisify } from 'node:util';
 
+import { errnoCode } from '../../internal/errno-code.js';
 import { ProjectTransactionError } from './project-transaction-error.js';
 
 const PROJECT_LOCK_FILE = '.attest/project.lock';
@@ -35,11 +36,6 @@ type ProjectLockHandle = {
   path: string;
   root: string;
 };
-
-const getErrorCode = (error: unknown): string | undefined =>
-  error instanceof Error && 'code' in error && typeof Reflect.get(error, 'code') === 'string'
-    ? (Reflect.get(error, 'code') as string)
-    : undefined;
 
 /** Fsyncs a directory entry after creating or removing lock metadata. */
 const syncDirectory = async (path: string): Promise<void> => {
@@ -94,7 +90,7 @@ const isProcessPresent = (pid: number): boolean => {
     return true;
   } catch (error: unknown) {
     // EPERM proves the process exists even though this user cannot signal it.
-    return getErrorCode(error) === 'EPERM';
+    return errnoCode(error) === 'EPERM';
   }
 };
 
@@ -105,7 +101,7 @@ const inspectProjectLock = async (root: string): Promise<ProjectLockInspection> 
   try {
     raw = await readFile(path, 'utf8');
   } catch (error: unknown) {
-    if (getErrorCode(error) === 'ENOENT') {
+    if (errnoCode(error) === 'ENOENT') {
       return { state: 'absent' };
     }
     throw new ProjectTransactionError('project_locked', 'Could not inspect the project lock.', {
@@ -199,7 +195,7 @@ const acquireProjectLock = async (root: string): Promise<ProjectLockHandle> => {
   try {
     handle = await open(path, 'wx', 0o600);
   } catch (error: unknown) {
-    if (getErrorCode(error) === 'EEXIST') {
+    if (errnoCode(error) === 'EEXIST') {
       const inspection = await inspectProjectLock(root);
       if (inspection.state === 'absent') {
         // The owner released between open and inspection; a fresh retry is safe.

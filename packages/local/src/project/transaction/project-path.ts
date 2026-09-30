@@ -1,13 +1,9 @@
 import { lstat, realpath } from 'node:fs/promises';
 import { isAbsolute, resolve } from 'node:path';
 
+import { errnoCode } from '../../internal/errno-code.js';
 import { isProjectPath } from '../project-path.js';
 import { ProjectTransactionError } from './project-transaction-error.js';
-
-const getErrorCode = (error: unknown): string | undefined =>
-  error instanceof Error && 'code' in error && typeof Reflect.get(error, 'code') === 'string'
-    ? (Reflect.get(error, 'code') as string)
-    : undefined;
 
 /** Rejects absolute, normalized-ambiguous, and internal transaction destination paths. */
 const assertProjectRelativePath = (path: string): void => {
@@ -66,7 +62,7 @@ const resolveSafeProjectPath = async (root: string, path: string): Promise<strin
         );
       }
     } catch (error: unknown) {
-      if (getErrorCode(error) !== 'ENOENT') {
+      if (errnoCode(error) !== 'ENOENT') {
         throw error;
       }
       // Once an ancestor is missing, every remaining path is lexical until created locally.
