@@ -31,7 +31,8 @@ import {
   resolveNativeAgent,
   resolveProcessEnvironment,
 } from '../agent/adapter/resolve-native-agent.js';
-import type { ResolvedEvalCaseInput, ResolvedEvalMetric } from './eval-resolver.js';
+import type { ResolvedEvalMetric } from './eval-case-expansion.js';
+import type { ResolvedEvalCaseInput } from './eval-resolver.js';
 
 /** Adapts the shared SQLite response cache to the judge metric cache contract. */
 const createJudgeCache = (cacheStore: CacheStore): JudgeCache => ({

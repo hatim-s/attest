@@ -4,31 +4,25 @@ import {
   type CliWarning,
   type CommandRequest,
   type ProjectResources,
-  type TestCase,
-  type TestResource,
 } from '@attest/contracts';
-import {
-  createContentCaseId,
-  type ImportCollisionContext,
-  type TabularImportResult,
-} from '@attest/core';
+import { type TabularImportResult } from '@attest/core';
 
 import { LocalError } from '../../errors/index.js';
-import { loadProject, type LoadedProject } from '../../project/project-loader/index.js';
+import { type LoadedProject } from '../../project/project-loader/index.js';
 import type { ProjectMutationRequest } from '../../project/transaction/index.js';
-import type {
-  CommandResult,
-  MutationResult,
-  ResourceListResult,
-  ResourceShowResult,
-  TestCaseListResult,
-  TestCaseShowResult,
-} from '../shared/command-result.js';
-import { executeProjectMutation } from '../shared/project-mutation.js';
-import { runListCommand } from '../list/list-command.js';
-import { candidateFromLoadedProject, loadCommandProject } from '../project/load-command-project.js';
-import { runShowCommand } from '../show/show-command.js';
+import { candidateFromLoadedProject } from '../project/load-command-project.js';
 import { runTabularImportAdapter } from './import/tabular-import-adapter.js';
+import {
+  assertDatasetRemovable,
+  assertNewResourceId,
+  attachedDatasetTests,
+  attachmentCases,
+  caseWithGeneratedId,
+  datasetImportCollisionContexts,
+  findDataset,
+  findTest,
+  missingResource,
+} from './test-resources.js';
 
 type TestAuthoringCommand = Extract<
   CommandRequest,
@@ -59,13 +53,6 @@ type TestMutationCommandOptions = {
   workingDirectory: string;
 };
 
-type TestReadCommandOptions = {
-  caseId?: string;
-  project?: string;
-  testId?: string;
-  workingDirectory: string;
-};
-
 type MutationBuildResult = {
   affectedTests?: string[];
   candidate: ProjectResources;
@@ -74,104 +61,6 @@ type MutationBuildResult = {
   renames?: ProjectMutationRequest['renames'];
   resource: { id: string; type: 'dataset' | 'test' | 'test_case' };
   warnings?: CliWarning[];
-};
-
-const MISSING_RESOURCE_HINTS = {
-  case: 'Run `attest test case list <test-id>` to inspect direct case ids.',
-  dataset: 'Run `attest list datasets` to inspect available ids.',
-  test: 'Run `attest list tests` to inspect available ids.',
-} as const;
-
-const missingResource = (type: keyof typeof MISSING_RESOURCE_HINTS, id: string): LocalError =>
-  new LocalError('resource_not_found', `${type} ${id} was not found.`, {
-    path: id,
-    hint: MISSING_RESOURCE_HINTS[type],
-  });
-
-const findTest = (candidate: ProjectResources, id: string): TestResource => {
-  const test = candidate.tests.find((item) => item.id === id);
-  if (test === undefined) throw missingResource('test', id);
-  return test;
-};
-
-const findDataset = (candidate: ProjectResources, id: string) => {
-  const dataset = candidate.datasets.find(({ metadata }) => metadata.id === id);
-  if (dataset === undefined) throw missingResource('dataset', id);
-  return dataset;
-};
-
-const assertNewResourceId = (
-  values: readonly { id: string }[],
-  type: 'dataset' | 'test',
-  id: string,
-): void => {
-  if (values.some((value) => value.id === id)) {
-    throw new LocalError('project_invalid', `${type} ${id} already exists.`, {
-      path: id,
-      hint: `Choose a new ${type} id.`,
-    });
-  }
-};
-
-const caseWithGeneratedId = (
-  value: Extract<TestAuthoringCommand, { command: 'test.case.add' }>['case'],
-): TestCase => ({ ...value, id: value.id ?? createContentCaseId(value) });
-
-const attachedDatasetTests = (candidate: ProjectResources, datasetId: string): string[] =>
-  candidate.tests
-    .filter((test) => test.datasets.some(({ dataset_id }) => dataset_id === datasetId))
-    .map(({ id }) => id)
-    .sort();
-
-const attachmentCases = (
-  candidate: ProjectResources,
-  test: TestResource,
-  excludedDatasetId?: string,
-): TestCase[] =>
-  test.datasets.flatMap((attachment) => {
-    if (attachment.dataset_id === excludedDatasetId) return [];
-    const dataset = findDataset(candidate, attachment.dataset_id);
-    return dataset.cases.filter((testCase) => {
-      const tags = new Set(testCase.tags ?? []);
-      return attachment.tags?.some((tag) => !tags.has(tag)) !== true;
-    });
-  });
-
-/** Collects direct/attached cases that an imported dataset must not collide with in any test. */
-const datasetImportCollisionContexts = (
-  candidate: ProjectResources,
-  datasetId: string,
-  importingTestId: string,
-): ImportCollisionContext[] =>
-  candidate.tests
-    .filter(
-      (test) =>
-        test.id === importingTestId ||
-        test.datasets.some((attachment) => attachment.dataset_id === datasetId),
-    )
-    .map((test) => {
-      const targetAttachment = test.datasets.find(
-        (attachment) => attachment.dataset_id === datasetId,
-      );
-      return {
-        cases: [...test.cases, ...attachmentCases(candidate, test, datasetId)],
-        ...(targetAttachment?.tags === undefined ? {} : { requiredTags: targetAttachment.tags }),
-      };
-    });
-
-/** Rejects dataset removal with copy-paste detach commands for every blocking test. */
-const assertDatasetRemovable = (candidate: ProjectResources, datasetId: string): void => {
-  findDataset(candidate, datasetId);
-  const references = attachedDatasetTests(candidate, datasetId);
-  if (references.length === 0) return;
-  const detachCommands = references.map(
-    (testId) => `attest test dataset detach ${testId} ${datasetId}`,
-  );
-  throw new LocalError('project_invalid', 'Attached datasets cannot be removed.', {
-    path: datasetId,
-    hint: `Run ${detachCommands.map((command) => `\`${command}\``).join(', ')}, then retry.`,
-    details: { attached_tests: references, detach_commands: detachCommands },
-  });
 };
 
 /** Builds the complete candidate for one test/case/dataset command before any write occurs. */
@@ -380,121 +269,4 @@ const buildMutation = async (
   }
 };
 
-/** Performs reference validation before a destructive dataset confirmation prompt. */
-const runTestDatasetRemovePreflight = async (
-  options: TestReadCommandOptions & { datasetId: string },
-): Promise<void> => {
-  const loaded = await loadCommandProject(options);
-  assertDatasetRemovable(loaded, options.datasetId);
-};
-
-/** Executes one normalized authoring request through the shared hash-guarded transaction writer. */
-const runTestMutationCommand = async (
-  options: TestMutationCommandOptions,
-): Promise<CommandResult<'mutation', MutationResult>> => {
-  // A preview must not recover journals or acquire a reader lock because that would write locally.
-  const loaded =
-    options.request.dry_run === true
-      ? await loadProject({ project: options.project, workingDirectory: options.workingDirectory })
-      : await loadCommandProject({
-          project: options.project,
-          workingDirectory: options.workingDirectory,
-        });
-  const built = await buildMutation(loaded, options.request, options);
-  const mutation = await executeProjectMutation({
-    dryRun: options.request.dry_run === true,
-    mutation: {
-      candidate: built.candidate,
-      // Always bind the candidate to its loaded base; an explicit caller hash is stricter still.
-      expectedProjectHash: options.request.if_project_hash ?? loaded.projectHash,
-      projectRoot: loaded.root,
-      renames: built.renames,
-      warnings: built.warnings?.map(({ message }) => message),
-    },
-  });
-  const dryRun = options.request.dry_run === true;
-  return {
-    operation: 'mutation',
-    projectHashBefore: mutation.projectHashBefore,
-    projectHashAfter: mutation.projectHashAfter,
-    result: {
-      committed: mutation.committed,
-      dry_run: dryRun,
-      resource: built.resource,
-      operations: mutation.diff.operations,
-      ...(built.affectedTests === undefined ? {} : { affected_tests: built.affectedTests }),
-      ...(built.importedCaseCount === undefined
-        ? {}
-        : { imported_case_count: built.importedCaseCount }),
-      ...(built.importResult === undefined
-        ? {}
-        : {
-            import: {
-              format: built.importResult.format,
-              counts: built.importResult.counts,
-              decisions: built.importResult.decisions,
-              preview: built.importResult.preview,
-              source_content_hash: built.importResult.sourceHash,
-            },
-          }),
-    },
-    warnings: built.warnings,
-  };
-};
-
-/** Lists canonical tests using the same deterministic summary as the generic read surface. */
-const runTestListCommand = async (
-  options: TestReadCommandOptions,
-): Promise<CommandResult<'list', ResourceListResult>> =>
-  runListCommand({ ...options, resourceType: 'tests' });
-
-/** Shows one canonical test using the same validated generic read surface. */
-const runTestShowCommand = async (
-  options: TestReadCommandOptions & { testId: string },
-): Promise<CommandResult<'show', ResourceShowResult>> =>
-  runShowCommand({ ...options, id: options.testId, resourceType: 'test' });
-
-/** Lists direct cases only; attached dataset rows remain visible through dataset inspection. */
-const runTestCaseListCommand = async (
-  options: TestReadCommandOptions & { testId: string },
-): Promise<CommandResult<'test-case-list', TestCaseListResult>> => {
-  const loaded = await loadCommandProject(options);
-  const test = findTest(loaded, options.testId);
-  const items = test.cases.map(({ id, tags, folder }) => ({
-    id,
-    ...(tags === undefined ? {} : { tags }),
-    ...(folder === undefined ? {} : { folder }),
-  }));
-  return {
-    operation: 'test-case-list',
-    projectHashBefore: loaded.projectHash,
-    projectHashAfter: loaded.projectHash,
-    result: { test_id: test.id, items },
-  };
-};
-
-/** Shows one direct case without resolving or copying attached dataset rows. */
-const runTestCaseShowCommand = async (
-  options: TestReadCommandOptions & { caseId: string; testId: string },
-): Promise<CommandResult<'test-case-show', TestCaseShowResult>> => {
-  const loaded = await loadCommandProject(options);
-  const test = findTest(loaded, options.testId);
-  const testCase = test.cases.find(({ id }) => id === options.caseId);
-  if (testCase === undefined) throw missingResource('case', options.caseId);
-  return {
-    operation: 'test-case-show',
-    projectHashBefore: loaded.projectHash,
-    projectHashAfter: loaded.projectHash,
-    result: { test_id: test.id, case: testCase },
-  };
-};
-
-export {
-  runTestCaseListCommand,
-  runTestCaseShowCommand,
-  runTestDatasetRemovePreflight,
-  runTestListCommand,
-  runTestMutationCommand,
-  runTestShowCommand,
-  type TestAuthoringCommand,
-};
+export { buildMutation, type TestAuthoringCommand, type TestMutationCommandOptions };
