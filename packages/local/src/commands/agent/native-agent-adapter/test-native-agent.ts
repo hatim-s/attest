@@ -21,8 +21,8 @@ import {
 } from '@attest/executor';
 
 import { LocalError } from '../../../errors/index.js';
+import { assertSafeNativeAgentResource } from '../authoring/index.js';
 import {
-  REDACTED,
   redactAgentRequest,
   redactAgentResponse,
   redactInvocationDiagnostics,
@@ -47,66 +47,6 @@ type NativeAgentConnectionResult = {
   warnings: JsonValue;
 };
 
-const assertSupportedProbePolicy = (agent: AgentResource): void => {
-  const kind = agent.transport.kind;
-  const unsupportedTimeoutFields =
-    kind === 'native_cli'
-      ? ['connect_ms', 'first_byte_ms', 'idle_ms', 'run_ms']
-      : kind === 'http' || kind === 'polling'
-        ? ['run_ms']
-        : kind === 'jsonl_bridge'
-          ? ['connect_ms']
-          : [];
-  const unsupportedTimeout = unsupportedTimeoutFields.find(
-    (field) =>
-      agent.timeouts?.[field as keyof NonNullable<AgentResource['timeouts']>] !== undefined,
-  );
-  if (unsupportedTimeout !== undefined) {
-    throw new LocalError('project_invalid', 'This timeout phase is not supported by the adapter.', {
-      path: `/agents/${agent.id}/timeouts/${unsupportedTimeout}`,
-      hint: 'Remove the unsupported phase or select a lifecycle that owns it.',
-    });
-  }
-  if (
-    (kind === 'native_cli' && agent.retry !== undefined && agent.retry.backoff.kind !== 'none') ||
-    (kind === 'jsonl_bridge' && (agent.retry?.retries ?? 0) > 0)
-  ) {
-    throw new LocalError('project_invalid', 'Retry backoff is not supported by native probes.', {
-      path: `/agents/${agent.id}/retry/backoff`,
-      hint:
-        kind === 'jsonl_bridge'
-          ? 'Set retries to zero; sent bridge requests are not replayed.'
-          : 'Use deterministic no-backoff retries for a native connection probe.',
-    });
-  }
-  const unsupportedLimitFields =
-    kind === 'native_cli'
-      ? ['request_bytes', 'event_count', 'event_bytes', 'total_evidence_bytes']
-      : kind === 'http' || kind === 'polling'
-        ? ['event_count', 'event_bytes', 'total_evidence_bytes']
-        : kind === 'background_cli'
-          ? ['event_count', 'event_bytes']
-          : kind === 'stream'
-            ? ['response_bytes']
-            : [];
-  const unsupportedLimit = unsupportedLimitFields.find(
-    (field) => agent.limits?.[field as keyof NonNullable<AgentResource['limits']>] !== undefined,
-  );
-  if (unsupportedLimit !== undefined) {
-    throw new LocalError(
-      'project_invalid',
-      'This evidence limit is not supported by the adapter.',
-      {
-        path: `/agents/${agent.id}/limits/${unsupportedLimit}`,
-        hint: 'Remove the limit or use the adapter-specific request, response, or event cap.',
-      },
-    );
-  }
-};
-
-const redactString = (value: string, secrets: readonly string[]): string =>
-  redactTransportText(value, secrets);
-
 const invocationAttempts = (attempts: InvocationResult['attempts']): JsonValue =>
   attempts.map((attempt, index) => ({
     attempt: index + 1,
@@ -127,7 +67,7 @@ const storedAttempts = (
 const testNativeAgentConnection = async (
   options: NativeAgentTestOptions,
 ): Promise<NativeAgentConnectionResult> => {
-  assertSupportedProbePolicy(options.agent);
+  assertSafeNativeAgentResource(options.agent);
   options.onProgress?.(`Testing agent ${options.agent.id}...`);
   const resolved = await resolveNativeAgent(options.agent, options.projectRoot);
   const request: AgentRequest = {
@@ -288,7 +228,7 @@ const testNativeAgentConnection = async (
       diagnostics: redactInvocationDiagnostics(invocation.diagnostics, resolved.secrets),
       durationMs: invocation.durationMs,
       errorCode: invocation.error.code,
-      errorMessage: redactString(invocation.error.message, resolved.secrets),
+      errorMessage: redactTransportText(invocation.error.message, resolved.secrets),
       expectedMetrics: [],
       outcome:
         invocation.error.code === 'cancelled'
@@ -303,7 +243,7 @@ const testNativeAgentConnection = async (
     });
     throw new LocalError(
       code,
-      `Agent connection test failed: ${redactString(invocation.error.message, resolved.secrets)}`,
+      `Agent connection test failed: ${redactTransportText(invocation.error.message, resolved.secrets)}`,
       {
         hint:
           code === 'cancelled'
@@ -345,7 +285,7 @@ const testNativeAgentConnection = async (
   });
 
   const result: NativeAgentConnectionResult = {
-    agent_id: redactString(options.agent.id, resolved.secrets),
+    agent_id: redactTransportText(options.agent.id, resolved.secrets),
     attempt_count: invocation.attempts.length,
     attempts: redactProbeValue(invocationAttempts(invocation.attempts), resolved.secrets),
     response: redactProbeValue(invocation.report.value, resolved.secrets),
@@ -358,8 +298,6 @@ const testNativeAgentConnection = async (
 
 export {
   CONNECTION_TEST_RUN_ID,
-  REDACTED,
-  assertSupportedProbePolicy,
   redactProbeValue,
   testNativeAgentConnection,
   type NativeAgentConnectionResult,

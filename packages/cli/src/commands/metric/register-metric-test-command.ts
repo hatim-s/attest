@@ -1,8 +1,8 @@
 import { COMMAND_REQUEST_SCHEMA_ID } from '@attest/contracts';
 import {
-  readMetricCommandRequest,
+  readCommandRequest,
   runMetricTestCommand,
-  validateMetricCommandRequest,
+  validateCommandRequest,
 } from '@attest/local/metric';
 import type { Command } from 'commander';
 
@@ -44,7 +44,7 @@ const registerMetricTestCommand = (
       const interactive = isInteractive(options, context.interaction, options.fromJson);
       const request =
         options.fromJson === undefined
-          ? validateMetricCommandRequest('metric.test', {
+          ? validateCommandRequest('metric.test', {
               schema: COMMAND_REQUEST_SCHEMA_ID,
               command: 'metric.test',
               metric_id: await requiredMetricInput(
@@ -62,12 +62,10 @@ const registerMetricTestCommand = (
                 context,
               ),
             })
-          : await readMetricCommandRequest(
-              'metric.test',
-              options.fromJson,
-              context.workingDirectory,
-              context.interaction.readStdin,
-            );
+          : await readCommandRequest('metric.test', options.fromJson, {
+              readStdin: context.interaction.readStdin,
+              workingDirectory: context.workingDirectory,
+            });
       if (options.fromJson === '-' && request.fixture === '-') {
         throw new AttestCliError(
           'cli_usage',

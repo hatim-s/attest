@@ -1,6 +1,9 @@
-import type { ProjectResources } from '@attest/contracts';
+import type { ProjectResources, JsonValue } from '@attest/contracts';
 
-import { datasetMetadataForHash, hashCanonicalJson, type JsonValue } from '../canonical-project.js';
+import { contentHash } from '@attest/core';
+
+import { escapeJsonPointerSegment } from '../../internal/json-pointer.js';
+import { datasetMetadataForHash } from '../canonical-project.js';
 import type { LoadedProject } from '../project-loader/index.js';
 import { ProjectTransactionError } from './project-transaction-error.js';
 import type {
@@ -14,9 +17,6 @@ import type {
 
 type ResourceValue = JsonValue & { id: string };
 type IdentityValue = Record<string, JsonValue> & { id: string };
-
-const escapePointerSegment = (segment: string): string =>
-  segment.replaceAll('~', '~0').replaceAll('/', '~1');
 
 const identityValues = (values: readonly JsonValue[]): IdentityValue[] | undefined => {
   const records: IdentityValue[] = [];
@@ -51,7 +51,7 @@ const diffIdentityArray = (
   const afterById = new Map(afterRecords.map((value) => [value.id, value]));
   const ids = [...new Set([...beforeById.keys(), ...afterById.keys()])].sort();
   const changes = ids.flatMap((id) => {
-    const childPath = `${path}/${escapePointerSegment(id)}`;
+    const childPath = `${path}/${escapeJsonPointerSegment(id)}`;
     const oldValue = beforeById.get(id);
     const newValue = afterById.get(id);
     if (oldValue === undefined) return [{ change: 'add' as const, path: childPath }];
@@ -104,7 +104,7 @@ const diffJsonFields = (before: JsonValue, after: JsonValue, path = ''): Semanti
     return [...new Set([...Object.keys(beforeRecord), ...Object.keys(afterRecord)])]
       .sort()
       .flatMap((key) => {
-        const childPath = `${path}/${escapePointerSegment(key)}`;
+        const childPath = `${path}/${escapeJsonPointerSegment(key)}`;
         if (!(key in beforeRecord)) {
           return [{ change: 'add' as const, path: childPath }];
         }
@@ -209,8 +209,8 @@ const makeOperation = (
 ): SemanticProjectOperation => ({
   changes:
     before === undefined || after === undefined ? [] : diffJsonFields(before, after).sort(byPath),
-  ...(after === undefined ? {} : { new_content_hash: hashCanonicalJson(after) }),
-  ...(before === undefined ? {} : { old_content_hash: hashCanonicalJson(before) }),
+  ...(after === undefined ? {} : { new_content_hash: contentHash(after) }),
+  ...(before === undefined ? {} : { old_content_hash: contentHash(before) }),
   op,
   ...(previousId === undefined ? {} : { previous_id: previousId }),
   references_added: referencesForResource(addedReferences, kind, id),
@@ -291,7 +291,7 @@ const createSemanticProjectDiff = (
       } else if (
         oldValue !== undefined &&
         newValue !== undefined &&
-        hashCanonicalJson(oldValue) !== hashCanonicalJson(newValue)
+        contentHash(oldValue) !== contentHash(newValue)
       ) {
         operations.push(
           makeOperation(
@@ -320,7 +320,7 @@ const createSemanticProjectDiff = (
     name: after.project.name,
     ...(after.project.defaults === undefined ? {} : { defaults: after.project.defaults }),
   };
-  if (hashCanonicalJson(oldProjectMetadata) !== hashCanonicalJson(newProjectMetadata)) {
+  if (contentHash(oldProjectMetadata) !== contentHash(newProjectMetadata)) {
     operations.push(
       makeOperation(
         'update',

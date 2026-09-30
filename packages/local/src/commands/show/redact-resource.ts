@@ -1,8 +1,6 @@
-import type { AgentResource, MetricResource } from '@attest/contracts';
+import type { AgentResource, MetricResource, JsonValue } from '@attest/contracts';
 
-import type { JsonValue } from '../../project/canonical-project.js';
-
-const REDACTED = '[REDACTED]';
+import { REDACTED } from '../../internal/redaction.js';
 
 /** Removes userinfo and every literal query value from one display-only URL. */
 const redactUrl = (value: string): string => {
@@ -68,4 +66,4 @@ const redactMetricResource = (resource: MetricResource): JsonValue => {
   return redacted;
 };
 
-export { REDACTED, redactAgentResource, redactMetricResource, redactUrl };
+export { redactAgentResource, redactMetricResource, redactUrl };

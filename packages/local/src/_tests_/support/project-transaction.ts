@@ -12,13 +12,13 @@ import {
   type DatasetResource,
   type MetricResource,
   type ProjectManifest,
-  type ProjectResources,
   type TestCase,
   type TestResource,
 } from '@attest/contracts';
 
-import { hashCanonicalJson, hashCanonicalJsonLines } from '../../project/canonical-project.js';
-import type { LoadedProject } from '../../project/project-loader/index.js';
+import { contentHash } from '@attest/core';
+
+import { hashCanonicalJsonLines } from '../../project/canonical-project.js';
 
 const fixtureAgent: AgentResource = {
   schema: AGENT_RESOURCE_SCHEMA_ID,
@@ -80,7 +80,7 @@ const writeFixtureProject = async (root: string): Promise<void> => {
           id: fixtureAgent.id,
           schema: fixtureAgent.schema,
           path: 'attest/agents/support.json',
-          content_hash: hashCanonicalJson(fixtureAgent),
+          content_hash: contentHash(fixtureAgent),
         },
       ],
       tests: [
@@ -88,7 +88,7 @@ const writeFixtureProject = async (root: string): Promise<void> => {
           id: fixtureTest.id,
           schema: fixtureTest.schema,
           path: 'attest/tests/refund.json',
-          content_hash: hashCanonicalJson(fixtureTest),
+          content_hash: contentHash(fixtureTest),
         },
       ],
       datasets: [
@@ -98,7 +98,7 @@ const writeFixtureProject = async (root: string): Promise<void> => {
           data_path: 'attest/datasets/refunds.jsonl',
           data_content_hash: hashCanonicalJsonLines([fixtureCase]),
           metadata_path: 'attest/datasets/refunds.meta.json',
-          metadata_content_hash: hashCanonicalJson(fixtureDataset),
+          metadata_content_hash: contentHash(fixtureDataset),
         },
       ],
       metrics: [
@@ -106,7 +106,7 @@ const writeFixtureProject = async (root: string): Promise<void> => {
           id: fixtureMetric.id,
           schema: fixtureMetric.schema,
           path: 'attest/metrics/correct.json',
-          content_hash: hashCanonicalJson(fixtureMetric),
+          content_hash: contentHash(fixtureMetric),
         },
       ],
     },
@@ -119,22 +119,4 @@ const writeFixtureProject = async (root: string): Promise<void> => {
   }
 };
 
-/** Removes loader-only metadata to create a mutable candidate snapshot. */
-const candidateFromLoadedProject = (loaded: LoadedProject): ProjectResources =>
-  structuredClone({
-    agents: loaded.agents,
-    datasets: loaded.datasets,
-    metrics: loaded.metrics,
-    project: loaded.project,
-    tests: loaded.tests,
-  });
-
-export {
-  candidateFromLoadedProject,
-  fixtureAgent,
-  fixtureCase,
-  fixtureDataset,
-  fixtureMetric,
-  fixtureTest,
-  writeFixtureProject,
-};
+export { writeFixtureProject };

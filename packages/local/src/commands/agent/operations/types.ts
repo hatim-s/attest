@@ -1,8 +1,7 @@
 import type { CommandRequest } from '@attest/contracts';
 
+import type { Prompt } from '../../shared/prompt.js';
 import type { ReadInput } from '../authoring/index.js';
-
-type Prompt = (question: string, options?: { signal?: AbortSignal }) => Promise<string>;
 
 type MutationFields = {
   dryRun?: boolean;
@@ -142,5 +141,4 @@ export {
   type AgentTestCommandOptions,
   type CurlImportRequest,
   type MutationFields,
-  type Prompt,
 };

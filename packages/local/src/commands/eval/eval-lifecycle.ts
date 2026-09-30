@@ -1,10 +1,9 @@
-import { mkdir, realpath } from 'node:fs/promises';
 import { isAbsolute, resolve } from 'node:path';
 
 import type { EvalRun } from '@attest/contracts';
 
 import { LocalError } from '../../errors/index.js';
-import { isProjectPath } from '../../project/project-path.js';
+import { isProjectPath, resolveContainedPath } from '../../project/project-path.js';
 import { createBaseEnvironment } from '../agent/native-agent-adapter/index.js';
 import {
   HookCommandError,
@@ -68,43 +67,19 @@ const resolveWorkerDirectory = (
   return directory;
 };
 
-/** Creates a worker directory only after its nearest existing target resolves inside the project. */
-const prepareWorkerDirectory = async (projectRoot: string, directory: string): Promise<string> => {
-  const resolvedRoot = await realpath(projectRoot);
-  let ancestor = directory;
-  while (true) {
-    try {
-      ancestor = await realpath(ancestor);
-      break;
-    } catch (error: unknown) {
-      if (!(error instanceof Error && 'code' in error && error.code === 'ENOENT')) throw error;
-      const parent = resolve(ancestor, '..');
-      if (parent === ancestor) {
-        throw new LocalError('run_failed', 'Eval worker directory has no existing ancestor.', {
-          path: directory,
-        });
-      }
-      ancestor = parent;
-    }
-  }
-  if (!isProjectPath(resolvedRoot, ancestor)) {
-    throw new LocalError(
-      'project_invalid',
-      'Eval worker directory escapes the project through a symbolic link.',
-      { path: directory },
-    );
-  }
-  await mkdir(directory, { recursive: true });
-  const resolvedDirectory = await realpath(directory);
-  if (resolvedDirectory === resolvedRoot || !isProjectPath(resolvedRoot, resolvedDirectory)) {
-    throw new LocalError(
-      'project_invalid',
-      'Eval worker directory escapes the project through a symbolic link.',
-      { path: directory },
-    );
-  }
-  return resolvedDirectory;
-};
+/** Creates a worker directory whose every segment is a real directory inside the project. */
+const prepareWorkerDirectory = async (projectRoot: string, directory: string): Promise<string> =>
+  resolveContainedPath(projectRoot, directory, {
+    allowAbsolute: true,
+    createDirectories: true,
+    expect: 'directory',
+    problem: () =>
+      new LocalError(
+        'project_invalid',
+        'Eval worker directory escapes the project through a symbolic link.',
+        { path: directory },
+      ),
+  });
 
 /** Runs one argv-only lifecycle hook with isolated environment and bounded process cleanup. */
 const runHook = async (

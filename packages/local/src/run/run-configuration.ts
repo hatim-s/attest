@@ -11,8 +11,8 @@ import {
   type EvalRun,
   type EvalRunRequest,
 } from '@attest/contracts';
-import { StoreError } from '@attest/core';
-import { executeResolvedEvalPlan } from '@attest/runtime';
+import type { RunRecord } from '@attest/core';
+import { executeResolvedEvalPlan, type EvalTerminalFailureFactory } from '@attest/runtime';
 
 import { LocalError } from '../errors/index.js';
 import { createRunIdentity, openReadonlyRunStore } from '../store/index.js';
@@ -35,6 +35,7 @@ import {
 } from '../commands/eval/eval-persistence.js';
 import { resolveEvalRun } from '../commands/eval/eval-resolver.js';
 import { loadCommandProject } from '../commands/project/load-command-project.js';
+import { withRunNotFound } from '../commands/run-store/run-not-found.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -42,9 +43,7 @@ type RunConfigurationOptions = {
   argv: readonly string[];
   project?: string;
   signal: AbortSignal;
-  terminalFailure: NonNullable<
-    NonNullable<Parameters<typeof executeResolvedEvalPlan>[3]>['terminalFailure']
-  >;
+  terminalFailure: EvalTerminalFailureFactory;
   workingDirectory: string;
 };
 
@@ -86,32 +85,23 @@ const readGitMetadata = async (projectRoot: string): Promise<EvalRun['git'] | un
   };
 };
 
-/** Confirms a requested baseline from a read-only store before any candidate side effects occur. */
-const preflightEvalBaseline = async (storePath: string, baselineRunId?: string): Promise<void> => {
-  if (baselineRunId === undefined) return;
+/** Reads one run from a read-only store; a missing store or run is `resource_not_found`. */
+const readStoredRun = async (storePath: string, runId: string): Promise<RunRecord> => {
+  const runNotFound = (cause: unknown): LocalError =>
+    new LocalError('resource_not_found', `Eval run ${runId} was not found.`, {
+      path: runId,
+      cause,
+    });
   try {
     await access(storePath);
   } catch (error: unknown) {
-    throw new LocalError('resource_not_found', `Eval run ${baselineRunId} was not found.`, {
-      path: baselineRunId,
-      cause: error,
-    });
+    throw runNotFound(error);
   }
-
-  let store: Awaited<ReturnType<typeof openReadonlyRunStore>> | undefined;
+  const store = await openReadonlyRunStore(storePath);
   try {
-    store = await openReadonlyRunStore(storePath);
-    await store.getRun(baselineRunId);
-  } catch (error: unknown) {
-    if (error instanceof StoreError && error.code === 'RUN_NOT_FOUND') {
-      throw new LocalError('resource_not_found', `Eval run ${baselineRunId} was not found.`, {
-        path: baselineRunId,
-        cause: error,
-      });
-    }
-    throw error;
+    return await withRunNotFound(() => store.getRun(runId), runNotFound);
   } finally {
-    await store?.close().catch(() => undefined);
+    await store.close().catch(() => undefined);
   }
 };
 
@@ -141,7 +131,9 @@ const runConfiguration = async (
     errorCode: 'run_failed',
     message: 'The eval run store is not a safe project file.',
   });
-  await preflightEvalBaseline(storePath, resolved.effectiveCommand.resolved.baseline_run_id);
+  // Confirm the baseline exists before any candidate side effect.
+  const baselineRunId = resolved.effectiveCommand.resolved.baseline_run_id;
+  if (baselineRunId !== undefined) await readStoredRun(storePath, baselineRunId);
   const store = await openEvalProjectStore(project.root);
   let registry: Awaited<ReturnType<typeof registerEvalRun>>;
   try {
@@ -205,26 +197,14 @@ const cancelConfiguration = async (
     project: options.project,
     workingDirectory: options.workingDirectory,
   });
+  const result = { projectHash: project.projectHash, runId: request.run_id };
   const requested = await signalRegisteredEvalRun(project.root, request.run_id);
-  let status: 'cancellation_requested' | 'already_cancelled' | 'already_terminal';
-  if (requested === 'cancellation_requested') status = requested;
-  else {
-    const storePath = join(project.root, '.attest', 'runs.db');
-    let store: Awaited<ReturnType<typeof openReadonlyRunStore>> | undefined;
-    try {
-      store = await openReadonlyRunStore(storePath);
-      const run = await store.getRun(request.run_id);
-      status = run.status === 'cancelled' ? 'already_cancelled' : 'already_terminal';
-    } catch (error: unknown) {
-      throw new LocalError('resource_not_found', `Eval run ${request.run_id} was not found.`, {
-        path: request.run_id,
-        cause: error,
-      });
-    } finally {
-      await store?.close().catch(() => undefined);
-    }
-  }
-  return { projectHash: project.projectHash, runId: request.run_id, status };
+  if (requested === 'cancellation_requested') return { ...result, status: requested };
+  const run = await readStoredRun(join(project.root, '.attest', 'runs.db'), request.run_id);
+  return {
+    ...result,
+    status: run.status === 'cancelled' ? 'already_cancelled' : 'already_terminal',
+  };
 };
 
 export {

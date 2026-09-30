@@ -3,7 +3,6 @@ import {
   copyFile,
   lstat,
   mkdir,
-  open,
   readFile,
   readdir,
   rename,
@@ -15,6 +14,7 @@ import {
 import { dirname, join, relative } from 'node:path';
 
 import { errnoCode } from '../../internal/errno-code.js';
+import { syncPath } from '../../internal/sync-path.js';
 import type { ProjectLockHandle } from './project-lock.js';
 import { resolveSafeProjectPath } from './project-path.js';
 import { ProjectTransactionError } from './project-transaction-error.js';
@@ -67,16 +67,6 @@ type RecoveryResult = {
 
 const hashBytes = (contents: string | Buffer): string =>
   createHash('sha256').update(contents).digest('hex');
-
-/** Fsyncs a file or directory after transaction state changes. */
-const syncPath = async (path: string): Promise<void> => {
-  const handle = await open(path, 'r');
-  try {
-    await handle.sync();
-  } finally {
-    await handle.close();
-  }
-};
 
 const readByteHash = async (path: string): Promise<string | null> => {
   try {
@@ -448,7 +438,6 @@ export {
   readByteHash,
   recoverProjectTransactions,
   rollbackPreparedTransaction,
-  syncPath,
   writeTransactionJournal,
   type PreparedTransaction,
   type RecoveryResult,

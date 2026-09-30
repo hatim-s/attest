@@ -15,7 +15,7 @@ export {
   acquireProjectLock,
   inspectProjectLock,
   releaseProjectLock,
-  unlockStaleProjectLock,
+  throwForExistingLock,
   type ProjectLockHandle,
   type ProjectLockInspection,
   type ProjectLockMetadata,

@@ -23,8 +23,8 @@ import {
 } from '@attest/runtime';
 
 import { LocalError } from '../../errors/index.js';
+import { assertSafeNativeAgentResource } from '../agent/authoring/index.js';
 import {
-  assertSupportedProbePolicy,
   resolveNativeAgent,
   type ResolvedNativeAgent,
 } from '../agent/native-agent-adapter/index.js';
@@ -138,7 +138,7 @@ const startRuntime = async (
   projectRoot: string,
   signal: AbortSignal,
 ): Promise<EvalAgentRuntime> => {
-  assertSupportedProbePolicy(payload.agent);
+  assertSafeNativeAgentResource(payload.agent);
   const resolved = await resolveNativeAgent(payload.agent, projectRoot);
   switch (resolved.kind) {
     case 'background':

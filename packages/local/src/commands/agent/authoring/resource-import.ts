@@ -1,5 +1,3 @@
-import { constants } from 'node:fs';
-import { lstat, open, readFile, realpath } from 'node:fs/promises';
 import { isAbsolute, resolve } from 'node:path';
 
 import {
@@ -10,6 +8,9 @@ import {
 } from '@attest/contracts';
 
 import { LocalError } from '../../../errors/index.js';
+import { openAnchored, type AnchoredEntry } from '../../../internal/open-anchored.js';
+import { schemaIssueDiagnostics } from '../../../internal/schema-issue-diagnostics.js';
+import { parseJsonText, readSourceText } from '../../../internal/source-text.js';
 import { isProjectPath } from '../../../project/project-path.js';
 import {
   CurlImportError,
@@ -17,11 +18,61 @@ import {
   parseCurlCommand,
   type CurlImportPreview,
 } from '../import/curl/index.js';
-import { readJsonDocument, requestDiagnostics } from './json-source.js';
 import { assertSafeNativeAgentResource } from './resource-validation.js';
 import type { ReadInput } from './types.js';
 
 const MAX_CURL_BYTES = 1024 * 1024;
+const REMOTE_SOURCE = /^https?:\/\//u;
+const MAX_REMOTE_JSON_BYTES = 1024 * 1024;
+const REMOTE_JSON_TIMEOUT_MS = 10_000;
+
+/** Fetches one bounded JSON document without following redirects or reflecting its URL. */
+const readRemoteJson = async (source: string, path: string): Promise<string> => {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), REMOTE_JSON_TIMEOUT_MS);
+  try {
+    const response = await fetch(source, { redirect: 'manual', signal: controller.signal });
+    if (!response.ok) {
+      throw new LocalError('cli_usage', 'The remote JSON source returned an error.', {
+        path,
+        details: { http_status: response.status },
+      });
+    }
+    if (response.body === null) return '';
+    const reader = response.body.getReader();
+    const chunks: Uint8Array[] = [];
+    let bytes = 0;
+    while (true) {
+      const chunk = await reader.read();
+      if (chunk.done) break;
+      bytes += chunk.value.byteLength;
+      if (bytes > MAX_REMOTE_JSON_BYTES) {
+        await reader.cancel();
+        throw new LocalError('cli_usage', 'The remote JSON source exceeds the size limit.', {
+          path,
+          details: { maximum_bytes: MAX_REMOTE_JSON_BYTES },
+        });
+      }
+      chunks.push(chunk.value);
+    }
+    const body = new Uint8Array(bytes);
+    let offset = 0;
+    for (const chunk of chunks) {
+      body.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    return new TextDecoder('utf-8', { fatal: true }).decode(body);
+  } catch (error: unknown) {
+    if (error instanceof LocalError) throw error;
+    throw new LocalError('cli_usage', 'Could not fetch the remote JSON source.', {
+      path,
+      hint: 'Use a reachable HTTP(S) JSON resource under 1 MiB.',
+      cause: error,
+    });
+  } finally {
+    clearTimeout(timeout);
+  }
+};
 
 /** Imports one native agent resource without preserving its source bytes or literal secrets. */
 const readImportedAgentResource = async (
@@ -31,12 +82,15 @@ const readImportedAgentResource = async (
   workingDirectory: string,
   readStdin: ReadInput,
 ): Promise<AgentResource> => {
-  const value = await readJsonDocument(source, workingDirectory, readStdin, 'source', true);
+  const text = REMOTE_SOURCE.test(source)
+    ? await readRemoteJson(source, 'source')
+    : await readSourceText(source, { path: 'source', readStdin, workingDirectory });
+  const value = parseJsonText(text, { path: 'source' });
   const parsed = agentResourceSchema.safeParse(value);
   if (!parsed.success) {
     throw new LocalError('cli_usage', 'Imported agent JSON does not match its schema.', {
       path: 'source',
-      details: { diagnostics: requestDiagnostics(parsed.error.issues) },
+      details: { diagnostics: schemaIssueDiagnostics(parsed.error.issues) },
     });
   }
   const resource = { ...parsed.data, id: agentId, name: name?.trim() || parsed.data.name };
@@ -55,20 +109,13 @@ const readCurlDocument = async (
   workingDirectory: string,
   readStdin: ReadInput,
 ): Promise<string> => {
-  let text: string;
-  try {
-    if (/^https?:\/\//u.test(source)) throw new Error('remote cURL sources are not supported');
-    text =
-      source === '-'
-        ? await readStdin()
-        : await readFile(resolve(workingDirectory, source), 'utf8');
-  } catch (error: unknown) {
-    throw new LocalError('cli_usage', 'Could not read the selected cURL source.', {
+  if (REMOTE_SOURCE.test(source)) {
+    throw new LocalError('cli_usage', 'Remote cURL sources are not supported.', {
       path: 'source',
       hint: 'Pass a local cURL file or `-` for stdin.',
-      cause: error,
     });
   }
+  const text = await readSourceText(source, { path: 'source', readStdin, workingDirectory });
   if (Buffer.byteLength(text) > MAX_CURL_BYTES) {
     throw new LocalError('cli_usage', 'The cURL source exceeds the size limit.', {
       path: 'source',
@@ -91,21 +138,13 @@ const readCurlBodyFile = async (
       details: { diagnostic: 'file_body_outside_project' },
     });
   }
-  let handle: Awaited<ReturnType<typeof open>> | undefined;
+  let entry: AnchoredEntry | undefined;
   try {
-    handle = await open(candidate, constants.O_RDONLY | constants.O_NOFOLLOW);
-    const metadata = await handle.stat();
-    const [resolvedPath, pathMetadata] = await Promise.all([realpath(candidate), lstat(candidate)]);
-    if (
-      !metadata.isFile() ||
-      !isProjectPath(projectRoot, resolvedPath) ||
-      pathMetadata.isSymbolicLink() ||
-      pathMetadata.dev !== metadata.dev ||
-      pathMetadata.ino !== metadata.ino
-    ) {
-      throw new Error('body file must retain one project-contained regular-file identity');
+    entry = await openAnchored(candidate, { kind: 'file', root: projectRoot });
+    const { handle } = entry;
+    if (entry.identity.size > BigInt(maximumBytes)) {
+      throw new Error('body file exceeds the request cap');
     }
-    if (metadata.size > maximumBytes) throw new Error('body file exceeds the request cap');
     const chunks: Buffer[] = [];
     let bytes = 0;
     for (;;) {
@@ -125,7 +164,7 @@ const readCurlBodyFile = async (
       cause: error,
     });
   } finally {
-    await handle?.close().catch(() => undefined);
+    await entry?.handle.close().catch(() => undefined);
   }
 };
 
@@ -207,7 +246,7 @@ const createImportedCurlAgentResource = async (
   if (!parsed.success) {
     throw new LocalError('cli_usage', 'The cURL mapping does not match the agent schema.', {
       path: 'source',
-      details: { diagnostics: requestDiagnostics(parsed.error.issues) },
+      details: { diagnostics: schemaIssueDiagnostics(parsed.error.issues) },
     });
   }
   assertSafeNativeAgentResource(parsed.data);

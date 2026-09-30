@@ -2,23 +2,17 @@ import { randomUUID } from 'node:crypto';
 import { lstat, link, mkdir, open, readFile, realpath, rmdir, unlink } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
 
-import {
-  COMMAND_REQUEST_SCHEMA_ID,
-  PROJECT_SCHEMA_ID,
-  commandRequestSchema,
-  type CommandRequest,
-  type ProjectResources,
-} from '@attest/contracts';
+import { PROJECT_SCHEMA_ID, type ProjectResources } from '@attest/contracts';
 import { ulid } from 'ulid';
 
 import { errnoCode } from '../../internal/errno-code.js';
+import { syncPath } from '../../internal/sync-path.js';
 import { LocalError } from '../../errors/index.js';
-import { hashCanonicalContent, type JsonValue } from '../../project/canonical-project.js';
+import { hashCanonicalContent } from '../../project/canonical-project.js';
 import { loadProject } from '../../project/project-loader/index.js';
 import { prepareProjectCandidate } from '../../project/transaction/index.js';
+import { readCommandRequest } from '../shared/command-request.js';
 import type { CommandResult, ProjectInitResult } from '../shared/command-result.js';
-
-type ProjectInitRequest = Extract<CommandRequest, { command: 'project.init' }>;
 
 type ProjectInitCommandOptions = {
   directory?: string;
@@ -33,10 +27,6 @@ type ProjectInitCommandOptions = {
   workingDirectory: string;
   yes?: boolean;
 };
-
-const requestDiagnostics = (
-  issues: readonly { message: string; path: PropertyKey[] }[],
-): JsonValue => issues.map(({ message, path }) => ({ message, path: `/${path.join('/')}` }));
 
 /** Rejects overlapping request sources before reading stdin or applying precedence. */
 const assertUnambiguousInitSources = (options: ProjectInitCommandOptions): void => {
@@ -67,53 +57,6 @@ const assertUnambiguousInitSources = (options: ProjectInitCommandOptions): void 
         : 'Pass project values in either the command request or CLI flags, not both.',
     details: { conflicting_fields: conflictingFields },
   });
-};
-
-/** Reads one request document without reflecting its source text into failures. */
-const readProjectInitRequest = async (
-  source: string,
-  workingDirectory: string,
-  readStdin: () => Promise<string>,
-): Promise<ProjectInitRequest> => {
-  let text: string;
-  try {
-    text =
-      source === '-'
-        ? await readStdin()
-        : await readFile(resolve(workingDirectory, source), 'utf8');
-  } catch (error: unknown) {
-    throw new LocalError('cli_usage', `Could not read command request from ${source}.`, {
-      path: '--from-json',
-      hint: 'Pass a readable JSON file or `-` for stdin.',
-      cause: error,
-    });
-  }
-
-  let value: unknown;
-  try {
-    value = JSON.parse(text) as unknown;
-  } catch (error: unknown) {
-    throw new LocalError('cli_usage', 'The command request is not valid JSON.', {
-      path: '--from-json',
-      hint: `Provide one ${COMMAND_REQUEST_SCHEMA_ID} document.`,
-      cause: error,
-    });
-  }
-  const parsed = commandRequestSchema.safeParse(value);
-  if (!parsed.success) {
-    throw new LocalError('cli_usage', 'The command request does not match its schema.', {
-      path: '--from-json',
-      hint: `Provide one ${COMMAND_REQUEST_SCHEMA_ID} project.init document.`,
-      details: { diagnostics: requestDiagnostics(parsed.error.issues) },
-    });
-  }
-  if (parsed.data.command !== 'project.init') {
-    throw new LocalError('cli_usage', 'The command request targets another command.', {
-      path: '/command',
-      hint: 'Set `command` to `project.init`.',
-    });
-  }
-  return parsed.data;
 };
 
 const inspectTargetDirectory = async (
@@ -187,16 +130,6 @@ const emptyProject = (projectId: string, name: string): ProjectResources => ({
   tests: [],
 });
 
-/** Fsyncs a directory entry after manifest publication or rollback. */
-const syncDirectory = async (path: string): Promise<void> => {
-  const handle = await open(path, 'r');
-  try {
-    await handle.sync();
-  } finally {
-    await handle.close();
-  }
-};
-
 /** Publishes the empty-project manifest as one atomic, no-overwrite filesystem commit. */
 const publishProjectManifest = async (root: string, contents: string): Promise<void> => {
   const manifestPath = join(root, 'attest.project.json');
@@ -235,7 +168,7 @@ const publishProjectManifest = async (root: string, contents: string): Promise<v
     if (manifestPublished) {
       try {
         await unlink(manifestPath);
-        await syncDirectory(root);
+        await syncPath(root);
       } catch (rollbackError: unknown) {
         cleanupFailure = rollbackError;
       }
@@ -274,7 +207,7 @@ const rollbackPublishedManifest = async (root: string, expectedContents: string)
       );
     }
     await unlink(manifestPath);
-    await syncDirectory(root);
+    await syncPath(root);
   } catch (error: unknown) {
     if (errnoCode(error) !== 'ENOENT') {
       throw error;
@@ -290,7 +223,10 @@ const runProjectInitCommand = async (
   const request =
     options.fromJson === undefined
       ? undefined
-      : await readProjectInitRequest(options.fromJson, options.workingDirectory, options.readStdin);
+      : await readCommandRequest('project.init', options.fromJson, {
+          readStdin: options.readStdin,
+          workingDirectory: options.workingDirectory,
+        });
   const requestedDirectory =
     options.directory ?? options.projectDirectory ?? request?.directory ?? '.';
   const inspected = await inspectTargetDirectory(

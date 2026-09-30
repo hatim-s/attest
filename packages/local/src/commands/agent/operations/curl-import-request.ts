@@ -1,7 +1,9 @@
-import { commandRequestSchema, type JsonValue } from '@attest/contracts';
+import { commandRequestSchema } from '@attest/contracts';
 
 import { LocalError } from '../../../errors/index.js';
-import { parseDuration } from '../authoring/index.js';
+import { schemaIssueDiagnostics } from '../../../internal/schema-issue-diagnostics.js';
+import { parseSecretBindings } from '../../shared/secret-bindings.js';
+import { parseDuration, parseJsonValues } from '../authoring/index.js';
 import { CurlImportError, parseCurlCommand } from '../import/curl/index.js';
 import {
   commaSeparated,
@@ -11,28 +13,18 @@ import {
 } from './command-support.js';
 import type { AgentImportCommandOptions, CurlImportRequest } from './types.js';
 
+/** Maps header or query secret bindings to environment names; names match case-insensitively. */
 const parseEnvironmentBindings = (
   values: readonly string[] | undefined,
   path: string,
 ): Record<string, string> | undefined => {
   if (values === undefined || values.length === 0) return undefined;
-  const bindings: Record<string, string> = {};
-  for (const value of values) {
-    const separator = value.indexOf('=');
-    const target = value.slice(0, separator).trim();
-    const environment = value.slice(separator + 1).trim();
-    if (separator <= 0 || target.length === 0 || environment.length === 0) {
-      throw new LocalError('cli_usage', 'A cURL secret binding is invalid.', {
-        path,
-        hint: 'Use TARGET_NAME=SOURCE_ENV; the captured value is discarded.',
-      });
-    }
-    if (Object.keys(bindings).some((name) => name.toLowerCase() === target.toLowerCase())) {
-      throw new LocalError('cli_usage', 'A cURL secret binding is duplicated.', { path });
-    }
-    bindings[target] = environment;
+  const bindings = Object.entries(parseSecretBindings(values, path));
+  const names = new Set(bindings.map(([target]) => target.toLowerCase()));
+  if (names.size !== values.length) {
+    throw new LocalError('cli_usage', 'A cURL secret binding is duplicated.', { path });
   }
-  return bindings;
+  return Object.fromEntries(bindings.map(([target, reference]) => [target, reference.from_env]));
 };
 
 const parseBodyMappings = (
@@ -52,40 +44,29 @@ const parseBodyMappings = (
     };
   });
 
-const parsePositiveInteger = (value: string | undefined, path: string): number | undefined => {
-  if (value === undefined) return undefined;
+const parseInteger = (value: string, path: string, options: { min: number }): number => {
   const parsed = Number(value);
-  if (!Number.isSafeInteger(parsed) || parsed <= 0) {
-    throw new LocalError('cli_usage', 'Value must be a positive integer.', { path });
-  }
-  return parsed;
-};
-
-const parseRetryCount = (value: string | undefined): number | undefined => {
-  if (value === undefined) return undefined;
-  const parsed = Number(value);
-  if (!Number.isSafeInteger(parsed) || parsed < 0) {
-    throw new LocalError('cli_usage', 'Retry count must be a non-negative integer.', {
-      path: '--retries',
+  if (!Number.isSafeInteger(parsed) || parsed < options.min) {
+    throw new LocalError('cli_usage', `${path} must be an integer of at least ${options.min}.`, {
+      path,
     });
   }
   return parsed;
 };
 
-const parseJsonValues = (
-  values: readonly string[] | undefined,
-  path: string,
-): JsonValue[] | undefined =>
-  values?.map((value) => {
-    try {
-      return JSON.parse(value) as JsonValue;
-    } catch (error: unknown) {
-      throw new LocalError('cli_usage', 'Polling terminal value is not valid JSON.', {
-        path,
-        cause: error,
-      });
-    }
-  });
+/** True when any polling flag was passed, which selects the polling transport. */
+const pollingFlagsPresent = (options: AgentImportCommandOptions): boolean =>
+  [
+    options.pollJobIdPointer,
+    options.pollStatusPointer,
+    options.pollStatusUrlPointer,
+    options.pollStatusUrlTemplate,
+    options.pollSuccess,
+    options.pollFailure,
+    options.pollMinimumInterval,
+    options.pollMaximumInterval,
+    options.idempotencyHeader,
+  ].some((value) => value !== undefined);
 
 /** Normalizes cURL import flags through the same request schema as --from-json. */
 const createCurlImportRequest = (fields: {
@@ -96,19 +77,19 @@ const createCurlImportRequest = (fields: {
   source: string;
 }): CurlImportRequest => {
   const { options } = fields;
-  const pollingSelected =
-    options.pollJobIdPointer !== undefined ||
-    options.pollStatusPointer !== undefined ||
-    options.pollStatusUrlPointer !== undefined ||
-    options.pollStatusUrlTemplate !== undefined ||
-    options.pollSuccess !== undefined ||
-    options.pollFailure !== undefined ||
-    options.pollMinimumInterval !== undefined ||
-    options.pollMaximumInterval !== undefined ||
-    options.idempotencyHeader !== undefined;
-  const successes = parseJsonValues(options.pollSuccess, '--poll-success');
-  const failures = parseJsonValues(options.pollFailure, '--poll-failure');
-  const retries = parseRetryCount(options.retries);
+  const pollingSelected = pollingFlagsPresent(options);
+  const successes =
+    options.pollSuccess === undefined
+      ? undefined
+      : parseJsonValues(options.pollSuccess, '--poll-success');
+  const failures =
+    options.pollFailure === undefined
+      ? undefined
+      : parseJsonValues(options.pollFailure, '--poll-failure');
+  const retries =
+    options.retries === undefined
+      ? undefined
+      : parseInteger(options.retries, '--retries', { min: 0 });
   const retryDelay =
     options.retryDelay === undefined
       ? undefined
@@ -206,18 +187,16 @@ const createCurlImportRequest = (fields: {
             ...(options.requestCapBytes === undefined
               ? {}
               : {
-                  request_bytes: parsePositiveInteger(
-                    options.requestCapBytes,
-                    '--request-cap-bytes',
-                  ),
+                  request_bytes: parseInteger(options.requestCapBytes, '--request-cap-bytes', {
+                    min: 1,
+                  }),
                 }),
             ...(options.responseCapBytes === undefined
               ? {}
               : {
-                  response_bytes: parsePositiveInteger(
-                    options.responseCapBytes,
-                    '--response-cap-bytes',
-                  ),
+                  response_bytes: parseInteger(options.responseCapBytes, '--response-cap-bytes', {
+                    min: 1,
+                  }),
                 }),
           },
         }),
@@ -236,14 +215,7 @@ const createCurlImportRequest = (fields: {
     throw new LocalError('cli_usage', 'cURL import flags are incomplete or inconsistent.', {
       path: '--type',
       hint: 'Provide extraction pointers and every required polling field.',
-      details: {
-        diagnostics: parsed.success
-          ? []
-          : parsed.error.issues.map(({ message, path }) => ({
-              message,
-              path: `/${path.join('/')}`,
-            })),
-      },
+      details: { diagnostics: parsed.success ? [] : schemaIssueDiagnostics(parsed.error.issues) },
     });
   }
   return parsed.data;
@@ -311,14 +283,7 @@ const prepareGuidedCurlOptions = async (
     true,
     options.prompt,
   );
-  const pollingSelected =
-    options.pollJobIdPointer !== undefined ||
-    options.pollStatusPointer !== undefined ||
-    options.pollStatusUrlPointer !== undefined ||
-    options.pollStatusUrlTemplate !== undefined ||
-    options.pollSuccess !== undefined ||
-    options.pollFailure !== undefined;
-  const transport = pollingSelected
+  const transport = pollingFlagsPresent(options)
     ? 'polling'
     : await promptDefault(undefined, 'Transport', 'direct', true, options.prompt);
   if (!['direct', 'polling'].includes(transport)) {

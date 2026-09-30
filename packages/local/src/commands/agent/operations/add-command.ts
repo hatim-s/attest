@@ -1,16 +1,15 @@
 import type { CommandRequest } from '@attest/contracts';
 
 import { LocalError } from '../../../errors/index.js';
-import { loadCommandProject } from '../../project/load-command-project.js';
-import { redactAgentResource } from '../../show/redact-resource.js';
 import {
-  assertSafeNativeAgentResource,
-  createAgentResource,
-  readAgentCommandRequest,
-} from '../authoring/index.js';
+  candidateFromLoadedProject,
+  loadCommandProject,
+} from '../../project/load-command-project.js';
+import { readCommandRequest } from '../../shared/command-request.js';
+import { redactAgentResource } from '../../show/redact-resource.js';
+import { assertSafeNativeAgentResource, createAgentResource } from '../authoring/index.js';
 import {
   assertNoFromJsonFlags,
-  candidateFromLoaded,
   commaSeparated,
   mutationResult,
   promptDefault,
@@ -75,12 +74,10 @@ const runAgentAddCommand = async (
   });
   let request: Extract<CommandRequest, { command: 'agent.add' }>;
   if (options.fromJson !== undefined) {
-    request = await readAgentCommandRequest(
-      options.fromJson,
-      'agent.add',
-      options.workingDirectory,
-      options.readStdin,
-    );
+    request = await readCommandRequest('agent.add', options.fromJson, {
+      readStdin: options.readStdin,
+      workingDirectory: options.workingDirectory,
+    });
   } else {
     const agentId = await promptRequired(
       options.agentId,
@@ -407,7 +404,7 @@ const runAgentAddCommand = async (
       hint: 'Choose another id or remove the existing agent first.',
     });
   }
-  const candidate = candidateFromLoaded(loaded);
+  const candidate = candidateFromLoadedProject(loaded);
   candidate.agents.push(request.agent);
   return mutationResult({
     command: 'agent.add',

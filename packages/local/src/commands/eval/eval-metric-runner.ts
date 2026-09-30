@@ -7,7 +7,6 @@ import {
   METRIC_PROTOCOL,
   type AgentRequest,
   type AgentResource,
-  type JsonValue,
   type MetricDefinition,
   type MetricResource,
 } from '@attest/contracts';
@@ -25,12 +24,12 @@ import {
 import { z } from 'zod';
 
 import { LocalError } from '../../errors/index.js';
+import { readJsonPointer } from '../../internal/json-pointer.js';
 import { isProjectPath } from '../../project/project-path.js';
 import {
-  createBaseEnvironment,
-  readSecretReference,
   redactProbeValue,
   resolveNativeAgent,
+  resolveProcessEnvironment,
 } from '../agent/native-agent-adapter/index.js';
 import type { ResolvedEvalCaseInput, ResolvedEvalMetric } from './eval-resolver.js';
 
@@ -51,13 +50,7 @@ const resolveExecutableMetric = async (
       path: metric.cwd ?? '.',
     });
   }
-  const env: NodeJS.ProcessEnv = createBaseEnvironment();
-  const secrets: string[] = [];
-  for (const [name, reference] of Object.entries(metric.env ?? {})) {
-    const value = await readSecretReference(reference, projectRoot);
-    env[name] = value;
-    secrets.push(value);
-  }
+  const { env, secrets } = await resolveProcessEnvironment(metric.env, projectRoot);
   return { cwd, env, secrets };
 };
 
@@ -104,37 +97,6 @@ const redactMetricEvaluation = (
   };
 };
 
-const decodePointerSegment = (segment: string): string | undefined => {
-  if (/~(?:[^01]|$)/u.test(segment)) return undefined;
-  return segment.replaceAll('~1', '/').replaceAll('~0', '~');
-};
-
-/** Reads one strict RFC 6901 pointer without traversing inherited properties. */
-const readJsonPointer = (value: unknown, pointer: string): unknown => {
-  if (pointer === '') return value;
-  if (!pointer.startsWith('/')) return undefined;
-  let current = value;
-  for (const encoded of pointer.slice(1).split('/')) {
-    const segment = decodePointerSegment(encoded);
-    if (segment === undefined || current === null || typeof current !== 'object') return undefined;
-    if (Array.isArray(current)) {
-      if (!/^(?:0|[1-9]\d*)$/u.test(segment)) return undefined;
-      current = current[Number(segment)];
-    } else {
-      if (!Object.hasOwn(current, segment)) return undefined;
-      current = Reflect.get(current, segment);
-    }
-  }
-  return current;
-};
-
-const isJsonValue = (value: unknown): value is JsonValue => {
-  if (value === null || typeof value === 'string' || typeof value === 'boolean') return true;
-  if (typeof value === 'number') return Number.isFinite(value);
-  if (Array.isArray(value)) return value.every(isJsonValue);
-  return typeof value === 'object' && Object.values(value).every(isJsonValue);
-};
-
 /** Converts a HTTP metric response mapping into the existing metric result evidence shape. */
 const extractHttpMetricResult = (
   metricId: string,
@@ -148,16 +110,19 @@ const extractHttpMetricResult = (
     definition.extraction.rationale_pointer === undefined
       ? undefined
       : readJsonPointer(value, definition.extraction.rationale_pointer);
-  const details =
+  const rawDetails =
     definition.extraction.details_pointer === undefined
       ? undefined
       : readJsonPointer(value, definition.extraction.details_pointer);
+  const details = rawDetails === undefined ? undefined : z.json().safeParse(rawDetails);
+  // Runtime's MetricEvaluation has no HTTP kind; an HTTP metric reports like an exec metric
+  // because both return a score and pass result from outside the process.
   if (
     typeof score !== 'number' ||
     !Number.isFinite(score) ||
     typeof pass !== 'boolean' ||
     (rationale !== undefined && typeof rationale !== 'string') ||
-    (details !== undefined && !isJsonValue(details))
+    details?.success === false
   ) {
     return {
       metricName: metricId,
@@ -178,7 +143,7 @@ const extractHttpMetricResult = (
       score,
       pass,
       ...(rationale === undefined ? {} : { rationale }),
-      ...(details === undefined ? {} : { details }),
+      ...(details?.success === true ? { details: details.data } : {}),
     },
     durationMs,
   };

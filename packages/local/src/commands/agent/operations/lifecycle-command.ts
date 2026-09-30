@@ -1,10 +1,12 @@
 import { LocalError } from '../../../errors/index.js';
-import { loadCommandProject } from '../../project/load-command-project.js';
+import {
+  candidateFromLoadedProject,
+  loadCommandProject,
+} from '../../project/load-command-project.js';
+import { readCommandRequest } from '../../shared/command-request.js';
 import type { CommandResult, MutationResult } from '../../shared/command-result.js';
-import { readAgentCommandRequest } from '../authoring/index.js';
 import {
   assertNoFromJsonFlags,
-  candidateFromLoaded,
   findAgent,
   mutationResult,
   promptRequired,
@@ -47,12 +49,10 @@ const runAgentRenameCommand = async (
             : { if_project_hash: options.expectedProjectHash }),
           ...(options.yes === undefined ? {} : { yes: options.yes }),
         }
-      : await readAgentCommandRequest(
-          options.fromJson,
-          'agent.rename',
-          options.workingDirectory,
-          options.readStdin,
-        );
+      : await readCommandRequest('agent.rename', options.fromJson, {
+          readStdin: options.readStdin,
+          workingDirectory: options.workingDirectory,
+        });
   const loaded = await loadCommandProject({
     project: options.project,
     recover: request.dry_run !== true,
@@ -64,7 +64,7 @@ const runAgentRenameCommand = async (
       path: request.new_id,
     });
   }
-  const candidate = candidateFromLoaded(loaded);
+  const candidate = candidateFromLoadedProject(loaded);
   candidate.agents = candidate.agents.map((agent) =>
     agent.id === current.id ? { ...agent, id: request.new_id } : agent,
   );
@@ -117,12 +117,10 @@ const runAgentRemoveCommand = async (
             : { if_project_hash: options.expectedProjectHash }),
           ...(options.yes === undefined ? {} : { yes: options.yes }),
         }
-      : await readAgentCommandRequest(
-          options.fromJson,
-          'agent.remove',
-          options.workingDirectory,
-          options.readStdin,
-        );
+      : await readCommandRequest('agent.remove', options.fromJson, {
+          readStdin: options.readStdin,
+          workingDirectory: options.workingDirectory,
+        });
   const loaded = await loadCommandProject({
     project: options.project,
     recover: request.dry_run !== true,
@@ -139,7 +137,7 @@ const runAgentRemoveCommand = async (
       details: { dependent_test_ids: dependentTests.map(({ id }) => id) },
     });
   }
-  const candidate = candidateFromLoaded(loaded);
+  const candidate = candidateFromLoadedProject(loaded);
   candidate.agents = candidate.agents.filter(({ id }) => id !== request.agent_id);
   candidate.tests = candidate.tests.filter(({ agent_id: agentId }) => agentId !== request.agent_id);
   const warnings =

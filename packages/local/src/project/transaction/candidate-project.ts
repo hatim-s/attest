@@ -7,15 +7,16 @@ import {
   type ProjectResources,
   type TestCase,
   type TestResource,
+  type JsonValue,
 } from '@attest/contracts';
 
+import { canonicalStringify, contentHash } from '@attest/core';
+
+import { schemaIssueDiagnostics } from '../../internal/schema-issue-diagnostics.js';
 import {
-  hashCanonicalJson,
   hashCanonicalJsonLines,
   hashProjectManifest,
-  serializeCanonicalJson,
   serializeCanonicalJsonLines,
-  type JsonValue,
 } from '../canonical-project.js';
 import { ProjectTransactionError } from './project-transaction-error.js';
 
@@ -36,7 +37,7 @@ const sortById = <T extends { id: string }>(values: readonly T[]): T[] =>
 
 /** Renders generated JSON with canonical key ordering and one terminal newline. */
 const renderCanonicalJsonFile = (value: JsonValue): string =>
-  `${JSON.stringify(JSON.parse(serializeCanonicalJson(value)), undefined, 2)}\n`;
+  `${JSON.stringify(JSON.parse(canonicalStringify(value)), undefined, 2)}\n`;
 
 /** Renders ordered JSONL records canonically, including a terminal newline when non-empty. */
 const renderCanonicalJsonLinesFile = (values: readonly JsonValue[]): string => {
@@ -50,7 +51,7 @@ const addJsonResource = <T extends AgentResource | MetricResource | TestResource
   resource: T,
 ): string => {
   const value = resource as JsonValue;
-  const canonicalHash = hashCanonicalJson(value);
+  const canonicalHash = contentHash(value);
   files.set(path, {
     canonicalHash,
     contents: renderCanonicalJsonFile(value),
@@ -68,7 +69,7 @@ const addDataset = (
   const dataPath = `attest/datasets/${metadata.id}.jsonl`;
   const metadataValue = metadata as JsonValue;
   const caseValues = cases as unknown as readonly JsonValue[];
-  const metadataIntegrityHash = hashCanonicalJson(metadataValue);
+  const metadataIntegrityHash = contentHash(metadataValue);
   const dataHash = hashCanonicalJsonLines(caseValues);
   files.set(metadataPath, {
     canonicalHash: metadataIntegrityHash,
@@ -143,10 +144,7 @@ const prepareProjectCandidate = (candidate: ProjectResources): PreparedProjectCa
       `Candidate project validation failed with ${validated.error.issues.length} diagnostic(s).`,
       {
         details: {
-          diagnostics: validated.error.issues.map(({ message, path }) => ({
-            message,
-            path: path.length === 0 ? '' : `/${path.join('/')}`,
-          })),
+          diagnostics: schemaIssueDiagnostics(validated.error.issues),
         },
       },
     );
@@ -158,7 +156,7 @@ const prepareProjectCandidate = (candidate: ProjectResources): PreparedProjectCa
     validated.data.datasets.map(({ metadata }) => metadata),
   );
   files.set('attest.project.json', {
-    canonicalHash: hashCanonicalJson(manifestValue),
+    canonicalHash: contentHash(manifestValue),
     contents: renderCanonicalJsonFile(manifestValue),
     path: 'attest.project.json',
   });

@@ -3,6 +3,7 @@ import { readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 
 import { errnoCode } from '../../internal/errno-code.js';
+import { isProcessPresent } from '../../internal/process-presence.js';
 import { LocalError } from '../../errors/index.js';
 import { prepareEvalProjectFile } from './eval-project-path.js';
 
@@ -29,16 +30,6 @@ type EvalCancellationRequest = {
 
 const localControllers = new Map<string, { controller: AbortController; token: string }>();
 const registryKey = (projectRoot: string, runId: string): string => `${projectRoot}\0${runId}`;
-
-/** Checks liveness without delivering a process-wide cancellation signal. */
-const isProcessPresent = (pid: number): boolean => {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error: unknown) {
-    return errnoCode(error) === 'EPERM';
-  }
-};
 
 /** Publishes one atomic active-run record that can be safely addressed by a separate CLI process. */
 const registerEvalRun = async (projectRoot: string, runId: string): Promise<EvalRegistryHandle> => {
@@ -89,16 +80,17 @@ const registerEvalRun = async (projectRoot: string, runId: string): Promise<Eval
         controller.abort(new Error(`Eval run ${runId} was cancelled.`));
         return;
       }
-    } catch (error: unknown) {
-      if (errnoCode(error) !== 'ENOENT') {
-        // A malformed request cannot authenticate, so leave the owned run active.
-      }
+    } catch {
+      // A missing or malformed request cannot authenticate, so leave the owned run active.
     }
+    schedulePoll();
+  };
+  const schedulePoll = (): void => {
+    // Detached on purpose: poll handles its own failures and reschedules itself.
     timer = setTimeout(() => void poll(), 25);
     timer.unref();
   };
-  timer = setTimeout(() => void poll(), 25);
-  timer.unref();
+  schedulePoll();
   return {
     path,
     requestPath,

@@ -10,7 +10,8 @@ import {
   type DatasetResource,
   type ProjectManifest,
 } from '@attest/contracts';
-import { hashCanonicalJson, loadProject } from '@attest/local/project';
+import { contentHash } from '@attest/core';
+import { loadProject } from '@attest/local/project';
 import { runTestMutationCommand, validateCommandRequest } from '@attest/local/test';
 import { afterEach, describe, expect, it } from 'vitest';
 
@@ -459,7 +460,7 @@ describe('CLI test, case, dataset, and import authoring', { timeout: 20_000 }, (
     ) as ProjectManifest;
     expect(
       manifest.resources.datasets.find(({ id }) => id === 'stable-import')?.metadata_content_hash,
-    ).toBe(hashCanonicalJson(metadata));
+    ).toBe(contentHash(metadata));
     if (metadata.provenance === undefined) throw new Error('Expected import provenance.');
     metadata.provenance.imported_at = '2001-02-03T04:05:06.000Z';
     await writeFile(metadataPath, `${JSON.stringify(metadata, undefined, 2)}\n`);

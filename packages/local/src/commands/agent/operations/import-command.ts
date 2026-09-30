@@ -2,19 +2,21 @@ import type { AgentResource, CommandRequest, JsonValue } from '@attest/contracts
 
 import { LocalError } from '../../../errors/index.js';
 import { discoverProject } from '../../../project/discover-project.js';
-import { loadCommandProject } from '../../project/load-command-project.js';
+import {
+  candidateFromLoadedProject,
+  loadCommandProject,
+} from '../../project/load-command-project.js';
+import { readCommandRequest } from '../../shared/command-request.js';
 import { redactAgentResource } from '../../show/redact-resource.js';
 import type { CommandResult, MutationResult } from '../../shared/command-result.js';
 import {
   createImportedCurlAgentResource,
-  readAgentCommandRequest,
   readCurlDocument,
   readImportedAgentResource,
 } from '../authoring/index.js';
 import { createCurlImportRequest, prepareGuidedCurlOptions } from './curl-import-request.js';
 import {
   assertNoFromJsonFlags,
-  candidateFromLoaded,
   commaSeparated,
   mutationResult,
   promptDefault,
@@ -64,12 +66,10 @@ const runAgentImportCommand = async (
   let name = options.name;
   let request: Extract<CommandRequest, { command: 'agent.import' }> | undefined;
   if (options.fromJson !== undefined) {
-    request = await readAgentCommandRequest(
-      options.fromJson,
-      'agent.import',
-      options.workingDirectory,
-      options.readStdin,
-    );
+    request = await readCommandRequest('agent.import', options.fromJson, {
+      readStdin: options.readStdin,
+      workingDirectory: options.workingDirectory,
+    });
     if (options.fromJson === '-' && request.source === '-') {
       throw new LocalError('cli_usage', 'Command request and agent source cannot share stdin.', {
         path: '/source',
@@ -178,7 +178,7 @@ const runAgentImportCommand = async (
       path: agent.id,
     });
   }
-  const candidate = candidateFromLoaded(loaded);
+  const candidate = candidateFromLoadedProject(loaded);
   candidate.agents.push(agent);
   return mutationResult({
     command: 'agent.import',

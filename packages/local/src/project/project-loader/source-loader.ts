@@ -1,17 +1,15 @@
 import { readFile, realpath, stat } from 'node:fs/promises';
 import { resolve } from 'node:path';
 
+import type { JsonValue } from '@attest/contracts';
+
+import { contentHash } from '@attest/core';
+
 import { errnoCode } from '../../internal/errno-code.js';
-import { hashCanonicalJson, type JsonValue } from '../canonical-project.js';
+import { toJsonPointer } from '../../internal/json-pointer.js';
 import type { ProjectDiagnostic } from '../project-errors.js';
 import { isProjectPath } from '../project-path.js';
 import type { LoadedJsonResource, RuntimeSchema, SchemaIssue } from './types.js';
-
-const pointerEscape = (segment: PropertyKey): string =>
-  String(segment).replaceAll('~', '~0').replaceAll('/', '~1');
-
-const toJsonPointer = (path: readonly PropertyKey[]): string =>
-  path.length === 0 ? '' : `/${path.map(pointerEscape).join('/')}`;
 
 /** Reads one project-relative file only after lexical and realpath containment checks. */
 const readProjectSource = async (
@@ -106,7 +104,7 @@ const loadJsonResource = async <Value>(
   source: string,
   expectedHash: string | undefined,
   schema: RuntimeSchema<Value>,
-  hashValue: (value: JsonValue) => string = hashCanonicalJson,
+  hashValue: (value: JsonValue) => string = contentHash,
 ): Promise<LoadedJsonResource<Value>> => {
   const loaded = await readProjectSource(root, source);
   if (loaded.text === undefined) return { diagnostics: loaded.diagnostics, source };
@@ -131,4 +129,4 @@ const loadJsonResource = async <Value>(
   return { diagnostics, hash, rawValue: parsed.value, source, value: validated.data };
 };
 
-export { loadJsonResource, parseJson, readProjectSource, schemaDiagnostics, toJsonPointer };
+export { loadJsonResource, parseJson, readProjectSource, schemaDiagnostics };

@@ -1,5 +1,8 @@
 import type { HttpRequestTemplate, JsonValue, SecretReference } from '@attest/contracts';
 
+import { parseJsonPointer } from '../../../../internal/json-pointer.js';
+import { isSensitiveFieldName } from '../../../../internal/redaction.js';
+
 type CurlPlaceholderMapping = { inputPointer: string; targetPointer: string };
 
 type CurlParserOptions = {
@@ -33,7 +36,6 @@ class CurlImportError extends Error {
   }
 }
 
-const SENSITIVE_NAME = /authorization|cookie|password|secret|token|api[-_]?key/iu;
 const HEADER_NAME = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/u;
 const METHODS = new Set<HttpRequestTemplate['method']>(['GET', 'POST', 'PUT', 'PATCH', 'DELETE']);
 const UNSUPPORTED_VALUE_FLAGS = new Set([
@@ -199,21 +201,13 @@ const parseHeader = (
     ]);
   }
   const environment = secretHeaders.get(normalized);
-  if (SENSITIVE_NAME.test(name) && environment === undefined) {
+  if (isSensitiveFieldName(name) && environment === undefined) {
     throw new CurlImportError('A sensitive cURL header needs an environment reference.', [
       `unsafe_header:${normalized}`,
     ]);
   }
   headers[name] = environment === undefined ? value : secretReference(environment);
 };
-
-const pointerTokens = (pointer: string): string[] =>
-  pointer === ''
-    ? []
-    : pointer
-        .slice(1)
-        .split('/')
-        .map((token) => token.replaceAll('~1', '/').replaceAll('~0', '~'));
 
 /** Rejects credential-shaped JSON fields because body secret resolution is intentionally unsupported. */
 const assertNoSensitiveBodyFields = (value: JsonValue): void => {
@@ -223,7 +217,7 @@ const assertNoSensitiveBodyFields = (value: JsonValue): void => {
   }
   if (value === null || typeof value !== 'object') return;
   for (const [name, entry] of Object.entries(value)) {
-    if (SENSITIVE_NAME.test(name)) {
+    if (isSensitiveFieldName(name)) {
       throw new CurlImportError('The cURL body contains an unsafe credential field.', [
         `unsafe_body_field:${name.toLowerCase()}`,
       ]);
@@ -242,7 +236,7 @@ const applyPlaceholder = (body: JsonValue, mapping: CurlPlaceholderMapping): voi
       'invalid_input_pointer',
     ]);
   }
-  const tokens = pointerTokens(mapping.targetPointer);
+  const tokens = parseJsonPointer(mapping.targetPointer) ?? [];
   const final = tokens.pop()!;
   let parent: JsonValue = body;
   for (const token of tokens) {
@@ -307,7 +301,7 @@ const contentType = (headers: Readonly<Record<string, string | SecretReference>>
 const mapFormBody = (body: string, mappings: readonly CurlPlaceholderMapping[]): string => {
   const form = new URLSearchParams(body);
   for (const name of form.keys()) {
-    if (SENSITIVE_NAME.test(name)) {
+    if (isSensitiveFieldName(name)) {
       throw new CurlImportError('The cURL form body contains an unsafe credential field.', [
         `unsafe_body_field:${name.toLowerCase()}`,
       ]);
@@ -315,7 +309,7 @@ const mapFormBody = (body: string, mappings: readonly CurlPlaceholderMapping[]):
   }
   if (mappings.length === 0) return body;
   for (const mapping of mappings) {
-    const tokens = pointerTokens(mapping.targetPointer);
+    const tokens = parseJsonPointer(mapping.targetPointer) ?? [];
     if (tokens.length !== 1 || !form.has(tokens[0]!) || form.getAll(tokens[0]!).length !== 1) {
       throw new CurlImportError('A form body mapping target is missing or ambiguous.', [
         'invalid_form_target',
@@ -430,7 +424,7 @@ const parseCurlCommand = (source: string, options: CurlParserOptions = {}): Pars
       ]);
     }
     const environment = secretQuery.get(name.toLowerCase());
-    if (SENSITIVE_NAME.test(name) && environment === undefined) {
+    if (isSensitiveFieldName(name) && environment === undefined) {
       throw new CurlImportError('A sensitive cURL query needs an environment reference.', [
         `unsafe_query:${name}`,
       ]);
@@ -469,7 +463,7 @@ const parseCurlCommand = (source: string, options: CurlParserOptions = {}): Pars
           'raw_body_mapping',
         ]);
       }
-      if (SENSITIVE_NAME.test(rawBody)) {
+      if (isSensitiveFieldName(rawBody)) {
         throw new CurlImportError('The raw cURL body may contain an unsafe credential.', [
           'unsafe_raw_body',
         ]);

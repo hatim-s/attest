@@ -1,12 +1,15 @@
-import { mkdir, readFile } from 'node:fs/promises';
-import { join, resolve } from 'node:path';
+import { mkdir } from 'node:fs/promises';
+import { join } from 'node:path';
 
 import type { JsonValue } from '@attest/contracts';
+
 import { LocalError } from '../../../errors/index.js';
+import { parseJsonText, readSourceText } from '../../../internal/source-text.js';
 import { openStore } from '../../../store/index.js';
 import { loadCommandProject } from '../../project/load-command-project.js';
+import { readCommandRequest } from '../../shared/command-request.js';
 import type { AgentTestResult, CommandResult } from '../../shared/command-result.js';
-import { readAgentCommandRequest, type ReadInput } from '../authoring/index.js';
+import type { ReadInput } from '../authoring/index.js';
 import { testNativeAgentConnection } from '../native-agent-adapter/index.js';
 import { assertNoFromJsonFlags, findAgent, promptRequired } from './command-support.js';
 import type { AgentTestCommandOptions } from './types.js';
@@ -23,30 +26,17 @@ const readTestInput = async (
       hint: 'Pass either `--input` or `--input-file`, not both.',
     });
   }
-  let text = input;
+  const hint = 'Pass any valid JSON scalar, array, or object.';
   if (inputFile !== undefined) {
-    try {
-      text =
-        inputFile === '-'
-          ? await readStdin()
-          : await readFile(resolve(workingDirectory, inputFile), 'utf8');
-    } catch (error: unknown) {
-      throw new LocalError('cli_usage', 'Could not read agent test input.', {
-        path: '--input-file',
-        cause: error,
-      });
-    }
-  }
-  if (text === undefined) return {};
-  try {
-    return JSON.parse(text) as JsonValue;
-  } catch (error: unknown) {
-    throw new LocalError('cli_usage', 'Agent test input is not valid JSON.', {
-      path: inputFile === undefined ? '--input' : '--input-file',
-      hint: 'Pass any valid JSON scalar, array, or object.',
-      cause: error,
+    const text = await readSourceText(inputFile, {
+      path: '--input-file',
+      readStdin,
+      workingDirectory,
     });
+    return parseJsonText(text, { path: '--input-file', hint });
   }
+  if (input === undefined) return {};
+  return parseJsonText(input, { path: '--input', hint });
 };
 
 /** Probes one supported adapter without project writes and records one case only when requested. */
@@ -82,12 +72,10 @@ const runAgentTestCommand = async (
             options.readStdin,
           ),
         }
-      : await readAgentCommandRequest(
-          options.fromJson,
-          'agent.test',
-          options.workingDirectory,
-          options.readStdin,
-        );
+      : await readCommandRequest('agent.test', options.fromJson, {
+          readStdin: options.readStdin,
+          workingDirectory: options.workingDirectory,
+        });
   const loaded = await loadCommandProject({
     project: options.project,
     workingDirectory: options.workingDirectory,

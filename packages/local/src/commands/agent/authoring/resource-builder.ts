@@ -11,11 +11,11 @@ import {
   parseJsonValues,
   parseRequestTemplate,
   parseSandboxJson,
-  parseSecretBindings,
   parseTcpReadiness,
   tokenizeCommand,
 } from './input-parsers.js';
-import { requestDiagnostics } from './json-source.js';
+import { schemaIssueDiagnostics } from '../../../internal/schema-issue-diagnostics.js';
+import { parseSecretBindings } from '../../shared/secret-bindings.js';
 import { assertSafeNativeAgentResource } from './resource-validation.js';
 import type { AgentAddFields } from './types.js';
 
@@ -376,7 +376,7 @@ const createAgentResource = (fields: AgentAddFields): AgentResource => {
   });
   if (!parsed.success) {
     throw new LocalError('cli_usage', 'Agent values do not match the resource schema.', {
-      details: { diagnostics: requestDiagnostics(parsed.error.issues) },
+      details: { diagnostics: schemaIssueDiagnostics(parsed.error.issues) },
     });
   }
   assertSafeNativeAgentResource(parsed.data);

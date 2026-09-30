@@ -15,15 +15,17 @@ import {
 } from '@attest/contracts';
 import { describe, expect, it } from 'vitest';
 
+import { contentHash } from '@attest/core';
+
 import { LocalError } from '../../../errors/index.js';
-import { hashCanonicalJson, hashCanonicalJsonLines } from '../../../project/canonical-project.js';
+import { hashCanonicalJsonLines } from '../../../project/canonical-project.js';
 import type { LoadedProject } from '../../../project/project-loader/index.js';
 import { resolveEvalRun } from '../eval-resolver.js';
 
 const PROJECT_ID = '01ARZ3NDEKTSV4RRFFQ69G5FAB';
 const BASELINE_RUN_ID = '01ARZ3NDEKTSV4RRFFQ69G5FAA';
 
-const canonicalHash = (value: unknown): string => hashCanonicalJson(value);
+const canonicalHash = (value: unknown): string => contentHash(value);
 
 const createAgent = (id: string): AgentResource => ({
   schema: AGENT_RESOURCE_SCHEMA_ID,

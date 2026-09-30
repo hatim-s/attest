@@ -1,6 +1,7 @@
 import { mkdir, rename, unlink } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 
+import { syncPath } from '../../internal/sync-path.js';
 import type { LoadedProject } from '../project-loader/index.js';
 import { loadProject } from '../project-loader/index.js';
 import { prepareProjectCandidate, type PreparedProjectCandidate } from './candidate-project.js';
@@ -14,7 +15,6 @@ import {
   readByteHash,
   recoverProjectTransactions,
   rollbackPreparedTransaction,
-  syncPath,
   writeTransactionJournal,
   type PreparedTransaction,
   type TransactionFileChange,

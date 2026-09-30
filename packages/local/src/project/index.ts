@@ -1,4 +1,3 @@
-export { hashCanonicalJson } from '../project/canonical-project.js';
 export {
   loadProject,
   type LoadedProject,

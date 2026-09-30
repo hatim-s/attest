@@ -1,10 +1,11 @@
-import { constants, type BigIntStats } from 'node:fs';
-import { lstat, open, realpath, type FileHandle } from 'node:fs/promises';
+import type { BigIntStats } from 'node:fs';
+import { lstat, realpath, type FileHandle } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 
 import { StoreError, type RunStore } from '@attest/core';
 
 import { errnoCode } from '../../internal/errno-code.js';
+import { openAnchored } from '../../internal/open-anchored.js';
 import { LocalError } from '../../errors/index.js';
 import { openRunStoreSnapshot } from '../../store/index.js';
 import { isProjectPath } from '../../project/project-path.js';
@@ -110,12 +111,12 @@ const withReadonlyRunStoreFile = async <T>(
   };
   let result: T;
   try {
-    anchor = await open(resolvedStore, constants.O_RDONLY | constants.O_NOFOLLOW);
-    const anchoredMetadata = await anchor.stat({ bigint: true });
+    const anchored = await openAnchored(resolvedStore, { kind: 'file', root: resolvedDirectory });
+    anchor = anchored.handle;
+    // The anchor must be the inode inspected before containment checks, not a later swap.
     if (
-      !anchoredMetadata.isFile() ||
-      anchoredMetadata.dev !== storeMetadata.dev ||
-      anchoredMetadata.ino !== storeMetadata.ino
+      anchored.identity.dev !== storeMetadata.dev ||
+      anchored.identity.ino !== storeMetadata.ino
     ) {
       throw unsafeStore(storePath);
     }

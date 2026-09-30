@@ -1,5 +1,4 @@
-import { constants } from 'node:fs';
-import { lstat, open, realpath } from 'node:fs/promises';
+import { realpath } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { delimiter, isAbsolute, resolve } from 'node:path';
 
@@ -11,6 +10,7 @@ import type {
 } from '@attest/executor';
 
 import { LocalError } from '../../../errors/index.js';
+import { openAnchored, type AnchoredEntry } from '../../../internal/open-anchored.js';
 import { isProjectPath } from '../../../project/project-path.js';
 import type { ResolvedNativeAgent } from './types.js';
 
@@ -37,23 +37,13 @@ const readSecretReference = async (
       hint: 'Use a project-contained secret file or an environment reference.',
     });
   }
-  let handle: Awaited<ReturnType<typeof open>> | undefined;
+  let entry: AnchoredEntry | undefined;
   try {
-    handle = await open(candidate, constants.O_RDONLY | constants.O_NOFOLLOW);
-    const metadata = await handle.stat();
-    if (!metadata.isFile() || (metadata.mode & 0o077) !== 0) {
-      throw new Error('secret file must be a private regular file');
+    entry = await openAnchored(candidate, { kind: 'file', root: projectRoot });
+    if ((entry.identity.mode & 0o077n) !== 0n) {
+      throw new Error('secret file must not be readable by group or others');
     }
-    const [resolvedPath, pathMetadata] = await Promise.all([realpath(candidate), lstat(candidate)]);
-    if (
-      !isProjectPath(projectRoot, resolvedPath) ||
-      pathMetadata.dev !== metadata.dev ||
-      pathMetadata.ino !== metadata.ino
-    ) {
-      throw new Error('secret file identity changed while opening');
-    }
-    // Read from the validated descriptor so a path replacement cannot redirect the secret read.
-    return await handle.readFile('utf8');
+    return await entry.handle.readFile('utf8');
   } catch (error: unknown) {
     throw new LocalError('invocation_failed', 'A referenced secret file is unavailable.', {
       path: reference.from_file,
@@ -61,7 +51,7 @@ const readSecretReference = async (
       cause: error,
     });
   } finally {
-    await handle?.close().catch(() => undefined);
+    await entry?.handle.close().catch(() => undefined);
   }
 };
 
@@ -99,7 +89,10 @@ const resolveProcessArgv = (argv: readonly string[], cwd: string): string[] =>
       : resolve(cwd, argument),
   );
 
-/** Materializes runtime-only environment secret references for one managed child. */
+/**
+ * Builds a child process environment from the hardened base plus secret references read at
+ * invocation time. Returns the secret values too so every evidence path can redact them.
+ */
 const resolveProcessEnvironment = async (
   references: Readonly<Record<string, SecretReference>> | undefined,
   projectRoot: string,
@@ -322,4 +315,4 @@ const resolveNativeAgent = async (
 
 /** Rejects authored policies that the selected bounded adapter cannot enforce. */
 
-export { createBaseEnvironment, readSecretReference, resolveNativeAgent };
+export { createBaseEnvironment, resolveNativeAgent, resolveProcessEnvironment };

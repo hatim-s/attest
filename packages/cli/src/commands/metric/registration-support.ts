@@ -1,8 +1,8 @@
 import { COMMAND_REQUEST_SCHEMA_ID, type MetricPreset } from '@attest/contracts';
 import {
-  readMetricCommandRequest,
+  readCommandRequest,
   runMetricMutationCommand,
-  validateMetricCommandRequest,
+  validateCommandRequest,
   type MetricAddFields,
   type MetricAuthoringRequest,
 } from '@attest/local/metric';
@@ -95,12 +95,10 @@ const readOrBuildMetricMutation = async <TCommand extends MetricAuthoringRequest
   build: () => Promise<unknown>,
 ): Promise<Extract<MetricAuthoringRequest, { command: TCommand }>> => {
   if (options.fromJson !== undefined) {
-    const request = (await readMetricCommandRequest(
-      command,
-      options.fromJson,
-      context.workingDirectory,
-      context.interaction.readStdin,
-    )) as MetricAuthoringRequest;
+    const request = (await readCommandRequest(command, options.fromJson, {
+      readStdin: context.interaction.readStdin,
+      workingDirectory: context.workingDirectory,
+    })) as MetricAuthoringRequest;
     if (options.fromJson === '-' && request.command === 'metric.import' && request.source === '-') {
       throw new AttestCliError('cli_usage', 'One stdin stream cannot contain two metric inputs.', {
         path: '--from-json',
@@ -109,7 +107,7 @@ const readOrBuildMetricMutation = async <TCommand extends MetricAuthoringRequest
     }
     return request as Extract<MetricAuthoringRequest, { command: TCommand }>;
   }
-  return validateMetricCommandRequest(command, await build());
+  return validateCommandRequest(command, await build());
 };
 
 /** Executes one metric mutation and renders its stable command result. */

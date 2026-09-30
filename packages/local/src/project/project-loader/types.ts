@@ -1,6 +1,5 @@
-import type { DatasetResource, ProjectResources, TestCase } from '@attest/contracts';
+import type { DatasetResource, ProjectResources, TestCase, JsonValue } from '@attest/contracts';
 
-import type { JsonValue } from '../canonical-project.js';
 import type { ProjectDiagnostic } from '../project-errors.js';
 
 type ProjectContentHashes = {

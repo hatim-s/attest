@@ -1,13 +1,14 @@
 import { randomUUID } from 'node:crypto';
 import { link, open, rename, unlink } from 'node:fs/promises';
 
-import { StoreError, summarizeCaseRecord, type RunStore } from '@attest/core';
+import { summarizeCaseRecord } from '@attest/core';
 import { dashboardHtml } from '@attest/web/embedded';
 
 import { errnoCode } from '../internal/errno-code.js';
 import { LocalError } from '../errors/index.js';
 import { prepareEvalProjectFile } from '../commands/eval/eval-project-path.js';
 import { withReadonlyRunStoreFile } from '../commands/run-store/readonly-run-store.js';
+import { withRunNotFound } from '../commands/run-store/run-not-found.js';
 import { createReportHtml } from './create-report-html.js';
 
 const MAX_REPORT_CASES = 10_000;
@@ -43,25 +44,16 @@ const runReportCommand = async (
     errorCode: 'project_read_failed',
     message: 'The report run store is not a safe project file.',
   });
-  let runWithCases: Awaited<ReturnType<RunStore['getRunWithCases']>> | undefined;
-  try {
-    runWithCases = await withReadonlyRunStoreFile(storePath, (store) =>
-      store.getRunWithCases(options.runId),
-    );
-  } catch (error: unknown) {
-    if (error instanceof StoreError && error.code === 'RUN_NOT_FOUND') {
-      throw new LocalError('resource_not_found', `Run ${options.runId} was not found.`, {
-        path: options.runId,
-        cause: error,
-      });
-    }
-    throw error;
-  }
-  if (runWithCases === undefined) {
-    throw new LocalError('resource_not_found', `Run ${options.runId} was not found.`, {
+  const runNotFound = (cause?: unknown): LocalError =>
+    new LocalError('resource_not_found', `Run ${options.runId} was not found.`, {
       path: options.runId,
+      cause,
     });
-  }
+  const runWithCases = await withRunNotFound(
+    () => withReadonlyRunStoreFile(storePath, (store) => store.getRunWithCases(options.runId)),
+    runNotFound,
+  );
+  if (runWithCases === undefined) throw runNotFound();
 
   const selection = selectReportCases(runWithCases.cases);
   const reportData = {

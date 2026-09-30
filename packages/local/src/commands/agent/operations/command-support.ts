@@ -5,18 +5,8 @@ import { LocalError } from '../../../errors/index.js';
 import { loadCommandProject } from '../../project/load-command-project.js';
 import type { CommandResult, MutationResult } from '../../shared/command-result.js';
 import { executeProjectMutation } from '../../shared/project-mutation.js';
-import type { AgentMutationRequest, Prompt } from './types.js';
-
-const candidateFromLoaded = (
-  loaded: Awaited<ReturnType<typeof loadCommandProject>>,
-): ProjectResources =>
-  structuredClone({
-    agents: loaded.agents,
-    datasets: loaded.datasets,
-    metrics: loaded.metrics,
-    project: loaded.project,
-    tests: loaded.tests,
-  });
+import type { Prompt } from '../../shared/prompt.js';
+import type { AgentMutationRequest } from './types.js';
 
 const promptRequired = async (
   value: string | undefined,
@@ -232,7 +222,6 @@ const mutationResult = async ({
 
 export {
   assertNoFromJsonFlags,
-  candidateFromLoaded,
   commaSeparated,
   findAgent,
   mutationResult,

@@ -1,42 +1,50 @@
 import type { AgentResource } from '@attest/contracts';
 
 import { LocalError } from '../../../errors/index.js';
-import {
-  SENSITIVE_NAME,
-  assertSafeHttpTemplate,
-  findSensitiveBodyField,
-} from './http-template-validation.js';
+import { isSensitiveFieldName } from '../../../internal/redaction.js';
+import { assertSafeHttpTemplate, findSensitiveBodyField } from './http-template-validation.js';
+
+type TimeoutField = keyof NonNullable<AgentResource['timeouts']>;
+type LimitField = keyof NonNullable<AgentResource['limits']>;
+/** The HTTP native envelope reuses the direct invoker, so its policy matches native_cli. */
+type PolicyKind = AgentResource['transport']['kind'] | 'http_envelope';
+
+const UNSUPPORTED_TIMEOUTS: Readonly<Record<PolicyKind, readonly TimeoutField[]>> = {
+  background_cli: [],
+  http: ['run_ms'],
+  http_envelope: ['connect_ms', 'first_byte_ms', 'idle_ms', 'run_ms'],
+  jsonl_bridge: ['connect_ms'],
+  native_cli: ['connect_ms', 'first_byte_ms', 'idle_ms', 'run_ms'],
+  polling: ['run_ms'],
+  stream: ['run_ms'],
+  websocket: ['connect_ms', 'first_byte_ms', 'idle_ms', 'attempt_ms', 'run_ms'],
+};
+
+const UNSUPPORTED_LIMITS: Readonly<Record<PolicyKind, readonly LimitField[]>> = {
+  background_cli: ['event_count', 'event_bytes'],
+  http: ['event_count', 'event_bytes', 'total_evidence_bytes'],
+  http_envelope: ['request_bytes', 'event_count', 'event_bytes', 'total_evidence_bytes'],
+  jsonl_bridge: [],
+  native_cli: ['request_bytes', 'event_count', 'event_bytes', 'total_evidence_bytes'],
+  polling: ['event_count', 'event_bytes', 'total_evidence_bytes'],
+  stream: ['response_bytes'],
+  websocket: [],
+};
+
+const isLoopbackHost = (host: string): boolean =>
+  host === 'localhost' || host === '::1' || host.startsWith('127.');
 
 /** Rejects authored credentials and runtime policies outside the implemented adapter slice. */
 const assertSafeNativeAgentResource = (agent: AgentResource): void => {
   const transport = agent.transport;
   const kind = transport.kind;
-  const unsupportedTimeoutFields =
-    kind === 'websocket'
-      ? ['connect_ms', 'first_byte_ms', 'idle_ms', 'attempt_ms', 'run_ms']
-      : kind === 'native_cli' || (kind === 'http' && transport.response_mode === 'attest_envelope')
-        ? ['connect_ms', 'first_byte_ms', 'idle_ms', 'run_ms']
-        : kind === 'http' || kind === 'polling' || kind === 'stream'
-          ? ['run_ms']
-          : kind === 'jsonl_bridge'
-            ? ['connect_ms']
-            : [];
-  const unsupportedTimeout = unsupportedTimeoutFields.find(
-    (field) =>
-      agent.timeouts?.[field as keyof NonNullable<AgentResource['timeouts']>] !== undefined,
+  const policyKind: PolicyKind =
+    kind === 'http' && transport.response_mode === 'attest_envelope' ? 'http_envelope' : kind;
+  const unsupportedTimeout = UNSUPPORTED_TIMEOUTS[policyKind].find(
+    (field) => agent.timeouts?.[field] !== undefined,
   );
-  const unsupportedLimitFields =
-    kind === 'native_cli' || (kind === 'http' && transport.response_mode === 'attest_envelope')
-      ? ['request_bytes', 'event_count', 'event_bytes', 'total_evidence_bytes']
-      : kind === 'http' || kind === 'polling'
-        ? ['event_count', 'event_bytes', 'total_evidence_bytes']
-        : kind === 'background_cli'
-          ? ['event_count', 'event_bytes']
-          : kind === 'stream'
-            ? ['response_bytes']
-            : [];
-  const unsupportedLimit = unsupportedLimitFields.find(
-    (field) => agent.limits?.[field as keyof NonNullable<AgentResource['limits']>] !== undefined,
+  const unsupportedLimit = UNSUPPORTED_LIMITS[policyKind].find(
+    (field) => agent.limits?.[field] !== undefined,
   );
   if (unsupportedTimeout !== undefined || unsupportedLimit !== undefined) {
     const section = unsupportedTimeout === undefined ? 'limits' : 'timeouts';
@@ -71,7 +79,7 @@ const assertSafeNativeAgentResource = (agent: AgentResource): void => {
         });
       }
     }
-    const sensitivePosition = argv.findIndex((argument) => SENSITIVE_NAME.test(argument));
+    const sensitivePosition = argv.findIndex((argument) => isSensitiveFieldName(argument));
     if (sensitivePosition >= 0) {
       throw new LocalError(
         'project_invalid',
@@ -85,10 +93,9 @@ const assertSafeNativeAgentResource = (agent: AgentResource): void => {
     if (transport.kind === 'jsonl_bridge') return;
     if (transport.kind === 'native_cli') return;
 
-    let pattern: RegExp | undefined;
     if (transport.readiness.kind === 'stderr') {
       try {
-        pattern = new RegExp(transport.readiness.pattern, 'u');
+        new RegExp(transport.readiness.pattern, 'u');
       } catch (error: unknown) {
         throw new LocalError('project_invalid', 'Background readiness regex is invalid.', {
           path: '/agent/transport/readiness/pattern',
@@ -96,7 +103,6 @@ const assertSafeNativeAgentResource = (agent: AgentResource): void => {
         });
       }
     }
-    void pattern;
     const requests = [
       { request: transport.invoke, path: '/agent/transport/invoke' },
       ...(transport.shutdown === undefined
@@ -112,7 +118,7 @@ const assertSafeNativeAgentResource = (agent: AgentResource): void => {
         : undefined;
     for (const { request, path } of requests) {
       const url = assertSafeHttpTemplate(request, path);
-      if (!['localhost', '::1'].includes(url.hostname) && !url.hostname.startsWith('127.')) {
+      if (!isLoopbackHost(url.hostname)) {
         throw new LocalError(
           'project_invalid',
           'Background agents require loopback HTTP endpoints.',
@@ -122,20 +128,12 @@ const assertSafeNativeAgentResource = (agent: AgentResource): void => {
         );
       }
     }
-    if (
-      readinessUrl !== undefined &&
-      !['localhost', '::1'].includes(readinessUrl.hostname) &&
-      !readinessUrl.hostname.startsWith('127.')
-    ) {
+    if (readinessUrl !== undefined && !isLoopbackHost(readinessUrl.hostname)) {
       throw new LocalError('project_invalid', 'Background readiness requires a loopback URL.', {
         path: '/agent/transport/readiness/url',
       });
     }
-    if (
-      transport.readiness.kind === 'tcp' &&
-      !['localhost', '::1'].includes(transport.readiness.host) &&
-      !transport.readiness.host.startsWith('127.')
-    ) {
+    if (transport.readiness.kind === 'tcp' && !isLoopbackHost(transport.readiness.host)) {
       throw new LocalError(
         'project_invalid',
         'Background TCP readiness requires a loopback host.',
@@ -174,7 +172,7 @@ const assertSafeNativeAgentResource = (agent: AgentResource): void => {
       });
     }
     for (const [name, value] of Object.entries(transport.headers ?? {})) {
-      if (SENSITIVE_NAME.test(name) && typeof value === 'string') {
+      if (isSensitiveFieldName(name) && typeof value === 'string') {
         throw new LocalError(
           'project_invalid',
           'Sensitive WebSocket headers must use references.',
@@ -186,7 +184,7 @@ const assertSafeNativeAgentResource = (agent: AgentResource): void => {
       }
     }
     for (const [name, value] of url.searchParams) {
-      if (SENSITIVE_NAME.test(name) && value.length > 0) {
+      if (isSensitiveFieldName(name) && value.length > 0) {
         throw new LocalError(
           'project_invalid',
           'Sensitive WebSocket query values are unsupported.',

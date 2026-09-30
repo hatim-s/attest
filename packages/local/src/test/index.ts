@@ -1,8 +1,5 @@
-export {
-  parseJsonFlag,
-  readCommandRequest,
-  validateCommandRequest,
-} from '../commands/test/test-command-input.js';
+export { parseJsonFlag } from '../commands/test/test-command-input.js';
+export { readCommandRequest, validateCommandRequest } from '../commands/shared/command-request.js';
 export {
   prepareImportSource,
   type PreparedImportSource,

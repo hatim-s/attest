@@ -6,6 +6,8 @@ import { dirname, join } from 'node:path';
 import { promisify } from 'node:util';
 
 import { errnoCode } from '../../internal/errno-code.js';
+import { isProcessPresent } from '../../internal/process-presence.js';
+import { syncPath } from '../../internal/sync-path.js';
 import { ProjectTransactionError } from './project-transaction-error.js';
 
 const PROJECT_LOCK_FILE = '.attest/project.lock';
@@ -35,16 +37,6 @@ type ProjectLockHandle = {
   metadata: ProjectLockMetadata;
   path: string;
   root: string;
-};
-
-/** Fsyncs a directory entry after creating or removing lock metadata. */
-const syncDirectory = async (path: string): Promise<void> => {
-  const handle = await open(path, 'r');
-  try {
-    await handle.sync();
-  } finally {
-    await handle.close();
-  }
 };
 
 /** Reads the kernel-observed start identity used to detect PID reuse on macOS and Linux. */
@@ -82,16 +74,6 @@ const parseLockMetadata = (raw: string): ProjectLockMetadata | undefined => {
     return undefined;
   }
   return value as ProjectLockMetadata;
-};
-
-const isProcessPresent = (pid: number): boolean => {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error: unknown) {
-    // EPERM proves the process exists even though this user cannot signal it.
-    return errnoCode(error) === 'EPERM';
-  }
 };
 
 /** Classifies the project lock without mutating or stealing it. */
@@ -149,13 +131,14 @@ const inspectProjectLock = async (root: string): Promise<ProjectLockInspection> 
   return { metadata, raw, reason: 'owner process and start identity are live', state: 'live' };
 };
 
+/** Rejects a command because another owner holds the lock; a stale lock is never stolen. */
 const throwForExistingLock = (
   inspection: Exclude<ProjectLockInspection, { state: 'absent' }>,
 ): never => {
   if (inspection.state === 'stale') {
     throw new ProjectTransactionError('project_lock_stale', 'The project lock is stale.', {
       path: PROJECT_LOCK_FILE,
-      hint: 'Preview and explicitly remove the stale lock before retrying.',
+      hint: 'Confirm no Attest process is running, delete `.attest/project.lock`, then rerun the command.',
       details: {
         lock: inspection.metadata,
         lock_state: inspection.state,
@@ -218,7 +201,7 @@ const acquireProjectLock = async (root: string): Promise<ProjectLockHandle> => {
   } finally {
     await handle.close();
   }
-  await syncDirectory(dirname(path));
+  await syncPath(dirname(path));
   return { metadata, path, root };
 };
 
@@ -236,39 +219,7 @@ const releaseProjectLock = async (lock: ProjectLockHandle): Promise<void> => {
     });
   }
   await unlink(lock.path);
-  await syncDirectory(dirname(lock.path));
-};
-
-/** Previews or explicitly removes a lock proven stale without touching recovery journals. */
-const unlockStaleProjectLock = async (
-  root: string,
-  options: { dryRun?: boolean } = {},
-): Promise<ProjectLockMetadata> => {
-  const inspection = await inspectProjectLock(root);
-  if (inspection.state !== 'stale') {
-    if (inspection.state === 'absent') {
-      throw new ProjectTransactionError('project_locked', 'The project has no lock to remove.', {
-        path: PROJECT_LOCK_FILE,
-        details: { lock_state: inspection.state },
-      });
-    }
-    return throwForExistingLock(inspection);
-  }
-  if (options.dryRun === true) {
-    return inspection.metadata;
-  }
-
-  // Re-read before unlinking so a replacement owner can never be removed by a stale preview.
-  const currentRaw = await readFile(join(root, PROJECT_LOCK_FILE), 'utf8');
-  if (currentRaw !== inspection.raw) {
-    throw new ProjectTransactionError('project_locked', 'Project lock changed before removal.', {
-      path: PROJECT_LOCK_FILE,
-      details: { lock_state: 'changed' },
-    });
-  }
-  await unlink(join(root, PROJECT_LOCK_FILE));
-  await syncDirectory(join(root, '.attest'));
-  return inspection.metadata;
+  await syncPath(dirname(lock.path));
 };
 
 export {
@@ -277,7 +228,7 @@ export {
   acquireProjectLock,
   inspectProjectLock,
   releaseProjectLock,
-  unlockStaleProjectLock,
+  throwForExistingLock,
   type ProjectLockHandle,
   type ProjectLockInspection,
   type ProjectLockMetadata,

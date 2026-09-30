@@ -10,7 +10,6 @@ import {
   acquireProjectLock,
   inspectProjectLock,
   releaseProjectLock,
-  unlockStaleProjectLock,
   type ProjectLockMetadata,
 } from '../project-lock.js';
 
@@ -56,7 +55,7 @@ describe('project lock', () => {
     expect(await inspectProjectLock(root)).toEqual({ state: 'absent' });
   });
 
-  it('requires explicit stale unlock and keeps a dry-run byte-for-byte write-free', async () => {
+  it('classifies a dead owner as stale without removing its lock', async () => {
     const root = await createRoot();
     const stale: ProjectLockMetadata = {
       schema: PROJECT_LOCK_SCHEMA,
@@ -77,11 +76,7 @@ describe('project lock', () => {
       acquireFailure = error;
     }
     expect(acquireFailure).toMatchObject({ code: 'project_lock_stale' });
-
-    expect(await unlockStaleProjectLock(root, { dryRun: true })).toEqual(stale);
     expect(await readFile(lockPath)).toEqual(before);
-    await unlockStaleProjectLock(root);
-    expect(await inspectProjectLock(root)).toEqual({ state: 'absent' });
   });
 
   it('never removes malformed lock metadata automatically', async () => {
@@ -92,7 +87,7 @@ describe('project lock', () => {
 
     let failure: unknown;
     try {
-      await unlockStaleProjectLock(root);
+      await acquireProjectLock(root);
     } catch (error: unknown) {
       failure = error;
     }

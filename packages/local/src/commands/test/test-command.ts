@@ -7,7 +7,11 @@ import {
   type TestCase,
   type TestResource,
 } from '@attest/contracts';
-import type { ImportCollisionContext, TabularImportResult } from '@attest/core';
+import {
+  createContentCaseId,
+  type ImportCollisionContext,
+  type TabularImportResult,
+} from '@attest/core';
 
 import { LocalError } from '../../errors/index.js';
 import { loadProject, type LoadedProject } from '../../project/project-loader/index.js';
@@ -22,10 +26,9 @@ import type {
 } from '../shared/command-result.js';
 import { executeProjectMutation } from '../shared/project-mutation.js';
 import { runListCommand } from '../list/list-command.js';
-import { loadCommandProject } from '../project/load-command-project.js';
+import { candidateFromLoadedProject, loadCommandProject } from '../project/load-command-project.js';
 import { runShowCommand } from '../show/show-command.js';
 import { runTabularImportAdapter } from './import/tabular-import-adapter.js';
-import { generateCaseId } from './test-command-input.js';
 
 type TestAuthoringCommand = Extract<
   CommandRequest,
@@ -73,15 +76,6 @@ type MutationBuildResult = {
   warnings?: CliWarning[];
 };
 
-const candidateFromLoadedProject = (loaded: LoadedProject): ProjectResources =>
-  structuredClone({
-    agents: loaded.agents,
-    datasets: loaded.datasets,
-    metrics: loaded.metrics,
-    project: loaded.project,
-    tests: loaded.tests,
-  });
-
 const missingResource = (type: 'case' | 'dataset' | 'test', id: string): LocalError =>
   new LocalError('resource_not_found', `${type} ${id} was not found.`, {
     path: id,
@@ -120,7 +114,7 @@ const assertNewResourceId = (
 
 const caseWithGeneratedId = (
   value: Extract<TestAuthoringCommand, { command: 'test.case.add' }>['case'],
-): TestCase => ({ ...value, id: value.id ?? generateCaseId(value) });
+): TestCase => ({ ...value, id: value.id ?? createContentCaseId(value) });
 
 const attachedDatasetTests = (candidate: ProjectResources, datasetId: string): string[] =>
   candidate.tests

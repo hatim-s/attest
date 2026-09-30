@@ -8,6 +8,8 @@ import {
 import { z } from 'zod';
 
 import { LocalError } from '../../../errors/index.js';
+import { schemaIssueDiagnostics } from '../../../internal/schema-issue-diagnostics.js';
+import { parseJsonText } from '../../../internal/source-text.js';
 import { parseArgvJson, parseDuration } from '../../agent/authoring/index.js';
 import {
   parseAssertionJson,
@@ -16,11 +18,10 @@ import {
   parseJsonValue,
   parseNonnegativeInteger,
   parsePathValueMatchers,
-  parseSecretBindings,
+  parseOptionalSecretBindings,
   readExclusiveText,
   requireValue,
 } from './value-parsers.js';
-import { parseJson, requestDiagnostics } from './source.js';
 import type { MetricAddFields } from './types.js';
 import { assertSafeMetricResource } from './validation.js';
 
@@ -70,12 +71,12 @@ const jsonSchemaSchema = z.union([z.boolean(), z.record(z.string(), z.json())]);
 
 const parseJsonSchema = (value: string): z.infer<typeof jsonSchemaSchema> => {
   const parsed = jsonSchemaSchema.safeParse(
-    parseJson(value, '--json-schema', 'Pass a JSON Schema object or boolean.'),
+    parseJsonText(value, { path: '--json-schema', hint: 'Pass a JSON Schema object or boolean.' }),
   );
   if (!parsed.success) {
     throw new LocalError('cli_usage', 'JSON Schema must be an object or boolean.', {
       path: '--json-schema',
-      details: { diagnostics: requestDiagnostics(parsed.error.issues) },
+      details: { diagnostics: schemaIssueDiagnostics(parsed.error.issues) },
     });
   }
   return parsed.data;
@@ -256,13 +257,12 @@ const createMetricResource = async (fields: MetricAddFields): Promise<MetricReso
     };
   } else if (fields.preset === 'command') {
     assertOnlyFields(fields, allowedFields('argvJson', 'cwd', 'env', 'preset', 'timeout'));
+    const env = parseOptionalSecretBindings(fields.env, '--env');
     definition = {
       kind: 'exec',
       argv: parseArgvJson(requireValue(fields.argvJson, '--argv-json')),
       ...(fields.cwd === undefined ? {} : { cwd: fields.cwd }),
-      ...(parseSecretBindings(fields.env, '--env') === undefined
-        ? {}
-        : { env: parseSecretBindings(fields.env, '--env') }),
+      ...(env === undefined ? {} : { env }),
       ...(fields.timeout === undefined ? {} : { timeout_ms: parseDuration(fields.timeout) }),
     };
   } else if (fields.preset === 'http') {
@@ -282,17 +282,15 @@ const createMetricResource = async (fields: MetricAddFields): Promise<MetricReso
         'url',
       ),
     );
+    const headers = parseOptionalSecretBindings(fields.headerEnv, '--header-env');
+    const query = parseOptionalSecretBindings(fields.queryEnv, '--query-env');
     definition = {
       kind: 'http',
       request: {
         url: requireValue(fields.url, '--url'),
         method: (fields.httpMethod ?? 'POST') as 'POST',
-        ...(parseSecretBindings(fields.headerEnv, '--header-env') === undefined
-          ? {}
-          : { headers: parseSecretBindings(fields.headerEnv, '--header-env') }),
-        ...(parseSecretBindings(fields.queryEnv, '--query-env') === undefined
-          ? {}
-          : { query: parseSecretBindings(fields.queryEnv, '--query-env') }),
+        ...(headers === undefined ? {} : { headers }),
+        ...(query === undefined ? {} : { query }),
         ...(fields.bodyJson === undefined
           ? {}
           : { body: parseJsonValue(fields.bodyJson, '--body-json') }),
@@ -391,7 +389,7 @@ const createMetricResource = async (fields: MetricAddFields): Promise<MetricReso
   });
   if (!parsed.success) {
     throw new LocalError('cli_usage', 'Metric values do not match the resource schema.', {
-      details: { diagnostics: requestDiagnostics(parsed.error.issues) },
+      details: { diagnostics: schemaIssueDiagnostics(parsed.error.issues) },
     });
   }
   assertSafeMetricResource(parsed.data);

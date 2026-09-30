@@ -11,12 +11,12 @@ import {
   type MetricResource,
   type TestCase,
   type TestResource,
+  type JsonValue,
 } from '@attest/contracts';
 
-import { selectCases, CaseSelectionError } from '@attest/core';
+import { selectCases, CaseSelectionError, contentHash } from '@attest/core';
 
 import { LocalError } from '../../errors/index.js';
-import { hashCanonicalJson, type JsonValue } from '../../project/canonical-project.js';
 import type { LoadedProject } from '../../project/project-loader/index.js';
 
 const DEFAULT_EVAL_CONCURRENCY = 4;
@@ -286,7 +286,7 @@ const resolveMetrics = (
 
 /** Generates a move-stable logical execution id from project, test, and authored case identity. */
 const createExecutionId = (projectId: string, testId: string, caseId: string): string =>
-  hashCanonicalJson({ case_id: caseId, project_id: projectId, test_id: testId });
+  contentHash({ case_id: caseId, project_id: projectId, test_id: testId });
 
 const positiveInteger = (value: number | undefined, fallback: number, label: string): number => {
   const resolved = value ?? fallback;
@@ -522,7 +522,7 @@ const resolveEvalRun = (
     },
     selectedTests,
     snapshot,
-    snapshotHash: hashCanonicalJson(snapshot as JsonValue),
+    snapshotHash: contentHash(snapshot as JsonValue),
   });
 };
 

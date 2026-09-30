@@ -17,7 +17,8 @@ import {
 } from '../discover-project.js';
 import { ProjectLoadError } from '../project-errors.js';
 import { loadDataset } from './dataset-loader.js';
-import { loadJsonResource, toJsonPointer } from './source-loader.js';
+import { toJsonPointer } from '../../internal/json-pointer.js';
+import { loadJsonResource } from './source-loader.js';
 import type {
   LoadedDatasetResource,
   LoadedJsonResource,

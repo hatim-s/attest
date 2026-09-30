@@ -10,8 +10,7 @@ import type {
 import type { StoredAttempt } from '@attest/core';
 import { AgentInvocationError, redactTransportText, type InvocationResult } from '@attest/executor';
 
-const REDACTED = '[REDACTED]';
-const SENSITIVE_KEY = /authorization|cookie|password|secret|token|api[-_]?key/iu;
+import { REDACTED, isSensitiveFieldName } from '../../../internal/redaction.js';
 
 const REQUEST_FIELDS = new Set([
   'protocol',
@@ -42,13 +41,10 @@ const SPAN_FIELDS = new Set([
 const EVENT_FIELDS = new Set(['name', 'time', 'attributes']);
 const STATUS_FIELDS = new Set(['code', 'message']);
 
-const redactString = (value: string, secrets: readonly string[]): string =>
-  redactTransportText(value, secrets);
-
 /** Redacts JSON payload values and sensitive named fields without claiming their original type. */
 const redactProbeValue = (value: unknown, secrets: readonly string[]): JsonValue => {
   if (value === null || typeof value === 'boolean' || typeof value === 'number') return value;
-  if (typeof value === 'string') return redactString(value, secrets);
+  if (typeof value === 'string') return redactTransportText(value, secrets);
   if (Array.isArray(value)) return value.map((entry) => redactProbeValue(entry, secrets));
   if (typeof value !== 'object') return null;
   return Object.fromEntries(
@@ -56,7 +52,7 @@ const redactProbeValue = (value: unknown, secrets: readonly string[]): JsonValue
       .filter(([, entry]) => entry !== undefined)
       .map(([key, entry]) => [
         key,
-        SENSITIVE_KEY.test(key) ? REDACTED : redactProbeValue(entry, secrets),
+        isSensitiveFieldName(key) ? REDACTED : redactProbeValue(entry, secrets),
       ]),
   );
 };
@@ -71,7 +67,7 @@ const redactExtensions = (
       .filter(([key, entry]) => !knownFields.has(key) && entry !== undefined)
       .map(([key, entry]) => [
         key,
-        SENSITIVE_KEY.test(key) ? REDACTED : redactProbeValue(entry, secrets),
+        isSensitiveFieldName(key) ? REDACTED : redactProbeValue(entry, secrets),
       ]),
   );
 
@@ -84,10 +80,10 @@ const redactAttributes = (
     : Object.fromEntries(
         Object.entries(attributes).map(([key, value]) => [
           key,
-          SENSITIVE_KEY.test(key)
+          isSensitiveFieldName(key)
             ? REDACTED
             : typeof value === 'string'
-              ? redactString(value, secrets)
+              ? redactTransportText(value, secrets)
               : value,
         ]),
       );
@@ -101,7 +97,7 @@ const redactTrace = (trace: Trace, secrets: readonly string[]): Trace => ({
     ...redactExtensions(span, SPAN_FIELDS, secrets),
     span_id: span.span_id,
     parent_span_id: span.parent_span_id,
-    name: redactString(span.name, secrets),
+    name: redactTransportText(span.name, secrets),
     kind: span.kind,
     start_time: span.start_time,
     end_time: span.end_time,
@@ -110,7 +106,7 @@ const redactTrace = (trace: Trace, secrets: readonly string[]): Trace => ({
       code: span.status.code,
       ...(span.status.message === undefined
         ? {}
-        : { message: redactString(span.status.message, secrets) }),
+        : { message: redactTransportText(span.status.message, secrets) }),
     },
     ...(span.attributes === undefined
       ? {}
@@ -120,7 +116,7 @@ const redactTrace = (trace: Trace, secrets: readonly string[]): Trace => ({
       : {
           events: span.events.map((event) => ({
             ...redactExtensions(event, EVENT_FIELDS, secrets),
-            name: redactString(event.name, secrets),
+            name: redactTransportText(event.name, secrets),
             time: event.time,
             ...(event.attributes === undefined
               ? {}
@@ -145,7 +141,7 @@ const redactAgentRequest = (request: AgentRequest, secrets: readonly string[]): 
         params: Object.fromEntries(
           Object.entries(request.params).map(([key, value]) => [
             key,
-            SENSITIVE_KEY.test(key) ? REDACTED : redactProbeValue(value, secrets),
+            isSensitiveFieldName(key) ? REDACTED : redactProbeValue(value, secrets),
           ]),
         ),
       }),
@@ -154,7 +150,7 @@ const redactAgentRequest = (request: AgentRequest, secrets: readonly string[]): 
     : {
         messages: request.messages.map((message) => ({
           role: message.role,
-          content: redactString(message.content, secrets),
+          content: redactTransportText(message.content, secrets),
         })),
       }),
   ...(request.turn_index === undefined ? {} : { turn_index: request.turn_index }),
@@ -179,7 +175,7 @@ const redactAgentResponse = (
   return {
     ...common,
     error: {
-      message: redactString(response.error.message, secrets),
+      message: redactTransportText(response.error.message, secrets),
       ...(response.error.code === undefined ? {} : { code: response.error.code }),
     },
   };
@@ -192,13 +188,13 @@ const redactInvocationDiagnostics = (
 ): InvocationResult['diagnostics'] => ({
   ...(diagnostics.stderrExcerpt === undefined
     ? {}
-    : { stderrExcerpt: redactString(diagnostics.stderrExcerpt, secrets) }),
+    : { stderrExcerpt: redactTransportText(diagnostics.stderrExcerpt, secrets) }),
   ...(diagnostics.sandboxError === undefined
     ? {}
-    : { sandboxError: redactString(diagnostics.sandboxError, secrets) }),
+    : { sandboxError: redactTransportText(diagnostics.sandboxError, secrets) }),
   ...(diagnostics.lifecycleError === undefined
     ? {}
-    : { lifecycleError: redactString(diagnostics.lifecycleError, secrets) }),
+    : { lifecycleError: redactTransportText(diagnostics.lifecycleError, secrets) }),
   ...(diagnostics.sandboxCleanupConfirmed === undefined
     ? {}
     : { sandboxCleanupConfirmed: diagnostics.sandboxCleanupConfirmed }),
@@ -220,11 +216,11 @@ const redactWarnings = (
   warnings.map((warning) => ({
     code: warning.code,
     path: warning.path,
-    message: redactString(warning.message, secrets),
+    message: redactTransportText(warning.message, secrets),
   }));
 
 const redactRawExcerpt = (excerpt: RawExcerpt, secrets: readonly string[]): RawExcerpt => ({
-  text: redactString(excerpt.text, secrets),
+  text: redactTransportText(excerpt.text, secrets),
   truncated: excerpt.truncated,
   ...(excerpt.sha256 === undefined ? {} : { sha256: excerpt.sha256 }),
 });
@@ -247,7 +243,7 @@ const redactAttempt = (
       status: 'invocation_error',
       error: new AgentInvocationError(
         attempt.error.code,
-        redactString(attempt.error.message, secrets),
+        redactTransportText(attempt.error.message, secrets),
       ),
     };
   }
@@ -272,7 +268,7 @@ const redactAttempt = (
               ok: false as const,
               errors: report.errors.map((error) => ({
                 path: error.path,
-                message: redactString(error.message, secrets),
+                message: redactTransportText(error.message, secrets),
               })),
               warnings: redactWarnings(report.warnings, secrets),
             },
@@ -313,7 +309,6 @@ const redactStoredAttempt = (
 };
 
 export {
-  REDACTED,
   redactAgentRequest,
   redactAgentResponse,
   redactInvocation,

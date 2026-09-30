@@ -117,7 +117,7 @@ const CLI_ERROR_DEFINITIONS = [
     retryable: false,
     exit_code: 3,
     repairs: [
-      'Preview `attest project unlock --stale`, then explicitly unlock and recover the journal.',
+      'Confirm no Attest process is running, delete `.attest/project.lock`, then rerun the command to recover the journal.',
     ],
   },
   {

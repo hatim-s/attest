@@ -1,5 +1,4 @@
-import { constants, type BigIntStats } from 'node:fs';
-import { lstat, open, realpath, type FileHandle } from 'node:fs/promises';
+import { lstat, realpath } from 'node:fs/promises';
 import { resolve } from 'node:path';
 
 import {
@@ -7,28 +6,27 @@ import {
   type JsonValue,
   type MetricResource,
   type ProjectResources,
-  type SecretReference,
 } from '@attest/contracts';
 import { evaluateMetrics, type MetricContext, type MetricEvaluation } from '@attest/runtime';
 
 import { LocalError } from '../../errors/index.js';
+import { openAnchored, type AnchoredEntry } from '../../internal/open-anchored.js';
 import { loadProject, type LoadedProject } from '../../project/project-loader/index.js';
 import { isProjectPath } from '../../project/project-path.js';
 import type { SemanticProjectOperation } from '../../project/transaction/index.js';
 import type { CommandResult, MetricTestResult, MutationResult } from '../shared/command-result.js';
 import { executeProjectMutation } from '../shared/project-mutation.js';
+import type { Prompt } from '../shared/prompt.js';
 import {
-  createBaseEnvironment,
-  readSecretReference,
   redactProbeValue,
+  resolveProcessEnvironment,
 } from '../agent/native-agent-adapter/index.js';
-import { loadCommandProject } from '../project/load-command-project.js';
+import { candidateFromLoadedProject, loadCommandProject } from '../project/load-command-project.js';
 import { redactMetricResource } from '../show/redact-resource.js';
 import {
   assertSafeMetricResource,
   readImportedMetricResource,
   readMetricTestFixture,
-  type Prompt,
 } from './authoring/index.js';
 
 type MetricAuthoringRequest = Extract<
@@ -63,15 +61,6 @@ type MutationBuildResult = {
   renames?: readonly { from: string; to: string; type: 'metric' }[];
   warnings?: string[];
 };
-
-const candidateFromLoadedProject = (loaded: LoadedProject): ProjectResources =>
-  structuredClone({
-    agents: loaded.agents,
-    datasets: loaded.datasets,
-    metrics: loaded.metrics,
-    project: loaded.project,
-    tests: loaded.tests,
-  });
 
 const findMetric = (metrics: readonly MetricResource[], id: string): MetricResource => {
   const metric = metrics.find((candidate) => candidate.id === id);
@@ -288,53 +277,30 @@ const runMetricMutationCommand = async (
   };
 };
 
-type AnchoredMetricDirectory = {
-  handle: FileHandle;
-  identity: BigIntStats;
-  path: string;
-};
-
-const unsafeMetricDirectory = (path: string): LocalError =>
+const unsafeMetricDirectory = (path: string, cause?: unknown): LocalError =>
   new LocalError('project_invalid', 'Metric cwd is not a safe project directory.', {
     path,
     hint: 'Use a real project-contained directory without a symlink escape.',
+    cause,
   });
 
 /** Opens and identity-checks the executable cwd while retaining a descriptor through invocation. */
 const openMetricDirectory = async (
   projectRoot: string,
   configuredPath: string,
-): Promise<AnchoredMetricDirectory> => {
+): Promise<AnchoredEntry> => {
   const resolvedRoot = await realpath(projectRoot);
   const candidate = resolve(resolvedRoot, configuredPath);
   if (!isProjectPath(resolvedRoot, candidate)) throw unsafeMetricDirectory(configuredPath);
-  let handle: FileHandle | undefined;
   try {
-    handle = await open(candidate, constants.O_RDONLY | constants.O_NOFOLLOW);
-    const [identity, pathIdentity, resolvedPath] = await Promise.all([
-      handle.stat({ bigint: true }),
-      lstat(candidate, { bigint: true }),
-      realpath(candidate),
-    ]);
-    if (
-      !identity.isDirectory() ||
-      pathIdentity.isSymbolicLink() ||
-      identity.dev !== pathIdentity.dev ||
-      identity.ino !== pathIdentity.ino ||
-      !isProjectPath(resolvedRoot, resolvedPath)
-    ) {
-      throw unsafeMetricDirectory(configuredPath);
-    }
-    return { handle, identity, path: resolvedPath };
+    return await openAnchored(candidate, { kind: 'directory', root: resolvedRoot });
   } catch (error: unknown) {
-    await handle?.close().catch(() => undefined);
-    if (error instanceof LocalError) throw error;
-    throw unsafeMetricDirectory(configuredPath);
+    throw unsafeMetricDirectory(configuredPath, error);
   }
 };
 
 /** Rechecks the pathname against its retained descriptor immediately before process creation. */
-const assertMetricDirectoryIdentity = async (directory: AnchoredMetricDirectory): Promise<void> => {
+const assertMetricDirectoryIdentity = async (directory: AnchoredEntry): Promise<void> => {
   try {
     const current = await lstat(directory.path, { bigint: true });
     if (
@@ -349,34 +315,6 @@ const assertMetricDirectoryIdentity = async (directory: AnchoredMetricDirectory)
     if (error instanceof LocalError) throw error;
     throw unsafeMetricDirectory(directory.path);
   }
-};
-
-/** Resolves exec-only environment references immediately before starting the trusted fixture. */
-const resolveMetricEnvironment = async (
-  env: Readonly<Record<string, SecretReference>> | undefined,
-  projectRoot: string,
-): Promise<{ environment: NodeJS.ProcessEnv; secrets: string[] }> => {
-  const environment: NodeJS.ProcessEnv = createBaseEnvironment();
-  const secrets: string[] = [];
-  for (const [target, reference] of Object.entries(env ?? {})) {
-    let value: string;
-    try {
-      value = await readSecretReference(reference, projectRoot);
-    } catch (error: unknown) {
-      throw new LocalError(
-        'metric_infrastructure_failed',
-        'A referenced metric secret is unavailable.',
-        {
-          path: target,
-          hint: 'Set the referenced secret and retry the local metric test.',
-          cause: error,
-        },
-      );
-    }
-    environment[target] = value;
-    secrets.push(value);
-  }
-  return { environment, secrets };
 };
 
 const withoutDuration = (evaluation: MetricEvaluation): JsonValue => {
@@ -425,13 +363,25 @@ const runMetricTestCommand = async (
       : { name: metric.id, type: 'exec' as const, command: metric.definition.argv };
   let execCwd: string | undefined;
   let execEnv: NodeJS.ProcessEnv | undefined;
-  let execDirectory: AnchoredMetricDirectory | undefined;
+  let execDirectory: AnchoredEntry | undefined;
   let secrets: string[] = [];
   if (metric.definition.kind === 'exec') {
     execDirectory = await openMetricDirectory(loaded.root, metric.definition.cwd ?? '.');
     execCwd = execDirectory.path;
-    const resolved = await resolveMetricEnvironment(metric.definition.env, loaded.root);
-    execEnv = resolved.environment;
+    let resolved: Awaited<ReturnType<typeof resolveProcessEnvironment>>;
+    try {
+      resolved = await resolveProcessEnvironment(metric.definition.env, loaded.root);
+    } catch (error: unknown) {
+      throw new LocalError(
+        'metric_infrastructure_failed',
+        'A referenced metric secret is unavailable.',
+        {
+          hint: 'Set the referenced secret and retry the local metric test.',
+          cause: error,
+        },
+      );
+    }
+    execEnv = resolved.env;
     secrets = resolved.secrets;
   }
   let evaluation: MetricEvaluation | undefined;
