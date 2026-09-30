@@ -1,4 +1,8 @@
-"""Exercise the eval selection wizard and signal handling through one real PTY."""
+"""Drive one command through a real PTY: wait for each expected output, then send its input.
+
+Usage: drive-pty.py '<steps JSON>' command [args...]
+Each step is {"expect": "<output text>", "send": "<input text>"}. Prints JSON evidence.
+"""
 
 import json
 import os
@@ -11,7 +15,7 @@ import time
 
 
 def read_once(master_fd: int, timeout: float) -> bytes:
-    """Read available PTY bytes while treating child-exit EIO as EOF."""
+    """Read available PTY bytes, treating the child-exit EIO as EOF."""
     readable, _, _ = select.select([master_fd], [], [], timeout)
     if not readable:
         return b""
@@ -22,7 +26,7 @@ def read_once(master_fd: int, timeout: float) -> bytes:
 
 
 def read_until(master_fd: int, expected: bytes, deadline: float) -> tuple[bytes, bool]:
-    """Collect output until one marker appears or the bounded deadline expires."""
+    """Collect output until the marker appears or the deadline passes."""
     output = b""
     while expected not in output and time.monotonic() < deadline:
         output += read_once(master_fd, 0.1)
@@ -30,7 +34,7 @@ def read_until(master_fd: int, expected: bytes, deadline: float) -> tuple[bytes,
 
 
 def finish_child(child_pid: int, master_fd: int, output: bytes, deadline: float) -> dict[str, object]:
-    """Collect child exit evidence and verify canonical terminal flags were restored."""
+    """Wait for the child, then check that canonical terminal modes were restored."""
     status = None
     while status is None and time.monotonic() < deadline:
         output += read_once(master_fd, 0.1)
@@ -52,28 +56,30 @@ def finish_child(child_pid: int, master_fd: int, output: bytes, deadline: float)
     }
 
 
-def drive(command: list[str]) -> dict[str, object]:
-    """Answer the selection wizard, then send terminal SIGINT during the watched run."""
+def drive(steps: list[dict[str, str]], command: list[str]) -> dict[str, object]:
+    """Run the command in a PTY and play the steps in order, stopping at the first miss."""
     child_pid, master_fd = pty.fork()
     if child_pid == 0:
         os.environ.pop("CI", None)
         os.execvp(command[0], command)
     deadline = time.monotonic() + 15
-    output, prompt_seen = read_until(master_fd, b"Test ids (space-separated) or all [all]: ", deadline)
-    if prompt_seen:
-        os.write(master_fd, b"refund\n")
-    chunk, run_seen = read_until(master_fd, b" started: ", deadline)
-    output += chunk
-    if run_seen:
-        os.write(master_fd, b"\x03")
+    output = b""
+    steps_seen = []
+    for step in steps:
+        chunk, seen = read_until(master_fd, step["expect"].encode("utf-8"), deadline)
+        output += chunk
+        steps_seen.append(seen)
+        if not seen:
+            break
+        os.write(master_fd, step["send"].encode("utf-8"))
     evidence = finish_child(child_pid, master_fd, output, deadline)
-    evidence.update({"prompt_seen": prompt_seen, "run_seen": run_seen})
+    evidence["steps_seen"] = steps_seen
     return evidence
 
 
 def main() -> None:
-    """Run the supplied command and print JSON evidence for Vitest."""
-    print(json.dumps(drive(sys.argv[1:])))
+    """Print the JSON evidence for the caller."""
+    print(json.dumps(drive(json.loads(sys.argv[1]), sys.argv[2:])))
 
 
 if __name__ == "__main__":

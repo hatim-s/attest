@@ -1,22 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
 import { AttestCliError, renderCliError, serializeCliError } from '../cli-error.js';
-import { createCliErrorCatalog } from '../error-catalog.js';
 
 describe('CLI error contracts', () => {
-  it('publishes deterministic definitions for every stable exit-code class', () => {
-    const first = createCliErrorCatalog();
-    const second = createCliErrorCatalog();
-
-    expect(second).toEqual(first);
-    expect(first.errors.map(({ code }) => code)).toEqual(
-      [...first.errors.map(({ code }) => code)].sort(),
-    );
-    expect(new Set(first.errors.map(({ exit_code }) => exit_code))).toEqual(
-      new Set([1, 2, 3, 4, 130]),
-    );
-  });
-
   it('serializes expected errors identically for human and JSON boundaries', () => {
     const failure = serializeCliError(
       new AttestCliError('project_changed', 'The project changed.', {

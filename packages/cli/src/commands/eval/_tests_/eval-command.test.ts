@@ -1,6 +1,5 @@
 import { execFile } from 'node:child_process';
-import { mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { mkdir, readdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
@@ -19,12 +18,16 @@ import {
 import { cancelConfiguration, runConfiguration } from '@attest/local/eval';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { writeFixtureProject } from '../../../_tests_/support/project-fixture.js';
-import type { CliInteraction } from '../../shared/cli-interaction.js';
+import {
+  createFixtureProject,
+  nonInteractive,
+  runCommand,
+  temporaryDirectory,
+  type CliRun,
+} from '../../../_tests_/support/cli-test-support.js';
 import { getCliErrorDefinition } from '../../../errors/error-catalog.js';
-import type { CliIo } from '../../../commands/shared/command-context.js';
 import { runCli } from '../../../run-cli.js';
-import { createEvalRunRequest } from '../eval-request.js';
+import type { CliInteraction } from '../../shared/cli-interaction.js';
 
 vi.mock('@attest/local/eval', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@attest/local/eval')>()),
@@ -37,23 +40,11 @@ const BASELINE_ID = '01ARZ3NDEKTSV4RRFFQ69G5FAA';
 const SNAPSHOT_HASH = 'f'.repeat(64);
 const PROJECT_HASH = 'a'.repeat(64);
 const TIME = '2026-08-08T10:00:00.000Z';
-const PTY_DRIVER = fileURLToPath(new URL('./fixtures/drive-eval-command-pty.py', import.meta.url));
+const PTY_DRIVER = fileURLToPath(new URL('../../../_tests_/support/drive-pty.py', import.meta.url));
 const PTY_CHILD = fileURLToPath(new URL('./fixtures/eval-command-pty.ts', import.meta.url));
 const execFileAsync = promisify(execFile);
-const temporaryDirectories: string[] = [];
 const run = vi.mocked(runConfiguration);
 const cancel = vi.mocked(cancelConfiguration);
-
-type EvalHarness = { errors: string[]; exitCode: number; output: string[] };
-
-const interaction = (overrides: Partial<CliInteraction> = {}): Partial<CliInteraction> => ({
-  ci: false,
-  inputIsTTY: false,
-  outputIsTTY: false,
-  prompt: () => Promise.reject(new Error('prompt must not be called')),
-  readStdin: () => Promise.resolve(''),
-  ...overrides,
-});
 
 const cancellationSuccess = () =>
   evalCancelResultSchema.parse({
@@ -228,31 +219,12 @@ const eventSource = async function* (events: readonly EvalEvent[]): AsyncGenerat
   yield* events;
 };
 
-/** Runs the real CLI with the local eval runner replaced by the per-test mocks. */
-const parse = async (
+/** Runs the real CLI in `root` with the local eval runner replaced by the per-test mocks. */
+const parse = (
   argv: readonly string[],
-  overrides: Partial<CliInteraction> = {},
-  workingDirectory = process.cwd(),
-): Promise<EvalHarness> => {
-  const errors: string[] = [];
-  const output: string[] = [];
-  const io: CliIo = {
-    error: (message) => errors.push(message),
-    output: (message) => output.push(message),
-  };
-  const exitCode = await runCli([...argv], {
-    interaction: interaction(overrides),
-    io,
-    workingDirectory,
-  });
-  return { errors, exitCode, output };
-};
-
-const createTemporaryDirectory = async (prefix: string): Promise<string> => {
-  const directory = await mkdtemp(join(tmpdir(), prefix));
-  temporaryDirectories.push(directory);
-  return directory;
-};
+  interaction: Partial<CliInteraction> = {},
+  root = process.cwd(),
+): Promise<CliRun> => runCommand(root, argv, { interaction });
 
 beforeEach(() => {
   run.mockImplementation(() => Promise.resolve(eventSource(completedEvents())));
@@ -263,11 +235,8 @@ beforeEach(() => {
   });
 });
 
-afterEach(async () => {
+afterEach(() => {
   vi.resetAllMocks();
-  await Promise.all(
-    temporaryDirectories.splice(0).map((directory) => rm(directory, { recursive: true })),
-  );
 });
 
 describe('eval request normalization', () => {
@@ -368,10 +337,11 @@ describe('eval request normalization', () => {
     expect(harness.output.at(-1)).not.toContain('\n  attest diff\n');
   });
 
-  it('uses all as the guided default and validates direct normalization independently', async () => {
-    await expect(
-      createEvalRunRequest({}, { interactive: true, prompt: () => Promise.resolve('') }),
-    ).resolves.toEqual({
+  it('selects every test when the wizard answer is empty', async () => {
+    const prompt = vi.fn<CliInteraction['prompt']>(() => Promise.resolve(''));
+    await parse(['eval', 'run'], { inputIsTTY: true, outputIsTTY: true, prompt });
+
+    expect(run.mock.calls[0]?.[0]).toEqual({
       schema: COMMAND_REQUEST_SCHEMA_ID,
       command: 'eval.run',
       all: true,
@@ -434,7 +404,7 @@ describe('eval errors and no-write preflight', () => {
   });
 
   it('does not create files or dispatch when validation fails', async () => {
-    const root = await createTemporaryDirectory('attest-eval-no-write-');
+    const root = await temporaryDirectory('attest-eval-no-write-');
     const harness = await parse(['eval', 'run', '--non-interactive'], {}, root);
 
     expect(harness.exitCode).toBe(2);
@@ -509,7 +479,7 @@ describe('eval output and sequencing', () => {
     run.mockResolvedValue(events());
     const output: string[] = [];
     const parsing = runCli(['eval', 'run', 'refund', '--output', 'jsonl'], {
-      interaction: interaction(),
+      interaction: nonInteractive(),
       io: { error: () => undefined, output: (message) => output.push(message) },
     });
 
@@ -595,7 +565,7 @@ describe('eval cancellation command', () => {
   });
 
   it('accepts one complete cancellation request from JSON', async () => {
-    const root = await createTemporaryDirectory('attest-eval-cancel-json-');
+    const root = await temporaryDirectory('attest-eval-cancel-json-');
     await writeFile(
       join(root, 'cancel.json'),
       JSON.stringify({
@@ -668,30 +638,29 @@ describe('eval command grammar and terminal behavior', () => {
   });
 
   it('returns 130 and restores terminal modes after SIGINT in the real wizard PTY', async () => {
-    const root = await createTemporaryDirectory('attest-eval-pty-');
-    await writeFixtureProject(root);
+    const root = await createFixtureProject();
     // The agent never answers, so the run is still in flight when the driver sends SIGINT.
     await mkdir(join(root, 'src'));
     await writeFile(join(root, 'src', 'agent.mjs'), 'setInterval(() => undefined, 1_000);\n');
+    const steps = [
+      { expect: 'Test ids (space-separated) or all [all]: ', send: 'refund\n' },
+      { expect: ' started: ', send: '\u0003' },
+    ];
     const { stderr, stdout } = await execFileAsync(
       'python3',
-      [PTY_DRIVER, 'bun', PTY_CHILD, root],
-      {
-        timeout: 20_000,
-      },
+      [PTY_DRIVER, JSON.stringify(steps), 'bun', PTY_CHILD, root],
+      { timeout: 20_000 },
     );
     expect(stderr).toBe('');
     const evidence = JSON.parse(stdout) as {
       exit_code: number;
       output: string;
-      prompt_seen: boolean;
-      run_seen: boolean;
+      steps_seen: boolean[];
       terminal_restored: boolean;
     };
     expect(evidence).toMatchObject({
       exit_code: 130,
-      prompt_seen: true,
-      run_seen: true,
+      steps_seen: [true, true],
       terminal_restored: true,
     });
     expect(evidence.output).toContain('Result: CANCELLED (exit 130)');

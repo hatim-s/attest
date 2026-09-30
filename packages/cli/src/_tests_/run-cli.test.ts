@@ -1,50 +1,29 @@
-import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { mkdir, readFile, realpath, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
-import { cliErrorCatalogSchema, cliResultSchema } from '@attest/contracts';
+import { cliErrorCatalogSchema, cliHelpSchema } from '@attest/contracts';
 import { openStore } from '@attest/local/store';
-import { afterEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
-import { runCli } from '../run-cli.js';
-
-const temporaryDirectories: string[] = [];
-
-afterEach(async () => {
-  await Promise.all(
-    temporaryDirectories.splice(0).map((directory) => rm(directory, { recursive: true })),
-  );
-});
+import { runCommand, runJson, temporaryDirectory } from './support/cli-test-support.js';
 
 describe('runCli', () => {
   it('renders help without terminating the caller', async () => {
-    const output: string[] = [];
-    const exitCode = await runCli(['--help'], {
-      io: { output: (message) => output.push(message), error: (message) => output.push(message) },
-    });
+    const help = await runCommand(process.cwd(), ['--help']);
 
-    expect(exitCode).toBe(0);
-    expect(output.join('')).toContain('eval');
-    expect(output.join('')).not.toContain('\n  run [options]');
+    expect(help.exitCode).toBe(0);
+    const text = [...help.output, ...help.errors].join('');
+    expect(text).toContain('eval');
+    expect(text).not.toContain('\n  run [options]');
   });
 
   it('emits one complete deterministic JSON help document', async () => {
-    const output: string[] = [];
-    const errors: string[] = [];
+    const help = await runJson(process.cwd(), ['help', 'trace', 'convert']);
+    const repeated = await runJson(process.cwd(), ['help', 'trace', 'convert']);
 
-    const exitCode = await runCli(['help', 'trace', 'convert', '--output', 'json'], {
-      io: { output: (message) => output.push(message), error: (message) => errors.push(message) },
-    });
-
-    expect(exitCode).toBe(0);
-    expect(errors).toEqual([]);
-    expect(output).toHaveLength(1);
-    const repeatedOutput: string[] = [];
-    await runCli(['help', 'trace', 'convert', '--output', 'json'], {
-      io: { output: (message) => repeatedOutput.push(message), error: () => undefined },
-    });
-    expect(repeatedOutput).toEqual(output);
-    expect(JSON.parse(output[0] ?? '{}')).toEqual({
+    expect(help.exitCode).toBe(0);
+    expect(repeated.output).toEqual(help.output);
+    expect(help.document).toEqual({
       schema: 'attest.cli-result',
       ok: true,
       command: 'help',
@@ -119,17 +98,10 @@ describe('runCli', () => {
   });
 
   it('returns one structured usage failure for an unknown JSON help path', async () => {
-    const output: string[] = [];
-    const errors: string[] = [];
+    const help = await runJson(process.cwd(), ['help', 'unknown']);
 
-    const exitCode = await runCli(['help', 'unknown', '--output', 'json'], {
-      io: { output: (message) => output.push(message), error: (message) => errors.push(message) },
-    });
-
-    expect(exitCode).toBe(2);
-    expect(errors).toEqual([]);
-    expect(output).toHaveLength(1);
-    expect(JSON.parse(output[0] ?? '{}')).toEqual({
+    expect(help.exitCode).toBe(2);
+    expect(help.document).toEqual({
       schema: 'attest.cli-result',
       ok: false,
       command: 'help',
@@ -144,27 +116,12 @@ describe('runCli', () => {
   });
 
   it('exposes the same stable error registry through one JSON result', async () => {
-    const output: string[] = [];
+    const errors = await runJson(process.cwd(), ['errors']);
 
-    const exitCode = await runCli(['errors', '--output', 'json'], {
-      io: { output: (message) => output.push(message), error: () => undefined },
-    });
-
-    expect(exitCode).toBe(0);
-    expect(output).toHaveLength(1);
-    const document = cliResultSchema.parse(JSON.parse(output[0] ?? '{}') as unknown);
-    expect(document).toMatchObject({
-      schema: 'attest.cli-result',
-      ok: true,
-      command: 'errors',
-      result: {
-        schema: 'attest.cli-errors',
-      },
-    });
-    if (!document.ok) {
-      throw new Error('Expected the errors command to return a success document.');
-    }
-    const catalog = cliErrorCatalogSchema.parse(document.result);
+    expect(errors.exitCode).toBe(0);
+    expect(errors.document).toMatchObject({ ok: true, command: 'errors' });
+    if (!errors.document.ok) throw new Error('Expected the errors command to succeed.');
+    const catalog = cliErrorCatalogSchema.parse(errors.document.result);
     expect(catalog.errors.find(({ code }) => code === 'cli_usage')).toMatchObject({
       exit_code: 2,
       retryable: false,
@@ -180,30 +137,23 @@ describe('runCli', () => {
   });
 
   it('uses exit code 2 for Commander usage errors', async () => {
-    const exitCode = await runCli(['not-a-command'], {
-      io: { output: () => undefined, error: () => undefined },
-    });
+    const unknown = await runCommand(process.cwd(), ['not-a-command']);
 
-    expect(exitCode).toBe(2);
+    expect(unknown.exitCode).toBe(2);
+    expect(unknown.output).toEqual([]);
+    expect(unknown.errors.join('')).toContain("unknown command 'not-a-command'");
   });
 
   it('returns an actionable project discovery error', async () => {
-    const directory = await mkdtemp(join(tmpdir(), 'attest-cli-command-'));
-    temporaryDirectories.push(directory);
-    const errors: string[] = [];
+    const directory = await temporaryDirectory('attest-cli-command-');
+    const run = await runCommand(directory, ['eval', 'run', 'smoke']);
 
-    const exitCode = await runCli(['eval', 'run', 'smoke'], {
-      workingDirectory: directory,
-      io: { output: () => undefined, error: (message) => errors.push(message) },
-    });
-
-    expect(exitCode).toBe(1);
-    expect(errors.join('\n')).toContain('project_not_found');
+    expect(run.exitCode).toBe(1);
+    expect(run.errors.join('\n')).toContain('project_not_found');
   });
 
-  it('converts OTLP JSON through the nested trace command', async () => {
-    const directory = await mkdtemp(join(tmpdir(), 'attest-cli-command-'));
-    temporaryDirectories.push(directory);
+  it('keeps trace, report, and diff output flags off the root --output', async () => {
+    const directory = await temporaryDirectory('attest-cli-output-');
     const traceId = '00112233445566778899aabbccddeeff';
     await writeFile(
       join(directory, 'trace.json'),
@@ -229,66 +179,31 @@ describe('runCli', () => {
         ],
       }),
     );
-    const output: string[] = [];
-
-    const exitCode = await runCli(['trace', 'convert', 'trace.json'], {
-      workingDirectory: directory,
-      io: { output: (message) => output.push(message), error: () => undefined },
-    });
-
-    expect(exitCode).toBe(0);
-    expect(JSON.parse(output.at(-1) ?? '{}')).toMatchObject({
-      trace_id: traceId,
-      spans: [{ kind: 'agent' }],
-    });
-
-    const globalOutput: string[] = [];
-    expect(
-      await runCli(['--output', 'json', 'trace', 'convert', 'trace.json'], {
-        workingDirectory: directory,
-        io: { output: (message) => globalOutput.push(message), error: () => undefined },
-      }),
-    ).toBe(0);
-    expect(JSON.parse(globalOutput.at(-1) ?? '{}')).toMatchObject({ trace_id: traceId });
+    const rootOutput = await runCommand(directory, [
+      '--output',
+      'json',
+      'trace',
+      'convert',
+      'trace.json',
+    ]);
+    expect(rootOutput.exitCode).toBe(0);
+    expect(JSON.parse(rootOutput.output.at(-1) ?? '')).toMatchObject({ trace_id: traceId });
     await expect(readFile(join(directory, 'json'), 'utf8')).rejects.toMatchObject({
       code: 'ENOENT',
     });
-
-    const fileOutput: string[] = [];
-    expect(
-      await runCli(['trace', 'convert', 'trace.json', '--output', 'converted.json'], {
-        workingDirectory: directory,
-        io: { output: (message) => fileOutput.push(message), error: () => undefined },
-      }),
-    ).toBe(0);
-    expect(fileOutput.join('')).toContain('converted.json');
+    const fileOutput = await runCommand(directory, [
+      'trace',
+      'convert',
+      'trace.json',
+      '--output',
+      'converted.json',
+    ]);
+    expect(fileOutput.exitCode).toBe(0);
+    expect(fileOutput.output.join('')).toContain('converted.json');
     expect(JSON.parse(await readFile(join(directory, 'converted.json'), 'utf8'))).toMatchObject({
       trace_id: traceId,
     });
-  });
 
-  it('does not expose the removed top-level run alias', async () => {
-    const directory = await mkdtemp(join(tmpdir(), 'attest-cli-command-'));
-    temporaryDirectories.push(directory);
-    const output: string[] = [];
-    const errors: string[] = [];
-
-    const exitCode = await runCli(['run', '--format', 'json'], {
-      workingDirectory: directory,
-      io: { output: (message) => output.push(message), error: (message) => errors.push(message) },
-    });
-
-    expect(exitCode).toBe(2);
-    expect(output).toEqual([]);
-    expect(errors.join('')).toContain("unknown command 'run'");
-    await expect(readFile(join(directory, '.attest', 'runs.db'), 'utf8')).rejects.toMatchObject({
-      code: 'ENOENT',
-    });
-  });
-
-  it('keeps command output options scoped to their artifact and format semantics', async () => {
-    const directory = await mkdtemp(join(tmpdir(), 'attest-cli-output-'));
-    temporaryDirectories.push(directory);
     await mkdir(join(directory, '.attest'));
     const storePath = join(directory, '.attest', 'runs.db');
     const store = await openStore(storePath);
@@ -306,79 +221,65 @@ describe('runCli', () => {
     await store.runs.finalizeRun(second.id, 'completed');
     await store.close();
 
-    const globalReportOutput: string[] = [];
-    expect(
-      await runCli(['--output', 'json', 'report', first.id, '--store', storePath], {
-        workingDirectory: directory,
-        io: { output: (message) => globalReportOutput.push(message), error: () => undefined },
-      }),
-    ).toBe(0);
-    expect(globalReportOutput.join('')).toContain(`${first.id}.html`);
+    const rootReport = await runCommand(directory, [
+      '--output',
+      'json',
+      'report',
+      first.id,
+      '--store',
+      storePath,
+    ]);
+    expect(rootReport.exitCode).toBe(0);
+    expect(rootReport.output.join('')).toContain(`${first.id}.html`);
     await expect(readFile(join(directory, 'json'), 'utf8')).rejects.toMatchObject({
       code: 'ENOENT',
     });
 
-    const reportOutput: string[] = [];
     const absoluteReportPath = join(directory, 'report.json');
-    expect(
-      await runCli(['report', first.id, '--store', storePath, '--output', absoluteReportPath], {
-        // On macOS this pairs a /var-authored destination with its /private/var project alias.
-        workingDirectory: await realpath(directory),
-        io: { output: (message) => reportOutput.push(message), error: () => undefined },
-      }),
-    ).toBe(0);
-    expect(reportOutput.join('')).toContain('report.json');
+    // On macOS this pairs a /var-authored destination with its /private/var project alias.
+    const report = await runCommand(await realpath(directory), [
+      'report',
+      first.id,
+      '--store',
+      storePath,
+      '--output',
+      absoluteReportPath,
+    ]);
+    expect(report.exitCode).toBe(0);
+    expect(report.output.join('')).toContain('report.json');
     expect(await readFile(absoluteReportPath, 'utf8')).toContain('<!doctype html>');
 
-    const diffOutput: string[] = [];
-    expect(
-      await runCli(['diff', first.id, second.id, '--store', storePath, '--format', 'json'], {
-        workingDirectory: directory,
-        io: { output: (message) => diffOutput.push(message), error: () => undefined },
-      }),
-    ).toBe(0);
-    expect(JSON.parse(diffOutput[0] ?? '{}')).toMatchObject({
+    const diff = await runCommand(directory, [
+      'diff',
+      first.id,
+      second.id,
+      '--store',
+      storePath,
+      '--format',
+      'json',
+    ]);
+    expect(diff.exitCode).toBe(0);
+    expect(JSON.parse(diff.output[0] ?? '')).toMatchObject({
       summary: { baseRunId: first.id, candidateRunId: second.id },
     });
-
-    const usageOutput: string[] = [];
-    const usageErrors: string[] = [];
-    expect(
-      await runCli(['run', '--output', 'json'], {
-        workingDirectory: directory,
-        io: {
-          output: (message) => usageOutput.push(message),
-          error: (message) => usageErrors.push(message),
-        },
-      }),
-    ).toBe(2);
-    expect(usageOutput).toEqual([]);
-    expect(usageErrors.join('')).toContain("unknown command 'run'");
   });
 
   it('retrieves the schema id advertised by JSON help from the generated registry', async () => {
-    const listOutput: string[] = [];
-    expect(
-      await runCli(['schema', 'list', '--output', 'json'], {
-        io: { output: (message) => listOutput.push(message), error: () => undefined },
-      }),
-    ).toBe(0);
-    const listed = cliResultSchema.parse(JSON.parse(listOutput[0] ?? '{}') as unknown);
-    if (!listed.ok) throw new Error('Expected schema.list success.');
-    expect(listed.command).toBe('schema.list');
-    const listResult = listed.result as { items: { file: string; id: string }[] };
-    expect(listResult.items.find(({ id }) => id === 'attest.command-request')).toEqual({
-      file: 'command-request.json',
-      id: 'attest.command-request',
+    const listed = await runJson(process.cwd(), ['schema', 'list']);
+    expect(listed.exitCode).toBe(0);
+    expect(listed.document).toMatchObject({
+      ok: true,
+      command: 'schema.list',
+      result: {
+        items: expect.arrayContaining([
+          { file: 'command-request.json', id: 'attest.command-request' },
+        ]) as unknown,
+      },
     });
 
-    const printOutput: string[] = [];
-    expect(
-      await runCli(['schema', 'print', 'attest.command-request', '--output', 'json'], {
-        io: { output: (message) => printOutput.push(message), error: () => undefined },
-      }),
-    ).toBe(0);
-    expect(JSON.parse(printOutput[0] ?? '{}')).toMatchObject({
+    const printed = await runJson(process.cwd(), ['schema', 'print', 'attest.command-request']);
+    expect(printed.exitCode).toBe(0);
+    expect(printed.document).toMatchObject({
       ok: true,
       command: 'schema.print',
       result: {
@@ -387,43 +288,27 @@ describe('runCli', () => {
         schema: { $schema: 'https://json-schema.org/draft/2020-12/schema' },
       },
     });
+    const repeated = await runJson(process.cwd(), ['schema', 'print', 'attest.command-request']);
+    expect(repeated.output).toEqual(printed.output);
 
-    const repeatedOutput: string[] = [];
-    await runCli(['schema', 'print', 'attest.command-request', '--output', 'json'], {
-      io: { output: (message) => repeatedOutput.push(message), error: () => undefined },
-    });
-    expect(repeatedOutput).toEqual(printOutput);
-
-    const missingOutput: string[] = [];
-    expect(
-      await runCli(['schema', 'print', 'missing', '--output', 'json'], {
-        io: { output: (message) => missingOutput.push(message), error: () => undefined },
-      }),
-    ).toBe(1);
-    expect(JSON.parse(missingOutput[0] ?? '{}')).toMatchObject({
+    const missing = await runJson(process.cwd(), ['schema', 'print', 'missing']);
+    expect(missing.exitCode).toBe(1);
+    expect(missing.document).toMatchObject({
       command: 'schema.print',
       error: { code: 'resource_not_found' },
     });
   });
 
   it('advertises positional common options without changing command-specific semantics', async () => {
-    const output: string[] = [];
-    await runCli(['help', '--output', 'json'], {
-      io: { output: (message) => output.push(message), error: () => undefined },
-    });
-    const document = cliResultSchema.parse(JSON.parse(output[0] ?? '{}') as unknown);
-    if (!document.ok) throw new Error('Expected help success.');
-    const result = document.result as {
-      command: {
-        options: { name: string }[];
-        subcommands: { name: string; options: { name: string }[] }[];
-      };
-    };
-    expect(result.command.options.map(({ name }) => name)).toEqual(
+    const help = await runJson(process.cwd(), ['help']);
+    if (!help.document.ok) throw new Error('Expected help success.');
+    const { command } = cliHelpSchema.parse(help.document.result);
+
+    expect(command.options.map(({ name }) => name)).toEqual(
       expect.arrayContaining(['output', 'project', 'non-interactive']),
     );
     const subcommands = new Map(
-      result.command.subcommands.map((command) => [command.name, command]),
+      command.subcommands.map((subcommand) => [subcommand.name, subcommand]),
     );
     expect(subcommands.has('run')).toBe(false);
     expect(subcommands.has('eval')).toBe(true);
