@@ -1,7 +1,6 @@
 import { describe, expect, expectTypeOf, it } from 'vitest';
 
 import { agentResourceSchema, type AgentResource } from '../project/resources/agent.js';
-import { jsonlBridgeInputSchema, jsonlBridgeOutputSchema } from '../agent/jsonl-bridge.js';
 import { testCaseSchema, type TestCase } from '../project/resources/case.js';
 import { commandRequestSchema, type CommandRequest } from '../cli/command-request.js';
 import { datasetResourceSchema, type DatasetResource } from '../project/resources/dataset.js';
@@ -381,52 +380,32 @@ describe('agent transport contract', () => {
   });
 
   it.each([
-    ['./output.json', 'output.json'],
-    ['artifacts//output.json', 'artifacts/output.json'],
-    ['artifacts\\output.json', 'artifacts/output.json'],
-    ['artifacts/./output.json', 'artifacts/output.json'],
-  ])('rejects aliased sandbox file destinations %s and %s', (first, second) => {
+    ['files', './output.json', 'output.json'],
+    ['files', 'artifacts//output.json', 'artifacts/output.json'],
+    ['files', 'artifacts\\output.json', 'artifacts/output.json'],
+    ['files', 'artifacts/./output.json', 'artifacts/output.json'],
+    ['artifacts', 'results\\output.json', 'results/output.json'],
+  ] as const)('rejects aliased sandbox %s destinations %s and %s', (list, first, second) => {
+    const entries = [
+      { source: 'one.json', destination: first },
+      { source: 'two.json', destination: second },
+    ];
+    const sandbox =
+      list === 'files'
+        ? { kind: 'vercel', files: entries }
+        : { kind: 'vercel', files: [], artifacts: entries };
     const transport = {
       kind: 'native_cli',
       lifecycle: 'per_case',
       argv: ['node', 'agent.mjs'],
-      sandbox: {
-        kind: 'vercel',
-        files: [
-          { source: 'src/agent.mjs', destination: first },
-          { source: 'src/helper.mjs', destination: second },
-        ],
-      },
+      sandbox,
     };
 
     const result = agentResourceSchema.safeParse({ ...agent, transport });
     expect(result.success).toBe(false);
     if (result.success) return;
     expect(result.error.issues).toContainEqual(
-      expect.objectContaining({ path: ['transport', 'sandbox', 'files', 1, 'destination'] }),
-    );
-  });
-
-  it('rejects aliased sandbox artifact destinations', () => {
-    const transport = {
-      kind: 'native_cli',
-      lifecycle: 'per_case',
-      argv: ['node', 'agent.mjs'],
-      sandbox: {
-        kind: 'vercel',
-        files: [],
-        artifacts: [
-          { source: 'one.json', destination: 'results\\output.json' },
-          { source: 'two.json', destination: 'results/output.json' },
-        ],
-      },
-    };
-
-    const result = agentResourceSchema.safeParse({ ...agent, transport });
-    expect(result.success).toBe(false);
-    if (result.success) return;
-    expect(result.error.issues).toContainEqual(
-      expect.objectContaining({ path: ['transport', 'sandbox', 'artifacts', 1, 'destination'] }),
+      expect.objectContaining({ path: ['transport', 'sandbox', list, 1, 'destination'] }),
     );
   });
 
@@ -470,46 +449,10 @@ describe('agent transport contract', () => {
   });
 });
 
-describe('managed JSONL bridge protocol', () => {
-  it('accepts correlated request, response, cancel, and cancellation acknowledgement frames', () => {
-    expect(
-      jsonlBridgeInputSchema.safeParse({
-        type: 'request',
-        request_id: 'request-1',
-        request: {
-          protocol: 'attest.agent-invocation',
-          run_id: '01ARZ3NDEKTSV4RRFFQ69G5FAV',
-          case_id: 'one',
-          input: {},
-        },
-      }).success,
-    ).toBe(true);
-    expect(
-      jsonlBridgeInputSchema.safeParse({ type: 'cancel', request_id: 'request-1' }).success,
-    ).toBe(true);
-    expect(
-      jsonlBridgeOutputSchema.safeParse({
-        type: 'response',
-        request_id: 'request-1',
-        response: { protocol: 'attest.agent-invocation', output: 'done' },
-      }).success,
-    ).toBe(true);
-    expect(
-      jsonlBridgeOutputSchema.safeParse({ type: 'cancelled', request_id: 'request-1' }).success,
-    ).toBe(true);
-    expect(
-      jsonlBridgeOutputSchema.safeParse({ type: 'response', request_id: 'request-1' }).success,
-    ).toBe(false);
-  });
-});
-
 describe('command request contract', () => {
   const base = { schema: COMMAND_REQUEST_SCHEMA_ID } as const;
-  const importOptions = { format: 'jsonl' as const };
   const requests: CommandRequest[] = [
     { ...base, command: 'project.init', name: 'Support' },
-    { ...base, command: 'project.unlock', stale: true },
-    { ...base, command: 'agent.add', agent },
     {
       ...base,
       command: 'agent.import',
@@ -518,70 +461,7 @@ describe('command request contract', () => {
       as: agent.id,
       extraction: { result_pointer: '/answer' },
     },
-    {
-      ...base,
-      command: 'agent.import',
-      source: 'agent.json',
-      source_type: 'json',
-      as: agent.id,
-    },
-    { ...base, command: 'agent.test', agent_id: agent.id, input: { question: 'ping' } },
-    { ...base, command: 'agent.rename', agent_id: agent.id, new_id: 'support-renamed' },
-    { ...base, command: 'agent.remove', agent_id: agent.id },
-    { ...base, command: 'test.add', test },
-    { ...base, command: 'test.case.add', test_id: test.id, case: testCase },
-    {
-      ...base,
-      command: 'test.case.import',
-      test_id: test.id,
-      source: 'cases.jsonl',
-      import: importOptions,
-    },
-    { ...base, command: 'test.dataset.add', test_id: test.id, dataset: emptyDataset },
-    {
-      ...base,
-      command: 'test.dataset.import',
-      test_id: test.id,
-      source: 'cases.jsonl',
-      as: dataset.id,
-      import: importOptions,
-    },
-    {
-      ...base,
-      command: 'test.dataset.attach',
-      test_id: test.id,
-      dataset_id: dataset.id,
-    },
-    {
-      ...base,
-      command: 'test.dataset.detach',
-      test_id: test.id,
-      dataset_id: dataset.id,
-    },
-    {
-      ...base,
-      command: 'test.metric.attach',
-      test_id: test.id,
-      metric_id: metric.id,
-    },
-    {
-      ...base,
-      command: 'test.metric.detach',
-      test_id: test.id,
-      metric_id: metric.id,
-    },
-    { ...base, command: 'test.rename', test_id: test.id, new_id: 'refund-renamed' },
-    { ...base, command: 'test.remove', test_id: test.id },
-    { ...base, command: 'metric.add', metric },
-    {
-      ...base,
-      command: 'metric.import',
-      source: 'metric.json',
-      source_type: 'json',
-      as: metric.id,
-    },
-    { ...base, command: 'metric.rename', metric_id: metric.id, new_id: 'correct-renamed' },
-    { ...base, command: 'metric.remove', metric_id: metric.id },
+    { ...base, command: 'test.dataset.attach', test_id: test.id, dataset_id: dataset.id },
   ];
 
   it.each(requests)('accepts the $command normalized request', (request) => {

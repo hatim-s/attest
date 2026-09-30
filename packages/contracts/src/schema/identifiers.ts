@@ -1,62 +1,62 @@
 /** Identifies the agent invocation request and response envelopes. */
-const AGENT_PROTOCOL = 'attest.agent-invocation' as const;
+const AGENT_PROTOCOL = 'attest.agent-invocation';
 
 /** Identifies trace documents described by the trace schema contract. */
-const TRACE_SCHEMA_ID = 'attest.trace' as const;
+const TRACE_SCHEMA_ID = 'attest.trace';
 
 /** Identifies executable metric envelopes described by the metric contract. */
-const METRIC_PROTOCOL = 'attest.metric-evaluation' as const;
+const METRIC_PROTOCOL = 'attest.metric-evaluation';
 
 /** Identifies the generated project manifest. */
-const PROJECT_SCHEMA_ID = 'attest.project' as const;
+const PROJECT_SCHEMA_ID = 'attest.project';
 
 /** Identifies a canonical agent resource. */
-const AGENT_RESOURCE_SCHEMA_ID = 'attest.agent' as const;
+const AGENT_RESOURCE_SCHEMA_ID = 'attest.agent';
 
 /** Identifies a canonical test resource. */
-const TEST_RESOURCE_SCHEMA_ID = 'attest.test' as const;
+const TEST_RESOURCE_SCHEMA_ID = 'attest.test';
 
 /** Identifies test cases stored inline or as JSONL rows. */
-const CASE_SCHEMA_ID = 'attest.case' as const;
+const CASE_SCHEMA_ID = 'attest.case';
 
 /** Identifies canonical metadata for a dataset JSONL file. */
-const DATASET_SCHEMA_ID = 'attest.dataset' as const;
+const DATASET_SCHEMA_ID = 'attest.dataset';
 
 /** Identifies a canonical metric resource. */
-const METRIC_RESOURCE_SCHEMA_ID = 'attest.metric' as const;
+const METRIC_RESOURCE_SCHEMA_ID = 'attest.metric';
 
 /** Identifies the inspectable built-in metric preset catalog. */
-const METRIC_PRESET_SCHEMA_ID = 'attest.metric-preset' as const;
+const METRIC_PRESET_SCHEMA_ID = 'attest.metric-preset';
 
 /** Identifies local fixture documents accepted by `attest metric test`. */
-const METRIC_TEST_FIXTURE_SCHEMA_ID = 'attest.metric-test-fixture' as const;
+const METRIC_TEST_FIXTURE_SCHEMA_ID = 'attest.metric-test-fixture';
 
 /** Identifies normalized mutation requests accepted by --from-json. */
-const COMMAND_REQUEST_SCHEMA_ID = 'attest.command-request' as const;
+const COMMAND_REQUEST_SCHEMA_ID = 'attest.command-request';
 
 /** Identifies immutable eval-run snapshot metadata persisted at orchestration start. */
-const EVAL_RUN_SCHEMA_ID = 'attest.eval-run' as const;
+const EVAL_RUN_SCHEMA_ID = 'attest.eval-run';
 
 /** Identifies the single-document success and failure envelope written by the CLI. */
-const CLI_RESULT_SCHEMA_ID = 'attest.cli-result' as const;
+const CLI_RESULT_SCHEMA_ID = 'attest.cli-result';
 
 /** Identifies one line in a streaming CLI JSONL response. */
-const CLI_EVENT_SCHEMA_ID = 'attest.cli-event' as const;
+const CLI_EVENT_SCHEMA_ID = 'attest.cli-event';
 
 /** Identifies the machine-readable command tree returned by `attest help`. */
-const CLI_HELP_SCHEMA_ID = 'attest.cli-help' as const;
+const CLI_HELP_SCHEMA_ID = 'attest.cli-help';
 
 /** Identifies the stable CLI error registry returned by `attest errors`. */
-const CLI_ERROR_CATALOG_SCHEMA_ID = 'attest.cli-errors' as const;
+const CLI_ERROR_CATALOG_SCHEMA_ID = 'attest.cli-errors';
 
 /** Identifies normalized WebSocket invocation requests at the adapter boundary. */
-const WEBSOCKET_REQUEST_PROTOCOL = 'attest.websocket-request' as const;
+const WEBSOCKET_REQUEST_PROTOCOL = 'attest.websocket-request';
 
 /** Identifies correlated WebSocket messages after authored pointer extraction. */
-const WEBSOCKET_MESSAGE_PROTOCOL = 'attest.websocket-message' as const;
+const WEBSOCKET_MESSAGE_PROTOCOL = 'attest.websocket-message';
 
 /** Identifies persisted bounded/redacted evidence from one WebSocket attempt. */
-const WEBSOCKET_EVIDENCE_SCHEMA_ID = 'attest.websocket-evidence' as const;
+const WEBSOCKET_EVIDENCE_SCHEMA_ID = 'attest.websocket-evidence';
 
 export {
   AGENT_PROTOCOL,
