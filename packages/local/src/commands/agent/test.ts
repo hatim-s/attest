@@ -4,13 +4,13 @@ import { join } from 'node:path';
 import type { JsonValue } from '@attest/contracts';
 import type { StoredCaseExecution } from '@attest/core';
 
-import { LocalError } from '../../../errors/index.js';
-import { parseJsonText, readSourceText } from '../../../internal/source-text.js';
-import { openStore } from '../../../store/index.js';
-import { loadCommandProject } from '../../project/load-command-project.js';
-import type { AgentTestResult, CommandResult } from '../../shared/command-result.js';
-import type { ReadInput } from '../authoring/index.js';
-import { testNativeAgentConnection } from '../native-agent-adapter/index.js';
+import { LocalError } from '../../errors/index.js';
+import { parseJsonText, readSourceText } from '../../internal/source-text.js';
+import { openStore } from '../../store/index.js';
+import { loadCommandProject } from '../project/load-command-project.js';
+import type { AgentTestResult, CommandResult } from '../shared/command-result.js';
+import type { ReadInput } from './authoring/types.js';
+import { testNativeAgentConnection } from './adapter/test-native-agent.js';
 import { findAgent } from './agent-mutation.js';
 import type { AgentTestCommandOptions } from './types.js';
 

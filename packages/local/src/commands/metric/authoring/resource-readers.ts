@@ -9,7 +9,7 @@ import {
 import { LocalError } from '../../../errors/index.js';
 import { schemaIssueDiagnostics } from '../../../internal/schema-issue-diagnostics.js';
 import { parseJsonText, readSourceText } from '../../../internal/source-text.js';
-import type { ReadInput } from '../../agent/authoring/index.js';
+import type { ReadInput } from '../../agent/authoring/types.js';
 import { assertSafeMetricResource } from './validation.js';
 
 /** Imports either one canonical metric resource or the metric inside a add request. */

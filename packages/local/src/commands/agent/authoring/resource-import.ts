@@ -12,12 +12,8 @@ import { openAnchored, type AnchoredEntry } from '../../../internal/open-anchore
 import { schemaIssueDiagnostics } from '../../../internal/schema-issue-diagnostics.js';
 import { parseJsonText, readSourceText } from '../../../internal/source-text.js';
 import { isProjectPath } from '../../../project/project-path.js';
-import {
-  CurlImportError,
-  findCurlBodyFilePath,
-  parseCurlCommand,
-  type CurlImportPreview,
-} from '../import/curl/index.js';
+import { findCurlBodyFilePath, parseCurlCommand, type CurlImportPreview } from '../curl-parser.js';
+import { CurlImportError } from '../curl-tokenizer.js';
 import { assertSafeNativeAgentResource } from './resource-validation.js';
 import type { ReadInput } from './types.js';
 

@@ -1,6 +1,6 @@
 import type { MetricPresetId } from '@attest/contracts';
 
-import type { ReadInput } from '../../agent/authoring/index.js';
+import type { ReadInput } from '../../agent/authoring/types.js';
 
 type MetricAddFields = {
   argContains?: readonly string[];

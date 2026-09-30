@@ -26,11 +26,11 @@ import { z } from 'zod';
 import { LocalError } from '../../errors/index.js';
 import { readJsonPointer } from '../../internal/json-pointer.js';
 import { isProjectPath } from '../../project/project-path.js';
+import { redactMetricEvaluation } from '../agent/adapter/evidence-redaction.js';
 import {
-  redactMetricEvaluation,
   resolveNativeAgent,
   resolveProcessEnvironment,
-} from '../agent/native-agent-adapter/index.js';
+} from '../agent/adapter/resolve-native-agent.js';
 import type { ResolvedEvalCaseInput, ResolvedEvalMetric } from './eval-resolver.js';
 
 /** Adapts the shared SQLite response cache to the judge metric cache contract. */

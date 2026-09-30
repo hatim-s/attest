@@ -12,10 +12,8 @@ import type { SemanticProjectOperation } from '../../project/transaction/index.j
 import type { CommandResult, MetricTestResult, MutationResult } from '../shared/command-result.js';
 import { executeProjectMutation } from '../shared/project-mutation.js';
 import type { Prompt } from '../shared/prompt.js';
-import {
-  redactProbeValue,
-  resolveProcessEnvironment,
-} from '../agent/native-agent-adapter/index.js';
+import { redactProbeValue } from '../agent/adapter/evidence-redaction.js';
+import { resolveProcessEnvironment } from '../agent/adapter/resolve-native-agent.js';
 import { candidateFromLoadedProject, loadCommandProject } from '../project/load-command-project.js';
 import { redactMetricResource } from '../show/redact-resource.js';
 import {

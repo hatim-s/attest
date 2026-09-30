@@ -1,7 +1,7 @@
 import type { CommandRequest } from '@attest/contracts';
 
-import type { Prompt } from '../../shared/prompt.js';
-import type { ReadInput } from '../authoring/index.js';
+import type { Prompt } from '../shared/prompt.js';
+import type { ReadInput } from './authoring/types.js';
 
 type AgentRequest<Command extends CommandRequest['command']> = Extract<
   CommandRequest,

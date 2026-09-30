@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
-import { CurlImportError, parseCurlCommand } from '../curl-parser.js';
+import { parseCurlCommand } from '../curl-parser.js';
+import { CurlImportError } from '../curl-tokenizer.js';
 
 /** Captures stable parser diagnostics without ever snapshotting the hostile source text. */
 const diagnostics = (operation: () => unknown): string[] => {

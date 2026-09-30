@@ -1,11 +1,11 @@
 import type { AgentResource, JsonValue, ProjectResources } from '@attest/contracts';
 import { z } from 'zod';
 
-import { LocalError } from '../../../errors/index.js';
-import type { LoadedProject } from '../../../project/project-loader/index.js';
-import type { CommandResult, MutationResult } from '../../shared/command-result.js';
-import { executeProjectMutation } from '../../shared/project-mutation.js';
-import type { Prompt } from '../../shared/prompt.js';
+import { LocalError } from '../../errors/index.js';
+import type { LoadedProject } from '../../project/project-loader/index.js';
+import type { CommandResult, MutationResult } from '../shared/command-result.js';
+import { executeProjectMutation } from '../shared/project-mutation.js';
+import type { Prompt } from '../shared/prompt.js';
 import type { AgentMutationRequest } from './types.js';
 
 /** Finds one authored agent or reports the missing id with a way to list them. */

@@ -10,7 +10,7 @@ import type {
 } from '@attest/contracts';
 import type { RunRecord, TabularImportResult } from '@attest/core';
 
-import type { NativeAgentConnectionResult } from '../agent/native-agent-adapter/test-native-agent.js';
+import type { NativeAgentConnectionResult } from '../agent/adapter/test-native-agent.js';
 import type { SemanticProjectOperation } from '../../project/transaction/index.js';
 
 type CommandResult<Operation extends string, Result> = {

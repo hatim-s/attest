@@ -4,7 +4,7 @@ import type { EvalRun } from '@attest/contracts';
 
 import { LocalError } from '../../errors/index.js';
 import { isProjectPath, resolveContainedPath } from '../../project/project-path.js';
-import { createBaseEnvironment } from '../agent/native-agent-adapter/index.js';
+import { createBaseEnvironment } from '../agent/adapter/resolve-native-agent.js';
 import {
   HookCommandError,
   runHookCommand,

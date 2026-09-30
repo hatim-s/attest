@@ -11,17 +11,16 @@ import {
 } from '@attest/runtime';
 
 import { LocalError } from '../../errors/index.js';
-import { assertSafeNativeAgentResource } from '../agent/authoring/index.js';
+import { assertSafeNativeAgentResource } from '../agent/authoring/resource-validation.js';
 import {
   invocationOutcome,
   invokeResolvedAgent,
-  redactAgentRequest,
-  redactInvocation,
-  resolveNativeAgent,
   startAgentRuntime,
   startupFailure,
   type AgentRuntime,
-} from '../agent/native-agent-adapter/index.js';
+} from '../agent/adapter/invoke-resolved-agent.js';
+import { redactAgentRequest, redactInvocation } from '../agent/adapter/evidence-redaction.js';
+import { resolveNativeAgent } from '../agent/adapter/resolve-native-agent.js';
 import type { ResolvedEvalCaseInput } from './eval-resolver.js';
 import { createEvalMetricEvaluator } from './eval-metric-runner.js';
 import { createEvalLifecycle } from './eval-lifecycle.js';

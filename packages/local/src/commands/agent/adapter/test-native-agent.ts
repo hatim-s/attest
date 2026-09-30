@@ -7,7 +7,7 @@ import {
 import { AgentInvocationError, redactTransportText, type InvocationResult } from '@attest/executor';
 
 import { LocalError } from '../../../errors/index.js';
-import { assertSafeNativeAgentResource } from '../authoring/index.js';
+import { assertSafeNativeAgentResource } from '../authoring/resource-validation.js';
 import {
   redactAgentRequest,
   redactAgentResponse,

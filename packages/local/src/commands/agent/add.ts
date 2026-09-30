@@ -1,11 +1,8 @@
-import { LocalError } from '../../../errors/index.js';
-import {
-  candidateFromLoadedProject,
-  loadCommandProject,
-} from '../../project/load-command-project.js';
-import type { CommandResult, MutationResult } from '../../shared/command-result.js';
-import { redactAgentResource } from '../../show/redact-resource.js';
-import { assertSafeNativeAgentResource } from '../authoring/index.js';
+import { LocalError } from '../../errors/index.js';
+import { candidateFromLoadedProject, loadCommandProject } from '../project/load-command-project.js';
+import type { CommandResult, MutationResult } from '../shared/command-result.js';
+import { redactAgentResource } from '../show/redact-resource.js';
+import { assertSafeNativeAgentResource } from './authoring/resource-validation.js';
 import { mutationResult } from './agent-mutation.js';
 import type { AgentMutationCommandOptions, AgentRequest } from './types.js';
 

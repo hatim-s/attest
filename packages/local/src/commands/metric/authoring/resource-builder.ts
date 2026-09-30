@@ -10,7 +10,7 @@ import { z } from 'zod';
 import { LocalError } from '../../../errors/index.js';
 import { schemaIssueDiagnostics } from '../../../internal/schema-issue-diagnostics.js';
 import { parseJsonText } from '../../../internal/source-text.js';
-import { parseArgvJson, parseDuration } from '../../agent/authoring/index.js';
+import { parseArgvJson, parseDuration } from '../../agent/authoring/input-parsers.js';
 import {
   parseAssertionJson,
   parseAttributes,

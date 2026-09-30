@@ -1,18 +1,15 @@
 import type { AgentResource, JsonValue } from '@attest/contracts';
 
-import { LocalError } from '../../../errors/index.js';
-import { discoverProject } from '../../../project/discover-project.js';
-import {
-  candidateFromLoadedProject,
-  loadCommandProject,
-} from '../../project/load-command-project.js';
-import type { CommandResult, MutationResult } from '../../shared/command-result.js';
-import { redactAgentResource } from '../../show/redact-resource.js';
+import { LocalError } from '../../errors/index.js';
+import { discoverProject } from '../../project/discover-project.js';
+import { candidateFromLoadedProject, loadCommandProject } from '../project/load-command-project.js';
+import type { CommandResult, MutationResult } from '../shared/command-result.js';
+import { redactAgentResource } from '../show/redact-resource.js';
 import {
   createImportedCurlAgentResource,
   readCurlDocument,
   readImportedAgentResource,
-} from '../authoring/index.js';
+} from './authoring/resource-import.js';
 import { mutationResult } from './agent-mutation.js';
 import type { AgentImportCommandOptions, AgentRequest } from './types.js';
 

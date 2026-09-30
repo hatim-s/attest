@@ -3,55 +3,20 @@ import { vercelSandboxSchema, type JsonValue, type VercelSandbox } from '@attest
 import { LocalError } from '../../../errors/index.js';
 import { schemaIssueDiagnostics } from '../../../internal/schema-issue-diagnostics.js';
 import { parseJsonText } from '../../../internal/source-text.js';
+import { ShellWordsError, splitShellWords } from '../shell-words.js';
 
 /** Tokenizes a convenience command string into argv without expansion or shell execution. */
 const tokenizeCommand = (value: string): string[] => {
-  const argv: string[] = [];
-  let token = '';
-  let quote: 'single' | 'double' | undefined;
-  let tokenStarted = false;
-  for (let index = 0; index < value.length; index += 1) {
-    const character = value[index]!;
-    if (quote === 'single') {
-      if (character === "'") quote = undefined;
-      else token += character;
-      tokenStarted = true;
-      continue;
-    }
-    if (quote === 'double') {
-      if (character === '"') quote = undefined;
-      else if (character === '\\' && index + 1 < value.length) token += value[++index]!;
-      else token += character;
-      tokenStarted = true;
-      continue;
-    }
-    if (character === "'") {
-      quote = 'single';
-      tokenStarted = true;
-    } else if (character === '"') {
-      quote = 'double';
-      tokenStarted = true;
-    } else if (character === '\\' && index + 1 < value.length) {
-      token += value[++index]!;
-      tokenStarted = true;
-    } else if (/\s/u.test(character)) {
-      if (tokenStarted) {
-        argv.push(token);
-        token = '';
-        tokenStarted = false;
-      }
-    } else {
-      token += character;
-      tokenStarted = true;
-    }
-  }
-  if (quote !== undefined) {
+  let argv: string[];
+  try {
+    argv = splitShellWords(value, { rejectShellControl: false });
+  } catch (error: unknown) {
+    if (!(error instanceof ShellWordsError)) throw error;
     throw new LocalError('cli_usage', 'The native command contains an unclosed quote.', {
       path: '--native-command',
       hint: 'Close the quote or use `--argv-json` for an unambiguous argv array.',
     });
   }
-  if (tokenStarted) argv.push(token);
   if (argv.length === 0) {
     throw new LocalError('cli_missing_input', 'The native command argv cannot be empty.', {
       path: '--native-command',

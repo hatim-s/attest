@@ -1,10 +1,11 @@
 import { commandRequestSchema } from '@attest/contracts';
 
-import { LocalError } from '../../../errors/index.js';
-import { schemaIssueDiagnostics } from '../../../internal/schema-issue-diagnostics.js';
-import { parseSecretBindings } from '../../shared/secret-bindings.js';
-import { parseDuration, parseJsonValues } from '../authoring/index.js';
-import { CurlImportError, parseCurlCommand } from '../import/curl/index.js';
+import { LocalError } from '../../errors/index.js';
+import { schemaIssueDiagnostics } from '../../internal/schema-issue-diagnostics.js';
+import { parseSecretBindings } from '../shared/secret-bindings.js';
+import { parseDuration, parseJsonValues } from './authoring/input-parsers.js';
+import { parseCurlCommand } from './curl-parser.js';
+import { CurlImportError } from './curl-tokenizer.js';
 import type { AgentRequest } from './types.js';
 
 type CurlImportRequest = Extract<AgentRequest<'agent.import'>, { source_type: 'curl' }>;

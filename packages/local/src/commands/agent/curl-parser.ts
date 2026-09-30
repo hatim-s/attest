@@ -1,9 +1,13 @@
 import type { HttpRequestTemplate, JsonValue, SecretReference } from '@attest/contracts';
 
-import { parseJsonPointer } from '../../../../internal/json-pointer.js';
-import { isSensitiveFieldName } from '../../../../internal/redaction.js';
-
-type CurlPlaceholderMapping = { inputPointer: string; targetPointer: string };
+import { isSensitiveFieldName } from '../../internal/redaction.js';
+import {
+  applyPlaceholder,
+  assertNoSensitiveBodyFields,
+  mapFormBody,
+  type CurlPlaceholderMapping,
+} from './curl-body-mapping.js';
+import { CurlImportError, optionValue, tokenizeCurl } from './curl-tokenizer.js';
 
 type CurlParserOptions = {
   bodyFile?: { path: string; text: string };
@@ -25,16 +29,6 @@ type ParsedCurlCommand = {
   preview: CurlImportPreview;
   request: HttpRequestTemplate;
 };
-
-class CurlImportError extends Error {
-  readonly diagnostics: string[];
-
-  constructor(message: string, diagnostics: readonly string[]) {
-    super(message);
-    this.name = 'CurlImportError';
-    this.diagnostics = [...diagnostics];
-  }
-}
 
 const HEADER_NAME = /^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/u;
 const METHODS = new Set<HttpRequestTemplate['method']>(['GET', 'POST', 'PUT', 'PATCH', 'DELETE']);
@@ -92,88 +86,6 @@ const IGNORED_FLAGS = new Set([
   '-s',
 ]);
 
-type TokenizeState = {
-  quote?: 'double' | 'single';
-  token: string;
-  tokenStarted: boolean;
-  tokens: string[];
-};
-
-const pushToken = (state: TokenizeState): void => {
-  if (!state.tokenStarted) return;
-  state.tokens.push(state.token);
-  state.token = '';
-  state.tokenStarted = false;
-};
-
-/** Tokenizes a cURL command as inert data and rejects every shell control construct. */
-const tokenizeCurl = (source: string): string[] => {
-  const state: TokenizeState = { token: '', tokenStarted: false, tokens: [] };
-  for (let index = 0; index < source.length; index += 1) {
-    const character = source[index]!;
-    const next = source[index + 1];
-    if (character === '`' || (character === '$' && ['(', '{'].includes(next ?? ''))) {
-      throw new CurlImportError('The cURL input contains shell expansion.', ['shell_expansion']);
-    }
-    if (state.quote === 'single') {
-      if (character === "'") state.quote = undefined;
-      else state.token += character;
-      state.tokenStarted = true;
-      continue;
-    }
-    if (state.quote === 'double') {
-      if (character === '"') state.quote = undefined;
-      else if (character === '\\' && next !== undefined) state.token += source[++index]!;
-      else state.token += character;
-      state.tokenStarted = true;
-      continue;
-    }
-    if (character === "'" || character === '"') {
-      state.quote = character === "'" ? 'single' : 'double';
-      state.tokenStarted = true;
-      continue;
-    }
-    if (character === '\\' && (next === '\n' || (next === '\r' && source[index + 2] === '\n'))) {
-      index += next === '\r' ? 2 : 1;
-      continue;
-    }
-    if (character === '\\' && next !== undefined) {
-      state.token += source[++index]!;
-      state.tokenStarted = true;
-      continue;
-    }
-    if (
-      character === ';' ||
-      character === '|' ||
-      character === '<' ||
-      character === '>' ||
-      (character === '&' && next === '&')
-    ) {
-      throw new CurlImportError('The cURL input contains shell control syntax.', ['shell_control']);
-    }
-    if (/\s/u.test(character)) pushToken(state);
-    else {
-      state.token += character;
-      state.tokenStarted = true;
-    }
-  }
-  if (state.quote !== undefined) {
-    throw new CurlImportError('The cURL input contains an unclosed quote.', ['unclosed_quote']);
-  }
-  pushToken(state);
-  return state.tokens;
-};
-
-const optionValue = (tokens: readonly string[], index: number, flag: string): string => {
-  const value = tokens[index + 1];
-  if (value === undefined || value.startsWith('-')) {
-    throw new CurlImportError(`cURL option ${flag} is missing its value.`, [
-      `missing_value:${flag}`,
-    ]);
-  }
-  return value;
-};
-
 const normalizedSecretMap = (
   bindings: Readonly<Record<string, string>> | undefined,
 ): Map<string, string> =>
@@ -209,68 +121,6 @@ const parseHeader = (
   headers[name] = environment === undefined ? value : secretReference(environment);
 };
 
-/** Rejects credential-shaped JSON fields because body secret resolution is intentionally unsupported. */
-const assertNoSensitiveBodyFields = (value: JsonValue): void => {
-  if (Array.isArray(value)) {
-    for (const entry of value) assertNoSensitiveBodyFields(entry);
-    return;
-  }
-  if (value === null || typeof value !== 'object') return;
-  for (const [name, entry] of Object.entries(value)) {
-    if (isSensitiveFieldName(name)) {
-      throw new CurlImportError('The cURL body contains an unsafe credential field.', [
-        `unsafe_body_field:${name.toLowerCase()}`,
-      ]);
-    }
-    assertNoSensitiveBodyFields(entry);
-  }
-};
-
-/** Replaces one existing JSON target with a typed input placeholder and never creates guessed paths. */
-const applyPlaceholder = (body: JsonValue, mapping: CurlPlaceholderMapping): void => {
-  if (!/^(?:\/(?:[^~/]|~[01])*)*$/u.test(mapping.targetPointer) || mapping.targetPointer === '') {
-    throw new CurlImportError('A cURL body mapping target is invalid.', ['invalid_target_pointer']);
-  }
-  if (!/^(?:\/(?:[^~/]|~[01])*)*$/u.test(mapping.inputPointer)) {
-    throw new CurlImportError('A cURL input mapping pointer is invalid.', [
-      'invalid_input_pointer',
-    ]);
-  }
-  const tokens = parseJsonPointer(mapping.targetPointer) ?? [];
-  const final = tokens.pop()!;
-  let parent: JsonValue = body;
-  for (const token of tokens) {
-    if (Array.isArray(parent) && /^(?:0|[1-9]\d*)$/u.test(token)) parent = parent[Number(token)]!;
-    else if (
-      parent !== null &&
-      typeof parent === 'object' &&
-      !Array.isArray(parent) &&
-      Object.hasOwn(parent, token)
-    ) {
-      parent = (parent as Record<string, JsonValue>)[token]!;
-    } else {
-      throw new CurlImportError('A cURL body mapping target does not exist.', [
-        'missing_target_pointer',
-      ]);
-    }
-  }
-  const placeholder = `{{input${mapping.inputPointer}}}`;
-  if (Array.isArray(parent) && /^(?:0|[1-9]\d*)$/u.test(final) && Number(final) < parent.length) {
-    parent[Number(final)] = placeholder;
-  } else if (
-    parent !== null &&
-    typeof parent === 'object' &&
-    !Array.isArray(parent) &&
-    Object.hasOwn(parent, final)
-  ) {
-    (parent as Record<string, JsonValue>)[final] = placeholder;
-  } else {
-    throw new CurlImportError('A cURL body mapping target does not exist.', [
-      'missing_target_pointer',
-    ]);
-  }
-};
-
 /** Locates the one cURL data file reference without reading or executing it. */
 const findCurlBodyFilePath = (source: string): string | undefined => {
   const tokens = tokenizeCurl(source.trim());
@@ -295,32 +145,6 @@ const findCurlBodyFilePath = (source: string): string | undefined => {
 const contentType = (headers: Readonly<Record<string, string | SecretReference>>): string => {
   const entry = Object.entries(headers).find(([name]) => name.toLowerCase() === 'content-type');
   return typeof entry?.[1] === 'string' ? entry[1].toLowerCase() : '';
-};
-
-/** Applies pointer-shaped mappings to unique form fields while preserving form wire encoding. */
-const mapFormBody = (body: string, mappings: readonly CurlPlaceholderMapping[]): string => {
-  const form = new URLSearchParams(body);
-  for (const name of form.keys()) {
-    if (isSensitiveFieldName(name)) {
-      throw new CurlImportError('The cURL form body contains an unsafe credential field.', [
-        `unsafe_body_field:${name.toLowerCase()}`,
-      ]);
-    }
-  }
-  if (mappings.length === 0) return body;
-  for (const mapping of mappings) {
-    const tokens = parseJsonPointer(mapping.targetPointer) ?? [];
-    if (tokens.length !== 1 || !form.has(tokens[0]!) || form.getAll(tokens[0]!).length !== 1) {
-      throw new CurlImportError('A form body mapping target is missing or ambiguous.', [
-        'invalid_form_target',
-      ]);
-    }
-    form.set(tokens[0]!, `{{input${mapping.inputPointer}}}`);
-  }
-  return mappings.reduce((serialized, mapping) => {
-    const placeholder = `{{input${mapping.inputPointer}}}`;
-    return serialized.replaceAll(encodeURIComponent(placeholder), placeholder);
-  }, form.toString());
 };
 
 /** Parses one cURL command into a strict, secret-reference-only HTTP request template. */
@@ -507,11 +331,9 @@ const parseCurlCommand = (source: string, options: CurlParserOptions = {}): Pars
 };
 
 export {
-  CurlImportError,
   findCurlBodyFilePath,
   parseCurlCommand,
   type CurlImportPreview,
   type CurlParserOptions,
-  type CurlPlaceholderMapping,
   type ParsedCurlCommand,
 };
