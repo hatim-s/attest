@@ -1,265 +1,198 @@
-import { request as httpRequest, type IncomingMessage } from 'node:http';
-import { request as httpsRequest } from 'node:https';
-import { isDeepStrictEqual } from 'node:util';
-
-import { AGENT_PROTOCOL, type AgentRequest, type JsonValue } from '@attest/contracts';
+import type { IncomingMessage } from 'node:http';
 
 import { AgentInvocationError, abortedError } from '../../errors.js';
-import {
-  DEFAULT_CONNECT_MS,
-  DEFAULT_EVENT_BYTES,
-  DEFAULT_EVENT_COUNT,
-  DEFAULT_FIRST_BYTE_MS,
-  DEFAULT_IDLE_MS,
-  DEFAULT_TOTAL_EVIDENCE_BYTES,
-} from '../../internal/agent-defaults.js';
-import { isJsonValue } from '../../internal/json-value.js';
+import { DEFAULT_CONNECT_MS, DEFAULT_FIRST_BYTE_MS } from '../../internal/agent-defaults.js';
+import { LineSplitter } from '../../internal/line-splitter.js';
 import { createRawExcerpt } from '../../internal/raw-excerpt.js';
-import { extractRemoteError } from '../../internal/remote-error.js';
-import { readJsonPointer } from '../http/json-pointer.js';
-import { materializeHttpRequest } from '../http/request-template.js';
-import { redactEventEvidence, redactTransportText } from '../http/redaction.js';
+import { openPinnedRequest } from '../http/pinned-request.js';
+import type { MaterializedHttpRequest } from '../http/request-template.js';
 import { parseRetryAfter } from '../http/retry-after.js';
 import { resolveSafeHttpUrl } from '../http/url-security.js';
 import { SseParser, type StreamEvent } from './sse-parser.js';
-
-/** A terminal event mapped onto a native envelope; the adapter validates it before use. */
-type CandidateResponse = Record<string, unknown>;
 import type { StreamAgentResource, StreamInvokeOptions } from './stream-adapter.js';
+import { StreamEvidence, capError, createStreamCaps } from './stream-evidence.js';
+import {
+  createTerminalExtractor,
+  type CandidateResponse,
+  type TerminalExtractor,
+} from './stream-terminal.js';
+
+type ConsumedStream = {
+  response: CandidateResponse;
+  evidence: string;
+  applicationStarted: boolean;
+};
+
+type ConsumeOptions = {
+  agent: StreamAgentResource;
+  signal: AbortSignal;
+  callerSignal: AbortSignal | undefined;
+  secrets: readonly string[];
+  extractTerminal: TerminalExtractor;
+};
+
+/** Parses one event payload; SSE and JSONL report bad JSON under their own framing name. */
+const parseEventData = (source: string, framing: 'sse' | 'jsonl'): unknown => {
+  try {
+    return JSON.parse(source) as unknown;
+  } catch (error: unknown) {
+    const message =
+      framing === 'sse' ? 'SSE data is not valid JSON.' : 'JSONL stream contains non-JSON data.';
+    throw new AgentInvocationError('invalid_envelope', message, { cause: error });
+  }
+};
 
 /** Reads one HTTP stream with separate transport/application idle clocks and hard event caps. */
 const consumeResponse = async (
   response: IncomingMessage,
-  agent: StreamAgentResource,
-  signal: AbortSignal,
-  callerSignal: AbortSignal | undefined,
-  secrets: readonly string[],
-  onEvent: (event: StreamEvent) => CandidateResponse | undefined,
-): Promise<{ response: CandidateResponse; evidence: string; applicationStarted: boolean }> =>
-  new Promise((resolve, reject) => {
-    const transport = agent.transport;
-    const maximumEventBytes = agent.limits?.event_bytes ?? DEFAULT_EVENT_BYTES;
-    const maximumEventCount = agent.limits?.event_count ?? DEFAULT_EVENT_COUNT;
-    const maximumTotalBytes = agent.limits?.total_evidence_bytes ?? DEFAULT_TOTAL_EVIDENCE_BYTES;
-    const idleMs = agent.timeouts?.idle_ms ?? DEFAULT_IDLE_MS;
-    const sse = transport.framing === 'sse' ? new SseParser() : undefined;
-    const decoder = new TextDecoder('utf-8', { fatal: true });
-    let buffer = '';
-    let evidence = '';
-    let eventCount = 0;
-    let totalBytes = 0;
-    let applicationStarted = false;
-    let settled = false;
-    let transportIdle: NodeJS.Timeout;
-    let applicationIdle: NodeJS.Timeout;
+  options: ConsumeOptions,
+): Promise<ConsumedStream> => {
+  const { agent, signal } = options;
+  const { framing } = agent.transport;
+  const caps = createStreamCaps(agent);
+  const evidence = new StreamEvidence(agent, caps, options.secrets);
+  const sse = framing === 'sse' ? new SseParser() : undefined;
+  const splitter = new LineSplitter(caps.eventBytes);
+  const decoder = new TextDecoder('utf-8', { fatal: true });
+  let totalBytes = 0;
+  let interruption: AgentInvocationError | undefined;
+  let transportIdle: NodeJS.Timeout | undefined;
+  let applicationIdle: NodeJS.Timeout | undefined;
 
-    const fail = (error: AgentInvocationError): void => {
-      error.applicationStarted = applicationStarted;
-      error.rawExcerpt = createRawExcerpt(evidence);
-      finish(() => reject(error));
-    };
-    const finish = (operation: () => void): void => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(transportIdle);
-      clearTimeout(applicationIdle);
-      signal.removeEventListener('abort', abort);
-      response.destroy();
-      operation();
-    };
-    const resetTransportIdle = (): void => {
-      clearTimeout(transportIdle);
-      transportIdle = setTimeout(
-        () => fail(new AgentInvocationError('timeout', 'Streaming transport became idle.')),
-        idleMs,
-      );
-    };
-    const resetApplicationIdle = (): void => {
-      clearTimeout(applicationIdle);
-      applicationIdle = setTimeout(
-        () => fail(new AgentInvocationError('timeout', 'Streaming application became idle.')),
-        idleMs,
-      );
-    };
-    const abort = (): void => fail(abortedError(callerSignal, 'Streaming invocation'));
-    const accept = (event: StreamEvent): void => {
-      if (Buffer.byteLength(event.source) > maximumEventBytes) {
-        fail(
-          new AgentInvocationError(
-            'output_cap_exceeded',
-            'Streaming response event exceeds its event byte cap.',
-          ),
-        );
-        return;
-      }
-      eventCount += 1;
-      if (eventCount > maximumEventCount) {
-        fail(
-          new AgentInvocationError(
-            'output_cap_exceeded',
-            'Streaming response exceeds its event count cap.',
-          ),
-        );
-        return;
-      }
-      if (event.heartbeat) {
-        evidence += `${redactTransportText(event.source, secrets)}\n`;
-        if (transport.heartbeat_resets_application_idle === true) resetApplicationIdle();
-        return;
-      }
-      evidence += `${redactEventEvidence(
-        event.raw,
-        agent.redaction?.event_pointers ?? [],
-        secrets,
-      )}\n`;
-      applicationStarted = true;
-      resetApplicationIdle();
-      let terminal: CandidateResponse | undefined;
-      try {
-        terminal = onEvent(event);
-      } catch (error: unknown) {
-        fail(
-          error instanceof AgentInvocationError
-            ? error
-            : new AgentInvocationError(
-                'invalid_envelope',
-                'Streaming event could not be decoded.',
-                { cause: error },
-              ),
-        );
-        return;
-      }
-      if (terminal !== undefined)
-        finish(() => resolve({ response: terminal, evidence, applicationStarted }));
-    };
-    const consumeLine = (line: string): void => {
-      if (Buffer.byteLength(line) > maximumEventBytes) {
-        fail(
-          new AgentInvocationError(
-            'output_cap_exceeded',
-            'Streaming response line exceeds its event byte cap.',
-          ),
-        );
-        return;
-      }
-      if (sse !== undefined) {
-        if (line === '' && sse.bufferedDataBytes > maximumEventBytes) {
-          fail(
-            new AgentInvocationError(
-              'output_cap_exceeded',
-              'Streaming response event exceeds its event byte cap.',
-            ),
-          );
-          return;
-        }
-        try {
-          const event = sse.push(line);
-          if (event !== undefined) accept(event);
-        } catch (error: unknown) {
-          fail(
-            new AgentInvocationError('invalid_envelope', 'SSE data is not valid JSON.', {
-              cause: error,
-            }),
-          );
-        }
-      } else if (line.trim().length > 0) {
-        try {
-          accept({ heartbeat: false, raw: JSON.parse(line) as unknown, source: line });
-        } catch (error: unknown) {
-          fail(
-            new AgentInvocationError('invalid_envelope', 'JSONL stream contains non-JSON data.', {
-              cause: error,
-            }),
-          );
-        }
-      }
-    };
+  // Destroying the response ends the read loop; `interruption` records why it was stopped.
+  const interrupt = (error: AgentInvocationError): void => {
+    interruption ??= error;
+    response.destroy(error);
+  };
+  const resetTransportIdle = (): void => {
+    clearTimeout(transportIdle);
+    transportIdle = setTimeout(
+      () => interrupt(new AgentInvocationError('timeout', 'Streaming transport became idle.')),
+      caps.idleMs,
+    );
+  };
+  const resetApplicationIdle = (): void => {
+    clearTimeout(applicationIdle);
+    applicationIdle = setTimeout(
+      () => interrupt(new AgentInvocationError('timeout', 'Streaming application became idle.')),
+      caps.idleMs,
+    );
+  };
+  const abort = (): void => interrupt(abortedError(options.callerSignal, 'Streaming invocation'));
 
-    signal.addEventListener('abort', abort, { once: true });
-    response.on('data', (chunk: Buffer) => {
-      if (settled) return;
+  /** Records one event and returns the terminal envelope once it arrives. */
+  const acceptEvent = (event: StreamEvent): CandidateResponse | undefined => {
+    if (event.heartbeat) {
+      evidence.record(event);
+      if (agent.transport.heartbeat_resets_application_idle === true) resetApplicationIdle();
+      return undefined;
+    }
+    const raw = parseEventData(event.source, framing);
+    evidence.record(event, raw);
+    resetApplicationIdle();
+    try {
+      return options.extractTerminal(raw, event.eventName);
+    } catch (error: unknown) {
+      if (error instanceof AgentInvocationError) throw error;
+      throw new AgentInvocationError('invalid_envelope', 'Streaming event could not be decoded.', {
+        cause: error,
+      });
+    }
+  };
+
+  const acceptLine = (line: string): CandidateResponse | undefined => {
+    if (sse === undefined) {
+      if (line.trim().length === 0) return undefined;
+      return acceptEvent({ heartbeat: false, source: line });
+    }
+    if (line === '' && sse.bufferedDataBytes > caps.eventBytes) {
+      throw capError('Streaming response event exceeds its event byte cap.');
+    }
+    const event = sse.push(line);
+    return event === undefined ? undefined : acceptEvent(event);
+  };
+
+  /** Feeds split lines in order and stops at the first terminal event. */
+  const acceptLines = (text: string, final: boolean): CandidateResponse | undefined => {
+    const split = final ? splitter.end() : splitter.push(text);
+    for (const line of split.lines) {
+      const terminal = acceptLine(line);
+      if (terminal !== undefined) return terminal;
+    }
+    if (split.overflow) throw capError('Streaming response line exceeds its event byte cap.');
+    return undefined;
+  };
+
+  const decode = (chunk?: Buffer): string => {
+    try {
+      return chunk === undefined ? decoder.decode() : decoder.decode(chunk, { stream: true });
+    } catch (error: unknown) {
+      throw new AgentInvocationError('invalid_envelope', 'Streaming response is not valid UTF-8.', {
+        cause: error,
+      });
+    }
+  };
+
+  const completed = (terminal: CandidateResponse): ConsumedStream => ({
+    response: terminal,
+    evidence: evidence.text,
+    applicationStarted: evidence.applicationStarted,
+  });
+
+  signal.addEventListener('abort', abort, { once: true });
+  resetTransportIdle();
+  resetApplicationIdle();
+  if (signal.aborted) abort();
+  try {
+    for await (const chunk of response as AsyncIterable<Buffer>) {
       resetTransportIdle();
       totalBytes += chunk.byteLength;
-      if (totalBytes > maximumTotalBytes) {
-        fail(
-          new AgentInvocationError(
-            'output_cap_exceeded',
-            'Streaming response exceeds its aggregate evidence cap.',
-          ),
-        );
-        return;
+      if (totalBytes > caps.totalBytes) {
+        throw capError('Streaming response exceeds its aggregate evidence cap.');
       }
-      try {
-        buffer += decoder.decode(chunk, { stream: true });
-      } catch (error: unknown) {
-        fail(
-          new AgentInvocationError('invalid_envelope', 'Streaming response is not valid UTF-8.', {
-            cause: error,
-          }),
-        );
-        return;
-      }
-      if (Buffer.byteLength(buffer) > maximumEventBytes && !buffer.includes('\n')) {
-        fail(
-          new AgentInvocationError(
-            'output_cap_exceeded',
-            'Streaming response line exceeds its event byte cap.',
-          ),
-        );
-        return;
-      }
-      for (;;) {
-        const newline = buffer.indexOf('\n');
-        if (newline < 0) break;
-        const line = buffer.slice(0, newline).replace(/\r$/u, '');
-        buffer = buffer.slice(newline + 1);
-        consumeLine(line);
-        if (settled) return;
-      }
-    });
-    response.once('error', (error) =>
-      fail(new AgentInvocationError('network', 'Streaming response failed.', { cause: error })),
+      const terminal = acceptLines(decode(chunk), false);
+      if (terminal !== undefined) return completed(terminal);
+    }
+    const trailing = decode();
+    const terminal = acceptLines(trailing, false) ?? acceptLines('', true);
+    if (terminal !== undefined) return completed(terminal);
+    throw new AgentInvocationError(
+      'invalid_envelope',
+      'Streaming response closed without a terminal result.',
     );
-    response.once('end', () => {
-      try {
-        buffer += decoder.decode();
-      } catch (error: unknown) {
-        fail(
-          new AgentInvocationError('invalid_envelope', 'Streaming response is not valid UTF-8.', {
-            cause: error,
-          }),
-        );
-        return;
-      }
-      if (buffer.length > 0) consumeLine(buffer.replace(/\r$/u, ''));
-      if (!settled)
-        fail(
-          new AgentInvocationError(
-            'invalid_envelope',
-            'Streaming response closed without a terminal result.',
-          ),
-        );
-    });
-    resetTransportIdle();
-    resetApplicationIdle();
-    if (signal.aborted) abort();
-  });
+  } catch (error: unknown) {
+    const failure =
+      interruption ??
+      (error instanceof AgentInvocationError
+        ? error
+        : new AgentInvocationError('network', 'Streaming response failed.', { cause: error }));
+    failure.applicationStarted = evidence.applicationStarted;
+    failure.rawExcerpt = createRawExcerpt(evidence.text);
+    throw failure;
+  } finally {
+    clearTimeout(transportIdle);
+    clearTimeout(applicationIdle);
+    signal.removeEventListener('abort', abort);
+    response.destroy();
+  }
+};
+
+const contentType = (response: IncomingMessage): string | undefined =>
+  String(response.headers['content-type'] ?? '')
+    .split(';', 1)[0]
+    ?.trim()
+    .toLowerCase();
 
 /** Performs one DNS-pinned stream request and returns only after terminal extraction. */
 const streamOnce = async (
   agent: StreamAgentResource,
-  request: AgentRequest,
-  materialized: ReturnType<typeof materializeHttpRequest>,
+  materialized: MaterializedHttpRequest,
   signal: AbortSignal,
   options: StreamInvokeOptions,
-): Promise<{
-  response: CandidateResponse;
-  evidence: string;
-  applicationStarted: boolean;
-  status: number;
-}> => {
+): Promise<ConsumedStream & { status: number }> => {
+  const connectTimeoutMs = agent.timeouts?.connect_ms ?? DEFAULT_CONNECT_MS;
   const resolved = await resolveSafeHttpUrl(materialized.url, {
-    timeoutMs: agent.timeouts?.connect_ms ?? DEFAULT_CONNECT_MS,
+    timeoutMs: connectTimeoutMs,
     signal,
     callerSignal: options.signal,
   });
@@ -273,177 +206,50 @@ const streamOnce = async (
       'Streaming secrets require HTTPS except on loopback.',
     );
   }
-  const transport = resolved.url.protocol === 'https:' ? httpsRequest : httpRequest;
-  return new Promise((resolve, reject) => {
-    let settled = false;
-    const timers: { firstByte?: NodeJS.Timeout } = {};
-    const finish = (operation: () => void): void => {
-      if (settled) return;
-      settled = true;
-      if (timers.firstByte !== undefined) clearTimeout(timers.firstByte);
-      signal.removeEventListener('abort', abort);
-      operation();
-    };
-    const abort = (): void => {
-      outgoing.destroy();
-      finish(() => reject(abortedError(options.signal, 'Streaming invocation')));
-    };
-    const outgoing = transport(
-      resolved.url,
-      {
-        method: materialized.method,
-        headers: materialized.headers,
-        lookup: (_hostname, _options, callback) =>
-          callback(null, resolved.address, resolved.family),
-      },
-      (response) => {
-        if (timers.firstByte !== undefined) clearTimeout(timers.firstByte);
-        outgoing.setTimeout(0);
-        const status = response.statusCode ?? 0;
-        if (status < 200 || status >= 300) {
-          response.destroy();
-          const error = new AgentInvocationError(
-            'http_status',
-            `Streaming HTTP returned status ${String(status)}.`,
-            {
-              httpStatus: status,
-              retryAfterMs: parseRetryAfter(response.headersDistinct['retry-after']?.[0]),
-            },
-          );
-          finish(() => reject(error));
-          return;
-        }
-        const contentType = String(response.headers['content-type'] ?? '')
-          .split(';', 1)[0]
-          ?.trim()
-          .toLowerCase();
-        if (agent.transport.framing === 'sse' && contentType !== 'text/event-stream') {
-          response.destroy();
-          finish(() =>
-            reject(
-              new AgentInvocationError(
-                'invalid_envelope',
-                'SSE response must use the text/event-stream content type.',
-              ),
-            ),
-          );
-          return;
-        }
-        let incrementalText = '';
-        const incrementalArray: JsonValue[] = [];
-        void consumeResponse(
-          response,
-          agent,
-          signal,
-          options.signal,
-          options.secrets ?? [],
-          (event) => {
-            if (
-              agent.transport.event_name !== undefined &&
-              event.eventName !== agent.transport.event_name
-            )
-              return undefined;
-            const payload =
-              agent.transport.event_data_pointer === undefined
-                ? event.raw
-                : readJsonPointer(event.raw, agent.transport.event_data_pointer);
-            if (payload === undefined)
-              throw new AgentInvocationError(
-                'invalid_envelope',
-                'Streaming event data pointer did not resolve.',
-              );
-            if (agent.transport.incremental_output_pointer !== undefined) {
-              const chunk = readJsonPointer(payload, agent.transport.incremental_output_pointer);
-              if (agent.transport.incremental_output_mode === 'text') {
-                if (typeof chunk !== 'string')
-                  throw new AgentInvocationError(
-                    'invalid_envelope',
-                    'Streaming text accumulation requires string chunks.',
-                  );
-                incrementalText += chunk;
-              } else {
-                if (!isJsonValue(chunk))
-                  throw new AgentInvocationError(
-                    'invalid_envelope',
-                    'Streaming array accumulation requires JSON chunks.',
-                  );
-                incrementalArray.push(chunk);
-              }
-            }
-            const terminal = readJsonPointer(payload, agent.transport.terminal_pointer);
-            if (
-              !agent.transport.terminal_values.some((value) => isDeepStrictEqual(value, terminal))
-            )
-              return undefined;
-            const error =
-              agent.transport.error_pointer === undefined
-                ? undefined
-                : readJsonPointer(payload, agent.transport.error_pointer);
-            const trace =
-              agent.transport.trace_pointer === undefined
-                ? undefined
-                : readJsonPointer(payload, agent.transport.trace_pointer);
-            if (error !== undefined && error !== null) {
-              return {
-                protocol: AGENT_PROTOCOL,
-                error: extractRemoteError(error, 'The streaming agent reported an error.'),
-                ...(trace === undefined ? {} : { trace }),
-              };
-            }
-            const extracted = readJsonPointer(payload, agent.transport.result_pointer);
-            const output =
-              extracted === undefined && agent.transport.incremental_output_pointer !== undefined
-                ? agent.transport.incremental_output_mode === 'array'
-                  ? incrementalArray
-                  : incrementalText
-                : extracted;
-            if (!isJsonValue(output))
-              throw new AgentInvocationError(
-                'invalid_envelope',
-                'Streaming terminal result is not a JSON value.',
-              );
-            return {
-              protocol: AGENT_PROTOCOL,
-              output,
-              ...(trace === undefined ? {} : { trace }),
-            };
-          },
-        ).then(
-          (completed) => finish(() => resolve({ ...completed, status })),
-          (error: unknown) =>
-            finish(() =>
-              reject(error instanceof Error ? error : new Error('Streaming response failed.')),
-            ),
-        );
-      },
-    );
-    outgoing.once('error', (error) =>
-      finish(() =>
-        reject(
-          new AgentInvocationError('network', 'Streaming HTTP transport failed.', { cause: error }),
-        ),
-      ),
-    );
-    signal.addEventListener('abort', abort, { once: true });
-    if (signal.aborted) {
-      abort();
-      return;
-    }
-    timers.firstByte = setTimeout(() => {
-      outgoing.destroy();
-      finish(() =>
-        reject(new AgentInvocationError('timeout', 'Streaming HTTP first byte timed out.')),
-      );
-    }, agent.timeouts?.first_byte_ms ?? DEFAULT_FIRST_BYTE_MS);
-    outgoing.setTimeout(agent.timeouts?.connect_ms ?? DEFAULT_CONNECT_MS, () => {
-      outgoing.destroy();
-      finish(() =>
-        reject(new AgentInvocationError('timeout', 'Streaming HTTP connection timed out.')),
-      );
-    });
-    if (materialized.body !== undefined) outgoing.write(materialized.body);
-    outgoing.end();
+  const { response } = await openPinnedRequest(resolved, {
+    method: materialized.method,
+    headers: materialized.headers,
+    body: materialized.body,
+    signal,
+    firstByteTimeoutMs: agent.timeouts?.first_byte_ms ?? DEFAULT_FIRST_BYTE_MS,
+    connectTimeoutMs,
+    errors: {
+      aborted: () => abortedError(options.signal, 'Streaming invocation'),
+      firstByteTimeout: () =>
+        new AgentInvocationError('timeout', 'Streaming HTTP first byte timed out.'),
+      connectTimeout: () =>
+        new AgentInvocationError('timeout', 'Streaming HTTP connection timed out.'),
+      failed: (cause) =>
+        new AgentInvocationError('network', 'Streaming HTTP transport failed.', { cause }),
+    },
   });
+  const status = response.statusCode ?? 0;
+  if (status < 200 || status >= 300) {
+    response.destroy();
+    throw new AgentInvocationError(
+      'http_status',
+      `Streaming HTTP returned status ${String(status)}.`,
+      {
+        httpStatus: status,
+        retryAfterMs: parseRetryAfter(response.headersDistinct['retry-after']?.[0]),
+      },
+    );
+  }
+  if (agent.transport.framing === 'sse' && contentType(response) !== 'text/event-stream') {
+    response.destroy();
+    throw new AgentInvocationError(
+      'invalid_envelope',
+      'SSE response must use the text/event-stream content type.',
+    );
+  }
+  const consumed = await consumeResponse(response, {
+    agent,
+    signal,
+    callerSignal: options.signal,
+    secrets: options.secrets ?? [],
+    extractTerminal: createTerminalExtractor(agent),
+  });
+  return { ...consumed, status };
 };
 
 export { streamOnce };

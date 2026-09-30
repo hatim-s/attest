@@ -53,7 +53,7 @@ const invokeStreamingAgent = async (
         request,
         agent.limits?.request_bytes ?? DEFAULT_REQUEST_BYTES,
       );
-      const completed = await streamOnce(agent, request, materialized, attemptSignal, options);
+      const completed = await streamOnce(agent, materialized, attemptSignal, options);
       const report = parseAgentResponse(completed.response);
       if (!report.ok)
         throw new AgentInvocationError(
