@@ -140,12 +140,7 @@ export type {
 } from './project/resources/dataset.js';
 export { metricResourceSchema, metricResultExtractionSchema } from './project/resources/metric.js';
 export type { MetricResource, MetricResultExtraction } from './project/resources/metric.js';
-export {
-  METRIC_PRESETS,
-  findMetricPreset,
-  metricPresetIdSchema,
-  metricPresetSchema,
-} from './metric/presets.js';
+export { METRIC_PRESETS, metricPresetIdSchema, metricPresetSchema } from './metric/presets.js';
 export type { MetricPreset, MetricPresetId } from './metric/presets.js';
 export { metricTestFixtureSchema } from './metric/test-fixture.js';
 export type { MetricTestFixture } from './metric/test-fixture.js';
