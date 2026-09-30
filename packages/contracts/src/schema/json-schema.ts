@@ -15,7 +15,7 @@ import { evalCancelRequestSchema, evalCancelResultSchema } from '../eval/cancel.
 import { evalEventSchema } from '../eval/event.js';
 import { evalRunRequestSchema, evalRunSchema } from '../eval/run.js';
 import { metricRequestSchema, metricResultSchema } from '../metric/protocol.js';
-import { jsonlBridgeInputSchema, jsonlBridgeOutputSchema } from '../agent/managed-transport.js';
+import { jsonlBridgeInputSchema, jsonlBridgeOutputSchema } from '../agent/jsonl-bridge.js';
 import { metricResourceSchema } from '../project/resources/metric.js';
 import { metricPresetSchema } from '../metric/presets.js';
 import { metricTestFixtureSchema } from '../metric/test-fixture.js';
@@ -23,10 +23,10 @@ import { projectManifestSchema } from '../project/manifest.js';
 import { testResourceSchema } from '../project/resources/test.js';
 import { traceSchema } from '../trace/protocol.js';
 import {
-  webSocketAttemptEvidenceSchema,
   webSocketCorrelatedMessageSchema,
   webSocketInvocationRequestSchema,
 } from '../agent/websocket-contract.js';
+import { webSocketAttemptEvidenceSchema } from '../agent/websocket-evidence.js';
 
 type JsonSchemaFragment = Readonly<Record<string, unknown>>;
 type ContractJsonSchemaDefinition = {

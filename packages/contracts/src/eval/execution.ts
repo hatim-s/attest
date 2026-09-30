@@ -25,18 +25,6 @@ const invocationErrorCodeSchema = z.enum([
 /** Recoverable problems reported alongside a successfully parsed agent response. */
 const warningCodeSchema = z.enum(['unknown_field', 'invalid_trace']);
 
-/**
- * Bounded evidence of a transport payload, retained per attempt so runs stay
- * auditable without persisting unbounded bodies. On cap overflow the excerpt
- * keeps a prefix plus the digest of everything received.
- */
-type RawExcerpt = {
-  text: string;
-  truncated: boolean;
-  /** SHA-256 of the full received payload; present only when truncated. */
-  sha256?: string;
-};
-
 type CaseOutcome = z.infer<typeof caseOutcomeSchema>;
 type InvocationErrorCode = z.infer<typeof invocationErrorCodeSchema>;
 type WarningCode = z.infer<typeof warningCodeSchema>;
@@ -47,6 +35,5 @@ export {
   warningCodeSchema,
   type CaseOutcome,
   type InvocationErrorCode,
-  type RawExcerpt,
   type WarningCode,
 };

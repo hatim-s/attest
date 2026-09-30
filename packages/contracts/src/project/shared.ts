@@ -21,6 +21,35 @@ const jsonPointerSchema = z
   .regex(/^(?:\/(?:[^~/]|~[01])*)*$/, 'must be an RFC 6901 JSON Pointer');
 const durationMillisecondsSchema = z.number().int().positive();
 
+/** Any JSON value accepted at a contract boundary. */
+const jsonValueSchema = z.json();
+
+/** Correlates one in-flight request with its reply on a shared connection or process. */
+const requestIdSchema = z
+  .string()
+  .min(1)
+  .max(128)
+  .regex(
+    /^[A-Za-z0-9][A-Za-z0-9._:-]*$/u,
+    'must start with an alphanumeric character and contain only correlation-safe characters',
+  );
+
+/**
+ * Bounded evidence of a transport payload, retained per attempt so runs stay auditable without
+ * persisting unbounded bodies. On cap overflow the excerpt keeps a prefix, and `sha256` digests
+ * everything received.
+ */
+const rawExcerptSchema = z
+  .strictObject({
+    text: z.string().max(4_096),
+    truncated: z.boolean(),
+    sha256: sha256Schema.optional(),
+  })
+  .refine(
+    (excerpt) => !excerpt.truncated || excerpt.sha256 !== undefined,
+    'a truncated excerpt must carry the sha256 of the full payload',
+  );
+
 /** References a host-provided secret without persisting the secret value. */
 const secretReferenceSchema = z.union([
   z.strictObject({ from_env: z.string().min(1) }),
@@ -91,20 +120,32 @@ const refinePollingSchedule = (polling: PollingSchedule, context: z.RefinementCt
   }
 };
 
+/** Narrows unknown input to JSON so callers can drop hand-rolled recursive guards. */
+const isJsonValue = (value: unknown): value is JsonValue =>
+  jsonValueSchema.safeParse(value).success;
+
 type ExecutionDefaults = z.infer<typeof executionDefaultsSchema>;
+type JsonValue = z.infer<typeof jsonValueSchema>;
+type RawExcerpt = z.infer<typeof rawExcerptSchema>;
 type SecretReference = z.infer<typeof secretReferenceSchema>;
 
 export {
   durationMillisecondsSchema,
   executionDefaultsSchema,
+  isJsonValue,
   jsonPointerSchema,
+  jsonValueSchema,
   projectIdSchema,
+  rawExcerptSchema,
   refinePollingSchedule,
   relativePathSchema,
+  requestIdSchema,
   resourceIdSchema,
   retryPolicySchema,
   secretReferenceSchema,
   sha256Schema,
   type ExecutionDefaults,
+  type JsonValue,
+  type RawExcerpt,
   type SecretReference,
 };

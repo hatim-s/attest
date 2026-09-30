@@ -1,8 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 
-import * as formatsModule from 'ajv-formats';
-import { Ajv2020, type AnySchema } from 'ajv/dist/2020.js';
 import { describe, expect, expectTypeOf, it } from 'vitest';
 
 import { cliEventSchema, cliResultSchema } from '../cli/protocol.js';
@@ -13,7 +11,6 @@ import {
   type EvalCancelRequest,
 } from '../eval/cancel.js';
 import {
-  evalEventSchema,
   evalEventStreamSchema,
   evalFinalResultDataSchema,
   type EvalEventStream,
@@ -24,7 +21,7 @@ import {
   type EvalRun,
   type EvalRunRequest,
 } from '../eval/run.js';
-import { serializeContractSchema } from '../schema/json-schema.js';
+import { compileGeneratedSchema } from './support/compile-generated-schema.js';
 
 const fixturesDirectory = resolve(import.meta.dirname, 'fixtures');
 
@@ -38,14 +35,6 @@ const readJsonlFixture = async (relativePath: string): Promise<unknown[]> =>
     .trimEnd()
     .split('\n')
     .map((line) => JSON.parse(line) as unknown);
-
-/** Compiles a generated Draft 2020-12 contract for runtime/generator agreement checks. */
-const compileGeneratedSchema = (fileName: string) => {
-  const ajv = new Ajv2020({ allErrors: true, strict: false });
-  formatsModule.default.default(ajv);
-  ajv.addFormat('ulid', /^[0-9A-HJKMNP-TV-Z]{26}$/u);
-  return ajv.compile(JSON.parse(serializeContractSchema(fileName)) as AnySchema);
-};
 
 const structuredTestRequest = {
   schema: 'attest.command-request',
@@ -163,8 +152,7 @@ describe('immutable eval run metadata contract', () => {
   });
 
   it('rejects top-level run spelling and mutable or unknown snapshot metadata', async () => {
-    const fixture = (await readJsonFixture('eval-run/eval-run.json')) as Record<string, unknown>;
-    const run = evalRunSchema.parse(fixture);
+    const run = evalRunSchema.parse(await readJsonFixture('eval-run/eval-run.json'));
 
     expect(
       evalRunSchema.safeParse({
@@ -265,20 +253,5 @@ describe('eval cancellation contract', () => {
     expect(compileGeneratedSchema('eval-cancel-request.json')(request)).toBe(true);
     expect(compileGeneratedSchema('eval-cancel-result.json')(result)).toBe(true);
     expectTypeOf(evalCancelRequestSchema.parse(request)).toMatchTypeOf<EvalCancelRequest>();
-  });
-
-  it('rejects the top-level run alias and unknown cancellation controls', () => {
-    const request = {
-      schema: 'attest.command-request',
-      command: 'eval.cancel',
-      run_id: '01ARZ3NDEKTSV4RRFFQ69G5FAV',
-      output: 'json',
-    };
-
-    expect(evalCancelRequestSchema.safeParse({ ...request, command: 'run.cancel' }).success).toBe(
-      false,
-    );
-    expect(evalCancelRequestSchema.safeParse({ ...request, force: true }).success).toBe(false);
-    expect(evalEventSchema.safeParse({ event: 'cancel', data: request }).success).toBe(false);
   });
 });

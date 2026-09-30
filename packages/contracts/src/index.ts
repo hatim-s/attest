@@ -6,7 +6,7 @@ export type {
   AgentResponse,
   AgentSuccessResponse,
 } from './agent/protocol.js';
-export type { CaseOutcome, InvocationErrorCode, RawExcerpt } from './eval/execution.js';
+export type { CaseOutcome, InvocationErrorCode } from './eval/execution.js';
 export {
   assertionCheckSchema,
   metricDefinitionSchema,
@@ -41,8 +41,8 @@ export {
   jsonlBridgeOutputSchema,
   jsonlBridgeRequestSchema,
   jsonlBridgeResponseSchema,
-} from './agent/managed-transport.js';
-export type { JsonlBridgeInput, JsonlBridgeOutput } from './agent/managed-transport.js';
+} from './agent/jsonl-bridge.js';
+export type { JsonlBridgeInput, JsonlBridgeOutput } from './agent/jsonl-bridge.js';
 export { CONTRACT_JSON_SCHEMAS, serializeContractSchema } from './schema/json-schema.js';
 export { spanKindSchema, spanSchema, traceSchema } from './trace/protocol.js';
 export type { Span, SpanKind, Trace } from './trace/protocol.js';
@@ -176,7 +176,7 @@ export {
   secretReferenceSchema,
   sha256Schema,
 } from './project/shared.js';
-export type { ExecutionDefaults, SecretReference } from './project/shared.js';
+export type { ExecutionDefaults, RawExcerpt, SecretReference } from './project/shared.js';
 export {
   evalExecutionConfigSchema,
   evalHookCommandSchema,
@@ -235,24 +235,25 @@ export type {
   EvalRunSummary,
 } from './eval/event.js';
 export {
-  webSocketAttemptEvidenceSchema,
   webSocketConnectionModeSchema,
   webSocketCorrelatedMessageSchema,
-  webSocketErrorClassificationSchema,
-  webSocketEvidenceClassificationSchema,
   webSocketInvocationRequestSchema,
-  webSocketRequestIdSchema,
   webSocketTransportSchema,
 } from './agent/websocket-contract.js';
 export type {
-  WebSocketAttemptEvidence,
-  WebSocketConnectionMode,
   WebSocketCorrelatedMessage,
-  WebSocketErrorClassification,
-  WebSocketEvidenceClassification,
   WebSocketInvocationRequest,
   WebSocketTransport,
 } from './agent/websocket-contract.js';
+export {
+  webSocketAttemptEvidenceSchema,
+  webSocketErrorClassificationSchema,
+  webSocketEvidenceClassificationSchema,
+} from './agent/websocket-evidence.js';
+export type {
+  WebSocketAttemptEvidence,
+  WebSocketErrorClassification,
+} from './agent/websocket-evidence.js';
 
 export {
   caseFolderSchema,

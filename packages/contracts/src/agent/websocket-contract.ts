@@ -4,23 +4,15 @@ import { agentRequestSchema } from './protocol.js';
 import {
   durationMillisecondsSchema,
   jsonPointerSchema,
+  requestIdSchema,
   secretReferenceSchema,
-  sha256Schema,
 } from '../project/shared.js';
-import {
-  WEBSOCKET_EVIDENCE_SCHEMA_ID,
-  WEBSOCKET_MESSAGE_PROTOCOL,
-  WEBSOCKET_REQUEST_PROTOCOL,
-} from '../schema/identifiers.js';
+import { WEBSOCKET_MESSAGE_PROTOCOL, WEBSOCKET_REQUEST_PROTOCOL } from '../schema/identifiers.js';
 
-const webSocketRequestIdSchema = z
-  .string()
-  .min(1)
-  .max(128)
-  .regex(
-    /^[A-Za-z0-9][A-Za-z0-9._:-]*$/u,
-    'must start with an alphanumeric character and contain only correlation-safe characters',
-  );
+// RFC 9110 token characters, shared by header names and subprotocol names.
+const httpTokenPattern = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/u;
+
+const webSocketLifecycleSchema = z.enum(['per_case', 'per_run']);
 const webSocketConnectionModeSchema = z.enum(['serial', 'multiplexed']);
 const webSocketJsonPointerSchema = jsonPointerSchema.refine(
   (pointer) => pointer !== '',
@@ -36,13 +28,13 @@ const webSocketUrlTemplateSchema = z
 const webSocketHeaderNameSchema = z
   .string()
   .min(1)
-  .regex(/^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/u, 'must be an HTTP header name');
+  .regex(httpTokenPattern, 'must be an HTTP header name');
 const webSocketHeaderValueSchema = z.union([z.string(), secretReferenceSchema]);
 const webSocketSubprotocolSchema = z
   .string()
   .min(1)
   .max(123)
-  .regex(/^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/u, 'must be one WebSocket subprotocol token')
+  .regex(httpTokenPattern, 'must be one WebSocket subprotocol token')
   .refine(
     (protocol) =>
       !['graphql-ws', 'graphql-transport-ws', 'socket.io'].includes(protocol.toLowerCase()),
@@ -51,17 +43,17 @@ const webSocketSubprotocolSchema = z
 
 /** Counts exact correlation slots without interpreting any other authored template syntax. */
 const countRequestIdSlots = (value: unknown): number => {
-  if (value === '{{request_id}}') return 1;
-  if (Array.isArray(value)) {
-    let slots = 0;
-    for (const item of value as unknown[]) slots += countRequestIdSlots(item);
-    return slots;
+  if (value === '{{request_id}}') {
+    return 1;
   }
-  if (value === null || typeof value !== 'object') return 0;
-  return Object.values(value as Record<string, unknown>).reduce<number>(
-    (count, item) => count + countRequestIdSlots(item),
-    0,
-  );
+  if (Array.isArray(value)) {
+    return value.reduce<number>((count, item) => count + countRequestIdSlots(item), 0);
+  }
+  if (value === null || typeof value !== 'object') {
+    return 0;
+  }
+
+  return Object.values(value).reduce<number>((count, item) => count + countRequestIdSlots(item), 0);
 };
 
 const webSocketRequestTemplateSchema = z
@@ -76,13 +68,13 @@ const webSocketRequestTemplateSchema = z
   });
 
 /**
- * Freezes the authored WebSocket transport surface consumed by the future adapter.
- * The enclosing agent retry budget may be used only while acknowledgement state is unacknowledged.
+ * Authored WebSocket transport. Retries are allowed only before the server acknowledges the
+ * request.
  */
 const webSocketTransportSchema = z
   .strictObject({
     kind: z.literal('websocket'),
-    lifecycle: z.enum(['per_case', 'per_run']),
+    lifecycle: webSocketLifecycleSchema,
     connection_mode: webSocketConnectionModeSchema,
     framing: z.literal('text_json'),
     url: webSocketUrlTemplateSchema,
@@ -183,171 +175,29 @@ const webSocketTransportSchema = z
 /** Normalizes one adapter invocation before the authored request template is rendered. */
 const webSocketInvocationRequestSchema = z.strictObject({
   protocol: z.literal(WEBSOCKET_REQUEST_PROTOCOL),
-  request_id: webSocketRequestIdSchema,
+  request_id: requestIdSchema,
   request: agentRequestSchema,
 });
 
 /** Classifies a correlated text-JSON message after configured pointer extraction. */
-const webSocketCorrelatedMessageSchema = z.discriminatedUnion('type', [
-  z.strictObject({
-    protocol: z.literal(WEBSOCKET_MESSAGE_PROTOCOL),
-    type: z.literal('acknowledgement'),
-    request_id: webSocketRequestIdSchema,
-    value: z.json(),
-  }),
-  z.strictObject({
-    protocol: z.literal(WEBSOCKET_MESSAGE_PROTOCOL),
-    type: z.literal('result'),
-    request_id: webSocketRequestIdSchema,
-    value: z.json(),
-  }),
-  z.strictObject({
-    protocol: z.literal(WEBSOCKET_MESSAGE_PROTOCOL),
-    type: z.literal('error'),
-    request_id: webSocketRequestIdSchema,
-    value: z.json(),
-  }),
-  z.strictObject({
-    protocol: z.literal(WEBSOCKET_MESSAGE_PROTOCOL),
-    type: z.literal('trace'),
-    request_id: webSocketRequestIdSchema,
-    value: z.json(),
-  }),
-]);
-
-const webSocketEvidenceClassificationSchema = z.enum([
-  'connection_opened',
-  'request_sent',
-  'acknowledgement_received',
-  'trace_received',
-  'result_received',
-  'error_received',
-  'ping_sent',
-  'pong_received',
-  'retry_scheduled',
-  'reconnect_started',
-  'connection_closed',
-]);
-
-const webSocketErrorClassificationSchema = z.enum([
-  'open_timeout',
-  'message_idle_timeout',
-  'attempt_timeout',
-  'close_timeout',
-  'handshake_failed',
-  'connection_failed',
-  'unexpected_close',
-  'invalid_json',
-  'binary_frame_unsupported',
-  'uncorrelated_server_work',
-  'duplicate_terminal_message',
-  'acknowledgement_extraction_failed',
-  'result_extraction_failed',
-  'error_extraction_failed',
-  'trace_extraction_failed',
-  'remote_error',
-  'socket_io_unsupported',
-  'graphql_subscription_unsupported',
-  'interactive_auth_unsupported',
-  'resume_unsupported',
-  'bidirectional_callback_unsupported',
-  'cancelled',
-]);
-
-const webSocketAcknowledgementEvidenceSchema = z.discriminatedUnion('state', [
-  z.strictObject({
-    state: z.literal('not_acknowledged'),
-    retry: z.literal('allowed'),
-    reconnect: z.literal('allowed'),
-    replay: z.literal('allowed'),
-  }),
-  z.strictObject({
-    state: z.literal('acknowledged'),
-    retry: z.literal('forbidden'),
-    reconnect: z.literal('forbidden'),
-    replay: z.literal('forbidden'),
-  }),
-]);
-
-const webSocketEvidenceExcerptSchema = z.discriminatedUnion('truncated', [
-  z.strictObject({
-    text: z.string().max(4_096),
-    truncated: z.literal(false),
-  }),
-  z.strictObject({
-    text: z.string().max(4_096),
-    truncated: z.literal(true),
-    sha256: sha256Schema,
-  }),
-]);
-
-const webSocketEvidenceEventSchema = z.strictObject({
-  classification: webSocketEvidenceClassificationSchema,
-  elapsed_ms: z.number().int().nonnegative(),
-  request_id: webSocketRequestIdSchema.optional(),
-  message_bytes: z.number().int().nonnegative().optional(),
-  excerpt: webSocketEvidenceExcerptSchema.optional(),
+const webSocketCorrelatedMessageSchema = z.strictObject({
+  protocol: z.literal(WEBSOCKET_MESSAGE_PROTOCOL),
+  type: z.enum(['acknowledgement', 'result', 'error', 'trace']),
+  request_id: requestIdSchema,
+  value: z.json(),
 });
 
-const webSocketCloseEvidenceSchema = z.strictObject({
-  code: z.number().int().min(1_000).max(4_999).optional(),
-  reason: z.string().max(123).optional(),
-  clean: z.boolean(),
-});
-
-const webSocketEvidenceBaseFields = {
-  schema: z.literal(WEBSOCKET_EVIDENCE_SCHEMA_ID),
-  request_id: webSocketRequestIdSchema,
-  lifecycle: z.enum(['per_case', 'per_run']),
-  connection_mode: webSocketConnectionModeSchema,
-  acknowledgement: webSocketAcknowledgementEvidenceSchema,
-  events: z.array(webSocketEvidenceEventSchema).max(1_024),
-  close: webSocketCloseEvidenceSchema.optional(),
-};
-
-/**
- * Persists bounded/redacted WebSocket decisions with a stable terminal classification.
- * Acknowledgement state makes the no-replay boundary machine-checkable on every attempt.
- */
-const webSocketAttemptEvidenceSchema = z.discriminatedUnion('outcome', [
-  z.strictObject({
-    ...webSocketEvidenceBaseFields,
-    outcome: z.literal('completed'),
-  }),
-  z.strictObject({
-    ...webSocketEvidenceBaseFields,
-    outcome: z.literal('failed'),
-    error_classification: webSocketErrorClassificationSchema,
-  }),
-  z.strictObject({
-    ...webSocketEvidenceBaseFields,
-    outcome: z.literal('cancelled'),
-    error_classification: z.literal('cancelled'),
-  }),
-]);
-
-type WebSocketAttemptEvidence = z.infer<typeof webSocketAttemptEvidenceSchema>;
-type WebSocketConnectionMode = z.infer<typeof webSocketConnectionModeSchema>;
 type WebSocketCorrelatedMessage = z.infer<typeof webSocketCorrelatedMessageSchema>;
-type WebSocketErrorClassification = z.infer<typeof webSocketErrorClassificationSchema>;
-type WebSocketEvidenceClassification = z.infer<typeof webSocketEvidenceClassificationSchema>;
 type WebSocketInvocationRequest = z.infer<typeof webSocketInvocationRequestSchema>;
 type WebSocketTransport = z.infer<typeof webSocketTransportSchema>;
 
 export {
-  webSocketAttemptEvidenceSchema,
   webSocketConnectionModeSchema,
   webSocketCorrelatedMessageSchema,
-  webSocketErrorClassificationSchema,
-  webSocketEvidenceClassificationSchema,
   webSocketInvocationRequestSchema,
-  webSocketRequestIdSchema,
+  webSocketLifecycleSchema,
   webSocketTransportSchema,
-  type WebSocketAttemptEvidence,
-  type WebSocketConnectionMode,
   type WebSocketCorrelatedMessage,
-  type WebSocketErrorClassification,
-  type WebSocketEvidenceClassification,
   type WebSocketInvocationRequest,
   type WebSocketTransport,
 };

@@ -119,49 +119,25 @@
                 "type": "integer"
               },
               "excerpt": {
-                "oneOf": [
-                  {
-                    "additionalProperties": false,
-                    "properties": {
-                      "text": {
-                        "maxLength": 4096,
-                        "type": "string"
-                      },
-                      "truncated": {
-                        "const": false,
-                        "type": "boolean"
-                      }
-                    },
-                    "required": [
-                      "text",
-                      "truncated"
-                    ],
-                    "type": "object"
+                "additionalProperties": false,
+                "properties": {
+                  "sha256": {
+                    "pattern": "^[a-f0-9]{64}$",
+                    "type": "string"
                   },
-                  {
-                    "additionalProperties": false,
-                    "properties": {
-                      "sha256": {
-                        "pattern": "^[a-f0-9]{64}$",
-                        "type": "string"
-                      },
-                      "text": {
-                        "maxLength": 4096,
-                        "type": "string"
-                      },
-                      "truncated": {
-                        "const": true,
-                        "type": "boolean"
-                      }
-                    },
-                    "required": [
-                      "text",
-                      "truncated",
-                      "sha256"
-                    ],
-                    "type": "object"
+                  "text": {
+                    "maxLength": 4096,
+                    "type": "string"
+                  },
+                  "truncated": {
+                    "type": "boolean"
                   }
-                ]
+                },
+                "required": [
+                  "text",
+                  "truncated"
+                ],
+                "type": "object"
               },
               "message_bytes": {
                 "maximum": 9007199254740991,
@@ -361,49 +337,25 @@
                 "type": "integer"
               },
               "excerpt": {
-                "oneOf": [
-                  {
-                    "additionalProperties": false,
-                    "properties": {
-                      "text": {
-                        "maxLength": 4096,
-                        "type": "string"
-                      },
-                      "truncated": {
-                        "const": false,
-                        "type": "boolean"
-                      }
-                    },
-                    "required": [
-                      "text",
-                      "truncated"
-                    ],
-                    "type": "object"
+                "additionalProperties": false,
+                "properties": {
+                  "sha256": {
+                    "pattern": "^[a-f0-9]{64}$",
+                    "type": "string"
                   },
-                  {
-                    "additionalProperties": false,
-                    "properties": {
-                      "sha256": {
-                        "pattern": "^[a-f0-9]{64}$",
-                        "type": "string"
-                      },
-                      "text": {
-                        "maxLength": 4096,
-                        "type": "string"
-                      },
-                      "truncated": {
-                        "const": true,
-                        "type": "boolean"
-                      }
-                    },
-                    "required": [
-                      "text",
-                      "truncated",
-                      "sha256"
-                    ],
-                    "type": "object"
+                  "text": {
+                    "maxLength": 4096,
+                    "type": "string"
+                  },
+                  "truncated": {
+                    "type": "boolean"
                   }
-                ]
+                },
+                "required": [
+                  "text",
+                  "truncated"
+                ],
+                "type": "object"
               },
               "message_bytes": {
                 "maximum": 9007199254740991,
@@ -581,49 +533,25 @@
                 "type": "integer"
               },
               "excerpt": {
-                "oneOf": [
-                  {
-                    "additionalProperties": false,
-                    "properties": {
-                      "text": {
-                        "maxLength": 4096,
-                        "type": "string"
-                      },
-                      "truncated": {
-                        "const": false,
-                        "type": "boolean"
-                      }
-                    },
-                    "required": [
-                      "text",
-                      "truncated"
-                    ],
-                    "type": "object"
+                "additionalProperties": false,
+                "properties": {
+                  "sha256": {
+                    "pattern": "^[a-f0-9]{64}$",
+                    "type": "string"
                   },
-                  {
-                    "additionalProperties": false,
-                    "properties": {
-                      "sha256": {
-                        "pattern": "^[a-f0-9]{64}$",
-                        "type": "string"
-                      },
-                      "text": {
-                        "maxLength": 4096,
-                        "type": "string"
-                      },
-                      "truncated": {
-                        "const": true,
-                        "type": "boolean"
-                      }
-                    },
-                    "required": [
-                      "text",
-                      "truncated",
-                      "sha256"
-                    ],
-                    "type": "object"
+                  "text": {
+                    "maxLength": 4096,
+                    "type": "string"
+                  },
+                  "truncated": {
+                    "type": "boolean"
                   }
-                ]
+                },
+                "required": [
+                  "text",
+                  "truncated"
+                ],
+                "type": "object"
               },
               "message_bytes": {
                 "maximum": 9007199254740991,

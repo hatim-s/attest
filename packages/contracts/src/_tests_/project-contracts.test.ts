@@ -1,7 +1,7 @@
 import { describe, expect, expectTypeOf, it } from 'vitest';
 
 import { agentResourceSchema, type AgentResource } from '../project/resources/agent.js';
-import { jsonlBridgeInputSchema, jsonlBridgeOutputSchema } from '../agent/managed-transport.js';
+import { jsonlBridgeInputSchema, jsonlBridgeOutputSchema } from '../agent/jsonl-bridge.js';
 import { testCaseSchema, type TestCase } from '../project/resources/case.js';
 import { commandRequestSchema, type CommandRequest } from '../cli/command-request.js';
 import { datasetResourceSchema, type DatasetResource } from '../project/resources/dataset.js';

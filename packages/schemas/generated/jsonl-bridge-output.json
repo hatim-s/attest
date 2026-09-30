@@ -70,8 +70,9 @@
       "additionalProperties": false,
       "properties": {
         "request_id": {
-          "maxLength": 256,
+          "maxLength": 128,
           "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
           "type": "string"
         },
         "response": {
@@ -125,8 +126,9 @@
       "additionalProperties": false,
       "properties": {
         "request_id": {
-          "maxLength": 256,
+          "maxLength": 128,
           "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
           "type": "string"
         },
         "type": {

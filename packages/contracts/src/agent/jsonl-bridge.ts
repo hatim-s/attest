@@ -1,8 +1,7 @@
 import { z } from 'zod';
 
 import { agentRequestSchema, agentResponseSchema } from './protocol.js';
-
-const requestIdSchema = z.string().min(1).max(256);
+import { requestIdSchema } from '../project/shared.js';
 
 /** Frames one native agent request for a persistent JSONL bridge. */
 const jsonlBridgeRequestSchema = z.strictObject({
