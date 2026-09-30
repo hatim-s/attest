@@ -1,7 +1,6 @@
 # Attest marketing site
 
-`index.html` is the approved `site/variants/sorter-line.html`, copied without changes.
-It contains the page, styles, theme controls, scroll branches, and canvas animation.
+`index.html` contains the page, styles, theme controls, scroll branches, and canvas animation.
 Google Fonts remains its only external asset dependency.
 
 From the repository root:

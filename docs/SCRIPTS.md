@@ -42,7 +42,7 @@ Run workspace commands from the repository root. To run one package script, use
 | `dev`       | site        | Serves the marketing page at `http://127.0.0.1:8735`.                     |
 | `build`     | site        | Copies the marketing page into `dist/index.html`.                         |
 | `preview`   | site        | Serves the built marketing page on the same loopback address.             |
-| `typecheck` | site        | Checks the site build and preview scripts.                                |
+| `typecheck` | site        | Checks the dev and preview server script.                                 |
 | `test`      | conformance | Runs public protocol fixtures and fake-agent checks.                      |
 | `test:fuzz` | conformance | Runs parser fuzzing with `FUZZ=1`.                                        |
 | `typecheck` | conformance | Checks conformance source.                                                |
