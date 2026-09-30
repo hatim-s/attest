@@ -46,28 +46,11 @@ interface RunDiff {
   transitions: CaseTransition[];
 }
 
-/** Configures optional CI failure gates over a run diff. */
-interface ThresholdConfig {
-  minPassRate?: number;
-  maxRegressions?: number;
-  failOnInvocationErrors?: boolean;
-  failOnMetricErrors?: boolean;
-}
-
-/** Reports the CI-compatible decision and human-actionable failures. */
-interface CiVerdict {
-  pass: boolean;
-  exitCode: 0 | 1;
-  reasons: string[];
-}
-
 export {
   type CaseTransition,
   type CaseTransitionKind,
   type CaseVerdict,
-  type CiVerdict,
   type DiffSummary,
   type MetricDelta,
   type RunDiff,
-  type ThresholdConfig,
 };
