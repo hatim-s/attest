@@ -7,7 +7,6 @@ import {
   type ProjectResources,
   type TestCase,
   type TestResource,
-  type JsonValue,
 } from '@attest/contracts';
 
 import { canonicalStringify, contentHash } from '@attest/core';
@@ -36,25 +35,24 @@ const sortById = <T extends { id: string }>(values: readonly T[]): T[] =>
   [...values].sort(({ id: left }, { id: right }) => left.localeCompare(right, 'en'));
 
 /** Renders generated JSON with canonical key ordering and one terminal newline. */
-const renderCanonicalJsonFile = (value: JsonValue): string =>
+const renderCanonicalJsonFile = (value: unknown): string =>
   `${JSON.stringify(JSON.parse(canonicalStringify(value)), undefined, 2)}\n`;
 
 /** Renders ordered JSONL records canonically, including a terminal newline when non-empty. */
-const renderCanonicalJsonLinesFile = (values: readonly JsonValue[]): string => {
+const renderCanonicalJsonLinesFile = (values: readonly unknown[]): string => {
   const serialized = serializeCanonicalJsonLines(values);
   return serialized.length === 0 ? '' : `${serialized}\n`;
 };
 
-const addJsonResource = <T extends AgentResource | MetricResource | TestResource>(
+const addJsonResource = (
   files: Map<string, CandidateFile>,
   path: string,
-  resource: T,
+  resource: AgentResource | MetricResource | TestResource,
 ): string => {
-  const value = resource as JsonValue;
-  const canonicalHash = contentHash(value);
+  const canonicalHash = contentHash(resource);
   files.set(path, {
     canonicalHash,
-    contents: renderCanonicalJsonFile(value),
+    contents: renderCanonicalJsonFile(resource),
     path,
   });
   return canonicalHash;
@@ -67,18 +65,16 @@ const addDataset = (
 ): { dataHash: string; metadataIntegrityHash: string } => {
   const metadataPath = `attest/datasets/${metadata.id}.meta.json`;
   const dataPath = `attest/datasets/${metadata.id}.jsonl`;
-  const metadataValue = metadata as JsonValue;
-  const caseValues = cases as unknown as readonly JsonValue[];
-  const metadataIntegrityHash = contentHash(metadataValue);
-  const dataHash = hashCanonicalJsonLines(caseValues);
+  const metadataIntegrityHash = contentHash(metadata);
+  const dataHash = hashCanonicalJsonLines(cases);
   files.set(metadataPath, {
     canonicalHash: metadataIntegrityHash,
-    contents: renderCanonicalJsonFile(metadataValue),
+    contents: renderCanonicalJsonFile(metadata),
     path: metadataPath,
   });
   files.set(dataPath, {
     canonicalHash: dataHash,
-    contents: renderCanonicalJsonLinesFile(caseValues),
+    contents: renderCanonicalJsonLinesFile(cases),
     path: dataPath,
   });
   return { dataHash, metadataIntegrityHash };
@@ -150,23 +146,16 @@ const prepareProjectCandidate = (candidate: ProjectResources): PreparedProjectCa
     );
   }
 
-  const manifestValue = validated.data.project as JsonValue;
   const projectHash = hashProjectManifest(
     validated.data.project,
     validated.data.datasets.map(({ metadata }) => metadata),
   );
   files.set('attest.project.json', {
-    canonicalHash: contentHash(manifestValue),
-    contents: renderCanonicalJsonFile(manifestValue),
+    canonicalHash: contentHash(validated.data.project),
+    contents: renderCanonicalJsonFile(validated.data.project),
     path: 'attest.project.json',
   });
   return { files, project: validated.data, projectHash };
 };
 
-export {
-  prepareProjectCandidate,
-  renderCanonicalJsonFile,
-  renderCanonicalJsonLinesFile,
-  type CandidateFile,
-  type PreparedProjectCandidate,
-};
+export { prepareProjectCandidate, type PreparedProjectCandidate };

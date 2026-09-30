@@ -135,10 +135,4 @@ const runTabularImportAdapter = async (
   }
 };
 
-export {
-  inferImportFormat,
-  prepareImportSource,
-  runTabularImportAdapter,
-  type ImportCommandAdapterOptions,
-  type PreparedImportSource,
-};
+export { prepareImportSource, runTabularImportAdapter, type PreparedImportSource };

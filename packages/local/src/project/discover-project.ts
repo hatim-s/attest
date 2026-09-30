@@ -138,9 +138,4 @@ const discoverProject = async (
   ]);
 };
 
-export {
-  PROJECT_MANIFEST_FILE,
-  discoverProject,
-  type DiscoverProjectOptions,
-  type DiscoveredProject,
-};
+export { PROJECT_MANIFEST_FILE, discoverProject, type DiscoverProjectOptions };

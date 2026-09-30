@@ -140,5 +140,4 @@ export {
   type AgentRenameCommandOptions,
   type AgentTestCommandOptions,
   type CurlImportRequest,
-  type MutationFields,
 };

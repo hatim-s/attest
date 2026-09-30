@@ -1,6 +1,8 @@
 import { readFile, realpath, stat } from 'node:fs/promises';
 import { resolve } from 'node:path';
 
+import type { z } from 'zod';
+
 import type { JsonValue } from '@attest/contracts';
 
 import { contentHash } from '@attest/core';
@@ -9,7 +11,7 @@ import { errnoCode } from '../../internal/errno-code.js';
 import { toJsonPointer } from '../../internal/json-pointer.js';
 import type { ProjectDiagnostic } from '../project-errors.js';
 import { isProjectPath } from '../project-path.js';
-import type { LoadedJsonResource, RuntimeSchema, SchemaIssue } from './types.js';
+import type { LoadedJsonResource } from './types.js';
 
 /** Reads one project-relative file only after lexical and realpath containment checks. */
 const readProjectSource = async (
@@ -88,7 +90,7 @@ const parseJson = (
 
 const schemaDiagnostics = (
   source: string,
-  issues: readonly SchemaIssue[],
+  issues: readonly z.core.$ZodIssue[],
   prefix: readonly PropertyKey[] = [],
 ): ProjectDiagnostic[] =>
   issues.map((issue) => ({
@@ -103,7 +105,7 @@ const loadJsonResource = async <Value>(
   root: string,
   source: string,
   expectedHash: string | undefined,
-  schema: RuntimeSchema<Value>,
+  schema: z.ZodType<Value>,
   hashValue: (value: JsonValue) => string = contentHash,
 ): Promise<LoadedJsonResource<Value>> => {
   const loaded = await readProjectSource(root, source);

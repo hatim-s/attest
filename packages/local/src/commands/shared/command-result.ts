@@ -159,24 +159,18 @@ type ApplicationCommandResult =
   | CommandResult<'test-case-show', TestCaseShowResult>;
 
 export {
-  type AgentListItem,
   type AgentTestResult,
   type ApplicationCommandResult,
   type CommandResult,
-  type DatasetListItem,
-  type MetricListItem,
   type MetricTestResult,
   type MutationImportResult,
   type MutationResult,
-  type ProjectCounts,
   type ProjectInitResult,
   type ProjectShowResult,
   type ProjectValidateResult,
   type ResourceListResult,
   type ResourceShowResult,
   type RunListItem,
-  type SharedDatasetPreview,
   type TestCaseListResult,
   type TestCaseShowResult,
-  type TestListItem,
 };

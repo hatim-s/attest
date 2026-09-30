@@ -76,15 +76,16 @@ type MutationBuildResult = {
   warnings?: CliWarning[];
 };
 
-const missingResource = (type: 'case' | 'dataset' | 'test', id: string): LocalError =>
+const MISSING_RESOURCE_HINTS = {
+  case: 'Run `attest test case list <test-id>` to inspect direct case ids.',
+  dataset: 'Run `attest list datasets` to inspect available ids.',
+  test: 'Run `attest list tests` to inspect available ids.',
+} as const;
+
+const missingResource = (type: keyof typeof MISSING_RESOURCE_HINTS, id: string): LocalError =>
   new LocalError('resource_not_found', `${type} ${id} was not found.`, {
     path: id,
-    hint:
-      type === 'case'
-        ? 'Run `attest test case list <test-id>` to inspect direct case ids.'
-        : type === 'dataset'
-          ? 'Run `attest list datasets` to inspect available ids.'
-          : 'Run `attest list tests` to inspect available ids.',
+    hint: MISSING_RESOURCE_HINTS[type],
   });
 
 const findTest = (candidate: ProjectResources, id: string): TestResource => {
@@ -135,10 +136,6 @@ const attachmentCases = (
       return attachment.tags?.some((tag) => !tags.has(tag)) !== true;
     });
   });
-
-/** Collects cases outside a direct import target that already resolve into its test. */
-const directImportCollisionCases = (candidate: ProjectResources, test: TestResource): TestCase[] =>
-  attachmentCases(candidate, test);
 
 /** Collects direct/attached cases that an imported dataset must not collide with in any test. */
 const datasetImportCollisionContexts = (
@@ -214,7 +211,8 @@ const buildMutation = async (
     case 'test.case.import': {
       const test = findTest(candidate, request.test_id);
       const imported = await runTabularImportAdapter({
-        collisionCases: directImportCollisionCases(candidate, test),
+        // Cases outside the direct import target that already resolve into its test.
+        collisionCases: attachmentCases(candidate, test),
         existingCases: test.cases,
         importOptions: request.import,
         preparedSource: options.preparedImportSource,
@@ -499,6 +497,4 @@ export {
   runTestMutationCommand,
   runTestShowCommand,
   type TestAuthoringCommand,
-  type TestMutationCommandOptions,
-  type TestReadCommandOptions,
 };

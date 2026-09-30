@@ -429,20 +429,14 @@ const recoverProjectTransactions = async (
 };
 
 export {
-  JOURNAL_FILE,
   TRANSACTIONS_DIRECTORY,
-  TRANSACTION_JOURNAL_SCHEMA,
   cleanupPreparedTransaction,
-  hashBytes,
   prepareTransaction,
   readByteHash,
   recoverProjectTransactions,
   rollbackPreparedTransaction,
   writeTransactionJournal,
   type PreparedTransaction,
-  type RecoveryResult,
   type TransactionFileChange,
-  type TransactionJournal,
   type TransactionJournalEntry,
-  type TransactionJournalStatus,
 };

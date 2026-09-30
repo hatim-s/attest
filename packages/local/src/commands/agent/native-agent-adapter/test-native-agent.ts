@@ -6,7 +6,6 @@ import {
   type AgentResource,
   type JsonValue,
 } from '@attest/contracts';
-import { type StoredAttempt } from '@attest/core';
 import {
   AgentInvocationError,
   invokeAgent,
@@ -57,11 +56,6 @@ const invocationAttempts = (attempts: InvocationResult['attempts']): JsonValue =
     raw_excerpt: attempt.rawExcerpt,
     warnings: attempt.warnings,
   })) as JsonValue;
-
-const storedAttempts = (
-  attempts: InvocationResult['attempts'],
-  secrets: readonly string[],
-): StoredAttempt[] => attempts.map((attempt) => redactStoredAttempt(attempt, secrets));
 
 /** Runs one supported adapter probe and returns only bounded, redacted evidence. */
 const testNativeAgentConnection = async (
@@ -223,7 +217,9 @@ const testNativeAgentConnection = async (
   if (invocation.status === 'invocation_error') {
     const code = invocation.error.code === 'cancelled' ? 'cancelled' : 'invocation_failed';
     await options.onExecution?.({
-      attempts: storedAttempts(invocation.attempts, resolved.secrets),
+      attempts: invocation.attempts.map((attempt) =>
+        redactStoredAttempt(attempt, resolved.secrets),
+      ),
       caseId: request.case_id,
       diagnostics: redactInvocationDiagnostics(invocation.diagnostics, resolved.secrets),
       durationMs: invocation.durationMs,
@@ -267,7 +263,7 @@ const testNativeAgentConnection = async (
   }
 
   await options.onExecution?.({
-    attempts: storedAttempts(invocation.attempts, resolved.secrets),
+    attempts: invocation.attempts.map((attempt) => redactStoredAttempt(attempt, resolved.secrets)),
     caseId: request.case_id,
     diagnostics: redactInvocationDiagnostics(invocation.diagnostics, resolved.secrets),
     durationMs: invocation.durationMs,
@@ -296,9 +292,4 @@ const testNativeAgentConnection = async (
   return result;
 };
 
-export {
-  CONNECTION_TEST_RUN_ID,
-  redactProbeValue,
-  testNativeAgentConnection,
-  type NativeAgentConnectionResult,
-};
+export { testNativeAgentConnection, type NativeAgentConnectionResult };

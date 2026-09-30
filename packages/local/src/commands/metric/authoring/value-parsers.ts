@@ -5,6 +5,7 @@ import {
   type SecretReference,
   type ToolArgumentMatcher,
 } from '@attest/contracts';
+import { z } from 'zod';
 
 import { LocalError } from '../../../errors/index.js';
 import { schemaIssueDiagnostics } from '../../../internal/schema-issue-diagnostics.js';
@@ -18,6 +19,19 @@ const parseFiniteNumber = (value: string, path: string): number => {
     throw new LocalError('cli_usage', `${path} must be a finite number.`, { path });
   }
   return parsed;
+};
+
+/** Parses a flag limited to fixed values into its literal type, or rejects it as a usage error. */
+const parseChoice = <const Choice extends string>(
+  value: string,
+  choices: readonly [Choice, ...Choice[]],
+  path: string,
+): Choice => {
+  const parsed = z.enum(choices).safeParse(value);
+  if (!parsed.success) {
+    throw new LocalError('cli_usage', `${path} must be one of ${choices.join(', ')}.`, { path });
+  }
+  return parsed.data;
 };
 
 const parseNonnegativeInteger = (value: string, path: string): number => {
@@ -135,6 +149,7 @@ const readExclusiveText = async (
 export {
   parseAssertionJson,
   parseAttributes,
+  parseChoice,
   parseFiniteNumber,
   parseJsonValue,
   parseNonnegativeInteger,

@@ -55,13 +55,9 @@ const verifyBundleLines = (lines: string[]): BundleLine[] => {
       `Run bundle header uses unsupported schema ${JSON.stringify(first.schema)}; expected ${JSON.stringify(BUNDLE_SCHEMA_ID)}.`,
     );
   }
-  const runViolations = collectRunRecordViolations(first.run, 'header.run');
-  if (runViolations.length > 0) {
-    throw corruptBundle(`Run bundle header contains a malformed run: ${runViolations.join('; ')}`);
-  }
-
   if (!isRunRecord(first.run)) {
-    throw corruptBundle('Run bundle header contains a malformed run.');
+    const runViolations = collectRunRecordViolations(first.run, 'header.run');
+    throw corruptBundle(`Run bundle header contains a malformed run: ${runViolations.join('; ')}`);
   }
   const header: BundleHeader = {
     type: 'bundle_header',
@@ -137,7 +133,7 @@ const writeToStream = async (destination: Writable, line: string): Promise<void>
   }
 };
 
-/** Atomically replaces a file only after its complete PLAN 1S.4 bundle is available. */
+/** Atomically replaces a file only after its complete bundle is available. */
 const writeAtomically = async (destination: string, contents: string): Promise<void> => {
   const temporaryPath = `${destination}.${randomUUID()}.tmp`;
   try {
@@ -151,7 +147,7 @@ const writeAtomically = async (destination: string, contents: string): Promise<v
   }
 };
 
-/** Exports a canonical PLAN 1S.4 bundle to an atomic file or caller-owned stream. */
+/** Exports a canonical run bundle to an atomic file or caller-owned stream. */
 const exportRunBundle = async (
   store: RunStore,
   runId: string,
@@ -190,4 +186,4 @@ async function* readRunBundle(source: Readable | string): AsyncIterable<BundleLi
   }
 }
 
-export { exportRunBundle, readRunBundle, verifyBundleLines };
+export { exportRunBundle, readRunBundle };

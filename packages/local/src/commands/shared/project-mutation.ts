@@ -30,4 +30,4 @@ const executeProjectMutation = async (
   });
 };
 
-export { executeProjectMutation, type ExecuteProjectMutationOptions, type PreparedProjectMutation };
+export { executeProjectMutation };

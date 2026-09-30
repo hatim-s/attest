@@ -230,6 +230,5 @@ export {
   releaseProjectLock,
   throwForExistingLock,
   type ProjectLockHandle,
-  type ProjectLockInspection,
   type ProjectLockMetadata,
 };

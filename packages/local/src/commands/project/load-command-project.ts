@@ -116,4 +116,4 @@ const candidateFromLoadedProject = (loaded: LoadedProject): ProjectResources =>
     tests: loaded.tests,
   });
 
-export { candidateFromLoadedProject, loadCommandProject, type LoadCommandProjectOptions };
+export { candidateFromLoadedProject, loadCommandProject };

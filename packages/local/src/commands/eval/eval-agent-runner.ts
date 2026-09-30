@@ -25,13 +25,11 @@ import {
 import { LocalError } from '../../errors/index.js';
 import { assertSafeNativeAgentResource } from '../agent/authoring/index.js';
 import {
+  redactAgentRequest,
+  redactInvocation,
   resolveNativeAgent,
   type ResolvedNativeAgent,
 } from '../agent/native-agent-adapter/index.js';
-import {
-  redactAgentRequest,
-  redactInvocation,
-} from '../agent/native-agent-adapter/evidence-redaction.js';
 import type { ResolvedEvalCaseInput } from './eval-resolver.js';
 import { createEvalMetricEvaluator } from './eval-metric-runner.js';
 import { createEvalLifecycle } from './eval-lifecycle.js';
@@ -76,28 +74,10 @@ const appendLifecycleFailure = (
     ),
   ];
   const combined = messages.join(' ');
-  const contentLimit = LIFECYCLE_ERROR_LIMIT - TRUNCATED_SUFFIX.length;
-  const separatorLength = Math.max(0, messages.length - 1);
-  const contentBudget = Math.max(0, contentLimit - separatorLength);
-  let minimum = 0;
-  let maximum = contentBudget;
-  while (minimum < maximum) {
-    const candidate = Math.ceil((minimum + maximum) / 2);
-    const used = messages.reduce((total, entry) => total + Math.min(entry.length, candidate), 0);
-    if (used <= contentBudget) minimum = candidate;
-    else maximum = candidate - 1;
-  }
-  const lengths = messages.map((entry) => Math.min(entry.length, minimum));
-  let remaining = contentBudget - lengths.reduce((total, length) => total + length, 0);
-  for (const [index, entry] of messages.entries()) {
-    const extra = Math.min(remaining, entry.length - lengths[index]!);
-    lengths[index]! += extra;
-    remaining -= extra;
-  }
   const lifecycleError =
     combined.length <= LIFECYCLE_ERROR_LIMIT
       ? combined
-      : `${messages.map((entry, index) => entry.slice(0, lengths[index])).join(' ')}${TRUNCATED_SUFFIX}`;
+      : `${combined.slice(0, LIFECYCLE_ERROR_LIMIT - TRUNCATED_SUFFIX.length)}${TRUNCATED_SUFFIX}`;
   return {
     execution: {
       ...result.execution,
@@ -300,7 +280,11 @@ const createEvalCaseRunner = (
     let failure: unknown;
     try {
       workerDirectory = await lifecycle.prepareCase(hookContext);
-      await lifecycle.beforeCase(hookContext, workerDirectory, signal);
+      await lifecycle.runCasePhase('before_case', {
+        context: hookContext,
+        directory: workerDirectory,
+        signal,
+      });
       const request: AgentRequest = {
         protocol: AGENT_PROTOCOL,
         run_id: runId,
@@ -374,14 +358,24 @@ const createEvalCaseRunner = (
         lifecycleError = uncertainCleanup.lifecycle_error;
       }
       try {
-        await lifecycle.afterAgent(hookContext, workerDirectory, execution.outcome, signal);
+        await lifecycle.runCasePhase('after_agent', {
+          context: hookContext,
+          directory: workerDirectory,
+          outcome: execution.outcome,
+          signal,
+        });
         await context.afterAgent?.(execution);
       } catch (error: unknown) {
         throw new EvalCaseStageError('after_agent', execution, [], error);
       }
       const metrics = await metricEvaluator.evaluate(runId, payload, execution, signal);
       try {
-        await lifecycle.afterEvaluation(hookContext, workerDirectory, execution.outcome, signal);
+        await lifecycle.runCasePhase('after_evaluation', {
+          context: hookContext,
+          directory: workerDirectory,
+          outcome: execution.outcome,
+          signal,
+        });
         await context.afterEvaluation?.(execution, metrics);
       } catch (error: unknown) {
         throw new EvalCaseStageError('after_evaluation', execution, metrics, error);
@@ -396,7 +390,11 @@ const createEvalCaseRunner = (
     }
 
     try {
-      await lifecycle.afterCase(hookContext, workerDirectory, outcome);
+      await lifecycle.runCasePhase('after_case', {
+        context: hookContext,
+        directory: workerDirectory,
+        outcome,
+      });
     } catch (hookError: unknown) {
       if (result !== undefined) {
         result = appendLifecycleFailure(result, hookError);
@@ -460,4 +458,4 @@ const createEvalCaseRunner = (
   };
 };
 
-export { createEvalCaseRunner, redactAgentRequest, redactInvocation };
+export { createEvalCaseRunner };

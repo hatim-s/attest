@@ -145,4 +145,4 @@ const openEvalProjectStore = async (projectRoot: string): Promise<AttestStore> =
   throw asError(failure);
 };
 
-export { openEvalProjectStore, prepareEvalProjectFile, type PrepareEvalProjectFileOptions };
+export { openEvalProjectStore, prepareEvalProjectFile };

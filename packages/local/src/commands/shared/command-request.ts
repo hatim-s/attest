@@ -63,9 +63,4 @@ const readCommandRequest = async <TCommand extends CommandRequest['command']>(
   return parseCommandRequest(command, value, '--from-json');
 };
 
-export {
-  readCommandRequest,
-  validateCommandRequest,
-  type CommandRequestFor,
-  type ReadCommandRequestOptions,
-};
+export { readCommandRequest, validateCommandRequest };

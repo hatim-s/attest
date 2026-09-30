@@ -1,12 +1,7 @@
 import { lstat, realpath } from 'node:fs/promises';
 import { resolve } from 'node:path';
 
-import {
-  type CommandRequest,
-  type JsonValue,
-  type MetricResource,
-  type ProjectResources,
-} from '@attest/contracts';
+import { type CommandRequest, type MetricResource, type ProjectResources } from '@attest/contracts';
 import { evaluateMetrics, type MetricContext, type MetricEvaluation } from '@attest/runtime';
 
 import { LocalError } from '../../errors/index.js';
@@ -317,11 +312,9 @@ const assertMetricDirectoryIdentity = async (directory: AnchoredEntry): Promise<
   }
 };
 
-const withoutDuration = (evaluation: MetricEvaluation): JsonValue => {
-  const deterministic = structuredClone(evaluation);
-  Reflect.deleteProperty(deterministic, 'durationMs');
-  return deterministic;
-};
+/** Drops the timing so repeated fixture runs produce identical results. */
+const withoutDuration = (evaluation: MetricEvaluation): Record<string, unknown> =>
+  Object.fromEntries(Object.entries(evaluation).filter(([key]) => key !== 'durationMs'));
 
 /** Tests assertions or trusted argv locally; judge and HTTP definitions remain inspection-only. */
 const runMetricTestCommand = async (
@@ -437,12 +430,9 @@ const runMetricTestCommand = async (
 };
 
 export {
-  metricReferencePaths,
-  rewriteMetricReferences,
   runMetricMutationCommand,
   runMetricTestCommand,
   type MetricAuthoringRequest,
   type MetricMutationCommandOptions,
-  type MetricReadCommandOptions,
   type MetricTestCommandOptions,
 };

@@ -211,6 +211,5 @@ export {
   cancelConfiguration,
   runConfiguration,
   type CancelConfigurationOptions,
-  type CancelConfigurationResult,
   type RunConfigurationOptions,
 };

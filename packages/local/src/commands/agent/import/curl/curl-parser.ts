@@ -484,12 +484,11 @@ const parseCurlCommand = (source: string, options: CurlParserOptions = {}): Pars
     ...(body === undefined ? {} : { body }),
     ...(bodyEncoding === undefined ? {} : { body_encoding: bodyEncoding }),
   };
-  const redactTemplateValue = (value: string | SecretReference): string =>
-    typeof value === 'string'
-      ? value
-      : 'from_env' in value
-        ? `[from_env:${value.from_env}]`
-        : '[from_file]';
+  const redactTemplateValue = (value: string | SecretReference): string => {
+    if (typeof value === 'string') return value;
+    if ('from_env' in value) return `[from_env:${value.from_env}]`;
+    return '[from_file]';
+  };
   return {
     request,
     preview: {

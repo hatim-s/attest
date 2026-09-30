@@ -14,6 +14,7 @@ import { parseArgvJson, parseDuration } from '../../agent/authoring/index.js';
 import {
   parseAssertionJson,
   parseAttributes,
+  parseChoice,
   parseFiniteNumber,
   parseJsonValue,
   parseNonnegativeInteger,
@@ -110,6 +111,40 @@ const allowedFields = (
   ...values: Array<keyof MetricAddFields>
 ): ReadonlySet<keyof MetricAddFields> => new Set(values);
 
+const SPAN_KINDS = ['agent', 'llm', 'tool', 'retrieval', 'other'] as const;
+const HTTP_METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'] as const;
+
+const ASSERTION_PRESET_FIELDS: Readonly<
+  Record<
+    Exclude<MetricPresetId, 'command' | 'http' | 'judge-rubric'>,
+    ReadonlySet<keyof MetricAddFields>
+  >
+> = {
+  'output-equals': allowedFields('path', 'preset', 'value'),
+  'output-contains': allowedFields('path', 'preset', 'value'),
+  'output-schema': allowedFields('jsonSchema', 'jsonSchemaFile', 'path', 'preset'),
+  'tool-called': allowedFields(
+    'argContains',
+    'argEquals',
+    'argExists',
+    'count',
+    'preset',
+    'tool',
+    'toolStatus',
+  ),
+  'tool-order': allowedFields('order', 'preset'),
+  'no-tool-errors': allowedFields('preset'),
+  'trace-span': allowedFields(
+    'attribute',
+    'count',
+    'order',
+    'preset',
+    'spanKind',
+    'spanName',
+    'spanStatus',
+  ),
+};
+
 const buildAssertionDefinition = async (
   fields: MetricAddFields,
 ): Promise<MetricResource['definition']> => {
@@ -173,7 +208,7 @@ const buildAssertionDefinition = async (
               name: requireValue(fields.tool, '--tool'),
               ...(fields.toolStatus === undefined
                 ? {}
-                : { status: fields.toolStatus as 'error' | 'ok' }),
+                : { status: parseChoice(fields.toolStatus, ['ok', 'error'], '--tool-status') }),
               ...(fields.count === undefined
                 ? {}
                 : { count: parseNonnegativeInteger(fields.count, '--count') }),
@@ -202,9 +237,13 @@ const buildAssertionDefinition = async (
     case 'trace-span': {
       const attributes = parseAttributes(fields.attribute);
       const filter = {
-        ...(fields.spanKind === undefined ? {} : { kind: fields.spanKind as 'agent' }),
+        ...(fields.spanKind === undefined
+          ? {}
+          : { kind: parseChoice(fields.spanKind, SPAN_KINDS, '--span-kind') }),
         ...(fields.spanName === undefined ? {} : { name: fields.spanName }),
-        ...(fields.spanStatus === undefined ? {} : { status: fields.spanStatus as 'error' | 'ok' }),
+        ...(fields.spanStatus === undefined
+          ? {}
+          : { status: parseChoice(fields.spanStatus, ['ok', 'error'], '--span-status') }),
         ...(attributes === undefined ? {} : { attributes }),
       };
       return {
@@ -288,7 +327,7 @@ const createMetricResource = async (fields: MetricAddFields): Promise<MetricReso
       kind: 'http',
       request: {
         url: requireValue(fields.url, '--url'),
-        method: (fields.httpMethod ?? 'POST') as 'POST',
+        method: parseChoice(fields.httpMethod ?? 'POST', HTTP_METHODS, '--http-method'),
         ...(headers === undefined ? {} : { headers }),
         ...(query === undefined ? {} : { query }),
         ...(fields.bodyJson === undefined
@@ -306,35 +345,7 @@ const createMetricResource = async (fields: MetricAddFields): Promise<MetricReso
       ...(fields.timeout === undefined ? {} : { timeout_ms: parseDuration(fields.timeout) }),
     };
   } else if (fields.preset !== undefined) {
-    const presetFields: Record<
-      Exclude<MetricPresetId, 'command' | 'http' | 'judge-rubric'>,
-      ReadonlySet<keyof MetricAddFields>
-    > = {
-      'output-equals': allowedFields('path', 'preset', 'value'),
-      'output-contains': allowedFields('path', 'preset', 'value'),
-      'output-schema': allowedFields('jsonSchema', 'jsonSchemaFile', 'path', 'preset'),
-      'tool-called': allowedFields(
-        'argContains',
-        'argEquals',
-        'argExists',
-        'count',
-        'preset',
-        'tool',
-        'toolStatus',
-      ),
-      'tool-order': allowedFields('order', 'preset'),
-      'no-tool-errors': allowedFields('preset'),
-      'trace-span': allowedFields(
-        'attribute',
-        'count',
-        'order',
-        'preset',
-        'spanKind',
-        'spanName',
-        'spanStatus',
-      ),
-    };
-    assertOnlyFields(fields, presetFields[fields.preset]);
+    assertOnlyFields(fields, ASSERTION_PRESET_FIELDS[fields.preset]);
     definition = await buildAssertionDefinition(fields);
   } else {
     const thresholds = [fields.lt, fields.lte, fields.gt, fields.gte].filter(

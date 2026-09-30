@@ -53,7 +53,7 @@ const findResource = async (
   } else {
     const resource = project.datasets.find(({ metadata }) => metadata.id === id);
     if (resource !== undefined) {
-      return { metadata: resource.metadata as JsonValue, cases: resource.cases as JsonValue };
+      return { metadata: resource.metadata, cases: resource.cases };
     }
   }
   throw missingResource(type, id);

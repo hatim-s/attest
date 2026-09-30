@@ -23,6 +23,10 @@ class HookCommandError extends LocalError {
   }
 }
 
+/**
+ * Reads the abort flag through a call so TypeScript does not keep the narrowing from an earlier
+ * check; the signal can abort while the hook spawns.
+ */
 const isAborted = (signal: AbortSignal | undefined): boolean => signal?.aborted === true;
 
 /** Runs one argv-only hook with identity-checked process-tree cleanup on every terminal path. */

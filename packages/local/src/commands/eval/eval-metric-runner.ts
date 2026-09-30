@@ -11,7 +11,7 @@ import {
   type MetricResource,
 } from '@attest/contracts';
 import { type CacheStore } from '@attest/core';
-import { invokeMappedHttpAgent, redactTransportText, type CaseExecution } from '@attest/executor';
+import { invokeMappedHttpAgent, type CaseExecution } from '@attest/executor';
 import {
   caseExecutionToMetricContext,
   createTanstackJudgeClient,
@@ -27,7 +27,7 @@ import { LocalError } from '../../errors/index.js';
 import { readJsonPointer } from '../../internal/json-pointer.js';
 import { isProjectPath } from '../../project/project-path.js';
 import {
-  redactProbeValue,
+  redactMetricEvaluation,
   resolveNativeAgent,
   resolveProcessEnvironment,
 } from '../agent/native-agent-adapter/index.js';
@@ -52,49 +52,6 @@ const resolveExecutableMetric = async (
   }
   const { env, secrets } = await resolveProcessEnvironment(metric.env, projectRoot);
   return { cwd, env, secrets };
-};
-
-/** Redacts metric evidence while preserving identities and discriminants used by persistence. */
-const redactMetricEvaluation = (
-  evaluation: MetricEvaluation,
-  secrets: readonly string[],
-): MetricEvaluation => {
-  if (secrets.length === 0) return evaluation;
-  const judgeIo =
-    evaluation.judgeIo === undefined ? undefined : redactProbeValue(evaluation.judgeIo, secrets);
-  if (evaluation.status === 'error') {
-    return {
-      ...evaluation,
-      judgeIo,
-      rationale:
-        evaluation.rationale === undefined
-          ? undefined
-          : redactTransportText(evaluation.rationale, secrets),
-      error: {
-        ...evaluation.error,
-        message: redactTransportText(evaluation.error.message, secrets),
-        details:
-          evaluation.error.details === undefined
-            ? undefined
-            : redactProbeValue(evaluation.error.details, secrets),
-      },
-    };
-  }
-  return {
-    ...evaluation,
-    judgeIo,
-    result: {
-      ...evaluation.result,
-      rationale:
-        evaluation.result.rationale === undefined
-          ? undefined
-          : redactTransportText(evaluation.result.rationale, secrets),
-      details:
-        evaluation.result.details === undefined
-          ? undefined
-          : redactProbeValue(evaluation.result.details, secrets),
-    },
-  };
 };
 
 /** Converts a HTTP metric response mapping into the existing metric result evidence shape. */
@@ -333,9 +290,4 @@ const createEvalMetricEvaluator = (projectRoot: string, cacheStore: CacheStore) 
   return { evaluate };
 };
 
-export {
-  createEvalMetricEvaluator,
-  extractHttpMetricResult,
-  readJsonPointer,
-  redactMetricEvaluation,
-};
+export { createEvalMetricEvaluator };

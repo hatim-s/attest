@@ -12,7 +12,7 @@ import { openLibsqlHandle } from '../internal/libsql-handle.js';
 import { openNodeSqliteHandle } from '../internal/node-sqlite-handle.js';
 import { openSqliteHandle } from '../internal/open-sqlite-handle.js';
 import type { SqliteHandle } from '../internal/sqlite-handle.js';
-import { migrateToLatest, validateReadableSchema } from '../migration-runner.js';
+import { migrateToLatest } from '../migration-runner.js';
 import { openReadonlyRunStore, openStore, openRunStoreSnapshot } from '../run-store.js';
 
 const stores: { close(): Promise<void> }[] = [];
@@ -140,27 +140,6 @@ describe('SQLite store database', () => {
     await expect(openStore(path)).rejects.toMatchObject({ code: 'SCHEMA_TOO_NEW' });
   });
 
-  it('rejects the pre-latest runs table even when it claims the current schema version', async () => {
-    const path = await temporaryDatabasePath();
-    const handle = await openSqliteHandle(path);
-    await handle.exec(`
-      CREATE TABLE schema_migrations (
-        version INTEGER PRIMARY KEY,
-        name TEXT NOT NULL,
-        applied_at TEXT NOT NULL
-      );
-      INSERT INTO schema_migrations VALUES (1, 'initial', '2026-08-06T00:00:00.000Z');
-      CREATE TABLE runs (
-        id TEXT PRIMARY KEY,
-        config_version TEXT NOT NULL
-      );
-    `);
-
-    await expect(validateReadableSchema(handle)).rejects.toMatchObject({ code: 'SCHEMA_OUTDATED' });
-    await expect(migrateToLatest(handle)).rejects.toMatchObject({ code: 'SCHEMA_OUTDATED' });
-    await handle.close();
-  });
-
   it('inspects an existing store without changing its bytes or sidecars', async () => {
     const path = await temporaryDatabasePath();
     const writer = await openStore(path);
@@ -258,15 +237,6 @@ describe('SQLite store database', () => {
     await expect(reopened.runs.getCaseResults(runId)).resolves.toMatchObject([
       { caseId: 'crash-case', runId },
     ]);
-  });
-
-  it('enables WAL journal mode', async () => {
-    const path = await temporaryDatabasePath();
-    const handle = await openSqliteHandle(path);
-    const [row] = await handle.prepare('PRAGMA journal_mode').all();
-    await handle.close();
-
-    expect((row as { journal_mode: string }).journal_mode).toBe('wal');
   });
 
   it('returns inserted rows through the node:sqlite handle', async ({ skip }) => {

@@ -28,12 +28,6 @@ type RunReportCommandResult = {
   truncated: boolean;
 };
 
-/** Applies the report evidence ceiling without mutating the store result. */
-const selectReportCases = <T>(cases: T[]): { cases: T[]; truncated: boolean } => ({
-  cases: cases.slice(0, MAX_REPORT_CASES),
-  truncated: cases.length > MAX_REPORT_CASES,
-});
-
 /** Materializes one bounded, self-contained run report without overwriting by default. */
 const runReportCommand = async (
   options: RunReportCommandOptions,
@@ -55,13 +49,15 @@ const runReportCommand = async (
   );
   if (runWithCases === undefined) throw runNotFound();
 
-  const selection = selectReportCases(runWithCases.cases);
+  // Reports stay bounded: only the first MAX_REPORT_CASES cases are embedded.
+  const cases = runWithCases.cases.slice(0, MAX_REPORT_CASES);
+  const truncated = runWithCases.cases.length > MAX_REPORT_CASES;
   const reportData = {
     schema: 'attest.report',
     generatedAt: new Date().toISOString(),
     run: runWithCases.run,
-    cases: selection.cases.map((record) => ({ record, summary: summarizeCaseRecord(record) })),
-    truncated: selection.truncated,
+    cases: cases.map((record) => ({ record, summary: summarizeCaseRecord(record) })),
+    truncated: truncated,
   };
   const outputPath = await prepareEvalProjectFile(
     options.workingDirectory,
@@ -103,17 +99,11 @@ const runReportCommand = async (
   }
 
   return {
-    caseCount: selection.cases.length,
+    caseCount: cases.length,
     outputPath,
     totalCaseCount: runWithCases.cases.length,
-    truncated: selection.truncated,
+    truncated: truncated,
   };
 };
 
-export {
-  MAX_REPORT_CASES,
-  runReportCommand,
-  selectReportCases,
-  type RunReportCommandOptions,
-  type RunReportCommandResult,
-};
+export { runReportCommand, type RunReportCommandOptions, type RunReportCommandResult };

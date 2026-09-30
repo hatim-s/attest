@@ -9,6 +9,7 @@ import type {
 } from '@attest/contracts';
 import type { StoredAttempt } from '@attest/core';
 import { AgentInvocationError, redactTransportText, type InvocationResult } from '@attest/executor';
+import type { MetricEvaluation } from '@attest/runtime';
 
 import { REDACTED, isSensitiveFieldName } from '../../../internal/redaction.js';
 
@@ -308,13 +309,56 @@ const redactStoredAttempt = (
       };
 };
 
+/** Redacts metric evidence while preserving identities and discriminants used by persistence. */
+const redactMetricEvaluation = (
+  evaluation: MetricEvaluation,
+  secrets: readonly string[],
+): MetricEvaluation => {
+  if (secrets.length === 0) return evaluation;
+  const judgeIo =
+    evaluation.judgeIo === undefined ? undefined : redactProbeValue(evaluation.judgeIo, secrets);
+  if (evaluation.status === 'error') {
+    return {
+      ...evaluation,
+      judgeIo,
+      rationale:
+        evaluation.rationale === undefined
+          ? undefined
+          : redactTransportText(evaluation.rationale, secrets),
+      error: {
+        ...evaluation.error,
+        message: redactTransportText(evaluation.error.message, secrets),
+        details:
+          evaluation.error.details === undefined
+            ? undefined
+            : redactProbeValue(evaluation.error.details, secrets),
+      },
+    };
+  }
+  return {
+    ...evaluation,
+    judgeIo,
+    result: {
+      ...evaluation.result,
+      rationale:
+        evaluation.result.rationale === undefined
+          ? undefined
+          : redactTransportText(evaluation.result.rationale, secrets),
+      details:
+        evaluation.result.details === undefined
+          ? undefined
+          : redactProbeValue(evaluation.result.details, secrets),
+    },
+  };
+};
+
 export {
   redactAgentRequest,
   redactAgentResponse,
   redactInvocation,
   redactInvocationDiagnostics,
+  redactMetricEvaluation,
   redactProbeValue,
-  redactRawExcerpt,
   redactStoredAttempt,
   redactTrace,
   redactWarnings,

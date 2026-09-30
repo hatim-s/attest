@@ -193,11 +193,4 @@ const signalRegisteredEvalRun = async (
   }
 };
 
-export {
-  detachEvalRun,
-  EVAL_REGISTRY_DIRECTORY,
-  registerEvalRun,
-  signalRegisteredEvalRun,
-  unregisterEvalRun,
-  type EvalRegistryHandle,
-};
+export { detachEvalRun, registerEvalRun, signalRegisteredEvalRun, unregisterEvalRun };

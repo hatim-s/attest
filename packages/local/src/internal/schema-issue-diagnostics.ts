@@ -11,4 +11,4 @@ type SchemaIssueDiagnostic = { message: string; path: string };
 const schemaIssueDiagnostics = (issues: readonly SchemaIssue[]): SchemaIssueDiagnostic[] =>
   issues.map(({ message, path }) => ({ message, path: toJsonPointer(path) }));
 
-export { schemaIssueDiagnostics, type SchemaIssueDiagnostic };
+export { schemaIssueDiagnostics };

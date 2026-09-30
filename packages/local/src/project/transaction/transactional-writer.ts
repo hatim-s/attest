@@ -264,11 +264,4 @@ const applyProjectMutation = async (
   }
 };
 
-export {
-  applyProjectMutation,
-  createFileChanges,
-  markTransactionCommitted,
-  publishPreparedTransaction,
-  type PublishEvent,
-  type PublishObserver,
-};
+export { applyProjectMutation, createFileChanges, publishPreparedTransaction };

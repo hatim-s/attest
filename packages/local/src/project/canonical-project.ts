@@ -4,7 +4,7 @@ import type { DatasetResource, JsonValue, ProjectManifest } from '@attest/contra
 import { canonicalStringify, contentHash } from '@attest/core';
 
 /** Serializes ordered JSONL records with one canonical newline separator and no trailing newline. */
-const serializeCanonicalJsonLines = (values: readonly JsonValue[]): string =>
+const serializeCanonicalJsonLines = (values: readonly unknown[]): string =>
   values.map(canonicalStringify).join('\n');
 
 /** Computes the lowercase SHA-256 content hash used by project manifests. */
@@ -56,7 +56,7 @@ const hashProjectManifest = (
 };
 
 /** Computes a formatting-independent hash for ordered parsed JSONL records. */
-const hashCanonicalJsonLines = (values: readonly JsonValue[]): string =>
+const hashCanonicalJsonLines = (values: readonly unknown[]): string =>
   hashCanonicalContent(serializeCanonicalJsonLines(values));
 
 export {

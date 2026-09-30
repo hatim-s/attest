@@ -17,15 +17,6 @@ type LoadedProject = ProjectResources & {
   root: string;
 };
 
-type SchemaIssue = { message: string; path: PropertyKey[] };
-
-type RuntimeSchema<Value> = {
-  safeParse: (
-    value: unknown,
-  ) =>
-    { data: Value; success: true } | { error: { issues: readonly SchemaIssue[] }; success: false };
-};
-
 type LoadedJsonResource<Value> = {
   diagnostics: ProjectDiagnostic[];
   hash?: string;
@@ -48,6 +39,4 @@ export {
   type LoadedJsonResource,
   type LoadedProject,
   type ProjectContentHashes,
-  type RuntimeSchema,
-  type SchemaIssue,
 };

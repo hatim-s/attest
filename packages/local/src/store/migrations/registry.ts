@@ -168,4 +168,4 @@ CREATE INDEX idx_runs_created ON runs(created_at DESC);
 /** Registers the single supported initial schema consumed by the migration runner. */
 const migrations = [{ version: 1, name: 'initial', sql: initialSchemaSql }] as const;
 
-export { migrations, initialSchemaSql };
+export { migrations };

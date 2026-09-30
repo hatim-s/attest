@@ -108,9 +108,4 @@ const resolveContainedPath = async (
   return candidate;
 };
 
-export {
-  isProjectPath,
-  resolveContainedPath,
-  type ContainedPathProblem,
-  type ResolveContainedPathOptions,
-};
+export { isProjectPath, resolveContainedPath, type ContainedPathProblem };

@@ -1,5 +1,4 @@
 import type { Transaction } from 'kysely';
-import { monotonicFactory } from 'ulid';
 
 import {
   canonicalStringify,
@@ -14,9 +13,8 @@ import {
 
 import type { Database } from '../schema.js';
 import { toCaseRecord, toMetricEvaluation } from './row-mapping.js';
+import { createUlid } from './create-ulid.js';
 import { toSpanAttribute } from './span-attribute.js';
-
-const createUlid = monotonicFactory();
 
 /** Aggregates execution and evaluation violations before a database transaction begins. */
 const validateCaseRecordInput = (
@@ -24,15 +22,11 @@ const validateCaseRecordInput = (
   evaluations: StoredMetricEvaluation[],
 ): void => {
   const violations = collectStoredCaseExecutionViolations(execution);
-  if (!Array.isArray(evaluations)) {
-    violations.push('evaluations must be an array');
-  } else {
-    evaluations.forEach((evaluation, index) => {
-      violations.push(
-        ...collectStoredMetricEvaluationViolations(evaluation, `evaluations[${index}]`),
-      );
-    });
-  }
+  evaluations.forEach((evaluation, index) => {
+    violations.push(
+      ...collectStoredMetricEvaluationViolations(evaluation, `evaluations[${index}]`),
+    );
+  });
   if (violations.length > 0) {
     throw new StoreError('INVALID_RECORD', `Invalid case record: ${violations.join('; ')}.`);
   }

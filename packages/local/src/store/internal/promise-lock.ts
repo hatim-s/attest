@@ -20,4 +20,4 @@ const createLock = (): PromiseLock => {
   };
 };
 
-export { createLock, type PromiseLock };
+export { createLock };

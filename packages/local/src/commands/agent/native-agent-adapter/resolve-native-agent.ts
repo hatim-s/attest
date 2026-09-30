@@ -3,11 +3,6 @@ import { tmpdir } from 'node:os';
 import { delimiter, isAbsolute, resolve } from 'node:path';
 
 import type { AgentResource, SecretReference } from '@attest/contracts';
-import type {
-  HttpAgentResource,
-  StreamAgentResource,
-  WebSocketAgentResource,
-} from '@attest/executor';
 
 import { LocalError } from '../../../errors/index.js';
 import { openAnchored, type AnchoredEntry } from '../../../internal/open-anchored.js';
@@ -107,36 +102,130 @@ const resolveProcessEnvironment = async (
   return { env, secrets };
 };
 
-/** Resolves request-template secret references without changing the authored resource. */
-const resolveHttpSecrets = async (
-  requests: readonly {
-    headers?: Record<string, string | SecretReference>;
-    query?: Record<string, string | SecretReference>;
-  }[],
-  projectRoot: string,
-): Promise<{
+type ResolvedRequestSecrets = {
   headers: Record<string, string>;
   query: Record<string, string>;
   secrets: string[];
-}> => {
-  const headers: Record<string, string> = {};
-  const query: Record<string, string> = {};
+};
+
+/** Resolves one request template's secret references without changing the authored resource. */
+const resolveHttpSecrets = async (
+  request: {
+    headers?: Record<string, string | SecretReference>;
+    query?: Record<string, string | SecretReference>;
+  },
+  projectRoot: string,
+): Promise<ResolvedRequestSecrets> => {
+  const resolveValues = async (
+    values: Record<string, string | SecretReference> | undefined,
+    secrets: string[],
+  ): Promise<Record<string, string>> => {
+    const resolved: Record<string, string> = {};
+    for (const [name, value] of Object.entries(values ?? {})) {
+      if (typeof value === 'string') {
+        resolved[name] = value;
+        continue;
+      }
+      resolved[name] = await readSecretReference(value, projectRoot);
+      secrets.push(resolved[name]);
+    }
+    return resolved;
+  };
   const secrets: string[] = [];
-  for (const request of requests) {
-    for (const [name, value] of Object.entries(request.headers ?? {})) {
-      const resolved =
-        typeof value === 'string' ? value : await readSecretReference(value, projectRoot);
-      headers[name] = resolved;
-      if (typeof value !== 'string') secrets.push(resolved);
-    }
-    for (const [name, value] of Object.entries(request.query ?? {})) {
-      const resolved =
-        typeof value === 'string' ? value : await readSecretReference(value, projectRoot);
-      query[name] = resolved;
-      if (typeof value !== 'string') secrets.push(resolved);
-    }
-  }
+  const headers = await resolveValues(request.headers, secrets);
+  const query = await resolveValues(request.query, secrets);
   return { headers, query, secrets };
+};
+
+/** Adds literal header and query values the agent marks for redaction to its secret list. */
+const addRedactedRequestValues = (agent: AgentResource, resolved: ResolvedRequestSecrets): void => {
+  const redactedHeaders = new Set(agent.redaction?.headers?.map((name) => name.toLowerCase()));
+  for (const [name, value] of Object.entries(resolved.headers)) {
+    if (redactedHeaders.has(name.toLowerCase())) resolved.secrets.push(value);
+  }
+  for (const name of agent.redaction?.query ?? []) {
+    const value = resolved.query[name];
+    if (value !== undefined) resolved.secrets.push(value);
+  }
+};
+
+/** Reads the argv values the agent marks for redaction, so evidence can hide them. */
+const redactedArgvValues = (agent: AgentResource, argv: readonly string[]): string[] =>
+  (agent.redaction?.argv_positions ?? []).map((position) => {
+    const value = argv[position];
+    if (value === undefined) {
+      throw new LocalError('project_invalid', 'An argv redaction position is out of range.', {
+        path: `/agents/${agent.id}/redaction/argv_positions`,
+      });
+    }
+    return value;
+  });
+
+type ProcessTransport = Extract<
+  AgentResource['transport'],
+  { kind: 'background_cli' | 'jsonl_bridge' | 'native_cli' }
+>;
+
+/** Resolves a process-based transport: environment, cwd, argv, and redacted argv values. */
+const resolveProcessAgent = async (
+  agent: AgentResource,
+  transport: ProcessTransport,
+  projectRoot: string,
+): Promise<ResolvedNativeAgent> => {
+  const { env, secrets } = await resolveProcessEnvironment(transport.env, projectRoot);
+  if (transport.kind === 'native_cli' && transport.sandbox !== undefined) {
+    const sandboxEnvironment = Object.fromEntries(
+      Object.keys(transport.env ?? {}).flatMap((name) => {
+        const value = env[name];
+        return value === undefined ? [] : [[name, value]];
+      }),
+    );
+    return {
+      argv: [transport.argv[0]!, ...transport.argv.slice(1)],
+      ...(transport.cwd === undefined ? {} : { cwd: transport.cwd }),
+      env: sandboxEnvironment,
+      kind: 'vercel_sandbox',
+      sandbox: transport.sandbox,
+      secrets: [...secrets, ...redactedArgvValues(agent, transport.argv)],
+    };
+  }
+  const cwd = await resolveProcessCwd(projectRoot, transport.cwd);
+  const authoredArgv = transport.kind === 'background_cli' ? transport.start_argv : transport.argv;
+  const argv = resolveProcessArgv(authoredArgv, cwd);
+  const processSecrets = [...secrets, ...redactedArgvValues(agent, argv)];
+  if (transport.kind === 'native_cli') {
+    return {
+      env,
+      kind: 'direct',
+      secrets: processSecrets,
+      target: { type: 'cli', command: argv },
+    };
+  }
+  if (transport.kind === 'jsonl_bridge') {
+    return {
+      agent: { ...agent, transport: { ...transport, argv } },
+      cwd,
+      env,
+      kind: 'jsonl_bridge',
+      secrets: processSecrets,
+    };
+  }
+  const invoke = await resolveHttpSecrets(transport.invoke, projectRoot);
+  const shutdown =
+    transport.shutdown === undefined
+      ? { headers: {}, query: {}, secrets: [] }
+      : await resolveHttpSecrets(transport.shutdown, projectRoot);
+  return {
+    agent: { ...agent, transport: { ...transport, start_argv: argv } },
+    cwd,
+    env,
+    invokeHeaders: invoke.headers,
+    invokeQuery: invoke.query,
+    kind: 'background',
+    secrets: [...processSecrets, ...invoke.secrets, ...shutdown.secrets],
+    shutdownHeaders: shutdown.headers,
+    shutdownQuery: shutdown.query,
+  };
 };
 
 /** Resolves runtime-only secret references into an ephemeral native transport target. */
@@ -144,175 +233,45 @@ const resolveNativeAgent = async (
   agent: AgentResource,
   projectRoot: string,
 ): Promise<ResolvedNativeAgent> => {
-  if (
-    agent.transport.kind === 'native_cli' ||
-    agent.transport.kind === 'background_cli' ||
-    agent.transport.kind === 'jsonl_bridge'
-  ) {
-    const transport = agent.transport;
-    const resolvedEnvironment = await resolveProcessEnvironment(transport.env, projectRoot);
-    if (transport.kind === 'native_cli' && transport.sandbox !== undefined) {
-      for (const position of agent.redaction?.argv_positions ?? []) {
-        const value = transport.argv[position];
-        if (value === undefined) {
-          throw new LocalError('project_invalid', 'An argv redaction position is out of range.', {
-            path: `/agents/${agent.id}/redaction/argv_positions`,
-          });
-        }
-        resolvedEnvironment.secrets.push(value);
+  const transport = agent.transport;
+  switch (transport.kind) {
+    case 'native_cli':
+    case 'background_cli':
+    case 'jsonl_bridge':
+      return resolveProcessAgent(agent, transport, projectRoot);
+    case 'websocket': {
+      const resolved = await resolveHttpSecrets({ headers: transport.headers }, projectRoot);
+      addRedactedRequestValues(agent, resolved);
+      return {
+        agent: { ...agent, transport },
+        headers: resolved.headers,
+        kind: 'websocket',
+        secrets: [...new Set(resolved.secrets)],
+      };
+    }
+    case 'stream': {
+      const resolved = await resolveHttpSecrets(transport.request, projectRoot);
+      addRedactedRequestValues(agent, resolved);
+      return { agent: { ...agent, transport }, kind: 'stream', ...resolved };
+    }
+    case 'http':
+    case 'polling': {
+      const request = transport.kind === 'polling' ? transport.submit : transport.request;
+      const resolved = await resolveHttpSecrets(request, projectRoot);
+      addRedactedRequestValues(agent, resolved);
+      if (transport.kind === 'http' && transport.response_mode === 'attest_envelope') {
+        return {
+          headers: resolved.headers,
+          kind: 'direct',
+          secrets: resolved.secrets,
+          target: { type: 'http', url: request.url },
+        };
       }
-      const sandboxEnvironment = Object.fromEntries(
-        Object.keys(transport.env ?? {}).flatMap((name) => {
-          const value = resolvedEnvironment.env[name];
-          return value === undefined ? [] : [[name, value]];
-        }),
-      );
-      return {
-        argv: [transport.argv[0]!, ...transport.argv.slice(1)],
-        ...(transport.cwd === undefined ? {} : { cwd: transport.cwd }),
-        env: sandboxEnvironment,
-        kind: 'vercel_sandbox',
-        sandbox: transport.sandbox,
-        secrets: resolvedEnvironment.secrets,
-      };
+      return { agent: { ...agent, transport }, kind: 'mapped_http', ...resolved };
     }
-    const cwd = await resolveProcessCwd(projectRoot, transport.cwd);
-    const authoredArgv =
-      transport.kind === 'background_cli' ? transport.start_argv : transport.argv;
-    const argv = resolveProcessArgv(authoredArgv, cwd);
-    for (const position of agent.redaction?.argv_positions ?? []) {
-      const value = argv[position];
-      if (value === undefined) {
-        throw new LocalError('project_invalid', 'An argv redaction position is out of range.', {
-          path: `/agents/${agent.id}/redaction/argv_positions`,
-        });
-      }
-      resolvedEnvironment.secrets.push(value);
-    }
-    if (transport.kind === 'native_cli') {
-      return {
-        env: resolvedEnvironment.env,
-        kind: 'direct',
-        secrets: resolvedEnvironment.secrets,
-        target: { type: 'cli', command: argv },
-      };
-    }
-    if (transport.kind === 'jsonl_bridge') {
-      return {
-        agent: {
-          ...agent,
-          transport: { ...transport, argv },
-        },
-        cwd,
-        env: resolvedEnvironment.env,
-        kind: 'jsonl_bridge',
-        secrets: resolvedEnvironment.secrets,
-      };
-    }
-    const invoke = await resolveHttpSecrets([transport.invoke], projectRoot);
-    const shutdown =
-      transport.shutdown === undefined
-        ? { headers: {}, query: {}, secrets: [] }
-        : await resolveHttpSecrets([transport.shutdown], projectRoot);
-    return {
-      agent: {
-        ...agent,
-        transport: { ...transport, start_argv: argv },
-      },
-      cwd,
-      env: resolvedEnvironment.env,
-      invokeHeaders: invoke.headers,
-      invokeQuery: invoke.query,
-      kind: 'background',
-      secrets: [...resolvedEnvironment.secrets, ...invoke.secrets, ...shutdown.secrets],
-      shutdownHeaders: shutdown.headers,
-      shutdownQuery: shutdown.query,
-    };
+    default:
+      return transport satisfies never;
   }
-
-  if (
-    agent.transport.kind === 'http' ||
-    agent.transport.kind === 'polling' ||
-    agent.transport.kind === 'stream'
-  ) {
-    const transport = agent.transport;
-    const request = transport.kind === 'polling' ? transport.submit : transport.request;
-    const nativeEnvelope =
-      transport.kind === 'http' && transport.response_mode === 'attest_envelope';
-    const headers: Record<string, string> = {};
-    const query: Record<string, string> = {};
-    const secrets: string[] = [];
-    for (const [name, value] of Object.entries(request.headers ?? {})) {
-      if (typeof value === 'string') {
-        headers[name] = value;
-      } else {
-        const resolved = await readSecretReference(value, projectRoot);
-        headers[name] = resolved;
-        secrets.push(resolved);
-      }
-      if (agent.redaction?.headers?.some((header) => header.toLowerCase() === name.toLowerCase())) {
-        secrets.push(headers[name]);
-      }
-    }
-    for (const [name, value] of Object.entries(request.query ?? {})) {
-      if (typeof value === 'string') query[name] = value;
-      else {
-        query[name] = await readSecretReference(value, projectRoot);
-        secrets.push(query[name]);
-      }
-      if (agent.redaction?.query?.includes(name)) secrets.push(query[name]);
-    }
-    if (nativeEnvelope) {
-      return {
-        headers,
-        kind: 'direct',
-        secrets,
-        target: { type: 'http', url: request.url },
-      };
-    }
-    if (transport.kind === 'stream') {
-      return {
-        agent: agent as StreamAgentResource,
-        headers,
-        kind: 'stream',
-        query,
-        secrets,
-      };
-    }
-    return {
-      agent: agent as HttpAgentResource,
-      headers,
-      kind: 'mapped_http',
-      query,
-      secrets,
-    };
-  }
-
-  if (agent.transport.kind === 'websocket') {
-    const resolved = await resolveHttpSecrets([{ headers: agent.transport.headers }], projectRoot);
-    for (const [name, value] of Object.entries(resolved.headers)) {
-      if (agent.redaction?.headers?.some((header) => header.toLowerCase() === name.toLowerCase())) {
-        resolved.secrets.push(value);
-      }
-    }
-    return {
-      agent: agent as WebSocketAgentResource,
-      headers: resolved.headers,
-      kind: 'websocket',
-      secrets: [...new Set(resolved.secrets)],
-    };
-  }
-
-  throw new LocalError(
-    'project_invalid',
-    `Agent ${agent.id} uses a transport that belongs to a later CLI item.`,
-    {
-      path: `/agents/${agent.id}/transport/kind`,
-      hint: 'supports native_cli, background_cli, jsonl_bridge, HTTP, polling, and stream.',
-    },
-  );
 };
-
-/** Rejects authored policies that the selected bounded adapter cannot enforce. */
 
 export { createBaseEnvironment, resolveNativeAgent, resolveProcessEnvironment };

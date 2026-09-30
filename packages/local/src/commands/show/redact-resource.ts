@@ -22,10 +22,13 @@ const redactUrl = (value: string): string => {
   return parsed.toString();
 };
 
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  value !== null && typeof value === 'object' && !Array.isArray(value);
+
 const redactStringRecord = (value: unknown): void => {
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) return;
+  if (!isRecord(value)) return;
   for (const [key, entry] of Object.entries(value)) {
-    if (typeof entry === 'string') Reflect.set(value, key, REDACTED);
+    if (typeof entry === 'string') value[key] = REDACTED;
   }
 };
 
@@ -35,13 +38,26 @@ const redactRequestTemplates = (value: unknown): void => {
     value.forEach(redactRequestTemplates);
     return;
   }
-  if (value === null || typeof value !== 'object') return;
+  if (!isRecord(value)) return;
   for (const [key, entry] of Object.entries(value)) {
     if (key === 'headers' || key === 'query') redactStringRecord(entry);
     if ((key === 'url' || key === 'status_url_template') && typeof entry === 'string') {
-      Reflect.set(value, key, redactUrl(entry));
+      value[key] = redactUrl(entry);
     }
     redactRequestTemplates(entry);
+  }
+};
+
+/** Returns the argv a process transport launches, or undefined for network transports. */
+const processArgv = (transport: AgentResource['transport']): string[] | undefined => {
+  switch (transport.kind) {
+    case 'background_cli':
+      return transport.start_argv;
+    case 'jsonl_bridge':
+    case 'native_cli':
+      return transport.argv;
+    default:
+      return undefined;
   }
 };
 
@@ -50,12 +66,10 @@ const redactAgentResource = (resource: AgentResource): JsonValue => {
   const redacted = structuredClone(resource);
   redactRequestTemplates(redacted);
   const positions = new Set(redacted.redaction?.argv_positions ?? []);
-  for (const key of ['argv', 'start_argv'] as const) {
-    const argv = Reflect.get(redacted.transport, key) as string[] | undefined;
-    argv?.forEach((_, index) => {
-      if (positions.has(index)) argv[index] = REDACTED;
-    });
-  }
+  const argv = processArgv(redacted.transport);
+  argv?.forEach((_, index) => {
+    if (positions.has(index)) argv[index] = REDACTED;
+  });
   return redacted;
 };
 
@@ -66,4 +80,4 @@ const redactMetricResource = (resource: MetricResource): JsonValue => {
   return redacted;
 };
 
-export { redactAgentResource, redactMetricResource, redactUrl };
+export { redactAgentResource, redactMetricResource };

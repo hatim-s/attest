@@ -81,29 +81,26 @@ const prepareWorkerDirectory = async (projectRoot: string, directory: string): P
       ),
   });
 
-/** Runs one argv-only lifecycle hook with isolated environment and bounded process cleanup. */
-const runHook = async (
-  command: HookCommand | undefined,
-  cwd: string,
-  environment: Record<string, string>,
-  phase: HookPhase,
-  projectRoot: string,
-  signal?: AbortSignal,
-): Promise<void> => {
-  if (command === undefined) return;
-  const [file, ...argumentsList] = resolveHookArgv(projectRoot, command.argv);
-  const executable =
-    file !== undefined && !isAbsolute(file) && file.includes('/')
-      ? resolve(projectRoot, file)
-      : file;
-  await runHookCommand({
-    command: { ...command, argv: executable === undefined ? [] : [executable, ...argumentsList] },
-    cwd,
-    env: { ...createBaseEnvironment(), ...environment },
-    phase,
-    timeoutMs: DEFAULT_HOOK_TIMEOUT_MS,
-    signal,
-  });
+type RunHookOptions = {
+  command: HookCommand | undefined;
+  cwd: string;
+  environment: Record<string, string>;
+  phase: HookPhase;
+  signal?: AbortSignal;
+};
+
+type CasePhase = Extract<
+  HookPhase,
+  'after_agent' | 'after_case' | 'after_evaluation' | 'before_case'
+>;
+
+type CasePhaseRequest = {
+  context: CaseHookContext;
+  /** Prepared worker directory; hooks run in the project root when workers are not configured. */
+  directory: string | undefined;
+  /** Case outcome exposed to after-phase hooks as ATTEST_CASE_OUTCOME. */
+  outcome?: string;
+  signal?: AbortSignal;
 };
 
 /** Owns project-authored run/case hooks and stable worker directories for one immutable run. */
@@ -112,25 +109,51 @@ const createEvalLifecycle = (projectRoot: string, run: EvalRun) => {
   const runEnvironment = { ATTEST_PROJECT_ROOT: projectRoot, ATTEST_RUN_ID: run.run_id };
   let cleanupConfirmed = true;
 
-  /** Retains cleanup uncertainty until the runner releases cancellation ownership. */
-  const trackedRunHook = async (...arguments_: Parameters<typeof runHook>): Promise<void> => {
+  /** Runs one argv-only hook with an isolated environment and bounded process cleanup. */
+  const runHook = async (options: RunHookOptions): Promise<void> => {
+    if (options.command === undefined) return;
+    const [file, ...argumentsList] = resolveHookArgv(projectRoot, options.command.argv);
+    const executable =
+      file !== undefined && !isAbsolute(file) && file.includes('/')
+        ? resolve(projectRoot, file)
+        : file;
     try {
-      await runHook(...arguments_);
+      await runHookCommand({
+        command: {
+          ...options.command,
+          argv: executable === undefined ? [] : [executable, ...argumentsList],
+        },
+        cwd: options.cwd,
+        env: { ...createBaseEnvironment(), ...options.environment },
+        phase: options.phase,
+        timeoutMs: DEFAULT_HOOK_TIMEOUT_MS,
+        signal: options.signal,
+      });
     } catch (error: unknown) {
+      // Retain cleanup uncertainty until the runner releases cancellation ownership.
       if (error instanceof HookCommandError && !error.cleanupConfirmed) cleanupConfirmed = false;
       throw error;
     }
   };
 
-  const caseEnvironment = (context: CaseHookContext, workerDirectory?: string) => ({
-    ...runEnvironment,
-    ATTEST_CASE_ID: context.case_id,
-    ATTEST_TEST_ID: context.test_id,
-    ATTEST_WORKER_INDEX: String(context.worker_index),
-    ...(workerDirectory === undefined ? {} : { ATTEST_WORKER_DIRECTORY: workerDirectory }),
-  });
+  /** Runs one case-scoped hook in the worker directory with the case identity in its env. */
+  const runCasePhase = (phase: CasePhase, request: CasePhaseRequest): Promise<void> =>
+    runHook({
+      command: config?.hooks?.[phase],
+      cwd: request.directory ?? projectRoot,
+      environment: {
+        ...runEnvironment,
+        ATTEST_CASE_ID: request.context.case_id,
+        ATTEST_TEST_ID: request.context.test_id,
+        ATTEST_WORKER_INDEX: String(request.context.worker_index),
+        ...(request.directory === undefined ? {} : { ATTEST_WORKER_DIRECTORY: request.directory }),
+        ...(request.outcome === undefined ? {} : { ATTEST_CASE_OUTCOME: request.outcome }),
+      },
+      phase,
+      signal: request.signal,
+    });
 
-  const prepareCase = async (context: CaseHookContext) => {
+  const prepareCase = async (context: CaseHookContext): Promise<string | undefined> => {
     const configuredDirectory = resolveWorkerDirectory(
       projectRoot,
       run.run_id,
@@ -142,90 +165,32 @@ const createEvalLifecycle = (projectRoot: string, run: EvalRun) => {
   };
 
   return {
-    afterAgent: (
-      context: CaseHookContext,
-      directory: string | undefined,
-      outcome: string,
-      signal: AbortSignal,
-    ): Promise<void> =>
-      trackedRunHook(
-        config?.hooks?.after_agent,
-        directory ?? projectRoot,
-        { ...caseEnvironment(context, directory), ATTEST_CASE_OUTCOME: outcome },
-        'after_agent',
-        projectRoot,
-        signal,
-      ),
-    afterEvaluation: (
-      context: CaseHookContext,
-      directory: string | undefined,
-      outcome: string,
-      signal: AbortSignal,
-    ): Promise<void> =>
-      trackedRunHook(
-        config?.hooks?.after_evaluation,
-        directory ?? projectRoot,
-        { ...caseEnvironment(context, directory), ATTEST_CASE_OUTCOME: outcome },
-        'after_evaluation',
-        projectRoot,
-        signal,
-      ),
-    afterCase: async (
-      context: CaseHookContext,
-      workerDirectory: string | undefined,
-      outcome: string,
-    ): Promise<void> => {
-      const cwd = workerDirectory ?? projectRoot;
-      return trackedRunHook(
-        config?.hooks?.after_case,
-        cwd,
-        { ...caseEnvironment(context, workerDirectory), ATTEST_CASE_OUTCOME: outcome },
-        'after_case',
-        projectRoot,
-      );
-    },
-    afterRun: async (status: string, summary: unknown): Promise<void> =>
-      trackedRunHook(
-        config?.hooks?.after_run,
-        projectRoot,
-        {
+    afterRun: (status: string, summary: unknown): Promise<void> =>
+      runHook({
+        command: config?.hooks?.after_run,
+        cwd: projectRoot,
+        environment: {
           ...runEnvironment,
           ATTEST_RUN_STATUS: status,
           ATTEST_RUN_SUMMARY: JSON.stringify(summary),
         },
-        'after_run',
-        projectRoot,
-      ),
-    beforeCase: async (
-      context: CaseHookContext,
-      workerDirectory: string | undefined,
-      signal: AbortSignal,
-    ): Promise<void> => {
-      const cwd = workerDirectory ?? projectRoot;
-      return trackedRunHook(
-        config?.hooks?.before_case,
-        cwd,
-        caseEnvironment(context, workerDirectory),
-        'before_case',
-        projectRoot,
-        signal,
-      );
-    },
-    beforeRun: async (signal: AbortSignal): Promise<void> =>
-      trackedRunHook(
-        config?.hooks?.before_run,
-        projectRoot,
-        runEnvironment,
-        'before_run',
-        projectRoot,
-        signal,
-      ),
+        phase: 'after_run',
+      }),
     assertCleanup: (): void => {
       if (!cleanupConfirmed) {
         throw new HookCommandError('Eval hook process cleanup could not be confirmed.', false);
       }
     },
+    beforeRun: (signal: AbortSignal): Promise<void> =>
+      runHook({
+        command: config?.hooks?.before_run,
+        cwd: projectRoot,
+        environment: runEnvironment,
+        phase: 'before_run',
+        signal,
+      }),
     prepareCase,
+    runCasePhase,
   };
 };
 
