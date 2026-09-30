@@ -2,7 +2,7 @@ import { Readable } from 'node:stream';
 
 import { describe, expect, it, vi } from 'vitest';
 
-import { SANDBOX_WORKSPACE } from '../../adapters/sandbox/files.js';
+import { SANDBOX_WORKSPACE } from '../../adapters/sandbox/sandbox-paths.js';
 import type { VercelSandboxFactory, VercelSandboxSdk } from '../../adapters/sandbox/types.js';
 import { vercelSandboxIsolation } from '../vercel.js';
 import { caseContext } from './support/case-context.js';

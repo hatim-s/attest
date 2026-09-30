@@ -8,7 +8,8 @@ import { invokeWithRetries } from '../../internal/invocation-retry.js';
 import type { InvocationAttempt, InvocationDiagnostics, InvocationResult } from '../../types.js';
 import { BoundedOutputWritable, BoundedTailWritable } from './bounded-writable.js';
 import { resolveVercelSandboxCredentials } from './credentials.js';
-import { loadExplicitUploads, publishTerminalArtifacts, SANDBOX_WORKSPACE } from './files.js';
+import { SANDBOX_WORKSPACE } from './sandbox-paths.js';
+import { loadExplicitUploads, publishTerminalArtifacts } from './sandbox-transfer.js';
 import type {
   VercelSandboxCaseOptions,
   VercelSandboxCreateParams,

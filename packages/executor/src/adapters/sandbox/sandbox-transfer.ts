@@ -1,42 +1,24 @@
 import { constants } from 'node:fs';
 import { lstat, mkdir, mkdtemp, open, realpath, rename, rm, writeFile } from 'node:fs/promises';
-import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
-import { posix } from 'node:path';
+import { dirname, posix, relative, resolve, sep } from 'node:path';
+
+import type { VercelSandbox } from '@attest/contracts';
 
 import { AgentInvocationError } from '../../errors.js';
 import { errnoCode } from '../../internal/errno-code.js';
 import { requirePositiveInteger } from '../../internal/positive-integer.js';
 import { BoundedTailWritable } from './bounded-writable.js';
-import type { VercelSandbox } from '@attest/contracts';
-
+import {
+  SANDBOX_WORKSPACE,
+  assertLiteralRelativePath,
+  isContained,
+  resolveArtifactDestination,
+  resolveRemotePath,
+} from './sandbox-paths.js';
 import type { VercelSandboxSdk } from './types.js';
 
 type LoadedUpload = { path: string; content: Uint8Array; mode?: number };
 type StagedArtifact = { directory: string; stagedPath: string };
-
-const SANDBOX_WORKSPACE = '/vercel/sandbox/workspace';
-const GLOB_METACHARACTERS = /[*?\[\]{}]/u;
-
-const isContained = (root: string, path: string): boolean => {
-  const fromRoot = relative(root, path);
-  return (
-    fromRoot === '' ||
-    (!fromRoot.startsWith(`..${sep}`) && fromRoot !== '..' && !isAbsolute(fromRoot))
-  );
-};
-
-/** Rejects paths whose meaning could vary between file APIs and command execution. */
-const assertLiteralRelativePath = (value: string, label: string): void => {
-  if (
-    value.length === 0 ||
-    value.includes('\0') ||
-    isAbsolute(value) ||
-    posix.isAbsolute(value) ||
-    GLOB_METACHARACTERS.test(value)
-  ) {
-    throw new TypeError(`${label} must be a non-empty literal relative path.`);
-  }
-};
 
 /** Rejects existing symlink components while allowing not-yet-created output directories. */
 const assertNoSymlinkComponents = async (
@@ -80,27 +62,6 @@ const readBoundedHostFile = async (
     }
     chunks.push(buffer.subarray(0, read.bytesRead));
   }
-};
-
-/** Resolves an authored relative sandbox path below the fixed workspace root. */
-const resolveRemotePath = (value: string): string => {
-  assertLiteralRelativePath(value, 'Sandbox resource path');
-  const resolved = posix.resolve(SANDBOX_WORKSPACE, value);
-  if (resolved !== SANDBOX_WORKSPACE && !resolved.startsWith(`${SANDBOX_WORKSPACE}/`)) {
-    throw new TypeError(`Sandbox path escapes ${SANDBOX_WORKSPACE}: ${value}`);
-  }
-  return resolved;
-};
-
-/** Resolves artifact outputs below the configured host artifact directory. */
-const resolveArtifactDestination = (root: string, value: string): string => {
-  assertLiteralRelativePath(value, 'Artifact destination');
-  const destination = resolve(root, value);
-  const fromRoot = relative(resolve(root), destination);
-  if (fromRoot === '..' || fromRoot.startsWith(`..${sep}`) || isAbsolute(fromRoot)) {
-    throw new TypeError(`Artifact destination escapes its root: ${value}`);
-  }
-  return destination;
 };
 
 /** Opens every authored upload without following a terminal symlink and enforces the response cap. */
@@ -300,10 +261,4 @@ const publishTerminalArtifacts = async (
   }
 };
 
-export {
-  SANDBOX_WORKSPACE,
-  loadExplicitUploads,
-  publishTerminalArtifacts,
-  readRemoteFile,
-  resolveRemotePath,
-};
+export { loadExplicitUploads, publishTerminalArtifacts, readRemoteFile };

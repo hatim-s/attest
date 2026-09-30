@@ -5,12 +5,8 @@ import { Readable } from 'node:stream';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import {
-  loadExplicitUploads,
-  publishTerminalArtifacts,
-  resolveRemotePath,
-  SANDBOX_WORKSPACE,
-} from '../files.js';
+import { SANDBOX_WORKSPACE, resolveRemotePath } from '../sandbox-paths.js';
+import { loadExplicitUploads, publishTerminalArtifacts } from '../sandbox-transfer.js';
 import type { VercelSandboxSdk } from '../types.js';
 
 const temporaryDirectories: string[] = [];

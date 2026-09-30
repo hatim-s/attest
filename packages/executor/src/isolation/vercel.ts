@@ -1,6 +1,7 @@
 import { BoundedOutputWritable } from '../adapters/sandbox/bounded-writable.js';
 import { resolveVercelSandboxCredentials } from '../adapters/sandbox/credentials.js';
-import { readRemoteFile, resolveRemotePath, SANDBOX_WORKSPACE } from '../adapters/sandbox/files.js';
+import { SANDBOX_WORKSPACE, resolveRemotePath } from '../adapters/sandbox/sandbox-paths.js';
+import { readRemoteFile } from '../adapters/sandbox/sandbox-transfer.js';
 import type { VercelSandboxFactory } from '../adapters/sandbox/types.js';
 import { defaultSandboxFactory } from '../adapters/sandbox/vercel-sandbox-adapter.js';
 import { requirePositiveInteger } from '../internal/positive-integer.js';
