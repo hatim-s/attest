@@ -61,12 +61,18 @@ const classifyTransition = (
   return 'still_failing';
 };
 
+const passed = (metric: StoredMetricEvaluation | undefined): boolean =>
+  metric?.status === 'evaluated' && metric.pass;
+
+const scoreOf = (metric: StoredMetricEvaluation | undefined): number | undefined =>
+  metric?.status === 'evaluated' ? metric.score : undefined;
+
 const computePassTransition = (
   base: StoredMetricEvaluation | undefined,
   candidate: StoredMetricEvaluation | undefined,
 ): MetricDelta['passTransition'] => {
-  if (base?.pass === true && candidate?.pass !== true) return 'lost';
-  if (base?.pass !== true && candidate?.pass === true) return 'gained';
+  if (passed(base) && !passed(candidate)) return 'lost';
+  if (!passed(base) && passed(candidate)) return 'gained';
   return 'unchanged';
 };
 
@@ -80,14 +86,16 @@ const computeMetricDeltas = (
   return metricNames.map((metricName) => {
     const baseMetric = baseMetrics.get(metricName);
     const candidateMetric = candidateMetrics.get(metricName);
+    const baseScore = scoreOf(baseMetric);
+    const candidateScore = scoreOf(candidateMetric);
     const metricDelta: MetricDelta = {
       metricName,
-      baseScore: baseMetric?.score,
-      candidateScore: candidateMetric?.score,
+      baseScore,
+      candidateScore,
       passTransition: computePassTransition(baseMetric, candidateMetric),
     };
-    if (baseMetric?.score !== undefined && candidateMetric?.score !== undefined) {
-      metricDelta.delta = candidateMetric.score - baseMetric.score;
+    if (baseScore !== undefined && candidateScore !== undefined) {
+      metricDelta.delta = candidateScore - baseScore;
     }
     return metricDelta;
   });

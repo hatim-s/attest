@@ -1,4 +1,4 @@
-import { AttestError, type CaseOutcome } from '@attest/contracts';
+import type { CaseOutcome } from '@attest/contracts';
 
 import type { CacheStore } from './cache.js';
 import type {
@@ -11,33 +11,6 @@ import type {
   StoredDiagnostics,
   StoredMetricEvaluation,
 } from './internal/record-schema.js';
-
-type StoreErrorCode =
-  | 'SCHEMA_TOO_NEW'
-  | 'SCHEMA_OUTDATED'
-  | 'RUN_NOT_FOUND'
-  | 'CASE_NOT_FOUND'
-  | 'INVALID_CURSOR'
-  | 'INVALID_LIMIT'
-  | 'RUN_FINALIZED'
-  | 'CASE_CONFLICT'
-  | 'INVALID_JSON'
-  | 'CORRUPT_DATA'
-  | 'WRITE_FAILED'
-  | 'READ_FAILED'
-  | 'DRIVER_MISUSE'
-  | 'INVALID_RECORD';
-
-/** Identifies exceptional store failures that callers can render without parsing messages. */
-class StoreError extends AttestError {
-  readonly code: StoreErrorCode;
-
-  constructor(code: StoreErrorCode, message: string, options?: ErrorOptions) {
-    super(code, message, options);
-    this.name = 'StoreError';
-    this.code = code;
-  }
-}
 
 /** Describes lifecycle states persisted for a run. */
 type RunStatus = RunRecord['status'];
@@ -73,7 +46,7 @@ interface RunStore {
   ): Promise<void>;
   finalizeRun(runId: string, status: Exclude<RunStatus, 'running'>): Promise<RunRecord>;
   getRun(runId: string): Promise<RunRecord>;
-  listRuns(options?: { limit?: number }): Promise<RunRecord[]>;
+  listRuns(limit?: number): Promise<RunRecord[]>;
   getCaseResults(runId: string): Promise<CaseRecord[]>;
   getRunWithCases(runId: string): Promise<{ run: RunRecord; cases: CaseRecord[] }>;
   listCaseSummaries(
@@ -92,9 +65,7 @@ interface AttestStore {
 }
 
 export {
-  StoreError,
   type AttestStore,
-  type CaseOutcome,
   type CaseRecord,
   type CaseSummary,
   type CaseVerdict,
@@ -104,7 +75,6 @@ export {
   type RunStore,
   type RunStatus,
   type RunSummary,
-  type StoreErrorCode,
   type StoredCaseExecution,
   type StoredDiagnostics,
   type StoredMetricEvaluation,

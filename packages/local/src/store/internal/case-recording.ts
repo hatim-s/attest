@@ -38,6 +38,13 @@ const validateCaseRecordInput = (
   }
 };
 
+const metricOutcomeColumns = (evaluation: StoredMetricEvaluation) => {
+  if (evaluation.status === 'evaluated') {
+    return { score: evaluation.score, pass: Number(evaluation.pass), error_json: null };
+  }
+  return { score: null, pass: null, error_json: canonicalStringify(evaluation.error) };
+};
+
 const executionHash = (
   execution: StoredCaseExecution,
   evaluations: StoredMetricEvaluation[],
@@ -154,12 +161,10 @@ const recordCaseTransaction = async (
           metric_name: evaluation.metricName,
           kind: evaluation.kind,
           status: evaluation.status,
-          score: evaluation.score ?? null,
-          pass: evaluation.pass === undefined ? null : Number(evaluation.pass),
+          ...metricOutcomeColumns(evaluation),
           rationale: evaluation.rationale ?? null,
           details_json:
             evaluation.details === undefined ? null : canonicalStringify(evaluation.details),
-          error_json: evaluation.error ? canonicalStringify(evaluation.error) : null,
           judge_io_json:
             evaluation.judgeIo === undefined ? null : canonicalStringify(evaluation.judgeIo),
           duration_ms: evaluation.durationMs ?? null,

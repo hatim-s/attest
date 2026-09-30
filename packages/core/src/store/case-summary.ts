@@ -40,7 +40,7 @@ const summarizeCaseRecord = (record: CaseRecord): CaseSummary => {
     metricCounts: {
       expected: record.expectedMetrics.length,
       evaluated: record.metrics.filter(({ status }) => status === 'evaluated').length,
-      passed: record.metrics.filter(({ pass, status }) => status === 'evaluated' && pass === true)
+      passed: record.metrics.filter((metric) => metric.status === 'evaluated' && metric.pass)
         .length,
       errors: record.metrics.filter(({ status }) => status === 'error').length,
     },

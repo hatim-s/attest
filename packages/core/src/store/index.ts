@@ -2,9 +2,7 @@ export {
   BUNDLE_SCHEMA_ID,
   createBundle,
   createContentHasher,
-  type BundleCase,
-  type BundleFooter,
-  type BundleHeader,
+  verifyBundleLines,
   type BundleLine,
   type BundleManifest,
 } from './bundle-format.js';
@@ -12,16 +10,12 @@ export { summarizeCaseRecord } from './case-summary.js';
 export { type CacheKind, type CacheStore } from './cache.js';
 export { canonicalStringify, contentHash } from './internal/canonical-json.js';
 export {
-  collectRunRecordViolations,
   collectStoredCaseExecutionViolations,
   collectStoredMetricEvaluationViolations,
-  isCaseRecord,
-  isRunRecord,
 } from './internal/record-validation.js';
+export { StoreError, type StoreErrorCode } from './store-error.js';
 export {
-  StoreError,
   type AttestStore,
-  type CaseOutcome,
   type CaseRecord,
   type CaseSummary,
   type CaseVerdict,
@@ -30,7 +24,6 @@ export {
   type RunRecord,
   type RunStatus,
   type RunSummary,
-  type StoreErrorCode,
   type RunStore,
   type StoredCaseExecution,
   type StoredDiagnostics,

@@ -11,7 +11,6 @@ const isoTimestampSchema = z
   );
 const nonemptyStringSchema = z.string().min(1);
 const durationSchema = z.number().finite().nonnegative();
-const forbiddenValueSchema = z.never();
 const invocationErrorCodeSchema = z.enum([
   'spawn_failed',
   'timeout',
@@ -50,13 +49,8 @@ const attemptBase = {
   warnings: z.array(warningSchema),
 };
 const storedAttemptSchema = z.discriminatedUnion('status', [
-  z.object({
-    ...attemptBase,
-    status: z.literal('ok'),
-    errorCode: forbiddenValueSchema.optional(),
-    errorMessage: forbiddenValueSchema.optional(),
-  }),
-  z.object({
+  z.strictObject({ ...attemptBase, status: z.literal('ok') }),
+  z.strictObject({
     ...attemptBase,
     status: z.literal('invocation_error'),
     errorCode: invocationErrorCodeSchema,
@@ -74,32 +68,24 @@ const executionBase = {
   attempts: z.array(storedAttemptSchema),
   expectedMetrics: z.array(z.string()),
 };
-const completedExecutionSchema = z.object({
+const completedExecutionFields = {
   ...executionBase,
   outcome: z.literal('completed'),
-  response: z.unknown(),
+  // Agent responses may hold optional undefined fields, so `z.json()` would reject typed input.
+  response: z.unknown().refine((response) => response !== undefined, 'is required'),
   trace: traceSchema.optional(),
-  errorCode: forbiddenValueSchema.optional(),
-  errorMessage: forbiddenValueSchema.optional(),
-});
-const failedExecutionSchema = z.object({
+};
+const failedExecutionFields = {
   ...executionBase,
   outcome: z.enum(['invocation_error', 'timeout', 'cancelled']),
   errorCode: invocationErrorCodeSchema,
   errorMessage: z.string(),
-  response: forbiddenValueSchema.optional(),
-  trace: forbiddenValueSchema.optional(),
-});
-const storedCaseExecutionSchema = z
-  .discriminatedUnion('outcome', [completedExecutionSchema, failedExecutionSchema])
-  .superRefine((execution, context) => {
-    if (
-      execution.outcome === 'completed' &&
-      (!Object.hasOwn(execution, 'response') || execution.response === undefined)
-    ) {
-      context.addIssue({ code: 'custom', path: ['response'], message: 'is required' });
-    }
-  });
+};
+// Strict branches reject fields that belong to the other outcome, such as a response on a timeout.
+const storedCaseExecutionSchema = z.discriminatedUnion('outcome', [
+  z.strictObject(completedExecutionFields),
+  z.strictObject(failedExecutionFields),
+]);
 
 const metricBase = {
   metricName: nonemptyStringSchema,
@@ -110,19 +96,16 @@ const metricBase = {
   durationMs: durationSchema.optional(),
 };
 const storedMetricEvaluationSchema = z.discriminatedUnion('status', [
-  z.object({
+  z.strictObject({
     ...metricBase,
     status: z.literal('evaluated'),
     score: z.number().finite(),
     pass: z.boolean(),
-    error: forbiddenValueSchema.optional(),
   }),
-  z.object({
+  z.strictObject({
     ...metricBase,
     status: z.literal('error'),
     error: z.object({ message: nonemptyStringSchema, kind: nonemptyStringSchema }),
-    score: forbiddenValueSchema.optional(),
-    pass: forbiddenValueSchema.optional(),
   }),
 ]);
 
@@ -166,15 +149,16 @@ const runRecordSchema = runMetadataSchema
     }
   });
 
-const caseRecordSchema = z.intersection(
-  storedCaseExecutionSchema,
-  z.object({
-    rowId: nonemptyStringSchema,
-    runId: nonemptyStringSchema,
-    inputHash: nonemptyStringSchema,
-    metrics: z.array(storedMetricEvaluationSchema),
-  }),
-);
+const caseRecordFields = {
+  rowId: nonemptyStringSchema,
+  runId: nonemptyStringSchema,
+  inputHash: nonemptyStringSchema,
+  metrics: z.array(storedMetricEvaluationSchema),
+};
+const caseRecordSchema = z.discriminatedUnion('outcome', [
+  z.strictObject({ ...completedExecutionFields, ...caseRecordFields }),
+  z.strictObject({ ...failedExecutionFields, ...caseRecordFields }),
+]);
 
 type CaseRecord = z.infer<typeof caseRecordSchema>;
 type RunMetadata = z.infer<typeof runMetadataSchema>;
