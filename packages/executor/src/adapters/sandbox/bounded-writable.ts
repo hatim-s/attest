@@ -13,7 +13,8 @@ class BoundedOutputWritable extends Writable {
 
   constructor(
     private readonly capBytes: number,
-    private readonly onExceeded: () => void,
+    /** Runs once when the cap is first exceeded, so the owner can abort the producer. */
+    private readonly onExceeded?: () => void,
   ) {
     super();
   }
@@ -34,7 +35,7 @@ class BoundedOutputWritable extends Writable {
     }
     if (!this.exceeded && this.receivedBytes > this.capBytes) {
       this.exceeded = true;
-      this.onExceeded();
+      this.onExceeded?.();
     }
     callback();
   }

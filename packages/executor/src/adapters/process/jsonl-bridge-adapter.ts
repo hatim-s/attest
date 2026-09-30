@@ -37,6 +37,8 @@ type JsonlBridgeSessionOptions = {
   terminationGraceMs?: number;
 };
 
+type CancellationCode = 'cancelled' | 'timeout';
+
 type PendingInvocation = {
   cancelled: boolean;
   cancellationCode?: CancellationCode;
@@ -48,8 +50,6 @@ type PendingInvocation = {
   signal?: AbortSignal;
   timeoutTimer: NodeJS.Timeout;
 };
-
-type CancellationCode = 'cancelled' | 'timeout';
 
 /** Reports a request that attest stopped, either on caller cancellation or on its deadline. */
 const cancellationError = (code: CancellationCode, cause?: unknown): AgentInvocationError =>

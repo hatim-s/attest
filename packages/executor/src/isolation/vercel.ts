@@ -22,18 +22,21 @@ type VercelIsolationOptions = {
 
 type EnvironmentPhase = 'run' | 'transitioning' | 'finalizing' | 'poisoned' | 'disposed';
 
+/**
+ * A VM that could not be confirmed stopped. Runtime reads `cleanupConfirmed` to stop reusing the
+ * case worker, since the remote command may still be running.
+ */
+class SandboxCleanupError extends AggregateError {
+  readonly cleanupConfirmed = false;
+}
+
 /** Marks failed VM cleanup so runtime can prevent unsafe worker reuse. */
-const cleanupFailure = (operationError: unknown, stopError: unknown): AggregateError =>
-  Object.assign(
-    new AggregateError([operationError, stopError], 'Sandbox operation and cleanup failed.'),
-    { cleanupConfirmed: false },
-  );
+const cleanupFailure = (operationError: unknown, stopError: unknown): SandboxCleanupError =>
+  new SandboxCleanupError([operationError, stopError], 'Sandbox operation and cleanup failed.');
 
 /** Marks a standalone stop failure as unconfirmed cleanup. */
-const stopFailure = (error: unknown): AggregateError =>
-  Object.assign(new AggregateError([error], 'Sandbox cleanup failed.'), {
-    cleanupConfirmed: false,
-  });
+const stopFailure = (error: unknown): SandboxCleanupError =>
+  new SandboxCleanupError([error], 'Sandbox cleanup failed.');
 
 /** Resolves seed files before creating a VM so invalid paths cannot leave remote state behind. */
 const resolveSeedFiles = (
@@ -106,11 +109,7 @@ const vercelSandboxIsolation =
       try {
         await stop();
       } catch (cleanupError) {
-        if (!(
-          poisonReason instanceof AggregateError &&
-          'cleanupConfirmed' in poisonReason &&
-          poisonReason.cleanupConfirmed === false
-        )) {
+        if (!(poisonReason instanceof SandboxCleanupError)) {
           poisonReason = cleanupFailure(poisonReason, cleanupError);
         }
       }
@@ -194,13 +193,7 @@ const vercelSandboxIsolation =
         ]);
         if (timeout !== undefined) clearTimeout(timeout);
         if (!settled || cleanupError !== undefined) {
-          if (
-            poisonReason instanceof AggregateError &&
-            'cleanupConfirmed' in poisonReason &&
-            poisonReason.cleanupConfirmed === false
-          ) {
-            throw poisonReason;
-          }
+          if (poisonReason instanceof SandboxCleanupError) throw poisonReason;
           throw stopFailure(
             cleanupError ?? new Error('Sandbox operations did not drain before cleanup timed out.'),
           );
@@ -225,13 +218,7 @@ const vercelSandboxIsolation =
       try {
         await stop();
       } catch (cleanupError) {
-        if (
-          error instanceof AggregateError &&
-          'cleanupConfirmed' in error &&
-          error.cleanupConfirmed === false
-        ) {
-          throw error;
-        }
+        if (error instanceof SandboxCleanupError) throw error;
         throw cleanupFailure(error, cleanupError);
       }
       throw error;

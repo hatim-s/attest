@@ -7,7 +7,9 @@ import { AgentInvocationError } from '../../errors.js';
 import { errnoCode } from '../../internal/errno-code.js';
 import { requirePositiveInteger } from '../../internal/positive-integer.js';
 import { BoundedTailWritable } from './bounded-writable.js';
-import type { VercelSandboxResource, VercelSandboxSdk } from './types.js';
+import type { VercelSandbox } from '@attest/contracts';
+
+import type { VercelSandboxSdk } from './types.js';
 
 type LoadedUpload = { path: string; content: Uint8Array; mode?: number };
 type StagedArtifact = { directory: string; stagedPath: string };
@@ -104,7 +106,7 @@ const resolveArtifactDestination = (root: string, value: string): string => {
 /** Opens every authored upload without following a terminal symlink and enforces the response cap. */
 const loadExplicitUploads = async (
   projectRoot: string,
-  uploads: VercelSandboxResource['files'],
+  uploads: VercelSandbox['files'],
   responseBytes: number,
 ): Promise<LoadedUpload[]> => {
   requirePositiveInteger('Response byte cap', responseBytes);
@@ -202,6 +204,9 @@ const assertRemoteRegularFile = async (
   }
 };
 
+const isDestroyable = (stream: object): stream is { destroy: () => void } =>
+  'destroy' in stream && typeof stream.destroy === 'function';
+
 /** Streams one remote file into a bounded host buffer and destroys the stream on overflow. */
 const readRemoteFile = async (
   sandbox: VercelSandboxSdk,
@@ -209,17 +214,12 @@ const readRemoteFile = async (
   responseBytes: number,
   signal: AbortSignal,
 ): Promise<Buffer | null> => {
-  const readFile: (
-    file: { path: string },
-    options: { signal: AbortSignal },
-  ) => Promise<NodeJS.ReadableStream | null> = sandbox.readFile;
-  // The SDK method uses its Sandbox instance to resume a suspended VM.
-  const stream = await readFile.call(sandbox, { path }, { signal });
+  const stream = await sandbox.readFile({ path }, { signal });
   if (stream === null) return null;
   const chunks: Buffer[] = [];
   let bytes = 0;
   try {
-    for await (const chunk of stream as NodeJS.ReadableStream & AsyncIterable<Buffer | string>) {
+    for await (const chunk of stream) {
       const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
       bytes += buffer.length;
       if (bytes > responseBytes) {
@@ -232,15 +232,15 @@ const readRemoteFile = async (
     }
     return Buffer.concat(chunks, bytes);
   } finally {
-    const destroyable = stream as NodeJS.ReadableStream & { destroy?: () => void };
-    destroyable.destroy?.();
+    // An early exit on overflow must not leave the SDK download running.
+    if (isDestroyable(stream)) stream.destroy();
   }
 };
 
 /** Stages all terminal artifacts beside their destinations, then publishes each with rename. */
 const publishTerminalArtifacts = async (
   sandbox: VercelSandboxSdk,
-  artifacts: NonNullable<VercelSandboxResource['artifacts']>,
+  artifacts: NonNullable<VercelSandbox['artifacts']>,
   projectRoot: string,
   configuredArtifactRoot: string,
   responseBytes: number,
@@ -301,11 +301,9 @@ const publishTerminalArtifacts = async (
 };
 
 export {
-  readRemoteFile,
+  SANDBOX_WORKSPACE,
   loadExplicitUploads,
   publishTerminalArtifacts,
-  resolveArtifactDestination,
+  readRemoteFile,
   resolveRemotePath,
-  SANDBOX_WORKSPACE,
 };
-export type { LoadedUpload };
