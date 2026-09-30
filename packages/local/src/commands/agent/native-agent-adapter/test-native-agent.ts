@@ -1,23 +1,10 @@
-import { resolve } from 'node:path';
-
 import {
   AGENT_PROTOCOL,
   type AgentRequest,
   type AgentResource,
   type JsonValue,
 } from '@attest/contracts';
-import {
-  AgentInvocationError,
-  invokeAgent,
-  invokeMappedHttpAgent,
-  invokeStreamingAgent,
-  invokeVercelSandboxAgent,
-  redactTransportText,
-  startBackgroundAgent,
-  startJsonlBridgeAgent,
-  startWebSocketAgent,
-  type InvocationResult,
-} from '@attest/executor';
+import { AgentInvocationError, redactTransportText, type InvocationResult } from '@attest/executor';
 
 import { LocalError } from '../../../errors/index.js';
 import { assertSafeNativeAgentResource } from '../authoring/index.js';
@@ -30,11 +17,16 @@ import {
   redactTrace,
   redactWarnings,
 } from './evidence-redaction.js';
+import {
+  invocationOutcome,
+  invokeResolvedAgent,
+  startAgentRuntime,
+  startupFailure,
+} from './invoke-resolved-agent.js';
 import { resolveNativeAgent } from './resolve-native-agent.js';
 import type { NativeAgentTestOptions } from './types.js';
 
 const CONNECTION_TEST_RUN_ID = '01ARZ3NDEKTSV4RRFFQ69G5FAV';
-const DEFAULT_OUTPUT_CAP_BYTES = 10 * 1024 * 1024;
 const DEFAULT_TIMEOUT_MS = 60_000;
 
 type NativeAgentConnectionResult = {
@@ -70,149 +62,41 @@ const testNativeAgentConnection = async (
     case_id: 'connection-test',
     input: options.input,
   };
+  if (
+    resolved.kind === 'vercel_sandbox' &&
+    (resolved.sandbox.artifacts?.length ?? 0) > 0 &&
+    resolved.sandbox.artifact_directory === undefined
+  ) {
+    throw new LocalError(
+      'project_invalid',
+      'Sandbox artifacts require artifact_directory outside an eval worker.',
+      { path: `/agents/${options.agent.id}/transport/sandbox/artifact_directory` },
+    );
+  }
   const startedAt = new Date().toISOString();
-  let invocation: InvocationResult;
   const managedStartupStarted = performance.now();
+  let invocation: InvocationResult;
   try {
-    switch (resolved.kind) {
-      case 'background': {
-        const session = await startBackgroundAgent(resolved.agent, {
-          cwd: resolved.cwd,
-          env: resolved.env,
-          invokeHeaders: resolved.invokeHeaders,
-          invokeQuery: resolved.invokeQuery,
-          secrets: resolved.secrets,
-          shutdownHeaders: resolved.shutdownHeaders,
-          shutdownQuery: resolved.shutdownQuery,
-          signal: options.signal,
-        });
-        try {
-          invocation = await session.invoke(request, options.signal);
-        } finally {
-          await session.close();
-        }
-        break;
-      }
-      case 'jsonl_bridge': {
-        const session = await startJsonlBridgeAgent(resolved.agent, {
-          cwd: resolved.cwd,
-          env: resolved.env,
-          secrets: resolved.secrets,
-          signal: options.signal,
-        });
-        try {
-          invocation = await session.invoke(request, options.signal);
-        } finally {
-          await session.close();
-        }
-        break;
-      }
-      case 'stream':
-        invocation = await invokeStreamingAgent(resolved.agent, request, {
-          headers: resolved.headers,
-          query: resolved.query,
-          secrets: resolved.secrets,
-          signal: options.signal,
-        });
-        break;
-      case 'websocket': {
-        const session = await startWebSocketAgent(resolved.agent, {
-          headers: resolved.headers,
-          secrets: resolved.secrets,
-          signal: options.signal,
-        });
-        try {
-          invocation = await session.invoke(request, options.signal);
-        } finally {
-          await session.close();
-        }
-        break;
-      }
-      case 'mapped_http':
-        invocation = await invokeMappedHttpAgent(resolved.agent, request, {
-          headers: resolved.headers,
-          query: resolved.query,
-          secrets: resolved.secrets,
-          signal: options.signal,
-        });
-        break;
-      case 'vercel_sandbox': {
-        if (
-          (resolved.sandbox.artifacts?.length ?? 0) > 0 &&
-          resolved.sandbox.artifact_directory === undefined
-        ) {
-          throw new LocalError(
-            'project_invalid',
-            'Sandbox artifacts require artifact_directory outside an eval worker.',
-            { path: `/agents/${options.agent.id}/transport/sandbox/artifact_directory` },
-          );
-        }
-        const attemptTimeoutMs = options.agent.timeouts?.attempt_ms ?? DEFAULT_TIMEOUT_MS;
-        const retries = options.agent.retry?.retries ?? 0;
-        invocation = await invokeVercelSandboxAgent(
-          resolved.sandbox,
-          {
-            argv: resolved.argv,
-            ...(resolved.cwd === undefined ? {} : { cwd: resolved.cwd }),
-            env: resolved.env,
-            attemptTimeoutMs,
-            retries,
-            responseBytes: options.agent.limits?.response_bytes ?? DEFAULT_OUTPUT_CAP_BYTES,
-            sandboxTimeoutMs: Math.min(
-              Number.MAX_SAFE_INTEGER,
-              attemptTimeoutMs * (retries + 1) + 60_000,
-            ),
-          },
-          request,
-          {
-            projectRoot: options.projectRoot,
-            ...(resolved.sandbox.artifact_directory === undefined
-              ? {}
-              : {
-                  artifactRoot: resolve(
-                    options.projectRoot,
-                    resolved.sandbox.artifact_directory,
-                    request.run_id,
-                    'connection-test',
-                  ),
-                }),
-            ...(options.signal === undefined ? {} : { signal: options.signal }),
-          },
-        );
-        break;
-      }
-      case 'direct':
-        invocation = await invokeAgent(resolved.target, request, {
-          env: resolved.env,
-          httpHeaders: resolved.headers,
-          outputCapBytes: options.agent.limits?.response_bytes ?? DEFAULT_OUTPUT_CAP_BYTES,
-          retries: options.agent.retry?.retries ?? 0,
-          signal: options.signal,
-          timeoutMs: options.agent.timeouts?.attempt_ms ?? DEFAULT_TIMEOUT_MS,
-        });
-        break;
+    const runtime = await startAgentRuntime(resolved, options.signal);
+    try {
+      invocation = await invokeResolvedAgent(runtime, request, {
+        agent: options.agent,
+        attemptTimeoutMs: options.agent.timeouts?.attempt_ms ?? DEFAULT_TIMEOUT_MS,
+        projectRoot: options.projectRoot,
+        sandboxArtifactSegment: 'connection-test',
+        signal: options.signal,
+      });
+    } finally {
+      if (runtime.kind === 'session') await runtime.session.close();
     }
   } catch (error: unknown) {
-    if (
-      !(error instanceof AgentInvocationError) ||
-      (resolved.kind !== 'background' &&
-        resolved.kind !== 'jsonl_bridge' &&
-        resolved.kind !== 'websocket')
-    ) {
-      throw error;
-    }
-    const diagnostics =
-      'diagnostics' in error && error.diagnostics !== null && typeof error.diagnostics === 'object'
-        ? (error.diagnostics as InvocationResult['diagnostics'])
-        : {};
-    const attempt = {
-      status: 'invocation_error' as const,
-      error,
-      diagnostics,
-      durationMs: performance.now() - managedStartupStarted,
-      warnings: [],
-    };
-    invocation = { ...attempt, attempts: [attempt] };
+    // A managed session's lifecycle failure is probe evidence; any other throw propagates.
+    const managedSession =
+      resolved.kind === 'background' ||
+      resolved.kind === 'jsonl_bridge' ||
+      resolved.kind === 'websocket';
+    if (!(error instanceof AgentInvocationError) || !managedSession) throw error;
+    invocation = startupFailure(error, performance.now() - managedStartupStarted);
   }
   if (invocation.status === 'invocation_error') {
     const code = invocation.error.code === 'cancelled' ? 'cancelled' : 'invocation_failed';
@@ -226,12 +110,7 @@ const testNativeAgentConnection = async (
       errorCode: invocation.error.code,
       errorMessage: redactTransportText(invocation.error.message, resolved.secrets),
       expectedMetrics: [],
-      outcome:
-        invocation.error.code === 'cancelled'
-          ? 'cancelled'
-          : invocation.error.code === 'timeout'
-            ? 'timeout'
-            : 'invocation_error',
+      outcome: invocationOutcome(invocation),
       request: redactAgentRequest(request, resolved.secrets),
       startedAt,
       suiteName: `agent:${options.agent.id}`,

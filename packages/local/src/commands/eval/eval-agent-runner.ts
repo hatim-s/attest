@@ -1,20 +1,8 @@
 import { performance } from 'node:perf_hooks';
-import { resolve } from 'node:path';
 
 import { AGENT_PROTOCOL, type AgentRequest, type EvalRun } from '@attest/contracts';
 import { type CacheStore } from '@attest/core';
-import {
-  AgentInvocationError,
-  invokeAgent,
-  invokeMappedHttpAgent,
-  invokeStreamingAgent,
-  invokeVercelSandboxAgent,
-  startBackgroundAgent,
-  startJsonlBridgeAgent,
-  startWebSocketAgent,
-  type CaseExecution,
-  type InvocationResult,
-} from '@attest/executor';
+import type { CaseExecution, InvocationResult } from '@attest/executor';
 import {
   EvalCaseStageError,
   type EvalCaseExecutionContext,
@@ -25,40 +13,21 @@ import {
 import { LocalError } from '../../errors/index.js';
 import { assertSafeNativeAgentResource } from '../agent/authoring/index.js';
 import {
+  invocationOutcome,
+  invokeResolvedAgent,
   redactAgentRequest,
   redactInvocation,
   resolveNativeAgent,
-  type ResolvedNativeAgent,
+  startAgentRuntime,
+  startupFailure,
+  type AgentRuntime,
 } from '../agent/native-agent-adapter/index.js';
 import type { ResolvedEvalCaseInput } from './eval-resolver.js';
 import { createEvalMetricEvaluator } from './eval-metric-runner.js';
 import { createEvalLifecycle } from './eval-lifecycle.js';
 
-const DEFAULT_OUTPUT_CAP_BYTES = 10 * 1024 * 1024;
-const DEFAULT_TIMEOUT_MS = 60_000;
 const LIFECYCLE_ERROR_LIMIT = 4096;
 const TRUNCATED_SUFFIX = ' [truncated]';
-
-type RunScopedSession = {
-  close(): Promise<void>;
-  invoke(request: AgentRequest, signal?: AbortSignal): Promise<InvocationResult>;
-};
-
-type SessionAgent = Extract<
-  ResolvedNativeAgent,
-  { kind: 'background' | 'jsonl_bridge' | 'websocket' }
->;
-type DirectAgent = Exclude<ResolvedNativeAgent, SessionAgent>;
-type EvalAgentRuntime =
-  | { kind: 'session'; resolved: SessionAgent; session: RunScopedSession }
-  | { kind: 'direct'; resolved: DirectAgent };
-
-const invocationOutcome = (
-  result: Extract<InvocationResult, { status: 'invocation_error' }>,
-): Exclude<CaseExecution['outcome'], 'completed'> =>
-  result.error.code === 'timeout' || result.error.code === 'cancelled'
-    ? result.error.code
-    : 'invocation_error';
 
 /** Appends a local lifecycle failure to fresh result and diagnostics objects. */
 const appendLifecycleFailure = (
@@ -88,155 +57,14 @@ const appendLifecycleFailure = (
   };
 };
 
-/** Converts startup throws into one bounded invocation attempt so persistence retains the failure. */
-const startupFailure = (error: unknown, durationMs: number): InvocationResult => {
-  const invocationError =
-    error instanceof AgentInvocationError
-      ? error
-      : new AgentInvocationError('network', 'Agent runtime initialization failed.', {
-          cause: error,
-        });
-  const diagnostics =
-    'diagnostics' in invocationError &&
-    invocationError.diagnostics !== null &&
-    typeof invocationError.diagnostics === 'object'
-      ? (invocationError.diagnostics as InvocationResult['diagnostics'])
-      : {};
-  const attempt = {
-    status: 'invocation_error' as const,
-    error: invocationError,
-    diagnostics,
-    durationMs,
-    warnings: [],
-  };
-  return { ...attempt, attempts: [attempt] };
-};
-
-/** Creates one run-scoped adapter session only for transports whose lifecycle benefits from reuse. */
+/** Resolves and starts one agent runtime; session transports are reused across cases. */
 const startRuntime = async (
   payload: ResolvedEvalCaseInput,
   projectRoot: string,
   signal: AbortSignal,
-): Promise<EvalAgentRuntime> => {
+): Promise<AgentRuntime> => {
   assertSafeNativeAgentResource(payload.agent);
-  const resolved = await resolveNativeAgent(payload.agent, projectRoot);
-  switch (resolved.kind) {
-    case 'background':
-      return {
-        kind: 'session',
-        resolved,
-        session: await startBackgroundAgent(resolved.agent, {
-          cwd: resolved.cwd,
-          env: resolved.env,
-          invokeHeaders: resolved.invokeHeaders,
-          invokeQuery: resolved.invokeQuery,
-          secrets: resolved.secrets,
-          shutdownHeaders: resolved.shutdownHeaders,
-          shutdownQuery: resolved.shutdownQuery,
-          signal,
-        }),
-      };
-    case 'jsonl_bridge':
-      return {
-        kind: 'session',
-        resolved,
-        session: await startJsonlBridgeAgent(resolved.agent, {
-          cwd: resolved.cwd,
-          env: resolved.env,
-          secrets: resolved.secrets,
-          signal,
-        }),
-      };
-    case 'websocket':
-      return {
-        kind: 'session',
-        resolved,
-        session: await startWebSocketAgent(resolved.agent, {
-          headers: resolved.headers,
-          secrets: resolved.secrets,
-          signal,
-        }),
-      };
-    default:
-      return { kind: 'direct', resolved };
-  }
-};
-
-/** Invokes the exact existing transport selected by the resolved immutable agent resource. */
-const invokeRuntime = async (
-  runtime: EvalAgentRuntime,
-  request: AgentRequest,
-  signal: AbortSignal,
-  payload: ResolvedEvalCaseInput,
-  workerDirectory?: string,
-  configuredIndex?: number,
-  projectRoot?: string,
-): Promise<InvocationResult> => {
-  if (runtime.kind === 'session') return runtime.session.invoke(request, signal);
-  const { resolved } = runtime;
-  switch (resolved.kind) {
-    case 'vercel_sandbox': {
-      const attemptTimeoutMs = payload.attempt_timeout_ms ?? DEFAULT_TIMEOUT_MS;
-      const retries = payload.agent.retry?.retries ?? 0;
-      const artifactRoot =
-        workerDirectory ??
-        (resolved.sandbox.artifact_directory === undefined || projectRoot === undefined
-          ? undefined
-          : resolve(
-              projectRoot,
-              resolved.sandbox.artifact_directory,
-              request.run_id,
-              String(configuredIndex ?? 0),
-            ));
-      return invokeVercelSandboxAgent(
-        resolved.sandbox,
-        {
-          argv: resolved.argv,
-          ...(resolved.cwd === undefined ? {} : { cwd: resolved.cwd }),
-          env: resolved.env,
-          attemptTimeoutMs,
-          retries,
-          responseBytes: payload.agent.limits?.response_bytes ?? DEFAULT_OUTPUT_CAP_BYTES,
-          sandboxTimeoutMs: Math.min(
-            Number.MAX_SAFE_INTEGER,
-            attemptTimeoutMs * (retries + 1) + 60_000,
-          ),
-        },
-        request,
-        {
-          projectRoot: projectRoot ?? process.cwd(),
-          ...(artifactRoot === undefined ? {} : { artifactRoot }),
-          signal,
-        },
-      );
-    }
-    case 'stream':
-      return invokeStreamingAgent(resolved.agent, request, {
-        headers: resolved.headers,
-        query: resolved.query,
-        secrets: resolved.secrets,
-        signal,
-      });
-    case 'mapped_http':
-      return invokeMappedHttpAgent(resolved.agent, request, {
-        headers: resolved.headers,
-        query: resolved.query,
-        secrets: resolved.secrets,
-        signal,
-      });
-    case 'direct':
-      return invokeAgent(resolved.target, request, {
-        env: resolved.env,
-        httpHeaders: resolved.headers,
-        outputCapBytes: payload.agent.limits?.response_bytes ?? DEFAULT_OUTPUT_CAP_BYTES,
-        retries: payload.agent.retry?.retries ?? 0,
-        signal,
-        timeoutMs: payload.attempt_timeout_ms ?? DEFAULT_TIMEOUT_MS,
-        ...(workerDirectory === undefined
-          ? {}
-          : { preserveWorkingDirectory: true, workingDirectory: workerDirectory }),
-      });
-  }
+  return startAgentRuntime(await resolveNativeAgent(payload.agent, projectRoot), signal);
 };
 
 /** Builds the engine runner that reuses per-run transports and evaluates current metrics per completed case. */
@@ -245,7 +73,7 @@ const createEvalCaseRunner = (
   cacheStore: CacheStore,
   run: EvalRun,
 ): EvalCaseRunner<ResolvedEvalCaseInput> => {
-  const runtimes = new Map<string, Promise<EvalAgentRuntime>>();
+  const runtimes = new Map<string, Promise<AgentRuntime>>();
   const metricEvaluator = createEvalMetricEvaluator(projectRoot, cacheStore);
   const lifecycle = createEvalLifecycle(projectRoot, run);
   let sandboxCleanupUncertain = false;
@@ -253,7 +81,7 @@ const createEvalCaseRunner = (
   const runtimeFor = (
     payload: ResolvedEvalCaseInput,
     signal: AbortSignal,
-  ): Promise<EvalAgentRuntime> => {
+  ): Promise<AgentRuntime> => {
     const existing = runtimes.get(payload.agent.id);
     if (existing !== undefined) return existing;
     const created = startRuntime(payload, projectRoot, signal);
@@ -294,19 +122,18 @@ const createEvalCaseRunner = (
       };
       const startedAt = new Date().toISOString();
       const started = performance.now();
-      let runtime: EvalAgentRuntime | undefined;
+      let runtime: AgentRuntime | undefined;
       let invocation: InvocationResult;
       try {
         runtime = await runtimeFor(payload, signal);
-        invocation = await invokeRuntime(
-          runtime,
-          request,
-          signal,
-          payload,
-          workerDirectory,
-          resolvedCase.configured_index,
+        invocation = await invokeResolvedAgent(runtime, request, {
+          agent: payload.agent,
+          attemptTimeoutMs: payload.attempt_timeout_ms,
           projectRoot,
-        );
+          sandboxArtifactSegment: String(resolvedCase.configured_index),
+          signal,
+          workerDirectory,
+        });
       } catch (error: unknown) {
         invocation = startupFailure(error, performance.now() - started);
       }

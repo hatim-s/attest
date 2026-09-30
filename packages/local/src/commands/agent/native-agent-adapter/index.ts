@@ -5,6 +5,13 @@ export {
   redactProbeValue,
 } from './evidence-redaction.js';
 export {
+  invocationOutcome,
+  invokeResolvedAgent,
+  startAgentRuntime,
+  startupFailure,
+  type AgentRuntime,
+} from './invoke-resolved-agent.js';
+export {
   createBaseEnvironment,
   resolveNativeAgent,
   resolveProcessEnvironment,
