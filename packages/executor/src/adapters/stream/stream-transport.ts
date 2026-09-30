@@ -9,8 +9,18 @@ import {
   type JsonValue,
 } from '@attest/contracts';
 
-import { AgentInvocationError } from '../../errors.js';
+import { AgentInvocationError, abortedError } from '../../errors.js';
+import {
+  DEFAULT_CONNECT_MS,
+  DEFAULT_EVENT_BYTES,
+  DEFAULT_EVENT_COUNT,
+  DEFAULT_FIRST_BYTE_MS,
+  DEFAULT_IDLE_MS,
+  DEFAULT_TOTAL_EVIDENCE_BYTES,
+} from '../../internal/agent-defaults.js';
+import { isJsonValue } from '../../internal/json-value.js';
 import { createRawExcerpt } from '../../internal/raw-excerpt.js';
+import { extractRemoteError } from '../../internal/remote-error.js';
 import { readJsonPointer } from '../http/json-pointer.js';
 import { materializeHttpRequest } from '../http/request-template.js';
 import { redactEventEvidence, redactTransportText } from '../http/redaction.js';
@@ -18,35 +28,6 @@ import { parseRetryAfter } from '../http/retry-after.js';
 import { resolveSafeHttpUrl } from '../http/url-security.js';
 import { SseParser } from './sse-parser.js';
 import type { StreamAgentResource, StreamEvent, StreamInvokeOptions } from './types.js';
-
-const DEFAULT_CONNECT_MS = 10_000;
-const DEFAULT_FIRST_BYTE_MS = 30_000;
-const DEFAULT_IDLE_MS = 30_000;
-const DEFAULT_EVENT_COUNT = 10_000;
-const DEFAULT_EVENT_BYTES = 1024 * 1024;
-const DEFAULT_TOTAL_BYTES = 10 * 1024 * 1024;
-
-const isJsonValue = (value: unknown): value is JsonValue => {
-  if (value === null || ['string', 'number', 'boolean'].includes(typeof value)) return true;
-  if (Array.isArray(value)) return value.every(isJsonValue);
-  return (
-    typeof value === 'object' && Object.values(value as Record<string, unknown>).every(isJsonValue)
-  );
-};
-
-const extractedError = (value: unknown): { code?: string; message: string } => {
-  if (typeof value === 'string') return { message: value };
-  if (value !== null && typeof value === 'object') {
-    const candidate = value as Record<string, unknown>;
-    if (typeof candidate.message === 'string') {
-      return {
-        message: candidate.message,
-        ...(typeof candidate.code === 'string' ? { code: candidate.code } : {}),
-      };
-    }
-  }
-  return { message: 'The streaming agent reported an error.' };
-};
 
 /** Reads one HTTP stream with separate transport/application idle clocks and hard event caps. */
 const consumeResponse = async (
@@ -61,7 +42,7 @@ const consumeResponse = async (
     const transport = agent.transport;
     const maximumEventBytes = agent.limits?.event_bytes ?? DEFAULT_EVENT_BYTES;
     const maximumEventCount = agent.limits?.event_count ?? DEFAULT_EVENT_COUNT;
-    const maximumTotalBytes = agent.limits?.total_evidence_bytes ?? DEFAULT_TOTAL_BYTES;
+    const maximumTotalBytes = agent.limits?.total_evidence_bytes ?? DEFAULT_TOTAL_EVIDENCE_BYTES;
     const idleMs = agent.timeouts?.idle_ms ?? DEFAULT_IDLE_MS;
     const sse = transport.framing === 'sse' ? new SseParser() : undefined;
     const decoder = new TextDecoder('utf-8', { fatal: true });
@@ -102,15 +83,7 @@ const consumeResponse = async (
         idleMs,
       );
     };
-    const abort = (): void =>
-      fail(
-        new AgentInvocationError(
-          callerSignal?.aborted === true ? 'cancelled' : 'timeout',
-          callerSignal?.aborted === true
-            ? 'Streaming invocation was cancelled.'
-            : 'Streaming invocation timed out.',
-        ),
-      );
+    const abort = (): void => fail(abortedError(callerSignal, 'Streaming invocation'));
     const accept = (event: StreamEvent): void => {
       if (Buffer.byteLength(event.source) > maximumEventBytes) {
         fail(
@@ -316,16 +289,7 @@ const streamOnce = async (
     };
     const abort = (): void => {
       outgoing.destroy();
-      finish(() =>
-        reject(
-          new AgentInvocationError(
-            options.signal?.aborted === true ? 'cancelled' : 'timeout',
-            options.signal?.aborted === true
-              ? 'Streaming invocation was cancelled.'
-              : 'Streaming invocation timed out.',
-          ),
-        ),
-      );
+      finish(() => reject(abortedError(options.signal, 'Streaming invocation')));
     };
     const outgoing = transport(
       resolved.url,
@@ -420,7 +384,7 @@ const streamOnce = async (
             if (error !== undefined && error !== null) {
               return {
                 protocol: AGENT_PROTOCOL,
-                error: extractedError(error),
+                error: extractRemoteError(error, 'The streaming agent reported an error.'),
                 ...(trace === undefined ? {} : { trace }),
               } as AgentResponse;
             }

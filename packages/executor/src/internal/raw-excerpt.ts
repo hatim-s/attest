@@ -2,6 +2,8 @@ import type { RawExcerpt } from '@attest/contracts';
 import { createHash } from 'node:crypto';
 
 const RAW_EXCERPT_CHARACTERS = 4096;
+/** Enough payload bytes to fill a full excerpt even when every character takes four bytes. */
+const RAW_EVIDENCE_PREFIX_BYTES = RAW_EXCERPT_CHARACTERS * 4;
 
 /**
  * Retains deterministic, bounded payload evidence for an invocation attempt.
@@ -17,4 +19,18 @@ const createRawExcerpt = (payload: string): RawExcerpt => {
   };
 };
 
-export { createRawExcerpt };
+/**
+ * Keeps the payload prefix an excerpt can show while a transport streams an unbounded body, so a
+ * capped response still yields evidence. Returns the new retained byte count.
+ */
+const appendEvidencePrefix = (
+  chunks: Uint8Array[],
+  retainedBytes: number,
+  chunk: Uint8Array,
+): number => {
+  const retained = chunk.subarray(0, Math.max(0, RAW_EVIDENCE_PREFIX_BYTES - retainedBytes));
+  if (retained.byteLength > 0) chunks.push(retained);
+  return retainedBytes + retained.byteLength;
+};
+
+export { RAW_EXCERPT_CHARACTERS, appendEvidencePrefix, createRawExcerpt };

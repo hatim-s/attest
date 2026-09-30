@@ -9,6 +9,10 @@ import {
 } from '@attest/contracts';
 
 import { AgentInvocationError } from '../../errors.js';
+import {
+  DEFAULT_EVENT_COUNT,
+  DEFAULT_TOTAL_EVIDENCE_BYTES,
+} from '../../internal/agent-defaults.js';
 import { startTimer } from '../../internal/elapsed.js';
 import { createRawExcerpt } from '../../internal/raw-excerpt.js';
 import type { InvocationAttempt, InvocationResult } from '../../types.js';
@@ -16,8 +20,8 @@ import { redactEventEvidence, redactTransportText } from '../http/redaction.js';
 import type { WebSocketClose, WebSocketConnection } from './websocket-connection.js';
 import type { WebSocketAgentResource } from './websocket-protocol.js';
 
-const DEFAULT_EVENT_COUNT = 1_024;
-const DEFAULT_TOTAL_EVIDENCE_BYTES = 10 * 1024 * 1024;
+/** Evidence keeps at most this many lifecycle events per attempt, independent of the message cap. */
+const EVIDENCE_EVENT_CAP = 1_024;
 
 type EvidenceEvent = WebSocketAttemptEvidence['events'][number];
 
@@ -123,7 +127,7 @@ const recordEvent = (
   source?: string,
   raw?: unknown,
 ): void => {
-  if (pending.events.length >= DEFAULT_EVENT_COUNT) return;
+  if (pending.events.length >= EVIDENCE_EVENT_CAP) return;
   const redacted =
     source === undefined
       ? undefined
@@ -171,7 +175,7 @@ const attemptEvidence = (
     lifecycle: agent.transport.lifecycle,
     connection_mode: agent.transport.connection_mode,
     acknowledgement: pending.acknowledged ? acknowledged : notAcknowledged,
-    events: pending.events.slice(0, DEFAULT_EVENT_COUNT),
+    events: pending.events.slice(0, EVIDENCE_EVENT_CAP),
     ...(pending.close === undefined ? {} : { close: pending.close }),
   } as const;
   if (outcome === 'completed') return { ...base, outcome };

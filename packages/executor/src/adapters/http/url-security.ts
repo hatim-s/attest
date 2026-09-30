@@ -1,7 +1,7 @@
 import { isIP } from 'node:net';
 import { lookup } from 'node:dns/promises';
 
-import { AgentInvocationError } from '../../errors.js';
+import { AgentInvocationError, abortedError } from '../../errors.js';
 
 type ResolvedHttpUrl = {
   address: string;
@@ -67,14 +67,7 @@ const resolveSafeHttpUrl = async (
   signal?: AbortSignal,
   callerSignal?: AbortSignal,
 ): Promise<ResolvedHttpUrl> => {
-  if (isAborted(signal)) {
-    throw new AgentInvocationError(
-      isAborted(callerSignal) ? 'cancelled' : 'timeout',
-      isAborted(callerSignal)
-        ? 'Mapped HTTP invocation was cancelled.'
-        : 'Mapped HTTP hostname resolution timed out.',
-    );
-  }
+  if (isAborted(signal)) throw abortedError(callerSignal, 'HTTP hostname resolution');
   let url: URL;
   try {
     url = new URL(value);
@@ -95,14 +88,7 @@ const resolveSafeHttpUrl = async (
 
   const timeoutSignal = AbortSignal.timeout(timeoutMs);
   const combined = signal === undefined ? timeoutSignal : AbortSignal.any([signal, timeoutSignal]);
-  if (combined.aborted) {
-    throw new AgentInvocationError(
-      isAborted(callerSignal) ? 'cancelled' : 'timeout',
-      isAborted(callerSignal)
-        ? 'Mapped HTTP invocation was cancelled.'
-        : 'Mapped HTTP hostname resolution timed out.',
-    );
-  }
+  if (combined.aborted) throw abortedError(callerSignal, 'HTTP hostname resolution');
   let addresses: { address: string; family: 4 | 6 }[];
   try {
     addresses = (await Promise.race([
@@ -121,13 +107,12 @@ const resolveSafeHttpUrl = async (
       }),
     ])) as { address: string; family: 4 | 6 }[];
   } catch (error: unknown) {
+    if (isAborted(callerSignal) || isAborted(signal)) {
+      throw abortedError(callerSignal, 'HTTP hostname resolution', { cause: error });
+    }
     throw new AgentInvocationError(
-      isAborted(callerSignal) ? 'cancelled' : isAborted(signal) ? 'timeout' : 'network',
-      isAborted(callerSignal)
-        ? 'Mapped HTTP invocation was cancelled.'
-        : isAborted(signal)
-          ? 'Mapped HTTP hostname resolution timed out.'
-          : 'Mapped HTTP hostname could not be resolved safely.',
+      'network',
+      'Mapped HTTP hostname could not be resolved safely.',
       { cause: error },
     );
   }

@@ -6,8 +6,14 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { AgentInvocationError, type InvocationErrorCode } from './errors.js';
+import { DEFAULT_TERMINATION_GRACE_MS } from './internal/agent-defaults.js';
+import { BoundedTail } from './internal/bounded-tail.js';
 import { startTimer } from './internal/elapsed.js';
-import { createRawExcerpt as createPayloadRawExcerpt } from './internal/raw-excerpt.js';
+import {
+  RAW_EXCERPT_CHARACTERS,
+  appendEvidencePrefix,
+  createRawExcerpt as createPayloadRawExcerpt,
+} from './internal/raw-excerpt.js';
 import {
   killProcessTree,
   listDescendantProcesses,
@@ -23,9 +29,6 @@ import type {
 } from './types.js';
 
 const STDERR_EXCERPT_BYTES = 4096;
-const RAW_EXCERPT_CHARACTERS = 4096;
-const RAW_EVIDENCE_PREFIX_BYTES = RAW_EXCERPT_CHARACTERS * 4;
-const TERMINATION_GRACE_MS = 5000;
 
 type CliInvokeOptions = Omit<InvokeOptions, 'env' | 'workingDirectory'> & {
   /** Test seam for injecting a controlled base environment; HOME and TMPDIR stay attempt-local. */
@@ -72,48 +75,8 @@ const createInvocationError = (
   };
 };
 
-const appendStderr = (
-  current: Buffer<ArrayBufferLike>,
-  chunk: Buffer<ArrayBufferLike>,
-): Buffer<ArrayBufferLike> => {
-  const combined = Buffer.concat([current, chunk]);
-  return combined.subarray(Math.max(0, combined.length - STDERR_EXCERPT_BYTES));
-};
-
-const appendEvidencePrefix = (
-  chunks: Buffer<ArrayBufferLike>[],
-  byteCount: number,
-  chunk: Buffer<ArrayBufferLike>,
-): number => {
-  const remainingBytes = Math.max(0, RAW_EVIDENCE_PREFIX_BYTES - byteCount);
-  if (remainingBytes === 0) {
-    return byteCount;
-  }
-
-  const retained = chunk.subarray(0, remainingBytes);
-  chunks.push(retained);
-  return byteCount + retained.length;
-};
-
-/** Preserves a valid UTF-8 stderr tail at the 4 KB diagnostics boundary. */
-const decodeUtf8Tail = (buffer: Buffer<ArrayBufferLike>, maxBytes: number): string => {
-  const tail = buffer.subarray(Math.max(0, buffer.length - maxBytes));
-  let startOffset = 0;
-  // UTF-8 continuation bytes cannot begin a valid code point, so discard only the split prefix.
-  while (startOffset < tail.length) {
-    const leadingByte = tail[startOffset];
-    if (leadingByte === undefined || (leadingByte & 0xc0) !== 0x80) {
-      break;
-    }
-
-    startOffset += 1;
-  }
-
-  return tail.subarray(startOffset).toString('utf8');
-};
-
 const createRawExcerpt = (
-  evidenceChunks: readonly Buffer<ArrayBufferLike>[],
+  evidenceChunks: readonly Uint8Array[],
   payloadByteCount: number,
   evidenceByteCount: number,
   payloadHash: Hash,
@@ -138,11 +101,11 @@ const captureInvocation = (
   onStdout: () => void,
 ): InvocationCapture => {
   const stdoutChunks: Buffer<ArrayBufferLike>[] = [];
-  const evidenceChunks: Buffer<ArrayBufferLike>[] = [];
+  const evidenceChunks: Uint8Array[] = [];
   const payloadHash = createHash('sha256');
   let stdoutBytes = 0;
   let evidenceBytes = 0;
-  let stderrExcerpt: Buffer<ArrayBufferLike> = Buffer.alloc(0);
+  const stderrTail = new BoundedTail(STDERR_EXCERPT_BYTES);
   let terminalResolved = false;
   let resolveTerminal: (event: TerminalEvent) => void = () => undefined;
 
@@ -180,7 +143,7 @@ const captureInvocation = (
     stdoutChunks.push(chunk);
   });
   child.stderr?.on('data', (chunk: Buffer<ArrayBufferLike>) => {
-    stderrExcerpt = appendStderr(stderrExcerpt, chunk);
+    stderrTail.append(chunk);
   });
   child.once('error', (error) => resolveOnce({ type: 'spawn_error', error }));
   child.once('close', (exitCode) => resolveOnce({ type: 'close', exitCode }));
@@ -203,8 +166,7 @@ const captureInvocation = (
     readStdout: () => Buffer.concat(stdoutChunks, stdoutBytes).toString('utf8'),
     readRawExcerpt: (forceTruncated = false) =>
       createRawExcerpt(evidenceChunks, stdoutBytes, evidenceBytes, payloadHash, forceTruncated),
-    readStderrExcerpt: () =>
-      stderrExcerpt.length === 0 ? undefined : decodeUtf8Tail(stderrExcerpt, STDERR_EXCERPT_BYTES),
+    readStderrExcerpt: () => stderrTail.text(),
   };
 };
 
@@ -315,7 +277,7 @@ const invokeCliAgent = async (
       child,
       capture.close,
       descendantSnapshots,
-      options.terminationGraceMs ?? TERMINATION_GRACE_MS,
+      options.terminationGraceMs ?? DEFAULT_TERMINATION_GRACE_MS,
       terminal.type !== 'close',
     );
     const stderrExcerpt = capture.readStderrExcerpt();

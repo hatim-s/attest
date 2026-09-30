@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 
 import type {
@@ -11,13 +10,15 @@ import type {
 import { WEBSOCKET_REQUEST_PROTOCOL } from '@attest/contracts';
 
 import { AgentInvocationError } from '../../errors.js';
+import { DEFAULT_REQUEST_BYTES } from '../../internal/agent-defaults.js';
+import { isJsonValue } from '../../internal/json-value.js';
+import { extractRemoteError } from '../../internal/remote-error.js';
 import { readJsonPointer } from '../http/json-pointer.js';
 
 type WebSocketAgentResource = AgentResource & {
   transport: Extract<AgentResource['transport'], { kind: 'websocket' }>;
 };
 
-const DEFAULT_REQUEST_BYTES = 10 * 1024 * 1024;
 const FORBIDDEN_HANDSHAKE_HEADERS = new Set([
   'connection',
   'cookie',
@@ -52,39 +53,8 @@ type MessageInterpretation = {
   trace?: JsonValue;
 };
 
-/** Produces a bounded correlation id without retaining authored case ids. */
-const correlationId = (request: AgentRequest, sequence: number): string =>
-  `ws-${sequence.toString(36)}-${createHash('sha256')
-    .update(request.run_id)
-    .update('\0')
-    .update(request.case_id)
-    .digest('hex')
-    .slice(0, 32)}`;
-
 const isSecretReference = (value: string | SecretReference): value is SecretReference =>
   typeof value !== 'string';
-
-const isJsonValue = (value: unknown): value is JsonValue => {
-  if (value === null || ['string', 'number', 'boolean'].includes(typeof value)) return true;
-  if (Array.isArray(value)) return value.every(isJsonValue);
-  return (
-    typeof value === 'object' && Object.values(value as Record<string, unknown>).every(isJsonValue)
-  );
-};
-
-const remoteError = (value: unknown): { code?: string; message: string } => {
-  if (typeof value === 'string') return { message: value };
-  if (value !== null && typeof value === 'object') {
-    const candidate = value as Record<string, unknown>;
-    if (typeof candidate.message === 'string') {
-      return {
-        message: candidate.message,
-        ...(typeof candidate.code === 'string' ? { code: candidate.code } : {}),
-      };
-    }
-  }
-  return { message: 'The WebSocket agent reported an error.' };
-};
 
 /** Maps transport failures onto the stable WebSocket evidence vocabulary. */
 const errorClassification = (error: AgentInvocationError): WebSocketErrorClassification => {
@@ -265,7 +235,10 @@ const interpretServerMessage = (
   if (hasError) {
     return {
       ...progress,
-      terminal: { kind: 'error', value: remoteError(extractedError) },
+      terminal: {
+        kind: 'error',
+        value: extractRemoteError(extractedError, 'The WebSocket agent reported an error.'),
+      },
     };
   }
   if (hasResult) {
@@ -286,49 +259,11 @@ const interpretServerMessage = (
   return progress;
 };
 
-/** Computes deterministic retry backoff, including seeded jitter. */
-const retryDelay = (agent: WebSocketAgentResource, retryIndex: number): number => {
-  const backoff = agent.retry?.backoff;
-  if (backoff === undefined || backoff.kind === 'none') return 0;
-  if (backoff.kind === 'fixed') return backoff.delay_ms;
-  const bounded = Math.min(backoff.initial_delay_ms * 2 ** retryIndex, backoff.maximum_delay_ms);
-  const jitter = createHash('sha256')
-    .update(`${String(backoff.jitter_seed)}:${String(retryIndex)}`)
-    .digest()
-    .readUInt32BE(0);
-  return Math.floor((bounded * (75 + (jitter % 51))) / 100);
-};
-
-/** Waits for retry backoff while keeping caller cancellation immediate. */
-const waitForRetry = async (delayMs: number, signal?: AbortSignal): Promise<void> => {
-  if (signal?.aborted === true) {
-    throw new AgentInvocationError('cancelled', 'WebSocket retry was cancelled.');
-  }
-  if (delayMs <= 0) return;
-  await new Promise<void>((resolve, reject) => {
-    const finish = (): void => {
-      signal?.removeEventListener('abort', abort);
-      resolve();
-    };
-    const abort = (): void => {
-      clearTimeout(timer);
-      signal?.removeEventListener('abort', abort);
-      reject(new AgentInvocationError('cancelled', 'WebSocket retry was cancelled.'));
-    };
-    const timer = setTimeout(finish, delayMs);
-    signal?.addEventListener('abort', abort, { once: true });
-  });
-};
-
 export {
-  DEFAULT_REQUEST_BYTES,
-  correlationId,
   errorClassification,
   interpretServerMessage,
   materializeHeaders,
   materializeRequest,
   parseServerEnvelope,
-  retryDelay,
-  waitForRetry,
   type WebSocketAgentResource,
 };

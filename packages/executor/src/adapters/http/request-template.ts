@@ -8,6 +8,11 @@ type ResolvedHttpRequestTemplate = Omit<HttpRequestTemplate, 'headers' | 'query'
   query?: Record<string, string>;
 };
 
+type RequestTemplateOverrides = {
+  headers?: Record<string, string>;
+  query?: Record<string, string>;
+};
+
 type MaterializedHttpRequest = {
   body?: string;
   headers: Record<string, string>;
@@ -81,6 +86,43 @@ const mapBodyValue = (value: JsonValue, request: AgentRequest): JsonValue => {
   return value;
 };
 
+/** Replaces authored secret references with their runtime values; a missing value is an error. */
+const resolveTemplateValues = (
+  authored: HttpRequestTemplate['headers'],
+  overrides: Record<string, string> | undefined,
+  label: string,
+): Record<string, string> => {
+  const resolved: Record<string, string> = {};
+  for (const [name, value] of Object.entries(authored ?? {})) {
+    const override = overrides?.[name];
+    if (override !== undefined) {
+      resolved[name] = override;
+      continue;
+    }
+    if (typeof value !== 'string') {
+      throw new AgentInvocationError(
+        'invalid_envelope',
+        `HTTP ${label} ${name} references a secret that was not resolved at runtime.`,
+      );
+    }
+    resolved[name] = value;
+  }
+  return { ...resolved, ...overrides };
+};
+
+/**
+ * Applies runtime-resolved headers and query values to an authored request template. Callers
+ * resolve secret references outside the executor, so every reference must have an override.
+ */
+const resolveRequestTemplate = (
+  template: HttpRequestTemplate,
+  overrides: RequestTemplateOverrides,
+): ResolvedHttpRequestTemplate => ({
+  ...template,
+  headers: resolveTemplateValues(template.headers, overrides.headers, 'header'),
+  query: resolveTemplateValues(template.query, overrides.query, 'query parameter'),
+});
+
 /** Materializes one mapped request while encoding URL substitutions and preserving JSON body types. */
 const materializeHttpRequest = (
   template: ResolvedHttpRequestTemplate,
@@ -147,6 +189,8 @@ const materializeHttpRequest = (
 export {
   assertStaticUrlAuthority,
   materializeHttpRequest,
+  resolveRequestTemplate,
+  type RequestTemplateOverrides,
   type MaterializedHttpRequest,
   type ResolvedHttpRequestTemplate,
 };

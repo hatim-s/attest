@@ -3,7 +3,7 @@ import { request as httpRequest } from 'node:http';
 import { request as httpsRequest } from 'node:https';
 import type { Duplex } from 'node:stream';
 
-import { AgentInvocationError } from '../../errors.js';
+import { AgentInvocationError, abortedError } from '../../errors.js';
 import { resolveSafeHttpUrl } from '../http/url-security.js';
 
 type OpenWebSocketHandshakeOptions = {
@@ -94,14 +94,11 @@ const openWebSocketHandshake = async (
     });
     const abort = (): void => {
       outgoing.destroy();
-      const cancelled = options.callerSignal?.aborted === true;
       finish(() =>
         reject(
-          new AgentInvocationError(
-            cancelled ? 'cancelled' : 'timeout',
-            cancelled ? 'WebSocket opening was cancelled.' : 'WebSocket opening timed out.',
-            { classification: 'open_timeout' },
-          ),
+          abortedError(options.callerSignal, 'WebSocket opening', {
+            classification: 'open_timeout',
+          }),
         ),
       );
     };

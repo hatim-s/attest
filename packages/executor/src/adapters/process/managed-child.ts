@@ -1,6 +1,7 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { AgentInvocationError } from '../../errors.js';
 import {
+  identityKey,
   killProcessTree,
   listDescendantProcesses,
   type ProcessIdentity,
@@ -124,18 +125,8 @@ class ManagedChild {
     const processId = this.child.pid;
     if (processId === undefined) return;
     const discovered = await listDescendantProcesses(processId);
-    const retained = new Map(
-      this.descendants.map((identity) => [
-        `${String(identity.processId)}\u0000${identity.startedAt}\u0000${identity.command}`,
-        identity,
-      ]),
-    );
-    for (const identity of discovered) {
-      retained.set(
-        `${String(identity.processId)}\u0000${identity.startedAt}\u0000${identity.command}`,
-        identity,
-      );
-    }
+    const retained = new Map(this.descendants.map((identity) => [identityKey(identity), identity]));
+    for (const identity of discovered) retained.set(identityKey(identity), identity);
     // Graceful shutdown can reparent descendants; never discard the pre-shutdown snapshot.
     this.descendants = [...retained.values()];
   }

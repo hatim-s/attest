@@ -7,6 +7,11 @@ import {
 } from '@attest/contracts';
 
 import { AgentInvocationError } from '../../errors.js';
+import { abortableWait } from '../../internal/abortable-wait.js';
+import { DEFAULT_EVENT_BYTES, DEFAULT_REQUEST_BYTES } from '../../internal/agent-defaults.js';
+import { correlationId } from '../../internal/correlation-id.js';
+import { retryBackoffDelay } from '../../internal/retry-backoff.js';
+import { createSerialQueue } from '../../internal/serial-queue.js';
 import type { InvocationAttempt, InvocationResult } from '../../types.js';
 import {
   openWebSocket,
@@ -26,15 +31,11 @@ import {
   type PendingInvocation,
 } from './websocket-evidence.js';
 import {
-  DEFAULT_REQUEST_BYTES,
-  correlationId,
   errorClassification,
   interpretServerMessage,
   materializeHeaders,
   materializeRequest,
   parseServerEnvelope,
-  retryDelay,
-  waitForRetry,
   type WebSocketAgentResource,
 } from './websocket-protocol.js';
 
@@ -45,8 +46,15 @@ type WebSocketSessionOptions = {
   signal?: AbortSignal;
 };
 
-const DEFAULT_EVENT_BYTES = 1024 * 1024;
 const MAX_TOMBSTONES = 1_024;
+
+/** Waits for retry backoff while keeping caller cancellation immediate. */
+const waitForRetry = (delayMs: number, signal: AbortSignal | undefined): Promise<void> =>
+  abortableWait(
+    delayMs,
+    signal,
+    () => new AgentInvocationError('cancelled', 'WebSocket retry was cancelled.'),
+  );
 
 /** Runs one WebSocket lifecycle, either shared by the eval run or isolated per case. */
 class WebSocketAgentSession {
@@ -64,7 +72,7 @@ class WebSocketAgentSession {
   private pingTimer?: NodeJS.Timeout;
   private runTimer?: NodeJS.Timeout;
   private sequence = 0;
-  private serialTail: Promise<void> = Promise.resolve();
+  private readonly runSerially = createSerialQueue();
 
   private constructor(
     readonly agent: WebSocketAgentResource,
@@ -114,15 +122,7 @@ class WebSocketAgentSession {
     if (this.agent.transport.lifecycle === 'per_case') return this.invokePerCase(request, signal);
     if (this.agent.transport.connection_mode === 'multiplexed')
       return this.invokeRunScoped(request, signal);
-    let resolveResult!: (result: InvocationResult) => void;
-    const result = new Promise<InvocationResult>((resolve) => {
-      resolveResult = resolve;
-    });
-    const scheduled = this.serialTail.then(async () => {
-      resolveResult(await this.invokeRunScoped(request, signal));
-    });
-    this.serialTail = scheduled.catch(() => undefined);
-    return result;
+    return this.runSerially(() => this.invokeRunScoped(request, signal));
   }
 
   private async invokePerCase(
@@ -131,7 +131,7 @@ class WebSocketAgentSession {
   ): Promise<InvocationResult> {
     const attempts: InvocationAttempt[] = [];
     for (let retry = 0; ; retry += 1) {
-      const requestId = correlationId(request, ++this.sequence);
+      const requestId = correlationId('ws', request, ++this.sequence);
       const result = await this.runPerCaseAttempt(request, requestId, signal);
       const acknowledgedAttempt = this.lastAttemptAcknowledged(result);
       if (
@@ -146,7 +146,7 @@ class WebSocketAgentSession {
       }
       attempts.push(...result.attempts);
       try {
-        await waitForRetry(retryDelay(this.agent, retry), signal);
+        await waitForRetry(retryBackoffDelay(this.agent.retry?.backoff, retry), signal);
       } catch (error: unknown) {
         return createFailureResult(
           this.agent,
@@ -253,7 +253,7 @@ class WebSocketAgentSession {
     if (this.closed) {
       const pending = createPendingInvocation(
         request,
-        correlationId(request, ++this.sequence),
+        correlationId('ws', request, ++this.sequence),
         () => undefined,
         signal,
       );
@@ -273,7 +273,7 @@ class WebSocketAgentSession {
     });
     const pending = createPendingInvocation(
       request,
-      correlationId(request, ++this.sequence),
+      correlationId('ws', request, ++this.sequence),
       resolveResult,
       signal,
     );
@@ -533,7 +533,7 @@ class WebSocketAgentSession {
     recordEvent(this.agent, pending, this.secrets, 'retry_scheduled');
     try {
       await waitForRetry(
-        retryDelay(this.agent, pending.retriesUsed - 1),
+        retryBackoffDelay(this.agent.retry?.backoff, pending.retriesUsed - 1),
         pending.signal ?? this.options.signal,
       );
       if (!this.pending.has(pending.requestId)) return;

@@ -2,6 +2,8 @@ import { BoundedOutputWritable } from '../adapters/sandbox/bounded-writable.js';
 import { resolveVercelSandboxCredentials } from '../adapters/sandbox/credentials.js';
 import { readRemoteFile, resolveRemotePath, SANDBOX_WORKSPACE } from '../adapters/sandbox/files.js';
 import type { VercelSandboxFactory } from '../adapters/sandbox/types.js';
+import { defaultSandboxFactory } from '../adapters/sandbox/vercel-sandbox-adapter.js';
+import { requirePositiveInteger } from '../internal/positive-integer.js';
 import type { CaseEnvironmentFactory } from './types.js';
 import { normalizeWorkspacePath } from './workspace-path.js';
 
@@ -58,28 +60,15 @@ const vercelSandboxIsolation =
   async ({ signal }) => {
     signal.throwIfAborted();
     const credentials = resolveVercelSandboxCredentials(options.credentialEnv ?? process.env);
-    const factory =
-      options.sandboxFactory ??
-      (async (params) => {
-        const { Sandbox } = await import('@vercel/sandbox');
-        return Sandbox.create(params);
-      });
+    const factory = options.sandboxFactory ?? defaultSandboxFactory;
     const commandTimeoutMs = options.commandTimeoutMs ?? 60_000;
     const finalizationTimeoutMs = options.finalizationTimeoutMs ?? commandTimeoutMs;
     const cleanupTimeoutMs = options.cleanupTimeoutMs ?? 10_000;
     const cap = options.outputBytes ?? 1024 * 1024;
-    if (!Number.isSafeInteger(cap) || cap < 1) {
-      throw new TypeError('outputBytes must be a positive integer.');
-    }
-    for (const [label, value] of [
-      ['commandTimeoutMs', commandTimeoutMs],
-      ['finalizationTimeoutMs', finalizationTimeoutMs],
-      ['cleanupTimeoutMs', cleanupTimeoutMs],
-    ] as const) {
-      if (!Number.isSafeInteger(value) || value < 1) {
-        throw new TypeError(`${label} must be a positive integer.`);
-      }
-    }
+    requirePositiveInteger('outputBytes', cap);
+    requirePositiveInteger('commandTimeoutMs', commandTimeoutMs);
+    requirePositiveInteger('finalizationTimeoutMs', finalizationTimeoutMs);
+    requirePositiveInteger('cleanupTimeoutMs', cleanupTimeoutMs);
     const files = resolveSeedFiles(options.files ?? {}, cap);
     const sdk = await factory({
       image: options.image ?? 'vercel/sandbox/universal',

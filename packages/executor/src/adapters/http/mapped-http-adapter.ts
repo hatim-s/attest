@@ -1,9 +1,17 @@
 import { parseAgentResponse, type AgentRequest } from '@attest/contracts';
 
-import { AgentInvocationError } from '../../errors.js';
+import { AgentInvocationError, abortedError } from '../../errors.js';
+import {
+  DEFAULT_ATTEMPT_MS,
+  DEFAULT_CONNECT_MS,
+  DEFAULT_FIRST_BYTE_MS,
+  DEFAULT_IDLE_MS,
+  DEFAULT_REQUEST_BYTES,
+  DEFAULT_RESPONSE_BYTES,
+} from '../../internal/agent-defaults.js';
 import { startTimer } from '../../internal/elapsed.js';
 import type { InvocationAttempt, InvocationResult } from '../../types.js';
-import { materializeHttpRequest, type ResolvedHttpRequestTemplate } from './request-template.js';
+import { materializeHttpRequest, resolveRequestTemplate } from './request-template.js';
 import {
   assertPollingConfiguration,
   attemptFromError,
@@ -13,16 +21,8 @@ import {
   requireSuccessfulStatus,
   runDirect,
   runPolling,
-  withResolvedValues,
 } from './mapped-http-execution.js';
 import type { HttpAgentResource, MappedHttpInvokeOptions } from './mapped-http-types.js';
-
-const DEFAULT_ATTEMPT_MS = 60_000;
-const DEFAULT_CONNECT_MS = 10_000;
-const DEFAULT_FIRST_BYTE_MS = 30_000;
-const DEFAULT_BODY_IDLE_MS = 30_000;
-const DEFAULT_REQUEST_CAP_BYTES = 10 * 1024 * 1024;
-const DEFAULT_RESPONSE_CAP_BYTES = 10 * 1024 * 1024;
 
 /** Invokes a direct or polling mapped HTTP resource as one bounded Attest attempt. */
 const invokeMappedHttpAgent = async (
@@ -39,28 +39,21 @@ const invokeMappedHttpAgent = async (
     callerSignal: options.signal,
     connectTimeoutMs: agent.timeouts?.connect_ms ?? DEFAULT_CONNECT_MS,
     firstByteTimeoutMs: agent.timeouts?.first_byte_ms ?? DEFAULT_FIRST_BYTE_MS,
-    responseBodyTimeoutMs: agent.timeouts?.idle_ms ?? DEFAULT_BODY_IDLE_MS,
-    responseCapBytes: agent.limits?.response_bytes ?? DEFAULT_RESPONSE_CAP_BYTES,
+    responseBodyTimeoutMs: agent.timeouts?.idle_ms ?? DEFAULT_IDLE_MS,
+    responseCapBytes: agent.limits?.response_bytes ?? DEFAULT_RESPONSE_BYTES,
     secrets: options.secrets ?? [],
   };
   const retryAttempts: InvocationAttempt[] = [];
   let terminalAttemptDurationMs: number | undefined;
   try {
-    if (signal.aborted) {
-      throw new AgentInvocationError(
-        options.signal?.aborted === true ? 'cancelled' : 'timeout',
-        options.signal?.aborted === true
-          ? 'Mapped HTTP invocation was cancelled.'
-          : 'Mapped HTTP invocation timed out.',
-      );
-    }
+    if (signal.aborted) throw abortedError(options.signal, 'Mapped HTTP invocation');
     if (agent.transport.kind === 'polling') assertPollingConfiguration(agent.transport);
     const requestTemplate =
       agent.transport.kind === 'http' ? agent.transport.request : agent.transport.submit;
     const materialized = materializeHttpRequest(
-      withResolvedValues(requestTemplate as ResolvedHttpRequestTemplate, options),
+      resolveRequestTemplate(requestTemplate, options),
       request,
-      agent.limits?.request_bytes ?? DEFAULT_REQUEST_CAP_BYTES,
+      agent.limits?.request_bytes ?? DEFAULT_REQUEST_BYTES,
     );
     const completed =
       agent.transport.kind === 'http'

@@ -1,8 +1,7 @@
-import { performance } from 'node:perf_hooks';
-
 import type { AgentRequest } from '@attest/contracts';
 
 import { AgentInvocationError } from '../../errors.js';
+import { startTimer } from '../../internal/elapsed.js';
 import { createRawExcerpt } from '../../internal/raw-excerpt.js';
 import { invokeWithRetries } from '../../internal/invocation-retry.js';
 import type { InvocationAttempt, InvocationResult } from '../../types.js';
@@ -23,6 +22,7 @@ const INTERNAL_ROOT = '/vercel/sandbox/.attest';
 const REQUEST_PATH = `${INTERNAL_ROOT}/request.json`;
 const STDIN_WRAPPER = 'exec "$@" < "$0"';
 
+/** Loads the Vercel SDK lazily so hosts that never use sandboxes do not pay for the import. */
 const defaultSandboxFactory = async (
   params: VercelSandboxCreateParams,
 ): Promise<VercelSandboxSdk> => {
@@ -37,7 +37,7 @@ const invokeSandboxAttempt = async (
   request: AgentRequest,
   signal: AbortSignal | undefined,
 ): Promise<InvocationAttempt> => {
-  const started = performance.now();
+  const duration = startTimer();
   const attemptTimeout = AbortSignal.timeout(invocation.attemptTimeoutMs + 1_000);
   const attemptSignal =
     signal === undefined ? attemptTimeout : AbortSignal.any([signal, attemptTimeout]);
@@ -55,7 +55,7 @@ const invokeSandboxAttempt = async (
           'Sandbox request exceeds limits.response_bytes.',
         ),
         diagnostics: {},
-        durationMs: performance.now() - started,
+        durationMs: duration(),
         warnings: [],
       };
     }
@@ -88,20 +88,20 @@ const invokeSandboxAttempt = async (
           `Sandbox stdout exceeded the ${String(invocation.responseBytes)}-byte output cap`,
         ),
         diagnostics,
-        durationMs: performance.now() - started,
+        durationMs: duration(),
         rawExcerpt: { ...rawExcerpt, truncated: true, sha256: stdout.digest() },
         warnings: [],
       };
     }
     if (
       result.exitCode === 137 &&
-      (result.durationMs ?? performance.now() - started) >= invocation.attemptTimeoutMs
+      (result.durationMs ?? duration()) >= invocation.attemptTimeoutMs
     ) {
       return {
         status: 'invocation_error',
         error: new AgentInvocationError('timeout', 'Sandbox agent invocation timed out'),
         diagnostics,
-        durationMs: performance.now() - started,
+        durationMs: duration(),
         rawExcerpt,
         warnings: [],
       };
@@ -114,7 +114,7 @@ const invokeSandboxAttempt = async (
           `Sandbox agent exited with code ${String(result.exitCode)}`,
         ),
         diagnostics,
-        durationMs: performance.now() - started,
+        durationMs: duration(),
         rawExcerpt,
         warnings: [],
       };
@@ -124,7 +124,7 @@ const invokeSandboxAttempt = async (
         status: 'ok',
         raw: JSON.parse(raw) as unknown,
         diagnostics,
-        durationMs: performance.now() - started,
+        durationMs: duration(),
         rawExcerpt,
         warnings: [],
       };
@@ -139,7 +139,7 @@ const invokeSandboxAttempt = async (
           },
         ),
         diagnostics,
-        durationMs: performance.now() - started,
+        durationMs: duration(),
         rawExcerpt,
         warnings: [],
       };
@@ -167,7 +167,7 @@ const invokeSandboxAttempt = async (
         ...(stderr.text() === undefined ? {} : { stderrExcerpt: stderr.text() }),
         sandboxCompletionConfirmed: false,
       },
-      durationMs: performance.now() - started,
+      durationMs: duration(),
       rawExcerpt: createRawExcerpt(stdout.buffer().toString('utf8')),
       warnings: [],
     };
@@ -306,4 +306,4 @@ const invokeVercelSandboxAgent = async (
   return { ...attempt, attempts: [...(result?.attempts ?? []), attempt] };
 };
 
-export { invokeVercelSandboxAgent };
+export { defaultSandboxFactory, invokeVercelSandboxAgent };

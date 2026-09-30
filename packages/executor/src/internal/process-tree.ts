@@ -1,6 +1,8 @@
 import { type ChildProcess, spawn } from 'node:child_process';
 import { setTimeout as wait } from 'node:timers/promises';
 
+import { errnoCode } from './errno-code.js';
+
 const PROCESS_EXIT_POLL_INTERVAL_MS = 25;
 const PROCESS_SNAPSHOT_TIMEOUT_MS = 2000;
 const SWEEP_DEADLINE_MS = 5000;
@@ -18,13 +20,9 @@ const PROCESS_ROW_PATTERN =
 const PROCESS_IDENTITY_PATTERN =
   /^\s*(\d+)\s+(\w{3}\s+\w{3}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2}\s+\d{4})\s+(.+?)\s*$/;
 
-const isMissingProcess = (error: unknown): boolean => {
-  return error instanceof Error && 'code' in error && error.code === 'ESRCH';
-};
+const isMissingProcess = (error: unknown): boolean => errnoCode(error) === 'ESRCH';
 
-const isPermissionDenied = (error: unknown): boolean => {
-  return error instanceof Error && 'code' in error && error.code === 'EPERM';
-};
+const isPermissionDenied = (error: unknown): boolean => errnoCode(error) === 'EPERM';
 
 const signalProcessGroup = (processId: number, signal: NodeJS.Signals): boolean => {
   try {
@@ -195,6 +193,7 @@ const parseIdentitySnapshot = (snapshotText: string): ProcessIdentity[] => {
   });
 };
 
+/** Keys a process by pid, start time, and command so a reused pid never matches an old identity. */
 const identityKey = (identity: ProcessIdentity): string => {
   return `${String(identity.processId)}\u0000${identity.startedAt}\u0000${identity.command}`;
 };
@@ -449,6 +448,7 @@ const killProcessTree = async (
 };
 
 export {
+  identityKey,
   killProcessTree,
   listDescendantProcesses,
   parseIdentitySnapshot,

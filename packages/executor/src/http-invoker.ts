@@ -3,12 +3,10 @@ import { createHash } from 'node:crypto';
 
 import { AgentInvocationError } from './errors.js';
 import { startTimer } from './internal/elapsed.js';
-import { createRawExcerpt } from './internal/raw-excerpt.js';
+import { appendEvidencePrefix, createRawExcerpt } from './internal/raw-excerpt.js';
 import type { InvocationAttempt, InvokeOptions, NativeAgentTarget } from './types.js';
 
 const HTTP_SUCCESS_STATUS = 200;
-const RAW_EXCERPT_CHARACTERS = 4096;
-const RAW_EVIDENCE_PREFIX_BYTES = RAW_EXCERPT_CHARACTERS * 4;
 
 const createInvocationErrorAttempt = (
   error: AgentInvocationError,
@@ -49,18 +47,6 @@ type CappedJson = { raw: unknown; rawExcerpt: NonNullable<InvocationAttempt['raw
 type BodyReadFailure = {
   error: AgentInvocationError;
   rawExcerpt?: InvocationAttempt['rawExcerpt'];
-};
-
-const appendEvidencePrefix = (
-  chunks: Uint8Array[],
-  byteCount: number,
-  chunk: Uint8Array,
-): number => {
-  const retained = chunk.subarray(0, Math.max(0, RAW_EVIDENCE_PREFIX_BYTES - byteCount));
-  if (retained.byteLength > 0) {
-    chunks.push(retained);
-  }
-  return byteCount + retained.byteLength;
 };
 
 /** Creates cap evidence that is always marked truncated and hashes every byte received so far. */

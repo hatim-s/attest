@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import { StringDecoder } from 'node:string_decoder';
 
 import {
@@ -9,7 +8,18 @@ import {
 } from '@attest/contracts';
 
 import { AgentInvocationError } from '../../errors.js';
+import {
+  DEFAULT_ATTEMPT_MS,
+  DEFAULT_EVENT_BYTES,
+  DEFAULT_EVENT_COUNT,
+  DEFAULT_REQUEST_BYTES,
+  DEFAULT_STDERR_BYTES,
+  DEFAULT_TERMINATION_GRACE_MS,
+  DEFAULT_TOTAL_EVIDENCE_BYTES,
+} from '../../internal/agent-defaults.js';
+import { correlationId } from '../../internal/correlation-id.js';
 import { startTimer } from '../../internal/elapsed.js';
+import { createSerialQueue } from '../../internal/serial-queue.js';
 import { createRawExcerpt } from '../../internal/raw-excerpt.js';
 import type { InvocationAttempt, InvocationResult } from '../../types.js';
 import { redactEventEvidence, redactTransportText } from '../http/redaction.js';
@@ -39,24 +49,6 @@ type PendingInvocation = {
   timeoutTimer: NodeJS.Timeout;
 };
 
-const DEFAULT_ATTEMPT_MS = 60_000;
-const DEFAULT_EVENT_COUNT = 10_000;
-const DEFAULT_EVENT_BYTES = 1024 * 1024;
-const DEFAULT_TOTAL_EVIDENCE_BYTES = 10 * 1024 * 1024;
-const DEFAULT_STDERR_BYTES = 16 * 1024;
-const DEFAULT_TERMINATION_GRACE_MS = 5_000;
-
-/** Derives a bounded correlation token without embedding unbounded authored request identifiers. */
-const correlationId = (request: AgentRequest, sequence: number): string => {
-  const digest = createHash('sha256')
-    .update(request.run_id)
-    .update('\0')
-    .update(request.case_id)
-    .digest('hex')
-    .slice(0, 32);
-  return `req-${sequence.toString(36)}-${digest}`;
-};
-
 /** Runs one persistent, correlated native-agent JSONL bridge for exactly one eval run. */
 class JsonlBridgeSession {
   private readonly pending = new Map<string, PendingInvocation>();
@@ -67,7 +59,7 @@ class JsonlBridgeSession {
   private closePromise?: Promise<void>;
   private eventCount = 0;
   private sequence = 0;
-  private serialTail: Promise<void> = Promise.resolve();
+  private readonly runSerially = createSerialQueue();
   private totalEvidenceBytes = 0;
   private runTimer?: NodeJS.Timeout;
 
@@ -127,15 +119,7 @@ class JsonlBridgeSession {
   /** Queues serial bridges and directly multiplexes bridges that advertise correlation support. */
   async invoke(request: AgentRequest, signal?: AbortSignal): Promise<InvocationResult> {
     if (this.agent.transport.concurrency === 'multiplexed') return this.invokeNow(request, signal);
-    let resolveResult!: (result: InvocationResult) => void;
-    const result = new Promise<InvocationResult>((resolve) => {
-      resolveResult = resolve;
-    });
-    const scheduled = this.serialTail.then(async () => {
-      resolveResult(await this.invokeNow(request, signal));
-    });
-    this.serialTail = scheduled.catch(() => undefined);
-    return result;
+    return this.runSerially(() => this.invokeNow(request, signal));
   }
 
   private async invokeNow(request: AgentRequest, signal?: AbortSignal): Promise<InvocationResult> {
@@ -147,11 +131,11 @@ class JsonlBridgeSession {
         0,
       );
     }
-    const requestId = correlationId(request, ++this.sequence);
+    const requestId = correlationId('req', request, ++this.sequence);
     const frame = { type: 'request', request_id: requestId, request } as const;
     if (
       Buffer.byteLength(JSON.stringify(frame)) >
-      (this.agent.limits?.request_bytes ?? DEFAULT_TOTAL_EVIDENCE_BYTES)
+      (this.agent.limits?.request_bytes ?? DEFAULT_REQUEST_BYTES)
     ) {
       return this.failure(
         new AgentInvocationError(

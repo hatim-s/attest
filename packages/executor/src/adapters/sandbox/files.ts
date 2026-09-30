@@ -4,6 +4,8 @@ import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 import { posix } from 'node:path';
 
 import { AgentInvocationError } from '../../errors.js';
+import { errnoCode } from '../../internal/errno-code.js';
+import { requirePositiveInteger } from '../../internal/positive-integer.js';
 import { BoundedTailWritable } from './bounded-writable.js';
 import type { VercelSandboxResource, VercelSandboxSdk } from './types.js';
 
@@ -12,12 +14,6 @@ type StagedArtifact = { directory: string; stagedPath: string };
 
 const SANDBOX_WORKSPACE = '/vercel/sandbox/workspace';
 const GLOB_METACHARACTERS = /[*?\[\]{}]/u;
-
-const ensurePositiveCap = (value: number): void => {
-  if (!Number.isSafeInteger(value) || value <= 0) {
-    throw new TypeError('Response byte cap must be a positive safe integer.');
-  }
-};
 
 const isContained = (root: string, path: string): boolean => {
   const fromRoot = relative(root, path);
@@ -56,15 +52,7 @@ const assertNoSymlinkComponents = async (
       if (stats.isSymbolicLink())
         throw new TypeError(`Host path contains a symbolic link: ${current}`);
     } catch (error: unknown) {
-      if (
-        allowMissing &&
-        error !== null &&
-        typeof error === 'object' &&
-        'code' in error &&
-        error.code === 'ENOENT'
-      ) {
-        return;
-      }
+      if (allowMissing && errnoCode(error) === 'ENOENT') return;
       throw error;
     }
   }
@@ -119,7 +107,7 @@ const loadExplicitUploads = async (
   uploads: VercelSandboxResource['files'],
   responseBytes: number,
 ): Promise<LoadedUpload[]> => {
-  ensurePositiveCap(responseBytes);
+  requirePositiveInteger('Response byte cap', responseBytes);
   const loaded: LoadedUpload[] = [];
   let totalBytes = 0;
   const root = await realpath(projectRoot);
@@ -259,7 +247,7 @@ const publishTerminalArtifacts = async (
   commandTimeoutMs: number,
   signal: AbortSignal,
 ): Promise<void> => {
-  ensurePositiveCap(responseBytes);
+  requirePositiveInteger('Response byte cap', responseBytes);
   const staged: StagedArtifact[] = [];
   let totalBytes = 0;
   const configuredProjectRoot = resolve(projectRoot);

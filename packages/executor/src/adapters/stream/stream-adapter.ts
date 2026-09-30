@@ -1,65 +1,16 @@
-import { createHash } from 'node:crypto';
-
 import { parseAgentResponse, type AgentRequest } from '@attest/contracts';
 
-import { AgentInvocationError } from '../../errors.js';
+import { AgentInvocationError, abortedError } from '../../errors.js';
+import { abortableWait } from '../../internal/abortable-wait.js';
+import { DEFAULT_ATTEMPT_MS, DEFAULT_REQUEST_BYTES } from '../../internal/agent-defaults.js';
 import { startTimer } from '../../internal/elapsed.js';
 import { createRawExcerpt } from '../../internal/raw-excerpt.js';
+import { retryBackoffDelay } from '../../internal/retry-backoff.js';
 import type { InvocationAttempt, InvocationResult } from '../../types.js';
-import {
-  materializeHttpRequest,
-  type ResolvedHttpRequestTemplate,
-} from '../http/request-template.js';
+import { materializeHttpRequest, resolveRequestTemplate } from '../http/request-template.js';
 import { redactTransportText } from '../http/redaction.js';
 import { streamOnce } from './stream-transport.js';
 import type { StreamAgentResource, StreamInvokeOptions } from './types.js';
-
-const DEFAULT_ATTEMPT_MS = 60_000;
-const DEFAULT_REQUEST_BYTES = 10 * 1024 * 1024;
-
-const retryDelay = (agent: StreamAgentResource, retryIndex: number): number => {
-  const backoff = agent.retry?.backoff;
-  if (backoff === undefined || backoff.kind === 'none') return 0;
-  if (backoff.kind === 'fixed') return backoff.delay_ms;
-  const bounded = Math.min(backoff.initial_delay_ms * 2 ** retryIndex, backoff.maximum_delay_ms);
-  const jitter = createHash('sha256')
-    .update(`${String(backoff.jitter_seed)}:${String(retryIndex)}`)
-    .digest()
-    .readUInt32BE(0);
-  return Math.floor((bounded * (75 + (jitter % 51))) / 100);
-};
-
-const wait = async (
-  delayMs: number,
-  signal: AbortSignal | undefined,
-  callerSignal?: AbortSignal,
-): Promise<void> => {
-  if (delayMs <= 0) return;
-  if (signal === undefined) {
-    await new Promise<void>((resolve) => setTimeout(resolve, delayMs));
-    return;
-  }
-  const retrySignal = signal;
-  await new Promise<void>((resolve, reject) => {
-    const timer = setTimeout(finish, delayMs);
-    const abort = (): void => {
-      clearTimeout(timer);
-      retrySignal.removeEventListener('abort', abort);
-      reject(
-        new AgentInvocationError(
-          callerSignal?.aborted === true ? 'cancelled' : 'timeout',
-          'Streaming retry wait was interrupted.',
-        ),
-      );
-    };
-    function finish(): void {
-      retrySignal.removeEventListener('abort', abort);
-      resolve();
-    }
-    retrySignal.addEventListener('abort', abort, { once: true });
-    if (retrySignal.aborted) abort();
-  });
-};
 
 /** Invokes one external SSE or JSONL agent with bounded evidence and pre-event retries only. */
 const invokeStreamingAgent = async (
@@ -77,17 +28,6 @@ const invokeStreamingAgent = async (
       : overallTimeout === undefined
         ? options.signal
         : AbortSignal.any([options.signal, overallTimeout]);
-  const template: ResolvedHttpRequestTemplate = {
-    ...agent.transport.request,
-    headers: {
-      ...(agent.transport.request.headers as Record<string, string> | undefined),
-      ...options.headers,
-    },
-    query: {
-      ...(agent.transport.request.query as Record<string, string> | undefined),
-      ...options.query,
-    },
-  };
   const attempts: InvocationAttempt[] = [];
   for (let retry = 0; ; retry += 1) {
     const attemptTimeout = AbortSignal.timeout(agent.timeouts?.attempt_ms ?? DEFAULT_ATTEMPT_MS);
@@ -98,7 +38,7 @@ const invokeStreamingAgent = async (
     const duration = startTimer();
     try {
       const materialized = materializeHttpRequest(
-        template,
+        resolveRequestTemplate(agent.transport.request, options),
         request,
         agent.limits?.request_bytes ?? DEFAULT_REQUEST_BYTES,
       );
@@ -156,7 +96,7 @@ const invokeStreamingAgent = async (
           overallDeadline === undefined
             ? Number.POSITIVE_INFINITY
             : Math.max(0, overallDeadline - Date.now());
-        const authoredDelay = retryDelay(agent, retry);
+        const authoredDelay = retryBackoffDelay(agent.retry?.backoff, retry);
         const delay =
           normalized.httpStatus === 429 && normalized.retryAfterMs !== undefined
             ? Math.min(
@@ -165,7 +105,11 @@ const invokeStreamingAgent = async (
                 remainingOverall,
               )
             : Math.min(authoredDelay, remainingOverall);
-        await wait(delay, overallSignal, options.signal);
+        if (delay > 0) {
+          await abortableWait(delay, overallSignal, () =>
+            abortedError(options.signal, 'Streaming retry wait'),
+          );
+        }
       } catch (waitError: unknown) {
         const terminal = waitError instanceof AgentInvocationError ? waitError : normalized;
         const failed: InvocationAttempt = { ...attempt, error: terminal };

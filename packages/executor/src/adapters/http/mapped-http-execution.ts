@@ -1,54 +1,24 @@
 import { createHash } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 
-import {
-  AGENT_PROTOCOL,
-  type AgentErrorResponse,
-  type AgentRequest,
-  type AgentResponse,
-  type JsonValue,
-} from '@attest/contracts';
+import { AGENT_PROTOCOL, type AgentRequest, type AgentResponse } from '@attest/contracts';
 
-import { AgentInvocationError } from '../../errors.js';
+import { AgentInvocationError, abortedError } from '../../errors.js';
+import { abortableWait } from '../../internal/abortable-wait.js';
 import { startTimer } from '../../internal/elapsed.js';
+import { isJsonValue } from '../../internal/json-value.js';
+import { extractRemoteError } from '../../internal/remote-error.js';
+import { retryBackoffDelay } from '../../internal/retry-backoff.js';
 import type { InvocationAttempt } from '../../types.js';
 import { requestJson, type HttpJsonResponse } from './http-client.js';
 import { readJsonPointer } from './json-pointer.js';
-import {
-  assertStaticUrlAuthority,
-  type MaterializedHttpRequest,
-  type ResolvedHttpRequestTemplate,
-} from './request-template.js';
+import { assertStaticUrlAuthority, type MaterializedHttpRequest } from './request-template.js';
 import { redactTransportText } from './redaction.js';
 import { parseRetryAfter } from './retry-after.js';
 import { requireSameOrigin } from './url-security.js';
-import type {
-  CompletedHttpResponse,
-  HttpAgentResource,
-  MappedHttpInvokeOptions,
-} from './mapped-http-types.js';
+import type { CompletedHttpResponse, HttpAgentResource } from './mapped-http-types.js';
 
-const isJsonValue = (value: unknown): value is JsonValue => {
-  if (value === null || ['string', 'number', 'boolean'].includes(typeof value)) return true;
-  if (Array.isArray(value)) return value.every(isJsonValue);
-  return (
-    typeof value === 'object' && Object.values(value as Record<string, unknown>).every(isJsonValue)
-  );
-};
-
-const errorFromExtracted = (value: unknown): AgentErrorResponse['error'] => {
-  if (typeof value === 'string') return { message: value };
-  if (value !== null && typeof value === 'object') {
-    const candidate = value as Record<string, unknown>;
-    if (typeof candidate.message === 'string') {
-      return {
-        message: candidate.message,
-        ...(typeof candidate.code === 'string' ? { code: candidate.code } : {}),
-      };
-    }
-  }
-  return { message: 'The mapped HTTP agent reported an error.' };
-};
+const REMOTE_ERROR_FALLBACK = 'The mapped HTTP agent reported an error.';
 
 /** Redacts secret representations from extracted JSON before it becomes persisted evidence. */
 const redactExtractedJson = (value: unknown, secrets: readonly string[]): unknown =>
@@ -86,7 +56,7 @@ const extractAgentResponse = (
       ? undefined
       : readJsonPointer(raw, extraction.trace_pointer);
   if (error !== undefined && error !== null) {
-    const extractedError = errorFromExtracted(error);
+    const extractedError = extractRemoteError(error, REMOTE_ERROR_FALLBACK);
     return {
       protocol: AGENT_PROTOCOL,
       error: {
@@ -119,54 +89,11 @@ const retryableStatus = (status: number): boolean =>
 const retryableTransportError = (error: AgentInvocationError): boolean =>
   error.code === 'network' || error.code === 'timeout';
 
-const retryDelay = (agent: HttpAgentResource, retryIndex: number): number => {
-  const backoff = agent.retry?.backoff;
-  if (backoff === undefined || backoff.kind === 'none') return 0;
-  if (backoff.kind === 'fixed') return backoff.delay_ms;
-  const exponential = backoff.initial_delay_ms * 2 ** retryIndex;
-  const bounded = Math.min(exponential, backoff.maximum_delay_ms);
-  // A deterministic seed avoids run-to-run timing drift while still breaking synchronized retries.
-  const digest = createHash('sha256')
-    .update(`${String(backoff.jitter_seed)}:${String(retryIndex)}`)
-    .digest()
-    .readUInt32BE(0);
-  return Math.floor((bounded * (75 + (digest % 51))) / 100);
-};
+const retryDelay = (agent: HttpAgentResource, retryIndex: number): number =>
+  retryBackoffDelay(agent.retry?.backoff, retryIndex);
 
-const wait = async (
-  delayMs: number,
-  signal: AbortSignal,
-  callerSignal?: AbortSignal,
-): Promise<void> => {
-  if (signal.aborted)
-    throw new AgentInvocationError(
-      callerSignal?.aborted === true ? 'cancelled' : 'timeout',
-      callerSignal?.aborted === true
-        ? 'Mapped HTTP invocation was cancelled.'
-        : 'Mapped HTTP invocation timed out.',
-    );
-  if (delayMs <= 0) return;
-  await new Promise<void>((resolve, reject) => {
-    const timer = setTimeout(finish, delayMs);
-    const cancel = (): void => {
-      clearTimeout(timer);
-      signal.removeEventListener('abort', cancel);
-      reject(
-        new AgentInvocationError(
-          callerSignal?.aborted === true ? 'cancelled' : 'timeout',
-          callerSignal?.aborted === true
-            ? 'Mapped HTTP invocation was cancelled.'
-            : 'Mapped HTTP invocation timed out.',
-        ),
-      );
-    };
-    function finish(): void {
-      signal.removeEventListener('abort', cancel);
-      resolve();
-    }
-    signal.addEventListener('abort', cancel, { once: true });
-  });
-};
+const wait = (delayMs: number, signal: AbortSignal, callerSignal?: AbortSignal): Promise<void> =>
+  abortableWait(delayMs, signal, () => abortedError(callerSignal, 'Mapped HTTP invocation'));
 
 const attemptFromError = (error: AgentInvocationError, durationMs: number): InvocationAttempt => ({
   status: 'invocation_error',
@@ -192,29 +119,16 @@ const normalizeFailure = (
   callerSignal?: AbortSignal,
 ): AgentInvocationError => {
   if (error instanceof AgentInvocationError) {
-    return error.code === 'cancelled' && callerSignal?.aborted !== true
-      ? new AgentInvocationError('timeout', 'Mapped HTTP invocation timed out.', { cause: error })
-      : error;
+    if (error.code !== 'cancelled' || callerSignal?.aborted === true) return error;
+    return new AgentInvocationError('timeout', 'Mapped HTTP invocation timed out.', {
+      cause: error,
+    });
   }
-  return new AgentInvocationError(
-    callerSignal?.aborted === true ? 'cancelled' : signal.aborted ? 'timeout' : 'network',
-    callerSignal?.aborted === true
-      ? 'Mapped HTTP invocation was cancelled.'
-      : signal.aborted
-        ? 'Mapped HTTP invocation timed out.'
-        : 'Mapped HTTP transport failed.',
-    { cause: error },
-  );
+  if (callerSignal?.aborted === true || signal.aborted) {
+    return abortedError(callerSignal, 'Mapped HTTP invocation', { cause: error });
+  }
+  return new AgentInvocationError('network', 'Mapped HTTP transport failed.', { cause: error });
 };
-
-const withResolvedValues = (
-  template: ResolvedHttpRequestTemplate,
-  options: MappedHttpInvokeOptions,
-): ResolvedHttpRequestTemplate => ({
-  ...template,
-  headers: { ...template.headers, ...options.headers },
-  query: { ...template.query, ...options.query },
-});
 
 const statusError = (response: HttpJsonResponse): AgentInvocationError =>
   new AgentInvocationError('http_status', `Mapped HTTP returned status ${response.status}.`, {
@@ -380,7 +294,7 @@ const pollingFailure = (
     'invalid_envelope',
     extracted === undefined || extracted === null
       ? 'Mapped HTTP polling reached a configured failure state.'
-      : redactTransportText(errorFromExtracted(extracted).message, secrets),
+      : redactTransportText(extractRemoteError(extracted, REMOTE_ERROR_FALLBACK).message, secrets),
     { rawExcerpt: response.rawExcerpt },
   );
 };
@@ -557,5 +471,4 @@ export {
   requireSuccessfulStatus,
   runDirect,
   runPolling,
-  withResolvedValues,
 };

@@ -1,8 +1,8 @@
 import { request as httpRequest } from 'node:http';
 import { request as httpsRequest } from 'node:https';
 
-import { AgentInvocationError } from '../../errors.js';
-import { createRawExcerpt } from '../../internal/raw-excerpt.js';
+import { AgentInvocationError, abortedError } from '../../errors.js';
+import { appendEvidencePrefix, createRawExcerpt } from '../../internal/raw-excerpt.js';
 import type { InvocationAttempt } from '../../types.js';
 import type { MaterializedHttpRequest } from './request-template.js';
 import { redactTransportText } from './redaction.js';
@@ -27,16 +27,9 @@ type HttpJsonResponse = {
 };
 
 const MAX_REDIRECTS = 3;
-const EVIDENCE_PREFIX_BYTES = 16 * 1024;
 
-const abortError = (policy: HttpClientPolicy, cause?: unknown): AgentInvocationError =>
-  new AgentInvocationError(
-    policy.callerSignal?.aborted === true ? 'cancelled' : 'timeout',
-    policy.callerSignal?.aborted === true
-      ? 'Mapped HTTP invocation was cancelled.'
-      : 'Mapped HTTP request timed out.',
-    { cause },
-  );
+const abortError = (policy: HttpClientPolicy): AgentInvocationError =>
+  abortedError(policy.callerSignal, 'Mapped HTTP request');
 
 const normalizeHeaders = (headers: NodeJS.Dict<string | string[]>): Record<string, string> =>
   Object.fromEntries(
@@ -56,7 +49,7 @@ const readResponseBody = async (
 ): Promise<{ raw: unknown; rawExcerpt: NonNullable<InvocationAttempt['rawExcerpt']> }> =>
   new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
-    const evidence: Buffer[] = [];
+    const evidence: Uint8Array[] = [];
     let byteCount = 0;
     let evidenceBytes = 0;
     let settled = false;
@@ -103,11 +96,7 @@ const readResponseBody = async (
     response.on('data', (chunk: Buffer) => {
       resetIdle();
       byteCount += chunk.byteLength;
-      if (evidenceBytes < EVIDENCE_PREFIX_BYTES) {
-        const retained = chunk.subarray(0, EVIDENCE_PREFIX_BYTES - evidenceBytes);
-        evidence.push(retained);
-        evidenceBytes += retained.byteLength;
-      }
+      evidenceBytes = appendEvidencePrefix(evidence, evidenceBytes, chunk);
       if (byteCount > policy.responseCapBytes) {
         const prefix = redactTransportText(
           Buffer.concat(evidence, evidenceBytes).toString('utf8'),

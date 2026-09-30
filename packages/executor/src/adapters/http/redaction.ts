@@ -1,3 +1,5 @@
+import { splitJsonPointer } from './json-pointer.js';
+
 const REDACTED = '[REDACTED]';
 
 /** Enumerates common transport encodings so reflected credentials cannot evade evidence redaction. */
@@ -28,14 +30,6 @@ const redactTransportText = (value: string, secrets: readonly string[]): string 
     value,
   );
 
-const pointerSegments = (pointer: string): string[] =>
-  pointer === ''
-    ? []
-    : pointer
-        .slice(1)
-        .split('/')
-        .map((segment) => segment.replaceAll('~1', '/').replaceAll('~0', '~'));
-
 /** Replaces authored sensitive event fields before an event becomes persisted evidence. */
 const redactEventEvidence = (
   value: unknown,
@@ -44,7 +38,7 @@ const redactEventEvidence = (
 ): string => {
   const redacted = structuredClone(value);
   for (const pointer of pointers) {
-    const segments = pointerSegments(pointer);
+    const segments = splitJsonPointer(pointer);
     if (segments.length === 0) return REDACTED;
     let parent: unknown = redacted;
     for (const segment of segments.slice(0, -1)) {
