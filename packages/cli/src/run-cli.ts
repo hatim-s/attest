@@ -1,11 +1,6 @@
 import { createRequire } from 'node:module';
 
-import {
-  evalCancelResultSchema,
-  evalFinalResultDataSchema,
-  type CliExitCode,
-} from '@attest/contracts';
-import { cancelConfiguration, runConfiguration } from '@attest/local/eval';
+import { diffToJson } from '@attest/core';
 import {
   compareLocalRuns,
   runReportCommand,
@@ -14,40 +9,46 @@ import {
 } from '@attest/local/runs';
 import { Command, CommanderError, Option } from 'commander';
 
-import { registerEvalCommands } from './commands/eval/eval-command.js';
+import {
+  registerEvalCommands,
+  renderEvalFailureEvent,
+  renderEvalResultLine,
+} from './commands/eval/eval-command.js';
+import { registerMetricCommands } from './commands/metric/register-metric-commands.js';
+import { registerProjectResourceCommands } from './commands/register-project-resource-commands.js';
 import {
   createDefaultCliInteraction,
-  registerProjectResourceCommands,
   type CliInteraction,
-} from './commands/register-project-resource-commands.js';
-import { registerMetricCommands } from './commands/metric/register-metric-commands.js';
-import { registerTestCommands } from './commands/test/registration/index.js';
+} from './commands/shared/cli-interaction.js';
 import {
-  AttestCliError,
-  createCliErrorCatalog,
-  renderCliError,
-  renderCliErrorCatalog,
-  serializeCliError,
-} from './errors/index.js';
-import { createCliHelp, renderCliHelp, setCliCommandHelpMetadata } from './help/command-help.js';
-import { diffToJson, renderDiffSummary } from './output/render-output.js';
+  commonOption,
+  commonOutputMode,
+  inheritCommonOptions,
+  nonInteractiveOption,
+  outputOption,
+  projectOption,
+} from './commands/shared/cli-options.js';
+import type { CliIo, CommandContext } from './commands/shared/command-context.js';
+import { renderResult } from './commands/shared/command-result.js';
+import { withProcessSignals } from './commands/shared/process-signals.js';
+import { registerTestCommands } from './commands/test/registration/register-test-commands.js';
+import { AttestCliError, CliExit, renderCliError, serializeCliError } from './errors/cli-error.js';
+import { createCliErrorCatalog, renderCliErrorCatalog } from './errors/error-catalog.js';
 import {
-  createCliFailureResult,
-  createCliSuccessResult,
-  serializeCliResult,
-} from './output/cli-protocol.js';
+  createCliHelp,
+  renderCliHelp,
+  resultCommandName,
+  setCliCommandHelpMetadata,
+} from './help/command-help.js';
+import { createCliFailureResult, serializeCliResult } from './output/cli-protocol.js';
+import { renderDiffSummary } from './output/render-output.js';
 import { openBrowser } from './view/open-browser.js';
 
 const require = createRequire(import.meta.url);
 
-interface PackageMetadata {
+type PackageMetadata = {
   name: string;
   version: string;
-}
-
-type CliIo = {
-  error: (message: string) => void;
-  output: (message: string) => void;
 };
 
 type RunCliOptions = {
@@ -99,62 +100,8 @@ const parsePort = (value: string): number => {
   return port;
 };
 
-/** Distinguishes the common machine-output option from command-specific artifact paths. */
-const acceptsGlobalCommonOption = (command: Command, name: string): boolean => {
-  const option = command.options.find((candidate) => candidate.attributeName() === name);
-  if (option === undefined) return false;
-  if (name !== 'output') return true;
-  return (
-    option.argChoices?.length === 2 &&
-    option.argChoices.includes('human') &&
-    option.argChoices.includes('json')
-  );
-};
-
-/** Builds the public command tree while keeping command effects behind narrow action callbacks. */
-const createProgram = (
-  io: CliIo,
-  workingDirectory: string,
-  setExitCode: (exitCode: CliExitCode) => void,
-  interaction: CliInteraction = createDefaultCliInteraction(),
-  argv: readonly string[] = process.argv.slice(2),
-): Command => {
-  const packageMetadata = require('../package.json') as PackageMetadata;
-  const program = new Command()
-    .name('attest')
-    .enablePositionalOptions()
-    .description('Run reproducible evaluations for CLI and HTTP AI agents.')
-    .version(packageMetadata.version)
-    .showHelpAfterError()
-    .exitOverride()
-    .configureOutput({
-      writeOut: io.output,
-      writeErr: io.error,
-    });
-
-  program
-    .option('--project <dir>', 'explicit Attest project directory')
-    .addOption(new Option('--output <format>', 'output format').choices(['human', 'json']))
-    .option('--non-interactive', 'disable prompts and fail when required input is missing');
-  program.hook('preAction', (_rootCommand, actionCommand) => {
-    const globalOptions = program.opts<{
-      nonInteractive?: boolean;
-      output?: 'human' | 'json';
-      project?: string;
-    }>();
-    // Leaf commands retain a locally positioned value; otherwise inherit the normative global flag.
-    for (const [name, value] of Object.entries(globalOptions)) {
-      const localSource = actionCommand.getOptionValueSource(name);
-      if (
-        value !== undefined &&
-        acceptsGlobalCommonOption(actionCommand, name) &&
-        (localSource === undefined || localSource === 'default')
-      ) {
-        actionCommand.setOptionValueWithSource(name, value, 'implied');
-      }
-    }
-  });
-
+/** Registers the run-store, trace, and protocol commands that sit directly under the root. */
+const registerRootCommands = ({ io, program, workingDirectory }: CommandContext): void => {
   program
     .command('view')
     .description('Open the local dashboard over the project run store.')
@@ -162,25 +109,18 @@ const createProgram = (
     .option('--port <port>', 'loopback port; 0 chooses a free port', parsePort, 0)
     .option('--no-open', 'do not launch a browser')
     .action(async (options: ViewCommandOptions) => {
-      const abortController = new AbortController();
-      const stop = (): void => abortController.abort();
-      process.once('SIGINT', stop);
-      process.once('SIGTERM', stop);
-      try {
-        await runViewCommand({
+      await withProcessSignals((signal) =>
+        runViewCommand({
           onReady: async ({ url }) => {
             io.output(`Attest view: ${url}\nPress Ctrl+C to stop.`);
             if (options.open) await openBrowser(url);
           },
           port: options.port,
-          signal: abortController.signal,
+          signal,
           storePath: options.store,
           workingDirectory,
-        });
-      } finally {
-        process.off('SIGINT', stop);
-        process.off('SIGTERM', stop);
-      }
+        }),
+      );
     });
 
   program
@@ -206,8 +146,9 @@ const createProgram = (
       }
     });
 
-  const traceCommand = program.command('trace').description('Convert and inspect trace data.');
-  traceCommand
+  program
+    .command('trace')
+    .description('Convert and inspect trace data.')
     .command('convert')
     .description('Convert an OTLP/HTTP JSON export to attest.trace JSON.')
     .argument('<input>', 'OTLP JSON input path')
@@ -250,115 +191,58 @@ const createProgram = (
       io.output(options.format === 'json' ? diffToJson(diff) : renderDiffSummary(diff));
     });
 
-  const helpCommand = program
+  const help = program
     .command('help [command...]')
     .description('Show human or machine-readable help for a registered command path.')
-    .addOption(
-      new Option('--output <format>', 'help output format')
-        .choices(['human', 'json'])
-        .default('human'),
-    )
-    .action((commandPath: string[], options: ProtocolCommandOptions, action: Command) => {
-      const help = createCliHelp(program, commandPath);
-      if (
-        program.getOptionValueSource('output') === 'cli' &&
-        action.getOptionValueSource('output') === 'cli'
-      ) {
-        throw new AttestCliError('cli_usage', 'Common option --output was provided twice.', {
-          path: '--output',
-        });
-      }
-      const output =
-        program.getOptionValueSource('output') === 'cli'
-          ? (program.opts<ProtocolCommandOptions>().output ?? options.output)
-          : options.output;
+    .addOption(commonOption(outputOption('help output format').default('human')))
+    .action((commandPath: string[], options: ProtocolCommandOptions) => {
       io.output(
-        output === 'json'
-          ? serializeCliResult(createCliSuccessResult('help', help))
-          : renderCliHelp(help),
+        renderResult('help', options.output, createCliHelp(program, commandPath), renderCliHelp),
       );
     });
-  setCliCommandHelpMetadata(helpCommand, {
+  setCliCommandHelpMetadata(help, {
     examples: ['attest help test case import --output json'],
     options: { output: { implies: ['non-interactive'] } },
   });
 
-  const errorsCommand = program
+  const errors = program
     .command('errors')
     .description('List stable CLI error identities, exit codes, and repairs.')
-    .addOption(
-      new Option('--output <format>', 'error catalog output format')
-        .choices(['human', 'json'])
-        .default('human'),
-    )
-    .action((options: ProtocolCommandOptions, action: Command) => {
-      const catalog = createCliErrorCatalog();
-      if (
-        program.getOptionValueSource('output') === 'cli' &&
-        action.getOptionValueSource('output') === 'cli'
-      ) {
-        throw new AttestCliError('cli_usage', 'Common option --output was provided twice.', {
-          path: '--output',
-        });
-      }
-      const output =
-        program.getOptionValueSource('output') === 'cli'
-          ? (program.opts<ProtocolCommandOptions>().output ?? options.output)
-          : options.output;
+    .addOption(commonOption(outputOption('error catalog output format').default('human')))
+    .action((options: ProtocolCommandOptions) => {
       io.output(
-        output === 'json'
-          ? serializeCliResult(createCliSuccessResult('errors', catalog))
-          : renderCliErrorCatalog(catalog),
+        renderResult('errors', options.output, createCliErrorCatalog(), renderCliErrorCatalog),
       );
     });
-  setCliCommandHelpMetadata(errorsCommand, {
+  setCliCommandHelpMetadata(errors, {
     examples: ['attest errors --output json'],
     options: { output: { implies: ['non-interactive'] } },
   });
+};
 
-  registerProjectResourceCommands({
-    interaction,
-    io,
-    program,
-    workingDirectory,
-  });
-  registerMetricCommands({ interaction, io, program, workingDirectory });
-  registerTestCommands({ interaction, io, program, workingDirectory });
-  registerEvalCommands({
-    argv,
-    interaction,
-    io,
-    program,
-    services: {
-      cancel: async (request, context) => {
-        const result = await cancelConfiguration(request, context);
-        return evalCancelResultSchema.parse(
-          createCliSuccessResult(
-            'eval.cancel',
-            { run_id: result.runId, status: result.status },
-            {
-              projectHashBefore: result.projectHash,
-              projectHashAfter: result.projectHash,
-            },
-          ),
-        );
-      },
-      run: (request, context) =>
-        runConfiguration(request, {
-          ...context,
-          terminalFailure: (code, message) => {
-            const failure = serializeCliError(new AttestCliError(code, message));
-            return evalFinalResultDataSchema.parse({
-              exit_code: failure.exitCode,
-              result: createCliFailureResult('eval.run', failure.error),
-            });
-          },
-        }),
-    },
-    setExitCode,
-    workingDirectory,
-  });
+/** Builds the public command tree; the returned leaf getter names the command that failed. */
+const createProgram = (
+  context: Omit<CommandContext, 'program'>,
+  writeCommanderError: (message: string) => void,
+): { failingCommand: () => Command; program: Command } => {
+  const packageMetadata = require('../package.json') as PackageMetadata;
+  const program = new Command()
+    .name('attest')
+    .enablePositionalOptions()
+    .description('Run reproducible evaluations for CLI and HTTP AI agents.')
+    .version(packageMetadata.version)
+    .showHelpAfterError()
+    .configureOutput({ writeOut: context.io.output, writeErr: writeCommanderError })
+    .addOption(projectOption())
+    .addOption(outputOption())
+    .addOption(nonInteractiveOption());
 
+  const commandContext = { ...context, program };
+  registerRootCommands(commandContext);
+  registerProjectResourceCommands(commandContext);
+  registerMetricCommands(commandContext);
+  registerTestCommands(commandContext);
+  registerEvalCommands(commandContext);
   setCliCommandHelpMetadata(program, {
     examples: [
       'attest help --output json',
@@ -369,139 +253,60 @@ const createProgram = (
     ],
   });
 
-  return program;
-};
-
-const requestedStructuredOutput = (argv: readonly string[]): boolean => {
-  const command = requestedCommand(argv);
-  const supportsStructuredOutput =
-    command === 'help' ||
-    command === 'errors' ||
-    command === 'init' ||
-    command === 'list' ||
-    command === 'show' ||
-    command.startsWith('project.') ||
-    command.startsWith('agent.') ||
-    command.startsWith('metric.') ||
-    command.startsWith('eval.') ||
-    command.startsWith('schema.') ||
-    command.startsWith('test.');
-  return (
-    supportsStructuredOutput &&
-    argv.some(
-      (argument, index) =>
-        argument === '--output=json' ||
-        argument === '--output=jsonl' ||
-        (argument === '--output' && (argv[index + 1] === 'json' || argv[index + 1] === 'jsonl')),
-    )
-  );
-};
-
-/** Removes only recognized global common options before identifying the requested command. */
-const commandArguments = (argv: readonly string[]): string[] => {
-  const argumentsWithoutGlobals: string[] = [];
-  for (let index = 0; index < argv.length; index += 1) {
-    const argument = argv[index]!;
-    if (argument === '--project' || argument === '--output') {
-      index += 1;
-    } else if (
-      argument === '--non-interactive' ||
-      argument.startsWith('--project=') ||
-      argument.startsWith('--output=')
-    ) {
-      continue;
-    } else {
-      argumentsWithoutGlobals.push(argument);
-    }
-  }
-  return argumentsWithoutGlobals;
-};
-
-const requestedCommand = (argv: readonly string[]): string => {
-  const normalizedArguments = commandArguments(argv);
-  const first = normalizedArguments[0];
-  const second = normalizedArguments[1];
-  if (first === undefined || first.startsWith('-')) {
-    return 'cli';
-  }
-  if (first === 'trace' && second === 'convert') {
-    return 'trace.convert';
-  }
-  if (first === 'init') {
-    return 'project.init';
-  }
-  if (first === 'project' && ['init', 'show', 'validate'].includes(second ?? '')) {
-    return `project.${second}`;
-  }
-  if (first === 'agent' && ['add', 'import', 'test', 'rename', 'remove'].includes(second ?? '')) {
-    return `agent.${second}`;
-  }
-  if (first === 'metric' && ['add', 'import', 'test', 'rename', 'remove'].includes(second ?? '')) {
-    return `metric.${second}`;
-  }
-  if (first === 'schema' && ['list', 'print'].includes(second ?? '')) {
-    return `schema.${second}`;
-  }
-  if (first === 'eval' && ['run', 'cancel'].includes(second ?? '')) {
-    return `eval.${second}`;
-  }
-  if (first === 'test') {
-    const third = normalizedArguments[2];
-    if (second === 'case' && third !== undefined && !third.startsWith('-')) {
-      return `test.case.${third}`;
-    }
-    if (second === 'dataset' && third !== undefined && !third.startsWith('-')) {
-      return `test.dataset.${third}`;
-    }
-    if (second !== undefined && !second.startsWith('-')) return `test.${second}`;
-  }
-  return /^[a-z][a-z0-9-]*$/.test(first) ? first : 'cli';
+  let failing = program;
+  const trackFailures = (command: Command): void => {
+    command.exitOverride((error) => {
+      failing = command;
+      throw error;
+    });
+    command.commands.forEach(trackFailures);
+  };
+  trackFailures(program);
+  program.hook('preAction', (_root, leaf) => {
+    failing = leaf;
+    inheritCommonOptions(program, leaf);
+  });
+  return { failingCommand: () => failing, program };
 };
 
 /** Parses one CLI invocation and returns an exit code without terminating embedders or tests. */
 const runCli = async (argv: string[], options: RunCliOptions = {}): Promise<number> => {
   const io = options.io ?? defaultIo;
-  const workingDirectory = options.workingDirectory ?? process.cwd();
-  const structuredOutput = requestedStructuredOutput(argv);
-  const commandIo: CliIo = structuredOutput ? { output: io.output, error: () => undefined } : io;
-  let exitCode: CliExitCode = 0;
-  const defaultInteraction = createDefaultCliInteraction();
-  const interaction = { ...defaultInteraction, ...options.interaction };
-  if (
-    options.interaction?.readStdin !== undefined &&
-    options.interaction.readImportStdin === undefined
-  ) {
-    // Test and embedding callers with a text stdin override retain parity without touching process stdin.
-    interaction.readImportStdin = async function* readImportStdin() {
-      yield await options.interaction!.readStdin!();
-    };
-  }
-  const program = createProgram(
-    commandIo,
-    workingDirectory,
-    (nextExitCode) => {
-      exitCode = nextExitCode;
+  // Commander's own usage errors wait until the failing command's output mode is known.
+  const commanderErrors: string[] = [];
+  const { failingCommand, program } = createProgram(
+    {
+      argv,
+      interaction: { ...createDefaultCliInteraction(), ...options.interaction },
+      io,
+      workingDirectory: options.workingDirectory ?? process.cwd(),
     },
-    interaction,
-    argv,
+    (message) => commanderErrors.push(message),
   );
 
   try {
     await program.parseAsync(argv, { from: 'user' });
-    return exitCode;
+    return 0;
   } catch (error: unknown) {
-    if (error instanceof CommanderError && error.exitCode === 0) {
-      return 0;
-    }
+    if (error instanceof CommanderError && error.exitCode === 0) return 0;
+    if (error instanceof CliExit) return error.exitCode;
 
     const failure = serializeCliError(error);
-    if (structuredOutput) {
-      io.output(serializeCliResult(createCliFailureResult(requestedCommand(argv), failure.error)));
-    } else if (!(error instanceof CommanderError)) {
+    const leaf = failingCommand();
+    const command = resultCommandName(leaf);
+    const output = commonOutputMode(program, leaf);
+    if (output === 'json') {
+      io.output(serializeCliResult(createCliFailureResult(command, failure.error)));
+    } else if (output === 'jsonl') {
+      io.output(renderEvalFailureEvent(failure));
+    } else if (error instanceof CommanderError) {
+      commanderErrors.forEach(io.error);
+    } else {
       io.error(renderCliError(failure.error));
+      if (leaf.parent?.name() === 'eval') io.output(renderEvalResultLine(failure.exitCode));
     }
     return failure.exitCode;
   }
 };
 
-export { createProgram, runCli, type CliIo, type RunCliOptions };
+export { runCli, type RunCliOptions };

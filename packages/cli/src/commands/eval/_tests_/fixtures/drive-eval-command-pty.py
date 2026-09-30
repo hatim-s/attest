@@ -62,7 +62,7 @@ def drive(command: list[str]) -> dict[str, object]:
     output, prompt_seen = read_until(master_fd, b"Test ids (space-separated) or all [all]: ", deadline)
     if prompt_seen:
         os.write(master_fd, b"refund\n")
-    chunk, run_seen = read_until(master_fd, b"started: 0 cases", deadline)
+    chunk, run_seen = read_until(master_fd, b" started: ", deadline)
     output += chunk
     if run_seen:
         os.write(master_fd, b"\x03")

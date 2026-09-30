@@ -1,12 +1,12 @@
 import { setCliCommandHelpMetadata } from '../../help/command-help.js';
+import type { CommandContext } from '../shared/command-context.js';
 import { registerMetricAddCommand } from './register-metric-add-command.js';
 import { registerMetricImportCommand } from './register-metric-import-command.js';
 import { registerMetricLifecycleCommands } from './register-metric-lifecycle-commands.js';
 import { registerMetricTestCommand } from './register-metric-test-command.js';
-import type { RegisterMetricCommandsOptions } from './registration-support.js';
 
-/** Registers metric CRUD, local fixture tests, and redacted inspection commands. */
-const registerMetricCommands = (context: RegisterMetricCommandsOptions): void => {
+/** Registers metric add, import, test, rename, and remove. */
+const registerMetricCommands = (context: CommandContext): void => {
   const metric = context.program.command('metric').description('Author and test metric resources.');
   registerMetricAddCommand(metric, context);
   registerMetricImportCommand(metric, context);
@@ -22,4 +22,4 @@ const registerMetricCommands = (context: RegisterMetricCommandsOptions): void =>
   });
 };
 
-export { registerMetricCommands, type RegisterMetricCommandsOptions };
+export { registerMetricCommands };

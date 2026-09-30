@@ -1,27 +1,20 @@
 import { COMMAND_REQUEST_SCHEMA_ID } from '@attest/contracts';
-import {
-  readAgentTestInput,
-  readCommandRequest,
-  runAgentTestCommand,
-  validateCommandRequest,
-} from '@attest/local/agent';
+import { readAgentTestInput, runAgentTestCommand } from '@attest/local/agent';
 import type { Command } from 'commander';
 
-import { AttestCliError } from '../../errors/index.js';
+import { AttestCliError } from '../../errors/cli-error.js';
 import { setCliCommandHelpMetadata } from '../../help/command-help.js';
-import { renderCommandResult } from '../shared/command-result.js';
 import {
   addCommonOptions,
   isInteractive,
-  mergeCommonOptions,
   outputFormat,
   type CommonCliOptions,
 } from '../shared/cli-options.js';
-import { promptRequired } from './agent-prompts.js';
-import {
-  assertNoAgentRequestOverlap,
-  type RegisterAgentCommandsOptions,
-} from './registration-support.js';
+import type { CommandContext } from '../shared/command-context.js';
+import { readOrBuildRequest } from '../shared/command-request.js';
+import { renderCommandResult } from '../shared/command-result.js';
+import { withProcessSignals } from '../shared/process-signals.js';
+import { requiredInput } from '../shared/required-input.js';
 
 type TestOptions = CommonCliOptions & {
   fromJson?: string;
@@ -31,8 +24,8 @@ type TestOptions = CommonCliOptions & {
   watch?: boolean;
 };
 
-/** Registers local agent probing with cancellation and optional progress output. */
-const registerAgentTestCommand = (agent: Command, context: RegisterAgentCommandsOptions): void => {
+/** Registers `agent test`, which probes one agent and can be cancelled by a signal. */
+const registerAgentTestCommand = (agent: Command, context: CommandContext): void => {
   const test = addCommonOptions(
     agent
       .command('test')
@@ -46,81 +39,46 @@ const registerAgentTestCommand = (agent: Command, context: RegisterAgentCommands
     .option('--from-json <path|->', 'read one agent.test request')
     .option('--record', 'persist this probe as an eval run')
     .option('--watch', 'show human transport progress')
-    .action(async (agentId: string | undefined, raw: TestOptions, command: Command) => {
-      const options = mergeCommonOptions(raw, command, context.program);
-      if (options.watch === true && outputFormat(options) !== 'human') {
-        throw new AttestCliError('cli_usage', '--watch requires human output.', {
-          path: '--watch',
-        });
-      }
-      if (
-        options.watch === true &&
-        !isInteractive(options, context.interaction, options.fromJson)
-      ) {
+    .action(async (agentId: string | undefined, options: TestOptions, leaf: Command) => {
+      const interactive = isInteractive(options, context.interaction, options.fromJson);
+      if (options.watch === true && !interactive) {
         throw new AttestCliError('cli_usage', '--watch requires an interactive human terminal.', {
           path: '--watch',
         });
       }
-
-      assertNoAgentRequestOverlap(
-        { fromJson: options.fromJson },
-        {
-          'agent-id': agentId,
-          input: options.input,
-          'input-file': options.inputFile,
-          record: options.record,
-        },
-      );
-      if (options.fromJson === '-' && options.inputFile === '-') {
-        throw new AttestCliError(
-          'cli_usage',
-          'Command request and test input cannot share stdin.',
-          {
-            path: '--input-file',
-          },
-        );
-      }
-
-      const controller = new AbortController();
-      const cancel = (): void => controller.abort();
-      process.once('SIGINT', cancel);
-      process.once('SIGTERM', cancel);
-      try {
-        const readRequest = {
-          readStdin: context.interaction.readStdin,
-          workingDirectory: context.workingDirectory,
-        };
-        const request =
-          options.fromJson === undefined
-            ? validateCommandRequest('agent.test', {
-                schema: COMMAND_REQUEST_SCHEMA_ID,
-                command: 'agent.test',
-                agent_id: await promptRequired(agentId, 'Agent id', '<agent-id>', {
-                  interactive: isInteractive(options, context.interaction, options.fromJson),
-                  prompt: context.interaction.prompt,
-                  signal: controller.signal,
-                }),
-                input: await readAgentTestInput({
-                  input: options.input,
-                  inputFile: options.inputFile,
-                  ...readRequest,
-                }),
-                ...(options.record === undefined ? {} : { record: options.record }),
-              })
-            : await readCommandRequest('agent.test', options.fromJson, readRequest);
+      await withProcessSignals(async (signal) => {
+        const request = await readOrBuildRequest({
+          command: 'agent.test',
+          context,
+          leaf,
+          options,
+          build: async () => ({
+            schema: COMMAND_REQUEST_SCHEMA_ID,
+            command: 'agent.test',
+            agent_id: await requiredInput(
+              agentId,
+              { path: '<agent-id>', question: 'Agent id: ' },
+              { interactive, prompt: context.interaction.prompt, signal },
+            ),
+            input: await readAgentTestInput({
+              input: options.input,
+              inputFile: options.inputFile,
+              readStdin: context.interaction.readStdin,
+              workingDirectory: context.workingDirectory,
+            }),
+            ...(options.record === undefined ? {} : { record: options.record }),
+          }),
+        });
         const result = await runAgentTestCommand({
           onProgress: (message) => context.io.error(message),
           project: options.project,
           request,
-          signal: controller.signal,
+          signal,
           watch: options.watch,
           workingDirectory: context.workingDirectory,
         });
         context.io.output(renderCommandResult('agent.test', outputFormat(options), result));
-      } finally {
-        process.off('SIGINT', cancel);
-        process.off('SIGTERM', cancel);
-      }
+      });
     });
 
   setCliCommandHelpMetadata(test, {

@@ -6,14 +6,8 @@ import {
   type CurlImportFields,
 } from '@attest/local/agent';
 
-import {
-  commaSeparated,
-  promptChoice,
-  promptDefault,
-  promptOptional,
-  promptRequired,
-  type AgentPromptContext,
-} from './agent-prompts.js';
+import { commaSeparated, promptChoice, promptDefault, promptOptional } from './agent-prompts.js';
+import { requiredInput, type PromptContext } from '../shared/required-input.js';
 
 type CurlFlags = Omit<CurlImportFields, 'responsePointer'> & { responsePointer?: string };
 
@@ -24,7 +18,7 @@ const MAX_CREDENTIAL_PROMPTS = 32;
 const promptCredentialBindings = async (
   fields: CurlFlags,
   curlSource: string,
-  context: AgentPromptContext,
+  context: PromptContext,
 ): Promise<CurlFlags> => {
   let headerEnv = [...(fields.headerEnv ?? [])];
   let queryEnv = [...(fields.queryEnv ?? [])];
@@ -34,10 +28,9 @@ const promptCredentialBindings = async (
     if (credential === undefined) break;
     const flag = credential.kind === 'header' ? '--header-env' : '--query-env';
     const label = credential.kind === 'header' ? 'Header' : 'Query';
-    const environment = await promptRequired(
+    const environment = await requiredInput(
       undefined,
-      `${label} ${credential.name} environment variable`,
-      flag,
+      { path: flag, question: `${label} ${credential.name} environment variable: ` },
       context,
     );
     const binding = `${credential.name}=${environment}`;
@@ -50,7 +43,7 @@ const promptCredentialBindings = async (
 /** Asks how the polling submission reports its job and where to poll for status. */
 const promptPollingFields = async (
   fields: CurlFlags,
-  context: AgentPromptContext,
+  context: PromptContext,
 ): Promise<CurlFlags> => {
   const polling: CurlFlags = {
     ...fields,
@@ -77,10 +70,12 @@ const promptPollingFields = async (
         context,
       );
     } else {
-      polling.pollStatusUrlTemplate = await promptRequired(
+      polling.pollStatusUrlTemplate = await requiredInput(
         undefined,
-        'Same-origin status URL template with {{job_id}}',
-        '--poll-status-url-template',
+        {
+          path: '--poll-status-url-template',
+          question: 'Same-origin status URL template with {{job_id}}: ',
+        },
         context,
       );
     }
@@ -126,7 +121,7 @@ const promptPollingFields = async (
 const promptCurlImportFields = async (
   fields: CurlFlags,
   curlSource: string,
-  context: AgentPromptContext,
+  context: PromptContext,
 ): Promise<CurlImportFields> => {
   if (!context.interactive) {
     return { ...fields, responsePointer: fields.responsePointer ?? '/answer' };
@@ -174,7 +169,7 @@ const isCurlMappingError = (error: unknown): boolean => {
 };
 
 /** Asks for replacement body mappings after an import rejected the previous ones. */
-const promptBodyMappings = async (context: AgentPromptContext): Promise<string[] | undefined> =>
+const promptBodyMappings = async (context: PromptContext): Promise<string[] | undefined> =>
   commaSeparated(
     await context.prompt(
       'Body mapping was invalid. Re-enter TARGET_POINTER=INPUT_POINTER values [none]: ',

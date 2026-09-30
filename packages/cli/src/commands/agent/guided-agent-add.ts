@@ -1,14 +1,8 @@
 import type { AgentAddFields } from '@attest/local/agent';
 
-import { AttestCliError } from '../../errors/index.js';
-import {
-  commaSeparated,
-  promptChoice,
-  promptDefault,
-  promptOptional,
-  promptRequired,
-  type AgentPromptContext,
-} from './agent-prompts.js';
+import { AttestCliError } from '../../errors/cli-error.js';
+import { commaSeparated, promptChoice, promptDefault, promptOptional } from './agent-prompts.js';
+import { requiredInput, type PromptContext } from '../shared/required-input.js';
 
 type GuidedTransport = 'background' | 'cli' | 'http' | 'jsonl' | 'stream' | 'websocket';
 
@@ -22,7 +16,7 @@ const TRANSPORT_FLAGS = [
   'webSocketUrl',
 ] as const satisfies readonly (keyof AgentAddFields)[];
 
-const readTransport = async (context: AgentPromptContext): Promise<GuidedTransport> => {
+const readTransport = async (context: PromptContext): Promise<GuidedTransport> => {
   const answer = (await context.prompt('Transport [cli/http/background/jsonl/stream/websocket]: '))
     .trim()
     .toLowerCase();
@@ -45,24 +39,33 @@ const readTransport = async (context: AgentPromptContext): Promise<GuidedTranspo
 };
 
 const promptBackgroundFields = async (
-  context: AgentPromptContext,
+  context: PromptContext,
 ): Promise<Partial<AgentAddFields>> => ({
-  backgroundCommand: await promptRequired(
+  backgroundCommand: await requiredInput(
     undefined,
-    'Background start command',
-    '--background-command',
+    { path: '--background-command', question: 'Background start command: ' },
     context,
   ),
-  readinessHttp: await promptRequired(undefined, 'Readiness HTTP URL', '--readiness-http', context),
-  invokeUrl: await promptRequired(undefined, 'Invoke HTTP URL', '--invoke-url', context),
+  readinessHttp: await requiredInput(
+    undefined,
+    { path: '--readiness-http', question: 'Readiness HTTP URL: ' },
+    context,
+  ),
+  invokeUrl: await requiredInput(
+    undefined,
+    { path: '--invoke-url', question: 'Invoke HTTP URL: ' },
+    context,
+  ),
   responsePointer: await promptDefault(undefined, 'Result JSON Pointer', '/output', context),
   stopTimeout: await promptDefault(undefined, 'Stop timeout', '5s', context),
 });
 
-const promptJsonlFields = async (
-  context: AgentPromptContext,
-): Promise<Partial<AgentAddFields>> => ({
-  jsonlCommand: await promptRequired(undefined, 'JSONL bridge command', '--jsonl-command', context),
+const promptJsonlFields = async (context: PromptContext): Promise<Partial<AgentAddFields>> => ({
+  jsonlCommand: await requiredInput(
+    undefined,
+    { path: '--jsonl-command', question: 'JSONL bridge command: ' },
+    context,
+  ),
   bridgeConcurrency: await promptChoice(
     'Bridge concurrency',
     ['serial', 'multiplexed'],
@@ -73,10 +76,12 @@ const promptJsonlFields = async (
   cancellationGrace: await promptDefault(undefined, 'Cancellation grace', '1s', context),
 });
 
-const promptStreamFields = async (
-  context: AgentPromptContext,
-): Promise<Partial<AgentAddFields>> => ({
-  streamUrl: await promptRequired(undefined, 'Stream HTTP URL', '--stream-url', context),
+const promptStreamFields = async (context: PromptContext): Promise<Partial<AgentAddFields>> => ({
+  streamUrl: await requiredInput(
+    undefined,
+    { path: '--stream-url', question: 'Stream HTTP URL: ' },
+    context,
+  ),
   streamFraming: await promptChoice(
     'Stream framing',
     ['sse', 'jsonl'],
@@ -89,10 +94,12 @@ const promptStreamFields = async (
   responsePointer: await promptDefault(undefined, 'Result JSON Pointer', '/output', context),
 });
 
-const promptWebSocketFields = async (
-  context: AgentPromptContext,
-): Promise<Partial<AgentAddFields>> => {
-  const webSocketUrl = await promptRequired(undefined, 'WebSocket URL', '--websocket-url', context);
+const promptWebSocketFields = async (context: PromptContext): Promise<Partial<AgentAddFields>> => {
+  const webSocketUrl = await requiredInput(
+    undefined,
+    { path: '--websocket-url', question: 'WebSocket URL: ' },
+    context,
+  );
   const webSocketLifecycle = await promptChoice(
     'WebSocket lifecycle',
     ['per_run', 'per_case'],
@@ -153,7 +160,7 @@ const promptWebSocketFields = async (
  */
 const promptTransportFields = async (
   fields: AgentAddFields,
-  context: AgentPromptContext,
+  context: PromptContext,
 ): Promise<AgentAddFields> => {
   if (!context.interactive || TRANSPORT_FLAGS.some((flag) => fields[flag] !== undefined)) {
     return fields;
@@ -162,17 +169,20 @@ const promptTransportFields = async (
     case 'cli':
       return {
         ...fields,
-        nativeCommand: await promptRequired(
+        nativeCommand: await requiredInput(
           undefined,
-          'Native command',
-          '--native-command',
+          { path: '--native-command', question: 'Native command: ' },
           context,
         ),
       };
     case 'http':
       return {
         ...fields,
-        nativeHttp: await promptRequired(undefined, 'Native HTTP URL', '--native-http', context),
+        nativeHttp: await requiredInput(
+          undefined,
+          { path: '--native-http', question: 'Native HTTP URL: ' },
+          context,
+        ),
       };
     case 'background':
       return { ...fields, ...(await promptBackgroundFields(context)) };

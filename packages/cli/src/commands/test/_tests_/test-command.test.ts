@@ -12,13 +12,11 @@ import {
 } from '@attest/contracts';
 import { contentHash } from '@attest/core';
 import { loadProject } from '@attest/local/project';
-import { runTestMutationCommand, validateCommandRequest } from '@attest/local/test';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { fixtureAgent, writeFixtureProject } from '../../../_tests_/support/project-fixture.js';
-import { serializeCliError } from '../../../errors/index.js';
-import { runCli, type CliIo } from '../../../run-cli.js';
-import { runConfirmedDatasetImport } from '../registration/support.js';
+import type { CliIo } from '../../../commands/shared/command-context.js';
+import { runCli } from '../../../run-cli.js';
 
 const temporaryDirectories: string[] = [];
 
@@ -45,6 +43,9 @@ const nonInteractive = (stdin = '') => ({
   outputIsTTY: false,
   prompt: (): Promise<string> => Promise.reject(new Error('prompt must not be called')),
   readStdin: (): Promise<string> => Promise.resolve(stdin),
+  readImportStdin: async function* readImportStdin() {
+    yield await Promise.resolve(stdin);
+  },
 });
 
 const runJson = async (
@@ -1098,82 +1099,6 @@ describe('CLI test, case, dataset, and import authoring', { timeout: 20_000 }, (
     await runJson(root, ['test', 'dataset', 'add', 'race-owner', 'race']);
     const source = join(root, 'race.jsonl');
     await writeFile(source, '{"id":"race-case","input":"must-not-publish"}\n');
-    const request = validateCommandRequest('test.dataset.import', {
-      schema: COMMAND_REQUEST_SCHEMA_ID,
-      command: 'test.dataset.import',
-      test_id: 'race-owner',
-      source,
-      as: 'race',
-      yes: true,
-      import: { format: 'jsonl', sync: 'upsert' },
-    });
-    const collected = collectIo();
-    let afterAttachment: Record<string, string> | undefined;
-    let previewHash: null | string | undefined;
-    let failure: unknown;
-    try {
-      await runConfirmedDatasetImport(
-        request,
-        { output: 'json', project: root },
-        {
-          interaction: {
-            ...nonInteractive(),
-            readImportStdin: async function* readImportStdin() {
-              await Promise.resolve();
-              yield '';
-            },
-          },
-          io: collected.io,
-          workingDirectory: root,
-        },
-        async (mutationRequest, _options, _context, preparedImportSource) => {
-          const result = await runTestMutationCommand({
-            preparedImportSource,
-            project: root,
-            readImportStdin: async function* readImportStdin() {
-              await Promise.resolve();
-              yield '';
-            },
-            readStdin: () => Promise.resolve(''),
-            request: mutationRequest,
-            workingDirectory: root,
-          });
-          if (mutationRequest.dry_run === true) {
-            previewHash = result.projectHashBefore;
-            await runJson(root, ['test', 'dataset', 'attach', 'race-reader', 'race']);
-            afterAttachment = await snapshotProject(root);
-          }
-          return result;
-        },
-      );
-    } catch (error: unknown) {
-      failure = error;
-    }
-
-    expect(previewHash).toEqual(expect.any(String));
-    expect(afterAttachment).toBeDefined();
-    expect(serializeCliError(failure)).toMatchObject({
-      exitCode: 3,
-      error: {
-        code: 'project_changed',
-        details: { expected_hash: previewHash },
-      },
-    });
-    expect(collected.output).toEqual([]);
-    expect(await snapshotProject(root)).toEqual(afterAttachment);
-    const loaded = await loadProject({ project: root });
-    expect(loaded.datasets.find(({ metadata }) => metadata.id === 'race')?.cases).toEqual([]);
-    expect(loaded.tests.map(({ id }) => id)).toEqual(
-      expect.arrayContaining(['race-owner', 'race-reader', 'refund']),
-    );
-    for (const testId of ['race-owner', 'race-reader']) {
-      expect(
-        loaded.tests
-          .find(({ id }) => id === testId)
-          ?.datasets.some(({ dataset_id: datasetId }) => datasetId === 'race'),
-      ).toBe(true);
-    }
-
     await runJson(root, ['test', 'add', 'race-reader-2', '--agent', 'support']);
     const prompted = collectIo();
     let afterPromptAttachment: Record<string, string> | undefined;

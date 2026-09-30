@@ -1,20 +1,22 @@
 import {
+  COMMAND_REQUEST_SCHEMA_ID,
   CLI_HELP_SCHEMA_ID,
+  cliHelpArgumentSchema,
+  cliHelpOptionSchema,
   cliHelpSchema,
-  metricPresetSchema,
   type CliHelp,
   type JsonValue,
   type MetricPreset,
 } from '@attest/contracts';
 import { type Argument, type Command, type Option } from 'commander';
 
-import { AttestCliError } from '../errors/index.js';
+import { authoredFieldNames, collect } from '../commands/shared/cli-options.js';
+import { AttestCliError } from '../errors/cli-error.js';
 
 type CliOptionHelpMetadata = {
   conflicts?: readonly string[];
-  default?: JsonValue | null;
+  default?: JsonValue;
   implies?: readonly string[];
-  repeatable?: boolean;
 };
 
 type CliCommandHelpMetadata = {
@@ -26,21 +28,53 @@ type CliCommandHelpMetadata = {
   options?: Readonly<Record<string, CliOptionHelpMetadata>>;
 };
 
+/** A help node before `cliHelpSchema` validates the whole tree and copies the frozen presets. */
+type CommandHelpDraft = Omit<CliHelp['command'], 'presets' | 'subcommands'> & {
+  presets?: readonly MetricPreset[];
+  subcommands: CommandHelpDraft[];
+};
+
 const metadataByCommand = new WeakMap<Command, CliCommandHelpMetadata>();
 
 /** Associates structured metadata that Commander does not retain on public fields. */
-const setCliCommandHelpMetadata = (command: Command, metadata: CliCommandHelpMetadata): Command => {
+const setCliCommandHelpMetadata = (command: Command, metadata: CliCommandHelpMetadata): void => {
   metadataByCommand.set(command, metadata);
-  return command;
 };
 
-const toJsonValue = (value: unknown): JsonValue | null => {
-  if (value === undefined) {
-    return null;
-  }
+type MutationHelp = {
+  constraints?: readonly string[];
+  examples: readonly string[];
+  /** Extra metadata for authored options; `from-json` is always added to their conflicts. */
+  options?: Readonly<Record<string, CliOptionHelpMetadata>>;
+  presets?: readonly MetricPreset[];
+};
 
-  const serialized = JSON.stringify(value);
-  return serialized === undefined ? null : (JSON.parse(serialized) as JsonValue);
+/**
+ * Records help for a command that accepts either authored flags and arguments or one complete
+ * `--from-json` request. The authored fields are read from the registered command, so call this
+ * after every option is added.
+ */
+const setMutationHelp = (command: Command, help: MutationHelp): void => {
+  const fields = authoredFieldNames(command);
+  setCliCommandHelpMetadata(command, {
+    constraints: help.constraints,
+    examples: help.examples,
+    presets: help.presets,
+    requestSchema: COMMAND_REQUEST_SCHEMA_ID,
+    options: {
+      output: { implies: ['non-interactive'] },
+      'from-json': {
+        conflicts: ['dry-run', 'if-project-hash', 'yes', ...fields],
+        implies: ['non-interactive'],
+      },
+      ...Object.fromEntries(
+        fields.map((field) => {
+          const extra = help.options?.[field];
+          return [field, { ...extra, conflicts: ['from-json', ...(extra?.conflicts ?? [])] }];
+        }),
+      ),
+    },
+  });
 };
 
 const argumentUsage = (argument: Argument): string => {
@@ -55,12 +89,14 @@ const toArgumentHelp = (argument: Argument): CliHelp['command']['arguments'][num
   required: argument.required,
   variadic: argument.variadic,
   choices: argument.argChoices ?? [],
-  default: toJsonValue(argument.defaultValue),
+  default: cliHelpArgumentSchema.shape.default.parse(argument.defaultValue ?? null),
 });
 
 const optionValueName = (option: Option): string | null => {
-  const match = /(?:<([^>]+)>|\[([^\]]+)\])/.exec(option.flags);
-  return match?.[1] ?? match?.[2] ?? null;
+  if (!option.required && !option.optional) return null;
+  // Commander keeps the value placeholder only in the flags, as the last word: `--output <format>`.
+  const placeholder = option.flags.split(' ').at(-1) ?? '';
+  return placeholder.slice(1, -1);
 };
 
 const toOptionHelp = (
@@ -72,9 +108,10 @@ const toOptionHelp = (
   description: option.description,
   value_name: optionValueName(option),
   required: option.mandatory,
-  repeatable: metadata?.repeatable ?? option.variadic,
+  repeatable: option.variadic || option.parseArg === collect,
   choices: option.argChoices ?? [],
-  default: metadata?.default ?? toJsonValue(option.defaultValue),
+  default:
+    metadata?.default ?? cliHelpOptionSchema.shape.default.parse(option.defaultValue ?? null),
   conflicts: [...(metadata?.conflicts ?? [])],
   implies: [...(metadata?.implies ?? [])],
 });
@@ -106,7 +143,7 @@ const findCommand = (program: Command, path: readonly string[]): Command => {
   return current;
 };
 
-const toCommandHelp = (command: Command): CliHelp['command'] => {
+const toCommandHelp = (command: Command): CommandHelpDraft => {
   const metadata = metadataByCommand.get(command);
   const path = getCommandPath(command);
   const commandPrefix = ['attest', ...path].join(' ');
@@ -129,11 +166,13 @@ const toCommandHelp = (command: Command): CliHelp['command'] => {
     request_schema: metadata?.requestSchema ?? null,
     examples: [...(metadata?.examples ?? [])],
     constraints: [...(metadata?.constraints ?? [])],
-    ...(metadata?.presets === undefined
-      ? {}
-      : { presets: metricPresetSchema.array().parse(metadata.presets) }),
+    ...(metadata?.presets === undefined ? {} : { presets: metadata.presets }),
   };
 };
+
+/** Names a command in JSON results by its dotted path; an alias reports the command it runs. */
+const resultCommandName = (command: Command): string =>
+  metadataByCommand.get(command)?.aliasFor ?? (getCommandPath(command).join('.') || 'cli');
 
 /** Builds a validated machine-readable tree for the selected registered command path. */
 const createCliHelp = (program: Command, path: readonly string[] = []): CliHelp =>
@@ -193,7 +232,7 @@ const renderCliHelp = (help: CliHelp): string => {
 export {
   createCliHelp,
   renderCliHelp,
+  resultCommandName,
   setCliCommandHelpMetadata,
-  type CliCommandHelpMetadata,
-  type CliOptionHelpMetadata,
+  setMutationHelp,
 };

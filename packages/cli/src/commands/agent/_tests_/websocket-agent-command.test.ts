@@ -9,7 +9,8 @@ import { type AgentResource } from '@attest/contracts';
 import { loadProject } from '@attest/local/project';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { runCli, type CliIo } from '../../../run-cli.js';
+import type { CliIo } from '../../../commands/shared/command-context.js';
+import { runCli } from '../../../run-cli.js';
 
 const PTY_FIXTURE = fileURLToPath(new URL('./fixtures/pty-agent-command.py', import.meta.url));
 const CLI_PACKAGE_ROOT = fileURLToPath(new URL('../../../../', import.meta.url));

@@ -7,51 +7,60 @@ import {
   type JsonValue,
 } from '@attest/contracts';
 
-import { AttestCliError } from '../../errors/index.js';
-import type { CommandResult } from '../shared/command-result.js';
+import { AttestCliError } from '../../errors/cli-error.js';
 
-const schemaAliases = new Map<string, string>([
-  [COMMAND_REQUEST_SCHEMA_ID, 'command-request.json'],
-  [METRIC_PRESET_SCHEMA_ID, 'metric-preset.json'],
-  [METRIC_TEST_FIXTURE_SCHEMA_ID, 'metric-test-fixture.json'],
-]);
-
-const schemaIdForFile = (file: string): string =>
-  [...schemaAliases.entries()].find(([, candidate]) => candidate === file)?.[0] ?? file;
-
-/** Lists the generated runtime schema registry in deterministic identifier order. */
-const runSchemaListCommand = (): CommandResult => {
-  const items = [...CONTRACT_JSON_SCHEMAS.keys()]
-    .map((file) => {
-      const id = schemaIdForFile(file);
-      return { file, id };
-    })
-    .sort((left, right) => left.id.localeCompare(right.id));
-  return {
-    operation: 'schema-list',
-    projectHashBefore: null,
-    projectHashAfter: null,
-    result: { items },
-  };
+type SchemaListItem = {
+  file: string;
+  id: string;
 };
 
-/** Retrieves one exact generated schema by its public id or registered filename. */
-const runSchemaPrintCommand = (schemaId: string): CommandResult => {
-  const file = schemaAliases.get(schemaId) ?? schemaId;
+type SchemaListResult = {
+  items: SchemaListItem[];
+};
+
+type SchemaPrintResult = SchemaListItem & {
+  schema: JsonValue;
+};
+
+/** Public schema ids whose generated file name differs from the id. */
+const FILE_BY_SCHEMA_ID: Readonly<Record<string, string>> = {
+  [COMMAND_REQUEST_SCHEMA_ID]: 'command-request.json',
+  [METRIC_PRESET_SCHEMA_ID]: 'metric-preset.json',
+  [METRIC_TEST_FIXTURE_SCHEMA_ID]: 'metric-test-fixture.json',
+};
+
+const SCHEMA_ID_BY_FILE: Readonly<Record<string, string>> = Object.fromEntries(
+  Object.entries(FILE_BY_SCHEMA_ID).map(([id, file]) => [file, id]),
+);
+
+const schemaIdForFile = (file: string): string => SCHEMA_ID_BY_FILE[file] ?? file;
+
+/** Lists the generated schema registry sorted by public id. */
+const runSchemaListCommand = (): SchemaListResult => ({
+  items: [...CONTRACT_JSON_SCHEMAS.keys()]
+    .map((file) => ({ file, id: schemaIdForFile(file) }))
+    .sort((left, right) => left.id.localeCompare(right.id)),
+});
+
+/** Reads one generated schema by its public id or its file name. */
+const runSchemaPrintCommand = (schemaId: string): SchemaPrintResult => {
+  const file = FILE_BY_SCHEMA_ID[schemaId] ?? schemaId;
   if (!CONTRACT_JSON_SCHEMAS.has(file)) {
     throw new AttestCliError('resource_not_found', `schema ${schemaId} was not found.`, {
       path: schemaId,
       hint: 'Run `attest schema list --output json` to inspect registered schema ids.',
     });
   }
-  const id = schemaIdForFile(file);
   const schema = JSON.parse(serializeContractSchema(file)) as JsonValue;
-  return {
-    operation: 'schema-print',
-    projectHashBefore: null,
-    projectHashAfter: null,
-    result: { file, id, schema },
-  };
+  return { file, id: schemaIdForFile(file), schema };
 };
 
-export { runSchemaListCommand, runSchemaPrintCommand };
+/** Prints one id per line, with the file name when it differs from the id. */
+const renderSchemaList = (result: SchemaListResult): string =>
+  result.items.map(({ file, id }) => `  ${id}${id === file ? '' : `  (${file})`}`).join('\n');
+
+/** Prints the schema document itself, indented for reading. */
+const renderSchemaPrint = (result: SchemaPrintResult): string =>
+  JSON.stringify(result.schema, undefined, 2);
+
+export { renderSchemaList, renderSchemaPrint, runSchemaListCommand, runSchemaPrintCommand };

@@ -33,7 +33,8 @@ import { openStore } from '@attest/local/store';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { REDACTED } from '../../../_tests_/support/project-fixture.js';
-import { runCli, type CliIo } from '../../../run-cli.js';
+import type { CliIo } from '../../../commands/shared/command-context.js';
+import { runCli } from '../../../run-cli.js';
 
 const FIXTURE = fileURLToPath(new URL('./fixtures/native-agent.cjs', import.meta.url));
 const PTY_FIXTURE = fileURLToPath(new URL('./fixtures/pty-agent-command.py', import.meta.url));

@@ -1,12 +1,12 @@
 import { setCliCommandHelpMetadata } from '../../help/command-help.js';
+import type { CommandContext } from '../shared/command-context.js';
 import { registerAgentAddCommand } from './register-agent-add-command.js';
 import { registerAgentImportCommand } from './register-agent-import-command.js';
 import { registerAgentLifecycleCommands } from './register-agent-lifecycle-commands.js';
 import { registerAgentTestCommand } from './register-agent-test-command.js';
-import type { RegisterAgentCommandsOptions } from './registration-support.js';
 
-/** Registers agent authoring plus native, HTTP, streaming, and WebSocket UX commands. */
-const registerAgentCommands = (context: RegisterAgentCommandsOptions): void => {
+/** Registers agent add, import, test, rename, and remove. */
+const registerAgentCommands = (context: CommandContext): void => {
   const agent = context.program.command('agent').description('Author and test agent adapters.');
   registerAgentAddCommand(agent, context);
   registerAgentImportCommand(agent, context);
@@ -17,4 +17,4 @@ const registerAgentCommands = (context: RegisterAgentCommandsOptions): void => {
   });
 };
 
-export { registerAgentCommands, type RegisterAgentCommandsOptions };
+export { registerAgentCommands };

@@ -17,7 +17,8 @@ import { openStore } from '@attest/local/store';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { projectResources, writeFixtureProject } from '../../../_tests_/support/project-fixture.js';
-import { runCli, type CliIo } from '../../../run-cli.js';
+import type { CliIo } from '../../../commands/shared/command-context.js';
+import { runCli } from '../../../run-cli.js';
 
 const temporaryDirectories: string[] = [];
 

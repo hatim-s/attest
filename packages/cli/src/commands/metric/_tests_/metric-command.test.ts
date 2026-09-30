@@ -22,7 +22,8 @@ import {
   projectResources,
   writeFixtureProject,
 } from '../../../_tests_/support/project-fixture.js';
-import { runCli, type CliIo } from '../../../run-cli.js';
+import type { CliIo } from '../../../commands/shared/command-context.js';
+import { runCli } from '../../../run-cli.js';
 
 const EXEC_FIXTURE = fileURLToPath(new URL('./fixtures/result-metric.cjs', import.meta.url));
 const PTY_FIXTURE = fileURLToPath(new URL('./fixtures/pty-metric-authoring.py', import.meta.url));
