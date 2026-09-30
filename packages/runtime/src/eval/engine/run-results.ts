@@ -3,42 +3,17 @@ import {
   CLI_RESULT_SCHEMA_ID,
   type EvalEvent,
   type EvalFinalResultData,
+  type EvalRun,
   type EvalRunSummary,
 } from '@attest/contracts';
 
+import { summarizeEvalCases } from '../normalization.js';
 import type {
   EvalExecutionResult,
+  EvalRunStatus,
   EvalTerminalFailureFactory,
   ExecuteEvalOptions,
-  ImmutableEvalRun,
-  ResolvedEvalPlan,
 } from '../types.js';
-
-const EMPTY_SUMMARY: EvalRunSummary = {
-  total_cases: 0,
-  passed_cases: 0,
-  failed_cases: 0,
-  error_cases: 0,
-  metric_error_count: 0,
-};
-
-/** Recursively freezes cloned JSON metadata so adapters cannot mutate the run snapshot. */
-const deepFreeze = <Value>(value: Value): Value => {
-  if (value === null || typeof value !== 'object' || Object.isFrozen(value)) return value;
-  Object.freeze(value);
-  for (const child of Object.values(value)) deepFreeze(child);
-  return value;
-};
-
-/** Produces an owned immutable copy of resolver-supplied eval-run metadata. */
-const freezeEvalRun = (run: ResolvedEvalPlan['run']): ImmutableEvalRun =>
-  deepFreeze(structuredClone(run));
-
-/** Converts hostile thrown values to bounded, non-sensitive infrastructure diagnostics. */
-const safeErrorMessage = (error: unknown, fallback: string): string => {
-  const message = error instanceof Error ? error.message : fallback;
-  return message.length <= 512 ? message : `${message.slice(0, 509)}...`;
-};
 
 /** Builds the shared failure envelope without leaking raw adapter evidence. */
 const defaultTerminalFailure: EvalTerminalFailureFactory = (code, message) => ({
@@ -52,7 +27,7 @@ const defaultTerminalFailure: EvalTerminalFailureFactory = (code, message) => ({
 });
 
 /** Builds the completed pass/fail envelope shared by JSON and the final JSONL event. */
-const completedResult = (run: ImmutableEvalRun, summary: EvalRunSummary): EvalFinalResultData => {
+const completedResult = (run: Readonly<EvalRun>, summary: EvalRunSummary): EvalFinalResultData => {
   const verdict = summary.failed_cases === 0 ? 'pass' : 'fail';
   const sharedResult = {
     schema: CLI_RESULT_SCHEMA_ID,
@@ -67,6 +42,7 @@ const completedResult = (run: ImmutableEvalRun, summary: EvalRunSummary): EvalFi
     snapshot_hash: run.snapshot_hash,
     status: 'completed' as const,
     summary,
+    // The result is validated as JSON, which rejects keys holding undefined, so absent fields are omitted.
     ...(run.snapshot.selection === undefined ? {} : { selection: run.snapshot.selection }),
     ...(run.effective_command.resolved.baseline_run_id === undefined
       ? {}
@@ -80,42 +56,63 @@ const completedResult = (run: ImmutableEvalRun, summary: EvalRunSummary): EvalFi
     : { exit_code: 1, result: { ...sharedResult, result: { ...payload, verdict: 'fail' } } };
 };
 
+/** Picks the terminal result envelope for a finished run. */
+const terminalResultFor = (
+  run: Readonly<EvalRun>,
+  summary: EvalRunSummary,
+  outcome: {
+    status: EvalRunStatus;
+    timedOut: boolean;
+    terminalFailure: EvalTerminalFailureFactory;
+  },
+): EvalFinalResultData => {
+  if (outcome.status === 'completed') {
+    return completedResult(run, summary);
+  }
+  if (outcome.status === 'cancelled') {
+    return outcome.terminalFailure('cancelled', 'Eval run was cancelled.');
+  }
+  if (outcome.timedOut) {
+    return outcome.terminalFailure('run_failed', 'Eval run deadline exceeded.');
+  }
+  return outcome.terminalFailure(
+    'run_failed',
+    'Eval run encountered an invocation, metric, persistence, or artifact error.',
+  );
+};
+
 /** Creates a contract-shaped result-only response for failures before orchestration starts. */
 const preOrchestrationFailure = async <Payload, BaselineDiff>(
-  run: ImmutableEvalRun,
-  now: () => string,
-  status: 'cancelled' | 'failed',
-  finalResult: EvalFinalResultData,
-  onEvent: ExecuteEvalOptions['onEvent'],
+  run: Readonly<EvalRun>,
+  failure: {
+    time: string;
+    status: 'cancelled' | 'failed';
+    finalResult: EvalFinalResultData;
+    onEvent: ExecuteEvalOptions['onEvent'];
+  },
 ): Promise<EvalExecutionResult<Payload, BaselineDiff>> => {
   const event: EvalEvent = {
     schema: CLI_EVENT_SCHEMA_ID,
     sequence: 0,
-    time: now(),
+    time: failure.time,
     event: 'result',
-    data: finalResult,
+    data: failure.finalResult,
   };
   try {
-    await onEvent?.(event);
+    await failure.onEvent?.(event);
   } catch {
     // The primary failure remains authoritative when its one result-event sink also fails.
   }
   return {
     run,
-    status,
-    exit_code: finalResult.exit_code,
-    summary: EMPTY_SUMMARY,
+    status: failure.status,
+    exit_code: failure.finalResult.exit_code,
+    summary: summarizeEvalCases([]),
     cases: [],
     events: [event],
-    final_result: finalResult,
+    final_result: failure.finalResult,
     can_release_cancellation_ownership: true,
   };
 };
 
-export {
-  completedResult,
-  defaultTerminalFailure,
-  freezeEvalRun,
-  preOrchestrationFailure,
-  safeErrorMessage,
-};
+export { defaultTerminalFailure, preOrchestrationFailure, terminalResultFor };

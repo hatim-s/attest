@@ -70,7 +70,7 @@ const appendLifecycleFailure = (
   const message = failure instanceof Error ? failure.message : 'The eval case lifecycle failed.';
   const messages = [
     ...new Set(
-      [result.execution.diagnostics.lifecycleError, result.lifecycle_error, message].filter(
+      [result.execution.diagnostics.lifecycleError, message].filter(
         (value): value is string => value !== undefined && value.length > 0,
       ),
     ),
@@ -104,7 +104,6 @@ const appendLifecycleFailure = (
       diagnostics: { ...result.execution.diagnostics, lifecycleError },
     },
     metrics: [...result.metrics],
-    lifecycle_error: lifecycleError,
   };
 };
 
@@ -292,7 +291,7 @@ const createEvalCaseRunner = (
     const hookContext = {
       case_id: payload.case_id,
       test_id: payload.test_id,
-      worker_index: context.worker_index,
+      worker_index: context.workerIndex,
     };
     let workerDirectory: string | undefined;
     let outcome = 'infrastructure_error';
@@ -363,15 +362,12 @@ const createEvalCaseRunner = (
         );
       }
       outcome = execution.outcome;
-      let lifecycleError: string | undefined;
       if (execution.diagnostics.sandboxCleanupConfirmed === false) {
         sandboxCleanupUncertain = true;
-        const uncertainCleanup = appendLifecycleFailure(
+        execution = appendLifecycleFailure(
           { execution, metrics: [] },
           new Error('Vercel sandbox cleanup was not confirmed.'),
-        );
-        execution = uncertainCleanup.execution;
-        lifecycleError = uncertainCleanup.lifecycle_error;
+        ).execution;
       }
       try {
         await lifecycle.afterAgent(hookContext, workerDirectory, execution.outcome, signal);
@@ -386,11 +382,7 @@ const createEvalCaseRunner = (
       } catch (error: unknown) {
         throw new EvalCaseStageError('after_evaluation', execution, metrics, error);
       }
-      result = {
-        execution,
-        metrics,
-        ...(lifecycleError === undefined ? {} : { lifecycle_error: lifecycleError }),
-      };
+      result = { execution, metrics };
     } catch (error: unknown) {
       failure = error;
     }

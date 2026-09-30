@@ -54,6 +54,22 @@ const normalizeCaseResult = (
   metric_results: metrics,
 });
 
+/** Builds the record for a case whose runner failed, so it still counts as an error verdict. */
+const normalizeInfrastructureFailure = (
+  resolvedCase: ResolvedEvalCase,
+  failure: { completionIndex: number; cancelled: boolean; startedAt: string },
+): NormalizedEvalCaseResult => ({
+  test_id: resolvedCase.test_id,
+  case_id: resolvedCase.case_id,
+  configured_index: resolvedCase.configured_index,
+  completion_index: failure.completionIndex,
+  outcome: failure.cancelled ? 'cancelled' : 'invocation_error',
+  verdict: 'error',
+  started_at: failure.startedAt,
+  duration_ms: 0,
+  metric_results: [],
+});
+
 /** Aggregates mutually exclusive verdict totals and every metric infrastructure error. */
 const summarizeEvalCases = (
   cases: readonly Pick<NormalizedEvalCaseResult, 'verdict' | 'metric_results'>[],
@@ -76,4 +92,9 @@ const summarizeEvalCases = (
   return summary;
 };
 
-export { classifyCaseVerdict, normalizeCaseResult, summarizeEvalCases };
+export {
+  classifyCaseVerdict,
+  normalizeCaseResult,
+  normalizeInfrastructureFailure,
+  summarizeEvalCases,
+};

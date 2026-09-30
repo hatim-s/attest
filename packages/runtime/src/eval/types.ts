@@ -6,22 +6,11 @@ import type {
   EvalRunSummary,
   JsonValue,
 } from '@attest/contracts';
-
-import type { EvalHooks } from './hooks.js';
-
 import type { StoredMetricEvaluation } from '@attest/core';
 import type { CaseEnvironment, CaseEnvironmentFactory, CaseExecution } from '@attest/executor';
 
-/** Recursively marks the immutable eval-run metadata handed to execution and persistence. */
-type DeepReadonly<Value> = Value extends (...arguments_: never[]) => unknown
-  ? Value
-  : Value extends readonly (infer Item)[]
-    ? readonly DeepReadonly<Item>[]
-    : Value extends object
-      ? { readonly [Key in keyof Value]: DeepReadonly<Value[Key]> }
-      : Value;
-
-type ImmutableEvalRun = DeepReadonly<EvalRun>;
+/** Terminal states a run can end in. */
+type EvalRunStatus = 'completed' | 'failed' | 'cancelled';
 
 /** Carries one resolver-owned case payload without coupling orchestration to project discovery. */
 type ResolvedEvalCase<Payload = unknown> = EvalRunSelectedCase & {
@@ -29,7 +18,7 @@ type ResolvedEvalCase<Payload = unknown> = EvalRunSelectedCase & {
   payload: Payload;
 };
 
-/** Defines the complete, already-resolved immutable input accepted by the eval engine. */
+/** Defines the complete, already-resolved input accepted by the eval engine. */
 type ResolvedEvalPlan<Payload = unknown> = {
   run: EvalRun;
   cases: readonly ResolvedEvalCase<Payload>[];
@@ -75,7 +64,7 @@ type EvalCaseRecord<Payload = unknown> =
 /** Runs one already-resolved case through the existing runner and metric result interfaces. */
 type EvalCaseExecutionContext = {
   /** Identifies the stable worker directory or transient concurrency slot assigned to this case. */
-  worker_index: number;
+  workerIndex: number;
   environment?: CaseEnvironment;
   afterAgent?(execution: CaseExecution): Promise<void>;
   afterEvaluation?(
@@ -84,10 +73,10 @@ type EvalCaseExecutionContext = {
   ): Promise<void>;
 };
 
+/** One case's evidence; lifecycle failures live in `execution.diagnostics.lifecycleError`. */
 type EvalCaseRunnerResult = {
   execution: CaseExecution;
   metrics: readonly StoredMetricEvaluation[];
-  lifecycle_error?: string;
 };
 
 type EvalCaseRunner<Payload = unknown> = {
@@ -99,11 +88,37 @@ type EvalCaseRunner<Payload = unknown> = {
     context: EvalCaseExecutionContext,
   ): Promise<EvalCaseRunnerResult>;
   cleanup?(runId: string): Promise<void>;
-  afterRun?(
-    runId: string,
-    status: 'completed' | 'failed' | 'cancelled',
-    summary: EvalRunSummary,
-  ): Promise<void>;
+  afterRun?(runId: string, status: EvalRunStatus, summary: EvalRunSummary): Promise<void>;
+};
+
+type EvalRunHookContext = {
+  run: Readonly<EvalRun>;
+  signal: AbortSignal;
+};
+
+type EvalCaseHookContext<Payload> = EvalRunHookContext & {
+  resolvedCase: ResolvedEvalCase<Payload>;
+  workerIndex: number;
+  environment?: CaseEnvironment;
+};
+
+type EvalHookContexts<Payload> = {
+  before_run: EvalRunHookContext;
+  before_case: EvalCaseHookContext<Payload>;
+  after_agent: EvalCaseHookContext<Payload> & { execution: CaseExecution };
+  after_evaluation: EvalCaseHookContext<Payload> & {
+    execution: CaseExecution;
+    metrics: readonly StoredMetricEvaluation[];
+  };
+  after_case: EvalCaseHookContext<Payload> & { result?: EvalCaseRunnerResult; error?: unknown };
+  after_run: EvalRunHookContext & { status: EvalRunStatus; summary: EvalRunSummary };
+};
+
+/** One set of awaited lifecycle callbacks; runs execute every hook set in order at each stage. */
+type EvalHooks<Payload = unknown> = {
+  [Stage in keyof EvalHookContexts<Payload>]?: (
+    context: EvalHookContexts<Payload>[Stage],
+  ) => void | Promise<void>;
 };
 
 /**
@@ -111,13 +126,9 @@ type EvalCaseRunner<Payload = unknown> = {
  * The engine never opens a database or imports the old configuration model directly.
  */
 type EvalPersistenceAdapter<Payload = unknown> = {
-  createRun(run: ImmutableEvalRun): Promise<void>;
+  createRun(run: Readonly<EvalRun>): Promise<void>;
   recordCase(runId: string, record: EvalCaseRecord<Payload>): Promise<void>;
-  finalizeRun(
-    runId: string,
-    status: 'completed' | 'failed' | 'cancelled',
-    summary: EvalRunSummary,
-  ): Promise<void>;
+  finalizeRun(runId: string, status: EvalRunStatus, summary: EvalRunSummary): Promise<void>;
 };
 
 /** Computes a persisted comparison after the candidate cases have been recorded. */
@@ -137,12 +148,6 @@ type EvalArtifactWriter = {
   writeJUnitAtomically(path: string, payload: EvalJUnitPayload): Promise<void>;
 };
 
-/** Bounds the public event stream before any agent work begins. */
-type EvalEventLimits = {
-  max_events: number;
-  max_event_bytes: number;
-};
-
 type EvalTerminalErrorCode = 'cancelled' | 'run_failed';
 
 /** Builds a terminal eval failure from the caller's canonical public error catalog. */
@@ -157,7 +162,6 @@ type ExecuteEvalOptions<BaselineDiff = JsonValue, Payload = unknown> = {
   isolation?: CaseEnvironmentFactory;
   signal?: AbortSignal;
   now?: () => string;
-  event_limits?: Partial<EvalEventLimits>;
   onEvent?: (event: EvalEvent) => void | Promise<void>;
   baseline?: EvalBaselineAdapter<BaselineDiff>;
   artifacts?: EvalArtifactWriter;
@@ -166,8 +170,8 @@ type ExecuteEvalOptions<BaselineDiff = JsonValue, Payload = unknown> = {
 
 /** Returns all auditable outputs needed by the CLI adapter without performing CLI rendering. */
 type EvalExecutionResult<Payload = unknown, BaselineDiff = JsonValue> = {
-  run: ImmutableEvalRun;
-  status: 'completed' | 'failed' | 'cancelled';
+  run: Readonly<EvalRun>;
+  status: EvalRunStatus;
   exit_code: EvalFinalResultData['exit_code'];
   summary: EvalRunSummary;
   cases: readonly EvalCaseRecord<Payload>[];
@@ -180,23 +184,25 @@ type EvalExecutionResult<Payload = unknown, BaselineDiff = JsonValue> = {
 };
 
 export {
-  type DeepReadonly,
   type EvalArtifactWriter,
   type EvalBaselineAdapter,
-  type EvalCaseInfrastructureFailure,
   type EvalCaseExecutionContext,
+  type EvalCaseHookContext,
+  type EvalCaseInfrastructureFailure,
   type EvalCaseRecord,
   type EvalCaseRunner,
   type EvalCaseRunnerResult,
   type EvalCaseVerdict,
-  type EvalEventLimits,
   type EvalExecutionResult,
+  type EvalHookContexts,
+  type EvalHooks,
   type EvalJUnitPayload,
   type EvalPersistenceAdapter,
+  type EvalRunHookContext,
+  type EvalRunStatus,
   type EvalTerminalErrorCode,
   type EvalTerminalFailureFactory,
   type ExecuteEvalOptions,
-  type ImmutableEvalRun,
   type NormalizedEvalCaseResult,
   type ResolvedEvalCase,
   type ResolvedEvalPlan,
