@@ -69,10 +69,9 @@ const validMetricResult = {
   details: { matched: ['$.output'] },
 };
 
-/** Supplies ordinary JSON noise to exercise every Phase 1 ingestion boundary. */
 const jsonNoise = fc.jsonValue();
 
-/** Includes non-JSON unknown values because callers can invoke parsers before serialization. */
+// Callers can pass values that never went through JSON, such as functions and symbols.
 const nonJsonNoise = fc.oneof(
   fc.anything(),
   fc.constant(() => undefined),
@@ -80,7 +79,7 @@ const nonJsonNoise = fc.oneof(
   fc.constant(undefined),
 );
 
-/** Builds simple alternating containers up to depth 200 to probe recursive validation safely. */
+// Alternating arrays and objects up to depth 200.
 const deepStructures = fc
   .tuple(fc.integer({ min: 1, max: 200 }), fc.boolean(), fc.jsonValue())
   .map(([depth, startsWithArray, leaf]) => {
@@ -97,7 +96,7 @@ const oneMegabyteHostileString = hostilePattern
   .repeat(Math.ceil(1_048_576 / hostilePattern.length))
   .slice(0, 1_048_576);
 
-/** Mixes Unicode edge cases with an explicit one-megabyte parser boundary value. */
+// Lone surrogates, NUL, RTL override, and a one-megabyte string.
 const hostileStrings = fc.oneof(
   fc.string({ maxLength: 4_096 }),
   fc.constant('\u0000'),
@@ -119,11 +118,10 @@ const mutationInstructions = fc.record({
   replacement: mutationValues,
 });
 
-/** Narrows plain object containers used by the valid JSON seeds. */
 const isMutableRecord = (value: unknown): value is MutableRecord =>
   value !== null && typeof value === 'object' && !Array.isArray(value);
 
-/** Collects nested mutation targets while keeping the mutation logic explicit and inspectable. */
+/** Collects every nested object, array, and value slot a mutation can target. */
 const collectMutationTargets = (
   value: unknown,
   records: MutableRecord[],
@@ -150,7 +148,7 @@ const collectMutationTargets = (
   });
 };
 
-/** Applies one shrinkable mutation to a fresh valid contract document. */
+/** Applies one mutation to a copy of a valid document. */
 const mutateValidDocument = (
   seed: MutableRecord,
   instruction: MutationInstruction,
@@ -202,11 +200,9 @@ const mutateValidDocument = (
   return document;
 };
 
-/** Generates deeper validation cases by perturbing a document known to satisfy its contract. */
 const mutatedValidDocument = (seed: MutableRecord) =>
   mutationInstructions.map((instruction) => mutateValidDocument(seed, instruction));
 
-/** Keeps one structure-aware arbitrary per public parser contract. */
 const mutatedValidDocuments = {
   agentRequest: mutatedValidDocument(validAgentRequest),
   agentResponse: mutatedValidDocument(validAgentResponse),
@@ -215,11 +211,10 @@ const mutatedValidDocuments = {
   trace: mutatedValidDocument(validTrace),
 };
 
-/** Combines broad hostile inputs with contract-aware mutations for one parser property. */
 const parserCandidates = (mutatedDocuments: fc.Arbitrary<MutableRecord>) =>
   fc.oneof(jsonNoise, nonJsonNoise, deepStructures, hostileStrings, mutatedDocuments);
 
-/** Enforces the Phase 1 ingestion guarantee that parsers return shaped results instead of crashing. */
+/** Fails when a parser throws or returns something other than a `{ ok }` result. */
 const expectCrashFreeResult = (parser: Parser, candidate: unknown): void => {
   let result: unknown;
   try {
@@ -237,7 +232,6 @@ const expectCrashFreeResult = (parser: Parser, candidate: unknown): void => {
   expect(typeof Reflect.get(result, 'ok')).toBe('boolean');
 };
 
-/** Runs exactly one crash-freedom property for a public parser family. */
 const assertParserNeverThrows = (
   parser: Parser,
   mutatedDocuments: fc.Arbitrary<MutableRecord>,
@@ -274,5 +268,3 @@ describe.skipIf(process.env.FUZZ !== '1')(
     });
   },
 );
-
-export { deepStructures, hostileStrings, jsonNoise, mutatedValidDocuments };

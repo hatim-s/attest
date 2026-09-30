@@ -1,11 +1,12 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-/** Describes one black-box input and the contract behavior it must retain. */
+/** One fixture file. Paths are dotted, matching parser diagnostics such as `spans.0.span_id`. */
 type FixtureEnvelope = {
   description: string;
   expect: 'valid' | 'invalid' | 'valid-with-warnings';
-  issue_paths?: string[][];
+  issue_paths?: string[];
+  preserve_paths?: string[];
   warning_codes?: string[];
   input: unknown;
 };
