@@ -2,7 +2,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { AGENT_PROTOCOL, TRACE_SCHEMA_ID, type CaseOutcome } from '@attest/contracts';
+import { AGENT_PROTOCOL, TRACE_SCHEMA_ID } from '@attest/contracts';
 import type { CaseRecord, RunStore, StoredCaseExecution } from '@attest/core';
 import { AgentInvocationError, type CaseExecution } from '@attest/executor';
 import { toStoredCaseExecution } from '@attest/runtime';
@@ -130,10 +130,5 @@ describe('toStoredCaseExecution', () => {
 
     const stored = await store.getCaseResults(run.id);
     expect(stored.map(toStoredProjection)).toEqual(projections);
-  });
-
-  it('covers every canonical terminal outcome', () => {
-    const outcomes: CaseOutcome[] = ['completed', 'invocation_error', 'timeout', 'cancelled'];
-    expect(outcomes).toHaveLength(4);
   });
 });

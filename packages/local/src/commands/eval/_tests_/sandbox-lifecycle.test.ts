@@ -28,15 +28,9 @@ vi.mock('@attest/executor', async (importOriginal) => ({
 const directories: string[] = [];
 const cache: CacheStore = { get: () => Promise.resolve(undefined), put: () => Promise.resolve() };
 
-/** Uses the canonical run fixture while setting only the lifecycle configuration under test. */
+/** Uses a copy of the canonical contracts run fixture while setting only the lifecycle configuration under test. */
 const createRun = async (execution: EvalRun['effective_command']['resolved']['execution']) => {
-  const fixture = await readFile(
-    new URL(
-      '../../../../../contracts/src/_tests_/fixtures/eval-run/eval-run.json',
-      import.meta.url,
-    ),
-    'utf8',
-  );
+  const fixture = await readFile(new URL('./fixtures/eval-run.json', import.meta.url), 'utf8');
   const run = evalRunSchema.parse(JSON.parse(fixture));
   if (execution === undefined) delete run.effective_command.resolved.execution;
   else run.effective_command.resolved.execution = execution;
