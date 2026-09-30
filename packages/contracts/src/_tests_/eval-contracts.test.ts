@@ -10,11 +10,8 @@ import {
   evalCancelResultSchema,
   type EvalCancelRequest,
 } from '../eval/cancel.js';
-import {
-  evalEventStreamSchema,
-  evalFinalResultDataSchema,
-  type EvalEventStream,
-} from '../eval/event.js';
+import { evalFinalResultDataSchema } from '../eval/event.js';
+import { evalEventStreamSchema, type EvalEventStream } from '../eval/event-stream.js';
 import {
   evalRunRequestSchema,
   evalRunSchema,

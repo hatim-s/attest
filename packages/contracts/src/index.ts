@@ -166,6 +166,7 @@ export type {
   TestResource,
 } from './project/resources/test.js';
 export {
+  caseFolderSchema,
   durationMillisecondsSchema,
   executionDefaultsSchema,
   jsonPointerSchema,
@@ -221,19 +222,15 @@ export {
   evalCaseCompletedEventSchema,
   evalCaseStartedEventSchema,
   evalEventSchema,
-  evalEventStreamSchema,
   evalFinalResultDataSchema,
   evalResultEventSchema,
   evalRunCompletedEventSchema,
   evalRunStartedEventSchema,
   evalRunSummarySchema,
 } from './eval/event.js';
-export type {
-  EvalEvent,
-  EvalEventStream,
-  EvalFinalResultData,
-  EvalRunSummary,
-} from './eval/event.js';
+export type { EvalEvent, EvalFinalResultData, EvalRunSummary } from './eval/event.js';
+export { evalEventStreamSchema } from './eval/event-stream.js';
+export type { EvalEventStream } from './eval/event-stream.js';
 export {
   webSocketConnectionModeSchema,
   webSocketCorrelatedMessageSchema,
@@ -256,7 +253,6 @@ export type {
 } from './agent/websocket-evidence.js';
 
 export {
-  caseFolderSchema,
   caseSelectionSchema,
   caseSelectionSummarySchema,
   type CaseSelection,

@@ -21,6 +21,18 @@ const jsonPointerSchema = z
   .regex(/^(?:\/(?:[^~/]|~[01])*)*$/, 'must be an RFC 6901 JSON Pointer');
 const durationMillisecondsSchema = z.number().int().positive();
 
+// Segments allow internal spaces but exclude whitespace at either end and dot traversal.
+const folderSegment = String.raw`(?!\.{1,2}(?:/|$))[^\s/\\](?:[^/\\]*[^\s/\\])?`;
+
+/** Logical case folder; the pattern is also emitted in the public JSON schemas. */
+const caseFolderSchema = z
+  .string()
+  .min(1)
+  .regex(
+    new RegExp(String.raw`^${folderSegment}(?:/${folderSegment})*(?![\s\S])`, 'u'),
+    'Use non-empty slash-separated folder names without dot segments or backslashes.',
+  );
+
 /** Any JSON value accepted at a contract boundary. */
 const jsonValueSchema = z.json();
 
@@ -130,6 +142,7 @@ type RawExcerpt = z.infer<typeof rawExcerptSchema>;
 type SecretReference = z.infer<typeof secretReferenceSchema>;
 
 export {
+  caseFolderSchema,
   durationMillisecondsSchema,
   executionDefaultsSchema,
   isJsonValue,
