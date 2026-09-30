@@ -439,29 +439,6 @@ describe('agent transport contract', () => {
     ).toBe(true);
   });
 
-  it('defaults legacy HTTP resources to native envelope response provenance', () => {
-    const explicitMapped = transports.find((transport) => transport.kind === 'http');
-    expect(explicitMapped).toBeDefined();
-    const explicitNative = {
-      kind: 'http',
-      lifecycle: 'external',
-      response_mode: 'attest_envelope',
-      request: { url: 'https://example.com/invoke', method: 'POST' },
-      extraction: { result_pointer: '' },
-    } as const;
-    const withoutMode = structuredClone(explicitNative) as Record<string, unknown>;
-    Reflect.deleteProperty(withoutMode, 'response_mode');
-    expect(agentResourceSchema.parse({ ...agent, transport: withoutMode }).transport).toMatchObject(
-      { kind: 'http', response_mode: 'attest_envelope' },
-    );
-    expect(
-      agentResourceSchema.parse({ ...agent, transport: explicitNative }).transport,
-    ).toMatchObject({ kind: 'http', response_mode: 'attest_envelope' });
-    expect(
-      agentResourceSchema.parse({ ...agent, transport: explicitMapped }).transport,
-    ).toMatchObject({ kind: 'http', response_mode: 'mapped' });
-  });
-
   it('validates all polling invariants', () => {
     const polling = transports.find((transport) => transport.kind === 'polling');
     expect(polling?.kind).toBe('polling');

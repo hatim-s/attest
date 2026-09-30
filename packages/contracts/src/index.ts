@@ -72,22 +72,26 @@ export {
   agentEvidenceLimitsSchema,
   agentResourceSchema,
   agentTimeoutPolicySchema,
-  agentTransportSchema,
-  httpRequestTemplateSchema,
   redactionPolicySchema,
-  responseExtractionSchema,
-  vercelSandboxSchema,
 } from './project/resources/agent.js';
 export type {
   AgentEvidenceLimits,
   AgentResource,
   AgentTimeoutPolicy,
+  RedactionPolicy,
+} from './project/resources/agent.js';
+export {
+  agentTransportSchema,
+  httpRequestTemplateSchema,
+  responseExtractionSchema,
+  vercelSandboxSchema,
+} from './project/resources/agent-transports.js';
+export type {
   AgentTransport,
   HttpRequestTemplate,
-  RedactionPolicy,
   ResponseExtraction,
   VercelSandbox,
-} from './project/resources/agent.js';
+} from './project/resources/agent-transports.js';
 export { caseMetricOverrideSchema, testCaseSchema } from './project/resources/case.js';
 export type { CaseMetricOverride, TestCase } from './project/resources/case.js';
 export {

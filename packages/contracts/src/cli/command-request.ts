@@ -4,8 +4,8 @@ import {
   agentEvidenceLimitsSchema,
   agentResourceSchema,
   agentTimeoutPolicySchema,
-  responseExtractionSchema,
 } from '../project/resources/agent.js';
+import { responseExtractionSchema } from '../project/resources/agent-transports.js';
 import { testCaseSchema } from '../project/resources/case.js';
 import { datasetImportMappingSchema, datasetResourceSchema } from '../project/resources/dataset.js';
 import { evalCancelRequestSchema } from '../eval/cancel.js';
@@ -14,6 +14,7 @@ import { metricResourceSchema } from '../project/resources/metric.js';
 import { testResourceSchema } from '../project/resources/test.js';
 import {
   jsonPointerSchema,
+  refinePollingSchedule,
   resourceIdSchema,
   retryPolicySchema,
   sha256Schema,
@@ -76,25 +77,7 @@ const curlPollingImportSchema = z
     minimum_interval_ms: z.number().int().positive(),
     maximum_interval_ms: z.number().int().positive(),
   })
-  .superRefine((polling, context) => {
-    if (
-      (polling.status_url_pointer === undefined) ===
-      (polling.status_url_template === undefined)
-    ) {
-      context.addIssue({
-        code: 'custom',
-        path: ['status_url_pointer'],
-        message: 'provide exactly one status URL pointer or template',
-      });
-    }
-    if (polling.minimum_interval_ms > polling.maximum_interval_ms) {
-      context.addIssue({
-        code: 'custom',
-        path: ['maximum_interval_ms'],
-        message: 'must be greater than or equal to minimum_interval_ms',
-      });
-    }
-  });
+  .superRefine(refinePollingSchedule);
 
 const agentImportRequestSchema = z.union([
   z.strictObject({

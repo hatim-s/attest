@@ -1219,7 +1219,6 @@
               "$ref": "#/$defs/HttpRequestTemplate"
             },
             "response_mode": {
-              "default": "attest_envelope",
               "enum": [
                 "attest_envelope",
                 "mapped"

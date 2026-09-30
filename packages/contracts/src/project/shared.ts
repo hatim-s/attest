@@ -1,5 +1,7 @@
 import { z } from 'zod';
 
+import { canonicalJson } from '../internal/canonical-json.js';
+
 const resourceIdSchema = z
   .string()
   .regex(/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/, 'must be a lowercase slug');
@@ -51,6 +53,44 @@ const executionDefaultsSchema = z.strictObject({
   retries: z.number().int().nonnegative().optional(),
 });
 
+type PollingSchedule = {
+  status_url_pointer?: string;
+  status_url_template?: string;
+  success_values: readonly unknown[];
+  failure_values: readonly unknown[];
+  minimum_interval_ms: number;
+  maximum_interval_ms: number;
+};
+
+/**
+ * Checks the polling rules shared by authored polling transports and cURL polling imports, so an
+ * import cannot produce an agent that later fails validation.
+ */
+const refinePollingSchedule = (polling: PollingSchedule, context: z.RefinementCtx): void => {
+  if ((polling.status_url_pointer === undefined) === (polling.status_url_template === undefined)) {
+    context.addIssue({
+      code: 'custom',
+      path: ['status_url_pointer'],
+      message: 'provide exactly one status URL pointer or template',
+    });
+  }
+  if (polling.minimum_interval_ms > polling.maximum_interval_ms) {
+    context.addIssue({
+      code: 'custom',
+      path: ['maximum_interval_ms'],
+      message: 'must be greater than or equal to minimum_interval_ms',
+    });
+  }
+  const failureValues = new Set(polling.failure_values.map((value) => canonicalJson(value)));
+  if (polling.success_values.some((value) => failureValues.has(canonicalJson(value)))) {
+    context.addIssue({
+      code: 'custom',
+      path: ['failure_values'],
+      message: 'must not overlap success_values',
+    });
+  }
+};
+
 type ExecutionDefaults = z.infer<typeof executionDefaultsSchema>;
 type SecretReference = z.infer<typeof secretReferenceSchema>;
 
@@ -59,6 +99,7 @@ export {
   executionDefaultsSchema,
   jsonPointerSchema,
   projectIdSchema,
+  refinePollingSchedule,
   relativePathSchema,
   resourceIdSchema,
   retryPolicySchema,
