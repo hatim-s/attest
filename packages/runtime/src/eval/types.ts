@@ -9,13 +9,8 @@ import type {
 
 import type { EvalHooks } from './hooks.js';
 
-import type { MetricEvaluation } from '../metrics/metric-evaluation.js';
-import type {
-  CaseEnvironment,
-  CaseEnvironmentFactory,
-  CaseExecution,
-  InvocationDiagnostics,
-} from '@attest/executor';
+import type { StoredMetricEvaluation } from '@attest/core';
+import type { CaseEnvironment, CaseEnvironmentFactory, CaseExecution } from '@attest/executor';
 
 /** Recursively marks the immutable eval-run metadata handed to execution and persistence. */
 type DeepReadonly<Value> = Value extends (...arguments_: never[]) => unknown
@@ -40,40 +35,6 @@ type ResolvedEvalPlan<Payload = unknown> = {
   cases: readonly ResolvedEvalCase<Payload>[];
 };
 
-/** Preserves one normalized transport attempt independently from runner implementation details. */
-type NormalizedEvalAttempt = {
-  attempt_index: number;
-  status: 'ok' | 'invocation_error';
-  duration_ms: number;
-  diagnostics: InvocationDiagnostics;
-  warnings: CaseExecution['warnings'];
-  raw_excerpt?: CaseExecution['attempts'][number]['rawExcerpt'];
-  error?: { code: string; message: string };
-};
-
-/** Preserves metric failure and metric infrastructure error as distinct machine states. */
-type NormalizedEvalMetricResult =
-  | {
-      metric_name: string;
-      kind: MetricEvaluation['kind'];
-      status: 'evaluated';
-      score: number;
-      pass: boolean;
-      rationale?: string;
-      details?: JsonValue;
-      judge_io?: JsonValue;
-      duration_ms?: number;
-    }
-  | {
-      metric_name: string;
-      kind: MetricEvaluation['kind'];
-      status: 'error';
-      error: { code: string; message: string; details?: JsonValue };
-      rationale?: string;
-      judge_io?: JsonValue;
-      duration_ms?: number;
-    };
-
 type EvalCaseVerdict = 'pass' | 'fail' | 'error';
 
 /** Provides the stable case-level projection consumed by events, JUnit, and result summaries. */
@@ -86,8 +47,7 @@ type NormalizedEvalCaseResult = {
   verdict: EvalCaseVerdict;
   started_at: string;
   duration_ms: number;
-  attempts: NormalizedEvalAttempt[];
-  metric_results: NormalizedEvalMetricResult[];
+  metric_results: readonly StoredMetricEvaluation[];
 };
 
 /** Captures a catastrophic per-case adapter rejection without inventing runner evidence. */
@@ -102,7 +62,7 @@ type EvalCaseRecord<Payload = unknown> =
       kind: 'executed';
       resolved_case: ResolvedEvalCase<Payload>;
       execution: CaseExecution;
-      metrics: readonly MetricEvaluation[];
+      metrics: readonly StoredMetricEvaluation[];
       normalized: NormalizedEvalCaseResult;
     }
   | {
@@ -118,12 +78,15 @@ type EvalCaseExecutionContext = {
   worker_index: number;
   environment?: CaseEnvironment;
   afterAgent?(execution: CaseExecution): Promise<void>;
-  afterEvaluation?(execution: CaseExecution, metrics: readonly MetricEvaluation[]): Promise<void>;
+  afterEvaluation?(
+    execution: CaseExecution,
+    metrics: readonly StoredMetricEvaluation[],
+  ): Promise<void>;
 };
 
 type EvalCaseRunnerResult = {
   execution: CaseExecution;
-  metrics: readonly MetricEvaluation[];
+  metrics: readonly StoredMetricEvaluation[];
   lifecycle_error?: string;
 };
 
@@ -234,9 +197,7 @@ export {
   type EvalTerminalFailureFactory,
   type ExecuteEvalOptions,
   type ImmutableEvalRun,
-  type NormalizedEvalAttempt,
   type NormalizedEvalCaseResult,
-  type NormalizedEvalMetricResult,
   type ResolvedEvalCase,
   type ResolvedEvalPlan,
 };

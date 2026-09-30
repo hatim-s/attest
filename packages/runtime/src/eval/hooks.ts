@@ -1,7 +1,7 @@
 import type { EvalRunSummary } from '@attest/contracts';
 import type { CaseEnvironment, CaseEnvironmentFactory, CaseExecution } from '@attest/executor';
 
-import type { MetricEvaluation } from '../metrics/metric-evaluation.js';
+import type { StoredMetricEvaluation } from '@attest/core';
 import { EvalCaseStageError } from './staged-runner.js';
 import type { EvalCaseRunner, ImmutableEvalRun, ResolvedEvalCase } from './types.js';
 
@@ -24,7 +24,7 @@ type EvalHookContexts<Payload> = {
   after_agent: EvalCaseHookContext<Payload> & { execution: CaseExecution };
   after_evaluation: EvalCaseHookContext<Payload> & {
     execution: CaseExecution;
-    metrics: readonly MetricEvaluation[];
+    metrics: readonly StoredMetricEvaluation[];
   };
   after_case: EvalCaseHookContext<Payload> & {
     result?: Awaited<ReturnType<EvalCaseRunner<Payload>['executeCase']>>;

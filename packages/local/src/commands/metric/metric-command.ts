@@ -4,12 +4,12 @@ import { resolve } from 'node:path';
 
 import {
   type CommandRequest,
-  type JsonValue,
   type MetricResource,
   type ProjectResources,
   type SecretReference,
 } from '@attest/contracts';
-import { evaluateMetrics, type MetricContext, type MetricEvaluation } from '@attest/runtime';
+import type { StoredMetricEvaluation } from '@attest/core';
+import { evaluateMetrics, type MetricContext } from '@attest/runtime';
 
 import { LocalError } from '../../errors/index.js';
 import { loadProject, type LoadedProject } from '../../project/project-loader/index.js';
@@ -385,7 +385,7 @@ const resolveMetricEnvironment = async (
   return { environment, secrets };
 };
 
-const withoutDuration = (evaluation: MetricEvaluation): JsonValue => {
+const withoutDuration = (evaluation: StoredMetricEvaluation): unknown => {
   const deterministic = structuredClone(evaluation);
   Reflect.deleteProperty(deterministic, 'durationMs');
   return deterministic;
@@ -440,7 +440,7 @@ const runMetricTestCommand = async (
     execEnv = resolved.environment;
     secrets = resolved.secrets;
   }
-  let evaluation: MetricEvaluation | undefined;
+  let evaluation: StoredMetricEvaluation | undefined;
   try {
     if (execDirectory !== undefined) {
       await options.cwdObserver?.(execDirectory.path);
@@ -468,7 +468,7 @@ const runMetricTestCommand = async (
       details: { evaluation: redacted },
     });
   }
-  const passed = evaluation.status === 'evaluated' ? evaluation.result.pass : false;
+  const passed = evaluation.status === 'evaluated' ? evaluation.pass : false;
   if (passed !== fixture.expected_pass) {
     throw new LocalError('metric_fixture_mismatch', 'Metric result did not match the fixture.', {
       path: metric.id,

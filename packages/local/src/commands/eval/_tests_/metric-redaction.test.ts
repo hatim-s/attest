@@ -8,12 +8,10 @@ it('redacts evidence without changing metric identity, kind, or status', () => {
       metricName: 'quality',
       kind: 'exec',
       status: 'evaluated',
-      result: {
-        score: 1,
-        pass: true,
-        rationale: 'quality evaluated exec',
-        details: { token: 'hidden', output: 'quality' },
-      },
+      score: 1,
+      pass: true,
+      rationale: 'quality evaluated exec',
+      details: { token: 'hidden', output: 'quality' },
     },
     ['quality', 'evaluated', 'exec'],
   );
@@ -21,37 +19,29 @@ it('redacts evidence without changing metric identity, kind, or status', () => {
     metricName: 'quality',
     kind: 'exec',
     status: 'evaluated',
-    result: {
-      score: 1,
-      pass: true,
-      rationale: '[REDACTED] [REDACTED] [REDACTED]',
-      details: { token: '[REDACTED]', output: '[REDACTED]' },
-    },
+    score: 1,
+    pass: true,
+    rationale: '[REDACTED] [REDACTED] [REDACTED]',
+    details: { token: '[REDACTED]', output: '[REDACTED]' },
   });
 });
 
-it('preserves error codes while redacting error messages and evidence', () => {
+it('preserves error kinds while redacting error messages and evidence', () => {
   const evaluation = redactMetricEvaluation(
     {
       metricName: 'quality',
       kind: 'exec',
       status: 'error',
-      error: {
-        code: 'exec_spawn_failed',
-        message: 'exec_spawn_failed with credential',
-        details: { diagnostic: 'credential' },
-      },
+      error: { kind: 'exec_spawn_failed', message: 'exec_spawn_failed with credential' },
+      details: { diagnostic: 'credential' },
       judgeIo: { response: 'credential' },
     },
     ['error', 'exec_spawn_failed', 'credential'],
   );
   expect(evaluation).toMatchObject({
     status: 'error',
-    error: {
-      code: 'exec_spawn_failed',
-      message: '[REDACTED] with [REDACTED]',
-      details: { diagnostic: '[REDACTED]' },
-    },
+    error: { kind: 'exec_spawn_failed', message: '[REDACTED] with [REDACTED]' },
+    details: { diagnostic: '[REDACTED]' },
     judgeIo: { response: '[REDACTED]' },
   });
 });

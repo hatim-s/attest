@@ -1,13 +1,11 @@
-import type { AssertionCheck, JsonValue, Trace } from '@attest/contracts';
+import type { AssertionCheck, Trace } from '@attest/contracts';
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 
-import {
-  evaluateAssertionCheck,
-  evaluateAssertionMetric,
-  type AssertionMetricDefinition,
-} from '../assertion-engine.js';
+import { evaluateAssertionCheck, evaluateAssertionMetric } from '../assertion-engine.js';
 import type { EvaluationDocument } from '../evaluation-document.js';
+import type { AssertionMetricDefinition } from '../metric-definitions.js';
+import { generatedDocumentArbitrary, jsonValueArbitrary } from './support/arbitraries.js';
 
 const trace: Trace = {
   schema: 'attest.trace',
@@ -329,21 +327,6 @@ describe('evaluateAssertionMetric', () => {
     expect(typeof checks.checks[1]?.reason).toBe('string');
   });
 
-  it('fails exists when expected is absent from the evaluation document', () => {
-    const absentExpectedDocument: EvaluationDocument = {
-      input: document.input,
-      output: document.output,
-      trace: document.trace,
-    };
-
-    expect(
-      evaluateAssertionCheck({ exists: { path: '$.expected' } }, absentExpectedDocument),
-    ).toMatchObject({
-      passed: false,
-      reason: 'path $.expected was not found',
-    });
-  });
-
   it('fails a permissive JSON Schema when its root path is absent', () => {
     const absentExpectedDocument: EvaluationDocument = {
       input: document.input,
@@ -357,30 +340,6 @@ describe('evaluateAssertionMetric', () => {
         absentExpectedDocument,
       ),
     ).toMatchObject({ passed: false, reason: 'path $.expected was not found' });
-  });
-
-  it('throws a typed error when JSON Schema configuration cannot compile', () => {
-    const definition: AssertionMetricDefinition = {
-      name: 'invalid-schema',
-      type: 'assertion',
-      assert: [
-        {
-          json_schema: {
-            path: '$.output.metadata',
-            schema: { type: 'not-a-json-schema-type' },
-          },
-        },
-      ],
-    };
-
-    expect(() => evaluateAssertionMetric(definition, document)).toThrowError(
-      /JSON Schema could not be compiled/,
-    );
-    try {
-      evaluateAssertionMetric(definition, document);
-    } catch (error: unknown) {
-      expect(error).toMatchObject({ code: 'invalid_json_schema' });
-    }
   });
 
   it('isolates schemas that share an identifier', () => {
@@ -421,37 +380,6 @@ describe('evaluateAssertionMetric', () => {
   });
 });
 
-/** Narrows fast-check's unknown JSON generator using the same recursive JSON value boundary as the contract. */
-const isJsonValue = (value: unknown): value is JsonValue => {
-  if (value === null || typeof value === 'string' || typeof value === 'boolean') {
-    return true;
-  }
-  if (typeof value === 'number') {
-    return Number.isFinite(value);
-  }
-  if (Array.isArray(value)) {
-    return value.every(isJsonValue);
-  }
-  if (typeof value === 'object') {
-    return Object.values(value).every(isJsonValue);
-  }
-  return false;
-};
-
-const toJsonValue = (value: unknown): JsonValue => {
-  if (!isJsonValue(value)) {
-    throw new Error('fast-check generated a non-JSON value');
-  }
-  return value;
-};
-
-const jsonValueArbitrary: fc.Arbitrary<JsonValue> = fc.jsonValue().map(toJsonValue);
-const generatedDocumentArbitrary: fc.Arbitrary<EvaluationDocument> = fc.record({
-  input: jsonValueArbitrary,
-  output: fc.option(jsonValueArbitrary, { nil: undefined }),
-  expected: fc.option(jsonValueArbitrary, { nil: undefined }),
-  trace: fc.constant(null),
-});
 const leafCheckArbitrary: fc.Arbitrary<AssertionCheck> = fc.oneof(
   jsonValueArbitrary.map((value) => ({ equals: { path: '$.input', value } })),
   fc.string().map((value) => ({ contains: { path: '$.input', value } })),

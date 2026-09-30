@@ -111,7 +111,6 @@ const recordSettledCase = async <Payload>(
         verdict: 'error',
         started_at: run.created_at,
         duration_ms: 0,
-        attempts: [],
         metric_results: [],
       },
     };

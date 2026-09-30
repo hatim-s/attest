@@ -2,11 +2,13 @@ import { performance } from 'node:perf_hooks';
 
 import { parseMetricResult, type ContractIssue, type MetricResult } from '@attest/contracts';
 
+import type { StoredMetricEvaluation } from '@attest/core';
+
 import {
-  skippedNoOutput,
-  type MetricContext,
+  evaluatedMetric,
+  metricError,
+  type CompletedMetricContext,
   type MetricErrorInfo,
-  type MetricEvaluation,
 } from './metric-evaluation.js';
 import type { ExecMetricDefinition } from './metric-definitions.js';
 import { invokeCommandMetric } from './internal/exec-command.js';
@@ -24,19 +26,6 @@ type ExecMetricOptions = {
   signal?: AbortSignal;
   timeoutMs?: number;
 };
-
-/** Produces the result union used by every exit path, preserving metric errors apart from failing scores. */
-const metricError = (
-  definition: ExecMetricDefinition,
-  error: MetricErrorInfo,
-  durationMs: number,
-): MetricEvaluation => ({
-  metricName: definition.name,
-  kind: 'exec',
-  status: 'error',
-  error,
-  durationMs,
-});
 
 /** Makes parser diagnostics renderable and diffable without relying on Zod's internal issue objects. */
 const describeContractIssues = (issues: ContractIssue[]): MetricErrorInfo['details'] => ({
@@ -80,14 +69,10 @@ const parseInvocationResult = (
  */
 const executeExecutableMetric = async (
   definition: ExecMetricDefinition,
-  context: MetricContext,
+  context: CompletedMetricContext,
   options: ExecMetricOptions = {},
-): Promise<MetricEvaluation> => {
+): Promise<StoredMetricEvaluation> => {
   const startedAt = performance.now();
-  if (context.execution.outcome !== 'completed') {
-    return skippedNoOutput(definition.name, definition.type);
-  }
-
   const transportOptions = {
     ...options,
     outputCapBytes: options.outputCapBytes ?? DEFAULT_OUTPUT_CAP_BYTES,
@@ -104,13 +89,7 @@ const executeExecutableMetric = async (
   if (!parsed.ok) {
     return metricError(definition, parsed.error, durationMs);
   }
-  return {
-    metricName: definition.name,
-    kind: 'exec',
-    status: 'evaluated',
-    result: parsed.result,
-    durationMs,
-  };
+  return evaluatedMetric(definition, parsed.result, durationMs);
 };
 
 export { executeExecutableMetric, type ExecMetricOptions };

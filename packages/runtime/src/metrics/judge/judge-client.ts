@@ -1,5 +1,7 @@
 import type { JsonValue } from '@attest/contracts';
 
+import type { JudgeVerdict } from './rubric-prompt.js';
+
 /** Describes the case-local evidence sent across the provider-agnostic judge boundary. */
 type JudgeRequest = {
   model: string;
@@ -11,9 +13,6 @@ type JudgeRequest = {
     traceSummary: string | undefined;
   };
 };
-
-/** Captures the normalized structured decision returned by a judge provider. */
-type JudgeVerdict = { score: number; rationale: string };
 
 /** Retains portable token counts when the selected provider reports them. */
 type JudgeUsage = { inputTokens?: number; outputTokens?: number };
@@ -59,5 +58,4 @@ export {
   type JudgeRecord,
   type JudgeRequest,
   type JudgeUsage,
-  type JudgeVerdict,
 };

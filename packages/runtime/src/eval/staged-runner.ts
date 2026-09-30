@@ -1,6 +1,6 @@
 import type { CaseEnvironment, CaseExecution } from '@attest/executor';
 
-import type { MetricEvaluation } from '../metrics/metric-evaluation.js';
+import type { StoredMetricEvaluation } from '@attest/core';
 import type { EvalCaseRunner, ResolvedEvalCase } from './types.js';
 
 type CaseStageContext<Payload> = {
@@ -14,7 +14,7 @@ type StagedCaseRunnerOptions<Payload> = {
   invoke(context: CaseStageContext<Payload>): Promise<CaseExecution>;
   evaluate(
     context: CaseStageContext<Payload> & { execution: CaseExecution },
-  ): Promise<readonly MetricEvaluation[]>;
+  ): Promise<readonly StoredMetricEvaluation[]>;
 };
 type EvalCaseStage = 'after_agent' | 'after_evaluation';
 
@@ -23,7 +23,7 @@ class EvalCaseStageError extends Error {
   constructor(
     readonly stage: EvalCaseStage,
     readonly execution: CaseExecution,
-    readonly metrics: readonly MetricEvaluation[],
+    readonly metrics: readonly StoredMetricEvaluation[],
     cause: unknown,
   ) {
     const detail = cause instanceof Error ? cause.message : `Eval ${stage} hook failed.`;

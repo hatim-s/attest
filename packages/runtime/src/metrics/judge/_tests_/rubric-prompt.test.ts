@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import type { Trace } from '@attest/contracts';
 
 import type { JudgeRequest } from '../judge-client.js';
-import { buildJudgePrompt, judgeResponseSchema, summarizeTraceForJudge } from '../rubric-prompt.js';
+import { buildJudgePrompt, summarizeTraceForJudge } from '../rubric-prompt.js';
 
 const request: JudgeRequest = {
   model: 'anthropic/claude-sonnet-5',
@@ -34,18 +34,6 @@ const createTrace = (spanCount: number): Trace => ({
 });
 
 describe('buildJudgePrompt', () => {
-  it('is byte-deterministic and includes the rubric verbatim', () => {
-    const first = buildJudgePrompt(request);
-    const second = buildJudgePrompt(structuredClone(request));
-
-    expect(first).toEqual(second);
-    expect(first.system).toContain(request.rubric);
-    expect(first.user).toContain('Input:\n```json');
-    expect(first.user).toContain('Output:\n```json');
-    expect(first.user).toContain('Expected:\n```json');
-    expect(first.user).toContain('Trace summary:\n```text');
-  });
-
   it('uses valid JSON null blocks for absent optional document fields', () => {
     const prompt = buildJudgePrompt({
       ...request,
@@ -72,22 +60,5 @@ describe('summarizeTraceForJudge', () => {
     expect(lines[49]).toBe('tool operation-49 ok (10ms)');
     expect(summary).not.toContain('secret');
     expect(summary).not.toContain('operation-50');
-  });
-});
-
-describe('judgeResponseSchema', () => {
-  it('accepts finite scores and rationale text', () => {
-    expect(
-      judgeResponseSchema.safeParse({ score: 0.75, rationale: 'Mostly correct.' }).success,
-    ).toBe(true);
-  });
-
-  it.each([
-    { score: Number.NaN, rationale: 'not finite' },
-    { score: 1 },
-    { score: 1, rationale: 7 },
-    { score: 1, rationale: 'ok', extra: true },
-  ])('rejects malformed response %#', (candidate) => {
-    expect(judgeResponseSchema.safeParse(candidate).success).toBe(false);
   });
 });

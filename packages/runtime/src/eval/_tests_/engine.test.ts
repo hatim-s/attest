@@ -2,7 +2,7 @@ import type { EvalRun } from '@attest/contracts';
 import { evalEventStreamSchema } from '@attest/contracts';
 import { describe, expect, it, vi } from 'vitest';
 
-import type { MetricEvaluation } from '../../metrics/metric-evaluation.js';
+import type { StoredMetricEvaluation } from '@attest/core';
 import { AgentInvocationError } from '@attest/executor';
 import type { CaseExecution } from '@attest/executor';
 import { createStagedCaseRunner } from '../staged-runner.js';
@@ -126,8 +126,8 @@ const createPlan = (
 /** Produces a normalized successful runner execution with caller-selected metric evidence. */
 const completedExecution = (
   resolvedCase: ResolvedEvalCase<string>,
-  metrics: readonly MetricEvaluation[],
-): { execution: CaseExecution; metrics: readonly MetricEvaluation[] } => ({
+  metrics: readonly StoredMetricEvaluation[],
+): { execution: CaseExecution; metrics: readonly StoredMetricEvaluation[] } => ({
   execution: {
     caseId: resolvedCase.case_id,
     suiteName: resolvedCase.test_id,
@@ -162,7 +162,7 @@ const completedExecution = (
 const failedExecution = (
   resolvedCase: ResolvedEvalCase<string>,
   outcome: 'invocation_error' | 'timeout' | 'cancelled' = 'invocation_error',
-): { execution: CaseExecution; metrics: readonly MetricEvaluation[] } => {
+): { execution: CaseExecution; metrics: readonly StoredMetricEvaluation[] } => {
   const code =
     outcome === 'timeout' ? 'timeout' : outcome === 'cancelled' ? 'cancelled' : 'network';
   const invocationError = new AgentInvocationError(code, `${resolvedCase.case_id} ${outcome}`);
@@ -198,27 +198,30 @@ const failedExecution = (
   };
 };
 
-const passingMetric = (name = 'correct'): MetricEvaluation => ({
+const passingMetric = (name = 'correct'): StoredMetricEvaluation => ({
   metricName: name,
   kind: 'assertion',
   status: 'evaluated',
-  result: { score: 1, pass: true },
+  score: 1,
+  pass: true,
   durationMs: 0,
 });
 
-const failingMetric = (name = 'correct'): MetricEvaluation => ({
+const failingMetric = (name = 'correct'): StoredMetricEvaluation => ({
   metricName: name,
   kind: 'assertion',
   status: 'evaluated',
-  result: { score: 0, pass: false, rationale: 'expected mismatch' },
+  score: 0,
+  pass: false,
+  rationale: 'expected mismatch',
   durationMs: 0,
 });
 
-const errorMetric = (name = 'correct'): MetricEvaluation => ({
+const errorMetric = (name = 'correct'): StoredMetricEvaluation => ({
   metricName: name,
   kind: 'assertion',
   status: 'error',
-  error: { code: 'internal_error', message: 'metric adapter failed' },
+  error: { kind: 'internal_error', message: 'metric adapter failed' },
   durationMs: 1,
 });
 

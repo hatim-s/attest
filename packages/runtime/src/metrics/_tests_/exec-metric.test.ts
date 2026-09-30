@@ -6,11 +6,11 @@ import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it, vi } from 'vitest';
 
-import type { MetricContext } from '../metric-evaluation.js';
+import type { CompletedMetricContext } from '../metric-evaluation.js';
 import { executeExecutableMetric } from '../exec-metric.js';
 
 /** Builds a completed execution context so every transport test shares exact request evidence. */
-const metricContext = (): MetricContext => ({
+const metricContext = (): CompletedMetricContext => ({
   caseDefinition: {
     id: 'greeting',
     input: { locale: 'en' },
@@ -102,7 +102,8 @@ describe('executeExecutableMetric command metrics', () => {
       metricName: 'fixture',
       kind: 'exec',
       status: 'evaluated',
-      result: { score: 1, pass: true },
+      score: 1,
+      pass: true,
     });
   });
 
@@ -114,7 +115,7 @@ describe('executeExecutableMetric command metrics', () => {
 
     expect(evaluation).toMatchObject({
       status: 'error',
-      error: { code: 'exec_nonzero_exit' },
+      error: { kind: 'exec_nonzero_exit' },
     });
   });
 
@@ -126,7 +127,7 @@ describe('executeExecutableMetric command metrics', () => {
 
     expect(evaluation.status).toBe('error');
     if (evaluation.status === 'error') {
-      expect(evaluation.error.code).toBe('exec_malformed_output');
+      expect(evaluation.error.kind).toBe('exec_malformed_output');
       expect(evaluation.error.message).toContain('Metric output was not valid JSON');
     }
   });
@@ -140,7 +141,7 @@ describe('executeExecutableMetric command metrics', () => {
 
     expect(evaluation.status).toBe('error');
     if (evaluation.status === 'error') {
-      expect(evaluation.error.code).toBe('exec_malformed_output');
+      expect(evaluation.error.kind).toBe('exec_malformed_output');
       expect(evaluation.error.message).toContain('512-byte');
     }
   });
@@ -153,8 +154,8 @@ describe('executeExecutableMetric command metrics', () => {
 
     expect(evaluation.status).toBe('error');
     if (evaluation.status === 'error') {
-      expect(evaluation.error.code).toBe('exec_malformed_output');
-      expect(evaluation.error.details).toMatchObject({ issues: [{ path: 'pass' }] });
+      expect(evaluation.error.kind).toBe('exec_malformed_output');
+      expect(evaluation.details).toMatchObject({ issues: [{ path: 'pass' }] });
     }
   });
 
@@ -164,7 +165,7 @@ describe('executeExecutableMetric command metrics', () => {
       metricContext(),
     );
 
-    expect(evaluation).toMatchObject({ status: 'error', error: { code: 'exec_spawn_failed' } });
+    expect(evaluation).toMatchObject({ status: 'error', error: { kind: 'exec_spawn_failed' } });
   });
 
   it('kills the process tree and reaps the direct child before resolving a timeout', async () => {
@@ -184,7 +185,7 @@ describe('executeExecutableMetric command metrics', () => {
       const processIdentifier = Number(await readFile(processIdentifierPath, 'utf8'));
 
       expect(isProcessAlive(processIdentifier)).toBe(false);
-      expect(evaluation).toMatchObject({ status: 'error', error: { code: 'exec_timeout' } });
+      expect(evaluation).toMatchObject({ status: 'error', error: { kind: 'exec_timeout' } });
       // Wait beyond the descendant's marker delay so a surviving grandchild cannot pass silently.
       await new Promise((resolve) => setTimeout(resolve, 2_000));
       await expect(access(markerPath)).rejects.toThrow();
@@ -192,19 +193,6 @@ describe('executeExecutableMetric command metrics', () => {
       await rm(directory, { recursive: true, force: true });
     }
   }, 15_000);
-
-  it('skips metrics after an incomplete case without spawning the command', async () => {
-    const context: MetricContext = {
-      ...metricContext(),
-      execution: { outcome: 'timeout', trace: null },
-    };
-    const evaluation = await executeExecutableMetric(
-      { name: 'skipped', type: 'exec', command: ['attest-missing-metric-command'] },
-      context,
-    );
-
-    expect(evaluation).toMatchObject({ status: 'error', error: { code: 'skipped_no_output' } });
-  });
 
   it('reports caller cancellation distinctly without a synthetic score', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'attest-metric-'));
@@ -223,7 +211,7 @@ describe('executeExecutableMetric command metrics', () => {
 
       expect(evaluation).toMatchObject({
         status: 'error',
-        error: { code: 'metric_cancelled', message: 'Metric execution was cancelled.' },
+        error: { kind: 'metric_cancelled', message: 'Metric execution was cancelled.' },
       });
     } finally {
       await rm(directory, { recursive: true, force: true });
@@ -257,7 +245,7 @@ describe('executeExecutableMetric HTTP metrics', () => {
         output: 'hello',
         trace: null,
       });
-      expect(evaluation).toMatchObject({ status: 'evaluated', result: { score: 0.5, pass: true } });
+      expect(evaluation).toMatchObject({ status: 'evaluated', score: 0.5, pass: true });
     } finally {
       await closeServer(server);
     }
@@ -277,7 +265,7 @@ describe('executeExecutableMetric HTTP metrics', () => {
       expect(progress.chunksWritten).toBeLessThan(100);
       expect(evaluation).toMatchObject({
         status: 'error',
-        error: { code: 'exec_malformed_output' },
+        error: { kind: 'exec_malformed_output' },
       });
       expect(evaluation.status === 'error' && evaluation.error.message).toContain('512-byte');
     } finally {
@@ -296,7 +284,7 @@ describe('executeExecutableMetric HTTP metrics', () => {
       await vi.waitFor(() => expect(progress.responseClosed).toBe(true));
 
       expect(progress.chunksWritten).toBeLessThan(100);
-      expect(evaluation).toMatchObject({ status: 'error', error: { code: 'http_bad_status' } });
+      expect(evaluation).toMatchObject({ status: 'error', error: { kind: 'http_bad_status' } });
     } finally {
       await closeServer(server);
     }
@@ -314,7 +302,7 @@ describe('executeExecutableMetric HTTP metrics', () => {
       );
       expect(evaluation).toMatchObject({
         status: 'error',
-        error: { code: 'exec_malformed_output' },
+        error: { kind: 'exec_malformed_output' },
       });
     } finally {
       await closeServer(server);
@@ -329,7 +317,7 @@ describe('executeExecutableMetric HTTP metrics', () => {
 
     expect(evaluation.status).toBe('error');
     if (evaluation.status === 'error') {
-      expect(evaluation.error.code).toBe('http_request_failed');
+      expect(evaluation.error.kind).toBe('http_request_failed');
       expect(evaluation.error.message).toContain('must use http: or https:');
     }
   });
@@ -342,6 +330,6 @@ describe('executeExecutableMetric HTTP metrics', () => {
       { name: 'refused', type: 'exec', url },
       metricContext(),
     );
-    expect(evaluation).toMatchObject({ status: 'error', error: { code: 'http_request_failed' } });
+    expect(evaluation).toMatchObject({ status: 'error', error: { kind: 'http_request_failed' } });
   });
 });
