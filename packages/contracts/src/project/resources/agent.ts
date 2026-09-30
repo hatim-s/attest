@@ -8,6 +8,7 @@ import {
   retryPolicySchema,
   secretReferenceSchema,
 } from '../shared.js';
+import { reportDuplicates } from '../../internal/duplicates.js';
 import { AGENT_RESOURCE_SCHEMA_ID } from '../../schema/identifiers.js';
 import { webSocketTransportSchema } from '../../agent/websocket-contract.js';
 
@@ -108,27 +109,6 @@ const canonicalRelativePath = (path: string): string =>
     .filter((segment) => segment.length > 0 && segment !== '.')
     .join('/');
 
-/** Reports aliased destinations that would overwrite sandbox files or host artifacts. */
-const reportDuplicateDestinations = (
-  entries: ReadonlyArray<{ destination: string }>,
-  path: 'files' | 'artifacts',
-  context: z.RefinementCtx,
-): void => {
-  const destinations = new Set<string>();
-  const label = path === 'files' ? 'file' : 'artifact';
-  entries.forEach(({ destination }, index) => {
-    const canonicalDestination = canonicalRelativePath(destination);
-    if (destinations.has(canonicalDestination)) {
-      context.addIssue({
-        code: 'custom',
-        path: [path, index, 'destination'],
-        message: `duplicate ${label} destination: ${destination}`,
-      });
-    }
-    destinations.add(canonicalDestination);
-  });
-};
-
 /** Configures an isolated Vercel sandbox for one native CLI case. */
 const vercelSandboxSchema = z
   .strictObject({
@@ -139,8 +119,21 @@ const vercelSandboxSchema = z
     artifact_directory: relativePathSchema.optional(),
   })
   .superRefine((sandbox, context) => {
-    reportDuplicateDestinations(sandbox.files, 'files', context);
-    reportDuplicateDestinations(sandbox.artifacts ?? [], 'artifacts', context);
+    // Aliased destinations would overwrite sandbox files or host artifacts.
+    reportDuplicates({
+      values: sandbox.files.map(({ destination }) => canonicalRelativePath(destination)),
+      pathFor: (index) => ['files', index, 'destination'],
+      label: 'file destination',
+      context,
+    });
+    reportDuplicates({
+      values: (sandbox.artifacts ?? []).map(({ destination }) =>
+        canonicalRelativePath(destination),
+      ),
+      pathFor: (index) => ['artifacts', index, 'destination'],
+      label: 'artifact destination',
+      context,
+    });
   });
 
 /** Compares JSON terminal values without treating object key insertion order as semantic. */

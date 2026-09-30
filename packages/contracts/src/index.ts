@@ -145,13 +145,10 @@ export {
 export type { MetricPreset, MetricPresetId } from './metric/presets.js';
 export { metricTestFixtureSchema } from './metric/test-fixture.js';
 export type { MetricTestFixture } from './metric/test-fixture.js';
-export {
-  datasetManifestEntrySchema,
-  loadedDatasetSchema,
-  projectManifestSchema,
-  projectResourcesSchema,
-} from './project/manifest.js';
-export type { LoadedDataset, ProjectManifest, ProjectResources } from './project/manifest.js';
+export { projectManifestSchema } from './project/manifest.js';
+export type { ProjectManifest } from './project/manifest.js';
+export { projectResourcesSchema } from './project/resources-snapshot.js';
+export type { ProjectResources } from './project/resources-snapshot.js';
 export {
   datasetAttachmentSchema,
   testMetricReferenceSchema,

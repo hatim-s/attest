@@ -1,5 +1,6 @@
 import { z } from 'zod';
 
+import { reportDuplicates } from '../internal/duplicates.js';
 import { TRACE_SCHEMA_ID } from '../schema/identifiers.js';
 
 const attributeValueSchema = z.union([z.string(), z.number(), z.boolean()]);
@@ -69,16 +70,11 @@ const traceSchema = z
     spans: z.array(spanSchema),
   })
   .superRefine((trace, context) => {
-    const spanIds = new Set<string>();
-    trace.spans.forEach((span, spanIndex) => {
-      if (spanIds.has(span.span_id)) {
-        context.addIssue({
-          code: 'custom',
-          path: ['spans', spanIndex, 'span_id'],
-          message: `duplicate span_id: ${span.span_id}`,
-        });
-      }
-      spanIds.add(span.span_id);
+    reportDuplicates({
+      values: trace.spans.map(({ span_id }) => span_id),
+      pathFor: (index) => ['spans', index, 'span_id'],
+      label: 'span_id',
+      context,
     });
   });
 

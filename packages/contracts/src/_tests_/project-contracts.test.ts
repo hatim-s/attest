@@ -6,11 +6,8 @@ import { testCaseSchema, type TestCase } from '../project/resources/case.js';
 import { commandRequestSchema, type CommandRequest } from '../cli/command-request.js';
 import { datasetResourceSchema, type DatasetResource } from '../project/resources/dataset.js';
 import { metricResourceSchema, type MetricResource } from '../project/resources/metric.js';
-import {
-  projectManifestSchema,
-  projectResourcesSchema,
-  type ProjectManifest,
-} from '../project/manifest.js';
+import { projectManifestSchema, type ProjectManifest } from '../project/manifest.js';
+import { projectResourcesSchema } from '../project/resources-snapshot.js';
 import { testResourceSchema, type TestResource } from '../project/resources/test.js';
 import { relativePathSchema } from '../project/shared.js';
 import { evalExecutionConfigSchema, type EvalExecutionConfig } from '../project/eval-execution.js';
