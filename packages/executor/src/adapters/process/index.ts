@@ -1,6 +1,6 @@
+export { assertLoopbackUrl } from './loopback-url.js';
 export {
   BackgroundAgentSession,
-  assertLoopbackUrl,
   startBackgroundAgent,
   type BackgroundAgentResource,
   type BackgroundSessionOptions,

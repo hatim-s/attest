@@ -1,14 +1,13 @@
-import { connect, isIP } from 'node:net';
-
 import type { AgentRequest, AgentResource } from '@attest/contracts';
 
 import { AgentInvocationError, abortedError } from '../../errors.js';
-import { abortableWait } from '../../internal/abortable-wait.js';
 import { DEFAULT_REQUEST_BYTES, DEFAULT_STDERR_BYTES } from '../../internal/agent-defaults.js';
 import type { InvocationResult } from '../../types.js';
 import { invokeMappedHttpAgent, type HttpAgentResource } from '../http/mapped-http-adapter.js';
 import { materializeStaticRequest, resolveRequestTemplate } from '../http/request-template.js';
 import { redactTransportText } from '../http/redaction.js';
+import { waitForReadiness } from './background-readiness.js';
+import { assertLoopbackUrl, loopbackHost } from './loopback-url.js';
 import { ManagedChild } from './managed-child.js';
 
 type BackgroundAgentResource = AgentResource & {
@@ -27,81 +26,6 @@ type BackgroundSessionOptions = {
 };
 
 const DEFAULT_STARTUP_MS = 10_000;
-const READINESS_INTERVAL_MS = 50;
-const READINESS_BUFFER_CHARACTERS = 16 * 1024;
-
-const loopbackHost = (hostname: string): boolean => {
-  if (hostname === 'localhost') return true;
-  if (isIP(hostname) === 4) return hostname.startsWith('127.');
-  return hostname === '::1';
-};
-
-/** Prevents a managed local process definition from becoming a general network pivot. */
-const assertLoopbackUrl = (value: string): URL => {
-  let url: URL;
-  try {
-    url = new URL(value);
-  } catch (error: unknown) {
-    throw new AgentInvocationError('network', 'Background agent URL is invalid.', { cause: error });
-  }
-  if (
-    !['http:', 'https:'].includes(url.protocol) ||
-    !loopbackHost(url.hostname) ||
-    url.username.length > 0 ||
-    url.password.length > 0 ||
-    url.hash.length > 0
-  ) {
-    throw new AgentInvocationError(
-      'network',
-      'Background agents require credential-free loopback HTTP endpoints.',
-    );
-  }
-  return url;
-};
-
-const tcpReady = (host: string, port: number, signal: AbortSignal): Promise<boolean> =>
-  new Promise((resolve) => {
-    if (!loopbackHost(host) || signal.aborted) {
-      resolve(false);
-      return;
-    }
-    const socket = connect({ host, port });
-    const finish = (ready: boolean): void => {
-      signal.removeEventListener('abort', abort);
-      socket.destroy();
-      resolve(ready);
-    };
-    const abort = (): void => finish(false);
-    signal.addEventListener('abort', abort, { once: true });
-    socket.once('connect', () => finish(true));
-    socket.once('error', () => finish(false));
-  });
-
-const httpReady = async (endpoint: URL, signal: AbortSignal): Promise<boolean> => {
-  try {
-    const response = await fetch(endpoint, { redirect: 'manual', signal });
-    await response.body?.cancel().catch(() => undefined);
-    return response.status >= 200 && response.status < 300;
-  } catch {
-    return false;
-  }
-};
-
-type PolledReadiness = Exclude<
-  BackgroundAgentResource['transport']['readiness'],
-  { kind: 'stderr' }
->;
-
-/** Builds the connection probe for HTTP or TCP readiness, validating the target once. */
-const readinessProbe = (
-  readiness: PolledReadiness,
-): ((signal: AbortSignal) => Promise<boolean>) => {
-  if (readiness.kind === 'tcp') {
-    return (signal) => tcpReady(readiness.host, readiness.port, signal);
-  }
-  const endpoint = assertLoopbackUrl(readiness.url);
-  return (signal) => httpReady(endpoint, signal);
-};
 
 /** Owns one background service from readiness through graceful shutdown and tree cleanup. */
 class BackgroundAgentSession {
@@ -167,72 +91,15 @@ class BackgroundAgentSession {
     };
   }
 
-  private async waitForReadiness(): Promise<void> {
-    const startupSignal = AbortSignal.any([
-      this.runController.signal,
-      AbortSignal.timeout(this.agent.timeouts?.connect_ms ?? DEFAULT_STARTUP_MS),
-    ]);
-    const readiness = this.agent.transport.readiness;
-    if (readiness.kind === 'stderr') {
-      let pattern: RegExp;
-      try {
-        pattern = new RegExp(readiness.pattern, 'u');
-      } catch (error: unknown) {
-        throw new AgentInvocationError(
-          'invalid_envelope',
-          'Background readiness regex is invalid.',
-          { cause: error },
-        );
-      }
-      let retained = this.process.stderrExcerpt() ?? '';
-      if (pattern.test(retained)) return;
-      await new Promise<void>((resolve, reject) => {
-        let settled = false;
-        const abort = (): void =>
-          finish(() => reject(abortedError(this.options.signal, 'Background agent startup')));
-        const data = (chunk: Buffer): void => {
-          retained = `${retained}${chunk.toString('utf8')}`.slice(-READINESS_BUFFER_CHARACTERS);
-          if (pattern.test(retained)) finish(resolve);
-        };
-        const finish = (operation: () => void): void => {
-          if (settled) return;
-          settled = true;
-          startupSignal.removeEventListener('abort', abort);
-          this.process.stderr.off('data', data);
-          operation();
-        };
-        void this.process.exit.then(({ code, signal }) =>
-          finish(() =>
-            reject(
-              new AgentInvocationError(
-                'nonzero_exit',
-                `Background agent exited before stderr readiness (code ${String(code)}, signal ${String(signal)}).`,
-              ),
-            ),
-          ),
-        );
-        startupSignal.addEventListener('abort', abort, { once: true });
-        this.process.stderr.on('data', data);
-        if (startupSignal.aborted) abort();
-      });
-      return;
-    }
-
-    const probe = readinessProbe(readiness);
-    for (;;) {
-      if (startupSignal.aborted)
-        throw abortedError(this.options.signal, 'Background agent startup');
-      if (!this.process.running) {
-        throw new AgentInvocationError(
-          'nonzero_exit',
-          'Background agent exited before becoming ready.',
-        );
-      }
-      if (await probe(startupSignal)) return;
-      await abortableWait(READINESS_INTERVAL_MS, startupSignal, () =>
-        abortedError(this.options.signal, 'Background agent startup'),
-      );
-    }
+  private waitForReadiness(): Promise<void> {
+    return waitForReadiness(this.agent.transport.readiness, {
+      process: this.process,
+      signal: AbortSignal.any([
+        this.runController.signal,
+        AbortSignal.timeout(this.agent.timeouts?.connect_ms ?? DEFAULT_STARTUP_MS),
+      ]),
+      abortError: () => abortedError(this.options.signal, 'Background agent startup'),
+    });
   }
 
   /** Invokes the ready service through the existing mapped HTTP retry and evidence boundary. */
@@ -322,7 +189,6 @@ const startBackgroundAgent = (
 
 export {
   BackgroundAgentSession,
-  assertLoopbackUrl,
   startBackgroundAgent,
   type BackgroundAgentResource,
   type BackgroundSessionOptions,
