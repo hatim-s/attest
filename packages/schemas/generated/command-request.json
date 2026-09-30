@@ -2627,7 +2627,7 @@
       "type": "object"
     },
     {
-      "anyOf": [
+      "oneOf": [
         {
           "additionalProperties": false,
           "properties": {
@@ -2670,8 +2670,8 @@
             "schema",
             "command",
             "source",
-            "source_type",
-            "as"
+            "as",
+            "source_type"
           ],
           "type": "object"
         },
@@ -2963,8 +2963,8 @@
             "schema",
             "command",
             "source",
-            "source_type",
             "as",
+            "source_type",
             "extraction"
           ],
           "type": "object"

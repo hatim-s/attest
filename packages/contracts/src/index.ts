@@ -123,8 +123,10 @@ export type {
   CliSuccessResult,
   CliWarning,
 } from './cli/protocol.js';
-export { caseImportOptionsSchema, commandRequestSchema } from './cli/command-request.js';
-export type { CaseImportOptions, CommandRequest } from './cli/command-request.js';
+export { commandRequestSchema } from './cli/command-request.js';
+export type { CommandRequest } from './cli/command-request.js';
+export { caseImportOptionsSchema } from './cli/command-request/test.js';
+export type { CaseImportOptions } from './cli/command-request/test.js';
 export {
   datasetImportDestinationSchema,
   datasetImportMappingSchema,
