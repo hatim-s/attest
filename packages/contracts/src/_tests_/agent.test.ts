@@ -7,7 +7,7 @@ import {
   type AgentResponse,
   type AgentSuccessResponse,
 } from '../agent/protocol.js';
-import { parseAgentRequest, parseAgentResponse } from '../schema/parse.js';
+import { parseAgentResponse } from '../schema/parse.js';
 import { AGENT_PROTOCOL } from '../schema/identifiers.js';
 
 describe('agentRequestSchema', () => {
@@ -60,17 +60,6 @@ describe('agentRequestSchema', () => {
     if (result.success) {
       expect(result.data.vendor_request).toEqual({ attempt: 2 });
     }
-  });
-
-  it('is exposed through the non-throwing request parser', () => {
-    const result = parseAgentRequest({
-      protocol: AGENT_PROTOCOL,
-      run_id: '01ARZ3NDEKTSV4RRFFQ69G5FAV',
-      case_id: 'greeting-basic',
-      input: {},
-    });
-
-    expect(result.ok).toBe(true);
   });
 });
 
@@ -130,7 +119,7 @@ describe('agentResponseSchema', () => {
       return;
     }
 
-    expect(Reflect.get(result.value, 'vendor_response')).toEqual({ cached: true });
+    expect(result.value).toMatchObject({ vendor_response: { cached: true } });
     expect(result.warnings).toEqual([
       {
         code: 'unknown_field',

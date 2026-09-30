@@ -3,7 +3,6 @@ import type { z } from 'zod';
 import {
   agentRequestSchema,
   agentResponseSchema,
-  agentResponseValueSchema,
   type AgentRequest,
   type AgentResponse,
 } from '../agent/protocol.js';
@@ -16,14 +15,13 @@ import {
 } from '../metric/protocol.js';
 import { err, ok, type Result } from '../result.js';
 import { traceSchema, type Trace } from '../trace/protocol.js';
-
-const AGENT_RESPONSE_FIELDS = new Set(['protocol', 'output', 'error', 'state', 'trace']);
+import { type WarningCode } from '../eval/execution.js';
 
 /** Describes a recoverable extension or optional-payload problem. */
 type ContractWarning = {
   path: string;
   message: string;
-  code: 'unknown_field' | 'invalid_trace';
+  code: WarningCode;
 };
 
 /** Reports successful parsing and recoverable warnings without conflating them with errors. */
@@ -49,11 +47,11 @@ const reportUnknownAgentResponseFields = (candidate: unknown): ContractWarning[]
   }
 
   return Object.keys(candidate)
-    .filter((fieldName) => !AGENT_RESPONSE_FIELDS.has(fieldName))
+    .filter((fieldName) => !Object.hasOwn(agentResponseSchema.shape, fieldName))
     .map((fieldName) => ({
       path: fieldName,
       message: `unknown top-level response field preserved: ${fieldName}`,
-      code: 'unknown_field' as const,
+      code: 'unknown_field',
     }));
 };
 
@@ -63,86 +61,51 @@ const reportInvalidTrace = (issues: ContractIssue[]): ContractWarning => ({
   code: 'invalid_trace',
 });
 
-const reportAgentOutcomeIssue = (candidate: unknown): ContractIssue[] | undefined => {
-  if (candidate === null || typeof candidate !== 'object' || Array.isArray(candidate)) {
-    return undefined;
-  }
-
-  const outcomeCount = ['output', 'error'].filter((fieldName) =>
-    Object.hasOwn(candidate, fieldName),
-  ).length;
-  if (outcomeCount === 1) {
-    return undefined;
-  }
-
-  return [{ path: 'output', message: 'exactly one of output or error must be present' }];
-};
-
-const omitUnvalidatedTrace = <T extends { trace?: unknown }>(response: T): Omit<T, 'trace'> => {
-  const responseWithoutTrace = { ...response };
-  delete responseWithoutTrace.trace;
-  return responseWithoutTrace;
-};
-
-/** Validates an agent request against docs/specs/agent-contract.md without throwing. */
+/**
+ * Validates an agent request without throwing, so transports can report contract issues as data.
+ */
 const parseAgentRequest = (candidate: unknown): Result<AgentRequest, ContractIssue[]> =>
   parseWithSchema(agentRequestSchema, candidate);
 
 /**
- * Validates an agent response while degrading malformed optional traces into warnings.
+ * Validates an agent response without throwing. The trace is optional evidence, so a malformed
+ * trace is dropped with a warning instead of failing an otherwise usable response.
  */
 const parseAgentResponse = (candidate: unknown): ParseReport<AgentResponse> => {
   const warnings = reportUnknownAgentResponseFields(candidate);
-  const parsedEnvelope = agentResponseSchema.safeParse(candidate);
-  if (!parsedEnvelope.success) {
+  const parsed = agentResponseSchema.safeParse(candidate);
+  if (!parsed.success) {
+    return { ok: false, errors: formatContractIssues(parsed.error.issues), warnings };
+  }
+
+  const { trace, ...fields } = parsed.data;
+  // The schema refinement guarantees exactly one of output or error.
+  const response = fields as AgentResponse;
+  if (trace === undefined) {
+    return { ok: true, value: response, warnings };
+  }
+
+  const parsedTrace = parseTrace(trace);
+  if (!parsedTrace.ok) {
     return {
-      ok: false,
-      errors:
-        reportAgentOutcomeIssue(candidate) ?? formatContractIssues(parsedEnvelope.error.issues),
-      warnings,
+      ok: true,
+      value: response,
+      warnings: [...warnings, reportInvalidTrace(parsedTrace.error)],
     };
   }
 
-  const response = omitUnvalidatedTrace(parsedEnvelope.data);
-  const hasTrace =
-    candidate !== null &&
-    typeof candidate === 'object' &&
-    !Array.isArray(candidate) &&
-    Object.hasOwn(candidate, 'trace');
-  if (!hasTrace) {
-    const parsedValue = agentResponseValueSchema.safeParse(response);
-    if (!parsedValue.success) {
-      return { ok: false, errors: formatContractIssues(parsedValue.error.issues), warnings };
-    }
-
-    const value: AgentResponse = { ...response, ...parsedValue.data };
-    return { ok: true, value, warnings };
-  }
-
-  const parsedTrace = parseTrace(Reflect.get(candidate, 'trace'));
-  if (!parsedTrace.ok) {
-    warnings.push(reportInvalidTrace(parsedTrace.error));
-  }
-
-  const trace = parsedTrace.ok ? parsedTrace.value : undefined;
-  const parsedValue = agentResponseValueSchema.safeParse({ ...response, trace });
-  if (!parsedValue.success) {
-    return { ok: false, errors: formatContractIssues(parsedValue.error.issues), warnings };
-  }
-
-  const value: AgentResponse = { ...response, ...parsedValue.data };
-  return { ok: true, value, warnings };
+  return { ok: true, value: { ...response, trace: parsedTrace.value }, warnings };
 };
 
-/** Validates and losslessly parses docs/specs/trace-schema.md documents without throwing. */
+/** Validates a trace document without throwing; extension fields are preserved. */
 const parseTrace = (candidate: unknown): Result<Trace, ContractIssue[]> =>
   parseWithSchema(traceSchema, candidate);
 
-/** Validates executable metric requests from docs/specs/metric-contract.md without throwing. */
+/** Validates an executable metric request without throwing. */
 const parseMetricRequest = (candidate: unknown): Result<MetricRequest, ContractIssue[]> =>
   parseWithSchema(metricRequestSchema, candidate);
 
-/** Validates docs/specs/metric-contract.md result envelopes without throwing. */
+/** Validates a metric result envelope without throwing. */
 const parseMetricResult = (candidate: unknown): Result<MetricResult, ContractIssue[]> =>
   parseWithSchema(metricResultSchema, candidate);
 
