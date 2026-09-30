@@ -1,72 +1,43 @@
-import type { AgentRequest } from '@attest/contracts';
+import type { AgentRequest, RawExcerpt } from '@attest/contracts';
 import { createHash } from 'node:crypto';
 
 import { AgentInvocationError } from './errors.js';
 import { startTimer } from './internal/elapsed.js';
+import { createFailedAttempt } from './internal/failed-attempt.js';
 import { appendEvidencePrefix, createRawExcerpt } from './internal/raw-excerpt.js';
 import type { InvocationAttempt, InvokeOptions, NativeAgentTarget } from './types.js';
 
 const HTTP_SUCCESS_STATUS = 200;
 
-const createInvocationErrorAttempt = (
-  error: AgentInvocationError,
-  durationMs: number,
-  httpStatus?: number,
-  rawExcerpt?: InvocationAttempt['rawExcerpt'],
-): InvocationAttempt => ({
-  status: 'invocation_error',
-  error,
-  diagnostics: { httpStatus },
-  durationMs,
-  ...(rawExcerpt === undefined ? {} : { rawExcerpt }),
-  warnings: [],
-});
-
-const cancelReader = async (reader: ReadableStreamDefaultReader<Uint8Array>): Promise<void> => {
+/** Cancels an abandoned body; a failed cancellation cannot change the failure already classified. */
+const swallowCancel = async (cancellation: Promise<void> | undefined): Promise<void> => {
   try {
-    await reader.cancel();
+    await cancellation;
   } catch {
-    // A failed cancellation does not change the transport failure already classified.
+    // The transport outcome is already decided.
   }
 };
 
-const cancelResponseBody = async (response: Response): Promise<void> => {
-  if (response.body === null) {
-    return;
-  }
-
-  try {
-    await response.body.cancel();
-  } catch {
-    // A failed cancellation does not change the transport failure already classified.
-  }
-};
-
-type CappedJson = { raw: unknown; rawExcerpt: NonNullable<InvocationAttempt['rawExcerpt']> };
-
-type BodyReadFailure = {
-  error: AgentInvocationError;
-  rawExcerpt?: InvocationAttempt['rawExcerpt'];
-};
+type CappedJson =
+  | { ok: true; raw: unknown; rawExcerpt: RawExcerpt }
+  | { ok: false; error: AgentInvocationError; rawExcerpt?: RawExcerpt };
 
 /** Creates cap evidence that is always marked truncated and hashes every byte received so far. */
 const createCappedRawExcerpt = (
   evidenceChunks: readonly Uint8Array[],
   evidenceByteCount: number,
   digest: string,
-): NonNullable<InvocationAttempt['rawExcerpt']> => ({
+): RawExcerpt => ({
   ...createRawExcerpt(Buffer.concat(evidenceChunks, evidenceByteCount).toString('utf8')),
   truncated: true,
   sha256: digest,
 });
 
-const readCappedJson = async (
-  response: Response,
-  outputCapBytes: number,
-): Promise<CappedJson | BodyReadFailure> => {
+const readCappedJson = async (response: Response, outputCapBytes: number): Promise<CappedJson> => {
   const reader = response.body?.getReader();
   if (reader === undefined) {
     return {
+      ok: false,
       error: new AgentInvocationError(
         'invalid_envelope',
         'HTTP agent response body is not valid JSON.',
@@ -92,8 +63,9 @@ const readCappedJson = async (
       evidenceByteCount = appendEvidencePrefix(evidenceChunks, evidenceByteCount, value);
       if (byteCount > outputCapBytes) {
         // Cancel immediately so an unbounded response is not fully downloaded before rejection.
-        await cancelReader(reader);
+        await swallowCancel(reader.cancel());
         return {
+          ok: false,
           error: new AgentInvocationError(
             'output_cap_exceeded',
             `HTTP agent response exceeds the ${outputCapBytes}-byte output cap.`,
@@ -115,9 +87,10 @@ const readCappedJson = async (
   const rawExcerpt = createRawExcerpt(payload);
 
   try {
-    return { raw: JSON.parse(payload) as unknown, rawExcerpt };
+    return { ok: true, raw: JSON.parse(payload) as unknown, rawExcerpt };
   } catch (error) {
     return {
+      ok: false,
       error: new AgentInvocationError(
         'invalid_envelope',
         'HTTP agent response body is not valid JSON.',
@@ -193,22 +166,20 @@ const invokeHttpAgent = async (
 
     if (response.status !== HTTP_SUCCESS_STATUS) {
       // Status is authoritative at header receipt; body size and read failures cannot reclassify it.
-      void cancelResponseBody(response);
-      return createInvocationErrorAttempt(
+      void swallowCancel(response.body?.cancel());
+      return createFailedAttempt(
         new AgentInvocationError('http_status', `HTTP agent returned status ${response.status}.`),
-        duration(),
-        response.status,
+        { diagnostics: { httpStatus: response.status }, durationMs: duration() },
       );
     }
 
     const parsed = await readCappedJson(response, options.outputCapBytes);
-    if ('error' in parsed) {
-      return createInvocationErrorAttempt(
-        parsed.error,
-        duration(),
-        response.status,
-        parsed.rawExcerpt,
-      );
+    if (!parsed.ok) {
+      return createFailedAttempt(parsed.error, {
+        diagnostics: { httpStatus: response.status },
+        durationMs: duration(),
+        rawExcerpt: parsed.rawExcerpt,
+      });
     }
 
     return {
@@ -220,11 +191,10 @@ const invokeHttpAgent = async (
       warnings: [],
     };
   } catch (error) {
-    return createInvocationErrorAttempt(
-      classifyFetchFailure(error, options),
-      duration(),
-      httpStatus,
-    );
+    return createFailedAttempt(classifyFetchFailure(error, options), {
+      diagnostics: httpStatus === undefined ? {} : { httpStatus },
+      durationMs: duration(),
+    });
   }
 };
 

@@ -51,12 +51,11 @@ const openWebSocketHandshake = async (
 
   const httpUrl = new URL(webSocketUrl);
   httpUrl.protocol = webSocketUrl.protocol === 'wss:' ? 'https:' : 'http:';
-  const resolved = await resolveSafeHttpUrl(
-    httpUrl.toString(),
-    options.openTimeoutMs,
-    options.signal,
-    options.callerSignal,
-  );
+  const resolved = await resolveSafeHttpUrl(httpUrl.toString(), {
+    timeoutMs: options.openTimeoutMs,
+    signal: options.signal,
+    callerSignal: options.callerSignal,
+  });
   if (options.secrets.length > 0 && webSocketUrl.protocol !== 'wss:' && !resolved.loopback) {
     throw new AgentInvocationError(
       'network',

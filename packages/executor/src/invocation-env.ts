@@ -1,19 +1,6 @@
 import { AGENT_PROTOCOL } from '@attest/contracts';
 import { delimiter, isAbsolute, join } from 'node:path';
 
-const copyPresentEnvironmentKeys = (
-  destination: Record<string, string>,
-  keys: readonly string[],
-  base: NodeJS.ProcessEnv,
-): void => {
-  for (const key of keys) {
-    const value = base[key];
-    if (value !== undefined) {
-      destination[key] = value;
-    }
-  }
-};
-
 /** Removes relative and empty search entries so executable lookup cannot escape the opted-in host path. */
 const resolveSafePath = (parentPath: string | undefined): string => {
   return (parentPath ?? '')
@@ -27,7 +14,7 @@ const resolveSafePath = (parentPath: string | undefined): string => {
  * temporary state default beneath the attempt directory; only explicit allowlisting can replace them.
  */
 const resolveInvocationEnv = (
-  allowlist: readonly string[] | undefined,
+  allowlist: readonly string[],
   parentEnv: NodeJS.ProcessEnv,
   attest: { runId: string; caseId: string },
   attemptDirectory: string,
@@ -38,7 +25,10 @@ const resolveInvocationEnv = (
     TMPDIR: join(attemptDirectory, 'tmp'),
     LC_ALL: 'C',
   };
-  copyPresentEnvironmentKeys(environment, allowlist ?? [], parentEnv);
+  for (const key of allowlist) {
+    const value = parentEnv[key];
+    if (value !== undefined) environment[key] = value;
+  }
   environment.ATTEST_RUN_ID = attest.runId;
   environment.ATTEST_CASE_ID = attest.caseId;
   environment.ATTEST_PROTOCOL = AGENT_PROTOCOL;

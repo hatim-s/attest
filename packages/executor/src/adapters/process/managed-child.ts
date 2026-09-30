@@ -1,4 +1,6 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import type { Readable } from 'node:stream';
+
 import { AgentInvocationError } from '../../errors.js';
 import {
   identityKey,
@@ -18,7 +20,7 @@ type ProcessExit = { code: number | null; signal: NodeJS.Signals | null };
 
 /** Owns one detached process group and bounded stderr evidence for a run-scoped adapter. */
 class ManagedChild {
-  readonly child: ChildProcessWithoutNullStreams;
+  private readonly child: ChildProcessWithoutNullStreams;
   readonly exit: Promise<ProcessExit>;
   private readonly stderrChunks: Buffer[] = [];
   private stderrBytes = 0;
@@ -72,6 +74,26 @@ class ManagedChild {
     // Later process errors are represented by stream/exit state and must not become uncaught events.
     child.on('error', () => undefined);
     return managed;
+  }
+
+  /** Agent stdout, where run-scoped adapters read protocol frames. */
+  get stdout(): Readable {
+    return this.child.stdout;
+  }
+
+  /** Agent stderr, for readiness patterns; bounded evidence is kept separately. */
+  get stderr(): Readable {
+    return this.child.stderr;
+  }
+
+  /** Exit code after a normal exit; null while running or after a signal. */
+  get exitCode(): number | null {
+    return this.child.exitCode;
+  }
+
+  /** False once the process exited or was killed by a signal. */
+  get running(): boolean {
+    return this.child.exitCode === null && this.child.signalCode === null;
   }
 
   /** Writes one complete protocol frame while making backpressure cancellation-safe. */
@@ -144,7 +166,7 @@ class ManagedChild {
     return killProcessTree(this.child, {
       graceMs,
       initialDescendants: this.descendants,
-      signalProcessGroup: this.child.exitCode === null && this.child.signalCode === null,
+      signalProcessGroup: this.running,
     });
   }
 }

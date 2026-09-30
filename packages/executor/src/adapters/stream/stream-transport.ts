@@ -2,12 +2,7 @@ import { request as httpRequest, type IncomingMessage } from 'node:http';
 import { request as httpsRequest } from 'node:https';
 import { isDeepStrictEqual } from 'node:util';
 
-import {
-  AGENT_PROTOCOL,
-  type AgentRequest,
-  type AgentResponse,
-  type JsonValue,
-} from '@attest/contracts';
+import { AGENT_PROTOCOL, type AgentRequest, type JsonValue } from '@attest/contracts';
 
 import { AgentInvocationError, abortedError } from '../../errors.js';
 import {
@@ -27,6 +22,9 @@ import { redactEventEvidence, redactTransportText } from '../http/redaction.js';
 import { parseRetryAfter } from '../http/retry-after.js';
 import { resolveSafeHttpUrl } from '../http/url-security.js';
 import { SseParser, type StreamEvent } from './sse-parser.js';
+
+/** A terminal event mapped onto a native envelope; the adapter validates it before use. */
+type CandidateResponse = Record<string, unknown>;
 import type { StreamAgentResource, StreamInvokeOptions } from './stream-adapter.js';
 
 /** Reads one HTTP stream with separate transport/application idle clocks and hard event caps. */
@@ -36,8 +34,8 @@ const consumeResponse = async (
   signal: AbortSignal,
   callerSignal: AbortSignal | undefined,
   secrets: readonly string[],
-  onEvent: (event: StreamEvent) => AgentResponse | undefined,
-): Promise<{ response: AgentResponse; evidence: string; applicationStarted: boolean }> =>
+  onEvent: (event: StreamEvent) => CandidateResponse | undefined,
+): Promise<{ response: CandidateResponse; evidence: string; applicationStarted: boolean }> =>
   new Promise((resolve, reject) => {
     const transport = agent.transport;
     const maximumEventBytes = agent.limits?.event_bytes ?? DEFAULT_EVENT_BYTES;
@@ -116,7 +114,7 @@ const consumeResponse = async (
       )}\n`;
       applicationStarted = true;
       resetApplicationIdle();
-      let terminal: AgentResponse | undefined;
+      let terminal: CandidateResponse | undefined;
       try {
         terminal = onEvent(event);
       } catch (error: unknown) {
@@ -255,17 +253,16 @@ const streamOnce = async (
   signal: AbortSignal,
   options: StreamInvokeOptions,
 ): Promise<{
-  response: AgentResponse;
+  response: CandidateResponse;
   evidence: string;
   applicationStarted: boolean;
   status: number;
 }> => {
-  const resolved = await resolveSafeHttpUrl(
-    materialized.url,
-    agent.timeouts?.connect_ms ?? DEFAULT_CONNECT_MS,
+  const resolved = await resolveSafeHttpUrl(materialized.url, {
+    timeoutMs: agent.timeouts?.connect_ms ?? DEFAULT_CONNECT_MS,
     signal,
-    options.signal,
-  );
+    callerSignal: options.signal,
+  });
   if (
     (options.secrets?.length ?? 0) > 0 &&
     resolved.url.protocol !== 'https:' &&
@@ -365,7 +362,12 @@ const streamOnce = async (
                   );
                 incrementalText += chunk;
               } else {
-                incrementalArray.push(chunk as JsonValue);
+                if (!isJsonValue(chunk))
+                  throw new AgentInvocationError(
+                    'invalid_envelope',
+                    'Streaming array accumulation requires JSON chunks.',
+                  );
+                incrementalArray.push(chunk);
               }
             }
             const terminal = readJsonPointer(payload, agent.transport.terminal_pointer);
@@ -386,7 +388,7 @@ const streamOnce = async (
                 protocol: AGENT_PROTOCOL,
                 error: extractRemoteError(error, 'The streaming agent reported an error.'),
                 ...(trace === undefined ? {} : { trace }),
-              } as AgentResponse;
+              };
             }
             const extracted = readJsonPointer(payload, agent.transport.result_pointer);
             const output =
@@ -404,7 +406,7 @@ const streamOnce = async (
               protocol: AGENT_PROTOCOL,
               output,
               ...(trace === undefined ? {} : { trace }),
-            } as AgentResponse;
+            };
           },
         ).then(
           (completed) => finish(() => resolve({ ...completed, status })),

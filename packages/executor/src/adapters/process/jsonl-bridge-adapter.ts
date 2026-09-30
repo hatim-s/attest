@@ -39,7 +39,7 @@ type JsonlBridgeSessionOptions = {
 
 type PendingInvocation = {
   cancelled: boolean;
-  cancellationCode?: 'cancelled' | 'timeout';
+  cancellationCode?: CancellationCode;
   cancellationTimer?: NodeJS.Timeout;
   callerAbort?: () => void;
   duration: () => number;
@@ -48,6 +48,16 @@ type PendingInvocation = {
   signal?: AbortSignal;
   timeoutTimer: NodeJS.Timeout;
 };
+
+type CancellationCode = 'cancelled' | 'timeout';
+
+/** Reports a request that attest stopped, either on caller cancellation or on its deadline. */
+const cancellationError = (code: CancellationCode, cause?: unknown): AgentInvocationError =>
+  new AgentInvocationError(
+    code,
+    code === 'timeout' ? 'JSONL bridge request timed out.' : 'JSONL bridge request was cancelled.',
+    cause === undefined ? {} : { cause },
+  );
 
 /** Runs one persistent, correlated native-agent JSONL bridge for exactly one eval run. */
 class JsonlBridgeSession {
@@ -69,8 +79,8 @@ class JsonlBridgeSession {
     private readonly options: JsonlBridgeSessionOptions,
   ) {
     this.secrets = options.secrets ?? [];
-    process.child.stdout.on('data', (chunk: Buffer) => this.consume(chunk));
-    process.child.stdout.once('end', () => this.consumeEnd());
+    process.stdout.on('data', (chunk: Buffer) => this.consume(chunk));
+    process.stdout.once('end', () => this.consumeEnd());
     void process.exit.then(({ code, signal }) => {
       if (this.closed) return;
       const error =
@@ -126,10 +136,7 @@ class JsonlBridgeSession {
     if (this.closed)
       return this.failure(new AgentInvocationError('network', 'JSONL bridge is closed.'), 0);
     if (signal?.aborted === true) {
-      return this.failure(
-        new AgentInvocationError('cancelled', 'JSONL bridge request was cancelled.'),
-        0,
-      );
+      return this.failure(cancellationError('cancelled'), 0);
     }
     const requestId = correlationId('req', request, ++this.sequence);
     const frame = { type: 'request', request_id: requestId, request } as const;
@@ -294,12 +301,7 @@ class JsonlBridgeSession {
       this.settle(
         parsed.data.request_id,
         this.failure(
-          new AgentInvocationError(
-            pending.cancellationCode ?? 'cancelled',
-            pending.cancellationCode === 'timeout'
-              ? 'JSONL bridge request timed out.'
-              : 'JSONL bridge request was cancelled.',
-          ),
+          cancellationError(pending.cancellationCode ?? 'cancelled'),
           pending.duration(),
           line,
         ),
@@ -310,12 +312,7 @@ class JsonlBridgeSession {
       this.settle(
         parsed.data.request_id,
         this.failure(
-          new AgentInvocationError(
-            pending.cancellationCode ?? 'cancelled',
-            pending.cancellationCode === 'timeout'
-              ? 'JSONL bridge request timed out.'
-              : 'JSONL bridge request was cancelled.',
-          ),
+          cancellationError(pending.cancellationCode ?? 'cancelled'),
           pending.duration(),
           line,
         ),
@@ -351,7 +348,7 @@ class JsonlBridgeSession {
     this.settle(parsed.data.request_id, { ...attempt, attempts: [attempt] });
   }
 
-  private async cancel(requestId: string, code: 'cancelled' | 'timeout'): Promise<void> {
+  private async cancel(requestId: string, code: CancellationCode): Promise<void> {
     const pending = this.pending.get(requestId);
     if (pending === undefined || pending.cancelled) return;
     pending.cancelled = true;
@@ -375,24 +372,12 @@ class JsonlBridgeSession {
 
   private fallbackAfterCancellation(
     requestId: string,
-    code: 'cancelled' | 'timeout',
+    code: CancellationCode,
     cause?: unknown,
   ): void {
     const pending = this.pending.get(requestId);
     if (pending !== undefined) {
-      this.settle(
-        requestId,
-        this.failure(
-          new AgentInvocationError(
-            code,
-            code === 'timeout'
-              ? 'JSONL bridge request timed out.'
-              : 'JSONL bridge request was cancelled.',
-            { cause },
-          ),
-          pending.duration(),
-        ),
-      );
+      this.settle(requestId, this.failure(cancellationError(code, cause), pending.duration()));
     }
     this.failSession(
       new AgentInvocationError(
@@ -443,12 +428,7 @@ class JsonlBridgeSession {
     for (const [requestId, pending] of this.pending) {
       const requestError =
         pending.cancelled && pending.cancellationCode !== undefined
-          ? new AgentInvocationError(
-              pending.cancellationCode,
-              pending.cancellationCode === 'timeout'
-                ? 'JSONL bridge request timed out.'
-                : 'JSONL bridge request was cancelled.',
-            )
+          ? cancellationError(pending.cancellationCode)
           : error;
       this.settle(requestId, this.failure(requestError, pending.duration()));
     }

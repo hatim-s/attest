@@ -2,7 +2,6 @@ import {
   AGENT_PROTOCOL,
   webSocketTransportSchema,
   type AgentRequest,
-  type AgentResponse,
   type WebSocketErrorClassification,
 } from '@attest/contracts';
 
@@ -21,13 +20,9 @@ import {
 import {
   beginRetry,
   clearPendingTimers,
-  countMessage,
-  createFailureAttempt,
-  createFailureResult,
+  createEvidenceRecorder,
   createPendingInvocation,
-  createSuccessResult,
-  recordClose,
-  recordEvent,
+  type EvidenceRecorder,
   type PendingInvocation,
 } from './websocket-evidence.js';
 import {
@@ -64,6 +59,7 @@ class WebSocketAgentSession {
   private readonly lifecycleController = new AbortController();
   private readonly pending = new Map<string, PendingInvocation>();
   private readonly secrets: readonly string[];
+  private readonly evidence: EvidenceRecorder;
   private closePromise?: Promise<void>;
   private closed = false;
   private connection?: WebSocketConnection;
@@ -80,6 +76,7 @@ class WebSocketAgentSession {
   ) {
     this.headers = materializeHeaders(agent, options.headers ?? {});
     this.secrets = options.secrets ?? [];
+    this.evidence = createEvidenceRecorder(agent, this.secrets);
     if (agent.timeouts?.run_ms !== undefined) {
       this.runTimer = setTimeout(() => {
         this.failRun(new AgentInvocationError('timeout', 'WebSocket run timed out.'));
@@ -132,26 +129,22 @@ class WebSocketAgentSession {
     const attempts: InvocationAttempt[] = [];
     for (let retry = 0; ; retry += 1) {
       const requestId = correlationId('ws', request, ++this.sequence);
-      const result = await this.runPerCaseAttempt(request, requestId, signal);
-      const acknowledgedAttempt = this.lastAttemptAcknowledged(result);
-      if (
-        result.status === 'ok' ||
-        acknowledgedAttempt ||
-        retry >= (this.agent.retry?.retries ?? 0) ||
-        result.status !== 'invocation_error' ||
-        !['network', 'timeout'].includes(result.error.code) ||
-        result.error.code === 'cancelled'
-      ) {
+      const { acknowledged, result } = await this.runPerCaseAttempt(request, requestId, signal);
+      // Acknowledged work may already be running remotely, so it is never replayed.
+      const retryable =
+        result.status === 'invocation_error' &&
+        !acknowledged &&
+        retry < (this.agent.retry?.retries ?? 0) &&
+        (result.error.code === 'network' || result.error.code === 'timeout');
+      if (!retryable) {
         return { ...result, attempts: [...attempts, ...result.attempts] };
       }
       attempts.push(...result.attempts);
       try {
         await waitForRetry(retryBackoffDelay(this.agent.retry?.backoff, retry), signal);
       } catch (error: unknown) {
-        return createFailureResult(
-          this.agent,
+        return this.evidence.failureResult(
           createPendingInvocation(request, requestId, () => undefined, signal),
-          this.secrets,
           error instanceof AgentInvocationError ? error : result.error,
           'cancelled',
           attempts,
@@ -164,22 +157,26 @@ class WebSocketAgentSession {
     request: AgentRequest,
     requestId: string,
     signal?: AbortSignal,
-  ): Promise<InvocationResult> {
+  ): Promise<{ acknowledged: boolean; result: InvocationResult }> {
+    const pending = createPendingInvocation(request, requestId, () => undefined, signal);
+    const result = await this.runPerCaseConnection(pending);
+    return { acknowledged: pending.acknowledged, result };
+  }
+
+  /** Runs one request on its own connection, including the close handshake. */
+  private async runPerCaseConnection(pending: PendingInvocation): Promise<InvocationResult> {
+    const { requestId, signal } = pending;
     if (this.closed) {
-      const pending = createPendingInvocation(request, requestId, () => undefined, signal);
-      return createFailureResult(
-        this.agent,
+      return this.evidence.failureResult(
         pending,
-        this.secrets,
         new AgentInvocationError('network', 'WebSocket session is closed.'),
         'connection_failed',
+        [],
       );
     }
-    let resolveResult!: (result: InvocationResult) => void;
     const result = new Promise<InvocationResult>((resolve) => {
-      resolveResult = resolve;
+      pending.resolve = resolve;
     });
-    const pending = createPendingInvocation(request, requestId, resolveResult, signal);
     let connection: WebSocketConnection | undefined;
     const attemptController = new AbortController();
     const signalCombined = AbortSignal.any([
@@ -196,7 +193,7 @@ class WebSocketAgentSession {
     try {
       connection = await this.openConnection(signalCombined, {
         onClose: (close) => {
-          recordClose(this.agent, pending, this.secrets, close);
+          this.evidence.recordClose(pending, close);
           if (this.pending.has(requestId)) {
             lose(
               new AgentInvocationError('network', 'WebSocket closed before a terminal response.', {
@@ -206,7 +203,7 @@ class WebSocketAgentSession {
           }
         },
         onFailure: lose,
-        onPong: () => recordEvent(this.agent, pending, this.secrets, 'pong_received'),
+        onPong: () => this.evidence.record(pending, { classification: 'pong_received' }),
         onText: (text, bytes) => this.consumeMessage(text, bytes, new Set([requestId])),
       });
       // Closing a session can settle the invocation while an HTTP upgrade is still racing.
@@ -215,16 +212,14 @@ class WebSocketAgentSession {
         return result;
       }
       pending.connection = connection;
-      recordEvent(this.agent, pending, this.secrets, 'connection_opened');
+      this.evidence.record(pending, { classification: 'connection_opened' });
       await this.send(pending, connection, signalCombined);
       const terminal = await result;
       const close = await connection.close(this.agent.transport.close_timeout_ms);
-      recordClose(this.agent, pending, this.secrets, close);
+      this.evidence.recordClose(pending, close);
       if (!close.clean && terminal.status === 'ok') {
-        return createFailureResult(
-          this.agent,
+        return this.evidence.failureResult(
           pending,
-          this.secrets,
           new AgentInvocationError('timeout', 'WebSocket close handshake timed out.', {
             classification: 'close_timeout',
           }),
@@ -258,12 +253,11 @@ class WebSocketAgentSession {
         signal,
       );
       return Promise.resolve(
-        createFailureResult(
-          this.agent,
+        this.evidence.failureResult(
           pending,
-          this.secrets,
           new AgentInvocationError('network', 'WebSocket session is closed.'),
           'connection_failed',
+          [],
         ),
       );
     }
@@ -311,7 +305,7 @@ class WebSocketAgentSession {
       onFailure: (error) => this.connectionFailed(generation, error),
       onPong: () => {
         for (const pending of this.pending.values()) {
-          recordEvent(this.agent, pending, this.secrets, 'pong_received');
+          this.evidence.record(pending, { classification: 'pong_received' });
         }
       },
       onText: (text, bytes) => this.consumeMessage(text, bytes),
@@ -320,7 +314,7 @@ class WebSocketAgentSession {
         this.connection = connection;
         this.connectionPromise = undefined;
         for (const pending of this.pending.values()) {
-          recordEvent(this.agent, pending, this.secrets, 'connection_opened');
+          this.evidence.record(pending, { classification: 'connection_opened' });
         }
         this.startPing(connection, generation);
         return connection;
@@ -361,7 +355,10 @@ class WebSocketAgentSession {
     const text = materializeRequest(this.agent, pending.request, pending.requestId);
     await connection.sendText(text, signal);
     if (!this.pending.has(pending.requestId)) return;
-    recordEvent(this.agent, pending, this.secrets, 'request_sent', Buffer.byteLength(text));
+    this.evidence.record(pending, {
+      classification: 'request_sent',
+      bytes: Buffer.byteLength(text),
+    });
     this.resetIdle(pending);
   }
 
@@ -389,7 +386,7 @@ class WebSocketAgentSession {
       return;
     }
     this.resetIdle(pending);
-    if (!countMessage(this.agent, pending, bytes)) {
+    if (!this.evidence.countMessage(pending, bytes)) {
       this.settleFailure(
         pending,
         new AgentInvocationError(
@@ -403,32 +400,42 @@ class WebSocketAgentSession {
     const message = interpretServerMessage(raw, this.agent, pending.acknowledged);
     if (message.acknowledgement) {
       pending.acknowledged = true;
-      recordEvent(this.agent, pending, this.secrets, 'acknowledgement_received', bytes, text, raw);
+      this.evidence.record(pending, {
+        classification: 'acknowledgement_received',
+        bytes,
+        source: text,
+        raw,
+      });
     }
     if (message.trace !== undefined) {
       pending.trace = message.trace;
-      recordEvent(this.agent, pending, this.secrets, 'trace_received', bytes, text, raw);
+      this.evidence.record(pending, { classification: 'trace_received', bytes, source: text, raw });
     }
     if (message.failure !== undefined) {
       this.settleFailure(pending, message.failure.error, message.failure.classification);
       return;
     }
     if (message.terminal?.kind === 'error') {
-      recordEvent(this.agent, pending, this.secrets, 'error_received', bytes, text, raw);
+      this.evidence.record(pending, { classification: 'error_received', bytes, source: text, raw });
       this.settleSuccess(pending, {
         protocol: AGENT_PROTOCOL,
         error: message.terminal.value,
         ...(pending.trace === undefined ? {} : { trace: pending.trace }),
-      } as AgentResponse);
+      });
       return;
     }
     if (message.terminal?.kind === 'result') {
-      recordEvent(this.agent, pending, this.secrets, 'result_received', bytes, text, raw);
+      this.evidence.record(pending, {
+        classification: 'result_received',
+        bytes,
+        source: text,
+        raw,
+      });
       this.settleSuccess(pending, {
         protocol: AGENT_PROTOCOL,
         output: message.terminal.value,
         ...(pending.trace === undefined ? {} : { trace: pending.trace }),
-      } as AgentResponse);
+      });
     }
   }
 
@@ -488,11 +495,11 @@ class WebSocketAgentSession {
       this.remember(this.completed, pending.requestId);
     }
     clearPendingTimers(pending);
-    pending.resolve(createFailureResult(this.agent, pending, this.secrets, error, classification));
+    pending.resolve(this.evidence.failureResult(pending, error, classification, pending.attempts));
   }
 
-  private settleSuccess(pending: PendingInvocation, response: AgentResponse): void {
-    const success = createSuccessResult(this.agent, pending, this.secrets, response);
+  private settleSuccess(pending: PendingInvocation, response: Record<string, unknown>): void {
+    const success = this.evidence.successResult(pending, response);
     if (!success.ok) {
       this.settleFailure(
         pending,
@@ -525,19 +532,17 @@ class WebSocketAgentSession {
       this.settleFailure(pending, error, classification);
       return;
     }
-    pending.attempts.push(
-      createFailureAttempt(this.agent, pending, this.secrets, error, classification),
-    );
+    pending.attempts.push(this.evidence.failureAttempt(pending, error, classification));
     pending.retriesUsed += 1;
     beginRetry(pending);
-    recordEvent(this.agent, pending, this.secrets, 'retry_scheduled');
+    this.evidence.record(pending, { classification: 'retry_scheduled' });
     try {
       await waitForRetry(
         retryBackoffDelay(this.agent.retry?.backoff, pending.retriesUsed - 1),
         pending.signal ?? this.options.signal,
       );
       if (!this.pending.has(pending.requestId)) return;
-      recordEvent(this.agent, pending, this.secrets, 'reconnect_started');
+      this.evidence.record(pending, { classification: 'reconnect_started' });
       this.armPending(pending);
       await this.dispatchRunScoped(pending);
     } catch (waitError: unknown) {
@@ -547,11 +552,6 @@ class WebSocketAgentSession {
         'cancelled',
       );
     }
-  }
-
-  private lastAttemptAcknowledged(result: InvocationResult): boolean {
-    const evidenceText = result.rawExcerpt?.text;
-    return evidenceText?.includes('"state":"acknowledged"') === true;
   }
 
   private connectionFailed(generation: number, error: AgentInvocationError): void {
@@ -575,7 +575,7 @@ class WebSocketAgentSession {
       { classification: 'unexpected_close' },
     );
     for (const pending of [...this.pending.values()]) {
-      recordClose(this.agent, pending, this.secrets, close);
+      this.evidence.recordClose(pending, close);
       void this.retryOrSettle(pending, error, 'unexpected_close');
     }
   }
@@ -586,7 +586,7 @@ class WebSocketAgentSession {
       if (generation !== this.connectionGeneration || this.connection !== connection) return;
       if (!connection.ping()) return;
       for (const pending of this.pending.values()) {
-        recordEvent(this.agent, pending, this.secrets, 'ping_sent');
+        this.evidence.record(pending, { classification: 'ping_sent' });
       }
     }, this.agent.transport.ping_interval_ms);
   }

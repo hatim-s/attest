@@ -1,9 +1,10 @@
-import { request as httpRequest } from 'node:http';
+import { request as httpRequest, type IncomingMessage } from 'node:http';
 import { request as httpsRequest } from 'node:https';
+
+import type { RawExcerpt } from '@attest/contracts';
 
 import { AgentInvocationError, abortedError } from '../../errors.js';
 import { appendEvidencePrefix, createRawExcerpt } from '../../internal/raw-excerpt.js';
-import type { InvocationAttempt } from '../../types.js';
 import type { MaterializedHttpRequest } from './request-template.js';
 import { redactTransportText } from './redaction.js';
 import { requireSameOrigin, resolveSafeHttpUrl } from './url-security.js';
@@ -21,7 +22,7 @@ type HttpClientPolicy = {
 type HttpJsonResponse = {
   headers: Record<string, string>;
   raw: unknown;
-  rawExcerpt: NonNullable<InvocationAttempt['rawExcerpt']>;
+  rawExcerpt: RawExcerpt;
   status: number;
   url: URL;
 };
@@ -41,12 +42,16 @@ const normalizeHeaders = (headers: NodeJS.Dict<string | string[]>): Record<strin
       ]),
   );
 
-/** Reads one response body while enforcing cancellation, idle, and aggregate byte caps. */
+const isSuccessStatus = (status: number): boolean => status >= 200 && status < 300;
+
+/**
+ * Reads one response body while enforcing cancellation, idle, and aggregate byte caps. Only a
+ * success body is parsed as JSON; other statuses keep their text as evidence only.
+ */
 const readResponseBody = async (
-  response: import('node:http').IncomingMessage,
+  response: IncomingMessage,
   policy: HttpClientPolicy,
-  parseJson: boolean,
-): Promise<{ raw: unknown; rawExcerpt: NonNullable<InvocationAttempt['rawExcerpt']> }> =>
+): Promise<{ raw: unknown; rawExcerpt: RawExcerpt }> =>
   new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
     const evidence: Uint8Array[] = [];
@@ -117,7 +122,7 @@ const readResponseBody = async (
     response.once('end', () => {
       const text = Buffer.concat(chunks, byteCount).toString('utf8');
       const rawExcerpt = createRawExcerpt(redactTransportText(text, policy.secrets));
-      if (!parseJson) {
+      if (!isSuccessStatus(response.statusCode ?? 0)) {
         finish(() => resolve({ raw: null, rawExcerpt }));
         return;
       }
@@ -148,12 +153,11 @@ const requestOnce = async (
   policy: HttpClientPolicy,
 ): Promise<HttpJsonResponse> => {
   if (policy.attemptSignal.aborted) throw abortError(policy);
-  const resolved = await resolveSafeHttpUrl(
-    request.url,
-    policy.connectTimeoutMs,
-    policy.attemptSignal,
-    policy.callerSignal,
-  );
+  const resolved = await resolveSafeHttpUrl(request.url, {
+    timeoutMs: policy.connectTimeoutMs,
+    signal: policy.attemptSignal,
+    callerSignal: policy.callerSignal,
+  });
   if (policy.attemptSignal.aborted) throw abortError(policy);
   if (policy.secrets.length > 0 && resolved.url.protocol !== 'https:' && !resolved.loopback) {
     throw new AgentInvocationError(
@@ -168,11 +172,16 @@ const requestOnce = async (
       return;
     }
     let settled = false;
-    const timers: { firstByte?: NodeJS.Timeout } = {};
+    const firstByteTimer = setTimeout(() => {
+      outgoing.destroy();
+      finish(() =>
+        reject(new AgentInvocationError('timeout', 'Mapped HTTP first byte timed out.')),
+      );
+    }, policy.firstByteTimeoutMs);
     const finish = (operation: () => void): void => {
       if (settled) return;
       settled = true;
-      if (timers.firstByte !== undefined) clearTimeout(timers.firstByte);
+      clearTimeout(firstByteTimer);
       policy.attemptSignal.removeEventListener('abort', abort);
       operation();
     };
@@ -187,9 +196,9 @@ const requestOnce = async (
       (response) => {
         // The response body owns its own idle deadline after headers arrive.
         outgoing.setTimeout(0);
-        if (timers.firstByte !== undefined) clearTimeout(timers.firstByte);
+        clearTimeout(firstByteTimer);
         const status = response.statusCode ?? 0;
-        void readResponseBody(response, policy, status >= 200 && status < 300).then(
+        void readResponseBody(response, policy).then(
           ({ raw, rawExcerpt }) =>
             finish(() =>
               resolve({
@@ -212,12 +221,6 @@ const requestOnce = async (
       finish(() => reject(abortError(policy)));
     };
     policy.attemptSignal.addEventListener('abort', abort, { once: true });
-    timers.firstByte = setTimeout(() => {
-      outgoing.destroy();
-      finish(() =>
-        reject(new AgentInvocationError('timeout', 'Mapped HTTP first byte timed out.')),
-      );
-    }, policy.firstByteTimeoutMs);
     outgoing.setTimeout(policy.connectTimeoutMs, () => {
       outgoing.destroy();
       finish(() =>

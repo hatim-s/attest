@@ -13,11 +13,16 @@ type InvokeOptions = {
   timeoutMs: number;
   /** Maximum stdout / response-body size in bytes (spec default 10 MB). */
   outputCapBytes: number;
-  /** Fully resolved environment for the child process: allowlist + ATTEST_* + synthesized base. */
-  env: Record<string, string>;
+  /**
+   * Resolved variables for a CLI agent, layered over its isolated base environment. When set,
+   * every key is forwarded (including PATH) and `envAllowlist` is ignored.
+   */
+  env?: Record<string, string>;
+  /** Host variable names copied from `process.env` into a CLI agent when `env` is unset. */
+  envAllowlist?: readonly string[];
   /** Runtime-only native HTTP headers resolved from authored secret references. */
   httpHeaders?: Record<string, string>;
-  /** Fresh per-attempt directory the CLI transport uses as cwd; owned by the invoker. */
+  /** Parent of the fresh per-attempt CLI cwd; defaults to the system temporary directory. */
   workingDirectory?: string;
   /** Uses workingDirectory itself as cwd and preserves its contents for lifecycle hooks. */
   preserveWorkingDirectory?: boolean;

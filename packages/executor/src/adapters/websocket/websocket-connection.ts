@@ -30,6 +30,15 @@ type OpenWebSocketOptions = {
   url: string;
 };
 
+type WebSocketConnectionOptions = {
+  socket: Duplex;
+  /** Bytes the server sent after the upgrade response, already part of the frame stream. */
+  initialData: Buffer;
+  callbacks: WebSocketConnectionCallbacks;
+  maximumMessageBytes: number;
+  maximumPendingWriteBytes: number;
+};
+
 /** Owns one upgraded socket, including bounded frame parsing and the close handshake. */
 class WebSocketConnection {
   private closeDetails?: WebSocketClose;
@@ -43,14 +52,16 @@ class WebSocketConnection {
   private readonly writeController = new AbortController();
   private writeTail: Promise<void> = Promise.resolve();
 
-  constructor(
-    private readonly socket: Duplex,
-    maximumMessageBytes: number,
-    private readonly callbacks: WebSocketConnectionCallbacks,
-    initialData: Buffer,
-    private readonly maximumPendingWriteBytes = maximumMessageBytes,
-  ) {
-    this.frameDecoder = new WebSocketFrameDecoder(maximumMessageBytes, {
+  private readonly socket: Duplex;
+  private readonly callbacks: WebSocketConnectionCallbacks;
+  private readonly maximumPendingWriteBytes: number;
+
+  constructor(options: WebSocketConnectionOptions) {
+    const { callbacks, initialData, socket } = options;
+    this.socket = socket;
+    this.callbacks = callbacks;
+    this.maximumPendingWriteBytes = options.maximumPendingWriteBytes;
+    this.frameDecoder = new WebSocketFrameDecoder(options.maximumMessageBytes, {
       onClose: (close) => this.acceptClose(close),
       onFailure: (error) => this.fail(error),
       onPing: (payload) => this.writeControlFrame(0x0a, payload),
@@ -104,10 +115,7 @@ class WebSocketConnection {
 
   /** Sends a protocol ping without altering application-idle state. */
   ping(): boolean {
-    if (this.failed || this.sentClose || this.socket.destroyed || this.socket.writableNeedDrain)
-      return false;
-    this.socket.write(encodeWebSocketFrame(0x9));
-    return true;
+    return this.writeControlFrame(0x9);
   }
 
   /** Performs a bounded close handshake and destroys sockets that do not cooperate. */
@@ -237,13 +245,13 @@ class WebSocketConnection {
 /** Opens a DNS-pinned RFC 6455 connection after validating the URL and handshake. */
 const openWebSocket = async (options: OpenWebSocketOptions): Promise<WebSocketConnection> => {
   const { head, socket } = await openWebSocketHandshake(options);
-  return new WebSocketConnection(
+  return new WebSocketConnection({
     socket,
-    options.maximumMessageBytes,
-    options.callbacks,
-    head,
-    options.maximumPendingWriteBytes,
-  );
+    initialData: head,
+    callbacks: options.callbacks,
+    maximumMessageBytes: options.maximumMessageBytes,
+    maximumPendingWriteBytes: options.maximumPendingWriteBytes,
+  });
 };
 
 export {

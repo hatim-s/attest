@@ -1,16 +1,17 @@
 import { createHash } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 
-import { AGENT_PROTOCOL, type AgentRequest, type AgentResponse } from '@attest/contracts';
+import { AGENT_PROTOCOL, type AgentRequest } from '@attest/contracts';
 
 import { AgentInvocationError, abortedError } from '../../errors.js';
 import { abortableWait } from '../../internal/abortable-wait.js';
 import { startTimer } from '../../internal/elapsed.js';
+import { createFailedAttempt } from '../../internal/failed-attempt.js';
 import { isJsonValue } from '../../internal/json-value.js';
 import { extractRemoteError } from '../../internal/remote-error.js';
 import { retryBackoffDelay } from '../../internal/retry-backoff.js';
 import type { InvocationAttempt } from '../../types.js';
-import { requestJson, type HttpJsonResponse } from './http-client.js';
+import { requestJson, type HttpClientPolicy, type HttpJsonResponse } from './http-client.js';
 import { readJsonPointer } from './json-pointer.js';
 import { assertStaticUrlAuthority, type MaterializedHttpRequest } from './request-template.js';
 import { redactTransportText } from './redaction.js';
@@ -25,6 +26,16 @@ type CompletedHttpResponse = {
   response: HttpJsonResponse;
 };
 
+type PollingTransport = Extract<HttpAgentResource['transport'], { kind: 'polling' }>;
+
+/** Shared state of one mapped exchange: retry budget, deadlines, and retained failed attempts. */
+type ExchangeContext = {
+  retry: HttpAgentResource['retry'];
+  policy: HttpClientPolicy;
+  signal: AbortSignal;
+  retryAttempts: InvocationAttempt[];
+};
+
 const REMOTE_ERROR_FALLBACK = 'The mapped HTTP agent reported an error.';
 
 /** Redacts secret representations from extracted JSON before it becomes persisted evidence. */
@@ -36,7 +47,6 @@ const extractRemoteJobId = (
   raw: unknown,
   pointer: string | undefined,
 ): string | number | undefined => {
-  if (pointer === undefined) return undefined;
   const value = readJsonPointer(raw, pointer);
   if (value === undefined || value === null) return undefined;
   if (typeof value !== 'string' && typeof value !== 'number') {
@@ -48,20 +58,17 @@ const extractRemoteJobId = (
   return value;
 };
 
-/** Converts a foreign JSON response into the native Attest response envelope. */
+/**
+ * Maps a foreign JSON response onto a candidate native envelope. The caller validates the
+ * candidate with parseAgentResponse, so extraction only has to place values correctly.
+ */
 const extractAgentResponse = (
   raw: unknown,
-  extraction: Extract<HttpAgentResource['transport'], { kind: 'http' }>['extraction'],
+  extraction: HttpAgentResource['transport']['extraction'],
   secrets: readonly string[],
-): AgentResponse => {
-  const error =
-    extraction.error_pointer === undefined
-      ? undefined
-      : readJsonPointer(raw, extraction.error_pointer);
-  const trace =
-    extraction.trace_pointer === undefined
-      ? undefined
-      : readJsonPointer(raw, extraction.trace_pointer);
+): Record<string, unknown> => {
+  const error = readJsonPointer(raw, extraction.error_pointer);
+  const trace = readJsonPointer(raw, extraction.trace_pointer);
   if (error !== undefined && error !== null) {
     const extractedError = extractRemoteError(error, REMOTE_ERROR_FALLBACK);
     return {
@@ -74,7 +81,7 @@ const extractAgentResponse = (
           : { code: redactTransportText(extractedError.code, secrets) }),
       },
       ...(trace === undefined ? {} : { trace: redactExtractedJson(trace, secrets) }),
-    } as AgentResponse;
+    };
   }
   const result = readJsonPointer(raw, extraction.result_pointer);
   if (result === undefined || !isJsonValue(result)) {
@@ -87,7 +94,7 @@ const extractAgentResponse = (
     protocol: AGENT_PROTOCOL,
     output: result,
     ...(trace === undefined ? {} : { trace: redactExtractedJson(trace, secrets) }),
-  } as AgentResponse;
+  };
 };
 
 const retryableStatus = (status: number): boolean =>
@@ -96,20 +103,18 @@ const retryableStatus = (status: number): boolean =>
 const retryableTransportError = (error: AgentInvocationError): boolean =>
   error.code === 'network' || error.code === 'timeout';
 
-const retryDelay = (agent: HttpAgentResource, retryIndex: number): number =>
-  retryBackoffDelay(agent.retry?.backoff, retryIndex);
+const retryDelay = (retry: HttpAgentResource['retry'], retryIndex: number): number =>
+  retryBackoffDelay(retry?.backoff, retryIndex);
 
 const wait = (delayMs: number, signal: AbortSignal, callerSignal?: AbortSignal): Promise<void> =>
   abortableWait(delayMs, signal, () => abortedError(callerSignal, 'Mapped HTTP invocation'));
 
-const attemptFromError = (error: AgentInvocationError, durationMs: number): InvocationAttempt => ({
-  status: 'invocation_error',
-  error,
-  diagnostics: { ...(error.httpStatus === undefined ? {} : { httpStatus: error.httpStatus }) },
-  durationMs,
-  ...(error.rawExcerpt === undefined ? {} : { rawExcerpt: error.rawExcerpt }),
-  warnings: [],
-});
+const attemptFromError = (error: AgentInvocationError, durationMs: number): InvocationAttempt =>
+  createFailedAttempt(error, {
+    diagnostics: error.httpStatus === undefined ? {} : { httpStatus: error.httpStatus },
+    durationMs,
+    rawExcerpt: error.rawExcerpt,
+  });
 
 /** Carries request-local timing through terminal error normalization without exposing it publicly. */
 const withAttemptDuration = (
@@ -148,17 +153,13 @@ const requireSuccessfulStatus = (response: HttpJsonResponse): void => {
   throw statusError(response);
 };
 
+/** Sends a direct request, retrying transient transport failures and retryable statuses. */
 const runDirect = async (
-  agent: HttpAgentResource & {
-    transport: Extract<HttpAgentResource['transport'], { kind: 'http' }>;
-  },
-  request: AgentRequest,
   materialized: MaterializedHttpRequest,
-  policy: Parameters<typeof requestJson>[1],
-  signal: AbortSignal,
-  retryAttempts: InvocationAttempt[],
+  context: ExchangeContext,
 ): Promise<CompletedHttpResponse> => {
-  const retries = agent.retry?.retries ?? 0;
+  const { policy, retry: retryPolicy, retryAttempts, signal } = context;
+  const retries = retryPolicy?.retries ?? 0;
   for (let retry = 0; ; retry += 1) {
     const attemptDuration = startTimer();
     let response: HttpJsonResponse;
@@ -175,7 +176,7 @@ const runDirect = async (
         throw withAttemptDuration(normalized, durationMs);
       }
       retryAttempts.push(attemptFromError(normalized, durationMs));
-      await wait(retryDelay(agent, retry), signal, policy.callerSignal);
+      await wait(retryDelay(retryPolicy, retry), signal, policy.callerSignal);
       continue;
     }
     const durationMs = attemptDuration();
@@ -186,34 +187,40 @@ const runDirect = async (
     }
     retryAttempts.push(attemptFromError(error, durationMs));
     await wait(
-      parseRetryAfter(response.headers['retry-after']) ?? retryDelay(agent, retry),
+      parseRetryAfter(response.headers['retry-after']) ?? retryDelay(retryPolicy, retry),
       signal,
       policy.callerSignal,
     );
   }
 };
 
-const pollingUrl = (
-  transport: Extract<HttpAgentResource['transport'], { kind: 'polling' }>,
+/** Renders the status URL from the submit response or the authored template. */
+const renderStatusUrl = (
+  transport: PollingTransport,
   response: HttpJsonResponse,
   jobId: string | number,
-): URL => {
-  const extracted =
-    transport.status_url_pointer === undefined
-      ? undefined
-      : readJsonPointer(response.raw, transport.status_url_pointer);
-  const template = transport.status_url_template;
-  if (extracted === undefined && template === undefined) {
-    throw new AgentInvocationError('invalid_envelope', 'Polling requires a status URL.');
-  }
-  if (extracted !== undefined && typeof extracted !== 'string') {
+): string => {
+  const extracted = readJsonPointer(response.raw, transport.status_url_pointer);
+  if (typeof extracted === 'string') return extracted;
+  if (extracted !== undefined) {
     throw new AgentInvocationError(
       'invalid_envelope',
       'Polling status URL extraction must be a string.',
     );
   }
-  const rendered =
-    extracted ?? template!.replaceAll('{{job_id}}', encodeURIComponent(String(jobId)));
+  const template = transport.status_url_template;
+  if (template === undefined) {
+    throw new AgentInvocationError('invalid_envelope', 'Polling requires a status URL.');
+  }
+  return template.replaceAll('{{job_id}}', encodeURIComponent(String(jobId)));
+};
+
+const pollingUrl = (
+  transport: PollingTransport,
+  response: HttpJsonResponse,
+  jobId: string | number,
+): URL => {
+  const rendered = renderStatusUrl(transport, response, jobId);
   if (rendered.includes('{{')) {
     throw new AgentInvocationError(
       'invalid_envelope',
@@ -225,20 +232,18 @@ const pollingUrl = (
   return candidate;
 };
 
+/** Keeps a polling or retry delay inside the authored polling interval bounds. */
+const clampInterval = (transport: PollingTransport, delayMs: number): number =>
+  Math.min(Math.max(delayMs, transport.minimum_interval_ms), transport.maximum_interval_ms);
+
 const boundedPollingDelay = (
-  transport: Extract<HttpAgentResource['transport'], { kind: 'polling' }>,
+  transport: PollingTransport,
   retryAfter: string | undefined,
   fallback: number,
-): number =>
-  Math.min(
-    Math.max(parseRetryAfter(retryAfter) ?? fallback, transport.minimum_interval_ms),
-    transport.maximum_interval_ms,
-  );
+): number => clampInterval(transport, parseRetryAfter(retryAfter) ?? fallback);
 
 /** Validates every polling invariant before a submission can create remote work. */
-const assertPollingConfiguration = (
-  transport: Extract<HttpAgentResource['transport'], { kind: 'polling' }>,
-): void => {
+const assertPollingConfiguration = (transport: PollingTransport): void => {
   if (
     (transport.status_url_pointer === undefined) ===
     (transport.status_url_template === undefined)
@@ -289,14 +294,11 @@ const assertPollingConfiguration = (
 
 /** Converts an authored polling failure state into a failed probe with bounded response evidence. */
 const pollingFailure = (
-  transport: Extract<HttpAgentResource['transport'], { kind: 'polling' }>,
+  transport: PollingTransport,
   response: HttpJsonResponse,
   secrets: readonly string[],
 ): AgentInvocationError => {
-  const extracted =
-    transport.extraction.error_pointer === undefined
-      ? undefined
-      : readJsonPointer(response.raw, transport.extraction.error_pointer);
+  const extracted = readJsonPointer(response.raw, transport.extraction.error_pointer);
   return new AgentInvocationError(
     'invalid_envelope',
     extracted === undefined || extracted === null
@@ -306,22 +308,20 @@ const pollingFailure = (
   );
 };
 
+/** Submits remote work, then polls its status URL until an authored terminal value appears. */
 const runPolling = async (
-  agent: HttpAgentResource & {
-    transport: Extract<HttpAgentResource['transport'], { kind: 'polling' }>;
-  },
+  transport: PollingTransport,
   request: AgentRequest,
   submission: MaterializedHttpRequest,
-  policy: Parameters<typeof requestJson>[1],
-  signal: AbortSignal,
-  retryAttempts: InvocationAttempt[],
+  context: ExchangeContext,
 ): Promise<CompletedHttpResponse> => {
-  const { transport } = agent;
+  const { policy, retry: retryPolicy, retryAttempts, signal } = context;
   assertPollingConfiguration(transport);
-  const retries = agent.retry?.retries ?? 0;
-  if (transport.idempotency_header !== undefined) {
+  const retries = retryPolicy?.retries ?? 0;
+  const idempotencyHeader = transport.idempotency_header;
+  if (idempotencyHeader !== undefined) {
     const duplicate = Object.keys(submission.headers).find(
-      (name) => name.toLowerCase() === transport.idempotency_header!.toLowerCase(),
+      (name) => name.toLowerCase() === idempotencyHeader.toLowerCase(),
     );
     if (duplicate !== undefined) {
       throw new AgentInvocationError(
@@ -329,7 +329,7 @@ const runPolling = async (
         'Idempotency header mapping is ambiguous.',
       );
     }
-    submission.headers[transport.idempotency_header] = createHash('sha256')
+    submission.headers[idempotencyHeader] = createHash('sha256')
       .update(`${request.run_id}:${request.case_id}`)
       .digest('hex');
   }
@@ -353,7 +353,7 @@ const runPolling = async (
       }
       retryAttempts.push(attemptFromError(normalized, durationMs));
       await wait(
-        boundedPollingDelay(transport, undefined, retryDelay(agent, retry)),
+        boundedPollingDelay(transport, undefined, retryDelay(retryPolicy, retry)),
         signal,
         policy.callerSignal,
       );
@@ -375,7 +375,11 @@ const runPolling = async (
     }
     retryAttempts.push(attemptFromError(error, durationMs));
     await wait(
-      boundedPollingDelay(transport, response.headers['retry-after'], retryDelay(agent, retry)),
+      boundedPollingDelay(
+        transport,
+        response.headers['retry-after'],
+        retryDelay(retryPolicy, retry),
+      ),
       signal,
       policy.callerSignal,
     );
@@ -417,7 +421,7 @@ const runPolling = async (
         }
         retryAttempts.push(attemptFromError(normalized, durationMs));
         await wait(
-          boundedPollingDelay(transport, undefined, retryDelay(agent, retry)),
+          boundedPollingDelay(transport, undefined, retryDelay(retryPolicy, retry)),
           signal,
           policy.callerSignal,
         );
@@ -435,7 +439,11 @@ const runPolling = async (
       }
       retryAttempts.push(attemptFromError(error, durationMs));
       await wait(
-        boundedPollingDelay(transport, response.headers['retry-after'], retryDelay(agent, retry)),
+        boundedPollingDelay(
+          transport,
+          response.headers['retry-after'],
+          retryDelay(retryPolicy, retry),
+        ),
         signal,
         policy.callerSignal,
       );
@@ -455,17 +463,8 @@ const runPolling = async (
         polledDurationMs,
       );
     }
-    const retryAfter = parseRetryAfter(polled.headers['retry-after']);
-    interval =
-      retryAfter === undefined
-        ? Math.min(
-            Math.max(interval * 2, transport.minimum_interval_ms),
-            transport.maximum_interval_ms,
-          )
-        : Math.min(
-            Math.max(retryAfter, transport.minimum_interval_ms),
-            transport.maximum_interval_ms,
-          );
+    const next = parseRetryAfter(polled.headers['retry-after']) ?? interval * 2;
+    interval = clampInterval(transport, next);
   }
 };
 

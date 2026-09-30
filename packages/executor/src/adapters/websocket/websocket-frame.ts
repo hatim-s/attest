@@ -16,13 +16,20 @@ type WebSocketFrameCallbacks = {
   onText: (text: string, bytes: number) => void;
 };
 
+/** RFC 6455 stores small lengths inline and larger ones in a 16-bit or 64-bit extension. */
+const extendedLengthBytes = (payloadBytes: number): 0 | 2 | 8 => {
+  if (payloadBytes < 126) return 0;
+  if (payloadBytes <= 65_535) return 2;
+  return 8;
+};
+
 /** Encodes one client frame with the masking required by RFC 6455. */
 const encodeWebSocketFrame = (
   opcode: number,
   payload: Buffer<ArrayBufferLike> = Buffer.alloc(0),
 ): Buffer<ArrayBufferLike> => {
   const mask = randomBytes(4);
-  const lengthBytes = payload.byteLength < 126 ? 0 : payload.byteLength <= 65_535 ? 2 : 8;
+  const lengthBytes = extendedLengthBytes(payload.byteLength);
   const header = Buffer.alloc(2 + lengthBytes + mask.byteLength);
   header[0] = 0x80 | opcode;
   if (lengthBytes === 0) {

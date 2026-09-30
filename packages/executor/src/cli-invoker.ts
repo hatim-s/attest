@@ -5,14 +5,15 @@ import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { AgentInvocationError, type InvocationErrorCode } from './errors.js';
+import { AgentInvocationError } from './errors.js';
 import { DEFAULT_TERMINATION_GRACE_MS } from './internal/agent-defaults.js';
 import { BoundedTail } from './internal/bounded-tail.js';
 import { startTimer } from './internal/elapsed.js';
+import { createFailedAttempt } from './internal/failed-attempt.js';
 import {
   RAW_EXCERPT_CHARACTERS,
   appendEvidencePrefix,
-  createRawExcerpt as createPayloadRawExcerpt,
+  createRawExcerpt,
 } from './internal/raw-excerpt.js';
 import {
   killProcessTree,
@@ -20,7 +21,7 @@ import {
   spawnInProcessGroup,
   type ProcessIdentity,
 } from './internal/process-tree.js';
-import { resolveInvocationEnv } from './request.js';
+import { resolveInvocationEnv } from './invocation-env.js';
 import type {
   InvocationAttempt,
   InvocationDiagnostics,
@@ -29,14 +30,6 @@ import type {
 } from './types.js';
 
 const STDERR_EXCERPT_BYTES = 4096;
-
-type CliInvokeOptions = Omit<InvokeOptions, 'env' | 'workingDirectory'> & {
-  /** Test seam for injecting a controlled base environment; HOME and TMPDIR stay attempt-local. */
-  env?: Record<string, string>;
-  envAllowlist?: readonly string[];
-  /** Test seam selecting the parent beneath which a unique attempt directory is created. */
-  workingDirectory?: string;
-};
 
 type TerminalEvent =
   | { type: 'abort' }
@@ -56,26 +49,16 @@ type InvocationCapture = {
 
 type AttemptDirectory = { path: string; remove: boolean };
 
-const createInvocationError = (
-  code: InvocationErrorCode,
-  message: string,
-  diagnostics: InvocationDiagnostics,
-  duration: () => number,
-  rawExcerpt: RawExcerpt,
-  cause?: Error,
-): InvocationAttempt => {
-  const errorOptions = cause === undefined ? undefined : { cause };
-  return {
-    status: 'invocation_error',
-    error: new AgentInvocationError(code, message, errorOptions),
-    diagnostics,
-    durationMs: duration(),
-    rawExcerpt,
-    warnings: [],
-  };
+type CaptureOptions = {
+  outputCapBytes: number;
+  signal: AbortSignal | undefined;
+  timeoutMs: number;
+  /** Runs once when stdout first produces data, while the agent is known to be running. */
+  onFirstStdout: () => void;
 };
 
-const createRawExcerpt = (
+/** Builds stdout evidence; a hash of every received byte accompanies any truncated excerpt. */
+const createStdoutExcerpt = (
   evidenceChunks: readonly Uint8Array[],
   payloadByteCount: number,
   evidenceByteCount: number,
@@ -87,19 +70,13 @@ const createRawExcerpt = (
     forceTruncated ||
     payloadByteCount > evidenceByteCount ||
     evidence.length > RAW_EXCERPT_CHARACTERS;
-  const rawExcerpt = createPayloadRawExcerpt(evidence);
-  return truncated
-    ? { ...rawExcerpt, truncated: true, sha256: payloadHash.digest('hex') }
-    : rawExcerpt;
+  const rawExcerpt = createRawExcerpt(evidence);
+  if (!truncated) return rawExcerpt;
+  return { ...rawExcerpt, truncated: true, sha256: payloadHash.digest('hex') };
 };
 
-const captureInvocation = (
-  child: ChildProcess,
-  outputCapBytes: number,
-  signal: AbortSignal | undefined,
-  timeoutMs: number,
-  onStdout: () => void,
-): InvocationCapture => {
+const captureInvocation = (child: ChildProcess, options: CaptureOptions): InvocationCapture => {
+  const { outputCapBytes, signal, timeoutMs } = options;
   const stdoutChunks: Buffer<ArrayBufferLike>[] = [];
   const evidenceChunks: Uint8Array[] = [];
   const payloadHash = createHash('sha256');
@@ -107,6 +84,7 @@ const captureInvocation = (
   let evidenceBytes = 0;
   const stderrTail = new BoundedTail(STDERR_EXCERPT_BYTES);
   let terminalResolved = false;
+  let stdoutStarted = false;
   let resolveTerminal: (event: TerminalEvent) => void = () => undefined;
 
   const resolveOnce = (event: TerminalEvent): void => {
@@ -130,7 +108,10 @@ const captureInvocation = (
       return;
     }
 
-    onStdout();
+    if (!stdoutStarted) {
+      stdoutStarted = true;
+      options.onFirstStdout();
+    }
     stdoutBytes += chunk.length;
     payloadHash.update(chunk);
     evidenceBytes = appendEvidencePrefix(evidenceChunks, evidenceBytes, chunk);
@@ -165,7 +146,7 @@ const captureInvocation = (
     close,
     readStdout: () => Buffer.concat(stdoutChunks, stdoutBytes).toString('utf8'),
     readRawExcerpt: (forceTruncated = false) =>
-      createRawExcerpt(evidenceChunks, stdoutBytes, evidenceBytes, payloadHash, forceTruncated),
+      createStdoutExcerpt(evidenceChunks, stdoutBytes, evidenceBytes, payloadHash, forceTruncated),
     readStderrExcerpt: () => stderrTail.text(),
   };
 };
@@ -174,39 +155,40 @@ const createAttemptDirectory = async (
   override: string | undefined,
   preserve: boolean,
 ): Promise<AttemptDirectory> => {
-  if (override !== undefined && preserve) {
+  if (override === undefined) {
+    return { path: await mkdtemp(join(tmpdir(), 'attest-')), remove: true };
+  }
+  if (preserve) {
     await mkdir(override, { recursive: true });
     return { path: override, remove: false };
   }
-  return override === undefined
-    ? { path: await mkdtemp(join(tmpdir(), 'attest-')), remove: true }
-    : { path: await mkdtemp(join(override, 'attempt-')), remove: true };
+  return { path: await mkdtemp(join(override, 'attempt-')), remove: true };
 };
 
 const resolveCliEnvironment = async (
   request: AgentRequest,
   attemptDirectory: string,
-  options: CliInvokeOptions,
+  options: InvokeOptions,
 ): Promise<Record<string, string>> => {
-  const homeDirectory = join(attemptDirectory, 'home');
-  const temporaryDirectory = join(attemptDirectory, 'tmp');
   await Promise.all([
-    mkdir(homeDirectory, { recursive: true }),
-    mkdir(temporaryDirectory, { recursive: true }),
+    mkdir(join(attemptDirectory, 'home'), { recursive: true }),
+    mkdir(join(attemptDirectory, 'tmp'), { recursive: true }),
   ]);
-  const environment = resolveInvocationEnv(
-    options.env === undefined ? options.envAllowlist : Object.keys(options.env),
+  // Explicit values are forwarded whole; otherwise only allowlisted host values cross over.
+  const forwardedKeys =
+    options.env === undefined ? (options.envAllowlist ?? []) : Object.keys(options.env);
+  return resolveInvocationEnv(
+    forwardedKeys,
     options.env ?? process.env,
     { runId: request.run_id, caseId: request.case_id },
     attemptDirectory,
   );
-  return environment;
 };
 
-const withUnreapedDiagnostics = (
+const describeProcessExit = (
   stderrExcerpt: string | undefined,
   unreapedProcessIds: readonly number[],
-  exitCode?: number,
+  exitCode: number | undefined,
 ): InvocationDiagnostics => ({
   stderrExcerpt,
   ...(exitCode === undefined ? {} : { exitCode }),
@@ -232,13 +214,11 @@ const sweepProcessTree = async (
 /**
  * Performs one isolated CLI attempt under docs/specs/agent-contract.md. The invoker owns the fresh
  * cwd and applies the same best-effort identity-checked descendant sweep to every terminal path.
- * `env` and `workingDirectory` are test seams; production configuration uses the allowlist and a
- * system temporary parent. Every seam-provided parent still receives a unique attempt directory.
  */
 const invokeCliAgent = async (
   target: Extract<NativeAgentTarget, { type: 'cli' }>,
   request: AgentRequest,
-  options: CliInvokeOptions,
+  options: InvokeOptions,
 ): Promise<InvocationAttempt> => {
   const duration = startTimer();
   const attemptDirectory = await createAttemptDirectory(
@@ -249,29 +229,24 @@ const invokeCliAgent = async (
 
   try {
     const environment = await resolveCliEnvironment(request, attemptDirectory.path, options);
-    const requestDocument = JSON.stringify(request);
     const child = spawnInProcessGroup(target.command, {
       cwd: attemptDirectory.path,
       env: environment,
     });
-    const descendantSnapshots = [
-      child.pid === undefined ? Promise.resolve([]) : listDescendantProcesses(child.pid),
+    const { pid } = child;
+    const descendantSnapshots: Promise<ProcessIdentity[]>[] = [
+      pid === undefined ? Promise.resolve([]) : listDescendantProcesses(pid),
     ];
-    let stdoutSnapshotStarted = false;
-    capture = captureInvocation(
-      child,
-      options.outputCapBytes,
-      options.signal,
-      options.timeoutMs,
-      () => {
-        if (!stdoutSnapshotStarted && child.pid !== undefined) {
-          stdoutSnapshotStarted = true;
-          descendantSnapshots.push(listDescendantProcesses(child.pid));
-        }
+    capture = captureInvocation(child, {
+      outputCapBytes: options.outputCapBytes,
+      signal: options.signal,
+      timeoutMs: options.timeoutMs,
+      onFirstStdout: () => {
+        if (pid !== undefined) descendantSnapshots.push(listDescendantProcesses(pid));
       },
-    );
+    });
 
-    child.stdin?.end(requestDocument);
+    child.stdin?.end(JSON.stringify(request));
     const terminal = await capture.terminal;
     const unreapedProcessIds = await sweepProcessTree(
       child,
@@ -280,75 +255,72 @@ const invokeCliAgent = async (
       options.terminationGraceMs ?? DEFAULT_TERMINATION_GRACE_MS,
       terminal.type !== 'close',
     );
-    const stderrExcerpt = capture.readStderrExcerpt();
-    const diagnostics = withUnreapedDiagnostics(stderrExcerpt, unreapedProcessIds);
+    const diagnostics = describeProcessExit(
+      capture.readStderrExcerpt(),
+      unreapedProcessIds,
+      terminal.type === 'close' ? (terminal.exitCode ?? undefined) : undefined,
+    );
+    const fail = (error: AgentInvocationError, rawExcerpt: RawExcerpt): InvocationAttempt =>
+      createFailedAttempt(error, { diagnostics, durationMs: duration(), rawExcerpt });
 
     if (terminal.type === 'spawn_error') {
-      return createInvocationError(
-        'spawn_failed',
-        `Failed to spawn CLI agent: ${terminal.error.message}`,
-        diagnostics,
-        duration,
-        capture.readRawExcerpt(),
-        terminal.error,
-      );
-    }
-
-    if (terminal.type === 'timeout' || terminal.type === 'abort') {
-      const cancelled = terminal.type === 'abort' || options.signal?.aborted === true;
-      return createInvocationError(
-        cancelled ? 'cancelled' : 'timeout',
-        cancelled ? 'CLI agent invocation was cancelled' : 'CLI agent invocation timed out',
-        diagnostics,
-        duration,
+      return fail(
+        new AgentInvocationError(
+          'spawn_failed',
+          `Failed to spawn CLI agent: ${terminal.error.message}`,
+          { cause: terminal.error },
+        ),
         capture.readRawExcerpt(),
       );
     }
-
+    if (terminal.type === 'abort' || (terminal.type === 'timeout' && options.signal?.aborted)) {
+      return fail(
+        new AgentInvocationError('cancelled', 'CLI agent invocation was cancelled'),
+        capture.readRawExcerpt(),
+      );
+    }
+    if (terminal.type === 'timeout') {
+      return fail(
+        new AgentInvocationError('timeout', 'CLI agent invocation timed out'),
+        capture.readRawExcerpt(),
+      );
+    }
     if (terminal.type === 'output_cap') {
-      return createInvocationError(
-        'output_cap_exceeded',
-        `CLI agent stdout exceeded the ${options.outputCapBytes}-byte output cap`,
-        diagnostics,
-        duration,
+      return fail(
+        new AgentInvocationError(
+          'output_cap_exceeded',
+          `CLI agent stdout exceeded the ${options.outputCapBytes}-byte output cap`,
+        ),
         capture.readRawExcerpt(true),
       );
     }
 
     const rawExcerpt = capture.readRawExcerpt();
-    const exitDiagnostics = withUnreapedDiagnostics(
-      stderrExcerpt,
-      unreapedProcessIds,
-      terminal.exitCode ?? undefined,
-    );
     if (terminal.exitCode !== 0) {
-      return createInvocationError(
-        'nonzero_exit',
-        `CLI agent exited with code ${String(terminal.exitCode)}`,
-        exitDiagnostics,
-        duration,
+      return fail(
+        new AgentInvocationError(
+          'nonzero_exit',
+          `CLI agent exited with code ${String(terminal.exitCode)}`,
+        ),
         rawExcerpt,
       );
     }
 
-    const stdout = capture.readStdout();
     try {
       return {
         status: 'ok',
-        raw: JSON.parse(stdout) as unknown,
-        diagnostics: exitDiagnostics,
+        raw: JSON.parse(capture.readStdout()) as unknown,
+        diagnostics,
         durationMs: duration(),
         rawExcerpt,
         warnings: [],
       };
     } catch (error) {
-      return createInvocationError(
-        'invalid_envelope',
-        'CLI agent stdout was not valid JSON',
-        exitDiagnostics,
-        duration,
+      return fail(
+        new AgentInvocationError('invalid_envelope', 'CLI agent stdout was not valid JSON', {
+          cause: error,
+        }),
         rawExcerpt,
-        error instanceof Error ? error : undefined,
       );
     }
   } finally {

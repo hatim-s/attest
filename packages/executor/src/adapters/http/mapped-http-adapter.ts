@@ -32,7 +32,10 @@ type MappedHttpInvokeOptions = {
   headers?: Record<string, string>;
   query?: Record<string, string>;
   secrets?: readonly string[];
+  /** The caller's cancellation; its abort is recorded as `cancelled`. */
   signal?: AbortSignal;
+  /** An extra deadline owned by an enclosing session; its abort is recorded as `timeout`. */
+  deadlineSignal?: AbortSignal;
 };
 
 /** Invokes a direct or polling mapped HTTP resource as one bounded Attest attempt. */
@@ -42,9 +45,13 @@ const invokeMappedHttpAgent = async (
   options: MappedHttpInvokeOptions = {},
 ): Promise<InvocationResult> => {
   const invocationDuration = startTimer();
-  const timeoutSignal = AbortSignal.timeout(agent.timeouts?.attempt_ms ?? DEFAULT_ATTEMPT_MS);
-  const signal =
-    options.signal === undefined ? timeoutSignal : AbortSignal.any([options.signal, timeoutSignal]);
+  const signal = AbortSignal.any(
+    [
+      AbortSignal.timeout(agent.timeouts?.attempt_ms ?? DEFAULT_ATTEMPT_MS),
+      options.signal,
+      options.deadlineSignal,
+    ].filter((candidate) => candidate !== undefined),
+  );
   const policy = {
     attemptSignal: signal,
     callerSignal: options.signal,
@@ -65,24 +72,12 @@ const invokeMappedHttpAgent = async (
       request,
       agent.limits?.request_bytes ?? DEFAULT_REQUEST_BYTES,
     );
+    const context = { retry: agent.retry, policy, signal, retryAttempts };
+    const { transport } = agent;
     const completed =
-      agent.transport.kind === 'http'
-        ? await runDirect(
-            agent as Parameters<typeof runDirect>[0],
-            request,
-            materialized,
-            policy,
-            signal,
-            retryAttempts,
-          )
-        : await runPolling(
-            agent as Parameters<typeof runPolling>[0],
-            request,
-            materialized,
-            policy,
-            signal,
-            retryAttempts,
-          );
+      transport.kind === 'http'
+        ? await runDirect(materialized, context)
+        : await runPolling(transport, request, materialized, context);
     terminalAttemptDurationMs = completed.durationMs;
     const { response } = completed;
     requireSuccessfulStatus(response);

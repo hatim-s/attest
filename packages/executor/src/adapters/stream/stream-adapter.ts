@@ -4,6 +4,7 @@ import { AgentInvocationError, abortedError } from '../../errors.js';
 import { abortableWait } from '../../internal/abortable-wait.js';
 import { DEFAULT_ATTEMPT_MS, DEFAULT_REQUEST_BYTES } from '../../internal/agent-defaults.js';
 import { startTimer } from '../../internal/elapsed.js';
+import { createFailedAttempt } from '../../internal/failed-attempt.js';
 import { createRawExcerpt } from '../../internal/raw-excerpt.js';
 import { retryBackoffDelay } from '../../internal/retry-backoff.js';
 import type { InvocationAttempt, InvocationResult } from '../../types.js';
@@ -30,23 +31,21 @@ const invokeStreamingAgent = async (
   request: AgentRequest,
   options: StreamInvokeOptions = {},
 ): Promise<InvocationResult> => {
-  const overallDeadline =
-    agent.timeouts?.run_ms === undefined ? undefined : Date.now() + agent.timeouts.run_ms;
-  const overallTimeout =
-    agent.timeouts?.run_ms === undefined ? undefined : AbortSignal.timeout(agent.timeouts.run_ms);
-  const overallSignal =
-    options.signal === undefined
-      ? overallTimeout
-      : overallTimeout === undefined
-        ? options.signal
-        : AbortSignal.any([options.signal, overallTimeout]);
+  const runMs = agent.timeouts?.run_ms;
+  const attemptMs = agent.timeouts?.attempt_ms ?? DEFAULT_ATTEMPT_MS;
+  const overallDeadline = runMs === undefined ? undefined : Date.now() + runMs;
+  const overallSignal = AbortSignal.any(
+    [options.signal, runMs === undefined ? undefined : AbortSignal.timeout(runMs)].filter(
+      (signal) => signal !== undefined,
+    ),
+  );
   const attempts: InvocationAttempt[] = [];
+  const conclude = (attempt: InvocationAttempt): InvocationResult => ({
+    ...attempt,
+    attempts: [...attempts, attempt],
+  });
   for (let retry = 0; ; retry += 1) {
-    const attemptTimeout = AbortSignal.timeout(agent.timeouts?.attempt_ms ?? DEFAULT_ATTEMPT_MS);
-    const attemptSignal =
-      overallSignal === undefined
-        ? attemptTimeout
-        : AbortSignal.any([overallSignal, attemptTimeout]);
+    const attemptSignal = AbortSignal.any([overallSignal, AbortSignal.timeout(attemptMs)]);
     const duration = startTimer();
     try {
       const materialized = materializeHttpRequest(
@@ -72,25 +71,23 @@ const invokeStreamingAgent = async (
         ),
         warnings: report.warnings,
       };
-      return { ...attempt, attempts: [...attempts, attempt] };
+      return conclude(attempt);
     } catch (error: unknown) {
       const normalized =
         error instanceof AgentInvocationError
           ? error
           : new AgentInvocationError('network', 'Streaming transport failed.', { cause: error });
-      const attempt: InvocationAttempt = {
-        status: 'invocation_error',
-        error: normalized,
-        diagnostics: {
-          ...(normalized.httpStatus === undefined ? {} : { httpStatus: normalized.httpStatus }),
-        },
+      const evidence = {
+        diagnostics:
+          normalized.httpStatus === undefined ? {} : { httpStatus: normalized.httpStatus },
         durationMs: duration(),
-        ...(normalized.rawExcerpt === undefined ? {} : { rawExcerpt: normalized.rawExcerpt }),
-        warnings: [],
+        rawExcerpt: normalized.rawExcerpt,
       };
+      const attempt = createFailedAttempt(normalized, evidence);
+      const boundedRetryAfter = normalized.httpStatus === 429 ? normalized.retryAfterMs : undefined;
       const retryableStatus =
         normalized.httpStatus === 408 ||
-        (normalized.httpStatus === 429 && normalized.retryAfterMs !== undefined) ||
+        boundedRetryAfter !== undefined ||
         (normalized.httpStatus ?? 0) >= 500;
       const retryable =
         normalized.code === 'network' || normalized.code === 'timeout' || retryableStatus;
@@ -100,7 +97,7 @@ const invokeStreamingAgent = async (
         normalized.applicationStarted === true ||
         normalized.code === 'cancelled'
       ) {
-        return { ...attempt, attempts: [...attempts, attempt] };
+        return conclude(attempt);
       }
       attempts.push(attempt);
       try {
@@ -108,15 +105,12 @@ const invokeStreamingAgent = async (
           overallDeadline === undefined
             ? Number.POSITIVE_INFINITY
             : Math.max(0, overallDeadline - Date.now());
-        const authoredDelay = retryBackoffDelay(agent.retry?.backoff, retry);
-        const delay =
-          normalized.httpStatus === 429 && normalized.retryAfterMs !== undefined
-            ? Math.min(
-                normalized.retryAfterMs,
-                agent.timeouts?.attempt_ms ?? DEFAULT_ATTEMPT_MS,
-                remainingOverall,
-              )
-            : Math.min(authoredDelay, remainingOverall);
+        // A 429 is retried only on its own Retry-After, bounded by one attempt deadline.
+        const requested =
+          boundedRetryAfter === undefined
+            ? retryBackoffDelay(agent.retry?.backoff, retry)
+            : Math.min(boundedRetryAfter, attemptMs);
+        const delay = Math.min(requested, remainingOverall);
         if (delay > 0) {
           await abortableWait(delay, overallSignal, () =>
             abortedError(options.signal, 'Streaming retry wait'),
@@ -124,8 +118,7 @@ const invokeStreamingAgent = async (
         }
       } catch (waitError: unknown) {
         const terminal = waitError instanceof AgentInvocationError ? waitError : normalized;
-        const failed: InvocationAttempt = { ...attempt, error: terminal };
-        return { ...failed, attempts: [...attempts, failed] };
+        return conclude(createFailedAttempt(terminal, evidence));
       }
     }
   }

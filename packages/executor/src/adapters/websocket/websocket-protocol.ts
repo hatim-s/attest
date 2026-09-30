@@ -4,7 +4,6 @@ import type {
   AgentRequest,
   AgentResource,
   JsonValue,
-  SecretReference,
   WebSocketErrorClassification,
 } from '@attest/contracts';
 import { WEBSOCKET_REQUEST_PROTOCOL } from '@attest/contracts';
@@ -53,9 +52,6 @@ type MessageInterpretation = {
   trace?: JsonValue;
 };
 
-const isSecretReference = (value: string | SecretReference): value is SecretReference =>
-  typeof value !== 'string';
-
 /** Maps transport failures onto the stable WebSocket evidence vocabulary. */
 const errorClassification = (error: AgentInvocationError): WebSocketErrorClassification => {
   if (error.classification !== undefined) return error.classification;
@@ -87,20 +83,24 @@ const materializeHeaders = (
         `WebSocket header ${name} is controlled by the runtime or unsupported.`,
       );
     }
-    if (normalized === 'authorization' && !isSecretReference(value)) {
-      throw new AgentInvocationError(
-        'invalid_envelope',
-        'Literal WebSocket authorization is unsupported.',
-      );
+    const resolved = resolvedByName.get(normalized)?.[1];
+    if (typeof value === 'string') {
+      if (normalized === 'authorization') {
+        throw new AgentInvocationError(
+          'invalid_envelope',
+          'Literal WebSocket authorization is unsupported.',
+        );
+      }
+      materialized.set(normalized, [name, resolved ?? value]);
+      continue;
     }
-    const resolved = resolvedByName.get(normalized);
-    if (isSecretReference(value) && resolved === undefined) {
+    if (resolved === undefined) {
       throw new AgentInvocationError(
         'invalid_envelope',
         `WebSocket secret header ${name} was not resolved at runtime.`,
       );
     }
-    materialized.set(normalized, [name, resolved?.[1] ?? (value as string)]);
+    materialized.set(normalized, [name, resolved]);
   }
 
   for (const [normalized, [name, value]] of resolvedByName) {
@@ -129,9 +129,11 @@ const materializeRequest = (
     }
     return value;
   };
-  const rendered = replace(agent.transport.request_template);
+  const rendered = Object.fromEntries(
+    Object.entries(agent.transport.request_template).map(([key, value]) => [key, replace(value)]),
+  );
   const text = JSON.stringify({
-    ...(rendered as Record<string, JsonValue>),
+    ...rendered,
     protocol: WEBSOCKET_REQUEST_PROTOCOL,
     request_id: requestId,
     request,
