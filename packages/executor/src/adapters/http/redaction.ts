@@ -56,4 +56,4 @@ const redactEventEvidence = (
   return redactTransportText(JSON.stringify(redacted), secrets);
 };
 
-export { REDACTED, redactEventEvidence, redactTransportText, secretRepresentations };
+export { redactEventEvidence, redactTransportText };

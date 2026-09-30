@@ -2,7 +2,7 @@ import type { AgentRequest } from '@attest/contracts';
 
 import { invokeCliAgent } from './cli-invoker.js';
 import { invokeHttpAgent } from './http-invoker.js';
-import { invokeWithRetries, isRetryableInvocationError } from './internal/invocation-retry.js';
+import { invokeWithRetries } from './internal/invocation-retry.js';
 import type {
   InvocationAttempt,
   InvocationResult,
@@ -40,4 +40,4 @@ const invokeAgent = async (
   return invokeWithRetries(() => invokeOnce(target, request, options), options.retries);
 };
 
-export { invokeAgent, isRetryableInvocationError };
+export { invokeAgent };

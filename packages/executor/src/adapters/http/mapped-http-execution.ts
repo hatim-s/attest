@@ -16,7 +16,14 @@ import { assertStaticUrlAuthority, type MaterializedHttpRequest } from './reques
 import { redactTransportText } from './redaction.js';
 import { parseRetryAfter } from './retry-after.js';
 import { requireSameOrigin } from './url-security.js';
-import type { CompletedHttpResponse, HttpAgentResource } from './mapped-http-types.js';
+import type { HttpAgentResource } from './mapped-http-adapter.js';
+
+/** The successful response that ends a direct or polling exchange, with its request timing. */
+type CompletedHttpResponse = {
+  durationMs: number;
+  remoteJobId?: string | number;
+  response: HttpJsonResponse;
+};
 
 const REMOTE_ERROR_FALLBACK = 'The mapped HTTP agent reported an error.';
 
@@ -463,7 +470,6 @@ const runPolling = async (
 };
 
 export {
-  assertPollingConfiguration,
   attemptFromError,
   extractAgentResponse,
   extractRemoteJobId,

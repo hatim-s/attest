@@ -1,4 +1,4 @@
-import { parseAgentResponse, type AgentRequest } from '@attest/contracts';
+import { parseAgentResponse, type AgentRequest, type AgentResource } from '@attest/contracts';
 
 import { AgentInvocationError, abortedError } from '../../errors.js';
 import { abortableWait } from '../../internal/abortable-wait.js';
@@ -10,7 +10,19 @@ import type { InvocationAttempt, InvocationResult } from '../../types.js';
 import { materializeHttpRequest, resolveRequestTemplate } from '../http/request-template.js';
 import { redactTransportText } from '../http/redaction.js';
 import { streamOnce } from './stream-transport.js';
-import type { StreamAgentResource, StreamInvokeOptions } from './types.js';
+
+/** An agent that answers over an SSE or JSONL HTTP stream. */
+type StreamAgentResource = AgentResource & {
+  transport: Extract<AgentResource['transport'], { kind: 'stream' }>;
+};
+
+/** Runtime-resolved request values and cancellation for one streaming invocation. */
+type StreamInvokeOptions = {
+  headers?: Record<string, string>;
+  query?: Record<string, string>;
+  secrets?: readonly string[];
+  signal?: AbortSignal;
+};
 
 /** Invokes one external SSE or JSONL agent with bounded evidence and pre-event retries only. */
 const invokeStreamingAgent = async (

@@ -26,8 +26,8 @@ import { materializeHttpRequest } from '../http/request-template.js';
 import { redactEventEvidence, redactTransportText } from '../http/redaction.js';
 import { parseRetryAfter } from '../http/retry-after.js';
 import { resolveSafeHttpUrl } from '../http/url-security.js';
-import { SseParser } from './sse-parser.js';
-import type { StreamAgentResource, StreamEvent, StreamInvokeOptions } from './types.js';
+import { SseParser, type StreamEvent } from './sse-parser.js';
+import type { StreamAgentResource, StreamInvokeOptions } from './stream-adapter.js';
 
 /** Reads one HTTP stream with separate transport/application idle clocks and hard event caps. */
 const consumeResponse = async (

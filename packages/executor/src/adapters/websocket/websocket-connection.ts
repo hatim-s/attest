@@ -249,7 +249,6 @@ const openWebSocket = async (options: OpenWebSocketOptions): Promise<WebSocketCo
 export {
   WebSocketConnection,
   openWebSocket,
-  type OpenWebSocketOptions,
   type WebSocketClose,
   type WebSocketConnectionCallbacks,
 };

@@ -34,7 +34,7 @@ const READINESS_BUFFER_CHARACTERS = 16 * 1024;
 const loopbackHost = (hostname: string): boolean => {
   if (hostname === 'localhost') return true;
   if (isIP(hostname) === 4) return hostname.startsWith('127.');
-  return hostname === '::1' || hostname === '[::1]';
+  return hostname === '::1';
 };
 
 /** Prevents a managed local process definition from becoming a general network pivot. */

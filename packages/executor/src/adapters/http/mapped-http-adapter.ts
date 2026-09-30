@@ -1,4 +1,4 @@
-import { parseAgentResponse, type AgentRequest } from '@attest/contracts';
+import { parseAgentResponse, type AgentRequest, type AgentResource } from '@attest/contracts';
 
 import { AgentInvocationError, abortedError } from '../../errors.js';
 import {
@@ -13,7 +13,6 @@ import { startTimer } from '../../internal/elapsed.js';
 import type { InvocationAttempt, InvocationResult } from '../../types.js';
 import { materializeHttpRequest, resolveRequestTemplate } from './request-template.js';
 import {
-  assertPollingConfiguration,
   attemptFromError,
   extractAgentResponse,
   extractRemoteJobId,
@@ -22,7 +21,19 @@ import {
   runDirect,
   runPolling,
 } from './mapped-http-execution.js';
-import type { HttpAgentResource, MappedHttpInvokeOptions } from './mapped-http-types.js';
+
+/** An agent reached over plain HTTP, either answering directly or through submit-and-poll. */
+type HttpAgentResource = AgentResource & {
+  transport: Extract<AgentResource['transport'], { kind: 'http' | 'polling' }>;
+};
+
+/** Runtime-resolved request values and cancellation for one mapped HTTP invocation. */
+type MappedHttpInvokeOptions = {
+  headers?: Record<string, string>;
+  query?: Record<string, string>;
+  secrets?: readonly string[];
+  signal?: AbortSignal;
+};
 
 /** Invokes a direct or polling mapped HTTP resource as one bounded Attest attempt. */
 const invokeMappedHttpAgent = async (
@@ -47,7 +58,6 @@ const invokeMappedHttpAgent = async (
   let terminalAttemptDurationMs: number | undefined;
   try {
     if (signal.aborted) throw abortedError(options.signal, 'Mapped HTTP invocation');
-    if (agent.transport.kind === 'polling') assertPollingConfiguration(agent.transport);
     const requestTemplate =
       agent.transport.kind === 'http' ? agent.transport.request : agent.transport.submit;
     const materialized = materializeHttpRequest(

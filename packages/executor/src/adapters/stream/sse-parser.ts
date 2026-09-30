@@ -1,4 +1,5 @@
-import type { StreamEvent } from './types.js';
+/** One decoded stream record; heartbeats carry no payload but still count toward caps. */
+type StreamEvent = { eventName?: string; heartbeat: boolean; raw: unknown; source: string };
 
 /** Converts bounded SSE bytes into complete events while preserving comment heartbeats. */
 class SseParser {
@@ -37,4 +38,4 @@ class SseParser {
   }
 }
 
-export { SseParser };
+export { SseParser, type StreamEvent };
