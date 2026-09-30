@@ -17,22 +17,6 @@ type WebSocketAgentResource = AgentResource & {
   transport: Extract<AgentResource['transport'], { kind: 'websocket' }>;
 };
 
-type ClassifiedError = AgentInvocationError & {
-  webSocketClassification?: WebSocketErrorClassification;
-};
-
-/** Attaches the evidence classification without widening the public error taxonomy. */
-const classifiedError = (
-  classification: WebSocketErrorClassification,
-  code: AgentInvocationError['code'],
-  message: string,
-  cause?: unknown,
-): ClassifiedError =>
-  Object.assign(
-    new AgentInvocationError(code, message, cause === undefined ? undefined : { cause }),
-    { webSocketClassification: classification },
-  );
-
 const DEFAULT_REQUEST_BYTES = 10 * 1024 * 1024;
 const FORBIDDEN_HANDSHAKE_HEADERS = new Set([
   'connection',
@@ -103,8 +87,8 @@ const remoteError = (value: unknown): { code?: string; message: string } => {
 };
 
 /** Maps transport failures onto the stable WebSocket evidence vocabulary. */
-const errorClassification = (error: ClassifiedError): WebSocketErrorClassification => {
-  if (error.webSocketClassification !== undefined) return error.webSocketClassification;
+const errorClassification = (error: AgentInvocationError): WebSocketErrorClassification => {
+  if (error.classification !== undefined) return error.classification;
   if (error.code === 'cancelled') return 'cancelled';
   if (error.code === 'timeout') return 'attempt_timeout';
   if (error.code === 'invalid_envelope') return 'invalid_json';
@@ -338,7 +322,6 @@ const waitForRetry = async (delayMs: number, signal?: AbortSignal): Promise<void
 
 export {
   DEFAULT_REQUEST_BYTES,
-  classifiedError,
   correlationId,
   errorClassification,
   interpretServerMessage,

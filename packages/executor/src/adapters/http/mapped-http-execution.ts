@@ -26,7 +26,6 @@ import type {
   CompletedHttpResponse,
   HttpAgentResource,
   MappedHttpInvokeOptions,
-  TimedInvocationError,
 } from './mapped-http-types.js';
 
 const isJsonValue = (value: unknown): value is JsonValue => {
@@ -169,13 +168,7 @@ const wait = async (
   });
 };
 
-const attemptFromError = (
-  error: AgentInvocationError & {
-    httpStatus?: number;
-    rawExcerpt?: InvocationAttempt['rawExcerpt'];
-  },
-  durationMs: number,
-): InvocationAttempt => ({
+const attemptFromError = (error: AgentInvocationError, durationMs: number): InvocationAttempt => ({
   status: 'invocation_error',
   error,
   diagnostics: { ...(error.httpStatus === undefined ? {} : { httpStatus: error.httpStatus }) },
@@ -188,7 +181,10 @@ const attemptFromError = (
 const withAttemptDuration = (
   error: AgentInvocationError,
   durationMs: number,
-): TimedInvocationError => Object.assign(error, { attemptDurationMs: durationMs });
+): AgentInvocationError => {
+  error.attemptDurationMs = durationMs;
+  return error;
+};
 
 const normalizeFailure = (
   error: unknown,
@@ -220,16 +216,11 @@ const withResolvedValues = (
   query: { ...template.query, ...options.query },
 });
 
-const statusError = (
-  response: HttpJsonResponse,
-): AgentInvocationError & {
-  httpStatus: number;
-  rawExcerpt: InvocationAttempt['rawExcerpt'];
-} =>
-  Object.assign(
-    new AgentInvocationError('http_status', `Mapped HTTP returned status ${response.status}.`),
-    { httpStatus: response.status, rawExcerpt: response.rawExcerpt },
-  );
+const statusError = (response: HttpJsonResponse): AgentInvocationError =>
+  new AgentInvocationError('http_status', `Mapped HTTP returned status ${response.status}.`, {
+    httpStatus: response.status,
+    rawExcerpt: response.rawExcerpt,
+  });
 
 const requireSuccessfulStatus = (response: HttpJsonResponse): void => {
   if (response.status >= 200 && response.status < 300) return;
@@ -380,18 +371,16 @@ const pollingFailure = (
   transport: Extract<HttpAgentResource['transport'], { kind: 'polling' }>,
   response: HttpJsonResponse,
   secrets: readonly string[],
-): AgentInvocationError & { rawExcerpt: InvocationAttempt['rawExcerpt'] } => {
+): AgentInvocationError => {
   const extracted =
     transport.extraction.error_pointer === undefined
       ? undefined
       : readJsonPointer(response.raw, transport.extraction.error_pointer);
-  return Object.assign(
-    new AgentInvocationError(
-      'invalid_envelope',
-      extracted === undefined || extracted === null
-        ? 'Mapped HTTP polling reached a configured failure state.'
-        : redactTransportText(errorFromExtracted(extracted).message, secrets),
-    ),
+  return new AgentInvocationError(
+    'invalid_envelope',
+    extracted === undefined || extracted === null
+      ? 'Mapped HTTP polling reached a configured failure state.'
+      : redactTransportText(errorFromExtracted(extracted).message, secrets),
     { rawExcerpt: response.rawExcerpt },
   );
 };

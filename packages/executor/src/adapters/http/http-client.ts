@@ -114,17 +114,10 @@ const readResponseBody = async (
           policy.secrets,
         );
         destroyAndReject(
-          Object.assign(
-            new AgentInvocationError(
-              'output_cap_exceeded',
-              `Mapped HTTP response exceeds the ${policy.responseCapBytes}-byte response cap.`,
-            ),
-            {
-              rawExcerpt: {
-                ...createRawExcerpt(prefix),
-                truncated: true,
-              },
-            },
+          new AgentInvocationError(
+            'output_cap_exceeded',
+            `Mapped HTTP response exceeds the ${policy.responseCapBytes}-byte response cap.`,
+            { rawExcerpt: { ...createRawExcerpt(prefix), truncated: true } },
           ),
         );
         return;
@@ -145,15 +138,13 @@ const readResponseBody = async (
       } catch (error: unknown) {
         finish(() =>
           reject(
-            Object.assign(
-              new AgentInvocationError(
-                'invalid_envelope',
-                'Mapped HTTP response is not valid JSON.',
-                {
-                  cause: error,
-                },
-              ),
-              { rawExcerpt },
+            new AgentInvocationError(
+              'invalid_envelope',
+              'Mapped HTTP response is not valid JSON.',
+              {
+                cause: error,
+                rawExcerpt,
+              },
             ),
           ),
         );
@@ -272,8 +263,9 @@ const requestJson = async (
     if (![307, 308].includes(response.status)) return response;
     const location = response.headers.location;
     if (location === undefined || redirects === MAX_REDIRECTS) {
-      throw Object.assign(
-        new AgentInvocationError('http_status', `Mapped HTTP returned status ${response.status}.`),
+      throw new AgentInvocationError(
+        'http_status',
+        `Mapped HTTP returned status ${response.status}.`,
         { httpStatus: response.status, rawExcerpt: response.rawExcerpt },
       );
     }

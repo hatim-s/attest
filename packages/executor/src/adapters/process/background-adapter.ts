@@ -159,9 +159,7 @@ class BackgroundAgentSession {
     } catch (error: unknown) {
       const diagnostics = session.startupDiagnostics();
       await session.close();
-      if (error instanceof AgentInvocationError) {
-        throw Object.assign(error, { diagnostics });
-      }
+      if (error instanceof AgentInvocationError) error.diagnostics = diagnostics;
       throw error;
     }
   }

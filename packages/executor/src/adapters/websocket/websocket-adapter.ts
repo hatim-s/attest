@@ -27,7 +27,6 @@ import {
 } from './websocket-evidence.js';
 import {
   DEFAULT_REQUEST_BYTES,
-  classifiedError,
   correlationId,
   errorClassification,
   interpretServerMessage,
@@ -200,11 +199,9 @@ class WebSocketAgentSession {
           recordClose(this.agent, pending, this.secrets, close);
           if (this.pending.has(requestId)) {
             lose(
-              classifiedError(
-                'unexpected_close',
-                'network',
-                'WebSocket closed before a terminal response.',
-              ),
+              new AgentInvocationError('network', 'WebSocket closed before a terminal response.', {
+                classification: 'unexpected_close',
+              }),
             );
           }
         },
@@ -228,7 +225,9 @@ class WebSocketAgentSession {
           this.agent,
           pending,
           this.secrets,
-          classifiedError('close_timeout', 'timeout', 'WebSocket close handshake timed out.'),
+          new AgentInvocationError('timeout', 'WebSocket close handshake timed out.', {
+            classification: 'close_timeout',
+          }),
           'close_timeout',
           terminal.attempts.slice(0, -1),
         );
@@ -438,7 +437,9 @@ class WebSocketAgentSession {
       () =>
         void this.retryOrSettle(
           pending,
-          classifiedError('attempt_timeout', 'timeout', 'WebSocket attempt timed out.'),
+          new AgentInvocationError('timeout', 'WebSocket attempt timed out.', {
+            classification: 'attempt_timeout',
+          }),
           'attempt_timeout',
         ),
       this.agent.transport.attempt_timeout_ms,
@@ -447,7 +448,9 @@ class WebSocketAgentSession {
       pending.callerAbort = () => {
         this.settleFailure(
           pending,
-          classifiedError('cancelled', 'cancelled', 'WebSocket request was cancelled.'),
+          new AgentInvocationError('cancelled', 'WebSocket request was cancelled.', {
+            classification: 'cancelled',
+          }),
           'cancelled',
         );
         if (this.agent.transport.lifecycle === 'per_case') pending.connection?.destroy();
@@ -463,7 +466,9 @@ class WebSocketAgentSession {
       () =>
         void this.retryOrSettle(
           pending,
-          classifiedError('message_idle_timeout', 'timeout', 'WebSocket message became idle.'),
+          new AgentInvocationError('timeout', 'WebSocket message became idle.', {
+            classification: 'message_idle_timeout',
+          }),
           'message_idle_timeout',
         ),
       this.agent.transport.message_idle_timeout_ms,
@@ -564,10 +569,10 @@ class WebSocketAgentSession {
     if (generation !== this.connectionGeneration || this.connection === undefined) return;
     this.connection = undefined;
     if (this.pingTimer !== undefined) clearInterval(this.pingTimer);
-    const error = classifiedError(
-      'unexpected_close',
+    const error = new AgentInvocationError(
       'network',
       'WebSocket disconnected before requests settled.',
+      { classification: 'unexpected_close' },
     );
     for (const pending of [...this.pending.values()]) {
       recordClose(this.agent, pending, this.secrets, close);
@@ -644,7 +649,9 @@ class WebSocketAgentSession {
       if (connection === undefined) return;
       const close = await connection.close(this.agent.transport.close_timeout_ms);
       if (!close.clean) {
-        throw classifiedError('close_timeout', 'timeout', 'WebSocket close handshake timed out.');
+        throw new AgentInvocationError('timeout', 'WebSocket close handshake timed out.', {
+          classification: 'close_timeout',
+        });
       }
     })();
     return this.closePromise;

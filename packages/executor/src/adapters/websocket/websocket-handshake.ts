@@ -3,9 +3,8 @@ import { request as httpRequest } from 'node:http';
 import { request as httpsRequest } from 'node:https';
 import type { Duplex } from 'node:stream';
 
-import type { AgentInvocationError } from '../../errors.js';
+import { AgentInvocationError } from '../../errors.js';
 import { resolveSafeHttpUrl } from '../http/url-security.js';
-import { classifiedError } from './websocket-protocol.js';
 
 type OpenWebSocketHandshakeOptions = {
   callerSignal?: AbortSignal;
@@ -22,10 +21,6 @@ type WebSocketUpgrade = {
   socket: Duplex;
 };
 
-type ClassifiedWebSocketError = AgentInvocationError & {
-  webSocketClassification?: 'connection_failed' | 'handshake_failed' | 'open_timeout';
-};
-
 const WEBSOCKET_GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11';
 
 /** Opens a DNS-pinned RFC 6455 socket and validates the complete upgrade response. */
@@ -36,7 +31,10 @@ const openWebSocketHandshake = async (
   try {
     webSocketUrl = new URL(options.url);
   } catch (cause: unknown) {
-    throw classifiedError('connection_failed', 'network', 'WebSocket URL is invalid.', cause);
+    throw new AgentInvocationError('network', 'WebSocket URL is invalid.', {
+      cause,
+      classification: 'connection_failed',
+    });
   }
   if (
     !['ws:', 'wss:'].includes(webSocketUrl.protocol) ||
@@ -44,10 +42,10 @@ const openWebSocketHandshake = async (
     webSocketUrl.password.length > 0 ||
     webSocketUrl.hash.length > 0
   ) {
-    throw classifiedError(
-      'connection_failed',
+    throw new AgentInvocationError(
       'network',
       'WebSocket URL must use WS(S) without credentials or a fragment.',
+      { classification: 'connection_failed' },
     );
   }
 
@@ -60,10 +58,10 @@ const openWebSocketHandshake = async (
     options.callerSignal,
   );
   if (options.secrets.length > 0 && webSocketUrl.protocol !== 'wss:' && !resolved.loopback) {
-    throw classifiedError(
-      'connection_failed',
+    throw new AgentInvocationError(
       'network',
       'WebSocket secrets require WSS except on explicit loopback endpoints.',
+      { classification: 'connection_failed' },
     );
   }
 
@@ -99,10 +97,10 @@ const openWebSocketHandshake = async (
       const cancelled = options.callerSignal?.aborted === true;
       finish(() =>
         reject(
-          classifiedError(
-            'open_timeout',
+          new AgentInvocationError(
             cancelled ? 'cancelled' : 'timeout',
             cancelled ? 'WebSocket opening was cancelled.' : 'WebSocket opening timed out.',
+            { classification: 'open_timeout' },
           ),
         ),
       );
@@ -110,7 +108,11 @@ const openWebSocketHandshake = async (
     const openTimer = setTimeout(() => {
       outgoing.destroy();
       finish(() =>
-        reject(classifiedError('open_timeout', 'timeout', 'WebSocket opening timed out.')),
+        reject(
+          new AgentInvocationError('timeout', 'WebSocket opening timed out.', {
+            classification: 'open_timeout',
+          }),
+        ),
       );
     }, options.openTimeoutMs);
     options.signal.addEventListener('abort', abort, { once: true });
@@ -127,7 +129,9 @@ const openWebSocketHandshake = async (
         socket.destroy();
         finish(() =>
           reject(
-            classifiedError('handshake_failed', 'network', 'WebSocket handshake was rejected.'),
+            new AgentInvocationError('network', 'WebSocket handshake was rejected.', {
+              classification: 'handshake_failed',
+            }),
           ),
         );
         return;
@@ -138,10 +142,10 @@ const openWebSocketHandshake = async (
       response.resume();
       finish(() =>
         reject(
-          classifiedError(
-            'handshake_failed',
+          new AgentInvocationError(
             'network',
             `WebSocket handshake returned status ${String(response.statusCode ?? 0)}.`,
+            { classification: 'handshake_failed' },
           ),
         ),
       );
@@ -149,7 +153,10 @@ const openWebSocketHandshake = async (
     outgoing.once('error', (error) =>
       finish(() =>
         reject(
-          classifiedError('connection_failed', 'network', 'WebSocket connection failed.', error),
+          new AgentInvocationError('network', 'WebSocket connection failed.', {
+            cause: error,
+            classification: 'connection_failed',
+          }),
         ),
       ),
     );
@@ -158,4 +165,4 @@ const openWebSocketHandshake = async (
   });
 };
 
-export { openWebSocketHandshake, type ClassifiedWebSocketError };
+export { openWebSocketHandshake };

@@ -6,7 +6,7 @@ import {
   encodeWebSocketFrame,
   type WebSocketCloseFrame,
 } from './websocket-frame.js';
-import { openWebSocketHandshake, type ClassifiedWebSocketError } from './websocket-handshake.js';
+import { openWebSocketHandshake } from './websocket-handshake.js';
 
 type WebSocketClose = { clean: boolean; code?: number; reason?: string };
 
@@ -249,7 +249,6 @@ const openWebSocket = async (options: OpenWebSocketOptions): Promise<WebSocketCo
 export {
   WebSocketConnection,
   openWebSocket,
-  type ClassifiedWebSocketError,
   type OpenWebSocketOptions,
   type WebSocketClose,
   type WebSocketConnectionCallbacks,

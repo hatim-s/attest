@@ -15,11 +15,7 @@ import {
   runPolling,
   withResolvedValues,
 } from './mapped-http-execution.js';
-import type {
-  HttpAgentResource,
-  MappedHttpInvokeOptions,
-  TimedInvocationError,
-} from './mapped-http-types.js';
+import type { HttpAgentResource, MappedHttpInvokeOptions } from './mapped-http-types.js';
 
 const DEFAULT_ATTEMPT_MS = 60_000;
 const DEFAULT_CONNECT_MS = 10_000;
@@ -116,15 +112,10 @@ const invokeMappedHttpAgent = async (
     };
     return { ...attempt, attempts: [...retryAttempts, attempt] };
   } catch (error: unknown) {
-    const normalized = normalizeFailure(error, signal, options.signal) as AgentInvocationError & {
-      httpStatus?: number;
-      rawExcerpt?: InvocationAttempt['rawExcerpt'];
-    };
+    const normalized = normalizeFailure(error, signal, options.signal);
     const attempt = attemptFromError(
       normalized,
-      (normalized as TimedInvocationError).attemptDurationMs ??
-        terminalAttemptDurationMs ??
-        invocationDuration(),
+      normalized.attemptDurationMs ?? terminalAttemptDurationMs ?? invocationDuration(),
     );
     return { ...attempt, attempts: [...retryAttempts, attempt] };
   }

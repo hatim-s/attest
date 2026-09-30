@@ -17,12 +17,7 @@ import { redactEventEvidence, redactTransportText } from '../http/redaction.js';
 import { parseRetryAfter } from '../http/retry-after.js';
 import { resolveSafeHttpUrl } from '../http/url-security.js';
 import { SseParser } from './sse-parser.js';
-import type {
-  StreamAgentResource,
-  StreamEvent,
-  StreamFailure,
-  StreamInvokeOptions,
-} from './types.js';
+import type { StreamAgentResource, StreamEvent, StreamInvokeOptions } from './types.js';
 
 const DEFAULT_CONNECT_MS = 10_000;
 const DEFAULT_FIRST_BYTE_MS = 30_000;
@@ -79,7 +74,7 @@ const consumeResponse = async (
     let transportIdle: NodeJS.Timeout;
     let applicationIdle: NodeJS.Timeout;
 
-    const fail = (error: StreamFailure): void => {
+    const fail = (error: AgentInvocationError): void => {
       error.applicationStarted = applicationStarted;
       error.rawExcerpt = createRawExcerpt(evidence);
       finish(() => reject(error));
@@ -346,16 +341,14 @@ const streamOnce = async (
         const status = response.statusCode ?? 0;
         if (status < 200 || status >= 300) {
           response.destroy();
-          const error = Object.assign(
-            new AgentInvocationError(
-              'http_status',
-              `Streaming HTTP returned status ${String(status)}.`,
-            ),
+          const error = new AgentInvocationError(
+            'http_status',
+            `Streaming HTTP returned status ${String(status)}.`,
             {
               httpStatus: status,
               retryAfterMs: parseRetryAfter(response.headersDistinct['retry-after']?.[0]),
             },
-          ) as StreamFailure;
+          );
           finish(() => reject(error));
           return;
         }

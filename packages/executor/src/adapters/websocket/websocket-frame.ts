@@ -1,7 +1,6 @@
 import { randomBytes } from 'node:crypto';
 
 import { AgentInvocationError } from '../../errors.js';
-import { classifiedError } from './websocket-protocol.js';
 
 type WebSocketCloseFrame = {
   code?: number;
@@ -127,11 +126,9 @@ class WebSocketFrameDecoder {
     }
     if (opcode === 0x2 || (opcode === 0x0 && this.fragmentedOpcode === 0x2)) {
       this.fail(
-        classifiedError(
-          'binary_frame_unsupported',
-          'invalid_envelope',
-          'Binary WebSocket frames are unsupported.',
-        ),
+        new AgentInvocationError('invalid_envelope', 'Binary WebSocket frames are unsupported.', {
+          classification: 'binary_frame_unsupported',
+        }),
       );
       return;
     }
@@ -177,12 +174,10 @@ class WebSocketFrameDecoder {
       this.callbacks.onText(text, complete.byteLength);
     } catch (cause: unknown) {
       this.fail(
-        classifiedError(
-          'invalid_json',
-          'invalid_envelope',
-          'WebSocket text is not valid UTF-8.',
+        new AgentInvocationError('invalid_envelope', 'WebSocket text is not valid UTF-8.', {
           cause,
-        ),
+          classification: 'invalid_json',
+        }),
       );
     }
   }
@@ -217,7 +212,12 @@ class WebSocketFrameDecoder {
   }
 
   private protocolFailure(message: string, cause?: unknown): void {
-    this.fail(classifiedError('connection_failed', 'invalid_envelope', message, cause));
+    this.fail(
+      new AgentInvocationError('invalid_envelope', message, {
+        ...(cause === undefined ? {} : { cause }),
+        classification: 'connection_failed',
+      }),
+    );
   }
 
   private fail(error: AgentInvocationError): void {

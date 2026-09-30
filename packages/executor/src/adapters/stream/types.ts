@@ -1,8 +1,5 @@
 import type { AgentResource } from '@attest/contracts';
 
-import type { AgentInvocationError } from '../../errors.js';
-import type { InvocationAttempt } from '../../types.js';
-
 type StreamAgentResource = AgentResource & {
   transport: Extract<AgentResource['transport'], { kind: 'stream' }>;
 };
@@ -15,11 +12,5 @@ type StreamInvokeOptions = {
 };
 
 type StreamEvent = { eventName?: string; heartbeat: boolean; raw: unknown; source: string };
-type StreamFailure = AgentInvocationError & {
-  applicationStarted?: boolean;
-  httpStatus?: number;
-  rawExcerpt?: InvocationAttempt['rawExcerpt'];
-  retryAfterMs?: number;
-};
 
-export { type StreamAgentResource, type StreamEvent, type StreamFailure, type StreamInvokeOptions };
+export { type StreamAgentResource, type StreamEvent, type StreamInvokeOptions };

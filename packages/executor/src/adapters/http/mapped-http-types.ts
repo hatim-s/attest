@@ -1,6 +1,5 @@
 import type { AgentResource } from '@attest/contracts';
 
-import { AgentInvocationError } from '../../errors.js';
 import type { HttpJsonResponse } from './http-client.js';
 
 type HttpAgentResource = AgentResource & {
@@ -20,13 +19,4 @@ type CompletedHttpResponse = {
   response: HttpJsonResponse;
 };
 
-type TimedInvocationError = AgentInvocationError & {
-  attemptDurationMs?: number;
-};
-
-export {
-  type CompletedHttpResponse,
-  type HttpAgentResource,
-  type MappedHttpInvokeOptions,
-  type TimedInvocationError,
-};
+export { type CompletedHttpResponse, type HttpAgentResource, type MappedHttpInvokeOptions };

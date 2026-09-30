@@ -12,7 +12,7 @@ import {
 } from '../http/request-template.js';
 import { redactTransportText } from '../http/redaction.js';
 import { streamOnce } from './stream-transport.js';
-import type { StreamAgentResource, StreamFailure, StreamInvokeOptions } from './types.js';
+import type { StreamAgentResource, StreamInvokeOptions } from './types.js';
 
 const DEFAULT_ATTEMPT_MS = 60_000;
 const DEFAULT_REQUEST_BYTES = 10 * 1024 * 1024;
@@ -122,11 +122,10 @@ const invokeStreamingAgent = async (
       };
       return { ...attempt, attempts: [...attempts, attempt] };
     } catch (error: unknown) {
-      const normalized = (
+      const normalized =
         error instanceof AgentInvocationError
           ? error
-          : new AgentInvocationError('network', 'Streaming transport failed.', { cause: error })
-      ) as StreamFailure;
+          : new AgentInvocationError('network', 'Streaming transport failed.', { cause: error });
       const attempt: InvocationAttempt = {
         status: 'invocation_error',
         error: normalized,
