@@ -97,7 +97,12 @@ const resolveContainedPath = async (
         options.createDirectories === true && (!destination || options.expect === 'directory');
       // Once an entry is missing and not created here, the rest of the path is only lexical.
       if (!createHere) break;
-      await mkdir(current, { mode: 0o700 });
+      try {
+        await mkdir(current, { mode: 0o700 });
+      } catch (error: unknown) {
+        // Another worker may create a shared parent; validate its entry below before using it.
+        if (errnoCode(error) !== 'EEXIST') throw error;
+      }
       metadata = await lstat(current);
     }
     if (metadata.isSymbolicLink()) throw options.problem('symlink');
