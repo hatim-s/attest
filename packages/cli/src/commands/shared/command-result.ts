@@ -1,165 +1,100 @@
 import type {
   ApplicationCommandResult,
-  CommandResult as LocalCommandResult,
+  MutationImportResult,
   MutationResult,
   ResourceListResult,
 } from '@attest/local';
-import type { JsonValue } from '@attest/contracts';
 
 import { createCliSuccessResult, serializeCliResult } from '../../output/cli-protocol.js';
 
-type SchemaListResult = {
-  items: readonly {
-    file: string;
-    id: string;
-  }[];
-};
+type SemanticOperation = MutationResult['operations'][number];
 
-type SchemaPrintResult = {
-  file: string;
-  id: string;
-  schema: JsonValue;
-};
-
-type CommandResult =
-  | ApplicationCommandResult
-  | LocalCommandResult<'schema-list', SchemaListResult>
-  | LocalCommandResult<'schema-print', SchemaPrintResult>;
-
-const renderAgentMutation = (
-  command: string,
-  result: MutationResult,
-  projectHash?: string | null,
-): string => {
-  const operationLines = result.operations.map((operation) => {
-    const renamed = operation.previous_id === undefined ? '' : ` from ${operation.previous_id}`;
-    const changes = operation.changes.map(({ path }) => path).join(', ');
-    const references = [
-      ...operation.references_added.map(({ id }) => `+ref:${id}`),
-      ...operation.references_removed.map(({ id }) => `-ref:${id}`),
-    ].join(', ');
-    const details = [changes, references].filter((value) => value.length > 0).join('; ');
-    return `- ${operation.op} ${operation.resource.type} ${operation.resource.id}${renamed}${details.length === 0 ? '' : ` (${details})`}`;
-  });
-  return [
-    `${command} ${result.dry_run ? 'preview' : 'changes'}:`,
-    ...(operationLines.length === 0 ? ['- no semantic changes'] : operationLines),
-    ...(result.warnings ?? []).map((warning) => `Warning: ${warning}`),
-    ...(result.import_preview === undefined
-      ? []
-      : [`Redacted definition preview: ${JSON.stringify(result.import_preview)}`]),
-    `${command} ${result.dry_run ? 'would apply' : 'applied'} ${result.operations.length} operation(s).`,
-    ...(projectHash === undefined || projectHash === null ? [] : [`Project hash: ${projectHash}`]),
-    ...(!result.dry_run && result.next_command !== undefined
-      ? [`Next: ${result.next_command}`]
-      : []),
-  ].join('\n');
-};
-
-const renderMetricMutation = (result: MutationResult, projectHash?: string | null): string => {
-  if (result.resource === undefined) return '';
-  return [
-    `${result.dry_run ? 'Dry run: would update' : 'Updated'} metric ${result.resource.id}.`,
-    ...(result.dry_run
-      ? [
-          'Semantic diff:',
-          ...result.operations.map((operation) => {
-            const previous =
-              operation.previous_id === undefined ? '' : ` from ${operation.previous_id}`;
-            return `  ${operation.op} ${operation.resource.type} ${operation.resource.id}${previous}`;
-          }),
-          'Next: remove `--dry-run` to apply these changes.',
-        ]
-      : []),
-    ...(projectHash === undefined || projectHash === null ? [] : [`Project hash: ${projectHash}`]),
-  ].join('\n');
-};
-
-const renderTestMutationOperations = (operations: MutationResult['operations']): string[] =>
-  operations.flatMap((operation) => [
-    `  ${operation.op} ${operation.resource.type} ${operation.resource.id}`,
-    ...operation.changes.map(({ change, path }) => `    ${change} ${path || '/'}`),
-    ...operation.references_added.map(
-      ({ id, path, type }) => `    reference added: ${type} ${id} at ${path}`,
-    ),
-    ...operation.references_removed.map(
-      ({ id, path, type }) => `    reference removed: ${type} ${id} at ${path}`,
-    ),
-  ]);
-
-const renderImportSummary = (
-  result: NonNullable<MutationResult['import']>,
-  includePreview: boolean,
-): string[] => [
-  `Import: read ${result.counts.read}, inserted ${result.counts.inserted}, updated ${result.counts.updated}, skipped ${result.counts.skipped}.`,
-  ...(includePreview
-    ? [
-        'Redacted normalized preview (up to 5 rows):',
-        ...(result.preview.length === 0
-          ? ['  <empty>']
-          : result.preview.map((row) => `  ${JSON.stringify(row)}`)),
-      ]
-    : []),
+const renderOperation = (operation: SemanticOperation): string[] => [
+  `  ${operation.op} ${operation.resource.type} ${operation.resource.id}${operation.previous_id === undefined ? '' : ` from ${operation.previous_id}`}`,
+  ...operation.changes.map(({ change, path }) => `    ${change} ${path || '/'}`),
+  ...operation.references_added.map(
+    ({ id, path, type }) => `    reference added: ${type} ${id} at ${path}`,
+  ),
+  ...operation.references_removed.map(
+    ({ id, path, type }) => `    reference removed: ${type} ${id} at ${path}`,
+  ),
 ];
 
-const renderTestMutation = (result: MutationResult, projectHash?: string | null): string => {
-  if (result.resource === undefined) return '';
+const renderImport = (result: MutationImportResult, includePreview: boolean): string[] => {
+  const counts = `Import: read ${result.counts.read}, inserted ${result.counts.inserted}, updated ${result.counts.updated}, skipped ${result.counts.skipped}.`;
+  if (!includePreview) return [counts];
+  const rows = result.preview.map((row) => `  ${JSON.stringify(row)}`);
   return [
-    `${result.dry_run ? 'Dry run: would update' : 'updated'} ${result.resource.type} ${result.resource.id}.`,
+    counts,
+    'Redacted normalized preview (up to 5 rows):',
+    ...(rows.length === 0 ? ['  <empty>'] : rows),
+  ];
+};
+
+const mutationHeader = (command: string, result: MutationResult): string => {
+  if (result.resource === undefined) {
+    const count = `${result.operations.length} operation(s)`;
+    return result.dry_run
+      ? `Dry run: ${command} would apply ${count}.`
+      : `${command} applied ${count}.`;
+  }
+  const { id, type } = result.resource;
+  return result.dry_run ? `Dry run: would update ${type} ${id}.` : `Updated ${type} ${id}.`;
+};
+
+/** Renders any mutation as a header, its import and preview details, and the semantic diff. */
+const renderMutation = (
+  command: string,
+  result: Omit<MutationResult, 'shared_dataset_preview'>,
+  projectHash: string | null | undefined,
+): string => {
+  const operations = result.operations.flatMap(renderOperation);
+  const lines = [
+    mutationHeader(command, result),
+    ...(result.warnings ?? []).map((warning) => `Warning: ${warning}`),
     ...(result.affected_tests === undefined
       ? []
       : [`Affected consumer tests: ${result.affected_tests.join(', ')}.`]),
-    ...(result.import === undefined ? [] : renderImportSummary(result.import, result.dry_run)),
-    ...(result.dry_run
-      ? [
-          'Semantic diff:',
-          ...renderTestMutationOperations(result.operations),
-          'Next: remove `--dry-run` from this command to apply these changes.',
-        ]
-      : []),
-    ...(projectHash === undefined || projectHash === null ? [] : [`Project hash: ${projectHash}`]),
-  ].join('\n');
+    ...(result.import === undefined ? [] : renderImport(result.import, result.dry_run)),
+    ...(result.import_preview === undefined
+      ? []
+      : [`Redacted definition preview: ${JSON.stringify(result.import_preview)}`]),
+    'Semantic diff:',
+    ...(operations.length === 0 ? ['  no semantic changes'] : operations),
+  ];
+  if (result.dry_run) lines.push('Next: remove `--dry-run` to apply these changes.');
+  if (projectHash !== undefined && projectHash !== null) lines.push(`Project hash: ${projectHash}`);
+  if (!result.dry_run && result.next_command !== undefined) {
+    lines.push(`Next: ${result.next_command}`);
+  }
+  return lines.join('\n');
 };
 
-const renderMutation = (
+/** Shows the mandatory shared-dataset preview ahead of the confirmed update it led to. */
+const renderMutationResult = (
   command: string,
   result: MutationResult,
-  projectHash?: string | null,
+  projectHash: string | null | undefined,
 ): string => {
-  if (result.shared_dataset_preview !== undefined) {
-    const { shared_dataset_preview: preview, ...confirmedResult } = result;
-    const previewResult: MutationResult = {
-      ...confirmedResult,
-      committed: false,
-      dry_run: true,
-      operations: preview.operations,
-      affected_tests: preview.affected_tests,
-      ...(preview.import === null ? {} : { import: preview.import }),
-    };
-    return [
-      'Shared dataset update preview:',
-      renderMutation(command, previewResult, preview.project_hash_after),
-      'Confirmed shared dataset update:',
-      renderMutation(command, confirmedResult, projectHash),
-    ].join('\n\n');
-  }
-  if (result.resource === undefined) {
-    return renderAgentMutation(command, result, projectHash);
-  }
-  return result.resource.type === 'metric'
-    ? renderMetricMutation(result, projectHash)
-    : renderTestMutation(result, projectHash);
+  const { shared_dataset_preview: preview, ...confirmed } = result;
+  if (preview === undefined) return renderMutation(command, confirmed, projectHash);
+  const previewResult = {
+    ...confirmed,
+    affected_tests: preview.affected_tests,
+    committed: false,
+    dry_run: true,
+    import: preview.import ?? undefined,
+    operations: preview.operations,
+  };
+  return [
+    'Shared dataset update preview:',
+    renderMutation(command, previewResult, preview.project_hash_after),
+    'Confirmed shared dataset update:',
+    renderMutation(command, confirmed, projectHash),
+  ].join('\n\n');
 };
 
-const unreachableOperation = (operation: never): never => {
-  throw new Error(`Unsupported command result operation: ${String(operation)}`);
-};
-
-const unreachableResourceList = (result: never): never => {
-  throw new Error(`Unsupported resource list: ${JSON.stringify(result)}`);
-};
-
-/** Renders the compact human list while retaining richer fields in structured output. */
+/** Lists ids and names only; JSON output keeps every list field. */
 const renderResourceList = (result: ResourceListResult): string => {
   if (result.items.length === 0) return `No ${result.resource_type}.`;
   switch (result.resource_type) {
@@ -170,13 +105,17 @@ const renderResourceList = (result: ResourceListResult): string => {
       return result.items.map(({ id, name }) => `  ${id}  ${name}`).join('\n');
     case 'runs':
       return result.items.map(({ id }) => `  ${id}`).join('\n');
-    default:
-      return unreachableResourceList(result);
+    default: {
+      result satisfies never;
+      throw new Error('Unsupported resource list.');
+    }
   }
 };
 
-/** Renders one typed application result without moving terminal prose into the local package. */
-const renderHumanCommandResult = (command: string, commandResult: CommandResult): string => {
+const renderHumanCommandResult = (
+  command: string,
+  commandResult: ApplicationCommandResult,
+): string => {
   switch (commandResult.operation) {
     case 'project-init': {
       const { dry_run: dryRun, project } = commandResult.result;
@@ -221,32 +160,33 @@ const renderHumanCommandResult = (command: string, commandResult: CommandResult)
         : `Metric ${result.metric_id} fixture is valid; ${result.kind} execution was not started.`;
     }
     case 'mutation':
-      return renderMutation(command, commandResult.result, commandResult.projectHashAfter);
-    case 'schema-list':
-      return commandResult.result.items
-        .map(({ file, id }) => `  ${id}${id === file ? '' : `  (${file})`}`)
-        .join('\n');
-    case 'schema-print':
-      return JSON.stringify(commandResult.result.schema, undefined, 2);
-    default:
-      return unreachableOperation(commandResult);
+      return renderMutationResult(command, commandResult.result, commandResult.projectHashAfter);
+    default: {
+      commandResult satisfies never;
+      throw new Error('Unsupported command result.');
+    }
   }
 };
 
-/** Renders application data through the selected CLI output contract. */
+/** Renders a result that carries no project hashes as one JSON document or human text. */
+const renderResult = <TResult>(
+  command: string,
+  output: 'human' | 'json',
+  result: TResult,
+  renderHuman: (result: TResult) => string,
+): string =>
+  output === 'json'
+    ? serializeCliResult(createCliSuccessResult(command, result))
+    : renderHuman(result);
+
+/** Renders a local command result, with its project hashes, as JSON or human text. */
 const renderCommandResult = (
   command: string,
   output: 'human' | 'json',
-  commandResult: CommandResult,
+  commandResult: ApplicationCommandResult,
 ): string =>
   output === 'json'
     ? serializeCliResult(createCliSuccessResult(command, commandResult.result, commandResult))
     : renderHumanCommandResult(command, commandResult);
 
-export {
-  renderCommandResult,
-  renderHumanCommandResult,
-  type CommandResult,
-  type SchemaListResult,
-  type SchemaPrintResult,
-};
+export { renderCommandResult, renderResult };

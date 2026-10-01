@@ -7,8 +7,9 @@ import {
 } from '@attest/contracts';
 
 import { LocalError } from '../../../errors/index.js';
-import type { ReadInput } from '../../agent/authoring/index.js';
-import { parseJson, readTextSource, requestDiagnostics } from './source.js';
+import { schemaIssueDiagnostics } from '../../../internal/schema-issue-diagnostics.js';
+import { parseJsonText, readSourceText } from '../../../internal/source-text.js';
+import type { ReadInput } from '../../agent/authoring/types.js';
 import { assertSafeMetricResource } from './validation.js';
 
 /** Imports either one canonical metric resource or the metric inside a add request. */
@@ -19,11 +20,11 @@ const readImportedMetricResource = async (
   workingDirectory: string,
   readStdin: ReadInput,
 ): Promise<MetricResource> => {
-  const value = parseJson(
-    await readTextSource(source, '<path|->', workingDirectory, readStdin),
-    '<path|->',
-    'Provide one canonical metric resource or metric.add request.',
-  );
+  const text = await readSourceText(source, { path: '<path|->', readStdin, workingDirectory });
+  const value = parseJsonText(text, {
+    path: '<path|->',
+    hint: 'Provide one canonical metric resource or metric.add request.',
+  });
   const request = commandRequestSchema.safeParse(value);
   const candidate =
     request.success && request.data.command === 'metric.add' ? request.data.metric : value;
@@ -31,7 +32,7 @@ const readImportedMetricResource = async (
   if (!parsed.success) {
     throw new LocalError('cli_usage', 'Imported metric JSON does not match its schema.', {
       path: '<path|->',
-      details: { diagnostics: requestDiagnostics(parsed.error.issues) },
+      details: { diagnostics: schemaIssueDiagnostics(parsed.error.issues) },
     });
   }
   const resource = { ...parsed.data, id: metricId, name: name?.trim() || parsed.data.name };
@@ -45,16 +46,16 @@ const readMetricTestFixture = async (
   workingDirectory: string,
   readStdin: ReadInput,
 ): Promise<MetricTestFixture> => {
-  const value = parseJson(
-    await readTextSource(source, '--fixture', workingDirectory, readStdin),
-    '--fixture',
-    'Provide one attest.metric-test-fixture document.',
-  );
+  const text = await readSourceText(source, { path: '--fixture', readStdin, workingDirectory });
+  const value = parseJsonText(text, {
+    path: '--fixture',
+    hint: 'Provide one attest.metric-test-fixture document.',
+  });
   const parsed = metricTestFixtureSchema.safeParse(value);
   if (!parsed.success) {
     throw new LocalError('project_invalid', 'The local metric fixture does not match its schema.', {
       path: '--fixture',
-      details: { diagnostics: requestDiagnostics(parsed.error.issues) },
+      details: { diagnostics: schemaIssueDiagnostics(parsed.error.issues) },
     });
   }
   return parsed.data;

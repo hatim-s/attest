@@ -4,13 +4,12 @@ import { join, relative } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
+import { errnoCode } from '../../../internal/errno-code.js';
 import { loadProject } from '../../project-loader/index.js';
 import { prepareProjectCandidate } from '../candidate-project.js';
 import { acquireProjectLock, releaseProjectLock } from '../project-lock.js';
-import {
-  candidateFromLoadedProject,
-  writeFixtureProject,
-} from '../../../_tests_/support/project-transaction.js';
+import { candidateFromLoadedProject } from '../../../commands/project/load-command-project.js';
+import { writeFixtureProject } from '../../../_tests_/support/project-transaction.js';
 import {
   TRANSACTIONS_DIRECTORY,
   prepareTransaction,
@@ -40,7 +39,7 @@ const snapshotProjectFiles = async (root: string): Promise<ReadonlyMap<string, B
     try {
       entries = await readdir(directory, { withFileTypes: true });
     } catch (error: unknown) {
-      if (error instanceof Error && 'code' in error && Reflect.get(error, 'code') === 'ENOENT') {
+      if (errnoCode(error) === 'ENOENT') {
         return;
       }
       throw error;

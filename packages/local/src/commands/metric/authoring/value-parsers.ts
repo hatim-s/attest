@@ -8,7 +8,9 @@ import {
 import { z } from 'zod';
 
 import { LocalError } from '../../../errors/index.js';
-import { parseJson, readTextSource, requestDiagnostics } from './source.js';
+import { schemaIssueDiagnostics } from '../../../internal/schema-issue-diagnostics.js';
+import { parseJsonText, readSourceText } from '../../../internal/source-text.js';
+import { parseSecretBindings } from '../../shared/secret-bindings.js';
 import type { MetricAddFields } from './types.js';
 
 const parseFiniteNumber = (value: string, path: string): number => {
@@ -17,6 +19,19 @@ const parseFiniteNumber = (value: string, path: string): number => {
     throw new LocalError('cli_usage', `${path} must be a finite number.`, { path });
   }
   return parsed;
+};
+
+/** Parses a flag limited to fixed values into its literal type, or rejects it as a usage error. */
+const parseChoice = <const Choice extends string>(
+  value: string,
+  choices: readonly [Choice, ...Choice[]],
+  path: string,
+): Choice => {
+  const parsed = z.enum(choices).safeParse(value);
+  if (!parsed.success) {
+    throw new LocalError('cli_usage', `${path} must be one of ${choices.join(', ')}.`, { path });
+  }
+  return parsed.data;
 };
 
 const parseNonnegativeInteger = (value: string, path: string): number => {
@@ -28,28 +43,14 @@ const parseNonnegativeInteger = (value: string, path: string): number => {
 };
 
 const parseJsonValue = (value: string, path: string): JsonValue =>
-  z.json().parse(parseJson(value, path, 'Pass one JSON scalar, array, or object.'));
+  parseJsonText(value, { path, hint: 'Pass one JSON scalar, array, or object.' });
 
-const parseSecretBindings = (
+/** Parses secret binding flags, returning undefined when none were passed so the field is omitted. */
+const parseOptionalSecretBindings = (
   values: readonly string[] | undefined,
   path: string,
-): Record<string, SecretReference> | undefined => {
-  if (values === undefined || values.length === 0) return undefined;
-  const bindings: Record<string, SecretReference> = {};
-  for (const value of values) {
-    const separator = value.indexOf('=');
-    const target = value.slice(0, separator).trim();
-    const source = value.slice(separator + 1).trim();
-    if (separator <= 0 || target.length === 0 || source.length === 0) {
-      throw new LocalError('cli_usage', `Invalid secret reference in ${path}.`, {
-        path,
-        hint: 'Use TARGET_NAME=SOURCE_ENV; only the environment variable name is stored.',
-      });
-    }
-    bindings[target] = { from_env: source };
-  }
-  return bindings;
-};
+): Record<string, SecretReference> | undefined =>
+  values === undefined || values.length === 0 ? undefined : parseSecretBindings(values, path);
 
 const parsePathValueMatchers = (
   values: readonly string[] | undefined,
@@ -98,12 +99,12 @@ const parseAttributes = (
 const parseAssertionJson = (values: readonly string[]): AssertionCheck[] =>
   values.map((value, index) => {
     const parsed = assertionCheckSchema.safeParse(
-      parseJson(value, '--assert-json', 'Pass one assertion check object.'),
+      parseJsonText(value, { path: '--assert-json', hint: 'Pass one assertion check object.' }),
     );
     if (!parsed.success) {
       throw new LocalError('cli_usage', 'An assertion does not match the metric contract.', {
         path: `--assert-json[${index}]`,
-        details: { diagnostics: requestDiagnostics(parsed.error.issues) },
+        details: { diagnostics: schemaIssueDiagnostics(parsed.error.issues) },
       });
     }
     return parsed.data;
@@ -132,12 +133,11 @@ const readExclusiveText = async (
   }
   if (literal?.trim()) return literal.trim();
   if (source !== undefined) {
-    const text = await readTextSource(
-      source,
-      sourcePath,
-      fields.workingDirectory,
-      fields.readStdin,
-    );
+    const text = await readSourceText(source, {
+      path: sourcePath,
+      readStdin: fields.readStdin,
+      workingDirectory: fields.workingDirectory,
+    });
     if (text.trim()) return text;
   }
   throw new LocalError('cli_missing_input', `Required metric input ${literalPath} is missing.`, {
@@ -149,11 +149,12 @@ const readExclusiveText = async (
 export {
   parseAssertionJson,
   parseAttributes,
+  parseChoice,
   parseFiniteNumber,
   parseJsonValue,
   parseNonnegativeInteger,
   parsePathValueMatchers,
-  parseSecretBindings,
+  parseOptionalSecretBindings,
   readExclusiveText,
   requireValue,
 };

@@ -37,13 +37,12 @@ export {
   type StreamInvokeOptions,
 } from './adapters/stream/index.js';
 export {
-  WebSocketAgentSession,
+  type WebSocketAgentSession,
   startWebSocketAgent,
   type WebSocketAgentResource,
   type WebSocketSessionOptions,
 } from './adapters/websocket/index.js';
 export {
-  type CaseExecution,
   type InvokeAgentOptions,
   type InvocationResult,
   type InvocationAttempt,

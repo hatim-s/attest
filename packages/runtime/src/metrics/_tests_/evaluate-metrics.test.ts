@@ -37,11 +37,11 @@ describe('evaluateMetrics', () => {
       'exec-second',
       'judge-third',
     ]);
-    expect(evaluations[0]).toMatchObject({ status: 'evaluated', result: { pass: true } });
-    expect(evaluations[1]).toMatchObject({ status: 'evaluated', result: { pass: true } });
+    expect(evaluations[0]).toMatchObject({ status: 'evaluated', pass: true });
+    expect(evaluations[1]).toMatchObject({ status: 'evaluated', pass: true });
     expect(evaluations[2]).toMatchObject({
       status: 'error',
-      error: { code: 'judge_provider_error' },
+      error: { kind: 'judge_provider_error' },
     });
     expect(evaluations[2]?.status === 'error' ? evaluations[2].error.message : '').toContain(
       'judgeClient',
@@ -53,26 +53,31 @@ describe('evaluateMetrics', () => {
   });
 
   it('applies the same no-output skip semantics to every metric kind', async () => {
-    const incompleteContext: MetricContext = {
-      ...context,
-      execution: { outcome: 'invocation_error', trace: null },
-    };
     const definitions: MetricDefinition[] = [
       { name: 'assertion', type: 'assertion', assert: [{ exists: { path: '$.output' } }] },
       { name: 'exec', type: 'exec', command: ['must-not-run'] },
       { name: 'judge', type: 'judge', ...judgeDefinition },
     ];
 
-    const evaluations = await evaluateMetrics(definitions, incompleteContext);
+    const evaluations = await evaluateMetrics(definitions, {
+      ...context,
+      execution: { outcome: 'invocation_error', trace: null },
+    });
 
     expect(evaluations).toHaveLength(3);
-    expect(evaluations.every((evaluation) => evaluation.status === 'error')).toBe(true);
-    expect(
-      evaluations.every(
-        (evaluation) =>
-          evaluation.status === 'error' && evaluation.error.code === 'skipped_no_output',
-      ),
-    ).toBe(true);
+    for (const evaluation of evaluations) {
+      expect(evaluation).toMatchObject({ status: 'error', error: { kind: 'skipped_no_output' } });
+    }
+  });
+
+  it('explains an agent-error skip differently from a missing-output skip', async () => {
+    const [evaluation] = await evaluateMetrics(
+      [{ name: 'answer-exists', type: 'assertion', assert: [{ exists: { path: '$.output' } }] }],
+      { ...context, execution: { outcome: 'agent_error', trace: null } },
+    );
+
+    expect(evaluation).toMatchObject({ status: 'error', error: { kind: 'skipped_no_output' } });
+    expect(evaluation?.status === 'error' && evaluation.error.message).toContain('error envelope');
   });
 
   it('isolates unexpected assertion exceptions and continues with later metrics', async () => {
@@ -92,8 +97,8 @@ describe('evaluateMetrics', () => {
     const evaluations = await evaluateMetrics(definitions, context);
 
     expect(evaluations).toMatchObject([
-      { metricName: 'invalid-regex', status: 'error', error: { code: 'internal_error' } },
-      { metricName: 'later-assertion', status: 'evaluated', result: { pass: true } },
+      { metricName: 'invalid-regex', status: 'error', error: { kind: 'internal_error' } },
+      { metricName: 'later-assertion', status: 'evaluated', pass: true },
     ]);
   });
 
@@ -117,7 +122,7 @@ describe('evaluateMetrics', () => {
     );
 
     expect(evaluations).toMatchObject([
-      { status: 'error', error: { code: 'invalid_json_schema' } },
+      { status: 'error', error: { kind: 'invalid_json_schema' } },
     ]);
   });
 });

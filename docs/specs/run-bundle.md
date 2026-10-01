@@ -4,7 +4,8 @@ title: Run bundle format
 
 # Run bundle format
 
-Run bundles are the portable, append-friendly export format for attest runs. They are the stable ingestion boundary for a future cloud service while remaining simple to inspect locally.
+A run bundle is one run and its cases in a single NDJSON file. No CLI command writes or reads
+bundles. Use `exportRunBundle` and `readRunBundle` from `@attest/local/store`.
 
 ## Format
 
@@ -20,13 +21,17 @@ Each bundle is UTF-8 NDJSON. Every line is canonical, whitespace-free JSON with 
 
 ## Validation
 
-The header schema is `attest.bundle`. Readers MUST spool and verify the entire bundle before exposing
-any records to callers. They MUST verify the first and only header, its schema, case record shapes,
-the final footer, `case_count`, and `content_hash`.
+The header schema is `attest.bundle`. `readRunBundle` reads the whole bundle and verifies it
+before yielding any line. It checks for exactly one header in first position, the header schema,
+each case record's shape, a single final footer, `case_count`, and `content_hash`.
 
-Readers reject unknown line types, malformed JSON or records, duplicate or misplaced headers and
-footers, missing footers, mismatched case counts, and mismatched hashes as corrupt data.
+It rejects unknown line types, malformed JSON or records, duplicate or misplaced headers and
+footers, a missing footer, a mismatched case count, and a mismatched hash. Because the footer
+hash covers every earlier line, appending lines to a finished bundle makes it invalid.
 
 ## Atomicity
 
-When exporting to a file path, attest writes the complete bundle to a temporary sibling path and then renames it into place. A missing run fails before the temporary file is created. Stream destinations cannot provide filesystem atomicity and may observe data before a later stream failure.
+`exportRunBundle` takes a file path or a writable stream. For a path, it writes the whole bundle
+to a temporary sibling file and renames it into place. A missing run fails before the temporary
+file exists. A stream gets lines as they are written, so a reader can see partial data if the
+stream later fails.

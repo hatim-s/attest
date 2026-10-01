@@ -1,6 +1,8 @@
 import { type ChildProcess, spawn } from 'node:child_process';
 import { setTimeout as wait } from 'node:timers/promises';
 
+import { errnoCode } from './errno-code.js';
+
 const PROCESS_EXIT_POLL_INTERVAL_MS = 25;
 const PROCESS_SNAPSHOT_TIMEOUT_MS = 2000;
 const SWEEP_DEADLINE_MS = 5000;
@@ -18,39 +20,32 @@ const PROCESS_ROW_PATTERN =
 const PROCESS_IDENTITY_PATTERN =
   /^\s*(\d+)\s+(\w{3}\s+\w{3}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2}\s+\d{4})\s+(.+?)\s*$/;
 
-const isMissingProcess = (error: unknown): boolean => {
-  return error instanceof Error && 'code' in error && error.code === 'ESRCH';
-};
+const isMissingProcess = (error: unknown): boolean => errnoCode(error) === 'ESRCH';
 
-const isPermissionDenied = (error: unknown): boolean => {
-  return error instanceof Error && 'code' in error && error.code === 'EPERM';
-};
+const isPermissionDenied = (error: unknown): boolean => errnoCode(error) === 'EPERM';
 
-const signalProcessGroup = (processId: number, signal: NodeJS.Signals): boolean => {
+/** Sends a signal to a pid, or to its whole group when negated; gone or foreign targets are skipped. */
+const sendSignal = (target: number, signal: NodeJS.Signals): void => {
   try {
-    process.kill(-processId, signal);
-    return true;
+    process.kill(target, signal);
   } catch (error) {
-    if (isMissingProcess(error) || isPermissionDenied(error)) {
-      return false;
-    }
-
+    if (isMissingProcess(error) || isPermissionDenied(error)) return;
     throw error;
   }
 };
 
-const signalProcess = (processId: number, signal: NodeJS.Signals): boolean => {
-  try {
-    process.kill(processId, signal);
-    return true;
-  } catch (error) {
-    if (isMissingProcess(error) || isPermissionDenied(error)) {
-      return false;
-    }
+const processIds = (identities: readonly ProcessIdentity[]): number[] =>
+  identities.map(({ processId }) => processId);
 
-    throw error;
-  }
-};
+/** Waits until the poll interval, the grace deadline, or the sweep deadline, whichever is first. */
+const waitForNextPoll = (graceDeadline: number, sweepDeadline: number): Promise<void> =>
+  wait(
+    Math.min(
+      PROCESS_EXIT_POLL_INTERVAL_MS,
+      Math.max(0, graceDeadline - Date.now()),
+      Math.max(0, sweepDeadline - Date.now()),
+    ),
+  );
 
 const isProcessGroupAlive = (processId: number): boolean => {
   try {
@@ -75,6 +70,7 @@ const isProcessGroupAlive = (processId: number): boolean => {
 const readProcessListing = async (
   argumentsList: readonly string[],
   deadline = Date.now() + PROCESS_SNAPSHOT_TIMEOUT_MS,
+  options: { emptyWhenNoMatch?: boolean } = {},
 ): Promise<string | undefined> => {
   const timeoutMs = Math.min(PROCESS_SNAPSHOT_TIMEOUT_MS, deadline - Date.now());
   if (timeoutMs <= 0) {
@@ -103,12 +99,15 @@ const readProcessListing = async (
     });
     processSnapshot.once('close', (exitCode) => {
       clearTimeout(timeout);
-      if (timedOut || exitCode !== 0) {
+      const output = Buffer.concat(standardOutputChunks).toString('utf8');
+      // `ps -p` exits 1 with no rows when none of the queried pids exist: every process is gone.
+      const noMatch = options.emptyWhenNoMatch === true && exitCode === 1 && output.trim() === '';
+      if (timedOut || (exitCode !== 0 && !noMatch)) {
         resolve(undefined);
         return;
       }
 
-      resolve(Buffer.concat(standardOutputChunks).toString('utf8'));
+      resolve(output);
     });
   });
 };
@@ -195,6 +194,7 @@ const parseIdentitySnapshot = (snapshotText: string): ProcessIdentity[] => {
   });
 };
 
+/** Keys a process by pid, start time, and command so a reused pid never matches an old identity. */
 const identityKey = (identity: ProcessIdentity): string => {
   return `${String(identity.processId)}\u0000${identity.startedAt}\u0000${identity.command}`;
 };
@@ -216,10 +216,11 @@ const readMatchingIdentities = async (
     return [];
   }
 
-  const processIds = [...new Set(identities.map(({ processId }) => processId))];
+  const queriedIds = [...new Set(processIds(identities))];
   const snapshotText = await readProcessListing(
-    ['-o', 'pid=,lstart=,comm=', '-p', processIds.join(',')],
+    ['-o', 'pid=,lstart=,comm=', '-p', queriedIds.join(',')],
     deadline,
+    { emptyWhenNoMatch: true },
   );
   if (snapshotText === undefined) {
     return undefined;
@@ -272,60 +273,36 @@ const waitThroughTerminationGrace = async (
     const newIdentityKeys = new Set(newIdentities.map(identityKey));
     for (const identity of survivors) {
       if (newIdentityKeys.has(identityKey(identity))) {
-        signalProcess(identity.processId, 'SIGTERM');
+        sendSignal(identity.processId, 'SIGTERM');
       }
     }
     if (!isProcessGroupAlive(rootProcessId) && survivors.length === 0) {
       return true;
     }
 
-    await wait(
-      Math.min(
-        PROCESS_EXIT_POLL_INTERVAL_MS,
-        Math.max(0, graceDeadline - Date.now()),
-        Math.max(0, sweepDeadline - Date.now()),
-      ),
-    );
+    await waitForNextPoll(graceDeadline, sweepDeadline);
   }
   return true;
 };
 
-const verifyKilledIdentities = async (
+/**
+ * Re-reads identities until none survive or `pollDeadline` passes. `complete` is false when ps
+ * became unavailable mid-poll; `survivors` then holds the last identities known to be alive.
+ */
+const pollSurvivors = async (
   identities: readonly ProcessIdentity[],
-  deadline: number,
-): Promise<number[]> => {
-  let survivors = await readMatchingIdentities(identities, deadline);
-  if (survivors === undefined) {
-    return identities.map(({ processId }) => processId);
-  }
-  while (survivors.length > 0 && Date.now() < deadline) {
-    await wait(Math.min(PROCESS_EXIT_POLL_INTERVAL_MS, deadline - Date.now()));
-    const nextSurvivors = await readMatchingIdentities(survivors, deadline);
-    if (nextSurvivors === undefined) {
-      return survivors.map(({ processId }) => processId);
-    }
-    survivors = nextSurvivors;
-  }
-  return survivors.map(({ processId }) => processId);
-};
-
-const waitForIdentityExit = async (
-  identities: readonly ProcessIdentity[],
-  graceDeadline: number,
+  pollDeadline: number,
   sweepDeadline: number,
-): Promise<ProcessIdentity[] | undefined> => {
+): Promise<{ survivors: ProcessIdentity[]; complete: boolean }> => {
   let survivors = await readMatchingIdentities(identities, sweepDeadline);
-  while (survivors !== undefined && survivors.length > 0 && Date.now() < graceDeadline) {
-    await wait(
-      Math.min(
-        PROCESS_EXIT_POLL_INTERVAL_MS,
-        Math.max(0, graceDeadline - Date.now()),
-        Math.max(0, sweepDeadline - Date.now()),
-      ),
-    );
-    survivors = await readMatchingIdentities(survivors, sweepDeadline);
+  if (survivors === undefined) return { survivors: [...identities], complete: false };
+  while (survivors.length > 0 && Date.now() < pollDeadline) {
+    await waitForNextPoll(pollDeadline, sweepDeadline);
+    const next = await readMatchingIdentities(survivors, sweepDeadline);
+    if (next === undefined) return { survivors, complete: false };
+    survivors = next;
   }
-  return survivors;
+  return { survivors, complete: true };
 };
 
 const isDirectChildAlive = (child: ChildProcess): boolean => {
@@ -333,9 +310,7 @@ const isDirectChildAlive = (child: ChildProcess): boolean => {
 };
 
 const signalIdentities = (identities: readonly ProcessIdentity[], signal: NodeJS.Signals): void => {
-  for (const identity of identities) {
-    signalProcess(identity.processId, signal);
-  }
+  for (const identity of identities) sendSignal(identity.processId, signal);
 };
 
 /** Starts a CLI agent in its own process group for best-effort macOS/Linux tree containment. */
@@ -376,6 +351,9 @@ const killProcessTree = async (
     return [];
   }
 
+  const killGroupIfAlive = (): void => {
+    if (isDirectChildAlive(child)) sendSignal(-rootProcessId, 'SIGKILL');
+  };
   const sweepDeadline = Date.now() + SWEEP_DEADLINE_MS;
   const graceDeadline = Math.min(sweepDeadline, Date.now() + options.graceMs);
   const identitiesByKey = new Map<string, ProcessIdentity>();
@@ -388,25 +366,19 @@ const killProcessTree = async (
     } else {
       discoveryAvailable = false;
     }
-    if (isDirectChildAlive(child)) {
-      signalProcessGroup(rootProcessId, 'SIGTERM');
-    }
+    if (isDirectChildAlive(child)) sendSignal(-rootProcessId, 'SIGTERM');
   }
 
   const identities = [...identitiesByKey.values()];
   if (!discoveryAvailable) {
     await wait(Math.max(0, graceDeadline - Date.now()));
-    if (isDirectChildAlive(child)) {
-      signalProcessGroup(rootProcessId, 'SIGKILL');
-    }
-    return identities.map(({ processId }) => processId);
+    killGroupIfAlive();
+    return processIds(identities);
   }
   const termMatches = await readMatchingIdentities(identities, sweepDeadline);
   if (termMatches === undefined) {
-    if (options.signalProcessGroup && isDirectChildAlive(child)) {
-      signalProcessGroup(rootProcessId, 'SIGKILL');
-    }
-    return identities.map(({ processId }) => processId);
+    if (options.signalProcessGroup) killGroupIfAlive();
+    return processIds(identities);
   }
   signalIdentities(termMatches, 'SIGTERM');
 
@@ -417,38 +389,25 @@ const killProcessTree = async (
       graceDeadline,
       sweepDeadline,
     );
-    if (!snapshotsAvailable) {
-      if (isDirectChildAlive(child)) {
-        signalProcessGroup(rootProcessId, 'SIGKILL');
-      }
-      return [...identitiesByKey.values()].map(({ processId }) => processId);
-    }
-    if (isDirectChildAlive(child)) {
-      signalProcessGroup(rootProcessId, 'SIGKILL');
-    }
+    killGroupIfAlive();
+    if (!snapshotsAvailable) return processIds([...identitiesByKey.values()]);
   } else {
-    const normalExitSurvivors = await waitForIdentityExit(
-      termMatches,
-      graceDeadline,
-      sweepDeadline,
-    );
-    if (normalExitSurvivors === undefined) {
-      return termMatches.map(({ processId }) => processId);
-    }
+    const normalExit = await pollSurvivors(termMatches, graceDeadline, sweepDeadline);
+    if (!normalExit.complete) return processIds(termMatches);
     identitiesByKey.clear();
-    mergeIdentities(identitiesByKey, normalExitSurvivors);
+    mergeIdentities(identitiesByKey, normalExit.survivors);
   }
 
   const killCandidates = [...identitiesByKey.values()];
   const killMatches = await readMatchingIdentities(killCandidates, sweepDeadline);
-  if (killMatches === undefined) {
-    return killCandidates.map(({ processId }) => processId);
-  }
+  if (killMatches === undefined) return processIds(killCandidates);
   signalIdentities(killMatches, 'SIGKILL');
-  return verifyKilledIdentities(killMatches, sweepDeadline);
+  const verified = await pollSurvivors(killMatches, sweepDeadline, sweepDeadline);
+  return processIds(verified.survivors);
 };
 
 export {
+  identityKey,
   killProcessTree,
   listDescendantProcesses,
   parseIdentitySnapshot,

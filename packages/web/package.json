@@ -1,7 +1,6 @@
 {
   "name": "@attest/web",
-  "version": "0.0.0",
-  "private": true,
+  "version": "0.1.0-alpha.0",
   "type": "module",
   "exports": {
     "./embedded": {
@@ -12,29 +11,45 @@
   "scripts": {
     "build": "bun scripts/build-dashboard.ts",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit -p tsconfig.json"
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "prepublishOnly": "node ../../scripts/block-source-publish.mjs"
   },
-  "dependencies": {
+  "devDependencies": {
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.4",
+    "@vitejs/plugin-react": "^6.0.5",
+    "vite": "^8.2.1",
+    "vite-plugin-singlefile": "^2.3.3",
+    "vitest": "^3",
     "@attest/core": "workspace:*",
     "@tanstack/react-query": "^5.101.4",
-    "@tanstack/react-router": "^1.170.21",
-    "@tanstack/react-table": "^9.0.0",
     "@tanstack/react-virtual": "^3.14.9",
     "echarts": "^6.1.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8"
   },
-  "devDependencies": {
-    "@tailwindcss/vite": "^4.3.3",
-    "@types/react": "^19.2.18",
-    "@types/react-dom": "^19.2.4",
-    "@vitejs/plugin-react": "^6.0.5",
-    "tailwindcss": "^4.3.3",
-    "vite": "^8.2.1",
-    "vite-plugin-singlefile": "^2.3.3",
-    "vitest": "^4.1.10"
-  },
   "files": [
-    "dist"
-  ]
+    "dist",
+    "LICENSE",
+    "NOTICE"
+  ],
+  "description": "Embedded local dashboard for the Attest CLI.",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hatim-s/attest.git",
+    "directory": "packages/web"
+  },
+  "homepage": "https://github.com/hatim-s/attest#readme",
+  "bugs": {
+    "url": "https://github.com/hatim-s/attest/issues"
+  },
+  "publishConfig": {
+    "access": "public",
+    "tag": "alpha"
+  },
+  "engines": {
+    "node": ">=22.15.0",
+    "bun": ">=1.4"
+  }
 }

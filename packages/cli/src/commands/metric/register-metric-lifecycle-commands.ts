@@ -1,28 +1,21 @@
 import type { Command } from 'commander';
 
+import { setMutationHelp } from '../../help/command-help.js';
 import {
   addMutationOptions,
   isInteractive,
-  mergeCommonOptions,
+  mutationRequestFields,
   type MutationCliOptions,
 } from '../shared/cli-options.js';
-import {
-  assertNoMetricRequestOverlap,
-  markMetricMutationHelp,
-  metricMutationFields,
-  readOrBuildMetricMutation,
-  requiredMetricInput,
-  runMetricMutation,
-  type RegisterMetricCommandsOptions,
-} from './registration-support.js';
+import type { CommandContext } from '../shared/command-context.js';
+import { readOrBuildRequest } from '../shared/command-request.js';
+import { requiredInput } from '../shared/required-input.js';
+import { runMetricMutation } from './run-metric-mutation.js';
 
 type RemoveOptions = MutationCliOptions & { detach?: boolean };
 
 /** Registers metric rename and removal commands that update references atomically. */
-const registerMetricLifecycleCommands = (
-  metric: Command,
-  context: RegisterMetricCommandsOptions,
-): void => {
+const registerMetricLifecycleCommands = (metric: Command, context: CommandContext): void => {
   const rename = addMutationOptions(
     metric.command('rename').description('Rename metric references atomically.'),
   )
@@ -32,75 +25,60 @@ const registerMetricLifecycleCommands = (
       async (
         metricId: string | undefined,
         newId: string | undefined,
-        raw: MutationCliOptions,
-        command: Command,
+        options: MutationCliOptions,
+        leaf: Command,
       ) => {
-        const options = mergeCommonOptions(raw, command, context.program);
-        assertNoMetricRequestOverlap(options, { 'metric-id': metricId, 'new-id': newId });
         const interactive = isInteractive(options, context.interaction, options.fromJson);
-        const request = await readOrBuildMetricMutation(
-          'metric.rename',
-          options,
+        const prompt = { interactive, prompt: context.interaction.prompt };
+        const request = await readOrBuildRequest({
+          command: 'metric.rename',
           context,
-          async () => ({
-            ...metricMutationFields('metric.rename', options),
-            metric_id: await requiredMetricInput(
+          leaf,
+          options,
+          build: async () => ({
+            ...mutationRequestFields('metric.rename', options),
+            metric_id: await requiredInput(
               metricId,
-              '<metric-id>',
-              'Metric id: ',
-              interactive,
-              context,
+              { path: '<metric-id>', question: 'Metric id: ' },
+              prompt,
             ),
-            new_id: await requiredMetricInput(
+            new_id: await requiredInput(
               newId,
-              '<new-id>',
-              'New metric id: ',
-              interactive,
-              context,
+              { path: '<new-id>', question: 'New metric id: ' },
+              prompt,
             ),
           }),
-        );
+        });
         await runMetricMutation(request, options, interactive, context);
       },
     );
-  markMetricMutationHelp(
-    rename,
-    ['attest metric rename correct correctness'],
-    ['metric-id', 'new-id'],
-  );
+  setMutationHelp(rename, { examples: ['attest metric rename correct correctness'] });
 
   const remove = addMutationOptions(
     metric.command('remove').description('Remove one metric resource.'),
   )
     .argument('[metric-id]', 'metric id')
     .option('--detach', 'remove every test and case reference atomically')
-    .action(async (metricId: string | undefined, raw: RemoveOptions, command: Command) => {
-      const options = mergeCommonOptions(raw, command, context.program);
-      assertNoMetricRequestOverlap(options, { 'metric-id': metricId, detach: options.detach });
+    .action(async (metricId: string | undefined, options: RemoveOptions, leaf: Command) => {
       const interactive = isInteractive(options, context.interaction, options.fromJson);
-      const request = await readOrBuildMetricMutation(
-        'metric.remove',
-        options,
+      const request = await readOrBuildRequest({
+        command: 'metric.remove',
         context,
-        async () => ({
-          ...metricMutationFields('metric.remove', options),
-          metric_id: await requiredMetricInput(
+        leaf,
+        options,
+        build: async () => ({
+          ...mutationRequestFields('metric.remove', options),
+          metric_id: await requiredInput(
             metricId,
-            '<metric-id>',
-            'Metric id: ',
-            interactive,
-            context,
+            { path: '<metric-id>', question: 'Metric id: ' },
+            { interactive, prompt: context.interaction.prompt },
           ),
           ...(options.detach === undefined ? {} : { detach: options.detach }),
         }),
-      );
+      });
       await runMetricMutation(request, options, interactive, context);
     });
-  markMetricMutationHelp(
-    remove,
-    ['attest metric remove correct --dry-run'],
-    ['metric-id', 'detach'],
-  );
+  setMutationHelp(remove, { examples: ['attest metric remove correct --dry-run'] });
 };
 
 export { registerMetricLifecycleCommands };

@@ -1,7 +1,6 @@
 import { z } from 'zod';
-import { caseFolderSchema } from '../../eval/selection.js';
 
-import { resourceIdSchema } from '../shared.js';
+import { caseFolderSchema, resourceIdSchema } from '../shared.js';
 
 /** Overrides one attached metric for a particular case without copying its definition. */
 const caseMetricOverrideSchema = z.strictObject({

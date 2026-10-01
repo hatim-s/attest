@@ -1,68 +1,60 @@
 import { CLI_EVENT_SCHEMA_ID, type CliError, type EvalEvent } from '@attest/contracts';
 
-import type { EvalEventLimits, ExecuteEvalOptions } from '../types.js';
-import { safeErrorMessage } from './run-model.js';
+import { safeErrorMessage } from '../errors.js';
+import type { ExecuteEvalOptions } from '../types.js';
+
+const MAXIMUM_EVENTS = 100_003;
+const MAXIMUM_EVENT_BYTES = 16 * 1024;
+
+/** An event before the collector stamps its schema, sequence, and time. */
+type EvalEventBody = EvalEvent extends infer Event
+  ? Event extends EvalEvent
+    ? Omit<Event, 'schema' | 'sequence' | 'time'>
+    : never
+  : never;
 
 type EventCollector = {
   events: EvalEvent[];
-  emit: (event: Omit<EvalEvent, 'schema' | 'sequence' | 'time'>) => Promise<void>;
+  emit: (event: EvalEventBody) => Promise<void>;
   sinkFailure: () => CliError | undefined;
 };
 
-/** Collects bounded eval events and records the first clock or delivery failure. */
+/**
+ * Collects bounded eval events. Caps are enforced at emit time; a failed caller sink is recorded
+ * once and delivery stops, while collection continues so the returned stream stays complete.
+ */
 const createEventCollector = (
   now: () => string,
-  limits: EvalEventLimits,
   onEvent: ExecuteEvalOptions['onEvent'],
-  preflightTime: string,
 ): EventCollector => {
   const events: EvalEvent[] = [];
-  let collectorFailure: CliError | undefined;
   let deliveryFailure: CliError | undefined;
-  const emit = async (event: Omit<EvalEvent, 'schema' | 'sequence' | 'time'>): Promise<void> => {
-    if (events.length >= limits.max_events) throw new Error('Eval event count cap was exceeded.');
-    let eventTime: string;
-    try {
-      eventTime = now();
-    } catch (error: unknown) {
-      eventTime = preflightTime;
-      collectorFailure ??= {
-        code: 'eval_event_delivery_failed',
-        message: safeErrorMessage(error, 'Eval event clock failed.'),
-        retryable: false,
-      };
-    }
-    let completeEvent = {
+  const emit = async (event: EvalEventBody): Promise<void> => {
+    if (events.length >= MAXIMUM_EVENTS) throw new Error('Eval event count cap was exceeded.');
+    const completeEvent: EvalEvent = {
+      ...event,
       schema: CLI_EVENT_SCHEMA_ID,
       sequence: events.length,
-      time: eventTime,
-      ...event,
-    } as EvalEvent;
-    if (Buffer.byteLength(JSON.stringify(completeEvent), 'utf8') > limits.max_event_bytes) {
-      completeEvent = { ...completeEvent, time: preflightTime };
-      if (Buffer.byteLength(JSON.stringify(completeEvent), 'utf8') > limits.max_event_bytes) {
-        throw new Error('Eval event byte cap was exceeded.');
-      }
-      collectorFailure ??= {
+      time: now(),
+    };
+    if (Buffer.byteLength(JSON.stringify(completeEvent), 'utf8') > MAXIMUM_EVENT_BYTES) {
+      throw new Error('Eval event byte cap was exceeded.');
+    }
+    events.push(completeEvent);
+    if (onEvent === undefined || deliveryFailure !== undefined) {
+      return;
+    }
+    try {
+      await onEvent(completeEvent);
+    } catch (error: unknown) {
+      deliveryFailure = {
         code: 'eval_event_delivery_failed',
-        message: 'Eval event clock exceeded the configured byte cap.',
+        message: safeErrorMessage(error, 'Eval event delivery failed.'),
         retryable: false,
       };
     }
-    events.push(completeEvent);
-    if (onEvent !== undefined && deliveryFailure === undefined) {
-      try {
-        await onEvent(completeEvent);
-      } catch (error: unknown) {
-        deliveryFailure = {
-          code: 'eval_event_delivery_failed',
-          message: safeErrorMessage(error, 'Eval event delivery failed.'),
-          retryable: false,
-        };
-      }
-    }
   };
-  return { events, emit, sinkFailure: () => collectorFailure ?? deliveryFailure };
+  return { events, emit, sinkFailure: () => deliveryFailure };
 };
 
-export { createEventCollector, type EventCollector };
+export { createEventCollector, MAXIMUM_EVENTS, type EventCollector };

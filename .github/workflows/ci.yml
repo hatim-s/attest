@@ -30,14 +30,20 @@ jobs:
           bun-version: 1.4.x
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: ${{ matrix.os == 'ubuntu-latest' && '22.15.0' || '22' }}
       - run: bun install --frozen-lockfile
       - run: bun run typecheck
       - run: bun run lint
       - run: bun run format:check
       - run: bun run test
       - run: bun run build && node packages/cli/dist/cli.js --help
-      - run: bun run --cwd packages/executor test:node
-      - run: bun run --cwd packages/executor test:bun
-      - run: bun run --cwd packages/runtime test:node
-      - run: bun run --cwd packages/runtime test:bun
+      - run: bun run test:acceptance
+      - run: bun run test:portability
+      - run: bun run release:check
+      - uses: actions/upload-artifact@v4
+        with:
+          name: alpha-packages-${{ matrix.os }}
+          path: |
+            dist/release/*.tgz
+            dist/release/SHA256SUMS
+          if-no-files-found: error

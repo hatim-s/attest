@@ -1,3 +1,4 @@
+export { readRequestDocument } from '../commands/shared/command-request.js';
 export {
   cancelConfiguration,
   runConfiguration,

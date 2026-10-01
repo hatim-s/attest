@@ -6,7 +6,7 @@ type SummaryCase = Pick<CasesTable, 'id' | 'outcome' | 'expected_metrics_json'>;
 type SummaryMetric = Pick<MetricResultsTable, 'case_row_id' | 'metric_name' | 'status' | 'pass'>;
 type CaseVerdict = 'pass' | 'fail' | 'error';
 
-/** Applies the PLAN 1S.3 expected-metric verdict rule without penalizing optional extra rows. */
+/** Applies the expected-metric verdict rule without penalizing optional extra rows. */
 const computeCaseVerdict = (caseRow: SummaryCase, metrics: SummaryMetric[]): CaseVerdict => {
   if (caseRow.outcome !== 'completed') {
     return 'error';
@@ -46,4 +46,4 @@ const computeSummary = (cases: SummaryCase[], metrics: SummaryMetric[]): RunSumm
   };
 };
 
-export { computeCaseVerdict, computeSummary, type CaseVerdict };
+export { computeCaseVerdict, computeSummary };

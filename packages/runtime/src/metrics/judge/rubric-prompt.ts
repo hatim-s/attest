@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 import type { JsonValue, Trace } from '@attest/contracts';
+import { canonicalStringify } from '@attest/core';
 
 import type { JudgeRequest } from './judge-client.js';
 
@@ -22,29 +23,17 @@ const JUDGE_REQUEST_PARAMS: Record<string, JsonValue> = Object.freeze({
 });
 
 /** Constrains the provider response while allowing every finite score supported by metric contract §3. */
-const judgeResponseSchema: z.ZodType<{ score: number; rationale: string }> = z.strictObject({
+const judgeResponseSchema = z.strictObject({
   score: z.number().finite(),
   rationale: z.string(),
 });
 
-/** Canonicalizes object order before rendering so logically equal evidence produces identical prompt bytes. */
-const canonicalizeJson = (value: JsonValue): JsonValue => {
-  if (value === null || typeof value !== 'object') {
-    return value;
-  }
-  if (Array.isArray(value)) {
-    return value.map(canonicalizeJson);
-  }
-  return Object.fromEntries(
-    Object.keys(value)
-      .sort()
-      .map((key) => [key, canonicalizeJson(value[key]!)]),
-  );
-};
+/** Captures the normalized structured decision returned by a judge provider. */
+type JudgeVerdict = z.infer<typeof judgeResponseSchema>;
 
-/** Serializes absent optional evidence as JSON null so every labeled prompt block remains valid JSON. */
+/** Renders one prompt block with sorted keys so logically equal evidence produces identical bytes. */
 const formatJsonBlock = (value: JsonValue | undefined): string =>
-  JSON.stringify(canonicalizeJson(value ?? null), undefined, 2);
+  JSON.stringify(JSON.parse(canonicalStringify(value ?? null)), undefined, 2);
 
 /**
  * Assembles the deterministic, case-local judge prompt required by metric contract §3.
@@ -71,7 +60,7 @@ const buildJudgePrompt = (request: JudgeRequest): { system: string; user: string
 };
 
 /**
- * Reduces a trace to at most 50 shape-only span lines for metric contract §3.
+ * Reduces a trace to a bounded number of shape-only span lines for metric contract §3.
  * Inputs, outputs, attributes, and events stay out of judge prompts to keep payloads small and case-local.
  */
 const summarizeTraceForJudge = (trace: Trace | null): string | undefined => {
@@ -97,4 +86,5 @@ export {
   judgeResponseSchema,
   MAXIMUM_STRUCTURED_OUTPUT_ATTEMPTS,
   summarizeTraceForJudge,
+  type JudgeVerdict,
 };

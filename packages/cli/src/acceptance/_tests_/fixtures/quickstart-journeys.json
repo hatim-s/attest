@@ -1,0 +1,325 @@
+{
+  "schema": "attest.acceptance.quickstart",
+  "per_command_timeout_ms": 30000,
+  "fixture_files": [
+    "native-agent.mjs",
+    "human-cases.csv",
+    "agent-cases.jsonl",
+    "agent-add.json",
+    "metric-add.json"
+  ],
+  "actors": [
+    {
+      "id": "human-copy-paste",
+      "description": "A human follows documented, copy-paste commands in a terminal without editing generated JSON or YAML.",
+      "commands": [
+        {
+          "id": "discover",
+          "argv": ["help"],
+          "exit_code": 0,
+          "output": "human",
+          "required_stdout": ["Usage:", "agent", "test", "metric", "eval"],
+          "no_write": true
+        },
+        {
+          "id": "init",
+          "argv": ["project", "init", ".", "--name", "support", "--non-interactive"],
+          "exit_code": 0,
+          "output": "human",
+          "required_stdout": ["support"],
+          "artifacts_present": ["attest.project.json"]
+        },
+        {
+          "id": "add-agent",
+          "argv": [
+            "agent",
+            "add",
+            "support",
+            "--argv-json",
+            "[\"node\",\"./native-agent.mjs\"]",
+            "--timeout",
+            "5s"
+          ],
+          "exit_code": 0,
+          "output": "human",
+          "required_stdout": ["support", "attest agent test support"],
+          "artifacts_present": ["attest/agents/support.json"]
+        },
+        {
+          "id": "probe-agent",
+          "argv": ["agent", "test", "support", "--input", "\"ping\""],
+          "exit_code": 0,
+          "output": "human",
+          "required_stdout": ["support"],
+          "no_write": true
+        },
+        {
+          "id": "add-metric",
+          "argv": [
+            "metric",
+            "add",
+            "exact",
+            "--preset",
+            "output-contains",
+            "--value",
+            "\"policy\""
+          ],
+          "exit_code": 0,
+          "output": "human",
+          "required_stdout": ["exact"],
+          "artifacts_present": ["attest/metrics/exact.json"]
+        },
+        {
+          "id": "add-test",
+          "argv": ["test", "add", "smoke", "--agent", "support", "--metric", "exact"],
+          "exit_code": 0,
+          "output": "human",
+          "required_stdout": ["smoke"],
+          "artifacts_present": ["attest/tests/smoke.json"]
+        },
+        {
+          "id": "import-dataset",
+          "argv": [
+            "test",
+            "dataset",
+            "import",
+            "smoke",
+            "./human-cases.csv",
+            "--as",
+            "regression",
+            "--map",
+            "input=prompt",
+            "--map",
+            "expected=ideal",
+            "--key",
+            "external_id"
+          ],
+          "exit_code": 0,
+          "output": "human",
+          "required_stdout": ["regression", "2"],
+          "artifacts_present": [
+            "attest/datasets/regression.jsonl",
+            "attest/datasets/regression.meta.json"
+          ]
+        },
+        {
+          "id": "run-eval",
+          "argv": ["eval", "run", "smoke"],
+          "exit_code": 0,
+          "output": "human",
+          "capture_run_id": true,
+          "required_stdout": [
+            "Result: PASS (exit 0)",
+            "attest report $RUN_ID",
+            "attest view --no-open",
+            "Compare with a baseline run:",
+            "attest diff <base-run-id> $RUN_ID"
+          ],
+          "artifacts_present": [".attest/runs.db"]
+        },
+        {
+          "id": "inspect-run",
+          "argv": ["show", "run", "$RUN_ID", "--output", "json"],
+          "exit_code": 0,
+          "output": "json",
+          "command": "show",
+          "result_schema": "run",
+          "no_write": true
+        },
+        {
+          "id": "validate-comparison-template",
+          "argv": ["help", "diff", "--output", "json"],
+          "exit_code": 0,
+          "output": "json",
+          "command": "help",
+          "result_schema": "attest.cli-help",
+          "help_usage": "attest diff [options] <base-run-id> <candidate-run-id>",
+          "help_arguments": ["base-run-id", "candidate-run-id"],
+          "no_write": true
+        },
+        {
+          "id": "write-report",
+          "argv": ["report", "$RUN_ID"],
+          "exit_code": 0,
+          "output": "human",
+          "required_stdout": ["2-case report", "attest-report-$RUN_ID.html"],
+          "artifacts_present": ["attest-report-$RUN_ID.html"]
+        },
+        {
+          "id": "open-view",
+          "argv": ["view", "--no-open"],
+          "exit_code": 0,
+          "output": "human",
+          "readiness_probe": "view",
+          "required_stdout": ["Attest view: http://127.0.0.1:", "Press Ctrl+C to stop."]
+        },
+        {
+          "id": "structured-failure",
+          "argv": ["agent", "add", "incomplete", "--output", "json"],
+          "exit_code": 2,
+          "output": "json",
+          "command": "agent.add",
+          "error_code": "cli_missing_input",
+          "required_error_fields": ["path", "hint", "retryable"],
+          "no_write": true,
+          "artifacts_absent": ["attest/agents/incomplete.json"]
+        },
+        {
+          "id": "identify-repair",
+          "argv": ["errors", "--output", "json"],
+          "exit_code": 0,
+          "output": "json",
+          "command": "errors",
+          "result_schema": "attest.cli-errors",
+          "catalog_error_code": "cli_missing_input",
+          "no_write": true
+        }
+      ]
+    },
+    {
+      "id": "coding-agent-non-interactive",
+      "description": "A coding agent discovers machine contracts and uses flags or checked-in request documents without scraping prose or editing generated resources.",
+      "commands": [
+        {
+          "id": "discover",
+          "argv": ["help", "test", "case", "import", "--output", "json"],
+          "exit_code": 0,
+          "output": "json",
+          "command": "help",
+          "result_schema": "attest.cli-help",
+          "no_write": true
+        },
+        {
+          "id": "discover-schema",
+          "argv": ["schema", "print", "attest.command-request", "--output", "json"],
+          "exit_code": 0,
+          "output": "json",
+          "command": "schema.print",
+          "no_write": true
+        },
+        {
+          "id": "discover-errors",
+          "argv": ["errors", "--output", "json"],
+          "exit_code": 0,
+          "output": "json",
+          "command": "errors",
+          "result_schema": "attest.cli-errors",
+          "no_write": true
+        },
+        {
+          "id": "init",
+          "argv": [
+            "project",
+            "init",
+            ".",
+            "--name",
+            "support",
+            "--non-interactive",
+            "--output",
+            "json"
+          ],
+          "exit_code": 0,
+          "output": "json",
+          "command": "project.init",
+          "artifacts_present": ["attest.project.json"]
+        },
+        {
+          "id": "add-agent-request",
+          "argv": ["agent", "add", "--from-json", "./agent-add.json", "--output", "json"],
+          "exit_code": 0,
+          "output": "json",
+          "command": "agent.add",
+          "artifacts_present": ["attest/agents/support.json"]
+        },
+        {
+          "id": "probe-agent",
+          "argv": ["agent", "test", "support", "--input", "\"ping\"", "--output", "json"],
+          "exit_code": 0,
+          "output": "json",
+          "command": "agent.test",
+          "no_write": true
+        },
+        {
+          "id": "add-metric-request",
+          "argv": ["metric", "add", "--from-json", "./metric-add.json", "--output", "json"],
+          "exit_code": 0,
+          "output": "json",
+          "command": "metric.add",
+          "artifacts_present": ["attest/metrics/exact.json"]
+        },
+        {
+          "id": "add-test",
+          "argv": [
+            "test",
+            "add",
+            "smoke",
+            "--agent",
+            "support",
+            "--metric",
+            "exact",
+            "--output",
+            "json"
+          ],
+          "exit_code": 0,
+          "output": "json",
+          "command": "test.add",
+          "artifacts_present": ["attest/tests/smoke.json"]
+        },
+        {
+          "id": "import-cases",
+          "argv": ["test", "case", "import", "smoke", "./agent-cases.jsonl", "--output", "json"],
+          "exit_code": 0,
+          "output": "json",
+          "command": "test.case.import",
+          "artifacts_present": ["attest/tests/smoke.json"]
+        },
+        {
+          "id": "run-eval",
+          "argv": ["eval", "run", "smoke", "--output", "jsonl"],
+          "exit_code": 0,
+          "output": "jsonl",
+          "capture_run_id": true,
+          "artifacts_present": [".attest/runs.db"]
+        },
+        {
+          "id": "inspect-run",
+          "argv": ["show", "run", "$RUN_ID", "--output", "json"],
+          "exit_code": 0,
+          "output": "json",
+          "command": "show",
+          "result_schema": "run",
+          "no_write": true
+        },
+        {
+          "id": "write-report",
+          "argv": ["report", "$RUN_ID", "--output", "artifacts/agent-run.html"],
+          "exit_code": 0,
+          "output": "human",
+          "required_stdout": ["2-case report", "artifacts/agent-run.html"],
+          "artifacts_present": ["artifacts/agent-run.html"]
+        },
+        {
+          "id": "structured-failure",
+          "argv": ["agent", "add", "incomplete", "--output", "json"],
+          "exit_code": 2,
+          "output": "json",
+          "command": "agent.add",
+          "error_code": "cli_missing_input",
+          "required_error_fields": ["path", "hint", "retryable"],
+          "no_write": true,
+          "artifacts_absent": ["attest/agents/incomplete.json"]
+        },
+        {
+          "id": "identify-repair",
+          "argv": ["errors", "--output", "json"],
+          "exit_code": 0,
+          "output": "json",
+          "command": "errors",
+          "result_schema": "attest.cli-errors",
+          "catalog_error_code": "cli_missing_input",
+          "no_write": true
+        }
+      ]
+    }
+  ]
+}

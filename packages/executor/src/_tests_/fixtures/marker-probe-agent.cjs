@@ -2,9 +2,8 @@
 
 'use strict';
 
-/* eslint-disable @typescript-eslint/no-require-imports -- Node 22.0-compatible CommonJS fixture. */
-const { existsSync, writeFileSync } = require('node:fs');
-const { join } = require('node:path');
+const { existsSync, writeFileSync } = process.getBuiltinModule('node:fs');
+const { join } = process.getBuiltinModule('node:path');
 
 const markerPath = join(process.cwd(), 'attempt-marker');
 const statePath = process.env.MARKER_PROBE_STATE_FILE;

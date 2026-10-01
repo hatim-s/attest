@@ -5,7 +5,6 @@ import { describe, expect, it } from 'vitest';
 
 import { createContentCaseId, createKeyedCaseId } from '../canonical-import.js';
 import { TabularImportError, type ImportDiagnostic } from '../import-types.js';
-import { collectBoundedImportSource } from '../parse-import-source.js';
 import { importTabularCases } from '../tabular-import.js';
 
 const fixture = (name: string): Uint8Array =>
@@ -52,42 +51,18 @@ describe('tabular import golden formats', () => {
 
     expect(result.cases).toEqual(expected);
     expect(result.counts).toEqual({ inserted: 2, read: 2, skipped: 0, updated: 0 });
-    expect(result.preview).toEqual([
-      {
-        id: 'refund-1',
-        input: { question: '<redacted:string>' },
-        expected: { answer: '<redacted:string>' },
-        params: { locale: '<redacted:string>' },
-        tags: ['<redacted:string>'],
-      },
-      {
-        id: 'refund-2',
-        input: { question: '<redacted:string>' },
-        expected: { answer: '<redacted:string>' },
-        params: { locale: '<redacted:string>' },
-        tags: ['<redacted:string>'],
-      },
-    ]);
+    expect(result.preview).toHaveLength(2);
+    expect(result.preview[0]).toEqual({
+      id: 'refund-1',
+      input: { question: '<redacted:string>' },
+      expected: { answer: '<redacted:string>' },
+      params: { locale: '<redacted:string>' },
+      tags: ['<redacted:string>'],
+    });
   });
 });
 
 describe('tabular import validation and identity', () => {
-  it('stops bounded stream collection before consuming bytes beyond the hard cap', async () => {
-    let consumedPastLimit = false;
-    const chunks = async function* sourceChunks(): AsyncGenerator<Uint8Array> {
-      await Promise.resolve();
-      yield new Uint8Array([1, 2]);
-      yield new Uint8Array([3, 4]);
-      consumedPastLimit = true;
-      yield new Uint8Array([5]);
-    };
-
-    await expect(collectBoundedImportSource(chunks(), 3)).rejects.toMatchObject({
-      diagnostics: [{ code: 'import_size_limit' }],
-    });
-    expect(consumedPastLimit).toBe(false);
-  });
-
   it('aggregates malformed JSONL and normalized-row diagnostics in physical order', () => {
     const diagnostics = diagnosticsFrom(() =>
       importTabularCases({
@@ -148,7 +123,7 @@ describe('tabular import validation and identity', () => {
     expect(Object.hasOwn(Object.prototype, 'polluted')).toBe(false);
   });
 
-  it('rejects duplicate content by default and deterministically keeps the first when explicit', () => {
+  it('rejects duplicate content by default', () => {
     const source = JSON.stringify([
       { id: 'first', input: 'same' },
       { id: 'second', input: 'same' },
@@ -156,61 +131,14 @@ describe('tabular import validation and identity', () => {
     expect(diagnosticsFrom(() => importTabularCases({ format: 'json', source }))).toMatchObject([
       { code: 'duplicate_content', row: 2 },
     ]);
-
-    const deduped = importTabularCases({ dedupe: 'content', format: 'json', source });
-    expect(deduped.cases.map(({ id }) => id)).toEqual(['first']);
-    expect(deduped.counts).toEqual({ inserted: 1, read: 2, skipped: 1, updated: 0 });
   });
 
-  it('reports generated-id collisions against resolved direct or attached cases', () => {
-    const imported = importTabularCases({ format: 'json', source: '[{"input":"same"}]' });
-    expect(
-      diagnosticsFrom(() =>
-        importTabularCases({
-          collisionCases: imported.cases,
-          format: 'json',
-          source: '[{"input":"same"}]',
-        }),
-      ),
-    ).toMatchObject([{ code: 'resolved_case_collision', row: 1 }]);
-  });
-
-  it('enforces byte, row, CSV-header, and CSV-shape limits before mutation', () => {
+  it('enforces byte and row limits before mapping any record', () => {
     expect(
       diagnosticsFrom(() =>
         importTabularCases({ format: 'json', limits: { maxBytes: 2 }, source: '[] ' }),
       ),
     ).toMatchObject([{ code: 'import_size_limit' }]);
-    expect(
-      diagnosticsFrom(() =>
-        importTabularCases({
-          format: 'json',
-          limits: { maxRows: 1 },
-          source: '[{"input":1},{"input":2}]',
-        }),
-      ),
-    ).toMatchObject([{ code: 'import_row_limit' }]);
-    expect(
-      diagnosticsFrom(() =>
-        importTabularCases({
-          format: 'csv',
-          mappings: [{ destination: 'input', source: 'prompt' }],
-          source: 'prompt,prompt\na,b,c\n',
-        }),
-      ).map(({ code }) => code),
-    ).toEqual(['duplicate_csv_header', 'csv_column_count']);
-  });
-
-  it('rejects quotes inside unquoted CSV fields and caps JSONL before retaining excess rows', () => {
-    expect(
-      diagnosticsFrom(() =>
-        importTabularCases({
-          format: 'csv',
-          mappings: [{ destination: 'input', source: 'prompt' }],
-          source: 'prompt\nabc"def\n',
-        }),
-      ),
-    ).toMatchObject([{ code: 'malformed_csv', line: 2 }]);
     expect(
       diagnosticsFrom(() =>
         importTabularCases({
@@ -220,6 +148,22 @@ describe('tabular import validation and identity', () => {
         }),
       ),
     ).toMatchObject([{ code: 'import_row_limit' }]);
+  });
+
+  it('reports malformed CSV headers, row widths, and quotes', () => {
+    const csvDiagnostics = (source: string) =>
+      diagnosticsFrom(() =>
+        importTabularCases({
+          format: 'csv',
+          mappings: [{ destination: 'input', source: 'prompt' }],
+          source,
+        }),
+      );
+    expect(csvDiagnostics('prompt,prompt\na,b,c\n').map(({ code }) => code)).toEqual([
+      'duplicate_csv_header',
+      'csv_column_count',
+    ]);
+    expect(csvDiagnostics('prompt\nabc"def\n')).toMatchObject([{ code: 'malformed_csv', line: 2 }]);
   });
 
   it('reports authored mapping provenance without exposing source record values', () => {

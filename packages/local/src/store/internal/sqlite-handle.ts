@@ -16,4 +16,4 @@ interface SqliteHandle {
   close(): Promise<void>;
 }
 
-export { type SqliteHandle, type SqliteStatement, type SqliteValue };
+export { type SqliteHandle, type SqliteValue };

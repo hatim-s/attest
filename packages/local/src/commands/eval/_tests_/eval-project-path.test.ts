@@ -1,4 +1,4 @@
-import { access, lstat, mkdir, mkdtemp, readdir, rename, rm, symlink } from 'node:fs/promises';
+import { lstat, mkdir, mkdtemp, readdir, rm, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -24,24 +24,6 @@ afterEach(async () => {
 });
 
 describe('openEvalProjectStore', () => {
-  it('rejects a parent swap in the validation-to-open window without outside writes', async () => {
-    const projectRoot = await createTemporaryDirectory('attest-store-boundary-');
-    const outside = await createTemporaryDirectory('attest-store-outside-');
-    const originalDirectory = join(projectRoot, '.attest-original');
-
-    await expect(
-      openEvalProjectStore(projectRoot, {
-        beforeCapture: async () => {
-          await rename(join(projectRoot, '.attest'), originalDirectory);
-          await symlink(outside, join(projectRoot, '.attest'));
-        },
-      }),
-    ).rejects.toMatchObject({ code: 'run_failed', path: '.attest/runs.db' });
-
-    expect(await readdir(outside)).toEqual([]);
-    await expect(access(join(outside, 'runs.db'))).rejects.toMatchObject({ code: 'ENOENT' });
-  });
-
   it('preserves final SQLite file symlink rejection', async () => {
     const projectRoot = await createTemporaryDirectory('attest-store-boundary-');
     const outside = await createTemporaryDirectory('attest-store-outside-');

@@ -1,5 +1,4 @@
-/** Case-level verdict derived from invocation and metric outcomes. */
-type CaseVerdict = 'pass' | 'fail' | 'error';
+import type { CaseVerdict } from '../store/types.js';
 
 /** Exhaustive transition classification for a case across two runs. */
 type CaseTransitionKind =
@@ -40,34 +39,27 @@ interface DiffSummary {
   coverage?: { sharedCases: number; baseOnlyCases: number; candidateOnlyCases: number };
 }
 
+/** Identifies the two runs being compared and whether only shared cases count. */
+interface RunComparison {
+  baseRunId: string;
+  candidateRunId: string;
+  baseConfigHash: string;
+  candidateConfigHash: string;
+  /** Partial selections compare only cases both runs recorded. */
+  sharedOnly?: boolean;
+}
+
 /** Represents the complete comparison between two persisted runs. */
 interface RunDiff {
   summary: DiffSummary;
   transitions: CaseTransition[];
 }
 
-/** Configures optional CI failure gates over a run diff. */
-interface ThresholdConfig {
-  minPassRate?: number;
-  maxRegressions?: number;
-  failOnInvocationErrors?: boolean;
-  failOnMetricErrors?: boolean;
-}
-
-/** Reports the CI-compatible decision and human-actionable failures. */
-interface CiVerdict {
-  pass: boolean;
-  exitCode: 0 | 1;
-  reasons: string[];
-}
-
 export {
   type CaseTransition,
   type CaseTransitionKind,
-  type CaseVerdict,
-  type CiVerdict,
   type DiffSummary,
   type MetricDelta,
+  type RunComparison,
   type RunDiff,
-  type ThresholdConfig,
 };

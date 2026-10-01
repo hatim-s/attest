@@ -35,32 +35,27 @@ class ProjectLoadError extends LocalError {
     diagnostics: readonly ProjectDiagnostic[],
     options?: ProjectLoadErrorOptions,
   ) {
-    const detail = diagnostics.map(formatProjectDiagnostic).join('\n');
-    const safeDiagnostics = [...diagnostics]
-      .sort((left, right) =>
-        [left.source, left.path ?? '', left.code, left.message]
-          .join('\0')
-          .localeCompare([right.source, right.path ?? '', right.code, right.message].join('\0')),
-      )
-      .map(({ code: diagnosticCode, message, path, source }) => ({
-        code: diagnosticCode,
-        message,
-        source,
-        ...(path === undefined ? {} : { path }),
-      }));
+    // One stable order for the message, the structured details, and this.diagnostics.
+    const sorted = [...diagnostics].sort((left, right) =>
+      [left.source, left.path ?? '', left.code, left.message]
+        .join('\0')
+        .localeCompare([right.source, right.path ?? '', right.code, right.message].join('\0')),
+    );
+    const detail = sorted.map(formatProjectDiagnostic).join('\n');
+    const safeDiagnostics = sorted.map(({ code: diagnosticCode, message, path, source }) => ({
+      code: diagnosticCode,
+      message,
+      source,
+      ...(path === undefined ? {} : { path }),
+    }));
     super(code, options?.summaryOnly || detail.length === 0 ? summary : `${summary}\n${detail}`, {
       cause: options?.cause,
       hint: options?.hint,
       path: options?.path,
       details: { diagnostics: safeDiagnostics },
     });
-    this.diagnostics = diagnostics;
+    this.diagnostics = sorted;
   }
 }
 
-export {
-  ProjectLoadError,
-  formatProjectDiagnostic,
-  type ProjectDiagnostic,
-  type ProjectDiagnosticCode,
-};
+export { ProjectLoadError, type ProjectDiagnostic };

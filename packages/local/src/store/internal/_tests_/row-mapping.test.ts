@@ -25,16 +25,14 @@ describe('metric row mapping', () => {
     ).toThrow('Stored errored metric violates its discriminant.');
   });
 
-  it.each([-1, 2])('rejects non-boolean persisted pass value %s', (pass) => {
-    expect(() => toMetricEvaluation({ ...evaluatedRow, pass })).toThrow(
-      'Stored evaluated metric violates its discriminant.',
-    );
-  });
-
   it.each([
     [0, false],
     [1, true],
+    [-1, 'Stored evaluated metric violates its discriminant.'],
+    [2, 'Stored evaluated metric violates its discriminant.'],
   ])('maps persisted pass value %s to %s', (pass, expected) => {
-    expect(toMetricEvaluation({ ...evaluatedRow, pass })).toMatchObject({ pass: expected });
+    const map = () => toMetricEvaluation({ ...evaluatedRow, pass });
+    if (typeof expected === 'string') expect(map).toThrow(expected);
+    else expect(map()).toMatchObject({ pass: expected });
   });
 });

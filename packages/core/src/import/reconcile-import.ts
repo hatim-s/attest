@@ -1,107 +1,108 @@
 import type { TestCase } from '@attest/contracts';
 
 import { fingerprintCaseContent } from './canonical-import.js';
-import {
-  createImportDiagnostic as diagnostic,
-  sortImportDiagnostics,
-  type NormalizedImportRow,
-} from './import-internal.js';
+import { importDiagnostic, sortImportDiagnostics } from './import-diagnostics.js';
 import {
   TabularImportError,
+  type DedupedRows,
   type ImportDecision,
+  type ImportDiagnostic,
+  type NormalizedImportRow,
+  type ReconciledImport,
   type TabularImportRequest,
-  type TabularImportResult,
 } from './import-types.js';
 
-/** Applies collision and update policy to normalized import rows. */
-const reconcileRows = (
-  rows: readonly NormalizedImportRow[],
-  request: TabularImportRequest,
-  dedupeSkipped: number,
-  dedupeDecisions: readonly ImportDecision[],
-): Omit<TabularImportResult, 'format' | 'importedCases' | 'preview' | 'sourceHash'> => {
+type MatchBasis = NonNullable<ImportDecision['matched_by']>;
+
+const collidesOutsideTarget = (row: NormalizedImportRow, request: TabularImportRequest): boolean =>
+  (request.collisionContexts ?? []).some(
+    ({ cases, requiredTags }) =>
+      (requiredTags ?? []).every((tag) => (row.case.tags ?? []).includes(tag)) &&
+      cases.some(({ id }) => id === row.case.id),
+  );
+
+const idMatchBasis = (row: NormalizedImportRow): MatchBasis =>
+  row.identitySource === 'key' ? 'key' : 'id';
+
+const conflictDestination = (matchedBy: MatchBasis): string => {
+  if (matchedBy === 'content') return '';
+  return '/id';
+};
+
+const upsertIdentityDiagnostics = (rows: readonly NormalizedImportRow[]): ImportDiagnostic[] =>
+  rows
+    .filter((row) => row.identitySource === 'content')
+    .map((row) =>
+      importDiagnostic({
+        code: 'upsert_identity_required',
+        message: 'Upsert requires an explicit mapped id or stable source key.',
+        hint: 'Map id or pass --key so changed content retains its case identity.',
+        sourceField: '<identity>',
+        destinationPath: '/id',
+        location: row.location,
+      }),
+    );
+
+/**
+ * Applies sync and conflict policy against the target's existing cases. Matching is by id first,
+ * then by content. Existing cases absent from the source are never deleted.
+ */
+const reconcileRows = (deduped: DedupedRows, request: TabularImportRequest): ReconciledImport => {
   const sync = request.sync ?? 'append';
   const conflict = request.onConflict ?? (sync === 'upsert' ? 'update' : 'error');
-  const cases: TestCase[] = structuredClone([...(request.existingCases ?? [])]);
-  const collisionContexts = [
-    ...((request.collisionCases ?? []).length === 0
-      ? []
-      : [{ cases: request.collisionCases ?? [] }]),
-    ...(request.collisionContexts ?? []),
-  ];
-  const diagnostics = [];
-  const decisions: ImportDecision[] = [...dedupeDecisions];
+  const cases: TestCase[] = (request.existingCases ?? []).map((testCase) =>
+    structuredClone(testCase),
+  );
+  // Kept in step with `cases` so each case is hashed once rather than once per imported row.
+  const fingerprints = cases.map(fingerprintCaseContent);
+  const diagnostics: ImportDiagnostic[] = [];
+  const decisions: ImportDecision[] = [...deduped.decisions];
   let inserted = 0;
-  let skipped = dedupeSkipped;
+  let skipped = deduped.skipped;
   let updated = 0;
 
-  if (sync === 'upsert') {
-    rows.forEach((row) => {
-      if (row.generatedFromContent) {
-        diagnostics.push(
-          diagnostic(
-            'upsert_identity_required',
-            'Upsert requires an explicit mapped id or stable source key.',
-            'Map id or pass --key so changed content retains its case identity.',
-            '<identity>',
-            '/id',
-            row.location,
-          ),
-        );
-      }
-    });
-  }
+  if (sync === 'upsert') diagnostics.push(...upsertIdentityDiagnostics(deduped.rows));
 
-  for (const row of rows) {
-    const collides = collisionContexts.some(
-      ({ cases: collisionCases, requiredTags }) =>
-        (requiredTags ?? []).every((tag) => (row.case.tags ?? []).includes(tag)) &&
-        collisionCases.some(({ id }) => id === row.case.id),
-    );
-    if (collides) {
+  for (const row of deduped.rows) {
+    if (collidesOutsideTarget(row, request)) {
       if (conflict === 'skip') {
         skipped += 1;
         decisions.push({ action: 'skip', case_id: row.case.id, matched_by: 'id', ...row.location });
-      } else {
-        diagnostics.push(
-          diagnostic(
-            'resolved_case_collision',
-            'Imported case id collides with a direct or attached case outside the import target.',
-            'Choose an explicit non-colliding id or use --on-conflict skip.',
-            'id',
-            '/id',
-            row.location,
-          ),
-        );
+        continue;
       }
+      diagnostics.push(
+        importDiagnostic({
+          code: 'resolved_case_collision',
+          message:
+            'Imported case id collides with a direct or attached case outside the import target.',
+          hint: 'Choose an explicit non-colliding id or use --on-conflict skip.',
+          sourceField: 'id',
+          destinationPath: '/id',
+          location: row.location,
+        }),
+      );
       continue;
     }
 
     const idIndex = cases.findIndex(({ id }) => id === row.case.id);
-    const contentIndex = cases.findIndex(
-      (testCase) => fingerprintCaseContent(testCase) === row.contentFingerprint,
-    );
-    const matchIndex = idIndex >= 0 ? idIndex : contentIndex;
-    const matchedBy = idIndex >= 0 ? (row.identitySource === 'key' ? 'key' : 'id') : 'content';
+    const matchIndex = idIndex >= 0 ? idIndex : fingerprints.indexOf(row.contentFingerprint);
     if (matchIndex < 0) {
       cases.push(row.case);
+      fingerprints.push(row.contentFingerprint);
       inserted += 1;
       decisions.push({ action: 'insert', case_id: row.case.id });
       continue;
     }
+    const matchedBy: MatchBasis = idIndex >= 0 ? idMatchBasis(row) : 'content';
+    const stableId = cases[matchIndex]!.id;
     if (conflict === 'skip') {
       skipped += 1;
-      decisions.push({
-        action: 'skip',
-        case_id: cases[matchIndex]!.id,
-        matched_by: matchedBy,
-        ...row.location,
-      });
+      decisions.push({ action: 'skip', case_id: stableId, matched_by: matchedBy, ...row.location });
       continue;
     }
     if (conflict === 'update') {
-      const stableId = cases[matchIndex]!.id;
       cases[matchIndex] = { ...row.case, id: stableId };
+      fingerprints[matchIndex] = row.contentFingerprint;
       updated += 1;
       decisions.push({
         action: 'update',
@@ -112,14 +113,14 @@ const reconcileRows = (
       continue;
     }
     diagnostics.push(
-      diagnostic(
-        'existing_case_conflict',
-        `Imported case conflicts with existing ${matchedBy}.`,
-        'Pass --on-conflict skip|update or repair the source identity.',
-        matchedBy,
-        matchedBy === 'id' || matchedBy === 'key' ? '/id' : '',
-        row.location,
-      ),
+      importDiagnostic({
+        code: 'existing_case_conflict',
+        message: `Imported case conflicts with existing ${matchedBy}.`,
+        hint: 'Pass --on-conflict skip|update or repair the source identity.',
+        sourceField: matchedBy,
+        destinationPath: conflictDestination(matchedBy),
+        location: row.location,
+      }),
     );
   }
 
@@ -131,7 +132,7 @@ const reconcileRows = (
   }
   return {
     cases,
-    counts: { inserted, read: rows.length + dedupeSkipped, skipped, updated },
+    counts: { inserted, read: deduped.rows.length + deduped.skipped, skipped, updated },
     decisions,
   };
 };

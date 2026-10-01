@@ -1,5 +1,5 @@
 {
-  "$comment": "Runtime-only invariants include span time ordering, duplicate identifiers, and metric references.",
+  "$comment": "Runtime-only invariants: the agent response carries exactly one of output or error.",
   "$defs": {
     "__schema0": {
       "anyOf": [
@@ -62,37 +62,6 @@
           "type": "object"
         }
       ]
-    },
-    "__schema2": {
-      "anyOf": [
-        {
-          "type": "string"
-        },
-        {
-          "type": "number"
-        },
-        {
-          "type": "boolean"
-        },
-        {
-          "type": "null"
-        },
-        {
-          "items": {
-            "$ref": "#/$defs/__schema2"
-          },
-          "type": "array"
-        },
-        {
-          "additionalProperties": {
-            "$ref": "#/$defs/__schema2"
-          },
-          "propertyNames": {
-            "type": "string"
-          },
-          "type": "object"
-        }
-      ]
     }
   },
   "$schema": "https://json-schema.org/draft/2020-12/schema",
@@ -101,67 +70,45 @@
       "additionalProperties": false,
       "properties": {
         "request_id": {
-          "maxLength": 256,
+          "maxLength": 128,
           "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
           "type": "string"
         },
         "response": {
-          "anyOf": [
-            {
-              "additionalProperties": {},
+          "additionalProperties": {},
+          "properties": {
+            "error": {
+              "additionalProperties": false,
               "properties": {
-                "output": {
-                  "$ref": "#/$defs/__schema0"
-                },
-                "protocol": {
-                  "const": "attest.agent-invocation",
+                "code": {
                   "type": "string"
                 },
-                "state": {
-                  "$ref": "#/$defs/__schema1"
-                },
-                "trace": {}
+                "message": {
+                  "type": "string"
+                }
               },
               "required": [
-                "protocol",
-                "output"
+                "message"
               ],
               "type": "object"
             },
-            {
-              "additionalProperties": {},
-              "properties": {
-                "error": {
-                  "additionalProperties": false,
-                  "properties": {
-                    "code": {
-                      "type": "string"
-                    },
-                    "message": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "message"
-                  ],
-                  "type": "object"
-                },
-                "protocol": {
-                  "const": "attest.agent-invocation",
-                  "type": "string"
-                },
-                "state": {
-                  "$ref": "#/$defs/__schema2"
-                },
-                "trace": {}
-              },
-              "required": [
-                "protocol",
-                "error"
-              ],
-              "type": "object"
-            }
-          ]
+            "output": {
+              "$ref": "#/$defs/__schema0"
+            },
+            "protocol": {
+              "const": "attest.agent-invocation",
+              "type": "string"
+            },
+            "state": {
+              "$ref": "#/$defs/__schema1"
+            },
+            "trace": {}
+          },
+          "required": [
+            "protocol"
+          ],
+          "type": "object"
         },
         "type": {
           "const": "response",
@@ -179,8 +126,9 @@
       "additionalProperties": false,
       "properties": {
         "request_id": {
-          "maxLength": 256,
+          "maxLength": 128,
           "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
           "type": "string"
         },
         "type": {

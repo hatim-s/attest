@@ -1,22 +1,19 @@
 import { spawn } from 'node:child_process';
 
+const BROWSER_OPENERS: Partial<Record<NodeJS.Platform, string>> = {
+  darwin: 'open',
+  linux: 'xdg-open',
+};
+
 /** Opens one local URL with the platform browser, returning false on unsupported platforms. */
-const openBrowser = async (url: string, platform = process.platform): Promise<boolean> => {
-  const command =
-    platform === 'darwin'
-      ? { executable: 'open', arguments: [url] }
-      : platform === 'linux'
-        ? { executable: 'xdg-open', arguments: [url] }
-        : undefined;
-  if (command === undefined) return false;
+const openBrowser = async (url: string): Promise<boolean> => {
+  const executable = BROWSER_OPENERS[process.platform];
+  if (executable === undefined) return false;
 
   await new Promise<void>((resolve, reject) => {
-    const child = spawn(command.executable, command.arguments, {
-      detached: true,
-      stdio: 'ignore',
-    });
+    const child = spawn(executable, [url], { detached: true, stdio: 'ignore' });
     child.once('spawn', () => {
-      // Browser ownership outlives the CLI child; the view server remains the controlled lifecycle.
+      // The browser outlives the CLI; only the view server's lifecycle is controlled here.
       child.unref();
       resolve();
     });

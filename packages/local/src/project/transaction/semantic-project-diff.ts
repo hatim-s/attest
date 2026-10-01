@@ -1,6 +1,9 @@
-import type { ProjectResources } from '@attest/contracts';
+import type { ProjectResources, JsonValue } from '@attest/contracts';
 
-import { datasetMetadataForHash, hashCanonicalJson, type JsonValue } from '../canonical-project.js';
+import { contentHash } from '@attest/core';
+
+import { escapeJsonPointerSegment } from '../../internal/json-pointer.js';
+import { datasetMetadataForHash } from '../canonical-project.js';
 import type { LoadedProject } from '../project-loader/index.js';
 import { ProjectTransactionError } from './project-transaction-error.js';
 import type {
@@ -14,9 +17,6 @@ import type {
 
 type ResourceValue = JsonValue & { id: string };
 type IdentityValue = Record<string, JsonValue> & { id: string };
-
-const escapePointerSegment = (segment: string): string =>
-  segment.replaceAll('~', '~0').replaceAll('/', '~1');
 
 const identityValues = (values: readonly JsonValue[]): IdentityValue[] | undefined => {
   const records: IdentityValue[] = [];
@@ -51,7 +51,7 @@ const diffIdentityArray = (
   const afterById = new Map(afterRecords.map((value) => [value.id, value]));
   const ids = [...new Set([...beforeById.keys(), ...afterById.keys()])].sort();
   const changes = ids.flatMap((id) => {
-    const childPath = `${path}/${escapePointerSegment(id)}`;
+    const childPath = `${path}/${escapeJsonPointerSegment(id)}`;
     const oldValue = beforeById.get(id);
     const newValue = afterById.get(id);
     if (oldValue === undefined) return [{ change: 'add' as const, path: childPath }];
@@ -104,7 +104,7 @@ const diffJsonFields = (before: JsonValue, after: JsonValue, path = ''): Semanti
     return [...new Set([...Object.keys(beforeRecord), ...Object.keys(afterRecord)])]
       .sort()
       .flatMap((key) => {
-        const childPath = `${path}/${escapePointerSegment(key)}`;
+        const childPath = `${path}/${escapeJsonPointerSegment(key)}`;
         if (!(key in beforeRecord)) {
           return [{ change: 'add' as const, path: childPath }];
         }
@@ -169,23 +169,27 @@ const diffReferences = (
   };
 };
 
+const RESOURCE_VALUES: Readonly<
+  Record<Exclude<ProjectResourceKind, 'project'>, (project: ProjectResources) => readonly unknown[]>
+> = {
+  agent: (project) => project.agents,
+  dataset: (project) =>
+    project.datasets.map(({ cases, metadata }) => ({
+      ...(datasetMetadataForHash(metadata) as Record<string, JsonValue>),
+      id: metadata.id,
+      cases,
+    })),
+  metric: (project) => project.metrics,
+  test: (project) => project.tests,
+};
+
 const valuesByKind = (
   project: ProjectResources,
   kind: Exclude<ProjectResourceKind, 'project'>,
 ): ReadonlyMap<string, ResourceValue> => {
-  const values =
-    kind === 'agent'
-      ? project.agents
-      : kind === 'test'
-        ? project.tests
-        : kind === 'metric'
-          ? project.metrics
-          : project.datasets.map(({ cases, metadata }) => ({
-              ...(datasetMetadataForHash(metadata as JsonValue) as Record<string, JsonValue>),
-              id: metadata.id,
-              cases,
-            }));
-  return new Map(values.map((value) => [value.id, value as ResourceValue]));
+  // Every resource is a validated JSON object with a string id.
+  const values = RESOURCE_VALUES[kind](project) as readonly ResourceValue[];
+  return new Map(values.map((value) => [value.id, value]));
 };
 
 const referencesForResource = (
@@ -197,24 +201,33 @@ const referencesForResource = (
     kind === 'test' ? reference.path.startsWith(`/tests/${id}/`) : reference.id === id,
   );
 
-const makeOperation = (
-  op: SemanticProjectOperation['op'],
-  kind: ProjectResourceKind,
-  id: string,
-  before: JsonValue | undefined,
-  after: JsonValue | undefined,
-  addedReferences: readonly SemanticReference[],
-  removedReferences: readonly SemanticReference[],
-  previousId?: string,
-): SemanticProjectOperation => ({
+type OperationOptions = {
+  after?: JsonValue;
+  before?: JsonValue;
+  id: string;
+  kind: ProjectResourceKind;
+  op: SemanticProjectOperation['op'];
+  previousId?: string;
+  references: { added: readonly SemanticReference[]; removed: readonly SemanticReference[] };
+};
+
+const makeOperation = ({
+  after,
+  before,
+  id,
+  kind,
+  op,
+  previousId,
+  references,
+}: OperationOptions): SemanticProjectOperation => ({
   changes:
     before === undefined || after === undefined ? [] : diffJsonFields(before, after).sort(byPath),
-  ...(after === undefined ? {} : { new_content_hash: hashCanonicalJson(after) }),
-  ...(before === undefined ? {} : { old_content_hash: hashCanonicalJson(before) }),
+  ...(after === undefined ? {} : { new_content_hash: contentHash(after) }),
+  ...(before === undefined ? {} : { old_content_hash: contentHash(before) }),
   op,
   ...(previousId === undefined ? {} : { previous_id: previousId }),
-  references_added: referencesForResource(addedReferences, kind, id),
-  references_removed: referencesForResource(removedReferences, kind, previousId ?? id),
+  references_added: referencesForResource(references.added, kind, id),
+  references_removed: referencesForResource(references.removed, kind, previousId ?? id),
   resource: { id, type: kind },
 });
 
@@ -249,16 +262,15 @@ const createSemanticProjectDiff = (
     renameKeys.add(`${rename.type}:${rename.from}`);
     renameKeys.add(`${rename.type}:${rename.to}`);
     operations.push(
-      makeOperation(
-        'rename',
-        rename.type,
-        rename.to,
-        oldValue,
-        newValue,
-        references.added,
-        references.removed,
-        rename.from,
-      ),
+      makeOperation({
+        op: 'rename',
+        kind: rename.type,
+        id: rename.to,
+        before: oldValue,
+        after: newValue,
+        references,
+        previousId: rename.from,
+      }),
     );
   }
 
@@ -273,36 +285,16 @@ const createSemanticProjectDiff = (
       const oldValue = oldValues.get(id);
       const newValue = newValues.get(id);
       if (oldValue === undefined && newValue !== undefined) {
-        operations.push(
-          makeOperation('add', kind, id, undefined, newValue, references.added, references.removed),
-        );
+        operations.push(makeOperation({ op: 'add', kind, id, after: newValue, references }));
       } else if (oldValue !== undefined && newValue === undefined) {
-        operations.push(
-          makeOperation(
-            'remove',
-            kind,
-            id,
-            oldValue,
-            undefined,
-            references.added,
-            references.removed,
-          ),
-        );
+        operations.push(makeOperation({ op: 'remove', kind, id, before: oldValue, references }));
       } else if (
         oldValue !== undefined &&
         newValue !== undefined &&
-        hashCanonicalJson(oldValue) !== hashCanonicalJson(newValue)
+        contentHash(oldValue) !== contentHash(newValue)
       ) {
         operations.push(
-          makeOperation(
-            'update',
-            kind,
-            id,
-            oldValue,
-            newValue,
-            references.added,
-            references.removed,
-          ),
+          makeOperation({ op: 'update', kind, id, before: oldValue, after: newValue, references }),
         );
       }
     }
@@ -320,17 +312,16 @@ const createSemanticProjectDiff = (
     name: after.project.name,
     ...(after.project.defaults === undefined ? {} : { defaults: after.project.defaults }),
   };
-  if (hashCanonicalJson(oldProjectMetadata) !== hashCanonicalJson(newProjectMetadata)) {
+  if (contentHash(oldProjectMetadata) !== contentHash(newProjectMetadata)) {
     operations.push(
-      makeOperation(
-        'update',
-        'project',
-        after.project.project_id,
-        oldProjectMetadata,
-        newProjectMetadata,
-        references.added,
-        references.removed,
-      ),
+      makeOperation({
+        op: 'update',
+        kind: 'project',
+        id: after.project.project_id,
+        before: oldProjectMetadata,
+        after: newProjectMetadata,
+        references,
+      }),
     );
   }
 
@@ -361,4 +352,4 @@ const createSemanticProjectDiff = (
   };
 };
 
-export { createSemanticProjectDiff, diffJsonFields };
+export { createSemanticProjectDiff };

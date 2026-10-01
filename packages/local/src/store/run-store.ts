@@ -1,7 +1,6 @@
 import { resolve } from 'node:path';
 
 import { Kysely } from 'kysely';
-import { monotonicFactory } from 'ulid';
 
 import {
   canonicalStringify,
@@ -21,6 +20,7 @@ import {
 import { createCacheStore } from './cache.js';
 import { recordCaseTransaction, validateCaseRecordInput } from './internal/case-recording.js';
 import { createSqliteDialect } from './internal/kysely-sqlite-dialect.js';
+import { createUlid } from './internal/create-ulid.js';
 import { createLock } from './internal/promise-lock.js';
 import { toCaseRecord, toMetricEvaluation, toRunRecord } from './internal/row-mapping.js';
 import { computeCaseVerdict, computeSummary } from './internal/run-summary.js';
@@ -34,7 +34,6 @@ import { executeStoreOperation } from './internal/store-operation.js';
 import { migrateToLatest, validateReadableSchema } from './migration-runner.js';
 import type { Database, MetricResultsTable } from './schema.js';
 
-const createUlid = monotonicFactory();
 const migrationLocks = new Map<string, ReturnType<typeof createLock>>();
 
 /** Allocates the shared ULID/timestamp pair used by immutable eval metadata and the run store. */
@@ -181,13 +180,13 @@ class SqliteRunStore implements RunStore {
   }
 
   /** Lists runs in deterministic newest-first order. */
-  async listRuns(options: { limit?: number } = {}): Promise<RunRecord[]> {
+  async listRuns(limit?: number): Promise<RunRecord[]> {
     let query = this.#database
       .selectFrom('runs')
       .selectAll()
       .orderBy('created_at', 'desc')
       .orderBy('id', 'desc');
-    if (options.limit !== undefined) query = query.limit(options.limit);
+    if (limit !== undefined) query = query.limit(limit);
     return (await query.execute()).map(toRunRecord);
   }
 

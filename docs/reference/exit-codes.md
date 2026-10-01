@@ -1,7 +1,7 @@
 # Exit codes
 
-Attest uses a closed process-status set: `0`, `1`, `2`, `3`, `4`, and `130`. The exit code is a
-broad operational class; the stable error code or eval verdict is the precise identity.
+Attest exits with `0`, `1`, `2`, `3`, `4`, or `130`. The exit code is a broad class. The error code
+or eval verdict says exactly what happened.
 
 | Exit | Class                                  | Examples                                                                                                                 | Retry rule                                                                 |
 | ---: | -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------- |
@@ -45,8 +45,7 @@ Therefore automation must inspect both `ok` and, for successful eval results, `r
 
 ## JSON and JSONL
 
-Non-streaming `--output json` prints exactly one `attest.cli-result`. Success omits `error`;
-failure omits project hashes, `result`, and `warnings`.
+`--output json` prints one [`attest.cli-result`](./schemas.md#attestcli-result).
 
 Eval `--output jsonl` ends with one `attest.cli-event` result line whose data is:
 
@@ -99,8 +98,9 @@ jq -c . eval.jsonl >/dev/null
 tail -n 1 eval.jsonl | jq '{event, exit: .data.exit_code, result: .data.result}'
 ```
 
-When a pipeline matters, preserve the Attest process status using the shell's pipeline-status
-facility rather than returning only the last consumer's status.
+In Bash or Zsh, run `set -o pipefail` so a successful consumer does not hide an Attest failure.
+If several pipeline commands fail, the pipeline returns the rightmost failure. Capture Attest's
+status separately when you need its exact exit code.
 
 ## Stable identity within each exit
 
@@ -110,9 +110,8 @@ Multiple error codes intentionally share an exit. Query the installed catalog:
 attest errors --output json | jq '.result.errors[] | {code, exit_code, retryable}'
 ```
 
-Never build a repair from the exit alone. For example, exit 3 can mean “reload a changed project,”
-“wait for a live lock,” “explicitly remove a proven stale lock,” or “stop for human recovery.”
-Those actions are not interchangeable.
+Never build a repair from the exit alone. Exit 3 can mean reload a changed project, wait for a live
+lock, or stop for a human to recover a stale lock or interrupted transaction.
 
 See [Errors](./errors.md) for every stable identity and repair, and [Schemas](./schemas.md) for the
 machine envelopes.

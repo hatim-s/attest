@@ -1,28 +1,21 @@
 import { Option, type Command } from 'commander';
 
+import { setMutationHelp } from '../../help/command-help.js';
 import {
   addMutationOptions,
   isInteractive,
-  mergeCommonOptions,
+  mutationRequestFields,
   type MutationCliOptions,
 } from '../shared/cli-options.js';
-import {
-  assertNoMetricRequestOverlap,
-  markMetricMutationHelp,
-  metricMutationFields,
-  readOrBuildMetricMutation,
-  requiredMetricInput,
-  runMetricMutation,
-  type RegisterMetricCommandsOptions,
-} from './registration-support.js';
+import type { CommandContext } from '../shared/command-context.js';
+import { readOrBuildRequest } from '../shared/command-request.js';
+import { requiredInput } from '../shared/required-input.js';
+import { runMetricMutation } from './run-metric-mutation.js';
 
 type ImportOptions = MutationCliOptions & { as?: string; name?: string; type?: 'json' };
 
 /** Registers canonical JSON metric imports. */
-const registerMetricImportCommand = (
-  metric: Command,
-  context: RegisterMetricCommandsOptions,
-): void => {
+const registerMetricImportCommand = (metric: Command, context: CommandContext): void => {
   const importCommand = addMutationOptions(
     metric.command('import').description('Import one canonical JSON metric from a file or stdin.'),
   )
@@ -30,50 +23,39 @@ const registerMetricImportCommand = (
     .option('--as <metric-id>', 'imported metric id')
     .addOption(new Option('--type <type>', 'import type').choices(['json']))
     .option('--name <name>', 'override the imported display name')
-    .action(async (source: string | undefined, raw: ImportOptions, command: Command) => {
-      const options = mergeCommonOptions(raw, command, context.program);
-      assertNoMetricRequestOverlap(options, {
-        as: options.as,
-        name: options.name,
-        path: source,
-        type: options.type,
-      });
+    .action(async (source: string | undefined, options: ImportOptions, leaf: Command) => {
       const interactive = isInteractive(options, context.interaction, options.fromJson);
-      const request = await readOrBuildMetricMutation(
-        'metric.import',
-        options,
+      const prompt = { interactive, prompt: context.interaction.prompt };
+      const request = await readOrBuildRequest({
+        command: 'metric.import',
         context,
-        async () => ({
-          ...metricMutationFields('metric.import', options),
-          source: await requiredMetricInput(
+        leaf,
+        options,
+        build: async () => ({
+          ...mutationRequestFields('metric.import', options),
+          source: await requiredInput(
             source,
-            '<path|->',
-            'Metric JSON path or -: ',
-            interactive,
-            context,
+            { path: '<path|->', question: 'Metric JSON path or -: ' },
+            prompt,
           ),
           source_type: 'json',
-          as: await requiredMetricInput(
+          as: await requiredInput(
             options.as,
-            '--as',
-            'Imported metric id: ',
-            interactive,
-            context,
+            { path: '--as', question: 'Imported metric id: ' },
+            prompt,
           ),
           ...(options.name === undefined ? {} : { name: options.name }),
         }),
-      );
+      });
       await runMetricMutation(request, options, interactive, context);
     });
-  markMetricMutationHelp(
-    importCommand,
-    [
+  setMutationHelp(importCommand, {
+    examples: [
       'attest metric import ./metric.json --type json --as correct',
       'attest metric import - --type json --as correct',
       'attest metric import --from-json ./metric-import.json --output json',
     ],
-    ['path', 'as', 'type', 'name'],
-  );
+  });
 };
 
 export { registerMetricImportCommand };

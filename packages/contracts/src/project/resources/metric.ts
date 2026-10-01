@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-import { httpRequestTemplateSchema } from './agent.js';
+import { httpRequestTemplateSchema } from './agent-transports.js';
 import { assertionCheckSchema } from '../../metric/protocol.js';
 import {
   durationMillisecondsSchema,

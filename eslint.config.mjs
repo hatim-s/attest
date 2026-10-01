@@ -64,7 +64,7 @@ export default tseslint.config(
     },
   },
   {
-    files: ['packages/runtime/src/**/*.ts', 'packages/executor/src/**/*.ts'],
+    files: ['packages/runtime/src/**/*.ts'],
     rules: {
       'no-restricted-imports': [
         'error',
@@ -86,16 +86,21 @@ export default tseslint.config(
         'error',
         {
           patterns: [
-            '@attest/core',
-            '@attest/core/*',
-            '@attest/runtime',
-            '@attest/runtime/*',
-            '@attest/local',
-            '@attest/local/*',
-            '@attest/cli',
-            '@attest/cli/*',
-            '@attest/web',
-            '@attest/web/*',
+            {
+              group: [
+                '@attest/core',
+                '@attest/core/*',
+                '@attest/runtime',
+                '@attest/runtime/*',
+                '@attest/local',
+                '@attest/local/*',
+                '@attest/cli',
+                '@attest/cli/*',
+                '@attest/web',
+                '@attest/web/*',
+              ],
+              message: 'Executor imports only @attest/contracts.',
+            },
           ],
         },
       ],

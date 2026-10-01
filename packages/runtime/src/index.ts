@@ -1,3 +1,31 @@
-export * from './metrics/index.js';
-export * from './eval/index.js';
-export { toStoredCaseExecution } from './store-recording.js';
+export {
+  caseExecutionToMetricContext,
+  createTanstackJudgeClient,
+  evaluateMetrics,
+  type EvaluateMetricsOptions,
+  type JudgeCache,
+  type JudgeClient,
+  type JudgeOutcome,
+  type MetricContext,
+  type TanstackJudgeClientOptions,
+} from './metrics/index.js';
+export {
+  EvalCaseStageError,
+  executeResolvedEvalPlan,
+  toStoredCaseExecution,
+  type CaseExecution,
+  type CaseExecutionBase,
+  type EvalArtifactWriter,
+  type EvalBaselineAdapter,
+  type EvalCaseExecutionContext,
+  type EvalCaseRunner,
+  type EvalCaseRunnerResult,
+  type EvalExecutionResult,
+  type EvalHooks,
+  type EvalJUnitPayload,
+  type EvalPersistenceAdapter,
+  type EvalTerminalFailureFactory,
+  type ExecuteEvalOptions,
+  type ResolvedEvalCase,
+  type ResolvedEvalPlan,
+} from './eval/index.js';

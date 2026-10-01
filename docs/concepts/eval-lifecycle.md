@@ -69,7 +69,7 @@ Subsequent read surfaces consume the persisted record:
 
 ```bash
 attest show run <run-id> --output json
-attest diff <base-run-id> <candidate-run-id> --output json
+attest diff <base-run-id> <candidate-run-id> --format json
 attest report <run-id>
 attest view
 ```
@@ -80,10 +80,8 @@ diffing, and reports.
 
 ## 6. Consume output
 
-With `--output json`, stdout contains exactly one `attest.cli-result` document after
-completion. Success includes `ok: true`, `command: "eval.run"`, project hashes, a
-command-specific result, and warnings. Failure includes `ok: false`, `command`, and a
-structured error with stable `code`, `message`, and `retryable` fields.
+With `--output json`, stdout holds one
+[`attest.cli-result`](../reference/schemas.md#attestcli-result) after the run ends.
 
 Use `--output jsonl` for live machine events:
 
@@ -103,13 +101,9 @@ Automation should validate the schemas listed in the
 ## Cancellation and exit status
 
 Cancel a known run with `attest eval cancel <run-id>`. A signal-cancelled process exits
-`130`. The stable process-level matrix is: `0` success, `1` evaluated failure or
-user-data validation failure, `2` CLI usage error, `3` stale project conflict, `4`
-invocation or metric infrastructure error, and `130` signal cancellation.
-
-The structured error code is more precise than the process exit status. Query
-`attest errors --output json`, then use the [error catalog](../reference/errors.md) and
-[exit-code reference](../reference/exit-codes.md) to decide whether and how to retry.
+`130`. [Exit codes](../reference/exit-codes.md) lists every process status. The structured
+error code is more precise than the exit status, so decide on retries with the
+[error catalog](../reference/errors.md).
 
 ## Lifecycle hooks and worker directories
 
@@ -212,21 +206,37 @@ The runtime SDK accepts an ordered `hooks` array on `executeResolvedEvalPlan`. E
 | `after_case`       | Result or error, before environment disposal and persistence. All registered final hooks are attempted.                |
 | `after_run`        | Status and summary after runner cleanup and initial finalization. Hook failure reconciles the stored status to failed. |
 
-Use `createStagedCaseRunner` to wire the agent/evaluation stages automatically. Custom `EvalCaseRunner` implementations call `context.afterAgent(execution)` and `context.afterEvaluation(execution, metrics)` at those boundaries. The CLI's built-in runner does this. Project JSON also accepts `after_agent` and `after_evaluation` argv hooks with the same timeout and environment rules as existing case hooks. Project command hooks execute on the host in the worker directory.
+An `EvalCaseRunner` calls `context.afterAgent(execution)` and
+`context.afterEvaluation(execution, metrics)` at those boundaries. Its fourth `executeCase`
+argument contains `workerIndex`, the optional environment, and those stage callbacks. Wrap a
+callback failure in `EvalCaseStageError` to retain the execution and metrics produced so far. The
+CLI's built-in runner does this. Project JSON also accepts `after_agent` and `after_evaluation` argv
+hooks with the same timeout and environment rules as existing case hooks. Project command hooks
+execute on the host in the worker directory.
 
 ```ts
 import { justBashIsolation } from '@attest/executor';
-import { createStagedCaseRunner, executeResolvedEvalPlan } from '@attest/runtime';
+import { EvalCaseStageError, executeResolvedEvalPlan, type EvalCaseRunner } from '@attest/runtime';
 
-const runner = createStagedCaseRunner({
-  invoke: async ({ resolvedCase, environment, signal }) => {
+const runner: EvalCaseRunner = {
+  executeCase: async (_runId, resolvedCase, signal, context) => {
+    const { environment } = context;
     // Give the coding agent environment.exec/readFile/writeFile as its tools.
-    return runCodingAgent(resolvedCase, environment, signal);
+    const execution = await runCodingAgent(resolvedCase, environment, signal);
+    try {
+      await context.afterAgent?.(execution);
+    } catch (error) {
+      throw new EvalCaseStageError('after_agent', execution, [], error);
+    }
+    const metrics = await evaluateCase(execution, environment, signal);
+    try {
+      await context.afterEvaluation?.(execution, metrics);
+    } catch (error) {
+      throw new EvalCaseStageError('after_evaluation', execution, metrics, error);
+    }
+    return { execution, metrics };
   },
-  evaluate: async ({ execution, environment, signal }) => {
-    return evaluateCase(execution, environment, signal);
-  },
-});
+};
 
 await executeResolvedEvalPlan(plan, runner, persistence, {
   isolation: justBashIsolation({ files: { 'input.txt': 'seed' } }),
@@ -246,7 +256,7 @@ await executeResolvedEvalPlan(plan, runner, persistence, {
 
 The factory creates a fresh environment per case. Hooks, agent tools, and evaluators share it until `after_case` finishes. Before final case hooks, environments enter a bounded finalization phase with `finalizationTimeoutMs`, defaulting to the configured command timeout or 60 seconds, so hooks can inspect partial files after cancellation. If a remote command failed without confirmed completion, its environment is stopped and cannot be reused. Disposal drains owned operations; a cleanup failure fails the run and retains cancellation ownership. A setup failure still runs final case hooks with an absent environment. Use the per-case `caseState` map for hook data. The run-level `state` map is shared, so callers must coordinate concurrent writes.
 
-`justBashIsolation` uses the portable just-bash 3.4.2 browser build on both Node and Bun. This avoids Node-specific global monkey-patches and uses an in-memory filesystem, no host filesystem mount, no network configuration, and no custom host commands. Shell calls within one case are serialized. It supports built-in shell commands, not arbitrary host executables such as Node or Git. Default limits are 60 seconds per command, 1 MiB output, and 16 MiB filesystem storage. This is a virtual shell, not a VM boundary for arbitrary untrusted JavaScript.
+`justBashIsolation` uses the portable just-bash browser build on both Node and Bun. This avoids Node-specific global monkey-patches and uses an in-memory filesystem, no host filesystem mount, no network configuration, and no custom host commands. Shell calls within one case are serialized. It supports built-in shell commands, not arbitrary host executables such as Node or Git. Default limits are 60 seconds per command, 1 MiB output, and 16 MiB filesystem storage. This is a virtual shell, not a VM boundary for arbitrary untrusted JavaScript.
 
 For coding agents that need real executables, pass `vercelSandboxIsolation({ files, env })`. It creates one Vercel VM per case and retains it through evaluation. Both providers use workspace-relative paths for file methods and initial file maps. Shell commands run in their workspace. Existing `native_cli` resources with `sandbox.kind: "vercel"` continue to run each invocation in a VM with explicit uploads and artifact export. The SDK factory supports environment-aware agent tools and evaluators; the native CLI transport retains its invocation-scoped sandbox lifetime.
 

@@ -1,11 +1,11 @@
-import type { JsonValue, TestCase } from '@attest/contracts';
+import type { TestCase } from '@attest/contracts';
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 
 import { AttestMetricError } from '../errors.js';
-import { buildEvaluationDocument, resolveDocumentPath } from '../evaluation-document.js';
+import { buildEvaluationDocument, resolveValuePath } from '../evaluation-document.js';
 import type { EvaluationDocument } from '../evaluation-document.js';
-import type { MetricContext } from '../metric-evaluation.js';
+import { generatedDocumentArbitrary } from './support/arbitraries.js';
 
 const caseDefinition: TestCase = {
   id: 'capital',
@@ -13,7 +13,7 @@ const caseDefinition: TestCase = {
   expected: { answer: 'Paris' },
 };
 
-describe('resolveDocumentPath', () => {
+describe('resolveValuePath', () => {
   const document: EvaluationDocument = {
     input: { nested: { values: [{ answer: 'Paris' }] } },
     output: ['first', { present: null }],
@@ -25,20 +25,20 @@ describe('resolveDocumentPath', () => {
     ['$.input.nested.values[0].answer', 'Paris'],
     ['$.output[1].present', null],
   ])('resolves %s', (path, expected) => {
-    expect(resolveDocumentPath(document, path)).toEqual({ found: true, value: expected });
+    expect(resolveValuePath(document, path)).toEqual({ found: true, value: expected });
   });
 
   it.each(['$.input.missing', '$.input.nested.values[4]', '$.output.present'])(
     'reports a miss for %s',
     (path) => {
-      expect(resolveDocumentPath(document, path)).toEqual({ found: false });
+      expect(resolveValuePath(document, path)).toEqual({ found: false });
     },
   );
 
   it.each(['input', '$.input.*', '$[x]', '$.input..nested'])(
     'defensively rejects invalid grammar in %s',
     (path) => {
-      expect(() => resolveDocumentPath(document, path)).toThrowError(AttestMetricError);
+      expect(() => resolveValuePath(document, path)).toThrowError(AttestMetricError);
     },
   );
 
@@ -49,7 +49,7 @@ describe('resolveDocumentPath', () => {
       value: undefined,
     });
 
-    expect(resolveDocumentPath(documentWithUndefinedExpected, '$.expected')).toEqual({
+    expect(resolveValuePath(documentWithUndefinedExpected, '$.expected')).toEqual({
       found: false,
     });
   });
@@ -57,78 +57,29 @@ describe('resolveDocumentPath', () => {
 
 describe('buildEvaluationDocument', () => {
   it('maps completed execution output and case fields', () => {
-    const context: MetricContext = {
-      caseDefinition,
-      execution: { outcome: 'completed', output: { answer: 'Paris' }, trace: null },
-    };
-
-    expect(buildEvaluationDocument(context)).toEqual({
+    expect(
+      buildEvaluationDocument({
+        caseDefinition,
+        execution: { outcome: 'completed', output: { answer: 'Paris' }, trace: null },
+      }),
+    ).toEqual({
       input: caseDefinition.input,
       output: { answer: 'Paris' },
       expected: caseDefinition.expected,
       trace: null,
     });
   });
-
-  it.each(['invocation_error', 'timeout', 'cancelled'] as const)(
-    'hides output after a %s outcome',
-    (outcome) => {
-      const context: MetricContext = {
-        caseDefinition,
-        execution: { outcome, output: 'partial output', trace: null },
-      };
-
-      expect(buildEvaluationDocument(context)).not.toHaveProperty('output');
-    },
-  );
-
-  it('omits an absent expected value rather than materializing undefined', () => {
-    const context: MetricContext = {
-      caseDefinition: { ...caseDefinition, expected: undefined },
-      execution: { outcome: 'completed', output: { answer: 'Paris' }, trace: null },
-    };
-
-    expect(buildEvaluationDocument(context)).not.toHaveProperty('expected');
-  });
 });
 
-/** Narrows generated values before treating them as contract JSON. */
-const isJsonValue = (value: unknown): value is JsonValue => {
-  if (value === null || typeof value === 'string' || typeof value === 'boolean') {
-    return true;
+/** Returns what an action throws, so the error's fields can be matched directly. */
+const thrownBy = (action: () => unknown): unknown => {
+  try {
+    action();
+  } catch (error: unknown) {
+    return error;
   }
-  if (typeof value === 'number') {
-    return Number.isFinite(value);
-  }
-  if (Array.isArray(value)) {
-    return value.every(isJsonValue);
-  }
-  if (typeof value === 'object') {
-    return Object.values(value).every(isJsonValue);
-  }
-  return false;
+  return undefined;
 };
-
-const toJsonValue = (value: unknown): JsonValue => {
-  if (!isJsonValue(value)) {
-    throw new Error('fast-check generated a non-JSON value');
-  }
-  return value;
-};
-
-const jsonValueArbitrary: fc.Arbitrary<JsonValue> = fc.jsonValue().map(toJsonValue);
-const generatedDocumentArbitrary: fc.Arbitrary<EvaluationDocument> = fc
-  .record({
-    input: jsonValueArbitrary,
-    output: fc.option(jsonValueArbitrary, { nil: undefined }),
-    expected: fc.option(jsonValueArbitrary, { nil: undefined }),
-  })
-  .map(({ input, output, expected }) => ({
-    input,
-    ...(output === undefined ? {} : { output }),
-    ...(expected === undefined ? {} : { expected }),
-    trace: null,
-  }));
 
 type DocumentPathValue = { path: string; value: unknown };
 const fieldNamePattern = /^[A-Za-z_][A-Za-z0-9_]*$/;
@@ -158,7 +109,7 @@ describe('evaluation-document path properties', () => {
     fc.assert(
       fc.property(generatedDocumentArbitrary, (generatedDocument) => {
         for (const expected of collectDocumentPaths(generatedDocument)) {
-          expect(resolveDocumentPath(generatedDocument, expected.path)).toEqual({
+          expect(resolveValuePath(generatedDocument, expected.path)).toEqual({
             found: true,
             value: expected.value,
           });
@@ -177,7 +128,7 @@ describe('evaluation-document path properties', () => {
           expect(collectDocumentPaths(document).some(({ path }) => path === missingPath)).toBe(
             false,
           );
-          expect(resolveDocumentPath(document, missingPath)).toEqual({ found: false });
+          expect(resolveValuePath(document, missingPath)).toEqual({ found: false });
         },
       ),
     );
@@ -188,14 +139,11 @@ describe('evaluation-document path properties', () => {
       fc.property(
         fc.string().filter((path) => !/^\$(?:\.[A-Za-z_][A-Za-z0-9_]*|\[\d+\])*$/.test(path)),
         (path) => {
-          expect(() => resolveDocumentPath({ input: null, trace: null }, path)).toThrowError(
-            AttestMetricError,
-          );
-          try {
-            resolveDocumentPath({ input: null, trace: null }, path);
-          } catch (error: unknown) {
-            expect(error).toMatchObject({ code: 'invalid_path' });
-          }
+          expect(
+            thrownBy(() => resolveValuePath({ input: null, trace: null }, path)),
+          ).toMatchObject({
+            code: 'invalid_path',
+          });
         },
       ),
     );

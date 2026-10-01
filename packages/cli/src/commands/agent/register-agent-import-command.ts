@@ -1,56 +1,43 @@
-import { runAgentImportCommand } from '@attest/local/agent';
+import {
+  createCurlImportRequest,
+  readCurlDocument,
+  runAgentImportCommand,
+  validateCommandRequest,
+  type CurlImportFields,
+} from '@attest/local/agent';
 import { Option, type Command } from 'commander';
 
-import { renderCommandResult } from '../shared/command-result.js';
+import { setMutationHelp } from '../../help/command-help.js';
 import {
   addMutationOptions,
-  collectOption as collect,
+  collect,
   isInteractive,
-  mergeCommonOptions,
+  mutationRequestFields,
   outputFormat,
   type MutationCliOptions,
 } from '../shared/cli-options.js';
+import type { CommandContext } from '../shared/command-context.js';
+import { readJsonRequest } from '../shared/command-request.js';
+import { renderCommandResult } from '../shared/command-result.js';
+import { requiredInput } from '../shared/required-input.js';
 import {
-  markAgentMutationHelp,
-  mutationArguments,
-  type RegisterAgentCommandsOptions,
-} from './registration-support.js';
+  isCurlMappingError,
+  promptBodyMappings,
+  promptCurlImportFields,
+  type CurlFlags,
+} from './guided-agent-import.js';
 
-type ImportOptions = MutationCliOptions & {
-  as?: string;
-  attemptTimeout?: string;
-  bodyTimeout?: string;
-  connectTimeout?: string;
-  errorPointer?: string;
-  firstByteTimeout?: string;
-  headerEnv?: string[];
-  idempotencyHeader?: string;
-  mapBody?: string[];
-  name?: string;
-  pollFailure?: string[];
-  pollJobIdPointer?: string;
-  pollMaximumInterval?: string;
-  pollMinimumInterval?: string;
-  pollStatusPointer?: string;
-  pollStatusUrlPointer?: string;
-  pollStatusUrlTemplate?: string;
-  pollSuccess?: string[];
-  queryEnv?: string[];
-  requestCapBytes?: string;
-  responseCapBytes?: string;
-  responsePointer?: string;
-  retries?: string;
-  retryDelay?: string;
-  remoteJobIdPointer?: string;
-  tracePointer?: string;
-  type?: string;
-};
+type ImportOptions = MutationCliOptions &
+  Omit<CurlFlags, 'agentId' | 'dryRun' | 'expectedProjectHash' | 'source' | 'yes'> & {
+    as?: string;
+    type?: 'curl' | 'json';
+  };
 
-/** Registers canonical JSON and cURL agent imports. */
-const registerAgentImportCommand = (
-  agent: Command,
-  context: RegisterAgentCommandsOptions,
-): void => {
+/** Guided imports re-ask for body mappings this many times before failing. */
+const MAX_IMPORT_ATTEMPTS = 3;
+
+/** Registers `agent import` for a canonical JSON resource or a mapped cURL request. */
+const registerAgentImportCommand = (agent: Command, context: CommandContext): void => {
   const importCommand = addMutationOptions(
     agent
       .command('import')
@@ -96,82 +83,99 @@ const registerAgentImportCommand = (
     .option('--response-cap-bytes <bytes>', 'maximum response body bytes')
     .option('--retries <count>', 'safe transport retry count')
     .option('--retry-delay <duration>', 'fixed transport retry delay')
-    .action(async (source: string | undefined, raw: ImportOptions, command: Command) => {
-      const options = mergeCommonOptions(raw, command, context.program);
-      const result = await runAgentImportCommand({
-        ...mutationArguments(options, context),
-        agentId: options.as,
-        attemptTimeout: options.attemptTimeout,
-        bodyTimeout: options.bodyTimeout,
-        connectTimeout: options.connectTimeout,
-        errorPointer: options.errorPointer,
-        firstByteTimeout: options.firstByteTimeout,
-        headerEnv: options.headerEnv,
-        idempotencyHeader: options.idempotencyHeader,
-        interactive: isInteractive(options, context.interaction, options.fromJson),
-        mapBody: options.mapBody,
-        name: options.name,
-        pollFailure: options.pollFailure,
-        pollJobIdPointer: options.pollJobIdPointer,
-        pollMaximumInterval: options.pollMaximumInterval,
-        pollMinimumInterval: options.pollMinimumInterval,
-        pollStatusPointer: options.pollStatusPointer,
-        pollStatusUrlPointer: options.pollStatusUrlPointer,
-        pollStatusUrlTemplate: options.pollStatusUrlTemplate,
-        pollSuccess: options.pollSuccess,
-        prompt: context.interaction.prompt,
-        queryEnv: options.queryEnv,
-        requestCapBytes: options.requestCapBytes,
-        responseCapBytes: options.responseCapBytes,
-        responsePointer: options.responsePointer,
-        retries: options.retries,
-        retryDelay: options.retryDelay,
-        remoteJobIdPointer: options.remoteJobIdPointer,
+    .action(async (source: string | undefined, options: ImportOptions, command: Command) => {
+      const interactive = isInteractive(options, context.interaction, options.fromJson);
+      const prompt = { interactive, prompt: context.interaction.prompt };
+      const runImport = async (
+        request: Parameters<typeof runAgentImportCommand>[0]['request'],
+        sourceText?: string,
+      ): Promise<void> => {
+        const result = await runAgentImportCommand({
+          interactive,
+          project: options.project,
+          prompt: context.interaction.prompt,
+          readStdin: context.interaction.readStdin,
+          request,
+          sourceText,
+          workingDirectory: context.workingDirectory,
+        });
+        context.io.output(renderCommandResult('agent.import', outputFormat(options), result));
+      };
+
+      if (options.fromJson !== undefined) {
+        await runImport(
+          await readJsonRequest({
+            command: 'agent.import',
+            context,
+            leaf: command,
+            options: { ...options, fromJson: options.fromJson },
+          }),
+        );
+        return;
+      }
+
+      const importSource = await requiredInput(
         source,
-        sourceType: options.type,
-        tracePointer: options.tracePointer,
-      });
-      context.io.output(renderCommandResult('agent.import', outputFormat(options), result));
+        { path: '<path|url|->', question: 'Agent import source: ' },
+        prompt,
+      );
+      const importId = await requiredInput(
+        options.as,
+        { path: '--as', question: 'Imported agent id: ' },
+        prompt,
+      );
+      if ((options.type ?? (/\.curl$/iu.test(importSource) ? 'curl' : 'json')) === 'json') {
+        await runImport(
+          validateCommandRequest('agent.import', {
+            ...mutationRequestFields('agent.import', options),
+            source: importSource,
+            source_type: 'json',
+            as: importId,
+            ...(options.name === undefined ? {} : { name: options.name }),
+          }),
+        );
+        return;
+      }
+
+      const curlSource = await readCurlDocument(
+        importSource,
+        context.workingDirectory,
+        context.interaction.readStdin,
+      );
+      let fields: CurlImportFields = await promptCurlImportFields(
+        {
+          ...options,
+          agentId: importId,
+          expectedProjectHash: options.ifProjectHash,
+          source: importSource,
+        },
+        curlSource,
+        prompt,
+      );
+      for (let attempt = 1; ; attempt += 1) {
+        try {
+          await runImport(createCurlImportRequest(fields), curlSource);
+          return;
+        } catch (error: unknown) {
+          if (!interactive || attempt === MAX_IMPORT_ATTEMPTS || !isCurlMappingError(error)) {
+            throw error;
+          }
+          fields = { ...fields, mapBody: await promptBodyMappings(prompt) };
+        }
+      }
     });
 
-  markAgentMutationHelp(
-    importCommand,
-    [
+  setMutationHelp(importCommand, {
+    examples: [
       'attest agent import ./agent.json --type json --as support',
       'attest agent import request.curl --type curl --as support --map-body /prompt=/question --response-pointer /answer',
       'attest agent import --from-json ./agent-import.json --output json',
     ],
-    {
-      as: [],
-      'attempt-timeout': [],
-      'body-timeout': [],
-      'connect-timeout': [],
-      'error-pointer': [],
-      'first-byte-timeout': [],
-      'header-env': [],
-      'idempotency-header': [],
-      'map-body': [],
-      name: [],
-      path: [],
-      'poll-failure': [],
-      'poll-job-id-pointer': [],
-      'poll-maximum-interval': [],
-      'poll-minimum-interval': [],
-      'poll-status-pointer': [],
-      'poll-status-url-pointer': ['poll-status-url-template'],
-      'poll-status-url-template': ['poll-status-url-pointer'],
-      'poll-success': [],
-      'query-env': [],
-      'request-cap-bytes': [],
-      'response-cap-bytes': [],
-      'response-pointer': [],
-      retries: [],
-      'retry-delay': [],
-      'remote-job-id-pointer': [],
-      'trace-pointer': [],
-      type: [],
+    options: {
+      'poll-status-url-pointer': { conflicts: ['poll-status-url-template'] },
+      'poll-status-url-template': { conflicts: ['poll-status-url-pointer'] },
     },
-  );
+  });
 };
 
 export { registerAgentImportCommand };

@@ -1,35 +1,39 @@
-/**
- * Terminal classification of one executed case, shared by the runner (producer)
- * and the store (persistence) so the two can never drift (docs/TASTE.md: data first).
- */
-type CaseOutcome = 'completed' | 'invocation_error' | 'timeout' | 'cancelled';
+import { z } from 'zod';
 
 /**
- * Discriminates every way an agent invocation can fail before producing an
- * evaluable envelope (docs/specs/agent-contract.md, execution semantics).
- * Persisted verbatim by the store — values are lower_snake and append-only
- * within a contract version.
+ * Terminal classification of one executed case. The runner produces it and the store persists
+ * it, so both read the same enum.
  */
-type InvocationErrorCode =
-  | 'spawn_failed'
-  | 'timeout'
-  | 'output_cap_exceeded'
-  | 'nonzero_exit'
-  | 'http_status'
-  | 'network'
-  | 'invalid_envelope'
-  | 'cancelled';
+const caseOutcomeSchema = z.enum(['completed', 'invocation_error', 'timeout', 'cancelled']);
 
 /**
- * Bounded evidence of a transport payload, retained per attempt so runs stay
- * auditable without persisting unbounded bodies. On cap overflow the excerpt
- * keeps a prefix plus the digest of everything received.
+ * Every way an agent invocation can fail before producing an evaluable envelope
+ * (docs/specs/agent-contract.md, execution semantics). The store persists these values verbatim,
+ * so they are append-only within a contract version.
  */
-type RawExcerpt = {
-  text: string;
-  truncated: boolean;
-  /** SHA-256 of the full received payload; present only when truncated. */
-  sha256?: string;
+const invocationErrorCodeSchema = z.enum([
+  'spawn_failed',
+  'timeout',
+  'output_cap_exceeded',
+  'nonzero_exit',
+  'http_status',
+  'network',
+  'invalid_envelope',
+  'cancelled',
+]);
+
+/** Recoverable problems reported alongside a successfully parsed agent response. */
+const warningCodeSchema = z.enum(['unknown_field', 'invalid_trace']);
+
+type CaseOutcome = z.infer<typeof caseOutcomeSchema>;
+type InvocationErrorCode = z.infer<typeof invocationErrorCodeSchema>;
+type WarningCode = z.infer<typeof warningCodeSchema>;
+
+export {
+  caseOutcomeSchema,
+  invocationErrorCodeSchema,
+  warningCodeSchema,
+  type CaseOutcome,
+  type InvocationErrorCode,
+  type WarningCode,
 };
-
-export { type CaseOutcome, type InvocationErrorCode, type RawExcerpt };

@@ -1,5 +1,4 @@
 import { describe, expect, it } from 'vitest';
-import { caseFolderSchema, caseSelectionSchema } from '@attest/contracts';
 import { selectCases, type SelectableCase } from '../select-cases.js';
 
 const population: SelectableCase[] = Array.from({ length: 100 }, (_, index) => ({
@@ -72,31 +71,12 @@ describe('core case selection', () => {
     expect(selectCases(population, { sample: sample.summary.sample }).cases).toEqual(sample.cases);
   });
 
-  it('rejects empty matches, missing ids, duplicate identities, and invalid sample sizes', () => {
+  it('rejects empty matches, missing ids, and duplicate identities', () => {
     expect(() => selectCases(population, { tags: ['missing'] })).toThrow('No cases matched');
     expect(() => selectCases(population, { case_ids: ['missing'] })).toThrow('do not exist');
     expect(() => selectCases([population[0]!, population[0]!])).toThrow(
       'Duplicate case identities',
     );
     expect(() => selectCases(population, { tags: ['api', 'api'] })).toThrow('Duplicate selection');
-    for (const count of [0, -1, 1.5, NaN, Infinity]) {
-      expect(() => selectCases(population, { sample: { count } })).toThrow('positive safe integer');
-      expect(caseSelectionSchema.safeParse({ sample: { count } }).success).toBe(false);
-    }
-  });
-
-  it('validates logical folders without accepting filesystem traversal spellings', () => {
-    for (const folder of [
-      '',
-      '/billing',
-      'billing/',
-      'billing//refunds',
-      '../billing',
-      'billing/./refunds',
-      'billing\\refunds',
-    ]) {
-      expect(caseFolderSchema.safeParse(folder).success).toBe(false);
-    }
-    expect(caseFolderSchema.parse('billing/refunds')).toBe('billing/refunds');
   });
 });

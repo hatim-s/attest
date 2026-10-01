@@ -2,8 +2,7 @@
 
 'use strict';
 
-/* eslint-disable @typescript-eslint/no-require-imports -- Node 22.0-compatible CommonJS fixture. */
-const { appendFileSync } = require('node:fs');
+const { appendFileSync } = process.getBuiltinModule('node:fs');
 
 const heartbeatFile = process.env.ORPHAN_HEARTBEAT_FILE;
 if (!heartbeatFile) {

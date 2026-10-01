@@ -1,17 +1,12 @@
 import { randomUUID } from 'node:crypto';
-import { lstat, mkdir, readlink, realpath, rename, symlink, unlink } from 'node:fs/promises';
-import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { lstat, readlink, rename, symlink, unlink } from 'node:fs/promises';
+import { basename, dirname, join } from 'node:path';
 
 import type { AttestStore } from '@attest/core';
 
 import { LocalError, type LocalErrorCode } from '../../errors/index.js';
 import { openStore } from '../../store/index.js';
-import { isProjectPath } from '../../project/project-path.js';
-
-const getErrorCode = (error: unknown): string | undefined =>
-  error instanceof Error && 'code' in error && typeof Reflect.get(error, 'code') === 'string'
-    ? (Reflect.get(error, 'code') as string)
-    : undefined;
+import { resolveContainedPath } from '../../project/project-path.js';
 
 type PrepareEvalProjectFileOptions = {
   allowAbsolute?: boolean;
@@ -20,95 +15,29 @@ type PrepareEvalProjectFileOptions = {
   message: string;
 };
 
-type EvalStoreBoundaryHooks = {
-  beforeCapture?: () => Promise<void> | void;
-};
-
-/** Maps an absolute output through its nearest existing ancestor without resolving the final file. */
-const normalizeAbsoluteProjectFile = async (
-  resolvedRoot: string,
-  configuredPath: string,
-  unsafe: () => LocalError,
-): Promise<string> => {
-  const authoredSegments = configuredPath.split(sep).slice(1);
-  if (authoredSegments.some((segment) => segment === '.' || segment === '..')) throw unsafe();
-  const suffix = [basename(configuredPath)];
-  let ancestor = dirname(configuredPath);
-  let resolvedAncestor: string | undefined;
-  while (resolvedAncestor === undefined) {
-    try {
-      resolvedAncestor = await realpath(ancestor);
-    } catch (error: unknown) {
-      if (getErrorCode(error) !== 'ENOENT') throw unsafe();
-      const parent = dirname(ancestor);
-      if (parent === ancestor) throw unsafe();
-      suffix.unshift(basename(ancestor));
-      ancestor = parent;
-    }
-  }
-  const candidate = resolve(resolvedAncestor, ...suffix);
-  if (!isProjectPath(resolvedRoot, candidate)) throw unsafe();
-  return relative(resolvedRoot, candidate);
-};
-
-/** Resolves one project-controlled file after rejecting traversal and symlinked path segments. */
+/**
+ * Resolves one project-controlled file for eval state or output, creating missing parent
+ * directories when asked. Every failure, including filesystem errors, becomes the caller's
+ * error so no path detail beyond the configured value reaches the user.
+ */
 const prepareEvalProjectFile = async (
   projectRoot: string,
   configuredPath: string,
   options: PrepareEvalProjectFileOptions,
 ): Promise<string> => {
-  const resolvedRoot = await realpath(projectRoot);
   const unsafe = (): LocalError =>
     new LocalError(options.errorCode, options.message, { path: configuredPath });
-  const projectPath = isAbsolute(configuredPath)
-    ? options.allowAbsolute === true
-      ? await normalizeAbsoluteProjectFile(resolvedRoot, configuredPath, unsafe)
-      : configuredPath
-    : configuredPath;
-  const candidate = resolve(resolvedRoot, projectPath);
-  const fromRoot = relative(resolvedRoot, candidate);
-  const segments = fromRoot.split(sep);
-  const authoredSegments = projectPath.split('/');
-  if (
-    projectPath.length === 0 ||
-    projectPath.includes('\0') ||
-    projectPath.includes('\\') ||
-    isAbsolute(projectPath) ||
-    !isProjectPath(resolvedRoot, candidate) ||
-    authoredSegments.some(
-      (segment) => segment.length === 0 || segment === '.' || segment === '..',
-    ) ||
-    segments.some((segment) => segment.length === 0 || segment === '.' || segment === '..')
-  ) {
+  try {
+    return await resolveContainedPath(projectRoot, configuredPath, {
+      allowAbsolute: options.allowAbsolute,
+      createDirectories: options.createDirectories,
+      expect: 'file',
+      problem: unsafe,
+    });
+  } catch (error: unknown) {
+    if (error instanceof LocalError) throw error;
     throw unsafe();
   }
-
-  let current = resolvedRoot;
-  for (let index = 0; index < segments.length; index += 1) {
-    current = resolve(current, segments[index]!);
-    const destination = index === segments.length - 1;
-    let metadata: Awaited<ReturnType<typeof lstat>>;
-    try {
-      metadata = await lstat(current);
-    } catch (error: unknown) {
-      if (getErrorCode(error) !== 'ENOENT') throw unsafe();
-      if (destination || options.createDirectories !== true) break;
-      try {
-        await mkdir(current, { mode: 0o700 });
-        metadata = await lstat(current);
-      } catch {
-        throw unsafe();
-      }
-    }
-    if (
-      metadata.isSymbolicLink() ||
-      (!destination && !metadata.isDirectory()) ||
-      (destination && !metadata.isFile())
-    ) {
-      throw unsafe();
-    }
-  }
-  return candidate;
 };
 
 const sameDirectoryIdentity = (
@@ -164,10 +93,7 @@ const retainCapturedStoreAlias = (
 };
 
 /** Atomically captures the validated .attest directory through SQLite open and migration. */
-const openEvalProjectStore = async (
-  projectRoot: string,
-  hooks: EvalStoreBoundaryHooks = {},
-): Promise<AttestStore> => {
+const openEvalProjectStore = async (projectRoot: string): Promise<AttestStore> => {
   const storePath = await prepareEvalProjectFile(projectRoot, '.attest/runs.db', {
     createDirectories: true,
     errorCode: 'run_failed',
@@ -183,7 +109,6 @@ const openEvalProjectStore = async (
   let store: AttestStore | undefined;
   let failure: unknown;
   try {
-    await hooks.beforeCapture?.();
     // Atomic rename converts the validated directory identity into the path SQLite actually opens.
     await rename(directory, capturedDirectory);
     moved = true;
@@ -220,9 +145,4 @@ const openEvalProjectStore = async (
   throw asError(failure);
 };
 
-export {
-  openEvalProjectStore,
-  prepareEvalProjectFile,
-  type EvalStoreBoundaryHooks,
-  type PrepareEvalProjectFileOptions,
-};
+export { openEvalProjectStore, prepareEvalProjectFile };

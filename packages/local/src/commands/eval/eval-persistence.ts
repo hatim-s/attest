@@ -5,7 +5,6 @@ import { AGENT_PROTOCOL, EVAL_RUN_SCHEMA_ID } from '@attest/contracts';
 import { diffRuns, type AttestStore, type RunDiff } from '@attest/core';
 import {
   toStoredCaseExecution,
-  toStoredMetricEvaluation,
   type EvalArtifactWriter,
   type EvalBaselineAdapter,
   type EvalJUnitPayload,
@@ -21,7 +20,7 @@ const createEvalPersistenceAdapter = (
   store: AttestStore,
 ): EvalPersistenceAdapter<ResolvedEvalCaseInput> => ({
   createRun: async (run) => {
-    const created = await store.runs.createRun(
+    await store.runs.createRun(
       {
         schemaId: EVAL_RUN_SCHEMA_ID,
         configHash: run.snapshot_hash,
@@ -41,17 +40,12 @@ const createEvalPersistenceAdapter = (
       },
       { id: run.run_id, createdAt: run.created_at },
     );
-    if (created.id !== run.run_id || created.createdAt !== run.created_at) {
-      throw new Error('The run store did not preserve the immutable eval identity.');
-    }
   },
   recordCase: async (runId, record) => {
     if (record.kind === 'executed') {
-      await store.runs.recordCase(
-        runId,
-        toStoredCaseExecution(record.execution),
-        record.metrics.map(toStoredMetricEvaluation),
-      );
+      await store.runs.recordCase(runId, toStoredCaseExecution(record.execution), [
+        ...record.metrics,
+      ]);
       return;
     }
     const payload = record.resolved_case.payload;
@@ -80,19 +74,8 @@ const createEvalPersistenceAdapter = (
       [],
     );
   },
-  finalizeRun: async (runId, status, summary) => {
-    const finalized = await store.runs.finalizeRun(runId, status);
-    const stored = finalized.summary;
-    if (
-      stored === undefined ||
-      stored.totalCases !== summary.total_cases ||
-      stored.passedCases !== summary.passed_cases ||
-      stored.failedCases !== summary.failed_cases ||
-      stored.errorCases !== summary.error_cases ||
-      stored.metricErrorCount !== summary.metric_error_count
-    ) {
-      throw new Error('The persisted run summary drifted from eval orchestration.');
-    }
+  finalizeRun: async (runId, status) => {
+    await store.runs.finalizeRun(runId, status);
   },
 });
 

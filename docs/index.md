@@ -15,6 +15,7 @@ recording reproducible evaluation runs. Start with the journey you need:
   repair command.
 
 For a complete local journey, follow the [five-minute quickstart](./quickstart.md).
+For installation and alpha package setup, start with the [README](../README.md).
 
 ## Choose a reading path
 
@@ -60,6 +61,7 @@ The [CLI index](./cli/index.md) maps every workflow to its canonical guide:
 ## Integration guides
 
 - [Native agents](./integrations/native.md)
+- [TypeScript integration](./integrations/typescript.md)
 - [cURL and HTTP](./integrations/curl-and-http.md)
 - [Managed CLI processes](./integrations/cli-processes.md)
 - [Polling and streams](./integrations/polling-and-streams.md)

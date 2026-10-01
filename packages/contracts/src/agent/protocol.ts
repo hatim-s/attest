@@ -1,7 +1,6 @@
 import { z } from 'zod';
 
-import { requireExactlyOne } from '../internal/exactly-one.js';
-import { traceSchema } from '../trace/protocol.js';
+import type { Trace } from '../trace/protocol.js';
 import { AGENT_PROTOCOL } from '../schema/identifiers.js';
 
 const MULTI_TURN_FIELDS = ['messages', 'turn_index', 'conversation_id'] as const;
@@ -47,69 +46,53 @@ const agentRequestSchema = z
 /** Represents a validated invocation request sent to an agent transport. */
 type AgentRequest = z.infer<typeof agentRequestSchema>;
 
-/** Encodes the successful response branch from docs/specs/agent-contract.md. */
-const agentSuccessResponseSchema = z
-  .looseObject({
-    protocol: z.literal(AGENT_PROTOCOL),
-    output: z.json(),
-    state: z.json().optional(),
-    trace: z.unknown().optional(),
-  })
-  .superRefine((response, context) => requireExactlyOne(response, ['output', 'error'], context));
-
-/** Encodes the agent-reported failure branch from docs/specs/agent-contract.md. */
-const agentErrorResponseSchema = z
-  .looseObject({
-    protocol: z.literal(AGENT_PROTOCOL),
-    error: z.strictObject({
+const agentResponseShape = {
+  protocol: z.literal(AGENT_PROTOCOL),
+  output: z.json().optional(),
+  error: z
+    .strictObject({
       message: z.string(),
       code: z.string().optional(),
-    }),
-    state: z.json().optional(),
-    trace: z.unknown().optional(),
-  })
-  .superRefine((response, context) => requireExactlyOne(response, ['output', 'error'], context));
-
-/** Encodes the output-or-error response union from docs/specs/agent-contract.md. */
-const agentResponseSchema = z.union([agentSuccessResponseSchema, agentErrorResponseSchema]);
-
-const agentSuccessResponseValueSchema = z.object({
-  protocol: z.literal(AGENT_PROTOCOL),
-  output: z.json(),
+    })
+    .optional(),
   state: z.json().optional(),
-  trace: traceSchema.optional(),
+  // Left unvalidated here so a malformed optional trace degrades to a warning in parseAgentResponse.
+  trace: z.unknown().optional(),
+};
+
+/**
+ * Encodes docs/specs/agent-contract.md response envelope. Agents may add vendor fields, and a
+ * response must carry exactly one terminal outcome.
+ */
+const agentResponseSchema = z.looseObject(agentResponseShape).superRefine((response, context) => {
+  const outcomeCount = ['output', 'error'].filter((field) => Object.hasOwn(response, field)).length;
+  if (outcomeCount === 1 && (response.output !== undefined || response.error !== undefined)) {
+    return;
+  }
+
+  context.addIssue({
+    code: 'custom',
+    path: ['output'],
+    message: 'exactly one of output or error must be present',
+  });
 });
 
-const agentErrorResponseValueSchema = z.object({
-  protocol: z.literal(AGENT_PROTOCOL),
-  error: z.strictObject({
-    message: z.string(),
-    code: z.string().optional(),
-  }),
-  state: z.json().optional(),
-  trace: traceSchema.optional(),
-});
+type AgentResponseFields = z.output<z.ZodObject<typeof agentResponseShape>>;
+type AgentResponseBase = Omit<AgentResponseFields, 'output' | 'error' | 'trace'> & {
+  trace?: Trace;
+};
 
-const agentResponseValueSchema = z.union([
-  agentSuccessResponseValueSchema,
-  agentErrorResponseValueSchema,
-]);
+/** Represents a validated agent response with exactly one terminal outcome and a valid trace. */
+type AgentResponse =
+  | (AgentResponseBase & Required<Pick<AgentResponseFields, 'output'>>)
+  | (AgentResponseBase & Required<Pick<AgentResponseFields, 'error'>>);
 
-/** Represents a validated successful response with an optional valid trace. */
-type AgentSuccessResponse = z.infer<typeof agentSuccessResponseValueSchema>;
-
-/** Represents a validated agent-reported failure with an optional valid trace. */
-type AgentErrorResponse = z.infer<typeof agentErrorResponseValueSchema>;
-
-/** Represents a validated agent response with exactly one terminal outcome. */
-type AgentResponse = AgentSuccessResponse | AgentErrorResponse;
+type AgentSuccessResponse = Extract<AgentResponse, { output: unknown }>;
+type AgentErrorResponse = Extract<AgentResponse, { error: unknown }>;
 
 export {
-  agentErrorResponseSchema,
   agentRequestSchema,
   agentResponseSchema,
-  agentResponseValueSchema,
-  agentSuccessResponseSchema,
   type AgentErrorResponse,
   type AgentRequest,
   type AgentResponse,

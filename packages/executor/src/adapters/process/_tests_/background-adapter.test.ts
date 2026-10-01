@@ -1,10 +1,10 @@
-import { createServer as createHttpServer } from 'node:http';
 import { createServer as createNetServer } from 'node:net';
 import { resolve } from 'node:path';
 
 import { AGENT_PROTOCOL, AGENT_RESOURCE_SCHEMA_ID, type AgentRequest } from '@attest/contracts';
 import { describe, expect, it } from 'vitest';
 
+import { startLoopbackServer } from '../../../_tests_/support/loopback-server.js';
 import { startBackgroundAgent, type BackgroundAgentResource } from '../background-adapter.js';
 
 const fixture = resolve(import.meta.dirname, '../../../_tests_/fixtures/background-agent.cjs');
@@ -46,6 +46,33 @@ const agent = (
 });
 
 describe('background process adapter', () => {
+  it.each(['before', 'during'] as const)(
+    'rejects cancellation %s service startup',
+    async (timing) => {
+      const port = await freePort();
+      let session: Awaited<ReturnType<typeof startBackgroundAgent>> | undefined;
+      const controller = new AbortController();
+      if (timing === 'before') controller.abort();
+      try {
+        const startup = startBackgroundAgent(
+          agent(port, { kind: 'stderr', pattern: `READY ${String(port)}` }),
+          {
+            cwd: process.cwd(),
+            env: { PATH: process.env.PATH ?? '' },
+            signal: controller.signal,
+          },
+        ).then((started) => {
+          session = started;
+          return started;
+        });
+        controller.abort();
+        await expect(startup).rejects.toMatchObject({ code: 'cancelled' });
+      } finally {
+        await session?.close();
+      }
+    },
+  );
+
   it.each(['http', 'tcp', 'stderr'] as const)(
     'waits for %s readiness, invokes, and shuts down',
     async (kind) => {
@@ -147,45 +174,23 @@ describe('background process adapter', () => {
     let shutdownCredential: string | undefined;
     let invokeQuery = '';
     let shutdownQuery = '';
-    const invokeServer = createHttpServer((message, response) => {
+    const invokeServer = await startLoopbackServer((message, response) => {
       invokeCredential = message.headers['x-invoke'] as string | undefined;
       invokeQuery = message.url ?? '';
       response.setHeader('content-type', 'application/json');
       response.end('{"output":{"ok":true}}');
     });
-    const shutdownServer = createHttpServer((message, response) => {
+    const shutdownServer = await startLoopbackServer((message, response) => {
       shutdownCredential = message.headers['x-shutdown'] as string | undefined;
       shutdownQuery = message.url ?? '';
       response.writeHead(204).end();
     });
-    await Promise.all(
-      [invokeServer, shutdownServer].map(
-        (server) =>
-          new Promise<void>((resolveListen, reject) => {
-            server.once('error', reject);
-            server.listen(0, '127.0.0.1', resolveListen);
-          }),
-      ),
-    );
-    const invokeAddress = invokeServer.address();
-    const shutdownAddress = shutdownServer.address();
-    if (
-      invokeAddress === null ||
-      typeof invokeAddress === 'string' ||
-      shutdownAddress === null ||
-      typeof shutdownAddress === 'string'
-    ) {
-      throw new Error('Expected HTTP fixture addresses.');
-    }
     const configured = agent(processPort, {
       kind: 'stderr',
       pattern: `READY ${String(processPort)}`,
     });
-    configured.transport.invoke.url = `http://127.0.0.1:${String(invokeAddress.port)}/invoke`;
-    configured.transport.shutdown = {
-      method: 'POST',
-      url: `http://127.0.0.1:${String(shutdownAddress.port)}/shutdown`,
-    };
+    configured.transport.invoke.url = `${invokeServer.url}/invoke`;
+    configured.transport.shutdown = { method: 'POST', url: `${shutdownServer.url}/shutdown` };
     try {
       const session = await startBackgroundAgent(configured, {
         cwd: process.cwd(),
@@ -204,11 +209,7 @@ describe('background process adapter', () => {
       expect(shutdownQuery).toContain('shutdown_token=shutdown-query');
       expect(shutdownQuery).not.toContain('invoke');
     } finally {
-      await Promise.all(
-        [invokeServer, shutdownServer].map(
-          (server) => new Promise<void>((resolveClose) => server.close(() => resolveClose())),
-        ),
-      );
+      await Promise.all([invokeServer.close(), shutdownServer.close()]);
     }
   });
 

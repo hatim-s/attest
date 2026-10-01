@@ -1,8 +1,7 @@
 # Resource model
 
-Attest keeps authored intent in reviewable files and execution history in a separate
-local run store. The project manifest indexes four reusable resource types: agents,
-tests, datasets, and metrics.
+A project stores authored resources as JSON files and run history in a separate SQLite store.
+The manifest indexes four resource types: agents, tests, datasets, and metrics.
 
 ## Project manifest
 
@@ -23,13 +22,15 @@ references, hashes, canonical paths, and duplicate ids.
 
 ## Authored resources
 
-| Resource         | Schema           | Canonical path                   | Purpose                                                                    |
-| ---------------- | ---------------- | -------------------------------- | -------------------------------------------------------------------------- |
-| Agent            | `attest.agent`   | `attest/agents/<id>.json`        | Transport and invocation policy for one reusable agent                     |
-| Test             | `attest.test`    | `attest/tests/<id>.json`         | Agent reference, direct cases, dataset attachments, metrics, and pass gate |
-| Dataset metadata | `attest.dataset` | `attest/datasets/<id>.meta.json` | Dataset identity, case schema, provenance, and row count                   |
-| Dataset cases    | `attest.case`    | `attest/datasets/<id>.jsonl`     | One case document per line                                                 |
-| Metric           | `attest.metric`  | `attest/metrics/<id>.json`       | Assertion, judge, executable, or HTTP scoring definition                   |
+| Resource         | Schema           | Purpose                                                                    |
+| ---------------- | ---------------- | -------------------------------------------------------------------------- |
+| Agent            | `attest.agent`   | Transport and invocation policy for one reusable agent                     |
+| Test             | `attest.test`    | Agent reference, direct cases, dataset attachments, metrics, and pass gate |
+| Dataset metadata | `attest.dataset` | Dataset identity, case schema, provenance, and row count                   |
+| Dataset cases    | `attest.case`    | One case document per line                                                 |
+| Metric           | `attest.metric`  | Assertion, judge, executable, or HTTP scoring definition                   |
+
+[File layout](../reference/file-layout.md) lists the path of each file.
 
 Ids use lower-case kebab case and are unique within a resource type. References use ids,
 not filesystem paths: a test names one `agent_id`, attaches datasets by `dataset_id`, and
@@ -69,31 +70,19 @@ Resource commands discover the project, lock it, read and hash current state, bu
 validate a complete candidate, calculate a semantic diff, then either return the dry run
 or atomically publish staged files. The manifest is the commit point.
 
-Useful controls are:
-
-```text
---dry-run                    return the semantic diff and write nothing
---from-json <path|->         read an attest.command-request document
---if-project-hash <sha256>   reject the mutation if the project changed
-```
-
-For coding agents, retain `project_hash_after` from the last successful
-`attest.cli-result` document and pass it to the next mutation. A stale hash returns
-`project_changed`, exit code `3`, and current-state repair context rather than
-overwriting another actor's work.
+The [mutation controls](../cli/index.md#mutation-controls) include `--dry-run` and
+`--if-project-hash`.
 
 ## Schemas are the shape authority
 
-The generated Draft 2020-12 schemas live in `packages/schemas/generated/` and are built
-from the runtime definitions. Discover them without browsing the repository:
+The generated Draft 2020-12 schemas live in `packages/schemas/generated/`. `schema print` takes the
+file name from `schema list`. Only `attest.command-request`, `attest.metric-preset`, and
+`attest.metric-test-fixture` also print by id.
 
 ```bash
 attest schema list --output json
-attest schema print attest.project --output json
-attest schema print attest.agent --output json
-attest schema print attest.test --output json
-attest schema print attest.dataset --output json
-attest schema print attest.metric --output json
+attest schema print project.json --output json
+attest schema print agent.json --output json
 attest schema print attest.command-request --output json
 ```
 

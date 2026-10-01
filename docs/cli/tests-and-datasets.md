@@ -20,17 +20,17 @@ attest test case list smoke --output json
 
 ## Expected files
 
-`test add` writes `attest/tests/smoke.json`. A direct-case import updates that same file. A dataset
-import additionally writes `attest/datasets/<dataset-id>.jsonl`,
-`attest/datasets/<dataset-id>.meta.json`, and updates `attest.project.json`. Authoring does not
-create `.attest/runs.db`.
+`test add` writes the test file and a direct-case import updates it. A dataset import also writes the
+dataset's data and metadata files and updates the manifest. See
+[File layout](../reference/file-layout.md) for the paths. Authoring does not create
+`.attest/runs.db`.
 
 ## Expected stdout
 
-With `--output json`, each command emits one `attest.cli-result` document. Import success
-includes deterministic counts such as read, inserted, updated, and skipped rows plus addressable
-dedupe decisions when applicable. Warnings are structured; importing more than 100 direct cases
-adds `direct_case_count_high` without changing success into failure.
+Each command prints one [`attest.cli-result`](../reference/schemas.md#attestcli-result). An
+import's `result` holds read, inserted, updated, and skipped row counts, plus each dedupe decision.
+A `test case import` that reads more than 100 rows adds the `direct_case_count_high` warning. The
+check counts that one import's rows, not the test's total, and the command still succeeds.
 
 ## Cleanup
 
@@ -58,19 +58,25 @@ renaming a dataset does not change the generated id.
 
 ## Interactive import
 
-The import wizard is active only on a human TTY without `--non-interactive`, structured output, or
-`--from-json`. It reads the source once, detects its format, and validates the complete source.
-For CSV without explicit mappings, it proposes only conservative matches for canonical header
-names such as `input`, `prompt`, `question`, `expected`, `params`, `tags`, and `id`. Accepting a
-proposal is not the write: Attest first prints a bounded semantic dry run, then asks
-`Apply this import? [y/N]`. The final write is bound to that preview's project hash.
+The import wizard follows the [prompt rules](./index.md#prompts-and-non-interactive-runs). It reads
+the source once, detects its format, and validates every row. For CSV without `--map`, it proposes
+mappings only from exact header names:
 
-`--yes` bypasses confirmations but does not infer missing mappings. `--dry-run` performs no writes,
-locks, recovery, or timestamp changes.
+| Case field | CSV headers it matches, in priority order |
+| ---------- | ----------------------------------------- |
+| `id`       | `id`, `external_id`                       |
+| `input`    | `input`, `prompt`, `question`             |
+| `expected` | `expected`, `ideal`, `answer`             |
+| `params`   | `params`, `parameters`                    |
+| `tags`     | `tags`                                    |
+
+Accepting the proposal does not write. Attest prints a semantic dry run, then asks
+`Apply this import? [y/N]`. The write is bound to that preview's project hash. `--yes` skips the
+confirmation but does not infer missing mappings.
 
 ## Non-interactive and JSON flows
 
-Structured output implies non-interactive behavior. Supply every required value explicitly:
+Without prompts, supply every required value:
 
 ```sh
 attest test case import smoke ./cases.csv \
@@ -106,9 +112,8 @@ For an agent-authored request, use one strict `attest.command-request` document:
 attest test dataset import --from-json ./dataset-import.json --output json
 ```
 
-`--from-json -` consumes the request from stdin, so it cannot also be the tabular source. Flags and
-arguments conflict with `--from-json`; place dry-run, confirmation, and optimistic-hash fields in
-the request itself.
+`--from-json -` reads the request from stdin, so stdin cannot also be the tabular source. Put
+`dry_run`, `yes`, and `if_project_hash` in the request itself.
 
 ## CSV, JSON, and JSONL mapping
 
@@ -139,10 +144,10 @@ duplicate is an error.
 an explicit mapped id or `--key`; it updates matches in stable order and never deletes existing
 rows absent from the source.
 
-Updating an existing dataset requires `--sync upsert`. If the dataset is shared across tests,
-Attest always shows a semantic preview of every affected test; `yes: true` only bypasses the final
-confirmation. Generated or explicit ids that collide with direct cases or applicable attached
-dataset cases fail atomically.
+Updating an existing dataset requires `--sync upsert`. When other tests share the dataset, Attest
+previews every affected test, and `yes: true` skips only the final confirmation. If a generated or
+explicit id collides with a direct case or an attached dataset case, the whole import fails and
+nothing is written.
 
 ## Repair an import
 
@@ -171,20 +176,9 @@ attest test dataset rename regression regression-renamed --dry-run
 attest test dataset remove regression-renamed --yes --output json
 ```
 
-Dataset removal is blocked while any test remains attached and returns copy-paste detach commands.
-Test, case, and dataset mutations accept `--dry-run`, `--yes`, `--from-json`, and
-`--if-project-hash`; read commands accept `--project` and human/JSON output.
+`test dataset remove` fails while any test is attached and returns the detach commands to run.
 
 ## Agent-readable contract
 
-1. Query `attest help test case import --output json` or
-   `attest help test dataset import --output json` at runtime.
-2. Use its `usage`, exact option choices/defaults, conflicts, constraints, examples, and
-   `request_schema`; do not infer a field name.
-3. Preview before a write and bind the write to `project_hash_before` with `--if-project-hash`.
-4. Treat an import as all-or-nothing. On failure, iterate through every structured diagnostic.
-5. Parse stdout as one `attest.cli-result` document and branch on stable error codes documented
-   in [Errors](../reference/errors.md).
-
-See also [Schemas](../reference/schemas.md), [Exit codes](../reference/exit-codes.md), and
-[File layout](../reference/file-layout.md).
+Treat an import as all-or-nothing and read every entry in `error.details.diagnostics` before
+retrying. The general steps are in [Errors](../reference/errors.md#repair-steps-for-agents).

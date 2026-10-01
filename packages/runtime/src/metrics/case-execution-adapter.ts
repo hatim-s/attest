@@ -1,49 +1,36 @@
-import type { AgentResponse, CaseOutcome, TestCase, Trace } from '@attest/contracts';
+import type { AgentErrorResponse, AgentResponse, TestCase } from '@attest/contracts';
+import type { CaseExecution } from '../eval/types.js';
 
 import type { MetricContext } from './metric-evaluation.js';
 
-/** Execution fields consumed by metric evaluation. */
-type CaseExecutionView = {
-  caseId: string;
-  trace?: Trace;
-} & (
-  { outcome: 'completed'; response: AgentResponse } | { outcome: Exclude<CaseOutcome, 'completed'> }
-);
+/** The execution fields metrics read, picked per outcome so a completed view keeps its response. */
+type CaseExecutionView =
+  | Pick<Extract<CaseExecution, { outcome: 'completed' }>, 'outcome' | 'response' | 'trace'>
+  | Pick<Exclude<CaseExecution, { outcome: 'completed' }>, 'outcome'>;
 
-/** Reports an impossible completed runner view before metrics can mis-score its absent output. */
-class CaseExecutionAdapterError extends Error {
-  readonly code = 'INVALID_CASE_EXECUTION';
-
-  constructor(message: string) {
-    super(message);
-    this.name = 'CaseExecutionAdapterError';
-  }
-}
+/**
+ * An agent error envelope completes the transport but carries no output, so metrics skip it and
+ * the case verdict is an error rather than a failure.
+ */
+const isAgentErrorResponse = (response: AgentResponse): response is AgentErrorResponse =>
+  !('output' in response);
 
 /** Maps the runner's terminal case shape to the narrow context every metric consumes. */
 const caseExecutionToMetricContext = (
   caseDefinition: TestCase,
   execution: CaseExecutionView,
 ): MetricContext => {
-  const trace = execution.trace ?? null;
   if (execution.outcome !== 'completed') {
-    return { caseDefinition, execution: { outcome: execution.outcome, trace } };
+    return { caseDefinition, execution: { outcome: execution.outcome, trace: null } };
   }
-
-  if (execution.response === undefined) {
-    throw new CaseExecutionAdapterError(
-      `Completed case execution ${execution.caseId} is missing its agent response.`,
-    );
+  const trace = execution.trace ?? null;
+  if (isAgentErrorResponse(execution.response)) {
+    return { caseDefinition, execution: { outcome: 'agent_error', trace } };
   }
-
-  if ('output' in execution.response) {
-    return {
-      caseDefinition,
-      execution: { outcome: 'completed', output: execution.response.output, trace },
-    };
-  }
-
-  return { caseDefinition, execution: { outcome: 'agent_error', trace } };
+  return {
+    caseDefinition,
+    execution: { outcome: 'completed', output: execution.response.output, trace },
+  };
 };
 
-export { CaseExecutionAdapterError, caseExecutionToMetricContext, type CaseExecutionView };
+export { caseExecutionToMetricContext, isAgentErrorResponse, type CaseExecutionView };

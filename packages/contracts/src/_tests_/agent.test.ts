@@ -7,7 +7,7 @@ import {
   type AgentResponse,
   type AgentSuccessResponse,
 } from '../agent/protocol.js';
-import { parseAgentRequest, parseAgentResponse } from '../schema/parse.js';
+import { parseAgentResponse } from '../schema/parse.js';
 import { AGENT_PROTOCOL } from '../schema/identifiers.js';
 
 describe('agentRequestSchema', () => {
@@ -61,17 +61,6 @@ describe('agentRequestSchema', () => {
       expect(result.data.vendor_request).toEqual({ attempt: 2 });
     }
   });
-
-  it('is exposed through the non-throwing request parser', () => {
-    const result = parseAgentRequest({
-      protocol: AGENT_PROTOCOL,
-      run_id: '01ARZ3NDEKTSV4RRFFQ69G5FAV',
-      case_id: 'greeting-basic',
-      input: {},
-    });
-
-    expect(result.ok).toBe(true);
-  });
 });
 
 describe('agentResponseSchema', () => {
@@ -84,6 +73,8 @@ describe('agentResponseSchema', () => {
 
   it.each([
     { protocol: AGENT_PROTOCOL },
+    { protocol: AGENT_PROTOCOL, output: undefined },
+    { protocol: AGENT_PROTOCOL, error: undefined },
     { protocol: AGENT_PROTOCOL, output: 'Paris', error: { message: 'failed' } },
   ])('rejects a response without exactly one outcome', (response) => {
     const result = parseAgentResponse(response);
@@ -130,7 +121,7 @@ describe('agentResponseSchema', () => {
       return;
     }
 
-    expect(Reflect.get(result.value, 'vendor_response')).toEqual({ cached: true });
+    expect(result.value).toMatchObject({ vendor_response: { cached: true } });
     expect(result.warnings).toEqual([
       {
         code: 'unknown_field',

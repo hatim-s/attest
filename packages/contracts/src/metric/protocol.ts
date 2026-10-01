@@ -1,22 +1,20 @@
 import { z } from 'zod';
 
-import { traceSchema } from '../trace/protocol.js';
+import { jsonValueSchema } from '../project/shared.js';
+import {
+  attributeValueSchema,
+  spanKindSchema,
+  spanStatusSchema,
+  traceSchema,
+} from '../trace/protocol.js';
 import { METRIC_PROTOCOL } from '../schema/identifiers.js';
-
-const jsonValueSchema = z.json();
-
-/** Represents the JSON values accepted at contract boundaries. */
-type JsonValue = z.infer<typeof jsonValueSchema>;
 
 const pathSchema = z.string().regex(/^\$(?:\.[A-Za-z_][A-Za-z0-9_]*|\[\d+\])*$/);
 // 'g' and 'y' are deliberately excluded: they make RegExp.test stateful via lastIndex,
 // which would turn assertion evaluation order into a correctness hazard.
 const regularExpressionFlagsSchema = z.string().regex(/^[dimsuv]*$/);
 
-/**
- * Checks JavaScript regular-expression syntax from docs/specs/metric-contract.md.
- * The engine enforces a per-check time guard at evaluation; syntax is checked here.
- */
+// Syntax is checked here; the engine enforces a per-check time guard at evaluation.
 const isValidRegularExpression = (value: { pattern: string; flags?: string }): boolean => {
   try {
     new RegExp(value.pattern, value.flags);
@@ -56,27 +54,26 @@ const thresholdSchema = z
   })
   .meta({ id: 'Threshold' });
 
-const equalsCheckSchema = z.strictObject({ path: pathSchema, value: jsonValueSchema });
-const containsCheckSchema = z.strictObject({ path: pathSchema, value: jsonValueSchema });
+const pathValueCheckSchema = z.strictObject({ path: pathSchema, value: jsonValueSchema });
 const existsCheckSchema = z.strictObject({ path: pathSchema });
 
 const toolArgumentMatcherSchema = z.union([
-  z.strictObject({ equals: equalsCheckSchema }),
-  z.strictObject({ contains: containsCheckSchema }),
+  z.strictObject({ equals: pathValueCheckSchema }),
+  z.strictObject({ contains: pathValueCheckSchema }),
   z.strictObject({ exists: existsCheckSchema }),
 ]);
 
 /** Matches trace spans through stable core fields and a partial attribute map. */
 const spanFilterSchema = z.strictObject({
-  kind: z.enum(['agent', 'llm', 'tool', 'retrieval', 'other']).optional(),
+  kind: spanKindSchema.optional(),
   name: z.string().optional(),
-  status: z.enum(['ok', 'error']).optional(),
-  attributes: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).optional(),
+  status: spanStatusSchema.shape.code.optional(),
+  attributes: z.record(z.string(), attributeValueSchema).optional(),
 });
 
 const leafAssertionCheckSchema = z.union([
-  z.strictObject({ equals: equalsCheckSchema }),
-  z.strictObject({ contains: containsCheckSchema }),
+  z.strictObject({ equals: pathValueCheckSchema }),
+  z.strictObject({ contains: pathValueCheckSchema }),
   z.strictObject({ regex: regexCheckSchema }),
   z.strictObject({
     json_schema: z.strictObject({
@@ -89,7 +86,7 @@ const leafAssertionCheckSchema = z.union([
   z.strictObject({
     tool_calls: z.strictObject({
       name: z.string().optional(),
-      status: z.enum(['ok', 'error']).optional(),
+      status: spanStatusSchema.shape.code.optional(),
       count: z.number().int().nonnegative().optional(),
       order: z.array(z.string()).optional(),
       arguments: z.array(toolArgumentMatcherSchema).nonempty().optional(),
@@ -114,7 +111,8 @@ type ToolArgumentMatcher = z.infer<typeof toolArgumentMatcherSchema>;
 type SpanFilter = z.infer<typeof spanFilterSchema>;
 
 /**
- * Represents recursive combinators whose self-reference requires an explicit TypeScript layer.
+ * Written by hand because Zod cannot infer a recursive union: getter recursion degrades the
+ * nested checks to Record<string, unknown> in emitted declarations.
  */
 type AssertionCheck =
   | LeafAssertionCheck
@@ -122,24 +120,19 @@ type AssertionCheck =
   | { any: AssertionCheck[] }
   | { not: AssertionCheck };
 
-/**
- * Recursively encodes the deterministic assertion checks in docs/specs/metric-contract.md.
- */
-const assertionCheckSchema: z.ZodType<AssertionCheck> = z.lazy(() => {
-  const allAssertionCheckSchema = z
-    .strictObject({ all: z.array(assertionCheckSchema).nonempty() })
-    .meta({ id: 'AllAssertionCheck' });
-  const anyAssertionCheckSchema = z
-    .strictObject({ any: z.array(assertionCheckSchema).nonempty() })
-    .meta({ id: 'AnyAssertionCheck' });
-
-  return z.union([
+/** Recursively encodes the deterministic assertion checks in docs/specs/metric-contract.md. */
+const assertionCheckSchema: z.ZodType<AssertionCheck> = z.lazy(() =>
+  z.union([
     leafAssertionCheckSchema,
-    allAssertionCheckSchema,
-    anyAssertionCheckSchema,
+    z
+      .strictObject({ all: z.array(assertionCheckSchema).nonempty() })
+      .meta({ id: 'AllAssertionCheck' }),
+    z
+      .strictObject({ any: z.array(assertionCheckSchema).nonempty() })
+      .meta({ id: 'AnyAssertionCheck' }),
     z.strictObject({ not: assertionCheckSchema }),
-  ]);
-});
+  ]),
+);
 
 /** Encodes the normalized metric verdict described by docs/specs/metric-contract.md. */
 const metricResultSchema = z.strictObject({
@@ -170,61 +163,23 @@ const metricRequestSchema = z.looseObject({
 /** Represents one validated request to an executable metric. */
 type MetricRequest = z.infer<typeof metricRequestSchema>;
 
-const assertionMetricDefinitionSchema = z
-  .strictObject({
-    name: z.string(),
-    type: z.literal('assertion'),
-    assert: z.array(assertionCheckSchema).nonempty(),
-  })
-  .meta({ id: 'AssertionMetricDefinition' });
-
-const executableCommandMetricDefinitionSchema = z.strictObject({
-  name: z.string(),
-  type: z.literal('exec'),
-  command: z.array(z.string()).nonempty(),
-});
-
-const executableHttpMetricDefinitionSchema = z.strictObject({
-  name: z.string(),
-  type: z.literal('exec'),
-  url: z.url(),
-});
-
-const executableMetricDefinitionSchema = z
-  .union([executableCommandMetricDefinitionSchema, executableHttpMetricDefinitionSchema], {
-    error: 'exactly one of command or url must be present',
-  })
-  .meta({ id: 'ExecutableMetricDefinition' });
-
-const judgeMetricDefinitionSchema = z.strictObject({
-  name: z.string(),
-  type: z.literal('judge'),
-  model: z.string(),
-  rubric: z.string(),
-  threshold: z.number().finite().optional(),
-});
-
-/** Encodes all metric definition variants from docs/specs/metric-contract.md. */
-const metricDefinitionSchema = z.union([
-  assertionMetricDefinitionSchema,
-  executableMetricDefinitionSchema,
-  judgeMetricDefinitionSchema,
-]);
-
-/** Represents a validated assertion, executable, or judge metric definition. */
-type MetricDefinition = z.infer<typeof metricDefinitionSchema>;
+/**
+ * The runtime's normalized metric vocabulary. Local builds these from metric resources before
+ * evaluation, so no schema parses them; authored metrics use metricResourceSchema instead.
+ */
+type MetricDefinition =
+  | { name: string; type: 'assertion'; assert: AssertionCheck[] }
+  | { name: string; type: 'exec'; command: string[] }
+  | { name: string; type: 'exec'; url: string }
+  | { name: string; type: 'judge'; model: string; rubric: string; threshold?: number };
 
 export {
   assertionCheckSchema,
-  isValidRegularExpression,
-  leafAssertionCheckSchema,
-  metricDefinitionSchema,
   metricRequestSchema,
   metricResultSchema,
   spanFilterSchema,
   toolArgumentMatcherSchema,
   type AssertionCheck,
-  type JsonValue,
   type LeafAssertionCheck,
   type MetricDefinition,
   type MetricRequest,

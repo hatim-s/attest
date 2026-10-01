@@ -1,43 +1,27 @@
-import { constants, type BigIntStats } from 'node:fs';
-import { lstat, open, realpath, type FileHandle } from 'node:fs/promises';
+import type { BigIntStats } from 'node:fs';
+import { lstat, realpath, type FileHandle } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 
 import { StoreError, type RunStore } from '@attest/core';
 
+import { errnoCode } from '../../internal/errno-code.js';
+import { openAnchored } from '../../internal/open-anchored.js';
 import { LocalError } from '../../errors/index.js';
 import { openRunStoreSnapshot } from '../../store/index.js';
 import { isProjectPath } from '../../project/project-path.js';
-import { captureCleanupFailure, runCleanupSteps, type CleanupFailure } from './cleanup.js';
+import { rethrowAfterCleanup, runCleanupSteps, type CleanupStep } from './cleanup.js';
 import {
   captureRunStoreSnapshot,
   removeRunStoreSnapshot,
   type RunStoreSnapshot,
-  type RunStoreSnapshotHooks,
 } from './run-store-snapshot.js';
 
 const RUN_STORE_DIRECTORY = '.attest';
 const RUN_STORE_FILE = 'runs.db';
 
-type ReadonlyRunStoreHooks = {
-  beforeAnchorOpen?: () => Promise<void> | void;
-  afterSnapshotCaptured?: () => Promise<void> | void;
-  snapshot?: RunStoreSnapshotHooks;
-  cleanup?: {
-    closeStore?: (store: RunStore) => Promise<void>;
-    removeSnapshot?: (snapshot: RunStoreSnapshot) => Promise<void>;
-    closeAnchor?: (anchor: FileHandle) => Promise<void>;
-  };
-};
-
 type ReadonlyRunStoreFileOptions = {
   containmentRoot?: string;
-  hooks?: ReadonlyRunStoreHooks;
 };
-
-const getErrorCode = (error: unknown): string | undefined =>
-  error instanceof Error && 'code' in error && typeof Reflect.get(error, 'code') === 'string'
-    ? (Reflect.get(error, 'code') as string)
-    : undefined;
 
 const unsafeStore = (path: string): LocalError =>
   new LocalError('project_read_failed', 'The project run store is not a safe file.', {
@@ -71,14 +55,13 @@ const withReadonlyRunStoreFile = async <T>(
   options: ReadonlyRunStoreFileOptions = {},
 ): Promise<T | undefined> => {
   const storeDirectory = dirname(storePath);
-  const hooks = options.hooks ?? {};
   let directoryMetadata: BigIntStats;
   let storeMetadata: BigIntStats;
   try {
     directoryMetadata = await lstat(storeDirectory, { bigint: true });
     storeMetadata = await lstat(storePath, { bigint: true });
   } catch (error: unknown) {
-    if (getErrorCode(error) === 'ENOENT') return undefined;
+    if (errnoCode(error) === 'ENOENT') return undefined;
     throw toSafeStoreError(error, storePath);
   }
   if (
@@ -114,49 +97,41 @@ const withReadonlyRunStoreFile = async <T>(
 
   let anchor: FileHandle | undefined;
   let store: RunStore | undefined;
-  let snapshot: Awaited<ReturnType<typeof captureRunStoreSnapshot>> | undefined;
-  let result: T | undefined;
-  let failure: CleanupFailure | undefined;
+  let snapshot: RunStoreSnapshot | undefined;
+  // Cleanup must not short-circuit: later steps remove copied data and release the source anchor.
+  const cleanupSteps = (): CleanupStep[] => {
+    const [openedStore, capturedSnapshot, openedAnchor] = [store, snapshot, anchor];
+    const steps: CleanupStep[] = [];
+    if (openedStore !== undefined) steps.push(async () => openedStore.close());
+    if (capturedSnapshot !== undefined) {
+      steps.push(async () => removeRunStoreSnapshot(capturedSnapshot));
+    }
+    if (openedAnchor !== undefined) steps.push(async () => openedAnchor.close());
+    return steps;
+  };
+  let result: T;
   try {
-    await hooks.beforeAnchorOpen?.();
-    anchor = await open(resolvedStore, constants.O_RDONLY | constants.O_NOFOLLOW);
-    const anchoredMetadata = await anchor.stat({ bigint: true });
+    const anchored = await openAnchored(resolvedStore, { kind: 'file', root: resolvedDirectory });
+    anchor = anchored.handle;
+    // The anchor must be the inode inspected before containment checks, not a later swap.
     if (
-      !anchoredMetadata.isFile() ||
-      anchoredMetadata.dev !== storeMetadata.dev ||
-      anchoredMetadata.ino !== storeMetadata.ino
+      anchored.identity.dev !== storeMetadata.dev ||
+      anchored.identity.ino !== storeMetadata.ino
     ) {
       throw unsafeStore(storePath);
     }
-    snapshot = await captureRunStoreSnapshot(resolvedStore, anchor, hooks.snapshot);
-    await hooks.afterSnapshotCaptured?.();
+    snapshot = await captureRunStoreSnapshot(resolvedStore, anchor);
     const openedStore = await openRunStoreSnapshot(snapshot.path);
     store = openedStore;
     result = await operation(openedStore);
   } catch (error: unknown) {
-    failure = captureCleanupFailure(
+    const failure =
       error instanceof StoreError && error.code === 'RUN_NOT_FOUND'
         ? error
-        : toSafeStoreError(error, storePath),
-    );
+        : toSafeStoreError(error, storePath);
+    return rethrowAfterCleanup(failure, cleanupSteps());
   }
-
-  // Cleanup must not short-circuit: later steps remove copied data and release the source anchor.
-  failure = await runCleanupSteps(failure, [
-    ...(store === undefined
-      ? []
-      : [async () => (hooks.cleanup?.closeStore ?? ((value: RunStore) => value.close()))(store)]),
-    ...(snapshot === undefined
-      ? []
-      : [async () => (hooks.cleanup?.removeSnapshot ?? removeRunStoreSnapshot)(snapshot)]),
-    ...(anchor === undefined
-      ? []
-      : [
-          async () =>
-            (hooks.cleanup?.closeAnchor ?? ((value: FileHandle) => value.close()))(anchor),
-        ]),
-  ]);
-  if (failure !== undefined) throw failure.error;
+  await runCleanupSteps(cleanupSteps());
   return result;
 };
 
@@ -164,16 +139,9 @@ const withReadonlyRunStoreFile = async <T>(
 const withReadonlyRunStore = async <T>(
   root: string,
   operation: (store: RunStore) => Promise<T>,
-  hooks: ReadonlyRunStoreHooks = {},
 ): Promise<T | undefined> =>
   withReadonlyRunStoreFile(join(root, RUN_STORE_DIRECTORY, RUN_STORE_FILE), operation, {
     containmentRoot: root,
-    hooks,
   });
 
-export {
-  withReadonlyRunStore,
-  withReadonlyRunStoreFile,
-  type ReadonlyRunStoreFileOptions,
-  type ReadonlyRunStoreHooks,
-};
+export { withReadonlyRunStore, withReadonlyRunStoreFile };

@@ -32,6 +32,30 @@ const agent = (overrides: Partial<JsonlBridgeAgentResource> = {}): JsonlBridgeAg
 });
 
 describe('JSONL bridge adapter', () => {
+  it.each(['before', 'during'] as const)(
+    'rejects cancellation %s bridge startup',
+    async (timing) => {
+      let session: Awaited<ReturnType<typeof startJsonlBridgeAgent>> | undefined;
+      const controller = new AbortController();
+      if (timing === 'before') controller.abort();
+      try {
+        const startup = startJsonlBridgeAgent(agent(), {
+          cwd: process.cwd(),
+          env: { PATH: process.env.PATH ?? '' },
+          signal: controller.signal,
+          terminationGraceMs: 50,
+        }).then((started) => {
+          session = started;
+          return started;
+        });
+        controller.abort();
+        await expect(startup).rejects.toMatchObject({ code: 'cancelled' });
+      } finally {
+        await session?.close();
+      }
+    },
+  );
+
   it('correlates multiplexed responses that complete out of order', async () => {
     const session = await startJsonlBridgeAgent(
       agent({ redaction: { event_pointers: ['/response/output/token'] } }),
@@ -105,7 +129,9 @@ describe('JSONL bridge adapter', () => {
   });
 
   it('falls back to process termination when cancellation is ignored', async () => {
-    const session = await startJsonlBridgeAgent(agent(), {
+    const quickFallback = agent();
+    quickFallback.transport.cancellation_grace_ms = 100;
+    const session = await startJsonlBridgeAgent(quickFallback, {
       cwd: process.cwd(),
       env: { PATH: process.env.PATH ?? '', IGNORE_CANCEL: '1' },
       terminationGraceMs: 50,

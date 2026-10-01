@@ -18,7 +18,9 @@ import {
 } from '@attest/contracts';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { hashCanonicalJson, hashCanonicalJsonLines } from '../canonical-project.js';
+import { contentHash } from '@attest/core';
+
+import { hashCanonicalJsonLines } from '../canonical-project.js';
 import { loadProject } from '../project-loader/index.js';
 import { ProjectLoadError } from '../project-errors.js';
 
@@ -107,7 +109,7 @@ const writeValidProject = async (
           id: agent.id,
           schema: AGENT_RESOURCE_SCHEMA_ID,
           path: 'attest/agents/support.json',
-          content_hash: hashCanonicalJson(agent),
+          content_hash: contentHash(agent),
         },
       ],
       tests: [
@@ -115,7 +117,7 @@ const writeValidProject = async (
           id: test.id,
           schema: TEST_RESOURCE_SCHEMA_ID,
           path: 'attest/tests/refund.json',
-          content_hash: hashCanonicalJson(test),
+          content_hash: contentHash(test),
         },
       ],
       datasets: [
@@ -125,7 +127,7 @@ const writeValidProject = async (
           data_path: 'attest/datasets/refunds.jsonl',
           data_content_hash: hashCanonicalJsonLines(dataRecords),
           metadata_path: 'attest/datasets/refunds.meta.json',
-          metadata_content_hash: hashCanonicalJson(dataset),
+          metadata_content_hash: contentHash(dataset),
         },
       ],
       metrics: [
@@ -133,7 +135,7 @@ const writeValidProject = async (
           id: metric.id,
           schema: METRIC_RESOURCE_SCHEMA_ID,
           path: 'attest/metrics/correct.json',
-          content_hash: hashCanonicalJson(metric),
+          content_hash: contentHash(metric),
         },
       ],
     },
@@ -178,7 +180,7 @@ describe('loadProject', () => {
     expect(compact.datasets[0]?.cases).toEqual([testCase]);
     expect(compact.contentHashes.datasets.refunds).toEqual({
       data: hashCanonicalJsonLines([testCase]),
-      metadata: hashCanonicalJson(dataset),
+      metadata: contentHash(dataset),
     });
     expect(compact.projectHash).toBe(pretty.projectHash);
     expect(compact.projectHash).toHaveLength(64);
@@ -200,7 +202,7 @@ describe('loadProject', () => {
     await writeProjectFile(root, 'attest/agents/support.json', '{"token":"DO-NOT-LEAK"');
     await writeProjectFile(root, 'attest/tests/refund.json', JSON.stringify(invalidTest));
     await unlink(join(root, 'attest/metrics/correct.json'));
-    manifest.resources.tests[0]!.content_hash = hashCanonicalJson(invalidTest);
+    manifest.resources.tests[0]!.content_hash = contentHash(invalidTest);
     await writeProjectFile(root, 'attest.project.json', JSON.stringify(manifest));
 
     let failure: unknown;

@@ -1,8 +1,7 @@
 import type { AgentResource, JsonValue } from '@attest/contracts';
 
 import { LocalError } from '../../../errors/index.js';
-
-const SENSITIVE_NAME = /authorization|cookie|password|secret|token|api[-_]?key/iu;
+import { isSensitiveFieldName } from '../../../internal/redaction.js';
 
 const findSensitiveBodyField = (value: JsonValue, path = ''): string | undefined => {
   if (Array.isArray(value)) {
@@ -14,7 +13,7 @@ const findSensitiveBodyField = (value: JsonValue, path = ''): string | undefined
   }
   if (value === null || typeof value !== 'object') return undefined;
   for (const [name, entry] of Object.entries(value)) {
-    if (SENSITIVE_NAME.test(name)) return `${path}/${name}`;
+    if (isSensitiveFieldName(name)) return `${path}/${name}`;
     const found = findSensitiveBodyField(entry, `${path}/${name}`);
     if (found !== undefined) return found;
   }
@@ -62,14 +61,14 @@ const assertSafeHttpTemplate = (
     });
   }
   for (const [name, value] of Object.entries(request.headers ?? {})) {
-    if (SENSITIVE_NAME.test(name) && typeof value === 'string') {
+    if (isSensitiveFieldName(name) && typeof value === 'string') {
       throw new LocalError('project_invalid', 'Sensitive HTTP headers must use references.', {
         path: `${path}/headers/${name}`,
       });
     }
   }
   for (const [name, value] of Object.entries(request.query ?? {})) {
-    if (SENSITIVE_NAME.test(name) && typeof value === 'string') {
+    if (isSensitiveFieldName(name) && typeof value === 'string') {
       throw new LocalError('project_invalid', 'Sensitive HTTP query values must use references.', {
         path: `${path}/query/${name}`,
       });
@@ -86,4 +85,4 @@ const assertSafeHttpTemplate = (
   return url;
 };
 
-export { SENSITIVE_NAME, assertSafeHttpTemplate, findSensitiveBodyField };
+export { assertSafeHttpTemplate, findSensitiveBodyField };

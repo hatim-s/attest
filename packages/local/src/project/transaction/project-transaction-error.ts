@@ -18,4 +18,4 @@ class ProjectTransactionError extends LocalError {
   }
 }
 
-export { ProjectTransactionError, type ProjectTransactionErrorCode };
+export { ProjectTransactionError };

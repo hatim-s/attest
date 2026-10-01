@@ -1,4 +1,4 @@
-import { diffToJson, type RunDiff } from '@attest/core';
+import type { RunDiff } from '@attest/core';
 
 /** Renders transition totals and pass-rate movement for human CLI diff output. */
 const renderDiffSummary = (diff: RunDiff): string => {
@@ -19,4 +19,4 @@ const renderDiffSummary = (diff: RunDiff): string => {
   ].join('\n');
 };
 
-export { diffToJson, renderDiffSummary };
+export { renderDiffSummary };

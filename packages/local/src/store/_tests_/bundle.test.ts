@@ -1,7 +1,8 @@
 import { readFile, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { Readable } from 'node:stream';
+import { Readable, Writable } from 'node:stream';
+import { setTimeout as delay } from 'node:timers/promises';
 
 import { AGENT_PROTOCOL } from '@attest/contracts';
 import {
@@ -101,6 +102,24 @@ describe('run bundles', () => {
     expect(manifest.schemaId).toBe(BUNDLE_SCHEMA_ID);
   });
 
+  it('rejects a destination closed during backpressure without hanging the export', async () => {
+    const { store } = await openTemporaryStore();
+    const run = await createStoredRun(store);
+    const destination = new Writable({
+      highWaterMark: 1,
+      write() {
+        this.destroy();
+      },
+    });
+
+    const result = await Promise.race([
+      exportRunBundle(store, run.id, destination).catch((error: unknown) => error),
+      delay(100).then(() => 'export did not settle'),
+    ]);
+
+    expect(result).toMatchObject({ code: 'WRITE_FAILED' });
+  });
+
   it('rejects a tampered case before yielding any record', async () => {
     const { directory, store } = await openTemporaryStore();
     const run = await createStoredRun(store);
@@ -185,44 +204,34 @@ describe('run bundles', () => {
     );
   });
 
-  it('reports field-level violations for malformed header runs', async () => {
-    const { directory, store } = await openTemporaryStore();
-    const run = await createStoredRun(store);
-    const destination = join(directory, 'malformed-run.ndjson');
-    await exportRunBundle(store, run.id, destination);
-    const source = await mutateAndRehashBundle(destination, (header) => {
-      (header.run as Record<string, unknown>).status = 'other';
-    });
-
-    await expect(collect(source)).rejects.toThrow(
-      'Run bundle header contains a malformed run: header.run.status',
-    );
-  });
-
   it.each([
     [
       'invalid run status',
       (header: Record<string, unknown>) => {
         (header.run as Record<string, unknown>).status = 'other';
       },
+      'Run bundle header contains a malformed run: header.run.status',
     ],
     [
       'invalid run timestamp',
       (header: Record<string, unknown>) => {
         (header.run as Record<string, unknown>).finishedAt = 'yesterday';
       },
+      'Run bundle header contains a malformed run: header.run.finishedAt',
     ],
     [
       'foreign case run id',
       (_header: Record<string, unknown>, caseLine: Record<string, unknown>) => {
         (caseLine.case as Record<string, unknown>).runId = 'other-run';
       },
+      'Run bundle case line 2 is malformed.',
     ],
     [
       'completed case error field',
       (_header: Record<string, unknown>, caseLine: Record<string, unknown>) => {
         (caseLine.case as Record<string, unknown>).errorMessage = 'forbidden';
       },
+      'Run bundle case line 2 is malformed.',
     ],
     [
       'malformed evaluated metric',
@@ -231,13 +240,16 @@ describe('run bundles', () => {
         const metrics = caseRecord.metrics as Array<Record<string, unknown>>;
         delete metrics[0]?.pass;
       },
+      'Run bundle case line 2 is malformed.',
     ],
-  ] as const)('rejects a self-hashed bundle with %s', async (_, mutate) => {
+  ] as const)('rejects a self-hashed bundle with %s', async (_, mutate, message) => {
     const { directory, store } = await openTemporaryStore();
     const run = await createStoredRun(store);
     const destination = join(directory, 'structurally-invalid.ndjson');
     await exportRunBundle(store, run.id, destination);
     const source = await mutateAndRehashBundle(destination, mutate);
-    await expect(collect(source)).rejects.toMatchObject({ code: 'CORRUPT_DATA' });
+    const collected = collect(source);
+    await expect(collected).rejects.toMatchObject({ code: 'CORRUPT_DATA' });
+    await expect(collected).rejects.toThrow(message);
   });
 });

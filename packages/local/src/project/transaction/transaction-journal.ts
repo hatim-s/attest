@@ -3,7 +3,6 @@ import {
   copyFile,
   lstat,
   mkdir,
-  open,
   readFile,
   readdir,
   rename,
@@ -14,6 +13,10 @@ import {
 } from 'node:fs/promises';
 import { dirname, join, relative } from 'node:path';
 
+import { z } from 'zod';
+
+import { errnoCode } from '../../internal/errno-code.js';
+import { syncPath } from '../../internal/sync-path.js';
 import type { ProjectLockHandle } from './project-lock.js';
 import { resolveSafeProjectPath } from './project-path.js';
 import { ProjectTransactionError } from './project-transaction-error.js';
@@ -28,30 +31,32 @@ type TransactionFileChange = {
   type: 'remove' | 'write';
 };
 
-type TransactionJournalEntry = {
-  backup_path: string | null;
-  next_hash: string | null;
-  original_hash: string | null;
-  path: string;
-  staged_path: string | null;
-  type: 'remove' | 'write';
-};
+const transactionJournalEntrySchema = z.object({
+  backup_path: z.string().nullable(),
+  next_hash: z.string().nullable(),
+  original_hash: z.string().nullable(),
+  path: z.string(),
+  staged_path: z.string().nullable(),
+  type: z.enum(['remove', 'write']),
+});
 
-type TransactionJournalStatus =
-  'committed' | 'prepared' | 'publishing' | 'rolled_back' | 'rolling_back';
+/** The recovery journal written beside staged files; recovery trusts nothing it does not parse. */
+const transactionJournalSchema = z.object({
+  created_at: z.string(),
+  created_directories: z.array(z.string()),
+  entries: z.array(transactionJournalEntrySchema),
+  manifest_path: z.literal('attest.project.json'),
+  project_hash_after: z.string(),
+  project_hash_before: z.string(),
+  published_count: z.number().int().nonnegative(),
+  schema: z.literal(TRANSACTION_JOURNAL_SCHEMA),
+  status: z.enum(['committed', 'prepared', 'publishing', 'rolled_back', 'rolling_back']),
+  transaction_id: z.string(),
+});
 
-type TransactionJournal = {
-  created_at: string;
-  created_directories: string[];
-  entries: TransactionJournalEntry[];
-  manifest_path: 'attest.project.json';
-  project_hash_after: string;
-  project_hash_before: string;
-  published_count: number;
-  schema: typeof TRANSACTION_JOURNAL_SCHEMA;
-  status: TransactionJournalStatus;
-  transaction_id: string;
-};
+type TransactionJournalEntry = z.infer<typeof transactionJournalEntrySchema>;
+
+type TransactionJournal = z.infer<typeof transactionJournalSchema>;
 
 type PreparedTransaction = {
   directory: string;
@@ -64,29 +69,14 @@ type RecoveryResult = {
   transactionId: string;
 };
 
-const getErrorCode = (error: unknown): string | undefined =>
-  error instanceof Error && 'code' in error && typeof Reflect.get(error, 'code') === 'string'
-    ? (Reflect.get(error, 'code') as string)
-    : undefined;
-
 const hashBytes = (contents: string | Buffer): string =>
   createHash('sha256').update(contents).digest('hex');
-
-/** Fsyncs a file or directory after transaction state changes. */
-const syncPath = async (path: string): Promise<void> => {
-  const handle = await open(path, 'r');
-  try {
-    await handle.sync();
-  } finally {
-    await handle.close();
-  }
-};
 
 const readByteHash = async (path: string): Promise<string | null> => {
   try {
     return hashBytes(await readFile(path));
   } catch (error: unknown) {
-    if (getErrorCode(error) === 'ENOENT') {
+    if (errnoCode(error) === 'ENOENT') {
       return null;
     }
     throw error;
@@ -129,7 +119,7 @@ const missingParentDirectories = async (
           );
         }
       } catch (error: unknown) {
-        if (getErrorCode(error) !== 'ENOENT') {
+        if (errnoCode(error) !== 'ENOENT') {
           throw error;
         }
         missing.add(current);
@@ -202,22 +192,8 @@ const prepareTransaction = async (
   return prepared;
 };
 
-const isJournalEntry = (value: unknown): value is TransactionJournalEntry => {
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
-    return false;
-  }
-  const entry = value as Record<string, unknown>;
-  return (
-    (entry.type === 'write' || entry.type === 'remove') &&
-    typeof entry.path === 'string' &&
-    (entry.backup_path === null || typeof entry.backup_path === 'string') &&
-    (entry.staged_path === null || typeof entry.staged_path === 'string') &&
-    (entry.original_hash === null || typeof entry.original_hash === 'string') &&
-    (entry.next_hash === null || typeof entry.next_hash === 'string')
-  );
-};
-
 const parseTransactionJournal = (raw: string, directory: string): TransactionJournal => {
+  const path = relative(dirname(dirname(directory)), directory);
   let value: unknown;
   try {
     value = JSON.parse(raw) as unknown;
@@ -228,34 +204,18 @@ const parseTransactionJournal = (raw: string, directory: string): TransactionJou
     throw new ProjectTransactionError(
       'project_recovery_required',
       'Transaction journal is malformed.',
-      { path: relative(dirname(dirname(directory)), directory) },
+      { path },
     );
   }
-  const journal = value as Record<string, unknown>;
-  if (
-    journal.schema !== TRANSACTION_JOURNAL_SCHEMA ||
-    typeof journal.transaction_id !== 'string' ||
-    typeof journal.created_at !== 'string' ||
-    !['prepared', 'publishing', 'committed', 'rolling_back', 'rolled_back'].includes(
-      String(journal.status),
-    ) ||
-    journal.manifest_path !== 'attest.project.json' ||
-    typeof journal.project_hash_before !== 'string' ||
-    typeof journal.project_hash_after !== 'string' ||
-    !Number.isSafeInteger(journal.published_count) ||
-    (journal.published_count as number) < 0 ||
-    !Array.isArray(journal.created_directories) ||
-    !journal.created_directories.every((path) => typeof path === 'string') ||
-    !Array.isArray(journal.entries) ||
-    !journal.entries.every(isJournalEntry)
-  ) {
+  const parsed = transactionJournalSchema.safeParse(value);
+  if (!parsed.success) {
     throw new ProjectTransactionError(
       'project_recovery_required',
       'Transaction journal has an unsupported shape.',
-      { path: relative(dirname(dirname(directory)), directory) },
+      { path },
     );
   }
-  return value as TransactionJournal;
+  return parsed.data;
 };
 
 /** Loads a transaction journal while keeping every recovery artifact in place on failure. */
@@ -304,7 +264,7 @@ const removeCreatedDirectories = async (root: string, paths: readonly string[]):
       await rmdir(join(root, path));
     } catch (error: unknown) {
       // A non-empty directory now contains authored data and must always be preserved.
-      if (!['ENOENT', 'ENOTEMPTY', 'EEXIST'].includes(getErrorCode(error) ?? '')) {
+      if (!['ENOENT', 'ENOTEMPTY', 'EEXIST'].includes(errnoCode(error) ?? '')) {
         throw error;
       }
     }
@@ -388,7 +348,7 @@ const recoverProjectTransactions = async (
   try {
     names = await readdir(transactionsRoot);
   } catch (error: unknown) {
-    if (getErrorCode(error) === 'ENOENT') {
+    if (errnoCode(error) === 'ENOENT') {
       return [];
     }
     throw error;
@@ -443,21 +403,14 @@ const recoverProjectTransactions = async (
 };
 
 export {
-  JOURNAL_FILE,
   TRANSACTIONS_DIRECTORY,
-  TRANSACTION_JOURNAL_SCHEMA,
   cleanupPreparedTransaction,
-  hashBytes,
   prepareTransaction,
   readByteHash,
   recoverProjectTransactions,
   rollbackPreparedTransaction,
-  syncPath,
   writeTransactionJournal,
   type PreparedTransaction,
-  type RecoveryResult,
   type TransactionFileChange,
-  type TransactionJournal,
   type TransactionJournalEntry,
-  type TransactionJournalStatus,
 };

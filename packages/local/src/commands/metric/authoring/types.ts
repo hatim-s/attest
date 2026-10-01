@@ -1,8 +1,6 @@
 import type { MetricPresetId } from '@attest/contracts';
 
-import type { ReadInput } from '../../agent/authoring/index.js';
-
-type Prompt = (question: string, options?: { signal?: AbortSignal }) => Promise<string>;
+import type { ReadInput } from '../../agent/authoring/types.js';
 
 type MetricAddFields = {
   argContains?: readonly string[];
@@ -51,4 +49,4 @@ type MetricAddFields = {
   workingDirectory: string;
 };
 
-export { type MetricAddFields, type Prompt };
+export { type MetricAddFields };

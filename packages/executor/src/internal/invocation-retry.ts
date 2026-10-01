@@ -14,7 +14,7 @@ const requireValidRetryCount = (retries: number): void => {
 const withAttemptEvidence = (attempt: InvocationAttempt): InvocationAttempt => {
   if (attempt.rawExcerpt !== undefined) return attempt;
   const payload = attempt.status === 'ok' ? JSON.stringify(attempt.raw) : '';
-  return { ...attempt, rawExcerpt: createRawExcerpt(payload), warnings: attempt.warnings ?? [] };
+  return { ...attempt, rawExcerpt: createRawExcerpt(payload) };
 };
 
 /** Summarizes contract issues without obscuring their retry classification. */
@@ -83,5 +83,4 @@ const invokeWithRetries = async (
   }
 };
 
-export { invokeWithRetries, isRetryableInvocationError };
-export type { InvocationAttemptFactory };
+export { invokeWithRetries, type InvocationAttemptFactory };

@@ -1,7 +1,7 @@
 {
   "description": "Rejects timestamps that are not RFC 3339 UTC timestamps with whole seconds.",
   "expect": "invalid",
-  "issue_paths": [["spans", "0", "start_time"]],
+  "issue_paths": ["spans.0.start_time"],
   "input": {
     "schema": "attest.trace",
     "trace_id": "trace-bad-time",

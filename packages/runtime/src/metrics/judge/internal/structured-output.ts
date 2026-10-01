@@ -4,8 +4,21 @@ import {
   type AnyTextAdapter,
   type ChatMiddleware,
 } from '@tanstack/ai';
+import { z } from 'zod';
 
 import { judgeResponseSchema } from '../rubric-prompt.js';
+
+/** SDK finalization codes for structured output the provider returned but that failed to parse. */
+const UNPARSEABLE_RESPONSE_CODES = new Set([
+  'structured-output-parse-failed',
+  'structured-output-validation-failed',
+  'structured-output-missing-result',
+]);
+
+const structuredOutputCompleteSchema = z.object({
+  name: z.literal('structured-output.complete'),
+  value: z.object({ raw: z.string() }),
+});
 
 /** Captures one provider attempt without conflating its evidence with an earlier structured-output retry. */
 type JudgeAttemptObservation = {
@@ -15,16 +28,16 @@ type JudgeAttemptObservation = {
   rawResponse: string | undefined;
 };
 
-/** Defines the narrow SDK invocation seam used to test retry behavior without provider network calls. */
+/** Inputs for one schema-constrained chat call. */
 type StructuredChatRequest = {
   adapter: AnyTextAdapter;
   system: string;
   user: string;
-  abortController: AbortController;
+  signal: AbortSignal;
   observation: JudgeAttemptObservation;
 };
 
-/** Executes one schema-constrained TanStack chat call. */
+/** Executes one schema-constrained chat call; injected by tests to avoid provider network calls. */
 type StructuredChatExecutor = (request: StructuredChatRequest) => Promise<unknown>;
 
 /** Identifies SDK structured-output failures that metric spec §3 permits retrying exactly once. */
@@ -32,42 +45,25 @@ const isUnparseableResponse = (error: unknown): boolean => {
   if (error instanceof StandardSchemaValidationError) {
     return true;
   }
-  if (typeof error === 'object' && error !== null && 'code' in error) {
-    const code = (error as { code?: unknown }).code;
-    return (
-      code === 'structured-output-parse-failed' ||
-      code === 'structured-output-validation-failed' ||
-      code === 'structured-output-missing-result'
-    );
-  }
-
-  const message = error instanceof Error ? error.message : String(error);
-  return /structured output|valid json|parse.*json/i.test(message);
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    typeof error.code === 'string' &&
+    UNPARSEABLE_RESPONSE_CODES.has(error.code)
+  );
 };
 
-/** Captures one attempt's provider bytes and token deltas without exposing provider SDK objects to persistence. */
+/** Captures one attempt's provider bytes and token deltas without exposing SDK objects to persistence. */
 const createRecordMiddleware = (observation: JudgeAttemptObservation): ChatMiddleware => ({
   name: 'attest-judge-record',
   onChunk: (_context, chunk) => {
-    const candidate: unknown = chunk;
-    if (typeof candidate !== 'object' || candidate === null) {
+    if (chunk.type !== 'CUSTOM') {
       return;
     }
-    if (!('type' in candidate) || candidate.type !== 'CUSTOM') {
-      return;
-    }
-    if (!('name' in candidate) || candidate.name !== 'structured-output.complete') {
-      return;
-    }
-    if (
-      !('value' in candidate) ||
-      typeof candidate.value !== 'object' ||
-      candidate.value === null
-    ) {
-      return;
-    }
-    if ('raw' in candidate.value && typeof candidate.value.raw === 'string') {
-      observation.rawResponse = candidate.value.raw;
+    const complete = structuredOutputCompleteSchema.safeParse(chunk);
+    if (complete.success) {
+      observation.rawResponse = complete.data.value.raw;
     }
   },
   onUsage: (_context, providerUsage) => {
@@ -77,24 +73,33 @@ const createRecordMiddleware = (observation: JudgeAttemptObservation): ChatMiddl
   },
 });
 
-/** Keeps the SDK call at an injectable effect boundary while the scoring loop remains deterministic. */
-const executeStructuredChat: StructuredChatExecutor = async (request) =>
-  chat({
-    adapter: request.adapter,
-    systemPrompts: [request.system],
-    messages: [{ role: 'user', content: request.user }],
-    outputSchema: judgeResponseSchema,
-    stream: false,
-    abortController: request.abortController,
-    middleware: [createRecordMiddleware(request.observation)],
-    debug: false,
-  });
+/** Runs the real TanStack structured chat, forwarding the caller's signal to the SDK's controller. */
+const executeStructuredChat: StructuredChatExecutor = async (request) => {
+  const abortController = new AbortController();
+  const forwardAbort = (): void => abortController.abort(request.signal.reason);
+  if (request.signal.aborted) {
+    forwardAbort();
+  }
+  request.signal.addEventListener('abort', forwardAbort, { once: true });
+  try {
+    return await chat({
+      adapter: request.adapter,
+      systemPrompts: [request.system],
+      messages: [{ role: 'user', content: request.user }],
+      outputSchema: judgeResponseSchema,
+      stream: false,
+      abortController,
+      middleware: [createRecordMiddleware(request.observation)],
+      debug: false,
+    });
+  } finally {
+    request.signal.removeEventListener('abort', forwardAbort);
+  }
+};
 
 export {
-  createRecordMiddleware,
   executeStructuredChat,
   isUnparseableResponse,
   type JudgeAttemptObservation,
   type StructuredChatExecutor,
-  type StructuredChatRequest,
 };

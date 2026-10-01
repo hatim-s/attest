@@ -12,7 +12,7 @@ type CaseEnvironment = {
   readFile(path: string): Promise<string>;
   writeFile(path: string, contents: string): Promise<void>;
   /** Cancels and drains run work before admitting bounded final-hook operations. */
-  beginFinalization?(): Promise<void>;
+  beginFinalization(): Promise<void>;
   /** Aborts and drains all admitted work before releasing the environment. */
   dispose(): Promise<void>;
 };

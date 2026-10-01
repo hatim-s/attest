@@ -1,5 +1,4 @@
 import type { Transaction } from 'kysely';
-import { monotonicFactory } from 'ulid';
 
 import {
   canonicalStringify,
@@ -14,9 +13,8 @@ import {
 
 import type { Database } from '../schema.js';
 import { toCaseRecord, toMetricEvaluation } from './row-mapping.js';
+import { createUlid } from './create-ulid.js';
 import { toSpanAttribute } from './span-attribute.js';
-
-const createUlid = monotonicFactory();
 
 /** Aggregates execution and evaluation violations before a database transaction begins. */
 const validateCaseRecordInput = (
@@ -24,18 +22,21 @@ const validateCaseRecordInput = (
   evaluations: StoredMetricEvaluation[],
 ): void => {
   const violations = collectStoredCaseExecutionViolations(execution);
-  if (!Array.isArray(evaluations)) {
-    violations.push('evaluations must be an array');
-  } else {
-    evaluations.forEach((evaluation, index) => {
-      violations.push(
-        ...collectStoredMetricEvaluationViolations(evaluation, `evaluations[${index}]`),
-      );
-    });
-  }
+  evaluations.forEach((evaluation, index) => {
+    violations.push(
+      ...collectStoredMetricEvaluationViolations(evaluation, `evaluations[${index}]`),
+    );
+  });
   if (violations.length > 0) {
     throw new StoreError('INVALID_RECORD', `Invalid case record: ${violations.join('; ')}.`);
   }
+};
+
+const metricOutcomeColumns = (evaluation: StoredMetricEvaluation) => {
+  if (evaluation.status === 'evaluated') {
+    return { score: evaluation.score, pass: Number(evaluation.pass), error_json: null };
+  }
+  return { score: null, pass: null, error_json: canonicalStringify(evaluation.error) };
 };
 
 const executionHash = (
@@ -154,12 +155,10 @@ const recordCaseTransaction = async (
           metric_name: evaluation.metricName,
           kind: evaluation.kind,
           status: evaluation.status,
-          score: evaluation.score ?? null,
-          pass: evaluation.pass === undefined ? null : Number(evaluation.pass),
+          ...metricOutcomeColumns(evaluation),
           rationale: evaluation.rationale ?? null,
           details_json:
             evaluation.details === undefined ? null : canonicalStringify(evaluation.details),
-          error_json: evaluation.error ? canonicalStringify(evaluation.error) : null,
           judge_io_json:
             evaluation.judgeIo === undefined ? null : canonicalStringify(evaluation.judgeIo),
           duration_ms: evaluation.durationMs ?? null,

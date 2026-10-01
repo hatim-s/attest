@@ -1,18 +1,26 @@
 {
   "$schema": "https://turbo.build/schema.json",
-  "globalDependencies": ["tsconfig.base.json", "eslint.config.mjs", ".prettierrc.json"],
+  "globalDependencies": ["tsconfig.base.json"],
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
       "outputs": ["dist/**"]
     },
     "typecheck": {
-      "dependsOn": ["^build"],
-      "inputs": ["src/**", "tsconfig.json", "package.json"]
+      "dependsOn": ["^build"]
     },
     "test": {
       "dependsOn": ["^build"],
       "inputs": ["src/**", "package.json", "$TURBO_ROOT$/packages/schemas/generated/**"]
+    },
+    "test:acceptance": {
+      "dependsOn": ["^build", "build"],
+      "cache": false
+    },
+    "test:fuzz": {
+      "dependsOn": ["^build"],
+      "cache": false,
+      "env": ["FUZZ_ITERATIONS"]
     }
   }
 }

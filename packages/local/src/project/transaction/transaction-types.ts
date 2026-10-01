@@ -42,10 +42,8 @@ type ProjectRenameHint = {
   type: Exclude<ProjectResourceKind, 'project'>;
 };
 
-type ProjectMutationCandidate = ProjectResources;
-
 type ProjectMutationRequest = {
-  candidate: ProjectMutationCandidate;
+  candidate: ProjectResources;
   dryRun?: boolean;
   expectedProjectHash?: string;
   projectRoot: string;
@@ -62,16 +60,12 @@ type ProjectMutationResult = {
 };
 
 export {
-  type FieldChangeKind,
-  type ProjectMutationCandidate,
   type ProjectMutationRequest,
   type ProjectMutationResult,
   type ProjectRenameHint,
   type ProjectResourceKind,
   type SemanticFieldChange,
-  type SemanticOperationKind,
   type SemanticProjectDiff,
   type SemanticProjectOperation,
   type SemanticReference,
-  type SemanticResourceIdentity,
 };

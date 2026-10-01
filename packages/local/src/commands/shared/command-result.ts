@@ -6,11 +6,11 @@ import type {
   ProjectManifest,
   TestCase,
   TestResource,
+  JsonValue,
 } from '@attest/contracts';
 import type { RunRecord, TabularImportResult } from '@attest/core';
 
-import type { NativeAgentConnectionResult } from '../agent/native-agent-adapter/test-native-agent.js';
-import type { JsonValue } from '../../project/canonical-project.js';
+import type { NativeAgentConnectionResult } from '../agent/adapter/test-native-agent.js';
 import type { SemanticProjectOperation } from '../../project/transaction/index.js';
 
 type CommandResult<Operation extends string, Result> = {
@@ -159,24 +159,18 @@ type ApplicationCommandResult =
   | CommandResult<'test-case-show', TestCaseShowResult>;
 
 export {
-  type AgentListItem,
   type AgentTestResult,
   type ApplicationCommandResult,
   type CommandResult,
-  type DatasetListItem,
-  type MetricListItem,
   type MetricTestResult,
   type MutationImportResult,
   type MutationResult,
-  type ProjectCounts,
   type ProjectInitResult,
   type ProjectShowResult,
   type ProjectValidateResult,
   type ResourceListResult,
   type ResourceShowResult,
   type RunListItem,
-  type SharedDatasetPreview,
   type TestCaseListResult,
   type TestCaseShowResult,
-  type TestListItem,
 };

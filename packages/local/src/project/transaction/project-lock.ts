@@ -5,20 +5,28 @@ import { hostname } from 'node:os';
 import { dirname, join } from 'node:path';
 import { promisify } from 'node:util';
 
+import { z } from 'zod';
+
+import { errnoCode } from '../../internal/errno-code.js';
+import { isProcessPresent } from '../../internal/process-presence.js';
+import { syncPath } from '../../internal/sync-path.js';
 import { ProjectTransactionError } from './project-transaction-error.js';
 
 const PROJECT_LOCK_FILE = '.attest/project.lock';
 const PROJECT_LOCK_SCHEMA = 'attest.project-lock';
 const execFileAsync = promisify(execFile);
 
-type ProjectLockMetadata = {
-  created_at: string;
-  hostname: string;
-  owner_token: string;
-  pid: number;
-  process_start_identity: string | null;
-  schema: typeof PROJECT_LOCK_SCHEMA;
-};
+/** The lock file's contents: who owns the project mutation lock and how to prove it is stale. */
+const projectLockSchema = z.object({
+  created_at: z.string(),
+  hostname: z.string(),
+  owner_token: z.string(),
+  pid: z.number().int().positive(),
+  process_start_identity: z.string().nullable(),
+  schema: z.literal(PROJECT_LOCK_SCHEMA),
+});
+
+type ProjectLockMetadata = z.infer<typeof projectLockSchema>;
 
 type ProjectLockInspection =
   | { state: 'absent' }
@@ -34,21 +42,6 @@ type ProjectLockHandle = {
   metadata: ProjectLockMetadata;
   path: string;
   root: string;
-};
-
-const getErrorCode = (error: unknown): string | undefined =>
-  error instanceof Error && 'code' in error && typeof Reflect.get(error, 'code') === 'string'
-    ? (Reflect.get(error, 'code') as string)
-    : undefined;
-
-/** Fsyncs a directory entry after creating or removing lock metadata. */
-const syncDirectory = async (path: string): Promise<void> => {
-  const handle = await open(path, 'r');
-  try {
-    await handle.sync();
-  } finally {
-    await handle.close();
-  }
 };
 
 /** Reads the kernel-observed start identity used to detect PID reuse on macOS and Linux. */
@@ -70,32 +63,8 @@ const parseLockMetadata = (raw: string): ProjectLockMetadata | undefined => {
   } catch {
     return undefined;
   }
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
-    return undefined;
-  }
-  const record = value as Record<string, unknown>;
-  if (
-    record.schema !== PROJECT_LOCK_SCHEMA ||
-    !Number.isSafeInteger(record.pid) ||
-    (record.pid as number) <= 0 ||
-    typeof record.hostname !== 'string' ||
-    typeof record.owner_token !== 'string' ||
-    typeof record.created_at !== 'string' ||
-    (record.process_start_identity !== null && typeof record.process_start_identity !== 'string')
-  ) {
-    return undefined;
-  }
-  return value as ProjectLockMetadata;
-};
-
-const isProcessPresent = (pid: number): boolean => {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error: unknown) {
-    // EPERM proves the process exists even though this user cannot signal it.
-    return getErrorCode(error) === 'EPERM';
-  }
+  const parsed = projectLockSchema.safeParse(value);
+  return parsed.success ? parsed.data : undefined;
 };
 
 /** Classifies the project lock without mutating or stealing it. */
@@ -105,7 +74,7 @@ const inspectProjectLock = async (root: string): Promise<ProjectLockInspection> 
   try {
     raw = await readFile(path, 'utf8');
   } catch (error: unknown) {
-    if (getErrorCode(error) === 'ENOENT') {
+    if (errnoCode(error) === 'ENOENT') {
       return { state: 'absent' };
     }
     throw new ProjectTransactionError('project_locked', 'Could not inspect the project lock.', {
@@ -153,13 +122,14 @@ const inspectProjectLock = async (root: string): Promise<ProjectLockInspection> 
   return { metadata, raw, reason: 'owner process and start identity are live', state: 'live' };
 };
 
+/** Rejects a command because another owner holds the lock; a stale lock is never stolen. */
 const throwForExistingLock = (
   inspection: Exclude<ProjectLockInspection, { state: 'absent' }>,
 ): never => {
   if (inspection.state === 'stale') {
     throw new ProjectTransactionError('project_lock_stale', 'The project lock is stale.', {
       path: PROJECT_LOCK_FILE,
-      hint: 'Preview and explicitly remove the stale lock before retrying.',
+      hint: 'Confirm no Attest process is running, delete `.attest/project.lock`, then rerun the command.',
       details: {
         lock: inspection.metadata,
         lock_state: inspection.state,
@@ -199,7 +169,7 @@ const acquireProjectLock = async (root: string): Promise<ProjectLockHandle> => {
   try {
     handle = await open(path, 'wx', 0o600);
   } catch (error: unknown) {
-    if (getErrorCode(error) === 'EEXIST') {
+    if (errnoCode(error) === 'EEXIST') {
       const inspection = await inspectProjectLock(root);
       if (inspection.state === 'absent') {
         // The owner released between open and inspection; a fresh retry is safe.
@@ -222,7 +192,7 @@ const acquireProjectLock = async (root: string): Promise<ProjectLockHandle> => {
   } finally {
     await handle.close();
   }
-  await syncDirectory(dirname(path));
+  await syncPath(dirname(path));
   return { metadata, path, root };
 };
 
@@ -240,39 +210,7 @@ const releaseProjectLock = async (lock: ProjectLockHandle): Promise<void> => {
     });
   }
   await unlink(lock.path);
-  await syncDirectory(dirname(lock.path));
-};
-
-/** Previews or explicitly removes a lock proven stale without touching recovery journals. */
-const unlockStaleProjectLock = async (
-  root: string,
-  options: { dryRun?: boolean } = {},
-): Promise<ProjectLockMetadata> => {
-  const inspection = await inspectProjectLock(root);
-  if (inspection.state !== 'stale') {
-    if (inspection.state === 'absent') {
-      throw new ProjectTransactionError('project_locked', 'The project has no lock to remove.', {
-        path: PROJECT_LOCK_FILE,
-        details: { lock_state: inspection.state },
-      });
-    }
-    return throwForExistingLock(inspection);
-  }
-  if (options.dryRun === true) {
-    return inspection.metadata;
-  }
-
-  // Re-read before unlinking so a replacement owner can never be removed by a stale preview.
-  const currentRaw = await readFile(join(root, PROJECT_LOCK_FILE), 'utf8');
-  if (currentRaw !== inspection.raw) {
-    throw new ProjectTransactionError('project_locked', 'Project lock changed before removal.', {
-      path: PROJECT_LOCK_FILE,
-      details: { lock_state: 'changed' },
-    });
-  }
-  await unlink(join(root, PROJECT_LOCK_FILE));
-  await syncDirectory(join(root, '.attest'));
-  return inspection.metadata;
+  await syncPath(dirname(lock.path));
 };
 
 export {
@@ -281,8 +219,7 @@ export {
   acquireProjectLock,
   inspectProjectLock,
   releaseProjectLock,
-  unlockStaleProjectLock,
+  throwForExistingLock,
   type ProjectLockHandle,
-  type ProjectLockInspection,
   type ProjectLockMetadata,
 };

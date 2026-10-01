@@ -1,6 +1,6 @@
 # Native agent integrations
 
-Use the native `attest.agent-invocation` envelope when you control the agent process or HTTP endpoint. It is the smallest integration surface: Attest sends one JSON request and expects one JSON response.
+Use the native `attest.agent-invocation` envelope when you control the agent process or HTTP endpoint. Attest sends one JSON request and expects one JSON response, with no mapping config.
 
 ## Copy-paste example
 
@@ -91,7 +91,9 @@ The stored `sandbox` object has this shape:
 
 `image`, `artifacts`, and `artifact_directory` are optional. Omitting `image` selects
 `vercel/sandbox/universal`. `artifact_directory` is required when artifacts are configured and the
-eval does not have worker directories. An `agent test` probe uses its own unique artifact root.
+eval does not have worker directories. `agent test` always requires it when artifacts are configured
+and fails with `project_invalid` otherwise. A probe writes artifacts under
+`<artifact_directory>/<run-id>/connection-test`.
 
 Attest transfers only the regular files named in `files`. Each `source` is a fixed project-relative
 file and each `destination` is its sandbox path. Attest does not expand globs, upload directories,
@@ -172,7 +174,8 @@ Attest sends `POST` with the native request envelope as JSON and requires a nati
 - Foreground commands are argv arrays, not shell programs. Attest does not expand pipes, redirects, command substitutions, or environment variables in argv.
 - `cwd` must be project-relative and resolve inside the project. The child receives a minimal environment plus only values explicitly referenced with repeatable `--env TARGET=SOURCE_ENV`.
 - Never pass credentials as argv literals. They can appear in process listings and command diagnostics. Use `--env` or `--header-env` references.
-- stdout and HTTP bodies are bounded. Unknown response fields are warnings; raw evidence and stderr excerpts are bounded and secret values are redacted before probe output or persistence.
+- stdout and HTTP bodies are bounded. Unknown response fields are warnings. Attest bounds raw evidence and stderr excerpts and redacts secret values before probe output or persistence.
+- Native HTTP endpoints follow the [network rules](./curl-and-http.md#security-and-redaction).
 - A `native_cli` process runs as trusted local code unless its resource opts into Vercel Sandbox.
   Attest supervises and terminates local processes. Vercel-sandboxed processes run remotely in a
   fresh sandbox for each case.
@@ -185,16 +188,9 @@ Probe the exact resource before attaching it to a test:
 attest agent test local-echo --input-file ./probe-input.json --output json
 ```
 
-`--input` accepts one JSON value; strings therefore need JSON quoting, for example `--input '"hello"'`. Ctrl-C or SIGTERM cancels the probe. Attest terminates a foreground process tree and returns stable CLI error `cancelled` with exit code `130`. A deadline returns `invocation_failed` with `details.invocation_code: "timeout"` and exit code `4`.
+`--input` accepts one JSON value, so strings need JSON quoting, for example `--input '"hello"'`. Ctrl-C or SIGTERM cancels the probe and terminates a foreground process tree.
 
 ## Stable errors
 
-Use machine output in automation:
-
-```sh
-attest errors --output json
-attest help agent add --output json
-attest help agent test --output json
-```
-
-Transport failures use stable inner codes such as `spawn_failed`, `nonzero_exit`, `timeout`, `output_cap_exceeded`, `network`, and `invalid_envelope`. `agent test --output json` exposes that value at `details.invocation_code`; do not parse human messages.
+See [Agent transport failures](../reference/errors.md#agent-transport-failures) for the
+`details.invocation_code` values.

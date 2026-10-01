@@ -66,17 +66,18 @@ describe('WebSocket connection bounds', () => {
   it('ignores buffered text after connection failure while completing socket close', async () => {
     const socket = new ControlledSocket();
     const events: string[] = [];
-    new WebSocketConnection(
-      socket,
-      1_024,
-      {
+    new WebSocketConnection({
+      socket: socket,
+      maximumMessageBytes: 1_024,
+      callbacks: {
         onClose: () => events.push('close'),
         onFailure: () => events.push('failure'),
         onPong: () => undefined,
         onText: (text) => events.push(`text:${text}`),
       },
-      Buffer.alloc(0),
-    );
+      initialData: Buffer.alloc(0),
+      maximumPendingWriteBytes: 1_024,
+    });
 
     socket.emit('error', new Error('connection lost'));
     socket.receive(serverFrame(0x1, true, 'late'));
@@ -89,12 +90,13 @@ describe('WebSocket connection bounds', () => {
     const boundarySocket = new ControlledSocket();
     const boundaryTexts: string[] = [];
     const boundaryFailures: Array<{ code: string }> = [];
-    new WebSocketConnection(
-      boundarySocket,
-      10,
-      callbacks(boundaryTexts, boundaryFailures),
-      Buffer.alloc(0),
-    );
+    new WebSocketConnection({
+      socket: boundarySocket,
+      maximumMessageBytes: 10,
+      callbacks: callbacks(boundaryTexts, boundaryFailures),
+      initialData: Buffer.alloc(0),
+      maximumPendingWriteBytes: 10,
+    });
     boundarySocket.receive(serverFrame(0x1, false, '123456'));
     boundarySocket.receive(serverFrame(0x0, true, '7890'));
     expect(boundaryTexts).toEqual(['1234567890']);
@@ -103,12 +105,13 @@ describe('WebSocket connection bounds', () => {
     const oversizedSocket = new ControlledSocket();
     const oversizedTexts: string[] = [];
     const oversizedFailures: Array<{ code: string }> = [];
-    new WebSocketConnection(
-      oversizedSocket,
-      10,
-      callbacks(oversizedTexts, oversizedFailures),
-      Buffer.alloc(0),
-    );
+    new WebSocketConnection({
+      socket: oversizedSocket,
+      maximumMessageBytes: 10,
+      callbacks: callbacks(oversizedTexts, oversizedFailures),
+      initialData: Buffer.alloc(0),
+      maximumPendingWriteBytes: 10,
+    });
     oversizedSocket.receive(serverFrame(0x1, false, '123456'));
     oversizedSocket.receive(serverFrame(0x0, true, '78901'));
     expect(oversizedTexts).toEqual([]);
@@ -118,13 +121,13 @@ describe('WebSocket connection bounds', () => {
 
   it('serializes writes and interrupts drain waits on cancellation and close', async () => {
     const serializedSocket = new ControlledSocket();
-    const connection = new WebSocketConnection(
-      serializedSocket,
-      1_024,
-      callbacks([], []),
-      Buffer.alloc(0),
-      1_024,
-    );
+    const connection = new WebSocketConnection({
+      socket: serializedSocket,
+      maximumMessageBytes: 1_024,
+      callbacks: callbacks([], []),
+      initialData: Buffer.alloc(0),
+      maximumPendingWriteBytes: 1_024,
+    });
     const first = connection.sendText('a'.repeat(64));
     const second = connection.sendText('b'.repeat(32));
     await advance();
@@ -138,13 +141,13 @@ describe('WebSocket connection bounds', () => {
     connection.destroy();
 
     const cancellationSocket = new ControlledSocket();
-    const cancellable = new WebSocketConnection(
-      cancellationSocket,
-      1_024,
-      callbacks([], []),
-      Buffer.alloc(0),
-      1_024,
-    );
+    const cancellable = new WebSocketConnection({
+      socket: cancellationSocket,
+      maximumMessageBytes: 1_024,
+      callbacks: callbacks([], []),
+      initialData: Buffer.alloc(0),
+      maximumPendingWriteBytes: 1_024,
+    });
     const controller = new AbortController();
     const cancelledWrite = cancellable.sendText('c'.repeat(64), controller.signal);
     await advance();
@@ -154,13 +157,13 @@ describe('WebSocket connection bounds', () => {
     cancellable.destroy();
 
     const closingSocket = new ControlledSocket();
-    const closing = new WebSocketConnection(
-      closingSocket,
-      1_024,
-      callbacks([], []),
-      Buffer.alloc(0),
-      1_024,
-    );
+    const closing = new WebSocketConnection({
+      socket: closingSocket,
+      maximumMessageBytes: 1_024,
+      callbacks: callbacks([], []),
+      initialData: Buffer.alloc(0),
+      maximumPendingWriteBytes: 1_024,
+    });
     const interruptedWrite = closing.sendText('d'.repeat(64));
     await advance();
     const close = closing.close(10);

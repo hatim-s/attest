@@ -4,10 +4,8 @@ import {
   projectManifestSchema,
   projectResourcesSchema,
   testResourceSchema,
-  type AgentResource,
-  type MetricResource,
-  type TestResource,
 } from '@attest/contracts';
+import type { z } from 'zod';
 
 import { hashProjectManifest } from '../canonical-project.js';
 import {
@@ -17,7 +15,8 @@ import {
 } from '../discover-project.js';
 import { ProjectLoadError } from '../project-errors.js';
 import { loadDataset } from './dataset-loader.js';
-import { loadJsonResource, toJsonPointer } from './source-loader.js';
+import { toJsonPointer } from '../../internal/json-pointer.js';
+import { loadJsonResource } from './source-loader.js';
 import type {
   LoadedDatasetResource,
   LoadedJsonResource,
@@ -25,43 +24,47 @@ import type {
   ProjectContentHashes,
 } from './types.js';
 
+type ResourceSources = {
+  agents: readonly string[];
+  datasets: readonly { data: string; metadata: string }[];
+  metrics: readonly string[];
+  tests: readonly string[];
+};
+
+/** Maps an aggregate schema issue path back to the authored file that holds the bad value. */
 const sourceForProjectIssue = (
   path: readonly PropertyKey[],
-  sources: {
-    agents: readonly string[];
-    datasets: readonly { data: string; metadata: string }[];
-    metrics: readonly string[];
-    tests: readonly string[];
-  },
+  sources: ResourceSources,
 ): { path: PropertyKey[]; source: string } => {
   const [collection, rawIndex, field, ...remaining] = path;
   if (collection === 'project') return { path: path.slice(1), source: PROJECT_MANIFEST_FILE };
   const index = typeof rawIndex === 'number' ? rawIndex : -1;
+  const fieldPath = field === undefined ? remaining : [field, ...remaining];
   if (collection === 'datasets') {
     const datasetSource = sources.datasets[index];
-    const useMetadata = field === 'metadata';
-    return {
-      path: useMetadata ? remaining : field === undefined ? remaining : [field, ...remaining],
-      source:
-        datasetSource === undefined
-          ? PROJECT_MANIFEST_FILE
-          : useMetadata
-            ? datasetSource.metadata
-            : datasetSource.data,
-    };
+    if (field === 'metadata') {
+      return { path: remaining, source: datasetSource?.metadata ?? PROJECT_MANIFEST_FILE };
+    }
+    return { path: fieldPath, source: datasetSource?.data ?? PROJECT_MANIFEST_FILE };
   }
   const collectionSources =
-    collection === 'agents'
-      ? sources.agents
-      : collection === 'tests'
-        ? sources.tests
-        : collection === 'metrics'
-          ? sources.metrics
-          : undefined;
-  return {
-    path: field === undefined ? remaining : [field, ...remaining],
-    source: collectionSources?.[index] ?? PROJECT_MANIFEST_FILE,
-  };
+    collection === 'agents' || collection === 'metrics' || collection === 'tests'
+      ? sources[collection]
+      : undefined;
+  return { path: fieldPath, source: collectionSources?.[index] ?? PROJECT_MANIFEST_FILE };
+};
+
+/** Loads each manifest entry in order; failures stay in each result's diagnostics. */
+const loadJsonResources = async <Value>(
+  root: string,
+  entries: readonly { content_hash: string; path: string }[],
+  schema: z.ZodType<Value>,
+): Promise<LoadedJsonResource<Value>[]> => {
+  const loads: LoadedJsonResource<Value>[] = [];
+  for (const entry of entries) {
+    loads.push(await loadJsonResource(root, entry.path, entry.content_hash, schema));
+  }
+  return loads;
 };
 
 /** Loads the complete project read model and rejects aggregate source-safe diagnostics. */
@@ -81,28 +84,22 @@ const loadProject = async (options: DiscoverProjectOptions = {}): Promise<Loaded
     );
   }
 
-  const agentLoads: LoadedJsonResource<AgentResource>[] = [];
-  for (const entry of manifest.value.resources.agents) {
-    agentLoads.push(
-      await loadJsonResource(discovered.root, entry.path, entry.content_hash, agentResourceSchema),
-    );
-  }
-  const testLoads: LoadedJsonResource<TestResource>[] = [];
-  for (const entry of manifest.value.resources.tests) {
-    testLoads.push(
-      await loadJsonResource(discovered.root, entry.path, entry.content_hash, testResourceSchema),
-    );
-  }
+  const { resources } = manifest.value;
+  const agentLoads = await loadJsonResources(
+    discovered.root,
+    resources.agents,
+    agentResourceSchema,
+  );
+  const testLoads = await loadJsonResources(discovered.root, resources.tests, testResourceSchema);
   const datasetLoads: LoadedDatasetResource[] = [];
-  for (const entry of manifest.value.resources.datasets) {
+  for (const entry of resources.datasets) {
     datasetLoads.push(await loadDataset(discovered.root, entry));
   }
-  const metricLoads: LoadedJsonResource<MetricResource>[] = [];
-  for (const entry of manifest.value.resources.metrics) {
-    metricLoads.push(
-      await loadJsonResource(discovered.root, entry.path, entry.content_hash, metricResourceSchema),
-    );
-  }
+  const metricLoads = await loadJsonResources(
+    discovered.root,
+    resources.metrics,
+    metricResourceSchema,
+  );
 
   const diagnostics = [
     ...agentLoads.flatMap(({ diagnostics: issues }) => issues),

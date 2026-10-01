@@ -1,4 +1,3 @@
-import type { VercelSandbox as VercelSandboxResource } from '@attest/contracts';
 import type { Sandbox as SandboxSdk } from '@vercel/sandbox';
 
 type VercelSandboxInvocation = {
@@ -24,15 +23,8 @@ type VercelSandboxCaseOptions = {
   cleanupTimeoutMs?: number;
 };
 
-type VercelSandboxCreateParams = {
-  image: string;
-  persistent: false;
-  timeout: number;
-  signal?: AbortSignal;
-  token?: string;
-  teamId?: string;
-  projectId?: string;
-};
+/** The SDK's own creation parameters, so the injectable factory cannot drift from the SDK. */
+type VercelSandboxCreateParams = NonNullable<Parameters<typeof SandboxSdk.create>[0]>;
 
 type VercelSandboxSdk = Pick<SandboxSdk, 'readFile' | 'runCommand' | 'stop' | 'writeFiles'>;
 
@@ -43,6 +35,5 @@ export type {
   VercelSandboxCreateParams,
   VercelSandboxFactory,
   VercelSandboxInvocation,
-  VercelSandboxResource,
   VercelSandboxSdk,
 };

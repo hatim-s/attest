@@ -15,7 +15,11 @@ type AttestMetricErrorCode = Extract<
 /** Carries optional JSON evidence while preserving the shared AttestError cause chain. */
 type AttestMetricErrorOptions = ErrorOptions & { details?: JsonValue };
 
-/** Raised for defensive invariant violations inside metric evaluation because config is validated upstream. */
+/**
+ * Thrown inside metric evaluation for failures that end one metric: invalid paths or schemas that
+ * bypassed upstream validation, judge provider errors, timeouts, and cancellation. The dispatcher
+ * turns it into a metric error result, so it never aborts the rest of the case.
+ */
 class AttestMetricError extends AttestError {
   declare readonly code: AttestMetricErrorCode;
   readonly details: JsonValue | undefined;
@@ -26,4 +30,4 @@ class AttestMetricError extends AttestError {
   }
 }
 
-export { AttestMetricError, type AttestMetricErrorCode, type AttestMetricErrorOptions };
+export { AttestMetricError, type AttestMetricErrorCode };

@@ -1,10 +1,10 @@
-import type { ButtonHTMLAttributes, HTMLAttributes, ReactNode } from 'react';
+import type { ButtonHTMLAttributes, ReactNode } from 'react';
 
 type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
   tone?: 'primary' | 'secondary' | 'ghost';
 };
 
-/** Shared shadcn-style button primitive with consistent focus and disabled states. */
+/** Button with tone classes. Defaults to `type="button"` so it never submits a form. */
 const Button = ({ className = '', tone = 'secondary', ...props }: ButtonProps) => (
   <button
     className={`button button-${tone} ${className}`}
@@ -13,30 +13,25 @@ const Button = ({ className = '', tone = 'secondary', ...props }: ButtonProps) =
   />
 );
 
-/** Shared surface primitive used for summary and detail groupings. */
-const Card = ({ className = '', ...props }: HTMLAttributes<HTMLDivElement>) => (
-  <div className={`card ${className}`} {...props} />
-);
-
 type BadgeProps = { children: ReactNode; tone?: string };
 
-/** Renders compact semantic status labels without coupling callers to color classes. */
+/** Status label styled by the `badge-<tone>` class. */
 const Badge = ({ children, tone = 'neutral' }: BadgeProps) => (
   <span className={`badge badge-${tone}`}>{children}</span>
 );
 
-/** Provides a consistent full-width async failure state. */
+/** Full-width alert for a failed query. */
 const ErrorNotice = ({ error }: { error: unknown }) => (
   <div className="error-notice" role="alert">
     {error instanceof Error ? error.message : 'Something went wrong.'}
   </div>
 );
 
-/** Provides a compact loading state announced to assistive technologies. */
+/** Loading indicator announced as a status region. */
 const Loading = ({ label = 'Loading' }: { label?: string }) => (
   <div className="loading" role="status">
     <span className="loading-dot" /> {label}
   </div>
 );
 
-export { Badge, Button, Card, ErrorNotice, Loading, type ButtonProps };
+export { Badge, Button, ErrorNotice, Loading };

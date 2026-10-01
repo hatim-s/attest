@@ -1,6 +1,7 @@
 import { lstat, realpath, stat } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
 
+import { errnoCode } from '../internal/errno-code.js';
 import { ProjectLoadError, type ProjectDiagnostic } from './project-errors.js';
 
 const PROJECT_MANIFEST_FILE = 'attest.project.json' as const;
@@ -14,11 +15,6 @@ type DiscoveredProject = {
   manifestPath: string;
   root: string;
 };
-
-const getErrorCode = (error: unknown): string | undefined =>
-  error instanceof Error && 'code' in error && typeof Reflect.get(error, 'code') === 'string'
-    ? (Reflect.get(error, 'code') as string)
-    : undefined;
 
 const missingDiagnostic = (source: string, message: string): ProjectDiagnostic => ({
   code: 'source_missing',
@@ -44,7 +40,7 @@ const resolveDirectory = async (directory: string, source: string): Promise<stri
     if (error instanceof ProjectLoadError) {
       throw error;
     }
-    const code = getErrorCode(error);
+    const code = errnoCode(error);
     const diagnostic =
       code === 'ENOENT'
         ? missingDiagnostic(source, 'directory does not exist')
@@ -65,7 +61,7 @@ const pathExists = async (path: string, source: string): Promise<boolean> => {
     await lstat(path);
     return true;
   } catch (error: unknown) {
-    if (getErrorCode(error) === 'ENOENT') {
+    if (errnoCode(error) === 'ENOENT') {
       return false;
     }
     throw new ProjectLoadError('project_read_failed', 'Could not inspect project path.', [
@@ -142,9 +138,4 @@ const discoverProject = async (
   ]);
 };
 
-export {
-  PROJECT_MANIFEST_FILE,
-  discoverProject,
-  type DiscoverProjectOptions,
-  type DiscoveredProject,
-};
+export { PROJECT_MANIFEST_FILE, discoverProject, type DiscoverProjectOptions };

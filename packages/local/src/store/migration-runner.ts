@@ -7,10 +7,6 @@ interface MigrationVersionRow {
   version: number;
 }
 
-interface TableColumnRow {
-  name: string;
-}
-
 const createMigrationTableSql = `
   CREATE TABLE IF NOT EXISTS schema_migrations (
     version INTEGER PRIMARY KEY,
@@ -24,17 +20,6 @@ const readAppliedVersions = async (handle: SqliteHandle): Promise<number[]> => {
     .prepare('SELECT version FROM schema_migrations ORDER BY version')
     .all()) as MigrationVersionRow[];
   return rows.map((row) => Number(row.version));
-};
-
-/** Rejects the pre-latest runs table that shared this schema version number. */
-const assertCurrentLayout = async (handle: SqliteHandle): Promise<void> => {
-  const columns = (await handle.prepare('PRAGMA table_info(runs)').all()) as TableColumnRow[];
-  if (!columns.some((column) => column.name === 'schema_id')) {
-    throw new StoreError(
-      'SCHEMA_OUTDATED',
-      'Run store uses an unsupported pre-latest layout; archive or remove .attest/runs.db and rerun.',
-    );
-  }
 };
 
 /** Verifies an existing store schema without creating tables or applying migrations. */
@@ -67,10 +52,9 @@ const validateReadableSchema = async (handle: SqliteHandle): Promise<void> => {
       `Run store schema version ${newestAppliedVersion} is older than supported version ${latestKnownVersion}; open it with a compatible attest writer first.`,
     );
   }
-  await assertCurrentLayout(handle);
 };
 
-/** Applies numbered SQL atomically and rejects databases from newer attest versions (PLAN 1S.2). */
+/** Applies numbered SQL atomically and rejects databases from newer attest versions. */
 const migrateToLatest = async (handle: SqliteHandle): Promise<void> => {
   await handle.exec(createMigrationTableSql);
   const appliedVersions = await readAppliedVersions(handle);
@@ -101,7 +85,6 @@ const migrateToLatest = async (handle: SqliteHandle): Promise<void> => {
       throw error;
     }
   }
-  await assertCurrentLayout(handle);
 };
 
 export { migrateToLatest, validateReadableSchema };

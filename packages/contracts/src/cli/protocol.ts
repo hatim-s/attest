@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 import { metricPresetSchema } from '../metric/presets.js';
-import { sha256Schema } from '../project/shared.js';
+import { jsonValueSchema, sha256Schema } from '../project/shared.js';
 import {
   CLI_ERROR_CATALOG_SCHEMA_ID,
   CLI_EVENT_SCHEMA_ID,
@@ -9,26 +9,13 @@ import {
   CLI_RESULT_SCHEMA_ID,
 } from '../schema/identifiers.js';
 
-const jsonValueSchema = z.json();
 const cliCommandSchema = z
   .string()
   .regex(/^[a-z][a-z0-9-]*(?:\.[a-z][a-z0-9-]*)*$/, 'must be a dotted lowercase command path');
 const cliPathSchema = z.string().min(1);
-const cliExitCodeSchema = z.union([
-  z.literal(0),
-  z.literal(1),
-  z.literal(2),
-  z.literal(3),
-  z.literal(4),
-  z.literal(130),
-]);
-const cliFailureExitCodeSchema = z.union([
-  z.literal(1),
-  z.literal(2),
-  z.literal(3),
-  z.literal(4),
-  z.literal(130),
-]);
+const cliFailureExitCodes = [1, 2, 3, 4, 130] as const;
+const cliFailureExitCodeSchema = z.literal(cliFailureExitCodes);
+const cliExitCodeSchema = z.literal([0, ...cliFailureExitCodes]);
 
 /** Carries a stable non-fatal diagnostic alongside a successful result. */
 const cliWarningSchema = z.strictObject({
@@ -103,40 +90,24 @@ const cliHelpOptionSchema = z.strictObject({
   implies: z.array(z.string().min(1)),
 });
 
-type CliHelpCommand = {
-  path: string[];
-  name: string;
-  summary: string;
-  usage: string;
-  arguments: z.infer<typeof cliHelpArgumentSchema>[];
-  options: z.infer<typeof cliHelpOptionSchema>[];
-  subcommands: CliHelpCommand[];
-  aliases: string[];
-  alias_for: string | null;
-  request_schema: string | null;
-  examples: string[];
-  constraints: string[];
-  presets?: z.infer<typeof metricPresetSchema>[];
-};
-
 /** Recursively describes one command and every currently registered child command. */
-const cliHelpCommandSchema: z.ZodType<CliHelpCommand> = z.lazy(() =>
-  z.strictObject({
-    path: z.array(z.string().min(1)),
-    name: z.string().min(1),
-    summary: z.string(),
-    usage: z.string().min(1),
-    arguments: z.array(cliHelpArgumentSchema),
-    options: z.array(cliHelpOptionSchema),
-    subcommands: z.array(cliHelpCommandSchema),
-    aliases: z.array(z.string().min(1)),
-    alias_for: cliCommandSchema.nullable(),
-    request_schema: z.string().min(1).nullable(),
-    examples: z.array(z.string().min(1)),
-    constraints: z.array(z.string().min(1)),
-    presets: z.array(metricPresetSchema).optional(),
-  }),
-);
+const cliHelpCommandSchema = z.strictObject({
+  path: z.array(z.string().min(1)),
+  name: z.string().min(1),
+  summary: z.string(),
+  usage: z.string().min(1),
+  arguments: z.array(cliHelpArgumentSchema),
+  options: z.array(cliHelpOptionSchema),
+  get subcommands(): z.ZodArray<typeof cliHelpCommandSchema> {
+    return z.array(cliHelpCommandSchema);
+  },
+  aliases: z.array(z.string().min(1)),
+  alias_for: cliCommandSchema.nullable(),
+  request_schema: z.string().min(1).nullable(),
+  examples: z.array(z.string().min(1)),
+  constraints: z.array(z.string().min(1)),
+  presets: z.array(metricPresetSchema).optional(),
+});
 
 /** Defines the command tree carried by a successful help result. */
 const cliHelpSchema = z.strictObject({
@@ -168,6 +139,7 @@ type CliExitCode = z.infer<typeof cliExitCodeSchema>;
 type CliFailureResult = z.infer<typeof cliFailureResultSchema>;
 type CliHelp = z.infer<typeof cliHelpSchema>;
 type CliHelpArgument = z.infer<typeof cliHelpArgumentSchema>;
+type CliHelpCommand = z.infer<typeof cliHelpCommandSchema>;
 type CliHelpOption = z.infer<typeof cliHelpOptionSchema>;
 type CliResult = z.infer<typeof cliResultSchema>;
 type CliSuccessResult = z.infer<typeof cliSuccessResultSchema>;

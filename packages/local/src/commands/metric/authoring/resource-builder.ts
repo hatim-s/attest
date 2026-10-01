@@ -8,19 +8,21 @@ import {
 import { z } from 'zod';
 
 import { LocalError } from '../../../errors/index.js';
-import { parseArgvJson, parseDuration } from '../../agent/authoring/index.js';
+import { schemaIssueDiagnostics } from '../../../internal/schema-issue-diagnostics.js';
+import { parseJsonText } from '../../../internal/source-text.js';
+import { parseArgvJson, parseDuration } from '../../agent/authoring/input-parsers.js';
 import {
   parseAssertionJson,
   parseAttributes,
+  parseChoice,
   parseFiniteNumber,
   parseJsonValue,
   parseNonnegativeInteger,
   parsePathValueMatchers,
-  parseSecretBindings,
+  parseOptionalSecretBindings,
   readExclusiveText,
   requireValue,
 } from './value-parsers.js';
-import { parseJson, requestDiagnostics } from './source.js';
 import type { MetricAddFields } from './types.js';
 import { assertSafeMetricResource } from './validation.js';
 
@@ -70,12 +72,12 @@ const jsonSchemaSchema = z.union([z.boolean(), z.record(z.string(), z.json())]);
 
 const parseJsonSchema = (value: string): z.infer<typeof jsonSchemaSchema> => {
   const parsed = jsonSchemaSchema.safeParse(
-    parseJson(value, '--json-schema', 'Pass a JSON Schema object or boolean.'),
+    parseJsonText(value, { path: '--json-schema', hint: 'Pass a JSON Schema object or boolean.' }),
   );
   if (!parsed.success) {
     throw new LocalError('cli_usage', 'JSON Schema must be an object or boolean.', {
       path: '--json-schema',
-      details: { diagnostics: requestDiagnostics(parsed.error.issues) },
+      details: { diagnostics: schemaIssueDiagnostics(parsed.error.issues) },
     });
   }
   return parsed.data;
@@ -108,6 +110,40 @@ const assertOnlyFields = (
 const allowedFields = (
   ...values: Array<keyof MetricAddFields>
 ): ReadonlySet<keyof MetricAddFields> => new Set(values);
+
+const SPAN_KINDS = ['agent', 'llm', 'tool', 'retrieval', 'other'] as const;
+const HTTP_METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'] as const;
+
+const ASSERTION_PRESET_FIELDS: Readonly<
+  Record<
+    Exclude<MetricPresetId, 'command' | 'http' | 'judge-rubric'>,
+    ReadonlySet<keyof MetricAddFields>
+  >
+> = {
+  'output-equals': allowedFields('path', 'preset', 'value'),
+  'output-contains': allowedFields('path', 'preset', 'value'),
+  'output-schema': allowedFields('jsonSchema', 'jsonSchemaFile', 'path', 'preset'),
+  'tool-called': allowedFields(
+    'argContains',
+    'argEquals',
+    'argExists',
+    'count',
+    'preset',
+    'tool',
+    'toolStatus',
+  ),
+  'tool-order': allowedFields('order', 'preset'),
+  'no-tool-errors': allowedFields('preset'),
+  'trace-span': allowedFields(
+    'attribute',
+    'count',
+    'order',
+    'preset',
+    'spanKind',
+    'spanName',
+    'spanStatus',
+  ),
+};
 
 const buildAssertionDefinition = async (
   fields: MetricAddFields,
@@ -172,7 +208,7 @@ const buildAssertionDefinition = async (
               name: requireValue(fields.tool, '--tool'),
               ...(fields.toolStatus === undefined
                 ? {}
-                : { status: fields.toolStatus as 'error' | 'ok' }),
+                : { status: parseChoice(fields.toolStatus, ['ok', 'error'], '--tool-status') }),
               ...(fields.count === undefined
                 ? {}
                 : { count: parseNonnegativeInteger(fields.count, '--count') }),
@@ -201,9 +237,13 @@ const buildAssertionDefinition = async (
     case 'trace-span': {
       const attributes = parseAttributes(fields.attribute);
       const filter = {
-        ...(fields.spanKind === undefined ? {} : { kind: fields.spanKind as 'agent' }),
+        ...(fields.spanKind === undefined
+          ? {}
+          : { kind: parseChoice(fields.spanKind, SPAN_KINDS, '--span-kind') }),
         ...(fields.spanName === undefined ? {} : { name: fields.spanName }),
-        ...(fields.spanStatus === undefined ? {} : { status: fields.spanStatus as 'error' | 'ok' }),
+        ...(fields.spanStatus === undefined
+          ? {}
+          : { status: parseChoice(fields.spanStatus, ['ok', 'error'], '--span-status') }),
         ...(attributes === undefined ? {} : { attributes }),
       };
       return {
@@ -256,13 +296,12 @@ const createMetricResource = async (fields: MetricAddFields): Promise<MetricReso
     };
   } else if (fields.preset === 'command') {
     assertOnlyFields(fields, allowedFields('argvJson', 'cwd', 'env', 'preset', 'timeout'));
+    const env = parseOptionalSecretBindings(fields.env, '--env');
     definition = {
       kind: 'exec',
       argv: parseArgvJson(requireValue(fields.argvJson, '--argv-json')),
       ...(fields.cwd === undefined ? {} : { cwd: fields.cwd }),
-      ...(parseSecretBindings(fields.env, '--env') === undefined
-        ? {}
-        : { env: parseSecretBindings(fields.env, '--env') }),
+      ...(env === undefined ? {} : { env }),
       ...(fields.timeout === undefined ? {} : { timeout_ms: parseDuration(fields.timeout) }),
     };
   } else if (fields.preset === 'http') {
@@ -282,17 +321,15 @@ const createMetricResource = async (fields: MetricAddFields): Promise<MetricReso
         'url',
       ),
     );
+    const headers = parseOptionalSecretBindings(fields.headerEnv, '--header-env');
+    const query = parseOptionalSecretBindings(fields.queryEnv, '--query-env');
     definition = {
       kind: 'http',
       request: {
         url: requireValue(fields.url, '--url'),
-        method: (fields.httpMethod ?? 'POST') as 'POST',
-        ...(parseSecretBindings(fields.headerEnv, '--header-env') === undefined
-          ? {}
-          : { headers: parseSecretBindings(fields.headerEnv, '--header-env') }),
-        ...(parseSecretBindings(fields.queryEnv, '--query-env') === undefined
-          ? {}
-          : { query: parseSecretBindings(fields.queryEnv, '--query-env') }),
+        method: parseChoice(fields.httpMethod ?? 'POST', HTTP_METHODS, '--http-method'),
+        ...(headers === undefined ? {} : { headers }),
+        ...(query === undefined ? {} : { query }),
         ...(fields.bodyJson === undefined
           ? {}
           : { body: parseJsonValue(fields.bodyJson, '--body-json') }),
@@ -308,35 +345,7 @@ const createMetricResource = async (fields: MetricAddFields): Promise<MetricReso
       ...(fields.timeout === undefined ? {} : { timeout_ms: parseDuration(fields.timeout) }),
     };
   } else if (fields.preset !== undefined) {
-    const presetFields: Record<
-      Exclude<MetricPresetId, 'command' | 'http' | 'judge-rubric'>,
-      ReadonlySet<keyof MetricAddFields>
-    > = {
-      'output-equals': allowedFields('path', 'preset', 'value'),
-      'output-contains': allowedFields('path', 'preset', 'value'),
-      'output-schema': allowedFields('jsonSchema', 'jsonSchemaFile', 'path', 'preset'),
-      'tool-called': allowedFields(
-        'argContains',
-        'argEquals',
-        'argExists',
-        'count',
-        'preset',
-        'tool',
-        'toolStatus',
-      ),
-      'tool-order': allowedFields('order', 'preset'),
-      'no-tool-errors': allowedFields('preset'),
-      'trace-span': allowedFields(
-        'attribute',
-        'count',
-        'order',
-        'preset',
-        'spanKind',
-        'spanName',
-        'spanStatus',
-      ),
-    };
-    assertOnlyFields(fields, presetFields[fields.preset]);
+    assertOnlyFields(fields, ASSERTION_PRESET_FIELDS[fields.preset]);
     definition = await buildAssertionDefinition(fields);
   } else {
     const thresholds = [fields.lt, fields.lte, fields.gt, fields.gte].filter(
@@ -391,7 +400,7 @@ const createMetricResource = async (fields: MetricAddFields): Promise<MetricReso
   });
   if (!parsed.success) {
     throw new LocalError('cli_usage', 'Metric values do not match the resource schema.', {
-      details: { diagnostics: requestDiagnostics(parsed.error.issues) },
+      details: { diagnostics: schemaIssueDiagnostics(parsed.error.issues) },
     });
   }
   assertSafeMetricResource(parsed.data);

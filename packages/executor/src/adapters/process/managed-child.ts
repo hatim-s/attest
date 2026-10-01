@@ -1,6 +1,9 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import type { Readable } from 'node:stream';
+
 import { AgentInvocationError } from '../../errors.js';
 import {
+  identityKey,
   killProcessTree,
   listDescendantProcesses,
   type ProcessIdentity,
@@ -17,7 +20,7 @@ type ProcessExit = { code: number | null; signal: NodeJS.Signals | null };
 
 /** Owns one detached process group and bounded stderr evidence for a run-scoped adapter. */
 class ManagedChild {
-  readonly child: ChildProcessWithoutNullStreams;
+  private readonly child: ChildProcessWithoutNullStreams;
   readonly exit: Promise<ProcessExit>;
   private readonly stderrChunks: Buffer[] = [];
   private stderrBytes = 0;
@@ -73,6 +76,26 @@ class ManagedChild {
     return managed;
   }
 
+  /** Agent stdout, where run-scoped adapters read protocol frames. */
+  get stdout(): Readable {
+    return this.child.stdout;
+  }
+
+  /** Agent stderr, for readiness patterns; bounded evidence is kept separately. */
+  get stderr(): Readable {
+    return this.child.stderr;
+  }
+
+  /** Exit code after a normal exit; null while running or after a signal. */
+  get exitCode(): number | null {
+    return this.child.exitCode;
+  }
+
+  /** False once the process exited or was killed by a signal. */
+  get running(): boolean {
+    return this.child.exitCode === null && this.child.signalCode === null;
+  }
+
   /** Writes one complete protocol frame while making backpressure cancellation-safe. */
   async writeLine(value: unknown, signal?: AbortSignal): Promise<void> {
     if (signal?.aborted === true) {
@@ -124,18 +147,8 @@ class ManagedChild {
     const processId = this.child.pid;
     if (processId === undefined) return;
     const discovered = await listDescendantProcesses(processId);
-    const retained = new Map(
-      this.descendants.map((identity) => [
-        `${String(identity.processId)}\u0000${identity.startedAt}\u0000${identity.command}`,
-        identity,
-      ]),
-    );
-    for (const identity of discovered) {
-      retained.set(
-        `${String(identity.processId)}\u0000${identity.startedAt}\u0000${identity.command}`,
-        identity,
-      );
-    }
+    const retained = new Map(this.descendants.map((identity) => [identityKey(identity), identity]));
+    for (const identity of discovered) retained.set(identityKey(identity), identity);
     // Graceful shutdown can reparent descendants; never discard the pre-shutdown snapshot.
     this.descendants = [...retained.values()];
   }
@@ -153,7 +166,7 @@ class ManagedChild {
     return killProcessTree(this.child, {
       graceMs,
       initialDescendants: this.descendants,
-      signalProcessGroup: this.child.exitCode === null && this.child.signalCode === null,
+      signalProcessGroup: this.running,
     });
   }
 }

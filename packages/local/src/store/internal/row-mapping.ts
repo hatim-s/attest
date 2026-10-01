@@ -32,7 +32,7 @@ const parseRequiredJson = <Value>(serialized: string, field: string): Value => {
   return value;
 };
 
-/** Restores a public run record from its initial schema row representation (PLAN 1S.3). */
+/** Restores a public run record from its initial schema row representation. */
 const toRunRecord = (row: RunsTable): RunRecord => ({
   id: row.id,
   createdAt: row.created_at,
