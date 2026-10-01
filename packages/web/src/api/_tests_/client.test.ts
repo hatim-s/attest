@@ -70,3 +70,18 @@ describe('static report data client', () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 });
+
+describe('HTTP dashboard client', () => {
+  it.each(['runs', 'items'])('rejects an object in the %s list field', async (field) => {
+    vi.stubGlobal('window', {});
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => Promise.resolve({ ok: true, json: () => Promise.resolve({ [field]: {} }) })),
+    );
+    const { listCases, listRuns } = await import('../client.js');
+
+    await expect(field === 'runs' ? listRuns() : listCases(run.id)).rejects.toThrow(
+      'was malformed',
+    );
+  });
+});
