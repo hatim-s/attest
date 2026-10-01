@@ -211,7 +211,7 @@ describe('host HTTP transports', () => {
         new Promise<Response>((resolve, reject) => {
           const abort = (): void => {
             clearTimeout(timer);
-            reject(init.signal?.reason);
+            reject(new DOMException('Aborted', 'AbortError'));
           };
           const timer = setTimeout(() => {
             init.signal?.removeEventListener('abort', abort);
