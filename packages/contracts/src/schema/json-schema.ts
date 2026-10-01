@@ -1,4 +1,6 @@
-import { z } from 'zod';
+import type { z } from 'zod';
+
+import { canonicalJson } from '../internal/canonical-json.js';
 
 import { agentRequestSchema, agentResponseSchema } from '../agent/protocol.js';
 import { agentResourceSchema } from '../project/resources/agent.js';
@@ -15,7 +17,7 @@ import { evalCancelRequestSchema, evalCancelResultSchema } from '../eval/cancel.
 import { evalEventSchema } from '../eval/event.js';
 import { evalRunRequestSchema, evalRunSchema } from '../eval/run.js';
 import { metricRequestSchema, metricResultSchema } from '../metric/protocol.js';
-import { jsonlBridgeInputSchema, jsonlBridgeOutputSchema } from '../agent/managed-transport.js';
+import { jsonlBridgeInputSchema, jsonlBridgeOutputSchema } from '../agent/jsonl-bridge.js';
 import { metricResourceSchema } from '../project/resources/metric.js';
 import { metricPresetSchema } from '../metric/presets.js';
 import { metricTestFixtureSchema } from '../metric/test-fixture.js';
@@ -23,119 +25,152 @@ import { projectManifestSchema } from '../project/manifest.js';
 import { testResourceSchema } from '../project/resources/test.js';
 import { traceSchema } from '../trace/protocol.js';
 import {
-  webSocketAttemptEvidenceSchema,
   webSocketCorrelatedMessageSchema,
   webSocketInvocationRequestSchema,
 } from '../agent/websocket-contract.js';
+import { webSocketAttemptEvidenceSchema } from '../agent/websocket-evidence.js';
 
 type JsonSchemaFragment = Readonly<Record<string, unknown>>;
 type ContractJsonSchemaDefinition = {
   schema: z.ZodType;
-  invariants: JsonSchemaFragment;
+  /** Keywords overlaid on the generated schema, including a $comment for runtime-only rules. */
+  invariants?: JsonSchemaFragment;
 };
 
-const sharedComment =
-  'Runtime-only invariants include span time ordering, duplicate identifiers, and metric references.';
+const runtimeOnly = (rules: string): JsonSchemaFragment => ({
+  $comment: `Runtime-only invariants: ${rules}.`,
+});
 
-const noAdditionalInvariants = { $comment: sharedComment } satisfies JsonSchemaFragment;
-
-const projectRuntimeInvariants = {
-  $comment:
-    'Runtime-only invariants include canonical manifest paths, cross-resource references, duplicate identifiers, and resolved case-id collisions.',
-} satisfies JsonSchemaFragment;
-
-const agentRuntimeInvariants = {
-  $comment:
-    'Runtime-only invariants include polling status URL exclusivity, polling interval ordering, disjoint polling terminal values, and duplicate sandbox file and artifact destinations after platform-independent relative-path normalization.',
-} satisfies JsonSchemaFragment;
-
-const commandRequestRuntimeInvariants = {
-  $comment:
-    'Runtime-only invariants include canonical manifest paths, cross-resource references, duplicate identifiers, resolved case-id collisions, polling constraints, and duplicate sandbox destinations after platform-independent relative-path normalization.',
-} satisfies JsonSchemaFragment;
-
-const agentRequestInvariants = {
-  $comment: sharedComment,
-  dependentRequired: {
-    messages: ['turn_index', 'conversation_id'],
-    turn_index: ['messages', 'conversation_id'],
-    conversation_id: ['messages', 'turn_index'],
-  },
-} satisfies JsonSchemaFragment;
-
-const agentResponseInvariants = {
-  $comment: sharedComment,
-  additionalProperties: true,
-  oneOf: [
-    { required: ['output'], not: { required: ['error'] } },
-    { required: ['error'], not: { required: ['output'] } },
-  ],
-} satisfies JsonSchemaFragment;
+const traceRules = 'span end_time must not precede start_time, and span ids must be unique';
+const assertionRules =
+  'regex checks must compile, and threshold checks need at least one comparison';
+const agentRequestRules =
+  'messages, turn_index, and conversation_id must appear together in the agent request';
+const agentResponseRules = 'the agent response carries exactly one of output or error';
+const selectionRules = 'selection counts satisfy selected_cases <= matched_cases <= total_cases';
+const agentResourceRules = [
+  'polling needs exactly one status URL source, ordered intervals, and disjoint terminal values',
+  'sandbox destinations are unique after relative-path normalization',
+  'HTTP body_encoding requires a body, and raw bodies are strings',
+  'stream incremental output pointer and mode appear together',
+  'WebSocket timeouts nest, pointers are distinct, and authorization headers use secret references',
+].join('; ');
 
 const CONTRACT_JSON_SCHEMAS = new Map<string, ContractJsonSchemaDefinition>([
-  ['agent-request.json', { schema: agentRequestSchema, invariants: agentRequestInvariants }],
-  ['agent-response.json', { schema: agentResponseSchema, invariants: agentResponseInvariants }],
-  ['trace.json', { schema: traceSchema, invariants: noAdditionalInvariants }],
-  ['metric-request.json', { schema: metricRequestSchema, invariants: noAdditionalInvariants }],
-  ['metric-result.json', { schema: metricResultSchema, invariants: noAdditionalInvariants }],
-  ['project.json', { schema: projectManifestSchema, invariants: projectRuntimeInvariants }],
-  ['agent.json', { schema: agentResourceSchema, invariants: agentRuntimeInvariants }],
-  ['test.json', { schema: testResourceSchema, invariants: projectRuntimeInvariants }],
-  ['case.json', { schema: testCaseSchema, invariants: projectRuntimeInvariants }],
-  ['dataset.json', { schema: datasetResourceSchema, invariants: projectRuntimeInvariants }],
-  ['metric.json', { schema: metricResourceSchema, invariants: projectRuntimeInvariants }],
-  ['metric-preset.json', { schema: metricPresetSchema, invariants: noAdditionalInvariants }],
+  [
+    'agent-request.json',
+    {
+      schema: agentRequestSchema,
+      invariants: {
+        dependentRequired: {
+          messages: ['turn_index', 'conversation_id'],
+          turn_index: ['messages', 'conversation_id'],
+          conversation_id: ['messages', 'turn_index'],
+        },
+      },
+    },
+  ],
+  [
+    'agent-response.json',
+    {
+      schema: agentResponseSchema,
+      invariants: {
+        additionalProperties: true,
+        oneOf: [
+          { required: ['output'], not: { required: ['error'] } },
+          { required: ['error'], not: { required: ['output'] } },
+        ],
+      },
+    },
+  ],
+  ['trace.json', { schema: traceSchema, invariants: runtimeOnly(traceRules) }],
+  ['metric-request.json', { schema: metricRequestSchema, invariants: runtimeOnly(traceRules) }],
+  ['metric-result.json', { schema: metricResultSchema }],
+  [
+    'project.json',
+    {
+      schema: projectManifestSchema,
+      invariants: runtimeOnly(
+        'resource paths must be canonical for their id, and resource ids must be unique per type',
+      ),
+    },
+  ],
+  ['agent.json', { schema: agentResourceSchema, invariants: runtimeOnly(agentResourceRules) }],
+  [
+    'test.json',
+    {
+      schema: testResourceSchema,
+      invariants: runtimeOnly(
+        'agent, metric, and dataset references and resolved case ids are checked when the project loads',
+      ),
+    },
+  ],
+  ['case.json', { schema: testCaseSchema }],
+  ['dataset.json', { schema: datasetResourceSchema }],
+  ['metric.json', { schema: metricResourceSchema, invariants: runtimeOnly(assertionRules) }],
+  ['metric-preset.json', { schema: metricPresetSchema, invariants: runtimeOnly(assertionRules) }],
   [
     'metric-test-fixture.json',
-    { schema: metricTestFixtureSchema, invariants: noAdditionalInvariants },
+    { schema: metricTestFixtureSchema, invariants: runtimeOnly(traceRules) },
   ],
   [
     'command-request.json',
-    { schema: commandRequestSchema, invariants: commandRequestRuntimeInvariants },
+    {
+      schema: commandRequestSchema,
+      invariants: runtimeOnly(`${agentResourceRules}; ${assertionRules}`),
+    },
   ],
-  ['eval-run-request.json', { schema: evalRunRequestSchema, invariants: noAdditionalInvariants }],
-  ['eval-run.json', { schema: evalRunSchema, invariants: noAdditionalInvariants }],
-  ['eval-event.json', { schema: evalEventSchema, invariants: noAdditionalInvariants }],
+  ['eval-run-request.json', { schema: evalRunRequestSchema }],
   [
-    'eval-cancel-request.json',
-    { schema: evalCancelRequestSchema, invariants: noAdditionalInvariants },
+    'eval-run.json',
+    {
+      schema: evalRunSchema,
+      invariants: runtimeOnly(
+        `${selectionRules}, and selection.selected_cases equals the selected case count`,
+      ),
+    },
   ],
   [
-    'eval-cancel-result.json',
-    { schema: evalCancelResultSchema, invariants: noAdditionalInvariants },
+    'eval-event.json',
+    {
+      schema: evalEventSchema,
+      invariants: runtimeOnly(
+        `${selectionRules}; sequencing across a stream is checked by the stream parser`,
+      ),
+    },
   ],
-  ['cli-result.json', { schema: cliResultSchema, invariants: noAdditionalInvariants }],
-  ['cli-event.json', { schema: cliEventSchema, invariants: noAdditionalInvariants }],
-  ['cli-help.json', { schema: cliHelpSchema, invariants: noAdditionalInvariants }],
-  ['cli-errors.json', { schema: cliErrorCatalogSchema, invariants: noAdditionalInvariants }],
+  ['eval-cancel-request.json', { schema: evalCancelRequestSchema }],
+  ['eval-cancel-result.json', { schema: evalCancelResultSchema }],
+  ['cli-result.json', { schema: cliResultSchema }],
+  ['cli-event.json', { schema: cliEventSchema }],
+  ['cli-help.json', { schema: cliHelpSchema, invariants: runtimeOnly(assertionRules) }],
+  ['cli-errors.json', { schema: cliErrorCatalogSchema }],
   [
     'jsonl-bridge-input.json',
-    { schema: jsonlBridgeInputSchema, invariants: noAdditionalInvariants },
+    { schema: jsonlBridgeInputSchema, invariants: runtimeOnly(agentRequestRules) },
   ],
   [
     'jsonl-bridge-output.json',
-    { schema: jsonlBridgeOutputSchema, invariants: noAdditionalInvariants },
+    { schema: jsonlBridgeOutputSchema, invariants: runtimeOnly(agentResponseRules) },
   ],
   [
     'websocket-request.json',
-    { schema: webSocketInvocationRequestSchema, invariants: noAdditionalInvariants },
+    { schema: webSocketInvocationRequestSchema, invariants: runtimeOnly(agentRequestRules) },
   ],
-  [
-    'websocket-message.json',
-    { schema: webSocketCorrelatedMessageSchema, invariants: noAdditionalInvariants },
-  ],
+  ['websocket-message.json', { schema: webSocketCorrelatedMessageSchema }],
   [
     'websocket-evidence.json',
-    { schema: webSocketAttemptEvidenceSchema, invariants: noAdditionalInvariants },
+    {
+      schema: webSocketAttemptEvidenceSchema,
+      invariants: runtimeOnly('a truncated excerpt carries the sha256 of the full payload'),
+    },
   ],
 ]);
 
-const isJsonSchemaObject = (value: unknown): value is Record<string, unknown> =>
+const isJsonObject = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === 'object' && !Array.isArray(value);
 
-/**
- * Purely overlays declarative invariant fragments without mutating Zod's generated schema.
- */
+/** Deep-merges invariant keywords into a generated schema without mutating either input. */
 const mergeJsonSchemaFragments = (
   generated: Readonly<Record<string, unknown>>,
   fragment: JsonSchemaFragment,
@@ -145,28 +180,12 @@ const mergeJsonSchemaFragments = (
   for (const [key, fragmentValue] of Object.entries(fragment)) {
     const generatedValue = generated[key];
     merged[key] =
-      isJsonSchemaObject(generatedValue) && isJsonSchemaObject(fragmentValue)
+      isJsonObject(generatedValue) && isJsonObject(fragmentValue)
         ? mergeJsonSchemaFragments(generatedValue, fragmentValue)
         : fragmentValue;
   }
 
   return merged;
-};
-
-const sortObjectKeys = (_key: string, value: unknown): unknown => {
-  if (!isJsonSchemaObject(value)) {
-    return value;
-  }
-
-  return Object.fromEntries(
-    Object.entries(value).sort(([left], [right]) => {
-      if (left === right) {
-        return 0;
-      }
-
-      return left < right ? -1 : 1;
-    }),
-  );
 };
 
 /** Serializes one registered contract as deterministic Draft 2020-12 JSON Schema. */
@@ -180,17 +199,8 @@ const serializeContractSchema = (fileName: string): string => {
     target: 'draft-2020-12',
     unrepresentable: 'any',
   });
-  if (!isJsonSchemaObject(generated)) {
-    throw new Error(`Zod generated a non-object JSON Schema for ${fileName}`);
-  }
-
-  const merged = mergeJsonSchemaFragments(generated, definition.invariants);
-  return `${JSON.stringify(merged, sortObjectKeys, 2)}\n`;
+  const merged = mergeJsonSchemaFragments(generated, definition.invariants ?? {});
+  return `${canonicalJson(merged, 2)}\n`;
 };
 
-export {
-  CONTRACT_JSON_SCHEMAS,
-  mergeJsonSchemaFragments,
-  serializeContractSchema,
-  type JsonSchemaFragment,
-};
+export { CONTRACT_JSON_SCHEMAS, serializeContractSchema };

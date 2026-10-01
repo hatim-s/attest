@@ -1,5 +1,5 @@
 {
-  "$comment": "Runtime-only invariants include span time ordering, duplicate identifiers, and metric references.",
+  "$comment": "Runtime-only invariants: messages, turn_index, and conversation_id must appear together in the agent request.",
   "$defs": {
     "__schema0": {
       "anyOf": [
@@ -171,8 +171,9 @@
           "type": "object"
         },
         "request_id": {
-          "maxLength": 256,
+          "maxLength": 128,
           "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
           "type": "string"
         },
         "type": {
@@ -191,8 +192,9 @@
       "additionalProperties": false,
       "properties": {
         "request_id": {
-          "maxLength": 256,
+          "maxLength": 128,
           "minLength": 1,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
           "type": "string"
         },
         "type": {

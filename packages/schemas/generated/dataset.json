@@ -1,5 +1,4 @@
 {
-  "$comment": "Runtime-only invariants include canonical manifest paths, cross-resource references, duplicate identifiers, and resolved case-id collisions.",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "properties": {
@@ -69,7 +68,7 @@
             "additionalProperties": false,
             "properties": {
               "destination": {
-                "pattern": "^(?:id|input(?:\\.(?:[A-Za-z0-9_-]|\\\\[.\\\\])+)*|expected(?:\\.(?:[A-Za-z0-9_-]|\\\\[.\\\\])+)*|params(?:\\.(?:[A-Za-z0-9_-]|\\\\[.\\\\])+)+|tags|folder|metrics)$",
+                "pattern": "^(?:id|input(?:\\.(?:[A-Za-z0-9_-]|\\\\[.\\\\])+)*|expected(?:\\.(?:[A-Za-z0-9_-]|\\\\[.\\\\])+)*|params(?:\\.(?:[A-Za-z0-9_-]|\\\\[.\\\\])+)+|tags|folder|metric_overrides)$",
                 "type": "string"
               },
               "source": {

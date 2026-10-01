@@ -1,5 +1,5 @@
 {
-  "$comment": "Runtime-only invariants include span time ordering, duplicate identifiers, and metric references.",
+  "$comment": "Runtime-only invariants: regex checks must compile, and threshold checks need at least one comparison.",
   "$defs": {
     "AllAssertionCheck": {
       "additionalProperties": false,
@@ -37,7 +37,7 @@
       "additionalProperties": false,
       "properties": {
         "body": {
-          "$ref": "#/$defs/__schema4"
+          "$ref": "#/$defs/__schema3"
         },
         "body_encoding": {
           "enum": [
@@ -781,7 +781,7 @@
                       "type": "string"
                     },
                     "value": {
-                      "$ref": "#/$defs/__schema3"
+                      "$ref": "#/$defs/__schema1"
                     }
                   },
                   "required": [
@@ -807,7 +807,7 @@
                       "type": "string"
                     },
                     "value": {
-                      "$ref": "#/$defs/__schema3"
+                      "$ref": "#/$defs/__schema1"
                     }
                   },
                   "required": [
@@ -869,7 +869,7 @@
                         },
                         {
                           "additionalProperties": {
-                            "$ref": "#/$defs/__schema3"
+                            "$ref": "#/$defs/__schema1"
                           },
                           "propertyNames": {
                             "type": "string"
@@ -945,7 +945,7 @@
                                     "type": "string"
                                   },
                                   "value": {
-                                    "$ref": "#/$defs/__schema3"
+                                    "$ref": "#/$defs/__schema1"
                                   }
                                 },
                                 "required": [
@@ -971,7 +971,7 @@
                                     "type": "string"
                                   },
                                   "value": {
-                                    "$ref": "#/$defs/__schema3"
+                                    "$ref": "#/$defs/__schema1"
                                   }
                                 },
                                 "required": [
@@ -1159,37 +1159,6 @@
         {
           "additionalProperties": {
             "$ref": "#/$defs/__schema3"
-          },
-          "propertyNames": {
-            "type": "string"
-          },
-          "type": "object"
-        }
-      ]
-    },
-    "__schema4": {
-      "anyOf": [
-        {
-          "type": "string"
-        },
-        {
-          "type": "number"
-        },
-        {
-          "type": "boolean"
-        },
-        {
-          "type": "null"
-        },
-        {
-          "items": {
-            "$ref": "#/$defs/__schema4"
-          },
-          "type": "array"
-        },
-        {
-          "additionalProperties": {
-            "$ref": "#/$defs/__schema4"
           },
           "propertyNames": {
             "type": "string"

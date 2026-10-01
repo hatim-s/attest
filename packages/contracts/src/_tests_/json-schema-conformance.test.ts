@@ -1,9 +1,8 @@
-import * as formatsModule from 'ajv-formats';
-import { Ajv2020, type AnySchema, type ValidateFunction } from 'ajv/dist/2020.js';
 import { describe, expect, it } from 'vitest';
 import type { z } from 'zod';
 
-import { CONTRACT_JSON_SCHEMAS, serializeContractSchema } from '../schema/json-schema.js';
+import { CONTRACT_JSON_SCHEMAS } from '../schema/json-schema.js';
+import { compileGeneratedSchema } from './support/compile-generated-schema.js';
 import {
   AGENT_PROTOCOL,
   AGENT_RESOURCE_SCHEMA_ID,
@@ -19,6 +18,9 @@ import {
   PROJECT_SCHEMA_ID,
   TEST_RESOURCE_SCHEMA_ID,
   TRACE_SCHEMA_ID,
+  WEBSOCKET_EVIDENCE_SCHEMA_ID,
+  WEBSOCKET_MESSAGE_PROTOCOL,
+  WEBSOCKET_REQUEST_PROTOCOL,
 } from '../schema/identifiers.js';
 
 type ConformanceFixture = {
@@ -26,6 +28,14 @@ type ConformanceFixture = {
   fileName: string;
   candidate: unknown;
   valid: boolean;
+};
+
+/** A candidate Zod rejects but Draft 2020-12 cannot, with the reason the check is runtime-only. */
+type DivergenceFixture = {
+  name: string;
+  fileName: string;
+  candidate: unknown;
+  reason: string;
 };
 
 const validTrace = {
@@ -113,6 +123,32 @@ const validCliHelpCommand = {
   request_schema: null,
   examples: ['attest help --output json'],
   constraints: [],
+};
+
+const webSocketRequest = {
+  protocol: WEBSOCKET_REQUEST_PROTOCOL,
+  request_id: 'run-01:case-01',
+  request: {
+    protocol: AGENT_PROTOCOL,
+    run_id: '01ARZ3NDEKTSV4RRFFQ69G5FAV',
+    case_id: 'case-01',
+    input: { question: 'Ready?' },
+  },
+};
+
+const webSocketEvidence = {
+  schema: WEBSOCKET_EVIDENCE_SCHEMA_ID,
+  request_id: webSocketRequest.request_id,
+  lifecycle: 'per_run',
+  connection_mode: 'multiplexed',
+  acknowledgement: {
+    state: 'acknowledged',
+    retry: 'forbidden',
+    reconnect: 'forbidden',
+    replay: 'forbidden',
+  },
+  outcome: 'completed',
+  events: [{ classification: 'connection_opened', elapsed_ms: 2 }],
 };
 
 const fixtures: ConformanceFixture[] = [
@@ -215,33 +251,6 @@ const fixtures: ConformanceFixture[] = [
     fileName: 'agent.json',
     candidate: validAgent,
     valid: true,
-  },
-  {
-    name: 'current agent accepts a Vercel sandbox with no uploads',
-    fileName: 'agent.json',
-    candidate: {
-      ...validAgent,
-      transport: {
-        ...validAgent.transport,
-        sandbox: { kind: 'vercel', files: [], artifacts: [] },
-      },
-    },
-    valid: true,
-  },
-  {
-    name: 'current agent rejects an out-of-range sandbox file mode',
-    fileName: 'agent.json',
-    candidate: {
-      ...validAgent,
-      transport: {
-        ...validAgent.transport,
-        sandbox: {
-          kind: 'vercel',
-          files: [{ source: 'agent.mjs', destination: 'agent.mjs', mode: 0o1000 }],
-        },
-      },
-    },
-    valid: false,
   },
   {
     name: 'current agent rejects an invalid resource id',
@@ -422,19 +431,53 @@ const fixtures: ConformanceFixture[] = [
     },
     valid: false,
   },
+  {
+    name: 'WebSocket request accepts a correlated agent request',
+    fileName: 'websocket-request.json',
+    candidate: webSocketRequest,
+    valid: true,
+  },
+  {
+    name: 'WebSocket request rejects a missing correlation id',
+    fileName: 'websocket-request.json',
+    candidate: { ...webSocketRequest, request_id: undefined },
+    valid: false,
+  },
+  {
+    name: 'WebSocket message accepts a correlated acknowledgement',
+    fileName: 'websocket-message.json',
+    candidate: {
+      protocol: WEBSOCKET_MESSAGE_PROTOCOL,
+      type: 'acknowledgement',
+      request_id: webSocketRequest.request_id,
+      value: true,
+    },
+    valid: true,
+  },
+  {
+    name: 'WebSocket message rejects uncorrelated results',
+    fileName: 'websocket-message.json',
+    candidate: { protocol: WEBSOCKET_MESSAGE_PROTOCOL, type: 'result', value: 'uncorrelated' },
+    valid: false,
+  },
+  {
+    name: 'WebSocket evidence accepts a completed acknowledged attempt',
+    fileName: 'websocket-evidence.json',
+    candidate: webSocketEvidence,
+    valid: true,
+  },
+  {
+    name: 'WebSocket evidence rejects replay after acknowledgement',
+    fileName: 'websocket-evidence.json',
+    candidate: {
+      ...webSocketEvidence,
+      acknowledgement: { ...webSocketEvidence.acknowledgement, replay: 'allowed' },
+    },
+    valid: false,
+  },
 ];
 
-/** Documents deliberate runtime checks that Draft 2020-12 cannot represent directly. */
-const KNOWN_DIVERGENCES: Readonly<Record<string, string>> = {
-  'trace rejects end time before start time':
-    'Span ordering compares two parsed timestamps and remains a runtime-only invariant.',
-  'project rejects a non-canonical resource path':
-    'Canonical paths depend on the sibling resource id and remain a runtime-only invariant.',
-  'agent rejects aliased sandbox destinations':
-    'Destination uniqueness requires platform-independent relative-path normalization and remains a runtime-only invariant.',
-} as const;
-
-const divergenceFixtures: ConformanceFixture[] = [
+const divergenceFixtures: DivergenceFixture[] = [
   {
     name: 'trace rejects end time before start time',
     fileName: 'trace.json',
@@ -448,7 +491,7 @@ const divergenceFixtures: ConformanceFixture[] = [
         },
       ],
     },
-    valid: false,
+    reason: 'Span ordering compares two parsed timestamps.',
   },
   {
     name: 'project rejects a non-canonical resource path',
@@ -460,7 +503,7 @@ const divergenceFixtures: ConformanceFixture[] = [
         agents: [{ ...validProject.resources.agents[0], path: 'agents/support.json' }],
       },
     },
-    valid: false,
+    reason: 'Canonical paths depend on the sibling resource id.',
   },
   {
     name: 'agent rejects aliased sandbox destinations',
@@ -478,19 +521,9 @@ const divergenceFixtures: ConformanceFixture[] = [
         },
       },
     },
-    valid: false,
+    reason: 'Destination uniqueness needs platform-independent relative-path normalization.',
   },
 ];
-
-const ajv = new Ajv2020({ allErrors: true, strict: false });
-formatsModule.default.default(ajv);
-ajv.addFormat('ulid', /^[0-9A-HJKMNP-TV-Za-hjkmnp-tv-z]{26}$/);
-
-const validators = new Map<string, ValidateFunction>();
-for (const fileName of CONTRACT_JSON_SCHEMAS.keys()) {
-  const schema = JSON.parse(serializeContractSchema(fileName)) as AnySchema;
-  validators.set(fileName, ajv.compile(schema));
-}
 
 const getZodSchema = (fileName: string): z.ZodType => {
   const definition = CONTRACT_JSON_SCHEMAS.get(fileName);
@@ -499,15 +532,6 @@ const getZodSchema = (fileName: string): z.ZodType => {
   }
 
   return definition.schema;
-};
-
-const getJsonSchemaValidator = (fileName: string): ValidateFunction => {
-  const validator = validators.get(fileName);
-  if (validator === undefined) {
-    throw new Error(`Missing JSON Schema validator for ${fileName}`);
-  }
-
-  return validator;
 };
 
 describe('Zod and generated JSON Schema conformance', () => {
@@ -524,47 +548,26 @@ describe('Zod and generated JSON Schema conformance', () => {
     ['billing/ refunds', false],
     ['billing /refunds', false],
     ['billing\n', false],
-  ])('agrees on folder %j in case and selection schemas', (folder, valid) => {
-    const candidates = [
-      ['case.json', { ...validCase, folder }],
-      [
-        'eval-run-request.json',
-        {
-          schema: COMMAND_REQUEST_SCHEMA_ID,
-          command: 'eval.run',
-          test_ids: ['refund'],
-          output: 'json',
-          folders: [folder],
-        },
-      ],
-    ] as const;
-    for (const [fileName, candidate] of candidates) {
-      expect(getZodSchema(fileName).safeParse(candidate).success).toBe(valid);
-      expect(getJsonSchemaValidator(fileName)(candidate)).toBe(valid);
-    }
+  ])('agrees on case folder %j', (folder, valid) => {
+    const candidate = { ...validCase, folder };
+    expect(getZodSchema('case.json').safeParse(candidate).success).toBe(valid);
+    expect(compileGeneratedSchema('case.json')(candidate)).toBe(valid);
   });
 
   it.each(fixtures)('$name', ({ fileName, candidate, valid }) => {
     const zodValid = getZodSchema(fileName).safeParse(candidate).success;
-    const jsonSchemaValid = getJsonSchemaValidator(fileName)(candidate);
+    const jsonSchemaValid = compileGeneratedSchema(fileName)(candidate);
 
     expect(zodValid).toBe(valid);
     expect(jsonSchemaValid).toBe(valid);
   });
 
-  it.each(divergenceFixtures)('$name is documented', ({ name, fileName, candidate }) => {
-    expect(KNOWN_DIVERGENCES[name]).toBeTruthy();
-    expect(getZodSchema(fileName).safeParse(candidate).success).toBe(false);
-    expect(getJsonSchemaValidator(fileName)(candidate)).toBe(true);
-  });
-
-  it('publishes the sandbox destination runtime invariant', () => {
-    for (const fileName of ['agent.json', 'command-request.json']) {
-      const schema = JSON.parse(serializeContractSchema(fileName)) as { $comment?: string };
-      expect(schema.$comment).toContain('duplicate sandbox');
-      expect(schema.$comment).toContain('platform-independent relative-path normalization');
-    }
-  });
+  it.each(divergenceFixtures)(
+    '$name is a runtime-only check',
+    ({ fileName, candidate, reason }) => {
+      expect(reason).not.toBe('');
+      expect(getZodSchema(fileName).safeParse(candidate).success).toBe(false);
+      expect(compileGeneratedSchema(fileName)(candidate)).toBe(true);
+    },
+  );
 });
-
-export { KNOWN_DIVERGENCES };

@@ -1,5 +1,5 @@
 {
-  "$comment": "Runtime-only invariants include polling status URL exclusivity, polling interval ordering, disjoint polling terminal values, and duplicate sandbox file and artifact destinations after platform-independent relative-path normalization.",
+  "$comment": "Runtime-only invariants: polling needs exactly one status URL source, ordered intervals, and disjoint terminal values; sandbox destinations are unique after relative-path normalization; HTTP body_encoding requires a body, and raw bodies are strings; stream incremental output pointer and mode appear together; WebSocket timeouts nest, pointers are distinct, and authorization headers use secret references.",
   "$defs": {
     "HttpRequestTemplate": {
       "additionalProperties": false,
@@ -1219,7 +1219,6 @@
               "$ref": "#/$defs/HttpRequestTemplate"
             },
             "response_mode": {
-              "default": "attest_envelope",
               "enum": [
                 "attest_envelope",
                 "mapped"

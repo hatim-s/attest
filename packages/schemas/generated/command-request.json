@@ -1,5 +1,5 @@
 {
-  "$comment": "Runtime-only invariants include canonical manifest paths, cross-resource references, duplicate identifiers, resolved case-id collisions, polling constraints, and duplicate sandbox destinations after platform-independent relative-path normalization.",
+  "$comment": "Runtime-only invariants: polling needs exactly one status URL source, ordered intervals, and disjoint terminal values; sandbox destinations are unique after relative-path normalization; HTTP body_encoding requires a body, and raw bodies are strings; stream incremental output pointer and mode appear together; WebSocket timeouts nest, pointers are distinct, and authorization headers use secret references; regex checks must compile, and threshold checks need at least one comparison.",
   "$defs": {
     "AgentResource": {
       "additionalProperties": false,
@@ -691,7 +691,6 @@
                   "$ref": "#/$defs/HttpRequestTemplate"
                 },
                 "response_mode": {
-                  "default": "attest_envelope",
                   "enum": [
                     "attest_envelope",
                     "mapped"
@@ -2628,7 +2627,7 @@
       "type": "object"
     },
     {
-      "anyOf": [
+      "oneOf": [
         {
           "additionalProperties": false,
           "properties": {
@@ -2671,8 +2670,8 @@
             "schema",
             "command",
             "source",
-            "source_type",
-            "as"
+            "as",
+            "source_type"
           ],
           "type": "object"
         },
@@ -2964,8 +2963,8 @@
             "schema",
             "command",
             "source",
-            "source_type",
             "as",
+            "source_type",
             "extraction"
           ],
           "type": "object"
@@ -3246,7 +3245,7 @@
                 "additionalProperties": false,
                 "properties": {
                   "destination": {
-                    "pattern": "^(?:id|input(?:\\.(?:[A-Za-z0-9_-]|\\\\[.\\\\])+)*|expected(?:\\.(?:[A-Za-z0-9_-]|\\\\[.\\\\])+)*|params(?:\\.(?:[A-Za-z0-9_-]|\\\\[.\\\\])+)+|tags|folder|metrics)$",
+                    "pattern": "^(?:id|input(?:\\.(?:[A-Za-z0-9_-]|\\\\[.\\\\])+)*|expected(?:\\.(?:[A-Za-z0-9_-]|\\\\[.\\\\])+)*|params(?:\\.(?:[A-Za-z0-9_-]|\\\\[.\\\\])+)+|tags|folder|metric_overrides)$",
                     "type": "string"
                   },
                   "source": {
@@ -3510,7 +3509,7 @@
                 "additionalProperties": false,
                 "properties": {
                   "destination": {
-                    "pattern": "^(?:id|input(?:\\.(?:[A-Za-z0-9_-]|\\\\[.\\\\])+)*|expected(?:\\.(?:[A-Za-z0-9_-]|\\\\[.\\\\])+)*|params(?:\\.(?:[A-Za-z0-9_-]|\\\\[.\\\\])+)+|tags|folder|metrics)$",
+                    "pattern": "^(?:id|input(?:\\.(?:[A-Za-z0-9_-]|\\\\[.\\\\])+)*|expected(?:\\.(?:[A-Za-z0-9_-]|\\\\[.\\\\])+)*|params(?:\\.(?:[A-Za-z0-9_-]|\\\\[.\\\\])+)+|tags|folder|metric_overrides)$",
                     "type": "string"
                   },
                   "source": {
@@ -4180,6 +4179,107 @@
         {
           "additionalProperties": false,
           "properties": {
+            "all": {
+              "const": true,
+              "type": "boolean"
+            },
+            "baseline_run_id": {
+              "format": "ulid",
+              "pattern": "^[0-9A-HJKMNP-TV-Za-hjkmnp-tv-z]{26}$",
+              "type": "string"
+            },
+            "case_ids": {
+              "items": {
+                "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+                "type": "string"
+              },
+              "minItems": 1,
+              "type": "array"
+            },
+            "command": {
+              "const": "eval.run",
+              "type": "string"
+            },
+            "concurrency": {
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991,
+              "type": "integer"
+            },
+            "dataset_ids": {
+              "items": {
+                "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+                "type": "string"
+              },
+              "minItems": 1,
+              "type": "array"
+            },
+            "folders": {
+              "items": {
+                "minLength": 1,
+                "pattern": "^(?!\\.{1,2}(?:\\/|$))[^\\s/\\\\](?:[^/\\\\]*[^\\s/\\\\])?(?:\\/(?!\\.{1,2}(?:\\/|$))[^\\s/\\\\](?:[^/\\\\]*[^\\s/\\\\])?)*(?![\\s\\S])",
+                "type": "string"
+              },
+              "minItems": 1,
+              "type": "array"
+            },
+            "junit_path": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "output": {
+              "const": "human",
+              "type": "string"
+            },
+            "sample": {
+              "additionalProperties": false,
+              "properties": {
+                "count": {
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991,
+                  "type": "integer"
+                },
+                "seed": {
+                  "minLength": 1,
+                  "type": "string"
+                }
+              },
+              "required": [
+                "count"
+              ],
+              "type": "object"
+            },
+            "schema": {
+              "const": "attest.command-request",
+              "type": "string"
+            },
+            "tags": {
+              "items": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "minItems": 1,
+              "type": "array"
+            },
+            "timeout_ms": {
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991,
+              "type": "integer"
+            },
+            "watch": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "schema",
+            "command",
+            "all",
+            "output"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
             "baseline_run_id": {
               "format": "ulid",
               "pattern": "^[0-9A-HJKMNP-TV-Za-hjkmnp-tv-z]{26}$",
@@ -4278,107 +4378,6 @@
             "schema",
             "command",
             "test_ids",
-            "output"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "all": {
-              "const": true,
-              "type": "boolean"
-            },
-            "baseline_run_id": {
-              "format": "ulid",
-              "pattern": "^[0-9A-HJKMNP-TV-Za-hjkmnp-tv-z]{26}$",
-              "type": "string"
-            },
-            "case_ids": {
-              "items": {
-                "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
-                "type": "string"
-              },
-              "minItems": 1,
-              "type": "array"
-            },
-            "command": {
-              "const": "eval.run",
-              "type": "string"
-            },
-            "concurrency": {
-              "exclusiveMinimum": 0,
-              "maximum": 9007199254740991,
-              "type": "integer"
-            },
-            "dataset_ids": {
-              "items": {
-                "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
-                "type": "string"
-              },
-              "minItems": 1,
-              "type": "array"
-            },
-            "folders": {
-              "items": {
-                "minLength": 1,
-                "pattern": "^(?!\\.{1,2}(?:\\/|$))[^\\s/\\\\](?:[^/\\\\]*[^\\s/\\\\])?(?:\\/(?!\\.{1,2}(?:\\/|$))[^\\s/\\\\](?:[^/\\\\]*[^\\s/\\\\])?)*(?![\\s\\S])",
-                "type": "string"
-              },
-              "minItems": 1,
-              "type": "array"
-            },
-            "junit_path": {
-              "minLength": 1,
-              "type": "string"
-            },
-            "output": {
-              "const": "human",
-              "type": "string"
-            },
-            "sample": {
-              "additionalProperties": false,
-              "properties": {
-                "count": {
-                  "exclusiveMinimum": 0,
-                  "maximum": 9007199254740991,
-                  "type": "integer"
-                },
-                "seed": {
-                  "minLength": 1,
-                  "type": "string"
-                }
-              },
-              "required": [
-                "count"
-              ],
-              "type": "object"
-            },
-            "schema": {
-              "const": "attest.command-request",
-              "type": "string"
-            },
-            "tags": {
-              "items": {
-                "minLength": 1,
-                "type": "string"
-              },
-              "minItems": 1,
-              "type": "array"
-            },
-            "timeout_ms": {
-              "exclusiveMinimum": 0,
-              "maximum": 9007199254740991,
-              "type": "integer"
-            },
-            "watch": {
-              "type": "boolean"
-            }
-          },
-          "required": [
-            "schema",
-            "command",
-            "all",
             "output"
           ],
           "type": "object"

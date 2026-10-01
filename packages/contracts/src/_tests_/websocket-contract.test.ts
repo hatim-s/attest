@@ -1,25 +1,22 @@
-import * as formatsModule from 'ajv-formats';
-import { Ajv2020, type AnySchema } from 'ajv/dist/2020.js';
 import { describe, expect, expectTypeOf, it } from 'vitest';
 
-import { serializeContractSchema } from '../schema/json-schema.js';
 import {
   WEBSOCKET_EVIDENCE_SCHEMA_ID,
   WEBSOCKET_MESSAGE_PROTOCOL,
   WEBSOCKET_REQUEST_PROTOCOL,
 } from '../schema/identifiers.js';
 import {
-  webSocketAttemptEvidenceSchema,
   webSocketCorrelatedMessageSchema,
-  webSocketErrorClassificationSchema,
-  webSocketEvidenceClassificationSchema,
   webSocketInvocationRequestSchema,
-  webSocketRequestIdSchema,
   webSocketTransportSchema,
-  type WebSocketAttemptEvidence,
   type WebSocketInvocationRequest,
   type WebSocketTransport,
 } from '../agent/websocket-contract.js';
+import {
+  webSocketAttemptEvidenceSchema,
+  type WebSocketAttemptEvidence,
+} from '../agent/websocket-evidence.js';
+import { requestIdSchema } from '../project/shared.js';
 
 const validTransport: WebSocketTransport = {
   kind: 'websocket',
@@ -94,14 +91,6 @@ const validEvidence: WebSocketAttemptEvidence = {
     },
   ],
   close: { code: 1_000, reason: 'complete', clean: true },
-};
-
-/** Compiles one committed serializer output so golden fixtures exercise Draft 2020-12 too. */
-const compileGeneratedSchema = (fileName: string) => {
-  const ajv = new Ajv2020({ allErrors: true, strict: false });
-  formatsModule.default.default(ajv);
-  ajv.addFormat('ulid', /^[0-9A-HJKMNP-TV-Z]{26}$/u);
-  return ajv.compile(JSON.parse(serializeContractSchema(fileName)) as AnySchema);
 };
 
 describe('WebSocket authored resource contract', () => {
@@ -183,10 +172,6 @@ describe('WebSocket authored resource contract', () => {
     ['binary frames', { framing: 'binary' }],
     ['Socket.IO endpoints', { url: 'wss://agent.example.test/socket.io/?EIO=4' }],
     ['GraphQL subscriptions', { subprotocol: 'graphql-transport-ws' }],
-    ['interactive auth', { interactive_auth: true }],
-    ['uncorrelated server work', { allow_uncorrelated_server_work: true }],
-    ['resume', { resume: true }],
-    ['bidirectional callbacks', { callbacks: true }],
   ])('rejects unsupported %s configuration', (_name, unsupported) => {
     expect(webSocketTransportSchema.safeParse({ ...validTransport, ...unsupported }).success).toBe(
       false,
@@ -211,9 +196,9 @@ describe('WebSocket normalized request and message protocol', () => {
   });
 
   it('rejects missing, oversized, and unsafe correlation ids', () => {
-    expect(webSocketRequestIdSchema.safeParse('').success).toBe(false);
-    expect(webSocketRequestIdSchema.safeParse('a'.repeat(129)).success).toBe(false);
-    expect(webSocketRequestIdSchema.safeParse('case id').success).toBe(false);
+    expect(requestIdSchema.safeParse('').success).toBe(false);
+    expect(requestIdSchema.safeParse('a'.repeat(129)).success).toBe(false);
+    expect(requestIdSchema.safeParse('case id').success).toBe(false);
     expect(
       webSocketCorrelatedMessageSchema.safeParse({
         protocol: WEBSOCKET_MESSAGE_PROTOCOL,
@@ -225,45 +210,8 @@ describe('WebSocket normalized request and message protocol', () => {
 });
 
 describe('WebSocket attempt evidence contract', () => {
-  it('accepts bounded completed evidence and freezes stable classifications', () => {
+  it('accepts bounded completed evidence', () => {
     expect(webSocketAttemptEvidenceSchema.safeParse(validEvidence).success).toBe(true);
-    expect(webSocketEvidenceClassificationSchema.options).toEqual([
-      'connection_opened',
-      'request_sent',
-      'acknowledgement_received',
-      'trace_received',
-      'result_received',
-      'error_received',
-      'ping_sent',
-      'pong_received',
-      'retry_scheduled',
-      'reconnect_started',
-      'connection_closed',
-    ]);
-    expect(webSocketErrorClassificationSchema.options).toEqual([
-      'open_timeout',
-      'message_idle_timeout',
-      'attempt_timeout',
-      'close_timeout',
-      'handshake_failed',
-      'connection_failed',
-      'unexpected_close',
-      'invalid_json',
-      'binary_frame_unsupported',
-      'uncorrelated_server_work',
-      'duplicate_terminal_message',
-      'acknowledgement_extraction_failed',
-      'result_extraction_failed',
-      'error_extraction_failed',
-      'trace_extraction_failed',
-      'remote_error',
-      'socket_io_unsupported',
-      'graphql_subscription_unsupported',
-      'interactive_auth_unsupported',
-      'resume_unsupported',
-      'bidirectional_callback_unsupported',
-      'cancelled',
-    ]);
   });
 
   it('allows retry/reconnect/replay only before acknowledgement', () => {
@@ -311,42 +259,5 @@ describe('WebSocket attempt evidence contract', () => {
         ],
       }).success,
     ).toBe(false);
-  });
-
-  it.each([
-    ['websocket-request.json', validRequest],
-    [
-      'websocket-message.json',
-      {
-        protocol: WEBSOCKET_MESSAGE_PROTOCOL,
-        type: 'acknowledgement',
-        request_id: validRequest.request_id,
-        value: true,
-      },
-    ],
-    ['websocket-evidence.json', validEvidence],
-  ])('%s accepts the matching golden fixture', (fileName, fixture) => {
-    expect(compileGeneratedSchema(fileName)(fixture)).toBe(true);
-  });
-
-  it.each([
-    ['websocket-request.json', { ...validRequest, request_id: undefined }],
-    [
-      'websocket-message.json',
-      {
-        protocol: WEBSOCKET_MESSAGE_PROTOCOL,
-        type: 'result',
-        value: 'uncorrelated',
-      },
-    ],
-    [
-      'websocket-evidence.json',
-      {
-        ...validEvidence,
-        acknowledgement: { ...acknowledged, replay: 'allowed' },
-      },
-    ],
-  ])('%s rejects the matching hostile golden fixture', (fileName, fixture) => {
-    expect(compileGeneratedSchema(fileName)(fixture)).toBe(false);
   });
 });

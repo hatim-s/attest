@@ -27,27 +27,11 @@ const metricPresetSchema = z.strictObject({
   definition: metricResourceSchema.shape.definition,
 });
 
-type DeepReadonly<T> = T extends (...arguments_: never[]) => unknown
-  ? T
-  : T extends readonly (infer Item)[]
-    ? readonly DeepReadonly<Item>[]
-    : T extends object
-      ? { readonly [Key in keyof T]: DeepReadonly<T[Key]> }
-      : T;
+type MetricPreset = z.infer<typeof metricPresetSchema>;
+type MetricPresetId = z.infer<typeof metricPresetIdSchema>;
 
-/** Freezes every preset field so stable catalog lookups cannot be mutated by consumers. */
-const deepFreeze = <T>(value: T): DeepReadonly<T> => {
-  if (value !== null && typeof value === 'object' && !Object.isFrozen(value)) {
-    for (const nested of Object.values(value)) deepFreeze(nested);
-    Object.freeze(value);
-  }
-  return value as DeepReadonly<T>;
-};
-
-/**
- * Publishes defaults rather than hidden wizard prompts while accepting the transitional marker.
- */
-const parsedMetricPresets = metricPresetSchema.array().parse([
+/** Built-in metric starting points shown by `attest metric add`. */
+const METRIC_PRESETS = [
   {
     schema: METRIC_PRESET_SCHEMA_ID,
     id: 'output-equals',
@@ -177,22 +161,10 @@ const parsedMetricPresets = metricPresetSchema.array().parse([
       assertions: [{ spans: { filter: { kind: 'other' }, count: 1 } }],
     },
   },
-]);
-const METRIC_PRESETS = deepFreeze(parsedMetricPresets);
-
-type MetricPreset = DeepReadonly<z.infer<typeof metricPresetSchema>>;
-type MetricPresetId = z.infer<typeof metricPresetIdSchema>;
-
-/** Resolves one stable preset id without exposing array-order assumptions to callers. */
-const findMetricPreset = (id: MetricPresetId): MetricPreset => {
-  const preset = METRIC_PRESETS.find((candidate) => candidate.id === id);
-  if (preset === undefined) throw new Error(`Unknown metric preset: ${id}`);
-  return preset;
-};
+] satisfies MetricPreset[];
 
 export {
   METRIC_PRESETS,
-  findMetricPreset,
   metricPresetIdSchema,
   metricPresetSchema,
   type MetricPreset,

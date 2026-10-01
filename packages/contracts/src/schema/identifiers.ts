@@ -1,3 +1,6 @@
+// `as const` gives each identifier a non-widening literal type, so `{ schema: CLI_RESULT_SCHEMA_ID }`
+// stays typed as the literal inside mutable object literals instead of widening to string.
+
 /** Identifies the agent invocation request and response envelopes. */
 const AGENT_PROTOCOL = 'attest.agent-invocation' as const;
 

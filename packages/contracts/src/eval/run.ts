@@ -1,6 +1,6 @@
 import { z } from 'zod';
-import { caseSelectionSchema, caseSelectionSummarySchema } from './selection.js';
 
+import { caseSelectionSchema, caseSelectionSummarySchema } from './selection.js';
 import {
   durationMillisecondsSchema,
   projectIdSchema,
@@ -23,14 +23,6 @@ const evalRunCommonRequestFields = {
   junit_path: z.string().min(1).optional(),
 };
 
-const selectedTestsFields = {
-  test_ids: z.array(resourceIdSchema).nonempty(),
-};
-
-const allTestsFields = {
-  all: z.literal(true),
-};
-
 const humanOutputFields = {
   output: z.literal('human'),
   watch: z.boolean().optional(),
@@ -40,31 +32,26 @@ const structuredOutputFields = {
   output: z.enum(['json', 'jsonl']),
 };
 
+/** Builds the explicit-tests and all-tests request branches for one output mode. */
+const testScopeBranches = <OutputFields extends z.core.$ZodLooseShape>(
+  outputFields: OutputFields,
+) =>
+  [
+    z.strictObject({
+      ...evalRunCommonRequestFields,
+      test_ids: z.array(resourceIdSchema).nonempty(),
+      ...outputFields,
+    }),
+    z.strictObject({ ...evalRunCommonRequestFields, all: z.literal(true), ...outputFields }),
+  ] as const;
+
 /**
  * Encodes the normalized `attest eval run` request produced by flags or JSON input.
- * Separate strict branches make test/all selection exclusive and keep watch out of structured output.
+ * Strict branches make test/all selection exclusive and keep watch out of structured output.
  */
 const evalRunRequestSchema = z.union([
-  z.strictObject({
-    ...evalRunCommonRequestFields,
-    ...selectedTestsFields,
-    ...humanOutputFields,
-  }),
-  z.strictObject({
-    ...evalRunCommonRequestFields,
-    ...selectedTestsFields,
-    ...structuredOutputFields,
-  }),
-  z.strictObject({
-    ...evalRunCommonRequestFields,
-    ...allTestsFields,
-    ...humanOutputFields,
-  }),
-  z.strictObject({
-    ...evalRunCommonRequestFields,
-    ...allTestsFields,
-    ...structuredOutputFields,
-  }),
+  ...testScopeBranches(humanOutputFields),
+  ...testScopeBranches(structuredOutputFields),
 ]);
 
 const authoredResourceHashSchema = z.strictObject({
