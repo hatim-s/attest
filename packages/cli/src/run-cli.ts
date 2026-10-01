@@ -2,6 +2,7 @@ import { createRequire } from 'node:module';
 
 import { Command, CommanderError } from 'commander';
 
+import { registerCloudCommands } from './commands/cloud/register-cloud-commands.js';
 import { registerEvalCommands } from './commands/eval/eval-command.js';
 import { renderEvalFailureEvent, renderEvalResultLine } from './commands/eval/eval-output.js';
 import { registerMetricCommands } from './commands/metric/register-metric-commands.js';
@@ -61,6 +62,7 @@ const createProgram = (
 
   const commandContext = { ...context, program };
   registerRootCommands(commandContext);
+  registerCloudCommands(commandContext);
   registerProjectResourceCommands(commandContext);
   registerMetricCommands(commandContext);
   registerTestCommands(commandContext);
@@ -149,6 +151,12 @@ const requestedCommand = (argv: readonly string[]): string => {
   }
   if (first === 'schema' && ['list', 'print'].includes(second ?? '')) {
     return `schema.${second}`;
+  }
+  if (first === 'cloud' && second !== undefined && !second.startsWith('-')) {
+    const third = normalizedArguments[2];
+    if (second === 'project' && ['create', 'list'].includes(third ?? ''))
+      return `cloud.project.${third}`;
+    return `cloud.${second}`;
   }
   if (first === 'eval' && ['run', 'cancel'].includes(second ?? '')) {
     return `eval.${second}`;

@@ -40,6 +40,10 @@
     "./view-server": {
       "types": "./dist/view-server/index.d.ts",
       "import": "./dist/view-server/index.js"
+    },
+    "./cloud": {
+      "types": "./dist/cloud/index.d.ts",
+      "import": "./dist/cloud/index.js"
     }
   },
   "dependencies": {
