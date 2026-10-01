@@ -162,6 +162,7 @@ const executeCases = async <Payload>(
   const scheduler = createCaseScheduler(cases, { concurrency, workerCount });
   const failedWorkers = new Map<number, string>();
   const pending = new Map<number, Promise<SettledCase<Payload>>>();
+  const completions: SettledCase<Payload>[] = [];
   const state: CaseExecutionState<Payload> = {
     records: [],
     infrastructureErrors: [],
@@ -191,14 +192,18 @@ const executeCases = async <Payload>(
       const failure = failedWorkers.get(workerIndex);
       pending.set(
         workerIndex,
-        failure === undefined
+        (failure === undefined
           ? startCase(task, resolvedCase, workerIndex)
-          : Promise.resolve({
+          : Promise.resolve<SettledCase<Payload>>({
               resolvedCase,
               workerIndex,
               cancelledAtSettlement: signal.aborted,
               result: { status: 'rejected', reason: new Error(failure) },
-            }),
+            })
+        ).then((settled) => {
+          completions.push(settled);
+          return settled;
+        }),
       );
     }
   };
@@ -206,7 +211,10 @@ const executeCases = async <Payload>(
   try {
     await schedule();
     while (pending.size > 0) {
-      const settled = await Promise.race(pending.values());
+      // Several cases can settle while persistence waits. Capture their order at settlement;
+      // Promise.race alone picks map order when all its inputs have already resolved.
+      if (completions.length === 0) await Promise.race(pending.values());
+      const settled = completions.shift()!;
       pending.delete(settled.workerIndex);
       scheduler.release(settled.resolvedCase);
       const failure = workerCount === undefined ? undefined : workerFailure(settled);

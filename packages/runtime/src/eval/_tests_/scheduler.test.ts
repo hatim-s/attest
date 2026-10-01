@@ -36,6 +36,49 @@ const controlledRunner = (plan: ResolvedEvalPlan<string>) => {
 };
 
 describe('case scheduling', () => {
+  it('retains completion order while the persistence sink is blocked', async () => {
+    const plan = createPlan(['first', 'second', 'third'], { concurrency: 3 });
+    const control = controlledRunner(plan);
+    const persistence = createPersistence();
+    const persistenceStarted = deferred<void>();
+    const releasePersistence = deferred<void>();
+    const thirdFinished = deferred<void>();
+    persistence.recordCase.mockImplementationOnce(async () => {
+      persistenceStarted.resolve();
+      await releasePersistence.promise;
+    });
+    const runner: EvalCaseRunner<string> = {
+      executeCase: async (...args) => {
+        const result = await control.runner.executeCase(...args);
+        if (args[1].case_id === 'third') thirdFinished.resolve();
+        return result;
+      },
+    };
+    const execution = executeCases(
+      plan.run,
+      plan.cases,
+      runner,
+      persistence.adapter,
+      new AbortController().signal,
+      () => Promise.resolve(),
+    );
+    await vi.waitFor(() => expect(control.startedIds()).toHaveLength(3));
+    control.complete('first');
+    await persistenceStarted.promise;
+    control.complete('third');
+    await thirdFinished.promise;
+    control.complete('second');
+    releasePersistence.resolve();
+
+    const result = await execution;
+    expect(result.records.map(({ normalized }) => normalized.case_id)).toEqual([
+      'first',
+      'third',
+      'second',
+    ]);
+    expect(result.records.map(({ normalized }) => normalized.completion_index)).toEqual([0, 1, 2]);
+  });
+
   it('bounds concurrency while retaining observed completion order and configured indexes', async () => {
     const plan = createPlan(['case-zero', 'case-one', 'case-two']);
     const control = controlledRunner(plan);
