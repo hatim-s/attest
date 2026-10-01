@@ -1,5 +1,5 @@
 import { AgentInvocationError, abortedError } from '../../errors.js';
-import { DEFAULT_CONNECT_MS, DEFAULT_FIRST_BYTE_MS } from '../../internal/agent-defaults.js';
+import { DEFAULT_FIRST_BYTE_MS } from '../../internal/agent-defaults.js';
 import { appendEvidencePrefix, createRawExcerpt } from '../../internal/raw-excerpt.js';
 import type { StreamHttpResponse, StreamHttpTransport } from '../stream/stream-transport.js';
 import type { HttpClientPolicy, HttpJsonTransport } from './http-client.js';
@@ -144,6 +144,7 @@ const readFetchJson = async (
 /**
  * Adapts host-guarded fetch to shared mapped JSON, polling, SSE and JSONL execution.
  * This does not validate DNS. The host must enforce its network policy before every fetch.
+ * Fetch exposes no separate TCP phase; connect_ms enforcement belongs to the host.
  * Neither adapter retries requests; replay remains controlled by the invocation options.
  */
 const createFetchHttpTransports = (
@@ -160,7 +161,7 @@ const createFetchHttpTransports = (
         guardedFetch,
         current,
         policy.attemptSignal,
-        Math.min(policy.connectTimeoutMs, policy.firstByteTimeoutMs),
+        policy.firstByteTimeoutMs,
       );
       const parsed = await readFetchJson(response, policy);
       const result = {
@@ -189,10 +190,7 @@ const createFetchHttpTransports = (
       guardedFetch,
       request,
       signal,
-      Math.min(
-        agent.timeouts?.connect_ms ?? DEFAULT_CONNECT_MS,
-        agent.timeouts?.first_byte_ms ?? DEFAULT_FIRST_BYTE_MS,
-      ),
+      agent.timeouts?.first_byte_ms ?? DEFAULT_FIRST_BYTE_MS,
     );
   return { requestJson, requestStream };
 };

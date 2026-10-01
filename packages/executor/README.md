@@ -46,5 +46,7 @@ transports, local callers retain DNS-pinned Node HTTP behavior.
 
 The fetch adapter does not validate or pin DNS. The caller's `guardedFetch` must
 enforce endpoint policy on every request, including polling and same-origin
-redirects, and honor the supplied cancellation signal. Passing global fetch
+redirects, and honor the supplied cancellation signal. Fetch has no separate TCP connection
+phase, so these adapters use `first_byte_ms` for the header deadline. The host
+must enforce `connect_ms` when its networking API supports that phase. Passing global fetch
 without a guard is suitable only for trusted local endpoints.

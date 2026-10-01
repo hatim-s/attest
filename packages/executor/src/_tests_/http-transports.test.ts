@@ -204,4 +204,45 @@ describe('host HTTP transports', () => {
     expect(result.diagnostics.remoteJobId).toBe('one');
     expect(guardedFetch).toHaveBeenCalledTimes(2);
   });
+  it.each(['json', 'jsonl'] as const)(
+    'uses first-byte rather than connect timeout for delayed %s headers',
+    async (mode) => {
+      const delayedFetch = (_url: string, init: RequestInit) =>
+        new Promise<Response>((resolve, reject) => {
+          const abort = (): void => {
+            clearTimeout(timer);
+            reject(init.signal?.reason);
+          };
+          const timer = setTimeout(() => {
+            init.signal?.removeEventListener('abort', abort);
+            resolve(
+              mode === 'json'
+                ? Response.json({ answer: 'ok' })
+                : new Response('{"type":"done","output":"ok"}\n'),
+            );
+          }, 30);
+          init.signal?.addEventListener('abort', abort, { once: true });
+        });
+      const invoke = (firstByteMs: number) => {
+        const transports = createFetchHttpTransports(delayedFetch);
+        const timeouts = {
+          connect_ms: 1,
+          first_byte_ms: firstByteMs,
+          attempt_ms: 1000,
+          idle_ms: 50,
+        };
+        return mode === 'json'
+          ? invokeMappedHttpAgent({ ...mapped, timeouts }, request, { ...transports, retries: 0 })
+          : invokeStreamingAgent({ ...streaming('jsonl'), timeouts }, request, {
+              ...transports,
+              retries: 0,
+            });
+      };
+      const completed = await invoke(200);
+      expect(completed.status).toBe('ok');
+      const expired = await invoke(5);
+      expect(expired.status === 'invocation_error' && expired.error.code).toBe('timeout');
+      expect(expired.attempts).toHaveLength(1);
+    },
+  );
 });
