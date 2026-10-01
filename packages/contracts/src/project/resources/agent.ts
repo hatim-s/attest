@@ -82,6 +82,67 @@ const redactionPolicySchema = z.strictObject({
 
 const processEnvironmentSchema = z.record(z.string(), secretReferenceSchema);
 
+const literalRelativePathSchema = relativePathSchema.regex(
+  /^[^*?\[\]{}]+$/u,
+  'must not contain glob metacharacters',
+);
+
+/** Uploads one project file into a Vercel sandbox before agent invocation. */
+const vercelSandboxFileSchema = z.strictObject({
+  source: literalRelativePathSchema,
+  destination: literalRelativePathSchema,
+  mode: z.number().int().min(0).max(0o777).optional(),
+});
+
+/** Copies one sandbox artifact back into the project after agent invocation. */
+const vercelSandboxArtifactSchema = z.strictObject({
+  source: literalRelativePathSchema,
+  destination: literalRelativePathSchema,
+});
+
+/** Canonicalizes safe authored paths without consulting host-platform path rules. */
+const canonicalRelativePath = (path: string): string =>
+  path
+    .replaceAll('\\', '/')
+    .split('/')
+    .filter((segment) => segment.length > 0 && segment !== '.')
+    .join('/');
+
+/** Reports aliased destinations that would overwrite sandbox files or host artifacts. */
+const reportDuplicateDestinations = (
+  entries: ReadonlyArray<{ destination: string }>,
+  path: 'files' | 'artifacts',
+  context: z.RefinementCtx,
+): void => {
+  const destinations = new Set<string>();
+  const label = path === 'files' ? 'file' : 'artifact';
+  entries.forEach(({ destination }, index) => {
+    const canonicalDestination = canonicalRelativePath(destination);
+    if (destinations.has(canonicalDestination)) {
+      context.addIssue({
+        code: 'custom',
+        path: [path, index, 'destination'],
+        message: `duplicate ${label} destination: ${destination}`,
+      });
+    }
+    destinations.add(canonicalDestination);
+  });
+};
+
+/** Configures an isolated Vercel sandbox for one native CLI case. */
+const vercelSandboxSchema = z
+  .strictObject({
+    kind: z.literal('vercel'),
+    image: z.string().min(1).optional(),
+    files: z.array(vercelSandboxFileSchema),
+    artifacts: z.array(vercelSandboxArtifactSchema).optional(),
+    artifact_directory: relativePathSchema.optional(),
+  })
+  .superRefine((sandbox, context) => {
+    reportDuplicateDestinations(sandbox.files, 'files', context);
+    reportDuplicateDestinations(sandbox.artifacts ?? [], 'artifacts', context);
+  });
+
 /** Compares JSON terminal values without treating object key insertion order as semantic. */
 const jsonValuesEqual = (left: unknown, right: unknown): boolean => {
   if (Object.is(left, right)) return true;
@@ -112,6 +173,7 @@ const nativeForegroundTransportSchema = z.strictObject({
   argv: z.array(z.string()).nonempty(),
   cwd: relativePathSchema.optional(),
   env: processEnvironmentSchema.optional(),
+  sandbox: vercelSandboxSchema.optional(),
 });
 
 const backgroundReadinessSchema = z.discriminatedUnion('kind', [
@@ -267,6 +329,7 @@ type AgentTransport = z.infer<typeof agentTransportSchema>;
 type HttpRequestTemplate = z.infer<typeof httpRequestTemplateSchema>;
 type RedactionPolicy = z.infer<typeof redactionPolicySchema>;
 type ResponseExtraction = z.infer<typeof responseExtractionSchema>;
+type VercelSandbox = z.infer<typeof vercelSandboxSchema>;
 
 export {
   agentEvidenceLimitsSchema,
@@ -276,6 +339,7 @@ export {
   httpRequestTemplateSchema,
   redactionPolicySchema,
   responseExtractionSchema,
+  vercelSandboxSchema,
   type AgentEvidenceLimits,
   type AgentResource,
   type AgentTimeoutPolicy,
@@ -283,4 +347,5 @@ export {
   type HttpRequestTemplate,
   type RedactionPolicy,
   type ResponseExtraction,
+  type VercelSandbox,
 };

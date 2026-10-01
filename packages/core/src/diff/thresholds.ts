@@ -43,7 +43,7 @@ const validateThresholds = (thresholds: ThresholdConfig): void => {
   }
 };
 
-/** Evaluates only explicitly configured PLAN 1D.3 CI gates. */
+/** Evaluates only explicitly configured CI gates. */
 const evaluateThresholds = (
   diff: RunDiff,
   candidateCases: CaseRecord[],
@@ -51,6 +51,9 @@ const evaluateThresholds = (
 ): CiVerdict => {
   validateThresholds(thresholds);
   const reasons: string[] = [];
+  if (diff.summary.coverage?.sharedCases === 0) {
+    reasons.push('Partial runs have no shared cases to compare.');
+  }
   if (
     thresholds.minPassRate !== undefined &&
     diff.summary.candidatePassRate < thresholds.minPassRate

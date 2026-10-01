@@ -16,9 +16,8 @@
   "dependencies": {
     "@attest/contracts": "workspace:*",
     "@attest/core": "workspace:*",
-    "@attest/web": "workspace:*",
-    "commander": "^15.0.0",
-    "yaml": "^2.9.0"
+    "@attest/local": "workspace:*",
+    "commander": "^15.0.0"
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
@@ -29,6 +28,11 @@
   "devDependencies": {
     "vitest": "^3"
   },
+  "files": [
+    "dist",
+    "LICENSE",
+    "NOTICE"
+  ],
   "description": "Command-line agent evaluation and local results dashboard.",
   "license": "Apache-2.0",
   "repository": {
@@ -40,16 +44,12 @@
   "bugs": {
     "url": "https://github.com/hatim-s/attest/issues"
   },
-  "engines": {
-    "node": ">=22.15.0"
-  },
-  "files": [
-    "dist",
-    "LICENSE",
-    "NOTICE"
-  ],
   "publishConfig": {
     "access": "public",
     "tag": "alpha"
+  },
+  "engines": {
+    "node": ">=22.15.0",
+    "bun": ">=1.4"
   }
 }

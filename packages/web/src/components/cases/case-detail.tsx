@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 
-import type { CaseRecord, CaseSummary } from '../../api/types.js';
+import type { CaseRecord, CaseSummary, StoredMetricEvaluation } from '../../api/types.js';
 import { formatDuration } from '../../lib/format.js';
 import { TraceWaterfall } from '../traces/trace-waterfall.js';
 import { Badge, Button, ErrorNotice, Loading } from '../shared/ui.js';
@@ -11,6 +11,32 @@ const JsonBlock = ({ label, value }: { label: string; value: unknown }) => (
     <pre>{JSON.stringify(value, null, 2)}</pre>
   </section>
 );
+
+/** Renders one stored metric evaluation by narrowing the evaluated/error union once. */
+const MetricRow = ({ metric }: { metric: StoredMetricEvaluation }) => {
+  if (metric.status === 'error') {
+    return (
+      <div className="metric-row" key={metric.metricName}>
+        <span>
+          <Badge tone="error">error</Badge>
+        </span>
+        <strong>{metric.metricName}</strong>
+        <span className="mono">—</span>
+        <span className="metric-rationale">{metric.rationale ?? metric.error.message}</span>
+      </div>
+    );
+  }
+  return (
+    <div className="metric-row" key={metric.metricName}>
+      <span>
+        <Badge tone={metric.pass ? 'pass' : 'fail'}>{metric.pass ? 'passed' : 'failed'}</Badge>
+      </span>
+      <strong>{metric.metricName}</strong>
+      <span className="mono">{metric.score}</span>
+      <span className="metric-rationale">{metric.rationale ?? ''}</span>
+    </div>
+  );
+};
 
 type CaseDetailProps = {
   caseRecord?: CaseRecord;
@@ -74,30 +100,7 @@ const CaseDetail = ({ caseRecord, error, isLoading, onClose, selected }: CaseDet
               <h4>Metrics</h4>
               <div className="metric-list">
                 {caseRecord.metrics.map((metric) => (
-                  <div className="metric-row" key={metric.metricName}>
-                    <span>
-                      <Badge
-                        tone={
-                          metric.status === 'error'
-                            ? 'error'
-                            : metric.pass === false
-                              ? 'fail'
-                              : 'pass'
-                        }
-                      >
-                        {metric.status === 'error'
-                          ? 'error'
-                          : metric.pass === false
-                            ? 'failed'
-                            : 'passed'}
-                      </Badge>
-                    </span>
-                    <strong>{metric.metricName}</strong>
-                    <span className="mono">{metric.score ?? '—'}</span>
-                    <span className="metric-rationale">
-                      {metric.rationale ?? metric.error?.message ?? ''}
-                    </span>
-                  </div>
+                  <MetricRow key={metric.metricName} metric={metric} />
                 ))}
               </div>
             </section>
@@ -105,10 +108,12 @@ const CaseDetail = ({ caseRecord, error, isLoading, onClose, selected }: CaseDet
             <JsonBlock
               label="Response"
               value={
-                caseRecord.response ?? {
-                  errorCode: caseRecord.errorCode,
-                  errorMessage: caseRecord.errorMessage,
-                }
+                caseRecord.outcome === 'completed'
+                  ? caseRecord.response
+                  : {
+                      errorCode: caseRecord.errorCode,
+                      errorMessage: caseRecord.errorMessage,
+                    }
               }
             />
             {caseRecord.trace !== undefined ? (

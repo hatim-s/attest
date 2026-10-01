@@ -1,35 +1,62 @@
 # Package scripts
 
-| Name                | Package                  | What it does                                                                                                     |
-| ------------------- | ------------------------ | ---------------------------------------------------------------------------------------------------------------- |
-| `build`             | root                     | Runs each package build task through Turborepo.                                                                  |
-| `typecheck`         | root                     | Runs workspace TypeScript checks through Turborepo, then checks release scripts.                                 |
-| `lint`              | root                     | Runs ESLint across the repository.                                                                               |
-| `test`              | root                     | Runs package test tasks serially so process fixtures cannot collide.                                             |
-| `generate:schemas`  | root                     | Regenerates published JSON Schemas from `@attest/contracts`.                                                     |
-| `format:check`      | root                     | Checks repository formatting with Prettier.                                                                      |
-| `format`            | root                     | Formats repository files with Prettier.                                                                          |
-| `lint:fix`          | root                     | Applies ESLint fixes across the repository.                                                                      |
-| `build`             | `@attest/contracts`      | Compiles production contract artifacts to `dist/`, excluding tests.                                              |
-| `typecheck`         | `@attest/contracts`      | Type-checks contract source without emitting files.                                                              |
-| `test`              | `@attest/contracts`      | Runs contract tests.                                                                                             |
-| `test`              | `@attest/conformance`    | Runs cross-package contract fixtures + fake-agent smoke tests.                                                   |
-| `typecheck`         | `@attest/conformance`    | Type-checks conformance source without emitting files.                                                           |
-| `test:fuzz`         | `@attest/conformance`    | Fuzzes contract parsers when `FUZZ=1` is set.                                                                    |
-| `build`             | `@attest/core`           | Builds referenced contracts and production core artifacts.                                                       |
-| `typecheck`         | `@attest/core`           | Type-checks core source without emitting files.                                                                  |
-| `test`              | `@attest/core`           | Runs core tests in one worker because process sweeps are global.                                                 |
-| `build`             | `@attest/cli`            | Compiles production CLI artifacts to `dist/`, excluding tests.                                                   |
-| `test`              | `@attest/cli`            | Runs CLI and acceptance tests in one worker to isolate processes.                                                |
-| `typecheck`         | `@attest/cli`            | Type-checks CLI source without emitting files.                                                                   |
-| `generate`          | `@attest/schemas`        | Regenerates published schemas from the contract source.                                                          |
-| `typecheck`         | `@attest/schemas`        | Type-checks schema generation and artifact validation source.                                                    |
-| `test`              | `@attest/schemas`        | Runs the `_tests` validator for generated JSON Schema artifacts.                                                 |
-| `build`             | `@attest/web`            | Builds the self-contained dashboard HTML module for CLI embedding.                                               |
-| `test`              | `@attest/web`            | Runs focused dashboard unit tests.                                                                               |
-| `typecheck`         | `@attest/web`            | Type-checks web source without emitting files.                                                                   |
-| `test:fuzz`         | root                     | Builds contracts, then runs conformance parser fuzzing through Turborepo without caching.                        |
-| `release:pack`      | root                     | Builds packages, regenerates schemas, and packs five alpha archives with SHA-256 checksums into `dist/release/`. |
-| `release:check`     | root                     | Packs the release and validates npm installation, CLI, SQLite, schemas, and dashboard outside the workspace.     |
-| `typecheck:scripts` | root                     | Type-checks release packaging and consumer verification scripts.                                                 |
-| `prepublishOnly`    | all five public packages | Rejects direct workspace publication; publish archives produced by `release:pack`.                               |
+Run workspace commands from the repository root. To run one package script, use
+`bun run --cwd packages/<package> <script>`.
+
+| Script             | Root behavior                                                           |
+| ------------------ | ----------------------------------------------------------------------- |
+| `build`            | Builds packages in dependency order through Turborepo.                  |
+| `typecheck`        | Builds dependencies, checks package source, and checks release scripts. |
+| `lint`             | Checks TypeScript, TSX, and package import boundaries with ESLint.      |
+| `lint:fix`         | Applies available ESLint fixes.                                         |
+| `test`             | Runs package tests serially to isolate process fixtures.                |
+| `generate:schemas` | Regenerates JSON schemas from contracts.                                |
+| `format:check`     | Checks repository formatting with Prettier.                             |
+| `format`           | Formats repository files with Prettier.                                 |
+
+## Application packages
+
+| Script      | Packages                                       | Behavior                                                                                                             |
+| ----------- | ---------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `build`     | contracts, core, executor, runtime, local, cli | Compiles production artifacts into `dist`, excluding tests. Runtime and local build their referenced packages first. |
+| `typecheck` | contracts, core, executor, runtime, local, cli | Checks source and test types without emitting files.                                                                 |
+| `test`      | contracts                                      | Runs protocol and schema tests.                                                                                      |
+| `test`      | core                                           | Runs domain comparison, import, trace, and record tests.                                                             |
+| `test`      | executor                                       | Runs invocation, transport, and process-cleanup tests with one worker.                                               |
+| `test:node` | executor                                       | Runs compiled executor acceptance checks on Node. Build executor first.                                              |
+| `test:bun`  | executor                                       | Runs the same compiled executor checks on Bun. Build executor first.                                                 |
+| `test`      | runtime                                        | Runs scheduling, lifecycle, isolation, metric, and cancellation tests with one worker.                               |
+| `test`      | local                                          | Runs project, transaction, SQLite, application, and local server tests with one worker.                              |
+| `test`      | cli                                            | Runs terminal command and packed-install acceptance tests with one worker.                                           |
+
+## Supporting packages
+
+| Script      | Package     | Behavior                                                                  |
+| ----------- | ----------- | ------------------------------------------------------------------------- |
+| `generate`  | schemas     | Writes public JSON schemas from the contract registry.                    |
+| `typecheck` | schemas     | Checks generation and artifact validation code.                           |
+| `test`      | schemas     | Checks the generated schema file set and exact content against contracts. |
+| `build`     | web         | Builds the self-contained dashboard HTML module for local embedding.      |
+| `typecheck` | web         | Checks dashboard source and tests.                                        |
+| `test`      | web         | Runs focused dashboard tests.                                             |
+| `dev`       | site        | Serves the marketing page at `http://127.0.0.1:8735`.                     |
+| `build`     | site        | Copies the marketing page into `dist/index.html`.                         |
+| `preview`   | site        | Serves the built marketing page on the same loopback address.             |
+| `typecheck` | site        | Checks the site build and preview scripts.                                |
+| `test`      | conformance | Runs public protocol fixtures and fake-agent checks.                      |
+| `test:fuzz` | conformance | Runs parser fuzzing with `FUZZ=1`.                                        |
+| `typecheck` | conformance | Checks conformance source.                                                |
+
+Conformance commands run with `bun run --cwd conformance <script>`.
+
+Runtime also provides `test:node` and `test:bun`. They run the same compiled eval pipeline on each host, including isolated case files, all case stages, and persistence. Build runtime first.
+
+## Release scripts
+
+| Script              | Package                | Behavior                                                                                                                                     |
+| ------------------- | ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| `release:pack`      | root                   | Builds packages, regenerates schemas, and packs eight alpha archives with checksums into `dist/release/`.                                    |
+| `release:check`     | root                   | Packs and installs the archives in an isolated npm project, then checks public imports, evaluation, reports, SQLite, schemas, and dashboard. |
+| `typecheck:scripts` | root                   | Checks release packaging and consumer verification scripts.                                                                                  |
+| `test:fuzz`         | root                   | Builds contracts and runs uncached conformance parser fuzzing.                                                                               |
+| `prepublishOnly`    | eight release packages | Rejects workspace publication. Publish the reviewed archives instead.                                                                        |

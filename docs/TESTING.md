@@ -1,6 +1,6 @@
 # Testing
 
-Tests live in a local `_tests/` directory beside the source module they exercise and use the
+Tests live in a local `_tests_/` directory beside the source module they exercise and use the
 `*.test.ts` naming convention. Test-only fixtures and support code belong beneath that same
 directory. Add tests only for meaningful behavior: public contracts, important edge cases, and
 regressions. Do not add tests merely to mirror implementation details.

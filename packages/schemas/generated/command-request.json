@@ -1,5 +1,5 @@
 {
-  "$comment": "Runtime-only invariants include canonical manifest paths, cross-resource references, duplicate identifiers, and resolved case-id collisions.",
+  "$comment": "Runtime-only invariants include canonical manifest paths, cross-resource references, duplicate identifiers, resolved case-id collisions, polling constraints, and duplicate sandbox destinations after platform-independent relative-path normalization.",
   "$defs": {
     "AgentResource": {
       "additionalProperties": false,
@@ -282,6 +282,127 @@
                 "lifecycle": {
                   "const": "per_case",
                   "type": "string"
+                },
+                "sandbox": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "artifact_directory": {
+                      "allOf": [
+                        {
+                          "pattern": "^(?![A-Za-z]:)"
+                        },
+                        {
+                          "pattern": "^(?![\\\\/])(?!(?:.*[\\\\/])?\\.\\.(?:[\\\\/]|$)).+$"
+                        }
+                      ],
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "artifacts": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "destination": {
+                            "allOf": [
+                              {
+                                "pattern": "^(?![A-Za-z]:)"
+                              },
+                              {
+                                "pattern": "^(?![\\\\/])(?!(?:.*[\\\\/])?\\.\\.(?:[\\\\/]|$)).+$"
+                              },
+                              {
+                                "pattern": "^[^*?\\[\\]{}]+$"
+                              }
+                            ],
+                            "minLength": 1,
+                            "type": "string"
+                          },
+                          "source": {
+                            "allOf": [
+                              {
+                                "pattern": "^(?![A-Za-z]:)"
+                              },
+                              {
+                                "pattern": "^(?![\\\\/])(?!(?:.*[\\\\/])?\\.\\.(?:[\\\\/]|$)).+$"
+                              },
+                              {
+                                "pattern": "^[^*?\\[\\]{}]+$"
+                              }
+                            ],
+                            "minLength": 1,
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "source",
+                          "destination"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "files": {
+                      "items": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "destination": {
+                            "allOf": [
+                              {
+                                "pattern": "^(?![A-Za-z]:)"
+                              },
+                              {
+                                "pattern": "^(?![\\\\/])(?!(?:.*[\\\\/])?\\.\\.(?:[\\\\/]|$)).+$"
+                              },
+                              {
+                                "pattern": "^[^*?\\[\\]{}]+$"
+                              }
+                            ],
+                            "minLength": 1,
+                            "type": "string"
+                          },
+                          "mode": {
+                            "maximum": 511,
+                            "minimum": 0,
+                            "type": "integer"
+                          },
+                          "source": {
+                            "allOf": [
+                              {
+                                "pattern": "^(?![A-Za-z]:)"
+                              },
+                              {
+                                "pattern": "^(?![\\\\/])(?!(?:.*[\\\\/])?\\.\\.(?:[\\\\/]|$)).+$"
+                              },
+                              {
+                                "pattern": "^[^*?\\[\\]{}]+$"
+                              }
+                            ],
+                            "minLength": 1,
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "source",
+                          "destination"
+                        ],
+                        "type": "object"
+                      },
+                      "type": "array"
+                    },
+                    "image": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "kind": {
+                      "const": "vercel",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "files"
+                  ],
+                  "type": "object"
                 }
               },
               "required": [
@@ -1242,6 +1363,11 @@
       "properties": {
         "expected": {
           "$ref": "#/$defs/__schema10"
+        },
+        "folder": {
+          "minLength": 1,
+          "pattern": "^(?!\\.{1,2}(?:\\/|$))[^\\s/\\\\](?:[^/\\\\]*[^\\s/\\\\])?(?:\\/(?!\\.{1,2}(?:\\/|$))[^\\s/\\\\](?:[^/\\\\]*[^\\s/\\\\])?)*(?![\\s\\S])",
+          "type": "string"
         },
         "id": {
           "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
@@ -2991,6 +3117,11 @@
             "expected": {
               "$ref": "#/$defs/__schema10"
             },
+            "folder": {
+              "minLength": 1,
+              "pattern": "^(?!\\.{1,2}(?:\\/|$))[^\\s/\\\\](?:[^/\\\\]*[^\\s/\\\\])?(?:\\/(?!\\.{1,2}(?:\\/|$))[^\\s/\\\\](?:[^/\\\\]*[^\\s/\\\\])?)*(?![\\s\\S])",
+              "type": "string"
+            },
             "id": {
               "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
               "type": "string"
@@ -3115,7 +3246,7 @@
                 "additionalProperties": false,
                 "properties": {
                   "destination": {
-                    "pattern": "^(?:id|input(?:\\.(?:[A-Za-z0-9_-]|\\\\[.\\\\])+)*|expected(?:\\.(?:[A-Za-z0-9_-]|\\\\[.\\\\])+)*|params(?:\\.(?:[A-Za-z0-9_-]|\\\\[.\\\\])+)+|tags|metrics)$",
+                    "pattern": "^(?:id|input(?:\\.(?:[A-Za-z0-9_-]|\\\\[.\\\\])+)*|expected(?:\\.(?:[A-Za-z0-9_-]|\\\\[.\\\\])+)*|params(?:\\.(?:[A-Za-z0-9_-]|\\\\[.\\\\])+)+|tags|folder|metrics)$",
                     "type": "string"
                   },
                   "source": {
@@ -3379,7 +3510,7 @@
                 "additionalProperties": false,
                 "properties": {
                   "destination": {
-                    "pattern": "^(?:id|input(?:\\.(?:[A-Za-z0-9_-]|\\\\[.\\\\])+)*|expected(?:\\.(?:[A-Za-z0-9_-]|\\\\[.\\\\])+)*|params(?:\\.(?:[A-Za-z0-9_-]|\\\\[.\\\\])+)+|tags|metrics)$",
+                    "pattern": "^(?:id|input(?:\\.(?:[A-Za-z0-9_-]|\\\\[.\\\\])+)*|expected(?:\\.(?:[A-Za-z0-9_-]|\\\\[.\\\\])+)*|params(?:\\.(?:[A-Za-z0-9_-]|\\\\[.\\\\])+)+|tags|folder|metrics)$",
                     "type": "string"
                   },
                   "source": {
@@ -3966,6 +4097,23 @@
               "maximum": 9007199254740991,
               "type": "integer"
             },
+            "dataset_ids": {
+              "items": {
+                "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+                "type": "string"
+              },
+              "minItems": 1,
+              "type": "array"
+            },
+            "folders": {
+              "items": {
+                "minLength": 1,
+                "pattern": "^(?!\\.{1,2}(?:\\/|$))[^\\s/\\\\](?:[^/\\\\]*[^\\s/\\\\])?(?:\\/(?!\\.{1,2}(?:\\/|$))[^\\s/\\\\](?:[^/\\\\]*[^\\s/\\\\])?)*(?![\\s\\S])",
+                "type": "string"
+              },
+              "minItems": 1,
+              "type": "array"
+            },
             "junit_path": {
               "minLength": 1,
               "type": "string"
@@ -3973,6 +4121,24 @@
             "output": {
               "const": "human",
               "type": "string"
+            },
+            "sample": {
+              "additionalProperties": false,
+              "properties": {
+                "count": {
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991,
+                  "type": "integer"
+                },
+                "seed": {
+                  "minLength": 1,
+                  "type": "string"
+                }
+              },
+              "required": [
+                "count"
+              ],
+              "type": "object"
             },
             "schema": {
               "const": "attest.command-request",
@@ -4036,6 +4202,23 @@
               "maximum": 9007199254740991,
               "type": "integer"
             },
+            "dataset_ids": {
+              "items": {
+                "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+                "type": "string"
+              },
+              "minItems": 1,
+              "type": "array"
+            },
+            "folders": {
+              "items": {
+                "minLength": 1,
+                "pattern": "^(?!\\.{1,2}(?:\\/|$))[^\\s/\\\\](?:[^/\\\\]*[^\\s/\\\\])?(?:\\/(?!\\.{1,2}(?:\\/|$))[^\\s/\\\\](?:[^/\\\\]*[^\\s/\\\\])?)*(?![\\s\\S])",
+                "type": "string"
+              },
+              "minItems": 1,
+              "type": "array"
+            },
             "junit_path": {
               "minLength": 1,
               "type": "string"
@@ -4046,6 +4229,24 @@
                 "jsonl"
               ],
               "type": "string"
+            },
+            "sample": {
+              "additionalProperties": false,
+              "properties": {
+                "count": {
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991,
+                  "type": "integer"
+                },
+                "seed": {
+                  "minLength": 1,
+                  "type": "string"
+                }
+              },
+              "required": [
+                "count"
+              ],
+              "type": "object"
             },
             "schema": {
               "const": "attest.command-request",
@@ -4110,6 +4311,23 @@
               "maximum": 9007199254740991,
               "type": "integer"
             },
+            "dataset_ids": {
+              "items": {
+                "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+                "type": "string"
+              },
+              "minItems": 1,
+              "type": "array"
+            },
+            "folders": {
+              "items": {
+                "minLength": 1,
+                "pattern": "^(?!\\.{1,2}(?:\\/|$))[^\\s/\\\\](?:[^/\\\\]*[^\\s/\\\\])?(?:\\/(?!\\.{1,2}(?:\\/|$))[^\\s/\\\\](?:[^/\\\\]*[^\\s/\\\\])?)*(?![\\s\\S])",
+                "type": "string"
+              },
+              "minItems": 1,
+              "type": "array"
+            },
             "junit_path": {
               "minLength": 1,
               "type": "string"
@@ -4117,6 +4335,24 @@
             "output": {
               "const": "human",
               "type": "string"
+            },
+            "sample": {
+              "additionalProperties": false,
+              "properties": {
+                "count": {
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991,
+                  "type": "integer"
+                },
+                "seed": {
+                  "minLength": 1,
+                  "type": "string"
+                }
+              },
+              "required": [
+                "count"
+              ],
+              "type": "object"
             },
             "schema": {
               "const": "attest.command-request",
@@ -4176,6 +4412,23 @@
               "maximum": 9007199254740991,
               "type": "integer"
             },
+            "dataset_ids": {
+              "items": {
+                "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+                "type": "string"
+              },
+              "minItems": 1,
+              "type": "array"
+            },
+            "folders": {
+              "items": {
+                "minLength": 1,
+                "pattern": "^(?!\\.{1,2}(?:\\/|$))[^\\s/\\\\](?:[^/\\\\]*[^\\s/\\\\])?(?:\\/(?!\\.{1,2}(?:\\/|$))[^\\s/\\\\](?:[^/\\\\]*[^\\s/\\\\])?)*(?![\\s\\S])",
+                "type": "string"
+              },
+              "minItems": 1,
+              "type": "array"
+            },
             "junit_path": {
               "minLength": 1,
               "type": "string"
@@ -4186,6 +4439,24 @@
                 "jsonl"
               ],
               "type": "string"
+            },
+            "sample": {
+              "additionalProperties": false,
+              "properties": {
+                "count": {
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991,
+                  "type": "integer"
+                },
+                "seed": {
+                  "minLength": 1,
+                  "type": "string"
+                }
+              },
+              "required": [
+                "count"
+              ],
+              "type": "object"
             },
             "schema": {
               "const": "attest.command-request",

@@ -58,15 +58,11 @@ put them in `package.json`.
 - Whenever adding, removing, or renaming an environment variable, secret, or Cloudflare binding,
 update `docs/ENV.md` in the same change.
 
-## Implementation plan protocol
+## Architecture and implementation plans
 
-The build plan is `PLAN.md` (repo root, **gitignored** — local working copy). Canonical copy: planloft store `~/.planloft/docs/attest/attest-implementation-plan.md`; published view: https://hatim-s.github.io/planloft-plans/p/d6omNNpVrp/
+Read `docs/ARCHITECTURE.md` before changing package ownership. Keep core independent of execution
+and local infrastructure, runtime independent of local and CLI, and local independent of CLI.
 
-If `PLAN.md` is missing locally, restore it: `planloft copy attest-implementation-plan` (or `node /Users/admin/Projects/planloft/dist/cli.js copy attest-implementation-plan`), then move it to repo root as `PLAN.md`.
-
-Follow the **Agent protocol** section at the top of PLAN.md: claim items (⏳), respect dependencies, mark done ([x] + ✅ note), and after every status change rehost + redeploy so all agents and the human stay in sync:
-
-```bash
-node /Users/admin/Projects/planloft/dist/cli.js hoist PLAN.md --slug attest-implementation-plan --title "attest — Implementation Plan" --kind plan
-node /Users/admin/Projects/planloft/dist/cli.js deploy attest-implementation-plan
-```
+Use `PLAN.md` for a local working plan when a task needs one. It is gitignored. Track concrete
+ownership, dependencies, completed work, and verification there. Keep durable architecture and
+script documentation in `docs/`. Publishing a plan is a separate user-requested action.

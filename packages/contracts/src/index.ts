@@ -76,6 +76,7 @@ export {
   httpRequestTemplateSchema,
   redactionPolicySchema,
   responseExtractionSchema,
+  vercelSandboxSchema,
 } from './project/resources/agent.js';
 export type {
   AgentEvidenceLimits,
@@ -85,6 +86,7 @@ export type {
   HttpRequestTemplate,
   RedactionPolicy,
   ResponseExtraction,
+  VercelSandbox,
 } from './project/resources/agent.js';
 export { caseMetricOverrideSchema, testCaseSchema } from './project/resources/case.js';
 export type { CaseMetricOverride, TestCase } from './project/resources/case.js';
@@ -175,6 +177,19 @@ export {
 } from './project/shared.js';
 export type { ExecutionDefaults, SecretReference } from './project/shared.js';
 export {
+  evalExecutionConfigSchema,
+  evalHookCommandSchema,
+  evalHooksSchema,
+  evalWorkerDirectorySchema,
+  evalWorkersSchema,
+} from './project/eval-execution.js';
+export type {
+  EvalExecutionConfig,
+  EvalHookCommand,
+  EvalHooks,
+  EvalWorkers,
+} from './project/eval-execution.js';
+export {
   evalOutputModeSchema,
   evalRunEffectiveCommandSchema,
   evalRunIdSchema,
@@ -237,3 +252,11 @@ export type {
   WebSocketInvocationRequest,
   WebSocketTransport,
 } from './agent/websocket-contract.js';
+
+export {
+  caseFolderSchema,
+  caseSelectionSchema,
+  caseSelectionSummarySchema,
+  type CaseSelection,
+  type CaseSelectionSummary,
+} from './eval/selection.js';

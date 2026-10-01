@@ -4,10 +4,10 @@ import {
   METRIC_PRESET_SCHEMA_ID,
   METRIC_TEST_FIXTURE_SCHEMA_ID,
   serializeContractSchema,
+  type JsonValue,
 } from '@attest/contracts';
 
 import { AttestCliError } from '../../errors/index.js';
-import type { JsonValue } from '../../project/canonical-project.js';
 import type { CommandResult } from '../shared/command-result.js';
 
 const schemaAliases = new Map<string, string>([
@@ -28,7 +28,7 @@ const runSchemaListCommand = (): CommandResult => {
     })
     .sort((left, right) => left.id.localeCompare(right.id));
   return {
-    human: items.map(({ file, id }) => `  ${id}${id === file ? '' : `  (${file})`}`).join('\n'),
+    operation: 'schema-list',
     projectHashBefore: null,
     projectHashAfter: null,
     result: { items },
@@ -47,7 +47,7 @@ const runSchemaPrintCommand = (schemaId: string): CommandResult => {
   const id = schemaIdForFile(file);
   const schema = JSON.parse(serializeContractSchema(file)) as JsonValue;
   return {
-    human: serializeContractSchema(file).trimEnd(),
+    operation: 'schema-print',
     projectHashBefore: null,
     projectHashAfter: null,
     result: { file, id, schema },

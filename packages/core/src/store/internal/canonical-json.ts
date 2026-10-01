@@ -53,7 +53,7 @@ const toCanonicalValue = (value: unknown, ancestors: Set<object>): unknown => {
 };
 
 /**
- * Produces deterministic, whitespace-free JSON for persisted blobs (PLAN 1S.3).
+ * Produces deterministic, whitespace-free JSON for persisted blobs.
  * Undefined object properties are absent because JSON-domain equivalence intentionally treats
  * `{ a: undefined }` and `{}` identically; array holes have no JSON equivalent and are rejected.
  */
@@ -72,7 +72,7 @@ const canonicalStringify = (value: unknown): string => {
 };
 
 /**
- * Computes the SHA-256 content identity used by store and cache records (PLAN 1S.3).
+ * Computes the SHA-256 content identity used by store and cache records.
  */
 const contentHash = (value: unknown): string =>
   createHash('sha256').update(canonicalStringify(value)).digest('hex');

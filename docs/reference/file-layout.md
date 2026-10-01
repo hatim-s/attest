@@ -75,7 +75,8 @@ schema, name, and import provenance: source type/content hash, mappings, optiona
 import timestamp, and read/insert/update/skip counts.
 
 Generated case ids exclude dataset identity, so the same logical case remains stable across direct
-case/dataset moves and dataset renames. The project reproducibility hash ignores only the volatile
+case/dataset moves, folder changes, and dataset renames. An optional `folder` field provides
+logical case organization without changing these canonical file paths. The project reproducibility hash ignores only the volatile
 dataset `imported_at` value; the persisted metadata integrity hash still protects the exact metadata
 file, including that timestamp.
 

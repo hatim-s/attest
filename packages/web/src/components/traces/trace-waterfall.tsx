@@ -39,8 +39,9 @@ const readTraceSpans = (trace: unknown): TraceSpan[] => {
   if (!Array.isArray(spans)) return [];
   return spans.flatMap((candidate) => {
     const span = asRecord(candidate);
-    const startTime = Date.parse(String(span?.start_time ?? ''));
-    const endTime = Date.parse(String(span?.end_time ?? ''));
+    // Non-string timestamps fall back to '' so Date.parse yields NaN and the span is dropped.
+    const startTime = Date.parse(typeof span?.start_time === 'string' ? span.start_time : '');
+    const endTime = Date.parse(typeof span?.end_time === 'string' ? span.end_time : '');
     if (
       typeof span?.span_id !== 'string' ||
       typeof span.name !== 'string' ||

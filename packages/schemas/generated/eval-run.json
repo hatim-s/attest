@@ -58,6 +58,23 @@
                   "maximum": 9007199254740991,
                   "type": "integer"
                 },
+                "dataset_ids": {
+                  "items": {
+                    "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+                    "type": "string"
+                  },
+                  "minItems": 1,
+                  "type": "array"
+                },
+                "folders": {
+                  "items": {
+                    "minLength": 1,
+                    "pattern": "^(?!\\.{1,2}(?:\\/|$))[^\\s/\\\\](?:[^/\\\\]*[^\\s/\\\\])?(?:\\/(?!\\.{1,2}(?:\\/|$))[^\\s/\\\\](?:[^/\\\\]*[^\\s/\\\\])?)*(?![\\s\\S])",
+                    "type": "string"
+                  },
+                  "minItems": 1,
+                  "type": "array"
+                },
                 "junit_path": {
                   "minLength": 1,
                   "type": "string"
@@ -65,6 +82,24 @@
                 "output": {
                   "const": "human",
                   "type": "string"
+                },
+                "sample": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "count": {
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991,
+                      "type": "integer"
+                    },
+                    "seed": {
+                      "minLength": 1,
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "count"
+                  ],
+                  "type": "object"
                 },
                 "schema": {
                   "const": "attest.command-request",
@@ -128,6 +163,23 @@
                   "maximum": 9007199254740991,
                   "type": "integer"
                 },
+                "dataset_ids": {
+                  "items": {
+                    "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+                    "type": "string"
+                  },
+                  "minItems": 1,
+                  "type": "array"
+                },
+                "folders": {
+                  "items": {
+                    "minLength": 1,
+                    "pattern": "^(?!\\.{1,2}(?:\\/|$))[^\\s/\\\\](?:[^/\\\\]*[^\\s/\\\\])?(?:\\/(?!\\.{1,2}(?:\\/|$))[^\\s/\\\\](?:[^/\\\\]*[^\\s/\\\\])?)*(?![\\s\\S])",
+                    "type": "string"
+                  },
+                  "minItems": 1,
+                  "type": "array"
+                },
                 "junit_path": {
                   "minLength": 1,
                   "type": "string"
@@ -138,6 +190,24 @@
                     "jsonl"
                   ],
                   "type": "string"
+                },
+                "sample": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "count": {
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991,
+                      "type": "integer"
+                    },
+                    "seed": {
+                      "minLength": 1,
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "count"
+                  ],
+                  "type": "object"
                 },
                 "schema": {
                   "const": "attest.command-request",
@@ -202,6 +272,23 @@
                   "maximum": 9007199254740991,
                   "type": "integer"
                 },
+                "dataset_ids": {
+                  "items": {
+                    "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+                    "type": "string"
+                  },
+                  "minItems": 1,
+                  "type": "array"
+                },
+                "folders": {
+                  "items": {
+                    "minLength": 1,
+                    "pattern": "^(?!\\.{1,2}(?:\\/|$))[^\\s/\\\\](?:[^/\\\\]*[^\\s/\\\\])?(?:\\/(?!\\.{1,2}(?:\\/|$))[^\\s/\\\\](?:[^/\\\\]*[^\\s/\\\\])?)*(?![\\s\\S])",
+                    "type": "string"
+                  },
+                  "minItems": 1,
+                  "type": "array"
+                },
                 "junit_path": {
                   "minLength": 1,
                   "type": "string"
@@ -209,6 +296,24 @@
                 "output": {
                   "const": "human",
                   "type": "string"
+                },
+                "sample": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "count": {
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991,
+                      "type": "integer"
+                    },
+                    "seed": {
+                      "minLength": 1,
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "count"
+                  ],
+                  "type": "object"
                 },
                 "schema": {
                   "const": "attest.command-request",
@@ -268,6 +373,23 @@
                   "maximum": 9007199254740991,
                   "type": "integer"
                 },
+                "dataset_ids": {
+                  "items": {
+                    "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+                    "type": "string"
+                  },
+                  "minItems": 1,
+                  "type": "array"
+                },
+                "folders": {
+                  "items": {
+                    "minLength": 1,
+                    "pattern": "^(?!\\.{1,2}(?:\\/|$))[^\\s/\\\\](?:[^/\\\\]*[^\\s/\\\\])?(?:\\/(?!\\.{1,2}(?:\\/|$))[^\\s/\\\\](?:[^/\\\\]*[^\\s/\\\\])?)*(?![\\s\\S])",
+                    "type": "string"
+                  },
+                  "minItems": 1,
+                  "type": "array"
+                },
                 "junit_path": {
                   "minLength": 1,
                   "type": "string"
@@ -278,6 +400,24 @@
                     "jsonl"
                   ],
                   "type": "string"
+                },
+                "sample": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "count": {
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991,
+                      "type": "integer"
+                    },
+                    "seed": {
+                      "minLength": 1,
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "count"
+                  ],
+                  "type": "object"
                 },
                 "schema": {
                   "const": "attest.command-request",
@@ -319,6 +459,180 @@
               "exclusiveMinimum": 0,
               "maximum": 9007199254740991,
               "type": "integer"
+            },
+            "execution": {
+              "additionalProperties": false,
+              "properties": {
+                "hooks": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "after_agent": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "argv": {
+                          "items": {
+                            "minLength": 1,
+                            "type": "string"
+                          },
+                          "minItems": 1,
+                          "type": "array"
+                        },
+                        "timeout_ms": {
+                          "exclusiveMinimum": 0,
+                          "maximum": 9007199254740991,
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "argv"
+                      ],
+                      "type": "object"
+                    },
+                    "after_case": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "argv": {
+                          "items": {
+                            "minLength": 1,
+                            "type": "string"
+                          },
+                          "minItems": 1,
+                          "type": "array"
+                        },
+                        "timeout_ms": {
+                          "exclusiveMinimum": 0,
+                          "maximum": 9007199254740991,
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "argv"
+                      ],
+                      "type": "object"
+                    },
+                    "after_evaluation": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "argv": {
+                          "items": {
+                            "minLength": 1,
+                            "type": "string"
+                          },
+                          "minItems": 1,
+                          "type": "array"
+                        },
+                        "timeout_ms": {
+                          "exclusiveMinimum": 0,
+                          "maximum": 9007199254740991,
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "argv"
+                      ],
+                      "type": "object"
+                    },
+                    "after_run": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "argv": {
+                          "items": {
+                            "minLength": 1,
+                            "type": "string"
+                          },
+                          "minItems": 1,
+                          "type": "array"
+                        },
+                        "timeout_ms": {
+                          "exclusiveMinimum": 0,
+                          "maximum": 9007199254740991,
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "argv"
+                      ],
+                      "type": "object"
+                    },
+                    "before_case": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "argv": {
+                          "items": {
+                            "minLength": 1,
+                            "type": "string"
+                          },
+                          "minItems": 1,
+                          "type": "array"
+                        },
+                        "timeout_ms": {
+                          "exclusiveMinimum": 0,
+                          "maximum": 9007199254740991,
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "argv"
+                      ],
+                      "type": "object"
+                    },
+                    "before_run": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "argv": {
+                          "items": {
+                            "minLength": 1,
+                            "type": "string"
+                          },
+                          "minItems": 1,
+                          "type": "array"
+                        },
+                        "timeout_ms": {
+                          "exclusiveMinimum": 0,
+                          "maximum": 9007199254740991,
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "argv"
+                      ],
+                      "type": "object"
+                    }
+                  },
+                  "type": "object"
+                },
+                "workers": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "count": {
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991,
+                      "type": "integer"
+                    },
+                    "directory": {
+                      "allOf": [
+                        {
+                          "pattern": "^(?![A-Za-z]:)"
+                        },
+                        {
+                          "pattern": "^(?![\\\\/])(?!(?:.*[\\\\/])?\\.\\.(?:[\\\\/]|$)).+$"
+                        },
+                        {
+                          "pattern": "^(?:[^{}]|\\{(?:run_id|worker_index)\\})+$"
+                        }
+                      ],
+                      "minLength": 1,
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "count",
+                    "directory"
+                  ],
+                  "type": "object"
+                }
+              },
+              "type": "object"
             },
             "junit_path": {
               "minLength": 1,
@@ -571,6 +885,56 @@
           },
           "minItems": 1,
           "type": "array"
+        },
+        "selection": {
+          "additionalProperties": false,
+          "properties": {
+            "matched_cases": {
+              "maximum": 9007199254740991,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "sample": {
+              "additionalProperties": false,
+              "properties": {
+                "algorithm": {
+                  "const": "hash-rank-v1",
+                  "type": "string"
+                },
+                "count": {
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991,
+                  "type": "integer"
+                },
+                "seed": {
+                  "minLength": 1,
+                  "type": "string"
+                }
+              },
+              "required": [
+                "count",
+                "seed",
+                "algorithm"
+              ],
+              "type": "object"
+            },
+            "selected_cases": {
+              "maximum": 9007199254740991,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "total_cases": {
+              "maximum": 9007199254740991,
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "total_cases",
+            "matched_cases",
+            "selected_cases"
+          ],
+          "type": "object"
         }
       },
       "required": [

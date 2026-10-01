@@ -5,7 +5,7 @@ import type { CaseRecord, RunRecord } from './types.js';
 
 const BUNDLE_SCHEMA_ID = 'attest.bundle';
 
-/** Describes the run metadata line that starts every PLAN 1S.4 cloud-ingest bundle. */
+/** Describes the run metadata at the start of an exported bundle. */
 interface BundleHeader {
   type: 'bundle_header';
   schema: typeof BUNDLE_SCHEMA_ID;
@@ -27,7 +27,7 @@ interface BundleFooter {
 
 type BundleLine = BundleHeader | BundleCase | BundleFooter;
 
-/** Summarizes a completed PLAN 1S.4 export for future cloud-ingest callers. */
+/** Summarizes a completed export with its record count and content hash. */
 interface BundleManifest {
   schemaId: typeof BUNDLE_SCHEMA_ID;
   runId: string;

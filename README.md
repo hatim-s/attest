@@ -41,6 +41,22 @@ example in that directory so `npx` can find the local installation. The
 [release guide](docs/RELEASING.md) covers producing and checking these archives.
 Registry installation becomes available after the maintainer publishes the alpha.
 
+## Packages
+
+| Package             | Responsibility                                                               |
+| ------------------- | ---------------------------------------------------------------------------- |
+| `@attest/contracts` | Versioned protocols and resource schemas                                     |
+| `@attest/core`      | Domain records, comparison, import, trace conversion, and storage interfaces |
+| `@attest/executor`  | Agent invocation, transport cleanup, and isolated case environments          |
+| `@attest/runtime`   | Metrics, lifecycle hooks, and evaluation scheduling                          |
+| `@attest/local`     | Project files, SQLite, local evaluation, reports, and dashboard server       |
+| `@attest/cli`       | Terminal commands, prompts, and output                                       |
+| `@attest/web`       | Dashboard and embedded report UI                                             |
+| `@attest/schemas`   | Generated JSON schemas for non-TypeScript consumers                          |
+| `@attest/site`      | Marketing page                                                               |
+
+The [architecture guide](docs/ARCHITECTURE.md) explains the dependency rules and where new code belongs. Cloud code can reuse contracts, core, executor, and runtime without importing the CLI or local application.
+
 ## Use Attest
 
 - [Quickstart](docs/quickstart.md): one agent, one case, one metric, and a saved run.

@@ -77,9 +77,11 @@ and parse stdout. Keep stderr separate. Both approaches use the same
 evaluation with a failing verdict returns exit code `1` and `ok: true`; an invocation
 failure returns `ok: false`. Do not treat every nonzero exit as malformed output.
 
-`@attest/core` exposes lower-level runners, metrics, stores, and diff functions. It
-does not provide a single high-level `evaluate()` SDK. Those APIs and the in-process
-CLI API can change during the alpha; pin matching package versions. Discover the
+`@attest/core` exposes domain records, comparison, imports, and case selection.
+`@attest/executor` invokes agents; `@attest/runtime` schedules evaluations and metrics.
+`@attest/local` owns project files, SQLite, reports, and the local dashboard. See the
+[architecture guide](../ARCHITECTURE.md) for package entry points and dependency rules.
+These APIs and the in-process CLI API can change during the alpha; pin matching package versions. Discover the
 installed CLI contract with `attest help --output json` when building automation.
 
 ## Check a project before an evaluation

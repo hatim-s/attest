@@ -1,4 +1,5 @@
 import { CASE_SCHEMA_ID, DATASET_SCHEMA_ID } from '@attest/contracts';
+import { runTestDatasetRemovePreflight } from '@attest/local/test';
 import type { Command } from 'commander';
 
 import { setCliCommandHelpMetadata } from '../../../help/command-help.js';
@@ -20,7 +21,6 @@ import {
   type MutationOptions,
   type RegisterTestCommandsOptions,
 } from './support.js';
-import { runTestDatasetRemovePreflight } from '../test-command.js';
 
 /** Registers attached dataset authoring, import, and lifecycle commands. */
 const registerTestDatasetCommands = (test: Command, context: RegisterTestCommandsOptions): void => {

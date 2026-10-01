@@ -1,8 +1,8 @@
 # Alpha releases
 
 The first candidate is `0.1.0-alpha.0`. Alpha packages use the npm `alpha` tag. The
-release includes `@attest/contracts`, `@attest/core`, `@attest/web`, `@attest/cli`,
-and `@attest/schemas`. Their versions move together. The web package contains the
+release includes `@attest/contracts`, `@attest/core`, `@attest/executor`, `@attest/runtime`,
+`@attest/local`, `@attest/web`, `@attest/cli`, and `@attest/schemas`. Their versions move together. The web package contains the
 prebuilt dashboard and does not install a frontend toolchain for CLI users.
 
 ## Prepare a candidate
@@ -30,7 +30,7 @@ bun run test:fuzz
 bun run release:check
 ```
 
-`release:check` builds the packages, regenerates JSON Schemas, and creates five
+`release:check` builds the packages, regenerates JSON Schemas, and creates eight
 archives and their `SHA256SUMS` file in `dist/release/`. It installs those archives into a temporary npm
 project outside the workspace, then checks the installed executable, project
 initialization, a native-agent evaluation, its persisted HTML report, public imports,
@@ -40,7 +40,8 @@ archives remain available for inspection and distribution.
 
 `release:pack` performs only the build, schema generation, and packaging. Packaging
 copies the root Apache-2.0 license and NOTICE into each archive, excludes source and tests,
-removes development scripts and dependencies, and replaces workspace dependency
+removes development scripts, dependencies, and the local workspace-only `/testing` export,
+and replaces workspace dependency
 references with exact candidate versions. Publish these archives, not the raw
 workspace directories. A `prepublishOnly` guard rejects direct workspace publication.
 
@@ -49,7 +50,7 @@ CI runs the isolated install check on macOS and Linux and uploads the archives a
 
 ## Test without publishing
 
-Copy all five archives and `SHA256SUMS` to a tester's machine. From their directory,
+Copy all eight archives and `SHA256SUMS` to a tester's machine. From their directory,
 verify the files with `shasum -a 256 -c SHA256SUMS` on macOS or
 `sha256sum -c SHA256SUMS` on Linux. In a separate project directory:
 
@@ -60,7 +61,7 @@ npx attest --version
 npx attest --help
 ```
 
-Install all five archives together because their exact alpha versions may not yet
+Install all eight archives together because their exact alpha versions may not yet
 exist on npm. The CLI archive alone cannot satisfy unpublished sibling packages.
 
 ## Publish to npm
@@ -85,7 +86,10 @@ cd "$PUBLISH_WORKDIR"
 npm whoami
 npm publish "$RELEASE_DIR/attest-contracts-0.1.0-alpha.0.tgz" --access public --tag alpha
 npm publish "$RELEASE_DIR/attest-core-0.1.0-alpha.0.tgz" --access public --tag alpha
+npm publish "$RELEASE_DIR/attest-executor-0.1.0-alpha.0.tgz" --access public --tag alpha
+npm publish "$RELEASE_DIR/attest-runtime-0.1.0-alpha.0.tgz" --access public --tag alpha
 npm publish "$RELEASE_DIR/attest-web-0.1.0-alpha.0.tgz" --access public --tag alpha
+npm publish "$RELEASE_DIR/attest-local-0.1.0-alpha.0.tgz" --access public --tag alpha
 npm publish "$RELEASE_DIR/attest-cli-0.1.0-alpha.0.tgz" --access public --tag alpha
 npm publish "$RELEASE_DIR/attest-schemas-0.1.0-alpha.0.tgz" --access public --tag alpha
 ```

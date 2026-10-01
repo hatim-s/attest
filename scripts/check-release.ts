@@ -16,7 +16,7 @@ const checkRelease = async (): Promise<void> => {
     const tarballs = (await readdir(releaseDirectory))
       .filter((file) => file.endsWith('.tgz'))
       .map((file) => join(releaseDirectory, file));
-    assert.equal(tarballs.length, 5, 'Expected all five release packages.');
+    assert.equal(tarballs.length, 8, 'Expected all eight release packages.');
     execFileSync('npm', ['install', '--no-audit', '--no-fund', ...tarballs], {
       cwd: directory,
       stdio: 'inherit',
@@ -66,10 +66,17 @@ const checkRelease = async (): Promise<void> => {
       `import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { cliResultSchema } from '@attest/contracts';
-import { openStore, startViewServer } from '@attest/core';
+import { openStore } from '@attest/local/store';
+import { startViewServer } from '@attest/local/view-server';
+import { invokeAgent } from '@attest/executor';
+import { executeResolvedEvalPlan } from '@attest/runtime';
+import { selectCases } from '@attest/core';
 import { dashboardHtml } from '@attest/web/embedded';
 import { runCli } from '@attest/cli';
 assert.equal(typeof runCli, 'function');
+assert.equal(typeof invokeAgent, 'function');
+assert.equal(typeof executeResolvedEvalPlan, 'function');
+assert.equal(typeof selectCases, 'function');
 assert.equal(typeof cliResultSchema.parse, 'function');
 assert.ok(dashboardHtml.includes('<html'));
 const schema = JSON.parse(await readFile(new URL(import.meta.resolve('@attest/schemas/generated/project.json')), 'utf8'));

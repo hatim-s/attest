@@ -7,13 +7,14 @@ import { fileURLToPath } from 'node:url';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const releaseDirectory = resolve(root, 'dist/release');
-const packageNames = ['contracts', 'core', 'web', 'cli', 'schemas'];
+const packageNames = ['contracts', 'core', 'executor', 'runtime', 'web', 'local', 'cli', 'schemas'];
 
 type Manifest = {
   name: string;
   version: string;
   private?: boolean;
   files: string[];
+  exports?: Record<string, string | Record<string, string>>;
   dependencies?: Record<string, string>;
   optionalDependencies?: Record<string, string>;
   devDependencies?: Record<string, string>;
@@ -70,6 +71,8 @@ const packRelease = async (): Promise<void> => {
         }
       }
       // Consumers receive compiled code and never need the monorepo build toolchain.
+      // The local testing entry point belongs to workspace tests, which are excluded from archives.
+      if (directory === 'local') delete manifest.exports?.['./testing'];
       delete manifest.scripts;
       delete manifest.devDependencies;
       await writeFile(join(staged, 'package.json'), `${JSON.stringify(manifest, null, 2)}\n`);
@@ -92,6 +95,14 @@ const packRelease = async (): Promise<void> => {
       }
       if (result.files.some(({ path }) => /(^|\/)(src|_tests_?|node_modules)\//.test(path))) {
         throw new Error(`Unexpected source or dependencies in ${manifest.name}.`);
+      }
+      const exportTargets = Object.values(manifest.exports ?? {}).flatMap((entry) =>
+        typeof entry === 'string' ? [entry] : Object.values(entry),
+      );
+      for (const target of exportTargets) {
+        if (!target.includes('*') && !result.files.some(({ path }) => path === target.slice(2))) {
+          throw new Error(`Missing exported artifact ${target} in ${manifest.name}.`);
+        }
       }
       const archive = await readFile(join(releaseDirectory, result.filename));
       checksums.push(`${createHash('sha256').update(archive).digest('hex')}  ${result.filename}`);

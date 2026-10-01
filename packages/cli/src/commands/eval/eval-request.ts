@@ -10,9 +10,9 @@ import {
   type EvalRunRequest,
   type JsonValue,
 } from '@attest/contracts';
+import { parseDuration } from '@attest/local/agent';
 
 import { AttestCliError } from '../../errors/index.js';
-import { parseDuration } from '../agent/agent-request.js';
 
 type EvalPrompt = (question: string, options?: { signal?: AbortSignal }) => Promise<string>;
 
@@ -34,6 +34,10 @@ type EvalRunRequestFields = {
   junit?: string;
   output?: EvalOutputMode;
   tags?: readonly string[];
+  folders?: readonly string[];
+  datasetIds?: readonly string[];
+  sample?: string;
+  seed?: string;
   testIds?: readonly string[];
   timeout?: string;
   watch?: boolean;
@@ -147,6 +151,10 @@ const createEvalRunRequest = async (
     '--junit': fields.junit,
     '--output': fields.output,
     '--tag': fields.tags,
+    '--folder': fields.folders,
+    '--dataset': fields.datasetIds,
+    '--sample': fields.sample,
+    '--seed': fields.seed,
     '--timeout': fields.timeout,
     '--watch': fields.watch,
     '<test-id>': fields.testIds,
@@ -163,6 +171,9 @@ const createEvalRunRequest = async (
       hint: 'Pass either --all or one or more test ids.',
       details: { conflicting_fields: ['--all', '<test-id>'] },
     });
+  }
+  if (fields.seed !== undefined && fields.sample === undefined) {
+    throw new AttestCliError('cli_usage', '`--seed` requires `--sample`.');
   }
   const output = fields.output ?? 'human';
   context.onOutputMode?.(output);
@@ -191,6 +202,16 @@ const createEvalRunRequest = async (
     ...selection,
     ...(fields.caseIds === undefined ? {} : { case_ids: [...fields.caseIds] }),
     ...(fields.tags === undefined ? {} : { tags: [...fields.tags] }),
+    ...(fields.folders === undefined ? {} : { folders: [...fields.folders] }),
+    ...(fields.datasetIds === undefined ? {} : { dataset_ids: [...fields.datasetIds] }),
+    ...(fields.sample === undefined
+      ? {}
+      : {
+          sample: {
+            count: Number(fields.sample),
+            ...(fields.seed === undefined ? {} : { seed: fields.seed }),
+          },
+        }),
     ...(fields.concurrency === undefined ? {} : { concurrency: Number(fields.concurrency) }),
     ...(fields.timeout === undefined ? {} : { timeout_ms: parseDuration(fields.timeout) }),
     ...(fields.baseline === undefined ? {} : { baseline_run_id: fields.baseline }),

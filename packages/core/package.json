@@ -12,14 +12,6 @@
   },
   "dependencies": {
     "@attest/contracts": "workspace:*",
-    "@hono/node-server": "^2.1.0",
-    "@tanstack/ai": "0.43.0",
-    "@tanstack/ai-anthropic": "0.16.4",
-    "@tanstack/ai-openai": "0.18.0",
-    "ajv": "^8.20.0",
-    "hono": "^4.13.0",
-    "kysely": "^0.29.4",
-    "ulid": "^3.0.2",
     "zod": "^4"
   },
   "scripts": {
@@ -28,14 +20,16 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "prepublishOnly": "node ../../scripts/block-source-publish.mjs"
   },
-  "optionalDependencies": {
-    "@libsql/client": "^0.17.4"
-  },
   "devDependencies": {
     "fast-check": "^4.9.0",
     "vitest": "^3"
   },
-  "description": "Agent evaluation execution, metrics, traces, and local persistence.",
+  "files": [
+    "dist",
+    "LICENSE",
+    "NOTICE"
+  ],
+  "description": "Domain records, case selection, comparison, imports, and storage interfaces.",
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
@@ -46,16 +40,12 @@
   "bugs": {
     "url": "https://github.com/hatim-s/attest/issues"
   },
-  "engines": {
-    "node": ">=22.15.0"
-  },
-  "files": [
-    "dist",
-    "LICENSE",
-    "NOTICE"
-  ],
   "publishConfig": {
     "access": "public",
     "tag": "alpha"
+  },
+  "engines": {
+    "node": ">=22.15.0",
+    "bun": ">=1.4"
   }
 }

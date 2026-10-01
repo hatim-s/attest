@@ -2,6 +2,7 @@ import { z } from 'zod';
 
 import { cliFailureResultSchema, cliSuccessResultSchema } from '../cli/protocol.js';
 import { evalRunIdSchema } from './run.js';
+import { caseSelectionSummarySchema } from './selection.js';
 import { resourceIdSchema, sha256Schema } from '../project/shared.js';
 import { CLI_EVENT_SCHEMA_ID } from '../schema/identifiers.js';
 
@@ -25,6 +26,7 @@ const evalRunStartedEventSchema = z.strictObject({
   data: z.strictObject({
     run_id: evalRunIdSchema,
     snapshot_hash: sha256Schema,
+    selection: caseSelectionSummarySchema.optional(),
     total_cases: z.number().int().nonnegative(),
     concurrency: z.number().int().positive(),
     timeout_ms: z.number().int().positive(),
@@ -71,6 +73,7 @@ const evalRunResultPayloadFields = {
   snapshot_hash: sha256Schema,
   status: z.literal('completed'),
   summary: evalRunSummarySchema,
+  selection: caseSelectionSummarySchema.optional(),
   baseline_run_id: evalRunIdSchema.optional(),
   junit_path: z.string().min(1).optional(),
 };
@@ -173,7 +176,7 @@ const evalEventStreamSchema = z
 
     const runId = started.data.run_id;
     const startedCases = new Map<string, number>();
-    let lastConfiguredIndex = -1;
+    const startedIndexes = new Set<number>();
     let startedCaseCount = 0;
     let completionIndex = 0;
     let completedEvent: EvalRunCompletedEvent | undefined;
@@ -193,14 +196,14 @@ const evalEventStreamSchema = z
 
       if (event.event === 'case_started') {
         const key = caseKey(event.data.test_id, event.data.case_id);
-        if (event.data.configured_index <= lastConfiguredIndex || startedCases.has(key)) {
+        if (startedIndexes.has(event.data.configured_index) || startedCases.has(key)) {
           context.addIssue({
             code: 'custom',
             path: [index, 'data', 'configured_index'],
-            message: 'case starts must be unique and follow configured index order',
+            message: 'case starts must have unique identities and configured indexes',
           });
         }
-        lastConfiguredIndex = event.data.configured_index;
+        startedIndexes.add(event.data.configured_index);
         startedCases.set(key, event.data.configured_index);
         startedCaseCount += 1;
       }
@@ -244,8 +247,10 @@ const evalEventStreamSchema = z
 
     const summary = completedEvent.data.summary;
     const summaryCountsMatch =
-      summary.total_cases === started.data.total_cases &&
-      summary.passed_cases + summary.failed_cases + summary.error_cases === summary.total_cases;
+      summary.passed_cases + summary.failed_cases + summary.error_cases === summary.total_cases &&
+      (completedEvent.data.status === 'failed'
+        ? summary.total_cases === completionIndex
+        : summary.total_cases === started.data.total_cases);
     const caseLifecycleMatches =
       completedEvent.data.status === 'failed'
         ? startedCaseCount <= started.data.total_cases && completionIndex === startedCaseCount

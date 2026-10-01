@@ -6,6 +6,7 @@ import { getCase, getDiff, getRun, listCases, listRuns } from './client.js';
 import type { RunStatus } from './types.js';
 import { getReportData } from '../report/report-data.js';
 
+/** Polls recent runs in the live dashboard and keeps static reports offline. */
 const useRuns = () =>
   useQuery({
     queryKey: ['runs'],
@@ -13,6 +14,7 @@ const useRuns = () =>
     refetchInterval: getReportData() === undefined ? 5_000 : false,
   });
 
+/** Loads one run and keeps polling only while it is still executing. */
 const useRun = (runId: string | undefined) =>
   useQuery({
     queryKey: ['run', runId],
@@ -43,6 +45,7 @@ const useCases = (runId: string | undefined, status: RunStatus | undefined) => {
   });
 };
 
+/** Loads the full evidence record for the case opened in the detail drawer. */
 const useCase = (
   runId: string | undefined,
   suiteName: string | undefined,
@@ -54,6 +57,7 @@ const useCase = (
     enabled: runId !== undefined && suiteName !== undefined && caseId !== undefined,
   });
 
+/** Compares two distinct runs once both sides of the comparison are chosen. */
 const useDiff = (baseRunId: string | undefined, candidateRunId: string | undefined) =>
   useQuery({
     queryKey: ['diff', baseRunId, candidateRunId],

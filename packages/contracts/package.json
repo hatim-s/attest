@@ -23,6 +23,11 @@
     "ajv": "^8",
     "ajv-formats": "^3"
   },
+  "files": [
+    "dist",
+    "LICENSE",
+    "NOTICE"
+  ],
   "description": "Typed contracts and parsers for Attest agent evaluations.",
   "license": "Apache-2.0",
   "repository": {
@@ -34,16 +39,12 @@
   "bugs": {
     "url": "https://github.com/hatim-s/attest/issues"
   },
-  "engines": {
-    "node": ">=22.15.0"
-  },
-  "files": [
-    "dist",
-    "LICENSE",
-    "NOTICE"
-  ],
   "publishConfig": {
     "access": "public",
     "tag": "alpha"
+  },
+  "engines": {
+    "node": ">=22.15.0",
+    "bun": ">=1.4"
   }
 }

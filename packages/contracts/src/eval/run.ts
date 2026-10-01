@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { caseSelectionSchema, caseSelectionSummarySchema } from './selection.js';
 
 import {
   durationMillisecondsSchema,
@@ -6,6 +7,7 @@ import {
   resourceIdSchema,
   sha256Schema,
 } from '../project/shared.js';
+import { evalExecutionConfigSchema } from '../project/eval-execution.js';
 import { COMMAND_REQUEST_SCHEMA_ID, EVAL_RUN_SCHEMA_ID } from '../schema/identifiers.js';
 
 const evalOutputModeSchema = z.enum(['human', 'json', 'jsonl']);
@@ -14,8 +16,7 @@ const evalRunIdSchema = z.ulid();
 const evalRunCommonRequestFields = {
   schema: z.literal(COMMAND_REQUEST_SCHEMA_ID),
   command: z.literal('eval.run'),
-  case_ids: z.array(resourceIdSchema).nonempty().optional(),
-  tags: z.array(z.string().min(1)).nonempty().optional(),
+  ...caseSelectionSchema.shape,
   concurrency: z.number().int().positive().optional(),
   timeout_ms: durationMillisecondsSchema.optional(),
   baseline_run_id: evalRunIdSchema.optional(),
@@ -91,18 +92,26 @@ const evalRunSelectedCaseSchema = z.strictObject({
 });
 
 /** Freezes every content address and selected identity resolved before execution begins. */
-const evalRunSnapshotSchema = z.strictObject({
-  project_id: projectIdSchema,
-  project_hash: sha256Schema,
-  resource_hashes: z.strictObject({
-    agents: z.array(authoredResourceHashSchema),
-    tests: z.array(authoredResourceHashSchema),
-    datasets: z.array(datasetResourceHashSchema),
-    metrics: z.array(authoredResourceHashSchema),
-  }),
-  selected_test_ids: z.array(resourceIdSchema).nonempty(),
-  selected_cases: z.array(evalRunSelectedCaseSchema),
-});
+const evalRunSnapshotSchema = z
+  .strictObject({
+    project_id: projectIdSchema,
+    project_hash: sha256Schema,
+    resource_hashes: z.strictObject({
+      agents: z.array(authoredResourceHashSchema),
+      tests: z.array(authoredResourceHashSchema),
+      datasets: z.array(datasetResourceHashSchema),
+      metrics: z.array(authoredResourceHashSchema),
+    }),
+    selected_test_ids: z.array(resourceIdSchema).nonempty(),
+    selected_cases: z.array(evalRunSelectedCaseSchema),
+    selection: caseSelectionSummarySchema.optional(),
+  })
+  .refine(
+    (snapshot) =>
+      snapshot.selection === undefined ||
+      snapshot.selection.selected_cases === snapshot.selected_cases.length,
+    'Selection coverage must match the selected case list.',
+  );
 
 /** Records the caller spelling and fully resolved execution values used for the immutable run. */
 const evalRunEffectiveCommandSchema = z.strictObject({
@@ -114,6 +123,7 @@ const evalRunEffectiveCommandSchema = z.strictObject({
     timeout_ms: durationMillisecondsSchema,
     output: evalOutputModeSchema,
     watch: z.boolean(),
+    execution: evalExecutionConfigSchema.optional(),
     baseline_run_id: evalRunIdSchema.optional(),
     junit_path: z.string().min(1).optional(),
   }),

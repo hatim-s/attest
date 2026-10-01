@@ -1,9 +1,4 @@
-import {
-  CASE_SCHEMA_ID,
-  testCaseSchema,
-  type DatasetImportMapping,
-  type TestCase,
-} from '@attest/contracts';
+import { CASE_SCHEMA_ID, testCaseSchema, type DatasetImportMapping } from '@attest/contracts';
 
 import {
   caseContentWithoutId,
@@ -21,17 +16,13 @@ import {
   type TabularImportRequest,
   type TabularImportResult,
 } from './import-types.js';
+import {
+  createImportDiagnostic as diagnostic,
+  sortImportDiagnostics as sortDiagnostics,
+  type NormalizedImportRow,
+} from './import-internal.js';
 import { parseImportSource, resolveJsonPointer, type SourceRecord } from './parse-import-source.js';
-
-type NormalizedImportRow = {
-  case: TestCase;
-  contentFingerprint: string;
-  explicitId: boolean;
-  generatedFromContent: boolean;
-  identitySource: 'content' | 'id' | 'key';
-  location: ImportLocation;
-  sourceKeyFingerprint?: string;
-};
+import { reconcileRows } from './reconcile-import.js';
 
 const escapePointerSegment = (segment: PropertyKey): string =>
   String(segment).replaceAll('~', '~0').replaceAll('/', '~1');
@@ -50,36 +41,11 @@ const destinationPathsForIssue = (issue: {
     .sort();
 };
 
-const diagnostic = (
-  code: string,
-  message: string,
-  hint: string,
-  sourceField: string,
-  destinationPath: string,
-  location: ImportLocation = {},
-): ImportDiagnostic => ({
-  code,
-  destination_path: destinationPath,
-  hint,
-  message,
-  source_field: sourceField,
-  ...location,
-});
-
 /** Copies only public physical coordinates so authored row values can never leak. */
 const importLocation = (location: ImportLocation): ImportLocation => ({
   ...(location.line === undefined ? {} : { line: location.line }),
   ...(location.row === undefined ? {} : { row: location.row }),
 });
-
-const sortDiagnostics = (diagnostics: readonly ImportDiagnostic[]): ImportDiagnostic[] =>
-  [...diagnostics].sort(
-    (left, right) =>
-      (left.line ?? left.row ?? 0) - (right.line ?? right.row ?? 0) ||
-      left.source_field.localeCompare(right.source_field, 'en') ||
-      left.destination_path.localeCompare(right.destination_path, 'en') ||
-      left.code.localeCompare(right.code, 'en'),
-  );
 
 /** Splits dotted destinations while allowing literal dots and backslashes to be escaped. */
 const splitDestination = (destination: string): string[] => {
@@ -350,9 +316,7 @@ const normalizeRecord = (
         ...(sourceRecord.line === undefined ? {} : { line: sourceRecord.line }),
         ...(sourceRecord.row === undefined ? {} : { row: sourceRecord.row }),
       },
-      ...(sourceKey === undefined
-        ? {}
-        : { sourceKeyFingerprint: hashImportJson(sourceKey as JsonValue) }),
+      ...(sourceKey === undefined ? {} : { sourceKeyFingerprint: hashImportJson(sourceKey) }),
     },
   };
 };
@@ -448,124 +412,6 @@ const createImportPreview = (rows: readonly NormalizedImportRow[]): unknown[] =>
     id: testCase.id,
     ...(redactValue(caseContentWithoutId(testCase)) as Record<string, unknown>),
   }));
-
-const reconcileRows = (
-  rows: readonly NormalizedImportRow[],
-  request: TabularImportRequest,
-  dedupeSkipped: number,
-  dedupeDecisions: readonly ImportDecision[],
-): Omit<TabularImportResult, 'format' | 'importedCases' | 'preview' | 'sourceHash'> => {
-  const sync = request.sync ?? 'append';
-  const conflict = request.onConflict ?? (sync === 'upsert' ? 'update' : 'error');
-  const cases: TestCase[] = structuredClone([...(request.existingCases ?? [])]);
-  const collisionContexts = [
-    ...((request.collisionCases ?? []).length === 0
-      ? []
-      : [{ cases: request.collisionCases ?? [] }]),
-    ...(request.collisionContexts ?? []),
-  ];
-  const diagnostics: ImportDiagnostic[] = [];
-  const decisions: ImportDecision[] = [...dedupeDecisions];
-  let inserted = 0;
-  let skipped = dedupeSkipped;
-  let updated = 0;
-
-  if (sync === 'upsert') {
-    rows.forEach((row) => {
-      if (row.generatedFromContent) {
-        diagnostics.push(
-          diagnostic(
-            'upsert_identity_required',
-            'Upsert requires an explicit mapped id or stable source key.',
-            'Map id or pass --key so changed content retains its case identity.',
-            '<identity>',
-            '/id',
-            row.location,
-          ),
-        );
-      }
-    });
-  }
-
-  for (const row of rows) {
-    const collides = collisionContexts.some(
-      ({ cases: collisionCases, requiredTags }) =>
-        (requiredTags ?? []).every((tag) => (row.case.tags ?? []).includes(tag)) &&
-        collisionCases.some(({ id }) => id === row.case.id),
-    );
-    if (collides) {
-      if (conflict === 'skip') {
-        skipped += 1;
-        decisions.push({ action: 'skip', case_id: row.case.id, matched_by: 'id', ...row.location });
-      } else {
-        diagnostics.push(
-          diagnostic(
-            'resolved_case_collision',
-            'Imported case id collides with a direct or attached case outside the import target.',
-            'Choose an explicit non-colliding id or use --on-conflict skip.',
-            'id',
-            '/id',
-            row.location,
-          ),
-        );
-      }
-      continue;
-    }
-    const idIndex = cases.findIndex(({ id }) => id === row.case.id);
-    const contentIndex = cases.findIndex(
-      (testCase) => fingerprintCaseContent(testCase) === row.contentFingerprint,
-    );
-    const matchIndex = idIndex >= 0 ? idIndex : contentIndex;
-    const matchedBy = idIndex >= 0 ? (row.identitySource === 'key' ? 'key' : 'id') : 'content';
-    if (matchIndex < 0) {
-      cases.push(row.case);
-      inserted += 1;
-      decisions.push({ action: 'insert', case_id: row.case.id });
-      continue;
-    }
-    if (conflict === 'skip') {
-      skipped += 1;
-      decisions.push({
-        action: 'skip',
-        case_id: cases[matchIndex]!.id,
-        matched_by: matchedBy,
-        ...row.location,
-      });
-    } else if (conflict === 'update') {
-      const stableId = cases[matchIndex]!.id;
-      cases[matchIndex] = { ...row.case, id: stableId };
-      updated += 1;
-      decisions.push({
-        action: 'update',
-        case_id: stableId,
-        matched_by: matchedBy,
-        ...row.location,
-      });
-    } else {
-      diagnostics.push(
-        diagnostic(
-          'existing_case_conflict',
-          `Imported case conflicts with existing ${matchedBy}.`,
-          'Pass --on-conflict skip|update or repair the source identity.',
-          matchedBy,
-          matchedBy === 'id' || matchedBy === 'key' ? '/id' : '',
-          row.location,
-        ),
-      );
-    }
-  }
-  if (diagnostics.length > 0) {
-    throw new TabularImportError(
-      'Imported cases conflict with existing project cases.',
-      sortDiagnostics(diagnostics),
-    );
-  }
-  return {
-    cases,
-    counts: { inserted, read: rows.length + dedupeSkipped, skipped, updated },
-    decisions,
-  };
-};
 
 /** Parses, maps, validates, deduplicates, and reconciles a complete bounded import in memory. */
 const importTabularCases = (request: TabularImportRequest): TabularImportResult => {

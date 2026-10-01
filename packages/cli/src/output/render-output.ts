@@ -11,6 +11,11 @@ const renderDiffSummary = (diff: RunDiff): string => {
     `  added: ${summary.counts.added}`,
     `  removed: ${summary.counts.removed}`,
     `  flaky suspects: ${summary.flakySuspectCount}`,
+    ...(summary.coverage === undefined
+      ? []
+      : [
+          `  compared: ${summary.coverage.sharedCases} shared cases; ${summary.coverage.baseOnlyCases} baseline-only, ${summary.coverage.candidateOnlyCases} candidate-only`,
+        ]),
   ].join('\n');
 };
 

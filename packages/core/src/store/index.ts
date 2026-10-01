@@ -1,20 +1,23 @@
-export { exportRunBundle, readRunBundle } from './bundle-io.js';
 export {
   BUNDLE_SCHEMA_ID,
+  createBundle,
+  createContentHasher,
   type BundleCase,
   type BundleFooter,
   type BundleHeader,
   type BundleLine,
   type BundleManifest,
 } from './bundle-format.js';
+export { averageMetricScore, classifyStoredCase, summarizeCaseRecord } from './case-summary.js';
 export { type CacheKind, type CacheStore } from './cache.js';
-export { toStoredCaseExecution } from './from-runner.js';
+export { canonicalStringify, contentHash } from './internal/canonical-json.js';
 export {
-  createRunIdentity,
-  openReadonlyRunStore,
-  openRunStoreSnapshot,
-  openStore,
-} from './run-store.js';
+  collectRunRecordViolations,
+  collectStoredCaseExecutionViolations,
+  collectStoredMetricEvaluationViolations,
+  isCaseRecord,
+  isRunRecord,
+} from './internal/record-validation.js';
 export {
   StoreError,
   type AttestStore,
@@ -26,6 +29,7 @@ export {
   type RunRecord,
   type RunStatus,
   type RunSummary,
+  type StoreErrorCode,
   type RunStore,
   type StoredCaseExecution,
   type StoredDiagnostics,

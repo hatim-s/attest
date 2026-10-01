@@ -17,11 +17,28 @@ const fetchJson = async <T>(path: string): Promise<T> => {
 /** Encodes user-authored suite and case identifiers as individual URL segments. */
 const segment = (value: string): string => encodeURIComponent(value);
 
+/** Confirms a list envelope field survived the network as an array. */
+const requireList = <T>(value: T[] | undefined, path: string): T[] => {
+  if (!Array.isArray(value)) {
+    throw new Error(`Attest API response at ${path} was malformed.`);
+  }
+  return value;
+};
+
+/** Confirms an object envelope field survived the network before typed readers use it. */
+const requireRecord = <T extends object>(value: T | undefined, path: string): T => {
+  if (typeof value !== 'object' || value === null) {
+    throw new Error(`Attest API response at ${path} was malformed.`);
+  }
+  return value;
+};
+
 const listRuns = async (): Promise<RunRecord[]> => {
   const report = getReportData();
   if (report !== undefined) return [report.run];
-  const body = await fetchJson<ApiEnvelope & { runs: RunRecord[] }>('/api/runs?limit=100');
-  return body.runs;
+  const path = '/api/runs?limit=100';
+  const body = await fetchJson<ApiEnvelope & { runs: RunRecord[] }>(path);
+  return requireList(body.runs, path);
 };
 
 const getRun = async (runId: string): Promise<RunRecord> => {
@@ -30,8 +47,9 @@ const getRun = async (runId: string): Promise<RunRecord> => {
     if (report.run.id === runId) return report.run;
     throw new Error(`Run ${runId} is not included in this static report.`);
   }
-  const body = await fetchJson<ApiEnvelope & { run: RunRecord }>(`/api/runs/${segment(runId)}`);
-  return body.run;
+  const path = `/api/runs/${segment(runId)}`;
+  const body = await fetchJson<ApiEnvelope & { run: RunRecord }>(path);
+  return requireRecord(body.run, path);
 };
 
 const listCases = async (
@@ -58,10 +76,9 @@ const listCases = async (
   }
   const query = new URLSearchParams({ limit: '250' });
   if (cursor !== undefined) query.set('cursor', cursor);
-  const body = await fetchJson<ApiEnvelope & { items: CaseSummary[]; nextCursor?: string }>(
-    `/api/runs/${segment(runId)}/cases?${query.toString()}`,
-  );
-  return { items: body.items, nextCursor: body.nextCursor };
+  const path = `/api/runs/${segment(runId)}/cases?${query.toString()}`;
+  const body = await fetchJson<ApiEnvelope & { items: CaseSummary[]; nextCursor?: string }>(path);
+  return { items: requireList(body.items, path), nextCursor: body.nextCursor };
 };
 
 const getCase = async (runId: string, suiteName: string, caseId: string): Promise<CaseRecord> => {
@@ -74,20 +91,18 @@ const getCase = async (runId: string, suiteName: string, caseId: string): Promis
   if (report !== undefined) {
     throw new Error(`Case ${suiteName}/${caseId} is not included in this static report.`);
   }
-  const body = await fetchJson<ApiEnvelope & { case: CaseRecord }>(
-    `/api/runs/${segment(runId)}/cases/${segment(suiteName)}/${segment(caseId)}`,
-  );
-  return body.case;
+  const path = `/api/runs/${segment(runId)}/cases/${segment(suiteName)}/${segment(caseId)}`;
+  const body = await fetchJson<ApiEnvelope & { case: CaseRecord }>(path);
+  return requireRecord(body.case, path);
 };
 
 const getDiff = async (baseRunId: string, candidateRunId: string): Promise<RunDiff> => {
   if (getReportData() !== undefined) {
     throw new Error('Run comparisons require the live Attest dashboard.');
   }
-  const body = await fetchJson<ApiEnvelope & { diff: RunDiff }>(
-    `/api/diffs/${segment(baseRunId)}/${segment(candidateRunId)}`,
-  );
-  return body.diff;
+  const path = `/api/diffs/${segment(baseRunId)}/${segment(candidateRunId)}`;
+  const body = await fetchJson<ApiEnvelope & { diff: RunDiff }>(path);
+  return requireRecord(body.diff, path);
 };
 
 export { getCase, getDiff, getRun, listCases, listRuns };

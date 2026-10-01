@@ -48,3 +48,7 @@ jobs:
             dist/release/*.tgz
             dist/release/SHA256SUMS
           if-no-files-found: error
+      - run: bun run --cwd packages/executor test:node
+      - run: bun run --cwd packages/executor test:bun
+      - run: bun run --cwd packages/runtime test:node
+      - run: bun run --cwd packages/runtime test:bun

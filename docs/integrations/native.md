@@ -61,6 +61,74 @@ cd ..
 rm -rf ./attest-native-guide
 ```
 
+## Run a native agent in Vercel Sandbox
+
+Vercel Sandbox is an opt-in remote execution mode for `native_cli`. Attest can run locally while
+each case runs in a Vercel-managed sandbox. This mode needs network access and Vercel
+credentials, so it does not provide a local or offline sandbox.
+
+Pass the complete sandbox definition when you author the agent:
+
+```sh
+attest agent add remote-echo \
+  --argv-json '["node","./agent.mjs"]' \
+  --sandbox-json '{"kind":"vercel","files":[{"source":"agent.mjs","destination":"agent.mjs"}],"artifacts":[{"source":"result.json","destination":"result.json"}],"artifact_directory":".attest/artifacts"}' \
+  --timeout 30s \
+  --output json
+```
+
+The stored `sandbox` object has this shape:
+
+```json
+{
+  "kind": "vercel",
+  "image": "vercel/sandbox/universal",
+  "files": [{ "source": "agent.mjs", "destination": "agent.mjs", "mode": 493 }],
+  "artifacts": [{ "source": "result.json", "destination": "result.json" }],
+  "artifact_directory": ".attest/artifacts"
+}
+```
+
+`image`, `artifacts`, and `artifact_directory` are optional. Omitting `image` selects
+`vercel/sandbox/universal`. `artifact_directory` is required when artifacts are configured and the
+eval does not have worker directories. An `agent test` probe uses its own unique artifact root.
+
+Attest transfers only the regular files named in `files`. Each `source` is a fixed project-relative
+file and each `destination` is its sandbox path. Attest does not expand globs, upload directories,
+follow symbolic links, or infer files from argv. List the executable and every runtime dependency
+that the command needs. `mode` is the optional numeric file mode, such as decimal `493` for octal
+`0755`.
+
+The sandbox workspace is `/vercel/sandbox/workspace`. A transport `cwd` resolves relative to that
+directory. Relative argv entries also remain relative inside the sandbox. Attest does not rewrite
+them to an absolute path from the host project.
+
+Artifact transfer is similarly explicit. After the command finishes, Attest downloads each regular
+file named by `artifacts[].source`. It does not download directories, globs, symbolic links, or
+unlisted sandbox files. When the eval has a worker directory, Attest writes each artifact to:
+
+```text
+<worker_directory>/<mapping.destination>
+```
+
+Without a worker directory, Attest writes it to a per-case directory under the configured root:
+
+```text
+<project>/<artifact_directory>/<run_id>/<configured_index>/<mapping.destination>
+```
+
+The agent's existing `limits.response_bytes` bounds each uploaded file, each downloaded artifact,
+and both aggregate transfer totals in this first version. The same limit still bounds stdout.
+
+Each case gets a fresh sandbox. Attest uploads the configured files once, reuses that sandbox for
+the case's configured retries, and downloads artifacts after the terminal attempt. It stops the
+sandbox before the eval runs `after_case`. Changes made by an earlier retry remain visible to later
+retries for the same case.
+
+Set either `VERCEL_OIDC_TOKEN` or the complete `VERCEL_TOKEN`, `VERCEL_TEAM_ID`, and
+`VERCEL_PROJECT_ID` set in the environment that launches Attest. See [Environment
+variables](../ENV.md). Never put their values in the agent resource.
+
 ## Request and response contract
 
 For a foreground CLI agent, Attest writes exactly one request document to stdin. Required request fields are `protocol`, `run_id`, `case_id`, and `input`; multi-turn runs may also include `messages`, `turn_index`, `conversation_id`, and `state`.
@@ -105,7 +173,9 @@ Attest sends `POST` with the native request envelope as JSON and requires a nati
 - `cwd` must be project-relative and resolve inside the project. The child receives a minimal environment plus only values explicitly referenced with repeatable `--env TARGET=SOURCE_ENV`.
 - Never pass credentials as argv literals. They can appear in process listings and command diagnostics. Use `--env` or `--header-env` references.
 - stdout and HTTP bodies are bounded. Unknown response fields are warnings; raw evidence and stderr excerpts are bounded and secret values are redacted before probe output or persistence.
-- Treat the agent process as trusted code. Attest supervises and terminates it, but does not sandbox it.
+- A `native_cli` process runs as trusted local code unless its resource opts into Vercel Sandbox.
+  Attest supervises and terminates local processes. Vercel-sandboxed processes run remotely in a
+  fresh sandbox for each case.
 
 ## Testing and cancellation
 
