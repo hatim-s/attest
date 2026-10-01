@@ -1,7 +1,6 @@
 import type { RunRecord } from '../../api/types.js';
-import { formatDateTime, formatPercent, shortId } from '../../lib/format.js';
-import { runPassRate } from '../../lib/run-stats.js';
-import { Badge, Button, ErrorNotice, Loading } from '../shared/ui.js';
+import { formatDateTime, formatPassRate, shortId } from '../../lib/format.js';
+import { Badge, ErrorNotice, Loading } from '../shared/ui.js';
 
 type RunListProps = {
   error: unknown;
@@ -11,7 +10,7 @@ type RunListProps = {
   selectedRunId?: string;
 };
 
-/** Renders recent evaluations as a keyboard-operable local run navigator. */
+/** Sidebar of recent runs. The selected run carries `aria-current="page"`. */
 const RunList = ({ error, isLoading, onSelect, runs, selectedRunId }: RunListProps) => (
   <aside className="run-sidebar" aria-label="Evaluation runs">
     <div className="run-sidebar-heading">
@@ -24,16 +23,18 @@ const RunList = ({ error, isLoading, onSelect, runs, selectedRunId }: RunListPro
     {isLoading ? <Loading label="Loading runs" /> : null}
     {error !== null && error !== undefined ? <ErrorNotice error={error} /> : null}
     {!isLoading && runs.length === 0 ? (
-      <div className="empty-compact">No evaluations yet. Run `attest eval run` to create one.</div>
+      <div className="empty-compact">
+        No evaluations yet. Run <code>attest eval run</code> to create one.
+      </div>
     ) : null}
     <div className="run-list">
       {runs.map((run) => (
-        <Button
+        <button
           aria-current={selectedRunId === run.id ? 'page' : undefined}
           className="run-list-item"
           key={run.id}
           onClick={() => onSelect(run.id)}
-          tone="ghost"
+          type="button"
         >
           <span className="run-list-row">
             <span className="run-id">{shortId(run.id)}</span>
@@ -41,9 +42,9 @@ const RunList = ({ error, isLoading, onSelect, runs, selectedRunId }: RunListPro
           </span>
           <span className="run-list-row run-list-meta">
             <span>{formatDateTime(run.createdAt)}</span>
-            <span>{formatPercent(runPassRate(run))}</span>
+            <span>{formatPassRate(run)}</span>
           </span>
-        </Button>
+        </button>
       ))}
     </div>
   </aside>

@@ -1,7 +1,7 @@
 {
   "description": "Rejects a duplicate span identifier at the duplicate span.",
   "expect": "invalid",
-  "issue_paths": [["spans", "1", "span_id"]],
+  "issue_paths": ["spans.1.span_id"],
   "input": {
     "schema": "attest.trace",
     "trace_id": "trace-duplicate",

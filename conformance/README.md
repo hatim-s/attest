@@ -1,23 +1,25 @@
 # Conformance fixtures
 
-These fixtures are the cross-package compatibility gate for public attest contracts. Each fixture
-is one JSON file named `NN-kebab-description.json` and has this envelope:
+These fixtures pin the behavior of the public contract parsers in `@attest/contracts`. Each fixture
+is one JSON file named `NN-kebab-description.json` with this envelope:
 
 ```json
 {
   "description": "What behavior this fixture protects.",
   "expect": "valid | invalid | valid-with-warnings",
-  "issue_paths": [["field", "0", "child"]],
+  "issue_paths": ["field.0.child"],
   "warning_codes": ["unknown_field"],
+  "preserve_paths": ["vendor_field"],
   "input": {}
 }
 ```
 
-`issue_paths` is used only for invalid fixtures. It lists the exact parser diagnostic paths that
-must be present; a fixture may intentionally require only a subset of all diagnostics. `warning_codes`
-is used only for `valid-with-warnings` fixtures and must match exactly.
+`issue_paths` applies to invalid fixtures. It lists parser diagnostic paths, in the parser's dotted
+form, that must appear. The parser may report more. `warning_codes` applies to
+`valid-with-warnings` fixtures and must match exactly. `preserve_paths` lists input paths whose
+values must survive parsing unchanged.
 
-Fixtures live in five directories, each routed to its matching public parser:
+Each directory under `fixtures/` maps to one parser:
 
 - `agent-request`
 - `agent-response`
@@ -25,7 +27,9 @@ Fixtures live in five directories, each routed to its matching public parser:
 - `metric-request`
 - `metric-result`
 
-To add a fixture, choose the contract directory, create the next numbered JSON file with the
-envelope above, and run the conformance test. The synchronous directory loader automatically finds
-new JSON fixtures, so no registry needs updating. `src/_tests_/fixtures/fake-agents/` holds hostile
-agent executables used to harden the runner.
+To add a fixture, create the next numbered JSON file in the right directory and run
+`bun run --cwd conformance test`. The test reads every JSON file on disk, so there is no registry to
+update. A directory without a parser fails the run.
+
+`src/_tests_/fixtures/fake-agents/` holds the CLI and HTTP test agents that executor and runtime
+tests spawn.

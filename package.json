@@ -21,11 +21,12 @@
     "typecheck": "turbo run typecheck",
     "lint": "eslint .",
     "test": "turbo run test --concurrency=1",
-    "test:acceptance": "turbo run test:acceptance",
+    "test:portability": "bun run --cwd packages/executor test:node && bun run --cwd packages/executor test:bun && bun run --cwd packages/runtime test:node && bun run --cwd packages/runtime test:bun",
     "generate:schemas": "bun run --cwd packages/schemas generate",
     "format:check": "prettier --check .",
     "format": "prettier --write .",
-    "lint:fix": "eslint --fix ."
+    "lint:fix": "eslint --fix .",
+    "test:acceptance": "bun run build && bun run --cwd packages/cli test:acceptance"
   },
   "devDependencies": {
     "@types/node": "^22",

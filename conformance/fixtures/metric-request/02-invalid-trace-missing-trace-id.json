@@ -1,7 +1,7 @@
 {
   "description": "Rejects a supplied trace missing its required trace_id instead of treating it as null.",
   "expect": "invalid",
-  "issue_paths": [["trace", "trace_id"]],
+  "issue_paths": ["trace.trace_id"],
   "input": {
     "protocol": "attest.metric-evaluation",
     "case": { "id": "greeting", "input": {} },

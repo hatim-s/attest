@@ -8,7 +8,7 @@ import type {
   RunRecord,
 } from '../../api/types.js';
 import { formatPercent, shortId } from '../../lib/format.js';
-import { Badge, Card, ErrorNotice, Loading } from '../shared/ui.js';
+import { Badge, ErrorNotice, Loading } from '../shared/ui.js';
 
 type DiffPanelProps = {
   baseRunId?: string;
@@ -89,22 +89,22 @@ const DiffPanel = ({
       {diff !== undefined ? (
         <>
           <div className="summary-grid diff-summary-grid">
-            <Card className="summary-card">
+            <div className="card summary-card">
               <span className="summary-label">Baseline</span>
               <strong>{formatPercent(diff.summary.basePassRate)}</strong>
-            </Card>
-            <Card className="summary-card">
+            </div>
+            <div className="card summary-card">
               <span className="summary-label">Candidate</span>
               <strong>{formatPercent(diff.summary.candidatePassRate)}</strong>
-            </Card>
-            <Card className="summary-card">
+            </div>
+            <div className="card summary-card">
               <span className="summary-label">Regressions</span>
               <strong>{diff.summary.counts.regressed}</strong>
-            </Card>
-            <Card className="summary-card">
+            </div>
+            <div className="card summary-card">
               <span className="summary-label">Fixed</span>
               <strong>{diff.summary.counts.fixed}</strong>
-            </Card>
+            </div>
           </div>
           <section className="verdict-matrix-card" aria-label="Verdict transition matrix">
             <div className="section-heading">
@@ -206,4 +206,4 @@ const DiffPanel = ({
   );
 };
 
-export { DiffPanel, createVerdictMatrix, type DiffPanelProps, type VerdictMatrix };
+export { DiffPanel, type DiffPanelProps };

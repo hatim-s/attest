@@ -1,10 +1,5 @@
-import { useMemo, useRef } from 'react';
+import { useRef } from 'react';
 
-import {
-  getCoreRowModel,
-  legacyCreateColumnHelper,
-  useLegacyTable,
-} from '@tanstack/react-table/legacy';
 import { useVirtualizer } from '@tanstack/react-virtual';
 
 import type { CaseSummary } from '../../api/types.js';
@@ -19,9 +14,9 @@ type CaseTableProps = {
   onSelect: (item: CaseSummary) => void;
 };
 
-const columnHelper = legacyCreateColumnHelper<CaseSummary>();
+const headers = ['Case', 'Suite', 'Verdict', 'Duration', 'Metrics'];
 
-/** Renders the paged case projection using TanStack Table and row virtualization. */
+/** Renders the paged case list with row virtualization. */
 const CaseTable = ({
   cases,
   hasNextPage,
@@ -29,22 +24,9 @@ const CaseTable = ({
   onLoadMore,
   onSelect,
 }: CaseTableProps) => {
-  const columns = useMemo(
-    () =>
-      columnHelper.columns([
-        columnHelper.accessor('caseId', { header: 'Case' }),
-        columnHelper.accessor('suiteName', { header: 'Suite' }),
-        columnHelper.accessor('verdict', { header: 'Verdict' }),
-        columnHelper.accessor('durationMs', { header: 'Duration' }),
-        columnHelper.accessor((item) => item.metricCounts, { id: 'metrics', header: 'Metrics' }),
-      ]),
-    [],
-  );
-  const table = useLegacyTable({ columns, data: cases, getCoreRowModel: getCoreRowModel() });
-  const rows = table.getRowModel().rows;
   const scrollRef = useRef<HTMLDivElement>(null);
   const virtualizer = useVirtualizer({
-    count: rows.length,
+    count: cases.length,
     getScrollElement: () => scrollRef.current,
     estimateSize: () => 52,
     overscan: 10,
@@ -53,26 +35,25 @@ const CaseTable = ({
   return (
     <div className="case-table-frame">
       <div className="case-table-header" role="row">
-        {table.getFlatHeaders().map((header) => (
-          <div key={header.id} role="columnheader">
-            {String(header.column.columnDef.header ?? '')}
+        {headers.map((header) => (
+          <div key={header} role="columnheader">
+            {header}
           </div>
         ))}
       </div>
       <div className="case-table-scroll" ref={scrollRef} role="rowgroup">
         <div className="case-table-spacer" style={{ height: virtualizer.getTotalSize() }}>
           {virtualizer.getVirtualItems().map((virtualRow) => {
-            const row = rows[virtualRow.index];
-            if (row === undefined) return null;
-            const item = row.original;
+            const item = cases[virtualRow.index];
+            if (item === undefined) return null;
             return (
-              <Button
+              <button
                 className="case-table-row"
-                key={row.id}
+                key={virtualRow.key}
                 onClick={() => onSelect(item)}
                 role="row"
                 style={{ height: virtualRow.size, transform: `translateY(${virtualRow.start}px)` }}
-                tone="ghost"
+                type="button"
               >
                 <span className="case-name" role="cell">
                   {item.caseId}
@@ -89,7 +70,7 @@ const CaseTable = ({
                 <span className="mono" role="cell">
                   {item.metricCounts.passed}/{item.metricCounts.expected}
                 </span>
-              </Button>
+              </button>
             );
           })}
         </div>

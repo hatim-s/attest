@@ -1,5 +1,7 @@
 # attest — Stack & Implementation Philosophy
 
+Frozen design notes from August 2026. Much of this was never built, so trust the code over this file.
+
 > Decided 2026-08-06 after a scouted technical review (Codex gpt-5.6-sol, high reasoning; full report archived) plus founder calls on the flagged executive decisions. Implementation details stay open until build time; this locks direction.
 
 ## Executive decisions (founder calls)

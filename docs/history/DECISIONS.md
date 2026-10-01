@@ -1,5 +1,7 @@
 # attest — Foundation Decisions
 
+Frozen design notes from August 2026. Much of this was never built, so trust the code over this file.
+
 > Product: a general eval runtime for AI agents. Users connect agents through a supported adapter;
 > the runtime executes them against test cases, scores with deterministic and LLM-based metrics,
 > and produces run diffs, reports, and interactive dashboards. Local-first, cloud later.

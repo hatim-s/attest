@@ -8,10 +8,7 @@ AGENTS.md
 CLAUDE.md
 DECISIONS.md
 STACK.md
-ROADMAP.md
 TASTE.md
-docs/attest-foundation.html
-docs/scout-stack-report.md
 conformance/fixtures/
 packages/schemas/generated/*.json
 # Preserve the approved marketing HTML exactly as supplied.

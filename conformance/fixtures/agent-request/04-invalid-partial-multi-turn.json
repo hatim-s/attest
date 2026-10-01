@@ -1,7 +1,7 @@
 {
   "description": "Rejects a transcript unless the multi-turn counter and conversation identity are both supplied.",
   "expect": "invalid",
-  "issue_paths": [["turn_index"], ["conversation_id"]],
+  "issue_paths": ["turn_index", "conversation_id"],
   "input": {
     "protocol": "attest.agent-invocation",
     "run_id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",

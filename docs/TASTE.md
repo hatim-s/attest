@@ -1,28 +1,28 @@
-# attest — Code Taste & Aesthetic Guide
+# Attest code taste guide
 
-Every orchestrating agent MUST inline the relevant parts of this guide into codex implementation prompts, and reviewers MUST enforce it. Codex writes thorough code with no taste — taste comes from here.
+Every orchestrating agent MUST inline the relevant parts of this guide into codex implementation prompts, and reviewers MUST enforce it. Codex writes thorough code with no taste. Taste comes from here.
 
 ## Shape of the code
 
 - **Deep modules, narrow APIs.** A package exposes a handful of well-named functions/types; internals stay internal. If a module's public surface needs a paragraph to explain, redesign it.
 - **Functional core, imperative shell.** Pure logic (assertion evaluation, diff classification, hashing, envelope validation) lives in dependency-free functions. Effects (process spawn, fs, network, db) live at the edges behind small interfaces. Pure parts get property tests; edges get integration tests.
 - **Composition over inheritance.** No class hierarchies. Classes only where identity + lifecycle genuinely exist (e.g., a running process handle, a db connection). Otherwise plain functions + data.
-- **Data first.** Define the types/Zod schemas first; functions transform typed data. No stringly-typed plumbing. Types are inferred from Zod at boundaries — never hand-duplicate a type a schema already defines.
-- **No premature abstraction.** Two call sites don't justify a helper. Three might. A "manager", "service", "util", or "helper" name is a smell — name things by what they do (`spawnAgentProcess`, `classifyRegressions`).
+- **Data first.** Define the types/Zod schemas first; functions transform typed data. No stringly-typed plumbing. Types are inferred from Zod at boundaries. Never hand-duplicate a type a schema already defines.
+- **No premature abstraction.** Two call sites don't justify a helper. Three might. A "manager", "service", "util", or "helper" name is a smell. Name things by what they do (`spawnAgentProcess`, `classifyRegressions`).
 
 ## Files & exports
 
 - Named exports only. **One export statement at the bottom of the file** listing everything exported.
-- `index.ts` contains re-exports ONLY — never logic.
+- `index.ts` contains re-exports only, never logic.
 - One concept per file; files under ~300 lines; if bigger, the concept is probably two concepts.
-- Readable file names: `agent-process.ts`, `assertion-engine.ts`, `run-diff.ts` — no `utils.ts`, `helpers.ts`, `misc.ts`.
+- Readable file names: `agent-process.ts`, `assertion-engine.ts`, `run-diff.ts`, never `utils.ts`, `helpers.ts`, `misc.ts`.
 - Folder = module boundary. `internal/` subfolder allowed for private pieces.
 
 ## Documentation & comments
 
-- Docstring (JSDoc) on every exported function, class, and non-obvious type: what it does, why it exists — not restating the signature.
-- Inline comments ONLY for non-trivial logic: invariants, tricky edge cases, protocol requirements ("must kill the whole process group — child may have forked"). Never narrate the obvious.
-- No TODO litter — discoveries go to PLAN.md Backlog.
+- Docstring (JSDoc) on every exported function, class, and non-obvious type: what it does, why it exists, not a restatement of the signature.
+- Inline comments ONLY for non-trivial logic: invariants, tricky edge cases, protocol requirements ("must kill the whole process group, the child may have forked"). Never narrate the obvious.
+- No TODO litter. Discoveries go to PLAN.md Backlog.
 
 ## Errors
 
@@ -32,28 +32,28 @@ Every orchestrating agent MUST inline the relevant parts of this guide into code
 
 ## Async & processes
 
-- `async/await` only — no floating promises (every promise awaited or explicitly detached with a comment).
+- `async/await` only, no floating promises (every promise awaited or explicitly detached with a comment).
 - Cancellation via `AbortSignal` threaded through, not ad-hoc flags.
 - Timeouts are enforced at the edge that owns the resource; process-tree cleanup is the invoker's responsibility, always.
 
 ## Dependencies
 
 - Boring and few. Before adding a dep, ask: does the standard library / an existing dep do this? A left-pad-class dep is an automatic reject.
-- Locked stack (do not re-litigate in code): Commander, Zod, Kysely, Hono, TanStack (Router/Query/Table/AI), Tailwind + shadcn/ui, ECharts, Vitest, Playwright.
+- Locked stack, do not re-litigate in code: Commander, Zod, Kysely, Hono, React, TanStack (Query, Virtual, AI), ECharts, Vitest, fast-check.
 
 ## Tests
 
-- Tests live under a local `_tests_/` directory beside the source module they exercise. Only meaningful behavior gets tested — no snapshot spam, no testing mocks.
+- Tests live under a local `_tests_/` directory beside the source module they exercise. Only meaningful behavior gets tested: no snapshot spam, no testing mocks.
 - Deterministic: no timers without fake clocks, no network, no live LLMs. Fixtures over inline blobs when shared.
 - Property tests for pure logic where inputs are combinatorial (assertions, diffing).
 
 ## Style details
 
-- No default parameter sprawl — options objects with a defined `Options` type for >2 params.
+- No default parameter sprawl. Use options objects with a defined `Options` type for >2 params.
 - Early returns over nested conditionals. Max ~2 levels of nesting; extract otherwise.
 - No clever one-liners; optimize for the reader. A junior should follow any file top-to-bottom.
 - Naming: verbs for functions, nouns for data, no abbreviations (`configuration` → `config` is fine; `cfg`, `res`, `tmp` are not).
-- Format/lint clean (ESLint + Prettier) — zero warnings policy in CI.
+- Format/lint clean (ESLint + Prettier), zero warnings in CI.
 
 ## Commit & PR discipline
 

@@ -1,1 +1,1 @@
-Generated JSON Schema for attest contracts. Do not edit by hand — regenerate via @attest/contracts.
+Regenerate these JSON Schema files with `bun run generate:schemas` from the repository root instead of editing them.

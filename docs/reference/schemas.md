@@ -1,8 +1,7 @@
 # Schema reference
 
-Attest publishes JSON Schemas generated from the same runtime definitions used by the CLI. Treat
-the generated files and `attest schema` output as authoritative; prose summarizes their roles but
-does not replace validation.
+The JSON Schemas in `packages/schemas/generated` are generated from the Zod schemas the CLI
+validates with. When this page and a schema disagree, the schema is right.
 
 ## Discover and print
 
@@ -22,14 +21,17 @@ by generated filename even when their in-document `schema` discriminator is an `
 
 ## Canonical authored resources
 
-| Document discriminator | Generated schema                                              | Authored location                    |
-| ---------------------- | ------------------------------------------------------------- | ------------------------------------ |
-| `attest.project`       | [project.json](../../packages/schemas/generated/project.json) | `attest.project.json`                |
-| `attest.agent`         | [agent.json](../../packages/schemas/generated/agent.json)     | `attest/agents/<id>.json`            |
-| `attest.test`          | [test.json](../../packages/schemas/generated/test.json)       | `attest/tests/<id>.json`             |
-| `attest.case`          | [case.json](../../packages/schemas/generated/case.json)       | Direct case or one dataset JSONL row |
-| `attest.dataset`       | [dataset.json](../../packages/schemas/generated/dataset.json) | `attest/datasets/<id>.meta.json`     |
-| `attest.metric`        | [metric.json](../../packages/schemas/generated/metric.json)   | `attest/metrics/<id>.json`           |
+| Document discriminator | Generated schema                                              |
+| ---------------------- | ------------------------------------------------------------- |
+| `attest.project`       | [project.json](../../packages/schemas/generated/project.json) |
+| `attest.agent`         | [agent.json](../../packages/schemas/generated/agent.json)     |
+| `attest.test`          | [test.json](../../packages/schemas/generated/test.json)       |
+| `attest.case`          | [case.json](../../packages/schemas/generated/case.json)       |
+| `attest.dataset`       | [dataset.json](../../packages/schemas/generated/dataset.json) |
+| `attest.metric`        | [metric.json](../../packages/schemas/generated/metric.json)   |
+
+[File layout](./file-layout.md) gives each file's path. An `attest.case` is a direct case in a test
+file or one row of a dataset's JSONL file.
 
 The manifest contains canonical paths and SHA-256 content hashes. Dataset entries bind both JSONL
 data bytes and metadata bytes. Runtime loading validates strict shapes, canonical paths, hash
@@ -64,9 +66,25 @@ A success document contains:
 }
 ```
 
-A failure contains only `schema`, `ok: false`, `command`, and `error`. The error has stable `code`,
-human `message`, `retryable`, and optional `path`, `hint`, and structured `details`. See
-[Errors](./errors.md).
+A failure contains only `schema`, `ok: false`, `command`, and `error`:
+
+```json
+{
+  "schema": "attest.cli-result",
+  "ok": false,
+  "command": "agent.add",
+  "error": {
+    "code": "cli_missing_input",
+    "message": "Required agent input is missing.",
+    "path": "--argv-json",
+    "hint": "Pass one supported transport selector.",
+    "retryable": false
+  }
+}
+```
+
+`code` is stable. `message` is for humans. `path`, `hint`, and `details` are optional. JSON mode
+prints failures to stdout like successes. See [Errors](./errors.md) for every code.
 
 ### `attest.cli-event`
 
@@ -131,13 +149,9 @@ agent request/response semantics.
 
 ## Validation rules for agents
 
-1. Select a schema using `schema list`; do not synthesize a filename from a discriminator.
-2. Validate before invoking the CLI, then still handle a structured CLI failure because project
-   hashes and cross-resource invariants require current filesystem state.
-3. Keep JSON objects strict. Do not pass undocumented fields.
-4. Preserve ids, hashes, JSON pointers, ULIDs, and schema strings exactly as returned.
-5. Regenerate or retrieve schemas from the installed CLI version instead of caching prose shapes
-   indefinitely.
+Pick a schema with `schema list` instead of building a filename from a discriminator. Validating
+before a call does not replace handling the CLI's failure, because project hashes and cross-resource
+checks depend on current files. See [Repair steps for agents](./errors.md#repair-steps-for-agents).
 
 Related references: [Errors](./errors.md), [Exit codes](./exit-codes.md), and
 [File layout](./file-layout.md).

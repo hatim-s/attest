@@ -19,15 +19,14 @@ attest show metric exact --output json
 
 ## Expected files
 
-`metric add` writes `attest/metrics/exact.json` and updates its entry in `attest.project.json`.
-`test add` writes `attest/tests/scored-smoke.json` with the metric reference. No run database is
-created by authoring or inspection.
+`metric add` writes the metric file and updates its manifest entry. `test add` writes the test file
+with the metric reference. See [File layout](../reference/file-layout.md) for the paths. Authoring
+and inspection do not create a run database.
 
 ## Expected stdout
 
-`--output json` emits one `attest.cli-result` document. A successful mutation reports
-`project_hash_before`, `project_hash_after`, the authored resource identity, and semantic
-operations. Inspection redacts environment-backed secret references where appropriate.
+Each command prints one [`attest.cli-result`](../reference/schemas.md#attestcli-result). A
+mutation's `result` names the authored resource and lists the semantic operations.
 
 ## Cleanup
 
@@ -38,15 +37,11 @@ attest metric remove exact --yes --output json
 
 ## Interactive authoring
 
-With a human TTY, `attest metric add` asks for the metric id, then shows the preset
-catalog. The default kind is assertion. Assertion guidance selects `input`, `output`, `expected`,
-or `trace` evidence and an operator; trace guidance also displays whether authored agents advertise
-trace support. Judge, command, and HTTP kinds select their matching preset. Missing required values
-are prompted, then the CLI shows a redacted semantic preview and asks for confirmation.
-
-Prompts are disabled in CI, with non-TTY input/output, with `--non-interactive`, with
-`--output json`, or when `--from-json` is used. `--yes` accepts a confirmation but cannot supply a
-missing id, rubric, model, executable argv, URL, or assertion value. `--dry-run` is zero-write.
+When [prompts are enabled](./index.md#prompts-and-non-interactive-runs), `attest metric add` asks
+for the metric id, then shows the preset catalog. The default kind is assertion. Assertion prompts
+choose `input`, `output`, `expected`, or `trace` evidence and an operator. Trace prompts also show
+whether authored agents declare trace support. Judge, command, and HTTP kinds use their matching
+preset. The CLI prompts for missing values, shows a redacted preview, and asks for confirmation.
 
 ## Non-interactive and JSON flows
 
@@ -66,19 +61,11 @@ attest metric add rubric \
   --output json
 ```
 
-All mutations accept a complete `attest.command-request` document through `--from-json`:
+Both authoring commands accept a complete `attest.command-request` through `--from-json`:
 
 ```sh
 attest metric add --from-json ./metric-add.json --output json
 attest metric import --from-json ./metric-import.json --output json
-```
-
-The request source conflicts with metric arguments, definition flags, `--dry-run`, `--yes`, and
-`--if-project-hash`; encode those fields in the request. Discover the exact union branch with:
-
-```sh
-attest help metric add --output json
-attest schema print attest.command-request --output json
 ```
 
 ## Presets
@@ -133,8 +120,7 @@ attest metric add remote-score \
 ```
 
 Only environment-variable names are persisted for `--env`, `--header-env`, and `--query-env`.
-Metric authoring does not call a judge or HTTP endpoint; execution occurs during `metric test` or an
-evaluation as supported by the selected metric runner.
+Authoring never calls a judge or HTTP endpoint. `metric test` and `eval run` do.
 
 ## Import and local fixture tests
 
@@ -167,32 +153,13 @@ The fixture contains a canonical case, expected verdict, arbitrary JSON output, 
 `metric_infrastructure_failed` (exit 4). `--from-json -` and `--fixture -` cannot share the same
 stdin stream.
 
-## Rename, detach, and remove
+## Rename and remove
 
-Renaming updates every test metric reference atomically. Removal is blocked while references exist
-unless `--detach` removes those references explicitly:
-
-```sh
-attest metric rename exact exact-renamed --dry-run
-attest metric remove exact-renamed --dry-run
-attest metric remove exact-renamed --detach --yes --output json
-```
-
-The implemented command tree attaches a metric when a test is created with `test add --metric`; it
-does not expose a later `test metric attach` or `detach` command. To change an existing test's
-metric list, recreate that test through the supported authoring surface. `metric remove --detach`
-can explicitly remove references before deleting a metric.
+See [Rename and remove](./index.md#rename-and-remove). Tests list their metrics when created with
+`test add --metric`. No command attaches a metric to an existing test. To change a test's metrics,
+recreate the test.
 
 ## Agent-readable contract
 
-1. Read `attest help metric add --output json`; its `presets` array is the canonical authoring
-   catalog.
-2. Select one input route: flags or `--from-json`. Parse JSON-valued flags before constructing the
-   command.
-3. Use `--dry-run`, then bind the reviewed state with `--if-project-hash` for the write.
-4. Parse one `attest.cli-result` from stdout and branch on `ok` and stable `error.code`.
-5. Retrieve `attest.metric`, `attest.metric-evaluation`, and fixture schemas through
-   `attest schema list --output json` and `attest schema print`.
-
-See [Schemas](../reference/schemas.md), [Errors](../reference/errors.md),
-[Exit codes](../reference/exit-codes.md), and [File layout](../reference/file-layout.md).
+`attest help metric add --output json` returns the preset catalog in its `presets` array. For the
+general steps, see [Repair steps for agents](../reference/errors.md#repair-steps-for-agents).

@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "bun --watch src/serve.ts",
-    "build": "bun src/build.ts",
+    "build": "mkdir -p dist && cp index.html dist/index.html",
     "preview": "bun src/serve.ts --built",
     "typecheck": "tsc --noEmit"
   }

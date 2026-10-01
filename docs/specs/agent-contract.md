@@ -1,10 +1,10 @@
-# Agent Contract — `attest.agent-invocation`
+# Agent contract: `attest.agent-invocation`
 
-How attest invokes your agent. Any language, any framework: expose either a **CLI command** or an **HTTP endpoint** that speaks this envelope, and attest can evaluate it.
+This page defines the JSON envelopes attest exchanges with an agent. An agent is a CLI command or an HTTP endpoint that reads a request envelope and returns a response envelope.
 
 ## Model
 
-attest treats your agent as a black box invoked once per test case (once per _turn_ in multi-turn simulation). The runner sends a **request envelope**, your agent returns a **response envelope** containing its final output and, optionally, a [trace](./trace-schema.md) of what it did internally. No SDK required.
+The runner invokes your agent once per test case. It sends a request envelope. Your agent returns a response envelope with its final output and, optionally, a [trace](./trace-schema.md) of its internal steps.
 
 ## Request envelope
 
@@ -14,25 +14,20 @@ attest treats your agent as a black box invoked once per test case (once per _tu
   "run_id": "01J9ZK7Q2M5X8W4V3T2R1QPN0M",
   "case_id": "greeting-basic",
   "input": { "question": "What is the capital of France?" },
-  "params": { "locale": "en" },
-  "messages": [{ "role": "user", "content": "What is the capital of France?" }],
-  "turn_index": 0,
-  "conversation_id": "01J9ZK7Q2M5X8W4V3T2R1QPN0M-greeting-basic-0"
+  "params": { "locale": "en" }
 }
 ```
 
-| Field             | Type          | Presence        | Meaning                                                                                                      |
-| ----------------- | ------------- | --------------- | ------------------------------------------------------------------------------------------------------------ |
-| `protocol`        | string        | always          | Envelope version. Reject requests you don't understand.                                                      |
-| `run_id`          | string (ULID) | always          | The evaluation run this invocation belongs to.                                                               |
-| `case_id`         | string        | always          | The test case being executed.                                                                                |
-| `input`           | JSON          | always          | The case input, verbatim from config. Shape is yours.                                                        |
-| `params`          | object        | optional        | Case-level passthrough parameters from config.                                                               |
-| `messages`        | array         | multi-turn only | Full conversation transcript so far (`{role, content}`; roles `user`/`assistant`). Single-turn runs omit it. |
-| `turn_index`      | number        | multi-turn only | 0-based turn counter.                                                                                        |
-| `conversation_id` | string        | multi-turn only | Stable id across turns of one simulated conversation.                                                        |
+| Field      | Type          | Presence | Meaning                                                 |
+| ---------- | ------------- | -------- | ------------------------------------------------------- |
+| `protocol` | string        | always   | Envelope version. Reject requests you don't understand. |
+| `run_id`   | string (ULID) | always   | The evaluation run this invocation belongs to.          |
+| `case_id`  | string        | always   | The test case being executed.                           |
+| `input`    | JSON          | always   | The case input, copied from the case. Shape is yours.   |
+| `params`   | object        | optional | The case's `params`, passed through unchanged.          |
 
-Multi-turn is **stateless by default**: each turn replays the full transcript, so your agent needs no session storage. HTTP agents may opt into stateful mode via the `state` token (below).
+The schema also accepts `messages`, `turn_index`, `conversation_id`, and `state`. They are
+reserved for multi-turn runs. The runner does not send them yet.
 
 ## Response envelope
 
@@ -44,17 +39,17 @@ Multi-turn is **stateless by default**: each turn replays the full transcript, s
 }
 ```
 
-| Field      | Type   | Presence                  | Meaning                                                                                                                                                                 |
-| ---------- | ------ | ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `protocol` | string | always                    | Must match the request protocol.                                                                                                                                        |
-| `output`   | JSON   | xor `error`               | The agent's final answer. String or structured — metrics decide how to read it.                                                                                         |
-| `error`    | object | xor `output`              | `{ "message": string, "code"?: string }` — the agent understood the request but failed to produce an answer. Counts as a **case failure**, not an infrastructure error. |
-| `trace`    | object | optional                  | An [`attest.trace`](./trace-schema.md) document. Omitting it disables trajectory metrics for this case; output metrics still run.                                       |
-| `state`    | JSON   | optional, HTTP multi-turn | Opaque token echoed back on the next turn's request as `state`.                                                                                                         |
+| Field      | Type   | Presence     | Meaning                                                                                                                                           |
+| ---------- | ------ | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `protocol` | string | always       | Must match the request protocol.                                                                                                                  |
+| `output`   | JSON   | xor `error`  | The agent's final answer. A string or structured JSON. Metrics decide how to read it.                                                             |
+| `error`    | object | xor `output` | `{ "message": string, "code"?: string }`. The agent understood the request but could not answer. This is a case failure, not an invocation error. |
+| `trace`    | object | optional     | An [`attest.trace`](./trace-schema.md) document. Omitting it disables trajectory metrics for this case; output metrics still run.                 |
+| `state`    | JSON   | optional     | Reserved for multi-turn runs. The parser accepts it and the runner ignores it.                                                                    |
 
-Exactly one of `output` / `error` must be present — a response is either a **success** (`output`) or an **agent failure** (`error`), never both.
+Exactly one of `output` and `error` must be present. A response with `output` is a success. A response with `error` is an agent failure.
 
-A malformed or invalid `trace` never invalidates the response: the output is still evaluated, trajectory metrics are disabled for the case, and the trace problem is reported as a warning diagnostic.
+A malformed `trace` does not invalidate the response. The runner still evaluates the output, skips trajectory metrics for the case, and reports the trace problem as a warning.
 
 ## CLI transport
 
@@ -64,29 +59,29 @@ The runner spawns your command once per invocation:
 - **stdout**: MUST be exactly one JSON response envelope. All logging goes to **stderr** (surfaced in reports, never parsed).
 - **exit code**: `0` when a valid envelope was written (even if it contains `error`). Any other exit code is an **invocation error**.
 - **cwd**: a fresh temporary directory per invocation. Do not rely on persistent local state.
-- **environment**: the runner synthesizes `HOME` and `TMPDIR` beneath the per-attempt directory, inherits `PATH` after filtering it to absolute entries, and sets `LC_ALL=C` for a stable locale. Only variables allowlisted in config (`agent.env`) forward their real host values as explicit opt-in; those values override synthesized values. It also sets `ATTEST_RUN_ID`, `ATTEST_CASE_ID`, and `ATTEST_PROTOCOL`. Nothing else from the parent environment leaks through.
+- **environment**: the runner synthesizes `HOME` and `TMPDIR` beneath the per-attempt directory, inherits `PATH` after filtering it to absolute entries, and sets `LC_ALL=C` for a stable locale. Variables listed in the agent's `transport.env` map forward their real values, and those values override the synthesized ones. It also sets `ATTEST_RUN_ID`, `ATTEST_CASE_ID`, and `ATTEST_PROTOCOL`. Nothing else from the parent environment leaks through.
 
 ## HTTP transport
 
-- `POST <agent.url>` with the request envelope as JSON body (`Content-Type: application/json`).
+- `POST` to `transport.request.url` with the request envelope as JSON body (`Content-Type: application/json`).
 - `200` with a response envelope body = success (including agent-reported `error`).
 - Redirects are not followed; any `3xx` is a terminal **invocation error**.
-- Any other status, malformed body, or network failure is an **invocation error**. `5xx` and network failures are retried per config; `4xx` is not.
-- Your endpoint must tolerate concurrent requests up to the run's configured concurrency.
+- Any other status, malformed body, or network failure is an **invocation error**. The runner retries `5xx` and network failures up to `retry.retries` times. It does not retry `4xx`.
+- Your endpoint receives up to the run's concurrency limit of requests at once.
 
 ## Execution semantics
 
-| Concern     | Behavior                                                                                                                                                                                 |
-| ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Timeout     | `agent.timeout_ms` per invocation (default 60 000). CLI: SIGTERM, 5 s grace, then SIGKILL using best-effort process-tree termination. HTTP: request aborted. Timeout = invocation error. |
-| Retries     | `agent.retries` (default 0) applies to invocation errors only — never to agent-reported `error` envelopes.                                                                               |
-| Output cap  | stdout / response body capped (default 10 MB). Exceeding the cap = invocation error.                                                                                                     |
-| Concurrency | Cases run in parallel (`run.concurrency`). No ordering guarantees between cases.                                                                                                         |
-| Determinism | The runner records request, response, timing, and exit metadata for every invocation, including retries.                                                                                 |
+| Concern     | Behavior                                                                                                                                                                                                                                             |
+| ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Timeout     | `timeouts.attempt_ms` per invocation (default 60 000). A test's `defaults.timeout_ms` overrides it. CLI: SIGTERM, 5 s grace, then SIGKILL with best-effort process-tree termination. HTTP: the request is aborted. A timeout is an invocation error. |
+| Retries     | `retry.retries` (default 0) applies to invocation errors only, never to agent-reported `error` envelopes.                                                                                                                                            |
+| Output cap  | stdout and response bodies are capped (default 10 MB). Exceeding the cap is an invocation error.                                                                                                                                                     |
+| Concurrency | Cases run in parallel up to `defaults.concurrency` in `attest.project.json`, a test's `defaults.concurrency`, or `attest eval run --concurrency`. Cases have no ordering guarantee.                                                                  |
+| Evidence    | The runner records request, response, timing, and exit metadata for every invocation, including retries.                                                                                                                                             |
 
-**Invocation error vs case failure**: invocation errors (spawn failure, timeout, bad envelope, non-zero exit, HTTP 5xx) mean attest could not evaluate the case and are reported as infrastructure problems. A well-formed `error` envelope or failing metric scores are results.
+**Invocation error or case failure.** An invocation error (spawn failure, timeout, bad envelope, non-zero exit, HTTP 5xx) means attest could not evaluate the case. A well-formed `error` envelope or a failing metric score is a result.
 
-**Containment**: CLI process-tree termination is **best-effort**. Processes that daemonize into a new session after the pre-kill snapshot, and children spawned after that snapshot, can escape. Batched start-time and command identity checks are best-effort **detection** that reduces PID-reuse risk, not a prevention guarantee: same-second reuse by the same command can match, and a process can change between the check and the signal. Unreaped or unverified candidates are reported in diagnostics.
+**Containment.** CLI process-tree termination is best-effort. A process that daemonizes into a new session after the pre-kill snapshot can escape, and so can a child spawned after that snapshot. Before signalling, the runner compares each process's start time and command to reduce PID-reuse risk. Same-second reuse by the same command still matches, and a process can change between the check and the signal. Diagnostics list unreaped or unverified processes.
 
-Unknown request fields are extensions. Unknown top-level response fields are preserved and surfaced
-as warnings so vendor-specific evidence remains inspectable.
+Unknown request fields are extensions. The parser keeps unknown top-level response fields and
+reports each one as a warning.

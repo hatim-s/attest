@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { createTraceWaterfallRows, readTraceSpans } from '../trace-waterfall.js';
+import { createTraceWaterfall, readTraceSpans } from '../trace-waterfall.js';
 
 describe('trace waterfall projection', () => {
   it('sorts spans, computes hierarchy depth, and aligns the shared timeline', () => {
@@ -27,10 +27,11 @@ describe('trace waterfall projection', () => {
       ],
     };
 
-    expect(createTraceWaterfallRows(trace)).toMatchObject([
+    expect(createTraceWaterfall(trace).rows).toMatchObject([
       { spanId: 'root', depth: 0, durationMs: 1_000, offsetPercent: 0, widthPercent: 100 },
       { spanId: 'child', depth: 1, durationMs: 500, offsetPercent: 25, widthPercent: 50 },
     ]);
+    expect(createTraceWaterfall(trace).durationMs).toBe(1_000);
   });
 
   it('drops malformed spans and bounds cyclic parents', () => {
@@ -55,6 +56,6 @@ describe('trace waterfall projection', () => {
     };
 
     expect(readTraceSpans(trace)).toHaveLength(2);
-    expect(createTraceWaterfallRows(trace).map(({ depth }) => depth)).toEqual([0, 0]);
+    expect(createTraceWaterfall(trace).rows.map(({ depth }) => depth)).toEqual([0, 0]);
   });
 });

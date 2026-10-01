@@ -5,109 +5,84 @@ import {
   parseMetricResult,
   parseTrace,
 } from '@attest/contracts';
-import { readdirSync } from 'node:fs';
-import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import { loadFixtures, type FixtureEnvelope, type LoadedFixture } from './support/load-fixtures.js';
 
 type FixtureParseResult =
-  | { ok: true; warningCodes: string[] }
+  | { ok: true; value: unknown; warningCodes: string[] }
   | { ok: false; issuePaths: string[]; warningCodes: string[] };
 
-const fixtures = loadFixtures();
-const fixtureRoot = join(import.meta.dirname, '../../fixtures');
+type ContractIssueResult =
+  { ok: true; value: unknown } | { ok: false; error: Array<{ path: string }> };
 
-/** Converts public parser results into the few assertions every fixture envelope shares. */
-const parseFixture = (fixture: LoadedFixture): FixtureParseResult => {
-  if (fixture.contract === 'agent-request') {
-    const result = parseAgentRequest(fixture.envelope.input);
-    return result.ok
-      ? { ok: true, warningCodes: [] }
-      : { ok: false, issuePaths: result.error.map((issue) => issue.path), warningCodes: [] };
-  }
+/** Adapts parsers that report no warnings to the shared fixture result. */
+const withoutWarnings = (result: ContractIssueResult): FixtureParseResult =>
+  result.ok
+    ? { ok: true, value: result.value, warningCodes: [] }
+    : { ok: false, issuePaths: result.error.map((issue) => issue.path), warningCodes: [] };
 
-  if (fixture.contract === 'agent-response') {
-    const result = parseAgentResponse(fixture.envelope.input);
+const parsers: Record<string, (input: unknown) => FixtureParseResult> = {
+  'agent-request': (input) => withoutWarnings(parseAgentRequest(input)),
+  'agent-response': (input) => {
+    const result = parseAgentResponse(input);
     const warningCodes = result.warnings.map((warning) => warning.code);
     return result.ok
-      ? { ok: true, warningCodes }
+      ? { ok: true, value: result.value, warningCodes }
       : { ok: false, issuePaths: result.errors.map((issue) => issue.path), warningCodes };
-  }
-
-  if (fixture.contract === 'metric-request') {
-    const result = parseMetricRequest(fixture.envelope.input);
-    return result.ok
-      ? { ok: true, warningCodes: [] }
-      : { ok: false, issuePaths: result.error.map((issue) => issue.path), warningCodes: [] };
-  }
-
-  if (fixture.contract === 'metric-result') {
-    const result = parseMetricResult(fixture.envelope.input);
-    return result.ok
-      ? { ok: true, warningCodes: [] }
-      : { ok: false, issuePaths: result.error.map((issue) => issue.path), warningCodes: [] };
-  }
-
-  const result = parseTrace(fixture.envelope.input);
-  return result.ok
-    ? { ok: true, warningCodes: [] }
-    : { ok: false, issuePaths: result.error.map((issue) => issue.path), warningCodes: [] };
+  },
+  'metric-request': (input) => withoutWarnings(parseMetricRequest(input)),
+  'metric-result': (input) => withoutWarnings(parseMetricResult(input)),
+  trace: (input) => withoutWarnings(parseTrace(input)),
 };
 
-/** Joins fixture path segments because the public parser intentionally exposes dot-path diagnostics. */
-const formatFixturePath = (path: string[]): string => path.join('.');
+/** Routes a fixture to the public parser for its directory. Unknown directories fail the run. */
+const parseFixture = (fixture: LoadedFixture): FixtureParseResult => {
+  const parser = parsers[fixture.contract];
+  if (parser === undefined) {
+    throw new Error(`No parser for fixture directory "${fixture.contract}".`);
+  }
+  return parser(fixture.envelope.input);
+};
 
-/** Asserts the declared outcome without coupling fixtures to Zod implementation details. */
+/** Reads a dotted path such as `spans.0.vendor_span` from parsed JSON. */
+const readPath = (value: unknown, path: string): unknown =>
+  path
+    .split('.')
+    .reduce<unknown>(
+      (current, key) =>
+        current !== null && typeof current === 'object'
+          ? (current as Record<string, unknown>)[key]
+          : undefined,
+      value,
+    );
+
+/** Asserts the outcome the envelope declares. */
 const expectFixtureOutcome = (envelope: FixtureEnvelope, result: FixtureParseResult): void => {
   if (envelope.expect === 'invalid') {
     expect(result.ok).toBe(false);
-    if (result.ok) {
-      return;
-    }
-
-    const expectedPaths = (envelope.issue_paths ?? []).map(formatFixturePath);
-    expect(result.issuePaths).toEqual(expect.arrayContaining(expectedPaths));
+    if (result.ok) return;
+    expect(result.issuePaths).toEqual(expect.arrayContaining(envelope.issue_paths ?? []));
     return;
   }
 
   expect(result.ok).toBe(true);
-  if (!result.ok) {
-    return;
-  }
+  if (!result.ok) return;
 
-  if (envelope.expect === 'valid-with-warnings') {
-    expect(result.warningCodes).toEqual(envelope.warning_codes ?? []);
-    return;
+  const expectedWarnings = envelope.expect === 'valid-with-warnings' ? envelope.warning_codes : [];
+  expect(result.warningCodes).toEqual(expectedWarnings ?? []);
+  for (const path of envelope.preserve_paths ?? []) {
+    const authored = readPath(envelope.input, path);
+    expect(authored, path).toBeDefined();
+    expect(readPath(result.value, path), path).toEqual(authored);
   }
-
-  expect(result.warningCodes).toEqual([]);
 };
 
-const contractDirectories = [
-  'agent-request',
-  'agent-response',
-  'trace',
-  'metric-request',
-  'metric-result',
-] as const;
+const fixtures = loadFixtures();
+// Group by directory on disk so a fixture folder without a parser fails instead of being skipped.
+const contracts = [...new Set(fixtures.map((fixture) => fixture.contract))];
 
-it('contains exactly the known contract directories with JSON fixtures', () => {
-  const actualDirectories = readdirSync(fixtureRoot, { withFileTypes: true })
-    .filter((entry) => entry.isDirectory())
-    .map((entry) => entry.name)
-    .sort();
-  expect(actualDirectories).toEqual([...contractDirectories].sort());
-
-  for (const contract of contractDirectories) {
-    const jsonFixtures = readdirSync(join(fixtureRoot, contract), { withFileTypes: true }).filter(
-      (entry) => entry.isFile() && entry.name.endsWith('.json'),
-    );
-    expect(jsonFixtures.length, `${contract} fixture count`).toBeGreaterThan(0);
-  }
-});
-
-for (const contract of contractDirectories) {
+for (const contract of contracts) {
   const contractFixtures = fixtures.filter((fixture) => fixture.contract === contract);
 
   describe(`${contract} conformance fixtures`, () => {
@@ -116,30 +91,3 @@ for (const contract of contractDirectories) {
     });
   });
 }
-
-describe('trace extension conformance', () => {
-  it('round-trips unknown document and span fields from trace fixture 06', () => {
-    const fixture = fixtures.find(
-      (candidate) =>
-        candidate.contract === 'trace' &&
-        candidate.name === '06-valid-unknown-span-fields-preserved.json',
-    );
-    expect(fixture).toBeDefined();
-    if (fixture === undefined) {
-      return;
-    }
-
-    const result = parseTrace(fixture.envelope.input);
-    expect(result.ok).toBe(true);
-    if (!result.ok) {
-      return;
-    }
-
-    const input = fixture.envelope.input as {
-      vendor_document: unknown;
-      spans: Array<{ vendor_span: unknown }>;
-    };
-    expect(result.value.vendor_document).toEqual(input.vendor_document);
-    expect(result.value.spans[0]?.vendor_span).toEqual(input.spans[0]?.vendor_span);
-  });
-});

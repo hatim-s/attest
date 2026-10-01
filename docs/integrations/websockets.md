@@ -113,16 +113,12 @@ Ctrl-C cancels pending work, closes or destroys the connection, and returns top-
 - Use `wss://` whenever credentials are resolved. Plain `ws://` with secrets is allowed only for explicit loopback endpoints.
 - `Authorization` must be an environment/file secret reference. Cookies, proxy authorization, and runtime-controlled handshake headers are rejected.
 - The server must select exactly the configured subprotocol. Socket.IO endpoints, GraphQL subscription subprotocols, binary frames, and arbitrary bidirectional tool callbacks are unsupported.
-- URLs cannot contain credentials or fragments. DNS is resolved and pinned; private and special-use addresses are rejected except loopback.
+- URLs cannot contain credentials or fragments. The DNS pinning and address rules from the [network rules](./curl-and-http.md#security-and-redaction) apply.
 - Request bytes, message bytes, message count, and total evidence are bounded. Resolved header values and configured event pointers are redacted from persisted attempt evidence and errors.
 
 ## Testing and stable errors
 
 Test serial and multiplexed correlation, acknowledgement timing, clean/unclean close, ping/pong, idle timeout, invalid JSON, unknown ids, cap overflow, and cancellation against a local fake before using production credentials.
 
-`agent test --output json` uses top-level `invocation_failed` with exit `4` for transport failures. Inspect `details.invocation_code` (`network`, `timeout`, `invalid_envelope`, or `output_cap_exceeded`) and the bounded attempt evidence instead of parsing messages. Discover the exact installed grammar and stable error catalog with:
-
-```sh
-attest help agent add --output json
-attest errors --output json
-```
+See [Agent transport failures](../reference/errors.md#agent-transport-failures) for the
+`details.invocation_code` values. The bounded attempt evidence shows the messages exchanged.

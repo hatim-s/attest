@@ -37,16 +37,13 @@ After initialization and authoring, the directory contains `attest.project.json`
 `attest/agents/support.json`, `attest/metrics/exact.json`, and
 `attest/tests/smoke.json`. `agent.mjs` and `cases.jsonl` are the two input fixtures.
 
-No `attest.config.json` is created. `.attest/runs.db` remains absent through authoring and
-is created only by `attest eval run smoke --output json`.
+`.attest/runs.db` does not exist until `attest eval run smoke --output json` creates it.
 
 ## Expected stdout
 
-Each `--output json` command writes exactly one JSON document and no progress prose to
-stdout. Every document has `"schema":"attest.cli-result"`, `ok`, and the exact
-command id. In order, the ids are `project.init`, `agent.add`, `agent.test`, `metric.add`,
-`test.add`, `test.case.import`, and `eval.run`. Successful documents also contain
-`project_hash_before`, `project_hash_after`, `result`, and `warnings`.
+Each command prints one [`attest.cli-result`](./reference/schemas.md#attestcli-result) and nothing
+else on stdout. In order, the `command` values are `project.init`, `agent.add`, `agent.test`,
+`metric.add`, `test.add`, `test.case.import`, and `eval.run`.
 
 The full envelope is defined in [schema reference](./reference/schemas.md). If a command
 fails, inspect `error.code` and use the [error catalog](./reference/errors.md); do not
