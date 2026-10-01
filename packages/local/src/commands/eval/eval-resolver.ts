@@ -3,6 +3,7 @@ import {
   resolveEvalRun as resolve,
   EvalResolutionError,
   type EvalResolverOptions,
+  type ResolvedEvalCaseInput,
 } from '@attest/core';
 import type { LoadedProject } from '../../project/project-loader/index.js';
 import { LocalError } from '../../errors/index.js';
@@ -25,5 +26,4 @@ const resolveEvalRun = (
     });
   }
 };
-export { resolveEvalRun };
-export type { ResolvedEvalCaseInput } from '@attest/core';
+export { resolveEvalRun, type ResolvedEvalCaseInput };

@@ -78,10 +78,14 @@ file and 5 MiB total. Credential-bearing HTTP fields require environment secret 
 Arbitrary dataset text and source code are user content; these checks do not detect embedded
 secrets in arbitrary strings. Static source checks reject direct third-party and relative imports. TypeScript accepts node-prefixed
 built-ins and bun; Python accepts the documented safe standard-library subset in
-`portable-metric-source.ts`. These checks are conservative and do not replace sandbox isolation.
+`portable-metric-source.ts`. These checks are a convenience preflight. They do not prove dependency closure and are not a security boundary. Sandbox isolation and runtime import errors remain authoritative. Hosts must return actionable metric errors for missing dependencies.
 Cloud capability validation must reject unsupported execution hooks before accepting a run.
 
 Core owns pure `resolveEvalRun`, dataset expansion, metric overrides, and canonical project
 hashing. Local supplies loaded resources and maps domain errors into its application errors.
 Cloud resolves the same resources from a validated bundle. Authentication, service response
 envelopes, queue persistence, quotas, and retention remain deployment-owned.
+
+Cloud revision identity must include the full bundle, including metric source bytes. The core
+`projectHash` intentionally retains local manifest semantics and does not identify bundled source
+files. Persist a full-bundle content hash and revision ID in cloud run provenance.
