@@ -14,6 +14,8 @@ type PinnedRequestOptions = {
   method: string;
   headers: Record<string, string>;
   body?: string;
+  /** Only WebSocket handshakes may transfer ownership of an upgraded socket. */
+  allowUpgrade?: boolean;
   /** Aborts the request until the first response arrives. */
   signal: AbortSignal;
   /** Deadline for the first response or upgrade after the request is sent. */
@@ -75,6 +77,11 @@ const openPinnedRequest = (
       settle(() => resolve({ kind: 'response', response }));
     });
     outgoing.once('upgrade', (response, socket, head) => {
+      if (options.allowUpgrade !== true) {
+        socket.destroy();
+        settle(() => reject(errors.failed(new Error('Unexpected HTTP protocol upgrade.'))));
+        return;
+      }
       settle(() => resolve({ kind: 'upgrade', response, socket, head }));
     });
     // Stays attached after settlement so a late socket error cannot become an uncaught event.

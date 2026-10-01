@@ -67,6 +67,7 @@ const openWebSocketHandshake = async (
   const expectedAccept = createHash('sha1').update(`${key}${WEBSOCKET_GUID}`).digest('base64');
   const opened = await openPinnedRequest(resolved, {
     method: 'GET',
+    allowUpgrade: true,
     headers: {
       ...options.headers,
       connection: 'Upgrade',
