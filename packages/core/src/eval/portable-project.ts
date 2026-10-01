@@ -43,7 +43,18 @@ const assertPortableRequest = (request: HttpRequestTemplate): void => {
 
 /** Validates source/resource parity and computes the same snapshot hashes as the local loader. */
 const resolvePortableProject = (input: PortableProjectBundle): ResolutionProject => {
-  const { resources, files } = portableProjectBundleSchema.parse(input);
+  const parsed = portableProjectBundleSchema.safeParse(input);
+  if (!parsed.success) {
+    throw new EvalResolutionError('project_invalid', 'Invalid portable project bundle.', {
+      details: {
+        issues: parsed.error.issues.map(({ path, message }) => ({
+          path: path.map(String),
+          message,
+        })),
+      },
+    });
+  }
+  const { resources, files } = parsed.data;
   const allowedFiles = new Set(['attest.project.json']);
   const checkJson = (path: string, value: unknown, expectedHash?: string): string => {
     allowedFiles.add(path);
