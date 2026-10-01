@@ -98,8 +98,9 @@ jq -c . eval.jsonl >/dev/null
 tail -n 1 eval.jsonl | jq '{event, exit: .data.exit_code, result: .data.result}'
 ```
 
-In a pipeline, run `set -o pipefail` so the pipeline returns Attest's exit status instead of the
-last command's.
+In Bash or Zsh, run `set -o pipefail` so a successful consumer does not hide an Attest failure.
+If several pipeline commands fail, the pipeline returns the rightmost failure. Capture Attest's
+status separately when you need its exact exit code.
 
 ## Stable identity within each exit
 
