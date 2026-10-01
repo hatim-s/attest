@@ -66,7 +66,7 @@ const agentResponseShape = {
  */
 const agentResponseSchema = z.looseObject(agentResponseShape).superRefine((response, context) => {
   const outcomeCount = ['output', 'error'].filter((field) => Object.hasOwn(response, field)).length;
-  if (outcomeCount === 1) {
+  if (outcomeCount === 1 && (response.output !== undefined || response.error !== undefined)) {
     return;
   }
 
