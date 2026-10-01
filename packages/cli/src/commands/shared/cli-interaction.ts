@@ -1,22 +1,25 @@
 import { createInterface } from 'node:readline/promises';
+import { text } from 'node:stream/consumers';
+
+type CliPrompt = (question: string, options?: { signal?: AbortSignal }) => Promise<string>;
 
 type CliInteraction = {
   ci: boolean;
   inputIsTTY: boolean;
   outputIsTTY: boolean;
-  prompt: (question: string, options?: { signal?: AbortSignal }) => Promise<string>;
+  prompt: CliPrompt;
   readImportStdin: () => AsyncIterable<string | Uint8Array>;
   readStdin: () => Promise<string>;
 };
 
-/** Reads stdin to completion for one non-interactive command request. */
-const readStdin = async (): Promise<string> => {
-  let text = '';
-  for await (const chunk of process.stdin as AsyncIterable<unknown>) {
-    if (typeof chunk === 'string') text += chunk;
-    else if (Buffer.isBuffer(chunk)) text += chunk.toString('utf8');
+/** Asks one readline question; the signal closes the question so its terminal listeners go too. */
+const promptOnTerminal: CliPrompt = async (question, options) => {
+  const readline = createInterface({ input: process.stdin, output: process.stdout });
+  try {
+    return await readline.question(question, { signal: options?.signal });
+  } finally {
+    readline.close();
   }
-  return text;
 };
 
 /** Creates the process-backed interaction used by the production CLI. */
@@ -24,19 +27,9 @@ const createDefaultCliInteraction = (): CliInteraction => ({
   ci: process.env.CI === 'true',
   inputIsTTY: process.stdin.isTTY === true,
   outputIsTTY: process.stdout.isTTY === true,
-  readImportStdin: () => process.stdin as AsyncIterable<Uint8Array>,
-  readStdin,
-  prompt: async (question: string, options?: { signal?: AbortSignal }) => {
-    const prompt = createInterface({ input: process.stdin, output: process.stdout });
-    try {
-      // Bind process cancellation to readline so its terminal listeners are closed in finally.
-      return options?.signal === undefined
-        ? await prompt.question(question)
-        : await prompt.question(question, { signal: options.signal });
-    } finally {
-      prompt.close();
-    }
-  },
+  prompt: promptOnTerminal,
+  readImportStdin: () => process.stdin,
+  readStdin: () => text(process.stdin),
 });
 
-export { createDefaultCliInteraction, type CliInteraction };
+export { createDefaultCliInteraction, type CliInteraction, type CliPrompt };

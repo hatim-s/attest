@@ -1,10 +1,9 @@
-export { hashCanonicalJson } from '../project/canonical-project.js';
 export {
   loadProject,
   type LoadedProject,
   type ProjectContentHashes,
-} from '../project/project-loader/index.js';
-export { applyProjectMutation } from '../project/transaction/index.js';
+} from './project-loader/index.js';
+export { applyProjectMutation } from './transaction/index.js';
 export { loadCommandProject } from '../commands/project/load-command-project.js';
 export {
   runProjectInitCommand,

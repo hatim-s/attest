@@ -6,10 +6,8 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import { loadProject } from '../../project-loader/index.js';
 import { prepareProjectCandidate } from '../candidate-project.js';
-import {
-  candidateFromLoadedProject,
-  writeFixtureProject,
-} from '../../../_tests_/support/project-transaction.js';
+import { candidateFromLoadedProject } from '../../../commands/project/load-command-project.js';
+import { writeFixtureProject } from '../../../_tests_/support/project-transaction.js';
 import { createSemanticProjectDiff } from '../semantic-project-diff.js';
 
 const temporaryDirectories: string[] = [];

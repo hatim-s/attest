@@ -11,15 +11,16 @@ import {
   parseJsonValues,
   parseRequestTemplate,
   parseSandboxJson,
-  parseSecretBindings,
   parseTcpReadiness,
   tokenizeCommand,
 } from './input-parsers.js';
-import { requestDiagnostics } from './json-source.js';
+import { schemaIssueDiagnostics } from '../../../internal/schema-issue-diagnostics.js';
+import { parseSecretBindings } from '../../shared/secret-bindings.js';
 import { assertSafeNativeAgentResource } from './resource-validation.js';
 import type { AgentAddFields } from './types.js';
 
-const AUTHORING_FLAG_BY_FIELD: Readonly<Record<keyof AgentAddFields, string>> = {
+/** The CLI flag, without dashes, that sets each agent add field. */
+const AGENT_ADD_FLAGS: Readonly<Record<keyof AgentAddFields, string>> = {
   acknowledgementPointer: 'acknowledgement-pointer',
   acknowledgementValues: 'acknowledgement-value',
   agentId: 'agent-id',
@@ -68,71 +69,110 @@ const AUTHORING_FLAG_BY_FIELD: Readonly<Record<keyof AgentAddFields, string>> = 
 
 const COMMON_AUTHORING_FIELDS = new Set<keyof AgentAddFields>(['agentId', 'name', 'trace']);
 
-const TRANSPORT_AUTHORING_FIELDS: Readonly<
-  Record<
-    'background' | 'jsonl' | 'native_cli' | 'native_http' | 'stream' | 'websocket',
-    Set<keyof AgentAddFields>
-  >
-> = {
-  native_cli: new Set(['argvJson', 'nativeCommand', 'cwd', 'env', 'sandboxJson', 'timeout']),
-  native_http: new Set(['nativeHttp', 'headerEnv', 'timeout']),
-  background: new Set([
-    'backgroundCommand',
-    'cwd',
-    'env',
-    'errorPointer',
-    'headerEnv',
-    'invokeUrl',
-    'readinessHttp',
-    'readinessStderr',
-    'readinessTcp',
-    'responsePointer',
-    'shutdownUrl',
-    'stopTimeout',
-    'tracePointer',
-    'timeout',
-  ]),
-  jsonl: new Set([
-    'jsonlCommand',
-    'cwd',
-    'env',
-    'bridgeConcurrency',
-    'cancellationGrace',
-    'timeout',
-  ]),
-  stream: new Set([
-    'streamUrl',
-    'streamFraming',
-    'headerEnv',
-    'errorPointer',
-    'eventName',
-    'incrementalOutputMode',
-    'incrementalOutputPointer',
-    'responsePointer',
-    'terminalPointer',
-    'terminalValues',
-    'tracePointer',
-    'timeout',
-  ]),
-  websocket: new Set([
-    'acknowledgementPointer',
-    'acknowledgementValues',
-    'attemptTimeout',
-    'closeTimeout',
-    'connectionMode',
-    'errorPointer',
-    'headerEnv',
-    'idleTimeout',
-    'openTimeout',
-    'pingInterval',
-    'requestIdPointer',
-    'requestTemplate',
-    'responsePointer',
-    'tracePointer',
-    'webSocketLifecycle',
-    'webSocketSubprotocol',
-    'webSocketUrl',
-  ]),
+type TransportSelection =
+  'background' | 'jsonl' | 'native_cli' | 'native_http' | 'stream' | 'websocket';
+
+/** The flags that select a transport; exactly one may be passed. */
+const TRANSPORT_SELECTORS: readonly (readonly [keyof AgentAddFields, TransportSelection])[] = [
+  ['argvJson', 'native_cli'],
+  ['nativeCommand', 'native_cli'],
+  ['nativeHttp', 'native_http'],
+  ['backgroundCommand', 'background'],
+  ['jsonlCommand', 'jsonl'],
+  ['streamUrl', 'stream'],
+  ['webSocketUrl', 'websocket'],
+];
+
+const TRANSPORT_AUTHORING_FIELDS: Readonly<Record<TransportSelection, Set<keyof AgentAddFields>>> =
+  {
+    native_cli: new Set(['argvJson', 'nativeCommand', 'cwd', 'env', 'sandboxJson', 'timeout']),
+    native_http: new Set(['nativeHttp', 'headerEnv', 'timeout']),
+    background: new Set([
+      'backgroundCommand',
+      'cwd',
+      'env',
+      'errorPointer',
+      'headerEnv',
+      'invokeUrl',
+      'readinessHttp',
+      'readinessStderr',
+      'readinessTcp',
+      'responsePointer',
+      'shutdownUrl',
+      'stopTimeout',
+      'tracePointer',
+      'timeout',
+    ]),
+    jsonl: new Set([
+      'jsonlCommand',
+      'cwd',
+      'env',
+      'bridgeConcurrency',
+      'cancellationGrace',
+      'timeout',
+    ]),
+    stream: new Set([
+      'streamUrl',
+      'streamFraming',
+      'headerEnv',
+      'errorPointer',
+      'eventName',
+      'incrementalOutputMode',
+      'incrementalOutputPointer',
+      'responsePointer',
+      'terminalPointer',
+      'terminalValues',
+      'tracePointer',
+      'timeout',
+    ]),
+    websocket: new Set([
+      'acknowledgementPointer',
+      'acknowledgementValues',
+      'attemptTimeout',
+      'closeTimeout',
+      'connectionMode',
+      'errorPointer',
+      'headerEnv',
+      'idleTimeout',
+      'openTimeout',
+      'pingInterval',
+      'requestIdPointer',
+      'requestTemplate',
+      'responsePointer',
+      'tracePointer',
+      'webSocketLifecycle',
+      'webSocketSubprotocol',
+      'webSocketUrl',
+    ]),
+  };
+
+/**
+ * Lists, per `agent add` flag, the transport-selecting flags it cannot be combined with; a
+ * selector also conflicts with the other selectors and with every flag its transport rejects.
+ * Help publishes this so callers learn the matrix `createAgentResource` enforces.
+ */
+const agentAddFlagConflicts = (): Record<string, string[]> => {
+  const selectors = new Set(TRANSPORT_SELECTORS.map(([field]) => field));
+  const conflicts = new Map<keyof AgentAddFields, (keyof AgentAddFields)[]>();
+  const add = (field: keyof AgentAddFields, other: keyof AgentAddFields): void => {
+    const existing = conflicts.get(field) ?? [];
+    if (!existing.includes(other)) conflicts.set(field, [...existing, other]);
+  };
+  for (const [selector, transport] of TRANSPORT_SELECTORS) {
+    for (const [other] of TRANSPORT_SELECTORS) if (other !== selector) add(selector, other);
+    for (const field of Object.keys(AGENT_ADD_FLAGS) as (keyof AgentAddFields)[]) {
+      if (selectors.has(field) || COMMON_AUTHORING_FIELDS.has(field)) continue;
+      if (TRANSPORT_AUTHORING_FIELDS[transport].has(field)) continue;
+      add(field, selector);
+      add(selector, field);
+    }
+  }
+  return Object.fromEntries(
+    [...conflicts].map(([field, others]) => [
+      AGENT_ADD_FLAGS[field],
+      others.map((other) => AGENT_ADD_FLAGS[other]),
+    ]),
+  );
 };
 
 const fieldIsProvided = (value: AgentAddFields[keyof AgentAddFields]): boolean =>
@@ -141,17 +181,17 @@ const fieldIsProvided = (value: AgentAddFields[keyof AgentAddFields]): boolean =
 /** Rejects every flag that the selected transport would otherwise silently discard. */
 const assertApplicableAuthoringFlags = (
   fields: AgentAddFields,
-  selected: keyof typeof TRANSPORT_AUTHORING_FIELDS,
+  selected: TransportSelection,
 ): void => {
   const allowed = TRANSPORT_AUTHORING_FIELDS[selected];
   const incompatibleOptions: string[] = [];
-  for (const field of Object.keys(AUTHORING_FLAG_BY_FIELD) as (keyof AgentAddFields)[]) {
+  for (const field of Object.keys(AGENT_ADD_FLAGS) as (keyof AgentAddFields)[]) {
     if (
       fieldIsProvided(fields[field]) &&
       !COMMON_AUTHORING_FIELDS.has(field) &&
       !allowed.has(field)
     ) {
-      incompatibleOptions.push(`--${AUTHORING_FLAG_BY_FIELD[field]}`);
+      incompatibleOptions.push(`--${AGENT_ADD_FLAGS[field]}`);
     }
   }
   if (incompatibleOptions.length > 0) {
@@ -182,17 +222,22 @@ const assertApplicableAuthoringFlags = (
   }
 };
 
+/** Builds the one readiness probe a background agent was given. */
+const backgroundReadiness = (
+  fields: AgentAddFields,
+): Extract<AgentResource['transport'], { kind: 'background_cli' }>['readiness'] => {
+  if (fields.readinessHttp !== undefined) return { kind: 'http', url: fields.readinessHttp };
+  if (fields.readinessTcp !== undefined) {
+    return { kind: 'tcp', ...parseTcpReadiness(fields.readinessTcp) };
+  }
+  return { kind: 'stderr', pattern: fields.readinessStderr ?? '' };
+};
+
 /** Normalizes non-interactive or wizard-populated add fields into one resource. */
 const createAgentResource = (fields: AgentAddFields): AgentResource => {
-  const selections = [
-    fields.argvJson === undefined ? undefined : ('native_cli' as const),
-    fields.nativeCommand === undefined ? undefined : ('native_cli' as const),
-    fields.nativeHttp === undefined ? undefined : ('native_http' as const),
-    fields.backgroundCommand === undefined ? undefined : ('background' as const),
-    fields.jsonlCommand === undefined ? undefined : ('jsonl' as const),
-    fields.streamUrl === undefined ? undefined : ('stream' as const),
-    fields.webSocketUrl === undefined ? undefined : ('websocket' as const),
-  ].filter((value) => value !== undefined);
+  const selections = TRANSPORT_SELECTORS.filter(([field]) => fields[field] !== undefined).map(
+    ([, selection]) => selection,
+  );
   if (selections.length !== 1) {
     throw new LocalError(
       selections.length === 0 ? 'cli_missing_input' : 'cli_usage',
@@ -213,6 +258,10 @@ const createAgentResource = (fields: AgentAddFields): AgentResource => {
     fields.env === undefined || fields.env.length === 0
       ? {}
       : { env: parseSecretBindings(fields.env, '--env') };
+  const headers =
+    fields.headerEnv === undefined || fields.headerEnv.length === 0
+      ? {}
+      : { headers: parseSecretBindings(fields.headerEnv, '--header-env') };
   let transport: AgentResource['transport'];
   if (fields.nativeHttp !== undefined) {
     transport = {
@@ -222,9 +271,7 @@ const createAgentResource = (fields: AgentAddFields): AgentResource => {
       request: {
         url: fields.nativeHttp,
         method: 'POST',
-        ...(fields.headerEnv === undefined || fields.headerEnv.length === 0
-          ? {}
-          : { headers: parseSecretBindings(fields.headerEnv, '--header-env') }),
+        ...headers,
       },
       extraction: { result_pointer: '' },
     };
@@ -242,26 +289,18 @@ const createAgentResource = (fields: AgentAddFields): AgentResource => {
         },
       );
     }
-    const readinessDefinition =
-      fields.readinessHttp !== undefined
-        ? { kind: 'http' as const, url: fields.readinessHttp }
-        : fields.readinessTcp !== undefined
-          ? { kind: 'tcp' as const, ...parseTcpReadiness(fields.readinessTcp) }
-          : { kind: 'stderr' as const, pattern: fields.readinessStderr! };
     transport = {
       kind: 'background_cli',
       lifecycle: 'per_run',
       start_argv: tokenizeCommand(fields.backgroundCommand),
       ...(fields.cwd === undefined ? {} : { cwd: fields.cwd }),
       ...processEnvironment,
-      readiness: readinessDefinition,
+      readiness: backgroundReadiness(fields),
       invoke: {
         url: fields.invokeUrl,
         method: 'POST',
         body: '{{request}}',
-        ...(fields.headerEnv === undefined || fields.headerEnv.length === 0
-          ? {}
-          : { headers: parseSecretBindings(fields.headerEnv, '--header-env') }),
+        ...headers,
       },
       extraction: {
         result_pointer: fields.responsePointer ?? '/output',
@@ -292,9 +331,7 @@ const createAgentResource = (fields: AgentAddFields): AgentResource => {
         url: fields.streamUrl,
         method: 'POST',
         body: '{{request}}',
-        ...(fields.headerEnv === undefined || fields.headerEnv.length === 0
-          ? {}
-          : { headers: parseSecretBindings(fields.headerEnv, '--header-env') }),
+        ...headers,
       },
       ...(fields.eventName === undefined ? {} : { event_name: fields.eventName }),
       terminal_pointer: fields.terminalPointer ?? '/type',
@@ -318,9 +355,7 @@ const createAgentResource = (fields: AgentAddFields): AgentResource => {
         fields.connectionMode ?? (lifecycle === 'per_case' ? 'serial' : 'multiplexed'),
       framing: 'text_json',
       url: fields.webSocketUrl,
-      ...(fields.headerEnv === undefined || fields.headerEnv.length === 0
-        ? {}
-        : { headers: parseSecretBindings(fields.headerEnv, '--header-env') }),
+      ...headers,
       ...(fields.webSocketSubprotocol === undefined
         ? {}
         : { subprotocol: fields.webSocketSubprotocol }),
@@ -376,11 +411,11 @@ const createAgentResource = (fields: AgentAddFields): AgentResource => {
   });
   if (!parsed.success) {
     throw new LocalError('cli_usage', 'Agent values do not match the resource schema.', {
-      details: { diagnostics: requestDiagnostics(parsed.error.issues) },
+      details: { diagnostics: schemaIssueDiagnostics(parsed.error.issues) },
     });
   }
   assertSafeNativeAgentResource(parsed.data);
   return parsed.data;
 };
 
-export { createAgentResource };
+export { AGENT_ADD_FLAGS, agentAddFlagConflicts, createAgentResource };

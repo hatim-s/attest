@@ -41,4 +41,4 @@ const openNodeSqliteHandle = async (
   };
 };
 
-export { openNodeSqliteHandle, type NodeSqliteHandleOptions };
+export { openNodeSqliteHandle };

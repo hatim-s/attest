@@ -1,24 +1,9 @@
 import type { JsonValue, MetricResource } from '@attest/contracts';
 
 import { LocalError } from '../../../errors/index.js';
+import { isSensitiveFieldName } from '../../../internal/redaction.js';
 
-const SENSITIVE_FIELD_NAME =
-  /(?:^|[-_])(?:authorization|cookie|password|secret|token|api[-_]?key)(?:$|[-_])/iu;
 const AUTHORIZATION_VALUE = /^(?:basic|bearer)\s+\S/iu;
-
-/** Normalizes common identifier styles before credential-field classification. */
-const canonicalFieldName = (name: string): string =>
-  name
-    .normalize('NFKC')
-    .replace(/([A-Z]+)([A-Z][a-z])/gu, '$1-$2')
-    .replace(/([a-z\d])([A-Z])/gu, '$1-$2')
-    .replace(/[^\p{L}\p{N}]+/gu, '-')
-    .replace(/^-+|-+$/gu, '')
-    .toLowerCase();
-
-/** Matches credential fields consistently across casing and separator conventions. */
-const isSensitiveFieldName = (name: string): boolean =>
-  SENSITIVE_FIELD_NAME.test(canonicalFieldName(name));
 
 /** Locates only actual credential values, not ordinary filenames or analysis option names. */
 const credentialArgumentPosition = (argv: readonly string[]): number => {

@@ -1,12 +1,14 @@
 import { randomUUID } from 'node:crypto';
 import { link, open, rename, unlink } from 'node:fs/promises';
 
-import { StoreError, summarizeCaseRecord, type RunStore } from '@attest/core';
+import { summarizeCaseRecord } from '@attest/core';
 import { dashboardHtml } from '@attest/web/embedded';
 
+import { errnoCode } from '../internal/errno-code.js';
 import { LocalError } from '../errors/index.js';
 import { prepareEvalProjectFile } from '../commands/eval/eval-project-path.js';
 import { withReadonlyRunStoreFile } from '../commands/run-store/readonly-run-store.js';
+import { withRunNotFound } from '../commands/run-store/run-not-found.js';
 import { createReportHtml } from './create-report-html.js';
 
 const MAX_REPORT_CASES = 10_000;
@@ -26,14 +28,6 @@ type RunReportCommandResult = {
   truncated: boolean;
 };
 
-/** Applies the report evidence ceiling without mutating the store result. */
-const selectReportCases = <T>(cases: T[]): { cases: T[]; truncated: boolean } => ({
-  cases: cases.slice(0, MAX_REPORT_CASES),
-  truncated: cases.length > MAX_REPORT_CASES,
-});
-
-const isNodeError = (error: unknown): error is NodeJS.ErrnoException => error instanceof Error;
-
 /** Materializes one bounded, self-contained run report without overwriting by default. */
 const runReportCommand = async (
   options: RunReportCommandOptions,
@@ -44,33 +38,26 @@ const runReportCommand = async (
     errorCode: 'project_read_failed',
     message: 'The report run store is not a safe project file.',
   });
-  let runWithCases: Awaited<ReturnType<RunStore['getRunWithCases']>> | undefined;
-  try {
-    runWithCases = await withReadonlyRunStoreFile(storePath, (store) =>
-      store.getRunWithCases(options.runId),
-    );
-  } catch (error: unknown) {
-    if (error instanceof StoreError && error.code === 'RUN_NOT_FOUND') {
-      throw new LocalError('resource_not_found', `Run ${options.runId} was not found.`, {
-        path: options.runId,
-        cause: error,
-      });
-    }
-    throw error;
-  }
-  if (runWithCases === undefined) {
-    throw new LocalError('resource_not_found', `Run ${options.runId} was not found.`, {
+  const runNotFound = (cause?: unknown): LocalError =>
+    new LocalError('resource_not_found', `Run ${options.runId} was not found.`, {
       path: options.runId,
+      cause,
     });
-  }
+  const runWithCases = await withRunNotFound(
+    () => withReadonlyRunStoreFile(storePath, (store) => store.getRunWithCases(options.runId)),
+    runNotFound,
+  );
+  if (runWithCases === undefined) throw runNotFound();
 
-  const selection = selectReportCases(runWithCases.cases);
+  // Reports stay bounded: only the first MAX_REPORT_CASES cases are embedded.
+  const cases = runWithCases.cases.slice(0, MAX_REPORT_CASES);
+  const truncated = runWithCases.cases.length > MAX_REPORT_CASES;
   const reportData = {
     schema: 'attest.report',
     generatedAt: new Date().toISOString(),
     run: runWithCases.run,
-    cases: selection.cases.map((record) => ({ record, summary: summarizeCaseRecord(record) })),
-    truncated: selection.truncated,
+    cases: cases.map((record) => ({ record, summary: summarizeCaseRecord(record) })),
+    truncated: truncated,
   };
   const outputPath = await prepareEvalProjectFile(
     options.workingDirectory,
@@ -99,7 +86,7 @@ const runReportCommand = async (
   } catch (error: unknown) {
     await handle?.close().catch(() => undefined);
     await unlink(temporaryPath).catch(() => undefined);
-    if (isNodeError(error) && error.code === 'EEXIST') {
+    if (errnoCode(error) === 'EEXIST') {
       throw new LocalError(
         'output_exists',
         `Report already exists at ${outputPath}; pass --force to replace it.`,
@@ -112,17 +99,11 @@ const runReportCommand = async (
   }
 
   return {
-    caseCount: selection.cases.length,
+    caseCount: cases.length,
     outputPath,
     totalCaseCount: runWithCases.cases.length,
-    truncated: selection.truncated,
+    truncated: truncated,
   };
 };
 
-export {
-  MAX_REPORT_CASES,
-  runReportCommand,
-  selectReportCases,
-  type RunReportCommandOptions,
-  type RunReportCommandResult,
-};
+export { runReportCommand, type RunReportCommandOptions, type RunReportCommandResult };

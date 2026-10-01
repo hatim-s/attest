@@ -1,151 +1,59 @@
-import { runAgentAddCommand } from '@attest/local/agent';
+import { webSocketConnectionModeSchema, webSocketTransportSchema } from '@attest/contracts';
+import {
+  agentAddFlagConflicts,
+  createAgentResource,
+  runAgentAddCommand,
+  type AgentAddFields,
+} from '@attest/local/agent';
 import { Option, type Command } from 'commander';
 
-import { renderCommandResult } from '../shared/command-result.js';
+import { setMutationHelp } from '../../help/command-help.js';
 import {
   addMutationOptions,
-  collectOption as collect,
+  collect,
   isInteractive,
-  mergeCommonOptions,
+  mutationRequestFields,
   outputFormat,
   type MutationCliOptions,
 } from '../shared/cli-options.js';
-import {
-  markAgentMutationHelp,
-  mutationArguments,
-  type RegisterAgentCommandsOptions,
-} from './registration-support.js';
+import type { CommandContext } from '../shared/command-context.js';
+import { readOrBuildRequest } from '../shared/command-request.js';
+import { renderCommandResult } from '../shared/command-result.js';
+import { requiredInput } from '../shared/required-input.js';
+import { promptTransportFields } from './guided-agent-add.js';
 
-type AddOptions = MutationCliOptions & {
-  acknowledgementPointer?: string;
-  acknowledgementValues?: string[];
-  argvJson?: string;
-  attemptTimeout?: string;
-  backgroundCommand?: string;
-  bridgeConcurrency?: 'serial' | 'multiplexed';
-  cancelGrace?: string;
-  closeTimeout?: string;
-  connectionMode?: 'serial' | 'multiplexed';
-  cwd?: string;
-  env?: string[];
-  errorPointer?: string;
-  eventName?: string;
-  headerEnv?: string[];
-  incrementalOutputMode?: 'text' | 'array';
-  incrementalOutputPointer?: string;
-  idleTimeout?: string;
-  invokeUrl?: string;
-  jsonlCommand?: string;
-  name?: string;
-  nativeCommand?: string;
-  nativeHttp?: string;
-  openTimeout?: string;
-  pingInterval?: string;
-  readinessHttp?: string;
-  readinessStderr?: string;
-  readinessTcp?: string;
-  requestIdPointer?: string;
-  requestTemplate?: string;
-  responsePointer?: string;
-  sandboxJson?: string;
-  shutdownUrl?: string;
-  stopTimeout?: string;
-  streamFraming?: 'sse' | 'jsonl';
-  streamUrl?: string;
-  terminalPointer?: string;
-  terminalValues?: string[];
-  timeout?: string;
-  trace?: boolean;
-  tracePointer?: string;
-  subprotocol?: string;
-  websocketLifecycle?: 'per_case' | 'per_run';
-  websocketUrl?: string;
-};
+/** Fields whose flag spelling does not camel-case to the local field name. */
+type RenamedAddFields =
+  | 'acknowledgementValues'
+  | 'agentId'
+  | 'cancellationGrace'
+  | 'terminalValues'
+  | 'webSocketLifecycle'
+  | 'webSocketSubprotocol'
+  | 'webSocketUrl';
 
-const TRANSPORT_OPTIONS = [
-  'argv-json',
-  'native-command',
-  'native-http',
-  'background-command',
-  'jsonl-command',
-  'stream-url',
-  'websocket-url',
-] as const;
+type AddOptions = MutationCliOptions &
+  Omit<AgentAddFields, RenamedAddFields> & {
+    acknowledgementValue?: string[];
+    cancelGrace?: string;
+    subprotocol?: string;
+    terminalValue?: string[];
+    websocketLifecycle?: AgentAddFields['webSocketLifecycle'];
+    websocketUrl?: string;
+  };
 
-const conflictsOutside = (...supported: (typeof TRANSPORT_OPTIONS)[number][]): string[] =>
-  TRANSPORT_OPTIONS.filter((name) => !supported.includes(name));
+const STREAM_FRAMINGS = ['sse', 'jsonl'] as const satisfies readonly NonNullable<
+  AgentAddFields['streamFraming']
+>[];
+const BRIDGE_CONCURRENCY_MODES = ['serial', 'multiplexed'] as const satisfies readonly NonNullable<
+  AgentAddFields['bridgeConcurrency']
+>[];
+const INCREMENTAL_OUTPUT_MODES = ['text', 'array'] as const satisfies readonly NonNullable<
+  AgentAddFields['incrementalOutputMode']
+>[];
 
-const ADD_CONFLICTS = {
-  'agent-id': [],
-  'argv-json': conflictsOutside('argv-json'),
-  'acknowledgement-pointer': conflictsOutside('websocket-url'),
-  'acknowledgement-value': conflictsOutside('websocket-url'),
-  'attempt-timeout': conflictsOutside('websocket-url'),
-  'background-command': [...conflictsOutside('background-command'), 'sandbox-json'],
-  'bridge-concurrency': conflictsOutside('jsonl-command'),
-  'cancel-grace': conflictsOutside('jsonl-command'),
-  'close-timeout': conflictsOutside('websocket-url'),
-  'connection-mode': conflictsOutside('websocket-url'),
-  cwd: conflictsOutside('argv-json', 'native-command', 'background-command', 'jsonl-command'),
-  env: conflictsOutside('argv-json', 'native-command', 'background-command', 'jsonl-command'),
-  'error-pointer': conflictsOutside('background-command', 'stream-url', 'websocket-url'),
-  'event-name': conflictsOutside('stream-url'),
-  'header-env': conflictsOutside(
-    'native-http',
-    'background-command',
-    'stream-url',
-    'websocket-url',
-  ),
-  'incremental-output-mode': conflictsOutside('stream-url'),
-  'incremental-output-pointer': conflictsOutside('stream-url'),
-  'idle-timeout': conflictsOutside('websocket-url'),
-  'invoke-url': conflictsOutside('background-command'),
-  'jsonl-command': [...conflictsOutside('jsonl-command'), 'sandbox-json'],
-  name: [],
-  'native-command': conflictsOutside('native-command'),
-  'native-http': [...conflictsOutside('native-http'), 'sandbox-json'],
-  'open-timeout': conflictsOutside('websocket-url'),
-  'ping-interval': conflictsOutside('websocket-url'),
-  'readiness-http': [
-    ...conflictsOutside('background-command'),
-    'readiness-stderr',
-    'readiness-tcp',
-  ],
-  'readiness-stderr': [
-    ...conflictsOutside('background-command'),
-    'readiness-http',
-    'readiness-tcp',
-  ],
-  'readiness-tcp': [
-    ...conflictsOutside('background-command'),
-    'readiness-http',
-    'readiness-stderr',
-  ],
-  'response-pointer': conflictsOutside('background-command', 'stream-url', 'websocket-url'),
-  'sandbox-json': [
-    'native-http',
-    'background-command',
-    'jsonl-command',
-    'stream-url',
-    'websocket-url',
-  ],
-  'request-id-pointer': conflictsOutside('websocket-url'),
-  'request-template': conflictsOutside('websocket-url'),
-  'shutdown-url': conflictsOutside('background-command'),
-  'stop-timeout': conflictsOutside('background-command'),
-  'stream-framing': conflictsOutside('stream-url'),
-  'stream-url': [...conflictsOutside('stream-url'), 'sandbox-json'],
-  subprotocol: conflictsOutside('websocket-url'),
-  'terminal-pointer': conflictsOutside('stream-url'),
-  'terminal-value': conflictsOutside('stream-url'),
-  timeout: ['websocket-url'],
-  trace: [],
-  'trace-pointer': conflictsOutside('background-command', 'stream-url', 'websocket-url'),
-  'websocket-lifecycle': conflictsOutside('websocket-url'),
-  'websocket-url': [...conflictsOutside('websocket-url'), 'sandbox-json'],
-};
-
-const ADD_IMPLIES = {
+/** Help-only hints: these WebSocket and stream flags take effect only with the flag they imply. */
+const ADD_IMPLIES: Readonly<Record<string, string[]>> = {
   'acknowledgement-pointer': ['websocket-url'],
   'acknowledgement-value': ['websocket-url'],
   'attempt-timeout': ['websocket-url'],
@@ -161,8 +69,29 @@ const ADD_IMPLIES = {
   'websocket-lifecycle': ['websocket-url'],
 };
 
-/** Registers the transport-rich `agent add` command without owning application behavior. */
-const registerAgentAddCommand = (agent: Command, context: RegisterAgentCommandsOptions): void => {
+/** Publishes local's transport conflict matrix and the help-only implications per flag. */
+const addOptionHelp = () => {
+  const conflicts = agentAddFlagConflicts();
+  const names = new Set([...Object.keys(conflicts), ...Object.keys(ADD_IMPLIES)]);
+  return Object.fromEntries(
+    [...names].map((name) => [name, { conflicts: conflicts[name], implies: ADD_IMPLIES[name] }]),
+  );
+};
+
+/** Maps parsed flags to local's field names; the spread keeps every flag that already matches. */
+const agentAddFields = (agentId: string | undefined, options: AddOptions) => ({
+  ...options,
+  acknowledgementValues: options.acknowledgementValue,
+  agentId,
+  cancellationGrace: options.cancelGrace,
+  terminalValues: options.terminalValue,
+  webSocketLifecycle: options.websocketLifecycle,
+  webSocketSubprotocol: options.subprotocol,
+  webSocketUrl: options.websocketUrl,
+});
+
+/** Registers `agent add`; every transport's flags map onto one local agent resource. */
+const registerAgentAddCommand = (agent: Command, context: CommandContext): void => {
   const add = addMutationOptions(
     agent
       .command('add')
@@ -178,24 +107,21 @@ const registerAgentAddCommand = (agent: Command, context: RegisterAgentCommandsO
     .option('--jsonl-command <command>', 'run-scoped correlated JSONL bridge command')
     .option('--stream-url <url>', 'external SSE or JSONL stream endpoint')
     .option('--websocket-url <url>', 'plain ws:// or wss:// text-JSON endpoint')
-    .addOption(new Option('--stream-framing <framing>', 'stream framing').choices(['sse', 'jsonl']))
+    .addOption(new Option('--stream-framing <framing>', 'stream framing').choices(STREAM_FRAMINGS))
     .addOption(
-      new Option('--bridge-concurrency <mode>', 'JSONL bridge concurrency').choices([
-        'serial',
-        'multiplexed',
-      ]),
+      new Option('--bridge-concurrency <mode>', 'JSONL bridge concurrency').choices(
+        BRIDGE_CONCURRENCY_MODES,
+      ),
     )
     .addOption(
-      new Option('--websocket-lifecycle <lifecycle>', 'WebSocket connection lifecycle').choices([
-        'per_case',
-        'per_run',
-      ]),
+      new Option('--websocket-lifecycle <lifecycle>', 'WebSocket connection lifecycle').choices(
+        webSocketTransportSchema.shape.lifecycle.options,
+      ),
     )
     .addOption(
-      new Option('--connection-mode <mode>', 'WebSocket request concurrency').choices([
-        'serial',
-        'multiplexed',
-      ]),
+      new Option('--connection-mode <mode>', 'WebSocket request concurrency').choices(
+        webSocketConnectionModeSchema.options,
+      ),
     )
     .option('--subprotocol <token>', 'one plain WebSocket subprotocol token')
     .option('--request-template <json>', 'text-JSON request template with one {{request_id}} slot')
@@ -222,10 +148,9 @@ const registerAgentAddCommand = (agent: Command, context: RegisterAgentCommandsO
     .option('--terminal-value <json>', 'stream terminal value as JSON; repeatable', collect)
     .option('--incremental-output-pointer <pointer>', 'stream incremental output JSON Pointer')
     .addOption(
-      new Option('--incremental-output-mode <mode>', 'stream accumulation mode').choices([
-        'text',
-        'array',
-      ]),
+      new Option('--incremental-output-mode <mode>', 'stream accumulation mode').choices(
+        INCREMENTAL_OUTPUT_MODES,
+      ),
     )
     .option('--env <target=source>', 'environment secret reference', collect)
     .option('--header-env <header=source>', 'HTTP header secret reference', collect)
@@ -236,63 +161,40 @@ const registerAgentAddCommand = (agent: Command, context: RegisterAgentCommandsO
     .option('--ping-interval <duration>', 'WebSocket ping interval')
     .option('--close-timeout <duration>', 'WebSocket graceful close timeout')
     .option('--trace', 'declare trace support')
-    .action(async (agentId: string | undefined, raw: AddOptions, command: Command) => {
-      const options = mergeCommonOptions(raw, command, context.program);
+    .action(async (agentId: string | undefined, options: AddOptions, leaf: Command) => {
+      const fields = agentAddFields(agentId, options);
+      const interactive = isInteractive(options, context.interaction, options.fromJson);
+      const prompt = { interactive, prompt: context.interaction.prompt };
+      const request = await readOrBuildRequest({
+        command: 'agent.add',
+        context,
+        leaf,
+        options,
+        build: async () => {
+          const id = await requiredInput(
+            agentId,
+            { path: '<agent-id>', question: 'Agent id: ' },
+            prompt,
+          );
+          const guided = await promptTransportFields({ ...fields, agentId: id }, prompt);
+          return {
+            ...mutationRequestFields('agent.add', options),
+            agent: createAgentResource(guided),
+          };
+        },
+      });
       const result = await runAgentAddCommand({
-        ...mutationArguments(options, context),
-        acknowledgementPointer: options.acknowledgementPointer,
-        acknowledgementValues: options.acknowledgementValues,
-        agentId,
-        argvJson: options.argvJson,
-        attemptTimeout: options.attemptTimeout,
-        backgroundCommand: options.backgroundCommand,
-        bridgeConcurrency: options.bridgeConcurrency,
-        cancellationGrace: options.cancelGrace,
-        closeTimeout: options.closeTimeout,
-        connectionMode: options.connectionMode,
-        cwd: options.cwd,
-        env: options.env,
-        errorPointer: options.errorPointer,
-        eventName: options.eventName,
-        headerEnv: options.headerEnv,
-        incrementalOutputMode: options.incrementalOutputMode,
-        incrementalOutputPointer: options.incrementalOutputPointer,
-        idleTimeout: options.idleTimeout,
-        invokeUrl: options.invokeUrl,
-        jsonlCommand: options.jsonlCommand,
-        interactive: isInteractive(options, context.interaction, options.fromJson),
-        name: options.name,
-        nativeCommand: options.nativeCommand,
-        nativeHttp: options.nativeHttp,
-        openTimeout: options.openTimeout,
-        pingInterval: options.pingInterval,
-        readinessHttp: options.readinessHttp,
-        readinessStderr: options.readinessStderr,
-        readinessTcp: options.readinessTcp,
-        requestIdPointer: options.requestIdPointer,
-        requestTemplate: options.requestTemplate,
-        responsePointer: options.responsePointer,
-        sandboxJson: options.sandboxJson,
-        shutdownUrl: options.shutdownUrl,
-        stopTimeout: options.stopTimeout,
-        streamFraming: options.streamFraming,
-        streamUrl: options.streamUrl,
-        terminalPointer: options.terminalPointer,
-        terminalValues: options.terminalValues,
+        interactive,
+        project: options.project,
         prompt: context.interaction.prompt,
-        timeout: options.timeout,
-        trace: options.trace,
-        tracePointer: options.tracePointer,
-        webSocketLifecycle: options.websocketLifecycle,
-        webSocketSubprotocol: options.subprotocol,
-        webSocketUrl: options.websocketUrl,
+        request,
+        workingDirectory: context.workingDirectory,
       });
       context.io.output(renderCommandResult('agent.add', outputFormat(options), result));
     });
 
-  markAgentMutationHelp(
-    add,
-    [
+  setMutationHelp(add, {
+    examples: [
       'attest agent add support --argv-json \'["node","./src/agent.mjs"]\' --timeout 60s',
       'attest agent add support --native-command "node ./src/agent.mjs" --sandbox-json \'{"kind":"vercel","files":[]}\'',
       'attest agent add support --native-http https://localhost:8787/invoke',
@@ -302,9 +204,8 @@ const registerAgentAddCommand = (agent: Command, context: RegisterAgentCommandsO
       'attest agent add support --websocket-url wss://example.com/agent --header-env Authorization=AGENT_TOKEN --connection-mode multiplexed --response-pointer /output',
       'attest agent add --from-json ./agent-add.json --output json',
     ],
-    ADD_CONFLICTS,
-    ADD_IMPLIES,
-  );
+    options: addOptionHelp(),
+  });
 };
 
 export { registerAgentAddCommand };

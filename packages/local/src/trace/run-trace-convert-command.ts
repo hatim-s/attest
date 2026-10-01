@@ -3,6 +3,7 @@ import { dirname, resolve } from 'node:path';
 
 import { convertOtlpJson, selectConvertedTrace } from '@attest/core';
 
+import { errnoCode } from '../internal/errno-code.js';
 import { LocalError } from '../errors/index.js';
 
 type RunTraceConvertCommandOptions = {
@@ -19,8 +20,6 @@ type RunTraceConvertCommandResult = {
   spanCount: number;
   traceId: string;
 };
-
-const isNodeError = (error: unknown): error is NodeJS.ErrnoException => error instanceof Error;
 
 /** Reads OTLP JSON, selects one trace, and optionally writes without clobbering. */
 const runTraceConvertCommand = async (
@@ -50,7 +49,7 @@ const runTraceConvertCommand = async (
       flag: options.force === true ? 'w' : 'wx',
     });
   } catch (error: unknown) {
-    if (isNodeError(error) && error.code === 'EEXIST') {
+    if (errnoCode(error) === 'EEXIST') {
       throw new LocalError(
         'output_exists',
         `Trace output already exists at ${outputPath}; pass --force to replace it.`,

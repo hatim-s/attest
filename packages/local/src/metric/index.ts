@@ -1,13 +1,11 @@
-export {
-  createMetricResource,
-  readMetricCommandRequest,
-  validateMetricCommandRequest,
-  type MetricAddFields,
-} from '../commands/metric/authoring/index.js';
+export { createMetricResource, type MetricAddFields } from '../commands/metric/authoring/index.js';
+export { readCommandRequest, validateCommandRequest } from '../commands/shared/command-request.js';
 export {
   runMetricMutationCommand,
-  runMetricTestCommand,
   type MetricAuthoringRequest,
   type MetricMutationCommandOptions,
+} from '../commands/metric/metric-mutation-command.js';
+export {
+  runMetricTestCommand,
   type MetricTestCommandOptions,
-} from '../commands/metric/metric-command.js';
+} from '../commands/metric/metric-test-command.js';

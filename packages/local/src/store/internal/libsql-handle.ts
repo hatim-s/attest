@@ -102,4 +102,4 @@ const openLibsqlHandle = async (path: string): Promise<SqliteHandle> => {
   return createLibsqlHandle(createClient({ url: `file:${path}`, timeout: 5_000 }));
 };
 
-export { createLibsqlHandle, openLibsqlHandle, splitMigrationStatements };
+export { openLibsqlHandle };

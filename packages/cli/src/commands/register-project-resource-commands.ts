@@ -8,67 +8,59 @@ import {
   type ListResourceType,
   type ShowResourceType,
 } from '@attest/local/project';
-import { Argument, Command, Option } from 'commander';
+import { Argument, type Command } from 'commander';
 
 import { setCliCommandHelpMetadata } from '../help/command-help.js';
-import type { CliIo } from '../run-cli.js';
-import { renderCommandResult } from './shared/command-result.js';
 import { registerAgentCommands } from './agent/register-agent-commands.js';
-import { runSchemaListCommand, runSchemaPrintCommand } from './schema/schema-command.js';
-import { createDefaultCliInteraction, type CliInteraction } from './shared/cli-interaction.js';
+import {
+  renderSchemaList,
+  renderSchemaPrint,
+  runSchemaListCommand,
+  runSchemaPrintCommand,
+} from './schema/schema-command.js';
 import {
   addCommonOptions,
   addMutationOptions,
+  commonOption,
   isInteractive,
-  mergeCommonOptions,
   outputFormat,
-  type CommonCliOptions as CommonCommandOptions,
+  outputOption,
+  type CommonCliOptions,
   type MutationCliOptions,
 } from './shared/cli-options.js';
-
-type RegisterProjectResourceCommandsOptions = {
-  interaction: CliInteraction;
-  io: CliIo;
-  program: Command;
-  workingDirectory: string;
-};
+import type { CommandContext } from './shared/command-context.js';
+import { renderCommandResult, renderResult } from './shared/command-result.js';
 
 type ProjectInitCliOptions = MutationCliOptions & {
   name?: string;
 };
 
-const addOutputOption = (command: Command): Command =>
-  command.addOption(new Option('--output <format>', 'output format').choices(['human', 'json']));
-
 const registerProjectInit = (
   command: Command,
   aliasFor: string | undefined,
-  context: RegisterProjectResourceCommandsOptions,
+  context: CommandContext,
 ): void => {
   addMutationOptions(command)
     .argument('[directory]', 'target project directory')
     .option('--name <name>', 'project display name; defaults to the directory name')
-    .action(
-      async (directory: string | undefined, local: ProjectInitCliOptions, action: Command) => {
-        const options = mergeCommonOptions(local, action, context.program);
-        const result = await runProjectInitCommand({
-          directory,
-          dryRun: options.dryRun,
-          expectedProjectHash: options.ifProjectHash,
-          fromJson: options.fromJson,
-          interactive: isInteractive(options, context.interaction, options.fromJson),
-          name: options.name,
-          prompt: context.interaction.prompt,
-          projectDirectory: options.project,
-          readStdin: context.interaction.readStdin,
-          workingDirectory: context.workingDirectory,
-          yes: options.yes,
-        });
-        context.io.output(renderCommandResult('project.init', outputFormat(options), result));
-      },
-    );
+    .action(async (directory: string | undefined, options: ProjectInitCliOptions) => {
+      const result = await runProjectInitCommand({
+        directory,
+        dryRun: options.dryRun,
+        expectedProjectHash: options.ifProjectHash,
+        fromJson: options.fromJson,
+        interactive: isInteractive(options, context.interaction, options.fromJson),
+        name: options.name,
+        prompt: context.interaction.prompt,
+        projectDirectory: options.project,
+        readStdin: context.interaction.readStdin,
+        workingDirectory: context.workingDirectory,
+        yes: options.yes,
+      });
+      context.io.output(renderCommandResult('project.init', outputFormat(options), result));
+    });
   setCliCommandHelpMetadata(command, {
-    ...(aliasFor === undefined ? {} : { aliasFor }),
+    aliasFor,
     examples: [
       'attest project init --name support',
       'attest project init --from-json ./request.json --output json',
@@ -90,38 +82,48 @@ const registerProjectInit = (
   });
 };
 
-/** Registers only the ratified project and resource inspection shell. */
-const registerProjectResourceCommands = (context: RegisterProjectResourceCommandsOptions): void => {
+/** Registers project init, show, and validate, the list and show readers, and schema output. */
+const registerProjectResourceCommands = (context: CommandContext): void => {
   const project = context.program
     .command('project')
     .description('Initialize and inspect a project.');
-  const projectInit = new Command('init').description('Initialize one canonical Attest project.');
-  project.addCommand(projectInit);
-  registerProjectInit(projectInit, undefined, context);
+  registerProjectInit(
+    project.command('init').description('Initialize one canonical Attest project.'),
+    undefined,
+    context,
+  );
+  // Commander aliases only name siblings, so the top-level `init` is its own registration.
+  registerProjectInit(
+    context.program.command('init').description('Alias for `attest project init`.'),
+    'project.init',
+    context,
+  );
 
-  const initAlias = new Command('init').description('Alias for `attest project init`.');
-  context.program.addCommand(initAlias);
-  registerProjectInit(initAlias, 'project.init', context);
-
-  addCommonOptions(
-    project.command('show').description('Show the discovered project manifest.'),
-  ).action(async (local: CommonCommandOptions, action: Command) => {
-    const options = mergeCommonOptions(local, action, context.program);
-    const result = await runProjectShowCommand({
-      project: options.project,
-      workingDirectory: context.workingDirectory,
-    });
-    context.io.output(renderCommandResult('project.show', outputFormat(options), result));
-  });
-  addCommonOptions(
-    project.command('validate').description('Validate every authored project resource.'),
-  ).action(async (local: CommonCommandOptions, action: Command) => {
-    const options = mergeCommonOptions(local, action, context.program);
-    const result = await runProjectValidateCommand({
-      project: options.project,
-      workingDirectory: context.workingDirectory,
-    });
-    context.io.output(renderCommandResult('project.validate', outputFormat(options), result));
+  const inspections = [
+    {
+      name: 'show',
+      description: 'Show the discovered project manifest.',
+      run: runProjectShowCommand,
+    },
+    {
+      name: 'validate',
+      description: 'Validate every authored project resource.',
+      run: runProjectValidateCommand,
+    },
+  ] as const;
+  for (const { description, name, run } of inspections) {
+    addCommonOptions(project.command(name).description(description)).action(
+      async (options: CommonCliOptions) => {
+        const result = await run({
+          project: options.project,
+          workingDirectory: context.workingDirectory,
+        });
+        context.io.output(renderCommandResult(`project.${name}`, outputFormat(options), result));
+      },
+    );
+  }
+  setCliCommandHelpMetadata(project, {
+    examples: ['attest project init', 'attest project show --output json'],
   });
 
   addCommonOptions(context.program.command('list').description('List project resources.'))
@@ -134,17 +136,14 @@ const registerProjectResourceCommands = (context: RegisterProjectResourceCommand
         'runs',
       ]),
     )
-    .action(
-      async (resourceType: ListResourceType, local: CommonCommandOptions, action: Command) => {
-        const options = mergeCommonOptions(local, action, context.program);
-        const result = await runListCommand({
-          project: options.project,
-          resourceType,
-          workingDirectory: context.workingDirectory,
-        });
-        context.io.output(renderCommandResult('list', outputFormat(options), result));
-      },
-    );
+    .action(async (resourceType: ListResourceType, options: CommonCliOptions) => {
+      const result = await runListCommand({
+        project: options.project,
+        resourceType,
+        workingDirectory: context.workingDirectory,
+      });
+      context.io.output(renderCommandResult('list', outputFormat(options), result));
+    });
 
   addCommonOptions(context.program.command('show').description('Show one project resource.'))
     .addArgument(
@@ -157,46 +156,48 @@ const registerProjectResourceCommands = (context: RegisterProjectResourceCommand
       ]),
     )
     .argument('<id>', 'resource id')
-    .action(
-      async (
-        resourceType: ShowResourceType,
-        id: string,
-        local: CommonCommandOptions,
-        action: Command,
-      ) => {
-        const options = mergeCommonOptions(local, action, context.program);
-        const result = await runShowCommand({
-          id,
-          project: options.project,
-          resourceType,
-          workingDirectory: context.workingDirectory,
-        });
-        context.io.output(renderCommandResult('show', outputFormat(options), result));
-      },
-    );
+    .action(async (resourceType: ShowResourceType, id: string, options: CommonCliOptions) => {
+      const result = await runShowCommand({
+        id,
+        project: options.project,
+        resourceType,
+        workingDirectory: context.workingDirectory,
+      });
+      context.io.output(renderCommandResult('show', outputFormat(options), result));
+    });
 
   const schema = context.program
     .command('schema')
     .description('List or print generated contract JSON Schemas.');
-  addOutputOption(
-    schema.command('list').description('List registered contract schema ids.'),
-  ).action((local: Pick<CommonCommandOptions, 'output'>, action: Command) => {
-    const options = mergeCommonOptions(local, action, context.program);
-    context.io.output(
-      renderCommandResult('schema.list', outputFormat(options), runSchemaListCommand()),
-    );
-  });
-  addOutputOption(
-    schema
-      .command('print')
-      .description('Print one registered contract JSON Schema.')
-      .argument('<schema-id>', 'schema id or generated filename'),
-  ).action((schemaId: string, local: Pick<CommonCommandOptions, 'output'>, action: Command) => {
-    const options = mergeCommonOptions(local, action, context.program);
-    context.io.output(
-      renderCommandResult('schema.print', outputFormat(options), runSchemaPrintCommand(schemaId)),
-    );
-  });
+  schema
+    .command('list')
+    .description('List registered contract schema ids.')
+    .addOption(commonOption(outputOption()))
+    .action((options: CommonCliOptions) => {
+      context.io.output(
+        renderResult(
+          'schema.list',
+          outputFormat(options),
+          runSchemaListCommand(),
+          renderSchemaList,
+        ),
+      );
+    });
+  schema
+    .command('print')
+    .description('Print one registered contract JSON Schema.')
+    .argument('<schema-id>', 'schema id or generated filename')
+    .addOption(commonOption(outputOption()))
+    .action((schemaId: string, options: CommonCliOptions) => {
+      context.io.output(
+        renderResult(
+          'schema.print',
+          outputFormat(options),
+          runSchemaPrintCommand(schemaId),
+          renderSchemaPrint,
+        ),
+      );
+    });
   setCliCommandHelpMetadata(schema, {
     examples: [
       'attest schema list --output json',
@@ -204,18 +205,7 @@ const registerProjectResourceCommands = (context: RegisterProjectResourceCommand
     ],
   });
 
-  setCliCommandHelpMetadata(project, {
-    examples: ['attest project init', 'attest project show --output json'],
-  });
   registerAgentCommands(context);
-  setCliCommandHelpMetadata(context.program, {
-    examples: ['attest help --output json', 'attest project init', 'attest list agents'],
-  });
 };
 
-export {
-  createDefaultCliInteraction,
-  registerProjectResourceCommands,
-  type CliInteraction,
-  type RegisterProjectResourceCommandsOptions,
-};
+export { registerProjectResourceCommands };

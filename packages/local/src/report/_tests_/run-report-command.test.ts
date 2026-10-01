@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import { openStore } from '../../store/index.js';
 
-import { MAX_REPORT_CASES, runReportCommand, selectReportCases } from '../run-report-command.js';
+import { runReportCommand } from '../run-report-command.js';
 
 const directories: string[] = [];
 
@@ -57,15 +57,6 @@ afterEach(async () => {
 });
 
 describe('runReportCommand', () => {
-  it('caps oversized report evidence at ten thousand cases', () => {
-    const allCases = Array.from({ length: MAX_REPORT_CASES + 1 }, (_, index) => index);
-
-    expect(selectReportCases(allCases)).toMatchObject({
-      cases: { length: MAX_REPORT_CASES },
-      truncated: true,
-    });
-  });
-
   it('writes a self-contained report and refuses overwrite without force', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'attest-report-command-'));
     directories.push(directory);

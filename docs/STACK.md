@@ -21,7 +21,7 @@
 - **Dashboard**: React + Vite SPA embedded in the shipped artifact. `attest view` = loopback-only HTTP server (127.0.0.1, session token for writes, Origin validation). `attest report` = same components, second build entry point, run bundle inlined into one self-contained HTML file (no network requests). TanStack Table + virtualized lists; tree-shaken ECharts for distributions/trends; custom virtualized trace-waterfall component. Test at 10k cases.
 - **Project resources**: generated JSON resources plus JSONL datasets are canonical. Draft 2020-12 JSON Schemas reject unknown fields and aggregate source-addressed errors before any agent runs; transactional writes use canonical hashes, atomic publication, and stale-project protection.
 - **Multi-turn simulation**: simulator loop lives in the runtime as an orchestration layer over the ordinary one-turn agent contract (`messages`, `turn_index`, `conversation_id` in the request envelope; stateless replay default, optional opaque state token for HTTP agents). Deterministic termination policy (max_turns / timeout / agent failure / simulator `finished`). Simulator prompts, params, and usage recorded separately from the tested agent.
-- **Repo layout**: one public OSS monorepo — CLI, runtime, web app, schemas, docs, examples, conformance fixtures. `LICENSE`, `NOTICE`, SBOM release step, DCO sign-off (no CLA at launch), trademark policy once the name is final.
+- **Repo layout**: one public OSS monorepo — CLI, runtime, web app, schemas, docs, conformance fixtures. `LICENSE`, `NOTICE`, SBOM release step, DCO sign-off (no CLA at launch), trademark policy once the name is final.
 
 ## Testing philosophy
 

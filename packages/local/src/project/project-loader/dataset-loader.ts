@@ -3,9 +3,10 @@ import {
   testCaseSchema,
   type ProjectManifest,
   type TestCase,
+  type JsonValue,
 } from '@attest/contracts';
 
-import { hashCanonicalJsonLines, type JsonValue } from '../canonical-project.js';
+import { hashCanonicalJsonLines } from '../canonical-project.js';
 import {
   loadJsonResource,
   parseJson,

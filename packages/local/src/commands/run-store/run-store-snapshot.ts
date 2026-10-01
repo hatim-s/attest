@@ -3,7 +3,8 @@ import { lstat, mkdtemp, open, rm, type FileHandle } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { captureCleanupFailure, runCleanupSteps, type CleanupFailure } from './cleanup.js';
+import { errnoCode } from '../../internal/errno-code.js';
+import { rethrowAfterCleanup } from './cleanup.js';
 
 const COPY_BUFFER_BYTES = 64 * 1024;
 const MAX_SNAPSHOT_ATTEMPTS = 4;
@@ -13,12 +14,6 @@ type FileVersion = BigIntStats;
 type RunStoreSnapshot = {
   directory: string;
   path: string;
-};
-
-type RunStoreSnapshotHooks = {
-  beforeWalOpen?: (path: string) => Promise<void> | void;
-  closeWal?: (handle: FileHandle) => Promise<void>;
-  removeSnapshot?: (snapshot: RunStoreSnapshot) => Promise<void>;
 };
 
 class SnapshotChangedError extends Error {
@@ -48,7 +43,6 @@ const copyFileHandle = async (
   const target = await open(destination, 'wx', 0o600);
   const buffer = Buffer.allocUnsafe(COPY_BUFFER_BYTES);
   let offset = 0;
-  let failure: CleanupFailure | undefined;
   try {
     while (offset < expectedSize) {
       const length = Math.min(buffer.length, expectedSize - offset);
@@ -63,62 +57,41 @@ const copyFileHandle = async (
       offset += bytesRead;
     }
   } catch (error: unknown) {
-    failure = captureCleanupFailure(error);
+    return rethrowAfterCleanup(error, [async () => target.close()]);
   }
-  failure = await runCleanupSteps(failure, [async () => target.close()]);
-  if (failure !== undefined) throw failure.error;
+  await target.close();
 };
 
 /** Opens an optional WAL and binds its descriptor to both pre- and post-open identities. */
 const openWal = async (
   path: string,
-  hooks: RunStoreSnapshotHooks,
 ): Promise<{ handle: FileHandle; version: FileVersion } | undefined> => {
   let metadata: FileVersion;
   try {
     metadata = await lstat(path, { bigint: true });
   } catch (error: unknown) {
-    if (
-      error instanceof Error &&
-      'code' in error &&
-      typeof Reflect.get(error, 'code') === 'string' &&
-      Reflect.get(error, 'code') === 'ENOENT'
-    ) {
-      return undefined;
-    }
+    if (errnoCode(error) === 'ENOENT') return undefined;
     throw error;
   }
   if (!metadata.isFile() || metadata.isSymbolicLink()) throw new SnapshotChangedError();
 
   let handle: FileHandle | undefined;
-  let version: FileVersion | undefined;
-  let failure: CleanupFailure | undefined;
   try {
-    await hooks.beforeWalOpen?.(path);
     handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
-    version = await handle.stat({ bigint: true });
+    const version = await handle.stat({ bigint: true });
     const current = await lstat(path, { bigint: true });
     if (!sameIdentity(metadata, version) || !sameIdentity(version, current)) {
       throw new SnapshotChangedError();
     }
+    return { handle, version };
   } catch (error: unknown) {
-    failure = captureCleanupFailure(
-      error instanceof Error && 'code' in error && Reflect.get(error, 'code') === 'ENOENT'
-        ? new SnapshotChangedError()
-        : error,
+    const openedHandle = handle;
+    const failure = errnoCode(error) === 'ENOENT' ? new SnapshotChangedError() : error;
+    return rethrowAfterCleanup(
+      failure,
+      openedHandle === undefined ? [] : [async () => openedHandle.close()],
     );
   }
-  if (failure !== undefined) {
-    const firstFailure = failure;
-    const completedFailure = await runCleanupSteps(firstFailure, [
-      ...(handle === undefined
-        ? []
-        : [async () => (hooks.closeWal ?? ((value: FileHandle) => value.close()))(handle)]),
-    ]);
-    throw (completedFailure ?? firstFailure).error;
-  }
-  if (handle === undefined || version === undefined) throw new SnapshotChangedError();
-  return { handle, version };
 };
 
 const pathMatchesVersion = async (path: string, version: FileVersion): Promise<boolean> => {
@@ -134,17 +107,16 @@ const pathMatchesVersion = async (path: string, version: FileVersion): Promise<b
 const captureAttempt = async (
   sourcePath: string,
   source: FileHandle,
-  hooks: RunStoreSnapshotHooks,
 ): Promise<RunStoreSnapshot> => {
   const directory = await mkdtemp(join(tmpdir(), 'attest-run-store-snapshot-'));
   const snapshot = { directory, path: join(directory, 'runs.db') };
   const walPath = `${sourcePath}-wal`;
   let wal: Awaited<ReturnType<typeof openWal>> = undefined;
-  let failure: CleanupFailure | undefined;
+  const removeSnapshot = async (): Promise<void> => removeRunStoreSnapshot(snapshot);
   try {
     const sourceBefore = await source.stat({ bigint: true });
     if (!(await pathMatchesVersion(sourcePath, sourceBefore))) throw new SnapshotChangedError();
-    wal = await openWal(walPath, hooks);
+    wal = await openWal(walPath);
     await copyFileHandle(source, snapshot.path, sourceBefore.size);
     if (wal !== undefined) {
       await copyFileHandle(wal.handle, `${snapshot.path}-wal`, wal.version.size);
@@ -158,13 +130,7 @@ const captureAttempt = async (
         await lstat(walPath);
         throw new SnapshotChangedError();
       } catch (error: unknown) {
-        if (
-          !(error instanceof Error) ||
-          !('code' in error) ||
-          Reflect.get(error, 'code') !== 'ENOENT'
-        ) {
-          throw error;
-        }
+        if (errnoCode(error) !== 'ENOENT') throw error;
       }
     } else {
       const walAfter = await wal.handle.stat({ bigint: true });
@@ -173,21 +139,16 @@ const captureAttempt = async (
       }
     }
   } catch (error: unknown) {
-    failure = captureCleanupFailure(error);
+    const openedWal = wal;
+    const closeWal = openedWal === undefined ? [] : [async () => openedWal.handle.close()];
+    return rethrowAfterCleanup(error, [...closeWal, removeSnapshot]);
   }
 
   // A failed descriptor close invalidates the handoff, so remove the copied data too.
-  failure = await runCleanupSteps(failure, [
-    ...(wal === undefined
-      ? []
-      : [async () => (hooks.closeWal ?? ((handle: FileHandle) => handle.close()))(wal.handle)]),
-  ]);
-  if (failure !== undefined) {
-    const firstFailure = failure;
-    const completedFailure = await runCleanupSteps(firstFailure, [
-      async () => (hooks.removeSnapshot ?? removeRunStoreSnapshot)(snapshot),
-    ]);
-    throw (completedFailure ?? firstFailure).error;
+  try {
+    await wal?.handle.close();
+  } catch (error: unknown) {
+    return rethrowAfterCleanup(error, [removeSnapshot]);
   }
   return snapshot;
 };
@@ -196,11 +157,10 @@ const captureAttempt = async (
 const captureRunStoreSnapshot = async (
   sourcePath: string,
   source: FileHandle,
-  hooks: RunStoreSnapshotHooks = {},
 ): Promise<RunStoreSnapshot> => {
   for (let attempt = 0; attempt < MAX_SNAPSHOT_ATTEMPTS; attempt += 1) {
     try {
-      return await captureAttempt(sourcePath, source, hooks);
+      return await captureAttempt(sourcePath, source);
     } catch (error: unknown) {
       if (!(error instanceof SnapshotChangedError) || attempt === MAX_SNAPSHOT_ATTEMPTS - 1) {
         throw error;
@@ -215,10 +175,4 @@ const removeRunStoreSnapshot = async (snapshot: RunStoreSnapshot): Promise<void>
   await rm(snapshot.directory, { force: true, recursive: true });
 };
 
-export {
-  captureRunStoreSnapshot,
-  removeRunStoreSnapshot,
-  SnapshotChangedError,
-  type RunStoreSnapshotHooks,
-  type RunStoreSnapshot,
-};
+export { captureRunStoreSnapshot, removeRunStoreSnapshot, type RunStoreSnapshot };

@@ -1,12 +1,12 @@
-import { StoreError } from '@attest/core';
+import type { JsonValue } from '@attest/contracts';
 
 import { LocalError } from '../../errors/index.js';
-import type { JsonValue } from '../../project/canonical-project.js';
 import type { LoadedProject } from '../../project/project-loader/index.js';
 import type { CommandResult, ResourceShowResult } from '../shared/command-result.js';
 import { toSafeRunSummary } from '../list/list-command.js';
 import { loadCommandProject } from '../project/load-command-project.js';
 import { withReadonlyRunStore } from '../run-store/readonly-run-store.js';
+import { withRunNotFound } from '../run-store/run-not-found.js';
 import { redactAgentResource, redactMetricResource } from './redact-resource.js';
 
 type ShowResourceType = 'agent' | 'dataset' | 'metric' | 'run' | 'test';
@@ -25,16 +25,12 @@ const missingResource = (type: ShowResourceType, id: string): LocalError =>
   });
 
 const showRun = async (project: LoadedProject, id: string): Promise<JsonValue> => {
-  try {
-    const run = await withReadonlyRunStore(project.root, async (store) => store.getRun(id));
-    if (run === undefined) throw missingResource('run', id);
-    return toSafeRunSummary(run);
-  } catch (error: unknown) {
-    if (error instanceof StoreError && error.code === 'RUN_NOT_FOUND') {
-      throw missingResource('run', id);
-    }
-    throw error;
-  }
+  const run = await withRunNotFound(
+    () => withReadonlyRunStore(project.root, async (store) => store.getRun(id)),
+    () => missingResource('run', id),
+  );
+  if (run === undefined) throw missingResource('run', id);
+  return toSafeRunSummary(run);
 };
 
 const findResource = async (
@@ -57,7 +53,7 @@ const findResource = async (
   } else {
     const resource = project.datasets.find(({ metadata }) => metadata.id === id);
     if (resource !== undefined) {
-      return { metadata: resource.metadata as JsonValue, cases: resource.cases as JsonValue };
+      return { metadata: resource.metadata, cases: resource.cases };
     }
   }
   throw missingResource(type, id);

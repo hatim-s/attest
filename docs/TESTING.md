@@ -9,6 +9,10 @@ Required CI must be deterministic. Use fake clocks for time-dependent behavior; 
 timers. Tests must not make network requests, and required CI must never call a live LLM. Keep
 fixtures small, readable, and checked in when behavior is shared across packages.
 
+`bun run test` never builds or packs a package. The cli journeys that install the packed CLI
+and replay the quickstart and documented commands run separately with `bun run test:acceptance`,
+which builds every package first.
+
 Conformance fixtures in `conformance/fixtures/<contract>/` are golden input-and-expected files
 shared across packages. They protect conformance at the contract seam and should change only
 with an intentional contract change. Use property tests for pure logic with combinatorial inputs,

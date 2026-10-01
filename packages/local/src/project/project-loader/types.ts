@@ -1,6 +1,5 @@
-import type { DatasetResource, ProjectResources, TestCase } from '@attest/contracts';
+import type { DatasetResource, ProjectResources, TestCase, JsonValue } from '@attest/contracts';
 
-import type { JsonValue } from '../canonical-project.js';
 import type { ProjectDiagnostic } from '../project-errors.js';
 
 type ProjectContentHashes = {
@@ -16,15 +15,6 @@ type LoadedProject = ProjectResources & {
   manifestPath: string;
   projectHash: string;
   root: string;
-};
-
-type SchemaIssue = { message: string; path: PropertyKey[] };
-
-type RuntimeSchema<Value> = {
-  safeParse: (
-    value: unknown,
-  ) =>
-    { data: Value; success: true } | { error: { issues: readonly SchemaIssue[] }; success: false };
 };
 
 type LoadedJsonResource<Value> = {
@@ -49,6 +39,4 @@ export {
   type LoadedJsonResource,
   type LoadedProject,
   type ProjectContentHashes,
-  type RuntimeSchema,
-  type SchemaIssue,
 };

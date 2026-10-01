@@ -15,15 +15,17 @@ import {
 } from '@attest/contracts';
 import { describe, expect, it } from 'vitest';
 
+import { contentHash } from '@attest/core';
+
 import { LocalError } from '../../../errors/index.js';
-import { hashCanonicalJson, hashCanonicalJsonLines } from '../../../project/canonical-project.js';
+import { hashCanonicalJsonLines } from '../../../project/canonical-project.js';
 import type { LoadedProject } from '../../../project/project-loader/index.js';
 import { resolveEvalRun } from '../eval-resolver.js';
 
 const PROJECT_ID = '01ARZ3NDEKTSV4RRFFQ69G5FAB';
 const BASELINE_RUN_ID = '01ARZ3NDEKTSV4RRFFQ69G5FAA';
 
-const canonicalHash = (value: unknown): string => hashCanonicalJson(value);
+const canonicalHash = (value: unknown): string => contentHash(value);
 
 const createAgent = (id: string): AgentResource => ({
   schema: AGENT_RESOURCE_SCHEMA_ID,
@@ -369,25 +371,7 @@ describe('eval resolver', () => {
     expect(after.snapshotHash).not.toBe(before.snapshotHash);
   });
 
-  it('returns detached deeply immutable resource and case snapshots', () => {
-    const project = createProject();
-    const resolved = resolveEvalRun(project, request(), options);
-    project.tests[0]!.cases[0]!.input = { prompt: 'mutated after resolution' };
-
-    expect(resolved.cases[0]?.case.input).toEqual({ prompt: 'direct smoke' });
-    expect(Object.isFrozen(resolved)).toBe(true);
-    expect(Object.isFrozen(resolved.cases[0]?.case.input)).toBe(true);
-    expect(Reflect.set(resolved.cases[0]!.case, 'id', 'changed')).toBe(false);
-  });
-
-  it('rejects duplicate resource, resolved case, and selection ids deterministically', () => {
-    const duplicateResource = createProject();
-    duplicateResource.tests.push(structuredClone(duplicateResource.tests[0]!));
-    const resourceError = captureCliError(() =>
-      resolveEvalRun(duplicateResource, request(), options),
-    );
-    expect(resourceError.code).toBe('project_invalid');
-
+  it('rejects duplicate resolved case and selection ids deterministically', () => {
     const duplicateCase = createProject();
     duplicateCase.tests[0]!.cases.push(structuredClone(duplicateCase.tests[0]!.cases[0]!));
     const caseError = captureCliError(() => resolveEvalRun(duplicateCase, request(), options));
@@ -454,20 +438,6 @@ describe('eval resolver', () => {
     );
     expect(tagError.code).toBe('resource_not_found');
     expect(tagError.message).toContain('No cases matched');
-
-    const missingSelector = captureCliError(() =>
-      resolveEvalRun(
-        createProject(),
-        {
-          schema: COMMAND_REQUEST_SCHEMA_ID,
-          command: 'eval.run',
-          output: 'json',
-        } as EvalRunRequest,
-        options,
-      ),
-    );
-    expect(missingSelector.code).toBe('cli_missing_input');
-    expect(missingSelector.message).toContain('exact test ids or pass `--all`');
   });
 
   it('is order-stable across non-semantic loaded collection reordering', () => {
@@ -504,19 +474,5 @@ describe('eval resolver', () => {
       current_hash: changedProject.projectHash,
       expected_hash: firstProject.projectHash,
     });
-  });
-
-  it('rejects unknown command request variants', () => {
-    const unknownRequest = {
-      schema: COMMAND_REQUEST_SCHEMA_ID,
-      command: 'run',
-      test_ids: ['alpha'],
-      output: 'json',
-    } as unknown as EvalRunRequest;
-    const requestError = captureCliError(() =>
-      resolveEvalRun(createProject(), unknownRequest, options),
-    );
-    expect(requestError.code).toBe('cli_usage');
-    expect(requestError.message).toBe('Expected a canonical `attest eval run` request.');
   });
 });

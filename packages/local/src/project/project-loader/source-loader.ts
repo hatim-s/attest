@@ -1,21 +1,17 @@
 import { readFile, realpath, stat } from 'node:fs/promises';
 import { resolve } from 'node:path';
 
-import { hashCanonicalJson, type JsonValue } from '../canonical-project.js';
+import type { z } from 'zod';
+
+import type { JsonValue } from '@attest/contracts';
+
+import { contentHash } from '@attest/core';
+
+import { errnoCode } from '../../internal/errno-code.js';
+import { toJsonPointer } from '../../internal/json-pointer.js';
 import type { ProjectDiagnostic } from '../project-errors.js';
 import { isProjectPath } from '../project-path.js';
-import type { LoadedJsonResource, RuntimeSchema, SchemaIssue } from './types.js';
-
-const getErrorCode = (error: unknown): string | undefined =>
-  error instanceof Error && 'code' in error && typeof Reflect.get(error, 'code') === 'string'
-    ? (Reflect.get(error, 'code') as string)
-    : undefined;
-
-const pointerEscape = (segment: PropertyKey): string =>
-  String(segment).replaceAll('~', '~0').replaceAll('/', '~1');
-
-const toJsonPointer = (path: readonly PropertyKey[]): string =>
-  path.length === 0 ? '' : `/${path.map(pointerEscape).join('/')}`;
+import type { LoadedJsonResource } from './types.js';
 
 /** Reads one project-relative file only after lexical and realpath containment checks. */
 const readProjectSource = async (
@@ -35,7 +31,7 @@ const readProjectSource = async (
   try {
     resolvedSource = await realpath(candidate);
   } catch (error: unknown) {
-    const missing = getErrorCode(error) === 'ENOENT';
+    const missing = errnoCode(error) === 'ENOENT';
     return {
       diagnostics: [
         {
@@ -94,7 +90,7 @@ const parseJson = (
 
 const schemaDiagnostics = (
   source: string,
-  issues: readonly SchemaIssue[],
+  issues: readonly z.core.$ZodIssue[],
   prefix: readonly PropertyKey[] = [],
 ): ProjectDiagnostic[] =>
   issues.map((issue) => ({
@@ -109,8 +105,8 @@ const loadJsonResource = async <Value>(
   root: string,
   source: string,
   expectedHash: string | undefined,
-  schema: RuntimeSchema<Value>,
-  hashValue: (value: JsonValue) => string = hashCanonicalJson,
+  schema: z.ZodType<Value>,
+  hashValue: (value: JsonValue) => string = contentHash,
 ): Promise<LoadedJsonResource<Value>> => {
   const loaded = await readProjectSource(root, source);
   if (loaded.text === undefined) return { diagnostics: loaded.diagnostics, source };
@@ -135,4 +131,4 @@ const loadJsonResource = async <Value>(
   return { diagnostics, hash, rawValue: parsed.value, source, value: validated.data };
 };
 
-export { loadJsonResource, parseJson, readProjectSource, schemaDiagnostics, toJsonPointer };
+export { loadJsonResource, parseJson, readProjectSource, schemaDiagnostics };

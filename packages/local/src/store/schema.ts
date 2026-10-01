@@ -1,7 +1,7 @@
 import type { CaseOutcome, InvocationErrorCode, SpanKind } from '@attest/contracts';
 import type { CacheKind, RunStatus, StoredMetricEvaluation } from '@attest/core';
 
-/** Kysely row shape for the initial schema runs table (PLAN 1S.2). */
+/** Kysely row shape for the initial schema runs table. */
 interface RunsTable {
   id: string;
   created_at: string;
@@ -16,7 +16,7 @@ interface RunsTable {
   summary_json: string | null;
 }
 
-/** Kysely row shape for the initial schema cases table (PLAN 1S.2). */
+/** Kysely row shape for the initial schema cases table. */
 interface CasesTable {
   id: string;
   run_id: string;
@@ -37,7 +37,7 @@ interface CasesTable {
   trace_json: string | null;
 }
 
-/** Kysely row shape for the initial schema metric_results table (PLAN 1S.2). */
+/** Kysely row shape for the initial schema metric_results table. */
 interface MetricResultsTable {
   id: string;
   case_row_id: string;
@@ -53,7 +53,7 @@ interface MetricResultsTable {
   duration_ms: number | null;
 }
 
-/** Kysely row shape for the initial schema spans table (PLAN 1S.2). */
+/** Kysely row shape for the initial schema spans table. */
 interface SpansTable {
   id: string;
   case_row_id: string;
@@ -68,7 +68,7 @@ interface SpansTable {
   model_name: string | null;
 }
 
-/** Kysely row shape for the initial schema response_cache table (PLAN 1D.4). */
+/** Kysely row shape for the initial schema response_cache table. */
 interface ResponseCacheTable {
   cache_key: string;
   kind: CacheKind;
@@ -77,7 +77,7 @@ interface ResponseCacheTable {
   last_used_at: string;
 }
 
-/** Defines the complete initial schema database surface consumed by Kysely (PLAN 1S.2). */
+/** Defines the complete initial schema database surface consumed by Kysely. */
 interface Database {
   runs: RunsTable;
   cases: CasesTable;
@@ -86,11 +86,4 @@ interface Database {
   response_cache: ResponseCacheTable;
 }
 
-export {
-  type CasesTable,
-  type Database,
-  type MetricResultsTable,
-  type ResponseCacheTable,
-  type RunsTable,
-  type SpansTable,
-};
+export { type CasesTable, type Database, type MetricResultsTable, type RunsTable };

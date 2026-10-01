@@ -1,82 +1,42 @@
-import { METRIC_PRESETS } from '@attest/contracts';
-import { createMetricResource } from '@attest/local/metric';
+import {
+  METRIC_PRESETS,
+  httpRequestTemplateSchema,
+  metricPresetIdSchema,
+  spanFilterSchema,
+  spanKindSchema,
+} from '@attest/contracts';
+import { createMetricResource, type MetricAddFields } from '@attest/local/metric';
 import { Option, type Command } from 'commander';
 
+import { setMutationHelp } from '../../help/command-help.js';
 import {
   addMutationOptions,
-  collectOption as collect,
+  collect,
   isInteractive,
-  mergeCommonOptions,
+  mutationRequestFields,
+  type MutationCliOptions,
 } from '../shared/cli-options.js';
+import type { CommandContext } from '../shared/command-context.js';
+import { readOrBuildRequest } from '../shared/command-request.js';
+import { requiredInput } from '../shared/required-input.js';
 import { fillGuidedMetricFields, selectGuidedMetricFields } from './guided-metric-add.js';
-import {
-  assertNoMetricRequestOverlap,
-  markMetricMutationHelp,
-  metricMutationFields,
-  readOrBuildMetricMutation,
-  requiredMetricInput,
-  runMetricMutation,
-  type MetricAddOptions,
-  type RegisterMetricCommandsOptions,
-} from './registration-support.js';
+import { runMetricMutation } from './run-metric-mutation.js';
 
-const PRESET_IDS = METRIC_PRESETS.map(({ id }) => id);
-const ADD_FIELDS = [
-  'metric-id',
-  'name',
-  'preset',
-  'assert-json',
-  'path',
-  'value',
-  'pattern',
-  'flags',
-  'json-schema',
-  'json-schema-file',
-  'lt',
-  'lte',
-  'gt',
-  'gte',
-  'tool',
-  'tool-status',
-  'count',
-  'order',
-  'arg-equals',
-  'arg-contains',
-  'arg-exists',
-  'span-kind',
-  'span-name',
-  'span-status',
-  'attribute',
-  'model',
-  'rubric',
-  'rubric-file',
-  'threshold',
-  'argv-json',
-  'cwd',
-  'env',
-  'timeout',
-  'url',
-  'http-method',
-  'header-env',
-  'query-env',
-  'body-json',
-  'score-pointer',
-  'pass-pointer',
-  'rationale-pointer',
-  'details-pointer',
-];
+type MetricAddOptions = MutationCliOptions &
+  Omit<MetricAddFields, 'metricId' | 'readStdin' | 'workingDirectory'>;
+
+const TOOL_STATUSES = ['ok', 'error'] as const;
 
 /** Registers assertion, judge, executable, and HTTP metric authoring. */
-const registerMetricAddCommand = (
-  metric: Command,
-  context: RegisterMetricCommandsOptions,
-): void => {
+const registerMetricAddCommand = (metric: Command, context: CommandContext): void => {
   const add = addMutationOptions(
     metric.command('add').description('Add one assertion, judge, executable, or HTTP metric.'),
   )
     .argument('[metric-id]', 'metric id')
     .option('--name <name>', 'metric display name; defaults to the id')
-    .addOption(new Option('--preset <preset>', 'stable metric preset').choices(PRESET_IDS))
+    .addOption(
+      new Option('--preset <preset>', 'stable metric preset').choices(metricPresetIdSchema.options),
+    )
     .option('--assert-json <json>', 'complete assertion check; repeatable', collect)
     .option('--path <path>', 'assertion evidence path; alone authors exists')
     .option('--value <json>', 'equals or contains JSON value')
@@ -89,23 +49,19 @@ const registerMetricAddCommand = (
     .option('--gt <number>', 'numeric greater-than assertion')
     .option('--gte <number>', 'numeric greater-than-or-equal assertion')
     .option('--tool <name>', 'tool name for tool-called')
-    .addOption(new Option('--tool-status <status>', 'tool status').choices(['ok', 'error']))
+    .addOption(new Option('--tool-status <status>', 'tool status').choices(TOOL_STATUSES))
     .option('--count <integer>', 'tool-call or span count')
     .option('--order <name>', 'tool or span name in chronological order; repeatable', collect)
     .option('--arg-equals <path=json>', 'tool argument equals matcher; repeatable', collect)
     .option('--arg-contains <path=json>', 'tool argument contains matcher; repeatable', collect)
     .option('--arg-exists <path>', 'tool argument exists matcher; repeatable', collect)
-    .addOption(
-      new Option('--span-kind <kind>', 'trace span kind').choices([
-        'agent',
-        'llm',
-        'tool',
-        'retrieval',
-        'other',
-      ]),
-    )
+    .addOption(new Option('--span-kind <kind>', 'trace span kind').choices(spanKindSchema.options))
     .option('--span-name <name>', 'trace span name')
-    .addOption(new Option('--span-status <status>', 'trace span status').choices(['ok', 'error']))
+    .addOption(
+      new Option('--span-status <status>', 'trace span status').choices(
+        spanFilterSchema.shape.status.unwrap().options,
+      ),
+    )
     .option('--attribute <name=json>', 'trace span attribute matcher; repeatable', collect)
     .option('--model <provider/model>', 'judge provider/model identifier')
     .option('--rubric <text>', 'literal judge rubric')
@@ -117,13 +73,9 @@ const registerMetricAddCommand = (
     .option('--timeout <duration>', 'executable or HTTP timeout such as 30s')
     .option('--url <url>', 'HTTP metric URL')
     .addOption(
-      new Option('--http-method <method>', 'HTTP metric method').choices([
-        'GET',
-        'POST',
-        'PUT',
-        'PATCH',
-        'DELETE',
-      ]),
+      new Option('--http-method <method>', 'HTTP metric method').choices(
+        httpRequestTemplateSchema.shape.method.options,
+      ),
     )
     .option('--header-env <header=source-env>', 'HTTP header secret reference', collect)
     .option('--query-env <name=source-env>', 'HTTP query secret reference', collect)
@@ -132,59 +84,41 @@ const registerMetricAddCommand = (
     .option('--pass-pointer <pointer>', 'HTTP result pass pointer; defaults to /pass')
     .option('--rationale-pointer <pointer>', 'HTTP result rationale pointer')
     .option('--details-pointer <pointer>', 'HTTP result details pointer')
-    .action(async (metricId: string | undefined, raw: MetricAddOptions, command: Command) => {
-      const options = mergeCommonOptions(raw, command, context.program);
-      const directFields: Record<string, unknown> = { ...options, 'metric-id': metricId };
-      for (const field of [
-        'dryRun',
-        'fromJson',
-        'ifProjectHash',
-        'nonInteractive',
-        'output',
-        'project',
-        'yes',
-      ]) {
-        Reflect.deleteProperty(directFields, field);
-      }
-      assertNoMetricRequestOverlap(options, directFields);
+    .action(async (metricId: string | undefined, options: MetricAddOptions, leaf: Command) => {
       const interactive = isInteractive(options, context.interaction, options.fromJson);
-      const request = await readOrBuildMetricMutation('metric.add', options, context, async () => {
-        const id = await requiredMetricInput(
-          metricId,
-          '<metric-id>',
-          'Metric id: ',
-          interactive,
-          context,
-        );
-        const selected = await selectGuidedMetricFields(options, interactive, context);
-        const guided = await fillGuidedMetricFields(
-          selected,
-          selected.preset,
-          interactive,
-          context,
-        );
-        const resource = await createMetricResource({
-          ...guided,
-          metricId: id,
-          preset: guided.preset,
-          readStdin: context.interaction.readStdin,
-          workingDirectory: context.workingDirectory,
-        });
-        return { ...metricMutationFields('metric.add', options), metric: resource };
+      const request = await readOrBuildRequest({
+        command: 'metric.add',
+        context,
+        leaf,
+        options,
+        build: async () => {
+          const id = await requiredInput(
+            metricId,
+            { path: '<metric-id>', question: 'Metric id: ' },
+            { interactive, prompt: context.interaction.prompt },
+          );
+          const selected = await selectGuidedMetricFields(options, interactive, context);
+          const guided = await fillGuidedMetricFields(selected, interactive, context);
+          const resource = await createMetricResource({
+            ...guided,
+            metricId: id,
+            readStdin: context.interaction.readStdin,
+            workingDirectory: context.workingDirectory,
+          });
+          return { ...mutationRequestFields('metric.add', options), metric: resource };
+        },
       });
       await runMetricMutation(request, options, interactive, context);
     });
 
-  markMetricMutationHelp(
-    add,
-    [
+  setMutationHelp(add, {
+    examples: [
       'attest metric add exact --preset output-equals --value \'"Paris"\'',
       'attest metric add safe --assert-json \'{"not":{"tool_calls":{"status":"error"}}}\'',
       'attest metric add --from-json ./metric-add.json --output json',
     ],
-    ADD_FIELDS,
-    METRIC_PRESETS,
-  );
+    presets: METRIC_PRESETS,
+  });
 };
 
-export { registerMetricAddCommand };
+export { registerMetricAddCommand, type MetricAddOptions };

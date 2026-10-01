@@ -1,9 +1,7 @@
-import { readFile } from 'node:fs/promises';
-import { resolve } from 'node:path';
-
 import {
   COMMAND_REQUEST_SCHEMA_ID,
   evalCancelRequestSchema,
+  evalOutputModeSchema,
   evalRunRequestSchema,
   type EvalCancelRequest,
   type EvalOutputMode,
@@ -12,160 +10,114 @@ import {
 } from '@attest/contracts';
 import { parseDuration } from '@attest/local/agent';
 
-import { AttestCliError } from '../../errors/index.js';
-
-type EvalPrompt = (question: string, options?: { signal?: AbortSignal }) => Promise<string>;
-
-type EvalRequestContext = {
-  interactive: boolean;
-  onOutputMode?: (output: EvalOutputMode) => void;
-  prompt: EvalPrompt;
-  readStdin: () => Promise<string>;
-  signal?: AbortSignal;
-  workingDirectory: string;
-};
+import { AttestCliError } from '../../errors/cli-error.js';
+import { assertNoRequestOverlap } from '../shared/command-request.js';
+import { promptWithSignal, type PromptContext } from '../shared/required-input.js';
 
 type EvalRunRequestFields = {
   all?: boolean;
   baseline?: string;
   caseIds?: readonly string[];
   concurrency?: string;
-  fromJson?: string;
+  datasetIds?: readonly string[];
+  folders?: readonly string[];
   junit?: string;
   output?: EvalOutputMode;
-  tags?: readonly string[];
-  folders?: readonly string[];
-  datasetIds?: readonly string[];
   sample?: string;
   seed?: string;
+  tags?: readonly string[];
   testIds?: readonly string[];
   timeout?: string;
   watch?: boolean;
 };
 
 type EvalCancelRequestFields = {
-  fromJson?: string;
   output?: Exclude<EvalOutputMode, 'jsonl'>;
   runId?: string;
 };
 
-const requestDiagnostics = (
-  issues: readonly { message: string; path: PropertyKey[] }[],
-): JsonValue => issues.map(({ message, path }) => ({ message, path: `/${path.join('/')}` }));
+type SchemaIssue = { message: string; path: readonly PropertyKey[] };
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  value !== null && typeof value === 'object' && !Array.isArray(value);
+/** Lists schema issues with JSON Pointer-style paths for the error `details`. */
+const issueDiagnostics = (issues: readonly SchemaIssue[]): JsonValue =>
+  issues.map(({ message, path }) => ({ message, path: `/${path.map(String).join('/')}` }));
 
-/** Reads one JSON request source without allowing filesystem errors to escape the CLI contract. */
-const readRequestSource = async (source: string, context: EvalRequestContext): Promise<unknown> => {
-  let text: string;
-  try {
-    text =
-      source === '-'
-        ? await context.readStdin()
-        : await readFile(resolve(context.workingDirectory, source), 'utf8');
-  } catch (error: unknown) {
-    throw new AttestCliError('cli_usage', 'Could not read the eval command request.', {
-      path: '--from-json',
-      hint: 'Pass a readable UTF-8 JSON file or `-` for stdin.',
-      cause: error,
-    });
+/** Reads the `output` a request document asks for, even when the rest of it is invalid. */
+const requestedOutput = (document: JsonValue): EvalOutputMode | undefined => {
+  if (typeof document !== 'object' || document === null || Array.isArray(document)) {
+    return undefined;
   }
-  try {
-    return JSON.parse(text) as unknown;
-  } catch (error: unknown) {
-    throw new AttestCliError('cli_usage', 'The eval command request is not valid JSON.', {
-      path: '--from-json',
-      hint: `Provide one ${COMMAND_REQUEST_SCHEMA_ID} document.`,
-      cause: error,
-    });
-  }
+  const parsed = evalOutputModeSchema.safeParse(document.output);
+  return parsed.success ? parsed.data : undefined;
 };
 
-/** Records a structured mode before strict validation so malformed requests still render correctly. */
-const observeOutputMode = (value: unknown, context: EvalRequestContext): void => {
-  if (!isRecord(value)) return;
-  const output = value.output;
-  if (output === 'human' || output === 'json' || output === 'jsonl') {
-    context.onOutputMode?.(output);
-  }
-};
-
-const supplied = (value: unknown): boolean =>
-  value !== undefined && (!Array.isArray(value) || value.length > 0);
-
-/** Rejects overlapping JSON and flag request sources in stable flag-name order. */
-const assertNoJsonSourceConflicts = (
-  fromJson: string | undefined,
-  fields: Readonly<Record<string, unknown>>,
-): void => {
-  if (fromJson === undefined) return;
-  const conflicts = Object.entries(fields)
-    .filter(([, value]) => supplied(value))
-    .map(([name]) => name)
-    .sort();
-  if (conflicts.length === 0) return;
-  throw new AttestCliError('cli_usage', 'Eval command request sources overlap.', {
-    path: '--from-json',
-    hint: 'Pass request values through either flags and arguments or --from-json, not both.',
-    details: { conflicting_fields: conflicts },
-  });
-};
-
-/** Converts one guided selection answer into the same all-or-test-id fields used by flags. */
-const promptForSelection = async (
-  context: EvalRequestContext,
-): Promise<{ all: true } | { test_ids: string[] }> => {
-  const answer = (
-    await context.prompt('Test ids (space-separated) or all [all]: ', {
-      signal: context.signal,
-    })
-  ).trim();
-  if (answer.length === 0 || answer.toLowerCase() === 'all') return { all: true };
-  const testIds = answer.split(/[\s,]+/u).filter((value) => value.length > 0);
-  return { test_ids: testIds };
-};
-
-/** Validates one normalized run request through the frozen public contract. */
-const validateEvalRunRequest = (value: unknown): EvalRunRequest => {
+/** Validates one eval run request from flags or `--from-json` through the published schema. */
+const parseEvalRunRequest = (value: unknown): EvalRunRequest => {
   const parsed = evalRunRequestSchema.safeParse(value);
   if (!parsed.success) {
     throw new AttestCliError('cli_usage', 'The eval run request does not match its schema.', {
       hint: 'Run `attest help eval run --output json` and repair every diagnostic.',
-      details: { diagnostics: requestDiagnostics(parsed.error.issues) },
+      details: { diagnostics: issueDiagnostics(parsed.error.issues) },
     });
   }
   return parsed.data;
 };
 
-/** Normalizes flags, a strict JSON request, or the selection wizard into one run request. */
+/** Validates one eval cancel request from flags or `--from-json` through the published schema. */
+const parseEvalCancelRequest = (value: unknown): EvalCancelRequest => {
+  const parsed = evalCancelRequestSchema.safeParse(value);
+  if (!parsed.success) {
+    throw new AttestCliError('cli_usage', 'The eval cancel request does not match its schema.', {
+      hint: 'Run `attest help eval cancel --output json` and repair every diagnostic.',
+      details: { diagnostics: issueDiagnostics(parsed.error.issues) },
+    });
+  }
+  return parsed.data;
+};
+
+/** Rejects run flags beside `--from-json`, using the flag spellings in the conflict list. */
+const assertNoRunFlags = (fromJson: string | undefined, fields: EvalRunRequestFields): void =>
+  assertNoRequestOverlap(
+    { fromJson },
+    {
+      '--all': fields.all,
+      '--baseline': fields.baseline,
+      '--case': fields.caseIds,
+      '--concurrency': fields.concurrency,
+      '--dataset': fields.datasetIds,
+      '--folder': fields.folders,
+      '--junit': fields.junit,
+      '--output': fields.output,
+      '--sample': fields.sample,
+      '--seed': fields.seed,
+      '--tag': fields.tags,
+      '--timeout': fields.timeout,
+      '--watch': fields.watch,
+      '<test-id>': fields.testIds,
+    },
+  );
+
+/** Rejects cancel flags beside `--from-json`. */
+const assertNoCancelFlags = (fromJson: string | undefined, fields: EvalCancelRequestFields): void =>
+  assertNoRequestOverlap({ fromJson }, { '--output': fields.output, '<run-id>': fields.runId });
+
+/** Asks which tests to run; an empty answer or `all` selects every test. */
+const promptForSelection = async (
+  context: PromptContext,
+): Promise<{ all: true } | { test_ids: string[] }> => {
+  const question = 'Test ids (space-separated) or all [all]: ';
+  const answer = (await promptWithSignal(context.prompt, question, context.signal)).trim();
+  if (answer.length === 0 || answer.toLowerCase() === 'all') return { all: true };
+  return { test_ids: answer.split(/[\s,]+/u).filter((value) => value.length > 0) };
+};
+
+/** Turns run flags, or the selection wizard when no tests were named, into one run request. */
 const createEvalRunRequest = async (
   fields: EvalRunRequestFields,
-  context: EvalRequestContext,
+  context: PromptContext,
 ): Promise<EvalRunRequest> => {
-  assertNoJsonSourceConflicts(fields.fromJson, {
-    '--all': fields.all,
-    '--baseline': fields.baseline,
-    '--case': fields.caseIds,
-    '--concurrency': fields.concurrency,
-    '--junit': fields.junit,
-    '--output': fields.output,
-    '--tag': fields.tags,
-    '--folder': fields.folders,
-    '--dataset': fields.datasetIds,
-    '--sample': fields.sample,
-    '--seed': fields.seed,
-    '--timeout': fields.timeout,
-    '--watch': fields.watch,
-    '<test-id>': fields.testIds,
-  });
-  if (fields.fromJson !== undefined) {
-    const value = await readRequestSource(fields.fromJson, context);
-    observeOutputMode(value, context);
-    return validateEvalRunRequest(value);
-  }
-
-  if (fields.all === true && supplied(fields.testIds)) {
+  const testIds = fields.testIds ?? [];
+  if (fields.all === true && testIds.length > 0) {
     throw new AttestCliError('cli_usage', '`--all` conflicts with explicit test ids.', {
       path: '--all',
       hint: 'Pass either --all or one or more test ids.',
@@ -176,7 +128,6 @@ const createEvalRunRequest = async (
     throw new AttestCliError('cli_usage', '`--seed` requires `--sample`.');
   }
   const output = fields.output ?? 'human';
-  context.onOutputMode?.(output);
   if (fields.watch === true && output !== 'human') {
     throw new AttestCliError('cli_usage', '`--watch` requires human output.', {
       path: '--watch',
@@ -187,7 +138,7 @@ const createEvalRunRequest = async (
 
   let selection: { all: true } | { test_ids: string[] };
   if (fields.all === true) selection = { all: true };
-  else if (supplied(fields.testIds)) selection = { test_ids: [...(fields.testIds ?? [])] };
+  else if (testIds.length > 0) selection = { test_ids: [...testIds] };
   else if (context.interactive) selection = await promptForSelection(context);
   else {
     throw new AttestCliError('cli_missing_input', 'Eval run selection is missing.', {
@@ -196,7 +147,7 @@ const createEvalRunRequest = async (
     });
   }
 
-  return validateEvalRunRequest({
+  return parseEvalRunRequest({
     schema: COMMAND_REQUEST_SCHEMA_ID,
     command: 'eval.run',
     ...selection,
@@ -221,32 +172,8 @@ const createEvalRunRequest = async (
   });
 };
 
-/** Validates one normalized cancellation request through the frozen public contract. */
-const validateEvalCancelRequest = (value: unknown): EvalCancelRequest => {
-  const parsed = evalCancelRequestSchema.safeParse(value);
-  if (!parsed.success) {
-    throw new AttestCliError('cli_usage', 'The eval cancel request does not match its schema.', {
-      hint: 'Run `attest help eval cancel --output json` and repair every diagnostic.',
-      details: { diagnostics: requestDiagnostics(parsed.error.issues) },
-    });
-  }
-  return parsed.data;
-};
-
-/** Normalizes cancellation flags or one strict JSON request into the frozen request shape. */
-const createEvalCancelRequest = async (
-  fields: EvalCancelRequestFields,
-  context: EvalRequestContext,
-): Promise<EvalCancelRequest> => {
-  assertNoJsonSourceConflicts(fields.fromJson, {
-    '--output': fields.output,
-    '<run-id>': fields.runId,
-  });
-  if (fields.fromJson !== undefined) {
-    const value = await readRequestSource(fields.fromJson, context);
-    observeOutputMode(value, context);
-    return validateEvalCancelRequest(value);
-  }
+/** Turns cancellation flags into one cancel request. */
+const createEvalCancelRequest = (fields: EvalCancelRequestFields): EvalCancelRequest => {
   const runId = fields.runId?.trim();
   if (runId === undefined || runId.length === 0) {
     throw new AttestCliError('cli_missing_input', 'Eval cancellation requires a run id.', {
@@ -254,23 +181,23 @@ const createEvalCancelRequest = async (
       hint: 'Pass the immutable eval run id or a complete --from-json request.',
     });
   }
-  const output = fields.output ?? 'human';
-  context.onOutputMode?.(output);
-  return validateEvalCancelRequest({
+  return parseEvalCancelRequest({
     schema: COMMAND_REQUEST_SCHEMA_ID,
     command: 'eval.cancel',
     run_id: runId,
-    output,
+    output: fields.output ?? 'human',
   });
 };
 
 export {
+  assertNoCancelFlags,
+  assertNoRunFlags,
   createEvalCancelRequest,
   createEvalRunRequest,
-  validateEvalCancelRequest,
-  validateEvalRunRequest,
+  issueDiagnostics,
+  parseEvalCancelRequest,
+  parseEvalRunRequest,
+  requestedOutput,
   type EvalCancelRequestFields,
-  type EvalPrompt,
-  type EvalRequestContext,
   type EvalRunRequestFields,
 };

@@ -1,76 +1,31 @@
-import { randomBytes, randomUUID } from 'node:crypto';
-import { lstat, link, mkdir, open, readFile, realpath, rmdir, unlink } from 'node:fs/promises';
+import { lstat, mkdir, realpath, rmdir } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
 
-import {
-  COMMAND_REQUEST_SCHEMA_ID,
-  PROJECT_SCHEMA_ID,
-  commandRequestSchema,
-  type CommandRequest,
-  type ProjectResources,
-} from '@attest/contracts';
+import { PROJECT_SCHEMA_ID, type ProjectResources } from '@attest/contracts';
+import { ulid } from 'ulid';
 
+import { errnoCode } from '../../internal/errno-code.js';
 import { LocalError } from '../../errors/index.js';
-import { hashCanonicalContent, type JsonValue } from '../../project/canonical-project.js';
+import { hashCanonicalContent } from '../../project/canonical-project.js';
 import { loadProject } from '../../project/project-loader/index.js';
 import { prepareProjectCandidate } from '../../project/transaction/index.js';
+import { readCommandRequest } from '../shared/command-request.js';
 import type { CommandResult, ProjectInitResult } from '../shared/command-result.js';
-
-const ULID_ALPHABET = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
-
-type ProjectInitRequest = Extract<CommandRequest, { command: 'project.init' }>;
-
-type ProjectInitFileStep =
-  | 'directory_close'
-  | 'directory_open'
-  | 'directory_sync'
-  | 'manifest_link'
-  | 'rollback_manifest_unlink'
-  | 'temporary_close'
-  | 'temporary_open'
-  | 'temporary_sync'
-  | 'temporary_unlink'
-  | 'temporary_write';
+import { publishProjectManifest, rollbackPublishedManifest } from './manifest-publish.js';
 
 type ProjectInitCommandOptions = {
-  createProjectId?: () => string;
   directory?: string;
   dryRun?: boolean;
   expectedProjectHash?: string;
-  faultInjector?: (step: ProjectInitFileStep) => Promise<void> | void;
   fromJson?: string;
   interactive: boolean;
   name?: string;
   prompt?: (question: string) => Promise<string>;
   projectDirectory?: string;
-  publishObserver?: () => Promise<void> | void;
   readStdin: () => Promise<string>;
   workingDirectory: string;
   yes?: boolean;
 };
-
-const getErrorCode = (error: unknown): string | undefined =>
-  error instanceof Error && 'code' in error && typeof Reflect.get(error, 'code') === 'string'
-    ? (Reflect.get(error, 'code') as string)
-    : undefined;
-
-/** Generates a standards-compliant time-sortable identity without adding a runtime package. */
-const createProjectId = (): string => {
-  const bytes = Buffer.alloc(16);
-  bytes.writeUIntBE(Date.now(), 0, 6);
-  randomBytes(10).copy(bytes, 6);
-  let value = BigInt(`0x${bytes.toString('hex')}`);
-  let encoded = '';
-  for (let index = 0; index < 26; index += 1) {
-    encoded = `${ULID_ALPHABET[Number(value & 31n)]}${encoded}`;
-    value >>= 5n;
-  }
-  return encoded;
-};
-
-const requestDiagnostics = (
-  issues: readonly { message: string; path: PropertyKey[] }[],
-): JsonValue => issues.map(({ message, path }) => ({ message, path: `/${path.join('/')}` }));
 
 /** Rejects overlapping request sources before reading stdin or applying precedence. */
 const assertUnambiguousInitSources = (options: ProjectInitCommandOptions): void => {
@@ -103,53 +58,6 @@ const assertUnambiguousInitSources = (options: ProjectInitCommandOptions): void 
   });
 };
 
-/** Reads one request document without reflecting its source text into failures. */
-const readProjectInitRequest = async (
-  source: string,
-  workingDirectory: string,
-  readStdin: () => Promise<string>,
-): Promise<ProjectInitRequest> => {
-  let text: string;
-  try {
-    text =
-      source === '-'
-        ? await readStdin()
-        : await readFile(resolve(workingDirectory, source), 'utf8');
-  } catch (error: unknown) {
-    throw new LocalError('cli_usage', `Could not read command request from ${source}.`, {
-      path: '--from-json',
-      hint: 'Pass a readable JSON file or `-` for stdin.',
-      cause: error,
-    });
-  }
-
-  let value: unknown;
-  try {
-    value = JSON.parse(text) as unknown;
-  } catch (error: unknown) {
-    throw new LocalError('cli_usage', 'The command request is not valid JSON.', {
-      path: '--from-json',
-      hint: `Provide one ${COMMAND_REQUEST_SCHEMA_ID} document.`,
-      cause: error,
-    });
-  }
-  const parsed = commandRequestSchema.safeParse(value);
-  if (!parsed.success) {
-    throw new LocalError('cli_usage', 'The command request does not match its schema.', {
-      path: '--from-json',
-      hint: `Provide one ${COMMAND_REQUEST_SCHEMA_ID} project.init document.`,
-      details: { diagnostics: requestDiagnostics(parsed.error.issues) },
-    });
-  }
-  if (parsed.data.command !== 'project.init') {
-    throw new LocalError('cli_usage', 'The command request targets another command.', {
-      path: '/command',
-      hint: 'Set `command` to `project.init`.',
-    });
-  }
-  return parsed.data;
-};
-
 const inspectTargetDirectory = async (
   targetDirectory: string,
 ): Promise<{ exists: boolean; root: string }> => {
@@ -166,7 +74,7 @@ const inspectTargetDirectory = async (
     if (error instanceof LocalError) {
       throw error;
     }
-    if (getErrorCode(error) !== 'ENOENT') {
+    if (errnoCode(error) !== 'ENOENT') {
       throw new LocalError('init_failed', 'Could not inspect the initialization target.', {
         path: targetDirectory,
         cause: error,
@@ -191,7 +99,7 @@ const pathExists = async (path: string): Promise<boolean> => {
     await lstat(path);
     return true;
   } catch (error: unknown) {
-    if (getErrorCode(error) === 'ENOENT') {
+    if (errnoCode(error) === 'ENOENT') {
       return false;
     }
     throw error;
@@ -221,127 +129,6 @@ const emptyProject = (projectId: string, name: string): ProjectResources => ({
   tests: [],
 });
 
-const injectFileFault = async (
-  faultInjector: ProjectInitCommandOptions['faultInjector'],
-  step: ProjectInitFileStep,
-): Promise<void> => {
-  await faultInjector?.(step);
-};
-
-/** Fsyncs a directory entry after manifest publication or rollback. */
-const syncDirectory = async (path: string): Promise<void> => {
-  const handle = await open(path, 'r');
-  try {
-    await handle.sync();
-  } finally {
-    await handle.close();
-  }
-};
-
-/** Publishes the empty-project manifest as one atomic, no-overwrite filesystem commit. */
-const publishProjectManifest = async (
-  root: string,
-  contents: string,
-  faultInjector?: ProjectInitCommandOptions['faultInjector'],
-): Promise<void> => {
-  const manifestPath = join(root, 'attest.project.json');
-  const temporaryPath = join(root, `.attest-project-${randomUUID()}.tmp`);
-  let temporaryHandle;
-  let directoryHandle;
-  let temporaryExists = false;
-  let manifestPublished = false;
-  try {
-    await injectFileFault(faultInjector, 'temporary_open');
-    temporaryHandle = await open(temporaryPath, 'wx', 0o644);
-    temporaryExists = true;
-    await injectFileFault(faultInjector, 'temporary_write');
-    await temporaryHandle.writeFile(contents, 'utf8');
-    await injectFileFault(faultInjector, 'temporary_sync');
-    await temporaryHandle.sync();
-    await injectFileFault(faultInjector, 'temporary_close');
-    await temporaryHandle.close();
-    temporaryHandle = undefined;
-    // Hard-link publication fails rather than replacing a manifest created by a racing process.
-    await injectFileFault(faultInjector, 'manifest_link');
-    await link(temporaryPath, manifestPath);
-    manifestPublished = true;
-    await injectFileFault(faultInjector, 'temporary_unlink');
-    await unlink(temporaryPath);
-    temporaryExists = false;
-    await injectFileFault(faultInjector, 'directory_open');
-    directoryHandle = await open(root, 'r');
-    await injectFileFault(faultInjector, 'directory_sync');
-    await directoryHandle.sync();
-    await injectFileFault(faultInjector, 'directory_close');
-    await directoryHandle.close();
-    directoryHandle = undefined;
-  } catch (error: unknown) {
-    await directoryHandle?.close().catch(() => undefined);
-    await temporaryHandle?.close().catch(() => undefined);
-    let cleanupFailure: unknown;
-    if (temporaryExists) {
-      try {
-        await unlink(temporaryPath);
-      } catch (unlinkError: unknown) {
-        if (getErrorCode(unlinkError) !== 'ENOENT') cleanupFailure = unlinkError;
-      }
-    }
-    if (manifestPublished) {
-      try {
-        await injectFileFault(faultInjector, 'rollback_manifest_unlink');
-        await unlink(manifestPath);
-        await syncDirectory(root);
-      } catch (rollbackError: unknown) {
-        cleanupFailure = rollbackError;
-      }
-    }
-    if (cleanupFailure !== undefined) {
-      throw new LocalError(
-        'project_recovery_required',
-        'Initialization failed and temporary publication state could not be removed.',
-        {
-          path: manifestPath,
-          hint: 'Preserve the target directory and reconcile its manifest and temporary files.',
-          cause: cleanupFailure,
-        },
-      );
-    }
-    if (getErrorCode(error) === 'EEXIST') {
-      throw new LocalError('init_conflict', 'Another process initialized this project first.', {
-        path: manifestPath,
-        hint: 'Inspect the existing project before retrying.',
-        cause: error,
-      });
-    }
-    throw error;
-  }
-};
-
-/** Removes only the exact manifest published by this initialization attempt. */
-const rollbackPublishedManifest = async (
-  root: string,
-  expectedContents: string,
-  faultInjector?: ProjectInitCommandOptions['faultInjector'],
-): Promise<void> => {
-  const manifestPath = join(root, 'attest.project.json');
-  try {
-    if ((await readFile(manifestPath, 'utf8')) !== expectedContents) {
-      throw new LocalError(
-        'project_recovery_required',
-        'The published manifest changed before initialization rollback.',
-        { path: manifestPath },
-      );
-    }
-    await injectFileFault(faultInjector, 'rollback_manifest_unlink');
-    await unlink(manifestPath);
-    await syncDirectory(root);
-  } catch (error: unknown) {
-    if (getErrorCode(error) !== 'ENOENT') {
-      throw error;
-    }
-  }
-};
-
 /** Initializes one canonical project from flags, stdin, or a guided TTY prompt. */
 const runProjectInitCommand = async (
   options: ProjectInitCommandOptions,
@@ -350,7 +137,10 @@ const runProjectInitCommand = async (
   const request =
     options.fromJson === undefined
       ? undefined
-      : await readProjectInitRequest(options.fromJson, options.workingDirectory, options.readStdin);
+      : await readCommandRequest('project.init', options.fromJson, {
+          readStdin: options.readStdin,
+          workingDirectory: options.workingDirectory,
+        });
   const requestedDirectory =
     options.directory ?? options.projectDirectory ?? request?.directory ?? '.';
   const inspected = await inspectTargetDirectory(
@@ -388,9 +178,7 @@ const runProjectInitCommand = async (
     await assertUninitialized(inspected.root);
   }
 
-  const prepared = prepareProjectCandidate(
-    emptyProject((options.createProjectId ?? createProjectId)(), name),
-  );
+  const prepared = prepareProjectCandidate(emptyProject(ulid(), name));
   const manifest = prepared.files.get('attest.project.json');
   if (manifest === undefined) {
     throw new LocalError('internal_error', 'The project candidate omitted its manifest.');
@@ -431,9 +219,8 @@ const runProjectInitCommand = async (
       createdDirectory = true;
     }
     await assertUninitialized(inspected.root);
-    await publishProjectManifest(inspected.root, manifest.contents, options.faultInjector);
+    await publishProjectManifest(inspected.root, manifest.contents);
     published = true;
-    await options.publishObserver?.();
     const loaded = await loadProject({ project: inspected.root });
     if (loaded.projectHash !== prepared.projectHash) {
       throw new LocalError('init_failed', 'Published project verification failed.', {
@@ -443,7 +230,7 @@ const runProjectInitCommand = async (
   } catch (error: unknown) {
     if (published) {
       try {
-        await rollbackPublishedManifest(inspected.root, manifest.contents, options.faultInjector);
+        await rollbackPublishedManifest(inspected.root, manifest.contents);
       } catch (rollbackError: unknown) {
         throw new LocalError(
           'project_recovery_required',
@@ -490,9 +277,4 @@ const runProjectInitCommand = async (
   };
 };
 
-export {
-  createProjectId,
-  runProjectInitCommand,
-  type ProjectInitCommandOptions,
-  type ProjectInitFileStep,
-};
+export { runProjectInitCommand, type ProjectInitCommandOptions };
