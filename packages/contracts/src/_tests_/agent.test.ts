@@ -73,6 +73,8 @@ describe('agentResponseSchema', () => {
 
   it.each([
     { protocol: AGENT_PROTOCOL },
+    { protocol: AGENT_PROTOCOL, output: undefined },
+    { protocol: AGENT_PROTOCOL, error: undefined },
     { protocol: AGENT_PROTOCOL, output: 'Paris', error: { message: 'failed' } },
   ])('rejects a response without exactly one outcome', (response) => {
     const result = parseAgentResponse(response);
