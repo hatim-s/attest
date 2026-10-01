@@ -26,7 +26,7 @@ const pythonModules = new Set([
   'unicodedata',
 ]);
 
-/** Rejects directly declared dependencies that the isolated alpha runner cannot install. */
+/** Provides a convenience dependency preflight; runtime isolation remains the security boundary. */
 const validatePortableMetricSource = (path: string, source: string): void => {
   const reject = (): never => {
     throw new EvalResolutionError(
