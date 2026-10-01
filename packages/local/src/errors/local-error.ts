@@ -2,6 +2,10 @@ import { AttestError, type JsonValue } from '@attest/contracts';
 
 type LocalErrorCode =
   | 'cancelled'
+  | 'cloud_auth_required'
+  | 'cloud_credentials_failed'
+  | 'cloud_request_failed'
+  | 'cloud_unavailable'
   | 'cli_missing_input'
   | 'cli_usage'
   | 'init_conflict'

@@ -57,6 +57,7 @@ The [CLI index](./cli/index.md) maps every workflow to its canonical guide:
 - [Tests and datasets](./cli/tests-and-datasets.md)
 - [Metrics](./cli/metrics.md)
 - [Evaluation runs](./cli/eval-runs.md)
+- [Cloud commands](./cli/cloud.md)
 
 ## Integration guides
 

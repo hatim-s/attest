@@ -46,7 +46,7 @@ Runtime must not import local or CLI. A hosted worker can supply its own persist
 
 Application errors carry typed codes and context. The CLI owns terminal rendering and exit presentation. Local must not import Commander or the CLI package. Paths, locks, cancellation registries, and the SQLite driver stay here rather than leaking into core types.
 
-Local exposes focused entry points: `/agent`, `/metric`, `/test`, `/project`, `/eval`, `/runs`, `/store`, and `/view-server`. Its root exports application errors and result types.
+Local exposes focused entry points: `/agent`, `/metric`, `/test`, `/project`, `/eval`, `/runs`, `/store`, `/cloud`, and `/view-server`. Its root exports application errors and result types.
 
 `@attest/cli` translates flags and interactive answers into application requests. Its public entry point runs the CLI. It is not the SDK for project loading, eval execution, or persistence.
 
@@ -56,11 +56,11 @@ Local exposes focused entry points: `/agent`, `/metric`, `/test`, `/project`, `/
 
 `@attest/schemas` publishes generated JSON Schema files. Its validation command checks both the file set and exact content against contracts. `@attest/site` remains a separate marketing page with no application dependencies.
 
-## Adding cloud later
+## Cloud integration
 
 Add cloud code where the deployment needs it. Reuse contracts and core; use runtime in execution workers with the necessary process or network capabilities. Implement storage and artifact adapters against actual cloud services. Do not import local to obtain a domain type or a comparison function.
 
-Authentication, tenant boundaries, queues, and object storage belong to that deployment. They are not hidden inside the local dashboard server. No cloud package, transport facade, or generic plugin registry is needed before that work begins.
+Authentication, tenant boundaries, queues, and object storage belong to that deployment. They are not hidden inside the local dashboard server. The public local `/cloud` adapter owns the HTTP client, CLI credential storage, project links, and transactional project synchronization. CLI commands own flags and terminal output. The hosted service implementation stays outside the public repository.
 
 ## Checking boundaries
 

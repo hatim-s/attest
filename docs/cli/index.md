@@ -21,14 +21,15 @@ run database.
 
 ## Workflow map
 
-| Goal                        | Canonical guide                                 | Primary commands                                                           |
-| --------------------------- | ----------------------------------------------- | -------------------------------------------------------------------------- |
-| Create or inspect a project | [Resource model](../concepts/resource-model.md) | `attest project init`, `attest project show`, `attest project validate`    |
-| Connect and probe an agent  | [Agents](./agents.md)                           | `attest agent add`, `attest agent import`, `attest agent test`             |
-| Add cases or datasets       | [Tests and datasets](./tests-and-datasets.md)   | `attest test add`, `attest test case import`, `attest test dataset import` |
-| Define scoring              | [Metrics](./metrics.md)                         | `attest metric add`, `attest metric import`, `attest metric test`          |
-| Execute and inspect         | [Evaluation runs](./eval-runs.md)               | `attest eval run`, `attest eval cancel`, `attest diff`, `attest report`    |
-| Diagnose a failure          | [Error catalog](../reference/errors.md)         | `attest errors --output json`                                              |
+| Goal                        | Canonical guide                                 | Primary commands                                                                     |
+| --------------------------- | ----------------------------------------------- | ------------------------------------------------------------------------------------ |
+| Create or inspect a project | [Resource model](../concepts/resource-model.md) | `attest project init`, `attest project show`, `attest project validate`              |
+| Connect and probe an agent  | [Agents](./agents.md)                           | `attest agent add`, `attest agent import`, `attest agent test`                       |
+| Add cases or datasets       | [Tests and datasets](./tests-and-datasets.md)   | `attest test add`, `attest test case import`, `attest test dataset import`           |
+| Define scoring              | [Metrics](./metrics.md)                         | `attest metric add`, `attest metric import`, `attest metric test`                    |
+| Execute and inspect         | [Evaluation runs](./eval-runs.md)               | `attest eval run`, `attest eval cancel`, `attest diff`, `attest report`              |
+| Run in the cloud            | [Cloud commands](./cloud.md)                    | `attest cloud login`, `attest cloud push`, `attest cloud run`, `attest cloud events` |
+| Diagnose a failure          | [Error catalog](../reference/errors.md)         | `attest errors --output json`                                                        |
 
 There are no plural namespace aliases. `attest init` is the only convenience alias and
 maps to `attest project init`. The removed `attest run` spelling is not accepted; use

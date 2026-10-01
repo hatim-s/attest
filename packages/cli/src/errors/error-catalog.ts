@@ -6,6 +6,34 @@ import {
 } from '@attest/contracts';
 
 const CLI_ERROR_DEFINITIONS = {
+  cloud_auth_required: {
+    meaning: 'Cloud authentication is required.',
+    likely_causes: ['The CLI session expired or was revoked.'],
+    retryable: false,
+    exit_code: 2,
+    repairs: ['Run attest cloud login --url <cloud-origin>.'],
+  },
+  cloud_credentials_failed: {
+    meaning: 'Private cloud credentials could not be saved.',
+    likely_causes: ['The credential directory is not writable.'],
+    retryable: true,
+    exit_code: 4,
+    repairs: ['Check permissions for ~/.attest/cloud.'],
+  },
+  cloud_request_failed: {
+    meaning: 'The cloud rejected the request.',
+    likely_causes: ['The request conflicts with cloud state or limits.'],
+    retryable: false,
+    exit_code: 4,
+    repairs: ['Inspect the remote_code detail and correct the request.'],
+  },
+  cloud_unavailable: {
+    meaning: 'The cloud request did not complete.',
+    likely_causes: ['The endpoint or network is unavailable.'],
+    retryable: true,
+    exit_code: 4,
+    repairs: ['Check the endpoint and reconnect with the last event cursor.'],
+  },
   cancelled: {
     meaning: 'The command was cancelled by a process signal.',
     likely_causes: ['The caller sent SIGINT or SIGTERM.'],
