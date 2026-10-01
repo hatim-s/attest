@@ -154,7 +154,7 @@ describe('runMetricTestCommand', () => {
     );
     await expect(testMetric(root, 'broken')).rejects.toMatchObject({
       code: 'metric_infrastructure_failed',
-      details: { evaluation: { status: 'error', error: { code: 'exec_spawn_failed' } } },
+      details: { evaluation: { status: 'error', error: { kind: 'exec_spawn_failed' } } },
     });
   });
 
