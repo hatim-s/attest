@@ -1,3 +1,8 @@
+import {
+  portableProjectBundleSchema,
+  cloudRunRequestSchema,
+  cloudQueueMessageSchema,
+} from '../cloud/project-bundle.js';
 import type { z } from 'zod';
 
 import { canonicalJson } from '../internal/canonical-json.js';
@@ -57,6 +62,17 @@ const agentResourceRules = [
 ].join('; ');
 
 const CONTRACT_JSON_SCHEMAS = new Map<string, ContractJsonSchemaDefinition>([
+  [
+    'project-bundle.json',
+    {
+      schema: portableProjectBundleSchema,
+      invariants: runtimeOnly(
+        'project resource references, duplicate identities, and manifest parity follow projectResourcesSchema; source file parity and hashes require resolvePortableProject',
+      ),
+    },
+  ],
+  ['cloud-run-request.json', { schema: cloudRunRequestSchema }],
+  ['cloud-queue-message.json', { schema: cloudQueueMessageSchema }],
   [
     'agent-request.json',
     {
