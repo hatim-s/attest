@@ -31,6 +31,19 @@ describe('eval lifecycle worker directories', () => {
     expect(resolveWorkerDirectory('/project', 'run-1', 0, undefined)).toBeUndefined();
   });
 
+  test('creates shared worker parents concurrently', async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), 'attest-workers-concurrent-'));
+    temporaryDirectories.push(projectRoot);
+
+    const directories = await Promise.all(
+      Array.from({ length: 8 }, (_, index) =>
+        prepareWorkerDirectory(projectRoot, join(projectRoot, 'workers', 'run-1', `${index}`)),
+      ),
+    );
+
+    expect(new Set(directories).size).toBe(8);
+  });
+
   test('rejects an explicit worker directory equal to the project root', async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), 'attest-worker-root-'));
     temporaryDirectories.push(projectRoot);
