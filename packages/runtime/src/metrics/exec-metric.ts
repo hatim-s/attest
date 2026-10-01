@@ -11,7 +11,7 @@ import {
   type MetricErrorInfo,
 } from './metric-evaluation.js';
 import type { ExecMetricDefinition } from './metric-definitions.js';
-import { invokeCommandMetric } from './internal/exec-command.js';
+import type { CommandMetricTransport } from './internal/metric-transport.js';
 import { invokeHttpMetric } from './internal/exec-http.js';
 import { buildMetricRequest } from './internal/metric-request.js';
 
@@ -20,6 +20,8 @@ const DEFAULT_OUTPUT_CAP_BYTES = 1024 * 1024;
 
 /** Applies one deadline, cancellation signal, and byte cap consistently across CLI and HTTP metrics. */
 type ExecMetricOptions = {
+  /** Executes command metrics in a host-owned environment while retaining shared scoring. */
+  commandTransport?: CommandMetricTransport;
   cwd?: string;
   env?: NodeJS.ProcessEnv;
   outputCapBytes?: number;
@@ -81,7 +83,10 @@ const executeExecutableMetric = async (
   const requestBody = JSON.stringify(buildMetricRequest(context));
   const outcome =
     'command' in definition
-      ? await invokeCommandMetric(definition, requestBody, transportOptions)
+      ? await (
+          options.commandTransport ??
+          (await import('./internal/exec-command.js')).invokeCommandMetric
+        )(definition, requestBody, transportOptions)
       : await invokeHttpMetric(definition, requestBody, transportOptions);
   const parsed = outcome.ok ? parseInvocationResult(outcome.text) : outcome;
   const durationMs = performance.now() - startedAt;

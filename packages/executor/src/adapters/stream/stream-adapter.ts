@@ -10,7 +10,7 @@ import { retryBackoffDelay } from '../../internal/retry-backoff.js';
 import type { InvocationAttempt, InvocationResult } from '../../types.js';
 import { materializeHttpRequest, resolveRequestTemplate } from '../http/request-template.js';
 import { redactTransportText } from '../http/redaction.js';
-import { streamOnce } from './stream-transport.js';
+import { streamOnce, type StreamHttpTransport } from './stream-transport.js';
 
 /** An agent that answers over an SSE or JSONL HTTP stream. */
 type StreamAgentResource = AgentResource & {
@@ -19,6 +19,10 @@ type StreamAgentResource = AgentResource & {
 
 /** Runtime-resolved request values and cancellation for one streaming invocation. */
 type StreamInvokeOptions = {
+  /** Overrides local socket I/O with a host-owned guarded transport. */
+  requestStream?: StreamHttpTransport;
+  /** Overrides the authored retry budget. Zero forbids replay. */
+  retries?: number;
   headers?: Record<string, string>;
   query?: Record<string, string>;
   secrets?: readonly string[];
@@ -92,7 +96,7 @@ const invokeStreamingAgent = async (
       const retryable =
         normalized.code === 'network' || normalized.code === 'timeout' || retryableStatus;
       if (
-        retry >= (agent.retry?.retries ?? 0) ||
+        retry >= (options.retries ?? agent.retry?.retries ?? 0) ||
         !retryable ||
         normalized.applicationStarted === true ||
         normalized.code === 'cancelled'

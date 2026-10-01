@@ -27,6 +27,12 @@ type HttpJsonResponse = {
   url: URL;
 };
 
+/** A host-supplied transport must enforce endpoint security and the supplied limits. */
+type HttpJsonTransport = (
+  request: MaterializedHttpRequest,
+  policy: HttpClientPolicy,
+) => Promise<HttpJsonResponse>;
+
 const MAX_REDIRECTS = 3;
 
 const abortError = (policy: HttpClientPolicy): AgentInvocationError =>
@@ -186,4 +192,4 @@ const requestJson = async (
   throw new AgentInvocationError('http_status', 'Mapped HTTP redirect limit was exceeded.');
 };
 
-export { requestJson, type HttpClientPolicy, type HttpJsonResponse };
+export { requestJson, type HttpClientPolicy, type HttpJsonResponse, type HttpJsonTransport };

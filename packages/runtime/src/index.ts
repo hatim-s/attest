@@ -29,3 +29,10 @@ export {
   type ResolvedEvalCase,
   type ResolvedEvalPlan,
 } from './eval/index.js';
+
+export type { ExecMetricOptions } from './metrics/exec-metric.js';
+export type {
+  CommandMetricTransport,
+  MetricTransportOptions,
+  MetricTransportOutcome,
+} from './metrics/internal/metric-transport.js';

@@ -92,6 +92,36 @@ const isProcessAlive = (processIdentifier: number): boolean => {
 };
 
 describe('executeExecutableMetric command metrics', () => {
+  it('validates isolated command transport output through the shared result contract', async () => {
+    const commandTransport = vi.fn(() =>
+      Promise.resolve({
+        ok: true as const,
+        text: JSON.stringify({ score: 0.8, pass: true }),
+      }),
+    );
+    const definition = {
+      name: 'isolated',
+      type: 'exec' as const,
+      command: ['python', 'metric.py'],
+    };
+    const evaluated = await executeExecutableMetric(definition, metricContext(), {
+      commandTransport,
+      outputCapBytes: 1234,
+      timeoutMs: 5000,
+    });
+    expect(evaluated).toMatchObject({ status: 'evaluated', score: 0.8, pass: true });
+    expect(commandTransport).toHaveBeenCalledWith(
+      definition,
+      expect.stringContaining('"output":"hello"'),
+      expect.objectContaining({ outputCapBytes: 1234, timeoutMs: 5000 }),
+    );
+    commandTransport.mockResolvedValue({ ok: true, text: '{"score":99}' });
+    const malformed = await executeExecutableMetric(definition, metricContext(), {
+      commandTransport,
+    });
+    expect(malformed).toMatchObject({ status: 'error', error: { kind: 'exec_malformed_output' } });
+  });
+
   it('normalizes a valid fixture result', async () => {
     const evaluation = await executeExecutableMetric(
       { name: 'fixture', type: 'exec', command: buildFixtureCommand('result.mjs') },

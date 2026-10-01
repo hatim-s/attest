@@ -21,6 +21,7 @@ import {
   runDirect,
 } from './mapped-http-execution.js';
 import { runPolling } from './mapped-http-polling.js';
+import type { HttpJsonTransport } from './http-client.js';
 
 /** An agent reached over plain HTTP, either answering directly or through submit-and-poll. */
 type HttpAgentResource = AgentResource & {
@@ -29,6 +30,10 @@ type HttpAgentResource = AgentResource & {
 
 /** Runtime-resolved request values and cancellation for one mapped HTTP invocation. */
 type MappedHttpInvokeOptions = {
+  /** Overrides Node DNS-pinned I/O with a host-owned guarded transport. */
+  requestJson?: HttpJsonTransport;
+  /** Limits retries regardless of the authored resource policy. Zero forbids replay. */
+  retries?: number;
   headers?: Record<string, string>;
   query?: Record<string, string>;
   secrets?: readonly string[];
@@ -72,7 +77,11 @@ const invokeMappedHttpAgent = async (
       request,
       agent.limits?.request_bytes ?? DEFAULT_REQUEST_BYTES,
     );
-    const context = { retry: agent.retry, policy, signal, retryAttempts };
+    const retry =
+      options.retries === undefined
+        ? agent.retry
+        : { backoff: agent.retry?.backoff ?? { kind: 'none' as const }, retries: options.retries };
+    const context = { retry, policy, signal, retryAttempts, requestJson: options.requestJson };
     const { transport } = agent;
     const completed =
       transport.kind === 'http'

@@ -155,7 +155,7 @@ const invokeHttpAgent = async (
   let httpStatus: number | undefined;
 
   try {
-    const response = await fetch(target.url, {
+    const response = await (options.httpFetch ?? fetch)(target.url, {
       method: 'POST',
       headers: { 'content-type': 'application/json', ...options.httpHeaders },
       body: JSON.stringify(request),

@@ -67,3 +67,20 @@ Authentication, tenant boundaries, queues, and object storage belong to that dep
 ESLint rejects runtime/application dependencies in executor, execution and local infrastructure imports in core, local or CLI imports in runtime, CLI or Commander imports in local, and server imports in web. Workspace manifests and TypeScript references make the dependency graph explicit. Run the root build, typecheck, lint, and tests after moving an API across packages.
 
 Executor APIs such as `invokeAgent`, transport sessions, and process cleanup are imported from `@attest/executor`. Runtime does not re-export them. Consumers using their former runtime exports must update imports and add the executor dependency. `CaseExecution` is imported from `@attest/runtime`, which assembles it from invocation results.
+
+## Hosted transport injection
+
+`@attest/executor/http` exports HTTP-only invocation and host transport hooks.
+It does not eagerly import process or sandbox implementations. Hosted callers
+supply guarded fetch through `createFetchHttpTransports` and set `retries: 0` for
+mapped and streaming invocations. Native `invokeNativeHttpAgent` always records
+one validated attempt. The host owns DNS pinning and tenant endpoint policy;
+shared adapters own mapping, polling, stream parsing, caps and cancellation.
+Workers using this entry point require `nodejs_compat` for crypto, util and Buffer.
+
+`evaluateMetrics` accepts `exec.commandTransport` to execute custom commands in
+a host-owned isolated environment. The transport receives the existing metric
+request JSON and normalized timeout, output cap and cancellation options. It
+returns bounded response text or a typed metric error. Runtime retains result
+contract validation and scoring. The local command implementation loads only
+when no custom command transport is supplied.

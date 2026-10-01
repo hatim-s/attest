@@ -1,13 +1,8 @@
-import type { IncomingMessage } from 'node:http';
-
 import { AgentInvocationError, abortedError } from '../../errors.js';
-import { DEFAULT_CONNECT_MS, DEFAULT_FIRST_BYTE_MS } from '../../internal/agent-defaults.js';
 import { LineSplitter } from '../../internal/line-splitter.js';
 import { createRawExcerpt } from '../../internal/raw-excerpt.js';
-import { openPinnedRequest } from '../http/pinned-request.js';
 import type { MaterializedHttpRequest } from '../http/request-template.js';
 import { parseRetryAfter } from '../http/retry-after.js';
-import { resolveSafeHttpUrl } from '../http/url-security.js';
 import { SseParser, type StreamEvent } from './sse-parser.js';
 import type { StreamAgentResource, StreamInvokeOptions } from './stream-adapter.js';
 import { StreamEvidence, capError, createStreamCaps } from './stream-evidence.js';
@@ -16,6 +11,22 @@ import {
   type CandidateResponse,
   type TerminalExtractor,
 } from './stream-terminal.js';
+
+/** A response whose lifetime and network policy belong to the host transport. */
+type StreamHttpResponse = {
+  status: number;
+  headers: Record<string, string>;
+  body: AsyncIterable<Uint8Array>;
+  cancel: () => void;
+};
+
+/** Opens a guarded HTTP stream without changing Attest framing or terminal extraction. */
+type StreamHttpTransport = (
+  agent: StreamAgentResource,
+  request: MaterializedHttpRequest,
+  signal: AbortSignal,
+  options: StreamInvokeOptions,
+) => Promise<StreamHttpResponse>;
 
 type ConsumedStream = {
   response: CandidateResponse;
@@ -44,7 +55,7 @@ const parseEventData = (source: string, framing: 'sse' | 'jsonl'): unknown => {
 
 /** Reads one HTTP stream with separate transport/application idle clocks and hard event caps. */
 const consumeResponse = async (
-  response: IncomingMessage,
+  response: StreamHttpResponse,
   options: ConsumeOptions,
 ): Promise<ConsumedStream> => {
   const { agent, signal } = options;
@@ -62,7 +73,7 @@ const consumeResponse = async (
   // Destroying the response ends the read loop; `interruption` records why it was stopped.
   const interrupt = (error: AgentInvocationError): void => {
     interruption ??= error;
-    response.destroy(error);
+    response.cancel();
   };
   const resetTransportIdle = (): void => {
     clearTimeout(transportIdle);
@@ -123,7 +134,7 @@ const consumeResponse = async (
     return undefined;
   };
 
-  const decode = (chunk?: Buffer): string => {
+  const decode = (chunk?: Uint8Array): string => {
     try {
       return chunk === undefined ? decoder.decode() : decoder.decode(chunk, { stream: true });
     } catch (error: unknown) {
@@ -144,7 +155,7 @@ const consumeResponse = async (
   resetApplicationIdle();
   if (signal.aborted) abort();
   try {
-    for await (const chunk of response as AsyncIterable<Buffer>) {
+    for await (const chunk of response.body) {
       resetTransportIdle();
       totalBytes += chunk.byteLength;
       if (totalBytes > caps.totalBytes) {
@@ -173,11 +184,11 @@ const consumeResponse = async (
     clearTimeout(transportIdle);
     clearTimeout(applicationIdle);
     signal.removeEventListener('abort', abort);
-    response.destroy();
+    response.cancel();
   }
 };
 
-const contentType = (response: IncomingMessage): string | undefined =>
+const contentType = (response: StreamHttpResponse): string | undefined =>
   String(response.headers['content-type'] ?? '')
     .split(';', 1)[0]
     ?.trim()
@@ -190,53 +201,18 @@ const streamOnce = async (
   signal: AbortSignal,
   options: StreamInvokeOptions,
 ): Promise<ConsumedStream & { status: number }> => {
-  const connectTimeoutMs = agent.timeouts?.connect_ms ?? DEFAULT_CONNECT_MS;
-  const resolved = await resolveSafeHttpUrl(materialized.url, {
-    timeoutMs: connectTimeoutMs,
-    signal,
-    callerSignal: options.signal,
-  });
-  if (
-    (options.secrets?.length ?? 0) > 0 &&
-    resolved.url.protocol !== 'https:' &&
-    !resolved.loopback
-  ) {
-    throw new AgentInvocationError(
-      'network',
-      'Streaming secrets require HTTPS except on loopback.',
-    );
-  }
-  const { response } = await openPinnedRequest(resolved, {
-    method: materialized.method,
-    headers: materialized.headers,
-    body: materialized.body,
-    signal,
-    firstByteTimeoutMs: agent.timeouts?.first_byte_ms ?? DEFAULT_FIRST_BYTE_MS,
-    connectTimeoutMs,
-    errors: {
-      aborted: () => abortedError(options.signal, 'Streaming invocation'),
-      firstByteTimeout: () =>
-        new AgentInvocationError('timeout', 'Streaming HTTP first byte timed out.'),
-      connectTimeout: () =>
-        new AgentInvocationError('timeout', 'Streaming HTTP connection timed out.'),
-      failed: (cause) =>
-        new AgentInvocationError('network', 'Streaming HTTP transport failed.', { cause }),
-    },
-  });
-  const status = response.statusCode ?? 0;
+  const open = options.requestStream ?? (await import('./node-stream-request.js')).openNodeStream;
+  const response = await open(agent, materialized, signal, options);
+  const { status } = response;
   if (status < 200 || status >= 300) {
-    response.destroy();
-    throw new AgentInvocationError(
-      'http_status',
-      `Streaming HTTP returned status ${String(status)}.`,
-      {
-        httpStatus: status,
-        retryAfterMs: parseRetryAfter(response.headersDistinct['retry-after']?.[0]),
-      },
-    );
+    response.cancel();
+    throw new AgentInvocationError('http_status', `Streaming HTTP returned status ${status}.`, {
+      httpStatus: status,
+      retryAfterMs: parseRetryAfter(response.headers['retry-after']),
+    });
   }
   if (agent.transport.framing === 'sse' && contentType(response) !== 'text/event-stream') {
-    response.destroy();
+    response.cancel();
     throw new AgentInvocationError(
       'invalid_envelope',
       'SSE response must use the text/event-stream content type.',
@@ -252,4 +228,4 @@ const streamOnce = async (
   return { ...consumed, status };
 };
 
-export { streamOnce };
+export { streamOnce, type StreamHttpTransport, type StreamHttpResponse };

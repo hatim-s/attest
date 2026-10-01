@@ -8,7 +8,7 @@ import { isJsonValue } from '../../internal/json-value.js';
 import { extractRemoteError } from '../../internal/remote-error.js';
 import { retryBackoffDelay } from '../../internal/retry-backoff.js';
 import type { InvocationAttempt } from '../../types.js';
-import { requestJson, type HttpClientPolicy, type HttpJsonResponse } from './http-client.js';
+import type { HttpClientPolicy, HttpJsonResponse, HttpJsonTransport } from './http-client.js';
 import { readJsonPointer } from './json-pointer.js';
 import type { MaterializedHttpRequest } from './request-template.js';
 import { redactTransportText } from './redaction.js';
@@ -28,6 +28,7 @@ type ExchangeContext = {
   policy: HttpClientPolicy;
   signal: AbortSignal;
   retryAttempts: InvocationAttempt[];
+  requestJson?: HttpJsonTransport;
 };
 
 const REMOTE_ERROR_FALLBACK = 'The mapped HTTP agent reported an error.';
@@ -184,7 +185,8 @@ const requestWithRetries = async (
     const attemptDuration = startTimer();
     let response: HttpJsonResponse;
     try {
-      response = await requestJson(request, policy);
+      const transport = context.requestJson ?? (await import('./http-client.js')).requestJson;
+      response = await transport(request, policy);
     } catch (error: unknown) {
       const normalized = normalizeFailure(error, signal, policy.callerSignal);
       const retryable = retryableTransportError(normalized);
