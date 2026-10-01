@@ -1,4 +1,4 @@
-import { evalEventStreamSchema } from '@attest/contracts';
+import { evalEventStreamSchema, evalRunSchema } from '@attest/contracts';
 import { describe, expect, it, vi } from 'vitest';
 
 import { deferred } from '../../_tests_/support/deferred.js';
@@ -21,6 +21,44 @@ import {
 type Persistence = ReturnType<typeof createPersistence>;
 
 describe('executeResolvedEvalPlan', () => {
+  it.each([false, true])(
+    'returns a failed result when the start event exceeds its cap, with finalization failure %s',
+    async (finalizationFails) => {
+      const plan = createPlan(['case-zero']);
+      plan.run.snapshot.selection = {
+        total_cases: 1,
+        matched_cases: 1,
+        selected_cases: 1,
+        sample: { count: 1, seed: 'x'.repeat(20_000), algorithm: 'hash-rank-v1' },
+      };
+      expect(evalRunSchema.safeParse(plan.run).success).toBe(true);
+      const persistence = createPersistence();
+      if (finalizationFails) {
+        persistence.finalizeRun.mockRejectedValue(new Error('row remains running'));
+      }
+      const beforeRun = vi.fn(() => Promise.resolve());
+      const executeCase = vi.fn<EvalCaseRunner<string>['executeCase']>();
+
+      const result = await executeResolvedEvalPlan(
+        plan,
+        { beforeRun, executeCase },
+        persistence.adapter,
+        { now: createClock() },
+      );
+
+      expect(result).toMatchObject({
+        status: 'failed',
+        exit_code: 4,
+        cases: [],
+        can_release_cancellation_ownership: !finalizationFails,
+      });
+      expect(persistence.finalizeRun).toHaveBeenCalledWith(RUN_ID, 'failed', result.summary);
+      expect(beforeRun).not.toHaveBeenCalled();
+      expect(executeCase).not.toHaveBeenCalled();
+      expect(evalEventStreamSchema.safeParse(result.events).success).toBe(true);
+    },
+  );
+
   it('rejects invalid global concurrency before persistence or case scheduling', async () => {
     const persistence = createPersistence();
     const executeCase = vi.fn<EvalCaseRunner<string>['executeCase']>();

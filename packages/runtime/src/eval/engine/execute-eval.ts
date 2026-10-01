@@ -146,6 +146,37 @@ const executeResolvedEvalPlan = async <Payload, BaselineDiff = unknown>(
   }
 
   const collector = createEventCollector(now, options.onEvent);
+  try {
+    await collector.emit({
+      event: 'run_started',
+      data: {
+        run_id: run.run_id,
+        snapshot_hash: run.snapshot_hash,
+        total_cases: plan.cases.length,
+        ...(run.snapshot.selection === undefined ? {} : { selection: run.snapshot.selection }),
+        concurrency: run.effective_command.resolved.concurrency,
+        timeout_ms: run.effective_command.resolved.timeout_ms,
+      },
+    });
+  } catch (error: unknown) {
+    const failure = await preOrchestrationFailure<Payload, BaselineDiff>(run, {
+      time: now(),
+      status: 'failed',
+      finalResult: terminalFailure(
+        'run_failed',
+        safeErrorMessage(error, 'Eval start event emission failed.'),
+      ),
+      onEvent: options.onEvent,
+    });
+    try {
+      await persistence.finalizeRun(run.run_id, 'failed', failure.summary);
+    } catch {
+      // The row may still be running, so its owner must retain cancellation ownership.
+      failure.can_release_cancellation_ownership = false;
+    }
+    return failure;
+  }
+
   // Caller cancellation and the run deadline both abort case work; only the deadline sets timedOut.
   const deadline = new AbortController();
   let timedOut = false;
@@ -163,18 +194,6 @@ const executeResolvedEvalPlan = async <Payload, BaselineDiff = unknown>(
   const infrastructureErrors: string[] = [];
   let cleanupConfirmed = true;
   let casePersistenceConfirmed = true;
-
-  await collector.emit({
-    event: 'run_started',
-    data: {
-      run_id: run.run_id,
-      snapshot_hash: run.snapshot_hash,
-      total_cases: plan.cases.length,
-      ...(run.snapshot.selection === undefined ? {} : { selection: run.snapshot.selection }),
-      concurrency: run.effective_command.resolved.concurrency,
-      timeout_ms: run.effective_command.resolved.timeout_ms,
-    },
-  });
 
   try {
     await runner.beforeRun?.(run.run_id, runSignal);
