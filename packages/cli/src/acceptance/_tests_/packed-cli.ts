@@ -1,12 +1,14 @@
 import { execFile } from 'node:child_process';
 import { constants } from 'node:fs';
-import { access, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { access, mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { basename, dirname, join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 
 import type { TestProject } from 'vitest/node';
+
+import { materializePackedRuntime } from './packed-runtime.js';
 
 type PackedCli = {
   /** Packed archive path per workspace package name. */
@@ -60,8 +62,7 @@ const packPackage = async (
 };
 
 /**
- * Packs every runtime workspace and installs the CLI into a clean production prefix, the way a
- * user installs it. The packages must already be built; `bun run test:acceptance` builds first.
+ * Packs each runtime workspace and copies its installed dependency closure into a clean prefix. The packages must already be built; `bun run test:acceptance` builds first.
  */
 const createPackedCli = async (): Promise<PackedCli> => {
   const root = await mkdtemp(join(tmpdir(), 'attest-acceptance-packed-'));
@@ -72,39 +73,15 @@ const createPackedCli = async (): Promise<PackedCli> => {
     const [name, archivePath] = await packPackage(packageRoot, archiveDirectory);
     archivePaths[name] = archivePath;
   }
-  const archive = (name: string): string => `./archives/${basename(archivePaths[name] ?? '')}`;
-  const installManifest = {
-    private: true,
-    dependencies: { '@attest/cli': archive('@attest/cli') },
-    overrides: Object.fromEntries(
-      Object.keys(archivePaths)
-        .filter((name) => name !== '@attest/cli')
-        .map((name) => [name, archive(name)]),
+  const cliPath = await materializePackedRuntime(
+    root,
+    Object.fromEntries(
+      PACKED_PACKAGE_ROOTS.map((packageRoot) => {
+        const name = `@attest/${packageRoot.split('/')[1]}`;
+        return [name, { archive: archivePaths[name]!, source: join(REPOSITORY_ROOT, packageRoot) }];
+      }),
     ),
-  };
-  await writeFile(join(root, 'package.json'), `${JSON.stringify(installManifest, null, 2)}\n`);
-  // Keep dependencies inside this prefix whatever the user's global Bun config says.
-  await writeFile(
-    join(root, 'bunfig.toml'),
-    '[install]\nlinker = "hoisted"\nglobalStore = false\n',
   );
-  await execFileAsync(
-    'bun',
-    [
-      'install',
-      '--production',
-      '--ignore-scripts',
-      '--no-save',
-      '--linker',
-      'hoisted',
-      '--backend',
-      'copyfile',
-      // Use the cache primed by the repository install; a clean runner may still fetch.
-      '--prefer-offline',
-    ],
-    { cwd: root, timeout: 120_000 },
-  );
-  const cliPath = join(root, 'node_modules/.bin/attest');
   await access(cliPath, constants.X_OK);
   return { archivePaths, cliPath, root };
 };

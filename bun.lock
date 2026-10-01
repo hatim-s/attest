@@ -24,7 +24,7 @@
     },
     "packages/cli": {
       "name": "@attest/cli",
-      "version": "0.0.0",
+      "version": "0.1.0-alpha.0",
       "bin": {
         "attest": "./dist/cli.js",
       },
@@ -40,7 +40,7 @@
     },
     "packages/contracts": {
       "name": "@attest/contracts",
-      "version": "0.0.0",
+      "version": "0.1.0-alpha.0",
       "dependencies": {
         "zod": "^4",
       },
@@ -51,7 +51,7 @@
     },
     "packages/core": {
       "name": "@attest/core",
-      "version": "0.0.0",
+      "version": "0.1.0-alpha.0",
       "dependencies": {
         "@attest/contracts": "workspace:*",
         "zod": "^4",
@@ -62,7 +62,7 @@
     },
     "packages/executor": {
       "name": "@attest/executor",
-      "version": "0.0.0",
+      "version": "0.1.0-alpha.0",
       "dependencies": {
         "@attest/contracts": "workspace:*",
         "@vercel/sandbox": "3.3.0",
@@ -75,7 +75,7 @@
     },
     "packages/local": {
       "name": "@attest/local",
-      "version": "0.0.0",
+      "version": "0.1.0-alpha.0",
       "dependencies": {
         "@attest/contracts": "workspace:*",
         "@attest/core": "workspace:*",
@@ -97,7 +97,7 @@
     },
     "packages/runtime": {
       "name": "@attest/runtime",
-      "version": "0.0.0",
+      "version": "0.1.0-alpha.0",
       "dependencies": {
         "@attest/contracts": "workspace:*",
         "@attest/core": "workspace:*",
@@ -115,7 +115,7 @@
     },
     "packages/schemas": {
       "name": "@attest/schemas",
-      "version": "0.0.0",
+      "version": "0.1.0-alpha.0",
       "dependencies": {
         "@attest/contracts": "workspace:*",
       },
@@ -126,19 +126,17 @@
     },
     "packages/web": {
       "name": "@attest/web",
-      "version": "0.0.0",
-      "dependencies": {
+      "version": "0.1.0-alpha.0",
+      "devDependencies": {
         "@attest/core": "workspace:*",
         "@tanstack/react-query": "^5.101.4",
         "@tanstack/react-virtual": "^3.14.9",
-        "echarts": "^6.1.0",
-        "react": "^19.2.8",
-        "react-dom": "^19.2.8",
-      },
-      "devDependencies": {
         "@types/react": "^19.2.18",
         "@types/react-dom": "^19.2.4",
         "@vitejs/plugin-react": "^6.0.5",
+        "echarts": "^6.1.0",
+        "react": "^19.2.8",
+        "react-dom": "^19.2.8",
         "vite": "^8.2.1",
         "vite-plugin-singlefile": "^2.3.3",
         "vitest": "^3",

@@ -16,6 +16,11 @@
     "test:acceptance": {
       "dependsOn": ["^build", "build"],
       "cache": false
+    },
+    "test:fuzz": {
+      "dependsOn": ["^build"],
+      "cache": false,
+      "env": ["FUZZ_ITERATIONS"]
     }
   }
 }

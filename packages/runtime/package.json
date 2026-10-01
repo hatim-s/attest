@@ -1,6 +1,6 @@
 {
   "name": "@attest/runtime",
-  "version": "0.0.0",
+  "version": "0.1.0-alpha.0",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -25,13 +25,31 @@
     "test": "vitest run --maxWorkers=1",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test:node": "node --test src/eval/_tests_/portability.check.mjs",
-    "test:bun": "bun test ./src/eval/_tests_/portability.check.mjs"
+    "test:bun": "bun test ./src/eval/_tests_/portability.check.mjs",
+    "prepublishOnly": "node ../../scripts/block-source-publish.mjs"
   },
   "devDependencies": {
     "fast-check": "^4.9.0",
     "vitest": "^3"
   },
   "files": [
-    "dist"
-  ]
+    "dist",
+    "LICENSE",
+    "NOTICE"
+  ],
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=22.15.0",
+    "bun": ">=1.4"
+  },
+  "publishConfig": {
+    "access": "public",
+    "tag": "alpha"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hatim-s/attest.git",
+    "directory": "packages/runtime"
+  },
+  "description": "Evaluation scheduling, lifecycle hooks, and metrics."
 }

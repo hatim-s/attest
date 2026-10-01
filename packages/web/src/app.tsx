@@ -42,7 +42,7 @@ const Dashboard = () => {
   const [tab, setTab] = useState<DashboardTab>('cases');
   const [theme, setTheme] = useState<Theme>(getInitialTheme);
   const runQuery = useRun(selectedRunId);
-  const casesQuery = useCases(selectedRunId);
+  const casesQuery = useCases(selectedRunId, runQuery.data?.status);
   const caseQuery = useCase(selectedRunId, selectedCase?.suiteName, selectedCase?.caseId);
   const diffQuery = useDiff(baseRunId, selectedRunId);
   const cases = useMemo(
@@ -111,7 +111,7 @@ const Dashboard = () => {
           selectedRunId={selectedRunId}
         />
         <main className="main-content">
-          {selectedRunId === undefined ? (
+          {selectedRunId === undefined && runsQuery.isSuccess && runs.length === 0 ? (
             <div className="card welcome-card">
               <p className="eyebrow">Ready</p>
               <h1>Run your first evaluation</h1>
@@ -170,11 +170,14 @@ const Dashboard = () => {
                 </section>
               ) : null}
               {tab === 'distributions' ? (
-                <DistributionCharts
-                  cases={cases}
-                  isLoading={casesQuery.isFetchingNextPage}
-                  totalCases={run.summary?.totalCases ?? cases.length}
-                />
+                <>
+                  {casesQuery.error !== null ? <ErrorNotice error={casesQuery.error} /> : null}
+                  <DistributionCharts
+                    cases={cases}
+                    isLoading={casesQuery.isFetching}
+                    totalCases={run.summary?.totalCases ?? cases.length}
+                  />
+                </>
               ) : null}
               {tab === 'compare' ? (
                 <DiffPanel

@@ -1,8 +1,71 @@
 # Contributing
 
-Install dependencies with `bun install`. The available development commands are documented in
-[docs/SCRIPTS.md](docs/SCRIPTS.md). Read the [package architecture](docs/ARCHITECTURE.md)
-before adding dependencies or moving public APIs.
+## Set up the workspace
+
+Use Node.js 22.15 or newer and Bun 1.4. From the repository root:
+
+```bash
+bun install --frozen-lockfile
+bun run build
+node packages/cli/dist/cli.js --help
+```
+
+Build before running the CLI or package tests. Workspace imports resolve to compiled
+`dist/` exports, so rebuild after editing a dependency package. The build also embeds
+the dashboard in the CLI; a TypeScript-only build of `packages/cli` does not rebuild
+that dashboard.
+
+Follow the [quickstart](docs/quickstart.md) with the shell function in the
+[README](README.md#try-it-from-source) to exercise the compiled CLI outside the checkout.
+
+## Find the owning package
+
+| Package             | Responsibility                                                               |
+| ------------------- | ---------------------------------------------------------------------------- |
+| `@attest/contracts` | Versioned protocols and resource schemas                                     |
+| `@attest/core`      | Domain records, comparison, import, trace conversion, and storage interfaces |
+| `@attest/executor`  | Agent invocation, transport cleanup, and isolated case environments          |
+| `@attest/runtime`   | Metrics, lifecycle hooks, and evaluation scheduling                          |
+| `@attest/local`     | Project files, SQLite, local evaluation, reports, and dashboard server       |
+| `@attest/cli`       | Terminal commands, prompts, and output                                       |
+| `@attest/web`       | Dashboard and embedded report UI                                             |
+| `@attest/schemas`   | Generated JSON schemas for non-TypeScript consumers                          |
+| `@attest/site`      | Marketing page                                                               |
+
+The [architecture guide](docs/ARCHITECTURE.md) explains the dependency rules and where new code belongs. Cloud code can reuse contracts, core, executor, and runtime without importing the CLI or local application.
+
+Keep authored examples under `examples/`. Put focused tests and fixtures together in
+the owning module's existing `_tests_/` directory. Read [AGENTS.md](AGENTS.md) for repository
+instructions and [docs/TESTING.md](docs/TESTING.md) for the testing policy.
+
+## Verify a change
+
+During development, run the owning package's tests, for example:
+
+```bash
+bun run --cwd packages/contracts test
+```
+
+Before submitting, run the repository checks:
+
+```bash
+bun run typecheck
+bun run lint
+bun run format:check
+bun run test
+bun run build
+```
+
+If you change contract schemas, run `bun run generate:schemas` and include the generated
+artifacts. Document script changes in [docs/SCRIPTS.md](docs/SCRIPTS.md). Keep examples
+and structured help consistent with CLI changes. Required tests use local fixtures and
+do not need provider credentials. CI checks Linux and macOS.
+
+For package contents and installation checks, use the
+[release guide](docs/RELEASING.md). A passing workspace build alone does not verify
+that the published packages install outside the repository.
+
+## Submit changes
 
 Use [Conventional Commits](https://www.conventionalcommits.org/) for commit messages, such as
 `feat(core): add a run reader` or `fix(cli): report malformed input`.

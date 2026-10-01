@@ -1,8 +1,18 @@
 import { describe, expect, it } from 'vitest';
 
-import { redactEventEvidence } from '../redaction.js';
+import { redactEventEvidence, redactTransportText } from '../redaction.js';
 
 describe('transport event redaction', () => {
+  it('redacts lowercase percent escapes without changing literal credential casing', () => {
+    expect(redactTransportText('token=Secret%2fValue', ['Secret/Value'])).toBe('token=[REDACTED]');
+  });
+
+  it('redacts overlapping credentials completely regardless of configuration order', () => {
+    expect(
+      redactTransportText('token=prefix-sensitive-suffix', ['prefix', 'prefix-sensitive-suffix']),
+    ).toBe('token=[REDACTED]');
+  });
+
   it('redacts only own object and array properties', () => {
     const inherited = Object.create({ token: 'inherited-secret' }) as Record<string, unknown>;
     inherited.own = { token: 'own-secret' };

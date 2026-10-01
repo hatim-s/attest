@@ -1,9 +1,16 @@
 import { mkdir, readFile, realpath, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
-import { cliErrorCatalogSchema, cliHelpSchema } from '@attest/contracts';
+import {
+  cliErrorCatalogSchema,
+  cliHelpSchema,
+  cliResultSchema,
+  evalEventStreamSchema,
+} from '@attest/contracts';
 import { openStore } from '@attest/local/store';
 import { describe, expect, it } from 'vitest';
+
+import { runCli } from '../run-cli.js';
 
 import { runCommand, runJson, temporaryDirectory } from './support/cli-test-support.js';
 
@@ -142,6 +149,47 @@ describe('runCli', () => {
     expect(unknown.exitCode).toBe(2);
     expect(unknown.output).toEqual([]);
     expect(unknown.errors.join('')).toContain("unknown command 'not-a-command'");
+  });
+
+  it.each([
+    ['unknown-command', '--output', 'json'],
+    ['project', 'unknown-command', '--output', 'json'],
+    ['agent', 'unknown-command', '--output=json'],
+    ['--output', 'json', 'schema', 'unknown-command'],
+  ])('keeps unknown command failures machine-readable for %j', async (...args) => {
+    const output: string[] = [];
+    const errors: string[] = [];
+    const exitCode = await runCli(args, {
+      io: { output: (message) => output.push(message), error: (message) => errors.push(message) },
+    });
+
+    expect(exitCode).toBe(2);
+    expect(errors).toEqual([]);
+    expect(output).toHaveLength(1);
+    expect(cliResultSchema.parse(JSON.parse(output[0]!))).toMatchObject({
+      ok: false,
+      error: { code: 'cli_usage', retryable: false },
+    });
+  });
+
+  it('wraps JSONL parser failures in one terminal event', async () => {
+    const output: string[] = [];
+    const errors: string[] = [];
+    const exitCode = await runCli(['eval', 'run', '--unknown', '--output', 'jsonl'], {
+      io: { output: (message) => output.push(message), error: (message) => errors.push(message) },
+    });
+
+    expect(exitCode).toBe(2);
+    expect(errors).toEqual([]);
+    const stream = evalEventStreamSchema.parse(
+      output.map((line): unknown => JSON.parse(line) as unknown),
+    );
+    expect(stream).toHaveLength(1);
+    expect(stream[0]).toMatchObject({
+      event: 'result',
+      sequence: 0,
+      data: { exit_code: 2, result: { ok: false, error: { code: 'cli_usage' } } },
+    });
   });
 
   it('returns an actionable project discovery error', async () => {

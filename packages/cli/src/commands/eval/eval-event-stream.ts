@@ -148,30 +148,28 @@ const collectEvalEvents = async (
         });
       }
       events.push(event);
-      if (options.streamJsonl && event.event === 'result') {
-        const completed = events.at(-2);
-        if (completed?.event === 'run_completed') print(completed);
-      }
-      if (options.streamJsonl && event.event !== 'run_completed') print(event);
+      if (options.streamJsonl && event.event !== 'run_completed' && event.event !== 'result')
+        print(event);
       if (options.watch) {
         const rendered = renderHumanProgress(event);
         if (rendered !== undefined) options.io.output(rendered);
       }
     }
+    const parsed = evalEventStreamSchema.safeParse(events);
+    if (!parsed.success) {
+      throw new AttestCliError('run_failed', 'Eval event stream is out of order or incomplete.', {
+        hint: 'Repair dispatcher event ordering and terminal result metadata.',
+        details: { diagnostics: issueDiagnostics(parsed.error.issues) },
+      });
+    }
+    if (options.streamJsonl) parsed.data.slice(printed).forEach(print);
+    return parsed.data;
   } catch (error: unknown) {
     if (!options.streamJsonl || events.length === 0) throw error;
     const recovered = recoverFailedJsonlStream(events, error, options.now);
     recovered.slice(printed).forEach((event) => options.io.output(serializeEvalEvent(event)));
     return recovered;
   }
-  const parsed = evalEventStreamSchema.safeParse(events);
-  if (!parsed.success) {
-    throw new AttestCliError('run_failed', 'Eval event stream is out of order or incomplete.', {
-      hint: 'Repair dispatcher event ordering and terminal result metadata.',
-      details: { diagnostics: issueDiagnostics(parsed.error.issues) },
-    });
-  }
-  return parsed.data;
 };
 
 export { collectEvalEvents, evalEvent, serializeEvalEvent };

@@ -91,6 +91,81 @@ const createProgram = (
   return { failingCommand: () => failing, program };
 };
 
+/** Honors machine output even when an agent misspells a command before parsing succeeds. */
+const requestedStructuredOutput = (argv: readonly string[]): 'json' | 'jsonl' | undefined => {
+  // These commands retain artifact-path or legacy --format semantics.
+  if (['view', 'report', 'trace.convert', 'diff'].includes(requestedCommand(argv))) return;
+  let output: string | undefined;
+  for (let index = 0; index < argv.length; index += 1) {
+    const argument = argv[index]!;
+    if (argument === '--') break;
+    if (argument === '--output') output = argv[++index];
+    else if (argument.startsWith('--output=')) output = argument.slice('--output='.length);
+  }
+  return output === 'json' || output === 'jsonl' ? output : undefined;
+};
+
+/** Removes only recognized global common options before identifying the requested command. */
+const commandArguments = (argv: readonly string[]): string[] => {
+  const argumentsWithoutGlobals: string[] = [];
+  for (let index = 0; index < argv.length; index += 1) {
+    const argument = argv[index]!;
+    if (argument === '--project' || argument === '--output') {
+      index += 1;
+    } else if (
+      argument === '--non-interactive' ||
+      argument.startsWith('--project=') ||
+      argument.startsWith('--output=')
+    ) {
+      continue;
+    } else {
+      argumentsWithoutGlobals.push(argument);
+    }
+  }
+  return argumentsWithoutGlobals;
+};
+
+const requestedCommand = (argv: readonly string[]): string => {
+  const normalizedArguments = commandArguments(argv);
+  const first = normalizedArguments[0];
+  const second = normalizedArguments[1];
+  if (first === undefined || first.startsWith('-')) {
+    return 'cli';
+  }
+  if (first === 'trace' && second === 'convert') {
+    return 'trace.convert';
+  }
+  if (first === 'init') {
+    return 'project.init';
+  }
+  if (first === 'project' && ['init', 'show', 'validate'].includes(second ?? '')) {
+    return `project.${second}`;
+  }
+  if (first === 'agent' && ['add', 'import', 'test', 'rename', 'remove'].includes(second ?? '')) {
+    return `agent.${second}`;
+  }
+  if (first === 'metric' && ['add', 'import', 'test', 'rename', 'remove'].includes(second ?? '')) {
+    return `metric.${second}`;
+  }
+  if (first === 'schema' && ['list', 'print'].includes(second ?? '')) {
+    return `schema.${second}`;
+  }
+  if (first === 'eval' && ['run', 'cancel'].includes(second ?? '')) {
+    return `eval.${second}`;
+  }
+  if (first === 'test') {
+    const third = normalizedArguments[2];
+    if (second === 'case' && third !== undefined && !third.startsWith('-')) {
+      return `test.case.${third}`;
+    }
+    if (second === 'dataset' && third !== undefined && !third.startsWith('-')) {
+      return `test.dataset.${third}`;
+    }
+    if (second !== undefined && !second.startsWith('-')) return `test.${second}`;
+  }
+  return /^[a-z][a-z0-9-]*$/.test(first) ? first : 'cli';
+};
+
 /** Parses one CLI invocation and returns an exit code without terminating embedders or tests. */
 const runCli = async (argv: string[], options: RunCliOptions = {}): Promise<number> => {
   const io = options.io ?? defaultIo;
@@ -115,8 +190,9 @@ const runCli = async (argv: string[], options: RunCliOptions = {}): Promise<numb
 
     const failure = serializeCliError(error);
     const leaf = failingCommand();
-    const command = resultCommandName(leaf);
-    const output = commonOutputMode(program, leaf);
+    const command =
+      error instanceof CommanderError ? requestedCommand(argv) : resultCommandName(leaf);
+    const output = requestedStructuredOutput(argv) ?? commonOutputMode(program, leaf);
     if (output === 'json') {
       io.output(serializeCliResult(createCliFailureResult(command, failure.error)));
     } else if (output === 'jsonl') {

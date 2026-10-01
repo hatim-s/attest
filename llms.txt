@@ -1,34 +1,33 @@
 # Attest documentation map
 
-Attest is a CLI that stores agents, tests, datasets, and metrics as JSON files and records each
-evaluation run in a local SQLite store. Read shapes from the schemas and commands below, not from
-examples.
+Attest is a local-first CLI for authored agent-evaluation resources and immutable runs.
+Use canonical pages and machine contracts; do not infer shapes from examples.
 
 Start:
 
-- docs/index.md: navigation
-- docs/quickstart.md: a native agent from setup to eval run
-- docs/cli/index.md: shared CLI rules and machine output
+- docs/index.md — human and coding-agent navigation
+- docs/quickstart.md — complete native agent to eval journey
+- docs/cli/index.md — CLI workflow and machine-output contract
 
 Concepts:
 
-- docs/concepts/resource-model.md: project, resources, references, hashes, paths
-- docs/concepts/eval-lifecycle.md: resolve, invoke, score, persist, render
+- docs/concepts/resource-model.md — project, resources, references, hashes, paths
+- docs/concepts/eval-lifecycle.md — resolve, invoke, score, persist, render
 
 Machine discovery:
 
-- `attest help --output json`: command tree
-- `attest help <namespace> <verb> --output json`: one command's contract
-- `attest schema list --output json`: schema ids and file names
-- `attest schema print <file-or-id> --output json`: one JSON Schema
-- `attest errors --output json`: error registry and repairs
+- `attest help --output json` — command tree
+- `attest help <namespace> <verb> --output json` — focused command contract
+- `attest schema list --output json` — available schema ids
+- `attest schema print <schema-id> --output json` — authoritative JSON Schema
+- `attest errors --output json` — stable error registry and repairs
 
 Reference:
 
-- docs/reference/schemas.md: schema ids and generated files
-- docs/reference/errors.md: meaning, retryability, exit code, and repair per error
-- docs/reference/exit-codes.md: process exit statuses
-- docs/reference/file-layout.md: authored and runtime paths
+- docs/reference/schemas.md — schema ids and generated artifacts
+- docs/reference/errors.md — meaning, causes, retryability, exit codes, repairs
+- docs/reference/exit-codes.md — process status contract
+- docs/reference/file-layout.md — authored and runtime paths
 
 CLI guides:
 
@@ -47,17 +46,19 @@ Integration guides:
 
 Protocols:
 
-- docs/specs/agent-contract.md: attest.agent-invocation
-- docs/specs/metric-contract.md: attest.metric-evaluation
-- docs/specs/trace-schema.md: attest.trace
-
-SDK formats (no CLI command):
-
-- docs/specs/run-bundle.md: run bundles written by exportRunBundle in @attest/local/store
+- docs/specs/agent-contract.md — attest.agent-invocation
+- docs/specs/metric-contract.md — attest.metric-evaluation
+- docs/specs/run-bundle.md — portable eval evidence
+- docs/specs/trace-schema.md — attest.trace
 
 Machine output:
 
-- `--output json` prints one `attest.cli-result` document.
-- `attest eval run --output jsonl` prints one `attest.cli-event` per line. The last event is `result`.
+- Discovery, project, resource, and eval JSON is one `attest.cli-result` document.
+- JSON help is in `result`; a printed JSON Schema is in `result.schema`.
+- Use `help --output json` for machine discovery; `--help` prints terminal text.
+- Eval JSONL uses `attest.cli-event` per line; the final event is `result`.
+- Eval JSONL parser and preflight failures emit one result event, including `data.exit_code`.
+- `diff --format json` prints a raw diff; `trace convert` prints a raw trace when no file is selected.
+- `report --output` and `trace convert --output` select artifact paths, not output formats.
 - Mutation requests use `attest.command-request`.
-- Branch on `error.code`, schema ids, and project hashes. Do not parse prose.
+- Prefer `error.code`, schema ids, and project hashes over prose parsing.
