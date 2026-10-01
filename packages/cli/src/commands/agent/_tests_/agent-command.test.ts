@@ -18,14 +18,13 @@ import type { CliInteraction } from '../../shared/cli-interaction.js';
 
 const FIXTURE = fileURLToPath(new URL('./fixtures/native-agent.cjs', import.meta.url));
 const WEBSOCKET_SERVER = new URL(
-  '../../../../../executor/src/_tests_/fixtures/websocket-fake-server.ts',
+  '../../../../../executor/src/adapters/websocket/_tests_/support/test-websocket-server.ts',
   import.meta.url,
 ).href;
 const originalWebSocketToken = process.env.ATTEST_WS_TOKEN;
 
 type WebSocketFixtureServer = {
   close: () => Promise<void>;
-  events: () => readonly { headers?: Readonly<Record<string, string>>; type: string }[];
   url: string;
 };
 
@@ -778,12 +777,23 @@ describe('WebSocket agent commands', () => {
 
   it('routes agent.test flag and --from-json requests to the WebSocket runtime', async () => {
     const root = await createEmptyProject();
-    const { startWebSocketFixtureServer } = (await import(WEBSOCKET_SERVER)) as {
-      startWebSocketFixtureServer: (
-        scenario: 'serial_correlation',
-      ) => Promise<WebSocketFixtureServer>;
+    const { startTestWebSocketServer } = (await import(WEBSOCKET_SERVER)) as {
+      startTestWebSocketServer: (options: {
+        subprotocol: string;
+        onConnection: (_peer: unknown, request: { headers: { authorization?: string } }) => void;
+        onMessage: (peer: { sendJson: (value: unknown) => void }, value: unknown) => void;
+      }) => Promise<WebSocketFixtureServer>;
     };
-    const server = await startWebSocketFixtureServer('serial_correlation');
+    const authorizations: (string | undefined)[] = [];
+    const server = await startTestWebSocketServer({
+      subprotocol: 'attest',
+      onConnection: (_peer, request) => authorizations.push(request.headers.authorization),
+      onMessage: (peer, value) => {
+        const { request_id } = value as { request_id: string };
+        peer.sendJson({ request_id, type: 'acknowledgement' });
+        peer.sendJson({ request_id, result: { echoed_request_id: request_id } });
+      },
+    });
     try {
       process.env.ATTEST_WS_TOKEN = 'websocket-probe-secret';
       const addRequest = JSON.stringify({
@@ -816,11 +826,7 @@ describe('WebSocket agent commands', () => {
         expect(probe.output[0]).toMatch(/"echoed_request_id":"ws-/u);
         expect(probe.output.join('')).not.toContain('websocket-probe-secret');
       }
-      const upgrades = server.events().filter((event) => event.type === 'upgrade_requested');
-      expect(upgrades.map((event) => event.headers?.authorization)).toEqual([
-        'websocket-probe-secret',
-        'websocket-probe-secret',
-      ]);
+      expect(authorizations).toEqual(['websocket-probe-secret', 'websocket-probe-secret']);
     } finally {
       await server.close();
     }
