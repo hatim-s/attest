@@ -25,7 +25,15 @@ const fetchJson = async <T>(path: string): Promise<T> => {
   return body;
 };
 
-/** Throws when a response field that should hold an object or array is missing. */
+/** Rejects malformed list fields before dashboard queries flatten or render them. */
+const requireList = <T>(value: T[] | undefined, path: string): T[] => {
+  if (!Array.isArray(value)) {
+    throw new Error(`Attest API response at ${path} was malformed.`);
+  }
+  return value;
+};
+
+/** Throws when a response field that should hold an object is missing. */
 const requireField = <T extends object>(value: T | undefined, path: string): T => {
   if (typeof value !== 'object' || value === null) {
     throw new Error(`Attest API response at ${path} was malformed.`);
@@ -55,12 +63,12 @@ const createHttpClient = (): DashboardClient => ({
     if (cursor !== undefined) query.set('cursor', cursor);
     const path = `/api/runs/${encodeURIComponent(runId)}/cases?${query.toString()}`;
     const body = await fetchJson<CasePage>(path);
-    return { items: requireField(body.items, path), nextCursor: body.nextCursor };
+    return { items: requireList(body.items, path), nextCursor: body.nextCursor };
   },
   listRuns: async () => {
     const path = '/api/runs?limit=100';
     const body = await fetchJson<{ runs: RunRecord[] }>(path);
-    return requireField(body.runs, path);
+    return requireList(body.runs, path);
   },
 });
 
