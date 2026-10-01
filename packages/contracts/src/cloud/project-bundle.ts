@@ -38,12 +38,12 @@ const portableProjectBundleSchema = z
       Object.values(files).reduce(
         (total, value) => total + new TextEncoder().encode(value).byteLength,
         0,
-      ) > 10_485_760
+      ) > 5_242_880
     )
       context.addIssue({
         code: 'custom',
         path: ['files'],
-        message: 'bundle files must total at most 10 MiB',
+        message: 'bundle files must total at most 5 MiB',
       });
   });
 

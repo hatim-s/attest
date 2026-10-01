@@ -4,6 +4,8 @@ import {
   type HttpRequestTemplate,
 } from '@attest/contracts';
 
+import { validatePortableMetricSource } from './portable-metric-source.js';
+
 import { canonicalStringify, contentHash } from '../store/internal/canonical-json.js';
 import { hashCanonicalJsonLines, hashProjectManifest } from './canonical-project.js';
 import { EvalResolutionError, type ResolutionProject } from './resolution-project.js';
@@ -115,6 +117,7 @@ const resolvePortableProject = (input: PortableProjectBundle): ResolutionProject
     ),
   };
   for (const path of Object.keys(files)) {
+    if (/\.(?:ts|py)$/u.test(path)) validatePortableMetricSource(path, files[path]!);
     if (
       !allowedFiles.has(path) &&
       !/^attest\/metrics\/code\/(?:[a-zA-Z0-9_-]+\/)*[a-zA-Z0-9_-]+\.(?:ts|py)$/u.test(path)
