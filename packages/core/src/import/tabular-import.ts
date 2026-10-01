@@ -1,467 +1,101 @@
-import { CASE_SCHEMA_ID, testCaseSchema, type DatasetImportMapping } from '@attest/contracts';
-
-import {
-  caseContentWithoutId,
-  createContentCaseId,
-  createKeyedCaseId,
-  fingerprintCaseContent,
-  hashImportJson,
-  type JsonValue,
-} from './canonical-import.js';
+import { dedupeImportRows } from './dedupe-import-rows.js';
+import { importDiagnostic, sortImportDiagnostics } from './import-diagnostics.js';
 import {
   TabularImportError,
-  type ImportDecision,
   type ImportDiagnostic,
-  type ImportLocation,
+  type NormalizedImportRow,
+  type RedactedValue,
   type TabularImportRequest,
   type TabularImportResult,
 } from './import-types.js';
-import {
-  createImportDiagnostic as diagnostic,
-  sortImportDiagnostics as sortDiagnostics,
-  type NormalizedImportRow,
-} from './import-internal.js';
-import { parseImportSource, resolveJsonPointer, type SourceRecord } from './parse-import-source.js';
+import { normalizeRecord } from './map-import-record.js';
+import { parseImportSource } from './parse-import-source.js';
 import { reconcileRows } from './reconcile-import.js';
+import { assertMappingShape } from './validate-import-mappings.js';
 
-const escapePointerSegment = (segment: PropertyKey): string =>
-  String(segment).replaceAll('~', '~0').replaceAll('/', '~1');
+const PREVIEW_ROWS = 5;
 
-const destinationPathsForIssue = (issue: {
-  code: string;
-  keys?: readonly string[];
-  path: PropertyKey[];
-}): string[] => {
-  const paths =
-    issue.code === 'unrecognized_keys' && issue.keys !== undefined
-      ? issue.keys.map((key) => [...issue.path, key])
-      : [issue.path];
-  return paths
-    .map((path) => (path.length === 0 ? '' : `/${path.map(escapePointerSegment).join('/')}`))
-    .sort();
-};
+const redactFields = (record: object): Record<string, RedactedValue> =>
+  Object.fromEntries(Object.entries(record).map(([key, value]) => [key, redactValue(value)]));
 
-/** Copies only public physical coordinates so authored row values can never leak. */
-const importLocation = (location: ImportLocation): ImportLocation => ({
-  ...(location.line === undefined ? {} : { line: location.line }),
-  ...(location.row === undefined ? {} : { row: location.row }),
-});
-
-/** Splits dotted destinations while allowing literal dots and backslashes to be escaped. */
-const splitDestination = (destination: string): string[] => {
-  const segments: string[] = [];
-  let segment = '';
-  let escaping = false;
-  for (const character of destination) {
-    if (escaping) {
-      segment += character;
-      escaping = false;
-    } else if (character === '\\') {
-      escaping = true;
-    } else if (character === '.') {
-      segments.push(segment);
-      segment = '';
-    } else {
-      segment += character;
-    }
-  }
-  if (escaping) segment += '\\';
-  segments.push(segment);
-  return segments;
-};
-
-const assertMappingShape = (
-  format: TabularImportRequest['format'],
-  mappings: readonly DatasetImportMapping[],
-): ImportDiagnostic[] => {
-  const diagnostics: ImportDiagnostic[] = [];
-  if (format === 'csv' && mappings.length === 0) {
-    diagnostics.push(
-      diagnostic(
-        'mapping_required',
-        'CSV imports require at least one explicit field mapping.',
-        'Pass --map input=<header> and any other required mappings.',
-        '<mapping>',
-        '',
-      ),
-    );
-  }
-  const destinations = mappings.map(({ destination }) => splitDestination(destination));
-  destinations.forEach((path, index) => {
-    if (path.some((segment) => ['__proto__', 'constructor', 'prototype'].includes(segment))) {
-      diagnostics.push(
-        diagnostic(
-          'mapping_destination_unsafe',
-          'Mapping destinations cannot contain prototype-mutating path segments.',
-          'Rename the destination field to a plain data key.',
-          mappings[index]!.source,
-          `/${path.map(escapePointerSegment).join('/')}`,
-        ),
-      );
-    }
-    destinations.slice(0, index).forEach((prior, priorIndex) => {
-      const common = Math.min(path.length, prior.length);
-      if (path.slice(0, common).join('\0') === prior.slice(0, common).join('\0')) {
-        diagnostics.push(
-          diagnostic(
-            'mapping_destination_conflict',
-            `Mappings ${priorIndex + 1} and ${index + 1} target overlapping destinations.`,
-            'Map either a whole value or its nested fields, not both.',
-            mappings[index]!.source,
-            `/${path.map(escapePointerSegment).join('/')}`,
-          ),
-        );
-      }
-    });
-  });
-  mappings.forEach(({ source }, index) => {
-    if (format !== 'csv' && !source.startsWith('/')) {
-      diagnostics.push(
-        diagnostic(
-          'source_pointer_required',
-          'JSON and JSONL mapping sources must be RFC 6901 pointers.',
-          'Prefix the source with `/` and escape `~` or `/` pointer segments.',
-          source,
-          `/${splitDestination(mappings[index]!.destination).map(escapePointerSegment).join('/')}`,
-        ),
-      );
-    }
-  });
-  return diagnostics;
-};
-
-const sourceValue = (
-  record: Record<string, unknown>,
-  source: string,
-  format: TabularImportRequest['format'],
-): { found: boolean; value?: unknown } =>
-  format === 'csv'
-    ? { found: Object.hasOwn(record, source), value: record[source] }
-    : resolveJsonPointer(record, source);
-
-const parseStructuredCsvFields = (
-  record: SourceRecord,
-  sources: readonly string[],
-): { diagnostics: ImportDiagnostic[]; value: Record<string, unknown> } => {
-  const diagnostics: ImportDiagnostic[] = [];
-  const value = { ...record.value };
-  for (const source of sources) {
-    if (!Object.hasOwn(value, source)) {
-      diagnostics.push(
-        diagnostic(
-          'source_field_missing',
-          'A --parse-json source column is missing.',
-          'Use an exact CSV header name.',
-          source,
-          '',
-          importLocation(record),
-        ),
-      );
-      continue;
-    }
-    try {
-      value[source] = JSON.parse(String(value[source])) as unknown;
-    } catch {
-      diagnostics.push(
-        diagnostic(
-          'invalid_cell_json',
-          'A structured CSV cell is not valid JSON.',
-          'Repair the cell or remove this --parse-json option.',
-          source,
-          '',
-          importLocation(record),
-        ),
-      );
-    }
-  }
-  return { diagnostics, value };
-};
-
-const assignDestination = (
-  target: Record<string, unknown>,
-  destination: string,
-  value: unknown,
-): void => {
-  const segments = splitDestination(destination);
-  if (segments.some((segment) => ['__proto__', 'constructor', 'prototype'].includes(segment))) {
-    return;
-  }
-  if (segments[0] === 'metrics') {
-    target.metric_overrides = Array.isArray(value)
-      ? (value as unknown[]).map((entry) =>
-          typeof entry === 'string' ? { metric_id: entry } : entry,
-        )
-      : value;
-    return;
-  }
-  let current = target;
-  for (const segment of segments.slice(0, -1)) {
-    const existing = Object.hasOwn(current, segment) ? current[segment] : undefined;
-    const child =
-      existing !== null && typeof existing === 'object' && !Array.isArray(existing)
-        ? (existing as Record<string, unknown>)
-        : {};
-    if (existing !== child) current[segment] = child;
-    current = child;
-  }
-  current[segments.at(-1)!] = value;
-};
-
-const normalizeRecord = (
-  sourceRecord: SourceRecord,
-  request: TabularImportRequest,
-): { diagnostics: ImportDiagnostic[]; row?: NormalizedImportRow } => {
-  const parsedCsv =
-    request.format === 'csv'
-      ? parseStructuredCsvFields(sourceRecord, request.parseJsonSources ?? [])
-      : { diagnostics: [], value: sourceRecord.value };
-  const diagnostics = [...parsedCsv.diagnostics];
-  const mappings = request.mappings ?? [];
-  const candidate: Record<string, unknown> = Object.create(null) as Record<string, unknown>;
-  if (mappings.length === 0) {
-    Object.assign(candidate, parsedCsv.value);
-  } else {
-    for (const mapping of mappings) {
-      const resolved = sourceValue(parsedCsv.value, mapping.source, request.format);
-      if (!resolved.found) {
-        diagnostics.push(
-          diagnostic(
-            'source_field_missing',
-            'A mapped source field is missing.',
-            request.format === 'csv'
-              ? 'Use an exact CSV header name.'
-              : 'Use an RFC 6901 pointer that resolves in every record.',
-            mapping.source,
-            `/${splitDestination(mapping.destination).map(escapePointerSegment).join('/')}`,
-            importLocation(sourceRecord),
-          ),
-        );
-      } else {
-        assignDestination(candidate, mapping.destination, resolved.value);
-      }
-    }
-  }
-
-  let sourceKey: unknown;
-  if (request.keySource !== undefined) {
-    const resolved = sourceValue(parsedCsv.value, request.keySource, request.format);
-    if (!resolved.found) {
-      diagnostics.push(
-        diagnostic(
-          'source_key_missing',
-          'The stable source key is missing from this record.',
-          'Choose a key present in every imported record.',
-          request.keySource,
-          '/id',
-          importLocation(sourceRecord),
-        ),
-      );
-    } else {
-      sourceKey = resolved.value;
-    }
-  }
-
-  const explicitId = candidate.id !== undefined;
-  const placeholder = { ...candidate, id: explicitId ? candidate.id : 'case-pending' };
-  const parsed = testCaseSchema.safeParse(placeholder);
-  if (!parsed.success) {
-    const destinationSources = mappings.map((mapping) => {
-      const segments = splitDestination(mapping.destination);
-      const normalized = segments[0] === 'metrics' ? ['metric_overrides'] : segments;
-      return {
-        destination: `/${normalized.map(escapePointerSegment).join('/')}`,
-        source: mapping.source,
-      };
-    });
-    diagnostics.push(
-      ...parsed.error.issues.flatMap((issue) =>
-        destinationPathsForIssue(issue).map((destinationPath) => {
-          const authoredSource = destinationSources
-            .filter(
-              ({ destination }) =>
-                destinationPath === destination || destinationPath.startsWith(`${destination}/`),
-            )
-            .sort((left, right) => right.destination.length - left.destination.length)[0]?.source;
-          return diagnostic(
-            issue.code,
-            issue.message,
-            `Repair this field to match ${CASE_SCHEMA_ID}.`,
-            authoredSource ?? (destinationPath === '' ? '<record>' : destinationPath),
-            destinationPath,
-            importLocation(sourceRecord),
-          );
-        }),
-      ),
-    );
-  }
-  if (diagnostics.length > 0 || !parsed.success) return { diagnostics };
-
-  const withoutPlaceholder = caseContentWithoutId(parsed.data);
-  const generatedFromContent = !explicitId && request.keySource === undefined;
-  const id = explicitId
-    ? parsed.data.id
-    : sourceKey === undefined
-      ? createContentCaseId(withoutPlaceholder)
-      : createKeyedCaseId(sourceKey as JsonValue);
-  const testCase = { ...withoutPlaceholder, id };
-  return {
-    diagnostics,
-    row: {
-      case: testCase,
-      contentFingerprint: fingerprintCaseContent(testCase),
-      explicitId,
-      generatedFromContent,
-      identitySource: explicitId ? 'id' : sourceKey === undefined ? 'content' : 'key',
-      location: {
-        ...(sourceRecord.line === undefined ? {} : { line: sourceRecord.line }),
-        ...(sourceRecord.row === undefined ? {} : { row: sourceRecord.row }),
-      },
-      ...(sourceKey === undefined ? {} : { sourceKeyFingerprint: hashImportJson(sourceKey) }),
-    },
-  };
-};
-
-const dedupeRows = (
-  rows: readonly NormalizedImportRow[],
-  request: TabularImportRequest,
-): {
-  decisions: ImportDecision[];
-  diagnostics: ImportDiagnostic[];
-  rows: NormalizedImportRow[];
-  skipped: number;
-} => {
-  const diagnostics: ImportDiagnostic[] = [];
-  const decisions: ImportDecision[] = [];
-  if (request.dedupe === 'key' && request.keySource === undefined) {
-    diagnostics.push(
-      diagnostic(
-        'dedupe_key_required',
-        'Key dedupe requires an explicit source key.',
-        'Pass --key <source> or choose id/content dedupe.',
-        '<key>',
-        '',
-      ),
-    );
-  }
-  const seen = {
-    content: new Map<string, { index: number; row: NormalizedImportRow }>(),
-    id: new Map<string, { index: number; row: NormalizedImportRow }>(),
-    key: new Map<string, { index: number; row: NormalizedImportRow }>(),
-  };
-  const kept: NormalizedImportRow[] = [];
-  let skipped = 0;
-  rows.forEach((row, index) => {
-    const duplicates = {
-      content: seen.content.get(row.contentFingerprint),
-      id: seen.id.get(row.case.id),
-      key:
-        row.sourceKeyFingerprint === undefined ? undefined : seen.key.get(row.sourceKeyFingerprint),
-    };
-    const selectedDuplicate = request.dedupe === undefined ? undefined : duplicates[request.dedupe];
-    if (request.dedupe !== undefined && selectedDuplicate !== undefined) {
-      skipped += 1;
-      decisions.push({
-        action: 'skip',
-        case_id: selectedDuplicate.row.case.id,
-        matched_by: request.dedupe,
-        ...row.location,
-      });
-      return;
-    }
-    for (const [basis, prior] of Object.entries(duplicates) as [
-      keyof typeof duplicates,
-      { index: number; row: NormalizedImportRow } | undefined,
-    ][]) {
-      if (prior !== undefined) {
-        diagnostics.push(
-          diagnostic(
-            `duplicate_${basis}`,
-            `Imported record duplicates ${basis} from record ${prior.index + 1}.`,
-            `Pass --dedupe ${basis} to keep the first record, or repair the duplicate.`,
-            basis === 'key' ? (request.keySource ?? '<key>') : basis,
-            basis === 'id' ? '/id' : '',
-            row.location,
-          ),
-        );
-      }
-    }
-    seen.content.set(row.contentFingerprint, { index, row });
-    seen.id.set(row.case.id, { index, row });
-    if (row.sourceKeyFingerprint !== undefined) {
-      seen.key.set(row.sourceKeyFingerprint, { index, row });
-    }
-    kept.push(row);
-  });
-  return { decisions, diagnostics, rows: kept, skipped };
-};
-
-const redactValue = (value: unknown): unknown => {
-  if (Array.isArray(value)) return value.map(redactValue);
-  if (value !== null && typeof value === 'object') {
-    return Object.fromEntries(
-      Object.entries(value).map(([key, entry]) => [key, redactValue(entry)]),
-    );
-  }
+const redactValue = (value: unknown): RedactedValue => {
   if (value === null) return null;
+  if (Array.isArray(value)) return value.map(redactValue);
+  if (typeof value === 'object') return redactFields(value);
   return `<redacted:${typeof value}>`;
 };
 
-/** Returns a normalized five-row preview with authored scalar values redacted. */
-const createImportPreview = (rows: readonly NormalizedImportRow[]): unknown[] =>
-  rows.slice(0, 5).map(({ case: testCase }) => ({
-    id: testCase.id,
-    ...(redactValue(caseContentWithoutId(testCase)) as Record<string, unknown>),
+const createImportPreview = (
+  rows: readonly NormalizedImportRow[],
+): TabularImportResult['preview'] =>
+  rows.slice(0, PREVIEW_ROWS).map(({ case: { id, ...content } }) => ({
+    id,
+    ...redactFields(content),
   }));
 
-/** Parses, maps, validates, deduplicates, and reconciles a complete bounded import in memory. */
-const importTabularCases = (request: TabularImportRequest): TabularImportResult => {
-  const mappings = request.mappings ?? [];
-  const parsed = parseImportSource(request.source, request.format, {
-    limits: request.limits,
-    recordsPointer: request.recordsPointer,
-  });
-  const diagnostics = [...parsed.diagnostics, ...assertMappingShape(request.format, mappings)];
+/** Option combinations that only apply to one format, checked before any record is mapped. */
+const requestDiagnostics = (request: TabularImportRequest): ImportDiagnostic[] => {
+  const diagnostics = assertMappingShape(request.format, request.mappings ?? []);
   if (request.recordsPointer !== undefined && request.format !== 'json') {
     diagnostics.push(
-      diagnostic(
-        'records_pointer_format',
-        'A records pointer is supported only for JSON imports.',
-        'Remove --records-pointer or select --format json.',
-        '<records-pointer>',
-        '',
-      ),
+      importDiagnostic({
+        code: 'records_pointer_format',
+        message: 'A records pointer is supported only for JSON imports.',
+        hint: 'Remove --records-pointer or select --format json.',
+        sourceField: '<records-pointer>',
+      }),
     );
   }
   if ((request.parseJsonSources?.length ?? 0) > 0 && request.format !== 'csv') {
     diagnostics.push(
-      diagnostic(
-        'parse_json_format',
-        '--parse-json is supported only for CSV columns.',
-        'Remove --parse-json or select --format csv.',
-        '<parse-json>',
-        '',
-      ),
+      importDiagnostic({
+        code: 'parse_json_format',
+        message: '--parse-json is supported only for CSV columns.',
+        hint: 'Remove --parse-json or select --format csv.',
+        sourceField: '<parse-json>',
+      }),
     );
   }
+  return diagnostics;
+};
+
+const failValidation = (diagnostics: readonly ImportDiagnostic[]): never => {
+  throw new TabularImportError(
+    'Imported case validation failed.',
+    sortImportDiagnostics(diagnostics),
+  );
+};
+
+/**
+ * Parses, maps, validates, deduplicates, and reconciles a bounded import in memory. It is
+ * all-or-nothing: any diagnostic throws `TabularImportError` with every problem found, and the
+ * caller writes nothing.
+ */
+const importTabularCases = (request: TabularImportRequest): TabularImportResult => {
+  const parsed = parseImportSource(request.source, request.format, {
+    limits: request.limits,
+    recordsPointer: request.recordsPointer,
+  });
+  const diagnostics = [...parsed.diagnostics, ...requestDiagnostics(request)];
+  // Invalid mappings would misplace every record, so row-level checks would only add noise.
+  if (diagnostics.length > parsed.diagnostics.length) failValidation(diagnostics);
+
   const rows: NormalizedImportRow[] = [];
-  parsed.records.forEach((record) => {
+  for (const record of parsed.records) {
     const normalized = normalizeRecord(record, request);
     diagnostics.push(...normalized.diagnostics);
     if (normalized.row !== undefined) rows.push(normalized.row);
-  });
-  const deduped = dedupeRows(rows, request);
-  diagnostics.push(...deduped.diagnostics);
-  if (diagnostics.length > 0) {
-    throw new TabularImportError('Imported case validation failed.', sortDiagnostics(diagnostics));
   }
-  const reconciled = reconcileRows(deduped.rows, request, deduped.skipped, deduped.decisions);
+  const deduped = dedupeImportRows(rows, request);
+  diagnostics.push(...deduped.diagnostics);
+  if (diagnostics.length > 0) failValidation(diagnostics);
+
   return {
-    ...reconciled,
+    ...reconcileRows(deduped, request),
     format: request.format,
-    importedCases: deduped.rows.map(({ case: testCase }) => testCase),
     preview: createImportPreview(deduped.rows),
     sourceHash: parsed.sourceHash,
   };
 };
 
-export { createImportPreview, importTabularCases };
+export { importTabularCases };

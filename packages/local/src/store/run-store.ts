@@ -181,13 +181,13 @@ class SqliteRunStore implements RunStore {
   }
 
   /** Lists runs in deterministic newest-first order. */
-  async listRuns(options: { limit?: number } = {}): Promise<RunRecord[]> {
+  async listRuns(limit?: number): Promise<RunRecord[]> {
     let query = this.#database
       .selectFrom('runs')
       .selectAll()
       .orderBy('created_at', 'desc')
       .orderBy('id', 'desc');
-    if (options.limit !== undefined) query = query.limit(options.limit);
+    if (limit !== undefined) query = query.limit(limit);
     return (await query.execute()).map(toRunRecord);
   }
 

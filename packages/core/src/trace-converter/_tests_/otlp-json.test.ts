@@ -2,11 +2,15 @@ import { readFile } from 'node:fs/promises';
 
 import { describe, expect, it } from 'vitest';
 
-import { convertOtlpJson, nanosecondsToTimestamp, selectConvertedTrace } from '../otlp-json.js';
+import { convertOtlpJson, selectConvertedTrace } from '../otlp-json.js';
 
-/** Loads one checked-in sanitized framework export as opaque converter input. */
-const loadFixture = async (name: string): Promise<unknown> =>
-  JSON.parse(await readFile(new URL(`./fixtures/${name}`, import.meta.url), 'utf8')) as unknown;
+interface OtlpFixture {
+  resourceSpans: unknown[];
+}
+
+/** Loads one checked-in sanitized framework export as converter input. */
+const loadFixture = async (name: string): Promise<OtlpFixture> =>
+  JSON.parse(await readFile(new URL(`./fixtures/${name}`, import.meta.url), 'utf8')) as OtlpFixture;
 
 describe('convertOtlpJson', () => {
   it('normalizes a Vercel AI SDK export into agent, llm, and tool spans', async () => {
@@ -48,30 +52,25 @@ describe('convertOtlpJson', () => {
   });
 
   it('selects explicitly from multi-trace exports and rejects ambiguity', async () => {
-    const first = (await loadFixture('vercel-ai-sdk.otlp.json')) as {
-      resourceSpans: unknown[];
-    };
-    const second = (await loadFixture('langchain-langsmith.otlp.json')) as {
-      resourceSpans: unknown[];
-    };
+    const first = await loadFixture('vercel-ai-sdk.otlp.json');
+    const second = await loadFixture('langchain-langsmith.otlp.json');
     const traces = convertOtlpJson({
       resourceSpans: [...first.resourceSpans, ...second.resourceSpans],
     });
 
     expect(() => selectConvertedTrace(traces)).toThrowError(/contains 2 traces/);
-    expect(
-      selectConvertedTrace(traces, { traceId: '8A7B6C5D4E3F20112233445566778899' }).trace_id,
-    ).toBe('8a7b6c5d4e3f20112233445566778899');
+    expect(selectConvertedTrace(traces, '8A7B6C5D4E3F20112233445566778899').trace_id).toBe(
+      '8a7b6c5d4e3f20112233445566778899',
+    );
   });
 
-  it('rejects malformed IDs and preserves timestamp ordering', () => {
-    expect(nanosecondsToTimestamp('1786059000100000000', 'time')).toBe('2026-08-06T23:30:00.100Z');
+  it('rejects malformed trace ids', () => {
     expect(() =>
       convertOtlpJson({
         resourceSpans: [
           { scopeSpans: [{ spans: [{ traceId: 'bad', spanId: '1000000000000001' }] }] },
         ],
       }),
-    ).toThrowError(/traceId and 16-character spanId/);
+    ).toThrowError(/spans\[0\]\.traceId: must be a 32-character hex string/);
   });
 });

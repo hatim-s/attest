@@ -1,5 +1,5 @@
-import type { InvocationErrorCode, SpanKind } from '@attest/contracts';
-import type { CacheKind, CaseOutcome, RunStatus, StoredMetricEvaluation } from '@attest/core';
+import type { CaseOutcome, InvocationErrorCode, SpanKind } from '@attest/contracts';
+import type { CacheKind, RunStatus, StoredMetricEvaluation } from '@attest/core';
 
 /** Kysely row shape for the initial schema runs table (PLAN 1S.2). */
 interface RunsTable {

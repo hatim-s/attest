@@ -4,16 +4,11 @@ type TraceConversionErrorCode = 'invalid_otlp_json' | 'trace_not_found' | 'ambig
 
 /** Identifies malformed or ambiguous trace conversion inputs at the CLI boundary. */
 class TraceConversionError extends AttestError {
-  readonly code: TraceConversionErrorCode;
+  declare readonly code: TraceConversionErrorCode;
 
   constructor(code: TraceConversionErrorCode, message: string, options?: ErrorOptions) {
     super(code, message, options);
-    this.code = code;
   }
 }
 
-type ConvertOtlpJsonOptions = {
-  traceId?: string;
-};
-
-export { TraceConversionError, type ConvertOtlpJsonOptions, type TraceConversionErrorCode };
+export { TraceConversionError, type TraceConversionErrorCode };

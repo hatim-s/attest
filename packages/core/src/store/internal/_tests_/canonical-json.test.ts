@@ -1,15 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
+import { StoreError } from '../../store-error.js';
 import { canonicalStringify, contentHash } from '../canonical-json.js';
 
-/** Captures a synchronous failure without introducing matcher `any` types into linted tests. */
-const captureFailure = (operation: () => unknown): unknown => {
-  try {
-    operation();
-  } catch (error) {
-    return error;
-  }
-  throw new Error('Expected operation to fail.');
+const cyclicValue = (): Record<string, unknown> => {
+  const value: Record<string, unknown> = {};
+  value.self = value;
+  return value;
 };
 
 describe('canonicalStringify', () => {
@@ -17,30 +14,15 @@ describe('canonicalStringify', () => {
     expect(canonicalStringify({ zeta: undefined, alpha: 1 })).toBe('{"alpha":1}');
   });
 
-  it.each([NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY])(
-    'rejects the non-finite number %s',
-    (value) => {
-      expect(captureFailure(() => canonicalStringify({ value }))).toMatchObject({
-        code: 'INVALID_JSON',
-      });
-    },
-  );
-
-  it('rejects undefined values and holes inside arrays', () => {
-    expect(captureFailure(() => canonicalStringify([undefined]))).toMatchObject({
-      code: 'INVALID_JSON',
-    });
-    expect(captureFailure(() => canonicalStringify(new Array(1)))).toMatchObject({
-      code: 'INVALID_JSON',
-    });
-  });
-
-  it('rejects cyclic values with a typed error', () => {
-    const value: Record<string, unknown> = {};
-    value.self = value;
-    expect(captureFailure(() => canonicalStringify(value))).toMatchObject({
-      code: 'INVALID_JSON',
-    });
+  it.each([
+    ['NaN', { value: NaN }],
+    ['positive infinity', { value: Number.POSITIVE_INFINITY }],
+    ['negative infinity', { value: Number.NEGATIVE_INFINITY }],
+    ['undefined inside an array', [undefined]],
+    ['an array hole', new Array(1)],
+    ['a cycle', cyclicValue()],
+  ])('rejects %s with a typed error', (_, value) => {
+    expect(() => canonicalStringify(value)).toThrowError(StoreError);
   });
 
   it('sorts object keys recursively without reordering arrays', () => {

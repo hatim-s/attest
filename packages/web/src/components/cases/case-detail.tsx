@@ -90,7 +90,7 @@ const CaseDetail = ({ caseRecord, error, isLoading, onClose, selected }: CaseDet
                   }
             }
           />
-          {caseRecord.trace !== undefined ? (
+          {caseRecord.outcome === 'completed' && caseRecord.trace !== undefined ? (
             <section className="detail-section">
               <h4>Trace</h4>
               <TraceWaterfall trace={caseRecord.trace} />

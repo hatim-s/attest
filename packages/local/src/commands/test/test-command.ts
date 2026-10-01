@@ -225,7 +225,7 @@ const buildMutation = async (
     case 'test.case.import': {
       const test = findTest(candidate, request.test_id);
       const imported = await runTabularImportAdapter({
-        collisionCases: directImportCollisionCases(candidate, test),
+        collisionContexts: [{ cases: directImportCollisionCases(candidate, test) }],
         existingCases: test.cases,
         importOptions: request.import,
         preparedSource: options.preparedImportSource,
