@@ -5,10 +5,10 @@ import {
   type TestResource,
 } from '@attest/contracts';
 
-import { contentHash } from '@attest/core';
+import { contentHash } from '../store/internal/canonical-json.js';
 
-import { LocalError } from '../../errors/index.js';
-import type { LoadedProject } from '../../project/project-loader/index.js';
+import { EvalResolutionError } from './resolution-project.js';
+import type { ResolutionProject } from './resolution-project.js';
 
 const SHA256_PATTERN = /^[a-f0-9]{64}$/u;
 
@@ -30,9 +30,9 @@ const duplicateValues = (values: readonly string[]): string[] => {
 };
 
 /** Confirms the loaded project carries every hash an eval snapshot records. */
-const assertSnapshotHashes = (project: LoadedProject): void => {
+const assertSnapshotHashes = (project: ResolutionProject): void => {
   if (!SHA256_PATTERN.test(project.projectHash)) {
-    throw new LocalError(
+    throw new EvalResolutionError(
       'project_invalid',
       'The loaded project is missing its canonical project hash.',
     );
@@ -61,7 +61,7 @@ const assertSnapshotHashes = (project: LoadedProject): void => {
     }
   });
   if (hashFailures.length > 0) {
-    throw new LocalError(
+    throw new EvalResolutionError(
       'project_invalid',
       'The loaded project is missing canonical content hashes required for an eval snapshot.',
       { details: { resources: hashFailures } },
@@ -72,16 +72,20 @@ const assertSnapshotHashes = (project: LoadedProject): void => {
 const requireUniqueSelection = (label: string, values: readonly string[] | undefined): void => {
   const duplicates = duplicateValues(values ?? []);
   if (duplicates.length > 0) {
-    throw new LocalError('cli_usage', `Duplicate ${label} selection values are not allowed.`, {
-      details: { duplicates, selection: label },
-    });
+    throw new EvalResolutionError(
+      'cli_usage',
+      `Duplicate ${label} selection values are not allowed.`,
+      {
+        details: { duplicates, selection: label },
+      },
+    );
   }
 };
 
 /** Expands direct cases first, then attached dataset rows in authored attachment/row order. */
 const expandTestCases = (
   test: TestResource,
-  datasetsById: ReadonlyMap<string, LoadedProject['datasets'][number]>,
+  datasetsById: ReadonlyMap<string, ResolutionProject['datasets'][number]>,
 ): ExpandedCase[] => {
   const expanded: ExpandedCase[] = test.cases.map((testCase) => ({
     case: testCase,
@@ -90,7 +94,7 @@ const expandTestCases = (
   test.datasets.forEach((attachment) => {
     const dataset = datasetsById.get(attachment.dataset_id);
     if (dataset === undefined) {
-      throw new LocalError(
+      throw new EvalResolutionError(
         'project_invalid',
         `Test ${test.id} references missing dataset ${attachment.dataset_id}.`,
         { details: { dataset_id: attachment.dataset_id, test_id: test.id } },
@@ -108,9 +112,13 @@ const expandTestCases = (
 
   const collisions = duplicateValues(expanded.map(({ case: testCase }) => testCase.id));
   if (collisions.length > 0) {
-    throw new LocalError('project_invalid', `Test ${test.id} has duplicate resolved case ids.`, {
-      details: { case_ids: collisions, test_id: test.id },
-    });
+    throw new EvalResolutionError(
+      'project_invalid',
+      `Test ${test.id} has duplicate resolved case ids.`,
+      {
+        details: { case_ids: collisions, test_id: test.id },
+      },
+    );
   }
   return expanded;
 };
@@ -129,7 +137,7 @@ const resolveMetrics = (
   );
   for (const [metricId, value] of resolved) {
     if (value.metric === undefined) {
-      throw new LocalError(
+      throw new EvalResolutionError(
         'project_invalid',
         `Test ${test.id} references missing metric ${metricId}.`,
         {
@@ -141,7 +149,7 @@ const resolveMetrics = (
   testCase.metric_overrides?.forEach((override) => {
     const current = resolved.get(override.metric_id);
     if (current === undefined || current.metric === undefined) {
-      throw new LocalError(
+      throw new EvalResolutionError(
         'project_invalid',
         `Case ${testCase.id} references metric ${override.metric_id} that is not attached to test ${test.id}.`,
         { details: { case_id: testCase.id, metric_id: override.metric_id, test_id: test.id } },
