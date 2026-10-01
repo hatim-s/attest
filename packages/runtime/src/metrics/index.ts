@@ -7,3 +7,10 @@ export {
   createTanstackJudgeClient,
   type TanstackJudgeClientOptions,
 } from './judge/tanstack-judge-client.js';
+
+export type { ExecMetricOptions } from './exec-metric.js';
+export type {
+  CommandMetricTransport,
+  MetricTransportOptions,
+  MetricTransportOutcome,
+} from './internal/metric-transport.js';

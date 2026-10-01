@@ -21,7 +21,7 @@ import {
 import { assertStaticUrlAuthority, type MaterializedHttpRequest } from './request-template.js';
 import { redactTransportText } from './redaction.js';
 import { parseRetryAfter } from './retry-after.js';
-import { requireSameOrigin } from './url-security.js';
+import { requireSameOrigin } from './same-origin.js';
 
 type PollingTransport = Extract<HttpAgentResource['transport'], { kind: 'polling' }>;
 

@@ -22,6 +22,8 @@ type InvokeOptions = {
   envAllowlist?: readonly string[];
   /** Runtime-only native HTTP headers resolved from authored secret references. */
   httpHeaders?: Record<string, string>;
+  /** Host-owned guarded HTTP I/O, used instead of the global fetch implementation. */
+  httpFetch?: (url: string, init: RequestInit) => Promise<Response>;
   /** Parent of the fresh per-attempt CLI cwd; defaults to the system temporary directory. */
   workingDirectory?: string;
   /** Uses workingDirectory itself as cwd and preserves its contents for lifecycle hooks. */
