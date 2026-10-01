@@ -1,23 +1,21 @@
-import type { AssertionCheck, JsonValue, MetricDefinition, MetricResult } from '@attest/contracts';
+import type { AssertionCheck, JsonValue, MetricResult } from '@attest/contracts';
 
 import type { EvaluationDocument } from './evaluation-document.js';
 import { evaluateLeafCheck } from './internal/checks.js';
-
-/** Narrows the shared metric contract to the deterministic assertion definition used by this engine. */
-type AssertionMetricDefinition = Extract<MetricDefinition, { type: 'assertion' }>;
+import type { CheckEvaluation } from './internal/leaf-check.js';
+import type { AssertionMetricDefinition } from './metric-definitions.js';
 
 /** Retains the source check beside its verdict so callers can render precise assertion evidence. */
-type AssertionCheckOutcome = { check: AssertionCheck; passed: boolean; reason?: string };
+type AssertionCheckOutcome = CheckEvaluation & { check: AssertionCheck };
 
+/** Lists each failed child by its one-based position so nested failures stay traceable. */
 const aggregateFailureReasons = (
   combinator: 'all' | 'any',
   outcomes: AssertionCheckOutcome[],
 ): string => {
-  const reasons = outcomes
-    .map((outcome, index) =>
-      outcome.passed ? undefined : `${index + 1}: ${outcome.reason ?? 'failed'}`,
-    )
-    .filter((reason): reason is string => reason !== undefined);
+  const reasons = outcomes.flatMap((outcome, index) =>
+    outcome.passed ? [] : [`${index + 1}: ${outcome.reason ?? 'failed'}`],
+  );
   return `${combinator} failed (${reasons.join('; ')})`;
 };
 
@@ -49,10 +47,7 @@ const evaluateAssertionCheck = (
       : { check, passed: true };
   }
 
-  const outcome = evaluateLeafCheck(check, document);
-  return outcome.reason === undefined
-    ? { check, passed: outcome.passed }
-    : { check, passed: outcome.passed, reason: outcome.reason };
+  return { check, ...evaluateLeafCheck(check, document) };
 };
 
 /** Computes the spec §Assertions fraction and aligned details while requiring every top-level check to pass. */
@@ -76,9 +71,4 @@ const evaluateAssertionMetric = (
   };
 };
 
-export {
-  evaluateAssertionCheck,
-  evaluateAssertionMetric,
-  type AssertionCheckOutcome,
-  type AssertionMetricDefinition,
-};
+export { evaluateAssertionCheck, evaluateAssertionMetric };

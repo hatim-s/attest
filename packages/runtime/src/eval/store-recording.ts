@@ -1,4 +1,4 @@
-import type { StoredAttempt, StoredCaseExecution } from '@attest/core';
+import type { StoredCaseExecution } from '@attest/core';
 
 import type { CaseExecution } from '@attest/executor';
 
@@ -13,7 +13,24 @@ const toStoredCaseExecution = (execution: CaseExecution): StoredCaseExecution =>
     warnings: execution.warnings,
     diagnostics: execution.diagnostics,
     expectedMetrics: execution.expectedMetrics,
-    attempts: execution.attempts.map(toStoredAttempt),
+    // Raw envelopes and parse reports stay runner-local; only durable transport evidence persists.
+    attempts: execution.attempts.map((attempt) => {
+      const evidence = {
+        diagnostics: attempt.diagnostics,
+        durationMs: attempt.durationMs,
+        rawExcerpt: attempt.rawExcerpt,
+        warnings: attempt.warnings,
+      };
+      if (attempt.status === 'ok') {
+        return { ...evidence, status: 'ok' as const };
+      }
+      return {
+        ...evidence,
+        status: 'invocation_error' as const,
+        errorCode: attempt.error.code,
+        errorMessage: attempt.error.message,
+      };
+    }),
   };
 
   switch (execution.outcome) {
@@ -37,24 +54,6 @@ const toStoredCaseExecution = (execution: CaseExecution): StoredCaseExecution =>
       execution satisfies never;
       throw new Error('Unhandled case execution outcome.');
   }
-};
-
-/** Retains only durable transport evidence; raw envelopes and parse reports remain runner-local. */
-const toStoredAttempt = (attempt: CaseExecution['attempts'][number]): StoredAttempt => {
-  const base = {
-    diagnostics: attempt.diagnostics,
-    durationMs: attempt.durationMs,
-    rawExcerpt: attempt.rawExcerpt,
-    warnings: attempt.warnings,
-  };
-  return attempt.status === 'ok'
-    ? { ...base, status: 'ok' }
-    : {
-        ...base,
-        status: 'invocation_error',
-        errorCode: attempt.error.code,
-        errorMessage: attempt.error.message,
-      };
 };
 
 export { toStoredCaseExecution };

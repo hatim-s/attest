@@ -12,7 +12,7 @@ import {
   type EvalRunRequest,
 } from '@attest/contracts';
 import { StoreError } from '@attest/core';
-import { executeResolvedEvalPlan } from '@attest/runtime';
+import { executeResolvedEvalPlan, type EvalTerminalFailureFactory } from '@attest/runtime';
 
 import { LocalError } from '../errors/index.js';
 import { createRunIdentity, openReadonlyRunStore } from '../store/index.js';
@@ -42,9 +42,7 @@ type RunConfigurationOptions = {
   argv: readonly string[];
   project?: string;
   signal: AbortSignal;
-  terminalFailure: NonNullable<
-    NonNullable<Parameters<typeof executeResolvedEvalPlan>[3]>['terminalFailure']
-  >;
+  terminalFailure: EvalTerminalFailureFactory;
   workingDirectory: string;
 };
 

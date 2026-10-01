@@ -155,7 +155,7 @@ describe('sandbox eval lifecycle integration', () => {
       run.run_id,
       createCase(0),
       new AbortController().signal,
-      { worker_index: 0 },
+      { workerIndex: 0 },
     );
     const stages = (await readFile(join(root, 'stages.jsonl'), 'utf8'))
       .trim()
@@ -196,7 +196,7 @@ describe('sandbox eval lifecycle integration', () => {
 
       const failure = await runner
         .executeCase(run.run_id, createCase(0), new AbortController().signal, {
-          worker_index: 0,
+          workerIndex: 0,
         })
         .catch((error: unknown) => error);
 
@@ -232,7 +232,7 @@ describe('sandbox eval lifecycle integration', () => {
 
     const failure = await runner
       .executeCase(run.run_id, createCase(0), new AbortController().signal, {
-        worker_index: 0,
+        workerIndex: 0,
       })
       .catch((error: unknown) => error);
 
@@ -282,10 +282,10 @@ describe('sandbox eval lifecycle integration', () => {
     const signal = new AbortController().signal;
     for (const index of [0, 1]) {
       const result = await runner.executeCase(run.run_id, createCase(index), signal, {
-        worker_index: 0,
+        workerIndex: 0,
       });
       expect(result.execution.outcome).toBe('completed');
-      expect(result.lifecycle_error).toBeUndefined();
+      expect(result.execution.diagnostics.lifecycleError).toBeUndefined();
       expect(await readFile(join(root, `case-${index}.collected`), 'utf8')).toBe(`case-${index}`);
     }
     expect(await readdir(join(root, 'workers/0'))).toEqual([]);
@@ -302,7 +302,7 @@ describe('sandbox eval lifecycle integration', () => {
     const results = await Promise.all(
       [0, 1].map((index) =>
         runner.executeCase(run.run_id, createCase(index), new AbortController().signal, {
-          worker_index: index,
+          workerIndex: index,
         }),
       ),
     );
@@ -335,11 +335,14 @@ describe('sandbox eval lifecycle integration', () => {
       run.run_id,
       createCase(0),
       new AbortController().signal,
-      { worker_index: 0 },
+      { workerIndex: 0 },
     );
-    expect(result.lifecycle_error).toContain('Vercel sandbox cleanup was not confirmed.');
-    expect(result.lifecycle_error).toContain('Eval after_case hook exited with code 7.');
-    expect(result.execution.diagnostics.lifecycleError).toBe(result.lifecycle_error);
+    expect(result.execution.diagnostics.lifecycleError).toContain(
+      'Vercel sandbox cleanup was not confirmed.',
+    );
+    expect(result.execution.diagnostics.lifecycleError).toContain(
+      'Eval after_case hook exited with code 7.',
+    );
     expect(result.execution.diagnostics.sandboxCleanupConfirmed).toBe(false);
     await expect(runner.cleanup?.(run.run_id)).rejects.toThrow('cleanup');
   });

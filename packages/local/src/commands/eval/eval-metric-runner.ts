@@ -11,16 +11,15 @@ import {
   type MetricDefinition,
   type MetricResource,
 } from '@attest/contracts';
-import { type CacheStore } from '@attest/core';
+import { type CacheStore, type StoredMetricEvaluation } from '@attest/core';
 import { invokeMappedHttpAgent, redactTransportText, type CaseExecution } from '@attest/executor';
 import {
   caseExecutionToMetricContext,
   createTanstackJudgeClient,
   evaluateMetrics,
   type JudgeCache,
-  type JudgeCacheEntry,
+  type JudgeOutcome,
   type MetricContext,
-  type MetricEvaluation,
 } from '@attest/runtime';
 import { z } from 'zod';
 
@@ -36,7 +35,7 @@ import type { ResolvedEvalCaseInput, ResolvedEvalMetric } from './eval-resolver.
 
 /** Adapts the shared SQLite response cache to the judge metric cache contract. */
 const createJudgeCache = (cacheStore: CacheStore): JudgeCache => ({
-  get: async (key) => (await cacheStore.get('judge', key)) as JudgeCacheEntry | undefined,
+  get: async (key) => (await cacheStore.get('judge', key)) as JudgeOutcome | undefined,
   set: (key, entry) => cacheStore.put('judge', key, entry),
 });
 
@@ -63,45 +62,31 @@ const resolveExecutableMetric = async (
 
 /** Redacts metric evidence while preserving identities and discriminants used by persistence. */
 const redactMetricEvaluation = (
-  evaluation: MetricEvaluation,
+  evaluation: StoredMetricEvaluation,
   secrets: readonly string[],
-): MetricEvaluation => {
+): StoredMetricEvaluation => {
   if (secrets.length === 0) return evaluation;
-  const judgeIo =
-    evaluation.judgeIo === undefined ? undefined : redactProbeValue(evaluation.judgeIo, secrets);
+  const evidence = {
+    rationale:
+      evaluation.rationale === undefined
+        ? undefined
+        : redactTransportText(evaluation.rationale, secrets),
+    details:
+      evaluation.details === undefined ? undefined : redactProbeValue(evaluation.details, secrets),
+    judgeIo:
+      evaluation.judgeIo === undefined ? undefined : redactProbeValue(evaluation.judgeIo, secrets),
+  };
   if (evaluation.status === 'error') {
     return {
       ...evaluation,
-      judgeIo,
-      rationale:
-        evaluation.rationale === undefined
-          ? undefined
-          : redactTransportText(evaluation.rationale, secrets),
+      ...evidence,
       error: {
         ...evaluation.error,
         message: redactTransportText(evaluation.error.message, secrets),
-        details:
-          evaluation.error.details === undefined
-            ? undefined
-            : redactProbeValue(evaluation.error.details, secrets),
       },
     };
   }
-  return {
-    ...evaluation,
-    judgeIo,
-    result: {
-      ...evaluation.result,
-      rationale:
-        evaluation.result.rationale === undefined
-          ? undefined
-          : redactTransportText(evaluation.result.rationale, secrets),
-      details:
-        evaluation.result.details === undefined
-          ? undefined
-          : redactProbeValue(evaluation.result.details, secrets),
-    },
-  };
+  return { ...evaluation, ...evidence };
 };
 
 const decodePointerSegment = (segment: string): string | undefined => {
@@ -141,7 +126,7 @@ const extractHttpMetricResult = (
   definition: Extract<MetricResource['definition'], { kind: 'http' }>,
   value: unknown,
   durationMs: number,
-): MetricEvaluation => {
+): StoredMetricEvaluation => {
   const score = readJsonPointer(value, definition.extraction.score_pointer);
   const pass = readJsonPointer(value, definition.extraction.pass_pointer);
   const rationale =
@@ -164,7 +149,7 @@ const extractHttpMetricResult = (
       kind: 'exec',
       status: 'error',
       error: {
-        code: 'exec_malformed_output',
+        kind: 'exec_malformed_output',
         message: 'HTTP metric extraction did not produce a finite score and boolean pass result.',
       },
       durationMs,
@@ -174,12 +159,10 @@ const extractHttpMetricResult = (
     metricName: metricId,
     kind: 'exec',
     status: 'evaluated',
-    result: {
-      score,
-      pass,
-      ...(rationale === undefined ? {} : { rationale }),
-      ...(details === undefined ? {} : { details }),
-    },
+    score,
+    pass,
+    rationale,
+    details,
     durationMs,
   };
 };
@@ -191,7 +174,7 @@ const evaluateHttpMetric = async (
   request: AgentRequest,
   projectRoot: string,
   signal: AbortSignal,
-): Promise<MetricEvaluation> => {
+): Promise<StoredMetricEvaluation> => {
   const definition = metric.metric.definition;
   if (definition.kind !== 'http') throw new Error('Expected an HTTP metric definition.');
   if (context.execution.outcome !== 'completed') {
@@ -252,7 +235,7 @@ const evaluateHttpMetric = async (
         kind: 'exec',
         status: 'error',
         error: {
-          code: invocation.error.code === 'timeout' ? 'exec_timeout' : 'http_request_failed',
+          kind: invocation.error.code === 'timeout' ? 'exec_timeout' : 'http_request_failed',
           message: invocation.error.message,
         },
         durationMs,
@@ -273,15 +256,12 @@ const evaluateHttpMetric = async (
 };
 
 const applyAttachedThreshold = (
-  evaluation: MetricEvaluation,
+  evaluation: StoredMetricEvaluation,
   threshold: number | undefined,
-): MetricEvaluation =>
+): StoredMetricEvaluation =>
   threshold === undefined || evaluation.status === 'error'
     ? evaluation
-    : {
-        ...evaluation,
-        result: { ...evaluation.result, pass: evaluation.result.score >= threshold },
-      };
+    : { ...evaluation, pass: evaluation.score >= threshold };
 
 /** Creates the per-run metric bridge from resources to existing assertion/exec/judge engines. */
 const createEvalMetricEvaluator = (projectRoot: string, cacheStore: CacheStore) => {
@@ -294,7 +274,7 @@ const createEvalMetricEvaluator = (projectRoot: string, cacheStore: CacheStore) 
     payload: ResolvedEvalCaseInput,
     execution: CaseExecution,
     signal: AbortSignal,
-  ): Promise<MetricEvaluation[]> => {
+  ): Promise<StoredMetricEvaluation[]> => {
     const context = caseExecutionToMetricContext(payload.case, execution);
     const request: AgentRequest = {
       protocol: AGENT_PROTOCOL,
@@ -303,10 +283,10 @@ const createEvalMetricEvaluator = (projectRoot: string, cacheStore: CacheStore) 
       input: payload.case.input,
       ...(payload.case.params === undefined ? {} : { params: payload.case.params }),
     };
-    const evaluations: MetricEvaluation[] = [];
+    const evaluations: StoredMetricEvaluation[] = [];
     for (const resolvedMetric of payload.metrics) {
       const { definition } = resolvedMetric.metric;
-      let evaluation: MetricEvaluation;
+      let evaluation: StoredMetricEvaluation;
       let secrets: readonly string[] = [];
       if (definition.kind === 'http') {
         evaluation = await evaluateHttpMetric(
@@ -344,9 +324,7 @@ const createEvalMetricEvaluator = (projectRoot: string, cacheStore: CacheStore) 
             command: definition.argv,
           };
           options = {
-            execCwd: runtime.cwd,
-            execEnv: runtime.env,
-            execTimeoutMs: definition.timeout_ms,
+            exec: { cwd: runtime.cwd, env: runtime.env, timeoutMs: definition.timeout_ms },
             signal,
           };
         }

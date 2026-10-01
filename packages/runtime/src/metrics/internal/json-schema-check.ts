@@ -1,12 +1,11 @@
 import Ajv2020, { type ValidateFunction } from 'ajv/dist/2020.js';
-import type { LeafAssertionCheck } from '@attest/contracts';
 
 import type { PathResolution } from '../evaluation-document.js';
 import { AttestMetricError } from '../errors.js';
+import type { CheckEvaluation, LeafCheck } from './leaf-check.js';
 import { pathNotFound } from './path.js';
 
-type CheckEvaluation = { passed: boolean; reason?: string };
-type JsonSchemaCheck = Extract<LeafAssertionCheck, { json_schema: unknown }>['json_schema'];
+type JsonSchemaCheck = LeafCheck<'json_schema'>;
 
 type SchemaValidator = {
   validate: ValidateFunction;
@@ -14,12 +13,10 @@ type SchemaValidator = {
 };
 
 // Config validation freezes metric definitions before evaluation, so object identity is a safe cache key.
-// Keep this cache here: compiling schemas is the only stateful assertion concern.
-const objectSchemaValidators = new WeakMap<object, SchemaValidator>();
-const booleanSchemaValidators = new Map<boolean, SchemaValidator>();
+const schemaValidators = new WeakMap<object, SchemaValidator>();
 
 /** Compiles one root schema in an isolated Ajv registry so independent `$id` values cannot collide. */
-const compileSchemaValidator = (schema: JsonSchemaCheck['schema']): SchemaValidator => {
+const compileSchemaValidator = (schema: object): SchemaValidator => {
   const ajv = new Ajv2020.Ajv2020({ allErrors: true, strict: false });
   try {
     const validate = ajv.compile(schema);
@@ -39,23 +36,14 @@ const compileSchemaValidator = (schema: JsonSchemaCheck['schema']): SchemaValida
   }
 };
 
-const getSchemaValidator = (schema: JsonSchemaCheck['schema']): SchemaValidator => {
-  if (typeof schema === 'boolean') {
-    const cached = booleanSchemaValidators.get(schema);
-    if (cached !== undefined) {
-      return cached;
-    }
-    const validator = compileSchemaValidator(schema);
-    booleanSchemaValidators.set(schema, validator);
-    return validator;
-  }
-
-  const cached = objectSchemaValidators.get(schema);
+/** Returns the cached validator for a schema object, compiling it on first use. */
+const getSchemaValidator = (schema: object): SchemaValidator => {
+  const cached = schemaValidators.get(schema);
   if (cached !== undefined) {
     return cached;
   }
   const validator = compileSchemaValidator(schema);
-  objectSchemaValidators.set(schema, validator);
+  schemaValidators.set(schema, validator);
   return validator;
 };
 
@@ -66,6 +54,15 @@ const evaluateJsonSchemaCheck = (
 ): CheckEvaluation => {
   if (!resolution.found) {
     return pathNotFound(check.path);
+  }
+  // Boolean schemas accept or reject everything, so they never need Ajv.
+  if (typeof check.schema === 'boolean') {
+    return check.schema
+      ? { passed: true }
+      : {
+          passed: false,
+          reason: `value at ${check.path} failed JSON Schema validation: boolean schema is false`,
+        };
   }
 
   const validator = getSchemaValidator(check.schema);

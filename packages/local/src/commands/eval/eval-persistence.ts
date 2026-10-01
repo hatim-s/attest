@@ -5,7 +5,6 @@ import { AGENT_PROTOCOL, EVAL_RUN_SCHEMA_ID } from '@attest/contracts';
 import { diffRuns, type AttestStore, type RunDiff } from '@attest/core';
 import {
   toStoredCaseExecution,
-  toStoredMetricEvaluation,
   type EvalArtifactWriter,
   type EvalBaselineAdapter,
   type EvalJUnitPayload,
@@ -47,11 +46,9 @@ const createEvalPersistenceAdapter = (
   },
   recordCase: async (runId, record) => {
     if (record.kind === 'executed') {
-      await store.runs.recordCase(
-        runId,
-        toStoredCaseExecution(record.execution),
-        record.metrics.map(toStoredMetricEvaluation),
-      );
+      await store.runs.recordCase(runId, toStoredCaseExecution(record.execution), [
+        ...record.metrics,
+      ]);
       return;
     }
     const payload = record.resolved_case.payload;

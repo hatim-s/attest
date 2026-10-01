@@ -19,17 +19,16 @@ const evalCase = (
   verdict,
   started_at: '2026-08-08T10:00:00.000Z',
   duration_ms: 125,
-  attempts: [],
   metric_results: [
     verdict === 'error'
       ? {
-          metric_name: 'correct',
+          metricName: 'correct',
           kind: 'assertion',
           status: 'error',
-          error: { code: 'internal_error', message: 'bad <metric>\u0000' },
+          error: { kind: 'internal_error', message: 'bad <metric>\u0000' },
         }
       : {
-          metric_name: 'correct',
+          metricName: 'correct',
           kind: 'assertion',
           status: 'evaluated',
           score: verdict === 'pass' ? 1 : 0,

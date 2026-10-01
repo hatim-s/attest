@@ -1,67 +1,60 @@
 import { performance } from 'node:perf_hooks';
 
 import type { MetricDefinition } from '@attest/contracts';
+import type { StoredMetricEvaluation } from '@attest/core';
 
 import { evaluateAssertionMetric } from './assertion-engine.js';
 import { AttestMetricError } from './errors.js';
 import { buildEvaluationDocument } from './evaluation-document.js';
-import { executeExecutableMetric } from './exec-metric.js';
+import { executeExecutableMetric, type ExecMetricOptions } from './exec-metric.js';
 import type { JudgeClient } from './judge/judge-client.js';
 import type { JudgeCache } from './judge/judge-cache.js';
 import { evaluateJudgeMetric } from './judge/judge-metric.js';
-import { skippedNoOutput, type MetricContext, type MetricEvaluation } from './metric-evaluation.js';
+import {
+  evaluatedMetric,
+  metricError,
+  skippedNoOutput,
+  type CompletedMetricContext,
+  type MetricContext,
+} from './metric-evaluation.js';
 
 /** Configures optional metric edges while keeping assertion evaluation dependency-free. */
 type EvaluateMetricsOptions = {
-  execCwd?: string;
-  execEnv?: NodeJS.ProcessEnv;
+  exec?: Omit<ExecMetricOptions, 'signal'>;
   judgeClient?: JudgeClient;
-  execTimeoutMs?: number;
   judgeTimeoutMs?: number;
   cache?: JudgeCache;
   signal?: AbortSignal;
 };
 
-/** Evaluates one definition after the shared execution-state guard has passed. */
+/** Dispatches one definition by kind; only called once the case has scoreable output. */
 const evaluateMetric = async (
   definition: MetricDefinition,
-  context: MetricContext,
+  context: CompletedMetricContext,
   options: EvaluateMetricsOptions,
-): Promise<MetricEvaluation> => {
+): Promise<StoredMetricEvaluation> => {
   if (definition.type === 'assertion') {
     const result = evaluateAssertionMetric(definition, buildEvaluationDocument(context));
-    return {
-      metricName: definition.name,
-      kind: 'assertion',
-      status: 'evaluated',
-      result,
-      // Assertion checks are in-process computation, not measurable external metric work.
-      durationMs: 0,
-    };
+    return evaluatedMetric(definition, result, 0);
   }
 
   if (definition.type === 'exec') {
     return executeExecutableMetric(definition, context, {
-      commandCwd: options.execCwd,
-      commandEnv: options.execEnv,
-      timeoutMs: options.execTimeoutMs,
+      ...options.exec,
       signal: options.signal,
     });
   }
 
   if (options.judgeClient === undefined) {
-    return {
-      metricName: definition.name,
-      kind: 'judge',
-      status: 'error',
-      error: {
+    return metricError(
+      definition,
+      {
         code: 'judge_provider_error',
         message:
           'Judge metric requires a configured judgeClient; create one with createTanstackJudgeClient().',
       },
-      // This only constructs the configuration error; no judge request was made.
-      durationMs: 0,
-    };
+      0,
+    );
   }
 
   return evaluateJudgeMetric(definition, context, {
@@ -80,35 +73,31 @@ const evaluateMetrics = async (
   definitions: MetricDefinition[],
   context: MetricContext,
   options: EvaluateMetricsOptions = {},
-): Promise<MetricEvaluation[]> => {
-  const evaluations: MetricEvaluation[] = [];
-
-  for (const definition of definitions) {
-    if (context.execution.outcome !== 'completed') {
-      evaluations.push(skippedNoOutput(definition.name, definition.type, context.execution));
-      continue;
-    }
-    const startedAt = performance.now();
-    try {
-      evaluations.push(await evaluateMetric(definition, context, options));
-    } catch (error: unknown) {
-      const metricError = error instanceof AttestMetricError ? error : undefined;
-      const message =
-        error instanceof Error ? error.message : 'Metric evaluation threw an unknown error.';
-      evaluations.push({
-        metricName: definition.name,
-        kind: definition.type,
-        status: 'error',
-        error: {
-          code: metricError?.code ?? 'internal_error',
-          message,
-          ...(metricError?.details !== undefined ? { details: metricError.details } : {}),
-        },
-        durationMs: performance.now() - startedAt,
-      });
-    }
+): Promise<StoredMetricEvaluation[]> => {
+  const { execution } = context;
+  if (execution.outcome !== 'completed') {
+    return definitions.map((definition) => skippedNoOutput(definition, execution));
   }
 
+  const completed = { caseDefinition: context.caseDefinition, execution };
+  const evaluations: StoredMetricEvaluation[] = [];
+  for (const definition of definitions) {
+    const startedAt = performance.now();
+    try {
+      evaluations.push(await evaluateMetric(definition, completed, options));
+    } catch (error: unknown) {
+      const known = error instanceof AttestMetricError ? error : undefined;
+      const message =
+        error instanceof Error ? error.message : 'Metric evaluation threw an unknown error.';
+      evaluations.push(
+        metricError(
+          definition,
+          { code: known?.code ?? 'internal_error', message, details: known?.details },
+          performance.now() - startedAt,
+        ),
+      );
+    }
+  }
   return evaluations;
 };
 

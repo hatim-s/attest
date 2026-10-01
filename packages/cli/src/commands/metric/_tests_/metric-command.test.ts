@@ -160,9 +160,9 @@ const evaluationEnvironmentKeys = (
   if (!document.ok) throw new Error('Expected a successful metric result.');
   const value = (
     document.result as {
-      evaluation?: { result?: { details?: { env_keys?: unknown } } };
+      evaluation?: { details?: { env_keys?: unknown } };
     }
-  ).evaluation?.result?.details?.env_keys;
+  ).evaluation?.details?.env_keys;
   if (!Array.isArray(value) || !value.every((item): item is string => typeof item === 'string')) {
     throw new Error('Expected metric environment key evidence.');
   }
@@ -306,7 +306,7 @@ describe('metric authoring and local tests', { timeout: 30_000 }, () => {
       (await runJson(root, ['metric', 'test', 'no-errors', '--fixture', okTraceFixture])).document,
     ).toMatchObject({
       ok: true,
-      result: { evaluation: { status: 'evaluated', result: { pass: true } } },
+      result: { evaluation: { status: 'evaluated', pass: true } },
     });
     const mixedFixture = JSON.parse(metricFixture({}, false)) as {
       trace: { spans: Array<Record<string, unknown>> };
@@ -328,7 +328,7 @@ describe('metric authoring and local tests', { timeout: 30_000 }, () => {
         .document,
     ).toMatchObject({
       ok: true,
-      result: { evaluation: { status: 'evaluated', result: { pass: false } } },
+      result: { evaluation: { status: 'evaluated', pass: false } },
     });
   });
 
@@ -629,7 +629,7 @@ describe('metric authoring and local tests', { timeout: 30_000 }, () => {
       result: {
         executed: true,
         expected_pass: true,
-        evaluation: { status: 'evaluated', result: { pass: true } },
+        evaluation: { status: 'evaluated', pass: true },
       },
     });
     expect(await runHuman(root, ['metric', 'test', 'exact', '--fixture', fixturePath])).toBe(
@@ -654,7 +654,7 @@ describe('metric authoring and local tests', { timeout: 30_000 }, () => {
       ok: true,
       result: {
         expected_pass: false,
-        evaluation: { status: 'evaluated', result: { pass: false } },
+        evaluation: { status: 'evaluated', pass: false },
       },
     });
     const missingVerdict = JSON.parse(metricFixture()) as Record<string, unknown>;
@@ -737,7 +737,7 @@ describe('metric authoring and local tests', { timeout: 30_000 }, () => {
       ok: false,
       error: {
         code: 'metric_infrastructure_failed',
-        details: { evaluation: { status: 'error', error: { code: 'exec_spawn_failed' } } },
+        details: { evaluation: { status: 'error', error: { kind: 'exec_spawn_failed' } } },
       },
     });
   });

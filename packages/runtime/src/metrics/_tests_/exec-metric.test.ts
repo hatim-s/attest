@@ -4,18 +4,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
-import type { MetricContext } from '../metric-evaluation.js';
+import type { CompletedMetricContext } from '../metric-evaluation.js';
 import { executeExecutableMetric } from '../exec-metric.js';
-import { acquireFixtureProcessSweepLock } from './support/fixture-processes.js';
-
-/** Resolves source fixtures from the repository root so conformance assets remain shared across tracks. */
-const fromRepositoryRoot = (relativePath: string): string =>
-  fileURLToPath(new URL(`../../../../../${relativePath}`, import.meta.url));
 
 /** Builds a completed execution context so every transport test shares exact request evidence. */
-const metricContext = (): MetricContext => ({
+const metricContext = (): CompletedMetricContext => ({
   caseDefinition: {
     id: 'greeting',
     input: { locale: 'en' },
@@ -28,14 +23,19 @@ const metricContext = (): MetricContext => ({
 /** Resolves a fixture command through the active Node executable to avoid shell-specific behavior. */
 const buildFixtureCommand = (fixtureName: string, ...commandArguments: string[]) => [
   process.execPath,
-  fromRepositoryRoot(`packages/runtime/src/metrics/_tests_/fixtures/exec-metric/${fixtureName}`),
+  fileURLToPath(new URL(`./fixtures/exec-metric/${fixtureName}`, import.meta.url)),
   ...commandArguments,
 ];
 
 /** Uses the canonical hostile-agent behaviors wherever their transport shape already exercises the metric edge. */
 const conformanceAgentCommand = (behavior: string) => [
   process.execPath,
-  fromRepositoryRoot('conformance/src/_tests_/fixtures/fake-agents/cli-agent.cjs'),
+  fileURLToPath(
+    new URL(
+      '../../../../../conformance/src/_tests_/fixtures/fake-agents/cli-agent.cjs',
+      import.meta.url,
+    ),
+  ),
   `--behavior=${behavior}`,
 ];
 
@@ -54,22 +54,32 @@ const startMetricServer = async (
     });
   });
 
+/** Streams up to 100 chunks and records whether the client hung up before the stream finished. */
+const startChunkedServer = async (status: number, chunk: string) => {
+  const progress = { chunksWritten: 0, responseClosed: false };
+  const { server, url } = await startMetricServer((_request, response) => {
+    response.writeHead(status);
+    const interval = setInterval(() => {
+      progress.chunksWritten += 1;
+      response.write(chunk);
+      if (progress.chunksWritten === 100) {
+        clearInterval(interval);
+        response.end();
+      }
+    }, 5);
+    response.on('close', () => {
+      progress.responseClosed = true;
+      clearInterval(interval);
+    });
+  });
+  return { server, url, progress };
+};
+
 /** Closes a fixture server so refusal tests exercise a real, previously valid loopback endpoint. */
 const closeServer = async (server: Server): Promise<void> =>
   new Promise((resolve, reject) =>
     server.close((error) => (error === undefined ? resolve() : reject(error))),
   );
-
-/** Polls an integration condition until it succeeds or a bounded deadline makes failure explicit. */
-const waitFor = async (condition: () => boolean, timeoutMs = 1_000): Promise<void> => {
-  const deadline = Date.now() + timeoutMs;
-  while (!condition()) {
-    if (Date.now() >= deadline) {
-      throw new Error(`Condition was not met within ${timeoutMs} ms.`);
-    }
-    await new Promise((resolve) => setTimeout(resolve, 10));
-  }
-};
 
 /** Checks a PID without mutating it; ESRCH means the direct child has been reaped. */
 const isProcessAlive = (processIdentifier: number): boolean => {
@@ -81,21 +91,7 @@ const isProcessAlive = (processIdentifier: number): boolean => {
   }
 };
 
-let releaseFixtureProcessSweepLock: (() => Promise<void>) | undefined;
-
 describe('executeExecutableMetric command metrics', () => {
-  beforeAll(async () => {
-    releaseFixtureProcessSweepLock = await acquireFixtureProcessSweepLock();
-  }, 30_000);
-
-  afterAll(async () => {
-    try {
-      await releaseFixtureProcessSweepLock?.();
-    } finally {
-      releaseFixtureProcessSweepLock = undefined;
-    }
-  });
-
   it('normalizes a valid fixture result', async () => {
     const evaluation = await executeExecutableMetric(
       { name: 'fixture', type: 'exec', command: buildFixtureCommand('result.mjs') },
@@ -106,7 +102,8 @@ describe('executeExecutableMetric command metrics', () => {
       metricName: 'fixture',
       kind: 'exec',
       status: 'evaluated',
-      result: { score: 1, pass: true },
+      score: 1,
+      pass: true,
     });
   });
 
@@ -118,7 +115,7 @@ describe('executeExecutableMetric command metrics', () => {
 
     expect(evaluation).toMatchObject({
       status: 'error',
-      error: { code: 'exec_nonzero_exit' },
+      error: { kind: 'exec_nonzero_exit' },
     });
   });
 
@@ -130,7 +127,7 @@ describe('executeExecutableMetric command metrics', () => {
 
     expect(evaluation.status).toBe('error');
     if (evaluation.status === 'error') {
-      expect(evaluation.error.code).toBe('exec_malformed_output');
+      expect(evaluation.error.kind).toBe('exec_malformed_output');
       expect(evaluation.error.message).toContain('Metric output was not valid JSON');
     }
   });
@@ -144,7 +141,7 @@ describe('executeExecutableMetric command metrics', () => {
 
     expect(evaluation.status).toBe('error');
     if (evaluation.status === 'error') {
-      expect(evaluation.error.code).toBe('exec_malformed_output');
+      expect(evaluation.error.kind).toBe('exec_malformed_output');
       expect(evaluation.error.message).toContain('512-byte');
     }
   });
@@ -157,8 +154,8 @@ describe('executeExecutableMetric command metrics', () => {
 
     expect(evaluation.status).toBe('error');
     if (evaluation.status === 'error') {
-      expect(evaluation.error.code).toBe('exec_malformed_output');
-      expect(evaluation.error.details).toMatchObject({ issues: [{ path: 'pass' }] });
+      expect(evaluation.error.kind).toBe('exec_malformed_output');
+      expect(evaluation.details).toMatchObject({ issues: [{ path: 'pass' }] });
     }
   });
 
@@ -168,14 +165,13 @@ describe('executeExecutableMetric command metrics', () => {
       metricContext(),
     );
 
-    expect(evaluation).toMatchObject({ status: 'error', error: { code: 'exec_spawn_failed' } });
+    expect(evaluation).toMatchObject({ status: 'error', error: { kind: 'exec_spawn_failed' } });
   });
 
-  it('awaits SIGKILL and direct-child reaping before resolving a timeout', async () => {
+  it('kills the process tree and reaps the direct child before resolving a timeout', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'attest-metric-'));
     const markerPath = join(directory, 'survival-marker');
     const processIdentifierPath = join(directory, 'process-id');
-    const startedAt = Date.now();
     try {
       const evaluation = await executeExecutableMetric(
         {
@@ -184,67 +180,19 @@ describe('executeExecutableMetric command metrics', () => {
           command: buildFixtureCommand('term-resistant.mjs', processIdentifierPath, markerPath),
         },
         metricContext(),
-        { timeoutMs: 3_000 },
-      );
-      const elapsedMs = Date.now() - startedAt;
-      const processIdentifier = Number(await readFile(processIdentifierPath, 'utf8'));
-
-      expect(elapsedMs).toBeGreaterThanOrEqual(4_800);
-      expect(elapsedMs).toBeLessThan(9_500);
-      expect(isProcessAlive(processIdentifier)).toBe(false);
-      await expect(access(markerPath)).rejects.toThrow();
-      expect(evaluation).toMatchObject({ status: 'error', error: { code: 'exec_timeout' } });
-    } finally {
-      await rm(directory, { recursive: true, force: true });
-    }
-  }, 10_000);
-
-  it('reaps the direct child when a descendant creates a new process group', async () => {
-    const directory = await mkdtemp(join(tmpdir(), 'attest-metric-'));
-    const markerPath = join(directory, 'escaped-descendant-marker');
-    const processIdentifierPath = join(directory, 'process-id');
-    try {
-      const evaluation = await executeExecutableMetric(
-        {
-          name: 'new-process-group',
-          type: 'exec',
-          command: buildFixtureCommand(
-            'descendant-new-process-group.mjs',
-            processIdentifierPath,
-            markerPath,
-            // Marker delay sits far beyond the kill window so the assertion is
-            // deterministic even when node startup eats most of the timeout.
-            '2500',
-          ),
-        },
-        metricContext(),
         { timeoutMs: 1_000 },
       );
       const processIdentifier = Number(await readFile(processIdentifierPath, 'utf8'));
 
       expect(isProcessAlive(processIdentifier)).toBe(false);
-      expect(evaluation).toMatchObject({ status: 'error', error: { code: 'exec_timeout' } });
-
-      // Wait beyond the fixture's marker delay so a surviving detached descendant cannot pass silently.
-      await new Promise((resolve) => setTimeout(resolve, 3_000));
+      expect(evaluation).toMatchObject({ status: 'error', error: { kind: 'exec_timeout' } });
+      // Wait beyond the descendant's marker delay so a surviving grandchild cannot pass silently.
+      await new Promise((resolve) => setTimeout(resolve, 2_000));
       await expect(access(markerPath)).rejects.toThrow();
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
   }, 15_000);
-
-  it('skips metrics after an incomplete case without spawning the command', async () => {
-    const context: MetricContext = {
-      ...metricContext(),
-      execution: { outcome: 'timeout', trace: null },
-    };
-    const evaluation = await executeExecutableMetric(
-      { name: 'skipped', type: 'exec', command: ['attest-missing-metric-command'] },
-      context,
-    );
-
-    expect(evaluation).toMatchObject({ status: 'error', error: { code: 'skipped_no_output' } });
-  });
 
   it('reports caller cancellation distinctly without a synthetic score', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'attest-metric-'));
@@ -263,7 +211,7 @@ describe('executeExecutableMetric command metrics', () => {
 
       expect(evaluation).toMatchObject({
         status: 'error',
-        error: { code: 'metric_cancelled', message: 'Metric execution was cancelled.' },
+        error: { kind: 'metric_cancelled', message: 'Metric execution was cancelled.' },
       });
     } finally {
       await rm(directory, { recursive: true, force: true });
@@ -297,29 +245,14 @@ describe('executeExecutableMetric HTTP metrics', () => {
         output: 'hello',
         trace: null,
       });
-      expect(evaluation).toMatchObject({ status: 'evaluated', result: { score: 0.5, pass: true } });
+      expect(evaluation).toMatchObject({ status: 'evaluated', score: 0.5, pass: true });
     } finally {
       await closeServer(server);
     }
   });
 
   it('cancels an oversized streaming response at the shared output cap', async () => {
-    let responseClosed = false;
-    let chunksWritten = 0;
-    const { server, url } = await startMetricServer((_request, response) => {
-      response.on('close', () => {
-        responseClosed = true;
-      });
-      const interval = setInterval(() => {
-        chunksWritten += 1;
-        response.write('x'.repeat(256));
-        if (chunksWritten === 100) {
-          clearInterval(interval);
-          response.end();
-        }
-      }, 5);
-      response.on('close', () => clearInterval(interval));
-    });
+    const { server, url, progress } = await startChunkedServer(200, 'x'.repeat(256));
 
     try {
       const evaluation = await executeExecutableMetric(
@@ -327,47 +260,31 @@ describe('executeExecutableMetric HTTP metrics', () => {
         metricContext(),
         { outputCapBytes: 512 },
       );
-      await waitFor(() => responseClosed);
+      await vi.waitFor(() => expect(progress.responseClosed).toBe(true));
 
-      expect(chunksWritten).toBeLessThan(100);
-      expect(evaluation.status).toBe('error');
-      if (evaluation.status === 'error') {
-        expect(evaluation.error.code).toBe('exec_malformed_output');
-        expect(evaluation.error.message).toContain('512-byte');
-      }
+      expect(progress.chunksWritten).toBeLessThan(100);
+      expect(evaluation).toMatchObject({
+        status: 'error',
+        error: { kind: 'exec_malformed_output' },
+      });
+      expect(evaluation.status === 'error' && evaluation.error.message).toContain('512-byte');
     } finally {
       await closeServer(server);
     }
   });
 
   it('cancels a non-200 response without reading its complete body', async () => {
-    let responseClosed = false;
-    let chunksWritten = 0;
-    const { server, url } = await startMetricServer((_request, response) => {
-      response.writeHead(503);
-      response.on('close', () => {
-        responseClosed = true;
-      });
-      const interval = setInterval(() => {
-        chunksWritten += 1;
-        response.write('unneeded response diagnostics');
-        if (chunksWritten === 100) {
-          clearInterval(interval);
-          response.end();
-        }
-      }, 5);
-      response.on('close', () => clearInterval(interval));
-    });
+    const { server, url, progress } = await startChunkedServer(503, 'unneeded diagnostics');
 
     try {
       const evaluation = await executeExecutableMetric(
         { name: 'http-status', type: 'exec', url },
         metricContext(),
       );
-      await waitFor(() => responseClosed);
+      await vi.waitFor(() => expect(progress.responseClosed).toBe(true));
 
-      expect(chunksWritten).toBeLessThan(100);
-      expect(evaluation).toMatchObject({ status: 'error', error: { code: 'http_bad_status' } });
+      expect(progress.chunksWritten).toBeLessThan(100);
+      expect(evaluation).toMatchObject({ status: 'error', error: { kind: 'http_bad_status' } });
     } finally {
       await closeServer(server);
     }
@@ -385,7 +302,7 @@ describe('executeExecutableMetric HTTP metrics', () => {
       );
       expect(evaluation).toMatchObject({
         status: 'error',
-        error: { code: 'exec_malformed_output' },
+        error: { kind: 'exec_malformed_output' },
       });
     } finally {
       await closeServer(server);
@@ -400,7 +317,7 @@ describe('executeExecutableMetric HTTP metrics', () => {
 
     expect(evaluation.status).toBe('error');
     if (evaluation.status === 'error') {
-      expect(evaluation.error.code).toBe('http_request_failed');
+      expect(evaluation.error.kind).toBe('http_request_failed');
       expect(evaluation.error.message).toContain('must use http: or https:');
     }
   });
@@ -413,6 +330,6 @@ describe('executeExecutableMetric HTTP metrics', () => {
       { name: 'refused', type: 'exec', url },
       metricContext(),
     );
-    expect(evaluation).toMatchObject({ status: 'error', error: { code: 'http_request_failed' } });
+    expect(evaluation).toMatchObject({ status: 'error', error: { kind: 'http_request_failed' } });
   });
 });

@@ -32,14 +32,15 @@ const caseMessage = (evalCase: NormalizedEvalCaseResult): string => {
   if (evalCase.verdict === 'fail') {
     const failedMetrics = evalCase.metric_results
       .filter((metric) => metric.status === 'evaluated' && !metric.pass)
-      .map((metric) => metric.metric_name)
+      .map((metric) => metric.metricName)
       .sort();
     return `failing metrics: ${failedMetrics.join(', ')}`;
   }
 
   const metricErrors = evalCase.metric_results
-    .filter((metric) => metric.status === 'error')
-    .map((metric) => `${metric.metric_name}: ${metric.error.message}`)
+    .flatMap((metric) =>
+      metric.status === 'error' ? [`${metric.metricName}: ${metric.error.message}`] : [],
+    )
     .sort();
   return metricErrors.length > 0 ? metricErrors.join('; ') : `case ended with ${evalCase.outcome}`;
 };

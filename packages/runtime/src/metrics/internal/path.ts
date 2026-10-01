@@ -46,4 +46,4 @@ const pathNotFound = (path: string): { passed: false; reason: string } => ({
   reason: `path ${path} was not found`,
 });
 
-export { parsePathSegments, pathNotFound };
+export { parsePathSegments, pathNotFound, type PathSegment };

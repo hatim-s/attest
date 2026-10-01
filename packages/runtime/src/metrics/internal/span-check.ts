@@ -1,16 +1,15 @@
-import type { LeafAssertionCheck, Span, SpanFilter, Trace } from '@attest/contracts';
+import { isDeepStrictEqual } from 'node:util';
 
-import { isDeepEqual } from './deep-equal.js';
+import type { Span, SpanFilter, Trace } from '@attest/contracts';
 
-type CheckEvaluation = { passed: boolean; reason?: string };
-type SpansCheck = Extract<LeafAssertionCheck, { spans: unknown }>['spans'];
+import type { CheckEvaluation, LeafCheck } from './leaf-check.js';
 
-/** Orders spans by start instant and retains document order for equal timestamps. */
+/** Orders spans by start instant, keeping document order for equal or unparseable timestamps. */
 const orderSpans = (spans: Span[]): Span[] =>
   spans
-    .map((span, index) => ({ span, index }))
+    .map((span, index) => ({ span, index, startedAt: Date.parse(span.start_time) }))
     .sort((left, right) => {
-      const difference = Date.parse(left.span.start_time) - Date.parse(right.span.start_time);
+      const difference = left.startedAt - right.startedAt;
       return difference === 0 || Number.isNaN(difference) ? left.index - right.index : difference;
     })
     .map(({ span }) => span);
@@ -22,11 +21,11 @@ const spanMatchesFilter = (span: Span, filter: SpanFilter): boolean =>
   (filter.status === undefined || span.status.code === filter.status) &&
   (filter.attributes === undefined ||
     Object.entries(filter.attributes).every(([name, value]) =>
-      isDeepEqual(span.attributes?.[name], value),
+      isDeepStrictEqual(span.attributes?.[name], value),
     ));
 
 /** Evaluates a declarative span filter, exact count, and chronological name sequence. */
-const evaluateSpansCheck = (check: SpansCheck, trace: Trace | null): CheckEvaluation => {
+const evaluateSpansCheck = (check: LeafCheck<'spans'>, trace: Trace | null): CheckEvaluation => {
   if (trace === null) return { passed: false, reason: 'no trace emitted' };
   const candidates = orderSpans(trace.spans).filter(
     (span) => check.filter === undefined || spanMatchesFilter(span, check.filter),
@@ -47,7 +46,7 @@ const evaluateSpansCheck = (check: SpansCheck, trace: Trace | null): CheckEvalua
   }
   if (
     check.order !== undefined &&
-    !isDeepEqual(
+    !isDeepStrictEqual(
       candidates.map((span) => span.name),
       check.order,
     )
@@ -57,4 +56,4 @@ const evaluateSpansCheck = (check: SpansCheck, trace: Trace | null): CheckEvalua
   return { passed: true };
 };
 
-export { evaluateSpansCheck, orderSpans, spanMatchesFilter };
+export { evaluateSpansCheck, orderSpans };
