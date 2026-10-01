@@ -150,4 +150,58 @@ describe('host HTTP transports', () => {
     expect(result.status === 'invocation_error' && result.error.code).toBe('http_status');
     expect(guardedFetch).toHaveBeenCalledOnce();
   });
+  it('classifies cancellation before streaming headers without retrying', async () => {
+    const controller = new AbortController();
+    const guardedFetch = vi.fn(
+      (_url: string, init: RequestInit) =>
+        new Promise<Response>((_resolve, reject) => {
+          init.signal?.addEventListener(
+            'abort',
+            () => reject(new DOMException('Cancelled', 'AbortError')),
+            { once: true },
+          );
+          controller.abort();
+        }),
+    );
+    const result = await invokeStreamingAgent(streaming('jsonl'), request, {
+      ...createFetchHttpTransports(guardedFetch),
+      signal: controller.signal,
+      retries: 0,
+    });
+    expect(result.status === 'invocation_error' && result.error.code).toBe('cancelled');
+    expect(guardedFetch).toHaveBeenCalledOnce();
+  });
+
+  it('retains shared submit-and-poll semantics on the guarded transport', async () => {
+    const guardedFetch = vi.fn((url: string) =>
+      Promise.resolve(
+        Response.json(url.endsWith('/run') ? { job: 'one' } : { state: 'done', answer: 'ok' }),
+      ),
+    );
+    const polling: HttpAgentResource = {
+      ...mapped,
+      transport: {
+        kind: 'polling',
+        lifecycle: 'external',
+        submit: { method: 'POST', url: 'https://agent.example/run', body: '{{request}}' },
+        job_id_pointer: '/job',
+        status_url_template: 'https://agent.example/jobs/{{job_id}}',
+        status_pointer: '/state',
+        success_values: ['done'],
+        failure_values: ['failed'],
+        minimum_interval_ms: 1,
+        maximum_interval_ms: 2,
+        extraction: { result_pointer: '/answer' },
+      },
+    };
+    const result = await invokeMappedHttpAgent(polling, request, {
+      ...createFetchHttpTransports(guardedFetch),
+      retries: 0,
+    });
+    expect(result.status === 'ok' && result.report?.ok && result.report.value).toMatchObject({
+      output: 'ok',
+    });
+    expect(result.diagnostics.remoteJobId).toBe('one');
+    expect(guardedFetch).toHaveBeenCalledTimes(2);
+  });
 });
