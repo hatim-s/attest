@@ -139,3 +139,13 @@ export { evalEventSchema, evalFinalResultDataSchema } from './eval/event.js';
 export type { EvalEvent, EvalFinalResultData, EvalRunSummary } from './eval/event.js';
 export { evalEventStreamSchema } from './eval/event-stream.js';
 export type { EvalEventStream } from './eval/event-stream.js';
+export {
+  portableProjectBundleSchema,
+  cloudRunRequestSchema,
+  cloudQueueMessageSchema,
+} from './cloud/project-bundle.js';
+export type {
+  PortableProjectBundle,
+  CloudRunRequest,
+  CloudQueueMessage,
+} from './cloud/project-bundle.js';

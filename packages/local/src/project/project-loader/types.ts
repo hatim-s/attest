@@ -2,13 +2,7 @@ import type { DatasetResource, ProjectResources, TestCase, JsonValue } from '@at
 
 import type { ProjectDiagnostic } from '../project-errors.js';
 
-type ProjectContentHashes = {
-  agents: Readonly<Record<string, string>>;
-  datasets: Readonly<Record<string, { data: string; metadata: string }>>;
-  manifest: string;
-  metrics: Readonly<Record<string, string>>;
-  tests: Readonly<Record<string, string>>;
-};
+import type { ProjectContentHashes } from '@attest/core';
 
 type LoadedProject = ProjectResources & {
   contentHashes: ProjectContentHashes;
