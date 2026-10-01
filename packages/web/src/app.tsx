@@ -77,7 +77,8 @@ const Dashboard = () => {
     if (
       tab === 'distributions' &&
       casesQuery.hasNextPage === true &&
-      !casesQuery.isFetchingNextPage
+      !casesQuery.isFetching &&
+      !casesQuery.isFetchNextPageError
     ) {
       void casesQuery.fetchNextPage();
     }
