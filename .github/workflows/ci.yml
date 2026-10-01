@@ -30,7 +30,7 @@ jobs:
           bun-version: 1.4.x
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: ${{ matrix.os == 'ubuntu-latest' && '22.15.0' || '22' }}
       - run: bun install --frozen-lockfile
       - run: bun run typecheck
       - run: bun run lint

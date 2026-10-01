@@ -13,7 +13,7 @@ as a direct dependency when your own package imports it.
 Save this as `agent.ts` in a Bun project with `@attest/contracts` installed:
 
 ```typescript
-import { agentRequestSchema, type AgentSuccessResponse } from '@attest/contracts';
+import { agentRequestSchema, type AgentResponse } from '@attest/contracts';
 
 /** Reads one invocation and returns its input as the agent output. */
 async function main() {
@@ -26,7 +26,7 @@ async function main() {
   const response = {
     protocol: 'attest.agent-invocation',
     output: request.input,
-  } satisfies AgentSuccessResponse;
+  } satisfies AgentResponse;
 
   process.stdout.write(JSON.stringify(response));
 }
@@ -41,7 +41,7 @@ npx attest agent add typed --argv-json '["bun","./agent.ts"]' --timeout 5s --out
 npx attest agent test typed --input '"hello"' --output json
 ```
 
-The request is typed after parsing. Use `satisfies AgentSuccessResponse` to check
+The request is typed after parsing. Use `satisfies AgentResponse` to check
 your returned object without discarding inference. Write diagnostic logs to stderr;
 stdout must contain exactly one protocol response. Bun executes the TypeScript file
 here. If using Node, compile it with your application's TypeScript build and register
@@ -73,7 +73,7 @@ process.exitCode = exitCode;
 
 For process isolation, execute the installed `attest` binary with an argument array
 and parse stdout. Keep stderr separate. Both approaches use the same
-[command and result contracts](../cli/index.md#global-machine-contract). A completed
+[command and result contracts](../cli/index.md#machine-output). A completed
 evaluation with a failing verdict returns exit code `1` and `ok: true`; an invocation
 failure returns `ok: false`. Do not treat every nonzero exit as malformed output.
 
