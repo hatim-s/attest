@@ -206,21 +206,37 @@ The runtime SDK accepts an ordered `hooks` array on `executeResolvedEvalPlan`. E
 | `after_case`       | Result or error, before environment disposal and persistence. All registered final hooks are attempted.                |
 | `after_run`        | Status and summary after runner cleanup and initial finalization. Hook failure reconciles the stored status to failed. |
 
-Use `createStagedCaseRunner` to wire the agent/evaluation stages automatically. Custom `EvalCaseRunner` implementations call `context.afterAgent(execution)` and `context.afterEvaluation(execution, metrics)` at those boundaries. The CLI's built-in runner does this. Project JSON also accepts `after_agent` and `after_evaluation` argv hooks with the same timeout and environment rules as existing case hooks. Project command hooks execute on the host in the worker directory.
+An `EvalCaseRunner` calls `context.afterAgent(execution)` and
+`context.afterEvaluation(execution, metrics)` at those boundaries. Its fourth `executeCase`
+argument contains `workerIndex`, the optional environment, and those stage callbacks. Wrap a
+callback failure in `EvalCaseStageError` to retain the execution and metrics produced so far. The
+CLI's built-in runner does this. Project JSON also accepts `after_agent` and `after_evaluation` argv
+hooks with the same timeout and environment rules as existing case hooks. Project command hooks
+execute on the host in the worker directory.
 
 ```ts
 import { justBashIsolation } from '@attest/executor';
-import { createStagedCaseRunner, executeResolvedEvalPlan } from '@attest/runtime';
+import { EvalCaseStageError, executeResolvedEvalPlan, type EvalCaseRunner } from '@attest/runtime';
 
-const runner = createStagedCaseRunner({
-  invoke: async ({ resolvedCase, environment, signal }) => {
+const runner: EvalCaseRunner = {
+  executeCase: async (_runId, resolvedCase, signal, context) => {
+    const { environment } = context;
     // Give the coding agent environment.exec/readFile/writeFile as its tools.
-    return runCodingAgent(resolvedCase, environment, signal);
+    const execution = await runCodingAgent(resolvedCase, environment, signal);
+    try {
+      await context.afterAgent?.(execution);
+    } catch (error) {
+      throw new EvalCaseStageError('after_agent', execution, [], error);
+    }
+    const metrics = await evaluateCase(execution, environment, signal);
+    try {
+      await context.afterEvaluation?.(execution, metrics);
+    } catch (error) {
+      throw new EvalCaseStageError('after_evaluation', execution, metrics, error);
+    }
+    return { execution, metrics };
   },
-  evaluate: async ({ execution, environment, signal }) => {
-    return evaluateCase(execution, environment, signal);
-  },
-});
+};
 
 await executeResolvedEvalPlan(plan, runner, persistence, {
   isolation: justBashIsolation({ files: { 'input.txt': 'seed' } }),
