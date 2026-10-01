@@ -80,7 +80,9 @@ const invokeStreamingAgent = async (
       const normalized =
         error instanceof AgentInvocationError
           ? error
-          : new AgentInvocationError('network', 'Streaming transport failed.', { cause: error });
+          : attemptSignal.aborted
+            ? abortedError(options.signal, 'Streaming invocation', { cause: error })
+            : new AgentInvocationError('network', 'Streaming transport failed.', { cause: error });
       const evidence = {
         diagnostics:
           normalized.httpStatus === undefined ? {} : { httpStatus: normalized.httpStatus },
