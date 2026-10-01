@@ -44,12 +44,14 @@ reserved for multi-turn runs. The runner does not send them yet.
 | `protocol` | string | always       | Must match the request protocol.                                                                                                                  |
 | `output`   | JSON   | xor `error`  | The agent's final answer. A string or structured JSON. Metrics decide how to read it.                                                             |
 | `error`    | object | xor `output` | `{ "message": string, "code"?: string }`. The agent understood the request but could not answer. This is a case failure, not an invocation error. |
-| `trace`    | object | optional     | An [`attest.trace`](./trace-schema.md) document. Omitting it disables trajectory metrics for this case; output metrics still run.                 |
+| `trace`    | object | optional     | An [`attest.trace`](./trace-schema.md) document. Without it, trace-dependent assertions fail; output metrics still run.                           |
 | `state`    | JSON   | optional     | Reserved for multi-turn runs. The parser accepts it and the runner ignores it.                                                                    |
 
 Exactly one of `output` and `error` must be present. A response with `output` is a success. A response with `error` is an agent failure.
 
-A malformed `trace` does not invalidate the response. The runner still evaluates the output, skips trajectory metrics for the case, and reports the trace problem as a warning.
+A malformed `trace` does not invalidate the response. The parser omits it from the normalized response
+and reports an `invalid_trace` warning. The runner still evaluates metrics. Assertions that require
+trace evidence fail because no valid trace is available; output assertions can still pass.
 
 ## CLI transport
 

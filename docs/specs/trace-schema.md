@@ -4,7 +4,8 @@ An `attest.trace` document is plain JSON that lists the spans of one agent invoc
 assertions, tool-call checks, and the dashboard's trace waterfall read it. Attribute names follow
 the OpenTelemetry GenAI semantic conventions where the meaning matches.
 
-A trace is optional. Without one, attest evaluates outputs and skips trajectory metrics.
+A trace is optional. Without one, attest still evaluates metrics. Trace-dependent assertions fail
+because no trace evidence is available; output assertions can still pass.
 
 ## Document
 
@@ -100,7 +101,7 @@ Unknown attributes are allowed and preserved.
 
 1. Unknown fields are stored and returned unchanged.
 2. Attest never rewrites a submitted trace. It normalizes a copy when reading.
-3. A malformed trace disables trajectory metrics for that case and is recorded as a trace error. It does not fail the invocation.
+3. A malformed trace produces an `invalid_trace` warning and is omitted from the normalized response. It does not fail the invocation. Metrics still run, and assertions that require trace evidence fail.
 
 ## Converters
 
