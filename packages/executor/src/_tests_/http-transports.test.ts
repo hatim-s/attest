@@ -245,4 +245,30 @@ describe('host HTTP transports', () => {
       expect(expired.attempts).toHaveLength(1);
     },
   );
+  it.each(['idle', 'caller'] as const)(
+    'does not accept buffered terminal JSONL after %s interruption',
+    async (reason) => {
+      const live = liveResponse('{"type":"done","output":"ok"}', 'application/x-ndjson');
+      const controller = new AbortController();
+      const configured = {
+        ...streaming('jsonl'),
+        timeouts: { attempt_ms: 1000, idle_ms: reason === 'idle' ? 20 : 500 },
+      };
+      const timer = reason === 'caller' ? setTimeout(() => controller.abort(), 10) : undefined;
+      try {
+        const result = await invokeStreamingAgent(configured, request, {
+          ...createFetchHttpTransports(() => Promise.resolve(live.response)),
+          retries: 0,
+          signal: controller.signal,
+        });
+        expect(result.status === 'invocation_error' && result.error.code).toBe(
+          reason === 'idle' ? 'timeout' : 'cancelled',
+        );
+        expect(result.attempts).toHaveLength(1);
+        expect(live.cancelled).toHaveBeenCalledOnce();
+      } finally {
+        clearTimeout(timer);
+      }
+    },
+  );
 });

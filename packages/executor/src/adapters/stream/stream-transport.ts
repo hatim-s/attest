@@ -144,11 +144,15 @@ const consumeResponse = async (
     }
   };
 
-  const completed = (terminal: CandidateResponse): ConsumedStream => ({
-    response: terminal,
-    evidence: evidence.text,
-    applicationStarted: evidence.applicationStarted,
-  });
+  const completed = (terminal: CandidateResponse): ConsumedStream => {
+    if (interruption !== undefined) throw interruption;
+    if (signal.aborted) throw abortedError(options.callerSignal, 'Streaming invocation');
+    return {
+      response: terminal,
+      evidence: evidence.text,
+      applicationStarted: evidence.applicationStarted,
+    };
+  };
 
   signal.addEventListener('abort', abort, { once: true });
   resetTransportIdle();
@@ -164,6 +168,9 @@ const consumeResponse = async (
       const terminal = acceptLines(decode(chunk), false);
       if (terminal !== undefined) return completed(terminal);
     }
+    // Cancellation may close a fetch reader cleanly. It must not flush buffered terminal data.
+    if (interruption !== undefined) throw interruption;
+    if (signal.aborted) throw abortedError(options.callerSignal, 'Streaming invocation');
     const trailing = decode();
     const terminal = acceptLines(trailing, false) ?? acceptLines('', true);
     if (terminal !== undefined) return completed(terminal);
