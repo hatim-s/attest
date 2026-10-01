@@ -1,5 +1,5 @@
 import type { StoredMetricEvaluation } from '@attest/core';
-import type { CaseExecution } from '@attest/executor';
+import type { CaseExecution } from './types.js';
 
 const MAXIMUM_ERROR_MESSAGE_LENGTH = 512;
 

@@ -1,7 +1,6 @@
 import { randomBytes } from 'node:crypto';
 
 import { AgentInvocationError } from '../../errors.js';
-import { classifiedError } from './websocket-protocol.js';
 
 type WebSocketCloseFrame = {
   code?: number;
@@ -17,13 +16,20 @@ type WebSocketFrameCallbacks = {
   onText: (text: string, bytes: number) => void;
 };
 
+/** RFC 6455 stores small lengths inline and larger ones in a 16-bit or 64-bit extension. */
+const extendedLengthBytes = (payloadBytes: number): 0 | 2 | 8 => {
+  if (payloadBytes < 126) return 0;
+  if (payloadBytes <= 65_535) return 2;
+  return 8;
+};
+
 /** Encodes one client frame with the masking required by RFC 6455. */
 const encodeWebSocketFrame = (
   opcode: number,
   payload: Buffer<ArrayBufferLike> = Buffer.alloc(0),
 ): Buffer<ArrayBufferLike> => {
   const mask = randomBytes(4);
-  const lengthBytes = payload.byteLength < 126 ? 0 : payload.byteLength <= 65_535 ? 2 : 8;
+  const lengthBytes = extendedLengthBytes(payload.byteLength);
   const header = Buffer.alloc(2 + lengthBytes + mask.byteLength);
   header[0] = 0x80 | opcode;
   if (lengthBytes === 0) {
@@ -127,11 +133,9 @@ class WebSocketFrameDecoder {
     }
     if (opcode === 0x2 || (opcode === 0x0 && this.fragmentedOpcode === 0x2)) {
       this.fail(
-        classifiedError(
-          'binary_frame_unsupported',
-          'invalid_envelope',
-          'Binary WebSocket frames are unsupported.',
-        ),
+        new AgentInvocationError('invalid_envelope', 'Binary WebSocket frames are unsupported.', {
+          classification: 'binary_frame_unsupported',
+        }),
       );
       return;
     }
@@ -177,12 +181,10 @@ class WebSocketFrameDecoder {
       this.callbacks.onText(text, complete.byteLength);
     } catch (cause: unknown) {
       this.fail(
-        classifiedError(
-          'invalid_json',
-          'invalid_envelope',
-          'WebSocket text is not valid UTF-8.',
+        new AgentInvocationError('invalid_envelope', 'WebSocket text is not valid UTF-8.', {
           cause,
-        ),
+          classification: 'invalid_json',
+        }),
       );
     }
   }
@@ -217,7 +219,12 @@ class WebSocketFrameDecoder {
   }
 
   private protocolFailure(message: string, cause?: unknown): void {
-    this.fail(classifiedError('connection_failed', 'invalid_envelope', message, cause));
+    this.fail(
+      new AgentInvocationError('invalid_envelope', message, {
+        ...(cause === undefined ? {} : { cause }),
+        classification: 'connection_failed',
+      }),
+    );
   }
 
   private fail(error: AgentInvocationError): void {

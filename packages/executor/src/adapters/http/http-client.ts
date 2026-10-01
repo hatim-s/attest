@@ -1,9 +1,10 @@
-import { request as httpRequest } from 'node:http';
-import { request as httpsRequest } from 'node:https';
+import type { IncomingMessage } from 'node:http';
 
-import { AgentInvocationError } from '../../errors.js';
-import { createRawExcerpt } from '../../internal/raw-excerpt.js';
-import type { InvocationAttempt } from '../../types.js';
+import type { RawExcerpt } from '@attest/contracts';
+
+import { AgentInvocationError, abortedError } from '../../errors.js';
+import { appendEvidencePrefix, createRawExcerpt } from '../../internal/raw-excerpt.js';
+import { openPinnedRequest } from './pinned-request.js';
 import type { MaterializedHttpRequest } from './request-template.js';
 import { redactTransportText } from './redaction.js';
 import { requireSameOrigin, resolveSafeHttpUrl } from './url-security.js';
@@ -21,22 +22,15 @@ type HttpClientPolicy = {
 type HttpJsonResponse = {
   headers: Record<string, string>;
   raw: unknown;
-  rawExcerpt: NonNullable<InvocationAttempt['rawExcerpt']>;
+  rawExcerpt: RawExcerpt;
   status: number;
   url: URL;
 };
 
 const MAX_REDIRECTS = 3;
-const EVIDENCE_PREFIX_BYTES = 16 * 1024;
 
-const abortError = (policy: HttpClientPolicy, cause?: unknown): AgentInvocationError =>
-  new AgentInvocationError(
-    policy.callerSignal?.aborted === true ? 'cancelled' : 'timeout',
-    policy.callerSignal?.aborted === true
-      ? 'Mapped HTTP invocation was cancelled.'
-      : 'Mapped HTTP request timed out.',
-    { cause },
-  );
+const abortError = (policy: HttpClientPolicy): AgentInvocationError =>
+  abortedError(policy.callerSignal, 'Mapped HTTP request');
 
 const normalizeHeaders = (headers: NodeJS.Dict<string | string[]>): Record<string, string> =>
   Object.fromEntries(
@@ -48,119 +42,79 @@ const normalizeHeaders = (headers: NodeJS.Dict<string | string[]>): Record<strin
       ]),
   );
 
-/** Reads one response body while enforcing cancellation, idle, and aggregate byte caps. */
+const isSuccessStatus = (status: number): boolean => status >= 200 && status < 300;
+
+/**
+ * Reads one response body while enforcing cancellation, idle, and aggregate byte caps. Only a
+ * success body is parsed as JSON; other statuses keep their text as evidence only.
+ */
 const readResponseBody = async (
-  response: import('node:http').IncomingMessage,
+  response: IncomingMessage,
   policy: HttpClientPolicy,
-  parseJson: boolean,
-): Promise<{ raw: unknown; rawExcerpt: NonNullable<InvocationAttempt['rawExcerpt']> }> =>
-  new Promise((resolve, reject) => {
-    const chunks: Buffer[] = [];
-    const evidence: Buffer[] = [];
-    let byteCount = 0;
-    let evidenceBytes = 0;
-    let settled = false;
-    let terminating = false;
-    let idleTimer: NodeJS.Timeout;
-
-    const finish = (operation: () => void): void => {
-      if (settled || terminating) return;
-      settled = true;
-      clearTimeout(idleTimer);
-      policy.attemptSignal.removeEventListener('abort', abort);
-      operation();
-    };
-    const destroyAndReject = (error: Error): void => {
-      if (settled || terminating) return;
-      terminating = true;
-      clearTimeout(idleTimer);
-      policy.attemptSignal.removeEventListener('abort', abort);
-      // Do not let an idle/capped response survive the invocation as background socket I/O.
-      response.once('close', () => {
-        if (settled) return;
-        settled = true;
-        reject(error);
-      });
-      response.destroy();
-    };
-    const resetIdle = (): void => {
-      clearTimeout(idleTimer);
-      idleTimer = setTimeout(() => {
-        destroyAndReject(
-          new AgentInvocationError('timeout', 'Mapped HTTP response body timed out.'),
-        );
-      }, policy.responseBodyTimeoutMs);
-    };
-    const abort = (): void => {
-      destroyAndReject(abortError(policy));
-    };
-
-    policy.attemptSignal.addEventListener('abort', abort, { once: true });
-    if (policy.attemptSignal.aborted) {
-      abort();
-      return;
-    }
-    response.on('data', (chunk: Buffer) => {
+): Promise<{ raw: unknown; rawExcerpt: RawExcerpt }> => {
+  const chunks: Buffer[] = [];
+  const evidence: Uint8Array[] = [];
+  let byteCount = 0;
+  let evidenceBytes = 0;
+  let interruption: AgentInvocationError | undefined;
+  let idleTimer: NodeJS.Timeout | undefined;
+  // Destroying the response ends the read loop; `interruption` records why it was stopped.
+  const interrupt = (error: AgentInvocationError): void => {
+    interruption ??= error;
+    response.destroy(error);
+  };
+  const resetIdle = (): void => {
+    clearTimeout(idleTimer);
+    idleTimer = setTimeout(
+      () => interrupt(new AgentInvocationError('timeout', 'Mapped HTTP response body timed out.')),
+      policy.responseBodyTimeoutMs,
+    );
+  };
+  const abort = (): void => interrupt(abortError(policy));
+  policy.attemptSignal.addEventListener('abort', abort, { once: true });
+  try {
+    if (policy.attemptSignal.aborted) throw abortError(policy);
+    resetIdle();
+    for await (const chunk of response as AsyncIterable<Buffer>) {
       resetIdle();
       byteCount += chunk.byteLength;
-      if (evidenceBytes < EVIDENCE_PREFIX_BYTES) {
-        const retained = chunk.subarray(0, EVIDENCE_PREFIX_BYTES - evidenceBytes);
-        evidence.push(retained);
-        evidenceBytes += retained.byteLength;
-      }
+      evidenceBytes = appendEvidencePrefix(evidence, evidenceBytes, chunk);
       if (byteCount > policy.responseCapBytes) {
-        const prefix = redactTransportText(
-          Buffer.concat(evidence, evidenceBytes).toString('utf8'),
-          policy.secrets,
-        );
-        destroyAndReject(
-          Object.assign(
-            new AgentInvocationError(
-              'output_cap_exceeded',
-              `Mapped HTTP response exceeds the ${policy.responseCapBytes}-byte response cap.`,
-            ),
-            {
-              rawExcerpt: {
-                ...createRawExcerpt(prefix),
-                truncated: true,
-              },
+        const prefix = Buffer.concat(evidence, evidenceBytes).toString('utf8');
+        throw new AgentInvocationError(
+          'output_cap_exceeded',
+          `Mapped HTTP response exceeds the ${policy.responseCapBytes}-byte response cap.`,
+          {
+            rawExcerpt: {
+              ...createRawExcerpt(redactTransportText(prefix, policy.secrets)),
+              truncated: true,
             },
-          ),
+          },
         );
-        return;
       }
       chunks.push(chunk);
+    }
+  } catch (error: unknown) {
+    throw interruption ?? error;
+  } finally {
+    clearTimeout(idleTimer);
+    policy.attemptSignal.removeEventListener('abort', abort);
+    // Do not let an idle or capped response survive the invocation as background socket I/O.
+    response.destroy();
+  }
+
+  const text = Buffer.concat(chunks, byteCount).toString('utf8');
+  const rawExcerpt = createRawExcerpt(redactTransportText(text, policy.secrets));
+  if (!isSuccessStatus(response.statusCode ?? 0)) return { raw: null, rawExcerpt };
+  try {
+    return { raw: JSON.parse(text) as unknown, rawExcerpt };
+  } catch (error: unknown) {
+    throw new AgentInvocationError('invalid_envelope', 'Mapped HTTP response is not valid JSON.', {
+      cause: error,
+      rawExcerpt,
     });
-    response.once('error', (error) => finish(() => reject(error)));
-    response.once('end', () => {
-      const text = Buffer.concat(chunks, byteCount).toString('utf8');
-      const rawExcerpt = createRawExcerpt(redactTransportText(text, policy.secrets));
-      if (!parseJson) {
-        finish(() => resolve({ raw: null, rawExcerpt }));
-        return;
-      }
-      try {
-        const raw = JSON.parse(text) as unknown;
-        finish(() => resolve({ raw, rawExcerpt }));
-      } catch (error: unknown) {
-        finish(() =>
-          reject(
-            Object.assign(
-              new AgentInvocationError(
-                'invalid_envelope',
-                'Mapped HTTP response is not valid JSON.',
-                {
-                  cause: error,
-                },
-              ),
-              { rawExcerpt },
-            ),
-          ),
-        );
-      }
-    });
-    resetIdle();
-  });
+  }
+};
 
 /** Performs one DNS-pinned request and returns only bounded JSON evidence. */
 const requestOnce = async (
@@ -168,96 +122,43 @@ const requestOnce = async (
   policy: HttpClientPolicy,
 ): Promise<HttpJsonResponse> => {
   if (policy.attemptSignal.aborted) throw abortError(policy);
-  const resolved = await resolveSafeHttpUrl(
-    request.url,
-    policy.connectTimeoutMs,
-    policy.attemptSignal,
-    policy.callerSignal,
-  );
-  if (policy.attemptSignal.aborted) throw abortError(policy);
+  const resolved = await resolveSafeHttpUrl(request.url, {
+    timeoutMs: policy.connectTimeoutMs,
+    signal: policy.attemptSignal,
+    callerSignal: policy.callerSignal,
+  });
   if (policy.secrets.length > 0 && resolved.url.protocol !== 'https:' && !resolved.loopback) {
     throw new AgentInvocationError(
       'network',
       'Mapped HTTP secrets require HTTPS except for explicit loopback endpoints.',
     );
   }
-  const transport = resolved.url.protocol === 'https:' ? httpsRequest : httpRequest;
-  return new Promise<HttpJsonResponse>((resolve, reject) => {
-    if (policy.attemptSignal.aborted) {
-      reject(abortError(policy));
-      return;
-    }
-    let settled = false;
-    const timers: { firstByte?: NodeJS.Timeout } = {};
-    const finish = (operation: () => void): void => {
-      if (settled) return;
-      settled = true;
-      if (timers.firstByte !== undefined) clearTimeout(timers.firstByte);
-      policy.attemptSignal.removeEventListener('abort', abort);
-      operation();
-    };
-    const outgoing = transport(
-      resolved.url,
-      {
-        method: request.method,
-        headers: request.headers,
-        lookup: (_hostname, _options, callback) =>
-          callback(null, resolved.address, resolved.family),
-      },
-      (response) => {
-        // The response body owns its own idle deadline after headers arrive.
-        outgoing.setTimeout(0);
-        if (timers.firstByte !== undefined) clearTimeout(timers.firstByte);
-        const status = response.statusCode ?? 0;
-        void readResponseBody(response, policy, status >= 200 && status < 300).then(
-          ({ raw, rawExcerpt }) =>
-            finish(() =>
-              resolve({
-                headers: normalizeHeaders(response.headers),
-                raw,
-                rawExcerpt,
-                status,
-                url: resolved.url,
-              }),
-            ),
-          (error: unknown) =>
-            finish(() =>
-              reject(error instanceof Error ? error : new Error('HTTP body read failed.')),
-            ),
-        );
-      },
-    );
-    const abort = (): void => {
-      outgoing.destroy();
-      finish(() => reject(abortError(policy)));
-    };
-    policy.attemptSignal.addEventListener('abort', abort, { once: true });
-    timers.firstByte = setTimeout(() => {
-      outgoing.destroy();
-      finish(() =>
-        reject(new AgentInvocationError('timeout', 'Mapped HTTP first byte timed out.')),
-      );
-    }, policy.firstByteTimeoutMs);
-    outgoing.setTimeout(policy.connectTimeoutMs, () => {
-      outgoing.destroy();
-      finish(() =>
-        reject(new AgentInvocationError('timeout', 'Mapped HTTP connection timed out.')),
-      );
-    });
-    outgoing.once('error', (error) => {
-      finish(() =>
-        reject(
-          error instanceof AgentInvocationError
-            ? error
-            : new AgentInvocationError('network', 'Mapped HTTP transport failed.', {
-                cause: error,
-              }),
-        ),
-      );
-    });
-    if (request.body !== undefined) outgoing.write(request.body);
-    outgoing.end();
+  const opened = await openPinnedRequest(resolved, {
+    method: request.method,
+    headers: request.headers,
+    body: request.body,
+    signal: policy.attemptSignal,
+    firstByteTimeoutMs: policy.firstByteTimeoutMs,
+    connectTimeoutMs: policy.connectTimeoutMs,
+    errors: {
+      aborted: () => abortError(policy),
+      firstByteTimeout: () =>
+        new AgentInvocationError('timeout', 'Mapped HTTP first byte timed out.'),
+      connectTimeout: () =>
+        new AgentInvocationError('timeout', 'Mapped HTTP connection timed out.'),
+      failed: (cause) =>
+        new AgentInvocationError('network', 'Mapped HTTP transport failed.', { cause }),
+    },
   });
+  const { response } = opened;
+  const { raw, rawExcerpt } = await readResponseBody(response, policy);
+  return {
+    headers: normalizeHeaders(response.headers),
+    raw,
+    rawExcerpt,
+    status: response.statusCode ?? 0,
+    url: resolved.url,
+  };
 };
 
 /** Follows only bounded, method-preserving, same-origin redirects. */
@@ -272,8 +173,9 @@ const requestJson = async (
     if (![307, 308].includes(response.status)) return response;
     const location = response.headers.location;
     if (location === undefined || redirects === MAX_REDIRECTS) {
-      throw Object.assign(
-        new AgentInvocationError('http_status', `Mapped HTTP returned status ${response.status}.`),
+      throw new AgentInvocationError(
+        'http_status',
+        `Mapped HTTP returned status ${response.status}.`,
         { httpStatus: response.status, rawExcerpt: response.rawExcerpt },
       );
     }

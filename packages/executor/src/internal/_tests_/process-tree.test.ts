@@ -1,6 +1,12 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
-import { parseIdentitySnapshot, parseProcessSnapshot } from '../process-tree.js';
+import {
+  killProcessTree,
+  listDescendantProcesses,
+  parseIdentitySnapshot,
+  parseProcessSnapshot,
+  spawnInProcessGroup,
+} from '../process-tree.js';
 
 const row = (processId: number, parentProcessId: number, command: string): string => {
   return `${String(processId).padStart(5)} ${String(parentProcessId).padStart(5)} Thu Aug  6 19:00:00 2026 ${command}`;
@@ -57,5 +63,31 @@ describe('parseIdentitySnapshot', () => {
         command: '/usr/bin/grandchild',
       },
     ]);
+  });
+});
+
+describe('killProcessTree', () => {
+  it('reports no survivors once every tracked descendant is gone', async () => {
+    // The parent keeps one child; killing the group must leave nothing for ps -p to report.
+    const program = `require('node:child_process').spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' }); setInterval(() => {}, 1000);`;
+    const child = spawnInProcessGroup([process.execPath, '-e', program], {
+      cwd: process.cwd(),
+      env: { PATH: process.env.PATH ?? '' },
+    });
+    const closed = new Promise((resolve) => child.once('close', resolve));
+    let descendants: Awaited<ReturnType<typeof listDescendantProcesses>> = [];
+    await vi.waitFor(async () => {
+      descendants = await listDescendantProcesses(child.pid ?? -1);
+      expect(descendants).toHaveLength(1);
+    });
+
+    const survivors = await killProcessTree(child, {
+      graceMs: 200,
+      initialDescendants: descendants,
+      signalProcessGroup: true,
+    });
+    await closed;
+
+    expect(survivors).toEqual([]);
   });
 });

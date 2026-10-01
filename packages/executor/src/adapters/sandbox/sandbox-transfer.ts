@@ -1,44 +1,24 @@
 import { constants } from 'node:fs';
 import { lstat, mkdir, mkdtemp, open, realpath, rename, rm, writeFile } from 'node:fs/promises';
-import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
-import { posix } from 'node:path';
+import { dirname, posix, relative, resolve, sep } from 'node:path';
+
+import type { VercelSandbox } from '@attest/contracts';
 
 import { AgentInvocationError } from '../../errors.js';
+import { errnoCode } from '../../internal/errno-code.js';
+import { requirePositiveInteger } from '../../internal/positive-integer.js';
 import { BoundedTailWritable } from './bounded-writable.js';
-import type { VercelSandboxResource, VercelSandboxSdk } from './types.js';
+import {
+  SANDBOX_WORKSPACE,
+  assertLiteralRelativePath,
+  isContained,
+  resolveArtifactDestination,
+  resolveRemotePath,
+} from './sandbox-paths.js';
+import type { VercelSandboxSdk } from './types.js';
 
 type LoadedUpload = { path: string; content: Uint8Array; mode?: number };
 type StagedArtifact = { directory: string; stagedPath: string };
-
-const SANDBOX_WORKSPACE = '/vercel/sandbox/workspace';
-const GLOB_METACHARACTERS = /[*?\[\]{}]/u;
-
-const ensurePositiveCap = (value: number): void => {
-  if (!Number.isSafeInteger(value) || value <= 0) {
-    throw new TypeError('Response byte cap must be a positive safe integer.');
-  }
-};
-
-const isContained = (root: string, path: string): boolean => {
-  const fromRoot = relative(root, path);
-  return (
-    fromRoot === '' ||
-    (!fromRoot.startsWith(`..${sep}`) && fromRoot !== '..' && !isAbsolute(fromRoot))
-  );
-};
-
-/** Rejects paths whose meaning could vary between file APIs and command execution. */
-const assertLiteralRelativePath = (value: string, label: string): void => {
-  if (
-    value.length === 0 ||
-    value.includes('\0') ||
-    isAbsolute(value) ||
-    posix.isAbsolute(value) ||
-    GLOB_METACHARACTERS.test(value)
-  ) {
-    throw new TypeError(`${label} must be a non-empty literal relative path.`);
-  }
-};
 
 /** Rejects existing symlink components while allowing not-yet-created output directories. */
 const assertNoSymlinkComponents = async (
@@ -56,15 +36,7 @@ const assertNoSymlinkComponents = async (
       if (stats.isSymbolicLink())
         throw new TypeError(`Host path contains a symbolic link: ${current}`);
     } catch (error: unknown) {
-      if (
-        allowMissing &&
-        error !== null &&
-        typeof error === 'object' &&
-        'code' in error &&
-        error.code === 'ENOENT'
-      ) {
-        return;
-      }
+      if (allowMissing && errnoCode(error) === 'ENOENT') return;
       throw error;
     }
   }
@@ -92,34 +64,13 @@ const readBoundedHostFile = async (
   }
 };
 
-/** Resolves an authored relative sandbox path below the fixed workspace root. */
-const resolveRemotePath = (value: string): string => {
-  assertLiteralRelativePath(value, 'Sandbox resource path');
-  const resolved = posix.resolve(SANDBOX_WORKSPACE, value);
-  if (resolved !== SANDBOX_WORKSPACE && !resolved.startsWith(`${SANDBOX_WORKSPACE}/`)) {
-    throw new TypeError(`Sandbox path escapes ${SANDBOX_WORKSPACE}: ${value}`);
-  }
-  return resolved;
-};
-
-/** Resolves artifact outputs below the configured host artifact directory. */
-const resolveArtifactDestination = (root: string, value: string): string => {
-  assertLiteralRelativePath(value, 'Artifact destination');
-  const destination = resolve(root, value);
-  const fromRoot = relative(resolve(root), destination);
-  if (fromRoot === '..' || fromRoot.startsWith(`..${sep}`) || isAbsolute(fromRoot)) {
-    throw new TypeError(`Artifact destination escapes its root: ${value}`);
-  }
-  return destination;
-};
-
 /** Opens every authored upload without following a terminal symlink and enforces the response cap. */
 const loadExplicitUploads = async (
   projectRoot: string,
-  uploads: VercelSandboxResource['files'],
+  uploads: VercelSandbox['files'],
   responseBytes: number,
 ): Promise<LoadedUpload[]> => {
-  ensurePositiveCap(responseBytes);
+  requirePositiveInteger('Response byte cap', responseBytes);
   const loaded: LoadedUpload[] = [];
   let totalBytes = 0;
   const root = await realpath(projectRoot);
@@ -214,6 +165,9 @@ const assertRemoteRegularFile = async (
   }
 };
 
+const isDestroyable = (stream: object): stream is { destroy: () => void } =>
+  'destroy' in stream && typeof stream.destroy === 'function';
+
 /** Streams one remote file into a bounded host buffer and destroys the stream on overflow. */
 const readRemoteFile = async (
   sandbox: VercelSandboxSdk,
@@ -221,17 +175,12 @@ const readRemoteFile = async (
   responseBytes: number,
   signal: AbortSignal,
 ): Promise<Buffer | null> => {
-  const readFile: (
-    file: { path: string },
-    options: { signal: AbortSignal },
-  ) => Promise<NodeJS.ReadableStream | null> = sandbox.readFile;
-  // The SDK method uses its Sandbox instance to resume a suspended VM.
-  const stream = await readFile.call(sandbox, { path }, { signal });
+  const stream = await sandbox.readFile({ path }, { signal });
   if (stream === null) return null;
   const chunks: Buffer[] = [];
   let bytes = 0;
   try {
-    for await (const chunk of stream as NodeJS.ReadableStream & AsyncIterable<Buffer | string>) {
+    for await (const chunk of stream) {
       const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
       bytes += buffer.length;
       if (bytes > responseBytes) {
@@ -244,22 +193,22 @@ const readRemoteFile = async (
     }
     return Buffer.concat(chunks, bytes);
   } finally {
-    const destroyable = stream as NodeJS.ReadableStream & { destroy?: () => void };
-    destroyable.destroy?.();
+    // An early exit on overflow must not leave the SDK download running.
+    if (isDestroyable(stream)) stream.destroy();
   }
 };
 
 /** Stages all terminal artifacts beside their destinations, then publishes each with rename. */
 const publishTerminalArtifacts = async (
   sandbox: VercelSandboxSdk,
-  artifacts: NonNullable<VercelSandboxResource['artifacts']>,
+  artifacts: NonNullable<VercelSandbox['artifacts']>,
   projectRoot: string,
   configuredArtifactRoot: string,
   responseBytes: number,
   commandTimeoutMs: number,
   signal: AbortSignal,
 ): Promise<void> => {
-  ensurePositiveCap(responseBytes);
+  requirePositiveInteger('Response byte cap', responseBytes);
   const staged: StagedArtifact[] = [];
   let totalBytes = 0;
   const configuredProjectRoot = resolve(projectRoot);
@@ -312,12 +261,4 @@ const publishTerminalArtifacts = async (
   }
 };
 
-export {
-  readRemoteFile,
-  loadExplicitUploads,
-  publishTerminalArtifacts,
-  resolveArtifactDestination,
-  resolveRemotePath,
-  SANDBOX_WORKSPACE,
-};
-export type { LoadedUpload };
+export { loadExplicitUploads, publishTerminalArtifacts, readRemoteFile };

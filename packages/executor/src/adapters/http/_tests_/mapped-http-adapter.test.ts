@@ -1,4 +1,4 @@
-import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
+import type { IncomingMessage, ServerResponse } from 'node:http';
 
 import {
   AGENT_PROTOCOL,
@@ -8,9 +8,13 @@ import {
 } from '@attest/contracts';
 import { afterEach, describe, expect, it } from 'vitest';
 
+import {
+  startLoopbackServer,
+  type LoopbackServer,
+} from '../../../_tests_/support/loopback-server.js';
 import { invokeMappedHttpAgent, type HttpAgentResource } from '../mapped-http-adapter.js';
 
-const servers: Server[] = [];
+const servers: LoopbackServer[] = [];
 const request: AgentRequest = {
   protocol: AGENT_PROTOCOL,
   run_id: '01ARZ3NDEKTSV4RRFFQ69G5FAV',
@@ -21,16 +25,10 @@ const request: AgentRequest = {
 /** Starts a loopback fixture and returns its stable origin after the socket is listening. */
 const startServer = async (
   handler: (request: IncomingMessage, response: ServerResponse) => void,
-): Promise<{ origin: string; server: Server }> => {
-  const server = createServer(handler);
+): Promise<{ origin: string }> => {
+  const server = await startLoopbackServer(handler);
   servers.push(server);
-  await new Promise<void>((resolve, reject) => {
-    server.once('error', reject);
-    server.listen(0, '127.0.0.1', resolve);
-  });
-  const address = server.address();
-  if (address === null || typeof address === 'string') throw new Error('Expected TCP fixture.');
-  return { origin: `http://127.0.0.1:${String(address.port)}`, server };
+  return { origin: server.url };
 };
 
 const directAgent = (origin: string, overrides: Partial<AgentResource> = {}): HttpAgentResource =>
@@ -55,11 +53,7 @@ const directAgent = (origin: string, overrides: Partial<AgentResource> = {}): Ht
   }) as HttpAgentResource;
 
 afterEach(async () => {
-  await Promise.all(
-    servers
-      .splice(0)
-      .map((server) => new Promise<void>((resolve) => server.close(() => resolve()))),
-  );
+  await Promise.all(servers.splice(0).map((server) => server.close()));
 });
 
 describe('mapped HTTP adapter', () => {

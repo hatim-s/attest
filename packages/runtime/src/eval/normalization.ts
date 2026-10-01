@@ -1,6 +1,6 @@
 import type { EvalRunSummary } from '@attest/contracts';
 import type { StoredMetricEvaluation } from '@attest/core';
-import type { CaseExecution } from '@attest/executor';
+import type { CaseExecution } from './types.js';
 
 import { isAgentErrorResponse } from '../metrics/case-execution-adapter.js';
 import type { NormalizedEvalCaseResult, ResolvedEvalCase } from './types.js';

@@ -2,6 +2,8 @@ export { executeResolvedEvalPlan } from './engine/index.js';
 export { EvalCaseStageError } from './errors.js';
 export { toStoredCaseExecution } from './store-recording.js';
 export type {
+  CaseExecution,
+  CaseExecutionBase,
   EvalArtifactWriter,
   EvalBaselineAdapter,
   EvalCaseExecutionContext,

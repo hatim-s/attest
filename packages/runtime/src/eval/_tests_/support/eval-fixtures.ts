@@ -1,8 +1,9 @@
+import type { CaseExecution } from '../../types.js';
 import { readFileSync } from 'node:fs';
 
 import { evalRunSchema, type EvalRun } from '@attest/contracts';
 import type { StoredMetricEvaluation } from '@attest/core';
-import { AgentInvocationError, type CaseExecution } from '@attest/executor';
+import { AgentInvocationError } from '@attest/executor';
 import { vi } from 'vitest';
 
 import type {

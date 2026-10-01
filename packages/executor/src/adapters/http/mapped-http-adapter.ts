@@ -1,32 +1,42 @@
-import { parseAgentResponse, type AgentRequest } from '@attest/contracts';
+import { parseAgentResponse, type AgentRequest, type AgentResource } from '@attest/contracts';
 
-import { AgentInvocationError } from '../../errors.js';
+import { AgentInvocationError, abortedError } from '../../errors.js';
+import {
+  DEFAULT_ATTEMPT_MS,
+  DEFAULT_CONNECT_MS,
+  DEFAULT_FIRST_BYTE_MS,
+  DEFAULT_IDLE_MS,
+  DEFAULT_REQUEST_BYTES,
+  DEFAULT_RESPONSE_BYTES,
+} from '../../internal/agent-defaults.js';
 import { startTimer } from '../../internal/elapsed.js';
 import type { InvocationAttempt, InvocationResult } from '../../types.js';
-import { materializeHttpRequest, type ResolvedHttpRequestTemplate } from './request-template.js';
+import { materializeHttpRequest, resolveRequestTemplate } from './request-template.js';
 import {
-  assertPollingConfiguration,
   attemptFromError,
   extractAgentResponse,
   extractRemoteJobId,
   normalizeFailure,
   requireSuccessfulStatus,
   runDirect,
-  runPolling,
-  withResolvedValues,
 } from './mapped-http-execution.js';
-import type {
-  HttpAgentResource,
-  MappedHttpInvokeOptions,
-  TimedInvocationError,
-} from './mapped-http-types.js';
+import { runPolling } from './mapped-http-polling.js';
 
-const DEFAULT_ATTEMPT_MS = 60_000;
-const DEFAULT_CONNECT_MS = 10_000;
-const DEFAULT_FIRST_BYTE_MS = 30_000;
-const DEFAULT_BODY_IDLE_MS = 30_000;
-const DEFAULT_REQUEST_CAP_BYTES = 10 * 1024 * 1024;
-const DEFAULT_RESPONSE_CAP_BYTES = 10 * 1024 * 1024;
+/** An agent reached over plain HTTP, either answering directly or through submit-and-poll. */
+type HttpAgentResource = AgentResource & {
+  transport: Extract<AgentResource['transport'], { kind: 'http' | 'polling' }>;
+};
+
+/** Runtime-resolved request values and cancellation for one mapped HTTP invocation. */
+type MappedHttpInvokeOptions = {
+  headers?: Record<string, string>;
+  query?: Record<string, string>;
+  secrets?: readonly string[];
+  /** The caller's cancellation; its abort is recorded as `cancelled`. */
+  signal?: AbortSignal;
+  /** An extra deadline owned by an enclosing session; its abort is recorded as `timeout`. */
+  deadlineSignal?: AbortSignal;
+};
 
 /** Invokes a direct or polling mapped HTTP resource as one bounded Attest attempt. */
 const invokeMappedHttpAgent = async (
@@ -35,55 +45,39 @@ const invokeMappedHttpAgent = async (
   options: MappedHttpInvokeOptions = {},
 ): Promise<InvocationResult> => {
   const invocationDuration = startTimer();
-  const timeoutSignal = AbortSignal.timeout(agent.timeouts?.attempt_ms ?? DEFAULT_ATTEMPT_MS);
-  const signal =
-    options.signal === undefined ? timeoutSignal : AbortSignal.any([options.signal, timeoutSignal]);
+  const signal = AbortSignal.any(
+    [
+      AbortSignal.timeout(agent.timeouts?.attempt_ms ?? DEFAULT_ATTEMPT_MS),
+      options.signal,
+      options.deadlineSignal,
+    ].filter((candidate) => candidate !== undefined),
+  );
   const policy = {
     attemptSignal: signal,
     callerSignal: options.signal,
     connectTimeoutMs: agent.timeouts?.connect_ms ?? DEFAULT_CONNECT_MS,
     firstByteTimeoutMs: agent.timeouts?.first_byte_ms ?? DEFAULT_FIRST_BYTE_MS,
-    responseBodyTimeoutMs: agent.timeouts?.idle_ms ?? DEFAULT_BODY_IDLE_MS,
-    responseCapBytes: agent.limits?.response_bytes ?? DEFAULT_RESPONSE_CAP_BYTES,
+    responseBodyTimeoutMs: agent.timeouts?.idle_ms ?? DEFAULT_IDLE_MS,
+    responseCapBytes: agent.limits?.response_bytes ?? DEFAULT_RESPONSE_BYTES,
     secrets: options.secrets ?? [],
   };
   const retryAttempts: InvocationAttempt[] = [];
   let terminalAttemptDurationMs: number | undefined;
   try {
-    if (signal.aborted) {
-      throw new AgentInvocationError(
-        options.signal?.aborted === true ? 'cancelled' : 'timeout',
-        options.signal?.aborted === true
-          ? 'Mapped HTTP invocation was cancelled.'
-          : 'Mapped HTTP invocation timed out.',
-      );
-    }
-    if (agent.transport.kind === 'polling') assertPollingConfiguration(agent.transport);
+    if (signal.aborted) throw abortedError(options.signal, 'Mapped HTTP invocation');
     const requestTemplate =
       agent.transport.kind === 'http' ? agent.transport.request : agent.transport.submit;
     const materialized = materializeHttpRequest(
-      withResolvedValues(requestTemplate as ResolvedHttpRequestTemplate, options),
+      resolveRequestTemplate(requestTemplate, options),
       request,
-      agent.limits?.request_bytes ?? DEFAULT_REQUEST_CAP_BYTES,
+      agent.limits?.request_bytes ?? DEFAULT_REQUEST_BYTES,
     );
+    const context = { retry: agent.retry, policy, signal, retryAttempts };
+    const { transport } = agent;
     const completed =
-      agent.transport.kind === 'http'
-        ? await runDirect(
-            agent as Parameters<typeof runDirect>[0],
-            request,
-            materialized,
-            policy,
-            signal,
-            retryAttempts,
-          )
-        : await runPolling(
-            agent as Parameters<typeof runPolling>[0],
-            request,
-            materialized,
-            policy,
-            signal,
-            retryAttempts,
-          );
+      transport.kind === 'http'
+        ? await runDirect(materialized, context)
+        : await runPolling(transport, request, materialized, context);
     terminalAttemptDurationMs = completed.durationMs;
     const { response } = completed;
     requireSuccessfulStatus(response);
@@ -116,15 +110,10 @@ const invokeMappedHttpAgent = async (
     };
     return { ...attempt, attempts: [...retryAttempts, attempt] };
   } catch (error: unknown) {
-    const normalized = normalizeFailure(error, signal, options.signal) as AgentInvocationError & {
-      httpStatus?: number;
-      rawExcerpt?: InvocationAttempt['rawExcerpt'];
-    };
+    const normalized = normalizeFailure(error, signal, options.signal);
     const attempt = attemptFromError(
       normalized,
-      (normalized as TimedInvocationError).attemptDurationMs ??
-        terminalAttemptDurationMs ??
-        invocationDuration(),
+      normalized.attemptDurationMs ?? terminalAttemptDurationMs ?? invocationDuration(),
     );
     return { ...attempt, attempts: [...retryAttempts, attempt] };
   }

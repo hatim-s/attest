@@ -1,3 +1,5 @@
+import { splitJsonPointer } from './json-pointer.js';
+
 const REDACTED = '[REDACTED]';
 
 /** Enumerates common transport encodings so reflected credentials cannot evade evidence redaction. */
@@ -28,13 +30,8 @@ const redactTransportText = (value: string, secrets: readonly string[]): string 
     value,
   );
 
-const pointerSegments = (pointer: string): string[] =>
-  pointer === ''
-    ? []
-    : pointer
-        .slice(1)
-        .split('/')
-        .map((segment) => segment.replaceAll('~1', '/').replaceAll('~0', '~'));
+const isContainer = (value: unknown): value is Record<string, unknown> =>
+  value !== null && typeof value === 'object';
 
 /** Replaces authored sensitive event fields before an event becomes persisted evidence. */
 const redactEventEvidence = (
@@ -44,22 +41,17 @@ const redactEventEvidence = (
 ): string => {
   const redacted = structuredClone(value);
   for (const pointer of pointers) {
-    const segments = pointerSegments(pointer);
-    if (segments.length === 0) return REDACTED;
+    const segments = splitJsonPointer(pointer);
+    const leaf = segments.pop();
+    // The root pointer names the whole event, so the entire evidence entry becomes the marker.
+    if (leaf === undefined) return REDACTED;
     let parent: unknown = redacted;
-    for (const segment of segments.slice(0, -1)) {
-      if (parent === null || typeof parent !== 'object' || !Object.hasOwn(parent, segment)) {
-        parent = undefined;
-        break;
-      }
-      parent = Reflect.get(parent, segment);
+    for (const segment of segments) {
+      parent = isContainer(parent) && Object.hasOwn(parent, segment) ? parent[segment] : undefined;
     }
-    if (parent !== null && typeof parent === 'object') {
-      const leaf = segments.at(-1);
-      if (leaf !== undefined && Object.hasOwn(parent, leaf)) Reflect.set(parent, leaf, REDACTED);
-    }
+    if (isContainer(parent) && Object.hasOwn(parent, leaf)) parent[leaf] = REDACTED;
   }
   return redactTransportText(JSON.stringify(redacted), secrets);
 };
 
-export { REDACTED, redactEventEvidence, redactTransportText, secretRepresentations };
+export { redactEventEvidence, redactTransportText };

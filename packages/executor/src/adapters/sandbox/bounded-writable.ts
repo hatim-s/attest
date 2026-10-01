@@ -1,6 +1,8 @@
 import { createHash, type Hash } from 'node:crypto';
 import { Writable } from 'node:stream';
 
+import { BoundedTail } from '../../internal/bounded-tail.js';
+
 /** Captures a bounded stdout prefix, hashes all received bytes, and aborts at the cap. */
 class BoundedOutputWritable extends Writable {
   private readonly chunks: Buffer[] = [];
@@ -11,7 +13,8 @@ class BoundedOutputWritable extends Writable {
 
   constructor(
     private readonly capBytes: number,
-    private readonly onExceeded: () => void,
+    /** Runs once when the cap is first exceeded, so the owner can abort the producer. */
+    private readonly onExceeded?: () => void,
   ) {
     super();
   }
@@ -32,7 +35,7 @@ class BoundedOutputWritable extends Writable {
     }
     if (!this.exceeded && this.receivedBytes > this.capBytes) {
       this.exceeded = true;
-      this.onExceeded();
+      this.onExceeded?.();
     }
     callback();
   }
@@ -49,10 +52,11 @@ class BoundedOutputWritable extends Writable {
 
 /** Retains a bounded diagnostics tail without exerting unbounded backpressure on SDK log delivery. */
 class BoundedTailWritable extends Writable {
-  private retained = Buffer.alloc(0);
+  private readonly tail: BoundedTail;
 
-  constructor(private readonly capBytes: number) {
+  constructor(capBytes: number) {
     super();
+    this.tail = new BoundedTail(capBytes);
   }
 
   override _write(
@@ -60,17 +64,12 @@ class BoundedTailWritable extends Writable {
     encoding: BufferEncoding,
     callback: (error?: Error | null) => void,
   ): void {
-    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk, encoding);
-    const combined = Buffer.concat([this.retained, buffer]);
-    this.retained = combined.subarray(Math.max(0, combined.length - this.capBytes));
+    this.tail.append(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk, encoding));
     callback();
   }
 
   text(): string | undefined {
-    if (this.retained.length === 0) return undefined;
-    let offset = 0;
-    while (offset < this.retained.length && (this.retained[offset]! & 0xc0) === 0x80) offset += 1;
-    return this.retained.subarray(offset).toString('utf8');
+    return this.tail.text();
   }
 }
 

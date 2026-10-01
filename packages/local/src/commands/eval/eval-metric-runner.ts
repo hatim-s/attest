@@ -12,8 +12,9 @@ import {
   type MetricResource,
 } from '@attest/contracts';
 import { type CacheStore, type StoredMetricEvaluation } from '@attest/core';
-import { invokeMappedHttpAgent, redactTransportText, type CaseExecution } from '@attest/executor';
+import { invokeMappedHttpAgent, redactTransportText } from '@attest/executor';
 import {
+  type CaseExecution,
   caseExecutionToMetricContext,
   createTanstackJudgeClient,
   evaluateMetrics,

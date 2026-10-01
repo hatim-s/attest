@@ -1,7 +1,8 @@
 import { isIP } from 'node:net';
+import type { LookupAddress } from 'node:dns';
 import { lookup } from 'node:dns/promises';
 
-import { AgentInvocationError } from '../../errors.js';
+import { AgentInvocationError, abortedError } from '../../errors.js';
 
 type ResolvedHttpUrl = {
   address: string;
@@ -58,23 +59,40 @@ const isLoopbackAddress = (address: string): boolean =>
 const isSafeAddress = (address: string): boolean =>
   isIP(address) === 4 ? isSafeIpv4(address) : isIP(address) === 6 && isSafeIpv6(address);
 
-const isAborted = (signal: AbortSignal | undefined): boolean => signal?.aborted === true;
+type ResolveSafeHttpUrlOptions = {
+  /** Deadline for the DNS lookup alone. */
+  timeoutMs: number;
+  /** Aborts resolution when the attempt ends for any reason. */
+  signal?: AbortSignal;
+  /** The caller's own signal; its abort is reported as a cancellation rather than a timeout. */
+  callerSignal?: AbortSignal;
+};
+
+/** Rejects once `signal` aborts so a stalled DNS lookup cannot outlive its deadline. */
+const rejectOnAbort = (signal: AbortSignal): Promise<never> =>
+  new Promise<never>((_resolve, reject) => {
+    signal.addEventListener(
+      'abort',
+      () =>
+        reject(
+          signal.reason instanceof Error
+            ? signal.reason
+            : new DOMException('Aborted', 'AbortError'),
+        ),
+      { once: true },
+    );
+  });
 
 /** Validates an HTTP URL and pins a previously validated DNS result for the ensuing connection. */
 const resolveSafeHttpUrl = async (
   value: string,
-  timeoutMs: number,
-  signal?: AbortSignal,
-  callerSignal?: AbortSignal,
+  options: ResolveSafeHttpUrlOptions,
 ): Promise<ResolvedHttpUrl> => {
-  if (isAborted(signal)) {
-    throw new AgentInvocationError(
-      isAborted(callerSignal) ? 'cancelled' : 'timeout',
-      isAborted(callerSignal)
-        ? 'Mapped HTTP invocation was cancelled.'
-        : 'Mapped HTTP hostname resolution timed out.',
-    );
-  }
+  const { callerSignal, signal } = options;
+  const throwIfAborted = (): void => {
+    if (signal?.aborted === true) throw abortedError(callerSignal, 'HTTP hostname resolution');
+  };
+  throwIfAborted();
   let url: URL;
   try {
     url = new URL(value);
@@ -93,54 +111,35 @@ const resolveSafeHttpUrl = async (
     );
   }
 
-  const timeoutSignal = AbortSignal.timeout(timeoutMs);
+  throwIfAborted();
+  const timeoutSignal = AbortSignal.timeout(options.timeoutMs);
   const combined = signal === undefined ? timeoutSignal : AbortSignal.any([signal, timeoutSignal]);
-  if (combined.aborted) {
-    throw new AgentInvocationError(
-      isAborted(callerSignal) ? 'cancelled' : 'timeout',
-      isAborted(callerSignal)
-        ? 'Mapped HTTP invocation was cancelled.'
-        : 'Mapped HTTP hostname resolution timed out.',
-    );
-  }
-  let addresses: { address: string; family: 4 | 6 }[];
+  let addresses: LookupAddress[];
   try {
-    addresses = (await Promise.race([
+    addresses = await Promise.race([
       lookup(url.hostname, { all: true, verbatim: true }),
-      new Promise<never>((_resolve, reject) => {
-        combined.addEventListener(
-          'abort',
-          () =>
-            reject(
-              combined.reason instanceof Error
-                ? combined.reason
-                : new DOMException('Aborted', 'AbortError'),
-            ),
-          { once: true },
-        );
-      }),
-    ])) as { address: string; family: 4 | 6 }[];
+      rejectOnAbort(combined),
+    ]);
   } catch (error: unknown) {
+    if (callerSignal?.aborted === true || signal?.aborted === true) {
+      throw abortedError(callerSignal, 'HTTP hostname resolution', { cause: error });
+    }
     throw new AgentInvocationError(
-      isAborted(callerSignal) ? 'cancelled' : isAborted(signal) ? 'timeout' : 'network',
-      isAborted(callerSignal)
-        ? 'Mapped HTTP invocation was cancelled.'
-        : isAborted(signal)
-          ? 'Mapped HTTP hostname resolution timed out.'
-          : 'Mapped HTTP hostname could not be resolved safely.',
+      'network',
+      'Mapped HTTP hostname could not be resolved safely.',
       { cause: error },
     );
   }
-  if (addresses.length === 0 || addresses.some(({ address }) => !isSafeAddress(address))) {
+  const [selected] = addresses;
+  if (selected === undefined || addresses.some(({ address }) => !isSafeAddress(address))) {
     throw new AgentInvocationError(
       'network',
       'Mapped HTTP hostname resolves to a prohibited network address.',
     );
   }
-  const selected = addresses[0]!;
   return {
     address: selected.address,
-    family: selected.family,
+    family: selected.family === 6 ? 6 : 4,
     loopback: addresses.every(({ address }) => isLoopbackAddress(address)),
     url,
   };

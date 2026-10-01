@@ -13,6 +13,8 @@ export {
   EvalCaseStageError,
   executeResolvedEvalPlan,
   toStoredCaseExecution,
+  type CaseExecution,
+  type CaseExecutionBase,
   type EvalArtifactWriter,
   type EvalBaselineAdapter,
   type EvalCaseExecutionContext,

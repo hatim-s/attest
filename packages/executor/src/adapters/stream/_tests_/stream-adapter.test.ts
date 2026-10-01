@@ -1,28 +1,25 @@
-import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
+import type { IncomingMessage, ServerResponse } from 'node:http';
 
 import { AGENT_PROTOCOL, AGENT_RESOURCE_SCHEMA_ID, type AgentRequest } from '@attest/contracts';
 import { afterEach, describe, expect, it } from 'vitest';
 
+import {
+  startLoopbackServer,
+  type LoopbackServer,
+} from '../../../_tests_/support/loopback-server.js';
 import { invokeStreamingAgent, type StreamAgentResource } from '../stream-adapter.js';
 
-const servers: Server[] = [];
+const servers: LoopbackServer[] = [];
 const listen = async (
   handler: (request: IncomingMessage, response: ServerResponse) => void,
 ): Promise<string> => {
-  const server = createServer(handler);
+  const server = await startLoopbackServer(handler);
   servers.push(server);
-  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
-  const address = server.address();
-  if (address === null || typeof address === 'string') throw new Error('Expected TCP address.');
-  return `http://127.0.0.1:${String(address.port)}`;
+  return server.url;
 };
 
 afterEach(async () => {
-  await Promise.all(
-    servers
-      .splice(0)
-      .map((server) => new Promise<void>((resolve) => server.close(() => resolve()))),
-  );
+  await Promise.all(servers.splice(0).map((server) => server.close()));
 });
 
 const request: AgentRequest = {
@@ -213,20 +210,21 @@ describe('HTTP streaming adapter', () => {
       calls += 1;
       if (calls === 1) {
         response.statusCode = 429;
-        response.setHeader('retry-after', '1');
+        response.setHeader('retry-after', '0');
         response.end();
         return;
       }
       response.setHeader('content-type', 'application/x-ndjson');
       response.end('{"type":"result","output":"after-wait"}\n');
     });
+    // A long authored backoff proves the zero-second Retry-After replaced it.
     const configured = agent(origin, 'jsonl', {
-      retry: { retries: 1, backoff: { kind: 'none' } },
+      retry: { retries: 1, backoff: { kind: 'fixed', delay_ms: 60_000 } },
       timeouts: { attempt_ms: 2_000, idle_ms: 500, run_ms: 3_000 },
     });
     const started = Date.now();
     expect((await invokeStreamingAgent(configured, request)).status).toBe('ok');
-    expect(Date.now() - started).toBeGreaterThanOrEqual(900);
+    expect(Date.now() - started).toBeLessThan(1_000);
     expect(calls).toBe(2);
 
     let unboundedCalls = 0;

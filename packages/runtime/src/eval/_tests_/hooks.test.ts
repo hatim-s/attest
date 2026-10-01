@@ -1,5 +1,6 @@
+import type { CaseExecution } from '../types.js';
 import type { StoredMetricEvaluation } from '@attest/core';
-import { justBashIsolation, type CaseEnvironment, type CaseExecution } from '@attest/executor';
+import { justBashIsolation, type CaseEnvironment } from '@attest/executor';
 import { describe, expect, it, vi } from 'vitest';
 
 import { executeResolvedEvalPlan } from '../engine/execute-eval.js';

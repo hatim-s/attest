@@ -144,7 +144,7 @@ const withEvalHooks = <Payload>(
   ): Promise<unknown[]> => {
     const failures: unknown[] = [];
     try {
-      await context.environment?.beginFinalization?.();
+      await context.environment?.beginFinalization();
     } catch (error: unknown) {
       latchUncertainCleanup(error);
       failures.push(error);

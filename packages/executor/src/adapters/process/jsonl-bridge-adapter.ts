@@ -1,15 +1,27 @@
-import { createHash } from 'node:crypto';
 import { StringDecoder } from 'node:string_decoder';
 
 import {
   jsonlBridgeOutputSchema,
   parseAgentResponse,
+  type JsonlBridgeOutput,
   type AgentRequest,
   type AgentResource,
 } from '@attest/contracts';
 
 import { AgentInvocationError } from '../../errors.js';
+import {
+  DEFAULT_ATTEMPT_MS,
+  DEFAULT_EVENT_BYTES,
+  DEFAULT_EVENT_COUNT,
+  DEFAULT_REQUEST_BYTES,
+  DEFAULT_STDERR_BYTES,
+  DEFAULT_TERMINATION_GRACE_MS,
+  DEFAULT_TOTAL_EVIDENCE_BYTES,
+} from '../../internal/agent-defaults.js';
+import { correlationId } from '../../internal/correlation-id.js';
+import { LineSplitter, type SplitLines } from '../../internal/line-splitter.js';
 import { startTimer } from '../../internal/elapsed.js';
+import { createSerialQueue } from '../../internal/serial-queue.js';
 import { createRawExcerpt } from '../../internal/raw-excerpt.js';
 import type { InvocationAttempt, InvocationResult } from '../../types.js';
 import { redactEventEvidence, redactTransportText } from '../http/redaction.js';
@@ -27,9 +39,11 @@ type JsonlBridgeSessionOptions = {
   terminationGraceMs?: number;
 };
 
+type CancellationCode = 'cancelled' | 'timeout';
+
 type PendingInvocation = {
   cancelled: boolean;
-  cancellationCode?: 'cancelled' | 'timeout';
+  cancellationCode?: CancellationCode;
   cancellationTimer?: NodeJS.Timeout;
   callerAbort?: () => void;
   duration: () => number;
@@ -39,35 +53,30 @@ type PendingInvocation = {
   timeoutTimer: NodeJS.Timeout;
 };
 
-const DEFAULT_ATTEMPT_MS = 60_000;
-const DEFAULT_EVENT_COUNT = 10_000;
-const DEFAULT_EVENT_BYTES = 1024 * 1024;
-const DEFAULT_TOTAL_EVIDENCE_BYTES = 10 * 1024 * 1024;
-const DEFAULT_STDERR_BYTES = 16 * 1024;
-const DEFAULT_TERMINATION_GRACE_MS = 5_000;
+type ParsedOutput = { output: JsonlBridgeOutput; raw: unknown };
 
-/** Derives a bounded correlation token without embedding unbounded authored request identifiers. */
-const correlationId = (request: AgentRequest, sequence: number): string => {
-  const digest = createHash('sha256')
-    .update(request.run_id)
-    .update('\0')
-    .update(request.case_id)
-    .digest('hex')
-    .slice(0, 32);
-  return `req-${sequence.toString(36)}-${digest}`;
-};
+const capError = (message: string): AgentInvocationError =>
+  new AgentInvocationError('output_cap_exceeded', message);
+
+/** Reports a request that attest stopped, either on caller cancellation or on its deadline. */
+const cancellationError = (code: CancellationCode, cause?: unknown): AgentInvocationError =>
+  new AgentInvocationError(
+    code,
+    code === 'timeout' ? 'JSONL bridge request timed out.' : 'JSONL bridge request was cancelled.',
+    cause === undefined ? {} : { cause },
+  );
 
 /** Runs one persistent, correlated native-agent JSONL bridge for exactly one eval run. */
 class JsonlBridgeSession {
   private readonly pending = new Map<string, PendingInvocation>();
   private readonly decoder = new StringDecoder('utf8');
   private readonly secrets: readonly string[];
-  private buffer = '';
+  private readonly lines: LineSplitter;
   private closed = false;
   private closePromise?: Promise<void>;
   private eventCount = 0;
   private sequence = 0;
-  private serialTail: Promise<void> = Promise.resolve();
+  private readonly runSerially = createSerialQueue();
   private totalEvidenceBytes = 0;
   private runTimer?: NodeJS.Timeout;
 
@@ -77,8 +86,9 @@ class JsonlBridgeSession {
     private readonly options: JsonlBridgeSessionOptions,
   ) {
     this.secrets = options.secrets ?? [];
-    process.child.stdout.on('data', (chunk: Buffer) => this.consume(chunk));
-    process.child.stdout.once('end', () => this.consumeEnd());
+    this.lines = new LineSplitter(agent.limits?.event_bytes ?? DEFAULT_EVENT_BYTES);
+    process.stdout.on('data', (chunk: Buffer) => this.consume(chunk));
+    process.stdout.once('end', () => this.consumeEnd());
     void process.exit.then(({ code, signal }) => {
       if (this.closed) return;
       const error =
@@ -127,31 +137,20 @@ class JsonlBridgeSession {
   /** Queues serial bridges and directly multiplexes bridges that advertise correlation support. */
   async invoke(request: AgentRequest, signal?: AbortSignal): Promise<InvocationResult> {
     if (this.agent.transport.concurrency === 'multiplexed') return this.invokeNow(request, signal);
-    let resolveResult!: (result: InvocationResult) => void;
-    const result = new Promise<InvocationResult>((resolve) => {
-      resolveResult = resolve;
-    });
-    const scheduled = this.serialTail.then(async () => {
-      resolveResult(await this.invokeNow(request, signal));
-    });
-    this.serialTail = scheduled.catch(() => undefined);
-    return result;
+    return this.runSerially(() => this.invokeNow(request, signal));
   }
 
   private async invokeNow(request: AgentRequest, signal?: AbortSignal): Promise<InvocationResult> {
     if (this.closed)
       return this.failure(new AgentInvocationError('network', 'JSONL bridge is closed.'), 0);
     if (signal?.aborted === true) {
-      return this.failure(
-        new AgentInvocationError('cancelled', 'JSONL bridge request was cancelled.'),
-        0,
-      );
+      return this.failure(cancellationError('cancelled'), 0);
     }
-    const requestId = correlationId(request, ++this.sequence);
+    const requestId = correlationId('req', request, ++this.sequence);
     const frame = { type: 'request', request_id: requestId, request } as const;
     if (
       Buffer.byteLength(JSON.stringify(frame)) >
-      (this.agent.limits?.request_bytes ?? DEFAULT_TOTAL_EVIDENCE_BYTES)
+      (this.agent.limits?.request_bytes ?? DEFAULT_REQUEST_BYTES)
     ) {
       return this.failure(
         new AgentInvocationError(
@@ -201,93 +200,74 @@ class JsonlBridgeSession {
 
   private consume(chunk: Buffer): void {
     if (this.closed) return;
-    this.buffer += this.decoder.write(chunk);
-    const maximumLineBytes = this.agent.limits?.event_bytes ?? DEFAULT_EVENT_BYTES;
-    if (Buffer.byteLength(this.buffer) > maximumLineBytes && !this.buffer.includes('\n')) {
-      this.failSession(
-        new AgentInvocationError(
-          'output_cap_exceeded',
-          'JSONL bridge line exceeds its event byte cap.',
-        ),
-      );
-      return;
-    }
-    for (;;) {
-      const newline = this.buffer.indexOf('\n');
-      if (newline < 0) break;
-      const line = this.buffer.slice(0, newline).replace(/\r$/u, '');
-      this.buffer = this.buffer.slice(newline + 1);
-      if (line.trim().length === 0) continue;
-      this.consumeLine(line);
-      if (this.closed) return;
-    }
+    this.consumeLines(this.lines.push(this.decoder.write(chunk)));
   }
 
   private consumeEnd(): void {
     if (this.closed) return;
-    this.buffer += this.decoder.end();
-    if (this.buffer.trim().length > 0) this.consumeLine(this.buffer.replace(/\r$/u, ''));
-    this.buffer = '';
+    this.consumeLines(this.lines.push(this.decoder.end()));
+    if (!this.closed) this.consumeLines(this.lines.end());
   }
 
-  private consumeLine(line: string): void {
-    const bytes = Buffer.byteLength(line);
+  private consumeLines({ lines, overflow }: SplitLines): void {
+    for (const line of lines) {
+      if (line.trim().length > 0) this.consumeLine(line);
+      if (this.closed) return;
+    }
+    if (overflow) {
+      this.failSession(capError('JSONL bridge line exceeds its event byte cap.'));
+    }
+  }
+
+  /** Counts one output line against the session caps; returns the cap it broke, if any. */
+  private checkCaps(line: string): AgentInvocationError | undefined {
     this.eventCount += 1;
-    this.totalEvidenceBytes += bytes;
-    if (bytes > (this.agent.limits?.event_bytes ?? DEFAULT_EVENT_BYTES)) {
-      this.failSession(
-        new AgentInvocationError(
-          'output_cap_exceeded',
-          'JSONL bridge line exceeds its event byte cap.',
-        ),
-      );
-      return;
-    }
+    this.totalEvidenceBytes += Buffer.byteLength(line);
     if (this.eventCount > (this.agent.limits?.event_count ?? DEFAULT_EVENT_COUNT)) {
-      this.failSession(
-        new AgentInvocationError(
-          'output_cap_exceeded',
-          'JSONL bridge exceeds its event count cap.',
-        ),
-      );
-      return;
+      return capError('JSONL bridge exceeds its event count cap.');
     }
-    if (
-      this.totalEvidenceBytes >
-      (this.agent.limits?.total_evidence_bytes ?? DEFAULT_TOTAL_EVIDENCE_BYTES)
-    ) {
-      this.failSession(
-        new AgentInvocationError(
-          'output_cap_exceeded',
-          'JSONL bridge exceeds its aggregate evidence cap.',
-        ),
-      );
-      return;
+    const totalCap = this.agent.limits?.total_evidence_bytes ?? DEFAULT_TOTAL_EVIDENCE_BYTES;
+    if (this.totalEvidenceBytes > totalCap) {
+      return capError('JSONL bridge exceeds its aggregate evidence cap.');
     }
+    return undefined;
+  }
+
+  /** Parses one line into a bridge output envelope, or the protocol error that ends the session. */
+  private parseOutput(line: string): ParsedOutput | AgentInvocationError {
     let raw: unknown;
     try {
       raw = JSON.parse(line) as unknown;
     } catch (error: unknown) {
-      this.failSession(
-        new AgentInvocationError(
-          'invalid_envelope',
-          'JSONL bridge stdout contains non-JSON data.',
-          { cause: error },
-        ),
+      return new AgentInvocationError(
+        'invalid_envelope',
+        'JSONL bridge stdout contains non-JSON data.',
+        { cause: error },
       );
-      return;
     }
     const parsed = jsonlBridgeOutputSchema.safeParse(raw);
     if (!parsed.success) {
-      this.failSession(
-        new AgentInvocationError(
-          'invalid_envelope',
-          'JSONL bridge emitted an invalid output envelope.',
-        ),
+      return new AgentInvocationError(
+        'invalid_envelope',
+        'JSONL bridge emitted an invalid output envelope.',
       );
+    }
+    return { output: parsed.data, raw };
+  }
+
+  private consumeLine(line: string): void {
+    const capFailure = this.checkCaps(line);
+    if (capFailure !== undefined) {
+      this.failSession(capFailure);
       return;
     }
-    const pending = this.pending.get(parsed.data.request_id);
+    const parsed = this.parseOutput(line);
+    if (parsed instanceof AgentInvocationError) {
+      this.failSession(parsed);
+      return;
+    }
+    const { output, raw } = parsed;
+    const pending = this.pending.get(output.request_id);
     if (pending === undefined) {
       this.failSession(
         new AgentInvocationError(
@@ -297,51 +277,24 @@ class JsonlBridgeSession {
       );
       return;
     }
-    if (parsed.data.type === 'cancelled') {
-      if (!pending.cancelled) {
-        this.failSession(
-          new AgentInvocationError(
-            'invalid_envelope',
-            'JSONL bridge acknowledged cancellation that was not requested.',
-          ),
-        );
-        return;
-      }
-      this.settle(
-        parsed.data.request_id,
-        this.failure(
-          new AgentInvocationError(
-            pending.cancellationCode ?? 'cancelled',
-            pending.cancellationCode === 'timeout'
-              ? 'JSONL bridge request timed out.'
-              : 'JSONL bridge request was cancelled.',
-          ),
-          pending.duration(),
-          line,
+    if (output.type === 'cancelled' && !pending.cancelled) {
+      this.failSession(
+        new AgentInvocationError(
+          'invalid_envelope',
+          'JSONL bridge acknowledged cancellation that was not requested.',
         ),
       );
       return;
     }
-    if (pending.cancelled) {
-      this.settle(
-        parsed.data.request_id,
-        this.failure(
-          new AgentInvocationError(
-            pending.cancellationCode ?? 'cancelled',
-            pending.cancellationCode === 'timeout'
-              ? 'JSONL bridge request timed out.'
-              : 'JSONL bridge request was cancelled.',
-          ),
-          pending.duration(),
-          line,
-        ),
-      );
+    // After attest cancels, both the acknowledgement and a late response settle as cancelled.
+    if (output.type === 'cancelled' || pending.cancelled) {
+      this.settleCancellation(output.request_id, pending, line);
       return;
     }
-    const report = parseAgentResponse(parsed.data.response);
+    const report = parseAgentResponse(output.response);
     if (!report.ok) {
       this.settle(
-        parsed.data.request_id,
+        output.request_id,
         this.failure(
           new AgentInvocationError(
             'invalid_envelope',
@@ -355,7 +308,7 @@ class JsonlBridgeSession {
     }
     const attempt: InvocationAttempt = {
       status: 'ok',
-      raw: parsed.data.response,
+      raw: output.response,
       report,
       diagnostics: this.diagnostics(),
       durationMs: pending.duration(),
@@ -364,10 +317,21 @@ class JsonlBridgeSession {
       ),
       warnings: report.warnings,
     };
-    this.settle(parsed.data.request_id, { ...attempt, attempts: [attempt] });
+    this.settle(output.request_id, { ...attempt, attempts: [attempt] });
   }
 
-  private async cancel(requestId: string, code: 'cancelled' | 'timeout'): Promise<void> {
+  private settleCancellation(requestId: string, pending: PendingInvocation, line: string): void {
+    this.settle(
+      requestId,
+      this.failure(
+        cancellationError(pending.cancellationCode ?? 'cancelled'),
+        pending.duration(),
+        line,
+      ),
+    );
+  }
+
+  private async cancel(requestId: string, code: CancellationCode): Promise<void> {
     const pending = this.pending.get(requestId);
     if (pending === undefined || pending.cancelled) return;
     pending.cancelled = true;
@@ -391,24 +355,12 @@ class JsonlBridgeSession {
 
   private fallbackAfterCancellation(
     requestId: string,
-    code: 'cancelled' | 'timeout',
+    code: CancellationCode,
     cause?: unknown,
   ): void {
     const pending = this.pending.get(requestId);
     if (pending !== undefined) {
-      this.settle(
-        requestId,
-        this.failure(
-          new AgentInvocationError(
-            code,
-            code === 'timeout'
-              ? 'JSONL bridge request timed out.'
-              : 'JSONL bridge request was cancelled.',
-            { cause },
-          ),
-          pending.duration(),
-        ),
-      );
+      this.settle(requestId, this.failure(cancellationError(code, cause), pending.duration()));
     }
     this.failSession(
       new AgentInvocationError(
@@ -459,12 +411,7 @@ class JsonlBridgeSession {
     for (const [requestId, pending] of this.pending) {
       const requestError =
         pending.cancelled && pending.cancellationCode !== undefined
-          ? new AgentInvocationError(
-              pending.cancellationCode,
-              pending.cancellationCode === 'timeout'
-                ? 'JSONL bridge request timed out.'
-                : 'JSONL bridge request was cancelled.',
-            )
+          ? cancellationError(pending.cancellationCode)
           : error;
       this.settle(requestId, this.failure(requestError, pending.duration()));
     }

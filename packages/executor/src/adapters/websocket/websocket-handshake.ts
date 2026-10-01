@@ -1,11 +1,9 @@
 import { createHash, randomBytes } from 'node:crypto';
-import { request as httpRequest } from 'node:http';
-import { request as httpsRequest } from 'node:https';
 import type { Duplex } from 'node:stream';
 
-import type { AgentInvocationError } from '../../errors.js';
+import { AgentInvocationError, abortedError } from '../../errors.js';
+import { openPinnedRequest } from '../http/pinned-request.js';
 import { resolveSafeHttpUrl } from '../http/url-security.js';
-import { classifiedError } from './websocket-protocol.js';
 
 type OpenWebSocketHandshakeOptions = {
   callerSignal?: AbortSignal;
@@ -22,10 +20,6 @@ type WebSocketUpgrade = {
   socket: Duplex;
 };
 
-type ClassifiedWebSocketError = AgentInvocationError & {
-  webSocketClassification?: 'connection_failed' | 'handshake_failed' | 'open_timeout';
-};
-
 const WEBSOCKET_GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11';
 
 /** Opens a DNS-pinned RFC 6455 socket and validates the complete upgrade response. */
@@ -36,7 +30,10 @@ const openWebSocketHandshake = async (
   try {
     webSocketUrl = new URL(options.url);
   } catch (cause: unknown) {
-    throw classifiedError('connection_failed', 'network', 'WebSocket URL is invalid.', cause);
+    throw new AgentInvocationError('network', 'WebSocket URL is invalid.', {
+      cause,
+      classification: 'connection_failed',
+    });
   }
   if (
     !['ws:', 'wss:'].includes(webSocketUrl.protocol) ||
@@ -44,118 +41,82 @@ const openWebSocketHandshake = async (
     webSocketUrl.password.length > 0 ||
     webSocketUrl.hash.length > 0
   ) {
-    throw classifiedError(
-      'connection_failed',
+    throw new AgentInvocationError(
       'network',
       'WebSocket URL must use WS(S) without credentials or a fragment.',
+      { classification: 'connection_failed' },
     );
   }
 
   const httpUrl = new URL(webSocketUrl);
   httpUrl.protocol = webSocketUrl.protocol === 'wss:' ? 'https:' : 'http:';
-  const resolved = await resolveSafeHttpUrl(
-    httpUrl.toString(),
-    options.openTimeoutMs,
-    options.signal,
-    options.callerSignal,
-  );
+  const resolved = await resolveSafeHttpUrl(httpUrl.toString(), {
+    timeoutMs: options.openTimeoutMs,
+    signal: options.signal,
+    callerSignal: options.callerSignal,
+  });
   if (options.secrets.length > 0 && webSocketUrl.protocol !== 'wss:' && !resolved.loopback) {
-    throw classifiedError(
-      'connection_failed',
+    throw new AgentInvocationError(
       'network',
       'WebSocket secrets require WSS except on explicit loopback endpoints.',
+      { classification: 'connection_failed' },
     );
   }
 
   const key = randomBytes(16).toString('base64');
   const expectedAccept = createHash('sha1').update(`${key}${WEBSOCKET_GUID}`).digest('base64');
-  const transport = webSocketUrl.protocol === 'wss:' ? httpsRequest : httpRequest;
-  return new Promise<WebSocketUpgrade>((resolve, reject) => {
-    let settled = false;
-    const finish = (operation: () => void): void => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(openTimer);
-      options.signal.removeEventListener('abort', abort);
-      operation();
-    };
-    const outgoing = transport(resolved.url, {
-      method: 'GET',
-      headers: {
-        ...options.headers,
-        connection: 'Upgrade',
-        upgrade: 'websocket',
-        'sec-websocket-key': key,
-        'sec-websocket-version': '13',
-        ...(options.subprotocol === undefined
-          ? {}
-          : { 'sec-websocket-protocol': options.subprotocol }),
-      },
-      lookup: (_hostname, _lookupOptions, callback) =>
-        callback(null, resolved.address, resolved.family),
-    });
-    const abort = (): void => {
-      outgoing.destroy();
-      const cancelled = options.callerSignal?.aborted === true;
-      finish(() =>
-        reject(
-          classifiedError(
-            'open_timeout',
-            cancelled ? 'cancelled' : 'timeout',
-            cancelled ? 'WebSocket opening was cancelled.' : 'WebSocket opening timed out.',
-          ),
-        ),
-      );
-    };
-    const openTimer = setTimeout(() => {
-      outgoing.destroy();
-      finish(() =>
-        reject(classifiedError('open_timeout', 'timeout', 'WebSocket opening timed out.')),
-      );
-    }, options.openTimeoutMs);
-    options.signal.addEventListener('abort', abort, { once: true });
-    outgoing.once('upgrade', (response, socket, head) => {
-      const accept = response.headers['sec-websocket-accept'];
-      const selectedProtocol = response.headers['sec-websocket-protocol'];
-      if (
-        response.statusCode !== 101 ||
-        String(response.headers.upgrade ?? '').toLowerCase() !== 'websocket' ||
-        String(accept ?? '') !== expectedAccept ||
-        (options.subprotocol !== undefined && selectedProtocol !== options.subprotocol) ||
-        (options.subprotocol === undefined && selectedProtocol !== undefined)
-      ) {
-        socket.destroy();
-        finish(() =>
-          reject(
-            classifiedError('handshake_failed', 'network', 'WebSocket handshake was rejected.'),
-          ),
-        );
-        return;
-      }
-      finish(() => resolve({ head, socket }));
-    });
-    outgoing.once('response', (response) => {
-      response.resume();
-      finish(() =>
-        reject(
-          classifiedError(
-            'handshake_failed',
-            'network',
-            `WebSocket handshake returned status ${String(response.statusCode ?? 0)}.`,
-          ),
-        ),
-      );
-    });
-    outgoing.once('error', (error) =>
-      finish(() =>
-        reject(
-          classifiedError('connection_failed', 'network', 'WebSocket connection failed.', error),
-        ),
-      ),
-    );
-    outgoing.end();
-    if (options.signal.aborted) abort();
+  const opened = await openPinnedRequest(resolved, {
+    method: 'GET',
+    headers: {
+      ...options.headers,
+      connection: 'Upgrade',
+      upgrade: 'websocket',
+      'sec-websocket-key': key,
+      'sec-websocket-version': '13',
+      ...(options.subprotocol === undefined
+        ? {}
+        : { 'sec-websocket-protocol': options.subprotocol }),
+    },
+    signal: options.signal,
+    firstByteTimeoutMs: options.openTimeoutMs,
+    errors: {
+      aborted: () =>
+        abortedError(options.callerSignal, 'WebSocket opening', {
+          classification: 'open_timeout',
+        }),
+      firstByteTimeout: () =>
+        new AgentInvocationError('timeout', 'WebSocket opening timed out.', {
+          classification: 'open_timeout',
+        }),
+      failed: (cause) =>
+        new AgentInvocationError('network', 'WebSocket connection failed.', {
+          cause,
+          classification: 'connection_failed',
+        }),
+    },
   });
+  if (opened.kind === 'response') {
+    opened.response.resume();
+    throw new AgentInvocationError(
+      'network',
+      `WebSocket handshake returned status ${String(opened.response.statusCode ?? 0)}.`,
+      { classification: 'handshake_failed' },
+    );
+  }
+  const { head, response, socket } = opened;
+  const selectedProtocol = response.headers['sec-websocket-protocol'];
+  const accepted =
+    response.statusCode === 101 &&
+    String(response.headers.upgrade ?? '').toLowerCase() === 'websocket' &&
+    String(response.headers['sec-websocket-accept'] ?? '') === expectedAccept &&
+    selectedProtocol === options.subprotocol;
+  if (!accepted) {
+    socket.destroy();
+    throw new AgentInvocationError('network', 'WebSocket handshake was rejected.', {
+      classification: 'handshake_failed',
+    });
+  }
+  return { head, socket };
 };
 
-export { openWebSocketHandshake, type ClassifiedWebSocketError };
+export { openWebSocketHandshake };

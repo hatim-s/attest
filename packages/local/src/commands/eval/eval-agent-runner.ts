@@ -12,11 +12,11 @@ import {
   startBackgroundAgent,
   startJsonlBridgeAgent,
   startWebSocketAgent,
-  type CaseExecution,
   type InvocationResult,
 } from '@attest/executor';
 import {
   EvalCaseStageError,
+  type CaseExecution,
   type EvalCaseExecutionContext,
   type EvalCaseRunner,
   type EvalCaseRunnerResult,

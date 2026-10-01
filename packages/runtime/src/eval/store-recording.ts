@@ -1,6 +1,6 @@
 import type { StoredCaseExecution } from '@attest/core';
 
-import type { CaseExecution } from '@attest/executor';
+import type { CaseExecution } from './types.js';
 
 /** Drops transient metric input while converting runner evidence into the durable store projection. */
 const toStoredCaseExecution = (execution: CaseExecution): StoredCaseExecution => {

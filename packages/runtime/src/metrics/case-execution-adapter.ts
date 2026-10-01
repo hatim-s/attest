@@ -1,5 +1,5 @@
 import type { AgentErrorResponse, AgentResponse, TestCase } from '@attest/contracts';
-import type { CaseExecution } from '@attest/executor';
+import type { CaseExecution } from '../eval/types.js';
 
 import type { MetricContext } from './metric-evaluation.js';
 

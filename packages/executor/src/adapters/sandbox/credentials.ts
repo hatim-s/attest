@@ -20,24 +20,17 @@ const resolveVercelSandboxCredentials = (
 ): VercelSandboxCredentials => {
   if (nonEmpty(environment.VERCEL_OIDC_TOKEN)) return { kind: 'oidc' };
 
-  const present = requiredAccessTokenKeys.filter((key) => nonEmpty(environment[key]));
-  if (present.length !== requiredAccessTokenKeys.length) {
-    const missing = requiredAccessTokenKeys.filter((key) => !nonEmpty(environment[key]));
-    const message =
-      present.length === 0
-        ? 'Vercel Sandbox requires VERCEL_OIDC_TOKEN or VERCEL_TOKEN, VERCEL_TEAM_ID, and VERCEL_PROJECT_ID.'
-        : `Vercel Sandbox access-token credentials are incomplete. Missing: ${missing.join(', ')}.`;
-    throw new AgentInvocationError('spawn_failed', message);
+  const { VERCEL_TOKEN: token, VERCEL_TEAM_ID: teamId, VERCEL_PROJECT_ID: projectId } = environment;
+  if (nonEmpty(token) && nonEmpty(teamId) && nonEmpty(projectId)) {
+    return { kind: 'access_token', credentials: { token, teamId, projectId } };
   }
 
-  return {
-    kind: 'access_token',
-    credentials: {
-      token: environment.VERCEL_TOKEN as string,
-      teamId: environment.VERCEL_TEAM_ID as string,
-      projectId: environment.VERCEL_PROJECT_ID as string,
-    },
-  };
+  const missing = requiredAccessTokenKeys.filter((key) => !nonEmpty(environment[key]));
+  const message =
+    missing.length === requiredAccessTokenKeys.length
+      ? 'Vercel Sandbox requires VERCEL_OIDC_TOKEN or VERCEL_TOKEN, VERCEL_TEAM_ID, and VERCEL_PROJECT_ID.'
+      : `Vercel Sandbox access-token credentials are incomplete. Missing: ${missing.join(', ')}.`;
+  throw new AgentInvocationError('spawn_failed', message);
 };
 
 export { resolveVercelSandboxCredentials };

@@ -1,7 +1,7 @@
 import { AGENT_PROTOCOL } from '@attest/contracts';
 import { describe, expect, it } from 'vitest';
 
-import { resolveInvocationEnv } from '../request.js';
+import { resolveInvocationEnv } from '../invocation-env.js';
 
 describe('resolveInvocationEnv', () => {
   it('synthesizes an isolated base, filters PATH, and forwards only allowlisted parent values', () => {
