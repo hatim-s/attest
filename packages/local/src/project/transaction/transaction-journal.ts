@@ -377,7 +377,13 @@ const recoverProjectTransactions = async (
       );
     }
     const manifestHash = await readByteHash(await resolveSafeProjectPath(root, manifest.path));
-    if (manifestHash === manifest.next_hash) {
+    // A code-only cloud revision can keep identical manifest bytes. In that case the
+    // manifest cannot prove publication completed; only the committed journal can.
+    const unchangedManifest = manifest.original_hash === manifest.next_hash;
+    if (
+      manifestHash === manifest.next_hash &&
+      (!unchangedManifest || prepared.journal.status === 'committed')
+    ) {
       await ensureExpectedState(root, prepared, 'next');
       prepared.journal.status = 'committed';
       await writeTransactionJournal(prepared);

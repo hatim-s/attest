@@ -6,6 +6,12 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { PROJECT_SCHEMA_ID, type PortableProjectBundle } from '@attest/contracts';
 import { createCloudClient } from '../client.js';
+import { acquireProjectLock, releaseProjectLock } from '../../project/transaction/project-lock.js';
+import {
+  prepareTransaction,
+  recoverProjectTransactions,
+} from '../../project/transaction/transaction-journal.js';
+import { publishPreparedTransaction } from '../../project/transaction/transactional-writer.js';
 
 import { readCloudLink, writeCloudLink, type CloudLink } from '../link.js';
 import { planPullChanges, pushCloudProject, pullCloudProject } from '../sync.js';
@@ -172,4 +178,45 @@ describe('cloud revision synchronization', () => {
     });
     expect(await readFile(join(root, 'attest.project.json'), 'utf8')).toBe('local unsaved edit');
   });
+});
+
+describe('cloud pull crash recovery', () => {
+  it.each(['prepared', 'partial', 'published'] as const)(
+    'restores code-only revisions interrupted at %s with unchanged manifest bytes',
+    async (phase) => {
+      const root = await createDirectory();
+      await writeFile(join(root, 'attest.project.json'), 'unchanged manifest');
+      await writeFile(join(root, 'attest/code.ts'), 'old code');
+      const lock = await acquireProjectLock(root);
+      try {
+        const transaction = await prepareTransaction(
+          root,
+          [
+            { path: 'attest/code.ts', type: 'write', contents: 'new code' },
+            { path: 'attest.project.json', type: 'write', contents: 'unchanged manifest' },
+          ],
+          'old-revision',
+          'new-revision',
+        );
+        if (phase === 'partial') {
+          await expect(
+            publishPreparedTransaction(root, transaction, () => {
+              throw new Error('Interrupted');
+            }),
+          ).rejects.toThrow('Interrupted');
+        } else if (phase === 'published') {
+          await publishPreparedTransaction(root, transaction);
+        }
+        expect(await recoverProjectTransactions(root, lock)).toEqual([
+          { action: 'rolled_back', transactionId: transaction.journal.transaction_id },
+        ]);
+        expect(await readFile(join(root, 'attest/code.ts'), 'utf8')).toBe('old code');
+        expect(await readFile(join(root, 'attest.project.json'), 'utf8')).toBe(
+          'unchanged manifest',
+        );
+      } finally {
+        await releaseProjectLock(lock);
+      }
+    },
+  );
 });
