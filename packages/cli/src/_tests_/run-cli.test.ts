@@ -155,6 +155,7 @@ describe('runCli', () => {
     ['unknown-command', '--output', 'json'],
     ['project', 'unknown-command', '--output', 'json'],
     ['agent', 'unknown-command', '--output=json'],
+    ['agent', 'unknown-command', '--output', 'jsonl'],
     ['--output', 'json', 'schema', 'unknown-command'],
   ])('keeps unknown command failures machine-readable for %j', async (...args) => {
     const output: string[] = [];

@@ -193,7 +193,7 @@ const runCli = async (argv: string[], options: RunCliOptions = {}): Promise<numb
     const command =
       error instanceof CommanderError ? requestedCommand(argv) : resultCommandName(leaf);
     const output = requestedStructuredOutput(argv) ?? commonOutputMode(program, leaf);
-    if (output === 'json') {
+    if (output === 'json' || (output === 'jsonl' && command !== 'eval.run')) {
       io.output(serializeCliResult(createCliFailureResult(command, failure.error)));
     } else if (output === 'jsonl') {
       io.output(renderEvalFailureEvent(failure));
