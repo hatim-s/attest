@@ -1,3 +1,4 @@
+import type { CaseExecution } from '@attest/runtime';
 import { resolve } from 'node:path';
 
 import type { AgentRequest, AgentResource } from '@attest/contracts';
@@ -10,7 +11,6 @@ import {
   startBackgroundAgent,
   startJsonlBridgeAgent,
   startWebSocketAgent,
-  type CaseExecution,
   type InvocationResult,
 } from '@attest/executor';
 

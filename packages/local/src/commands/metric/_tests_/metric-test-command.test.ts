@@ -22,7 +22,7 @@ const EXEC_FIXTURE = fileURLToPath(new URL('./fixtures/result-metric.cjs', impor
 
 /** The child reports its sorted env keys; macOS adds `__CF_*` keys to every process. */
 const envKeysSchema = z.object({
-  result: z.object({ details: z.object({ env_keys: z.array(z.string()) }) }),
+  details: z.object({ env_keys: z.array(z.string()) }),
 });
 
 const temporaryDirectory = async (prefix: string): Promise<string> => {
@@ -74,9 +74,7 @@ const testMetric = (root: string, metricId: string, document = fixture('Paris', 
   });
 
 const envKeys = (evaluation: unknown): string[] =>
-  envKeysSchema
-    .parse(evaluation)
-    .result.details.env_keys.filter((name) => !name.startsWith('__CF_'));
+  envKeysSchema.parse(evaluation).details.env_keys.filter((name) => !name.startsWith('__CF_'));
 
 describe('runMetricTestCommand', () => {
   it('evaluates assertions deterministically and reports expected_pass mismatches', async () => {
@@ -96,7 +94,7 @@ describe('runMetricTestCommand', () => {
     expect(first.result).toMatchObject({
       executed: true,
       expected_pass: true,
-      evaluation: { status: 'evaluated', result: { pass: true } },
+      evaluation: { status: 'evaluated', pass: true },
     });
     await expect(testMetric(root, 'exact', fixture('London', true))).rejects.toMatchObject({
       code: 'metric_fixture_mismatch',
@@ -104,7 +102,7 @@ describe('runMetricTestCommand', () => {
     });
     expect((await testMetric(root, 'exact', fixture('London', false))).result).toMatchObject({
       expected_pass: false,
-      evaluation: { status: 'evaluated', result: { pass: false } },
+      evaluation: { status: 'evaluated', pass: false },
     });
   });
 
@@ -130,7 +128,7 @@ describe('runMetricTestCommand', () => {
 
     const withSecret = await testMetric(root, 'with-secret');
     expect(JSON.stringify(withSecret)).not.toContain('metric-super-secret');
-    expect(withSecret.result).toMatchObject({ evaluation: { result: { rationale: REDACTED } } });
+    expect(withSecret.result).toMatchObject({ evaluation: { rationale: REDACTED } });
     if (!withSecret.result.executed) throw new Error('Expected an executed metric.');
     expect(envKeys(withSecret.result.evaluation)).toEqual([
       'LC_ALL',
@@ -142,7 +140,7 @@ describe('runMetricTestCommand', () => {
 
     const ambient = await testMetric(root, 'ambient');
     expect(ambient.result).toMatchObject({
-      evaluation: { result: { rationale: 'ambient-absent' } },
+      evaluation: { rationale: 'ambient-absent' },
     });
     if (!ambient.result.executed) throw new Error('Expected an executed metric.');
     expect(envKeys(ambient.result.evaluation)).toEqual(['LC_ALL', 'PATH', 'TMPDIR']);

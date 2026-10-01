@@ -34,16 +34,19 @@ export {
 export { agentRequestSchema } from './agent/protocol.js';
 export type { AgentErrorResponse, AgentRequest, AgentResponse } from './agent/protocol.js';
 export { jsonlBridgeOutputSchema } from './agent/jsonl-bridge.js';
-export { webSocketTransportSchema } from './agent/websocket-contract.js';
+export {
+  webSocketConnectionModeSchema,
+  webSocketTransportSchema,
+} from './agent/websocket-contract.js';
 export type {
   WebSocketAttemptEvidence,
   WebSocketErrorClassification,
 } from './agent/websocket-evidence.js';
 
-export { traceSchema } from './trace/protocol.js';
+export { spanKindSchema, traceSchema } from './trace/protocol.js';
 export type { Span, SpanKind, Trace } from './trace/protocol.js';
 
-export { assertionCheckSchema } from './metric/protocol.js';
+export { assertionCheckSchema, spanFilterSchema } from './metric/protocol.js';
 export type {
   AssertionCheck,
   LeafAssertionCheck,
@@ -53,7 +56,7 @@ export type {
   SpanFilter,
   ToolArgumentMatcher,
 } from './metric/protocol.js';
-export { METRIC_PRESETS, metricPresetSchema } from './metric/presets.js';
+export { METRIC_PRESETS, metricPresetIdSchema, metricPresetSchema } from './metric/presets.js';
 export type { MetricPreset, MetricPresetId } from './metric/presets.js';
 export { metricTestFixtureSchema } from './metric/test-fixture.js';
 export type { MetricTestFixture } from './metric/test-fixture.js';
@@ -66,7 +69,10 @@ export { projectResourcesSchema } from './project/resources-snapshot.js';
 export type { ProjectResources } from './project/resources-snapshot.js';
 export { agentResourceSchema } from './project/resources/agent.js';
 export type { AgentResource } from './project/resources/agent.js';
-export { vercelSandboxSchema } from './project/resources/agent-transports.js';
+export {
+  httpRequestTemplateSchema,
+  vercelSandboxSchema,
+} from './project/resources/agent-transports.js';
 export type { HttpRequestTemplate, VercelSandbox } from './project/resources/agent-transports.js';
 export { testCaseSchema } from './project/resources/case.js';
 export type { TestCase } from './project/resources/case.js';
@@ -78,6 +84,10 @@ export { testResourceSchema } from './project/resources/test.js';
 export type { TestResource } from './project/resources/test.js';
 
 export {
+  cliFailureResultSchema,
+  cliHelpArgumentSchema,
+  cliHelpOptionSchema,
+  cliSuccessResultSchema,
   cliErrorCatalogSchema,
   cliEventSchema,
   cliHelpSchema,
@@ -91,11 +101,13 @@ export type {
   CliExitCode,
   CliFailureResult,
   CliHelp,
+  CliResult,
   CliSuccessResult,
   CliWarning,
 } from './cli/protocol.js';
 export { commandRequestSchema } from './cli/command-request.js';
 export type { CommandRequest } from './cli/command-request.js';
+export { caseImportOptionsSchema } from './cli/command-request/test.js';
 export type { CaseImportOptions } from './cli/command-request/test.js';
 
 export {
@@ -107,6 +119,7 @@ export type { CaseOutcome, InvocationErrorCode, WarningCode } from './eval/execu
 export { caseSelectionSchema } from './eval/selection.js';
 export type { CaseSelection, CaseSelectionSummary } from './eval/selection.js';
 export {
+  evalOutputModeSchema,
   evalRunEffectiveCommandSchema,
   evalRunRequestSchema,
   evalRunSchema,

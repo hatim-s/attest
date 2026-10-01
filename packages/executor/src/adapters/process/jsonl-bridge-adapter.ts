@@ -3,7 +3,6 @@ import { StringDecoder } from 'node:string_decoder';
 import {
   jsonlBridgeOutputSchema,
   parseAgentResponse,
-  type JsonlBridgeOutput,
   type AgentRequest,
   type AgentResource,
 } from '@attest/contracts';
@@ -53,7 +52,7 @@ type PendingInvocation = {
   timeoutTimer: NodeJS.Timeout;
 };
 
-type ParsedOutput = { output: JsonlBridgeOutput; raw: unknown };
+type ParsedOutput = { output: ReturnType<typeof jsonlBridgeOutputSchema.parse>; raw: unknown };
 
 const capError = (message: string): AgentInvocationError =>
   new AgentInvocationError('output_cap_exceeded', message);

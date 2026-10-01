@@ -142,12 +142,10 @@ describe('redactMetricEvaluation', () => {
         metricName: 'quality',
         kind: 'exec',
         status: 'evaluated',
-        result: {
-          score: 1,
-          pass: true,
-          rationale: 'quality evaluated exec',
-          details: { token: 'hidden', output: 'quality' },
-        },
+        score: 1,
+        pass: true,
+        rationale: 'quality evaluated exec',
+        details: { token: 'hidden', output: 'quality' },
       },
       ['quality', 'evaluated', 'exec'],
     );
@@ -155,12 +153,10 @@ describe('redactMetricEvaluation', () => {
       metricName: 'quality',
       kind: 'exec',
       status: 'evaluated',
-      result: {
-        score: 1,
-        pass: true,
-        rationale: '[REDACTED] [REDACTED] [REDACTED]',
-        details: { token: '[REDACTED]', output: '[REDACTED]' },
-      },
+      score: 1,
+      pass: true,
+      rationale: '[REDACTED] [REDACTED] [REDACTED]',
+      details: { token: '[REDACTED]', output: '[REDACTED]' },
     });
   });
 
@@ -171,10 +167,10 @@ describe('redactMetricEvaluation', () => {
         kind: 'exec',
         status: 'error',
         error: {
-          code: 'exec_spawn_failed',
+          kind: 'exec_spawn_failed',
           message: 'exec_spawn_failed with credential',
-          details: { diagnostic: 'credential' },
         },
+        details: { diagnostic: 'credential' },
         judgeIo: { response: 'credential' },
       },
       ['error', 'exec_spawn_failed', 'credential'],
@@ -182,10 +178,10 @@ describe('redactMetricEvaluation', () => {
     expect(evaluation).toMatchObject({
       status: 'error',
       error: {
-        code: 'exec_spawn_failed',
+        kind: 'exec_spawn_failed',
         message: '[REDACTED] with [REDACTED]',
-        details: { diagnostic: '[REDACTED]' },
       },
+      details: { diagnostic: '[REDACTED]' },
       judgeIo: { response: '[REDACTED]' },
     });
   });

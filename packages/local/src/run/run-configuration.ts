@@ -11,7 +11,7 @@ import {
   type EvalRun,
   type EvalRunRequest,
 } from '@attest/contracts';
-import { StoreError, type RunRecord } from '@attest/core';
+import type { RunRecord } from '@attest/core';
 import { executeResolvedEvalPlan, type EvalTerminalFailureFactory } from '@attest/runtime';
 
 import { LocalError } from '../errors/index.js';

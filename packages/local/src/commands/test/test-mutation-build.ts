@@ -101,7 +101,7 @@ const buildMutation = async (
       const test = findTest(candidate, request.test_id);
       const imported = await runTabularImportAdapter({
         // Cases outside the direct import target that already resolve into its test.
-        collisionCases: attachmentCases(candidate, test),
+        collisionContexts: [{ cases: attachmentCases(candidate, test) }],
         existingCases: test.cases,
         importOptions: request.import,
         preparedSource: options.preparedImportSource,

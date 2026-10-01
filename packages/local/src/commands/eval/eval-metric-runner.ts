@@ -87,7 +87,7 @@ const extractHttpMetricResult = (
       kind: 'exec',
       status: 'error',
       error: {
-        code: 'exec_malformed_output',
+        kind: 'exec_malformed_output',
         message: 'HTTP metric extraction did not produce a finite score and boolean pass result.',
       },
       durationMs,
@@ -173,7 +173,7 @@ const evaluateHttpMetric = async (
         kind: 'exec',
         status: 'error',
         error: {
-          code: invocation.error.code === 'timeout' ? 'exec_timeout' : 'http_request_failed',
+          kind: invocation.error.code === 'timeout' ? 'exec_timeout' : 'http_request_failed',
           message: invocation.error.message,
         },
         durationMs,

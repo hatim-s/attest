@@ -42,6 +42,7 @@ const stagedRunner = (
 /** A fake environment whose finalization steps can be scripted. */
 const fakeEnvironment = (overrides: Partial<CaseEnvironment> = {}): CaseEnvironment => ({
   kind: 'fake',
+  beginFinalization: vi.fn(() => Promise.resolve()),
   exec: vi.fn(),
   readFile: vi.fn(),
   writeFile: vi.fn(),
