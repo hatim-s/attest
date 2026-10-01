@@ -111,3 +111,24 @@ describe('portable project resolution', () => {
     expect(() => resolvePortableProject(input)).toThrow('secret reference');
   });
 });
+
+describe('portable metric dependencies', () => {
+  it.each([
+    ['helper.ts', "import './other.ts';"],
+    ['helper.ts', "import x from 'npm-package';"],
+    ['helper.py', 'import requests'],
+    ['helper.py', 'from .helper import score'],
+  ])('rejects unsupported dependencies in %s', (name, source) => {
+    const input = bundle();
+    input.files[`attest/metrics/code/${name}`] = source;
+    expect(() => resolvePortableProject(input)).toThrow('self-contained');
+  });
+  it.each([
+    ['helper.ts', "import { createHash } from 'node:crypto';"],
+    ['helper.py', 'import json, math'],
+  ])('allows built-ins in %s', (name, source) => {
+    const input = bundle();
+    input.files[`attest/metrics/code/${name}`] = source;
+    expect(() => resolvePortableProject(input)).not.toThrow();
+  });
+});

@@ -74,10 +74,12 @@ Executor APIs such as `invokeAgent`, transport sessions, and process cleanup are
 files. `resolvePortableProject` checks source/resource equality and manifest hashes before a host
 persists a revision. Paths are limited to the canonical `attest.project.json` and `attest/` layout;
 extra source files belong under `attest/metrics/code/`. Bundles allow at most 100 files, 1 MiB per
-file and 10 MiB total. Credential-bearing HTTP fields require environment secret references.
+file and 5 MiB total. Credential-bearing HTTP fields require environment secret references.
 Arbitrary dataset text and source code are user content; these checks do not detect embedded
-secrets in arbitrary strings. Cloud capability validation must reject unsupported scripts and
-execution hooks before accepting a run.
+secrets in arbitrary strings. Static source checks reject direct third-party and relative imports. TypeScript accepts node-prefixed
+built-ins and bun; Python accepts the documented safe standard-library subset in
+`portable-metric-source.ts`. These checks are conservative and do not replace sandbox isolation.
+Cloud capability validation must reject unsupported execution hooks before accepting a run.
 
 Core owns pure `resolveEvalRun`, dataset expansion, metric overrides, and canonical project
 hashing. Local supplies loaded resources and maps domain errors into its application errors.
