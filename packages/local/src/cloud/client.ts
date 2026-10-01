@@ -90,7 +90,10 @@ const createCloudClient = (options: CloudClientOptions): CloudClient => {
         response = await fetcher(new URL(path, baseUrl), {
           method,
           redirect: 'error',
-          signal: signal ?? AbortSignal.timeout(30_000),
+          signal:
+            signal === undefined
+              ? AbortSignal.timeout(30_000)
+              : AbortSignal.any([signal, AbortSignal.timeout(30_000)]),
           headers: {
             accept: 'application/json',
             ...(body === undefined ? {} : { 'content-type': 'application/json' }),
