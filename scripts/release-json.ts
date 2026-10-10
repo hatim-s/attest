@@ -8,6 +8,7 @@ type Manifest = {
   private?: boolean;
   files: string[];
   exports?: Record<string, string | Record<string, string>>;
+  bin?: string | Record<string, string>;
   dependencies?: Record<string, string>;
   optionalDependencies?: Record<string, string>;
   devDependencies?: Record<string, string>;
@@ -49,7 +50,14 @@ const parseManifest = (source: string): Manifest => {
     Array.isArray(value.files) && value.files.every(isString),
     'Expected published file paths.',
   );
-  const manifest: Manifest = { name: value.name, version: value.version, files: value.files };
+
+  // Preserve npm metadata such as bin, type, engines, and license while checking release fields.
+  const manifest: Manifest = {
+    ...value,
+    name: value.name,
+    version: value.version,
+    files: value.files,
+  };
 
   if (value.private !== undefined) {
     assert(isBoolean(value.private), 'Expected package private flag.');
@@ -59,6 +67,11 @@ const parseManifest = (source: string): Manifest => {
   if (value.exports !== undefined) {
     assert(isExportRecord(value.exports), 'Expected package export paths.');
     manifest.exports = value.exports;
+  }
+
+  if (value.bin !== undefined) {
+    assert(isString(value.bin) || isStringRecord(value.bin), 'Expected package binary paths.');
+    manifest.bin = value.bin;
   }
 
   for (const key of [
@@ -99,6 +112,4 @@ const parsePackedArchives = (source: string): PackedArchive[] => {
 /** Reads the CLI's versioned result envelope during release verification. */
 const parseCliResult = (source: string) => cliResultSchema.parse(JSON.parse(source));
 
-export { isRecord, isString, parseCliResult, parseManifest, parsePackedArchives };
-
-export type { Manifest };
+export { isRecord, isString, parseCliResult, parseManifest, parsePackedArchives, type Manifest };

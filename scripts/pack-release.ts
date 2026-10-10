@@ -114,6 +114,16 @@ const packRelease = async (): Promise<void> => {
         }
       }
 
+      const binaryTargets = isString(manifest.bin)
+        ? [manifest.bin]
+        : Object.values(manifest.bin ?? {});
+
+      for (const target of binaryTargets) {
+        if (!result.files.some(({ path }) => path === target.replace(/^\.\//, ''))) {
+          throw new Error(`Missing binary artifact ${target} in ${manifest.name}.`);
+        }
+      }
+
       const archive = await readFile(join(releaseDirectory, result.filename));
       checksums.push(`${createHash('sha256').update(archive).digest('hex')}  ${result.filename}`);
       console.log(

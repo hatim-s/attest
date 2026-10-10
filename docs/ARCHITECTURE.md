@@ -138,3 +138,12 @@ flowchart LR
   CLI[CLI services] --> Defaults[Production adapters]
   CLI --> Tests[Per-instance test services]
 ```
+
+Metric cancellation retains timeout source signals while the composed signal is
+live. This avoids Node 22.15 garbage collection losing a deadline before process
+cleanup. Source references release when the combined signal aborts or is collected;
+subprocess GC tests cover timeout-only and caller-plus-timeout paths.
+
+Release tooling validates the package fields it uses while preserving all other
+JSON metadata. Packed archives retain npm binary mappings, and packing verifies
+that each declared binary target is present.
