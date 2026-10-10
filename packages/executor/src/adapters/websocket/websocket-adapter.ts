@@ -28,16 +28,19 @@ const startWebSocketAgent = (
       'WebSocket transport uses an invalid or unsupported mode.',
     );
   }
+
   if (agent.transport.url.includes('{{')) {
     throw new AgentInvocationError(
       'invalid_envelope',
       'WebSocket runtime URLs must have a static authority and path.',
     );
   }
+
   const session =
     agent.transport.lifecycle === 'per_case'
       ? new PerCaseWebSocketSession(agent, options)
       : new RunScopedWebSocketSession(agent, options);
+
   return Promise.resolve(session);
 };
 

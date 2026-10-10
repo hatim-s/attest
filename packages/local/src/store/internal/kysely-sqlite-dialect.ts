@@ -19,18 +19,20 @@ import { StoreError } from '@attest/core';
 import { createLock } from './promise-lock.js';
 import type { SqliteHandle, SqliteValue } from './sqlite-handle.js';
 
+function isSqliteValue(value: unknown): value is SqliteValue {
+  return (
+    value === null ||
+    typeof value === 'string' ||
+    typeof value === 'number' ||
+    typeof value === 'bigint' ||
+    value instanceof Uint8Array
+  );
+}
+
 /** Rejects values Kysely cannot bind through either supported SQLite driver. */
 const toSqliteValues = (parameters: readonly unknown[]): SqliteValue[] =>
   parameters.map((value) => {
-    if (
-      value === null ||
-      typeof value === 'string' ||
-      typeof value === 'number' ||
-      typeof value === 'bigint' ||
-      value instanceof Uint8Array
-    ) {
-      return value;
-    }
+    if (isSqliteValue(value)) return value;
     throw new StoreError('DRIVER_MISUSE', 'A query contains an unsupported SQLite value.');
   });
 
@@ -51,12 +53,16 @@ class HandleConnection implements DatabaseConnection {
   async executeQuery<Row>(compiledQuery: CompiledQuery): Promise<QueryResult<Row>> {
     const statement = this.#handle.prepare(compiledQuery.sql);
     const parameters = toSqliteValues(compiledQuery.parameters);
+
     if (returnsRows(compiledQuery.query)) {
       const rows = await statement.all(...parameters);
+
+      // SAFETY: Kysely derives Row from the compiled query projection; this driver returns that same query's native column rows.
       return { rows: rows as Row[] };
     }
 
     const result = await statement.run(...parameters);
+
     return { numAffectedRows: BigInt(result.changes), rows: [] };
   }
 
@@ -86,6 +92,7 @@ class HandleDriver implements Driver {
   /** Brackets both standalone statements and complete Kysely transactions on one connection. */
   async acquireConnection(): Promise<DatabaseConnection> {
     this.#releaseConnection = await this.#lock.acquire();
+
     return this.#connection;
   }
 
@@ -103,11 +110,14 @@ class HandleDriver implements Driver {
 
   releaseConnection(): Promise<void> {
     const release = this.#releaseConnection;
+
     if (!release) {
       throw new StoreError('DRIVER_MISUSE', 'Cannot release an unacquired SQLite connection.');
     }
+
     this.#releaseConnection = undefined;
     release();
+
     return Promise.resolve();
   }
 

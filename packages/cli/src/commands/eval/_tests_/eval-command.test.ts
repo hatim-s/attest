@@ -11,6 +11,7 @@ import {
   cliHelpSchema,
   cliResultSchema,
   evalCancelResultSchema,
+  evalEventSchema,
   evalEventStreamSchema,
   type EvalEvent,
   type EvalRunRequest,
@@ -21,30 +22,41 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   createFixtureProject,
   nonInteractive,
-  runCommand,
+  runCommand as executeCommand,
   temporaryDirectory,
   type CliRun,
 } from '../../../_tests_/support/cli-test-support.js';
 import { getCliErrorDefinition } from '../../../errors/error-catalog.js';
-import { runCli } from '../../../run-cli.js';
+import { runCli as executeCli } from '../../../run-cli.js';
 import type { CliInteraction } from '../../shared/cli-interaction.js';
 
-vi.mock('@attest/local/eval', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('@attest/local/eval')>()),
-  cancelConfiguration: vi.fn(),
-  runConfiguration: vi.fn(),
-}));
-
 const RUN_ID = '01ARZ3NDEKTSV4RRFFQ69G5FAV';
+
 const BASELINE_ID = '01ARZ3NDEKTSV4RRFFQ69G5FAA';
+
 const SNAPSHOT_HASH = 'f'.repeat(64);
+
 const PROJECT_HASH = 'a'.repeat(64);
+
 const TIME = '2026-08-08T10:00:00.000Z';
+
 const PTY_DRIVER = fileURLToPath(new URL('../../../_tests_/support/drive-pty.py', import.meta.url));
+
 const PTY_CHILD = fileURLToPath(new URL('./fixtures/eval-command-pty.ts', import.meta.url));
+
 const execFileAsync = promisify(execFile);
-const run = vi.mocked(runConfiguration);
-const cancel = vi.mocked(cancelConfiguration);
+
+const run = vi.fn<typeof runConfiguration>();
+
+const cancel = vi.fn<typeof cancelConfiguration>();
+
+const services = { eval: { runConfiguration: run, cancelConfiguration: cancel } };
+
+const runCommand = (...[root, argv, options]: Parameters<typeof executeCommand>) =>
+  executeCommand(root, argv, { ...options, services });
+
+const runCli = (...[argv, options]: Parameters<typeof executeCli>) =>
+  executeCli(argv, { ...options, services });
 
 const cancellationSuccess = () =>
   evalCancelResultSchema.parse({
@@ -66,7 +78,9 @@ const completedEvents = (verdict: 'fail' | 'pass' = 'pass'): EvalEvent[] => {
     error_cases: 0,
     metric_error_count: 0,
   };
+
   const exitCode = verdict === 'pass' ? 0 : 1;
+
   return evalEventStreamSchema.parse([
     {
       schema: CLI_EVENT_SCHEMA_ID,
@@ -242,6 +256,7 @@ afterEach(() => {
 describe('eval request normalization', () => {
   it('normalizes every run flag through the frozen request schema', async () => {
     run.mockResolvedValue(eventSource(completedEvents('fail')));
+
     const harness = await parse([
       'eval',
       'run',
@@ -308,14 +323,17 @@ describe('eval request normalization', () => {
       concurrency: 3,
       output: 'jsonl',
     };
+
     const harness = await parse(['eval', 'run', '--from-json', '-'], {
       readStdin: () => Promise.resolve(JSON.stringify(request)),
     });
 
     expect(run.mock.calls[0]?.[0]).toEqual(request);
+
     const stream = evalEventStreamSchema.parse(
-      harness.output.map((line): unknown => JSON.parse(line)),
+      harness.output.map((line) => evalEventSchema.parse(JSON.parse(line))),
     );
+
     expect(stream).toHaveLength(7);
     expect(stream.at(-1)).toMatchObject({ event: 'result' });
   });
@@ -439,12 +457,14 @@ describe('eval output and sequencing', () => {
   it('preserves catalog identity and retryability across human, JSON, and JSONL terminals', async () => {
     const definition = getCliErrorDefinition('run_failed');
     expect(definition).toMatchObject({ exit_code: 4, retryable: true });
+
     for (const output of ['human', 'json', 'jsonl'] as const) {
       run.mockResolvedValue(eventSource(failedEvents()));
       const harness = await parse(['eval', 'run', 'refund', '--output', output]);
       expect(harness.exitCode).toBe(definition.exit_code);
       const serialized = [...harness.errors, ...harness.output].join('\n');
       expect(serialized).toContain('run_failed');
+
       if (output !== 'human') expect(serialized).toContain('"retryable":true');
     }
   });
@@ -467,17 +487,21 @@ describe('eval output and sequencing', () => {
 
   it('streams validated JSONL live and preserves completion order', async () => {
     let release: (() => void) | undefined;
+
     const gate = new Promise<void>((resolve) => {
       release = resolve;
     });
+
     const events = async function* (): AsyncGenerator<EvalEvent> {
       const completed = completedEvents();
       yield completed[0]!;
       await gate;
       yield* completed.slice(1);
     };
+
     run.mockResolvedValue(events());
     const output: string[] = [];
+
     const parsing = runCli(['eval', 'run', 'refund', '--output', 'jsonl'], {
       interaction: nonInteractive(),
       io: { error: () => undefined, output: (message) => output.push(message) },
@@ -487,7 +511,10 @@ describe('eval output and sequencing', () => {
     release?.();
     await parsing;
 
-    const stream = evalEventStreamSchema.parse(output.map((line): unknown => JSON.parse(line)));
+    const stream = evalEventStreamSchema.parse(
+      output.map((line) => evalEventSchema.parse(JSON.parse(line))),
+    );
+
     expect(stream.map(({ sequence }) => sequence)).toEqual([0, 1, 2, 3, 4, 5, 6]);
     expect(
       stream.filter(({ event }) => event === 'case_completed').map((event) => event.data),
@@ -504,13 +531,15 @@ describe('eval output and sequencing', () => {
       await Promise.resolve();
       throw new Error('producer failed');
     };
+
     run.mockResolvedValue(events());
 
     const harness = await parse(['eval', 'run', 'refund', '--output', 'jsonl']);
 
     const stream = evalEventStreamSchema.parse(
-      harness.output.map((line): unknown => JSON.parse(line)),
+      harness.output.map((line) => evalEventSchema.parse(JSON.parse(line))),
     );
+
     expect(stream.map(({ sequence }) => sequence)).toEqual([0, 1, 2]);
     expect(stream.map(({ event }) => event)).toEqual(['run_started', 'run_completed', 'result']);
     expect(stream.at(-2)).toMatchObject({
@@ -526,8 +555,9 @@ describe('eval output and sequencing', () => {
     const harness = await parse(['eval', 'run', 'refund', '--output', 'jsonl']);
 
     const stream = evalEventStreamSchema.parse(
-      harness.output.map((line): unknown => JSON.parse(line) as unknown),
+      harness.output.map((line) => evalEventSchema.parse(JSON.parse(line))),
     );
+
     expect(stream.at(-1)).toMatchObject({ event: 'result', data: { exit_code: 4 } });
     expect(stream.filter(({ event }) => event === 'result')).toHaveLength(1);
     expect(harness.exitCode).toBe(4);
@@ -536,14 +566,16 @@ describe('eval output and sequencing', () => {
   it('validates terminal metadata before publishing a JSONL success', async () => {
     const events = completedEvents();
     const final = events.at(-1)!;
+
     if (final.event !== 'result' || !final.data.result.ok) throw new Error('Expected success.');
     final.data.result.result.snapshot_hash = 'b'.repeat(64);
     run.mockResolvedValue(eventSource(events));
     const harness = await parse(['eval', 'run', 'refund', '--output', 'jsonl']);
 
     const stream = evalEventStreamSchema.parse(
-      harness.output.map((line): unknown => JSON.parse(line) as unknown),
+      harness.output.map((line) => evalEventSchema.parse(JSON.parse(line))),
     );
+
     expect(stream.filter(({ event }) => event === 'result')).toHaveLength(1);
     expect(stream.at(-1)).toMatchObject({ event: 'result', data: { exit_code: 4 } });
     expect(harness.exitCode).toBe(4);
@@ -625,6 +657,7 @@ describe('eval cancellation command', () => {
       '--output',
       'json',
     ]);
+
     expect(cliResultSchema.parse(JSON.parse(overlapping.output[0]!))).toMatchObject({
       error: {
         code: 'cli_usage',
@@ -639,6 +672,7 @@ describe('eval command grammar and terminal behavior', () => {
   it('publishes structured help metadata without registering a top-level run alias', async () => {
     const root = await parse(['help', '--output', 'json']);
     const rootHelp = cliResultSchema.parse(JSON.parse(root.output[0]!));
+
     if (!rootHelp.ok) throw new Error('Expected root help.');
     const subcommands = cliHelpSchema.parse(rootHelp.result).command.subcommands;
     expect(subcommands.some(({ name }) => name === 'eval')).toBe(true);
@@ -646,6 +680,7 @@ describe('eval command grammar and terminal behavior', () => {
 
     const harness = await parse(['help', 'eval', 'run', '--output', 'json']);
     const document = cliResultSchema.parse(JSON.parse(harness.output[0]!));
+
     if (!document.ok) throw new Error('Expected eval run help.');
     const help = cliHelpSchema.parse(document.result);
     expect(help.command).toMatchObject({
@@ -670,22 +705,28 @@ describe('eval command grammar and terminal behavior', () => {
     // The agent never answers, so the run is still in flight when the driver sends SIGINT.
     await mkdir(join(root, 'src'));
     await writeFile(join(root, 'src', 'agent.mjs'), 'setInterval(() => undefined, 1_000);\n');
+
     const steps = [
       { expect: 'Test ids (space-separated) or all [all]: ', send: 'refund\n' },
       { expect: ' started: ', send: '\u0003' },
     ];
+
     const { stderr, stdout } = await execFileAsync(
       'python3',
       [PTY_DRIVER, JSON.stringify(steps), 'bun', PTY_CHILD, root],
       { timeout: 20_000 },
     );
+
     expect(stderr).toBe('');
+
+    // SAFETY: drive-pty.py owns this evidence format; the following assertions verify the terminal interaction and exit status.
     const evidence = JSON.parse(stdout) as {
       exit_code: number;
       output: string;
       steps_seen: boolean[];
       terminal_restored: boolean;
     };
+
     expect(evidence).toMatchObject({
       exit_code: 130,
       steps_seen: [true, true],

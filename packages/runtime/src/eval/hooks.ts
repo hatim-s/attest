@@ -13,6 +13,7 @@ import type {
 } from './types.js';
 
 const LIFECYCLE_ERROR_LIMIT = 4096;
+
 const TRUNCATED_SUFFIX = ' [truncated]';
 
 /** What the case stages produced before finalization: evidence, the stopping error, or both. */
@@ -23,19 +24,22 @@ type CaseAttempt = {
 };
 
 /** Flattens nested lifecycle failures into stable diagnostics without discarding earlier evidence. */
-const lifecycleErrorMessages = (error: unknown): string[] => {
-  if (error instanceof AggregateError && error.errors.length > 0) {
-    return error.errors.flatMap(lifecycleErrorMessages);
+const lifecycleErrorMessages = (cause: unknown): string[] => {
+  if (cause instanceof AggregateError && cause.errors.length > 0) {
+    return cause.errors.flatMap(lifecycleErrorMessages);
   }
-  return [error instanceof Error ? error.message : 'Eval case lifecycle failed.'];
+
+  return [cause instanceof Error ? cause.message : 'Eval case lifecycle failed.'];
 };
 
 /** Joins distinct lifecycle messages within the persisted diagnostics limit. */
 const boundedLifecycleError = (messages: readonly string[]): string => {
   const message = [...new Set(messages)].join(' ');
+
   if (message.length <= LIFECYCLE_ERROR_LIMIT) {
     return message;
   }
+
   return `${message.slice(0, LIFECYCLE_ERROR_LIMIT - TRUNCATED_SUFFIX.length)}${TRUNCATED_SUFFIX}`;
 };
 
@@ -45,11 +49,14 @@ const withLifecycleFailures = (
   failures: readonly unknown[],
 ): EvalCaseRunnerResult => {
   const existing = result.execution.diagnostics.lifecycleError;
+
   const messages = [
     ...(existing === undefined ? [] : [existing]),
     ...failures.flatMap(lifecycleErrorMessages),
   ].filter((message) => message.length > 0);
+
   const lifecycleError = messages.length === 0 ? undefined : boundedLifecycleError(messages);
+
   return {
     execution: {
       ...result.execution,
@@ -87,6 +94,7 @@ const withEvalHooks = <Payload>(
     context: EvalHookContexts<Payload>[Stage],
   ): Promise<void> => {
     const errors: unknown[] = [];
+
     for (const hook of hooks) {
       try {
         await hook[stage]?.(context);
@@ -94,11 +102,12 @@ const withEvalHooks = <Payload>(
         errors.push(error);
       }
     }
+
     if (errors.length > 0) throw new AggregateError(errors, `Eval ${stage} hooks failed.`);
   };
 
-  const latchUncertainCleanup = (error: unknown): void => {
-    if (isCleanupUncertain(error)) cleanupFailures.push(error);
+  const latchUncertainCleanup = (cause: unknown): void => {
+    if (isCleanupUncertain(cause)) cleanupFailures.push(cause);
   };
 
   const runCaseStages = async (
@@ -116,6 +125,7 @@ const withEvalHooks = <Payload>(
         signal: context.signal,
       });
       await dispatch('before_case', context);
+
       const result = await runner.executeCase(runId, context.resolvedCase, context.signal, {
         ...worker,
         environment: context.environment,
@@ -123,9 +133,11 @@ const withEvalHooks = <Payload>(
         afterEvaluation: (execution, metrics) =>
           dispatch('after_evaluation', { ...context, execution, metrics }),
       });
+
       return { result, lifecycleFailures: [] };
     } catch (error: unknown) {
       latchUncertainCleanup(error);
+
       if (error instanceof EvalCaseStageError) {
         return {
           result: { execution: error.execution, metrics: error.metrics },
@@ -133,6 +145,7 @@ const withEvalHooks = <Payload>(
           lifecycleFailures: [error.cause],
         };
       }
+
       return { error, lifecycleFailures: [] };
     }
   };
@@ -143,12 +156,14 @@ const withEvalHooks = <Payload>(
     attempt: CaseAttempt,
   ): Promise<unknown[]> => {
     const failures: unknown[] = [];
+
     try {
       await context.environment?.beginFinalization();
     } catch (error: unknown) {
       latchUncertainCleanup(error);
       failures.push(error);
     }
+
     try {
       await dispatchSettled('after_case', {
         ...context,
@@ -159,6 +174,7 @@ const withEvalHooks = <Payload>(
       latchUncertainCleanup(error);
       failures.push(error);
     }
+
     try {
       await context.environment?.dispose();
     } catch (error: unknown) {
@@ -166,12 +182,14 @@ const withEvalHooks = <Payload>(
       cleanupFailures.push(error);
       failures.push(error);
     }
+
     return failures;
   };
 
   return {
     beforeRun: async (runId, signal) => {
       runSignal = signal;
+
       try {
         await dispatch('before_run', { run, signal });
         await runner.beforeRun?.(runId, signal);
@@ -187,14 +205,17 @@ const withEvalHooks = <Payload>(
         resolvedCase,
         workerIndex: worker.workerIndex,
       };
+
       const attempt = await runCaseStages(runId, context, worker);
       const finalizationFailures = await finalizeCase(context, attempt);
+
       if (attempt.result !== undefined) {
         return withLifecycleFailures(attempt.result, [
           ...attempt.lifecycleFailures,
           ...finalizationFailures,
         ]);
       }
+
       const failures = [attempt.error, ...finalizationFailures];
       throw new AggregateError(
         failures,
@@ -203,11 +224,13 @@ const withEvalHooks = <Payload>(
     },
     cleanup: async (runId) => {
       const failures = [...cleanupFailures];
+
       try {
         await runner.cleanup?.(runId);
       } catch (error: unknown) {
         failures.push(error);
       }
+
       if (failures.length > 0) {
         throw Object.assign(new AggregateError(failures, 'Eval cleanup failed.'), {
           cleanupConfirmed: false,
@@ -216,16 +239,19 @@ const withEvalHooks = <Payload>(
     },
     afterRun: async (runId, status, summary) => {
       const errors: unknown[] = [];
+
       try {
         await runner.afterRun?.(runId, status, summary);
       } catch (error: unknown) {
         errors.push(error);
       }
+
       try {
         await dispatchSettled('after_run', { run, signal: runSignal, status, summary });
       } catch (error: unknown) {
         errors.push(error);
       }
+
       if (errors.length > 0) {
         throw Object.assign(new AggregateError(errors, 'Eval after_run hooks failed.'), {
           cleanupConfirmed: !errors.some(isCleanupUncertain),

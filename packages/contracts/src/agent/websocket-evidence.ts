@@ -104,6 +104,7 @@ const webSocketAttemptEvidenceSchema = z.discriminatedUnion('outcome', [
 ]);
 
 type WebSocketAttemptEvidence = z.infer<typeof webSocketAttemptEvidenceSchema>;
+
 type WebSocketErrorClassification = z.infer<typeof webSocketErrorClassificationSchema>;
 
 export {

@@ -4,13 +4,14 @@ import { parseCurlCommand } from '../curl-parser.js';
 import { CurlImportError } from '../curl-tokenizer.js';
 
 /** Captures stable parser diagnostics without ever snapshotting the hostile source text. */
-const diagnostics = (operation: () => unknown): string[] => {
+const diagnostics = (operation: () => void): string[] => {
   try {
     operation();
   } catch (error: unknown) {
     if (error instanceof CurlImportError) return error.diagnostics;
     throw error;
   }
+
   throw new Error('Expected cURL import to fail.');
 };
 
@@ -20,6 +21,7 @@ describe('safe cURL parser', () => {
       'curl \'https://api.example.test/v1/run?locale=en\' -X POST -H \'Content-Type: application/json\' --data-raw \'{"prompt":"literal","count":2}\'',
       { placeholders: [{ targetPointer: '/prompt', inputPointer: '/question' }] },
     );
+
     expect(parsed.request).toEqual({
       url: 'https://api.example.test/v1/run',
       method: 'POST',
@@ -32,6 +34,7 @@ describe('safe cURL parser', () => {
 
   it('converts sensitive header and query captures to references without previewing values', () => {
     const secret = 'must-never-be-returned';
+
     const parsed = parseCurlCommand(
       `curl 'https://api.example.test/run?api_key=${secret}' -H 'Authorization: Bearer ${secret}'`,
       {
@@ -39,6 +42,7 @@ describe('safe cURL parser', () => {
         querySecrets: { api_key: 'ATTEST_QUERY_TOKEN' },
       },
     );
+
     expect(parsed.request.headers).toEqual({ Authorization: { from_env: 'ATTEST_API_TOKEN' } });
     expect(parsed.request.query).toEqual({ api_key: { from_env: 'ATTEST_QUERY_TOKEN' } });
     expect(JSON.stringify(parsed.preview)).not.toContain(secret);

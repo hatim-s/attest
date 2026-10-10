@@ -45,7 +45,9 @@ const datasetResourceSchema = z
   .meta({ id: 'DatasetResource' });
 
 type DatasetImportMapping = z.infer<typeof datasetImportMappingSchema>;
+
 type DatasetImportProvenance = z.infer<typeof datasetImportProvenanceSchema>;
+
 type DatasetResource = z.infer<typeof datasetResourceSchema>;
 
 export {

@@ -23,6 +23,7 @@ describe('invokeAgent', { timeout: 30_000 }, () => {
   it('creates isolated retry directories beneath an explicit working-directory test seam', async () => {
     const stateDirectory = await mkdtemp(join(tmpdir(), 'attest-marker-probe-'));
     const statePath = join(stateDirectory, 'state');
+
     try {
       const result = await invokeAgent(
         { type: 'cli', command: [process.execPath, MARKER_PROBE_AGENT_PATH] },

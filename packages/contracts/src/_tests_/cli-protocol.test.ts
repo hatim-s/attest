@@ -62,6 +62,7 @@ describe('CLI protocol contracts', () => {
       result: { imported: 3 },
       warnings: [],
     };
+
     const failure = {
       schema: CLI_RESULT_SCHEMA_ID,
       ok: false,

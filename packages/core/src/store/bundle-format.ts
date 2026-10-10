@@ -1,3 +1,8 @@
+type CreateContentHasherResult = { add(line: string): void; digest(): string };
+
+type CreateBundleResult = { lines: string[]; manifest: BundleManifest };
+
+import { isString, isNumber } from '@attest/contracts';
 import { createHash } from 'node:crypto';
 
 import { canonicalStringify } from './internal/canonical-json.js';
@@ -38,9 +43,10 @@ interface BundleManifest {
 }
 
 /** Incrementally hashes canonical NDJSON lines without including a trailing newline. */
-const createContentHasher = (): { add(line: string): void; digest(): string } => {
+const createContentHasher = (): CreateContentHasherResult => {
   const hash = createHash('sha256');
   let hasLine = false;
+
   return {
     add(line) {
       if (hasLine) hash.update('\n');
@@ -52,16 +58,15 @@ const createContentHasher = (): { add(line: string): void; digest(): string } =>
 };
 
 /** Purely assembles canonical bundle lines from one already-loaded run aggregate. */
-const createBundle = (
-  run: RunRecord,
-  cases: CaseRecord[],
-): { lines: string[]; manifest: BundleManifest } => {
+const createBundle = (run: RunRecord, cases: CaseRecord[]): CreateBundleResult => {
   const hasher = createContentHasher();
+
   const headerLine = canonicalStringify({
     type: 'bundle_header',
     schema: BUNDLE_SCHEMA_ID,
     run,
   });
+
   const lines = [headerLine];
   hasher.add(headerLine);
 
@@ -79,6 +84,7 @@ const createBundle = (
       content_hash: contentHash,
     }),
   );
+
   return {
     lines,
     manifest: {
@@ -90,6 +96,7 @@ const createBundle = (
   };
 };
 
+// BOUNDARY: Imported NDJSON bundle fields remain unknown until header, case and footer validators establish their contracts.
 type JsonObject = Record<string, unknown>;
 
 const corruptBundle = (message: string, cause?: unknown): StoreError =>
@@ -100,14 +107,17 @@ const isObject = (value: unknown): value is JsonObject =>
 
 const parseJsonLine = (line: string, index: number): JsonObject => {
   let parsed: unknown;
+
   try {
     parsed = JSON.parse(line);
   } catch (error) {
     throw corruptBundle(`Run bundle line ${index + 1} contains invalid JSON.`, error);
   }
-  if (!isObject(parsed) || typeof parsed.type !== 'string') {
+
+  if (!isObject(parsed) || !isString(parsed.type)) {
     throw corruptBundle(`Run bundle line ${index + 1} is missing a string type.`);
   }
+
   return parsed;
 };
 
@@ -115,26 +125,31 @@ const parseHeader = (first: JsonObject | undefined): BundleHeader => {
   if (first?.type !== 'bundle_header') {
     throw corruptBundle('Run bundle must start with a bundle_header record.');
   }
+
   if (first.schema !== BUNDLE_SCHEMA_ID) {
     throw corruptBundle(
       `Run bundle header uses unsupported schema ${JSON.stringify(first.schema)}; expected ${JSON.stringify(BUNDLE_SCHEMA_ID)}.`,
     );
   }
+
   const run = parseRunRecord(first.run, 'header.run');
+
   if (!run.ok) {
     throw corruptBundle(`Run bundle header contains a malformed run: ${run.violations.join('; ')}`);
   }
+
   return { type: 'bundle_header', schema: BUNDLE_SCHEMA_ID, run: run.value };
 };
 
 const parseFooter = (parsed: JsonObject): BundleFooter => {
   if (
-    typeof parsed.case_count !== 'number' ||
+    !isNumber(parsed.case_count) ||
     !Number.isInteger(parsed.case_count) ||
-    typeof parsed.content_hash !== 'string'
+    !isString(parsed.content_hash)
   ) {
     throw corruptBundle('Run bundle footer is malformed.');
   }
+
   return {
     type: 'bundle_footer',
     case_count: parsed.case_count,
@@ -154,39 +169,52 @@ const verifyBundleLines = (lines: string[]): BundleLine[] => {
   const hasher = createContentHasher();
   hasher.add(lines[0] ?? '');
   let footer: BundleFooter | undefined;
+
   for (const [index, parsed] of parsedLines.entries()) {
     if (index === 0) continue;
+
     if (parsed.type === 'bundle_footer') {
       if (index !== parsedLines.length - 1) {
         throw corruptBundle('Run bundle footer must appear exactly once and be final.');
       }
+
       footer = parseFooter(parsed);
       continue;
     }
+
     hasher.add(lines[index] ?? '');
+
     if (parsed.type === 'bundle_header') {
       throw corruptBundle('Run bundle must contain exactly one header in the first position.');
     }
+
     if (parsed.type !== 'case') {
       throw corruptBundle(
         `Run bundle line ${index + 1} has an unknown record type for schema ${JSON.stringify(header.schema)}.`,
       );
     }
+
     const caseRecord = parseCaseRecord(parsed.case);
+
     if (!caseRecord.ok || caseRecord.value.runId !== header.run.id) {
       throw corruptBundle(`Run bundle case line ${index + 1} is malformed.`);
     }
+
     recognized.push({ type: 'case', case: caseRecord.value });
   }
 
   if (!footer) throw corruptBundle('Run bundle is missing its footer.');
+
   if (footer.case_count !== recognized.length - 1) {
     throw corruptBundle('Run bundle footer case count does not match its case records.');
   }
+
   if (footer.content_hash !== hasher.digest()) {
     throw corruptBundle('Run bundle footer content hash does not match its contents.');
   }
+
   recognized.push(footer);
+
   return recognized;
 };
 

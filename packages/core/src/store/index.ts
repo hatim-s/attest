@@ -6,14 +6,22 @@ export {
   type BundleLine,
   type BundleManifest,
 } from './bundle-format.js';
+
 export { summarizeCaseRecord } from './case-summary.js';
+
 export { type CacheKind, type CacheStore } from './cache.js';
+
 export { canonicalStringify, contentHash } from './internal/canonical-json.js';
+
 export {
   collectStoredCaseExecutionViolations,
   collectStoredMetricEvaluationViolations,
+  parseStoredCaseExecution,
+  parseStoredMetricEvaluation,
 } from './internal/record-validation.js';
+
 export { StoreError, type StoreErrorCode } from './store-error.js';
+
 export {
   type AttestStore,
   type CaseRecord,
@@ -30,3 +38,10 @@ export {
   type StoredMetricEvaluation,
   type StoredAttempt,
 } from './types.js';
+
+export {
+  caseRecordSchema,
+  runRecordSchema,
+  storedCaseExecutionSchema,
+  storedMetricEvaluationSchema,
+} from './internal/record-schema.js';

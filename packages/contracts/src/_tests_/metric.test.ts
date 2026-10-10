@@ -36,6 +36,7 @@ describe('metric schemas', () => {
     const result = parseMetricResult({ score: 1 });
 
     expect(result.ok).toBe(false);
+
     if (result.ok) {
       return;
     }

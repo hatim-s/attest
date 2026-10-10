@@ -14,6 +14,7 @@ const directories: string[] = [];
 const createTemporaryDirectory = async (prefix: string): Promise<string> => {
   const directory = await mkdtemp(join(tmpdir(), prefix));
   directories.push(directory);
+
   return directory;
 };
 
@@ -41,12 +42,14 @@ describe('openEvalProjectStore', () => {
     const projectRoot = await createTemporaryDirectory('attest-store-boundary-');
     const store = await openEvalProjectStore(projectRoot);
     let runId: string;
+
     try {
       const run = await store.runs.createRun({
         configHash: 'sha256:boundary',
         configJson: '{}',
         schemaId: 'attest.eval-run',
       });
+
       runId = run.id;
       await store.runs.finalizeRun(run.id, 'completed');
       await expect(store.runs.getRun(run.id)).resolves.toMatchObject({ status: 'completed' });
@@ -59,6 +62,7 @@ describe('openEvalProjectStore', () => {
     expect((await readdir(projectRoot)).filter((entry) => entry.endsWith('.opening'))).toEqual([]);
 
     const reopened = await openStore(join(projectRoot, '.attest', 'runs.db'));
+
     try {
       await expect(reopened.runs.getRun(runId)).resolves.toMatchObject({ status: 'completed' });
     } finally {

@@ -26,12 +26,15 @@ describe('loadCommandProject', () => {
     candidate.agents[0]!.name = 'New snapshot';
     let signalPublished!: () => void;
     let releasePublication!: () => void;
+
     const publicationPaused = new Promise<void>((resolve) => {
       signalPublished = resolve;
     });
+
     const publicationGate = new Promise<void>((resolve) => {
       releasePublication = resolve;
     });
+
     const mutation = applyProjectMutation(
       { candidate, projectRoot: root },
       {
@@ -42,6 +45,7 @@ describe('loadCommandProject', () => {
         },
       },
     );
+
     await publicationPaused;
 
     await expect(loadCommandProject({ workingDirectory: root })).rejects.toMatchObject({

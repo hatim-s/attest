@@ -1,9 +1,10 @@
+import type { JsonValue } from '../project/shared.js';
 import {
   portableProjectBundleSchema,
   cloudRunRequestSchema,
   cloudQueueMessageSchema,
 } from '../cloud/project-bundle.js';
-import type { z } from 'zod';
+import { z } from 'zod';
 
 import { canonicalJson } from '../internal/canonical-json.js';
 
@@ -35,24 +36,30 @@ import {
 } from '../agent/websocket-contract.js';
 import { webSocketAttemptEvidenceSchema } from '../agent/websocket-evidence.js';
 
-type JsonSchemaFragment = Readonly<Record<string, unknown>>;
+type JsonSchemaFragment = Readonly<Record<string, JsonValue>>;
+
 type ContractJsonSchemaDefinition = {
   schema: z.ZodType;
   /** Keywords overlaid on the generated schema, including a $comment for runtime-only rules. */
   invariants?: JsonSchemaFragment;
 };
 
-const runtimeOnly = (rules: string): JsonSchemaFragment => ({
+const runtimeOnly = (rules: string) => ({
   $comment: `Runtime-only invariants: ${rules}.`,
 });
 
 const traceRules = 'span end_time must not precede start_time, and span ids must be unique';
+
 const assertionRules =
   'regex checks must compile, and threshold checks need at least one comparison';
+
 const agentRequestRules =
   'messages, turn_index, and conversation_id must appear together in the agent request';
+
 const agentResponseRules = 'the agent response carries exactly one of output or error';
+
 const selectionRules = 'selection counts satisfy selected_cases <= matched_cases <= total_cases';
+
 const agentResourceRules = [
   'polling needs exactly one status URL source, ordered intervals, and disjoint terminal values',
   'sandbox destinations are unique after relative-path normalization',
@@ -183,15 +190,15 @@ const CONTRACT_JSON_SCHEMAS = new Map<string, ContractJsonSchemaDefinition>([
   ],
 ]);
 
-const isJsonObject = (value: unknown): value is Record<string, unknown> =>
+const isJsonObject = (value: unknown): value is Record<string, JsonValue> =>
   value !== null && typeof value === 'object' && !Array.isArray(value);
 
 /** Deep-merges invariant keywords into a generated schema without mutating either input. */
 const mergeJsonSchemaFragments = (
-  generated: Readonly<Record<string, unknown>>,
+  generated: Readonly<Record<string, JsonValue>>,
   fragment: JsonSchemaFragment,
-): Record<string, unknown> => {
-  const merged: Record<string, unknown> = { ...generated };
+) => {
+  const merged = { ...generated };
 
   for (const [key, fragmentValue] of Object.entries(fragment)) {
     const generatedValue = generated[key];
@@ -207,6 +214,7 @@ const mergeJsonSchemaFragments = (
 /** Serializes one registered contract as deterministic Draft 2020-12 JSON Schema. */
 const serializeContractSchema = (fileName: string): string => {
   const definition = CONTRACT_JSON_SCHEMAS.get(fileName);
+
   if (definition === undefined) {
     throw new Error(`Unknown contract JSON Schema file: ${fileName}`);
   }
@@ -215,7 +223,10 @@ const serializeContractSchema = (fileName: string): string => {
     target: 'draft-2020-12',
     unrepresentable: 'any',
   });
-  const merged = mergeJsonSchemaFragments(generated, definition.invariants ?? {});
+
+  const parsed = z.record(z.string(), z.json()).parse(generated);
+  const merged = mergeJsonSchemaFragments(parsed, definition.invariants ?? {});
+
   return `${canonicalJson(merged, 2)}\n`;
 };
 

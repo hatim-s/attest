@@ -2,10 +2,10 @@ import type { Transaction } from 'kysely';
 
 import {
   canonicalStringify,
-  collectStoredCaseExecutionViolations,
-  collectStoredMetricEvaluationViolations,
   contentHash,
   StoreError,
+  parseStoredCaseExecution,
+  parseStoredMetricEvaluation,
   type CaseRecord,
   type StoredCaseExecution,
   type StoredMetricEvaluation,
@@ -17,25 +17,33 @@ import { createUlid } from './create-ulid.js';
 import { toSpanAttribute } from './span-attribute.js';
 
 /** Aggregates execution and evaluation violations before a database transaction begins. */
-const validateCaseRecordInput = (
-  execution: StoredCaseExecution,
-  evaluations: StoredMetricEvaluation[],
-): void => {
-  const violations = collectStoredCaseExecutionViolations(execution);
-  evaluations.forEach((evaluation, index) => {
-    violations.push(
-      ...collectStoredMetricEvaluationViolations(evaluation, `evaluations[${index}]`),
-    );
-  });
-  if (violations.length > 0) {
+// BOUNDARY: Public store submissions are parsed with the execution and metric owner schemas before any transaction.
+const validateCaseRecordInput = (execution: unknown, evaluations: unknown) => {
+  const parsedExecution = parseStoredCaseExecution(execution);
+  const violations = parsedExecution.ok ? [] : [...parsedExecution.violations];
+  const parsedEvaluations: StoredMetricEvaluation[] = [];
+
+  if (!Array.isArray(evaluations)) violations.push('evaluations must be an array');
+  else
+    evaluations.forEach((evaluation, index) => {
+      const parsed = parseStoredMetricEvaluation(evaluation, `evaluations[${index}]`);
+
+      if (parsed.ok) parsedEvaluations.push(parsed.value);
+      else violations.push(...parsed.violations);
+    });
+
+  if (!parsedExecution.ok || violations.length > 0) {
     throw new StoreError('INVALID_RECORD', `Invalid case record: ${violations.join('; ')}.`);
   }
+
+  return { execution: parsedExecution.value, evaluations: parsedEvaluations };
 };
 
 const metricOutcomeColumns = (evaluation: StoredMetricEvaluation) => {
   if (evaluation.status === 'evaluated') {
     return { score: evaluation.score, pass: Number(evaluation.pass), error_json: null };
   }
+
   return { score: null, pass: null, error_json: canonicalStringify(evaluation.error) };
 };
 
@@ -56,6 +64,7 @@ const toExecution = (record: CaseRecord): StoredCaseExecution => {
     attempts: record.attempts,
     expectedMetrics: record.expectedMetrics,
   };
+
   return record.outcome === 'completed'
     ? { ...shared, outcome: 'completed', response: record.response, trace: record.trace }
     : {
@@ -78,13 +87,16 @@ const readExistingCase = async (
     .where('suite_name', '=', execution.suiteName)
     .where('case_id', '=', execution.caseId)
     .executeTakeFirst();
+
   if (!row) return undefined;
+
   const metrics = await database
     .selectFrom('metric_results')
     .selectAll()
     .where('case_row_id', '=', row.id)
     .orderBy('id')
     .execute();
+
   return {
     inputHash: row.input_hash,
     record: toCaseRecord(row, metrics.map(toMetricEvaluation)),
@@ -103,20 +115,25 @@ const recordCaseTransaction = async (
     .select('status')
     .where('id', '=', runId)
     .executeTakeFirst();
+
   if (!run) throw new StoreError('RUN_NOT_FOUND', `Run ${runId} was not found.`);
 
   const existing = await readExistingCase(database, runId, execution);
+
   if (existing) {
     const sameInput = existing.inputHash === contentHash(execution.request.input);
+
     const sameExecution =
       executionHash(toExecution(existing.record), existing.record.metrics) ===
       executionHash(execution, evaluations);
+
     if (sameInput && sameExecution) return;
     throw new StoreError(
       'CASE_CONFLICT',
       `Case ${execution.suiteName}/${execution.caseId} conflicts with its stored record.`,
     );
   }
+
   if (run.status !== 'running')
     throw new StoreError('RUN_FINALIZED', `Run ${runId} is already finalized.`);
 
@@ -168,6 +185,7 @@ const recordCaseTransaction = async (
   }
 
   const spans = completed ? (execution.trace?.spans ?? []) : [];
+
   if (spans.length > 0) {
     await database
       .insertInto('spans')

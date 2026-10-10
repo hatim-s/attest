@@ -22,7 +22,9 @@ type DiffPanelProps = {
 
 const transitionTone = (kind: CaseTransitionKind): string => {
   if (kind === 'regressed' || kind === 'still_failing') return 'fail';
+
   if (kind === 'fixed' || kind === 'still_passing') return 'pass';
+
   return 'neutral';
 };
 
@@ -37,11 +39,13 @@ const createVerdictMatrix = (transitions: CaseTransition[]): VerdictMatrix => {
     fail: { pass: 0, fail: 0, error: 0 },
     error: { pass: 0, fail: 0, error: 0 },
   };
+
   for (const transition of transitions) {
     if (transition.baseVerdict !== undefined && transition.candidateVerdict !== undefined) {
       matrix[transition.baseVerdict][transition.candidateVerdict] += 1;
     }
   }
+
   return matrix;
 };
 
@@ -143,6 +147,7 @@ const DiffPanel = ({
             {diff.transitions.map((transition) => {
               const key = `${transition.suiteName}:${transition.caseId}`;
               const expanded = selectedTransition === key;
+
               return (
                 <div className="transition-item" key={key}>
                   <button

@@ -21,13 +21,16 @@ const resolveInstalledPackage = async (
   name: string,
 ): Promise<string | undefined> => {
   let directory = source;
+
   while (true) {
     try {
       return await realpath(join(directory, 'node_modules', name));
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      if (!(error instanceof Error) || !('code' in error) || error.code !== 'ENOENT') throw error;
     }
+
     const parent = dirname(directory);
+
     if (parent === directory) return undefined;
     directory = parent;
   }
@@ -62,20 +65,26 @@ const materializePackedRuntime = async (
 
   for (let index = 0; index < pending.length; index += 1) {
     const { source, destination } = pending[index]!;
+
+    // SAFETY: The packer copied the checked-in package manifest before traversing its dependency names.
     const manifest = JSON.parse(
       await readFile(join(destination, 'package.json'), 'utf8'),
     ) as PackageManifest;
+
     const dependencyNames = new Set([
       ...Object.keys(manifest.dependencies ?? {}),
       ...Object.keys(manifest.optionalDependencies ?? {}),
       ...Object.keys(manifest.peerDependencies ?? {}),
     ]);
+
     for (const name of dependencyNames) {
       const dependencySource = await resolveInstalledPackage(source, name);
+
       if (dependencySource === undefined) {
         const optional =
           Object.hasOwn(manifest.optionalDependencies ?? {}, name) ||
           manifest.peerDependenciesMeta?.[name]?.optional === true;
+
         if (optional) continue;
         throw new Error(
           `Installed dependency ${name} is missing for ${manifest.name}. Run bun install --frozen-lockfile.`,
@@ -83,6 +92,7 @@ const materializePackedRuntime = async (
       }
 
       let dependencyDestination = destinations.get(dependencySource);
+
       if (dependencyDestination === undefined) {
         dependencyDestination = join(runtime, 'dependencies', String(destinations.size));
         destinations.set(dependencySource, dependencyDestination);
@@ -94,6 +104,7 @@ const materializePackedRuntime = async (
         });
         pending.push({ source: dependencySource, destination: dependencyDestination });
       }
+
       const link = join(destination, 'node_modules', name);
       await mkdir(dirname(link), { recursive: true });
       await symlink(relative(dirname(link), dependencyDestination), link, 'dir');
@@ -104,6 +115,7 @@ const materializePackedRuntime = async (
   await mkdir(binaryDirectory, { recursive: true });
   const cliPath = join(binaryDirectory, 'attest');
   await symlink('../@attest/cli/dist/cli.js', cliPath);
+
   return cliPath;
 };
 

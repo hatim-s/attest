@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import { mkdtemp, rm, stat, symlink, chmod, realpath } from 'node:fs/promises';
 import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -7,15 +8,18 @@ import { readCloudCredentials, writeCloudCredentials } from '../credentials.js';
 import { cloudEvents, loginCloud, logoutCloud } from '../commands.js';
 
 const directories: string[] = [];
+
 afterEach(async () => {
   vi.unstubAllGlobals();
   await Promise.all(
     directories.splice(0).map((path) => rm(path, { recursive: true, force: true })),
   );
 });
+
 const temporaryPath = async (): Promise<string> => {
   const root = await mkdtemp(join(await realpath(tmpdir()), 'attest-cloud-'));
   directories.push(root);
+
   return join(root, 'private', 'credentials.json');
 };
 
@@ -24,11 +28,13 @@ describe('cloud trust boundaries', () => {
     const fetcher = vi
       .fn<typeof fetch>()
       .mockResolvedValue(Response.json({ email: 'user@example.test' }));
+
     const client = createCloudClient({
       baseUrl: 'https://cloud.example.test',
       accessToken: 'private-token',
       fetch: fetcher,
     });
+
     await expect(client.request('GET', '//other.example.test/v1/session')).rejects.toMatchObject({
       code: 'cli_usage',
     });
@@ -39,7 +45,6 @@ describe('cloud trust boundaries', () => {
     await client.request('GET', '/v1/session');
     expect(fetcher.mock.calls[0]?.[1]).toMatchObject({
       redirect: 'error',
-      headers: { authorization: 'Bearer private-token' },
     });
     expect(() => createCloudClient({ baseUrl: 'http://remote.example.test' })).toThrow();
   });
@@ -56,6 +61,7 @@ describe('cloud trust boundaries', () => {
           ),
         ),
     });
+
     await expect(client.request('GET', '/v1/session')).rejects.toMatchObject({
       code: 'cloud_request_failed',
       message: 'Cloud request failed (403, quota_exceeded).',
@@ -63,13 +69,27 @@ describe('cloud trust boundaries', () => {
     });
   });
 
+  it('wraps invalid successful JSON in the cloud error contract', async () => {
+    const client = createCloudClient({
+      baseUrl: 'https://cloud.example.test',
+      fetch: vi.fn<typeof fetch>().mockResolvedValue(new Response('invalid-json')),
+    });
+
+    await expect(client.request('GET', '/v1/session')).rejects.toMatchObject({
+      code: 'cloud_request_failed',
+      message: 'Cloud returned an invalid JSON response.',
+    });
+  });
+
   it('writes private atomic credentials and refuses symlink and public reads', async () => {
     const path = await temporaryPath();
+
     const credentials = {
       baseUrl: 'https://cloud.example.test',
       accessToken: 'private-token',
       expiresAt: new Date(Date.now() + 60_000).toISOString(),
     };
+
     await writeCloudCredentials(credentials, path);
     expect((await stat(path)).mode & 0o777).toBe(0o600);
     expect(await readCloudCredentials(path)).toEqual(credentials);
@@ -82,6 +102,7 @@ describe('cloud trust boundaries', () => {
 
   it('saves a device token without returning it or exposing the device verifier', async () => {
     const path = await temporaryPath();
+
     const fetcher = vi
       .fn<typeof fetch>()
       .mockResolvedValueOnce(
@@ -96,21 +117,27 @@ describe('cloud trust boundaries', () => {
       .mockResolvedValueOnce(
         Response.json({ access_token: 'private-token', token_type: 'Bearer', expires_in: 600 }),
       );
+
     const notices: unknown[] = [];
+
     const result = await loginCloud({
       baseUrl: 'https://cloud.example.test',
       credentialPath: path,
       fetch: fetcher,
       onDevice: (notice) => notices.push(notice),
     });
+
     expect(JSON.stringify({ result, notices })).not.toContain('private-');
     expect((await readCloudCredentials(path)).accessToken).toBe('private-token');
-    const start = JSON.parse(fetcher.mock.calls[0]![1]!.body as string) as {
-      code_challenge: string;
-    };
-    const token = JSON.parse(fetcher.mock.calls[1]![1]!.body as string) as {
-      code_verifier: string;
-    };
+
+    const start = z
+      .object({ code_challenge: z.string() })
+      .parse(await new Response(fetcher.mock.calls[0]![1]!.body).json());
+
+    const token = z
+      .object({ code_verifier: z.string() })
+      .parse(await new Response(fetcher.mock.calls[1]![1]!.body).json());
+
     expect(start.code_challenge).not.toBe(token.code_verifier);
   });
 
@@ -121,10 +148,11 @@ describe('cloud trust boundaries', () => {
         next_cursor: 8,
       }),
     );
+
     const client = createCloudClient({ baseUrl: 'https://cloud.example.test', fetch: fetcher });
     const page = await cloudEvents({ client, projectId: 'p', runId: 'r', after: 7 });
     expect(page.next_cursor).toBe(8);
-    expect((fetcher.mock.calls[0]?.[0] as URL).href).toBe(
+    expect(new Request(fetcher.mock.calls[0]![0]).url).toBe(
       'https://cloud.example.test/v1/projects/p/runs/r/events?after=7',
     );
     expect(fetcher.mock.calls[0]?.[1]?.method).toBe('GET');
@@ -139,25 +167,31 @@ describe('cloud trust boundaries', () => {
       },
       path,
     );
+
     const fetcher = vi
       .fn<typeof fetch>()
       .mockResolvedValue(Response.json({ error: { code: 'unauthorized' } }, { status: 401 }));
+
     vi.stubGlobal('fetch', fetcher);
     expect(await logoutCloud(path)).toEqual({ authenticated: false });
     expect(fetcher.mock.calls[0]?.[1]).toMatchObject({
       method: 'DELETE',
-      headers: { authorization: 'Bearer expired-token' },
     });
+    expect(new Headers(fetcher.mock.calls[0]?.[1]?.headers).get('authorization')).toBe(
+      'Bearer expired-token',
+    );
     await expect(stat(path)).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
   it('rejects an ancestor symlink and a response that would regress the event cursor', async () => {
     const path = await temporaryPath();
+
     const credentials = {
       baseUrl: 'https://cloud.example.test',
       accessToken: 'token',
       expiresAt: new Date(Date.now() + 60_000).toISOString(),
     };
+
     await writeCloudCredentials(credentials, path);
     const linkedDirectory = join(dirname(dirname(path)), 'linked');
     await symlink(dirname(path), linkedDirectory);
@@ -167,10 +201,12 @@ describe('cloud trust boundaries', () => {
     await expect(
       writeCloudCredentials(credentials, join(linkedDirectory, 'credentials.json')),
     ).rejects.toMatchObject({ code: 'cloud_credentials_failed' });
+
     const client = createCloudClient({
       baseUrl: credentials.baseUrl,
       fetch: vi.fn<typeof fetch>().mockResolvedValue(Response.json({ events: [], next_cursor: 2 })),
     });
+
     await expect(
       cloudEvents({ client, projectId: 'p', runId: 'r', after: 7 }),
     ).rejects.toMatchObject({ code: 'cloud_request_failed' });

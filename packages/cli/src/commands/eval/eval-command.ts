@@ -73,14 +73,19 @@ const readRunRequest = async (
       signal,
     });
   }
+
   assertNoRunFlags(fields.fromJson, fields);
+
   const document = await readRequestDocument(fields.fromJson, {
     hint: REQUEST_DOCUMENT_HINT,
     readStdin: context.interaction.readStdin,
     workingDirectory: context.workingDirectory,
   });
+
   const output = requestedOutput(document);
+
   if (output !== undefined) command.setOptionValueWithSource('output', output, 'config');
+
   return parseEvalRunRequest(document);
 };
 
@@ -91,7 +96,9 @@ const executeEvalRun = async (
   signal: AbortSignal,
   context: CommandContext,
 ): Promise<void> => {
-  const source = await runConfiguration(request, {
+  const execute = context.services?.eval?.runConfiguration ?? runConfiguration;
+
+  const source = await execute(request, {
     argv: context.argv,
     project,
     signal,
@@ -99,21 +106,27 @@ const executeEvalRun = async (
       failedRunResult(serializeCliError(new AttestCliError(code, message))),
     workingDirectory: context.workingDirectory,
   });
+
   const events = await collectEvalEvents(source, {
     io: context.io,
     now: () => new Date(),
     streamJsonl: request.output === 'jsonl',
     watch: request.output === 'human' && request.watch === true,
   });
+
   const final = events.at(-1);
+
   if (final?.event !== 'result') {
     throw new AttestCliError('run_failed', 'Eval stream did not produce a final result.');
   }
+
   if (request.output === 'json') context.io.output(serializeCliResult(final.data.result));
+
   if (request.output === 'human') {
     if (!final.data.result.ok) context.io.error(renderCliError(final.data.result.error));
     context.io.output(renderHumanFinalResult(final.data));
   }
+
   if (final.data.exit_code !== 0) throw new CliExit(final.data.exit_code);
 };
 
@@ -130,22 +143,28 @@ const readCancelRequest = async (
   if (options.fromJson === undefined) {
     return createEvalCancelRequest({ output: options.output, runId });
   }
+
   assertNoCancelFlags(options.fromJson, { output: options.output, runId });
+
   const document = await readRequestDocument(options.fromJson, {
     hint: REQUEST_DOCUMENT_HINT,
     readStdin: context.interaction.readStdin,
     workingDirectory: context.workingDirectory,
   });
+
   const output = requestedOutput(document);
+
   if (output === 'human' || output === 'json') {
     command.setOptionValueWithSource('output', output, 'config');
   }
+
   return parseEvalCancelRequest(document);
 };
 
 /** Registers `eval run` and `eval cancel`, which call the local eval runner directly. */
 const registerEvalCommands = (context: CommandContext): void => {
   const evalCommand = context.program.command('eval').description('Run and cancel evaluations.');
+
   const run = evalCommand
     .command('run')
     .description('Run selected tests and persist one immutable evaluation.')
@@ -180,12 +199,15 @@ const registerEvalCommands = (context: CommandContext): void => {
         tags: options.tag,
         testIds,
       };
+
       await withProcessSignals(async (signal) => {
         try {
           const request = await readRunRequest(fields, command, signal, context);
+
           if (signal.aborted) {
             throw new AttestCliError('cancelled', 'Evaluation was cancelled before execution.');
           }
+
           await executeEvalRun(request, options.project, signal, context);
         } catch (error: unknown) {
           if (!signal.aborted || error instanceof CliExit) throw error;
@@ -195,6 +217,7 @@ const registerEvalCommands = (context: CommandContext): void => {
         }
       });
     });
+
   setCliCommandHelpMetadata(run, {
     requestSchema: COMMAND_REQUEST_SCHEMA_ID,
     examples: [
@@ -257,21 +280,29 @@ const registerEvalCommands = (context: CommandContext): void => {
     )
     .action(async (runId: string | undefined, options: EvalCancelCliOptions, command: Command) => {
       const request = await readCancelRequest(runId, options, command, context);
-      const result = await cancelConfiguration(request, {
+
+      const cancel = context.services?.eval?.cancelConfiguration ?? cancelConfiguration;
+
+      const result = await cancel(request, {
         project: options.project,
         workingDirectory: context.workingDirectory,
       });
+
       if (request.output === 'json') {
         const document = createCliSuccessResult(
           'eval.cancel',
           { run_id: result.runId, status: result.status },
           { projectHashBefore: result.projectHash, projectHashAfter: result.projectHash },
         );
+
         context.io.output(serializeCliResult(document));
+
         return;
       }
+
       context.io.output(`Run ${result.runId}: ${result.status.replaceAll('_', ' ')}.`);
     });
+
   setCliCommandHelpMetadata(cancel, {
     requestSchema: COMMAND_REQUEST_SCHEMA_ID,
     examples: [

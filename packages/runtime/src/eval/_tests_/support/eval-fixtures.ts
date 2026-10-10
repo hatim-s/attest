@@ -1,3 +1,4 @@
+import { isString } from '@attest/contracts';
 import type { CaseExecution } from '../../types.js';
 import { readFileSync } from 'node:fs';
 
@@ -15,6 +16,7 @@ import type {
 } from '../../types.js';
 
 const RUN_ID = '01ARZ3NDEKTSV4RRFFQ69G5FAV';
+
 const BASELINE_RUN_ID = '01ARZ3NDEKTSV4RRFFQ69G5FAA';
 
 const baseRun = evalRunSchema.parse(
@@ -37,16 +39,19 @@ const createPlan = (
   cases: readonly (string | CaseSpec)[],
   options: PlanOptions = {},
 ): ResolvedEvalPlan<string> => {
-  const specs = cases.map((spec) => (typeof spec === 'string' ? { caseId: spec } : spec));
+  const specs = cases.map((spec) => (isString(spec) ? { caseId: spec } : spec));
+
   const selectedCases = specs.map((spec, configuredIndex) => ({
     configured_index: configuredIndex,
     test_id: spec.testId ?? 'refund',
     case_id: spec.caseId,
     source: { kind: 'direct' as const },
   }));
+
   const concurrency = options.concurrency ?? 2;
   const baselineRunId = options.baseline === true ? BASELINE_RUN_ID : undefined;
   const junitPath = options.junit === true ? 'artifacts/results.xml' : undefined;
+
   const run: EvalRun = {
     ...structuredClone(baseRun),
     snapshot: {
@@ -55,6 +60,7 @@ const createPlan = (
       selected_cases: selectedCases,
     },
   };
+
   run.effective_command.resolved = {
     concurrency,
     timeout_ms: options.timeoutMs ?? 60_000,
@@ -72,6 +78,7 @@ const createPlan = (
             },
           },
   };
+
   return {
     run,
     cases: selectedCases.map((selectedCase, index) => ({
@@ -85,6 +92,7 @@ const createPlan = (
 /** Provides a monotonic injected ISO clock so event snapshots never depend on wall time. */
 const createClock = (): (() => string) => {
   let milliseconds = 0;
+
   return () => new Date(Date.UTC(2026, 7, 8, 10, 0, 0, milliseconds++)).toISOString();
 };
 
@@ -132,6 +140,7 @@ const failedExecution = (
 ): EvalCaseRunnerResult => {
   const code = outcome === 'invocation_error' ? 'network' : outcome;
   const invocationError = new AgentInvocationError(code, `${resolvedCase.case_id} ${outcome}`);
+
   return {
     execution: {
       caseId: resolvedCase.case_id,
@@ -191,13 +200,17 @@ const createPersistence = () => {
   const createRun = vi
     .fn<EvalPersistenceAdapter<string>['createRun']>()
     .mockResolvedValue(undefined);
+
   const recordCase = vi
     .fn<EvalPersistenceAdapter<string>['recordCase']>()
     .mockResolvedValue(undefined);
+
   const finalizeRun = vi
     .fn<EvalPersistenceAdapter<string>['finalizeRun']>()
     .mockResolvedValue(undefined);
+
   const adapter: EvalPersistenceAdapter<string> = { createRun, recordCase, finalizeRun };
+
   return { adapter, createRun, recordCase, finalizeRun };
 };
 
@@ -212,6 +225,7 @@ const waitForAbort: EvalCaseRunner<string>['executeCase'] = async (
       signal.addEventListener('abort', () => resolve(), { once: true }),
     );
   }
+
   return failedExecution(resolvedCase, 'cancelled');
 };
 

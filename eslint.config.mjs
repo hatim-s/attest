@@ -1,6 +1,8 @@
+import antiSlopConfig from './tools/anti-slop/config.mjs';
 import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
+  ...antiSlopConfig,
   {
     ignores: [
       '**/dist/**',

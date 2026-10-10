@@ -7,11 +7,13 @@ import type { StreamHttpTransport } from './stream-transport.js';
 /** Opens the local DNS-pinned transport; stream parsing stays shared with other hosts. */
 const openNodeStream: StreamHttpTransport = async (agent, materialized, signal, options) => {
   const connectTimeoutMs = agent.timeouts?.connect_ms ?? DEFAULT_CONNECT_MS;
+
   const resolved = await resolveSafeHttpUrl(materialized.url, {
     timeoutMs: connectTimeoutMs,
     signal,
     callerSignal: options.signal,
   });
+
   if (
     (options.secrets?.length ?? 0) > 0 &&
     resolved.url.protocol !== 'https:' &&
@@ -22,6 +24,7 @@ const openNodeStream: StreamHttpTransport = async (agent, materialized, signal, 
       'Streaming secrets require HTTPS except on loopback.',
     );
   }
+
   const { response } = await openPinnedRequest(resolved, {
     method: materialized.method,
     headers: materialized.headers,
@@ -39,13 +42,16 @@ const openNodeStream: StreamHttpTransport = async (agent, materialized, signal, 
         new AgentInvocationError('network', 'Streaming HTTP transport failed.', { cause }),
     },
   });
+
   const status = response.statusCode ?? 0;
+
   return {
     status,
     headers: {
       'content-type': String(response.headers['content-type'] ?? ''),
       'retry-after': response.headersDistinct['retry-after']?.[0] ?? '',
     },
+    // SAFETY: the pinned IncomingMessage has no text encoding and its Buffer chunks implement Uint8Array.
     body: response as AsyncIterable<Uint8Array>,
     cancel: () => response.destroy(),
   };

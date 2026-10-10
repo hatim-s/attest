@@ -1,5 +1,7 @@
 import { vercelSandboxSchema, type JsonValue, type VercelSandbox } from '@attest/contracts';
 
+import { z } from 'zod';
+
 import { LocalError } from '../../../errors/index.js';
 import { schemaIssueDiagnostics } from '../../../internal/schema-issue-diagnostics.js';
 import { parseJsonText } from '../../../internal/source-text.js';
@@ -8,6 +10,7 @@ import { ShellWordsError, splitShellWords } from '../shell-words.js';
 /** Tokenizes a convenience command string into argv without expansion or shell execution. */
 const tokenizeCommand = (value: string): string[] => {
   let argv: string[];
+
   try {
     argv = splitShellWords(value, { rejectShellControl: false });
   } catch (error: unknown) {
@@ -17,12 +20,14 @@ const tokenizeCommand = (value: string): string[] => {
       hint: 'Close the quote or use `--argv-json` for an unambiguous argv array.',
     });
   }
+
   if (argv.length === 0) {
     throw new LocalError('cli_missing_input', 'The native command argv cannot be empty.', {
       path: '--native-command',
       hint: 'Pass a command string or a non-empty `--argv-json` array.',
     });
   }
+
   return argv;
 };
 
@@ -32,17 +37,17 @@ const parseArgvJson = (value: string): string[] => {
     path: '--argv-json',
     hint: 'Pass a JSON array of strings.',
   });
-  if (
-    !Array.isArray(parsed) ||
-    parsed.length === 0 ||
-    parsed.some((entry) => typeof entry !== 'string')
-  ) {
+
+  const argv = z.array(z.string()).nonempty().safeParse(parsed);
+
+  if (!argv.success) {
     throw new LocalError('cli_usage', '`--argv-json` must be a non-empty string array.', {
       path: '--argv-json',
-      hint: 'Example: `--argv-json \'["node","./agent.mjs"]\'`.',
+      hint: 'Pass a JSON array containing at least one string.',
     });
   }
-  return parsed as string[];
+
+  return argv.data;
 };
 
 /** Parses and validates one Vercel sandbox definition. */
@@ -51,7 +56,9 @@ const parseSandboxJson = (value: string): VercelSandbox => {
     path: '--sandbox-json',
     hint: 'Pass one Vercel sandbox JSON object.',
   });
+
   const sandbox = vercelSandboxSchema.safeParse(parsed);
+
   if (!sandbox.success) {
     throw new LocalError('cli_usage', '`--sandbox-json` does not match the sandbox schema.', {
       path: '--sandbox-json',
@@ -59,6 +66,7 @@ const parseSandboxJson = (value: string): VercelSandbox => {
       details: { diagnostics: schemaIssueDiagnostics(sandbox.error.issues) },
     });
   }
+
   return sandbox.data;
 };
 
@@ -69,12 +77,14 @@ const parseDuration = (value: string, path = '--timeout'): number => {
   const unit = match?.[2];
   const multiplier = unit === 'm' ? 60_000 : unit === 's' ? 1_000 : 1;
   const milliseconds = amount * multiplier;
+
   if (!Number.isSafeInteger(milliseconds) || milliseconds <= 0) {
     throw new LocalError('cli_usage', 'Duration must be a positive value.', {
       path,
       hint: 'Use an integer followed by ms, s, or m, such as `60s`.',
     });
   }
+
   return milliseconds;
 };
 
@@ -88,30 +98,35 @@ const parseJsonValues = (values: readonly string[], path: string): JsonValue[] =
   );
 
 /** Parses one WebSocket text-JSON request template. */
+// BOUNDARY: CLI JSON template text is decoded and rejected unless it is an object containing the required request id placeholder.
 const parseRequestTemplate = (value: string): Record<string, JsonValue> => {
   const parsed = parseJsonText(value, {
     path: '--request-template',
     hint: 'Pass one JSON object containing exactly one `{{request_id}}` value.',
   });
+
   if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
     throw new LocalError('cli_usage', '`--request-template` must be a JSON object.', {
       path: '--request-template',
       hint: 'Example: `{"request_id":"{{request_id}}","request":"{{request}}"}`.',
     });
   }
+
   return parsed;
 };
 
 /** Parses one background-process TCP readiness target. */
-const parseTcpReadiness = (value: string): { host: string; port: number } => {
+const parseTcpReadiness = (value: string) => {
   const match = /^(\[[^\]]+\]|[^:]+):(\d+)$/u.exec(value);
   const port = Number(match?.[2]);
+
   if (match?.[1] === undefined || !Number.isInteger(port) || port < 1 || port > 65_535) {
     throw new LocalError('cli_usage', '--readiness-tcp must be HOST:PORT.', {
       path: '--readiness-tcp',
       hint: 'Example: `--readiness-tcp 127.0.0.1:8787`.',
     });
   }
+
   return { host: match[1].replace(/^\[|\]$/gu, ''), port };
 };
 

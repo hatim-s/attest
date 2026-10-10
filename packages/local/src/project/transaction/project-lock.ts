@@ -13,7 +13,9 @@ import { syncPath } from '../../internal/sync-path.js';
 import { ProjectTransactionError } from './project-transaction-error.js';
 
 const PROJECT_LOCK_FILE = '.attest/project.lock';
+
 const PROJECT_LOCK_SCHEMA = 'attest.project-lock';
+
 const execFileAsync = promisify(execFile);
 
 /** The lock file's contents: who owns the project mutation lock and how to prove it is stale. */
@@ -50,6 +52,7 @@ const getProcessStartIdentity = async (pid: number): Promise<string | null> => {
     const { stdout } = await execFileAsync('ps', ['-o', 'lstart=', '-p', String(pid)], {
       encoding: 'utf8',
     });
+
     return stdout.trim() || null;
   } catch {
     return null;
@@ -58,12 +61,15 @@ const getProcessStartIdentity = async (pid: number): Promise<string | null> => {
 
 const parseLockMetadata = (raw: string): ProjectLockMetadata | undefined => {
   let value: unknown;
+
   try {
-    value = JSON.parse(raw) as unknown;
+    value = JSON.parse(raw);
   } catch {
     return undefined;
   }
+
   const parsed = projectLockSchema.safeParse(value);
+
   return parsed.success ? parsed.data : undefined;
 };
 
@@ -71,12 +77,14 @@ const parseLockMetadata = (raw: string): ProjectLockMetadata | undefined => {
 const inspectProjectLock = async (root: string): Promise<ProjectLockInspection> => {
   const path = join(root, PROJECT_LOCK_FILE);
   let raw: string;
+
   try {
     raw = await readFile(path, 'utf8');
   } catch (error: unknown) {
     if (errnoCode(error) === 'ENOENT') {
       return { state: 'absent' };
     }
+
     throw new ProjectTransactionError('project_locked', 'Could not inspect the project lock.', {
       path: PROJECT_LOCK_FILE,
       details: { lock_state: 'unreadable' },
@@ -85,9 +93,11 @@ const inspectProjectLock = async (root: string): Promise<ProjectLockInspection> 
   }
 
   const metadata = parseLockMetadata(raw);
+
   if (metadata === undefined) {
     return { raw, reason: 'lock metadata is malformed', state: 'invalid' };
   }
+
   if (metadata.hostname !== hostname()) {
     return {
       metadata,
@@ -96,9 +106,11 @@ const inspectProjectLock = async (root: string): Promise<ProjectLockInspection> 
       state: 'unknown',
     };
   }
+
   if (!isProcessPresent(metadata.pid)) {
     return { metadata, raw, reason: 'owner process no longer exists', state: 'stale' };
   }
+
   if (metadata.process_start_identity === null) {
     return {
       metadata,
@@ -107,7 +119,9 @@ const inspectProjectLock = async (root: string): Promise<ProjectLockInspection> 
       state: 'live',
     };
   }
+
   const currentIdentity = await getProcessStartIdentity(metadata.pid);
+
   if (currentIdentity === null) {
     return {
       metadata,
@@ -116,9 +130,11 @@ const inspectProjectLock = async (root: string): Promise<ProjectLockInspection> 
       state: 'live',
     };
   }
+
   if (currentIdentity !== metadata.process_start_identity) {
     return { metadata, raw, reason: 'owner PID was reused by another process', state: 'stale' };
   }
+
   return { metadata, raw, reason: 'owner process and start identity are live', state: 'live' };
 };
 
@@ -137,6 +153,14 @@ const throwForExistingLock = (
       },
     });
   }
+
+  const details: ProjectLockFailureDetails = {
+    lock_state: inspection.state,
+    reason: inspection.reason,
+  };
+
+  if (inspection.state !== 'invalid') details.lock = inspection.metadata;
+
   throw new ProjectTransactionError(
     'project_locked',
     inspection.state === 'invalid'
@@ -144,19 +168,22 @@ const throwForExistingLock = (
       : 'The project is locked by another process.',
     {
       path: PROJECT_LOCK_FILE,
-      details: {
-        lock_state: inspection.state,
-        reason: inspection.reason,
-        ...(inspection.state === 'invalid' ? {} : { lock: inspection.metadata }),
-      },
+      details,
     },
   );
+};
+
+type ProjectLockFailureDetails = {
+  lock_state: Exclude<ProjectLockInspection, { state: 'absent' }>['state'];
+  reason: Exclude<ProjectLockInspection, { state: 'absent' }>['reason'];
+  lock?: z.infer<typeof projectLockSchema>;
 };
 
 /** Acquires the project-local lock exclusively and never steals an existing owner. */
 const acquireProjectLock = async (root: string): Promise<ProjectLockHandle> => {
   const path = join(root, PROJECT_LOCK_FILE);
   await mkdir(dirname(path), { recursive: true });
+
   const metadata: ProjectLockMetadata = {
     schema: PROJECT_LOCK_SCHEMA,
     owner_token: randomUUID(),
@@ -165,18 +192,23 @@ const acquireProjectLock = async (root: string): Promise<ProjectLockHandle> => {
     hostname: hostname(),
     created_at: new Date().toISOString(),
   };
+
   let handle;
+
   try {
     handle = await open(path, 'wx', 0o600);
   } catch (error: unknown) {
     if (errnoCode(error) === 'EEXIST') {
       const inspection = await inspectProjectLock(root);
+
       if (inspection.state === 'absent') {
         // The owner released between open and inspection; a fresh retry is safe.
         return acquireProjectLock(root);
       }
+
       return throwForExistingLock(inspection);
     }
+
     throw new ProjectTransactionError(
       'project_transaction_failed',
       'Could not create project lock.',
@@ -186,19 +218,23 @@ const acquireProjectLock = async (root: string): Promise<ProjectLockHandle> => {
       },
     );
   }
+
   try {
     await handle.writeFile(`${JSON.stringify(metadata)}\n`, 'utf8');
     await handle.sync();
   } finally {
     await handle.close();
   }
+
   await syncPath(dirname(path));
+
   return { metadata, path, root };
 };
 
 /** Releases a lock only when its on-disk owner token still belongs to this handle. */
 const releaseProjectLock = async (lock: ProjectLockHandle): Promise<void> => {
   const inspection = await inspectProjectLock(lock.root);
+
   if (
     inspection.state === 'absent' ||
     inspection.state === 'invalid' ||
@@ -209,6 +245,7 @@ const releaseProjectLock = async (lock: ProjectLockHandle): Promise<void> => {
       details: { lock_state: inspection.state },
     });
   }
+
   await unlink(lock.path);
   await syncPath(dirname(lock.path));
 };

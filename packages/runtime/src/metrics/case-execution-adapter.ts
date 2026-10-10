@@ -23,10 +23,13 @@ const caseExecutionToMetricContext = (
   if (execution.outcome !== 'completed') {
     return { caseDefinition, execution: { outcome: execution.outcome, trace: null } };
   }
+
   const trace = execution.trace ?? null;
+
   if (isAgentErrorResponse(execution.response)) {
     return { caseDefinition, execution: { outcome: 'agent_error', trace } };
   }
+
   return {
     caseDefinition,
     execution: { outcome: 'completed', output: execution.response.output, trace },

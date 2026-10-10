@@ -1,3 +1,4 @@
+import { isBoolean } from '@attest/contracts';
 import Ajv2020, { type ValidateFunction } from 'ajv/dist/2020.js';
 
 import type { PathResolution } from '../evaluation-document.js';
@@ -16,10 +17,14 @@ type SchemaValidator = {
 const schemaValidators = new WeakMap<object, SchemaValidator>();
 
 /** Compiles one root schema in an isolated Ajv registry so independent `$id` values cannot collide. */
-const compileSchemaValidator = (schema: object): SchemaValidator => {
+const compileSchemaValidator = (
+  schema: Exclude<JsonSchemaCheck['schema'], boolean>,
+): SchemaValidator => {
   const ajv = new Ajv2020.Ajv2020({ allErrors: true, strict: false });
+
   try {
     const validate = ajv.compile(schema);
+
     return {
       validate,
       formatErrors: (errors) => ajv.errorsText(errors, { separator: '; ' }),
@@ -37,13 +42,18 @@ const compileSchemaValidator = (schema: object): SchemaValidator => {
 };
 
 /** Returns the cached validator for a schema object, compiling it on first use. */
-const getSchemaValidator = (schema: object): SchemaValidator => {
+const getSchemaValidator = (
+  schema: Exclude<JsonSchemaCheck['schema'], boolean>,
+): SchemaValidator => {
   const cached = schemaValidators.get(schema);
+
   if (cached !== undefined) {
     return cached;
   }
+
   const validator = compileSchemaValidator(schema);
   schemaValidators.set(schema, validator);
+
   return validator;
 };
 
@@ -55,8 +65,9 @@ const evaluateJsonSchemaCheck = (
   if (!resolution.found) {
     return pathNotFound(check.path);
   }
+
   // Boolean schemas accept or reject everything, so they never need Ajv.
-  if (typeof check.schema === 'boolean') {
+  if (isBoolean(check.schema)) {
     return check.schema
       ? { passed: true }
       : {
@@ -66,12 +77,15 @@ const evaluateJsonSchemaCheck = (
   }
 
   const validator = getSchemaValidator(check.schema);
+
   if ('$async' in validator.validate && validator.validate.$async === true) {
     return { passed: false, reason: `JSON Schema at ${check.path} must be synchronous` };
   }
+
   if (validator.validate(resolution.value)) {
     return { passed: true };
   }
+
   return {
     passed: false,
     reason: `value at ${check.path} failed JSON Schema validation: ${validator.formatErrors(validator.validate.errors)}`,

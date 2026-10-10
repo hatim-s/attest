@@ -17,6 +17,7 @@ const createProject = async (): Promise<string> => {
   const root = await mkdtemp(join(tmpdir(), 'attest-semantic-diff-'));
   temporaryDirectories.push(root);
   await writeFixtureProject(root);
+
   return root;
 };
 

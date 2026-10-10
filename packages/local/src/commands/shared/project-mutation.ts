@@ -20,9 +20,11 @@ const executeProjectMutation = async (
   options: ExecuteProjectMutationOptions,
 ): Promise<ProjectMutationResult> => {
   const preview = await applyProjectMutation({ ...options.mutation, dryRun: true });
+
   if (options.dryRun) return preview;
 
   await options.confirm?.(preview);
+
   return applyProjectMutation({
     ...options.mutation,
     dryRun: false,

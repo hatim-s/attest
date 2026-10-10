@@ -28,13 +28,14 @@ const stagedRunner = (
   executeCase: async (_runId, resolvedCase, _signal, context) => {
     const stage = { resolvedCase, environment: context.environment };
     const execution = await invoke(stage);
-    await context.afterAgent?.(execution).catch((error: unknown) => {
-      throw new EvalCaseStageError('after_agent', execution, [], error);
+    await context.afterAgent?.(execution).catch((cause: unknown) => {
+      throw new EvalCaseStageError('after_agent', execution, [], cause);
     });
     const metrics = await evaluate(stage);
-    await context.afterEvaluation?.(execution, metrics).catch((error: unknown) => {
-      throw new EvalCaseStageError('after_evaluation', execution, metrics, error);
+    await context.afterEvaluation?.(execution, metrics).catch((cause: unknown) => {
+      throw new EvalCaseStageError('after_evaluation', execution, metrics, cause);
     });
+
     return { execution, metrics };
   },
 });
@@ -54,15 +55,18 @@ describe('eval hooks and case environments', () => {
   it('keeps the environment alive through all stages and isolates concurrent cases', async () => {
     const stages = new Map<string, string[]>();
     const runStages: string[] = [];
+
     const runner = stagedRunner(
       async ({ resolvedCase, environment }) => {
         stages.get(resolvedCase.case_id)?.push('invoke');
         expect(await environment?.readFile('case.txt')).toBe(resolvedCase.case_id);
+
         return completedExecution(resolvedCase).execution;
       },
       async ({ resolvedCase, environment }) => {
         stages.get(resolvedCase.case_id)?.push('evaluate');
         expect(await environment?.readFile('after-agent.txt')).toBe('ready');
+
         return [];
       },
     );
@@ -144,10 +148,13 @@ describe('eval hooks and case environments', () => {
 
   it('latches uncertain setup cleanup and aggregates the runner cleanup failure', async () => {
     const plan = createPlan(['one']);
+
     const setupFailure = Object.assign(new Error('setup child may be live'), {
       cleanupConfirmed: false,
     });
+
     const runnerCleanupFailure = new Error('runner cleanup failed');
+
     const wrapped = withEvalHooks<string>(
       plan.run,
       {
@@ -192,10 +199,12 @@ describe('eval hooks and case environments', () => {
               fakeEnvironment({
                 beginFinalization: () => {
                   finalization.push('begin');
+
                   return Promise.reject(new Error('finalization transition failed'));
                 },
                 dispose: () => {
                   finalization.push('dispose');
+
                   return disposeResult();
                 },
               }),
@@ -214,6 +223,7 @@ describe('eval hooks and case environments', () => {
 
       expect(finalization).toEqual(['begin', 'after_case_one', 'after_case_two', 'dispose']);
       const record = result.cases[0];
+
       if (record?.kind !== 'executed') throw new Error('Expected executed evidence.');
       expect(record.execution).not.toBe(original.execution);
       expect(record.normalized.verdict).toBe('error');
@@ -231,6 +241,7 @@ describe('eval hooks and case environments', () => {
 
   it('truncates lifecycle diagnostics to the persisted limit', async () => {
     const plan = createPlan(['one']);
+
     const result = await executeResolvedEvalPlan(
       plan,
       { executeCase: (_runId, resolvedCase) => Promise.resolve(completedExecution(resolvedCase)) },
@@ -239,6 +250,7 @@ describe('eval hooks and case environments', () => {
     );
 
     const record = result.cases[0];
+
     if (record?.kind !== 'executed') throw new Error('Expected executed evidence.');
     expect(record.execution.diagnostics.lifecycleError).toHaveLength(4096);
     expect(record.execution.diagnostics.lifecycleError?.endsWith(' [truncated]')).toBe(true);
@@ -250,6 +262,7 @@ describe('eval hooks and case environments', () => {
   ])('preserves completed evidence when $stage fails', async ({ stage, expectedMetrics }) => {
     const evaluate = vi.fn(() => Promise.resolve([passingMetric()]));
     const persistence = createPersistence();
+
     const runner = stagedRunner(
       ({ resolvedCase }) => Promise.resolve(completedExecution(resolvedCase).execution),
       evaluate,
@@ -266,6 +279,7 @@ describe('eval hooks and case environments', () => {
     });
 
     const record = result.cases[0];
+
     if (record?.kind !== 'executed') throw new Error('Expected executed evidence.');
     expect(result.status).toBe('failed');
     expect(record.metrics).toHaveLength(expectedMetrics);

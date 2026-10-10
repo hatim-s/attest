@@ -5,6 +5,14 @@ import { AgentInvocationError, abortedError } from '../../errors.js';
 import { openPinnedRequest } from '../http/pinned-request.js';
 import { resolveSafeHttpUrl } from '../http/url-security.js';
 
+/** HTTP upgrade headers required by RFC 6455, plus caller-authored request fields. */
+type UpgradeHeaders = Record<string, string> & {
+  connection: string;
+  upgrade: string;
+  'sec-websocket-key': string;
+  'sec-websocket-version': string;
+};
+
 type OpenWebSocketHandshakeOptions = {
   callerSignal?: AbortSignal;
   headers: Record<string, string>;
@@ -27,6 +35,7 @@ const openWebSocketHandshake = async (
   options: OpenWebSocketHandshakeOptions,
 ): Promise<WebSocketUpgrade> => {
   let webSocketUrl: URL;
+
   try {
     webSocketUrl = new URL(options.url);
   } catch (cause: unknown) {
@@ -35,6 +44,7 @@ const openWebSocketHandshake = async (
       classification: 'connection_failed',
     });
   }
+
   if (
     !['ws:', 'wss:'].includes(webSocketUrl.protocol) ||
     webSocketUrl.username.length > 0 ||
@@ -50,11 +60,13 @@ const openWebSocketHandshake = async (
 
   const httpUrl = new URL(webSocketUrl);
   httpUrl.protocol = webSocketUrl.protocol === 'wss:' ? 'https:' : 'http:';
+
   const resolved = await resolveSafeHttpUrl(httpUrl.toString(), {
     timeoutMs: options.openTimeoutMs,
     signal: options.signal,
     callerSignal: options.callerSignal,
   });
+
   if (options.secrets.length > 0 && webSocketUrl.protocol !== 'wss:' && !resolved.loopback) {
     throw new AgentInvocationError(
       'network',
@@ -65,19 +77,21 @@ const openWebSocketHandshake = async (
 
   const key = randomBytes(16).toString('base64');
   const expectedAccept = createHash('sha1').update(`${key}${WEBSOCKET_GUID}`).digest('base64');
+
+  const headers: UpgradeHeaders = {
+    ...options.headers,
+    connection: 'Upgrade',
+    upgrade: 'websocket',
+    'sec-websocket-key': key,
+    'sec-websocket-version': '13',
+  };
+
+  if (options.subprotocol !== undefined) headers['sec-websocket-protocol'] = options.subprotocol;
+
   const opened = await openPinnedRequest(resolved, {
     method: 'GET',
     allowUpgrade: true,
-    headers: {
-      ...options.headers,
-      connection: 'Upgrade',
-      upgrade: 'websocket',
-      'sec-websocket-key': key,
-      'sec-websocket-version': '13',
-      ...(options.subprotocol === undefined
-        ? {}
-        : { 'sec-websocket-protocol': options.subprotocol }),
-    },
+    headers,
     signal: options.signal,
     firstByteTimeoutMs: options.openTimeoutMs,
     errors: {
@@ -96,6 +110,7 @@ const openWebSocketHandshake = async (
         }),
     },
   });
+
   if (opened.kind === 'response') {
     opened.response.resume();
     throw new AgentInvocationError(
@@ -104,19 +119,23 @@ const openWebSocketHandshake = async (
       { classification: 'handshake_failed' },
     );
   }
+
   const { head, response, socket } = opened;
   const selectedProtocol = response.headers['sec-websocket-protocol'];
+
   const accepted =
     response.statusCode === 101 &&
     String(response.headers.upgrade ?? '').toLowerCase() === 'websocket' &&
     String(response.headers['sec-websocket-accept'] ?? '') === expectedAccept &&
     selectedProtocol === options.subprotocol;
+
   if (!accepted) {
     socket.destroy();
     throw new AgentInvocationError('network', 'WebSocket handshake was rejected.', {
       classification: 'handshake_failed',
     });
   }
+
   return { head, socket };
 };
 

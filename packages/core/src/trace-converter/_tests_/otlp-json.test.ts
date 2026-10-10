@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import { readFile } from 'node:fs/promises';
 
 import { describe, expect, it } from 'vitest';
@@ -10,7 +11,9 @@ interface OtlpFixture {
 
 /** Loads one checked-in sanitized framework export as converter input. */
 const loadFixture = async (name: string): Promise<OtlpFixture> =>
-  JSON.parse(await readFile(new URL(`./fixtures/${name}`, import.meta.url), 'utf8')) as OtlpFixture;
+  z
+    .object({ resourceSpans: z.array(z.unknown()) })
+    .parse(JSON.parse(await readFile(new URL(`./fixtures/${name}`, import.meta.url), 'utf8')));
 
 describe('convertOtlpJson', () => {
   it('normalizes a Vercel AI SDK export into agent, llm, and tool spans', async () => {
@@ -54,6 +57,7 @@ describe('convertOtlpJson', () => {
   it('selects explicitly from multi-trace exports and rejects ambiguity', async () => {
     const first = await loadFixture('vercel-ai-sdk.otlp.json');
     const second = await loadFixture('langchain-langsmith.otlp.json');
+
     const traces = convertOtlpJson({
       resourceSpans: [...first.resourceSpans, ...second.resourceSpans],
     });

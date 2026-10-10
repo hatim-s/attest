@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
+import { z } from 'zod';
 
 import { errnoCode } from '../../internal/errno-code.js';
 import { isProcessPresent } from '../../internal/process-presence.js';
@@ -9,11 +10,13 @@ import { prepareEvalProjectFile } from './eval-project-path.js';
 
 const EVAL_REGISTRY_DIRECTORY = join('.attest', 'eval-runs');
 
-type EvalRegistryRecord = {
-  pid: number;
-  run_id: string;
-  token: string;
-};
+const evalRegistryRecordSchema = z.object({
+  pid: z.number().int().positive(),
+  run_id: z.string(),
+  token: z.string().min(1),
+});
+
+type EvalRegistryRecord = z.infer<typeof evalRegistryRecordSchema>;
 
 type EvalRegistryHandle = {
   path: string;
@@ -23,12 +26,14 @@ type EvalRegistryHandle = {
   stopPolling: () => void;
 };
 
-type EvalCancellationRequest = {
-  run_id: string;
-  token: string;
-};
+const evalCancellationRequestSchema = z.object({ run_id: z.string(), token: z.string() });
+
+type EvalCancellationRequest = z.infer<typeof evalCancellationRequestSchema>;
+
+const registryOwnershipSchema = z.object({ token: z.string() });
 
 const localControllers = new Map<string, { controller: AbortController; token: string }>();
+
 const registryKey = (projectRoot: string, runId: string): string => `${projectRoot}\0${runId}`;
 
 /** Publishes one atomic active-run record that can be safely addressed by a separate CLI process. */
@@ -42,14 +47,18 @@ const registerEvalRun = async (projectRoot: string, runId: string): Promise<Eval
       message: 'The eval cancellation registry is unsafe.',
     },
   );
+
   const directory = dirname(path);
+
   const record: EvalRegistryRecord = {
     pid: process.pid,
     run_id: runId,
     token: randomUUID(),
   };
+
   const requestPath = join(directory, `${runId}.cancel.json`);
   const temporaryPath = join(directory, `.${runId}.${record.token}.tmp`);
+
   try {
     await writeFile(temporaryPath, `${JSON.stringify(record)}\n`, {
       encoding: 'utf8',
@@ -64,33 +73,42 @@ const registerEvalRun = async (projectRoot: string, runId: string): Promise<Eval
       cause: error,
     });
   }
+
   const controller = new AbortController();
   const key = registryKey(projectRoot, runId);
   localControllers.set(key, { controller, token: record.token });
   let timer: NodeJS.Timeout | undefined;
   let stopped = false;
+
   /** Polls only this run's authenticated request file for cross-process cancellation. */
   const poll = async (): Promise<void> => {
     if (stopped || controller.signal.aborted) return;
+
     try {
-      const request = JSON.parse(
-        await readFile(requestPath, 'utf8'),
-      ) as Partial<EvalCancellationRequest>;
-      if (request.run_id === runId && request.token === record.token) {
+      const request = evalCancellationRequestSchema.safeParse(
+        JSON.parse(await readFile(requestPath, 'utf8')),
+      );
+
+      if (request.success && request.data.run_id === runId && request.data.token === record.token) {
         controller.abort(new Error(`Eval run ${runId} was cancelled.`));
+
         return;
       }
     } catch {
       // A missing or malformed request cannot authenticate, so leave the owned run active.
     }
+
     schedulePoll();
   };
+
   const schedulePoll = (): void => {
     // Detached on purpose: poll handles its own failures and reschedules itself.
     timer = setTimeout(() => void poll(), 25);
     timer.unref();
   };
+
   schedulePoll();
+
   return {
     path,
     requestPath,
@@ -98,8 +116,10 @@ const registerEvalRun = async (projectRoot: string, runId: string): Promise<Eval
     signal: controller.signal,
     stopPolling: () => {
       stopped = true;
+
       if (timer !== undefined) clearTimeout(timer);
       const local = localControllers.get(key);
+
       if (local?.token === record.token) localControllers.delete(key);
     },
   };
@@ -108,13 +128,17 @@ const registerEvalRun = async (projectRoot: string, runId: string): Promise<Eval
 /** Removes only the registry generation owned by this run, tolerating an already-cleaned record. */
 const unregisterEvalRun = async (handle: EvalRegistryHandle): Promise<void> => {
   handle.stopPolling();
+
   try {
-    const current = JSON.parse(await readFile(handle.path, 'utf8')) as Partial<EvalRegistryRecord>;
-    if (current.token === handle.record.token) {
+    const current = registryOwnershipSchema.safeParse(
+      JSON.parse(await readFile(handle.path, 'utf8')),
+    );
+
+    if (current.success && current.data.token === handle.record.token) {
       await Promise.all([
         unlink(handle.path),
-        unlink(handle.requestPath).catch((error: unknown) => {
-          if (errnoCode(error) !== 'ENOENT') throw error;
+        unlink(handle.requestPath).catch((cause: unknown) => {
+          if (errnoCode(cause) !== 'ENOENT') throw cause;
         }),
       ]);
     }
@@ -131,16 +155,11 @@ const unregisterEvalRun = async (handle: EvalRegistryHandle): Promise<void> => {
 /** Releases in-process cancellation resources while retaining uncertain durable ownership. */
 const detachEvalRun = (handle: EvalRegistryHandle): void => handle.stopPolling();
 
+// BOUNDARY: Cancellation registry JSON is untrusted disk input; validate every record field before checking process ownership.
 const parseRegistryRecord = (value: unknown, runId: string): EvalRegistryRecord | undefined => {
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) return undefined;
-  const candidate = value as Partial<EvalRegistryRecord>;
-  return candidate.run_id === runId &&
-    Number.isInteger(candidate.pid) &&
-    (candidate.pid ?? 0) > 0 &&
-    typeof candidate.token === 'string' &&
-    candidate.token.length > 0
-    ? (candidate as EvalRegistryRecord)
-    : undefined;
+  const parsed = evalRegistryRecordSchema.safeParse(value);
+
+  return parsed.success && parsed.data.run_id === runId ? parsed.data : undefined;
 };
 
 /** Publishes one authenticated run-scoped request without signalling unrelated process work. */
@@ -156,26 +175,34 @@ const signalRegisteredEvalRun = async (
       message: 'The eval cancellation registry is unsafe.',
     },
   );
+
   let record: EvalRegistryRecord | undefined;
+
   try {
-    record = parseRegistryRecord(JSON.parse(await readFile(path, 'utf8')) as unknown, runId);
+    record = parseRegistryRecord(JSON.parse(await readFile(path, 'utf8')), runId);
   } catch (error: unknown) {
     if (errnoCode(error) === 'ENOENT') return 'not_active';
   }
+
   if (record === undefined) return 'not_active';
+
   if (!isProcessPresent(record.pid)) {
     await unlink(path).catch(() => undefined);
+
     return 'not_active';
   }
 
   const local = localControllers.get(registryKey(projectRoot, runId));
+
   if (record.pid === process.pid && local?.token === record.token) {
     local.controller.abort(new Error(`Eval run ${runId} was cancelled.`));
+
     return 'cancellation_requested';
   }
 
   const requestPath = join(dirname(path), `${runId}.cancel.json`);
   const temporaryPath = `${requestPath}.${randomUUID()}.tmp`;
+
   try {
     await writeFile(
       temporaryPath,
@@ -183,6 +210,7 @@ const signalRegisteredEvalRun = async (
       { encoding: 'utf8', flag: 'wx', mode: 0o600 },
     );
     await rename(temporaryPath, requestPath);
+
     return 'cancellation_requested';
   } catch (error: unknown) {
     await unlink(temporaryPath).catch(() => undefined);

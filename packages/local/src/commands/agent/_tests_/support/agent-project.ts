@@ -13,6 +13,7 @@ const createAgentProject = async (): Promise<string> => {
   const root = await mkdtemp(join(tmpdir(), 'attest-local-agent-'));
   onTestFinished(() => rm(root, { force: true, recursive: true }));
   await writeFixtureProject(root);
+
   return root;
 };
 
@@ -29,12 +30,16 @@ const addAgent = async (root: string, agent: AgentResource): Promise<void> => {
 /** Reads every file below `root` as text, keyed by sorted relative path, for no-write checks. */
 const snapshotFiles = async (root: string): Promise<Record<string, string>> => {
   const entries = await readdir(root, { recursive: true, withFileTypes: true });
+
   const files = entries
     .filter((entry) => entry.isFile())
     .map((entry) => join(entry.parentPath, entry.name))
     .sort();
+
   const snapshot: Record<string, string> = {};
+
   for (const path of files) snapshot[path.slice(root.length + 1)] = await readFile(path, 'utf8');
+
   return snapshot;
 };
 

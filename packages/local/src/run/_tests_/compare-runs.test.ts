@@ -9,6 +9,7 @@ import { compareLocalRuns } from '../compare-runs.js';
 
 it('compares an external store by absolute and parent-relative paths without modifying it', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'attest-diff-'));
+
   try {
     const workingDirectory = join(directory, 'project');
     const storeDirectory = join(directory, 'external');
@@ -16,28 +17,34 @@ it('compares an external store by absolute and parent-relative paths without mod
     await Promise.all([mkdir(workingDirectory), mkdir(storeDirectory)]);
 
     const store = await openStore(storePath);
+
     const base = await store.runs.createRun({
       schemaId: 'attest.project',
       configHash: 'base-config',
       configJson: '{}',
     });
+
     await store.runs.finalizeRun(base.id, 'completed');
+
     const candidate = await store.runs.createRun({
       schemaId: 'attest.project',
       configHash: 'candidate-config',
       configJson: '{}',
     });
+
     await store.runs.finalizeRun(candidate.id, 'completed');
     await store.close();
 
     const bytesBefore = await readFile(storePath);
     const filesBefore = await readdir(storeDirectory);
+
     const absoluteDiff = await compareLocalRuns({
       baseRunId: base.id,
       candidateRunId: candidate.id,
       storePath,
       workingDirectory,
     });
+
     const relativeDiff = await compareLocalRuns({
       baseRunId: base.id,
       candidateRunId: candidate.id,
@@ -62,6 +69,7 @@ it('compares an external store by absolute and parent-relative paths without mod
 
 it('does not create a missing absolute store outside the working directory', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'attest-diff-'));
+
   try {
     const workingDirectory = join(directory, 'project');
     const storeDirectory = join(directory, 'external');

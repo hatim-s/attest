@@ -11,6 +11,7 @@ const run: RunRecord = {
   createdAt: '2026-08-07T00:00:00.000Z',
   status: 'completed',
 };
+
 const summary: CaseSummary = {
   caseId: 'one',
   durationMs: 2,
@@ -20,6 +21,7 @@ const summary: CaseSummary = {
   suiteName: 'smoke',
   verdict: 'pass',
 };
+
 const record: CaseRecord = {
   attempts: [],
   caseId: summary.caseId,
@@ -42,6 +44,7 @@ const record: CaseRecord = {
   suiteName: summary.suiteName,
   warnings: [],
 };
+
 const report: ReportData = {
   schema: 'attest.report',
   cases: [{ record, summary }],

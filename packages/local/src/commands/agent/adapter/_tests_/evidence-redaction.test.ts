@@ -43,11 +43,13 @@ describe('redactAgentRequest', () => {
 
   it('redacts payload text without corrupting protocol, warning, status, or trace fields', () => {
     const timestamp = '2026-09-19T10:00:00.000Z';
+
     const warning = {
       code: 'unknown_field' as const,
       path: 'secret-value',
       message: 'secret-value',
     };
+
     const attempt: InvocationResult['attempts'][number] = {
       status: 'ok',
       raw: { protocol: AGENT_PROTOCOL, status: 'ok', payload: 'secret-value' },
@@ -90,6 +92,7 @@ describe('redactAgentRequest', () => {
       rawExcerpt: { text: 'secret-value', truncated: false },
       warnings: [warning],
     };
+
     const invocation: InvocationResult = { ...attempt, attempts: [attempt] };
 
     const redacted = redactInvocation(invocation, [
@@ -115,9 +118,11 @@ describe('redactAgentRequest', () => {
     expect(redacted.warnings).toEqual([
       { code: 'unknown_field', path: 'secret-value', message: '[REDACTED]' },
     ]);
+
     if (redacted.status !== 'ok' || redacted.report?.ok !== true) throw new Error('unreachable');
     const response = redacted.report.value;
     expect(response.protocol).toBe(AGENT_PROTOCOL);
+
     if (!('output' in response)) throw new Error('unreachable');
     expect(response.output).toEqual({ status: '[REDACTED]', token: '[REDACTED]' });
     expect(response.trace?.schema).toBe(TRACE_SCHEMA_ID);
@@ -149,6 +154,7 @@ describe('redactMetricEvaluation', () => {
       },
       ['quality', 'evaluated', 'exec'],
     );
+
     expect(evaluation).toMatchObject({
       metricName: 'quality',
       kind: 'exec',
@@ -175,6 +181,7 @@ describe('redactMetricEvaluation', () => {
       },
       ['error', 'exec_spawn_failed', 'credential'],
     );
+
     expect(evaluation).toMatchObject({
       status: 'error',
       error: {

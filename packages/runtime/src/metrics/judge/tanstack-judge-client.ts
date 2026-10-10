@@ -54,6 +54,7 @@ type ScoreRequest = {
 /** Parses the spec's provider/model identifier and rejects unsupported prefixes with a stable error code. */
 const parseJudgeModel = (qualifiedModel: string): ParsedJudgeModel => {
   const separatorIndex = qualifiedModel.indexOf('/');
+
   if (separatorIndex <= 0 || separatorIndex === qualifiedModel.length - 1) {
     throw new AttestMetricError(
       'judge_provider_error',
@@ -63,6 +64,7 @@ const parseJudgeModel = (qualifiedModel: string): ParsedJudgeModel => {
 
   const provider = qualifiedModel.slice(0, separatorIndex);
   const model = qualifiedModel.slice(separatorIndex + 1);
+
   if (provider !== 'anthropic' && provider !== 'openai') {
     throw new AttestMetricError(
       'judge_provider_error',
@@ -80,13 +82,17 @@ const selectAdapter = (
 ): AnyTextAdapter => {
   if (parsedModel.provider === 'anthropic') {
     // SDK model unions age faster than provider APIs; runtime provider failures retain their judge record.
+    // SAFETY: The provider prefix was validated above; the SDK sends this model identifier to Anthropic, which resolves supported identifiers at request time.
     const model = parsedModel.model as AnthropicChatModel;
+
     return options.anthropicApiKey === undefined
       ? anthropicText(model)
       : createAnthropicChat(model, options.anthropicApiKey);
   }
 
+  // SAFETY: The provider prefix was validated above; the SDK sends this model identifier to OpenAI, which resolves supported identifiers at request time.
   const model = parsedModel.model as OpenAIChatModel;
+
   return options.openaiApiKey === undefined
     ? openaiText(model)
     : createOpenaiChat(model, options.openaiApiKey);
@@ -95,20 +101,24 @@ const selectAdapter = (
 /** Sums token usage across attempts, staying undefined when no attempt reported any. */
 const totalUsage = (attempts: readonly JudgeAttempt[]): JudgeUsage | undefined => {
   let total: Required<JudgeUsage> | undefined;
+
   for (const { usage } of attempts) {
     if (usage === undefined) {
       continue;
     }
+
     total ??= { inputTokens: 0, outputTokens: 0 };
     total.inputTokens += usage.inputTokens ?? 0;
     total.outputTokens += usage.outputTokens ?? 0;
   }
+
   return total;
 };
 
 /** Builds persisted call evidence without provider credentials or SDK-specific objects. */
 const buildJudgeRecord = (request: JudgeRequest, attempts: JudgeAttempt[]): JudgeRecord => {
   const prompt = buildJudgePrompt(request);
+
   return {
     request: {
       model: request.model,
@@ -132,12 +142,13 @@ const recordAttempt = (
   const usage = observation.usageObserved
     ? { inputTokens: observation.inputTokens, outputTokens: observation.outputTokens }
     : undefined;
+
   attempts.push({ rawResponse, usage, error });
 };
 
 /** Maps a failed attempt to its terminal error, or undefined when spec §3 allows a retry. */
 const classifyProviderFailure = (
-  error: unknown,
+  cause: unknown,
   signal: AbortSignal,
   timeoutMs: number | undefined,
 ): { code: AttestMetricErrorCode; message: string } | undefined => {
@@ -146,10 +157,13 @@ const classifyProviderFailure = (
       ? { code: 'metric_cancelled', message: 'Judge request was cancelled.' }
       : { code: 'judge_provider_error', message: `Judge request exceeded ${timeoutMs} ms.` };
   }
-  if (isUnparseableResponse(error)) {
+
+  if (isUnparseableResponse(cause)) {
     return undefined;
   }
-  const message = error instanceof Error ? error.message : String(error);
+
+  const message = cause instanceof Error ? cause.message : String(cause);
+
   return { code: 'judge_provider_error', message: `Judge provider call failed: ${message}` };
 };
 
@@ -171,7 +185,9 @@ const scoreWithTanStack = async ({
       usageObserved: false,
       rawResponse: undefined,
     };
+
     let rawResponse: unknown;
+
     try {
       rawResponse = await executeChat({
         adapter,
@@ -184,21 +200,26 @@ const scoreWithTanStack = async ({
       const message = error instanceof Error ? error.message : String(error);
       recordAttempt(attempts, observation, observation.rawResponse ?? { error: message }, message);
       const failure = classifyProviderFailure(error, signal, callOptions.timeoutMs);
+
       if (failure !== undefined) {
         throw new AttestMetricError(failure.code, failure.message, {
           cause: error,
           details: buildJudgeRecord(request, attempts),
         });
       }
+
       continue;
     }
 
     const verdict = judgeResponseSchema.safeParse(rawResponse);
     const rawEvidence = observation.rawResponse ?? JSON.stringify(rawResponse);
+
     if (verdict.success) {
       recordAttempt(attempts, observation, rawEvidence);
+
       return { verdict: verdict.data, record: buildJudgeRecord(request, attempts) };
     }
+
     recordAttempt(attempts, observation, rawEvidence, verdict.error.message);
   }
 
@@ -215,9 +236,11 @@ const scoreWithTanStack = async ({
  */
 const createTanstackJudgeClient = (options: TanstackJudgeClientOptions = {}): JudgeClient => {
   const executeChat = options.executeChat ?? executeStructuredChat;
+
   return {
     scoreRubric: async (request, callOptions = {}) => {
       const adapter = selectAdapter(parseJudgeModel(request.model), options);
+
       return scoreWithTanStack({ adapter, request, callOptions, executeChat });
     },
   };

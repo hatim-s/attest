@@ -70,6 +70,7 @@ const setMutationHelp = (command: Command, help: MutationHelp): void => {
       ...Object.fromEntries(
         fields.map((field) => {
           const extra = help.options?.[field];
+
           return [field, { ...extra, conflicts: ['from-json', ...(extra?.conflicts ?? [])] }];
         }),
       ),
@@ -79,6 +80,7 @@ const setMutationHelp = (command: Command, help: MutationHelp): void => {
 
 const argumentUsage = (argument: Argument): string => {
   const suffix = argument.variadic ? '...' : '';
+
   return argument.required ? `<${argument.name()}${suffix}>` : `[${argument.name()}${suffix}]`;
 };
 
@@ -96,6 +98,7 @@ const optionValueName = (option: Option): string | null => {
   if (!option.required && !option.optional) return null;
   // Commander keeps the value placeholder only in the flags, as the last word: `--output <format>`.
   const placeholder = option.flags.split(' ').at(-1) ?? '';
+
   return placeholder.slice(1, -1);
 };
 
@@ -119,27 +122,33 @@ const toOptionHelp = (
 const getCommandPath = (command: Command): string[] => {
   const path: string[] = [];
   let current: Command | null = command;
+
   while (current !== null && current.parent !== null) {
     path.unshift(current.name());
     current = current.parent;
   }
+
   return path;
 };
 
 const findCommand = (program: Command, path: readonly string[]): Command => {
   let current = program;
+
   for (const segment of path) {
     const child = current.commands.find(
       (candidate) => candidate.name() === segment || candidate.aliases().includes(segment),
     );
+
     if (child === undefined) {
       throw new AttestCliError('cli_usage', `Unknown help path: ${path.join(' ')}.`, {
         path: path.join('.'),
         hint: 'Run `attest help --output json` to inspect registered command paths.',
       });
     }
+
     current = child;
   }
+
   return current;
 };
 
@@ -149,7 +158,7 @@ const toCommandHelp = (command: Command): CommandHelpDraft => {
   const commandPrefix = ['attest', ...path].join(' ');
   const usageSuffix = command.usage();
 
-  return {
+  const help: CommandHelpDraft = {
     path,
     name: command.name(),
     summary: command.description(),
@@ -166,8 +175,11 @@ const toCommandHelp = (command: Command): CommandHelpDraft => {
     request_schema: metadata?.requestSchema ?? null,
     examples: [...(metadata?.examples ?? [])],
     constraints: [...(metadata?.constraints ?? [])],
-    ...(metadata?.presets === undefined ? {} : { presets: metadata.presets }),
   };
+
+  if (metadata?.presets !== undefined) help.presets = metadata.presets;
+
+  return help;
 };
 
 /** Names a command in JSON results by its dotted path; an alias reports the command it runs. */
@@ -193,6 +205,7 @@ const renderCliHelp = (help: CliHelp): string => {
         .join('\n')}`,
     );
   }
+
   if (command.options.length > 0) {
     sections.push(
       `Options:\n${command.options
@@ -200,6 +213,7 @@ const renderCliHelp = (help: CliHelp): string => {
         .join('\n')}`,
     );
   }
+
   if (command.subcommands.length > 0) {
     sections.push(
       `Commands:\n${command.subcommands
@@ -207,19 +221,23 @@ const renderCliHelp = (help: CliHelp): string => {
         .join('\n')}`,
     );
   }
+
   if (command.examples.length > 0) {
     sections.push(`Examples:\n${command.examples.map((example) => `  ${example}`).join('\n')}`);
   }
+
   if (command.presets !== undefined) {
     sections.push(
       `Presets (${command.presets[0]?.schema ?? 'unknown'}):\n${command.presets
         .map((preset, index) => {
           const required =
             preset.required_inputs.length === 0 ? 'none' : preset.required_inputs.join(', ');
+
           const configurable =
             preset.configurable_fields.length === 0
               ? 'none'
               : preset.configurable_fields.join(', ');
+
           return `  ${preset.id}${index === 0 ? ' (default)' : ''}\n    ${preset.description}\n    required: ${required}; configurable: ${configurable}`;
         })
         .join('\n')}`,

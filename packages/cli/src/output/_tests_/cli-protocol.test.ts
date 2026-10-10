@@ -9,6 +9,7 @@ import {
 describe('CLI protocol serialization', () => {
   it('serializes success and failure as one deterministic JSON document', () => {
     const success = createCliSuccessResult('project.show', { project_id: 'project-1' });
+
     const failure = createCliFailureResult('project.show', {
       code: 'project_changed',
       message: 'The project changed.',

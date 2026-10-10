@@ -12,9 +12,13 @@ import {
 const cliCommandSchema = z
   .string()
   .regex(/^[a-z][a-z0-9-]*(?:\.[a-z][a-z0-9-]*)*$/, 'must be a dotted lowercase command path');
+
 const cliPathSchema = z.string().min(1);
+
 const cliFailureExitCodes = [1, 2, 3, 4, 130] as const;
+
 const cliFailureExitCodeSchema = z.literal(cliFailureExitCodes);
+
 const cliExitCodeSchema = z.literal([0, ...cliFailureExitCodes]);
 
 /** Carries a stable non-fatal diagnostic alongside a successful result. */
@@ -132,17 +136,29 @@ const cliErrorCatalogSchema = z.strictObject({
 });
 
 type CliError = z.infer<typeof cliErrorSchema>;
+
 type CliErrorCatalog = z.infer<typeof cliErrorCatalogSchema>;
+
 type CliErrorDefinition = z.infer<typeof cliErrorDefinitionSchema>;
+
 type CliEvent = z.infer<typeof cliEventSchema>;
+
 type CliExitCode = z.infer<typeof cliExitCodeSchema>;
+
 type CliFailureResult = z.infer<typeof cliFailureResultSchema>;
+
 type CliHelp = z.infer<typeof cliHelpSchema>;
+
 type CliHelpArgument = z.infer<typeof cliHelpArgumentSchema>;
+
 type CliHelpCommand = z.infer<typeof cliHelpCommandSchema>;
+
 type CliHelpOption = z.infer<typeof cliHelpOptionSchema>;
+
 type CliResult = z.infer<typeof cliResultSchema>;
+
 type CliSuccessResult = z.infer<typeof cliSuccessResultSchema>;
+
 type CliWarning = z.infer<typeof cliWarningSchema>;
 
 export {

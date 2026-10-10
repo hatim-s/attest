@@ -24,25 +24,30 @@ class EvalCaseStageError extends Error {
  * confirmed. Errors from other packages signal this through a `cleanupConfirmed: false` field.
  * Follow-up: switch to `instanceof` once executor exports its SandboxCleanupError class.
  */
-const isCleanupUncertain = (error: unknown): boolean => {
-  if (!(error instanceof Error)) {
+const isCleanupUncertain = (cause: unknown): boolean => {
+  if (!(cause instanceof Error)) {
     return false;
   }
-  if ('cleanupConfirmed' in error && error.cleanupConfirmed === false) {
+
+  if ('cleanupConfirmed' in cause && cause.cleanupConfirmed === false) {
     return true;
   }
-  if (error instanceof AggregateError && error.errors.some(isCleanupUncertain)) {
+
+  if (cause instanceof AggregateError && cause.errors.some(isCleanupUncertain)) {
     return true;
   }
-  return isCleanupUncertain(error.cause);
+
+  return isCleanupUncertain(cause.cause);
 };
 
 /** Bounds thrown values to short messages so infrastructure diagnostics never carry raw evidence. */
-const safeErrorMessage = (error: unknown, fallback: string): string => {
-  const message = error instanceof Error ? error.message : fallback;
+const safeErrorMessage = (cause: unknown, fallback: string): string => {
+  const message = cause instanceof Error ? cause.message : fallback;
+
   if (message.length <= MAXIMUM_ERROR_MESSAGE_LENGTH) {
     return message;
   }
+
   return `${message.slice(0, MAXIMUM_ERROR_MESSAGE_LENGTH - 3)}...`;
 };
 

@@ -33,9 +33,11 @@ const collectBoundedImportSource = async (
 ): Promise<Uint8Array> => {
   const collected: Uint8Array[] = [];
   let byteLength = 0;
+
   for await (const chunk of chunks) {
-    const bytes = typeof chunk === 'string' ? new TextEncoder().encode(chunk) : chunk;
+    const bytes = chunk instanceof Uint8Array ? chunk : new TextEncoder().encode(chunk);
     byteLength += bytes.byteLength;
+
     if (byteLength > maxBytes) {
       throw new TabularImportError('Import source validation failed.', [
         {
@@ -47,28 +49,37 @@ const collectBoundedImportSource = async (
         },
       ]);
     }
+
     collected.push(bytes);
   }
+
   const source = new Uint8Array(byteLength);
   let offset = 0;
+
   for (const chunk of collected) {
     source.set(chunk, offset);
     offset += chunk.byteLength;
   }
+
   return source;
 };
 
 const inferImportFormat = (source: string, explicit?: ImportFormat): ImportFormat => {
   if (explicit !== undefined) return explicit;
+
   if (source === '-') {
     throw new LocalError('cli_missing_input', 'Stdin imports require an explicit format.', {
       path: '--format',
       hint: 'Pass --format csv|json|jsonl.',
     });
   }
+
   const extension = extname(source).toLowerCase();
+
   if (extension === '.csv') return 'csv';
+
   if (extension === '.json') return 'json';
+
   if (extension === '.jsonl') return 'jsonl';
   throw new LocalError('cli_usage', 'Could not infer the case import format.', {
     path: '--format',
@@ -84,9 +95,8 @@ const readImportSource = async (
 ): Promise<Uint8Array> => {
   try {
     const chunks =
-      source === '-'
-        ? readImportStdin()
-        : (createReadStream(resolve(workingDirectory, source)) as AsyncIterable<Uint8Array>);
+      source === '-' ? readImportStdin() : createReadStream(resolve(workingDirectory, source));
+
     return await collectBoundedImportSource(chunks);
   } catch (error: unknown) {
     if (error instanceof TabularImportError) throw error;
@@ -105,9 +115,11 @@ const toCliImportError = (error: TabularImportError): LocalError => {
   const humanDiagnostics = error.diagnostics
     .map((entry) => {
       const location = entry.line === undefined ? `row ${entry.row ?? '?'}` : `line ${entry.line}`;
+
       return `${location}, source ${entry.source_field}, destination ${entry.destination_path || '<record>'}: ${entry.code}: ${entry.message} ${entry.hint}`;
     })
     .join('\n');
+
   return new LocalError('project_invalid', error.message, {
     path: '<source>',
     hint: `Repair every listed diagnostic, then retry the all-or-nothing import.\n${humanDiagnostics}`,
@@ -126,6 +138,7 @@ const prepareImportSource = async (
   try {
     const format = inferImportFormat(source, explicitFormat);
     const boundedSource = await readImportSource(source, workingDirectory, readImportStdin);
+
     return {
       csvHeaders: format === 'csv' ? discoverCsvHeaders(boundedSource) : [],
       format,
@@ -142,10 +155,12 @@ const runTabularImportAdapter = async (
   options: ImportCommandAdapterOptions,
 ): Promise<TabularImportResult> => {
   const format = inferImportFormat(options.source, options.importOptions.format);
+
   try {
     const source =
       options.preparedSource ??
       (await readImportSource(options.source, options.workingDirectory, options.readImportStdin));
+
     return importTabularCases({
       collisionContexts: options.collisionContexts,
       dedupe: options.importOptions.dedupe,
@@ -163,6 +178,7 @@ const runTabularImportAdapter = async (
     if (error instanceof TabularImportError) {
       throw toCliImportError(error);
     }
+
     throw error;
   }
 };

@@ -14,6 +14,7 @@ const requireValidRetryCount = (retries: number): void => {
 const withAttemptEvidence = (attempt: InvocationAttempt): InvocationAttempt => {
   if (attempt.rawExcerpt !== undefined) return attempt;
   const payload = attempt.status === 'ok' ? JSON.stringify(attempt.raw) : '';
+
   return { ...attempt, rawExcerpt: createRawExcerpt(payload) };
 };
 
@@ -23,6 +24,7 @@ const summarizeContractIssues = (issues: ContractIssue[]): string => {
     .slice(0, 3)
     .map((issue) => `${issue.path}: ${issue.message}`)
     .join('; ');
+
   return issues.length > 3 ? `${summary}; and ${String(issues.length - 3)} more` : summary;
 };
 
@@ -31,6 +33,7 @@ const validateResponseEnvelope = (
   attempt: Extract<InvocationAttempt, { status: 'ok' }>,
 ): InvocationAttempt => {
   const report = parseAgentResponse(attempt.raw);
+
   if (report.ok) return { ...attempt, report, warnings: report.warnings };
 
   return {
@@ -52,8 +55,11 @@ const isRetryableInvocationError = (
   diagnostics: InvocationDiagnostics,
 ): boolean => {
   if (diagnostics.sandboxCompletionConfirmed === false) return false;
+
   if (error.code === 'cancelled') return false;
+
   if (error.code !== 'http_status') return true;
+
   return diagnostics.httpStatus !== undefined && diagnostics.httpStatus >= 500;
 };
 
@@ -65,20 +71,26 @@ const invokeWithRetries = async (
   requireValidRetryCount(retries);
   const attempts: InvocationAttempt[] = [];
   let attemptIndex = 0;
+
   for (;;) {
     const transportAttempt = withAttemptEvidence(await invokeOnce(attemptIndex));
+
     const attempt =
       transportAttempt.status === 'ok'
         ? validateResponseEnvelope(transportAttempt)
         : transportAttempt;
+
     attempts.push(attempt);
+
     if (attempt.status === 'ok') return { ...attempt, attempts };
+
     if (
       attemptIndex >= retries ||
       !isRetryableInvocationError(attempt.error, attempt.diagnostics)
     ) {
       return { ...attempt, attempts };
     }
+
     attemptIndex += 1;
   }
 };

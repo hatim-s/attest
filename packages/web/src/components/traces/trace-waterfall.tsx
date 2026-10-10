@@ -26,44 +26,57 @@ type TraceWaterfallProps = {
   trace: unknown;
 };
 
+/** BOUNDARY: checks untrusted stored trace objects before reading their span fields. */
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  value !== null && typeof value === 'object' && !Array.isArray(value);
+
+/** BOUNDARY: accepts only a stored JSON object for field inspection. */
 const asRecord = (value: unknown): Record<string, unknown> | undefined =>
-  value !== null && typeof value === 'object' && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : undefined;
+  isRecord(value) ? value : undefined;
+
+const isString = (value: unknown): value is string => typeof value === 'string';
 
 const TRACE_KINDS = new Set(['agent', 'llm', 'tool', 'retrieval', 'other']);
 
-/** Reads only the stable Attest span fields needed to render an untrusted stored trace. */
+/** BOUNDARY: validates stored span identifiers and timestamps before rendering a row. */
+const readTraceSpan = (candidate: unknown): TraceSpan[] => {
+  const span = asRecord(candidate);
+  // Non-string timestamps fall back to '' so Date.parse yields NaN and the span is dropped.
+  const startTime = Date.parse(isString(span?.start_time) ? span.start_time : '');
+  const endTime = Date.parse(isString(span?.end_time) ? span.end_time : '');
+
+  if (
+    !isString(span?.span_id) ||
+    !isString(span.name) ||
+    !Number.isFinite(startTime) ||
+    !Number.isFinite(endTime)
+  ) {
+    return [];
+  }
+
+  const status = asRecord(span.status)?.code;
+  const kind = isString(span.kind) && TRACE_KINDS.has(span.kind) ? span.kind : 'other';
+
+  return [
+    {
+      endTime,
+      kind,
+      name: span.name,
+      parentSpanId: isString(span.parent_span_id) ? span.parent_span_id : null,
+      spanId: span.span_id,
+      startTime,
+      status: isString(status) ? status : 'ok',
+    },
+  ];
+};
+
+/** BOUNDARY: decodes the span list of an untrusted stored trace. Reads only the stable Attest span fields needed to render an untrusted stored trace. */
 const readTraceSpans = (trace: unknown): TraceSpan[] => {
   const spans = asRecord(trace)?.spans;
+
   if (!Array.isArray(spans)) return [];
-  return spans.flatMap((candidate) => {
-    const span = asRecord(candidate);
-    // Non-string timestamps fall back to '' so Date.parse yields NaN and the span is dropped.
-    const startTime = Date.parse(typeof span?.start_time === 'string' ? span.start_time : '');
-    const endTime = Date.parse(typeof span?.end_time === 'string' ? span.end_time : '');
-    if (
-      typeof span?.span_id !== 'string' ||
-      typeof span.name !== 'string' ||
-      !Number.isFinite(startTime) ||
-      !Number.isFinite(endTime)
-    ) {
-      return [];
-    }
-    const status = asRecord(span.status)?.code;
-    const kind = typeof span.kind === 'string' && TRACE_KINDS.has(span.kind) ? span.kind : 'other';
-    return [
-      {
-        endTime,
-        kind,
-        name: span.name,
-        parentSpanId: typeof span.parent_span_id === 'string' ? span.parent_span_id : null,
-        spanId: span.span_id,
-        startTime,
-        status: typeof status === 'string' ? status : 'ok',
-      },
-    ];
-  });
+
+  return spans.flatMap(readTraceSpan);
 };
 
 type TraceWaterfallLayout = {
@@ -71,11 +84,13 @@ type TraceWaterfallLayout = {
   rows: TraceWaterfallRow[];
 };
 
-/** Computes each span's tree depth and timeline position, plus the whole trace's duration. */
+/** BOUNDARY: decodes the untrusted stored trace with readTraceSpans before computing layout.
+ * Computes each span's tree depth and timeline position, plus the whole trace's duration. */
 const createTraceWaterfall = (trace: unknown): TraceWaterfallLayout => {
   const spans = readTraceSpans(trace).sort(
     (left, right) => left.startTime - right.startTime || left.spanId.localeCompare(right.spanId),
   );
+
   if (spans.length === 0) return { durationMs: 0, rows: [] };
   const byId = new Map(spans.map((span) => [span.spanId, span]));
   const traceStart = Math.min(...spans.map(({ startTime }) => startTime));
@@ -87,18 +102,23 @@ const createTraceWaterfall = (trace: unknown): TraceWaterfallLayout => {
     let depth = 0;
     let parentSpanId = span.parentSpanId;
     const visited = new Set([span.spanId]);
+
     while (parentSpanId !== null && depth < spans.length) {
       if (visited.has(parentSpanId)) {
         depth = 0;
         break;
       }
+
       const parent = byId.get(parentSpanId);
+
       if (parent === undefined) break;
       visited.add(parentSpanId);
       depth += 1;
       parentSpanId = parent.parentSpanId;
     }
+
     const durationMs = Math.max(0, span.endTime - span.startTime);
+
     return {
       ...span,
       depth,
@@ -107,6 +127,7 @@ const createTraceWaterfall = (trace: unknown): TraceWaterfallLayout => {
       widthPercent: Math.max(0.7, (durationMs / traceDuration) * 100),
     };
   });
+
   return { durationMs: traceEnd - traceStart, rows };
 };
 
@@ -114,6 +135,7 @@ const createTraceWaterfall = (trace: unknown): TraceWaterfallLayout => {
 const TraceWaterfall = ({ trace }: TraceWaterfallProps) => {
   const { durationMs, rows } = useMemo(() => createTraceWaterfall(trace), [trace]);
   const scrollRef = useRef<HTMLDivElement>(null);
+
   const virtualizer = useVirtualizer({
     count: rows.length,
     estimateSize: () => 44,
@@ -152,6 +174,7 @@ const TraceWaterfall = ({ trace }: TraceWaterfallProps) => {
         <div className="trace-waterfall-spacer" style={{ height: virtualizer.getTotalSize() }}>
           {virtualizer.getVirtualItems().map((virtualRow) => {
             const row = rows[virtualRow.index]!;
+
             return (
               <div
                 className="trace-waterfall-row"

@@ -49,17 +49,20 @@ const guidedTerminal = (
   prompt: (question) => {
     questions.push(question);
     const key = Object.keys(answers).find((candidate) => question.includes(candidate));
+
     return Promise.resolve(key === undefined ? 'yes' : (answers[key] ?? ''));
   },
 });
 
 /** Options every mutation leaf registers besides its own fields. */
 const COMMON_OPTIONS = ['project', 'output', 'non-interactive', 'from-json'];
+
 const MUTATION_OPTIONS = ['dry-run', 'if-project-hash', 'yes'];
 
 describe('metric commands', { timeout: 30_000 }, () => {
   it('authors a preset metric and a complete assertion JSON metric', async () => {
     const root = await createEmptyProject();
+
     const preset = await runJson(root, [
       'metric',
       'add',
@@ -69,7 +72,9 @@ describe('metric commands', { timeout: 30_000 }, () => {
       '--value',
       '"Paris"',
     ]);
+
     expect(preset.exitCode).toBe(0);
+
     const composition = await runJson(root, [
       'metric',
       'add',
@@ -79,6 +84,7 @@ describe('metric commands', { timeout: 30_000 }, () => {
       '--assert-json',
       '{"not":{"equals":{"path":"$.output","value":null}}}',
     ]);
+
     expect(composition.exitCode).toBe(0);
 
     const loaded = await loadProject({ project: root });
@@ -97,6 +103,7 @@ describe('metric commands', { timeout: 30_000 }, () => {
 
   it('keeps guided, flag, stdin, import, and from-json routes on canonical resources', async () => {
     const root = await createEmptyProject();
+
     const traced = await runJson(root, [
       'agent',
       'add',
@@ -105,9 +112,11 @@ describe('metric commands', { timeout: 30_000 }, () => {
       JSON.stringify([process.execPath]),
       '--trace',
     ]);
+
     expect(traced.exitCode).toBe(0);
 
     const questions: string[] = [];
+
     const guided = await runCommand(root, ['metric', 'add'], {
       interaction: guidedTerminal(
         {
@@ -120,6 +129,7 @@ describe('metric commands', { timeout: 30_000 }, () => {
         questions,
       ),
     });
+
     expect(guided.errors).toEqual([]);
     expect(guided.exitCode).toBe(0);
     expect(questions[1]).toMatch(/^Metric catalog \(attest\.metric-preset\):/u);
@@ -142,9 +152,11 @@ describe('metric commands', { timeout: 30_000 }, () => {
         'JSON value: ': 'null',
       }),
     });
+
     expect(defaults.exitCode).toBe(0);
 
     const traceQuestions: string[] = [];
+
     const trace = await runCommand(root, ['metric', 'add', 'guided-trace'], {
       interaction: guidedTerminal(
         {
@@ -157,6 +169,7 @@ describe('metric commands', { timeout: 30_000 }, () => {
         traceQuestions,
       ),
     });
+
     expect(trace.exitCode).toBe(0);
     expect(traceQuestions.join('\n')).toContain('traced: advertises trace support');
     expect(traceQuestions.join('\n')).toContain(
@@ -173,13 +186,17 @@ describe('metric commands', { timeout: 30_000 }, () => {
         metric: assertionMetric('requested'),
       }),
     });
+
     expect(requested.exitCode).toBe(0);
+
     const imported = await runJson(
       root,
       ['metric', 'import', '-', '--type', 'json', '--as', 'imported'],
       { stdin: JSON.stringify(assertionMetric('source')) },
     );
+
     expect(imported.exitCode).toBe(0);
+
     const judge = await runJson(
       root,
       [
@@ -195,11 +212,13 @@ describe('metric commands', { timeout: 30_000 }, () => {
       ],
       { stdin: 'Judge correctness against expected output.' },
     );
+
     expect(judge.exitCode).toBe(0);
 
     const definitions = new Map(
       (await loadProject({ project: root })).metrics.map(({ id, definition }) => [id, definition]),
     );
+
     expect([...definitions.keys()].sort()).toEqual([
       'guided',
       'guided-default',
@@ -258,6 +277,7 @@ describe('metric commands', { timeout: 30_000 }, () => {
     const root = await createEmptyProject();
     const before = await snapshotTree(root);
     const { projectHash } = await loadProject({ project: root });
+
     const preview = await runJson(root, [
       'metric',
       'add',
@@ -270,6 +290,7 @@ describe('metric commands', { timeout: 30_000 }, () => {
       '--if-project-hash',
       projectHash,
     ]);
+
     expect(preview.document).toMatchObject({
       ok: true,
       result: { committed: false, dry_run: true },
@@ -295,6 +316,7 @@ describe('metric commands', { timeout: 30_000 }, () => {
       }),
     );
     const before = await snapshotTree(root);
+
     const overlap = await runJson(root, [
       'metric',
       'add',
@@ -306,6 +328,7 @@ describe('metric commands', { timeout: 30_000 }, () => {
       '--from-json',
       requestPath,
     ]);
+
     expect(overlap.exitCode).toBe(2);
     expect(overlap.document).toMatchObject({
       ok: false,
@@ -321,6 +344,7 @@ describe('metric commands', { timeout: 30_000 }, () => {
       '--url',
       'https://metric.example/evaluate',
     ]);
+
     expect(incompatible.exitCode).toBe(2);
     expect(incompatible.document).toMatchObject({
       ok: false,
@@ -332,6 +356,7 @@ describe('metric commands', { timeout: 30_000 }, () => {
   it('omits a rejected credential literal from the command output', async () => {
     const root = await createEmptyProject();
     const secret = 'literal-camel-access-secret';
+
     const rejected = await runJson(root, [
       'metric',
       'add',
@@ -343,6 +368,7 @@ describe('metric commands', { timeout: 30_000 }, () => {
       '--body-json',
       JSON.stringify({ accessToken: secret }),
     ]);
+
     expect(rejected.exitCode).toBe(1);
     expect(rejected.document).toMatchObject({ ok: false, error: { code: 'project_invalid' } });
     expect(rejected.output.join('\n')).not.toContain(secret);
@@ -351,6 +377,7 @@ describe('metric commands', { timeout: 30_000 }, () => {
   it('derives repeatable flags and from-json conflicts in metric add help', async () => {
     const root = await createEmptyProject();
     const help = await runJson(root, ['help', 'metric', 'add']);
+
     if (!help.document.ok) throw new Error('Expected metric help success.');
     const { command } = cliHelpSchema.parse(help.document.result);
     expect(command.path).toEqual(['metric', 'add']);
@@ -376,15 +403,18 @@ describe('metric commands', { timeout: 30_000 }, () => {
     const fieldOptions = command.options
       .map(({ name }) => name)
       .filter((name) => !COMMON_OPTIONS.includes(name) && !MUTATION_OPTIONS.includes(name));
+
     const fromJson = command.options.find(({ name }) => name === 'from-json');
     expect([...(fromJson?.conflicts ?? [])].sort()).toEqual(
       [...MUTATION_OPTIONS, 'metric-id', ...fieldOptions].sort(),
     );
+
     for (const option of command.options.filter(({ name }) => fieldOptions.includes(name))) {
       expect(option.conflicts).toContain('from-json');
     }
 
     const metricHelp = await runJson(root, ['help', 'metric']);
+
     if (!metricHelp.document.ok) throw new Error('Expected metric help success.');
     expect(
       cliHelpSchema.parse(metricHelp.document.result).command.subcommands.map(({ name }) => name),

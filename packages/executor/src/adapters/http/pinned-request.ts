@@ -41,16 +41,20 @@ const openPinnedRequest = (
   options: PinnedRequestOptions,
 ): Promise<PinnedResponse> => {
   const { errors, signal } = options;
+
   if (signal.aborted) return Promise.reject(errors.aborted());
   const transport = resolved.url.protocol === 'https:' ? httpsRequest : httpRequest;
+
   return new Promise<PinnedResponse>((resolve, reject) => {
     let settled = false;
+
     const outgoing = transport(resolved.url, {
       method: options.method,
       headers: options.headers,
       lookup: (_hostname, _lookupOptions, callback) =>
         callback(null, resolved.address, resolved.family),
     });
+
     const settle = (outcome: () => void): void => {
       if (settled) return;
       settled = true;
@@ -58,19 +62,25 @@ const openPinnedRequest = (
       signal.removeEventListener('abort', abort);
       outcome();
     };
+
     const failWith = (error: AgentInvocationError): void => {
       outgoing.destroy();
       settle(() => reject(error));
     };
+
     const abort = (): void => failWith(errors.aborted());
+
     const firstByteTimer = setTimeout(
       () => failWith(errors.firstByteTimeout()),
       options.firstByteTimeoutMs,
     );
+
     const { connectTimeout } = errors;
+
     if (options.connectTimeoutMs !== undefined && connectTimeout !== undefined) {
       outgoing.setTimeout(options.connectTimeoutMs, () => failWith(connectTimeout()));
     }
+
     outgoing.once('response', (response) => {
       // The response body owns its own idle deadline after headers arrive.
       outgoing.setTimeout(0);
@@ -80,13 +90,16 @@ const openPinnedRequest = (
       if (options.allowUpgrade !== true) {
         socket.destroy();
         settle(() => reject(errors.failed(new Error('Unexpected HTTP protocol upgrade.'))));
+
         return;
       }
+
       settle(() => resolve({ kind: 'upgrade', response, socket, head }));
     });
     // Stays attached after settlement so a late socket error cannot become an uncaught event.
     outgoing.on('error', (error) => settle(() => reject(errors.failed(error))));
     signal.addEventListener('abort', abort, { once: true });
+
     if (options.body !== undefined) outgoing.write(options.body);
     outgoing.end();
   });

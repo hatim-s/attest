@@ -1,3 +1,5 @@
+import { agentRequestSchema, type AgentRequest, type JsonValue } from '@attest/contracts';
+import { isJsonObject, isString, parseJson } from '../../../../internal/json-value.js';
 import { createHash } from 'node:crypto';
 import { createServer, type IncomingMessage, type Server } from 'node:http';
 import type { Duplex } from 'node:stream';
@@ -8,7 +10,10 @@ type TestWebSocketServerOptions = {
   upgradeDelayMs?: number;
   ignoreClientClose?: boolean;
   onConnection?: (peer: TestWebSocketPeer, request: IncomingMessage) => void;
-  onMessage: (peer: TestWebSocketPeer, value: unknown) => void;
+  onMessage: (
+    peer: TestWebSocketPeer,
+    value: { request_id: string; request: AgentRequest },
+  ) => void;
   subprotocol?: string;
 };
 
@@ -23,12 +28,14 @@ const serverFrame = (
   const lengthBytes = payload.byteLength < 126 ? 0 : 2;
   const header = Buffer.alloc(2 + lengthBytes);
   header[0] = 0x80 | opcode;
+
   if (lengthBytes === 0) {
     header[1] = payload.byteLength;
   } else {
     header[1] = 126;
     header.writeUInt16BE(payload.byteLength, 2);
   }
+
   return Buffer.concat([header, payload]);
 };
 
@@ -48,7 +55,7 @@ class TestWebSocketPeer {
     });
   }
 
-  sendJson(value: unknown): void {
+  sendJson(value: JsonValue): void {
     this.sendText(JSON.stringify(value));
   }
 
@@ -75,6 +82,7 @@ class TestWebSocketPeer {
 
   private consume(chunk: Buffer): void {
     this.buffer = Buffer.concat([this.buffer, chunk]);
+
     for (;;) {
       if (this.buffer.byteLength < 2) return;
       const first = this.buffer[0]!;
@@ -82,6 +90,7 @@ class TestWebSocketPeer {
       const opcode = first & 0x0f;
       let headerBytes = 2;
       let payloadBytes = second & 0x7f;
+
       if (payloadBytes === 126) {
         if (this.buffer.byteLength < 4) return;
         payloadBytes = this.buffer.readUInt16BE(2);
@@ -91,22 +100,36 @@ class TestWebSocketPeer {
         payloadBytes = Number(this.buffer.readBigUInt64BE(2));
         headerBytes = 10;
       }
+
       const masked = (second & 0x80) !== 0;
       const maskBytes = masked ? 4 : 0;
+
       if (this.buffer.byteLength < headerBytes + maskBytes + payloadBytes) return;
       const mask = this.buffer.subarray(headerBytes, headerBytes + maskBytes);
+
       const source = this.buffer.subarray(
         headerBytes + maskBytes,
         headerBytes + maskBytes + payloadBytes,
       );
+
       const payload = Buffer.alloc(source.byteLength);
+
       for (let index = 0; index < source.byteLength; index += 1) {
         payload[index] = masked ? source[index]! ^ mask[index % 4]! : source[index]!;
       }
+
       this.buffer = this.buffer.subarray(headerBytes + maskBytes + payloadBytes);
+
       if (opcode === 0x1) {
         try {
-          this.onMessage(this, JSON.parse(payload.toString('utf8')) as unknown);
+          const value = parseJson(payload.toString('utf8'));
+
+          if (!isJsonObject(value) || !isString(value.request_id))
+            throw new Error('Invalid client frame');
+          this.onMessage(this, {
+            request_id: value.request_id,
+            request: agentRequestSchema.parse(value.request),
+          });
         } catch {
           // Malformed client frames must not crash the Vitest worker.
         }
@@ -133,17 +156,23 @@ const startTestWebSocketServer = async (
 }> => {
   const peers: TestWebSocketPeer[] = [];
   const sockets = new Set<Duplex>();
+
   const server: Server = createServer((_request, response) => {
     response.writeHead(426).end();
   });
+
   let upgradeRequests = 0;
+
   const acceptUpgrade = (request: IncomingMessage, socket: Duplex): void => {
     if (socket.destroyed) return;
     const key = request.headers['sec-websocket-key'];
-    if (typeof key !== 'string') {
+
+    if (!isString(key)) {
       socket.destroy();
+
       return;
     }
+
     const accept = createHash('sha1').update(`${key}${GUID}`).digest('base64');
     socket.write(
       [
@@ -158,23 +187,30 @@ const startTestWebSocketServer = async (
         '',
       ].join('\r\n'),
     );
+
     const peer = new TestWebSocketPeer(
       socket,
       options.onMessage,
       options.ignoreClientClose === true,
     );
+
     peers.push(peer);
     options.onConnection?.(peer, request);
   };
+
   server.on('upgrade', (request, socket) => {
     upgradeRequests += 1;
     sockets.add(socket);
     socket.once('close', () => sockets.delete(socket));
+
     if (options.ignoreUpgrade === true) return;
+
     if (options.upgradeDelayMs === undefined) {
       acceptUpgrade(request, socket);
+
       return;
     }
+
     setTimeout(() => acceptUpgrade(request, socket), options.upgradeDelayMs);
   });
   await new Promise<void>((resolve, reject) => {
@@ -185,7 +221,9 @@ const startTestWebSocketServer = async (
     });
   });
   const address = server.address();
-  if (address === null || typeof address === 'string') throw new Error('fixture did not bind TCP');
+
+  if (address === null || isString(address)) throw new Error('fixture did not bind TCP');
+
   return {
     close: async () => {
       for (const socket of sockets) socket.destroy();

@@ -40,7 +40,9 @@ const openMetricDirectory = async (
 ): Promise<AnchoredEntry> => {
   const resolvedRoot = await realpath(projectRoot);
   const candidate = resolve(resolvedRoot, configuredPath);
+
   if (!isProjectPath(resolvedRoot, candidate)) throw unsafeMetricDirectory(configuredPath);
+
   try {
     return await openAnchored(candidate, { kind: 'directory', root: resolvedRoot });
   } catch (error: unknown) {
@@ -52,6 +54,7 @@ const openMetricDirectory = async (
 const assertMetricDirectoryIdentity = async (directory: AnchoredEntry): Promise<void> => {
   try {
     const current = await lstat(directory.path, { bigint: true });
+
     if (
       current.isSymbolicLink() ||
       !current.isDirectory() ||
@@ -67,8 +70,12 @@ const assertMetricDirectoryIdentity = async (directory: AnchoredEntry): Promise<
 };
 
 /** Drops the timing so repeated fixture runs produce identical results. */
-const withoutDuration = (evaluation: StoredMetricEvaluation): Record<string, unknown> =>
-  Object.fromEntries(Object.entries(evaluation).filter(([key]) => key !== 'durationMs'));
+const withoutDuration = (evaluation: StoredMetricEvaluation) => {
+  const { durationMs: _duration, ...evidence } = evaluation;
+  void _duration;
+
+  return evidence;
+};
 
 /** Tests assertions or trusted argv locally; judge and HTTP definitions remain inspection-only. */
 const runMetricTestCommand = async (
@@ -76,11 +83,13 @@ const runMetricTestCommand = async (
 ): Promise<CommandResult<'metric-test', MetricTestResult>> => {
   const loaded = await loadCommandProject(options);
   const metric = findMetric(loaded.metrics, options.metricId ?? '');
+
   const fixture = await readMetricTestFixture(
     options.fixture,
     options.workingDirectory,
     options.readStdin,
   );
+
   if (metric.definition.kind === 'judge' || metric.definition.kind === 'http') {
     return {
       operation: 'metric-test',
@@ -95,27 +104,40 @@ const runMetricTestCommand = async (
       },
     };
   }
+
+  const caseDefinition: MetricContext['caseDefinition'] = {
+    id: fixture.case.id,
+    input: fixture.case.input,
+  };
+
+  if (fixture.case.expected !== undefined) {
+    caseDefinition.expected = fixture.case.expected;
+  }
+
+  if (fixture.case.params !== undefined) {
+    caseDefinition.params = fixture.case.params;
+  }
+
   const context: MetricContext = {
-    caseDefinition: {
-      id: fixture.case.id,
-      input: fixture.case.input,
-      ...(fixture.case.expected === undefined ? {} : { expected: fixture.case.expected }),
-      ...(fixture.case.params === undefined ? {} : { params: fixture.case.params }),
-    },
+    caseDefinition,
     execution: { outcome: 'completed', output: fixture.output, trace: fixture.trace },
   };
+
   const definition =
     metric.definition.kind === 'assertion'
       ? { name: metric.id, type: 'assertion' as const, assert: metric.definition.assertions }
       : { name: metric.id, type: 'exec' as const, command: metric.definition.argv };
+
   let execCwd: string | undefined;
   let execEnv: NodeJS.ProcessEnv | undefined;
   let execDirectory: AnchoredEntry | undefined;
   let secrets: string[] = [];
+
   if (metric.definition.kind === 'exec') {
     execDirectory = await openMetricDirectory(loaded.root, metric.definition.cwd ?? '.');
     execCwd = execDirectory.path;
     let resolved: Awaited<ReturnType<typeof resolveProcessEnvironment>>;
+
     try {
       resolved = await resolveProcessEnvironment(metric.definition.env, loaded.root);
     } catch (error: unknown) {
@@ -128,14 +150,18 @@ const runMetricTestCommand = async (
         },
       );
     }
+
     execEnv = resolved.env;
     secrets = resolved.secrets;
   }
+
   let evaluation: StoredMetricEvaluation | undefined;
+
   try {
     if (execDirectory !== undefined) {
       await assertMetricDirectoryIdentity(execDirectory);
     }
+
     [evaluation] = await evaluateMetrics([definition], context, {
       exec: {
         cwd: execCwd,
@@ -147,10 +173,13 @@ const runMetricTestCommand = async (
   } finally {
     await execDirectory?.handle.close().catch(() => undefined);
   }
+
   if (evaluation === undefined) {
     throw new LocalError('metric_infrastructure_failed', 'Metric test produced no evaluation.');
   }
+
   const redacted = redactProbeValue(withoutDuration(evaluation), secrets);
+
   if (evaluation.status === 'error') {
     throw new LocalError('metric_infrastructure_failed', 'Metric fixture execution failed.', {
       path: metric.id,
@@ -158,7 +187,9 @@ const runMetricTestCommand = async (
       details: { evaluation: redacted },
     });
   }
+
   const passed = evaluation.status === 'evaluated' ? evaluation.pass : false;
+
   if (passed !== fixture.expected_pass) {
     throw new LocalError('metric_fixture_mismatch', 'Metric result did not match the fixture.', {
       path: metric.id,
@@ -170,6 +201,7 @@ const runMetricTestCommand = async (
       },
     });
   }
+
   return {
     operation: 'metric-test',
     projectHashBefore: loaded.projectHash,

@@ -1,3 +1,4 @@
+import { isString, type JsonValue } from '../project/shared.js';
 import { z } from 'zod';
 
 import { agentRequestSchema } from './protocol.js';
@@ -13,11 +14,14 @@ import { WEBSOCKET_MESSAGE_PROTOCOL, WEBSOCKET_REQUEST_PROTOCOL } from '../schem
 const httpTokenPattern = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/u;
 
 const webSocketLifecycleSchema = z.enum(['per_case', 'per_run']);
+
 const webSocketConnectionModeSchema = z.enum(['serial', 'multiplexed']);
+
 const webSocketJsonPointerSchema = jsonPointerSchema.refine(
   (pointer) => pointer !== '',
   'must address a field rather than the whole message',
 );
+
 const webSocketUrlTemplateSchema = z
   .string()
   .regex(/^wss?:\/\/\S+$/u, 'must be a WebSocket URL template')
@@ -25,11 +29,14 @@ const webSocketUrlTemplateSchema = z
     (url) => !/(?:^|\/)socket\.io(?:\/|\?|$)|[?&]EIO=/iu.test(url),
     'Socket.IO endpoints are unsupported; configure a plain WebSocket endpoint',
   );
+
 const webSocketHeaderNameSchema = z
   .string()
   .min(1)
   .regex(httpTokenPattern, 'must be an HTTP header name');
+
 const webSocketHeaderValueSchema = z.union([z.string(), secretReferenceSchema]);
+
 const webSocketSubprotocolSchema = z
   .string()
   .min(1)
@@ -41,15 +48,20 @@ const webSocketSubprotocolSchema = z
     'Socket.IO and GraphQL subscription subprotocols are unsupported',
   );
 
+const isJsonContainer = (value: JsonValue): value is Record<string, JsonValue> | JsonValue[] =>
+  value !== null && typeof value === 'object';
+
 /** Counts exact correlation slots without interpreting any other authored template syntax. */
-const countRequestIdSlots = (value: unknown): number => {
+const countRequestIdSlots = (value: JsonValue): number => {
   if (value === '{{request_id}}') {
     return 1;
   }
+
   if (Array.isArray(value)) {
     return value.reduce<number>((count, item) => count + countRequestIdSlots(item), 0);
   }
-  if (value === null || typeof value !== 'object') {
+
+  if (!isJsonContainer(value)) {
     return 0;
   }
 
@@ -111,6 +123,7 @@ const webSocketTransportSchema = z
         message: 'must not exceed attempt_timeout_ms',
       });
     }
+
     if (transport.message_idle_timeout_ms > transport.attempt_timeout_ms) {
       context.addIssue({
         code: 'custom',
@@ -118,6 +131,7 @@ const webSocketTransportSchema = z
         message: 'must not exceed attempt_timeout_ms',
       });
     }
+
     if (transport.ping_interval_ms >= transport.message_idle_timeout_ms) {
       context.addIssue({
         code: 'custom',
@@ -135,9 +149,12 @@ const webSocketTransportSchema = z
         ? []
         : ([['trace_pointer', transport.trace_pointer]] as const)),
     ] as const;
+
     const firstPathByPointer = new Map<string, string>();
+
     for (const [path, pointer] of pointers) {
       const firstPath = firstPathByPointer.get(pointer);
+
       if (firstPath !== undefined) {
         context.addIssue({
           code: 'custom',
@@ -151,6 +168,7 @@ const webSocketTransportSchema = z
 
     for (const [name, value] of Object.entries(transport.headers ?? {})) {
       const normalizedName = name.toLowerCase();
+
       if (normalizedName === 'cookie') {
         context.addIssue({
           code: 'custom',
@@ -158,9 +176,10 @@ const webSocketTransportSchema = z
           message: 'cookies are unsupported',
         });
       }
+
       if (
         (normalizedName === 'authorization' || normalizedName === 'proxy-authorization') &&
-        typeof value === 'string'
+        isString(value)
       ) {
         context.addIssue({
           code: 'custom',
@@ -188,7 +207,9 @@ const webSocketCorrelatedMessageSchema = z.strictObject({
 });
 
 type WebSocketCorrelatedMessage = z.infer<typeof webSocketCorrelatedMessageSchema>;
+
 type WebSocketInvocationRequest = z.infer<typeof webSocketInvocationRequestSchema>;
+
 type WebSocketTransport = z.infer<typeof webSocketTransportSchema>;
 
 export {

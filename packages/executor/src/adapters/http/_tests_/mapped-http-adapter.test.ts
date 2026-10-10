@@ -1,10 +1,11 @@
+import { parseJson } from '../../../internal/json-value.js';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 
 import {
   AGENT_PROTOCOL,
   AGENT_RESOURCE_SCHEMA_ID,
   type AgentRequest,
-  type AgentResource,
+  type JsonValue,
 } from '@attest/contracts';
 import { afterEach, describe, expect, it } from 'vitest';
 
@@ -15,6 +16,7 @@ import {
 import { invokeMappedHttpAgent, type HttpAgentResource } from '../mapped-http-adapter.js';
 
 const servers: LoopbackServer[] = [];
+
 const request: AgentRequest = {
   protocol: AGENT_PROTOCOL,
   run_id: '01ARZ3NDEKTSV4RRFFQ69G5FAV',
@@ -28,29 +30,32 @@ const startServer = async (
 ): Promise<{ origin: string }> => {
   const server = await startLoopbackServer(handler);
   servers.push(server);
+
   return { origin: server.url };
 };
 
-const directAgent = (origin: string, overrides: Partial<AgentResource> = {}): HttpAgentResource =>
-  ({
-    schema: AGENT_RESOURCE_SCHEMA_ID,
-    id: 'mapped',
-    name: 'Mapped',
-    transport: {
-      kind: 'http',
-      lifecycle: 'external',
-      response_mode: 'mapped',
-      request: {
-        url: `${origin}/invoke/{{input/question}}`,
-        method: 'POST',
-        headers: { 'x-input': '{{input/question}}' },
-        query: { q: '{{input/question}}' },
-        body: { prompt: '{{input/question}}' },
-      },
-      extraction: { result_pointer: '/data/result', error_pointer: '/error' },
+const directAgent = (
+  origin: string,
+  overrides: Partial<HttpAgentResource> = {},
+): HttpAgentResource => ({
+  schema: AGENT_RESOURCE_SCHEMA_ID,
+  id: 'mapped',
+  name: 'Mapped',
+  transport: {
+    kind: 'http',
+    lifecycle: 'external',
+    response_mode: 'mapped',
+    request: {
+      url: `${origin}/invoke/{{input/question}}`,
+      method: 'POST',
+      headers: { 'x-input': '{{input/question}}' },
+      query: { q: '{{input/question}}' },
+      body: { prompt: '{{input/question}}' },
     },
-    ...overrides,
-  }) as HttpAgentResource;
+    extraction: { result_pointer: '/data/result', error_pointer: '/error' },
+  },
+  ...overrides,
+});
 
 afterEach(async () => {
   await Promise.all(servers.splice(0).map((server) => server.close()));
@@ -58,13 +63,16 @@ afterEach(async () => {
 
 describe('mapped HTTP adapter', () => {
   it('maps path, query, headers, body, and extraction without shell or string coercion ambiguity', async () => {
-    let observed: Record<string, unknown> = {};
+    let observed:
+      | { body: JsonValue; header: string | string[] | undefined; url: string | undefined }
+      | undefined;
+
     const fixture = await startServer((incoming, response) => {
       const chunks: Buffer[] = [];
       incoming.on('data', (chunk: Buffer) => chunks.push(chunk));
       incoming.on('end', () => {
         observed = {
-          body: JSON.parse(Buffer.concat(chunks).toString('utf8')),
+          body: parseJson(Buffer.concat(chunks).toString('utf8')),
           header: incoming.headers['x-input'],
           url: incoming.url,
         };
@@ -75,8 +83,10 @@ describe('mapped HTTP adapter', () => {
 
     const result = await invokeMappedHttpAgent(directAgent(fixture.origin), request);
     expect(result.status).toBe('ok');
+
     if (result.status !== 'ok') throw result.error;
     expect(result.report?.ok).toBe(true);
+
     if (result.report?.ok !== true) throw new Error('Expected a valid extracted response.');
     expect(result.report.value).toMatchObject({
       protocol: AGENT_PROTOCOL,
@@ -94,11 +104,14 @@ describe('mapped HTTP adapter', () => {
       response.setHeader('content-type', 'application/json');
       response.end(JSON.stringify({ data: { result: 'x'.repeat(2_000) } }));
     });
+
     const result = await invokeMappedHttpAgent(
       directAgent(fixture.origin, { limits: { response_bytes: 128 } }),
       request,
     );
+
     expect(result.status).toBe('invocation_error');
+
     if (result.status !== 'invocation_error') throw new Error('Expected cap error.');
     expect(result.error.code).toBe('output_cap_exceeded');
     expect(result.rawExcerpt?.truncated).toBe(true);
@@ -109,11 +122,14 @@ describe('mapped HTTP adapter', () => {
       response.setHeader('content-type', 'application/json');
       response.end(JSON.stringify({ error: { message: 'agent declined', code: 'DECLINED' } }));
     });
+
     const result = await invokeMappedHttpAgent(directAgent(fixture.origin), request);
     expect(result.status).toBe('ok');
+
     if (result.status !== 'ok' || result.report?.ok !== true) {
       throw new Error('Expected an extracted agent error.');
     }
+
     expect(result.report.value).toMatchObject({
       protocol: AGENT_PROTOCOL,
       error: { message: 'agent declined', code: 'DECLINED' },
@@ -123,6 +139,7 @@ describe('mapped HTTP adapter', () => {
 
   it('redacts secrets from extracted provider errors and traces before persistence', async () => {
     const secret = 'provider-secret';
+
     const fixture = await startServer((_incoming, response) => {
       response.setHeader('content-type', 'application/json');
       response.end(
@@ -132,7 +149,9 @@ describe('mapped HTTP adapter', () => {
         }),
       );
     });
+
     const agent = directAgent(fixture.origin);
+
     if (agent.transport.kind !== 'http') throw new Error('Expected direct HTTP transport.');
     agent.transport.extraction.trace_pointer = '/trace';
 
@@ -147,19 +166,26 @@ describe('mapped HTTP adapter', () => {
     let submissions = 0;
     let polls = 0;
     const keys: string[] = [];
+
     const fixture = await startServer((incoming, response) => {
       response.setHeader('content-type', 'application/json');
+
       if (incoming.url === '/submit') {
         submissions += 1;
         keys.push(String(incoming.headers['idempotency-key']));
+
         if (submissions === 1) {
           response.statusCode = 503;
           response.end();
+
           return;
         }
+
         response.end(JSON.stringify({ job: 'abc', status_url: '/jobs/abc' }));
+
         return;
       }
+
       polls += 1;
       response.setHeader('retry-after', '0');
       response.end(
@@ -168,6 +194,7 @@ describe('mapped HTTP adapter', () => {
         ),
       );
     });
+
     const agent: HttpAgentResource = {
       schema: AGENT_RESOURCE_SCHEMA_ID,
       id: 'poller',
@@ -201,12 +228,15 @@ describe('mapped HTTP adapter', () => {
 
   it('does not retry submission without an idempotency header', async () => {
     let submissions = 0;
+
     const fixture = await startServer((_incoming, response) => {
       submissions += 1;
       response.statusCode = 503;
       response.end();
     });
+
     const base = directAgent(fixture.origin);
+
     const agent = {
       ...base,
       retry: { retries: 3, backoff: { kind: 'none' as const } },
@@ -224,6 +254,7 @@ describe('mapped HTTP adapter', () => {
         maximum_interval_ms: 5,
       },
     };
+
     const result = await invokeMappedHttpAgent(agent, request);
     expect(result.status).toBe('invocation_error');
     expect(submissions).toBe(1);
@@ -231,10 +262,12 @@ describe('mapped HTTP adapter', () => {
 
   it('rejects cross-origin status URLs and cancels a pending poll promptly', async () => {
     const second = await startServer((_incoming, response) => response.end('{}'));
+
     const first = await startServer((_incoming, response) => {
       response.setHeader('content-type', 'application/json');
       response.end(JSON.stringify({ job: 'abc', url: `${second.origin}/job` }));
     });
+
     const makeAgent = (statusPointer: boolean): HttpAgentResource => ({
       schema: AGENT_RESOURCE_SCHEMA_ID,
       id: 'poller',
@@ -258,25 +291,32 @@ describe('mapped HTTP adapter', () => {
 
     const rejected = await invokeMappedHttpAgent(makeAgent(true), request);
     expect(rejected.status).toBe('invocation_error');
+
     const timedOut = await invokeMappedHttpAgent(
       { ...makeAgent(false), timeouts: { attempt_ms: 10 } },
       request,
     );
+
     expect(timedOut.status).toBe('invocation_error');
+
     if (timedOut.status !== 'invocation_error') throw new Error('Expected timeout.');
     expect(timedOut.error.code).toBe('timeout');
     const controller = new AbortController();
     setTimeout(() => controller.abort(), 10);
+
     const cancelled = await invokeMappedHttpAgent(makeAgent(false), request, {
       signal: controller.signal,
     });
+
     expect(cancelled.status).toBe('invocation_error');
+
     if (cancelled.status !== 'invocation_error') throw new Error('Expected cancellation.');
     expect(cancelled.error.code).toBe('cancelled');
   });
 
   it('follows same-origin 307 redirects but rejects origin changes and prohibited URLs', async () => {
     const foreign = await startServer((_incoming, response) => response.end('{}'));
+
     const fixture = await startServer((incoming, response) => {
       if (incoming.url?.startsWith('/invoke/')) {
         response.statusCode = 307;
@@ -285,15 +325,20 @@ describe('mapped HTTP adapter', () => {
           incoming.headers['x-mode'] === 'foreign' ? `${foreign.origin}/target` : '/target',
         );
         response.end();
+
         return;
       }
+
       response.setHeader('content-type', 'application/json');
       response.end(JSON.stringify({ data: { result: 'ok' } }));
     });
+
     expect((await invokeMappedHttpAgent(directAgent(fixture.origin), request)).status).toBe('ok');
+
     const foreignResult = await invokeMappedHttpAgent(directAgent(fixture.origin), request, {
       headers: { 'x-mode': 'foreign' },
     });
+
     expect(foreignResult.status).toBe('invocation_error');
 
     const prohibited = await invokeMappedHttpAgent(directAgent('http://169.254.169.254'), request);
@@ -302,10 +347,12 @@ describe('mapped HTTP adapter', () => {
 
   it('redacts escaped response evidence and records an authored remote job id', async () => {
     const secret = 'quote"\\secret';
+
     const fixture = await startServer((_incoming, response) => {
       response.setHeader('content-type', 'application/json');
       response.end(JSON.stringify({ data: { result: 'ok' }, echo: secret, job: 'remote-7' }));
     });
+
     const agent = directAgent(fixture.origin);
     agent.transport.extraction.remote_job_id_pointer = '/job';
     const result = await invokeMappedHttpAgent(agent, request, { secrets: [secret] });
@@ -328,23 +375,29 @@ describe('mapped HTTP adapter', () => {
 
   it('performs zero network I/O for pre-cancelled, authority-templated, and oversized requests', async () => {
     let requests = 0;
+
     const fixture = await startServer((_incoming, response) => {
       requests += 1;
       response.end(JSON.stringify({ data: { result: 'unexpected' } }));
     });
+
     const controller = new AbortController();
     controller.abort();
+
     const cancelled = await invokeMappedHttpAgent(directAgent(fixture.origin), request, {
       signal: controller.signal,
     });
+
     expect(cancelled).toMatchObject({ status: 'invocation_error', error: { code: 'cancelled' } });
 
     const authority = directAgent(fixture.origin);
+
     if (authority.transport.kind !== 'http') throw new Error('Expected direct HTTP transport.');
     authority.transport.request.url = `http://{{input/question}}:${new URL(fixture.origin).port}/x`;
     expect((await invokeMappedHttpAgent(authority, request)).status).toBe('invocation_error');
 
     const oversized = directAgent(fixture.origin, { limits: { request_bytes: 80 } });
+
     if (oversized.transport.kind !== 'http') throw new Error('Expected direct HTTP transport.');
     oversized.transport.request.body = undefined;
     oversized.transport.request.query = { large: '{{input/question}}'.repeat(30) };
@@ -354,6 +407,7 @@ describe('mapped HTTP adapter', () => {
 
   it('caps hostile non-2xx bodies and records real retry durations', async () => {
     let requests = 0;
+
     const fixture = await startServer((_incoming, response) => {
       requests += 1;
       setTimeout(() => {
@@ -366,10 +420,12 @@ describe('mapped HTTP adapter', () => {
         );
       }, 20);
     });
+
     const capped = await invokeMappedHttpAgent(
       directAgent(fixture.origin, { limits: { response_bytes: 64 } }),
       request,
     );
+
     expect(capped).toMatchObject({
       status: 'invocation_error',
       error: { code: 'output_cap_exceeded' },
@@ -377,6 +433,7 @@ describe('mapped HTTP adapter', () => {
 
     requests = 0;
     const retryStartedAt = performance.now();
+
     const retried = await invokeMappedHttpAgent(
       directAgent(fixture.origin, {
         retry: { retries: 1, backoff: { kind: 'fixed', delay_ms: 200 } },
@@ -384,6 +441,7 @@ describe('mapped HTTP adapter', () => {
       }),
       request,
     );
+
     const retryElapsedMs = performance.now() - retryStartedAt;
     expect(retried.status).toBe('ok');
     expect(retried.attempts[0]?.durationMs).toBeGreaterThanOrEqual(15);
@@ -396,9 +454,11 @@ describe('mapped HTTP adapter', () => {
   it('closes a stalled non-2xx response socket before returning its idle timeout', async () => {
     let peerSocket: IncomingMessage['socket'] | undefined;
     let observePeerClose: (() => void) | undefined;
+
     const peerClosed = new Promise<void>((resolve) => {
       observePeerClose = resolve;
     });
+
     const fixture = await startServer((incoming, response) => {
       peerSocket = incoming.socket;
       incoming.socket.once('close', () => observePeerClose?.());
@@ -411,6 +471,7 @@ describe('mapped HTTP adapter', () => {
         directAgent(fixture.origin, { timeouts: { idle_ms: 25, attempt_ms: 500 } }),
         request,
       );
+
       expect(stalled).toMatchObject({
         status: 'invocation_error',
         error: { code: 'timeout' },
@@ -419,22 +480,28 @@ describe('mapped HTTP adapter', () => {
       expect(peerSocket?.destroyed).toBe(true);
     } finally {
       peerSocket?.destroy();
+
       if (peerSocket !== undefined) await peerClosed;
     }
   });
 
   it('validates polling before submit and fails authored terminal failures', async () => {
     let submissions = 0;
+
     const fixture = await startServer((incoming, response) => {
       response.setHeader('content-type', 'application/json');
+
       if (incoming.url === '/submit') {
         submissions += 1;
         response.end(JSON.stringify({ job: 'job-9', status_url: '/jobs/job-9' }));
+
         return;
       }
+
       response.end(JSON.stringify({ status: 'failed', error: { message: 'provider failed' } }));
     });
-    const invalid = {
+
+    const invalid: HttpAgentResource = {
       schema: AGENT_RESOURCE_SCHEMA_ID,
       id: 'invalid-poller',
       name: 'Invalid poller',
@@ -450,11 +517,13 @@ describe('mapped HTTP adapter', () => {
         minimum_interval_ms: 1,
         maximum_interval_ms: 2,
       },
-    } as HttpAgentResource;
+    };
+
     expect((await invokeMappedHttpAgent(invalid, request)).status).toBe('invocation_error');
     expect(submissions).toBe(0);
 
     const valid = structuredClone(invalid);
+
     if (valid.transport.kind !== 'polling') throw new Error('Expected polling transport.');
     valid.transport.status_url_pointer = '/status_url';
     valid.transport.extraction.error_pointer = '/error';
@@ -469,6 +538,7 @@ describe('mapped HTTP adapter', () => {
 
   it('serializes authored raw/form bodies byte for byte', async () => {
     let observed = '';
+
     const fixture = await startServer((incoming, response) => {
       const chunks: Buffer[] = [];
       incoming.on('data', (chunk: Buffer) => chunks.push(chunk));
@@ -477,7 +547,9 @@ describe('mapped HTTP adapter', () => {
         response.end(JSON.stringify({ data: { result: 'ok' } }));
       });
     });
+
     const agent = directAgent(fixture.origin);
+
     if (agent.transport.kind !== 'http') throw new Error('Expected direct HTTP transport.');
     agent.transport.request.body = 'prompt={{input/question}}&mode=fast';
     agent.transport.request.body_encoding = 'raw';

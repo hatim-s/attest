@@ -7,7 +7,9 @@ import { OPERATOR_PROMPTS, PRESET_PROMPTS, askGuidedPrompt } from './guided-metr
 import type { MetricAddOptions } from './register-metric-add-command.js';
 
 const METRIC_KINDS = ['assertion', 'judge', 'command', 'http'] as const;
+
 const ASSERTION_EVIDENCE = ['input', 'output', 'expected', 'trace'] as const;
+
 const VALUE_OPERATORS = [
   'equals',
   'contains',
@@ -19,6 +21,7 @@ const VALUE_OPERATORS = [
   'gt',
   'gte',
 ] as const;
+
 const TRACE_OPERATORS = ['tool-called', 'tool-order', 'no-tool-errors', 'span'] as const;
 
 type ValueOperator = (typeof VALUE_OPERATORS)[number];
@@ -52,6 +55,7 @@ const guidedChoice = async <Choice extends string>(
 ): Promise<Choice> => {
   const answer = (await context.interaction.prompt(question)).trim() || defaultChoice;
   const choice = choices.find((candidate) => candidate === answer);
+
   if (choice !== undefined) return choice;
   throw new AttestCliError('cli_usage', `Unknown guided metric choice for ${path}.`, {
     path,
@@ -74,24 +78,31 @@ const guidedTraceCapability = async (
     recover: options.dryRun !== true,
     workingDirectory: context.workingDirectory,
   });
+
   const defaultAgent = loaded.agents[0];
+
   if (defaultAgent === undefined) {
     return 'No authored agent is available to verify trace support. Creation remains available before trace evidence exists.';
   }
+
   const catalog = loaded.agents.map((agent) => `  ${agent.id}: ${traceSupport(agent)}`).join('\n');
+
   const selectedId =
     (
       await context.interaction.prompt(
         `Agent trace capabilities:\n${catalog}\nAgent for capability guidance [${defaultAgent.id}]: `,
       )
     ).trim() || defaultAgent.id;
+
   const selected = loaded.agents.find(({ id }) => id === selectedId);
+
   if (selected === undefined) {
     throw new AttestCliError('cli_usage', 'Unknown agent selected for trace guidance.', {
       path: '<agent-id>',
       hint: `Choose one of: ${loaded.agents.map(({ id }) => id).join(', ')}.`,
     });
   }
+
   return `Agent ${selected.id} ${traceSupport(selected)}. Creation remains available before trace evidence exists.`;
 };
 
@@ -99,8 +110,10 @@ const presetCatalog = (): string =>
   METRIC_PRESETS.map((preset, index) => {
     const required =
       preset.required_inputs.length === 0 ? 'none' : preset.required_inputs.join(', ');
+
     const configurable =
       preset.configurable_fields.length === 0 ? 'none' : preset.configurable_fields.join(', ');
+
     return `  ${preset.id}${index === 0 ? ' (default)' : ''}: ${preset.description}\n    required: ${required}; configurable: ${configurable}`;
   }).join('\n');
 
@@ -111,11 +124,13 @@ const selectGuidedMetricFields = async (
   context: CommandContext,
 ): Promise<MetricAddOptions> => {
   if (options.preset !== undefined) return options;
+
   const hasDirectAssertion =
     options.assertJson !== undefined ||
     options.path !== undefined ||
     options.pattern !== undefined ||
     [options.lt, options.lte, options.gt, options.gte].some((value) => value !== undefined);
+
   if (!interactive || hasDirectAssertion) return options;
 
   const kind = await guidedChoice(
@@ -125,6 +140,7 @@ const selectGuidedMetricFields = async (
     'kind',
     context,
   );
+
   if (kind !== 'assertion') return { ...options, preset: PRESET_BY_KIND[kind] };
 
   const evidence = await guidedChoice(
@@ -134,8 +150,10 @@ const selectGuidedMetricFields = async (
     'evidence',
     context,
   );
+
   if (evidence === 'trace') {
     const capability = await guidedTraceCapability(options, context);
+
     const operator = await guidedChoice(
       `${capability}\nTrace operator [tool-called] (tool-called|tool-order|no-tool-errors|span): `,
       TRACE_OPERATORS,
@@ -143,6 +161,7 @@ const selectGuidedMetricFields = async (
       'operator',
       context,
     );
+
     return { ...options, preset: PRESET_BY_TRACE_OPERATOR[operator] };
   }
 
@@ -153,12 +172,15 @@ const selectGuidedMetricFields = async (
     'operator',
     context,
   );
+
   const guided: MetricAddOptions = {
     ...options,
     path: `$.${evidence}`,
     preset: PRESET_BY_VALUE_OPERATOR[operator],
   };
-  const step = OPERATOR_PROMPTS[operator];
+
+  const step = OPERATOR_PROMPTS.get(operator);
+
   return step === undefined ? guided : askGuidedPrompt(step, guided, context);
 };
 
@@ -169,11 +191,14 @@ const fillGuidedMetricFields = async (
   context: CommandContext,
 ): Promise<MetricAddOptions> => {
   const preset = options.preset;
+
   if (!interactive || preset === undefined) return options;
   let guided = options;
+
   for (const step of PRESET_PROMPTS[preset] ?? []) {
     if (step.needed(guided)) guided = await askGuidedPrompt(step, guided, context);
   }
+
   return guided;
 };
 

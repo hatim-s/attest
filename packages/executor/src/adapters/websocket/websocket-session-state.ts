@@ -1,3 +1,4 @@
+import type { AgentResponseCandidate } from '../../internal/agent-response-candidate.js';
 import {
   AGENT_PROTOCOL,
   type AgentRequest,
@@ -51,8 +52,10 @@ const MAX_TOMBSTONES = 1_024;
 /** Remembers a settled request id, evicting the oldest once the bound is reached. */
 const remember = (target: Set<string>, requestId: string): void => {
   target.add(requestId);
+
   if (target.size <= MAX_TOMBSTONES) return;
   const oldest = target.values().next().value;
+
   if (oldest !== undefined) target.delete(oldest);
 };
 
@@ -82,12 +85,14 @@ class WebSocketSessionState {
     this.secrets = options.secrets ?? [];
     this.evidence = createEvidenceRecorder(agent, this.secrets);
     const runMs = agent.timeouts?.run_ms;
+
     if (runMs !== undefined) {
       this.runTimer = setTimeout(
         () => this.failRun(new AgentInvocationError('timeout', 'WebSocket run timed out.')),
         runMs,
       );
     }
+
     options.signal?.addEventListener(
       'abort',
       () => this.failRun(new AgentInvocationError('cancelled', 'WebSocket run was cancelled.')),
@@ -124,10 +129,10 @@ class WebSocketSessionState {
     callbacks: WebSocketConnectionCallbacks,
   ): Promise<WebSocketConnection> {
     const { transport } = this.agent;
-    return openWebSocket({
+
+    const options: Parameters<typeof openWebSocket>[0] = {
       url: transport.url,
       headers: this.headers,
-      ...(transport.subprotocol === undefined ? {} : { subprotocol: transport.subprotocol }),
       openTimeoutMs: transport.open_timeout_ms,
       maximumMessageBytes: this.agent.limits?.event_bytes ?? DEFAULT_EVENT_BYTES,
       maximumPendingWriteBytes: this.agent.limits?.request_bytes ?? DEFAULT_REQUEST_BYTES,
@@ -135,7 +140,11 @@ class WebSocketSessionState {
       signal,
       callerSignal: signal,
       callbacks,
-    });
+    };
+
+    if (transport.subprotocol !== undefined) options.subprotocol = transport.subprotocol;
+
+    return openWebSocket(options);
   }
 
   async send(
@@ -145,6 +154,7 @@ class WebSocketSessionState {
   ): Promise<void> {
     const text = materializeRequest(this.agent, pending.request, pending.requestId);
     await connection.sendText(text, signal);
+
     if (!this.pending.has(pending.requestId)) return;
     this.evidence.record(pending, {
       classification: 'request_sent',
@@ -168,6 +178,7 @@ class WebSocketSessionState {
       this.agent.transport.attempt_timeout_ms,
     );
     const { signal } = pending;
+
     if (signal === undefined) return;
     pending.callerAbort = () => {
       this.settleFailure(
@@ -180,7 +191,9 @@ class WebSocketSessionState {
       // Only a per-case request owns its connection; run-scoped requests share one.
       pending.connection?.destroy();
     };
+
     signal.addEventListener('abort', pending.callerAbort, { once: true });
+
     if (signal.aborted) pending.callerAbort();
   }
 
@@ -190,17 +203,24 @@ class WebSocketSessionState {
    */
   consumeMessage(text: string, bytes: number, scope?: ReadonlySet<string>): void {
     const envelope = parseServerEnvelope(text, this.agent.transport.request_id_pointer);
+
     if ('error' in envelope) {
       this.failScope(envelope.error, envelope.classification, scope);
+
       return;
     }
+
     const { raw, requestId } = envelope;
     const pending = this.pending.get(requestId);
+
     if (pending === undefined || (scope !== undefined && !scope.has(requestId))) {
       this.rejectUnknown(requestId, scope);
+
       return;
     }
+
     this.resetIdle(pending);
+
     if (!this.evidence.countMessage(pending, bytes)) {
       this.settleFailure(
         pending,
@@ -210,24 +230,32 @@ class WebSocketSessionState {
         ),
         'connection_failed',
       );
+
       return;
     }
+
     const message = interpretServerMessage(raw, this.agent, pending.acknowledged);
     const event = { bytes, source: text, raw };
+
     if (message.acknowledgement) {
       pending.acknowledged = true;
       this.evidence.record(pending, { classification: 'acknowledgement_received', ...event });
     }
+
     if (message.trace !== undefined) {
       pending.trace = message.trace;
       this.evidence.record(pending, { classification: 'trace_received', ...event });
     }
+
     if (message.failure !== undefined) {
       this.settleFailure(pending, message.failure.error, message.failure.classification);
+
       return;
     }
+
     if (message.terminal === undefined) return;
     const trace = pending.trace === undefined ? {} : { trace: pending.trace };
+
     if (message.terminal.kind === 'error') {
       this.evidence.record(pending, { classification: 'error_received', ...event });
       this.settleSuccess(pending, {
@@ -235,8 +263,10 @@ class WebSocketSessionState {
         error: message.terminal.value,
         ...trace,
       });
+
       return;
     }
+
     this.evidence.record(pending, { classification: 'result_received', ...event });
     this.settleSuccess(pending, {
       protocol: AGENT_PROTOCOL,
@@ -280,21 +310,25 @@ class WebSocketSessionState {
     classification: WebSocketErrorClassification,
   ): void {
     clearTimeout(this.runTimer);
+
     for (const pending of [...this.pending.values()]) {
       this.settleFailure(pending, error, classification);
     }
   }
 
-  private settleSuccess(pending: PendingInvocation, response: Record<string, unknown>): void {
+  private settleSuccess(pending: PendingInvocation, response: AgentResponseCandidate): void {
     const success = this.evidence.successResult(pending, response);
+
     if (!success.ok) {
       this.settleFailure(
         pending,
         success.error,
         pending.trace === undefined ? 'result_extraction_failed' : 'trace_extraction_failed',
       );
+
       return;
     }
+
     this.pending.delete(pending.requestId);
     remember(this.completed, pending.requestId);
     clearPendingTimers(pending);
@@ -319,6 +353,7 @@ class WebSocketSessionState {
   /** Fails work the server sent for a request that is not outstanding on this connection. */
   private rejectUnknown(requestId: string, scope: ReadonlySet<string> | undefined): void {
     if (this.ignored.has(requestId)) return;
+
     if (this.completed.has(requestId)) {
       this.failScope(
         new AgentInvocationError(
@@ -328,8 +363,10 @@ class WebSocketSessionState {
         'duplicate_terminal_message',
         scope,
       );
+
       return;
     }
+
     this.failScope(
       new AgentInvocationError('invalid_envelope', 'WebSocket server emitted uncorrelated work.'),
       'uncorrelated_server_work',
@@ -344,10 +381,13 @@ class WebSocketSessionState {
   ): void {
     if (scope === undefined) {
       this.failRun(error, classification);
+
       return;
     }
+
     for (const requestId of scope) {
       const pending = this.pending.get(requestId);
+
       if (pending !== undefined) this.settleFailure(pending, error, classification);
     }
   }

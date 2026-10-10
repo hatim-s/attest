@@ -21,22 +21,29 @@ const readImportedMetricResource = async (
   readStdin: ReadInput,
 ): Promise<MetricResource> => {
   const text = await readSourceText(source, { path: '<path|->', readStdin, workingDirectory });
+
   const value = parseJsonText(text, {
     path: '<path|->',
     hint: 'Provide one canonical metric resource or metric.add request.',
   });
+
   const request = commandRequestSchema.safeParse(value);
+
   const candidate =
     request.success && request.data.command === 'metric.add' ? request.data.metric : value;
+
   const parsed = metricResourceSchema.safeParse(candidate);
+
   if (!parsed.success) {
     throw new LocalError('cli_usage', 'Imported metric JSON does not match its schema.', {
       path: '<path|->',
       details: { diagnostics: schemaIssueDiagnostics(parsed.error.issues) },
     });
   }
+
   const resource = { ...parsed.data, id: metricId, name: name?.trim() || parsed.data.name };
   assertSafeMetricResource(resource);
+
   return resource;
 };
 
@@ -47,17 +54,21 @@ const readMetricTestFixture = async (
   readStdin: ReadInput,
 ): Promise<MetricTestFixture> => {
   const text = await readSourceText(source, { path: '--fixture', readStdin, workingDirectory });
+
   const value = parseJsonText(text, {
     path: '--fixture',
     hint: 'Provide one attest.metric-test-fixture document.',
   });
+
   const parsed = metricTestFixtureSchema.safeParse(value);
+
   if (!parsed.success) {
     throw new LocalError('project_invalid', 'The local metric fixture does not match its schema.', {
       path: '--fixture',
       details: { diagnostics: schemaIssueDiagnostics(parsed.error.issues) },
     });
   }
+
   return parsed.data;
 };
 

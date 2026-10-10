@@ -38,6 +38,7 @@ const registerTestResourceCommands = (test: Command, context: CommandContext): v
         interactive: isInteractive(options, context.interaction, options.fromJson),
         prompt: context.interaction.prompt,
       };
+
       const request = await readOrBuildRequest({
         command: 'test.add',
         context,
@@ -49,11 +50,13 @@ const registerTestResourceCommands = (test: Command, context: CommandContext): v
             { path: '<test-id>', question: 'Test id: ' },
             prompt,
           );
+
           const agentId = await requiredInput(
             options.agent,
             { path: '--agent', question: 'Existing agent id: ' },
             prompt,
           );
+
           return {
             ...mutationRequestFields('test.add', options),
             test: {
@@ -68,8 +71,10 @@ const registerTestResourceCommands = (test: Command, context: CommandContext): v
           };
         },
       });
+
       await runTestMutation(request, options, context);
     });
+
   setMutationHelp(add, {
     examples: [
       'attest test add smoke --agent support',
@@ -83,6 +88,7 @@ const registerTestResourceCommands = (test: Command, context: CommandContext): v
         project: options.project,
         workingDirectory: context.workingDirectory,
       });
+
       context.io.output(renderCommandResult('test.list', outputFormat(options), result));
     },
   );
@@ -98,11 +104,13 @@ const registerTestResourceCommands = (test: Command, context: CommandContext): v
           prompt: context.interaction.prompt,
         },
       );
+
       const result = await runTestShowCommand({
         project: options.project,
         testId: id,
         workingDirectory: context.workingDirectory,
       });
+
       context.io.output(renderCommandResult('test.show', outputFormat(options), result));
     });
 
@@ -120,6 +128,7 @@ const registerTestResourceCommands = (test: Command, context: CommandContext): v
           interactive: isInteractive(options, context.interaction, options.fromJson),
           prompt: context.interaction.prompt,
         };
+
         const request = await readOrBuildRequest({
           command: 'test.rename',
           context,
@@ -139,9 +148,11 @@ const registerTestResourceCommands = (test: Command, context: CommandContext): v
             ),
           }),
         });
+
         await runTestMutation(request, options, context);
       },
     );
+
   setMutationHelp(rename, { examples: ['attest test rename smoke smoke-renamed --dry-run'] });
 
   const remove = addMutationOptions(test.command('remove').description('Remove one test.'))
@@ -164,9 +175,11 @@ const registerTestResourceCommands = (test: Command, context: CommandContext): v
           ),
         }),
       });
+
       if (!(await confirmRemoval(request, `test ${request.test_id}`, options, context))) return;
       await runTestMutation(request, options, context);
     });
+
   setMutationHelp(remove, { examples: ['attest test remove smoke --yes'] });
 };
 

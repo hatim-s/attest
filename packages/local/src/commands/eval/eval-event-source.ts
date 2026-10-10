@@ -1,7 +1,7 @@
 import type { EvalEvent } from '@attest/contracts';
 
 type PendingRead = {
-  reject: (error: unknown) => void;
+  reject: (cause: unknown) => void;
   resolve: (result: IteratorResult<EvalEvent>) => void;
 };
 
@@ -17,6 +17,7 @@ class EvalEventQueue implements AsyncIterable<EvalEvent>, AsyncIterator<EvalEven
   push(event: EvalEvent): void {
     if (this.#closed) throw new Error('Cannot append to a closed eval event stream.');
     const pending = this.#reads.shift();
+
     if (pending === undefined) this.#events.push(event);
     else pending.resolve({ done: false, value: event });
   }
@@ -25,24 +26,30 @@ class EvalEventQueue implements AsyncIterable<EvalEvent>, AsyncIterator<EvalEven
   close(): void {
     if (this.#closed) return;
     this.#closed = true;
+
     for (const pending of this.#reads.splice(0)) pending.resolve({ done: true, value: undefined });
   }
 
   /** Rejects pending and future reads when setup or orchestration unexpectedly escapes its boundary. */
-  fail(error: unknown): void {
+  fail(cause: unknown): void {
     if (this.#closed) return;
     this.#closed = true;
     this.#failure =
-      error instanceof Error ? error : new Error('Eval event production failed.', { cause: error });
+      cause instanceof Error ? cause : new Error('Eval event production failed.', { cause: cause });
+
     for (const pending of this.#reads.splice(0)) pending.reject(this.#failure);
   }
 
   /** Returns the next event in callback order and never permits two consumers to split the stream. */
   next(): Promise<IteratorResult<EvalEvent>> {
     const event = this.#events.shift();
+
     if (event !== undefined) return Promise.resolve({ done: false, value: event });
+
     if (this.#failure !== undefined) return Promise.reject(this.#failure);
+
     if (this.#closed) return Promise.resolve({ done: true, value: undefined });
+
     return new Promise((resolve, reject) => this.#reads.push({ reject, resolve }));
   }
 
@@ -50,6 +57,7 @@ class EvalEventQueue implements AsyncIterable<EvalEvent>, AsyncIterator<EvalEven
   [Symbol.asyncIterator](): AsyncIterator<EvalEvent> {
     if (this.#iterated) throw new Error('Eval event streams can only be consumed once.');
     this.#iterated = true;
+
     return this;
   }
 }

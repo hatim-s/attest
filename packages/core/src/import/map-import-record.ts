@@ -1,3 +1,10 @@
+type CaseIdentityResult = { id: string; source: NormalizedImportRow['identitySource'] };
+
+type NormalizeRecordResult = { diagnostics: ImportDiagnostic[]; row?: NormalizedImportRow };
+
+import { z } from 'zod';
+import { isJsonObject } from '@attest/contracts';
+import { isString } from '@attest/contracts';
 import {
   CASE_SCHEMA_ID,
   testCaseSchema,
@@ -5,7 +12,6 @@ import {
   type JsonValue,
   type TestCase,
 } from '@attest/contracts';
-import type { z } from 'zod';
 
 import { contentHash } from '../store/internal/canonical-json.js';
 import {
@@ -32,7 +38,9 @@ const importedCaseSchema = testCaseSchema.partial({ id: true });
 /** CSV sources name a header; JSON sources are pointers into the record. */
 const sourceValue = (record: JsonObject, source: string, format: ImportFormat) => {
   if (format !== 'csv') return resolveJsonPointer(record, source);
+
   if (!Object.hasOwn(record, source)) return { found: false } as const;
+
   return { found: true, value: record[source]! } as const;
 };
 
@@ -42,6 +50,7 @@ const parseStructuredCsvFields = (
   diagnostics: ImportDiagnostic[],
 ): JsonObject => {
   const value = { ...record.value };
+
   for (const source of sources) {
     if (!Object.hasOwn(value, source)) {
       diagnostics.push(
@@ -55,11 +64,14 @@ const parseStructuredCsvFields = (
       );
       continue;
     }
+
     const cell = value[source];
+
     // CSV cells are strings; a non-string cell was already decoded by a repeated --parse-json.
-    if (typeof cell !== 'string') continue;
+    if (!isString(cell)) continue;
+
     try {
-      value[source] = JSON.parse(cell) as JsonValue;
+      value[source] = z.json().parse(JSON.parse(cell));
     } catch {
       diagnostics.push(
         importDiagnostic({
@@ -72,6 +84,7 @@ const parseStructuredCsvFields = (
       );
     }
   }
+
   return value;
 };
 
@@ -79,16 +92,20 @@ const parseStructuredCsvFields = (
 const assignDestination = (target: JsonObject, destination: string, value: JsonValue): void => {
   const segments = splitDestination(destination);
   let current = target;
+
   for (const segment of segments.slice(0, -1)) {
     const existing = Object.hasOwn(current, segment) ? current[segment] : undefined;
-    if (existing !== null && typeof existing === 'object' && !Array.isArray(existing)) {
+
+    if (isJsonObject(existing)) {
       current = existing;
       continue;
     }
+
     const child: JsonObject = {};
     current[segment] = child;
     current = child;
   }
+
   current[segments.at(-1)!] = value;
 };
 
@@ -101,11 +118,13 @@ const schemaDiagnostics = (
   const mapped = mappings
     .map(({ destination, source }) => ({ destination: destinationPointer(destination), source }))
     .toSorted((left, right) => right.destination.length - left.destination.length);
+
   return issues.flatMap((issue) => {
     const paths =
       issue.code === 'unrecognized_keys'
         ? issue.keys.map((key) => [...issue.path, key])
         : [issue.path];
+
     return paths
       .map(toPointer)
       .toSorted()
@@ -114,6 +133,7 @@ const schemaDiagnostics = (
           ({ destination }) =>
             destinationPath === destination || destinationPath.startsWith(`${destination}/`),
         );
+
         return importDiagnostic({
           code: issue.code,
           message: issue.message,
@@ -133,14 +153,18 @@ const mapRecord = (
   diagnostics: ImportDiagnostic[],
 ): JsonObject => {
   const mappings = request.mappings ?? [];
+
   if (mappings.length === 0) return value;
   const candidate: JsonObject = {};
+
   for (const mapping of mappings) {
     const resolved = sourceValue(value, mapping.source, request.format);
+
     if (resolved.found) {
       assignDestination(candidate, mapping.destination, resolved.value);
       continue;
     }
+
     diagnostics.push(
       importDiagnostic({
         code: 'source_field_missing',
@@ -155,6 +179,7 @@ const mapRecord = (
       }),
     );
   }
+
   return candidate;
 };
 
@@ -166,6 +191,7 @@ const resolveSourceKey = (
 ): JsonValue | undefined => {
   if (request.keySource === undefined) return undefined;
   const resolved = sourceValue(value, request.keySource, request.format);
+
   if (resolved.found) return resolved.value;
   diagnostics.push(
     importDiagnostic({
@@ -177,6 +203,7 @@ const resolveSourceKey = (
       location: record,
     }),
   );
+
   return undefined;
 };
 
@@ -184,9 +211,11 @@ const caseIdentity = (
   content: Omit<TestCase, 'id'>,
   explicitId: string | undefined,
   sourceKey: JsonValue | undefined,
-): { id: string; source: NormalizedImportRow['identitySource'] } => {
+): CaseIdentityResult => {
   if (explicitId !== undefined) return { id: explicitId, source: 'id' };
+
   if (sourceKey !== undefined) return { id: createKeyedCaseId(sourceKey), source: 'key' };
+
   return { id: createContentCaseId(content), source: 'content' };
 };
 
@@ -197,31 +226,39 @@ const caseIdentity = (
 const normalizeRecord = (
   record: SourceRecord,
   request: TabularImportRequest,
-): { diagnostics: ImportDiagnostic[]; row?: NormalizedImportRow } => {
+): NormalizeRecordResult => {
   const diagnostics: ImportDiagnostic[] = [];
   let value = record.value;
+
   if (request.format === 'csv') {
     value = parseStructuredCsvFields(record, request.parseJsonSources ?? [], diagnostics);
   }
+
   const candidate = mapRecord(value, record, request, diagnostics);
   const sourceKey = resolveSourceKey(value, record, request, diagnostics);
   const parsed = importedCaseSchema.safeParse(candidate);
+
   if (!parsed.success) {
     diagnostics.push(...schemaDiagnostics(parsed.error.issues, request.mappings ?? [], record));
+
     return { diagnostics };
   }
+
   if (diagnostics.length > 0) return { diagnostics };
 
   const { id: explicitId, ...content } = parsed.data;
   const identity = caseIdentity(content, explicitId, sourceKey);
   const testCase = { ...content, id: identity.id };
+
   const row: NormalizedImportRow = {
     case: testCase,
     contentFingerprint: fingerprintCaseContent(testCase),
     identitySource: identity.source,
     location: importLocation(record),
   };
+
   if (sourceKey !== undefined) row.sourceKeyFingerprint = contentHash(sourceKey);
+
   return { diagnostics, row };
 };
 

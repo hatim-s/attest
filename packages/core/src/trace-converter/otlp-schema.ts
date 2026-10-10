@@ -12,14 +12,19 @@ const hexIdSchema = (length: number) =>
 const timestampSchema = z.union([z.string(), z.number()]).transform((value, context) => {
   if (!/^\d+$/.test(String(value))) {
     context.addIssue({ code: 'custom', message: 'must be an unsigned nanosecond timestamp' });
+
     return z.NEVER;
   }
+
   // Values beyond the Date range become NaN here, including ones too large for a safe integer.
   const timestamp = new Date(Number(BigInt(value) / 1_000_000n));
+
   if (Number.isNaN(timestamp.getTime())) {
     context.addIssue({ code: 'custom', message: 'is outside the Date range' });
+
     return z.NEVER;
   }
+
   return timestamp.toISOString();
 });
 
@@ -73,8 +78,11 @@ const otlpExportSchema = z.looseObject({
 });
 
 type OtlpExport = z.infer<typeof otlpExportSchema>;
+
 type OtlpResourceSpans = OtlpExport['resourceSpans'][number];
+
 type OtlpScopeSpans = OtlpResourceSpans['scopeSpans'][number];
+
 type OtlpSpan = z.infer<typeof otlpSpanSchema>;
 
 export { otlpExportSchema, type OtlpScopeSpans, type OtlpSpan };

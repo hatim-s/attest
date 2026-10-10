@@ -23,32 +23,45 @@ const buildEvaluationDocument = (context: CompletedMetricContext): EvaluationDoc
 });
 
 /** Takes one path step, or undefined when the step leaves the value. */
-const stepInto = (current: unknown, segment: PathSegment): unknown => {
+// BOUNDARY: Trace vendor fields and JSON values are inspected for own path segments without asserting their domain types.
+const stepInto = (current: unknown, segment: PathSegment): PathResolution => {
   if (segment.kind === 'index') {
-    return Array.isArray(current) && Object.hasOwn(current, segment.index)
-      ? current[segment.index]
-      : undefined;
+    const value: unknown =
+      Array.isArray(current) && Object.hasOwn(current, segment.index)
+        ? current[segment.index]
+        : undefined;
+
+    return value === undefined ? { found: false } : { found: true, value };
   }
-  if (current === null || typeof current !== 'object' || Array.isArray(current)) {
-    return undefined;
-  }
-  return Object.hasOwn(current, segment.name)
-    ? (current as Record<string, unknown>)[segment.name]
-    : undefined;
+
+  if (!isRecord(current)) return { found: false };
+  const value = Object.hasOwn(current, segment.name) ? current[segment.name] : undefined;
+
+  return value === undefined ? { found: false } : { found: true, value };
 };
+
+// BOUNDARY: Arbitrary additive trace fields remain unknown while path traversal validates only object containment and own property presence.
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  value !== null && typeof value === 'object' && !Array.isArray(value);
 
 /**
  * Resolves the narrow `$`-rooted path grammar against any JSON-compatible value. An own property
  * holding undefined counts as missing, because absent optional document fields are undefined.
  */
+// BOUNDARY: Evaluation JSON and additive trace fields are traversed only through valid grammar and own property segments.
 const resolveValuePath = (value: unknown, path: string): PathResolution => {
   let current: unknown = value;
+
   for (const segment of parsePathSegments(path)) {
-    current = stepInto(current, segment);
-    if (current === undefined) {
+    const resolution = stepInto(current, segment);
+
+    if (!resolution.found) {
       return { found: false };
     }
+
+    current = resolution.value;
   }
+
   return { found: true, value: current };
 };
 

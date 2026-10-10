@@ -8,8 +8,11 @@ const caseDefinition: TestCase = {
   input: { question: 'What is the capital of France?' },
   expected: 'Paris',
 };
+
 const trace: Trace = { schema: 'attest.trace', trace_id: 'trace-1', spans: [] };
+
 const successResponse: AgentResponse = { protocol: 'attest.agent-invocation', output: 'Paris' };
+
 const errorResponse: AgentResponse = {
   protocol: 'attest.agent-invocation',
   error: { code: 'AGENT_ERROR', message: 'Agent could not answer.' },

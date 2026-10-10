@@ -4,7 +4,8 @@ import { join } from 'node:path';
 import { Readable, Writable } from 'node:stream';
 import { setTimeout as delay } from 'node:timers/promises';
 
-import { AGENT_PROTOCOL } from '@attest/contracts';
+import { z } from 'zod';
+import { AGENT_PROTOCOL, type JsonValue } from '@attest/contracts';
 import {
   BUNDLE_SCHEMA_ID,
   canonicalStringify,
@@ -16,7 +17,10 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { exportRunBundle, readRunBundle } from '../bundle-io.js';
 import { openStore } from '../run-store.js';
 
+const fixtureRecordSchema = z.record(z.string(), z.json());
+
 const stores: RunStore[] = [];
+
 const directories: string[] = [];
 
 const openTemporaryStore = async (): Promise<{ directory: string; store: RunStore }> => {
@@ -24,6 +28,7 @@ const openTemporaryStore = async (): Promise<{ directory: string; store: RunStor
   const store = (await openStore(join(directory, 'runs.db'))).runs;
   directories.push(directory);
   stores.push(store);
+
   return { directory, store };
 };
 
@@ -34,6 +39,7 @@ const createStoredRun = async (store: RunStore) => {
     configHash: 'hash',
     configJson: '{}',
   });
+
   await store.recordCase(
     run.id,
     {
@@ -51,32 +57,38 @@ const createStoredRun = async (store: RunStore) => {
     },
     [{ metricName: 'quality', kind: 'assertion', status: 'evaluated', score: 1, pass: true }],
   );
+
   return store.finalizeRun(run.id, 'completed');
 };
 
 const collect = async (source: Readable | string) => {
   const records = [];
+
   for await (const record of readRunBundle(source)) records.push(record);
+
   return records;
 };
 
 /** Rehashes a deliberately malformed recognized record so structural checks are isolated. */
 const mutateAndRehashBundle = async (
   destination: string,
-  mutate: (header: Record<string, unknown>, caseLine: Record<string, unknown>) => void,
+  mutate: (header: Record<string, JsonValue>, caseLine: Record<string, JsonValue>) => void,
 ): Promise<Readable> => {
   const originalLines = (await readFile(destination, 'utf8')).trimEnd().split('\n');
-  const header = JSON.parse(originalLines[0] ?? '') as Record<string, unknown>;
-  const caseLine = JSON.parse(originalLines[1] ?? '') as Record<string, unknown>;
+  const header = fixtureRecordSchema.parse(JSON.parse(originalLines[0] ?? ''));
+  const caseLine = fixtureRecordSchema.parse(JSON.parse(originalLines[1] ?? ''));
   mutate(header, caseLine);
   const contentLines = [canonicalStringify(header), canonicalStringify(caseLine)];
   const hasher = createContentHasher();
+
   for (const line of contentLines) hasher.add(line);
+
   const footer = canonicalStringify({
     type: 'bundle_footer',
     case_count: 1,
     content_hash: hasher.digest(),
   });
+
   return Readable.from(`${[...contentLines, footer].join('\n')}\n`);
 };
 
@@ -105,6 +117,7 @@ describe('run bundles', () => {
   it('rejects a destination closed during backpressure without hanging the export', async () => {
     const { store } = await openTemporaryStore();
     const run = await createStoredRun(store);
+
     const destination = new Writable({
       highWaterMark: 1,
       write() {
@@ -113,7 +126,7 @@ describe('run bundles', () => {
     });
 
     const result = await Promise.race([
-      exportRunBundle(store, run.id, destination).catch((error: unknown) => error),
+      exportRunBundle(store, run.id, destination).catch((cause: unknown) => cause),
       delay(100).then(() => 'export did not settle'),
     ]);
 
@@ -128,23 +141,27 @@ describe('run bundles', () => {
     const contents = await readFile(destination, 'utf8');
     await writeFile(destination, contents.replace('"output":"ok"', '"output":"no"'), 'utf8');
     let yielded = 0;
+
     const failure = await (async () => {
       for await (const record of readRunBundle(destination)) {
         yielded += 1;
         void record;
       }
-    })().catch((error: unknown) => error);
+    })().catch((cause: unknown) => cause);
+
     expect(yielded).toBe(0);
     expect(failure).toMatchObject({ code: 'CORRUPT_DATA' });
   });
 
   it('rejects a footer-only bundle even when its empty hash is valid', async () => {
     const hasher = createContentHasher();
+
     const footer = canonicalStringify({
       type: 'bundle_footer',
       case_count: 0,
       content_hash: hasher.digest(),
     });
+
     await expect(collect(Readable.from(`${footer}\n`))).rejects.toMatchObject({
       code: 'CORRUPT_DATA',
     });
@@ -159,7 +176,9 @@ describe('run bundles', () => {
     const unknown = canonicalStringify({ type: 'future_optional', value: { retained: true } });
     const contentLines = [lines[0] ?? '', unknown, lines[1] ?? ''];
     const hasher = createContentHasher();
+
     for (const line of contentLines) hasher.add(line);
+
     const footer = canonicalStringify({
       type: 'bundle_footer',
       case_count: 1,
@@ -179,12 +198,15 @@ describe('run bundles', () => {
     const lines = (await readFile(destination, 'utf8')).trimEnd().split('\n');
     const contentLines = lines.slice(0, -1);
     const hasher = createContentHasher();
+
     for (const line of contentLines) hasher.add(line);
+
     const footer = canonicalStringify({
       type: 'bundle_footer',
       case_count: 2,
       content_hash: hasher.digest(),
     });
+
     await expect(
       collect(Readable.from(`${[...contentLines, footer].join('\n')}\n`)),
     ).rejects.toMatchObject({ code: 'CORRUPT_DATA' });
@@ -195,6 +217,7 @@ describe('run bundles', () => {
     const run = await createStoredRun(store);
     const destination = join(directory, 'unsupported-schema.ndjson');
     await exportRunBundle(store, run.id, destination);
+
     const source = await mutateAndRehashBundle(destination, (header) => {
       header.schema = 'attest.bundle/future';
     });
@@ -207,38 +230,40 @@ describe('run bundles', () => {
   it.each([
     [
       'invalid run status',
-      (header: Record<string, unknown>) => {
-        (header.run as Record<string, unknown>).status = 'other';
+      (header: Record<string, JsonValue>) => {
+        header.run = { ...fixtureRecordSchema.parse(header.run), status: 'other' };
       },
       'Run bundle header contains a malformed run: header.run.status',
     ],
     [
       'invalid run timestamp',
-      (header: Record<string, unknown>) => {
-        (header.run as Record<string, unknown>).finishedAt = 'yesterday';
+      (header: Record<string, JsonValue>) => {
+        header.run = { ...fixtureRecordSchema.parse(header.run), finishedAt: 'yesterday' };
       },
       'Run bundle header contains a malformed run: header.run.finishedAt',
     ],
     [
       'foreign case run id',
-      (_header: Record<string, unknown>, caseLine: Record<string, unknown>) => {
-        (caseLine.case as Record<string, unknown>).runId = 'other-run';
+      (_header: Record<string, JsonValue>, caseLine: Record<string, JsonValue>) => {
+        caseLine.case = { ...fixtureRecordSchema.parse(caseLine.case), runId: 'other-run' };
       },
       'Run bundle case line 2 is malformed.',
     ],
     [
       'completed case error field',
-      (_header: Record<string, unknown>, caseLine: Record<string, unknown>) => {
-        (caseLine.case as Record<string, unknown>).errorMessage = 'forbidden';
+      (_header: Record<string, JsonValue>, caseLine: Record<string, JsonValue>) => {
+        caseLine.case = { ...fixtureRecordSchema.parse(caseLine.case), errorMessage: 'forbidden' };
       },
       'Run bundle case line 2 is malformed.',
     ],
     [
       'malformed evaluated metric',
-      (_header: Record<string, unknown>, caseLine: Record<string, unknown>) => {
-        const caseRecord = caseLine.case as Record<string, unknown>;
-        const metrics = caseRecord.metrics as Array<Record<string, unknown>>;
+      (_header: Record<string, JsonValue>, caseLine: Record<string, JsonValue>) => {
+        const caseRecord = fixtureRecordSchema.parse(caseLine.case);
+        const metrics = z.array(fixtureRecordSchema).parse(caseRecord.metrics);
         delete metrics[0]?.pass;
+        caseRecord.metrics = metrics;
+        caseLine.case = caseRecord;
       },
       'Run bundle case line 2 is malformed.',
     ],

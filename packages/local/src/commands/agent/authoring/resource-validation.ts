@@ -5,7 +5,9 @@ import { isSensitiveFieldName } from '../../../internal/redaction.js';
 import { assertSafeHttpTemplate, findSensitiveBodyField } from './http-template-validation.js';
 
 type TimeoutField = keyof NonNullable<AgentResource['timeouts']>;
+
 type LimitField = keyof NonNullable<AgentResource['limits']>;
+
 /** The HTTP native envelope reuses the direct invoker, so its policy matches native_cli. */
 type PolicyKind = AgentResource['transport']['kind'] | 'http_envelope';
 
@@ -35,17 +37,22 @@ const isLoopbackHost = (host: string): boolean =>
   host === 'localhost' || host === '::1' || host.startsWith('127.');
 
 /** Rejects authored credentials and runtime policies outside the implemented adapter slice. */
+// BOUNDARY: Authored transport resources cross the execution boundary here; secret references, headers and credential arguments are checked before invocation.
 const assertSafeNativeAgentResource = (agent: AgentResource): void => {
   const transport = agent.transport;
   const kind = transport.kind;
+
   const policyKind: PolicyKind =
     kind === 'http' && transport.response_mode === 'attest_envelope' ? 'http_envelope' : kind;
+
   const unsupportedTimeout = UNSUPPORTED_TIMEOUTS[policyKind].find(
     (field) => agent.timeouts?.[field] !== undefined,
   );
+
   const unsupportedLimit = UNSUPPORTED_LIMITS[policyKind].find(
     (field) => agent.limits?.[field] !== undefined,
   );
+
   if (unsupportedTimeout !== undefined || unsupportedLimit !== undefined) {
     const section = unsupportedTimeout === undefined ? 'limits' : 'timeouts';
     const field = unsupportedTimeout ?? unsupportedLimit!;
@@ -54,6 +61,7 @@ const assertSafeNativeAgentResource = (agent: AgentResource): void => {
       hint: 'Remove the unsupported phase or select an adapter that enforces it.',
     });
   }
+
   if (
     (kind === 'native_cli' && agent.retry !== undefined && agent.retry.backoff.kind !== 'none') ||
     (kind === 'jsonl_bridge' && (agent.retry?.retries ?? 0) > 0)
@@ -66,12 +74,14 @@ const assertSafeNativeAgentResource = (agent: AgentResource): void => {
           : 'Use deterministic no-backoff retries for native per-case probes.',
     });
   }
+
   if (
     transport.kind === 'native_cli' ||
     transport.kind === 'background_cli' ||
     transport.kind === 'jsonl_bridge'
   ) {
     const argv = transport.kind === 'background_cli' ? transport.start_argv : transport.argv;
+
     for (const position of agent.redaction?.argv_positions ?? []) {
       if (position >= argv.length) {
         throw new LocalError('project_invalid', 'An argv redaction position is out of range.', {
@@ -79,7 +89,9 @@ const assertSafeNativeAgentResource = (agent: AgentResource): void => {
         });
       }
     }
+
     const sensitivePosition = argv.findIndex((argument) => isSensitiveFieldName(argument));
+
     if (sensitivePosition >= 0) {
       throw new LocalError(
         'project_invalid',
@@ -90,7 +102,9 @@ const assertSafeNativeAgentResource = (agent: AgentResource): void => {
         },
       );
     }
+
     if (transport.kind === 'jsonl_bridge') return;
+
     if (transport.kind === 'native_cli') return;
 
     if (transport.readiness.kind === 'stderr') {
@@ -103,12 +117,14 @@ const assertSafeNativeAgentResource = (agent: AgentResource): void => {
         });
       }
     }
+
     const requests = [
       { request: transport.invoke, path: '/agent/transport/invoke' },
       ...(transport.shutdown === undefined
         ? []
         : [{ request: transport.shutdown, path: '/agent/transport/shutdown' }]),
     ];
+
     const readinessUrl =
       transport.readiness.kind === 'http'
         ? assertSafeHttpTemplate(
@@ -116,8 +132,10 @@ const assertSafeNativeAgentResource = (agent: AgentResource): void => {
             '/agent/transport/readiness/url',
           )
         : undefined;
+
     for (const { request, path } of requests) {
       const url = assertSafeHttpTemplate(request, path);
+
       if (!isLoopbackHost(url.hostname)) {
         throw new LocalError(
           'project_invalid',
@@ -128,11 +146,13 @@ const assertSafeNativeAgentResource = (agent: AgentResource): void => {
         );
       }
     }
+
     if (readinessUrl !== undefined && !isLoopbackHost(readinessUrl.hostname)) {
       throw new LocalError('project_invalid', 'Background readiness requires a loopback URL.', {
         path: '/agent/transport/readiness/url',
       });
     }
+
     if (transport.readiness.kind === 'tcp' && !isLoopbackHost(transport.readiness.host)) {
       throw new LocalError(
         'project_invalid',
@@ -142,10 +162,13 @@ const assertSafeNativeAgentResource = (agent: AgentResource): void => {
         },
       );
     }
+
     return;
   }
+
   if (transport.kind === 'websocket') {
     const sensitiveTemplateField = findSensitiveBodyField(transport.request_template);
+
     if (sensitiveTemplateField !== undefined) {
       throw new LocalError(
         'project_invalid',
@@ -156,7 +179,9 @@ const assertSafeNativeAgentResource = (agent: AgentResource): void => {
         },
       );
     }
+
     let url: URL;
+
     try {
       url = new URL(transport.url.replaceAll(/\{\{[^}]+\}\}/gu, 'placeholder'));
     } catch (error: unknown) {
@@ -165,12 +190,14 @@ const assertSafeNativeAgentResource = (agent: AgentResource): void => {
         cause: error,
       });
     }
+
     if (url.username.length > 0 || url.password.length > 0) {
       throw new LocalError('project_invalid', 'WebSocket URLs cannot contain credentials.', {
         path: '/agent/transport/url',
         hint: 'Move credentials to an environment-backed header reference.',
       });
     }
+
     for (const [name, value] of Object.entries(transport.headers ?? {})) {
       if (isSensitiveFieldName(name) && typeof value === 'string') {
         throw new LocalError(
@@ -183,6 +210,7 @@ const assertSafeNativeAgentResource = (agent: AgentResource): void => {
         );
       }
     }
+
     for (const [name, value] of url.searchParams) {
       if (isSensitiveFieldName(name) && value.length > 0) {
         throw new LocalError(
@@ -195,10 +223,13 @@ const assertSafeNativeAgentResource = (agent: AgentResource): void => {
         );
       }
     }
+
     return;
   }
+
   const request = transport.kind === 'polling' ? transport.submit : transport.request;
   const requestPath = `/agent/transport/${transport.kind === 'polling' ? 'submit' : 'request'}`;
+
   if (
     transport.kind === 'http' &&
     transport.response_mode === 'attest_envelope' &&
@@ -215,18 +246,22 @@ const assertSafeNativeAgentResource = (agent: AgentResource): void => {
       hint: 'Use the canonical POST envelope shape or select mapped response mode.',
     });
   }
+
   const origin = assertSafeHttpTemplate(request, requestPath);
+
   if (transport.kind === 'polling' && transport.status_url_template !== undefined) {
     const status = assertSafeHttpTemplate(
       { url: transport.status_url_template.replaceAll('{{job_id}}', 'job'), method: 'GET' },
       '/agent/transport/status_url_template',
     );
+
     if (status.origin !== origin.origin) {
       throw new LocalError('project_invalid', 'Polling status URL must retain submit origin.', {
         path: '/agent/transport/status_url_template',
       });
     }
   }
+
   if (
     transport.kind === 'stream' &&
     transport.incremental_output_pointer !== undefined &&
@@ -236,6 +271,7 @@ const assertSafeNativeAgentResource = (agent: AgentResource): void => {
       path: '/agent/transport/incremental_output_mode',
     });
   }
+
   for (const name of agent.redaction?.headers ?? []) {
     if (
       !Object.keys(request.headers ?? {}).some(
@@ -247,6 +283,7 @@ const assertSafeNativeAgentResource = (agent: AgentResource): void => {
       });
     }
   }
+
   for (const name of agent.redaction?.query ?? []) {
     if (!Object.hasOwn(request.query ?? {}, name)) {
       throw new LocalError('project_invalid', 'A query redaction target does not exist.', {

@@ -50,13 +50,16 @@ const runConfirmedDatasetImport = async (
     context.interaction.readImportStdin,
     request.import.format,
   );
+
   const preview = await runPreparedImport(
     validateCommandRequest('test.dataset.import', { ...request, dry_run: true }),
     options,
     context,
     prepared.source,
   );
+
   const { projectHashAfter, projectHashBefore } = preview;
+
   if (
     projectHashBefore === null ||
     projectHashBefore === undefined ||
@@ -72,8 +75,10 @@ const runConfirmedDatasetImport = async (
     if_project_hash: projectHashBefore,
     yes: true,
   });
+
   const committed = await runPreparedImport(confirmed, options, context, prepared.source);
   const affectedTests = preview.result.affected_tests ?? [];
+
   const result =
     affectedTests.length < 2
       ? committed
@@ -90,6 +95,7 @@ const runConfirmedDatasetImport = async (
             },
           },
         };
+
   context.io.output(renderCommandResult('test.dataset.import', outputFormat(options), result));
 };
 
@@ -97,6 +103,7 @@ const runConfirmedDatasetImport = async (
 const suggestedCsvMappings = (headers: readonly string[]): DatasetImportMapping[] => {
   const sourceFor = (...candidates: string[]): string | undefined =>
     candidates.find((candidate) => headers.includes(candidate));
+
   return [
     ['id', sourceFor('id', 'external_id')],
     ['input', sourceFor('input', 'prompt', 'question')],
@@ -110,6 +117,7 @@ const suggestedCsvMappings = (headers: readonly string[]): DatasetImportMapping[
 
 const confirmed = (answer: string): boolean => {
   const normalized = answer.trim().toLowerCase();
+
   return normalized === 'y' || normalized === 'yes';
 };
 
@@ -120,13 +128,16 @@ const withSuggestedMappings = async (
   context: CommandContext,
 ): Promise<ImportRequest | null> => {
   const suggestions = suggestedCsvMappings(csvHeaders);
+
   if (suggestions.length === 0) {
     throw new AttestCliError('cli_missing_input', 'No safe CSV field mappings were detected.', {
       path: '--map',
       hint: `Detected headers: ${csvHeaders.join(', ') || '<none>'}. Pass explicit --map destination=header options.`,
     });
   }
+
   const proposal = suggestions.map(({ destination, source }) => `${destination}=${source}`);
+
   const answer = (
     await context.interaction.prompt(
       `Detected CSV headers: ${csvHeaders.join(', ')}. Use mappings ${proposal.join(', ')}? [Y/n]: `,
@@ -134,10 +145,13 @@ const withSuggestedMappings = async (
   )
     .trim()
     .toLowerCase();
+
   if (answer === 'n' || answer === 'no') {
     context.io.output('No changes made; pass explicit --map options to choose different mappings.');
+
     return null;
   }
+
   return validateCommandRequest(request.command, {
     ...request,
     import: { ...request.import, mapping: suggestions },
@@ -156,10 +170,13 @@ const runGuidedImport = async (
     context.interaction.readImportStdin,
     request.import.format,
   );
+
   const needsMappings = prepared.format === 'csv' && (request.import.mapping?.length ?? 0) === 0;
+
   const guided = needsMappings
     ? await withSuggestedMappings(request, prepared.csvHeaders, context)
     : request;
+
   if (guided === null) return;
 
   const preview = await runPreparedImport(
@@ -168,17 +185,22 @@ const runGuidedImport = async (
     context,
     prepared.source,
   );
+
   context.io.output(renderCommandResult(guided.command, 'human', preview));
+
   if (!confirmed(await context.interaction.prompt('Apply this import? [y/N]: '))) {
     context.io.output('No changes made; import was not applied.');
+
     return;
   }
+
   const applied = validateCommandRequest(guided.command, {
     ...guided,
     dry_run: false,
     if_project_hash: preview.projectHashBefore,
     yes: true,
   });
+
   await runTestMutation(applied, options, context, prepared.source);
 };
 

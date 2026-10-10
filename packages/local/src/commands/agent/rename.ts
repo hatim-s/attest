@@ -9,17 +9,21 @@ const runAgentRenameCommand = async (
   options: AgentMutationCommandOptions<AgentRequest<'agent.rename'>>,
 ): Promise<CommandResult<'mutation', MutationResult>> => {
   const { request } = options;
+
   const loaded = await loadCommandProject({
     project: options.project,
     recover: request.dry_run !== true,
     workingDirectory: options.workingDirectory,
   });
+
   const current = findAgent(loaded.agents, request.agent_id);
+
   if (loaded.agents.some(({ id }) => id === request.new_id)) {
     throw new LocalError('project_invalid', `Agent ${request.new_id} already exists.`, {
       path: request.new_id,
     });
   }
+
   const candidate = candidateFromLoadedProject(loaded);
   candidate.agents = candidate.agents.map((agent) =>
     agent.id === current.id ? { ...agent, id: request.new_id } : agent,
@@ -27,6 +31,7 @@ const runAgentRenameCommand = async (
   candidate.tests = candidate.tests.map((test) =>
     test.agent_id === current.id ? { ...test, agent_id: request.new_id } : test,
   );
+
   return mutationResult({
     command: 'agent.rename',
     loaded,

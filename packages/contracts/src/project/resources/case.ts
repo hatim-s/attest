@@ -23,6 +23,7 @@ const testCaseSchema = z
   .meta({ id: 'TestCase' });
 
 type CaseMetricOverride = z.infer<typeof caseMetricOverrideSchema>;
+
 type TestCase = z.infer<typeof testCaseSchema>;
 
 export { caseMetricOverrideSchema, testCaseSchema, type CaseMetricOverride, type TestCase };

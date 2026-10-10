@@ -47,6 +47,7 @@ class RunScopedWebSocketSession {
     if (this.state.agent.transport.connection_mode === 'multiplexed') {
       return this.dispatch(request, signal);
     }
+
     return this.runSerially(() => this.dispatch(request, signal));
   }
 
@@ -60,12 +61,14 @@ class RunScopedWebSocketSession {
     this.closePromise = (async () => {
       if (connection === undefined) return;
       const close = await connection.close(this.state.agent.transport.close_timeout_ms);
+
       if (!close.clean) {
         throw new AgentInvocationError('timeout', 'WebSocket close handshake timed out.', {
           classification: 'close_timeout',
         });
       }
     })();
+
     return this.closePromise;
   }
 
@@ -73,6 +76,7 @@ class RunScopedWebSocketSession {
     if (this.state.closed) {
       return Promise.resolve(this.state.closedResult(this.state.createPending(request, signal)));
     }
+
     return new Promise<InvocationResult>((resolve) => {
       const pending = this.state.createPending(request, signal, resolve);
       this.state.arm(pending);
@@ -83,29 +87,36 @@ class RunScopedWebSocketSession {
   private async sendOnConnection(pending: PendingInvocation): Promise<void> {
     try {
       const connection = await this.ensureConnection();
+
       if (!this.state.pending.has(pending.requestId)) return;
       await this.state.send(pending, connection, pending.signal);
     } catch (error: unknown) {
       if (!this.state.pending.has(pending.requestId)) return;
+
       const normalized =
         error instanceof AgentInvocationError
           ? error
           : new AgentInvocationError('network', 'WebSocket connection failed.', { cause: error });
+
       await this.retryOrSettle(pending, normalized, errorClassification(normalized));
     }
   }
 
   private ensureConnection(): Promise<WebSocketConnection> {
     if (this.connection !== undefined) return Promise.resolve(this.connection);
+
     if (this.connectionPromise !== undefined) return this.connectionPromise;
     const generation = ++this.connectionGeneration;
     const { evidence, options } = this.state;
+
     const runSignal = AbortSignal.any(
       [options.signal, this.state.lifecycle.signal].filter((signal) => signal !== undefined),
     );
+
     const forEachPending = (record: (pending: PendingInvocation) => void): void => {
       for (const pending of this.state.pending.values()) record(pending);
     };
+
     this.connectionPromise = this.state
       .openConnection(runSignal, {
         onClose: (close) => this.connectionLost(generation, close),
@@ -124,13 +135,15 @@ class RunScopedWebSocketSession {
             evidence.record(pending, { classification: 'connection_opened' }),
           );
           this.startPing(connection, generation);
+
           return connection;
         },
-        (error: unknown) => {
+        (cause: unknown) => {
           this.connectionPromise = undefined;
-          throw error;
+          throw cause;
         },
       );
+
     return this.connectionPromise;
   }
 
@@ -140,26 +153,33 @@ class RunScopedWebSocketSession {
     classification: WebSocketErrorClassification,
   ): Promise<void> {
     const { agent, evidence } = this.state;
+
     if (!this.state.pending.has(pending.requestId)) return;
+
     const retryable =
       !pending.acknowledged &&
       pending.retriesUsed < (agent.retry?.retries ?? 0) &&
       (error.code === 'network' || error.code === 'timeout') &&
       RECONNECTABLE.has(classification);
+
     if (!retryable) {
       this.state.settleFailure(pending, error, classification);
+
       return;
     }
+
     pending.attempts.push(evidence.failureAttempt(pending, error, classification));
     pending.retriesUsed += 1;
     beginRetry(pending);
     evidence.record(pending, { classification: 'retry_scheduled' });
+
     try {
       await abortableWait(
         retryBackoffDelay(agent.retry?.backoff, pending.retriesUsed - 1),
         pending.signal ?? this.state.options.signal,
         () => new AgentInvocationError('cancelled', 'WebSocket retry was cancelled.'),
       );
+
       if (!this.state.pending.has(pending.requestId)) return;
       evidence.record(pending, { classification: 'reconnect_started' });
       this.state.arm(pending);
@@ -179,6 +199,7 @@ class RunScopedWebSocketSession {
     this.connection = undefined;
     this.connectionPromise = undefined;
     clearInterval(this.pingTimer);
+
     for (const pending of [...this.state.pending.values()]) {
       void this.retryOrSettle(pending, error, errorClassification(error));
     }
@@ -188,11 +209,13 @@ class RunScopedWebSocketSession {
     if (generation !== this.connectionGeneration || this.connection === undefined) return;
     this.connection = undefined;
     clearInterval(this.pingTimer);
+
     const error = new AgentInvocationError(
       'network',
       'WebSocket disconnected before requests settled.',
       { classification: 'unexpected_close' },
     );
+
     for (const pending of [...this.state.pending.values()]) {
       this.state.evidence.recordClose(pending, close);
       void this.retryOrSettle(pending, error, 'unexpected_close');
@@ -203,7 +226,9 @@ class RunScopedWebSocketSession {
     clearInterval(this.pingTimer);
     this.pingTimer = setInterval(() => {
       if (generation !== this.connectionGeneration || this.connection !== connection) return;
+
       if (!connection.ping()) return;
+
       for (const pending of this.state.pending.values()) {
         this.state.evidence.record(pending, { classification: 'ping_sent' });
       }

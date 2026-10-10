@@ -41,8 +41,11 @@ const evalExecutionConfigSchema = z.strictObject({
 });
 
 type EvalExecutionConfig = z.infer<typeof evalExecutionConfigSchema>;
+
 type EvalHookCommand = z.infer<typeof evalHookCommandSchema>;
+
 type EvalHooks = z.infer<typeof evalHooksSchema>;
+
 type EvalWorkers = z.infer<typeof evalWorkersSchema>;
 
 export {

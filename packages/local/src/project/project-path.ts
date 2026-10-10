@@ -20,6 +20,7 @@ type ResolveContainedPathOptions = {
 /** Returns whether a resolved candidate path is the project root or one of its descendants. */
 const isProjectPath = (root: string, candidate: string): boolean => {
   const fromRoot = relative(root, candidate);
+
   return (
     fromRoot === '' ||
     (!isAbsolute(fromRoot) && fromRoot !== '..' && !fromRoot.startsWith(`..${sep}`))
@@ -35,22 +36,28 @@ const relativeFromAbsolute = async (
   if (path.split(sep).some((segment) => segment === '.' || segment === '..')) {
     throw options.problem('invalid');
   }
+
   const suffix = [basename(path)];
   let ancestor = dirname(path);
   let resolvedAncestor: string | undefined;
+
   while (resolvedAncestor === undefined) {
     try {
       resolvedAncestor = await realpath(ancestor);
     } catch (error: unknown) {
       if (errnoCode(error) !== 'ENOENT') throw error;
       const parent = dirname(ancestor);
+
       if (parent === ancestor) throw options.problem('outside');
       suffix.unshift(basename(ancestor));
       ancestor = parent;
     }
   }
+
   const candidate = resolve(resolvedAncestor, ...suffix);
+
   if (!isProjectPath(resolvedRoot, candidate)) throw options.problem('outside');
+
   return relative(resolvedRoot, candidate);
 };
 
@@ -65,10 +72,12 @@ const resolveContainedPath = async (
   options: ResolveContainedPathOptions,
 ): Promise<string> => {
   const resolvedRoot = await realpath(root);
+
   const projectPath =
     isAbsolute(path) && options.allowAbsolute === true
       ? await relativeFromAbsolute(resolvedRoot, path, options)
       : path;
+
   if (
     projectPath.length === 0 ||
     projectPath.includes('\0') ||
@@ -80,36 +89,48 @@ const resolveContainedPath = async (
   ) {
     throw options.problem('invalid');
   }
+
   const candidate = resolve(resolvedRoot, projectPath);
+
   if (!isProjectPath(resolvedRoot, candidate)) throw options.problem('outside');
 
   const segments = relative(resolvedRoot, candidate).split(sep);
   let current = resolvedRoot;
+
   for (const [index, segment] of segments.entries()) {
     current = resolve(current, segment);
     const destination = index === segments.length - 1;
     let metadata: Awaited<ReturnType<typeof lstat>>;
+
     try {
       metadata = await lstat(current);
     } catch (error: unknown) {
       if (errnoCode(error) !== 'ENOENT') throw error;
+
       const createHere =
         options.createDirectories === true && (!destination || options.expect === 'directory');
+
       // Once an entry is missing and not created here, the rest of the path is only lexical.
       if (!createHere) break;
+
       try {
         await mkdir(current, { mode: 0o700 });
       } catch (error: unknown) {
         // Another worker may create a shared parent; validate its entry below before using it.
         if (errnoCode(error) !== 'EEXIST') throw error;
       }
+
       metadata = await lstat(current);
     }
+
     if (metadata.isSymbolicLink()) throw options.problem('symlink');
+
     if (!destination && !metadata.isDirectory()) throw options.problem('ancestor_not_directory');
     const wrongType = options.expect === 'file' ? !metadata.isFile() : !metadata.isDirectory();
+
     if (destination && wrongType) throw options.problem('wrong_destination_type');
   }
+
   return candidate;
 };
 

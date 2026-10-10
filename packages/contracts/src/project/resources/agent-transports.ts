@@ -1,3 +1,4 @@
+import { isString } from '../shared.js';
 import { z } from 'zod';
 
 import {
@@ -13,6 +14,7 @@ import { webSocketTransportSchema } from '../../agent/websocket-contract.js';
 const httpUrlTemplateSchema = z
   .string()
   .regex(/^https?:\/\/\S+$/u, 'must be an HTTP or HTTPS URL template');
+
 const templateValueSchema = z.union([z.string(), secretReferenceSchema]);
 
 /** Builds a foreign HTTP request before normalization at the runner boundary. */
@@ -26,13 +28,14 @@ const httpRequestTemplateSchema = z
     body_encoding: z.enum(['json', 'raw']).optional(),
   })
   .superRefine((request, context) => {
-    if (request.body_encoding === 'raw' && typeof request.body !== 'string') {
+    if (request.body_encoding === 'raw' && !isString(request.body)) {
       context.addIssue({
         code: 'custom',
         path: ['body'],
         message: 'must be a string when body_encoding is raw',
       });
     }
+
     if (request.body === undefined && request.body_encoding !== undefined) {
       context.addIssue({
         code: 'custom',
@@ -218,8 +221,11 @@ const agentTransportSchema = z.discriminatedUnion('kind', [
 ]);
 
 type AgentTransport = z.infer<typeof agentTransportSchema>;
+
 type HttpRequestTemplate = z.infer<typeof httpRequestTemplateSchema>;
+
 type ResponseExtraction = z.infer<typeof responseExtractionSchema>;
+
 type VercelSandbox = z.infer<typeof vercelSandboxSchema>;
 
 export {

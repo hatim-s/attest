@@ -1,11 +1,8 @@
+import { z } from 'zod';
 import { StoreError } from '@attest/core';
 
 import type { SqliteHandle } from './internal/sqlite-handle.js';
 import { migrations } from './migrations/registry.js';
-
-interface MigrationVersionRow {
-  version: number;
-}
 
 const createMigrationTableSql = `
   CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -16,9 +13,10 @@ const createMigrationTableSql = `
 `;
 
 const readAppliedVersions = async (handle: SqliteHandle): Promise<number[]> => {
-  const rows = (await handle
-    .prepare('SELECT version FROM schema_migrations ORDER BY version')
-    .all()) as MigrationVersionRow[];
+  const rows = z
+    .array(z.object({ version: z.number() }))
+    .parse(await handle.prepare('SELECT version FROM schema_migrations ORDER BY version').all());
+
   return rows.map((row) => Number(row.version));
 };
 
@@ -26,6 +24,7 @@ const readAppliedVersions = async (handle: SqliteHandle): Promise<number[]> => {
 const validateReadableSchema = async (handle: SqliteHandle): Promise<void> => {
   const latestKnownVersion = migrations.at(-1)?.version ?? 0;
   let appliedVersions: number[];
+
   try {
     appliedVersions = await readAppliedVersions(handle);
   } catch (error) {
@@ -35,14 +34,18 @@ const validateReadableSchema = async (handle: SqliteHandle): Promise<void> => {
       { cause: error },
     );
   }
+
   const newestAppliedVersion = appliedVersions.at(-1) ?? 0;
+
   if (newestAppliedVersion > latestKnownVersion) {
     throw new StoreError(
       'SCHEMA_TOO_NEW',
       `Run store schema version ${newestAppliedVersion} is newer than supported version ${latestKnownVersion}; upgrade attest to open it.`,
     );
   }
+
   const knownVersions = migrations.map((migration) => migration.version);
+
   if (
     appliedVersions.length !== knownVersions.length ||
     appliedVersions.some((version, index) => version !== knownVersions[index])
@@ -70,15 +73,18 @@ const migrateToLatest = async (handle: SqliteHandle): Promise<void> => {
 
   for (const migration of migrations) {
     await handle.begin();
+
     try {
       // Another opener may have applied this version before our SQLite write lock was acquired.
       const lockedAppliedVersions = await readAppliedVersions(handle);
+
       if (!lockedAppliedVersions.includes(migration.version)) {
         await handle.exec(migration.sql);
         await handle
           .prepare('INSERT INTO schema_migrations (version, name, applied_at) VALUES (?, ?, ?)')
           .run(migration.version, migration.name, new Date().toISOString());
       }
+
       await handle.commit();
     } catch (error) {
       await handle.rollback();

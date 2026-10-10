@@ -50,6 +50,7 @@ const invokeMappedHttpAgent = async (
   options: MappedHttpInvokeOptions = {},
 ): Promise<InvocationResult> => {
   const invocationDuration = startTimer();
+
   const signal = AbortSignal.any(
     [
       AbortSignal.timeout(agent.timeouts?.attempt_ms ?? DEFAULT_ATTEMPT_MS),
@@ -57,6 +58,7 @@ const invokeMappedHttpAgent = async (
       options.deadlineSignal,
     ].filter((candidate) => candidate !== undefined),
   );
+
   const policy = {
     attemptSignal: signal,
     callerSignal: options.signal,
@@ -66,64 +68,81 @@ const invokeMappedHttpAgent = async (
     responseCapBytes: agent.limits?.response_bytes ?? DEFAULT_RESPONSE_BYTES,
     secrets: options.secrets ?? [],
   };
+
   const retryAttempts: InvocationAttempt[] = [];
   let terminalAttemptDurationMs: number | undefined;
+
   try {
     if (signal.aborted) throw abortedError(options.signal, 'Mapped HTTP invocation');
+
     const requestTemplate =
       agent.transport.kind === 'http' ? agent.transport.request : agent.transport.submit;
+
     const materialized = materializeHttpRequest(
       resolveRequestTemplate(requestTemplate, options),
       request,
       agent.limits?.request_bytes ?? DEFAULT_REQUEST_BYTES,
     );
+
     const retry =
       options.retries === undefined
         ? agent.retry
         : { backoff: agent.retry?.backoff ?? { kind: 'none' as const }, retries: options.retries };
+
     const context = { retry, policy, signal, retryAttempts, requestJson: options.requestJson };
     const { transport } = agent;
+
     const completed =
       transport.kind === 'http'
         ? await runDirect(materialized, context)
         : await runPolling(transport, request, materialized, context);
+
     terminalAttemptDurationMs = completed.durationMs;
     const { response } = completed;
     requireSuccessfulStatus(response);
+
     const remoteJobId =
       completed.remoteJobId ??
       extractRemoteJobId(response.raw, agent.transport.extraction.remote_job_id_pointer);
+
     const normalized = extractAgentResponse(
       response.raw,
       agent.transport.extraction,
       options.secrets ?? [],
     );
+
     const report = parseAgentResponse(normalized);
+
     if (!report.ok) {
       throw new AgentInvocationError(
         'invalid_envelope',
         'Mapped HTTP extraction is not a valid agent response.',
       );
     }
+
     const attempt: InvocationAttempt = {
       status: 'ok',
       raw: normalized,
       report,
       diagnostics: {
         httpStatus: response.status,
-        ...(remoteJobId === undefined ? {} : { remoteJobId }),
       },
       durationMs: completed.durationMs,
       rawExcerpt: response.rawExcerpt,
       warnings: report.warnings,
     };
+
+    if (remoteJobId !== undefined) attempt.diagnostics.remoteJobId = remoteJobId;
+
     return { ...attempt, attempts: [...retryAttempts, attempt] };
   } catch (error: unknown) {
     const normalized = normalizeFailure(error, signal, options.signal);
+
     const attempt = attemptFromError(
       normalized,
       normalized.attemptDurationMs ?? terminalAttemptDurationMs ?? invocationDuration(),
     );
+
     return { ...attempt, attempts: [...retryAttempts, attempt] };
   }
 };

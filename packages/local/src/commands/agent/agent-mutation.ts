@@ -11,12 +11,14 @@ import type { AgentMutationRequest } from './types.js';
 /** Finds one authored agent or reports the missing id with a way to list them. */
 const findAgent = (agents: readonly AgentResource[], id: string): AgentResource => {
   const agent = agents.find((candidate) => candidate.id === id);
+
   if (agent === undefined) {
     throw new LocalError('resource_not_found', `Agent ${id} does not exist.`, {
       path: id,
       hint: 'Run `attest list agents` and retry with an available id.',
     });
   }
+
   return agent;
 };
 
@@ -51,13 +53,17 @@ const mutationResult = async ({
     const operationLines = preview.diff.operations.map((operation) => {
       const renamed = operation.previous_id === undefined ? '' : ` from ${operation.previous_id}`;
       const changes = operation.changes.map(({ path }) => path).join(', ');
+
       const references = [
         ...operation.references_added.map(({ id }) => `+ref:${id}`),
         ...operation.references_removed.map(({ id }) => `-ref:${id}`),
       ].join(', ');
+
       const details = [changes, references].filter((value) => value.length > 0).join('; ');
+
       return `- ${operation.op} ${operation.resource.type} ${operation.resource.id}${renamed}${details.length === 0 ? '' : ` (${details})`}`;
     });
+
     return [
       `${command} ${request.dry_run === true ? 'preview' : 'changes'}:`,
       ...(operationLines.length === 0 ? ['- no semantic changes'] : operationLines),
@@ -67,6 +73,7 @@ const mutationResult = async ({
         : [`Redacted definition preview: ${JSON.stringify(confirmation.definitionPreview)}`]),
     ].join('\n');
   };
+
   const result = await executeProjectMutation({
     dryRun: request.dry_run === true,
     mutation: {
@@ -79,10 +86,12 @@ const mutationResult = async ({
     confirm: async (preview) => {
       if (confirmation.yes === true) return;
       const previewText = renderPreview(preview);
+
       if (confirmation.interactive === true && confirmation.prompt !== undefined) {
         const answer = (
           await confirmation.prompt(`${previewText}\nApply these changes? [y/N]: `)
         ).trim();
+
         if (!/^y(?:es)?$/iu.test(answer)) {
           throw new LocalError('cancelled', 'Project mutation was not confirmed.');
         }
@@ -95,22 +104,27 @@ const mutationResult = async ({
       }
     },
   });
+
+  const mutationPayload: MutationResult = {
+    committed: result.committed,
+    dry_run: request.dry_run === true,
+    operations: result.diff.operations,
+    warnings: result.diff.warnings,
+  };
+
+  if (confirmation.definitionPreview !== undefined) {
+    mutationPayload.import_preview = confirmation.definitionPreview;
+  }
+
+  if (!(request.dry_run === true || confirmation.nextCommand === undefined)) {
+    mutationPayload.next_command = confirmation.nextCommand;
+  }
+
   return {
     operation: 'mutation',
     projectHashAfter: result.projectHashAfter,
     projectHashBefore: result.projectHashBefore,
-    result: {
-      committed: result.committed,
-      dry_run: request.dry_run === true,
-      operations: result.diff.operations,
-      warnings: result.diff.warnings,
-      ...(confirmation.definitionPreview === undefined
-        ? {}
-        : { import_preview: confirmation.definitionPreview }),
-      ...(request.dry_run === true || confirmation.nextCommand === undefined
-        ? {}
-        : { next_command: confirmation.nextCommand }),
-    },
+    result: mutationPayload,
   };
 };
 

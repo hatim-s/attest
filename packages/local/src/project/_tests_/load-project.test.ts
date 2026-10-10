@@ -36,6 +36,7 @@ const agent: AgentResource = {
     argv: ['node', './src/agent.mjs'],
   },
 };
+
 const metric: MetricResource = {
   schema: METRIC_RESOURCE_SCHEMA_ID,
   id: 'correct',
@@ -45,11 +46,13 @@ const metric: MetricResource = {
     assertions: [{ contains: { path: '$.output', value: 'expected' } }],
   },
 };
+
 const testCase: TestCase = {
   id: 'refund-basic',
   input: { question: 'How do refunds work?' },
   expected: 'expected',
 };
+
 const dataset: DatasetResource = {
   schema: DATASET_SCHEMA_ID,
   case_schema: CASE_SCHEMA_ID,
@@ -57,6 +60,7 @@ const dataset: DatasetResource = {
   name: 'Refunds',
   case_count: 1,
 };
+
 const test: TestResource = {
   schema: TEST_RESOURCE_SCHEMA_ID,
   id: 'refund',
@@ -71,6 +75,7 @@ const test: TestResource = {
 const createTemporaryDirectory = async (): Promise<string> => {
   const directory = await mkdtemp(join(tmpdir(), 'attest-project-loader-'));
   temporaryDirectories.push(directory);
+
   return directory;
 };
 
@@ -86,8 +91,11 @@ const writeValidProject = async (
   root: string,
   formatting: 'compact' | 'pretty' = 'compact',
 ): Promise<ProjectManifest> => {
-  const render = (value: unknown): string =>
+  const render = (
+    value: AgentResource | TestResource | DatasetResource | MetricResource | ProjectManifest,
+  ): string =>
     formatting === 'pretty' ? JSON.stringify(value, undefined, 2) : JSON.stringify(value);
+
   const dataRecords = [testCase];
   await writeProjectFile(root, 'attest/agents/support.json', render(agent));
   await writeProjectFile(root, 'attest/tests/refund.json', render(test));
@@ -140,22 +148,24 @@ const writeValidProject = async (
       ],
     },
   };
+
   await writeProjectFile(root, 'attest.project.json', render(manifest));
+
   return manifest;
 };
 
 /** Captures the typed aggregate error produced by a failing project load. */
-const captureProjectFailure = async (
-  operation: () => Promise<unknown>,
-): Promise<ProjectLoadError> => {
+const captureProjectFailure = async <T>(operation: () => Promise<T>): Promise<ProjectLoadError> => {
   try {
     await operation();
   } catch (error: unknown) {
     if (error instanceof ProjectLoadError) {
       return error;
     }
+
     throw error;
   }
+
   throw new Error('Expected project loading to fail.');
 };
 
@@ -189,6 +199,7 @@ describe('loadProject', () => {
   it('aggregates malformed, missing, duplicate, and reference failures by source', async () => {
     const root = await createTemporaryDirectory();
     const manifest = await writeValidProject(root);
+
     const invalidTest: TestResource = {
       ...test,
       agent_id: 'missing-agent',
@@ -199,6 +210,7 @@ describe('loadProject', () => {
         { metric_id: 'missing-metric' },
       ],
     };
+
     await writeProjectFile(root, 'attest/agents/support.json', '{"token":"DO-NOT-LEAK"');
     await writeProjectFile(root, 'attest/tests/refund.json', JSON.stringify(invalidTest));
     await unlink(join(root, 'attest/metrics/correct.json'));
@@ -206,6 +218,7 @@ describe('loadProject', () => {
     await writeProjectFile(root, 'attest.project.json', JSON.stringify(manifest));
 
     let failure: unknown;
+
     try {
       await loadProject({ project: root });
     } catch (error: unknown) {
@@ -214,7 +227,10 @@ describe('loadProject', () => {
 
     expect(failure).toBeInstanceOf(ProjectLoadError);
     expect(failure).toMatchObject({ code: 'project_invalid' });
-    const diagnostics = (failure as ProjectLoadError).diagnostics;
+
+    if (!(failure instanceof ProjectLoadError))
+      throw new Error('Expected project validation failure.');
+    const diagnostics = failure.diagnostics;
     expect(diagnostics).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ code: 'json_invalid', source: 'attest/agents/support.json' }),
@@ -225,7 +241,7 @@ describe('loadProject', () => {
         expect.objectContaining({ message: 'metric is not defined: missing-metric' }),
       ]),
     );
-    expect((failure as Error).message).not.toContain('DO-NOT-LEAK');
+    expect(failure.message).not.toContain('DO-NOT-LEAK');
   });
 
   it('rejects a document that does not match the project contract', async () => {
@@ -291,6 +307,7 @@ describe('loadProject', () => {
     );
 
     let failure: unknown;
+
     try {
       await loadProject({ project: root });
     } catch (error: unknown) {
@@ -298,7 +315,10 @@ describe('loadProject', () => {
     }
 
     expect(failure).toBeInstanceOf(ProjectLoadError);
-    expect((failure as ProjectLoadError).diagnostics).toEqual(
+
+    if (!(failure instanceof ProjectLoadError))
+      throw new Error('Expected project validation failure.');
+    expect(failure.diagnostics).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           code: 'json_invalid',
@@ -312,7 +332,7 @@ describe('loadProject', () => {
         }),
       ]),
     );
-    expect((failure as Error).message).not.toContain('DATASET-SECRET');
+    expect(failure.message).not.toContain('DATASET-SECRET');
     expect(manifest.resources.datasets[0]!.data_content_hash).toHaveLength(64);
   });
 

@@ -27,8 +27,10 @@ type LoadCommandProjectOptions = {
 /** Detects transaction journals without following a replacement transactions directory. */
 const hasRecoveryArtifacts = async (root: string): Promise<boolean> => {
   const path = join(root, TRANSACTIONS_DIRECTORY);
+
   try {
     const metadata = await lstat(path);
+
     if (!metadata.isDirectory() || metadata.isSymbolicLink()) {
       throw new ProjectTransactionError(
         'project_recovery_required',
@@ -36,6 +38,7 @@ const hasRecoveryArtifacts = async (root: string): Promise<boolean> => {
         { path: TRANSACTIONS_DIRECTORY },
       );
     }
+
     return (await readdir(path)).length > 0;
   } catch (error: unknown) {
     if (errnoCode(error) === 'ENOENT') return false;
@@ -48,17 +51,21 @@ const recoverBeforeRead = async (root: string): Promise<void> => {
   if (!(await hasRecoveryArtifacts(root))) return;
   const lock = await acquireProjectLock(root);
   let recoveryFailure: unknown;
+
   try {
     await recoverProjectTransactions(root, lock);
   } catch (error: unknown) {
     recoveryFailure = error;
   }
+
   try {
     await releaseProjectLock(lock);
   } catch (error: unknown) {
     if (recoveryFailure === undefined) throw error;
   }
+
   if (recoveryFailure instanceof Error) throw recoveryFailure;
+
   if (recoveryFailure !== undefined) {
     throw new ProjectTransactionError(
       'project_recovery_required',
@@ -71,6 +78,7 @@ const recoverBeforeRead = async (root: string): Promise<void> => {
 /** Loads a hash-verified old or new snapshot while rejecting a concurrent publication window. */
 const loadCommandProject = async (options: LoadCommandProjectOptions): Promise<LoadedProject> => {
   const discovered = await discoverProject(options);
+
   if (options.recover === false && (await hasRecoveryArtifacts(discovered.root))) {
     throw new ProjectTransactionError(
       'project_recovery_required',
@@ -81,22 +89,30 @@ const loadCommandProject = async (options: LoadCommandProjectOptions): Promise<L
       },
     );
   }
+
   if (options.recover !== false) await recoverBeforeRead(discovered.root);
 
   for (let attempt = 1; ; attempt += 1) {
     const before = await inspectProjectLock(discovered.root);
+
     if (before.state !== 'absent') return throwForExistingLock(before);
+
     try {
       const loaded = await loadProject({
         project: discovered.root,
         workingDirectory: discovered.root,
       });
+
       const after = await inspectProjectLock(discovered.root);
+
       if (after.state !== 'absent') return throwForExistingLock(after);
+
       return loaded;
     } catch (error: unknown) {
       const after = await inspectProjectLock(discovered.root);
+
       if (after.state !== 'absent') return throwForExistingLock(after);
+
       // A writer can publish and release entirely between the two lock inspections.
       if (attempt === MAX_READ_ATTEMPTS) throw error;
     }

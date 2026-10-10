@@ -1,3 +1,4 @@
+import type { CommandRequest } from '@attest/contracts';
 import {
   createCurlImportRequest,
   readCurlDocument,
@@ -86,6 +87,7 @@ const registerAgentImportCommand = (agent: Command, context: CommandContext): vo
     .action(async (source: string | undefined, options: ImportOptions, command: Command) => {
       const interactive = isInteractive(options, context.interaction, options.fromJson);
       const prompt = { interactive, prompt: context.interaction.prompt };
+
       const runImport = async (
         request: Parameters<typeof runAgentImportCommand>[0]['request'],
         sourceText?: string,
@@ -99,6 +101,7 @@ const registerAgentImportCommand = (agent: Command, context: CommandContext): vo
           sourceText,
           workingDirectory: context.workingDirectory,
         });
+
         context.io.output(renderCommandResult('agent.import', outputFormat(options), result));
       };
 
@@ -111,6 +114,7 @@ const registerAgentImportCommand = (agent: Command, context: CommandContext): vo
             options: { ...options, fromJson: options.fromJson },
           }),
         );
+
         return;
       }
 
@@ -119,21 +123,24 @@ const registerAgentImportCommand = (agent: Command, context: CommandContext): vo
         { path: '<path|url|->', question: 'Agent import source: ' },
         prompt,
       );
+
       const importId = await requiredInput(
         options.as,
         { path: '--as', question: 'Imported agent id: ' },
         prompt,
       );
+
       if ((options.type ?? (/\.curl$/iu.test(importSource) ? 'curl' : 'json')) === 'json') {
-        await runImport(
-          validateCommandRequest('agent.import', {
-            ...mutationRequestFields('agent.import', options),
-            source: importSource,
-            source_type: 'json',
-            as: importId,
-            ...(options.name === undefined ? {} : { name: options.name }),
-          }),
-        );
+        const request: Extract<CommandRequest, { command: 'agent.import' }> = {
+          ...mutationRequestFields('agent.import', options),
+          source: importSource,
+          source_type: 'json',
+          as: importId,
+        };
+
+        if (options.name !== undefined) request.name = options.name;
+        await runImport(validateCommandRequest('agent.import', request));
+
         return;
       }
 
@@ -142,6 +149,7 @@ const registerAgentImportCommand = (agent: Command, context: CommandContext): vo
         context.workingDirectory,
         context.interaction.readStdin,
       );
+
       let fields: CurlImportFields = await promptCurlImportFields(
         {
           ...options,
@@ -152,14 +160,17 @@ const registerAgentImportCommand = (agent: Command, context: CommandContext): vo
         curlSource,
         prompt,
       );
+
       for (let attempt = 1; ; attempt += 1) {
         try {
           await runImport(createCurlImportRequest(fields), curlSource);
+
           return;
         } catch (error: unknown) {
           if (!interactive || attempt === MAX_IMPORT_ATTEMPTS || !isCurlMappingError(error)) {
             throw error;
           }
+
           fields = { ...fields, mapBody: await promptBodyMappings(prompt) };
         }
       }

@@ -3,7 +3,9 @@ import { z } from 'zod';
 import { evalEventSchema, type EvalEvent } from './event.js';
 
 type RunStartedEvent = Extract<EvalEvent, { event: 'run_started' }>;
+
 type RunCompletedEvent = Extract<EvalEvent, { event: 'run_completed' }>;
+
 type RunStatus = RunCompletedEvent['data']['status'];
 
 /** Case lifecycle counts observed between run_started and the final result. */
@@ -29,6 +31,7 @@ const reportSequenceNumbers = (events: readonly EvalEvent[], context: z.Refineme
     if (event.sequence === index) {
       return;
     }
+
     context.addIssue({
       code: 'custom',
       path: [index, 'sequence'],
@@ -39,9 +42,11 @@ const reportSequenceNumbers = (events: readonly EvalEvent[], context: z.Refineme
 
 const reportResultPlacement = (events: readonly EvalEvent[], context: z.RefinementCtx): void => {
   const resultIndexes = events.flatMap((event, index) => (event.event === 'result' ? [index] : []));
+
   if (resultIndexes.length === 1 && resultIndexes[0] === events.length - 1) {
     return;
   }
+
   context.addIssue({
     code: 'custom',
     path: [],
@@ -57,9 +62,11 @@ const reportResultOnlyStream = (
 ): void => {
   const { exit_code, result: envelope } = result.data;
   const describesFailure = exit_code !== 0 && !(exit_code === 1 && envelope.ok);
+
   if (events.length === 1 && describesFailure) {
     return;
   }
+
   context.addIssue({
     code: 'custom',
     path: [0],
@@ -78,13 +85,16 @@ const collectCaseLifecycle = (
     completedCount: 0,
     completedEvent: undefined,
   };
+
   const startedIndexes = new Set<number>();
 
   events.slice(1, -1).forEach((event, offset) => {
     const index = offset + 1;
+
     if (event.event === 'result') {
       return;
     }
+
     if (event.data.run_id !== runId) {
       context.addIssue({
         code: 'custom',
@@ -95,6 +105,7 @@ const collectCaseLifecycle = (
 
     if (event.event === 'case_started') {
       const key = caseKey(event.data.test_id, event.data.case_id);
+
       if (startedIndexes.has(event.data.configured_index) || lifecycle.openCases.has(key)) {
         context.addIssue({
           code: 'custom',
@@ -102,14 +113,17 @@ const collectCaseLifecycle = (
           message: 'case starts must have unique identities and configured indexes',
         });
       }
+
       startedIndexes.add(event.data.configured_index);
       lifecycle.openCases.set(key, event.data.configured_index);
       lifecycle.startedCount += 1;
+
       return;
     }
 
     if (event.event === 'case_completed') {
       const key = caseKey(event.data.test_id, event.data.case_id);
+
       if (
         lifecycle.openCases.get(key) !== event.data.configured_index ||
         event.data.completion_index !== lifecycle.completedCount
@@ -120,8 +134,10 @@ const collectCaseLifecycle = (
           message: 'completion must reference its start and retain observed completion order',
         });
       }
+
       lifecycle.openCases.delete(key);
       lifecycle.completedCount += 1;
+
       return;
     }
 
@@ -133,6 +149,7 @@ const collectCaseLifecycle = (
           message: 'run_completed must occur exactly once immediately before result',
         });
       }
+
       lifecycle.completedEvent = event;
     }
   });
@@ -151,12 +168,15 @@ const totalsMatch = (
 ): boolean => {
   const { summary, status } = completed.data;
   const planned = started.data.total_cases;
+
   if (lifecycle.openCases.size !== 0) {
     return false;
   }
+
   if (summary.passed_cases + summary.failed_cases + summary.error_cases !== summary.total_cases) {
     return false;
   }
+
   if (status === 'failed') {
     return (
       summary.total_cases === lifecycle.completedCount &&
@@ -179,12 +199,14 @@ const reportFinalResult = (
   context: z.RefinementCtx,
 ): void => {
   const finalEvent = events.at(-1);
+
   if (finalEvent?.event !== 'result') {
     return;
   }
 
   const { status, summary } = completed.data;
   const resultPath = [events.length - 1, 'data'];
+
   if (!allowedExitCodes[status].includes(finalEvent.data.exit_code)) {
     context.addIssue({
       code: 'custom',
@@ -192,11 +214,13 @@ const reportFinalResult = (
       message: `does not match terminal status ${status}`,
     });
   }
+
   if (status !== 'completed') {
     return;
   }
 
   const result = finalEvent.data.result;
+
   if (
     !result.ok ||
     result.result.run_id !== started.data.run_id ||
@@ -220,23 +244,29 @@ const validateEvalEventStream = (events: readonly EvalEvent[], context: z.Refine
   reportResultPlacement(events, context);
 
   const first = events[0];
+
   if (first?.event === 'result') {
     reportResultOnlyStream(events, first, context);
+
     return;
   }
+
   if (first?.event !== 'run_started') {
     context.addIssue({ code: 'custom', path: [0, 'event'], message: 'must be run_started' });
+
     return;
   }
 
   const lifecycle = collectCaseLifecycle(events, first.data.run_id, context);
   const completed = lifecycle.completedEvent;
+
   if (completed === undefined) {
     context.addIssue({
       code: 'custom',
       path: [],
       message: 'orchestration must emit run_completed',
     });
+
     return;
   }
 
@@ -247,6 +277,7 @@ const validateEvalEventStream = (events: readonly EvalEvent[], context: z.Refine
       message: 'run totals must match the started, completed, and summarized cases',
     });
   }
+
   reportFinalResult(events, first, completed, context);
 };
 

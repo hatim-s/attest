@@ -1,3 +1,4 @@
+import { parseJson } from './internal/json-value.js';
 import type { AgentRequest, RawExcerpt } from '@attest/contracts';
 import type { ChildProcess } from 'node:child_process';
 import { createHash, type Hash } from 'node:crypto';
@@ -66,12 +67,16 @@ const createStdoutExcerpt = (
   forceTruncated: boolean,
 ): RawExcerpt => {
   const evidence = Buffer.concat(evidenceChunks, evidenceByteCount).toString('utf8');
+
   const truncated =
     forceTruncated ||
     payloadByteCount > evidenceByteCount ||
     evidence.length > RAW_EXCERPT_CHARACTERS;
+
   const rawExcerpt = createRawExcerpt(evidence);
+
   if (!truncated) return rawExcerpt;
+
   return { ...rawExcerpt, truncated: true, sha256: payloadHash.digest('hex') };
 };
 
@@ -99,6 +104,7 @@ const captureInvocation = (child: ChildProcess, options: CaptureOptions): Invoca
   const terminal = new Promise<TerminalEvent>((resolve) => {
     resolveTerminal = resolve;
   });
+
   const close = new Promise<void>((resolve) => {
     child.once('close', () => resolve());
   });
@@ -112,12 +118,15 @@ const captureInvocation = (child: ChildProcess, options: CaptureOptions): Invoca
       stdoutStarted = true;
       options.onFirstStdout();
     }
+
     stdoutBytes += chunk.length;
     payloadHash.update(chunk);
     evidenceBytes = appendEvidencePrefix(evidenceChunks, evidenceBytes, chunk);
+
     if (stdoutBytes > outputCapBytes) {
       resolveOnce({ type: 'output_cap' });
       child.stdout?.pause();
+
       return;
     }
 
@@ -133,6 +142,7 @@ const captureInvocation = (child: ChildProcess, options: CaptureOptions): Invoca
   const timeout = setTimeout(() => resolveOnce({ type: 'timeout' }), timeoutMs);
   const abort = (): void => resolveOnce({ type: 'abort' });
   signal?.addEventListener('abort', abort, { once: true });
+
   if (signal?.aborted === true) {
     abort();
   }
@@ -158,10 +168,13 @@ const createAttemptDirectory = async (
   if (override === undefined) {
     return { path: await mkdtemp(join(tmpdir(), 'attest-')), remove: true };
   }
+
   if (preserve) {
     await mkdir(override, { recursive: true });
+
     return { path: override, remove: false };
   }
+
   return { path: await mkdtemp(join(override, 'attempt-')), remove: true };
 };
 
@@ -174,9 +187,11 @@ const resolveCliEnvironment = async (
     mkdir(join(attemptDirectory, 'home'), { recursive: true }),
     mkdir(join(attemptDirectory, 'tmp'), { recursive: true }),
   ]);
+
   // Explicit values are forwarded whole; otherwise only allowlisted host values cross over.
   const forwardedKeys =
     options.env === undefined ? (options.envAllowlist ?? []) : Object.keys(options.env);
+
   return resolveInvocationEnv(
     forwardedKeys,
     options.env ?? process.env,
@@ -189,11 +204,15 @@ const describeProcessExit = (
   stderrExcerpt: string | undefined,
   unreapedProcessIds: readonly number[],
   exitCode: number | undefined,
-): InvocationDiagnostics => ({
-  stderrExcerpt,
-  ...(exitCode === undefined ? {} : { exitCode }),
-  ...(unreapedProcessIds.length === 0 ? {} : { unreapedProcessIds: [...unreapedProcessIds] }),
-});
+): InvocationDiagnostics => {
+  const diagnostics: InvocationDiagnostics = { stderrExcerpt };
+
+  if (exitCode !== undefined) diagnostics.exitCode = exitCode;
+
+  if (unreapedProcessIds.length > 0) diagnostics.unreapedProcessIds = [...unreapedProcessIds];
+
+  return diagnostics;
+};
 
 const sweepProcessTree = async (
   child: ChildProcess,
@@ -207,7 +226,9 @@ const sweepProcessTree = async (
     initialDescendants: (await Promise.all(descendantSnapshots)).flat(),
     signalProcessGroup,
   });
+
   await close;
+
   return unreapedProcessIds;
 };
 
@@ -221,22 +242,28 @@ const invokeCliAgent = async (
   options: InvokeOptions,
 ): Promise<InvocationAttempt> => {
   const duration = startTimer();
+
   const attemptDirectory = await createAttemptDirectory(
     options.workingDirectory,
     options.preserveWorkingDirectory ?? false,
   );
+
   let capture: InvocationCapture | undefined;
 
   try {
     const environment = await resolveCliEnvironment(request, attemptDirectory.path, options);
+
     const child = spawnInProcessGroup(target.command, {
       cwd: attemptDirectory.path,
       env: environment,
     });
+
     const { pid } = child;
+
     const descendantSnapshots: Promise<ProcessIdentity[]>[] = [
       pid === undefined ? Promise.resolve([]) : listDescendantProcesses(pid),
     ];
+
     capture = captureInvocation(child, {
       outputCapBytes: options.outputCapBytes,
       signal: options.signal,
@@ -248,6 +275,7 @@ const invokeCliAgent = async (
 
     child.stdin?.end(JSON.stringify(request));
     const terminal = await capture.terminal;
+
     const unreapedProcessIds = await sweepProcessTree(
       child,
       capture.close,
@@ -255,11 +283,13 @@ const invokeCliAgent = async (
       options.terminationGraceMs ?? DEFAULT_TERMINATION_GRACE_MS,
       terminal.type !== 'close',
     );
+
     const diagnostics = describeProcessExit(
       capture.readStderrExcerpt(),
       unreapedProcessIds,
       terminal.type === 'close' ? (terminal.exitCode ?? undefined) : undefined,
     );
+
     const fail = (error: AgentInvocationError, rawExcerpt: RawExcerpt): InvocationAttempt =>
       createFailedAttempt(error, { diagnostics, durationMs: duration(), rawExcerpt });
 
@@ -273,18 +303,21 @@ const invokeCliAgent = async (
         capture.readRawExcerpt(),
       );
     }
+
     if (terminal.type === 'abort' || (terminal.type === 'timeout' && options.signal?.aborted)) {
       return fail(
         new AgentInvocationError('cancelled', 'CLI agent invocation was cancelled'),
         capture.readRawExcerpt(),
       );
     }
+
     if (terminal.type === 'timeout') {
       return fail(
         new AgentInvocationError('timeout', 'CLI agent invocation timed out'),
         capture.readRawExcerpt(),
       );
     }
+
     if (terminal.type === 'output_cap') {
       return fail(
         new AgentInvocationError(
@@ -296,6 +329,7 @@ const invokeCliAgent = async (
     }
 
     const rawExcerpt = capture.readRawExcerpt();
+
     if (terminal.exitCode !== 0) {
       return fail(
         new AgentInvocationError(
@@ -309,7 +343,7 @@ const invokeCliAgent = async (
     try {
       return {
         status: 'ok',
-        raw: JSON.parse(capture.readStdout()) as unknown,
+        raw: parseJson(capture.readStdout()),
         diagnostics,
         durationMs: duration(),
         rawExcerpt,
@@ -325,6 +359,7 @@ const invokeCliAgent = async (
     }
   } finally {
     capture?.cleanup();
+
     if (attemptDirectory.remove) {
       await rm(attemptDirectory.path, { recursive: true, force: true });
     }

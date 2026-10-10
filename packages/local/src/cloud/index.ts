@@ -4,6 +4,7 @@ export {
   type CloudClient,
   type CloudClientOptions,
 } from './client.js';
+
 export {
   listCloudProjects,
   createCloudProject,
@@ -19,12 +20,14 @@ export {
   type LoginNotice,
   type CloudEventPage,
 } from './commands.js';
+
 export {
   readCloudCredentials,
   writeCloudCredentials,
   removeCloudCredentials,
   type CloudCredentials,
 } from './credentials.js';
+
 export {
   linkCloudProject,
   readCloudLink,
@@ -33,4 +36,5 @@ export {
   type CloudLink,
   type CloudProjectOptions,
 } from './link.js';
+
 export { pushCloudProject, pullCloudProject } from './sync.js';

@@ -9,15 +9,19 @@ const runAgentRemoveCommand = async (
   options: AgentMutationCommandOptions<AgentRequest<'agent.remove'>>,
 ): Promise<CommandResult<'mutation', MutationResult>> => {
   const { request } = options;
+
   const loaded = await loadCommandProject({
     project: options.project,
     recover: request.dry_run !== true,
     workingDirectory: options.workingDirectory,
   });
+
   findAgent(loaded.agents, request.agent_id);
+
   const dependentTests = loaded.tests.filter(
     ({ agent_id: agentId }) => agentId === request.agent_id,
   );
+
   if (dependentTests.length > 0 && request.detach !== true) {
     throw new LocalError('project_invalid', 'Agent is referenced by tests.', {
       path: request.agent_id,
@@ -25,13 +29,16 @@ const runAgentRemoveCommand = async (
       details: { dependent_test_ids: dependentTests.map(({ id }) => id) },
     });
   }
+
   const candidate = candidateFromLoadedProject(loaded);
   candidate.agents = candidate.agents.filter(({ id }) => id !== request.agent_id);
   candidate.tests = candidate.tests.filter(({ agent_id: agentId }) => agentId !== request.agent_id);
+
   const warnings =
     dependentTests.length === 0
       ? []
       : [`Removed dependent tests: ${dependentTests.map(({ id }) => id).join(', ')}`];
+
   return mutationResult({
     command: 'agent.remove',
     loaded,

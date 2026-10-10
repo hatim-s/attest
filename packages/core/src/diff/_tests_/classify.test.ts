@@ -28,6 +28,7 @@ const qualityMetric = (verdict: CaseVerdict, score: number | undefined): StoredM
       error: { kind: 'test', message: 'metric failed' },
     };
   }
+
   return {
     metricName: 'quality',
     kind: 'assertion',
@@ -40,6 +41,7 @@ const qualityMetric = (verdict: CaseVerdict, score: number | undefined): StoredM
 const caseRecord = (verdict: CaseVerdict, options: CaseOptions = {}): CaseRecord => {
   const suiteName = options.suiteName ?? 'suite';
   const caseId = options.caseId ?? 'case';
+
   const shared = {
     rowId: `${suiteName}:${caseId}`,
     runId: 'run',
@@ -55,6 +57,7 @@ const caseRecord = (verdict: CaseVerdict, options: CaseOptions = {}): CaseRecord
     expectedMetrics: ['quality'],
     metrics: [qualityMetric(verdict, options.score)],
   };
+
   if (verdict === 'error') {
     return {
       ...shared,
@@ -63,6 +66,7 @@ const caseRecord = (verdict: CaseVerdict, options: CaseOptions = {}): CaseRecord
       errorMessage: 'invocation failed',
     };
   }
+
   return { ...shared, outcome: 'completed', response: {} };
 };
 
@@ -147,6 +151,7 @@ describe('classifyRuns', () => {
         [caseRecord(candidateVerdict, { score: 0.5, inputHash: 'input' })],
         hashes,
       );
+
       expect(diff.transitions[0]!.flakiness).toBeUndefined();
     },
   );
@@ -169,11 +174,13 @@ describe('classifyRuns', () => {
       kind: 'regressed',
       flakiness: undefined,
     });
+
     const fixed = classifyRuns(
       [caseRecord('fail', { score: 0.5, inputHash: 'input' })],
       [caseRecord('pass', { score: 0.5, inputHash: 'input' })],
       comparison,
     );
+
     expect(fixed.transitions[0]).toMatchObject({ kind: 'fixed', flakiness: 'suspected' });
     expect(fixed.summary.flakySuspectCount).toBe(1);
   });
@@ -183,10 +190,12 @@ describe('classifyRuns', () => {
       caseRecord('pass', { caseId: 'shared' }),
       caseRecord('fail', { caseId: 'excluded' }),
     ];
+
     const candidate = [
       caseRecord('fail', { caseId: 'shared' }),
       caseRecord('pass', { caseId: 'new-sample' }),
     ];
+
     const result = classifyRuns(base, candidate, { ...comparison, sharedOnly: true });
     expect(result.transitions.map(({ kind }) => kind)).toEqual(['regressed']);
     expect(result.summary).toMatchObject({

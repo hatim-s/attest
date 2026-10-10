@@ -19,16 +19,22 @@ const runViewCommand = async (options: RunViewCommandOptions): Promise<ViewServe
     port: options.port,
     storePath: resolve(options.workingDirectory, options.storePath ?? '.attest/runs.db'),
   });
+
   const closeOnAbort = (): void => {
     void server.close();
   };
+
   options.signal?.addEventListener('abort', closeOnAbort, { once: true });
+
   try {
     await options.onReady?.(server);
+
     if (options.signal?.aborted === true) {
       await server.close();
     }
+
     await server.closed;
+
     return server;
   } catch (error: unknown) {
     await server.close();

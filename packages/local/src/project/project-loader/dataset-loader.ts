@@ -26,6 +26,7 @@ const loadDataset = async (
     entry.metadata_content_hash,
     datasetResourceSchema,
   );
+
   const loadedData = await readProjectSource(root, entry.data_path);
   const diagnostics = [...metadata.diagnostics, ...loadedData.diagnostics];
   const cases: TestCase[] = [];
@@ -46,20 +47,25 @@ const loadDataset = async (
     const lineNumber = index + 1;
     const parsed = parseJson(line, entry.data_path, `line ${lineNumber}`);
     diagnostics.push(...parsed.diagnostics);
+
     if (parsed.value === undefined) return;
     canonicalRecords.push(parsed.value);
     const validated = testCaseSchema.safeParse(parsed.value);
+
     if (!validated.success) {
       diagnostics.push(
         ...schemaDiagnostics(entry.data_path, validated.error.issues, [`line ${lineNumber}`]),
       );
+
       return;
     }
+
     cases.push(validated.data);
     caseLines.push(lineNumber);
   });
 
   const dataHash = hashCanonicalJsonLines(canonicalRecords);
+
   if (dataHash !== entry.data_content_hash) {
     diagnostics.push({
       code: 'content_hash_mismatch',

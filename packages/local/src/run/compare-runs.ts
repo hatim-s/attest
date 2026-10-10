@@ -17,6 +17,7 @@ type CompareLocalRunsOptions = {
 const compareLocalRuns = async (options: CompareLocalRunsOptions): Promise<RunDiff> => {
   const configuredStorePath = options.storePath ?? '.attest/runs.db';
   const storePath = resolve(options.workingDirectory, configuredStorePath);
+
   const diff = await withRunNotFound(
     () =>
       withReadonlyRunStoreFile(storePath, (store) =>
@@ -24,11 +25,13 @@ const compareLocalRuns = async (options: CompareLocalRunsOptions): Promise<RunDi
       ),
     (error) => new LocalError('resource_not_found', error.message, { cause: error }),
   );
+
   if (diff === undefined) {
     throw new LocalError('resource_not_found', 'The run store does not exist.', {
       path: storePath,
     });
   }
+
   return diff;
 };
 

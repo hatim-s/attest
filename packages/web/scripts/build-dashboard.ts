@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { build } from 'vite';
 
 const packageDirectory = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+
 const outputDirectory = resolve(packageDirectory, 'dist');
 
 /** Writes the single-file dashboard as a typed ESM string asset for the local application. */
@@ -22,6 +23,7 @@ const writeEmbeddedDashboard = async (html: string): Promise<void> => {
 /** Builds in an isolated temporary directory so concurrent workspace commands cannot race. */
 const buildDashboard = async (): Promise<void> => {
   const temporaryDirectory = await mkdtemp(join(tmpdir(), 'attest-web-build-'));
+
   try {
     await build({
       root: packageDirectory,

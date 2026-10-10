@@ -33,12 +33,14 @@ const jsonlBridgeInputSchema = z.discriminatedUnion('type', [
   jsonlBridgeRequestSchema,
   jsonlBridgeCancelSchema,
 ]);
+
 const jsonlBridgeOutputSchema = z.discriminatedUnion('type', [
   jsonlBridgeResponseSchema,
   jsonlBridgeCancelledSchema,
 ]);
 
 type JsonlBridgeInput = z.infer<typeof jsonlBridgeInputSchema>;
+
 type JsonlBridgeOutput = z.infer<typeof jsonlBridgeOutputSchema>;
 
 export {

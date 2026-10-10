@@ -1,20 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import {
-  authenticatedCloudClient,
-  cloudEvents,
-  listCloudProjects,
-  createCloudProject,
-  getCloudRun,
-  cancelCloudRun,
-  getCloudRunResult,
-  linkCloudProject,
-  loginCloud,
-  logoutCloud,
-  pullCloudProject,
-  pushCloudProject,
-  resolveCloudProject,
-  runCloud,
-} from '@attest/local/cloud';
+import * as cloudAdapter from '@attest/local/cloud';
 import { createEvalRunRequest } from '../eval/eval-request.js';
 import { AttestCliError } from '../../errors/cli-error.js';
 import { renderResult } from '../shared/command-result.js';
@@ -45,22 +30,43 @@ const registerCloudCommands = ({
   io,
   workingDirectory,
   interaction,
+  services,
 }: CommandContext): void => {
+  const {
+    authenticatedCloudClient,
+    cloudEvents,
+    listCloudProjects,
+    createCloudProject,
+    getCloudRun,
+    cancelCloudRun,
+    getCloudRunResult,
+    linkCloudProject,
+    loginCloud,
+    logoutCloud,
+    pullCloudProject,
+    pushCloudProject,
+    resolveCloudProject,
+    runCloud,
+  } = { ...cloudAdapter, ...services?.cloud };
+
   const cloud = program
     .command('cloud')
     .description('Authenticate, sync projects, and manage hosted evaluations.');
-  const output = (command: string, options: Options, result: unknown): void => {
+
+  const output = <TResult>(command: string, options: Options, result: TResult): void => {
     io.output(
       renderResult(`cloud.${command}`, options.output ?? 'human', result, (value) =>
         JSON.stringify(value, undefined, 2),
       ),
     );
   };
+
   const projectContext = async (options: Options) => ({
     workingDirectory,
     project: options.project,
     client: await authenticatedCloudClient(),
   });
+
   const projects = cloud.command('project').description('List or create cloud projects.');
   addCommonOptions(
     projects.command('list').description('List projects available to this account.'),
@@ -92,6 +98,7 @@ const registerCloudCommands = ({
             io.error(`Approve CLI access at ${verification_uri}\nCode: ${user_code}`),
         }),
       );
+
       output('login', options, result);
     });
   addCommonOptions(
@@ -164,16 +171,19 @@ const registerCloudCommands = ({
     .action(async (testIds: string[], options: Options) => {
       if (options.all && testIds.length)
         throw new AttestCliError('cli_usage', 'Pass --all or test ids.');
+
       if (!options.all && !testIds.length)
         throw new AttestCliError('cli_missing_input', 'Pass --all or test ids.');
       const context = await projectContext(options);
       const project = await resolveCloudProject(context);
       const revisionId = options.revision ?? project.revisionId;
+
       if (!revisionId)
         throw new AttestCliError(
           'cli_missing_input',
           'Push the project before running it in the cloud.',
         );
+
       const request = await createEvalRunRequest(
         {
           all: options.all,
@@ -190,9 +200,11 @@ const registerCloudCommands = ({
         },
         { interactive: false, prompt: interaction.prompt },
       );
+
       const idempotencyKey = options.idempotencyKey ?? randomUUID();
       // Print the key before submission so a lost response can be retried safely.
       io.error(`Cloud submission retry key: ${idempotencyKey}`);
+
       const result = await runCloud({
         client: context.client,
         projectId: project.projectId,
@@ -200,8 +212,10 @@ const registerCloudCommands = ({
         request,
         idempotencyKey,
       });
+
       output('run', options, { idempotency_key: idempotencyKey, ...result });
     });
+
   for (const action of ['status', 'cancel', 'result'] as const) {
     addCommonOptions(
       cloud
@@ -213,12 +227,15 @@ const registerCloudCommands = ({
     ).action(async (runId: string, options: Options) => {
       const context = await projectContext(options);
       const project = await resolveCloudProject(context);
+
       const operation = { status: getCloudRun, cancel: cancelCloudRun, result: getCloudRunResult }[
         action
       ];
+
       output(action, options, await operation(context.client, project.projectId, runId));
     });
   }
+
   addCommonOptions(
     cloud
       .command('events')
@@ -241,4 +258,5 @@ const registerCloudCommands = ({
       );
     });
 };
+
 export { registerCloudCommands };

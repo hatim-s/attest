@@ -22,17 +22,21 @@ const classifyCaseVerdict = (
   }
 
   const metricsByName = new Map<string, StoredMetricEvaluation>();
+
   for (const metric of metrics) {
     if (metricsByName.has(metric.metricName)) return 'error';
     metricsByName.set(metric.metricName, metric);
   }
 
   let failed = false;
+
   for (const expectedMetric of execution.expectedMetrics) {
     const metric = metricsByName.get(expectedMetric);
+
     if (metric === undefined || metric.status === 'error') return 'error';
     failed ||= !metric.pass;
   }
+
   return failed ? 'fail' : 'pass';
 };
 
@@ -81,14 +85,19 @@ const summarizeEvalCases = (
     error_cases: 0,
     metric_error_count: 0,
   };
+
   for (const evalCase of cases) {
     if (evalCase.verdict === 'pass') summary.passed_cases += 1;
+
     if (evalCase.verdict === 'fail') summary.failed_cases += 1;
+
     if (evalCase.verdict === 'error') summary.error_cases += 1;
+
     for (const metric of evalCase.metric_results) {
       if (metric.status === 'error') summary.metric_error_count += 1;
     }
   }
+
   return summary;
 };
 

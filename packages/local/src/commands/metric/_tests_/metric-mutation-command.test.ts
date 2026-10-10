@@ -23,6 +23,7 @@ const createProject = async (): Promise<string> => {
   const root = await mkdtemp(join(tmpdir(), 'attest-metric-mutation-'));
   onTestFinished(() => rm(root, { force: true, recursive: true }));
   await writeFixtureProject(root);
+
   return root;
 };
 
@@ -38,21 +39,30 @@ const mutate = (root: string, request: MetricAuthoringRequest, stdin = '') =>
   });
 
 /** Resolves to the rejection reason, or undefined when the mutation succeeds. */
-const rejection = (attempt: Promise<unknown>): Promise<unknown> =>
-  attempt.then(
-    () => undefined,
-    (error: unknown) => error,
-  );
+const rejection = async <T>(attempt: Promise<T>): Promise<Error | undefined> => {
+  try {
+    await attempt;
+  } catch (cause: unknown) {
+    if (!(cause instanceof Error)) throw cause;
+
+    return cause;
+  }
+
+  return undefined;
+};
 
 const snapshotFiles = async (root: string): Promise<Record<string, string>> => {
   const entries = await readdir(root, { recursive: true, withFileTypes: true });
   const files = entries.filter((entry) => entry.isFile());
+
   const contents = await Promise.all(
     files.map(async (entry) => {
       const path = join(entry.parentPath, entry.name);
+
       return [path, await readFile(path, 'utf8')] as const;
     }),
   );
+
   return Object.fromEntries(contents);
 };
 
@@ -104,6 +114,7 @@ describe('runMetricMutationCommand', () => {
       detach: true,
       yes: true,
     });
+
     expect(removed.warnings).toEqual([
       {
         code: 'metric_references_detached',
@@ -121,6 +132,7 @@ describe('runMetricMutationCommand', () => {
     const root = await createProject();
     const before = await snapshotFiles(root);
     const secrets = ['literal-access-secret', 'literal-api-secret', 'literal-exec-secret'] as const;
+
     const unsafeHttp: MetricResource = {
       schema: METRIC_RESOURCE_SCHEMA_ID,
       id: 'unsafe-http',
@@ -135,6 +147,7 @@ describe('runMetricMutationCommand', () => {
         extraction: { score_pointer: '/score', pass_pointer: '/pass' },
       },
     };
+
     const unsafeExec: MetricResource = {
       schema: METRIC_RESOURCE_SCHEMA_ID,
       id: 'exec-secret',
@@ -168,6 +181,7 @@ describe('runMetricMutationCommand', () => {
       ),
       await rejection(mutate(root, { schema, command: 'metric.add', metric: unsafeExec })),
     ];
+
     expect(errors).toEqual([
       expect.objectContaining({
         code: 'project_invalid',
@@ -180,12 +194,14 @@ describe('runMetricMutationCommand', () => {
       expect.objectContaining({ code: 'project_invalid', path: '/metric/definition/argv/2' }),
     ]);
     const serialized = errors.map((error) => `${String(error)} ${JSON.stringify(error)}`).join();
+
     for (const secret of secrets) expect(serialized).not.toContain(secret);
     expect(await snapshotFiles(root)).toEqual(before);
   });
 
   it('builds executable and HTTP metrics with secret references from flag fields', async () => {
     const fields = { readStdin: () => Promise.resolve(''), workingDirectory: tmpdir() };
+
     const exec = await createMetricResource({
       ...fields,
       metricId: 'exec',
@@ -194,12 +210,14 @@ describe('runMetricMutationCommand', () => {
       env: ['METRIC_SECRET=ATTEST_METRIC_SOURCE_SECRET'],
       timeout: '5s',
     });
+
     expect(exec.definition).toEqual({
       kind: 'exec',
       argv: ['metric'],
       env: { METRIC_SECRET: { from_env: 'ATTEST_METRIC_SOURCE_SECRET' } },
       timeout_ms: 5_000,
     });
+
     const http = await createMetricResource({
       ...fields,
       metricId: 'http',
@@ -209,6 +227,7 @@ describe('runMetricMutationCommand', () => {
       scorePointer: '/verdict/score',
       passPointer: '/verdict/pass',
     });
+
     expect(http.definition).toMatchObject({
       kind: 'http',
       request: { headers: { Authorization: { from_env: 'ATTEST_METRIC_SOURCE_SECRET' } } },

@@ -16,28 +16,35 @@ const readSecretReference = async (
 ): Promise<string> => {
   if ('from_env' in reference) {
     const value = process.env[reference.from_env];
+
     if (value === undefined) {
       throw new LocalError('invocation_failed', 'A referenced environment secret is missing.', {
         path: reference.from_env,
         hint: 'Set the referenced environment variable and retry the connection test.',
       });
     }
+
     return value;
   }
 
   const candidate = resolve(projectRoot, reference.from_file);
+
   if (!isProjectPath(projectRoot, candidate)) {
     throw new LocalError('invocation_failed', 'A secret file is outside the project.', {
       path: reference.from_file,
       hint: 'Use a project-contained secret file or an environment reference.',
     });
   }
+
   let entry: AnchoredEntry | undefined;
+
   try {
     entry = await openAnchored(candidate, { kind: 'file', root: projectRoot });
+
     if ((entry.identity.mode & 0o077n) !== 0n) {
       throw new Error('secret file must not be readable by group or others');
     }
+
     return await entry.handle.readFile('utf8');
   } catch (error: unknown) {
     throw new LocalError('invocation_failed', 'A referenced secret file is unavailable.', {
@@ -51,7 +58,7 @@ const readSecretReference = async (
 };
 
 /** Builds the minimum safe inherited environment used by the hardened native CLI invoker. */
-const createBaseEnvironment = (): Record<string, string> => ({
+const createBaseEnvironment = () => ({
   PATH: (process.env.PATH ?? '')
     .split(delimiter)
     .filter((entry) => isAbsolute(entry))
@@ -63,9 +70,12 @@ const createBaseEnvironment = (): Record<string, string> => ({
 /** Resolves an authored cwd through realpath and rejects symlink escapes from the project. */
 const resolveProcessCwd = async (projectRoot: string, cwd = '.'): Promise<string> => {
   const candidate = resolve(projectRoot, cwd);
+
   try {
     const resolved = await realpath(candidate);
+
     if (!isProjectPath(projectRoot, resolved)) throw new Error('cwd escapes project');
+
     return resolved;
   } catch (error: unknown) {
     throw new LocalError('invocation_failed', 'The managed process cwd is unavailable.', {
@@ -84,6 +94,11 @@ const resolveProcessArgv = (argv: readonly string[], cwd: string): string[] =>
       : resolve(cwd, argument),
   );
 
+type ResolvedProcessEnvironment = {
+  env: Record<string, string>;
+  secrets: string[];
+};
+
 /**
  * Builds a child process environment from the hardened base plus secret references read at
  * invocation time. Returns the secret values too so every evidence path can redact them.
@@ -91,14 +106,17 @@ const resolveProcessArgv = (argv: readonly string[], cwd: string): string[] =>
 const resolveProcessEnvironment = async (
   references: Readonly<Record<string, SecretReference>> | undefined,
   projectRoot: string,
-): Promise<{ env: Record<string, string>; secrets: string[] }> => {
-  const env = createBaseEnvironment();
+): Promise<ResolvedProcessEnvironment> => {
+  const env: ResolvedProcessEnvironment['env'] = createBaseEnvironment();
+
   const secrets: string[] = [];
+
   for (const [name, reference] of Object.entries(references ?? {})) {
     const value = await readSecretReference(reference, projectRoot);
     env[name] = value;
     secrets.push(value);
   }
+
   return { env, secrets };
 };
 
@@ -107,6 +125,10 @@ type ResolvedRequestSecrets = {
   query: Record<string, string>;
   secrets: string[];
 };
+
+/** Distinguishes a literal header/query value from its authored secret reference. */
+const isLiteralRequestValue = (value: string | SecretReference): value is string =>
+  typeof value === 'string';
 
 /** Resolves one request template's secret references without changing the authored resource. */
 const resolveHttpSecrets = async (
@@ -121,30 +143,38 @@ const resolveHttpSecrets = async (
     secrets: string[],
   ): Promise<Record<string, string>> => {
     const resolved: Record<string, string> = {};
+
     for (const [name, value] of Object.entries(values ?? {})) {
-      if (typeof value === 'string') {
+      if (isLiteralRequestValue(value)) {
         resolved[name] = value;
         continue;
       }
+
       resolved[name] = await readSecretReference(value, projectRoot);
       secrets.push(resolved[name]);
     }
+
     return resolved;
   };
+
   const secrets: string[] = [];
   const headers = await resolveValues(request.headers, secrets);
   const query = await resolveValues(request.query, secrets);
+
   return { headers, query, secrets };
 };
 
 /** Adds literal header and query values the agent marks for redaction to its secret list. */
 const addRedactedRequestValues = (agent: AgentResource, resolved: ResolvedRequestSecrets): void => {
   const redactedHeaders = new Set(agent.redaction?.headers?.map((name) => name.toLowerCase()));
+
   for (const [name, value] of Object.entries(resolved.headers)) {
     if (redactedHeaders.has(name.toLowerCase())) resolved.secrets.push(value);
   }
+
   for (const name of agent.redaction?.query ?? []) {
     const value = resolved.query[name];
+
     if (value !== undefined) resolved.secrets.push(value);
   }
 };
@@ -153,11 +183,13 @@ const addRedactedRequestValues = (agent: AgentResource, resolved: ResolvedReques
 const redactedArgvValues = (agent: AgentResource, argv: readonly string[]): string[] =>
   (agent.redaction?.argv_positions ?? []).map((position) => {
     const value = argv[position];
+
     if (value === undefined) {
       throw new LocalError('project_invalid', 'An argv redaction position is out of range.', {
         path: `/agents/${agent.id}/redaction/argv_positions`,
       });
     }
+
     return value;
   });
 
@@ -173,26 +205,38 @@ const resolveProcessAgent = async (
   projectRoot: string,
 ): Promise<ResolvedNativeAgent> => {
   const { env, secrets } = await resolveProcessEnvironment(transport.env, projectRoot);
+
   if (transport.kind === 'native_cli' && transport.sandbox !== undefined) {
     const sandboxEnvironment = Object.fromEntries(
       Object.keys(transport.env ?? {}).flatMap((name) => {
         const value = env[name];
+
         return value === undefined ? [] : [[name, value]];
       }),
     );
-    return {
-      argv: [transport.argv[0]!, ...transport.argv.slice(1)],
-      ...(transport.cwd === undefined ? {} : { cwd: transport.cwd }),
-      env: sandboxEnvironment,
-      kind: 'vercel_sandbox',
-      sandbox: transport.sandbox,
-      secrets: [...secrets, ...redactedArgvValues(agent, transport.argv)],
-    };
+
+    {
+      const assembledFields: ResolvedNativeAgent = {
+        argv: [transport.argv[0]!, ...transport.argv.slice(1)],
+        env: sandboxEnvironment,
+        kind: 'vercel_sandbox',
+        sandbox: transport.sandbox,
+        secrets: [...secrets, ...redactedArgvValues(agent, transport.argv)],
+      };
+
+      if (transport.cwd !== undefined) {
+        assembledFields.cwd = transport.cwd;
+      }
+
+      return assembledFields;
+    }
   }
+
   const cwd = await resolveProcessCwd(projectRoot, transport.cwd);
   const authoredArgv = transport.kind === 'background_cli' ? transport.start_argv : transport.argv;
   const argv = resolveProcessArgv(authoredArgv, cwd);
   const processSecrets = [...secrets, ...redactedArgvValues(agent, argv)];
+
   if (transport.kind === 'native_cli') {
     return {
       env,
@@ -201,6 +245,7 @@ const resolveProcessAgent = async (
       target: { type: 'cli', command: argv },
     };
   }
+
   if (transport.kind === 'jsonl_bridge') {
     return {
       agent: { ...agent, transport: { ...transport, argv } },
@@ -210,11 +255,14 @@ const resolveProcessAgent = async (
       secrets: processSecrets,
     };
   }
+
   const invoke = await resolveHttpSecrets(transport.invoke, projectRoot);
+
   const shutdown =
     transport.shutdown === undefined
       ? { headers: {}, query: {}, secrets: [] }
       : await resolveHttpSecrets(transport.shutdown, projectRoot);
+
   return {
     agent: { ...agent, transport: { ...transport, start_argv: argv } },
     cwd,
@@ -234,6 +282,7 @@ const resolveNativeAgent = async (
   projectRoot: string,
 ): Promise<ResolvedNativeAgent> => {
   const transport = agent.transport;
+
   switch (transport.kind) {
     case 'native_cli':
     case 'background_cli':
@@ -242,6 +291,7 @@ const resolveNativeAgent = async (
     case 'websocket': {
       const resolved = await resolveHttpSecrets({ headers: transport.headers }, projectRoot);
       addRedactedRequestValues(agent, resolved);
+
       return {
         agent: { ...agent, transport },
         headers: resolved.headers,
@@ -249,16 +299,20 @@ const resolveNativeAgent = async (
         secrets: [...new Set(resolved.secrets)],
       };
     }
+
     case 'stream': {
       const resolved = await resolveHttpSecrets(transport.request, projectRoot);
       addRedactedRequestValues(agent, resolved);
+
       return { agent: { ...agent, transport }, kind: 'stream', ...resolved };
     }
+
     case 'http':
     case 'polling': {
       const request = transport.kind === 'polling' ? transport.submit : transport.request;
       const resolved = await resolveHttpSecrets(request, projectRoot);
       addRedactedRequestValues(agent, resolved);
+
       if (transport.kind === 'http' && transport.response_mode === 'attest_envelope') {
         return {
           headers: resolved.headers,
@@ -267,8 +321,10 @@ const resolveNativeAgent = async (
           target: { type: 'http', url: request.url },
         };
       }
+
       return { agent: { ...agent, transport }, kind: 'mapped_http', ...resolved };
     }
+
     default:
       return transport satisfies never;
   }

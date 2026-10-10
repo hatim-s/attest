@@ -48,28 +48,30 @@ class CliExit extends Error {
  * Maps any thrown value to a catalog error and exit code. Unknown errors lose their message
  * because it can carry paths, secrets, or stack details.
  */
-const serializeCliError = (error: unknown): SerializedCliFailure => {
-  if (error instanceof AttestCliError || error instanceof LocalError) {
-    const definition = getCliErrorDefinition(error.code);
+const serializeCliError = (cause: unknown): SerializedCliFailure => {
+  if (cause instanceof AttestCliError || cause instanceof LocalError) {
+    const definition = getCliErrorDefinition(cause.code);
+
     return {
       error: {
-        code: error.code,
-        message: error.message,
-        path: error.path,
-        hint: error.hint,
+        code: cause.code,
+        message: cause.message,
+        path: cause.path,
+        hint: cause.hint,
         retryable: definition.retryable,
-        details: error.details,
+        details: cause.details,
       },
       exitCode: definition.exit_code,
     };
   }
 
-  if (error instanceof CommanderError) {
+  if (cause instanceof CommanderError) {
     const definition = getCliErrorDefinition('cli_usage');
+
     return {
       error: {
         code: definition.code,
-        message: error.message,
+        message: cause.message,
         hint: definition.repairs[0],
         retryable: definition.retryable,
       },
@@ -78,17 +80,18 @@ const serializeCliError = (error: unknown): SerializedCliFailure => {
   }
 
   const definition = getCliErrorDefinition('internal_error');
-  const cause = error instanceof AttestError ? error : undefined;
+  const applicationCause = cause instanceof AttestError ? cause : undefined;
+
   return {
     error: {
       code: definition.code,
       message:
-        cause === undefined
+        applicationCause === undefined
           ? 'The command failed with an unknown internal error.'
           : 'The command failed with an unclassified Attest error.',
       hint: definition.repairs[0],
       retryable: definition.retryable,
-      details: cause === undefined ? undefined : { cause_code: cause.code },
+      details: applicationCause === undefined ? undefined : { cause_code: applicationCause.code },
     },
     exitCode: definition.exit_code,
   };
@@ -97,8 +100,11 @@ const serializeCliError = (error: unknown): SerializedCliFailure => {
 /** Renders an error for stderr as code, message, path, and hint lines, never a stack. */
 const renderCliError = (error: CliError): string => {
   const lines = [`${error.code}: ${error.message}`];
+
   if (error.path !== undefined) lines.push(`Path: ${error.path}`);
+
   if (error.hint !== undefined) lines.push(`Hint: ${error.hint}`);
+
   return lines.join('\n');
 };
 

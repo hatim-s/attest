@@ -38,32 +38,40 @@ const invokeStreamingAgent = async (
   const runMs = agent.timeouts?.run_ms;
   const attemptMs = agent.timeouts?.attempt_ms ?? DEFAULT_ATTEMPT_MS;
   const overallDeadline = runMs === undefined ? undefined : Date.now() + runMs;
+
   const overallSignal = AbortSignal.any(
     [options.signal, runMs === undefined ? undefined : AbortSignal.timeout(runMs)].filter(
       (signal) => signal !== undefined,
     ),
   );
+
   const attempts: InvocationAttempt[] = [];
+
   const conclude = (attempt: InvocationAttempt): InvocationResult => ({
     ...attempt,
     attempts: [...attempts, attempt],
   });
+
   for (let retry = 0; ; retry += 1) {
     const attemptSignal = AbortSignal.any([overallSignal, AbortSignal.timeout(attemptMs)]);
     const duration = startTimer();
+
     try {
       const materialized = materializeHttpRequest(
         resolveRequestTemplate(agent.transport.request, options),
         request,
         agent.limits?.request_bytes ?? DEFAULT_REQUEST_BYTES,
       );
+
       const completed = await streamOnce(agent, materialized, attemptSignal, options);
       const report = parseAgentResponse(completed.response);
+
       if (!report.ok)
         throw new AgentInvocationError(
           'invalid_envelope',
           'Streaming extraction is not a valid native response.',
         );
+
       const attempt: InvocationAttempt = {
         status: 'ok',
         raw: completed.response,
@@ -75,6 +83,7 @@ const invokeStreamingAgent = async (
         ),
         warnings: report.warnings,
       };
+
       return conclude(attempt);
     } catch (error: unknown) {
       const normalized =
@@ -83,20 +92,25 @@ const invokeStreamingAgent = async (
           : attemptSignal.aborted
             ? abortedError(options.signal, 'Streaming invocation', { cause: error })
             : new AgentInvocationError('network', 'Streaming transport failed.', { cause: error });
+
       const evidence = {
         diagnostics:
           normalized.httpStatus === undefined ? {} : { httpStatus: normalized.httpStatus },
         durationMs: duration(),
         rawExcerpt: normalized.rawExcerpt,
       };
+
       const attempt = createFailedAttempt(normalized, evidence);
       const boundedRetryAfter = normalized.httpStatus === 429 ? normalized.retryAfterMs : undefined;
+
       const retryableStatus =
         normalized.httpStatus === 408 ||
         boundedRetryAfter !== undefined ||
         (normalized.httpStatus ?? 0) >= 500;
+
       const retryable =
         normalized.code === 'network' || normalized.code === 'timeout' || retryableStatus;
+
       if (
         retry >= (options.retries ?? agent.retry?.retries ?? 0) ||
         !retryable ||
@@ -105,18 +119,23 @@ const invokeStreamingAgent = async (
       ) {
         return conclude(attempt);
       }
+
       attempts.push(attempt);
+
       try {
         const remainingOverall =
           overallDeadline === undefined
             ? Number.POSITIVE_INFINITY
             : Math.max(0, overallDeadline - Date.now());
+
         // A 429 is retried only on its own Retry-After, bounded by one attempt deadline.
         const requested =
           boundedRetryAfter === undefined
             ? retryBackoffDelay(agent.retry?.backoff, retry)
             : Math.min(boundedRetryAfter, attemptMs);
+
         const delay = Math.min(requested, remainingOverall);
+
         if (delay > 0) {
           await abortableWait(delay, overallSignal, () =>
             abortedError(options.signal, 'Streaming retry wait'),
@@ -124,6 +143,7 @@ const invokeStreamingAgent = async (
         }
       } catch (waitError: unknown) {
         const terminal = waitError instanceof AgentInvocationError ? waitError : normalized;
+
         return conclude(createFailedAttempt(terminal, evidence));
       }
     }

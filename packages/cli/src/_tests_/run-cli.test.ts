@@ -5,6 +5,7 @@ import {
   cliErrorCatalogSchema,
   cliHelpSchema,
   cliResultSchema,
+  evalEventSchema,
   evalEventStreamSchema,
 } from '@attest/contracts';
 import { openStore } from '@attest/local/store';
@@ -127,6 +128,7 @@ describe('runCli', () => {
 
     expect(errors.exitCode).toBe(0);
     expect(errors.document).toMatchObject({ ok: true, command: 'errors' });
+
     if (!errors.document.ok) throw new Error('Expected the errors command to succeed.');
     const catalog = cliErrorCatalogSchema.parse(errors.document.result);
     expect(catalog.errors.find(({ code }) => code === 'cli_usage')).toMatchObject({
@@ -160,6 +162,7 @@ describe('runCli', () => {
   ])('keeps unknown command failures machine-readable for %j', async (...args) => {
     const output: string[] = [];
     const errors: string[] = [];
+
     const exitCode = await runCli(args, {
       io: { output: (message) => output.push(message), error: (message) => errors.push(message) },
     });
@@ -176,15 +179,18 @@ describe('runCli', () => {
   it('wraps JSONL parser failures in one terminal event', async () => {
     const output: string[] = [];
     const errors: string[] = [];
+
     const exitCode = await runCli(['eval', 'run', '--unknown', '--output', 'jsonl'], {
       io: { output: (message) => output.push(message), error: (message) => errors.push(message) },
     });
 
     expect(exitCode).toBe(2);
     expect(errors).toEqual([]);
+
     const stream = evalEventStreamSchema.parse(
-      output.map((line): unknown => JSON.parse(line) as unknown),
+      output.map((line) => evalEventSchema.parse(JSON.parse(line))),
     );
+
     expect(stream).toHaveLength(1);
     expect(stream[0]).toMatchObject({
       event: 'result',
@@ -228,6 +234,7 @@ describe('runCli', () => {
         ],
       }),
     );
+
     const rootOutput = await runCommand(directory, [
       '--output',
       'json',
@@ -235,11 +242,13 @@ describe('runCli', () => {
       'convert',
       'trace.json',
     ]);
+
     expect(rootOutput.exitCode).toBe(0);
     expect(JSON.parse(rootOutput.output.at(-1) ?? '')).toMatchObject({ trace_id: traceId });
     await expect(readFile(join(directory, 'json'), 'utf8')).rejects.toMatchObject({
       code: 'ENOENT',
     });
+
     const fileOutput = await runCommand(directory, [
       'trace',
       'convert',
@@ -247,6 +256,7 @@ describe('runCli', () => {
       '--output',
       'converted.json',
     ]);
+
     expect(fileOutput.exitCode).toBe(0);
     expect(fileOutput.output.join('')).toContain('converted.json');
     expect(JSON.parse(await readFile(join(directory, 'converted.json'), 'utf8'))).toMatchObject({
@@ -256,17 +266,21 @@ describe('runCli', () => {
     await mkdir(join(directory, '.attest'));
     const storePath = join(directory, '.attest', 'runs.db');
     const store = await openStore(storePath);
+
     const first = await store.runs.createRun({
       schemaId: 'attest.project',
       configHash: 'first',
       configJson: '{}',
     });
+
     await store.runs.finalizeRun(first.id, 'completed');
+
     const second = await store.runs.createRun({
       schemaId: 'attest.project',
       configHash: 'second',
       configJson: '{}',
     });
+
     await store.runs.finalizeRun(second.id, 'completed');
     await store.close();
 
@@ -278,6 +292,7 @@ describe('runCli', () => {
       '--store',
       storePath,
     ]);
+
     expect(rootReport.exitCode).toBe(0);
     expect(rootReport.output.join('')).toContain(`${first.id}.html`);
     await expect(readFile(join(directory, 'json'), 'utf8')).rejects.toMatchObject({
@@ -285,6 +300,7 @@ describe('runCli', () => {
     });
 
     const absoluteReportPath = join(directory, 'report.json');
+
     // On macOS this pairs a /var-authored destination with its /private/var project alias.
     const report = await runCommand(await realpath(directory), [
       'report',
@@ -294,6 +310,7 @@ describe('runCli', () => {
       '--output',
       absoluteReportPath,
     ]);
+
     expect(report.exitCode).toBe(0);
     expect(report.output.join('')).toContain('report.json');
     expect(await readFile(absoluteReportPath, 'utf8')).toContain('<!doctype html>');
@@ -307,6 +324,7 @@ describe('runCli', () => {
       '--format',
       'json',
     ]);
+
     expect(diff.exitCode).toBe(0);
     expect(JSON.parse(diff.output[0] ?? '')).toMatchObject({
       summary: { baseRunId: first.id, candidateRunId: second.id },
@@ -319,12 +337,11 @@ describe('runCli', () => {
     expect(listed.document).toMatchObject({
       ok: true,
       command: 'schema.list',
-      result: {
-        items: expect.arrayContaining([
-          { file: 'command-request.json', id: 'attest.command-request' },
-        ]) as unknown,
-      },
     });
+    expect(listed.document).toHaveProperty(
+      'result.items',
+      expect.arrayContaining([{ file: 'command-request.json', id: 'attest.command-request' }]),
+    );
 
     const printed = await runJson(process.cwd(), ['schema', 'print', 'attest.command-request']);
     expect(printed.exitCode).toBe(0);
@@ -350,15 +367,18 @@ describe('runCli', () => {
 
   it('advertises positional common options without changing command-specific semantics', async () => {
     const help = await runJson(process.cwd(), ['help']);
+
     if (!help.document.ok) throw new Error('Expected help success.');
     const { command } = cliHelpSchema.parse(help.document.result);
 
     expect(command.options.map(({ name }) => name)).toEqual(
       expect.arrayContaining(['output', 'project', 'non-interactive']),
     );
+
     const subcommands = new Map(
       command.subcommands.map((subcommand) => [subcommand.name, subcommand]),
     );
+
     expect(subcommands.has('run')).toBe(false);
     expect(subcommands.has('eval')).toBe(true);
     expect(subcommands.get('diff')?.options.map(({ name }) => name)).toContain('format');

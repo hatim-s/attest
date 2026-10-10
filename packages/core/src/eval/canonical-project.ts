@@ -1,3 +1,4 @@
+import { isJsonObject } from '@attest/contracts';
 import { createHash } from 'node:crypto';
 
 import type { DatasetResource, JsonValue, ProjectManifest } from '@attest/contracts';
@@ -13,9 +14,10 @@ const hashCanonicalContent = (canonicalContent: string): string =>
 
 /** Excludes volatile import time from dataset reproducibility hashes while retaining provenance. */
 const datasetMetadataForHash = (value: JsonValue): JsonValue => {
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) return value;
+  if (!isJsonObject(value)) return value;
   const provenance = value.provenance;
-  if (provenance === null || typeof provenance !== 'object' || Array.isArray(provenance)) {
+
+  if (!isJsonObject(provenance)) {
     return value;
   }
 
@@ -23,6 +25,7 @@ const datasetMetadataForHash = (value: JsonValue): JsonValue => {
   const stableProvenance = Object.fromEntries(
     Object.entries(provenance).filter(([key]) => key !== 'imported_at'),
   );
+
   return { ...value, provenance: stableProvenance };
 };
 
@@ -36,15 +39,18 @@ const hashProjectManifest = (
   datasets: readonly DatasetResource[],
 ): string => {
   const metadataById = new Map(datasets.map((metadata) => [metadata.id, metadata]));
+
   const projectedManifest: ProjectManifest = {
     ...manifest,
     resources: {
       ...manifest.resources,
       datasets: manifest.resources.datasets.map((entry) => {
         const metadata = metadataById.get(entry.id);
+
         if (metadata === undefined) {
           throw new Error(`Missing metadata for dataset ${entry.id}.`);
         }
+
         return {
           ...entry,
           metadata_content_hash: hashDatasetMetadata(metadata),
@@ -52,6 +58,7 @@ const hashProjectManifest = (
       }),
     },
   };
+
   return contentHash(projectedManifest);
 };
 

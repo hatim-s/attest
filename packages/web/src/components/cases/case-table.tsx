@@ -25,6 +25,7 @@ const CaseTable = ({
   onSelect,
 }: CaseTableProps) => {
   const scrollRef = useRef<HTMLDivElement>(null);
+
   const virtualizer = useVirtualizer({
     count: cases.length,
     getScrollElement: () => scrollRef.current,
@@ -45,7 +46,9 @@ const CaseTable = ({
         <div className="case-table-spacer" style={{ height: virtualizer.getTotalSize() }}>
           {virtualizer.getVirtualItems().map((virtualRow) => {
             const item = cases[virtualRow.index];
+
             if (item === undefined) return null;
+
             return (
               <button
                 className="case-table-row"

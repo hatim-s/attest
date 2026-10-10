@@ -1,7 +1,9 @@
 import type { ProjectResources } from '@attest/contracts';
 
 type ProjectResourceKind = 'agent' | 'dataset' | 'metric' | 'project' | 'test';
+
 type SemanticOperationKind = 'add' | 'attach' | 'detach' | 'remove' | 'rename' | 'update';
+
 type FieldChangeKind = 'add' | 'remove' | 'update';
 
 type SemanticFieldChange = {

@@ -30,7 +30,9 @@ declare module 'vitest' {
 }
 
 const execFileAsync = promisify(execFile);
+
 const REPOSITORY_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../../../../..');
+
 const PACKED_PACKAGE_ROOTS = [
   'packages/contracts',
   'packages/core',
@@ -51,13 +53,18 @@ const packPackage = async (
     ['pm', 'pack', '--quiet', '--destination', archiveDirectory],
     { cwd: join(REPOSITORY_ROOT, packageRoot), encoding: 'utf8', timeout: 30_000 },
   );
+
   const archivePath = resolve(stdout.trim());
+
   const { stdout: manifest } = await execFileAsync(
     'tar',
     ['-xOf', archivePath, 'package/package.json'],
     { encoding: 'utf8', timeout: 30_000 },
   );
+
+  // SAFETY: bun packs the checked-in package manifest, whose package name is required by each workspace.
   const { name } = JSON.parse(manifest) as { name: string };
+
   return [name, archivePath];
 };
 
@@ -69,20 +76,25 @@ const createPackedCli = async (): Promise<PackedCli> => {
   const archiveDirectory = join(root, 'archives');
   await mkdir(archiveDirectory);
   const archivePaths: Record<string, string> = {};
+
   for (const packageRoot of PACKED_PACKAGE_ROOTS) {
     const [name, archivePath] = await packPackage(packageRoot, archiveDirectory);
     archivePaths[name] = archivePath;
   }
+
   const cliPath = await materializePackedRuntime(
     root,
     Object.fromEntries(
       PACKED_PACKAGE_ROOTS.map((packageRoot) => {
         const name = `@attest/${packageRoot.split('/')[1]}`;
+
         return [name, { archive: archivePaths[name]!, source: join(REPOSITORY_ROOT, packageRoot) }];
       }),
     ),
   );
+
   await access(cliPath, constants.X_OK);
+
   return { archivePaths, cliPath, root };
 };
 
@@ -90,7 +102,21 @@ const createPackedCli = async (): Promise<PackedCli> => {
 const setup = async (project: TestProject): Promise<() => Promise<void>> => {
   const packed = await createPackedCli();
   project.provide('packedCli', packed);
+
   return () => rm(packed.root, { force: true, recursive: true });
+};
+
+/** Accepts the documented execFile rejection fields without assuming every thrown value is a process error. */
+const isPackedProcessFailure = (
+  cause: unknown,
+): cause is { code?: number | string; stderr?: string; stdout?: string } => {
+  if (!(cause instanceof Error)) return false;
+
+  return (
+    (!('code' in cause) || typeof cause.code === 'number' || typeof cause.code === 'string') &&
+    (!('stderr' in cause) || typeof cause.stderr === 'string') &&
+    (!('stdout' in cause) || typeof cause.stdout === 'string')
+  );
 };
 
 /** Runs the installed CLI under Node and keeps stdout and the exit code of failed commands. */
@@ -106,11 +132,14 @@ const runPackedCommand = async (
       ['--no-warnings', cliPath, ...argv],
       { cwd: workingDirectory, encoding: 'utf8', maxBuffer: 10 * 1024 * 1024, timeout },
     );
+
     return { exitCode: 0, stderr, stdout };
-  } catch (error: unknown) {
-    const failure = error as { code?: number; stderr?: string; stdout?: string };
+  } catch (cause: unknown) {
+    if (!isPackedProcessFailure(cause)) throw cause;
+    const failure = cause;
+
     return {
-      exitCode: typeof failure.code === 'number' ? failure.code : 1,
+      exitCode: Number.isInteger(failure.code) ? Number(failure.code) : 1,
       stderr: failure.stderr ?? '',
       stdout: failure.stdout ?? '',
     };

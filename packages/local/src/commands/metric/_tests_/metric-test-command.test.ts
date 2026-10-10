@@ -28,12 +28,14 @@ const envKeysSchema = z.object({
 const temporaryDirectory = async (prefix: string): Promise<string> => {
   const directory = await mkdtemp(join(tmpdir(), prefix));
   onTestFinished(() => rm(directory, { force: true, recursive: true }));
+
   return directory;
 };
 
 const createProject = async (): Promise<string> => {
   const root = await temporaryDirectory('attest-metric-test-');
   await writeFixtureProject(root);
+
   return root;
 };
 
@@ -73,6 +75,7 @@ const testMetric = (root: string, metricId: string, document = fixture('Paris', 
     workingDirectory: root,
   });
 
+// BOUNDARY: The fixture metric process returns untrusted execution details; envKeysSchema validates the emitted key list.
 const envKeys = (evaluation: unknown): string[] =>
   envKeysSchema.parse(evaluation).details.env_keys.filter((name) => !name.startsWith('__CF_'));
 
@@ -129,6 +132,7 @@ describe('runMetricTestCommand', () => {
     const withSecret = await testMetric(root, 'with-secret');
     expect(JSON.stringify(withSecret)).not.toContain('metric-super-secret');
     expect(withSecret.result).toMatchObject({ evaluation: { rationale: REDACTED } });
+
     if (!withSecret.result.executed) throw new Error('Expected an executed metric.');
     expect(envKeys(withSecret.result.evaluation)).toEqual([
       'LC_ALL',
@@ -142,6 +146,7 @@ describe('runMetricTestCommand', () => {
     expect(ambient.result).toMatchObject({
       evaluation: { rationale: 'ambient-absent' },
     });
+
     if (!ambient.result.executed) throw new Error('Expected an executed metric.');
     expect(envKeys(ambient.result.evaluation)).toEqual(['LC_ALL', 'PATH', 'TMPDIR']);
   });
@@ -195,6 +200,7 @@ describe('runMetricTestCommand', () => {
     onTestFinished(() => {
       vi.unstubAllGlobals();
     });
+
     for (const id of ['judge', 'http']) {
       expect((await testMetric(root, id)).result).toEqual({
         metric_id: id,
@@ -204,6 +210,7 @@ describe('runMetricTestCommand', () => {
         reason: 'external_execution_not_supported',
       });
     }
+
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 });

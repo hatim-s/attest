@@ -37,6 +37,7 @@ describe('agentRequestSchema', () => {
     });
 
     expect(result.success).toBe(false);
+
     if (result.success) {
       return;
     }
@@ -57,6 +58,7 @@ describe('agentRequestSchema', () => {
     });
 
     expect(result.success).toBe(true);
+
     if (result.success) {
       expect(result.data.vendor_request).toEqual({ attempt: 2 });
     }
@@ -80,6 +82,7 @@ describe('agentResponseSchema', () => {
     const result = parseAgentResponse(response);
 
     expect(result.ok).toBe(false);
+
     if (result.ok) {
       return;
     }
@@ -98,6 +101,7 @@ describe('agentResponseSchema', () => {
     });
 
     expect(result.ok).toBe(true);
+
     if (!result.ok) {
       return;
     }
@@ -117,6 +121,7 @@ describe('agentResponseSchema', () => {
     });
 
     expect(result.ok).toBe(true);
+
     if (!result.ok) {
       return;
     }
@@ -134,13 +139,17 @@ describe('agentResponseSchema', () => {
   it('infers a response union that narrows to one terminal outcome', () => {
     expectTypeOf<AgentResponse>().toEqualTypeOf<AgentSuccessResponse | AgentErrorResponse>();
 
-    const readOutcome = (response: AgentResponse): unknown => {
+    const readOutcome = (
+      response: AgentResponse,
+    ): AgentSuccessResponse['output'] | AgentErrorResponse['error'] => {
       if ('output' in response) {
         expectTypeOf(response).toEqualTypeOf<AgentSuccessResponse>();
+
         return response.output;
       }
 
       expectTypeOf(response).toEqualTypeOf<AgentErrorResponse>();
+
       return response.error;
     };
 

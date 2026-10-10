@@ -19,6 +19,7 @@ describe('runViewCommand', () => {
     const directory = await mkdtemp(join(tmpdir(), 'attest-view-command-'));
     directories.push(directory);
     const abortController = new AbortController();
+
     const server = await runViewCommand({
       workingDirectory: directory,
       signal: abortController.signal,
@@ -27,6 +28,7 @@ describe('runViewCommand', () => {
           fetch(`${origin}/api/health`),
           fetch(origin),
         ]);
+
         expect(healthResponse.status).toBe(200);
         await expect(dashboardResponse.text()).resolves.toContain('<div id="root"></div>');
         abortController.abort();

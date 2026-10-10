@@ -10,11 +10,13 @@ import {
 import { invokeStreamingAgent, type StreamAgentResource } from '../stream-adapter.js';
 
 const servers: LoopbackServer[] = [];
+
 const listen = async (
   handler: (request: IncomingMessage, response: ServerResponse) => void,
 ): Promise<string> => {
   const server = await startLoopbackServer(handler);
   servers.push(server);
+
   return server.url;
 };
 
@@ -58,6 +60,7 @@ describe('HTTP streaming adapter', () => {
       response.write('data: {"type":"delta","chunk":"hel"}\n\n');
       response.end('data: {"type":"result","chunk":"lo","token":"stream-secret"}\n\n');
     });
+
     const configured = agent(origin, 'sse');
     configured.transport.incremental_output_pointer = '/chunk';
     configured.transport.incremental_output_mode = 'text';
@@ -65,9 +68,11 @@ describe('HTTP streaming adapter', () => {
     configured.redaction = { event_pointers: ['/token'] };
     const result = await invokeStreamingAgent(configured, request);
     expect(result.status).toBe('ok');
+
     if (result.status === 'ok' && result.report?.ok && 'output' in result.report.value) {
       expect(result.report.value.output).toBe('hello');
     }
+
     expect(result.rawExcerpt?.text).not.toContain('stream-secret');
     expect(result.rawExcerpt?.text).toContain('[REDACTED]');
   });
@@ -81,12 +86,14 @@ describe('HTTP streaming adapter', () => {
           : '{"type":"result","output":{"ok":true}}\n',
       );
     });
+
     const completed = await invokeStreamingAgent(agent(origin, 'jsonl'), request);
     expect(completed.status).toBe('ok');
     const missing = agent(origin, 'jsonl');
     missing.transport.request.url = `${origin}/missing`;
     const failed = await invokeStreamingAgent(missing, request);
     expect(failed.status).toBe('invocation_error');
+
     if (failed.status === 'invocation_error') expect(failed.error.code).toBe('invalid_envelope');
   });
 
@@ -95,49 +102,63 @@ describe('HTTP streaming adapter', () => {
       response.setHeader('content-type', 'application/x-ndjson');
       response.write('{"type":"delta","chunk":"0123456789"}\n');
     });
+
     const capped = agent(origin, 'jsonl', { limits: { event_bytes: 8 } });
     const capResult = await invokeStreamingAgent(capped, request);
     expect(capResult.status).toBe('invocation_error');
+
     if (capResult.status === 'invocation_error')
       expect(capResult.error.code).toBe('output_cap_exceeded');
 
     const controller = new AbortController();
+
     const pending = invokeStreamingAgent(agent(origin, 'jsonl'), request, {
       signal: controller.signal,
     });
+
     controller.abort();
     const cancelled = await pending;
     expect(cancelled.status).toBe('invocation_error');
+
     if (cancelled.status === 'invocation_error') expect(cancelled.error.code).toBe('cancelled');
   });
 
   it('retries only before the first application event', async () => {
     let calls = 0;
+
     const origin = await listen((_request, response) => {
       calls += 1;
       response.setHeader('content-type', 'application/x-ndjson');
+
       if (calls === 1) {
         response.destroy();
+
         return;
       }
+
       response.end('{"type":"result","output":"done"}\n');
     });
+
     const configured = agent(origin, 'jsonl', {
       retry: { retries: 1, backoff: { kind: 'none' } },
     });
+
     expect((await invokeStreamingAgent(configured, request)).status).toBe('ok');
     expect(calls).toBe(2);
 
     calls = 0;
+
     const startedOrigin = await listen((_request, response) => {
       calls += 1;
       response.setHeader('content-type', 'application/x-ndjson');
       response.write('{"type":"delta"}\n');
       setImmediate(() => response.destroy());
     });
+
     const started = agent(startedOrigin, 'jsonl', {
       retry: { retries: 1, backoff: { kind: 'none' } },
     });
+
     expect((await invokeStreamingAgent(started, request)).status).toBe('invocation_error');
     expect(calls).toBe(1);
   });
@@ -149,8 +170,10 @@ describe('HTTP streaming adapter', () => {
         framing === 'sse'
           ? 'data: {"type":"result","output":"💥"}\n\n'
           : '{"type":"result","output":"💥"}\n';
+
       const bytes = Buffer.from(terminal, 'utf8');
       const split = bytes.indexOf(Buffer.from('💥', 'utf8')) + 2;
+
       const origin = await listen((_request, response) => {
         response.setHeader(
           'content-type',
@@ -159,8 +182,10 @@ describe('HTTP streaming adapter', () => {
         response.write(bytes.subarray(0, split));
         setImmediate(() => response.end(bytes.subarray(split)));
       });
+
       const result = await invokeStreamingAgent(agent(origin, framing), request);
       expect(result.status).toBe('ok');
+
       if (result.status === 'ok' && result.report?.ok && 'output' in result.report.value) {
         expect(result.report.value.output).toBe('💥');
       }
@@ -175,8 +200,10 @@ describe('HTTP streaming adapter', () => {
           ]),
         );
       });
+
       const malformed = await invokeStreamingAgent(agent(malformedOrigin, 'jsonl'), request);
       expect(malformed.status).toBe('invocation_error');
+
       if (malformed.status === 'invocation_error') {
         expect(malformed.error.code).toBe('invalid_envelope');
       }
@@ -185,6 +212,7 @@ describe('HTTP streaming adapter', () => {
 
   it('gives each retry a fresh attempt deadline under a separate run deadline', async () => {
     let calls = 0;
+
     const origin = await listen((_request, response) => {
       calls += 1;
       const attempt = calls;
@@ -194,10 +222,12 @@ describe('HTTP streaming adapter', () => {
         response.end(attempt === 1 ? '{"error":"retry"}\n' : '{"type":"result","output":"done"}\n');
       }, 60);
     });
+
     const configured = agent(origin, 'jsonl', {
       retry: { retries: 1, backoff: { kind: 'none' } },
       timeouts: { attempt_ms: 100, idle_ms: 100, run_ms: 500 },
     });
+
     const result = await invokeStreamingAgent(configured, request);
     expect(result.status).toBe('ok');
     expect(result.attempts).toHaveLength(2);
@@ -206,36 +236,45 @@ describe('HTTP streaming adapter', () => {
 
   it('honors bounded Retry-After for 429 and rejects an unbounded 429 retry', async () => {
     let calls = 0;
+
     const origin = await listen((_request, response) => {
       calls += 1;
+
       if (calls === 1) {
         response.statusCode = 429;
         response.setHeader('retry-after', '0');
         response.end();
+
         return;
       }
+
       response.setHeader('content-type', 'application/x-ndjson');
       response.end('{"type":"result","output":"after-wait"}\n');
     });
+
     // A long authored backoff proves the zero-second Retry-After replaced it.
     const configured = agent(origin, 'jsonl', {
       retry: { retries: 1, backoff: { kind: 'fixed', delay_ms: 60_000 } },
       timeouts: { attempt_ms: 2_000, idle_ms: 500, run_ms: 3_000 },
     });
+
     const started = Date.now();
     expect((await invokeStreamingAgent(configured, request)).status).toBe('ok');
     expect(Date.now() - started).toBeLessThan(1_000);
     expect(calls).toBe(2);
 
     let unboundedCalls = 0;
+
     const unboundedOrigin = await listen((_request, response) => {
       unboundedCalls += 1;
       response.statusCode = 429;
       response.end();
     });
+
     const unbounded = agent(unboundedOrigin, 'jsonl', {
       retry: { retries: 1, backoff: { kind: 'none' } },
     });
+
     expect((await invokeStreamingAgent(unbounded, request)).status).toBe('invocation_error');
     expect(unboundedCalls).toBe(1);
   });

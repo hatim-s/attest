@@ -52,7 +52,10 @@ Local exposes focused entry points: `/agent`, `/metric`, `/test`, `/project`, `/
 
 ## Browser and artifacts
 
-`@attest/web` supplies the same dashboard for the live local server and static reports. Domain types come from core through type-only imports. Browser code must not import runtime, local, CLI, or Node modules.
+`@attest/web` supplies the same dashboard for the live local server and static reports. Domain types come from core through type-only imports. Browser code must not import runtime, local, CLI, or Node modules. The browser-safe
+`@attest/core/records` entry point exposes record, summary and comparison schemas
+without importing persistence, hashing or execution code. Servers and browsers
+validate their shared response projections through these owner schemas.
 
 `@attest/schemas` publishes generated JSON Schema files. Its validation command checks both the file set and exact content against contracts. `@attest/site` remains a separate marketing page with no application dependencies.
 
@@ -106,3 +109,32 @@ request JSON and normalized timeout, output cap and cancellation options. It
 returns bounded response text or a typed metric error. Runtime retains result
 contract validation and scoring. The local command implementation loads only
 when no custom command transport is supplied.
+
+## Strict lint and boundary ownership
+
+All 18 generic anti-slop rules run as ESLint errors. Vendored provenance,
+licenses, and the narrowly documented boundary exception are recorded in
+`tools/anti-slop/UPSTREAM.md`. Ordinary code uses owned contracts. A directly
+attached boundary comment preserves unknown inputs only where a parser checks
+untrusted representations.
+
+Core owns the stored execution and evaluation schemas through its browser-safe
+`@attest/core/records` entry point. Local validates records before database writes
+and validates hydrated rows before returning them. Undefined optional fields are
+normalized before schema parsing. Runtime owns the judge outcome schema. Web and
+CLI decode response contracts after bounded JSON parsing.
+
+CLI services and sandbox invocation accept per-instance dependencies with the
+production implementations as defaults. Tests supply those dependencies rather
+than replacing modules globally.
+
+```mermaid
+flowchart LR
+  Input[HTTP, files, SQL rows] --> Boundary[Documented parser]
+  Boundary --> Schema[Owning domain schema]
+  Schema --> Domain[Typed commands and records]
+  Domain --> Store[Validated local persistence]
+  Domain --> Runtime[Execution and metric evaluation]
+  CLI[CLI services] --> Defaults[Production adapters]
+  CLI --> Tests[Per-instance test services]
+```

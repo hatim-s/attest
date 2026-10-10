@@ -27,6 +27,7 @@ const prepareEvalProjectFile = async (
 ): Promise<string> => {
   const unsafe = (): LocalError =>
     new LocalError(options.errorCode, options.message, { path: configuredPath });
+
   try {
     return await resolveContainedPath(projectRoot, configuredPath, {
       allowAbsolute: options.allowAbsolute,
@@ -53,19 +54,19 @@ const sameDirectoryIdentity = (
 /** Removes only the temporary symlink owned by this store capture. */
 const removeStorePlaceholder = async (path: string, target: string): Promise<void> => {
   const metadata = await lstat(path);
+
   if (!metadata.isSymbolicLink() || (await readlink(path)) !== target) {
     throw new LocalError('run_failed', 'The eval store boundary changed during opening.', {
       path: '.attest/runs.db',
     });
   }
+
   await unlink(path);
 };
 
 /** Preserves native failures while ensuring cleanup failures remain throwable errors. */
-const asError = (failure: unknown): Error =>
-  failure instanceof Error
-    ? failure
-    : new Error('Eval store boundary cleanup failed.', { cause: failure });
+const asError = (cause: unknown): Error =>
+  cause instanceof Error ? cause : new Error('Eval store boundary cleanup failed.', { cause });
 
 /** Retains SQLite's captured pathname until close, then removes only the owned reverse alias. */
 const retainCapturedStoreAlias = (
@@ -74,6 +75,7 @@ const retainCapturedStoreAlias = (
   target: string,
 ): AttestStore => {
   let closed = false;
+
   return {
     runs: store.runs,
     cache: store.cache,
@@ -81,12 +83,13 @@ const retainCapturedStoreAlias = (
       if (closed) return;
       closed = true;
       let failure: unknown;
-      await store.close().catch((error: unknown) => {
-        failure = error;
+      await store.close().catch((cause: unknown) => {
+        failure = cause;
       });
-      await removeStorePlaceholder(capturedDirectory, target).catch((error: unknown) => {
-        failure ??= error;
+      await removeStorePlaceholder(capturedDirectory, target).catch((cause: unknown) => {
+        failure ??= cause;
       });
+
       if (failure !== undefined) throw asError(failure);
     },
   };
@@ -99,6 +102,7 @@ const openEvalProjectStore = async (projectRoot: string): Promise<AttestStore> =
     errorCode: 'run_failed',
     message: 'The eval run store is not a safe project file.',
   });
+
   const directory = dirname(storePath);
   const resolvedRoot = dirname(directory);
   const captureTarget = `.attest-${randomUUID()}.opening`;
@@ -108,15 +112,18 @@ const openEvalProjectStore = async (projectRoot: string): Promise<AttestStore> =
   let placeholder = false;
   let store: AttestStore | undefined;
   let failure: unknown;
+
   try {
     // Atomic rename converts the validated directory identity into the path SQLite actually opens.
     await rename(directory, capturedDirectory);
     moved = true;
+
     if (!sameDirectoryIdentity(identity, await lstat(capturedDirectory))) {
       throw new LocalError('run_failed', 'The eval store boundary changed before opening.', {
         path: '.attest/runs.db',
       });
     }
+
     await symlink(captureTarget, directory);
     placeholder = true;
     store = await openStore(join(capturedDirectory, basename(storePath)));
@@ -126,22 +133,26 @@ const openEvalProjectStore = async (projectRoot: string): Promise<AttestStore> =
     moved = false;
     // SQLite may create or checkpoint WAL files after open, so retain its unguessable pathname.
     await symlink(basename(directory), capturedDirectory);
+
     return retainCapturedStoreAlias(store, capturedDirectory, basename(directory));
   } catch (error: unknown) {
     failure = error;
   }
 
   await store?.close().catch(() => undefined);
+
   if (placeholder) {
-    await removeStorePlaceholder(directory, captureTarget).catch((error: unknown) => {
-      failure = error;
+    await removeStorePlaceholder(directory, captureTarget).catch((cause: unknown) => {
+      failure = cause;
     });
   }
+
   if (moved) {
-    await rename(capturedDirectory, directory).catch((error: unknown) => {
-      failure = error;
+    await rename(capturedDirectory, directory).catch((cause: unknown) => {
+      failure = cause;
     });
   }
+
   throw asError(failure);
 };
 

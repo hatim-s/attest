@@ -16,6 +16,7 @@ const aggregateFailureReasons = (
   const reasons = outcomes.flatMap((outcome, index) =>
     outcome.passed ? [] : [`${index + 1}: ${outcome.reason ?? 'failed'}`],
   );
+
   return `${combinator} failed (${reasons.join('; ')})`;
 };
 
@@ -27,6 +28,7 @@ const evaluateAssertionCheck = (
   if ('all' in check) {
     const outcomes = check.all.map((child) => evaluateAssertionCheck(child, document));
     const passed = outcomes.every((outcome) => outcome.passed);
+
     return passed
       ? { check, passed: true }
       : { check, passed: false, reason: aggregateFailureReasons('all', outcomes) };
@@ -35,6 +37,7 @@ const evaluateAssertionCheck = (
   if ('any' in check) {
     const outcomes = check.any.map((child) => evaluateAssertionCheck(child, document));
     const passed = outcomes.some((outcome) => outcome.passed);
+
     return passed
       ? { check, passed: true }
       : { check, passed: false, reason: aggregateFailureReasons('any', outcomes) };
@@ -42,6 +45,7 @@ const evaluateAssertionCheck = (
 
   if ('not' in check) {
     const outcome = evaluateAssertionCheck(check.not, document);
+
     return outcome.passed
       ? { check, passed: false, reason: 'not failed because its child passed' }
       : { check, passed: true };
@@ -57,13 +61,13 @@ const evaluateAssertionMetric = (
 ): MetricResult => {
   const outcomes = definition.assert.map((check) => evaluateAssertionCheck(check, document));
   const passedCount = outcomes.filter((outcome) => outcome.passed).length;
-  const checks = outcomes.map<JsonValue>((outcome) => {
-    const details: Record<string, JsonValue> = { passed: outcome.passed };
-    if (outcome.reason !== undefined) {
-      details.reason = outcome.reason;
-    }
-    return details;
+
+  const checks = outcomes.map((outcome): JsonValue => {
+    if (outcome.reason !== undefined) return { passed: outcome.passed, reason: outcome.reason };
+
+    return { passed: outcome.passed };
   });
+
   return {
     score: passedCount / outcomes.length,
     pass: passedCount === outcomes.length,

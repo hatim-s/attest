@@ -34,6 +34,7 @@ const portableProjectBundleSchema = z
         path: ['files'],
         message: 'at most 100 files are allowed',
       });
+
     if (
       Object.values(files).reduce(
         (total, value) => total + new TextEncoder().encode(value).byteLength,
@@ -58,7 +59,9 @@ const cloudRunRequestSchema = z.strictObject({
 const cloudQueueMessageSchema = z.strictObject({ run_id: z.string().min(1).max(128) });
 
 type PortableProjectBundle = z.infer<typeof portableProjectBundleSchema>;
+
 type CloudRunRequest = z.infer<typeof cloudRunRequestSchema>;
+
 type CloudQueueMessage = z.infer<typeof cloudQueueMessageSchema>;
 
 export {

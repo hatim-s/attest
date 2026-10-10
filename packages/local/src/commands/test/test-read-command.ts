@@ -44,11 +44,25 @@ const runTestCaseListCommand = async (
 ): Promise<CommandResult<'test-case-list', TestCaseListResult>> => {
   const loaded = await loadCommandProject(options);
   const test = findTest(loaded, options.testId);
-  const items = test.cases.map(({ id, tags, folder }) => ({
-    id,
-    ...(tags === undefined ? {} : { tags }),
-    ...(folder === undefined ? {} : { folder }),
-  }));
+
+  const items = test.cases.map(
+    ({ id, tags, folder }): TestCaseListResult['items'][number] & { folder?: string } => {
+      const assembledFields: TestCaseListResult['items'][number] & { folder?: string } = {
+        id,
+      };
+
+      if (tags !== undefined) {
+        assembledFields.tags = tags;
+      }
+
+      if (folder !== undefined) {
+        assembledFields.folder = folder;
+      }
+
+      return assembledFields;
+    },
+  );
+
   return {
     operation: 'test-case-list',
     projectHashBefore: loaded.projectHash,
@@ -64,7 +78,9 @@ const runTestCaseShowCommand = async (
   const loaded = await loadCommandProject(options);
   const test = findTest(loaded, options.testId);
   const testCase = test.cases.find(({ id }) => id === options.caseId);
+
   if (testCase === undefined) throw missingResource('case', options.caseId);
+
   return {
     operation: 'test-case-show',
     projectHashBefore: loaded.projectHash,

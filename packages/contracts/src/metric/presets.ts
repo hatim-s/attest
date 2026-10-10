@@ -28,6 +28,7 @@ const metricPresetSchema = z.strictObject({
 });
 
 type MetricPreset = z.infer<typeof metricPresetSchema>;
+
 type MetricPresetId = z.infer<typeof metricPresetIdSchema>;
 
 /** Built-in metric starting points shown by `attest metric add`. */

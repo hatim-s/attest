@@ -1,3 +1,4 @@
+import type { JsonValue } from '@attest/contracts';
 import { AgentInvocationError } from '../../errors.js';
 import {
   DEFAULT_EVENT_BYTES,
@@ -44,18 +45,23 @@ class StreamEvidence {
   ) {}
 
   /** Records one event; `raw` is the parsed payload of an application event. */
-  record(event: StreamEvent, raw?: unknown): void {
+  record(event: StreamEvent, raw?: JsonValue): void {
     if (Buffer.byteLength(event.source) > this.caps.eventBytes) {
       throw capError('Streaming response event exceeds its event byte cap.');
     }
+
     this.eventCount += 1;
+
     if (this.eventCount > this.caps.eventCount) {
       throw capError('Streaming response exceeds its event count cap.');
     }
+
     if (event.heartbeat) {
       this.text += `${redactTransportText(event.source, this.secrets)}\n`;
+
       return;
     }
+
     const pointers = this.agent.redaction?.event_pointers ?? [];
     this.text += `${redactEventEvidence(raw, pointers, this.secrets)}\n`;
     this.applicationStarted = true;

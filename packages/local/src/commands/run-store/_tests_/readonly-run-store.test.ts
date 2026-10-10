@@ -12,12 +12,14 @@ const temporaryDirectories: string[] = [];
 const temporaryDirectory = async (): Promise<string> => {
   const directory = await mkdtemp(join(tmpdir(), 'attest-readonly-run-store-'));
   temporaryDirectories.push(directory);
+
   return directory;
 };
 
 /** Captures exact file bytes in one directory, keyed by sorted file name. */
 const snapshotDirectory = async (directory: string): Promise<Record<string, Buffer>> => {
   const entries = (await readdir(directory)).sort();
+
   return Object.fromEntries(
     await Promise.all(
       entries.map(async (entry) => [entry, await readFile(join(directory, entry))] as const),
@@ -31,6 +33,7 @@ const createStoreBytes = async (): Promise<Buffer> => {
   const store = await openStore(path);
   await store.runs.createRun({ schemaId: 'attest.project', configHash: 'hash', configJson: '{}' });
   await store.close();
+
   return readFile(path);
 };
 
@@ -46,12 +49,14 @@ describe('withReadonlyRunStore', () => {
     const storeDirectory = join(root, '.attest');
     await mkdir(storeDirectory);
     const writer = await openStore(join(storeDirectory, 'runs.db'));
+
     try {
       const run = await writer.runs.createRun({
         schemaId: 'attest.project',
         configHash: 'live-wal',
         configJson: '{}',
       });
+
       expect(await readdir(storeDirectory)).toContain('runs.db-wal');
       const before = await snapshotDirectory(storeDirectory);
 
@@ -81,6 +86,7 @@ describe('withReadonlyRunStore', () => {
         withReadonlyRunStore(root, async (store) => store.listRuns()),
       ).rejects.toMatchObject({ code: 'project_read_failed' });
     }
+
     expect(await readFile(outsideStore)).toEqual(bytes);
     expect(await readdir(outside)).toEqual(['runs.db']);
   });

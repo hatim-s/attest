@@ -22,13 +22,17 @@ const missingResource = (type: keyof typeof MISSING_RESOURCE_HINTS, id: string):
 
 const findTest = (candidate: ProjectResources, id: string): TestResource => {
   const test = candidate.tests.find((item) => item.id === id);
+
   if (test === undefined) throw missingResource('test', id);
+
   return test;
 };
 
 const findDataset = (candidate: ProjectResources, id: string) => {
   const dataset = candidate.datasets.find(({ metadata }) => metadata.id === id);
+
   if (dataset === undefined) throw missingResource('dataset', id);
+
   return dataset;
 };
 
@@ -63,8 +67,10 @@ const attachmentCases = (
   test.datasets.flatMap((attachment) => {
     if (attachment.dataset_id === excludedDatasetId) return [];
     const dataset = findDataset(candidate, attachment.dataset_id);
+
     return dataset.cases.filter((testCase) => {
       const tags = new Set(testCase.tags ?? []);
+
       return attachment.tags?.some((tag) => !tags.has(tag)) !== true;
     });
   });
@@ -81,24 +87,35 @@ const datasetImportCollisionContexts = (
         test.id === importingTestId ||
         test.datasets.some((attachment) => attachment.dataset_id === datasetId),
     )
-    .map((test) => {
+    .map((test): ImportCollisionContext => {
       const targetAttachment = test.datasets.find(
         (attachment) => attachment.dataset_id === datasetId,
       );
-      return {
-        cases: [...test.cases, ...attachmentCases(candidate, test, datasetId)],
-        ...(targetAttachment?.tags === undefined ? {} : { requiredTags: targetAttachment.tags }),
-      };
+
+      {
+        const assembledFields: ImportCollisionContext = {
+          cases: [...test.cases, ...attachmentCases(candidate, test, datasetId)],
+        };
+
+        if (!(targetAttachment?.tags === undefined)) {
+          assembledFields.requiredTags = targetAttachment.tags;
+        }
+
+        return assembledFields;
+      }
     });
 
 /** Rejects dataset removal with copy-paste detach commands for every blocking test. */
 const assertDatasetRemovable = (candidate: ProjectResources, datasetId: string): void => {
   findDataset(candidate, datasetId);
   const references = attachedDatasetTests(candidate, datasetId);
+
   if (references.length === 0) return;
+
   const detachCommands = references.map(
     (testId) => `attest test dataset detach ${testId} ${datasetId}`,
   );
+
   throw new LocalError('project_invalid', 'Attached datasets cannot be removed.', {
     path: datasetId,
     hint: `Run ${detachCommands.map((command) => `\`${command}\``).join(', ')}, then retry.`,

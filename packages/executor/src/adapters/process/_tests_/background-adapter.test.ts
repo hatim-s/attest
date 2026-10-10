@@ -1,3 +1,5 @@
+import { AgentInvocationError } from '../../../errors.js';
+import { isJsonObject, isNumber, isString } from '../../../internal/json-value.js';
 import { createServer as createNetServer } from 'node:net';
 import { resolve } from 'node:path';
 
@@ -13,8 +15,9 @@ const freePort = async (): Promise<number> => {
   const server = createNetServer();
   await new Promise<void>((resolveListen) => server.listen(0, '127.0.0.1', resolveListen));
   const address = server.address();
-  const port = typeof address === 'object' && address !== null ? address.port : 0;
+  const port = !isString(address) && address !== null ? address.port : 0;
   await new Promise<void>((resolveClose) => server.close(() => resolveClose()));
+
   return port;
 };
 
@@ -52,7 +55,9 @@ describe('background process adapter', () => {
       const port = await freePort();
       let session: Awaited<ReturnType<typeof startBackgroundAgent>> | undefined;
       const controller = new AbortController();
+
       if (timing === 'before') controller.abort();
+
       try {
         const startup = startBackgroundAgent(
           agent(port, { kind: 'stderr', pattern: `READY ${String(port)}` }),
@@ -63,8 +68,10 @@ describe('background process adapter', () => {
           },
         ).then((started) => {
           session = started;
+
           return started;
         });
+
         controller.abort();
         await expect(startup).rejects.toMatchObject({ code: 'cancelled' });
       } finally {
@@ -77,21 +84,26 @@ describe('background process adapter', () => {
     'waits for %s readiness, invokes, and shuts down',
     async (kind) => {
       const port = await freePort();
+
       const readiness =
         kind === 'http'
           ? ({ kind, url: `http://127.0.0.1:${String(port)}/ready` } as const)
           : kind === 'tcp'
             ? ({ kind, host: '127.0.0.1', port } as const)
             : ({ kind, pattern: `READY ${String(port)}` } as const);
+
       const session = await startBackgroundAgent(agent(port, readiness), {
         cwd: process.cwd(),
         env: { PATH: process.env.PATH ?? '' },
       });
+
       const result = await session.invoke(request);
       expect(result.status).toBe('ok');
+
       if (result.status === 'ok' && result.report?.ok && 'output' in result.report.value) {
         expect(result.report.value.output).toEqual({ ping: true });
       }
+
       await session.close();
     },
   );
@@ -120,18 +132,23 @@ describe('background process adapter', () => {
 
   it('classifies the run deadline as timeout and still cleans up the service', async () => {
     const port = await freePort();
+
     const configured = agent(port, {
       kind: 'http',
       url: `http://127.0.0.1:${String(port)}/ready`,
     });
+
     configured.transport.start_argv.push('slow');
     configured.timeouts = { connect_ms: 2_000, attempt_ms: 3_000, run_ms: 1_000 };
+
     const session = await startBackgroundAgent(configured, {
       cwd: process.cwd(),
       env: { PATH: process.env.PATH ?? '' },
     });
+
     const result = await session.invoke(request);
     expect(result.status).toBe('invocation_error');
+
     if (result.status === 'invocation_error') expect(result.error.code).toBe('timeout');
     await session.close();
   });
@@ -141,14 +158,18 @@ describe('background process adapter', () => {
     const configured = agent(port, { kind: 'stderr', pattern: 'NEVER' });
     configured.transport.start_argv.push('exit-before-ready');
     const started = Date.now();
+
     const failure: unknown = await startBackgroundAgent(configured, {
       cwd: process.cwd(),
       env: { PATH: process.env.PATH ?? '' },
-    }).catch((error: unknown) => error);
+    }).catch((cause: unknown) => cause);
+
     expect(failure).toMatchObject({ code: 'nonzero_exit' });
-    if (failure === null || typeof failure !== 'object' || !('diagnostics' in failure)) {
+
+    if (!(failure instanceof AgentInvocationError) || failure.diagnostics === undefined) {
       throw new Error('Expected bounded startup diagnostics.');
     }
+
     expect(failure.diagnostics).toMatchObject({ exitCode: 23 });
     expect(JSON.stringify(failure.diagnostics)).toContain('startup failed');
     expect(Date.now() - started).toBeLessThan(1_000);
@@ -159,11 +180,13 @@ describe('background process adapter', () => {
     const configured = agent(port, { kind: 'stderr', pattern: 'NEVER' });
     configured.transport.start_argv.push('silent');
     const controller = new AbortController();
+
     const startup = startBackgroundAgent(configured, {
       cwd: process.cwd(),
       env: { PATH: process.env.PATH ?? '' },
       signal: controller.signal,
     });
+
     setTimeout(() => controller.abort(), 20);
     await expect(startup).rejects.toMatchObject({ code: 'cancelled' });
   });
@@ -174,23 +197,32 @@ describe('background process adapter', () => {
     let shutdownCredential: string | undefined;
     let invokeQuery = '';
     let shutdownQuery = '';
+
     const invokeServer = await startLoopbackServer((message, response) => {
-      invokeCredential = message.headers['x-invoke'] as string | undefined;
+      invokeCredential = isString(message.headers['x-invoke'])
+        ? message.headers['x-invoke']
+        : undefined;
       invokeQuery = message.url ?? '';
       response.setHeader('content-type', 'application/json');
       response.end('{"output":{"ok":true}}');
     });
+
     const shutdownServer = await startLoopbackServer((message, response) => {
-      shutdownCredential = message.headers['x-shutdown'] as string | undefined;
+      shutdownCredential = isString(message.headers['x-shutdown'])
+        ? message.headers['x-shutdown']
+        : undefined;
       shutdownQuery = message.url ?? '';
       response.writeHead(204).end();
     });
+
     const configured = agent(processPort, {
       kind: 'stderr',
       pattern: `READY ${String(processPort)}`,
     });
+
     configured.transport.invoke.url = `${invokeServer.url}/invoke`;
     configured.transport.shutdown = { method: 'POST', url: `${shutdownServer.url}/shutdown` };
+
     try {
       const session = await startBackgroundAgent(configured, {
         cwd: process.cwd(),
@@ -200,6 +232,7 @@ describe('background process adapter', () => {
         shutdownHeaders: { 'X-Shutdown': 'shutdown-secret' },
         shutdownQuery: { shutdown_token: 'shutdown-query' },
       });
+
       expect((await session.invoke(request)).status).toBe('ok');
       await session.close();
       expect(invokeCredential).toBe('invoke-secret');
@@ -215,25 +248,36 @@ describe('background process adapter', () => {
 
   it('terminates descendants retained before graceful parent shutdown', async () => {
     const port = await freePort();
+
     const configured = agent(port, {
       kind: 'stderr',
       pattern: `READY ${String(port)}`,
     });
+
     configured.transport.start_argv.push('reparent-descendant');
+
     const session = await startBackgroundAgent(configured, {
       cwd: process.cwd(),
       env: { PATH: process.env.PATH ?? '' },
     });
+
     const result = await session.invoke(request);
+
     if (result.status !== 'ok' || !result.report?.ok || !('output' in result.report.value)) {
       throw new Error('Expected descendant fixture output.');
     }
-    const descendantPid = (result.report.value.output as { descendant_pid: number }).descendant_pid;
+
+    const output = result.report.value.output;
+
+    if (output === null || !isJsonObject(output) || !isNumber(output.descendant_pid))
+      throw new Error('Expected descendant pid');
+    const descendantPid = output.descendant_pid;
     await session.close();
     await expect
       .poll(() => {
         try {
           process.kill(descendantPid, 0);
+
           return true;
         } catch {
           return false;

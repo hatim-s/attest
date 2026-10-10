@@ -1,3 +1,5 @@
+import { z } from 'zod';
+
 import { execFile } from 'node:child_process';
 import { access } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -66,23 +68,36 @@ const readGitMetadata = async (projectRoot: string): Promise<EvalRun['git'] | un
         encoding: 'utf8',
         timeout: 2_000,
       });
+
       const value = stdout.trim();
+
       return value.length === 0 ? undefined : value;
     } catch {
       return undefined;
     }
   };
+
   const commit = await runGit(['rev-parse', '--verify', 'HEAD']);
+
   if (commit === undefined || !/^[a-f0-9]{7,64}$/u.test(commit)) return undefined;
+
   const [branch, status] = await Promise.all([
     runGit(['symbolic-ref', '--quiet', '--short', 'HEAD']),
     runGit(['status', '--porcelain=v1', '--untracked-files=normal']),
   ]);
-  return {
-    commit,
-    ...(branch === undefined ? {} : { branch }),
-    dirty: status !== undefined && status.length > 0,
-  };
+
+  {
+    const assembledFields: EvalRun['git'] | undefined = {
+      commit,
+      dirty: status !== undefined && status.length > 0,
+    };
+
+    if (branch !== undefined) {
+      assembledFields.branch = branch;
+    }
+
+    return assembledFields;
+  }
 };
 
 /** Reads one run from a read-only store; a missing store or run is `resource_not_found`. */
@@ -92,12 +107,15 @@ const readStoredRun = async (storePath: string, runId: string): Promise<RunRecor
       path: runId,
       cause,
     });
+
   try {
     await access(storePath);
   } catch (error: unknown) {
     throw runNotFound(error);
   }
+
   const store = await openReadonlyRunStore(storePath);
+
   try {
     return await withRunNotFound(() => store.getRun(runId), runNotFound);
   } finally {
@@ -114,28 +132,37 @@ const runConfiguration = async (
     project: options.project,
     workingDirectory: options.workingDirectory,
   });
+
   const resolved = resolveEvalRun(project, request, { argv: options.argv });
   const identity = createRunIdentity();
   const git = await readGitMetadata(project.root);
-  const run = evalRunSchema.parse({
+
+  const runCandidate: z.input<typeof evalRunSchema> = {
     schema: EVAL_RUN_SCHEMA_ID,
     run_id: identity.id,
     created_at: identity.createdAt,
     snapshot_hash: resolved.snapshotHash,
     snapshot: resolved.snapshot,
     effective_command: resolved.effectiveCommand,
-    ...(git === undefined ? {} : { git }),
-  });
+  };
+
+  if (git !== undefined) runCandidate.git = git;
+  const run = evalRunSchema.parse(runCandidate);
+
   const configuredStorePath = join('.attest', 'runs.db');
+
   const storePath = await prepareEvalProjectFile(project.root, configuredStorePath, {
     errorCode: 'run_failed',
     message: 'The eval run store is not a safe project file.',
   });
+
   // Confirm the baseline exists before any candidate side effect.
   const baselineRunId = resolved.effectiveCommand.resolved.baseline_run_id;
+
   if (baselineRunId !== undefined) await readStoredRun(storePath, baselineRunId);
   const store = await openEvalProjectStore(project.root);
   let registry: Awaited<ReturnType<typeof registerEvalRun>>;
+
   try {
     registry = await registerEvalRun(project.root, run.run_id);
   } catch (error: unknown) {
@@ -144,6 +171,7 @@ const runConfiguration = async (
   }
 
   const queue = new EvalEventQueue();
+
   const plan = {
     run,
     cases: resolved.cases.map((payload) => ({
@@ -155,9 +183,11 @@ const runConfiguration = async (
       payload,
     })),
   };
+
   const runner = createEvalCaseRunner(project.root, store.cache, run);
   void (async () => {
     let canReleaseCancellationOwnership = false;
+
     try {
       const result = await executeResolvedEvalPlan(
         plan,
@@ -171,6 +201,7 @@ const runConfiguration = async (
           terminalFailure: options.terminalFailure,
         },
       );
+
       canReleaseCancellationOwnership = result.can_release_cancellation_ownership;
     } catch (error: unknown) {
       queue.fail(error);
@@ -181,10 +212,12 @@ const runConfiguration = async (
       } else {
         detachEvalRun(registry);
       }
+
       await store.close().catch(() => undefined);
       queue.close();
     }
   })();
+
   return queue;
 };
 
@@ -197,10 +230,13 @@ const cancelConfiguration = async (
     project: options.project,
     workingDirectory: options.workingDirectory,
   });
+
   const result = { projectHash: project.projectHash, runId: request.run_id };
   const requested = await signalRegisteredEvalRun(project.root, request.run_id);
+
   if (requested === 'cancellation_requested') return { ...result, status: requested };
   const run = await readStoredRun(join(project.root, '.attest', 'runs.db'), request.run_id);
+
   return {
     ...result,
     status: run.status === 'cancelled' ? 'already_cancelled' : 'already_terminal',

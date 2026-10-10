@@ -2,6 +2,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+import { z } from 'zod';
 import type { AttestStore } from '@attest/core';
 import { afterEach, describe, expect, it } from 'vitest';
 
@@ -9,6 +10,7 @@ import { openSqliteHandle } from '../internal/open-sqlite-handle.js';
 import { openStore } from '../run-store.js';
 
 const stores: AttestStore[] = [];
+
 const directories: string[] = [];
 
 const openTemporaryStore = async (): Promise<{ path: string; store: AttestStore }> => {
@@ -17,15 +19,23 @@ const openTemporaryStore = async (): Promise<{ path: string; store: AttestStore 
   const store = await openStore(path);
   stores.push(store);
   directories.push(directory);
+
   return { path, store };
 };
 
 const readLastUsedAt = async (path: string, requestHash: string): Promise<string> => {
   const handle = await openSqliteHandle(path);
-  const [row] = (await handle
-    .prepare('SELECT last_used_at FROM response_cache WHERE cache_key = ?')
-    .all(requestHash)) as { last_used_at: string }[];
+
+  const [row] = z
+    .array(z.object({ last_used_at: z.string() }))
+    .parse(
+      await handle
+        .prepare('SELECT last_used_at FROM response_cache WHERE cache_key = ?')
+        .all(requestHash),
+    );
+
   await handle.close();
+
   return row?.last_used_at ?? '';
 };
 

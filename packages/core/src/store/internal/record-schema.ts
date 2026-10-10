@@ -9,8 +9,11 @@ const isoTimestampSchema = z
       Number.isFinite(Date.parse(value)),
     'must be an ISO timestamp',
   );
+
 const nonemptyStringSchema = z.string().min(1);
+
 const durationSchema = z.number().finite().nonnegative();
+
 const invocationErrorCodeSchema = z.enum([
   'spawn_failed',
   'timeout',
@@ -21,16 +24,19 @@ const invocationErrorCodeSchema = z.enum([
   'invalid_envelope',
   'cancelled',
 ]);
+
 const warningSchema = z.object({
   path: z.string(),
   message: z.string(),
   code: z.enum(['unknown_field', 'invalid_trace']),
 });
+
 const rawExcerptSchema = z.object({
   text: z.string(),
   truncated: z.boolean(),
   sha256: z.string().optional(),
 });
+
 const diagnosticsSchema = z.object({
   stderrExcerpt: z.string().optional(),
   exitCode: z.number().int().optional(),
@@ -42,12 +48,14 @@ const diagnosticsSchema = z.object({
   sandboxCleanupConfirmed: z.boolean().optional(),
   sandboxCompletionConfirmed: z.boolean().optional(),
 });
+
 const attemptBase = {
   diagnostics: diagnosticsSchema,
   durationMs: durationSchema,
   rawExcerpt: rawExcerptSchema.optional(),
   warnings: z.array(warningSchema),
 };
+
 const storedAttemptSchema = z.discriminatedUnion('status', [
   z.strictObject({ ...attemptBase, status: z.literal('ok') }),
   z.strictObject({
@@ -57,6 +65,7 @@ const storedAttemptSchema = z.discriminatedUnion('status', [
     errorMessage: z.string(),
   }),
 ]);
+
 const executionBase = {
   caseId: nonemptyStringSchema,
   suiteName: nonemptyStringSchema,
@@ -68,6 +77,7 @@ const executionBase = {
   attempts: z.array(storedAttemptSchema),
   expectedMetrics: z.array(z.string()),
 };
+
 const completedExecutionFields = {
   ...executionBase,
   outcome: z.literal('completed'),
@@ -75,12 +85,14 @@ const completedExecutionFields = {
   response: z.unknown().refine((response) => response !== undefined, 'is required'),
   trace: traceSchema.optional(),
 };
+
 const failedExecutionFields = {
   ...executionBase,
   outcome: z.enum(['invocation_error', 'timeout', 'cancelled']),
   errorCode: invocationErrorCodeSchema,
   errorMessage: z.string(),
 };
+
 // Strict branches reject fields that belong to the other outcome, such as a response on a timeout.
 const storedCaseExecutionSchema = z.discriminatedUnion('outcome', [
   z.strictObject(completedExecutionFields),
@@ -95,6 +107,7 @@ const metricBase = {
   judgeIo: z.json().optional(),
   durationMs: durationSchema.optional(),
 };
+
 const storedMetricEvaluationSchema = z.discriminatedUnion('status', [
   z.strictObject({
     ...metricBase,
@@ -116,6 +129,7 @@ const summarySchema = z.object({
   errorCases: z.number().int().nonnegative(),
   metricErrorCount: z.number().int().nonnegative(),
 });
+
 const runMetadataSchema = z.object({
   schemaId: nonemptyStringSchema,
   configHash: nonemptyStringSchema,
@@ -124,6 +138,7 @@ const runMetadataSchema = z.object({
   gitBranch: z.string().optional(),
   labels: z.record(z.string(), z.string()).optional(),
 });
+
 const runRecordSchema = runMetadataSchema
   .extend({
     id: nonemptyStringSchema,
@@ -140,6 +155,7 @@ const runRecordSchema = runMetadataSchema
         message: 'is forbidden while running',
       });
     }
+
     if (run.status !== 'running' && run.finishedAt === undefined) {
       context.addIssue({
         code: 'custom',
@@ -155,18 +171,26 @@ const caseRecordFields = {
   inputHash: nonemptyStringSchema,
   metrics: z.array(storedMetricEvaluationSchema),
 };
+
 const caseRecordSchema = z.discriminatedUnion('outcome', [
   z.strictObject({ ...completedExecutionFields, ...caseRecordFields }),
   z.strictObject({ ...failedExecutionFields, ...caseRecordFields }),
 ]);
 
 type CaseRecord = z.infer<typeof caseRecordSchema>;
+
 type RunMetadata = z.infer<typeof runMetadataSchema>;
+
 type RunRecord = z.infer<typeof runRecordSchema>;
+
 type RunSummary = z.infer<typeof summarySchema>;
+
 type StoredAttempt = z.infer<typeof storedAttemptSchema>;
+
 type StoredCaseExecution = z.infer<typeof storedCaseExecutionSchema>;
+
 type StoredDiagnostics = z.infer<typeof diagnosticsSchema>;
+
 type StoredMetricEvaluation = z.infer<typeof storedMetricEvaluationSchema>;
 
 export {

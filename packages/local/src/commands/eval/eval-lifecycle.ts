@@ -1,6 +1,6 @@
 import { isAbsolute, resolve } from 'node:path';
 
-import type { EvalRun } from '@attest/contracts';
+import type { EvalRun, EvalEvent } from '@attest/contracts';
 
 import { LocalError } from '../../errors/index.js';
 import { isProjectPath, resolveContainedPath } from '../../project/project-path.js';
@@ -26,11 +26,13 @@ const resolveHookArgv = (projectRoot: string, argv: readonly string[]): string[]
   argv.map((argument) => {
     if (!argument.startsWith('./') && !argument.startsWith('../')) return argument;
     const resolved = resolve(projectRoot, argument);
+
     if (!isProjectPath(projectRoot, resolved)) {
       throw new LocalError('project_invalid', 'Eval hook argument path escapes the project.', {
         path: argument,
       });
     }
+
     return resolved;
   });
 
@@ -42,8 +44,10 @@ const resolveWorkerDirectory = (
   config: LifecycleConfig | undefined,
 ): string | undefined => {
   const template = config?.workers?.directory;
+
   if (template === undefined) return undefined;
   const workers = config?.workers;
+
   if (workers !== undefined && workers.count > 1 && !template.includes('{worker_index}')) {
     throw new LocalError(
       'project_invalid',
@@ -51,10 +55,13 @@ const resolveWorkerDirectory = (
       { path: template },
     );
   }
+
   const relative = template
     .replaceAll('{run_id}', runId)
     .replaceAll('{worker_index}', String(workerIndex));
+
   const directory = resolve(projectRoot, relative);
+
   if (directory === resolve(projectRoot) || !isProjectPath(projectRoot, directory)) {
     throw new LocalError(
       'project_invalid',
@@ -64,6 +71,7 @@ const resolveWorkerDirectory = (
       },
     );
   }
+
   return directory;
 };
 
@@ -113,10 +121,12 @@ const createEvalLifecycle = (projectRoot: string, run: EvalRun) => {
   const runHook = async (options: RunHookOptions): Promise<void> => {
     if (options.command === undefined) return;
     const [file, ...argumentsList] = resolveHookArgv(projectRoot, options.command.argv);
+
     const executable =
       file !== undefined && !isAbsolute(file) && file.includes('/')
         ? resolve(projectRoot, file)
         : file;
+
     try {
       await runHookCommand({
         command: {
@@ -137,21 +147,30 @@ const createEvalLifecycle = (projectRoot: string, run: EvalRun) => {
   };
 
   /** Runs one case-scoped hook in the worker directory with the case identity in its env. */
-  const runCasePhase = (phase: CasePhase, request: CasePhaseRequest): Promise<void> =>
-    runHook({
+  const runCasePhase = (phase: CasePhase, request: CasePhaseRequest): Promise<void> => {
+    const environment: Parameters<typeof runHook>[0]['environment'] = {
+      ...runEnvironment,
+      ATTEST_CASE_ID: request.context.case_id,
+      ATTEST_TEST_ID: request.context.test_id,
+      ATTEST_WORKER_INDEX: String(request.context.worker_index),
+    };
+
+    if (request.directory !== undefined) {
+      environment.ATTEST_WORKER_DIRECTORY = request.directory;
+    }
+
+    if (request.outcome !== undefined) {
+      environment.ATTEST_CASE_OUTCOME = request.outcome;
+    }
+
+    return runHook({
       command: config?.hooks?.[phase],
       cwd: request.directory ?? projectRoot,
-      environment: {
-        ...runEnvironment,
-        ATTEST_CASE_ID: request.context.case_id,
-        ATTEST_TEST_ID: request.context.test_id,
-        ATTEST_WORKER_INDEX: String(request.context.worker_index),
-        ...(request.directory === undefined ? {} : { ATTEST_WORKER_DIRECTORY: request.directory }),
-        ...(request.outcome === undefined ? {} : { ATTEST_CASE_OUTCOME: request.outcome }),
-      },
+      environment,
       phase,
       signal: request.signal,
     });
+  };
 
   const prepareCase = async (context: CaseHookContext): Promise<string | undefined> => {
     const configuredDirectory = resolveWorkerDirectory(
@@ -160,12 +179,17 @@ const createEvalLifecycle = (projectRoot: string, run: EvalRun) => {
       context.worker_index,
       config,
     );
+
     if (configuredDirectory === undefined) return undefined;
+
     return prepareWorkerDirectory(projectRoot, configuredDirectory);
   };
 
   return {
-    afterRun: (status: string, summary: unknown): Promise<void> =>
+    afterRun: (
+      status: string,
+      summary: Extract<EvalEvent, { event: 'run_completed' }>['data']['summary'],
+    ): Promise<void> =>
       runHook({
         command: config?.hooks?.after_run,
         cwd: projectRoot,

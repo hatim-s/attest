@@ -11,6 +11,7 @@ import { evalExecutionConfigSchema } from '../project/eval-execution.js';
 import { COMMAND_REQUEST_SCHEMA_ID, EVAL_RUN_SCHEMA_ID } from '../schema/identifiers.js';
 
 const evalOutputModeSchema = z.enum(['human', 'json', 'jsonl']);
+
 const evalRunIdSchema = z.ulid();
 
 const evalRunCommonRequestFields = {
@@ -33,7 +34,7 @@ const structuredOutputFields = {
 };
 
 /** Builds the explicit-tests and all-tests request branches for one output mode. */
-const testScopeBranches = <OutputFields extends z.core.$ZodLooseShape>(
+const testScopeBranches = <OutputFields extends Record<string, z.core.$ZodType>>(
   outputFields: OutputFields,
 ) =>
   [
@@ -137,10 +138,15 @@ const evalRunSchema = z.strictObject({
 });
 
 type EvalOutputMode = z.infer<typeof evalOutputModeSchema>;
+
 type EvalRun = z.infer<typeof evalRunSchema>;
+
 type EvalRunEffectiveCommand = z.infer<typeof evalRunEffectiveCommandSchema>;
+
 type EvalRunRequest = z.infer<typeof evalRunRequestSchema>;
+
 type EvalRunSelectedCase = z.infer<typeof evalRunSelectedCaseSchema>;
+
 type EvalRunSnapshot = z.infer<typeof evalRunSnapshotSchema>;
 
 export {

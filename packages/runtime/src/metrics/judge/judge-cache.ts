@@ -31,6 +31,7 @@ const inFlightCallsByCache = new WeakMap<JudgeCache, Map<string, InFlightJudgeCa
 /** Hashes the exact rendered judge request, excluding threshold because callers recompute pass from score. */
 const computeJudgeCacheKey = (request: JudgeRequest): string => {
   const prompt = buildJudgePrompt(request);
+
   return createHash('sha256')
     .update(
       canonicalStringify({
@@ -54,6 +55,7 @@ const callThroughCache = async (
   scope.signal?.throwIfAborted();
   const cached = await cache.get(key);
   scope.signal?.throwIfAborted();
+
   if (cached !== undefined) {
     return { outcome: cached, source: 'hit' };
   }
@@ -62,12 +64,15 @@ const callThroughCache = async (
     timeoutMs: scope.timeoutMs,
     signal: scope.signal,
   });
+
   scope.signal?.throwIfAborted();
+
   try {
     await cache.set(key, outcome);
   } catch {
     // Cache persistence is advisory: a completed provider verdict remains the source of truth for this run.
   }
+
   return { outcome, source: 'miss' };
 };
 
@@ -82,12 +87,14 @@ const resolveThroughJudgeCache = async (
 ): Promise<{ outcome: JudgeOutcome; source: JudgeCacheSource; key: string }> => {
   const key = computeJudgeCacheKey(request);
   let inFlightCalls = inFlightCallsByCache.get(cache);
+
   if (inFlightCalls === undefined) {
     inFlightCalls = new Map();
     inFlightCallsByCache.set(cache, inFlightCalls);
   }
 
   const inFlight = inFlightCalls.get(key);
+
   if (
     inFlight !== undefined &&
     inFlight.client === scope.client &&
@@ -95,20 +102,26 @@ const resolveThroughJudgeCache = async (
     inFlight.timeoutMs === scope.timeoutMs
   ) {
     const shared = await inFlight.promise;
+
     return { outcome: shared.outcome, source: shared.source === 'hit' ? 'hit' : 'coalesced', key };
   }
 
   const promise = callThroughCache(cache, key, request, scope);
+
   if (inFlight === undefined) {
     const call = { ...scope, promise };
+
     const release = (): void => {
       if (inFlightCalls.get(key) === call) inFlightCalls.delete(key);
     };
+
     inFlightCalls.set(key, call);
     // Detached on purpose: callers await the call promise itself; this only frees the slot.
     void promise.then(release, release);
   }
+
   const resolved = await promise;
+
   return { ...resolved, key };
 };
 

@@ -34,6 +34,7 @@ const caseSelectionSummarySchema = z
   );
 
 type CaseSelection = z.infer<typeof caseSelectionSchema>;
+
 type CaseSelectionSummary = z.infer<typeof caseSelectionSummarySchema>;
 
 export {

@@ -103,6 +103,7 @@ describe('resource output URL redaction', () => {
         extraction: { score_pointer: '/score', pass_pointer: '/pass' },
       },
     });
+
     const output = JSON.stringify(redactMetricResource(metric));
     expect(output).toContain('REDACTED');
     expect(output).not.toMatch(/metric-(?:password|token|key)/u);

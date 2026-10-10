@@ -72,36 +72,44 @@ describe('buildEvaluationDocument', () => {
 });
 
 /** Returns what an action throws, so the error's fields can be matched directly. */
-const thrownBy = (action: () => unknown): unknown => {
+const thrownBy = (action: () => void) => {
   try {
     action();
   } catch (error: unknown) {
-    return error;
+    return { cause: error };
   }
-  return undefined;
+
+  return { cause: undefined };
 };
 
 type DocumentPathValue = { path: string; value: unknown };
+
 const fieldNamePattern = /^[A-Za-z_][A-Za-z0-9_]*$/;
 
 /** Walks every path expressible by the v0 grammar, retaining its exact value for resolution assertions. */
+// BOUNDARY: Generated document values are inspected only for traversable object and array containers.
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  value !== null && typeof value === 'object' && !Array.isArray(value);
+
+// BOUNDARY: Generated JSON fields are walked through own keys to produce expected path/value observations.
 const collectDocumentPaths = (value: unknown, path = '$'): DocumentPathValue[] => {
   const paths: DocumentPathValue[] = [{ path, value }];
+
   if (Array.isArray(value)) {
-    return value.reduce<DocumentPathValue[]>(
-      (allPaths, child, index) => allPaths.concat(collectDocumentPaths(child, `${path}[${index}]`)),
-      paths,
+    value.forEach((child, index) =>
+      paths.push(...collectDocumentPaths(child, `${path}[${index}]`)),
     );
-  }
-  if (value === null || typeof value !== 'object') {
+
     return paths;
   }
-  return Object.entries(value).reduce<DocumentPathValue[]>((allPaths, [key, child]) => {
-    if (!fieldNamePattern.test(key)) {
-      return allPaths;
-    }
-    return allPaths.concat(collectDocumentPaths(child, `${path}.${key}`));
-  }, paths);
+
+  if (!isRecord(value)) return paths;
+
+  for (const [key, child] of Object.entries(value)) {
+    if (fieldNamePattern.test(key)) paths.push(...collectDocumentPaths(child, `${path}.${key}`));
+  }
+
+  return paths;
 };
 
 describe('evaluation-document path properties', () => {
@@ -140,7 +148,7 @@ describe('evaluation-document path properties', () => {
         fc.string().filter((path) => !/^\$(?:\.[A-Za-z_][A-Za-z0-9_]*|\[\d+\])*$/.test(path)),
         (path) => {
           expect(
-            thrownBy(() => resolveValuePath({ input: null, trace: null }, path)),
+            thrownBy(() => resolveValuePath({ input: null, trace: null }, path)).cause,
           ).toMatchObject({
             code: 'invalid_path',
           });

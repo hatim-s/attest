@@ -26,6 +26,7 @@ const createProject = async (): Promise<string> => {
   const root = await mkdtemp(join(tmpdir(), 'attest-test-mutation-'));
   onTestFinished(() => rm(root, { force: true, recursive: true }));
   await writeFixtureProject(root);
+
   return root;
 };
 
@@ -33,16 +34,19 @@ const createProject = async (): Promise<string> => {
 const snapshotProject = async (root: string): Promise<Record<string, string>> => {
   const entries = await readdir(root, { recursive: true, withFileTypes: true });
   const snapshot: Record<string, string> = {};
+
   for (const entry of entries.filter((item) => item.isFile())) {
     const path = join(entry.parentPath, entry.name);
     snapshot[path] = await readFile(path, 'base64');
   }
+
   return snapshot;
 };
 
 const writeSource = async (root: string, name: string, contents: string): Promise<string> => {
   const path = join(root, name);
   await writeFile(path, contents);
+
   return path;
 };
 
@@ -128,11 +132,13 @@ describe('runTestMutationCommand', { timeout: 20_000 }, () => {
 
   it('generates the same case id for direct and dataset imports and keeps it across a dataset rename', async () => {
     const root = await createProject();
+
     const source = await writeSource(
       root,
       'native.json',
       JSON.stringify([{ input: { prompt: 'same' }, expected: 'ok' }]),
     );
+
     await addTest(root, 'direct');
     await addTest(root, 'dataset-owner');
     await mutate(root, {
@@ -163,11 +169,13 @@ describe('runTestMutationCommand', { timeout: 20_000 }, () => {
 
   it('reports every case collision when attaching a dataset', async () => {
     const root = await createProject();
+
     const source = await writeSource(
       root,
       'collisions.jsonl',
       '{"id":"collision-one","input":1}\n{"id":"collision-two","input":2}\n',
     );
+
     await addTest(root, 'holding');
     await importDataset(root, { as: 'collisions', source, testId: 'holding' });
     await addCase(root, 'refund', 'collision-one');
@@ -216,6 +224,7 @@ describe('runTestMutationCommand', { timeout: 20_000 }, () => {
 
   it('diffs a direct-case removal by case id instead of array position', async () => {
     const root = await createProject();
+
     for (const id of ['case-one', 'case-two', 'case-three']) await addCase(root, 'refund', id);
 
     const preview = await mutate(root, {
@@ -229,6 +238,7 @@ describe('runTestMutationCommand', { timeout: 20_000 }, () => {
     const testUpdate = preview.result.operations.find(
       ({ resource }) => resource.type === 'test' && resource.id === 'refund',
     );
+
     expect(testUpdate?.changes).toContainEqual(
       expect.objectContaining({ change: 'remove', path: '/cases/case-one' }),
     );
@@ -238,17 +248,21 @@ describe('runTestMutationCommand', { timeout: 20_000 }, () => {
   it('rejects a direct import that collides with an attached case before writing', async () => {
     const root = await createProject();
     await addTest(root, 'target');
+
     const datasetSource = await writeSource(
       root,
       'attached.jsonl',
       '{"id":"attached-id","input":"dataset"}\n',
     );
+
     await importDataset(root, { as: 'attached', source: datasetSource, testId: 'target' });
+
     const directSource = await writeSource(
       root,
       'direct.json',
       '[{"id":"attached-id","input":"direct"}]',
     );
+
     const before = await snapshotProject(root);
 
     await expect(
@@ -284,6 +298,7 @@ describe('runTestMutationCommand', { timeout: 20_000 }, () => {
       dataset_id: 'filtered',
       tags: ['billing'],
     });
+
     const source = await writeSource(
       root,
       'filtered.json',
@@ -295,6 +310,7 @@ describe('runTestMutationCommand', { timeout: 20_000 }, () => {
       { as: 'filtered', source, testId: 'filtered-target' },
       { import: { sync: 'upsert' } },
     );
+
     expect(imported.result.committed).toBe(true);
   });
 
@@ -316,12 +332,15 @@ describe('runTestMutationCommand', { timeout: 20_000 }, () => {
     const metadata = datasetResourceSchema.parse(
       JSON.parse(await readFile(join(root, 'attest/datasets/stable.meta.json'), 'utf8')),
     );
+
     const importedAt = Date.parse(metadata.provenance?.imported_at ?? '');
     expect(importedAt).toBeGreaterThanOrEqual(beforeCommit);
     expect(importedAt).toBeLessThanOrEqual(afterCommit);
+
     const manifest = projectManifestSchema.parse(
       JSON.parse(await readFile(join(root, 'attest.project.json'), 'utf8')),
     );
+
     expect(
       manifest.resources.datasets.find(({ id }) => id === 'stable')?.metadata_content_hash,
     ).toBe(contentHash(metadata));
@@ -331,6 +350,7 @@ describe('runTestMutationCommand', { timeout: 20_000 }, () => {
     const root = await createProject();
     const source = join(root, 'incremental.csv');
     const target = { as: 'incremental', source, testId: 'refund' };
+
     const upsert = {
       import: {
         mapping: [{ destination: 'input', source: 'prompt' }],
@@ -338,8 +358,10 @@ describe('runTestMutationCommand', { timeout: 20_000 }, () => {
         sync: 'upsert' as const,
       },
     };
+
     await writeFile(source, 'external_id,prompt\none,old\ntwo,preserved\n');
     await importDataset(root, target, upsert);
+
     const initial = (await loadProject({ project: root })).datasets.find(
       ({ metadata }) => metadata.id === 'incremental',
     )?.cases;
@@ -352,6 +374,7 @@ describe('runTestMutationCommand', { timeout: 20_000 }, () => {
     const dataset = (await loadProject({ project: root })).datasets.find(
       ({ metadata }) => metadata.id === 'incremental',
     );
+
     expect(dataset?.cases).toEqual([
       { id: initial?.[0]?.id, input: 'new' },
       initial?.[1],
@@ -397,11 +420,13 @@ describe('runTestMutationCommand', { timeout: 20_000 }, () => {
     expect(confirmed.result).toMatchObject({ affected_tests: affected, committed: true });
 
     await addTest(root, 'shared-new');
+
     const newConsumer = await importDataset(
       root,
       { ...target, testId: 'shared-new' },
       { ...upsert, yes: true },
     );
+
     expect(newConsumer.result.affected_tests).toEqual(['shared-new', ...affected]);
   });
 
@@ -441,7 +466,7 @@ describe('runTestMutationCommand', { timeout: 20_000 }, () => {
     const error: unknown = await readCommandRequest('test.add', requestPath, {
       readStdin: () => Promise.reject(new Error('stdin must not be read')),
       workingDirectory: root,
-    }).catch((caught: unknown) => caught);
+    }).catch((cause: unknown) => cause);
 
     if (!(error instanceof LocalError)) throw new Error('Expected a LocalError.');
     expect(error.code).toBe('cli_usage');

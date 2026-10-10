@@ -13,6 +13,7 @@ const createTemporaryDirectory = async (): Promise<string> => {
   const directory = await mkdtemp(join(tmpdir(), 'attest-project-discovery-'));
   const resolvedDirectory = await realpath(directory);
   temporaryDirectories.push(resolvedDirectory);
+
   return resolvedDirectory;
 };
 

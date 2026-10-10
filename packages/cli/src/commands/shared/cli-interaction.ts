@@ -15,6 +15,7 @@ type CliInteraction = {
 /** Asks one readline question; the signal closes the question so its terminal listeners go too. */
 const promptOnTerminal: CliPrompt = async (question, options) => {
   const readline = createInterface({ input: process.stdin, output: process.stdout });
+
   try {
     return await readline.question(question, { signal: options?.signal });
   } finally {

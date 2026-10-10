@@ -1,3 +1,4 @@
+import type { CommandRequest } from '@attest/contracts';
 import { CASE_SCHEMA_ID, DATASET_SCHEMA_ID } from '@attest/contracts';
 import { runTestDatasetRemovePreflight } from '@attest/local/test';
 import type { Command } from 'commander';
@@ -32,6 +33,7 @@ type DatasetAttachOptions = MutationCliOptions & { tag?: string[] };
 /** Registers attached dataset authoring, import, and lifecycle commands. */
 const registerTestDatasetCommands = (test: Command, context: CommandContext): void => {
   const dataset = test.command('dataset').description('Add, import, and attach datasets.');
+
   const datasetAdd = addMutationOptions(
     dataset.command('add').description('Add an empty dataset and attach it atomically.'),
   )
@@ -46,6 +48,7 @@ const registerTestDatasetCommands = (test: Command, context: CommandContext): vo
         leaf: Command,
       ) => {
         const prompt = promptContext(options, context.interaction);
+
         const request = await readOrBuildRequest({
           command: 'test.dataset.add',
           context,
@@ -57,6 +60,7 @@ const registerTestDatasetCommands = (test: Command, context: CommandContext): vo
               { path: '<dataset-id>', question: 'Dataset id: ' },
               prompt,
             );
+
             return {
               ...mutationRequestFields('test.dataset.add', options),
               test_id: await requiredInput(
@@ -74,9 +78,11 @@ const registerTestDatasetCommands = (test: Command, context: CommandContext): vo
             };
           },
         });
+
         await runTestMutation(request, options, context);
       },
     );
+
   setMutationHelp(datasetAdd, { examples: ['attest test dataset add smoke regression'] });
 
   const datasetImport = addImportOptions(
@@ -96,43 +102,63 @@ const registerTestDatasetCommands = (test: Command, context: CommandContext): vo
         leaf: Command,
       ) => {
         const prompt = promptContext(options, context.interaction);
+
         const request = await readOrBuildRequest({
           command: 'test.dataset.import',
           context,
           leaf,
           options,
-          build: async () => ({
-            ...mutationRequestFields('test.dataset.import', options),
-            test_id: await requiredInput(
-              testId,
-              { path: '<test-id>', question: 'Test id: ' },
-              prompt,
-            ),
-            source: await requiredInput(
-              source,
-              { path: '<source>', question: 'CSV/JSON/JSONL source: ' },
-              prompt,
-            ),
-            as: await requiredInput(options.as, { path: '--as', question: 'Dataset id: ' }, prompt),
-            ...(options.name === undefined ? {} : { name: options.name }),
-            import: importRequestFields(options),
-          }),
+          build: async () => {
+            const request: Extract<CommandRequest, { command: 'test.dataset.import' }> = {
+              ...mutationRequestFields('test.dataset.import', options),
+              test_id: await requiredInput(
+                testId,
+                { path: '<test-id>', question: 'Test id: ' },
+                prompt,
+              ),
+              source: await requiredInput(
+                source,
+                { path: '<source>', question: 'CSV/JSON/JSONL source: ' },
+                prompt,
+              ),
+              as: await requiredInput(
+                options.as,
+                { path: '--as', question: 'Dataset id: ' },
+                prompt,
+              ),
+              import: importRequestFields(options),
+            };
+
+            if (options.name !== undefined) {
+              request.name = options.name;
+            }
+
+            return request;
+          },
         });
+
         if (request.dry_run === true) {
           await runTestMutation(request, options, context);
+
           return;
         }
+
         if (request.yes === true) {
           await runConfirmedDatasetImport(request, options, context);
+
           return;
         }
+
         if (prompt.interactive) {
           await runGuidedImport(request, options, context);
+
           return;
         }
+
         await runTestMutation(request, options, context);
       },
     );
+
   setMutationHelp(datasetImport, {
     examples: [
       'attest test dataset import smoke ./cases.jsonl --as regression',
@@ -162,29 +188,39 @@ const registerTestDatasetCommands = (test: Command, context: CommandContext): vo
         leaf: Command,
       ) => {
         const prompt = promptContext(options, context.interaction);
+
         const request = await readOrBuildRequest({
           command: 'test.dataset.attach',
           context,
           leaf,
           options,
-          build: async () => ({
-            ...mutationRequestFields('test.dataset.attach', options),
-            test_id: await requiredInput(
-              testId,
-              { path: '<test-id>', question: 'Test id: ' },
-              prompt,
-            ),
-            dataset_id: await requiredInput(
-              datasetId,
-              { path: '<dataset-id>', question: 'Dataset id: ' },
-              prompt,
-            ),
-            ...(options.tag === undefined ? {} : { tags: options.tag }),
-          }),
+          build: async () => {
+            const request: Extract<CommandRequest, { command: 'test.dataset.attach' }> = {
+              ...mutationRequestFields('test.dataset.attach', options),
+              test_id: await requiredInput(
+                testId,
+                { path: '<test-id>', question: 'Test id: ' },
+                prompt,
+              ),
+              dataset_id: await requiredInput(
+                datasetId,
+                { path: '<dataset-id>', question: 'Dataset id: ' },
+                prompt,
+              ),
+            };
+
+            if (options.tag !== undefined) {
+              request.tags = options.tag;
+            }
+
+            return request;
+          },
         });
+
         await runTestMutation(request, options, context);
       },
     );
+
   setMutationHelp(datasetAttach, { examples: ['attest test dataset attach smoke regression'] });
 
   const datasetDetach = addMutationOptions(
@@ -200,6 +236,7 @@ const registerTestDatasetCommands = (test: Command, context: CommandContext): vo
         leaf: Command,
       ) => {
         const prompt = promptContext(options, context.interaction);
+
         const request = await readOrBuildRequest({
           command: 'test.dataset.detach',
           context,
@@ -219,9 +256,11 @@ const registerTestDatasetCommands = (test: Command, context: CommandContext): vo
             ),
           }),
         });
+
         await runTestMutation(request, options, context);
       },
     );
+
   setMutationHelp(datasetDetach, { examples: ['attest test dataset detach smoke regression'] });
 
   const datasetRename = addMutationOptions(
@@ -237,6 +276,7 @@ const registerTestDatasetCommands = (test: Command, context: CommandContext): vo
         leaf: Command,
       ) => {
         const prompt = promptContext(options, context.interaction);
+
         const request = await readOrBuildRequest({
           command: 'test.dataset.rename',
           context,
@@ -256,9 +296,11 @@ const registerTestDatasetCommands = (test: Command, context: CommandContext): vo
             ),
           }),
         });
+
         await runTestMutation(request, options, context);
       },
     );
+
   setMutationHelp(datasetRename, {
     examples: ['attest test dataset rename regression regression-renamed'],
   });
@@ -282,6 +324,7 @@ const registerTestDatasetCommands = (test: Command, context: CommandContext): vo
           ),
         }),
       });
+
       if (request.dry_run !== true) {
         await runTestDatasetRemovePreflight({
           datasetId: request.dataset_id,
@@ -289,11 +332,14 @@ const registerTestDatasetCommands = (test: Command, context: CommandContext): vo
           workingDirectory: context.workingDirectory,
         });
       }
+
       if (!(await confirmRemoval(request, `dataset ${request.dataset_id}`, options, context))) {
         return;
       }
+
       await runTestMutation(request, options, context);
     });
+
   setMutationHelp(datasetRemove, { examples: ['attest test dataset remove regression --yes'] });
 
   setCliCommandHelpMetadata(test, {

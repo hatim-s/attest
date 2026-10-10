@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import type { AssertionCheck, Trace } from '@attest/contracts';
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
@@ -275,6 +276,7 @@ describe('evaluateAssertionCheck', () => {
     const outcome = evaluateAssertionCheck(check, customDocument ?? document);
 
     expect(outcome.passed).toBe(passed);
+
     if (reason === undefined) {
       expect(outcome.reason).toBeUndefined();
     } else {
@@ -322,9 +324,13 @@ describe('evaluateAssertionMetric', () => {
 
     expect(result.score).toBe(2 / 3);
     expect(result.pass).toBe(false);
-    const checks = result.details as { checks: { passed: boolean; reason?: string }[] };
+
+    const checks = z
+      .object({ checks: z.array(z.object({ passed: z.boolean(), reason: z.string().optional() })) })
+      .parse(result.details);
+
     expect(checks.checks.map(({ passed }) => passed)).toEqual([true, false, true]);
-    expect(typeof checks.checks[1]?.reason).toBe('string');
+    expect(checks.checks[1]?.reason).toBeTypeOf('string');
   });
 
   it('fails a permissive JSON Schema when its root path is absent', () => {
@@ -344,6 +350,7 @@ describe('evaluateAssertionMetric', () => {
 
   it('isolates schemas that share an identifier', () => {
     const sharedIdentifier = 'https://attest.dev/schema/shared';
+
     const first = evaluateAssertionMetric(
       {
         name: 'first-schema',
@@ -359,6 +366,7 @@ describe('evaluateAssertionMetric', () => {
       },
       document,
     );
+
     const second = evaluateAssertionMetric(
       {
         name: 'second-schema',

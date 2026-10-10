@@ -40,6 +40,7 @@ describe('traceSchema', () => {
     const result = traceSchema.safeParse(trace);
 
     expect(result.success).toBe(false);
+
     if (result.success) {
       return;
     }
@@ -62,6 +63,7 @@ describe('traceSchema', () => {
     const result = parseTrace(trace);
 
     expect(result.ok).toBe(true);
+
     if (!result.ok) {
       return;
     }
@@ -91,6 +93,7 @@ describe('traceSchema', () => {
     const result = parseTrace(trace);
 
     expect(result.ok).toBe(true);
+
     if (result.ok) {
       expect(result.value.spans[0]?.status.vendor_status).toBe('queued');
       expect(result.value.spans[0]?.events?.[0]?.vendor_event).toEqual({ source: 'sdk' });
@@ -104,6 +107,7 @@ describe('traceSchema', () => {
     const result = traceSchema.safeParse(trace);
 
     expect(result.success).toBe(false);
+
     if (!result.success) {
       expect(result.error.issues[0]?.path).toEqual(['spans', 1, 'span_id']);
     }

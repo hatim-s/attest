@@ -14,6 +14,7 @@ const publishProjectManifest = async (root: string, contents: string): Promise<v
   let directoryHandle;
   let temporaryExists = false;
   let manifestPublished = false;
+
   try {
     temporaryHandle = await open(temporaryPath, 'wx', 0o644);
     temporaryExists = true;
@@ -34,6 +35,7 @@ const publishProjectManifest = async (root: string, contents: string): Promise<v
     await directoryHandle?.close().catch(() => undefined);
     await temporaryHandle?.close().catch(() => undefined);
     let cleanupFailure: unknown;
+
     if (temporaryExists) {
       try {
         await unlink(temporaryPath);
@@ -41,6 +43,7 @@ const publishProjectManifest = async (root: string, contents: string): Promise<v
         if (errnoCode(unlinkError) !== 'ENOENT') cleanupFailure = unlinkError;
       }
     }
+
     if (manifestPublished) {
       try {
         await unlink(manifestPath);
@@ -49,6 +52,7 @@ const publishProjectManifest = async (root: string, contents: string): Promise<v
         cleanupFailure = rollbackError;
       }
     }
+
     if (cleanupFailure !== undefined) {
       throw new LocalError(
         'project_recovery_required',
@@ -60,6 +64,7 @@ const publishProjectManifest = async (root: string, contents: string): Promise<v
         },
       );
     }
+
     if (errnoCode(error) === 'EEXIST') {
       throw new LocalError('init_conflict', 'Another process initialized this project first.', {
         path: manifestPath,
@@ -67,6 +72,7 @@ const publishProjectManifest = async (root: string, contents: string): Promise<v
         cause: error,
       });
     }
+
     throw error;
   }
 };
@@ -74,6 +80,7 @@ const publishProjectManifest = async (root: string, contents: string): Promise<v
 /** Removes only the exact manifest published by this initialization attempt. */
 const rollbackPublishedManifest = async (root: string, expectedContents: string): Promise<void> => {
   const manifestPath = join(root, 'attest.project.json');
+
   try {
     if ((await readFile(manifestPath, 'utf8')) !== expectedContents) {
       throw new LocalError(
@@ -82,6 +89,7 @@ const rollbackPublishedManifest = async (root: string, expectedContents: string)
         { path: manifestPath },
       );
     }
+
     await unlink(manifestPath);
     await syncPath(root);
   } catch (error: unknown) {

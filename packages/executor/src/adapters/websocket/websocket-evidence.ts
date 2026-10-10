@@ -1,3 +1,4 @@
+import type { AgentResponseCandidate } from '../../internal/agent-response-candidate.js';
 import {
   parseAgentResponse,
   WEBSOCKET_EVIDENCE_SCHEMA_ID,
@@ -53,6 +54,7 @@ const notAcknowledged = {
   reconnect: 'allowed',
   replay: 'allowed',
 } as const;
+
 const acknowledged = {
   state: 'acknowledged',
   retry: 'forbidden',
@@ -83,10 +85,13 @@ const createPendingInvocation = (
 /** Clears attempt timers and detaches the caller abort listener. */
 const clearPendingTimers = (pending: PendingInvocation): void => {
   if (pending.attemptTimer !== undefined) clearTimeout(pending.attemptTimer);
+
   if (pending.idleTimer !== undefined) clearTimeout(pending.idleTimer);
+
   if (pending.callerAbort !== undefined) {
     pending.signal?.removeEventListener('abort', pending.callerAbort);
   }
+
   pending.attemptTimer = undefined;
   pending.idleTimer = undefined;
   pending.callerAbort = undefined;
@@ -112,7 +117,7 @@ type RecordedEvent = {
   /** Raw message text, redacted before it becomes an excerpt. */
   source?: string;
   /** Parsed message, so authored event pointers can be redacted field by field. */
-  raw?: unknown;
+  raw?: JsonValue;
 };
 
 /** Connection-level events describe the socket, not one request, so they omit the request id. */
@@ -141,7 +146,7 @@ type EvidenceRecorder = {
     priorAttempts: readonly InvocationAttempt[],
   ) => InvocationResult;
   /** Validates a candidate envelope extracted from a terminal message. */
-  successResult: (pending: PendingInvocation, response: Record<string, unknown>) => SuccessResult;
+  successResult: (pending: PendingInvocation, response: AgentResponseCandidate) => SuccessResult;
 };
 
 type SuccessResult =
@@ -152,41 +157,57 @@ const createEvidenceRecorder = (
   agent: WebSocketAgentResource,
   secrets: readonly string[],
 ): EvidenceRecorder => {
-  const redactSource = (source: string, raw: unknown): string => {
+  const redactSource = (source: string, raw: JsonValue | undefined): string => {
     if (raw === undefined) return redactTransportText(source, secrets);
+
     return redactEventEvidence(raw, agent.redaction?.event_pointers ?? [], secrets);
   };
 
-  const excerptOf = (source: string | undefined, raw: unknown): EvidenceEvent['excerpt'] => {
+  const excerptOf = (
+    source: string | undefined,
+    raw: JsonValue | undefined,
+  ): EvidenceEvent['excerpt'] => {
     if (source === undefined) return undefined;
     const excerpt = createRawExcerpt(redactSource(source, raw));
+
     if (excerpt.truncated && excerpt.sha256 !== undefined) {
       return { text: excerpt.text, truncated: true, sha256: excerpt.sha256 };
     }
+
     return { text: excerpt.text, truncated: false };
   };
 
   const record = (pending: PendingInvocation, event: RecordedEvent): void => {
     if (pending.events.length >= EVIDENCE_EVENT_CAP) return;
     const excerpt = excerptOf(event.source, event.raw);
-    pending.events.push({
+
+    const recorded: EvidenceEvent = {
       classification: event.classification,
       elapsed_ms: Math.max(0, Math.round(pending.duration())),
-      ...(CONNECTION_EVENTS.has(event.classification) ? {} : { request_id: pending.requestId }),
-      ...(event.bytes === undefined ? {} : { message_bytes: event.bytes }),
-      ...(excerpt === undefined ? {} : { excerpt }),
-    });
+    };
+
+    if (!CONNECTION_EVENTS.has(event.classification)) recorded.request_id = pending.requestId;
+
+    if (event.bytes !== undefined) recorded.message_bytes = event.bytes;
+
+    if (excerpt !== undefined) recorded.excerpt = excerpt;
+    pending.events.push(recorded);
   };
 
-  const evidenceBase = (pending: PendingInvocation): EvidenceBase => ({
-    schema: WEBSOCKET_EVIDENCE_SCHEMA_ID,
-    request_id: pending.requestId,
-    lifecycle: agent.transport.lifecycle,
-    connection_mode: agent.transport.connection_mode,
-    acknowledgement: pending.acknowledged ? acknowledged : notAcknowledged,
-    events: pending.events.slice(0, EVIDENCE_EVENT_CAP),
-    ...(pending.close === undefined ? {} : { close: pending.close }),
-  });
+  const evidenceBase = (pending: PendingInvocation): EvidenceBase => {
+    const base: EvidenceBase = {
+      schema: WEBSOCKET_EVIDENCE_SCHEMA_ID,
+      request_id: pending.requestId,
+      lifecycle: agent.transport.lifecycle,
+      connection_mode: agent.transport.connection_mode,
+      acknowledgement: pending.acknowledged ? acknowledged : notAcknowledged,
+      events: pending.events.slice(0, EVIDENCE_EVENT_CAP),
+    };
+
+    if (pending.close !== undefined) base.close = pending.close;
+
+    return base;
+  };
 
   const failureEvidence = (
     pending: PendingInvocation,
@@ -195,6 +216,7 @@ const createEvidenceRecorder = (
     if (classification === 'cancelled') {
       return { ...evidenceBase(pending), outcome: 'cancelled', error_classification: 'cancelled' };
     }
+
     return { ...evidenceBase(pending), outcome: 'failed', error_classification: classification };
   };
 
@@ -211,6 +233,7 @@ const createEvidenceRecorder = (
     countMessage: (pending, bytes) => {
       pending.messageCount += 1;
       pending.totalEvidenceBytes += bytes;
+
       return (
         pending.messageCount <= (agent.limits?.event_count ?? DEFAULT_EVENT_COUNT) &&
         pending.totalEvidenceBytes <=
@@ -225,10 +248,12 @@ const createEvidenceRecorder = (
     failureAttempt,
     failureResult: (pending, error, classification, priorAttempts) => {
       const attempt = failureAttempt(pending, error, classification);
+
       return { ...attempt, attempts: [...priorAttempts, attempt] };
     },
     successResult: (pending, response) => {
       const report = parseAgentResponse(response);
+
       if (!report.ok) {
         return {
           ok: false,
@@ -238,6 +263,7 @@ const createEvidenceRecorder = (
           ),
         };
       }
+
       const attempt: InvocationAttempt = {
         status: 'ok',
         raw: response,
@@ -247,6 +273,7 @@ const createEvidenceRecorder = (
         rawExcerpt: evidenceExcerpt({ ...evidenceBase(pending), outcome: 'completed' }),
         warnings: report.warnings,
       };
+
       return { ok: true, result: { ...attempt, attempts: [...pending.attempts, attempt] } };
     },
   };

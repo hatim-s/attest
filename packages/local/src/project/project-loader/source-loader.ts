@@ -1,7 +1,7 @@
 import { readFile, realpath, stat } from 'node:fs/promises';
 import { resolve } from 'node:path';
 
-import type { z } from 'zod';
+import { z } from 'zod';
 
 import type { JsonValue } from '@attest/contracts';
 
@@ -19,6 +19,7 @@ const readProjectSource = async (
   source: string,
 ): Promise<{ diagnostics: ProjectDiagnostic[]; text?: string }> => {
   const candidate = resolve(root, source);
+
   if (!isProjectPath(root, candidate)) {
     return {
       diagnostics: [
@@ -28,10 +29,12 @@ const readProjectSource = async (
   }
 
   let resolvedSource: string;
+
   try {
     resolvedSource = await realpath(candidate);
   } catch (error: unknown) {
     const missing = errnoCode(error) === 'ENOENT';
+
     return {
       diagnostics: [
         {
@@ -63,6 +66,7 @@ const readProjectSource = async (
         ],
       };
     }
+
     return { diagnostics: [], text: await readFile(resolvedSource, 'utf8') };
   } catch {
     return {
@@ -74,13 +78,11 @@ const readProjectSource = async (
 };
 
 /** Parses JSON without forwarding parser excerpts that may contain authored secret values. */
-const parseJson = (
-  text: string,
-  source: string,
-  path?: string,
-): { diagnostics: ProjectDiagnostic[]; value?: JsonValue } => {
+type ParsedProjectJson = { diagnostics: ProjectDiagnostic[]; value?: JsonValue };
+
+const parseJson = (text: string, source: string, path?: string): ParsedProjectJson => {
   try {
-    return { diagnostics: [], value: JSON.parse(text) as JsonValue };
+    return { diagnostics: [], value: z.json().parse(JSON.parse(text)) };
   } catch {
     return {
       diagnostics: [{ code: 'json_invalid', message: 'could not parse JSON', path, source }],
@@ -109,12 +111,15 @@ const loadJsonResource = async <Value>(
   hashValue: (value: JsonValue) => string = contentHash,
 ): Promise<LoadedJsonResource<Value>> => {
   const loaded = await readProjectSource(root, source);
+
   if (loaded.text === undefined) return { diagnostics: loaded.diagnostics, source };
   const parsed = parseJson(loaded.text, source);
+
   if (parsed.value === undefined) return { diagnostics: parsed.diagnostics, source };
 
   const hash = hashValue(parsed.value);
   const diagnostics = [...parsed.diagnostics];
+
   if (expectedHash !== undefined && expectedHash !== hash) {
     diagnostics.push({
       code: 'content_hash_mismatch',
@@ -124,10 +129,13 @@ const loadJsonResource = async <Value>(
   }
 
   const validated = schema.safeParse(parsed.value);
+
   if (!validated.success) {
     diagnostics.push(...schemaDiagnostics(source, validated.error.issues));
+
     return { diagnostics, hash, rawValue: parsed.value, source };
   }
+
   return { diagnostics, hash, rawValue: parsed.value, source, value: validated.data };
 };
 

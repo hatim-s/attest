@@ -28,15 +28,18 @@ class BoundedOutputWritable extends Writable {
     this.receivedBytes += buffer.length;
     this.hash.update(buffer);
     const remaining = Math.max(0, this.capBytes - this.retainedBytes);
+
     if (remaining > 0) {
       const retained = buffer.subarray(0, remaining);
       this.chunks.push(retained);
       this.retainedBytes += retained.length;
     }
+
     if (!this.exceeded && this.receivedBytes > this.capBytes) {
       this.exceeded = true;
       this.onExceeded?.();
     }
+
     callback();
   }
 

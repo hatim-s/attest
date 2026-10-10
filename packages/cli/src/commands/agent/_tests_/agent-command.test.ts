@@ -2,7 +2,12 @@ import { access, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { AGENT_PROTOCOL, cliHelpSchema, type AgentResource } from '@attest/contracts';
+import {
+  AGENT_PROTOCOL,
+  cliHelpSchema,
+  type AgentResource,
+  type JsonValue,
+} from '@attest/contracts';
 import { loadProject } from '@attest/local/project';
 import { openStore } from '@attest/local/store';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -17,16 +22,40 @@ import {
 import type { CliInteraction } from '../../shared/cli-interaction.js';
 
 const FIXTURE = fileURLToPath(new URL('./fixtures/native-agent.cjs', import.meta.url));
+
 const WEBSOCKET_SERVER = new URL(
   '../../../../../executor/src/adapters/websocket/_tests_/support/test-websocket-server.ts',
   import.meta.url,
 ).href;
+
 const originalWebSocketToken = process.env.ATTEST_WS_TOKEN;
 
 type WebSocketFixtureServer = {
   close: () => Promise<void>;
   url: string;
 };
+
+type WebSocketFixturePeer = { sendJson: (value: JsonValue) => void };
+
+type WebSocketFixtureModule = {
+  startTestWebSocketServer: (options: {
+    subprotocol: string;
+    onConnection: (
+      peer: WebSocketFixturePeer,
+      request: { headers: { authorization?: string } },
+    ) => void;
+    onMessage: (peer: WebSocketFixturePeer, value: JsonValue) => void;
+  }) => Promise<WebSocketFixtureServer>;
+};
+
+const isProbeRecord = (value: JsonValue | undefined): value is Record<string, JsonValue> =>
+  value !== undefined && value !== null && typeof value === 'object' && !Array.isArray(value);
+
+const isRecordedProbe = (value: JsonValue | undefined): value is { recorded_run_id: string } =>
+  isProbeRecord(value) && typeof value.recorded_run_id === 'string';
+
+const isFixtureRequest = (value: JsonValue): value is { request_id: string } =>
+  isProbeRecord(value) && typeof value.request_id === 'string';
 
 /** A TTY terminal whose prompt answers come from `answer`. */
 const tty = (answer: (question: string) => string): Partial<CliInteraction> => ({
@@ -80,15 +109,21 @@ describe('agent commands', () => {
   it('routes guided, --from-json, and import requests to canonical resources', async () => {
     const root = await createEmptyProject();
     const questions: string[] = [];
+
     const guided = await runCommand(root, ['agent', 'add'], {
       interaction: tty((question) => {
         questions.push(question);
+
         if (question.includes('Apply these changes?')) return 'yes';
+
         if (question.startsWith('Agent id')) return 'guided';
+
         if (question.startsWith('Transport')) return 'cli';
+
         return 'node agent.mjs';
       }),
     });
+
     expect(guided.exitCode).toBe(0);
     expect(questions.slice(0, 3)).toEqual([
       'Agent id: ',
@@ -103,15 +138,18 @@ describe('agent commands', () => {
       name: id,
       transport: { kind: 'native_cli', lifecycle: 'per_case', argv: ['node', 'agent.mjs'] },
     });
+
     const request = JSON.stringify({
       schema: 'attest.command-request',
       command: 'agent.add',
       agent: agent('requested'),
     });
+
     const fromJson = await runJson(root, ['agent', 'add', '--from-json', '-'], { stdin: request });
     expect(fromJson.exitCode).toBe(0);
 
     await writeFile(join(root, 'import.json'), JSON.stringify(agent('source-id')));
+
     const imported = await runJson(root, [
       'agent',
       'import',
@@ -121,6 +159,7 @@ describe('agent commands', () => {
       '--as',
       'imported',
     ]);
+
     expect(imported.exitCode).toBe(0);
 
     const loaded = await loadProject({ project: root });
@@ -147,9 +186,11 @@ describe('agent commands', () => {
       source_type: 'json',
       as: 'stdin-agent',
     });
+
     const conflict = await runJson(root, ['agent', 'import', '--from-json', '-'], {
       stdin: request,
     });
+
     expect(conflict.exitCode).toBe(2);
     expect(conflict.document).toMatchObject({
       error: {
@@ -184,6 +225,7 @@ describe('agent commands', () => {
 
   it('maps --sandbox-json onto native CLI agents and rejects it elsewhere', async () => {
     const root = await createEmptyProject();
+
     const sandbox = {
       kind: 'vercel',
       image: 'node:22',
@@ -191,6 +233,7 @@ describe('agent commands', () => {
       artifacts: [{ source: 'workspace/output.json', destination: 'artifacts/output.json' }],
       artifact_directory: '.attest/artifacts',
     };
+
     const added = await runJson(root, [
       'agent',
       'add',
@@ -200,6 +243,7 @@ describe('agent commands', () => {
       '--sandbox-json',
       JSON.stringify(sandbox),
     ]);
+
     expect(added.exitCode).toBe(0);
     expect((await loadProject({ project: root })).agents[0]?.transport).toMatchObject({
       kind: 'native_cli',
@@ -210,6 +254,7 @@ describe('agent commands', () => {
       kind: 'vercel',
       files: [{ source: '../agent.mjs', destination: 'agent.mjs' }],
     });
+
     for (const [selector, value, invalidSandbox] of [
       ['--argv-json', '["node","agent.mjs"]', '{'],
       ['--argv-json', '["node","agent.mjs"]', traversal],
@@ -228,6 +273,7 @@ describe('agent commands', () => {
         '--sandbox-json',
         invalidSandbox,
       ]);
+
       expect(rejected.exitCode).toBe(2);
       expect(rejected.document).toMatchObject({
         error: { code: 'cli_usage', path: '--sandbox-json' },
@@ -249,6 +295,7 @@ describe('agent commands', () => {
     expect(await snapshotTree(root)).toEqual(before);
 
     const staleHash = 'a'.repeat(64);
+
     const conflict = await runJson(root, [
       'agent',
       'add',
@@ -258,6 +305,7 @@ describe('agent commands', () => {
       '--if-project-hash',
       staleHash,
     ]);
+
     expect(conflict.exitCode).toBe(3);
     expect(conflict.document).toMatchObject({
       error: { code: 'project_changed', details: { expected_hash: staleHash } },
@@ -284,6 +332,7 @@ describe('agent commands', () => {
       '--detach',
       '--dry-run',
     ]);
+
     expect(humanPreview.exitCode).toBe(0);
     expect(humanPreview.output.join('\n')).toContain('Warning: Removed dependent tests: refund');
 
@@ -300,6 +349,7 @@ describe('agent commands', () => {
       '--detach',
       '--yes',
     ]);
+
     expect(removed.exitCode).toBe(0);
     expect(removed.document).toMatchObject({
       result: { warnings: ['Removed dependent tests: refund'] },
@@ -323,6 +373,7 @@ describe('agent commands', () => {
         },
       }),
     );
+
     for (const [command, argv] of [
       ['agent.add', ['agent', 'add', 'global-position', '--argv-json', echoArgv]],
       ['agent.import', ['agent', 'import', 'prefix-import.json', '--as', 'prefix-import']],
@@ -344,6 +395,7 @@ describe('agent commands', () => {
       '--output',
       'json',
     ]);
+
     expect(duplicate.exitCode).toBe(2);
     expect(JSON.parse(duplicate.output[0] ?? '')).toMatchObject({
       command: 'agent.test',
@@ -355,15 +407,21 @@ describe('agent commands', () => {
     const root = await createEmptyProject();
     const before = await snapshotTree(root);
     const questions: string[] = [];
+
     const declined = await runCommand(root, ['agent', 'add'], {
       interaction: tty((question) => {
         questions.push(question);
+
         if (question.startsWith('Agent id')) return 'declined';
+
         if (question.startsWith('Transport')) return 'cli';
+
         if (question.startsWith('Native command')) return 'node agent.mjs';
+
         return '';
       }),
     });
+
     expect(declined.exitCode).toBe(130);
     expect(questions.at(-1)).toContain('- add agent declined');
     expect(questions.at(-1)).toContain('Apply these changes? [y/N]');
@@ -379,6 +437,7 @@ describe('agent commands', () => {
     );
     const before = await snapshotTree(root);
     const questions: string[] = [];
+
     const responses = [
       'ATTEST_GUIDED_TOKEN',
       '/missing=/question',
@@ -388,18 +447,23 @@ describe('agent commands', () => {
       'direct',
       '/answer',
     ];
+
     const declined = await runCommand(
       root,
       ['agent', 'import', 'guided.curl', '--type', 'curl', '--as', 'guided'],
       {
         interaction: tty((question) => {
           questions.push(question);
+
           if (question.startsWith('Body mapping was invalid')) return '/prompt=/question';
+
           if (question.includes('Apply these changes?')) return 'no';
+
           return responses.shift() ?? '';
         }),
       },
     );
+
     expect(declined.exitCode).toBe(130);
     const confirmation = questions.find((question) => question.includes('Apply these changes?'));
     expect(confirmation).toContain('Redacted definition preview:');
@@ -415,9 +479,11 @@ describe('agent commands', () => {
     const sigintBefore = process.listeners('SIGINT');
     const sigtermBefore = process.listeners('SIGTERM');
     let markPromptStarted = (): void => undefined;
+
     const promptStarted = new Promise<void>((resolve) => {
       markPromptStarted = resolve;
     });
+
     const pending = runCommand(root, ['agent', 'test', '--project', root], {
       interaction: {
         inputIsTTY: true,
@@ -433,10 +499,13 @@ describe('agent commands', () => {
           }),
       },
     });
+
     await promptStarted;
+
     const commandListeners = process
       .listeners('SIGINT')
       .filter((listener) => !sigintBefore.includes(listener));
+
     expect(commandListeners).toHaveLength(1);
     commandListeners[0]?.('SIGINT');
 
@@ -462,6 +531,7 @@ describe('agent commands', () => {
     const watched = await runCommand(root, ['agent', 'test', 'probe', '--watch'], {
       interaction: { inputIsTTY: true, outputIsTTY: true },
     });
+
     expect(watched.exitCode).toBe(0);
     expect(watched.errors).toEqual(['Testing agent probe...', 'Agent probe completed.']);
     await expect(access(store)).rejects.toBeDefined();
@@ -469,12 +539,13 @@ describe('agent commands', () => {
     const recorded = await runJson(root, ['agent', 'test', 'probe', '--record']);
     expect(recorded.exitCode).toBe(0);
     const probe = recorded.document.ok ? recorded.document.result : undefined;
-    if (typeof probe !== 'object' || probe === null || Array.isArray(probe)) {
-      throw new Error('Expected a recorded probe result.');
-    }
+
+    if (!isRecordedProbe(probe)) throw new Error('Expected a recorded probe result.');
+
     const runId = probe.recorded_run_id;
-    if (typeof runId !== 'string') throw new Error('Expected a recorded run id.');
+
     const runs = await openStore(store);
+
     try {
       await expect(runs.runs.getRun(runId)).resolves.toMatchObject({
         status: 'completed',
@@ -488,6 +559,7 @@ describe('agent commands', () => {
   it('reports the exact duration option in a structured failure', async () => {
     const root = await createEmptyProject();
     await writeFile(join(root, 'duration.curl'), 'curl https://agent.example');
+
     const polling = [
       '--poll-job-id-pointer',
       '/job',
@@ -502,6 +574,7 @@ describe('agent commands', () => {
       '--poll-maximum-interval',
       '1s',
     ];
+
     for (const [option, extra] of [
       ['--connect-timeout', []],
       ['--poll-minimum-interval', polling],
@@ -520,6 +593,7 @@ describe('agent commands', () => {
         option,
         'nope',
       ]);
+
       expect(result.exitCode).toBe(2);
       expect(result.document).toMatchObject({ error: { path: option } });
     }
@@ -527,6 +601,7 @@ describe('agent commands', () => {
 
   it('rejects flags the selected transport would discard and publishes the matrix in help', async () => {
     const root = await createEmptyProject();
+
     for (const flags of [
       ['--stream-url', 'http://127.0.0.1:1234/stream', '--env', 'TOKEN=STREAM_TOKEN'],
       ['--jsonl-command', 'node bridge.mjs', '--header-env', 'Authorization=BRIDGE_TOKEN'],
@@ -550,7 +625,9 @@ describe('agent commands', () => {
       '--terminal-value',
       '"done"',
     ]);
+
     expect(stream.exitCode).toBe(0);
+
     const bridge = await runJson(root, [
       'agent',
       'add',
@@ -560,6 +637,7 @@ describe('agent commands', () => {
       '--env',
       'TOKEN=BRIDGE_TOKEN',
     ]);
+
     expect(bridge.exitCode).toBe(0);
     const loaded = await loadProject({ project: root });
     expect(loaded.agents.find(({ id }) => id === 'stream-auth')?.transport).toMatchObject({
@@ -573,10 +651,13 @@ describe('agent commands', () => {
 
     const helpOptions = async (command: string) => {
       const help = await runJson(root, ['help', 'agent', command]);
+
       if (!help.document.ok) throw new Error(`Expected agent ${command} help.`);
       const { options } = cliHelpSchema.parse(help.document.result).command;
+
       return new Map(options.map((option) => [option.name, option]));
     };
+
     const add = await helpOptions('add');
     expect(add.get('env')?.conflicts).toContain('stream-url');
     expect(add.get('header-env')?.conflicts).toContain('jsonl-command');
@@ -606,6 +687,7 @@ describe('agent commands', () => {
     expect(add.get('attempt-timeout')?.implies).toContain('websocket-url');
 
     const importOptions = await helpOptions('import');
+
     for (const name of ['header-env', 'query-env', 'map-body', 'poll-success', 'poll-failure']) {
       expect(importOptions.get(name)?.repeatable).toBe(true);
     }
@@ -616,6 +698,7 @@ describe('WebSocket agent commands', () => {
   it('builds one resource shape from flags, --from-json, JSON import, and the wizard', async () => {
     const root = await createEmptyProject();
     process.env.ATTEST_WS_TOKEN = 'websocket-super-secret';
+
     const flags = await runJson(root, [
       'agent',
       'add',
@@ -656,6 +739,7 @@ describe('WebSocket agent commands', () => {
       '500ms',
       '--trace',
     ]);
+
     expect(flags.exitCode).toBe(0);
     expect(flags.output.join('')).not.toContain('websocket-super-secret');
 
@@ -664,6 +748,7 @@ describe('WebSocket agent commands', () => {
       command: 'agent.add',
       agent: canonicalWebSocketAgent('json'),
     });
+
     const fromJson = await runJson(root, ['agent', 'add', '--from-json', '-'], { stdin: request });
     expect(fromJson.exitCode).toBe(0);
 
@@ -671,6 +756,7 @@ describe('WebSocket agent commands', () => {
       join(root, 'websocket-agent.json'),
       JSON.stringify(canonicalWebSocketAgent('source')),
     );
+
     const imported = await runJson(root, [
       'agent',
       'import',
@@ -680,6 +766,7 @@ describe('WebSocket agent commands', () => {
       '--as',
       'imported',
     ]);
+
     expect(imported.exitCode).toBe(0);
 
     const answers = new Map<string, string>([
@@ -698,15 +785,18 @@ describe('WebSocket agent commands', () => {
       ['Ping interval [15s]: ', '2s'],
       ['Close timeout [5s]: ', '500ms'],
     ]);
+
     const wizard = await runCommand(root, ['agent', 'add', '--trace'], {
       interaction: tty((question) =>
         question.includes('Apply these changes?') ? 'yes' : (answers.get(question) ?? ''),
       ),
     });
+
     expect(wizard.exitCode).toBe(0);
 
     const loaded = await loadProject({ project: root });
     expect(loaded.agents.map(({ id }) => id)).toEqual(['flags', 'imported', 'json', 'wizard']);
+
     for (const agent of loaded.agents) {
       expect(agent.transport).toEqual(canonicalTransport());
       expect(agent.redaction).toEqual({ headers: ['Authorization'] });
@@ -716,6 +806,7 @@ describe('WebSocket agent commands', () => {
 
   it('derives a serial connection for per-case flags when the mode is omitted', async () => {
     const root = await createEmptyProject();
+
     const added = await runJson(root, [
       'agent',
       'add',
@@ -725,6 +816,7 @@ describe('WebSocket agent commands', () => {
       '--websocket-lifecycle',
       'per_case',
     ]);
+
     expect(added.exitCode).toBe(0);
     expect((await loadProject({ project: root })).agents[0]?.transport).toMatchObject({
       kind: 'websocket',
@@ -736,6 +828,7 @@ describe('WebSocket agent commands', () => {
   it('aggregates inapplicable and conflicting flags before any project write', async () => {
     const root = await createEmptyProject();
     const before = await snapshotTree(root);
+
     const inapplicable = await runJson(root, [
       'agent',
       'add',
@@ -751,6 +844,7 @@ describe('WebSocket agent commands', () => {
       '--timeout',
       '1s',
     ]);
+
     expect(inapplicable.exitCode).toBe(2);
     expect(inapplicable.document).toMatchObject({
       error: {
@@ -768,6 +862,7 @@ describe('WebSocket agent commands', () => {
       '--stream-url',
       'https://agent.example/events',
     ]);
+
     expect(conflicting.exitCode).toBe(2);
     expect(conflicting.document).toMatchObject({
       error: { code: 'cli_usage', details: { selected_transports: ['stream', 'websocket'] } },
@@ -777,25 +872,26 @@ describe('WebSocket agent commands', () => {
 
   it('routes agent.test flag and --from-json requests to the WebSocket runtime', async () => {
     const root = await createEmptyProject();
-    const { startTestWebSocketServer } = (await import(WEBSOCKET_SERVER)) as {
-      startTestWebSocketServer: (options: {
-        subprotocol: string;
-        onConnection: (_peer: unknown, request: { headers: { authorization?: string } }) => void;
-        onMessage: (peer: { sendJson: (value: unknown) => void }, value: unknown) => void;
-      }) => Promise<WebSocketFixtureServer>;
-    };
+
+    // SAFETY: The executor-owned WebSocket fixture implements this callback API and JSON frame writer; the URL points directly to that checked-in source.
+    const { startTestWebSocketServer } = (await import(WEBSOCKET_SERVER)) as WebSocketFixtureModule;
+
     const authorizations: (string | undefined)[] = [];
+
     const server = await startTestWebSocketServer({
       subprotocol: 'attest',
       onConnection: (_peer, request) => authorizations.push(request.headers.authorization),
       onMessage: (peer, value) => {
-        const { request_id } = value as { request_id: string };
+        if (!isFixtureRequest(value)) throw new Error('Expected a correlated JSON request.');
+        const { request_id } = value;
         peer.sendJson({ request_id, type: 'acknowledgement' });
         peer.sendJson({ request_id, result: { echoed_request_id: request_id } });
       },
     });
+
     try {
       process.env.ATTEST_WS_TOKEN = 'websocket-probe-secret';
+
       const addRequest = JSON.stringify({
         schema: 'attest.command-request',
         command: 'agent.add',
@@ -804,6 +900,7 @@ describe('WebSocket agent commands', () => {
           transport: { ...canonicalTransport(), url: server.url, result_pointer: '/result' },
         },
       });
+
       expect(
         (await runJson(root, ['agent', 'add', '--from-json', '-'], { stdin: addRequest })).exitCode,
       ).toBe(0);
@@ -814,6 +911,7 @@ describe('WebSocket agent commands', () => {
         agent_id: 'probe',
         input: { question: 'ping' },
       });
+
       for (const probe of [
         await runJson(root, ['agent', 'test', 'probe', '--input', '{"question":"ping"}']),
         await runJson(root, ['agent', 'test', '--from-json', '-'], { stdin: testRequest }),
@@ -826,6 +924,7 @@ describe('WebSocket agent commands', () => {
         expect(probe.output[0]).toMatch(/"echoed_request_id":"ws-/u);
         expect(probe.output.join('')).not.toContain('websocket-probe-secret');
       }
+
       expect(authorizations).toEqual(['websocket-probe-secret', 'websocket-probe-secret']);
     } finally {
       await server.close();

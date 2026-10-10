@@ -40,9 +40,11 @@ describe('just-bash case isolation', () => {
 
   it('drains run work and permits bounded final reads after run cancellation', async () => {
     const controller = new AbortController();
+
     const environment = await justBashIsolation({ files: { 'partial.txt': 'partial' } })(
       caseContext(controller.signal),
     );
+
     const pending = environment.exec('sleep 10; echo late > late.txt');
     controller.abort(new Error('run cancelled'));
 

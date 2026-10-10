@@ -51,8 +51,11 @@ const agentResourceSchema = z
   .meta({ id: 'AgentResource' });
 
 type AgentEvidenceLimits = z.infer<typeof agentEvidenceLimitsSchema>;
+
 type AgentResource = z.infer<typeof agentResourceSchema>;
+
 type AgentTimeoutPolicy = z.infer<typeof agentTimeoutPolicySchema>;
+
 type RedactionPolicy = z.infer<typeof redactionPolicySchema>;
 
 export {

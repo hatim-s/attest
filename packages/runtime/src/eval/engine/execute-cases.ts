@@ -41,9 +41,11 @@ const startCase = async <Payload>(
 ): Promise<SettledCase<Payload>> => {
   try {
     task.signal.throwIfAborted();
+
     const value = await task.runner.executeCase(task.run.run_id, resolvedCase, task.signal, {
       workerIndex,
     });
+
     return {
       resolvedCase,
       workerIndex,
@@ -68,11 +70,14 @@ const toCaseRecord = <Payload>(
   state: CaseExecutionState<Payload>,
 ): EvalCaseRecord<Payload> => {
   const { resolvedCase, result } = settled;
+
   if (result.status === 'fulfilled' && result.value.execution.caseId === resolvedCase.case_id) {
     const { execution, metrics } = result.value;
+
     if (execution.diagnostics.lifecycleError !== undefined) {
       state.infrastructureErrors.push(execution.diagnostics.lifecycleError);
     }
+
     return {
       kind: 'executed',
       resolved_case: resolvedCase,
@@ -88,8 +93,10 @@ const toCaseRecord = <Payload>(
       : new Error(
           `Runner case id ${result.value.execution.caseId} does not match ${resolvedCase.case_id}.`,
         );
+
   const message = safeErrorMessage(reason, 'Eval case runner failed.');
   state.infrastructureErrors.push(message);
+
   return {
     kind: 'infrastructure_error',
     resolved_case: resolvedCase,
@@ -112,12 +119,14 @@ const recordSettledCase = async <Payload>(
 ): Promise<void> => {
   const record = toCaseRecord(run, settled, state.records.length, state);
   state.records.push(record);
+
   try {
     await persistence.recordCase(run.run_id, record);
   } catch (error: unknown) {
     state.persistenceConfirmed = false;
     state.infrastructureErrors.push(safeErrorMessage(error, 'Eval case persistence failed.'));
   }
+
   try {
     await emit({
       event: 'case_completed',
@@ -144,6 +153,7 @@ const workerFailure = <Payload>(settled: SettledCase<Payload>): string | undefin
   if (settled.result.status === 'rejected') {
     return safeErrorMessage(settled.result.reason, 'The worker case failed.');
   }
+
   return settled.result.value.execution.diagnostics.lifecycleError;
 };
 
@@ -163,6 +173,7 @@ const executeCases = async <Payload>(
   const failedWorkers = new Map<number, string>();
   const pending = new Map<number, Promise<SettledCase<Payload>>>();
   const completions: SettledCase<Payload>[] = [];
+
   const state: CaseExecutionState<Payload> = {
     records: [],
     infrastructureErrors: [],
@@ -173,7 +184,9 @@ const executeCases = async <Payload>(
     for (let workerIndex = 0; workerIndex < concurrency; workerIndex += 1) {
       if (pending.has(workerIndex)) continue;
       const resolvedCase = scheduler.take(workerIndex);
+
       if (resolvedCase === undefined) continue;
+
       try {
         await emit({
           event: 'case_started',
@@ -189,6 +202,7 @@ const executeCases = async <Payload>(
           safeErrorMessage(error, 'Eval case event emission failed.'),
         );
       }
+
       const failure = failedWorkers.get(workerIndex);
       pending.set(
         workerIndex,
@@ -202,6 +216,7 @@ const executeCases = async <Payload>(
             })
         ).then((settled) => {
           completions.push(settled);
+
           return settled;
         }),
       );
@@ -210,6 +225,7 @@ const executeCases = async <Payload>(
 
   try {
     await schedule();
+
     while (pending.size > 0) {
       // Several cases can settle while persistence waits. Capture their order at settlement;
       // Promise.race alone picks map order when all its inputs have already resolved.
@@ -218,6 +234,7 @@ const executeCases = async <Payload>(
       pending.delete(settled.workerIndex);
       scheduler.release(settled.resolvedCase);
       const failure = workerCount === undefined ? undefined : workerFailure(settled);
+
       if (failure !== undefined) failedWorkers.set(settled.workerIndex, failure);
       // Refill before awaiting the ordered persistence sink so slots never idle on persistence.
       await schedule();
@@ -226,6 +243,7 @@ const executeCases = async <Payload>(
   } finally {
     await Promise.all(pending.values());
   }
+
   return state;
 };
 

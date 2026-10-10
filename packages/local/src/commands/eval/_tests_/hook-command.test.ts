@@ -21,6 +21,7 @@ const isProcessRunning = (processId: number): boolean => {
     const state = execFileSync('ps', ['-o', 'stat=', '-p', String(processId)], {
       encoding: 'utf8',
     }).trim();
+
     return state.length > 0 && !state.startsWith('Z');
   } catch {
     return false;

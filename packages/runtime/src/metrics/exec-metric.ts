@@ -16,6 +16,7 @@ import { invokeHttpMetric } from './internal/exec-http.js';
 import { buildMetricRequest } from './internal/metric-request.js';
 
 const DEFAULT_TIMEOUT_MS = 30_000;
+
 const DEFAULT_OUTPUT_CAP_BYTES = 1024 * 1024;
 
 /** Applies one deadline, cancellation signal, and byte cap consistently across CLI and HTTP metrics. */
@@ -39,6 +40,7 @@ const parseInvocationResult = (
   text: string,
 ): { ok: true; result: MetricResult } | { ok: false; error: MetricErrorInfo } => {
   let candidate: unknown;
+
   try {
     candidate = JSON.parse(text);
   } catch (error: unknown) {
@@ -52,6 +54,7 @@ const parseInvocationResult = (
   }
 
   const parsed = parseMetricResult(candidate);
+
   if (!parsed.ok) {
     return {
       ok: false,
@@ -62,6 +65,7 @@ const parseInvocationResult = (
       },
     };
   }
+
   return { ok: true, result: parsed.value };
 };
 
@@ -75,12 +79,15 @@ const executeExecutableMetric = async (
   options: ExecMetricOptions = {},
 ): Promise<StoredMetricEvaluation> => {
   const startedAt = performance.now();
+
   const transportOptions = {
     ...options,
     outputCapBytes: options.outputCapBytes ?? DEFAULT_OUTPUT_CAP_BYTES,
     timeoutMs: options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
   };
+
   const requestBody = JSON.stringify(buildMetricRequest(context));
+
   const outcome =
     'command' in definition
       ? await (
@@ -88,12 +95,14 @@ const executeExecutableMetric = async (
           (await import('./internal/exec-command.js')).invokeCommandMetric
         )(definition, requestBody, transportOptions)
       : await invokeHttpMetric(definition, requestBody, transportOptions);
+
   const parsed = outcome.ok ? parseInvocationResult(outcome.text) : outcome;
   const durationMs = performance.now() - startedAt;
 
   if (!parsed.ok) {
     return metricError(definition, parsed.error, durationMs);
   }
+
   return evaluatedMetric(definition, parsed.result, durationMs);
 };
 

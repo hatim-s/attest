@@ -24,13 +24,16 @@ type OpenAnchoredOptions = {
  */
 const openAnchored = async (path: string, options: OpenAnchoredOptions): Promise<AnchoredEntry> => {
   const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+
   try {
     const [identity, pathIdentity, resolvedPath] = await Promise.all([
       handle.stat({ bigint: true }),
       lstat(path, { bigint: true }),
       realpath(path),
     ]);
+
     const kindMatches = options.kind === 'file' ? identity.isFile() : identity.isDirectory();
+
     if (
       !kindMatches ||
       pathIdentity.isSymbolicLink() ||
@@ -40,6 +43,7 @@ const openAnchored = async (path: string, options: OpenAnchoredOptions): Promise
     ) {
       throw new Error(`The ${options.kind} changed identity or left its root while opening.`);
     }
+
     return { handle, identity, path: resolvedPath };
   } catch (error: unknown) {
     await handle.close().catch(() => undefined);

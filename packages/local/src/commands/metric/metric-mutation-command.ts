@@ -34,12 +34,14 @@ type MutationBuildResult = {
 /** Finds one authored metric or reports the missing id with a way to list them. */
 const findMetric = (metrics: readonly MetricResource[], id: string): MetricResource => {
   const metric = metrics.find((candidate) => candidate.id === id);
+
   if (metric === undefined) {
     throw new LocalError('resource_not_found', `Metric ${id} was not found.`, {
       path: id,
       hint: 'Run `attest list metrics` to inspect available metric ids.',
     });
   }
+
   return metric;
 };
 
@@ -55,6 +57,7 @@ const assertNewMetricId = (metrics: readonly MetricResource[], id: string): void
 /** Lists every authored location that would become dangling if a metric disappeared. */
 const metricReferencePaths = (project: ProjectResources, metricId: string): string[] => {
   const paths: string[] = [];
+
   for (const test of project.tests) {
     test.metrics.forEach(({ metric_id: id }, index) => {
       if (id === metricId) paths.push(`/tests/${test.id}/metrics/${index}`);
@@ -67,6 +70,7 @@ const metricReferencePaths = (project: ProjectResources, metricId: string): stri
       }),
     );
   }
+
   for (const dataset of project.datasets) {
     dataset.cases.forEach((testCase, caseIndex) =>
       testCase.metric_overrides?.forEach(({ metric_id: id }, overrideIndex) => {
@@ -78,6 +82,7 @@ const metricReferencePaths = (project: ProjectResources, metricId: string): stri
       }),
     );
   }
+
   return paths.sort();
 };
 
@@ -104,6 +109,7 @@ const rewriteMetricReferences = (
             );
     });
   }
+
   project.datasets.forEach((dataset) =>
     dataset.cases.forEach((testCase) => {
       if (testCase.metric_overrides === undefined) return;
@@ -124,14 +130,17 @@ const buildMetricMutation = async (
   options: MetricMutationCommandOptions,
 ): Promise<MutationBuildResult> => {
   const candidate = candidateFromLoadedProject(loaded);
+
   switch (request.command) {
     case 'metric.add':
       assertSafeMetricResource(request.metric);
       assertNewMetricId(candidate.metrics, request.metric.id);
       candidate.metrics.push(request.metric);
+
       return { candidate, metric: request.metric };
     case 'metric.import': {
       assertNewMetricId(candidate.metrics, request.as);
+
       const metric = await readImportedMetricResource(
         request.source,
         request.as,
@@ -139,23 +148,29 @@ const buildMetricMutation = async (
         options.workingDirectory,
         options.readStdin,
       );
+
       candidate.metrics.push(metric);
+
       return { candidate, metric };
     }
+
     case 'metric.rename': {
       const metric = findMetric(candidate.metrics, request.metric_id);
       assertNewMetricId(candidate.metrics, request.new_id);
       metric.id = request.new_id;
       rewriteMetricReferences(candidate, request.metric_id, request.new_id);
+
       return {
         candidate,
         metric,
         renames: [{ from: request.metric_id, to: request.new_id, type: 'metric' }],
       };
     }
+
     case 'metric.remove': {
       const metric = findMetric(candidate.metrics, request.metric_id);
       const references = metricReferencePaths(candidate, request.metric_id);
+
       if (references.length > 0 && request.detach !== true) {
         throw new LocalError('project_invalid', 'Referenced metrics cannot be removed.', {
           path: request.metric_id,
@@ -163,15 +178,25 @@ const buildMetricMutation = async (
           details: { reference_paths: references },
         });
       }
+
       candidate.metrics = candidate.metrics.filter(({ id }) => id !== request.metric_id);
+
       if (request.detach === true) rewriteMetricReferences(candidate, request.metric_id, undefined);
-      return {
-        candidate,
-        metric,
-        ...(references.length === 0
-          ? {}
-          : { warnings: [`Detached ${references.length} metric references before removal.`] }),
-      };
+
+      {
+        const assembledFields: MutationBuildResult = {
+          candidate,
+          metric,
+        };
+
+        if (!(references.length === 0)) {
+          assembledFields.warnings = [
+            `Detached ${references.length} metric references before removal.`,
+          ];
+        }
+
+        return assembledFields;
+      }
     }
   }
 };
@@ -180,6 +205,7 @@ const renderOperations = (operations: readonly SemanticProjectOperation[]): stri
   operations
     .map((operation) => {
       const previous = operation.previous_id === undefined ? '' : ` from ${operation.previous_id}`;
+
       return `  ${operation.op} ${operation.resource.type} ${operation.resource.id}${previous}`;
     })
     .join('\n');
@@ -196,7 +222,9 @@ const runMetricMutationCommand = async (
           project: options.project,
           workingDirectory: options.workingDirectory,
         });
+
   const built = await buildMetricMutation(loaded, options.request, options);
+
   const mutationOptions = {
     candidate: built.candidate,
     expectedProjectHash: options.request.if_project_hash ?? loaded.projectHash,
@@ -204,16 +232,20 @@ const runMetricMutationCommand = async (
     renames: built.renames,
     warnings: built.warnings,
   };
+
   const destructive = options.request.command === 'metric.remove';
+
   const mutation = await executeProjectMutation({
     dryRun: options.request.dry_run === true,
     mutation: mutationOptions,
     confirm: async (preview) => {
       if (options.request.yes === true) return;
+
       if (options.interactive && options.prompt !== undefined) {
         const resourcePreview = destructive
           ? `Remove metric ${built.metric.id}`
           : JSON.stringify(redactMetricResource(built.metric), undefined, 2);
+
         const answer = (
           await options.prompt(
             `${resourcePreview}\nSemantic diff:\n${renderOperations(preview.diff.operations)}\nApply these changes? [y/N]: `,
@@ -221,6 +253,7 @@ const runMetricMutationCommand = async (
         )
           .trim()
           .toLowerCase();
+
         if (answer !== 'y' && answer !== 'yes') {
           throw new LocalError('cancelled', 'Metric mutation was not confirmed.');
         }
@@ -232,7 +265,9 @@ const runMetricMutationCommand = async (
       }
     },
   });
+
   const dryRun = options.request.dry_run === true;
+
   return {
     operation: 'mutation',
     projectHashBefore: mutation.projectHashBefore,

@@ -13,6 +13,7 @@ interface EvalScope {
 
 const isPartialSelection = (snapshot: EvalRun['snapshot']): boolean => {
   if (snapshot.selection === undefined) return false;
+
   return snapshot.selection.selected_cases < snapshot.selection.total_cases;
 };
 
@@ -20,14 +21,18 @@ const isPartialSelection = (snapshot: EvalRun['snapshot']): boolean => {
 const evalScope = (run: RunRecord): EvalScope | undefined => {
   if (run.schemaId !== EVAL_RUN_SCHEMA_ID) return undefined;
   let value: unknown;
+
   try {
     value = JSON.parse(run.configJson);
   } catch {
     return undefined;
   }
+
   const parsed = evalRunSchema.safeParse(value);
+
   if (!parsed.success) return undefined;
   const { snapshot } = parsed.data;
+
   return {
     partial: isPartialSelection(snapshot),
     tests: snapshot.selected_test_ids.toSorted(),
@@ -52,12 +57,15 @@ const diffRuns = async (
     baseStore.getRunWithCases(baseRunId),
     candidateStore.getRunWithCases(candidateRunId),
   ]);
+
   const baseScope = evalScope(base.run);
   const candidateScope = evalScope(candidate.run);
+
   const differentTests =
     baseScope !== undefined &&
     candidateScope !== undefined &&
     !hasSameTests(baseScope, candidateScope);
+
   return classifyRuns(base.cases, candidate.cases, {
     baseRunId,
     candidateRunId,

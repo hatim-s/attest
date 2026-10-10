@@ -39,8 +39,11 @@ const testResourceSchema = z
   .meta({ id: 'TestResource' });
 
 type DatasetAttachment = z.infer<typeof datasetAttachmentSchema>;
+
 type TestMetricReference = z.infer<typeof testMetricReferenceSchema>;
+
 type TestPassGate = z.infer<typeof testPassGateSchema>;
+
 type TestResource = z.infer<typeof testResourceSchema>;
 
 export {

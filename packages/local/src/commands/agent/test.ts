@@ -29,16 +29,21 @@ const readAgentTestInput = async (options: AgentTestInputOptions): Promise<JsonV
       hint: 'Pass either `--input` or `--input-file`, not both.',
     });
   }
+
   const hint = 'Pass any valid JSON scalar, array, or object.';
+
   if (options.inputFile !== undefined) {
     const text = await readSourceText(options.inputFile, {
       path: '--input-file',
       readStdin: options.readStdin,
       workingDirectory: options.workingDirectory,
     });
+
     return parseJsonText(text, { path: '--input-file', hint });
   }
+
   if (options.input === undefined) return {};
+
   return parseJsonText(options.input, { path: '--input', hint });
 };
 
@@ -56,12 +61,14 @@ const startProbeRecording = async (
 ): Promise<ProbeRecording> => {
   await mkdir(join(root, '.attest'), { recursive: true });
   const store = await openStore(join(root, '.attest', 'runs.db'));
+
   const run = await store.runs.createRun({
     schemaId: 'attest.agent-test',
     configHash: projectHash,
     configJson: JSON.stringify({ agent_id: agentId, project_hash: projectHash }),
     labels: { agent_id: agentId, kind: 'agent-probe' },
   });
+
   return {
     finish: async (status) => {
       try {
@@ -80,16 +87,21 @@ const runAgentTestCommand = async (
   options: AgentTestCommandOptions,
 ): Promise<CommandResult<'agent-test', AgentTestResult>> => {
   const { request } = options;
+
   const loaded = await loadCommandProject({
     project: options.project,
     workingDirectory: options.workingDirectory,
   });
+
   const agent = findAgent(loaded.agents, request.agent_id);
+
   const recording =
     request.record === true
       ? await startProbeRecording(loaded.root, agent.id, loaded.projectHash)
       : undefined;
+
   let result: Awaited<ReturnType<typeof testNativeAgentConnection>>;
+
   try {
     result = await testNativeAgentConnection({
       agent,
@@ -105,7 +117,9 @@ const runAgentTestCommand = async (
     await recording?.finish(cancelled ? 'cancelled' : 'failed');
     throw error;
   }
+
   await recording?.finish('completed');
+
   return {
     operation: 'agent-test',
     projectHashAfter: loaded.projectHash,

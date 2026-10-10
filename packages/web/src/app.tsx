@@ -13,6 +13,7 @@ import { shortId } from './lib/format.js';
 import { getReportData } from './report/report-data.js';
 
 type DashboardTab = 'cases' | 'compare' | 'distributions';
+
 type Theme = 'light' | 'dark';
 
 const DASHBOARD_TABS: { id: DashboardTab; label: string }[] = [
@@ -23,12 +24,15 @@ const DASHBOARD_TABS: { id: DashboardTab; label: string }[] = [
 
 const getInitialTheme = (): Theme => {
   let stored: string | null = null;
+
   try {
     stored = localStorage.getItem('attest-theme');
   } catch {
     // Some browsers disable local storage for file:// reports; system preference remains safe.
   }
+
   if (stored === 'light' || stored === 'dark') return stored;
+
   return matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
 };
 
@@ -45,6 +49,7 @@ const Dashboard = () => {
   const casesQuery = useCases(selectedRunId, runQuery.data?.status);
   const caseQuery = useCase(selectedRunId, selectedCase?.suiteName, selectedCase?.caseId);
   const diffQuery = useDiff(baseRunId, selectedRunId);
+
   const cases = useMemo(
     () => casesQuery.data?.pages.flatMap((page) => page.items) ?? [],
     [casesQuery.data],
@@ -56,6 +61,7 @@ const Dashboard = () => {
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
+
     try {
       localStorage.setItem('attest-theme', theme);
     } catch {
@@ -137,19 +143,21 @@ const Dashboard = () => {
               </section>
               <SummaryCards run={run} />
               <div className="tabs" role="tablist">
-                {DASHBOARD_TABS.filter(({ id }) => id !== 'compare' || runs.length > 1).map(
-                  ({ id, label }) => (
-                    <Button
-                      aria-selected={tab === id}
-                      key={id}
-                      onClick={() => setTab(id)}
-                      role="tab"
-                      tone={tab === id ? 'primary' : 'ghost'}
-                    >
-                      {label}
-                      {id === 'cases' ? <span>{run.summary?.totalCases ?? 0}</span> : null}
-                    </Button>
-                  ),
+                {DASHBOARD_TABS.flatMap(({ id, label }) =>
+                  id !== 'compare' || runs.length > 1
+                    ? [
+                        <Button
+                          aria-selected={tab === id}
+                          key={id}
+                          onClick={() => setTab(id)}
+                          role="tab"
+                          tone={tab === id ? 'primary' : 'ghost'}
+                        >
+                          {label}
+                          {id === 'cases' ? <span>{run.summary?.totalCases ?? 0}</span> : null}
+                        </Button>,
+                      ]
+                    : [],
                 )}
               </div>
               {tab === 'cases' ? (

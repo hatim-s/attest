@@ -6,6 +6,7 @@
 const { spawn } = require('node:child_process');
 
 const protocol = 'attest.agent-invocation';
+
 const outputChunkBytes = 64 * 1024;
 
 const readRequest = () =>
@@ -31,6 +32,7 @@ const utcSecond = () => new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
 
 const validTrace = () => {
   const timestamp = utcSecond();
+
   return {
     schema: 'attest.trace',
     trace_id: 'fixture-trace',
@@ -71,6 +73,7 @@ const writeJson = (response) => {
 const writeChunks = async (value, chunkSize, intervalMilliseconds) => {
   for (let offset = 0; offset < value.length; offset += chunkSize) {
     process.stdout.write(value.slice(offset, offset + chunkSize));
+
     if (intervalMilliseconds > 0) {
       await new Promise((resolve) => setTimeout(resolve, intervalMilliseconds));
     }
@@ -79,20 +82,24 @@ const writeChunks = async (value, chunkSize, intervalMilliseconds) => {
 
 const hugeByteCount = () => {
   const configured = Number.parseInt(process.env.AGENT_HUGE_BYTES ?? '', 10);
+
   return Number.isSafeInteger(configured) && configured >= 0 ? configured : 12 * 1024 * 1024;
 };
 
 const spawnOrphanChild = () => {
   const heartbeatFile = process.env.ORPHAN_HEARTBEAT_FILE;
+
   if (!heartbeatFile) {
     return;
   }
 
   const childProgram = `const fs = require('node:fs'); const file = process.argv[1]; fs.appendFileSync(file, 'PID ' + process.pid + '\\n'); setInterval(() => fs.appendFileSync(file, new Date().toISOString() + '\\n'), 200);`;
+
   const child = spawn(process.execPath, ['-e', childProgram, heartbeatFile], {
     detached: true,
     stdio: 'ignore',
   });
+
   // The detached child must outlive this fixture so runners can prove tree cleanup reaps it.
   child.unref();
 };
@@ -113,6 +120,7 @@ const behaviors = {
   },
   'stderr-noise': (request) => {
     writeJson(responseFor(request));
+
     for (let line = 1; line <= 50; line += 1) {
       process.stderr.write(`fixture stderr noise ${line}\n`);
     }
@@ -127,8 +135,10 @@ const behaviors = {
   },
   'slow-drip': async (request) => {
     const configured = Number.parseInt(process.env.AGENT_DRIP_MS ?? '', 10);
+
     const intervalMilliseconds =
       Number.isSafeInteger(configured) && configured >= 0 ? configured : 100;
+
     await writeChunks(JSON.stringify(responseFor(request)), 1, intervalMilliseconds);
   },
   'with-trace': (request) => writeJson({ ...responseFor(request), trace: validTrace() }),
@@ -142,9 +152,11 @@ const behaviorName =
 
 const run = async () => {
   const behavior = behaviors[behaviorName];
+
   if (!behavior) {
     process.stderr.write(`Unknown agent behavior: ${behaviorName}\n`);
     process.exitCode = 64;
+
     return;
   }
 

@@ -1,6 +1,16 @@
 import { AGENT_PROTOCOL } from '@attest/contracts';
 import { delimiter, isAbsolute, join } from 'node:path';
 
+type InvocationEnvironment = Record<string, string> & {
+  PATH: string;
+  HOME: string;
+  TMPDIR: string;
+  LC_ALL: string;
+  ATTEST_RUN_ID: string;
+  ATTEST_CASE_ID: string;
+  ATTEST_PROTOCOL: typeof AGENT_PROTOCOL;
+};
+
 /** Removes relative and empty search entries so executable lookup cannot escape the opted-in host path. */
 const resolveSafePath = (parentPath: string | undefined): string => {
   return (parentPath ?? '')
@@ -18,20 +28,27 @@ const resolveInvocationEnv = (
   parentEnv: NodeJS.ProcessEnv,
   attest: { runId: string; caseId: string },
   attemptDirectory: string,
-): Record<string, string> => {
-  const environment: Record<string, string> = {
+): InvocationEnvironment => {
+  const environment: InvocationEnvironment = {
     PATH: resolveSafePath(parentEnv.PATH),
     HOME: join(attemptDirectory, 'home'),
     TMPDIR: join(attemptDirectory, 'tmp'),
     LC_ALL: 'C',
+    ATTEST_RUN_ID: attest.runId,
+    ATTEST_CASE_ID: attest.caseId,
+    ATTEST_PROTOCOL: AGENT_PROTOCOL,
   };
+
   for (const key of allowlist) {
     const value = parentEnv[key];
+
     if (value !== undefined) environment[key] = value;
   }
+
   environment.ATTEST_RUN_ID = attest.runId;
   environment.ATTEST_CASE_ID = attest.caseId;
   environment.ATTEST_PROTOCOL = AGENT_PROTOCOL;
+
   return environment;
 };
 

@@ -33,10 +33,13 @@ const attributesSchema = z
   .catch([])
   .transform((entries) => {
     const attributes: Record<string, AttributeValue> = {};
+
     for (const entry of entries) {
       const parsed = keyValueSchema.safeParse(entry);
+
       if (parsed.success) attributes[parsed.data.key] = parsed.data.value;
     }
+
     return attributes;
   });
 

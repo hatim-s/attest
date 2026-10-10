@@ -7,6 +7,7 @@ const withProcessSignals = async <T>(run: (signal: AbortSignal) => Promise<T>): 
   const abort = (): void => controller.abort();
   process.once('SIGINT', abort);
   process.once('SIGTERM', abort);
+
   try {
     return await run(controller.signal);
   } finally {

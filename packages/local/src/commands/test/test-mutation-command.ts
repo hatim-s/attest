@@ -17,7 +17,9 @@ const runTestMutationCommand = async (
           project: options.project,
           workingDirectory: options.workingDirectory,
         });
+
   const built = await buildMutation(loaded, options.request, options);
+
   const mutation = await executeProjectMutation({
     dryRun: options.request.dry_run === true,
     mutation: {
@@ -29,32 +31,40 @@ const runTestMutationCommand = async (
       warnings: built.warnings?.map(({ message }) => message),
     },
   });
+
   const dryRun = options.request.dry_run === true;
+
+  const result: MutationResult = {
+    committed: mutation.committed,
+    dry_run: dryRun,
+    resource: built.resource,
+    operations: mutation.diff.operations,
+  };
+
+  if (built.affectedTests !== undefined) {
+    result.affected_tests = built.affectedTests;
+  }
+
+  if (built.importedCaseCount !== undefined) {
+    result.imported_case_count = built.importedCaseCount;
+  }
+
+  if (built.importResult !== undefined) {
+    result.import = {
+      format: built.importResult.format,
+      counts: built.importResult.counts,
+      decisions: built.importResult.decisions,
+      preview: built.importResult.preview,
+      source_content_hash: built.importResult.sourceHash,
+    };
+  }
+
   return {
     operation: 'mutation',
     projectHashBefore: mutation.projectHashBefore,
     projectHashAfter: mutation.projectHashAfter,
-    result: {
-      committed: mutation.committed,
-      dry_run: dryRun,
-      resource: built.resource,
-      operations: mutation.diff.operations,
-      ...(built.affectedTests === undefined ? {} : { affected_tests: built.affectedTests }),
-      ...(built.importedCaseCount === undefined
-        ? {}
-        : { imported_case_count: built.importedCaseCount }),
-      ...(built.importResult === undefined
-        ? {}
-        : {
-            import: {
-              format: built.importResult.format,
-              counts: built.importResult.counts,
-              decisions: built.importResult.decisions,
-              preview: built.importResult.preview,
-              source_content_hash: built.importResult.sourceHash,
-            },
-          }),
-    },
+    result,
+
     warnings: built.warnings,
   };
 };

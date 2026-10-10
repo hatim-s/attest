@@ -35,6 +35,7 @@ const evaluateMetric = async (
 ): Promise<StoredMetricEvaluation> => {
   if (definition.type === 'assertion') {
     const result = evaluateAssertionMetric(definition, buildEvaluationDocument(context));
+
     return evaluatedMetric(definition, result, 0);
   }
 
@@ -75,20 +76,25 @@ const evaluateMetrics = async (
   options: EvaluateMetricsOptions = {},
 ): Promise<StoredMetricEvaluation[]> => {
   const { execution } = context;
+
   if (execution.outcome !== 'completed') {
     return definitions.map((definition) => skippedNoOutput(definition, execution));
   }
 
   const completed = { caseDefinition: context.caseDefinition, execution };
   const evaluations: StoredMetricEvaluation[] = [];
+
   for (const definition of definitions) {
     const startedAt = performance.now();
+
     try {
       evaluations.push(await evaluateMetric(definition, completed, options));
     } catch (error: unknown) {
       const known = error instanceof AttestMetricError ? error : undefined;
+
       const message =
         error instanceof Error ? error.message : 'Metric evaluation threw an unknown error.';
+
       evaluations.push(
         metricError(
           definition,
@@ -98,6 +104,7 @@ const evaluateMetrics = async (
       );
     }
   }
+
   return evaluations;
 };
 

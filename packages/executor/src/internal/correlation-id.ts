@@ -13,6 +13,7 @@ const correlationId = (prefix: string, request: AgentRequest, sequence: number):
     .update(request.case_id)
     .digest('hex')
     .slice(0, 32);
+
   return `${prefix}-${sequence.toString(36)}-${digest}`;
 };
 

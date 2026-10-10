@@ -24,12 +24,14 @@ type ReadRequestDocumentOptions = ReadCommandRequestOptions & {
   hint: string;
 };
 
+// BOUNDARY: CLI command documents are untrusted JSON; commandRequestSchema validates the complete document and expected command discriminant.
 const parseCommandRequest = <TCommand extends CommandRequest['command']>(
   command: TCommand,
   value: unknown,
   path: string | undefined,
 ): CommandRequestFor<TCommand> => {
   const parsed = commandRequestSchema.safeParse(value);
+
   if (!parsed.success) {
     throw new LocalError('cli_usage', 'The command request does not match its schema.', {
       path,
@@ -37,12 +39,15 @@ const parseCommandRequest = <TCommand extends CommandRequest['command']>(
       details: { diagnostics: schemaIssueDiagnostics(parsed.error.issues) },
     });
   }
+
   if (parsed.data.command !== command) {
     throw new LocalError('cli_usage', 'The command request targets another command.', {
       path: '/command',
       hint: `Set \`command\` to \`${command}\`.`,
     });
   }
+
+  // SAFETY: The complete request schema passed and its command discriminant equals the generic command argument above.
   return parsed.data as CommandRequestFor<TCommand>;
 };
 
@@ -50,6 +55,7 @@ const parseCommandRequest = <TCommand extends CommandRequest['command']>(
  * Validates a request built from CLI flags through the same published schema as `--from-json`,
  * so both input routes reach the command with one shape.
  */
+// BOUNDARY: CLI authored drafts are validated through parseCommandRequest before returning a normalized command request.
 const validateCommandRequest = <TCommand extends CommandRequest['command']>(
   command: TCommand,
   value: unknown,
@@ -64,6 +70,7 @@ const readRequestDocument = async (
   options: ReadRequestDocumentOptions,
 ): Promise<JsonValue> => {
   const text = await readSourceText(source, { ...options, path: '--from-json' });
+
   return parseJsonText(text, { path: '--from-json', hint: options.hint });
 };
 
@@ -77,6 +84,7 @@ const readCommandRequest = async <TCommand extends CommandRequest['command']>(
     ...options,
     hint: `Provide one ${COMMAND_REQUEST_SCHEMA_ID} ${command} document.`,
   });
+
   return parseCommandRequest(command, value, '--from-json');
 };
 

@@ -10,12 +10,15 @@ type RetryBackoff = NonNullable<AgentResource['retry']>['backoff'];
  */
 const retryBackoffDelay = (backoff: RetryBackoff | undefined, retryIndex: number): number => {
   if (backoff === undefined || backoff.kind === 'none') return 0;
+
   if (backoff.kind === 'fixed') return backoff.delay_ms;
   const bounded = Math.min(backoff.initial_delay_ms * 2 ** retryIndex, backoff.maximum_delay_ms);
+
   const jitter = createHash('sha256')
     .update(`${String(backoff.jitter_seed)}:${String(retryIndex)}`)
     .digest()
     .readUInt32BE(0);
+
   return Math.floor((bounded * (75 + (jitter % 51))) / 100);
 };
 

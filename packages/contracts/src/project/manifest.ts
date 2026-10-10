@@ -26,12 +26,15 @@ const authoredResourceManifestEntrySchema = z.strictObject({
 const agentManifestEntrySchema = authoredResourceManifestEntrySchema.extend({
   schema: z.literal(AGENT_RESOURCE_SCHEMA_ID),
 });
+
 const testManifestEntrySchema = authoredResourceManifestEntrySchema.extend({
   schema: z.literal(TEST_RESOURCE_SCHEMA_ID),
 });
+
 const metricManifestEntrySchema = authoredResourceManifestEntrySchema.extend({
   schema: z.literal(METRIC_RESOURCE_SCHEMA_ID),
 });
+
 const datasetManifestEntrySchema = z.strictObject({
   id: resourceIdSchema,
   schema: z.literal(DATASET_SCHEMA_ID),
@@ -96,6 +99,7 @@ const projectManifestSchema = z
         );
       });
     }
+
     project.resources.datasets.forEach((entry, index) => {
       reportNonCanonicalManifestPath(
         entry.data_path,

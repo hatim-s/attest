@@ -5,8 +5,11 @@ import { canonicalJson } from '../internal/canonical-json.js';
 const resourceIdSchema = z
   .string()
   .regex(/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/, 'must be a lowercase slug');
+
 const projectIdSchema = z.ulid();
+
 const sha256Schema = z.string().regex(/^[a-f0-9]{64}$/, 'must be a lowercase SHA-256 digest');
+
 // Reject drive-qualified/absolute paths and complete `..` segments on either path separator.
 const relativePathSchema = z
   .string()
@@ -16,9 +19,11 @@ const relativePathSchema = z
     /^(?![\\/])(?!(?:.*[\\/])?\.\.(?:[\\/]|$)).+$/u,
     'must be a project-relative path without parent traversal',
   );
+
 const jsonPointerSchema = z
   .string()
   .regex(/^(?:\/(?:[^~/]|~[01])*)*$/, 'must be an RFC 6901 JSON Pointer');
+
 const durationMillisecondsSchema = z.number().int().positive();
 
 // Segments allow internal spaces but exclude whitespace at either end and dot traversal.
@@ -115,6 +120,7 @@ const refinePollingSchedule = (polling: PollingSchedule, context: z.RefinementCt
       message: 'provide exactly one status URL pointer or template',
     });
   }
+
   if (polling.minimum_interval_ms > polling.maximum_interval_ms) {
     context.addIssue({
       code: 'custom',
@@ -122,7 +128,9 @@ const refinePollingSchedule = (polling: PollingSchedule, context: z.RefinementCt
       message: 'must be greater than or equal to minimum_interval_ms',
     });
   }
+
   const failureValues = new Set(polling.failure_values.map((value) => canonicalJson(value)));
+
   if (polling.success_values.some((value) => failureValues.has(canonicalJson(value)))) {
     context.addIssue({
       code: 'custom',
@@ -137,15 +145,35 @@ const isJsonValue = (value: unknown): value is JsonValue =>
   jsonValueSchema.safeParse(value).success;
 
 type ExecutionDefaults = z.infer<typeof executionDefaultsSchema>;
+
 type JsonValue = z.infer<typeof jsonValueSchema>;
+
 type RawExcerpt = z.infer<typeof rawExcerptSchema>;
+
 type SecretReference = z.infer<typeof secretReferenceSchema>;
+
+/** Identifies scalar strings in decoded JSON and authored template values. */
+const isString = (value: unknown): value is string => typeof value === 'string';
+
+/** Identifies scalar numbers before domain-specific numeric checks. */
+const isNumber = (value: unknown): value is number => typeof value === 'number';
+
+/** Identifies boolean schema branches. */
+const isBoolean = (value: unknown): value is boolean => typeof value === 'boolean';
+
+/** Identifies object containers in decoded JSON without claiming any field schema. */
+const isJsonObject = (value: JsonValue | undefined): value is Record<string, JsonValue> =>
+  value !== null && typeof value === 'object' && !Array.isArray(value);
 
 export {
   caseFolderSchema,
   durationMillisecondsSchema,
   executionDefaultsSchema,
   isJsonValue,
+  isString,
+  isNumber,
+  isBoolean,
+  isJsonObject,
   jsonPointerSchema,
   jsonValueSchema,
   projectIdSchema,

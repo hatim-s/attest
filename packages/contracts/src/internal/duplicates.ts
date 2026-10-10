@@ -22,6 +22,7 @@ const reportDuplicates = ({ values, pathFor, label, context }: DuplicateCheck): 
         message: `duplicate ${label}: ${value}`,
       });
     }
+
     seen.add(value);
   });
 };

@@ -1,7 +1,7 @@
 import { access, mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
-import { cliHelpSchema } from '@attest/contracts';
+import { cliHelpSchema, isJsonValue, type JsonValue } from '@attest/contracts';
 import { applyProjectMutation, loadProject } from '@attest/local/project';
 import { openStore } from '@attest/local/store';
 import { describe, expect, it } from 'vitest';
@@ -13,6 +13,19 @@ import {
   temporaryDirectory,
 } from './support/cli-test-support.js';
 import { projectResources } from './support/project-fixture.js';
+
+const isDocument = (value: JsonValue): value is Record<string, JsonValue> =>
+  value !== null && typeof value === 'object' && !Array.isArray(value);
+
+const hasSourceDiagnostics = (
+  value: JsonValue | undefined,
+): value is { diagnostics: { source: string }[] } =>
+  value !== undefined &&
+  isDocument(value) &&
+  Array.isArray(value.diagnostics) &&
+  value.diagnostics.every(
+    (item): item is { source: string } => isDocument(item) && typeof item.source === 'string',
+  );
 
 describe('project commands', () => {
   it('initializes, shows, validates, and lists an empty project', async () => {
@@ -26,6 +39,7 @@ describe('project commands', () => {
       project_hash_before: null,
       result: { committed: true, dry_run: false, project: { name: 'Demo' } },
     });
+
     if (!init.document.ok) throw new Error('Expected project.init success.');
     const projectRoot = join(parent, 'demo');
     const loaded = await loadProject({ project: projectRoot });
@@ -49,6 +63,7 @@ describe('project commands', () => {
         outputIsTTY: true,
         prompt: (question) => {
           questions.push(question);
+
           return Promise.resolve('Guided Project');
         },
       },
@@ -66,15 +81,18 @@ describe('project commands', () => {
 
   it('accepts a complete project.init request from stdin and preserves the init alias', async () => {
     const parent = await temporaryDirectory('attest-project-');
+
     const request = JSON.stringify({
       schema: 'attest.command-request',
       command: 'project.init',
       directory: 'stdin-project',
       name: 'Stdin Project',
     });
+
     const stdin = await runJson(parent, ['project', 'init', '--from-json', '-'], {
       stdin: request,
     });
+
     expect(stdin.exitCode).toBe(0);
     expect(stdin.document).toMatchObject({
       ok: true,
@@ -87,12 +105,14 @@ describe('project commands', () => {
     expect(alias.document).toMatchObject({ ok: true, command: 'project.init' });
 
     const help = await runJson(parent, ['help', 'init']);
+
     if (!help.document.ok) throw new Error('Expected init help.');
     expect(cliHelpSchema.parse(help.document.result).command.alias_for).toBe('project.init');
   });
 
   it('reports an expected-project-hash conflict without writing', async () => {
     const parent = await temporaryDirectory('attest-project-');
+
     const conflict = await runJson(parent, [
       'project',
       'init',
@@ -132,6 +152,7 @@ describe('project commands', () => {
         name: 'Request Project',
       }),
     );
+
     const rejectStdin = {
       readStdin: () => Promise.reject(new Error('stdin must not be consumed on conflict')),
     };
@@ -150,6 +171,7 @@ describe('project commands', () => {
         expected: ['dry-run', 'name'],
       },
     ];
+
     for (const { argv, expected } of cases) {
       const response = await runJson(parent, argv, { interaction: rejectStdin });
       expect(response.exitCode).toBe(2);
@@ -157,9 +179,11 @@ describe('project commands', () => {
         error: { code: 'cli_usage', details: { conflicting_fields: expected } },
       });
     }
+
     expect((await readdir(parent)).sort()).toEqual(['request.json']);
 
     const help = await runJson(parent, ['help', 'project', 'init']);
+
     if (!help.document.ok) throw new Error('Expected project init help.');
     const { options } = cliHelpSchema.parse(help.document.result).command;
     expect(options.find(({ name }) => name === 'from-json')?.conflicts).toEqual([
@@ -188,21 +212,28 @@ describe('project commands', () => {
     expect(missing.document).toMatchObject({ error: { code: 'resource_not_found' } });
 
     for (const path of ['attest/agents/support.json', 'attest/metrics/correct.json']) {
-      const resource = JSON.parse(await readFile(join(root, path), 'utf8')) as object;
+      const resource: unknown = JSON.parse(await readFile(join(root, path), 'utf8'));
+
+      if (!isJsonValue(resource) || !isDocument(resource))
+        throw new Error('Expected a JSON resource object.');
       await writeFile(
         join(root, path),
         `${JSON.stringify({ ...resource, secret: 'must-not-render' })}\n`,
       );
     }
+
     const validation = await runJson(root, ['project', 'validate']);
     expect(validation.exitCode).toBe(1);
     expect(validation.output.join('')).not.toContain('must-not-render');
+
     if (validation.document.ok) throw new Error('Expected project validation failure.');
     expect(validation.document.error.code).toBe('project_invalid');
-    // Contracts has no schema for diagnostic details, so this one read is typed by hand.
-    const { diagnostics } = validation.document.error.details as {
-      diagnostics: { source: string }[];
-    };
+
+    const details = validation.document.error.details;
+
+    if (!hasSourceDiagnostics(details)) throw new Error('Expected source diagnostics.');
+    const { diagnostics } = details;
+
     const sources = diagnostics.map(({ source }) => source);
     expect(sources).toEqual([...sources].sort());
     expect(sources).toEqual(
@@ -240,6 +271,7 @@ describe('project commands', () => {
 
     const human = await runCommand(root, ['show', 'agent', 'support']);
     const json = await runJson(root, ['show', 'agent', 'worker']);
+
     for (const response of [human, json]) {
       expect(response.exitCode).toBe(0);
       const output = response.output.join('\n');
@@ -256,11 +288,13 @@ describe('project commands', () => {
     const storePath = join(root, '.attest', 'runs.db');
     await mkdir(join(root, '.attest'));
     const store = await openStore(storePath);
+
     const run = await store.runs.createRun({
       schemaId: 'attest.project',
       configHash: 'safe-hash',
       configJson: '{"secret":"must-not-render"}',
     });
+
     await store.close();
     const beforeBytes = await readFile(storePath);
     const beforeFiles = await readdir(join(root, '.attest'));

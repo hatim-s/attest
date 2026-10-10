@@ -117,7 +117,9 @@ const evalEventSchema = z.discriminatedUnion('event', [
 ]);
 
 type EvalEvent = z.infer<typeof evalEventSchema>;
+
 type EvalFinalResultData = z.infer<typeof evalFinalResultDataSchema>;
+
 type EvalRunSummary = z.infer<typeof evalRunSummarySchema>;
 
 export {

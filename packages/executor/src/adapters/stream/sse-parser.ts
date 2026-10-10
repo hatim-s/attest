@@ -14,12 +14,16 @@ class SseParser {
 
   push(line: string): StreamEvent | undefined {
     if (line === '') return this.dispatch();
+
     if (line.startsWith(':')) return { heartbeat: true, source: line };
     const separator = line.indexOf(':');
     const field = separator < 0 ? line : line.slice(0, separator);
     const value = separator < 0 ? '' : line.slice(separator + 1).replace(/^ /u, '');
+
     if (field === 'event') this.eventName = value;
+
     if (field === 'data') this.data.push(value);
+
     return undefined;
   }
 
@@ -29,8 +33,10 @@ class SseParser {
       this.data.length === 0
         ? undefined
         : { heartbeat: false, eventName: this.eventName, source: this.data.join('\n') };
+
     this.data = [];
     this.eventName = undefined;
+
     return event;
   }
 }

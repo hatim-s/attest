@@ -17,8 +17,11 @@ const isIpv4Loopback = (address: string): boolean => address.startsWith('127.');
 const isSafeIpv4 = (address: string): boolean => {
   const octets = address.split('.').map(Number);
   const [first = -1, second = -1, third = -1] = octets;
+
   if (octets.length !== 4 || octets.some((octet) => octet < 0 || octet > 255)) return false;
+
   if (isIpv4Loopback(address)) return true;
+
   return !(
     first === 0 ||
     first === 10 ||
@@ -40,9 +43,12 @@ const normalizedIpv6 = (address: string): string => address.toLowerCase().split(
 /** Allows public IPv6 and explicit loopback while rejecting local/special address classes. */
 const isSafeIpv6 = (address: string): boolean => {
   const normalized = normalizedIpv6(address);
+
   if (normalized === '::1') return true;
   const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/u.exec(normalized)?.[1];
+
   if (mapped !== undefined) return isSafeIpv4(mapped);
+
   return !(
     normalized === '::' ||
     normalized.startsWith('fc') ||
@@ -89,16 +95,20 @@ const resolveSafeHttpUrl = async (
   options: ResolveSafeHttpUrlOptions,
 ): Promise<ResolvedHttpUrl> => {
   const { callerSignal, signal } = options;
+
   const throwIfAborted = (): void => {
     if (signal?.aborted === true) throw abortedError(callerSignal, 'HTTP hostname resolution');
   };
+
   throwIfAborted();
   let url: URL;
+
   try {
     url = new URL(value);
   } catch (error: unknown) {
     throw new AgentInvocationError('network', 'Mapped HTTP URL is invalid.', { cause: error });
   }
+
   if (
     !['http:', 'https:'].includes(url.protocol) ||
     url.username.length > 0 ||
@@ -115,6 +125,7 @@ const resolveSafeHttpUrl = async (
   const timeoutSignal = AbortSignal.timeout(options.timeoutMs);
   const combined = signal === undefined ? timeoutSignal : AbortSignal.any([signal, timeoutSignal]);
   let addresses: LookupAddress[];
+
   try {
     addresses = await Promise.race([
       lookup(url.hostname, { all: true, verbatim: true }),
@@ -124,19 +135,23 @@ const resolveSafeHttpUrl = async (
     if (callerSignal?.aborted === true || signal?.aborted === true) {
       throw abortedError(callerSignal, 'HTTP hostname resolution', { cause: error });
     }
+
     throw new AgentInvocationError(
       'network',
       'Mapped HTTP hostname could not be resolved safely.',
       { cause: error },
     );
   }
+
   const [selected] = addresses;
+
   if (selected === undefined || addresses.some(({ address }) => !isSafeAddress(address))) {
     throw new AgentInvocationError(
       'network',
       'Mapped HTTP hostname resolves to a prohibited network address.',
     );
   }
+
   return {
     address: selected.address,
     family: selected.family === 6 ? 6 : 4,
@@ -146,4 +161,5 @@ const resolveSafeHttpUrl = async (
 };
 
 export { requireSameOrigin } from './same-origin.js';
+
 export { resolveSafeHttpUrl, type ResolvedHttpUrl };

@@ -7,6 +7,7 @@ import { errnoCode } from './errno-code.js';
 const isProcessPresent = (pid: number): boolean => {
   try {
     process.kill(pid, 0);
+
     return true;
   } catch (error: unknown) {
     return errnoCode(error) === 'EPERM';

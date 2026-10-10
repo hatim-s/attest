@@ -1,3 +1,5 @@
+import type { JsonValue } from '@attest/contracts';
+import { validateCommandRequest } from '@attest/local/agent';
 import { parseJsonFlag, runTestCaseListCommand, runTestCaseShowCommand } from '@attest/local/test';
 import type { Command } from 'commander';
 
@@ -41,9 +43,20 @@ const IMPORT_CONSTRAINTS = [
   'upsert requires an explicit mapped id or --key source.',
 ];
 
+/** Case fields authored in JSON before validating the params object and generated id policy. */
+type AuthoredCaseDraft = {
+  input: JsonValue;
+  id?: string;
+  expected?: JsonValue;
+  params?: JsonValue;
+  tags?: string[];
+  folder?: string;
+};
+
 /** Registers direct case authoring, import, and inspection commands. */
 const registerTestCaseCommands = (test: Command, context: CommandContext): void => {
   const testCase = test.command('case').description('Author direct test cases.');
+
   const caseAdd = addMutationOptions(testCase.command('add').description('Add one direct case.'))
     .argument('[test-id]', 'test id')
     .option('--id <case-id>', 'case id; generated from logical content when omitted')
@@ -54,6 +67,7 @@ const registerTestCaseCommands = (test: Command, context: CommandContext): void 
     .option('--tag <tag>', 'case tag', collect)
     .action(async (testId: string | undefined, options: CaseAddOptions, leaf: Command) => {
       const prompt = promptContext(options, context.interaction);
+
       const request = await readOrBuildRequest({
         command: 'test.case.add',
         context,
@@ -65,30 +79,39 @@ const registerTestCaseCommands = (test: Command, context: CommandContext): void 
             { path: '--input', question: 'Case input JSON: ' },
             prompt,
           );
-          return {
+
+          const input = parseJsonFlag(inputText, '--input');
+
+          if (input === undefined) throw new Error('Required input JSON was not parsed.');
+          const authoredCase: AuthoredCaseDraft = { input };
+
+          if (options.id !== undefined) authoredCase.id = options.id;
+
+          if (options.expected !== undefined)
+            authoredCase.expected = parseJsonFlag(options.expected, '--expected');
+
+          if (options.params !== undefined)
+            authoredCase.params = parseJsonFlag(options.params, '--params');
+
+          if (options.tag !== undefined) authoredCase.tags = options.tag;
+
+          if (options.folder !== undefined) authoredCase.folder = options.folder;
+
+          return validateCommandRequest('test.case.add', {
             ...mutationRequestFields('test.case.add', options),
             test_id: await requiredInput(
               testId,
               { path: '<test-id>', question: 'Test id: ' },
               prompt,
             ),
-            case: {
-              ...(options.id === undefined ? {} : { id: options.id }),
-              input: parseJsonFlag(inputText, '--input'),
-              ...(options.expected === undefined
-                ? {}
-                : { expected: parseJsonFlag(options.expected, '--expected') }),
-              ...(options.params === undefined
-                ? {}
-                : { params: parseJsonFlag(options.params, '--params') }),
-              ...(options.tag === undefined ? {} : { tags: options.tag }),
-              ...(options.folder === undefined ? {} : { folder: options.folder }),
-            },
-          };
+            case: authoredCase,
+          });
         },
       });
+
       await runTestMutation(request, options, context);
     });
+
   setMutationHelp(caseAdd, {
     examples: ['attest test case add smoke --input \'{"question":"ping"}\''],
   });
@@ -106,6 +129,7 @@ const registerTestCaseCommands = (test: Command, context: CommandContext): void 
         leaf: Command,
       ) => {
         const prompt = promptContext(options, context.interaction);
+
         const request = await readOrBuildRequest({
           command: 'test.case.import',
           context,
@@ -126,13 +150,17 @@ const registerTestCaseCommands = (test: Command, context: CommandContext): void 
             import: importRequestFields(options),
           }),
         });
+
         if (prompt.interactive && request.yes !== true && request.dry_run !== true) {
           await runGuidedImport(request, options, context);
+
           return;
         }
+
         await runTestMutation(request, options, context);
       },
     );
+
   setMutationHelp(caseImport, {
     examples: [
       'attest test case import smoke ./cases.jsonl',
@@ -152,11 +180,13 @@ const registerTestCaseCommands = (test: Command, context: CommandContext): void 
         { path: '<test-id>', question: 'Test id: ' },
         promptContext(options, context.interaction),
       );
+
       const result = await runTestCaseListCommand({
         project: options.project,
         testId: id,
         workingDirectory: context.workingDirectory,
       });
+
       context.io.output(renderCommandResult('test.case.list', outputFormat(options), result));
     });
 
@@ -166,22 +196,26 @@ const registerTestCaseCommands = (test: Command, context: CommandContext): void 
     .action(
       async (testId: string | undefined, caseId: string | undefined, options: CommonCliOptions) => {
         const prompt = promptContext(options, context.interaction);
+
         const resolvedTestId = await requiredInput(
           testId,
           { path: '<test-id>', question: 'Test id: ' },
           prompt,
         );
+
         const resolvedCaseId = await requiredInput(
           caseId,
           { path: '<case-id>', question: 'Case id: ' },
           prompt,
         );
+
         const result = await runTestCaseShowCommand({
           caseId: resolvedCaseId,
           project: options.project,
           testId: resolvedTestId,
           workingDirectory: context.workingDirectory,
         });
+
         context.io.output(renderCommandResult('test.case.show', outputFormat(options), result));
       },
     );
@@ -201,6 +235,7 @@ const registerTestCaseCommands = (test: Command, context: CommandContext): void 
         leaf: Command,
       ) => {
         const prompt = promptContext(options, context.interaction);
+
         const request = await readOrBuildRequest({
           command: 'test.case.rename',
           context,
@@ -225,9 +260,11 @@ const registerTestCaseCommands = (test: Command, context: CommandContext): void 
             ),
           }),
         });
+
         await runTestMutation(request, options, context);
       },
     );
+
   setMutationHelp(caseRename, {
     examples: ['attest test case rename smoke old-case new-case'],
   });
@@ -245,6 +282,7 @@ const registerTestCaseCommands = (test: Command, context: CommandContext): void 
         leaf: Command,
       ) => {
         const prompt = promptContext(options, context.interaction);
+
         const request = await readOrBuildRequest({
           command: 'test.case.remove',
           context,
@@ -264,10 +302,12 @@ const registerTestCaseCommands = (test: Command, context: CommandContext): void 
             ),
           }),
         });
+
         if (!(await confirmRemoval(request, `case ${request.case_id}`, options, context))) return;
         await runTestMutation(request, options, context);
       },
     );
+
   setMutationHelp(caseRemove, {
     examples: ['attest test case remove smoke old-case --yes'],
   });

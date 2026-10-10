@@ -12,6 +12,7 @@ const splitDestination = (destination: string): string[] => {
   const segments: string[] = [];
   let segment = '';
   let escaping = false;
+
   for (const character of destination) {
     if (escaping) {
       segment += character;
@@ -25,8 +26,10 @@ const splitDestination = (destination: string): string[] => {
       segment += character;
     }
   }
+
   if (escaping) segment += '\\';
   segments.push(segment);
+
   return segments;
 };
 
@@ -36,6 +39,7 @@ const destinationPointer = (destination: string): string =>
 /** Two destinations overlap when one is a prefix of the other, such as `input` and `input.a`. */
 const overlaps = (left: readonly string[], right: readonly string[]): boolean => {
   const common = Math.min(left.length, right.length);
+
   return left.slice(0, common).every((segment, index) => segment === right[index]);
 };
 
@@ -43,11 +47,12 @@ const overlaps = (left: readonly string[], right: readonly string[]): boolean =>
  * Checks mappings before any record is read: unsafe or overlapping destinations would make
  * assignment ambiguous or unsafe, so these must reject the whole import.
  */
-const assertMappingShape = (
+const validateMappingDestinations = (
   format: ImportFormat,
   mappings: readonly DatasetImportMapping[],
 ): ImportDiagnostic[] => {
   const diagnostics: ImportDiagnostic[] = [];
+
   if (format === 'csv' && mappings.length === 0) {
     diagnostics.push(
       importDiagnostic({
@@ -58,10 +63,13 @@ const assertMappingShape = (
       }),
     );
   }
+
   const destinations = mappings.map(({ destination }) => splitDestination(destination));
+
   for (const [index, { source }] of mappings.entries()) {
     const path = destinations[index]!;
     const destinationPath = toPointer(path);
+
     if (path.some((segment) => UNSAFE_SEGMENTS.has(segment))) {
       diagnostics.push(
         importDiagnostic({
@@ -73,6 +81,7 @@ const assertMappingShape = (
         }),
       );
     }
+
     if (path[0] === 'metrics') {
       diagnostics.push(
         importDiagnostic({
@@ -84,6 +93,7 @@ const assertMappingShape = (
         }),
       );
     }
+
     for (const [priorIndex, prior] of destinations.slice(0, index).entries()) {
       if (!overlaps(path, prior)) continue;
       diagnostics.push(
@@ -96,6 +106,7 @@ const assertMappingShape = (
         }),
       );
     }
+
     if (format !== 'csv' && !source.startsWith('/')) {
       diagnostics.push(
         importDiagnostic({
@@ -108,7 +119,8 @@ const assertMappingShape = (
       );
     }
   }
+
   return diagnostics;
 };
 
-export { assertMappingShape, destinationPointer, splitDestination };
+export { validateMappingDestinations, destinationPointer, splitDestination };

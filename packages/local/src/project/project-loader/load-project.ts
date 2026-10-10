@@ -1,5 +1,6 @@
 import {
   agentResourceSchema,
+  type ProjectManifest,
   metricResourceSchema,
   projectManifestSchema,
   projectResourcesSchema,
@@ -31,51 +32,70 @@ type ResourceSources = {
   tests: readonly string[];
 };
 
+type ProjectIssueSource = { path: PropertyKey[]; source: string };
+
+function isIssueIndex(value: PropertyKey | undefined): value is number {
+  return typeof value === 'number';
+}
+
 /** Maps an aggregate schema issue path back to the authored file that holds the bad value. */
 const sourceForProjectIssue = (
   path: readonly PropertyKey[],
   sources: ResourceSources,
-): { path: PropertyKey[]; source: string } => {
+): ProjectIssueSource => {
   const [collection, rawIndex, field, ...remaining] = path;
+
   if (collection === 'project') return { path: path.slice(1), source: PROJECT_MANIFEST_FILE };
-  const index = typeof rawIndex === 'number' ? rawIndex : -1;
+  const index = isIssueIndex(rawIndex) ? rawIndex : -1;
   const fieldPath = field === undefined ? remaining : [field, ...remaining];
+
   if (collection === 'datasets') {
     const datasetSource = sources.datasets[index];
+
     if (field === 'metadata') {
       return { path: remaining, source: datasetSource?.metadata ?? PROJECT_MANIFEST_FILE };
     }
+
     return { path: fieldPath, source: datasetSource?.data ?? PROJECT_MANIFEST_FILE };
   }
+
   const collectionSources =
     collection === 'agents' || collection === 'metrics' || collection === 'tests'
       ? sources[collection]
       : undefined;
+
   return { path: fieldPath, source: collectionSources?.[index] ?? PROJECT_MANIFEST_FILE };
 };
 
 /** Loads each manifest entry in order; failures stay in each result's diagnostics. */
 const loadJsonResources = async <Value>(
   root: string,
-  entries: readonly { content_hash: string; path: string }[],
+  entries:
+    | ProjectManifest['resources']['agents']
+    | ProjectManifest['resources']['tests']
+    | ProjectManifest['resources']['metrics'],
   schema: z.ZodType<Value>,
 ): Promise<LoadedJsonResource<Value>[]> => {
   const loads: LoadedJsonResource<Value>[] = [];
+
   for (const entry of entries) {
     loads.push(await loadJsonResource(root, entry.path, entry.content_hash, schema));
   }
+
   return loads;
 };
 
 /** Loads the complete project read model and rejects aggregate source-safe diagnostics. */
 const loadProject = async (options: DiscoverProjectOptions = {}): Promise<LoadedProject> => {
   const discovered = await discoverProject(options);
+
   const manifest = await loadJsonResource(
     discovered.root,
     PROJECT_MANIFEST_FILE,
     undefined,
     projectManifestSchema,
   );
+
   if (manifest.value === undefined || manifest.hash === undefined) {
     throw new ProjectLoadError(
       'project_invalid',
@@ -85,16 +105,20 @@ const loadProject = async (options: DiscoverProjectOptions = {}): Promise<Loaded
   }
 
   const { resources } = manifest.value;
+
   const agentLoads = await loadJsonResources(
     discovered.root,
     resources.agents,
     agentResourceSchema,
   );
+
   const testLoads = await loadJsonResources(discovered.root, resources.tests, testResourceSchema);
   const datasetLoads: LoadedDatasetResource[] = [];
+
   for (const entry of resources.datasets) {
     datasetLoads.push(await loadDataset(discovered.root, entry));
   }
+
   const metricLoads = await loadJsonResources(
     discovered.root,
     resources.metrics,
@@ -107,16 +131,19 @@ const loadProject = async (options: DiscoverProjectOptions = {}): Promise<Loaded
     ...datasetLoads.flatMap(({ diagnostics: issues }) => issues),
     ...metricLoads.flatMap(({ diagnostics: issues }) => issues),
   ];
+
   const agents = agentLoads.flatMap(({ value }) => (value === undefined ? [] : [value]));
   const tests = testLoads.flatMap(({ value }) => (value === undefined ? [] : [value]));
   const datasets = datasetLoads.flatMap(({ value }) => (value === undefined ? [] : [value]));
   const metrics = metricLoads.flatMap(({ value }) => (value === undefined ? [] : [value]));
+
   const sources = {
     agents: agentLoads.flatMap(({ source, value }) => (value === undefined ? [] : [source])),
     datasets: datasetLoads.flatMap(({ source, value }) => (value === undefined ? [] : [source])),
     metrics: metricLoads.flatMap(({ source, value }) => (value === undefined ? [] : [source])),
     tests: testLoads.flatMap(({ source, value }) => (value === undefined ? [] : [source])),
   };
+
   const validated = projectResourcesSchema.safeParse({
     agents,
     datasets,
@@ -124,10 +151,12 @@ const loadProject = async (options: DiscoverProjectOptions = {}): Promise<Loaded
     project: manifest.value,
     tests,
   });
+
   if (!validated.success) {
     diagnostics.push(
       ...validated.error.issues.map((issue) => {
         const source = sourceForProjectIssue(issue.path, sources);
+
         return {
           code: 'schema_invalid' as const,
           message: issue.message,
@@ -137,6 +166,7 @@ const loadProject = async (options: DiscoverProjectOptions = {}): Promise<Loaded
       }),
     );
   }
+
   if (diagnostics.length > 0 || !validated.success) {
     throw new ProjectLoadError(
       'project_invalid',

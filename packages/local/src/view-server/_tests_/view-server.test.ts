@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { get } from 'node:http';
 import { tmpdir } from 'node:os';
@@ -12,6 +13,7 @@ import { startViewServer } from '../start-view-server.js';
 import type { ViewServerHandle } from '../types.js';
 
 const directories: string[] = [];
+
 const servers: ViewServerHandle[] = [];
 
 const createRun = async (store: RunStore, pass: boolean): Promise<string> => {
@@ -20,6 +22,7 @@ const createRun = async (store: RunStore, pass: boolean): Promise<string> => {
     configHash: 'same-config',
     configJson: '{}',
   });
+
   await store.recordCase(
     run.id,
     {
@@ -51,6 +54,7 @@ const createRun = async (store: RunStore, pass: boolean): Promise<string> => {
     ],
   );
   await store.finalizeRun(run.id, 'completed');
+
   return run.id;
 };
 
@@ -63,9 +67,11 @@ const createStoreFixture = async (): Promise<{
   directories.push(directory);
   const storePath = join(directory, 'runs.db');
   const store = (await openStore(storePath)).runs;
+
   try {
     const baseRunId = await createRun(store, true);
     const candidateRunId = await createRun(store, false);
+
     return { baseRunId, candidateRunId, storePath };
   } finally {
     await store.close();
@@ -92,9 +98,11 @@ describe('view server', () => {
       schema: 'attest.view',
       ok: true,
     });
-    const runs = (await fetch(`${server.origin}/api/runs`).then((response) => response.json())) as {
-      runs: Array<{ id: string }>;
-    };
+
+    const runs = z
+      .object({ runs: z.array(z.object({ id: z.string() })) })
+      .parse(await fetch(`${server.origin}/api/runs`).then((response) => response.json()));
+
     expect(runs.runs.map(({ id }) => id)).toEqual([fixture.candidateRunId, fixture.baseRunId]);
     await expect(
       fetch(`${server.origin}/api/runs/${fixture.baseRunId}/cases/smoke/capital`).then((response) =>
@@ -129,28 +137,33 @@ describe('view server', () => {
 
   it('requires both exact origin and session token for shutdown writes', async () => {
     const fixture = await createStoreFixture();
+
     const server = await startViewServer({
       sessionToken: 'known-session-token',
       storePath: fixture.storePath,
     });
+
     servers.push(server);
 
     const missingOrigin = await fetch(`${server.origin}/api/shutdown`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${server.sessionToken}` },
     });
+
     expect(missingOrigin.status).toBe(403);
 
     const badToken = await fetch(`${server.origin}/api/shutdown`, {
       method: 'POST',
       headers: { Authorization: 'Bearer wrong', Origin: server.origin },
     });
+
     expect(badToken.status).toBe(401);
 
     const accepted = await fetch(`${server.origin}/api/shutdown`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${server.sessionToken}`, Origin: server.origin },
     });
+
     expect(accepted.status).toBe(204);
     await server.closed;
     servers.splice(servers.indexOf(server), 1);

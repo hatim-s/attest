@@ -64,6 +64,7 @@ const metricResourceSchema = z
   .meta({ id: 'MetricResource' });
 
 type MetricResource = z.infer<typeof metricResourceSchema>;
+
 type MetricResultExtraction = z.infer<typeof metricResultExtractionSchema>;
 
 export {

@@ -26,6 +26,7 @@ const missingDiagnostic = (source: string, message: string): ProjectDiagnostic =
 const resolveDirectory = async (directory: string, source: string): Promise<string> => {
   try {
     const resolvedDirectory = await realpath(directory);
+
     if (!(await stat(resolvedDirectory)).isDirectory()) {
       throw new ProjectLoadError('project_read_failed', 'Could not inspect project path.', [
         {
@@ -35,12 +36,15 @@ const resolveDirectory = async (directory: string, source: string): Promise<stri
         },
       ]);
     }
+
     return resolvedDirectory;
   } catch (error: unknown) {
     if (error instanceof ProjectLoadError) {
       throw error;
     }
+
     const code = errnoCode(error);
+
     const diagnostic =
       code === 'ENOENT'
         ? missingDiagnostic(source, 'directory does not exist')
@@ -49,6 +53,7 @@ const resolveDirectory = async (directory: string, source: string): Promise<stri
             message: 'directory is not readable',
             source,
           } satisfies ProjectDiagnostic);
+
     throw new ProjectLoadError('project_read_failed', 'Could not inspect project path.', [
       diagnostic,
     ]);
@@ -59,11 +64,13 @@ const resolveDirectory = async (directory: string, source: string): Promise<stri
 const pathExists = async (path: string, source: string): Promise<boolean> => {
   try {
     await lstat(path);
+
     return true;
   } catch (error: unknown) {
     if (errnoCode(error) === 'ENOENT') {
       return false;
     }
+
     throw new ProjectLoadError('project_read_failed', 'Could not inspect project path.', [
       {
         code: 'source_unreadable',
@@ -78,6 +85,7 @@ const pathExists = async (path: string, source: string): Promise<boolean> => {
 const sharesDevice = async (directory: string, parent: string): Promise<boolean> => {
   try {
     const [directoryStats, parentStats] = await Promise.all([stat(directory), stat(parent)]);
+
     return directoryStats.dev === parentStats.dev;
   } catch {
     throw new ProjectLoadError('project_read_failed', 'Could not inspect project boundary.', [
@@ -95,38 +103,48 @@ const discoverProject = async (
   options: DiscoverProjectOptions = {},
 ): Promise<DiscoveredProject> => {
   const workingDirectory = resolve(options.workingDirectory ?? process.cwd());
+
   if (options.project !== undefined) {
     const requestedRoot = await resolveDirectory(
       resolve(workingDirectory, options.project),
       options.project,
     );
+
     const manifestPath = join(requestedRoot, PROJECT_MANIFEST_FILE);
+
     if (!(await pathExists(manifestPath, PROJECT_MANIFEST_FILE))) {
       throw new ProjectLoadError('project_not_found', 'No Attest project was found.', [
         missingDiagnostic(PROJECT_MANIFEST_FILE, 'manifest does not exist in the explicit project'),
       ]);
     }
+
     return { manifestPath, root: requestedRoot };
   }
 
   let current = await resolveDirectory(workingDirectory, workingDirectory);
+
   while (true) {
     const manifestPath = join(current, PROJECT_MANIFEST_FILE);
+
     if (await pathExists(manifestPath, PROJECT_MANIFEST_FILE)) {
       return { manifestPath, root: current };
     }
+
     // A .git file denotes a linked worktree or submodule; a directory denotes a regular worktree.
     if (await pathExists(join(current, '.git'), '.git')) {
       break;
     }
 
     const parent = dirname(current);
+
     if (parent === current) {
       break;
     }
+
     if (!(await sharesDevice(current, parent))) {
       break;
     }
+
     current = parent;
   }
 

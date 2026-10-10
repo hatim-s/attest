@@ -29,7 +29,9 @@ const showRun = async (project: LoadedProject, id: string): Promise<JsonValue> =
     () => withReadonlyRunStore(project.root, async (store) => store.getRun(id)),
     () => missingResource('run', id),
   );
+
   if (run === undefined) throw missingResource('run', id);
+
   return toSafeRunSummary(run);
 };
 
@@ -41,21 +43,27 @@ const findResource = async (
   if (type === 'run') {
     return await showRun(project, id);
   }
+
   if (type === 'agent') {
     const resource = project.agents.find((candidate) => candidate.id === id);
+
     if (resource !== undefined) return redactAgentResource(resource);
   } else if (type === 'test') {
     const resource = project.tests.find((candidate) => candidate.id === id);
+
     if (resource !== undefined) return resource;
   } else if (type === 'metric') {
     const resource = project.metrics.find((candidate) => candidate.id === id);
+
     if (resource !== undefined) return redactMetricResource(resource);
   } else {
     const resource = project.datasets.find(({ metadata }) => metadata.id === id);
+
     if (resource !== undefined) {
       return { metadata: resource.metadata, cases: resource.cases };
     }
   }
+
   throw missingResource(type, id);
 };
 
@@ -67,7 +75,9 @@ const runShowCommand = async (
     project: options.project,
     workingDirectory: options.workingDirectory,
   });
+
   const resource = await findResource(project, options.resourceType, options.id);
+
   return {
     operation: 'show',
     projectHashBefore: project.projectHash,

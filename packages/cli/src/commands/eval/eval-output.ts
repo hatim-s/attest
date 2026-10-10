@@ -22,15 +22,18 @@ const renderEvalFailureEvent = (failure: SerializedCliFailure): string =>
 /** The last human line of every eval command, naming the outcome and exit code. */
 const renderEvalResultLine = (exitCode: CliExitCode, verdict?: string): string => {
   const label = verdict ?? (exitCode === 130 ? 'CANCELLED' : 'ERROR');
+
   return `Result: ${label} (exit ${exitCode})`;
 };
 
 /** Renders the finished run with the commands to inspect, view, and compare it. */
 const renderHumanFinalResult = (data: EvalFinalResultData): string => {
   const result = data.result;
+
   if (!result.ok) return renderEvalResultLine(data.exit_code);
   const run = result.result;
   const selection = run.selection;
+
   return [
     `Run ${run.run_id}`,
     `  cases: ${run.summary.total_cases}`,

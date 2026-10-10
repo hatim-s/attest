@@ -30,11 +30,13 @@ const tokenizeCurl = (source: string): string[] => {
 /** Reads the value after a flag, rejecting a missing value or another flag in its place. */
 const optionValue = (tokens: readonly string[], index: number, flag: string): string => {
   const value = tokens[index + 1];
+
   if (value === undefined || value.startsWith('-')) {
     throw new CurlImportError(`cURL option ${flag} is missing its value.`, [
       `missing_value:${flag}`,
     ]);
   }
+
   return value;
 };
 

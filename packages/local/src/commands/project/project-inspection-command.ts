@@ -18,6 +18,7 @@ const runProjectShowCommand = async (
     project: options.project,
     workingDirectory: options.workingDirectory,
   });
+
   return {
     operation: 'project-show',
     projectHashBefore: loaded.projectHash,
@@ -38,12 +39,14 @@ const runProjectValidateCommand = async (
     project: options.project,
     workingDirectory: options.workingDirectory,
   });
+
   const counts = {
     agents: loaded.agents.length,
     datasets: loaded.datasets.length,
     metrics: loaded.metrics.length,
     tests: loaded.tests.length,
   };
+
   return {
     operation: 'project-validate',
     projectHashBefore: loaded.projectHash,

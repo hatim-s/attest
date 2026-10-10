@@ -19,6 +19,7 @@ const runTestMutation = async (
     request,
     workingDirectory: context.workingDirectory,
   });
+
   context.io.output(renderCommandResult(request.command, outputFormat(options), result));
 };
 

@@ -1,6 +1,7 @@
 import {
   projectResourcesSchema,
   type AgentResource,
+  type JsonValue,
   type DatasetResource,
   type MetricResource,
   type ProjectManifest,
@@ -35,12 +36,13 @@ const sortById = <T extends { id: string }>(values: readonly T[]): T[] =>
   [...values].sort(({ id: left }, { id: right }) => left.localeCompare(right, 'en'));
 
 /** Renders generated JSON with canonical key ordering and one terminal newline. */
-const renderCanonicalJsonFile = (value: unknown): string =>
+const renderCanonicalJsonFile = (value: JsonValue): string =>
   `${JSON.stringify(JSON.parse(canonicalStringify(value)), undefined, 2)}\n`;
 
 /** Renders ordered JSONL records canonically, including a terminal newline when non-empty. */
-const renderCanonicalJsonLinesFile = (values: readonly unknown[]): string => {
+const renderCanonicalJsonLinesFile = (values: readonly JsonValue[]): string => {
   const serialized = serializeCanonicalJsonLines(values);
+
   return serialized.length === 0 ? '' : `${serialized}\n`;
 };
 
@@ -55,6 +57,7 @@ const addJsonResource = (
     contents: renderCanonicalJsonFile(resource),
     path,
   });
+
   return canonicalHash;
 };
 
@@ -62,7 +65,7 @@ const addDataset = (
   files: Map<string, CandidateFile>,
   metadata: DatasetResource,
   cases: readonly TestCase[],
-): { dataHash: string; metadataIntegrityHash: string } => {
+) => {
   const metadataPath = `attest/datasets/${metadata.id}.meta.json`;
   const dataPath = `attest/datasets/${metadata.id}.jsonl`;
   const metadataIntegrityHash = contentHash(metadata);
@@ -77,6 +80,7 @@ const addDataset = (
     contents: renderCanonicalJsonLinesFile(cases),
     path: dataPath,
   });
+
   return { dataHash, metadataIntegrityHash };
 };
 
@@ -84,9 +88,11 @@ const addDataset = (
 const prepareProjectCandidate = (candidate: ProjectResources): PreparedProjectCandidate => {
   const agents = sortById(candidate.agents);
   const tests = sortById(candidate.tests);
+
   const datasets = [...candidate.datasets].sort(({ metadata: left }, { metadata: right }) =>
     left.id.localeCompare(right.id, 'en'),
   );
+
   const metrics = sortById(candidate.metrics);
   const files = new Map<string, CandidateFile>();
 
@@ -96,14 +102,17 @@ const prepareProjectCandidate = (candidate: ProjectResources): PreparedProjectCa
     path: `attest/agents/${agent.id}.json`,
     content_hash: addJsonResource(files, `attest/agents/${agent.id}.json`, agent),
   }));
+
   const testEntries = tests.map((test) => ({
     id: test.id,
     schema: test.schema,
     path: `attest/tests/${test.id}.json`,
     content_hash: addJsonResource(files, `attest/tests/${test.id}.json`, test),
   }));
+
   const datasetEntries = datasets.map(({ cases, metadata }) => {
     const hashes = addDataset(files, metadata, cases);
+
     return {
       id: metadata.id,
       schema: metadata.schema,
@@ -113,6 +122,7 @@ const prepareProjectCandidate = (candidate: ProjectResources): PreparedProjectCa
       metadata_content_hash: hashes.metadataIntegrityHash,
     };
   });
+
   const metricEntries = metrics.map((metric) => ({
     id: metric.id,
     schema: metric.schema,
@@ -124,7 +134,6 @@ const prepareProjectCandidate = (candidate: ProjectResources): PreparedProjectCa
     schema: candidate.project.schema,
     project_id: candidate.project.project_id,
     name: candidate.project.name,
-    ...(candidate.project.defaults === undefined ? {} : { defaults: candidate.project.defaults }),
     resources: {
       agents: agentEntries,
       tests: testEntries,
@@ -132,8 +141,14 @@ const prepareProjectCandidate = (candidate: ProjectResources): PreparedProjectCa
       metrics: metricEntries,
     },
   };
+
+  if (!(candidate.project.defaults === undefined)) {
+    manifest.defaults = candidate.project.defaults;
+  }
+
   const project: ProjectResources = { agents, datasets, metrics, project: manifest, tests };
   const validated = projectResourcesSchema.safeParse(project);
+
   if (!validated.success) {
     throw new ProjectTransactionError(
       'project_invalid',
@@ -150,11 +165,13 @@ const prepareProjectCandidate = (candidate: ProjectResources): PreparedProjectCa
     validated.data.project,
     validated.data.datasets.map(({ metadata }) => metadata),
   );
+
   files.set('attest.project.json', {
     canonicalHash: contentHash(validated.data.project),
     contents: renderCanonicalJsonFile(validated.data.project),
     path: 'attest.project.json',
   });
+
   return { files, project: validated.data, projectHash };
 };
 

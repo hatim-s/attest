@@ -30,6 +30,7 @@ const registerMetricTestCommand = (metric: Command, context: CommandContext): vo
         interactive: isInteractive(options, context.interaction, options.fromJson),
         prompt: context.interaction.prompt,
       };
+
       const request = await readOrBuildRequest({
         command: 'metric.test',
         context,
@@ -50,6 +51,7 @@ const registerMetricTestCommand = (metric: Command, context: CommandContext): vo
           ),
         }),
       });
+
       const result = await withProcessSignals((signal) =>
         runMetricTestCommand({
           fixture: request.fixture,
@@ -60,6 +62,7 @@ const registerMetricTestCommand = (metric: Command, context: CommandContext): vo
           workingDirectory: context.workingDirectory,
         }),
       );
+
       context.io.output(renderCommandResult('metric.test', outputFormat(options), result));
     });
 

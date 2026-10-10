@@ -4,6 +4,7 @@ import { safeErrorMessage } from '../errors.js';
 import type { ExecuteEvalOptions } from '../types.js';
 
 const MAXIMUM_EVENTS = 100_003;
+
 const MAXIMUM_EVENT_BYTES = 16 * 1024;
 
 /** An event before the collector stamps its schema, sequence, and time. */
@@ -29,21 +30,27 @@ const createEventCollector = (
 ): EventCollector => {
   const events: EvalEvent[] = [];
   let deliveryFailure: CliError | undefined;
+
   const emit = async (event: EvalEventBody): Promise<void> => {
     if (events.length >= MAXIMUM_EVENTS) throw new Error('Eval event count cap was exceeded.');
+
     const completeEvent: EvalEvent = {
       ...event,
       schema: CLI_EVENT_SCHEMA_ID,
       sequence: events.length,
       time: now(),
     };
+
     if (Buffer.byteLength(JSON.stringify(completeEvent), 'utf8') > MAXIMUM_EVENT_BYTES) {
       throw new Error('Eval event byte cap was exceeded.');
     }
+
     events.push(completeEvent);
+
     if (onEvent === undefined || deliveryFailure !== undefined) {
       return;
     }
+
     try {
       await onEvent(completeEvent);
     } catch (error: unknown) {
@@ -54,6 +61,7 @@ const createEventCollector = (
       };
     }
   };
+
   return { events, emit, sinkFailure: () => deliveryFailure };
 };
 

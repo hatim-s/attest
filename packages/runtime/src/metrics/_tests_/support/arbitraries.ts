@@ -4,10 +4,12 @@ import fc from 'fast-check';
 import type { EvaluationDocument } from '../../evaluation-document.js';
 import { isJsonValue } from '../../internal/json-value.js';
 
+// BOUNDARY: fast-check candidates must satisfy the JSON schema before generated documents consume them.
 const toJsonValue = (value: unknown): JsonValue => {
   if (!isJsonValue(value)) {
     throw new Error('fast-check generated a non-JSON value');
   }
+
   return value;
 };
 

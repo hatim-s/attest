@@ -13,6 +13,7 @@ import {
   evalRunRequestSchema,
   evalRunSchema,
   type EvalEvent,
+  type EvalRunRequest,
   type EvalFinalResultData,
   type MetricResource,
   type TestCase,
@@ -51,11 +52,13 @@ const ECHO_AGENT = [
 ].join('\n');
 
 const temporaryDirectories: string[] = [];
+
 const originalMetricSecret = process.env.ATTEST_EVAL_METRIC_SECRET;
 
 const temporaryDirectory = async (prefix: string): Promise<string> => {
   const directory = await mkdtemp(join(tmpdir(), prefix));
   temporaryDirectories.push(directory);
+
   return directory;
 };
 
@@ -131,12 +134,13 @@ const createEvalProject = async (options: EvalProjectOptions = {}): Promise<stri
     ...(options.tests ?? []),
   );
   await applyProjectMutation({ candidate, projectRoot: root });
+
   return root;
 };
 
 const startEval = async (
   root: string,
-  selection: Record<string, unknown>,
+  selection: Partial<EvalRunRequest>,
 ): Promise<AsyncIterable<EvalEvent>> =>
   runConfiguration(
     evalRunRequestSchema.parse({
@@ -156,15 +160,19 @@ const startEval = async (
 /** Drains an eval stream and returns its run id and final result. */
 const collectEval = async (source: AsyncIterable<EvalEvent>): Promise<EvalOutcome> => {
   const events: EvalEvent[] = [];
+
   for await (const event of source) events.push(event);
   const started = events[0];
   const final = events.at(-1);
+
   if (started?.event !== 'run_started') throw new Error('Expected run_started first.');
+
   if (final?.event !== 'result') throw new Error('Expected a final result event.');
+
   return { events, final: final.data, runId: started.data.run_id };
 };
 
-const runEval = async (root: string, selection: Record<string, unknown>): Promise<EvalOutcome> =>
+const runEval = async (root: string, selection: Partial<EvalRunRequest>): Promise<EvalOutcome> =>
   collectEval(await startEval(root, selection));
 
 afterEach(async () => {
@@ -180,10 +188,12 @@ describe('runConfiguration', () => {
     const root = await createEvalProject({
       tests: [testResource('other', 'exact', [{ id: 'other-case', input: 'Paris' }])],
     });
+
     const all = await runEval(root, { all: true });
     const smoke = await runEval(root, { test_ids: ['smoke'] });
 
     const store = await openStore(join(root, '.attest', 'runs.db'));
+
     try {
       const diff = await diffRuns(store.runs, all.runId, smoke.runId);
       expect(diff.summary.coverage).toEqual({
@@ -206,6 +216,7 @@ describe('runConfiguration', () => {
       tags: [index % 2 === 0 ? 'smoke' : 'slow'],
       folder: 'billing/refunds',
     }));
+
     const root = await createEvalProject();
     const loaded = await loadProject({ project: root });
     const candidate = candidateFromLoadedProject(loaded);
@@ -213,6 +224,7 @@ describe('runConfiguration', () => {
     await applyProjectMutation({ candidate, projectRoot: root });
 
     const baseline = await runEval(root, { test_ids: ['smoke'] });
+
     const selected = await runEval(root, {
       test_ids: ['smoke'],
       folders: ['billing'],
@@ -220,7 +232,9 @@ describe('runConfiguration', () => {
       sample: { count: 25, seed: 'integration' },
       baseline_run_id: baseline.runId,
     });
+
     const started = selected.events[0];
+
     if (started?.event !== 'run_started') throw new Error('Expected sampled run start.');
     expect(started.data.selection).toMatchObject({
       total_cases: 101,
@@ -233,6 +247,7 @@ describe('runConfiguration', () => {
     });
 
     const store = await openStore(join(root, '.attest', 'runs.db'));
+
     try {
       const stored = await store.runs.getRunWithCases(selected.runId);
       const snapshot = evalRunSchema.parse(JSON.parse(stored.run.configJson)).snapshot;
@@ -285,6 +300,7 @@ describe('runConfiguration', () => {
     expect(second.final.exit_code).toBe(0);
 
     const store = await openStore(join(root, '.attest', 'runs.db'));
+
     try {
       const firstRun = await store.runs.getRun(first.runId);
       const persistedEval = evalRunSchema.parse(JSON.parse(firstRun.configJson));
@@ -311,6 +327,7 @@ describe('runConfiguration', () => {
     } finally {
       await store.close();
     }
+
     expect(await readdir(join(root, '.attest', 'eval-runs'))).toEqual([]);
   }, 15_000);
 
@@ -348,6 +365,7 @@ describe('runConfiguration', () => {
   it('redacts executable metric secrets from results and persisted evidence', async () => {
     const secret = 'eval-metric-secret-must-never-persist';
     process.env.ATTEST_EVAL_METRIC_SECRET = secret;
+
     const secretMetric = (mode: 'pass' | 'error'): MetricResource => ({
       schema: METRIC_RESOURCE_SCHEMA_ID,
       id: `secret-${mode}`,
@@ -358,6 +376,7 @@ describe('runConfiguration', () => {
         env: { METRIC_SECRET: { from_env: 'ATTEST_EVAL_METRIC_SECRET' } },
       },
     });
+
     const root = await createEvalProject({
       metrics: [secretMetric('pass'), secretMetric('error')],
       tests: (['pass', 'error'] as const).map((mode) =>
@@ -366,6 +385,7 @@ describe('runConfiguration', () => {
         ]),
       ),
     });
+
     await writeFile(
       join(root, 'metric.mjs'),
       [
@@ -397,10 +417,12 @@ describe('runConfiguration', () => {
     expect(JSON.stringify([passed.events, failed.events])).not.toContain(secret);
 
     const store = await openStore(join(root, '.attest', 'runs.db'));
+
     try {
       const passedEvidence = JSON.stringify(await store.runs.getCaseResults(passed.runId));
       const failedEvidence = JSON.stringify(await store.runs.getCaseResults(failed.runId));
       expect(passedEvidence).toContain('retained');
+
       for (const evidence of [passedEvidence, failedEvidence]) {
         expect(evidence).not.toContain(secret);
         expect(evidence).toContain(REDACTED);
@@ -413,6 +435,7 @@ describe('runConfiguration', () => {
   it('cancels only the addressed run when two evals share one process', async () => {
     const root = await temporaryDirectory('attest-run-configuration-release-');
     const releasePath = join(root, 'release-agent');
+
     const project = await createEvalProject({
       agentSource: [
         "import { existsSync } from 'node:fs';",
@@ -426,13 +449,16 @@ describe('runConfiguration', () => {
         "process.stdout.write(JSON.stringify({ protocol: 'attest.agent-invocation', output: request.input }));",
       ].join('\n'),
     });
+
     // runConfiguration returns only after the run is registered, so it is cancellable now.
     const first = collectEval(await startEval(project, { test_ids: ['smoke'] }));
     const second = collectEval(await startEval(project, { test_ids: ['smoke'] }));
+
     const [firstRunId] = (await readdir(join(project, '.attest', 'eval-runs')))
       .filter((file) => file.endsWith('.json') && !file.endsWith('.cancel.json'))
       .map((file) => file.slice(0, -'.json'.length))
       .sort();
+
     if (firstRunId === undefined) throw new Error('Expected a registered eval run.');
 
     await expect(

@@ -7,7 +7,7 @@ import { expect, onTestFinished } from 'vitest';
 
 import type { CliInteraction } from '../../commands/shared/cli-interaction.js';
 import type { CliIo } from '../../commands/shared/command-context.js';
-import { runCli } from '../../run-cli.js';
+import { runCli, type RunCliOptions } from '../../run-cli.js';
 import { writeFixtureProject } from './project-fixture.js';
 
 type CollectedIo = {
@@ -25,12 +25,14 @@ type RunOptions = {
   interaction?: Partial<CliInteraction>;
   /** Text returned by both stdin readers. */
   stdin?: string;
+  services?: RunCliOptions['services'];
 };
 
 /** Creates a temporary directory that is removed when the current test finishes. */
 const temporaryDirectory = async (prefix: string): Promise<string> => {
   const directory = await mkdtemp(join(tmpdir(), prefix));
   onTestFinished(() => rm(directory, { force: true, recursive: true }));
+
   return directory;
 };
 
@@ -38,6 +40,7 @@ const temporaryDirectory = async (prefix: string): Promise<string> => {
 const collectIo = (): CollectedIo => {
   const errors: string[] = [];
   const output: string[] = [];
+
   return {
     errors,
     output,
@@ -64,11 +67,14 @@ const runCommand = async (
   options: RunOptions = {},
 ): Promise<CliRun> => {
   const collected = collectIo();
+
   const exitCode = await runCli([...argv], {
     interaction: { ...nonInteractive(options.stdin), ...options.interaction },
     io: collected.io,
     workingDirectory: root,
+    services: options.services,
   });
+
   return { ...collected, exitCode };
 };
 
@@ -81,22 +87,28 @@ const runJson = async (
   const run = await runCommand(root, [...argv, '--output', 'json'], options);
   expect(run.errors).toEqual([]);
   expect(run.output).toHaveLength(1);
+
   return { ...run, document: cliResultSchema.parse(JSON.parse(run.output[0] ?? '')) };
 };
 
 /** Reads every file below `root` as base64, keyed by sorted `/`-separated relative paths. */
 const snapshotTree = async (root: string): Promise<Record<string, string>> => {
   const snapshot: Record<string, string> = {};
+
   const visit = async (directory: string, prefix: string): Promise<void> => {
     const entries = await readdir(directory, { withFileTypes: true });
+
     for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name))) {
       const relative = prefix.length === 0 ? entry.name : `${prefix}/${entry.name}`;
       const path = join(directory, entry.name);
+
       if (entry.isDirectory()) await visit(path, relative);
       else snapshot[relative] = (await readFile(path)).toString('base64');
     }
   };
+
   await visit(root, '');
+
   return snapshot;
 };
 
@@ -105,6 +117,7 @@ const createEmptyProject = async (): Promise<string> => {
   const parent = await temporaryDirectory('attest-cli-project-');
   const init = await runJson(parent, ['project', 'init', 'demo', '--name', 'Demo']);
   expect(init.exitCode).toBe(0);
+
   return join(parent, 'demo');
 };
 
@@ -112,6 +125,7 @@ const createEmptyProject = async (): Promise<string> => {
 const createFixtureProject = async (): Promise<string> => {
   const root = await temporaryDirectory('attest-cli-fixture-');
   await writeFixtureProject(root);
+
   return root;
 };
 

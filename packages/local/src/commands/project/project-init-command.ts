@@ -30,9 +30,11 @@ type ProjectInitCommandOptions = {
 /** Rejects overlapping request sources before reading stdin or applying precedence. */
 const assertUnambiguousInitSources = (options: ProjectInitCommandOptions): void => {
   const conflicts: string[] = [];
+
   if (options.directory !== undefined && options.projectDirectory !== undefined) {
     conflicts.push('directory', 'project');
   }
+
   if (options.fromJson !== undefined) {
     const flagFields = [
       ['directory', options.directory],
@@ -42,10 +44,10 @@ const assertUnambiguousInitSources = (options: ProjectInitCommandOptions): void 
       ['if-project-hash', options.expectedProjectHash],
       ['yes', options.yes],
     ] as const;
-    conflicts.push(
-      ...flagFields.filter(([, value]) => value !== undefined).map(([field]) => field),
-    );
+
+    conflicts.push(...flagFields.flatMap(([field, value]) => (value === undefined ? [] : [field])));
   }
+
   if (conflicts.length === 0) return;
   const conflictingFields = [...new Set(conflicts)].sort();
   throw new LocalError('cli_usage', 'Project initialization inputs overlap.', {
@@ -63,26 +65,31 @@ const inspectTargetDirectory = async (
 ): Promise<{ exists: boolean; root: string }> => {
   try {
     const metadata = await lstat(targetDirectory);
+
     if (!metadata.isDirectory() || metadata.isSymbolicLink()) {
       throw new LocalError('init_conflict', 'The initialization target is not a safe directory.', {
         path: targetDirectory,
         hint: 'Choose a real directory rather than a file or symbolic link.',
       });
     }
+
     return { exists: true, root: await realpath(targetDirectory) };
   } catch (error: unknown) {
     if (error instanceof LocalError) {
       throw error;
     }
+
     if (errnoCode(error) !== 'ENOENT') {
       throw new LocalError('init_failed', 'Could not inspect the initialization target.', {
         path: targetDirectory,
         cause: error,
       });
     }
+
     // Resolve the existing parent before any write so symlink aliases cannot change the target root.
     try {
       const parent = await realpath(dirname(targetDirectory));
+
       return { exists: false, root: join(parent, basename(targetDirectory)) };
     } catch (parentError: unknown) {
       throw new LocalError('init_failed', 'The initialization parent directory is unavailable.', {
@@ -97,17 +104,20 @@ const inspectTargetDirectory = async (
 const pathExists = async (path: string): Promise<boolean> => {
   try {
     await lstat(path);
+
     return true;
   } catch (error: unknown) {
     if (errnoCode(error) === 'ENOENT') {
       return false;
     }
+
     throw error;
   }
 };
 
 const assertUninitialized = async (root: string): Promise<void> => {
   const manifestPath = join(root, 'attest.project.json');
+
   if (await pathExists(manifestPath)) {
     throw new LocalError('init_conflict', 'An Attest project already exists at the target.', {
       path: manifestPath,
@@ -134,6 +144,7 @@ const runProjectInitCommand = async (
   options: ProjectInitCommandOptions,
 ): Promise<CommandResult<'project-init', ProjectInitResult>> => {
   assertUnambiguousInitSources(options);
+
   const request =
     options.fromJson === undefined
       ? undefined
@@ -141,13 +152,17 @@ const runProjectInitCommand = async (
           readStdin: options.readStdin,
           workingDirectory: options.workingDirectory,
         });
+
   const requestedDirectory =
     options.directory ?? options.projectDirectory ?? request?.directory ?? '.';
+
   const inspected = await inspectTargetDirectory(
     resolve(options.workingDirectory, requestedDirectory),
   );
+
   const defaultName = basename(inspected.root);
   let name = options.name ?? request?.name;
+
   if (name === undefined && options.interactive) {
     if (options.prompt === undefined) {
       throw new LocalError('cli_missing_input', 'Interactive input is unavailable.', {
@@ -155,9 +170,12 @@ const runProjectInitCommand = async (
         hint: 'Pass `--name <name>` or a complete `--from-json` request.',
       });
     }
+
     name = (await options.prompt(`Project name [${defaultName}]: `)).trim() || defaultName;
   }
+
   name = (name ?? defaultName).trim();
+
   if (name.length === 0) {
     throw new LocalError('cli_missing_input', 'Project name cannot be empty.', {
       path: '--name',
@@ -167,6 +185,7 @@ const runProjectInitCommand = async (
 
   const dryRun = options.dryRun ?? request?.dry_run ?? false;
   const expectedProjectHash = options.expectedProjectHash ?? request?.if_project_hash;
+
   if (expectedProjectHash !== undefined) {
     throw new LocalError('project_changed', 'The initialization target has no project hash.', {
       path: '--if-project-hash',
@@ -174,15 +193,18 @@ const runProjectInitCommand = async (
       details: { current_hash: null, expected_hash: expectedProjectHash },
     });
   }
+
   if (inspected.exists) {
     await assertUninitialized(inspected.root);
   }
 
   const prepared = prepareProjectCandidate(emptyProject(ulid(), name));
   const manifest = prepared.files.get('attest.project.json');
+
   if (manifest === undefined) {
     throw new LocalError('internal_error', 'The project candidate omitted its manifest.');
   }
+
   const result: ProjectInitResult = {
     committed: !dryRun,
     dry_run: dryRun,
@@ -202,6 +224,7 @@ const runProjectInitCommand = async (
       },
     ],
   };
+
   if (dryRun) {
     return {
       operation: 'project-init',
@@ -213,15 +236,18 @@ const runProjectInitCommand = async (
 
   let createdDirectory = false;
   let published = false;
+
   try {
     if (!inspected.exists) {
       await mkdir(inspected.root);
       createdDirectory = true;
     }
+
     await assertUninitialized(inspected.root);
     await publishProjectManifest(inspected.root, manifest.contents);
     published = true;
     const loaded = await loadProject({ project: inspected.root });
+
     if (loaded.projectHash !== prepared.projectHash) {
       throw new LocalError('init_failed', 'Published project verification failed.', {
         details: { current_hash: loaded.projectHash, expected_hash: prepared.projectHash },
@@ -243,6 +269,7 @@ const runProjectInitCommand = async (
         );
       }
     }
+
     if (createdDirectory) {
       try {
         await rmdir(inspected.root);
@@ -258,9 +285,11 @@ const runProjectInitCommand = async (
         );
       }
     }
+
     if (error instanceof LocalError) {
       throw error;
     }
+
     throw new LocalError('init_failed', 'Could not initialize the Attest project.', {
       path: inspected.root,
       hint: 'Check the target permissions and retry in an uninitialized directory.',

@@ -1,3 +1,4 @@
+import type { CommandRequest } from '@attest/contracts';
 import type { Command } from 'commander';
 
 import { setMutationHelp } from '../../help/command-help.js';
@@ -30,6 +31,7 @@ const registerMetricLifecycleCommands = (metric: Command, context: CommandContex
       ) => {
         const interactive = isInteractive(options, context.interaction, options.fromJson);
         const prompt = { interactive, prompt: context.interaction.prompt };
+
         const request = await readOrBuildRequest({
           command: 'metric.rename',
           context,
@@ -49,9 +51,11 @@ const registerMetricLifecycleCommands = (metric: Command, context: CommandContex
             ),
           }),
         });
+
         await runMetricMutation(request, options, interactive, context);
       },
     );
+
   setMutationHelp(rename, { examples: ['attest metric rename correct correctness'] });
 
   const remove = addMutationOptions(
@@ -61,23 +65,33 @@ const registerMetricLifecycleCommands = (metric: Command, context: CommandContex
     .option('--detach', 'remove every test and case reference atomically')
     .action(async (metricId: string | undefined, options: RemoveOptions, leaf: Command) => {
       const interactive = isInteractive(options, context.interaction, options.fromJson);
+
       const request = await readOrBuildRequest({
         command: 'metric.remove',
         context,
         leaf,
         options,
-        build: async () => ({
-          ...mutationRequestFields('metric.remove', options),
-          metric_id: await requiredInput(
-            metricId,
-            { path: '<metric-id>', question: 'Metric id: ' },
-            { interactive, prompt: context.interaction.prompt },
-          ),
-          ...(options.detach === undefined ? {} : { detach: options.detach }),
-        }),
+        build: async () => {
+          const request: Extract<CommandRequest, { command: 'metric.remove' }> = {
+            ...mutationRequestFields('metric.remove', options),
+            metric_id: await requiredInput(
+              metricId,
+              { path: '<metric-id>', question: 'Metric id: ' },
+              { interactive, prompt: context.interaction.prompt },
+            ),
+          };
+
+          if (options.detach !== undefined) {
+            request.detach = options.detach;
+          }
+
+          return request;
+        },
       });
+
       await runMetricMutation(request, options, interactive, context);
     });
+
   setMutationHelp(remove, { examples: ['attest metric remove correct --dry-run'] });
 };
 

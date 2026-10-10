@@ -5,6 +5,7 @@ import {
   METRIC_TEST_FIXTURE_SCHEMA_ID,
   serializeContractSchema,
   type JsonValue,
+  isJsonValue,
 } from '@attest/contracts';
 
 import { AttestCliError } from '../../errors/cli-error.js';
@@ -23,17 +24,17 @@ type SchemaPrintResult = SchemaListItem & {
 };
 
 /** Public schema ids whose generated file name differs from the id. */
-const FILE_BY_SCHEMA_ID: Readonly<Record<string, string>> = {
-  [COMMAND_REQUEST_SCHEMA_ID]: 'command-request.json',
-  [METRIC_PRESET_SCHEMA_ID]: 'metric-preset.json',
-  [METRIC_TEST_FIXTURE_SCHEMA_ID]: 'metric-test-fixture.json',
-};
-
-const SCHEMA_ID_BY_FILE: Readonly<Record<string, string>> = Object.fromEntries(
-  Object.entries(FILE_BY_SCHEMA_ID).map(([id, file]) => [file, id]),
+const FILE_BY_SCHEMA_ID = new Map<string, string>(
+  Object.entries({
+    [COMMAND_REQUEST_SCHEMA_ID]: 'command-request.json',
+    [METRIC_PRESET_SCHEMA_ID]: 'metric-preset.json',
+    [METRIC_TEST_FIXTURE_SCHEMA_ID]: 'metric-test-fixture.json',
+  }),
 );
 
-const schemaIdForFile = (file: string): string => SCHEMA_ID_BY_FILE[file] ?? file;
+const SCHEMA_ID_BY_FILE = new Map([...FILE_BY_SCHEMA_ID].map(([id, file]) => [file, id]));
+
+const schemaIdForFile = (file: string): string => SCHEMA_ID_BY_FILE.get(file) ?? file;
 
 /** Lists the generated schema registry sorted by public id. */
 const runSchemaListCommand = (): SchemaListResult => ({
@@ -44,14 +45,19 @@ const runSchemaListCommand = (): SchemaListResult => ({
 
 /** Reads one generated schema by its public id or its file name. */
 const runSchemaPrintCommand = (schemaId: string): SchemaPrintResult => {
-  const file = FILE_BY_SCHEMA_ID[schemaId] ?? schemaId;
+  const file = FILE_BY_SCHEMA_ID.get(schemaId) ?? schemaId;
+
   if (!CONTRACT_JSON_SCHEMAS.has(file)) {
     throw new AttestCliError('resource_not_found', `schema ${schemaId} was not found.`, {
       path: schemaId,
       hint: 'Run `attest schema list --output json` to inspect registered schema ids.',
     });
   }
-  const schema = JSON.parse(serializeContractSchema(file)) as JsonValue;
+
+  const schema: unknown = JSON.parse(serializeContractSchema(file));
+
+  if (!isJsonValue(schema)) throw new Error('Generated JSON Schema contains a non-JSON value.');
+
   return { file, id: schemaIdForFile(file), schema };
 };
 

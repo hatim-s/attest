@@ -2,7 +2,7 @@ import { performance } from 'node:perf_hooks';
 
 import { AGENT_PROTOCOL, type AgentRequest, type EvalRun } from '@attest/contracts';
 import { type CacheStore } from '@attest/core';
-import type { InvocationResult } from '@attest/executor';
+import type { invokeVercelSandboxAgent, InvocationResult } from '@attest/executor';
 import {
   EvalCaseStageError,
   type CaseExecution,
@@ -27,14 +27,16 @@ import { createEvalMetricEvaluator } from './eval-metric-runner.js';
 import { createEvalLifecycle } from './eval-lifecycle.js';
 
 const LIFECYCLE_ERROR_LIMIT = 4096;
+
 const TRUNCATED_SUFFIX = ' [truncated]';
 
 /** Appends a local lifecycle failure to fresh result and diagnostics objects. */
 const appendLifecycleFailure = (
   result: EvalCaseRunnerResult,
-  failure: unknown,
+  cause: unknown,
 ): EvalCaseRunnerResult => {
-  const message = failure instanceof Error ? failure.message : 'The eval case lifecycle failed.';
+  const message = cause instanceof Error ? cause.message : 'The eval case lifecycle failed.';
+
   const messages = [
     ...new Set(
       [result.execution.diagnostics.lifecycleError, message].filter(
@@ -42,11 +44,14 @@ const appendLifecycleFailure = (
       ),
     ),
   ];
+
   const combined = messages.join(' ');
+
   const lifecycleError =
     combined.length <= LIFECYCLE_ERROR_LIMIT
       ? combined
       : `${combined.slice(0, LIFECYCLE_ERROR_LIMIT - TRUNCATED_SUFFIX.length)}${TRUNCATED_SUFFIX}`;
+
   return {
     execution: {
       ...result.execution,
@@ -63,6 +68,7 @@ const startRuntime = async (
   signal: AbortSignal,
 ): Promise<AgentRuntime> => {
   assertSafeNativeAgentResource(payload.agent);
+
   return startAgentRuntime(await resolveNativeAgent(payload.agent, projectRoot), signal);
 };
 
@@ -71,6 +77,7 @@ const createEvalCaseRunner = (
   projectRoot: string,
   cacheStore: CacheStore,
   run: EvalRun,
+  transports: { invokeSandbox?: typeof invokeVercelSandboxAgent } = {},
 ): EvalCaseRunner<ResolvedEvalCaseInput> => {
   const runtimes = new Map<string, Promise<AgentRuntime>>();
   const metricEvaluator = createEvalMetricEvaluator(projectRoot, cacheStore);
@@ -82,9 +89,11 @@ const createEvalCaseRunner = (
     signal: AbortSignal,
   ): Promise<AgentRuntime> => {
     const existing = runtimes.get(payload.agent.id);
+
     if (existing !== undefined) return existing;
     const created = startRuntime(payload, projectRoot, signal);
     runtimes.set(payload.agent.id, created);
+
     return created;
   };
 
@@ -96,15 +105,18 @@ const createEvalCaseRunner = (
     context: EvalCaseExecutionContext,
   ) => {
     const payload = resolvedCase.payload;
+
     const hookContext = {
       case_id: payload.case_id,
       test_id: payload.test_id,
       worker_index: context.workerIndex,
     };
+
     let workerDirectory: string | undefined;
     let outcome = 'infrastructure_error';
     let result: EvalCaseRunnerResult | undefined;
-    let failure: unknown;
+    let failure: Error | undefined;
+
     try {
       workerDirectory = await lifecycle.prepareCase(hookContext);
       await lifecycle.runCasePhase('before_case', {
@@ -112,20 +124,27 @@ const createEvalCaseRunner = (
         directory: workerDirectory,
         signal,
       });
+
       const request: AgentRequest = {
         protocol: AGENT_PROTOCOL,
         run_id: runId,
         case_id: payload.case_id,
         input: payload.case.input,
-        ...(payload.case.params === undefined ? {} : { params: payload.case.params }),
       };
+
+      if (payload.case.params !== undefined) {
+        request.params = payload.case.params;
+      }
+
       const startedAt = new Date().toISOString();
       const started = performance.now();
       let runtime: AgentRuntime | undefined;
       let invocation: InvocationResult;
+
       try {
         runtime = await runtimeFor(payload, signal);
         invocation = await invokeResolvedAgent(runtime, request, {
+          invokeSandbox: transports.invokeSandbox,
           agent: payload.agent,
           attemptTimeoutMs: payload.attempt_timeout_ms,
           projectRoot,
@@ -136,7 +155,9 @@ const createEvalCaseRunner = (
       } catch (error: unknown) {
         invocation = startupFailure(error, performance.now() - started);
       }
+
       const redacted = redactInvocation(invocation, runtime?.resolved.secrets ?? []);
+
       const common = {
         attempts: redacted.attempts,
         caseDefinition: payload.case,
@@ -149,7 +170,9 @@ const createEvalCaseRunner = (
         suiteName: payload.test_id,
         warnings: redacted.warnings,
       };
+
       let execution: CaseExecution;
+
       if (redacted.status === 'invocation_error') {
         execution = {
           ...common,
@@ -161,26 +184,31 @@ const createEvalCaseRunner = (
           ...common,
           outcome: 'completed',
           response: redacted.report.value,
-          ...('trace' in redacted.report.value && redacted.report.value.trace !== undefined
-            ? { trace: redacted.report.value.trace }
-            : {}),
           warnings: redacted.report.warnings,
         };
+
+        if ('trace' in redacted.report.value && redacted.report.value.trace !== undefined)
+          execution.trace = redacted.report.value.trace;
       } else {
         throw new LocalError(
           'internal_error',
           'Agent adapter returned an unvalidated successful response.',
         );
       }
+
       outcome = execution.outcome;
+
       if (execution.diagnostics.sandboxCleanupConfirmed === false) {
         sandboxCleanupUncertain = true;
+
         const uncertainCleanup = appendLifecycleFailure(
           { execution, metrics: [] },
           new Error('Vercel sandbox cleanup was not confirmed.'),
         );
+
         execution = uncertainCleanup.execution;
       }
+
       try {
         await lifecycle.runCasePhase('after_agent', {
           context: hookContext,
@@ -192,7 +220,9 @@ const createEvalCaseRunner = (
       } catch (error: unknown) {
         throw new EvalCaseStageError('after_agent', execution, [], error);
       }
+
       const metrics = await metricEvaluator.evaluate(runId, payload, execution, signal);
+
       try {
         await lifecycle.runCasePhase('after_evaluation', {
           context: hookContext,
@@ -204,12 +234,14 @@ const createEvalCaseRunner = (
       } catch (error: unknown) {
         throw new EvalCaseStageError('after_evaluation', execution, metrics, error);
       }
+
       result = {
         execution,
         metrics,
       };
     } catch (error: unknown) {
-      failure = error;
+      failure =
+        error instanceof Error ? error : new Error('Eval case execution failed.', { cause: error });
     }
 
     try {
@@ -237,39 +269,49 @@ const createEvalCaseRunner = (
     }
 
     if (failure instanceof Error) throw failure;
+
     if (failure !== undefined) {
       throw new Error('Eval case execution failed.', { cause: failure });
     }
+
     if (result === undefined) throw new Error('Eval runner returned no case result.');
+
     return result;
   };
 
   /** Closes every started per-run transport and reports all cleanup failures together. */
   const cleanup = async (): Promise<void> => {
     const settledRuntimes = await Promise.allSettled(runtimes.values());
+
     const sessions = settledRuntimes.flatMap((result) =>
       result.status === 'fulfilled' && result.value.kind === 'session'
         ? [result.value.session]
         : [],
     );
+
     const closed = await Promise.allSettled(sessions.map((session) => session.close()));
     const failures: unknown[] = [];
+
     for (const result of settledRuntimes) {
-      if (result.status === 'rejected') failures.push(result.reason as unknown);
+      if (result.status === 'rejected') failures.push(result.reason);
     }
+
     for (const result of closed) {
-      if (result.status === 'rejected') failures.push(result.reason as unknown);
+      if (result.status === 'rejected') failures.push(result.reason);
     }
+
     try {
       lifecycle.assertCleanup();
     } catch (error: unknown) {
       failures.push(error);
     }
+
     if (sandboxCleanupUncertain) {
       failures.push(
         new LocalError('run_failed', 'One or more Vercel sandbox cleanups were not confirmed.'),
       );
     }
+
     if (failures.length > 0) throw new AggregateError(failures, 'Eval agent cleanup failed.');
   };
 

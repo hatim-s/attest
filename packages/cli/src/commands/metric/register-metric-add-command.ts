@@ -86,6 +86,7 @@ const registerMetricAddCommand = (metric: Command, context: CommandContext): voi
     .option('--details-pointer <pointer>', 'HTTP result details pointer')
     .action(async (metricId: string | undefined, options: MetricAddOptions, leaf: Command) => {
       const interactive = isInteractive(options, context.interaction, options.fromJson);
+
       const request = await readOrBuildRequest({
         command: 'metric.add',
         context,
@@ -97,17 +98,21 @@ const registerMetricAddCommand = (metric: Command, context: CommandContext): voi
             { path: '<metric-id>', question: 'Metric id: ' },
             { interactive, prompt: context.interaction.prompt },
           );
+
           const selected = await selectGuidedMetricFields(options, interactive, context);
           const guided = await fillGuidedMetricFields(selected, interactive, context);
+
           const resource = await createMetricResource({
             ...guided,
             metricId: id,
             readStdin: context.interaction.readStdin,
             workingDirectory: context.workingDirectory,
           });
+
           return { ...mutationRequestFields('metric.add', options), metric: resource };
         },
       });
+
       await runMetricMutation(request, options, interactive, context);
     });
 

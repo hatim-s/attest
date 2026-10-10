@@ -8,9 +8,11 @@ const generatedDirectory = new URL('../../generated/', import.meta.url);
 /** Checks the complete published schema set against its authoritative contract definitions. */
 const validateArtifacts = async (): Promise<void> => {
   const expected = [...CONTRACT_JSON_SCHEMAS.keys()].sort();
+
   const actual = (await readdir(generatedDirectory))
     .filter((name) => name.endsWith('.json'))
     .sort();
+
   assert.deepEqual(actual, expected, 'Generated schema files differ from the contract registry.');
 
   for (const fileName of expected) {

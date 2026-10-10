@@ -22,21 +22,27 @@ const promptCredentialBindings = async (
 ): Promise<CurlFlags> => {
   let headerEnv = [...(fields.headerEnv ?? [])];
   let queryEnv = [...(fields.queryEnv ?? [])];
+
   // Reparse after each binding; the captured value is never copied into a prompt.
   for (let asked = 0; asked < MAX_CREDENTIAL_PROMPTS; asked += 1) {
     const credential = findUnboundCurlCredential(curlSource, { headerEnv, queryEnv });
+
     if (credential === undefined) break;
     const flag = credential.kind === 'header' ? '--header-env' : '--query-env';
     const label = credential.kind === 'header' ? 'Header' : 'Query';
+
     const environment = await requiredInput(
       undefined,
       { path: flag, question: `${label} ${credential.name} environment variable: ` },
       context,
     );
+
     const binding = `${credential.name}=${environment}`;
+
     if (credential.kind === 'header') headerEnv = [...headerEnv, binding];
     else queryEnv = [...queryEnv, binding];
   }
+
   return { ...fields, headerEnv, queryEnv };
 };
 
@@ -54,6 +60,7 @@ const promptPollingFields = async (
       context,
     ),
   };
+
   if (fields.pollStatusUrlPointer === undefined && fields.pollStatusUrlTemplate === undefined) {
     const statusSource = await promptChoice(
       'Status URL source',
@@ -62,6 +69,7 @@ const promptPollingFields = async (
       'status-url-source',
       context,
     );
+
     if (statusSource === 'pointer') {
       polling.pollStatusUrlPointer = await promptDefault(
         undefined,
@@ -80,6 +88,7 @@ const promptPollingFields = async (
       );
     }
   }
+
   polling.pollStatusPointer = await promptDefault(
     fields.pollStatusPointer,
     'Polling status JSON Pointer',
@@ -111,6 +120,7 @@ const promptPollingFields = async (
     'Submission idempotency header',
     context,
   );
+
   return polling;
 };
 
@@ -126,12 +136,15 @@ const promptCurlImportFields = async (
   if (!context.interactive) {
     return { ...fields, responsePointer: fields.responsePointer ?? '/answer' };
   }
+
   let guided = await promptCredentialBindings(fields, curlSource, context);
+
   if (fields.mapBody === undefined) {
     guided.mapBody = commaSeparated(
       await context.prompt('Body mappings TARGET_POINTER=INPUT_POINTER, comma-separated [none]: '),
     );
   }
+
   guided.errorPointer = await promptOptional(fields.errorPointer, 'Error JSON Pointer', context);
   guided.tracePointer = await promptOptional(fields.tracePointer, 'Trace JSON Pointer', context);
   guided.remoteJobIdPointer = await promptOptional(
@@ -139,10 +152,13 @@ const promptCurlImportFields = async (
     'Remote job id JSON Pointer',
     context,
   );
+
   const transport = pollingFlagsPresent(fields)
     ? 'polling'
     : await promptChoice('Transport', ['direct', 'polling'], 'direct', 'transport', context);
+
   if (transport === 'polling') guided = await promptPollingFields(guided, context);
+
   return {
     ...guided,
     responsePointer: await promptDefault(
@@ -155,15 +171,18 @@ const promptCurlImportFields = async (
 };
 
 /** True when an import failed on a body mapping the user can re-enter. */
-const isCurlMappingError = (error: unknown): boolean => {
-  if (!(error instanceof LocalError)) return false;
-  const details = error.details;
+const isCurlMappingError = (cause: unknown): cause is LocalError => {
+  if (!(cause instanceof LocalError)) return false;
+  const details = cause.details;
+
   if (details === null || typeof details !== 'object' || Array.isArray(details)) return false;
   const diagnostics = details.diagnostics;
+
   return (
     Array.isArray(diagnostics) &&
     diagnostics.some(
-      (diagnostic) => typeof diagnostic === 'string' && CURL_MAPPING_DIAGNOSTICS.has(diagnostic),
+      (diagnostic): diagnostic is string =>
+        typeof diagnostic === 'string' && CURL_MAPPING_DIAGNOSTICS.has(diagnostic),
     )
   );
 };

@@ -31,6 +31,7 @@ const MetricRow = ({ metric }: { metric: StoredMetricEvaluation }) => {
       </div>
     );
   }
+
   return (
     <div className="metric-row">
       <span>
@@ -59,11 +60,14 @@ const CaseDetail = ({ caseRecord, error, isLoading, onClose, selected }: CaseDet
     const dialog = dialogRef.current;
     // The native dialog traps focus and restores it when the evidence panel closes.
     dialog?.showModal();
+
     return () => {
       dialog?.close();
+
       if (triggerRef.current instanceof HTMLElement) triggerRef.current.focus();
     };
   }, []);
+
   return (
     <dialog
       className="drawer-backdrop"

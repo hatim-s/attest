@@ -9,6 +9,7 @@ import './styles.css';
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1, staleTime: 1_000 } },
 });
+
 const rootElement = document.querySelector('#root');
 
 if (rootElement === null) throw new Error('Dashboard root element was not found.');

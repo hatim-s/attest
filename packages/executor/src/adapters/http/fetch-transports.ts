@@ -1,3 +1,6 @@
+import { parseJson } from '../../internal/json-value.js';
+import type { JsonValue } from '@attest/contracts';
+
 import { AgentInvocationError, abortedError } from '../../errors.js';
 import { DEFAULT_FIRST_BYTE_MS } from '../../internal/agent-defaults.js';
 import { appendEvidencePrefix, createRawExcerpt } from '../../internal/raw-excerpt.js';
@@ -20,12 +23,16 @@ const openFetchResponse = async (
   const controller = new AbortController();
   const abort = (): void => controller.abort(signal.reason);
   signal.addEventListener('abort', abort, { once: true });
+
   if (signal.aborted) abort();
+
   const timer = setTimeout(
     () => controller.abort(new DOMException('Timed out', 'TimeoutError')),
     firstByteMs,
   );
+
   let response: Response;
+
   try {
     response = await guardedFetch(request.url, {
       method: request.method,
@@ -36,15 +43,19 @@ const openFetchResponse = async (
     });
   } catch (error: unknown) {
     signal.removeEventListener('abort', abort);
+
     if (controller.signal.aborted && !signal.aborted) {
       throw new AgentInvocationError('timeout', 'HTTP first byte timed out.', { cause: error });
     }
+
     throw error;
   } finally {
     clearTimeout(timer);
   }
+
   const reader = response.body?.getReader();
   let cancelled = false;
+
   const cancel = (): void => {
     if (cancelled) return;
     cancelled = true;
@@ -52,11 +63,14 @@ const openFetchResponse = async (
     controller.abort();
     void reader?.cancel().catch(() => undefined);
   };
+
   const body = (async function* (): AsyncGenerator<Uint8Array> {
     try {
       if (reader === undefined) return;
+
       for (;;) {
         const next = await reader.read();
+
         if (next.done) return;
         yield next.value;
       }
@@ -65,6 +79,7 @@ const openFetchResponse = async (
       reader?.releaseLock();
     }
   })();
+
   return { status: response.status, headers: Object.fromEntries(response.headers), body, cancel };
 };
 
@@ -72,18 +87,21 @@ const openFetchResponse = async (
 const readFetchJson = async (
   response: StreamHttpResponse,
   policy: HttpClientPolicy,
-): Promise<{ raw: unknown; rawExcerpt: ReturnType<typeof createRawExcerpt> }> => {
+): Promise<{ raw: JsonValue; rawExcerpt: ReturnType<typeof createRawExcerpt> }> => {
   const chunks: Uint8Array[] = [];
   let bytes = 0;
   const evidence: Uint8Array[] = [];
   let evidenceBytes = 0;
   let interruption: AgentInvocationError | undefined;
   let timer: ReturnType<typeof setTimeout> | undefined;
+
   const interrupt = (error: AgentInvocationError): void => {
     interruption ??= error;
     response.cancel();
   };
+
   const abort = (): void => interrupt(abortedError(policy.callerSignal, 'Mapped HTTP request'));
+
   const resetIdle = (): void => {
     clearTimeout(timer);
     timer = setTimeout(
@@ -91,15 +109,19 @@ const readFetchJson = async (
       policy.responseBodyTimeoutMs,
     );
   };
+
   policy.attemptSignal.addEventListener('abort', abort, { once: true });
+
   try {
     if (policy.attemptSignal.aborted)
       throw abortedError(policy.callerSignal, 'Mapped HTTP request');
     resetIdle();
+
     for await (const chunk of response.body) {
       resetIdle();
       bytes += chunk.byteLength;
       evidenceBytes = appendEvidencePrefix(evidence, evidenceBytes, chunk);
+
       if (bytes > policy.responseCapBytes) {
         throw new AgentInvocationError(
           'output_cap_exceeded',
@@ -117,14 +139,18 @@ const readFetchJson = async (
           },
         );
       }
+
       chunks.push(chunk);
     }
+
     if (interruption !== undefined) throw interruption;
     const payload = Buffer.concat(chunks, bytes).toString('utf8');
     const rawExcerpt = createRawExcerpt(redactTransportText(payload, policy.secrets));
+
     if (response.status < 200 || response.status >= 300) return { raw: null, rawExcerpt };
+
     try {
-      return { raw: JSON.parse(payload) as unknown, rawExcerpt };
+      return { raw: parseJson(payload), rawExcerpt };
     } catch (error: unknown) {
       throw new AgentInvocationError(
         'invalid_envelope',
@@ -147,15 +173,11 @@ const readFetchJson = async (
  * Fetch exposes no separate TCP phase; connect_ms enforcement belongs to the host.
  * Neither adapter retries requests; replay remains controlled by the invocation options.
  */
-const createFetchHttpTransports = (
-  guardedFetch: GuardedHttpFetch,
-): {
-  requestJson: HttpJsonTransport;
-  requestStream: StreamHttpTransport;
-} => {
+const createFetchHttpTransports = (guardedFetch: GuardedHttpFetch) => {
   const requestJson: HttpJsonTransport = async (request, policy) => {
     const origin = new URL(request.url);
     let current = request;
+
     for (let redirects = 0; redirects <= 3; redirects += 1) {
       const response = await openFetchResponse(
         guardedFetch,
@@ -163,15 +185,19 @@ const createFetchHttpTransports = (
         policy.attemptSignal,
         policy.firstByteTimeoutMs,
       );
+
       const parsed = await readFetchJson(response, policy);
+
       const result = {
         ...parsed,
         status: response.status,
         headers: response.headers,
         url: new URL(current.url),
       };
+
       if (![307, 308].includes(response.status)) return result;
       const location = response.headers.location;
+
       if (location === undefined || redirects === 3) {
         throw new AgentInvocationError(
           'http_status',
@@ -179,12 +205,15 @@ const createFetchHttpTransports = (
           { httpStatus: response.status, rawExcerpt: parsed.rawExcerpt },
         );
       }
+
       const redirected = new URL(location, result.url);
       requireSameOrigin(redirected, origin);
       current = { ...current, url: redirected.toString() };
     }
+
     throw new AgentInvocationError('http_status', 'Mapped HTTP redirect limit was exceeded.');
   };
+
   const requestStream: StreamHttpTransport = (agent, request, signal) =>
     openFetchResponse(
       guardedFetch,
@@ -192,6 +221,7 @@ const createFetchHttpTransports = (
       signal,
       agent.timeouts?.first_byte_ms ?? DEFAULT_FIRST_BYTE_MS,
     );
+
   return { requestJson, requestStream };
 };
 

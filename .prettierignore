@@ -13,3 +13,5 @@ conformance/fixtures/
 packages/schemas/generated/*.json
 # Preserve the approved marketing HTML exactly as supplied.
 packages/site/index.html
+
+tools/anti-slop/

@@ -10,6 +10,7 @@ const orderSpans = (spans: Span[]): Span[] =>
     .map((span, index) => ({ span, index, startedAt: Date.parse(span.start_time) }))
     .sort((left, right) => {
       const difference = left.startedAt - right.startedAt;
+
       return difference === 0 || Number.isNaN(difference) ? left.index - right.index : difference;
     })
     .map(({ span }) => span);
@@ -27,9 +28,11 @@ const spanMatchesFilter = (span: Span, filter: SpanFilter): boolean =>
 /** Evaluates a declarative span filter, exact count, and chronological name sequence. */
 const evaluateSpansCheck = (check: LeafCheck<'spans'>, trace: Trace | null): CheckEvaluation => {
   if (trace === null) return { passed: false, reason: 'no trace emitted' };
+
   const candidates = orderSpans(trace.spans).filter(
     (span) => check.filter === undefined || spanMatchesFilter(span, check.filter),
   );
+
   if (
     check.filter !== undefined &&
     check.count === undefined &&
@@ -38,12 +41,14 @@ const evaluateSpansCheck = (check: LeafCheck<'spans'>, trace: Trace | null): Che
   ) {
     return { passed: false, reason: 'no spans matched the filter' };
   }
+
   if (check.count !== undefined && candidates.length !== check.count) {
     return {
       passed: false,
       reason: `expected ${check.count} matching spans but found ${candidates.length}`,
     };
   }
+
   if (
     check.order !== undefined &&
     !isDeepStrictEqual(
@@ -53,6 +58,7 @@ const evaluateSpansCheck = (check: LeafCheck<'spans'>, trace: Trace | null): Che
   ) {
     return { passed: false, reason: 'span order did not match the expected sequence' };
   }
+
   return { passed: true };
 };
 

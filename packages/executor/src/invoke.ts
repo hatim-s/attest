@@ -16,6 +16,7 @@ const invokeOnce = (
   options: InvokeAgentOptions,
 ): Promise<InvocationAttempt> => {
   if (target.type === 'cli') return invokeCliAgent(target, request, options);
+
   return invokeHttpAgent(target, request, options);
 };
 

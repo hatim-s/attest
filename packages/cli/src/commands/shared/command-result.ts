@@ -22,8 +22,10 @@ const renderOperation = (operation: SemanticOperation): string[] => [
 
 const renderImport = (result: MutationImportResult, includePreview: boolean): string[] => {
   const counts = `Import: read ${result.counts.read}, inserted ${result.counts.inserted}, updated ${result.counts.updated}, skipped ${result.counts.skipped}.`;
+
   if (!includePreview) return [counts];
   const rows = result.preview.map((row) => `  ${JSON.stringify(row)}`);
+
   return [
     counts,
     'Redacted normalized preview (up to 5 rows):',
@@ -34,11 +36,14 @@ const renderImport = (result: MutationImportResult, includePreview: boolean): st
 const mutationHeader = (command: string, result: MutationResult): string => {
   if (result.resource === undefined) {
     const count = `${result.operations.length} operation(s)`;
+
     return result.dry_run
       ? `Dry run: ${command} would apply ${count}.`
       : `${command} applied ${count}.`;
   }
+
   const { id, type } = result.resource;
+
   return result.dry_run ? `Dry run: would update ${type} ${id}.` : `Updated ${type} ${id}.`;
 };
 
@@ -49,6 +54,7 @@ const renderMutation = (
   projectHash: string | null | undefined,
 ): string => {
   const operations = result.operations.flatMap(renderOperation);
+
   const lines = [
     mutationHeader(command, result),
     ...(result.warnings ?? []).map((warning) => `Warning: ${warning}`),
@@ -62,11 +68,15 @@ const renderMutation = (
     'Semantic diff:',
     ...(operations.length === 0 ? ['  no semantic changes'] : operations),
   ];
+
   if (result.dry_run) lines.push('Next: remove `--dry-run` to apply these changes.');
+
   if (projectHash !== undefined && projectHash !== null) lines.push(`Project hash: ${projectHash}`);
+
   if (!result.dry_run && result.next_command !== undefined) {
     lines.push(`Next: ${result.next_command}`);
   }
+
   return lines.join('\n');
 };
 
@@ -77,7 +87,9 @@ const renderMutationResult = (
   projectHash: string | null | undefined,
 ): string => {
   const { shared_dataset_preview: preview, ...confirmed } = result;
+
   if (preview === undefined) return renderMutation(command, confirmed, projectHash);
+
   const previewResult = {
     ...confirmed,
     affected_tests: preview.affected_tests,
@@ -86,6 +98,7 @@ const renderMutationResult = (
     import: preview.import ?? undefined,
     operations: preview.operations,
   };
+
   return [
     'Shared dataset update preview:',
     renderMutation(command, previewResult, preview.project_hash_after),
@@ -97,6 +110,7 @@ const renderMutationResult = (
 /** Lists ids and names only; JSON output keeps every list field. */
 const renderResourceList = (result: ResourceListResult): string => {
   if (result.items.length === 0) return `No ${result.resource_type}.`;
+
   switch (result.resource_type) {
     case 'agents':
     case 'datasets':
@@ -119,10 +133,13 @@ const renderHumanCommandResult = (
   switch (commandResult.operation) {
     case 'project-init': {
       const { dry_run: dryRun, project } = commandResult.result;
+
       return `${dryRun ? 'Dry run: would initialize' : 'Initialized'} Attest project "${project.name}" in ${project.root}.\nProject hash: ${commandResult.projectHashAfter ?? ''}`;
     }
+
     case 'project-show': {
       const { project, project_hash: projectHash, root } = commandResult.result;
+
       return [
         `Project ${project.name}`,
         `  id: ${project.project_id}`,
@@ -134,31 +151,41 @@ const renderHumanCommandResult = (
         `  metrics: ${project.resources.metrics.length}`,
       ].join('\n');
     }
+
     case 'project-validate': {
       const { counts, project_hash: projectHash } = commandResult.result;
+
       return `Project is valid.\nHash: ${projectHash}\nResources: ${counts.agents} agents, ${counts.tests} tests, ${counts.datasets} datasets, ${counts.metrics} metrics`;
     }
+
     case 'list':
       return renderResourceList(commandResult.result);
     case 'test-case-list': {
       const { items } = commandResult.result;
+
       if (items.length === 0) return 'No direct cases.';
+
       return items.map((item) => `  ${item.id}`).join('\n');
     }
+
     case 'show':
       return JSON.stringify(commandResult.result.resource, undefined, 2);
     case 'test-case-show':
       return JSON.stringify(commandResult.result.case, undefined, 2);
     case 'agent-test': {
       const { agent_id: agentId, recorded_run_id: recordedRunId } = commandResult.result;
+
       return `Agent ${agentId} passed the connection test.${recordedRunId === undefined ? '' : `\nRecorded run: ${recordedRunId}`}`;
     }
+
     case 'metric-test': {
       const result = commandResult.result;
+
       return result.executed
         ? `Metric ${result.metric_id} matched expected_pass=${result.expected_pass}.`
         : `Metric ${result.metric_id} fixture is valid; ${result.kind} execution was not started.`;
     }
+
     case 'mutation':
       return renderMutationResult(command, commandResult.result, commandResult.projectHashAfter);
     default: {

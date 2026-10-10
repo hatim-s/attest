@@ -17,6 +17,7 @@ import {
 } from './run-store-snapshot.js';
 
 const RUN_STORE_DIRECTORY = '.attest';
+
 const RUN_STORE_FILE = 'runs.db';
 
 type ReadonlyRunStoreFileOptions = {
@@ -28,10 +29,11 @@ const unsafeStore = (path: string): LocalError =>
     path,
   });
 
-const toSafeStoreError = (error: unknown, path: string): LocalError => {
-  if (error instanceof LocalError) return error;
-  const storeCode = error instanceof StoreError ? error.code : 'READ_FAILED';
+const toSafeStoreError = (cause: unknown, path: string): LocalError => {
+  if (cause instanceof LocalError) return cause;
+  const storeCode = cause instanceof StoreError ? cause.code : 'READ_FAILED';
   const schemaFailure = storeCode === 'SCHEMA_OUTDATED' || storeCode === 'SCHEMA_TOO_NEW';
+
   return new LocalError(
     'project_read_failed',
     schemaFailure
@@ -43,7 +45,7 @@ const toSafeStoreError = (error: unknown, path: string): LocalError => {
         ? 'Use a compatible Attest writer to migrate the store, or upgrade Attest for a newer schema.'
         : 'Check the run-store permissions and integrity, then retry.',
       details: { store_code: storeCode },
-      cause: error,
+      cause: cause,
     },
   );
 };
@@ -57,6 +59,7 @@ const withReadonlyRunStoreFile = async <T>(
   const storeDirectory = dirname(storePath);
   let directoryMetadata: BigIntStats;
   let storeMetadata: BigIntStats;
+
   try {
     directoryMetadata = await lstat(storeDirectory, { bigint: true });
     storeMetadata = await lstat(storePath, { bigint: true });
@@ -64,6 +67,7 @@ const withReadonlyRunStoreFile = async <T>(
     if (errnoCode(error) === 'ENOENT') return undefined;
     throw toSafeStoreError(error, storePath);
   }
+
   if (
     !directoryMetadata.isDirectory() ||
     directoryMetadata.isSymbolicLink() ||
@@ -76,6 +80,7 @@ const withReadonlyRunStoreFile = async <T>(
   let resolvedDirectory: string;
   let resolvedStore: string;
   let resolvedContainmentRoot: string | undefined;
+
   try {
     [resolvedContainmentRoot, resolvedDirectory, resolvedStore] = await Promise.all([
       options.containmentRoot === undefined
@@ -87,6 +92,7 @@ const withReadonlyRunStoreFile = async <T>(
   } catch (error: unknown) {
     throw toSafeStoreError(error, storePath);
   }
+
   if (
     (resolvedContainmentRoot !== undefined &&
       !isProjectPath(resolvedContainmentRoot, resolvedDirectory)) ||
@@ -98,21 +104,29 @@ const withReadonlyRunStoreFile = async <T>(
   let anchor: FileHandle | undefined;
   let store: RunStore | undefined;
   let snapshot: RunStoreSnapshot | undefined;
+
   // Cleanup must not short-circuit: later steps remove copied data and release the source anchor.
   const cleanupSteps = (): CleanupStep[] => {
     const [openedStore, capturedSnapshot, openedAnchor] = [store, snapshot, anchor];
     const steps: CleanupStep[] = [];
+
     if (openedStore !== undefined) steps.push(async () => openedStore.close());
+
     if (capturedSnapshot !== undefined) {
       steps.push(async () => removeRunStoreSnapshot(capturedSnapshot));
     }
+
     if (openedAnchor !== undefined) steps.push(async () => openedAnchor.close());
+
     return steps;
   };
+
   let result: T;
+
   try {
     const anchored = await openAnchored(resolvedStore, { kind: 'file', root: resolvedDirectory });
     anchor = anchored.handle;
+
     // The anchor must be the inode inspected before containment checks, not a later swap.
     if (
       anchored.identity.dev !== storeMetadata.dev ||
@@ -120,6 +134,7 @@ const withReadonlyRunStoreFile = async <T>(
     ) {
       throw unsafeStore(storePath);
     }
+
     snapshot = await captureRunStoreSnapshot(resolvedStore, anchor);
     const openedStore = await openRunStoreSnapshot(snapshot.path);
     store = openedStore;
@@ -129,9 +144,12 @@ const withReadonlyRunStoreFile = async <T>(
       error instanceof StoreError && error.code === 'RUN_NOT_FOUND'
         ? error
         : toSafeStoreError(error, storePath);
+
     return rethrowAfterCleanup(failure, cleanupSteps());
   }
+
   await runCleanupSteps(cleanupSteps());
+
   return result;
 };
 

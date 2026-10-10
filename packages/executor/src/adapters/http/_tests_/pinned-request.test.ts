@@ -9,12 +9,14 @@ import { openPinnedRequest } from '../pinned-request.js';
 it('rejects an unsolicited upgrade and closes its socket', async () => {
   let peer: Socket | undefined;
   let closed: Promise<void> | undefined;
+
   const fixture = await startLoopbackServer((request, response) => {
     peer = request.socket;
     closed = new Promise((resolve) => request.socket.once('close', resolve));
     response.writeHead(101, { connection: 'Upgrade', upgrade: 'unexpected' });
     response.flushHeaders();
   });
+
   try {
     await expect(
       openPinnedRequest(

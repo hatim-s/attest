@@ -7,7 +7,12 @@ import { AGENT_PROTOCOL, type AgentRequest } from '@attest/contracts';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { invokeVercelSandboxAgent } from '../vercel-sandbox-adapter.js';
-import type { VercelSandboxFactory, VercelSandboxInvocation, VercelSandboxSdk } from '../types.js';
+import type {
+  VercelSandboxCaseOptions,
+  VercelSandboxFactory,
+  VercelSandboxInvocation,
+  VercelSandboxSdk,
+} from '../types.js';
 
 const REQUEST: AgentRequest = {
   protocol: AGENT_PROTOCOL,
@@ -15,6 +20,7 @@ const REQUEST: AgentRequest = {
   case_id: 'case-zero',
   input: 'hello',
 };
+
 const INVOCATION: VercelSandboxInvocation = {
   argv: ['node', 'agent.mjs'],
   env: { LC_ALL: 'C' },
@@ -23,12 +29,14 @@ const INVOCATION: VercelSandboxInvocation = {
   responseBytes: 1024,
   sandboxTimeoutMs: 10_000,
 };
+
 const temporaryDirectories: string[] = [];
 
 /** Creates one isolated host root and schedules its removal. */
 const createTemporaryDirectory = async (): Promise<string> => {
   const directory = await mkdtemp(join(tmpdir(), 'attest-vercel-sandbox-'));
   temporaryDirectories.push(directory);
+
   return directory;
 };
 
@@ -52,29 +60,37 @@ describe('Vercel sandbox lifecycle', () => {
     const artifactRoot = join(projectRoot, 'artifacts');
     const events: string[] = [];
     let invocationCount = 0;
+
     const sdk = {
       writeFiles: vi.fn(() => Promise.resolve()),
       runCommand: vi.fn(
         (command: { cmd: string; args: string[]; stdout?: NodeJS.WritableStream }) => {
           if (command.cmd === 'mkdir') return Promise.resolve({ exitCode: 0 });
+
           if (command.args[0] === '-L') return Promise.resolve({ exitCode: 1 });
+
           if (command.args[0] === '-f') return Promise.resolve({ exitCode: 0 });
           invocationCount += 1;
           events.push(`invoke:${String(invocationCount)}`);
+
           if (invocationCount === 1) return Promise.resolve({ exitCode: 1 });
           writeSuccess(command.stdout!, 'retried');
+
           return Promise.resolve({ exitCode: 0 });
         },
       ),
       readFile: vi.fn(() => {
         events.push('artifact');
+
         return Promise.resolve(Readable.from(['artifact-body']));
       }),
       stop: vi.fn(() => {
         events.push('stop');
+
         return Promise.resolve();
       }),
-    } as unknown as VercelSandboxSdk;
+    } satisfies VercelSandboxSdk;
+
     const factory = createSdkFactory(sdk);
 
     const result = await invokeVercelSandboxAgent(
@@ -119,12 +135,14 @@ describe('Vercel sandbox lifecycle', () => {
   it('stops a created sandbox when setup fails', async () => {
     const projectRoot = await createTemporaryDirectory();
     await writeFile(join(projectRoot, 'agent.mjs'), 'export {};');
+
     const sdk = {
       writeFiles: vi.fn(() => Promise.reject(new Error('upload failed'))),
       runCommand: vi.fn(() => Promise.resolve({ exitCode: 0 })),
       readFile: vi.fn(),
       stop: vi.fn(() => Promise.resolve()),
-    } as unknown as VercelSandboxSdk;
+    } satisfies VercelSandboxSdk;
+
     const factory = createSdkFactory(sdk);
 
     const result = await invokeVercelSandboxAgent(
@@ -184,6 +202,7 @@ describe('Vercel sandbox lifecycle', () => {
       const controller = new AbortController();
       let activeCommands = 0;
       let maximumActiveCommands = 0;
+
       const sdk = {
         writeFiles: vi.fn(() => Promise.resolve()),
         runCommand: vi.fn(
@@ -191,8 +210,10 @@ describe('Vercel sandbox lifecycle', () => {
             new Promise<{ exitCode: number }>((_resolve, reject) => {
               if (command.cmd === 'mkdir') {
                 _resolve({ exitCode: 0 });
+
                 return;
               }
+
               activeCommands += 1;
               maximumActiveCommands = Math.max(maximumActiveCommands, activeCommands);
               command.signal.addEventListener(
@@ -207,29 +228,35 @@ describe('Vercel sandbox lifecycle', () => {
                 },
                 { once: true },
               );
+
               if (terminal === 'output_cap_exceeded') {
                 command.stdout!.write('x'.repeat(512));
                 activeCommands -= 1;
                 _resolve({ exitCode: 0 });
               }
+
               if (terminal === 'cancelled') controller.abort(new Error('cancelled'));
             }),
         ),
         readFile: vi.fn(),
         stop: vi.fn(() => Promise.resolve()),
-      } as unknown as VercelSandboxSdk;
+      } satisfies VercelSandboxSdk;
+
       const factory = createSdkFactory(sdk);
+
+      const options: VercelSandboxCaseOptions = {
+        projectRoot,
+        credentialEnv: { VERCEL_OIDC_TOKEN: 'test-token' },
+        sandboxFactory: factory,
+      };
+
+      if (terminal === 'cancelled') options.signal = controller.signal;
 
       const result = await invokeVercelSandboxAgent(
         { kind: 'vercel', files: [], artifacts: [] },
         { ...INVOCATION, attemptTimeoutMs, responseBytes, retries: 2 },
         REQUEST,
-        {
-          projectRoot,
-          ...(terminal === 'cancelled' ? { signal: controller.signal } : {}),
-          credentialEnv: { VERCEL_OIDC_TOKEN: 'test-token' },
-          sandboxFactory: factory,
-        },
+        options,
       );
 
       expect(result).toMatchObject({ status: 'invocation_error', error: { code: terminal } });
@@ -242,16 +269,19 @@ describe('Vercel sandbox lifecycle', () => {
 
   it('surfaces stop failure and marks sandbox cleanup as unconfirmed', async () => {
     const projectRoot = await createTemporaryDirectory();
+
     const sdk = {
       writeFiles: vi.fn(() => Promise.resolve()),
       runCommand: vi.fn((command: { cmd: string; stdout?: NodeJS.WritableStream }) => {
         if (command.cmd === 'mkdir') return Promise.resolve({ exitCode: 0 });
         writeSuccess(command.stdout!);
+
         return Promise.resolve({ exitCode: 0 });
       }),
       readFile: vi.fn(),
       stop: vi.fn(() => Promise.reject(new Error('stop failed'))),
-    } as unknown as VercelSandboxSdk;
+    } satisfies VercelSandboxSdk;
+
     const factory = createSdkFactory(sdk);
 
     const result = await invokeVercelSandboxAgent(
@@ -276,6 +306,7 @@ describe('Vercel sandbox lifecycle', () => {
     { durationMs: 999, expected: 'nonzero_exit' },
   ])('classifies exit 137 from its SDK duration ($expected)', async ({ durationMs, expected }) => {
     const projectRoot = await createTemporaryDirectory();
+
     const sdk = {
       writeFiles: vi.fn(() => Promise.resolve()),
       runCommand: vi.fn((command: { cmd: string }) =>
@@ -283,7 +314,8 @@ describe('Vercel sandbox lifecycle', () => {
       ),
       readFile: vi.fn(),
       stop: vi.fn(() => Promise.resolve()),
-    } as unknown as VercelSandboxSdk;
+    } satisfies VercelSandboxSdk;
+
     const factory = createSdkFactory(sdk);
 
     const result = await invokeVercelSandboxAgent(

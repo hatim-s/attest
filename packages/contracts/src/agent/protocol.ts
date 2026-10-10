@@ -46,7 +46,7 @@ const agentRequestSchema = z
 /** Represents a validated invocation request sent to an agent transport. */
 type AgentRequest = z.infer<typeof agentRequestSchema>;
 
-const agentResponseShape = {
+const agentResponseFields = {
   protocol: z.literal(AGENT_PROTOCOL),
   output: z.json().optional(),
   error: z
@@ -64,8 +64,9 @@ const agentResponseShape = {
  * Encodes docs/specs/agent-contract.md response envelope. Agents may add vendor fields, and a
  * response must carry exactly one terminal outcome.
  */
-const agentResponseSchema = z.looseObject(agentResponseShape).superRefine((response, context) => {
+const agentResponseSchema = z.looseObject(agentResponseFields).superRefine((response, context) => {
   const outcomeCount = ['output', 'error'].filter((field) => Object.hasOwn(response, field)).length;
+
   if (outcomeCount === 1 && (response.output !== undefined || response.error !== undefined)) {
     return;
   }
@@ -77,7 +78,8 @@ const agentResponseSchema = z.looseObject(agentResponseShape).superRefine((respo
   });
 });
 
-type AgentResponseFields = z.output<z.ZodObject<typeof agentResponseShape>>;
+type AgentResponseFields = z.output<z.ZodObject<typeof agentResponseFields>>;
+
 type AgentResponseBase = Omit<AgentResponseFields, 'output' | 'error' | 'trace'> & {
   trace?: Trace;
 };
@@ -88,6 +90,7 @@ type AgentResponse =
   | (AgentResponseBase & Required<Pick<AgentResponseFields, 'error'>>);
 
 type AgentSuccessResponse = Extract<AgentResponse, { output: unknown }>;
+
 type AgentErrorResponse = Extract<AgentResponse, { error: unknown }>;
 
 export {

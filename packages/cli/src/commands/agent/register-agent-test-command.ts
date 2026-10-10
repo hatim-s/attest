@@ -1,3 +1,4 @@
+import type { CommandRequest } from '@attest/contracts';
 import { COMMAND_REQUEST_SCHEMA_ID } from '@attest/contracts';
 import { readAgentTestInput, runAgentTestCommand } from '@attest/local/agent';
 import type { Command } from 'commander';
@@ -41,34 +42,44 @@ const registerAgentTestCommand = (agent: Command, context: CommandContext): void
     .option('--watch', 'show human transport progress')
     .action(async (agentId: string | undefined, options: TestOptions, leaf: Command) => {
       const interactive = isInteractive(options, context.interaction, options.fromJson);
+
       if (options.watch === true && !interactive) {
         throw new AttestCliError('cli_usage', '--watch requires an interactive human terminal.', {
           path: '--watch',
         });
       }
+
       await withProcessSignals(async (signal) => {
         const request = await readOrBuildRequest({
           command: 'agent.test',
           context,
           leaf,
           options,
-          build: async () => ({
-            schema: COMMAND_REQUEST_SCHEMA_ID,
-            command: 'agent.test',
-            agent_id: await requiredInput(
-              agentId,
-              { path: '<agent-id>', question: 'Agent id: ' },
-              { interactive, prompt: context.interaction.prompt, signal },
-            ),
-            input: await readAgentTestInput({
-              input: options.input,
-              inputFile: options.inputFile,
-              readStdin: context.interaction.readStdin,
-              workingDirectory: context.workingDirectory,
-            }),
-            ...(options.record === undefined ? {} : { record: options.record }),
-          }),
+          build: async () => {
+            const request: Extract<CommandRequest, { command: 'agent.test' }> = {
+              schema: COMMAND_REQUEST_SCHEMA_ID,
+              command: 'agent.test',
+              agent_id: await requiredInput(
+                agentId,
+                { path: '<agent-id>', question: 'Agent id: ' },
+                { interactive, prompt: context.interaction.prompt, signal },
+              ),
+              input: await readAgentTestInput({
+                input: options.input,
+                inputFile: options.inputFile,
+                readStdin: context.interaction.readStdin,
+                workingDirectory: context.workingDirectory,
+              }),
+            };
+
+            if (options.record !== undefined) {
+              request.record = options.record;
+            }
+
+            return request;
+          },
         });
+
         const result = await runAgentTestCommand({
           onProgress: (message) => context.io.error(message),
           project: options.project,
@@ -77,6 +88,7 @@ const registerAgentTestCommand = (agent: Command, context: CommandContext): void
           watch: options.watch,
           workingDirectory: context.workingDirectory,
         });
+
         context.io.output(renderCommandResult('agent.test', outputFormat(options), result));
       });
     });

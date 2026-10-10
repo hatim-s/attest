@@ -33,9 +33,11 @@ describe('executeResolvedEvalPlan', () => {
       };
       expect(evalRunSchema.safeParse(plan.run).success).toBe(true);
       const persistence = createPersistence();
+
       if (finalizationFails) {
         persistence.finalizeRun.mockRejectedValue(new Error('row remains running'));
       }
+
       const beforeRun = vi.fn(() => Promise.resolve());
       const executeCase = vi.fn<EvalCaseRunner<string>['executeCase']>();
 
@@ -88,6 +90,7 @@ describe('executeResolvedEvalPlan', () => {
       persistence.adapter,
       { now: createClock(), signal: controller.signal },
     );
+
     await vi.waitFor(() => expect(persistence.createRun).toHaveBeenCalledOnce());
     controller.abort(new Error('cancel during create'));
     creation.resolve(undefined);
@@ -100,9 +103,11 @@ describe('executeResolvedEvalPlan', () => {
     const controller = new AbortController();
     const observedSignals: AbortSignal[] = [];
     const cleanup = vi.fn(() => Promise.resolve());
+
     const runner: EvalCaseRunner<string> = {
       executeCase: (runId, resolvedCase, signal, context) => {
         observedSignals.push(signal);
+
         return waitForAbort(runId, resolvedCase, signal, context);
       },
       cleanup,
@@ -114,6 +119,7 @@ describe('executeResolvedEvalPlan', () => {
       createPersistence().adapter,
       { signal: controller.signal, now: createClock() },
     );
+
     await vi.waitFor(() => expect(observedSignals).toHaveLength(2));
     controller.abort(new Error('user interrupted'));
     const result = await execution;
@@ -164,6 +170,7 @@ describe('executeResolvedEvalPlan', () => {
         now: createClock(),
       },
     );
+
     await vi.waitFor(() => expect(executeCase).toHaveBeenCalledOnce());
     controller.abort(new Error('user interrupted'));
     const result = await execution;
@@ -189,6 +196,7 @@ describe('executeResolvedEvalPlan', () => {
       persistence.adapter,
       { signal: controller.signal },
     );
+
     await vi.waitFor(() => expect(executeCase).toHaveBeenCalledOnce());
     controller.abort(new Error('caller cancelled'));
     const result = await execution;
@@ -224,9 +232,11 @@ describe('executeResolvedEvalPlan', () => {
 
   it('keeps runner and invocation failures distinct from completed cases', async () => {
     const plan = createPlan(['runner-rejects', 'invocation-fails', 'passes'], { concurrency: 3 });
+
     const runner: EvalCaseRunner<string> = {
       executeCase: (_runId, resolvedCase) => {
         if (resolvedCase.case_id === 'runner-rejects') throw new Error('synchronous throw');
+
         return Promise.resolve(
           resolvedCase.case_id === 'invocation-fails'
             ? failedExecution(resolvedCase)

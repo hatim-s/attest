@@ -5,7 +5,9 @@ import { TRACE_SCHEMA_ID } from '../schema/identifiers.js';
 
 /** Span attribute values; filters match against the same scalar set. */
 const attributeValueSchema = z.union([z.string(), z.number(), z.boolean()]);
+
 const attributesSchema = z.record(z.string(), attributeValueSchema);
+
 const timestampSchema = z.iso
   .datetime({ offset: false })
   .regex(/T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/, 'timestamp must include whole seconds');

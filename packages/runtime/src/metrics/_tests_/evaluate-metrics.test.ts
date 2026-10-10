@@ -10,6 +10,7 @@ const context: MetricContext = {
   caseDefinition: { id: 'capital', input: { question: 'Capital?' }, expected: 'Paris' },
   execution: { outcome: 'completed', output: 'Paris', trace: null },
 };
+
 const judgeDefinition = {
   model: 'anthropic/claude-sonnet-5',
   rubric: 'Score correctness from 0 to 1.',
@@ -20,6 +21,7 @@ describe('evaluateMetrics', () => {
     const executableFixture = fileURLToPath(
       new URL('./fixtures/exec-metric/result.mjs', import.meta.url),
     );
+
     const definitions: MetricDefinition[] = [
       {
         name: 'assert-first',
@@ -46,6 +48,7 @@ describe('evaluateMetrics', () => {
     expect(evaluations[2]?.status === 'error' ? evaluations[2].error.message : '').toContain(
       'judgeClient',
     );
+
     for (const evaluation of evaluations) {
       expect(evaluation.durationMs).toEqual(expect.any(Number));
       expect(evaluation.durationMs).toBeGreaterThanOrEqual(0);
@@ -65,6 +68,7 @@ describe('evaluateMetrics', () => {
     });
 
     expect(evaluations).toHaveLength(3);
+
     for (const evaluation of evaluations) {
       expect(evaluation).toMatchObject({ status: 'error', error: { kind: 'skipped_no_output' } });
     }

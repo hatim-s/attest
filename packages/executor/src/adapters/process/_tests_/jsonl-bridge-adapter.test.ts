@@ -6,16 +6,19 @@ import { describe, expect, it } from 'vitest';
 import { startJsonlBridgeAgent, type JsonlBridgeAgentResource } from '../jsonl-bridge-adapter.js';
 
 const fixture = resolve(import.meta.dirname, '../../../_tests_/fixtures/jsonl-bridge-agent.cjs');
+
 const noReadFixture = resolve(
   import.meta.dirname,
   '../../../_tests_/fixtures/jsonl-no-read-agent.cjs',
 );
-const request = (caseId: string, input: unknown): AgentRequest => ({
+
+const request = (caseId: string, input: AgentRequest['input']): AgentRequest => ({
   protocol: AGENT_PROTOCOL,
   run_id: '01ARZ3NDEKTSV4RRFFQ69G5FAV',
   case_id: caseId,
-  input: input as AgentRequest['input'],
+  input,
 });
+
 const agent = (overrides: Partial<JsonlBridgeAgentResource> = {}): JsonlBridgeAgentResource => ({
   schema: AGENT_RESOURCE_SCHEMA_ID,
   id: 'bridge',
@@ -37,7 +40,9 @@ describe('JSONL bridge adapter', () => {
     async (timing) => {
       let session: Awaited<ReturnType<typeof startJsonlBridgeAgent>> | undefined;
       const controller = new AbortController();
+
       if (timing === 'before') controller.abort();
+
       try {
         const startup = startJsonlBridgeAgent(agent(), {
           cwd: process.cwd(),
@@ -46,8 +51,10 @@ describe('JSONL bridge adapter', () => {
           terminationGraceMs: 50,
         }).then((started) => {
           session = started;
+
           return started;
         });
+
         controller.abort();
         await expect(startup).rejects.toMatchObject({ code: 'cancelled' });
       } finally {
@@ -65,21 +72,27 @@ describe('JSONL bridge adapter', () => {
         terminationGraceMs: 50,
       },
     );
+
     try {
       const slow = session.invoke(request('slow', { delay_ms: 50, value: 'slow' }));
+
       const fast = session.invoke(
         request('fast', { delay_ms: 1, value: 'fast', token: 'bridge-secret' }),
       );
+
       const [slowResult, fastResult] = await Promise.all([slow, fast]);
       expect(slowResult.status).toBe('ok');
       expect(fastResult.status).toBe('ok');
+
       if (slowResult.status === 'ok' && fastResult.status === 'ok') {
         if (slowResult.report?.ok && 'output' in slowResult.report.value) {
           expect(slowResult.report.value.output).toMatchObject({ value: 'slow' });
         }
+
         if (fastResult.report?.ok && 'output' in fastResult.report.value) {
           expect(fastResult.report.value.output).toMatchObject({ value: 'fast' });
         }
+
         expect(fastResult.rawExcerpt?.text).not.toContain('bridge-secret');
         expect(fastResult.rawExcerpt?.text).toContain('[REDACTED]');
       }
@@ -94,7 +107,9 @@ describe('JSONL bridge adapter', () => {
       env: { PATH: process.env.PATH ?? '' },
       terminationGraceMs: 50,
     });
+
     const controller = new AbortController();
+
     try {
       const cancelled = session.invoke(request('cancel', { delay_ms: 500 }), controller.signal);
       const completed = session.invoke(request('keep', { delay_ms: 10 }));
@@ -112,6 +127,7 @@ describe('JSONL bridge adapter', () => {
       env: { PATH: process.env.PATH ?? '' },
       terminationGraceMs: 50,
     });
+
     expect((await protocol.invoke(request('bad', { action: 'non-json' }))).status).toBe(
       'invocation_error',
     );
@@ -122,8 +138,10 @@ describe('JSONL bridge adapter', () => {
       env: { PATH: process.env.PATH ?? '' },
       terminationGraceMs: 50,
     });
+
     const result = await eof.invoke(request('exit', { action: 'exit' }));
     expect(result.status).toBe('invocation_error');
+
     if (result.status === 'invocation_error') expect(result.error.code).toBe('nonzero_exit');
     await eof.close();
   });
@@ -131,16 +149,19 @@ describe('JSONL bridge adapter', () => {
   it('falls back to process termination when cancellation is ignored', async () => {
     const quickFallback = agent();
     quickFallback.transport.cancellation_grace_ms = 100;
+
     const session = await startJsonlBridgeAgent(quickFallback, {
       cwd: process.cwd(),
       env: { PATH: process.env.PATH ?? '', IGNORE_CANCEL: '1' },
       terminationGraceMs: 50,
     });
+
     const controller = new AbortController();
     const result = session.invoke(request('cancel', { delay_ms: 5_000 }), controller.signal);
     controller.abort();
     const terminal = await result;
     expect(terminal.status).toBe('invocation_error');
+
     if (terminal.status === 'invocation_error') expect(terminal.error.code).toBe('cancelled');
     await session.close();
   });
@@ -151,6 +172,7 @@ describe('JSONL bridge adapter', () => {
       env: { PATH: process.env.PATH ?? '' },
       terminationGraceMs: 50,
     });
+
     try {
       const result = await session.invoke(request('case-'.repeat(1_000), { value: 'bounded' }));
       expect(result.status).toBe('ok');
@@ -174,18 +196,22 @@ describe('JSONL bridge adapter', () => {
       },
       timeouts: { attempt_ms: 50 },
     });
+
     const session = await startJsonlBridgeAgent(configured, {
       cwd: process.cwd(),
       env: { PATH: process.env.PATH ?? '' },
       terminationGraceMs: 50,
     });
+
     const terminal = await Promise.race([
       session.invoke(request('blocked', { payload: 'x'.repeat(1024 * 1024) })),
       new Promise<never>((_resolve, reject) =>
         setTimeout(() => reject(new Error('backpressure cancellation did not settle')), 500),
       ),
     ]);
+
     expect(terminal.status).toBe('invocation_error');
+
     if (terminal.status === 'invocation_error') expect(terminal.error.code).toBe('timeout');
     await session.close();
   });

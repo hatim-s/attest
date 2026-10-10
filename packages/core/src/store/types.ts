@@ -39,11 +39,8 @@ interface CaseSummary {
 /** Defines durable run writes and queries. */
 interface RunStore {
   createRun(metadata: RunMetadata, identity?: RunIdentity): Promise<RunRecord>;
-  recordCase(
-    runId: string,
-    execution: StoredCaseExecution,
-    evaluations: StoredMetricEvaluation[],
-  ): Promise<void>;
+  // BOUNDARY: Hosts validate untrusted execution and metric records against the store schemas before writing their transaction.
+  recordCase(runId: string, execution: unknown, evaluations: unknown): Promise<void>;
   finalizeRun(runId: string, status: Exclude<RunStatus, 'running'>): Promise<RunRecord>;
   getRun(runId: string): Promise<RunRecord>;
   listRuns(limit?: number): Promise<RunRecord[]>;

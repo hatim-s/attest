@@ -28,24 +28,30 @@ const createProject = async (): Promise<string> => {
   const root = await mkdtemp(join(tmpdir(), 'attest-transaction-writer-'));
   temporaryDirectories.push(root);
   await writeFixtureProject(root);
+
   return root;
 };
 
 /** Captures every regular project file byte-for-byte in stable path order. */
 const snapshotProjectFiles = async (root: string): Promise<ReadonlyMap<string, Buffer>> => {
   const files = new Map<string, Buffer>();
+
   const visit = async (directory: string): Promise<void> => {
     let entries;
+
     try {
       entries = await readdir(directory, { withFileTypes: true });
     } catch (error: unknown) {
       if (errnoCode(error) === 'ENOENT') {
         return;
       }
+
       throw error;
     }
+
     for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name))) {
       const path = join(directory, entry.name);
+
       if (entry.isDirectory()) {
         await visit(path);
       } else if (entry.isFile()) {
@@ -53,7 +59,9 @@ const snapshotProjectFiles = async (root: string): Promise<ReadonlyMap<string, B
       }
     }
   };
+
   await visit(root);
+
   return files;
 };
 
@@ -62,6 +70,7 @@ const expectSnapshotsEqual = (
   expected: ReadonlyMap<string, Buffer>,
 ): void => {
   expect([...actual.keys()]).toEqual([...expected.keys()]);
+
   for (const [path, contents] of expected) {
     expect(actual.get(path)).toEqual(contents);
   }
@@ -91,6 +100,7 @@ describe('transactional project writer', () => {
       expectedProjectHash: loadedDry.projectHash,
       projectRoot: dryRoot,
     });
+
     const committed = await applyProjectMutation({
       candidate: commitCandidate,
       expectedProjectHash: loadedCommit.projectHash,
@@ -189,12 +199,14 @@ describe('transactional project writer', () => {
     const preparedCandidate = prepareProjectCandidate(candidate);
     const changes = createFileChanges(loaded, preparedCandidate);
     const lock = await acquireProjectLock(root);
+
     const prepared = await prepareTransaction(
       root,
       changes,
       loaded.projectHash,
       preparedCandidate.projectHash,
     );
+
     try {
       await expect(
         publishPreparedTransaction(root, prepared, ({ index }) => {
@@ -221,12 +233,14 @@ describe('transactional project writer', () => {
     const preparedCandidate = prepareProjectCandidate(candidate);
     const changes = createFileChanges(loaded, preparedCandidate);
     const lock = await acquireProjectLock(root);
+
     const prepared = await prepareTransaction(
       root,
       changes,
       loaded.projectHash,
       preparedCandidate.projectHash,
     );
+
     try {
       await publishPreparedTransaction(root, prepared);
 
@@ -251,13 +265,16 @@ describe('transactional project writer', () => {
     const preparedCandidate = prepareProjectCandidate(candidate);
     const changes = createFileChanges(loaded, preparedCandidate);
     const lock = await acquireProjectLock(root);
+
     const prepared = await prepareTransaction(
       root,
       changes,
       loaded.projectHash,
       preparedCandidate.projectHash,
     );
+
     const externalBytes = '{"authored":"outside-attest"}\n';
+
     try {
       await expect(
         publishPreparedTransaction(root, prepared, ({ index }) => {
@@ -269,11 +286,13 @@ describe('transactional project writer', () => {
       await writeFile(join(root, changes[0]!.path), externalBytes);
 
       let failure: unknown;
+
       try {
         await recoverProjectTransactions(root, lock);
       } catch (error: unknown) {
         failure = error;
       }
+
       expect(failure).toMatchObject({ code: 'project_recovery_required' });
       expect(await readFile(join(root, changes[0]!.path), 'utf8')).toBe(externalBytes);
       expect(await readdir(join(root, TRANSACTIONS_DIRECTORY))).toContain(

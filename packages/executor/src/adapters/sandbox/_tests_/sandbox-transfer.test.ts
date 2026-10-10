@@ -15,6 +15,7 @@ const temporaryDirectories: string[] = [];
 const createTemporaryDirectory = async (): Promise<string> => {
   const directory = await mkdtemp(join(tmpdir(), 'attest-sandbox-files-'));
   temporaryDirectories.push(directory);
+
   return directory;
 };
 
@@ -32,7 +33,7 @@ const createSandbox = (
     ),
     stop: vi.fn(),
     writeFiles: vi.fn(),
-  }) as unknown as VercelSandboxSdk;
+  }) satisfies VercelSandboxSdk;
 
 afterEach(async () => {
   await Promise.all(temporaryDirectories.splice(0).map((path) => rm(path, { recursive: true })));
@@ -41,10 +42,13 @@ afterEach(async () => {
 describe('sandbox file transfers', () => {
   it('resolves literal relative paths below the fixed remote workspace and artifact root', async () => {
     expect(resolveRemotePath('inputs/case.json')).toBe(`${SANDBOX_WORKSPACE}/inputs/case.json`);
+
     for (const path of ['', '/tmp/file', '../file', 'inputs/*.json', 'inputs/{a,b}.json']) {
       expect(() => resolveRemotePath(path), path).toThrow(TypeError);
     }
+
     const projectRoot = await createTemporaryDirectory();
+
     for (const destination of ['../outside', 'reports/*.json']) {
       await expect(
         publishTerminalArtifacts(
@@ -89,6 +93,7 @@ describe('sandbox file transfers', () => {
 
     await symlink(join(projectRoot, 'inputs'), join(projectRoot, 'linked-inputs'));
     await symlink(join(projectRoot, 'inputs', 'a.txt'), join(projectRoot, 'linked-file'));
+
     for (const source of ['linked-inputs/a.txt', 'linked-file']) {
       await expect(
         loadExplicitUploads(projectRoot, [{ source, destination: 'payload.txt' }], 16),

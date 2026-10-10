@@ -1,3 +1,5 @@
+import { z } from 'zod';
+import { isJsonObject } from '@attest/contracts';
 import { createHash } from 'node:crypto';
 
 import type { JsonValue } from '@attest/contracts';
@@ -37,7 +39,7 @@ const objectRecord = (
   location: ImportLocation,
   diagnostics: ImportDiagnostic[],
 ): SourceRecord | undefined => {
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+  if (!isJsonObject(value)) {
     diagnostics.push(
       importDiagnostic({
         code: 'record_not_object',
@@ -46,8 +48,10 @@ const objectRecord = (
         location,
       }),
     );
+
     return undefined;
   }
+
   return { ...location, value };
 };
 
@@ -57,8 +61,9 @@ const parseJsonSource = (
   maxRows: number,
 ): ParsedRecords => {
   let document: JsonValue;
+
   try {
-    document = JSON.parse(text) as JsonValue;
+    document = z.json().parse(JSON.parse(text));
   } catch {
     return fail(
       importDiagnostic({
@@ -68,7 +73,9 @@ const parseJsonSource = (
       }),
     );
   }
+
   const selected = resolveJsonPointer(document, recordsPointer ?? '');
+
   if (!selected.found) {
     return fail(
       importDiagnostic({
@@ -78,6 +85,7 @@ const parseJsonSource = (
       }),
     );
   }
+
   if (!Array.isArray(selected.value)) {
     return fail(
       importDiagnostic({
@@ -87,12 +95,16 @@ const parseJsonSource = (
       }),
     );
   }
+
   const diagnostics: ImportDiagnostic[] = [];
   const records: SourceRecord[] = [];
+
   for (const [index, value] of selected.value.slice(0, maxRows).entries()) {
     const record = objectRecord(value, { row: index + 1 }, diagnostics);
+
     if (record !== undefined) records.push(record);
   }
+
   return { diagnostics, records, rowsSeen: selected.value.length };
 };
 
@@ -100,15 +112,19 @@ const parseJsonlSource = (text: string, maxRows: number): ParsedRecords => {
   const diagnostics: ImportDiagnostic[] = [];
   const records: SourceRecord[] = [];
   let rowsSeen = 0;
+
   for (const [index, rawLine] of text.split('\n').entries()) {
     const line = rawLine.replace(/\r$/u, '');
+
     if (line.trim().length === 0) continue;
     rowsSeen += 1;
+
     if (rowsSeen > maxRows) break;
     const location = { line: index + 1 };
     let value: JsonValue;
+
     try {
-      value = JSON.parse(line) as JsonValue;
+      value = z.json().parse(JSON.parse(line));
     } catch {
       diagnostics.push(
         importDiagnostic({
@@ -121,9 +137,12 @@ const parseJsonlSource = (text: string, maxRows: number): ParsedRecords => {
       );
       continue;
     }
+
     const record = objectRecord(value, location, diagnostics);
+
     if (record !== undefined) records.push(record);
   }
+
   return { diagnostics, records, rowsSeen };
 };
 
@@ -152,18 +171,23 @@ const parseImportSource = (
   const limits = { ...DEFAULT_IMPORT_LIMITS, ...options.limits };
   const decoded = decodeSource(source);
   const sourceHash = createHash('sha256').update(decoded.bytes).digest('hex');
+
   if (decoded.bytes.byteLength > limits.maxBytes) {
     const diagnostic = importDiagnostic({
       code: 'import_size_limit',
       message: `Import source exceeds the ${limits.maxBytes}-byte limit.`,
       hint: 'Split the source into smaller explicit imports.',
     });
+
     return { ...fail(diagnostic), sourceHash };
   }
+
   if (decoded.diagnostics.length > 0) {
     return { diagnostics: decoded.diagnostics, records: [], rowsSeen: 0, sourceHash };
   }
+
   const parsed = parseRecords(decoded.text, format, options.recordsPointer, limits.maxRows);
+
   if (parsed.rowsSeen > limits.maxRows) {
     parsed.diagnostics.push(
       importDiagnostic({
@@ -173,6 +197,7 @@ const parseImportSource = (
       }),
     );
   }
+
   return {
     diagnostics: parsed.diagnostics,
     records: parsed.records.slice(0, limits.maxRows),

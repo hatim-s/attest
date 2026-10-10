@@ -11,21 +11,27 @@ import {
 } from './credentials.js';
 
 /** Validates untyped server data without carrying its contents into error output. */
+// BOUNDARY: Cloud HTTP response bodies are untrusted; the supplied Zod schema validates the response before returning domain data.
 const parseCloudResponse = <T>(schema: z.ZodType<T>, value: unknown): T => {
   const parsed = schema.safeParse(value);
+
   if (!parsed.success)
     throw new LocalError(
       'cloud_request_failed',
       'Cloud returned a response that does not match the protocol.',
     );
+
   return parsed.data;
 };
 
 /** Rejects malformed caller input before opening a network request. */
+// BOUNDARY: Cloud command inputs are validated by the supplied Zod schema before network submission.
 const parseCloudInput = <T>(schema: z.ZodType<T>, value: unknown): T => {
   const parsed = schema.safeParse(value);
+
   if (!parsed.success)
     throw new LocalError('cli_usage', 'Cloud request does not match the protocol.');
+
   return parsed.data;
 };
 
@@ -36,6 +42,7 @@ const deviceSchema = z.object({
   expires_in: z.number().positive().max(3600),
   interval: z.number().positive().max(60),
 });
+
 const tokenSchema = z.object({
   access_token: z.string().min(1),
   token_type: z.literal('Bearer'),
@@ -44,7 +51,9 @@ const tokenSchema = z.object({
     .positive()
     .max(366 * 24 * 60 * 60),
 });
+
 type LoginNotice = { user_code: string; verification_uri: string; expires_in: number };
+
 type CloudEventPage = {
   events: { sequence: number; time: string; event: string; data: unknown }[];
   next_cursor: number;
@@ -72,6 +81,7 @@ const loginCloud = async (options: {
 }): Promise<{ base_url: string; authenticated: true }> => {
   const client = createCloudClient({ baseUrl: options.baseUrl, fetch: options.fetch });
   const verifier = randomBytes(32).toString('base64url');
+
   const device = parseCloudResponse(
     deviceSchema,
     await client.request(
@@ -81,6 +91,7 @@ const loginCloud = async (options: {
       options.signal,
     ),
   );
+
   if (new URL(device.verification_uri).origin !== client.baseUrl)
     throw new LocalError('cloud_request_failed', 'Cloud approval URL points to another origin.');
   options.onDevice({
@@ -89,8 +100,10 @@ const loginCloud = async (options: {
     expires_in: device.expires_in,
   });
   const deadline = Date.now() + device.expires_in * 1000;
+
   while (Date.now() < deadline) {
     if (options.signal?.aborted) throw new LocalError('cancelled', 'Cloud login cancelled.');
+
     try {
       const token = parseCloudResponse(
         tokenSchema,
@@ -101,6 +114,7 @@ const loginCloud = async (options: {
           options.signal,
         ),
       );
+
       await writeCloudCredentials(
         {
           baseUrl: client.baseUrl,
@@ -109,17 +123,17 @@ const loginCloud = async (options: {
         },
         options.credentialPath,
       );
+
       return { base_url: client.baseUrl, authenticated: true };
     } catch (error) {
       if (
         !(error instanceof LocalError) ||
-        typeof error.details !== 'object' ||
-        error.details === null ||
-        Array.isArray(error.details) ||
-        error.details.remote_code !== 'authorization_pending'
+        !z.object({ remote_code: z.literal('authorization_pending') }).safeParse(error.details)
+          .success
       )
         throw error;
     }
+
     try {
       await setTimeout(
         Math.min(device.interval * 1000, Math.max(0, deadline - Date.now())),
@@ -130,6 +144,7 @@ const loginCloud = async (options: {
       throw new LocalError('cancelled', 'Cloud login cancelled.');
     }
   }
+
   throw new LocalError(
     'cloud_auth_required',
     'Cloud approval code expired. Run cloud login again.',
@@ -139,26 +154,32 @@ const loginCloud = async (options: {
 /** Loads only credentials tied to the configured cloud origin. */
 const authenticatedCloudClient = async (credentialPath?: string): Promise<CloudClient> => {
   const credentials = await readCloudCredentials(credentialPath);
+
   return createCloudClient({ baseUrl: credentials.baseUrl, accessToken: credentials.accessToken });
 };
 
 /** Revokes the server session before removing the local token. */
 const logoutCloud = async (credentialPath?: string): Promise<{ authenticated: false }> => {
   const credentials = await readCloudCredentials(credentialPath, { allowExpired: true });
+
   const client = createCloudClient({
     baseUrl: credentials.baseUrl,
     accessToken: credentials.accessToken,
   });
+
   try {
     await client.request('DELETE', '/v1/auth/session');
   } catch (error) {
     if (!(error instanceof LocalError) || error.code !== 'cloud_auth_required') throw error;
   }
+
   await removeCloudCredentials(credentialPath);
+
   return { authenticated: false };
 };
 
 const projectSchema = z.object({ id: z.string(), name: z.string(), created_at: z.string() });
+
 const runSchema = z.object({
   id: z.string(),
   project_id: z.string(),
@@ -171,6 +192,7 @@ const runSchema = z.object({
   raw_expires_at: z.string().nullable(),
   error_code: z.string().nullable(),
 });
+
 const runResponseSchema = z.object({ run: runSchema });
 
 const cloudProjectPath = (projectId: string): string =>
@@ -206,8 +228,10 @@ const cloudEvents = async (options: {
   signal?: AbortSignal;
 }): Promise<CloudEventPage> => {
   const after = options.after ?? 0;
+
   if (!Number.isSafeInteger(after) || after < 0)
     throw new LocalError('cli_usage', 'Event cursor must be a non-negative integer.');
+
   const page = parseCloudResponse(
     eventPageSchema,
     await options.client.request(
@@ -217,6 +241,7 @@ const cloudEvents = async (options: {
       options.signal,
     ),
   );
+
   if (
     page.next_cursor < after ||
     page.events.some(
@@ -226,6 +251,7 @@ const cloudEvents = async (options: {
     )
   )
     throw new LocalError('cloud_request_failed', 'Cloud event page has an invalid cursor order.');
+
   return page;
 };
 

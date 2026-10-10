@@ -57,6 +57,7 @@ const registerProjectInit = (
         workingDirectory: context.workingDirectory,
         yes: options.yes,
       });
+
       context.io.output(renderCommandResult('project.init', outputFormat(options), result));
     });
   setCliCommandHelpMetadata(command, {
@@ -87,6 +88,7 @@ const registerProjectResourceCommands = (context: CommandContext): void => {
   const project = context.program
     .command('project')
     .description('Initialize and inspect a project.');
+
   registerProjectInit(
     project.command('init').description('Initialize one canonical Attest project.'),
     undefined,
@@ -111,6 +113,7 @@ const registerProjectResourceCommands = (context: CommandContext): void => {
       run: runProjectValidateCommand,
     },
   ] as const;
+
   for (const { description, name, run } of inspections) {
     addCommonOptions(project.command(name).description(description)).action(
       async (options: CommonCliOptions) => {
@@ -118,10 +121,12 @@ const registerProjectResourceCommands = (context: CommandContext): void => {
           project: options.project,
           workingDirectory: context.workingDirectory,
         });
+
         context.io.output(renderCommandResult(`project.${name}`, outputFormat(options), result));
       },
     );
   }
+
   setCliCommandHelpMetadata(project, {
     examples: ['attest project init', 'attest project show --output json'],
   });
@@ -142,6 +147,7 @@ const registerProjectResourceCommands = (context: CommandContext): void => {
         resourceType,
         workingDirectory: context.workingDirectory,
       });
+
       context.io.output(renderCommandResult('list', outputFormat(options), result));
     });
 
@@ -163,12 +169,14 @@ const registerProjectResourceCommands = (context: CommandContext): void => {
         resourceType,
         workingDirectory: context.workingDirectory,
       });
+
       context.io.output(renderCommandResult('show', outputFormat(options), result));
     });
 
   const schema = context.program
     .command('schema')
     .description('List or print generated contract JSON Schemas.');
+
   schema
     .command('list')
     .description('List registered contract schema ids.')

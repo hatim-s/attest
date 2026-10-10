@@ -3,9 +3,12 @@ import { describe, expect, it } from 'vitest';
 import { StoreError } from '../../store-error.js';
 import { canonicalStringify, contentHash } from '../canonical-json.js';
 
-const cyclicValue = (): Record<string, unknown> => {
-  const value: Record<string, unknown> = {};
+type CyclicFixture = { self?: CyclicFixture };
+
+const cyclicValue = (): CyclicFixture => {
+  const value: CyclicFixture = {};
   value.self = value;
+
   return value;
 };
 

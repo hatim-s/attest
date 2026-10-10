@@ -29,6 +29,7 @@ const defaultTerminalFailure: EvalTerminalFailureFactory = (code, message) => ({
 /** Builds the completed pass/fail envelope shared by JSON and the final JSONL event. */
 const completedResult = (run: Readonly<EvalRun>, summary: EvalRunSummary): EvalFinalResultData => {
   const verdict = summary.failed_cases === 0 ? 'pass' : 'fail';
+
   const sharedResult = {
     schema: CLI_RESULT_SCHEMA_ID,
     ok: true as const,
@@ -37,23 +38,34 @@ const completedResult = (run: Readonly<EvalRun>, summary: EvalRunSummary): EvalF
     project_hash_after: run.snapshot.project_hash,
     warnings: [],
   };
+
+  const additions: Pick<EvalRun['snapshot'], 'selection'> &
+    Pick<EvalRun['effective_command']['resolved'], 'baseline_run_id' | 'junit_path'> = {};
+
   const payload = {
     run_id: run.run_id,
     snapshot_hash: run.snapshot_hash,
     status: 'completed' as const,
     summary,
-    // The result is validated as JSON, which rejects keys holding undefined, so absent fields are omitted.
-    ...(run.snapshot.selection === undefined ? {} : { selection: run.snapshot.selection }),
-    ...(run.effective_command.resolved.baseline_run_id === undefined
-      ? {}
-      : { baseline_run_id: run.effective_command.resolved.baseline_run_id }),
-    ...(run.effective_command.resolved.junit_path === undefined
-      ? {}
-      : { junit_path: run.effective_command.resolved.junit_path }),
   };
+
+  if (run.snapshot.selection !== undefined) additions.selection = run.snapshot.selection;
+
+  if (run.effective_command.resolved.baseline_run_id !== undefined)
+    additions.baseline_run_id = run.effective_command.resolved.baseline_run_id;
+
+  if (run.effective_command.resolved.junit_path !== undefined)
+    additions.junit_path = run.effective_command.resolved.junit_path;
+
   return verdict === 'pass'
-    ? { exit_code: 0, result: { ...sharedResult, result: { ...payload, verdict: 'pass' } } }
-    : { exit_code: 1, result: { ...sharedResult, result: { ...payload, verdict: 'fail' } } };
+    ? {
+        exit_code: 0,
+        result: { ...sharedResult, result: { ...payload, ...additions, verdict: 'pass' } },
+      }
+    : {
+        exit_code: 1,
+        result: { ...sharedResult, result: { ...payload, ...additions, verdict: 'fail' } },
+      };
 };
 
 /** Picks the terminal result envelope for a finished run. */
@@ -69,12 +81,15 @@ const terminalResultFor = (
   if (outcome.status === 'completed') {
     return completedResult(run, summary);
   }
+
   if (outcome.status === 'cancelled') {
     return outcome.terminalFailure('cancelled', 'Eval run was cancelled.');
   }
+
   if (outcome.timedOut) {
     return outcome.terminalFailure('run_failed', 'Eval run deadline exceeded.');
   }
+
   return outcome.terminalFailure(
     'run_failed',
     'Eval run encountered an invocation, metric, persistence, or artifact error.',
@@ -98,11 +113,13 @@ const preOrchestrationFailure = async <Payload, BaselineDiff>(
     event: 'result',
     data: failure.finalResult,
   };
+
   try {
     await failure.onEvent?.(event);
   } catch {
     // The primary failure remains authoritative when its one result-event sink also fails.
   }
+
   return {
     run,
     status: failure.status,

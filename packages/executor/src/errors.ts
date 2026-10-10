@@ -65,6 +65,7 @@ const abortedError = (
   if (callerSignal?.aborted === true) {
     return new AgentInvocationError('cancelled', `${operation} was cancelled.`, options);
   }
+
   return new AgentInvocationError('timeout', `${operation} timed out.`, options);
 };
 

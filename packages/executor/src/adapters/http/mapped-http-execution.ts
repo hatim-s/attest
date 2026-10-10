@@ -1,10 +1,11 @@
-import { AGENT_PROTOCOL } from '@attest/contracts';
+import type { AgentResponseCandidate } from '../../internal/agent-response-candidate.js';
+import { AGENT_PROTOCOL, type JsonValue } from '@attest/contracts';
 
 import { AgentInvocationError, abortedError } from '../../errors.js';
 import { abortableWait } from '../../internal/abortable-wait.js';
 import { startTimer } from '../../internal/elapsed.js';
 import { createFailedAttempt } from '../../internal/failed-attempt.js';
-import { isJsonValue } from '../../internal/json-value.js';
+import { isJsonValue, isNumber, isString, parseJson } from '../../internal/json-value.js';
 import { extractRemoteError } from '../../internal/remote-error.js';
 import { retryBackoffDelay } from '../../internal/retry-backoff.js';
 import type { InvocationAttempt } from '../../types.js';
@@ -34,22 +35,25 @@ type ExchangeContext = {
 const REMOTE_ERROR_FALLBACK = 'The mapped HTTP agent reported an error.';
 
 /** Redacts secret representations from extracted JSON before it becomes persisted evidence. */
-const redactExtractedJson = (value: unknown, secrets: readonly string[]): unknown =>
-  JSON.parse(redactTransportText(JSON.stringify(value), secrets)) as unknown;
+const redactExtractedJson = (value: JsonValue, secrets: readonly string[]): JsonValue =>
+  parseJson(redactTransportText(JSON.stringify(value), secrets));
 
 /** Extracts an optional provider correlation id without accepting structured secret-bearing data. */
 const extractRemoteJobId = (
-  raw: unknown,
+  raw: JsonValue,
   pointer: string | undefined,
 ): string | number | undefined => {
   const value = readJsonPointer(raw, pointer);
+
   if (value === undefined || value === null) return undefined;
-  if (typeof value !== 'string' && typeof value !== 'number') {
+
+  if (!isString(value) && !isNumber(value)) {
     throw new AgentInvocationError(
       'invalid_envelope',
       'Mapped HTTP remote job id extraction must produce a string or number.',
     );
   }
+
   return value;
 };
 
@@ -58,38 +62,44 @@ const extractRemoteJobId = (
  * candidate with parseAgentResponse, so extraction only has to place values correctly.
  */
 const extractAgentResponse = (
-  raw: unknown,
+  raw: JsonValue,
   extraction: HttpAgentResource['transport']['extraction'],
   secrets: readonly string[],
-): Record<string, unknown> => {
+): AgentResponseCandidate => {
   const error = readJsonPointer(raw, extraction.error_pointer);
   const trace = readJsonPointer(raw, extraction.trace_pointer);
+
   if (error !== undefined && error !== null) {
     const extractedError = extractRemoteError(error, REMOTE_ERROR_FALLBACK);
-    return {
+
+    const response: AgentResponseCandidate = {
       protocol: AGENT_PROTOCOL,
-      error: {
-        ...extractedError,
-        message: redactTransportText(extractedError.message, secrets),
-        ...(extractedError.code === undefined
-          ? {}
-          : { code: redactTransportText(extractedError.code, secrets) }),
-      },
-      ...(trace === undefined ? {} : { trace: redactExtractedJson(trace, secrets) }),
+      error: { message: redactTransportText(extractedError.message, secrets) },
     };
+
+    if (extractedError.code !== undefined && response.error !== undefined) {
+      response.error.code = redactTransportText(extractedError.code, secrets);
+    }
+
+    if (trace !== undefined) response.trace = redactExtractedJson(trace, secrets);
+
+    return response;
   }
+
   const result = readJsonPointer(raw, extraction.result_pointer);
+
   if (result === undefined || !isJsonValue(result)) {
     throw new AgentInvocationError(
       'invalid_envelope',
       'Mapped HTTP result extraction did not produce a JSON value.',
     );
   }
-  return {
-    protocol: AGENT_PROTOCOL,
-    output: result,
-    ...(trace === undefined ? {} : { trace: redactExtractedJson(trace, secrets) }),
-  };
+
+  const response: AgentResponseCandidate = { protocol: AGENT_PROTOCOL, output: result };
+
+  if (trace !== undefined) response.trace = redactExtractedJson(trace, secrets);
+
+  return response;
 };
 
 const retryableStatus = (status: number): boolean =>
@@ -117,24 +127,28 @@ const withAttemptDuration = (
   durationMs: number,
 ): AgentInvocationError => {
   error.attemptDurationMs = durationMs;
+
   return error;
 };
 
 const normalizeFailure = (
-  error: unknown,
+  cause: unknown,
   signal: AbortSignal,
   callerSignal?: AbortSignal,
 ): AgentInvocationError => {
-  if (error instanceof AgentInvocationError) {
-    if (error.code !== 'cancelled' || callerSignal?.aborted === true) return error;
+  if (cause instanceof AgentInvocationError) {
+    if (cause.code !== 'cancelled' || callerSignal?.aborted === true) return cause;
+
     return new AgentInvocationError('timeout', 'Mapped HTTP invocation timed out.', {
-      cause: error,
+      cause: cause,
     });
   }
+
   if (callerSignal?.aborted === true || signal.aborted) {
-    return abortedError(callerSignal, 'Mapped HTTP invocation', { cause: error });
+    return abortedError(callerSignal, 'Mapped HTTP invocation', { cause: cause });
   }
-  return new AgentInvocationError('network', 'Mapped HTTP transport failed.', { cause: error });
+
+  return new AgentInvocationError('network', 'Mapped HTTP transport failed.', { cause: cause });
 };
 
 const statusError = (response: HttpJsonResponse): AgentInvocationError =>
@@ -168,6 +182,7 @@ const requestWithRetries = async (
 ): Promise<{ durationMs: number; response: HttpJsonResponse }> => {
   const { policy, retryAttempts, signal } = context;
   const retries = context.retry?.retries ?? 0;
+
   const retryOrThrow = async (
     error: AgentInvocationError,
     durationMs: number,
@@ -178,12 +193,15 @@ const requestWithRetries = async (
     if (!rules.allowRetry || retry >= retries || !retryable) {
       throw withAttemptDuration(error, durationMs);
     }
+
     retryAttempts.push(attemptFromError(error, durationMs));
     await wait(rules.delayFor(retry, retryAfter), signal, policy.callerSignal);
   };
+
   for (let retry = 0; ; retry += 1) {
     const attemptDuration = startTimer();
     let response: HttpJsonResponse;
+
     try {
       const transport = context.requestJson ?? (await import('./http-client.js')).requestJson;
       response = await transport(request, policy);
@@ -193,7 +211,9 @@ const requestWithRetries = async (
       await retryOrThrow(normalized, attemptDuration(), retryable, retry, undefined);
       continue;
     }
+
     const durationMs = attemptDuration();
+
     if (isSuccessStatus(response.status)) return { durationMs, response };
     const retryAfter = response.headers['retry-after'];
     await retryOrThrow(

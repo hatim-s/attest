@@ -5,6 +5,7 @@ import { runAgentTestCommand } from '../test.js';
 import { addAgent, createAgentProject, snapshotFiles } from './support/agent-project.js';
 
 const REDACTED = '[REDACTED]';
+
 const originalSecret = process.env.ATTEST_SOURCE_SECRET;
 
 const nativeAgent = (
@@ -42,6 +43,7 @@ const HANG = 'process.stdin.resume(); setInterval(() => undefined, 1000);';
 
 afterEach(() => {
   vi.unstubAllGlobals();
+
   if (originalSecret === undefined) delete process.env.ATTEST_SOURCE_SECRET;
   else process.env.ATTEST_SOURCE_SECRET = originalSecret;
 });
@@ -71,6 +73,7 @@ describe('agent test command', () => {
     const argvSecret = 's3cr3t-value';
     const echo = `process.stdin.resume(); process.stdin.on('end', () => process.stdout.write(JSON.stringify({ protocol: 'attest.agent-invocation', output: { value: process.env.ATTEST_ECHO_VALUE, argv: process.argv.slice(1) } })));`;
     const success = nativeAgent('success', echo, { redaction: { argv_positions: [3] } });
+
     if (success.transport.kind !== 'native_cli') throw new Error('Expected a native agent.');
     success.transport.argv.push(argvSecret);
     await addAgent(root, success);
@@ -87,7 +90,7 @@ describe('agent test command', () => {
     expect(JSON.stringify(probed)).not.toContain('literal-super-secret');
     expect(JSON.stringify(probed)).not.toContain(argvSecret);
 
-    const failed: unknown = await probe(root, 'hostile').catch((error: unknown) => error);
+    const failed: unknown = await probe(root, 'hostile').catch((cause: unknown) => cause);
     expect(failed).toMatchObject({
       code: 'invocation_failed',
       details: { invocation_code: 'invalid_envelope' },
@@ -103,11 +106,14 @@ describe('agent test command', () => {
     vi.stubGlobal('fetch', (_url: string, init: RequestInit) => {
       const headers = new Headers(init.headers);
       seen.push(headers.get('authorization'));
+
       if (seen.length === 1) return Promise.resolve(new Response('temporary', { status: 503 }));
+
       const output = {
         authorization: headers.get('authorization'),
         opaque: headers.get('x-opaque'),
       };
+
       return Promise.resolve(
         new Response(JSON.stringify({ protocol: 'attest.agent-invocation', output }), {
           status: 200,

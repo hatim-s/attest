@@ -7,6 +7,7 @@ import { errnoCode } from '../../internal/errno-code.js';
 import { rethrowAfterCleanup } from './cleanup.js';
 
 const COPY_BUFFER_BYTES = 64 * 1024;
+
 const MAX_SNAPSHOT_ATTEMPTS = 4;
 
 type FileVersion = BigIntStats;
@@ -43,22 +44,28 @@ const copyFileHandle = async (
   const target = await open(destination, 'wx', 0o600);
   const buffer = Buffer.allocUnsafe(COPY_BUFFER_BYTES);
   let offset = 0;
+
   try {
     while (offset < expectedSize) {
       const length = Math.min(buffer.length, expectedSize - offset);
       const { bytesRead } = await source.read(buffer, 0, length, offset);
+
       if (bytesRead === 0) throw new SnapshotChangedError();
       let written = 0;
+
       while (written < bytesRead) {
         const result = await target.write(buffer, written, bytesRead - written, offset + written);
+
         if (result.bytesWritten === 0) throw new SnapshotChangedError();
         written += result.bytesWritten;
       }
+
       offset += bytesRead;
     }
   } catch (error: unknown) {
     return rethrowAfterCleanup(error, [async () => target.close()]);
   }
+
   await target.close();
 };
 
@@ -67,26 +74,32 @@ const openWal = async (
   path: string,
 ): Promise<{ handle: FileHandle; version: FileVersion } | undefined> => {
   let metadata: FileVersion;
+
   try {
     metadata = await lstat(path, { bigint: true });
   } catch (error: unknown) {
     if (errnoCode(error) === 'ENOENT') return undefined;
     throw error;
   }
+
   if (!metadata.isFile() || metadata.isSymbolicLink()) throw new SnapshotChangedError();
 
   let handle: FileHandle | undefined;
+
   try {
     handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
     const version = await handle.stat({ bigint: true });
     const current = await lstat(path, { bigint: true });
+
     if (!sameIdentity(metadata, version) || !sameIdentity(version, current)) {
       throw new SnapshotChangedError();
     }
+
     return { handle, version };
   } catch (error: unknown) {
     const openedHandle = handle;
     const failure = errnoCode(error) === 'ENOENT' ? new SnapshotChangedError() : error;
+
     return rethrowAfterCleanup(
       failure,
       openedHandle === undefined ? [] : [async () => openedHandle.close()],
@@ -97,6 +110,7 @@ const openWal = async (
 const pathMatchesVersion = async (path: string, version: FileVersion): Promise<boolean> => {
   try {
     const current = await lstat(path, { bigint: true });
+
     return !current.isSymbolicLink() && current.dev === version.dev && current.ino === version.ino;
   } catch {
     return false;
@@ -113,18 +127,24 @@ const captureAttempt = async (
   const walPath = `${sourcePath}-wal`;
   let wal: Awaited<ReturnType<typeof openWal>> = undefined;
   const removeSnapshot = async (): Promise<void> => removeRunStoreSnapshot(snapshot);
+
   try {
     const sourceBefore = await source.stat({ bigint: true });
+
     if (!(await pathMatchesVersion(sourcePath, sourceBefore))) throw new SnapshotChangedError();
     wal = await openWal(walPath);
     await copyFileHandle(source, snapshot.path, sourceBefore.size);
+
     if (wal !== undefined) {
       await copyFileHandle(wal.handle, `${snapshot.path}-wal`, wal.version.size);
     }
 
     const sourceAfter = await source.stat({ bigint: true });
+
     if (!sameVersion(sourceBefore, sourceAfter)) throw new SnapshotChangedError();
+
     if (!(await pathMatchesVersion(sourcePath, sourceAfter))) throw new SnapshotChangedError();
+
     if (wal === undefined) {
       try {
         await lstat(walPath);
@@ -134,6 +154,7 @@ const captureAttempt = async (
       }
     } else {
       const walAfter = await wal.handle.stat({ bigint: true });
+
       if (!sameVersion(wal.version, walAfter) || !(await pathMatchesVersion(walPath, walAfter))) {
         throw new SnapshotChangedError();
       }
@@ -141,6 +162,7 @@ const captureAttempt = async (
   } catch (error: unknown) {
     const openedWal = wal;
     const closeWal = openedWal === undefined ? [] : [async () => openedWal.handle.close()];
+
     return rethrowAfterCleanup(error, [...closeWal, removeSnapshot]);
   }
 
@@ -150,6 +172,7 @@ const captureAttempt = async (
   } catch (error: unknown) {
     return rethrowAfterCleanup(error, [removeSnapshot]);
   }
+
   return snapshot;
 };
 
@@ -167,6 +190,7 @@ const captureRunStoreSnapshot = async (
       }
     }
   }
+
   throw new SnapshotChangedError();
 };
 

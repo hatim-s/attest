@@ -154,19 +154,26 @@ const TRANSPORT_AUTHORING_FIELDS: Readonly<Record<TransportSelection, Set<keyof 
 const agentAddFlagConflicts = (): Record<string, string[]> => {
   const selectors = new Set(TRANSPORT_SELECTORS.map(([field]) => field));
   const conflicts = new Map<keyof AgentAddFields, (keyof AgentAddFields)[]>();
+
   const add = (field: keyof AgentAddFields, other: keyof AgentAddFields): void => {
     const existing = conflicts.get(field) ?? [];
+
     if (!existing.includes(other)) conflicts.set(field, [...existing, other]);
   };
+
   for (const [selector, transport] of TRANSPORT_SELECTORS) {
     for (const [other] of TRANSPORT_SELECTORS) if (other !== selector) add(selector, other);
+
+    // SAFETY: AGENT_ADD_FLAGS lists exactly the authored AgentAddFields keys.
     for (const field of Object.keys(AGENT_ADD_FLAGS) as (keyof AgentAddFields)[]) {
       if (selectors.has(field) || COMMON_AUTHORING_FIELDS.has(field)) continue;
+
       if (TRANSPORT_AUTHORING_FIELDS[transport].has(field)) continue;
       add(field, selector);
       add(selector, field);
     }
   }
+
   return Object.fromEntries(
     [...conflicts].map(([field, others]) => [
       AGENT_ADD_FLAGS[field],
@@ -185,6 +192,8 @@ const assertApplicableAuthoringFlags = (
 ): void => {
   const allowed = TRANSPORT_AUTHORING_FIELDS[selected];
   const incompatibleOptions: string[] = [];
+
+  // SAFETY: AGENT_ADD_FLAGS lists exactly the authored AgentAddFields keys.
   for (const field of Object.keys(AGENT_ADD_FLAGS) as (keyof AgentAddFields)[]) {
     if (
       fieldIsProvided(fields[field]) &&
@@ -194,6 +203,7 @@ const assertApplicableAuthoringFlags = (
       incompatibleOptions.push(`--${AGENT_ADD_FLAGS[field]}`);
     }
   }
+
   if (incompatibleOptions.length > 0) {
     incompatibleOptions.sort();
     throw new LocalError(
@@ -206,6 +216,7 @@ const assertApplicableAuthoringFlags = (
       },
     );
   }
+
   if (
     selected === 'stream' &&
     fields.incrementalOutputMode !== undefined &&
@@ -227,17 +238,20 @@ const backgroundReadiness = (
   fields: AgentAddFields,
 ): Extract<AgentResource['transport'], { kind: 'background_cli' }>['readiness'] => {
   if (fields.readinessHttp !== undefined) return { kind: 'http', url: fields.readinessHttp };
+
   if (fields.readinessTcp !== undefined) {
     return { kind: 'tcp', ...parseTcpReadiness(fields.readinessTcp) };
   }
+
   return { kind: 'stderr', pattern: fields.readinessStderr ?? '' };
 };
 
 /** Normalizes non-interactive or wizard-populated add fields into one resource. */
 const createAgentResource = (fields: AgentAddFields): AgentResource => {
-  const selections = TRANSPORT_SELECTORS.filter(([field]) => fields[field] !== undefined).map(
-    ([, selection]) => selection,
+  const selections = TRANSPORT_SELECTORS.flatMap(([field, selection]) =>
+    fields[field] === undefined ? [] : [selection],
   );
+
   if (selections.length !== 1) {
     throw new LocalError(
       selections.length === 0 ? 'cli_missing_input' : 'cli_usage',
@@ -251,18 +265,23 @@ const createAgentResource = (fields: AgentAddFields): AgentResource => {
       },
     );
   }
+
   assertApplicableAuthoringFlags(fields, selections[0]!);
   const timeout = fields.timeout === undefined ? undefined : parseDuration(fields.timeout);
   const name = fields.name?.trim() || fields.agentId;
+
   const processEnvironment =
     fields.env === undefined || fields.env.length === 0
       ? {}
       : { env: parseSecretBindings(fields.env, '--env') };
+
   const headers =
     fields.headerEnv === undefined || fields.headerEnv.length === 0
       ? {}
       : { headers: parseSecretBindings(fields.headerEnv, '--header-env') };
+
   let transport: AgentResource['transport'];
+
   if (fields.nativeHttp !== undefined) {
     transport = {
       kind: 'http',
@@ -279,6 +298,7 @@ const createAgentResource = (fields: AgentAddFields): AgentResource => {
     const readiness = [fields.readinessHttp, fields.readinessTcp, fields.readinessStderr].filter(
       (value) => value !== undefined,
     );
+
     if (readiness.length !== 1 || fields.invokeUrl === undefined) {
       throw new LocalError(
         'cli_missing_input',
@@ -289,11 +309,11 @@ const createAgentResource = (fields: AgentAddFields): AgentResource => {
         },
       );
     }
+
     transport = {
       kind: 'background_cli',
       lifecycle: 'per_run',
       start_argv: tokenizeCommand(fields.backgroundCommand),
-      ...(fields.cwd === undefined ? {} : { cwd: fields.cwd }),
       ...processEnvironment,
       readiness: backgroundReadiness(fields),
       invoke: {
@@ -304,24 +324,29 @@ const createAgentResource = (fields: AgentAddFields): AgentResource => {
       },
       extraction: {
         result_pointer: fields.responsePointer ?? '/output',
-        ...(fields.errorPointer === undefined ? {} : { error_pointer: fields.errorPointer }),
-        ...(fields.tracePointer === undefined ? {} : { trace_pointer: fields.tracePointer }),
       },
-      ...(fields.shutdownUrl === undefined
-        ? {}
-        : { shutdown: { url: fields.shutdownUrl, method: 'POST' } }),
       stop_timeout_ms: parseDuration(fields.stopTimeout ?? '5s', '--stop-timeout'),
     };
+
+    if (fields.cwd !== undefined) transport.cwd = fields.cwd;
+
+    if (fields.errorPointer !== undefined) transport.extraction.error_pointer = fields.errorPointer;
+
+    if (fields.tracePointer !== undefined) transport.extraction.trace_pointer = fields.tracePointer;
+
+    if (fields.shutdownUrl !== undefined)
+      transport.shutdown = { url: fields.shutdownUrl, method: 'POST' };
   } else if (fields.jsonlCommand !== undefined) {
     transport = {
       kind: 'jsonl_bridge',
       lifecycle: 'per_run',
       argv: tokenizeCommand(fields.jsonlCommand),
-      ...(fields.cwd === undefined ? {} : { cwd: fields.cwd }),
       ...processEnvironment,
       concurrency: fields.bridgeConcurrency ?? 'serial',
       cancellation_grace_ms: parseDuration(fields.cancellationGrace ?? '1s', '--cancel-grace'),
     };
+
+    if (fields.cwd !== undefined) transport.cwd = fields.cwd;
   } else if (fields.streamUrl !== undefined) {
     transport = {
       kind: 'stream',
@@ -333,19 +358,21 @@ const createAgentResource = (fields: AgentAddFields): AgentResource => {
         body: '{{request}}',
         ...headers,
       },
-      ...(fields.eventName === undefined ? {} : { event_name: fields.eventName }),
       terminal_pointer: fields.terminalPointer ?? '/type',
       terminal_values: parseJsonValues(fields.terminalValues ?? ['"result"'], '--terminal-value'),
       result_pointer: fields.responsePointer ?? '/output',
-      ...(fields.errorPointer === undefined ? {} : { error_pointer: fields.errorPointer }),
-      ...(fields.tracePointer === undefined ? {} : { trace_pointer: fields.tracePointer }),
-      ...(fields.incrementalOutputPointer === undefined
-        ? {}
-        : {
-            incremental_output_pointer: fields.incrementalOutputPointer,
-            incremental_output_mode: fields.incrementalOutputMode ?? 'text',
-          }),
     };
+
+    if (fields.eventName !== undefined) transport.event_name = fields.eventName;
+
+    if (fields.errorPointer !== undefined) transport.error_pointer = fields.errorPointer;
+
+    if (fields.tracePointer !== undefined) transport.trace_pointer = fields.tracePointer;
+
+    if (fields.incrementalOutputPointer !== undefined) {
+      transport.incremental_output_pointer = fields.incrementalOutputPointer;
+      transport.incremental_output_mode = fields.incrementalOutputMode ?? 'text';
+    }
   } else if (fields.webSocketUrl !== undefined) {
     const lifecycle = fields.webSocketLifecycle ?? 'per_run';
     transport = {
@@ -356,9 +383,6 @@ const createAgentResource = (fields: AgentAddFields): AgentResource => {
       framing: 'text_json',
       url: fields.webSocketUrl,
       ...headers,
-      ...(fields.webSocketSubprotocol === undefined
-        ? {}
-        : { subprotocol: fields.webSocketSubprotocol }),
       request_template: parseRequestTemplate(
         fields.requestTemplate ?? '{"request_id":"{{request_id}}","request":"{{request}}"}',
       ),
@@ -370,7 +394,6 @@ const createAgentResource = (fields: AgentAddFields): AgentResource => {
       ),
       result_pointer: fields.responsePointer ?? '/output',
       error_pointer: fields.errorPointer ?? '/error',
-      ...(fields.tracePointer === undefined ? {} : { trace_pointer: fields.tracePointer }),
       open_timeout_ms: parseDuration(fields.openTimeout ?? '10s', '--open-timeout'),
       message_idle_timeout_ms: parseDuration(fields.idleTimeout ?? '30s', '--idle-timeout'),
       attempt_timeout_ms: parseDuration(fields.attemptTimeout ?? '60s', '--attempt-timeout'),
@@ -379,6 +402,11 @@ const createAgentResource = (fields: AgentAddFields): AgentResource => {
       retry_boundary: 'before_acknowledgement',
       replay_after_acknowledgement: false,
     };
+
+    if (fields.webSocketSubprotocol !== undefined)
+      transport.subprotocol = fields.webSocketSubprotocol;
+
+    if (fields.tracePointer !== undefined) transport.trace_pointer = fields.tracePointer;
   } else {
     transport = {
       kind: 'native_cli' as const,
@@ -387,34 +415,41 @@ const createAgentResource = (fields: AgentAddFields): AgentResource => {
         fields.argvJson === undefined
           ? tokenizeCommand(fields.nativeCommand ?? '')
           : parseArgvJson(fields.argvJson),
-      ...(fields.cwd === undefined ? {} : { cwd: fields.cwd }),
       ...processEnvironment,
-      ...(fields.sandboxJson === undefined
-        ? {}
-        : { sandbox: parseSandboxJson(fields.sandboxJson) }),
     };
+
+    if (fields.cwd !== undefined) transport.cwd = fields.cwd;
+
+    if (fields.sandboxJson !== undefined) transport.sandbox = parseSandboxJson(fields.sandboxJson);
   }
-  const parsed = agentResourceSchema.safeParse({
+
+  const resource: AgentResource = {
     schema: AGENT_RESOURCE_SCHEMA_ID,
     id: fields.agentId,
     name,
     transport,
-    ...(timeout === undefined ? {} : { timeouts: { attempt_ms: timeout } }),
-    ...(fields.trace === undefined ? {} : { capabilities: { trace: fields.trace } }),
-    ...(fields.headerEnv === undefined || fields.headerEnv.length === 0
-      ? {}
-      : {
-          redaction: {
-            headers: fields.headerEnv.map((binding) => binding.slice(0, binding.indexOf('='))),
-          },
-        }),
-  });
+  };
+
+  if (timeout !== undefined) resource.timeouts = { attempt_ms: timeout };
+
+  if (fields.trace !== undefined) resource.capabilities = { trace: fields.trace };
+
+  if (fields.headerEnv !== undefined && fields.headerEnv.length > 0) {
+    resource.redaction = {
+      headers: fields.headerEnv.map((binding) => binding.slice(0, binding.indexOf('='))),
+    };
+  }
+
+  const parsed = agentResourceSchema.safeParse(resource);
+
   if (!parsed.success) {
     throw new LocalError('cli_usage', 'Agent values do not match the resource schema.', {
       details: { diagnostics: schemaIssueDiagnostics(parsed.error.issues) },
     });
   }
+
   assertSafeNativeAgentResource(parsed.data);
+
   return parsed.data;
 };
 

@@ -1,3 +1,4 @@
+import { isString } from '@attest/contracts';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { access, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -47,9 +48,11 @@ const startMetricServer = async (
     const server = createServer(handler);
     server.listen(0, '127.0.0.1', () => {
       const address = server.address();
-      if (address === null || typeof address === 'string') {
+
+      if (address === null || isString(address)) {
         throw new Error('Expected a TCP listener address.');
       }
+
       resolve({ server, url: `http://127.0.0.1:${address.port}` });
     });
   });
@@ -57,21 +60,26 @@ const startMetricServer = async (
 /** Streams up to 100 chunks and records whether the client hung up before the stream finished. */
 const startChunkedServer = async (status: number, chunk: string) => {
   const progress = { chunksWritten: 0, responseClosed: false };
+
   const { server, url } = await startMetricServer((_request, response) => {
     response.writeHead(status);
+
     const interval = setInterval(() => {
       progress.chunksWritten += 1;
       response.write(chunk);
+
       if (progress.chunksWritten === 100) {
         clearInterval(interval);
         response.end();
       }
     }, 5);
+
     response.on('close', () => {
       progress.responseClosed = true;
       clearInterval(interval);
     });
   });
+
   return { server, url, progress };
 };
 
@@ -85,6 +93,7 @@ const closeServer = async (server: Server): Promise<void> =>
 const isProcessAlive = (processIdentifier: number): boolean => {
   try {
     process.kill(processIdentifier, 0);
+
     return true;
   } catch {
     return false;
@@ -99,16 +108,19 @@ describe('executeExecutableMetric command metrics', () => {
         text: JSON.stringify({ score: 0.8, pass: true }),
       }),
     );
+
     const definition = {
       name: 'isolated',
       type: 'exec' as const,
       command: ['python', 'metric.py'],
     };
+
     const evaluated = await executeExecutableMetric(definition, metricContext(), {
       commandTransport,
       outputCapBytes: 1234,
       timeoutMs: 5000,
     });
+
     expect(evaluated).toMatchObject({ status: 'evaluated', score: 0.8, pass: true });
     expect(commandTransport).toHaveBeenCalledWith(
       definition,
@@ -116,9 +128,11 @@ describe('executeExecutableMetric command metrics', () => {
       expect.objectContaining({ outputCapBytes: 1234, timeoutMs: 5000 }),
     );
     commandTransport.mockResolvedValue({ ok: true, text: '{"score":99}' });
+
     const malformed = await executeExecutableMetric(definition, metricContext(), {
       commandTransport,
     });
+
     expect(malformed).toMatchObject({ status: 'error', error: { kind: 'exec_malformed_output' } });
   });
 
@@ -156,6 +170,7 @@ describe('executeExecutableMetric command metrics', () => {
     );
 
     expect(evaluation.status).toBe('error');
+
     if (evaluation.status === 'error') {
       expect(evaluation.error.kind).toBe('exec_malformed_output');
       expect(evaluation.error.message).toContain('Metric output was not valid JSON');
@@ -170,6 +185,7 @@ describe('executeExecutableMetric command metrics', () => {
     );
 
     expect(evaluation.status).toBe('error');
+
     if (evaluation.status === 'error') {
       expect(evaluation.error.kind).toBe('exec_malformed_output');
       expect(evaluation.error.message).toContain('512-byte');
@@ -183,6 +199,7 @@ describe('executeExecutableMetric command metrics', () => {
     );
 
     expect(evaluation.status).toBe('error');
+
     if (evaluation.status === 'error') {
       expect(evaluation.error.kind).toBe('exec_malformed_output');
       expect(evaluation.details).toMatchObject({ issues: [{ path: 'pass' }] });
@@ -202,6 +219,7 @@ describe('executeExecutableMetric command metrics', () => {
     const directory = await mkdtemp(join(tmpdir(), 'attest-metric-'));
     const markerPath = join(directory, 'survival-marker');
     const processIdentifierPath = join(directory, 'process-id');
+
     try {
       const evaluation = await executeExecutableMetric(
         {
@@ -212,6 +230,7 @@ describe('executeExecutableMetric command metrics', () => {
         metricContext(),
         { timeoutMs: 1_000 },
       );
+
       const processIdentifier = Number(await readFile(processIdentifierPath, 'utf8'));
 
       expect(isProcessAlive(processIdentifier)).toBe(false);
@@ -228,6 +247,7 @@ describe('executeExecutableMetric command metrics', () => {
     const directory = await mkdtemp(join(tmpdir(), 'attest-metric-'));
     const controller = new AbortController();
     setTimeout(() => controller.abort(), 50);
+
     try {
       const evaluation = await executeExecutableMetric(
         {
@@ -252,6 +272,7 @@ describe('executeExecutableMetric command metrics', () => {
 describe('executeExecutableMetric HTTP metrics', () => {
   it('posts the request envelope and normalizes a 200 result', async () => {
     let requestBody = '';
+
     const { server, url } = await startMetricServer((request, response) => {
       request.on('data', (chunk: Buffer) => {
         requestBody += chunk.toString();
@@ -264,6 +285,7 @@ describe('executeExecutableMetric HTTP metrics', () => {
         { name: 'http', type: 'exec', url },
         metricContext(),
       );
+
       expect(JSON.parse(requestBody)).toEqual({
         protocol: 'attest.metric-evaluation',
         case: {
@@ -290,6 +312,7 @@ describe('executeExecutableMetric HTTP metrics', () => {
         metricContext(),
         { outputCapBytes: 512 },
       );
+
       await vi.waitFor(() => expect(progress.responseClosed).toBe(true));
 
       expect(progress.chunksWritten).toBeLessThan(100);
@@ -311,6 +334,7 @@ describe('executeExecutableMetric HTTP metrics', () => {
         { name: 'http-status', type: 'exec', url },
         metricContext(),
       );
+
       await vi.waitFor(() => expect(progress.responseClosed).toBe(true));
 
       expect(progress.chunksWritten).toBeLessThan(100);
@@ -330,6 +354,7 @@ describe('executeExecutableMetric HTTP metrics', () => {
         { name: 'http', type: 'exec', url },
         metricContext(),
       );
+
       expect(evaluation).toMatchObject({
         status: 'error',
         error: { kind: 'exec_malformed_output' },
@@ -346,6 +371,7 @@ describe('executeExecutableMetric HTTP metrics', () => {
     );
 
     expect(evaluation.status).toBe('error');
+
     if (evaluation.status === 'error') {
       expect(evaluation.error.kind).toBe('http_request_failed');
       expect(evaluation.error.message).toContain('must use http: or https:');
@@ -360,6 +386,7 @@ describe('executeExecutableMetric HTTP metrics', () => {
       { name: 'refused', type: 'exec', url },
       metricContext(),
     );
+
     expect(evaluation).toMatchObject({ status: 'error', error: { kind: 'http_request_failed' } });
   });
 });

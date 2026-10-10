@@ -55,6 +55,7 @@ const validTrace = {
 };
 
 const contentHash = 'a'.repeat(64);
+
 const validAgent = {
   schema: AGENT_RESOURCE_SCHEMA_ID,
   id: 'support',
@@ -65,7 +66,9 @@ const validAgent = {
     argv: ['node', 'agent.mjs'],
   },
 };
+
 const validCase = { id: 'refund-basic', input: { question: 'Refund?' } };
+
 const validDataset = {
   schema: DATASET_SCHEMA_ID,
   case_schema: CASE_SCHEMA_ID,
@@ -73,6 +76,7 @@ const validDataset = {
   name: 'Refunds',
   case_count: 1,
 };
+
 const validMetric = {
   schema: METRIC_RESOURCE_SCHEMA_ID,
   id: 'correct',
@@ -82,6 +86,7 @@ const validMetric = {
     assertions: [{ exists: { path: '$.output' } }],
   },
 };
+
 const validTest = {
   schema: TEST_RESOURCE_SCHEMA_ID,
   id: 'refund',
@@ -91,6 +96,7 @@ const validTest = {
   datasets: [],
   metrics: [{ metric_id: validMetric.id }],
 };
+
 const validProject = {
   schema: PROJECT_SCHEMA_ID,
   project_id: '01ARZ3NDEKTSV4RRFFQ69G5FAV',
@@ -527,6 +533,7 @@ const divergenceFixtures: DivergenceFixture[] = [
 
 const getZodSchema = (fileName: string): z.ZodType => {
   const definition = CONTRACT_JSON_SCHEMAS.get(fileName);
+
   if (definition === undefined) {
     throw new Error(`Missing Zod schema for ${fileName}`);
   }

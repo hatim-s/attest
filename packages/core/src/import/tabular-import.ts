@@ -1,3 +1,11 @@
+import {
+  isString,
+  isNumber,
+  isBoolean,
+  isJsonObject,
+  type JsonValue,
+  type TestCase,
+} from '@attest/contracts';
 import { dedupeImportRows } from './dedupe-import-rows.js';
 import { importDiagnostic, sortImportDiagnostics } from './import-diagnostics.js';
 import {
@@ -11,18 +19,31 @@ import {
 import { normalizeRecord } from './map-import-record.js';
 import { parseImportSource } from './parse-import-source.js';
 import { reconcileRows } from './reconcile-import.js';
-import { assertMappingShape } from './validate-import-mappings.js';
+import { validateMappingDestinations } from './validate-import-mappings.js';
 
 const PREVIEW_ROWS = 5;
 
-const redactFields = (record: object): Record<string, RedactedValue> =>
+const redactFields = (
+  record: Record<string, JsonValue> | Omit<TestCase, 'id'>,
+): Record<string, RedactedValue> =>
   Object.fromEntries(Object.entries(record).map(([key, value]) => [key, redactValue(value)]));
 
-const redactValue = (value: unknown): RedactedValue => {
+const redactValue = (value: JsonValue | undefined): RedactedValue => {
   if (value === null) return null;
+
   if (Array.isArray(value)) return value.map(redactValue);
-  if (typeof value === 'object') return redactFields(value);
-  return `<redacted:${typeof value}>`;
+
+  if (isJsonObject(value)) return redactFields(value);
+
+  const kind = isString(value)
+    ? 'string'
+    : isNumber(value)
+      ? 'number'
+      : isBoolean(value)
+        ? 'boolean'
+        : 'undefined';
+
+  return `<redacted:${kind}>`;
 };
 
 const createImportPreview = (
@@ -35,7 +56,8 @@ const createImportPreview = (
 
 /** Option combinations that only apply to one format, checked before any record is mapped. */
 const requestDiagnostics = (request: TabularImportRequest): ImportDiagnostic[] => {
-  const diagnostics = assertMappingShape(request.format, request.mappings ?? []);
+  const diagnostics = validateMappingDestinations(request.format, request.mappings ?? []);
+
   if (request.recordsPointer !== undefined && request.format !== 'json') {
     diagnostics.push(
       importDiagnostic({
@@ -46,6 +68,7 @@ const requestDiagnostics = (request: TabularImportRequest): ImportDiagnostic[] =
       }),
     );
   }
+
   if ((request.parseJsonSources?.length ?? 0) > 0 && request.format !== 'csv') {
     diagnostics.push(
       importDiagnostic({
@@ -56,6 +79,7 @@ const requestDiagnostics = (request: TabularImportRequest): ImportDiagnostic[] =
       }),
     );
   }
+
   return diagnostics;
 };
 
@@ -76,18 +100,24 @@ const importTabularCases = (request: TabularImportRequest): TabularImportResult 
     limits: request.limits,
     recordsPointer: request.recordsPointer,
   });
+
   const diagnostics = [...parsed.diagnostics, ...requestDiagnostics(request)];
+
   // Invalid mappings would misplace every record, so row-level checks would only add noise.
   if (diagnostics.length > parsed.diagnostics.length) failValidation(diagnostics);
 
   const rows: NormalizedImportRow[] = [];
+
   for (const record of parsed.records) {
     const normalized = normalizeRecord(record, request);
     diagnostics.push(...normalized.diagnostics);
+
     if (normalized.row !== undefined) rows.push(normalized.row);
   }
+
   const deduped = dedupeImportRows(rows, request);
   diagnostics.push(...deduped.diagnostics);
+
   if (diagnostics.length > 0) failValidation(diagnostics);
 
   return {

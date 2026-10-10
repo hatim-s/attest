@@ -1,3 +1,5 @@
+type BuildJudgePromptResult = { system: string; user: string };
+
 import { z } from 'zod';
 
 import type { JsonValue, Trace } from '@attest/contracts';
@@ -39,13 +41,14 @@ const formatJsonBlock = (value: JsonValue | undefined): string =>
  * Assembles the deterministic, case-local judge prompt required by metric contract §3.
  * The rubric is included verbatim and no clock or provider state can affect the prompt bytes.
  */
-const buildJudgePrompt = (request: JudgeRequest): { system: string; user: string } => {
+const buildJudgePrompt = (request: JudgeRequest): BuildJudgePromptResult => {
   const system = [
     'You are an impartial evaluator scoring one agent result.',
     'Apply the following rubric exactly as written:',
     request.rubric,
     'Score the result according to the rubric and return only {score, rationale}.',
   ].join('\n\n');
+
   const sections = [
     `Input:\n\`\`\`json\n${formatJsonBlock(request.document.input)}\n\`\`\``,
     `Output:\n\`\`\`json\n${formatJsonBlock(request.document.output)}\n\`\`\``,
@@ -74,6 +77,7 @@ const summarizeTraceForJudge = (trace: Trace | null): string | undefined => {
       const durationMs = Date.parse(span.end_time) - Date.parse(span.start_time);
       // A span name can contain newlines; collapse them so one span always occupies one summary line.
       const name = span.name.replace(/\s+/g, ' ').trim();
+
       return `${span.kind} ${name} ${span.status.code} (${durationMs}ms)`;
     })
     .join('\n');

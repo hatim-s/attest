@@ -30,6 +30,7 @@ const fixtureAgent: AgentResource = {
     argv: ['node', './src/agent.mjs'],
   },
 };
+
 const fixtureMetric: MetricResource = {
   schema: METRIC_RESOURCE_SCHEMA_ID,
   id: 'correct',
@@ -39,11 +40,13 @@ const fixtureMetric: MetricResource = {
     assertions: [{ contains: { path: '$.output', value: 'expected' } }],
   },
 };
+
 const fixtureCase: TestCase = {
   id: 'refund-basic',
   input: { question: 'How do refunds work?' },
   expected: 'expected',
 };
+
 const fixtureDataset: DatasetResource = {
   schema: DATASET_SCHEMA_ID,
   case_schema: CASE_SCHEMA_ID,
@@ -51,6 +54,7 @@ const fixtureDataset: DatasetResource = {
   name: 'Refunds',
   case_count: 1,
 };
+
 const fixtureTest: TestResource = {
   schema: TEST_RESOURCE_SCHEMA_ID,
   id: 'refund',
@@ -70,6 +74,7 @@ const writeFixtureProject = async (root: string): Promise<void> => {
     ['attest/datasets/refunds.jsonl', JSON.stringify(fixtureCase)],
     ['attest/metrics/correct.json', JSON.stringify(fixtureMetric, undefined, 2)],
   ]);
+
   const manifest: ProjectManifest = {
     schema: PROJECT_SCHEMA_ID,
     project_id: '01ARZ3NDEKTSV4RRFFQ69G5FAV',
@@ -111,7 +116,9 @@ const writeFixtureProject = async (root: string): Promise<void> => {
       ],
     },
   };
+
   files.set('attest.project.json', JSON.stringify(manifest, undefined, 2));
+
   for (const [path, contents] of files) {
     const destination = join(root, path);
     await mkdir(dirname(destination), { recursive: true });

@@ -11,14 +11,20 @@ import type { NativeAgentTarget } from '../types.js';
 import type { InvocationAttempt, InvokeOptions } from '../types.js';
 
 const REPOSITORY_ROOT = fileURLToPath(new URL('../../../../', import.meta.url));
+
 const CANONICAL_AGENT_PATH = join(
   REPOSITORY_ROOT,
   'conformance/src/_tests_/fixtures/fake-agents/cli-agent.cjs',
 );
+
 const PRIVATE_FIXTURE_DIRECTORY = fileURLToPath(new URL('./fixtures/', import.meta.url));
+
 const TEST_TIMEOUT_MS = 15_000;
+
 const HEARTBEAT_SETTLE_MS = 700;
+
 const FIXTURE_READINESS_TIMEOUT_MS = 30_000;
+
 const request: AgentRequest = {
   protocol: 'attest.agent-invocation',
   run_id: '01J9ZK7Q2M5X8W4V3T2R1QPN0M',
@@ -43,7 +49,7 @@ const createInlineTarget = (program: string): Extract<NativeAgentTarget, { type:
   command: [process.execPath, '-e', program],
 });
 
-const createEnvironment = (values: Record<string, string> = {}): Record<string, string> => ({
+const createEnvironment = (values: Record<string, string> = {}) => ({
   PATH: process.env.PATH ?? '',
   ...values,
 });
@@ -62,6 +68,7 @@ const requireInvocationError = (
   attempt: InvocationAttempt,
 ): Extract<InvocationAttempt, { status: 'invocation_error' }> => {
   expect(attempt.status).toBe('invocation_error');
+
   if (attempt.status !== 'invocation_error') {
     throw new Error('Expected an invocation error');
   }
@@ -69,13 +76,14 @@ const requireInvocationError = (
   return attempt;
 };
 
-const isMissingProcessError = (error: unknown): boolean => {
-  return error instanceof Error && 'code' in error && error.code === 'ESRCH';
+const isMissingProcessError = (cause: unknown): cause is Error => {
+  return cause instanceof Error && 'code' in cause && cause.code === 'ESRCH';
 };
 
 /** Polls kill(pid, 0) so process cleanup assertions tolerate asynchronous OS reaping. */
-const waitForMissingProcessError = async (processId: number): Promise<unknown> => {
+const waitForMissingProcessError = async (processId: number): Promise<Error> => {
   const deadline = Date.now() + FIXTURE_READINESS_TIMEOUT_MS;
+
   while (Date.now() < deadline) {
     try {
       process.kill(processId, 0);
@@ -93,17 +101,21 @@ const waitForMissingProcessError = async (processId: number): Promise<unknown> =
   try {
     process.kill(processId, 0);
   } catch (error) {
-    return error;
+    if (error instanceof Error) return error;
+    throw error;
   }
+
   throw new Error(`Process ${processId} remained alive after cleanup`);
 };
 
 /** Waits for a hostile fixture to publish its PID before inspecting cleanup behavior. */
 const readHeartbeat = async (heartbeatFile: string): Promise<string> => {
   const deadline = Date.now() + FIXTURE_READINESS_TIMEOUT_MS;
+
   while (Date.now() < deadline) {
     try {
       const contents = await readFile(heartbeatFile, 'utf8');
+
       if (contents.length > 0) {
         return contents;
       }
@@ -128,6 +140,7 @@ const expectHeartbeatStopped = async (heartbeatFile: string): Promise<void> => {
 /** Owns one temporary heartbeat directory so every hostile-process test cleans up its files. */
 const withHeartbeatFile = async (run: (heartbeatFile: string) => Promise<void>): Promise<void> => {
   const directory = await mkdtemp(join(tmpdir(), 'attest-runner-'));
+
   try {
     await run(join(directory, 'heartbeat.log'));
   } finally {
@@ -137,6 +150,7 @@ const withHeartbeatFile = async (run: (heartbeatFile: string) => Promise<void>):
 
 const parseHeartbeatProcessId = (contents: string): number => {
   const match = /^PID (\d+)/.exec(contents);
+
   if (match?.[1] === undefined) {
     throw new Error(`Heartbeat did not start with a PID: ${contents}`);
   }
@@ -146,6 +160,7 @@ const parseHeartbeatProcessId = (contents: string): number => {
 
 const parseStderrProcessId = (stderrExcerpt: string | undefined): number => {
   const match = /PID (\d+)/.exec(stderrExcerpt ?? '');
+
   if (match?.[1] === undefined) {
     throw new Error(`stderr did not contain a PID: ${stderrExcerpt ?? '<empty>'}`);
   }
@@ -158,10 +173,12 @@ describe('invokeCliAgent', { timeout: TEST_TIMEOUT_MS }, () => {
     const attempt = await invokeCliAgent(createCanonicalTarget('happy'), request, createOptions());
 
     expect(attempt.status).toBe('ok');
+
     if (attempt.status === 'ok') {
       expect(attempt.raw).toEqual({ protocol: request.protocol, output: 'ok:cli-fixture' });
       expect(attempt.diagnostics.exitCode).toBe(0);
     }
+
     expect(attempt.durationMs).toBeGreaterThanOrEqual(0);
   });
 
@@ -170,6 +187,7 @@ describe('invokeCliAgent', { timeout: TEST_TIMEOUT_MS }, () => {
     const attempt = await invokeCliAgent(createInlineTarget(program), request, createOptions());
 
     expect(attempt.status).toBe('ok');
+
     if (attempt.status === 'ok') {
       expect(attempt.raw).toMatchObject({ error: { code: 'fixture_failure' } });
     }
@@ -178,6 +196,7 @@ describe('invokeCliAgent', { timeout: TEST_TIMEOUT_MS }, () => {
   it('times out the canonical hanging agent within the grace allowance', async () => {
     const timeoutMs = 100;
     const startedAt = performance.now();
+
     const attempt = requireInvocationError(
       await invokeCliAgent(
         createCanonicalTarget('hang'),
@@ -241,6 +260,7 @@ describe('invokeCliAgent', { timeout: TEST_TIMEOUT_MS }, () => {
       const timeoutMs = 100;
       const terminationGraceMs = 500;
       const startedAt = performance.now();
+
       const attempt = requireInvocationError(
         await invokeCliAgent(
           createPrivateFixtureTarget('ignore-sigterm-agent.cjs'),
@@ -252,6 +272,7 @@ describe('invokeCliAgent', { timeout: TEST_TIMEOUT_MS }, () => {
           }),
         ),
       );
+
       const elapsedMs = performance.now() - startedAt;
       const processId = parseStderrProcessId(attempt.diagnostics.stderrExcerpt);
 
@@ -265,6 +286,7 @@ describe('invokeCliAgent', { timeout: TEST_TIMEOUT_MS }, () => {
 
   it('kills the canonical agent promptly when stdout exceeds the cap', async () => {
     const startedAt = performance.now();
+
     const attempt = requireInvocationError(
       await invokeCliAgent(
         createCanonicalTarget('huge-output'),
@@ -288,6 +310,7 @@ describe('invokeCliAgent', { timeout: TEST_TIMEOUT_MS }, () => {
 
   it('gives caller cancellation precedence when timeout also expires', async () => {
     const abortController = new AbortController();
+
     const invocation = invokeCliAgent(
       createCanonicalTarget('hang'),
       request,
@@ -297,6 +320,7 @@ describe('invokeCliAgent', { timeout: TEST_TIMEOUT_MS }, () => {
         signal: abortController.signal,
       }),
     );
+
     abortController.abort();
 
     const attempt = requireInvocationError(await invocation);
@@ -376,6 +400,7 @@ describe('invokeCliAgent', { timeout: TEST_TIMEOUT_MS }, () => {
       type: 'cli',
       command: [join(PRIVATE_FIXTURE_DIRECTORY, 'missing-agent.cjs')],
     };
+
     const attempt = requireInvocationError(await invokeCliAgent(target, request, createOptions()));
 
     expect(attempt.error.code).toBe('spawn_failed');

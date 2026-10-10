@@ -28,6 +28,7 @@ const justBashIsolation =
     // The portable build avoids Node-only global patching and exposes no host command adapters.
     const { Bash } = await import('just-bash/browser');
     signal.throwIfAborted();
+
     const shell = new Bash({
       files: resolveJustBashFiles(options.files ?? {}),
       env: { ...options.env },
@@ -40,21 +41,27 @@ const justBashIsolation =
         maxFileSystemBytes: options.filesystemBytes ?? 16 * 1024 * 1024,
       },
     });
+
     const lifecycle = createEnvironmentLifecycle({
       signal,
       finalizationTimeoutMs: options.finalizationTimeoutMs ?? options.timeoutMs ?? 60_000,
     });
+
     // just-bash owns mutable interpreter state. Serialize tool calls within a case while allowing
     // separate case environments to execute concurrently.
     const runSerially = createSerialQueue();
+
     const enqueue = <Value>(operation: (admitted: AbortSignal) => Promise<Value>): Promise<Value> =>
       lifecycle.track((admitted) =>
         runSerially(() => {
           admitted.throwIfAborted();
+
           return operation(admitted);
         }),
       );
+
     let disposal: Promise<void> | undefined;
+
     return {
       kind: 'just-bash',
       exec: (script, execution = {}) =>
@@ -70,6 +77,7 @@ const justBashIsolation =
       beginFinalization: lifecycle.beginFinalization,
       dispose: () => {
         disposal ??= lifecycle.close(new Error('Case environment disposed.'));
+
         return disposal;
       },
     };

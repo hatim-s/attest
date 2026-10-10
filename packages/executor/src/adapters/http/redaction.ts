@@ -13,6 +13,7 @@ const secretRepresentations = (secret: string): string[] => {
   const percentEncoded = encodeURIComponent(secret);
   const formEncoded = new URLSearchParams({ value: secret }).toString().slice('value='.length);
   const bytes = Buffer.from(secret, 'utf8');
+
   return [
     secret,
     jsonEscaped,
@@ -35,27 +36,33 @@ const redactTransportText = (value: string, secrets: readonly string[]): string 
     .sort((left, right) => right.length - left.length)
     .reduce((redacted, secret) => redacted.replaceAll(secret, REDACTED), value);
 
+/** BOUNDARY: checks own fields in a foreign event before replacing sensitive values. */
 const isContainer = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === 'object';
 
-/** Replaces authored sensitive event fields before an event becomes persisted evidence. */
+/** BOUNDARY: accepts foreign event JSON and replaces sensitive own fields before persistence. */
 const redactEventEvidence = (
   value: unknown,
   pointers: readonly string[],
   secrets: readonly string[],
 ): string => {
   const redacted = structuredClone(value);
+
   for (const pointer of pointers) {
     const segments = splitJsonPointer(pointer);
     const leaf = segments.pop();
+
     // The root pointer names the whole event, so the entire evidence entry becomes the marker.
     if (leaf === undefined) return REDACTED;
     let parent: unknown = redacted;
+
     for (const segment of segments) {
       parent = isContainer(parent) && Object.hasOwn(parent, segment) ? parent[segment] : undefined;
     }
+
     if (isContainer(parent) && Object.hasOwn(parent, leaf)) parent[leaf] = REDACTED;
   }
+
   return redactTransportText(JSON.stringify(redacted), secrets);
 };
 

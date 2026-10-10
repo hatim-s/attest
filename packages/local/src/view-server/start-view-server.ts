@@ -22,15 +22,20 @@ const startViewServer = async (options: StartViewServerOptions): Promise<ViewSer
   let server: ServerType | undefined;
   let closePromise: Promise<void> | undefined;
   let storeClosePromise: Promise<void> | undefined;
+
   const closeStore = (): Promise<void> => {
     storeClosePromise ??= store.close();
+
     return storeClosePromise;
   };
+
   const closeHandle = (): Promise<void> => {
     if (server === undefined) return Promise.resolve();
     closePromise ??= closeServer(server).then(closeStore);
+
     return closePromise;
   };
+
   const app = createViewApp({
     allowedOrigin: () => origin,
     indexHtml: options.indexHtml,
@@ -55,6 +60,7 @@ const startViewServer = async (options: StartViewServerOptions): Promise<ViewSer
           resolve(candidate);
         },
       );
+
       candidate.once('error', reject);
     });
   } catch (error: unknown) {
@@ -70,10 +76,12 @@ const startViewServer = async (options: StartViewServerOptions): Promise<ViewSer
   });
 
   const resolvedOrigin = origin;
+
   if (resolvedOrigin === undefined) {
     await closeHandle();
     throw new Error('View server started without a resolved loopback origin.');
   }
+
   return {
     close: closeHandle,
     closed,

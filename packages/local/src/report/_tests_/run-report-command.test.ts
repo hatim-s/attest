@@ -15,12 +15,14 @@ const directories: string[] = [];
 const createRunFixture = async (directory: string): Promise<string> => {
   await mkdir(join(directory, '.attest'), { recursive: true });
   const store = await openStore(join(directory, '.attest', 'runs.db'));
+
   try {
     const run = await store.runs.createRun({
       schemaId: 'attest.project',
       configHash: 'sha256:test',
       configJson: '{}',
     });
+
     await store.runs.recordCase(
       run.id,
       {
@@ -44,6 +46,7 @@ const createRunFixture = async (directory: string): Promise<string> => {
       [{ kind: 'assertion', metricName: 'safe', pass: true, score: 1, status: 'evaluated' }],
     );
     await store.runs.finalizeRun(run.id, 'completed');
+
     return run.id;
   } finally {
     await store.close();
@@ -68,6 +71,7 @@ describe('runReportCommand', () => {
       runId,
       workingDirectory: directory,
     });
+
     const html = await readFile(result.outputPath, 'utf8');
 
     expect(result).toMatchObject({ caseCount: 1, totalCaseCount: 1, truncated: false });

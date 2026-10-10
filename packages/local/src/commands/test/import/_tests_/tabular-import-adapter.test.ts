@@ -23,8 +23,10 @@ const importFailure = async (options: {
     readImportStdin: options.readImportStdin ?? noStdin,
     source: options.source,
     workingDirectory: tmpdir(),
-  }).catch((caught: unknown) => caught);
+  }).catch((cause: unknown) => cause);
+
   if (!(error instanceof LocalError)) throw new Error('Expected a LocalError.');
+
   return error;
 };
 
@@ -33,6 +35,7 @@ const writeSource = async (name: string, contents: string): Promise<string> => {
   onTestFinished(() => rm(directory, { force: true, recursive: true }));
   const path = join(directory, name);
   await writeFile(path, contents);
+
   return path;
 };
 
@@ -47,6 +50,7 @@ describe('runTabularImportAdapter', () => {
         '{"expected":"missing-input"}',
       ].join('\n'),
     );
+
     const jsonl = await importFailure({ source: jsonlSource });
     expect(jsonl.code).toBe('project_invalid');
     expect(jsonl.details).toMatchObject({
@@ -63,6 +67,7 @@ describe('runTabularImportAdapter', () => {
       'cases.json',
       JSON.stringify([{ input: 'ok', extra: true }, { expected: 'missing-input' }]),
     );
+
     const json = await importFailure({ source: jsonSource });
     expect(json.details).toMatchObject({ diagnostics: [{ row: 1 }, { row: 2 }] });
   });
@@ -76,9 +81,11 @@ describe('runTabularImportAdapter', () => {
       },
       source: '-',
     });
+
     expect(invalid.details).toMatchObject({ diagnostics: [{ code: 'invalid_utf8' }] });
 
     let consumedPastLimit = false;
+
     const oversized = await importFailure({
       importOptions: { format: 'jsonl' },
       readImportStdin: async function* readOversizedStdin() {
@@ -90,6 +97,7 @@ describe('runTabularImportAdapter', () => {
       },
       source: '-',
     });
+
     expect(oversized.details).toMatchObject({ diagnostics: [{ code: 'import_size_limit' }] });
     expect(consumedPastLimit).toBe(false);
   });
@@ -98,6 +106,7 @@ describe('runTabularImportAdapter', () => {
 describe('collectBoundedImportSource', () => {
   it('stops reading before consuming bytes beyond the hard cap', async () => {
     let consumedPastLimit = false;
+
     const chunks = async function* sourceChunks(): AsyncGenerator<Uint8Array> {
       await Promise.resolve();
       yield new Uint8Array([1, 2]);

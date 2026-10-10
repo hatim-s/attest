@@ -3,6 +3,7 @@ import type { RunDiff } from '@attest/core';
 /** Renders transition totals and pass-rate movement for human CLI diff output. */
 const renderDiffSummary = (diff: RunDiff): string => {
   const { summary } = diff;
+
   return [
     `Diff ${summary.baseRunId} → ${summary.candidateRunId}`,
     `  pass rate: ${(summary.basePassRate * 100).toFixed(1)}% → ${(summary.candidatePassRate * 100).toFixed(1)}%`,

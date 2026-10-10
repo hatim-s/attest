@@ -1,10 +1,16 @@
+import { testCaseSchema } from '@attest/contracts';
+import { z } from 'zod';
 import { readFileSync } from 'node:fs';
 
 import type { DatasetImportMapping, TestCase } from '@attest/contracts';
 import { describe, expect, it } from 'vitest';
 
 import { createContentCaseId, createKeyedCaseId } from '../canonical-import.js';
-import { TabularImportError, type ImportDiagnostic } from '../import-types.js';
+import {
+  TabularImportError,
+  type ImportDiagnostic,
+  type TabularImportRequest,
+} from '../import-types.js';
 import { importTabularCases } from '../tabular-import.js';
 
 const fixture = (name: string): Uint8Array =>
@@ -12,6 +18,7 @@ const fixture = (name: string): Uint8Array =>
 
 const mappings = (format: 'csv' | 'json' | 'jsonl'): DatasetImportMapping[] => {
   const source = (field: string): string => (format === 'csv' ? field : `/${field}`);
+
   return [
     { destination: 'id', source: source('external_id') },
     { destination: 'input.question', source: source('prompt') },
@@ -21,32 +28,38 @@ const mappings = (format: 'csv' | 'json' | 'jsonl'): DatasetImportMapping[] => {
   ];
 };
 
-const diagnosticsFrom = (callback: () => unknown): readonly ImportDiagnostic[] => {
+const diagnosticsFrom = (callback: () => void): readonly ImportDiagnostic[] => {
   try {
     callback();
   } catch (error: unknown) {
     if (error instanceof TabularImportError) return error.diagnostics;
     throw error;
   }
+
   throw new Error('Expected tabular import to fail.');
 };
 
 describe('tabular import golden formats', () => {
-  const expected = JSON.parse(
-    new TextDecoder().decode(fixture('mapped.golden.json')),
-  ) as TestCase[];
+  const expected = z
+    .array(testCaseSchema)
+    .parse(JSON.parse(new TextDecoder().decode(fixture('mapped.golden.json'))));
 
   it.each([
     ['csv', 'mapped.csv'],
     ['json', 'mapped.json'],
     ['jsonl', 'mapped.jsonl'],
   ] as const)('maps the complete %s fixture to one canonical case shape', (format, name) => {
+    const options: Pick<TabularImportRequest, 'parseJsonSources' | 'recordsPointer'> = {};
+
+    if (format === 'csv') options.parseJsonSources = ['tags'];
+
+    if (format === 'json') options.recordsPointer = '/payload/rows';
+
     const result = importTabularCases({
       format,
       mappings: mappings(format),
-      ...(format === 'csv' ? { parseJsonSources: ['tags'] } : {}),
-      ...(format === 'json' ? { recordsPointer: '/payload/rows' } : {}),
       source: fixture(name),
+      ...options,
     });
 
     expect(result.cases).toEqual(expected);
@@ -80,10 +93,12 @@ describe('tabular import validation and identity', () => {
 
   it('keeps unkeyed ids move-stable and excludes tags and metric overrides', () => {
     const logical = { input: { prompt: 'same' }, expected: 1, params: { locale: 'en' } };
+
     const first = importTabularCases({
       format: 'json',
       source: JSON.stringify([{ ...logical, tags: ['one'] }]),
     });
+
     const second = importTabularCases({
       format: 'jsonl',
       source: `${JSON.stringify({
@@ -108,6 +123,7 @@ describe('tabular import validation and identity', () => {
       ],
       source: '[{"question":"where","context":"billing"}]',
     });
+
     expect(mapped.cases[0]?.input).toEqual({ question: 'where', context: 'billing' });
 
     const diagnostics = diagnosticsFrom(() =>
@@ -117,6 +133,7 @@ describe('tabular import validation and identity', () => {
         source: '[{"value":true}]',
       }),
     );
+
     expect(diagnostics).toContainEqual(
       expect.objectContaining({ code: 'mapping_destination_unsafe' }),
     );
@@ -128,6 +145,7 @@ describe('tabular import validation and identity', () => {
       { id: 'first', input: 'same' },
       { id: 'second', input: 'same' },
     ]);
+
     expect(diagnosticsFrom(() => importTabularCases({ format: 'json', source }))).toMatchObject([
       { code: 'duplicate_content', row: 2 },
     ]);
@@ -159,6 +177,7 @@ describe('tabular import validation and identity', () => {
           source,
         }),
       );
+
     expect(csvDiagnostics('prompt,prompt\na,b,c\n').map(({ code }) => code)).toEqual([
       'duplicate_csv_header',
       'csv_column_count',
@@ -174,6 +193,7 @@ describe('tabular import validation and identity', () => {
         source: 'parameters,secret\nnot-an-array,private-prompt\n',
       }),
     );
+
     expect(diagnostics).toContainEqual(
       expect.objectContaining({ destination_path: '/tags', row: 2, source_field: 'parameters' }),
     );
@@ -202,6 +222,7 @@ describe('tabular import reconciliation policies', () => {
       onConflict: 'skip',
       source,
     });
+
     expect(skipped.cases).toEqual(existing);
     expect(skipped.counts.skipped).toBe(1);
 
@@ -211,6 +232,7 @@ describe('tabular import reconciliation policies', () => {
       onConflict: 'update',
       source,
     });
+
     expect(updated.cases).toEqual([
       { id: 'keep-first', input: 'new' },
       { id: 'absent-source', input: 'preserved' },
@@ -223,6 +245,7 @@ describe('tabular import reconciliation policies', () => {
       format: 'jsonl',
       source: '{"id":"first","input":"same"}\n{"id":"second","input":"same"}\n',
     });
+
     expect(deduped.decisions).toContainEqual({
       action: 'skip',
       case_id: 'first',
@@ -241,6 +264,7 @@ describe('tabular import reconciliation policies', () => {
       onConflict: 'update',
       source: '[{"id":"same","external":"unrelated","input":"new"}]',
     });
+
     expect(updated.decisions).toContainEqual({
       action: 'update',
       case_id: 'same',
@@ -251,11 +275,13 @@ describe('tabular import reconciliation policies', () => {
 
   it('applies collision contexts only when imported tags satisfy the target attachment filter', () => {
     const collisionCases = [{ id: 'collision-id', input: 'direct' }];
+
     const allowed = importTabularCases({
       collisionContexts: [{ cases: collisionCases, requiredTags: ['billing'] }],
       format: 'json',
       source: '[{"id":"collision-id","input":"dataset","tags":["support"]}]',
     });
+
     expect(allowed.counts.inserted).toBe(1);
     expect(
       diagnosticsFrom(() =>
@@ -270,12 +296,14 @@ describe('tabular import reconciliation policies', () => {
 
   it('uses an explicit source key for stable upserts and never deletes absent rows', () => {
     const mapping: DatasetImportMapping[] = [{ destination: 'input', source: '/prompt' }];
+
     const first = importTabularCases({
       format: 'json',
       keySource: '/external_id',
       mappings: mapping,
       source: '[{"external_id":"one","prompt":"old"}]',
     });
+
     const stableId = createKeyedCaseId('one');
     expect(first.cases[0]!.id).toBe(stableId);
 
@@ -287,6 +315,7 @@ describe('tabular import reconciliation policies', () => {
       source: '[{"external_id":"one","prompt":"new"},{"external_id":"two","prompt":"added"}]',
       sync: 'upsert',
     });
+
     expect(upserted.cases).toEqual([
       { id: stableId, input: 'new' },
       { id: 'absent-source', input: 'preserved' },

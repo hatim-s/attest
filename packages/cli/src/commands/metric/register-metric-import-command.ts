@@ -1,3 +1,4 @@
+import type { CommandRequest } from '@attest/contracts';
 import { Option, type Command } from 'commander';
 
 import { setMutationHelp } from '../../help/command-help.js';
@@ -26,29 +27,39 @@ const registerMetricImportCommand = (metric: Command, context: CommandContext): 
     .action(async (source: string | undefined, options: ImportOptions, leaf: Command) => {
       const interactive = isInteractive(options, context.interaction, options.fromJson);
       const prompt = { interactive, prompt: context.interaction.prompt };
+
       const request = await readOrBuildRequest({
         command: 'metric.import',
         context,
         leaf,
         options,
-        build: async () => ({
-          ...mutationRequestFields('metric.import', options),
-          source: await requiredInput(
-            source,
-            { path: '<path|->', question: 'Metric JSON path or -: ' },
-            prompt,
-          ),
-          source_type: 'json',
-          as: await requiredInput(
-            options.as,
-            { path: '--as', question: 'Imported metric id: ' },
-            prompt,
-          ),
-          ...(options.name === undefined ? {} : { name: options.name }),
-        }),
+        build: async () => {
+          const request: Extract<CommandRequest, { command: 'metric.import' }> = {
+            ...mutationRequestFields('metric.import', options),
+            source: await requiredInput(
+              source,
+              { path: '<path|->', question: 'Metric JSON path or -: ' },
+              prompt,
+            ),
+            source_type: 'json',
+            as: await requiredInput(
+              options.as,
+              { path: '--as', question: 'Imported metric id: ' },
+              prompt,
+            ),
+          };
+
+          if (options.name !== undefined) {
+            request.name = options.name;
+          }
+
+          return request;
+        },
       });
+
       await runMetricMutation(request, options, interactive, context);
     });
+
   setMutationHelp(importCommand, {
     examples: [
       'attest metric import ./metric.json --type json --as correct',

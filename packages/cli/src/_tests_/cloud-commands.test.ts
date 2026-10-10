@@ -1,23 +1,59 @@
+import type * as CloudAdapter from '@attest/local/cloud';
 import { cliResultSchema } from '@attest/contracts';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { runCommand } from './support/cli-test-support.js';
+import { runCommand as executeCommand } from './support/cli-test-support.js';
 
-const cloud = vi.hoisted(() => ({
-  push: vi.fn().mockResolvedValue({ revision_id: 'rev' }),
-  run: vi.fn().mockResolvedValue({ run: { id: 'run' } }),
-}));
-vi.mock('@attest/local/cloud', async (importOriginal) => {
-  const original = await importOriginal<typeof import('@attest/local/cloud')>();
-  return {
-    ...original,
-    authenticatedCloudClient: vi.fn().mockResolvedValue({ baseUrl: 'https://cloud.example.test' }),
-    resolveCloudProject: vi
-      .fn()
-      .mockResolvedValue({ projectId: 'project', revisionId: 'revision' }),
+const cloud = {
+  push: vi.fn<typeof CloudAdapter.pushCloudProject>().mockResolvedValue({
+    project_id: 'project',
+    revision_id: 'rev',
+    file_count: 0,
+  }),
+  run: vi.fn<typeof CloudAdapter.runCloud>().mockResolvedValue({
+    run: {
+      id: 'run',
+      project_id: 'project',
+      revision_id: 'revision',
+      status: 'queued',
+      created_at: '2026-08-08T10:00:00.000Z',
+      started_at: null,
+      finished_at: null,
+      cancel_requested: false,
+      raw_expires_at: null,
+      error_code: null,
+    },
+  }),
+};
+
+const services = {
+  cloud: {
+    authenticatedCloudClient: () =>
+      Promise.resolve({
+        baseUrl: 'https://cloud.example.test',
+        request: () =>
+          Promise.reject(new Error('This command fixture should not send HTTP requests.')),
+      }),
+    resolveCloudProject: () =>
+      Promise.resolve({
+        root: process.cwd(),
+        projectId: 'project',
+        revisionId: 'revision',
+        link: {
+          schema: 'attest.cloud-link.v1' as const,
+          base_url: 'https://cloud.example.test',
+          project_id: 'project',
+          revision_id: 'revision',
+          file_hashes: {},
+        },
+      }),
     pushCloudProject: cloud.push,
     runCloud: cloud.run,
-  };
-});
+  },
+};
+
+const runCommand = (...[root, argv, options]: Parameters<typeof executeCommand>) =>
+  executeCommand(root, argv, { ...options, services });
+
 beforeEach(() => {
   cloud.push.mockClear();
   cloud.run.mockClear();
@@ -28,6 +64,7 @@ describe('cloud command translation', () => {
     const implicit = await runCommand(process.cwd(), ['cloud', 'push', '--output', 'json']);
     expect(implicit.exitCode).toBe(0);
     expect(cloud.push.mock.calls[0]?.[0]).toMatchObject({ acknowledgeNoSecrets: false });
+
     const explicit = await runCommand(process.cwd(), [
       'cloud',
       'push',
@@ -35,6 +72,7 @@ describe('cloud command translation', () => {
       '--output',
       'json',
     ]);
+
     expect(explicit.exitCode).toBe(0);
     expect(cloud.push.mock.calls[1]?.[0]).toMatchObject({ acknowledgeNoSecrets: true });
   });
@@ -57,6 +95,7 @@ describe('cloud command translation', () => {
       '--output',
       'json',
     ]);
+
     expect(result.exitCode).toBe(0);
     expect(cloud.run.mock.calls[0]?.[0]).toMatchObject({
       projectId: 'project',
@@ -77,6 +116,7 @@ describe('cloud command translation', () => {
       result: { idempotency_key: 'retry-key', run: { id: 'run' } },
     });
     expect(result.errors).toEqual(['Cloud submission retry key: retry-key']);
+
     const conflict = await runCommand(process.cwd(), [
       'cloud',
       'run',
@@ -85,6 +125,7 @@ describe('cloud command translation', () => {
       '--output',
       'json',
     ]);
+
     expect(conflict.exitCode).toBe(2);
     expect(cloud.run).toHaveBeenCalledTimes(1);
   });

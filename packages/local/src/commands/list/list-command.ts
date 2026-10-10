@@ -14,28 +14,43 @@ type ListCommandOptions = {
 };
 
 /** Removes the persisted config document from generic run inspection output. */
-const toSafeRunSummary = (run: RunRecord) => ({
-  id: run.id,
-  createdAt: run.createdAt,
-  status: run.status,
-  schemaId: run.schemaId,
-  configHash: run.configHash,
-  ...(run.finishedAt === undefined ? {} : { finishedAt: run.finishedAt }),
-  ...(run.gitSha === undefined ? {} : { gitSha: run.gitSha }),
-  ...(run.gitBranch === undefined ? {} : { gitBranch: run.gitBranch }),
-  ...(run.labels === undefined ? {} : { labels: run.labels }),
-  ...(run.summary === undefined
-    ? {}
-    : {
-        summary: {
-          totalCases: run.summary.totalCases,
-          passedCases: run.summary.passedCases,
-          failedCases: run.summary.failedCases,
-          errorCases: run.summary.errorCases,
-          metricErrorCount: run.summary.metricErrorCount,
-        },
-      }),
-});
+const toSafeRunSummary = (run: RunRecord): RunListItem => {
+  const assembledFields: RunListItem = {
+    id: run.id,
+    createdAt: run.createdAt,
+    status: run.status,
+    schemaId: run.schemaId,
+    configHash: run.configHash,
+  };
+
+  if (run.finishedAt !== undefined) {
+    assembledFields.finishedAt = run.finishedAt;
+  }
+
+  if (run.gitSha !== undefined) {
+    assembledFields.gitSha = run.gitSha;
+  }
+
+  if (run.gitBranch !== undefined) {
+    assembledFields.gitBranch = run.gitBranch;
+  }
+
+  if (run.labels !== undefined) {
+    assembledFields.labels = run.labels;
+  }
+
+  if (run.summary !== undefined) {
+    assembledFields.summary = {
+      totalCases: run.summary.totalCases,
+      passedCases: run.summary.passedCases,
+      failedCases: run.summary.failedCases,
+      errorCases: run.summary.errorCases,
+      metricErrorCount: run.summary.metricErrorCount,
+    };
+  }
+
+  return assembledFields;
+};
 
 const listRuns = async (project: LoadedProject): Promise<RunListItem[]> => {
   return (
@@ -52,6 +67,7 @@ const listResourceSummaries = async (
   if (resourceType === 'runs') {
     return { resource_type: 'runs', items: await listRuns(project) };
   }
+
   if (resourceType === 'agents') {
     return {
       resource_type: 'agents',
@@ -63,6 +79,7 @@ const listResourceSummaries = async (
       })),
     };
   }
+
   if (resourceType === 'tests') {
     return {
       resource_type: 'tests',
@@ -77,6 +94,7 @@ const listResourceSummaries = async (
       })),
     };
   }
+
   if (resourceType === 'datasets') {
     return {
       resource_type: 'datasets',
@@ -88,6 +106,7 @@ const listResourceSummaries = async (
       })),
     };
   }
+
   return {
     resource_type: 'metrics',
     items: project.metrics.map(({ definition, id, name, schema }) => ({
@@ -107,7 +126,9 @@ const runListCommand = async (
     project: options.project,
     workingDirectory: options.workingDirectory,
   });
+
   const result = await listResourceSummaries(project, options.resourceType);
+
   return {
     operation: 'list',
     projectHashBefore: project.projectHash,

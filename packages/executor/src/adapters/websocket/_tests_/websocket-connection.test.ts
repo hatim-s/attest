@@ -45,6 +45,7 @@ class ControlledSocket extends Duplex {
 /** Encodes a small unmasked server frame for parser boundary tests. */
 const serverFrame = (opcode: number, final: boolean, text: string): Buffer => {
   const payload = Buffer.from(text, 'utf8');
+
   return Buffer.concat([Buffer.from([(final ? 0x80 : 0) | opcode, payload.byteLength]), payload]);
 };
 
@@ -121,6 +122,7 @@ describe('WebSocket connection bounds', () => {
 
   it('serializes writes and interrupts drain waits on cancellation and close', async () => {
     const serializedSocket = new ControlledSocket();
+
     const connection = new WebSocketConnection({
       socket: serializedSocket,
       maximumMessageBytes: 1_024,
@@ -128,6 +130,7 @@ describe('WebSocket connection bounds', () => {
       initialData: Buffer.alloc(0),
       maximumPendingWriteBytes: 1_024,
     });
+
     const first = connection.sendText('a'.repeat(64));
     const second = connection.sendText('b'.repeat(32));
     await advance();
@@ -141,6 +144,7 @@ describe('WebSocket connection bounds', () => {
     connection.destroy();
 
     const cancellationSocket = new ControlledSocket();
+
     const cancellable = new WebSocketConnection({
       socket: cancellationSocket,
       maximumMessageBytes: 1_024,
@@ -148,6 +152,7 @@ describe('WebSocket connection bounds', () => {
       initialData: Buffer.alloc(0),
       maximumPendingWriteBytes: 1_024,
     });
+
     const controller = new AbortController();
     const cancelledWrite = cancellable.sendText('c'.repeat(64), controller.signal);
     await advance();
@@ -157,6 +162,7 @@ describe('WebSocket connection bounds', () => {
     cancellable.destroy();
 
     const closingSocket = new ControlledSocket();
+
     const closing = new WebSocketConnection({
       socket: closingSocket,
       maximumMessageBytes: 1_024,
@@ -164,6 +170,7 @@ describe('WebSocket connection bounds', () => {
       initialData: Buffer.alloc(0),
       maximumPendingWriteBytes: 1_024,
     });
+
     const interruptedWrite = closing.sendText('d'.repeat(64));
     await advance();
     const close = closing.close(10);

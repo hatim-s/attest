@@ -8,16 +8,19 @@ const abortableWait = async (
   abortError: () => Error,
 ): Promise<void> => {
   if (signal?.aborted === true) throw abortError();
+
   if (delayMs <= 0) return;
   await new Promise<void>((resolve, reject) => {
     const abort = (): void => {
       clearTimeout(timer);
       reject(abortError());
     };
+
     const timer = setTimeout(() => {
       signal?.removeEventListener('abort', abort);
       resolve();
     }, delayMs);
+
     signal?.addEventListener('abort', abort, { once: true });
   });
 };

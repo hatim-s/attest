@@ -9,34 +9,37 @@ const computeCaseVerdict = (record: CaseRecord): CaseVerdict => {
 
   const metrics = new Map(record.metrics.map((metric) => [metric.metricName, metric]));
   let failed = false;
+
   for (const metricName of record.expectedMetrics) {
     const metric = metrics.get(metricName);
+
     if (metric?.status !== 'evaluated') return 'error';
     failed ||= !metric.pass;
   }
+
   return failed ? 'fail' : 'pass';
 };
 
 /** Averages evaluated scores; errored metrics have no score and are left out. */
 const averageMetricScore = (metrics: readonly StoredMetricEvaluation[]): number | undefined => {
-  const scores = metrics
-    .filter((metric) => metric.status === 'evaluated')
-    .map((metric) => metric.score);
+  const scores = metrics.flatMap((metric) => (metric.status === 'evaluated' ? [metric.score] : []));
+
   if (scores.length === 0) return undefined;
+
   return scores.reduce((total, score) => total + score, 0) / scores.length;
 };
 
 /** Projects one full stored case into the blob-free list and report shape. */
 const summarizeCaseRecord = (record: CaseRecord): CaseSummary => {
   const score = averageMetricScore(record.metrics);
-  return {
+
+  const summary: CaseSummary = {
     caseId: record.caseId,
     suiteName: record.suiteName,
     outcome: record.outcome,
     verdict: computeCaseVerdict(record),
     startedAt: record.startedAt,
     durationMs: record.durationMs,
-    ...(score === undefined ? {} : { score }),
     metricCounts: {
       expected: record.expectedMetrics.length,
       evaluated: record.metrics.filter(({ status }) => status === 'evaluated').length,
@@ -45,6 +48,10 @@ const summarizeCaseRecord = (record: CaseRecord): CaseSummary => {
       errors: record.metrics.filter(({ status }) => status === 'error').length,
     },
   };
+
+  if (score !== undefined) summary.score = score;
+
+  return summary;
 };
 
 export { computeCaseVerdict, summarizeCaseRecord };

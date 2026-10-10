@@ -43,10 +43,12 @@ const promptingTerminal = (answer: (question: string) => string) => ({
 describe('CLI test, case, dataset, and import authoring', { timeout: 20_000 }, () => {
   it('supports canonical test and direct-case happy paths', async () => {
     const root = await createFixtureProject();
+
     const commands = [
       ['test', 'add', 'smoke', '--agent', 'support'],
       ['test', 'case', 'add', 'smoke', '--id', 'ping', '--input', '{"question":"ping"}'],
     ];
+
     for (const argv of commands) expect((await runJson(root, argv)).exitCode).toBe(0);
 
     expect((await runJson(root, ['test', 'case', 'list', 'smoke'])).document).toMatchObject({
@@ -64,6 +66,7 @@ describe('CLI test, case, dataset, and import authoring', { timeout: 20_000 }, (
       ['test', 'case', 'remove', 'smoke-renamed', 'pong', '--yes'],
       ['test', 'remove', 'smoke-renamed', '--yes'],
     ];
+
     for (const argv of renames) expect((await runJson(root, argv)).exitCode).toBe(0);
     expect((await loadProject({ project: root })).tests.map(({ id }) => id)).toEqual(['refund']);
   });
@@ -77,6 +80,7 @@ describe('CLI test, case, dataset, and import authoring', { timeout: 20_000 }, (
 
     const requestPath = join(root, 'request.json');
     await writeFile(requestPath, JSON.stringify(addTestRequest('from-json')));
+
     const overlap = await runJson(root, [
       'test',
       'add',
@@ -86,6 +90,7 @@ describe('CLI test, case, dataset, and import authoring', { timeout: 20_000 }, (
       '--from-json',
       requestPath,
     ]);
+
     expect(overlap).toMatchObject({
       exitCode: 2,
       document: {
@@ -98,6 +103,7 @@ describe('CLI test, case, dataset, and import authoring', { timeout: 20_000 }, (
   it('publishes machine help for the tabular import surface', async () => {
     const root = await createFixtureProject();
     const help = await runJson(root, ['help', 'test', 'case', 'import']);
+
     if (!help.document.ok) throw new Error('Expected structured import help.');
     const { command } = cliHelpSchema.parse(help.document.result);
     expect(command.path).toEqual(['test', 'case', 'import']);
@@ -134,6 +140,7 @@ describe('CLI test, case, dataset, and import authoring', { timeout: 20_000 }, (
     await runJson(root, ['test', 'add', 'mapped', '--agent', 'support']);
     const source = join(root, 'mapped.csv');
     await writeFile(source, 'external_id,prompt,tags\none,hello,"[""smoke""]"\n');
+
     const argv = [
       'test',
       'case',
@@ -152,6 +159,7 @@ describe('CLI test, case, dataset, and import authoring', { timeout: 20_000 }, (
       'upsert',
       '--dry-run',
     ];
+
     const before = await snapshotTree(root);
 
     const json = await runJson(root, argv);
@@ -174,6 +182,7 @@ describe('CLI test, case, dataset, and import authoring', { timeout: 20_000 }, (
 
   it('supports global common flags before the namespace with structured errors', async () => {
     const root = await createFixtureProject();
+
     const listed = await runCommand(root, [
       '--output',
       'json',
@@ -181,6 +190,7 @@ describe('CLI test, case, dataset, and import authoring', { timeout: 20_000 }, (
       'test',
       'list',
     ]);
+
     expect(listed.exitCode).toBe(0);
     expect(listed.errors).toEqual([]);
     expect(cliResultSchema.parse(JSON.parse(listed.output[0] ?? ''))).toMatchObject({
@@ -196,6 +206,7 @@ describe('CLI test, case, dataset, and import authoring', { timeout: 20_000 }, (
       'refund',
       'absent',
     ]);
+
     expect(missing.exitCode).toBe(1);
     expect(cliResultSchema.parse(JSON.parse(missing.output[0] ?? ''))).toMatchObject({
       ok: false,
@@ -216,6 +227,7 @@ describe('CLI test, case, dataset, and import authoring', { timeout: 20_000 }, (
     const declined = await runCommand(root, ['test', 'remove', 'refund'], {
       interaction: promptingTerminal(() => 'n'),
     });
+
     expect(declined).toMatchObject({
       exitCode: 0,
       errors: [],
@@ -227,12 +239,15 @@ describe('CLI test, case, dataset, and import authoring', { timeout: 20_000 }, (
   it('reports attached dataset blockers before prompting with exact detach commands', async () => {
     const root = await createFixtureProject();
     let promptCount = 0;
+
     const removed = await runCommand(root, ['test', 'dataset', 'remove', 'refunds'], {
       interaction: promptingTerminal(() => {
         promptCount += 1;
+
         return 'yes';
       }),
     });
+
     expect(removed.exitCode).toBe(1);
     expect(promptCount).toBe(0);
     expect(removed.errors.join('\n')).toContain('attest test dataset detach refund refunds');
@@ -246,11 +261,13 @@ describe('CLI test, case, dataset, and import authoring', { timeout: 20_000 }, (
     ).toMatchObject({ ok: true, command: 'test.add' });
 
     const cases = '{"input":"one"}\n{"input":"two"}\n';
+
     const stdinImport = await runJson(
       root,
       ['test', 'case', 'import', 'stdin-test', '-', '--format', 'jsonl'],
       { stdin: cases },
     );
+
     expect(stdinImport.document).toMatchObject({ ok: true, result: { imported_case_count: 2 } });
 
     const path = join(root, 'mapped-request.json');
@@ -264,9 +281,11 @@ describe('CLI test, case, dataset, and import authoring', { timeout: 20_000 }, (
         import: { format: 'csv', mapping: [{ destination: 'input', source: 'prompt' }] },
       }),
     );
+
     const imported = await runJson(root, ['test', 'case', 'import', '--from-json', path], {
       stdin: 'prompt\nmapped\n',
     });
+
     expect(imported).toMatchObject({
       exitCode: 0,
       document: {
@@ -283,6 +302,7 @@ describe('CLI test, case, dataset, and import authoring', { timeout: 20_000 }, (
     const root = await createFixtureProject();
     const source = join(root, 'invalid-private.csv');
     await writeFile(source, 'parameters,secret\nnot-an-array,private-prompt\n');
+
     const imported = await runCommand(root, [
       'test',
       'case',
@@ -292,6 +312,7 @@ describe('CLI test, case, dataset, and import authoring', { timeout: 20_000 }, (
       '--map',
       'tags=parameters',
     ]);
+
     expect(imported.exitCode).toBe(1);
     const rendered = imported.errors.join('\n');
     expect(rendered).toContain('row 2, source parameters, destination /tags');
@@ -309,22 +330,26 @@ describe('CLI test, case, dataset, and import authoring', { timeout: 20_000 }, (
     const declined = await runCommand(root, ['test', 'case', 'import', 'guided', source], {
       interaction: promptingTerminal(() => ''),
     });
+
     expect(declined.exitCode).toBe(0);
     expect(declined.output.join('\n')).toContain('Redacted normalized preview');
     expect(declined.output).toContain('No changes made; import was not applied.');
     expect(await snapshotTree(root)).toEqual(before);
 
     let promptCount = 0;
+
     const accepted = await runCommand(
       root,
       ['test', 'case', 'import', 'guided', source, '--map', 'input=prompt', '--yes'],
       {
         interaction: promptingTerminal(() => {
           promptCount += 1;
+
           return 'no';
         }),
       },
     );
+
     expect(accepted.exitCode).toBe(0);
     expect(promptCount).toBe(0);
     const guided = (await loadProject({ project: root })).tests.find(({ id }) => id === 'guided');
@@ -333,12 +358,14 @@ describe('CLI test, case, dataset, and import authoring', { timeout: 20_000 }, (
 
   it('prints the shared dataset preview with a confirmed shared update', async () => {
     const root = await createFixtureProject();
+
     const setup = [
       ['test', 'add', 'shared-owner', '--agent', 'support'],
       ['test', 'add', 'shared-reader', '--agent', 'support'],
       ['test', 'dataset', 'add', 'shared-owner', 'shared'],
       ['test', 'dataset', 'attach', 'shared-reader', 'shared'],
     ];
+
     for (const argv of setup) expect((await runJson(root, argv)).exitCode).toBe(0);
     const source = join(root, 'shared.jsonl');
     await writeFile(source, '{"id":"shared-case","input":"value"}\n');
@@ -355,6 +382,7 @@ describe('CLI test, case, dataset, and import authoring', { timeout: 20_000 }, (
       'upsert',
       '--yes',
     ]);
+
     expect(confirmed.exitCode).toBe(0);
     const human = confirmed.output.join('\n');
     expect(human).toContain('Shared dataset update preview:');

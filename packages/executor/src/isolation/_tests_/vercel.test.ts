@@ -13,9 +13,11 @@ const asFactory = (sdk: VercelSandboxSdk): VercelSandboxFactory =>
 describe('Vercel case isolation', () => {
   it('keeps relative files available through finalization and stops once', async () => {
     const controller = new AbortController();
+
     const sdk = {
       runCommand: vi.fn((command: { cmd: string; stdout?: NodeJS.WritableStream }) => {
         if (command.cmd === 'sh') command.stdout?.write('ok');
+
         return Promise.resolve({ exitCode: 0 });
       }),
       writeFiles: vi.fn(() => Promise.resolve()),
@@ -23,7 +25,8 @@ describe('Vercel case isolation', () => {
         Promise.resolve(Readable.from([file.path.endsWith('partial.txt') ? 'partial' : 'file'])),
       ),
       stop: vi.fn(() => Promise.resolve()),
-    } as unknown as VercelSandboxSdk;
+    } satisfies VercelSandboxSdk;
+
     const environment = await vercelSandboxIsolation({
       files: { './inputs/../seed.txt': 'seed' },
       credentialEnv: { VERCEL_OIDC_TOKEN: 'token' },
@@ -51,7 +54,8 @@ describe('Vercel case isolation', () => {
       writeFiles: vi.fn(() => Promise.reject(new Error('upload failed'))),
       readFile: vi.fn(),
       stop: vi.fn(() => Promise.resolve()),
-    } as unknown as VercelSandboxSdk;
+    } satisfies VercelSandboxSdk;
+
     const factory = asFactory(sdk);
 
     await expect(
@@ -77,10 +81,12 @@ describe('Vercel case isolation', () => {
   it('poisons and stops an uncertain command after cancellation', async () => {
     const controller = new AbortController();
     let remoteActive = false;
+
     const sdk = {
       runCommand: vi.fn((command: { cmd: string; signal: AbortSignal }) => {
         if (command.cmd === 'mkdir') return Promise.resolve({ exitCode: 0 });
         remoteActive = true;
+
         return new Promise<{ exitCode: number }>((_resolve, reject) => {
           command.signal.addEventListener(
             'abort',
@@ -93,9 +99,11 @@ describe('Vercel case isolation', () => {
       readFile: vi.fn(),
       stop: vi.fn(() => {
         remoteActive = false;
+
         return Promise.resolve();
       }),
-    } as unknown as VercelSandboxSdk;
+    } satisfies VercelSandboxSdk;
+
     const environment = await vercelSandboxIsolation({
       credentialEnv: { VERCEL_OIDC_TOKEN: 'token' },
       sandboxFactory: asFactory(sdk),
@@ -124,6 +132,7 @@ describe('Vercel case isolation', () => {
           stderr?: NodeJS.WritableStream;
         }) => {
           if (command.cmd === 'mkdir') return Promise.resolve({ exitCode: 0 });
+
           return new Promise<{ exitCode: number }>((_resolve, reject) => {
             command.signal.addEventListener(
               'abort',
@@ -143,7 +152,8 @@ describe('Vercel case isolation', () => {
       writeFiles: vi.fn(() => Promise.resolve()),
       readFile: vi.fn(),
       stop: vi.fn(() => Promise.resolve()),
-    } as unknown as VercelSandboxSdk;
+    } satisfies VercelSandboxSdk;
+
     const environment = await vercelSandboxIsolation({
       outputBytes: 8,
       credentialEnv: { VERCEL_OIDC_TOKEN: 'token' },
@@ -158,24 +168,29 @@ describe('Vercel case isolation', () => {
 
   it('rejects disposal when poisoned VM cleanup fails and blocks every later operation', async () => {
     const commandError = new Error('command rejected while remote active');
+
     const runCommand = vi.fn((command: { cmd: string }) =>
       command.cmd === 'mkdir' ? Promise.resolve({ exitCode: 0 }) : Promise.reject(commandError),
     );
+
     const sdk = {
       runCommand,
       writeFiles: vi.fn(() => Promise.resolve()),
       readFile: vi.fn(),
       stop: vi.fn(() => Promise.reject(new Error('stop failed'))),
-    } as unknown as VercelSandboxSdk;
+    } satisfies VercelSandboxSdk;
+
     const environment = await vercelSandboxIsolation({
       credentialEnv: { VERCEL_OIDC_TOKEN: 'token' },
       sandboxFactory: asFactory(sdk),
     })(caseContext());
 
-    const error = await environment.exec('uncertain').catch((caught: unknown) => caught);
+    const error = await environment.exec('uncertain').catch((cause: unknown) => cause);
     expect(error).toBeInstanceOf(AggregateError);
     expect(error).toMatchObject({ cleanupConfirmed: false });
-    expect((error as AggregateError).errors[0]).toBe(commandError);
+
+    if (!(error instanceof AggregateError)) throw new Error('Expected aggregate cleanup error');
+    expect(error.errors[0]).toBe(commandError);
     const calls = runCommand.mock.calls.length;
     expect(() => environment.exec('late')).toThrow();
     expect(() => environment.readFile('partial.txt')).toThrow();
@@ -187,10 +202,11 @@ describe('Vercel case isolation', () => {
 
   it('aborts and drains active file work before stopping on disposal', async () => {
     let writes = 0;
+
     const sdk = {
       runCommand: vi.fn(() => Promise.resolve({ exitCode: 0 })),
       writeFiles: vi.fn(
-        (_files: unknown, options: { signal: AbortSignal }) =>
+        (_files: Parameters<VercelSandboxSdk['writeFiles']>[0], options: { signal: AbortSignal }) =>
           new Promise<void>((_resolve, reject) => {
             writes += 1;
             options.signal.addEventListener(
@@ -207,7 +223,8 @@ describe('Vercel case isolation', () => {
       ),
       readFile: vi.fn(),
       stop: vi.fn(() => Promise.resolve()),
-    } as unknown as VercelSandboxSdk;
+    } satisfies VercelSandboxSdk;
+
     const environment = await vercelSandboxIsolation({
       credentialEnv: { VERCEL_OIDC_TOKEN: 'token' },
       sandboxFactory: asFactory(sdk),
@@ -222,20 +239,24 @@ describe('Vercel case isolation', () => {
 
   it('bounds disposal when SDK operations ignore abort and stop', async () => {
     let writes = 0;
+
     const sdk = {
       runCommand: vi.fn(() => Promise.resolve({ exitCode: 0 })),
       writeFiles: vi.fn(() => {
         writes += 1;
+
         return new Promise<void>(() => undefined);
       }),
       readFile: vi.fn(),
       stop: vi.fn(() => new Promise<void>(() => undefined)),
-    } as unknown as VercelSandboxSdk;
+    } satisfies VercelSandboxSdk;
+
     const environment = await vercelSandboxIsolation({
       cleanupTimeoutMs: 5,
       credentialEnv: { VERCEL_OIDC_TOKEN: 'token' },
       sandboxFactory: asFactory(sdk),
     })(caseContext());
+
     void environment.writeFile('active.txt', 'data');
     await vi.waitFor(() => expect(writes).toBe(1));
 

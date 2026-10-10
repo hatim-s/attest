@@ -41,13 +41,25 @@ class ProjectLoadError extends LocalError {
         .join('\0')
         .localeCompare([right.source, right.path ?? '', right.code, right.message].join('\0')),
     );
+
     const detail = sorted.map(formatProjectDiagnostic).join('\n');
-    const safeDiagnostics = sorted.map(({ code: diagnosticCode, message, path, source }) => ({
-      code: diagnosticCode,
-      message,
-      source,
-      ...(path === undefined ? {} : { path }),
-    }));
+
+    const safeDiagnostics = sorted.map(
+      ({ code: diagnosticCode, message, path, source }): ProjectDiagnostic => {
+        const assembledFields: ProjectDiagnostic = {
+          code: diagnosticCode,
+          message,
+          source,
+        };
+
+        if (!(path === undefined)) {
+          assembledFields.path = path;
+        }
+
+        return assembledFields;
+      },
+    );
+
     super(code, options?.summaryOnly || detail.length === 0 ? summary : `${summary}\n${detail}`, {
       cause: options?.cause,
       hint: options?.hint,

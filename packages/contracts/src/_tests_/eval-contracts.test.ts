@@ -1,3 +1,5 @@
+import { z } from 'zod';
+import type { JsonValue } from '../project/shared.js';
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 
@@ -23,15 +25,15 @@ import { compileGeneratedSchema } from './support/compile-generated-schema.js';
 const fixturesDirectory = resolve(import.meta.dirname, 'fixtures');
 
 /** Reads one committed JSON golden without weakening its unknown boundary. */
-const readJsonFixture = async (relativePath: string): Promise<unknown> =>
-  JSON.parse(await readFile(resolve(fixturesDirectory, relativePath), 'utf8')) as unknown;
+const readJsonFixture = async (relativePath: string): Promise<JsonValue> =>
+  z.json().parse(JSON.parse(await readFile(resolve(fixturesDirectory, relativePath), 'utf8')));
 
 /** Reads a JSONL golden while preserving the line order asserted by the event-stream contract. */
-const readJsonlFixture = async (relativePath: string): Promise<unknown[]> =>
+const readJsonlFixture = async (relativePath: string): Promise<JsonValue[]> =>
   (await readFile(resolve(fixturesDirectory, relativePath), 'utf8'))
     .trimEnd()
     .split('\n')
-    .map((line) => JSON.parse(line) as unknown);
+    .map((line) => z.json().parse(JSON.parse(line)));
 
 const structuredTestRequest = {
   schema: 'attest.command-request',
@@ -188,6 +190,7 @@ describe('eval event conformance and sequencing', () => {
     badSequence[3] = { ...badSequence[3]!, sequence: 9 };
     const duplicateStartIndex = events.map((event) => ({ ...event }));
     const secondStart = duplicateStartIndex[2];
+
     if (secondStart?.event !== 'case_started') throw new Error('Golden case-start event drifted.');
     duplicateStartIndex[2] = {
       ...secondStart,
@@ -202,9 +205,12 @@ describe('eval event conformance and sequencing', () => {
   it('freezes the complete 0/1/2/3/4/130 exit-code matrix and shared final result envelope', async () => {
     const events = evalEventStreamSchema.parse(await readJsonlFixture('eval-run/events.jsonl'));
     const resultEvent = events.at(-1);
+
     if (resultEvent?.event !== 'result') throw new Error('Golden final result event drifted.');
     const failingSuccess = resultEvent.data.result;
+
     if (!failingSuccess.ok) throw new Error('Golden evaluated-failure result drifted.');
+
     const passingSuccess = {
       ...failingSuccess,
       result: { ...failingSuccess.result, verdict: 'pass' },
@@ -216,6 +222,7 @@ describe('eval event conformance and sequencing', () => {
     expect(
       evalFinalResultDataSchema.safeParse({ exit_code: 1, result: failingSuccess }).success,
     ).toBe(true);
+
     for (const exit_code of [1, 2, 3, 4, 130] as const) {
       const data = { exit_code, result: failedResult };
       expect(evalFinalResultDataSchema.safeParse(data).success).toBe(true);
@@ -231,6 +238,7 @@ describe('eval event conformance and sequencing', () => {
         ]).success,
       ).toBe(true);
     }
+
     expect(
       evalFinalResultDataSchema.safeParse({ exit_code: 0, result: failedResult }).success,
     ).toBe(false);

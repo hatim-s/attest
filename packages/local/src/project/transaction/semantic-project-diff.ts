@@ -1,6 +1,7 @@
+import { z } from 'zod';
 import type { ProjectResources, JsonValue } from '@attest/contracts';
 
-import { contentHash } from '@attest/core';
+import { contentHash, canonicalStringify } from '@attest/core';
 
 import { escapeJsonPointerSegment } from '../../internal/json-pointer.js';
 import { datasetMetadataForHash } from '../canonical-project.js';
@@ -16,24 +17,28 @@ import type {
 } from './transaction-types.js';
 
 type ResourceValue = JsonValue & { id: string };
+
 type IdentityValue = Record<string, JsonValue> & { id: string };
+
+function isJsonRecord(value: JsonValue): value is Record<string, JsonValue> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function isIdentityValue(value: JsonValue): value is IdentityValue {
+  return isJsonRecord(value) && typeof value.id === 'string';
+}
 
 const identityValues = (values: readonly JsonValue[]): IdentityValue[] | undefined => {
   const records: IdentityValue[] = [];
   const ids = new Set<string>();
+
   for (const value of values) {
-    if (
-      value === null ||
-      typeof value !== 'object' ||
-      Array.isArray(value) ||
-      typeof value.id !== 'string' ||
-      ids.has(value.id)
-    ) {
-      return undefined;
-    }
+    if (!isIdentityValue(value) || ids.has(value.id)) return undefined;
+
     ids.add(value.id);
-    records.push(value as IdentityValue);
+    records.push(value);
   }
+
   return records;
 };
 
@@ -46,18 +51,24 @@ const diffIdentityArray = (
   if (!path.endsWith('/cases') || before.length + after.length === 0) return undefined;
   const beforeRecords = identityValues(before);
   const afterRecords = identityValues(after);
+
   if (beforeRecords === undefined || afterRecords === undefined) return undefined;
   const beforeById = new Map(beforeRecords.map((value) => [value.id, value]));
   const afterById = new Map(afterRecords.map((value) => [value.id, value]));
   const ids = [...new Set([...beforeById.keys(), ...afterById.keys()])].sort();
+
   const changes = ids.flatMap((id) => {
     const childPath = `${path}/${escapeJsonPointerSegment(id)}`;
     const oldValue = beforeById.get(id);
     const newValue = afterById.get(id);
+
     if (oldValue === undefined) return [{ change: 'add' as const, path: childPath }];
+
     if (newValue === undefined) return [{ change: 'remove' as const, path: childPath }];
+
     return diffJsonFields(oldValue, newValue, childPath);
   });
+
   // Preserve order semantics only when the membership itself is unchanged.
   if (
     beforeById.size === afterById.size &&
@@ -66,6 +77,7 @@ const diffIdentityArray = (
   ) {
     changes.push({ change: 'update', path: `${path}/@order` });
   }
+
   return changes;
 };
 
@@ -74,13 +86,17 @@ const diffJsonFields = (before: JsonValue, after: JsonValue, path = ''): Semanti
   if (Object.is(before, after)) {
     return [];
   }
+
   if (Array.isArray(before) && Array.isArray(after)) {
     const identityChanges = diffIdentityArray(before, after, path);
+
     if (identityChanges !== undefined) return identityChanges;
     const changes: SemanticFieldChange[] = [];
     const length = Math.max(before.length, after.length);
+
     for (let index = 0; index < length; index += 1) {
       const childPath = `${path}/${index}`;
+
       if (index >= before.length) {
         changes.push({ change: 'add', path: childPath });
       } else if (index >= after.length) {
@@ -89,31 +105,31 @@ const diffJsonFields = (before: JsonValue, after: JsonValue, path = ''): Semanti
         changes.push(...diffJsonFields(before[index]!, after[index]!, childPath));
       }
     }
+
     return changes;
   }
-  if (
-    before !== null &&
-    after !== null &&
-    typeof before === 'object' &&
-    typeof after === 'object' &&
-    !Array.isArray(before) &&
-    !Array.isArray(after)
-  ) {
-    const beforeRecord = before as Record<string, JsonValue>;
-    const afterRecord = after as Record<string, JsonValue>;
+
+  if (isJsonRecord(before) && isJsonRecord(after)) {
+    const beforeRecord = before;
+    const afterRecord = after;
+
     return [...new Set([...Object.keys(beforeRecord), ...Object.keys(afterRecord)])]
       .sort()
       .flatMap((key) => {
         const childPath = `${path}/${escapeJsonPointerSegment(key)}`;
+
         if (!(key in beforeRecord)) {
           return [{ change: 'add' as const, path: childPath }];
         }
+
         if (!(key in afterRecord)) {
           return [{ change: 'remove' as const, path: childPath }];
         }
+
         return diffJsonFields(beforeRecord[key]!, afterRecord[key]!, childPath);
       });
   }
+
   return [{ change: 'update', path: path || '' }];
 };
 
@@ -148,6 +164,7 @@ const referencesForProject = (project: ProjectResources): SemanticReference[] =>
       ),
     ),
   );
+
   return references.sort((left, right) =>
     `${left.path}:${left.type}:${left.id}`.localeCompare(`${right.path}:${right.type}:${right.id}`),
   );
@@ -155,32 +172,28 @@ const referencesForProject = (project: ProjectResources): SemanticReference[] =>
 
 const referenceKey = ({ id, path, type }: SemanticReference): string => `${type}:${id}:${path}`;
 
-const diffReferences = (
-  before: ProjectResources,
-  after: ProjectResources,
-): { added: SemanticReference[]; removed: SemanticReference[] } => {
+const diffReferences = (before: ProjectResources, after: ProjectResources) => {
   const oldReferences = referencesForProject(before);
   const newReferences = referencesForProject(after);
   const oldKeys = new Set(oldReferences.map(referenceKey));
   const newKeys = new Set(newReferences.map(referenceKey));
+
   return {
     added: newReferences.filter((reference) => !oldKeys.has(referenceKey(reference))),
     removed: oldReferences.filter((reference) => !newKeys.has(referenceKey(reference))),
   };
 };
 
-const RESOURCE_VALUES: Readonly<
-  Record<Exclude<ProjectResourceKind, 'project'>, (project: ProjectResources) => readonly unknown[]>
-> = {
-  agent: (project) => project.agents,
-  dataset: (project) =>
+const RESOURCE_VALUES = {
+  agent: (project: ProjectResources) => project.agents,
+  dataset: (project: ProjectResources) =>
     project.datasets.map(({ cases, metadata }) => ({
-      ...(datasetMetadataForHash(metadata) as Record<string, JsonValue>),
+      ...z.record(z.string(), z.json()).parse(datasetMetadataForHash(metadata)),
       id: metadata.id,
       cases,
     })),
-  metric: (project) => project.metrics,
-  test: (project) => project.tests,
+  metric: (project: ProjectResources) => project.metrics,
+  test: (project: ProjectResources) => project.tests,
 };
 
 const valuesByKind = (
@@ -188,7 +201,13 @@ const valuesByKind = (
   kind: Exclude<ProjectResourceKind, 'project'>,
 ): ReadonlyMap<string, ResourceValue> => {
   // Every resource is a validated JSON object with a string id.
-  const values = RESOURCE_VALUES[kind](project) as readonly ResourceValue[];
+  const values = RESOURCE_VALUES[kind](project).map((value) =>
+    z
+      .record(z.string(), z.json())
+      .and(z.object({ id: z.string() }))
+      .parse(JSON.parse(canonicalStringify(value))),
+  );
+
   return new Map(values.map((value) => [value.id, value]));
 };
 
@@ -219,17 +238,30 @@ const makeOperation = ({
   op,
   previousId,
   references,
-}: OperationOptions): SemanticProjectOperation => ({
-  changes:
-    before === undefined || after === undefined ? [] : diffJsonFields(before, after).sort(byPath),
-  ...(after === undefined ? {} : { new_content_hash: contentHash(after) }),
-  ...(before === undefined ? {} : { old_content_hash: contentHash(before) }),
-  op,
-  ...(previousId === undefined ? {} : { previous_id: previousId }),
-  references_added: referencesForResource(references.added, kind, id),
-  references_removed: referencesForResource(references.removed, kind, previousId ?? id),
-  resource: { id, type: kind },
-});
+}: OperationOptions): SemanticProjectOperation => {
+  const assembledFields: SemanticProjectOperation = {
+    changes:
+      before === undefined || after === undefined ? [] : diffJsonFields(before, after).sort(byPath),
+    op,
+    references_added: referencesForResource(references.added, kind, id),
+    references_removed: referencesForResource(references.removed, kind, previousId ?? id),
+    resource: { id, type: kind },
+  };
+
+  if (!(after === undefined)) {
+    assembledFields.new_content_hash = contentHash(after);
+  }
+
+  if (!(before === undefined)) {
+    assembledFields.old_content_hash = contentHash(before);
+  }
+
+  if (!(previousId === undefined)) {
+    assembledFields.previous_id = previousId;
+  }
+
+  return assembledFields;
+};
 
 const byPath = (left: SemanticFieldChange, right: SemanticFieldChange): number =>
   left.path.localeCompare(right.path);
@@ -252,6 +284,7 @@ const createSemanticProjectDiff = (
     const newValues = valuesByKind(after, rename.type);
     const oldValue = oldValues.get(rename.from);
     const newValue = newValues.get(rename.to);
+
     if (oldValue === undefined || newValue === undefined || oldValues.has(rename.to)) {
       throw new ProjectTransactionError(
         'project_invalid',
@@ -259,6 +292,7 @@ const createSemanticProjectDiff = (
         { details: { rename } },
       );
     }
+
     renameKeys.add(`${rename.type}:${rename.from}`);
     renameKeys.add(`${rename.type}:${rename.to}`);
     operations.push(
@@ -278,12 +312,15 @@ const createSemanticProjectDiff = (
     const oldValues = valuesByKind(before, kind);
     const newValues = valuesByKind(after, kind);
     const ids = [...new Set([...oldValues.keys(), ...newValues.keys()])].sort();
+
     for (const id of ids) {
       if (renameKeys.has(`${kind}:${id}`)) {
         continue;
       }
+
       const oldValue = oldValues.get(id);
       const newValue = newValues.get(id);
+
       if (oldValue === undefined && newValue !== undefined) {
         operations.push(makeOperation({ op: 'add', kind, id, after: newValue, references }));
       } else if (oldValue !== undefined && newValue === undefined) {
@@ -304,14 +341,22 @@ const createSemanticProjectDiff = (
     schema: before.project.schema,
     project_id: before.project.project_id,
     name: before.project.name,
-    ...(before.project.defaults === undefined ? {} : { defaults: before.project.defaults }),
   };
+
+  if (!(before.project.defaults === undefined)) {
+    oldProjectMetadata.defaults = before.project.defaults;
+  }
+
   const newProjectMetadata: JsonValue = {
     schema: after.project.schema,
     project_id: after.project.project_id,
     name: after.project.name,
-    ...(after.project.defaults === undefined ? {} : { defaults: after.project.defaults }),
   };
+
+  if (!(after.project.defaults === undefined)) {
+    newProjectMetadata.defaults = after.project.defaults;
+  }
+
   if (contentHash(oldProjectMetadata) !== contentHash(newProjectMetadata)) {
     operations.push(
       makeOperation({
@@ -334,6 +379,7 @@ const createSemanticProjectDiff = (
       references_removed: [],
       resource: { id: reference.id, type: reference.type },
     }));
+
   const detachOperations = references.removed
     .filter(({ type }) => type === 'dataset' || type === 'metric')
     .map((reference) => ({

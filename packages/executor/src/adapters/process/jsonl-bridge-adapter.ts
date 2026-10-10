@@ -1,3 +1,4 @@
+import { parseJson } from '../../internal/json-value.js';
 import { StringDecoder } from 'node:string_decoder';
 
 import {
@@ -90,6 +91,7 @@ class JsonlBridgeSession {
     process.stdout.once('end', () => this.consumeEnd());
     void process.exit.then(({ code, signal }) => {
       if (this.closed) return;
+
       const error =
         code !== 0 || signal !== null
           ? new AgentInvocationError(
@@ -100,14 +102,17 @@ class JsonlBridgeSession {
               'invalid_envelope',
               'JSONL bridge reached EOF before all requests settled.',
             );
+
       this.failSession(error);
     });
+
     if (agent.timeouts?.run_ms !== undefined) {
       this.runTimer = setTimeout(
         () => this.failSession(new AgentInvocationError('timeout', 'JSONL bridge run timed out.')),
         agent.timeouts.run_ms,
       );
     }
+
     options.signal?.addEventListener(
       'abort',
       () =>
@@ -124,6 +129,7 @@ class JsonlBridgeSession {
     if (options.signal?.aborted === true) {
       throw new AgentInvocationError('cancelled', 'JSONL bridge run was cancelled.');
     }
+
     const process = await ManagedChild.start({
       argv: agent.transport.argv,
       cwd: options.cwd,
@@ -133,28 +139,34 @@ class JsonlBridgeSession {
         DEFAULT_STDERR_BYTES,
       ),
     });
+
     // Cancellation can arrive while the OS is spawning the process, before session listeners exist.
     if (options.signal?.aborted) {
       await process.terminate(options.terminationGraceMs ?? DEFAULT_TERMINATION_GRACE_MS);
       throw new AgentInvocationError('cancelled', 'JSONL bridge run was cancelled.');
     }
+
     return new JsonlBridgeSession(agent, process, options);
   }
 
   /** Queues serial bridges and directly multiplexes bridges that advertise correlation support. */
   async invoke(request: AgentRequest, signal?: AbortSignal): Promise<InvocationResult> {
     if (this.agent.transport.concurrency === 'multiplexed') return this.invokeNow(request, signal);
+
     return this.runSerially(() => this.invokeNow(request, signal));
   }
 
   private async invokeNow(request: AgentRequest, signal?: AbortSignal): Promise<InvocationResult> {
     if (this.closed)
       return this.failure(new AgentInvocationError('network', 'JSONL bridge is closed.'), 0);
+
     if (signal?.aborted === true) {
       return this.failure(cancellationError('cancelled'), 0);
     }
+
     const requestId = correlationId('req', request, ++this.sequence);
     const frame = { type: 'request', request_id: requestId, request } as const;
+
     if (
       Buffer.byteLength(JSON.stringify(frame)) >
       (this.agent.limits?.request_bytes ?? DEFAULT_REQUEST_BYTES)
@@ -167,17 +179,21 @@ class JsonlBridgeSession {
         0,
       );
     }
+
     const duration = startTimer();
+
     const result = new Promise<InvocationResult>((resolve) => {
       const requestDeadline = Math.min(
         this.agent.timeouts?.first_byte_ms ?? DEFAULT_ATTEMPT_MS,
         this.agent.timeouts?.idle_ms ?? DEFAULT_ATTEMPT_MS,
         this.agent.timeouts?.attempt_ms ?? DEFAULT_ATTEMPT_MS,
       );
+
       const timeoutTimer = setTimeout(
         () => void this.cancel(requestId, 'timeout'),
         requestDeadline,
       );
+
       const pending: PendingInvocation = {
         cancelled: false,
         duration,
@@ -186,22 +202,26 @@ class JsonlBridgeSession {
         signal,
         timeoutTimer,
       };
+
       if (signal !== undefined) {
         pending.callerAbort = () => void this.cancel(requestId, 'cancelled');
         signal.addEventListener('abort', pending.callerAbort, { once: true });
       }
+
       this.pending.set(requestId, pending);
     });
+
     // Result settlement must remain independent of a peer that stops draining stdin.
-    void this.process.writeLine(frame).catch((error: unknown) =>
+    void this.process.writeLine(frame).catch((cause: unknown) =>
       this.failSession(
-        error instanceof AgentInvocationError
-          ? error
+        cause instanceof AgentInvocationError
+          ? cause
           : new AgentInvocationError('network', 'Could not write a JSONL bridge request.', {
-              cause: error,
+              cause: cause,
             }),
       ),
     );
+
     return result;
   }
 
@@ -213,14 +233,17 @@ class JsonlBridgeSession {
   private consumeEnd(): void {
     if (this.closed) return;
     this.consumeLines(this.lines.push(this.decoder.end()));
+
     if (!this.closed) this.consumeLines(this.lines.end());
   }
 
   private consumeLines({ lines, overflow }: SplitLines): void {
     for (const line of lines) {
       if (line.trim().length > 0) this.consumeLine(line);
+
       if (this.closed) return;
     }
+
     if (overflow) {
       this.failSession(capError('JSONL bridge line exceeds its event byte cap.'));
     }
@@ -230,21 +253,26 @@ class JsonlBridgeSession {
   private checkCaps(line: string): AgentInvocationError | undefined {
     this.eventCount += 1;
     this.totalEvidenceBytes += Buffer.byteLength(line);
+
     if (this.eventCount > (this.agent.limits?.event_count ?? DEFAULT_EVENT_COUNT)) {
       return capError('JSONL bridge exceeds its event count cap.');
     }
+
     const totalCap = this.agent.limits?.total_evidence_bytes ?? DEFAULT_TOTAL_EVIDENCE_BYTES;
+
     if (this.totalEvidenceBytes > totalCap) {
       return capError('JSONL bridge exceeds its aggregate evidence cap.');
     }
+
     return undefined;
   }
 
   /** Parses one line into a bridge output envelope, or the protocol error that ends the session. */
   private parseOutput(line: string): ParsedOutput | AgentInvocationError {
     let raw: unknown;
+
     try {
-      raw = JSON.parse(line) as unknown;
+      raw = parseJson(line);
     } catch (error: unknown) {
       return new AgentInvocationError(
         'invalid_envelope',
@@ -252,29 +280,39 @@ class JsonlBridgeSession {
         { cause: error },
       );
     }
+
     const parsed = jsonlBridgeOutputSchema.safeParse(raw);
+
     if (!parsed.success) {
       return new AgentInvocationError(
         'invalid_envelope',
         'JSONL bridge emitted an invalid output envelope.',
       );
     }
+
     return { output: parsed.data, raw };
   }
 
   private consumeLine(line: string): void {
     const capFailure = this.checkCaps(line);
+
     if (capFailure !== undefined) {
       this.failSession(capFailure);
+
       return;
     }
+
     const parsed = this.parseOutput(line);
+
     if (parsed instanceof AgentInvocationError) {
       this.failSession(parsed);
+
       return;
     }
+
     const { output, raw } = parsed;
     const pending = this.pending.get(output.request_id);
+
     if (pending === undefined) {
       this.failSession(
         new AgentInvocationError(
@@ -282,8 +320,10 @@ class JsonlBridgeSession {
           'JSONL bridge emitted an unknown or duplicate request id.',
         ),
       );
+
       return;
     }
+
     if (output.type === 'cancelled' && !pending.cancelled) {
       this.failSession(
         new AgentInvocationError(
@@ -291,14 +331,19 @@ class JsonlBridgeSession {
           'JSONL bridge acknowledged cancellation that was not requested.',
         ),
       );
+
       return;
     }
+
     // After attest cancels, both the acknowledgement and a late response settle as cancelled.
     if (output.type === 'cancelled' || pending.cancelled) {
       this.settleCancellation(output.request_id, pending, line);
+
       return;
     }
+
     const report = parseAgentResponse(output.response);
+
     if (!report.ok) {
       this.settle(
         output.request_id,
@@ -311,8 +356,10 @@ class JsonlBridgeSession {
           line,
         ),
       );
+
       return;
     }
+
     const attempt: InvocationAttempt = {
       status: 'ok',
       raw: output.response,
@@ -324,6 +371,7 @@ class JsonlBridgeSession {
       ),
       warnings: report.warnings,
     };
+
     this.settle(output.request_id, { ...attempt, attempts: [attempt] });
   }
 
@@ -340,6 +388,7 @@ class JsonlBridgeSession {
 
   private async cancel(requestId: string, code: CancellationCode): Promise<void> {
     const pending = this.pending.get(requestId);
+
     if (pending === undefined || pending.cancelled) return;
     pending.cancelled = true;
     pending.cancellationCode = code;
@@ -349,6 +398,7 @@ class JsonlBridgeSession {
       () => this.fallbackAfterCancellation(requestId, code),
       cancellationGrace,
     );
+
     try {
       // The same grace bounds both stdin backpressure and the peer acknowledgement.
       await this.process.writeLine(
@@ -366,9 +416,11 @@ class JsonlBridgeSession {
     cause?: unknown,
   ): void {
     const pending = this.pending.get(requestId);
+
     if (pending !== undefined) {
       this.settle(requestId, this.failure(cancellationError(code, cause), pending.duration()));
     }
+
     this.failSession(
       new AgentInvocationError(
         'invalid_envelope',
@@ -379,13 +431,17 @@ class JsonlBridgeSession {
 
   private settle(requestId: string, result: InvocationResult): void {
     const pending = this.pending.get(requestId);
+
     if (pending === undefined) return;
     clearTimeout(pending.timeoutTimer);
+
     if (pending.cancellationTimer !== undefined) clearTimeout(pending.cancellationTimer);
+
     if (pending.callerAbort !== undefined) {
       // AbortSignal listeners are one-shot, but explicit removal avoids retaining completed requests.
       pending.signal?.removeEventListener('abort', pending.callerAbort);
     }
+
     this.pending.delete(requestId);
     pending.resolve(result);
   }
@@ -403,25 +459,31 @@ class JsonlBridgeSession {
       rawExcerpt: createRawExcerpt(redactTransportText(evidence, this.secrets)),
       warnings: [],
     };
+
     return { ...attempt, attempts: [attempt] };
   }
 
   private diagnostics(): InvocationAttempt['diagnostics'] {
     const stderr = this.process.stderrExcerpt();
+
     return stderr === undefined ? {} : { stderrExcerpt: redactTransportText(stderr, this.secrets) };
   }
 
   private failSession(error: AgentInvocationError): void {
     if (this.closed) return;
     this.closed = true;
+
     if (this.runTimer !== undefined) clearTimeout(this.runTimer);
+
     for (const [requestId, pending] of this.pending) {
       const requestError =
         pending.cancelled && pending.cancellationCode !== undefined
           ? cancellationError(pending.cancellationCode)
           : error;
+
       this.settle(requestId, this.failure(requestError, pending.duration()));
     }
+
     this.closePromise = this.process
       .terminate(
         this.options.terminationGraceMs ??

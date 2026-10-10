@@ -1,3 +1,4 @@
+import { isJsonObject } from '@attest/contracts';
 import type { JsonValue } from '@attest/contracts';
 
 type PointerResolution = { found: true; value: JsonValue } | { found: false };
@@ -16,24 +17,33 @@ const childValue = (current: JsonValue, segment: string): PointerResolution => {
   if (Array.isArray(current)) {
     if (!ARRAY_INDEX.test(segment)) return { found: false };
     const index = Number(segment);
+
     if (index >= current.length) return { found: false };
+
     return { found: true, value: current[index]! };
   }
-  if (current === null || typeof current !== 'object') return { found: false };
+
+  if (!isJsonObject(current)) return { found: false };
+
   if (!Object.hasOwn(current, segment)) return { found: false };
+
   return { found: true, value: current[segment]! };
 };
 
 /** Resolves an RFC 6901 pointer without interpreting dotted object keys. */
 const resolveJsonPointer = (value: JsonValue, pointer: string): PointerResolution => {
   if (pointer === '') return { found: true, value };
+
   if (!pointer.startsWith('/')) return { found: false };
   let current = value;
+
   for (const encoded of pointer.slice(1).split('/')) {
     const child = childValue(current, encoded.replaceAll('~1', '/').replaceAll('~0', '~'));
+
     if (!child.found) return child;
     current = child.value;
   }
+
   return { found: true, value: current };
 };
 

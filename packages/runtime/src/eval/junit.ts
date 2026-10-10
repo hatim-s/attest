@@ -7,6 +7,7 @@ const stripInvalidXmlCodePoints = (value: string): string =>
   [...value]
     .filter((character) => {
       const codePoint = character.codePointAt(0)!;
+
       return (
         codePoint === 0x9 ||
         codePoint === 0xa ||
@@ -34,6 +35,7 @@ const caseMessage = (evalCase: NormalizedEvalCaseResult): string => {
       .filter((metric) => metric.status === 'evaluated' && !metric.pass)
       .map((metric) => metric.metricName)
       .sort();
+
     return `failing metrics: ${failedMetrics.join(', ')}`;
   }
 
@@ -42,6 +44,7 @@ const caseMessage = (evalCase: NormalizedEvalCaseResult): string => {
       metric.status === 'error' ? [`${metric.metricName}: ${metric.error.message}`] : [],
     )
     .sort();
+
   return metricErrors.length > 0 ? metricErrors.join('; ') : `case ended with ${evalCase.outcome}`;
 };
 
@@ -50,9 +53,11 @@ const serializeCase = (evalCase: NormalizedEvalCaseResult): string => {
   const attributes =
     `name="${escapeXml(evalCase.case_id)}" classname="${escapeXml(evalCase.test_id)}" ` +
     `time="${String(evalCase.duration_ms / 1000)}"`;
+
   if (evalCase.verdict === 'pass') return `    <testcase ${attributes}/>`;
   const tag = evalCase.verdict === 'fail' ? 'failure' : 'error';
   const message = caseMessage(evalCase);
+
   return `    <testcase ${attributes}><${tag} message="${escapeXml(message)}">${escapeXml(message)}</${tag}></testcase>`;
 };
 
@@ -67,7 +72,9 @@ const createEvalJUnitPayload = (
   const configuredCases = [...cases].sort(
     (left, right) => left.configured_index - right.configured_index,
   );
+
   const testIds = [...new Set(configuredCases.map((evalCase) => evalCase.test_id))].sort();
+
   const lines = [
     '<?xml version="1.0" encoding="UTF-8"?>',
     `<testsuites name="${escapeXml(runId)}">`,
@@ -83,9 +90,11 @@ const createEvalJUnitPayload = (
       '  </testsuite>',
     );
   }
+
   lines.push('</testsuites>');
 
   const contents = lines.join('\n');
+
   return {
     contents,
     byte_length: Buffer.byteLength(contents, 'utf8'),

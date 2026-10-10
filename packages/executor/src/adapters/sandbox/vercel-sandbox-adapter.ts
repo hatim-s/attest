@@ -1,3 +1,4 @@
+import { parseJson } from '../../internal/json-value.js';
 import type { AgentRequest, VercelSandbox } from '@attest/contracts';
 
 import { AgentInvocationError } from '../../errors.js';
@@ -18,9 +19,13 @@ import type {
 } from './types.js';
 
 const DEFAULT_IMAGE = 'vercel/sandbox/universal';
+
 const DEFAULT_CLEANUP_TIMEOUT_MS = 10_000;
+
 const INTERNAL_ROOT = '/vercel/sandbox/.attest';
+
 const REQUEST_PATH = `${INTERNAL_ROOT}/request.json`;
+
 const STDIN_WRAPPER = 'exec "$@" < "$0"';
 
 /** Loads the Vercel SDK lazily so hosts that never use sandboxes do not pay for the import. */
@@ -28,6 +33,7 @@ const defaultSandboxFactory = async (
   params: VercelSandboxCreateParams,
 ): Promise<VercelSandboxSdk> => {
   const { Sandbox } = await import('@vercel/sandbox');
+
   return Sandbox.create(params);
 };
 
@@ -40,17 +46,22 @@ const invokeSandboxAttempt = async (
 ): Promise<InvocationAttempt> => {
   const duration = startTimer();
   const attemptTimeout = AbortSignal.timeout(invocation.attemptTimeoutMs + 1_000);
+
   const attemptSignal =
     signal === undefined ? attemptTimeout : AbortSignal.any([signal, attemptTimeout]);
+
   // Keep draining after the cap. The server-enforced command timeout then confirms termination
   // before the retry loop may start another command in this case-scoped VM.
   const stdout = new BoundedOutputWritable(invocation.responseBytes);
   const stderr = new BoundedTailWritable(Math.min(4096, invocation.responseBytes));
   const capMessage = `Sandbox stdout exceeded the ${String(invocation.responseBytes)}-byte output cap`;
+
   const stderrDiagnostics = (): InvocationDiagnostics => {
     const stderrExcerpt = stderr.text();
+
     return stderrExcerpt === undefined ? {} : { stderrExcerpt };
   };
+
   const fail = (
     error: AgentInvocationError,
     diagnostics: InvocationDiagnostics,
@@ -63,15 +74,19 @@ const invokeSandboxAttempt = async (
     if (signal?.aborted === true) {
       return new AgentInvocationError('cancelled', 'Sandbox agent invocation was cancelled');
     }
+
     if (stdout.exceeded) return new AgentInvocationError('output_cap_exceeded', capMessage);
+
     if (attemptTimeout.aborted) {
       return new AgentInvocationError('timeout', 'Sandbox agent invocation failed');
     }
+
     return new AgentInvocationError('network', 'Sandbox agent invocation failed');
   };
 
   try {
     const requestDocument = JSON.stringify(request);
+
     if (Buffer.byteLength(requestDocument) > invocation.responseBytes) {
       return fail(
         new AgentInvocationError(
@@ -81,10 +96,12 @@ const invokeSandboxAttempt = async (
         {},
       );
     }
+
     await sdk.writeFiles([{ path: REQUEST_PATH, content: requestDocument }], {
       signal: attemptSignal,
     });
     const [command, ...args] = invocation.argv;
+
     const result = await sdk.runCommand({
       cmd: 'sh',
       args: ['-c', STDIN_WRAPPER, REQUEST_PATH, command, ...args],
@@ -96,9 +113,11 @@ const invokeSandboxAttempt = async (
       signal: attemptSignal,
       timeoutMs: invocation.attemptTimeoutMs,
     });
+
     const raw = stdout.buffer().toString('utf8');
     const rawExcerpt = createRawExcerpt(raw);
     const diagnostics = { ...stderrDiagnostics(), exitCode: result.exitCode };
+
     if (stdout.exceeded) {
       return fail(new AgentInvocationError('output_cap_exceeded', capMessage), diagnostics, {
         ...rawExcerpt,
@@ -106,9 +125,11 @@ const invokeSandboxAttempt = async (
         sha256: stdout.digest(),
       });
     }
+
     // The SDK reports a server-side command timeout as SIGKILL (137) at the deadline.
     const killedAtDeadline =
       result.exitCode === 137 && (result.durationMs ?? duration()) >= invocation.attemptTimeoutMs;
+
     if (killedAtDeadline) {
       return fail(
         new AgentInvocationError('timeout', 'Sandbox agent invocation timed out'),
@@ -116,6 +137,7 @@ const invokeSandboxAttempt = async (
         rawExcerpt,
       );
     }
+
     if (result.exitCode !== 0) {
       return fail(
         new AgentInvocationError(
@@ -126,10 +148,11 @@ const invokeSandboxAttempt = async (
         rawExcerpt,
       );
     }
+
     try {
       return {
         status: 'ok',
-        raw: JSON.parse(raw) as unknown,
+        raw: parseJson(raw),
         diagnostics,
         durationMs: duration(),
         rawExcerpt,
@@ -155,18 +178,21 @@ const invokeSandboxAttempt = async (
 
 /** Classifies a setup failure that is not already an invocation error. */
 const setupError = (
-  error: unknown,
+  cause: unknown,
   callerSignal: AbortSignal | undefined,
   setupTimeout: AbortSignal,
 ): AgentInvocationError => {
-  if (error instanceof AgentInvocationError) return error;
-  const options = { cause: error instanceof Error ? error : undefined };
+  if (cause instanceof AgentInvocationError) return cause;
+  const options = { cause: cause instanceof Error ? cause : undefined };
+
   if (callerSignal?.aborted === true) {
     return new AgentInvocationError('cancelled', 'Vercel sandbox setup was cancelled', options);
   }
+
   if (setupTimeout.aborted) {
     return new AgentInvocationError('timeout', 'Vercel sandbox setup timed out', options);
   }
+
   return new AgentInvocationError('spawn_failed', 'Vercel sandbox setup failed', options);
 };
 
@@ -179,10 +205,12 @@ const exportArtifacts = async (
   options: VercelSandboxCaseOptions,
 ): Promise<AgentInvocationError | undefined> => {
   const artifactTimeout = AbortSignal.timeout(invocation.attemptTimeoutMs);
+
   const artifactSignal =
     options.signal === undefined
       ? artifactTimeout
       : AbortSignal.any([options.signal, artifactTimeout]);
+
   try {
     await publishTerminalArtifacts(
       sdk,
@@ -193,9 +221,11 @@ const exportArtifacts = async (
       invocation.attemptTimeoutMs,
       artifactSignal,
     );
+
     return undefined;
   } catch (error: unknown) {
     if (error instanceof AgentInvocationError) return error;
+
     return new AgentInvocationError('network', 'Sandbox artifact export failed', {
       cause: error instanceof Error ? error : undefined,
     });
@@ -211,9 +241,11 @@ const invokeVercelSandboxAgent = async (
 ): Promise<InvocationResult> => {
   const artifacts = sandbox.artifacts ?? [];
   const { artifactRoot } = options;
+
   if (artifacts.length > 0 && artifactRoot === undefined) {
     throw new TypeError('Sandbox artifacts require an output directory.');
   }
+
   const credentials = resolveVercelSandboxCredentials(options.credentialEnv ?? process.env);
   const factory = options.sandboxFactory ?? defaultSandboxFactory;
   let sdk: VercelSandboxSdk | undefined;
@@ -221,36 +253,46 @@ const invokeVercelSandboxAgent = async (
   let postRunError: AgentInvocationError | undefined;
   let cleanupConfirmed = true;
   const setupTimeout = AbortSignal.timeout(invocation.attemptTimeoutMs);
+
   const setupSignal =
     options.signal === undefined ? setupTimeout : AbortSignal.any([options.signal, setupTimeout]);
+
   try {
-    const created = await factory({
+    const creation: VercelSandboxCreateParams = {
       image: sandbox.image ?? DEFAULT_IMAGE,
       persistent: false,
       timeout: invocation.sandboxTimeoutMs,
       signal: setupSignal,
-      ...(credentials.kind === 'oidc' ? {} : credentials.credentials),
-    });
+    };
+
+    if (credentials.kind !== 'oidc') Object.assign(creation, credentials.credentials);
+    const created = await factory(creation);
+
     sdk = created;
+
     const uploads = await loadExplicitUploads(
       options.projectRoot,
       sandbox.files,
       invocation.responseBytes,
     );
+
     const prepare = await created.runCommand({
       cmd: 'mkdir',
       args: ['-p', INTERNAL_ROOT, SANDBOX_WORKSPACE],
       signal: setupSignal,
       timeoutMs: invocation.attemptTimeoutMs,
     });
+
     if (prepare.exitCode !== 0) {
       throw new AgentInvocationError('spawn_failed', 'Could not prepare the sandbox workspace.');
     }
+
     if (uploads.length > 0) await created.writeFiles(uploads, { signal: setupSignal });
     result = await invokeWithRetries(
       () => invokeSandboxAttempt(created, invocation, request, options.signal),
       invocation.retries,
     );
+
     if (artifactRoot !== undefined && artifacts.length > 0) {
       postRunError = await exportArtifacts(created, artifacts, artifactRoot, invocation, options);
     }
@@ -273,6 +315,7 @@ const invokeVercelSandboxAgent = async (
 
   if (postRunError === undefined && result !== undefined) return result;
   const cleanupDiagnostics = cleanupConfirmed ? {} : { sandboxCleanupConfirmed: false };
+
   if (result?.status === 'invocation_error') {
     return {
       ...result,
@@ -283,17 +326,20 @@ const invokeVercelSandboxAgent = async (
       },
     };
   }
+
+  const diagnostics: InvocationDiagnostics = { ...cleanupDiagnostics };
+
+  if (postRunError !== undefined) diagnostics.sandboxError = postRunError.message;
+
   const attempt = createFailedAttempt(
     postRunError ??
       new AgentInvocationError('network', 'Sandbox execution did not produce a result.'),
     {
-      diagnostics: {
-        ...(postRunError === undefined ? {} : { sandboxError: postRunError.message }),
-        ...cleanupDiagnostics,
-      },
+      diagnostics,
       durationMs: result?.durationMs ?? 0,
     },
   );
+
   return { ...attempt, attempts: [...(result?.attempts ?? []), attempt] };
 };
 

@@ -32,23 +32,28 @@ const splitShellWords = (source: string, options: SplitShellWordsOptions): strin
   let word = '';
   let wordStarted = false;
   let quote: 'double' | 'single' | undefined;
+
   const endWord = (): void => {
     if (!wordStarted) return;
     words.push(word);
     word = '';
     wordStarted = false;
   };
+
   for (let index = 0; index < source.length; index += 1) {
     const character = source[index]!;
     const next = source[index + 1];
     const expansion = character === '`' || (character === '$' && (next === '(' || next === '{'));
+
     if (options.rejectShellControl && expansion) throw new ShellWordsError('shell_expansion');
+
     if (quote === 'single') {
       if (character === "'") quote = undefined;
       else word += character;
       wordStarted = true;
       continue;
     }
+
     if (quote === 'double') {
       if (character === '"') quote = undefined;
       else if (character === '\\' && next !== undefined) word += source[++index]!;
@@ -56,32 +61,40 @@ const splitShellWords = (source: string, options: SplitShellWordsOptions): strin
       wordStarted = true;
       continue;
     }
+
     if (character === "'" || character === '"') {
       quote = character === "'" ? 'single' : 'double';
       wordStarted = true;
       continue;
     }
+
     if (character === '\\' && (next === '\n' || (next === '\r' && source[index + 2] === '\n'))) {
       index += next === '\r' ? 2 : 1;
       continue;
     }
+
     if (character === '\\' && next !== undefined) {
       word += source[++index]!;
       wordStarted = true;
       continue;
     }
+
     if (options.rejectShellControl && isShellControl(character, next)) {
       throw new ShellWordsError('shell_control');
     }
+
     if (/\s/u.test(character)) {
       endWord();
       continue;
     }
+
     word += character;
     wordStarted = true;
   }
+
   if (quote !== undefined) throw new ShellWordsError('unclosed_quote');
   endWord();
+
   return words;
 };
 

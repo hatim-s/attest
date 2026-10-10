@@ -13,7 +13,9 @@ import {
 } from './metric-transport.js';
 
 const MAXIMUM_STDERR_BYTES = 4 * 1024;
+
 const PROCESS_KILL_GRACE_MS = 2_000;
+
 const PROCESS_REAP_WAIT_MS = 5_000;
 
 /** Selects the stable error returned after a forced process shutdown. */
@@ -22,9 +24,11 @@ type TerminationReason = 'timeout' | 'cancelled' | 'output_cap';
 /** Appends only the remaining diagnostic capacity so a single stderr chunk cannot bypass its cap. */
 const appendExcerpt = (value: string, chunk: Buffer, maximumBytes: number): string => {
   const remainingBytes = maximumBytes - Buffer.byteLength(value);
+
   if (remainingBytes <= 0) {
     return value;
   }
+
   return `${value}${chunk.subarray(0, remainingBytes).toString()}`;
 };
 
@@ -39,8 +43,10 @@ const waitForExit = async (child: ChildProcess): Promise<boolean> => {
   if (child.exitCode !== null || child.signalCode !== null) {
     return true;
   }
+
   try {
     await once(child, 'exit', { signal: AbortSignal.timeout(PROCESS_REAP_WAIT_MS) });
+
     return true;
   } catch {
     return false;
@@ -61,10 +67,13 @@ const terminationError = (
       message: `Metric stdout exceeded the ${options.outputCapBytes}-byte limit.`,
     },
   };
+
   const error = errors[reason];
+
   if (reaped) {
     return error;
   }
+
   return { ...error, message: `${error.message} Process may be unreaped.` };
 };
 
@@ -82,6 +91,7 @@ const invokeCommandMetric = (
       cwd: options.cwd ?? process.cwd(),
       env: toSpawnEnvironment(options.env ?? process.env),
     });
+
     const signal = composeAbortSignal(options.signal, options.timeoutMs);
     const stdoutChunks: Buffer[] = [];
     let stdoutBytes = 0;
@@ -93,6 +103,7 @@ const invokeCommandMetric = (
       if (settled) {
         return;
       }
+
       settled = true;
       signal.removeEventListener('abort', abort);
       resolve(outcome);
@@ -102,7 +113,9 @@ const invokeCommandMetric = (
       if (settled || terminationReason !== undefined) {
         return;
       }
+
       terminationReason = reason;
+
       try {
         // The returned descendant list is not a reliable reap signal: ps exits non-zero when none of
         // the queried PIDs exist, which the sweep reports as survivors. Direct-child exit decides.
@@ -134,11 +147,15 @@ const invokeCommandMetric = (
       if (terminationReason !== undefined) {
         return;
       }
+
       stdoutBytes += chunk.byteLength;
+
       if (stdoutBytes > options.outputCapBytes) {
         void terminate('output_cap');
+
         return;
       }
+
       stdoutChunks.push(chunk);
     });
     child.stderr?.on('data', (chunk: Buffer) => {
@@ -148,6 +165,7 @@ const invokeCommandMetric = (
       if (terminationReason !== undefined) {
         return;
       }
+
       if (exitCode !== 0) {
         settle({
           ok: false,
@@ -157,15 +175,19 @@ const invokeCommandMetric = (
             details: stderr.length === 0 ? undefined : { stderr },
           },
         });
+
         return;
       }
+
       settle({ ok: true, text: Buffer.concat(stdoutChunks).toString() });
     });
 
     if (signal.aborted) {
       abort();
+
       return;
     }
+
     signal.addEventListener('abort', abort, { once: true });
     child.stdin?.end(requestBody);
   });

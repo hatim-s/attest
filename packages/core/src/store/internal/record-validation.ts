@@ -1,3 +1,4 @@
+import { isNumber } from '@attest/contracts';
 import type { z } from 'zod';
 
 import {
@@ -13,14 +14,16 @@ type RecordParseResult<T> = { ok: true; value: T } | { ok: false; violations: st
 const formatPath = (prefix: string, path: readonly PropertyKey[]): string =>
   path.reduce<string>(
     (current, segment) =>
-      typeof segment === 'number' ? `${current}[${segment}]` : `${current}.${String(segment)}`,
+      isNumber(segment) ? `${current}[${segment}]` : `${current}.${String(segment)}`,
     prefix,
   );
 
 const formatIssue = (issue: z.core.$ZodIssue, path: string): string[] => {
   const location = formatPath(path, issue.path);
+
   if (issue.code === 'unrecognized_keys')
     return issue.keys.map((key) => `${location} forbids ${key}`);
+
   return [`${location} ${issue.message}`];
 };
 
@@ -28,23 +31,34 @@ const formatIssue = (issue: z.core.$ZodIssue, path: string): string[] => {
  * Persisted JSON drops undefined properties, so validation does too. Without this, strict record
  * branches would reject `{ errorCode: undefined }` on a completed case that stores identically to `{}`.
  */
-const withoutUndefinedProperties = (value: unknown): unknown => {
-  if (Array.isArray(value)) return value.map(withoutUndefinedProperties);
-  if (value === null || typeof value !== 'object') return value;
-  return Object.fromEntries(
-    Object.entries(value)
-      .filter(([, entry]) => entry !== undefined)
-      .map(([key, entry]) => [key, withoutUndefinedProperties(entry)]),
-  );
+type RecordCandidate = { value: unknown };
+
+// BOUNDARY: Record inputs keep their untrusted leaf values while undefined object properties are omitted before schema validation.
+const withoutUndefinedProperties = (value: unknown): RecordCandidate => {
+  if (Array.isArray(value))
+    return { value: value.map((entry) => withoutUndefinedProperties(entry).value) };
+
+  if (value === null || typeof value !== 'object') return { value };
+
+  return {
+    value: Object.fromEntries(
+      Object.entries(value)
+        .filter(([, entry]) => entry !== undefined)
+        .map(([key, entry]) => [key, withoutUndefinedProperties(entry).value]),
+    ),
+  };
 };
 
+// BOUNDARY: Imported or persisted record JSON is checked by its owner schema after omitting absent optional object fields.
 const parseRecord = <T>(
   schema: z.ZodType<T>,
   value: unknown,
   path: string,
 ): RecordParseResult<T> => {
-  const parsed = schema.safeParse(withoutUndefinedProperties(value));
+  const parsed = schema.safeParse(withoutUndefinedProperties(value).value);
+
   if (parsed.success) return { ok: true, value: parsed.data };
+
   return {
     ok: false,
     violations: parsed.error.issues.flatMap((issue) => formatIssue(issue, path)),
@@ -52,21 +66,37 @@ const parseRecord = <T>(
 };
 
 /** Validates an untrusted run header, such as one read from an imported bundle. */
+// BOUNDARY: Imported run header JSON is checked against runRecordSchema.
 const parseRunRecord = (value: unknown, path = 'run') => parseRecord(runRecordSchema, value, path);
 
 /** Validates an untrusted case record, such as one read from an imported bundle. */
+// BOUNDARY: Imported case JSON is checked against caseRecordSchema.
 const parseCaseRecord = (value: unknown, path = 'case') =>
   parseRecord(caseRecordSchema, value, path);
 
+/** Validates execution data at host persistence boundaries and retains all violations. */
+// BOUNDARY: Untrusted case execution values are normalized and checked against the stored execution schema.
+const parseStoredCaseExecution = (value: unknown, path = 'execution') =>
+  parseRecord(storedCaseExecutionSchema, value, path);
+
+/** Validates metric data at host persistence boundaries and retains all violations. */
+// BOUNDARY: Untrusted metric evaluation values are normalized and checked against the stored metric schema.
+const parseStoredMetricEvaluation = (value: unknown, path = 'evaluation') =>
+  parseRecord(storedMetricEvaluationSchema, value, path);
+
 /** Lists violations in a case execution so a store can reject it before opening a transaction. */
+// BOUNDARY: Untrusted case execution JSON is checked against storedCaseExecutionSchema.
 const collectStoredCaseExecutionViolations = (value: unknown, path = 'execution'): string[] => {
   const parsed = parseRecord(storedCaseExecutionSchema, value, path);
+
   return parsed.ok ? [] : parsed.violations;
 };
 
 /** Lists violations in a metric evaluation so a store can reject it before opening a transaction. */
+// BOUNDARY: Untrusted metric evaluation JSON is checked against storedMetricEvaluationSchema.
 const collectStoredMetricEvaluationViolations = (value: unknown, path = 'evaluation'): string[] => {
   const parsed = parseRecord(storedMetricEvaluationSchema, value, path);
+
   return parsed.ok ? [] : parsed.violations;
 };
 
@@ -74,6 +104,8 @@ export {
   collectStoredCaseExecutionViolations,
   collectStoredMetricEvaluationViolations,
   parseCaseRecord,
+  parseStoredCaseExecution,
+  parseStoredMetricEvaluation,
   parseRunRecord,
   type RecordParseResult,
 };

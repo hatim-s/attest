@@ -1,0 +1,473 @@
+import {
+  isClosingBraceToken,
+  isFunction,
+  isNotSemicolonToken,
+  isParenthesized,
+  isSemicolonToken,
+  isSingleLine,
+  isTokenOnSameLine,
+  isTopLevelExpressionStatement,
+  LINEBREAKS,
+  skipChainExpression
+} from "./padding-line-ast.mjs";
+const CJS_EXPORT = /^(?:module\s*\.\s*)?exports(?:\s*\.|\s*\[|$)/u;
+const CJS_IMPORT = /^require\(/u;
+const LT = `[${Array.from(LINEBREAKS).join("")}]`;
+const PADDING_LINE_SEQUENCE = new RegExp(String.raw`^(\s*?${LT})\s*${LT}(\s*;?)$`, "u");
+function isSelectorOption(option) {
+  return typeof option === "object" && !Array.isArray(option);
+}
+function newKeywordTester(type, keyword) {
+  return {
+    test(node, sourceCode) {
+      const isSameKeyword = sourceCode.getFirstToken(node)?.value === keyword;
+      const isSameType = Array.isArray(type) ? type.includes(node.type) : type === node.type;
+      return isSameKeyword && isSameType;
+    }
+  };
+}
+function newNodeTypeTester(type) {
+  return {
+    test: (node) => node.type === type
+  };
+}
+function isIIFEStatement(node) {
+  if (node.type === "ExpressionStatement") {
+    let expression = skipChainExpression(node.expression);
+    if (expression.type === "UnaryExpression")
+      expression = skipChainExpression(expression.argument);
+    if (expression.type === "CallExpression") {
+      let node = expression.callee;
+      while (node.type === "SequenceExpression") {
+        const lastExpression = node.expressions.at(-1);
+        if (lastExpression === undefined)
+          throw new Error("Padding rule invariant: sequence expression is empty");
+        node = lastExpression;
+      }
+      return isFunction(node);
+    }
+  }
+  return false;
+}
+function isCJSRequire(node) {
+  if (node.type === "VariableDeclaration") {
+    const declaration = node.declarations[0];
+    if (declaration?.init) {
+      let call = declaration?.init;
+      while (call.type === "MemberExpression")
+        call = call.object;
+      if (call.type === "CallExpression" && call.callee.type === "Identifier") {
+        return call.callee.name === "require";
+      }
+    }
+  }
+  return false;
+}
+function isBlockLikeStatement(node, sourceCode) {
+  if (node.type === "DoWhileStatement" && node.body.type === "BlockStatement") {
+    return true;
+  }
+  if (isIIFEStatement(node))
+    return true;
+  const lastToken = sourceCode.getLastToken(node, isNotSemicolonToken);
+  const belongingNode = lastToken && isClosingBraceToken(lastToken) ? sourceCode.getNodeByRangeIndex(lastToken.range[0]) : null;
+  return !!belongingNode && (belongingNode.type === "BlockStatement" || belongingNode.type === "SwitchStatement");
+}
+function isDirective(node, sourceCode) {
+  return isTopLevelExpressionStatement(node) && node.expression.type === "Literal" && typeof node.expression.value === "string" && !isParenthesized(node.expression, sourceCode);
+}
+function isDirectivePrologue(node, sourceCode) {
+  if (isDirective(node, sourceCode) && node.parent && "body" in node.parent && Array.isArray(node.parent.body)) {
+    for (const sibling of node.parent.body) {
+      if (sibling === node)
+        break;
+      if (!isDirective(sibling, sourceCode))
+        return false;
+    }
+    return true;
+  }
+  return false;
+}
+function isCJSExport(node) {
+  if (node.type === "ExpressionStatement") {
+    const expression = node.expression;
+    if (expression.type === "AssignmentExpression") {
+      let left = expression.left;
+      if (left.type === "MemberExpression") {
+        while (left.object.type === "MemberExpression")
+          left = left.object;
+        return left.object.type === "Identifier" && (left.object.name === "exports" || left.object.name === "module" && left.property.type === "Identifier" && left.property.name === "exports");
+      }
+    }
+  }
+  return false;
+}
+function isExpression(node, sourceCode) {
+  return node.type === "ExpressionStatement" && !isDirectivePrologue(node, sourceCode);
+}
+function getActualLastToken(node, sourceCode) {
+  const semiToken = sourceCode.getLastToken(node);
+  const prevToken = sourceCode.getTokenBefore(semiToken);
+  const nextToken = sourceCode.getTokenAfter(semiToken);
+  const isSemicolonLessStyle = prevToken && nextToken && prevToken.range[0] >= node.range[0] && isSemicolonToken(semiToken) && !isTokenOnSameLine(prevToken, semiToken) && isTokenOnSameLine(semiToken, nextToken);
+  return isSemicolonLessStyle ? prevToken : semiToken;
+}
+function replacerToRemovePaddingLines(_, trailingSpaces, indentSpaces) {
+  return trailingSpaces + indentSpaces;
+}
+function getReportLoc(node, sourceCode) {
+  if (isSingleLine(node))
+    return node.loc;
+  const line = node.loc.start.line;
+  const sourceLine = sourceCode.lines[line - 1];
+  if (sourceLine === undefined)
+    throw new Error("Padding rule invariant: statement source line is missing");
+  return {
+    start: node.loc.start,
+    end: {
+      line,
+      column: sourceLine.length
+    }
+  };
+}
+function verifyForAny() {}
+function verifyForNever(context, _, nextNode, paddingLines) {
+  if (paddingLines.length === 0)
+    return;
+  context.report({
+    node: nextNode,
+    messageId: "unexpectedBlankLine",
+    loc: getReportLoc(nextNode, context.sourceCode),
+    fix(fixer) {
+      if (paddingLines.length >= 2)
+        return null;
+      const paddingPair = paddingLines[0];
+      if (paddingPair === undefined)
+        throw new Error("Padding rule invariant: reported padding pair is missing");
+      const [prevToken, nextToken] = paddingPair;
+      const start = prevToken.range[1];
+      const end = nextToken.range[0];
+      const text = context.sourceCode.text.slice(start, end).replace(PADDING_LINE_SEQUENCE, replacerToRemovePaddingLines);
+      return fixer.replaceTextRange([start, end], text);
+    }
+  });
+}
+function verifyForAlways(context, prevNode, nextNode, paddingLines) {
+  if (paddingLines.length > 0)
+    return;
+  context.report({
+    node: nextNode,
+    messageId: "expectedBlankLine",
+    loc: getReportLoc(nextNode, context.sourceCode),
+    fix(fixer) {
+      const sourceCode = context.sourceCode;
+      let prevToken = getActualLastToken(prevNode, sourceCode);
+      const nextToken = sourceCode.getFirstTokenBetween(prevToken, nextNode, {
+        includeComments: true,
+        filter(token) {
+          if (isTokenOnSameLine(prevToken, token)) {
+            prevToken = token;
+            return false;
+          }
+          return true;
+        }
+      }) || nextNode;
+      const insertText = isTokenOnSameLine(prevToken, nextToken) ? `
+
+` : `
+`;
+      return fixer.insertTextAfter(prevToken, insertText);
+    }
+  });
+}
+const PaddingTypes = {
+  any: { verify: verifyForAny },
+  never: { verify: verifyForNever },
+  always: { verify: verifyForAlways }
+};
+const MaybeMultilineStatementType = {
+  "block-like": { test: isBlockLikeStatement },
+  expression: { test: isExpression },
+  return: newKeywordTester("ReturnStatement", "return"),
+  export: newKeywordTester([
+    "ExportAllDeclaration",
+    "ExportDefaultDeclaration",
+    "ExportNamedDeclaration"
+  ], "export"),
+  var: newKeywordTester("VariableDeclaration", "var"),
+  let: newKeywordTester("VariableDeclaration", "let"),
+  const: newKeywordTester("VariableDeclaration", "const"),
+  using: {
+    test: (node) => node.type === "VariableDeclaration" && (node.kind === "using" || node.kind === "await using")
+  },
+  type: newKeywordTester("TSTypeAliasDeclaration", "type")
+};
+const StatementTypes = {
+  "*": { test: () => true },
+  exports: { test: isCJSExport },
+  require: { test: isCJSRequire },
+  directive: { test: isDirectivePrologue },
+  iife: { test: isIIFEStatement },
+  block: newNodeTypeTester("BlockStatement"),
+  empty: newNodeTypeTester("EmptyStatement"),
+  function: newNodeTypeTester("FunctionDeclaration"),
+  "ts-method": newNodeTypeTester("TSMethodSignature"),
+  break: newKeywordTester("BreakStatement", "break"),
+  case: newKeywordTester("SwitchCase", "case"),
+  class: newKeywordTester("ClassDeclaration", "class"),
+  continue: newKeywordTester("ContinueStatement", "continue"),
+  debugger: newKeywordTester("DebuggerStatement", "debugger"),
+  default: newKeywordTester(["SwitchCase", "ExportDefaultDeclaration"], "default"),
+  do: newKeywordTester("DoWhileStatement", "do"),
+  for: newKeywordTester([
+    "ForStatement",
+    "ForInStatement",
+    "ForOfStatement"
+  ], "for"),
+  if: newKeywordTester("IfStatement", "if"),
+  import: newKeywordTester("ImportDeclaration", "import"),
+  switch: newKeywordTester("SwitchStatement", "switch"),
+  throw: newKeywordTester("ThrowStatement", "throw"),
+  try: newKeywordTester("TryStatement", "try"),
+  while: newKeywordTester(["WhileStatement", "DoWhileStatement"], "while"),
+  with: newKeywordTester("WithStatement", "with"),
+  "cjs-export": {
+    test: (node, sourceCode) => node.type === "ExpressionStatement" && node.expression.type === "AssignmentExpression" && CJS_EXPORT.test(sourceCode.getText(node.expression.left))
+  },
+  "cjs-import": {
+    test: (node, sourceCode) => node.type === "VariableDeclaration" && node.declarations.length > 0 && node.declarations[0]?.init != null && CJS_IMPORT.test(sourceCode.getText(node.declarations[0].init))
+  },
+  enum: newKeywordTester("TSEnumDeclaration", "enum"),
+  interface: newKeywordTester("TSInterfaceDeclaration", "interface"),
+  "function-overload": newNodeTypeTester("TSDeclareFunction"),
+  ...Object.fromEntries(Object.entries(MaybeMultilineStatementType).flatMap(([key, value]) => [
+    [key, value],
+    [
+      `singleline-${key}`,
+      {
+        ...value,
+        test: (node, sourceCode) => value.test(node, sourceCode) && isSingleLine(node)
+      }
+    ],
+    [
+      `multiline-${key}`,
+      {
+        ...value,
+        test: (node, sourceCode) => value.test(node, sourceCode) && !isSingleLine(node)
+      }
+    ]
+  ]))
+};
+export default function createPaddingLineRule(options) {
+  return {
+    meta: {
+      type: "layout",
+      docs: {
+        description: "Require or disallow padding lines between statements"
+      },
+      fixable: "whitespace",
+      hasSuggestions: false,
+      schema: {
+        $defs: {
+          paddingType: {
+            type: "string",
+            enum: Object.keys(PaddingTypes)
+          },
+          statementType: {
+            type: "string",
+            enum: Object.keys(StatementTypes)
+          },
+          selectorOption: {
+            type: "object",
+            properties: {
+              selector: {
+                type: "string"
+              },
+              lineMode: {
+                type: "string",
+                enum: ["any", "singleline", "multiline"]
+              }
+            },
+            required: ["selector"],
+            additionalProperties: false
+          },
+          statementMatcher: {
+            anyOf: [
+              { $ref: "#/$defs/statementType" },
+              { $ref: "#/$defs/selectorOption" }
+            ]
+          },
+          statementOption: {
+            anyOf: [
+              { $ref: "#/$defs/statementMatcher" },
+              {
+                type: "array",
+                items: { $ref: "#/$defs/statementMatcher" },
+                minItems: 1,
+                uniqueItems: true,
+                additionalItems: false
+              }
+            ]
+          }
+        },
+        type: "array",
+        additionalItems: false,
+        items: {
+          type: "object",
+          properties: {
+            blankLine: { $ref: "#/$defs/paddingType" },
+            prev: { $ref: "#/$defs/statementOption" },
+            next: { $ref: "#/$defs/statementOption" }
+          },
+          additionalProperties: false,
+          required: ["blankLine", "prev", "next"]
+        }
+      },
+      messages: {
+        unexpectedBlankLine: "Unexpected blank line before this statement.",
+        expectedBlankLine: "Expected blank line before this statement."
+      }
+    },
+    create(context) {
+      const sourceCode = context.sourceCode;
+      const selectorMatchedNodes = new Map;
+      const pendingPairs = [];
+      function collectSelectorOption(option) {
+        if (Array.isArray(option)) {
+          for (const item of option)
+            collectSelectorOption(item);
+          return;
+        }
+        if (!isSelectorOption(option))
+          return;
+        selectorMatchedNodes.set(option.selector, new Set);
+      }
+      for (const configure of options) {
+        collectSelectorOption(configure.prev);
+        collectSelectorOption(configure.next);
+      }
+      let scopeInfo = null;
+      function enterScope() {
+        scopeInfo = {
+          upper: scopeInfo,
+          prevNode: null
+        };
+      }
+      function exitScope() {
+        if (scopeInfo)
+          scopeInfo = scopeInfo.upper;
+      }
+      function match(node, type) {
+        let innerStatementNode = node;
+        while (innerStatementNode.type === "LabeledStatement")
+          innerStatementNode = innerStatementNode.body;
+        if (Array.isArray(type))
+          return type.some(match.bind(null, innerStatementNode));
+        if (isSelectorOption(type)) {
+          const matchedNodes = selectorMatchedNodes.get(type.selector);
+          if (!matchedNodes?.has(innerStatementNode))
+            return false;
+          const lineMode = type.lineMode;
+          if (lineMode === "singleline")
+            return isSingleLine(innerStatementNode);
+          else if (lineMode === "multiline")
+            return !isSingleLine(innerStatementNode);
+          return true;
+        } else {
+          const statementType = StatementTypes[type];
+          if (statementType === undefined)
+            throw new Error(`Padding rule invariant: unsupported statement type ${type}`);
+          return statementType.test(innerStatementNode, sourceCode);
+        }
+      }
+      function getPaddingType(prevNode, nextNode) {
+        for (let i = options.length - 1;i >= 0; --i) {
+          const configure = options[i];
+          if (configure === undefined)
+            throw new Error("Padding rule invariant: configuration entry is missing");
+          if (match(prevNode, configure.prev) && match(nextNode, configure.next)) {
+            return PaddingTypes[configure.blankLine];
+          }
+        }
+        return PaddingTypes.any;
+      }
+      function getPaddingLineSequences(prevNode, nextNode) {
+        const pairs = [];
+        let prevToken = getActualLastToken(prevNode, sourceCode);
+        if (nextNode.loc.start.line - prevToken.loc.end.line >= 2) {
+          do {
+            const token = sourceCode.getTokenAfter(prevToken, {
+              includeComments: true
+            });
+            if (token.loc.start.line - prevToken.loc.end.line >= 2)
+              pairs.push([prevToken, token]);
+            prevToken = token;
+          } while (prevToken.range[0] < nextNode.range[0]);
+        }
+        return pairs;
+      }
+      function verify(node) {
+        if (!node.parent || ![
+          "BlockStatement",
+          "Program",
+          "StaticBlock",
+          "SwitchCase",
+          "SwitchStatement",
+          "TSInterfaceBody",
+          "TSModuleBlock",
+          "TSTypeLiteral"
+        ].includes(node.parent.type)) {
+          return;
+        }
+        const prevNode = scopeInfo.prevNode;
+        if (prevNode)
+          pendingPairs.push({ prevNode, nextNode: node });
+        scopeInfo.prevNode = node;
+      }
+      function verifyPendingPairs() {
+        for (const { prevNode, nextNode } of pendingPairs) {
+          const type = getPaddingType(prevNode, nextNode);
+          const paddingLines = getPaddingLineSequences(prevNode, nextNode);
+          type.verify(context, prevNode, nextNode, paddingLines);
+        }
+      }
+      function verifyThenEnterScope(node) {
+        verify(node);
+        enterScope();
+      }
+      const selectorMatchListeners = Object.fromEntries(Array.from(selectorMatchedNodes.keys(), (selector) => [
+        selector,
+        (node) => {
+          selectorMatchedNodes.get(selector)?.add(node);
+        }
+      ]));
+      return {
+        Program: enterScope,
+        "Program:exit": () => {
+          verifyPendingPairs();
+          exitScope();
+        },
+        BlockStatement: enterScope,
+        "BlockStatement:exit": exitScope,
+        SwitchStatement: enterScope,
+        "SwitchStatement:exit": exitScope,
+        SwitchCase: verifyThenEnterScope,
+        "SwitchCase:exit": exitScope,
+        StaticBlock: enterScope,
+        "StaticBlock:exit": exitScope,
+        TSInterfaceBody: enterScope,
+        "TSInterfaceBody:exit": exitScope,
+        TSModuleBlock: enterScope,
+        "TSModuleBlock:exit": exitScope,
+        TSTypeLiteral: enterScope,
+        "TSTypeLiteral:exit": exitScope,
+        TSDeclareFunction: verifyThenEnterScope,
+        "TSDeclareFunction:exit": exitScope,
+        TSMethodSignature: verifyThenEnterScope,
+        "TSMethodSignature:exit": exitScope,
+        ":statement": verify,
+        ...selectorMatchListeners
+      };
+    }
+  };
+}

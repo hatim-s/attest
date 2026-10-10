@@ -18,11 +18,15 @@ const evaluatedRow: MetricResultsTable = {
   duration_ms: null,
 };
 
+function isErrorMessage(value: string | boolean): value is string {
+  return typeof value === 'string';
+}
+
 describe('metric row mapping', () => {
   it('rejects persisted statuses outside the metric discriminant', () => {
-    expect(() =>
-      toMetricEvaluation({ ...evaluatedRow, status: 'pending' } as unknown as MetricResultsTable),
-    ).toThrow('Stored errored metric violates its discriminant.');
+    expect(() => toMetricEvaluation({ ...evaluatedRow, status: 'pending' })).toThrow(
+      'Stored errored metric violates its discriminant.',
+    );
   });
 
   it.each([
@@ -32,7 +36,8 @@ describe('metric row mapping', () => {
     [2, 'Stored evaluated metric violates its discriminant.'],
   ])('maps persisted pass value %s to %s', (pass, expected) => {
     const map = () => toMetricEvaluation({ ...evaluatedRow, pass });
-    if (typeof expected === 'string') expect(map).toThrow(expected);
+
+    if (isErrorMessage(expected)) expect(map).toThrow(expected);
     else expect(map()).toMatchObject({ pass: expected });
   });
 });

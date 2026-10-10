@@ -26,7 +26,18 @@ type VercelSandboxCaseOptions = {
 /** The SDK's own creation parameters, so the injectable factory cannot drift from the SDK. */
 type VercelSandboxCreateParams = NonNullable<Parameters<typeof SandboxSdk.create>[0]>;
 
-type VercelSandboxSdk = Pick<SandboxSdk, 'readFile' | 'runCommand' | 'stop' | 'writeFiles'>;
+/** Executor-owned SDK operations; command execution consumes only completion and timing. */
+type VercelSandboxSdk = Pick<SandboxSdk, 'readFile' | 'writeFiles'> & {
+  runCommand: (
+    params: Parameters<SandboxSdk['runCommand']>[0] & { signal: AbortSignal; args: string[] },
+  ) => Promise<{
+    exitCode: number;
+    durationMs?: number;
+  }>;
+  stop: (
+    options?: Parameters<SandboxSdk['stop']>[0],
+  ) => Promise<void | Awaited<ReturnType<SandboxSdk['stop']>>>;
+};
 
 type VercelSandboxFactory = (params: VercelSandboxCreateParams) => Promise<VercelSandboxSdk>;
 

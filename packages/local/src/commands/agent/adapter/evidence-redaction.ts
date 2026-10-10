@@ -1,4 +1,5 @@
 import type {
+  AgentErrorResponse,
   AgentRequest,
   AgentResponse,
   ContractWarning,
@@ -12,6 +13,20 @@ import { AgentInvocationError, redactTransportText, type InvocationResult } from
 
 import { REDACTED, isSensitiveFieldName } from '../../../internal/redaction.js';
 
+const isString = (value: unknown): value is string => typeof value === 'string';
+
+type ResponseCommon = Pick<AgentResponse, 'protocol' | 'state' | 'trace'>;
+
+type AttemptCommon = Pick<
+  InvocationResult['attempts'][number],
+  'diagnostics' | 'durationMs' | 'rawExcerpt' | 'warnings'
+>;
+
+type StoredAttemptCommon = Pick<
+  StoredAttempt,
+  'diagnostics' | 'durationMs' | 'rawExcerpt' | 'warnings'
+>;
+
 const REQUEST_FIELDS = new Set([
   'protocol',
   'run_id',
@@ -23,8 +38,11 @@ const REQUEST_FIELDS = new Set([
   'conversation_id',
   'state',
 ]);
+
 const RESPONSE_FIELDS = new Set(['protocol', 'output', 'error', 'state', 'trace']);
+
 const TRACE_FIELDS = new Set(['schema', 'trace_id', 'spans']);
+
 const SPAN_FIELDS = new Set([
   'span_id',
   'parent_span_id',
@@ -38,15 +56,22 @@ const SPAN_FIELDS = new Set([
   'input',
   'output',
 ]);
+
 const EVENT_FIELDS = new Set(['name', 'time', 'attributes']);
+
 const STATUS_FIELDS = new Set(['code', 'message']);
 
 /** Redacts JSON payload values and sensitive named fields without claiming their original type. */
+// BOUNDARY: Agent extensions and probe output are untrusted; recursively sanitize them to finite JSON values and redact secrets before reporting.
 const redactProbeValue = (value: unknown, secrets: readonly string[]): JsonValue => {
   if (value === null || typeof value === 'boolean' || typeof value === 'number') return value;
+
   if (typeof value === 'string') return redactTransportText(value, secrets);
+
   if (Array.isArray(value)) return value.map((entry) => redactProbeValue(entry, secrets));
+
   if (typeof value !== 'object') return null;
+
   return Object.fromEntries(
     Object.entries(value)
       .filter(([, entry]) => entry !== undefined)
@@ -57,6 +82,7 @@ const redactProbeValue = (value: unknown, secrets: readonly string[]): JsonValue
   );
 };
 
+// BOUNDARY: Agent schema catchall fields are untrusted extensions; each extension is sanitized to JsonValue and secret strings are removed.
 const redactExtensions = (
   value: Record<string, unknown>,
   knownFields: ReadonlySet<string>,
@@ -82,132 +108,185 @@ const redactAttributes = (
           key,
           isSensitiveFieldName(key)
             ? REDACTED
-            : typeof value === 'string'
+            : isString(value)
               ? redactTransportText(value, secrets)
               : value,
         ]),
       );
+
+/** Redacts optional span status text while retaining the status code and extension fields. */
+const redactSpanStatus = (status: Span['status'], secrets: readonly string[]): Span['status'] => {
+  const redacted: Span['status'] = {
+    ...redactExtensions(status, STATUS_FIELDS, secrets),
+    code: status.code,
+  };
+
+  if (status.message !== undefined) redacted.message = redactTransportText(status.message, secrets);
+
+  return redacted;
+};
 
 /** Redacts trace payload text while retaining schema ids, span ids, enums, and timestamps. */
 const redactTrace = (trace: Trace, secrets: readonly string[]): Trace => ({
   ...redactExtensions(trace, TRACE_FIELDS, secrets),
   schema: trace.schema,
   trace_id: trace.trace_id,
-  spans: trace.spans.map((span): Span => ({
-    ...redactExtensions(span, SPAN_FIELDS, secrets),
-    span_id: span.span_id,
-    parent_span_id: span.parent_span_id,
-    name: redactTransportText(span.name, secrets),
-    kind: span.kind,
-    start_time: span.start_time,
-    end_time: span.end_time,
-    status: {
-      ...redactExtensions(span.status, STATUS_FIELDS, secrets),
-      code: span.status.code,
-      ...(span.status.message === undefined
-        ? {}
-        : { message: redactTransportText(span.status.message, secrets) }),
-    },
-    ...(span.attributes === undefined
-      ? {}
-      : { attributes: redactAttributes(span.attributes, secrets) }),
-    ...(span.events === undefined
-      ? {}
-      : {
-          events: span.events.map((event) => ({
-            ...redactExtensions(event, EVENT_FIELDS, secrets),
-            name: redactTransportText(event.name, secrets),
-            time: event.time,
-            ...(event.attributes === undefined
-              ? {}
-              : { attributes: redactAttributes(event.attributes, secrets) }),
-          })),
-        }),
-    ...(span.input === undefined ? {} : { input: redactProbeValue(span.input, secrets) }),
-    ...(span.output === undefined ? {} : { output: redactProbeValue(span.output, secrets) }),
-  })),
+  spans: trace.spans.map((span): Span => {
+    const redacted: Span = {
+      ...redactExtensions(span, SPAN_FIELDS, secrets),
+      span_id: span.span_id,
+      parent_span_id: span.parent_span_id,
+      name: redactTransportText(span.name, secrets),
+      kind: span.kind,
+      start_time: span.start_time,
+      end_time: span.end_time,
+      status: redactSpanStatus(span.status, secrets),
+    };
+
+    if (!(span.attributes === undefined)) {
+      redacted.attributes = redactAttributes(span.attributes, secrets);
+    }
+
+    if (!(span.events === undefined)) {
+      redacted.events = span.events.map((event) => {
+        const redactedEvent: NonNullable<Span['events']>[number] = {
+          ...redactExtensions(event, EVENT_FIELDS, secrets),
+          name: redactTransportText(event.name, secrets),
+          time: event.time,
+        };
+
+        if (event.attributes !== undefined)
+          redactedEvent.attributes = redactAttributes(event.attributes, secrets);
+
+        return redactedEvent;
+      });
+    }
+
+    if (!(span.input === undefined)) {
+      redacted.input = redactProbeValue(span.input, secrets);
+    }
+
+    if (!(span.output === undefined)) {
+      redacted.output = redactProbeValue(span.output, secrets);
+    }
+
+    return redacted;
+  }),
 });
 
 /** Redacts caller data while retaining request identity and multi-turn structure. */
-const redactAgentRequest = (request: AgentRequest, secrets: readonly string[]): AgentRequest => ({
-  ...redactExtensions(request, REQUEST_FIELDS, secrets),
-  protocol: request.protocol,
-  run_id: request.run_id,
-  case_id: request.case_id,
-  input: redactProbeValue(request.input, secrets),
-  ...(request.params === undefined
-    ? {}
-    : {
-        params: Object.fromEntries(
-          Object.entries(request.params).map(([key, value]) => [
-            key,
-            isSensitiveFieldName(key) ? REDACTED : redactProbeValue(value, secrets),
-          ]),
-        ),
-      }),
-  ...(request.messages === undefined
-    ? {}
-    : {
-        messages: request.messages.map((message) => ({
-          role: message.role,
-          content: redactTransportText(message.content, secrets),
-        })),
-      }),
-  ...(request.turn_index === undefined ? {} : { turn_index: request.turn_index }),
-  ...(request.conversation_id === undefined ? {} : { conversation_id: request.conversation_id }),
-  ...(request.state === undefined ? {} : { state: redactProbeValue(request.state, secrets) }),
-});
+const redactAgentRequest = (request: AgentRequest, secrets: readonly string[]): AgentRequest => {
+  const redacted: AgentRequest = {
+    ...redactExtensions(request, REQUEST_FIELDS, secrets),
+    protocol: request.protocol,
+    run_id: request.run_id,
+    case_id: request.case_id,
+    input: redactProbeValue(request.input, secrets),
+  };
+
+  if (!(request.params === undefined)) {
+    redacted.params = Object.fromEntries(
+      Object.entries(request.params).map(([key, value]) => [
+        key,
+        isSensitiveFieldName(key) ? REDACTED : redactProbeValue(value, secrets),
+      ]),
+    );
+  }
+
+  if (!(request.messages === undefined)) {
+    redacted.messages = request.messages.map((message) => ({
+      role: message.role,
+      content: redactTransportText(message.content, secrets),
+    }));
+  }
+
+  if (!(request.turn_index === undefined)) {
+    redacted.turn_index = request.turn_index;
+  }
+
+  if (!(request.conversation_id === undefined)) {
+    redacted.conversation_id = request.conversation_id;
+  }
+
+  if (!(request.state === undefined)) {
+    redacted.state = redactProbeValue(request.state, secrets);
+  }
+
+  return redacted;
+};
 
 /** Redacts response payloads while preserving protocol, error codes, and valid traces. */
 const redactAgentResponse = (
   response: AgentResponse,
   secrets: readonly string[],
 ): AgentResponse => {
-  const common = {
+  const common: ResponseCommon = {
     ...redactExtensions(response, RESPONSE_FIELDS, secrets),
     protocol: response.protocol,
-    ...(response.state === undefined ? {} : { state: redactProbeValue(response.state, secrets) }),
-    ...(response.trace === undefined ? {} : { trace: redactTrace(response.trace, secrets) }),
   };
+
+  if (response.state !== undefined) common.state = redactProbeValue(response.state, secrets);
+
+  if (response.trace !== undefined) common.trace = redactTrace(response.trace, secrets);
+
   if ('output' in response) {
     return { ...common, output: redactProbeValue(response.output, secrets) };
   }
-  return {
-    ...common,
-    error: {
-      message: redactTransportText(response.error.message, secrets),
-      ...(response.error.code === undefined ? {} : { code: response.error.code }),
-    },
+
+  const error: AgentErrorResponse['error'] = {
+    message: redactTransportText(response.error.message, secrets),
   };
+
+  if (response.error.code !== undefined) error.code = response.error.code;
+
+  return { ...common, error };
 };
 
 /** Redacts diagnostic text while retaining numeric and remote correlation identities. */
 const redactInvocationDiagnostics = (
   diagnostics: InvocationResult['diagnostics'],
   secrets: readonly string[],
-): InvocationResult['diagnostics'] => ({
-  ...(diagnostics.stderrExcerpt === undefined
-    ? {}
-    : { stderrExcerpt: redactTransportText(diagnostics.stderrExcerpt, secrets) }),
-  ...(diagnostics.sandboxError === undefined
-    ? {}
-    : { sandboxError: redactTransportText(diagnostics.sandboxError, secrets) }),
-  ...(diagnostics.lifecycleError === undefined
-    ? {}
-    : { lifecycleError: redactTransportText(diagnostics.lifecycleError, secrets) }),
-  ...(diagnostics.sandboxCleanupConfirmed === undefined
-    ? {}
-    : { sandboxCleanupConfirmed: diagnostics.sandboxCleanupConfirmed }),
-  ...(diagnostics.sandboxCompletionConfirmed === undefined
-    ? {}
-    : { sandboxCompletionConfirmed: diagnostics.sandboxCompletionConfirmed }),
-  ...(diagnostics.exitCode === undefined ? {} : { exitCode: diagnostics.exitCode }),
-  ...(diagnostics.httpStatus === undefined ? {} : { httpStatus: diagnostics.httpStatus }),
-  ...(diagnostics.remoteJobId === undefined ? {} : { remoteJobId: diagnostics.remoteJobId }),
-  ...(diagnostics.unreapedProcessIds === undefined
-    ? {}
-    : { unreapedProcessIds: [...diagnostics.unreapedProcessIds] }),
-});
+): InvocationResult['diagnostics'] => {
+  const redacted: InvocationResult['diagnostics'] = {};
+
+  if (!(diagnostics.stderrExcerpt === undefined)) {
+    redacted.stderrExcerpt = redactTransportText(diagnostics.stderrExcerpt, secrets);
+  }
+
+  if (!(diagnostics.sandboxError === undefined)) {
+    redacted.sandboxError = redactTransportText(diagnostics.sandboxError, secrets);
+  }
+
+  if (!(diagnostics.lifecycleError === undefined)) {
+    redacted.lifecycleError = redactTransportText(diagnostics.lifecycleError, secrets);
+  }
+
+  if (!(diagnostics.sandboxCleanupConfirmed === undefined)) {
+    redacted.sandboxCleanupConfirmed = diagnostics.sandboxCleanupConfirmed;
+  }
+
+  if (!(diagnostics.sandboxCompletionConfirmed === undefined)) {
+    redacted.sandboxCompletionConfirmed = diagnostics.sandboxCompletionConfirmed;
+  }
+
+  if (!(diagnostics.exitCode === undefined)) {
+    redacted.exitCode = diagnostics.exitCode;
+  }
+
+  if (!(diagnostics.httpStatus === undefined)) {
+    redacted.httpStatus = diagnostics.httpStatus;
+  }
+
+  if (!(diagnostics.remoteJobId === undefined)) {
+    redacted.remoteJobId = diagnostics.remoteJobId;
+  }
+
+  if (!(diagnostics.unreapedProcessIds === undefined)) {
+    redacted.unreapedProcessIds = [...diagnostics.unreapedProcessIds];
+  }
+
+  return redacted;
+};
 
 const redactWarnings = (
   warnings: readonly ContractWarning[],
@@ -219,24 +298,32 @@ const redactWarnings = (
     message: redactTransportText(warning.message, secrets),
   }));
 
-const redactRawExcerpt = (excerpt: RawExcerpt, secrets: readonly string[]): RawExcerpt => ({
-  text: redactTransportText(excerpt.text, secrets),
-  truncated: excerpt.truncated,
-  ...(excerpt.sha256 === undefined ? {} : { sha256: excerpt.sha256 }),
-});
+const redactRawExcerpt = (excerpt: RawExcerpt, secrets: readonly string[]): RawExcerpt => {
+  const redacted: RawExcerpt = {
+    text: redactTransportText(excerpt.text, secrets),
+    truncated: excerpt.truncated,
+  };
+
+  if (!(excerpt.sha256 === undefined)) {
+    redacted.sha256 = excerpt.sha256;
+  }
+
+  return redacted;
+};
 
 const redactAttempt = (
   attempt: InvocationResult['attempts'][number],
   secrets: readonly string[],
 ): InvocationResult['attempts'][number] => {
-  const common = {
+  const common: AttemptCommon = {
     diagnostics: redactInvocationDiagnostics(attempt.diagnostics, secrets),
     durationMs: attempt.durationMs,
-    ...(attempt.rawExcerpt === undefined
-      ? {}
-      : { rawExcerpt: redactRawExcerpt(attempt.rawExcerpt, secrets) }),
     warnings: redactWarnings(attempt.warnings, secrets),
   };
+
+  if (attempt.rawExcerpt !== undefined)
+    common.rawExcerpt = redactRawExcerpt(attempt.rawExcerpt, secrets);
+
   if (attempt.status === 'invocation_error') {
     return {
       ...common,
@@ -249,31 +336,31 @@ const redactAttempt = (
   }
 
   const report = attempt.report;
-  return {
+
+  const redacted: Extract<InvocationResult['attempts'][number], { status: 'ok' }> = {
     ...common,
     status: 'ok',
     raw: redactProbeValue(attempt.raw, secrets),
-    ...(report === undefined
-      ? {}
-      : report.ok
-        ? {
-            report: {
-              ok: true as const,
-              value: redactAgentResponse(report.value, secrets),
-              warnings: redactWarnings(report.warnings, secrets),
-            },
-          }
-        : {
-            report: {
-              ok: false as const,
-              errors: report.errors.map((error) => ({
-                path: error.path,
-                message: redactTransportText(error.message, secrets),
-              })),
-              warnings: redactWarnings(report.warnings, secrets),
-            },
-          }),
   };
+
+  if (report !== undefined) {
+    redacted.report = report.ok
+      ? {
+          ok: true,
+          value: redactAgentResponse(report.value, secrets),
+          warnings: redactWarnings(report.warnings, secrets),
+        }
+      : {
+          ok: false,
+          errors: report.errors.map((error) => ({
+            path: error.path,
+            message: redactTransportText(error.message, secrets),
+          })),
+          warnings: redactWarnings(report.warnings, secrets),
+        };
+  }
+
+  return redacted;
 };
 
 /** Redacts every text-bearing part of invocation evidence without changing schema fields. */
@@ -283,6 +370,7 @@ const redactInvocation = (
 ): InvocationResult => {
   const attempts = invocation.attempts.map((attempt) => redactAttempt(attempt, secrets));
   const terminal = redactAttempt(invocation, secrets);
+
   return { ...terminal, attempts };
 };
 
@@ -292,12 +380,15 @@ const redactStoredAttempt = (
   secrets: readonly string[],
 ): StoredAttempt => {
   const redacted = redactAttempt(attempt, secrets);
-  const common = {
+
+  const common: StoredAttemptCommon = {
     diagnostics: redacted.diagnostics,
     durationMs: redacted.durationMs,
-    ...(redacted.rawExcerpt === undefined ? {} : { rawExcerpt: redacted.rawExcerpt }),
     warnings: redacted.warnings,
   };
+
+  if (redacted.rawExcerpt !== undefined) common.rawExcerpt = redacted.rawExcerpt;
+
   return redacted.status === 'ok'
     ? { ...common, status: 'ok' }
     : {
@@ -314,6 +405,7 @@ const redactMetricEvaluation = (
   secrets: readonly string[],
 ): StoredMetricEvaluation => {
   if (secrets.length === 0) return evaluation;
+
   const evidence = {
     rationale:
       evaluation.rationale === undefined
@@ -324,6 +416,7 @@ const redactMetricEvaluation = (
     judgeIo:
       evaluation.judgeIo === undefined ? undefined : redactProbeValue(evaluation.judgeIo, secrets),
   };
+
   if (evaluation.status === 'error') {
     return {
       ...evaluation,
@@ -334,6 +427,7 @@ const redactMetricEvaluation = (
       },
     };
   }
+
   return { ...evaluation, ...evidence };
 };
 

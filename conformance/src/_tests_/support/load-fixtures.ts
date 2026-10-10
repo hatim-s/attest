@@ -1,3 +1,4 @@
+import { isString } from '@attest/contracts';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -18,30 +19,46 @@ type LoadedFixture = {
   envelope: FixtureEnvelope;
 };
 
-const allowedExpectValues = new Set<FixtureEnvelope['expect']>([
-  'valid',
-  'invalid',
-  'valid-with-warnings',
-]);
+// BOUNDARY: Fixture JSON object fields remain untyped until the envelope's field validators run.
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  value !== null && typeof value === 'object' && !Array.isArray(value);
 
-/** Validates the shared fixture envelope before a fixture reaches a contract parser. */
+const isStringList = (value: unknown): value is string[] =>
+  Array.isArray(value) && value.every(isString);
+
+/** Validates the shared fixture envelope before a fixture reaches its contract parser. */
+// BOUNDARY: Committed fixture JSON must declare an expected outcome, input and valid diagnostic path lists.
 const parseFixtureEnvelope = (value: unknown, path: string): FixtureEnvelope => {
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
-    throw new Error(`Fixture envelope must be an object: ${path}`);
-  }
+  if (!isRecord(value)) throw new Error(`Fixture envelope must be an object: ${path}`);
 
-  const envelope = value as Record<string, unknown>;
-  if (typeof envelope.description !== 'string' || envelope.description.length === 0) {
+  if (!isString(value.description) || value.description.length === 0)
     throw new Error(`Fixture envelope is missing description: ${path}`);
-  }
-  if (!allowedExpectValues.has(envelope.expect as FixtureEnvelope['expect'])) {
+
+  if (
+    value.expect !== 'valid' &&
+    value.expect !== 'invalid' &&
+    value.expect !== 'valid-with-warnings'
+  )
     throw new Error(`Fixture envelope has invalid expect value: ${path}`);
-  }
-  if (!Object.hasOwn(envelope, 'input')) {
-    throw new Error(`Fixture envelope is missing input: ${path}`);
+
+  if (!Object.hasOwn(value, 'input')) throw new Error(`Fixture envelope is missing input: ${path}`);
+
+  const result: FixtureEnvelope = {
+    description: value.description,
+    expect: value.expect,
+    input: value.input,
+  };
+
+  for (const key of ['issue_paths', 'preserve_paths', 'warning_codes'] as const) {
+    const field = value[key];
+
+    if (field === undefined) continue;
+
+    if (!isStringList(field)) throw new Error(`Fixture envelope has invalid ${key}: ${path}`);
+    result[key] = field;
   }
 
-  return envelope as FixtureEnvelope;
+  return result;
 };
 
 const fixtureRoot = join(import.meta.dirname, '../../..', 'fixtures');
@@ -57,8 +74,9 @@ const loadFixtures = (): LoadedFixture[] =>
         .map((file) => {
           const path = join(fixtureRoot, directory.name, file.name);
           let parsed: unknown;
+
           try {
-            parsed = JSON.parse(readFileSync(path, 'utf8')) as unknown;
+            parsed = JSON.parse(readFileSync(path, 'utf8'));
           } catch (error) {
             throw new Error(`Fixture JSON is unparseable: ${path}`, { cause: error });
           }

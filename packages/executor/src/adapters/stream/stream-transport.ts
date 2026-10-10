@@ -1,3 +1,5 @@
+import type { JsonValue } from '@attest/contracts';
+import { parseJson } from '../../internal/json-value.js';
 import { AgentInvocationError, abortedError } from '../../errors.js';
 import { LineSplitter } from '../../internal/line-splitter.js';
 import { createRawExcerpt } from '../../internal/raw-excerpt.js';
@@ -43,12 +45,13 @@ type ConsumeOptions = {
 };
 
 /** Parses one event payload; SSE and JSONL report bad JSON under their own framing name. */
-const parseEventData = (source: string, framing: 'sse' | 'jsonl'): unknown => {
+const parseEventData = (source: string, framing: 'sse' | 'jsonl'): JsonValue => {
   try {
-    return JSON.parse(source) as unknown;
+    return parseJson(source);
   } catch (error: unknown) {
     const message =
       framing === 'sse' ? 'SSE data is not valid JSON.' : 'JSONL stream contains non-JSON data.';
+
     throw new AgentInvocationError('invalid_envelope', message, { cause: error });
   }
 };
@@ -75,6 +78,7 @@ const consumeResponse = async (
     interruption ??= error;
     response.cancel();
   };
+
   const resetTransportIdle = (): void => {
     clearTimeout(transportIdle);
     transportIdle = setTimeout(
@@ -82,6 +86,7 @@ const consumeResponse = async (
       caps.idleMs,
     );
   };
+
   const resetApplicationIdle = (): void => {
     clearTimeout(applicationIdle);
     applicationIdle = setTimeout(
@@ -89,18 +94,23 @@ const consumeResponse = async (
       caps.idleMs,
     );
   };
+
   const abort = (): void => interrupt(abortedError(options.callerSignal, 'Streaming invocation'));
 
   /** Records one event and returns the terminal envelope once it arrives. */
   const acceptEvent = (event: StreamEvent): CandidateResponse | undefined => {
     if (event.heartbeat) {
       evidence.record(event);
+
       if (agent.transport.heartbeat_resets_application_idle === true) resetApplicationIdle();
+
       return undefined;
     }
+
     const raw = parseEventData(event.source, framing);
     evidence.record(event, raw);
     resetApplicationIdle();
+
     try {
       return options.extractTerminal(raw, event.eventName);
     } catch (error: unknown) {
@@ -114,23 +124,31 @@ const consumeResponse = async (
   const acceptLine = (line: string): CandidateResponse | undefined => {
     if (sse === undefined) {
       if (line.trim().length === 0) return undefined;
+
       return acceptEvent({ heartbeat: false, source: line });
     }
+
     if (line === '' && sse.bufferedDataBytes > caps.eventBytes) {
       throw capError('Streaming response event exceeds its event byte cap.');
     }
+
     const event = sse.push(line);
+
     return event === undefined ? undefined : acceptEvent(event);
   };
 
   /** Feeds split lines in order and stops at the first terminal event. */
   const acceptLines = (text: string, final: boolean): CandidateResponse | undefined => {
     const split = final ? splitter.end() : splitter.push(text);
+
     for (const line of split.lines) {
       const terminal = acceptLine(line);
+
       if (terminal !== undefined) return terminal;
     }
+
     if (split.overflow) throw capError('Streaming response line exceeds its event byte cap.');
+
     return undefined;
   };
 
@@ -146,7 +164,9 @@ const consumeResponse = async (
 
   const completed = (terminal: CandidateResponse): ConsumedStream => {
     if (interruption !== undefined) throw interruption;
+
     if (signal.aborted) throw abortedError(options.callerSignal, 'Streaming invocation');
+
     return {
       response: terminal,
       evidence: evidence.text,
@@ -157,22 +177,30 @@ const consumeResponse = async (
   signal.addEventListener('abort', abort, { once: true });
   resetTransportIdle();
   resetApplicationIdle();
+
   if (signal.aborted) abort();
+
   try {
     for await (const chunk of response.body) {
       resetTransportIdle();
       totalBytes += chunk.byteLength;
+
       if (totalBytes > caps.totalBytes) {
         throw capError('Streaming response exceeds its aggregate evidence cap.');
       }
+
       const terminal = acceptLines(decode(chunk), false);
+
       if (terminal !== undefined) return completed(terminal);
     }
+
     // Cancellation may close a fetch reader cleanly. It must not flush buffered terminal data.
     if (interruption !== undefined) throw interruption;
+
     if (signal.aborted) throw abortedError(options.callerSignal, 'Streaming invocation');
     const trailing = decode();
     const terminal = acceptLines(trailing, false) ?? acceptLines('', true);
+
     if (terminal !== undefined) return completed(terminal);
     throw new AgentInvocationError(
       'invalid_envelope',
@@ -184,6 +212,7 @@ const consumeResponse = async (
       (error instanceof AgentInvocationError
         ? error
         : new AgentInvocationError('network', 'Streaming response failed.', { cause: error }));
+
     failure.applicationStarted = evidence.applicationStarted;
     failure.rawExcerpt = createRawExcerpt(evidence.text);
     throw failure;
@@ -211,6 +240,7 @@ const streamOnce = async (
   const open = options.requestStream ?? (await import('./node-stream-request.js')).openNodeStream;
   const response = await open(agent, materialized, signal, options);
   const { status } = response;
+
   if (status < 200 || status >= 300) {
     response.cancel();
     throw new AgentInvocationError('http_status', `Streaming HTTP returned status ${status}.`, {
@@ -218,6 +248,7 @@ const streamOnce = async (
       retryAfterMs: parseRetryAfter(response.headers['retry-after']),
     });
   }
+
   if (agent.transport.framing === 'sse' && contentType(response) !== 'text/event-stream') {
     response.cancel();
     throw new AgentInvocationError(
@@ -225,6 +256,7 @@ const streamOnce = async (
       'SSE response must use the text/event-stream content type.',
     );
   }
+
   const consumed = await consumeResponse(response, {
     agent,
     signal,
@@ -232,6 +264,7 @@ const streamOnce = async (
     secrets: options.secrets ?? [],
     extractTerminal: createTerminalExtractor(agent),
   });
+
   return { ...consumed, status };
 };
 

@@ -26,6 +26,7 @@ const duplicateValues = (values: readonly string[]): string[] => {
   const seen = new Set<string>();
   const duplicates = new Set<string>();
   values.forEach((value) => (seen.has(value) ? duplicates.add(value) : seen.add(value)));
+
   return [...duplicates].sort();
 };
 
@@ -37,10 +38,13 @@ const assertSnapshotHashes = (project: ResolutionProject): void => {
       'The loaded project is missing its canonical project hash.',
     );
   }
+
   const hashFailures: { id: string; resource_type: string }[] = [];
   const { contentHashes } = project;
+
   const hasAuthoredHash = (resourceType: 'agents' | 'metrics' | 'tests', id: string): boolean =>
     SHA256_PATTERN.test(contentHashes[resourceType][id] ?? '');
+
   project.agents.forEach(({ id }) => {
     if (!hasAuthoredHash('agents', id)) hashFailures.push({ id, resource_type: 'agent' });
   });
@@ -52,6 +56,7 @@ const assertSnapshotHashes = (project: ResolutionProject): void => {
   });
   project.datasets.forEach(({ metadata: { id } }) => {
     const hashes = contentHashes.datasets[id];
+
     if (
       hashes === undefined ||
       !SHA256_PATTERN.test(hashes.data) ||
@@ -60,6 +65,7 @@ const assertSnapshotHashes = (project: ResolutionProject): void => {
       hashFailures.push({ id, resource_type: 'dataset' });
     }
   });
+
   if (hashFailures.length > 0) {
     throw new EvalResolutionError(
       'project_invalid',
@@ -71,6 +77,7 @@ const assertSnapshotHashes = (project: ResolutionProject): void => {
 
 const requireUniqueSelection = (label: string, values: readonly string[] | undefined): void => {
   const duplicates = duplicateValues(values ?? []);
+
   if (duplicates.length > 0) {
     throw new EvalResolutionError(
       'cli_usage',
@@ -91,8 +98,10 @@ const expandTestCases = (
     case: testCase,
     source: { kind: 'direct' },
   }));
+
   test.datasets.forEach((attachment) => {
     const dataset = datasetsById.get(attachment.dataset_id);
+
     if (dataset === undefined) {
       throw new EvalResolutionError(
         'project_invalid',
@@ -100,8 +109,10 @@ const expandTestCases = (
         { details: { dataset_id: attachment.dataset_id, test_id: test.id } },
       );
     }
+
     dataset.cases.forEach((testCase) => {
       const tags = new Set(testCase.tags ?? []);
+
       if (attachment.tags?.some((tag) => !tags.has(tag)) === true) return;
       expanded.push({
         case: testCase,
@@ -111,6 +122,7 @@ const expandTestCases = (
   });
 
   const collisions = duplicateValues(expanded.map(({ case: testCase }) => testCase.id));
+
   if (collisions.length > 0) {
     throw new EvalResolutionError(
       'project_invalid',
@@ -120,6 +132,7 @@ const expandTestCases = (
       },
     );
   }
+
   return expanded;
 };
 
@@ -135,6 +148,7 @@ const resolveMetrics = (
       { metric: metricsById.get(metric_id), threshold },
     ]),
   );
+
   for (const [metricId, value] of resolved) {
     if (value.metric === undefined) {
       throw new EvalResolutionError(
@@ -146,8 +160,10 @@ const resolveMetrics = (
       );
     }
   }
+
   testCase.metric_overrides?.forEach((override) => {
     const current = resolved.get(override.metric_id);
+
     if (current === undefined || current.metric === undefined) {
       throw new EvalResolutionError(
         'project_invalid',
@@ -155,19 +171,26 @@ const resolveMetrics = (
         { details: { case_id: testCase.id, metric_id: override.metric_id, test_id: test.id } },
       );
     }
+
     if (override.enabled === false) {
       resolved.delete(override.metric_id);
+
       return;
     }
+
     resolved.set(override.metric_id, {
       metric: current.metric,
       threshold: override.threshold ?? current.threshold,
     });
   });
-  return [...resolved.values()].map(({ metric, threshold }) => ({
-    metric: metric!,
-    ...(threshold === undefined ? {} : { threshold }),
-  }));
+
+  return [...resolved.values()].map(({ metric, threshold }) => {
+    const result: ResolvedEvalMetric = { metric: metric! };
+
+    if (threshold !== undefined) result.threshold = threshold;
+
+    return result;
+  });
 };
 
 /** Generates a move-stable logical execution id from project, test, and authored case identity. */

@@ -4,6 +4,7 @@ import { dirname, join } from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
+import { z } from 'zod';
 import { Kysely } from 'kysely';
 import { afterEach, describe, expect, it } from 'vitest';
 
@@ -16,11 +17,13 @@ import { migrateToLatest } from '../migration-runner.js';
 import { openReadonlyRunStore, openStore, openRunStoreSnapshot } from '../run-store.js';
 
 const stores: { close(): Promise<void> }[] = [];
+
 const directories: string[] = [];
 
 const temporaryDatabasePath = async (): Promise<string> => {
   const directory = await mkdtemp(join(tmpdir(), 'attest-database-'));
   directories.push(directory);
+
   return join(directory, 'runs.db');
 };
 
@@ -32,11 +35,13 @@ interface ReturningDatabase {
 const expectMutationReturning = async (handle: SqliteHandle): Promise<void> => {
   await handle.exec('CREATE TABLE returning_items (id INTEGER PRIMARY KEY, name TEXT NOT NULL)');
   const database = new Kysely<ReturningDatabase>({ dialect: createSqliteDialect(handle) });
+
   const row = await database
     .insertInto('returning_items')
     .values({ id: 1, name: 'first' })
     .returning(['id', 'name'])
     .executeTakeFirstOrThrow();
+
   expect(row).toEqual({ id: 1, name: 'first' });
   await expect(
     database
@@ -56,8 +61,10 @@ const expectMutationReturning = async (handle: SqliteHandle): Promise<void> => {
   await database.destroy();
 };
 
-const isLibsqlUnavailable = (error: unknown): boolean => {
-  const code = (error as { code?: unknown } | null)?.code;
+const isLibsqlUnavailable = (cause: unknown): boolean => {
+  const parsed = z.object({ code: z.string().optional() }).safeParse(cause);
+  const code = parsed.success ? parsed.data.code : undefined;
+
   return code === 'ERR_MODULE_NOT_FOUND' || code === 'ERR_DLOPEN_FAILED';
 };
 
@@ -74,6 +81,7 @@ const runCrashWriter = async (
       ['--experimental-strip-types', '--experimental-loader', loaderPath, writerPath, databasePath],
       { cwd: dirname(databasePath) },
     );
+
     let standardError = '';
     let standardOutput = '';
     child.stderr.setEncoding('utf8');
@@ -88,8 +96,10 @@ const runCrashWriter = async (
     child.once('close', (code) => {
       if (code === null) {
         reject(new Error(`Crash writer was terminated by a signal: ${standardError}`));
+
         return;
       }
+
       resolveExit({ code, standardError, standardOutput });
     });
   });
@@ -182,11 +192,13 @@ describe('SQLite store database', () => {
     const sourcePath = await temporaryDatabasePath();
     const writer = await openStore(sourcePath);
     stores.push(writer);
+
     const run = await writer.runs.createRun({
       schemaId: 'attest.project',
       configHash: 'committed-in-wal',
       configJson: '{}',
     });
+
     expect(await readdir(dirname(sourcePath))).toContain('runs.db-wal');
 
     const snapshotPath = await temporaryDatabasePath();
@@ -201,10 +213,12 @@ describe('SQLite store database', () => {
   it('rolls back all schema changes when a migration fails partway', async () => {
     const path = await temporaryDatabasePath();
     const handle = await openSqliteHandle(path);
+
     const failingHandle: SqliteHandle = {
       ...handle,
       exec: async (sql) => {
         await handle.exec(sql);
+
         if (sql.includes('CREATE TABLE runs')) {
           throw new Error('injected migration failure');
         }
@@ -242,23 +256,29 @@ describe('SQLite store database', () => {
   it('returns inserted rows through the node:sqlite handle', async ({ skip }) => {
     const path = await temporaryDatabasePath();
     const handle = await openNodeSqliteHandle(path);
+
     if (!handle) {
       skip();
+
       return;
     }
+
     await expectMutationReturning(handle);
   });
 
   it('runs WAL, transactions, rollback, and RETURNING through forced libsql', async ({ skip }) => {
     const path = await temporaryDatabasePath();
     let handle: SqliteHandle;
+
     try {
       handle = await openLibsqlHandle(path);
     } catch (error) {
       if (isLibsqlUnavailable(error)) {
         skip();
+
         return;
       }
+
       throw error;
     }
 
@@ -276,8 +296,9 @@ describe('SQLite store database', () => {
     await handle.rollback();
     expect(await handle.prepare('SELECT id FROM transaction_items').all()).toEqual([{ id: 1 }]);
     expect(
-      ((await handle.prepare('PRAGMA journal_mode').all())[0] as { journal_mode: string })
-        .journal_mode,
+      z
+        .object({ journal_mode: z.string() })
+        .parse((await handle.prepare('PRAGMA journal_mode').all())[0]).journal_mode,
     ).toBe('wal');
     await expectMutationReturning(handle);
   });

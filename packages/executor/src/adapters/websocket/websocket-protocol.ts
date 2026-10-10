@@ -3,7 +3,7 @@ import { isDeepStrictEqual } from 'node:util';
 import type { AgentResource, JsonValue, WebSocketErrorClassification } from '@attest/contracts';
 
 import { AgentInvocationError } from '../../errors.js';
-import { isJsonValue } from '../../internal/json-value.js';
+import { isJsonValue, isString, parseJson } from '../../internal/json-value.js';
 import { extractRemoteError } from '../../internal/remote-error.js';
 import { readJsonPointer } from '../http/json-pointer.js';
 
@@ -12,7 +12,7 @@ type WebSocketAgentResource = AgentResource & {
 };
 
 type ServerEnvelope = {
-  raw: unknown;
+  raw: JsonValue;
   requestId: string;
 };
 
@@ -35,9 +35,13 @@ type MessageInterpretation = {
 /** Maps transport failures onto the stable WebSocket evidence vocabulary. */
 const errorClassification = (error: AgentInvocationError): WebSocketErrorClassification => {
   if (error.classification !== undefined) return error.classification;
+
   if (error.code === 'cancelled') return 'cancelled';
+
   if (error.code === 'timeout') return 'attempt_timeout';
+
   if (error.code === 'invalid_envelope') return 'invalid_json';
+
   return 'connection_failed';
 };
 
@@ -46,9 +50,10 @@ const parseServerEnvelope = (
   text: string,
   requestIdPointer: string,
 ): ServerEnvelope | EnvelopeFailure => {
-  let raw: unknown;
+  let raw: JsonValue;
+
   try {
-    raw = JSON.parse(text) as unknown;
+    raw = parseJson(text);
   } catch (cause: unknown) {
     return {
       classification: 'invalid_json',
@@ -57,8 +62,10 @@ const parseServerEnvelope = (
       }),
     };
   }
+
   const requestId = readJsonPointer(raw, requestIdPointer);
-  if (typeof requestId !== 'string') {
+
+  if (!isString(requestId)) {
     return {
       classification: 'uncorrelated_server_work',
       error: new AgentInvocationError(
@@ -67,22 +74,25 @@ const parseServerEnvelope = (
       ),
     };
   }
+
   return { raw, requestId };
 };
 
 /** Interprets one correlated envelope as progress, a terminal value, or a protocol failure. */
 const interpretServerMessage = (
-  raw: unknown,
+  raw: JsonValue,
   agent: WebSocketAgentResource,
   previouslyAcknowledged: boolean,
 ): MessageInterpretation => {
   const acknowledgementValue = readJsonPointer(raw, agent.transport.acknowledgement_pointer);
   const result = readJsonPointer(raw, agent.transport.result_pointer);
   const extractedError = readJsonPointer(raw, agent.transport.error_pointer);
+
   const rawTrace =
     agent.transport.trace_pointer === undefined
       ? undefined
       : readJsonPointer(raw, agent.transport.trace_pointer);
+
   const acknowledgement = agent.transport.acknowledgement_values.some((value) =>
     isDeepStrictEqual(value, acknowledgementValue),
   );
@@ -97,10 +107,10 @@ const interpretServerMessage = (
     };
   }
 
-  const progress = {
-    acknowledgement,
-    ...(rawTrace === undefined ? {} : { trace: rawTrace }),
-  };
+  const progress: Pick<MessageInterpretation, 'acknowledgement' | 'trace'> = { acknowledgement };
+
+  if (rawTrace !== undefined) progress.trace = rawTrace;
+
   const invalid = (
     classification: WebSocketErrorClassification,
     message: string,
@@ -111,8 +121,10 @@ const interpretServerMessage = (
       error: new AgentInvocationError('invalid_envelope', message),
     },
   });
+
   const hasResult = result !== undefined;
   const hasError = extractedError !== undefined && extractedError !== null;
+
   if (hasResult && hasError) {
     return invalid(
       'result_extraction_failed',
@@ -136,21 +148,25 @@ const interpretServerMessage = (
       },
     };
   }
+
   if (hasResult) {
     if (!isJsonValue(result)) {
       return invalid('result_extraction_failed', 'WebSocket result extraction failed.');
     }
+
     return {
       ...progress,
       terminal: { kind: 'result', value: result },
     };
   }
+
   if (!acknowledgement && rawTrace === undefined) {
     return invalid(
       'acknowledgement_extraction_failed',
       'WebSocket acknowledgement extraction failed.',
     );
   }
+
   return progress;
 };
 

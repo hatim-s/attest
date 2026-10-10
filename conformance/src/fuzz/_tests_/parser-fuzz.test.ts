@@ -8,24 +8,37 @@ import {
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 
-type Parser = (candidate: unknown) => unknown;
+type Parser =
+  | typeof parseAgentRequest
+  | typeof parseAgentResponse
+  | typeof parseMetricRequest
+  | typeof parseMetricResult
+  | typeof parseTrace;
+
+// BOUNDARY: Generated malformed parser inputs are mutable containers whose fields intentionally have no domain contract.
 type MutableRecord = Record<string, unknown>;
+
 type MutationKind = 'delete-key' | 'duplicate-array-entry' | 'inject-key' | 'retype-value';
+
 type MutationInstruction = {
   index: number;
   kind: MutationKind;
   replacement: unknown;
 };
+
+// BOUNDARY: Mutation locations point into generated malformed objects or arrays, not validated application data.
 type ValueLocation = {
   container: MutableRecord | unknown[];
   key: number | string;
 };
 
 const defaultIterationCount = 200;
+
 const configuredIterationCount = Number.parseInt(
   process.env.FUZZ_ITERATIONS ?? String(defaultIterationCount),
   10,
 );
+
 const iterationCount =
   Number.isFinite(configuredIterationCount) && configuredIterationCount > 0
     ? configuredIterationCount
@@ -37,6 +50,7 @@ const validAgentRequest = {
   case_id: 'greeting-basic',
   input: { question: 'What is the capital of France?', tags: ['geography'] },
 };
+
 const validTrace = {
   schema: 'attest.trace',
   trace_id: 'trace-1',
@@ -52,17 +66,20 @@ const validTrace = {
     },
   ],
 };
+
 const validAgentResponse = {
   protocol: 'attest.agent-invocation',
   output: ['Paris'],
   trace: validTrace,
 };
+
 const validMetricRequest = {
   protocol: 'attest.metric-evaluation',
   case: { id: 'greeting', input: ['Capital of France?'] },
   output: 'Paris',
   trace: validTrace,
 };
+
 const validMetricResult = {
   score: 1,
   pass: true,
@@ -84,14 +101,17 @@ const deepStructures = fc
   .tuple(fc.integer({ min: 1, max: 200 }), fc.boolean(), fc.jsonValue())
   .map(([depth, startsWithArray, leaf]) => {
     let value: unknown = leaf;
+
     for (let level = 0; level < depth; level += 1) {
       const useArray = (level % 2 === 0) === startsWithArray;
       value = useArray ? [value] : { nested: value };
     }
+
     return value;
   });
 
 const hostilePattern = '\u0000\u202e\ud800\udc00\ud800';
+
 const oneMegabyteHostileString = hostilePattern
   .repeat(Math.ceil(1_048_576 / hostilePattern.length))
   .slice(0, 1_048_576);
@@ -107,6 +127,7 @@ const hostileStrings = fc.oneof(
 );
 
 const mutationValues = fc.oneof(jsonNoise, nonJsonNoise, deepStructures, hostileStrings);
+
 const mutationInstructions = fc.record({
   index: fc.nat(),
   kind: fc.constantFrom<MutationKind>(
@@ -122,6 +143,7 @@ const isMutableRecord = (value: unknown): value is MutableRecord =>
   value !== null && typeof value === 'object' && !Array.isArray(value);
 
 /** Collects every nested object, array, and value slot a mutation can target. */
+// BOUNDARY: Generated fuzz values are inspected only for mutable containers; scalar values are ignored.
 const collectMutationTargets = (
   value: unknown,
   records: MutableRecord[],
@@ -134,6 +156,7 @@ const collectMutationTargets = (
       locations.push({ container: value, key: index });
       collectMutationTargets(entry, records, arrays, locations);
     });
+
     return;
   }
 
@@ -153,7 +176,7 @@ const mutateValidDocument = (
   seed: MutableRecord,
   instruction: MutationInstruction,
 ): MutableRecord => {
-  const document = structuredClone(seed) as MutableRecord;
+  const document = structuredClone(seed);
   const records: MutableRecord[] = [];
   const arrays: unknown[][] = [];
   const locations: ValueLocation[] = [];
@@ -162,41 +185,49 @@ const mutateValidDocument = (
   if (instruction.kind === 'delete-key') {
     const objectLocations = locations.filter(({ container }) => !Array.isArray(container));
     const target = objectLocations[instruction.index % objectLocations.length];
+
     if (target === undefined) {
       return document;
     }
 
-    delete (target.container as MutableRecord)[target.key];
+    if (isMutableRecord(target.container)) delete target.container[target.key];
+
     return document;
   }
 
   if (instruction.kind === 'retype-value') {
     const target = locations[instruction.index % locations.length];
+
     if (target === undefined) {
       return document;
     }
 
     Reflect.set(target.container, target.key, instruction.replacement);
+
     return document;
   }
 
   if (instruction.kind === 'inject-key') {
     const target = records[instruction.index % records.length];
+
     if (target === undefined) {
       return document;
     }
 
     target[`fuzz_unknown_${instruction.index}`] = instruction.replacement;
+
     return document;
   }
 
   const nonEmptyArrays = arrays.filter((array) => array.length > 0);
   const target = nonEmptyArrays[instruction.index % nonEmptyArrays.length];
+
   if (target === undefined) {
     return document;
   }
 
   target.push(target[instruction.index % target.length]);
+
   return document;
 };
 
@@ -215,8 +246,10 @@ const parserCandidates = (mutatedDocuments: fc.Arbitrary<MutableRecord>) =>
   fc.oneof(jsonNoise, nonJsonNoise, deepStructures, hostileStrings, mutatedDocuments);
 
 /** Fails when a parser throws or returns something other than a `{ ok }` result. */
+// BOUNDARY: Generated fuzz input is passed to the public parser and its explicit result envelope is asserted.
 const expectCrashFreeResult = (parser: Parser, candidate: unknown): void => {
-  let result: unknown;
+  let result: ReturnType<Parser>;
+
   try {
     result = parser(candidate);
   } catch (error) {
@@ -224,12 +257,8 @@ const expectCrashFreeResult = (parser: Parser, candidate: unknown): void => {
   }
 
   expect(result).not.toBeNull();
-  expect(typeof result).toBe('object');
-  if (result === null || typeof result !== 'object') {
-    return;
-  }
-
-  expect(typeof Reflect.get(result, 'ok')).toBe('boolean');
+  expect(result).toBeTypeOf('object');
+  expect(result.ok).toBeTypeOf('boolean');
 };
 
 const assertParserNeverThrows = (

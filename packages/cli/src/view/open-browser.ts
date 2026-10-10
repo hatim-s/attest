@@ -8,6 +8,7 @@ const BROWSER_OPENERS: Partial<Record<NodeJS.Platform, string>> = {
 /** Opens one local URL with the platform browser, returning false on unsupported platforms. */
 const openBrowser = async (url: string): Promise<boolean> => {
   const executable = BROWSER_OPENERS[process.platform];
+
   if (executable === undefined) return false;
 
   await new Promise<void>((resolve, reject) => {
@@ -19,6 +20,7 @@ const openBrowser = async (url: string): Promise<boolean> => {
     });
     child.once('error', reject);
   });
+
   return true;
 };
 

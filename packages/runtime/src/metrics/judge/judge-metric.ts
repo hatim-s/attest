@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import { performance } from 'node:perf_hooks';
 
 import type { JsonValue } from '@attest/contracts';
@@ -17,6 +18,7 @@ import { resolveThroughJudgeCache, type JudgeCache } from './judge-cache.js';
 import { summarizeTraceForJudge } from './rubric-prompt.js';
 
 const DEFAULT_JUDGE_TIMEOUT_MS = 60_000;
+
 const DEFAULT_JUDGE_THRESHOLD = 0.5;
 
 /** Supplies the provider boundary and resource controls owned by the enclosing run. */
@@ -31,7 +33,8 @@ type EvaluateJudgeMetricOptions = {
  * Copies judge evidence into plain JSON. Records carry optional fields that may be undefined, which
  * the store's JSON schema rejects, and hooks must not mutate provider-owned objects.
  */
-const toJson = (value: unknown): JsonValue => JSON.parse(canonicalStringify(value)) as JsonValue;
+// BOUNDARY: Judge evidence is canonicalized and checked as JSON before persistence.
+const toJson = (value: unknown): JsonValue => z.json().parse(JSON.parse(canonicalStringify(value)));
 
 /** Scores one outcome identically for live and cached verdicts, keeping token usage as evidence. */
 const judgeEvaluation = (
@@ -42,31 +45,35 @@ const judgeEvaluation = (
 ): StoredMetricEvaluation => {
   const { verdict, record } = outcome;
   const threshold = definition.threshold ?? DEFAULT_JUDGE_THRESHOLD;
+
   const result = {
     score: verdict.score,
     pass: verdict.score >= threshold,
     rationale: verdict.rationale,
     details: record.usage === undefined ? undefined : toJson({ usage: record.usage }),
   };
+
   return { ...evaluatedMetric(definition, result, durationMs), judgeIo };
 };
 
 /** Classifies a failed judge call; typed metric errors keep their code and evidence. */
-const judgeFailure = (error: unknown, signal: AbortSignal | undefined): MetricErrorInfo => {
-  if (error instanceof AttestMetricError) {
+const judgeFailure = (cause: unknown, signal: AbortSignal | undefined): MetricErrorInfo => {
+  if (cause instanceof AttestMetricError) {
     return {
-      code: error.code,
-      message: error.message,
-      details: error.details === undefined ? undefined : toJson(error.details),
+      code: cause.code,
+      message: cause.message,
+      details: cause.details === undefined ? undefined : toJson(cause.details),
     };
   }
+
   if (signal?.aborted === true) {
     return { code: 'metric_cancelled', message: 'Judge evaluation was cancelled.' };
   }
+
   return {
     code: 'judge_provider_error',
     message:
-      error instanceof Error ? error.message : 'Judge provider call failed for an unknown reason.',
+      cause instanceof Error ? cause.message : 'Judge provider call failed for an unknown reason.',
   };
 };
 
@@ -81,6 +88,7 @@ const evaluateJudgeMetric = async (
 ): Promise<StoredMetricEvaluation> => {
   const startedAt = performance.now();
   const document = buildEvaluationDocument(context);
+
   const request: JudgeRequest = {
     model: definition.model,
     rubric: definition.rubric,
@@ -91,6 +99,7 @@ const evaluateJudgeMetric = async (
       traceSummary: summarizeTraceForJudge(document.trace),
     },
   };
+
   const scope = {
     client: options.client,
     signal: options.signal,
@@ -99,8 +108,10 @@ const evaluateJudgeMetric = async (
 
   try {
     options.signal?.throwIfAborted();
+
     if (options.cache === undefined) {
       const outcome = await options.client.scoreRubric(request, scope);
+
       return judgeEvaluation(
         definition,
         outcome,
@@ -108,8 +119,10 @@ const evaluateJudgeMetric = async (
         performance.now() - startedAt,
       );
     }
+
     const { outcome, source, key } = await resolveThroughJudgeCache(options.cache, request, scope);
     const judgeIo = toJson({ ...outcome.record, cache: source, key });
+
     return judgeEvaluation(definition, outcome, judgeIo, performance.now() - startedAt);
   } catch (error: unknown) {
     return metricError(

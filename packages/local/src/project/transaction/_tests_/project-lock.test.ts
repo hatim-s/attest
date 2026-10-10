@@ -19,6 +19,7 @@ const temporaryDirectories: string[] = [];
 const createRoot = async (): Promise<string> => {
   const root = await mkdtemp(join(tmpdir(), 'attest-project-lock-'));
   temporaryDirectories.push(root);
+
   return root;
 };
 
@@ -40,6 +41,7 @@ describe('project lock', () => {
     const root = await createRoot();
     const first = await acquireProjectLock(root);
     let failure: unknown;
+
     try {
       await acquireProjectLock(root);
     } catch (error: unknown) {
@@ -57,6 +59,7 @@ describe('project lock', () => {
 
   it('classifies a dead owner as stale without removing its lock', async () => {
     const root = await createRoot();
+
     const stale: ProjectLockMetadata = {
       schema: PROJECT_LOCK_SCHEMA,
       owner_token: 'stale-owner',
@@ -65,16 +68,19 @@ describe('project lock', () => {
       hostname: (await import('node:os')).hostname(),
       created_at: '2026-08-07T00:00:00.000Z',
     };
+
     await writeLock(root, stale);
     const lockPath = join(root, PROJECT_LOCK_FILE);
     const before = await readFile(lockPath);
 
     let acquireFailure: unknown;
+
     try {
       await acquireProjectLock(root);
     } catch (error: unknown) {
       acquireFailure = error;
     }
+
     expect(acquireFailure).toMatchObject({ code: 'project_lock_stale' });
     expect(await readFile(lockPath)).toEqual(before);
   });
@@ -86,6 +92,7 @@ describe('project lock', () => {
     await writeFile(lockPath, '{"pid":"unknown"}\n');
 
     let failure: unknown;
+
     try {
       await acquireProjectLock(root);
     } catch (error: unknown) {

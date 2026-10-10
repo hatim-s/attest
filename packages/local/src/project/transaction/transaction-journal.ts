@@ -22,7 +22,9 @@ import { resolveSafeProjectPath } from './project-path.js';
 import { ProjectTransactionError } from './project-transaction-error.js';
 
 const TRANSACTIONS_DIRECTORY = '.attest/transactions';
+
 const TRANSACTION_JOURNAL_SCHEMA = 'attest.project-transaction';
+
 const JOURNAL_FILE = 'journal.json';
 
 type TransactionFileChange = {
@@ -79,6 +81,7 @@ const readByteHash = async (path: string): Promise<string | null> => {
     if (errnoCode(error) === 'ENOENT') {
       return null;
     }
+
     throw error;
   }
 };
@@ -102,15 +105,20 @@ const missingParentDirectories = async (
   paths: readonly string[],
 ): Promise<string[]> => {
   const missing = new Set<string>();
+
   for (const path of paths) {
     const segments = dirname(path)
       .split('/')
       .filter((segment) => segment !== '.');
+
     let current = '';
+
     for (const segment of segments) {
       current = current.length === 0 ? segment : `${current}/${segment}`;
+
       try {
         const metadata = await lstat(join(root, current));
+
         if (!metadata.isDirectory() || metadata.isSymbolicLink()) {
           throw new ProjectTransactionError(
             'project_invalid',
@@ -122,10 +130,12 @@ const missingParentDirectories = async (
         if (errnoCode(error) !== 'ENOENT') {
           throw error;
         }
+
         missing.add(current);
       }
     }
   }
+
   return [...missing].sort((left, right) => left.split('/').length - right.split('/').length);
 };
 
@@ -144,10 +154,12 @@ const prepareTransaction = async (
   await mkdir(backupDirectory, { recursive: true });
 
   const entries: TransactionJournalEntry[] = [];
+
   for (const [index, change] of changes.entries()) {
     const destination = await resolveSafeProjectPath(root, change.path);
     const originalHash = await readByteHash(destination);
     const backupPath = originalHash === null ? null : `backups/${index}`;
+
     if (backupPath !== null) {
       const absoluteBackup = join(directory, backupPath);
       await copyFile(destination, absoluteBackup);
@@ -156,11 +168,13 @@ const prepareTransaction = async (
 
     const stagedPath = change.type === 'write' ? `staged/${index}` : null;
     const nextHash = change.type === 'write' ? hashBytes(change.contents ?? '') : null;
+
     if (stagedPath !== null) {
       const absoluteStage = join(directory, stagedPath);
       await writeFile(absoluteStage, change.contents ?? '', { mode: 0o644 });
       await syncWrittenFile(absoluteStage);
     }
+
     entries.push({
       backup_path: backupPath,
       next_hash: nextHash,
@@ -182,24 +196,29 @@ const prepareTransaction = async (
     published_count: 0,
     created_directories: await missingParentDirectories(
       root,
-      changes.filter(({ type }) => type === 'write').map(({ path }) => path),
+      changes.flatMap(({ type, path }) => (type === 'write' ? [path] : [])),
     ),
     entries,
   };
+
   const prepared = { directory, journal, journalPath: join(directory, JOURNAL_FILE) };
   await writeTransactionJournal(prepared);
   await syncPath(join(root, TRANSACTIONS_DIRECTORY));
+
   return prepared;
 };
 
+// BOUNDARY: Durable transaction journal text is untrusted disk input; validate its schema and transaction directory identity before recovery.
 const parseTransactionJournal = (raw: string, directory: string): TransactionJournal => {
   const path = relative(dirname(dirname(directory)), directory);
   let value: unknown;
+
   try {
-    value = JSON.parse(raw) as unknown;
+    value = JSON.parse(raw);
   } catch {
     value = undefined;
   }
+
   if (value === null || typeof value !== 'object' || Array.isArray(value)) {
     throw new ProjectTransactionError(
       'project_recovery_required',
@@ -207,7 +226,9 @@ const parseTransactionJournal = (raw: string, directory: string): TransactionJou
       { path },
     );
   }
+
   const parsed = transactionJournalSchema.safeParse(value);
+
   if (!parsed.success) {
     throw new ProjectTransactionError(
       'project_recovery_required',
@@ -215,6 +236,7 @@ const parseTransactionJournal = (raw: string, directory: string): TransactionJou
       { path },
     );
   }
+
   return parsed.data;
 };
 
@@ -222,6 +244,7 @@ const parseTransactionJournal = (raw: string, directory: string): TransactionJou
 const readPreparedTransaction = async (directory: string): Promise<PreparedTransaction> => {
   const journalPath = join(directory, JOURNAL_FILE);
   let raw: string;
+
   try {
     raw = await readFile(journalPath, 'utf8');
   } catch (error: unknown) {
@@ -231,6 +254,7 @@ const readPreparedTransaction = async (directory: string): Promise<PreparedTrans
       { path: journalPath, cause: error },
     );
   }
+
   return { directory, journal: parseTransactionJournal(raw, directory), journalPath };
 };
 
@@ -242,6 +266,7 @@ const ensureExpectedState = async (
   for (const entry of prepared.journal.entries) {
     const destination = await resolveSafeProjectPath(root, entry.path);
     const expectedHash = expected === 'next' ? entry.next_hash : entry.original_hash;
+
     if ((await readByteHash(destination)) !== expectedHash) {
       throw new ProjectTransactionError(
         'project_recovery_required',
@@ -278,12 +303,15 @@ const rollbackPreparedTransaction = async (
 ): Promise<void> => {
   prepared.journal.status = 'rolling_back';
   await writeTransactionJournal(prepared);
+
   for (const entry of [...prepared.journal.entries].reverse()) {
     const destination = await resolveSafeProjectPath(root, entry.path);
     const currentHash = await readByteHash(destination);
+
     if (currentHash === entry.original_hash) {
       continue;
     }
+
     if (currentHash !== entry.next_hash) {
       throw new ProjectTransactionError(
         'project_recovery_required',
@@ -305,7 +333,9 @@ const rollbackPreparedTransaction = async (
           { path: entry.path },
         );
       }
+
       const backup = join(prepared.directory, entry.backup_path);
+
       if ((await readByteHash(backup)) !== entry.original_hash) {
         throw new ProjectTransactionError(
           'project_recovery_required',
@@ -313,13 +343,16 @@ const rollbackPreparedTransaction = async (
           { path: entry.path },
         );
       }
+
       const sibling = join(dirname(destination), `.attest-recovery-${randomUUID()}.tmp`);
       await copyFile(backup, sibling);
       await syncPath(sibling);
       await rename(sibling, destination);
     }
+
     await syncPath(dirname(destination));
   }
+
   await ensureExpectedState(root, prepared, 'original');
   await removeCreatedDirectories(root, prepared.journal.created_directories);
   prepared.journal.status = 'rolled_back';
@@ -343,21 +376,26 @@ const recoverProjectTransactions = async (
   if (lock.root !== root) {
     throw new ProjectTransactionError('project_locked', 'Recovery lock belongs to another root.');
   }
+
   const transactionsRoot = join(root, TRANSACTIONS_DIRECTORY);
   let names: string[];
+
   try {
     names = await readdir(transactionsRoot);
   } catch (error: unknown) {
     if (errnoCode(error) === 'ENOENT') {
       return [];
     }
+
     throw error;
   }
 
   const results: RecoveryResult[] = [];
+
   for (const name of names.sort()) {
     const directory = join(transactionsRoot, name);
     const metadata = await lstat(directory);
+
     if (!metadata.isDirectory() || metadata.isSymbolicLink()) {
       throw new ProjectTransactionError(
         'project_recovery_required',
@@ -365,10 +403,13 @@ const recoverProjectTransactions = async (
         { path: `${TRANSACTIONS_DIRECTORY}/${name}` },
       );
     }
+
     const prepared = await readPreparedTransaction(directory);
+
     const manifest = prepared.journal.entries.find(
       ({ path }) => path === prepared.journal.manifest_path,
     );
+
     if (manifest === undefined) {
       throw new ProjectTransactionError(
         'project_recovery_required',
@@ -376,10 +417,12 @@ const recoverProjectTransactions = async (
         { path: `${TRANSACTIONS_DIRECTORY}/${name}/${JOURNAL_FILE}` },
       );
     }
+
     const manifestHash = await readByteHash(await resolveSafeProjectPath(root, manifest.path));
     // A code-only cloud revision can keep identical manifest bytes. In that case the
     // manifest cannot prove publication completed; only the committed journal can.
     const unchangedManifest = manifest.original_hash === manifest.next_hash;
+
     if (
       manifestHash === manifest.next_hash &&
       (!unchangedManifest || prepared.journal.status === 'committed')
@@ -391,6 +434,7 @@ const recoverProjectTransactions = async (
       results.push({ action: 'completed_commit', transactionId: prepared.journal.transaction_id });
       continue;
     }
+
     if (manifestHash !== manifest.original_hash) {
       throw new ProjectTransactionError(
         'project_recovery_required',
@@ -401,10 +445,12 @@ const recoverProjectTransactions = async (
         },
       );
     }
+
     await rollbackPreparedTransaction(root, prepared);
     await cleanupPreparedTransaction(root, prepared);
     results.push({ action: 'rolled_back', transactionId: prepared.journal.transaction_id });
   }
+
   return results;
 };
 

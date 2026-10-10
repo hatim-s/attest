@@ -1,6 +1,8 @@
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 
+import { z } from 'zod';
+
 import type { JsonValue } from '@attest/contracts';
 
 import { LocalError } from '../errors/index.js';
@@ -24,6 +26,7 @@ type ParseJsonTextOptions = {
 const readSourceText = async (source: string, options: ReadSourceTextOptions): Promise<string> => {
   try {
     if (source === '-') return await options.readStdin();
+
     return await readFile(resolve(options.workingDirectory, source), 'utf8');
   } catch (error: unknown) {
     throw new LocalError('cli_usage', `Could not read the ${options.path} input.`, {
@@ -37,7 +40,7 @@ const readSourceText = async (source: string, options: ReadSourceTextOptions): P
 /** Parses one JSON document; the error never echoes the text because it may hold secrets. */
 const parseJsonText = (text: string, options: ParseJsonTextOptions): JsonValue => {
   try {
-    return JSON.parse(text) as JsonValue;
+    return z.json().parse(JSON.parse(text));
   } catch (error: unknown) {
     throw new LocalError('cli_usage', `${options.path} is not valid JSON.`, {
       path: options.path,

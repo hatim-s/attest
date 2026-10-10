@@ -26,22 +26,25 @@ const idMatchBasis = (row: NormalizedImportRow): MatchBasis =>
 
 const conflictDestination = (matchedBy: MatchBasis): string => {
   if (matchedBy === 'content') return '';
+
   return '/id';
 };
 
 const upsertIdentityDiagnostics = (rows: readonly NormalizedImportRow[]): ImportDiagnostic[] =>
-  rows
-    .filter((row) => row.identitySource === 'content')
-    .map((row) =>
-      importDiagnostic({
-        code: 'upsert_identity_required',
-        message: 'Upsert requires an explicit mapped id or stable source key.',
-        hint: 'Map id or pass --key so changed content retains its case identity.',
-        sourceField: '<identity>',
-        destinationPath: '/id',
-        location: row.location,
-      }),
-    );
+  rows.flatMap((row) =>
+    row.identitySource === 'content'
+      ? [
+          importDiagnostic({
+            code: 'upsert_identity_required',
+            message: 'Upsert requires an explicit mapped id or stable source key.',
+            hint: 'Map id or pass --key so changed content retains its case identity.',
+            sourceField: '<identity>',
+            destinationPath: '/id',
+            location: row.location,
+          }),
+        ]
+      : [],
+  );
 
 /**
  * Applies sync and conflict policy against the target's existing cases. Matching is by id first,
@@ -50,9 +53,11 @@ const upsertIdentityDiagnostics = (rows: readonly NormalizedImportRow[]): Import
 const reconcileRows = (deduped: DedupedRows, request: TabularImportRequest): ReconciledImport => {
   const sync = request.sync ?? 'append';
   const conflict = request.onConflict ?? (sync === 'upsert' ? 'update' : 'error');
+
   const cases: TestCase[] = (request.existingCases ?? []).map((testCase) =>
     structuredClone(testCase),
   );
+
   // Kept in step with `cases` so each case is hashed once rather than once per imported row.
   const fingerprints = cases.map(fingerprintCaseContent);
   const diagnostics: ImportDiagnostic[] = [];
@@ -70,6 +75,7 @@ const reconcileRows = (deduped: DedupedRows, request: TabularImportRequest): Rec
         decisions.push({ action: 'skip', case_id: row.case.id, matched_by: 'id', ...row.location });
         continue;
       }
+
       diagnostics.push(
         importDiagnostic({
           code: 'resolved_case_collision',
@@ -86,6 +92,7 @@ const reconcileRows = (deduped: DedupedRows, request: TabularImportRequest): Rec
 
     const idIndex = cases.findIndex(({ id }) => id === row.case.id);
     const matchIndex = idIndex >= 0 ? idIndex : fingerprints.indexOf(row.contentFingerprint);
+
     if (matchIndex < 0) {
       cases.push(row.case);
       fingerprints.push(row.contentFingerprint);
@@ -93,13 +100,16 @@ const reconcileRows = (deduped: DedupedRows, request: TabularImportRequest): Rec
       decisions.push({ action: 'insert', case_id: row.case.id });
       continue;
     }
+
     const matchedBy: MatchBasis = idIndex >= 0 ? idMatchBasis(row) : 'content';
     const stableId = cases[matchIndex]!.id;
+
     if (conflict === 'skip') {
       skipped += 1;
       decisions.push({ action: 'skip', case_id: stableId, matched_by: matchedBy, ...row.location });
       continue;
     }
+
     if (conflict === 'update') {
       cases[matchIndex] = { ...row.case, id: stableId };
       fingerprints[matchIndex] = row.contentFingerprint;
@@ -112,6 +122,7 @@ const reconcileRows = (deduped: DedupedRows, request: TabularImportRequest): Rec
       });
       continue;
     }
+
     diagnostics.push(
       importDiagnostic({
         code: 'existing_case_conflict',
@@ -130,6 +141,7 @@ const reconcileRows = (deduped: DedupedRows, request: TabularImportRequest): Rec
       sortImportDiagnostics(diagnostics),
     );
   }
+
   return {
     cases,
     counts: { inserted, read: deduped.rows.length + deduped.skipped, skipped, updated },

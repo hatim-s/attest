@@ -1,12 +1,21 @@
-import type { JsonValue } from '@attest/contracts';
+import { isJsonValue, type JsonValue } from '@attest/contracts';
 
-/** Narrows extracted foreign data to JSON so it can become part of a native response envelope. */
-const isJsonValue = (value: unknown): value is JsonValue => {
-  if (value === null || ['string', 'number', 'boolean'].includes(typeof value)) return true;
-  if (Array.isArray(value)) return value.every(isJsonValue);
-  return (
-    typeof value === 'object' && Object.values(value as Record<string, unknown>).every(isJsonValue)
-  );
+/** Decodes a transport JSON document into the contracts-owned recursive JSON value. */
+const parseJson = (source: string): JsonValue => {
+  const value: unknown = JSON.parse(source);
+
+  if (!isJsonValue(value)) throw new TypeError('Transport document is not a JSON value.');
+
+  return value;
 };
 
-export { isJsonValue };
+const isString = (value: unknown): value is string => typeof value === 'string';
+
+const isNumber = (value: unknown): value is number => typeof value === 'number';
+
+const isBoolean = (value: unknown): value is boolean => typeof value === 'boolean';
+
+const isJsonObject = (value: JsonValue): value is { [key: string]: JsonValue } =>
+  value !== null && typeof value === 'object' && !Array.isArray(value);
+
+export { isBoolean, isJsonObject, isJsonValue, isNumber, isString, parseJson };

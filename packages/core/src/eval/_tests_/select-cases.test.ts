@@ -10,6 +10,7 @@ const population: SelectableCase[] = Array.from({ length: 100 }, (_, index) => (
   },
   source: index < 50 ? { kind: 'direct' } : { kind: 'dataset', dataset_id: 'shared' },
 }));
+
 const keys = (cases: readonly SelectableCase[]) =>
   cases.map((item) => `${item.test_id}/${item.case.id}`);
 
@@ -20,6 +21,7 @@ describe('core case selection', () => {
       case: { id: `case-${index}` },
       source: { kind: 'direct' },
     }));
+
     expect(
       selectCases(candidates, { sample: { count: 3, seed: 'v1' } }).cases.map(
         ({ case: testCase }) => testCase.id,
@@ -50,6 +52,7 @@ describe('core case selection', () => {
       dataset_ids: ['shared'],
       sample: { count: 10, seed: 'fixed' },
     });
+
     expect(result.summary).toMatchObject({
       total_cases: 100,
       matched_cases: 25,

@@ -36,6 +36,7 @@ const dedupeImportRows = (
 ): DedupedRows & { diagnostics: ImportDiagnostic[] } => {
   const diagnostics: ImportDiagnostic[] = [];
   const decisions: DedupedRows['decisions'] = [];
+
   if (request.dedupe === 'key' && request.keySource === undefined) {
     diagnostics.push(
       importDiagnostic({
@@ -46,19 +47,25 @@ const dedupeImportRows = (
       }),
     );
   }
+
   const seen = {
     content: new Map<string, SeenRow>(),
     id: new Map<string, SeenRow>(),
     key: new Map<string, SeenRow>(),
   };
+
   const kept: NormalizedImportRow[] = [];
   let skipped = 0;
+
   for (const [index, row] of rows.entries()) {
     const priorFor = (basis: DedupeBasis): SeenRow | undefined => {
       const value = basisValue(row, basis);
+
       return value === undefined ? undefined : seen[basis].get(value);
     };
+
     const selectedPrior = request.dedupe === undefined ? undefined : priorFor(request.dedupe);
+
     if (request.dedupe !== undefined && selectedPrior !== undefined) {
       skipped += 1;
       decisions.push({
@@ -69,8 +76,10 @@ const dedupeImportRows = (
       });
       continue;
     }
+
     for (const basis of DEDUPE_BASES) {
       const prior = priorFor(basis);
+
       if (prior !== undefined) {
         diagnostics.push(
           importDiagnostic({
@@ -83,11 +92,15 @@ const dedupeImportRows = (
           }),
         );
       }
+
       const value = basisValue(row, basis);
+
       if (value !== undefined) seen[basis].set(value, { index, row });
     }
+
     kept.push(row);
   }
+
   return { decisions, diagnostics, rows: kept, skipped };
 };
 

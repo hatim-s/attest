@@ -1,3 +1,4 @@
+import { isString } from '@attest/contracts';
 import { importDiagnostic } from './import-diagnostics.js';
 import type { ImportDiagnostic } from './import-types.js';
 
@@ -9,8 +10,9 @@ interface DecodedSource {
 
 /** Decodes strict UTF-8 and drops a leading byte-order mark; invalid bytes become a diagnostic. */
 const decodeSource = (source: string | Uint8Array): DecodedSource => {
-  const bytes = typeof source === 'string' ? new TextEncoder().encode(source) : source;
+  const bytes = isString(source) ? new TextEncoder().encode(source) : source;
   let decoded: string;
+
   try {
     decoded = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
   } catch {
@@ -19,9 +21,12 @@ const decodeSource = (source: string | Uint8Array): DecodedSource => {
       message: 'Import source is not valid UTF-8.',
       hint: 'Re-encode the complete source as UTF-8 and retry.',
     });
+
     return { bytes, diagnostics: [diagnostic], text: '' };
   }
+
   const text = decoded.startsWith('﻿') ? decoded.slice(1) : decoded;
+
   return { bytes, diagnostics: [], text };
 };
 

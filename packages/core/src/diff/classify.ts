@@ -31,17 +31,23 @@ const sortedMetricNames = (caseRecord: CaseRecord): string[] =>
 const hasIdenticalMetricScores = (base: CaseRecord, candidate: CaseRecord): boolean => {
   const baseNames = sortedMetricNames(base);
   const candidateNames = sortedMetricNames(candidate);
+
   if (baseNames.length !== candidateNames.length) return false;
+
   if (!baseNames.every((name, index) => name === candidateNames[index])) return false;
 
   const candidateMetrics = metricsByName(candidate);
   let sharedScoreCount = 0;
+
   for (const baseMetric of base.metrics) {
     const candidateMetric = candidateMetrics.get(baseMetric.metricName);
+
     if (baseMetric.status !== 'evaluated' || candidateMetric?.status !== 'evaluated') continue;
+
     if (Math.abs(candidateMetric.score - baseMetric.score) >= SCORE_EQUALITY_EPSILON) return false;
     sharedScoreCount += 1;
   }
+
   return sharedScoreCount > 0;
 };
 
@@ -51,13 +57,18 @@ const classifyTransition = (
   candidate: JudgedCase | undefined,
 ): CaseTransitionKind => {
   if (!base) return 'added';
+
   if (!candidate) return 'removed';
 
   const basePassed = base.verdict === 'pass';
   const candidatePassed = candidate.verdict === 'pass';
+
   if (basePassed && candidatePassed) return 'still_passing';
+
   if (candidatePassed) return 'fixed';
+
   if (basePassed) return 'regressed';
+
   return 'still_failing';
 };
 
@@ -72,7 +83,9 @@ const computePassTransition = (
   candidate: StoredMetricEvaluation | undefined,
 ): MetricDelta['passTransition'] => {
   if (passed(base) && !passed(candidate)) return 'lost';
+
   if (!passed(base) && passed(candidate)) return 'gained';
+
   return 'unchanged';
 };
 
@@ -83,31 +96,37 @@ const computeMetricDeltas = (
   const baseMetrics = metricsByName(base);
   const candidateMetrics = metricsByName(candidate);
   const metricNames = [...new Set([...baseMetrics.keys(), ...candidateMetrics.keys()])].toSorted();
+
   return metricNames.map((metricName) => {
     const baseMetric = baseMetrics.get(metricName);
     const candidateMetric = candidateMetrics.get(metricName);
     const baseScore = scoreOf(baseMetric);
     const candidateScore = scoreOf(candidateMetric);
+
     const metricDelta: MetricDelta = {
       metricName,
       baseScore,
       candidateScore,
       passTransition: computePassTransition(baseMetric, candidateMetric),
     };
+
     if (baseScore !== undefined && candidateScore !== undefined) {
       metricDelta.delta = candidateScore - baseScore;
     }
+
     return metricDelta;
   });
 };
 
 const indexCases = (cases: CaseRecord[]): Map<string, Map<string, CaseRecord>> => {
   const suites = new Map<string, Map<string, CaseRecord>>();
+
   for (const caseRecord of cases) {
     const suite = suites.get(caseRecord.suiteName) ?? new Map<string, CaseRecord>();
     suite.set(caseRecord.caseId, caseRecord);
     suites.set(caseRecord.suiteName, suite);
   }
+
   return suites;
 };
 
@@ -121,6 +140,7 @@ const isFlakinessSuspected = (
   comparison: RunComparison,
 ): boolean => {
   if (!base || !candidate) return false;
+
   return (
     comparison.baseConfigHash === comparison.candidateConfigHash &&
     base.record.inputHash === candidate.record.inputHash &&
@@ -147,6 +167,7 @@ const classifyRuns = (
   const candidateIndex = indexCases(candidateCases);
   const suiteNames = [...new Set([...baseIndex.keys(), ...candidateIndex.keys()])].toSorted();
   const transitions: CaseTransition[] = [];
+
   const counts: Record<CaseTransitionKind, number> = {
     added: 0,
     removed: 0,
@@ -155,33 +176,46 @@ const classifyRuns = (
     still_passing: 0,
     still_failing: 0,
   };
+
   const totals = { base: 0, basePassed: 0, candidate: 0, candidatePassed: 0 };
   let baseOnlyCases = 0;
   let candidateOnlyCases = 0;
   let flakySuspectCount = 0;
+
   for (const suiteName of suiteNames) {
     const baseSuite = baseIndex.get(suiteName);
     const candidateSuite = candidateIndex.get(suiteName);
+
     const caseIds = [
       ...new Set([...(baseSuite?.keys() ?? []), ...(candidateSuite?.keys() ?? [])]),
     ].toSorted();
+
     for (const caseId of caseIds) {
       const base = judgeCase(baseSuite?.get(caseId));
       const candidate = judgeCase(candidateSuite?.get(caseId));
+
       if (!base) candidateOnlyCases += 1;
+
       if (!candidate) baseOnlyCases += 1;
+
       if (comparison.sharedOnly === true && (!base || !candidate)) continue;
+
       if (base) {
         totals.base += 1;
+
         if (base.verdict === 'pass') totals.basePassed += 1;
       }
+
       if (candidate) {
         totals.candidate += 1;
+
         if (candidate.verdict === 'pass') totals.candidatePassed += 1;
       }
+
       const kind = classifyTransition(base, candidate);
       counts[kind] += 1;
       const flaky = isFlakinessSuspected(base, candidate, comparison);
+
       if (flaky) flakySuspectCount += 1;
       transitions.push({
         suiteName,
@@ -205,9 +239,11 @@ const classifyRuns = (
     basePassRate: passRate(totals.basePassed, totals.base),
     candidatePassRate: passRate(totals.candidatePassed, totals.candidate),
   };
+
   if (comparison.sharedOnly === true) {
     summary.coverage = { sharedCases: transitions.length, baseOnlyCases, candidateOnlyCases };
   }
+
   return { summary, transitions };
 };
 

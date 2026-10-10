@@ -163,9 +163,11 @@ describe('authored resource contracts', () => {
     const result = projectManifestSchema.safeParse(candidate);
 
     expect(result.success).toBe(false);
+
     if (result.success) {
       return;
     }
+
     expect(result.error.issues[0]).toMatchObject({
       path: ['resources', 'agents', 0, 'path'],
       message: 'must equal canonical path attest/agents/support.json',
@@ -187,9 +189,11 @@ describe('authored resource contracts', () => {
     const result = projectManifestSchema.safeParse(candidate);
 
     expect(result.success).toBe(false);
+
     if (result.success) {
       return;
     }
+
     expect(result.error.issues).toContainEqual(
       expect.objectContaining({ path: ['resources', 'agents', 1, 'id'] }),
     );
@@ -206,9 +210,11 @@ describe('authored resource contracts', () => {
     const result = projectResourcesSchema.safeParse(candidate);
 
     expect(result.success).toBe(false);
+
     if (result.success) {
       return;
     }
+
     expect(result.error.issues.map(({ path }) => path)).toEqual(
       expect.arrayContaining([
         ['project', 'resources', 'agents', 0, 'id'],
@@ -390,10 +396,12 @@ describe('agent transport contract', () => {
       { source: 'one.json', destination: first },
       { source: 'two.json', destination: second },
     ];
+
     const sandbox =
       list === 'files'
         ? { kind: 'vercel', files: entries }
         : { kind: 'vercel', files: [], artifacts: entries };
+
     const transport = {
       kind: 'native_cli',
       lifecycle: 'per_case',
@@ -403,6 +411,7 @@ describe('agent transport contract', () => {
 
     const result = agentResourceSchema.safeParse({ ...agent, transport });
     expect(result.success).toBe(false);
+
     if (result.success) return;
     expect(result.error.issues).toContainEqual(
       expect.objectContaining({ path: ['transport', 'sandbox', list, 1, 'destination'] }),
@@ -421,6 +430,7 @@ describe('agent transport contract', () => {
   it('validates all polling invariants', () => {
     const polling = transports.find((transport) => transport.kind === 'polling');
     expect(polling?.kind).toBe('polling');
+
     if (polling?.kind !== 'polling') throw new Error('Expected polling fixture.');
     expect(
       agentResourceSchema.safeParse({
@@ -451,6 +461,7 @@ describe('agent transport contract', () => {
 
 describe('command request contract', () => {
   const base = { schema: COMMAND_REQUEST_SCHEMA_ID } as const;
+
   const requests: CommandRequest[] = [
     { ...base, command: 'project.init', name: 'Support' },
     {

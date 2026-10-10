@@ -20,7 +20,7 @@ const preview = (evidence: string, operator: string): string =>
   `Assertion preview: evidence=${evidence}; operator=${operator}.\n`;
 
 /** Operators that need one more value as soon as they are chosen. */
-const OPERATOR_PROMPTS: Partial<Record<string, GuidedPrompt>> = {
+const operatorPrompts = {
   regex: {
     path: '--pattern',
     question: (options) => `${preview(options.path ?? '', 'regex')}Regular expression: `,
@@ -51,7 +51,9 @@ const OPERATOR_PROMPTS: Partial<Record<string, GuidedPrompt>> = {
     needed: always,
     apply: (options, gte) => ({ ...options, gte }),
   },
-};
+} satisfies Record<string, GuidedPrompt>;
+
+const OPERATOR_PROMPTS = new Map<string, GuidedPrompt>(Object.entries(operatorPrompts));
 
 /** The values each preset still needs once it is chosen, asked in order. */
 const PRESET_PROMPTS: Partial<Record<MetricPresetId, readonly GuidedPrompt[]>> = {
@@ -153,6 +155,7 @@ const askGuidedPrompt = async (
   context: CommandContext,
 ): Promise<MetricAddOptions> => {
   const question = step.question(options);
+
   const answer =
     step.fallback === undefined
       ? await requiredInput(
@@ -161,6 +164,7 @@ const askGuidedPrompt = async (
           { interactive: true, prompt: context.interaction.prompt },
         )
       : (await context.interaction.prompt(question)).trim() || step.fallback;
+
   return step.apply(options, answer);
 };
 

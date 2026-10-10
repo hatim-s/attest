@@ -1,3 +1,4 @@
+import { parseJson } from './internal/json-value.js';
 import type { AgentRequest, RawExcerpt } from '@attest/contracts';
 import { createHash } from 'node:crypto';
 
@@ -35,6 +36,7 @@ const createCappedRawExcerpt = (
 
 const readCappedJson = async (response: Response, outputCapBytes: number): Promise<CappedJson> => {
   const reader = response.body?.getReader();
+
   if (reader === undefined) {
     return {
       ok: false,
@@ -54,6 +56,7 @@ const readCappedJson = async (response: Response, outputCapBytes: number): Promi
   try {
     while (true) {
       const { done, value } = await reader.read();
+
       if (done) {
         break;
       }
@@ -61,9 +64,11 @@ const readCappedJson = async (response: Response, outputCapBytes: number): Promi
       byteCount += value.byteLength;
       payloadHash.update(value);
       evidenceByteCount = appendEvidencePrefix(evidenceChunks, evidenceByteCount, value);
+
       if (byteCount > outputCapBytes) {
         // Cancel immediately so an unbounded response is not fully downloaded before rejection.
         await swallowCancel(reader.cancel());
+
         return {
           ok: false,
           error: new AgentInvocationError(
@@ -77,6 +82,7 @@ const readCappedJson = async (response: Response, outputCapBytes: number): Promi
           ),
         };
       }
+
       chunks.push(value);
     }
   } finally {
@@ -87,7 +93,7 @@ const readCappedJson = async (response: Response, outputCapBytes: number): Promi
   const rawExcerpt = createRawExcerpt(payload);
 
   try {
-    return { ok: true, raw: JSON.parse(payload) as unknown, rawExcerpt };
+    return { ok: true, raw: parseJson(payload), rawExcerpt };
   } catch (error) {
     return {
       ok: false,
@@ -101,35 +107,35 @@ const readCappedJson = async (response: Response, outputCapBytes: number): Promi
   }
 };
 
-const isTimeoutFailure = (error: unknown): boolean =>
-  error instanceof DOMException && error.name === 'TimeoutError';
+const isTimeoutFailure = (cause: unknown): boolean =>
+  cause instanceof DOMException && cause.name === 'TimeoutError';
 
-const fetchFailureMessage = (error: unknown): string =>
-  error instanceof Error ? error.message : 'unknown transport failure';
+const fetchFailureMessage = (cause: unknown): string =>
+  cause instanceof Error ? cause.message : 'unknown transport failure';
 
-const classifyFetchFailure = (error: unknown, options: InvokeOptions): AgentInvocationError => {
-  if (error instanceof AgentInvocationError) {
-    return error;
+const classifyFetchFailure = (cause: unknown, options: InvokeOptions): AgentInvocationError => {
+  if (cause instanceof AgentInvocationError) {
+    return cause;
   }
 
   if (options.signal?.aborted) {
     return new AgentInvocationError('cancelled', 'HTTP agent invocation was cancelled.', {
-      cause: error,
+      cause: cause,
     });
   }
 
-  if (isTimeoutFailure(error)) {
+  if (isTimeoutFailure(cause)) {
     return new AgentInvocationError('timeout', 'HTTP agent invocation timed out.', {
-      cause: error,
+      cause: cause,
     });
   }
 
   // Fetch wraps DNS, connection, and reset failures differently across Node and Bun.
   return new AgentInvocationError(
     'network',
-    `HTTP agent request failed: ${fetchFailureMessage(error)}.`,
+    `HTTP agent request failed: ${fetchFailureMessage(cause)}.`,
     {
-      cause: error,
+      cause: cause,
     },
   );
 };
@@ -149,9 +155,11 @@ const invokeHttpAgent = async (
 ): Promise<InvocationAttempt> => {
   const duration = startTimer();
   const timeoutSignal = AbortSignal.timeout(options.timeoutMs);
+
   // One combined signal lets either the caller or deadline stop the underlying request.
   const signal =
     options.signal === undefined ? timeoutSignal : AbortSignal.any([options.signal, timeoutSignal]);
+
   let httpStatus: number | undefined;
 
   try {
@@ -162,11 +170,13 @@ const invokeHttpAgent = async (
       redirect: 'manual',
       signal,
     });
+
     httpStatus = response.status;
 
     if (response.status !== HTTP_SUCCESS_STATUS) {
       // Status is authoritative at header receipt; body size and read failures cannot reclassify it.
       void swallowCancel(response.body?.cancel());
+
       return createFailedAttempt(
         new AgentInvocationError('http_status', `HTTP agent returned status ${response.status}.`),
         { diagnostics: { httpStatus: response.status }, durationMs: duration() },
@@ -174,6 +184,7 @@ const invokeHttpAgent = async (
     }
 
     const parsed = await readCappedJson(response, options.outputCapBytes);
+
     if (!parsed.ok) {
       return createFailedAttempt(parsed.error, {
         diagnostics: { httpStatus: response.status },

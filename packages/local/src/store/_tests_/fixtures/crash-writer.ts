@@ -3,16 +3,19 @@ import { AGENT_PROTOCOL } from '@attest/contracts';
 import { openStore } from '../../run-store.js';
 
 const databasePath = process.argv[2];
+
 if (!databasePath) {
   throw new Error('Expected the database path as argv[2].');
 }
 
 const store = (await openStore(databasePath)).runs;
+
 const run = await store.createRun({
   schemaId: 'attest.project',
   configHash: 'crash',
   configJson: '{}',
 });
+
 await store.recordCase(
   run.id,
   {
@@ -35,5 +38,7 @@ await store.recordCase(
   },
   [],
 );
+
 process.stdout.write(run.id);
+
 process.exit(1);

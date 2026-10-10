@@ -13,8 +13,11 @@ interface ImportDiagnosticOptions {
 /** Copies only public physical coordinates so authored row values can never leak. */
 const importLocation = (location: ImportLocation): ImportLocation => {
   const copied: ImportLocation = {};
+
   if (location.line !== undefined) copied.line = location.line;
+
   if (location.row !== undefined) copied.row = location.row;
+
   return copied;
 };
 

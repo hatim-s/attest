@@ -73,9 +73,11 @@ const websocketAgent = (
 const rejection = async (pending: Promise<unknown>): Promise<LocalError> => {
   const error: unknown = await pending.then(
     () => undefined,
-    (reason: unknown) => reason,
+    (cause: unknown) => cause,
   );
+
   if (!(error instanceof LocalError)) throw new Error('Expected a LocalError rejection.');
+
   return error;
 };
 
@@ -91,6 +93,7 @@ describe('agent import', () => {
       join(root, 'polling.curl'),
       `curl 'https://agent.example/submit' -H 'Authorization: Bearer ${secret}' -H 'Content-Type: application/json' --data-raw '{"prompt":"replace-me"}'`,
     );
+
     const imported = await importCurl(root, {
       agentId: 'polling-curl',
       source: 'polling.curl',
@@ -118,9 +121,11 @@ describe('agent import', () => {
         body: { prompt: '{{input/question}}' },
       },
     });
+
     const written = Object.entries(await snapshotFiles(root)).filter(
       ([path]) => path !== 'polling.curl',
     );
+
     expect(JSON.stringify(written)).not.toContain(secret);
   });
 
@@ -145,6 +150,7 @@ describe('agent import', () => {
     await writeFile(join(root, 'large.txt'), 'x'.repeat(128));
     await writeFile(join(root, 'large.curl'), 'curl https://agent.example --data @large.txt');
     const before = await snapshotFiles(root);
+
     for (const [source, diagnostic, requestCapBytes] of [
       ['outside.curl', 'file_body_outside_project', undefined],
       ['linked.curl', 'unsafe_file_body', undefined],
@@ -154,17 +160,20 @@ describe('agent import', () => {
         importCurl(root, { agentId: 'rejected', source, requestCapBytes }),
       ).rejects.toMatchObject({ code: 'cli_usage', details: { diagnostic } });
     }
+
     expect(await snapshotFiles(root)).toEqual(before);
   });
 
   it('imports bounded remote JSON without following redirects or echoing the URL', async () => {
     const root = await createAgentProject();
+
     const remote: AgentResource = {
       schema: 'attest.agent',
       id: 'remote-source',
       name: 'Remote',
       transport: { kind: 'native_cli', lifecycle: 'per_case', argv: ['node', 'agent.mjs'] },
     };
+
     vi.stubGlobal('fetch', (url: string) =>
       Promise.resolve(
         url.endsWith('/redirect')
@@ -178,6 +187,7 @@ describe('agent import', () => {
     const redirected = await rejection(
       importJson(root, 'https://catalog.example/redirect', 'redirected'),
     );
+
     expect(redirected).toMatchObject({ code: 'cli_usage', details: { http_status: 302 } });
     expect(JSON.stringify([redirected.message, redirected.details])).not.toContain(
       'catalog.example',
@@ -186,6 +196,7 @@ describe('agent import', () => {
 
   it('rejects literal credentials and unsupported policies in imported JSON before writing', async () => {
     const root = await createAgentProject();
+
     const http = {
       kind: 'http',
       lifecycle: 'external',
@@ -193,6 +204,7 @@ describe('agent import', () => {
       request: { url: 'https://agent.example/invoke', method: 'POST' },
       extraction: { result_pointer: '' },
     } as const;
+
     const cases: readonly {
       expected: object;
       hint?: string;
@@ -238,16 +250,21 @@ describe('agent import', () => {
         expected: { path: '/agent/timeouts/connect_ms' },
       },
     ];
+
     const before = await snapshotFiles(root);
+
     for (const { expected, hint, resource, secret } of cases) {
       await writeFile(join(root, 'unsafe.json'), JSON.stringify(resource));
       const error = await rejection(importJson(root, 'unsafe.json', 'unsafe'));
       expect(error).toMatchObject({ code: 'project_invalid', ...expected });
+
       if (hint !== undefined) expect(error.hint).toContain(hint);
+
       if (secret !== undefined) {
         expect(JSON.stringify([error.message, error.details])).not.toContain(secret);
       }
     }
+
     const after = await snapshotFiles(root);
     delete after['unsafe.json'];
     expect(after).toEqual(before);
@@ -270,6 +287,7 @@ describe('agent add authoring', () => {
         return thrown;
       }
     })();
+
     if (!(error instanceof LocalError)) throw new Error('Expected a LocalError.');
     expect(error).toMatchObject({
       code: 'project_invalid',

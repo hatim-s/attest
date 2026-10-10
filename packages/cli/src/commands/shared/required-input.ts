@@ -23,27 +23,36 @@ const promptWithSignal = async (
   signal?: AbortSignal,
 ): Promise<string> => {
   if (signal === undefined) return prompt(question);
+
   if (signal.aborted) throw cancelled();
+
   return new Promise<string>((resolvePrompt, rejectPrompt) => {
     let settled = false;
+
     const finish = (action: () => void): void => {
       if (settled) return;
       settled = true;
       signal.removeEventListener('abort', cancel);
       action();
     };
+
     const cancel = (): void => finish(() => rejectPrompt(cancelled()));
-    const promptFailure = (error: unknown): Error => {
+
+    const promptFailure = (cause: unknown): Error => {
       if (signal.aborted) return cancelled();
-      if (error instanceof Error && error.name === 'AbortError') return cancelled();
-      if (error instanceof Error) return error;
-      return new Error('Prompt failed with a non-error rejection.', { cause: error });
+
+      if (cause instanceof Error && cause.name === 'AbortError') return cancelled();
+
+      if (cause instanceof Error) return cause;
+
+      return new Error('Prompt failed with a non-error rejection.', { cause });
     };
+
     signal.addEventListener('abort', cancel, { once: true });
     // The signal closes a real readline question; the race also covers prompts that ignore it.
     void prompt(question, { signal }).then(
       (answer) => finish(() => resolvePrompt(answer)),
-      (error: unknown) => finish(() => rejectPrompt(promptFailure(error))),
+      (cause: unknown) => finish(() => rejectPrompt(promptFailure(cause))),
     );
   });
 };
@@ -56,11 +65,15 @@ const requiredInput = async (
 ): Promise<string> => {
   if (context.signal?.aborted === true) throw cancelled();
   const provided = value?.trim();
+
   if (provided !== undefined && provided.length > 0) return provided;
+
   if (context.interactive) {
     const answer = (await promptWithSignal(context.prompt, input.question, context.signal)).trim();
+
     if (answer.length > 0) return answer;
   }
+
   throw new AttestCliError('cli_missing_input', `Required input ${input.path} is missing.`, {
     path: input.path,
     hint: `Pass ${input.path} or provide it in a complete --from-json request.`,

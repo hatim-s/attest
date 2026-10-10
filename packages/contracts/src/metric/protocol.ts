@@ -10,6 +10,7 @@ import {
 import { METRIC_PROTOCOL } from '../schema/identifiers.js';
 
 const pathSchema = z.string().regex(/^\$(?:\.[A-Za-z_][A-Za-z0-9_]*|\[\d+\])*$/);
+
 // 'g' and 'y' are deliberately excluded: they make RegExp.test stateful via lastIndex,
 // which would turn assertion evaluation order into a correctness hazard.
 const regularExpressionFlagsSchema = z.string().regex(/^[dimsuv]*$/);
@@ -18,6 +19,7 @@ const regularExpressionFlagsSchema = z.string().regex(/^[dimsuv]*$/);
 const isValidRegularExpression = (value: { pattern: string; flags?: string }): boolean => {
   try {
     new RegExp(value.pattern, value.flags);
+
     return true;
   } catch {
     return false;
@@ -42,6 +44,7 @@ const thresholdSchema = z
   })
   .superRefine((threshold, context) => {
     const comparisons = [threshold.lt, threshold.lte, threshold.gt, threshold.gte];
+
     if (comparisons.some((comparison) => comparison !== undefined)) {
       return;
     }
@@ -55,6 +58,7 @@ const thresholdSchema = z
   .meta({ id: 'Threshold' });
 
 const pathValueCheckSchema = z.strictObject({ path: pathSchema, value: jsonValueSchema });
+
 const existsCheckSchema = z.strictObject({ path: pathSchema });
 
 const toolArgumentMatcherSchema = z.union([

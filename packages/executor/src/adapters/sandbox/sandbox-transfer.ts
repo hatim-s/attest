@@ -18,6 +18,7 @@ import {
 import type { VercelSandboxSdk } from './types.js';
 
 type LoadedUpload = { path: string; content: Uint8Array; mode?: number };
+
 type StagedArtifact = { directory: string; stagedPath: string };
 
 /** Rejects existing symlink components while allowing not-yet-created output directories. */
@@ -29,10 +30,13 @@ const assertNoSymlinkComponents = async (
   if (!isContained(root, path)) throw new TypeError(`Host path escapes its root: ${path}`);
   const fromRoot = relative(root, path);
   let current = root;
+
   for (const segment of fromRoot.split(sep).filter((part) => part.length > 0)) {
     current = resolve(current, segment);
+
     try {
       const stats = await lstat(current);
+
       if (stats.isSymbolicLink())
         throw new TypeError(`Host path contains a symbolic link: ${current}`);
     } catch (error: unknown) {
@@ -48,18 +52,22 @@ const readBoundedHostFile = async (
 ): Promise<Buffer> => {
   const chunks: Buffer[] = [];
   let bytes = 0;
+
   for (;;) {
     const remaining = responseBytes - bytes;
     const buffer = Buffer.allocUnsafe(Math.min(64 * 1024, remaining + 1));
     const read = await handle.read(buffer, 0, buffer.length, null);
+
     if (read.bytesRead === 0) return Buffer.concat(chunks, bytes);
     bytes += read.bytesRead;
+
     if (bytes > responseBytes) {
       throw new AgentInvocationError(
         'output_cap_exceeded',
         'Sandbox upload grew beyond limits.response_bytes while reading.',
       );
     }
+
     chunks.push(buffer.subarray(0, read.bytesRead));
   }
 };
@@ -74,35 +82,41 @@ const loadExplicitUploads = async (
   const loaded: LoadedUpload[] = [];
   let totalBytes = 0;
   const root = await realpath(projectRoot);
+
   for (const upload of uploads) {
     assertLiteralRelativePath(upload.source, 'Sandbox upload source');
     const source = resolve(root, upload.source);
     let handle;
+
     try {
       await assertNoSymlinkComponents(root, source, false);
       handle = await open(source, constants.O_RDONLY | constants.O_NOFOLLOW);
       const stats = await handle.stat();
+
       if (!stats.isFile())
         throw new TypeError(`Sandbox upload is not a regular file: ${upload.source}`);
+
       if (stats.size > responseBytes) {
         throw new AgentInvocationError(
           'output_cap_exceeded',
           `Sandbox upload exceeds limits.response_bytes: ${upload.source}`,
         );
       }
+
       const content = await readBoundedHostFile(handle, responseBytes);
       totalBytes += content.length;
+
       if (totalBytes > responseBytes) {
         throw new AgentInvocationError(
           'output_cap_exceeded',
           'Sandbox uploads exceed limits.response_bytes in aggregate.',
         );
       }
-      loaded.push({
-        path: resolveRemotePath(upload.destination),
-        content,
-        ...(upload.mode === undefined ? {} : { mode: upload.mode }),
-      });
+
+      const loadedUpload: LoadedUpload = { path: resolveRemotePath(upload.destination), content };
+
+      if (upload.mode !== undefined) loadedUpload.mode = upload.mode;
+      loaded.push(loadedUpload);
     } catch (error: unknown) {
       if (error instanceof AgentInvocationError || error instanceof TypeError) throw error;
       throw new AgentInvocationError(
@@ -116,6 +130,7 @@ const loadExplicitUploads = async (
       await handle?.close();
     }
   }
+
   return loaded;
 };
 
@@ -128,6 +143,7 @@ const runFileTest = async (
 ): Promise<boolean> => {
   const stdout = new BoundedTailWritable(1024);
   const stderr = new BoundedTailWritable(1024);
+
   const result = await sandbox.runCommand({
     cmd: 'test',
     args: [flag, path],
@@ -136,6 +152,7 @@ const runFileTest = async (
     timeoutMs,
     signal,
   });
+
   return result.exitCode === 0;
 };
 
@@ -148,8 +165,10 @@ const assertRemoteRegularFile = async (
 ): Promise<void> => {
   const relativePath = posix.relative(SANDBOX_WORKSPACE, path);
   let current = SANDBOX_WORKSPACE;
+
   for (const segment of relativePath.split('/')) {
     current = posix.join(current, segment);
+
     if (await runFileTest(sandbox, '-L', current, timeoutMs, signal)) {
       throw new AgentInvocationError(
         'network',
@@ -157,6 +176,7 @@ const assertRemoteRegularFile = async (
       );
     }
   }
+
   if (!(await runFileTest(sandbox, '-f', path, timeoutMs, signal))) {
     throw new AgentInvocationError(
       'network',
@@ -165,8 +185,11 @@ const assertRemoteRegularFile = async (
   }
 };
 
-const isDestroyable = (stream: object): stream is { destroy: () => void } =>
-  'destroy' in stream && typeof stream.destroy === 'function';
+const isDestroyable = (
+  stream: NonNullable<Awaited<ReturnType<VercelSandboxSdk['readFile']>>>,
+): stream is NonNullable<Awaited<ReturnType<VercelSandboxSdk['readFile']>>> & {
+  destroy: () => void;
+} => 'destroy' in stream && typeof stream.destroy === 'function';
 
 /** Streams one remote file into a bounded host buffer and destroys the stream on overflow. */
 const readRemoteFile = async (
@@ -176,21 +199,26 @@ const readRemoteFile = async (
   signal: AbortSignal,
 ): Promise<Buffer | null> => {
   const stream = await sandbox.readFile({ path }, { signal });
+
   if (stream === null) return null;
   const chunks: Buffer[] = [];
   let bytes = 0;
+
   try {
     for await (const chunk of stream) {
       const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
       bytes += buffer.length;
+
       if (bytes > responseBytes) {
         throw new AgentInvocationError(
           'output_cap_exceeded',
           `Sandbox artifact exceeds limits.response_bytes: ${path}`,
         );
       }
+
       chunks.push(buffer);
     }
+
     return Buffer.concat(chunks, bytes);
   } finally {
     // An early exit on overflow must not leave the SDK download running.
@@ -214,23 +242,29 @@ const publishTerminalArtifacts = async (
   const configuredProjectRoot = resolve(projectRoot);
   const root = await realpath(projectRoot);
   const configuredRoot = resolve(configuredArtifactRoot);
+
   if (!isContained(configuredProjectRoot, configuredRoot)) {
     throw new TypeError(`Artifact root escapes the project root: ${configuredArtifactRoot}`);
   }
+
   const artifactRoot = resolve(root, relative(configuredProjectRoot, configuredRoot));
   await assertNoSymlinkComponents(root, artifactRoot, true);
+
   try {
     for (const artifact of artifacts) {
       const source = resolveRemotePath(artifact.source);
       await assertRemoteRegularFile(sandbox, source, commandTimeoutMs, signal);
       const content = await readRemoteFile(sandbox, source, responseBytes, signal);
+
       if (content === null) {
         throw new AgentInvocationError(
           'network',
           `Sandbox artifact disappeared before download: ${artifact.source}`,
         );
       }
+
       totalBytes += content.length;
+
       if (totalBytes > responseBytes) {
         throw new AgentInvocationError(
           'output_cap_exceeded',
@@ -243,9 +277,11 @@ const publishTerminalArtifacts = async (
       const parent = dirname(destination);
       await mkdir(parent, { recursive: true });
       await assertNoSymlinkComponents(root, parent, false);
+
       if (!isContained(root, await realpath(parent))) {
         throw new TypeError(`Artifact parent escapes the project root: ${artifact.destination}`);
       }
+
       const directory = await mkdtemp(resolve(parent, '.attest-stage-'));
       const stagedPath = resolve(directory, 'artifact');
       await writeFile(stagedPath, content, { flag: 'wx' });

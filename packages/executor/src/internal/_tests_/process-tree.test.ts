@@ -70,10 +70,12 @@ describe('killProcessTree', () => {
   it('reports no survivors once every tracked descendant is gone', async () => {
     // The parent keeps one child; killing the group must leave nothing for ps -p to report.
     const program = `require('node:child_process').spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' }); setInterval(() => {}, 1000);`;
+
     const child = spawnInProcessGroup([process.execPath, '-e', program], {
       cwd: process.cwd(),
       env: { PATH: process.env.PATH ?? '' },
     });
+
     const closed = new Promise((resolve) => child.once('close', resolve));
     let descendants: Awaited<ReturnType<typeof listDescendantProcesses>> = [];
     await vi.waitFor(async () => {
@@ -86,6 +88,7 @@ describe('killProcessTree', () => {
       initialDescendants: descendants,
       signalProcessGroup: true,
     });
+
     await closed;
 
     expect(survivors).toEqual([]);

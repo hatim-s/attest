@@ -17,6 +17,7 @@ import {
 import type { ResolvedNativeAgent } from './types.js';
 
 const DEFAULT_OUTPUT_CAP_BYTES = 10 * 1024 * 1024;
+
 /** Extra sandbox lifetime beyond every attempt, covering boot and artifact collection. */
 const SANDBOX_OVERHEAD_MS = 60_000;
 
@@ -37,6 +38,8 @@ type AgentRuntime =
 
 type InvokeResolvedAgentOptions = {
   agent: AgentResource;
+  /** Sandbox transport implementation supplied by the host or a lifecycle test. */
+  invokeSandbox?: typeof invokeVercelSandboxAgent;
   attemptTimeoutMs: number;
   projectRoot: string;
   /** Last path segment under the sandbox artifact directory, such as the case index. */
@@ -109,9 +112,11 @@ const invokeResolvedAgent = async (
   const { resolved } = runtime;
   const responseBytes = options.agent.limits?.response_bytes ?? DEFAULT_OUTPUT_CAP_BYTES;
   const retries = options.agent.retry?.retries ?? 0;
+
   switch (resolved.kind) {
     case 'vercel_sandbox': {
       const artifactDirectory = resolved.sandbox.artifact_directory;
+
       const artifactRoot =
         options.workerDirectory ??
         (artifactDirectory === undefined
@@ -122,28 +127,31 @@ const invokeResolvedAgent = async (
               request.run_id,
               options.sandboxArtifactSegment,
             ));
-      return invokeVercelSandboxAgent(
-        resolved.sandbox,
-        {
-          argv: resolved.argv,
-          ...(resolved.cwd === undefined ? {} : { cwd: resolved.cwd }),
-          env: resolved.env,
-          attemptTimeoutMs: options.attemptTimeoutMs,
-          retries,
-          responseBytes,
-          sandboxTimeoutMs: Math.min(
-            Number.MAX_SAFE_INTEGER,
-            options.attemptTimeoutMs * (retries + 1) + SANDBOX_OVERHEAD_MS,
-          ),
-        },
-        request,
-        {
-          projectRoot: options.projectRoot,
-          ...(artifactRoot === undefined ? {} : { artifactRoot }),
-          ...(options.signal === undefined ? {} : { signal: options.signal }),
-        },
-      );
+
+      const invokeSandbox = options.invokeSandbox ?? invokeVercelSandboxAgent;
+
+      const invocation: Parameters<typeof invokeSandbox>[1] = {
+        argv: resolved.argv,
+        env: resolved.env,
+        attemptTimeoutMs: options.attemptTimeoutMs,
+        retries,
+        responseBytes,
+        sandboxTimeoutMs: Math.min(
+          Number.MAX_SAFE_INTEGER,
+          options.attemptTimeoutMs * (retries + 1) + SANDBOX_OVERHEAD_MS,
+        ),
+      };
+
+      if (resolved.cwd !== undefined) invocation.cwd = resolved.cwd;
+      const execution: Parameters<typeof invokeSandbox>[3] = { projectRoot: options.projectRoot };
+
+      if (artifactRoot !== undefined) execution.artifactRoot = artifactRoot;
+
+      if (options.signal !== undefined) execution.signal = options.signal;
+
+      return invokeSandbox(resolved.sandbox, invocation, request, execution);
     }
+
     case 'stream':
       return invokeStreamingAgent(resolved.agent, request, {
         headers: resolved.headers,
@@ -158,35 +166,37 @@ const invokeResolvedAgent = async (
         secrets: resolved.secrets,
         signal: options.signal,
       });
-    case 'direct':
-      return invokeAgent(resolved.target, request, {
+    case 'direct': {
+      const invocation: Parameters<typeof invokeAgent>[2] = {
         env: resolved.env,
         httpHeaders: resolved.headers,
         outputCapBytes: responseBytes,
         retries,
         signal: options.signal,
         timeoutMs: options.attemptTimeoutMs,
-        ...(options.workerDirectory === undefined
-          ? {}
-          : { preserveWorkingDirectory: true, workingDirectory: options.workerDirectory }),
-      });
+      };
+
+      if (options.workerDirectory !== undefined) {
+        invocation.preserveWorkingDirectory = true;
+        invocation.workingDirectory = options.workerDirectory;
+      }
+
+      return invokeAgent(resolved.target, request, invocation);
+    }
   }
 };
 
 /** Converts a startup throw into one failed attempt so the failure is recorded like any other. */
-const startupFailure = (error: unknown, durationMs: number): InvocationResult => {
+const startupFailure = (cause: unknown, durationMs: number): InvocationResult => {
   const invocationError =
-    error instanceof AgentInvocationError
-      ? error
+    cause instanceof AgentInvocationError
+      ? cause
       : new AgentInvocationError('network', 'Agent runtime initialization failed.', {
-          cause: error,
+          cause: cause,
         });
-  const diagnostics =
-    'diagnostics' in invocationError &&
-    invocationError.diagnostics !== null &&
-    typeof invocationError.diagnostics === 'object'
-      ? (invocationError.diagnostics as InvocationResult['diagnostics'])
-      : {};
+
+  const diagnostics = invocationError.diagnostics ?? {};
+
   const attempt = {
     status: 'invocation_error' as const,
     error: invocationError,
@@ -194,6 +204,7 @@ const startupFailure = (error: unknown, durationMs: number): InvocationResult =>
     durationMs,
     warnings: [],
   };
+
   return { ...attempt, attempts: [attempt] };
 };
 
@@ -204,6 +215,7 @@ const invocationOutcome = (
   if (result.error.code === 'timeout' || result.error.code === 'cancelled') {
     return result.error.code;
   }
+
   return 'invocation_error';
 };
 

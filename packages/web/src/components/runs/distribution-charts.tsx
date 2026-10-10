@@ -27,12 +27,14 @@ const SCORE_LABELS = ['0–0.2', '0.2–0.4', '0.4–0.6', '0.6–0.8', '0.8–1
 /** Buckets average case scores into fifths. Cases without a numeric score are skipped. */
 const createScoreHistogram = (cases: CaseSummary[]): ScoreBin[] => {
   const counts = SCORE_LABELS.map(() => 0);
+
   for (const { score } of cases) {
     if (score === undefined || !Number.isFinite(score)) continue;
     const normalized = Math.max(0, Math.min(1, score));
     const index = Math.min(counts.length - 1, Math.floor(normalized * counts.length));
     counts[index]! += 1;
   }
+
   return SCORE_LABELS.map((label, index) => ({ count: counts[index]!, label }));
 };
 
@@ -40,6 +42,7 @@ const createScoreHistogram = (cases: CaseSummary[]): ScoreBin[] => {
 const readPalette = (): ChartPalette => {
   const styles = getComputedStyle(document.documentElement);
   const read = (name: keyof ChartPalette) => styles.getPropertyValue(`--${name}`).trim();
+
   return {
     accent: read('accent'),
     border: read('border'),
@@ -60,6 +63,7 @@ const useChart = (
 ): void => {
   useEffect(() => {
     const container = containerRef.current;
+
     if (container === null) return;
     const chart = init(container);
     chart.setOption(createOption(readPalette()));
@@ -67,6 +71,7 @@ const useChart = (
     resizeObserver.observe(container);
     const themeObserver = new MutationObserver(() => chart.setOption(createOption(readPalette())));
     themeObserver.observe(document.documentElement, { attributeFilter: ['data-theme'] });
+
     return () => {
       themeObserver.disconnect();
       resizeObserver.disconnect();
@@ -80,6 +85,7 @@ const DistributionCharts = ({ cases, isLoading, totalCases }: DistributionCharts
   const scoreChartRef = useRef<HTMLDivElement>(null);
   const verdictChartRef = useRef<HTMLDivElement>(null);
   const histogram = useMemo(() => createScoreHistogram(cases), [cases]);
+
   const verdicts = useMemo(
     () => ({
       pass: cases.filter(({ verdict }) => verdict === 'pass').length,
@@ -88,6 +94,7 @@ const DistributionCharts = ({ cases, isLoading, totalCases }: DistributionCharts
     }),
     [cases],
   );
+
   const scoreOption = useCallback(
     ({ accent, border, muted, text }: ChartPalette): EChartsCoreOption => ({
       animationDuration: 250,
@@ -116,6 +123,7 @@ const DistributionCharts = ({ cases, isLoading, totalCases }: DistributionCharts
     }),
     [histogram],
   );
+
   const verdictOption = useCallback(
     ({ accent, danger, muted, text, warning }: ChartPalette): EChartsCoreOption => ({
       animationDuration: 250,

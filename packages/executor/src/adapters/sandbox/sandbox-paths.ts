@@ -1,11 +1,13 @@
 import { isAbsolute, posix, relative, resolve, sep } from 'node:path';
 
 const SANDBOX_WORKSPACE = '/vercel/sandbox/workspace';
+
 const GLOB_METACHARACTERS = /[*?\[\]{}]/u;
 
 /** True when `path` is `root` itself or lies below it. */
 const isContained = (root: string, path: string): boolean => {
   const fromRoot = relative(root, path);
+
   return (
     fromRoot === '' ||
     (!fromRoot.startsWith(`..${sep}`) && fromRoot !== '..' && !isAbsolute(fromRoot))
@@ -29,9 +31,11 @@ const assertLiteralRelativePath = (value: string, label: string): void => {
 const resolveRemotePath = (value: string): string => {
   assertLiteralRelativePath(value, 'Sandbox resource path');
   const resolved = posix.resolve(SANDBOX_WORKSPACE, value);
+
   if (resolved !== SANDBOX_WORKSPACE && !resolved.startsWith(`${SANDBOX_WORKSPACE}/`)) {
     throw new TypeError(`Sandbox path escapes ${SANDBOX_WORKSPACE}: ${value}`);
   }
+
   return resolved;
 };
 
@@ -40,9 +44,11 @@ const resolveArtifactDestination = (root: string, value: string): string => {
   assertLiteralRelativePath(value, 'Artifact destination');
   const destination = resolve(root, value);
   const fromRoot = relative(resolve(root), destination);
+
   if (fromRoot === '..' || fromRoot.startsWith(`..${sep}`) || isAbsolute(fromRoot)) {
     throw new TypeError(`Artifact destination escapes its root: ${value}`);
   }
+
   return destination;
 };
 

@@ -13,13 +13,18 @@ type FailedAttemptOptions = {
 const createFailedAttempt = (
   error: AgentInvocationError,
   options: FailedAttemptOptions,
-): InvocationAttempt => ({
-  status: 'invocation_error',
-  error,
-  diagnostics: options.diagnostics ?? {},
-  durationMs: options.durationMs,
-  ...(options.rawExcerpt === undefined ? {} : { rawExcerpt: options.rawExcerpt }),
-  warnings: [],
-});
+): InvocationAttempt => {
+  const attempt: InvocationAttempt = {
+    status: 'invocation_error',
+    error,
+    diagnostics: options.diagnostics ?? {},
+    durationMs: options.durationMs,
+    warnings: [],
+  };
+
+  if (options.rawExcerpt !== undefined) attempt.rawExcerpt = options.rawExcerpt;
+
+  return attempt;
+};
 
 export { createFailedAttempt };

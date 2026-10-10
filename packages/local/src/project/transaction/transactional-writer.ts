@@ -45,6 +45,7 @@ const currentFileHashes = (project: LoadedProject): ReadonlyMap<string, string> 
     hashes.set(data_path, project.contentHashes.datasets[id]!.data);
     hashes.set(metadata_path, project.contentHashes.datasets[id]!.metadata);
   });
+
   return hashes;
 };
 
@@ -55,23 +56,28 @@ const createFileChanges = (
 ): TransactionFileChange[] => {
   const oldHashes = currentFileHashes(before);
   const changes: TransactionFileChange[] = [];
+
   for (const [path, file] of after.files) {
     if (oldHashes.get(path) !== file.canonicalHash) {
       changes.push({ contents: file.contents, path, type: 'write' });
     }
   }
+
   for (const path of oldHashes.keys()) {
     if (!after.files.has(path)) {
       changes.push({ path, type: 'remove' });
     }
   }
+
   return changes.sort((left, right) => {
     if (left.path === 'attest.project.json') {
       return 1;
     }
+
     if (right.path === 'attest.project.json') {
       return -1;
     }
+
     return left.path.localeCompare(right.path);
   });
 };
@@ -105,6 +111,7 @@ const publishPreparedTransaction = async (
   const manifestIndex = prepared.journal.entries.findIndex(
     ({ path }) => path === prepared.journal.manifest_path,
   );
+
   if (manifestIndex !== prepared.journal.entries.length - 1) {
     throw new ProjectTransactionError(
       'project_transaction_failed',
@@ -115,8 +122,10 @@ const publishPreparedTransaction = async (
   prepared.journal.status = 'publishing';
   await writeTransactionJournal(prepared);
   await createMissingDirectories(root, prepared);
+
   for (const [index, entry] of prepared.journal.entries.entries()) {
     const destination = await resolveSafeProjectPath(root, entry.path);
+
     if ((await readByteHash(destination)) !== entry.original_hash) {
       throw new ProjectTransactionError(
         'project_recovery_required',
@@ -127,6 +136,7 @@ const publishPreparedTransaction = async (
         },
       );
     }
+
     if (entry.type === 'write') {
       if (entry.staged_path === null) {
         throw new ProjectTransactionError(
@@ -135,12 +145,14 @@ const publishPreparedTransaction = async (
           { path: entry.path },
         );
       }
+
       // Recheck the destination after directory creation to reject symlink swaps.
       await resolveSafeProjectPath(root, entry.path);
       await rename(join(prepared.directory, entry.staged_path), destination);
     } else {
       await unlink(destination);
     }
+
     await syncPath(dirname(destination));
     prepared.journal.published_count = index + 1;
     await writeTransactionJournal(prepared);
@@ -164,10 +176,12 @@ const loadMutationState = async (
   const before = await loadProject({ project: request.projectRoot });
   assertExpectedProjectHash(before.projectHash, request.expectedProjectHash);
   const after = prepareProjectCandidate(request.candidate);
+
   const diff = createSemanticProjectDiff(before, after.project, {
     renames: request.renames,
     warnings: request.warnings,
   });
+
   return {
     after,
     before,
@@ -183,7 +197,7 @@ const loadMutationState = async (
 const rollbackAfterFailure = async (
   root: string,
   prepared: PreparedTransaction,
-  failure: unknown,
+  cause: unknown,
 ): Promise<never> => {
   try {
     await rollbackPreparedTransaction(root, prepared);
@@ -198,15 +212,17 @@ const rollbackAfterFailure = async (
       },
     );
   }
-  if (failure instanceof ProjectTransactionError) {
-    throw failure;
+
+  if (cause instanceof ProjectTransactionError) {
+    throw cause;
   }
+
   throw new ProjectTransactionError(
     'project_transaction_failed',
     'Transaction failed; the prior project was restored.',
     {
       details: { transaction_id: prepared.journal.transaction_id },
-      cause: failure,
+      cause,
     },
   );
 };
@@ -222,11 +238,13 @@ const applyProjectMutation = async (
   }
 
   let lock: ProjectLockHandle | undefined;
+
   try {
     lock = await acquireProjectLock(request.projectRoot);
     await recoverProjectTransactions(request.projectRoot, lock);
     const state = await loadMutationState(request);
     const changes = createFileChanges(state.before, state.after);
+
     if (changes.length === 0) {
       return { ...state.result, committed: true };
     }
@@ -237,9 +255,11 @@ const applyProjectMutation = async (
       state.before.projectHash,
       state.after.projectHash,
     );
+
     try {
       await publishPreparedTransaction(request.projectRoot, prepared, options.publishObserver);
       const verified = await loadProject({ project: request.projectRoot });
+
       if (verified.projectHash !== state.after.projectHash) {
         throw new ProjectTransactionError(
           'project_transaction_failed',
@@ -247,15 +267,17 @@ const applyProjectMutation = async (
           { details: { current_hash: verified.projectHash } },
         );
       }
+
       await markTransactionCommitted(prepared);
       await cleanupPreparedTransaction(request.projectRoot, prepared);
+
       return {
         ...state.result,
         committed: true,
         transactionId: prepared.journal.transaction_id,
       };
-    } catch (failure: unknown) {
-      return await rollbackAfterFailure(request.projectRoot, prepared, failure);
+    } catch (cause: unknown) {
+      return await rollbackAfterFailure(request.projectRoot, prepared, cause);
     }
   } finally {
     if (lock !== undefined) {

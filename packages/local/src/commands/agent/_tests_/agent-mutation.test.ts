@@ -22,11 +22,13 @@ const projectChanged = {
 describe('agent mutation confirmation', () => {
   it('rejects a project change that lands while the confirmation prompt is open', async () => {
     const root = await createAgentProject();
+
     const addWhilePrompting =
       (expectedLine: string, racer: string): Prompt =>
       async (question) => {
         expect(question).toContain(expectedLine);
         await addAgent(root, agent(racer));
+
         return 'yes';
       };
 
@@ -41,6 +43,7 @@ describe('agent mutation confirmation', () => {
       },
       workingDirectory: root,
     });
+
     await expect(add).rejects.toMatchObject(projectChanged);
 
     const remove = runAgentRemoveCommand({
@@ -55,6 +58,7 @@ describe('agent mutation confirmation', () => {
       },
       workingDirectory: root,
     });
+
     await expect(remove).rejects.toMatchObject(projectChanged);
 
     const loaded = await loadProject({ project: root });

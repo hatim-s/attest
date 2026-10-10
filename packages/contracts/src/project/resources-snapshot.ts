@@ -77,6 +77,7 @@ const reportMetricOverrides = (check: MetricOverrideCheck): void => {
   });
   overrides.forEach(({ metric_id }, overrideIndex) => {
     const overridePath = [...path, 'metric_overrides', overrideIndex, 'metric_id'];
+
     if (!metricIds.has(metric_id)) {
       if (reportUnknownMetric) {
         context.addIssue({
@@ -85,8 +86,10 @@ const reportMetricOverrides = (check: MetricOverrideCheck): void => {
           message: `metric is not defined: ${metric_id}`,
         });
       }
+
       return;
     }
+
     if (attachment !== undefined && !attachment.metricIds.has(metric_id)) {
       context.addIssue({
         code: 'custom',
@@ -110,6 +113,7 @@ const reportDatasetRows = (
       message: `case_count must equal loaded JSONL row count ${dataset.cases.length}`,
     });
   }
+
   reportDuplicates({
     values: dataset.cases.map(({ id }) => id),
     pathFor: (index) => ['datasets', datasetIndex, 'cases', index],
@@ -151,6 +155,7 @@ const reportMetricReferences = ({
     if (metricIds.has(metric_id)) {
       return;
     }
+
     context.addIssue({
       code: 'custom',
       path: ['tests', testIndex, 'metrics', metricIndex, 'metric_id'],
@@ -162,6 +167,7 @@ const reportMetricReferences = ({
 /** Resolves direct and dataset-attached cases in run order and reports id collisions. */
 const reportResolvedCases = (check: TestReferenceCheck): void => {
   const { test, testIndex, metricIds, datasetsById, context } = check;
+
   const attachment = {
     testId: test.id,
     metricIds: new Set(test.metrics.map(({ metric_id }) => metric_id)),
@@ -193,21 +199,25 @@ const reportResolvedCases = (check: TestReferenceCheck): void => {
   test.datasets.forEach((datasetAttachment, attachmentIndex) => {
     const attachmentPath = ['tests', testIndex, 'datasets', attachmentIndex, 'dataset_id'];
     const attached = datasetsById.get(datasetAttachment.dataset_id);
+
     if (attached === undefined) {
       context.addIssue({
         code: 'custom',
         path: attachmentPath,
         message: `dataset is not defined: ${datasetAttachment.dataset_id}`,
       });
+
       return;
     }
 
     attached.dataset.cases.forEach((testCase, caseIndex) => {
       const tags = new Set(testCase.tags ?? []);
+
       // Only rows carrying every attachment tag are attached.
       if (datasetAttachment.tags?.some((tag) => !tags.has(tag)) === true) {
         return;
       }
+
       if (resolvedCaseIds.has(testCase.id)) {
         context.addIssue({
           code: 'custom',
@@ -215,6 +225,7 @@ const reportResolvedCases = (check: TestReferenceCheck): void => {
           message: `duplicate resolved case id: ${testCase.id}`,
         });
       }
+
       resolvedCaseIds.add(testCase.id);
       reportMetricOverrides({
         overrides: testCase.metric_overrides ?? [],
@@ -230,6 +241,7 @@ const reportResolvedCases = (check: TestReferenceCheck): void => {
 
 const reportTestReferences = (check: TestReferenceCheck): void => {
   const { test, testIndex, agentIds, context } = check;
+
   if (!agentIds.has(test.agent_id)) {
     context.addIssue({
       code: 'custom',
@@ -237,6 +249,7 @@ const reportTestReferences = (check: TestReferenceCheck): void => {
       message: `agent is not defined: ${test.agent_id}`,
     });
   }
+
   reportMetricReferences(check);
   reportResolvedCases(check);
 };
@@ -260,6 +273,7 @@ const projectResourcesSchema = z
       datasets: resources.datasets.map(({ metadata }) => metadata.id),
       metrics: resources.metrics.map(({ id }) => id),
     };
+
     for (const resourceType of resourceTypes) {
       reportDuplicates({
         values: resourceIds[resourceType],
@@ -268,6 +282,7 @@ const projectResourcesSchema = z
         context,
       });
     }
+
     for (const resourceType of resourceTypes) {
       reportManifestParity(
         resources.project.resources[resourceType].map(({ id }) => id),
@@ -283,9 +298,11 @@ const projectResourcesSchema = z
     });
 
     const agentIds = new Set(resourceIds.agents);
+
     const datasetsById = new Map(
       resources.datasets.map((dataset, index) => [dataset.metadata.id, { dataset, index }]),
     );
+
     resources.tests.forEach((test, testIndex) => {
       reportTestReferences({ test, testIndex, agentIds, metricIds, datasetsById, context });
     });

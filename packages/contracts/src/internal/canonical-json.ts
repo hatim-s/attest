@@ -1,16 +1,21 @@
-/** JSON.stringify replacer that emits object keys in code-unit order. */
-const sortObjectKeys = (_key: string, value: unknown): unknown => {
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
-    return value;
-  }
+import { z } from 'zod';
+import type { JsonValue } from '../project/shared.js';
 
-  return Object.fromEntries(
-    Object.entries(value).sort(([left], [right]) => (left < right ? -1 : 1)),
-  );
+const isJsonObject = (value: JsonValue): value is Record<string, JsonValue> =>
+  value !== null && typeof value === 'object' && !Array.isArray(value);
+
+/** Emits JSON keys in code-unit order after JSON.stringify has applied its normal omission rules. */
+const sortObjectKeys = (_key: string, value: JsonValue): JsonValue =>
+  isJsonObject(value)
+    ? Object.fromEntries(Object.entries(value).sort(([left], [right]) => (left < right ? -1 : 1)))
+    : value;
+
+/** Serializes JSON so insertion order does not affect equality or output. */
+// BOUNDARY: Contract and schema values are encoded as JSON, then validated before canonical ordering.
+const canonicalJson = (value: unknown, indentation?: number): string => {
+  const json = z.json().parse(JSON.parse(JSON.stringify(value)));
+
+  return JSON.stringify(json, sortObjectKeys, indentation);
 };
-
-/** Serializes JSON so that key insertion order does not affect equality or output. */
-const canonicalJson = (value: unknown, indentation?: number): string =>
-  JSON.stringify(value, sortObjectKeys, indentation);
 
 export { canonicalJson };

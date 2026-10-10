@@ -3,16 +3,21 @@ import { describe, expect, it } from 'vitest';
 import type { CaseSummary } from '../../../api/types.js';
 import { createScoreHistogram } from '../distribution-charts.js';
 
-const createCase = (caseId: string, score?: number): CaseSummary => ({
-  caseId,
-  suiteName: 'suite',
-  outcome: 'completed',
-  verdict: 'pass',
-  startedAt: '2026-08-07T00:00:00.000Z',
-  durationMs: 10,
-  ...(score === undefined ? {} : { score }),
-  metricCounts: { expected: 1, evaluated: 1, passed: 1, errors: 0 },
-});
+const createCase = (caseId: string, score?: number): CaseSummary => {
+  const summary: CaseSummary = {
+    caseId,
+    suiteName: 'suite',
+    outcome: 'completed',
+    verdict: 'pass',
+    startedAt: '2026-08-07T00:00:00.000Z',
+    durationMs: 10,
+    metricCounts: { expected: 1, evaluated: 1, passed: 1, errors: 0 },
+  };
+
+  if (score !== undefined) summary.score = score;
+
+  return summary;
+};
 
 describe('createScoreHistogram', () => {
   it('clamps normalized boundary scores and ignores missing values', () => {

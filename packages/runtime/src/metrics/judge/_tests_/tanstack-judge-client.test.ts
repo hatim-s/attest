@@ -1,3 +1,4 @@
+import type { JsonValue } from '@attest/contracts';
 import { StandardSchemaValidationError } from '@tanstack/ai';
 import { describe, expect, it } from 'vitest';
 
@@ -15,14 +16,19 @@ const malformed = (message: string): StandardSchemaValidationError =>
   Object.assign(new StandardSchemaValidationError([{ message }]), { message });
 
 /** Scripts structured-chat results; observations mirror the raw provider bytes. */
-const scriptedExecutor = (scripts: unknown[]): StructuredChatExecutor => {
+const scriptedExecutor = (scripts: (JsonValue | Error)[]): StructuredChatExecutor => {
   return (chatRequest) => {
     const script = scripts.shift();
+
     if (script instanceof Error) {
       chatRequest.observation.rawResponse = `error:${script.message}`;
+
       return Promise.reject(script);
     }
+
+    if (script === undefined) throw new Error('The judge requested an unscripted response.');
     chatRequest.observation.rawResponse = JSON.stringify(script);
+
     return Promise.resolve(script);
   };
 };

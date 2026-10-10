@@ -27,8 +27,9 @@ const runTraceConvertCommand = async (
 ): Promise<RunTraceConvertCommandResult> => {
   const inputPath = resolve(options.workingDirectory, options.inputPath);
   let candidate: unknown;
+
   try {
-    candidate = JSON.parse(await readFile(inputPath, 'utf8')) as unknown;
+    candidate = JSON.parse(await readFile(inputPath, 'utf8'));
   } catch (error: unknown) {
     throw new LocalError('trace_convert_failed', `Could not read OTLP JSON from ${inputPath}.`, {
       cause: error,
@@ -37,11 +38,13 @@ const runTraceConvertCommand = async (
 
   const trace = selectConvertedTrace(convertOtlpJson(candidate), options.traceId);
   const json = `${JSON.stringify(trace, null, 2)}\n`;
+
   if (options.outputPath === undefined) {
     return { json, spanCount: trace.spans.length, traceId: trace.trace_id };
   }
 
   const outputPath = resolve(options.workingDirectory, options.outputPath);
+
   try {
     await mkdir(dirname(outputPath), { recursive: true });
     await writeFile(outputPath, json, {
@@ -56,6 +59,7 @@ const runTraceConvertCommand = async (
         { cause: error },
       );
     }
+
     throw new LocalError(
       'output_write_failed',
       `Could not write converted trace to ${outputPath}.`,

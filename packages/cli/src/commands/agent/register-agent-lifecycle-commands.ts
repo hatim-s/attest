@@ -1,3 +1,4 @@
+import type { CommandRequest } from '@attest/contracts';
 import { runAgentRemoveCommand, runAgentRenameCommand } from '@attest/local/agent';
 import type { Command } from 'commander';
 
@@ -33,6 +34,7 @@ const registerAgentLifecycleCommands = (agent: Command, context: CommandContext)
     ) => {
       const interactive = isInteractive(options, context.interaction, options.fromJson);
       const prompt = { interactive, prompt: context.interaction.prompt };
+
       const request = await readOrBuildRequest({
         command: 'agent.rename',
         context,
@@ -52,6 +54,7 @@ const registerAgentLifecycleCommands = (agent: Command, context: CommandContext)
           ),
         }),
       });
+
       const result = await runAgentRenameCommand({
         interactive,
         project: options.project,
@@ -59,9 +62,11 @@ const registerAgentLifecycleCommands = (agent: Command, context: CommandContext)
         request,
         workingDirectory: context.workingDirectory,
       });
+
       context.io.output(renderCommandResult('agent.rename', outputFormat(options), result));
     },
   );
+
   setMutationHelp(rename, { examples: ['attest agent rename support support-renamed'] });
 
   const remove = addMutationOptions(
@@ -73,21 +78,30 @@ const registerAgentLifecycleCommands = (agent: Command, context: CommandContext)
     .option('--detach', 'also remove tests that require this agent')
     .action(async (agentId: string | undefined, options: RemoveOptions, leaf: Command) => {
       const interactive = isInteractive(options, context.interaction, options.fromJson);
+
       const request = await readOrBuildRequest({
         command: 'agent.remove',
         context,
         leaf,
         options,
-        build: async () => ({
-          ...mutationRequestFields('agent.remove', options),
-          agent_id: await requiredInput(
-            agentId,
-            { path: '<agent-id>', question: 'Agent id: ' },
-            { interactive, prompt: context.interaction.prompt },
-          ),
-          ...(options.detach === undefined ? {} : { detach: options.detach }),
-        }),
+        build: async () => {
+          const request: Extract<CommandRequest, { command: 'agent.remove' }> = {
+            ...mutationRequestFields('agent.remove', options),
+            agent_id: await requiredInput(
+              agentId,
+              { path: '<agent-id>', question: 'Agent id: ' },
+              { interactive, prompt: context.interaction.prompt },
+            ),
+          };
+
+          if (options.detach !== undefined) {
+            request.detach = options.detach;
+          }
+
+          return request;
+        },
       });
+
       const result = await runAgentRemoveCommand({
         interactive,
         project: options.project,
@@ -95,8 +109,10 @@ const registerAgentLifecycleCommands = (agent: Command, context: CommandContext)
         request,
         workingDirectory: context.workingDirectory,
       });
+
       context.io.output(renderCommandResult('agent.remove', outputFormat(options), result));
     });
+
   setMutationHelp(remove, { examples: ['attest agent remove support --dry-run'] });
 };
 

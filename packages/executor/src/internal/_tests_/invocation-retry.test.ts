@@ -1,4 +1,4 @@
-import { AGENT_PROTOCOL } from '@attest/contracts';
+import { AGENT_PROTOCOL, type JsonValue } from '@attest/contracts';
 import { describe, expect, it, vi } from 'vitest';
 
 import { AgentInvocationError, type InvocationErrorCode } from '../../errors.js';
@@ -13,7 +13,7 @@ const failure = (code: InvocationErrorCode, httpStatus?: number): InvocationAtte
   warnings: [],
 });
 
-const success = (raw: unknown): InvocationAttempt => ({
+const success = (raw: JsonValue): InvocationAttempt => ({
   status: 'ok',
   raw,
   diagnostics: {},
@@ -79,6 +79,7 @@ describe('invokeWithRetries', () => {
       error: { code: 'invalid_envelope' },
     });
     expect(result.attempts).toHaveLength(2);
+
     for (const attempt of result.attempts) {
       expect(attempt.rawExcerpt?.text.length).toBeGreaterThan(0);
       expect(attempt.warnings[0]?.code).toBe('unknown_field');
@@ -100,6 +101,7 @@ describe('invokeWithRetries', () => {
       ...failure('network'),
       diagnostics: { sandboxCompletionConfirmed: false },
     };
+
     const result = await invokeWithRetries(sequence(unconfirmed), 2);
 
     expect(result.attempts).toHaveLength(1);

@@ -1,9 +1,13 @@
+import { z } from 'zod';
+
 import type { CasesTable, MetricResultsTable } from '../schema.js';
 import type { RunSummary } from '@attest/core';
 import { parseJson } from './row-mapping.js';
 
 type SummaryCase = Pick<CasesTable, 'id' | 'outcome' | 'expected_metrics_json'>;
+
 type SummaryMetric = Pick<MetricResultsTable, 'case_row_id' | 'metric_name' | 'status' | 'pass'>;
+
 type CaseVerdict = 'pass' | 'fail' | 'error';
 
 /** Applies the expected-metric verdict rule without penalizing optional extra rows. */
@@ -12,22 +16,27 @@ const computeCaseVerdict = (caseRow: SummaryCase, metrics: SummaryMetric[]): Cas
     return 'error';
   }
 
-  const expectedMetrics = parseJson<string[]>(caseRow.expected_metrics_json) ?? [];
+  const expectedMetrics = z.array(z.string()).parse(parseJson(caseRow.expected_metrics_json) ?? []);
   const metricsByName = new Map(metrics.map((metric) => [metric.metric_name, metric]));
   let failed = false;
+
   for (const metricName of expectedMetrics) {
     const metric = metricsByName.get(metricName);
+
     if (!metric || metric.status !== 'evaluated' || metric.pass === null) {
       return 'error';
     }
+
     failed ||= metric.pass !== 1;
   }
+
   return failed ? 'fail' : 'pass';
 };
 
 /** Computes exclusive run totals from expected metric names and all persisted metric error rows. */
 const computeSummary = (cases: SummaryCase[], metrics: SummaryMetric[]): RunSummary => {
   const metricsByCase = new Map<string, SummaryMetric[]>();
+
   for (const metric of metrics) {
     const caseMetrics = metricsByCase.get(metric.case_row_id) ?? [];
     caseMetrics.push(metric);
@@ -37,6 +46,7 @@ const computeSummary = (cases: SummaryCase[], metrics: SummaryMetric[]): RunSumm
   const verdicts = cases.map((caseRow) =>
     computeCaseVerdict(caseRow, metricsByCase.get(caseRow.id) ?? []),
   );
+
   return {
     totalCases: cases.length,
     passedCases: verdicts.filter((verdict) => verdict === 'pass').length,

@@ -10,11 +10,14 @@ const createLock = (): PromiseLock => {
     async acquire() {
       const previous = tail;
       let release = (): void => undefined;
+
       const current = new Promise<void>((resolve) => {
         release = resolve;
       });
+
       tail = previous.catch(() => undefined).then(() => current);
       await previous.catch(() => undefined);
+
       return release;
     },
   };

@@ -45,36 +45,44 @@ type AddOptions = MutationCliOptions &
 const STREAM_FRAMINGS = ['sse', 'jsonl'] as const satisfies readonly NonNullable<
   AgentAddFields['streamFraming']
 >[];
+
 const BRIDGE_CONCURRENCY_MODES = ['serial', 'multiplexed'] as const satisfies readonly NonNullable<
   AgentAddFields['bridgeConcurrency']
 >[];
+
 const INCREMENTAL_OUTPUT_MODES = ['text', 'array'] as const satisfies readonly NonNullable<
   AgentAddFields['incrementalOutputMode']
 >[];
 
 /** Help-only hints: these WebSocket and stream flags take effect only with the flag they imply. */
-const ADD_IMPLIES: Readonly<Record<string, string[]>> = {
-  'acknowledgement-pointer': ['websocket-url'],
-  'acknowledgement-value': ['websocket-url'],
-  'attempt-timeout': ['websocket-url'],
-  'close-timeout': ['websocket-url'],
-  'connection-mode': ['websocket-url'],
-  'idle-timeout': ['websocket-url'],
-  'incremental-output-mode': ['incremental-output-pointer'],
-  'open-timeout': ['websocket-url'],
-  'ping-interval': ['websocket-url'],
-  'request-id-pointer': ['websocket-url'],
-  'request-template': ['websocket-url'],
-  subprotocol: ['websocket-url'],
-  'websocket-lifecycle': ['websocket-url'],
-};
+const ADD_IMPLIES = new Map(
+  Object.entries({
+    'acknowledgement-pointer': ['websocket-url'],
+    'acknowledgement-value': ['websocket-url'],
+    'attempt-timeout': ['websocket-url'],
+    'close-timeout': ['websocket-url'],
+    'connection-mode': ['websocket-url'],
+    'idle-timeout': ['websocket-url'],
+    'incremental-output-mode': ['incremental-output-pointer'],
+    'open-timeout': ['websocket-url'],
+    'ping-interval': ['websocket-url'],
+    'request-id-pointer': ['websocket-url'],
+    'request-template': ['websocket-url'],
+    subprotocol: ['websocket-url'],
+    'websocket-lifecycle': ['websocket-url'],
+  }),
+);
 
 /** Publishes local's transport conflict matrix and the help-only implications per flag. */
 const addOptionHelp = () => {
   const conflicts = agentAddFlagConflicts();
-  const names = new Set([...Object.keys(conflicts), ...Object.keys(ADD_IMPLIES)]);
+  const names = new Set([...Object.keys(conflicts), ...ADD_IMPLIES.keys()]);
+
   return Object.fromEntries(
-    [...names].map((name) => [name, { conflicts: conflicts[name], implies: ADD_IMPLIES[name] }]),
+    [...names].map((name) => [
+      name,
+      { conflicts: conflicts[name], implies: ADD_IMPLIES.get(name) },
+    ]),
   );
 };
 
@@ -165,6 +173,7 @@ const registerAgentAddCommand = (agent: Command, context: CommandContext): void 
       const fields = agentAddFields(agentId, options);
       const interactive = isInteractive(options, context.interaction, options.fromJson);
       const prompt = { interactive, prompt: context.interaction.prompt };
+
       const request = await readOrBuildRequest({
         command: 'agent.add',
         context,
@@ -176,13 +185,16 @@ const registerAgentAddCommand = (agent: Command, context: CommandContext): void 
             { path: '<agent-id>', question: 'Agent id: ' },
             prompt,
           );
+
           const guided = await promptTransportFields({ ...fields, agentId: id }, prompt);
+
           return {
             ...mutationRequestFields('agent.add', options),
             agent: createAgentResource(guided),
           };
         },
       });
+
       const result = await runAgentAddCommand({
         interactive,
         project: options.project,
@@ -190,6 +202,7 @@ const registerAgentAddCommand = (agent: Command, context: CommandContext): void 
         request,
         workingDirectory: context.workingDirectory,
       });
+
       context.io.output(renderCommandResult('agent.add', outputFormat(options), result));
     });
 

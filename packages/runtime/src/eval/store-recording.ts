@@ -21,9 +21,11 @@ const toStoredCaseExecution = (execution: CaseExecution): StoredCaseExecution =>
         rawExcerpt: attempt.rawExcerpt,
         warnings: attempt.warnings,
       };
+
       if (attempt.status === 'ok') {
         return { ...evidence, status: 'ok' as const };
       }
+
       return {
         ...evidence,
         status: 'invocation_error' as const,

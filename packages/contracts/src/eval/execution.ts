@@ -26,7 +26,9 @@ const invocationErrorCodeSchema = z.enum([
 const warningCodeSchema = z.enum(['unknown_field', 'invalid_trace']);
 
 type CaseOutcome = z.infer<typeof caseOutcomeSchema>;
+
 type InvocationErrorCode = z.infer<typeof invocationErrorCodeSchema>;
+
 type WarningCode = z.infer<typeof warningCodeSchema>;
 
 export {

@@ -10,20 +10,27 @@ const credentialArgumentPosition = (argv: readonly string[]): number => {
   for (const [index, argument] of argv.entries()) {
     if (AUTHORIZATION_VALUE.test(argument)) return index;
     const assignment = /^(?:--)?([^=]+)=(.+)$/u.exec(argument);
+
     if (assignment !== null && isSensitiveFieldName(assignment[1] ?? '')) return index;
+
     if (!argument.startsWith('-') || !isSensitiveFieldName(argument.replace(/^-+/u, ''))) {
       continue;
     }
+
     const next = argv[index + 1];
+
     if (next !== undefined && !next.startsWith('-')) return index + 1;
   }
+
   return -1;
 };
 
 /** Rejects credential-like literals while preserving secret references for runtime resolution. */
+// BOUNDARY: Authored executable and HTTP metric definitions are checked for embedded credentials before execution.
 const assertSafeMetricResource = (metric: MetricResource): void => {
   if (metric.definition.kind === 'exec') {
     const sensitivePosition = credentialArgumentPosition(metric.definition.argv);
+
     if (sensitivePosition >= 0) {
       throw new LocalError(
         'project_invalid',
@@ -34,11 +41,14 @@ const assertSafeMetricResource = (metric: MetricResource): void => {
         },
       );
     }
+
     return;
   }
+
   if (metric.definition.kind !== 'http') return;
   const request = metric.definition.request;
   let url: URL;
+
   try {
     url = new URL(request.url);
   } catch (error: unknown) {
@@ -47,6 +57,7 @@ const assertSafeMetricResource = (metric: MetricResource): void => {
       cause: error,
     });
   }
+
   if (url.username.length > 0 || url.password.length > 0) {
     throw new LocalError(
       'project_invalid',
@@ -57,6 +68,7 @@ const assertSafeMetricResource = (metric: MetricResource): void => {
       },
     );
   }
+
   for (const name of url.searchParams.keys()) {
     if (isSensitiveFieldName(name)) {
       throw new LocalError(
@@ -69,6 +81,7 @@ const assertSafeMetricResource = (metric: MetricResource): void => {
       );
     }
   }
+
   for (const [section, values] of [
     ['headers', request.headers],
     ['query', request.query],
@@ -86,21 +99,26 @@ const assertSafeMetricResource = (metric: MetricResource): void => {
       }
     }
   }
+
   const pending: Array<{ path: string; value: JsonValue }> =
     request.body === undefined
       ? []
       : [{ path: '/metric/definition/request/body', value: request.body }];
+
   while (pending.length > 0) {
     const current = pending.shift();
+
     if (current === undefined || current.value === null || typeof current.value !== 'object') {
       continue;
     }
+
     if (Array.isArray(current.value)) {
       current.value.forEach((value, index) =>
         pending.push({ path: `${current.path}/${index}`, value }),
       );
       continue;
     }
+
     for (const [name, value] of Object.entries(current.value)) {
       if (isSensitiveFieldName(name) && value !== null) {
         throw new LocalError(
@@ -112,6 +130,7 @@ const assertSafeMetricResource = (metric: MetricResource): void => {
           },
         );
       }
+
       pending.push({ path: `${current.path}/${name}`, value });
     }
   }

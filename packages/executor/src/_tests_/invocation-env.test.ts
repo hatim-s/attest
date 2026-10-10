@@ -14,6 +14,7 @@ describe('resolveInvocationEnv', () => {
       PRESENT_SECRET: 'present',
       BLOCKED_SECRET: 'blocked',
     };
+
     const environment = resolveInvocationEnv(
       ['PRESENT_SECRET', 'ABSENT_SECRET'],
       base,

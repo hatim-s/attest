@@ -14,10 +14,12 @@ const definition: JudgeMetricDefinition = {
   model: 'anthropic/claude-sonnet-5',
   rubric: 'Score correctness from 0 to 1.',
 };
+
 const context: CompletedMetricContext = {
   caseDefinition: { id: 'capital', input: { question: 'Capital?' }, expected: 'Paris' },
   execution: { outcome: 'completed', output: 'Paris', trace: null },
 };
+
 const record: JudgeRecord = {
   request: {
     model: definition.model,
@@ -34,6 +36,7 @@ const record: JudgeRecord = {
     },
   ],
 };
+
 const verdict = (score: number): JudgeOutcome => ({
   verdict: { score, rationale: 'Scripted.' },
   record,
@@ -46,32 +49,39 @@ const scriptedClient = (scripts: Array<JudgeOutcome | Error>): JudgeClient & { c
     scoreRubric: () => {
       client.calls += 1;
       const script = scripts.shift() ?? new Error('No scripted judge outcome remains.');
+
       return script instanceof Error ? Promise.reject(script) : Promise.resolve(script);
     },
   };
+
   return client;
 };
 
 /** An in-memory cache that counts writes and can fail its first read. */
 const memoryCache = (options: { failFirstRead?: boolean; failWrites?: boolean } = {}) => {
   const entries = new Map<string, JudgeOutcome>();
+
   const cache: JudgeCache & { reads: number; writes: number } = {
     reads: 0,
     writes: 0,
     get: (key) => {
       cache.reads += 1;
+
       if (options.failFirstRead === true && cache.reads === 1) {
         return Promise.reject(new Error('cache offline'));
       }
+
       return Promise.resolve(entries.get(key));
     },
     set: (key, outcome) => {
       if (options.failWrites === true) return Promise.reject(new Error('cache offline'));
       cache.writes += 1;
       entries.set(key, outcome);
+
       return Promise.resolve();
     },
   };
+
   return cache;
 };
 
@@ -85,6 +95,7 @@ describe('evaluateJudgeMetric', () => {
         { rawResponse: { score: 0.5, rationale: 'At the boundary.' } },
       ],
     };
+
     const client = scriptedClient([
       { verdict: { score: 0.5, rationale: 'At the boundary.' }, record: retryRecord },
     ]);
@@ -121,13 +132,16 @@ describe('evaluateJudgeMetric', () => {
 
   it('coalesces concurrent identical cached calls while applying each metric threshold', async () => {
     const provider = deferred<JudgeOutcome>();
+
     const client: JudgeClient & { calls: number } = {
       calls: 0,
       scoreRubric: () => {
         client.calls += 1;
+
         return provider.promise;
       },
     };
+
     const cache = memoryCache();
 
     const pending = Array.from({ length: 32 }, (_, index) =>
@@ -137,6 +151,7 @@ describe('evaluateJudgeMetric', () => {
         { client, cache },
       ),
     );
+
     await Promise.resolve();
     provider.resolve(verdict(0.7));
     const [first, ...rest] = await Promise.all(pending);
@@ -144,9 +159,11 @@ describe('evaluateJudgeMetric', () => {
     expect(client.calls).toBe(1);
     expect(cache.writes).toBe(1);
     expect(first).toMatchObject({ pass: false, judgeIo: { cache: 'miss' } });
+
     for (const evaluation of rest) {
       expect(evaluation).toMatchObject({ pass: true, judgeIo: { cache: 'coalesced' } });
     }
+
     // Each metric owns a copy of the shared evidence, so hooks cannot mutate another's record.
     expect(first?.judgeIo).not.toBe(rest[0]?.judgeIo);
   });
@@ -160,6 +177,7 @@ describe('evaluateJudgeMetric', () => {
     ]);
 
     expect(client.calls).toBe(2);
+
     for (const evaluation of evaluations) {
       expect(evaluation.judgeIo).not.toHaveProperty('cache');
     }
@@ -168,12 +186,15 @@ describe('evaluateJudgeMetric', () => {
   it('isolates in-flight calls by client, cache, signal, and timeout identity', async () => {
     const provider = deferred<JudgeOutcome>();
     let calls = 0;
+
     const createClient = (): JudgeClient => ({
       scoreRubric: () => {
         calls += 1;
+
         return provider.promise;
       },
     });
+
     const client = createClient();
     const cache = memoryCache();
     const signal = new AbortController().signal;
@@ -185,6 +206,7 @@ describe('evaluateJudgeMetric', () => {
       { client, cache, signal: new AbortController().signal, timeoutMs: 100 },
       { client, cache, signal, timeoutMs: 200 },
     ].map((options) => evaluateJudgeMetric(definition, context, options));
+
     await Promise.resolve();
     provider.resolve(verdict(0.7));
 
@@ -195,9 +217,11 @@ describe('evaluateJudgeMetric', () => {
   it('shares cancellation only between callers using the same signal', async () => {
     const controller = new AbortController();
     let calls = 0;
+
     const client: JudgeClient = {
       scoreRubric: (_request, options) => {
         calls += 1;
+
         return new Promise((_resolve, reject) => {
           options?.signal?.addEventListener('abort', () => reject(new Error('aborted')), {
             once: true,
@@ -205,18 +229,21 @@ describe('evaluateJudgeMetric', () => {
         });
       },
     };
+
     const cache = memoryCache();
 
     const pending = [
       evaluateJudgeMetric(definition, context, { client, cache, signal: controller.signal }),
       evaluateJudgeMetric(definition, context, { client, cache, signal: controller.signal }),
     ];
+
     await Promise.resolve();
     controller.abort();
     const evaluations = await Promise.all(pending);
 
     expect(calls).toBe(1);
     expect(cache.writes).toBe(0);
+
     for (const evaluation of evaluations) {
       expect(evaluation).toMatchObject({
         status: 'error',
@@ -230,19 +257,24 @@ describe('evaluateJudgeMetric', () => {
     const client = scriptedClient([]);
     client.scoreRubric = () => {
       client.calls += 1;
+
       return client.calls === 1 ? firstCall.promise : Promise.resolve(verdict(0.7));
     };
+
     const cache = memoryCache();
 
     const failures = [
       evaluateJudgeMetric(definition, context, { client, cache }),
       evaluateJudgeMetric(definition, context, { client, cache }),
     ];
+
     await Promise.resolve();
     firstCall.reject(new Error('provider unavailable'));
+
     for (const failure of await Promise.all(failures)) {
       expect(failure).toMatchObject({ status: 'error', error: { kind: 'judge_provider_error' } });
     }
+
     expect(cache.writes).toBe(0);
 
     await expect(
@@ -260,8 +292,10 @@ describe('evaluateJudgeMetric', () => {
       evaluateJudgeMetric(definition, context, { client, cache }),
       evaluateJudgeMetric(definition, context, { client, cache }),
     ]);
+
     expect(cache.reads).toBe(1);
     expect(client.calls).toBe(0);
+
     for (const failure of failures) {
       expect(failure).toMatchObject({ status: 'error', error: { kind: 'judge_provider_error' } });
     }

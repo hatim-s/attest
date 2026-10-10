@@ -1,3 +1,4 @@
+import { isRecord, isString, parseCliResult, parseManifest } from './release-json.js';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { cp, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
@@ -10,12 +11,15 @@ const root = fileURLToPath(new URL('../', import.meta.url));
 /** Installs packed releases outside the workspace and exercises their public entry points with Node. */
 const checkRelease = async (): Promise<void> => {
   const directory = await mkdtemp(join(tmpdir(), 'attest-consumer-'));
+
   try {
     await writeFile(join(directory, 'package.json'), '{"private":true,"type":"module"}\n');
     const releaseDirectory = join(root, 'dist/release');
+
     const tarballs = (await readdir(releaseDirectory))
       .filter((file) => file.endsWith('.tgz'))
       .map((file) => join(releaseDirectory, file));
+
     assert.equal(tarballs.length, 8, 'Expected all eight release packages.');
     execFileSync('npm', ['install', '--no-audit', '--no-fund', ...tarballs], {
       cwd: directory,
@@ -24,16 +28,19 @@ const checkRelease = async (): Promise<void> => {
     });
     const cli = join(directory, 'node_modules/.bin/attest');
     const projectDirectory = join(directory, 'demo');
+
     const runCli = (...args: string[]): string =>
       execFileSync(cli, args, { cwd: directory, encoding: 'utf8', timeout: 30_000 });
-    const metadata = JSON.parse(
-      await readFile(join(root, 'packages/cli/package.json'), 'utf8'),
-    ) as { version: string };
+
+    const metadata = parseManifest(await readFile(join(root, 'packages/cli/package.json'), 'utf8'));
+
     assert.equal(runCli('--version').trim(), metadata.version);
     assert.match(runCli('--help'), /Usage: attest/);
-    const initialized = JSON.parse(
+
+    const initialized = parseCliResult(
       runCli('project', 'init', 'demo', '--name', 'Release check', '--output', 'json'),
-    ) as { ok: boolean };
+    );
+
     assert.equal(initialized.ok, true);
     await cp(
       join(root, 'packages/cli/src/acceptance/_tests_/fixtures/quickstart/native-agent.mjs'),
@@ -43,25 +50,25 @@ const checkRelease = async (): Promise<void> => {
       join(root, 'packages/cli/src/acceptance/_tests_/fixtures/quickstart/agent-cases.jsonl'),
       join(projectDirectory, 'cases.jsonl'),
     );
+
     const projectCli = (...args: string[]): string =>
       execFileSync(cli, args, { cwd: projectDirectory, encoding: 'utf8', timeout: 30_000 });
+
     for (const args of [
       ['agent', 'add', 'support', '--argv-json', '["node","./agent.mjs"]', '--timeout', '5s'],
       ['metric', 'add', 'exact', '--preset', 'output-contains', '--value', '"policy"'],
       ['test', 'add', 'smoke', '--agent', 'support', '--metric', 'exact'],
       ['test', 'case', 'import', 'smoke', './cases.jsonl'],
     ]) {
-      assert.equal(
-        (JSON.parse(projectCli(...args, '--output', 'json')) as { ok: boolean }).ok,
-        true,
-      );
+      assert.equal(parseCliResult(projectCli(...args, '--output', 'json')).ok, true);
     }
-    const evaluation = JSON.parse(projectCli('eval', 'run', 'smoke', '--output', 'json')) as {
-      ok: boolean;
-      result: { verdict: string; run_id: string };
-    };
+
+    const evaluation = parseCliResult(projectCli('eval', 'run', 'smoke', '--output', 'json'));
+
     assert.equal(evaluation.ok, true);
+    assert(evaluation.ok && isRecord(evaluation.result));
     assert.equal(evaluation.result.verdict, 'pass');
+    assert(isString(evaluation.result.run_id));
     assert.ok(evaluation.result.run_id);
     projectCli('report', evaluation.result.run_id, '--output', 'report.html');
     assert.match(await readFile(join(projectDirectory, 'report.html'), 'utf8'), /<html/);

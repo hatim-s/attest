@@ -60,25 +60,38 @@ const addImportOptions = (command: Command): Command =>
 /** Splits one `destination=source` mapping at its first equals sign. */
 const parseMapping = (value: string): DatasetImportMapping => {
   const separator = value.indexOf('=');
+
   if (separator <= 0 || separator === value.length - 1) {
     throw new AttestCliError('cli_usage', 'Import mappings must use destination=source.', {
       path: '--map',
       hint: 'For example, pass --map input.question=prompt.',
     });
   }
+
   return { destination: value.slice(0, separator), source: value.slice(separator + 1) };
 };
 
 /** Maps the import flags onto the request's `import` policy. */
-const importRequestFields = (options: ImportCliOptions): ImportPolicy => ({
-  ...(options.format === undefined ? {} : { format: options.format }),
-  ...(options.map === undefined ? {} : { mapping: options.map.map(parseMapping) }),
-  ...(options.parseJson === undefined ? {} : { parse_json: options.parseJson }),
-  ...(options.recordsPointer === undefined ? {} : { records_pointer: options.recordsPointer }),
-  ...(options.key === undefined ? {} : { key: options.key }),
-  ...(options.dedupe === undefined ? {} : { dedupe: options.dedupe }),
-  ...(options.onConflict === undefined ? {} : { on_conflict: options.onConflict }),
-  ...(options.sync === undefined ? {} : { sync: options.sync }),
-});
+const importRequestFields = (options: ImportCliOptions): ImportPolicy => {
+  const policy: ImportPolicy = {};
+
+  if (options.format !== undefined) policy.format = options.format;
+
+  if (options.map !== undefined) policy.mapping = options.map.map(parseMapping);
+
+  if (options.parseJson !== undefined) policy.parse_json = options.parseJson;
+
+  if (options.recordsPointer !== undefined) policy.records_pointer = options.recordsPointer;
+
+  if (options.key !== undefined) policy.key = options.key;
+
+  if (options.dedupe !== undefined) policy.dedupe = options.dedupe;
+
+  if (options.onConflict !== undefined) policy.on_conflict = options.onConflict;
+
+  if (options.sync !== undefined) policy.sync = options.sync;
+
+  return policy;
+};
 
 export { IMPORT_OPTION_HELP, addImportOptions, importRequestFields, type ImportCliOptions };

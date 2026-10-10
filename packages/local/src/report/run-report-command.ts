@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { z } from 'zod';
 import { link, open, rename, unlink } from 'node:fs/promises';
 
 import { summarizeCaseRecord } from '@attest/core';
@@ -33,25 +34,30 @@ const runReportCommand = async (
   options: RunReportCommandOptions,
 ): Promise<RunReportCommandResult> => {
   const configuredStorePath = options.storePath ?? '.attest/runs.db';
+
   const storePath = await prepareEvalProjectFile(options.workingDirectory, configuredStorePath, {
     allowAbsolute: true,
     errorCode: 'project_read_failed',
     message: 'The report run store is not a safe project file.',
   });
+
   const runNotFound = (cause?: unknown): LocalError =>
     new LocalError('resource_not_found', `Run ${options.runId} was not found.`, {
       path: options.runId,
       cause,
     });
+
   const runWithCases = await withRunNotFound(
     () => withReadonlyRunStoreFile(storePath, (store) => store.getRunWithCases(options.runId)),
     runNotFound,
   );
+
   if (runWithCases === undefined) throw runNotFound();
 
   // Reports stay bounded: only the first MAX_REPORT_CASES cases are embedded.
   const cases = runWithCases.cases.slice(0, MAX_REPORT_CASES);
   const truncated = runWithCases.cases.length > MAX_REPORT_CASES;
+
   const reportData = {
     schema: 'attest.report',
     generatedAt: new Date().toISOString(),
@@ -59,6 +65,7 @@ const runReportCommand = async (
     cases: cases.map((record) => ({ record, summary: summarizeCaseRecord(record) })),
     truncated: truncated,
   };
+
   const outputPath = await prepareEvalProjectFile(
     options.workingDirectory,
     options.outputPath ?? `attest-report-${options.runId}.html`,
@@ -72,12 +79,17 @@ const runReportCommand = async (
 
   const temporaryPath = `${outputPath}.${randomUUID()}.tmp`;
   let handle: Awaited<ReturnType<typeof open>> | undefined;
+
   try {
     handle = await open(temporaryPath, 'wx', 0o600);
-    await handle.writeFile(createReportHtml(dashboardHtml, reportData), 'utf8');
+    await handle.writeFile(
+      createReportHtml(dashboardHtml, z.json().parse(JSON.parse(JSON.stringify(reportData)))),
+      'utf8',
+    );
     await handle.sync();
     await handle.close();
     handle = undefined;
+
     if (options.force === true) await rename(temporaryPath, outputPath);
     else {
       await link(temporaryPath, outputPath);
@@ -86,6 +98,7 @@ const runReportCommand = async (
   } catch (error: unknown) {
     await handle?.close().catch(() => undefined);
     await unlink(temporaryPath).catch(() => undefined);
+
     if (errnoCode(error) === 'EEXIST') {
       throw new LocalError(
         'output_exists',
@@ -93,6 +106,7 @@ const runReportCommand = async (
         { cause: error },
       );
     }
+
     throw new LocalError('output_write_failed', `Could not write report to ${outputPath}.`, {
       cause: error,
     });

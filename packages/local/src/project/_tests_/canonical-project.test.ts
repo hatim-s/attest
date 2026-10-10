@@ -40,6 +40,7 @@ describe('canonical project content', () => {
         source_content_hash: 'a'.repeat(64),
       },
     };
+
     const second = {
       ...first,
       provenance: { ...first.provenance, imported_at: '2026-08-08T02:00:00.000Z' },

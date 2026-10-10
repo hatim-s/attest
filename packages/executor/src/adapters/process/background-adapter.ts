@@ -2,7 +2,7 @@ import type { AgentRequest, AgentResource } from '@attest/contracts';
 
 import { AgentInvocationError, abortedError } from '../../errors.js';
 import { DEFAULT_REQUEST_BYTES, DEFAULT_STDERR_BYTES } from '../../internal/agent-defaults.js';
-import type { InvocationResult } from '../../types.js';
+import type { InvocationDiagnostics, InvocationResult } from '../../types.js';
 import { invokeMappedHttpAgent, type HttpAgentResource } from '../http/mapped-http-adapter.js';
 import { materializeStaticRequest, resolveRequestTemplate } from '../http/request-template.js';
 import { redactTransportText } from '../http/redaction.js';
@@ -42,6 +42,7 @@ class BackgroundAgentSession {
     if (agent.timeouts?.run_ms !== undefined) {
       this.runTimer = setTimeout(() => this.runController.abort(), agent.timeouts.run_ms);
     }
+
     options.signal?.addEventListener('abort', () => this.runController.abort(), { once: true });
   }
 
@@ -53,15 +54,20 @@ class BackgroundAgentSession {
     if (options.signal?.aborted === true) {
       throw new AgentInvocationError('cancelled', 'Background agent run was cancelled.');
     }
+
     assertLoopbackUrl(agent.transport.invoke.url);
+
     if (agent.transport.shutdown !== undefined) assertLoopbackUrl(agent.transport.shutdown.url);
+
     if (agent.transport.readiness.kind === 'http') assertLoopbackUrl(agent.transport.readiness.url);
+
     if (agent.transport.readiness.kind === 'tcp' && !loopbackHost(agent.transport.readiness.host)) {
       throw new AgentInvocationError(
         'network',
         'Background TCP readiness requires a loopback host.',
       );
     }
+
     const process = await ManagedChild.start({
       argv: agent.transport.start_argv,
       cwd: options.cwd,
@@ -71,32 +77,40 @@ class BackgroundAgentSession {
         DEFAULT_STDERR_BYTES,
       ),
     });
+
     // Cancellation during spawn precedes the session's run-abort listener.
     if (options.signal?.aborted) {
       await process.terminate(agent.transport.stop_timeout_ms);
       throw new AgentInvocationError('cancelled', 'Background agent run was cancelled.');
     }
+
     const session = new BackgroundAgentSession(agent, process, options);
+
     try {
       await session.waitForReadiness();
+
       return session;
     } catch (error: unknown) {
       const diagnostics = session.startupDiagnostics();
       await session.close();
+
       if (error instanceof AgentInvocationError) error.diagnostics = diagnostics;
       throw error;
     }
   }
 
   /** Captures only bounded startup evidence for stable CLI error normalization. */
-  private startupDiagnostics(): { exitCode?: number; stderrExcerpt?: string } {
+  private startupDiagnostics(): InvocationDiagnostics {
     const stderr = this.process.stderrExcerpt();
-    return {
-      ...(this.process.exitCode === null ? {} : { exitCode: this.process.exitCode }),
-      ...(stderr === undefined
-        ? {}
-        : { stderrExcerpt: redactTransportText(stderr, this.options.secrets ?? []) }),
-    };
+
+    const diagnostics: InvocationDiagnostics = {};
+
+    if (this.process.exitCode !== null) diagnostics.exitCode = this.process.exitCode;
+
+    if (stderr !== undefined)
+      diagnostics.stderrExcerpt = redactTransportText(stderr, this.options.secrets ?? []);
+
+    return diagnostics;
   }
 
   private waitForReadiness(): Promise<void> {
@@ -115,6 +129,7 @@ class BackgroundAgentSession {
     if (this.closed) {
       throw new AgentInvocationError('network', 'Background agent session is closed.');
     }
+
     const mapped: HttpAgentResource = {
       ...this.agent,
       transport: {
@@ -125,6 +140,7 @@ class BackgroundAgentSession {
         extraction: this.agent.transport.extraction,
       },
     };
+
     // Session cancellation and the run deadline both end the service run, so they are timeouts.
     const result = await invokeMappedHttpAgent(mapped, request, {
       headers: this.options.invokeHeaders,
@@ -133,14 +149,16 @@ class BackgroundAgentSession {
       signal,
       deadlineSignal: this.runController.signal,
     });
+
     const stderr = this.process.stderrExcerpt();
-    const diagnostics = {
-      ...result.diagnostics,
-      ...(stderr === undefined
-        ? {}
-        : { stderrExcerpt: redactTransportText(stderr, this.options.secrets ?? []) }),
-      ...(this.process.exitCode === null ? {} : { exitCode: this.process.exitCode }),
-    };
+
+    const diagnostics = { ...result.diagnostics };
+
+    if (stderr !== undefined)
+      diagnostics.stderrExcerpt = redactTransportText(stderr, this.options.secrets ?? []);
+
+    if (this.process.exitCode !== null) diagnostics.exitCode = this.process.exitCode;
+
     return {
       ...result,
       diagnostics,
@@ -153,7 +171,9 @@ class BackgroundAgentSession {
 
   private async requestShutdown(): Promise<void> {
     const shutdown = this.agent.transport.shutdown;
+
     if (shutdown === undefined || this.process.exitCode !== null) return;
+
     const materialized = materializeStaticRequest(
       resolveRequestTemplate(shutdown, {
         headers: this.options.shutdownHeaders,
@@ -161,7 +181,9 @@ class BackgroundAgentSession {
       }),
       this.agent.limits?.request_bytes ?? DEFAULT_REQUEST_BYTES,
     );
+
     const signal = AbortSignal.timeout(this.agent.transport.stop_timeout_ms);
+
     try {
       const response = await fetch(materialized.url, {
         method: materialized.method,
@@ -170,6 +192,7 @@ class BackgroundAgentSession {
         redirect: 'manual',
         signal,
       });
+
       await response.body?.cancel().catch(() => undefined);
     } catch {
       // Graceful shutdown is best effort; mandatory process-tree cleanup follows.
@@ -180,12 +203,14 @@ class BackgroundAgentSession {
   async close(): Promise<void> {
     if (this.closePromise !== undefined) return this.closePromise;
     this.closed = true;
+
     if (this.runTimer !== undefined) clearTimeout(this.runTimer);
     this.closePromise = (async () => {
       await this.process.snapshotDescendants();
       await this.requestShutdown();
       await this.process.terminate(this.agent.transport.stop_timeout_ms);
     })();
+
     return this.closePromise;
   }
 }

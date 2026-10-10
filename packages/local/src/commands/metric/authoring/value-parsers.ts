@@ -15,9 +15,11 @@ import type { MetricAddFields } from './types.js';
 
 const parseFiniteNumber = (value: string, path: string): number => {
   const parsed = Number(value);
+
   if (!Number.isFinite(parsed)) {
     throw new LocalError('cli_usage', `${path} must be a finite number.`, { path });
   }
+
   return parsed;
 };
 
@@ -28,17 +30,21 @@ const parseChoice = <const Choice extends string>(
   path: string,
 ): Choice => {
   const parsed = z.enum(choices).safeParse(value);
+
   if (!parsed.success) {
     throw new LocalError('cli_usage', `${path} must be one of ${choices.join(', ')}.`, { path });
   }
+
   return parsed.data;
 };
 
 const parseNonnegativeInteger = (value: string, path: string): number => {
   const parsed = Number(value);
+
   if (!Number.isInteger(parsed) || parsed < 0) {
     throw new LocalError('cli_usage', `${path} must be a non-negative integer.`, { path });
   }
+
   return parsed;
 };
 
@@ -60,28 +66,35 @@ const parsePathValueMatchers = (
   (values ?? []).map((entry) => {
     const separator = entry.indexOf('=');
     const matcherPath = entry.slice(0, separator).trim();
+
     if (separator <= 0 || matcherPath.length === 0) {
       throw new LocalError('cli_usage', `Invalid matcher in ${path}.`, {
         path,
         hint: `Use '$.path=<json>' for ${operator} matchers.`,
       });
     }
+
     const value = parseJsonValue(entry.slice(separator + 1), path);
+
     return operator === 'equals'
       ? { equals: { path: matcherPath, value } }
       : { contains: { path: matcherPath, value } };
   });
 
+// BOUNDARY: CLI attribute text is decoded as JSON and accepted only when it represents a string, finite number or boolean.
 const parseAttributes = (
   values: readonly string[] | undefined,
 ): Record<string, string | number | boolean> | undefined => {
   if (values === undefined || values.length === 0) return undefined;
   const attributes: Record<string, string | number | boolean> = {};
+
   for (const entry of values) {
     const separator = entry.indexOf('=');
     const name = entry.slice(0, separator).trim();
+
     const parsed =
       separator <= 0 ? undefined : parseJsonValue(entry.slice(separator + 1), '--attribute');
+
     if (
       name.length === 0 ||
       parsed === undefined ||
@@ -91,8 +104,10 @@ const parseAttributes = (
         path: '--attribute',
       });
     }
+
     attributes[name] = parsed;
   }
+
   return attributes;
 };
 
@@ -101,12 +116,14 @@ const parseAssertionJson = (values: readonly string[]): AssertionCheck[] =>
     const parsed = assertionCheckSchema.safeParse(
       parseJsonText(value, { path: '--assert-json', hint: 'Pass one assertion check object.' }),
     );
+
     if (!parsed.success) {
       throw new LocalError('cli_usage', 'An assertion does not match the metric contract.', {
         path: `--assert-json[${index}]`,
         details: { diagnostics: schemaIssueDiagnostics(parsed.error.issues) },
       });
     }
+
     return parsed.data;
   });
 
@@ -131,15 +148,19 @@ const readExclusiveText = async (
       hint: `Pass either ${literalPath} or ${sourcePath}.`,
     });
   }
+
   if (literal?.trim()) return literal.trim();
+
   if (source !== undefined) {
     const text = await readSourceText(source, {
       path: sourcePath,
       readStdin: fields.readStdin,
       workingDirectory: fields.workingDirectory,
     });
+
     if (text.trim()) return text;
   }
+
   throw new LocalError('cli_missing_input', `Required metric input ${literalPath} is missing.`, {
     path: literalPath,
     hint: `Pass ${literalPath} or ${sourcePath}.`,

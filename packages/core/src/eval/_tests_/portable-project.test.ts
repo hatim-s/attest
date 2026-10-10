@@ -24,6 +24,7 @@ const bundle = (): PortableProjectBundle => {
       extraction: { result_pointer: '/result' },
     },
   };
+
   const test = {
     schema: TEST_RESOURCE_SCHEMA_ID,
     id: 'test',
@@ -33,6 +34,7 @@ const bundle = (): PortableProjectBundle => {
     datasets: [],
     cases: [{ id: 'one', input: { prompt: 'hello' } }],
   };
+
   const project = {
     schema: PROJECT_SCHEMA_ID,
     project_id: '01ARZ3NDEKTSV4RRFFQ69G5FAB',
@@ -58,6 +60,7 @@ const bundle = (): PortableProjectBundle => {
       metrics: [],
     },
   };
+
   return {
     schema: 'attest.project-bundle.v1',
     resources: { project, agents: [agent], tests: [test], datasets: [], metrics: [] },
@@ -72,11 +75,13 @@ const bundle = (): PortableProjectBundle => {
 describe('portable project resolution', () => {
   it('resolves the existing authored cases and snapshot without local paths', () => {
     const project = resolvePortableProject(bundle());
+
     const run = resolveEvalRun(
       project,
       { schema: COMMAND_REQUEST_SCHEMA_ID, command: 'eval.run', all: true, output: 'json' },
       { argv: ['attest', 'cloud', 'run'] },
     );
+
     expect(run.cases.map(({ case_id }) => case_id)).toEqual(['one']);
     expect(run.snapshot.project_hash).toBe(project.projectHash);
   });
@@ -103,6 +108,7 @@ describe('portable project resolution', () => {
   it('rejects literal authorization before storing a revision', () => {
     const input = bundle();
     const agent = input.resources.agents[0]!;
+
     if (agent.transport.kind !== 'http') throw new Error('fixture');
     agent.transport.request.headers = { Authorization: 'Bearer secret' };
     input.resources.project.resources.agents[0]!.content_hash = contentHash(agent);

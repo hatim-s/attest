@@ -29,7 +29,7 @@ type CollectEvalEventsOptions = {
 const evalEvent = (
   sequence: number,
   event: EvalEvent['event'],
-  data: unknown,
+  data: EvalEvent['data'],
   now: Clock,
 ): EvalEvent =>
   evalEventSchema.parse({
@@ -64,19 +64,23 @@ const renderHumanProgress = (event: EvalEvent): string | undefined => {
  */
 const recoverFailedJsonlStream = (
   events: readonly EvalEvent[],
-  error: unknown,
+  cause: unknown,
   now: Clock,
 ): EvalEventStream => {
   const alreadyComplete = evalEventStreamSchema.safeParse(events);
+
   if (alreadyComplete.success) return alreadyComplete.data;
   const started = events[0];
-  if (started?.event !== 'run_started') throw error;
+
+  if (started?.event !== 'run_started') throw cause;
 
   // The collector holds back terminal events, so they can be replaced after a failure.
   const recovered: EvalEvent[] = events.filter(
     (event) => event.event !== 'run_completed' && event.event !== 'result',
   );
+
   const openCases = new Map<string, Extract<EvalEvent, { event: 'case_started' }>['data']>();
+
   const summary = {
     // Counts only emitted case completions; the selection size stays on run_started.
     total_cases: 0,
@@ -85,12 +89,14 @@ const recoverFailedJsonlStream = (
     error_cases: 0,
     metric_error_count: 0,
   };
+
   for (const event of recovered) {
     if (event.event === 'case_started') {
       openCases.set(`${event.data.test_id}\u0000${event.data.case_id}`, event.data);
     } else if (event.event === 'case_completed') {
       openCases.delete(`${event.data.test_id}\u0000${event.data.case_id}`);
       summary.total_cases += 1;
+
       if (event.data.verdict === 'pass') summary.passed_cases += 1;
       else if (event.data.verdict === 'fail') summary.failed_cases += 1;
       else summary.error_cases += 1;
@@ -104,22 +110,33 @@ const recoverFailedJsonlStream = (
       outcome: 'invocation_error',
       verdict: 'error',
     };
+
     recovered.push(evalEvent(recovered.length, 'case_completed', data, now));
     summary.total_cases += 1;
     summary.error_cases += 1;
   }
-  const completion = { run_id: started.data.run_id, status: 'failed', summary };
+
+  const completion: Extract<EvalEvent, { event: 'run_completed' }>['data'] = {
+    run_id: started.data.run_id,
+    status: 'failed',
+    summary,
+  };
+
   recovered.push(evalEvent(recovered.length, 'run_completed', completion, now));
+
   const failure = serializeCliError(
     new AttestCliError('run_failed', 'Eval event source failed after orchestration started.', {
-      cause: error,
+      cause: cause,
     }),
   );
+
   const result = evalFinalResultDataSchema.parse({
     exit_code: failure.exitCode,
     result: createCliFailureResult('eval.run', failure.error),
   });
+
   recovered.push(evalEvent(recovered.length, 'result', result, now));
+
   return evalEventStreamSchema.parse(recovered);
 };
 
@@ -134,40 +151,52 @@ const collectEvalEvents = async (
 ): Promise<EvalEventStream> => {
   const events: EvalEvent[] = [];
   let printed = 0;
+
   const print = (event: EvalEvent): void => {
     options.io.output(serializeEvalEvent(event));
     printed += 1;
   };
+
   try {
     for await (const value of source) {
       const event = evalEventSchema.parse(value);
+
       if (event.sequence !== events.length) {
         throw new AttestCliError('run_failed', 'Eval event sequence is not deterministic.', {
           path: `/events/${events.length}/sequence`,
           hint: `Expected sequence ${events.length}; the dispatcher must emit contiguous zero-based events.`,
         });
       }
+
       events.push(event);
+
       if (options.streamJsonl && event.event !== 'run_completed' && event.event !== 'result')
         print(event);
+
       if (options.watch) {
         const rendered = renderHumanProgress(event);
+
         if (rendered !== undefined) options.io.output(rendered);
       }
     }
+
     const parsed = evalEventStreamSchema.safeParse(events);
+
     if (!parsed.success) {
       throw new AttestCliError('run_failed', 'Eval event stream is out of order or incomplete.', {
         hint: 'Repair dispatcher event ordering and terminal result metadata.',
         details: { diagnostics: issueDiagnostics(parsed.error.issues) },
       });
     }
+
     if (options.streamJsonl) parsed.data.slice(printed).forEach(print);
+
     return parsed.data;
   } catch (error: unknown) {
     if (!options.streamJsonl || events.length === 0) throw error;
     const recovered = recoverFailedJsonlStream(events, error, options.now);
     recovered.slice(printed).forEach((event) => options.io.output(serializeEvalEvent(event)));
+
     return recovered;
   }
 };

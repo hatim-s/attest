@@ -182,6 +182,7 @@ describe('WebSocket authored resource contract', () => {
 describe('WebSocket normalized request and message protocol', () => {
   it('accepts bounded correlated requests and every normalized message kind', () => {
     expect(webSocketInvocationRequestSchema.safeParse(validRequest).success).toBe(true);
+
     for (const type of ['acknowledgement', 'result', 'error', 'trace'] as const) {
       expect(
         webSocketCorrelatedMessageSchema.safeParse({
@@ -192,6 +193,7 @@ describe('WebSocket normalized request and message protocol', () => {
         }).success,
       ).toBe(true);
     }
+
     expectTypeOf(validRequest).toMatchTypeOf<WebSocketInvocationRequest>();
   });
 

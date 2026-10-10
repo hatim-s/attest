@@ -1,3 +1,4 @@
+import { isJsonObject, isString } from '../../internal/json-value.js';
 import { WEBSOCKET_REQUEST_PROTOCOL, type AgentRequest, type JsonValue } from '@attest/contracts';
 
 import { AgentInvocationError } from '../../errors.js';
@@ -24,39 +25,47 @@ const materializeHeaders = (
   resolvedHeaders: Record<string, string>,
 ): Record<string, string> => {
   const authored = agent.transport.headers ?? {};
+
   const resolvedByName = new Map(
     Object.entries(resolvedHeaders).map(([name, value]) => [
       name.toLowerCase(),
       [name, value] as const,
     ]),
   );
+
   const materialized = new Map<string, [string, string]>();
 
   for (const [name, value] of Object.entries(authored)) {
     const normalized = name.toLowerCase();
+
     if (FORBIDDEN_HANDSHAKE_HEADERS.has(normalized)) {
       throw new AgentInvocationError(
         'invalid_envelope',
         `WebSocket header ${name} is controlled by the runtime or unsupported.`,
       );
     }
+
     const resolved = resolvedByName.get(normalized)?.[1];
-    if (typeof value === 'string') {
+
+    if (isString(value)) {
       if (normalized === 'authorization') {
         throw new AgentInvocationError(
           'invalid_envelope',
           'Literal WebSocket authorization is unsupported.',
         );
       }
+
       materialized.set(normalized, [name, resolved ?? value]);
       continue;
     }
+
     if (resolved === undefined) {
       throw new AgentInvocationError(
         'invalid_envelope',
         `WebSocket secret header ${name} was not resolved at runtime.`,
       );
     }
+
     materialized.set(normalized, [name, resolved]);
   }
 
@@ -67,8 +76,10 @@ const materializeHeaders = (
         `WebSocket header ${name} is controlled by the runtime or unsupported.`,
       );
     }
+
     materialized.set(normalized, [name, value]);
   }
+
   return Object.fromEntries(materialized.values());
 };
 
@@ -80,28 +91,36 @@ const materializeRequest = (
 ): string => {
   const replace = (value: JsonValue): JsonValue => {
     if (value === '{{request_id}}') return requestId;
+
     if (Array.isArray(value)) return value.map(replace);
-    if (value !== null && typeof value === 'object') {
+
+    if (isJsonObject(value)) {
       return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, replace(item)]));
     }
+
     return value;
   };
+
   const rendered = Object.fromEntries(
     Object.entries(agent.transport.request_template).map(([key, value]) => [key, replace(value)]),
   );
+
   const text = JSON.stringify({
     ...rendered,
     protocol: WEBSOCKET_REQUEST_PROTOCOL,
     request_id: requestId,
     request,
   });
+
   const cap = agent.limits?.request_bytes ?? DEFAULT_REQUEST_BYTES;
+
   if (Buffer.byteLength(text) > cap) {
     throw new AgentInvocationError(
       'output_cap_exceeded',
       `WebSocket request exceeds the ${cap}-byte request cap.`,
     );
   }
+
   return text;
 };
 

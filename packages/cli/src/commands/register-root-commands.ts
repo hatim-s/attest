@@ -46,12 +46,14 @@ type ProtocolCommandOptions = {
 
 const parsePort = (value: string): number => {
   const port = Number(value);
+
   if (!Number.isInteger(port) || port < 0 || port > 65_535) {
     throw new AttestCliError('cli_usage', 'View port must be an integer from 0 to 65535.', {
       path: '--port',
       hint: 'Pass an integer from 0 to 65535.',
     });
   }
+
   return port;
 };
 
@@ -68,6 +70,7 @@ const registerRootCommands = ({ io, program, workingDirectory }: CommandContext)
         runViewCommand({
           onReady: async ({ url }) => {
             io.output(`Attest view: ${url}\nPress Ctrl+C to stop.`);
+
             if (options.open) await openBrowser(url);
           },
           port: options.port,
@@ -93,7 +96,9 @@ const registerRootCommands = ({ io, program, workingDirectory }: CommandContext)
         storePath: options.store,
         workingDirectory,
       });
+
       io.output(`Wrote ${result.caseCount}-case report to ${result.outputPath}`);
+
       if (result.truncated) {
         io.error(
           `report_truncated: Included the first ${result.caseCount} of ${result.totalCaseCount} cases.`,
@@ -118,6 +123,7 @@ const registerRootCommands = ({ io, program, workingDirectory }: CommandContext)
         traceId: options.traceId,
         workingDirectory,
       });
+
       io.output(
         result.outputPath === undefined
           ? result.json
@@ -143,6 +149,7 @@ const registerRootCommands = ({ io, program, workingDirectory }: CommandContext)
         storePath: options.store,
         workingDirectory,
       });
+
       io.output(options.format === 'json' ? diffToJson(diff) : renderDiffSummary(diff));
     });
 
@@ -155,6 +162,7 @@ const registerRootCommands = ({ io, program, workingDirectory }: CommandContext)
         renderResult('help', options.output, createCliHelp(program, commandPath), renderCliHelp),
       );
     });
+
   setCliCommandHelpMetadata(help, {
     examples: ['attest help test case import --output json'],
     options: { output: { implies: ['non-interactive'] } },
@@ -169,6 +177,7 @@ const registerRootCommands = ({ io, program, workingDirectory }: CommandContext)
         renderResult('errors', options.output, createCliErrorCatalog(), renderCliErrorCatalog),
       );
     });
+
   setCliCommandHelpMetadata(errors, {
     examples: ['attest errors --output json'],
     options: { output: { implies: ['non-interactive'] } },

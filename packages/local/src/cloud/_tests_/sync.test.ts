@@ -1,10 +1,15 @@
+import { z } from 'zod';
 import { createHash } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
-import { PROJECT_SCHEMA_ID, type PortableProjectBundle } from '@attest/contracts';
+import {
+  PROJECT_SCHEMA_ID,
+  portableProjectBundleSchema,
+  type PortableProjectBundle,
+} from '@attest/contracts';
 import { createCloudClient } from '../client.js';
 import { acquireProjectLock, releaseProjectLock } from '../../project/transaction/project-lock.js';
 import {
@@ -17,11 +22,14 @@ import { readCloudLink, writeCloudLink, type CloudLink } from '../link.js';
 import { planPullChanges, pushCloudProject, pullCloudProject } from '../sync.js';
 
 const directories: string[] = [];
+
 const hash = (contents: string) => createHash('sha256').update(contents).digest('hex');
+
 const createDirectory = async () => {
   const root = await mkdtemp(join(tmpdir(), 'attest-cloud-sync-'));
   directories.push(root);
   await mkdir(join(root, 'attest'));
+
   return root;
 };
 
@@ -60,6 +68,7 @@ describe('cloud pull conflict planning', () => {
     const root = await createDirectory();
     await writeFile(join(root, 'attest/old.json'), 'old');
     await writeFile(join(root, 'attest.project.json'), 'manifest');
+
     const changes = await planPullChanges(
       root,
       {
@@ -68,6 +77,7 @@ describe('cloud pull conflict planning', () => {
       },
       { 'attest.project.json': 'new manifest', 'attest/new.json': 'new' },
     );
+
     expect(changes).toEqual([
       { path: 'attest/new.json', type: 'write', contents: 'new' },
       { path: 'attest/old.json', type: 'remove' },
@@ -92,6 +102,7 @@ describe('cloud pull conflict planning', () => {
 describe('cloud link state', () => {
   it('round-trips origin-bound revision hashes and rejects malformed state', async () => {
     const root = await createDirectory();
+
     const link: CloudLink = {
       schema: 'attest.cloud-link.v1',
       base_url: 'https://cloud.example',
@@ -99,6 +110,7 @@ describe('cloud link state', () => {
       revision_id: 'revision-1',
       file_hashes: { 'attest/test.json': hash('test') },
     };
+
     await writeCloudLink(root, link);
     expect(await readCloudLink(root)).toEqual(link);
     await writeFile(join(root, '.attest/cloud.json'), '{}');
@@ -116,12 +128,14 @@ describe('cloud link state', () => {
 describe('cloud revision synchronization', () => {
   it('uploads only referenced files and pulls exact bytes through the project journal', async () => {
     const root = await createDirectory();
+
     const manifest = {
       schema: PROJECT_SCHEMA_ID,
       project_id: '01ARZ3NDEKTSV4RRFFQ69G5FAB',
       name: 'Original',
       resources: { agents: [], tests: [], datasets: [], metrics: [] },
     };
+
     await writeFile(join(root, 'attest.project.json'), JSON.stringify(manifest));
     await writeFile(join(root, '.env'), 'SECRET=never-upload');
     await writeFile(join(root, 'attest/unreferenced.json'), 'private-data');
@@ -132,26 +146,32 @@ describe('cloud revision synchronization', () => {
       file_hashes: {},
     });
     let uploaded: PortableProjectBundle | undefined;
+
     const client = createCloudClient({
       baseUrl: 'https://cloud.example',
-      fetch: (_url, init) => {
+      fetch: async (_url, init) => {
         if (init?.method === 'POST') {
-          if (typeof init.body !== 'string') throw new Error('Expected JSON request');
-          const body = JSON.parse(init.body) as {
-            bundle: PortableProjectBundle;
-            parent_revision_id: string | null;
-          };
+          const body = z
+            .object({
+              bundle: portableProjectBundleSchema,
+              parent_revision_id: z.string().nullable(),
+            })
+            .parse(await new Response(init.body).json());
+
           expect(body.parent_revision_id).toBe(uploaded === undefined ? null : 'revision-1');
           uploaded = body.bundle;
+
           return Promise.resolve(
             Response.json({
               revision: { id: 'revision-1', project_id: 'project-1', created_at: '2026-10-01' },
             }),
           );
         }
+
         const remote = structuredClone(uploaded!);
         remote.resources.project.name = 'Remote';
         remote.files['attest.project.json'] = JSON.stringify(remote.resources.project, null, 2);
+
         return Promise.resolve(
           Response.json({
             revision: { id: 'revision-2', project_id: 'project-1', created_at: '2026-10-02' },
@@ -160,6 +180,7 @@ describe('cloud revision synchronization', () => {
         );
       },
     });
+
     await expect(pushCloudProject({ workingDirectory: root, client })).rejects.toMatchObject({
       code: 'cli_usage',
     });
@@ -188,6 +209,7 @@ describe('cloud pull crash recovery', () => {
       await writeFile(join(root, 'attest.project.json'), 'unchanged manifest');
       await writeFile(join(root, 'attest/code.ts'), 'old code');
       const lock = await acquireProjectLock(root);
+
       try {
         const transaction = await prepareTransaction(
           root,
@@ -198,6 +220,7 @@ describe('cloud pull crash recovery', () => {
           'old-revision',
           'new-revision',
         );
+
         if (phase === 'partial') {
           await expect(
             publishPreparedTransaction(root, transaction, () => {
@@ -207,6 +230,7 @@ describe('cloud pull crash recovery', () => {
         } else if (phase === 'published') {
           await publishPreparedTransaction(root, transaction);
         }
+
         expect(await recoverProjectTransactions(root, lock)).toEqual([
           { action: 'rolled_back', transactionId: transaction.journal.transaction_id },
         ]);

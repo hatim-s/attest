@@ -16,6 +16,7 @@ type CaseEnvironment = {
   /** Aborts and drains all admitted work before releasing the environment. */
   dispose(): Promise<void>;
 };
+
 type CaseEnvironmentContext = {
   runId: string;
   testId: string;
@@ -24,6 +25,7 @@ type CaseEnvironmentContext = {
   workerIndex: number;
   signal: AbortSignal;
 };
+
 type CaseEnvironmentFactory = (context: CaseEnvironmentContext) => Promise<CaseEnvironment>;
 
 export { type CaseEnvironment, type CaseEnvironmentContext, type CaseEnvironmentFactory };

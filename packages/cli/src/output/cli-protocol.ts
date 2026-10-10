@@ -15,6 +15,7 @@ type CliResultOptions = {
 };
 
 /** Builds a validated success document; commands that never read a project report null hashes. */
+// BOUNDARY: Command-owned result values are validated by cliSuccessResultSchema before they reach terminal JSON output.
 const createCliSuccessResult = (
   command: string,
   result: unknown,

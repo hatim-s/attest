@@ -20,7 +20,9 @@ const readTransport = async (context: PromptContext): Promise<GuidedTransport> =
   const answer = (await context.prompt('Transport [cli/http/background/jsonl/stream/websocket]: '))
     .trim()
     .toLowerCase();
+
   if (answer === '') return 'cli';
+
   const transports: readonly GuidedTransport[] = [
     'background',
     'cli',
@@ -29,7 +31,9 @@ const readTransport = async (context: PromptContext): Promise<GuidedTransport> =
     'stream',
     'websocket',
   ];
+
   const transport = transports.find((candidate) => candidate === answer);
+
   if (transport !== undefined) return transport;
   throw new AttestCliError(
     'cli_usage',
@@ -100,6 +104,7 @@ const promptWebSocketFields = async (context: PromptContext): Promise<Partial<Ag
     { path: '--websocket-url', question: 'WebSocket URL: ' },
     context,
   );
+
   const webSocketLifecycle = await promptChoice(
     'WebSocket lifecycle',
     ['per_run', 'per_case'],
@@ -107,6 +112,7 @@ const promptWebSocketFields = async (context: PromptContext): Promise<Partial<Ag
     '--websocket-lifecycle',
     context,
   );
+
   const connectionMode = await promptChoice(
     'Connection mode',
     ['serial', 'multiplexed'],
@@ -114,6 +120,7 @@ const promptWebSocketFields = async (context: PromptContext): Promise<Partial<Ag
     '--connection-mode',
     context,
   );
+
   return {
     webSocketUrl,
     webSocketLifecycle,
@@ -165,6 +172,7 @@ const promptTransportFields = async (
   if (!context.interactive || TRANSPORT_FLAGS.some((flag) => fields[flag] !== undefined)) {
     return fields;
   }
+
   switch (await readTransport(context)) {
     case 'cli':
       return {

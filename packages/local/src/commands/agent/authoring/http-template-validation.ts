@@ -3,23 +3,33 @@ import type { AgentResource, JsonValue } from '@attest/contracts';
 import { LocalError } from '../../../errors/index.js';
 import { isSensitiveFieldName } from '../../../internal/redaction.js';
 
+const isJsonObject = (value: JsonValue): value is { [key: string]: JsonValue } =>
+  value !== null && typeof value === 'object' && !Array.isArray(value);
+
 const findSensitiveBodyField = (value: JsonValue, path = ''): string | undefined => {
   if (Array.isArray(value)) {
     for (let index = 0; index < value.length; index += 1) {
       const found = findSensitiveBodyField(value[index]!, `${path}/${String(index)}`);
+
       if (found !== undefined) return found;
     }
+
     return undefined;
   }
-  if (value === null || typeof value !== 'object') return undefined;
+
+  if (!isJsonObject(value)) return undefined;
+
   for (const [name, entry] of Object.entries(value)) {
     if (isSensitiveFieldName(name)) return `${path}/${name}`;
     const found = findSensitiveBodyField(entry, `${path}/${name}`);
+
     if (found !== undefined) return found;
   }
+
   return undefined;
 };
 
+// BOUNDARY: Authored HTTP templates are checked for credential literals, sensitive body fields and unsupported URL forms before requests are allowed.
 const assertSafeHttpTemplate = (
   request: Extract<AgentResource['transport'], { kind: 'http' }>['request'],
   path: string,
@@ -27,10 +37,12 @@ const assertSafeHttpTemplate = (
   const separator = request.url.indexOf('://');
   const authorityStart = separator + 3;
   const authorityEnd = request.url.slice(authorityStart).search(/[/?#]/u);
+
   const authority = request.url.slice(
     authorityStart,
     authorityEnd < 0 ? undefined : authorityStart + authorityEnd,
   );
+
   if (
     separator <= 0 ||
     request.url.slice(0, authorityStart).includes('{{') ||
@@ -42,12 +54,15 @@ const assertSafeHttpTemplate = (
       { path },
     );
   }
+
   let url: URL;
+
   try {
     url = new URL(request.url.replaceAll(/\{\{[^}]+\}\}/gu, 'placeholder'));
   } catch {
     throw new LocalError('project_invalid', 'Mapped HTTP URL is invalid.', { path });
   }
+
   if (
     !['http:', 'https:'].includes(url.protocol) ||
     url.username.length > 0 ||
@@ -60,6 +75,7 @@ const assertSafeHttpTemplate = (
       hint: 'Keep query mappings separate and remove credentials or fragments from the URL.',
     });
   }
+
   for (const [name, value] of Object.entries(request.headers ?? {})) {
     if (isSensitiveFieldName(name) && typeof value === 'string') {
       throw new LocalError('project_invalid', 'Sensitive HTTP headers must use references.', {
@@ -67,6 +83,7 @@ const assertSafeHttpTemplate = (
       });
     }
   }
+
   for (const [name, value] of Object.entries(request.query ?? {})) {
     if (isSensitiveFieldName(name) && typeof value === 'string') {
       throw new LocalError('project_invalid', 'Sensitive HTTP query values must use references.', {
@@ -74,14 +91,17 @@ const assertSafeHttpTemplate = (
       });
     }
   }
+
   const sensitiveBody =
     request.body === undefined ? undefined : findSensitiveBodyField(request.body);
+
   if (sensitiveBody !== undefined) {
     throw new LocalError('project_invalid', 'Mapped HTTP bodies cannot contain credentials.', {
       path: `${path}/body${sensitiveBody}`,
       hint: 'Move credentials to an environment-backed header or query reference.',
     });
   }
+
   return url;
 };
 

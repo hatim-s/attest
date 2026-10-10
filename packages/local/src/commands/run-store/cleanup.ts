@@ -6,6 +6,7 @@ type CleanupStep = () => Promise<void>;
  */
 const runCleanupSteps = async (steps: readonly CleanupStep[]): Promise<void> => {
   const failures: unknown[] = [];
+
   for (const step of steps) {
     try {
       await step();
@@ -13,6 +14,7 @@ const runCleanupSteps = async (steps: readonly CleanupStep[]): Promise<void> => 
       failures.push(error);
     }
   }
+
   if (failures.length > 0) throw failures[0];
 };
 
@@ -21,11 +23,11 @@ const runCleanupSteps = async (steps: readonly CleanupStep[]): Promise<void> => 
  * failures are dropped because the primary failure explains why the operation stopped.
  */
 const rethrowAfterCleanup = async (
-  failure: unknown,
+  cause: unknown,
   steps: readonly CleanupStep[],
 ): Promise<never> => {
   await runCleanupSteps(steps).catch(() => undefined);
-  throw failure;
+  throw cause;
 };
 
 export { rethrowAfterCleanup, runCleanupSteps, type CleanupStep };

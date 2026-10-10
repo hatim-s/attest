@@ -9,7 +9,9 @@ const promptDefault = async (
   context: PromptContext,
 ): Promise<string> => {
   if (value?.trim()) return value.trim();
+
   if (!context.interactive) return fallback;
+
   return (await context.prompt(`${question} [${fallback}]: `)).trim() || fallback;
 };
 
@@ -20,8 +22,10 @@ const promptOptional = async (
   context: PromptContext,
 ): Promise<string | undefined> => {
   if (value?.trim()) return value.trim();
+
   if (!context.interactive) return undefined;
   const answer = (await context.prompt(`${question} [none]: `)).trim();
+
   return answer.length === 0 ? undefined : answer;
 };
 
@@ -35,6 +39,7 @@ const promptChoice = async <const Choice extends string>(
 ): Promise<Choice> => {
   const answer = await promptDefault(undefined, question, fallback, context);
   const choice = choices.find((candidate) => candidate === answer);
+
   if (choice !== undefined) return choice;
   throw new AttestCliError('cli_usage', `${question} must be one of ${choices.join(', ')}.`, {
     path,
@@ -47,6 +52,7 @@ const commaSeparated = (value: string): string[] | undefined => {
     .split(',')
     .map((entry) => entry.trim())
     .filter((entry) => entry.length > 0);
+
   return entries.length === 0 ? undefined : entries;
 };
 

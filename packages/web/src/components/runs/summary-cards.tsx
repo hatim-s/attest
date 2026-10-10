@@ -5,14 +5,18 @@ import { formatDateTime, formatPassRate } from '../../lib/format.js';
 const describeCaseCounts = (run: RunRecord): string => {
   const failed = `${run.summary?.failedCases ?? 0} failed`;
   const labels = run.labels;
+
   if (labels?.selection_total === undefined) return failed;
+
   if (labels.selection_selected === labels.selection_total) return failed;
+
   return `${failed}; ${labels.selection_selected} of ${labels.selection_total} selected`;
 };
 
 /** Shows pass rate, case count, error count, and finish time for one run. */
 const SummaryCards = ({ run }: { run: RunRecord }) => {
   const summary = run.summary;
+
   const values = [
     {
       label: 'Pass rate',

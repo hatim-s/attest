@@ -17,14 +17,18 @@ class LineSplitter {
   push(text: string): SplitLines {
     this.buffer += text;
     const lines: string[] = [];
+
     for (;;) {
       const newline = this.buffer.indexOf('\n');
+
       if (newline < 0) break;
       const line = this.buffer.slice(0, newline).replace(/\r$/u, '');
       this.buffer = this.buffer.slice(newline + 1);
+
       if (this.exceedsCap(line)) return { lines, overflow: true };
       lines.push(line);
     }
+
     return { lines, overflow: this.exceedsCap(this.buffer) };
   }
 
@@ -33,7 +37,9 @@ class LineSplitter {
     if (this.buffer.length === 0) return { lines: [], overflow: false };
     const line = this.buffer.replace(/\r$/u, '');
     this.buffer = '';
+
     if (this.exceedsCap(line)) return { lines: [], overflow: true };
+
     return { lines: [line], overflow: false };
   }
 

@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { runTraceConvertCommand } from '../run-trace-convert-command.js';
 
 const directories: string[] = [];
+
 const traceId = '00112233445566778899aabbccddeeff';
 
 /** Creates the smallest valid OTLP/HTTP JSON export accepted by the converter. */
@@ -48,6 +49,7 @@ describe('runTraceConvertCommand', () => {
       inputPath: 'trace.json',
       workingDirectory: directory,
     });
+
     expect(JSON.parse(stdout.json)).toMatchObject({
       trace_id: traceId,
       spans: [{ kind: 'agent' }],
@@ -58,6 +60,7 @@ describe('runTraceConvertCommand', () => {
       outputPath: 'converted/trace.json',
       workingDirectory: directory,
     });
+
     await expect(readFile(written.outputPath ?? '', 'utf8')).resolves.toBe(written.json);
     await expect(
       runTraceConvertCommand({

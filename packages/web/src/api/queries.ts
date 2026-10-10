@@ -37,8 +37,9 @@ const useCases = (runId: string | undefined, status: RunStatus | undefined) => {
 
   return useInfiniteQuery({
     queryKey: ['cases', runId],
-    queryFn: ({ pageParam }) => listCases(runId ?? '', pageParam),
-    initialPageParam: undefined as string | undefined,
+    queryFn: ({ pageParam }: { pageParam: string | undefined }) =>
+      listCases(runId ?? '', pageParam),
+    initialPageParam: undefined,
     getNextPageParam: (page) => page.nextCursor,
     enabled: runId !== undefined,
     refetchInterval: isLive && status === 'running' ? 2_000 : false,

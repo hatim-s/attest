@@ -2,7 +2,7 @@ import { BoundedOutputWritable } from '../adapters/sandbox/bounded-writable.js';
 import { resolveVercelSandboxCredentials } from '../adapters/sandbox/credentials.js';
 import { SANDBOX_WORKSPACE, resolveRemotePath } from '../adapters/sandbox/sandbox-paths.js';
 import { readRemoteFile } from '../adapters/sandbox/sandbox-transfer.js';
-import type { VercelSandboxFactory } from '../adapters/sandbox/types.js';
+import type { VercelSandboxCreateParams, VercelSandboxFactory } from '../adapters/sandbox/types.js';
 import { defaultSandboxFactory } from '../adapters/sandbox/vercel-sandbox-adapter.js';
 import { requirePositiveInteger } from '../internal/positive-integer.js';
 import { createEnvironmentLifecycle } from './environment-lifecycle.js';
@@ -30,13 +30,14 @@ class SandboxCleanupError extends AggregateError {
   readonly cleanupConfirmed = false;
 }
 
-/** Marks failed VM cleanup so runtime can prevent unsafe worker reuse. */
-const cleanupFailure = (operationError: unknown, stopError: unknown): SandboxCleanupError =>
-  new SandboxCleanupError([operationError, stopError], 'Sandbox operation and cleanup failed.');
+/** BOUNDARY: retains both rejected SDK operation and cleanup causes without assuming an Error subtype.
+ * Marks failed VM cleanup so runtime can prevent unsafe worker reuse. */
+const cleanupFailure = (cause: unknown, stopCause: unknown): SandboxCleanupError =>
+  new SandboxCleanupError([cause, stopCause], 'Sandbox operation and cleanup failed.');
 
 /** Marks a standalone stop failure as unconfirmed cleanup. */
-const stopFailure = (error: unknown): SandboxCleanupError =>
-  new SandboxCleanupError([error], 'Sandbox cleanup failed.');
+const stopFailure = (cause: unknown): SandboxCleanupError =>
+  new SandboxCleanupError([cause], 'Sandbox cleanup failed.');
 
 /** Resolves seed files before creating a VM so invalid paths cannot leave remote state behind. */
 const resolveSeedFiles = (
@@ -46,14 +47,18 @@ const resolveSeedFiles = (
   const resolved: { path: string; content: string }[] = [];
   const destinations = new Set<string>();
   let bytes = 0;
+
   for (const [path, content] of Object.entries(files)) {
     const destination = resolveRemotePath(normalizeWorkspacePath(path, 'Seed file path'));
+
     if (destinations.has(destination)) throw new TypeError(`Duplicate seed file path: ${path}`);
     destinations.add(destination);
     bytes += Buffer.byteLength(content);
+
     if (bytes > cap) throw new Error('Initial sandbox files exceed outputBytes.');
     resolved.push({ path: destination, content });
   }
+
   return resolved;
 };
 
@@ -73,16 +78,21 @@ const vercelSandboxIsolation =
     requirePositiveInteger('finalizationTimeoutMs', finalizationTimeoutMs);
     requirePositiveInteger('cleanupTimeoutMs', cleanupTimeoutMs);
     const files = resolveSeedFiles(options.files ?? {}, cap);
-    const sdk = await factory({
+
+    const creation: VercelSandboxCreateParams = {
       image: options.image ?? 'vercel/sandbox/universal',
       persistent: false,
       timeout: options.timeoutMs ?? 600_000,
       signal: AbortSignal.any([signal, AbortSignal.timeout(commandTimeoutMs)]),
-      ...(credentials.kind === 'oidc' ? {} : credentials.credentials),
-    });
+    };
+
+    if (credentials.kind !== 'oidc') Object.assign(creation, credentials.credentials);
+    const sdk = await factory(creation);
+
     let poisonReason: Error | undefined;
     let stopping: Promise<void> | undefined;
     let disposal: Promise<void> | undefined;
+
     const lifecycle = createEnvironmentLifecycle({
       signal,
       finalizationTimeoutMs,
@@ -94,15 +104,18 @@ const vercelSandboxIsolation =
       stopping ??= Promise.resolve()
         .then(() => sdk.stop({ signal: AbortSignal.timeout(cleanupTimeoutMs) }))
         .then(() => undefined);
+
       return stopping;
     };
+
     /** Stops a VM whose command rejected because the remote process may still be running. */
-    const poison = async (error: unknown): Promise<never> => {
+    const poison = async (cause: unknown): Promise<never> => {
       poisonReason ??=
-        error instanceof Error
-          ? error
-          : new Error('Vercel Sandbox command rejected.', { cause: error });
-      lifecycle.poison(error);
+        cause instanceof Error
+          ? cause
+          : new Error('Vercel Sandbox command rejected.', { cause: cause });
+      lifecycle.poison(cause);
+
       try {
         await stop();
       } catch (cleanupError) {
@@ -110,28 +123,37 @@ const vercelSandboxIsolation =
           poisonReason = cleanupFailure(poisonReason, cleanupError);
         }
       }
+
       throw poisonReason;
     };
+
     /** Adds per-command and caller deadlines to an admitted phase signal. */
     const operationSignal = (admitted: AbortSignal, extra?: AbortSignal): AbortSignal =>
       AbortSignal.any([admitted, AbortSignal.timeout(commandTimeoutMs), ...(extra ? [extra] : [])]);
+
     /** Aborts and drains all operations, then confirms the VM stopped. */
     const dispose = async (): Promise<void> => {
       const drained = lifecycle.close(new Error('Case environment disposed.'));
       // Stop right away so an SDK call that ignores local abort still loses its remote VM.
       let cleanupError: unknown;
-      const stopped = stop().catch((error: unknown) => {
-        cleanupError = error;
+
+      const stopped = stop().catch((cause: unknown) => {
+        cleanupError = cause;
       });
+
       let timeout: ReturnType<typeof setTimeout> | undefined;
+
       const settled = await Promise.race([
         Promise.all([drained, stopped]).then(() => true),
         new Promise<false>((resolve) => {
           timeout = setTimeout(() => resolve(false), cleanupTimeoutMs);
         }),
       ]);
+
       clearTimeout(timeout);
+
       if (settled && cleanupError === undefined) return;
+
       if (poisonReason instanceof SandboxCleanupError) throw poisonReason;
       throw stopFailure(
         cleanupError ?? new Error('Sandbox operations did not drain before cleanup timed out.'),
@@ -140,6 +162,7 @@ const vercelSandboxIsolation =
 
     try {
       const setupSignal = operationSignal(signal);
+
       const ready = await sdk
         .runCommand({
           cmd: 'mkdir',
@@ -147,8 +170,10 @@ const vercelSandboxIsolation =
           signal: setupSignal,
           timeoutMs: commandTimeoutMs,
         })
-        .catch((error: unknown) => poison(error));
+        .catch((cause: unknown) => poison(cause));
+
       if (ready.exitCode !== 0) throw new Error('Could not prepare case sandbox.');
+
       if (files.length > 0) await sdk.writeFiles(files, { signal: setupSignal });
     } catch (error) {
       try {
@@ -157,6 +182,7 @@ const vercelSandboxIsolation =
         if (error instanceof SandboxCleanupError) throw error;
         throw cleanupFailure(error, cleanupError);
       }
+
       throw error;
     }
 
@@ -167,10 +193,13 @@ const vercelSandboxIsolation =
           const commandLifetime = new AbortController();
           const stdoutCap = Math.ceil(cap / 2);
           const stderrCap = Math.floor(cap / 2);
+
           const onExceeded = (): void =>
             commandLifetime.abort(new Error('Sandbox command output exceeds outputBytes.'));
+
           const stdout = new BoundedOutputWritable(stdoutCap, onExceeded);
           const stderr = new BoundedOutputWritable(stderrCap, onExceeded);
+
           const result = await sdk
             .runCommand({
               cmd: 'sh',
@@ -185,10 +214,12 @@ const vercelSandboxIsolation =
               stdout,
               stderr,
             })
-            .catch((error: unknown) => poison(error));
+            .catch((cause: unknown) => poison(cause));
+
           if (stdout.exceeded || stderr.exceeded) {
             throw new Error('Sandbox command output exceeds outputBytes.');
           }
+
           return {
             stdout: stdout.buffer().toString('utf8'),
             stderr: stderr.buffer().toString('utf8'),
@@ -203,7 +234,9 @@ const vercelSandboxIsolation =
             cap,
             operationSignal(admitted),
           );
+
           if (contents === null) throw new Error(`Sandbox file does not exist: ${path}`);
+
           return contents.toString('utf8');
         }),
       writeFile: (path, content) =>
@@ -211,6 +244,7 @@ const vercelSandboxIsolation =
           if (Buffer.byteLength(content) > cap) {
             throw new Error('Sandbox file exceeds outputBytes.');
           }
+
           await sdk.writeFiles(
             [{ path: resolveRemotePath(normalizeWorkspacePath(path)), content }],
             { signal: operationSignal(admitted) },
@@ -219,6 +253,7 @@ const vercelSandboxIsolation =
       beginFinalization: lifecycle.beginFinalization,
       dispose: () => {
         disposal ??= dispose();
+
         return disposal;
       },
     };

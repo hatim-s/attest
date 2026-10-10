@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto';
 
-import { AgentInvocationError } from '../../errors.js';
+import { AgentInvocationError, type AgentInvocationErrorOptions } from '../../errors.js';
 
 type WebSocketCloseFrame = {
   code?: number;
@@ -19,7 +19,9 @@ type WebSocketFrameCallbacks = {
 /** RFC 6455 stores small lengths inline and larger ones in a 16-bit or 64-bit extension. */
 const extendedLengthBytes = (payloadBytes: number): 0 | 2 | 8 => {
   if (payloadBytes < 126) return 0;
+
   if (payloadBytes <= 65_535) return 2;
+
   return 8;
 };
 
@@ -32,6 +34,7 @@ const encodeWebSocketFrame = (
   const lengthBytes = extendedLengthBytes(payload.byteLength);
   const header = Buffer.alloc(2 + lengthBytes + mask.byteLength);
   header[0] = 0x80 | opcode;
+
   if (lengthBytes === 0) {
     header[1] = 0x80 | payload.byteLength;
   } else if (lengthBytes === 2) {
@@ -41,11 +44,14 @@ const encodeWebSocketFrame = (
     header[1] = 0x80 | 127;
     header.writeBigUInt64BE(BigInt(payload.byteLength), 2);
   }
+
   mask.copy(header, 2 + lengthBytes);
   const masked = Buffer.allocUnsafe(payload.byteLength);
+
   for (let index = 0; index < payload.byteLength; index += 1) {
     masked[index] = payload[index]! ^ mask[index % 4]!;
   }
+
   return Buffer.concat([header, masked]);
 };
 
@@ -66,6 +72,7 @@ class WebSocketFrameDecoder {
   accept(chunk: Buffer): void {
     if (this.failed) return;
     this.buffer = Buffer.concat([this.buffer, chunk]);
+
     while (this.parseFrame()) {
       if (this.failed) return;
     }
@@ -77,26 +84,35 @@ class WebSocketFrameDecoder {
     const second = this.buffer[1]!;
     const final = (first & 0x80) !== 0;
     const opcode = first & 0x0f;
+
     if ((first & 0x70) !== 0 || (second & 0x80) !== 0) {
       this.protocolFailure('WebSocket server emitted an invalid or masked frame.');
+
       return false;
     }
 
     const length = this.readPayloadLength(second);
+
     if (length === undefined) return false;
     const { headerBytes, payloadBytes } = length;
+
     if (opcode >= 0x8 && (!final || payloadBytes > 125)) {
       this.protocolFailure('WebSocket server emitted an invalid control frame.');
+
       return false;
     }
+
     if (payloadBytes > this.maximumMessageBytes) {
       this.messageTooLarge();
+
       return false;
     }
+
     if (this.buffer.byteLength < headerBytes + payloadBytes) return false;
     const payload = this.buffer.subarray(headerBytes, headerBytes + payloadBytes);
     this.buffer = this.buffer.subarray(headerBytes + payloadBytes);
     this.acceptFrame(opcode, final, payload);
+
     return true;
   }
 
@@ -104,68 +120,94 @@ class WebSocketFrameDecoder {
     secondByte: number,
   ): { headerBytes: number; payloadBytes: number } | undefined {
     const marker = secondByte & 0x7f;
+
     if (marker < 126) return { headerBytes: 2, payloadBytes: marker };
+
     if (marker === 126) {
       if (this.buffer.byteLength < 4) return undefined;
+
       return { headerBytes: 4, payloadBytes: this.buffer.readUInt16BE(2) };
     }
+
     if (this.buffer.byteLength < 10) return undefined;
     const extended = this.buffer.readBigUInt64BE(2);
+
     if (extended > BigInt(Number.MAX_SAFE_INTEGER)) {
       this.protocolFailure('WebSocket frame length exceeds the supported numeric range.');
+
       return undefined;
     }
+
     return { headerBytes: 10, payloadBytes: Number(extended) };
   }
 
   private acceptFrame(opcode: number, final: boolean, payload: Buffer): void {
     if (opcode === 0x8) {
       this.acceptClose(payload);
+
       return;
     }
+
     if (opcode === 0x9) {
       this.callbacks.onPing(payload);
+
       return;
     }
+
     if (opcode === 0x0a) {
       this.callbacks.onPong();
+
       return;
     }
+
     if (opcode === 0x2 || (opcode === 0x0 && this.fragmentedOpcode === 0x2)) {
       this.fail(
         new AgentInvocationError('invalid_envelope', 'Binary WebSocket frames are unsupported.', {
           classification: 'binary_frame_unsupported',
         }),
       );
+
       return;
     }
+
     if (opcode !== 0x0 && opcode !== 0x1) {
       this.protocolFailure('WebSocket server emitted an unsupported frame opcode.');
+
       return;
     }
+
     if (opcode === 0x0 && this.fragmentedOpcode === undefined) {
       this.protocolFailure('WebSocket server emitted an unexpected continuation frame.');
+
       return;
     }
+
     if (opcode === 0x1 && this.fragmentedOpcode !== undefined) {
       this.protocolFailure('WebSocket server interleaved fragmented data messages.');
+
       return;
     }
+
     if (final) {
       this.finishMessage(opcode, payload);
+
       return;
     }
+
     if (opcode !== 0x0) this.fragmentedOpcode = opcode;
     this.fragmentedParts.push(payload);
     this.fragmentedBytes += payload.byteLength;
+
     if (this.fragmentedBytes > this.maximumMessageBytes) this.messageTooLarge();
   }
 
   private finishMessage(opcode: number, payload: Buffer): void {
     if (opcode === 0x0 && this.fragmentedBytes + payload.byteLength > this.maximumMessageBytes) {
       this.messageTooLarge();
+
       return;
     }
+
     const complete =
       opcode === 0x0
         ? Buffer.concat(
@@ -173,9 +215,11 @@ class WebSocketFrameDecoder {
             this.fragmentedBytes + payload.byteLength,
           )
         : payload;
+
     this.fragmentedOpcode = undefined;
     this.fragmentedParts = [];
     this.fragmentedBytes = 0;
+
     try {
       const text = new TextDecoder('utf-8', { fatal: true }).decode(complete);
       this.callbacks.onText(text, complete.byteLength);
@@ -192,21 +236,26 @@ class WebSocketFrameDecoder {
   private acceptClose(payload: Buffer): void {
     let code: number | undefined;
     let reason: string | undefined;
+
     try {
       if (payload.byteLength === 1) throw new Error('close code is truncated');
+
       if (payload.byteLength >= 2) {
         code = payload.readUInt16BE(0);
         reason = new TextDecoder('utf-8', { fatal: true }).decode(payload.subarray(2));
       }
     } catch (cause: unknown) {
       this.protocolFailure('WebSocket server emitted an invalid close frame.', cause);
+
       return;
     }
-    this.callbacks.onClose({
-      payload,
-      ...(code === undefined ? {} : { code }),
-      ...(reason === undefined ? {} : { reason: reason.slice(0, 123) }),
-    });
+
+    const close: WebSocketCloseFrame = { payload };
+
+    if (code !== undefined) close.code = code;
+
+    if (reason !== undefined) close.reason = reason.slice(0, 123);
+    this.callbacks.onClose(close);
   }
 
   private messageTooLarge(): void {
@@ -219,12 +268,10 @@ class WebSocketFrameDecoder {
   }
 
   private protocolFailure(message: string, cause?: unknown): void {
-    this.fail(
-      new AgentInvocationError('invalid_envelope', message, {
-        ...(cause === undefined ? {} : { cause }),
-        classification: 'connection_failed',
-      }),
-    );
+    const details: AgentInvocationErrorOptions = { classification: 'connection_failed' };
+
+    if (cause !== undefined) details.cause = cause;
+    this.fail(new AgentInvocationError('invalid_envelope', message, details));
   }
 
   private fail(error: AgentInvocationError): void {

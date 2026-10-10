@@ -1,3 +1,5 @@
+import type { JsonValue } from '@attest/contracts';
+import { isString } from '@attest/contracts';
 import {
   chat,
   StandardSchemaValidationError,
@@ -38,19 +40,24 @@ type StructuredChatRequest = {
 };
 
 /** Executes one schema-constrained chat call; injected by tests to avoid provider network calls. */
-type StructuredChatExecutor = (request: StructuredChatRequest) => Promise<unknown>;
+type StructuredChatExecutor = (request: StructuredChatRequest) => Promise<JsonValue>;
+
+// BOUNDARY: SDK thrown values may expose a failure code; only object containers are inspected.
+const isErrorRecord = (cause: unknown): cause is Record<string, unknown> =>
+  cause !== null && typeof cause === 'object';
 
 /** Identifies SDK structured-output failures that metric spec §3 permits retrying exactly once. */
-const isUnparseableResponse = (error: unknown): boolean => {
-  if (error instanceof StandardSchemaValidationError) {
+const isUnparseableResponse = (cause: unknown): boolean => {
+  if (cause instanceof StandardSchemaValidationError) {
     return true;
   }
+
   return (
-    typeof error === 'object' &&
-    error !== null &&
-    'code' in error &&
-    typeof error.code === 'string' &&
-    UNPARSEABLE_RESPONSE_CODES.has(error.code)
+    isErrorRecord(cause) &&
+    cause !== null &&
+    'code' in cause &&
+    isString(cause.code) &&
+    UNPARSEABLE_RESPONSE_CODES.has(cause.code)
   );
 };
 
@@ -61,7 +68,9 @@ const createRecordMiddleware = (observation: JudgeAttemptObservation): ChatMiddl
     if (chunk.type !== 'CUSTOM') {
       return;
     }
+
     const complete = structuredOutputCompleteSchema.safeParse(chunk);
+
     if (complete.success) {
       observation.rawResponse = complete.data.value.raw;
     }
@@ -77,12 +86,15 @@ const createRecordMiddleware = (observation: JudgeAttemptObservation): ChatMiddl
 const executeStructuredChat: StructuredChatExecutor = async (request) => {
   const abortController = new AbortController();
   const forwardAbort = (): void => abortController.abort(request.signal.reason);
+
   if (request.signal.aborted) {
     forwardAbort();
   }
+
   request.signal.addEventListener('abort', forwardAbort, { once: true });
+
   try {
-    return await chat({
+    const response = await chat({
       adapter: request.adapter,
       systemPrompts: [request.system],
       messages: [{ role: 'user', content: request.user }],
@@ -92,6 +104,8 @@ const executeStructuredChat: StructuredChatExecutor = async (request) => {
       middleware: [createRecordMiddleware(request.observation)],
       debug: false,
     });
+
+    return z.json().parse(response);
   } finally {
     request.signal.removeEventListener('abort', forwardAbort);
   }

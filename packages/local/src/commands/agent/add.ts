@@ -12,19 +12,23 @@ const runAgentAddCommand = async (
 ): Promise<CommandResult<'mutation', MutationResult>> => {
   const { request } = options;
   assertSafeNativeAgentResource(request.agent);
+
   const loaded = await loadCommandProject({
     project: options.project,
     recover: request.dry_run !== true,
     workingDirectory: options.workingDirectory,
   });
+
   if (loaded.agents.some(({ id }) => id === request.agent.id)) {
     throw new LocalError('project_invalid', `Agent ${request.agent.id} already exists.`, {
       path: request.agent.id,
       hint: 'Choose another id or remove the existing agent first.',
     });
   }
+
   const candidate = candidateFromLoadedProject(loaded);
   candidate.agents.push(request.agent);
+
   return mutationResult({
     command: 'agent.add',
     loaded,

@@ -11,6 +11,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { openStore } from '../run-store.js';
 
 const stores: RunStore[] = [];
+
 const directories: string[] = [];
 
 /** Opens an isolated database so the adapter is verified through actual persistence. */
@@ -19,17 +20,26 @@ const openTemporaryStore = async (): Promise<RunStore> => {
   const store = (await openStore(join(directory, 'runs.db'))).runs;
   directories.push(directory);
   stores.push(store);
+
   return store;
 };
 
 /** Removes database-owned identity and evaluation fields before comparing a store projection. */
 const toStoredProjection = (record: CaseRecord): StoredCaseExecution => {
-  const projection = { ...record } as Partial<CaseRecord>;
-  delete projection.rowId;
-  delete projection.runId;
-  delete projection.inputHash;
-  delete projection.metrics;
-  return projection as StoredCaseExecution;
+  const {
+    rowId: _rowId,
+    runId: _runId,
+    inputHash: _inputHash,
+    metrics: _metrics,
+    ...projection
+  } = record;
+
+  void _rowId;
+  void _runId;
+  void _inputHash;
+  void _metrics;
+
+  return projection;
 };
 
 afterEach(async () => {
@@ -42,11 +52,13 @@ afterEach(async () => {
 describe('toStoredCaseExecution', () => {
   it('persists completed and timeout runner projections without losing durable evidence', async () => {
     const store = await openTemporaryStore();
+
     const run = await store.createRun({
       schemaId: 'attest.project',
       configHash: 'hash',
       configJson: '{}',
     });
+
     const completed: CaseExecution = {
       caseId: 'completed-case',
       suiteName: 'runner-suite',
@@ -100,6 +112,7 @@ describe('toStoredCaseExecution', () => {
         ],
       },
     };
+
     const timeout: CaseExecution = {
       ...completed,
       caseId: 'timeout-case',
@@ -122,8 +135,6 @@ describe('toStoredCaseExecution', () => {
       durationMs: 60_000,
       invocationError: new AgentInvocationError('timeout', 'deadline exceeded'),
     };
-    delete (timeout as { response?: unknown }).response;
-    delete (timeout as { trace?: unknown }).trace;
 
     const projections = [toStoredCaseExecution(completed), toStoredCaseExecution(timeout)];
     await Promise.all(projections.map((projection) => store.recordCase(run.id, projection, [])));

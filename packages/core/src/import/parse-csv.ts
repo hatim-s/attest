@@ -1,3 +1,5 @@
+type ParseCsvRecordsResult = { diagnostics: ImportDiagnostic[]; records: CsvRecord[] };
+
 import { decodeSource } from './decode-source.js';
 import { importDiagnostic } from './import-diagnostics.js';
 import {
@@ -16,10 +18,7 @@ const malformedCsv = (message: string, hint: string, line: number): ImportDiagno
   importDiagnostic({ code: 'malformed_csv', message, hint, location: { line } });
 
 /** Parses RFC 4180-style quoting, escaped quotes, CRLF, and quoted newlines deterministically. */
-const parseCsvRecords = (
-  text: string,
-  maxRecords: number,
-): { diagnostics: ImportDiagnostic[]; records: CsvRecord[] } => {
+const parseCsvRecords = (text: string, maxRecords: number): ParseCsvRecordsResult => {
   const diagnostics: ImportDiagnostic[] = [];
   const records: CsvRecord[] = [];
   let fields: string[] = [];
@@ -40,6 +39,7 @@ const parseCsvRecords = (
 
   for (let index = 0; index < text.length; index += 1) {
     const character = text[index]!;
+
     if (quoted) {
       if (character === '"' && text[index + 1] === '"') {
         field += '"';
@@ -49,10 +49,13 @@ const parseCsvRecords = (
         closedQuote = true;
       } else {
         field += character;
+
         if (character === '\n') line += 1;
       }
+
       continue;
     }
+
     if (closedQuote && character !== ',' && character !== '\n' && character !== '\r') {
       diagnostics.push(
         malformedCsv(
@@ -63,6 +66,7 @@ const parseCsvRecords = (
       );
       closedQuote = false;
     }
+
     if (character === '"' && !closedQuote) {
       if (field.length === 0) {
         quoted = true;
@@ -82,6 +86,7 @@ const parseCsvRecords = (
     } else if (character === '\n' || character === '\r') {
       if (character === '\r' && text[index + 1] === '\n') index += 1;
       finishRecord();
+
       if (records.length >= maxRecords) break;
       line += 1;
       recordLine = line;
@@ -89,6 +94,7 @@ const parseCsvRecords = (
       field += character;
     }
   }
+
   if (quoted) {
     diagnostics.push(
       malformedCsv(
@@ -98,16 +104,19 @@ const parseCsvRecords = (
       ),
     );
   }
+
   if (field.length > 0 || fields.length > 0 || (text.length > 0 && !/[\r\n]$/u.test(text))) {
     fields.push(field);
     records.push({ fields, line: recordLine });
   }
+
   return { diagnostics, records };
 };
 
 const duplicateHeaderDiagnostics = (headerRecord: CsvRecord): ImportDiagnostic[] => {
   const diagnostics: ImportDiagnostic[] = [];
   const seenHeaders = new Set<string>();
+
   for (const [index, header] of headerRecord.fields.entries()) {
     if (seenHeaders.has(header)) {
       diagnostics.push(
@@ -120,8 +129,10 @@ const duplicateHeaderDiagnostics = (headerRecord: CsvRecord): ImportDiagnostic[]
         }),
       );
     }
+
     seenHeaders.add(header);
   }
+
   return diagnostics;
 };
 
@@ -131,6 +142,7 @@ const parseCsvSource = (text: string, maxRows: number): ParsedRecords => {
   const parsed = parseCsvRecords(text, maxRows + 2);
   const diagnostics = [...parsed.diagnostics];
   const [headerRecord, ...dataRecords] = parsed.records;
+
   if (headerRecord === undefined) {
     diagnostics.push(
       importDiagnostic({
@@ -139,14 +151,18 @@ const parseCsvSource = (text: string, maxRows: number): ParsedRecords => {
         hint: 'Provide one unique header row.',
       }),
     );
+
     return { diagnostics, records: [], rowsSeen: 0 };
   }
+
   const headers = headerRecord.fields;
   diagnostics.push(...duplicateHeaderDiagnostics(headerRecord));
   const records: SourceRecord[] = [];
+
   for (const { fields, line } of dataRecords) {
     // Ignore a physically blank trailing/data row, but retain authored empty comma-delimited rows.
     if (fields.length === 1 && fields[0] === '') continue;
+
     if (fields.length !== headers.length) {
       diagnostics.push(
         importDiagnostic({
@@ -157,11 +173,13 @@ const parseCsvSource = (text: string, maxRows: number): ParsedRecords => {
         }),
       );
     }
+
     records.push({
       row: line,
       value: Object.fromEntries(headers.map((header, index) => [header, fields[index] ?? ''])),
     });
   }
+
   return { diagnostics, records, rowsSeen: dataRecords.length };
 };
 
@@ -171,13 +189,17 @@ const parseCsvSource = (text: string, maxRows: number): ParsedRecords => {
  */
 const discoverCsvHeaders = (source: Uint8Array): string[] => {
   const decoded = decodeSource(source);
+
   if (decoded.diagnostics.length > 0) {
     throw new TabularImportError('Import source validation failed.', decoded.diagnostics);
   }
+
   const parsed = parseCsvRecords(decoded.text, 1);
+
   if (parsed.diagnostics.length > 0) {
     throw new TabularImportError('Import source validation failed.', parsed.diagnostics);
   }
+
   return parsed.records[0]?.fields ?? [];
 };
 

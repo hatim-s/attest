@@ -1,4 +1,6 @@
 import type { Kysely } from 'kysely';
+import type { JsonValue } from '@attest/contracts';
+import { z } from 'zod';
 
 import { canonicalStringify, StoreError, type CacheKind, type CacheStore } from '@attest/core';
 
@@ -7,6 +9,7 @@ import type { Database } from './schema.js';
 
 const nextUseTimestamp = (previousTimestamp: string): string => {
   const previousTime = Date.parse(previousTimestamp);
+
   // A monotonic value makes consecutive cache hits observable even within one wall-clock millisecond.
   return new Date(Math.max(Date.now(), previousTime + 1)).toISOString();
 };
@@ -19,7 +22,7 @@ class SqliteCacheStore implements CacheStore {
   }
 
   /** Reads and touches one cache identity; a miss deliberately resolves to `undefined`. */
-  async get(kind: CacheKind, requestHash: string): Promise<unknown> {
+  async get(kind: CacheKind, requestHash: string): Promise<JsonValue | undefined> {
     return executeStoreOperation('READ_FAILED', 'Could not read the response cache.', async () =>
       this.#database.transaction().execute(async (transaction) => {
         const row = await transaction
@@ -28,6 +31,7 @@ class SqliteCacheStore implements CacheStore {
           .where('cache_key', '=', requestHash)
           .where('kind', '=', kind)
           .executeTakeFirst();
+
         if (!row) return undefined;
 
         await transaction
@@ -36,8 +40,9 @@ class SqliteCacheStore implements CacheStore {
           .where('cache_key', '=', requestHash)
           .where('kind', '=', kind)
           .execute();
+
         try {
-          return JSON.parse(row.payload_json) as unknown;
+          return z.json().parse(JSON.parse(row.payload_json));
         } catch (error) {
           throw new StoreError('CORRUPT_DATA', 'Cached response JSON could not be rehydrated.', {
             cause: error,
@@ -48,7 +53,7 @@ class SqliteCacheStore implements CacheStore {
   }
 
   /** Upserts one immutable request identity while retaining its original creation timestamp. */
-  async put(kind: CacheKind, requestHash: string, payload: unknown): Promise<void> {
+  async put(kind: CacheKind, requestHash: string, payload: JsonValue): Promise<void> {
     await executeStoreOperation('WRITE_FAILED', 'Could not write the response cache.', async () => {
       const timestamp = new Date().toISOString();
       const payloadJson = canonicalStringify(payload);

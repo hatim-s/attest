@@ -11,10 +11,12 @@ import type { InvokeOptions } from '../types.js';
 import { startLoopbackServer, type LoopbackServer } from './support/loopback-server.js';
 
 const REPOSITORY_ROOT = fileURLToPath(new URL('../../../../', import.meta.url));
+
 const CANONICAL_AGENT_PATH = join(
   REPOSITORY_ROOT,
   'conformance/src/_tests_/fixtures/fake-agents/http-agent.cjs',
 );
+
 const servers = new Set<LoopbackServer>();
 
 const request: AgentRequest = {
@@ -44,6 +46,7 @@ const startEdgeServer = async (
 ): Promise<LoopbackServer> => {
   const server = await startLoopbackServer((_incomingRequest, response) => handler(response));
   servers.add(server);
+
   return server;
 };
 
@@ -53,14 +56,17 @@ const startCanonicalAgentServer = async (): Promise<CanonicalAgentServer> => {
     env: { ...process.env, AGENT_DRIP_MS: '1' },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
+
   const close = new Promise<void>((resolve) => child.once('close', () => resolve()));
   let standardOutput = '';
+
   const port = await new Promise<number>((resolve, reject) => {
     const readinessTimer = setTimeout(
       () => reject(new Error('Canonical HTTP agent did not report a listening port')),
       // Whole-suite parallel spawn storms can delay agent boot well past 2s.
       10_000,
     );
+
     const finish = (result: () => void): void => {
       clearTimeout(readinessTimer);
       result();
@@ -73,6 +79,7 @@ const startCanonicalAgentServer = async (): Promise<CanonicalAgentServer> => {
     child.stdout?.on('data', (chunk: Buffer) => {
       standardOutput += chunk.toString('utf8');
       const match = /(?:^|\n)LISTENING (\d+)/.exec(standardOutput);
+
       if (match?.[1] !== undefined) {
         finish(() => resolve(Number(match[1])));
       }
@@ -85,9 +92,11 @@ const startCanonicalAgentServer = async (): Promise<CanonicalAgentServer> => {
 /** Stops the shared fixture gracefully and retains SIGKILL only as a bounded test fallback. */
 const stopCanonicalAgentServer = async (server: CanonicalAgentServer): Promise<void> => {
   const forceKillTimer = setTimeout(() => server.child.kill('SIGKILL'), 1_000);
+
   if (server.child.exitCode === null && server.child.signalCode === null) {
     server.child.kill('SIGTERM');
   }
+
   await server.close;
   clearTimeout(forceKillTimer);
 };
@@ -154,6 +163,7 @@ describe('invokeHttpAgent', () => {
     'classifies HTTP %i (oversized body: %s) from headers without following redirects',
     async (status, oversized) => {
       const payload = oversized ? 'x'.repeat(options.outputCapBytes * 4) : '{}';
+
       const { url } = await startEdgeServer((response) => {
         response.statusCode = status;
         response.setHeader('content-length', String(Buffer.byteLength(payload)));
@@ -168,6 +178,7 @@ describe('invokeHttpAgent', () => {
         error: { code: 'http_status' },
         diagnostics: { httpStatus: status },
       });
+
       if (attempt.status === 'invocation_error') {
         expect(attempt.error.message).toContain(String(status));
       }
@@ -197,12 +208,15 @@ describe('invokeHttpAgent', () => {
   ])('$name a hanging canonical request', async ({ timeoutMs, abortAfterMs, code }) => {
     const controller = new AbortController();
     const invocation = invoke(canonicalUrl('hang'), { timeoutMs, signal: controller.signal });
+
     // A zero delay aborts synchronously, before the one-millisecond deadline can fire.
     if (abortAfterMs === 0) controller.abort();
+
     const abortTimer =
       abortAfterMs === undefined || abortAfterMs === 0
         ? undefined
         : setTimeout(() => controller.abort(), abortAfterMs);
+
     try {
       expect(await invocation).toMatchObject({ status: 'invocation_error', error: { code } });
     } finally {
@@ -213,16 +227,20 @@ describe('invokeHttpAgent', () => {
   it('aborts a streamed response as soon as its byte budget is exceeded', async () => {
     let bytesServed = 0;
     let responseClosed: (() => void) | undefined;
+
     const closed = new Promise<void>((resolve) => {
       responseClosed = resolve;
     });
+
     const cap = 4_096;
     const chunk = 'x'.repeat(256);
+
     const { url } = await startEdgeServer((response) => {
       const interval = setInterval(() => {
         bytesServed += Buffer.byteLength(chunk);
         response.write(chunk);
       }, 1);
+
       response.once('close', () => {
         clearInterval(interval);
         responseClosed?.();
@@ -244,6 +262,7 @@ describe('invokeHttpAgent', () => {
   it('retains forced-truncated digest evidence when Content-Length exceeds the cap', async () => {
     const cap = 1_024;
     const payload = JSON.stringify({ output: 'x'.repeat(cap * 2) });
+
     const { url } = await startEdgeServer((response) => {
       response.setHeader('content-length', String(Buffer.byteLength(payload)));
       response.end(payload);

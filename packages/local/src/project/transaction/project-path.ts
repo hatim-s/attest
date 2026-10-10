@@ -16,7 +16,9 @@ const PROBLEM_MESSAGES: Readonly<Record<ContainedPathProblem, string>> = {
 const resolveSafeProjectPath = async (root: string, path: string): Promise<string> => {
   const problem = (kind: ContainedPathProblem): ProjectTransactionError =>
     new ProjectTransactionError('project_invalid', PROBLEM_MESSAGES[kind], { path });
+
   if (path !== 'attest.project.json' && !path.startsWith('attest/')) throw problem('invalid');
+
   return resolveContainedPath(root, path, { expect: 'file', problem });
 };
 

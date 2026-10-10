@@ -5,6 +5,22 @@ import { AttestCliError } from '../../errors/cli-error.js';
 import type { CliInteraction } from './cli-interaction.js';
 import type { PromptContext } from './required-input.js';
 
+/** Values produced by this command tree's positional arguments and option parsers. */
+type AuthoredCliValue = string | number | boolean | readonly string[] | undefined;
+
+const isAuthoredCliValue = (value: unknown): value is AuthoredCliValue =>
+  value === undefined ||
+  typeof value === 'string' ||
+  typeof value === 'number' ||
+  typeof value === 'boolean' ||
+  (Array.isArray(value) && value.every((item): item is string => typeof item === 'string'));
+
+// BOUNDARY: Commander exposes untyped processed arguments; accept only values produced by this CLI's registered option parsers.
+const decodeAuthoredCliValue = (value: unknown): AuthoredCliValue => {
+  if (isAuthoredCliValue(value)) return value;
+  throw new AttestCliError('cli_usage', 'Command argument has an unsupported value.');
+};
+
 type CommonCliOptions = {
   nonInteractive?: boolean;
   output?: 'human' | 'json';
@@ -27,6 +43,7 @@ const commonOptions = new WeakSet<Option>();
 /** Marks a leaf option as one the root `--project`, `--output`, or `--non-interactive` feeds. */
 const commonOption = (option: Option): Option => {
   commonOptions.add(option);
+
   return option;
 };
 
@@ -49,27 +66,28 @@ const authoredFieldNames = (command: Command): string[] => [
     .filter((name) => !REQUEST_CONTROL_OPTIONS.has(name)),
 ];
 
-/** Reads the authored arguments and command-line options of a parsed leaf, keyed by name. */
-const authoredFieldValues = (command: Command): Record<string, unknown> => ({
-  ...Object.fromEntries(
-    command.registeredArguments.map((argument, index): [string, unknown] => [
-      argument.name(),
-      command.processedArgs[index],
-    ]),
-  ),
-  ...Object.fromEntries(
-    command.options
-      .filter(
-        (option) =>
-          !REQUEST_CONTROL_OPTIONS.has(option.name()) &&
-          command.getOptionValueSource(option.attributeName()) === 'cli',
-      )
-      .map((option): [string, unknown] => [
+/** Reads authored arguments and CLI-supplied options using their validated value contract. */
+const authoredFieldValues = (command: Command): ReadonlyMap<string, AuthoredCliValue> => {
+  const values = new Map<string, AuthoredCliValue>();
+
+  for (const [index, argument] of command.registeredArguments.entries()) {
+    values.set(argument.name(), decodeAuthoredCliValue(command.processedArgs[index]));
+  }
+
+  for (const option of command.options) {
+    if (
+      !REQUEST_CONTROL_OPTIONS.has(option.name()) &&
+      command.getOptionValueSource(option.attributeName()) === 'cli'
+    ) {
+      values.set(
         option.name(),
-        command.getOptionValue(option.attributeName()),
-      ]),
-  ),
-});
+        decodeAuthoredCliValue(command.getOptionValue(option.attributeName())),
+      );
+    }
+  }
+
+  return values;
+};
 
 /** Collects a repeatable option; help reports every option parsed by it as repeatable. */
 const collect = (value: string, previous: string[] | undefined): string[] => [
@@ -115,12 +133,15 @@ const inheritCommonOptions = (program: Command, leaf: Command): void => {
   for (const option of leaf.options) {
     if (!commonOptions.has(option)) continue;
     const name = option.attributeName();
+
     if (program.getOptionValueSource(name) !== 'cli') continue;
+
     if (leaf.getOptionValueSource(name) === 'cli') {
       throw new AttestCliError('cli_usage', `Common option ${option.long} was provided twice.`, {
         path: option.long,
       });
     }
+
     leaf.setOptionValueWithSource(name, program.getOptionValue(name), 'implied');
   }
 };
@@ -130,14 +151,20 @@ const commonOutputMode = (program: Command, leaf: Command): string | undefined =
   const output = leaf.options.find(
     (option) => commonOptions.has(option) && option.attributeName() === 'output',
   );
+
   if (output === undefined) return undefined;
-  const leafValue: unknown = leaf.getOptionValue('output');
+  const leafValue = decodeAuthoredCliValue(leaf.getOptionValue('output'));
   const source = leaf.getOptionValueSource('output');
+
   // Commander may fail before the preAction hook copied a root-position `--output`.
-  const inherited: unknown =
-    source === undefined || source === 'default' ? program.getOptionValue('output') : undefined;
+  const inherited =
+    source === undefined || source === 'default'
+      ? decodeAuthoredCliValue(program.getOptionValue('output'))
+      : undefined;
+
   const value = inherited ?? leafValue;
-  return typeof value === 'string' ? value : undefined;
+
+  return value === 'human' || value === 'json' || value === 'jsonl' ? value : undefined;
 };
 
 const outputFormat = (options: CommonCliOptions): 'human' | 'json' => options.output ?? 'human';
@@ -165,16 +192,28 @@ const promptContext = (
 });
 
 /** Builds the request envelope fields that the mutation flags map to. */
+type MutationRequestControls<TCommand extends string> = {
+  schema: typeof COMMAND_REQUEST_SCHEMA_ID;
+  command: TCommand;
+  dry_run?: boolean;
+  if_project_hash?: string;
+  yes?: boolean;
+};
+
 const mutationRequestFields = <TCommand extends string>(
   command: TCommand,
   options: MutationCliOptions,
-) => ({
-  schema: COMMAND_REQUEST_SCHEMA_ID,
-  command,
-  ...(options.dryRun === undefined ? {} : { dry_run: options.dryRun }),
-  ...(options.ifProjectHash === undefined ? {} : { if_project_hash: options.ifProjectHash }),
-  ...(options.yes === undefined ? {} : { yes: options.yes }),
-});
+): MutationRequestControls<TCommand> => {
+  const fields: MutationRequestControls<TCommand> = { schema: COMMAND_REQUEST_SCHEMA_ID, command };
+
+  if (options.dryRun !== undefined) fields.dry_run = options.dryRun;
+
+  if (options.ifProjectHash !== undefined) fields.if_project_hash = options.ifProjectHash;
+
+  if (options.yes !== undefined) fields.yes = options.yes;
+
+  return fields;
+};
 
 export {
   addCommonOptions,
@@ -192,6 +231,7 @@ export {
   outputOption,
   projectOption,
   promptContext,
+  type AuthoredCliValue,
   type CommonCliOptions,
   type MutationCliOptions,
 };

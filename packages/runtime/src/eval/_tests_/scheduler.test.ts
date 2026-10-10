@@ -18,20 +18,26 @@ import {
 const controlledRunner = (plan: ResolvedEvalPlan<string>) => {
   const pending = new Map<string, Deferred<EvalCaseRunnerResult>>();
   const starts: { caseId: string; workerIndex: number }[] = [];
+
   const runner: EvalCaseRunner<string> = {
     executeCase: (_runId, resolvedCase, _signal, context) => {
       starts.push({ caseId: resolvedCase.case_id, workerIndex: context.workerIndex });
       const completion = deferred<EvalCaseRunnerResult>();
       pending.set(resolvedCase.case_id, completion);
+
       return completion.promise;
     },
   };
+
   const complete = (caseId: string, metrics = [passingMetric()]): void => {
     const resolvedCase = plan.cases.find(({ case_id }) => case_id === caseId);
+
     if (resolvedCase === undefined) throw new Error(`Unknown case ${caseId}.`);
     pending.get(caseId)?.resolve(completedExecution(resolvedCase, metrics));
   };
+
   const startedIds = () => starts.map(({ caseId }) => caseId);
+
   return { runner, starts, startedIds, complete };
 };
 
@@ -47,13 +53,17 @@ describe('case scheduling', () => {
       persistenceStarted.resolve();
       await releasePersistence.promise;
     });
+
     const runner: EvalCaseRunner<string> = {
       executeCase: async (...args) => {
         const result = await control.runner.executeCase(...args);
+
         if (args[1].case_id === 'third') thirdFinished.resolve();
+
         return result;
       },
     };
+
     const execution = executeCases(
       plan.run,
       plan.cases,
@@ -62,6 +72,7 @@ describe('case scheduling', () => {
       new AbortController().signal,
       () => Promise.resolve(),
     );
+
     await vi.waitFor(() => expect(control.startedIds()).toHaveLength(3));
     control.complete('first');
     await persistenceStarted.promise;
@@ -87,6 +98,7 @@ describe('case scheduling', () => {
     const execution = executeResolvedEvalPlan(plan, control.runner, persistence.adapter, {
       now: createClock(),
     });
+
     await vi.waitFor(() => expect(control.startedIds()).toEqual(['case-zero', 'case-one']));
     control.complete('case-one');
     await vi.waitFor(() => expect(control.startedIds()).toHaveLength(3));
@@ -117,11 +129,13 @@ describe('case scheduling', () => {
       Array.from({ length: 7 }, (_, index) => `case-${String(index)}`),
       { concurrency: 3, workers: 3 },
     );
+
     const control = controlledRunner(plan);
 
     const execution = executeResolvedEvalPlan(plan, control.runner, createPersistence().adapter, {
       now: createClock(),
     });
+
     await vi.waitFor(() => expect(control.startedIds()).toEqual(['case-0', 'case-3', 'case-5']));
     control.complete('case-3');
     await vi.waitFor(() =>
@@ -148,6 +162,7 @@ describe('case scheduling', () => {
 
   it('records the rest of a worker batch as failed once one of its cases fails', async () => {
     const plan = createPlan(['a', 'b', 'c', 'd'], { concurrency: 2, workers: 2 });
+
     const executeCase = vi.fn<EvalCaseRunner<string>['executeCase']>((_runId, resolvedCase) =>
       resolvedCase.case_id === 'a'
         ? Promise.reject(new Error('worker directory corrupted'))
@@ -185,6 +200,7 @@ describe('case scheduling', () => {
       ],
       { concurrency: 3, testConcurrency: 1 },
     );
+
     const control = controlledRunner(plan);
     const persistence = createPersistence();
 
@@ -196,6 +212,7 @@ describe('case scheduling', () => {
       new AbortController().signal,
       () => Promise.resolve(),
     );
+
     await vi.waitFor(() => expect(control.startedIds()).toEqual(['a-1', 'b-1', 'c-1']));
     control.complete('b-1');
     await vi.waitFor(() => expect(persistence.recordCase).toHaveBeenCalledOnce());
@@ -222,6 +239,7 @@ describe('case scheduling', () => {
       new AbortController().signal,
       (event) => {
         if (event.event === 'case_completed') throw new Error('event is too large');
+
         return Promise.resolve();
       },
     );
@@ -236,6 +254,7 @@ describe('case scheduling', () => {
     const controller = new AbortController();
     const secondStart = deferred<void>();
     const releaseSecondStart = deferred<void>();
+
     const executeCase = vi
       .fn<EvalCaseRunner<string>['executeCase']>()
       .mockRejectedValue(new Error('failed before abort'));
@@ -253,6 +272,7 @@ describe('case scheduling', () => {
         }
       },
     );
+
     await secondStart.promise;
     controller.abort(new Error('cancel remaining work'));
     releaseSecondStart.resolve();

@@ -13,6 +13,7 @@ const openNodeSqliteHandle = async (
   options: NodeSqliteHandleOptions = {},
 ): Promise<SqliteHandle | undefined> => {
   let sqliteModule: typeof import('node:sqlite');
+
   try {
     sqliteModule = await import('node:sqlite');
   } catch {
@@ -24,10 +25,13 @@ const openNodeSqliteHandle = async (
     options.readOnly === true && options.immutable !== false
       ? `${pathToFileURL(path).href}?immutable=1`
       : path;
+
   const database = new sqliteModule.DatabaseSync(location, { readOnly: options.readOnly });
+
   return {
     prepare: (sql) => {
       const statement = database.prepare(sql);
+
       return {
         all: (...parameters) => Promise.resolve().then(() => statement.all(...parameters)),
         run: (...parameters) => Promise.resolve().then(() => statement.run(...parameters)),

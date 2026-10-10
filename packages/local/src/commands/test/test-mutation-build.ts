@@ -70,35 +70,45 @@ const buildMutation = async (
   options: TestMutationCommandOptions,
 ): Promise<MutationBuildResult> => {
   const candidate = candidateFromLoadedProject(loaded);
+
   switch (request.command) {
     case 'test.add': {
       assertNewResourceId(candidate.tests, 'test', request.test.id);
       candidate.tests.push(request.test);
+
       return { candidate, resource: { id: request.test.id, type: 'test' } };
     }
+
     case 'test.rename': {
       const test = findTest(candidate, request.test_id);
       assertNewResourceId(candidate.tests, 'test', request.new_id);
       test.id = request.new_id;
+
       return {
         candidate,
         renames: [{ from: request.test_id, to: request.new_id, type: 'test' }],
         resource: { id: request.new_id, type: 'test' },
       };
     }
+
     case 'test.remove': {
       findTest(candidate, request.test_id);
       candidate.tests = candidate.tests.filter(({ id }) => id !== request.test_id);
+
       return { candidate, resource: { id: request.test_id, type: 'test' } };
     }
+
     case 'test.case.add': {
       const test = findTest(candidate, request.test_id);
       const testCase = caseWithGeneratedId(request.case);
       test.cases.push(testCase);
+
       return { candidate, resource: { id: testCase.id, type: 'test_case' } };
     }
+
     case 'test.case.import': {
       const test = findTest(candidate, request.test_id);
+
       const imported = await runTabularImportAdapter({
         // Cases outside the direct import target that already resolve into its test.
         collisionContexts: [{ cases: attachmentCases(candidate, test) }],
@@ -109,7 +119,9 @@ const buildMutation = async (
         source: request.source,
         workingDirectory: options.workingDirectory,
       });
+
       test.cases = imported.cases;
+
       const warnings: CliWarning[] =
         imported.counts.read > 100
           ? [
@@ -119,6 +131,7 @@ const buildMutation = async (
               },
             ]
           : [];
+
       return {
         candidate,
         importedCaseCount: imported.counts.inserted + imported.counts.updated,
@@ -127,21 +140,29 @@ const buildMutation = async (
         warnings,
       };
     }
+
     case 'test.case.rename': {
       const test = findTest(candidate, request.test_id);
       const testCase = test.cases.find(({ id }) => id === request.case_id);
+
       if (testCase === undefined) throw missingResource('case', request.case_id);
       testCase.id = request.new_id;
+
       return { candidate, resource: { id: request.new_id, type: 'test_case' } };
     }
+
     case 'test.case.remove': {
       const test = findTest(candidate, request.test_id);
+
       if (!test.cases.some(({ id }) => id === request.case_id)) {
         throw missingResource('case', request.case_id);
       }
+
       test.cases = test.cases.filter(({ id }) => id !== request.case_id);
+
       return { candidate, resource: { id: request.case_id, type: 'test_case' } };
     }
+
     case 'test.dataset.add': {
       const test = findTest(candidate, request.test_id);
       assertNewResourceId(
@@ -151,13 +172,16 @@ const buildMutation = async (
       );
       candidate.datasets.push({ cases: [], metadata: request.dataset });
       test.datasets.push({ dataset_id: request.dataset.id });
+
       return { candidate, resource: { id: request.dataset.id, type: 'dataset' } };
     }
+
     case 'test.dataset.import': {
       const test = findTest(candidate, request.test_id);
       const existing = candidate.datasets.find(({ metadata }) => metadata.id === request.as);
       const affectedTests = attachedDatasetTests(candidate, request.as);
       const consumerTests = [...new Set([...affectedTests, request.test_id])].sort();
+
       if (existing !== undefined && request.import.sync !== 'upsert') {
         throw new LocalError(
           'project_invalid',
@@ -169,6 +193,7 @@ const buildMutation = async (
           },
         );
       }
+
       if (
         existing !== undefined &&
         affectedTests.some((id) => id !== request.test_id) &&
@@ -181,6 +206,7 @@ const buildMutation = async (
           details: { affected_tests: consumerTests },
         });
       }
+
       const imported = await runTabularImportAdapter({
         collisionContexts: datasetImportCollisionContexts(candidate, request.as, request.test_id),
         existingCases: existing?.cases,
@@ -190,6 +216,21 @@ const buildMutation = async (
         source: request.source,
         workingDirectory: options.workingDirectory,
       });
+
+      const provenance: NonNullable<
+        ProjectResources['datasets'][number]['metadata']['provenance']
+      > = {
+        source_type: imported.format,
+        mapping: request.import.mapping ?? [],
+        imported_at: new Date().toISOString(),
+        source_content_hash: imported.sourceHash,
+        counts: imported.counts,
+      };
+
+      if (request.import.key !== undefined) {
+        provenance.key_field = request.import.key;
+      }
+
       const importedDataset = {
         cases: imported.cases,
         metadata: {
@@ -198,48 +239,56 @@ const buildMutation = async (
           id: request.as,
           name: request.name ?? existing?.metadata.name ?? request.as,
           case_count: imported.cases.length,
-          provenance: {
-            source_type: imported.format,
-            mapping: request.import.mapping ?? [],
-            ...(request.import.key === undefined ? {} : { key_field: request.import.key }),
-            imported_at: new Date().toISOString(),
-            source_content_hash: imported.sourceHash,
-            counts: imported.counts,
-          },
+          provenance: provenance,
         },
       };
+
       if (existing === undefined) candidate.datasets.push(importedDataset);
       else Object.assign(existing, importedDataset);
+
       if (!test.datasets.some(({ dataset_id }) => dataset_id === request.as)) {
         test.datasets.push({ dataset_id: request.as });
       }
-      return {
-        ...(existing !== undefined && consumerTests.length > 1
-          ? { affectedTests: consumerTests }
-          : {}),
-        candidate,
-        importedCaseCount: imported.counts.inserted + imported.counts.updated,
-        importResult: imported,
-        resource: { id: request.as, type: 'dataset' },
-      };
+
+      {
+        const assembledFields: MutationBuildResult = {
+          candidate,
+          importedCaseCount: imported.counts.inserted + imported.counts.updated,
+          importResult: imported,
+          resource: { id: request.as, type: 'dataset' },
+        };
+
+        if (existing !== undefined && consumerTests.length > 1) {
+          assembledFields.affectedTests = consumerTests;
+        }
+
+        return assembledFields;
+      }
     }
+
     case 'test.dataset.attach': {
       const test = findTest(candidate, request.test_id);
       findDataset(candidate, request.dataset_id);
-      test.datasets.push({
-        dataset_id: request.dataset_id,
-        ...(request.tags === undefined ? {} : { tags: request.tags }),
-      });
+      const attachment: (typeof test.datasets)[number] = { dataset_id: request.dataset_id };
+
+      if (request.tags !== undefined) attachment.tags = request.tags;
+      test.datasets.push(attachment);
+
       return { candidate, resource: { id: request.dataset_id, type: 'dataset' } };
     }
+
     case 'test.dataset.detach': {
       const test = findTest(candidate, request.test_id);
+
       if (!test.datasets.some(({ dataset_id }) => dataset_id === request.dataset_id)) {
         throw missingResource('dataset', request.dataset_id);
       }
+
       test.datasets = test.datasets.filter(({ dataset_id }) => dataset_id !== request.dataset_id);
+
       return { candidate, resource: { id: request.dataset_id, type: 'dataset' } };
     }
+
     case 'test.dataset.rename': {
       const dataset = findDataset(candidate, request.dataset_id);
       assertNewResourceId(
@@ -253,17 +302,20 @@ const buildMutation = async (
           if (attachment.dataset_id === request.dataset_id) attachment.dataset_id = request.new_id;
         }),
       );
+
       return {
         candidate,
         renames: [{ from: request.dataset_id, to: request.new_id, type: 'dataset' }],
         resource: { id: request.new_id, type: 'dataset' },
       };
     }
+
     case 'test.dataset.remove': {
       assertDatasetRemovable(candidate, request.dataset_id);
       candidate.datasets = candidate.datasets.filter(
         ({ metadata }) => metadata.id !== request.dataset_id,
       );
+
       return { candidate, resource: { id: request.dataset_id, type: 'dataset' } };
     }
   }

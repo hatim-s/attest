@@ -33,7 +33,9 @@ const evalCancelResultSchema = z.union([
 ]);
 
 type EvalCancelRequest = z.infer<typeof evalCancelRequestSchema>;
+
 type EvalCancelResult = z.infer<typeof evalCancelResultSchema>;
+
 type EvalCancelResultPayload = z.infer<typeof evalCancelResultPayloadSchema>;
 
 export {

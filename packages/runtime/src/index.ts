@@ -2,6 +2,7 @@ export {
   caseExecutionToMetricContext,
   createTanstackJudgeClient,
   evaluateMetrics,
+  judgeOutcomeSchema,
   type EvaluateMetricsOptions,
   type JudgeCache,
   type JudgeClient,
@@ -9,6 +10,7 @@ export {
   type MetricContext,
   type TanstackJudgeClientOptions,
 } from './metrics/index.js';
+
 export {
   EvalCaseStageError,
   executeResolvedEvalPlan,
@@ -31,6 +33,7 @@ export {
 } from './eval/index.js';
 
 export type { ExecMetricOptions } from './metrics/exec-metric.js';
+
 export type {
   CommandMetricTransport,
   MetricTransportOptions,

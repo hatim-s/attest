@@ -14,8 +14,10 @@ const readCappedResponseBody = async (
 ): Promise<MetricTransportOutcome> => {
   const chunks: Buffer[] = [];
   let receivedBytes = 0;
+
   for await (const chunk of body) {
     receivedBytes += chunk.byteLength;
+
     if (receivedBytes > outputCapBytes) {
       return {
         ok: false,
@@ -25,8 +27,10 @@ const readCappedResponseBody = async (
         },
       };
     }
+
     chunks.push(Buffer.from(chunk));
   }
+
   return { ok: true, text: Buffer.concat(chunks).toString() };
 };
 
@@ -43,7 +47,9 @@ const parseHttpUrl = (
       },
     };
   }
+
   const url = new URL(value);
+
   if (url.protocol !== 'http:' && url.protocol !== 'https:') {
     return {
       ok: false,
@@ -53,6 +59,7 @@ const parseHttpUrl = (
       },
     };
   }
+
   return { ok: true, url };
 };
 
@@ -63,11 +70,13 @@ const invokeHttpMetric = async (
   options: MetricTransportOptions,
 ): Promise<MetricTransportOutcome> => {
   const parsed = parseHttpUrl(definition.url);
+
   if (!parsed.ok) {
     return parsed;
   }
 
   const signal = composeAbortSignal(options.signal, options.timeoutMs);
+
   try {
     const response = await fetch(parsed.url, {
       method: 'POST',
@@ -75,9 +84,11 @@ const invokeHttpMetric = async (
       body: requestBody,
       signal,
     });
+
     if (response.status !== 200) {
       // Cancellation is cleanup; the status error below stays authoritative even if it fails.
       await response.body?.cancel().catch(() => undefined);
+
       return {
         ok: false,
         error: {
@@ -87,14 +98,17 @@ const invokeHttpMetric = async (
         },
       };
     }
+
     if (response.body === null) {
       return { ok: true, text: '' };
     }
+
     return await readCappedResponseBody(response.body, options.outputCapBytes);
   } catch (error: unknown) {
     if (signal.aborted) {
       return { ok: false, error: abortedMetricError(abortReasonOf(signal), options.timeoutMs) };
     }
+
     return {
       ok: false,
       error: {

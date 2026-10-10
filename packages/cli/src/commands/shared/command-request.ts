@@ -3,7 +3,7 @@ import { readCommandRequest, validateCommandRequest } from '@attest/local/agent'
 import type { Command } from 'commander';
 
 import { AttestCliError } from '../../errors/cli-error.js';
-import { authoredFieldValues } from './cli-options.js';
+import { authoredFieldValues, type AuthoredCliValue } from './cli-options.js';
 import type { CommandContext } from './command-context.js';
 
 type CommandRequestFor<TCommand extends CommandRequest['command']> = Extract<
@@ -30,12 +30,19 @@ type ReadOrBuildRequestOptions<TCommand extends CommandRequest['command']> = Omi
   ReadRequestOptions<TCommand>,
   'options'
 > & {
-  build: () => Promise<unknown>;
+  build: () => Promise<CommandRequestFor<TCommand>>;
   options: RequestSourceFlags;
 };
 
-const supplied = (value: unknown): boolean =>
+const supplied = (value: AuthoredCliValue): boolean =>
   value !== undefined && value !== false && (!Array.isArray(value) || value.length > 0);
+
+type AuthoredRequestFields =
+  Readonly<Record<string, AuthoredCliValue>> | ReadonlyMap<string, AuthoredCliValue>;
+
+const isAuthoredFieldMap = (
+  fields: AuthoredRequestFields,
+): fields is ReadonlyMap<string, AuthoredCliValue> => fields instanceof Map;
 
 /**
  * Rejects flags and arguments next to `--from-json`. A request document is complete, so any
@@ -43,18 +50,22 @@ const supplied = (value: unknown): boolean =>
  */
 const assertNoRequestOverlap = (
   options: RequestSourceFlags,
-  fields: Readonly<Record<string, unknown>>,
+  fields: AuthoredRequestFields,
 ): void => {
   if (options.fromJson === undefined) return;
-  const conflicts = Object.entries({
-    ...fields,
-    'dry-run': options.dryRun,
-    'if-project-hash': options.ifProjectHash,
-    yes: options.yes,
-  })
-    .filter(([, value]) => supplied(value))
-    .map(([name]) => name)
+
+  const authored = new Map<string, AuthoredCliValue>(
+    isAuthoredFieldMap(fields) ? fields : Object.entries(fields),
+  );
+
+  authored.set('dry-run', options.dryRun);
+  authored.set('if-project-hash', options.ifProjectHash);
+  authored.set('yes', options.yes);
+
+  const conflicts = [...authored]
+    .flatMap(([name, value]) => (supplied(value) ? [name] : []))
     .sort();
+
   if (conflicts.length === 0) return;
   throw new AttestCliError('cli_usage', 'Command request sources overlap.', {
     path: '--from-json',
@@ -76,10 +87,12 @@ const readJsonRequest = async <TCommand extends CommandRequest['command']>({
   options,
 }: ReadRequestOptions<TCommand>): Promise<CommandRequestFor<TCommand>> => {
   assertNoRequestOverlap(options, authoredFieldValues(leaf));
+
   const request = await readCommandRequest(command, options.fromJson, {
     readStdin: context.interaction.readStdin,
     workingDirectory: context.workingDirectory,
   });
+
   if (options.fromJson === '-' && requestReadsStdin(request)) {
     throw new AttestCliError(
       'cli_usage',
@@ -90,6 +103,7 @@ const readJsonRequest = async <TCommand extends CommandRequest['command']>({
       },
     );
   }
+
   return request;
 };
 
@@ -103,7 +117,9 @@ const readOrBuildRequest = async <TCommand extends CommandRequest['command']>({
   ...read
 }: ReadOrBuildRequestOptions<TCommand>): Promise<CommandRequestFor<TCommand>> => {
   const { fromJson } = options;
+
   if (fromJson === undefined) return validateCommandRequest(read.command, await build());
+
   return readJsonRequest({ ...read, options: { ...options, fromJson } });
 };
 

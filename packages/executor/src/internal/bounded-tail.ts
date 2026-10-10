@@ -13,8 +13,10 @@ class BoundedTail {
   text(): string | undefined {
     if (this.retained.length === 0) return undefined;
     let offset = 0;
+
     // UTF-8 continuation bytes cannot begin a code point, so drop only the split prefix.
     while (offset < this.retained.length && (this.retained[offset]! & 0xc0) === 0x80) offset += 1;
+
     return this.retained.subarray(offset).toString('utf8');
   }
 }

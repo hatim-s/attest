@@ -10,6 +10,11 @@ import type { AgentRequest } from './types.js';
 
 type CurlImportRequest = Extract<AgentRequest<'agent.import'>, { source_type: 'curl' }>;
 
+/** CLI drafts can omit polling fields until commandRequestSchema reports every missing value. */
+type CurlImportCandidate = Omit<CurlImportRequest, 'polling'> & {
+  polling?: Partial<NonNullable<CurlImportRequest['polling']>>;
+};
+
 /** cURL import flags, before they become one validated agent.import request. */
 type CurlImportFields = {
   agentId: string;
@@ -62,9 +67,11 @@ const parseEnvironmentBindings = (
   if (values === undefined || values.length === 0) return undefined;
   const bindings = Object.entries(parseSecretBindings(values, path));
   const names = new Set(bindings.map(([target]) => target.toLowerCase()));
+
   if (names.size !== values.length) {
     throw new LocalError('cli_usage', 'A cURL secret binding is duplicated.', { path });
   }
+
   return Object.fromEntries(bindings.map(([target, reference]) => [target, reference.from_env]));
 };
 
@@ -73,12 +80,14 @@ const parseBodyMappings = (
 ): CurlImportRequest['placeholders'] =>
   values?.map((value) => {
     const separator = value.indexOf('=');
+
     if (separator <= 0) {
       throw new LocalError('cli_usage', 'A cURL body mapping is invalid.', {
         path: '--map-body',
         hint: 'Use TARGET_JSON_POINTER=INPUT_JSON_POINTER.',
       });
     }
+
     return {
       target_pointer: value.slice(0, separator),
       input_pointer: value.slice(separator + 1),
@@ -87,11 +96,13 @@ const parseBodyMappings = (
 
 const parseInteger = (value: string, path: string, options: { min: number }): number => {
   const parsed = Number(value);
+
   if (!Number.isSafeInteger(parsed) || parsed < options.min) {
     throw new LocalError('cli_usage', `${path} must be an integer of at least ${options.min}.`, {
       path,
     });
   }
+
   return parsed;
 };
 
@@ -115,135 +126,141 @@ const pollingFlagsPresent = (
 const createCurlImportRequest = (fields: CurlImportFields): CurlImportRequest => {
   const options = fields;
   const pollingSelected = pollingFlagsPresent(options);
+
   const successes =
     options.pollSuccess === undefined
       ? undefined
       : parseJsonValues(options.pollSuccess, '--poll-success');
+
   const failures =
     options.pollFailure === undefined
       ? undefined
       : parseJsonValues(options.pollFailure, '--poll-failure');
+
   const retries =
     options.retries === undefined
       ? undefined
       : parseInteger(options.retries, '--retries', { min: 0 });
+
   const retryDelay =
     options.retryDelay === undefined
       ? undefined
       : parseDuration(options.retryDelay, '--retry-delay');
+
   if (retryDelay !== undefined && retries === undefined) {
     throw new LocalError('cli_usage', '--retry-delay requires --retries.', {
       path: '--retry-delay',
     });
   }
-  const candidate = {
+
+  const candidate: CurlImportCandidate = {
     schema: 'attest.command-request',
     command: 'agent.import',
     source: fields.source,
     source_type: 'curl',
     as: fields.agentId,
-    ...(fields.name === undefined ? {} : { name: fields.name }),
-    ...(options.mapBody === undefined ? {} : { placeholders: parseBodyMappings(options.mapBody) }),
-    ...(options.headerEnv === undefined
-      ? {}
-      : { header_env: parseEnvironmentBindings(options.headerEnv, '--header-env') }),
-    ...(options.queryEnv === undefined
-      ? {}
-      : { query_env: parseEnvironmentBindings(options.queryEnv, '--query-env') }),
-    extraction: {
-      result_pointer: fields.responsePointer,
-      ...(options.errorPointer === undefined ? {} : { error_pointer: options.errorPointer }),
-      ...(options.tracePointer === undefined ? {} : { trace_pointer: options.tracePointer }),
-      ...(options.remoteJobIdPointer === undefined
-        ? {}
-        : { remote_job_id_pointer: options.remoteJobIdPointer }),
-    },
-    ...(pollingSelected
-      ? {
-          polling: {
-            job_id_pointer: options.pollJobIdPointer,
-            ...(options.pollStatusUrlPointer === undefined
-              ? {}
-              : { status_url_pointer: options.pollStatusUrlPointer }),
-            ...(options.pollStatusUrlTemplate === undefined
-              ? {}
-              : { status_url_template: options.pollStatusUrlTemplate }),
-            status_pointer: options.pollStatusPointer,
-            success_values: successes,
-            failure_values: failures,
-            minimum_interval_ms:
-              options.pollMinimumInterval === undefined
-                ? undefined
-                : parseDuration(options.pollMinimumInterval, '--poll-minimum-interval'),
-            maximum_interval_ms:
-              options.pollMaximumInterval === undefined
-                ? undefined
-                : parseDuration(options.pollMaximumInterval, '--poll-maximum-interval'),
-            ...(options.idempotencyHeader === undefined
-              ? {}
-              : { idempotency_header: options.idempotencyHeader }),
-          },
-        }
-      : {}),
-    ...([
+    extraction: { result_pointer: fields.responsePointer },
+  };
+
+  if (fields.name !== undefined) candidate.name = fields.name;
+
+  if (options.mapBody !== undefined) candidate.placeholders = parseBodyMappings(options.mapBody);
+
+  if (options.headerEnv !== undefined)
+    candidate.header_env = parseEnvironmentBindings(options.headerEnv, '--header-env');
+
+  if (options.queryEnv !== undefined)
+    candidate.query_env = parseEnvironmentBindings(options.queryEnv, '--query-env');
+
+  if (options.errorPointer !== undefined) candidate.extraction.error_pointer = options.errorPointer;
+
+  if (options.tracePointer !== undefined) candidate.extraction.trace_pointer = options.tracePointer;
+
+  if (options.remoteJobIdPointer !== undefined)
+    candidate.extraction.remote_job_id_pointer = options.remoteJobIdPointer;
+
+  if (pollingSelected) {
+    const polling: NonNullable<CurlImportCandidate['polling']> = {
+      job_id_pointer: options.pollJobIdPointer,
+      status_pointer: options.pollStatusPointer,
+      success_values: successes,
+      failure_values: failures,
+      minimum_interval_ms:
+        options.pollMinimumInterval === undefined
+          ? undefined
+          : parseDuration(options.pollMinimumInterval, '--poll-minimum-interval'),
+      maximum_interval_ms:
+        options.pollMaximumInterval === undefined
+          ? undefined
+          : parseDuration(options.pollMaximumInterval, '--poll-maximum-interval'),
+    };
+
+    if (options.pollStatusUrlPointer !== undefined)
+      polling.status_url_pointer = options.pollStatusUrlPointer;
+
+    if (options.pollStatusUrlTemplate !== undefined)
+      polling.status_url_template = options.pollStatusUrlTemplate;
+
+    if (options.idempotencyHeader !== undefined)
+      polling.idempotency_header = options.idempotencyHeader;
+    candidate.polling = polling;
+  }
+
+  if (
+    ![
       options.connectTimeout,
       options.firstByteTimeout,
       options.bodyTimeout,
       options.attemptTimeout,
     ].every((value) => value === undefined)
-      ? {}
-      : {
-          timeouts: {
-            ...(options.connectTimeout === undefined
-              ? {}
-              : { connect_ms: parseDuration(options.connectTimeout, '--connect-timeout') }),
-            ...(options.firstByteTimeout === undefined
-              ? {}
-              : { first_byte_ms: parseDuration(options.firstByteTimeout, '--first-byte-timeout') }),
-            ...(options.bodyTimeout === undefined
-              ? {}
-              : { idle_ms: parseDuration(options.bodyTimeout, '--body-timeout') }),
-            ...(options.attemptTimeout === undefined
-              ? {}
-              : { attempt_ms: parseDuration(options.attemptTimeout, '--attempt-timeout') }),
-          },
-        }),
-    ...(retries === undefined
-      ? {}
-      : {
-          retry: {
-            retries,
-            backoff:
-              retryDelay === undefined ? { kind: 'none' } : { kind: 'fixed', delay_ms: retryDelay },
-          },
-        }),
-    ...(options.requestCapBytes === undefined && options.responseCapBytes === undefined
-      ? {}
-      : {
-          limits: {
-            ...(options.requestCapBytes === undefined
-              ? {}
-              : {
-                  request_bytes: parseInteger(options.requestCapBytes, '--request-cap-bytes', {
-                    min: 1,
-                  }),
-                }),
-            ...(options.responseCapBytes === undefined
-              ? {}
-              : {
-                  response_bytes: parseInteger(options.responseCapBytes, '--response-cap-bytes', {
-                    min: 1,
-                  }),
-                }),
-          },
-        }),
-    ...(options.dryRun === undefined ? {} : { dry_run: options.dryRun }),
-    ...(options.expectedProjectHash === undefined
-      ? {}
-      : { if_project_hash: options.expectedProjectHash }),
-    ...(options.yes === undefined ? {} : { yes: options.yes }),
-  };
+  ) {
+    const timeouts: NonNullable<CurlImportRequest['timeouts']> = {};
+
+    if (options.connectTimeout !== undefined)
+      timeouts.connect_ms = parseDuration(options.connectTimeout, '--connect-timeout');
+
+    if (options.firstByteTimeout !== undefined)
+      timeouts.first_byte_ms = parseDuration(options.firstByteTimeout, '--first-byte-timeout');
+
+    if (options.bodyTimeout !== undefined)
+      timeouts.idle_ms = parseDuration(options.bodyTimeout, '--body-timeout');
+
+    if (options.attemptTimeout !== undefined)
+      timeouts.attempt_ms = parseDuration(options.attemptTimeout, '--attempt-timeout');
+    candidate.timeouts = timeouts;
+  }
+
+  if (retries !== undefined)
+    candidate.retry = {
+      retries,
+      backoff:
+        retryDelay === undefined ? { kind: 'none' } : { kind: 'fixed', delay_ms: retryDelay },
+    };
+
+  if (options.requestCapBytes !== undefined || options.responseCapBytes !== undefined) {
+    const limits: NonNullable<CurlImportRequest['limits']> = {};
+
+    if (options.requestCapBytes !== undefined)
+      limits.request_bytes = parseInteger(options.requestCapBytes, '--request-cap-bytes', {
+        min: 1,
+      });
+
+    if (options.responseCapBytes !== undefined)
+      limits.response_bytes = parseInteger(options.responseCapBytes, '--response-cap-bytes', {
+        min: 1,
+      });
+    candidate.limits = limits;
+  }
+
+  if (options.dryRun !== undefined) candidate.dry_run = options.dryRun;
+
+  if (options.expectedProjectHash !== undefined)
+    candidate.if_project_hash = options.expectedProjectHash;
+
+  if (options.yes !== undefined) candidate.yes = options.yes;
+
   const parsed = commandRequestSchema.safeParse(candidate);
+
   if (
     !parsed.success ||
     parsed.data.command !== 'agent.import' ||
@@ -255,6 +272,7 @@ const createCurlImportRequest = (fields: CurlImportFields): CurlImportRequest =>
       details: { diagnostics: parsed.success ? [] : schemaIssueDiagnostics(parsed.error.issues) },
     });
   }
+
   return parsed.data;
 };
 
@@ -272,15 +290,21 @@ const findUnboundCurlCredential = (
       headerSecrets: parseEnvironmentBindings(bindings.headerEnv, '--header-env'),
       querySecrets: parseEnvironmentBindings(bindings.queryEnv, '--query-env'),
     });
+
     return undefined;
   } catch (error: unknown) {
     if (!(error instanceof CurlImportError)) throw error;
+
     for (const diagnostic of error.diagnostics) {
       const [kind, name] = diagnostic.split(':');
+
       if (name === undefined) continue;
+
       if (kind === 'unsafe_header') return { kind: 'header', name };
+
       if (kind === 'unsafe_query') return { kind: 'query', name };
     }
+
     return undefined;
   }
 };

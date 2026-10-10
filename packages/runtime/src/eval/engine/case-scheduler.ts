@@ -20,14 +20,17 @@ const createWorkerBatches = <Payload>(
   requestedWorkers: number,
 ): ResolvedEvalCase<Payload>[][] => {
   const workerCount = Math.min(requestedWorkers, cases.length);
+
   if (workerCount === 0) return [];
   const minimumBatchSize = Math.floor(cases.length / workerCount);
   const workersWithExtraCase = cases.length % workerCount;
   let offset = 0;
+
   return Array.from({ length: workerCount }, (_, workerIndex) => {
     const size = minimumBatchSize + (workerIndex < workersWithExtraCase ? 1 : 0);
     const batch = cases.slice(offset, offset + size);
     offset += size;
+
     return batch;
   });
 };
@@ -38,16 +41,20 @@ const createTestQueues = <Payload>(
   concurrency: number,
 ): Map<string, TestQueue<Payload>> => {
   const queues = new Map<string, TestQueue<Payload>>();
+
   for (const resolvedCase of cases) {
     const limit = resolvedCase.test_concurrency ?? concurrency;
     const queue = queues.get(resolvedCase.test_id);
+
     if (queue === undefined) {
       queues.set(resolvedCase.test_id, { cases: [resolvedCase], next: 0, active: 0, limit });
       continue;
     }
+
     queue.limit = Math.min(queue.limit, limit);
     queue.cases.push(resolvedCase);
   }
+
   return queues;
 };
 
@@ -62,10 +69,12 @@ const createCaseScheduler = <Payload>(
   if (options.workerCount !== undefined) {
     const batches = createWorkerBatches(cases, options.workerCount);
     const nextByWorker = batches.map(() => 0);
+
     return {
       take: (workerIndex) => {
         const next = nextByWorker[workerIndex] ?? 0;
         nextByWorker[workerIndex] = next + 1;
+
         return batches[workerIndex]?.[next];
       },
       release: () => undefined,
@@ -73,21 +82,26 @@ const createCaseScheduler = <Payload>(
   }
 
   const queues = createTestQueues(cases, options.concurrency);
+
   const nextConfiguredIndex = (queue: TestQueue<Payload>): number =>
     queue.cases[queue.next]?.configured_index ?? Number.POSITIVE_INFINITY;
+
   return {
     take: () => {
       const [queue] = [...queues.values()]
         .filter(({ active, limit, next, cases }) => active < limit && next < cases.length)
         .sort((left, right) => nextConfiguredIndex(left) - nextConfiguredIndex(right));
+
       if (queue === undefined) return undefined;
       const selected = queue.cases[queue.next];
       queue.next += 1;
       queue.active += 1;
+
       return selected;
     },
     release: (resolvedCase) => {
       const queue = queues.get(resolvedCase.test_id);
+
       if (queue !== undefined) queue.active -= 1;
     },
   };
