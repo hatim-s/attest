@@ -261,16 +261,13 @@ const applyProjectMutation = async (
       }
 
       await markTransactionCommitted(prepared);
-      await cleanupPreparedTransaction(request.projectRoot, prepared);
-
-      return {
-        ...state.result,
-        committed: true,
-        transactionId: prepared.journal.transaction_id,
-      };
     } catch (cause: unknown) {
       return await rollbackAfterFailure(request.projectRoot, prepared, cause);
     }
+
+    await cleanupPreparedTransaction(request.projectRoot, prepared);
+
+    return { ...state.result, committed: true, transactionId: prepared.journal.transaction_id };
   } finally {
     if (lock !== undefined) {
       await releaseProjectLock(lock);
