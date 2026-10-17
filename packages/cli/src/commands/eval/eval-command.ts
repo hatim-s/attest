@@ -27,8 +27,7 @@ import { withProcessSignals } from '../shared/process-signals.js';
 import { collectEvalEvents } from './eval-event-stream.js';
 import { failedRunResult, renderHumanFinalResult } from './eval-output.js';
 import {
-  assertNoCancelFlags,
-  assertNoRunFlags,
+  assertNoEvalFlags,
   createEvalCancelRequest,
   createEvalRunRequest,
   parseEvalCancelRequest,
@@ -74,7 +73,7 @@ const readRunRequest = async (
     });
   }
 
-  assertNoRunFlags(fields.fromJson, fields);
+  assertNoEvalFlags(fields.fromJson, command);
 
   const document = await readRequestDocument(fields.fromJson, {
     hint: REQUEST_DOCUMENT_HINT,
@@ -144,7 +143,7 @@ const readCancelRequest = async (
     return createEvalCancelRequest({ output: options.output, runId });
   }
 
-  assertNoCancelFlags(options.fromJson, { output: options.output, runId });
+  assertNoEvalFlags(options.fromJson, command);
 
   const document = await readRequestDocument(options.fromJson, {
     hint: REQUEST_DOCUMENT_HINT,

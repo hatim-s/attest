@@ -1,25 +1,9 @@
-import { COMMAND_REQUEST_SCHEMA_ID } from '@attest/contracts';
+import { COMMAND_REQUEST_SCHEMA_ID, type EvalOutputMode } from '@attest/contracts';
 import { Option, type Command } from 'commander';
 
 import { AttestCliError } from '../../errors/cli-error.js';
 import type { CliInteraction } from './cli-interaction.js';
 import type { PromptContext } from './required-input.js';
-
-/** Values produced by this command tree's positional arguments and option parsers. */
-type AuthoredCliValue = string | number | boolean | readonly string[] | undefined;
-
-const isAuthoredCliValue = (value: unknown): value is AuthoredCliValue =>
-  value === undefined ||
-  typeof value === 'string' ||
-  typeof value === 'number' ||
-  typeof value === 'boolean' ||
-  (Array.isArray(value) && value.every((item): item is string => typeof item === 'string'));
-
-// BOUNDARY: Commander exposes untyped processed arguments; accept only values produced by this CLI's registered option parsers.
-const decodeAuthoredCliValue = (value: unknown): AuthoredCliValue => {
-  if (isAuthoredCliValue(value)) return value;
-  throw new AttestCliError('cli_usage', 'Command argument has an unsupported value.');
-};
 
 type CommonCliOptions = {
   nonInteractive?: boolean;
@@ -66,27 +50,31 @@ const authoredFieldNames = (command: Command): string[] => [
     .filter((name) => !REQUEST_CONTROL_OPTIONS.has(name)),
 ];
 
-/** Reads authored arguments and CLI-supplied options using their validated value contract. */
-const authoredFieldValues = (command: Command): ReadonlyMap<string, AuthoredCliValue> => {
-  const values = new Map<string, AuthoredCliValue>();
+/** Commander retains authored arguments, including empty strings, separately from defaults. */
+const authoredFieldPresence = (
+  command: Command,
+  excludedOptions: ReadonlySet<string> = new Set([
+    'from-json',
+    'non-interactive',
+    'output',
+    'project',
+  ]),
+): ReadonlySet<string> => {
+  const fields = new Set<string>();
 
   for (const [index, argument] of command.registeredArguments.entries()) {
-    values.set(argument.name(), decodeAuthoredCliValue(command.processedArgs[index]));
+    if (index < command.args.length) fields.add(argument.name());
   }
 
   for (const option of command.options) {
-    if (
-      !REQUEST_CONTROL_OPTIONS.has(option.name()) &&
-      command.getOptionValueSource(option.attributeName()) === 'cli'
-    ) {
-      values.set(
-        option.name(),
-        decodeAuthoredCliValue(command.getOptionValue(option.attributeName())),
-      );
+    const source = command.getOptionValueSource(option.attributeName());
+
+    if (!excludedOptions.has(option.name()) && (source === 'cli' || source === 'implied')) {
+      fields.add(option.name());
     }
   }
 
-  return values;
+  return fields;
 };
 
 /** Collects a repeatable option; help reports every option parsed by it as repeatable. */
@@ -153,13 +141,13 @@ const commonOutputMode = (program: Command, leaf: Command): string | undefined =
   );
 
   if (output === undefined) return undefined;
-  const leafValue = decodeAuthoredCliValue(leaf.getOptionValue('output'));
+  const leafValue = leaf.opts<{ output?: EvalOutputMode }>().output;
   const source = leaf.getOptionValueSource('output');
 
   // Commander may fail before the preAction hook copied a root-position `--output`.
   const inherited =
     source === undefined || source === 'default'
-      ? decodeAuthoredCliValue(program.getOptionValue('output'))
+      ? program.opts<{ output?: EvalOutputMode }>().output
       : undefined;
 
   const value = inherited ?? leafValue;
@@ -219,7 +207,7 @@ export {
   addCommonOptions,
   addMutationOptions,
   authoredFieldNames,
-  authoredFieldValues,
+  authoredFieldPresence,
   collect,
   commonOption,
   commonOutputMode,
@@ -231,7 +219,6 @@ export {
   outputOption,
   projectOption,
   promptContext,
-  type AuthoredCliValue,
   type CommonCliOptions,
   type MutationCliOptions,
 };

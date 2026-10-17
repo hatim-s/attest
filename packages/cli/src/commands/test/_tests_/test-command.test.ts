@@ -81,23 +81,24 @@ describe('CLI test, case, dataset, and import authoring', { timeout: 20_000 }, (
     const requestPath = join(root, 'request.json');
     await writeFile(requestPath, JSON.stringify(addTestRequest('from-json')));
 
-    const overlap = await runJson(root, [
-      'test',
-      'add',
-      'flag-id',
-      '--agent',
-      'support',
-      '--from-json',
-      requestPath,
-    ]);
+    for (const fields of [
+      ['flag-id', '--agent', 'support'],
+      [''],
+      ['--agent', ''],
+      ['--if-project-hash', ''],
+      ['--dry-run'],
+      ['--yes'],
+    ]) {
+      const overlap = await runJson(root, ['test', 'add', ...fields, '--from-json', requestPath]);
 
-    expect(overlap).toMatchObject({
-      exitCode: 2,
-      document: {
-        ok: false,
-        error: { code: 'cli_usage', message: 'Command request sources overlap.' },
-      },
-    });
+      expect(overlap).toMatchObject({
+        exitCode: 2,
+        document: {
+          ok: false,
+          error: { code: 'cli_usage', message: 'Command request sources overlap.' },
+        },
+      });
+    }
   });
 
   it('publishes machine help for the tabular import surface', async () => {
