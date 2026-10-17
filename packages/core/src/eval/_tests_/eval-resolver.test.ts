@@ -15,18 +15,14 @@ import {
 } from '@attest/contracts';
 import { describe, expect, it } from 'vitest';
 
-import { contentHash } from '@attest/core';
-
-import { LocalError } from '../../../errors/index.js';
-import { hashCanonicalJsonLines } from '../../../project/canonical-project.js';
-import type { LoadedProject } from '../../../project/project-loader/index.js';
+import { contentHash } from '../../store/internal/canonical-json.js';
+import { hashCanonicalJsonLines } from '../canonical-project.js';
 import { resolveEvalRun } from '../eval-resolver.js';
+import { EvalResolutionError, type ResolutionProject } from '../resolution-project.js';
 
 const PROJECT_ID = '01ARZ3NDEKTSV4RRFFQ69G5FAB';
 
 const BASELINE_RUN_ID = '01ARZ3NDEKTSV4RRFFQ69G5FAA';
-
-const canonicalHash = contentHash;
 
 const createAgent = (id: string): AgentResource => ({
   schema: AGENT_RESOURCE_SCHEMA_ID,
@@ -70,17 +66,15 @@ const createTest = (id: string, agentId: string, cases: TestCase[]): TestResourc
 });
 
 /** Recomputes every manifest/read-model hash after a hostile fixture mutation. */
-const refreshHashes = (project: LoadedProject): LoadedProject => {
+const refreshHashes = (project: ResolutionProject): ResolutionProject => {
   const agentHashes = Object.fromEntries(
-    project.agents.map((agent) => [agent.id, canonicalHash(agent)]),
+    project.agents.map((agent) => [agent.id, contentHash(agent)]),
   );
 
-  const testHashes = Object.fromEntries(
-    project.tests.map((test) => [test.id, canonicalHash(test)]),
-  );
+  const testHashes = Object.fromEntries(project.tests.map((test) => [test.id, contentHash(test)]));
 
   const metricHashes = Object.fromEntries(
-    project.metrics.map((metric) => [metric.id, canonicalHash(metric)]),
+    project.metrics.map((metric) => [metric.id, contentHash(metric)]),
   );
 
   const datasetHashes = Object.fromEntries(
@@ -88,7 +82,7 @@ const refreshHashes = (project: LoadedProject): LoadedProject => {
       dataset.metadata.id,
       {
         data: hashCanonicalJsonLines(dataset.cases),
-        metadata: canonicalHash(dataset.metadata),
+        metadata: contentHash(dataset.metadata),
       },
     ]),
   );
@@ -109,21 +103,21 @@ const refreshHashes = (project: LoadedProject): LoadedProject => {
   project.contentHashes = {
     agents: agentHashes,
     datasets: datasetHashes,
-    manifest: canonicalHash(project.project),
+    manifest: contentHash(project.project),
     metrics: metricHashes,
     tests: testHashes,
   };
-  project.projectHash = canonicalHash(project.project);
+  project.projectHash = contentHash(project.project);
 
   return project;
 };
 
 /** Builds an in-memory loaded project so resolver tests perform no filesystem I/O. */
-const createProject = (): LoadedProject => {
+const createProject = (): ResolutionProject => {
   const agents = [createAgent('support'), createAgent('secondary')];
   const metrics = [createMetric('quality')];
 
-  const datasets: LoadedProject['datasets'] = [
+  const datasets: ResolutionProject['datasets'] = [
     {
       metadata: {
         schema: DATASET_SCHEMA_ID,
@@ -188,11 +182,9 @@ const createProject = (): LoadedProject => {
       tests: {},
     },
     datasets,
-    manifestPath: '/project/attest.project.json',
     metrics,
     project: manifest,
     projectHash: '0'.repeat(64),
-    root: '/project',
     tests,
   });
 };
@@ -210,15 +202,15 @@ const options = {
   argv: ['eval', 'run', 'alpha', '--output', 'json'],
 } as const;
 
-const captureCliError = (operation: () => void): LocalError => {
+const captureResolutionError = (operation: () => void): EvalResolutionError => {
   try {
     operation();
   } catch (error: unknown) {
-    if (error instanceof LocalError) return error;
+    if (error instanceof EvalResolutionError) return error;
     throw error;
   }
 
-  throw new Error('Expected resolver to throw an LocalError.');
+  throw new Error('Expected resolver to throw an EvalResolutionError.');
 };
 
 describe('eval resolver', () => {
@@ -388,39 +380,43 @@ describe('eval resolver', () => {
   it('rejects duplicate resolved case ids deterministically', () => {
     const duplicateCase = createProject();
     duplicateCase.tests[0]!.cases.push(structuredClone(duplicateCase.tests[0]!.cases[0]!));
-    const caseError = captureCliError(() => resolveEvalRun(duplicateCase, request(), options));
+
+    const caseError = captureResolutionError(() =>
+      resolveEvalRun(duplicateCase, request(), options),
+    );
+
     expect(caseError.code).toBe('project_invalid');
   });
 
   it('rejects missing agents, metrics, tests, cases, and hash coverage before execution', () => {
     const missingAgent = createProject();
     missingAgent.agents = missingAgent.agents.filter(({ id }) => id !== 'support');
-    expect(captureCliError(() => resolveEvalRun(missingAgent, request(), options)).code).toBe(
-      'project_invalid',
-    );
+    expect(
+      captureResolutionError(() => resolveEvalRun(missingAgent, request(), options)).code,
+    ).toBe('project_invalid');
 
     const missingMetric = createProject();
     missingMetric.metrics = [];
-    expect(captureCliError(() => resolveEvalRun(missingMetric, request(), options)).code).toBe(
-      'project_invalid',
-    );
+    expect(
+      captureResolutionError(() => resolveEvalRun(missingMetric, request(), options)).code,
+    ).toBe('project_invalid');
 
     const missingHash = createProject();
     const testHashes = { ...missingHash.contentHashes.tests };
     delete testHashes.alpha;
     missingHash.contentHashes = { ...missingHash.contentHashes, tests: testHashes };
-    expect(captureCliError(() => resolveEvalRun(missingHash, request(), options)).code).toBe(
+    expect(captureResolutionError(() => resolveEvalRun(missingHash, request(), options)).code).toBe(
       'project_invalid',
     );
 
-    const missingTest = captureCliError(() =>
+    const missingTest = captureResolutionError(() =>
       resolveEvalRun(createProject(), request({ test_ids: ['absent'] }), options),
     );
 
     expect(missingTest.code).toBe('resource_not_found');
     expect(missingTest.details).toMatchObject({ missing_ids: ['absent'], resource_type: 'test' });
 
-    const missingCase = captureCliError(() =>
+    const missingCase = captureResolutionError(() =>
       resolveEvalRun(createProject(), request({ case_ids: ['absent'] }), options),
     );
 
@@ -441,11 +437,11 @@ describe('eval resolver', () => {
       output: 'json',
     } as const satisfies EvalRunRequest;
 
-    expect(captureCliError(() => resolveEvalRun(emptyProject, allRequest, options)).code).toBe(
-      'resource_not_found',
-    );
+    expect(
+      captureResolutionError(() => resolveEvalRun(emptyProject, allRequest, options)).code,
+    ).toBe('resource_not_found');
 
-    const tagError = captureCliError(() =>
+    const tagError = captureResolutionError(() =>
       resolveEvalRun(createProject(), request({ tags: ['nonexistent'] }), options),
     );
 
@@ -476,7 +472,7 @@ describe('eval resolver', () => {
     expect(changed.snapshotHash).not.toBe(first.snapshotHash);
     expect(changed.cases[0]?.execution_id).toBe(first.cases[0]?.execution_id);
 
-    const stale = captureCliError(() =>
+    const stale = captureResolutionError(() =>
       resolveEvalRun(changedProject, request(), {
         ...options,
         expectedProjectHash: firstProject.projectHash,

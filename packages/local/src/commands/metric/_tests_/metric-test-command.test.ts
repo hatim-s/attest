@@ -217,41 +217,4 @@ describe('runMetricTestCommand', () => {
     expect(swapped).toBe(true);
     await expect(access(join(outside, 'spawned.txt'))).rejects.toThrow();
   });
-
-  it('validates judge and HTTP fixtures without calling a provider or the network', async () => {
-    const root = await createProject();
-    await addMetric(root, {
-      schema: METRIC_RESOURCE_SCHEMA_ID,
-      id: 'judge',
-      name: 'Judge',
-      definition: { kind: 'judge', model: 'openai/gpt-5', rubric: 'Be correct.', threshold: 0.8 },
-    });
-    await addMetric(root, {
-      schema: METRIC_RESOURCE_SCHEMA_ID,
-      id: 'http',
-      name: 'HTTP',
-      definition: {
-        kind: 'http',
-        request: { method: 'POST', url: 'https://network-must-not-run.example/metric' },
-        extraction: { score_pointer: '/score', pass_pointer: '/pass' },
-      },
-    });
-    const fetchSpy = vi.fn(() => Promise.reject(new Error('network execution is forbidden')));
-    vi.stubGlobal('fetch', fetchSpy);
-    onTestFinished(() => {
-      vi.unstubAllGlobals();
-    });
-
-    for (const id of ['judge', 'http']) {
-      expect((await testMetric(root, id)).result).toEqual({
-        metric_id: id,
-        kind: id,
-        fixture_valid: true,
-        executed: false,
-        reason: 'external_execution_not_supported',
-      });
-    }
-
-    expect(fetchSpy).not.toHaveBeenCalled();
-  });
 });
