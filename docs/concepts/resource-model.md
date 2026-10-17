@@ -55,7 +55,7 @@ unchanged source row keeps its id when the dataset moves.
 ## Authored state versus run state
 
 Authored files describe what should run. `.attest/runs.db` stores immutable evaluation
-records describing what did run. The database is created by `attest eval run`, not by
+records describing what did run. The database is created by `attest eval run` or a recorded agent probe, not by
 project or resource authoring. An eval run is not an authored resource and cannot be
 edited through resource commands.
 
@@ -75,22 +75,9 @@ The [mutation controls](../cli/index.md#mutation-controls) include `--dry-run` a
 
 ## Schemas are the shape authority
 
-The generated Draft 2020-12 schemas live in `packages/schemas/generated/`. `schema print` takes the
-file name from `schema list`. Only `attest.command-request`, `attest.metric-preset`, and
-`attest.metric-test-fixture` also print by id.
-
-```bash
-attest schema list --output json
-attest schema print project.json --output json
-attest schema print agent.json --output json
-attest schema print attest.command-request --output json
-```
-
-The [schema reference](../reference/schemas.md) maps all ids to files, including
-`attest.cli-result`, `attest.cli-event`, `attest.agent-invocation`,
-`attest.metric-evaluation`, and `attest.trace`. Runtime validation additionally
-enforces invariants that JSON Schema alone cannot express, such as reference resolution,
-canonical paths, hash integrity, and collision checks.
+The [schema reference](../reference/schemas.md) owns the generated artifact map,
+printable aliases, and discovery commands. Runtime validation additionally checks
+reference resolution, canonical paths, hash integrity, and collisions.
 
 ## Execution
 

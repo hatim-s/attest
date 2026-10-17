@@ -88,8 +88,6 @@ The command tree, generated schemas, and error registry are the executable sourc
 
 - [Package architecture](./ARCHITECTURE.md)
 
-- [Foundation decisions](./DECISIONS.md)
-- [Stack and implementation philosophy](./STACK.md)
 - [Code taste and conventions](./TASTE.md)
 - [Testing policy](./TESTING.md)
 - [Package scripts](./SCRIPTS.md)

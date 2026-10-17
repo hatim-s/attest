@@ -102,19 +102,9 @@ attest agent add support-remote \
   --output json
 ```
 
-The JSON accepts `kind`, optional `image`, `files`, optional `artifacts`, and optional
-`artifact_directory`. File mappings accept `source`, `destination`, and optional numeric `mode`.
-Artifact mappings accept `source` and `destination`. The default image is
-`vercel/sandbox/universal`.
-
-This is remote execution from a local or CI Attest process. It requires network access and either
-`VERCEL_OIDC_TOKEN` or all of `VERCEL_TOKEN`, `VERCEL_TEAM_ID`, and `VERCEL_PROJECT_ID`. The agent
-resource stores no credential values.
-
-All transfers are explicit fixed-file mappings. Globs, directories, symbolic links, and implicit
-uploads are rejected. If artifacts are configured, set `artifact_directory` unless the eval uses
-worker directories. See [Native agent integrations](../integrations/native.md) for transfer limits,
-artifact paths, and lifecycle details.
+This is remote execution and requires network access. See [environment variables](../ENV.md#vercel-sandbox-credentials)
+for credentials and [native agents](../integrations/native.md) for file mappings,
+artifact export, and transfer limits.
 
 ## Import JSON or cURL
 
@@ -168,7 +158,7 @@ attest agent test --from-json ./agent-test.json --output json
 ```
 
 `--watch` is human-only. `--record` stores the probe as a run in `.attest/runs.db`. A probe without
-it writes nothing. For rename and remove, see [Rename and remove](./index.md#rename-and-remove).
+it does not write to the run store. Configured sandbox artifact export can still write files. For rename and remove, see [Rename and remove](./index.md#rename-and-remove).
 
 ## Agent-readable contract
 

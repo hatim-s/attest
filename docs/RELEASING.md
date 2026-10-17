@@ -40,7 +40,7 @@ archives remain available for inspection and distribution.
 
 `release:pack` performs only the build, schema generation, and packaging. Packaging
 copies the root Apache-2.0 license and NOTICE into each archive, excludes source and tests,
-removes development scripts, dependencies, and the local workspace-only `/testing` export,
+removes development scripts and dependencies,
 and replaces workspace dependency
 references with exact candidate versions. Publish these archives, not the raw
 workspace directories. A `prepublishOnly` guard rejects direct workspace publication.
@@ -71,8 +71,6 @@ package. A missing package on npm does not establish ownership of its scope.
 Confirm the final package scope before the first publication. If it changes,
 update package names, imports, documentation, and packaging together.
 
-As of the local release preparation, `npm whoami` returned `E401` and
-`npm view @attest/cli` returned `E404`. No package has been published by this work.
 Authenticate and confirm scope permissions before proceeding.
 
 Run npm account and publication commands outside the repository because the root

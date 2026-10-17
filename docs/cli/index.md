@@ -60,6 +60,33 @@ without a path, `trace convert` prints the raw trace document. `view` prints its
 URL and stays running. The root `--output json` flag does not change these commands.
 `--help` and `--version` retain terminal text; use `attest help --output json` for discovery.
 
+## Prompts and non-interactive runs
+
+Prompts require human output, both input and output TTYs, no `--from-json`, no
+`--non-interactive`, and `CI` other than the exact string `true`. Structured output
+never prompts. Supply missing values explicitly for automation.
+
+## Rename and remove
+
+```text
+attest agent rename <id> <new-id>
+attest agent remove <id>
+attest metric rename <id> <new-id>
+attest metric remove <id> [--detach]
+attest test rename <id> <new-id>
+attest test remove <id>
+attest test case rename <test-id> <case-id> <new-id>
+attest test case remove <test-id> <case-id>
+attest test dataset rename <id> <new-id>
+attest test dataset remove <id>
+```
+
+Renames update references atomically. Removal rejects referenced agents, metrics,
+and datasets with reference blockers. Read the returned detach commands; metric
+removal also supports explicit `--detach`. These commands share the mutation
+controls below. A dry-run does not rename anything, so subsequent commands must
+still use the original id until the rename is committed.
+
 ## Mutation controls
 
 All authored-resource mutations share these controls:

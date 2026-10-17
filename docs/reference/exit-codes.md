@@ -7,7 +7,7 @@ or eval verdict says exactly what happened.
 | ---: | -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------- |
 |    0 | Success                                | Mutation/read completed; eval verdict is `pass`; cancellation request accepted.                                          | No retry needed.                                                           |
 |    1 | User/project data or evaluated failure | Invalid project, missing resource, output collision, fixture mismatch, trace conversion failure, or eval verdict `fail`. | Repair data or accept the evaluated failure; do not retry unchanged.       |
-|    2 | CLI input/grammar                      | `cli_usage`, `cli_missing_input`.                                                                                        | Read machine help and repair the invocation/request.                       |
+|    2 | CLI input or cloud authentication      | `cli_usage`, `cli_missing_input`, expired/revoked cloud authentication.                                                  | Repair the invocation/request or log in again.                             |
 |    3 | Local concurrency/recovery             | Project changed, locked, stale-locked, or needs recovery.                                                                | Reload/wait or follow the explicit recovery path; never steal a live lock. |
 |    4 | Infrastructure/internal                | Filesystem write, invocation, metric provider, run store, transaction, initialization, or internal failure.              | Verify side effects and repair the boundary before retrying.               |
 |  130 | Cancellation                           | SIGINT, SIGTERM, or a requested active-run cancellation.                                                                 | Retry only if cancellation is no longer desired.                           |
@@ -115,3 +115,5 @@ lock, or stop for a human to recover a stale lock or interrupted transaction.
 
 See [Errors](./errors.md) for every stable identity and repair, and [Schemas](./schemas.md) for the
 machine envelopes.
+
+Exit `4` also covers cloud rejection, unavailability, and credential persistence failures.

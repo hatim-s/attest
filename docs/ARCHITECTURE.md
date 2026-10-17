@@ -121,8 +121,8 @@ untrusted representations.
 Core owns the stored execution and evaluation schemas through its browser-safe
 `@attest/core/records` entry point. Local validates records before database writes
 and validates hydrated rows before returning them. Undefined optional fields are
-normalized before schema parsing. Runtime owns the judge outcome schema. Web and
-CLI decode response contracts after bounded JSON parsing.
+normalized before schema parsing. Runtime owns the judge outcome schema. CLI decodes response contracts after bounded JSON parsing. Web parses live HTTP
+payloads with core schemas; its static report preload still needs a shared report boundary.
 
 CLI services and sandbox invocation accept per-instance dependencies with the
 production implementations as defaults. Tests supply those dependencies rather

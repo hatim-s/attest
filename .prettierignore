@@ -6,9 +6,7 @@ bun.lock
 # strategy/decision docs keep their authored formatting
 AGENTS.md
 CLAUDE.md
-DECISIONS.md
-STACK.md
-TASTE.md
+docs/TASTE.md
 conformance/fixtures/
 packages/schemas/generated/*.json
 # Preserve the approved marketing HTML exactly as supplied.

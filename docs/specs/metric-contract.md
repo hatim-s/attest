@@ -2,8 +2,7 @@
 
 A metric resource in `attest/metrics/<id>.json` has a `definition.kind` of `assertion`, `judge`,
 `exec`, or `http`. Every kind produces the same result shape, so reports and diffs read them the
-same way. Create metrics with `attest metric add`. The examples below show each command and the
-file it writes.
+same way. The [metric guide](../cli/metrics.md) owns authoring commands and presets.
 
 ## Result shape
 
@@ -27,35 +26,6 @@ file it writes.
 
 Assertions run in-process. A metric holds a non-empty list of checks. It passes when every check
 holds, and its score is the fraction of checks that passed.
-
-Presets such as `output-contains`, `output-equals`, `tool-called`, and `trace-span` write one check.
-Pass `--assert-json` once per check for anything else:
-
-```bash
-attest metric add grounded \
-  --assert-json '{"regex":{"path":"$.output","pattern":"capital","flags":"i"}}' \
-  --assert-json '{"not":{"contains":{"path":"$.output","value":"I do not know"}}}' \
-  --assert-json '{"threshold":{"path":"$.output.confidence","gte":0.7}}' \
-  --output json
-```
-
-`attest/metrics/grounded.json`:
-
-```json
-{
-  "definition": {
-    "assertions": [
-      { "regex": { "flags": "i", "path": "$.output", "pattern": "capital" } },
-      { "not": { "contains": { "path": "$.output", "value": "I do not know" } } },
-      { "threshold": { "gte": 0.7, "path": "$.output.confidence" } }
-    ],
-    "kind": "assertion"
-  },
-  "id": "grounded",
-  "name": "grounded",
-  "schema": "attest.metric"
-}
-```
 
 Paths start at `$`, the evaluation document `{ input, output, expected, trace }`. They support dot
 fields and `[n]` indexes only. Wildcards, filters, and recursive descent are rejected.
@@ -83,36 +53,13 @@ A judge sends a rubric to an LLM. The model uses `provider/model` form, where th
 `anthropic` or `openai`. The provider SDK reads `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` from the
 environment. Keys never appear in project files or run records.
 
-```bash
-attest metric add correctness --preset judge-rubric \
-  --model anthropic/claude-sonnet-5 \
-  --rubric 'Score 1 if the answer matches expected, else 0.' \
-  --output json
-```
-
-`attest/metrics/correctness.json`:
-
-```json
-{
-  "definition": {
-    "kind": "judge",
-    "model": "anthropic/claude-sonnet-5",
-    "rubric": "Score 1 if the answer matches expected, else 0.",
-    "threshold": 0.8
-  },
-  "id": "correctness",
-  "name": "correctness",
-  "schema": "attest.metric"
-}
-```
-
 `pass` is `score >= threshold`. `--threshold` defaults to 0.8.
 
 - The judge sees `input`, `output`, `expected`, and a trace summary when a trace exists. It never
   sees other cases.
 - The run records the full judge request (model, prompt, parameters) and the raw response.
-- Judge results are cached by a content hash of the request. Rerunning an unchanged case, output,
-  and rubric makes no provider call.
+- With a shared cache enabled, a recorded successful judge result is reused by the content hash
+  of its request. Calls without a cache and failed provider calls do not produce reusable hits.
 - Provider errors and unparseable responses are metric errors, distinct from `pass: false`.
 
 ## Executable metrics (`kind: exec` and `kind: http`)

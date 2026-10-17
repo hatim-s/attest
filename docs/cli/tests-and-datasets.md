@@ -167,12 +167,12 @@ hand before reading the full aggregate diagnostic list.
 
 ```sh
 attest test case show smoke refund-basic --output json
-attest test case rename smoke refund-basic refund-renamed --dry-run
+attest test case rename smoke refund-basic refund-renamed --yes --output json
 attest test case remove smoke refund-renamed --yes --output json
 
 attest test dataset import smoke ./cases.jsonl --as regression --output json
 attest test dataset detach smoke regression --output json
-attest test dataset rename regression regression-renamed --dry-run
+attest test dataset rename regression regression-renamed --yes --output json
 attest test dataset remove regression-renamed --yes --output json
 ```
 
