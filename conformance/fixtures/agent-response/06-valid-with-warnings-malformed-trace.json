@@ -2,6 +2,8 @@
   "description": "Keeps a valid output response while disabling an invalid optional trace.",
   "expect": "valid-with-warnings",
   "warning_codes": ["invalid_trace"],
+  "preserve_paths": ["output"],
+  "absent_paths": ["trace"],
   "input": {
     "protocol": "attest.agent-invocation",
     "output": "Paris",

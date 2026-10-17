@@ -2,6 +2,7 @@
   "description": "Preserves an unknown response extension and reports its compatibility warning.",
   "expect": "valid-with-warnings",
   "warning_codes": ["unknown_field"],
+  "preserve_paths": ["output", "vendor_response"],
   "input": {
     "protocol": "attest.agent-invocation",
     "output": "Paris",

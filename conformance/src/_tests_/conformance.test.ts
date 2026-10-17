@@ -7,7 +7,11 @@ import {
 } from '@attest/contracts';
 import { describe, expect, it } from 'vitest';
 
-import { loadFixtures, type FixtureEnvelope, type LoadedFixture } from './support/load-fixtures.js';
+import {
+  loadFixtures,
+  type FixtureEnvelope,
+  type LoadedFixture,
+} from '../../../packages/contracts/src/_tests_/support/load-fixtures.js';
 
 type FixtureParseResult =
   | { ok: true; value: unknown; warningCodes: string[] }
@@ -75,7 +79,7 @@ const expectFixtureOutcome = (envelope: FixtureEnvelope, result: FixtureParseRes
     expect(result.ok).toBe(false);
 
     if (result.ok) return;
-    expect(result.issuePaths).toEqual(expect.arrayContaining(envelope.issue_paths ?? []));
+    expect(result.issuePaths).toEqual(expect.arrayContaining(envelope.issue_paths));
 
     return;
   }
@@ -85,7 +89,11 @@ const expectFixtureOutcome = (envelope: FixtureEnvelope, result: FixtureParseRes
   if (!result.ok) return;
 
   const expectedWarnings = envelope.expect === 'valid-with-warnings' ? envelope.warning_codes : [];
-  expect(result.warningCodes).toEqual(expectedWarnings ?? []);
+  expect(result.warningCodes).toEqual(expectedWarnings);
+
+  for (const path of envelope.absent_paths ?? []) {
+    expect(readPath(result.value, path).value, path).toBeUndefined();
+  }
 
   for (const path of envelope.preserve_paths ?? []) {
     const authored = readPath(envelope.input, path).value;

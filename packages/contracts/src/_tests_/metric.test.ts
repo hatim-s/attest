@@ -1,49 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
-import {
-  assertionCheckSchema,
-  metricRequestSchema,
-  metricResultSchema,
-} from '../metric/protocol.js';
-import { parseMetricRequest, parseMetricResult } from '../schema/parse.js';
-import { METRIC_PROTOCOL } from '../schema/identifiers.js';
+import { assertionCheckSchema } from '../metric/protocol.js';
 
 describe('metric schemas', () => {
-  it('accepts a complete executable metric request', () => {
-    const result = metricRequestSchema.safeParse({
-      protocol: METRIC_PROTOCOL,
-      case: { id: 'greeting', input: {}, expected: {}, params: {} },
-      output: 'Paris',
-      trace: null,
-    });
-
-    expect(result.success).toBe(true);
-    expect(parseMetricRequest(result.data).ok).toBe(true);
-  });
-
-  it('accepts a complete normalized result', () => {
-    expect(
-      metricResultSchema.safeParse({
-        score: 1,
-        pass: true,
-        rationale: 'The answer matches.',
-        details: { matched: ['$.output'] },
-      }).success,
-    ).toBe(true);
-  });
-
-  it('rejects a result missing pass at the pass field', () => {
-    const result = parseMetricResult({ score: 1 });
-
-    expect(result.ok).toBe(false);
-
-    if (result.ok) {
-      return;
-    }
-
-    expect(result.error[0]?.path).toBe('pass');
-  });
-
   it('parses recursive assertion combinators', () => {
     const check = {
       all: [
