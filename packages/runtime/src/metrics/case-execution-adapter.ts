@@ -1,4 +1,4 @@
-import type { AgentErrorResponse, AgentResponse, TestCase } from '@attest/contracts';
+import { isAgentErrorResponse, type TestCase } from '@attest/contracts';
 import type { CaseExecution } from '../eval/types.js';
 
 import type { MetricContext } from './metric-evaluation.js';
@@ -7,13 +7,6 @@ import type { MetricContext } from './metric-evaluation.js';
 type CaseExecutionView =
   | Pick<Extract<CaseExecution, { outcome: 'completed' }>, 'outcome' | 'response' | 'trace'>
   | Pick<Exclude<CaseExecution, { outcome: 'completed' }>, 'outcome'>;
-
-/**
- * An agent error envelope completes the transport but carries no output, so metrics skip it and
- * the case verdict is an error rather than a failure.
- */
-const isAgentErrorResponse = (response: AgentResponse): response is AgentErrorResponse =>
-  !('output' in response);
 
 /** Maps the runner's terminal case shape to the narrow context every metric consumes. */
 const caseExecutionToMetricContext = (
@@ -36,4 +29,4 @@ const caseExecutionToMetricContext = (
   };
 };
 
-export { caseExecutionToMetricContext, isAgentErrorResponse, type CaseExecutionView };
+export { caseExecutionToMetricContext, type CaseExecutionView };

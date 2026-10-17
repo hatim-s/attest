@@ -38,7 +38,7 @@ interface ExecutionOptions {
   runId: string;
   caseId: string;
   expectedMetrics?: string[];
-  response?: unknown;
+  response?: Extract<StoredCaseExecution, { outcome: 'completed' }>['response'];
   trace?: Trace;
 }
 
@@ -228,6 +228,45 @@ describe('RunStore', () => {
 
     const finalized = await store.finalizeRun(run.id, 'failed');
     expect(finalized.summary).toMatchObject({ passedCases: 1, failedCases: 0, errorCases: 2 });
+  });
+
+  it('recomputes the totals of a run finalized before the shared verdict rule', async () => {
+    const { path, store } = await openTemporaryStore();
+
+    const run = await store.createRun({
+      schemaId: 'attest.project',
+      configHash: 'hash',
+      configJson: '{}',
+    });
+
+    await store.recordCase(
+      run.id,
+      {
+        ...completedExecution({ runId: run.id, caseId: 'hooked', expectedMetrics: ['quality'] }),
+        diagnostics: { lifecycleError: 'after_case exited 7' },
+      },
+      [evaluatedMetric('quality', true)],
+    );
+    await store.finalizeRun(run.id, 'completed');
+
+    // The old rule ignored lifecycle errors, so older databases hold a passing summary here.
+    const stale = JSON.stringify({
+      totalCases: 1,
+      passedCases: 1,
+      failedCases: 0,
+      errorCases: 0,
+      metricErrorCount: 0,
+    });
+
+    const handle = await openSqliteHandle(path);
+    await handle.exec('DROP TRIGGER runs_no_terminal_update');
+    await handle.prepare('UPDATE runs SET summary_json = ? WHERE id = ?').run(stale, run.id);
+    await handle.close();
+
+    const recomputed = { totalCases: 1, passedCases: 0, errorCases: 1 };
+    expect((await store.getRun(run.id)).summary).toMatchObject(recomputed);
+    expect((await store.listRuns())[0]?.summary).toMatchObject(recomputed);
+    expect((await store.listCaseSummaries(run.id)).items[0]?.verdict).toBe('error');
   });
 
   it('accepts identical case replay and rejects a changed natural-key payload', async () => {

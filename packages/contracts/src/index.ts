@@ -36,7 +36,7 @@ export {
   WEBSOCKET_REQUEST_PROTOCOL,
 } from './schema/identifiers.js';
 
-export { agentRequestSchema } from './agent/protocol.js';
+export { agentErrorSchema, agentRequestSchema, isAgentErrorResponse } from './agent/protocol.js';
 
 export type { AgentErrorResponse, AgentRequest, AgentResponse } from './agent/protocol.js';
 

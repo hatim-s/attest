@@ -1,4 +1,5 @@
 import {
+  agentErrorSchema,
   agentRequestSchema,
   caseOutcomeSchema,
   invocationDiagnosticsSchema,
@@ -72,8 +73,8 @@ const executionBase = {
 const completedExecutionFields = {
   ...executionBase,
   outcome: z.literal('completed'),
-  // Agent responses may hold optional undefined fields, so `z.json()` would reject typed input.
-  response: z.unknown().refine((response) => response !== undefined, 'is required'),
+  // Only the error field is typed: verdicts read it, and the rest of the envelope is opaque evidence.
+  response: z.looseObject({ error: agentErrorSchema.optional() }),
   trace: traceSchema.optional(),
 };
 
