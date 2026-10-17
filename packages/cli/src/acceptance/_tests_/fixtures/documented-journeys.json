@@ -169,7 +169,14 @@
             },
             "attest/tests/smoke.json": {
               "schema": "attest.test",
-              "id": "smoke"
+              "id": "smoke",
+              "cases": [
+                {
+                  "id": "refund-basic",
+                  "input": "refund policy",
+                  "expected": "refund policy"
+                }
+              ]
             }
           },
           "artifacts_present": ["attest/tests/smoke.json"],
@@ -185,7 +192,9 @@
           "artifact_documents": {},
           "artifacts_present": [".attest/runs.db"],
           "artifacts_absent": ["attest.config.json"],
-          "tree_changes": [".attest/eval-runs/", ".attest/runs.db"]
+          "tree_changes": [".attest/eval-runs/", ".attest/runs.db"],
+          "result_verdict": "pass",
+          "result_run_id": true
         }
       ]
     },

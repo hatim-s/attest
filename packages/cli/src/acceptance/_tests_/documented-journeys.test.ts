@@ -14,7 +14,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { cliResultSchema, type JsonValue } from '@attest/contracts';
+import { cliResultSchema, isJsonObject, type JsonValue } from '@attest/contracts';
 import { describe, expect, inject, it, onTestFinished } from 'vitest';
 
 import { REPOSITORY_ROOT, runPackedCommand } from './packed-cli.js';
@@ -30,6 +30,8 @@ type CommandExpectation = {
   exit_code: number;
   ok: boolean;
   result_schema?: string;
+  result_verdict?: string;
+  result_run_id?: boolean;
   tree_changes: string[];
 };
 
@@ -119,6 +121,18 @@ const assertCommand = async (
     expect(document.ok ? document.result : undefined, label).toMatchObject({
       schema: expectation.result_schema,
     });
+  }
+
+  if (expectation.result_verdict !== undefined) {
+    expect(document.ok ? document.result : undefined, label).toMatchObject({
+      verdict: expectation.result_verdict,
+    });
+  }
+
+  if (expectation.result_run_id === true) {
+    const runId = document.ok && isJsonObject(document.result) ? document.result.run_id : undefined;
+
+    expect(runId, label).toMatch(/^[0-9A-HJKMNP-TV-Z]{26}$/u);
   }
 
   expect(changedTreePaths(treeBefore, await snapshotTree(root)), label).toEqual(

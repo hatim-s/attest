@@ -105,6 +105,7 @@ const runViewReadinessProbe = async (
     stdio: ['ignore', 'pipe', 'pipe'],
   });
 
+  const deadline = AbortSignal.timeout(timeout);
   let stdout = '';
   let stderr = '';
   let ready = false;
@@ -142,7 +143,7 @@ const runViewReadinessProbe = async (
   });
 
   try {
-    const response = await fetch(readinessUrl);
+    const response = await fetch(readinessUrl, { signal: deadline });
     const readiness = { body: await response.text(), status: response.status, url: readinessUrl };
 
     return { exitCode: 0, readiness, stderr, stdout };
@@ -207,6 +208,8 @@ const assertCommand = async (
   const { document, runId: printedRunId } = readPrintedResult(expectation, result.stdout);
 
   if (document !== undefined) {
+    expect(document.ok, label).toBe(expectation.error_code === undefined);
+
     if (expectation.command !== undefined)
       expect(document.command, label).toBe(expectation.command);
 
