@@ -90,12 +90,12 @@ const loginCloud = async (options: {
       else if (error.outcome.code === 'expired_token') {
         throw new LocalError(
           'cloud_auth_required',
-          'Cloud approval code expired. Run cloud login again.',
+          'Cloud approval code expired. Run attest cloud login again.',
         );
       } else if (error.outcome.code === 'access_denied') {
         throw new LocalError(
           'cloud_auth_required',
-          'Cloud login was denied. Run cloud login again.',
+          'Cloud login was denied. Run attest cloud login again.',
         );
       }
     }
@@ -111,7 +111,7 @@ const loginCloud = async (options: {
 
   throw new LocalError(
     'cloud_auth_required',
-    'Cloud approval code expired. Run cloud login again.',
+    'Cloud approval code expired. Run attest cloud login again.',
   );
 };
 

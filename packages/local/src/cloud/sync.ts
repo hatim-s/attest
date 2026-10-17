@@ -130,7 +130,7 @@ const pushCloudProject = async (
     if (Buffer.byteLength(JSON.stringify(payload), 'utf8') > PORTABLE_MAX_UPLOAD_BYTES) {
       throw new LocalError(
         'project_invalid',
-        `Cloud revision exceeds the ${PORTABLE_MAX_UPLOAD_BYTES} byte upload limit.`,
+        `Cloud revision exceeds the ${PORTABLE_MAX_UPLOAD_BYTES / (1024 * 1024)} MiB upload limit.`,
         {
           hint: 'Reduce authored dataset or metric source size before pushing.',
         },

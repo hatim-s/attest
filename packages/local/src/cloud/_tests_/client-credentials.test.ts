@@ -154,7 +154,7 @@ describe('cloud trust boundaries', () => {
     expect(start.code_challenge).not.toBe(token.code_verifier);
   });
 
-  it('polls pending approval and retains the five-second slow_down increase', async () => {
+  it('polls pending approval and accumulates and retains each five-second slow_down increase', async () => {
     const path = await temporaryPath();
 
     const responses = [
@@ -166,6 +166,7 @@ describe('cloud trust boundaries', () => {
         interval: 3,
       }),
       Response.json({ error: { code: 'authorization_pending' } }, { status: 400 }),
+      Response.json({ error: { code: 'slow_down' } }, { status: 400 }),
       Response.json({ error: { code: 'slow_down' } }, { status: 400 }),
       Response.json({ error: { code: 'authorization_pending' } }, { status: 400 }),
       Response.json({ access_token: 'approved-token', token_type: 'Bearer', expires_in: 600 }),
@@ -203,21 +204,27 @@ describe('cloud trust boundaries', () => {
     nodeMock.timers.tick(1);
     await setImmediate();
     expect(fetcher).toHaveBeenCalledTimes(4);
-    nodeMock.timers.tick(7_999);
+    nodeMock.timers.tick(12_999);
     await setImmediate();
     expect(fetcher).toHaveBeenCalledTimes(4);
+    nodeMock.timers.tick(1);
+    await setImmediate();
+    expect(fetcher).toHaveBeenCalledTimes(5);
+    nodeMock.timers.tick(12_999);
+    await setImmediate();
+    expect(fetcher).toHaveBeenCalledTimes(5);
     nodeMock.timers.tick(1);
     await expect(login).resolves.toEqual({
       base_url: 'https://cloud.example.test',
       authenticated: true,
     });
-    expect(fetcher).toHaveBeenCalledTimes(5);
+    expect(fetcher).toHaveBeenCalledTimes(6);
     expect((await readCloudCredentials(path)).accessToken).toBe('approved-token');
   });
 
   it.each([
-    ['expired_token', 'Cloud approval code expired. Run cloud login again.'],
-    ['access_denied', 'Cloud login was denied. Run cloud login again.'],
+    ['expired_token', 'Cloud approval code expired. Run attest cloud login again.'],
+    ['access_denied', 'Cloud login was denied. Run attest cloud login again.'],
   ])('ends device login on %s with a login repair', async (code, message) => {
     const path = await temporaryPath();
 
