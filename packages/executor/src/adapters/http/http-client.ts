@@ -1,5 +1,6 @@
 import { parseJson } from '../../internal/json-value.js';
 import type { JsonValue } from '@attest/contracts';
+import { createHash } from 'node:crypto';
 
 import type { IncomingMessage } from 'node:http';
 
@@ -104,6 +105,9 @@ const readResponseBody = async (
             rawExcerpt: {
               ...createRawExcerpt(redactTransportText(prefix, policy.secrets)),
               truncated: true,
+              sha256: createHash('sha256')
+                .update(Buffer.concat([...chunks, chunk]))
+                .digest('hex'),
             },
           },
         );

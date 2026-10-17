@@ -1,5 +1,6 @@
 import { parseJson } from '../../internal/json-value.js';
 import type { JsonValue } from '@attest/contracts';
+import { createHash } from 'node:crypto';
 
 import { AgentInvocationError, abortedError } from '../../errors.js';
 import { DEFAULT_FIRST_BYTE_MS } from '../../internal/agent-defaults.js';
@@ -135,6 +136,9 @@ const readFetchJson = async (
                 ),
               ),
               truncated: true,
+              sha256: createHash('sha256')
+                .update(Buffer.concat([...chunks, chunk]))
+                .digest('hex'),
             },
           },
         );
