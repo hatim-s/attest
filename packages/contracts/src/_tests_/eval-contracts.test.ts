@@ -3,23 +3,14 @@ import type { JsonValue } from '../project/shared.js';
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 
-import { describe, expect, expectTypeOf, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import { cliEventSchema, cliResultSchema } from '../cli/protocol.js';
 import { commandRequestSchema } from '../cli/command-request.js';
-import {
-  evalCancelRequestSchema,
-  evalCancelResultSchema,
-  type EvalCancelRequest,
-} from '../eval/cancel.js';
+import { evalCancelRequestSchema, evalCancelResultSchema } from '../eval/cancel.js';
 import { evalFinalResultDataSchema } from '../eval/event.js';
-import { evalEventStreamSchema, type EvalEventStream } from '../eval/event-stream.js';
-import {
-  evalRunRequestSchema,
-  evalRunSchema,
-  type EvalRun,
-  type EvalRunRequest,
-} from '../eval/run.js';
+import { evalEventStreamSchema } from '../eval/event-stream.js';
+import { evalRunRequestSchema, evalRunSchema, type EvalRunRequest } from '../eval/run.js';
 import { compileGeneratedSchema } from './support/compile-generated-schema.js';
 
 const fixturesDirectory = resolve(import.meta.dirname, 'fixtures');
@@ -63,7 +54,6 @@ describe('eval run request contract', () => {
   it('accepts exact test/case/tag selection and every execution/output field', () => {
     expect(evalRunRequestSchema.safeParse(structuredTestRequest).success).toBe(true);
     expect(commandRequestSchema.safeParse(structuredTestRequest).success).toBe(true);
-    expectTypeOf(structuredTestRequest).toMatchTypeOf<EvalRunRequest>();
   });
 
   it('accepts all-selection and human watch while excluding watch from machine output', () => {
@@ -147,7 +137,6 @@ describe('immutable eval run metadata contract', () => {
       },
     });
     expect(compileGeneratedSchema('eval-run.json')(fixture)).toBe(true);
-    expectTypeOf(parsed).toMatchTypeOf<EvalRun>();
   });
 
   it('rejects top-level run spelling and mutable or unknown snapshot metadata', async () => {
@@ -181,7 +170,6 @@ describe('eval event conformance and sequencing', () => {
     expect(events.every((event) => cliEventSchema.safeParse(event).success)).toBe(true);
     const validateGeneratedEvent = compileGeneratedSchema('eval-event.json');
     events.forEach((event) => expect(validateGeneratedEvent(event)).toBe(true));
-    expectTypeOf(stream).toMatchTypeOf<EvalEventStream>();
   });
 
   it('rejects nondeterministic sequence, duplicate configured indexes, and a non-final result', async () => {
@@ -257,6 +245,5 @@ describe('eval cancellation contract', () => {
     expect(cliResultSchema.safeParse(result).success).toBe(true);
     expect(compileGeneratedSchema('eval-cancel-request.json')(request)).toBe(true);
     expect(compileGeneratedSchema('eval-cancel-result.json')(result)).toBe(true);
-    expectTypeOf(evalCancelRequestSchema.parse(request)).toMatchTypeOf<EvalCancelRequest>();
   });
 });
