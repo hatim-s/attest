@@ -6,6 +6,7 @@ import {
   rawExcerptSchema,
   traceSchema,
   warningCodeSchema,
+  type RawExcerpt,
 } from '@attest/contracts';
 import { z } from 'zod';
 
@@ -28,22 +29,33 @@ const warningSchema = z.object({
   code: warningCodeSchema,
 });
 
-const attemptBase = {
-  diagnostics: invocationDiagnosticsSchema,
-  durationMs: durationSchema,
-  rawExcerpt: rawExcerptSchema.optional(),
-  warnings: z.array(warningSchema),
+const attemptSchemaFor = (rawExcerpt: z.ZodType<RawExcerpt>) => {
+  const attemptBase = {
+    diagnostics: invocationDiagnosticsSchema,
+    durationMs: durationSchema,
+    rawExcerpt: rawExcerpt.optional(),
+    warnings: z.array(warningSchema),
+  };
+
+  return z.discriminatedUnion('status', [
+    z.strictObject({ ...attemptBase, status: z.literal('ok') }),
+    z.strictObject({
+      ...attemptBase,
+      status: z.literal('invocation_error'),
+      errorCode: invocationErrorCodeSchema,
+      errorMessage: z.string(),
+    }),
+  ]);
 };
 
-const storedAttemptSchema = z.discriminatedUnion('status', [
-  z.strictObject({ ...attemptBase, status: z.literal('ok') }),
-  z.strictObject({
-    ...attemptBase,
-    status: z.literal('invocation_error'),
-    errorCode: invocationErrorCodeSchema,
-    errorMessage: z.string(),
-  }),
-]);
+const storedAttemptSchema = attemptSchemaFor(rawExcerptSchema);
+
+// Read side only. Before "fix(executor): hash the received body on mapped HTTP cap overflow"
+// (5f8a023), mapped HTTP cap overflow stored `truncated: true` with no sha256, and the digest of
+// the dropped bytes cannot be rebuilt from the prefix. Dropping only the truncation refine admits
+// that one shape so those runs stay readable; writes keep the strict schema. Remove this once the
+// alpha databases written before that commit are gone.
+const recordedAttemptSchema = attemptSchemaFor(z.strictObject(rawExcerptSchema.shape));
 
 const executionBase = {
   caseId: nonemptyStringSchema,
@@ -148,6 +160,7 @@ const caseRecordFields = {
   rowId: nonemptyStringSchema,
   runId: nonemptyStringSchema,
   inputHash: nonemptyStringSchema,
+  attempts: z.array(recordedAttemptSchema),
   metrics: z.array(storedMetricEvaluationSchema),
 };
 

@@ -1,7 +1,7 @@
 import { AGENT_PROTOCOL, type RawExcerpt } from '@attest/contracts';
 import { describe, expect, it } from 'vitest';
 
-import { parseStoredCaseExecution } from '../record-validation.js';
+import { parseCaseRecord, parseStoredCaseExecution } from '../record-validation.js';
 
 const executionWithExcerpt = (rawExcerpt: RawExcerpt) => ({
   caseId: 'capital',
@@ -37,5 +37,21 @@ describe('stored attempt excerpts', () => {
         executionWithExcerpt({ text: 'Par', truncated: true, sha256: 'a'.repeat(64) }),
       ).ok,
     ).toBe(true);
+  });
+
+  it('reads a stored case written before cap-overflow excerpts carried a sha256', () => {
+    const historical = executionWithExcerpt({ text: 'Par', truncated: true });
+    const stored = { ...historical, rowId: 'row', runId: 'run', inputHash: 'hash', metrics: [] };
+
+    expect(parseCaseRecord(stored).ok).toBe(true);
+    expect(parseStoredCaseExecution(historical).ok).toBe(false);
+    expect(
+      parseCaseRecord({
+        ...stored,
+        attempts: [
+          { ...stored.attempts[0], rawExcerpt: { text: 'Par', truncated: true, sha256: 'A' } },
+        ],
+      }).ok,
+    ).toBe(false);
   });
 });
