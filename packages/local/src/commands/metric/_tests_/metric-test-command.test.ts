@@ -1,4 +1,5 @@
-import { access, mkdtemp, rm, symlink } from 'node:fs/promises';
+import { renameSync, symlinkSync } from 'node:fs';
+import { access, mkdir, mkdtemp, rm, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -175,6 +176,46 @@ describe('runMetricTestCommand', () => {
       code: 'project_invalid',
       message: 'Metric cwd is not a safe project directory.',
     });
+  });
+
+  it('rejects a cwd swapped for an outside symlink while metric secrets resolve', async () => {
+    const root = await createProject();
+    const outside = await temporaryDirectory('attest-metric-cwd-race-');
+    const cwd = join(root, 'metric-cwd');
+    await mkdir(cwd);
+    await addMetric(
+      root,
+      execMetric('race', {
+        argv: [process.execPath, '-e', "require('node:fs').writeFileSync('spawned.txt', 'x')"],
+        cwd: 'metric-cwd',
+        env: { RACE: { from_env: 'ATTEST_METRIC_RACE_SECRET' } },
+      }),
+    );
+
+    // Swaps the cwd for an outside symlink at the moment the metric secret is read, which is
+    // after the cwd was checked and before the metric process spawns.
+    const environment = process.env;
+    let swapped = false;
+    process.env = new Proxy(environment, {
+      get: (target, key) => {
+        if (key !== 'ATTEST_METRIC_RACE_SECRET') return target[String(key)];
+
+        if (!swapped) {
+          swapped = true;
+          renameSync(cwd, `${cwd}-saved`);
+          symlinkSync(outside, cwd);
+        }
+
+        return 'race-secret';
+      },
+    });
+    onTestFinished(() => {
+      process.env = environment;
+    });
+
+    await expect(testMetric(root, 'race')).rejects.toMatchObject({ code: 'project_invalid' });
+    expect(swapped).toBe(true);
+    await expect(access(join(outside, 'spawned.txt'))).rejects.toThrow();
   });
 
   it('validates judge and HTTP fixtures without calling a provider or the network', async () => {

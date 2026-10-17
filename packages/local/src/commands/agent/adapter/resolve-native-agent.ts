@@ -323,4 +323,4 @@ const resolveNativeAgent = async (
   }
 };
 
-export { createBaseEnvironment, resolveNativeAgent, resolveProcessEnvironment };
+export { createBaseEnvironment, resolveHttpSecrets, resolveNativeAgent, resolveProcessEnvironment };
