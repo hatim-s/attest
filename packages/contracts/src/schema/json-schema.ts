@@ -74,7 +74,7 @@ const CONTRACT_JSON_SCHEMAS = new Map<string, ContractJsonSchemaDefinition>([
     {
       schema: portableProjectBundleSchema,
       invariants: runtimeOnly(
-        'project resource references, duplicate identities, and manifest parity follow projectResourcesSchema; source file parity and hashes require resolvePortableProject',
+        `files contain no NUL and use at most 1 MiB per file and 5 MiB total decoded UTF-8 bytes; serialized bundle UTF-8 JSON fits the 5 MiB upload ceiling, while the host also counts the revision envelope; portable transport URLs exclude credentials and query strings, credential fields and process environments use environment references; project resource references, duplicate identities, and manifest parity follow projectResourcesSchema; ${agentResourceRules}; ${assertionRules}; source file parity and hashes require resolvePortableProject`,
       ),
     },
   ],

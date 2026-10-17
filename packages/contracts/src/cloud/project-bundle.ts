@@ -1,7 +1,22 @@
 import { z } from 'zod';
 
+import { refinePortableCredentials } from './portable-credentials.js';
+
 import { projectResourcesSchema } from '../project/resources-snapshot.js';
 import { evalRunRequestSchema } from '../eval/run.js';
+
+const PORTABLE_MAX_FILES = 100;
+
+const PORTABLE_MAX_FILE_BYTES = 1_048_576;
+
+const PORTABLE_MAX_TOTAL_FILE_BYTES = 5_242_880;
+
+/**
+ * The 5 MiB upload ceiling counts serialized UTF-8 JSON, including duplicated resources and
+ * escaping. Keep this stricter limit as well as the decoded file limits. Local also counts
+ * the revision envelope, so a bundle at this ceiling may still exceed the request limit.
+ */
+const PORTABLE_MAX_UPLOAD_BYTES = 5_242_880;
 
 const portableFilePathSchema = z
   .string()
@@ -16,19 +31,32 @@ const portableProjectBundleSchema = z
   .strictObject({
     schema: z.literal('attest.project-bundle.v1'),
     resources: projectResourcesSchema,
-    files: z.record(
-      portableFilePathSchema,
-      z
-        .string()
-        .refine(
-          (value) =>
-            !value.includes('\0') && new TextEncoder().encode(value).byteLength <= 1_048_576,
-          'must be UTF-8 text without NUL bytes and at most 1 MiB',
-        ),
-    ),
+    files: z
+      .record(
+        portableFilePathSchema,
+        z
+          .string()
+          .refine(
+            (value) =>
+              !value.includes('\0') &&
+              new TextEncoder().encode(value).byteLength <= PORTABLE_MAX_FILE_BYTES,
+            'must be UTF-8 text without NUL bytes and at most 1 MiB',
+          ),
+      )
+      .meta({ maxProperties: PORTABLE_MAX_FILES }),
   })
-  .superRefine(({ files }, context) => {
-    if (Object.keys(files).length > 100)
+  .superRefine((bundle, context) => {
+    const { files, resources } = bundle;
+    refinePortableCredentials(resources, context);
+
+    if (new TextEncoder().encode(JSON.stringify(bundle)).byteLength > PORTABLE_MAX_UPLOAD_BYTES)
+      context.addIssue({
+        code: 'custom',
+        path: [],
+        message: 'serialized bundle must fit the 5 MiB upload limit',
+      });
+
+    if (Object.keys(files).length > PORTABLE_MAX_FILES)
       context.addIssue({
         code: 'custom',
         path: ['files'],
@@ -39,7 +67,7 @@ const portableProjectBundleSchema = z
       Object.values(files).reduce(
         (total, value) => total + new TextEncoder().encode(value).byteLength,
         0,
-      ) > 5_242_880
+      ) > PORTABLE_MAX_TOTAL_FILE_BYTES
     )
       context.addIssue({
         code: 'custom',
@@ -65,6 +93,10 @@ type CloudRunRequest = z.infer<typeof cloudRunRequestSchema>;
 type CloudQueueMessage = z.infer<typeof cloudQueueMessageSchema>;
 
 export {
+  PORTABLE_MAX_FILES,
+  PORTABLE_MAX_FILE_BYTES,
+  PORTABLE_MAX_TOTAL_FILE_BYTES,
+  PORTABLE_MAX_UPLOAD_BYTES,
   portableProjectBundleSchema,
   cloudRunRequestSchema,
   cloudQueueMessageSchema,
