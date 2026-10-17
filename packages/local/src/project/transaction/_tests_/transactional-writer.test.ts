@@ -22,6 +22,7 @@ import {
   applyProjectMutation,
   createFileChanges,
   publishPreparedTransaction,
+  runPreparedTransaction,
 } from '../transactional-writer.js';
 
 const temporaryDirectories: string[] = [];
@@ -162,6 +163,38 @@ describe('transactional project writer', () => {
     expect(metricBytes).toMatch(/^\{\n  "definition":/u);
     expect(agentBytes.endsWith('\n')).toBe(true);
     expect(metricBytes.endsWith('\n')).toBe(true);
+  });
+
+  it('rolls back every published path when a later publish step fails', async () => {
+    const root = await createProject();
+    const loaded = await loadProject({ project: root });
+    const candidate = candidateFromLoadedProject(loaded);
+    candidate.agents[0]!.name = 'Will roll back';
+    candidate.metrics[0]!.name = 'Will also roll back';
+    const changes = createFileChanges(loaded, prepareProjectCandidate(candidate));
+    const lock = await acquireProjectLock(root);
+
+    try {
+      const prepared = await prepareTransaction(root, changes);
+      const [first, second] = prepared.journal.entries;
+
+      if (first?.type !== 'write' || second?.type !== 'write') {
+        throw new Error('Expected two staged writes first.');
+      }
+
+      const firstPath = join(root, first.path);
+      const firstBytes = await readFile(firstPath, 'utf8');
+      // A missing staged file makes the second rename fail after the first entry is published.
+      await rm(join(prepared.directory, second.staged_path));
+
+      await expect(
+        runPreparedTransaction({ root, prepared, verify: async () => {} }),
+      ).rejects.toMatchObject({ code: 'project_transaction_failed' });
+      expect(await readFile(firstPath, 'utf8')).toBe(firstBytes);
+      expect((await loadProject({ project: root })).projectHash).toBe(loaded.projectHash);
+    } finally {
+      await releaseProjectLock(lock);
+    }
   });
 
   it('rolls an interrupted pre-manifest publish back from its recovery journal', async () => {
