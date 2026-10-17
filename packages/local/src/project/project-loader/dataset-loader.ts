@@ -30,12 +30,10 @@ const loadDataset = async (
   const loadedData = await readProjectSource(root, entry.data_path);
   const diagnostics = [...metadata.diagnostics, ...loadedData.diagnostics];
   const cases: TestCase[] = [];
-  const caseLines: number[] = [];
   const canonicalRecords: JsonValue[] = [];
 
   if (loadedData.text === undefined) {
     return {
-      caseLines,
       diagnostics,
       metadataHash: metadata.hash,
       source: { data: entry.data_path, metadata: entry.metadata_path },
@@ -61,7 +59,6 @@ const loadDataset = async (
     }
 
     cases.push(validated.data);
-    caseLines.push(lineNumber);
   });
 
   const dataHash = hashCanonicalJsonLines(canonicalRecords);
@@ -75,7 +72,6 @@ const loadDataset = async (
   }
 
   return {
-    caseLines,
     dataHash,
     diagnostics,
     metadataHash: metadata.hash,

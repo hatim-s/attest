@@ -108,7 +108,6 @@ const loadJsonResource = async <Value>(
   source: string,
   expectedHash: string | undefined,
   schema: z.ZodType<Value>,
-  hashValue: (value: JsonValue) => string = contentHash,
 ): Promise<LoadedJsonResource<Value>> => {
   const loaded = await readProjectSource(root, source);
 
@@ -117,7 +116,7 @@ const loadJsonResource = async <Value>(
 
   if (parsed.value === undefined) return { diagnostics: parsed.diagnostics, source };
 
-  const hash = hashValue(parsed.value);
+  const hash = contentHash(parsed.value);
   const diagnostics = [...parsed.diagnostics];
 
   if (expectedHash !== undefined && expectedHash !== hash) {
@@ -133,10 +132,10 @@ const loadJsonResource = async <Value>(
   if (!validated.success) {
     diagnostics.push(...schemaDiagnostics(source, validated.error.issues));
 
-    return { diagnostics, hash, rawValue: parsed.value, source };
+    return { diagnostics, hash, source };
   }
 
-  return { diagnostics, hash, rawValue: parsed.value, source, value: validated.data };
+  return { diagnostics, hash, source, value: validated.data };
 };
 
 export { loadJsonResource, parseJson, readProjectSource, schemaDiagnostics };

@@ -238,7 +238,6 @@ export {
   loginCloud,
   logoutCloud,
   authenticatedCloudClient,
-  cloudProjectPath,
   runCloud,
   cloudEvents,
   type LoginNotice,

@@ -104,7 +104,7 @@ const createMissingDirectories = async (
   }
 };
 
-/** Publishes staged paths by atomic rename, recording progress after every file. */
+/** Publishes staged paths by atomic rename with the manifest commit point last. */
 const publishPreparedTransaction = async (
   root: string,
   prepared: PreparedTransaction,
@@ -148,8 +148,6 @@ const publishPreparedTransaction = async (
     }
 
     await syncPath(dirname(destination));
-    prepared.journal.published_count = index + 1;
-    await writeTransactionJournal(prepared);
     await observer?.({ entry, index, transactionId: prepared.journal.transaction_id });
   }
 };

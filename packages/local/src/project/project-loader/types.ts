@@ -1,4 +1,4 @@
-import type { DatasetResource, ProjectResources, TestCase, JsonValue } from '@attest/contracts';
+import type { DatasetResource, ProjectResources, TestCase } from '@attest/contracts';
 
 import type { ProjectDiagnostic } from '../project-errors.js';
 
@@ -14,13 +14,11 @@ type LoadedProject = ProjectResources & {
 type LoadedJsonResource<Value> = {
   diagnostics: ProjectDiagnostic[];
   hash?: string;
-  rawValue?: JsonValue;
   source: string;
   value?: Value;
 };
 
 type LoadedDatasetResource = {
-  caseLines: number[];
   dataHash?: string;
   diagnostics: ProjectDiagnostic[];
   metadataHash?: string;
