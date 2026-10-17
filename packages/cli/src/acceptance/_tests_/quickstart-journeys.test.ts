@@ -1,8 +1,7 @@
 import { spawn } from 'node:child_process';
-import { createHash } from 'node:crypto';
-import { access, cp, mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
+import { access, cp, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join, relative, sep } from 'node:path';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import {
@@ -16,82 +15,20 @@ import {
 import { describe, expect, inject, it, onTestFinished } from 'vitest';
 
 import { runPackedCommand, type PackedCommandResult } from './packed-cli.js';
-
-type CommandExpectation = {
-  argv: string[];
-  artifacts_absent?: string[];
-  artifacts_present?: string[];
-  capture_run_id?: boolean;
-  catalog_error_code?: string;
-  command?: string;
-  error_code?: string;
-  exit_code: number;
-  help_arguments?: string[];
-  help_usage?: string;
-  id: string;
-  no_write?: boolean;
-  output: 'human' | 'json' | 'jsonl';
-  readiness_probe?: 'view';
-  required_error_fields?: string[];
-  required_stdout?: string[];
-  result_schema?: string;
-};
-
-type Actor = {
-  commands: CommandExpectation[];
-  id: string;
-};
-
-type Journeys = {
-  actors: Actor[];
-  fixture_files: string[];
-  per_command_timeout_ms: number;
-};
+import {
+  quickstartJourneys,
+  type CommandExpectation,
+  type Journeys,
+} from './fixtures/quickstart-journeys.js';
+import { snapshotTree, type TreeSnapshot } from './snapshot-tree.js';
 
 type CommandResult = PackedCommandResult & {
   readiness?: { body: string; status: number; url: string };
 };
 
-const JOURNEYS_PATH = fileURLToPath(
-  new URL('./fixtures/quickstart-journeys.json', import.meta.url),
-);
-
 const FIXTURE_ROOT = fileURLToPath(new URL('./fixtures/quickstart', import.meta.url));
 
 const RUN_ID_PATTERN = /\b[0-9A-HJKMNP-TV-Z]{26}\b/u;
-
-// SAFETY: This checked-in fixture owns the Journeys contract consumed by the acceptance suite.
-const readJourneys = async (): Promise<Journeys> =>
-  JSON.parse(await readFile(JOURNEYS_PATH, 'utf8')) as Journeys;
-
-/** Hashes every file and records every directory, so no-write steps catch empty residue too. */
-const snapshotFiles = async (root: string): Promise<Map<string, string>> => {
-  const snapshot = new Map<string, string>();
-
-  const visit = async (directory: string): Promise<void> => {
-    const entries = await readdir(directory, { withFileTypes: true });
-
-    for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name))) {
-      const absolutePath = join(directory, entry.name);
-      const relativePath = relative(root, absolutePath).split(sep).join('/');
-
-      if (entry.isDirectory()) {
-        snapshot.set(`${relativePath}/`, '<directory>');
-        await visit(absolutePath);
-      } else {
-        const hash = createHash('sha256')
-          .update(await readFile(absolutePath))
-          .digest('hex');
-
-        snapshot.set(relativePath, hash);
-      }
-    }
-  };
-
-  await visit(root);
-
-  return snapshot;
-};
 
 /** Starts `attest view`, fetches the dashboard once it is ready, then stops it with SIGINT. */
 const runViewReadinessProbe = async (
@@ -196,7 +133,7 @@ const assertCommand = async (
   expectation: CommandExpectation,
   result: CommandResult,
   root: string,
-  before: Map<string, string>,
+  before: TreeSnapshot,
   priorRunId: string | undefined,
 ): Promise<string | undefined> => {
   const label = expectation.id;
@@ -262,7 +199,7 @@ const assertCommand = async (
     expect(result.readiness?.body, label).toContain('<!doctype html>');
   }
 
-  if (expectation.no_write === true) expect(await snapshotFiles(root), label).toEqual(before);
+  if (expectation.no_write === true) expect(await snapshotTree(root), label).toEqual(before);
 
   for (const path of expectation.artifacts_present ?? []) {
     const artifact = join(root, materialize(path, runId));
@@ -288,21 +225,21 @@ const assertCommand = async (
 /** Runs one actor's commands in a fresh copy of the quickstart fixture. */
 const runJourney = async (actorId: string): Promise<void> => {
   const { cliPath } = inject('packedCli');
-  const journeys = await readJourneys();
+  const journeys: Journeys = quickstartJourneys;
   const actor = journeys.actors.find(({ id }) => id === actorId);
 
   if (actor === undefined) throw new Error(`Acceptance actor ${actorId} is missing.`);
   const root = await mkdtemp(join(tmpdir(), `attest-quickstart-${actor.id}-`));
   onTestFinished(() => rm(root, { force: true, recursive: true }));
   await cp(FIXTURE_ROOT, root, { recursive: true });
-  const fixtureSnapshot = await snapshotFiles(root);
+  const fixtureSnapshot = await snapshotTree(root);
   expect([...fixtureSnapshot.keys()].sort()).toEqual([...journeys.fixture_files].sort());
 
   let runId: string | undefined;
 
   for (const command of actor.commands) {
     const argv = command.argv.map((argument) => materialize(argument, runId));
-    const before = await snapshotFiles(root);
+    const before = await snapshotTree(root);
     const timeout = journeys.per_command_timeout_ms;
 
     const result =
@@ -314,7 +251,7 @@ const runJourney = async (actorId: string): Promise<void> => {
   }
 
   // The fixture files stand for the user's own assets; the CLI must never rewrite them.
-  const finalSnapshot = await snapshotFiles(root);
+  const finalSnapshot = await snapshotTree(root);
 
   for (const [path, hash] of fixtureSnapshot) expect(finalSnapshot.get(path), path).toBe(hash);
   expect([...finalSnapshot.keys()].some((path) => /\.ya?ml$/u.test(path))).toBe(false);

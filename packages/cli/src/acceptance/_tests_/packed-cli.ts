@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 
 import type { TestProject } from 'vitest/node';
 
+import { parsePackageManifest } from './package-manifest.js';
 import { materializePackedRuntime } from './packed-runtime.js';
 
 type PackedCli = {
@@ -62,8 +63,7 @@ const packPackage = async (
     { encoding: 'utf8', timeout: 30_000 },
   );
 
-  // SAFETY: bun packs the checked-in package manifest, whose package name is required by each workspace.
-  const { name } = JSON.parse(manifest) as { name: string };
+  const { name } = parsePackageManifest(manifest);
 
   return [name, archivePath];
 };

@@ -3,13 +3,7 @@ import { cp, mkdir, readFile, realpath, symlink } from 'node:fs/promises';
 import { basename, dirname, join, relative } from 'node:path';
 import { promisify } from 'node:util';
 
-type PackageManifest = {
-  name: string;
-  dependencies?: Record<string, string>;
-  optionalDependencies?: Record<string, string>;
-  peerDependencies?: Record<string, string>;
-  peerDependenciesMeta?: Record<string, { optional?: boolean }>;
-};
+import { parsePackageManifest } from './package-manifest.js';
 
 type PackedWorkspace = { archive: string; source: string };
 
@@ -66,10 +60,9 @@ const materializePackedRuntime = async (
   for (let index = 0; index < pending.length; index += 1) {
     const { source, destination } = pending[index]!;
 
-    // SAFETY: The packer copied the checked-in package manifest before traversing its dependency names.
-    const manifest = JSON.parse(
+    const manifest = parsePackageManifest(
       await readFile(join(destination, 'package.json'), 'utf8'),
-    ) as PackageManifest;
+    );
 
     const dependencyNames = new Set([
       ...Object.keys(manifest.dependencies ?? {}),

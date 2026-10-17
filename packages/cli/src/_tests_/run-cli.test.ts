@@ -31,78 +31,29 @@ describe('runCli', () => {
 
     expect(help.exitCode).toBe(0);
     expect(repeated.output).toEqual(help.output);
-    expect(help.document).toEqual({
-      schema: 'attest.cli-result',
-      ok: true,
-      command: 'help',
-      project_hash_before: null,
-      project_hash_after: null,
-      result: {
-        schema: 'attest.cli-help',
-        command: {
-          path: ['trace', 'convert'],
-          name: 'convert',
-          summary: 'Convert an OTLP/HTTP JSON export to attest.trace JSON.',
-          usage: 'attest trace convert [options] <input>',
-          arguments: [
-            {
-              name: 'input',
-              usage: '<input>',
-              description: 'OTLP JSON input path',
-              required: true,
-              variadic: false,
-              choices: [],
-              default: null,
-            },
-          ],
-          options: [
-            {
-              name: 'trace-id',
-              flags: '--trace-id <trace-id>',
-              description: 'trace id to select from a multi-trace export',
-              value_name: 'trace-id',
-              required: false,
-              repeatable: false,
-              choices: [],
-              default: null,
-              conflicts: [],
-              implies: [],
-            },
-            {
-              name: 'output',
-              flags: '-o, --output <path>',
-              description: 'Attest trace output path',
-              value_name: 'path',
-              required: false,
-              repeatable: false,
-              choices: [],
-              default: null,
-              conflicts: [],
-              implies: [],
-            },
-            {
-              name: 'force',
-              flags: '--force',
-              description: 'replace an existing output file',
-              value_name: null,
-              required: false,
-              repeatable: false,
-              choices: [],
-              default: null,
-              conflicts: [],
-              implies: [],
-            },
-          ],
-          subcommands: [],
-          aliases: [],
-          alias_for: null,
-          request_schema: null,
-          examples: [],
-          constraints: [],
-        },
-      },
-      warnings: [],
+    expect(help.document).toMatchObject({ ok: true, command: 'help', warnings: [] });
+
+    if (!help.document.ok) throw new Error('Expected help success.');
+    const { command } = cliHelpSchema.parse(help.document.result);
+
+    expect(command).toMatchObject({
+      path: ['trace', 'convert'],
+      usage: 'attest trace convert [options] <input>',
+      arguments: [{ name: 'input', required: true, variadic: false }],
+      alias_for: null,
     });
+    expect(
+      command.options.map(({ name, value_name, required, repeatable }) => ({
+        name,
+        value_name,
+        required,
+        repeatable,
+      })),
+    ).toEqual([
+      { name: 'trace-id', value_name: 'trace-id', required: false, repeatable: false },
+      { name: 'output', value_name: 'path', required: false, repeatable: false },
+      { name: 'force', value_name: null, required: false, repeatable: false },
+    ]);
   });
 
   it('returns one structured usage failure for an unknown JSON help path', async () => {

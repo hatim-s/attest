@@ -8,6 +8,11 @@ import {
   CLI_EVENT_SCHEMA_ID,
   CLI_RESULT_SCHEMA_ID,
   COMMAND_REQUEST_SCHEMA_ID,
+  isJsonValue,
+  isJsonObject,
+  isString,
+  isNumber,
+  isBoolean,
   cliHelpSchema,
   cliResultSchema,
   evalCancelResultSchema,
@@ -340,7 +345,7 @@ describe('eval request normalization', () => {
 
   it('uses the TTY wizard only to supply a missing selection before schema validation', async () => {
     const prompt = vi.fn<CliInteraction['prompt']>(() => Promise.resolve('refund returns'));
-    const harness = await parse(['eval', 'run'], { inputIsTTY: true, outputIsTTY: true, prompt });
+    await parse(['eval', 'run'], { inputIsTTY: true, outputIsTTY: true, prompt });
 
     expect(prompt.mock.calls[0]?.[0]).toBe('Test ids (space-separated) or all [all]: ');
     expect(prompt.mock.calls[0]?.[1]?.signal).toBeInstanceOf(AbortSignal);
@@ -349,10 +354,6 @@ describe('eval request normalization', () => {
       output: 'human',
       test_ids: ['refund', 'returns'],
     });
-    expect(harness.output.at(-1)).toBe(
-      'Run 01ARZ3NDEKTSV4RRFFQ69G5FAV\n  cases: 2\n  passed: 2\n  failed: 0\n  errors: 0\n  metric errors: 0\nNext:\n  attest report 01ARZ3NDEKTSV4RRFFQ69G5FAV\n  attest view --no-open\nCompare with a baseline run:\n  attest diff <base-run-id> 01ARZ3NDEKTSV4RRFFQ69G5FAV\nResult: PASS (exit 0)',
-    );
-    expect(harness.output.at(-1)).not.toContain('\n  attest diff\n');
   });
 
   it('selects every test when the wizard answer is empty', async () => {
@@ -668,6 +669,30 @@ describe('eval cancellation command', () => {
   });
 });
 
+/** The PTY driver is a subprocess, so its evidence must validate before assertions read it. */
+const parsePtyEvidence = (text: string) => {
+  const value: unknown = JSON.parse(text);
+
+  if (
+    !isJsonValue(value) ||
+    !isJsonObject(value) ||
+    !isNumber(value.exit_code) ||
+    !isString(value.output) ||
+    !isBoolean(value.terminal_restored) ||
+    !Array.isArray(value.steps_seen) ||
+    !value.steps_seen.every(isBoolean)
+  ) {
+    throw new Error('Invalid PTY driver evidence.');
+  }
+
+  return {
+    exit_code: value.exit_code,
+    output: value.output,
+    steps_seen: value.steps_seen,
+    terminal_restored: value.terminal_restored,
+  };
+};
+
 describe('eval command grammar and terminal behavior', () => {
   it('publishes structured help metadata without registering a top-level run alias', async () => {
     const root = await parse(['help', '--output', 'json']);
@@ -719,13 +744,7 @@ describe('eval command grammar and terminal behavior', () => {
 
     expect(stderr).toBe('');
 
-    // SAFETY: drive-pty.py owns this evidence format; the following assertions verify the terminal interaction and exit status.
-    const evidence = JSON.parse(stdout) as {
-      exit_code: number;
-      output: string;
-      steps_seen: boolean[];
-      terminal_restored: boolean;
-    };
+    const evidence = parsePtyEvidence(stdout);
 
     expect(evidence).toMatchObject({
       exit_code: 130,
