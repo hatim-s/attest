@@ -1,0 +1,59 @@
+{
+  "name": "@attest/api",
+  "version": "0.1.0-alpha.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./contract": {
+      "types": "./dist/contract/index.d.ts",
+      "import": "./dist/contract/index.js"
+    },
+    "./client": {
+      "types": "./dist/client/index.d.ts",
+      "import": "./dist/client/index.js"
+    }
+  },
+  "dependencies": {
+    "@attest/core": "workspace:*",
+    "hono": "^4.13.0",
+    "zod": "^4"
+  },
+  "scripts": {
+    "build": "tsc --build tsconfig.build.json",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "prepublishOnly": "node ../../scripts/block-source-publish.mjs"
+  },
+  "devDependencies": {
+    "vitest": "^3"
+  },
+  "files": [
+    "dist",
+    "LICENSE",
+    "NOTICE"
+  ],
+  "description": "Read API contract, server app and typed client for Attest run data.",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hatim-s/attest.git",
+    "directory": "packages/api"
+  },
+  "homepage": "https://github.com/hatim-s/attest#readme",
+  "bugs": {
+    "url": "https://github.com/hatim-s/attest/issues"
+  },
+  "publishConfig": {
+    "access": "public",
+    "tag": "alpha"
+  },
+  "engines": {
+    "node": ">=22.15.0",
+    "bun": ">=1.4"
+  }
+}

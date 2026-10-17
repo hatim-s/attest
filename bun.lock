@@ -22,6 +22,18 @@
         "fast-check": "^4",
       },
     },
+    "packages/api": {
+      "name": "@attest/api",
+      "version": "0.1.0-alpha.0",
+      "dependencies": {
+        "@attest/core": "workspace:*",
+        "hono": "^4.13.0",
+        "zod": "^4",
+      },
+      "devDependencies": {
+        "vitest": "^3",
+      },
+    },
     "packages/cli": {
       "name": "@attest/cli",
       "version": "0.1.0-alpha.0",
@@ -148,6 +160,8 @@
     "@ag-ui/core": ["@ag-ui/core@0.1.1-canary.beta.0", "", { "peerDependencies": { "zod": "^3.25.18 || ^4.0.0" }, "optionalPeers": ["zod"] }, "sha512-zcP3RH5p3HJTZ0kyQxNOL1blnVFTDpaShitR7UMS/thwFdl48V6CAG+WQBcYEu/dfa8mKonRez88N0Ok+nEI+w=="],
 
     "@anthropic-ai/sdk": ["@anthropic-ai/sdk@0.97.1", "", { "dependencies": { "json-schema-to-ts": "^3.1.1", "standardwebhooks": "^1.0.0" }, "peerDependencies": { "zod": "^3.25.0 || ^4.0.0" }, "optionalPeers": ["zod"], "bin": { "anthropic-ai-sdk": "bin/cli" } }, "sha512-wOf7AUeJPitcVpvKO4UMu63mWH5SaVipkGd7OOQJt/G6VYGlV8D2Gp9dLxOrttDJh/9gqPqdaBwDGcBevumeAg=="],
+
+    "@attest/api": ["@attest/api@workspace:packages/api"],
 
     "@attest/cli": ["@attest/cli@workspace:packages/cli"],
 

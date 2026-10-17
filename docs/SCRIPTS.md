@@ -19,19 +19,20 @@ Run workspace commands from the repository root. To run one package script, use
 
 ## Application packages
 
-| Script            | Packages                                       | Behavior                                                                                                                                   |
-| ----------------- | ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| `build`           | contracts, core, executor, runtime, local, cli | Compiles production artifacts into `dist`, excluding tests. Core, runtime, and local use `tsc --build` to build referenced packages first. |
-| `typecheck`       | contracts, core, executor, runtime, local, cli | Checks source and test types without emitting files.                                                                                       |
-| `test`            | contracts                                      | Runs protocol and schema tests.                                                                                                            |
-| `test`            | core                                           | Runs domain comparison, import, trace, and record tests.                                                                                   |
-| `test`            | executor                                       | Runs invocation, transport, and process-cleanup tests with one worker.                                                                     |
-| `test:node`       | executor                                       | Runs compiled executor acceptance checks on Node. Build executor first.                                                                    |
-| `test:bun`        | executor                                       | Runs the same compiled executor checks on Bun. Build executor first.                                                                       |
-| `test`            | runtime                                        | Runs scheduling, lifecycle hooks, metric, and cancellation tests with one worker. Executor owns isolation providers.                       |
-| `test`            | local                                          | Runs project, transaction, SQLite, application, and local server tests with one worker.                                                    |
-| `test`            | cli                                            | Runs terminal command tests with one worker, excluding `src/acceptance/**`.                                                                |
-| `test:acceptance` | cli                                            | Runs packed-install journeys separately from package `test`.                                                                               |
+| Script            | Packages                                            | Behavior                                                                                                                                        |
+| ----------------- | --------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `build`           | contracts, core, api, executor, runtime, local, cli | Compiles production artifacts into `dist`, excluding tests. Core, api, runtime, and local use `tsc --build` to build referenced packages first. |
+| `typecheck`       | contracts, core, api, executor, runtime, local, cli | Checks source and test types without emitting files.                                                                                            |
+| `test`            | contracts                                           | Runs protocol and schema tests.                                                                                                                 |
+| `test`            | core                                                | Runs domain comparison, import, trace, and record tests.                                                                                        |
+| `test`            | api                                                 | Runs API contract, server, client, and dashboard bootstrap tests.                                                                               |
+| `test`            | executor                                            | Runs invocation, transport, and process-cleanup tests with one worker.                                                                          |
+| `test:node`       | executor                                            | Runs compiled executor acceptance checks on Node. Build executor first.                                                                         |
+| `test:bun`        | executor                                            | Runs the same compiled executor checks on Bun. Build executor first.                                                                            |
+| `test`            | runtime                                             | Runs scheduling, lifecycle hooks, metric, and cancellation tests with one worker. Executor owns isolation providers.                            |
+| `test`            | local                                               | Runs project, transaction, SQLite, application, and local server tests with one worker.                                                         |
+| `test`            | cli                                                 | Runs terminal command tests with one worker, excluding `src/acceptance/**`.                                                                     |
+| `test:acceptance` | cli                                                 | Runs packed-install journeys separately from package `test`.                                                                                    |
 
 ## Supporting packages
 
@@ -57,10 +58,10 @@ Runtime also provides `test:node` and `test:bun`. They run the same compiled eva
 
 ## Release scripts
 
-| Script              | Package                | Behavior                                                                                                                                     |
-| ------------------- | ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| `release:pack`      | root                   | Builds packages, regenerates schemas, and packs eight alpha archives with checksums into `dist/release/`.                                    |
-| `release:check`     | root                   | Packs and installs the archives in an isolated npm project, then checks public imports, evaluation, reports, SQLite, schemas, and dashboard. |
-| `typecheck:scripts` | root                   | Checks release packaging, consumer verification, and web build/config inputs with Node types.                                                |
-| `test:fuzz`         | root                   | Builds contracts and runs uncached conformance parser fuzzing.                                                                               |
-| `prepublishOnly`    | eight release packages | Rejects workspace publication. Publish the reviewed archives instead.                                                                        |
+| Script              | Package               | Behavior                                                                                                                                     |
+| ------------------- | --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| `release:pack`      | root                  | Builds packages, regenerates schemas, and packs nine alpha archives with checksums into `dist/release/`.                                     |
+| `release:check`     | root                  | Packs and installs the archives in an isolated npm project, then checks public imports, evaluation, reports, SQLite, schemas, and dashboard. |
+| `typecheck:scripts` | root                  | Checks release packaging, consumer verification, and web build/config inputs with Node types.                                                |
+| `test:fuzz`         | root                  | Builds contracts and runs uncached conformance parser fuzzing.                                                                               |
+| `prepublishOnly`    | nine release packages | Rejects workspace publication. Publish the reviewed archives instead.                                                                        |

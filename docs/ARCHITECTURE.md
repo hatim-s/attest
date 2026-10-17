@@ -8,6 +8,7 @@ graph TD
   Local --> Runtime[runtime]
   Local --> Executor
   Local --> Core[core]
+  Api[api] --> Core
   Local --> Web[web embedded dashboard]
   Runtime --> Executor[executor]
   Executor --> Contracts
@@ -49,6 +50,10 @@ Application errors carry typed codes and context. The CLI owns terminal renderin
 Local exposes focused entry points: `/agent`, `/metric`, `/test`, `/project`, `/eval`, `/runs`, `/store`, `/cloud`, and `/view-server`. Its root exports application errors and result types.
 
 `@attest/cli` translates flags and interactive answers into application requests. Its public entry point runs the CLI. It is not the SDK for project loading, eval execution, or persistence.
+
+## Read API
+
+`@attest/api` owns the read contract, fetch server app, typed client and dashboard bootstrap injection. Hosts inject core's read-only `RunSource`. The package owns no storage driver, socket, authentication or tenant policy. Contract and client subpaths use browser-safe core records. The server imports core's root for comparisons and store errors, so Cloudflare Workers hosts need `nodejs_compat`.
 
 ## Browser and artifacts
 
@@ -121,8 +126,7 @@ untrusted representations.
 Core owns the stored execution and evaluation schemas through its browser-safe
 `@attest/core/records` entry point. Local validates records before database writes
 and validates hydrated rows before returning them. Undefined optional fields are
-normalized before schema parsing. Runtime owns the judge outcome schema. CLI decodes response contracts after bounded JSON parsing. Web parses live HTTP
-payloads with core schemas; its static report preload still needs a shared report boundary.
+normalized before schema parsing. Runtime owns the judge outcome schema. CLI decodes response contracts after bounded JSON parsing. The read API contract owns live response and static snapshot validation.
 
 CLI services and sandbox invocation accept per-instance dependencies with the
 production implementations as defaults. Tests supply those dependencies rather
