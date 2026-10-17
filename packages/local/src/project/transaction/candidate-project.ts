@@ -10,14 +10,15 @@ import {
   type TestResource,
 } from '@attest/contracts';
 
-import { canonicalStringify, contentHash } from '@attest/core';
-
-import { schemaIssueDiagnostics } from '../../internal/schema-issue-diagnostics.js';
 import {
+  canonicalStringify,
+  contentHash,
   hashCanonicalJsonLines,
   hashProjectManifest,
   serializeCanonicalJsonLines,
-} from '../canonical-project.js';
+} from '@attest/core';
+
+import { schemaIssueDiagnostics } from '../../internal/schema-issue-diagnostics.js';
 import { ProjectTransactionError } from './project-transaction-error.js';
 
 type CandidateFile = {

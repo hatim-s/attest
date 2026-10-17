@@ -19,6 +19,7 @@ import {
   writeTransactionJournal,
   recoverProjectTransactions,
 } from '../../project/transaction/transaction-journal.js';
+import { interruptAfterFirstPublish } from '../../_tests_/support/project-transaction.js';
 import { publishPreparedTransaction } from '../../project/transaction/transactional-writer.js';
 
 import { readCloudLink, serializeCloudLink, writeCloudLink, type CloudLink } from '../link.js';
@@ -285,11 +286,8 @@ describe('cloud pull crash recovery', () => {
         ]);
 
         if (phase === 'partial') {
-          await expect(
-            publishPreparedTransaction(root, transaction, () => {
-              throw new Error('Interrupted');
-            }),
-          ).rejects.toThrow('Interrupted');
+          await interruptAfterFirstPublish(root, transaction);
+          expect(await readFile(join(root, 'attest/code.ts'), 'utf8')).toBe('new code');
         } else if (phase === 'published') {
           await publishPreparedTransaction(root, transaction);
         }

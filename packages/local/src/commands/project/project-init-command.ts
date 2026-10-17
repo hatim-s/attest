@@ -2,11 +2,11 @@ import { lstat, mkdir, realpath, rmdir } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
 
 import { PROJECT_SCHEMA_ID, type ProjectResources } from '@attest/contracts';
+import { hashCanonicalContent } from '@attest/core';
 import { ulid } from 'ulid';
 
 import { errnoCode } from '../../internal/errno-code.js';
 import { LocalError } from '../../errors/index.js';
-import { hashCanonicalContent } from '../../project/canonical-project.js';
 import { loadProject } from '../../project/project-loader/index.js';
 import { prepareProjectCandidate } from '../../project/transaction/index.js';
 import { readCommandRequest } from '../shared/command-request.js';

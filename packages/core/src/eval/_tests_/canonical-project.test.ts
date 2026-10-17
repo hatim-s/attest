@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { contentHash } from '@attest/core';
-
+import { contentHash } from '../../store/internal/canonical-json.js';
 import {
   hashDatasetMetadata,
   hashCanonicalJsonLines,

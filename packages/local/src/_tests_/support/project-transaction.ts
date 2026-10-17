@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, rename, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 
 import {
@@ -16,9 +16,12 @@ import {
   type TestResource,
 } from '@attest/contracts';
 
-import { contentHash } from '@attest/core';
+import { contentHash, hashCanonicalJsonLines } from '@attest/core';
 
-import { hashCanonicalJsonLines } from '../../project/canonical-project.js';
+import {
+  writeTransactionJournal,
+  type PreparedTransaction,
+} from '../../project/transaction/transaction-journal.js';
 
 const fixtureAgent: AgentResource = {
   schema: AGENT_RESOURCE_SCHEMA_ID,
@@ -126,4 +129,20 @@ const writeFixtureProject = async (root: string): Promise<void> => {
   }
 };
 
-export { writeFixtureProject };
+/**
+ * Leaves the files of a process killed after publishing the first journal entry: the journal
+ * says publishing and only that entry's staged file has been renamed into place.
+ */
+const interruptAfterFirstPublish = async (
+  root: string,
+  prepared: PreparedTransaction,
+): Promise<void> => {
+  const [first] = prepared.journal.entries;
+
+  if (first?.type !== 'write') throw new Error('Expected a staged write first.');
+  prepared.journal.status = 'publishing';
+  await writeTransactionJournal(prepared);
+  await rename(join(prepared.directory, first.staged_path), join(root, first.path));
+};
+
+export { interruptAfterFirstPublish, writeFixtureProject };

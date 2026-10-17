@@ -6,7 +6,7 @@ import {
   type JsonValue,
 } from '@attest/contracts';
 
-import { hashCanonicalJsonLines } from '../canonical-project.js';
+import { hashCanonicalJsonLines } from '@attest/core';
 import {
   loadJsonResource,
   parseJson,

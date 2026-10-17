@@ -20,17 +20,8 @@ import {
   writeTransactionJournal,
   type PreparedTransaction,
   type TransactionFileChange,
-  type TransactionJournalEntry,
 } from './transaction-journal.js';
 import type { ProjectMutationRequest, ProjectMutationResult } from './transaction-types.js';
-
-type PublishEvent = {
-  entry: TransactionJournalEntry;
-  index: number;
-  transactionId: string;
-};
-
-type PublishObserver = (event: PublishEvent) => Promise<void> | void;
 
 const currentFileHashes = (project: LoadedProject): ReadonlyMap<string, string> => {
   const hashes = new Map<string, string>([['attest.project.json', project.contentHashes.manifest]]);
@@ -108,7 +99,6 @@ const createMissingDirectories = async (
 const publishPreparedTransaction = async (
   root: string,
   prepared: PreparedTransaction,
-  observer?: PublishObserver,
 ): Promise<void> => {
   const manifestIndex = prepared.journal.entries.findIndex(
     ({ path }) => path === prepared.journal.manifest_path,
@@ -125,7 +115,7 @@ const publishPreparedTransaction = async (
   await writeTransactionJournal(prepared);
   await createMissingDirectories(root, prepared);
 
-  for (const [index, entry] of prepared.journal.entries.entries()) {
+  for (const entry of prepared.journal.entries) {
     const destination = await resolveSafeProjectPath(root, entry.path);
 
     if ((await readByteHash(destination)) !== entry.original_hash) {
@@ -148,7 +138,6 @@ const publishPreparedTransaction = async (
     }
 
     await syncPath(dirname(destination));
-    await observer?.({ entry, index, transactionId: prepared.journal.transaction_id });
   }
 };
 
@@ -228,13 +217,12 @@ const runPreparedTransaction = async (options: {
   prepared: PreparedTransaction;
   verify: () => Promise<void>;
   beforePublish?: () => Promise<void> | void;
-  publishObserver?: PublishObserver;
 }): Promise<void> => {
   const { root, prepared } = options;
 
   try {
     await options.beforePublish?.();
-    await publishPreparedTransaction(root, prepared, options.publishObserver);
+    await publishPreparedTransaction(root, prepared);
     await options.verify();
     await markTransactionCommitted(prepared);
   } catch (cause: unknown) {
@@ -260,7 +248,6 @@ const runPreparedTransaction = async (options: {
 /** Applies one complete candidate atomically or returns its identical write-free preview. */
 const applyProjectMutation = async (
   request: ProjectMutationRequest,
-  options: { publishObserver?: PublishObserver } = {},
 ): Promise<ProjectMutationResult> => {
   if (request.dryRun === true) {
     // This branch intentionally runs before mkdir, lock acquisition, journal staging, or recovery.
@@ -284,7 +271,6 @@ const applyProjectMutation = async (
     await runPreparedTransaction({
       root: request.projectRoot,
       prepared,
-      publishObserver: options.publishObserver,
       verify: async () => {
         const verified = await loadProject({ project: request.projectRoot });
 

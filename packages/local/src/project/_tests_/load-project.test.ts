@@ -18,9 +18,8 @@ import {
 } from '@attest/contracts';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { contentHash } from '@attest/core';
+import { contentHash, hashCanonicalJsonLines } from '@attest/core';
 
-import { hashCanonicalJsonLines } from '../canonical-project.js';
 import { loadProject } from '../project-loader/index.js';
 import { ProjectLoadError } from '../project-errors.js';
 
