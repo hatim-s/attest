@@ -152,7 +152,7 @@ const createEvalCaseRunner = (
     };
 
     let workerDirectory: string | undefined;
-    let outcome = 'infrastructure_error';
+    let outcome: CaseExecution['outcome'] | 'infrastructure_error' = 'infrastructure_error';
     let result: EvalCaseRunnerResult | undefined;
     let failure: Error | undefined;
 
@@ -304,11 +304,7 @@ const createEvalCaseRunner = (
       }
     }
 
-    if (failure instanceof Error) throw failure;
-
-    if (failure !== undefined) {
-      throw new Error('Eval case execution failed.', { cause: failure });
-    }
+    if (failure !== undefined) throw failure;
 
     if (result === undefined) throw new Error('Eval runner returned no case result.');
 

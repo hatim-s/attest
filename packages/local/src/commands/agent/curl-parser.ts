@@ -266,15 +266,11 @@ const parseCurlCommand = (source: string, options: CurlParserOptions = {}): Pars
     rawBody = options.bodyFile.text;
   }
 
-  let url: URL;
-
-  try {
-    url = new URL(rawUrl);
-  } catch (error: unknown) {
-    throw new CurlImportError('The cURL URL is invalid.', [
-      error instanceof Error ? 'invalid_url' : 'invalid_url_value',
-    ]);
+  if (!URL.canParse(rawUrl)) {
+    throw new CurlImportError('The cURL URL is invalid.', ['invalid_url']);
   }
+
+  const url = new URL(rawUrl);
 
   if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.hash) {
     throw new CurlImportError('The cURL URL contains an unsafe component.', ['unsafe_url']);

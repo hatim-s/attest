@@ -1,5 +1,6 @@
 import {
   isJsonObject,
+  isString,
   type AgentErrorResponse,
   type AgentRequest,
   type AgentResponse,
@@ -13,8 +14,6 @@ import type { StoredAttempt, StoredMetricEvaluation } from '@attest/core';
 import { AgentInvocationError, redactTransportText, type InvocationResult } from '@attest/executor';
 
 import { REDACTED, isSensitiveFieldName } from '../../../internal/redaction.js';
-
-const isString = (value: unknown): value is string => typeof value === 'string';
 
 type ResponseCommon = Pick<AgentResponse, 'protocol' | 'state' | 'trace'>;
 

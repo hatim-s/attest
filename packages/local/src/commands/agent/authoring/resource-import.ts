@@ -273,15 +273,15 @@ const createImportedCurlAgentResource = async (
     candidate.limits = request.limits;
   }
 
-  if (!(
-    (request.header_env === undefined || Object.keys(request.header_env).length === 0) &&
-    (request.query_env === undefined || Object.keys(request.query_env).length === 0)
-  )) {
+  const headerNames = Object.keys(request.header_env ?? {});
+  const queryNames = Object.keys(request.query_env ?? {});
+
+  if (headerNames.length + queryNames.length > 0) {
     const redaction: NonNullable<AgentResource['redaction']> = {};
 
-    if (request.header_env !== undefined) redaction.headers = Object.keys(request.header_env);
+    if (request.header_env !== undefined) redaction.headers = headerNames;
 
-    if (request.query_env !== undefined) redaction.query = Object.keys(request.query_env);
+    if (request.query_env !== undefined) redaction.query = queryNames;
     candidate.redaction = redaction;
   }
 

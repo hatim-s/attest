@@ -183,20 +183,14 @@ const buildMetricMutation = async (
 
       if (request.detach === true) rewriteMetricReferences(candidate, request.metric_id, undefined);
 
-      {
-        const assembledFields: MutationBuildResult = {
-          candidate,
-          metric,
-        };
-
-        if (!(references.length === 0)) {
-          assembledFields.warnings = [
-            `Detached ${references.length} metric references before removal.`,
-          ];
-        }
-
-        return assembledFields;
-      }
+      return {
+        candidate,
+        metric,
+        warnings:
+          references.length === 0
+            ? undefined
+            : [`Detached ${references.length} metric references before removal.`],
+      };
     }
   }
 };

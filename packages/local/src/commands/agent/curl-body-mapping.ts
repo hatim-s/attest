@@ -31,18 +31,20 @@ const assertNoSensitiveBodyFields = (value: JsonValue): void => {
 /** Replaces one existing JSON target with a typed input placeholder and never creates guessed paths. */
 // BOUNDARY: CLI placeholder mappings address imported curl JSON; validate pointer syntax and own-container paths before writing.
 const applyPlaceholder = (body: JsonValue, mapping: CurlPlaceholderMapping): void => {
-  if (!/^(?:\/(?:[^~/]|~[01])*)*$/u.test(mapping.targetPointer) || mapping.targetPointer === '') {
+  const tokens = parseJsonPointer(mapping.targetPointer);
+  const final = tokens?.pop();
+
+  // The root pointer has no final token, and replacing the whole body is not a mapping.
+  if (tokens === undefined || final === undefined) {
     throw new CurlImportError('A cURL body mapping target is invalid.', ['invalid_target_pointer']);
   }
 
-  if (!/^(?:\/(?:[^~/]|~[01])*)*$/u.test(mapping.inputPointer)) {
+  if (parseJsonPointer(mapping.inputPointer) === undefined) {
     throw new CurlImportError('A cURL input mapping pointer is invalid.', [
       'invalid_input_pointer',
     ]);
   }
 
-  const tokens = parseJsonPointer(mapping.targetPointer) ?? [];
-  const final = tokens.pop()!;
   let parent: JsonValue = body;
 
   for (const token of tokens) {
