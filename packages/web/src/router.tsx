@@ -1,5 +1,12 @@
 import type { ApiClient } from '@attest/api/client';
-import { caseParamsSchema, diffParamsSchema, runParamsSchema } from '@attest/api/contract';
+import {
+  caseParamsSchema,
+  diffParamsSchema,
+  runParamsSchema,
+  suiteParamsSchema,
+  suiteHistoryQuerySchema,
+  DEFAULT_SUITE_HISTORY_RUNS,
+} from '@attest/api/contract';
 import type { QueryClient } from '@tanstack/react-query';
 import {
   createRootRouteWithContext,
@@ -11,6 +18,8 @@ import {
 } from '@tanstack/react-router';
 import { z } from 'zod';
 import { runsQueryOptions } from './api/queries.js';
+import { EvalsPage } from './routes/evals-page.js';
+import { EvalPage } from './routes/eval-page.js';
 import { RunsLayout } from './routes/runs-layout.js';
 import { RootLayout } from './routes/root-layout.js';
 import { NewestRun } from './routes/newest-run.js';
@@ -30,8 +39,10 @@ const runsSearchSchema = z.object({
     .catch(undefined),
 });
 
+const runTabSchema = z.enum(['cases', 'distributions', 'suites']);
+
 const runSearchSchema = z.object({
-  tab: z.enum(['cases', 'distributions']).default('cases').catch('cases'),
+  tab: runTabSchema.default('cases').catch('cases'),
 });
 
 const rootRoute = createRootRouteWithContext<RouterContext>()({
@@ -100,11 +111,31 @@ const compareRoute = createRoute({
   component: ComparePage,
 });
 
+const evalsRoute = createRoute({
+  getParentRoute: () => workspaceRoute,
+  path: '/evals',
+  component: EvalsPage,
+});
+
+const evalRoute = createRoute({
+  getParentRoute: () => workspaceRoute,
+  path: '/evals/$suiteName',
+  params: { parse: (params) => suiteParamsSchema.parse(params) },
+  validateSearch: z.object({
+    limit: suiteHistoryQuerySchema.shape.limit
+      .default(DEFAULT_SUITE_HISTORY_RUNS)
+      .catch(DEFAULT_SUITE_HISTORY_RUNS),
+  }),
+  component: EvalPage,
+});
+
 const routeTree = rootRoute.addChildren([
   indexRoute,
   workspaceRoute.addChildren([
     runsRoute.addChildren([runsIndexRoute, runRoute.addChildren([caseRoute])]),
     compareRoute,
+    evalsRoute,
+    evalRoute,
   ]),
 ]);
 
@@ -136,4 +167,4 @@ declare module '@tanstack/react-router' {
   }
 }
 
-export { createDashboardRouter };
+export { createDashboardRouter, runTabSchema };
