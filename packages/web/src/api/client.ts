@@ -10,11 +10,15 @@ import { getReportData, type ReportData } from '../report/report-data.js';
 type CasePage = { items: CaseSummary[]; nextCursor?: string };
 
 type DashboardClient = {
-  getCase: (runId: string, suiteName: string, caseId: string) => Promise<CaseRecord>;
-  getDiff: (baseRunId: string, candidateRunId: string) => Promise<RunDiff>;
-  getRun: (runId: string) => Promise<RunRecord>;
-  listCases: (runId: string, cursor?: string) => Promise<CasePage>;
-  listRuns: () => Promise<RunRecord[]>;
+  getCase: (
+    runId: string,
+    identity: Pick<CaseSummary, 'suiteName' | 'caseId'>,
+    signal?: AbortSignal,
+  ) => Promise<CaseRecord>;
+  getDiff: (baseRunId: string, candidateRunId: string, signal?: AbortSignal) => Promise<RunDiff>;
+  getRun: (runId: string, signal?: AbortSignal) => Promise<RunRecord>;
+  listCases: (runId: string, cursor?: string, signal?: AbortSignal) => Promise<CasePage>;
+  listRuns: (signal?: AbortSignal) => Promise<RunRecord[]>;
 };
 
 type ResponseDecoder<T> = {
@@ -73,53 +77,82 @@ const decodeCasePage = (value: unknown): CasePage => {
   return page;
 };
 
-/** BOUNDARY: reads only a validated string message from a server error envelope. */
-const errorMessage = (value: unknown): string | undefined => {
-  if (!isRecord(value) || !isRecord(value.error)) return undefined;
+/** Carries HTTP status independently of whether a proxy returned a JSON error envelope. */
+class DashboardHttpError extends Error {
+  constructor(
+    readonly status: number,
+    readonly code: string | undefined,
+    message: string,
+  ) {
+    super(message);
+    this.name = 'DashboardHttpError';
+  }
+}
 
-  return isString(value.error.message) ? value.error.message : undefined;
-};
+/** Reads HTTP failures before endpoint decoding so non-JSON bodies retain their status. */
+const fetchJson = async <T>(
+  path: string,
+  decode: ResponseDecoder<T>,
+  signal: AbortSignal | undefined,
+): Promise<T> => {
+  const response = await fetch(path, { headers: { Accept: 'application/json' }, signal });
 
-/** Reads one JSON response, reports HTTP errors, and decodes a successful endpoint payload. */
-const fetchJson = async <T>(path: string, decode: ResponseDecoder<T>): Promise<T> => {
-  const response = await fetch(path, { headers: { Accept: 'application/json' } });
+  if (!response.ok) {
+    let body: unknown;
+
+    try {
+      body = await response.json();
+    } catch {
+      signal?.throwIfAborted();
+      throw new DashboardHttpError(
+        response.status,
+        undefined,
+        `Attest API request failed (${response.status}).`,
+      );
+    }
+
+    const error = isRecord(body) && isRecord(body.error) ? body.error : undefined;
+    throw new DashboardHttpError(
+      response.status,
+      isString(error?.code) ? error.code : undefined,
+      isString(error?.message) ? error.message : `Attest API request failed (${response.status}).`,
+    );
+  }
+
   const body: unknown = await response.json();
-
-  if (!response.ok)
-    throw new Error(errorMessage(body) ?? `Attest API request failed (${response.status}).`);
 
   return decode(body);
 };
 
 /** Reads from the loopback server started by `attest view`. */
 const createHttpClient = (): DashboardClient => ({
-  getCase: async (runId, suiteName, caseId) => {
+  getCase: async (runId, { suiteName, caseId }, signal) => {
     const path = `/api/runs/${encodeURIComponent(runId)}/cases/${encodeURIComponent(suiteName)}/${encodeURIComponent(caseId)}`;
 
-    return fetchJson(path, decodeCase);
+    return fetchJson(path, decodeCase, signal);
   },
-  getDiff: async (baseRunId, candidateRunId) => {
+  getDiff: async (baseRunId, candidateRunId, signal) => {
     const path = `/api/diffs/${encodeURIComponent(baseRunId)}/${encodeURIComponent(candidateRunId)}`;
 
-    return fetchJson(path, decodeDiff);
+    return fetchJson(path, decodeDiff, signal);
   },
-  getRun: async (runId) => {
+  getRun: async (runId, signal) => {
     const path = `/api/runs/${encodeURIComponent(runId)}`;
 
-    return fetchJson(path, decodeRun);
+    return fetchJson(path, decodeRun, signal);
   },
-  listCases: async (runId, cursor) => {
+  listCases: async (runId, cursor, signal) => {
     const query = new URLSearchParams({ limit: String(CASE_PAGE_SIZE) });
 
     if (cursor !== undefined) query.set('cursor', cursor);
     const path = `/api/runs/${encodeURIComponent(runId)}/cases?${query.toString()}`;
 
-    return fetchJson(path, decodeCasePage);
+    return fetchJson(path, decodeCasePage, signal);
   },
-  listRuns: async () => {
+  listRuns: async (signal) => {
     const path = '/api/runs?limit=100';
 
-    return fetchJson(path, decodeRuns);
+    return fetchJson(path, decodeRuns, signal);
   },
 });
 
@@ -130,7 +163,7 @@ const createStaticClient = (report: ReportData): DashboardClient => {
   const missingRun = (runId: string) => `Run ${runId} is not included in this static report.`;
 
   return {
-    getCase: (runId, suiteName, caseId) => {
+    getCase: (runId, { suiteName, caseId }) => {
       const reportCase = report.cases.find(
         ({ record }) =>
           record.runId === runId && record.suiteName === suiteName && record.caseId === caseId,
@@ -177,4 +210,4 @@ const client = reportData === undefined ? createHttpClient() : createStaticClien
 
 const { getCase, getDiff, getRun, listCases, listRuns } = client;
 
-export { getCase, getDiff, getRun, listCases, listRuns };
+export { DashboardHttpError, getCase, getDiff, getRun, listCases, listRuns };

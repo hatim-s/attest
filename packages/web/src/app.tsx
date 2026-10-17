@@ -47,8 +47,21 @@ const Dashboard = () => {
   const [theme, setTheme] = useState<Theme>(getInitialTheme);
   const runQuery = useRun(selectedRunId);
   const casesQuery = useCases(selectedRunId, runQuery.data?.status);
-  const caseQuery = useCase(selectedRunId, selectedCase?.suiteName, selectedCase?.caseId);
-  const diffQuery = useDiff(baseRunId, selectedRunId);
+
+  const caseQuery = useCase({
+    runId: selectedRunId,
+    suiteName: selectedCase?.suiteName,
+    caseId: selectedCase?.caseId,
+    status: runQuery.data?.status,
+  });
+
+  const diffQuery = useDiff({
+    baseRunId,
+    candidateRunId: selectedRunId,
+    baseStatus: runs.find((run) => run.id === baseRunId)?.status,
+    candidateStatus: runQuery.data?.status,
+    visible: tab === 'compare',
+  });
 
   const cases = useMemo(
     () => casesQuery.data?.pages.flatMap((page) => page.items) ?? [],

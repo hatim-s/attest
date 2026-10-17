@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 
-import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query';
+import { queryOptions, useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { getCase, getDiff, getRun, listCases, listRuns } from './client.js';
 import type { RunStatus } from './types.js';
@@ -10,7 +10,7 @@ import { getReportData } from '../report/report-data.js';
 const useRuns = () =>
   useQuery({
     queryKey: ['runs'],
-    queryFn: listRuns,
+    queryFn: ({ signal }) => listRuns(signal),
     refetchInterval: getReportData() === undefined ? 5_000 : false,
   });
 
@@ -18,7 +18,7 @@ const useRuns = () =>
 const useRun = (runId: string | undefined) =>
   useQuery({
     queryKey: ['run', runId],
-    queryFn: () => getRun(runId ?? ''),
+    queryFn: ({ signal }) => getRun(runId ?? '', signal),
     enabled: runId !== undefined,
     refetchInterval: (query) =>
       getReportData() === undefined && query.state.data?.status === 'running' ? 2_000 : false,
@@ -37,8 +37,8 @@ const useCases = (runId: string | undefined, status: RunStatus | undefined) => {
 
   return useInfiniteQuery({
     queryKey: ['cases', runId],
-    queryFn: ({ pageParam }: { pageParam: string | undefined }) =>
-      listCases(runId ?? '', pageParam),
+    queryFn: ({ pageParam, signal }: { pageParam: string | undefined; signal: AbortSignal }) =>
+      listCases(runId ?? '', pageParam, signal),
     initialPageParam: undefined,
     getNextPageParam: (page) => page.nextCursor,
     enabled: runId !== undefined,
@@ -46,25 +46,57 @@ const useCases = (runId: string | undefined, status: RunStatus | undefined) => {
   });
 };
 
-/** Loads the full evidence record for the case opened in the detail drawer. */
-const useCase = (
-  runId: string | undefined,
-  suiteName: string | undefined,
-  caseId: string | undefined,
-) =>
-  useQuery({
-    queryKey: ['case', runId, suiteName, caseId],
-    queryFn: () => getCase(runId ?? '', suiteName ?? '', caseId ?? ''),
+type CaseSelection = {
+  runId: string | undefined;
+  suiteName: string | undefined;
+  caseId: string | undefined;
+  status: RunStatus | undefined;
+};
+
+type ComparisonSelection = {
+  baseRunId: string | undefined;
+  candidateRunId: string | undefined;
+  baseStatus: RunStatus | undefined;
+  candidateStatus: RunStatus | undefined;
+  visible: boolean;
+};
+
+/** A status change gets a fresh cache entry even after active polling has stopped. */
+const caseQueryOptions = ({ runId, suiteName, caseId, status }: CaseSelection) =>
+  queryOptions({
+    queryKey: ['case', runId, suiteName, caseId, status],
+    queryFn: ({ signal }) =>
+      getCase(runId ?? '', { suiteName: suiteName ?? '', caseId: caseId ?? '' }, signal),
     enabled: runId !== undefined && suiteName !== undefined && caseId !== undefined,
+    refetchInterval: getReportData() === undefined && status === 'running' ? 2_000 : false,
   });
 
-/** Compares two distinct runs once both sides of the comparison are chosen. */
-const useDiff = (baseRunId: string | undefined, candidateRunId: string | undefined) =>
-  useQuery({
-    queryKey: ['diff', baseRunId, candidateRunId],
-    queryFn: () => getDiff(baseRunId ?? '', candidateRunId ?? ''),
+/** Both run statuses participate so either run finishing refreshes the comparison. */
+const diffQueryOptions = ({
+  baseRunId,
+  candidateRunId,
+  baseStatus,
+  candidateStatus,
+  visible,
+}: ComparisonSelection) =>
+  queryOptions({
+    queryKey: ['diff', baseRunId, candidateRunId, baseStatus, candidateStatus],
+    queryFn: ({ signal }) => getDiff(baseRunId ?? '', candidateRunId ?? '', signal),
     enabled:
-      baseRunId !== undefined && candidateRunId !== undefined && baseRunId !== candidateRunId,
+      visible &&
+      baseRunId !== undefined &&
+      candidateRunId !== undefined &&
+      baseRunId !== candidateRunId,
+    refetchInterval:
+      getReportData() === undefined && (baseStatus === 'running' || candidateStatus === 'running')
+        ? 2_000
+        : false,
   });
 
-export { useCase, useCases, useDiff, useRun, useRuns };
+/** Keeps the open drawer current through the final run response. */
+const useCase = (selection: CaseSelection) => useQuery(caseQueryOptions(selection));
+
+/** Fetches comparisons only while Compare is visible. */
+const useDiff = (selection: ComparisonSelection) => useQuery(diffQueryOptions(selection));
+
+export { caseQueryOptions, diffQueryOptions, useCase, useCases, useDiff, useRun, useRuns };

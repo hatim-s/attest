@@ -69,7 +69,7 @@ describe('static report data client', () => {
     await expect(listRuns()).resolves.toEqual([run]);
     await expect(getRun(run.id)).resolves.toEqual(run);
     await expect(listCases(run.id)).resolves.toEqual({ items: [summary] });
-    await expect(getCase(run.id, summary.suiteName, summary.caseId)).resolves.toEqual(record);
+    await expect(getCase(run.id, summary)).resolves.toEqual(record);
     expect(fetch).not.toHaveBeenCalled();
   });
 });
