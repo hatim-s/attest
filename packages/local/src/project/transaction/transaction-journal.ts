@@ -216,26 +216,25 @@ const prepareTransaction = async (
   for (const [index, change] of changes.entries()) {
     const destination = await resolveSafeProjectPath(root, change.path);
     const originalHash = await readByteHash(destination);
-    const backupPath = originalHash === null ? null : `backups/${index}`;
-
-    if (backupPath !== null) {
-      const absoluteBackup = join(directory, backupPath);
-      await copyFile(destination, absoluteBackup);
-      await syncWrittenFile(absoluteBackup);
-    }
-
-    const stagedPath = change.type === 'write' ? `staged/${index}` : null;
-
-    if (change.type === 'write' && stagedPath !== null) {
-      const absoluteStage = join(directory, stagedPath);
-      await writeFile(absoluteStage, change.contents, { mode: 0o644 });
-      await syncWrittenFile(absoluteStage);
-    }
 
     const original =
       originalHash === null
         ? { original_hash: null, backup_path: null }
         : { original_hash: originalHash, backup_path: `backups/${index}` };
+
+    if (original.backup_path !== null) {
+      const absoluteBackup = join(directory, original.backup_path);
+      await copyFile(destination, absoluteBackup);
+      await syncWrittenFile(absoluteBackup);
+    }
+
+    const stagedPath = `staged/${index}`;
+
+    if (change.type === 'write') {
+      const absoluteStage = join(directory, stagedPath);
+      await writeFile(absoluteStage, change.contents, { mode: 0o644 });
+      await syncWrittenFile(absoluteStage);
+    }
 
     entries.push(
       change.type === 'write'
@@ -243,7 +242,7 @@ const prepareTransaction = async (
             ...original,
             path: change.path,
             type: 'write',
-            staged_path: `staged/${index}`,
+            staged_path: stagedPath,
             next_hash: hashBytes(change.contents),
           }
         : { ...original, path: change.path, type: 'remove', staged_path: null, next_hash: null },
@@ -486,15 +485,7 @@ const recoverProjectTransactions = async (
 
     const manifest = prepared.journal.entries.find(
       ({ path }) => path === prepared.journal.manifest_path,
-    );
-
-    if (manifest === undefined) {
-      throw new ProjectTransactionError(
-        'project_recovery_required',
-        'Transaction journal does not contain the manifest commit point.',
-        { path: `${TRANSACTIONS_DIRECTORY}/${name}/${JOURNAL_FILE}` },
-      );
-    }
+    )!;
 
     const manifestHash = await readByteHash(await resolveSafeProjectPath(root, manifest.path));
     // A code-only cloud revision can keep identical manifest bytes. In that case the

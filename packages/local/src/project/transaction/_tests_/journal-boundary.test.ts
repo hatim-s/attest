@@ -1,6 +1,6 @@
 import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, relative } from 'node:path';
 
 import { afterEach, expect, it } from 'vitest';
 
@@ -45,7 +45,7 @@ it.each(['backup', 'directory', 'identity', 'duplicate', 'write', 'remove'])(
         ...journal,
         transaction_id:
           kind === 'identity' ? '00000000-0000-4000-8000-000000000000' : journal.transaction_id,
-        created_directories: kind === 'directory' ? [empty] : [],
+        created_directories: kind === 'directory' ? [relative(root, empty)] : [],
         entries:
           kind === 'duplicate'
             ? [entry, entry]
@@ -53,7 +53,9 @@ it.each(['backup', 'directory', 'identity', 'duplicate', 'write', 'remove'])(
                 {
                   ...entry,
                   backup_path:
-                    kind === 'backup' ? join(outside, 'attest.project.json') : entry.backup_path,
+                    kind === 'backup'
+                      ? relative(prepared.directory, join(outside, 'attest.project.json'))
+                      : entry.backup_path,
                   staged_path: kind === 'write' ? null : entry.staged_path,
                   type: kind === 'remove' ? 'remove' : entry.type,
                 },
@@ -84,7 +86,7 @@ it.each(['.attest', '.attest/transactions'])('rejects symlinked state at %s', as
   await symlink(outside, join(root, path));
 
   if (path === '.attest') {
-    await expect(acquireProjectLock(root)).rejects.toMatchObject({ code: 'project_locked' });
+    await expect(acquireProjectLock(root)).rejects.toMatchObject({ code: 'project_invalid' });
   } else {
     const lock = await acquireProjectLock(root);
 

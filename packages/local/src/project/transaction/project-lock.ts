@@ -79,7 +79,7 @@ const inspectProjectLock = async (root: string): Promise<ProjectLockInspection> 
   const path = await resolveContainedPath(root, PROJECT_LOCK_FILE, {
     expect: 'file',
     problem: () =>
-      new ProjectTransactionError('project_locked', 'Unsafe project lock path.', {
+      new ProjectTransactionError('project_invalid', 'Unsafe project lock path.', {
         path: PROJECT_LOCK_FILE,
       }),
   });
@@ -193,7 +193,7 @@ const acquireProjectLock = async (root: string): Promise<ProjectLockHandle> => {
     expect: 'file',
     createDirectories: true,
     problem: () =>
-      new ProjectTransactionError('project_locked', 'Unsafe project lock path.', {
+      new ProjectTransactionError('project_invalid', 'Unsafe project lock path.', {
         path: PROJECT_LOCK_FILE,
       }),
   });
