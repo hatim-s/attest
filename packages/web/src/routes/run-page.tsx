@@ -8,9 +8,9 @@ import { MetricErrorCases } from '../components/runs/metric-error-cases.js';
 import { RunTrends } from '../components/runs/run-trends.js';
 import { DistributionCharts } from '../components/runs/distribution-charts.js';
 import { Button, ErrorNotice, Loading } from '../components/shared/ui.js';
-import { RunOverview } from './run-overview.js';
+import { RunOverview } from '../components/runs/run-overview.js';
 
-const route = getRouteApi('/runs/$runId');
+const route = getRouteApi('/workspace/runs/$runId');
 
 /** Keeps case paging and distribution loading scoped to the URL's run. */
 const RunPage = () => {

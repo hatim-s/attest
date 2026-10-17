@@ -1,25 +1,17 @@
-import { useEffect } from 'react';
-import { getRouteApi, useNavigate } from '@tanstack/react-router';
+import { getRouteApi, Navigate } from '@tanstack/react-router';
 import { useRuns } from '../api/queries.js';
 
-const route = getRouteApi('/runs/');
+const route = getRouteApi('/workspace/runs/');
 
 /** Also redirects when polling discovers the first run after an empty initial load. */
 const NewestRun = () => {
   const runsQuery = useRuns();
   const newest = runsQuery.data?.[0];
   const search = route.useSearch();
-  const navigate = useNavigate();
-  useEffect(() => {
-    if (newest !== undefined) {
-      void navigate({
-        to: '/runs/$runId',
-        params: { runId: newest.id },
-        search: { ...search, tab: 'cases' },
-        replace: true,
-      });
-    }
-  }, [navigate, newest, search]);
+
+  if (newest !== undefined) {
+    return <Navigate to="/runs/$runId" params={{ runId: newest.id }} search={search} replace />;
+  }
 
   return (
     <div className="card welcome-card">

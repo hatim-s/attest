@@ -2,7 +2,7 @@ import { Link } from '@tanstack/react-router';
 import { useEffect, useState } from 'react';
 import { useApiClient } from '../api/api-client-context.js';
 import { Badge, Button } from '../components/shared/ui.js';
-import { RunsLayout } from './runs-layout.js';
+import { Outlet } from '@tanstack/react-router';
 
 type Theme = 'light' | 'dark';
 
@@ -57,7 +57,7 @@ const RootLayout = () => {
           </Button>
         </div>
       </header>
-      <RunsLayout />
+      <Outlet />
     </div>
   );
 };

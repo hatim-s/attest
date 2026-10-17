@@ -2,9 +2,9 @@ import { getRouteApi, useNavigate } from '@tanstack/react-router';
 import { useDiff, useRun, useRuns } from '../api/queries.js';
 import { DiffPanel } from '../components/cases/diff-panel.js';
 import { ErrorNotice, Loading } from '../components/shared/ui.js';
-import { RunOverview } from './run-overview.js';
+import { RunOverview } from '../components/runs/run-overview.js';
 
-const route = getRouteApi('/compare/$baseRunId/$candidateRunId');
+const route = getRouteApi('/workspace/compare/$baseRunId/$candidateRunId');
 
 /** Makes a comparison reproducible from its baseline and candidate identities. */
 const ComparePage = () => {
@@ -19,7 +19,6 @@ const ComparePage = () => {
     candidateRunId,
     baseStatus: baseQuery.data?.status,
     candidateStatus: candidateQuery.data?.status,
-    visible: true,
   });
 
   return (
@@ -41,6 +40,7 @@ const ComparePage = () => {
           void navigate({
             to: '/compare/$baseRunId/$candidateRunId',
             params: { baseRunId: nextBaseRunId, candidateRunId },
+            search: (previous) => previous,
           })
         }
       />

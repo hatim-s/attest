@@ -4,7 +4,7 @@ import { AnalyticsChart } from '../components/runs/analytics-chart.js';
 import { ErrorNotice, Loading } from '../components/shared/ui.js';
 import { formatDateTime, formatPercent } from '../lib/format.js';
 
-const route = getRouteApi('/evals/$suiteName');
+const route = getRouteApi('/workspace/evals/$suiteName');
 
 /** Keeps each measure on its own scale and preserves run provenance beside the charts. */
 const EvalPage = () => {

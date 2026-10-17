@@ -109,6 +109,10 @@ select {
 button {
   color: inherit;
 }
+a {
+  color: inherit;
+  text-decoration: none;
+}
 code,
 pre,
 .mono {
@@ -943,18 +947,6 @@ select:focus-visible {
   .metric-delta {
     display: none;
   }
-}
-
-/* Navigation links retain the button presentation of the dashboard controls. */
-a.button,
-a.run-list-item,
-a.case-table-row {
-  color: inherit;
-  text-decoration: none;
-  font-family: inherit;
-}
-a.button-primary {
-  color: var(--surface);
 }
 
 .analytics-table-scroll {

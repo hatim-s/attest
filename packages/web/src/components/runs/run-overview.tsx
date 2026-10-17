@@ -1,10 +1,10 @@
 import { Link } from '@tanstack/react-router';
 import type { RunRecord } from '@attest/core/records';
-import { useApiClient } from '../api/api-client-context.js';
-import { useRuns } from '../api/queries.js';
-import { SummaryCards } from '../components/runs/summary-cards.js';
-import { Badge } from '../components/shared/ui.js';
-import { shortId } from '../lib/format.js';
+import { useApiClient } from '../../api/api-client-context.js';
+import { useRuns } from '../../api/queries.js';
+import { SummaryCards } from '../../components/runs/summary-cards.js';
+import { Badge } from '../../components/shared/ui.js';
+import { shortId } from '../../lib/format.js';
 
 /** Keeps the run context visible when switching to a comparison URL. */
 const RunOverview = ({
@@ -68,6 +68,7 @@ const RunOverview = ({
           <Link
             to="/compare/$baseRunId/$candidateRunId"
             params={{ baseRunId: baseRun.id, candidateRunId: run.id }}
+            search={(previous) => previous}
             role="tab"
             aria-selected={tab === 'compare'}
             className={`button button-${tab === 'compare' ? 'primary' : 'ghost'}`}

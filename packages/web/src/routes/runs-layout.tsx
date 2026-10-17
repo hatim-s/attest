@@ -1,19 +1,14 @@
-import { Outlet, useMatch } from '@tanstack/react-router';
+import { getRouteApi, Outlet, useParams } from '@tanstack/react-router';
 import { useRuns } from '../api/queries.js';
 import { RunList } from '../components/runs/run-list.js';
+
+const route = getRouteApi('/workspace');
 
 /** Keeps run navigation available on both run and comparison pages. */
 const RunsLayout = () => {
   const runsQuery = useRuns();
-  const runMatch = useMatch({ from: '/runs/$runId', shouldThrow: false });
-
-  const compareMatch = useMatch({
-    from: '/compare/$baseRunId/$candidateRunId',
-    shouldThrow: false,
-  });
-
-  const runsMatch = useMatch({ from: '/runs', shouldThrow: false });
-  const { branch, label } = runsMatch?.search ?? {};
+  const { runId, candidateRunId } = useParams({ strict: false });
+  const { branch, label } = route.useSearch();
 
   const runs = (runsQuery.data ?? []).filter(
     (run) =>
@@ -28,7 +23,7 @@ const RunsLayout = () => {
         error={runsQuery.error}
         isLoading={runsQuery.isLoading}
         runs={runs}
-        selectedRunId={runMatch?.params.runId ?? compareMatch?.params.candidateRunId}
+        selectedRunId={runId ?? candidateRunId}
       />
       <main className="main-content">
         <Outlet />
