@@ -483,6 +483,7 @@ const recoverProjectTransactions = async (
 
     const prepared = await readPreparedTransaction(directory);
 
+    // The journal schema requires the manifest as the last write entry.
     const manifest = prepared.journal.entries.find(
       ({ path }) => path === prepared.journal.manifest_path,
     )!;

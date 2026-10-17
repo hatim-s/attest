@@ -78,28 +78,31 @@ it.each(['backup', 'directory', 'identity', 'duplicate', 'write', 'remove'])(
   },
 );
 
-it.each(['.attest', '.attest/transactions'])('rejects symlinked state at %s', async (path) => {
+it('rejects symlinked state at .attest', async () => {
   const root = await createRoot();
   const outside = await createRoot();
+  await symlink(outside, join(root, '.attest'));
 
-  if (path.includes('/')) await mkdir(join(root, '.attest'));
-  await symlink(outside, join(root, path));
+  await expect(acquireProjectLock(root)).rejects.toMatchObject({ code: 'project_invalid' });
+  expect(await readdir(outside)).toEqual(['attest.project.json']);
+});
 
-  if (path === '.attest') {
-    await expect(acquireProjectLock(root)).rejects.toMatchObject({ code: 'project_invalid' });
-  } else {
-    const lock = await acquireProjectLock(root);
+it('rejects symlinked state at .attest/transactions', async () => {
+  const root = await createRoot();
+  const outside = await createRoot();
+  await mkdir(join(root, '.attest'));
+  await symlink(outside, join(root, '.attest/transactions'));
+  const lock = await acquireProjectLock(root);
 
-    try {
-      await expect(recoverProjectTransactions(root, lock)).rejects.toMatchObject({
-        code: 'project_recovery_required',
-      });
-      await expect(prepareTransaction(root, [], 'before', 'after')).rejects.toMatchObject({
-        code: 'project_invalid',
-      });
-    } finally {
-      await releaseProjectLock(lock);
-    }
+  try {
+    await expect(recoverProjectTransactions(root, lock)).rejects.toMatchObject({
+      code: 'project_recovery_required',
+    });
+    await expect(prepareTransaction(root, [], 'before', 'after')).rejects.toMatchObject({
+      code: 'project_invalid',
+    });
+  } finally {
+    await releaseProjectLock(lock);
   }
 
   expect(await readdir(outside)).toEqual(['attest.project.json']);
