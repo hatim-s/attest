@@ -7,6 +7,7 @@ import {
   storedMetricEvaluationSchema,
   type CaseRecord,
   type RunRecord,
+  type RunSummary,
   type StoredMetricEvaluation,
 } from '@attest/core';
 
@@ -46,8 +47,8 @@ const parseRequiredJson = (serialized: string, field: string): JsonValue => {
   return value;
 };
 
-/** Restores a public run record from its initial schema row representation. */
-const toRunRecord = (row: RunsTable): RunRecord =>
+/** Restores a public run record from its row and the totals its caller computed. */
+const toRunRecord = (row: RunsTable, summary: RunSummary | undefined): RunRecord =>
   parseStored(runRecordSchema, {
     id: row.id,
     createdAt: row.created_at,
@@ -59,7 +60,7 @@ const toRunRecord = (row: RunsTable): RunRecord =>
     gitSha: row.git_sha ?? undefined,
     gitBranch: row.git_branch ?? undefined,
     labels: parseJson(row.labels_json),
-    summary: parseJson(row.summary_json),
+    summary,
   });
 
 /** Restores a metric evaluation while enforcing its persisted status discriminant. */

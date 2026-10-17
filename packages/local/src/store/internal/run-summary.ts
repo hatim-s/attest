@@ -1,7 +1,7 @@
-import { sql } from 'kysely';
+import { sql, type Kysely } from 'kysely';
 import { z } from 'zod';
 
-import type { CasesTable, MetricResultsTable } from '../schema.js';
+import type { CasesTable, Database, MetricResultsTable } from '../schema.js';
 import {
   computeCaseVerdict,
   summarizeVerdicts,
@@ -49,23 +49,66 @@ const rowVerdict = (caseRow: SummaryCase, metrics: readonly SummaryMetric[]): Ca
     metrics.map(toVerdictMetric),
   );
 
-/** Computes exclusive run totals from case rows and every persisted metric row. */
-const computeSummary = (cases: SummaryCase[], metrics: SummaryMetric[]): RunSummary => {
-  const metricsByCase = new Map<string, SummaryMetric[]>();
+const groupBy = <T>(rows: readonly T[], key: (row: T) => string): Map<string, T[]> => {
+  const grouped = new Map<string, T[]>();
 
-  for (const metric of metrics) {
-    const caseMetrics = metricsByCase.get(metric.case_row_id) ?? [];
-    caseMetrics.push(metric);
-    metricsByCase.set(metric.case_row_id, caseMetrics);
+  for (const row of rows) {
+    const group = grouped.get(key(row));
+
+    if (group) group.push(row);
+    else grouped.set(key(row), [row]);
   }
 
-  return summarizeVerdicts(
-    cases.map((caseRow) => {
-      const caseMetrics = metricsByCase.get(caseRow.id) ?? [];
-
-      return { verdict: rowVerdict(caseRow, caseMetrics), metrics: caseMetrics };
-    }),
-  );
+  return grouped;
 };
 
-export { agentErroredColumn, computeSummary, lifecycleFailedColumn, rowVerdict };
+/**
+ * Computes each run's exclusive totals from its case and metric rows. Reads call this instead of
+ * trusting summary_json, because runs finalized before the shared verdict rule stored totals that
+ * disagree with their own case list. Persisted rows stay untouched.
+ */
+const summarizeRuns = async (
+  database: Kysely<Database>,
+  runIds: readonly string[],
+): Promise<(runId: string) => RunSummary> => {
+  if (runIds.length === 0) return () => summarizeVerdicts([]);
+
+  const cases = await database
+    .selectFrom('cases')
+    .select([
+      'id',
+      'run_id',
+      'outcome',
+      'expected_metrics_json',
+      lifecycleFailedColumn,
+      agentErroredColumn,
+    ])
+    .where('run_id', 'in', runIds)
+    .execute();
+
+  const metrics = await database
+    .selectFrom('metric_results')
+    .innerJoin('cases', 'cases.id', 'metric_results.case_row_id')
+    .select([
+      'metric_results.case_row_id',
+      'metric_results.metric_name',
+      'metric_results.status',
+      'metric_results.pass',
+    ])
+    .where('cases.run_id', 'in', runIds)
+    .execute();
+
+  const metricsByCase = groupBy(metrics, (metric) => metric.case_row_id);
+  const casesByRun = groupBy(cases, (caseRow) => caseRow.run_id);
+
+  return (runId) =>
+    summarizeVerdicts(
+      (casesByRun.get(runId) ?? []).map((caseRow) => {
+        const caseMetrics = metricsByCase.get(caseRow.id) ?? [];
+
+        return { verdict: rowVerdict(caseRow, caseMetrics), metrics: caseMetrics };
+      }),
+    );
+};
+
+export { agentErroredColumn, lifecycleFailedColumn, rowVerdict, summarizeRuns };

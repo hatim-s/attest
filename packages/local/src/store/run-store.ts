@@ -26,9 +26,9 @@ import { createLock } from './internal/promise-lock.js';
 import { toCaseRecord, toMetricEvaluation, toRunRecord } from './internal/row-mapping.js';
 import {
   agentErroredColumn,
-  computeSummary,
   lifecycleFailedColumn,
   rowVerdict,
+  summarizeRuns,
 } from './internal/run-summary.js';
 import {
   openReadonlySqliteHandle,
@@ -38,7 +38,7 @@ import {
 import type { SqliteHandle } from './internal/sqlite-handle.js';
 import { executeStoreOperation } from './internal/store-operation.js';
 import { migrateToLatest, validateReadableSchema } from './migration-runner.js';
-import type { Database, MetricResultsTable } from './schema.js';
+import type { Database, MetricResultsTable, RunsTable } from './schema.js';
 
 const migrationLocks = new Map<string, ReturnType<typeof createLock>>();
 
@@ -158,29 +158,14 @@ class SqliteRunStore implements RunStore {
           );
         }
 
-        const cases = await database
-          .selectFrom('cases')
-          .select([
-            'id',
-            'outcome',
-            'expected_metrics_json',
-            lifecycleFailedColumn,
-            agentErroredColumn,
-          ])
-          .where('run_id', '=', runId)
-          .execute();
-
-        const metrics = await loadMetrics(
-          database,
-          cases.map((caseRow) => caseRow.id),
-        );
+        const summaryOf = await summarizeRuns(database, [runId]);
 
         await database
           .updateTable('runs')
           .set({
             status,
             finished_at: new Date().toISOString(),
-            summary_json: canonicalStringify(computeSummary(cases, metrics)),
+            summary_json: canonicalStringify(summaryOf(runId)),
           })
           .where('id', '=', runId)
           .execute();
@@ -190,8 +175,8 @@ class SqliteRunStore implements RunStore {
     return this.getRun(runId);
   }
 
-  /** Loads one run while preserving optional metadata and summary fields. */
-  async getRun(runId: string): Promise<RunRecord> {
+  /** Loads the run row, so case reads can confirm the run exists without totalling it. */
+  async #getRunRow(runId: string): Promise<RunsTable> {
     const row = await this.#database
       .selectFrom('runs')
       .selectAll()
@@ -200,7 +185,30 @@ class SqliteRunStore implements RunStore {
 
     if (!row) throw new StoreError('RUN_NOT_FOUND', `Run ${runId} was not found.`);
 
-    return toRunRecord(row);
+    return row;
+  }
+
+  /**
+   * Builds run records with totals recomputed from case rows. Runs finalized before the shared
+   * verdict rule hold stale summary_json, so no read uses it. Running runs have no totals yet.
+   */
+  async #runRecordMapper(rows: RunsTable[]): Promise<(row: RunsTable) => RunRecord> {
+    const terminal = rows.filter((row) => row.status !== 'running');
+
+    const summaryOf = await summarizeRuns(
+      this.#database,
+      terminal.map((row) => row.id),
+    );
+
+    return (row) => toRunRecord(row, row.status === 'running' ? undefined : summaryOf(row.id));
+  }
+
+  /** Loads one run with its metadata and recomputed totals. */
+  async getRun(runId: string): Promise<RunRecord> {
+    const row = await this.#getRunRow(runId);
+    const toRecord = await this.#runRecordMapper([row]);
+
+    return toRecord(row);
   }
 
   /** Lists runs in deterministic newest-first order. */
@@ -212,8 +220,10 @@ class SqliteRunStore implements RunStore {
       .orderBy('id', 'desc');
 
     if (limit !== undefined) query = query.limit(limit);
+    const rows = await query.execute();
+    const toRecord = await this.#runRecordMapper(rows);
 
-    return (await query.execute()).map(toRunRecord);
+    return rows.map(toRecord);
   }
 
   /** Rehydrates case blobs after the caller has established the parent run. */
@@ -244,7 +254,7 @@ class SqliteRunStore implements RunStore {
 
   /** Loads one case detail while preserving distinct missing-run and missing-case semantics. */
   async getCase(runId: string, suiteName: string, caseId: string): Promise<CaseRecord> {
-    await this.getRun(runId);
+    await this.#getRunRow(runId);
 
     const row = await this.#database
       .selectFrom('cases')
@@ -269,7 +279,7 @@ class SqliteRunStore implements RunStore {
     runId: string,
     options: { cursor?: string; limit?: number } = {},
   ): Promise<{ items: CaseSummary[]; nextCursor?: string }> {
-    await this.getRun(runId);
+    await this.#getRunRow(runId);
     const limit = options.limit ?? 100;
 
     if (!Number.isInteger(limit) || limit <= 0 || limit > 1_000) {
