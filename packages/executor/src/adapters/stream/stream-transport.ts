@@ -100,7 +100,7 @@ const consumeResponse = async (
   /** Records one event and returns the terminal envelope once it arrives. */
   const acceptEvent = (event: StreamEvent): CandidateResponse | undefined => {
     if (event.heartbeat) {
-      evidence.record(event);
+      evidence.recordHeartbeat(event.source);
 
       if (agent.transport.heartbeat_resets_application_idle === true) resetApplicationIdle();
 
@@ -108,7 +108,7 @@ const consumeResponse = async (
     }
 
     const raw = parseEventData(event.source, framing);
-    evidence.record(event, raw);
+    evidence.recordEvent(event.source, raw);
     resetApplicationIdle();
 
     try {

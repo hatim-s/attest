@@ -1,4 +1,4 @@
-import { isString } from '../../internal/json-value.js';
+import { isString } from '@attest/contracts';
 import { createServer, type RequestListener, type Server } from 'node:http';
 
 type LoopbackServer = {

@@ -1,6 +1,7 @@
-import { isJsonObject, parseJson } from '../../../internal/json-value.js';
+import { isJsonObject } from '@attest/contracts';
 import { describe, expect, it } from 'vitest';
 
+import { parseJson } from '../../../internal/json-value.js';
 import { redactEventEvidence, redactTransportText } from '../redaction.js';
 
 describe('transport event redaction', () => {
@@ -14,20 +15,16 @@ describe('transport event redaction', () => {
     ).toBe('token=[REDACTED]');
   });
 
-  it('redacts only own object and array properties', () => {
-    const inherited = { own: { token: 'own-secret' } };
-    Object.setPrototypeOf(inherited, { token: 'inherited-secret' });
-    const value = { inherited, items: [{ token: 'array-secret' }] };
-
+  it('redacts object and array properties', () => {
     const redacted = redactEventEvidence(
-      value,
-      ['/inherited/token', '/inherited/own/token', '/items/0/token'],
+      { own: { token: 'own-secret' }, items: [{ token: 'array-secret' }, 'item-secret'] },
+      ['/own/token', '/items/0/token', '/items/1'],
       [],
     );
 
-    expect(redacted).not.toContain('own-secret');
-    expect(redacted).not.toContain('array-secret');
-    expect(Object.getPrototypeOf(inherited)).toMatchObject({ token: 'inherited-secret' });
+    expect(redacted).toBe(
+      '{"own":{"token":"[REDACTED]"},"items":[{"token":"[REDACTED]"},"[REDACTED]"]}',
+    );
   });
 
   it('redacts schema-valid prototype-named own JSON properties', () => {

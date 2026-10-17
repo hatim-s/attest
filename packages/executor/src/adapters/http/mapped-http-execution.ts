@@ -1,11 +1,11 @@
 import type { AgentResponseCandidate } from '../../internal/agent-response-candidate.js';
-import { AGENT_PROTOCOL, type JsonValue } from '@attest/contracts';
+import { AGENT_PROTOCOL, isNumber, isString, type JsonValue } from '@attest/contracts';
 
 import { AgentInvocationError, abortedError } from '../../errors.js';
 import { abortableWait } from '../../internal/abortable-wait.js';
 import { startTimer } from '../../internal/elapsed.js';
 import { createFailedAttempt } from '../../internal/failed-attempt.js';
-import { isJsonValue, isNumber, isString, parseJson } from '../../internal/json-value.js';
+import { parseJson } from '../../internal/json-value.js';
 import { extractRemoteError } from '../../internal/remote-error.js';
 import { retryBackoffDelay } from '../../internal/retry-backoff.js';
 import type { InvocationAttempt } from '../../types.js';
@@ -88,7 +88,7 @@ const extractAgentResponse = (
 
   const result = readJsonPointer(raw, extraction.result_pointer);
 
-  if (result === undefined || !isJsonValue(result)) {
+  if (result === undefined) {
     throw new AgentInvocationError(
       'invalid_envelope',
       'Mapped HTTP result extraction did not produce a JSON value.',

@@ -1,9 +1,14 @@
 import { isDeepStrictEqual } from 'node:util';
 
-import type { AgentResource, JsonValue, WebSocketErrorClassification } from '@attest/contracts';
+import {
+  isString,
+  type AgentResource,
+  type JsonValue,
+  type WebSocketErrorClassification,
+} from '@attest/contracts';
 
 import { AgentInvocationError } from '../../errors.js';
-import { isJsonValue, isString, parseJson } from '../../internal/json-value.js';
+import { parseJson } from '../../internal/json-value.js';
 import { extractRemoteError } from '../../internal/remote-error.js';
 import { readJsonPointer } from '../http/json-pointer.js';
 
@@ -97,16 +102,6 @@ const interpretServerMessage = (
     isDeepStrictEqual(value, acknowledgementValue),
   );
 
-  if (rawTrace !== undefined && !isJsonValue(rawTrace)) {
-    return {
-      acknowledgement,
-      failure: {
-        classification: 'trace_extraction_failed',
-        error: new AgentInvocationError('invalid_envelope', 'WebSocket trace extraction failed.'),
-      },
-    };
-  }
-
   const progress: Pick<MessageInterpretation, 'acknowledgement' | 'trace'> = { acknowledgement };
 
   if (rawTrace !== undefined) progress.trace = rawTrace;
@@ -150,10 +145,6 @@ const interpretServerMessage = (
   }
 
   if (hasResult) {
-    if (!isJsonValue(result)) {
-      return invalid('result_extraction_failed', 'WebSocket result extraction failed.');
-    }
-
     return {
       ...progress,
       terminal: { kind: 'result', value: result },

@@ -1,10 +1,9 @@
 import type { AgentResponseCandidate } from '../../internal/agent-response-candidate.js';
 import { isDeepStrictEqual } from 'node:util';
 
-import { AGENT_PROTOCOL, type JsonValue } from '@attest/contracts';
+import { AGENT_PROTOCOL, isString, type JsonValue } from '@attest/contracts';
 
 import { AgentInvocationError } from '../../errors.js';
-import { isJsonValue, isString } from '../../internal/json-value.js';
 import { extractRemoteError } from '../../internal/remote-error.js';
 import { readJsonPointer } from '../http/json-pointer.js';
 import type { StreamAgentResource } from './stream-adapter.js';
@@ -44,7 +43,7 @@ const createTerminalExtractor = (agent: StreamAgentResource): TerminalExtractor 
       return;
     }
 
-    if (!isJsonValue(chunk)) throw invalid('Streaming array accumulation requires JSON chunks.');
+    if (chunk === undefined) throw invalid('Streaming array accumulation requires JSON chunks.');
     incrementalArray.push(chunk);
   };
 
@@ -88,7 +87,7 @@ const createTerminalExtractor = (agent: StreamAgentResource): TerminalExtractor 
 
     const output = terminalOutput(payload);
 
-    if (!isJsonValue(output)) throw invalid('Streaming terminal result is not a JSON value.');
+    if (output === undefined) throw invalid('Streaming terminal result is not a JSON value.');
 
     return { protocol: AGENT_PROTOCOL, output, ...traceField };
   };
