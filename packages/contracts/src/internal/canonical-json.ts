@@ -1,4 +1,4 @@
-import { z } from 'zod';
+import type { z } from 'zod';
 import type { JsonValue } from '../project/shared.js';
 
 const isJsonObject = (value: JsonValue): value is Record<string, JsonValue> =>
@@ -11,11 +11,9 @@ const sortObjectKeys = (_key: string, value: JsonValue): JsonValue =>
     : value;
 
 /** Serializes JSON so insertion order does not affect equality or output. */
-// BOUNDARY: Contract and schema values are encoded as JSON, then validated before canonical ordering.
-const canonicalJson = (value: unknown, indentation?: number): string => {
-  const json = z.json().parse(JSON.parse(JSON.stringify(value)));
-
-  return JSON.stringify(json, sortObjectKeys, indentation);
-};
+const canonicalJson = (
+  value: JsonValue | z.core.JSONSchema.BaseSchema,
+  indentation?: number,
+): string => JSON.stringify(value, sortObjectKeys, indentation);
 
 export { canonicalJson };

@@ -1,10 +1,9 @@
-import type { JsonValue } from '../project/shared.js';
 import {
   portableProjectBundleSchema,
   cloudRunRequestSchema,
   cloudQueueMessageSchema,
 } from '../cloud/project-bundle.js';
-import { z } from 'zod';
+import type { z } from 'zod';
 
 import { canonicalJson } from '../internal/canonical-json.js';
 
@@ -36,7 +35,7 @@ import {
 } from '../agent/websocket-contract.js';
 import { webSocketAttemptEvidenceSchema } from '../agent/websocket-evidence.js';
 
-type JsonSchemaFragment = Readonly<Record<string, JsonValue>>;
+type JsonSchemaFragment = z.core.JSONSchema.BaseSchema;
 
 type ContractJsonSchemaDefinition = {
   schema: z.ZodType;
@@ -190,27 +189,6 @@ const CONTRACT_JSON_SCHEMAS = new Map<string, ContractJsonSchemaDefinition>([
   ],
 ]);
 
-const isJsonObject = (value: unknown): value is Record<string, JsonValue> =>
-  value !== null && typeof value === 'object' && !Array.isArray(value);
-
-/** Deep-merges invariant keywords into a generated schema without mutating either input. */
-const mergeJsonSchemaFragments = (
-  generated: Readonly<Record<string, JsonValue>>,
-  fragment: JsonSchemaFragment,
-) => {
-  const merged = { ...generated };
-
-  for (const [key, fragmentValue] of Object.entries(fragment)) {
-    const generatedValue = generated[key];
-    merged[key] =
-      isJsonObject(generatedValue) && isJsonObject(fragmentValue)
-        ? mergeJsonSchemaFragments(generatedValue, fragmentValue)
-        : fragmentValue;
-  }
-
-  return merged;
-};
-
 /** Serializes one registered contract as deterministic Draft 2020-12 JSON Schema. */
 const serializeContractSchema = (fileName: string): string => {
   const definition = CONTRACT_JSON_SCHEMAS.get(fileName);
@@ -224,8 +202,7 @@ const serializeContractSchema = (fileName: string): string => {
     unrepresentable: 'any',
   });
 
-  const parsed = z.record(z.string(), z.json()).parse(generated);
-  const merged = mergeJsonSchemaFragments(parsed, definition.invariants ?? {});
+  const merged = { ...generated, ...definition.invariants };
 
   return `${canonicalJson(merged, 2)}\n`;
 };
