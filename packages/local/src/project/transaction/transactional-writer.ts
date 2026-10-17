@@ -11,6 +11,7 @@ import { ProjectTransactionError } from './project-transaction-error.js';
 import { createSemanticProjectDiff } from './semantic-project-diff.js';
 import {
   cleanupPreparedTransaction,
+  completePreparedTransaction,
   prepareTransaction,
   readByteHash,
   recoverProjectTransactions,
@@ -200,7 +201,10 @@ const rollbackAfterFailure = async (
       'Transaction failed and automatic rollback could not complete.',
       {
         details: { transaction_id: prepared.journal.transaction_id },
-        cause: rollbackFailure,
+        cause: new AggregateError(
+          [cause, rollbackFailure],
+          'Transaction and rollback both failed.',
+        ),
       },
     );
   }
@@ -275,12 +279,10 @@ const applyProjectMutation = async (
       return { ...state.result, committed: true };
     }
 
-    const prepared = await prepareTransaction(
-      request.projectRoot,
-      changes,
-      state.before.projectHash,
-      state.after.projectHash,
-    );
+    const prepared = await prepareTransaction(request.projectRoot, changes, {
+      projectHashBefore: state.before.projectHash,
+      projectHashAfter: state.after.projectHash,
+    });
 
     await runPreparedTransaction({
       root: request.projectRoot,

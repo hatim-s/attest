@@ -1,3 +1,5 @@
+import { dirname } from 'node:path';
+import { syncPath } from '../internal/sync-path.js';
 import { randomUUID } from 'node:crypto';
 import { readFile, rename, unlink, writeFile } from 'node:fs/promises';
 
@@ -56,12 +58,14 @@ const writeCloudLink = async (root: string, link: CloudLink): Promise<void> => {
   const temporary = `${path}.${randomUUID()}.tmp`;
 
   try {
-    await writeFile(temporary, `${JSON.stringify(cloudLinkSchema.parse(link), null, 2)}\n`, {
+    await writeFile(temporary, `${JSON.stringify(link, null, 2)}\n`, {
       flag: 'wx',
       mode: 0o600,
     });
+    await syncPath(temporary);
     await cloudLinkPath(root);
     await rename(temporary, path);
+    await syncPath(dirname(path));
   } finally {
     await unlink(temporary).catch((cause: unknown) => {
       if (errnoCode(cause) !== 'ENOENT') throw cause;

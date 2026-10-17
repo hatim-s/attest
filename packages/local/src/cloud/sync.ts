@@ -10,15 +10,12 @@ import { loadProject, type LoadedProject } from '../project/project-loader/index
 import { acquireProjectLock, releaseProjectLock } from '../project/transaction/project-lock.js';
 import { resolveSafeProjectPath } from '../project/transaction/project-path.js';
 import {
-  cleanupPreparedTransaction,
   prepareTransaction,
   readByteHash,
   recoverProjectTransactions,
-  rollbackPreparedTransaction,
-  writeTransactionJournal,
   type TransactionFileChange,
 } from '../project/transaction/transaction-journal.js';
-import { publishPreparedTransaction } from '../project/transaction/transactional-writer.js';
+import { runPreparedTransaction } from '../project/transaction/transactional-writer.js';
 import {
   readCloudLink,
   resolveCloudProject,
@@ -266,46 +263,39 @@ const pullCloudProject = async (options: CloudProjectOptions & { revisionId?: st
     await requireUnchangedLink(root, link);
     const changes = await planPullChanges(root, link.file_hashes, response.bundle.files);
 
-    const prepared = await prepareTransaction(
+    const prepared = await prepareTransaction(root, changes, {
+      projectHashBefore: link.revision_id ?? '',
+      projectHashAfter: response.revision.id,
+      completion: {
+        path: '.attest/cloud.json',
+        contents: `${JSON.stringify({ ...link, revision_id: response.revision.id, file_hashes: fileHashes(response.bundle.files) }, null, 2)}\n`,
+      },
+    });
+
+    await runPreparedTransaction({
       root,
-      changes,
-      link.revision_id ?? '',
-      response.revision.id,
-    );
+      prepared,
+      beforePublish: () => {
+        // A non-Attest editor may write after conflict planning but before staging.
+        for (const entry of prepared.journal.entries) {
+          const incoming = response.bundle.files[entry.path];
+          const nextHash = incoming === undefined ? null : byteHash(incoming);
 
-    try {
-      // A non-Attest editor may write after conflict planning but before staging.
-      for (const entry of prepared.journal.entries) {
-        const incoming = response.bundle.files[entry.path];
-        const nextHash = incoming === undefined ? null : byteHash(incoming);
-
-        if (
-          entry.original_hash !== (link.file_hashes[entry.path] ?? null) &&
-          entry.original_hash !== nextHash
-        ) {
-          throw new LocalError(
-            'project_changed',
-            'A local file changed while cloud pull was staging.',
-            { path: entry.path },
-          );
+          if (
+            entry.original_hash !== (link.file_hashes[entry.path] ?? null) &&
+            entry.original_hash !== nextHash
+          ) {
+            throw new LocalError(
+              'project_changed',
+              'A local file changed while cloud pull was staging.',
+              { path: entry.path },
+            );
+          }
         }
-      }
-
-      await publishPreparedTransaction(root, prepared);
-      await loadProject({ project: root });
-      prepared.journal.status = 'committed';
-      await writeTransactionJournal(prepared);
-      await cleanupPreparedTransaction(root, prepared);
-    } catch (error: unknown) {
-      await rollbackPreparedTransaction(root, prepared);
-      await cleanupPreparedTransaction(root, prepared);
-      throw error;
-    }
-
-    await writeCloudLink(root, {
-      ...link,
-      revision_id: response.revision.id,
-      file_hashes: fileHashes(response.bundle.files),
+      },
+      verify: async () => {
+        await loadProject({ project: root });
+      },
     });
 
     return {

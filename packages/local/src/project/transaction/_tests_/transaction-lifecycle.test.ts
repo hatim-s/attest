@@ -40,8 +40,7 @@ it.each(['preparing', 'cleanup'])('removes interrupted %s residue under the lock
     const prepared = await prepareTransaction(
       root,
       [{ type: 'write', path: 'attest.project.json', contents: 'new' }],
-      'before',
-      'after',
+      { projectHashBefore: 'before', projectHashAfter: 'after' },
     );
 
     expect(await recoverProjectTransactions(root, lock)).toEqual([
@@ -61,12 +60,10 @@ it('cleans a failed preparation without publishing a recoverable directory', asy
     await mkdir(join(root, 'attest'));
     await mkdir(join(root, 'attest/not-a-file'));
     await expect(
-      prepareTransaction(
-        root,
-        [{ type: 'write', path: 'attest/not-a-file', contents: 'new' }],
-        'before',
-        'after',
-      ),
+      prepareTransaction(root, [{ type: 'write', path: 'attest/not-a-file', contents: 'new' }], {
+        projectHashBefore: 'before',
+        projectHashAfter: 'after',
+      }),
     ).rejects.toMatchObject({ code: 'project_invalid' });
     expect(await readdir(join(root, '.attest/transactions'))).toEqual([]);
     expect(await recoverProjectTransactions(root, lock)).toEqual([]);
@@ -85,8 +82,7 @@ it('retains committed bytes and recovery evidence when cleanup fails', async () 
     const prepared = await prepareTransaction(
       root,
       [{ type: 'write', path: 'attest.project.json', contents: 'new' }],
-      'before',
-      'after',
+      { projectHashBefore: 'before', projectHashAfter: 'after' },
     );
 
     collision = join(transactionsRoot, `.cleanup-${prepared.journal.transaction_id}`);
