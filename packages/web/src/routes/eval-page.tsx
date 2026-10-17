@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import { getRouteApi, Link, useNavigate } from '@tanstack/react-router';
 import { useSuiteHistory } from '../api/queries.js';
 import { AnalyticsChart } from '../components/runs/analytics-chart.js';
@@ -15,11 +16,18 @@ const EvalPage = () => {
   const navigate = useNavigate();
   const historyQuery = useSuiteHistory(suiteName, limit);
   const history = historyQuery.data;
-  const points = [...(history?.points ?? [])].reverse();
+  const points = useMemo(() => [...(history?.points ?? [])].reverse(), [history?.points]);
 
-  const labels = points.map(
-    (point) =>
-      `${point.runId}\nBranch: ${point.gitBranch ?? 'Unknown'}\nSHA: ${point.gitSha ?? 'Unknown'}`,
+  const { labels, passRates, meanScores } = useMemo(
+    () => ({
+      labels: points.map(
+        (point) =>
+          `${point.runId}\nBranch: ${point.gitBranch ?? 'Unknown'}\nSHA: ${point.gitSha ?? 'Unknown'}`,
+      ),
+      passRates: points.map((point) => point.aggregate.passRate),
+      meanScores: points.map((point) => point.aggregate.meanScore),
+    }),
+    [points],
   );
 
   return (
@@ -65,14 +73,14 @@ const EvalPage = () => {
                 <AnalyticsChart
                   title="Suite pass rate"
                   labels={labels}
-                  values={points.map((point) => point.aggregate.passRate)}
+                  values={passRates}
                   measure="Pass rate (%)"
                   formatValue={formatPercent}
                 />
                 <AnalyticsChart
                   title="Suite mean score"
                   labels={labels}
-                  values={points.map((point) => point.aggregate.meanScore)}
+                  values={meanScores}
                   measure="Mean score"
                   formatValue={formatScore}
                 />

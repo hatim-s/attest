@@ -80,7 +80,7 @@ const useChart = (
     resizeObserver.observe(container);
 
     const themeObserver = new MutationObserver(() =>
-      chart.setOption(optionRef.current(readPalette()), true),
+      chart.setOption(optionRef.current(readPalette())),
     );
 
     themeObserver.observe(document.documentElement, { attributeFilter: ['data-theme'] });
@@ -95,7 +95,7 @@ const useChart = (
 
   useEffect(() => {
     optionRef.current = createOption;
-    chartRef.current?.setOption(createOption(readPalette()), true);
+    chartRef.current?.setOption(createOption(readPalette()));
   }, [createOption]);
 };
 

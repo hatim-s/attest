@@ -1,4 +1,4 @@
-import { useCallback, useRef } from 'react';
+import { useCallback, useMemo, useRef } from 'react';
 import type { CaseSummary } from '@attest/core/records';
 import type { EChartsCoreOption } from 'echarts/core';
 import { createDurationHistogram } from './loaded-analytics.js';
@@ -7,11 +7,15 @@ import { useChart, type ChartPalette } from './distribution-charts.js';
 /** Keeps durations in milliseconds so equal-width bars represent equal elapsed intervals. */
 const DurationDistribution = ({ cases }: { cases: CaseSummary[] }) => {
   const ref = useRef<HTMLDivElement>(null);
-  const bins = createDurationHistogram(cases);
+  const bins = useMemo(() => createDurationHistogram(cases), [cases]);
 
-  const labels = bins.map(
-    (bin, index) =>
-      `${bin.lowerMs} to ${bin.upperMs}${index === bins.length - 1 ? ' inclusive' : ' exclusive'}`,
+  const labels = useMemo(
+    () =>
+      bins.map(
+        (bin, index) =>
+          `${bin.lowerMs} to ${bin.upperMs}${index === bins.length - 1 ? ' inclusive' : ' exclusive'}`,
+      ),
+    [bins],
   );
 
   const option = useCallback(

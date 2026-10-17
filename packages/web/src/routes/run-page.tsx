@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useMemo } from 'react';
 import { getRouteApi, Outlet } from '@tanstack/react-router';
 import { useRun, useCases, useRunSuites, useRuns } from '../api/queries.js';
 import { SuiteTable } from '../components/runs/suite-table.js';
@@ -20,7 +20,12 @@ const RunPage = () => {
   const runsQuery = useRuns();
   const suitesQuery = useRunSuites(tab === 'suites' ? runId : undefined, runQuery.data?.status);
   const casesQuery = useCases(runId, runQuery.data?.status);
-  const cases = casesQuery.data?.pages.flatMap((page) => page.items) ?? [];
+
+  const cases = useMemo(
+    () => casesQuery.data?.pages.flatMap((page) => page.items) ?? [],
+    [casesQuery.data],
+  );
+
   useEffect(() => {
     if (
       tab === 'distributions' &&

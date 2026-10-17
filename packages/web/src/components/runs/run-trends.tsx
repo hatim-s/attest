@@ -1,18 +1,43 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Link } from '@tanstack/react-router';
 import type { RunRecord } from '@attest/core/records';
 import { AnalyticsChart } from './analytics-chart.js';
 import { createRunTrends } from './loaded-analytics.js';
 import { formatPercent } from '../../lib/format.js';
 
+/** Keeps chart arrays stable while the run page polls unchanged results. */
+const TrendChart = ({ group }: { group: ReturnType<typeof createRunTrends>['groups'][number] }) => {
+  const { labels, values } = useMemo(
+    () => ({
+      labels: group.points.map(({ run }) => `${run.id}\n${group.name}`),
+      values: group.points.map(({ passRate }) => passRate),
+    }),
+    [group],
+  );
+
+  return (
+    <AnalyticsChart
+      title={group.name}
+      measure="Pass rate (%)"
+      formatValue={formatPercent}
+      labels={labels}
+      values={values}
+    />
+  );
+};
+
 /** Facets groups so branch or label identity never depends on a generated or recycled hue. */
 const RunTrends = ({ runs }: { runs: RunRecord[] }) => {
   const [labelKey, setLabelKey] = useState('');
   const keys = [...new Set(runs.flatMap((run) => Object.keys(run.labels ?? {})))].sort();
 
-  const trends = createRunTrends(
-    runs,
-    labelKey === '' ? { kind: 'branch' } : { kind: 'label', key: labelKey },
+  const trends = useMemo(
+    () =>
+      createRunTrends(
+        runs,
+        labelKey === '' ? { kind: 'branch' } : { kind: 'label', key: labelKey },
+      ),
+    [runs, labelKey],
   );
 
   return (
@@ -36,14 +61,7 @@ const RunTrends = ({ runs }: { runs: RunRecord[] }) => {
       </p>
       <div className="chart-grid">
         {trends.groups.map((group) => (
-          <AnalyticsChart
-            key={group.name}
-            title={group.name}
-            measure="Pass rate (%)"
-            formatValue={formatPercent}
-            labels={group.points.map(({ run }) => `${run.id}\n${group.name}`)}
-            values={group.points.map(({ passRate }) => passRate)}
-          />
+          <TrendChart key={group.name} group={group} />
         ))}
       </div>
       {trends.groups.length === 0 ? (
