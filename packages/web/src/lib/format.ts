@@ -28,7 +28,11 @@ const formatPassRate = (run: RunRecord): string => {
   return formatPercent(run.summary.passedCases / run.summary.totalCases);
 };
 
+/** Counts a noun for prose, so a single run never reads as "1 runs". */
+const formatCount = (count: number, noun: string): string =>
+  `${count} ${noun}${count === 1 ? '' : 's'}`;
+
 /** Truncates an opaque identifier for display. */
 const shortId = (value: string, length = 8): string => value.slice(0, length);
 
-export { formatDateTime, formatDuration, formatPassRate, formatPercent, shortId };
+export { formatCount, formatDateTime, formatDuration, formatPassRate, formatPercent, shortId };

@@ -40,7 +40,7 @@ const SummaryCards = ({ run }: { run: RunRecord }) => {
     {
       label: 'Finished',
       value: run.finishedAt === undefined ? 'In progress' : formatDateTime(run.finishedAt),
-      detail: run.gitBranch ?? 'local workspace',
+      detail: run.gitBranch ?? 'No git branch',
     },
   ];
 

@@ -103,12 +103,12 @@ const DistributionCharts = ({ cases, isLoading, totalCases }: DistributionCharts
       </div>
       <div className="chart-grid">
         <ChartCard
-          title="Average metric score"
+          title="Mean score"
           detail={`${cases.filter(({ score }) => score !== undefined).length} scored cases`}
           option={scoreOption}
           table={
             <table className="analytics-table">
-              <caption>Score histogram</caption>
+              <caption>Cases by mean metric score</caption>
               <thead>
                 <tr>
                   <th scope="col">Score</th>
@@ -127,12 +127,12 @@ const DistributionCharts = ({ cases, isLoading, totalCases }: DistributionCharts
           }
         />
         <ChartCard
-          title="Case pass rate"
-          detail="Mutually exclusive final verdicts"
+          title="Verdicts"
+          detail="One final verdict per case"
           option={verdictOption}
           table={
             <table className="analytics-table">
-              <caption>Final verdict counts</caption>
+              <caption>Cases by final verdict</caption>
               <thead>
                 <tr>
                   <th scope="col">Verdict</th>

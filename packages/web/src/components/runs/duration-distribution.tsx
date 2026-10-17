@@ -59,12 +59,10 @@ const DurationDistribution = ({ cases }: { cases: CaseSummary[] }) => {
   return (
     <ChartCard
       title="Case durations by verdict"
+      detail="Each range includes its lower bound. The last range also includes its upper bound."
       option={option}
       table={
         <table className="analytics-table">
-          <caption>
-            Milliseconds. Lower bounds inclusive; upper bounds exclusive except the final bin.
-          </caption>
           <thead>
             <tr>
               <th scope="col">Duration</th>

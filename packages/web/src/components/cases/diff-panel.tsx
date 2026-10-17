@@ -7,7 +7,7 @@ import type {
   RunDiff,
   RunRecord,
 } from '@attest/core/records';
-import { formatPercent, shortId } from '../../lib/format.js';
+import { formatCount, formatPercent, shortId } from '../../lib/format.js';
 import { Badge, ErrorNotice, Loading } from '../shared/ui.js';
 
 type DiffPanelProps = {
@@ -116,12 +116,12 @@ const DiffPanel = ({
                 <p className="eyebrow">Verdict transitions</p>
                 <h3>Baseline → candidate</h3>
               </div>
-              <span>{diff.summary.flakySuspectCount} flaky suspects</span>
+              <span>{formatCount(diff.summary.flakySuspectCount, 'flaky suspect')}</span>
               {diff.summary.coverage !== undefined && (
                 <span>
-                  {diff.summary.coverage.sharedCases} shared cases compared;{' '}
-                  {diff.summary.coverage.baseOnlyCases} baseline-only,{' '}
-                  {diff.summary.coverage.candidateOnlyCases} candidate-only
+                  {formatCount(diff.summary.coverage.sharedCases, 'shared case')},{' '}
+                  {diff.summary.coverage.baseOnlyCases} only in baseline,{' '}
+                  {diff.summary.coverage.candidateOnlyCases} only in candidate
                 </span>
               )}
             </div>

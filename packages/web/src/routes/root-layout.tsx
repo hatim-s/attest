@@ -66,7 +66,7 @@ const RootLayout = () => {
               Evals
             </Link>
           </nav>
-          <Badge tone="local">{mode.kind === 'live' ? '127.0.0.1' : 'static report'}</Badge>
+          {mode.kind === 'snapshot' ? <Badge tone="local">Static report</Badge> : null}
           <Button onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} tone="ghost">
             {theme === 'dark' ? 'Light mode' : 'Dark mode'}
           </Button>

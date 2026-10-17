@@ -5,8 +5,7 @@ import { formatDuration, formatPercent } from '../../lib/format.js';
 /** Keeps server aggregates intact so every suite view uses the same definitions. */
 const SuiteTable = ({ suites }: { suites: SuiteAggregate[] }) => (
   <div className="case-table-frame analytics-table-scroll">
-    <table className="analytics-table">
-      <caption>Suites sorted by name</caption>
+    <table className="analytics-table" aria-label="Suites">
       <thead>
         <tr>
           {[

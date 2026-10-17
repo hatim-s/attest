@@ -9,7 +9,7 @@ const MetricErrorCases = ({ cases, runId }: { cases: CaseSummary[]; runId: strin
   return (
     <div className="case-table-frame analytics-table-scroll">
       <table className="analytics-table">
-        <caption>Cases with metric errors in loaded summaries</caption>
+        <caption>Cases with metric errors</caption>
         <thead>
           <tr>
             <th scope="col">Suite</th>
@@ -40,9 +40,7 @@ const MetricErrorCases = ({ cases, runId }: { cases: CaseSummary[]; runId: strin
           ))}
         </tbody>
       </table>
-      {errors.length === 0 ? (
-        <p className="empty-compact">No metric errors in loaded cases.</p>
-      ) : null}
+      {errors.length === 0 ? <p className="empty-compact">No metric errors.</p> : null}
     </div>
   );
 };

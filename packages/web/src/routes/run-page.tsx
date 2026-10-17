@@ -47,7 +47,7 @@ const RunSuites = ({ run }: { run: RunRecord }) => {
   return (
     <section aria-label="Suites">
       {run.status === 'running' ? (
-        <p className="empty-compact">This run is running. Suite numbers are partial.</p>
+        <p className="empty-compact">Still running. Counts cover the cases finished so far.</p>
       ) : null}
       {suitesQuery.isLoading ? <Loading label="Loading suites" /> : null}
       {suitesQuery.error !== null ? <ErrorNotice error={suitesQuery.error} /> : null}

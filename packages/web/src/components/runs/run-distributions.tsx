@@ -35,9 +35,7 @@ const RunDistributions = ({ run }: { run: RunRecord }) => {
         totalCases={run.summary?.totalCases ?? cases.length}
       />
       {run.status === 'running' ? (
-        <p className="empty-compact">
-          This run is running. Distributions and metric-error cases are partial.
-        </p>
+        <p className="empty-compact">Still running. Charts cover the cases finished so far.</p>
       ) : null}
       <DurationDistribution cases={cases} />
       <MetricErrorCases cases={cases} runId={run.id} />

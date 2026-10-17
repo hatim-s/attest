@@ -2,7 +2,7 @@ import type { RunRecord } from '@attest/core/records';
 import { useApiClient } from '../../api/api-client-context.js';
 import { SummaryCards } from './summary-cards.js';
 import { Badge } from '../shared/ui.js';
-import { shortId } from '../../lib/format.js';
+import { formatCount, shortId } from '../../lib/format.js';
 
 /** Keeps the run context visible on every run tab and on the comparison page. */
 const RunHeader = ({ run }: { run: RunRecord }) => {
@@ -22,15 +22,13 @@ const RunHeader = ({ run }: { run: RunRecord }) => {
       </section>
       <SummaryCards run={run} />
       {mode.kind === 'snapshot' ? (
-        <section className="empty-compact" aria-label="Report contents">
-          {mode.includedCases}{' '}
+        <p className="empty-compact">
+          This report includes{' '}
           {run.summary === undefined
-            ? 'cases included; total unavailable.'
-            : `of ${run.summary.totalCases} cases included.`}
-          {mode.truncated
-            ? ' This report is truncated. Omitted cases and traces are unavailable; distributions cover only included cases.'
-            : ''}
-        </section>
+            ? formatCount(mode.includedCases, 'case')
+            : `${mode.includedCases} of ${formatCount(run.summary.totalCases, 'case')}`}
+          .{mode.truncated ? ' Charts and tables cover only those.' : ''}
+        </p>
       ) : null}
     </>
   );

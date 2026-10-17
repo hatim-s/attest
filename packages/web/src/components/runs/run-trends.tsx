@@ -3,7 +3,7 @@ import { Link } from '@tanstack/react-router';
 import type { RunRecord } from '@attest/core/records';
 import { AnalyticsChart } from './analytics-chart.js';
 import { createRunTrends } from './loaded-analytics.js';
-import { formatPercent } from '../../lib/format.js';
+import { formatCount, formatPercent, shortId } from '../../lib/format.js';
 
 /** Keeps chart arrays stable while the run page polls unchanged results. */
 const TrendChart = ({ group }: { group: ReturnType<typeof createRunTrends>['groups'][number] }) => {
@@ -18,7 +18,7 @@ const TrendChart = ({ group }: { group: ReturnType<typeof createRunTrends>['grou
   return (
     <AnalyticsChart
       title={group.name}
-      measure="Pass rate (%)"
+      measure="Pass rate"
       min={0}
       max={1}
       formatValue={formatPercent}
@@ -43,8 +43,8 @@ const RunTrends = ({ runs }: { runs: RunRecord[] }) => {
   );
 
   return (
-    <section className="distribution-panel" aria-label="Loaded run trends">
-      <h2>Loaded run trends</h2>
+    <section className="distribution-panel" aria-label="Recent runs">
+      <h2>Pass rate by {labelKey === '' ? 'branch' : labelKey}</h2>
       <label>
         Group by{' '}
         <select value={labelKey} onChange={(event) => setLabelKey(event.target.value)}>
@@ -57,8 +57,14 @@ const RunTrends = ({ runs }: { runs: RunRecord[] }) => {
         </select>
       </label>
       <p className="empty-compact">
-        Only the {runs.length} loaded runs are included. Skipped {trends.runningRuns} running,{' '}
-        {trends.missingSummary} without a summary and {trends.emptyRuns} with zero cases.
+        {[
+          formatCount(runs.length, 'recent run'),
+          trends.runningRuns > 0 ? `${trends.runningRuns} still running` : '',
+          trends.missingSummary > 0 ? `${trends.missingSummary} without a summary` : '',
+          trends.emptyRuns > 0 ? `${trends.emptyRuns} with no cases` : '',
+        ]
+          .filter((part) => part !== '')
+          .join(', ')}
       </p>
       <div className="chart-grid">
         {trends.groups.map((group) => (
@@ -66,11 +72,11 @@ const RunTrends = ({ runs }: { runs: RunRecord[] }) => {
         ))}
       </div>
       {trends.groups.length === 0 ? (
-        <p className="empty-compact">No loaded runs have a usable summary.</p>
+        <p className="empty-compact">No finished runs with cases yet.</p>
       ) : (
         <div className="case-table-frame analytics-table-scroll">
           <table className="analytics-table">
-            <caption>Loaded run pass rates, oldest first within each group</caption>
+            <caption>Oldest first within each group</caption>
             <thead>
               <tr>
                 <th scope="col">Group</th>
@@ -88,8 +94,9 @@ const RunTrends = ({ runs }: { runs: RunRecord[] }) => {
                         to="/runs/$runId"
                         params={{ runId: run.id }}
                         search={(previous) => ({ ...previous, tab: 'cases' })}
+                        title={run.id}
                       >
-                        {run.id}
+                        {shortId(run.id)}
                       </Link>
                     </td>
                     <td>{formatPercent(passRate)}</td>
