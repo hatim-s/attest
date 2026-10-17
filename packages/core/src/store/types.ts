@@ -1,3 +1,4 @@
+import type { PageQuery, RunPage, CaseSummaryPage } from '../records/page-schemas.js';
 import type { CaseSummary, CaseVerdict } from '../records/projection-schemas.js';
 import type { CacheStore } from './cache.js';
 import type {
@@ -19,20 +20,21 @@ interface RunIdentity {
   createdAt: string;
 }
 
-/** Defines durable run writes and queries. */
-interface RunStore {
+/** The read operations every run data host implements. Writes stay on RunStore. */
+interface RunSource {
+  listRuns(query?: PageQuery): Promise<RunPage>;
+  getRun(runId: string): Promise<RunRecord>;
+  listCaseSummaries(runId: string, query?: PageQuery): Promise<CaseSummaryPage>;
+  getCase(runId: string, suiteName: string, caseId: string): Promise<CaseRecord>;
+  getRunWithCases(runId: string): Promise<{ run: RunRecord; cases: CaseRecord[] }>;
+}
+
+/** Defines durable run writes; reads come from RunSource. */
+interface RunStore extends RunSource {
   createRun(metadata: RunMetadata, identity?: RunIdentity): Promise<RunRecord>;
   // BOUNDARY: Hosts validate untrusted execution and metric records against the store schemas before writing their transaction.
   recordCase(runId: string, execution: unknown, evaluations: unknown): Promise<void>;
   finalizeRun(runId: string, status: Exclude<RunStatus, 'running'>): Promise<RunRecord>;
-  getRun(runId: string): Promise<RunRecord>;
-  listRuns(limit?: number): Promise<RunRecord[]>;
-  getRunWithCases(runId: string): Promise<{ run: RunRecord; cases: CaseRecord[] }>;
-  listCaseSummaries(
-    runId: string,
-    options?: { cursor?: string; limit?: number },
-  ): Promise<{ items: CaseSummary[]; nextCursor?: string }>;
-  getCase(runId: string, suiteName: string, caseId: string): Promise<CaseRecord>;
   close(): Promise<void>;
 }
 
@@ -51,6 +53,7 @@ export {
   type RunMetadata,
   type RunIdentity,
   type RunRecord,
+  type RunSource,
   type RunStore,
   type RunStatus,
   type RunSummary,

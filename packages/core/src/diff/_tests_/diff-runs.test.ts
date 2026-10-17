@@ -2,7 +2,7 @@ import { EVAL_RUN_SCHEMA_ID } from '@attest/contracts';
 import { describe, expect, it } from 'vitest';
 
 import { StoreError } from '../../store/store-error.js';
-import type { RunRecord, RunStore } from '../../store/types.js';
+import type { RunRecord, RunSource } from '../../store/types.js';
 import { diffRuns } from '../diff-runs.js';
 
 const runRecord = (id: string, schemaId: string, configJson: string): RunRecord => ({
@@ -15,17 +15,7 @@ const runRecord = (id: string, schemaId: string, configJson: string): RunRecord 
   status: 'completed',
 });
 
-const unused = () => Promise.reject(new Error('diffRuns only reads runs with cases'));
-
-const storeWith = (runs: RunRecord[]): RunStore => ({
-  createRun: unused,
-  recordCase: unused,
-  finalizeRun: unused,
-  getRun: unused,
-  listRuns: unused,
-  listCaseSummaries: unused,
-  getCase: unused,
-  close: unused,
+const storeWith = (runs: RunRecord[]): Pick<RunSource, 'getRunWithCases'> => ({
   getRunWithCases: (runId) => {
     const run = runs.find((candidate) => candidate.id === runId);
 

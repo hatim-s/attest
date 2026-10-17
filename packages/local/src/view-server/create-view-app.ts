@@ -78,7 +78,9 @@ const createViewApp = (options: CreateViewAppOptions): ViewApp => {
   app.get('/', (context) => context.html(options.indexHtml ?? DEFAULT_INDEX_HTML));
   app.get('/api/health', (context) => context.json({ schema: API_SCHEMA_ID, ok: true }));
   app.get('/api/runs', async (context) => {
-    const runs = await options.store.runs.listRuns(parseLimit(context.req.query('limit')));
+    const runs = (
+      await options.store.runs.listRuns({ limit: parseLimit(context.req.query('limit')) })
+    ).items;
 
     return context.json({ schema: API_SCHEMA_ID, runs });
   });

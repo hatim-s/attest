@@ -33,6 +33,7 @@ export {
   type RunRecord,
   type RunStatus,
   type RunSummary,
+  type RunSource,
   type RunStore,
   type StoredCaseExecution,
   type StoredMetricEvaluation,
@@ -45,3 +46,11 @@ export {
   storedCaseExecutionSchema,
   storedMetricEvaluationSchema,
 } from './internal/record-schema.js';
+
+export {
+  DEFAULT_PAGE_LIMIT,
+  MAX_PAGE_LIMIT,
+  type PageQuery,
+  type RunPage,
+  type CaseSummaryPage,
+} from '../records/page-schemas.js';

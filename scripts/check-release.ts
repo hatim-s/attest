@@ -95,7 +95,7 @@ assert.ok(dashboardHtml.includes('<html'));
 const schema = JSON.parse(await readFile(new URL(import.meta.resolve('@attest/schemas/generated/project.json')), 'utf8'));
 assert.ok(schema.$schema);
 const store = await openStore('release-check.db');
-assert.deepEqual(await store.runs.listRuns(), []);
+assert.deepEqual(await store.runs.listRuns(), { items: [] });
 await store.close();
 const server = await startViewServer({ storePath: 'release-check.db', indexHtml: dashboardHtml, port: 0 });
 try {

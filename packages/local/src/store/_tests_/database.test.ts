@@ -164,7 +164,7 @@ describe('SQLite store database', () => {
 
     const reader = await openReadonlyRunStore(path);
     stores.push(reader);
-    await expect(reader.listRuns()).resolves.toHaveLength(1);
+    await expect(reader.listRuns()).resolves.toMatchObject({ items: [expect.anything()] });
     await reader.close();
     stores.splice(stores.indexOf(reader), 1);
 
@@ -207,7 +207,7 @@ describe('SQLite store database', () => {
     const reader = await openRunStoreSnapshot(snapshotPath);
     stores.push(reader);
 
-    await expect(reader.listRuns()).resolves.toMatchObject([{ id: run.id }]);
+    await expect(reader.listRuns()).resolves.toMatchObject({ items: [{ id: run.id }] });
   });
 
   it('rolls back all schema changes when a migration fails partway', async () => {
