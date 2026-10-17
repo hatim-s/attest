@@ -15,7 +15,7 @@ const createDashboardHtml = (dashboardHtml: string, bootstrap: DashboardBootstra
 
   const preload = `<script>window.__ATTEST_BOOTSTRAP__=${serialized};</script>\n    `;
 
-  return dashboardHtml.replace(MODULE_SCRIPT_MARKER, `${preload}${MODULE_SCRIPT_MARKER}`);
+  return dashboardHtml.replace(MODULE_SCRIPT_MARKER, () => `${preload}${MODULE_SCRIPT_MARKER}`);
 };
 
 export { createDashboardHtml };
