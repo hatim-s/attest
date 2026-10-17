@@ -102,8 +102,8 @@ const executionDefaultsSchema = z.strictObject({
 type PollingSchedule = {
   status_url_pointer?: string;
   status_url_template?: string;
-  success_values: readonly unknown[];
-  failure_values: readonly unknown[];
+  success_values: readonly JsonValue[];
+  failure_values: readonly JsonValue[];
   minimum_interval_ms: number;
   maximum_interval_ms: number;
 };
