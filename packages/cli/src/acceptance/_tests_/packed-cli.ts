@@ -98,7 +98,7 @@ const createPackedCli = async (): Promise<PackedCli> => {
   return { archivePaths, cliPath, root };
 };
 
-/** Vitest global setup: installs one packed CLI for every acceptance file, then removes it. */
+/** Vitest global setup materializes one packed CLI for every acceptance file, then removes it. */
 const setup = async (project: TestProject): Promise<() => Promise<void>> => {
   const packed = await createPackedCli();
   project.provide('packedCli', packed);
@@ -119,7 +119,7 @@ const isPackedProcessFailure = (
   );
 };
 
-/** Runs the installed CLI under Node and keeps stdout and the exit code of failed commands. */
+/** Runs the materialized CLI under Node and keeps stdout and the exit code of failed commands. */
 const runPackedCommand = async (
   cliPath: string,
   argv: readonly string[],
