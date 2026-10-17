@@ -1,4 +1,5 @@
 import { diffRuns, type RunSource } from '@attest/core';
+import { summarizeSuites } from '@attest/core/analytics';
 import { Hono } from 'hono';
 
 import { apiRoutes } from '../contract/routes.js';
@@ -8,8 +9,12 @@ import {
   diffParamsSchema,
   pageQuerySchema,
   runParamsSchema,
+  suiteHistoryRequestSchema,
 } from '../contract/requests.js';
 import { parseInput, toErrorEnvelope } from './error-response.js';
+
+import { readCaseSummaries } from './read-case-summaries.js';
+import { readSuiteHistory } from './read-suite-history.js';
 
 type ApiAppDeps = { source: RunSource };
 
@@ -39,6 +44,19 @@ const createApiApp = ({ source }: ApiAppDeps): Hono => {
     const { baseRunId, candidateRunId } = parseInput(diffParamsSchema, context.req.param());
 
     return context.json(await diffRuns(source, baseRunId, candidateRunId));
+  });
+  app.get(apiRoutes.listRunSuites, async (context) => {
+    const { runId } = parseInput(runParamsSchema, context.req.param());
+
+    return context.json({ runId, suites: summarizeSuites(await readCaseSummaries(source, runId)) });
+  });
+  app.get(apiRoutes.getSuiteHistory, async (context) => {
+    const { suiteName, limit } = parseInput(suiteHistoryRequestSchema, {
+      ...context.req.query(),
+      ...context.req.param(),
+    });
+
+    return context.json(await readSuiteHistory(source, suiteName, limit));
   });
   // Mounted Hono apps do not carry their notFound handler into the host.
   app.all('*', (context) =>

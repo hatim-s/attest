@@ -6,6 +6,8 @@ import type {
   RunPage,
   RunRecord,
 } from '@attest/core/records';
+import type { SuiteHistoryQuery } from '../contract/requests.js';
+import type { RunSuites, SuiteHistory } from '../contract/responses.js';
 import type { DashboardBootstrap } from '../contract/bootstrap.js';
 import type { apiRoutes, PathParams } from '../contract/routes.js';
 import { createHttpClient } from './http-client.js';
@@ -30,6 +32,15 @@ type ApiClient = {
     params: PathParams<typeof apiRoutes.getCase>,
     options?: RequestOptions,
   ): Promise<CaseRecord>;
+  listRunSuites(
+    params: PathParams<typeof apiRoutes.listRunSuites>,
+    options?: RequestOptions,
+  ): Promise<RunSuites>;
+  getSuiteHistory(
+    params: PathParams<typeof apiRoutes.getSuiteHistory>,
+    query: SuiteHistoryQuery,
+    options?: RequestOptions,
+  ): Promise<SuiteHistory>;
   getDiff(params: PathParams<typeof apiRoutes.getDiff>, options?: RequestOptions): Promise<RunDiff>;
 };
 

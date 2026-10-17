@@ -19,6 +19,35 @@ const apiForbidden = [
   '@libsql/*',
 ];
 
+const coreForbidden = [
+  '@attest/api',
+  '@attest/api/*',
+  '@attest/executor',
+  '@attest/executor/*',
+  '@attest/runtime',
+  '@attest/runtime/*',
+  '@attest/local',
+  '@attest/local/*',
+  '@attest/cli',
+  '@attest/cli/*',
+  '@attest/web',
+  '@attest/web/*',
+  'node:fs',
+  'node:fs/*',
+  'node:child_process',
+  'node:http',
+  'node:https',
+  'node:net',
+  'node:sqlite',
+  'bun:sqlite',
+  'kysely',
+  '@libsql/*',
+  'hono',
+  'hono/*',
+  '@hono/*',
+  '@tanstack/ai*',
+];
+
 export default tseslint.config(
   ...antiSlopConfig,
   {
@@ -49,36 +78,26 @@ export default tseslint.config(
         {
           patterns: [
             {
-              group: [
-                '@attest/api',
-                '@attest/api/*',
-                '@attest/executor',
-                '@attest/executor/*',
-                '@attest/runtime',
-                '@attest/runtime/*',
-                '@attest/local',
-                '@attest/local/*',
-                '@attest/cli',
-                '@attest/cli/*',
-                '@attest/web',
-                '@attest/web/*',
-                'node:fs',
-                'node:fs/*',
-                'node:child_process',
-                'node:http',
-                'node:https',
-                'node:net',
-                'node:sqlite',
-                'bun:sqlite',
-                'kysely',
-                '@libsql/*',
-                'hono',
-                'hono/*',
-                '@hono/*',
-                '@tanstack/ai*',
-              ],
+              group: coreForbidden,
               message:
                 'Core owns domain logic and interfaces. Put transport execution in executor, evaluation execution in runtime, and local I/O in local.',
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
+    files: ['packages/core/src/{analytics,records}/**/*.ts'],
+    ignores: ['**/_tests_/**'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: [...coreForbidden, 'node:*'],
+              message: 'Analytics and records must remain browser-safe.',
             },
           ],
         },
