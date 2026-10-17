@@ -1,10 +1,17 @@
 import { parseAgentResponse, type ContractIssue } from '@attest/contracts';
+import { z } from 'zod';
 
 import { AgentInvocationError } from '../errors.js';
 import { createRawExcerpt } from './raw-excerpt.js';
 import type { InvocationAttempt, InvocationDiagnostics, InvocationResult } from '../types.js';
 
 type InvocationAttemptFactory = (attemptIndex: number) => Promise<InvocationAttempt>;
+
+/**
+ * Public entries take a raw retry count that never passed through `retryPolicySchema`. A NaN or
+ * Infinity count would never end the retry loop, so entries parse it before any transport work.
+ */
+const retryBudgetSchema = z.object({ retries: z.int().nonnegative() });
 
 const withAttemptEvidence = (attempt: InvocationAttempt): InvocationAttempt => {
   if (attempt.rawExcerpt !== undefined) return attempt;
@@ -89,4 +96,4 @@ const invokeWithRetries = async (
   }
 };
 
-export { invokeWithRetries, type InvocationAttemptFactory };
+export { invokeWithRetries, retryBudgetSchema, type InvocationAttemptFactory };

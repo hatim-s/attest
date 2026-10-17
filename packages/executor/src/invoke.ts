@@ -2,7 +2,7 @@ import type { AgentRequest } from '@attest/contracts';
 
 import { invokeCliAgent } from './cli-invoker.js';
 import { invokeHttpAgent } from './http-invoker.js';
-import { invokeWithRetries } from './internal/invocation-retry.js';
+import { invokeWithRetries, retryBudgetSchema } from './internal/invocation-retry.js';
 import type {
   InvocationAttempt,
   InvocationResult,
@@ -26,7 +26,9 @@ const invokeAgent = async (
   request: AgentRequest,
   options: InvokeAgentOptions,
 ): Promise<InvocationResult> => {
-  return invokeWithRetries(() => invokeOnce(target, request, options), options.retries);
+  const { retries } = retryBudgetSchema.parse(options);
+
+  return invokeWithRetries(() => invokeOnce(target, request, options), retries);
 };
 
 export { invokeAgent };
