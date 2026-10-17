@@ -207,7 +207,7 @@ const runAndRecord = async (
     },
   });
 
-  return { result, stored: await store.runs.getCaseResults(run.run_id) };
+  return { result, stored: (await store.runs.getRunWithCases(run.run_id)).cases };
 };
 
 afterEach(async () => {
