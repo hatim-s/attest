@@ -15,6 +15,8 @@ import type { CaseSummary } from '@attest/core/records';
 
 type DistributionChartsProps = {
   cases: CaseSummary[];
+  /** False while later pages are outstanding, when zero counts say nothing about the run. */
+  allLoaded: boolean;
   isLoading: boolean;
   totalCases: number;
 };
@@ -41,7 +43,12 @@ const createScoreHistogram = (cases: CaseSummary[]): ScoreBin[] => {
 };
 
 /** Renders the score histogram and verdict pie for the loaded cases. */
-const DistributionCharts = ({ cases, isLoading, totalCases }: DistributionChartsProps) => {
+const DistributionCharts = ({
+  cases,
+  allLoaded,
+  isLoading,
+  totalCases,
+}: DistributionChartsProps) => {
   const histogram = useMemo(() => createScoreHistogram(cases), [cases]);
   const scoredCases = histogram.reduce((total, { count }) => total + count, 0);
 
@@ -109,7 +116,7 @@ const DistributionCharts = ({ cases, isLoading, totalCases }: DistributionCharts
         <ChartCard
           title="Mean score"
           detail={formatCount(scoredCases, 'scored case')}
-          emptyMessage={scoredCases === 0 ? 'No scored cases yet.' : undefined}
+          emptyMessage={allLoaded && scoredCases === 0 ? 'No scored cases yet.' : undefined}
           option={scoreOption}
           table={
             <table className="analytics-table">
@@ -134,7 +141,7 @@ const DistributionCharts = ({ cases, isLoading, totalCases }: DistributionCharts
         <ChartCard
           title="Verdicts"
           detail="One final verdict per case"
-          emptyMessage={cases.length === 0 ? 'No cases have finished yet.' : undefined}
+          emptyMessage={allLoaded && cases.length === 0 ? 'No cases have finished yet.' : undefined}
           option={verdictOption}
           table={
             <table className="analytics-table">

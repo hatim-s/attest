@@ -23,7 +23,13 @@ const topVerdict = (bin: DurationBin) =>
   [...verdictSeries].reverse().find(({ verdict }) => bin.counts[verdict] > 0)?.verdict;
 
 /** Keeps durations in milliseconds so equal-width bars represent equal elapsed intervals. */
-const DurationDistribution = ({ cases }: { cases: CaseSummary[] }) => {
+const DurationDistribution = ({
+  cases,
+  allLoaded,
+}: {
+  cases: CaseSummary[];
+  allLoaded: boolean;
+}) => {
   const bins = useMemo(() => createDurationHistogram(cases), [cases]);
 
   const labels = useMemo(
@@ -60,7 +66,7 @@ const DurationDistribution = ({ cases }: { cases: CaseSummary[] }) => {
   return (
     <ChartCard
       title="Case durations by verdict"
-      emptyMessage={cases.length === 0 ? 'No cases have finished yet.' : undefined}
+      emptyMessage={allLoaded && cases.length === 0 ? 'No cases have finished yet.' : undefined}
       detail="Each range includes its lower bound. The last range also includes its upper bound."
       option={option}
       table={

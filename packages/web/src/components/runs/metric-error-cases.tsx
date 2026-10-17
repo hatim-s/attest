@@ -2,8 +2,10 @@ import type { CaseSummary } from '@attest/core/records';
 import { Link } from '@tanstack/react-router';
 import { Badge } from '../shared/ui.js';
 
+type MetricErrorCasesProps = { cases: CaseSummary[]; allLoaded: boolean; runId: string };
+
 /** Links to case evidence without fetching every full record to construct a per-metric table. */
-const MetricErrorCases = ({ cases, runId }: { cases: CaseSummary[]; runId: string }) => {
+const MetricErrorCases = ({ cases, allLoaded, runId }: MetricErrorCasesProps) => {
   const errors = cases.filter((item) => item.metricCounts.errors > 0);
 
   return (
@@ -40,7 +42,7 @@ const MetricErrorCases = ({ cases, runId }: { cases: CaseSummary[]; runId: strin
           ))}
         </tbody>
       </table>
-      {errors.length === 0 ? <p className="empty-compact">No metric errors.</p> : null}
+      {allLoaded && errors.length === 0 ? <p className="empty-compact">No metric errors.</p> : null}
     </div>
   );
 };
