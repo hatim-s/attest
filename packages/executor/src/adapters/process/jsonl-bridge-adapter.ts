@@ -6,6 +6,7 @@ import {
   parseAgentResponse,
   type AgentRequest,
   type AgentResource,
+  type JsonValue,
 } from '@attest/contracts';
 
 import { AgentInvocationError } from '../../errors.js';
@@ -53,7 +54,7 @@ type PendingInvocation = {
   timeoutTimer: NodeJS.Timeout;
 };
 
-type ParsedOutput = { output: ReturnType<typeof jsonlBridgeOutputSchema.parse>; raw: unknown };
+type ParsedOutput = { output: ReturnType<typeof jsonlBridgeOutputSchema.parse>; raw: JsonValue };
 
 const capError = (message: string): AgentInvocationError =>
   new AgentInvocationError('output_cap_exceeded', message);
@@ -269,7 +270,7 @@ class JsonlBridgeSession {
 
   /** Parses one line into a bridge output envelope, or the protocol error that ends the session. */
   private parseOutput(line: string): ParsedOutput | AgentInvocationError {
-    let raw: unknown;
+    let raw: JsonValue;
 
     try {
       raw = parseJson(line);

@@ -1,9 +1,15 @@
 import { AgentInvocationError } from '../../../errors.js';
-import { isJsonObject, isNumber, isString } from '../../../internal/json-value.js';
 import { createServer as createNetServer } from 'node:net';
 import { resolve } from 'node:path';
 
-import { AGENT_PROTOCOL, AGENT_RESOURCE_SCHEMA_ID, type AgentRequest } from '@attest/contracts';
+import {
+  AGENT_PROTOCOL,
+  AGENT_RESOURCE_SCHEMA_ID,
+  isJsonObject,
+  isNumber,
+  isString,
+  type AgentRequest,
+} from '@attest/contracts';
 import { describe, expect, it } from 'vitest';
 
 import { startLoopbackServer } from '../../../_tests_/support/loopback-server.js';

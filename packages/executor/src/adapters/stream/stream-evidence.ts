@@ -7,7 +7,6 @@ import {
   DEFAULT_TOTAL_EVIDENCE_BYTES,
 } from '../../internal/agent-defaults.js';
 import { redactEventEvidence, redactTransportText } from '../http/redaction.js';
-import type { StreamEvent } from './sse-parser.js';
 import type { StreamAgentResource } from './stream-adapter.js';
 
 /** Resolved stream limits; each bounds one way a peer could grow memory or stall forever. */
@@ -44,9 +43,22 @@ class StreamEvidence {
     private readonly secrets: readonly string[],
   ) {}
 
-  /** Records one event; `raw` is the parsed payload of an application event. */
-  record(event: StreamEvent, raw?: JsonValue): void {
-    if (Buffer.byteLength(event.source) > this.caps.eventBytes) {
+  /** Records a comment heartbeat, which counts toward the caps but carries no payload. */
+  recordHeartbeat(source: string): void {
+    this.count(source);
+    this.text += `${redactTransportText(source, this.secrets)}\n`;
+  }
+
+  /** Records an application event with its parsed payload. */
+  recordEvent(source: string, raw: JsonValue): void {
+    this.count(source);
+    const pointers = this.agent.redaction?.event_pointers ?? [];
+    this.text += `${redactEventEvidence(raw, pointers, this.secrets)}\n`;
+    this.applicationStarted = true;
+  }
+
+  private count(source: string): void {
+    if (Buffer.byteLength(source) > this.caps.eventBytes) {
       throw capError('Streaming response event exceeds its event byte cap.');
     }
 
@@ -55,16 +67,6 @@ class StreamEvidence {
     if (this.eventCount > this.caps.eventCount) {
       throw capError('Streaming response exceeds its event count cap.');
     }
-
-    if (event.heartbeat) {
-      this.text += `${redactTransportText(event.source, this.secrets)}\n`;
-
-      return;
-    }
-
-    const pointers = this.agent.redaction?.event_pointers ?? [];
-    this.text += `${redactEventEvidence(raw, pointers, this.secrets)}\n`;
-    this.applicationStarted = true;
   }
 }
 

@@ -1,7 +1,15 @@
-import { isBoolean, isJsonObject, isNumber, isString } from '../../internal/json-value.js';
-import type { AgentRequest, HttpRequestTemplate, JsonValue } from '@attest/contracts';
+import {
+  isBoolean,
+  isJsonObject,
+  isNumber,
+  isString,
+  type AgentRequest,
+  type HttpRequestTemplate,
+  type JsonValue,
+} from '@attest/contracts';
 
 import { AgentInvocationError } from '../../errors.js';
+import { parseJson } from '../../internal/json-value.js';
 import { readJsonPointer } from './json-pointer.js';
 
 type ResolvedHttpRequestTemplate = Omit<HttpRequestTemplate, 'headers' | 'query'> & {
@@ -64,7 +72,11 @@ const placeholderValue = (
     );
   }
 
-  return readJsonPointer(root === 'input' ? request.input : request, pointer);
+  if (root === 'input') return readJsonPointer(request.input, pointer);
+
+  // AgentRequest is a loose object whose extra fields are typed unknown. Its JSON form is the
+  // request document the agent receives, so pointers read that form.
+  return readJsonPointer(parseJson(JSON.stringify(request)), pointer);
 };
 
 const scalarText = (value: JsonValue | undefined): string => {

@@ -1,5 +1,10 @@
-import { isJsonObject, isString } from '../../internal/json-value.js';
-import { WEBSOCKET_REQUEST_PROTOCOL, type AgentRequest, type JsonValue } from '@attest/contracts';
+import {
+  isJsonObject,
+  isString,
+  WEBSOCKET_REQUEST_PROTOCOL,
+  type AgentRequest,
+  type JsonValue,
+} from '@attest/contracts';
 
 import { AgentInvocationError } from '../../errors.js';
 import { DEFAULT_REQUEST_BYTES } from '../../internal/agent-defaults.js';

@@ -1,4 +1,6 @@
-import { splitJsonPointer } from './json-pointer.js';
+import { isJsonObject, type JsonValue } from '@attest/contracts';
+
+import { readJsonPointer, splitJsonPointer } from './json-pointer.js';
 
 const REDACTED = '[REDACTED]';
 
@@ -36,31 +38,26 @@ const redactTransportText = (value: string, secrets: readonly string[]): string 
     .sort((left, right) => right.length - left.length)
     .reduce((redacted, secret) => redacted.replaceAll(secret, REDACTED), value);
 
-/** BOUNDARY: checks own fields in a foreign event before replacing sensitive values. */
-const isContainer = (value: unknown): value is Record<string, unknown> =>
-  value !== null && typeof value === 'object';
-
-/** BOUNDARY: accepts foreign event JSON and replaces sensitive own fields before persistence. */
+/** Replaces the values that authored pointers reach in one event, then redacts runtime secrets. */
 const redactEventEvidence = (
-  value: unknown,
+  value: JsonValue,
   pointers: readonly string[],
   secrets: readonly string[],
 ): string => {
   const redacted = structuredClone(value);
 
   for (const pointer of pointers) {
-    const segments = splitJsonPointer(pointer);
-    const leaf = segments.pop();
+    const leaf = splitJsonPointer(pointer).pop();
 
     // The root pointer names the whole event, so the entire evidence entry becomes the marker.
     if (leaf === undefined) return REDACTED;
-    let parent: unknown = redacted;
 
-    for (const segment of segments) {
-      parent = isContainer(parent) && Object.hasOwn(parent, segment) ? parent[segment] : undefined;
-    }
+    // Only a value the pointer already reaches is replaced, so redaction never adds keys.
+    if (readJsonPointer(redacted, pointer) === undefined) continue;
+    const parent = readJsonPointer(redacted, pointer.slice(0, pointer.lastIndexOf('/')));
 
-    if (isContainer(parent) && Object.hasOwn(parent, leaf)) parent[leaf] = REDACTED;
+    if (Array.isArray(parent)) parent[Number(leaf)] = REDACTED;
+    else if (isJsonObject(parent)) parent[leaf] = REDACTED;
   }
 
   return redactTransportText(JSON.stringify(redacted), secrets);

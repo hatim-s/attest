@@ -1,8 +1,7 @@
-import { isNumber, isString } from '../../internal/json-value.js';
 import { createHash } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 
-import type { AgentRequest } from '@attest/contracts';
+import { isNumber, isString, type AgentRequest } from '@attest/contracts';
 
 import { AgentInvocationError } from '../../errors.js';
 import { extractRemoteError } from '../../internal/remote-error.js';

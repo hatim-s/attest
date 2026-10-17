@@ -1,9 +1,4 @@
-import { AgentInvocationError } from '../../errors.js';
-import { isJsonValue, type JsonValue } from '@attest/contracts';
-
-/** BOUNDARY: inspects a transport document's own fields before pointer traversal. */
-const isContainer = (value: unknown): value is Record<string, unknown> =>
-  value !== null && typeof value === 'object';
+import { isJsonObject, type JsonValue } from '@attest/contracts';
 
 /** Decodes one RFC 6901 reference token after the pointer grammar has been validated. */
 const decodePointerToken = (token: string): string =>
@@ -14,16 +9,18 @@ const splitJsonPointer = (pointer: string): string[] =>
   pointer === '' ? [] : pointer.slice(1).split('/').map(decodePointerToken);
 
 /**
- * BOUNDARY: traverses foreign transport JSON and returns only a contracts-valid JSON leaf.
  * Reads an RFC 6901 JSON Pointer without falling back to property-path heuristics. An absent
  * pointer reads nothing, so optional authored extractions need no guard at each call site.
  */
-const readJsonPointer = (document: unknown, pointer: string | undefined): JsonValue | undefined => {
+const readJsonPointer = (
+  document: JsonValue,
+  pointer: string | undefined,
+): JsonValue | undefined => {
   if (pointer === undefined) return undefined;
 
   if (pointer !== '' && !pointer.startsWith('/')) return undefined;
 
-  let current = document;
+  let current: JsonValue | undefined = document;
 
   for (const token of splitJsonPointer(pointer)) {
     if (Array.isArray(current)) {
@@ -32,15 +29,12 @@ const readJsonPointer = (document: unknown, pointer: string | undefined): JsonVa
       continue;
     }
 
-    if (!isContainer(current) || !Object.hasOwn(current, token)) {
-      return undefined;
-    }
+    if (!isJsonObject(current) || !Object.hasOwn(current, token)) return undefined;
 
     current = current[token];
   }
 
-  if (current === undefined || isJsonValue(current)) return current;
-  throw new AgentInvocationError('invalid_envelope', 'Extracted transport value is not JSON.');
+  return current;
 };
 
 export { readJsonPointer, splitJsonPointer };

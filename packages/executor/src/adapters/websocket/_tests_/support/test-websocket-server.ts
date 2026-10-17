@@ -1,5 +1,12 @@
-import { agentRequestSchema, type AgentRequest, type JsonValue } from '@attest/contracts';
-import { isJsonObject, isString, parseJson } from '../../../../internal/json-value.js';
+import {
+  agentRequestSchema,
+  isJsonObject,
+  isString,
+  type AgentRequest,
+  type JsonValue,
+} from '@attest/contracts';
+
+import { parseJson } from '../../../../internal/json-value.js';
 import { createHash } from 'node:crypto';
 import { createServer, type IncomingMessage, type Server } from 'node:http';
 import type { Duplex } from 'node:stream';
