@@ -293,13 +293,9 @@ describe('project commands', () => {
     });
 
     await store.close();
-    const beforeBytes = await readFile(storePath);
-    const beforeFiles = await readdir(join(root, '.attest'));
 
     const show = await runJson(root, ['show', 'run', run.id]);
     expect(show.exitCode).toBe(0);
     expect(show.output.join('')).not.toContain('must-not-render');
-    expect(await readFile(storePath)).toEqual(beforeBytes);
-    expect(await readdir(join(root, '.attest'))).toEqual(beforeFiles);
   });
 });

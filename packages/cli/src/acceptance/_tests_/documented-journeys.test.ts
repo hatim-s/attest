@@ -1,86 +1,17 @@
-import { createHash } from 'node:crypto';
-import {
-  lstat,
-  mkdir,
-  mkdtemp,
-  readFile,
-  readdir,
-  readlink,
-  realpath,
-  rm,
-  writeFile,
-} from 'node:fs/promises';
+import { lstat, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative, sep } from 'node:path';
-import { fileURLToPath } from 'node:url';
 
-import { cliResultSchema, isJsonObject, type JsonValue } from '@attest/contracts';
+import { cliResultSchema, isJsonObject } from '@attest/contracts';
 import { describe, expect, inject, it, onTestFinished } from 'vitest';
 
 import { REPOSITORY_ROOT, runPackedCommand } from './packed-cli.js';
-
-type CommandExpectation = {
-  argv: string[];
-  artifact_documents: Record<string, Record<string, JsonValue>>;
-  artifacts_absent: string[];
-  artifacts_present: string[];
-  command: string;
-  display: string;
-  error_code?: string;
-  exit_code: number;
-  ok: boolean;
-  result_schema?: string;
-  result_verdict?: string;
-  result_run_id?: boolean;
-  tree_changes: string[];
-};
-
-type Journey = {
-  commands: CommandExpectation[];
-  id: string;
-  seed_files: Record<string, string>;
-};
-
-type TreeSnapshot = Map<string, string>;
-
-const JOURNEYS_PATH = fileURLToPath(
-  new URL('./fixtures/documented-journeys.json', import.meta.url),
-);
-
-// SAFETY: The checked-in documented journey fixture contains the declared commands and seeded files.
-const readJourneys = async (): Promise<Journey[]> =>
-  (JSON.parse(await readFile(JOURNEYS_PATH, 'utf8')) as { journeys: Journey[] }).journeys;
-
-/** Hashes every file and symlink target, and records every directory, below a journey root. */
-const snapshotTree = async (root: string): Promise<TreeSnapshot> => {
-  const snapshot: TreeSnapshot = new Map();
-
-  const visit = async (directory: string): Promise<void> => {
-    const entries = await readdir(directory, { withFileTypes: true });
-
-    for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name))) {
-      const absolutePath = join(directory, entry.name);
-      const relativePath = relative(root, absolutePath).split(sep).join('/');
-
-      if (entry.isSymbolicLink()) {
-        snapshot.set(relativePath, `symlink:${await readlink(absolutePath)}`);
-      } else if (entry.isDirectory()) {
-        snapshot.set(`${relativePath}/`, 'directory');
-        await visit(absolutePath);
-      } else {
-        const hash = createHash('sha256')
-          .update(await readFile(absolutePath))
-          .digest('hex');
-
-        snapshot.set(relativePath, hash);
-      }
-    }
-  };
-
-  await visit(root);
-
-  return snapshot;
-};
+import {
+  documentedJourneys,
+  type CommandExpectation,
+  type Journey,
+} from './fixtures/documented-journeys.js';
+import { snapshotTree, type TreeSnapshot } from './snapshot-tree.js';
 
 const changedTreePaths = (before: TreeSnapshot, after: TreeSnapshot): string[] =>
   [...new Set([...before.keys(), ...after.keys()])]
@@ -160,7 +91,7 @@ const isInside = (root: string, path: string): boolean => {
 };
 
 describe('documented journeys through the packed CLI', () => {
-  it('installs packed workspace dependencies without ambient repository links', async () => {
+  it('materializes packed workspace dependencies without ambient repository links', async () => {
     const packed = inject('packedCli');
     const realRuntime = await realpath(packed.root);
     const realRepository = await realpath(REPOSITORY_ROOT);
@@ -191,7 +122,7 @@ describe('documented journeys through the packed CLI', () => {
   it('runs every documented journey in a clean directory', async () => {
     const packed = inject('packedCli');
 
-    for (const journey of await readJourneys()) {
+    for (const journey of documentedJourneys.journeys) {
       const root = await seedJourney(journey);
 
       for (const command of journey.commands) {

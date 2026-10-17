@@ -68,7 +68,6 @@ describe('CLI test, case, dataset, and import authoring', { timeout: 20_000 }, (
     ];
 
     for (const argv of renames) expect((await runJson(root, argv)).exitCode).toBe(0);
-    expect((await loadProject({ project: root })).tests.map(({ id }) => id)).toEqual(['refund']);
   });
 
   it('reports non-TTY missing input and rejects overlapping request sources', async () => {

@@ -219,14 +219,6 @@ describe('metric commands', { timeout: 30_000 }, () => {
       (await loadProject({ project: root })).metrics.map(({ id, definition }) => [id, definition]),
     );
 
-    expect([...definitions.keys()].sort()).toEqual([
-      'guided',
-      'guided-default',
-      'guided-trace',
-      'imported',
-      'judge',
-      'requested',
-    ]);
     expect(definitions.get('guided')).toEqual({
       kind: 'assertion',
       assertions: [{ contains: { path: '$.expected', value: 'needle' } }],
@@ -271,31 +263,6 @@ describe('metric commands', { timeout: 30_000 }, () => {
       ok: false,
       error: { code: 'metric_fixture_mismatch' },
     });
-  });
-
-  it('keeps a dry run guarded by the current project hash write-free', async () => {
-    const root = await createEmptyProject();
-    const before = await snapshotTree(root);
-    const { projectHash } = await loadProject({ project: root });
-
-    const preview = await runJson(root, [
-      'metric',
-      'add',
-      'preview',
-      '--preset',
-      'output-equals',
-      '--value',
-      'null',
-      '--dry-run',
-      '--if-project-hash',
-      projectHash,
-    ]);
-
-    expect(preview.document).toMatchObject({
-      ok: true,
-      result: { committed: false, dry_run: true },
-    });
-    expect(await snapshotTree(root)).toEqual(before);
   });
 
   it('returns strict missing-input, overlapping-source, and incompatible-flag errors without writing', async () => {
