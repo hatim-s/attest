@@ -4,7 +4,8 @@ import type { ProjectResources } from '../project/resources-snapshot.js';
 import type { HttpRequestTemplate } from '../project/resources/agent-transports.js';
 import { isString, type SecretReference } from '../project/shared.js';
 
-const credentialKey = /(?:authorization|cookie|token|secret|password|api[-_]?key)/iu;
+const credentialKey =
+  /(?:^|[-_])(?:authorization|cookie|secret|password|api[-_]?key)(?:$|[-_])|^token$/iu;
 
 /** Portable revisions cannot depend on local files or persist credentials in transport fields. */
 const refinePortableCredentials = (resources: ProjectResources, context: z.RefinementCtx): void => {
@@ -17,8 +18,6 @@ const refinePortableCredentials = (resources: ProjectResources, context: z.Refin
     try {
       url = new URL(value);
     } catch {
-      report(path, 'must be a valid portable URL template');
-
       return;
     }
 
