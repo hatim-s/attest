@@ -51,13 +51,15 @@ const createRunTrends = (runs: readonly TrendRun[], grouping: TrendGrouping) => 
   };
 };
 
-/** Equal-width bins cover the observed range and include the maximum in the last bin. */
+const DURATION_BIN_COUNT = 10;
+
+/** Equal-width bins span zero to the maximum, including the maximum in the last bin. */
 const createDurationHistogram = (cases: readonly Pick<CaseSummary, 'durationMs' | 'verdict'>[]) => {
   if (cases.length === 0) return [];
   const maximum = cases.reduce((value, item) => Math.max(value, item.durationMs), 0);
-  const width = Math.max(1, Math.ceil(maximum / 10));
+  const width = Math.max(1, Math.ceil(maximum / DURATION_BIN_COUNT));
 
-  return Array.from({ length: 10 }, (_, index) => {
+  return Array.from({ length: DURATION_BIN_COUNT }, (_, index) => {
     const lowerMs = index * width;
     const upperMs = lowerMs + width;
     const counts = { pass: 0, fail: 0, error: 0 };
@@ -65,7 +67,8 @@ const createDurationHistogram = (cases: readonly Pick<CaseSummary, 'durationMs' 
     for (const item of cases) {
       if (
         item.durationMs >= lowerMs &&
-        (item.durationMs < upperMs || (index === 9 && item.durationMs === upperMs))
+        (item.durationMs < upperMs ||
+          (index === DURATION_BIN_COUNT - 1 && item.durationMs === upperMs))
       )
         counts[item.verdict] += 1;
     }
