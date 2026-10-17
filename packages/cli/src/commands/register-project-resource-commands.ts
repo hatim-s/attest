@@ -5,6 +5,7 @@ import {
   runProjectShowCommand,
   runProjectValidateCommand,
   runShowCommand,
+  type ProjectInitCommandOptions,
   type ListResourceType,
   type ShowResourceType,
 } from '@attest/local/project';
@@ -31,9 +32,7 @@ import {
 import type { CommandContext } from './shared/command-context.js';
 import { renderCommandResult, renderResult } from './shared/command-result.js';
 
-type ProjectInitCliOptions = MutationCliOptions & {
-  name?: string;
-};
+type ProjectInitCliOptions = MutationCliOptions & Pick<ProjectInitCommandOptions, 'name'>;
 
 const registerProjectInit = (
   command: Command,

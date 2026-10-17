@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import * as cloudAdapter from '@attest/local/cloud';
-import { createEvalRunRequest } from '../eval/eval-request.js';
+import { createEvalRunRequest, type EvalRunRequestFields } from '../eval/eval-request.js';
 import { AttestCliError } from '../../errors/cli-error.js';
 import { renderResult } from '../shared/command-result.js';
 import { addCommonOptions, collect } from '../shared/cli-options.js';
@@ -8,21 +8,26 @@ import type { CommonCliOptions } from '../shared/cli-options.js';
 import type { CommandContext } from '../shared/command-context.js';
 import { withProcessSignals } from '../shared/process-signals.js';
 
-type Options = CommonCliOptions & {
-  url?: string;
-  revision?: string;
-  all?: boolean;
-  idempotencyKey?: string;
-  after?: string;
-  case?: string[];
-  tag?: string[];
-  folder?: string[];
-  dataset?: string[];
-  sample?: string;
-  seed?: string;
-  concurrency?: string;
-  timeout?: string;
+type LoginOptions = CommonCliOptions & {
+  url: Parameters<typeof cloudAdapter.loginCloud>[0]['baseUrl'];
 };
+
+type PullOptions = CommonCliOptions & {
+  revision?: Parameters<typeof cloudAdapter.pullCloudProject>[0]['revisionId'];
+};
+
+type PushOptions = CommonCliOptions & { secrets?: boolean };
+
+type RunOptions = PullOptions &
+  Pick<EvalRunRequestFields, 'all' | 'sample' | 'seed' | 'concurrency' | 'timeout'> & {
+    case?: EvalRunRequestFields['caseIds'];
+    tag?: EvalRunRequestFields['tags'];
+    folder?: EvalRunRequestFields['folders'];
+    dataset?: EvalRunRequestFields['datasetIds'];
+    idempotencyKey?: Parameters<typeof cloudAdapter.runCloud>[0]['idempotencyKey'];
+  };
+
+type EventsOptions = CommonCliOptions & { after: string };
 
 /** Registers terminal translation only; the local cloud adapter owns authentication and state. */
 const registerCloudCommands = ({
@@ -53,7 +58,7 @@ const registerCloudCommands = ({
     .command('cloud')
     .description('Authenticate, sync projects, and manage hosted evaluations.');
 
-  const output = <TResult>(command: string, options: Options, result: TResult): void => {
+  const output = <TResult>(command: string, options: CommonCliOptions, result: TResult): void => {
     io.output(
       renderResult(`cloud.${command}`, options.output ?? 'human', result, (value) =>
         JSON.stringify(value, undefined, 2),
@@ -61,7 +66,7 @@ const registerCloudCommands = ({
     );
   };
 
-  const projectContext = async (options: Options) => ({
+  const projectContext = async (options: CommonCliOptions) => ({
     workingDirectory,
     project: options.project,
     client: await authenticatedCloudClient(),
@@ -70,7 +75,7 @@ const registerCloudCommands = ({
   const projects = cloud.command('project').description('List or create cloud projects.');
   addCommonOptions(
     projects.command('list').description('List projects available to this account.'),
-  ).action(async (options: Options) =>
+  ).action(async (options: CommonCliOptions) =>
     output('project.list', options, await listCloudProjects(await authenticatedCloudClient())),
   );
   addCommonOptions(
@@ -78,7 +83,7 @@ const registerCloudCommands = ({
       .command('create')
       .description('Create a project before linking a local directory.')
       .argument('<name>'),
-  ).action(async (name: string, options: Options) =>
+  ).action(async (name: string, options: CommonCliOptions) =>
     output(
       'project.create',
       options,
@@ -89,10 +94,10 @@ const registerCloudCommands = ({
     cloud.command('login').description('Approve a revocable CLI session in your cloud account.'),
   )
     .requiredOption('--url <origin>', 'cloud HTTPS origin')
-    .action(async (options: Options) => {
+    .action(async (options: LoginOptions) => {
       const result = await withProcessSignals((signal) =>
         loginCloud({
-          baseUrl: options.url!,
+          baseUrl: options.url,
           signal,
           onDevice: ({ verification_uri, user_code }) =>
             io.error(`Approve CLI access at ${verification_uri}\nCode: ${user_code}`),
@@ -103,13 +108,13 @@ const registerCloudCommands = ({
     });
   addCommonOptions(
     cloud.command('logout').description('Revoke the cloud session and remove its local token.'),
-  ).action(async (options: Options) => output('logout', options, await logoutCloud()));
+  ).action(async (options: CommonCliOptions) => output('logout', options, await logoutCloud()));
   addCommonOptions(
     cloud
       .command('link')
       .description('Link this local project to a cloud project.')
       .argument('<project-id>'),
-  ).action(async (projectId: string, options: Options) =>
+  ).action(async (projectId: string, options: CommonCliOptions) =>
     output(
       'link',
       options,
@@ -124,7 +129,7 @@ const registerCloudCommands = ({
       ),
   )
     .option('--no-secrets', 'confirm the project contains no secrets')
-    .action(async (options: Options & { secrets?: boolean }) =>
+    .action(async (options: PushOptions) =>
       output(
         'push',
         options,
@@ -138,7 +143,7 @@ const registerCloudCommands = ({
     cloud.command('pull').description('Pull a cloud revision with local conflict checks.'),
   )
     .option('--revision <id>', 'specific immutable revision; default current')
-    .action(async (options: Options) =>
+    .action(async (options: PullOptions) =>
       output(
         'pull',
         options,
@@ -168,7 +173,7 @@ const registerCloudCommands = ({
       '--idempotency-key <key>',
       'stable retry key; retain it when reconnecting after submission',
     )
-    .action(async (testIds: string[], options: Options) => {
+    .action(async (testIds: string[], options: RunOptions) => {
       if (options.all && testIds.length)
         throw new AttestCliError('cli_usage', 'Pass --all or test ids.');
 
@@ -224,7 +229,7 @@ const registerCloudCommands = ({
           `${action === 'cancel' ? 'Cancel' : 'Read'} a hosted run.${action === 'result' ? ' Raw evidence expires after five days; summaries persist.' : ''}`,
         )
         .argument('<run-id>'),
-    ).action(async (runId: string, options: Options) => {
+    ).action(async (runId: string, options: CommonCliOptions) => {
       const context = await projectContext(options);
       const project = await resolveCloudProject(context);
 
@@ -243,7 +248,7 @@ const registerCloudCommands = ({
       .argument('<run-id>'),
   )
     .option('--after <sequence>', 'last received sequence', '0')
-    .action(async (runId: string, options: Options) => {
+    .action(async (runId: string, options: EventsOptions) => {
       const context = await projectContext(options);
       const project = await resolveCloudProject(context);
       output(

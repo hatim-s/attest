@@ -4,6 +4,9 @@ import {
   runReportCommand,
   runTraceConvertCommand,
   runViewCommand,
+  type RunViewCommandOptions,
+  type RunReportCommandOptions,
+  type RunTraceConvertCommandOptions,
 } from '@attest/local/runs';
 import { Option } from 'commander';
 
@@ -22,22 +25,18 @@ type DiffCommandOptions = {
   store?: string;
 };
 
-type ViewCommandOptions = {
+type ViewCommandOptions = Required<Pick<RunViewCommandOptions, 'port'>> & {
   open: boolean;
-  port: number;
   store: string;
 };
 
-type ReportCommandOptions = {
-  force?: boolean;
-  output?: string;
+type ReportCommandOptions = Pick<RunReportCommandOptions, 'force'> & {
+  output?: RunReportCommandOptions['outputPath'];
   store: string;
 };
 
-type TraceConvertCommandOptions = {
-  force?: boolean;
-  output?: string;
-  traceId?: string;
+type TraceConvertCommandOptions = Pick<RunTraceConvertCommandOptions, 'force' | 'traceId'> & {
+  output?: RunTraceConvertCommandOptions['outputPath'];
 };
 
 type ProtocolCommandOptions = {

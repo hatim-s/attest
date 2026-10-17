@@ -52,7 +52,7 @@ export type {
   WebSocketErrorClassification,
 } from './agent/websocket-evidence.js';
 
-export { spanKindSchema, traceSchema } from './trace/protocol.js';
+export { spanKindSchema, spanStatusSchema, traceSchema } from './trace/protocol.js';
 
 export type { Span, SpanKind, Trace } from './trace/protocol.js';
 
@@ -101,6 +101,7 @@ export type { AgentResource } from './project/resources/agent.js';
 
 export {
   httpRequestTemplateSchema,
+  agentTransportSchema,
   vercelSandboxSchema,
 } from './project/resources/agent-transports.js';
 

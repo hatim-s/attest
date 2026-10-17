@@ -1,7 +1,9 @@
 import { createInterface } from 'node:readline/promises';
 import { text } from 'node:stream/consumers';
 
-type CliPrompt = (question: string, options?: { signal?: AbortSignal }) => Promise<string>;
+import type { AgentImportCommandOptions } from '@attest/local/agent';
+
+type CliPrompt = NonNullable<AgentImportCommandOptions['prompt']>;
 
 type CliInteraction = {
   ci: boolean;

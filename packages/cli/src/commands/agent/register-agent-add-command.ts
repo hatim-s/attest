@@ -1,4 +1,8 @@
-import { webSocketConnectionModeSchema, webSocketTransportSchema } from '@attest/contracts';
+import {
+  agentTransportSchema,
+  webSocketConnectionModeSchema,
+  webSocketTransportSchema,
+} from '@attest/contracts';
 import {
   agentAddFlagConflicts,
   createAgentResource,
@@ -42,17 +46,7 @@ type AddOptions = MutationCliOptions &
     websocketUrl?: string;
   };
 
-const STREAM_FRAMINGS = ['sse', 'jsonl'] as const satisfies readonly NonNullable<
-  AgentAddFields['streamFraming']
->[];
-
-const BRIDGE_CONCURRENCY_MODES = ['serial', 'multiplexed'] as const satisfies readonly NonNullable<
-  AgentAddFields['bridgeConcurrency']
->[];
-
-const INCREMENTAL_OUTPUT_MODES = ['text', 'array'] as const satisfies readonly NonNullable<
-  AgentAddFields['incrementalOutputMode']
->[];
+const [, , bridgeTransport, , , streamTransport] = agentTransportSchema.options;
 
 /** Help-only hints: these WebSocket and stream flags take effect only with the flag they imply. */
 const ADD_IMPLIES = new Map(
@@ -115,10 +109,14 @@ const registerAgentAddCommand = (agent: Command, context: CommandContext): void 
     .option('--jsonl-command <command>', 'run-scoped correlated JSONL bridge command')
     .option('--stream-url <url>', 'external SSE or JSONL stream endpoint')
     .option('--websocket-url <url>', 'plain ws:// or wss:// text-JSON endpoint')
-    .addOption(new Option('--stream-framing <framing>', 'stream framing').choices(STREAM_FRAMINGS))
+    .addOption(
+      new Option('--stream-framing <framing>', 'stream framing').choices(
+        streamTransport.shape.framing.options,
+      ),
+    )
     .addOption(
       new Option('--bridge-concurrency <mode>', 'JSONL bridge concurrency').choices(
-        BRIDGE_CONCURRENCY_MODES,
+        bridgeTransport.shape.concurrency.options,
       ),
     )
     .addOption(
@@ -157,7 +155,7 @@ const registerAgentAddCommand = (agent: Command, context: CommandContext): void 
     .option('--incremental-output-pointer <pointer>', 'stream incremental output JSON Pointer')
     .addOption(
       new Option('--incremental-output-mode <mode>', 'stream accumulation mode').choices(
-        INCREMENTAL_OUTPUT_MODES,
+        streamTransport.shape.incremental_output_mode.unwrap().options,
       ),
     )
     .option('--env <target=source>', 'environment secret reference', collect)

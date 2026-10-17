@@ -4,6 +4,7 @@ import {
   metricPresetIdSchema,
   spanFilterSchema,
   spanKindSchema,
+  spanStatusSchema,
 } from '@attest/contracts';
 import { createMetricResource, type MetricAddFields } from '@attest/local/metric';
 import { Option, type Command } from 'commander';
@@ -24,8 +25,6 @@ import { runMetricMutation } from './run-metric-mutation.js';
 
 type MetricAddOptions = MutationCliOptions &
   Omit<MetricAddFields, 'metricId' | 'readStdin' | 'workingDirectory'>;
-
-const TOOL_STATUSES = ['ok', 'error'] as const;
 
 /** Registers assertion, judge, executable, and HTTP metric authoring. */
 const registerMetricAddCommand = (metric: Command, context: CommandContext): void => {
@@ -49,7 +48,11 @@ const registerMetricAddCommand = (metric: Command, context: CommandContext): voi
     .option('--gt <number>', 'numeric greater-than assertion')
     .option('--gte <number>', 'numeric greater-than-or-equal assertion')
     .option('--tool <name>', 'tool name for tool-called')
-    .addOption(new Option('--tool-status <status>', 'tool status').choices(TOOL_STATUSES))
+    .addOption(
+      new Option('--tool-status <status>', 'tool status').choices(
+        spanStatusSchema.shape.code.options,
+      ),
+    )
     .option('--count <integer>', 'tool-call or span count')
     .option('--order <name>', 'tool or span name in chronological order; repeatable', collect)
     .option('--arg-equals <path=json>', 'tool argument equals matcher; repeatable', collect)
