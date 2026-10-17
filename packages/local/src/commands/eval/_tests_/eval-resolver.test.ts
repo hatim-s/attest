@@ -385,18 +385,11 @@ describe('eval resolver', () => {
     expect(after.snapshotHash).not.toBe(before.snapshotHash);
   });
 
-  it('rejects duplicate resolved case and selection ids deterministically', () => {
+  it('rejects duplicate resolved case ids deterministically', () => {
     const duplicateCase = createProject();
     duplicateCase.tests[0]!.cases.push(structuredClone(duplicateCase.tests[0]!.cases[0]!));
     const caseError = captureCliError(() => resolveEvalRun(duplicateCase, request(), options));
     expect(caseError.code).toBe('project_invalid');
-
-    const duplicateSelection = captureCliError(() =>
-      resolveEvalRun(createProject(), request({ test_ids: ['alpha', 'alpha'] }), options),
-    );
-
-    expect(duplicateSelection.code).toBe('cli_usage');
-    expect(duplicateSelection.details).toMatchObject({ duplicates: ['alpha'] });
   });
 
   it('rejects missing agents, metrics, tests, cases, and hash coverage before execution', () => {

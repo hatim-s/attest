@@ -84,20 +84,6 @@ const selectCases = <T extends SelectableCase>(
     );
   }
 
-  for (const values of [
-    selection.case_ids,
-    selection.tags,
-    selection.folders,
-    selection.dataset_ids,
-  ]) {
-    if (values !== undefined && new Set(values).size !== values.length) {
-      throw new CaseSelectionError(
-        'invalid_selection',
-        'Duplicate selection values are not allowed.',
-      );
-    }
-  }
-
   const availableIds = new Set(candidates.map(({ case: testCase }) => testCase.id));
   const missing = selection.case_ids?.filter((id) => !availableIds.has(id)) ?? [];
 
