@@ -394,8 +394,8 @@ describe('runConfiguration', () => {
     await symlink(outside, join(root, '.attest'));
 
     await expect(startEval(root, { test_ids: ['smoke'] })).rejects.toMatchObject({
-      code: 'run_failed',
-      path: '.attest/runs.db',
+      code: 'project_locked',
+      path: '.attest/project.lock',
     });
     expect(await readdir(outside)).toEqual([]);
   });

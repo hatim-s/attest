@@ -138,14 +138,6 @@ const publishPreparedTransaction = async (
     }
 
     if (entry.type === 'write') {
-      if (entry.staged_path === null) {
-        throw new ProjectTransactionError(
-          'project_transaction_failed',
-          'Write entry is missing staged contents.',
-          { path: entry.path },
-        );
-      }
-
       // Recheck the destination after directory creation to reject symlink swaps.
       await resolveSafeProjectPath(root, entry.path);
       await rename(join(prepared.directory, entry.staged_path), destination);

@@ -11,10 +11,11 @@ import {
   unlink,
   writeFile,
 } from 'node:fs/promises';
-import { dirname, join, relative } from 'node:path';
+import { basename, dirname, join, relative } from 'node:path';
 
 import { z } from 'zod';
 
+import { resolveContainedPath } from '../project-path.js';
 import { errnoCode } from '../../internal/errno-code.js';
 import { syncPath } from '../../internal/sync-path.js';
 import type { ProjectLockHandle } from './project-lock.js';
@@ -27,34 +28,83 @@ const TRANSACTION_JOURNAL_SCHEMA = 'attest.project-transaction';
 
 const JOURNAL_FILE = 'journal.json';
 
-type TransactionFileChange = {
-  contents?: string;
-  path: string;
-  type: 'remove' | 'write';
-};
+type TransactionFileChange =
+  { contents: string; path: string; type: 'write' } | { path: string; type: 'remove' };
 
-const transactionJournalEntrySchema = z.object({
-  backup_path: z.string().nullable(),
-  next_hash: z.string().nullable(),
-  original_hash: z.string().nullable(),
-  path: z.string(),
-  staged_path: z.string().nullable(),
-  type: z.enum(['remove', 'write']),
-});
+const canonicalPathSchema = z
+  .string()
+  .refine(
+    (path) =>
+      path.length > 0 &&
+      !path.includes('\\') &&
+      !path.includes('\0') &&
+      path.split('/').every((segment) => segment !== '' && segment !== '.' && segment !== '..'),
+  );
 
-/** The recovery journal written beside staged files; recovery trusts nothing it does not parse. */
-const transactionJournalSchema = z.object({
-  created_at: z.string(),
-  created_directories: z.array(z.string()),
-  entries: z.array(transactionJournalEntrySchema),
-  manifest_path: z.literal('attest.project.json'),
-  project_hash_after: z.string(),
-  project_hash_before: z.string(),
-  published_count: z.number().int().nonnegative(),
-  schema: z.literal(TRANSACTION_JOURNAL_SCHEMA),
-  status: z.enum(['committed', 'prepared', 'publishing', 'rolled_back', 'rolling_back']),
-  transaction_id: z.string(),
-});
+const authoredPathSchema = canonicalPathSchema.refine(
+  (path) => path === 'attest.project.json' || path.startsWith('attest/'),
+);
+
+const hashSchema = z.string().regex(/^[a-f0-9]{64}$/u);
+
+const originalSchema = z.union([
+  z.object({ original_hash: z.null(), backup_path: z.null() }),
+  z.object({ original_hash: hashSchema, backup_path: z.string().regex(/^backups\/[0-9]+$/u) }),
+]);
+
+const transactionJournalEntrySchema = z.intersection(
+  z.discriminatedUnion('type', [
+    z.object({
+      type: z.literal('write'),
+      path: authoredPathSchema,
+      staged_path: z.string().regex(/^staged\/[0-9]+$/u),
+      next_hash: hashSchema,
+    }),
+    z.object({
+      type: z.literal('remove'),
+      path: authoredPathSchema,
+      staged_path: z.null(),
+      next_hash: z.null(),
+    }),
+  ]),
+  originalSchema,
+);
+
+const transactionJournalSchema = z
+  .object({
+    created_at: z.iso.datetime(),
+    created_directories: z.array(
+      canonicalPathSchema.refine((path) => path === 'attest' || path.startsWith('attest/')),
+    ),
+    entries: z.array(transactionJournalEntrySchema).min(1),
+    manifest_path: z.literal('attest.project.json'),
+    project_hash_after: z.string(),
+    project_hash_before: z.string(),
+    published_count: z.number().int().nonnegative(),
+    schema: z.literal(TRANSACTION_JOURNAL_SCHEMA),
+    status: z.enum(['committed', 'prepared', 'publishing', 'rolled_back', 'rolling_back']),
+    transaction_id: z.uuid(),
+  })
+  .refine((journal) => {
+    const paths = journal.entries.map(({ path }) => path);
+
+    return (
+      new Set(paths).size === paths.length &&
+      paths.at(-1) === journal.manifest_path &&
+      journal.entries.at(-1)?.type === 'write' &&
+      new Set(journal.created_directories).size === journal.created_directories.length &&
+      journal.created_directories.every((directory) =>
+        journal.entries.some(
+          (entry) => entry.type === 'write' && entry.path.startsWith(`${directory}/`),
+        ),
+      ) &&
+      journal.entries.every(
+        (entry, index) =>
+          (entry.backup_path === null || entry.backup_path === `backups/${index}`) &&
+          (entry.type === 'remove' || entry.staged_path === `staged/${index}`),
+      )
+    );
+  });
 
 type TransactionJournalEntry = z.infer<typeof transactionJournalEntrySchema>;
 
@@ -147,7 +197,15 @@ const prepareTransaction = async (
   projectHashAfter: string,
 ): Promise<PreparedTransaction> => {
   const transactionId = randomUUID();
-  const directory = join(root, TRANSACTIONS_DIRECTORY, transactionId);
+
+  const transactionsRoot = await resolveContainedPath(root, TRANSACTIONS_DIRECTORY, {
+    expect: 'directory',
+    createDirectories: true,
+    problem: () =>
+      new ProjectTransactionError('project_invalid', 'Unsafe transaction state directory.'),
+  });
+
+  const directory = join(transactionsRoot, transactionId);
   const stagedDirectory = join(directory, 'staged');
   const backupDirectory = join(directory, 'backups');
   await mkdir(stagedDirectory, { recursive: true });
@@ -167,22 +225,29 @@ const prepareTransaction = async (
     }
 
     const stagedPath = change.type === 'write' ? `staged/${index}` : null;
-    const nextHash = change.type === 'write' ? hashBytes(change.contents ?? '') : null;
 
-    if (stagedPath !== null) {
+    if (change.type === 'write' && stagedPath !== null) {
       const absoluteStage = join(directory, stagedPath);
-      await writeFile(absoluteStage, change.contents ?? '', { mode: 0o644 });
+      await writeFile(absoluteStage, change.contents, { mode: 0o644 });
       await syncWrittenFile(absoluteStage);
     }
 
-    entries.push({
-      backup_path: backupPath,
-      next_hash: nextHash,
-      original_hash: originalHash,
-      path: change.path,
-      staged_path: stagedPath,
-      type: change.type,
-    });
+    const original =
+      originalHash === null
+        ? { original_hash: null, backup_path: null }
+        : { original_hash: originalHash, backup_path: `backups/${index}` };
+
+    entries.push(
+      change.type === 'write'
+        ? {
+            ...original,
+            path: change.path,
+            type: 'write',
+            staged_path: `staged/${index}`,
+            next_hash: hashBytes(change.contents),
+          }
+        : { ...original, path: change.path, type: 'remove', staged_path: null, next_hash: null },
+    );
   }
 
   const journal: TransactionJournal = {
@@ -211,38 +276,28 @@ const prepareTransaction = async (
 // BOUNDARY: Durable transaction journal text is untrusted disk input; validate its schema and transaction directory identity before recovery.
 const parseTransactionJournal = (raw: string, directory: string): TransactionJournal => {
   const path = relative(dirname(dirname(directory)), directory);
-  let value: unknown;
 
   try {
-    value = JSON.parse(raw);
-  } catch {
-    value = undefined;
-  }
-
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    return transactionJournalSchema
+      .refine((journal) => journal.transaction_id === basename(directory))
+      .parse(JSON.parse(raw));
+  } catch (cause: unknown) {
     throw new ProjectTransactionError(
       'project_recovery_required',
-      'Transaction journal is malformed.',
-      { path },
+      'Transaction journal is malformed or has an unsupported shape.',
+      { path, cause },
     );
   }
-
-  const parsed = transactionJournalSchema.safeParse(value);
-
-  if (!parsed.success) {
-    throw new ProjectTransactionError(
-      'project_recovery_required',
-      'Transaction journal has an unsupported shape.',
-      { path },
-    );
-  }
-
-  return parsed.data;
 };
 
 /** Loads a transaction journal while keeping every recovery artifact in place on failure. */
 const readPreparedTransaction = async (directory: string): Promise<PreparedTransaction> => {
-  const journalPath = join(directory, JOURNAL_FILE);
+  const journalPath = await resolveContainedPath(directory, JOURNAL_FILE, {
+    expect: 'file',
+    problem: () =>
+      new ProjectTransactionError('project_recovery_required', 'Unsafe recovery journal.'),
+  });
+
   let raw: string;
 
   try {
@@ -255,7 +310,22 @@ const readPreparedTransaction = async (directory: string): Promise<PreparedTrans
     );
   }
 
-  return { directory, journal: parseTransactionJournal(raw, directory), journalPath };
+  const journal = parseTransactionJournal(raw, directory);
+
+  for (const entry of journal.entries) {
+    for (const path of [entry.backup_path, entry.staged_path]) {
+      if (path === null) continue;
+      await resolveContainedPath(directory, path, {
+        expect: 'file',
+        problem: () =>
+          new ProjectTransactionError('project_recovery_required', 'Unsafe recovery artifact.', {
+            path,
+          }),
+      });
+    }
+  }
+
+  return { directory, journal, journalPath };
 };
 
 const ensureExpectedState = async (
@@ -286,7 +356,15 @@ const ensureExpectedState = async (
 const removeCreatedDirectories = async (root: string, paths: readonly string[]): Promise<void> => {
   for (const path of [...paths].sort((left, right) => right.length - left.length)) {
     try {
-      await rmdir(join(root, path));
+      await rmdir(
+        await resolveContainedPath(root, path, {
+          expect: 'directory',
+          problem: () =>
+            new ProjectTransactionError('project_recovery_required', 'Unsafe recovery directory.', {
+              path,
+            }),
+        }),
+      );
     } catch (error: unknown) {
       // A non-empty directory now contains authored data and must always be preserved.
       if (!['ENOENT', 'ENOTEMPTY', 'EEXIST'].includes(errnoCode(error) ?? '')) {
@@ -326,14 +404,6 @@ const rollbackPreparedTransaction = async (
     if (entry.original_hash === null) {
       await unlink(destination);
     } else {
-      if (entry.backup_path === null) {
-        throw new ProjectTransactionError(
-          'project_recovery_required',
-          'Rollback backup is missing from the journal.',
-          { path: entry.path },
-        );
-      }
-
       const backup = join(prepared.directory, entry.backup_path);
 
       if ((await readByteHash(backup)) !== entry.original_hash) {
@@ -377,7 +447,15 @@ const recoverProjectTransactions = async (
     throw new ProjectTransactionError('project_locked', 'Recovery lock belongs to another root.');
   }
 
-  const transactionsRoot = join(root, TRANSACTIONS_DIRECTORY);
+  const transactionsRoot = await resolveContainedPath(root, TRANSACTIONS_DIRECTORY, {
+    expect: 'directory',
+    problem: () =>
+      new ProjectTransactionError(
+        'project_recovery_required',
+        'Unsafe transaction state directory.',
+      ),
+  });
+
   let names: string[];
 
   try {
