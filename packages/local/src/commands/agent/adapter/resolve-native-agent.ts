@@ -215,21 +215,14 @@ const resolveProcessAgent = async (
       }),
     );
 
-    {
-      const assembledFields: ResolvedNativeAgent = {
-        argv: [transport.argv[0]!, ...transport.argv.slice(1)],
-        env: sandboxEnvironment,
-        kind: 'vercel_sandbox',
-        sandbox: transport.sandbox,
-        secrets: [...secrets, ...redactedArgvValues(agent, transport.argv)],
-      };
-
-      if (transport.cwd !== undefined) {
-        assembledFields.cwd = transport.cwd;
-      }
-
-      return assembledFields;
-    }
+    return {
+      argv: [transport.argv[0]!, ...transport.argv.slice(1)],
+      cwd: transport.cwd,
+      env: sandboxEnvironment,
+      kind: 'vercel_sandbox',
+      sandbox: transport.sandbox,
+      secrets: [...secrets, ...redactedArgvValues(agent, transport.argv)],
+    };
   }
 
   const cwd = await resolveProcessCwd(projectRoot, transport.cwd);

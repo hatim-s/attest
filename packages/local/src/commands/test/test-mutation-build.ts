@@ -250,20 +250,14 @@ const buildMutation = async (
         test.datasets.push({ dataset_id: request.as });
       }
 
-      {
-        const assembledFields: MutationBuildResult = {
-          candidate,
-          importedCaseCount: imported.counts.inserted + imported.counts.updated,
-          importResult: imported,
-          resource: { id: request.as, type: 'dataset' },
-        };
-
-        if (existing !== undefined && consumerTests.length > 1) {
-          assembledFields.affectedTests = consumerTests;
-        }
-
-        return assembledFields;
-      }
+      return {
+        affectedTests:
+          existing !== undefined && consumerTests.length > 1 ? consumerTests : undefined,
+        candidate,
+        importedCaseCount: imported.counts.inserted + imported.counts.updated,
+        importResult: imported,
+        resource: { id: request.as, type: 'dataset' },
+      };
     }
 
     case 'test.dataset.attach': {
