@@ -155,6 +155,17 @@ const Dashboard = () => {
                 <Badge tone={run.status}>{run.status}</Badge>
               </section>
               <SummaryCards run={run} />
+              {reportData !== undefined ? (
+                <section className="empty-compact" aria-label="Report contents">
+                  {reportData.cases.length}{' '}
+                  {run.summary === undefined
+                    ? 'cases included; total unavailable.'
+                    : `of ${run.summary.totalCases} cases included.`}
+                  {reportData.truncated
+                    ? ' This report is truncated. Omitted cases and traces are unavailable; distributions cover only included cases.'
+                    : ''}
+                </section>
+              ) : null}
               <div className="tabs" role="tablist">
                 {DASHBOARD_TABS.flatMap(({ id, label }) =>
                   id !== 'compare' || runs.length > 1
