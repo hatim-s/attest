@@ -242,11 +242,11 @@ const runPreparedTransaction = async (options: {
     await cleanupPreparedTransaction(root, prepared);
   } catch (cause: unknown) {
     throw new ProjectTransactionError(
-      'project_transaction_failed',
-      'Project mutation committed, but transaction cleanup did not complete.',
+      'project_mutation_committed_cleanup_failed',
+      'Project change was saved, but transaction cleanup did not complete.',
       {
         details: { committed: true, transaction_id: prepared.journal.transaction_id },
-        hint: 'The project contains the new files. Retry recovery to finish transaction cleanup.',
+        hint: 'Run attest project validate in this project to finish cleanup. Do not repeat the mutation.',
         cause,
       },
     );
