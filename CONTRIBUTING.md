@@ -20,18 +20,6 @@ Follow the [quickstart](docs/quickstart.md) with the shell function in the
 
 ## Find the owning package
 
-| Package             | Responsibility                                                               |
-| ------------------- | ---------------------------------------------------------------------------- |
-| `@attest/contracts` | Versioned protocols and resource schemas                                     |
-| `@attest/core`      | Domain records, comparison, import, trace conversion, and storage interfaces |
-| `@attest/executor`  | Agent invocation, transport cleanup, and isolated case environments          |
-| `@attest/runtime`   | Metrics, lifecycle hooks, and evaluation scheduling                          |
-| `@attest/local`     | Project files, SQLite, local evaluation, reports, and dashboard server       |
-| `@attest/cli`       | Terminal commands, prompts, and output                                       |
-| `@attest/web`       | Dashboard and embedded report UI                                             |
-| `@attest/schemas`   | Generated JSON schemas for non-TypeScript consumers                          |
-| `@attest/site`      | Marketing page                                                               |
-
 The [architecture guide](docs/ARCHITECTURE.md) explains the dependency rules and where new code belongs. Cloud code can reuse contracts, core, executor, and runtime without importing the CLI or local application.
 
 Keep authored examples under `examples/`. Put focused tests and fixtures together in

@@ -16,6 +16,7 @@ project/
 │       ├── <dataset-id>.jsonl
 │       └── <dataset-id>.meta.json
 └── .attest/
+    ├── cloud.json
     ├── runs.db
     ├── project.lock
     ├── transactions/
@@ -122,6 +123,12 @@ A separate `attest eval cancel` process atomically publishes
 `<run-id>.cancel.json` containing that authenticated token. The runner polls only its own request,
 cancels adapters, and removes owned registry files at termination. Stale/unowned uncertainty is
 reported; unrelated processes are never signalled.
+
+## Cloud state
+
+`.attest/cloud.json` stores the project link and synchronized hashes. Private user
+credentials live outside the project at `~/.attest/cloud/credentials.json`. Neither
+file belongs in version control. See [cloud commands](../cli/cloud.md) for sync behavior.
 
 ## Output artifacts
 

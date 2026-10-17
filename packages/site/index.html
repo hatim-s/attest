@@ -400,7 +400,7 @@
 
 <section>
   <h2 class="hang" data-at="{H+12}" data-branch="h-{C+W+12}">Six transports, one contract.</h2>
-  <p>Native module, managed process, HTTP, polling, stream, and WebSocket all normalize to one agent contract. Any language, no SDK.</p>
+  <p>Native process, managed process, HTTP, polling, stream, and WebSocket all normalize to one agent contract. Any language, no SDK.</p>
   <div class="hang transports" aria-hidden="true">
     <i data-at="135" data-branch="c-{W*.4} 0 -{W*.6} -125 -{W} -125 m3 0 a3 3 0 1 0 -6 0 a3 3 0 1 0 6 0"></i>
     <i data-at="135" data-branch="c-{W*.4} 0 -{W*.6} -75 -{W} -75 m3 0 a3 3 0 1 0 -6 0 a3 3 0 1 0 6 0"></i>
@@ -408,7 +408,7 @@
     <i data-at="135" data-branch="c-{W*.4} 0 -{W*.6} 25 -{W} 25 m3 0 a3 3 0 1 0 -6 0 a3 3 0 1 0 6 0"></i>
     <i data-at="135" data-branch="c-{W*.4} 0 -{W*.6} 75 -{W} 75 m3 0 a3 3 0 1 0 -6 0 a3 3 0 1 0 6 0"></i>
     <i data-at="135" data-branch="c-{W*.4} 0 -{W*.6} 125 -{W} 125 m3 0 a3 3 0 1 0 -6 0 a3 3 0 1 0 6 0"></i>
-    <span class="lab" style="top:0">native module</span>
+    <span class="lab" style="top:0">native process</span>
     <span class="lab" style="top:50px">managed process</span>
     <span class="lab" style="top:100px">HTTP</span>
     <span class="lab" style="top:150px">polling</span>
@@ -460,14 +460,14 @@
 
 <section>
   <h2 class="hang" data-at="{H+12}" data-branch="h-{C+W+12}">One file, attached to the PR.</h2>
-  <p><code>attest view</code> opens a local dashboard. <code>attest report</code> writes one self-contained HTML file with every case, trace, and diff inside, so the reviewer needs nothing installed.</p>
+  <p><code>attest view</code> opens a local dashboard. <code>attest report</code> writes one self-contained HTML file with up to 10,000 cases and their traces. Static reports do not include run comparisons.</p>
   <div class="hang file" aria-hidden="true" data-at="12"
        data-branch="h-52 v84 h68 v-66 l-16 -18 m0 0 v18 h16"></div>
 </section>
 
 <section id="quickstart">
   <h2 class="hang" data-at="{H+12}" data-branch="h-{C+W+12}">Quickstart.</h2>
-  <p>Seven commands. No credentials, no network.</p>
+  <p>Follow the <a href="https://github.com/hatim-s/attest/blob/main/docs/quickstart.md">quickstart</a> to create <code>agent.mjs</code> and <code>cases.jsonl</code>, then run these commands without provider credentials.</p>
   <div class="hang term-wrap" data-at="17" data-branch="h-39">
     <div class="term" role="figure" aria-label="The quickstart commands in a terminal">
       <div class="tbar" aria-hidden="true"><i></i><i></i><i></i><span>attest quickstart</span></div>
@@ -482,7 +482,7 @@
   <span class="f">"schema"</span>: <span class="s">"attest.cli-result"</span>,
   <span class="f">"ok"</span>: <span class="n">true</span>,
   <span class="f">"command"</span>: <span class="s">"eval.run"</span>,
-  <span class="f">"result"</span>: { <span class="f">"run_id"</span>: <span class="s">"01J9Q4…"</span>, <span class="f">"cases"</span>: <span class="n">24</span>, <span class="f">"passed"</span>: <span class="n">22</span>, <span class="f">"failed"</span>: <span class="n">2</span> }
+  <span class="f">"result"</span>: { <span class="f">"run_id"</span>: <span class="s">"01J9Q4…"</span>, <span class="f">"verdict"</span>: <span class="s">"fail"</span>, <span class="f">"summary"</span>: { <span class="f">"total_cases"</span>: <span class="n">24</span>, <span class="f">"passed_cases"</span>: <span class="n">22</span>, <span class="f">"failed_cases"</span>: <span class="n">2</span> } }
 }</span></pre>
     </div>
   </div>
@@ -492,7 +492,7 @@
   <h2 class="hang" data-at="{H+12}" data-branch="h-{C+W+12}">Speaks JSON.</h2>
   <p>Built for coding agents as much as for you.</p>
   <ul class="facts">
-    <li class="hang" data-at="{H/2}" data-branch="h-{W-16} m-3 0 a3 3 0 1 0 6 0 a3 3 0 1 0 -6 0">Every command accepts <code>--output json</code>, one <code>attest.cli-result</code> document, or <code>--output jsonl</code>.</li>
+    <li class="hang" data-at="{H/2}" data-branch="h-{W-16} m-3 0 a3 3 0 1 0 6 0 a3 3 0 1 0 -6 0">Discovery, resource, and eval commands accept <code>--output json</code> for one <code>attest.cli-result</code> document. Streaming commands also support <code>--output jsonl</code>; artifact commands use separate output options.</li>
     <li class="hang" data-at="{H/2}" data-branch="h-{W-16} m-3 0 a3 3 0 1 0 6 0 a3 3 0 1 0 -6 0"><code>attest help --output json</code> returns the command tree. <code>attest schema print &lt;id&gt;</code> returns the JSON Schema.</li>
     <li class="hang" data-at="{H/2}" data-branch="h-{W-16} m-3 0 a3 3 0 1 0 6 0 a3 3 0 1 0 -6 0"><code>attest errors --output json</code> lists stable error codes, each with a repair command.</li>
     <li class="hang" data-at="{H/2}" data-branch="h-{W-16} m-3 0 a3 3 0 1 0 6 0 a3 3 0 1 0 -6 0"><code>--if-project-hash &lt;sha256&gt;</code> guards a mutation when another actor may be editing the project.</li>
@@ -501,7 +501,7 @@
 
 <section>
   <h2 class="hang" data-at="{H+12}" data-branch="h-{C+W+12}">Apache 2.0.</h2>
-  <p>Runtime, CLI, trace schema, every metric type, dashboard, reports, and diffing are free. Cloud, with hosted dashboards, team sharing, and long-horizon CI history, comes later.</p>
+  <p>Runtime, CLI, trace schema, every metric type, dashboard, reports, and diffing are free. Cloud CLI commands support explicit login, project sync, and remote runs. Hosted dashboards, team sharing, and long-horizon CI history remain future work.</p>
   <p>Leave an email and we will write when cloud opens.</p>
   <form class="hang wait" data-at="-14" data-branch="h-{C+W+28} v{H+28} h{C+W+28}" onsubmit="event.preventDefault()">
     <label for="email" hidden>Email</label>

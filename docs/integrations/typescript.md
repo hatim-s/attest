@@ -73,7 +73,7 @@ process.exitCode = exitCode;
 
 For process isolation, execute the installed `attest` binary with an argument array
 and parse stdout. Keep stderr separate. Both approaches use the same
-[command and result contracts](../cli/index.md#machine-output). A completed
+[command and result contracts](../cli/index.md#global-machine-contract). A completed
 evaluation with a failing verdict returns exit code `1` and `ok: true`; an invocation
 failure returns `ok: false`. Do not treat every nonzero exit as malformed output.
 

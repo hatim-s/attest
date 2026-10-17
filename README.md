@@ -43,18 +43,6 @@ Registry installation becomes available after the maintainer publishes the alpha
 
 ## Packages
 
-| Package             | Responsibility                                                               |
-| ------------------- | ---------------------------------------------------------------------------- |
-| `@attest/contracts` | Versioned protocols and resource schemas                                     |
-| `@attest/core`      | Domain records, comparison, import, trace conversion, and storage interfaces |
-| `@attest/executor`  | Agent invocation, transport cleanup, and isolated case environments          |
-| `@attest/runtime`   | Metrics, lifecycle hooks, and evaluation scheduling                          |
-| `@attest/local`     | Project files, SQLite, local evaluation, reports, and dashboard server       |
-| `@attest/cli`       | Terminal commands, prompts, and output                                       |
-| `@attest/web`       | Dashboard and embedded report UI                                             |
-| `@attest/schemas`   | Generated JSON schemas for non-TypeScript consumers                          |
-| `@attest/site`      | Marketing page                                                               |
-
 The [architecture guide](docs/ARCHITECTURE.md) explains the dependency rules and where new code belongs. Cloud code can reuse contracts, core, executor, and runtime without importing the CLI or local application.
 
 ## Use Attest
@@ -85,7 +73,7 @@ tests. Runs live in `.attest/runs.db`; keep `.attest/` out of version control. R
 and run data can contain agent inputs, outputs, and traces.
 
 Attest runs the processes and requests configured in your project. Use projects and
-agent commands you trust. Evaluation data stays in the local store, while configured
+agent commands you trust. Local evaluation data stays in the local store. Explicit [cloud push and run commands](docs/cli/cloud.md) send project resources and run data to the configured cloud service. Configured
 HTTP agents and model judges communicate with their providers. Attest sends no usage
 telemetry. See the [telemetry policy](docs/TELEMETRY.md).
 

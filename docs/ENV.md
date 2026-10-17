@@ -24,3 +24,33 @@ Do not put credential values in `attest/agents/*.json`, `--sandbox-json`, argv, 
 scripts.
 
 The `after_agent` and `after_evaluation` command hooks receive the same case identifiers, worker directory, and `ATTEST_CASE_OUTCOME` as `after_case`. `after_agent` runs before metric evaluation, and `after_evaluation` runs after metrics.
+
+## CLI and model providers
+
+`CI=true` disables prompts. Other values do not. Prompts also require human output,
+input/output TTYs, no `--from-json`, and no `--non-interactive`.
+
+The TanStack judge adapters use `ANTHROPIC_API_KEY` and `OPENAI_API_KEY` for their
+respective providers when no explicit SDK key is supplied. Agent processes do not
+inherit provider secrets automatically. Explicit `from_env` mappings resolve named
+host variables for configured secret fields; process environment allowlists opt in
+host values. Never put the secret value in an authored resource.
+
+## Native process environment
+
+Native CLI invocations receive `ATTEST_PROTOCOL`, `ATTEST_RUN_ID`, and `ATTEST_CASE_ID`.
+These identifiers override allowlisted host values. By default `HOME` and `TMPDIR`
+point inside the attempt directory, `LC_ALL` is `C`, and `PATH` contains only absolute
+host entries. Explicit allowlisting can replace these environment defaults.
+
+## Cloud credentials
+
+Cloud login takes its URL explicitly and saves credentials in
+`~/.attest/cloud/credentials.json`. The local cloud adapter defines no URL/token
+environment variable. See [cloud commands](cli/cloud.md).
+
+## Developer controls
+
+`FUZZ=1` enables conformance fuzz tests. `FUZZ_ITERATIONS` overrides their iteration
+count. The `test:fuzz` script enables `FUZZ` itself. Telemetry opt-outs described in
+[the telemetry policy](TELEMETRY.md) are requirements for a future change, not current switches.

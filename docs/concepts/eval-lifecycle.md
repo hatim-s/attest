@@ -62,8 +62,8 @@ exits `4`. See the [metric protocol](../specs/metric-contract.md) and
 
 Attest writes the immutable eval run to `.attest/runs.db`, including selected case ids,
 resource hashes, attempts, metric results, Git metadata when available, timestamps, and
-the effective command. Authoring and `attest agent test` do not create this database;
-`attest eval run` does.
+the effective command. Authoring does not create this database. `attest agent test` creates it only with
+`--record`; `attest eval run` creates it when recording evaluation results.
 
 Subsequent read surfaces consume the persisted record:
 

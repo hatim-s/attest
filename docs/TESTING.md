@@ -5,9 +5,13 @@ Tests live in a local `_tests_/` directory beside the source module they exercis
 directory. Add tests only for meaningful behavior: public contracts, important edge cases, and
 regressions. Do not add tests merely to mirror implementation details.
 
-Required CI must be deterministic. Use fake clocks for time-dependent behavior; do not use real
-timers. Tests must not make network requests, and required CI must never call a live LLM. Keep
-fixtures small, readable, and checked in when behavior is shared across packages.
+Use fake clocks for pure time-dependent logic. Existing process-cleanup tests use real
+subprocess deadlines, and transport/server tests use loopback HTTP. Required CI must never
+call a live LLM or an external provider. Keep shared fixtures checked in.
+
+Existing layout exceptions are the schema artifact validator `validate-artifacts.ts`,
+executor/runtime `portability.check.mjs`, vendored `.mjs` suites, and the root conformance
+fixtures. Hatim still needs to decide whether these are permanent policy exceptions.
 
 `bun run test` builds dependencies before package tests. The cli journeys that install the packed CLI
 and replay the quickstart and documented commands run separately with `bun run test:acceptance`,
