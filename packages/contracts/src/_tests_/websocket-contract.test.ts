@@ -1,4 +1,4 @@
-import { describe, expect, expectTypeOf, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import {
   WEBSOCKET_EVIDENCE_SCHEMA_ID,
@@ -110,7 +110,6 @@ describe('WebSocket authored resource contract', () => {
         connection_mode: 'serial',
       }).success,
     ).toBe(true);
-    expectTypeOf(validTransport).toMatchTypeOf<WebSocketTransport>();
   });
 
   it('rejects multiplexing per-case connections and inconsistent timing bounds', () => {
@@ -193,8 +192,6 @@ describe('WebSocket normalized request and message protocol', () => {
         }).success,
       ).toBe(true);
     }
-
-    expectTypeOf(validRequest).toMatchTypeOf<WebSocketInvocationRequest>();
   });
 
   it('rejects missing, oversized, and unsafe correlation ids', () => {

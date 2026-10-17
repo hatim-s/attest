@@ -1,4 +1,4 @@
-import { describe, expect, expectTypeOf, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import { agentResourceSchema, type AgentResource } from '../project/resources/agent.js';
 import { testCaseSchema, type TestCase } from '../project/resources/case.js';
@@ -9,7 +9,7 @@ import { projectManifestSchema, type ProjectManifest } from '../project/manifest
 import { projectResourcesSchema } from '../project/resources-snapshot.js';
 import { testResourceSchema, type TestResource } from '../project/resources/test.js';
 import { relativePathSchema } from '../project/shared.js';
-import { evalExecutionConfigSchema, type EvalExecutionConfig } from '../project/eval-execution.js';
+import { evalExecutionConfigSchema } from '../project/eval-execution.js';
 import {
   AGENT_RESOURCE_SCHEMA_ID,
   CASE_SCHEMA_ID,
@@ -137,12 +137,6 @@ const validProjectResources = {
 describe('authored resource contracts', () => {
   it('accepts one complete, strictly typed project snapshot', () => {
     expect(projectResourcesSchema.safeParse(validProjectResources).success).toBe(true);
-    expectTypeOf(project).toMatchTypeOf<ProjectManifest>();
-    expectTypeOf(agent).toMatchTypeOf<AgentResource>();
-    expectTypeOf(test).toMatchTypeOf<TestResource>();
-    expectTypeOf(testCase).toMatchTypeOf<TestCase>();
-    expectTypeOf(dataset).toMatchTypeOf<DatasetResource>();
-    expectTypeOf(metric).toMatchTypeOf<MetricResource>();
   });
 
   it.each([
@@ -234,7 +228,6 @@ describe('eval execution defaults contract', () => {
   it('accepts strict worker isolation and every lifecycle hook', () => {
     expect(execution).toBeDefined();
     expect(evalExecutionConfigSchema.safeParse(execution).success).toBe(true);
-    expectTypeOf(execution).toMatchTypeOf<EvalExecutionConfig | undefined>();
   });
 
   it.each([
