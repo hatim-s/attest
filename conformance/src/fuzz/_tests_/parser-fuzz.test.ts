@@ -1,299 +1,190 @@
 import {
+  agentRequestSchema,
   parseAgentRequest,
   parseAgentResponse,
   parseMetricRequest,
   parseMetricResult,
   parseTrace,
+  traceSchema,
 } from '@attest/contracts';
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
 
-type Parser =
-  | typeof parseAgentRequest
-  | typeof parseAgentResponse
-  | typeof parseMetricRequest
-  | typeof parseMetricResult
-  | typeof parseTrace;
+import { loadFixtures } from '../../../../packages/contracts/src/_tests_/support/load-fixtures.js';
 
-// BOUNDARY: Generated malformed parser inputs are mutable containers whose fields intentionally have no domain contract.
-type MutableRecord = Record<string, unknown>;
+const iterationCount = Number.parseInt(process.env.FUZZ_ITERATIONS ?? '200', 10);
 
-type MutationKind = 'delete-key' | 'duplicate-array-entry' | 'inject-key' | 'retype-value';
-
-type MutationInstruction = {
-  index: number;
-  kind: MutationKind;
-  replacement: unknown;
+const options = {
+  numRuns: Number.isFinite(iterationCount) && iterationCount > 0 ? iterationCount : 200,
 };
 
-// BOUNDARY: Mutation locations point into generated malformed objects or arrays, not validated application data.
-type ValueLocation = {
-  container: MutableRecord | unknown[];
-  key: number | string;
+const fixtures = loadFixtures();
+
+const seed = (contract: string, name: string) => {
+  const fixture = fixtures.find(
+    (fixture) => fixture.contract === contract && fixture.name === name,
+  );
+
+  if (fixture === undefined) throw new Error(`Missing fuzz seed ${contract}/${name}`);
+
+  return fixture.envelope.input;
 };
 
-const defaultIterationCount = 200;
-
-const configuredIterationCount = Number.parseInt(
-  process.env.FUZZ_ITERATIONS ?? String(defaultIterationCount),
-  10,
+const request = agentRequestSchema.parse(
+  seed('agent-request', '01-valid-minimal-single-turn.json'),
 );
 
-const iterationCount =
-  Number.isFinite(configuredIterationCount) && configuredIterationCount > 0
-    ? configuredIterationCount
-    : defaultIterationCount;
+const trace = traceSchema.parse(
+  seed('trace', '02-valid-nested-spans-events-and-gen-ai-attributes.json'),
+);
 
-const validAgentRequest = {
-  protocol: 'attest.agent-invocation',
-  run_id: '01J9ZK7Q2M5X8W4V3T2R1QPN0M',
-  case_id: 'greeting-basic',
-  input: { question: 'What is the capital of France?', tags: ['geography'] },
-};
+const span = trace.spans[0]!;
 
-const validTrace = {
-  schema: 'attest.trace',
-  trace_id: 'trace-1',
-  spans: [
-    {
-      span_id: 'span-1',
-      parent_span_id: null,
-      name: 'agent.run',
-      kind: 'agent',
-      start_time: '2026-08-06T10:15:03.120Z',
-      end_time: '2026-08-06T10:15:09.480Z',
-      status: { code: 'ok' },
-    },
-  ],
-};
+const response = parseAgentResponse(seed('agent-response', '01-valid-output-success.json'));
 
-const validAgentResponse = {
-  protocol: 'attest.agent-invocation',
-  output: ['Paris'],
-  trace: validTrace,
-};
+const metricRequest = parseMetricRequest(seed('metric-request', '01-valid.json'));
 
-const validMetricRequest = {
-  protocol: 'attest.metric-evaluation',
-  case: { id: 'greeting', input: ['Capital of France?'] },
-  output: 'Paris',
-  trace: validTrace,
-};
+const metricResult = parseMetricResult(seed('metric-result', '01-valid-pass.json'));
 
-const validMetricResult = {
-  score: 1,
-  pass: true,
-  details: { matched: ['$.output'] },
-};
+if (!response.ok || !metricRequest.ok || !metricResult.ok) throw new Error('Invalid fuzz seed');
 
-const jsonNoise = fc.jsonValue();
+const tracePaths = ['spans.0.span_id', 'spans.0.start_time', 'spans.0.name'];
 
-// Callers can pass values that never went through JSON, such as functions and symbols.
-const nonJsonNoise = fc.oneof(
+const embeddedTracePaths = tracePaths.map((path) => `trace.${path}`);
+
+const parsers = [
+  ['parseAgentRequest', parseAgentRequest, request, []],
+  ['parseAgentResponse', parseAgentResponse, { ...response.value, trace }, embeddedTracePaths],
+  ['parseMetricRequest', parseMetricRequest, { ...metricRequest.value, trace }, embeddedTracePaths],
+  ['parseMetricResult', parseMetricResult, metricResult.value, []],
+  ['parseTrace', parseTrace, trace, tracePaths],
+] as const;
+
+const noise = fc.oneof(
+  fc.jsonValue(),
   fc.anything(),
+  fc.constant(Symbol('fuzz')),
   fc.constant(() => undefined),
-  fc.constant(Symbol('attest-fuzz')),
-  fc.constant(undefined),
+  fc.constantFrom('\uD800', '\uDC00', '\0', '\u202E', '\u200F', 'x'.repeat(1024 * 1024)),
 );
 
-// Alternating arrays and objects up to depth 200.
-const deepStructures = fc
-  .tuple(fc.integer({ min: 1, max: 200 }), fc.boolean(), fc.jsonValue())
-  .map(([depth, startsWithArray, leaf]) => {
-    let value: unknown = leaf;
+const deepPayload = fc
+  .tuple(fc.integer({ min: 1, max: 200 }), fc.jsonValue())
+  .map(([depth, leaf]) => {
+    let value: fc.JsonValue = leaf;
 
-    for (let level = 0; level < depth; level += 1) {
-      const useArray = (level % 2 === 0) === startsWithArray;
-      value = useArray ? [value] : { nested: value };
-    }
+    for (let level = 0; level < depth; level += 1)
+      value = level % 2 === 0 ? [value] : { nested: value };
 
     return value;
   });
 
-const hostilePattern = '\u0000\u202e\ud800\udc00\ud800';
+describe.skipIf(process.env.FUZZ !== '1')('contract parser properties (set FUZZ=1 to run)', () => {
+  it.each(parsers)(
+    '%s returns a result for JSON and non-JSON input',
+    (_name, parse, document, nestedPaths) => {
+      fc.assert(
+        fc.property(
+          fc.constantFrom(...Object.keys(document), ...nestedPaths),
+          noise,
+          (path, candidate) => {
+            const field = path.slice(path.lastIndexOf('.') + 1);
+            const spans = [{ ...span, [field]: candidate }, ...trace.spans.slice(1)];
+            let mutated = { ...document, [path]: candidate };
 
-const oneMegabyteHostileString = hostilePattern
-  .repeat(Math.ceil(1_048_576 / hostilePattern.length))
-  .slice(0, 1_048_576);
+            if (path.startsWith('spans.')) mutated = { ...document, spans };
 
-// Lone surrogates, NUL, RTL override, and a one-megabyte string.
-const hostileStrings = fc.oneof(
-  fc.string({ maxLength: 4_096 }),
-  fc.constant('\u0000'),
-  fc.constant('\u202eRTL'),
-  fc.constant('\ud800\udc00'),
-  fc.constant('\ud800'),
-  fc.constant(oneMegabyteHostileString),
-);
+            if (path.startsWith('trace.spans.'))
+              mutated = { ...document, trace: { ...trace, spans } };
 
-const mutationValues = fc.oneof(jsonNoise, nonJsonNoise, deepStructures, hostileStrings);
+            expect(parse(candidate).ok).toBeTypeOf('boolean');
+            expect(parse(mutated).ok).toBeTypeOf('boolean');
+          },
+        ),
+        options,
+      );
+    },
+  );
 
-const mutationInstructions = fc.record({
-  index: fc.nat(),
-  kind: fc.constantFrom<MutationKind>(
-    'delete-key',
-    'duplicate-array-entry',
-    'inject-key',
-    'retype-value',
-  ),
-  replacement: mutationValues,
+  it('requires exactly one agent outcome for every JSON output', () => {
+    const outcomes = fc.record(
+      {
+        protocol: fc.constant(request.protocol),
+        output: fc.jsonValue(),
+        error: fc.record({ message: fc.string() }),
+      },
+      { requiredKeys: ['protocol'] },
+    );
+
+    fc.assert(
+      fc.property(outcomes, (candidate) => {
+        expect(parseAgentResponse(candidate).ok).toBe(
+          Object.hasOwn(candidate, 'output') !== Object.hasOwn(candidate, 'error'),
+        );
+      }),
+      options,
+    );
+  });
+
+  it('accepts bounded deep JSON at the input payload', () => {
+    fc.assert(
+      fc.property(deepPayload, (input) => {
+        expect(parseAgentRequest({ ...request, input }).ok).toBe(true);
+      }),
+      options,
+    );
+  });
+
+  it('accepts unique span identities and rejects an appended duplicate', () => {
+    fc.assert(
+      fc.property(
+        fc.uniqueArray(fc.string({ minLength: 1 }), { minLength: 1, maxLength: 8 }),
+        (ids) => {
+          const spans = ids.map((span_id) => ({ ...span, span_id, parent_span_id: null }));
+          expect(parseTrace({ ...trace, spans }).ok).toBe(true);
+          const result = parseTrace({ ...trace, spans: [...spans, spans[0]!] });
+          expect(result.ok).toBe(false);
+
+          if (!result.ok)
+            expect(result.error).toContainEqual(
+              expect.objectContaining({ path: `spans.${spans.length}.span_id` }),
+            );
+        },
+      ),
+      options,
+    );
+  });
+
+  it('accepts finite metric scores', () => {
+    fc.assert(
+      fc.property(
+        fc.double({ noNaN: true, noDefaultInfinity: true }),
+        fc.boolean(),
+        (score, pass) => {
+          expect(parseMetricResult({ score, pass }).ok).toBe(true);
+        },
+      ),
+      options,
+    );
+  });
 });
 
-const isMutableRecord = (value: unknown): value is MutableRecord =>
-  value !== null && typeof value === 'object' && !Array.isArray(value);
+describe('finite protocol tables', () => {
+  it.each(Array.from({ length: 8 }, (_, mask) => mask))(
+    'requires all or none of the multi-turn fields for mask %i',
+    (mask) => {
+      const candidate = { ...request };
 
-/** Collects every nested object, array, and value slot a mutation can target. */
-// BOUNDARY: Generated fuzz values are inspected only for mutable containers; scalar values are ignored.
-const collectMutationTargets = (
-  value: unknown,
-  records: MutableRecord[],
-  arrays: unknown[][],
-  locations: ValueLocation[],
-): void => {
-  if (Array.isArray(value)) {
-    arrays.push(value);
-    value.forEach((entry, index) => {
-      locations.push({ container: value, key: index });
-      collectMutationTargets(entry, records, arrays, locations);
-    });
+      if (mask & 1) candidate.messages = [{ role: 'user', content: 'hello' }];
 
-    return;
-  }
+      if (mask & 2) candidate.turn_index = 0;
 
-  if (!isMutableRecord(value)) {
-    return;
-  }
-
-  records.push(value);
-  Object.entries(value).forEach(([key, entry]) => {
-    locations.push({ container: value, key });
-    collectMutationTargets(entry, records, arrays, locations);
-  });
-};
-
-/** Applies one mutation to a copy of a valid document. */
-const mutateValidDocument = (
-  seed: MutableRecord,
-  instruction: MutationInstruction,
-): MutableRecord => {
-  const document = structuredClone(seed);
-  const records: MutableRecord[] = [];
-  const arrays: unknown[][] = [];
-  const locations: ValueLocation[] = [];
-  collectMutationTargets(document, records, arrays, locations);
-
-  if (instruction.kind === 'delete-key') {
-    const objectLocations = locations.filter(({ container }) => !Array.isArray(container));
-    const target = objectLocations[instruction.index % objectLocations.length];
-
-    if (target === undefined) {
-      return document;
-    }
-
-    if (isMutableRecord(target.container)) delete target.container[target.key];
-
-    return document;
-  }
-
-  if (instruction.kind === 'retype-value') {
-    const target = locations[instruction.index % locations.length];
-
-    if (target === undefined) {
-      return document;
-    }
-
-    Reflect.set(target.container, target.key, instruction.replacement);
-
-    return document;
-  }
-
-  if (instruction.kind === 'inject-key') {
-    const target = records[instruction.index % records.length];
-
-    if (target === undefined) {
-      return document;
-    }
-
-    target[`fuzz_unknown_${instruction.index}`] = instruction.replacement;
-
-    return document;
-  }
-
-  const nonEmptyArrays = arrays.filter((array) => array.length > 0);
-  const target = nonEmptyArrays[instruction.index % nonEmptyArrays.length];
-
-  if (target === undefined) {
-    return document;
-  }
-
-  target.push(target[instruction.index % target.length]);
-
-  return document;
-};
-
-const mutatedValidDocument = (seed: MutableRecord) =>
-  mutationInstructions.map((instruction) => mutateValidDocument(seed, instruction));
-
-const mutatedValidDocuments = {
-  agentRequest: mutatedValidDocument(validAgentRequest),
-  agentResponse: mutatedValidDocument(validAgentResponse),
-  metricRequest: mutatedValidDocument(validMetricRequest),
-  metricResult: mutatedValidDocument(validMetricResult),
-  trace: mutatedValidDocument(validTrace),
-};
-
-const parserCandidates = (mutatedDocuments: fc.Arbitrary<MutableRecord>) =>
-  fc.oneof(jsonNoise, nonJsonNoise, deepStructures, hostileStrings, mutatedDocuments);
-
-/** Fails when a parser throws or returns something other than a `{ ok }` result. */
-// BOUNDARY: Generated fuzz input is passed to the public parser and its explicit result envelope is asserted.
-const expectCrashFreeResult = (parser: Parser, candidate: unknown): void => {
-  let result: ReturnType<Parser>;
-
-  try {
-    result = parser(candidate);
-  } catch (error) {
-    throw new Error('Contract parser threw instead of returning a result', { cause: error });
-  }
-
-  expect(result).not.toBeNull();
-  expect(result).toBeTypeOf('object');
-  expect(result.ok).toBeTypeOf('boolean');
-};
-
-const assertParserNeverThrows = (
-  parser: Parser,
-  mutatedDocuments: fc.Arbitrary<MutableRecord>,
-): void => {
-  fc.assert(
-    fc.property(parserCandidates(mutatedDocuments), (candidate) => {
-      expectCrashFreeResult(parser, candidate);
-    }),
-    { numRuns: iterationCount },
+      if (mask & 4) candidate.conversation_id = 'conversation';
+      expect(parseAgentRequest(candidate).ok).toBe(mask === 0 || mask === 7);
+    },
   );
-};
 
-describe.skipIf(process.env.FUZZ !== '1')(
-  'contract parser crash freedom (set FUZZ=1 to run)',
-  () => {
-    it('never throws while parsing agent requests', () => {
-      assertParserNeverThrows(parseAgentRequest, mutatedValidDocuments.agentRequest);
-    });
-
-    it('never throws while parsing agent responses', () => {
-      assertParserNeverThrows(parseAgentResponse, mutatedValidDocuments.agentResponse);
-    });
-
-    it('never throws while parsing traces', () => {
-      assertParserNeverThrows(parseTrace, mutatedValidDocuments.trace);
-    });
-
-    it('never throws while parsing metric requests', () => {
-      assertParserNeverThrows(parseMetricRequest, mutatedValidDocuments.metricRequest);
-    });
-
-    it('never throws while parsing metric results', () => {
-      assertParserNeverThrows(parseMetricResult, mutatedValidDocuments.metricResult);
-    });
-  },
-);
+  it.each([NaN, Infinity, -Infinity])('rejects non-finite metric score %s', (score) => {
+    expect(parseMetricResult({ score, pass: true }).ok).toBe(false);
+  });
+});

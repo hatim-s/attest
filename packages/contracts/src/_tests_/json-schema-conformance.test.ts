@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { z } from 'zod';
 
 import { CONTRACT_JSON_SCHEMAS } from '../schema/json-schema.js';
+import { loadFixtures } from './support/load-fixtures.js';
 import { compileGeneratedSchema } from './support/compile-generated-schema.js';
 import {
   AGENT_PROTOCOL,
@@ -13,8 +14,8 @@ import {
   CLI_RESULT_SCHEMA_ID,
   COMMAND_REQUEST_SCHEMA_ID,
   DATASET_SCHEMA_ID,
-  METRIC_PROTOCOL,
   METRIC_RESOURCE_SCHEMA_ID,
+  METRIC_PROTOCOL,
   PROJECT_SCHEMA_ID,
   TEST_RESOURCE_SCHEMA_ID,
   TRACE_SCHEMA_ID,
@@ -159,50 +160,6 @@ const webSocketEvidence = {
 
 const fixtures: ConformanceFixture[] = [
   {
-    name: 'agent request accepts a complete multi-turn envelope',
-    fileName: 'agent-request.json',
-    candidate: {
-      protocol: AGENT_PROTOCOL,
-      run_id: '01ARZ3NDEKTSV4RRFFQ69G5FAV',
-      case_id: 'one',
-      input: {},
-      messages: [],
-      turn_index: 0,
-      conversation_id: 'conversation-1',
-    },
-    valid: true,
-  },
-  {
-    name: 'agent request rejects partial multi-turn fields',
-    fileName: 'agent-request.json',
-    candidate: {
-      protocol: AGENT_PROTOCOL,
-      run_id: '01ARZ3NDEKTSV4RRFFQ69G5FAV',
-      case_id: 'one',
-      input: {},
-      messages: [],
-    },
-    valid: false,
-  },
-  {
-    name: 'agent response accepts one output and unknown fields',
-    fileName: 'agent-response.json',
-    candidate: { protocol: AGENT_PROTOCOL, output: 'Paris', vendor: true },
-    valid: true,
-  },
-  {
-    name: 'agent response rejects output together with error',
-    fileName: 'agent-response.json',
-    candidate: { protocol: AGENT_PROTOCOL, output: 'Paris', error: { message: 'failed' } },
-    valid: false,
-  },
-  {
-    name: 'trace accepts ordered RFC 3339 timestamps',
-    fileName: 'trace.json',
-    candidate: validTrace,
-    valid: true,
-  },
-  {
     name: 'trace rejects a missing span kind',
     fileName: 'trace.json',
     candidate: {
@@ -212,32 +169,9 @@ const fixtures: ConformanceFixture[] = [
     valid: false,
   },
   {
-    name: 'metric request accepts a nullable trace',
-    fileName: 'metric-request.json',
-    candidate: {
-      protocol: METRIC_PROTOCOL,
-      case: { id: 'one', input: {} },
-      output: 'Paris',
-      trace: null,
-    },
-    valid: true,
-  },
-  {
     name: 'metric request rejects a missing trace field',
     fileName: 'metric-request.json',
     candidate: { protocol: METRIC_PROTOCOL, case: { id: 'one', input: {} }, output: 'Paris' },
-    valid: false,
-  },
-  {
-    name: 'metric result accepts the normalized verdict',
-    fileName: 'metric-result.json',
-    candidate: { score: 1, pass: true },
-    valid: true,
-  },
-  {
-    name: 'metric result rejects a missing pass verdict',
-    fileName: 'metric-result.json',
-    candidate: { score: 1 },
     valid: false,
   },
   {
@@ -560,6 +494,20 @@ describe('Zod and generated JSON Schema conformance', () => {
     expect(getZodSchema('case.json').safeParse(candidate).success).toBe(valid);
     expect(compileGeneratedSchema('case.json')(candidate)).toBe(valid);
   });
+
+  it.each(loadFixtures())(
+    '$contract/$name shares the committed protocol input',
+    ({ contract, envelope }) => {
+      const fileName = `${contract}.json`;
+      const valid = envelope.expect !== 'invalid';
+
+      const generatedValid =
+        envelope.expect === 'invalid' ? envelope.json_schema_valid === true : true;
+
+      expect(getZodSchema(fileName).safeParse(envelope.input).success).toBe(valid);
+      expect(compileGeneratedSchema(fileName)(envelope.input)).toBe(generatedValid);
+    },
+  );
 
   it.each(fixtures)('$name', ({ fileName, candidate, valid }) => {
     const zodValid = getZodSchema(fileName).safeParse(candidate).success;

@@ -1,6 +1,7 @@
 {
   "description": "Keeps unknown request fields valid so newer runners remain compatible with older agents.",
   "expect": "valid",
+  "preserve_paths": ["vendor_request"],
   "input": {
     "protocol": "attest.agent-invocation",
     "run_id": "01ARZ3NDEKTSV4RRFFQ69G5FAV",
