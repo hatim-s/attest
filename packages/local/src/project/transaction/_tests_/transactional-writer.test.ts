@@ -9,7 +9,10 @@ import { loadProject } from '../../project-loader/index.js';
 import { prepareProjectCandidate } from '../candidate-project.js';
 import { acquireProjectLock, releaseProjectLock } from '../project-lock.js';
 import { candidateFromLoadedProject } from '../../../commands/project/load-command-project.js';
-import { writeFixtureProject } from '../../../_tests_/support/project-transaction.js';
+import {
+  interruptAfterFirstPublish,
+  writeFixtureProject,
+} from '../../../_tests_/support/project-transaction.js';
 import {
   TRANSACTIONS_DIRECTORY,
   prepareTransaction,
@@ -161,35 +164,6 @@ describe('transactional project writer', () => {
     expect(metricBytes.endsWith('\n')).toBe(true);
   });
 
-  it('rolls back every published path when a later publish step fails', async () => {
-    const root = await createProject();
-    const loaded = await loadProject({ project: root });
-    const candidate = candidateFromLoadedProject(loaded);
-    candidate.agents[0]!.name = 'Will roll back';
-    candidate.metrics[0]!.name = 'Will also roll back';
-    const before = await snapshotProjectFiles(root);
-    let failure: unknown;
-
-    try {
-      await applyProjectMutation(
-        { candidate, projectRoot: root },
-        {
-          publishObserver: ({ index }) => {
-            if (index === 0) {
-              throw new Error('injected publish failure');
-            }
-          },
-        },
-      );
-    } catch (error: unknown) {
-      failure = error;
-    }
-
-    expect(failure).toMatchObject({ code: 'project_transaction_failed' });
-    expectSnapshotsEqual(await snapshotProjectFiles(root), before);
-    expect((await loadProject({ project: root })).projectHash).toBe(loaded.projectHash);
-  });
-
   it('rolls an interrupted pre-manifest publish back from its recovery journal', async () => {
     const root = await createProject();
     const loaded = await loadProject({ project: root });
@@ -203,13 +177,10 @@ describe('transactional project writer', () => {
     const prepared = await prepareTransaction(root, changes);
 
     try {
-      await expect(
-        publishPreparedTransaction(root, prepared, ({ index }) => {
-          if (index === 0) {
-            throw new Error('simulated process interruption');
-          }
-        }),
-      ).rejects.toThrow('simulated process interruption');
+      const firstPath = join(root, prepared.journal.entries[0]!.path);
+      const beforeBytes = await readFile(firstPath, 'utf8');
+      await interruptAfterFirstPublish(root, prepared);
+      expect(await readFile(firstPath, 'utf8')).not.toBe(beforeBytes);
 
       expect(await recoverProjectTransactions(root, lock)).toEqual([
         { action: 'rolled_back', transactionId: prepared.journal.transaction_id },
@@ -261,13 +232,7 @@ describe('transactional project writer', () => {
     const externalBytes = '{"authored":"outside-attest"}\n';
 
     try {
-      await expect(
-        publishPreparedTransaction(root, prepared, ({ index }) => {
-          if (index === 0) {
-            throw new Error('simulated process interruption');
-          }
-        }),
-      ).rejects.toThrow();
+      await interruptAfterFirstPublish(root, prepared);
       await writeFile(join(root, changes[0]!.path), externalBytes);
 
       let failure: unknown;

@@ -1,10 +1,9 @@
 import { z } from 'zod';
 import type { ProjectResources, JsonValue } from '@attest/contracts';
 
-import { contentHash, canonicalStringify } from '@attest/core';
+import { contentHash, canonicalStringify, datasetMetadataForHash } from '@attest/core';
 
 import { escapeJsonPointerSegment } from '../../internal/json-pointer.js';
-import { datasetMetadataForHash } from '../canonical-project.js';
 import type { LoadedProject } from '../project-loader/index.js';
 import { ProjectTransactionError } from './project-transaction-error.js';
 import type {

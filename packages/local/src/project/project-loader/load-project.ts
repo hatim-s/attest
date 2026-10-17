@@ -8,7 +8,7 @@ import {
 } from '@attest/contracts';
 import type { z } from 'zod';
 
-import { hashProjectManifest } from '../canonical-project.js';
+import { hashProjectManifest } from '@attest/core';
 import {
   PROJECT_MANIFEST_FILE,
   discoverProject,
