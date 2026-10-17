@@ -2,6 +2,7 @@ import { access, mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { cliHelpSchema, isJsonObject, isJsonValue, type JsonValue } from '@attest/contracts';
+import { DEFAULT_PAGE_LIMIT } from '@attest/core/records';
 import { applyProjectMutation, loadProject } from '@attest/local/project';
 import { openStore } from '@attest/local/store';
 import { describe, expect, it } from 'vitest';
@@ -275,6 +276,34 @@ describe('project commands', () => {
       expect(output).toContain('[REDACTED]');
       expect(output).not.toMatch(/authored-(?:agent|query|argv)-secret|authored-url-/u);
     }
+  });
+
+  it('lists runs beyond the first page', async () => {
+    const root = await createFixtureProject();
+    await mkdir(join(root, '.attest'));
+    const store = await openStore(join(root, '.attest', 'runs.db'));
+    const ids: string[] = [];
+
+    try {
+      for (let index = 0; index <= DEFAULT_PAGE_LIMIT; index += 1) {
+        const run = await store.runs.createRun({
+          schemaId: 'attest.project',
+          configHash: 'hash',
+          configJson: '{}',
+        });
+
+        ids.push(run.id);
+      }
+    } finally {
+      await store.close();
+    }
+
+    const listed = await runJson(root, ['list', 'runs']);
+    expect(listed.exitCode).toBe(0);
+    expect(listed.document).toMatchObject({
+      ok: true,
+      result: { items: [...ids].reverse().map((id) => ({ id })) },
+    });
   });
 
   it('inspects runs without creating or changing project-local store files', async () => {
