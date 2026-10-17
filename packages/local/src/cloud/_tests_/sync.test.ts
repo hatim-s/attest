@@ -14,11 +14,12 @@ import { createCloudClient } from '../client.js';
 import { acquireProjectLock, releaseProjectLock } from '../../project/transaction/project-lock.js';
 import {
   prepareTransaction,
+  writeTransactionJournal,
   recoverProjectTransactions,
 } from '../../project/transaction/transaction-journal.js';
 import { publishPreparedTransaction } from '../../project/transaction/transactional-writer.js';
 
-import { readCloudLink, writeCloudLink, type CloudLink } from '../link.js';
+import { readCloudLink, serializeCloudLink, writeCloudLink, type CloudLink } from '../link.js';
 import { planPullChanges, pushCloudProject, pullCloudProject } from '../sync.js';
 
 const directories: string[] = [];
@@ -211,15 +212,10 @@ describe('cloud pull crash recovery', () => {
       const lock = await acquireProjectLock(root);
 
       try {
-        const transaction = await prepareTransaction(
-          root,
-          [
-            { path: 'attest/code.ts', type: 'write', contents: 'new code' },
-            { path: 'attest.project.json', type: 'write', contents: 'unchanged manifest' },
-          ],
-          'old-revision',
-          'new-revision',
-        );
+        const transaction = await prepareTransaction(root, [
+          { path: 'attest/code.ts', type: 'write', contents: 'new code' },
+          { path: 'attest.project.json', type: 'write', contents: 'unchanged manifest' },
+        ]);
 
         if (phase === 'partial') {
           await expect(
@@ -244,3 +240,64 @@ describe('cloud pull crash recovery', () => {
     },
   );
 });
+
+it.each(['changed', 'unchanged'])(
+  'recovers the cloud link after authored commit with %s manifest bytes',
+  async (kind) => {
+    const root = await createDirectory();
+    const manifest = kind === 'changed' ? 'new manifest' : 'old manifest';
+    await writeFile(join(root, 'attest.project.json'), 'old manifest');
+    await writeFile(join(root, 'attest/code.ts'), 'old code');
+
+    const before: CloudLink = {
+      schema: 'attest.cloud-link.v1',
+      base_url: 'https://cloud.example',
+      project_id: 'project-1',
+      revision_id: 'revision-1',
+      file_hashes: {
+        'attest.project.json': hash('old manifest'),
+        'attest/code.ts': hash('old code'),
+      },
+    };
+
+    const after: CloudLink = {
+      ...before,
+      revision_id: 'revision-2',
+      file_hashes: { 'attest.project.json': hash(manifest), 'attest/code.ts': hash('new code') },
+    };
+
+    await writeCloudLink(root, before);
+    const lock = await acquireProjectLock(root);
+
+    try {
+      const transaction = await prepareTransaction(
+        root,
+        [
+          { type: 'write', path: 'attest/code.ts', contents: 'new code' },
+          { type: 'write', path: 'attest.project.json', contents: manifest },
+        ],
+        {
+          completion: { path: '.attest/cloud.json', contents: serializeCloudLink(after) },
+        },
+      );
+
+      await publishPreparedTransaction(root, transaction);
+      transaction.journal.status = 'committed';
+      await writeTransactionJournal(transaction);
+      expect(await readCloudLink(root)).toEqual(before);
+      expect(await recoverProjectTransactions(root, lock)).toEqual([
+        { action: 'completed_commit', transactionId: transaction.journal.transaction_id },
+      ]);
+      expect(await readCloudLink(root)).toEqual(after);
+      expect(await readFile(join(root, 'attest/code.ts'), 'utf8')).toBe('new code');
+      expect(
+        await planPullChanges(root, after.file_hashes, {
+          'attest.project.json': manifest,
+          'attest/code.ts': 'third revision',
+        }),
+      ).toContainEqual({ type: 'write', path: 'attest/code.ts', contents: 'third revision' });
+    } finally {
+      await releaseProjectLock(lock);
+    }
+  },
+);

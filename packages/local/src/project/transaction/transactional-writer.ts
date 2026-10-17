@@ -1,6 +1,7 @@
 import { mkdir, rename, unlink } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 
+import { LocalError } from '../../errors/index.js';
 import { syncPath } from '../../internal/sync-path.js';
 import type { LoadedProject } from '../project-loader/index.js';
 import { loadProject } from '../project-loader/index.js';
@@ -11,6 +12,7 @@ import { ProjectTransactionError } from './project-transaction-error.js';
 import { createSemanticProjectDiff } from './semantic-project-diff.js';
 import {
   cleanupPreparedTransaction,
+  completePreparedTransaction,
   prepareTransaction,
   readByteHash,
   recoverProjectTransactions,
@@ -200,12 +202,15 @@ const rollbackAfterFailure = async (
       'Transaction failed and automatic rollback could not complete.',
       {
         details: { transaction_id: prepared.journal.transaction_id },
-        cause: rollbackFailure,
+        cause: new AggregateError(
+          [cause, rollbackFailure],
+          'Transaction and rollback both failed.',
+        ),
       },
     );
   }
 
-  if (cause instanceof ProjectTransactionError) {
+  if (cause instanceof LocalError) {
     throw cause;
   }
 
@@ -239,6 +244,7 @@ const runPreparedTransaction = async (options: {
   }
 
   try {
+    await completePreparedTransaction(root, prepared);
     await cleanupPreparedTransaction(root, prepared);
   } catch (cause: unknown) {
     throw new ProjectTransactionError(
@@ -275,12 +281,7 @@ const applyProjectMutation = async (
       return { ...state.result, committed: true };
     }
 
-    const prepared = await prepareTransaction(
-      request.projectRoot,
-      changes,
-      state.before.projectHash,
-      state.after.projectHash,
-    );
+    const prepared = await prepareTransaction(request.projectRoot, changes);
 
     await runPreparedTransaction({
       root: request.projectRoot,

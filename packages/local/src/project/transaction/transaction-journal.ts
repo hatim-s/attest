@@ -72,14 +72,19 @@ const transactionJournalEntrySchema = z.intersection(
 
 const transactionJournalSchema = z
   .object({
+    completion: z
+      .object({
+        path: z.literal('.attest/cloud.json'),
+        original_hash: hashSchema.nullable(),
+        next_hash: hashSchema,
+      })
+      .optional(),
     created_at: z.iso.datetime(),
     created_directories: z.array(
       canonicalPathSchema.refine((path) => path === 'attest' || path.startsWith('attest/')),
     ),
     entries: z.array(transactionJournalEntrySchema).min(1),
     manifest_path: z.literal('attest.project.json'),
-    project_hash_after: z.string(),
-    project_hash_before: z.string(),
     published_count: z.number().int().nonnegative(),
     schema: z.literal(TRANSACTION_JOURNAL_SCHEMA),
     status: z.enum(['committed', 'prepared', 'publishing', 'rolled_back', 'rolling_back']),
@@ -193,8 +198,9 @@ const missingParentDirectories = async (
 const prepareTransaction = async (
   root: string,
   changes: readonly TransactionFileChange[],
-  projectHashBefore: string,
-  projectHashAfter: string,
+  options: {
+    completion?: { path: '.attest/cloud.json'; contents: string };
+  } = {},
 ): Promise<PreparedTransaction> => {
   const transactionId = randomUUID();
 
@@ -257,8 +263,6 @@ const prepareTransaction = async (
       created_at: new Date().toISOString(),
       status: 'prepared',
       manifest_path: 'attest.project.json',
-      project_hash_before: projectHashBefore,
-      project_hash_after: projectHashAfter,
       published_count: 0,
       created_directories: await missingParentDirectories(
         root,
@@ -266,6 +270,22 @@ const prepareTransaction = async (
       ),
       entries,
     };
+
+    if (options.completion !== undefined) {
+      const destination = await resolveContainedPath(root, options.completion.path, {
+        expect: 'file',
+        problem: () =>
+          new ProjectTransactionError('project_invalid', 'Unsafe transaction completion path.'),
+      });
+
+      journal.completion = {
+        path: options.completion.path,
+        original_hash: await readByteHash(destination),
+        next_hash: hashBytes(options.completion.contents),
+      };
+      await writeFile(join(directory, 'completion'), options.completion.contents, { mode: 0o600 });
+      await syncWrittenFile(join(directory, 'completion'));
+    }
 
     const prepared = { directory, journal, journalPath: join(directory, JOURNAL_FILE) };
     await writeTransactionJournal(prepared);
@@ -339,6 +359,17 @@ const readPreparedTransaction = async (directory: string): Promise<PreparedTrans
           }),
       });
     }
+  }
+
+  if (journal.completion !== undefined) {
+    await resolveContainedPath(directory, 'completion', {
+      expect: 'file',
+      problem: () =>
+        new ProjectTransactionError(
+          'project_recovery_required',
+          'Unsafe transaction completion artifact.',
+        ),
+    });
   }
 
   return { directory, journal, journalPath };
@@ -445,6 +476,56 @@ const rollbackPreparedTransaction = async (
   await writeTransactionJournal(prepared);
 };
 
+/** Completes durable state only after authored files have committed, including after a crash. */
+const completePreparedTransaction = async (
+  root: string,
+  prepared: PreparedTransaction,
+): Promise<void> => {
+  const completion = prepared.journal.completion;
+
+  if (completion === undefined) return;
+
+  const destination = await resolveContainedPath(root, completion.path, {
+    expect: 'file',
+    problem: () =>
+      new ProjectTransactionError(
+        'project_recovery_required',
+        'Unsafe transaction completion path.',
+      ),
+  });
+
+  const current = await readByteHash(destination);
+
+  if (current === completion.next_hash) {
+    await syncPath(dirname(destination));
+
+    return;
+  }
+
+  const staged = await resolveContainedPath(prepared.directory, 'completion', {
+    expect: 'file',
+    problem: () =>
+      new ProjectTransactionError(
+        'project_recovery_required',
+        'Unsafe transaction completion artifact.',
+      ),
+  });
+
+  if (
+    current !== completion.original_hash ||
+    (await readByteHash(staged)) !== completion.next_hash
+  ) {
+    throw new ProjectTransactionError(
+      'project_recovery_required',
+      'Transaction completion state diverged from its journal.',
+      { path: completion.path },
+    );
+  }
+
+  await rename(staged, destination);
+  await syncPath(dirname(destination));
+};
+
 /** Removes a transaction directory only after commit verification or complete rollback. */
 const cleanupPreparedTransaction = async (
   root: string,
@@ -535,6 +616,7 @@ const recoverProjectTransactions = async (
       await ensureExpectedState(root, prepared, 'next');
       prepared.journal.status = 'committed';
       await writeTransactionJournal(prepared);
+      await completePreparedTransaction(root, prepared);
       await cleanupPreparedTransaction(root, prepared);
       results.push({ action: 'completed_commit', transactionId: prepared.journal.transaction_id });
       continue;
@@ -562,6 +644,7 @@ const recoverProjectTransactions = async (
 export {
   TRANSACTIONS_DIRECTORY,
   cleanupPreparedTransaction,
+  completePreparedTransaction,
   prepareTransaction,
   readByteHash,
   recoverProjectTransactions,

@@ -4,6 +4,7 @@ import { join } from 'node:path';
 
 import { afterEach, expect, it } from 'vitest';
 
+import { LocalError } from '../../../errors/index.js';
 import { acquireProjectLock, releaseProjectLock } from '../project-lock.js';
 import { prepareTransaction, recoverProjectTransactions } from '../transaction-journal.js';
 import { runPreparedTransaction } from '../transactional-writer.js';
@@ -37,12 +38,9 @@ it.each(['preparing', 'cleanup'])('removes interrupted %s residue under the lock
     expect(await recoverProjectTransactions(root, lock)).toEqual([]);
     expect(await readdir(join(root, '.attest/transactions'))).toEqual([]);
 
-    const prepared = await prepareTransaction(
-      root,
-      [{ type: 'write', path: 'attest.project.json', contents: 'new' }],
-      'before',
-      'after',
-    );
+    const prepared = await prepareTransaction(root, [
+      { type: 'write', path: 'attest.project.json', contents: 'new' },
+    ]);
 
     expect(await recoverProjectTransactions(root, lock)).toEqual([
       { action: 'rolled_back', transactionId: prepared.journal.transaction_id },
@@ -61,12 +59,7 @@ it('cleans a failed preparation without publishing a recoverable directory', asy
     await mkdir(join(root, 'attest'));
     await mkdir(join(root, 'attest/not-a-file'));
     await expect(
-      prepareTransaction(
-        root,
-        [{ type: 'write', path: 'attest/not-a-file', contents: 'new' }],
-        'before',
-        'after',
-      ),
+      prepareTransaction(root, [{ type: 'write', path: 'attest/not-a-file', contents: 'new' }]),
     ).rejects.toMatchObject({ code: 'project_invalid' });
     expect(await readdir(join(root, '.attest/transactions'))).toEqual([]);
     expect(await recoverProjectTransactions(root, lock)).toEqual([]);
@@ -82,12 +75,9 @@ it('retains committed bytes and recovery evidence when cleanup fails', async () 
   let collision: string | undefined;
 
   try {
-    const prepared = await prepareTransaction(
-      root,
-      [{ type: 'write', path: 'attest.project.json', contents: 'new' }],
-      'before',
-      'after',
-    );
+    const prepared = await prepareTransaction(root, [
+      { type: 'write', path: 'attest.project.json', contents: 'new' },
+    ]);
 
     collision = join(transactionsRoot, `.cleanup-${prepared.journal.transaction_id}`);
     await mkdir(collision);
@@ -109,4 +99,26 @@ it('retains committed bytes and recovery evidence when cleanup fails', async () 
     if (collision !== undefined) await rm(collision, { recursive: true, force: true });
     await releaseProjectLock(lock);
   }
+});
+
+it('preserves a project_changed error thrown before publication', async () => {
+  const root = await createRoot();
+
+  const prepared = await prepareTransaction(root, [
+    { type: 'write', path: 'attest.project.json', contents: 'new' },
+  ]);
+
+  const conflict = new LocalError('project_changed', 'A local file changed while staging.');
+
+  await expect(
+    runPreparedTransaction({
+      root,
+      prepared,
+      beforePublish: () => {
+        throw conflict;
+      },
+      verify: async () => {},
+    }),
+  ).rejects.toBe(conflict);
+  expect(await readFile(join(root, 'attest.project.json'), 'utf8')).toBe('old');
 });
