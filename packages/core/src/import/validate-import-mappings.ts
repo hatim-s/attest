@@ -1,7 +1,7 @@
-import type { DatasetImportMapping } from '@attest/contracts';
+import type { DatasetImportMapping, ImportFormat } from '@attest/contracts';
 
 import { importDiagnostic } from './import-diagnostics.js';
-import type { ImportDiagnostic, ImportFormat } from './import-types.js';
+import type { ImportDiagnostic } from './import-types.js';
 import { toPointer } from './json-pointer.js';
 
 /** Path segments that could reach an object prototype when assigned. */

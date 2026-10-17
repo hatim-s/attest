@@ -1,4 +1,12 @@
-import { agentRequestSchema, traceSchema } from '@attest/contracts';
+import {
+  agentRequestSchema,
+  caseOutcomeSchema,
+  invocationDiagnosticsSchema,
+  invocationErrorCodeSchema,
+  rawExcerptSchema,
+  traceSchema,
+  warningCodeSchema,
+} from '@attest/contracts';
 import { z } from 'zod';
 
 const isoTimestampSchema = z
@@ -14,43 +22,14 @@ const nonemptyStringSchema = z.string().min(1);
 
 const durationSchema = z.number().finite().nonnegative();
 
-const invocationErrorCodeSchema = z.enum([
-  'spawn_failed',
-  'timeout',
-  'output_cap_exceeded',
-  'nonzero_exit',
-  'http_status',
-  'network',
-  'invalid_envelope',
-  'cancelled',
-]);
-
 const warningSchema = z.object({
   path: z.string(),
   message: z.string(),
-  code: z.enum(['unknown_field', 'invalid_trace']),
-});
-
-const rawExcerptSchema = z.object({
-  text: z.string(),
-  truncated: z.boolean(),
-  sha256: z.string().optional(),
-});
-
-const diagnosticsSchema = z.object({
-  stderrExcerpt: z.string().optional(),
-  exitCode: z.number().int().optional(),
-  httpStatus: z.number().int().optional(),
-  remoteJobId: z.union([z.string(), z.number().finite()]).optional(),
-  unreapedProcessIds: z.array(z.number().int().positive()).optional(),
-  lifecycleError: z.string().max(4096).optional(),
-  sandboxError: z.string().max(4096).optional(),
-  sandboxCleanupConfirmed: z.boolean().optional(),
-  sandboxCompletionConfirmed: z.boolean().optional(),
+  code: warningCodeSchema,
 });
 
 const attemptBase = {
-  diagnostics: diagnosticsSchema,
+  diagnostics: invocationDiagnosticsSchema,
   durationMs: durationSchema,
   rawExcerpt: rawExcerptSchema.optional(),
   warnings: z.array(warningSchema),
@@ -73,7 +52,7 @@ const executionBase = {
   startedAt: isoTimestampSchema,
   durationMs: durationSchema,
   warnings: z.array(warningSchema),
-  diagnostics: diagnosticsSchema,
+  diagnostics: invocationDiagnosticsSchema,
   attempts: z.array(storedAttemptSchema),
   expectedMetrics: z.array(z.string()),
 };
@@ -88,7 +67,7 @@ const completedExecutionFields = {
 
 const failedExecutionFields = {
   ...executionBase,
-  outcome: z.enum(['invocation_error', 'timeout', 'cancelled']),
+  outcome: caseOutcomeSchema.exclude(['completed']),
   errorCode: invocationErrorCodeSchema,
   errorMessage: z.string(),
 };
@@ -189,8 +168,6 @@ type StoredAttempt = z.infer<typeof storedAttemptSchema>;
 
 type StoredCaseExecution = z.infer<typeof storedCaseExecutionSchema>;
 
-type StoredDiagnostics = z.infer<typeof diagnosticsSchema>;
-
 type StoredMetricEvaluation = z.infer<typeof storedMetricEvaluationSchema>;
 
 export {
@@ -205,6 +182,5 @@ export {
   type RunSummary,
   type StoredAttempt,
   type StoredCaseExecution,
-  type StoredDiagnostics,
   type StoredMetricEvaluation,
 };

@@ -9,6 +9,7 @@ import {
   CASE_SCHEMA_ID,
   testCaseSchema,
   type DatasetImportMapping,
+  type ImportFormat,
   type JsonValue,
   type TestCase,
 } from '@attest/contracts';
@@ -22,7 +23,6 @@ import {
 import { importDiagnostic, importLocation } from './import-diagnostics.js';
 import type {
   ImportDiagnostic,
-  ImportFormat,
   NormalizedImportRow,
   SourceRecord,
   TabularImportRequest,

@@ -1,5 +1,4 @@
-import type { CaseOutcome } from '@attest/contracts';
-
+import type { CaseSummary, CaseVerdict } from '../records/projection-schemas.js';
 import type { CacheStore } from './cache.js';
 import type {
   CaseRecord,
@@ -8,7 +7,6 @@ import type {
   RunSummary,
   StoredAttempt,
   StoredCaseExecution,
-  StoredDiagnostics,
   StoredMetricEvaluation,
 } from './internal/record-schema.js';
 
@@ -19,21 +17,6 @@ type RunStatus = RunRecord['status'];
 interface RunIdentity {
   id: string;
   createdAt: string;
-}
-
-/** Case-level verdict derived from invocation and metric outcomes. */
-type CaseVerdict = 'pass' | 'fail' | 'error';
-
-/** Provides the blob-free case list projection consumed by the view server. */
-interface CaseSummary {
-  caseId: string;
-  suiteName: string;
-  outcome: CaseOutcome;
-  verdict: CaseVerdict;
-  startedAt: string;
-  durationMs: number;
-  score?: number;
-  metricCounts: { expected: number; evaluated: number; passed: number; errors: number };
 }
 
 /** Defines durable run writes and queries. */
@@ -72,7 +55,6 @@ export {
   type RunStatus,
   type RunSummary,
   type StoredCaseExecution,
-  type StoredDiagnostics,
   type StoredMetricEvaluation,
   type StoredAttempt,
 };

@@ -32,7 +32,6 @@ export {
   type RunSummary,
   type RunStore,
   type StoredCaseExecution,
-  type StoredDiagnostics,
   type StoredMetricEvaluation,
   type StoredAttempt,
 } from './types.js';

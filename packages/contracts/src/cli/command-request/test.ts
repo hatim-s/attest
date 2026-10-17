@@ -14,16 +14,24 @@ const authoringTestCaseSchema = testCaseSchema
   .omit({ id: true })
   .extend({ id: resourceIdSchema.optional() });
 
+const importFormatSchema = z.enum(['csv', 'json', 'jsonl']);
+
+const importDedupePolicySchema = z.enum(['id', 'key', 'content']);
+
+const importConflictPolicySchema = z.enum(['error', 'skip', 'update']);
+
+const importSyncPolicySchema = z.enum(['append', 'upsert']);
+
 /** Encodes the complete deterministic CSV/JSON/JSONL import policy shared by case and dataset imports. */
 const caseImportOptionsSchema = z.strictObject({
-  format: z.enum(['csv', 'json', 'jsonl']).optional(),
+  format: importFormatSchema.optional(),
   mapping: z.array(datasetImportMappingSchema).optional(),
   parse_json: z.array(z.string().min(1)).optional(),
   records_pointer: jsonPointerSchema.optional(),
   key: z.string().min(1).optional(),
-  dedupe: z.enum(['id', 'key', 'content']).optional(),
-  on_conflict: z.enum(['error', 'skip', 'update']).optional(),
-  sync: z.enum(['append', 'upsert']).optional(),
+  dedupe: importDedupePolicySchema.optional(),
+  on_conflict: importConflictPolicySchema.optional(),
+  sync: importSyncPolicySchema.optional(),
 });
 
 const testAddRequestSchema = z.strictObject({
@@ -142,8 +150,20 @@ const testRemoveRequestSchema = z.strictObject({
 
 type CaseImportOptions = z.infer<typeof caseImportOptionsSchema>;
 
+type ImportFormat = z.infer<typeof importFormatSchema>;
+
+type ImportDedupePolicy = z.infer<typeof importDedupePolicySchema>;
+
+type ImportConflictPolicy = z.infer<typeof importConflictPolicySchema>;
+
+type ImportSyncPolicy = z.infer<typeof importSyncPolicySchema>;
+
 export {
   caseImportOptionsSchema,
+  importConflictPolicySchema,
+  importDedupePolicySchema,
+  importFormatSchema,
+  importSyncPolicySchema,
   testAddRequestSchema,
   testCaseAddRequestSchema,
   testCaseImportRequestSchema,
@@ -160,4 +180,8 @@ export {
   testRemoveRequestSchema,
   testRenameRequestSchema,
   type CaseImportOptions,
+  type ImportConflictPolicy,
+  type ImportDedupePolicy,
+  type ImportFormat,
+  type ImportSyncPolicy,
 };

@@ -25,7 +25,25 @@ const invocationErrorCodeSchema = z.enum([
 /** Recoverable problems reported alongside a successfully parsed agent response. */
 const warningCodeSchema = z.enum(['unknown_field', 'invalid_trace']);
 
+/**
+ * Transport metadata recorded per invocation attempt and per case. Free-text failures are capped
+ * so a hostile hook or sandbox cannot grow a stored record without bound.
+ */
+const invocationDiagnosticsSchema = z.object({
+  stderrExcerpt: z.string().optional(),
+  exitCode: z.number().int().optional(),
+  httpStatus: z.number().int().optional(),
+  remoteJobId: z.union([z.string(), z.number().finite()]).optional(),
+  unreapedProcessIds: z.array(z.number().int().positive()).optional(),
+  lifecycleError: z.string().max(4096).optional(),
+  sandboxError: z.string().max(4096).optional(),
+  sandboxCleanupConfirmed: z.boolean().optional(),
+  sandboxCompletionConfirmed: z.boolean().optional(),
+});
+
 type CaseOutcome = z.infer<typeof caseOutcomeSchema>;
+
+type InvocationDiagnostics = z.infer<typeof invocationDiagnosticsSchema>;
 
 type InvocationErrorCode = z.infer<typeof invocationErrorCodeSchema>;
 
@@ -33,9 +51,11 @@ type WarningCode = z.infer<typeof warningCodeSchema>;
 
 export {
   caseOutcomeSchema,
+  invocationDiagnosticsSchema,
   invocationErrorCodeSchema,
   warningCodeSchema,
   type CaseOutcome,
+  type InvocationDiagnostics,
   type InvocationErrorCode,
   type WarningCode,
 };

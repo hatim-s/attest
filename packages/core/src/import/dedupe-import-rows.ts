@@ -1,3 +1,5 @@
+import type { ImportDedupePolicy } from '@attest/contracts';
+
 import { importDiagnostic } from './import-diagnostics.js';
 import type {
   DedupedRows,
@@ -6,16 +8,15 @@ import type {
   TabularImportRequest,
 } from './import-types.js';
 
-const DEDUPE_BASES = ['content', 'id', 'key'] as const;
-
-type DedupeBasis = (typeof DEDUPE_BASES)[number];
+// Fixed order so duplicate diagnostics for one row always list content, then id, then key.
+const DEDUPE_BASES = ['content', 'id', 'key'] as const satisfies readonly ImportDedupePolicy[];
 
 interface SeenRow {
   index: number;
   row: NormalizedImportRow;
 }
 
-const basisValue = (row: NormalizedImportRow, basis: DedupeBasis): string | undefined => {
+const basisValue = (row: NormalizedImportRow, basis: ImportDedupePolicy): string | undefined => {
   switch (basis) {
     case 'content':
       return row.contentFingerprint;
@@ -58,7 +59,7 @@ const dedupeImportRows = (
   let skipped = 0;
 
   for (const [index, row] of rows.entries()) {
-    const priorFor = (basis: DedupeBasis): SeenRow | undefined => {
+    const priorFor = (basis: ImportDedupePolicy): SeenRow | undefined => {
       const value = basisValue(row, basis);
 
       return value === undefined ? undefined : seen[basis].get(value);
