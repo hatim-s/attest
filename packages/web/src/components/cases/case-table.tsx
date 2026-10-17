@@ -56,7 +56,7 @@ const CaseTable = ({
                 key={virtualRow.key}
                 to="/runs/$runId/cases/$suiteName/$caseId"
                 params={{ runId, suiteName: item.suiteName, caseId: item.caseId }}
-                search={(previous) => ({ ...previous, tab: previous.tab ?? 'cases' })}
+                search={(previous) => previous}
                 role="row"
                 style={{ height: virtualRow.size, transform: `translateY(${virtualRow.start}px)` }}
               >

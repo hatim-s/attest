@@ -11,6 +11,7 @@ import {
 } from '@tanstack/react-router';
 import { z } from 'zod';
 import { runsQueryOptions } from './api/queries.js';
+import { RunsLayout } from './routes/runs-layout.js';
 import { RootLayout } from './routes/root-layout.js';
 import { NewestRun } from './routes/newest-run.js';
 import { RunPage } from './routes/run-page.js';
@@ -29,26 +30,32 @@ const runsSearchSchema = z.object({
     .catch(undefined),
 });
 
-const runSearchSchema = z.object({ tab: z.enum(['cases', 'distributions']).catch('cases') });
+const runSearchSchema = z.object({
+  tab: z.enum(['cases', 'distributions']).default('cases').catch('cases'),
+});
 
 const rootRoute = createRootRouteWithContext<RouterContext>()({
   component: RootLayout,
-  errorComponent: ({ error }: ErrorComponentProps) => <ErrorNotice error={error} />,
-  notFoundComponent: () => <div className="empty-compact">This dashboard page does not exist.</div>,
 });
 
 const indexRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/',
   beforeLoad: () => {
-    return redirect({ to: '/runs', replace: true });
+    return redirect({ to: '/runs' });
   },
 });
 
-const runsRoute = createRoute({
+const workspaceRoute = createRoute({
   getParentRoute: () => rootRoute,
-  path: '/runs',
+  id: 'workspace',
+  component: RunsLayout,
   validateSearch: runsSearchSchema,
+});
+
+const runsRoute = createRoute({
+  getParentRoute: () => workspaceRoute,
+  path: '/runs',
 });
 
 const runsIndexRoute = createRoute({
@@ -63,8 +70,7 @@ const runsIndexRoute = createRoute({
       return redirect({
         to: '/runs/$runId',
         params: { runId: newest.id },
-        search: { ...search, tab: 'cases' },
-        replace: true,
+        search,
       });
     }
   },
@@ -88,7 +94,7 @@ const caseRoute = createRoute({
 });
 
 const compareRoute = createRoute({
-  getParentRoute: () => rootRoute,
+  getParentRoute: () => workspaceRoute,
   path: '/compare/$baseRunId/$candidateRunId',
   params: { parse: (params) => diffParamsSchema.parse(params) },
   component: ComparePage,
@@ -96,13 +102,33 @@ const compareRoute = createRoute({
 
 const routeTree = rootRoute.addChildren([
   indexRoute,
-  runsRoute.addChildren([runsIndexRoute, runRoute.addChildren([caseRoute])]),
-  compareRoute,
+  workspaceRoute.addChildren([
+    runsRoute.addChildren([runsIndexRoute, runRoute.addChildren([caseRoute])]),
+    compareRoute,
+  ]),
 ]);
 
-/** Accepts history so production can use hashes and invariant tests can navigate without a DOM. */
+/** Uses hash history in the dashboard and accepts memory history for non-browser callers. */
 const createDashboardRouter = (history: RouterHistory, context: RouterContext) =>
-  createRouter({ routeTree, history, context });
+  createRouter({
+    routeTree,
+    history,
+    context,
+    defaultErrorComponent: ({ error }: ErrorComponentProps) => (
+      <ErrorNotice
+        error={
+          error instanceof Error && error.cause instanceof z.ZodError
+            ? new Error(
+                `Invalid dashboard URL. ${error.cause.issues.map((issue) => issue.message).join(' ')}`,
+              )
+            : error
+        }
+      />
+    ),
+    defaultNotFoundComponent: () => (
+      <div className="empty-compact">This dashboard page does not exist.</div>
+    ),
+  });
 
 declare module '@tanstack/react-router' {
   interface Register {
