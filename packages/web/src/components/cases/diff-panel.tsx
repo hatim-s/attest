@@ -6,7 +6,7 @@ import type {
   CaseVerdict,
   RunDiff,
   RunRecord,
-} from '../../api/types.js';
+} from '@attest/core/records';
 import { formatPercent, shortId } from '../../lib/format.js';
 import { Badge, ErrorNotice, Loading } from '../shared/ui.js';
 

@@ -1,6 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { link, open, rename, unlink } from 'node:fs/promises';
 
+import { createDashboardHtml } from '@attest/api';
+import type { ReportSnapshot } from '@attest/api/contract';
 import { summarizeCaseRecord } from '@attest/core';
 import { dashboardHtml } from '@attest/web/embedded';
 
@@ -9,7 +11,6 @@ import { LocalError } from '../errors/index.js';
 import { prepareEvalProjectFile } from '../commands/eval/eval-project-path.js';
 import { withReadonlyRunStoreFile } from '../commands/run-store/readonly-run-store.js';
 import { withRunNotFound } from '../commands/run-store/run-not-found.js';
-import { createReportHtml, type ReportData } from './create-report-html.js';
 import { readBoundedRunDetails } from '../store/bounded-run-details.js';
 
 // Bound embedded HTML size and the per-case detail queries needed to generate it.
@@ -61,8 +62,7 @@ const runReportCommand = async (
   const cases = runWithCases.cases;
   const truncated = runWithCases.totalCaseCount > cases.length;
 
-  const reportData: ReportData = {
-    schema: 'attest.report',
+  const snapshot: ReportSnapshot = {
     generatedAt: new Date().toISOString(),
     run: runWithCases.run,
     cases: cases.map((record) => ({ record, summary: summarizeCaseRecord(record) })),
@@ -85,7 +85,10 @@ const runReportCommand = async (
 
   try {
     handle = await open(temporaryPath, 'wx', 0o600);
-    await handle.writeFile(createReportHtml(dashboardHtml, reportData), 'utf8');
+    await handle.writeFile(
+      createDashboardHtml(dashboardHtml, { kind: 'snapshot', snapshot }),
+      'utf8',
+    );
     await handle.sync();
     await handle.close();
     handle = undefined;

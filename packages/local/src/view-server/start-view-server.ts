@@ -1,4 +1,3 @@
-import { randomBytes } from 'node:crypto';
 import { mkdir } from 'node:fs/promises';
 import { dirname } from 'node:path';
 
@@ -17,7 +16,6 @@ const closeServer = (server: ServerType): Promise<void> =>
 const startViewServer = async (options: StartViewServerOptions): Promise<ViewServerHandle> => {
   await mkdir(dirname(options.storePath), { recursive: true });
   const store = await openStore(options.storePath);
-  const sessionToken = options.sessionToken ?? randomBytes(32).toString('base64url');
   let origin: string | undefined;
   let server: ServerType | undefined;
   let closePromise: Promise<void> | undefined;
@@ -36,18 +34,13 @@ const startViewServer = async (options: StartViewServerOptions): Promise<ViewSer
     return closePromise;
   };
 
-  const app = createViewApp({
-    allowedOrigin: () => origin,
-    indexHtml: options.indexHtml,
-    sessionToken,
-    store,
-    onShutdown: () => {
-      // Let Hono flush the 204 response before closing the listening socket.
-      setImmediate(() => void closeHandle());
-    },
-  });
-
   try {
+    const app = createViewApp({
+      allowedOrigin: () => origin,
+      indexHtml: options.indexHtml,
+      source: store.runs,
+    });
+
     server = await new Promise<ServerType>((resolve, reject) => {
       const candidate = serve(
         {
@@ -86,8 +79,7 @@ const startViewServer = async (options: StartViewServerOptions): Promise<ViewSer
     close: closeHandle,
     closed,
     origin: resolvedOrigin,
-    sessionToken,
-    url: `${resolvedOrigin}/#token=${encodeURIComponent(sessionToken)}`,
+    url: `${resolvedOrigin}/`,
   };
 };
 

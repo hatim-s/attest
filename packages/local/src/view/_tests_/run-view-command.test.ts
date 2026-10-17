@@ -24,12 +24,12 @@ describe('runViewCommand', () => {
       workingDirectory: directory,
       signal: abortController.signal,
       onReady: async ({ origin }) => {
-        const [healthResponse, dashboardResponse] = await Promise.all([
-          fetch(`${origin}/api/health`),
+        const [runsResponse, dashboardResponse] = await Promise.all([
+          fetch(`${origin}/api/runs`),
           fetch(origin),
         ]);
 
-        expect(healthResponse.status).toBe(200);
+        expect(runsResponse.status).toBe(200);
         await expect(dashboardResponse.text()).resolves.toContain('<div id="root"></div>');
         abortController.abort();
       },

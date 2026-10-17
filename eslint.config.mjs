@@ -189,6 +189,14 @@ export default tseslint.config(
       'no-restricted-imports': [
         'error',
         {
+          paths: [
+            {
+              name: '@attest/api',
+              message:
+                'The dashboard uses @attest/api/client and @attest/api/contract, never the server app.',
+            },
+            { name: '@attest/core', message: 'The dashboard imports browser-safe core entries.' },
+          ],
           patterns: [
             {
               group: [
@@ -201,6 +209,8 @@ export default tseslint.config(
                 '@attest/cli',
                 '@attest/cli/*',
                 'node:*',
+                'hono',
+                'hono/*',
               ],
               message: 'The dashboard consumes shared domain types, not server implementations.',
             },

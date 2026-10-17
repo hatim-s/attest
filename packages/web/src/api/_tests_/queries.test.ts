@@ -1,7 +1,9 @@
+import { createApiClient } from '@attest/api/client';
 import { QueryClient, QueryObserver } from '@tanstack/react-query';
-import { afterEach, expect, it, vi } from 'vitest';
+import { expect, it, vi } from 'vitest';
 
-import type { CaseRecord, RunDiff } from '../types.js';
+import type { CaseRecord, RunDiff } from '@attest/core/records';
+import { caseQueryOptions, diffQueryOptions } from '../queries.js';
 
 const runId = '01ARZ3NDEKTSV4RRFFQ69G5FAV';
 
@@ -37,29 +39,22 @@ const diff: RunDiff = {
   transitions: [],
 };
 
-afterEach(() => {
-  vi.unstubAllGlobals();
-  vi.resetModules();
-});
-
 it('refreshes final evidence after either run terminates and leaves hidden comparisons idle', async () => {
-  vi.stubGlobal('window', {});
   let terminal = false;
 
-  const fetch = vi.fn((path: string) => {
+  const fetch = vi.fn((input: RequestInfo | URL) => {
+    const path = input instanceof Request ? input.url : input.toString();
+
     return Promise.resolve(
       Response.json(
         path.includes('/cases/')
-          ? { case: { ...caseRecord, response: { output: terminal ? 'final' : 'working' } } }
-          : {
-              diff: { ...diff, summary: { ...diff.summary, candidatePassRate: terminal ? 1 : 0 } },
-            },
+          ? { ...caseRecord, response: { output: terminal ? 'final' : 'working' } }
+          : { ...diff, summary: { ...diff.summary, candidatePassRate: terminal ? 1 : 0 } },
       ),
     );
   });
 
-  vi.stubGlobal('fetch', fetch);
-  const { caseQueryOptions, diffQueryOptions } = await import('../queries.js');
+  const api = createApiClient({ kind: 'http', baseUrl: '/api', fetch });
 
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false, staleTime: Infinity } },
@@ -75,33 +70,33 @@ it('refreshes final evidence after either run terminates and leaves hidden compa
     visible: false,
   } as const;
 
-  const hidden = new QueryObserver(client, diffQueryOptions(comparison));
+  const hidden = new QueryObserver(client, diffQueryOptions(api, comparison));
   const unsubscribe = hidden.subscribe(() => {});
   expect(fetch).not.toHaveBeenCalled();
 
   try {
-    expect(await client.fetchQuery(caseQueryOptions(selection))).toMatchObject({
+    expect(await client.fetchQuery(caseQueryOptions(api, selection))).toMatchObject({
       response: { output: 'working' },
     });
     expect(
-      (await client.fetchQuery(diffQueryOptions({ ...comparison, visible: true }))).summary
+      (await client.fetchQuery(diffQueryOptions(api, { ...comparison, visible: true }))).summary
         .candidatePassRate,
     ).toBe(0);
     terminal = true;
     expect(
-      await client.fetchQuery(caseQueryOptions({ ...selection, status: 'completed' })),
+      await client.fetchQuery(caseQueryOptions(api, { ...selection, status: 'completed' })),
     ).toMatchObject({ response: { output: 'final' } });
     expect(
       (
         await client.fetchQuery(
-          diffQueryOptions({ ...comparison, visible: true, candidateStatus: 'completed' }),
+          diffQueryOptions(api, { ...comparison, visible: true, candidateStatus: 'completed' }),
         )
       ).summary.candidatePassRate,
     ).toBe(1);
     expect(
       (
         await client.fetchQuery(
-          diffQueryOptions({ ...comparison, visible: true, baseStatus: 'completed' }),
+          diffQueryOptions(api, { ...comparison, visible: true, baseStatus: 'completed' }),
         )
       ).summary.candidatePassRate,
     ).toBe(1);

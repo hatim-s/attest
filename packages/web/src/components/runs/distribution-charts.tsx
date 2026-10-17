@@ -5,7 +5,7 @@ import { GridComponent, LegendComponent, TooltipComponent } from 'echarts/compon
 import { init, use, type EChartsCoreOption } from 'echarts/core';
 import { CanvasRenderer } from 'echarts/renderers';
 
-import type { CaseSummary } from '../../api/types.js';
+import type { CaseSummary } from '@attest/core/records';
 
 use([BarChart, PieChart, GridComponent, LegendComponent, TooltipComponent, CanvasRenderer]);
 

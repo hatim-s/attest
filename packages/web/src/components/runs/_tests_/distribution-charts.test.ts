@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import type { CaseSummary } from '../../../api/types.js';
+import type { CaseSummary } from '@attest/core/records';
 import { createScoreHistogram } from '../distribution-charts.js';
 
 const createCase = (caseId: string, score?: number): CaseSummary => {

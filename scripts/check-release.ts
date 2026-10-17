@@ -101,7 +101,7 @@ const server = await startViewServer({ storePath: 'release-check.db', indexHtml:
 try {
   const response = await fetch(server.url);
   assert.equal(response.status, 200);
-  assert.equal(await response.text(), dashboardHtml);
+  assert.ok((await response.text()).includes('window.__ATTEST_BOOTSTRAP__='));
 } finally {
   await server.close();
 }

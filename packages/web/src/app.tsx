@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 
 import { useCase, useCases, useDiff, useRun, useRuns } from './api/queries.js';
-import type { CaseSummary } from './api/types.js';
+import type { CaseSummary } from '@attest/core/records';
 import { CaseDetail } from './components/cases/case-detail.js';
 import { CaseTable } from './components/cases/case-table.js';
 import { DiffPanel } from './components/cases/diff-panel.js';
@@ -10,7 +10,7 @@ import { RunList } from './components/runs/run-list.js';
 import { SummaryCards } from './components/runs/summary-cards.js';
 import { Badge, Button, ErrorNotice, Loading } from './components/shared/ui.js';
 import { shortId } from './lib/format.js';
-import { getReportData } from './report/report-data.js';
+import { useApiClient } from './api/api-client-context.js';
 
 type DashboardTab = 'cases' | 'compare' | 'distributions';
 
@@ -37,7 +37,7 @@ const getInitialTheme = (): Theme => {
 };
 
 const Dashboard = () => {
-  const reportData = getReportData();
+  const { mode } = useApiClient();
   const runsQuery = useRuns();
   const runs = runsQuery.data ?? [];
   const [selectedRunId, setSelectedRunId] = useState<string>();
@@ -116,7 +116,7 @@ const Dashboard = () => {
           </div>
         </div>
         <div className="topbar-actions">
-          <Badge tone="local">{reportData === undefined ? '127.0.0.1' : 'static report'}</Badge>
+          <Badge tone="local">{mode.kind === 'live' ? '127.0.0.1' : 'static report'}</Badge>
           <Button onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} tone="ghost">
             {theme === 'dark' ? 'Light mode' : 'Dark mode'}
           </Button>
@@ -155,13 +155,13 @@ const Dashboard = () => {
                 <Badge tone={run.status}>{run.status}</Badge>
               </section>
               <SummaryCards run={run} />
-              {reportData !== undefined ? (
+              {mode.kind === 'snapshot' ? (
                 <section className="empty-compact" aria-label="Report contents">
-                  {reportData.cases.length}{' '}
+                  {mode.includedCases}{' '}
                   {run.summary === undefined
                     ? 'cases included; total unavailable.'
                     : `of ${run.summary.totalCases} cases included.`}
-                  {reportData.truncated
+                  {mode.truncated
                     ? ' This report is truncated. Omitted cases and traces are unavailable; distributions cover only included cases.'
                     : ''}
                 </section>

@@ -1,33 +1,39 @@
 import { useEffect } from 'react';
-
+import type { ApiClient } from '@attest/api/client';
 import { queryOptions, useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query';
 
-import { getCase, getDiff, getRun, listCases, listRuns } from './client.js';
-import type { RunStatus } from './types.js';
-import { getReportData } from '../report/report-data.js';
+import type { RunStatus } from '@attest/core/records';
+import { useApiClient } from './api-client-context.js';
 
 /** Polls recent runs in the live dashboard and keeps static reports offline. */
-const useRuns = () =>
-  useQuery({
+const useRuns = () => {
+  const client = useApiClient();
+
+  return useQuery({
     queryKey: ['runs'],
-    queryFn: ({ signal }) => listRuns(signal),
-    refetchInterval: getReportData() === undefined ? 5_000 : false,
+    queryFn: async ({ signal }) => (await client.listRuns({}, { signal })).items,
+    refetchInterval: client.mode.kind === 'live' ? 5_000 : false,
   });
+};
 
 /** Loads one run and keeps polling only while it is still executing. */
-const useRun = (runId: string | undefined) =>
-  useQuery({
+const useRun = (runId: string | undefined) => {
+  const client = useApiClient();
+
+  return useQuery({
     queryKey: ['run', runId],
-    queryFn: ({ signal }) => getRun(runId ?? '', signal),
+    queryFn: ({ signal }) => client.getRun({ runId: runId ?? '' }, { signal }),
     enabled: runId !== undefined,
     refetchInterval: (query) =>
-      getReportData() === undefined && query.state.data?.status === 'running' ? 2_000 : false,
+      client.mode.kind === 'live' && query.state.data?.status === 'running' ? 2_000 : false,
   });
+};
 
 /** Refreshes recorded cases during execution and once more when the run finishes. */
 const useCases = (runId: string | undefined, status: RunStatus | undefined) => {
+  const client = useApiClient();
   const queryClient = useQueryClient();
-  const isLive = getReportData() === undefined;
+  const isLive = client.mode.kind === 'live';
   useEffect(() => {
     // The last case can arrive between the final interval and the completed run response.
     if (isLive && runId !== undefined && status !== undefined && status !== 'running') {
@@ -38,7 +44,11 @@ const useCases = (runId: string | undefined, status: RunStatus | undefined) => {
   return useInfiniteQuery({
     queryKey: ['cases', runId],
     queryFn: ({ pageParam, signal }: { pageParam: string | undefined; signal: AbortSignal }) =>
-      listCases(runId ?? '', pageParam, signal),
+      client.listCaseSummaries(
+        { runId: runId ?? '' },
+        { cursor: pageParam, limit: 250 },
+        { signal },
+      ),
     initialPageParam: undefined,
     getNextPageParam: (page) => page.nextCursor,
     enabled: runId !== undefined,
@@ -62,41 +72,46 @@ type ComparisonSelection = {
 };
 
 /** A status change gets a fresh cache entry even after active polling has stopped. */
-const caseQueryOptions = ({ runId, suiteName, caseId, status }: CaseSelection) =>
+const caseQueryOptions = (client: ApiClient, { runId, suiteName, caseId, status }: CaseSelection) =>
   queryOptions({
     queryKey: ['case', runId, suiteName, caseId, status],
     queryFn: ({ signal }) =>
-      getCase(runId ?? '', { suiteName: suiteName ?? '', caseId: caseId ?? '' }, signal),
+      client.getCase(
+        { runId: runId ?? '', suiteName: suiteName ?? '', caseId: caseId ?? '' },
+        { signal },
+      ),
     enabled: runId !== undefined && suiteName !== undefined && caseId !== undefined,
-    refetchInterval: getReportData() === undefined && status === 'running' ? 2_000 : false,
+    refetchInterval: client.mode.kind === 'live' && status === 'running' ? 2_000 : false,
   });
 
 /** Both run statuses participate so either run finishing refreshes the comparison. */
-const diffQueryOptions = ({
-  baseRunId,
-  candidateRunId,
-  baseStatus,
-  candidateStatus,
-  visible,
-}: ComparisonSelection) =>
+const diffQueryOptions = (
+  client: ApiClient,
+  { baseRunId, candidateRunId, baseStatus, candidateStatus, visible }: ComparisonSelection,
+) =>
   queryOptions({
     queryKey: ['diff', baseRunId, candidateRunId, baseStatus, candidateStatus],
-    queryFn: ({ signal }) => getDiff(baseRunId ?? '', candidateRunId ?? '', signal),
+    queryFn: ({ signal }) =>
+      client.getDiff(
+        { baseRunId: baseRunId ?? '', candidateRunId: candidateRunId ?? '' },
+        { signal },
+      ),
     enabled:
       visible &&
       baseRunId !== undefined &&
       candidateRunId !== undefined &&
       baseRunId !== candidateRunId,
     refetchInterval:
-      getReportData() === undefined && (baseStatus === 'running' || candidateStatus === 'running')
+      client.mode.kind === 'live' && (baseStatus === 'running' || candidateStatus === 'running')
         ? 2_000
         : false,
   });
 
 /** Keeps the open drawer current through the final run response. */
-const useCase = (selection: CaseSelection) => useQuery(caseQueryOptions(selection));
+const useCase = (selection: CaseSelection) => useQuery(caseQueryOptions(useApiClient(), selection));
 
 /** Fetches comparisons only while Compare is visible. */
-const useDiff = (selection: ComparisonSelection) => useQuery(diffQueryOptions(selection));
+const useDiff = (selection: ComparisonSelection) =>
+  useQuery(diffQueryOptions(useApiClient(), selection));
 
 export { caseQueryOptions, diffQueryOptions, useCase, useCases, useDiff, useRun, useRuns };
