@@ -369,6 +369,38 @@ describe('runConfiguration', () => {
     expect(await readdir(join(root, '.attest', 'eval-runs'))).toEqual([]);
   }, 15_000);
 
+  it('reports store cleanup failure after delivering successful run events', async () => {
+    const root = await createEvalProject();
+    const source = await startEval(root, { test_ids: ['smoke'] });
+    const events: EvalEvent[] = [];
+
+    const drained = (async () => {
+      for await (const event of source) {
+        events.push(event);
+
+        if (event.event !== 'run_started') continue;
+
+        const alias = (await readdir(root)).find(
+          (name) => name.startsWith('.attest-') && name.endsWith('.opening'),
+        );
+
+        if (alias === undefined) throw new Error('Expected the active store alias.');
+        await rm(join(root, alias));
+        await writeFile(join(root, alias), 'replacement');
+      }
+    })();
+
+    await expect(drained).rejects.toMatchObject({
+      code: 'run_failed',
+      message: 'The eval store boundary changed during opening.',
+      path: '.attest/runs.db',
+    });
+    expect(events.at(-1)).toMatchObject({
+      event: 'result',
+      data: { exit_code: 0, result: { ok: true } },
+    });
+  }, 15_000);
+
   it('rejects a missing baseline before agent, run-store, or registry side effects', async () => {
     const root = await temporaryDirectory('attest-run-configuration-marker-');
     const markerPath = join(root, 'agent-invoked');

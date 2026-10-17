@@ -1,7 +1,4 @@
-import { z } from 'zod';
-
 import { execFile } from 'node:child_process';
-import { access } from 'node:fs/promises';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 
@@ -15,9 +12,12 @@ import {
 } from '@attest/contracts';
 import type { RunRecord } from '@attest/core';
 import { executeResolvedEvalPlan, type EvalTerminalFailureFactory } from '@attest/runtime';
+import { z } from 'zod';
 
+import { withReadonlyRunStoreFile } from '../commands/run-store/readonly-run-store.js';
+import { runCleanupSteps } from '../commands/run-store/cleanup.js';
 import { LocalError } from '../errors/index.js';
-import { createRunIdentity, openReadonlyRunStore } from '../store/run-store.js';
+import { createRunIdentity } from '../store/run-store.js';
 import { createEvalCaseRunner } from '../commands/eval/eval-agent-runner.js';
 import {
   detachEvalRun,
@@ -102,25 +102,19 @@ const readGitMetadata = async (projectRoot: string): Promise<EvalRun['git'] | un
 
 /** Reads one run from a read-only store; a missing store or run is `resource_not_found`. */
 const readStoredRun = async (storePath: string, runId: string): Promise<RunRecord> => {
-  const runNotFound = (cause: unknown): LocalError =>
+  const runNotFound = (cause?: unknown): LocalError =>
     new LocalError('resource_not_found', `Eval run ${runId} was not found.`, {
       path: runId,
       cause,
     });
 
-  try {
-    await access(storePath);
-  } catch (error: unknown) {
-    throw runNotFound(error);
-  }
+  const run = await withReadonlyRunStoreFile(storePath, (store) =>
+    withRunNotFound(() => store.getRun(runId), runNotFound),
+  );
 
-  const store = await openReadonlyRunStore(storePath);
+  if (run === undefined) throw runNotFound();
 
-  try {
-    return await withRunNotFound(() => store.getRun(runId), runNotFound);
-  } finally {
-    await store.close().catch(() => undefined);
-  }
+  return run;
 };
 
 /** Runs one immutable snapshot through resolver, engine, adapters, store, artifacts, and events. */
@@ -206,14 +200,19 @@ const runConfiguration = async (
     } catch (error: unknown) {
       queue.fail(error);
     } finally {
-      // Preserve cancellation ownership when cleanup or durable finalization remains uncertain.
-      if (canReleaseCancellationOwnership) {
-        await unregisterEvalRun(registry).catch(() => undefined);
-      } else {
-        detachEvalRun(registry);
+      try {
+        await runCleanupSteps([
+          async () => {
+            // Preserve cancellation ownership when durable finalization remains uncertain.
+            if (canReleaseCancellationOwnership) await unregisterEvalRun(registry);
+            else detachEvalRun(registry);
+          },
+          async () => store.close(),
+        ]);
+      } catch (cause: unknown) {
+        queue.fail(cause);
       }
 
-      await store.close().catch(() => undefined);
       queue.close();
     }
   })();
