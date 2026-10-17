@@ -196,6 +196,7 @@ export { evalEventStreamSchema } from './eval/event-stream.js';
 export type { EvalEventStream } from './eval/event-stream.js';
 
 export {
+  PORTABLE_MAX_UPLOAD_BYTES,
   portableProjectBundleSchema,
   cloudRunRequestSchema,
   cloudQueueMessageSchema,
