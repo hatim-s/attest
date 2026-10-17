@@ -1,10 +1,15 @@
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 
-import { portableProjectBundleSchema, type PortableProjectBundle } from '@attest/contracts';
+import {
+  PORTABLE_MAX_UPLOAD_BYTES,
+  portableProjectBundleSchema,
+  type PortableProjectBundle,
+} from '@attest/contracts';
 import { resolvePortableProject } from '@attest/core';
 
 import { LocalError } from '../errors/index.js';
+import { schemaIssueDiagnostics } from '../internal/schema-issue-diagnostics.js';
 import { discoverProject } from '../project/discover-project.js';
 import { loadProject, type LoadedProject } from '../project/project-loader/index.js';
 import { acquireProjectLock, releaseProjectLock } from '../project/transaction/project-lock.js';
@@ -83,6 +88,7 @@ const createCloudBundle = async (project: LoadedProject): Promise<PortableProjec
 
   if (!parsed.success) {
     throw new LocalError('project_invalid', 'Project cannot be uploaded as a cloud revision.', {
+      details: { diagnostics: schemaIssueDiagnostics(parsed.error.issues) },
       hint: 'Keep custom metric code under attest/metrics/code and remove secrets from authored files.',
     });
   }
@@ -121,10 +127,14 @@ const pushCloudProject = async (
 
     const payload = { bundle, parent_revision_id: link.revision_id ?? null };
 
-    if (Buffer.byteLength(JSON.stringify(payload), 'utf8') > 5 * 1024 * 1024) {
-      throw new LocalError('project_invalid', 'Cloud revision exceeds the 5 MiB upload limit.', {
-        hint: 'Reduce authored dataset or metric source size before pushing.',
-      });
+    if (Buffer.byteLength(JSON.stringify(payload), 'utf8') > PORTABLE_MAX_UPLOAD_BYTES) {
+      throw new LocalError(
+        'project_invalid',
+        `Cloud revision exceeds the ${PORTABLE_MAX_UPLOAD_BYTES} byte upload limit.`,
+        {
+          hint: 'Reduce authored dataset or metric source size before pushing.',
+        },
+      );
     }
 
     const response = await options.client.request(

@@ -150,7 +150,56 @@ describe('cloud trust boundaries', () => {
     expect(start.code_challenge).not.toBe(token.code_verifier);
   });
 
-  it('polls authorization_pending until a device token is approved', async () => {
+  it('polls pending approval and retains the five-second slow_down increase', async () => {
+    const path = await temporaryPath();
+
+    const responses = [
+      Response.json({
+        device_code: 'private-device',
+        user_code: 'ABCD',
+        verification_uri: 'https://cloud.example.test/approve',
+        expires_in: 600,
+        interval: 3,
+      }),
+      Response.json({ error: { code: 'authorization_pending' } }, { status: 400 }),
+      Response.json({ error: { code: 'slow_down' } }, { status: 400 }),
+      Response.json({ error: { code: 'authorization_pending' } }, { status: 400 }),
+      Response.json({ access_token: 'approved-token', token_type: 'Bearer', expires_in: 600 }),
+    ];
+
+    const requestedAt: number[] = [];
+
+    const fetcher = vi.fn<typeof fetch>(() => {
+      requestedAt.push(performance.now());
+      const response = responses.shift();
+
+      if (response === undefined) throw new Error('Unexpected device request.');
+
+      return Promise.resolve(response);
+    });
+
+    const login = loginCloud({
+      baseUrl: 'https://cloud.example.test',
+      credentialPath: path,
+      fetch: fetcher,
+      onDevice: () => {},
+    });
+
+    await expect(login).resolves.toEqual({
+      base_url: 'https://cloud.example.test',
+      authenticated: true,
+    });
+    expect(fetcher).toHaveBeenCalledTimes(5);
+    expect(requestedAt[2]! - requestedAt[1]!).toBeGreaterThanOrEqual(2_990);
+    expect(requestedAt[3]! - requestedAt[2]!).toBeGreaterThanOrEqual(7_990);
+    expect(requestedAt[4]! - requestedAt[3]!).toBeGreaterThanOrEqual(7_990);
+    expect((await readCloudCredentials(path)).accessToken).toBe('approved-token');
+  }, 30_000);
+
+  it.each([
+    ['expired_token', 'Cloud approval code expired. Run cloud login again.'],
+    ['access_denied', 'Cloud login was denied. Run cloud login again.'],
+  ])('ends device login on %s with a login repair', async (code, message) => {
     const path = await temporaryPath();
 
     const fetcher = vi
@@ -164,30 +213,18 @@ describe('cloud trust boundaries', () => {
           interval: 3,
         }),
       )
-      .mockResolvedValueOnce(
-        Response.json({ error: { code: 'authorization_pending' } }, { status: 400 }),
-      )
-      .mockResolvedValueOnce(
-        Response.json({ access_token: 'approved-token', token_type: 'Bearer', expires_in: 600 }),
-      );
+      .mockResolvedValueOnce(Response.json({ error: { code } }, { status: 400 }));
 
-    vi.useFakeTimers();
-
-    const login = loginCloud({
-      baseUrl: 'https://cloud.example.test',
-      credentialPath: path,
-      fetch: fetcher,
-      onDevice: () => {},
-    });
-
-    await vi.waitFor(() => expect(fetcher).toHaveBeenCalledTimes(2));
-    await vi.advanceTimersByTimeAsync(3_000);
-    await expect(login).resolves.toEqual({
-      base_url: 'https://cloud.example.test',
-      authenticated: true,
-    });
-    expect(fetcher).toHaveBeenCalledTimes(3);
-    expect((await readCloudCredentials(path)).accessToken).toBe('approved-token');
+    await expect(
+      loginCloud({
+        baseUrl: 'https://cloud.example.test',
+        credentialPath: path,
+        fetch: fetcher,
+        onDevice: () => {},
+      }),
+    ).rejects.toMatchObject({ code: 'cloud_auth_required', message });
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    await expect(stat(path)).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
   it('distinguishes schema mismatches from invalid JSON', async () => {

@@ -87,7 +87,17 @@ const loginCloud = async (options: {
       if (!(error instanceof CloudRemoteError) || error.outcome.kind !== 'device') throw error;
 
       if (error.outcome.code === 'slow_down') interval += 5_000;
-      else if (error.outcome.code !== 'authorization_pending') throw error;
+      else if (error.outcome.code === 'expired_token') {
+        throw new LocalError(
+          'cloud_auth_required',
+          'Cloud approval code expired. Run cloud login again.',
+        );
+      } else if (error.outcome.code === 'access_denied') {
+        throw new LocalError(
+          'cloud_auth_required',
+          'Cloud login was denied. Run cloud login again.',
+        );
+      }
     }
 
     try {
@@ -168,7 +178,7 @@ const cloudEvents = async (options: {
   const page = await options.client.request(
     'GET',
     `${cloudProjectPath(options.projectId)}/runs/${encodeURIComponent(options.runId)}/events?after=${after}`,
-    { schema: eventPageSchema, body: undefined, signal: options.signal },
+    { schema: eventPageSchema, signal: options.signal },
   );
 
   if (
