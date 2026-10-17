@@ -6,8 +6,7 @@ import { Kysely } from 'kysely';
 
 import {
   canonicalStringify,
-  DEFAULT_PAGE_LIMIT,
-  MAX_PAGE_LIMIT,
+  pageQuerySchema,
   type PageQuery,
   type RunPage,
   type CaseSummaryPage,
@@ -252,16 +251,15 @@ class SqliteRunStore implements RunStore {
   }
 
   #pageLimit(query: PageQuery): number {
-    const limit = query.limit ?? DEFAULT_PAGE_LIMIT;
+    const parsed = pageQuerySchema.shape.limit.safeParse(query.limit);
 
-    if (!Number.isInteger(limit) || limit < 1 || limit > MAX_PAGE_LIMIT) {
+    if (!parsed.success)
       throw new StoreError(
         'INVALID_LIMIT',
-        `Page limit must be an integer from 1 to ${MAX_PAGE_LIMIT}.`,
+        parsed.error.issues[0]?.message ?? parsed.error.message,
       );
-    }
 
-    return limit;
+    return parsed.data;
   }
 
   /** Rehydrates case blobs after the caller has established the parent run. */
