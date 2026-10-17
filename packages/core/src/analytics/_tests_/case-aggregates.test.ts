@@ -63,9 +63,11 @@ describe('case aggregates', () => {
       summarizeSuites([
         summary({ suiteName: 'z', verdict: 'fail' }),
         summary({ suiteName: 'a' }),
+        summary({ suiteName: 'Z' }),
         summary({ suiteName: 'z' }),
       ]),
     ).toMatchObject([
+      { suiteName: 'Z', caseCount: 1, passRate: 1 },
       { suiteName: 'a', caseCount: 1, passRate: 1 },
       { suiteName: 'z', caseCount: 2, passRate: 0.5 },
     ]);

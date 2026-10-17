@@ -72,7 +72,7 @@ const summarizeSuites = (cases: readonly CaseSummary[]): SuiteAggregate[] => {
 
   return [...groups]
     .map(([suiteName, group]) => ({ suiteName, ...aggregateCases(group) }))
-    .sort((a, b) => a.suiteName.localeCompare(b.suiteName));
+    .sort((a, b) => (a.suiteName < b.suiteName ? -1 : a.suiteName > b.suiteName ? 1 : 0));
 };
 
 export {

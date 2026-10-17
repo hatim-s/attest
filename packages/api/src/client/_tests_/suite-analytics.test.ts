@@ -126,6 +126,7 @@ describe('suite analytics clients', () => {
     ).toEqual({
       suiteName: 'a/b',
       runsExamined: 1,
+      exhausted: true,
       points: [point],
     });
     expect(requests).toEqual([
@@ -135,6 +136,7 @@ describe('suite analytics clients', () => {
     expect(await client.getSuiteHistory({ suiteName: 'absent' }, {})).toEqual({
       suiteName: 'absent',
       runsExamined: 1,
+      exhausted: true,
       points: [],
     });
     await expect(client.listRunSuites({ runId: 'missing' })).rejects.toMatchObject({
@@ -158,6 +160,34 @@ describe('suite analytics clients', () => {
     });
   });
 
+  it('rejects invalid history limits with the same error in both client modes', async () => {
+    const app = new Hono().route('/api', createApiApp({ source }));
+
+    const clients = [
+      createApiClient({
+        kind: 'http',
+        baseUrl: '/api',
+        fetch: (input, init) => Promise.resolve(app.request(input, init)),
+      }),
+      createApiClient({
+        kind: 'snapshot',
+        snapshot: { generatedAt: run.createdAt, run, cases, truncated: false },
+      }),
+    ];
+
+    for (const client of clients) {
+      for (const limit of [0, 51, 1.5]) {
+        await expect(client.getSuiteHistory({ suiteName: 'a/b' }, { limit })).rejects.toMatchObject(
+          {
+            name: 'ApiError',
+            status: 400,
+            code: 'INVALID_REQUEST',
+          },
+        );
+      }
+    }
+  });
+
   it('aggregates only embedded cases and omits running or absent suites from offline history', async () => {
     const network = vi.fn(() => Promise.reject(new Error('Snapshot touched fetch.')));
     vi.stubGlobal('fetch', network);
@@ -170,11 +200,13 @@ describe('suite analytics clients', () => {
     expect(await client.getSuiteHistory({ suiteName: 'a/b' }, { limit: 1 })).toEqual({
       suiteName: 'a/b',
       runsExamined: 1,
+      exhausted: true,
       points: [point],
     });
     expect(await client.getSuiteHistory({ suiteName: 'z' }, { limit: 50 })).toEqual({
       suiteName: 'z',
       runsExamined: 1,
+      exhausted: true,
       points: [],
     });
     await expect(client.listRunSuites({ runId: 'missing' })).rejects.toMatchObject({
@@ -190,6 +222,7 @@ describe('suite analytics clients', () => {
     expect(await running.getSuiteHistory({ suiteName: 'a/b' }, {})).toEqual({
       suiteName: 'a/b',
       runsExamined: 0,
+      exhausted: true,
       points: [],
     });
     expect(await running.listRunSuites({ runId: run.id })).toEqual({

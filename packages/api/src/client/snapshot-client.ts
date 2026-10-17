@@ -1,6 +1,8 @@
-import { aggregateCases, summarizeSuites } from '@attest/core/analytics';
+import { summarizeSuites } from '@attest/core/analytics';
 import { DEFAULT_PAGE_LIMIT, MAX_PAGE_LIMIT, type PageQuery } from '@attest/core/records';
 import { API_ERROR_STATUS, type ApiErrorCode } from '../contract/errors.js';
+import { suiteHistoryRequestSchema } from '../contract/requests.js';
+import { toSuiteHistoryPoint } from '../contract/responses.js';
 import type { ReportSnapshot } from '../contract/snapshot.js';
 import type { ApiClient } from './api-client.js';
 import { ApiError } from './api-error.js';
@@ -88,31 +90,29 @@ const createSnapshotClient = (snapshot: ReportSnapshot): ApiClient => {
         suites: summarizeSuites(snapshot.cases.map(({ summary }) => summary)),
       });
     },
-    getSuiteHistory: async ({ suiteName }) => {
+    getSuiteHistory: async (params, query) => {
+      const parsed = suiteHistoryRequestSchema.safeParse({ ...params, ...query });
+
+      if (!parsed.success) return reject('INVALID_REQUEST', parsed.error.message);
+
+      const { suiteName } = parsed.data;
       const run = snapshot.run;
 
       if (run.status === 'running')
-        return Promise.resolve({ suiteName, runsExamined: 0, points: [] });
+        return Promise.resolve({ suiteName, runsExamined: 0, points: [], exhausted: true });
 
-      const [first, ...rest] = snapshot.cases
-        .map(({ summary }) => summary)
-        .filter((summary) => summary.suiteName === suiteName);
+      const point = toSuiteHistoryPoint(
+        run,
+        snapshot.cases.map(({ summary }) => summary),
+        suiteName,
+      );
 
-      const points =
-        first === undefined
-          ? []
-          : [
-              {
-                runId: run.id,
-                createdAt: run.createdAt,
-                status: run.status,
-                gitBranch: run.gitBranch,
-                gitSha: run.gitSha,
-                aggregate: aggregateCases([first, ...rest]),
-              },
-            ];
-
-      return Promise.resolve({ suiteName, runsExamined: 1, points });
+      return Promise.resolve({
+        suiteName,
+        runsExamined: 1,
+        points: point === undefined ? [] : [point],
+        exhausted: true,
+      });
     },
     getDiff: ({ baseRunId, candidateRunId }) =>
       Promise.resolve().then(() => {
