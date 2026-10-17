@@ -7,26 +7,7 @@ import {
 import { createContentCaseId, type ImportCollisionContext } from '@attest/core';
 
 import { LocalError } from '../../errors/index.js';
-
-const MISSING_RESOURCE_HINTS = {
-  case: 'Run `attest test case list <test-id>` to inspect direct case ids.',
-  dataset: 'Run `attest list datasets` to inspect available ids.',
-  test: 'Run `attest list tests` to inspect available ids.',
-} as const;
-
-const missingResource = (type: keyof typeof MISSING_RESOURCE_HINTS, id: string): LocalError =>
-  new LocalError('resource_not_found', `${type} ${id} was not found.`, {
-    path: id,
-    hint: MISSING_RESOURCE_HINTS[type],
-  });
-
-const findTest = (candidate: ProjectResources, id: string): TestResource => {
-  const test = candidate.tests.find((item) => item.id === id);
-
-  if (test === undefined) throw missingResource('test', id);
-
-  return test;
-};
+import { missingResource } from '../shared/resource-lookup.js';
 
 const findDataset = (candidate: ProjectResources, id: string) => {
   const dataset = candidate.datasets.find(({ metadata }) => metadata.id === id);
@@ -34,19 +15,6 @@ const findDataset = (candidate: ProjectResources, id: string) => {
   if (dataset === undefined) throw missingResource('dataset', id);
 
   return dataset;
-};
-
-const assertNewResourceId = (
-  values: readonly { id: string }[],
-  type: 'dataset' | 'test',
-  id: string,
-): void => {
-  if (values.some((value) => value.id === id)) {
-    throw new LocalError('project_invalid', `${type} ${id} already exists.`, {
-      path: id,
-      hint: `Choose a new ${type} id.`,
-    });
-  }
 };
 
 const caseWithGeneratedId = (
@@ -125,12 +93,9 @@ const assertDatasetRemovable = (candidate: ProjectResources, datasetId: string):
 
 export {
   assertDatasetRemovable,
-  assertNewResourceId,
   attachedDatasetTests,
   attachmentCases,
   caseWithGeneratedId,
   datasetImportCollisionContexts,
   findDataset,
-  findTest,
-  missingResource,
 };

@@ -11,17 +11,15 @@ import { LocalError } from '../../errors/index.js';
 import { type LoadedProject } from '../../project/project-loader/index.js';
 import type { ProjectMutationRequest } from '../../project/transaction/index.js';
 import { candidateFromLoadedProject } from '../project/load-command-project.js';
+import { assertNewId, findResource, missingResource } from '../shared/resource-lookup.js';
 import { runTabularImportAdapter } from './import/tabular-import-adapter.js';
 import {
   assertDatasetRemovable,
-  assertNewResourceId,
   attachedDatasetTests,
   attachmentCases,
   caseWithGeneratedId,
   datasetImportCollisionContexts,
   findDataset,
-  findTest,
-  missingResource,
 } from './test-resources.js';
 
 type TestAuthoringCommand = Extract<
@@ -73,15 +71,15 @@ const buildMutation = async (
 
   switch (request.command) {
     case 'test.add': {
-      assertNewResourceId(candidate.tests, 'test', request.test.id);
+      assertNewId('test', candidate.tests, request.test.id);
       candidate.tests.push(request.test);
 
       return { candidate, resource: { id: request.test.id, type: 'test' } };
     }
 
     case 'test.rename': {
-      const test = findTest(candidate, request.test_id);
-      assertNewResourceId(candidate.tests, 'test', request.new_id);
+      const test = findResource('test', candidate.tests, request.test_id);
+      assertNewId('test', candidate.tests, request.new_id);
       test.id = request.new_id;
 
       return {
@@ -92,14 +90,14 @@ const buildMutation = async (
     }
 
     case 'test.remove': {
-      findTest(candidate, request.test_id);
+      findResource('test', candidate.tests, request.test_id);
       candidate.tests = candidate.tests.filter(({ id }) => id !== request.test_id);
 
       return { candidate, resource: { id: request.test_id, type: 'test' } };
     }
 
     case 'test.case.add': {
-      const test = findTest(candidate, request.test_id);
+      const test = findResource('test', candidate.tests, request.test_id);
       const testCase = caseWithGeneratedId(request.case);
       test.cases.push(testCase);
 
@@ -107,7 +105,7 @@ const buildMutation = async (
     }
 
     case 'test.case.import': {
-      const test = findTest(candidate, request.test_id);
+      const test = findResource('test', candidate.tests, request.test_id);
 
       const imported = await runTabularImportAdapter({
         // Cases outside the direct import target that already resolve into its test.
@@ -142,7 +140,7 @@ const buildMutation = async (
     }
 
     case 'test.case.rename': {
-      const test = findTest(candidate, request.test_id);
+      const test = findResource('test', candidate.tests, request.test_id);
       const testCase = test.cases.find(({ id }) => id === request.case_id);
 
       if (testCase === undefined) throw missingResource('case', request.case_id);
@@ -152,7 +150,7 @@ const buildMutation = async (
     }
 
     case 'test.case.remove': {
-      const test = findTest(candidate, request.test_id);
+      const test = findResource('test', candidate.tests, request.test_id);
 
       if (!test.cases.some(({ id }) => id === request.case_id)) {
         throw missingResource('case', request.case_id);
@@ -164,10 +162,10 @@ const buildMutation = async (
     }
 
     case 'test.dataset.add': {
-      const test = findTest(candidate, request.test_id);
-      assertNewResourceId(
-        candidate.datasets.map(({ metadata }) => metadata),
+      const test = findResource('test', candidate.tests, request.test_id);
+      assertNewId(
         'dataset',
+        candidate.datasets.map(({ metadata }) => metadata),
         request.dataset.id,
       );
       candidate.datasets.push({ cases: [], metadata: request.dataset });
@@ -177,7 +175,7 @@ const buildMutation = async (
     }
 
     case 'test.dataset.import': {
-      const test = findTest(candidate, request.test_id);
+      const test = findResource('test', candidate.tests, request.test_id);
       const existing = candidate.datasets.find(({ metadata }) => metadata.id === request.as);
       const affectedTests = attachedDatasetTests(candidate, request.as);
       const consumerTests = [...new Set([...affectedTests, request.test_id])].sort();
@@ -261,7 +259,7 @@ const buildMutation = async (
     }
 
     case 'test.dataset.attach': {
-      const test = findTest(candidate, request.test_id);
+      const test = findResource('test', candidate.tests, request.test_id);
       findDataset(candidate, request.dataset_id);
       const attachment: (typeof test.datasets)[number] = { dataset_id: request.dataset_id };
 
@@ -272,7 +270,7 @@ const buildMutation = async (
     }
 
     case 'test.dataset.detach': {
-      const test = findTest(candidate, request.test_id);
+      const test = findResource('test', candidate.tests, request.test_id);
 
       if (!test.datasets.some(({ dataset_id }) => dataset_id === request.dataset_id)) {
         throw missingResource('dataset', request.dataset_id);
@@ -285,9 +283,9 @@ const buildMutation = async (
 
     case 'test.dataset.rename': {
       const dataset = findDataset(candidate, request.dataset_id);
-      assertNewResourceId(
-        candidate.datasets.map(({ metadata }) => metadata),
+      assertNewId(
         'dataset',
+        candidate.datasets.map(({ metadata }) => metadata),
         request.new_id,
       );
       dataset.metadata.id = request.new_id;

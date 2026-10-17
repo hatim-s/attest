@@ -1,7 +1,7 @@
-import { LocalError } from '../../errors/index.js';
 import { candidateFromLoadedProject, loadCommandProject } from '../project/load-command-project.js';
 import type { CommandResult, MutationResult } from '../shared/command-result.js';
-import { findAgent, mutationResult } from './agent-mutation.js';
+import { assertNewId, findResource } from '../shared/resource-lookup.js';
+import { mutationResult } from './agent-mutation.js';
 import type { AgentMutationCommandOptions, AgentRequest } from './types.js';
 
 /** Renames an agent and every test reference in one atomic transaction. */
@@ -16,13 +16,9 @@ const runAgentRenameCommand = async (
     workingDirectory: options.workingDirectory,
   });
 
-  const current = findAgent(loaded.agents, request.agent_id);
+  const current = findResource('agent', loaded.agents, request.agent_id);
 
-  if (loaded.agents.some(({ id }) => id === request.new_id)) {
-    throw new LocalError('project_invalid', `Agent ${request.new_id} already exists.`, {
-      path: request.new_id,
-    });
-  }
+  assertNewId('agent', loaded.agents, request.new_id);
 
   const candidate = candidateFromLoadedProject(loaded);
   candidate.agents = candidate.agents.map((agent) =>

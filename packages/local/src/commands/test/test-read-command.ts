@@ -9,7 +9,8 @@ import { runListCommand } from '../list/list-command.js';
 import { loadCommandProject } from '../project/load-command-project.js';
 import { runShowCommand } from '../show/show-command.js';
 
-import { assertDatasetRemovable, findTest, missingResource } from './test-resources.js';
+import { findResource, missingResource } from '../shared/resource-lookup.js';
+import { assertDatasetRemovable } from './test-resources.js';
 
 type TestReadCommandOptions = {
   caseId?: string;
@@ -43,7 +44,7 @@ const runTestCaseListCommand = async (
   options: TestReadCommandOptions & { testId: string },
 ): Promise<CommandResult<'test-case-list', TestCaseListResult>> => {
   const loaded = await loadCommandProject(options);
-  const test = findTest(loaded, options.testId);
+  const test = findResource('test', loaded.tests, options.testId);
 
   const items = test.cases.map(
     ({ id, tags, folder }): TestCaseListResult['items'][number] & { folder?: string } => {
@@ -76,7 +77,7 @@ const runTestCaseShowCommand = async (
   options: TestReadCommandOptions & { caseId: string; testId: string },
 ): Promise<CommandResult<'test-case-show', TestCaseShowResult>> => {
   const loaded = await loadCommandProject(options);
-  const test = findTest(loaded, options.testId);
+  const test = findResource('test', loaded.tests, options.testId);
   const testCase = test.cases.find(({ id }) => id === options.caseId);
 
   if (testCase === undefined) throw missingResource('case', options.caseId);

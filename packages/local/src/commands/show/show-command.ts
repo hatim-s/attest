@@ -1,10 +1,10 @@
 import type { JsonValue } from '@attest/contracts';
 
-import { LocalError } from '../../errors/index.js';
 import type { LoadedProject } from '../../project/project-loader/index.js';
 import type { CommandResult, ResourceShowResult } from '../shared/command-result.js';
 import { toSafeRunSummary } from '../list/list-command.js';
 import { loadCommandProject } from '../project/load-command-project.js';
+import { missingResource } from '../shared/resource-lookup.js';
 import { withReadonlyRunStore } from '../run-store/readonly-run-store.js';
 import { withRunNotFound } from '../run-store/run-not-found.js';
 import { redactAgentResource, redactMetricResource } from './redact-resource.js';
@@ -18,12 +18,6 @@ type ShowCommandOptions = {
   workingDirectory: string;
 };
 
-const missingResource = (type: ShowResourceType, id: string): LocalError =>
-  new LocalError('resource_not_found', `${type} ${id} was not found.`, {
-    path: id,
-    hint: `Run \`attest list ${type === 'run' ? 'runs' : `${type}s`}\` to inspect available ids.`,
-  });
-
 const showRun = async (project: LoadedProject, id: string): Promise<JsonValue> => {
   const run = await withRunNotFound(
     () => withReadonlyRunStore(project.root, async (store) => store.getRun(id)),
@@ -35,7 +29,7 @@ const showRun = async (project: LoadedProject, id: string): Promise<JsonValue> =
   return toSafeRunSummary(run);
 };
 
-const findResource = async (
+const showResource = async (
   project: LoadedProject,
   type: ShowResourceType,
   id: string,
@@ -76,7 +70,7 @@ const runShowCommand = async (
     workingDirectory: options.workingDirectory,
   });
 
-  const resource = await findResource(project, options.resourceType, options.id);
+  const resource = await showResource(project, options.resourceType, options.id);
 
   return {
     operation: 'show',
