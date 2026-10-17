@@ -1,6 +1,5 @@
 /** Case-owned shell and workspace-relative filesystem. */
 type CaseEnvironment = {
-  readonly kind: string;
   exec(
     script: string,
     options?: { signal?: AbortSignal; env?: Record<string, string> },

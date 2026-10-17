@@ -1,6 +1,1 @@
-export {
-  startWebSocketAgent,
-  type WebSocketAgentResource,
-  type WebSocketAgentSession,
-  type WebSocketSessionOptions,
-} from './websocket-adapter.js';
+export { startWebSocketAgent, type WebSocketAgentResource } from './websocket-adapter.js';

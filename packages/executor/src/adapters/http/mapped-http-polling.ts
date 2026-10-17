@@ -3,8 +3,10 @@ import { isDeepStrictEqual } from 'node:util';
 
 import { isNumber, isString, type AgentRequest } from '@attest/contracts';
 
-import { AgentInvocationError } from '../../errors.js';
+import { AgentInvocationError, abortedError } from '../../errors.js';
+import { abortableWait } from '../../internal/abortable-wait.js';
 import { extractRemoteError } from '../../internal/remote-error.js';
+import { retryBackoffDelay } from '../../internal/retry-backoff.js';
 import type { HttpJsonResponse } from './http-client.js';
 import { readJsonPointer } from './json-pointer.js';
 import type { HttpAgentResource } from './mapped-http-adapter.js';
@@ -12,8 +14,6 @@ import {
   REMOTE_ERROR_FALLBACK,
   extractRemoteJobId,
   requestWithRetries,
-  retryDelay,
-  wait,
   type ExchangeContext,
   type ExchangeOutcome,
 } from './mapped-http-execution.js';
@@ -154,7 +154,7 @@ const runPolling = async (
   }
 
   const pollingDelay = (retry: number, retryAfter: string | undefined): number =>
-    boundedPollingDelay(transport, retryAfter, retryDelay(retryPolicy, retry));
+    boundedPollingDelay(transport, retryAfter, retryBackoffDelay(retryPolicy?.backoff, retry));
 
   // Replaying a submit can create duplicate remote work unless the server can deduplicate it.
   const submitted = await requestWithRetries(submission, context, {
@@ -187,7 +187,9 @@ const runPolling = async (
   let interval = transport.minimum_interval_ms;
 
   for (;;) {
-    await wait(interval, signal, policy.callerSignal);
+    await abortableWait(interval, signal, () =>
+      abortedError(policy.callerSignal, 'Mapped HTTP invocation'),
+    );
 
     const polledOutcome = await requestWithRetries(pollRequest, context, {
       allowRetry: true,

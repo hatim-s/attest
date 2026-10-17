@@ -60,7 +60,6 @@ const createOptions = (overrides: Partial<InvokeOptions> = {}): InvokeOptions =>
   timeoutMs: 8_000,
   outputCapBytes: 1024 * 1024,
   env: createEnvironment(),
-  workingDirectory: REPOSITORY_ROOT,
   ...overrides,
 });
 

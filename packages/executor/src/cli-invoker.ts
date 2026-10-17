@@ -161,21 +161,14 @@ const captureInvocation = (child: ChildProcess, options: CaptureOptions): Invoca
   };
 };
 
-const createAttemptDirectory = async (
-  override: string | undefined,
-  preserve: boolean,
-): Promise<AttemptDirectory> => {
-  if (override === undefined) {
+const createAttemptDirectory = async (shared: string | undefined): Promise<AttemptDirectory> => {
+  if (shared === undefined) {
     return { path: await mkdtemp(join(tmpdir(), 'attest-')), remove: true };
   }
 
-  if (preserve) {
-    await mkdir(override, { recursive: true });
+  await mkdir(shared, { recursive: true });
 
-    return { path: override, remove: false };
-  }
-
-  return { path: await mkdtemp(join(override, 'attempt-')), remove: true };
+  return { path: shared, remove: false };
 };
 
 const resolveCliEnvironment = async (
@@ -188,12 +181,8 @@ const resolveCliEnvironment = async (
     mkdir(join(attemptDirectory, 'tmp'), { recursive: true }),
   ]);
 
-  // Explicit values are forwarded whole; otherwise only allowlisted host values cross over.
-  const forwardedKeys =
-    options.env === undefined ? (options.envAllowlist ?? []) : Object.keys(options.env);
-
   return resolveInvocationEnv(
-    forwardedKeys,
+    Object.keys(options.env ?? {}),
     options.env ?? process.env,
     { runId: request.run_id, caseId: request.case_id },
     attemptDirectory,
@@ -243,10 +232,7 @@ const invokeCliAgent = async (
 ): Promise<InvocationAttempt> => {
   const duration = startTimer();
 
-  const attemptDirectory = await createAttemptDirectory(
-    options.workingDirectory,
-    options.preserveWorkingDirectory ?? false,
-  );
+  const attemptDirectory = await createAttemptDirectory(options.workingDirectory);
 
   let capture: InvocationCapture | undefined;
 

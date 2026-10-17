@@ -2,7 +2,7 @@ import type { AgentResponse, ContractWarning, ParseReport, RawExcerpt } from '@a
 
 import type { AgentInvocationError } from './errors.js';
 
-/** Describes the two native transports that still use the shared envelope invoker. */
+/** Describes the two native transports that use the shared envelope invoker. */
 type NativeAgentTarget = { type: 'cli'; command: string[] } | { type: 'http'; url: string };
 
 /** Controls a single agent invocation; timeouts and caps come from resolved config defaults. */
@@ -14,24 +14,20 @@ type InvokeOptions = {
   /** Maximum stdout / response-body size in bytes (spec default 10 MB). */
   outputCapBytes: number;
   /**
-   * Resolved variables for a CLI agent, layered over its isolated base environment. When set,
-   * every key is forwarded (including PATH) and `envAllowlist` is ignored.
+   * Resolved variables for a CLI agent, layered over its isolated base environment. Every key is
+   * forwarded, including PATH. When unset, the agent gets only the host's absolute PATH entries.
    */
   env?: Record<string, string>;
-  /** Host variable names copied from `process.env` into a CLI agent when `env` is unset. */
-  envAllowlist?: readonly string[];
   /** Runtime-only native HTTP headers resolved from authored secret references. */
   httpHeaders?: Record<string, string>;
   /** Host-owned guarded HTTP I/O, used instead of the global fetch implementation. */
   httpFetch?: (url: string, init: RequestInit) => Promise<Response>;
-  /** Parent of the fresh per-attempt CLI cwd; defaults to the system temporary directory. */
-  workingDirectory?: string;
-  /** Uses workingDirectory itself as cwd and preserves its contents for lifecycle hooks. */
-  preserveWorkingDirectory?: boolean;
   /**
-   * SIGTERM→SIGKILL grace window in milliseconds (spec: 5 000). Overridable so
-   * kill-escalation tests do not wait out the full production grace period.
+   * CLI cwd shared with lifecycle hooks, kept after the attempt. When unset, every attempt gets a
+   * fresh directory under the system temporary directory that is removed afterwards.
    */
+  workingDirectory?: string;
+  /** SIGTERM→SIGKILL grace window in milliseconds (spec: 5 000). */
   terminationGraceMs?: number;
 };
 

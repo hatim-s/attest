@@ -5,8 +5,14 @@ import { createHash } from 'node:crypto';
 import { AgentInvocationError, abortedError } from './errors.js';
 import { startTimer } from './internal/elapsed.js';
 import { createFailedAttempt } from './internal/failed-attempt.js';
+import { invokeWithRetries } from './internal/invocation-retry.js';
 import { appendEvidencePrefix, createRawExcerpt } from './internal/raw-excerpt.js';
-import type { InvocationAttempt, InvokeOptions, NativeAgentTarget } from './types.js';
+import type {
+  InvocationAttempt,
+  InvocationResult,
+  InvokeOptions,
+  NativeAgentTarget,
+} from './types.js';
 
 const HTTP_SUCCESS_STATUS = 200;
 
@@ -201,4 +207,12 @@ const invokeHttpAgent = async (
   }
 };
 
-export { invokeHttpAgent };
+/** Invokes and validates one native HTTP request without retrying interrupted remote work. */
+const invokeNativeHttpAgent = (
+  target: Extract<NativeAgentTarget, { type: 'http' }>,
+  request: AgentRequest,
+  options: InvokeOptions,
+): Promise<InvocationResult> =>
+  invokeWithRetries(() => invokeHttpAgent(target, request, options), 0);
+
+export { invokeHttpAgent, invokeNativeHttpAgent };

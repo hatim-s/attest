@@ -10,7 +10,8 @@ import { appendEvidencePrefix, createRawExcerpt } from '../../internal/raw-excer
 import { openPinnedRequest } from './pinned-request.js';
 import type { MaterializedHttpRequest } from './request-template.js';
 import { redactTransportText } from './redaction.js';
-import { requireSameOrigin, resolveSafeHttpUrl } from './url-security.js';
+import { requireSameOrigin } from './same-origin.js';
+import { resolveSafeHttpUrl } from './url-security.js';
 
 type HttpClientPolicy = {
   attemptSignal: AbortSignal;

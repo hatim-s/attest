@@ -1,8 +1,6 @@
 export { AgentInvocationError, type InvocationErrorCode } from './errors.js';
 
-export { invokeHttpAgent } from './http-invoker.js';
-
-export { invokeNativeHttpAgent } from './native-http-agent.js';
+export { invokeHttpAgent, invokeNativeHttpAgent } from './http-invoker.js';
 
 export {
   invokeMappedHttpAgent,
