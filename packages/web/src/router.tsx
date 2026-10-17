@@ -5,6 +5,7 @@ import {
   runParamsSchema,
   suiteParamsSchema,
   suiteHistoryQuerySchema,
+  DEFAULT_SUITE_HISTORY_RUNS,
 } from '@attest/api/contract';
 import type { QueryClient } from '@tanstack/react-query';
 import {
@@ -120,7 +121,11 @@ const evalRoute = createRoute({
   getParentRoute: () => workspaceRoute,
   path: '/evals/$suiteName',
   params: { parse: (params) => suiteParamsSchema.parse(params) },
-  validateSearch: z.object({ limit: suiteHistoryQuerySchema.shape.limit.catch(20) }),
+  validateSearch: z.object({
+    limit: suiteHistoryQuerySchema.shape.limit
+      .default(DEFAULT_SUITE_HISTORY_RUNS)
+      .catch(DEFAULT_SUITE_HISTORY_RUNS),
+  }),
   component: EvalPage,
 });
 
