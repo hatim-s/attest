@@ -1,14 +1,18 @@
+import { randomUUID } from 'node:crypto';
 import { constants } from 'node:fs';
 import { chmod, lstat, mkdir, open, rename, rm } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, join, parse, resolve } from 'node:path';
-import { randomUUID } from 'node:crypto';
+
 import { z } from 'zod';
+
 import { LocalError } from '../errors/local-error.js';
+import { errnoCode } from '../internal/errno-code.js';
 import { normalizeCloudUrl } from './client.js';
+import { bearerTokenSchema } from './protocol.js';
 
 const credentialSchema = z
-  .object({ baseUrl: z.string(), accessToken: z.string().min(1), expiresAt: z.string().datetime() })
+  .object({ baseUrl: z.string(), accessToken: bearerTokenSchema, expiresAt: z.string().datetime() })
   .strict();
 
 type CloudCredentials = z.infer<typeof credentialSchema>;
@@ -26,7 +30,7 @@ const checkCredentialAncestors = async (path: string, create: boolean): Promise<
 
     if (create)
       await mkdir(current, { mode: 0o700 }).catch((cause: unknown) => {
-        if (!(cause instanceof Error && 'code' in cause && cause.code === 'EEXIST')) throw cause;
+        if (errnoCode(cause) !== 'EEXIST') throw cause;
       });
     const metadata = await lstat(current);
 
@@ -73,17 +77,12 @@ const writeCloudCredentials = async (
   credentials: CloudCredentials,
   path = defaultCredentialPath(),
 ): Promise<void> => {
-  credentialSchema.parse(credentials);
   normalizeCloudUrl(credentials.baseUrl);
   const directory = dirname(path);
   const temporary = join(directory, `.credentials-${randomUUID()}`);
 
   try {
     await checkCredentialAncestors(path, true);
-    const metadata = await lstat(directory);
-
-    if (!metadata.isDirectory() || metadata.isSymbolicLink())
-      throw new Error('Unsafe credential directory');
     await chmod(directory, 0o700);
     const handle = await open(temporary, 'wx', 0o600);
 
@@ -105,8 +104,16 @@ const writeCloudCredentials = async (
 
 /** Removes the locally stored bearer token after its cloud session has been revoked. */
 const removeCloudCredentials = async (path = defaultCredentialPath()): Promise<void> => {
-  await checkCredentialAncestors(path, false);
-  await rm(path, { force: true });
+  try {
+    await checkCredentialAncestors(path, false);
+    await rm(path, { force: true });
+  } catch (cause: unknown) {
+    throw new LocalError(
+      'cloud_credentials_failed',
+      'Could not remove private cloud credentials.',
+      { cause },
+    );
+  }
 };
 
 export {

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { contentHash } from '@attest/core';
 import { createHash } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -7,6 +8,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   PROJECT_SCHEMA_ID,
+  AGENT_RESOURCE_SCHEMA_ID,
   portableProjectBundleSchema,
   type PortableProjectBundle,
 } from '@attest/contracts';
@@ -127,6 +129,71 @@ describe('cloud link state', () => {
 });
 
 describe('cloud revision synchronization', () => {
+  it('preserves the rejected portable credential field path in upload diagnostics', async () => {
+    const root = await createDirectory();
+    await mkdir(join(root, 'attest/agents'));
+
+    const agent = {
+      schema: AGENT_RESOURCE_SCHEMA_ID,
+      id: 'support',
+      name: 'Support',
+      transport: {
+        kind: 'native_cli',
+        lifecycle: 'per_case',
+        argv: ['node', 'agent.mjs'],
+        env: { TOKEN: { from_file: 'token.txt' } },
+      },
+    };
+
+    await writeFile(
+      join(root, 'attest.project.json'),
+      JSON.stringify({
+        schema: PROJECT_SCHEMA_ID,
+        project_id: '01ARZ3NDEKTSV4RRFFQ69G5FAB',
+        name: 'Local',
+        resources: {
+          agents: [
+            {
+              id: agent.id,
+              schema: agent.schema,
+              path: 'attest/agents/support.json',
+              content_hash: contentHash(agent),
+            },
+          ],
+          tests: [],
+          datasets: [],
+          metrics: [],
+        },
+      }),
+    );
+    await writeFile(join(root, 'attest/agents/support.json'), JSON.stringify(agent));
+    await writeCloudLink(root, {
+      schema: 'attest.cloud-link.v1',
+      base_url: 'https://cloud.example',
+      project_id: 'project-1',
+      file_hashes: {},
+    });
+
+    const client = createCloudClient({
+      baseUrl: 'https://cloud.example',
+      fetch: () => Promise.reject(new Error('Must reject before upload.')),
+    });
+
+    await expect(
+      pushCloudProject({ workingDirectory: root, client, acknowledgeNoSecrets: true }),
+    ).rejects.toMatchObject({
+      code: 'project_invalid',
+      details: {
+        diagnostics: [
+          {
+            path: '/resources/agents/0/transport/env/TOKEN',
+            message: 'portable secrets must use environment references',
+          },
+        ],
+      },
+    });
+  });
+
   it('uploads only referenced files and pulls exact bytes through the project journal', async () => {
     const root = await createDirectory();
 

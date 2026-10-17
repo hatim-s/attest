@@ -1,4 +1,7 @@
 import { z } from 'zod';
+import { syncBuiltinESMExports } from 'node:module';
+import { mock as nodeMock } from 'node:test';
+import { setImmediate } from 'node:timers/promises';
 import { mkdtemp, rm, stat, symlink, chmod, realpath } from 'node:fs/promises';
 import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -10,6 +13,8 @@ import { cloudEvents, loginCloud, logoutCloud } from '../commands.js';
 const directories: string[] = [];
 
 afterEach(async () => {
+  nodeMock.timers.reset();
+  syncBuiltinESMExports();
   vi.unstubAllGlobals();
   await Promise.all(
     directories.splice(0).map((path) => rm(path, { recursive: true, force: true })),
@@ -35,14 +40,18 @@ describe('cloud trust boundaries', () => {
       fetch: fetcher,
     });
 
-    await expect(client.request('GET', '//other.example.test/v1/session')).rejects.toMatchObject({
+    await expect(
+      client.request('GET', '//other.example.test/v1/session', { schema: z.unknown() }),
+    ).rejects.toMatchObject({
       code: 'cli_usage',
     });
-    await expect(client.request('GET', '/v1/../../secrets')).rejects.toMatchObject({
+    await expect(
+      client.request('GET', '/v1/../../secrets', { schema: z.unknown() }),
+    ).rejects.toMatchObject({
       code: 'cli_usage',
     });
     expect(fetcher).not.toHaveBeenCalled();
-    await client.request('GET', '/v1/session');
+    await client.request('GET', '/v1/session', { schema: z.unknown() });
     expect(fetcher.mock.calls[0]?.[1]).toMatchObject({
       redirect: 'error',
     });
@@ -62,7 +71,9 @@ describe('cloud trust boundaries', () => {
         ),
     });
 
-    await expect(client.request('GET', '/v1/session')).rejects.toMatchObject({
+    await expect(
+      client.request('GET', '/v1/session', { schema: z.unknown() }),
+    ).rejects.toMatchObject({
       code: 'cloud_request_failed',
       message: 'Cloud request failed (403, quota_exceeded).',
       details: { remote_code: 'quota_exceeded', status: 403 },
@@ -75,7 +86,9 @@ describe('cloud trust boundaries', () => {
       fetch: vi.fn<typeof fetch>().mockResolvedValue(new Response('invalid-json')),
     });
 
-    await expect(client.request('GET', '/v1/session')).rejects.toMatchObject({
+    await expect(
+      client.request('GET', '/v1/session', { schema: z.unknown() }),
+    ).rejects.toMatchObject({
       code: 'cloud_request_failed',
       message: 'Cloud returned an invalid JSON response.',
     });
@@ -139,6 +152,134 @@ describe('cloud trust boundaries', () => {
       .parse(await new Response(fetcher.mock.calls[1]![1]!.body).json());
 
     expect(start.code_challenge).not.toBe(token.code_verifier);
+  });
+
+  it('polls pending approval and accumulates and retains each five-second slow_down increase', async () => {
+    const path = await temporaryPath();
+
+    const responses = [
+      Response.json({
+        device_code: 'private-device',
+        user_code: 'ABCD',
+        verification_uri: 'https://cloud.example.test/approve',
+        expires_in: 600,
+        interval: 3,
+      }),
+      Response.json({ error: { code: 'authorization_pending' } }, { status: 400 }),
+      Response.json({ error: { code: 'slow_down' } }, { status: 400 }),
+      Response.json({ error: { code: 'slow_down' } }, { status: 400 }),
+      Response.json({ error: { code: 'authorization_pending' } }, { status: 400 }),
+      Response.json({ access_token: 'approved-token', token_type: 'Bearer', expires_in: 600 }),
+    ];
+
+    const fetcher = vi.fn<typeof fetch>(() => {
+      const response = responses.shift();
+
+      if (response === undefined) throw new Error('Unexpected device request.');
+
+      return Promise.resolve(response);
+    });
+
+    nodeMock.timers.enable({ apis: ['setTimeout', 'Date'] });
+    syncBuiltinESMExports();
+
+    const login = loginCloud({
+      baseUrl: 'https://cloud.example.test',
+      credentialPath: path,
+      fetch: fetcher,
+      onDevice: () => {},
+    });
+
+    await setImmediate();
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    nodeMock.timers.tick(2_999);
+    await setImmediate();
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    nodeMock.timers.tick(1);
+    await setImmediate();
+    expect(fetcher).toHaveBeenCalledTimes(3);
+    nodeMock.timers.tick(7_999);
+    await setImmediate();
+    expect(fetcher).toHaveBeenCalledTimes(3);
+    nodeMock.timers.tick(1);
+    await setImmediate();
+    expect(fetcher).toHaveBeenCalledTimes(4);
+    nodeMock.timers.tick(12_999);
+    await setImmediate();
+    expect(fetcher).toHaveBeenCalledTimes(4);
+    nodeMock.timers.tick(1);
+    await setImmediate();
+    expect(fetcher).toHaveBeenCalledTimes(5);
+    nodeMock.timers.tick(12_999);
+    await setImmediate();
+    expect(fetcher).toHaveBeenCalledTimes(5);
+    nodeMock.timers.tick(1);
+    await expect(login).resolves.toEqual({
+      base_url: 'https://cloud.example.test',
+      authenticated: true,
+    });
+    expect(fetcher).toHaveBeenCalledTimes(6);
+    expect((await readCloudCredentials(path)).accessToken).toBe('approved-token');
+  });
+
+  it.each([
+    ['expired_token', 'Cloud approval code expired. Run attest cloud login again.'],
+    ['access_denied', 'Cloud login was denied. Run attest cloud login again.'],
+  ])('ends device login on %s with a login repair', async (code, message) => {
+    const path = await temporaryPath();
+
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        Response.json({
+          device_code: 'private-device',
+          user_code: 'ABCD',
+          verification_uri: 'https://cloud.example.test/approve',
+          expires_in: 600,
+          interval: 3,
+        }),
+      )
+      .mockResolvedValueOnce(Response.json({ error: { code } }, { status: 400 }));
+
+    await expect(
+      loginCloud({
+        baseUrl: 'https://cloud.example.test',
+        credentialPath: path,
+        fetch: fetcher,
+        onDevice: () => {},
+      }),
+    ).rejects.toMatchObject({ code: 'cloud_auth_required', message });
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    await expect(stat(path)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('distinguishes schema mismatches from invalid JSON', async () => {
+    const client = createCloudClient({
+      baseUrl: 'https://cloud.example.test',
+      fetch: vi.fn<typeof fetch>().mockResolvedValue(Response.json({ wrong: true })),
+    });
+
+    await expect(
+      client.request('GET', '/v1/session', { schema: z.object({ id: z.string() }) }),
+    ).rejects.toMatchObject({
+      code: 'cloud_request_failed',
+      message: 'Cloud returned a response that does not match the protocol.',
+    });
+  });
+
+  it('clears credentials after logout succeeds with a JSON body', async () => {
+    const path = await temporaryPath();
+    await writeCloudCredentials(
+      {
+        baseUrl: 'https://cloud.example.test',
+        accessToken: 'token',
+        expiresAt: new Date(Date.now() + 60_000).toISOString(),
+      },
+      path,
+    );
+    vi.stubGlobal('fetch', vi.fn<typeof fetch>().mockResolvedValue(Response.json({ ok: true })));
+    await expect(logoutCloud(path)).resolves.toEqual({ authenticated: false });
+    await expect(stat(path)).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
   it('reconnects with the last event cursor without submitting a second run', async () => {

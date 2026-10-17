@@ -1,15 +1,16 @@
 import type { JsonValue } from '@attest/contracts';
 import { z } from 'zod';
+
 import { LocalError } from '../errors/local-error.js';
+import { CloudRemoteError, decodeRemoteError, parseCloudEndpoint } from './protocol.js';
 
 type CloudClient = {
   readonly baseUrl: string;
-  request: (
+  request: <T>(
     method: string,
     path: string,
-    body?: JsonValue,
-    signal?: AbortSignal,
-  ) => Promise<JsonValue | undefined>;
+    options: { schema: z.ZodType<T>; body?: JsonValue; signal?: AbortSignal },
+  ) => Promise<T>;
 };
 
 type CloudClientOptions = { baseUrl: string; accessToken?: string; fetch?: typeof fetch };
@@ -43,8 +44,8 @@ const normalizeCloudUrl = (value: string): string => {
   return url.origin;
 };
 
-/** Bounds response bytes before decoding JSON, including proxy error bodies. */
-const readResponseJson = async (response: Response): Promise<JsonValue> => {
+/** Bounds response bytes before decoding UTF-8, including proxy error bodies. */
+const readResponseText = async (response: Response): Promise<string> => {
   const limit = 16 * 1024 * 1024;
 
   if (Number(response.headers.get('content-length')) > limit) {
@@ -84,7 +85,7 @@ const readResponseJson = async (response: Response): Promise<JsonValue> => {
     offset += chunk.byteLength;
   }
 
-  return z.json().parse(JSON.parse(new TextDecoder().decode(bytes)));
+  return new TextDecoder().decode(bytes);
 };
 
 /** Sends authenticated requests only to the configured origin; redirects never receive credentials. */
@@ -94,12 +95,13 @@ const createCloudClient = (options: CloudClientOptions): CloudClient => {
 
   return {
     baseUrl,
-    async request(
+    async request<T>(
       method: string,
       path: string,
-      body?: JsonValue,
-      signal?: AbortSignal,
-    ): Promise<JsonValue | undefined> {
+      requestOptions: { schema: z.ZodType<T>; body?: JsonValue; signal?: AbortSignal },
+    ): Promise<T> {
+      const { body, signal } = requestOptions;
+
       if (
         !path.startsWith('/v1/') ||
         path.startsWith('//') ||
@@ -136,32 +138,28 @@ const createCloudClient = (options: CloudClientOptions): CloudClient => {
       }
 
       if (!response.ok) {
-        let code = 'request_failed';
+        let outcome = decodeRemoteError(undefined);
 
         try {
-          const parsed = z
-            .object({ error: z.object({ code: z.string().regex(/^[a-z_]{1,80}$/) }).optional() })
-            .safeParse(await readResponseJson(response));
-
-          if (parsed.success && parsed.data.error !== undefined) code = parsed.data.error.code;
+          outcome = decodeRemoteError(JSON.parse(await readResponseText(response)));
         } catch {
           /* An upstream proxy may return a non-JSON failure. */
         }
 
-        throw new LocalError(
-          response.status === 401 ? 'cloud_auth_required' : 'cloud_request_failed',
-          `Cloud request failed (${response.status}, ${code}).`,
-          { details: { status: response.status, remote_code: code } },
-        );
+        throw new CloudRemoteError(response.status, outcome);
       }
 
-      if (response.status === 204) return undefined;
+      if (response.status === 204) return parseCloudEndpoint(requestOptions.schema, undefined);
+
+      let value: unknown;
 
       try {
-        return await readResponseJson(response);
+        value = JSON.parse(await readResponseText(response));
       } catch {
         throw new LocalError('cloud_request_failed', 'Cloud returned an invalid JSON response.');
       }
+
+      return parseCloudEndpoint(requestOptions.schema, value);
     },
   };
 };

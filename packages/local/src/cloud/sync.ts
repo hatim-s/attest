@@ -1,11 +1,15 @@
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 
-import { portableProjectBundleSchema, type PortableProjectBundle } from '@attest/contracts';
+import {
+  PORTABLE_MAX_UPLOAD_BYTES,
+  portableProjectBundleSchema,
+  type PortableProjectBundle,
+} from '@attest/contracts';
 import { resolvePortableProject } from '@attest/core';
-import { z } from 'zod';
 
 import { LocalError } from '../errors/index.js';
+import { schemaIssueDiagnostics } from '../internal/schema-issue-diagnostics.js';
 import { discoverProject } from '../project/discover-project.js';
 import { loadProject, type LoadedProject } from '../project/project-loader/index.js';
 import { acquireProjectLock, releaseProjectLock } from '../project/transaction/project-lock.js';
@@ -23,27 +27,7 @@ import {
   serializeCloudLink,
   type CloudProjectOptions,
 } from './link.js';
-
-const revisionSchema = z.object({
-  id: z.string().min(1),
-  project_id: z.string().min(1),
-  created_at: z.string(),
-});
-
-const revisionResponseSchema = z.object({ revision: revisionSchema });
-
-const revisionBundleSchema = revisionResponseSchema.extend({ bundle: portableProjectBundleSchema });
-
-/** Validates remote JSON at the application boundary without exposing raw response values. */
-// BOUNDARY: Cloud revision HTTP responses are untrusted; the supplied Zod schema validates them before local synchronization.
-const parseCloudResponse = <T>(schema: z.ZodType<T>, value: unknown): T => {
-  const parsed = schema.safeParse(value);
-
-  if (!parsed.success)
-    throw new LocalError('cloud_request_failed', 'Cloud returned an invalid revision response.');
-
-  return parsed.data;
-};
+import { revisionResponseSchema, revisionBundleSchema } from './protocol.js';
 
 const byteHash = (contents: string): string => createHash('sha256').update(contents).digest('hex');
 
@@ -104,6 +88,7 @@ const createCloudBundle = async (project: LoadedProject): Promise<PortableProjec
 
   if (!parsed.success) {
     throw new LocalError('project_invalid', 'Project cannot be uploaded as a cloud revision.', {
+      details: { diagnostics: schemaIssueDiagnostics(parsed.error.issues) },
       hint: 'Keep custom metric code under attest/metrics/code and remove secrets from authored files.',
     });
   }
@@ -142,19 +127,20 @@ const pushCloudProject = async (
 
     const payload = { bundle, parent_revision_id: link.revision_id ?? null };
 
-    if (Buffer.byteLength(JSON.stringify(payload), 'utf8') > 5 * 1024 * 1024) {
-      throw new LocalError('project_invalid', 'Cloud revision exceeds the 5 MiB upload limit.', {
-        hint: 'Reduce authored dataset or metric source size before pushing.',
-      });
+    if (Buffer.byteLength(JSON.stringify(payload), 'utf8') > PORTABLE_MAX_UPLOAD_BYTES) {
+      throw new LocalError(
+        'project_invalid',
+        `Cloud revision exceeds the ${PORTABLE_MAX_UPLOAD_BYTES / (1024 * 1024)} MiB upload limit.`,
+        {
+          hint: 'Reduce authored dataset or metric source size before pushing.',
+        },
+      );
     }
 
-    const response = parseCloudResponse(
-      revisionResponseSchema,
-      await options.client.request(
-        'POST',
-        `/v1/projects/${encodeURIComponent(projectId)}/revisions`,
-        payload,
-      ),
+    const response = await options.client.request(
+      'POST',
+      `/v1/projects/${encodeURIComponent(projectId)}/revisions`,
+      { schema: revisionResponseSchema, body: payload },
     );
 
     if (response.revision.project_id !== projectId) {
@@ -231,12 +217,10 @@ const pullCloudProject = async (options: CloudProjectOptions & { revisionId?: st
     const selected =
       options.revisionId === undefined ? 'current' : encodeURIComponent(options.revisionId);
 
-    const response = parseCloudResponse(
-      revisionBundleSchema,
-      await options.client.request(
-        'GET',
-        `/v1/projects/${encodeURIComponent(projectId)}/revisions/${selected}`,
-      ),
+    const response = await options.client.request(
+      'GET',
+      `/v1/projects/${encodeURIComponent(projectId)}/revisions/${selected}`,
+      { schema: revisionBundleSchema },
     );
 
     if (
