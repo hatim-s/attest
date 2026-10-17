@@ -74,7 +74,7 @@ const CONTRACT_JSON_SCHEMAS = new Map<string, ContractJsonSchemaDefinition>([
     {
       schema: portableProjectBundleSchema,
       invariants: runtimeOnly(
-        `file text limits follow files.$comment; project resource references, duplicate identities, and manifest parity follow projectResourcesSchema; ${agentResourceRules}; ${assertionRules}; source file parity and hashes require resolvePortableProject`,
+        `file text limits follow files.$comment; portable URLs exclude credentials, HTTP request URLs exclude query strings, credential fields and process environments use environment references; project resource references, duplicate identities, and manifest parity follow projectResourcesSchema; ${agentResourceRules}; ${assertionRules}; source file parity and hashes require resolvePortableProject`,
       ),
     },
   ],

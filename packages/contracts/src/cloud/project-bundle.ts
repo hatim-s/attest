@@ -1,5 +1,7 @@
 import { z } from 'zod';
 
+import { refinePortableCredentials } from './portable-credentials.js';
+
 import { projectResourcesSchema } from '../project/resources-snapshot.js';
 import { evalRunRequestSchema } from '../eval/run.js';
 
@@ -42,7 +44,9 @@ const portableProjectBundleSchema = z
         $comment: `Runtime-only invariants: files contain no NUL and use at most ${PORTABLE_MAX_FILE_BYTES / 1024 ** 2} MiB per file and ${PORTABLE_MAX_TOTAL_FILE_BYTES / 1024 ** 2} MiB total decoded UTF-8 bytes.`,
       }),
   })
-  .superRefine(({ files }, context) => {
+  .superRefine(({ files, resources }, context) => {
+    refinePortableCredentials(resources, context);
+
     if (Object.keys(files).length > PORTABLE_MAX_FILES)
       context.addIssue({
         code: 'custom',
