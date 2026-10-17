@@ -122,7 +122,7 @@ describe('RunStore', () => {
       const page = await store.listRuns({ cursor, limit: 1 });
       ids.push(...page.items.map((run) => run.id));
       cursor = page.nextCursor;
-    } while (cursor !== undefined);
+    } while (cursor !== undefined && ids.length < 4);
 
     expect(ids).toEqual(['c', 'b', 'a']);
     await expect(store.listRuns({ cursor: 'unknown' })).rejects.toMatchObject({

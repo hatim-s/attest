@@ -48,6 +48,7 @@ export {
 } from './internal/record-schema.js';
 
 export {
+  pageQuerySchema,
   DEFAULT_PAGE_LIMIT,
   MAX_PAGE_LIMIT,
   type PageQuery,

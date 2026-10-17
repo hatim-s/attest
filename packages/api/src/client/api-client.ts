@@ -7,6 +7,7 @@ import type {
   RunRecord,
 } from '@attest/core/records';
 import type { DashboardBootstrap } from '../contract/bootstrap.js';
+import type { apiRoutes, PathParams } from '../contract/routes.js';
 import { createHttpClient } from './http-client.js';
 import { createSnapshotClient } from './snapshot-client.js';
 
@@ -19,20 +20,17 @@ type ApiClientMode =
 type ApiClient = {
   mode: ApiClientMode;
   listRuns(query: PageQuery, options?: RequestOptions): Promise<RunPage>;
-  getRun(params: { runId: string }, options?: RequestOptions): Promise<RunRecord>;
+  getRun(params: PathParams<typeof apiRoutes.getRun>, options?: RequestOptions): Promise<RunRecord>;
   listCaseSummaries(
-    params: { runId: string },
+    params: PathParams<typeof apiRoutes.listCaseSummaries>,
     query: PageQuery,
     options?: RequestOptions,
   ): Promise<CaseSummaryPage>;
   getCase(
-    params: { runId: string; suiteName: string; caseId: string },
+    params: PathParams<typeof apiRoutes.getCase>,
     options?: RequestOptions,
   ): Promise<CaseRecord>;
-  getDiff(
-    params: { baseRunId: string; candidateRunId: string },
-    options?: RequestOptions,
-  ): Promise<RunDiff>;
+  getDiff(params: PathParams<typeof apiRoutes.getDiff>, options?: RequestOptions): Promise<RunDiff>;
 };
 
 type ApiClientConfig =

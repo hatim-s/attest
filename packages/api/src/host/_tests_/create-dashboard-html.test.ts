@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import type { DashboardBootstrap } from '../../contract/bootstrap.js';
 import { createDashboardHtml } from '../create-dashboard-html.js';
 
 const html = '<html><head><script type="module">boot()</script></head></html>';
@@ -6,12 +7,36 @@ const html = '<html><head><script type="module">boot()</script></head></html>';
 describe('createDashboardHtml', () => {
   it('injects the bootstrap before the deferred dashboard module', () => {
     const result = createDashboardHtml(html, { kind: 'http', baseUrl: '/api' });
-    expect(result.indexOf('__ATTEST_BOOTSTRAP__')).toBeLessThan(result.indexOf('boot()'));
+    expect(result).toContain('</script>\n    <script type="module">boot()');
     expect(result).toContain('{"kind":"http","baseUrl":"/api"}');
   });
   it('escapes script terminators and JavaScript line separators', () => {
     const result = createDashboardHtml(html, { kind: 'http', baseUrl: '</script>\u2028\u2029' });
     expect(result).toContain(String.raw`\u003c/script>\u2028\u2029`);
+    expect(result.match(/<\/script>/g)).toHaveLength(2);
+  });
+  it('inserts snapshot replacement patterns verbatim without opening a script terminator', () => {
+    const bootstrap: DashboardBootstrap = {
+      kind: 'snapshot',
+      snapshot: {
+        generatedAt: '2026-10-18T00:00:00.000Z',
+        run: {
+          id: 'run-one',
+          schemaId: 'attest.project',
+          configHash: 'hash',
+          configJson: "$' $& $` $$ </script>",
+          createdAt: '2026-10-18T00:00:00.000Z',
+          status: 'running',
+        },
+        cases: [],
+        truncated: false,
+      },
+    };
+
+    const result = createDashboardHtml(html, bootstrap);
+    const serialized = result.split('window.__ATTEST_BOOTSTRAP__=')[1]?.split(';</script>')[0];
+
+    expect(JSON.parse(serialized ?? 'null')).toEqual(bootstrap);
     expect(result.match(/<\/script>/g)).toHaveLength(2);
   });
   it('rejects HTML that cannot boot the dashboard', () => {
