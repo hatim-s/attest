@@ -25,7 +25,7 @@ const categoryAxis = (
   palette: ChartPalette,
   name: string,
   data: string[],
-  formatLabel?: (label: string) => string,
+  formatLabel?: (label: string, index: number) => string,
 ): XAXisComponentOption => ({
   type: 'category',
   name,

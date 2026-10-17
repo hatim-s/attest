@@ -9,12 +9,13 @@ const formatDateTime = (value: string | undefined): string => {
 };
 
 /** Month, day and time without the year, short enough for a chart tick. */
-const formatShortDateTime = (value: string): string =>
+const formatShortDateTime = (value: string, precision: 'minute' | 'second' = 'minute'): string =>
   new Date(value).toLocaleString(undefined, {
     month: 'short',
     day: 'numeric',
     hour: '2-digit',
     minute: '2-digit',
+    second: precision === 'second' ? '2-digit' : undefined,
   });
 
 /** Shows milliseconds under one second, seconds under one minute, then minutes and seconds. */

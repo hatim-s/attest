@@ -6,23 +6,43 @@ import {
   type ChartOptions,
   type ChartPalette,
 } from '../charts/use-chart.js';
-import { formatShortDateTime, shortId } from '../../lib/format.js';
+import { formatDateTime, formatShortDateTime, shortId } from '../../lib/format.js';
 
 type ChartRun = { id: string; createdAt: string; gitBranch?: string; gitSha?: string };
 
-/**
- * The first line is the tick; the tooltip shows every line. Categories repeat when two runs
- * start in the same minute, which a category axis handles by position.
- */
+/** The full run id keeps each category unique; the tooltip shows every line. */
 const describeRun = ({ id, createdAt, gitBranch, gitSha }: ChartRun): string =>
   [
-    formatShortDateTime(createdAt),
-    `Run ${shortId(id)}`,
+    formatDateTime(createdAt),
+    `Run ${id}`,
     gitBranch === undefined ? '' : `Branch ${gitBranch}`,
     gitSha === undefined ? '' : `Commit ${shortId(gitSha, 7)}`,
   ]
     .filter((line) => line !== '')
     .join('\n');
+
+type Tick = { run: ChartRun; label: string };
+
+/** Rewrites only the ticks whose label another tick in the same chart already uses. */
+const disambiguate = (ticks: Tick[], refine: (tick: Tick) => string): Tick[] => {
+  const seen = ticks.map(({ label }) => label);
+  const repeated = new Set(seen.filter((label, index) => seen.indexOf(label) !== index));
+
+  return ticks.map((tick) => (repeated.has(tick.label) ? { ...tick, label: refine(tick) } : tick));
+};
+
+/**
+ * Minute ticks by default. Runs that share a minute get seconds, and runs that still share a
+ * second get the end of their id, since ULIDs from the same second share their prefix.
+ */
+const runTickLabels = (runs: ChartRun[]): string[] => {
+  const minutes = runs.map((run) => ({ run, label: formatShortDateTime(run.createdAt) }));
+  const seconds = disambiguate(minutes, ({ run }) => formatShortDateTime(run.createdAt, 'second'));
+
+  return disambiguate(seconds, ({ run, label }) => `${label} · ${run.id.slice(-4)}`).map(
+    ({ label }) => label,
+  );
+};
 
 type AnalyticsChartProps = {
   title: string;
@@ -49,6 +69,7 @@ const AnalyticsChart = ({
   emptyMessage,
 }: AnalyticsChartProps) => {
   const labels = useMemo(() => runs.map(describeRun), [runs]);
+  const ticks = useMemo(() => runTickLabels(runs), [runs]);
 
   const option = useCallback(
     (palette: ChartPalette): ChartOptions => ({
@@ -63,7 +84,7 @@ const AnalyticsChart = ({
           return value === null || value === undefined ? 'Unscored' : formatValue(value);
         },
       },
-      xAxis: categoryAxis(palette, 'Run started', labels, (label) => label.split('\n')[0] ?? ''),
+      xAxis: categoryAxis(palette, 'Run started', labels, (_label, index) => ticks[index] ?? ''),
       yAxis: {
         ...valueAxis(palette, measure),
         min,
@@ -82,7 +103,7 @@ const AnalyticsChart = ({
         },
       ],
     }),
-    [labels, values, measure, formatValue, min, max],
+    [labels, ticks, values, measure, formatValue, min, max],
   );
 
   return (
@@ -94,4 +115,4 @@ const AnalyticsChart = ({
   );
 };
 
-export { AnalyticsChart, type ChartRun };
+export { AnalyticsChart, runTickLabels, type ChartRun };
