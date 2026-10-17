@@ -6,8 +6,7 @@ import { Kysely } from 'kysely';
 
 import {
   canonicalStringify,
-  DEFAULT_PAGE_LIMIT,
-  MAX_PAGE_LIMIT,
+  pageQuerySchema,
   type PageQuery,
   type RunPage,
   type CaseSummaryPage,
@@ -252,16 +251,15 @@ class SqliteRunStore implements RunStore {
   }
 
   #pageLimit(query: PageQuery): number {
-    const limit = query.limit ?? DEFAULT_PAGE_LIMIT;
+    const parsed = pageQuerySchema.shape.limit.safeParse(query.limit);
 
-    if (!Number.isInteger(limit) || limit < 1 || limit > MAX_PAGE_LIMIT) {
+    if (!parsed.success)
       throw new StoreError(
         'INVALID_LIMIT',
-        `Page limit must be an integer from 1 to ${MAX_PAGE_LIMIT}.`,
+        parsed.error.issues[0]?.message ?? parsed.error.message,
       );
-    }
 
-    return limit;
+    return parsed.data;
   }
 
   /** Rehydrates case blobs after the caller has established the parent run. */
@@ -313,26 +311,26 @@ class SqliteRunStore implements RunStore {
   }
 
   /** Returns a row-id cursor page without selecting request, response, trace, or diagnostic blobs. */
-  async listCaseSummaries(runId: string, options: PageQuery = {}): Promise<CaseSummaryPage> {
+  async listCaseSummaries(runId: string, query: PageQuery = {}): Promise<CaseSummaryPage> {
     await this.#getRunRow(runId);
-    const limit = this.#pageLimit(options);
+    const limit = this.#pageLimit(query);
 
-    if (options.cursor !== undefined) {
+    if (query.cursor !== undefined) {
       const cursor = await this.#database
         .selectFrom('cases')
         .select('run_id')
-        .where('id', '=', options.cursor)
+        .where('id', '=', query.cursor)
         .executeTakeFirst();
 
       if (cursor?.run_id !== runId) {
         throw new StoreError(
           'INVALID_CURSOR',
-          `Case summary cursor ${options.cursor} does not belong to run ${runId}.`,
+          `Case summary cursor ${query.cursor} does not belong to run ${runId}.`,
         );
       }
     }
 
-    let query = this.#database
+    let select = this.#database
       .selectFrom('cases')
       .select([
         'id',
@@ -349,8 +347,8 @@ class SqliteRunStore implements RunStore {
       .orderBy('id')
       .limit(limit + 1);
 
-    if (options.cursor !== undefined) query = query.where('id', '>', options.cursor);
-    const rows = await query.execute();
+    if (query.cursor !== undefined) select = select.where('id', '>', query.cursor);
+    const rows = await select.execute();
     const pageRows = rows.slice(0, limit);
 
     const metrics = await loadMetrics(
