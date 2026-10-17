@@ -200,10 +200,7 @@ describe('transactional project writer', () => {
     const changes = createFileChanges(loaded, preparedCandidate);
     const lock = await acquireProjectLock(root);
 
-    const prepared = await prepareTransaction(root, changes, {
-      projectHashBefore: loaded.projectHash,
-      projectHashAfter: preparedCandidate.projectHash,
-    });
+    const prepared = await prepareTransaction(root, changes);
 
     try {
       await expect(
@@ -232,10 +229,7 @@ describe('transactional project writer', () => {
     const changes = createFileChanges(loaded, preparedCandidate);
     const lock = await acquireProjectLock(root);
 
-    const prepared = await prepareTransaction(root, changes, {
-      projectHashBefore: loaded.projectHash,
-      projectHashAfter: preparedCandidate.projectHash,
-    });
+    const prepared = await prepareTransaction(root, changes);
 
     try {
       await publishPreparedTransaction(root, prepared);
@@ -262,10 +256,7 @@ describe('transactional project writer', () => {
     const changes = createFileChanges(loaded, preparedCandidate);
     const lock = await acquireProjectLock(root);
 
-    const prepared = await prepareTransaction(root, changes, {
-      projectHashBefore: loaded.projectHash,
-      projectHashAfter: preparedCandidate.projectHash,
-    });
+    const prepared = await prepareTransaction(root, changes);
 
     const externalBytes = '{"authored":"outside-attest"}\n';
 

@@ -1,11 +1,11 @@
-import { dirname } from 'node:path';
-import { syncPath } from '../internal/sync-path.js';
 import { randomUUID } from 'node:crypto';
 import { readFile, rename, unlink, writeFile } from 'node:fs/promises';
+import { dirname } from 'node:path';
 
 import { z } from 'zod';
 
 import { LocalError } from '../errors/index.js';
+import { syncPath } from '../internal/sync-path.js';
 import { errnoCode } from '../internal/errno-code.js';
 import { discoverProject, type DiscoverProjectOptions } from '../project/discover-project.js';
 import { resolveContainedPath } from '../project/project-path.js';
@@ -52,13 +52,16 @@ const readCloudLink = async (root: string): Promise<CloudLink | undefined> => {
   }
 };
 
+/** Keeps direct writes and recoverable completion byte-identical. */
+const serializeCloudLink = (link: CloudLink): string => `${JSON.stringify(link, null, 2)}\n`;
+
 /** Atomically saves project identity and the exact last synchronized file hashes. */
 const writeCloudLink = async (root: string, link: CloudLink): Promise<void> => {
   const path = await cloudLinkPath(root, true);
   const temporary = `${path}.${randomUUID()}.tmp`;
 
   try {
-    await writeFile(temporary, `${JSON.stringify(link, null, 2)}\n`, {
+    await writeFile(temporary, serializeCloudLink(link), {
       flag: 'wx',
       mode: 0o600,
     });
@@ -145,6 +148,7 @@ export {
   readCloudLink,
   resolveCloudProject,
   writeCloudLink,
+  serializeCloudLink,
   type CloudLink,
   type CloudProjectOptions,
 };

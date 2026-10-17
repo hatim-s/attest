@@ -212,14 +212,10 @@ describe('cloud pull crash recovery', () => {
       const lock = await acquireProjectLock(root);
 
       try {
-        const transaction = await prepareTransaction(
-          root,
-          [
-            { path: 'attest/code.ts', type: 'write', contents: 'new code' },
-            { path: 'attest.project.json', type: 'write', contents: 'unchanged manifest' },
-          ],
-          { projectHashBefore: 'old-revision', projectHashAfter: 'new-revision' },
-        );
+        const transaction = await prepareTransaction(root, [
+          { path: 'attest/code.ts', type: 'write', contents: 'new code' },
+          { path: 'attest.project.json', type: 'write', contents: 'unchanged manifest' },
+        ]);
 
         if (phase === 'partial') {
           await expect(
@@ -281,8 +277,6 @@ it.each(['changed', 'unchanged'])(
           { type: 'write', path: 'attest.project.json', contents: manifest },
         ],
         {
-          projectHashBefore: 'before',
-          projectHashAfter: 'after',
           completion: { path: '.attest/cloud.json', contents: JSON.stringify(after) },
         },
       );

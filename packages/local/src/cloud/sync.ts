@@ -6,6 +6,7 @@ import { resolvePortableProject } from '@attest/core';
 import { z } from 'zod';
 
 import { LocalError } from '../errors/index.js';
+import { discoverProject } from '../project/discover-project.js';
 import { loadProject, type LoadedProject } from '../project/project-loader/index.js';
 import { acquireProjectLock, releaseProjectLock } from '../project/transaction/project-lock.js';
 import { resolveSafeProjectPath } from '../project/transaction/project-path.js';
@@ -17,10 +18,9 @@ import {
 } from '../project/transaction/transaction-journal.js';
 import { runPreparedTransaction } from '../project/transaction/transactional-writer.js';
 import {
-  readCloudLink,
   resolveCloudProject,
   writeCloudLink,
-  type CloudLink,
+  serializeCloudLink,
   type CloudProjectOptions,
 } from './link.js';
 
@@ -113,30 +113,16 @@ const createCloudBundle = async (project: LoadedProject): Promise<PortableProjec
   return parsed.data;
 };
 
-/** Rejects a link changed while the operation was waiting for the project lock. */
-const requireUnchangedLink = async (root: string, expected: CloudLink): Promise<CloudLink> => {
-  const current = await readCloudLink(root);
-
-  if (JSON.stringify(current) !== JSON.stringify(expected)) {
-    throw new LocalError(
-      'project_changed',
-      'Cloud link changed during synchronization. Retry the command.',
-    );
-  }
-
-  return expected;
-};
-
 /** Uploads an immutable revision after explicit acknowledgement that its authored files contain no secrets. */
 const pushCloudProject = async (
   options: CloudProjectOptions & { acknowledgeNoSecrets?: boolean },
 ) => {
-  const { root, link: initialLink, projectId } = await resolveCloudProject(options);
+  const { root } = await discoverProject(options);
   const lock = await acquireProjectLock(root);
 
   try {
     await recoverProjectTransactions(root, lock);
-    const link = await requireUnchangedLink(root, initialLink);
+    const { link, projectId } = await resolveCloudProject(options);
     const bundle = await createCloudBundle(await loadProject({ project: root }));
     const hashes = fileHashes(bundle.files);
 
@@ -235,40 +221,42 @@ const planPullChanges = async (
 
 /** Pulls one validated revision using the existing recoverable transaction journal. */
 const pullCloudProject = async (options: CloudProjectOptions & { revisionId?: string }) => {
-  const { root, link, projectId } = await resolveCloudProject(options);
-
-  const selected =
-    options.revisionId === undefined ? 'current' : encodeURIComponent(options.revisionId);
-
-  const response = parseCloudResponse(
-    revisionBundleSchema,
-    await options.client.request(
-      'GET',
-      `/v1/projects/${encodeURIComponent(projectId)}/revisions/${selected}`,
-    ),
-  );
-
-  if (
-    response.revision.project_id !== projectId ||
-    (options.revisionId !== undefined && response.revision.id !== options.revisionId)
-  ) {
-    throw new LocalError('project_invalid', 'Cloud returned a different project or revision.');
-  }
-
-  resolvePortableProject(response.bundle);
+  const { root } = await discoverProject(options);
   const lock = await acquireProjectLock(root);
 
   try {
     await recoverProjectTransactions(root, lock);
-    await requireUnchangedLink(root, link);
+    const { link, projectId } = await resolveCloudProject(options);
+
+    const selected =
+      options.revisionId === undefined ? 'current' : encodeURIComponent(options.revisionId);
+
+    const response = parseCloudResponse(
+      revisionBundleSchema,
+      await options.client.request(
+        'GET',
+        `/v1/projects/${encodeURIComponent(projectId)}/revisions/${selected}`,
+      ),
+    );
+
+    if (
+      response.revision.project_id !== projectId ||
+      (options.revisionId !== undefined && response.revision.id !== options.revisionId)
+    ) {
+      throw new LocalError('project_invalid', 'Cloud returned a different project or revision.');
+    }
+
+    resolvePortableProject(response.bundle);
     const changes = await planPullChanges(root, link.file_hashes, response.bundle.files);
 
     const prepared = await prepareTransaction(root, changes, {
-      projectHashBefore: link.revision_id ?? '',
-      projectHashAfter: response.revision.id,
       completion: {
         path: '.attest/cloud.json',
-        contents: `${JSON.stringify({ ...link, revision_id: response.revision.id, file_hashes: fileHashes(response.bundle.files) }, null, 2)}\n`,
+        contents: serializeCloudLink({
+          ...link,
+          revision_id: response.revision.id,
+          file_hashes: fileHashes(response.bundle.files),
+        }),
       },
     });
 

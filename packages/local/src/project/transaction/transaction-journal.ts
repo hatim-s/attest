@@ -85,8 +85,6 @@ const transactionJournalSchema = z
     ),
     entries: z.array(transactionJournalEntrySchema).min(1),
     manifest_path: z.literal('attest.project.json'),
-    project_hash_after: z.string(),
-    project_hash_before: z.string(),
     published_count: z.number().int().nonnegative(),
     schema: z.literal(TRANSACTION_JOURNAL_SCHEMA),
     status: z.enum(['committed', 'prepared', 'publishing', 'rolled_back', 'rolling_back']),
@@ -201,10 +199,8 @@ const prepareTransaction = async (
   root: string,
   changes: readonly TransactionFileChange[],
   options: {
-    projectHashBefore: string;
-    projectHashAfter: string;
     completion?: { path: '.attest/cloud.json'; contents: string };
-  },
+  } = {},
 ): Promise<PreparedTransaction> => {
   const transactionId = randomUUID();
 
@@ -267,8 +263,6 @@ const prepareTransaction = async (
       created_at: new Date().toISOString(),
       status: 'prepared',
       manifest_path: 'attest.project.json',
-      project_hash_before: options.projectHashBefore,
-      project_hash_after: options.projectHashAfter,
       published_count: 0,
       created_directories: await missingParentDirectories(
         root,

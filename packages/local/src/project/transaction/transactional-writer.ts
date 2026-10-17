@@ -1,6 +1,7 @@
 import { mkdir, rename, unlink } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 
+import { LocalError } from '../../errors/index.js';
 import { syncPath } from '../../internal/sync-path.js';
 import type { LoadedProject } from '../project-loader/index.js';
 import { loadProject } from '../project-loader/index.js';
@@ -209,7 +210,7 @@ const rollbackAfterFailure = async (
     );
   }
 
-  if (cause instanceof ProjectTransactionError) {
+  if (cause instanceof LocalError) {
     throw cause;
   }
 
@@ -243,6 +244,7 @@ const runPreparedTransaction = async (options: {
   }
 
   try {
+    await completePreparedTransaction(root, prepared);
     await cleanupPreparedTransaction(root, prepared);
   } catch (cause: unknown) {
     throw new ProjectTransactionError(
@@ -279,10 +281,7 @@ const applyProjectMutation = async (
       return { ...state.result, committed: true };
     }
 
-    const prepared = await prepareTransaction(request.projectRoot, changes, {
-      projectHashBefore: state.before.projectHash,
-      projectHashAfter: state.after.projectHash,
-    });
+    const prepared = await prepareTransaction(request.projectRoot, changes);
 
     await runPreparedTransaction({
       root: request.projectRoot,

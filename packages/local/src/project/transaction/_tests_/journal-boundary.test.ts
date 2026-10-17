@@ -31,11 +31,9 @@ it.each(['backup', 'directory', 'identity', 'duplicate', 'write', 'remove'])(
     const lock = await acquireProjectLock(root);
 
     try {
-      const prepared = await prepareTransaction(
-        root,
-        [{ type: 'write', path: 'attest.project.json', contents: 'new' }],
-        { projectHashBefore: 'before', projectHashAfter: 'after' },
-      );
+      const prepared = await prepareTransaction(root, [
+        { type: 'write', path: 'attest.project.json', contents: 'new' },
+      ]);
 
       const journal = prepared.journal;
       const entry = journal.entries[0]!;
@@ -97,7 +95,7 @@ it('rejects symlinked state at .attest/transactions', async () => {
     await expect(recoverProjectTransactions(root, lock)).rejects.toMatchObject({
       code: 'project_recovery_required',
     });
-    await expect(prepareTransaction(root, [], { projectHashBefore: 'before', projectHashAfter: 'after' })).rejects.toMatchObject({
+    await expect(prepareTransaction(root, [])).rejects.toMatchObject({
       code: 'project_invalid',
     });
   } finally {
