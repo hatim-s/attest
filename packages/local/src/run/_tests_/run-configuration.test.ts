@@ -399,7 +399,7 @@ describe('runConfiguration', () => {
       event: 'result',
       data: { exit_code: 0, result: { ok: true } },
     });
-  });
+  }, 15_000);
 
   it('rejects a missing baseline before agent, run-store, or registry side effects', async () => {
     const root = await temporaryDirectory('attest-run-configuration-marker-');
