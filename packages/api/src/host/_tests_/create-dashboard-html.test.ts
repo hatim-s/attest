@@ -6,7 +6,7 @@ const html = '<html><head><script type="module">boot()</script></head></html>';
 describe('createDashboardHtml', () => {
   it('injects the bootstrap before the deferred dashboard module', () => {
     const result = createDashboardHtml(html, { kind: 'http', baseUrl: '/api' });
-    expect(result.indexOf('__ATTEST_BOOTSTRAP__')).toBeLessThan(result.indexOf('boot()'));
+    expect(result).toContain('</script>\n    <script type="module">boot()');
     expect(result).toContain('{"kind":"http","baseUrl":"/api"}');
   });
   it('escapes script terminators and JavaScript line separators', () => {
