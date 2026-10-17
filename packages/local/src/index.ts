@@ -5,4 +5,4 @@ export {
   type ResourceListResult,
 } from './commands/shared/command-result.js';
 
-export { LocalError } from './errors/index.js';
+export { LocalError, type LocalErrorCode } from './errors/index.js';
