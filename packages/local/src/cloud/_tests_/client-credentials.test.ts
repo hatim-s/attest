@@ -35,14 +35,18 @@ describe('cloud trust boundaries', () => {
       fetch: fetcher,
     });
 
-    await expect(client.request('GET', '//other.example.test/v1/session')).rejects.toMatchObject({
+    await expect(
+      client.request('GET', '//other.example.test/v1/session', { schema: z.unknown() }),
+    ).rejects.toMatchObject({
       code: 'cli_usage',
     });
-    await expect(client.request('GET', '/v1/../../secrets')).rejects.toMatchObject({
+    await expect(
+      client.request('GET', '/v1/../../secrets', { schema: z.unknown() }),
+    ).rejects.toMatchObject({
       code: 'cli_usage',
     });
     expect(fetcher).not.toHaveBeenCalled();
-    await client.request('GET', '/v1/session');
+    await client.request('GET', '/v1/session', { schema: z.unknown() });
     expect(fetcher.mock.calls[0]?.[1]).toMatchObject({
       redirect: 'error',
     });
@@ -62,7 +66,9 @@ describe('cloud trust boundaries', () => {
         ),
     });
 
-    await expect(client.request('GET', '/v1/session')).rejects.toMatchObject({
+    await expect(
+      client.request('GET', '/v1/session', { schema: z.unknown() }),
+    ).rejects.toMatchObject({
       code: 'cloud_request_failed',
       message: 'Cloud request failed (403, quota_exceeded).',
       details: { remote_code: 'quota_exceeded', status: 403 },
@@ -75,7 +81,9 @@ describe('cloud trust boundaries', () => {
       fetch: vi.fn<typeof fetch>().mockResolvedValue(new Response('invalid-json')),
     });
 
-    await expect(client.request('GET', '/v1/session')).rejects.toMatchObject({
+    await expect(
+      client.request('GET', '/v1/session', { schema: z.unknown() }),
+    ).rejects.toMatchObject({
       code: 'cloud_request_failed',
       message: 'Cloud returned an invalid JSON response.',
     });

@@ -1,3 +1,4 @@
+import { linkedProjectSchema } from './protocol.js';
 import { randomUUID } from 'node:crypto';
 import { readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
@@ -100,13 +101,13 @@ const resolveCloudProject = async (options: CloudProjectOptions) => {
 const linkCloudProject = async (options: CloudProjectOptions & { projectId: string }) => {
   const { root } = await discoverProject(options);
 
-  const response = z
-    .object({ project: z.object({ id: z.string() }) })
-    .safeParse(
-      await options.client.request('GET', `/v1/projects/${encodeURIComponent(options.projectId)}`),
-    );
+  const response = await options.client.request(
+    'GET',
+    `/v1/projects/${encodeURIComponent(options.projectId)}`,
+    { schema: linkedProjectSchema },
+  );
 
-  if (!response.success || response.data.project.id !== options.projectId) {
+  if (response.project.id !== options.projectId) {
     throw new LocalError('cloud_request_failed', 'Cloud returned a different or invalid project.');
   }
 
