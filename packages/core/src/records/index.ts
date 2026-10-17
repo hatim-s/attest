@@ -33,3 +33,5 @@ export {
   type CaseVerdict,
   type StoredMetricEvaluation,
 } from '../store/types.js';
+
+export { caseRecordVerdict } from '../store/case-summary.js';
