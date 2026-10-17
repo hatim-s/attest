@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { getRouteApi, Outlet, useNavigate } from '@tanstack/react-router';
+import { getRouteApi, Outlet } from '@tanstack/react-router';
 import { useRun, useCases } from '../api/queries.js';
 import { CaseTable } from '../components/cases/case-table.js';
 import { DistributionCharts } from '../components/runs/distribution-charts.js';
@@ -12,7 +12,6 @@ const route = getRouteApi('/runs/$runId');
 const RunPage = () => {
   const { runId } = route.useParams();
   const { tab } = route.useSearch();
-  const navigate = useNavigate();
   const runQuery = useRun(runId);
   const casesQuery = useCases(runId, runQuery.data?.status);
   const cases = casesQuery.data?.pages.flatMap((page) => page.items) ?? [];
@@ -45,13 +44,7 @@ const RunPage = () => {
                   hasNextPage={casesQuery.hasNextPage}
                   isFetchingNextPage={casesQuery.isFetchingNextPage}
                   onLoadMore={() => void casesQuery.fetchNextPage()}
-                  onSelect={(item) =>
-                    void navigate({
-                      to: '/runs/$runId/cases/$suiteName/$caseId',
-                      params: { runId, suiteName: item.suiteName, caseId: item.caseId },
-                      search: (previous) => ({ ...previous, tab: previous.tab ?? 'cases' }),
-                    })
-                  }
+                  runId={runId}
                 />
               ) : null}
               {!casesQuery.isLoading && cases.length === 0 ? (

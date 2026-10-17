@@ -1,4 +1,4 @@
-import { Outlet, useMatch, useNavigate } from '@tanstack/react-router';
+import { Outlet, useMatch } from '@tanstack/react-router';
 import { useRuns } from '../api/queries.js';
 import { RunList } from '../components/runs/run-list.js';
 
@@ -12,18 +12,23 @@ const RunsLayout = () => {
     shouldThrow: false,
   });
 
-  const navigate = useNavigate();
+  const runsMatch = useMatch({ from: '/runs', shouldThrow: false });
+  const { branch, label } = runsMatch?.search ?? {};
+
+  const runs = (runsQuery.data ?? []).filter(
+    (run) =>
+      (branch === undefined || run.gitBranch === branch) &&
+      (label === undefined ||
+        Object.entries(run.labels ?? {}).some(([key, value]) => label === `${key}=${value}`)),
+  );
 
   return (
     <div className="workspace">
       <RunList
         error={runsQuery.error}
         isLoading={runsQuery.isLoading}
-        runs={runsQuery.data ?? []}
+        runs={runs}
         selectedRunId={runMatch?.params.runId ?? compareMatch?.params.candidateRunId}
-        onSelect={(runId) =>
-          void navigate({ to: '/runs/$runId', params: { runId }, search: { tab: 'cases' } })
-        }
       />
       <main className="main-content">
         <Outlet />

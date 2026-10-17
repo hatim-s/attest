@@ -1,3 +1,4 @@
+import { Link } from '@tanstack/react-router';
 import type { RunRecord } from '@attest/core/records';
 import { formatDateTime, formatPassRate, shortId } from '../../lib/format.js';
 import { Badge, ErrorNotice, Loading } from '../shared/ui.js';
@@ -5,13 +6,12 @@ import { Badge, ErrorNotice, Loading } from '../shared/ui.js';
 type RunListProps = {
   error: unknown;
   isLoading: boolean;
-  onSelect: (runId: string) => void;
   runs: RunRecord[];
   selectedRunId?: string;
 };
 
 /** Sidebar of recent runs. The selected run carries `aria-current="page"`. */
-const RunList = ({ error, isLoading, onSelect, runs, selectedRunId }: RunListProps) => (
+const RunList = ({ error, isLoading, runs, selectedRunId }: RunListProps) => (
   <aside className="run-sidebar" aria-label="Evaluation runs">
     <div className="run-sidebar-heading">
       <div>
@@ -29,12 +29,13 @@ const RunList = ({ error, isLoading, onSelect, runs, selectedRunId }: RunListPro
     ) : null}
     <div className="run-list">
       {runs.map((run) => (
-        <button
+        <Link
           aria-current={selectedRunId === run.id ? 'page' : undefined}
           className="run-list-item"
           key={run.id}
-          onClick={() => onSelect(run.id)}
-          type="button"
+          to="/runs/$runId"
+          params={{ runId: run.id }}
+          search={(previous) => ({ ...previous, tab: 'cases' })}
         >
           <span className="run-list-row">
             <span className="run-id">{shortId(run.id)}</span>
@@ -44,7 +45,7 @@ const RunList = ({ error, isLoading, onSelect, runs, selectedRunId }: RunListPro
             <span>{formatDateTime(run.createdAt)}</span>
             <span>{formatPassRate(run)}</span>
           </span>
-        </button>
+        </Link>
       ))}
     </div>
   </aside>
