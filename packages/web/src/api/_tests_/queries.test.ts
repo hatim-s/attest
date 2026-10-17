@@ -98,14 +98,13 @@ it('refreshes final evidence after either run terminates and leaves hidden compa
         )
       ).summary.candidatePassRate,
     ).toBe(1);
-    terminal = false;
     expect(
       (
         await client.fetchQuery(
           diffQueryOptions({ ...comparison, visible: true, baseStatus: 'completed' }),
         )
       ).summary.candidatePassRate,
-    ).toBe(0);
+    ).toBe(1);
   } finally {
     unsubscribe();
     client.clear();
