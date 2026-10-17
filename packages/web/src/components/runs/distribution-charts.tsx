@@ -61,23 +61,36 @@ const useChart = (
   containerRef: RefObject<HTMLDivElement | null>,
   createOption: (palette: ChartPalette) => EChartsCoreOption,
 ): void => {
+  const chartRef = useRef<ReturnType<typeof init> | null>(null);
+  const optionRef = useRef(createOption);
+
   useEffect(() => {
     const container = containerRef.current;
 
     if (container === null) return;
     const chart = init(container);
-    chart.setOption(createOption(readPalette()));
+    chartRef.current = chart;
     const resizeObserver = new ResizeObserver(() => chart.resize());
     resizeObserver.observe(container);
-    const themeObserver = new MutationObserver(() => chart.setOption(createOption(readPalette())));
+
+    const themeObserver = new MutationObserver(() =>
+      chart.setOption(optionRef.current(readPalette())),
+    );
+
     themeObserver.observe(document.documentElement, { attributeFilter: ['data-theme'] });
 
     return () => {
       themeObserver.disconnect();
       resizeObserver.disconnect();
+      chartRef.current = null;
       chart.dispose();
     };
-  }, [containerRef, createOption]);
+  }, [containerRef]);
+
+  useEffect(() => {
+    optionRef.current = createOption;
+    chartRef.current?.setOption(createOption(readPalette()));
+  }, [createOption]);
 };
 
 /** Renders the score histogram and verdict pie for the loaded cases. */
