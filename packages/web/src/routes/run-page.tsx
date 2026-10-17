@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { getRouteApi, Outlet } from '@tanstack/react-router';
-import { useRun, useCases } from '../api/queries.js';
+import { useRun, useCases, useRunSuites } from '../api/queries.js';
+import { SuiteTable } from '../components/runs/suite-table.js';
 import { CaseTable } from '../components/cases/case-table.js';
 import { DistributionCharts } from '../components/runs/distribution-charts.js';
 import { ErrorNotice, Loading } from '../components/shared/ui.js';
@@ -13,6 +14,7 @@ const RunPage = () => {
   const { runId } = route.useParams();
   const { tab } = route.useSearch();
   const runQuery = useRun(runId);
+  const suitesQuery = useRunSuites(tab === 'suites' ? runId : undefined, runQuery.data?.status);
   const casesQuery = useCases(runId, runQuery.data?.status);
   const cases = casesQuery.data?.pages.flatMap((page) => page.items) ?? [];
   useEffect(() => {
@@ -49,6 +51,18 @@ const RunPage = () => {
               ) : null}
               {!casesQuery.isLoading && cases.length === 0 ? (
                 <div className="empty-compact">This run has no recorded cases.</div>
+              ) : null}
+            </section>
+          ) : null}
+          {tab === 'suites' ? (
+            <section aria-label="Suites">
+              {run.status === 'running' ? (
+                <p className="empty-compact">This run is running. Suite numbers are partial.</p>
+              ) : null}
+              {suitesQuery.isLoading ? <Loading label="Loading suites" /> : null}
+              {suitesQuery.error !== null ? <ErrorNotice error={suitesQuery.error} /> : null}
+              {suitesQuery.data !== undefined ? (
+                <SuiteTable suites={suitesQuery.data.suites} />
               ) : null}
             </section>
           ) : null}

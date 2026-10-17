@@ -114,7 +114,26 @@ const useCase = (selection: CaseSelection) => useQuery(caseQueryOptions(useApiCl
 const useDiff = (selection: ComparisonSelection) =>
   useQuery(diffQueryOptions(useApiClient(), selection));
 
+/** Status is part of the cache key so completion refreshes the final suite totals. */
+const runSuitesQueryOptions = (
+  client: ApiClient,
+  runId: string | undefined,
+  status: RunStatus | undefined,
+) =>
+  queryOptions({
+    queryKey: ['run-suites', runId, status],
+    queryFn: ({ signal }) => client.listRunSuites({ runId: runId ?? '' }, { signal }),
+    enabled: runId !== undefined,
+    refetchInterval: client.mode.kind === 'live' && status === 'running' ? 2_000 : false,
+  });
+
+/** Shares suite totals between a run and the evals index. */
+const useRunSuites = (runId: string | undefined, status: RunStatus | undefined) =>
+  useQuery(runSuitesQueryOptions(useApiClient(), runId, status));
+
 export {
+  runSuitesQueryOptions,
+  useRunSuites,
   runsQueryOptions,
   caseQueryOptions,
   diffQueryOptions,

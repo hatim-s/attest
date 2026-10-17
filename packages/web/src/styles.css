@@ -954,3 +954,28 @@ a.case-table-row {
 a.button-primary {
   color: var(--surface);
 }
+
+.analytics-table-scroll {
+  overflow-x: auto;
+}
+.analytics-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.analytics-table caption {
+  text-align: left;
+  padding: 12px;
+  color: var(--muted);
+}
+.analytics-table th,
+.analytics-table td {
+  padding: 10px 12px;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.analytics-table thead {
+  background: var(--surface-muted);
+}

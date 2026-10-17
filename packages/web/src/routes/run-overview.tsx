@@ -12,7 +12,7 @@ const RunOverview = ({
   tab,
 }: {
   run: RunRecord;
-  tab: 'cases' | 'distributions' | 'compare';
+  tab: 'cases' | 'distributions' | 'suites' | 'compare';
 }) => {
   const { mode } = useApiClient();
   const runsQuery = useRuns();
@@ -43,7 +43,7 @@ const RunOverview = ({
         </section>
       ) : null}
       <div className="tabs" role="tablist">
-        {(['cases', 'distributions'] as const).map((id) => (
+        {(['cases', 'distributions', 'suites'] as const).map((id) => (
           <Link
             key={id}
             to="/runs/$runId"
@@ -57,6 +57,8 @@ const RunOverview = ({
               <>
                 Cases<span>{run.summary?.totalCases ?? 0}</span>
               </>
+            ) : id === 'suites' ? (
+              'Suites'
             ) : (
               'Distributions'
             )}

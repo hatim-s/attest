@@ -61,6 +61,12 @@ it('parses search once and falls back to cases for unsupported tabs', async () =
       search: { tab: 'distributions' },
     });
     expect(router.state.matches.at(-1)?.search).toMatchObject({ tab: 'distributions' });
+    await router.navigate({
+      to: '/runs/$runId',
+      params: { runId: run.id },
+      search: { tab: 'suites' },
+    });
+    expect(router.state.matches.at(-1)?.search).toMatchObject({ tab: 'suites' });
   } finally {
     queryClient.clear();
     history.destroy();

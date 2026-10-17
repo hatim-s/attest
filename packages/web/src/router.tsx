@@ -29,7 +29,9 @@ const runsSearchSchema = z.object({
     .catch(undefined),
 });
 
-const runSearchSchema = z.object({ tab: z.enum(['cases', 'distributions']).catch('cases') });
+const runSearchSchema = z.object({
+  tab: z.enum(['cases', 'distributions', 'suites']).catch('cases'),
+});
 
 const rootRoute = createRootRouteWithContext<RouterContext>()({
   component: RootLayout,
