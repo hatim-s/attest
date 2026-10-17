@@ -46,7 +46,7 @@ const RootLayout = () => {
           <span className="brand-mark">A</span>
           <div>
             <strong>attest</strong>
-            <span>local evaluations</span>
+            <span>evaluations</span>
           </div>
         </div>
         <div className="topbar-actions">
