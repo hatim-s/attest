@@ -74,8 +74,6 @@ const packRelease = async (): Promise<void> => {
       }
 
       // Consumers receive compiled code and never need the monorepo build toolchain.
-      // The local testing entry point belongs to workspace tests, which are excluded from archives.
-      if (directory === 'local') delete manifest.exports?.['./testing'];
       delete manifest.scripts;
       delete manifest.devDependencies;
       await writeFile(join(staged, 'package.json'), `${JSON.stringify(manifest, null, 2)}\n`);
