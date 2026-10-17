@@ -59,7 +59,7 @@ Local exposes focused entry points: `/agent`, `/metric`, `/test`, `/project`, `/
 
 ## Browser and artifacts
 
-`@attest/web` supplies the same dashboard for the live local server and static reports. Domain types come from core through type-only imports. Browser code must not import runtime, local, CLI, or Node modules. The browser-safe
+`@attest/web` supplies the same dashboard for the live local server and static reports. Dashboard routes use hash history so file-based reports can link to runs, cases and comparisons without a server rewrite. Domain types come from core through type-only imports. Browser code must not import runtime, local, CLI, or Node modules. The browser-safe
 `@attest/core/records` entry point exposes record, summary and comparison schemas
 without importing persistence, hashing or execution code. Servers and browsers
 validate their shared response projections through these owner schemas.

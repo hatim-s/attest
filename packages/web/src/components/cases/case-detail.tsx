@@ -49,7 +49,7 @@ type CaseDetailProps = {
   error: unknown;
   isLoading: boolean;
   onClose: () => void;
-  selected: CaseSummary;
+  selected: Pick<CaseSummary, 'suiteName' | 'caseId'> & Partial<CaseSummary>;
 };
 
 /** Side drawer with the metrics, request, response, trace, and warnings for one case. */
@@ -95,11 +95,15 @@ const CaseDetail = ({ caseRecord, error, isLoading, onClose, selected }: CaseDet
             Close
           </Button>
         </header>
-        <div className="drawer-meta">
-          <Badge tone={selected.verdict}>{selected.verdict}</Badge>
-          <span>{formatDuration(selected.durationMs)}</span>
-          <span>{selected.outcome}</span>
-        </div>
+        {caseRecord !== undefined ? (
+          <div className="drawer-meta">
+            {selected.verdict !== undefined ? (
+              <Badge tone={selected.verdict}>{selected.verdict}</Badge>
+            ) : null}
+            <span>{formatDuration(caseRecord.durationMs)}</span>
+            <span>{caseRecord.outcome}</span>
+          </div>
+        ) : null}
         {isLoading ? <Loading label="Loading case evidence" /> : null}
         {error !== null && error !== undefined ? <ErrorNotice error={error} /> : null}
         {caseRecord !== undefined ? (

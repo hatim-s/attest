@@ -5,16 +5,16 @@ import { queryOptions, useInfiniteQuery, useQuery, useQueryClient } from '@tanst
 import type { RunStatus } from '@attest/core/records';
 import { useApiClient } from './api-client-context.js';
 
-/** Polls recent runs in the live dashboard and keeps static reports offline. */
-const useRuns = () => {
-  const client = useApiClient();
-
-  return useQuery({
+/** Shares the newest-first page between the index redirect and the polling sidebar. */
+const runsQueryOptions = (client: ApiClient) =>
+  queryOptions({
     queryKey: ['runs'],
     queryFn: async ({ signal }) => (await client.listRuns({}, { signal })).items,
     refetchInterval: client.mode.kind === 'live' ? 5_000 : false,
   });
-};
+
+/** Keeps the sidebar current without polling file-based reports. */
+const useRuns = () => useQuery(runsQueryOptions(useApiClient()));
 
 /** Loads one run and keeps polling only while it is still executing. */
 const useRun = (runId: string | undefined) => {
@@ -114,4 +114,13 @@ const useCase = (selection: CaseSelection) => useQuery(caseQueryOptions(useApiCl
 const useDiff = (selection: ComparisonSelection) =>
   useQuery(diffQueryOptions(useApiClient(), selection));
 
-export { caseQueryOptions, diffQueryOptions, useCase, useCases, useDiff, useRun, useRuns };
+export {
+  runsQueryOptions,
+  caseQueryOptions,
+  diffQueryOptions,
+  useCase,
+  useCases,
+  useDiff,
+  useRun,
+  useRuns,
+};
