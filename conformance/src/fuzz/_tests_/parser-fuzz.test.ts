@@ -48,12 +48,16 @@ const metricResult = parseMetricResult(seed('metric-result', '01-valid-pass.json
 
 if (!response.ok || !metricRequest.ok || !metricResult.ok) throw new Error('Invalid fuzz seed');
 
+const tracePaths = ['spans.0.span_id', 'spans.0.start_time', 'spans.0.name'];
+
+const embeddedTracePaths = tracePaths.map((path) => `trace.${path}`);
+
 const parsers = [
-  ['parseAgentRequest', parseAgentRequest, request],
-  ['parseAgentResponse', parseAgentResponse, response.value],
-  ['parseMetricRequest', parseMetricRequest, metricRequest.value],
-  ['parseMetricResult', parseMetricResult, metricResult.value],
-  ['parseTrace', parseTrace, trace],
+  ['parseAgentRequest', parseAgentRequest, request, []],
+  ['parseAgentResponse', parseAgentResponse, { ...response.value, trace }, embeddedTracePaths],
+  ['parseMetricRequest', parseMetricRequest, { ...metricRequest.value, trace }, embeddedTracePaths],
+  ['parseMetricResult', parseMetricResult, metricResult.value, []],
+  ['parseTrace', parseTrace, trace, tracePaths],
 ] as const;
 
 const noise = fc.oneof(
@@ -76,15 +80,31 @@ const deepPayload = fc
   });
 
 describe.skipIf(process.env.FUZZ !== '1')('contract parser properties (set FUZZ=1 to run)', () => {
-  it.each(parsers)('%s returns a result for JSON and non-JSON input', (_name, parse, document) => {
-    fc.assert(
-      fc.property(fc.constantFrom(...Object.keys(document)), noise, (key, candidate) => {
-        expect(parse(candidate).ok).toBeTypeOf('boolean');
-        expect(parse({ ...document, [key]: candidate }).ok).toBeTypeOf('boolean');
-      }),
-      options,
-    );
-  });
+  it.each(parsers)(
+    '%s returns a result for JSON and non-JSON input',
+    (_name, parse, document, nestedPaths) => {
+      fc.assert(
+        fc.property(
+          fc.constantFrom(...Object.keys(document), ...nestedPaths),
+          noise,
+          (path, candidate) => {
+            const field = path.slice(path.lastIndexOf('.') + 1);
+            const spans = [{ ...span, [field]: candidate }, ...trace.spans.slice(1)];
+            let mutated = { ...document, [path]: candidate };
+
+            if (path.startsWith('spans.')) mutated = { ...document, spans };
+
+            if (path.startsWith('trace.spans.'))
+              mutated = { ...document, trace: { ...trace, spans } };
+
+            expect(parse(candidate).ok).toBeTypeOf('boolean');
+            expect(parse(mutated).ok).toBeTypeOf('boolean');
+          },
+        ),
+        options,
+      );
+    },
+  );
 
   it('requires exactly one agent outcome for every JSON output', () => {
     const outcomes = fc.record(
