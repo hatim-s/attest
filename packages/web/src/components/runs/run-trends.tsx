@@ -4,6 +4,7 @@ import type { RunRecord } from '@attest/core/records';
 import { AnalyticsChart } from './analytics-chart.js';
 import { createRunTrends } from './loaded-analytics.js';
 import { formatCount, formatPercent, shortId } from '../../lib/format.js';
+import { Heading } from '../shared/ui.js';
 
 /** Keeps chart arrays stable while the run page polls unchanged results. */
 const TrendChart = ({ group }: { group: ReturnType<typeof createRunTrends>['groups'][number] }) => {
@@ -43,21 +44,12 @@ const RunTrends = ({ runs }: { runs: RunRecord[] }) => {
   );
 
   return (
-    <section className="distribution-panel" aria-label="Recent runs">
-      <h2>Pass rate by {labelKey === '' ? 'branch' : labelKey}</h2>
-      <label>
-        Group by{' '}
-        <select value={labelKey} onChange={(event) => setLabelKey(event.target.value)}>
-          <option value="">Branch</option>
-          {keys.map((key) => (
-            <option key={key} value={key}>
-              Label: {key}
-            </option>
-          ))}
-        </select>
-      </label>
-      <p className="empty-compact">
-        {[
+    <section className="stack" aria-label="Recent runs">
+      <Heading
+        level={2}
+        eyebrow="Recent runs"
+        title={`Pass rate by ${labelKey === '' ? 'branch' : labelKey}`}
+        meta={[
           formatCount(runs.length, 'recent run'),
           trends.runningRuns > 0 ? `${trends.runningRuns} still running` : '',
           trends.missingSummary > 0 ? `${trends.missingSummary} without a summary` : '',
@@ -65,7 +57,19 @@ const RunTrends = ({ runs }: { runs: RunRecord[] }) => {
         ]
           .filter((part) => part !== '')
           .join(', ')}
-      </p>
+      >
+        <label className="control">
+          Group by
+          <select value={labelKey} onChange={(event) => setLabelKey(event.target.value)}>
+            <option value="">Branch</option>
+            {keys.map((key) => (
+              <option key={key} value={key}>
+                Label {key}
+              </option>
+            ))}
+          </select>
+        </label>
+      </Heading>
       <div className="chart-grid">
         {trends.groups.map((group) => (
           <TrendChart key={group.name} group={group} />

@@ -1,7 +1,7 @@
 import type { RunRecord } from '@attest/core/records';
 import { useApiClient } from '../../api/api-client-context.js';
 import { SummaryCards } from './summary-cards.js';
-import { Badge } from '../shared/ui.js';
+import { Badge, Heading } from '../shared/ui.js';
 import { formatCount, shortId } from '../../lib/format.js';
 
 /** Keeps the run context visible on every run tab and on the comparison page. */
@@ -10,16 +10,14 @@ const RunHeader = ({ run }: { run: RunRecord }) => {
 
   return (
     <>
-      <section className="run-heading">
-        <div>
-          <p className="eyebrow">Evaluation run</p>
-          <h1>{shortId(run.id, 12)}</h1>
-          <p>
-            {run.configHash.slice(0, 12)} · {run.schemaId}
-          </p>
-        </div>
+      <Heading
+        level={1}
+        eyebrow="Evaluation run"
+        title={<code title={run.id}>{shortId(run.id, 12)}</code>}
+        meta={`${run.configHash.slice(0, 12)} · ${run.schemaId}`}
+      >
         <Badge tone={run.status}>{run.status}</Badge>
-      </section>
+      </Heading>
       <SummaryCards run={run} />
       {mode.kind === 'snapshot' ? (
         <p className="empty-compact">

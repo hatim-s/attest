@@ -24,7 +24,7 @@ const RunDistributions = ({ run }: { run: RunRecord }) => {
   }, [casesQuery]);
 
   return (
-    <section className="distribution-panel" aria-label="Analytics">
+    <section className="stack" aria-label="Distributions">
       {casesQuery.error !== null ? <ErrorNotice error={casesQuery.error} /> : null}
       {casesQuery.isFetchNextPageError ? (
         <Button onClick={() => void casesQuery.fetchNextPage()}>Retry loading cases</Button>

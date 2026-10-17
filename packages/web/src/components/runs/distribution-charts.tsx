@@ -10,6 +10,7 @@ import {
 
 import { aggregateCases } from '@attest/core/analytics';
 import { formatCount } from '../../lib/format.js';
+import { Heading } from '../shared/ui.js';
 import type { CaseSummary } from '@attest/core/records';
 
 type DistributionChartsProps = {
@@ -97,16 +98,13 @@ const DistributionCharts = ({ cases, isLoading, totalCases }: DistributionCharts
   );
 
   return (
-    <section className="distribution-panel" aria-label="Run distributions">
-      <div className="distribution-heading">
-        <div>
-          <p className="eyebrow">Run distributions</p>
-          <h3>Scores and verdicts</h3>
-        </div>
-        <span>
-          {cases.length} of {totalCases} cases loaded{isLoading ? '…' : ''}
-        </span>
-      </div>
+    <section className="stack" aria-label="Scores and verdicts">
+      <Heading
+        level={2}
+        eyebrow="This run"
+        title="Scores and verdicts"
+        meta={`${cases.length} of ${formatCount(totalCases, 'case')} loaded${isLoading ? '…' : ''}`}
+      />
       <div className="chart-grid">
         <ChartCard
           title="Mean score"

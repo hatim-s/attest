@@ -45,7 +45,7 @@ const RunSuites = ({ run }: { run: RunRecord }) => {
   const suitesQuery = useRunSuites(run.id, run.status);
 
   return (
-    <section aria-label="Suites">
+    <section className="stack" aria-label="Suites">
       {run.status === 'running' ? (
         <p className="empty-compact">Still running. Counts cover the cases finished so far.</p>
       ) : null}

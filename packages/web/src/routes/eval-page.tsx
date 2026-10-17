@@ -2,7 +2,7 @@ import { useMemo } from 'react';
 import { getRouteApi, Link, useNavigate } from '@tanstack/react-router';
 import { useSuiteHistory } from '../api/queries.js';
 import { AnalyticsChart } from '../components/runs/analytics-chart.js';
-import { ErrorNotice, Loading } from '../components/shared/ui.js';
+import { ErrorNotice, Heading, Loading } from '../components/shared/ui.js';
 import { formatCount, formatDateTime, formatPercent, shortId } from '../lib/format.js';
 
 const formatScore = (value: number) => value.toFixed(3);
@@ -33,38 +33,45 @@ const EvalPage = () => {
   );
 
   return (
-    <section aria-label="Suite history">
-      <h1>{suiteName}</h1>
-      <label>
-        Look back{' '}
-        <select
-          value={limit}
-          onChange={(event) =>
-            void navigate({
-              to: '/evals/$suiteName',
-              params: { suiteName },
-              search: (previous) => ({ ...previous, limit: Number(event.target.value) }),
-            })
-          }
-        >
-          {[10, 20, 50, ...([10, 20, 50].includes(limit) ? [] : [limit])]
-            .sort((a, b) => a - b)
-            .map((value) => (
-              <option key={value} value={value}>
-                {value} runs
-              </option>
-            ))}
-        </select>
-      </label>
+    <section className="stack" aria-label="Suite history">
+      <Heading
+        level={1}
+        eyebrow="Eval suite"
+        title={suiteName}
+        meta={
+          history === undefined
+            ? undefined
+            : history.exhausted
+              ? `All ${formatCount(points.length, 'run')}`
+              : `Last ${formatCount(points.length, 'run')}, from the newest ${formatCount(history.runsExamined, 'finished run')}`
+        }
+      >
+        <label className="control">
+          Look back
+          <select
+            value={limit}
+            onChange={(event) =>
+              void navigate({
+                to: '/evals/$suiteName',
+                params: { suiteName },
+                search: (previous) => ({ ...previous, limit: Number(event.target.value) }),
+              })
+            }
+          >
+            {[10, 20, 50, ...([10, 20, 50].includes(limit) ? [] : [limit])]
+              .sort((a, b) => a - b)
+              .map((value) => (
+                <option key={value} value={value}>
+                  {value} runs
+                </option>
+              ))}
+          </select>
+        </label>
+      </Heading>
       {historyQuery.isLoading ? <Loading label="Loading suite history" /> : null}
       {historyQuery.error !== null ? <ErrorNotice error={historyQuery.error} /> : null}
       {history !== undefined ? (
         <>
-          <p className="empty-compact">
-            {history.exhausted
-              ? `All ${formatCount(points.length, 'run')} of ${suiteName}`
-              : `Last ${formatCount(points.length, 'run')} of ${suiteName}, from the newest ${formatCount(history.runsExamined, 'finished run')}`}
-          </p>
           {points.length === 0 ? (
             <p className="empty-compact">
               {history.exhausted
