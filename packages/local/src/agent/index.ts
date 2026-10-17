@@ -8,7 +8,7 @@ export {
   type CurlImportFields,
 } from '../commands/agent/curl-import-request.js';
 
-export { runAgentImportCommand } from '../commands/agent/import.js';
+export { runAgentImportCommand, type AgentImportCommandOptions } from '../commands/agent/import.js';
 
 export { runAgentRemoveCommand } from '../commands/agent/remove.js';
 

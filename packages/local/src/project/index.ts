@@ -4,7 +4,10 @@ export { applyProjectMutation } from './transaction/index.js';
 
 export { loadCommandProject } from '../commands/project/load-command-project.js';
 
-export { runProjectInitCommand } from '../commands/project/project-init-command.js';
+export {
+  runProjectInitCommand,
+  type ProjectInitCommandOptions,
+} from '../commands/project/project-init-command.js';
 
 export {
   runProjectShowCommand,
