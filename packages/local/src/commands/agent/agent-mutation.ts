@@ -78,7 +78,8 @@ const mutationResult = async ({
     dryRun: request.dry_run === true,
     mutation: {
       candidate,
-      expectedProjectHash: request.if_project_hash,
+      // The candidate was built from `loaded`, so a write since then must reject the commit.
+      expectedProjectHash: request.if_project_hash ?? loaded.projectHash,
       projectRoot: loaded.root,
       renames,
       warnings,
