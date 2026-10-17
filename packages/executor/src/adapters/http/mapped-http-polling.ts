@@ -81,61 +81,32 @@ const boundedPollingDelay = (
   fallback: number,
 ): number => clampInterval(transport, parseRetryAfter(retryAfter) ?? fallback);
 
-/** Validates every polling invariant before a submission can create remote work. */
-const assertPollingConfiguration = (transport: PollingTransport): void => {
-  if (
-    (transport.status_url_pointer === undefined) ===
-    (transport.status_url_template === undefined)
-  ) {
+/** Checks the authored status URL template before a submission can create remote work. */
+const assertStatusUrlTemplate = (transport: PollingTransport): void => {
+  if (transport.status_url_template === undefined) return;
+  assertStaticUrlAuthority(transport.status_url_template);
+  const rendered = transport.status_url_template.replaceAll('{{job_id}}', 'job');
+
+  if (rendered.includes('{{')) {
     throw new AgentInvocationError(
       'invalid_envelope',
-      'Polling requires exactly one status URL pointer or template.',
+      'Polling status URL template contains an unsupported placeholder.',
     );
   }
 
-  if (transport.minimum_interval_ms > transport.maximum_interval_ms) {
-    throw new AgentInvocationError(
-      'invalid_envelope',
-      'Polling maximum interval must be at least its minimum interval.',
-    );
+  let submit: URL;
+  let status: URL;
+
+  try {
+    submit = new URL(transport.submit.url);
+    status = new URL(rendered, submit);
+  } catch (error: unknown) {
+    throw new AgentInvocationError('invalid_envelope', 'Polling status URL is invalid.', {
+      cause: error,
+    });
   }
 
-  if (
-    transport.success_values.some((success) =>
-      transport.failure_values.some((failure) => isDeepStrictEqual(success, failure)),
-    )
-  ) {
-    throw new AgentInvocationError(
-      'invalid_envelope',
-      'Polling success and failure terminal values must not overlap.',
-    );
-  }
-
-  if (transport.status_url_template !== undefined) {
-    assertStaticUrlAuthority(transport.status_url_template);
-    const rendered = transport.status_url_template.replaceAll('{{job_id}}', 'job');
-
-    if (rendered.includes('{{')) {
-      throw new AgentInvocationError(
-        'invalid_envelope',
-        'Polling status URL template contains an unsupported placeholder.',
-      );
-    }
-
-    let submit: URL;
-    let status: URL;
-
-    try {
-      submit = new URL(transport.submit.url);
-      status = new URL(rendered, submit);
-    } catch (error: unknown) {
-      throw new AgentInvocationError('invalid_envelope', 'Polling status URL is invalid.', {
-        cause: error,
-      });
-    }
-
-    requireSameOrigin(status, submit);
-  }
+  requireSameOrigin(status, submit);
 };
 
 /** Converts an authored polling failure state into a failed probe with bounded response evidence. */
@@ -163,7 +134,7 @@ const runPolling = async (
   context: ExchangeContext,
 ): Promise<CompletedHttpResponse> => {
   const { policy, retry: retryPolicy, signal } = context;
-  assertPollingConfiguration(transport);
+  assertStatusUrlTemplate(transport);
   const idempotencyHeader = transport.idempotency_header;
 
   if (idempotencyHeader !== undefined) {

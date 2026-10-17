@@ -6,11 +6,6 @@ import type { InvocationAttempt, InvocationDiagnostics, InvocationResult } from 
 
 type InvocationAttemptFactory = (attemptIndex: number) => Promise<InvocationAttempt>;
 
-const requireValidRetryCount = (retries: number): void => {
-  if (Number.isInteger(retries) && retries >= 0) return;
-  throw new TypeError('Retry count must be a non-negative integer');
-};
-
 const withAttemptEvidence = (attempt: InvocationAttempt): InvocationAttempt => {
   if (attempt.rawExcerpt !== undefined) return attempt;
   const payload = attempt.status === 'ok' ? JSON.stringify(attempt.raw) : '';
@@ -68,7 +63,6 @@ const invokeWithRetries = async (
   invokeOnce: InvocationAttemptFactory,
   retries: number,
 ): Promise<InvocationResult> => {
-  requireValidRetryCount(retries);
   const attempts: InvocationAttempt[] = [];
   let attemptIndex = 0;
 

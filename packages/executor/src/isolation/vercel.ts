@@ -4,7 +4,6 @@ import { SANDBOX_WORKSPACE, resolveRemotePath } from '../adapters/sandbox/sandbo
 import { readRemoteFile } from '../adapters/sandbox/sandbox-transfer.js';
 import type { VercelSandboxCreateParams, VercelSandboxFactory } from '../adapters/sandbox/types.js';
 import { defaultSandboxFactory } from '../adapters/sandbox/vercel-sandbox-adapter.js';
-import { requirePositiveInteger } from '../internal/positive-integer.js';
 import { createEnvironmentLifecycle } from './environment-lifecycle.js';
 import type { CaseEnvironmentFactory } from './types.js';
 import { normalizeWorkspacePath } from './workspace-path.js';
@@ -73,10 +72,6 @@ const vercelSandboxIsolation =
     const finalizationTimeoutMs = options.finalizationTimeoutMs ?? commandTimeoutMs;
     const cleanupTimeoutMs = options.cleanupTimeoutMs ?? 10_000;
     const cap = options.outputBytes ?? 1024 * 1024;
-    requirePositiveInteger('outputBytes', cap);
-    requirePositiveInteger('commandTimeoutMs', commandTimeoutMs);
-    requirePositiveInteger('finalizationTimeoutMs', finalizationTimeoutMs);
-    requirePositiveInteger('cleanupTimeoutMs', cleanupTimeoutMs);
     const files = resolveSeedFiles(options.files ?? {}, cap);
 
     const creation: VercelSandboxCreateParams = {

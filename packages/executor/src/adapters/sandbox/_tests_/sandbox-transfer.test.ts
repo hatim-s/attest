@@ -40,16 +40,16 @@ afterEach(async () => {
 });
 
 describe('sandbox file transfers', () => {
-  it('resolves literal relative paths below the fixed remote workspace and artifact root', async () => {
+  it('resolves relative paths below the fixed remote workspace and artifact root', async () => {
     expect(resolveRemotePath('inputs/case.json')).toBe(`${SANDBOX_WORKSPACE}/inputs/case.json`);
 
-    for (const path of ['', '/tmp/file', '../file', 'inputs/*.json', 'inputs/{a,b}.json']) {
+    for (const path of ['/tmp/file', '../file', 'inputs/\0case.json']) {
       expect(() => resolveRemotePath(path), path).toThrow(TypeError);
     }
 
     const projectRoot = await createTemporaryDirectory();
 
-    for (const destination of ['../outside', 'reports/*.json']) {
+    for (const destination of ['../outside', '/tmp/outside']) {
       await expect(
         publishTerminalArtifacts(
           createSandbox('artifact'),

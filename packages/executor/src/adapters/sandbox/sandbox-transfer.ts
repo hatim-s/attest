@@ -6,11 +6,9 @@ import type { VercelSandbox } from '@attest/contracts';
 
 import { AgentInvocationError } from '../../errors.js';
 import { errnoCode } from '../../internal/errno-code.js';
-import { requirePositiveInteger } from '../../internal/positive-integer.js';
 import { BoundedTailWritable } from './bounded-writable.js';
 import {
   SANDBOX_WORKSPACE,
-  assertLiteralRelativePath,
   isContained,
   resolveArtifactDestination,
   resolveRemotePath,
@@ -78,13 +76,11 @@ const loadExplicitUploads = async (
   uploads: VercelSandbox['files'],
   responseBytes: number,
 ): Promise<LoadedUpload[]> => {
-  requirePositiveInteger('Response byte cap', responseBytes);
   const loaded: LoadedUpload[] = [];
   let totalBytes = 0;
   const root = await realpath(projectRoot);
 
   for (const upload of uploads) {
-    assertLiteralRelativePath(upload.source, 'Sandbox upload source');
     const source = resolve(root, upload.source);
     let handle;
 
@@ -236,7 +232,6 @@ const publishTerminalArtifacts = async (
   commandTimeoutMs: number,
   signal: AbortSignal,
 ): Promise<void> => {
-  requirePositiveInteger('Response byte cap', responseBytes);
   const staged: StagedArtifact[] = [];
   let totalBytes = 0;
   const configuredProjectRoot = resolve(projectRoot);

@@ -53,13 +53,6 @@ const materializeHeaders = (
     const resolved = resolvedByName.get(normalized)?.[1];
 
     if (isString(value)) {
-      if (normalized === 'authorization') {
-        throw new AgentInvocationError(
-          'invalid_envelope',
-          'Literal WebSocket authorization is unsupported.',
-        );
-      }
-
       materialized.set(normalized, [name, resolved ?? value]);
       continue;
     }

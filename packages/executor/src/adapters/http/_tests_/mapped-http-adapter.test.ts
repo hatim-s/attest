@@ -485,7 +485,7 @@ describe('mapped HTTP adapter', () => {
     }
   });
 
-  it('validates polling before submit and fails authored terminal failures', async () => {
+  it('fails authored terminal polling failures', async () => {
     let submissions = 0;
 
     const fixture = await startServer((incoming, response) => {
@@ -501,10 +501,10 @@ describe('mapped HTTP adapter', () => {
       response.end(JSON.stringify({ status: 'failed', error: { message: 'provider failed' } }));
     });
 
-    const invalid: HttpAgentResource = {
+    const poller: HttpAgentResource = {
       schema: AGENT_RESOURCE_SCHEMA_ID,
-      id: 'invalid-poller',
-      name: 'Invalid poller',
+      id: 'failing-poller',
+      name: 'Failing poller',
       transport: {
         kind: 'polling',
         lifecycle: 'external',
@@ -513,21 +513,14 @@ describe('mapped HTTP adapter', () => {
         status_pointer: '/status',
         success_values: ['done'],
         failure_values: ['failed'],
-        extraction: { result_pointer: '/answer' },
+        status_url_pointer: '/status_url',
+        extraction: { result_pointer: '/answer', error_pointer: '/error' },
         minimum_interval_ms: 1,
         maximum_interval_ms: 2,
       },
     };
 
-    expect((await invokeMappedHttpAgent(invalid, request)).status).toBe('invocation_error');
-    expect(submissions).toBe(0);
-
-    const valid = structuredClone(invalid);
-
-    if (valid.transport.kind !== 'polling') throw new Error('Expected polling transport.');
-    valid.transport.status_url_pointer = '/status_url';
-    valid.transport.extraction.error_pointer = '/error';
-    const failed = await invokeMappedHttpAgent(valid, request);
+    const failed = await invokeMappedHttpAgent(poller, request);
     expect(failed).toMatchObject({
       status: 'invocation_error',
       error: { message: 'provider failed' },

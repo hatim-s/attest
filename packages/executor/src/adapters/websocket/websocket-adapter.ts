@@ -1,4 +1,4 @@
-import { webSocketTransportSchema, type AgentRequest } from '@attest/contracts';
+import type { AgentRequest } from '@attest/contracts';
 
 import { AgentInvocationError } from '../../errors.js';
 import type { InvocationResult } from '../../types.js';
@@ -14,21 +14,13 @@ type WebSocketAgentSession = {
 };
 
 /**
- * Validates the frozen transport before any connection opens, then starts a session that either
- * shares one connection across the run or opens one per case. Invalid transports throw
- * synchronously so a misconfigured run fails before it schedules cases.
+ * Starts a session that either shares one connection across the run or opens one per case. A
+ * templated URL throws synchronously so a misconfigured run fails before it schedules cases.
  */
 const startWebSocketAgent = (
   agent: WebSocketAgentResource,
   options: WebSocketSessionOptions = {},
 ): Promise<WebSocketAgentSession> => {
-  if (!webSocketTransportSchema.safeParse(agent.transport).success) {
-    throw new AgentInvocationError(
-      'invalid_envelope',
-      'WebSocket transport uses an invalid or unsupported mode.',
-    );
-  }
-
   if (agent.transport.url.includes('{{')) {
     throw new AgentInvocationError(
       'invalid_envelope',

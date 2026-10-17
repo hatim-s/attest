@@ -2,8 +2,6 @@ import { isAbsolute, posix, relative, resolve, sep } from 'node:path';
 
 const SANDBOX_WORKSPACE = '/vercel/sandbox/workspace';
 
-const GLOB_METACHARACTERS = /[*?\[\]{}]/u;
-
 /** True when `path` is `root` itself or lies below it. */
 const isContained = (root: string, path: string): boolean => {
   const fromRoot = relative(root, path);
@@ -14,22 +12,10 @@ const isContained = (root: string, path: string): boolean => {
   );
 };
 
-/** Rejects paths whose meaning could vary between file APIs and command execution. */
-const assertLiteralRelativePath = (value: string, label: string): void => {
-  if (
-    value.length === 0 ||
-    value.includes('\0') ||
-    isAbsolute(value) ||
-    posix.isAbsolute(value) ||
-    GLOB_METACHARACTERS.test(value)
-  ) {
-    throw new TypeError(`${label} must be a non-empty literal relative path.`);
-  }
-};
-
 /** Resolves an authored relative sandbox path below the fixed workspace root. */
 const resolveRemotePath = (value: string): string => {
-  assertLiteralRelativePath(value, 'Sandbox resource path');
+  // The project schema rejects empty, absolute, parent and glob paths but admits NUL bytes.
+  if (value.includes('\0')) throw new TypeError('Sandbox path must not contain NUL bytes.');
   const resolved = posix.resolve(SANDBOX_WORKSPACE, value);
 
   if (resolved !== SANDBOX_WORKSPACE && !resolved.startsWith(`${SANDBOX_WORKSPACE}/`)) {
@@ -41,7 +27,6 @@ const resolveRemotePath = (value: string): string => {
 
 /** Resolves artifact outputs below the configured host artifact directory. */
 const resolveArtifactDestination = (root: string, value: string): string => {
-  assertLiteralRelativePath(value, 'Artifact destination');
   const destination = resolve(root, value);
   const fromRoot = relative(resolve(root), destination);
 
@@ -52,10 +37,4 @@ const resolveArtifactDestination = (root: string, value: string): string => {
   return destination;
 };
 
-export {
-  SANDBOX_WORKSPACE,
-  assertLiteralRelativePath,
-  isContained,
-  resolveArtifactDestination,
-  resolveRemotePath,
-};
+export { SANDBOX_WORKSPACE, isContained, resolveArtifactDestination, resolveRemotePath };
