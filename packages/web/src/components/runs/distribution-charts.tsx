@@ -5,6 +5,7 @@ import { GridComponent, LegendComponent, TooltipComponent } from 'echarts/compon
 import { init, use, type EChartsCoreOption } from 'echarts/core';
 import { CanvasRenderer } from 'echarts/renderers';
 
+import { aggregateCases } from '@attest/core/analytics';
 import type { CaseSummary } from '@attest/core/records';
 
 use([BarChart, PieChart, GridComponent, LegendComponent, TooltipComponent, CanvasRenderer]);
@@ -104,27 +105,34 @@ const DistributionCharts = ({ cases, isLoading, totalCases }: DistributionCharts
   const verdictChartRef = useRef<HTMLDivElement>(null);
   const histogram = useMemo(() => createScoreHistogram(cases), [cases]);
 
-  const verdicts = useMemo(
-    () => ({
-      pass: cases.filter(({ verdict }) => verdict === 'pass').length,
-      fail: cases.filter(({ verdict }) => verdict === 'fail').length,
-      error: cases.filter(({ verdict }) => verdict === 'error').length,
-    }),
-    [cases],
-  );
+  const verdicts = useMemo(() => {
+    const [first, ...rest] = cases;
+
+    return first === undefined
+      ? { pass: 0, fail: 0, error: 0 }
+      : aggregateCases([first, ...rest]).verdicts;
+  }, [cases]);
 
   const scoreOption = useCallback(
-    ({ accent, border, muted, text }: ChartPalette): EChartsCoreOption => ({
+    ({ 'series-1': seriesColor, border, muted, text }: ChartPalette): EChartsCoreOption => ({
       animationDuration: 250,
-      grid: { left: 38, right: 16, top: 18, bottom: 35 },
-      tooltip: { trigger: 'axis' },
+      grid: { left: 55, right: 16, top: 35, bottom: 55 },
+      tooltip: { trigger: 'item', renderMode: 'richText' },
       xAxis: {
+        name: 'Mean score',
+        nameLocation: 'middle',
+        nameGap: 30,
+        nameTextStyle: { color: muted },
         axisLabel: { color: muted, fontSize: 10 },
         axisLine: { lineStyle: { color: border } },
         data: histogram.map(({ label }) => label),
         type: 'category',
       },
       yAxis: {
+        barMaxWidth: 24,
+        name: 'Cases',
+        minInterval: 1,
+        nameTextStyle: { color: muted },
         axisLabel: { color: muted, fontSize: 10, precision: 0 },
         splitLine: { lineStyle: { color: border } },
         type: 'value',
@@ -132,7 +140,8 @@ const DistributionCharts = ({ cases, isLoading, totalCases }: DistributionCharts
       series: [
         {
           data: histogram.map(({ count }) => count),
-          itemStyle: { borderRadius: [5, 5, 0, 0], color: accent },
+          itemStyle: { borderRadius: [4, 4, 0, 0], color: seriesColor },
+          barMaxWidth: 24,
           name: 'Cases',
           type: 'bar',
         },
@@ -159,7 +168,7 @@ const DistributionCharts = ({ cases, isLoading, totalCases }: DistributionCharts
           type: 'pie',
         },
       ],
-      tooltip: { trigger: 'item' },
+      tooltip: { trigger: 'item', renderMode: 'richText' },
     }),
     [verdicts],
   );
@@ -189,6 +198,26 @@ const DistributionCharts = ({ cases, isLoading, totalCases }: DistributionCharts
             className="chart-canvas"
             ref={scoreChartRef}
           />
+          <details>
+            <summary>Score values</summary>
+            <table className="analytics-table">
+              <caption>Score histogram</caption>
+              <thead>
+                <tr>
+                  <th scope="col">Score</th>
+                  <th scope="col">Cases</th>
+                </tr>
+              </thead>
+              <tbody>
+                {histogram.map((bin) => (
+                  <tr key={bin.label}>
+                    <th scope="row">{bin.label}</th>
+                    <td>{bin.count}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </details>
         </div>
         <div className="chart-card">
           <div>
@@ -200,6 +229,26 @@ const DistributionCharts = ({ cases, isLoading, totalCases }: DistributionCharts
             className="chart-canvas"
             ref={verdictChartRef}
           />
+          <details>
+            <summary>Verdict values</summary>
+            <table className="analytics-table">
+              <caption>Final verdict counts</caption>
+              <thead>
+                <tr>
+                  <th scope="col">Verdict</th>
+                  <th scope="col">Cases</th>
+                </tr>
+              </thead>
+              <tbody>
+                {Object.entries(verdicts).map(([verdict, count]) => (
+                  <tr key={verdict}>
+                    <th scope="row">{verdict}</th>
+                    <td>{count}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </details>
         </div>
       </div>
     </section>

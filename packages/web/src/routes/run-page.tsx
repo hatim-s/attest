@@ -1,10 +1,13 @@
 import { useEffect } from 'react';
 import { getRouteApi, Outlet } from '@tanstack/react-router';
-import { useRun, useCases, useRunSuites } from '../api/queries.js';
+import { useRun, useCases, useRunSuites, useRuns } from '../api/queries.js';
 import { SuiteTable } from '../components/runs/suite-table.js';
 import { CaseTable } from '../components/cases/case-table.js';
+import { DurationDistribution } from '../components/runs/duration-distribution.js';
+import { MetricErrorCases } from '../components/runs/metric-error-cases.js';
+import { RunTrends } from '../components/runs/run-trends.js';
 import { DistributionCharts } from '../components/runs/distribution-charts.js';
-import { ErrorNotice, Loading } from '../components/shared/ui.js';
+import { Button, ErrorNotice, Loading } from '../components/shared/ui.js';
 import { RunOverview } from './run-overview.js';
 
 const route = getRouteApi('/runs/$runId');
@@ -14,6 +17,7 @@ const RunPage = () => {
   const { runId } = route.useParams();
   const { tab } = route.useSearch();
   const runQuery = useRun(runId);
+  const runsQuery = useRuns();
   const suitesQuery = useRunSuites(tab === 'suites' ? runId : undefined, runQuery.data?.status);
   const casesQuery = useCases(runId, runQuery.data?.status);
   const cases = casesQuery.data?.pages.flatMap((page) => page.items) ?? [];
@@ -67,14 +71,26 @@ const RunPage = () => {
             </section>
           ) : null}
           {tab === 'distributions' ? (
-            <>
+            <section className="distribution-panel" aria-label="Analytics">
               {casesQuery.error !== null ? <ErrorNotice error={casesQuery.error} /> : null}
+              {casesQuery.isFetchNextPageError ? (
+                <Button onClick={() => void casesQuery.fetchNextPage()}>Retry loading cases</Button>
+              ) : null}
               <DistributionCharts
                 cases={cases}
                 isLoading={casesQuery.isFetching}
                 totalCases={run.summary?.totalCases ?? cases.length}
               />
-            </>
+              {run.status === 'running' ? (
+                <p className="empty-compact">
+                  This run is running. Distributions and metric-error cases are partial.
+                </p>
+              ) : null}
+              <DurationDistribution cases={cases} />
+              <MetricErrorCases cases={cases} runId={runId} />
+              {runsQuery.error !== null ? <ErrorNotice error={runsQuery.error} /> : null}
+              <RunTrends runs={runsQuery.data ?? []} />
+            </section>
           ) : null}
         </>
       ) : null}
