@@ -287,7 +287,7 @@ class SqliteRunStore implements RunStore {
     if (!Number.isInteger(limit) || limit <= 0 || limit > MAX_CASE_SUMMARY_LIMIT) {
       throw new StoreError(
         'INVALID_LIMIT',
-        'Case summary limit must be an integer from 1 to 1000.',
+        `Case summary limit must be an integer from 1 to ${MAX_CASE_SUMMARY_LIMIT}.`,
       );
     }
 
