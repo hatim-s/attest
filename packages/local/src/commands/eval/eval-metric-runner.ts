@@ -1,17 +1,17 @@
 import { realpath } from 'node:fs/promises';
-import { resolve } from 'node:path';
+import { relative, resolve } from 'node:path';
 
 import {
   AGENT_PROTOCOL,
   AGENT_RESOURCE_SCHEMA_ID,
   METRIC_PROTOCOL,
   type AgentRequest,
-  type AgentResource,
+  type JsonValue,
   type MetricDefinition,
   type MetricResource,
 } from '@attest/contracts';
 import { type CacheStore, type StoredMetricEvaluation } from '@attest/core';
-import { invokeMappedHttpAgent } from '@attest/executor';
+import { invokeMappedHttpAgent, type HttpAgentResource } from '@attest/executor';
 import {
   type CaseExecution,
   caseExecutionToMetricContext,
@@ -25,13 +25,12 @@ import { z } from 'zod';
 
 import { LocalError } from '../../errors/index.js';
 import { readJsonPointer } from '../../internal/json-pointer.js';
-import { isProjectPath } from '../../project/project-path.js';
+import { resolveContainedPath } from '../../project/project-path.js';
 import { redactMetricEvaluation, redactProbeValue } from '../agent/adapter/evidence-redaction.js';
 import {
-  resolveNativeAgent,
+  resolveHttpSecrets,
   resolveProcessEnvironment,
 } from '../agent/adapter/resolve-native-agent.js';
-import type { ResolvedEvalMetric } from '@attest/core';
 import type { ResolvedEvalCaseInput } from './eval-resolver.js';
 
 /**
@@ -47,56 +46,137 @@ const createJudgeCache = (cacheStore: CacheStore, secrets: readonly string[]): J
   set: (key, entry) => cacheStore.put('judge', key, redactProbeValue(entry, secrets)),
 });
 
-/** Resolves one executable metric environment at invocation time without persisting secret values. */
-const resolveExecutableMetric = async (
-  metric: Extract<MetricResource['definition'], { kind: 'exec' }>,
-  projectRoot: string,
-): Promise<{ cwd: string; env: NodeJS.ProcessEnv; secrets: string[] }> => {
-  const cwd = await realpath(resolve(projectRoot, metric.cwd ?? '.'));
+type ExecMetricDefinition = Extract<MetricResource['definition'], { kind: 'exec' }>;
 
-  if (!isProjectPath(projectRoot, cwd)) {
-    throw new LocalError('metric_infrastructure_failed', 'Metric cwd escapes the project.', {
-      path: metric.cwd ?? '.',
-    });
+type HttpMetricDefinition = Extract<MetricResource['definition'], { kind: 'http' }>;
+
+/** A metric evaluation before redaction, with the secret values its evidence may contain. */
+type MetricRun = { evaluation: StoredMetricEvaluation; secrets: readonly string[] };
+
+const httpMetricResultSchema = z.object({
+  score: z.number(),
+  pass: z.boolean(),
+  rationale: z.string().optional(),
+  details: z.json().optional(),
+});
+
+/** Runs one runtime metric definition and returns its single evaluation. */
+const evaluateOne = async (
+  definition: MetricDefinition,
+  context: MetricContext,
+  options: Parameters<typeof evaluateMetrics>[2],
+): Promise<StoredMetricEvaluation> => {
+  const [evaluation] = await evaluateMetrics([definition], context, options);
+
+  if (evaluation === undefined) {
+    throw new LocalError(
+      'metric_infrastructure_failed',
+      'The metric engine returned no evaluation.',
+    );
   }
 
-  const { env, secrets } = await resolveProcessEnvironment(metric.env, projectRoot);
-
-  return { cwd, env, secrets };
+  return evaluation;
 };
 
-/** Converts a HTTP metric response mapping into the existing metric result evidence shape. */
-// BOUNDARY: Foreign HTTP metric output is decoded by configured JSON pointers and rejected unless score is finite, pass boolean, rationale string, and details JSON.
+/**
+ * Resolves an exec metric cwd with the per-segment symlink check worker directories use. The
+ * schema accepts `.`, `./x` and trailing slashes, so the path is normalized lexically first; it
+ * already forbids `..`.
+ */
+const resolveMetricCwd = async (projectRoot: string, cwd: string | undefined): Promise<string> => {
+  const projectPath = relative(projectRoot, resolve(projectRoot, cwd ?? '.'));
+
+  if (projectPath === '') return realpath(projectRoot);
+
+  return resolveContainedPath(projectRoot, projectPath, {
+    expect: 'directory',
+    problem: () =>
+      new LocalError('project_invalid', 'Metric cwd is not a safe project directory.', {
+        path: projectPath,
+        hint: 'Use a real project-contained directory without a symlink escape.',
+      }),
+  });
+};
+
+/** Resolves an exec metric's secret environment, reporting a missing secret as a metric failure. */
+const resolveMetricEnvironment = async (
+  definition: ExecMetricDefinition,
+  projectRoot: string,
+): Promise<Awaited<ReturnType<typeof resolveProcessEnvironment>>> => {
+  try {
+    return await resolveProcessEnvironment(definition.env, projectRoot);
+  } catch (error: unknown) {
+    throw new LocalError(
+      'metric_infrastructure_failed',
+      'A referenced metric secret is unavailable.',
+      { hint: 'Set the referenced secret and retry.', cause: error },
+    );
+  }
+};
+
+type EvaluateMetricResourceOptions = {
+  context: MetricContext;
+  definition: Extract<MetricResource['definition'], { kind: 'assertion' | 'exec' }>;
+  id: string;
+  projectRoot: string;
+  signal?: AbortSignal;
+};
+
+/**
+ * Runs one assertion or exec metric for both `attest metric test` and eval, so the definition
+ * mapping, exec cwd containment and secret environment follow one rule. The caller redacts.
+ */
+const evaluateMetricResource = async ({
+  context,
+  definition,
+  id,
+  projectRoot,
+  signal,
+}: EvaluateMetricResourceOptions): Promise<MetricRun> => {
+  if (definition.kind === 'assertion') {
+    const evaluation = await evaluateOne(
+      { name: id, type: 'assertion', assert: definition.assertions },
+      context,
+      { signal },
+    );
+
+    return { evaluation, secrets: [] };
+  }
+
+  const cwd = await resolveMetricCwd(projectRoot, definition.cwd);
+  const { env, secrets } = await resolveMetricEnvironment(definition, projectRoot);
+
+  const evaluation = await evaluateOne(
+    { name: id, type: 'exec', command: definition.argv },
+    context,
+    { exec: { cwd, env, timeoutMs: definition.timeout_ms }, signal },
+  );
+
+  return { evaluation, secrets };
+};
+
+/**
+ * Converts a HTTP metric response mapping into the existing metric result evidence shape.
+ * Runtime's StoredMetricEvaluation has no HTTP kind, so an HTTP metric reports like an exec
+ * metric: both return a score and pass result from outside the process.
+ */
 const extractHttpMetricResult = (
   metricId: string,
-  definition: Extract<MetricResource['definition'], { kind: 'http' }>,
-  value: unknown,
+  definition: HttpMetricDefinition,
+  output: JsonValue | undefined,
   durationMs: number,
 ): StoredMetricEvaluation => {
-  const score = readJsonPointer(value, definition.extraction.score_pointer);
-  const pass = readJsonPointer(value, definition.extraction.pass_pointer);
+  const read = (pointer: string | undefined) =>
+    pointer === undefined ? undefined : readJsonPointer(output, pointer);
 
-  const rationale =
-    definition.extraction.rationale_pointer === undefined
-      ? undefined
-      : readJsonPointer(value, definition.extraction.rationale_pointer);
+  const result = httpMetricResultSchema.safeParse({
+    score: read(definition.extraction.score_pointer),
+    pass: read(definition.extraction.pass_pointer),
+    rationale: read(definition.extraction.rationale_pointer),
+    details: read(definition.extraction.details_pointer),
+  });
 
-  const rawDetails =
-    definition.extraction.details_pointer === undefined
-      ? undefined
-      : readJsonPointer(value, definition.extraction.details_pointer);
-
-  const details = rawDetails === undefined ? undefined : z.json().safeParse(rawDetails);
-
-  // Runtime's StoredMetricEvaluation has no HTTP kind; an HTTP metric reports like an exec metric
-  // because both return a score and pass result from outside the process.
-  if (
-    typeof score !== 'number' ||
-    !Number.isFinite(score) ||
-    typeof pass !== 'boolean' ||
-    (rationale !== undefined && typeof rationale !== 'string') ||
-    details?.success === false
-  ) {
+  if (!result.success) {
     return {
       metricName: metricId,
       kind: 'exec',
@@ -109,47 +189,36 @@ const extractHttpMetricResult = (
     };
   }
 
-  {
-    const assembledFields: StoredMetricEvaluation = {
-      metricName: metricId,
-      kind: 'exec',
-      status: 'evaluated',
-      score,
-      pass,
-      durationMs,
-    };
+  return { metricName: metricId, kind: 'exec', status: 'evaluated', durationMs, ...result.data };
+};
 
-    if (rationale !== undefined) {
-      assembledFields.rationale = rationale;
-    }
-
-    if (details?.success === true) {
-      assembledFields.details = details.data;
-    }
-
-    return assembledFields;
-  }
+type EvaluateHttpMetricOptions = {
+  context: MetricContext;
+  metric: Pick<MetricResource, 'id' | 'name'> & { definition: HttpMetricDefinition };
+  projectRoot: string;
+  request: AgentRequest;
+  signal: AbortSignal;
 };
 
 /** Executes one mapped HTTP metric through the hardened existing HTTP agent adapter. */
-const evaluateHttpMetric = async (
-  metric: ResolvedEvalMetric,
-  context: MetricContext,
-  request: AgentRequest,
-  projectRoot: string,
-  signal: AbortSignal,
-): Promise<StoredMetricEvaluation> => {
-  const definition = metric.metric.definition;
-
-  if (definition.kind !== 'http') throw new Error('Expected an HTTP metric definition.');
+const evaluateHttpMetric = async ({
+  context,
+  metric,
+  projectRoot,
+  request,
+  signal,
+}: EvaluateHttpMetricOptions): Promise<MetricRun> => {
+  const { definition } = metric;
 
   if (context.execution.outcome !== 'completed') {
-    return (
-      await evaluateMetrics(
-        [{ name: metric.metric.id, type: 'exec', url: definition.request.url }],
-        context,
-      )
-    )[0]!;
+    // Runtime exports no skipped-metric builder, so a URL exec definition borrows its skip rule.
+    const evaluation = await evaluateOne(
+      { name: metric.id, type: 'exec', url: definition.request.url },
+      context,
+      {},
+    );
+
+    return { evaluation, secrets: [] };
   }
 
   // Trace extensions are intentionally open, so validate their JSON shape at the HTTP boundary.
@@ -160,10 +229,13 @@ const evaluateHttpMetric = async (
     trace: context.execution.trace,
   });
 
-  const syntheticAgent: AgentResource = {
+  const agent: HttpAgentResource = {
     schema: AGENT_RESOURCE_SCHEMA_ID,
-    id: metric.metric.id,
-    name: metric.metric.name,
+    id: metric.id,
+    name: metric.name,
+    retry: definition.retry,
+    timeouts:
+      definition.timeout_ms === undefined ? undefined : { attempt_ms: definition.timeout_ms },
     transport: {
       kind: 'http',
       lifecycle: 'external',
@@ -177,62 +249,42 @@ const evaluateHttpMetric = async (
     },
   };
 
-  if (definition.timeout_ms !== undefined) {
-    syntheticAgent.timeouts = { attempt_ms: definition.timeout_ms };
-  }
-
-  if (definition.retry !== undefined) {
-    syntheticAgent.retry = definition.retry;
-  }
-
-  const resolved = await resolveNativeAgent(syntheticAgent, projectRoot);
-
-  if (resolved.kind !== 'mapped_http') {
-    throw new Error('HTTP metric adapter was not resolved.');
-  }
-
+  const { headers, query, secrets } = await resolveHttpSecrets(definition.request, projectRoot);
   const startedAt = performance.now();
 
   const invocation = await invokeMappedHttpAgent(
-    resolved.agent,
+    agent,
     { ...request, input: metricRequest },
-    {
-      headers: resolved.headers,
-      query: resolved.query,
-      secrets: resolved.secrets,
-      signal,
-    },
+    { headers, query, secrets, signal },
   );
 
   const durationMs = performance.now() - startedAt;
 
   if (invocation.status === 'invocation_error') {
-    return redactMetricEvaluation(
-      {
-        metricName: metric.metric.id,
-        kind: 'exec',
-        status: 'error',
-        error: {
-          kind: invocation.error.code === 'timeout' ? 'exec_timeout' : 'http_request_failed',
-          message: invocation.error.message,
-        },
-        durationMs,
+    const evaluation: StoredMetricEvaluation = {
+      metricName: metric.id,
+      kind: 'exec',
+      status: 'error',
+      error: {
+        kind: invocation.error.code === 'timeout' ? 'exec_timeout' : 'http_request_failed',
+        message: invocation.error.message,
       },
-      resolved.secrets,
-    );
+      durationMs,
+    };
+
+    return { evaluation, secrets };
   }
 
   const response = invocation.report?.ok === true ? invocation.report.value : undefined;
 
-  return redactMetricEvaluation(
-    extractHttpMetricResult(
-      metric.metric.id,
-      definition,
-      response !== undefined && 'output' in response ? response.output : undefined,
-      durationMs,
-    ),
-    resolved.secrets,
+  const evaluation = extractHttpMetricResult(
+    metric.id,
+    definition,
+    response !== undefined && 'output' in response ? response.output : undefined,
+    durationMs,
   );
+
+  return { evaluation, secrets };
 };
 
 const applyAttachedThreshold = (
@@ -307,63 +359,48 @@ const createEvalMetricEvaluator = (projectRoot: string, cacheStore: CacheStore) 
     const evaluations: StoredMetricEvaluation[] = [];
 
     for (const resolvedMetric of payload.metrics) {
-      const { definition } = resolvedMetric.metric;
-      let evaluation: StoredMetricEvaluation;
-      let secrets: readonly string[] = [];
+      const { metric, threshold } = resolvedMetric;
+      const { definition } = metric;
+      let run: MetricRun;
 
       if (definition.kind === 'http') {
-        evaluation = await evaluateHttpMetric(
-          resolvedMetric,
+        run = await evaluateHttpMetric({
           context,
-          request,
+          metric: { ...metric, definition },
           projectRoot,
+          request,
           signal,
-        );
-      } else {
-        let metricDefinition: MetricDefinition;
-        let options: Parameters<typeof evaluateMetrics>[2] = { signal };
+        });
+      } else if (definition.kind === 'judge') {
+        judgeClient ??= createTanstackJudgeClient();
 
-        if (definition.kind === 'assertion') {
-          metricDefinition = {
-            name: resolvedMetric.metric.id,
-            type: 'assertion',
-            assert: definition.assertions,
-          };
-        } else if (definition.kind === 'judge') {
-          judgeClient ??= createTanstackJudgeClient();
-          metricDefinition = {
-            name: resolvedMetric.metric.id,
+        const evaluation = await evaluateOne(
+          {
+            name: metric.id,
             type: 'judge',
             model: definition.model,
             rubric: definition.rubric,
-            threshold: resolvedMetric.threshold ?? definition.threshold,
-          };
-          options = { cache: judgeCacheFor(agentSecrets), judgeClient, signal };
-        } else {
-          const runtime = await resolveExecutableMetric(definition, projectRoot);
-          secrets = runtime.secrets;
-          metricDefinition = {
-            name: resolvedMetric.metric.id,
-            type: 'exec',
-            command: definition.argv,
-          };
-          options = {
-            exec: { cwd: runtime.cwd, env: runtime.env, timeoutMs: definition.timeout_ms },
-            signal,
-          };
-        }
+            threshold: threshold ?? definition.threshold,
+          },
+          context,
+          { cache: judgeCacheFor(agentSecrets), judgeClient, signal },
+        );
 
-        const evaluated = await evaluateMetrics([metricDefinition], context, options);
-        const first = evaluated[0];
-
-        if (first === undefined) throw new Error('Metric engine returned no evaluation.');
-        evaluation = first;
+        run = { evaluation, secrets: [] };
+      } else {
+        run = await evaluateMetricResource({
+          context,
+          definition,
+          id: metric.id,
+          projectRoot,
+          signal,
+        });
       }
 
       evaluations.push(
-        redactMetricEvaluation(applyAttachedThreshold(evaluation, resolvedMetric.threshold), [
+        redactMetricEvaluation(applyAttachedThreshold(run.evaluation, threshold), [
           ...agentSecrets,
-          ...secrets,
+          ...run.secrets,
         ]),
       );
     }
@@ -374,4 +411,4 @@ const createEvalMetricEvaluator = (projectRoot: string, cacheStore: CacheStore) 
   return { evaluate };
 };
 
-export { createEvalMetricEvaluator };
+export { createEvalMetricEvaluator, evaluateMetricResource };
