@@ -6,7 +6,7 @@ import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { AgentInvocationError } from './errors.js';
+import { AgentInvocationError, abortedError } from './errors.js';
 import { DEFAULT_TERMINATION_GRACE_MS } from './internal/agent-defaults.js';
 import { BoundedTail } from './internal/bounded-tail.js';
 import { startTimer } from './internal/elapsed.js';
@@ -304,18 +304,8 @@ const invokeCliAgent = async (
       );
     }
 
-    if (terminal.type === 'abort' || (terminal.type === 'timeout' && options.signal?.aborted)) {
-      return fail(
-        new AgentInvocationError('cancelled', 'CLI agent invocation was cancelled'),
-        capture.readRawExcerpt(),
-      );
-    }
-
-    if (terminal.type === 'timeout') {
-      return fail(
-        new AgentInvocationError('timeout', 'CLI agent invocation timed out'),
-        capture.readRawExcerpt(),
-      );
+    if (terminal.type === 'abort' || terminal.type === 'timeout') {
+      return fail(abortedError(options.signal, 'CLI agent invocation'), capture.readRawExcerpt());
     }
 
     if (terminal.type === 'output_cap') {

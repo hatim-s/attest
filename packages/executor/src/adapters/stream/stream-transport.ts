@@ -213,9 +213,11 @@ const consumeResponse = async (
         ? error
         : new AgentInvocationError('network', 'Streaming response failed.', { cause: error }));
 
-    failure.applicationStarted = evidence.applicationStarted;
-    failure.rawExcerpt = createRawExcerpt(evidence.text);
-    throw failure;
+    throw new AgentInvocationError(failure.code, failure.message, {
+      cause: failure,
+      applicationStarted: evidence.applicationStarted,
+      rawExcerpt: createRawExcerpt(evidence.text),
+    });
   } finally {
     clearTimeout(transportIdle);
     clearTimeout(applicationIdle);

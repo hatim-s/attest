@@ -14,9 +14,8 @@ import {
   requestWithRetries,
   retryDelay,
   wait,
-  withAttemptDuration,
-  type CompletedHttpResponse,
   type ExchangeContext,
+  type ExchangeOutcome,
 } from './mapped-http-execution.js';
 import { assertStaticUrlAuthority, type MaterializedHttpRequest } from './request-template.js';
 import { redactTransportText } from './redaction.js';
@@ -132,7 +131,7 @@ const runPolling = async (
   request: AgentRequest,
   submission: MaterializedHttpRequest,
   context: ExchangeContext,
-): Promise<CompletedHttpResponse> => {
+): Promise<ExchangeOutcome> => {
   const { policy, retry: retryPolicy, signal } = context;
   assertStatusUrlTemplate(transport);
   const idempotencyHeader = transport.idempotency_header;
@@ -163,6 +162,7 @@ const runPolling = async (
     delayFor: pollingDelay,
   });
 
+  if (!submitted.ok) return submitted;
   const jobId = readJsonPointer(submitted.response.raw, transport.job_id_pointer);
 
   if (!isString(jobId) && !isNumber(jobId)) {
@@ -189,16 +189,18 @@ const runPolling = async (
   for (;;) {
     await wait(interval, signal, policy.callerSignal);
 
-    const { durationMs: polledDurationMs, response: polled } = await requestWithRetries(
-      pollRequest,
-      context,
-      { allowRetry: true, delayFor: pollingDelay },
-    );
+    const polledOutcome = await requestWithRetries(pollRequest, context, {
+      allowRetry: true,
+      delayFor: pollingDelay,
+    });
 
+    if (!polledOutcome.ok) return polledOutcome;
+    const { durationMs: polledDurationMs, response: polled } = polledOutcome;
     const status = readJsonPointer(polled.raw, transport.status_pointer);
 
     if (transport.success_values.some((value) => isDeepStrictEqual(value, status))) {
       return {
+        ok: true,
         durationMs: polledDurationMs,
         response: polled,
         remoteJobId:
@@ -207,10 +209,11 @@ const runPolling = async (
     }
 
     if (transport.failure_values.some((value) => isDeepStrictEqual(value, status))) {
-      throw withAttemptDuration(
-        pollingFailure(transport, polled, policy.secrets),
-        polledDurationMs,
-      );
+      return {
+        ok: false,
+        durationMs: polledDurationMs,
+        error: pollingFailure(transport, polled, policy.secrets),
+      };
     }
 
     const next = parseRetryAfter(polled.headers['retry-after']) ?? interval * 2;
