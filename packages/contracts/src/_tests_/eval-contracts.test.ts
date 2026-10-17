@@ -190,6 +190,85 @@ describe('eval event conformance and sequencing', () => {
     expect(evalEventStreamSchema.safeParse(events.slice(0, -1)).success).toBe(false);
   });
 
+  it('rejects a second run_started inside an otherwise valid stream', async () => {
+    const events = evalEventStreamSchema.parse(await readJsonlFixture('eval-run/events.jsonl'));
+
+    const candidate = [events[0]!, events[0]!, ...events.slice(1)].map((event, sequence) => ({
+      ...event,
+      sequence,
+    }));
+
+    const result = evalEventStreamSchema.safeParse(candidate);
+
+    expect(result.success).toBe(false);
+
+    if (!result.success)
+      expect(result.error.issues).toContainEqual(
+        expect.objectContaining({
+          path: [1, 'event'],
+          message: 'run_started must occur only at stream position zero',
+        }),
+      );
+  });
+
+  it('rejects restarting a completed case identity at a fresh configured index', async () => {
+    const events = evalEventStreamSchema.parse(await readJsonlFixture('eval-run/events.jsonl'));
+
+    const [
+      started,
+      firstStart,
+      secondStart,
+      firstCompletion,
+      secondCompletion,
+      completed,
+      resultEvent,
+    ] = events;
+
+    if (
+      firstStart?.event !== 'case_started' ||
+      secondStart?.event !== 'case_started' ||
+      firstCompletion?.event !== 'case_completed' ||
+      secondCompletion?.event !== 'case_completed'
+    )
+      throw new Error('Golden case lifecycle drifted.');
+
+    const candidate = [
+      started!,
+      secondStart,
+      firstCompletion,
+      {
+        ...firstStart,
+        data: {
+          ...firstStart.data,
+          test_id: secondStart.data.test_id,
+          case_id: secondStart.data.case_id,
+        },
+      },
+      {
+        ...secondCompletion,
+        data: {
+          ...secondCompletion.data,
+          test_id: secondStart.data.test_id,
+          case_id: secondStart.data.case_id,
+        },
+      },
+      completed!,
+      resultEvent!,
+    ].map((event, sequence) => ({ ...event, sequence }));
+
+    const result = evalEventStreamSchema.safeParse(candidate);
+
+    expect(result.success).toBe(false);
+
+    if (!result.success)
+      expect(result.error.issues).toContainEqual(
+        expect.objectContaining({
+          path: [3, 'data', 'configured_index'],
+          message: 'case starts must have unique identities and configured indexes',
+        }),
+      );
+  });
+
   it('freezes the complete 0/1/2/3/4/130 exit-code matrix and shared final result envelope', async () => {
     const events = evalEventStreamSchema.parse(await readJsonlFixture('eval-run/events.jsonl'));
     const resultEvent = events.at(-1);

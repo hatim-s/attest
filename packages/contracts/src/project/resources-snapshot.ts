@@ -277,7 +277,10 @@ const projectResourcesSchema = z
     for (const resourceType of resourceTypes) {
       reportDuplicates({
         values: resourceIds[resourceType],
-        pathFor: (index) => [resourceType, index, 'id'],
+        pathFor: (index) =>
+          resourceType === 'datasets'
+            ? [resourceType, index, 'metadata', 'id']
+            : [resourceType, index, 'id'],
         label: 'resource id',
         context,
       });
