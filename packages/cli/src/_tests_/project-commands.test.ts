@@ -1,7 +1,7 @@
 import { access, mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
-import { cliHelpSchema, isJsonValue, type JsonValue } from '@attest/contracts';
+import { cliHelpSchema, isJsonObject, isJsonValue, type JsonValue } from '@attest/contracts';
 import { applyProjectMutation, loadProject } from '@attest/local/project';
 import { openStore } from '@attest/local/store';
 import { describe, expect, it } from 'vitest';
@@ -14,17 +14,14 @@ import {
 } from './support/cli-test-support.js';
 import { projectResources } from './support/project-fixture.js';
 
-const isDocument = (value: JsonValue): value is Record<string, JsonValue> =>
-  value !== null && typeof value === 'object' && !Array.isArray(value);
-
 const hasSourceDiagnostics = (
   value: JsonValue | undefined,
 ): value is { diagnostics: { source: string }[] } =>
   value !== undefined &&
-  isDocument(value) &&
+  isJsonObject(value) &&
   Array.isArray(value.diagnostics) &&
   value.diagnostics.every(
-    (item): item is { source: string } => isDocument(item) && typeof item.source === 'string',
+    (item): item is { source: string } => isJsonObject(item) && typeof item.source === 'string',
   );
 
 describe('project commands', () => {
@@ -214,7 +211,7 @@ describe('project commands', () => {
     for (const path of ['attest/agents/support.json', 'attest/metrics/correct.json']) {
       const resource: unknown = JSON.parse(await readFile(join(root, path), 'utf8'));
 
-      if (!isJsonValue(resource) || !isDocument(resource))
+      if (!isJsonValue(resource) || !isJsonObject(resource))
         throw new Error('Expected a JSON resource object.');
       await writeFile(
         join(root, path),

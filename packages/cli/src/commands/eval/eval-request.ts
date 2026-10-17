@@ -1,5 +1,6 @@
 import {
   COMMAND_REQUEST_SCHEMA_ID,
+  isJsonObject,
   evalCancelRequestSchema,
   evalOutputModeSchema,
   evalRunRequestSchema,
@@ -14,45 +15,30 @@ import { AttestCliError } from '../../errors/cli-error.js';
 import { assertNoRequestOverlap } from '../shared/command-request.js';
 import { promptWithSignal, type PromptContext } from '../shared/required-input.js';
 
-type EvalRunRequestFields = {
-  all?: boolean;
-  baseline?: string;
-  caseIds?: readonly string[];
+type EvalRunRequestFields = Partial<Pick<EvalRunRequest, 'tags' | 'folders' | 'output'>> & {
+  all?: Extract<EvalRunRequest, { all: true }>['all'];
+  baseline?: EvalRunRequest['baseline_run_id'];
+  caseIds?: EvalRunRequest['case_ids'];
   concurrency?: string;
-  datasetIds?: readonly string[];
-  folders?: readonly string[];
-  junit?: string;
-  output?: EvalOutputMode;
+  datasetIds?: EvalRunRequest['dataset_ids'];
+  junit?: EvalRunRequest['junit_path'];
   sample?: string;
   seed?: string;
-  tags?: readonly string[];
-  testIds?: readonly string[];
+  testIds?: Extract<EvalRunRequest, { test_ids: string[] }>['test_ids'];
   timeout?: string;
-  watch?: boolean;
+  watch?: Extract<EvalRunRequest, { output: 'human' }>['watch'];
 };
 
-/** JSON fields assembled from CLI flags before schema validation of ids and numeric bounds. */
-type EvalRunRequestDraft = {
-  schema: typeof COMMAND_REQUEST_SCHEMA_ID;
-  command: 'eval.run';
-  output: EvalOutputMode;
-  all?: true;
-  test_ids?: string[];
-  case_ids?: string[];
-  tags?: string[];
-  folders?: string[];
-  dataset_ids?: string[];
-  sample?: NonNullable<EvalRunRequest['sample']>;
-  concurrency?: number;
-  timeout_ms?: number;
-  baseline_run_id?: string;
-  junit_path?: string;
-  watch?: boolean;
-};
+/** Flags remain a draft until numeric bounds and selection validate together. */
+type EvalRunRequestDraft = Pick<EvalRunRequest, 'schema' | 'command' | 'output'> &
+  Partial<Omit<EvalRunRequest, 'schema' | 'command' | 'output'>> & {
+    all?: Extract<EvalRunRequest, { all: true }>['all'];
+    test_ids?: Extract<EvalRunRequest, { test_ids: string[] }>['test_ids'];
+    watch?: Extract<EvalRunRequest, { output: 'human' }>['watch'];
+  };
 
-type EvalCancelRequestFields = {
-  output?: Exclude<EvalOutputMode, 'jsonl'>;
-  runId?: string;
+type EvalCancelRequestFields = Partial<Pick<EvalCancelRequest, 'output'>> & {
+  runId?: EvalCancelRequest['run_id'];
 };
 
 type SchemaIssue = { message: string; path: readonly PropertyKey[] };
@@ -61,13 +47,9 @@ type SchemaIssue = { message: string; path: readonly PropertyKey[] };
 const issueDiagnostics = (issues: readonly SchemaIssue[]): JsonValue =>
   issues.map(({ message, path }) => ({ message, path: `/${path.map(String).join('/')}` }));
 
-/** Narrows a decoded JSON request to its object fields. */
-const isRequestDocument = (document: JsonValue): document is Record<string, JsonValue> =>
-  typeof document === 'object' && document !== null && !Array.isArray(document);
-
 /** Reads the `output` a request document asks for, even when the rest of it is invalid. */
 const requestedOutput = (document: JsonValue): EvalOutputMode | undefined => {
-  if (!isRequestDocument(document)) {
+  if (!isJsonObject(document)) {
     return undefined;
   }
 

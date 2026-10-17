@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 
 import {
   AGENT_PROTOCOL,
+  isJsonObject,
   cliHelpSchema,
   type AgentResource,
   type JsonValue,
@@ -48,14 +49,11 @@ type WebSocketFixtureModule = {
   }) => Promise<WebSocketFixtureServer>;
 };
 
-const isProbeRecord = (value: JsonValue | undefined): value is Record<string, JsonValue> =>
-  value !== undefined && value !== null && typeof value === 'object' && !Array.isArray(value);
-
 const isRecordedProbe = (value: JsonValue | undefined): value is { recorded_run_id: string } =>
-  isProbeRecord(value) && typeof value.recorded_run_id === 'string';
+  isJsonObject(value) && typeof value.recorded_run_id === 'string';
 
 const isFixtureRequest = (value: JsonValue): value is { request_id: string } =>
-  isProbeRecord(value) && typeof value.request_id === 'string';
+  isJsonObject(value) && typeof value.request_id === 'string';
 
 /** A TTY terminal whose prompt answers come from `answer`. */
 const tty = (answer: (question: string) => string): Partial<CliInteraction> => ({

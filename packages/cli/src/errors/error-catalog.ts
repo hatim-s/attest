@@ -5,6 +5,8 @@ import {
   type CliErrorDefinition,
 } from '@attest/contracts';
 
+import type { LocalErrorCode } from '@attest/local';
+
 const CLI_ERROR_DEFINITIONS = {
   cloud_auth_required: {
     meaning: 'Cloud authentication is required.',
@@ -205,9 +207,9 @@ const CLI_ERROR_DEFINITIONS = {
       'Validate the OTLP JSON and provide `--trace-id` when the input has multiple traces.',
     ],
   },
-} satisfies Record<string, Omit<CliErrorDefinition, 'code'>>;
+} satisfies Record<LocalErrorCode, Omit<CliErrorDefinition, 'code'>>;
 
-type CliErrorCode = keyof typeof CLI_ERROR_DEFINITIONS;
+type CliErrorCode = LocalErrorCode;
 
 /** Looks up the exit code and retryability that every renderer reports for one error code. */
 const getCliErrorDefinition = (code: CliErrorCode): CliErrorDefinition => ({

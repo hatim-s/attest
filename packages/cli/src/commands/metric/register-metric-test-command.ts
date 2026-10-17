@@ -1,5 +1,5 @@
 import { COMMAND_REQUEST_SCHEMA_ID } from '@attest/contracts';
-import { runMetricTestCommand } from '@attest/local/metric';
+import { runMetricTestCommand, type MetricTestCommandOptions } from '@attest/local/metric';
 import type { Command } from 'commander';
 
 import { setCliCommandHelpMetadata } from '../../help/command-help.js';
@@ -15,7 +15,8 @@ import { renderCommandResult } from '../shared/command-result.js';
 import { withProcessSignals } from '../shared/process-signals.js';
 import { requiredInput } from '../shared/required-input.js';
 
-type TestOptions = CommonCliOptions & { fixture?: string; fromJson?: string };
+type TestOptions = CommonCliOptions &
+  Partial<Pick<MetricTestCommandOptions, 'fixture'>> & { fromJson?: string };
 
 /** Registers metric evaluation against a strict local fixture. */
 const registerMetricTestCommand = (metric: Command, context: CommandContext): void => {
