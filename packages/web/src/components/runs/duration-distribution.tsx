@@ -2,7 +2,7 @@ import { useCallback, useMemo, useRef } from 'react';
 import type { CaseSummary } from '@attest/core/records';
 import type { EChartsCoreOption } from 'echarts/core';
 import { createDurationHistogram } from './loaded-analytics.js';
-import { useChart, type ChartPalette } from './distribution-charts.js';
+import { useChart, categoryAxis, valueAxis, type ChartPalette } from '../charts/use-chart.js';
 
 /** Keeps durations in milliseconds so equal-width bars represent equal elapsed intervals. */
 const DurationDistribution = ({ cases }: { cases: CaseSummary[] }) => {
@@ -26,26 +26,15 @@ const DurationDistribution = ({ cases }: { cases: CaseSummary[] }) => {
       legend: { top: 0, textStyle: { color: palette.text } },
       tooltip: { trigger: 'item', renderMode: 'richText' },
       xAxis: {
-        type: 'category',
-        name: 'Duration (ms)',
-        nameLocation: 'middle',
+        ...categoryAxis(palette, 'Duration (ms)', labels),
         nameGap: 48,
-        data: labels,
         axisLabel: {
           color: palette.muted,
           rotate: 25,
           formatter: (label: string) => label.replace(' inclusive', '').replace(' exclusive', ''),
         },
-        axisLine: { lineStyle: { color: palette.border } },
       },
-      yAxis: {
-        type: 'value',
-        name: 'Cases',
-        minInterval: 1,
-        axisLabel: { color: palette.muted },
-        nameTextStyle: { color: palette.muted },
-        splitLine: { lineStyle: { color: palette.border } },
-      },
+      yAxis: { ...valueAxis(palette, 'Cases'), minInterval: 1 },
       series: (
         [
           { verdict: 'pass', name: '✓ Pass', color: palette.accent },

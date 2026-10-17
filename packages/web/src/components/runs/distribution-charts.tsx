@@ -1,14 +1,10 @@
-import { useCallback, useEffect, useMemo, useRef, type RefObject } from 'react';
+import { useCallback, useMemo, useRef } from 'react';
 
-import { BarChart, PieChart } from 'echarts/charts';
-import { GridComponent, LegendComponent, TooltipComponent } from 'echarts/components';
-import { init, use, type EChartsCoreOption } from 'echarts/core';
-import { CanvasRenderer } from 'echarts/renderers';
+import type { EChartsCoreOption } from 'echarts/core';
+import { useChart, categoryAxis, valueAxis, type ChartPalette } from '../charts/use-chart.js';
 
 import { aggregateCases } from '@attest/core/analytics';
 import type { CaseSummary } from '@attest/core/records';
-
-use([BarChart, PieChart, GridComponent, LegendComponent, TooltipComponent, CanvasRenderer]);
 
 type DistributionChartsProps = {
   cases: CaseSummary[];
@@ -20,11 +16,6 @@ type ScoreBin = {
   count: number;
   label: string;
 };
-
-type ChartPalette = Record<
-  'accent' | 'border' | 'danger' | 'muted' | 'text' | 'warning' | 'series-1' | 'surface',
-  string
->;
 
 const SCORE_LABELS = ['0–0.2', '0.2–0.4', '0.4–0.6', '0.6–0.8', '0.8–1.0'];
 
@@ -42,63 +33,6 @@ const createScoreHistogram = (cases: CaseSummary[]): ScoreBin[] => {
   return SCORE_LABELS.map((label, index) => ({ count: counts[index]!, label }));
 };
 
-/** Reads chart colors from the theme variables in styles.css. */
-const readPalette = (): ChartPalette => {
-  const styles = getComputedStyle(document.documentElement);
-  const read = (name: keyof ChartPalette) => styles.getPropertyValue(`--${name}`).trim();
-
-  return {
-    accent: read('accent'),
-    'series-1': read('series-1'),
-    surface: read('surface'),
-    border: read('border'),
-    danger: read('danger'),
-    muted: read('muted'),
-    text: read('text'),
-    warning: read('warning'),
-  };
-};
-
-/**
- * Owns one ECharts instance. Resizes with its container and recolors when the dashboard
- * changes `data-theme` on the root element.
- */
-const useChart = (
-  containerRef: RefObject<HTMLDivElement | null>,
-  createOption: (palette: ChartPalette) => EChartsCoreOption,
-): void => {
-  const chartRef = useRef<ReturnType<typeof init> | null>(null);
-  const optionRef = useRef(createOption);
-
-  useEffect(() => {
-    const container = containerRef.current;
-
-    if (container === null) return;
-    const chart = init(container);
-    chartRef.current = chart;
-    const resizeObserver = new ResizeObserver(() => chart.resize());
-    resizeObserver.observe(container);
-
-    const themeObserver = new MutationObserver(() =>
-      chart.setOption(optionRef.current(readPalette())),
-    );
-
-    themeObserver.observe(document.documentElement, { attributeFilter: ['data-theme'] });
-
-    return () => {
-      themeObserver.disconnect();
-      resizeObserver.disconnect();
-      chartRef.current = null;
-      chart.dispose();
-    };
-  }, [containerRef]);
-
-  useEffect(() => {
-    optionRef.current = createOption;
-    chartRef.current?.setOption(createOption(readPalette()));
-  }, [createOption]);
-};
-
 /** Renders the score histogram and verdict pie for the loaded cases. */
 const DistributionCharts = ({ cases, isLoading, totalCases }: DistributionChartsProps) => {
   const scoreChartRef = useRef<HTMLDivElement>(null);
@@ -114,39 +48,26 @@ const DistributionCharts = ({ cases, isLoading, totalCases }: DistributionCharts
   }, [cases]);
 
   const scoreOption = useCallback(
-    ({ 'series-1': seriesColor, border, muted, text }: ChartPalette): EChartsCoreOption => ({
+    (palette: ChartPalette): EChartsCoreOption => ({
       animationDuration: 250,
       grid: { left: 55, right: 16, top: 35, bottom: 55 },
       tooltip: { trigger: 'item', renderMode: 'richText' },
-      xAxis: {
-        name: 'Mean score',
-        nameLocation: 'middle',
-        nameGap: 30,
-        nameTextStyle: { color: muted },
-        axisLabel: { color: muted, fontSize: 10 },
-        axisLine: { lineStyle: { color: border } },
-        data: histogram.map(({ label }) => label),
-        type: 'category',
-      },
-      yAxis: {
-        barMaxWidth: 24,
-        name: 'Cases',
-        minInterval: 1,
-        nameTextStyle: { color: muted },
-        axisLabel: { color: muted, fontSize: 10, precision: 0 },
-        splitLine: { lineStyle: { color: border } },
-        type: 'value',
-      },
+      xAxis: categoryAxis(
+        palette,
+        'Mean score',
+        histogram.map(({ label }) => label),
+      ),
+      yAxis: { ...valueAxis(palette, 'Cases'), minInterval: 1 },
       series: [
         {
           data: histogram.map(({ count }) => count),
-          itemStyle: { borderRadius: [4, 4, 0, 0], color: seriesColor },
+          itemStyle: { borderRadius: [4, 4, 0, 0], color: palette['series-1'] },
           barMaxWidth: 24,
           name: 'Cases',
           type: 'bar',
         },
       ],
-      textStyle: { color: text },
+      textStyle: { color: palette.text },
     }),
     [histogram],
   );
@@ -255,11 +176,4 @@ const DistributionCharts = ({ cases, isLoading, totalCases }: DistributionCharts
   );
 };
 
-export {
-  DistributionCharts,
-  createScoreHistogram,
-  useChart,
-  type ChartPalette,
-  type DistributionChartsProps,
-  type ScoreBin,
-};
+export { DistributionCharts, createScoreHistogram, type DistributionChartsProps, type ScoreBin };
