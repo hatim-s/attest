@@ -36,48 +36,64 @@ const CaseTable = ({
 
   return (
     <div className="case-table-frame">
-      <div className="case-table-header" role="row">
-        {headers.map((header) => (
-          <div key={header} role="columnheader">
-            {header}
+      <div role="table" aria-label="Cases" aria-rowcount={hasNextPage ? -1 : cases.length + 1}>
+        <div className="case-table-header" role="row" aria-rowindex={1}>
+          {headers.map((header) => (
+            <div key={header} role="columnheader">
+              {header}
+            </div>
+          ))}
+        </div>
+        <div className="case-table-scroll" ref={scrollRef} role="rowgroup">
+          <div
+            className="case-table-spacer"
+            role="presentation"
+            style={{ height: virtualizer.getTotalSize() }}
+          >
+            {virtualizer.getVirtualItems().map((virtualRow) => {
+              const item = cases[virtualRow.index];
+
+              if (item === undefined) return null;
+
+              return (
+                <div
+                  className="case-table-row"
+                  key={virtualRow.key}
+                  role="row"
+                  aria-rowindex={virtualRow.index + 2}
+                  style={{
+                    height: virtualRow.size,
+                    transform: `translateY(${virtualRow.start}px)`,
+                  }}
+                >
+                  <span className="case-name" role="cell">
+                    {/* The link stretches over the row, so the whole row stays clickable. */}
+                    <Link
+                      className="case-link"
+                      to="/runs/$runId/cases/$suiteName/$caseId"
+                      params={{ runId, suiteName: item.suiteName, caseId: item.caseId }}
+                      search={(previous) => previous}
+                      state={{ caseOpenedFromRun: true }}
+                    >
+                      {item.caseId}
+                    </Link>
+                  </span>
+                  <span className="muted" role="cell">
+                    {item.suiteName}
+                  </span>
+                  <span role="cell">
+                    <Badge tone={item.verdict}>{item.verdict}</Badge>
+                  </span>
+                  <span className="mono" role="cell">
+                    {formatDuration(item.durationMs)}
+                  </span>
+                  <span className="mono" role="cell">
+                    {item.metricCounts.passed}/{item.metricCounts.expected}
+                  </span>
+                </div>
+              );
+            })}
           </div>
-        ))}
-      </div>
-      <div className="case-table-scroll" ref={scrollRef} role="rowgroup">
-        <div className="case-table-spacer" style={{ height: virtualizer.getTotalSize() }}>
-          {virtualizer.getVirtualItems().map((virtualRow) => {
-            const item = cases[virtualRow.index];
-
-            if (item === undefined) return null;
-
-            return (
-              <Link
-                className="case-table-row"
-                key={virtualRow.key}
-                to="/runs/$runId/cases/$suiteName/$caseId"
-                params={{ runId, suiteName: item.suiteName, caseId: item.caseId }}
-                search={(previous) => previous}
-                role="row"
-                style={{ height: virtualRow.size, transform: `translateY(${virtualRow.start}px)` }}
-              >
-                <span className="case-name" role="cell">
-                  {item.caseId}
-                </span>
-                <span className="muted" role="cell">
-                  {item.suiteName}
-                </span>
-                <span role="cell">
-                  <Badge tone={item.verdict}>{item.verdict}</Badge>
-                </span>
-                <span className="mono" role="cell">
-                  {formatDuration(item.durationMs)}
-                </span>
-                <span className="mono" role="cell">
-                  {item.metricCounts.passed}/{item.metricCounts.expected}
-                </span>
-              </Link>
-            );
-          })}
         </div>
       </div>
       {hasNextPage ? (

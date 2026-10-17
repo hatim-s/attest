@@ -27,6 +27,7 @@ const MetricErrorCases = ({ cases, runId }: { cases: CaseSummary[]; runId: strin
                   to="/runs/$runId/cases/$suiteName/$caseId"
                   params={{ runId, suiteName: item.suiteName, caseId: item.caseId }}
                   search={{ tab: 'distributions' }}
+                  state={{ caseOpenedFromRun: true }}
                 >
                   {item.caseId}
                 </Link>

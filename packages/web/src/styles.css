@@ -302,14 +302,50 @@ pre,
 }
 .tabs {
   display: flex;
-  gap: 5px;
-  margin: 30px 0 12px;
-  padding-bottom: 10px;
+  gap: 4px;
+  margin: 30px 0 16px;
   border-bottom: 1px solid var(--border);
 }
-.tabs .button span {
-  opacity: 0.65;
-  margin-left: 5px;
+.tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: -1px;
+  padding: 9px 12px;
+  border-bottom: 2px solid transparent;
+  color: var(--muted);
+  font-size: 14px;
+}
+.tab:hover {
+  color: var(--text);
+}
+.tab[aria-current='page'] {
+  border-bottom-color: var(--accent);
+  color: var(--text);
+  font-weight: 600;
+}
+.tab span {
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.topbar-nav {
+  display: flex;
+  gap: 4px;
+  margin-right: 8px;
+}
+.topbar-nav a {
+  padding: 7px 11px;
+  border-radius: 9px;
+  color: var(--muted);
+}
+.topbar-nav a:hover {
+  color: var(--text);
+}
+.topbar-nav a[aria-current='page'] {
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  font-weight: 600;
 }
 .button {
   border: 1px solid var(--border);
@@ -333,7 +369,9 @@ pre,
 }
 .button:focus-visible,
 .run-list-item:focus-visible,
-.case-table-row:focus-visible,
+.tab:focus-visible,
+.topbar-nav a:focus-visible,
+.case-table-row:has(.case-link:focus-visible),
 select:focus-visible {
   outline: 3px solid color-mix(in srgb, var(--accent) 32%, transparent);
   outline-offset: 2px;
@@ -438,6 +476,14 @@ select:focus-visible {
 }
 .case-table-row:hover {
   background: var(--surface-muted);
+}
+.case-link {
+  outline: none;
+}
+.case-link::after {
+  content: '';
+  position: absolute;
+  inset: 0;
 }
 .case-name {
   font-weight: 700;

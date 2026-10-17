@@ -164,6 +164,11 @@ declare module '@tanstack/react-router' {
   interface Register {
     router: ReturnType<typeof createDashboardRouter>;
   }
+
+  interface HistoryState {
+    /** Set by links on the run page, so the case drawer knows Back returns to that run. */
+    caseOpenedFromRun?: true;
+  }
 }
 
 export { createDashboardRouter };
