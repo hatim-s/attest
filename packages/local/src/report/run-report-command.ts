@@ -1,5 +1,4 @@
 import { randomUUID } from 'node:crypto';
-import { z } from 'zod';
 import { link, open, rename, unlink } from 'node:fs/promises';
 
 import { summarizeCaseRecord } from '@attest/core';
@@ -10,8 +9,10 @@ import { LocalError } from '../errors/index.js';
 import { prepareEvalProjectFile } from '../commands/eval/eval-project-path.js';
 import { withReadonlyRunStoreFile } from '../commands/run-store/readonly-run-store.js';
 import { withRunNotFound } from '../commands/run-store/run-not-found.js';
-import { createReportHtml } from './create-report-html.js';
+import { createReportHtml, type ReportData } from './create-report-html.js';
+import { readBoundedRunDetails } from '../store/bounded-run-details.js';
 
+// Bound embedded HTML size and the per-case detail queries needed to generate it.
 const MAX_REPORT_CASES = 10_000;
 
 type RunReportCommandOptions = {
@@ -48,17 +49,19 @@ const runReportCommand = async (
     });
 
   const runWithCases = await withRunNotFound(
-    () => withReadonlyRunStoreFile(storePath, (store) => store.getRunWithCases(options.runId)),
+    () =>
+      withReadonlyRunStoreFile(storePath, (store) =>
+        readBoundedRunDetails(store, { runId: options.runId, limit: MAX_REPORT_CASES }),
+      ),
     runNotFound,
   );
 
   if (runWithCases === undefined) throw runNotFound();
 
-  // Reports stay bounded: only the first MAX_REPORT_CASES cases are embedded.
-  const cases = runWithCases.cases.slice(0, MAX_REPORT_CASES);
-  const truncated = runWithCases.cases.length > MAX_REPORT_CASES;
+  const cases = runWithCases.cases;
+  const truncated = runWithCases.totalCaseCount > cases.length;
 
-  const reportData = {
+  const reportData: ReportData = {
     schema: 'attest.report',
     generatedAt: new Date().toISOString(),
     run: runWithCases.run,
@@ -82,10 +85,7 @@ const runReportCommand = async (
 
   try {
     handle = await open(temporaryPath, 'wx', 0o600);
-    await handle.writeFile(
-      createReportHtml(dashboardHtml, z.json().parse(JSON.parse(JSON.stringify(reportData)))),
-      'utf8',
-    );
+    await handle.writeFile(createReportHtml(dashboardHtml, reportData), 'utf8');
     await handle.sync();
     await handle.close();
     handle = undefined;
@@ -115,7 +115,7 @@ const runReportCommand = async (
   return {
     caseCount: cases.length,
     outputPath,
-    totalCaseCount: runWithCases.cases.length,
+    totalCaseCount: runWithCases.totalCaseCount,
     truncated: truncated,
   };
 };
