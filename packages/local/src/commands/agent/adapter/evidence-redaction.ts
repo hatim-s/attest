@@ -399,13 +399,15 @@ const redactStoredAttempt = (
       };
 };
 
-/** Redacts metric evidence while preserving identities and discriminants used by persistence. */
+/**
+ * Redacts metric evidence while preserving identities and discriminants used by persistence.
+ * Metrics score unredacted output and can echo it, so sensitive field names are redacted even
+ * when no secret values are configured.
+ */
 const redactMetricEvaluation = (
   evaluation: StoredMetricEvaluation,
   secrets: readonly string[],
 ): StoredMetricEvaluation => {
-  if (secrets.length === 0) return evaluation;
-
   const evidence = {
     rationale:
       evaluation.rationale === undefined
