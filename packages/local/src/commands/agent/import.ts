@@ -104,4 +104,4 @@ const runAgentImportCommand = async (
   });
 };
 
-export { runAgentImportCommand, type AgentImportCommandOptions };
+export { runAgentImportCommand };
