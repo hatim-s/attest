@@ -1,5 +1,5 @@
 {
-  "$comment": "Runtime-only invariants: project resource references, duplicate identities, and manifest parity follow projectResourcesSchema; source file parity and hashes require resolvePortableProject.",
+  "$comment": "Runtime-only invariants: file text limits follow files.$comment; project resource references, duplicate identities, and manifest parity follow projectResourcesSchema; polling needs exactly one status URL source, ordered intervals, and disjoint terminal values; sandbox destinations are unique after relative-path normalization; HTTP body_encoding requires a body, and raw bodies are strings; stream incremental output pointer and mode appear together; WebSocket timeouts nest, pointers are distinct, and authorization headers use secret references; regex checks must compile, and threshold checks need at least one comparison; source file parity and hashes require resolvePortableProject.",
   "$defs": {
     "AgentResource": {
       "additionalProperties": false,
@@ -2973,9 +2973,11 @@
   "additionalProperties": false,
   "properties": {
     "files": {
+      "$comment": "Runtime-only invariants: files contain no NUL and use at most 1 MiB per file and 5 MiB total decoded UTF-8 bytes.",
       "additionalProperties": {
         "type": "string"
       },
+      "maxProperties": 100,
       "propertyNames": {
         "maxLength": 240,
         "pattern": "^(?:attest\\.project\\.json|attest\\/(?!.*(?:^|\\/)\\.)[a-zA-Z0-9_-]+(?:\\/[a-zA-Z0-9_-]+)*\\/[a-zA-Z0-9_-]+\\.(?:meta\\.json|json|jsonl|ts|py))$",
