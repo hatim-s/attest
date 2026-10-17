@@ -85,7 +85,6 @@ const transactionJournalSchema = z
     ),
     entries: z.array(transactionJournalEntrySchema).min(1),
     manifest_path: z.literal('attest.project.json'),
-    published_count: z.number().int().nonnegative(),
     schema: z.literal(TRANSACTION_JOURNAL_SCHEMA),
     status: z.enum(['committed', 'prepared', 'publishing', 'rolled_back', 'rolling_back']),
     transaction_id: z.uuid(),
@@ -263,7 +262,6 @@ const prepareTransaction = async (
       created_at: new Date().toISOString(),
       status: 'prepared',
       manifest_path: 'attest.project.json',
-      published_count: 0,
       created_directories: await missingParentDirectories(
         root,
         changes.flatMap(({ type, path }) => (type === 'write' ? [path] : [])),

@@ -17,7 +17,7 @@ import type { RunRecord } from '@attest/core';
 import { executeResolvedEvalPlan, type EvalTerminalFailureFactory } from '@attest/runtime';
 
 import { LocalError } from '../errors/index.js';
-import { createRunIdentity, openReadonlyRunStore } from '../store/index.js';
+import { createRunIdentity, openReadonlyRunStore } from '../store/run-store.js';
 import { createEvalCaseRunner } from '../commands/eval/eval-agent-runner.js';
 import {
   detachEvalRun,

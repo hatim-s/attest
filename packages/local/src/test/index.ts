@@ -1,11 +1,8 @@
 export { parseJsonFlag } from '../commands/test/test-command-input.js';
 
-export { readCommandRequest, validateCommandRequest } from '../commands/shared/command-request.js';
+export { validateCommandRequest } from '../commands/shared/command-request.js';
 
-export {
-  prepareImportSource,
-  type PreparedImportSource,
-} from '../commands/test/import/tabular-import-adapter.js';
+export { prepareImportSource } from '../commands/test/import/tabular-import-adapter.js';
 
 export { type TestAuthoringCommand } from '../commands/test/test-mutation-build.js';
 

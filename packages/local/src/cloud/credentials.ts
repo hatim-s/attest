@@ -120,6 +120,5 @@ export {
   readCloudCredentials,
   writeCloudCredentials,
   removeCloudCredentials,
-  defaultCredentialPath,
   type CloudCredentials,
 };

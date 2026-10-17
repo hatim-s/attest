@@ -16,16 +16,9 @@ export { runAgentRenameCommand } from '../commands/agent/rename.js';
 
 export { readAgentTestInput, runAgentTestCommand } from '../commands/agent/test.js';
 
-export {
-  type AgentImportCommandOptions,
-  type AgentMutationCommandOptions,
-  type AgentTestCommandOptions,
-} from '../commands/agent/types.js';
-
 export { parseDuration } from '../commands/agent/authoring/input-parsers.js';
 
 export {
-  AGENT_ADD_FLAGS,
   agentAddFlagConflicts,
   createAgentResource,
 } from '../commands/agent/authoring/resource-builder.js';
