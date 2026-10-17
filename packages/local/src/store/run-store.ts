@@ -6,6 +6,10 @@ import { Kysely } from 'kysely';
 
 import {
   canonicalStringify,
+  pageQuerySchema,
+  type PageQuery,
+  type RunPage,
+  type CaseSummaryPage,
   StoreError,
   type AttestStore,
   type CaseRecord,
@@ -39,8 +43,6 @@ import type { SqliteHandle } from './internal/sqlite-handle.js';
 import { executeStoreOperation } from './internal/store-operation.js';
 import { migrateToLatest, validateReadableSchema } from './migration-runner.js';
 import type { Database, MetricResultsTable, RunsTable } from './schema.js';
-
-const MAX_CASE_SUMMARY_LIMIT = 1_000;
 
 const migrationLocks = new Map<string, ReturnType<typeof createLock>>();
 
@@ -214,18 +216,50 @@ class SqliteRunStore implements RunStore {
   }
 
   /** Lists runs in deterministic newest-first order. */
-  async listRuns(limit?: number): Promise<RunRecord[]> {
-    let query = this.#database
+  async listRuns(query: PageQuery = {}): Promise<RunPage> {
+    const limit = this.#pageLimit(query);
+
+    let select = this.#database
       .selectFrom('runs')
       .selectAll()
       .orderBy('created_at', 'desc')
-      .orderBy('id', 'desc');
+      .orderBy('id', 'desc')
+      .limit(limit + 1);
 
-    if (limit !== undefined) query = query.limit(limit);
-    const rows = await query.execute();
-    const toRecord = await this.#runRecordMapper(rows);
+    if (query.cursor !== undefined) {
+      const anchor = await this.#database
+        .selectFrom('runs')
+        .select(['created_at', 'id'])
+        .where('id', '=', query.cursor)
+        .executeTakeFirst();
 
-    return rows.map(toRecord);
+      if (anchor === undefined)
+        throw new StoreError('INVALID_CURSOR', `Run cursor ${query.cursor} is unknown.`);
+      select = select.where((eb) =>
+        eb.or([
+          eb('created_at', '<', anchor.created_at),
+          eb.and([eb('created_at', '=', anchor.created_at), eb('id', '<', anchor.id)]),
+        ]),
+      );
+    }
+
+    const rows = await select.execute();
+    const pageRows = rows.slice(0, limit);
+    const items = pageRows.map(await this.#runRecordMapper(pageRows));
+
+    return rows.length > limit ? { items, nextCursor: pageRows.at(-1)?.id } : { items };
+  }
+
+  #pageLimit(query: PageQuery): number {
+    const parsed = pageQuerySchema.shape.limit.safeParse(query.limit);
+
+    if (!parsed.success)
+      throw new StoreError(
+        'INVALID_LIMIT',
+        parsed.error.issues[0]?.message ?? parsed.error.message,
+      );
+
+    return parsed.data;
   }
 
   /** Rehydrates case blobs after the caller has established the parent run. */
@@ -277,36 +311,26 @@ class SqliteRunStore implements RunStore {
   }
 
   /** Returns a row-id cursor page without selecting request, response, trace, or diagnostic blobs. */
-  async listCaseSummaries(
-    runId: string,
-    options: { cursor?: string; limit?: number } = {},
-  ): Promise<{ items: CaseSummary[]; nextCursor?: string }> {
+  async listCaseSummaries(runId: string, query: PageQuery = {}): Promise<CaseSummaryPage> {
     await this.#getRunRow(runId);
-    const limit = options.limit ?? 100;
+    const limit = this.#pageLimit(query);
 
-    if (!Number.isInteger(limit) || limit <= 0 || limit > MAX_CASE_SUMMARY_LIMIT) {
-      throw new StoreError(
-        'INVALID_LIMIT',
-        `Case summary limit must be an integer from 1 to ${MAX_CASE_SUMMARY_LIMIT}.`,
-      );
-    }
-
-    if (options.cursor !== undefined) {
+    if (query.cursor !== undefined) {
       const cursor = await this.#database
         .selectFrom('cases')
         .select('run_id')
-        .where('id', '=', options.cursor)
+        .where('id', '=', query.cursor)
         .executeTakeFirst();
 
       if (cursor?.run_id !== runId) {
         throw new StoreError(
           'INVALID_CURSOR',
-          `Case summary cursor ${options.cursor} does not belong to run ${runId}.`,
+          `Case summary cursor ${query.cursor} does not belong to run ${runId}.`,
         );
       }
     }
 
-    let query = this.#database
+    let select = this.#database
       .selectFrom('cases')
       .select([
         'id',
@@ -323,8 +347,8 @@ class SqliteRunStore implements RunStore {
       .orderBy('id')
       .limit(limit + 1);
 
-    if (options.cursor !== undefined) query = query.where('id', '>', options.cursor);
-    const rows = await query.execute();
+    if (query.cursor !== undefined) select = select.where('id', '>', query.cursor);
+    const rows = await select.execute();
     const pageRows = rows.slice(0, limit);
 
     const metrics = await loadMetrics(
@@ -428,11 +452,4 @@ const openRunStoreSnapshot = async (path: string): Promise<RunStore> => {
   }
 };
 
-export {
-  MAX_CASE_SUMMARY_LIMIT,
-  createRunIdentity,
-  openReadonlyRunStore,
-  openRunStoreSnapshot,
-  openStore,
-  type RunStore,
-};
+export { createRunIdentity, openReadonlyRunStore, openRunStoreSnapshot, openStore, type RunStore };

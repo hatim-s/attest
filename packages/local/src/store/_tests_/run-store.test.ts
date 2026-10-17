@@ -105,6 +105,30 @@ afterEach(async () => {
 });
 
 describe('RunStore', () => {
+  it('pages timestamp ties by descending id and rejects unknown cursors', async () => {
+    const { store } = await openTemporaryStore();
+
+    for (const id of ['a', 'c', 'b']) {
+      await store.createRun(
+        { schemaId: 'attest.project', configHash: 'hash', configJson: '{}' },
+        { id, createdAt: '2026-10-18T00:00:00.000Z' },
+      );
+    }
+
+    const ids: string[] = [];
+    let cursor: string | undefined;
+
+    do {
+      const page = await store.listRuns({ cursor, limit: 1 });
+      ids.push(...page.items.map((run) => run.id));
+      cursor = page.nextCursor;
+    } while (cursor !== undefined && ids.length < 4);
+
+    expect(ids).toEqual(['c', 'b', 'a']);
+    await expect(store.listRuns({ cursor: 'unknown' })).rejects.toMatchObject({
+      code: 'INVALID_CURSOR',
+    });
+  });
   it('round-trips runner diagnostics, attempts, warnings, expected metrics, response, and trace', async () => {
     const { store } = await openTemporaryStore();
 
@@ -265,7 +289,7 @@ describe('RunStore', () => {
 
     const recomputed = { totalCases: 1, passedCases: 0, errorCases: 1 };
     expect((await store.getRun(run.id)).summary).toMatchObject(recomputed);
-    expect((await store.listRuns())[0]?.summary).toMatchObject(recomputed);
+    expect((await store.listRuns()).items[0]?.summary).toMatchObject(recomputed);
     expect((await store.listCaseSummaries(run.id)).items[0]?.verdict).toBe('error');
   });
 

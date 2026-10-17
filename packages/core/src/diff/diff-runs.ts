@@ -2,7 +2,7 @@ import { EVAL_RUN_SCHEMA_ID, evalRunSchema, type EvalRun } from '@attest/contrac
 
 import { canonicalStringify } from '../store/internal/canonical-json.js';
 import { StoreError } from '../store/store-error.js';
-import type { RunRecord, RunStore } from '../store/types.js';
+import type { RunRecord, RunSource } from '../store/types.js';
 import { classifyRuns } from './classify.js';
 import type { RunDiff } from './types.js';
 
@@ -49,13 +49,13 @@ const hasSameTests = (base: EvalScope, candidate: EvalScope): boolean =>
  * different test selection compare only shared cases, so skipped cases never read as removals.
  */
 const diffRuns = async (
-  store: RunStore,
+  source: Pick<RunSource, 'getRunWithCases'>,
   baseRunId: string,
   candidateRunId: string,
 ): Promise<RunDiff> => {
   const [base, candidate] = await Promise.all([
-    store.getRunWithCases(baseRunId),
-    store.getRunWithCases(candidateRunId),
+    source.getRunWithCases(baseRunId),
+    source.getRunWithCases(candidateRunId),
   ]);
 
   const baseScope = evalScope(base.run);
