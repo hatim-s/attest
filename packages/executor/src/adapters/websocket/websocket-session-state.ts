@@ -66,9 +66,8 @@ const remember = (target: Set<string>, requestId: string): void => {
 class WebSocketSessionState {
   readonly pending = new Map<string, PendingInvocation>();
   readonly evidence: EvidenceRecorder;
-  /** Aborts every connection and write when the run ends. */
+  /** Aborts every connection and write when the run ends; aborted means the session is closed. */
   readonly lifecycle = new AbortController();
-  closed = false;
   private readonly completed = new Set<string>();
   private readonly ignored = new Set<string>();
   private readonly headers: Record<string, string>;
@@ -247,32 +246,25 @@ class WebSocketSessionState {
       this.evidence.record(pending, { classification: 'trace_received', ...event });
     }
 
-    if (message.failure !== undefined) {
+    if (message.kind === 'progress') return;
+
+    if (message.kind === 'failure') {
       this.settleFailure(pending, message.failure.error, message.failure.classification);
 
       return;
     }
 
-    if (message.terminal === undefined) return;
     const trace = pending.trace === undefined ? {} : { trace: pending.trace };
 
-    if (message.terminal.kind === 'error') {
+    if (message.kind === 'error') {
       this.evidence.record(pending, { classification: 'error_received', ...event });
-      this.settleSuccess(pending, {
-        protocol: AGENT_PROTOCOL,
-        error: message.terminal.value,
-        ...trace,
-      });
+      this.settleSuccess(pending, { protocol: AGENT_PROTOCOL, error: message.error, ...trace });
 
       return;
     }
 
     this.evidence.record(pending, { classification: 'result_received', ...event });
-    this.settleSuccess(pending, {
-      protocol: AGENT_PROTOCOL,
-      output: message.terminal.value,
-      ...trace,
-    });
+    this.settleSuccess(pending, { protocol: AGENT_PROTOCOL, output: message.result, ...trace });
   }
 
   settleFailure(
@@ -291,8 +283,7 @@ class WebSocketSessionState {
 
   /** Ends the run: every outstanding request fails and the session stops admitting work. */
   failRun(error: AgentInvocationError, classification = errorClassification(error)): void {
-    if (this.closed) return;
-    this.closed = true;
+    if (this.lifecycle.signal.aborted) return;
     this.settleAll(error, classification);
     this.hooks.onRunEnd();
     this.lifecycle.abort();
@@ -300,7 +291,6 @@ class WebSocketSessionState {
 
   /** Closes the session on its owner's request; connections are closed gracefully by the owner. */
   beginClose(): void {
-    this.closed = true;
     this.lifecycle.abort();
     this.settleAll(new AgentInvocationError('cancelled', 'WebSocket session closed.'), 'cancelled');
   }

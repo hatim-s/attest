@@ -43,8 +43,8 @@ type JsonlBridgeSessionOptions = {
 type CancellationCode = 'cancelled' | 'timeout';
 
 type PendingInvocation = {
-  cancelled: boolean;
-  cancellationCode?: CancellationCode;
+  /** Why attest cancelled the request; absent until it does. */
+  cancellation?: CancellationCode;
   cancellationTimer?: NodeJS.Timeout;
   callerAbort?: () => void;
   duration: () => number;
@@ -196,7 +196,6 @@ class JsonlBridgeSession {
       );
 
       const pending: PendingInvocation = {
-        cancelled: false,
         duration,
         request,
         resolve,
@@ -325,7 +324,7 @@ class JsonlBridgeSession {
       return;
     }
 
-    if (output.type === 'cancelled' && !pending.cancelled) {
+    if (output.type === 'cancelled' && pending.cancellation === undefined) {
       this.failSession(
         new AgentInvocationError(
           'invalid_envelope',
@@ -337,7 +336,7 @@ class JsonlBridgeSession {
     }
 
     // After attest cancels, both the acknowledgement and a late response settle as cancelled.
-    if (output.type === 'cancelled' || pending.cancelled) {
+    if (output.type === 'cancelled' || pending.cancellation !== undefined) {
       this.settleCancellation(output.request_id, pending, line);
 
       return;
@@ -380,7 +379,7 @@ class JsonlBridgeSession {
     this.settle(
       requestId,
       this.failure(
-        cancellationError(pending.cancellationCode ?? 'cancelled'),
+        cancellationError(pending.cancellation ?? 'cancelled'),
         pending.duration(),
         line,
       ),
@@ -390,9 +389,8 @@ class JsonlBridgeSession {
   private async cancel(requestId: string, code: CancellationCode): Promise<void> {
     const pending = this.pending.get(requestId);
 
-    if (pending === undefined || pending.cancelled) return;
-    pending.cancelled = true;
-    pending.cancellationCode = code;
+    if (pending === undefined || pending.cancellation !== undefined) return;
+    pending.cancellation = code;
     clearTimeout(pending.timeoutTimer);
     const cancellationGrace = this.agent.transport.cancellation_grace_ms;
     pending.cancellationTimer = setTimeout(
@@ -478,9 +476,7 @@ class JsonlBridgeSession {
 
     for (const [requestId, pending] of this.pending) {
       const requestError =
-        pending.cancelled && pending.cancellationCode !== undefined
-          ? cancellationError(pending.cancellationCode)
-          : error;
+        pending.cancellation === undefined ? error : cancellationError(pending.cancellation);
 
       this.settle(requestId, this.failure(requestError, pending.duration()));
     }

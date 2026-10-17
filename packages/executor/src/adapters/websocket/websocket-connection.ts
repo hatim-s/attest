@@ -39,16 +39,25 @@ type WebSocketConnectionOptions = {
   maximumPendingWriteBytes: number;
 };
 
+/**
+ * Close handshake progress. `closing` means attest sent its close frame; `received` means the peer's
+ * close frame arrived and was answered; `closed` means the socket is gone. A failure after the
+ * peer's close frame keeps that frame's details.
+ */
+type ConnectionState =
+  | { kind: 'open' }
+  | { kind: 'closing' }
+  | { kind: 'received'; close: WebSocketClose }
+  | { kind: 'failed'; close?: WebSocketClose }
+  | { kind: 'closed'; close: WebSocketClose };
+
 /** Owns one upgraded socket, including bounded frame parsing and the close handshake. */
 class WebSocketConnection {
-  private closeDetails?: WebSocketClose;
-  private closePromise?: Promise<WebSocketClose>;
-  private closeResolve?: (close: WebSocketClose) => void;
-  private failed = false;
+  private state: ConnectionState = { kind: 'open' };
+  /** Settles when the socket closes, with the details of the close handshake. */
+  private readonly closed: Promise<WebSocketClose>;
   private readonly frameDecoder: WebSocketFrameDecoder;
   private pendingWriteBytes = 0;
-  private receivedClose = false;
-  private sentClose = false;
   private readonly writeController = new AbortController();
   private writeTail: Promise<void> = Promise.resolve();
 
@@ -66,24 +75,21 @@ class WebSocketConnection {
       onFailure: (error) => this.fail(error),
       onPing: (payload) => this.writeControlFrame(0x0a, payload),
       onPong: () => {
-        if (!this.failed && !this.receivedClose && !this.socket.destroyed) callbacks.onPong();
+        if (this.readable()) callbacks.onPong();
       },
       onText: (text, bytes) => {
-        if (!this.failed && !this.receivedClose && !this.socket.destroyed) {
-          callbacks.onText(text, bytes);
-        }
+        if (this.readable()) callbacks.onText(text, bytes);
       },
     });
     socket.on('data', (chunk: Buffer) => {
-      if (this.failed || this.receivedClose || this.socket.destroyed) return;
-      this.frameDecoder.accept(chunk);
+      if (this.readable()) this.frameDecoder.accept(chunk);
     });
     socket.once('error', (error) =>
       this.fail(
         new AgentInvocationError('network', 'WebSocket connection failed.', { cause: error }),
       ),
     );
-    socket.once('close', () => this.finishClose());
+    this.closed = new Promise((resolve) => socket.once('close', () => resolve(this.finishClose())));
 
     if (initialData.byteLength > 0) this.frameDecoder.accept(initialData);
   }
@@ -127,18 +133,12 @@ class WebSocketConnection {
 
   /** Performs a bounded close handshake and destroys sockets that do not cooperate. */
   async close(timeoutMs: number): Promise<WebSocketClose> {
-    if (this.closeDetails !== undefined) return this.closeDetails;
-
-    if (this.closePromise === undefined) {
-      this.closePromise = new Promise<WebSocketClose>((resolve) => {
-        this.closeResolve = resolve;
-      });
-    }
+    if (this.state.kind === 'received' || this.state.kind === 'closed') return this.state.close;
 
     this.writeController.abort();
 
-    if (!this.sentClose && !this.socket.destroyed) {
-      this.sentClose = true;
+    if (this.state.kind === 'open' && !this.socket.destroyed) {
+      this.state = { kind: 'closing' };
       const reason = Buffer.from('complete', 'utf8');
       const payload = Buffer.allocUnsafe(2 + reason.byteLength);
       payload.writeUInt16BE(1_000, 0);
@@ -155,7 +155,7 @@ class WebSocketConnection {
       }, timeoutMs);
     });
 
-    const completed = await Promise.race([this.closePromise, timeout]);
+    const completed = await Promise.race([this.closed, timeout]);
 
     if (timer !== undefined) clearTimeout(timer);
 
@@ -174,7 +174,7 @@ class WebSocketConnection {
       throw new AgentInvocationError('cancelled', 'WebSocket write was cancelled.');
     }
 
-    if (this.failed || this.sentClose || this.socket.destroyed) {
+    if (!this.writable()) {
       throw new AgentInvocationError('network', 'WebSocket connection is not writable.');
     }
 
@@ -229,46 +229,62 @@ class WebSocketConnection {
 
   /** Emits a bounded control frame only when it will not deepen socket backpressure. */
   private writeControlFrame(opcode: number, payload: Buffer = Buffer.alloc(0)): boolean {
-    if (this.failed || this.sentClose || this.socket.destroyed || this.socket.writableNeedDrain)
-      return false;
+    if (!this.writable() || this.socket.writableNeedDrain) return false;
     this.socket.write(encodeWebSocketFrame(opcode, payload));
 
     return true;
   }
 
+  /** Inbound frames count only while the peer has not closed and nothing has failed. */
+  private readable(): boolean {
+    return (this.state.kind === 'open' || this.state.kind === 'closing') && !this.socket.destroyed;
+  }
+
+  /** Outbound frames are allowed only before either side starts the close handshake. */
+  private writable(): boolean {
+    return this.state.kind === 'open' && !this.socket.destroyed;
+  }
+
   private acceptClose({ code, payload, reason }: WebSocketCloseFrame): void {
-    this.receivedClose = true;
+    const sentClose = this.state.kind === 'closing';
     this.writeController.abort();
-    this.closeDetails = {
-      clean: this.sentClose || code === 1_000,
-    };
+    const close: WebSocketClose = { clean: sentClose || code === 1_000 };
 
-    if (code !== undefined) this.closeDetails.code = code;
+    if (code !== undefined) close.code = code;
 
-    if (reason !== undefined) this.closeDetails.reason = reason.slice(0, 123);
+    if (reason !== undefined) close.reason = reason.slice(0, 123);
 
-    if (!this.sentClose && !this.socket.destroyed) {
-      this.sentClose = true;
+    if (!sentClose && !this.socket.destroyed) {
       this.socket.write(encodeWebSocketFrame(0x8, payload));
     }
 
+    this.state = { kind: 'received', close };
     this.socket.end();
   }
 
   private fail(error: AgentInvocationError): void {
-    if (this.failed) return;
-    this.failed = true;
+    if (this.state.kind === 'failed') return;
+    this.state =
+      this.state.kind === 'received'
+        ? { kind: 'failed', close: this.state.close }
+        : { kind: 'failed' };
     this.writeController.abort();
     this.callbacks.onFailure(error);
     this.socket.destroy();
   }
 
-  private finishClose(): void {
+  private finishClose(): WebSocketClose {
     this.writeController.abort();
-    const close = this.closeDetails ?? { clean: this.receivedClose };
-    this.closeDetails = close;
-    this.closeResolve?.(close);
+
+    const close =
+      this.state.kind === 'open' || this.state.kind === 'closing'
+        ? { clean: false }
+        : (this.state.close ?? { clean: false });
+
+    this.state = { kind: 'closed', close };
     this.callbacks.onClose(close);
+
+    return close;
   }
 }
 

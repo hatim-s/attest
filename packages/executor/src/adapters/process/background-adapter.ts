@@ -29,7 +29,7 @@ const DEFAULT_STARTUP_MS = 10_000;
 
 /** Owns one background service from readiness through graceful shutdown and tree cleanup. */
 class BackgroundAgentSession {
-  private closed = false;
+  /** Set once by close; its presence marks the session closed. */
   private closePromise?: Promise<void>;
   private readonly runController = new AbortController();
   private runTimer?: NodeJS.Timeout;
@@ -126,7 +126,7 @@ class BackgroundAgentSession {
 
   /** Invokes the ready service through the existing mapped HTTP retry and evidence boundary. */
   async invoke(request: AgentRequest, signal?: AbortSignal): Promise<InvocationResult> {
-    if (this.closed) {
+    if (this.closePromise !== undefined) {
       throw new AgentInvocationError('network', 'Background agent session is closed.');
     }
 
@@ -202,7 +202,6 @@ class BackgroundAgentSession {
   /** Attempts authored shutdown, then always enforces TERM/grace/KILL cleanup. */
   async close(): Promise<void> {
     if (this.closePromise !== undefined) return this.closePromise;
-    this.closed = true;
 
     if (this.runTimer !== undefined) clearTimeout(this.runTimer);
     this.closePromise = (async () => {

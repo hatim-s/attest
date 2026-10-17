@@ -27,7 +27,6 @@ const waitForRetry = (delayMs: number, signal: AbortSignal | undefined): Promise
  */
 class PerCaseWebSocketSession {
   private readonly state: WebSocketSessionState;
-  private closePromise?: Promise<void>;
 
   constructor(agent: WebSocketAgentResource, options: WebSocketSessionOptions) {
     this.state = new WebSocketSessionState(agent, options, {
@@ -72,12 +71,9 @@ class PerCaseWebSocketSession {
 
   /** Ends the session and cancels outstanding cases; their connections close themselves. */
   close(): Promise<void> {
-    if (this.closePromise === undefined) {
-      this.state.beginClose();
-      this.closePromise = Promise.resolve();
-    }
+    this.state.beginClose();
 
-    return this.closePromise;
+    return Promise.resolve();
   }
 
   /** Runs one request on its own connection, including the close handshake. */
@@ -85,7 +81,7 @@ class PerCaseWebSocketSession {
     const { agent, evidence } = this.state;
     const { requestId, signal } = pending;
 
-    if (this.state.closed) return this.state.closedResult(pending);
+    if (this.state.lifecycle.signal.aborted) return this.state.closedResult(pending);
 
     const result = new Promise<InvocationResult>((resolve) => {
       pending.resolve = resolve;
@@ -121,7 +117,8 @@ class PerCaseWebSocketSession {
       });
 
       // Closing a session can settle the invocation while an HTTP upgrade is still racing.
-      if (this.state.closed || attemptSignal.aborted || !this.state.pending.has(requestId)) {
+      // attemptSignal follows the session lifecycle, so this also covers a closed session.
+      if (attemptSignal.aborted || !this.state.pending.has(requestId)) {
         connection.destroy();
 
         return await result;
