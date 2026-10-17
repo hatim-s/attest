@@ -1,6 +1,7 @@
 import { EVAL_RUN_SCHEMA_ID, evalRunSchema, type EvalRun } from '@attest/contracts';
 
 import { canonicalStringify } from '../store/internal/canonical-json.js';
+import { StoreError } from '../store/store-error.js';
 import type { RunRecord, RunStore } from '../store/types.js';
 import { classifyRuns } from './classify.js';
 import type { RunDiff } from './types.js';
@@ -17,21 +18,21 @@ const isPartialSelection = (snapshot: EvalRun['snapshot']): boolean => {
   return snapshot.selection.selected_cases < snapshot.selection.total_cases;
 };
 
-/** Reads selection metadata at the persisted JSON boundary; non-eval runs have no scope. */
+/**
+ * Reads selection metadata from a stored eval run; non-eval runs have no scope. A config that does
+ * not parse is corrupt, since treating it as a full selection would report skipped cases as removals.
+ */
 const evalScope = (run: RunRecord): EvalScope | undefined => {
   if (run.schemaId !== EVAL_RUN_SCHEMA_ID) return undefined;
-  let value: unknown;
+  let snapshot: EvalRun['snapshot'];
 
   try {
-    value = JSON.parse(run.configJson);
-  } catch {
-    return undefined;
+    snapshot = evalRunSchema.parse(JSON.parse(run.configJson)).snapshot;
+  } catch (error) {
+    throw new StoreError('CORRUPT_DATA', `Run ${run.id} has an unreadable eval configuration.`, {
+      cause: error,
+    });
   }
-
-  const parsed = evalRunSchema.safeParse(value);
-
-  if (!parsed.success) return undefined;
-  const { snapshot } = parsed.data;
 
   return {
     partial: isPartialSelection(snapshot),
