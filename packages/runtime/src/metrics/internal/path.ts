@@ -6,7 +6,7 @@ type PathSegment = { kind: 'field'; name: string } | { kind: 'index'; index: num
 
 const pathSegmentPattern = /(?:\.([A-Za-z_][A-Za-z0-9_]*)|\[(\d+)\])/gy;
 
-/** Parses the validated `$`-rooted subset from spec §Paths and fails defensively if upstream validation was bypassed. */
+/** Parses the validated `$`-rooted path subset and fails defensively if upstream validation was bypassed. */
 const parsePathSegments = (path: string): PathSegment[] => {
   if (path === '$') {
     return [];

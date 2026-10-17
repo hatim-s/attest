@@ -3,7 +3,7 @@ import type { JsonValue, Trace } from '@attest/contracts';
 import type { CompletedMetricContext } from './metric-evaluation.js';
 import { parsePathSegments, type PathSegment } from './internal/path.js';
 
-/** Defines the `$`-rooted document every metric reads so all metric kinds share spec §Paths semantics. */
+/** The `$`-rooted document every metric reads, so all metric kinds resolve paths the same way. */
 type EvaluationDocument = {
   input: JsonValue;
   output?: JsonValue;
@@ -14,7 +14,7 @@ type EvaluationDocument = {
 /** Distinguishes a missing path from a present property whose value is undefined. */
 type PathResolution = { found: true; value: unknown } | { found: false };
 
-/** Maps runner state into the stable evaluation document described by spec §Paths. */
+/** Maps runner state into the stable evaluation document metric paths resolve against. */
 const buildEvaluationDocument = (context: CompletedMetricContext): EvaluationDocument => ({
   input: context.caseDefinition.input,
   output: context.execution.output,

@@ -67,8 +67,8 @@ const evaluateMetric = async (
 };
 
 /**
- * Evaluates a case's metrics sequentially in definition order. Determinism wins over per-case latency
- * in v0; parallelism belongs to the runner's case-level pool where ordering stays observable.
+ * Evaluates a case's metrics sequentially in definition order. Determinism wins over per-case latency;
+ * parallelism belongs to the runner's case-level pool where ordering stays observable.
  */
 const evaluateMetrics = async (
   definitions: MetricDefinition[],

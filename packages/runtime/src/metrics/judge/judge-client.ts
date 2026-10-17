@@ -1,6 +1,6 @@
 import type { JsonValue } from '@attest/contracts';
 
-import type { JudgeVerdict } from './rubric-prompt.js';
+import type { JudgeOutcome } from './judge-outcome-schema.js';
 
 /** Describes the case-local evidence sent across the provider-agnostic judge boundary. */
 type JudgeRequest = {
@@ -14,31 +14,6 @@ type JudgeRequest = {
   };
 };
 
-/** Retains portable token counts when the selected provider reports them. */
-type JudgeUsage = { inputTokens?: number; outputTokens?: number };
-
-/** Retains each provider attempt so retried structured responses remain reproducible under metric spec §3. */
-type JudgeAttempt = { rawResponse: JsonValue; usage?: JudgeUsage; error?: string };
-
-/**
- * Records everything needed to reproduce one rubric call per metric contract §3.
- * Provider credentials are deliberately absent so records remain safe to persist and render.
- */
-type JudgeRecord = {
-  request: {
-    model: string;
-    system: string;
-    user: string;
-    params: Record<string, JsonValue>;
-  };
-  rawResponse: JsonValue;
-  usage?: JudgeUsage;
-  attempts: JudgeAttempt[];
-};
-
-/** Couples the semantic verdict with its reproducibility evidence. */
-type JudgeOutcome = { verdict: JudgeVerdict; record: JudgeRecord };
-
 /** Lets provider adapters own cancellation and deadlines without leaking SDK types into metric semantics. */
 type JudgeCallOptions = { signal?: AbortSignal; timeoutMs?: number };
 
@@ -50,12 +25,4 @@ interface JudgeClient {
   scoreRubric(request: JudgeRequest, options?: JudgeCallOptions): Promise<JudgeOutcome>;
 }
 
-export {
-  type JudgeCallOptions,
-  type JudgeAttempt,
-  type JudgeClient,
-  type JudgeOutcome,
-  type JudgeRecord,
-  type JudgeRequest,
-  type JudgeUsage,
-};
+export { type JudgeCallOptions, type JudgeClient, type JudgeRequest };

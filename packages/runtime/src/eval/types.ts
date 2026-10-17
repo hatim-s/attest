@@ -12,7 +12,7 @@ import type {
   TestCase,
   Trace,
 } from '@attest/contracts';
-import type { StoredMetricEvaluation } from '@attest/core';
+import type { CaseVerdict, RunStatus, StoredMetricEvaluation } from '@attest/core';
 import type {
   AgentInvocationError,
   CaseEnvironment,
@@ -56,7 +56,7 @@ type CaseExecution = CaseExecutionBase &
   );
 
 /** Terminal states a run can end in. */
-type EvalRunStatus = 'completed' | 'failed' | 'cancelled';
+type EvalRunStatus = Exclude<RunStatus, 'running'>;
 
 /** Carries one resolver-owned case payload without coupling orchestration to project discovery. */
 type ResolvedEvalCase<Payload = unknown> = EvalRunSelectedCase & {
@@ -70,8 +70,6 @@ type ResolvedEvalPlan<Payload = unknown> = {
   cases: readonly ResolvedEvalCase<Payload>[];
 };
 
-type EvalCaseVerdict = 'pass' | 'fail' | 'error';
-
 /** Provides the stable case-level projection consumed by events, JUnit, and result summaries. */
 type NormalizedEvalCaseResult = {
   test_id: string;
@@ -79,7 +77,7 @@ type NormalizedEvalCaseResult = {
   configured_index: number;
   completion_index: number;
   outcome: CaseExecution['outcome'];
-  verdict: EvalCaseVerdict;
+  verdict: CaseVerdict;
   started_at: string;
   duration_ms: number;
   metric_results: readonly StoredMetricEvaluation[];
@@ -240,7 +238,6 @@ export {
   type EvalCaseRecord,
   type EvalCaseRunner,
   type EvalCaseRunnerResult,
-  type EvalCaseVerdict,
   type EvalExecutionResult,
   type EvalHookContexts,
   type EvalHooks,

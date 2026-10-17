@@ -18,27 +18,24 @@ const JUDGE_PROMPT_VERSION = 1;
 const MAXIMUM_STRUCTURED_OUTPUT_ATTEMPTS = 2;
 
 /** Records the generation policy shared by cache keys and persisted judge requests. */
-const JUDGE_REQUEST_PARAMS: Record<string, JsonValue> = Object.freeze({
+const JUDGE_REQUEST_PARAMS = {
   stream: false,
   structuredOutput: true,
   maximumAttempts: MAXIMUM_STRUCTURED_OUTPUT_ATTEMPTS,
-});
+} as const satisfies Record<string, JsonValue>;
 
-/** Constrains the provider response while allowing every finite score supported by metric contract §3. */
+/** Constrains the provider response while allowing every finite score. */
 const judgeResponseSchema = z.strictObject({
   score: z.number().finite(),
   rationale: z.string(),
 });
-
-/** Captures the normalized structured decision returned by a judge provider. */
-type JudgeVerdict = z.infer<typeof judgeResponseSchema>;
 
 /** Renders one prompt block with sorted keys so logically equal evidence produces identical bytes. */
 const formatJsonBlock = (value: JsonValue | undefined): string =>
   JSON.stringify(JSON.parse(canonicalStringify(value ?? null)), undefined, 2);
 
 /**
- * Assembles the deterministic, case-local judge prompt required by metric contract §3.
+ * Assembles the deterministic, case-local judge prompt.
  * The rubric is included verbatim and no clock or provider state can affect the prompt bytes.
  */
 const buildJudgePrompt = (request: JudgeRequest): BuildJudgePromptResult => {
@@ -63,7 +60,7 @@ const buildJudgePrompt = (request: JudgeRequest): BuildJudgePromptResult => {
 };
 
 /**
- * Reduces a trace to a bounded number of shape-only span lines for metric contract §3.
+ * Reduces a trace to a bounded number of shape-only span lines.
  * Inputs, outputs, attributes, and events stay out of judge prompts to keep payloads small and case-local.
  */
 const summarizeTraceForJudge = (trace: Trace | null): string | undefined => {
@@ -90,5 +87,4 @@ export {
   judgeResponseSchema,
   MAXIMUM_STRUCTURED_OUTPUT_ATTEMPTS,
   summarizeTraceForJudge,
-  type JudgeVerdict,
 };
