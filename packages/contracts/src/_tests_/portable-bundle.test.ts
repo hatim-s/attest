@@ -234,14 +234,18 @@ describe('portable bundle limits and credentials', () => {
             ['agents', 0, 'transport', ...path],
             message,
           );
-        expect(
-          portableProjectBundleSchema.safeParse(
-            withTransport({
-              ...transport,
-              url: 'wss://api.openai.com/v1/realtime?model=gpt-realtime',
-            }),
-          ).success,
-        ).toBe(true);
+
+        for (const query of ['model=gpt-realtime', 'max_tokens=100', 'page_token={{job_token}}'])
+          expect
+            .soft(
+              portableProjectBundleSchema.safeParse(
+                withTransport({
+                  ...transport,
+                  url: `wss://api.openai.com/v1/realtime?${query}`,
+                }),
+              ).success,
+            )
+            .toBe(true);
       }
 
       if (transport.kind === 'polling') {
