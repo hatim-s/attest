@@ -1,3 +1,5 @@
+import { z } from 'zod';
+
 import { BoundedOutputWritable } from '../adapters/sandbox/bounded-writable.js';
 import { resolveVercelSandboxCredentials } from '../adapters/sandbox/credentials.js';
 import { SANDBOX_WORKSPACE, resolveRemotePath } from '../adapters/sandbox/sandbox-paths.js';
@@ -8,18 +10,36 @@ import { createEnvironmentLifecycle } from './environment-lifecycle.js';
 import type { CaseEnvironmentFactory } from './types.js';
 import { normalizeWorkspacePath } from './workspace-path.js';
 
-type VercelIsolationOptions = {
-  image?: string;
-  timeoutMs?: number;
-  commandTimeoutMs?: number;
-  finalizationTimeoutMs?: number;
-  cleanupTimeoutMs?: number;
-  outputBytes?: number;
-  files?: Record<string, string>;
-  env?: Record<string, string>;
-  sandboxFactory?: VercelSandboxFactory;
-  credentialEnv?: NodeJS.ProcessEnv;
-};
+/**
+ * Node's timers and `AbortSignal.timeout` throw on fractions and overflow past 2^31 - 1 ms. A
+ * cleanup bound that throws after creation would leave the VM running, so every bound is checked
+ * here before a VM exists.
+ */
+const timerMsSchema = z.int().positive().max(2_147_483_647);
+
+/** Programmatic options never pass through contracts, so this schema is their only parse. */
+const vercelIsolationOptionsSchema = z.strictObject({
+  image: z.string().default('vercel/sandbox/universal'),
+  timeoutMs: timerMsSchema.default(600_000),
+  commandTimeoutMs: timerMsSchema.default(60_000),
+  /** Defaults to commandTimeoutMs. */
+  finalizationTimeoutMs: timerMsSchema.optional(),
+  cleanupTimeoutMs: timerMsSchema.default(10_000),
+  outputBytes: z
+    .int()
+    .positive()
+    .default(1024 * 1024),
+  files: z.record(z.string(), z.string()).default({}),
+  env: z.record(z.string(), z.string()).optional(),
+  /**
+   * Passed through as typed. A non-function factory throws at the creation call, before any VM
+   * exists, and credential resolution parses the env at case start.
+   */
+  sandboxFactory: z.custom<VercelSandboxFactory>().default(() => defaultSandboxFactory),
+  credentialEnv: z.custom<NodeJS.ProcessEnv>().optional(),
+});
+
+type VercelIsolationOptions = z.input<typeof vercelIsolationOptionsSchema>;
 
 /**
  * A VM that could not be confirmed stopped. Runtime reads `cleanupConfirmed` to stop reusing the
@@ -62,27 +82,25 @@ const resolveSeedFiles = (
 };
 
 /** Keeps a fresh VM alive across case hooks, agent tools, evaluation, and bounded final hooks. */
-const vercelSandboxIsolation =
-  (options: VercelIsolationOptions = {}): CaseEnvironmentFactory =>
-  async ({ signal }) => {
+const vercelSandboxIsolation = (input: VercelIsolationOptions = {}): CaseEnvironmentFactory => {
+  const options = vercelIsolationOptionsSchema.parse(input);
+  const { commandTimeoutMs, cleanupTimeoutMs, outputBytes: cap } = options;
+  const finalizationTimeoutMs = options.finalizationTimeoutMs ?? commandTimeoutMs;
+
+  return async ({ signal }) => {
     signal.throwIfAborted();
     const credentials = resolveVercelSandboxCredentials(options.credentialEnv ?? process.env);
-    const factory = options.sandboxFactory ?? defaultSandboxFactory;
-    const commandTimeoutMs = options.commandTimeoutMs ?? 60_000;
-    const finalizationTimeoutMs = options.finalizationTimeoutMs ?? commandTimeoutMs;
-    const cleanupTimeoutMs = options.cleanupTimeoutMs ?? 10_000;
-    const cap = options.outputBytes ?? 1024 * 1024;
-    const files = resolveSeedFiles(options.files ?? {}, cap);
+    const files = resolveSeedFiles(options.files, cap);
 
     const creation: VercelSandboxCreateParams = {
-      image: options.image ?? 'vercel/sandbox/universal',
+      image: options.image,
       persistent: false,
-      timeout: options.timeoutMs ?? 600_000,
+      timeout: options.timeoutMs,
       signal: AbortSignal.any([signal, AbortSignal.timeout(commandTimeoutMs)]),
     };
 
     if (credentials.kind !== 'oidc') Object.assign(creation, credentials.credentials);
-    const sdk = await factory(creation);
+    const sdk = await options.sandboxFactory(creation);
 
     let poisonReason: Error | undefined;
     let stopping: Promise<void> | undefined;
@@ -253,5 +271,6 @@ const vercelSandboxIsolation =
       },
     };
   };
+};
 
 export { vercelSandboxIsolation, type VercelIsolationOptions };

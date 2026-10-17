@@ -78,6 +78,26 @@ describe('Vercel case isolation', () => {
     expect(invalidFactory).not.toHaveBeenCalled();
   });
 
+  it('rejects a cleanup bound Node timers cannot honour before creating a VM', async () => {
+    const sdk = {
+      runCommand: vi.fn(() => Promise.resolve({ exitCode: 0 })),
+      writeFiles: vi.fn(() => Promise.resolve()),
+      readFile: vi.fn(),
+      stop: vi.fn(() => Promise.resolve()),
+    } satisfies VercelSandboxSdk;
+
+    const factory = vi.fn(asFactory(sdk));
+
+    await expect(async () =>
+      vercelSandboxIsolation({
+        cleanupTimeoutMs: 0.5,
+        credentialEnv: { VERCEL_OIDC_TOKEN: 'token' },
+        sandboxFactory: factory,
+      })(caseContext()),
+    ).rejects.toThrow(/cleanupTimeoutMs/u);
+    expect(factory).not.toHaveBeenCalled();
+  });
+
   it('poisons and stops an uncertain command after cancellation', async () => {
     const controller = new AbortController();
     let remoteActive = false;
