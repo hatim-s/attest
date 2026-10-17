@@ -1,9 +1,9 @@
 import type { AgentResource, JsonValue } from '@attest/contracts';
 
-import { LocalError } from '../../errors/index.js';
 import { discoverProject } from '../../project/discover-project.js';
 import { candidateFromLoadedProject, loadCommandProject } from '../project/load-command-project.js';
 import type { CommandResult, MutationResult } from '../shared/command-result.js';
+import { assertNewId } from '../shared/resource-lookup.js';
 import { redactAgentResource } from '../show/redact-resource.js';
 import {
   createImportedCurlAgentResource,
@@ -79,11 +79,7 @@ const runAgentImportCommand = async (
     workingDirectory: options.workingDirectory,
   });
 
-  if (loaded.agents.some(({ id }) => id === agent.id)) {
-    throw new LocalError('project_invalid', `Agent ${agent.id} already exists.`, {
-      path: agent.id,
-    });
-  }
+  assertNewId('agent', loaded.agents, agent.id);
 
   const candidate = candidateFromLoadedProject(loaded);
   candidate.agents.push(agent);

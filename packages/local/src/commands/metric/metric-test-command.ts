@@ -11,8 +11,8 @@ import type { CommandResult, MetricTestResult } from '../shared/command-result.j
 import { redactProbeValue } from '../agent/adapter/evidence-redaction.js';
 import { resolveProcessEnvironment } from '../agent/adapter/resolve-native-agent.js';
 import { loadCommandProject } from '../project/load-command-project.js';
+import { findResource } from '../shared/resource-lookup.js';
 import { readMetricTestFixture } from './authoring/index.js';
-import { findMetric } from './metric-mutation-command.js';
 
 type MetricReadCommandOptions = {
   metricId?: string;
@@ -82,7 +82,7 @@ const runMetricTestCommand = async (
   options: MetricTestCommandOptions,
 ): Promise<CommandResult<'metric-test', MetricTestResult>> => {
   const loaded = await loadCommandProject(options);
-  const metric = findMetric(loaded.metrics, options.metricId ?? '');
+  const metric = findResource('metric', loaded.metrics, options.metricId ?? '');
 
   const fixture = await readMetricTestFixture(
     options.fixture,

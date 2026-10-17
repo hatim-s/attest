@@ -6,6 +6,7 @@ import type { SemanticProjectOperation } from '../../project/transaction/index.j
 import type { CommandResult, MutationResult } from '../shared/command-result.js';
 import { executeProjectMutation } from '../shared/project-mutation.js';
 import type { Prompt } from '../shared/prompt.js';
+import { assertNewId, findResource } from '../shared/resource-lookup.js';
 import { candidateFromLoadedProject, loadCommandProject } from '../project/load-command-project.js';
 import { redactMetricResource } from '../show/redact-resource.js';
 import { assertSafeMetricResource, readImportedMetricResource } from './authoring/index.js';
@@ -29,29 +30,6 @@ type MutationBuildResult = {
   metric: MetricResource;
   renames?: readonly { from: string; to: string; type: 'metric' }[];
   warnings?: string[];
-};
-
-/** Finds one authored metric or reports the missing id with a way to list them. */
-const findMetric = (metrics: readonly MetricResource[], id: string): MetricResource => {
-  const metric = metrics.find((candidate) => candidate.id === id);
-
-  if (metric === undefined) {
-    throw new LocalError('resource_not_found', `Metric ${id} was not found.`, {
-      path: id,
-      hint: 'Run `attest list metrics` to inspect available metric ids.',
-    });
-  }
-
-  return metric;
-};
-
-const assertNewMetricId = (metrics: readonly MetricResource[], id: string): void => {
-  if (metrics.some((metric) => metric.id === id)) {
-    throw new LocalError('project_invalid', `Metric ${id} already exists.`, {
-      path: id,
-      hint: 'Choose a new metric id or rename the existing resource.',
-    });
-  }
 };
 
 /** Lists every authored location that would become dangling if a metric disappeared. */
@@ -134,12 +112,12 @@ const buildMetricMutation = async (
   switch (request.command) {
     case 'metric.add':
       assertSafeMetricResource(request.metric);
-      assertNewMetricId(candidate.metrics, request.metric.id);
+      assertNewId('metric', candidate.metrics, request.metric.id);
       candidate.metrics.push(request.metric);
 
       return { candidate, metric: request.metric };
     case 'metric.import': {
-      assertNewMetricId(candidate.metrics, request.as);
+      assertNewId('metric', candidate.metrics, request.as);
 
       const metric = await readImportedMetricResource(
         request.source,
@@ -155,8 +133,8 @@ const buildMetricMutation = async (
     }
 
     case 'metric.rename': {
-      const metric = findMetric(candidate.metrics, request.metric_id);
-      assertNewMetricId(candidate.metrics, request.new_id);
+      const metric = findResource('metric', candidate.metrics, request.metric_id);
+      assertNewId('metric', candidate.metrics, request.new_id);
       metric.id = request.new_id;
       rewriteMetricReferences(candidate, request.metric_id, request.new_id);
 
@@ -168,7 +146,7 @@ const buildMetricMutation = async (
     }
 
     case 'metric.remove': {
-      const metric = findMetric(candidate.metrics, request.metric_id);
+      const metric = findResource('metric', candidate.metrics, request.metric_id);
       const references = metricReferencePaths(candidate, request.metric_id);
 
       if (references.length > 0 && request.detach !== true) {
@@ -276,9 +254,4 @@ const runMetricMutationCommand = async (
   };
 };
 
-export {
-  findMetric,
-  runMetricMutationCommand,
-  type MetricAuthoringRequest,
-  type MetricMutationCommandOptions,
-};
+export { runMetricMutationCommand, type MetricAuthoringRequest, type MetricMutationCommandOptions };

@@ -1,6 +1,6 @@
-import { LocalError } from '../../errors/index.js';
 import { candidateFromLoadedProject, loadCommandProject } from '../project/load-command-project.js';
 import type { CommandResult, MutationResult } from '../shared/command-result.js';
+import { assertNewId } from '../shared/resource-lookup.js';
 import { redactAgentResource } from '../show/redact-resource.js';
 import { assertSafeNativeAgentResource } from './authoring/resource-validation.js';
 import { mutationResult } from './agent-mutation.js';
@@ -19,12 +19,7 @@ const runAgentAddCommand = async (
     workingDirectory: options.workingDirectory,
   });
 
-  if (loaded.agents.some(({ id }) => id === request.agent.id)) {
-    throw new LocalError('project_invalid', `Agent ${request.agent.id} already exists.`, {
-      path: request.agent.id,
-      hint: 'Choose another id or remove the existing agent first.',
-    });
-  }
+  assertNewId('agent', loaded.agents, request.agent.id);
 
   const candidate = candidateFromLoadedProject(loaded);
   candidate.agents.push(request.agent);

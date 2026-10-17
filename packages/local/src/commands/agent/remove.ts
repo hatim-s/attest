@@ -1,7 +1,8 @@
 import { LocalError } from '../../errors/index.js';
 import { candidateFromLoadedProject, loadCommandProject } from '../project/load-command-project.js';
 import type { CommandResult, MutationResult } from '../shared/command-result.js';
-import { findAgent, mutationResult } from './agent-mutation.js';
+import { findResource } from '../shared/resource-lookup.js';
+import { mutationResult } from './agent-mutation.js';
 import type { AgentMutationCommandOptions, AgentRequest } from './types.js';
 
 /** Removes an unreferenced agent, or explicitly cascades dependent tests with --detach. */
@@ -16,7 +17,7 @@ const runAgentRemoveCommand = async (
     workingDirectory: options.workingDirectory,
   });
 
-  findAgent(loaded.agents, request.agent_id);
+  findResource('agent', loaded.agents, request.agent_id);
 
   const dependentTests = loaded.tests.filter(
     ({ agent_id: agentId }) => agentId === request.agent_id,

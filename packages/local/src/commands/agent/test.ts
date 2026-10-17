@@ -11,7 +11,7 @@ import { loadCommandProject } from '../project/load-command-project.js';
 import type { AgentTestResult, CommandResult } from '../shared/command-result.js';
 import type { ReadInput } from './authoring/types.js';
 import { testNativeAgentConnection } from './adapter/test-native-agent.js';
-import { findAgent } from './agent-mutation.js';
+import { findResource } from '../shared/resource-lookup.js';
 import type { AgentTestCommandOptions } from './types.js';
 
 type AgentTestInputOptions = {
@@ -93,7 +93,7 @@ const runAgentTestCommand = async (
     workingDirectory: options.workingDirectory,
   });
 
-  const agent = findAgent(loaded.agents, request.agent_id);
+  const agent = findResource('agent', loaded.agents, request.agent_id);
 
   const recording =
     request.record === true
