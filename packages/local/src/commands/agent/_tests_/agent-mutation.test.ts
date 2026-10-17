@@ -2,8 +2,13 @@ import { COMMAND_REQUEST_SCHEMA_ID, type AgentResource } from '@attest/contracts
 import { describe, expect, it } from 'vitest';
 
 import { loadProject } from '../../../project/index.js';
+import {
+  candidateFromLoadedProject,
+  loadCommandProject,
+} from '../../project/load-command-project.js';
 import type { Prompt } from '../../shared/prompt.js';
 import { runAgentAddCommand } from '../add.js';
+import { mutationResult } from '../agent-mutation.js';
 import { runAgentRemoveCommand } from '../remove.js';
 import { addAgent, createAgentProject } from './support/agent-project.js';
 
@@ -64,5 +69,25 @@ describe('agent mutation confirmation', () => {
     const loaded = await loadProject({ project: root });
     expect(loaded.agents.map(({ id }) => id)).toEqual(['concurrent', 'racer', 'support']);
     expect(loaded.tests).toMatchObject([{ id: 'refund', agent_id: 'support' }]);
+  });
+
+  it('rejects a write that lands between loading the project and previewing the mutation', async () => {
+    const root = await createAgentProject();
+    const loaded = await loadCommandProject({ project: root, workingDirectory: root });
+    const candidate = candidateFromLoadedProject(loaded);
+    candidate.agents.push(agent('stale'));
+    await addAgent(root, agent('racer'));
+
+    const commit = mutationResult({
+      candidate,
+      command: 'agent.add',
+      confirmation: { interactive: false, requireExplicit: false, yes: true },
+      loaded,
+      request: {},
+    });
+
+    await expect(commit).rejects.toMatchObject(projectChanged);
+    const current = await loadProject({ project: root });
+    expect(current.agents.map(({ id }) => id)).toEqual(['racer', 'support']);
   });
 });
