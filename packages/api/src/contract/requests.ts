@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { DEFAULT_PAGE_LIMIT, MAX_PAGE_LIMIT } from '@attest/core/records';
+import { pageQuerySchema as corePageQuerySchema } from '@attest/core/records';
 
 const idSchema = z.string().min(1);
 
@@ -13,9 +13,8 @@ const diffParamsSchema = z
     message: 'baseRunId and candidateRunId must differ.',
   });
 
-const pageQuerySchema = z.object({
-  cursor: z.string().min(1).optional(),
-  limit: z.coerce.number().int().min(1).max(MAX_PAGE_LIMIT).default(DEFAULT_PAGE_LIMIT),
+const pageQuerySchema = corePageQuerySchema.extend({
+  limit: z.coerce.number().optional().pipe(corePageQuerySchema.shape.limit),
 });
 
 export { runParamsSchema, caseParamsSchema, diffParamsSchema, pageQuerySchema };

@@ -1,4 +1,4 @@
-import { DEFAULT_PAGE_LIMIT, MAX_PAGE_LIMIT, type PageQuery } from '@attest/core/records';
+import { pageQuerySchema, type PageQuery } from '@attest/core/records';
 import { API_ERROR_STATUS, type ApiErrorCode } from '../contract/errors.js';
 import type { ReportSnapshot } from '../contract/snapshot.js';
 import type { ApiClient } from './api-client.js';
@@ -9,13 +9,12 @@ const reject = (code: ApiErrorCode, message: string): never => {
 };
 
 const pageLimit = (query: PageQuery): number => {
-  const limit = query.limit ?? DEFAULT_PAGE_LIMIT;
+  const parsed = pageQuerySchema.shape.limit.safeParse(query.limit);
 
-  if (!Number.isInteger(limit) || limit < 1 || limit > MAX_PAGE_LIMIT) {
-    return reject('INVALID_REQUEST', `Page limit must be an integer from 1 to ${MAX_PAGE_LIMIT}.`);
-  }
+  if (!parsed.success)
+    return reject('INVALID_REQUEST', parsed.error.issues[0]?.message ?? parsed.error.message);
 
-  return limit;
+  return parsed.data;
 };
 
 /** Reads the already parsed bootstrap without making network requests from offline reports. */
