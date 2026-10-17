@@ -7,6 +7,7 @@ type ProjectTransactionErrorCode = Extract<
   | 'project_locked'
   | 'project_lock_stale'
   | 'project_recovery_required'
+  | 'project_saved_cleanup_failed'
   | 'project_transaction_failed'
 >;
 

@@ -205,71 +205,88 @@ const prepareTransaction = async (
       new ProjectTransactionError('project_invalid', 'Unsafe transaction state directory.'),
   });
 
-  const directory = join(transactionsRoot, transactionId);
+  const directory = join(transactionsRoot, `.preparing-${transactionId}`);
   const stagedDirectory = join(directory, 'staged');
   const backupDirectory = join(directory, 'backups');
-  await mkdir(stagedDirectory, { recursive: true });
-  await mkdir(backupDirectory, { recursive: true });
 
   const entries: TransactionJournalEntry[] = [];
 
-  for (const [index, change] of changes.entries()) {
-    const destination = await resolveSafeProjectPath(root, change.path);
-    const originalHash = await readByteHash(destination);
+  try {
+    await mkdir(stagedDirectory, { recursive: true });
+    await mkdir(backupDirectory, { recursive: true });
 
-    const original =
-      originalHash === null
-        ? { original_hash: null, backup_path: null }
-        : { original_hash: originalHash, backup_path: `backups/${index}` };
+    for (const [index, change] of changes.entries()) {
+      const destination = await resolveSafeProjectPath(root, change.path);
+      const originalHash = await readByteHash(destination);
 
-    if (original.backup_path !== null) {
-      const absoluteBackup = join(directory, original.backup_path);
-      await copyFile(destination, absoluteBackup);
-      await syncWrittenFile(absoluteBackup);
+      const original =
+        originalHash === null
+          ? { original_hash: null, backup_path: null }
+          : { original_hash: originalHash, backup_path: `backups/${index}` };
+
+      if (original.backup_path !== null) {
+        const absoluteBackup = join(directory, original.backup_path);
+        await copyFile(destination, absoluteBackup);
+        await syncWrittenFile(absoluteBackup);
+      }
+
+      const stagedPath = `staged/${index}`;
+
+      if (change.type === 'write') {
+        const absoluteStage = join(directory, stagedPath);
+        await writeFile(absoluteStage, change.contents, { mode: 0o644 });
+        await syncWrittenFile(absoluteStage);
+      }
+
+      entries.push(
+        change.type === 'write'
+          ? {
+              ...original,
+              path: change.path,
+              type: 'write',
+              staged_path: stagedPath,
+              next_hash: hashBytes(change.contents),
+            }
+          : { ...original, path: change.path, type: 'remove', staged_path: null, next_hash: null },
+      );
     }
 
-    const stagedPath = `staged/${index}`;
+    const journal: TransactionJournal = {
+      schema: TRANSACTION_JOURNAL_SCHEMA,
+      transaction_id: transactionId,
+      created_at: new Date().toISOString(),
+      status: 'prepared',
+      manifest_path: 'attest.project.json',
+      project_hash_before: projectHashBefore,
+      project_hash_after: projectHashAfter,
+      published_count: 0,
+      created_directories: await missingParentDirectories(
+        root,
+        changes.flatMap(({ type, path }) => (type === 'write' ? [path] : [])),
+      ),
+      entries,
+    };
 
-    if (change.type === 'write') {
-      const absoluteStage = join(directory, stagedPath);
-      await writeFile(absoluteStage, change.contents, { mode: 0o644 });
-      await syncWrittenFile(absoluteStage);
+    const prepared = { directory, journal, journalPath: join(directory, JOURNAL_FILE) };
+    await writeTransactionJournal(prepared);
+    const publishedDirectory = join(transactionsRoot, transactionId);
+    await rename(directory, publishedDirectory);
+    await syncPath(transactionsRoot);
+
+    return {
+      directory: publishedDirectory,
+      journal,
+      journalPath: join(publishedDirectory, JOURNAL_FILE),
+    };
+  } catch (cause: unknown) {
+    try {
+      await rm(directory, { recursive: true, force: true });
+    } catch {
+      // Recovery removes staging residue if cleanup also fails.
     }
 
-    entries.push(
-      change.type === 'write'
-        ? {
-            ...original,
-            path: change.path,
-            type: 'write',
-            staged_path: stagedPath,
-            next_hash: hashBytes(change.contents),
-          }
-        : { ...original, path: change.path, type: 'remove', staged_path: null, next_hash: null },
-    );
+    throw cause;
   }
-
-  const journal: TransactionJournal = {
-    schema: TRANSACTION_JOURNAL_SCHEMA,
-    transaction_id: transactionId,
-    created_at: new Date().toISOString(),
-    status: 'prepared',
-    manifest_path: 'attest.project.json',
-    project_hash_before: projectHashBefore,
-    project_hash_after: projectHashAfter,
-    published_count: 0,
-    created_directories: await missingParentDirectories(
-      root,
-      changes.flatMap(({ type, path }) => (type === 'write' ? [path] : [])),
-    ),
-    entries,
-  };
-
-  const prepared = { directory, journal, journalPath: join(directory, JOURNAL_FILE) };
-  await writeTransactionJournal(prepared);
-  await syncPath(join(root, TRANSACTIONS_DIRECTORY));
-
-  return prepared;
 };
 
 // BOUNDARY: Durable transaction journal text is untrusted disk input; validate its schema and transaction directory identity before recovery.
@@ -433,8 +450,20 @@ const cleanupPreparedTransaction = async (
   root: string,
   prepared: PreparedTransaction,
 ): Promise<void> => {
-  await rm(prepared.directory, { recursive: true });
-  await syncPath(join(root, TRANSACTIONS_DIRECTORY));
+  const transactionsRoot = await resolveContainedPath(root, TRANSACTIONS_DIRECTORY, {
+    expect: 'directory',
+    problem: () =>
+      new ProjectTransactionError(
+        'project_recovery_required',
+        'Unsafe transaction state directory.',
+      ),
+  });
+
+  const retired = join(transactionsRoot, `.cleanup-${prepared.journal.transaction_id}`);
+  await rename(prepared.directory, retired);
+  await syncPath(transactionsRoot);
+  await rm(retired, { recursive: true });
+  await syncPath(transactionsRoot);
 };
 
 /** Recovers every interrupted journal under an already-owned project lock. */
@@ -479,6 +508,12 @@ const recoverProjectTransactions = async (
         'Unexpected recovery artifact is not a transaction directory.',
         { path: `${TRANSACTIONS_DIRECTORY}/${name}` },
       );
+    }
+
+    if (/^\.(preparing|cleanup)-[a-f0-9-]{36}$/u.test(name)) {
+      await rm(directory, { recursive: true });
+      await syncPath(transactionsRoot);
+      continue;
     }
 
     const prepared = await readPreparedTransaction(directory);

@@ -12,6 +12,10 @@ or eval verdict says exactly what happened.
 |    4 | Infrastructure/internal                | Filesystem write, invocation, metric provider, run store, transaction, initialization, or internal failure.              | Verify side effects and repair the boundary before retrying.               |
 |  130 | Cancellation                           | SIGINT, SIGTERM, or a requested active-run cancellation.                                                                 | Retry only if cancellation is no longer desired.                           |
 
+`project_saved_cleanup_failed` exits with `4` and is not retryable. The change
+was saved. Run `attest project validate` in that project to finish cleanup, without repeating
+the mutation.
+
 ## Eval exception at exit 1
 
 A normal evaluated failure is a successful protocol result with a failing verdict:

@@ -23,6 +23,7 @@ type LocalErrorCode =
   | 'project_not_found'
   | 'project_read_failed'
   | 'project_recovery_required'
+  | 'project_saved_cleanup_failed'
   | 'project_transaction_failed'
   | 'resource_not_found'
   | 'run_failed'
