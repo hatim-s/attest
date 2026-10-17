@@ -5,7 +5,8 @@ import { AttestMetricError } from '../../errors.js';
 import type { CompletedMetricContext } from '../../metric-evaluation.js';
 import type { JudgeMetricDefinition } from '../../metric-definitions.js';
 import type { JudgeCache } from '../judge-cache.js';
-import type { JudgeClient, JudgeOutcome, JudgeRecord } from '../judge-client.js';
+import type { JudgeClient } from '../judge-client.js';
+import type { JudgeOutcome, JudgeRecord } from '../judge-outcome-schema.js';
 import { evaluateJudgeMetric } from '../judge-metric.js';
 
 const definition: JudgeMetricDefinition = {

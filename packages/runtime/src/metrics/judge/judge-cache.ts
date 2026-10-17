@@ -2,12 +2,13 @@ import { createHash } from 'node:crypto';
 
 import { canonicalStringify } from '@attest/core';
 
-import type { JudgeClient, JudgeOutcome, JudgeRequest } from './judge-client.js';
+import type { JudgeClient, JudgeRequest } from './judge-client.js';
+import type { JudgeOutcome } from './judge-outcome-schema.js';
 import { buildJudgePrompt, JUDGE_PROMPT_VERSION, JUDGE_REQUEST_PARAMS } from './rubric-prompt.js';
 
 /**
  * Advisory content-addressed store for judge outcomes, so runs avoid repeated provider calls when
- * metric spec §3 inputs have not changed.
+ * the judge inputs have not changed.
  */
 interface JudgeCache {
   get(key: string): Promise<JudgeOutcome | undefined>;

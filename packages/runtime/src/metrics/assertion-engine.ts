@@ -54,7 +54,7 @@ const evaluateAssertionCheck = (
   return { check, ...evaluateLeafCheck(check, document) };
 };
 
-/** Computes the spec §Assertions fraction and aligned details while requiring every top-level check to pass. */
+/** Scores the fraction of passing top-level checks; the metric passes only when every check passes. */
 const evaluateAssertionMetric = (
   definition: AssertionMetricDefinition,
   document: EvaluationDocument,

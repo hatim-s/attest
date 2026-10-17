@@ -6,7 +6,7 @@ export type { MetricContext } from './metric-evaluation.js';
 
 export type { JudgeCache } from './judge/judge-cache.js';
 
-export type { JudgeClient, JudgeOutcome } from './judge/judge-client.js';
+export type { JudgeClient } from './judge/judge-client.js';
 
 export {
   createTanstackJudgeClient,
@@ -21,4 +21,4 @@ export type {
   MetricTransportOutcome,
 } from './internal/metric-transport.js';
 
-export { judgeOutcomeSchema } from './judge/judge-outcome-schema.js';
+export { judgeOutcomeSchema, type JudgeOutcome } from './judge/judge-outcome-schema.js';

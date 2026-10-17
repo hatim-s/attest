@@ -1,5 +1,4 @@
 import type { JsonValue } from '@attest/contracts';
-import { isString } from '@attest/contracts';
 import {
   chat,
   StandardSchemaValidationError,
@@ -10,12 +9,14 @@ import { z } from 'zod';
 
 import { judgeResponseSchema } from '../rubric-prompt.js';
 
-/** SDK finalization codes for structured output the provider returned but that failed to parse. */
-const UNPARSEABLE_RESPONSE_CODES = new Set([
-  'structured-output-parse-failed',
-  'structured-output-validation-failed',
-  'structured-output-missing-result',
-]);
+/** SDK finalization errors for structured output the provider returned but that failed to parse. */
+const unparseableResponseSchema = z.object({
+  code: z.enum([
+    'structured-output-parse-failed',
+    'structured-output-validation-failed',
+    'structured-output-missing-result',
+  ]),
+});
 
 const structuredOutputCompleteSchema = z.object({
   name: z.literal('structured-output.complete'),
@@ -42,24 +43,11 @@ type StructuredChatRequest = {
 /** Executes one schema-constrained chat call; injected by tests to avoid provider network calls. */
 type StructuredChatExecutor = (request: StructuredChatRequest) => Promise<JsonValue>;
 
-// BOUNDARY: SDK thrown values may expose a failure code; only object containers are inspected.
-const isErrorRecord = (cause: unknown): cause is Record<string, unknown> =>
-  cause !== null && typeof cause === 'object';
-
-/** Identifies SDK structured-output failures that metric spec §3 permits retrying exactly once. */
-const isUnparseableResponse = (cause: unknown): boolean => {
-  if (cause instanceof StandardSchemaValidationError) {
-    return true;
-  }
-
-  return (
-    isErrorRecord(cause) &&
-    cause !== null &&
-    'code' in cause &&
-    isString(cause.code) &&
-    UNPARSEABLE_RESPONSE_CODES.has(cause.code)
-  );
-};
+/** Identifies SDK structured-output failures the metric contract permits retrying exactly once. */
+// BOUNDARY: SDK thrown values may carry a structured-output failure code.
+const isUnparseableResponse = (cause: unknown): boolean =>
+  cause instanceof StandardSchemaValidationError ||
+  unparseableResponseSchema.safeParse(cause).success;
 
 /** Captures one attempt's provider bytes and token deltas without exposing SDK objects to persistence. */
 const createRecordMiddleware = (observation: JudgeAttemptObservation): ChatMiddleware => ({

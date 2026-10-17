@@ -10,15 +10,13 @@ import type { JsonValue } from '@attest/contracts';
 
 import { AttestMetricError, type AttestMetricErrorCode } from '../errors.js';
 import { abortReasonOf, composeAbortSignal } from '../internal/abort-signal.js';
+import type { JudgeCallOptions, JudgeClient, JudgeRequest } from './judge-client.js';
 import type {
   JudgeAttempt,
-  JudgeCallOptions,
-  JudgeClient,
   JudgeOutcome,
   JudgeRecord,
-  JudgeRequest,
   JudgeUsage,
-} from './judge-client.js';
+} from './judge-outcome-schema.js';
 import {
   executeStructuredChat,
   isUnparseableResponse,
@@ -146,7 +144,7 @@ const recordAttempt = (
   attempts.push({ rawResponse, usage, error });
 };
 
-/** Maps a failed attempt to its terminal error, or undefined when spec §3 allows a retry. */
+/** Maps a failed attempt to its terminal error, or undefined when the metric contract allows a retry. */
 const classifyProviderFailure = (
   cause: unknown,
   signal: AbortSignal,
@@ -167,7 +165,7 @@ const classifyProviderFailure = (
   return { code: 'judge_provider_error', message: `Judge provider call failed: ${message}` };
 };
 
-/** Runs the structured chat, retrying malformed structured output exactly once per spec §3. */
+/** Runs the structured chat, retrying malformed structured output exactly once. */
 const scoreWithTanStack = async ({
   adapter,
   request,

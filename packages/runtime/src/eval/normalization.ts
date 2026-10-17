@@ -1,18 +1,18 @@
 import { isAgentErrorResponse, type EvalRunSummary } from '@attest/contracts';
-import { computeCaseVerdict, summarizeVerdicts, type StoredMetricEvaluation } from '@attest/core';
+import {
+  computeCaseVerdict,
+  summarizeVerdicts,
+  type CaseVerdict,
+  type StoredMetricEvaluation,
+} from '@attest/core';
 
-import type {
-  CaseExecution,
-  EvalCaseVerdict,
-  NormalizedEvalCaseResult,
-  ResolvedEvalCase,
-} from './types.js';
+import type { CaseExecution, NormalizedEvalCaseResult, ResolvedEvalCase } from './types.js';
 
 /** Reads the verdict evidence from a live execution and applies core's rule. */
 const classifyCaseVerdict = (
   execution: CaseExecution,
   metrics: readonly StoredMetricEvaluation[],
-): EvalCaseVerdict =>
+): CaseVerdict =>
   computeCaseVerdict(
     {
       outcome: execution.outcome,

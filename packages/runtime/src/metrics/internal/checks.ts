@@ -31,7 +31,7 @@ const evaluateEqualsCheck = (
   return { passed: false, reason: `value at ${check.path} did not equal the expected value` };
 };
 
-/** Evaluates substring or array membership while rejecting target types outside spec §Check set v0. */
+/** Evaluates substring or array membership and rejects any other target type. */
 const evaluateContainsCheck = (
   check: LeafCheck<'contains'>,
   document: EvaluationDocument,
@@ -121,7 +121,7 @@ const evaluateThresholdCheck = (
       };
 };
 
-/** Tests path presence directly so null and false remain valid, present values under spec §Paths. */
+/** Tests path presence directly so null and false count as present values. */
 const evaluateExistsCheck = (
   check: LeafCheck<'exists'>,
   document: EvaluationDocument,

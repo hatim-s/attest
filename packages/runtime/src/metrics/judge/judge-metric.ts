@@ -13,7 +13,8 @@ import {
   type CompletedMetricContext,
   type MetricErrorInfo,
 } from '../metric-evaluation.js';
-import type { JudgeClient, JudgeOutcome, JudgeRequest } from './judge-client.js';
+import type { JudgeClient, JudgeRequest } from './judge-client.js';
+import type { JudgeOutcome } from './judge-outcome-schema.js';
 import { resolveThroughJudgeCache, type JudgeCache } from './judge-cache.js';
 import { summarizeTraceForJudge } from './rubric-prompt.js';
 
@@ -78,7 +79,7 @@ const judgeFailure = (cause: unknown, signal: AbortSignal | undefined): MetricEr
 };
 
 /**
- * Evaluates one judge rubric according to metric contract §3 while keeping provider faults distinct
+ * Evaluates one judge rubric while keeping provider faults distinct
  * from genuine failing scores. Full prompt/response evidence is retained for completed and attempted calls.
  */
 const evaluateJudgeMetric = async (

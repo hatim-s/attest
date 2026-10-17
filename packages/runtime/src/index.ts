@@ -3,11 +3,15 @@ export {
   createTanstackJudgeClient,
   evaluateMetrics,
   judgeOutcomeSchema,
+  type CommandMetricTransport,
   type EvaluateMetricsOptions,
+  type ExecMetricOptions,
   type JudgeCache,
   type JudgeClient,
   type JudgeOutcome,
   type MetricContext,
+  type MetricTransportOptions,
+  type MetricTransportOutcome,
   type TanstackJudgeClientOptions,
 } from './metrics/index.js';
 
@@ -31,11 +35,3 @@ export {
   type ResolvedEvalCase,
   type ResolvedEvalPlan,
 } from './eval/index.js';
-
-export type { ExecMetricOptions } from './metrics/exec-metric.js';
-
-export type {
-  CommandMetricTransport,
-  MetricTransportOptions,
-  MetricTransportOutcome,
-} from './metrics/internal/metric-transport.js';

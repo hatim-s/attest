@@ -34,7 +34,7 @@ type CompletedMetricContext = {
   execution: Extract<MetricExecutionView, { outcome: 'completed' }>;
 };
 
-/** Preserves actionable, diffable metric errors separately from assertion failures per spec §Errors vs failures. */
+/** Keeps actionable, diffable metric errors separate from assertion failures. */
 type MetricErrorInfo = {
   code: MetricErrorCode;
   message: string;
