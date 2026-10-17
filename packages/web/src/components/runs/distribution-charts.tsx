@@ -20,7 +20,10 @@ type ScoreBin = {
   label: string;
 };
 
-type ChartPalette = Record<'accent' | 'border' | 'danger' | 'muted' | 'text' | 'warning', string>;
+type ChartPalette = Record<
+  'accent' | 'border' | 'danger' | 'muted' | 'text' | 'warning' | 'series-1' | 'surface',
+  string
+>;
 
 const SCORE_LABELS = ['0–0.2', '0.2–0.4', '0.4–0.6', '0.6–0.8', '0.8–1.0'];
 
@@ -45,6 +48,8 @@ const readPalette = (): ChartPalette => {
 
   return {
     accent: read('accent'),
+    'series-1': read('series-1'),
+    surface: read('surface'),
     border: read('border'),
     danger: read('danger'),
     muted: read('muted'),
@@ -74,7 +79,7 @@ const useChart = (
     resizeObserver.observe(container);
 
     const themeObserver = new MutationObserver(() =>
-      chart.setOption(optionRef.current(readPalette())),
+      chart.setOption(optionRef.current(readPalette()), true),
     );
 
     themeObserver.observe(document.documentElement, { attributeFilter: ['data-theme'] });
@@ -89,7 +94,7 @@ const useChart = (
 
   useEffect(() => {
     optionRef.current = createOption;
-    chartRef.current?.setOption(createOption(readPalette()));
+    chartRef.current?.setOption(createOption(readPalette()), true);
   }, [createOption]);
 };
 
@@ -201,4 +206,11 @@ const DistributionCharts = ({ cases, isLoading, totalCases }: DistributionCharts
   );
 };
 
-export { DistributionCharts, createScoreHistogram, type DistributionChartsProps, type ScoreBin };
+export {
+  DistributionCharts,
+  createScoreHistogram,
+  useChart,
+  type ChartPalette,
+  type DistributionChartsProps,
+  type ScoreBin,
+};

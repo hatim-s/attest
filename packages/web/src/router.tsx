@@ -1,5 +1,11 @@
 import type { ApiClient } from '@attest/api/client';
-import { caseParamsSchema, diffParamsSchema, runParamsSchema } from '@attest/api/contract';
+import {
+  caseParamsSchema,
+  diffParamsSchema,
+  runParamsSchema,
+  suiteParamsSchema,
+  suiteHistoryQuerySchema,
+} from '@attest/api/contract';
 import type { QueryClient } from '@tanstack/react-query';
 import {
   createRootRouteWithContext,
@@ -11,6 +17,8 @@ import {
 } from '@tanstack/react-router';
 import { z } from 'zod';
 import { runsQueryOptions } from './api/queries.js';
+import { EvalsPage } from './routes/evals-page.js';
+import { EvalPage } from './routes/eval-page.js';
 import { RootLayout } from './routes/root-layout.js';
 import { NewestRun } from './routes/newest-run.js';
 import { RunPage } from './routes/run-page.js';
@@ -96,10 +104,26 @@ const compareRoute = createRoute({
   component: ComparePage,
 });
 
+const evalsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/evals',
+  component: EvalsPage,
+});
+
+const evalRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/evals/$suiteName',
+  params: { parse: (params) => suiteParamsSchema.parse(params) },
+  validateSearch: z.object({ limit: suiteHistoryQuerySchema.shape.limit.catch(20) }),
+  component: EvalPage,
+});
+
 const routeTree = rootRoute.addChildren([
   indexRoute,
   runsRoute.addChildren([runsIndexRoute, runRoute.addChildren([caseRoute])]),
   compareRoute,
+  evalsRoute,
+  evalRoute,
 ]);
 
 /** Accepts history so production can use hashes and invariant tests can navigate without a DOM. */

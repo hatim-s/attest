@@ -56,6 +56,7 @@
     'Segoe UI',
     sans-serif;
   --mono: 'SFMono-Regular', Consolas, monospace;
+  --series-1: #2a78d6;
   --bg: #f4f5f2;
   --surface: #ffffff;
   --surface-muted: #f7f8f5;
@@ -74,6 +75,7 @@
 
 :root[data-theme='dark'] {
   color-scheme: dark;
+  --series-1: #3987e5;
   --bg: #101410;
   --surface: #181d18;
   --surface-muted: #202620;
@@ -978,4 +980,9 @@ a.button-primary {
 }
 .analytics-table thead {
   background: var(--surface-muted);
+}
+
+.analytics-table a {
+  color: var(--text);
+  text-decoration: underline;
 }

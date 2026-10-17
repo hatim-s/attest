@@ -1,3 +1,4 @@
+import { Link } from '@tanstack/react-router';
 import { useEffect, useState } from 'react';
 import { useApiClient } from '../api/api-client-context.js';
 import { Badge, Button } from '../components/shared/ui.js';
@@ -44,6 +45,12 @@ const RootLayout = () => {
           </div>
         </div>
         <div className="topbar-actions">
+          <Link className="button button-ghost" to="/runs">
+            Runs
+          </Link>
+          <Link className="button button-ghost" to="/evals">
+            Evals
+          </Link>
           <Badge tone="local">{mode.kind === 'live' ? '127.0.0.1' : 'static report'}</Badge>
           <Button onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} tone="ghost">
             {theme === 'dark' ? 'Light mode' : 'Dark mode'}

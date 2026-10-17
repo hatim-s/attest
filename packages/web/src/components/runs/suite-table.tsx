@@ -1,3 +1,4 @@
+import { Link } from '@tanstack/react-router';
 import type { SuiteAggregate } from '@attest/core/analytics';
 import { formatDuration, formatPercent } from '../../lib/format.js';
 
@@ -31,7 +32,15 @@ const SuiteTable = ({ suites }: { suites: SuiteAggregate[] }) => (
           .sort((a, b) => a.suiteName.localeCompare(b.suiteName))
           .map((suite) => (
             <tr key={suite.suiteName}>
-              <th scope="row">{suite.suiteName}</th>
+              <th scope="row">
+                <Link
+                  to="/evals/$suiteName"
+                  params={{ suiteName: suite.suiteName }}
+                  search={{ limit: 20 }}
+                >
+                  {suite.suiteName}
+                </Link>
+              </th>
               <td>{suite.caseCount}</td>
               <td>{suite.verdicts.pass}</td>
               <td>{suite.verdicts.fail}</td>

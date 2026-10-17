@@ -131,7 +131,46 @@ const runSuitesQueryOptions = (
 const useRunSuites = (runId: string | undefined, status: RunStatus | undefined) =>
   useQuery(runSuitesQueryOptions(useApiClient(), runId, status));
 
+/** Walks past running-only pages so evals always starts from the newest finished run. */
+const newestCompletedRunQueryOptions = (client: ApiClient) =>
+  queryOptions({
+    queryKey: ['newest-completed-run'],
+    queryFn: async ({ signal }) => {
+      let cursor: string | undefined;
+
+      do {
+        const page = await client.listRuns({ cursor }, { signal });
+        const run = page.items.find((item) => item.status !== 'running');
+
+        if (run !== undefined) return run;
+        cursor = page.nextCursor;
+      } while (cursor !== undefined);
+
+      return null;
+    },
+    refetchInterval: client.mode.kind === 'live' ? 5_000 : false,
+  });
+
+/** Refreshes the eval catalog when a new run completes. */
+const useNewestCompletedRun = () => useQuery(newestCompletedRunQueryOptions(useApiClient()));
+
+/** Keeps the history limit in the cache identity and polls only live sources. */
+const suiteHistoryQueryOptions = (client: ApiClient, suiteName: string, limit: number) =>
+  queryOptions({
+    queryKey: ['suite-history', suiteName, limit],
+    queryFn: ({ signal }) => client.getSuiteHistory({ suiteName }, { limit }, { signal }),
+    refetchInterval: client.mode.kind === 'live' ? 5_000 : false,
+  });
+
+/** Lets both history charts consume a single parsed response. */
+const useSuiteHistory = (suiteName: string, limit: number) =>
+  useQuery(suiteHistoryQueryOptions(useApiClient(), suiteName, limit));
+
 export {
+  newestCompletedRunQueryOptions,
+  suiteHistoryQueryOptions,
+  useNewestCompletedRun,
+  useSuiteHistory,
   runSuitesQueryOptions,
   useRunSuites,
   runsQueryOptions,
