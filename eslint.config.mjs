@@ -1,6 +1,24 @@
 import antiSlopConfig from './tools/anti-slop/config.mjs';
 import tseslint from 'typescript-eslint';
 
+const apiForbidden = [
+  '@attest/executor',
+  '@attest/executor/*',
+  '@attest/runtime',
+  '@attest/runtime/*',
+  '@attest/local',
+  '@attest/local/*',
+  '@attest/cli',
+  '@attest/cli/*',
+  '@attest/web',
+  '@attest/web/*',
+  'node:*',
+  'bun:*',
+  '@hono/*',
+  'kysely',
+  '@libsql/*',
+];
+
 export default tseslint.config(
   ...antiSlopConfig,
   {
@@ -32,6 +50,8 @@ export default tseslint.config(
           patterns: [
             {
               group: [
+                '@attest/api',
+                '@attest/api/*',
                 '@attest/executor',
                 '@attest/executor/*',
                 '@attest/runtime',
@@ -59,6 +79,44 @@ export default tseslint.config(
               ],
               message:
                 'Core owns domain logic and interfaces. Put transport execution in executor, evaluation execution in runtime, and local I/O in local.',
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
+    files: ['packages/api/src/**/*.ts'],
+    ignores: ['**/_tests_/**'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: apiForbidden,
+              message:
+                'The api package runs on any fetch host. Hosts own sockets, storage drivers and auth.',
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
+    files: ['packages/api/src/contract/**/*.ts', 'packages/api/src/client/**/*.ts'],
+    ignores: ['**/_tests_/**'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          paths: [
+            { name: '@attest/core', message: 'Browser code imports browser-safe core entries.' },
+          ],
+          patterns: [
+            {
+              group: [...apiForbidden, 'hono', 'hono/*', '../server/*', '../host/*'],
+              message: 'Contract and client import zod, browser-safe core entries and each other.',
             },
           ],
         },

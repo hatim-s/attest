@@ -10,7 +10,17 @@ const root = fileURLToPath(new URL('../', import.meta.url));
 
 const releaseDirectory = resolve(root, 'dist/release');
 
-const packageNames = ['contracts', 'core', 'executor', 'runtime', 'web', 'local', 'cli', 'schemas'];
+const packageNames = [
+  'contracts',
+  'core',
+  'api',
+  'executor',
+  'runtime',
+  'web',
+  'local',
+  'cli',
+  'schemas',
+];
 
 /** Packs only built artifacts, rewriting workspace references to the exact release version. */
 const packRelease = async (): Promise<void> => {
