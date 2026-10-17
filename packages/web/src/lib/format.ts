@@ -8,6 +8,15 @@ const formatDateTime = (value: string | undefined): string => {
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
 };
 
+/** Month, day and time without the year, short enough for a chart tick. */
+const formatShortDateTime = (value: string): string =>
+  new Date(value).toLocaleString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+
 /** Shows milliseconds under one second, seconds under one minute, then minutes and seconds. */
 const formatDuration = (milliseconds: number): string => {
   if (milliseconds < 1_000) return `${Math.round(milliseconds)} ms`;
@@ -15,6 +24,17 @@ const formatDuration = (milliseconds: number): string => {
   if (milliseconds < 60_000) return `${(milliseconds / 1_000).toFixed(2)} s`;
 
   return `${Math.floor(milliseconds / 60_000)}m ${Math.round((milliseconds % 60_000) / 1_000)}s`;
+};
+
+/** Writes the unit once when both ends share it, as in "0 to 237 ms" or "1.42 to 1.66 s". */
+const formatDurationRange = (lowerMs: number, upperMs: number): string => {
+  if (upperMs < 1_000) return `${Math.round(lowerMs)} to ${Math.round(upperMs)} ms`;
+
+  if (lowerMs >= 1_000 && upperMs < 60_000) {
+    return `${(lowerMs / 1_000).toFixed(2)} to ${(upperMs / 1_000).toFixed(2)} s`;
+  }
+
+  return `${formatDuration(lowerMs)} to ${formatDuration(upperMs)}`;
 };
 
 /** Formats a zero-to-one rate as a percentage. */
@@ -35,4 +55,13 @@ const formatCount = (count: number, noun: string): string =>
 /** Truncates an opaque identifier for display. */
 const shortId = (value: string, length = 8): string => value.slice(0, length);
 
-export { formatCount, formatDateTime, formatDuration, formatPassRate, formatPercent, shortId };
+export {
+  formatCount,
+  formatDateTime,
+  formatDuration,
+  formatDurationRange,
+  formatPassRate,
+  formatPercent,
+  formatShortDateTime,
+  shortId,
+};

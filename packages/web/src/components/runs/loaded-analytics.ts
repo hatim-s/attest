@@ -1,6 +1,9 @@
 import type { CaseSummary, RunRecord } from '@attest/core/records';
 
-type TrendRun = Pick<RunRecord, 'id' | 'createdAt' | 'gitBranch' | 'labels' | 'summary' | 'status'>;
+type TrendRun = Pick<
+  RunRecord,
+  'id' | 'createdAt' | 'gitBranch' | 'gitSha' | 'labels' | 'summary' | 'status'
+>;
 
 type TrendPoint = { run: TrendRun; passRate: number };
 

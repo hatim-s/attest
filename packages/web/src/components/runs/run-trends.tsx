@@ -7,9 +7,9 @@ import { formatCount, formatPercent, shortId } from '../../lib/format.js';
 
 /** Keeps chart arrays stable while the run page polls unchanged results. */
 const TrendChart = ({ group }: { group: ReturnType<typeof createRunTrends>['groups'][number] }) => {
-  const { labels, values } = useMemo(
+  const { runs, values } = useMemo(
     () => ({
-      labels: group.points.map(({ run }) => `${run.id}\n${group.name}`),
+      runs: group.points.map(({ run }) => run),
       values: group.points.map(({ passRate }) => passRate),
     }),
     [group],
@@ -22,7 +22,7 @@ const TrendChart = ({ group }: { group: ReturnType<typeof createRunTrends>['grou
       min={0}
       max={1}
       formatValue={formatPercent}
-      labels={labels}
+      runs={runs}
       values={values}
     />
   );

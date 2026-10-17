@@ -1,43 +1,69 @@
-import { useCallback } from 'react';
-import { type EChartsCoreOption } from 'echarts/core';
+import { useCallback, useMemo } from 'react';
 import { ChartCard } from '../charts/chart-card.js';
-import { categoryAxis, valueAxis, type ChartPalette } from '../charts/use-chart.js';
+import {
+  categoryAxis,
+  valueAxis,
+  type ChartOptions,
+  type ChartPalette,
+} from '../charts/use-chart.js';
+import { formatShortDateTime, shortId } from '../../lib/format.js';
 
-/** Shares chart anatomy so histories and loaded-run trends have identical scales and tooltips. */
-const AnalyticsChart = ({
-  title,
-  labels,
-  values,
-  measure,
-  formatValue,
-  min,
-  max,
-}: {
+type ChartRun = { id: string; createdAt: string; gitBranch?: string; gitSha?: string };
+
+/**
+ * The first line is the tick; the tooltip shows every line. Categories repeat when two runs
+ * start in the same minute, which a category axis handles by position.
+ */
+const describeRun = ({ id, createdAt, gitBranch, gitSha }: ChartRun): string =>
+  [
+    formatShortDateTime(createdAt),
+    `Run ${shortId(id)}`,
+    gitBranch === undefined ? '' : `Branch ${gitBranch}`,
+    gitSha === undefined ? '' : `Commit ${shortId(gitSha, 7)}`,
+  ]
+    .filter((line) => line !== '')
+    .join('\n');
+
+type AnalyticsChartProps = {
   title: string;
-  labels: string[];
+  /** Oldest first, one per value. */
+  runs: ChartRun[];
   values: (number | null)[];
   measure: string;
   min?: number;
   max?: number;
   formatValue: (value: number) => string;
-}) => {
+  /** Shown instead of the chart when every value is null. */
+  emptyMessage?: string;
+};
+
+/** Shares chart anatomy so histories and recent-run trends have identical scales and tooltips. */
+const AnalyticsChart = ({
+  title,
+  runs,
+  values,
+  measure,
+  formatValue,
+  min,
+  max,
+  emptyMessage,
+}: AnalyticsChartProps) => {
+  const labels = useMemo(() => runs.map(describeRun), [runs]);
+
   const option = useCallback(
-    (palette: ChartPalette): EChartsCoreOption => ({
+    (palette: ChartPalette): ChartOptions => ({
       grid: { left: 65, right: 25, top: 40, bottom: 55 },
       tooltip: {
         trigger: 'axis',
-        renderMode: 'richText',
         axisPointer: { type: 'line', snap: true },
-        valueFormatter: (value: number | null) =>
-          value === null ? 'Unscored' : formatValue(value),
-      },
-      xAxis: {
-        ...categoryAxis(palette, 'Run (oldest → newest)', labels),
-        axisLabel: {
-          color: palette.muted,
-          formatter: (label: string) => label.split('\n')[0]?.slice(0, 10) ?? '',
+        // Reads the typed series by index; ECharts hands the callback its own loose value type.
+        valueFormatter: (_value, dataIndex) => {
+          const value = values[dataIndex];
+
+          return value === null || value === undefined ? 'Unscored' : formatValue(value);
         },
       },
+      xAxis: categoryAxis(palette, 'Run started', labels, (label) => label.split('\n')[0] ?? ''),
       yAxis: {
         ...valueAxis(palette, measure),
         min,
@@ -59,7 +85,13 @@ const AnalyticsChart = ({
     [labels, values, measure, formatValue, min, max],
   );
 
-  return <ChartCard title={title} option={option} />;
+  return (
+    <ChartCard
+      title={title}
+      option={option}
+      emptyMessage={values.every((value) => value === null) ? emptyMessage : undefined}
+    />
+  );
 };
 
-export { AnalyticsChart };
+export { AnalyticsChart, type ChartRun };

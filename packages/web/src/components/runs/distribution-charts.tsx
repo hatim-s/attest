@@ -1,10 +1,15 @@
 import { useCallback, useMemo } from 'react';
 
-import type { EChartsCoreOption } from 'echarts/core';
 import { ChartCard } from '../charts/chart-card.js';
-import { categoryAxis, valueAxis, type ChartPalette } from '../charts/use-chart.js';
+import {
+  categoryAxis,
+  valueAxis,
+  type ChartOptions,
+  type ChartPalette,
+} from '../charts/use-chart.js';
 
 import { aggregateCases } from '@attest/core/analytics';
+import { formatCount } from '../../lib/format.js';
 import type { CaseSummary } from '@attest/core/records';
 
 type DistributionChartsProps = {
@@ -37,6 +42,7 @@ const createScoreHistogram = (cases: CaseSummary[]): ScoreBin[] => {
 /** Renders the score histogram and verdict pie for the loaded cases. */
 const DistributionCharts = ({ cases, isLoading, totalCases }: DistributionChartsProps) => {
   const histogram = useMemo(() => createScoreHistogram(cases), [cases]);
+  const scoredCases = histogram.reduce((total, { count }) => total + count, 0);
 
   const verdicts = useMemo(() => {
     const [first, ...rest] = cases;
@@ -47,9 +53,9 @@ const DistributionCharts = ({ cases, isLoading, totalCases }: DistributionCharts
   }, [cases]);
 
   const scoreOption = useCallback(
-    (palette: ChartPalette): EChartsCoreOption => ({
+    (palette: ChartPalette): ChartOptions => ({
       grid: { left: 55, right: 16, top: 35, bottom: 55 },
-      tooltip: { trigger: 'item', renderMode: 'richText' },
+      tooltip: { trigger: 'item' },
       xAxis: categoryAxis(
         palette,
         'Mean score',
@@ -70,7 +76,7 @@ const DistributionCharts = ({ cases, isLoading, totalCases }: DistributionCharts
   );
 
   const verdictOption = useCallback(
-    ({ accent, danger, muted, text, warning }: ChartPalette): EChartsCoreOption => ({
+    ({ accent, danger, muted, text, warning }: ChartPalette): ChartOptions => ({
       legend: { bottom: 2, textStyle: { color: muted, fontSize: 10 } },
       series: [
         {
@@ -85,7 +91,7 @@ const DistributionCharts = ({ cases, isLoading, totalCases }: DistributionCharts
           type: 'pie',
         },
       ],
-      tooltip: { trigger: 'item', renderMode: 'richText' },
+      tooltip: { trigger: 'item' },
     }),
     [verdicts],
   );
@@ -104,7 +110,8 @@ const DistributionCharts = ({ cases, isLoading, totalCases }: DistributionCharts
       <div className="chart-grid">
         <ChartCard
           title="Mean score"
-          detail={`${cases.filter(({ score }) => score !== undefined).length} scored cases`}
+          detail={formatCount(scoredCases, 'scored case')}
+          emptyMessage={scoredCases === 0 ? 'No scored cases yet.' : undefined}
           option={scoreOption}
           table={
             <table className="analytics-table">
@@ -129,6 +136,7 @@ const DistributionCharts = ({ cases, isLoading, totalCases }: DistributionCharts
         <ChartCard
           title="Verdicts"
           detail="One final verdict per case"
+          emptyMessage={cases.length === 0 ? 'No cases have finished yet.' : undefined}
           option={verdictOption}
           table={
             <table className="analytics-table">

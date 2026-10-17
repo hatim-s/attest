@@ -18,12 +18,14 @@ const EvalPage = () => {
   const history = historyQuery.data;
   const points = useMemo(() => [...(history?.points ?? [])].reverse(), [history?.points]);
 
-  const { labels, passRates, meanScores } = useMemo(
+  const { runs, passRates, meanScores } = useMemo(
     () => ({
-      labels: points.map(
-        (point) =>
-          `${point.runId}\nBranch: ${point.gitBranch ?? 'Unknown'}\nSHA: ${point.gitSha ?? 'Unknown'}`,
-      ),
+      runs: points.map(({ runId, createdAt, gitBranch, gitSha }) => ({
+        id: runId,
+        createdAt,
+        gitBranch,
+        gitSha,
+      })),
       passRates: points.map((point) => point.aggregate.passRate),
       meanScores: points.map((point) => point.aggregate.meanScore),
     }),
@@ -74,7 +76,7 @@ const EvalPage = () => {
               <div className="chart-grid">
                 <AnalyticsChart
                   title="Pass rate"
-                  labels={labels}
+                  runs={runs}
                   values={passRates}
                   measure="Pass rate"
                   min={0}
@@ -83,8 +85,9 @@ const EvalPage = () => {
                 />
                 <AnalyticsChart
                   title="Mean score"
-                  labels={labels}
+                  runs={runs}
                   values={meanScores}
+                  emptyMessage="None of these runs has a score."
                   measure="Mean score"
                   formatValue={formatScore}
                 />
