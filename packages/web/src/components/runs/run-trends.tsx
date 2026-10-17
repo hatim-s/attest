@@ -84,7 +84,11 @@ const RunTrends = ({ runs }: { runs: RunRecord[] }) => {
                   <tr key={`${group.name}:${run.id}`}>
                     <th scope="row">{group.name}</th>
                     <td>
-                      <Link to="/runs/$runId" params={{ runId: run.id }} search={{ tab: 'cases' }}>
+                      <Link
+                        to="/runs/$runId"
+                        params={{ runId: run.id }}
+                        search={(previous) => ({ ...previous, tab: 'cases' })}
+                      >
                         {run.id}
                       </Link>
                     </td>

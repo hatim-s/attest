@@ -19,7 +19,11 @@ const EvalsPage = () => {
       {run !== undefined && run !== null ? (
         <p className="empty-compact">
           Suites from the newest non-running run,{' '}
-          <Link to="/runs/$runId" params={{ runId: run.id }} search={{ tab: 'suites' }}>
+          <Link
+            to="/runs/$runId"
+            params={{ runId: run.id }}
+            search={(previous) => ({ ...previous, tab: 'suites' })}
+          >
             {run.id}
           </Link>
           .

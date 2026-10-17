@@ -41,7 +41,7 @@ const EvalPage = () => {
             void navigate({
               to: '/evals/$suiteName',
               params: { suiteName },
-              search: { limit: Number(event.target.value) },
+              search: (previous) => ({ ...previous, limit: Number(event.target.value) }),
             })
           }
         >
@@ -108,7 +108,7 @@ const EvalPage = () => {
                           <Link
                             to="/runs/$runId"
                             params={{ runId: point.runId }}
-                            search={{ tab: 'suites' }}
+                            search={(previous) => ({ ...previous, tab: 'suites' })}
                           >
                             {point.runId}
                           </Link>

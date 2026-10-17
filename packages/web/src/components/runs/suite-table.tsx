@@ -33,7 +33,11 @@ const SuiteTable = ({ suites }: { suites: SuiteAggregate[] }) => (
           .map((suite) => (
             <tr key={suite.suiteName}>
               <th scope="row">
-                <Link to="/evals/$suiteName" params={{ suiteName: suite.suiteName }}>
+                <Link
+                  to="/evals/$suiteName"
+                  params={{ suiteName: suite.suiteName }}
+                  search={({ branch, label }) => ({ branch, label })}
+                >
                   {suite.suiteName}
                 </Link>
               </th>

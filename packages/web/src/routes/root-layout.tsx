@@ -45,10 +45,18 @@ const RootLayout = () => {
           </div>
         </div>
         <div className="topbar-actions">
-          <Link className="button button-ghost" to="/runs">
+          <Link
+            className="button button-ghost"
+            to="/runs"
+            search={({ branch, label }) => ({ branch, label })}
+          >
             Runs
           </Link>
-          <Link className="button button-ghost" to="/evals">
+          <Link
+            className="button button-ghost"
+            to="/evals"
+            search={({ branch, label }) => ({ branch, label })}
+          >
             Evals
           </Link>
           <Badge tone="local">{mode.kind === 'live' ? '127.0.0.1' : 'static report'}</Badge>
