@@ -316,7 +316,7 @@ describe('runConfiguration', () => {
         effective_command: { request: { command: 'eval.run', test_ids: ['smoke'] } },
       });
       expect((await store.runs.getRun(second.runId)).status).toBe('completed');
-      expect(await store.runs.getCaseResults(firstRun.id)).toMatchObject([
+      expect((await store.runs.getRunWithCases(firstRun.id)).cases).toMatchObject([
         {
           suiteName: 'smoke',
           caseId: 'capital',
@@ -419,8 +419,8 @@ describe('runConfiguration', () => {
     const store = await openStore(join(root, '.attest', 'runs.db'));
 
     try {
-      const passedEvidence = JSON.stringify(await store.runs.getCaseResults(passed.runId));
-      const failedEvidence = JSON.stringify(await store.runs.getCaseResults(failed.runId));
+      const passedEvidence = JSON.stringify((await store.runs.getRunWithCases(passed.runId)).cases);
+      const failedEvidence = JSON.stringify((await store.runs.getRunWithCases(failed.runId)).cases);
       expect(passedEvidence).toContain('retained');
 
       for (const evidence of [passedEvidence, failedEvidence]) {

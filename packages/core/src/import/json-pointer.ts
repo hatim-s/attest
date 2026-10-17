@@ -47,4 +47,4 @@ const resolveJsonPointer = (value: JsonValue, pointer: string): PointerResolutio
   return { found: true, value: current };
 };
 
-export { escapePointerSegment, resolveJsonPointer, toPointer };
+export { resolveJsonPointer, toPointer };

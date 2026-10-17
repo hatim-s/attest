@@ -48,14 +48,13 @@ const hasSameTests = (base: EvalScope, candidate: EvalScope): boolean =>
  * different test selection compare only shared cases, so skipped cases never read as removals.
  */
 const diffRuns = async (
-  baseStore: RunStore,
+  store: RunStore,
   baseRunId: string,
   candidateRunId: string,
-  candidateStore: RunStore = baseStore,
 ): Promise<RunDiff> => {
   const [base, candidate] = await Promise.all([
-    baseStore.getRunWithCases(baseRunId),
-    candidateStore.getRunWithCases(candidateRunId),
+    store.getRunWithCases(baseRunId),
+    store.getRunWithCases(candidateRunId),
   ]);
 
   const baseScope = evalScope(base.run);

@@ -184,7 +184,7 @@ describe('RunStore', () => {
       });
     }
 
-    await expect(store.getCaseResults(run.id)).resolves.toEqual([]);
+    expect((await store.getRunWithCases(run.id)).cases).toEqual([]);
     await expect(store.recordCase(run.id, valid, [])).resolves.toBeUndefined();
   });
 
@@ -245,7 +245,7 @@ describe('RunStore', () => {
     await expect(
       store.recordCase(run.id, { ...execution, durationMs: 11 }, []),
     ).rejects.toMatchObject({ code: 'CASE_CONFLICT' });
-    expect(await store.getCaseResults(run.id)).toHaveLength(1);
+    expect((await store.getRunWithCases(run.id)).cases).toHaveLength(1);
   });
 
   it('returns the existing finalization for same-status retry and rejects a different status', async () => {
@@ -425,7 +425,7 @@ describe('RunStore adversarial persistence', () => {
 
     await store.recordCase(run.id, completed, [evaluated]);
     await store.recordCase(run.id, failed, [errored]);
-    await expect(store.getCaseResults(run.id)).resolves.toHaveLength(2);
+    expect((await store.getRunWithCases(run.id)).cases).toHaveLength(2);
   });
 
   it('aggregates all execution and evaluation violations before persistence', async () => {
@@ -472,7 +472,7 @@ describe('RunStore adversarial persistence', () => {
     expect(failure).toHaveProperty('message', expect.stringContaining('trace'));
     expect(failure).toHaveProperty('message', expect.stringContaining('evaluations[0]'));
     expect(failure).toHaveProperty('message', expect.stringContaining('evaluations[1]'));
-    await expect(store.getCaseResults(run.id)).resolves.toEqual([]);
+    expect((await store.getRunWithCases(run.id)).cases).toEqual([]);
   });
 
   it('serializes five concurrent case transactions without losing writes', async () => {
@@ -496,13 +496,9 @@ describe('RunStore adversarial persistence', () => {
       }),
     );
 
-    expect((await store.getCaseResults(run.id)).map((record) => record.caseId).sort()).toEqual([
-      'concurrent-0',
-      'concurrent-1',
-      'concurrent-2',
-      'concurrent-3',
-      'concurrent-4',
-    ]);
+    expect(
+      (await store.getRunWithCases(run.id)).cases.map((record) => record.caseId).sort(),
+    ).toEqual(['concurrent-0', 'concurrent-1', 'concurrent-2', 'concurrent-3', 'concurrent-4']);
   });
 
   it('rolls back the whole case and wraps a duplicate child-row failure', async () => {
@@ -526,7 +522,7 @@ describe('RunStore adversarial persistence', () => {
     expect(failure).toBeInstanceOf(StoreError);
 
     if (failure instanceof StoreError) expect(failure.cause).toBeDefined();
-    await expect(store.getCaseResults(run.id)).resolves.toEqual([]);
+    expect((await store.getRunWithCases(run.id)).cases).toEqual([]);
   });
 
   it('reports malformed persisted JSON as CORRUPT_DATA with its parse cause', async () => {
@@ -543,7 +539,7 @@ describe('RunStore adversarial persistence', () => {
     await handle.prepare('UPDATE cases SET request_json = ? WHERE run_id = ?').run('{', run.id);
     await handle.close();
 
-    const failure = await captureRejection(store.getCaseResults(run.id));
+    const failure = await captureRejection(store.getRunWithCases(run.id));
     expect(failure).toMatchObject({ code: 'CORRUPT_DATA' });
     expect(failure).toBeInstanceOf(StoreError);
 

@@ -139,7 +139,7 @@ describe('toStoredCaseExecution', () => {
     const projections = [toStoredCaseExecution(completed), toStoredCaseExecution(timeout)];
     await Promise.all(projections.map((projection) => store.recordCase(run.id, projection, [])));
 
-    const stored = await store.getCaseResults(run.id);
+    const stored = (await store.getRunWithCases(run.id)).cases;
     expect(stored.map(toStoredProjection)).toEqual(projections);
   });
 });

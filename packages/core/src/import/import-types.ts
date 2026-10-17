@@ -37,7 +37,6 @@ type ImportDiagnosticCode =
   | 'invalid_utf8'
   | 'malformed_csv'
   | 'mapping_destination_conflict'
-  | 'mapping_destination_renamed'
   | 'mapping_destination_unsafe'
   | 'mapping_required'
   | 'parse_json_format'

@@ -231,11 +231,6 @@ class SqliteRunStore implements RunStore {
     return { run, cases: await this.#loadCaseResults(runId) };
   }
 
-  /** Rehydrates all case blobs while preserving missing-run semantics. */
-  async getCaseResults(runId: string): Promise<CaseRecord[]> {
-    return (await this.getRunWithCases(runId)).cases;
-  }
-
   /** Loads one case detail while preserving distinct missing-run and missing-case semantics. */
   async getCase(runId: string, suiteName: string, caseId: string): Promise<CaseRecord> {
     await this.getRun(runId);

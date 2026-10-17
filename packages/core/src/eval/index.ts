@@ -1,9 +1,8 @@
-export { CaseSelectionError, selectCases } from './select-cases.js';
+export { selectCases } from './select-cases.js';
 
 export {
   resolveEvalRun,
   type ResolvedEvalCaseInput,
-  type ResolvedEvalRun,
   type EvalResolverOptions,
 } from './eval-resolver.js';
 

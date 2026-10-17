@@ -70,16 +70,6 @@ type ResolvedEvalRun = Readonly<{
   snapshotHash: string;
 }>;
 
-const positiveInteger = (value: number | undefined, fallback: number, label: string): number => {
-  const resolved = value ?? fallback;
-
-  if (!Number.isInteger(resolved) || resolved <= 0) {
-    throw new EvalResolutionError('cli_usage', `${label} must be a positive integer.`);
-  }
-
-  return resolved;
-};
-
 /**
  * Resolves one loaded project and validated eval request into execution-ready
  * resource/case inputs plus the content-addressed snapshot metadata. It performs no I/O or writes.
@@ -145,19 +135,9 @@ const resolveEvalRun = (
     );
   }
 
-  const defaultConcurrency = positiveInteger(
-    options.defaultConcurrency,
-    DEFAULT_EVAL_CONCURRENCY,
-    'Default eval concurrency',
-  );
+  const projectConcurrency =
+    project.project.defaults?.concurrency ?? options.defaultConcurrency ?? DEFAULT_EVAL_CONCURRENCY;
 
-  const defaultTimeoutMs = positiveInteger(
-    options.defaultTimeoutMs,
-    DEFAULT_EVAL_TIMEOUT_MS,
-    'Default eval timeout',
-  );
-
-  const projectConcurrency = project.project.defaults?.concurrency ?? defaultConcurrency;
   const execution = project.project.defaults?.eval;
   const workerCount = execution?.workers?.count;
 
@@ -176,7 +156,10 @@ const resolveEvalRun = (
   const concurrency = workerCount ?? request.concurrency ?? projectConcurrency;
 
   const timeoutMs =
-    request.timeout_ms ?? project.project.defaults?.eval_timeout_ms ?? defaultTimeoutMs;
+    request.timeout_ms ??
+    project.project.defaults?.eval_timeout_ms ??
+    options.defaultTimeoutMs ??
+    DEFAULT_EVAL_TIMEOUT_MS;
 
   const agentsById = new Map(project.agents.map((agent) => [agent.id, agent]));
   const datasetsById = new Map(project.datasets.map((dataset) => [dataset.metadata.id, dataset]));
