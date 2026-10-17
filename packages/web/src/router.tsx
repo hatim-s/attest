@@ -46,6 +46,12 @@ const runSearchSchema = z.object({
 
 const rootRoute = createRootRouteWithContext<RouterContext>()({
   component: RootLayout,
+  // An unknown path matches only the root, so it borrows the workspace to keep the sidebar.
+  notFoundComponent: () => (
+    <RunsLayout>
+      <div className="empty-compact">This dashboard page does not exist.</div>
+    </RunsLayout>
+  ),
 });
 
 const indexRoute = createRoute({

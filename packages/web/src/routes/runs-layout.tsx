@@ -1,14 +1,16 @@
-import { getRouteApi, Outlet, useParams } from '@tanstack/react-router';
+import type { ReactNode } from 'react';
+import { Outlet, useParams, useSearch } from '@tanstack/react-router';
 import { useRuns } from '../api/queries.js';
 import { RunList } from '../components/runs/run-list.js';
 
-const route = getRouteApi('/workspace');
-
-/** Keeps run navigation available on both run and comparison pages. */
-const RunsLayout = () => {
+/**
+ * Keeps run navigation available on every page. Reads search loosely because the root
+ * not-found page renders it outside the workspace route.
+ */
+const RunsLayout = ({ children = <Outlet /> }: { children?: ReactNode }) => {
   const runsQuery = useRuns();
   const { runId, candidateRunId } = useParams({ strict: false });
-  const { branch, label } = route.useSearch();
+  const { branch, label } = useSearch({ strict: false });
 
   const runs = (runsQuery.data ?? []).filter(
     (run) =>
@@ -25,9 +27,7 @@ const RunsLayout = () => {
         runs={runs}
         selectedRunId={runId ?? candidateRunId}
       />
-      <main className="main-content">
-        <Outlet />
-      </main>
+      <main className="main-content">{children}</main>
     </div>
   );
 };
