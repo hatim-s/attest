@@ -9,6 +9,8 @@ import type { RunStore } from '@attest/core';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { openStore } from '../../store/run-store.js';
+import { dashboardHtml } from '@attest/web/embedded';
+
 import { startViewServer } from '../start-view-server.js';
 import type { ViewServerHandle } from '../types.js';
 
@@ -88,84 +90,66 @@ afterEach(async () => {
 describe('view server', () => {
   it('serves run, case, and diff reads from a loopback-only origin', async () => {
     const fixture = await createStoreFixture();
-    const server = await startViewServer({ storePath: fixture.storePath });
+
+    const server = await startViewServer({
+      storePath: fixture.storePath,
+      indexHtml: dashboardHtml,
+    });
+
     servers.push(server);
 
     expect(server.origin).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/);
-    await expect(
-      fetch(`${server.origin}/api/health`).then((response) => response.json()),
-    ).resolves.toEqual({
-      schema: 'attest.view',
-      ok: true,
-    });
+    expect(await fetch(server.url).then((response) => response.text())).toContain(
+      'window.__ATTEST_BOOTSTRAP__=',
+    );
 
     const runs = z
-      .object({ runs: z.array(z.object({ id: z.string() })) })
+      .object({ items: z.array(z.object({ id: z.string() })) })
       .parse(await fetch(`${server.origin}/api/runs`).then((response) => response.json()));
 
-    expect(runs.runs.map(({ id }) => id)).toEqual([fixture.candidateRunId, fixture.baseRunId]);
+    expect(runs.items.map(({ id }) => id)).toEqual([fixture.candidateRunId, fixture.baseRunId]);
     await expect(
       fetch(`${server.origin}/api/runs/${fixture.baseRunId}/cases/smoke/capital`).then((response) =>
         response.json(),
       ),
-    ).resolves.toMatchObject({ case: { caseId: 'capital', metrics: [{ pass: true }] } });
+    ).resolves.toMatchObject({ caseId: 'capital', metrics: [{ pass: true }] });
     await expect(
       fetch(`${server.origin}/api/diffs/${fixture.baseRunId}/${fixture.candidateRunId}`).then(
         (response) => response.json(),
       ),
-    ).resolves.toMatchObject({ diff: { summary: { counts: { regressed: 1 } } } });
+    ).resolves.toMatchObject({ summary: { counts: { regressed: 1 } } });
   });
 
   it('rejects requests addressed to foreign hosts before exposing stored runs', async () => {
     const fixture = await createStoreFixture();
-    const server = await startViewServer({ storePath: fixture.storePath });
-    servers.push(server);
-
-    const status = await new Promise<number | undefined>((resolve, reject) => {
-      get(
-        `${server.origin}/api/runs`,
-        { headers: { Host: 'rebound.example.test' } },
-        (response) => {
-          response.resume();
-          resolve(response.statusCode);
-        },
-      ).on('error', reject);
-    });
-
-    expect(status).toBe(403);
-  });
-
-  it('requires both exact origin and session token for shutdown writes', async () => {
-    const fixture = await createStoreFixture();
 
     const server = await startViewServer({
-      sessionToken: 'known-session-token',
       storePath: fixture.storePath,
+      indexHtml: dashboardHtml,
     });
 
     servers.push(server);
 
-    const missingOrigin = await fetch(`${server.origin}/api/shutdown`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${server.sessionToken}` },
+    const result = await new Promise<{ status: number | undefined; body: string }>(
+      (resolve, reject) => {
+        get(
+          `${server.origin}/api/runs`,
+          { headers: { Host: 'rebound.example.test' } },
+          (response) => {
+            let body = '';
+            response.setEncoding('utf8');
+            response.on('data', (chunk: string) => {
+              body += chunk;
+            });
+            response.on('end', () => resolve({ status: response.statusCode, body }));
+          },
+        ).on('error', reject);
+      },
+    );
+
+    expect(result.status).toBe(403);
+    expect(JSON.parse(result.body)).toEqual({
+      error: { code: 'FORBIDDEN', message: 'Request origin is not allowed.' },
     });
-
-    expect(missingOrigin.status).toBe(403);
-
-    const badToken = await fetch(`${server.origin}/api/shutdown`, {
-      method: 'POST',
-      headers: { Authorization: 'Bearer wrong', Origin: server.origin },
-    });
-
-    expect(badToken.status).toBe(401);
-
-    const accepted = await fetch(`${server.origin}/api/shutdown`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${server.sessionToken}`, Origin: server.origin },
-    });
-
-    expect(accepted.status).toBe(204);
-    await server.closed;
-    servers.splice(servers.indexOf(server), 1);
   });
 });

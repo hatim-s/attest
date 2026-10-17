@@ -90,6 +90,7 @@
       "name": "@attest/local",
       "version": "0.1.0-alpha.0",
       "dependencies": {
+        "@attest/api": "workspace:*",
         "@attest/contracts": "workspace:*",
         "@attest/core": "workspace:*",
         "@attest/executor": "workspace:*",
@@ -141,6 +142,7 @@
       "name": "@attest/web",
       "version": "0.1.0-alpha.0",
       "devDependencies": {
+        "@attest/api": "workspace:*",
         "@attest/core": "workspace:*",
         "@tanstack/react-query": "^5.101.4",
         "@tanstack/react-virtual": "^3.14.9",

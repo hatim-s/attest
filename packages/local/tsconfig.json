@@ -17,6 +17,9 @@
     },
     {
       "path": "../executor/tsconfig.build.json"
+    },
+    {
+      "path": "../api/tsconfig.build.json"
     }
   ]
 }

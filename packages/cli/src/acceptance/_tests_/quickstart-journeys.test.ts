@@ -70,7 +70,7 @@ const runViewReadinessProbe = async (
     });
     child.stdout.on('data', (chunk: string) => {
       stdout += chunk;
-      const match = /Attest view: (http:\/\/127\.0\.0\.1:\d+\/#token=\S+)/u.exec(stdout);
+      const match = /Attest view: (http:\/\/127\.0\.0\.1:\d+\/)/u.exec(stdout);
 
       if (match?.[1] === undefined || ready) return;
       ready = true;
@@ -194,7 +194,7 @@ const assertCommand = async (
   }
 
   if (expectation.readiness_probe === 'view') {
-    expect(result.readiness?.url, label).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/#token=/u);
+    expect(result.readiness?.url, label).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/$/u);
     expect(result.readiness?.status, label).toBe(200);
     expect(result.readiness?.body, label).toContain('<!doctype html>');
   }
