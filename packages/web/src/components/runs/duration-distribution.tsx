@@ -1,96 +1,99 @@
-import { useCallback, useMemo, useRef } from 'react';
+import { useCallback, useMemo } from 'react';
 import type { CaseSummary } from '@attest/core/records';
-import type { EChartsCoreOption } from 'echarts/core';
 import { createDurationHistogram } from './loaded-analytics.js';
-import { useChart, categoryAxis, valueAxis, type ChartPalette } from '../charts/use-chart.js';
+import { formatDurationRange } from '../../lib/format.js';
+import { ChartCard } from '../charts/chart-card.js';
+import {
+  categoryAxis,
+  valueAxis,
+  type ChartOptions,
+  type ChartPalette,
+} from '../charts/use-chart.js';
+
+const verdictSeries = [
+  { verdict: 'pass', name: '✓ Pass' },
+  { verdict: 'fail', name: '× Fail' },
+  { verdict: 'error', name: '! Error' },
+] as const;
+
+type DurationBin = ReturnType<typeof createDurationHistogram>[number];
+
+/** The last verdict with cases in a bin draws the top of its stack, so only it gets round corners. */
+const topVerdict = (bin: DurationBin) =>
+  [...verdictSeries].reverse().find(({ verdict }) => bin.counts[verdict] > 0)?.verdict;
 
 /** Keeps durations in milliseconds so equal-width bars represent equal elapsed intervals. */
-const DurationDistribution = ({ cases }: { cases: CaseSummary[] }) => {
-  const ref = useRef<HTMLDivElement>(null);
+const DurationDistribution = ({
+  cases,
+  allLoaded,
+}: {
+  cases: CaseSummary[];
+  allLoaded: boolean;
+}) => {
   const bins = useMemo(() => createDurationHistogram(cases), [cases]);
 
   const labels = useMemo(
-    () =>
-      bins.map(
-        (bin, index) =>
-          `${bin.lowerMs} to ${bin.upperMs}${index === bins.length - 1 ? ' inclusive' : ' exclusive'}`,
-      ),
+    () => bins.map((bin) => formatDurationRange(bin.lowerMs, bin.upperMs)),
     [bins],
   );
 
   const option = useCallback(
-    (palette: ChartPalette): EChartsCoreOption => ({
-      animation: false,
-      grid: { left: 55, right: 20, top: 45, bottom: 70 },
-      textStyle: { color: palette.text },
-      legend: { top: 0, textStyle: { color: palette.text } },
-      tooltip: { trigger: 'item', renderMode: 'richText' },
-      xAxis: {
-        ...categoryAxis(palette, 'Duration (ms)', labels),
-        nameGap: 48,
-        axisLabel: {
-          color: palette.muted,
-          rotate: 25,
-          formatter: (label: string) => label.replace(' inclusive', '').replace(' exclusive', ''),
-        },
-      },
-      yAxis: { ...valueAxis(palette, 'Cases'), minInterval: 1 },
-      series: (
-        [
-          { verdict: 'pass', name: '✓ Pass', color: palette.accent },
-          { verdict: 'fail', name: '× Fail', color: palette.danger },
-          { verdict: 'error', name: '! Error', color: palette.warning },
-        ] as const
-      ).map(({ verdict, name, color }) => ({
-        type: 'bar',
-        name,
-        stack: 'verdict',
-        barMaxWidth: 24,
-        data: bins.map((bin) => bin.counts[verdict]),
-        itemStyle: {
-          color,
-          borderColor: palette.surface,
-          borderWidth: 2,
-          borderRadius: [4, 4, 0, 0],
-        },
-      })),
-    }),
+    (palette: ChartPalette): ChartOptions => {
+      const colors = { pass: palette.accent, fail: palette.danger, error: palette.warning };
+
+      return {
+        grid: { left: 55, right: 20, top: 45, bottom: 55 },
+        legend: { top: 0, textStyle: { color: palette.text } },
+        tooltip: { trigger: 'item' },
+        xAxis: categoryAxis(palette, 'Duration', labels),
+        yAxis: { ...valueAxis(palette, 'Cases'), minInterval: 1 },
+        series: verdictSeries.map(({ verdict, name }) => ({
+          type: 'bar',
+          name,
+          stack: 'verdict',
+          barMaxWidth: 24,
+          data: bins.map((bin) => ({
+            value: bin.counts[verdict],
+            itemStyle: { borderRadius: topVerdict(bin) === verdict ? [4, 4, 0, 0] : 0 },
+          })),
+          itemStyle: { color: colors[verdict], borderColor: palette.surface, borderWidth: 2 },
+        })),
+      };
+    },
     [bins, labels],
   );
 
-  useChart(ref, option);
-
   return (
-    <div className="chart-card">
-      <strong>Case durations by verdict</strong>
-      <div ref={ref} className="chart-canvas" role="img" aria-label="Case duration histogram" />
-      <details>
-        <summary>Duration values</summary>
+    <ChartCard
+      title="Case durations by verdict"
+      emptyMessage={allLoaded && cases.length === 0 ? 'No cases have finished yet.' : undefined}
+      detail="Each range includes its lower bound. The last range also includes its upper bound."
+      option={option}
+      table={
         <table className="analytics-table">
-          <caption>
-            Milliseconds. Lower bounds inclusive; upper bounds exclusive except the final bin.
-          </caption>
           <thead>
             <tr>
               <th scope="col">Duration</th>
-              <th scope="col">✓ Pass</th>
-              <th scope="col">× Fail</th>
-              <th scope="col">! Error</th>
+              {verdictSeries.map(({ verdict, name }) => (
+                <th key={verdict} scope="col">
+                  {name}
+                </th>
+              ))}
             </tr>
           </thead>
           <tbody>
             {bins.map((bin, index) => (
               <tr key={bin.lowerMs}>
                 <th scope="row">{labels[index]}</th>
-                <td>{bin.counts.pass}</td>
-                <td>{bin.counts.fail}</td>
-                <td>{bin.counts.error}</td>
+                {verdictSeries.map(({ verdict }) => (
+                  <td key={verdict}>{bin.counts[verdict]}</td>
+                ))}
               </tr>
             ))}
           </tbody>
         </table>
-      </details>
-    </div>
+      }
+    />
   );
 };
 

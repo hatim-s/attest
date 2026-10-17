@@ -18,7 +18,7 @@ const NewestRun = () => {
       <p className="eyebrow">Ready</p>
       <h1>Run your first evaluation</h1>
       <p>
-        Use <code>attest eval run</code>, then this view will update automatically.
+        Run <code>attest eval run</code>. The run shows up here as soon as it starts.
       </p>
     </div>
   );

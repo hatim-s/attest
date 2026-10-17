@@ -2,7 +2,7 @@ import { useEffect, useRef, type RefObject } from 'react';
 import { BarChart, LineChart, PieChart } from 'echarts/charts';
 import { GridComponent, LegendComponent, TooltipComponent } from 'echarts/components';
 import { init, use, type EChartsCoreOption } from 'echarts/core';
-import type { XAXisComponentOption, YAXisComponentOption } from 'echarts';
+import type { TooltipComponentOption, XAXisComponentOption, YAXisComponentOption } from 'echarts';
 import { CanvasRenderer } from 'echarts/renderers';
 
 use([
@@ -25,6 +25,7 @@ const categoryAxis = (
   palette: ChartPalette,
   name: string,
   data: string[],
+  formatLabel?: (label: string, index: number) => string,
 ): XAXisComponentOption => ({
   type: 'category',
   name,
@@ -32,7 +33,14 @@ const categoryAxis = (
   nameLocation: 'middle',
   nameGap: 32,
   nameTextStyle: { color: palette.muted },
-  axisLabel: { color: palette.muted, fontSize: 10 },
+  // Tries every tick and drops only those that collide, instead of rotating or thinning evenly.
+  axisLabel: {
+    color: palette.muted,
+    fontSize: 10,
+    interval: 0,
+    hideOverlap: true,
+    formatter: formatLabel,
+  },
   axisLine: { lineStyle: { color: palette.border } },
 });
 
@@ -65,13 +73,38 @@ const readPalette = (): ChartPalette => {
   };
 };
 
+/** Every dashboard chart has a tooltip; applyOption supplies its theme colours. */
+type ChartOptions = EChartsCoreOption & { tooltip: TooltipComponentOption };
+
+type CreateChartOptions = (palette: ChartPalette) => ChartOptions;
+
+/** Applies the settings every dashboard chart shares, so callers describe only their own marks. */
+const applyOption = (chart: ReturnType<typeof init>, createOption: CreateChartOptions): void => {
+  const palette = readPalette();
+  const option = createOption(palette);
+
+  chart.setOption({
+    // Polling replaces options every few seconds; animating each refresh reads as data moving.
+    animation: false,
+    textStyle: { color: palette.text },
+    ...option,
+    tooltip: {
+      renderMode: 'richText',
+      backgroundColor: palette.surface,
+      borderColor: palette.border,
+      textStyle: { color: palette.text },
+      ...option.tooltip,
+    },
+  });
+};
+
 /**
  * Owns one ECharts instance. Resizes with its container and recolors when the dashboard
  * changes `data-theme` on the root element.
  */
 const useChart = (
   containerRef: RefObject<HTMLDivElement | null>,
-  createOption: (palette: ChartPalette) => EChartsCoreOption,
+  createOption: CreateChartOptions,
 ): void => {
   const chartRef = useRef<ReturnType<typeof init> | null>(null);
   const optionRef = useRef(createOption);
@@ -84,11 +117,7 @@ const useChart = (
     chartRef.current = chart;
     const resizeObserver = new ResizeObserver(() => chart.resize());
     resizeObserver.observe(container);
-
-    const themeObserver = new MutationObserver(() =>
-      chart.setOption(optionRef.current(readPalette())),
-    );
-
+    const themeObserver = new MutationObserver(() => applyOption(chart, optionRef.current));
     themeObserver.observe(document.documentElement, { attributeFilter: ['data-theme'] });
 
     return () => {
@@ -101,8 +130,16 @@ const useChart = (
 
   useEffect(() => {
     optionRef.current = createOption;
-    chartRef.current?.setOption(createOption(readPalette()));
+
+    if (chartRef.current !== null) applyOption(chartRef.current, createOption);
   }, [createOption]);
 };
 
-export { useChart, categoryAxis, valueAxis, type ChartPalette };
+export {
+  useChart,
+  categoryAxis,
+  valueAxis,
+  type CreateChartOptions,
+  type ChartOptions,
+  type ChartPalette,
+};

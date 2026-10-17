@@ -27,6 +27,7 @@ import { RunPage } from './routes/run-page.js';
 import { CaseDrawer } from './routes/case-drawer.js';
 import { ComparePage } from './routes/compare-page.js';
 import { ErrorNotice } from './components/shared/ui.js';
+import { runTabSchema } from './components/runs/run-tabs.js';
 
 type RouterContext = { client: ApiClient; queryClient: QueryClient };
 
@@ -39,14 +40,18 @@ const runsSearchSchema = z.object({
     .catch(undefined),
 });
 
-const runTabSchema = z.enum(['cases', 'distributions', 'suites']);
-
 const runSearchSchema = z.object({
   tab: runTabSchema.default('cases').catch('cases'),
 });
 
 const rootRoute = createRootRouteWithContext<RouterContext>()({
   component: RootLayout,
+  // An unknown path matches only the root, so it borrows the workspace to keep the sidebar.
+  notFoundComponent: () => (
+    <RunsLayout>
+      <div className="empty-compact">This dashboard page does not exist.</div>
+    </RunsLayout>
+  ),
 });
 
 const indexRoute = createRoute({
@@ -165,6 +170,11 @@ declare module '@tanstack/react-router' {
   interface Register {
     router: ReturnType<typeof createDashboardRouter>;
   }
+
+  interface HistoryState {
+    /** Set by links on the run page, so the case drawer knows Back returns to that run. */
+    caseOpenedFromRun?: true;
+  }
 }
 
-export { createDashboardRouter, runTabSchema };
+export { createDashboardRouter };

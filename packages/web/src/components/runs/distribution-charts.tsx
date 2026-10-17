@@ -1,13 +1,22 @@
-import { useCallback, useMemo, useRef } from 'react';
+import { useCallback, useMemo } from 'react';
 
-import type { EChartsCoreOption } from 'echarts/core';
-import { useChart, categoryAxis, valueAxis, type ChartPalette } from '../charts/use-chart.js';
+import { ChartCard } from '../charts/chart-card.js';
+import {
+  categoryAxis,
+  valueAxis,
+  type ChartOptions,
+  type ChartPalette,
+} from '../charts/use-chart.js';
 
 import { aggregateCases } from '@attest/core/analytics';
+import { formatCount } from '../../lib/format.js';
+import { Heading } from '../shared/ui.js';
 import type { CaseSummary } from '@attest/core/records';
 
 type DistributionChartsProps = {
   cases: CaseSummary[];
+  /** False while later pages are outstanding, when zero counts say nothing about the run. */
+  allLoaded: boolean;
   isLoading: boolean;
   totalCases: number;
 };
@@ -34,10 +43,14 @@ const createScoreHistogram = (cases: CaseSummary[]): ScoreBin[] => {
 };
 
 /** Renders the score histogram and verdict pie for the loaded cases. */
-const DistributionCharts = ({ cases, isLoading, totalCases }: DistributionChartsProps) => {
-  const scoreChartRef = useRef<HTMLDivElement>(null);
-  const verdictChartRef = useRef<HTMLDivElement>(null);
+const DistributionCharts = ({
+  cases,
+  allLoaded,
+  isLoading,
+  totalCases,
+}: DistributionChartsProps) => {
   const histogram = useMemo(() => createScoreHistogram(cases), [cases]);
+  const scoredCases = histogram.reduce((total, { count }) => total + count, 0);
 
   const verdicts = useMemo(() => {
     const [first, ...rest] = cases;
@@ -48,10 +61,9 @@ const DistributionCharts = ({ cases, isLoading, totalCases }: DistributionCharts
   }, [cases]);
 
   const scoreOption = useCallback(
-    (palette: ChartPalette): EChartsCoreOption => ({
-      animationDuration: 250,
+    (palette: ChartPalette): ChartOptions => ({
       grid: { left: 55, right: 16, top: 35, bottom: 55 },
-      tooltip: { trigger: 'item', renderMode: 'richText' },
+      tooltip: { trigger: 'item' },
       xAxis: categoryAxis(
         palette,
         'Mean score',
@@ -67,14 +79,12 @@ const DistributionCharts = ({ cases, isLoading, totalCases }: DistributionCharts
           type: 'bar',
         },
       ],
-      textStyle: { color: palette.text },
     }),
     [histogram],
   );
 
   const verdictOption = useCallback(
-    ({ accent, danger, muted, text, warning }: ChartPalette): EChartsCoreOption => ({
-      animationDuration: 250,
+    ({ accent, danger, muted, text, warning }: ChartPalette): ChartOptions => ({
       legend: { bottom: 2, textStyle: { color: muted, fontSize: 10 } },
       series: [
         {
@@ -89,40 +99,28 @@ const DistributionCharts = ({ cases, isLoading, totalCases }: DistributionCharts
           type: 'pie',
         },
       ],
-      tooltip: { trigger: 'item', renderMode: 'richText' },
+      tooltip: { trigger: 'item' },
     }),
     [verdicts],
   );
 
-  useChart(scoreChartRef, scoreOption);
-  useChart(verdictChartRef, verdictOption);
-
   return (
-    <section className="distribution-panel" aria-label="Run distributions">
-      <div className="distribution-heading">
-        <div>
-          <p className="eyebrow">Run distributions</p>
-          <h3>Scores and verdicts</h3>
-        </div>
-        <span>
-          {cases.length} of {totalCases} cases loaded{isLoading ? '…' : ''}
-        </span>
-      </div>
+    <section className="stack" aria-label="Scores and verdicts">
+      <Heading
+        level={2}
+        eyebrow="This run"
+        title="Scores and verdicts"
+        meta={`${cases.length} of ${formatCount(totalCases, 'case')} loaded${isLoading ? '…' : ''}`}
+      />
       <div className="chart-grid">
-        <div className="chart-card">
-          <div>
-            <strong>Average metric score</strong>
-            <span>{cases.filter(({ score }) => score !== undefined).length} scored cases</span>
-          </div>
-          <div
-            aria-label="Average metric score histogram"
-            className="chart-canvas"
-            ref={scoreChartRef}
-          />
-          <details>
-            <summary>Score values</summary>
+        <ChartCard
+          title="Mean score"
+          detail={formatCount(scoredCases, 'scored case')}
+          emptyMessage={allLoaded && scoredCases === 0 ? 'No scored cases yet.' : undefined}
+          option={scoreOption}
+          table={
             <table className="analytics-table">
-              <caption>Score histogram</caption>
+              <caption>Cases by mean metric score</caption>
               <thead>
                 <tr>
                   <th scope="col">Score</th>
@@ -138,22 +136,16 @@ const DistributionCharts = ({ cases, isLoading, totalCases }: DistributionCharts
                 ))}
               </tbody>
             </table>
-          </details>
-        </div>
-        <div className="chart-card">
-          <div>
-            <strong>Case pass rate</strong>
-            <span>Mutually exclusive final verdicts</span>
-          </div>
-          <div
-            aria-label="Case verdict distribution"
-            className="chart-canvas"
-            ref={verdictChartRef}
-          />
-          <details>
-            <summary>Verdict values</summary>
+          }
+        />
+        <ChartCard
+          title="Verdicts"
+          detail="One final verdict per case"
+          emptyMessage={allLoaded && cases.length === 0 ? 'No cases have finished yet.' : undefined}
+          option={verdictOption}
+          table={
             <table className="analytics-table">
-              <caption>Final verdict counts</caption>
+              <caption>Cases by final verdict</caption>
               <thead>
                 <tr>
                   <th scope="col">Verdict</th>
@@ -169,8 +161,8 @@ const DistributionCharts = ({ cases, isLoading, totalCases }: DistributionCharts
                 ))}
               </tbody>
             </table>
-          </details>
-        </div>
+          }
+        />
       </div>
     </section>
   );

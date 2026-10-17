@@ -35,7 +35,7 @@ const RunList = ({ error, isLoading, runs, selectedRunId }: RunListProps) => (
           key={run.id}
           to="/runs/$runId"
           params={{ runId: run.id }}
-          search={(previous) => ({ ...previous, tab: 'cases' })}
+          search={({ branch, label }) => ({ branch, label, tab: 'cases' })}
         >
           <span className="run-list-row">
             <span className="run-id">{shortId(run.id)}</span>

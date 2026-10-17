@@ -2,14 +2,16 @@ import type { CaseSummary } from '@attest/core/records';
 import { Link } from '@tanstack/react-router';
 import { Badge } from '../shared/ui.js';
 
+type MetricErrorCasesProps = { cases: CaseSummary[]; allLoaded: boolean; runId: string };
+
 /** Links to case evidence without fetching every full record to construct a per-metric table. */
-const MetricErrorCases = ({ cases, runId }: { cases: CaseSummary[]; runId: string }) => {
+const MetricErrorCases = ({ cases, allLoaded, runId }: MetricErrorCasesProps) => {
   const errors = cases.filter((item) => item.metricCounts.errors > 0);
 
   return (
     <div className="case-table-frame analytics-table-scroll">
       <table className="analytics-table">
-        <caption>Cases with metric errors in loaded summaries</caption>
+        <caption>Cases with metric errors</caption>
         <thead>
           <tr>
             <th scope="col">Suite</th>
@@ -27,6 +29,7 @@ const MetricErrorCases = ({ cases, runId }: { cases: CaseSummary[]; runId: strin
                   to="/runs/$runId/cases/$suiteName/$caseId"
                   params={{ runId, suiteName: item.suiteName, caseId: item.caseId }}
                   search={{ tab: 'distributions' }}
+                  state={{ caseOpenedFromRun: true }}
                 >
                   {item.caseId}
                 </Link>
@@ -39,9 +42,7 @@ const MetricErrorCases = ({ cases, runId }: { cases: CaseSummary[]; runId: strin
           ))}
         </tbody>
       </table>
-      {errors.length === 0 ? (
-        <p className="empty-compact">No metric errors in loaded cases.</p>
-      ) : null}
+      {allLoaded && errors.length === 0 ? <p className="empty-compact">No metric errors.</p> : null}
     </div>
   );
 };

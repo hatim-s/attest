@@ -1,8 +1,7 @@
-import { Link } from '@tanstack/react-router';
+import { Link, Outlet, useLocation } from '@tanstack/react-router';
 import { useEffect, useState } from 'react';
 import { useApiClient } from '../api/api-client-context.js';
 import { Badge, Button } from '../components/shared/ui.js';
-import { Outlet } from '@tanstack/react-router';
 
 type Theme = 'light' | 'dark';
 
@@ -24,6 +23,12 @@ const getInitialTheme = (): Theme => {
 const RootLayout = () => {
   const { mode } = useApiClient();
   const [theme, setTheme] = useState<Theme>(getInitialTheme);
+
+  // Comparisons belong to Runs even though their URL sits outside /runs.
+  const section = useLocation({
+    select: (location) => (location.pathname.startsWith('/evals') ? 'evals' : 'runs'),
+  });
+
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
 
@@ -41,25 +46,27 @@ const RootLayout = () => {
           <span className="brand-mark">A</span>
           <div>
             <strong>attest</strong>
-            <span>local evaluations</span>
+            <span>evaluations</span>
           </div>
         </div>
         <div className="topbar-actions">
-          <Link
-            className="button button-ghost"
-            to="/runs"
-            search={({ branch, label }) => ({ branch, label })}
-          >
-            Runs
-          </Link>
-          <Link
-            className="button button-ghost"
-            to="/evals"
-            search={({ branch, label }) => ({ branch, label })}
-          >
-            Evals
-          </Link>
-          <Badge tone="local">{mode.kind === 'live' ? '127.0.0.1' : 'static report'}</Badge>
+          <nav className="topbar-nav" aria-label="Dashboard">
+            <Link
+              to="/runs"
+              search={({ branch, label }) => ({ branch, label })}
+              aria-current={section === 'runs' ? 'page' : undefined}
+            >
+              Runs
+            </Link>
+            <Link
+              to="/evals"
+              search={({ branch, label }) => ({ branch, label })}
+              aria-current={section === 'evals' ? 'page' : undefined}
+            >
+              Evals
+            </Link>
+          </nav>
+          {mode.kind === 'snapshot' ? <Badge tone="local">Static report</Badge> : null}
           <Button onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} tone="ghost">
             {theme === 'dark' ? 'Light mode' : 'Dark mode'}
           </Button>

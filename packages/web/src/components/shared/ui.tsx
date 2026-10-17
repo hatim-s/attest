@@ -20,6 +20,30 @@ const Badge = ({ children, tone = 'neutral' }: BadgeProps) => (
   <span className={`badge badge-${tone}`}>{children}</span>
 );
 
+type HeadingProps = {
+  level: 1 | 2;
+  eyebrow: string;
+  title: ReactNode;
+  meta?: ReactNode;
+  /** Status or controls, placed on the right of the title. */
+  children?: ReactNode;
+};
+
+const Heading = ({ level, eyebrow, title, meta, children }: HeadingProps) => {
+  const Title = level === 1 ? 'h1' : 'h2';
+
+  return (
+    <header className={`heading heading-${level}`}>
+      <div>
+        <p className="eyebrow">{eyebrow}</p>
+        <Title>{title}</Title>
+        {meta !== undefined ? <p className="heading-meta">{meta}</p> : null}
+      </div>
+      {children}
+    </header>
+  );
+};
+
 /** Full-width alert for a failed query. */
 const ErrorNotice = ({ error }: { error: unknown }) => (
   <div className="error-notice" role="alert">
@@ -34,4 +58,4 @@ const Loading = ({ label = 'Loading' }: { label?: string }) => (
   </div>
 );
 
-export { Badge, Button, ErrorNotice, Loading };
+export { Badge, Button, ErrorNotice, Heading, Loading };

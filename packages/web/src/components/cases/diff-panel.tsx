@@ -7,8 +7,8 @@ import type {
   RunDiff,
   RunRecord,
 } from '@attest/core/records';
-import { formatPercent, shortId } from '../../lib/format.js';
-import { Badge, ErrorNotice, Loading } from '../shared/ui.js';
+import { formatCount, formatPercent, shortId } from '../../lib/format.js';
+import { Badge, ErrorNotice, Heading, Loading } from '../shared/ui.js';
 
 type DiffPanelProps = {
   baseRunId?: string;
@@ -111,20 +111,21 @@ const DiffPanel = ({
             </div>
           </div>
           <section className="verdict-matrix-card" aria-label="Verdict transition matrix">
-            <div className="section-heading">
-              <div>
-                <p className="eyebrow">Verdict transitions</p>
-                <h3>Baseline → candidate</h3>
-              </div>
-              <span>{diff.summary.flakySuspectCount} flaky suspects</span>
-              {diff.summary.coverage !== undefined && (
-                <span>
-                  {diff.summary.coverage.sharedCases} shared cases compared;{' '}
-                  {diff.summary.coverage.baseOnlyCases} baseline-only,{' '}
-                  {diff.summary.coverage.candidateOnlyCases} candidate-only
-                </span>
-              )}
-            </div>
+            <Heading
+              level={2}
+              eyebrow="Verdict transitions"
+              title="Baseline → candidate"
+              meta={[
+                formatCount(diff.summary.flakySuspectCount, 'flaky suspect'),
+                ...(diff.summary.coverage === undefined
+                  ? []
+                  : [
+                      formatCount(diff.summary.coverage.sharedCases, 'shared case'),
+                      `${diff.summary.coverage.baseOnlyCases} only in baseline`,
+                      `${diff.summary.coverage.candidateOnlyCases} only in candidate`,
+                    ]),
+              ].join(', ')}
+            />
             <div className="verdict-matrix">
               <span />
               {verdicts.map((verdict) => (
