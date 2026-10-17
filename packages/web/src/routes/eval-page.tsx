@@ -60,9 +60,7 @@ const EvalPage = () => {
         <>
           <p className="empty-compact">
             {history.runsExamined} non-running runs examined.{' '}
-            {history.runsExamined >= limit
-              ? 'Requested limit reached; older runs may exist.'
-              : 'Requested limit not reached.'}{' '}
+            {history.exhausted ? 'All runs examined.' : 'Limit reached, older runs may exist.'}{' '}
             {points.length} runs contain this suite.
           </p>
           {points.length === 0 ? (
