@@ -28,9 +28,8 @@ const resolveRemotePath = (value: string): string => {
 /** Resolves artifact outputs below the configured host artifact directory. */
 const resolveArtifactDestination = (root: string, value: string): string => {
   const destination = resolve(root, value);
-  const fromRoot = relative(resolve(root), destination);
 
-  if (fromRoot === '..' || fromRoot.startsWith(`..${sep}`) || isAbsolute(fromRoot)) {
+  if (!isContained(resolve(root), destination)) {
     throw new TypeError(`Artifact destination escapes its root: ${value}`);
   }
 

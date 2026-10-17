@@ -1,11 +1,15 @@
 import { z } from 'zod';
 
 import { BoundedOutputWritable } from '../adapters/sandbox/bounded-writable.js';
+import {
+  DEFAULT_CLEANUP_TIMEOUT_MS,
+  createCaseSandbox,
+  stopCaseSandbox,
+} from '../adapters/sandbox/case-sandbox.js';
 import { resolveVercelSandboxCredentials } from '../adapters/sandbox/credentials.js';
 import { SANDBOX_WORKSPACE, resolveRemotePath } from '../adapters/sandbox/sandbox-paths.js';
 import { readRemoteFile } from '../adapters/sandbox/sandbox-transfer.js';
-import type { VercelSandboxCreateParams, VercelSandboxFactory } from '../adapters/sandbox/types.js';
-import { defaultSandboxFactory } from '../adapters/sandbox/vercel-sandbox-adapter.js';
+import type { VercelSandboxFactory } from '../adapters/sandbox/types.js';
 import { createEnvironmentLifecycle } from './environment-lifecycle.js';
 import type { CaseEnvironmentFactory } from './types.js';
 import { normalizeWorkspacePath } from './workspace-path.js';
@@ -19,12 +23,12 @@ const timerMsSchema = z.int().positive().max(2_147_483_647);
 
 /** Programmatic options never pass through contracts, so this schema is their only parse. */
 const vercelIsolationOptionsSchema = z.strictObject({
-  image: z.string().default('vercel/sandbox/universal'),
+  image: z.string().optional(),
   timeoutMs: timerMsSchema.default(600_000),
   commandTimeoutMs: timerMsSchema.default(60_000),
   /** Defaults to commandTimeoutMs. */
   finalizationTimeoutMs: timerMsSchema.optional(),
-  cleanupTimeoutMs: timerMsSchema.default(10_000),
+  cleanupTimeoutMs: timerMsSchema.default(DEFAULT_CLEANUP_TIMEOUT_MS),
   outputBytes: z
     .int()
     .positive()
@@ -35,7 +39,7 @@ const vercelIsolationOptionsSchema = z.strictObject({
    * Passed through as typed. A non-function factory throws at the creation call, before any VM
    * exists, and credential resolution parses the env at case start.
    */
-  sandboxFactory: z.custom<VercelSandboxFactory>().default(() => defaultSandboxFactory),
+  sandboxFactory: z.custom<VercelSandboxFactory>().optional(),
   credentialEnv: z.custom<NodeJS.ProcessEnv>().optional(),
 });
 
@@ -48,15 +52,6 @@ type VercelIsolationOptions = z.input<typeof vercelIsolationOptionsSchema>;
 class SandboxCleanupError extends AggregateError {
   readonly cleanupConfirmed = false;
 }
-
-/** BOUNDARY: retains both rejected SDK operation and cleanup causes without assuming an Error subtype.
- * Marks failed VM cleanup so runtime can prevent unsafe worker reuse. */
-const cleanupFailure = (cause: unknown, stopCause: unknown): SandboxCleanupError =>
-  new SandboxCleanupError([cause, stopCause], 'Sandbox operation and cleanup failed.');
-
-/** Marks a standalone stop failure as unconfirmed cleanup. */
-const stopFailure = (cause: unknown): SandboxCleanupError =>
-  new SandboxCleanupError([cause], 'Sandbox cleanup failed.');
 
 /** Resolves seed files before creating a VM so invalid paths cannot leave remote state behind. */
 const resolveSeedFiles = (
@@ -92,15 +87,13 @@ const vercelSandboxIsolation = (input: VercelIsolationOptions = {}): CaseEnviron
     const credentials = resolveVercelSandboxCredentials(options.credentialEnv ?? process.env);
     const files = resolveSeedFiles(options.files, cap);
 
-    const creation: VercelSandboxCreateParams = {
+    const sdk = await createCaseSandbox({
+      credentials,
+      factory: options.sandboxFactory,
       image: options.image,
-      persistent: false,
-      timeout: options.timeoutMs,
+      timeoutMs: options.timeoutMs,
       signal: AbortSignal.any([signal, AbortSignal.timeout(commandTimeoutMs)]),
-    };
-
-    if (credentials.kind !== 'oidc') Object.assign(creation, credentials.credentials);
-    const sdk = await options.sandboxFactory(creation);
+    });
 
     let poisonReason: Error | undefined;
     let stopping: Promise<void> | undefined;
@@ -114,9 +107,7 @@ const vercelSandboxIsolation = (input: VercelIsolationOptions = {}): CaseEnviron
 
     /** Stops this SDK instance at most once, including concurrent poison and disposal paths. */
     const stop = (): Promise<void> => {
-      stopping ??= Promise.resolve()
-        .then(() => sdk.stop({ signal: AbortSignal.timeout(cleanupTimeoutMs) }))
-        .then(() => undefined);
+      stopping ??= Promise.resolve().then(() => stopCaseSandbox(sdk, cleanupTimeoutMs));
 
       return stopping;
     };
@@ -133,7 +124,10 @@ const vercelSandboxIsolation = (input: VercelIsolationOptions = {}): CaseEnviron
         await stop();
       } catch (cleanupError) {
         if (!(poisonReason instanceof SandboxCleanupError)) {
-          poisonReason = cleanupFailure(poisonReason, cleanupError);
+          poisonReason = new SandboxCleanupError(
+            [poisonReason, cleanupError],
+            'Sandbox operation and cleanup failed.',
+          );
         }
       }
 
@@ -168,8 +162,9 @@ const vercelSandboxIsolation = (input: VercelIsolationOptions = {}): CaseEnviron
       if (settled && cleanupError === undefined) return;
 
       if (poisonReason instanceof SandboxCleanupError) throw poisonReason;
-      throw stopFailure(
-        cleanupError ?? new Error('Sandbox operations did not drain before cleanup timed out.'),
+      throw new SandboxCleanupError(
+        [cleanupError ?? new Error('Sandbox operations did not drain before cleanup timed out.')],
+        'Sandbox cleanup failed.',
       );
     };
 
@@ -193,7 +188,10 @@ const vercelSandboxIsolation = (input: VercelIsolationOptions = {}): CaseEnviron
         await stop();
       } catch (cleanupError) {
         if (error instanceof SandboxCleanupError) throw error;
-        throw cleanupFailure(error, cleanupError);
+        throw new SandboxCleanupError(
+          [error, cleanupError],
+          'Sandbox operation and cleanup failed.',
+        );
       }
 
       throw error;

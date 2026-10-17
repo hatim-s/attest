@@ -54,11 +54,13 @@ describe('sandbox file transfers', () => {
         publishTerminalArtifacts(
           createSandbox('artifact'),
           [{ source: 'report.json', destination }],
-          projectRoot,
-          join(projectRoot, 'artifacts'),
-          32,
-          1_000,
-          new AbortController().signal,
+          {
+            projectRoot: projectRoot,
+            artifactRoot: join(projectRoot, 'artifacts'),
+            responseBytes: 32,
+            commandTimeoutMs: 1_000,
+            signal: new AbortController().signal,
+          },
         ),
         destination,
       ).rejects.toThrow(TypeError);
@@ -109,11 +111,13 @@ describe('sandbox file transfers', () => {
     await publishTerminalArtifacts(
       sandbox,
       [{ source: 'results/report.json', destination: 'case/report.json' }],
-      projectRoot,
-      artifactRoot,
-      32,
-      1_000,
-      new AbortController().signal,
+      {
+        projectRoot: projectRoot,
+        artifactRoot: artifactRoot,
+        responseBytes: 32,
+        commandTimeoutMs: 1_000,
+        signal: new AbortController().signal,
+      },
     );
 
     await expect(readFile(join(artifactRoot, 'case/report.json'), 'utf8')).resolves.toBe(
@@ -134,11 +138,13 @@ describe('sandbox file transfers', () => {
       publishTerminalArtifacts(
         createSandbox('artifact', new Set([remoteParent])),
         [{ source: 'results/report.json', destination: 'report.json' }],
-        projectRoot,
-        artifactRoot,
-        32,
-        1_000,
-        new AbortController().signal,
+        {
+          projectRoot: projectRoot,
+          artifactRoot: artifactRoot,
+          responseBytes: 32,
+          commandTimeoutMs: 1_000,
+          signal: new AbortController().signal,
+        },
       ),
     ).rejects.toThrow(/symbolic link/u);
 
@@ -146,11 +152,13 @@ describe('sandbox file transfers', () => {
       publishTerminalArtifacts(
         createSandbox('too large'),
         [{ source: 'report.json', destination: 'report.json' }],
-        projectRoot,
-        artifactRoot,
-        3,
-        1_000,
-        new AbortController().signal,
+        {
+          projectRoot: projectRoot,
+          artifactRoot: artifactRoot,
+          responseBytes: 3,
+          commandTimeoutMs: 1_000,
+          signal: new AbortController().signal,
+        },
       ),
     ).rejects.toMatchObject({ code: 'output_cap_exceeded' });
 
@@ -161,11 +169,13 @@ describe('sandbox file transfers', () => {
       publishTerminalArtifacts(
         createSandbox('artifact'),
         [{ source: 'report.json', destination: 'linked/report.json' }],
-        projectRoot,
-        artifactRoot,
-        32,
-        1_000,
-        new AbortController().signal,
+        {
+          projectRoot: projectRoot,
+          artifactRoot: artifactRoot,
+          responseBytes: 32,
+          commandTimeoutMs: 1_000,
+          signal: new AbortController().signal,
+        },
       ),
     ).rejects.toThrow(/symbolic link/u);
   });

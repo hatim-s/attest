@@ -226,12 +226,17 @@ const readRemoteFile = async (
 const publishTerminalArtifacts = async (
   sandbox: VercelSandboxSdk,
   artifacts: NonNullable<VercelSandbox['artifacts']>,
-  projectRoot: string,
-  configuredArtifactRoot: string,
-  responseBytes: number,
-  commandTimeoutMs: number,
-  signal: AbortSignal,
+  options: {
+    projectRoot: string;
+    /** Host directory below the project root that receives the artifacts. */
+    artifactRoot: string;
+    responseBytes: number;
+    commandTimeoutMs: number;
+    signal: AbortSignal;
+  },
 ): Promise<void> => {
+  const { commandTimeoutMs, projectRoot, responseBytes, signal } = options;
+  const configuredArtifactRoot = options.artifactRoot;
   const staged: StagedArtifact[] = [];
   let totalBytes = 0;
   const configuredProjectRoot = resolve(projectRoot);

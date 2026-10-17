@@ -8,34 +8,21 @@ import { createRawExcerpt } from '../../internal/raw-excerpt.js';
 import { invokeWithRetries, retryBudgetSchema } from '../../internal/invocation-retry.js';
 import type { InvocationAttempt, InvocationDiagnostics, InvocationResult } from '../../types.js';
 import { BoundedOutputWritable, BoundedTailWritable } from './bounded-writable.js';
+import { createCaseSandbox, stopCaseSandbox } from './case-sandbox.js';
 import { resolveVercelSandboxCredentials } from './credentials.js';
 import { SANDBOX_WORKSPACE } from './sandbox-paths.js';
 import { loadExplicitUploads, publishTerminalArtifacts } from './sandbox-transfer.js';
 import type {
   VercelSandboxCaseOptions,
-  VercelSandboxCreateParams,
   VercelSandboxInvocation,
   VercelSandboxSdk,
 } from './types.js';
-
-const DEFAULT_IMAGE = 'vercel/sandbox/universal';
-
-const DEFAULT_CLEANUP_TIMEOUT_MS = 10_000;
 
 const INTERNAL_ROOT = '/vercel/sandbox/.attest';
 
 const REQUEST_PATH = `${INTERNAL_ROOT}/request.json`;
 
 const STDIN_WRAPPER = 'exec "$@" < "$0"';
-
-/** Loads the Vercel SDK lazily so hosts that never use sandboxes do not pay for the import. */
-const defaultSandboxFactory = async (
-  params: VercelSandboxCreateParams,
-): Promise<VercelSandboxSdk> => {
-  const { Sandbox } = await import('@vercel/sandbox');
-
-  return Sandbox.create(params);
-};
 
 /** Runs one command attempt inside an already prepared case-scoped sandbox. */
 const invokeSandboxAttempt = async (
@@ -206,23 +193,19 @@ const exportArtifacts = async (
       : AbortSignal.any([options.signal, artifactTimeout]);
 
   try {
-    await publishTerminalArtifacts(
-      sdk,
-      artifacts,
-      options.projectRoot,
+    await publishTerminalArtifacts(sdk, artifacts, {
+      projectRoot: options.projectRoot,
       artifactRoot,
-      invocation.responseBytes,
-      invocation.attemptTimeoutMs,
-      artifactSignal,
-    );
+      responseBytes: invocation.responseBytes,
+      commandTimeoutMs: invocation.attemptTimeoutMs,
+      signal: artifactSignal,
+    });
 
     return undefined;
   } catch (error: unknown) {
     if (error instanceof AgentInvocationError) return error;
 
-    return new AgentInvocationError('network', 'Sandbox artifact export failed', {
-      cause: error instanceof Error ? error : undefined,
-    });
+    return new AgentInvocationError('network', 'Sandbox artifact export failed', { cause: error });
   }
 };
 
@@ -242,7 +225,6 @@ const invokeVercelSandboxAgent = async (
   }
 
   const credentials = resolveVercelSandboxCredentials(options.credentialEnv ?? process.env);
-  const factory = options.sandboxFactory ?? defaultSandboxFactory;
   let sdk: VercelSandboxSdk | undefined;
   let result: InvocationResult | undefined;
   let postRunError: AgentInvocationError | undefined;
@@ -253,15 +235,13 @@ const invokeVercelSandboxAgent = async (
     options.signal === undefined ? setupTimeout : AbortSignal.any([options.signal, setupTimeout]);
 
   try {
-    const creation: VercelSandboxCreateParams = {
-      image: sandbox.image ?? DEFAULT_IMAGE,
-      persistent: false,
-      timeout: invocation.sandboxTimeoutMs,
+    const created = await createCaseSandbox({
+      credentials,
+      factory: options.sandboxFactory,
+      image: sandbox.image,
+      timeoutMs: invocation.sandboxTimeoutMs,
       signal: setupSignal,
-    };
-
-    if (credentials.kind !== 'oidc') Object.assign(creation, credentials.credentials);
-    const created = await factory(creation);
+    });
 
     sdk = created;
 
@@ -296,13 +276,11 @@ const invokeVercelSandboxAgent = async (
   } finally {
     if (sdk !== undefined) {
       try {
-        await sdk.stop({
-          signal: AbortSignal.timeout(options.cleanupTimeoutMs ?? DEFAULT_CLEANUP_TIMEOUT_MS),
-        });
+        await stopCaseSandbox(sdk, options.cleanupTimeoutMs);
       } catch (error: unknown) {
         cleanupConfirmed = false;
         postRunError ??= new AgentInvocationError('network', 'Vercel sandbox cleanup failed', {
-          cause: error instanceof Error ? error : undefined,
+          cause: error,
         });
       }
     }
@@ -338,4 +316,4 @@ const invokeVercelSandboxAgent = async (
   return { ...attempt, attempts: [...(result?.attempts ?? []), attempt] };
 };
 
-export { defaultSandboxFactory, invokeVercelSandboxAgent };
+export { invokeVercelSandboxAgent };
