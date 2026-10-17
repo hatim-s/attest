@@ -1,4 +1,4 @@
-import type { RunRecord } from '../../api/types.js';
+import type { RunRecord } from '@attest/core/records';
 import { formatDateTime, formatPassRate } from '../../lib/format.js';
 
 /** Describes failed cases, plus the selection size when the run covered a subset. */

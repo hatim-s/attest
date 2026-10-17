@@ -1,4 +1,4 @@
-import type { RunRecord } from '../../api/types.js';
+import type { RunRecord } from '@attest/core/records';
 import { formatDateTime, formatPassRate, shortId } from '../../lib/format.js';
 import { Badge, ErrorNotice, Loading } from '../shared/ui.js';
 

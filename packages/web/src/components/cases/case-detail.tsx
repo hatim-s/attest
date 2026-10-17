@@ -1,6 +1,6 @@
 import { useEffect, useRef, type ReactNode } from 'react';
 
-import type { CaseRecord, CaseSummary, StoredMetricEvaluation } from '../../api/types.js';
+import type { CaseRecord, CaseSummary, StoredMetricEvaluation } from '@attest/core/records';
 import { formatDuration } from '../../lib/format.js';
 import { TraceWaterfall } from '../traces/trace-waterfall.js';
 import { Badge, Button, ErrorNotice, Loading } from '../shared/ui.js';

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import type { CaseRecord } from '../../../api/types.js';
+import type { CaseRecord } from '@attest/core/records';
 
 import { createTraceWaterfall } from '../trace-waterfall.js';
 

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 
 import { useCase, useCases, useDiff, useRun, useRuns } from './api/queries.js';
-import type { CaseSummary } from './api/types.js';
+import type { CaseSummary } from '@attest/core/records';
 import { CaseDetail } from './components/cases/case-detail.js';
 import { CaseTable } from './components/cases/case-table.js';
 import { DiffPanel } from './components/cases/diff-panel.js';

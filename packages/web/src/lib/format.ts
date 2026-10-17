@@ -1,4 +1,4 @@
-import type { RunRecord } from '../api/types.js';
+import type { RunRecord } from '@attest/core/records';
 
 /** Formats a timestamp in the browser locale, or a dash when absent. */
 const formatDateTime = (value: string | undefined): string => {

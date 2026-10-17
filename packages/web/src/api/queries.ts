@@ -2,7 +2,7 @@ import { useEffect } from 'react';
 import type { ApiClient } from '@attest/api/client';
 import { queryOptions, useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query';
 
-import type { RunStatus } from './types.js';
+import type { RunStatus } from '@attest/core/records';
 import { useApiClient } from './api-client-context.js';
 
 /** Polls recent runs in the live dashboard and keeps static reports offline. */

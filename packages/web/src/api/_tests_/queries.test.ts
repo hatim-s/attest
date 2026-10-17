@@ -2,7 +2,7 @@ import { createApiClient } from '@attest/api/client';
 import { QueryClient, QueryObserver } from '@tanstack/react-query';
 import { afterEach, expect, it, vi } from 'vitest';
 
-import type { CaseRecord, RunDiff } from '../types.js';
+import type { CaseRecord, RunDiff } from '@attest/core/records';
 
 const runId = '01ARZ3NDEKTSV4RRFFQ69G5FAV';
 

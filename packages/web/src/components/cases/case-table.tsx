@@ -2,7 +2,7 @@ import { useRef } from 'react';
 
 import { useVirtualizer } from '@tanstack/react-virtual';
 
-import type { CaseSummary } from '../../api/types.js';
+import type { CaseSummary } from '@attest/core/records';
 import { formatDuration } from '../../lib/format.js';
 import { Badge, Button, Loading } from '../shared/ui.js';
 
