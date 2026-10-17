@@ -96,7 +96,7 @@ it('retains committed bytes and recovery evidence when cleanup fails', async () 
       runPreparedTransaction({ root, prepared, verify: async () => {} }),
     ).rejects.toMatchObject({
       name: 'ProjectTransactionError',
-      code: 'project_mutation_committed_cleanup_failed',
+      code: 'project_saved_cleanup_failed',
       details: { committed: true, transaction_id: prepared.journal.transaction_id },
     });
     expect(await readFile(join(root, 'attest.project.json'), 'utf8')).toBe('new');

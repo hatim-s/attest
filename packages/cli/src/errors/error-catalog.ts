@@ -164,7 +164,7 @@ const CLI_ERROR_DEFINITIONS = {
       'Preserve the transaction journal and reconcile every reported path before retrying.',
     ],
   },
-  project_mutation_committed_cleanup_failed: {
+  project_saved_cleanup_failed: {
     meaning: 'The project change was saved, but transaction completion or cleanup failed.',
     likely_causes: ['The filesystem denied transaction completion or cleanup after commit.'],
     retryable: false,
