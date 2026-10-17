@@ -8,7 +8,9 @@ graph TD
   Local --> Runtime[runtime]
   Local --> Executor
   Local --> Core[core]
-  Api[api] --> Core
+  Local --> Api[api]
+  Api --> Core
+  Web --> Api
   Local --> Web[web embedded dashboard]
   Runtime --> Executor[executor]
   Executor --> Contracts
@@ -57,7 +59,7 @@ Local exposes focused entry points: `/agent`, `/metric`, `/test`, `/project`, `/
 
 ## Browser and artifacts
 
-`@attest/web` supplies the same dashboard for the live local server and static reports. Domain types come from core through type-only imports. Browser code must not import runtime, local, CLI, or Node modules. The browser-safe
+`@attest/web` supplies the same dashboard for the live local server and static reports. Web imports its client from `@attest/api/client`, parses bootstrap data through `@attest/api/contract`, and imports domain types from core. Browser code must not import runtime, local, CLI, or Node modules. The browser-safe
 `@attest/core/records` entry point exposes record, summary and comparison schemas
 without importing persistence, hashing or execution code. Servers and browsers
 validate their shared response projections through these owner schemas.
