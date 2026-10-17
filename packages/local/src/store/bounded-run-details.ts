@@ -1,5 +1,7 @@
 import type { CaseRecord, RunStore } from '@attest/core';
 
+import { MAX_CASE_SUMMARY_LIMIT } from './run-store.js';
+
 /** Counts snapshot rows without hydrating blobs beyond the report's detail budget. */
 const readBoundedRunDetails = async (
   store: RunStore,
@@ -11,7 +13,11 @@ const readBoundedRunDetails = async (
   let totalCaseCount = 0;
 
   do {
-    const page = await store.listCaseSummaries(options.runId, { cursor, limit: 1_000 });
+    const page = await store.listCaseSummaries(options.runId, {
+      cursor,
+      limit: MAX_CASE_SUMMARY_LIMIT,
+    });
+
     totalCaseCount += page.items.length;
 
     for (const item of page.items.slice(0, Math.max(0, options.limit - cases.length))) {

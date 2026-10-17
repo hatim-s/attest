@@ -12,6 +12,7 @@ import { withRunNotFound } from '../commands/run-store/run-not-found.js';
 import { createReportHtml, type ReportData } from './create-report-html.js';
 import { readBoundedRunDetails } from '../store/bounded-run-details.js';
 
+// Bound embedded HTML size and the per-case detail queries needed to generate it.
 const MAX_REPORT_CASES = 10_000;
 
 type RunReportCommandOptions = {

@@ -40,6 +40,8 @@ import { executeStoreOperation } from './internal/store-operation.js';
 import { migrateToLatest, validateReadableSchema } from './migration-runner.js';
 import type { Database, MetricResultsTable, RunsTable } from './schema.js';
 
+const MAX_CASE_SUMMARY_LIMIT = 1_000;
+
 const migrationLocks = new Map<string, ReturnType<typeof createLock>>();
 
 /** Allocates the shared ULID/timestamp pair used by immutable eval metadata and the run store. */
@@ -282,7 +284,7 @@ class SqliteRunStore implements RunStore {
     await this.#getRunRow(runId);
     const limit = options.limit ?? 100;
 
-    if (!Number.isInteger(limit) || limit <= 0 || limit > 1_000) {
+    if (!Number.isInteger(limit) || limit <= 0 || limit > MAX_CASE_SUMMARY_LIMIT) {
       throw new StoreError(
         'INVALID_LIMIT',
         'Case summary limit must be an integer from 1 to 1000.',
@@ -426,4 +428,11 @@ const openRunStoreSnapshot = async (path: string): Promise<RunStore> => {
   }
 };
 
-export { createRunIdentity, openReadonlyRunStore, openRunStoreSnapshot, openStore, type RunStore };
+export {
+  MAX_CASE_SUMMARY_LIMIT,
+  createRunIdentity,
+  openReadonlyRunStore,
+  openRunStoreSnapshot,
+  openStore,
+  type RunStore,
+};
