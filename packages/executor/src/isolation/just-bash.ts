@@ -63,7 +63,6 @@ const justBashIsolation =
     let disposal: Promise<void> | undefined;
 
     return {
-      kind: 'just-bash',
       exec: (script, execution = {}) =>
         enqueue((admitted) =>
           shell.exec(script, {

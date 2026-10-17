@@ -8,14 +8,11 @@ import { extractRemoteError } from '../../internal/remote-error.js';
 import { readJsonPointer } from '../http/json-pointer.js';
 import type { StreamAgentResource } from './stream-adapter.js';
 
-/** A terminal event mapped onto a native envelope; the adapter validates it before use. */
-type CandidateResponse = AgentResponseCandidate;
-
 /** Maps application events to a terminal envelope, or undefined while the stream continues. */
 type TerminalExtractor = (
   raw: JsonValue,
   eventName: string | undefined,
-) => CandidateResponse | undefined;
+) => AgentResponseCandidate | undefined;
 
 const invalid = (message: string): AgentInvocationError =>
   new AgentInvocationError('invalid_envelope', message);
@@ -93,4 +90,4 @@ const createTerminalExtractor = (agent: StreamAgentResource): TerminalExtractor 
   };
 };
 
-export { createTerminalExtractor, type CandidateResponse, type TerminalExtractor };
+export { createTerminalExtractor, type TerminalExtractor };

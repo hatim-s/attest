@@ -177,7 +177,6 @@ const invokeResolvedAgent = async (
       };
 
       if (options.workerDirectory !== undefined) {
-        invocation.preserveWorkingDirectory = true;
         invocation.workingDirectory = options.workerDirectory;
       }
 

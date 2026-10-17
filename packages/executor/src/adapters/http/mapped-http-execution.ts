@@ -109,12 +109,6 @@ const retryableStatus = (status: number): boolean =>
 const retryableTransportError = (error: AgentInvocationError): boolean =>
   error.code === 'network' || error.code === 'timeout';
 
-const retryDelay = (retry: HttpAgentResource['retry'], retryIndex: number): number =>
-  retryBackoffDelay(retry?.backoff, retryIndex);
-
-const wait = (delayMs: number, signal: AbortSignal, callerSignal?: AbortSignal): Promise<void> =>
-  abortableWait(delayMs, signal, () => abortedError(callerSignal, 'Mapped HTTP invocation'));
-
 const attemptFromError = (error: AgentInvocationError, durationMs: number): InvocationAttempt =>
   createFailedAttempt(error, {
     diagnostics: error.httpStatus === undefined ? {} : { httpStatus: error.httpStatus },
@@ -195,7 +189,9 @@ const requestWithRetries = async (
     }
 
     retryAttempts.push(attemptFromError(failure.error, durationMs));
-    await wait(rules.delayFor(retry, failure.retryAfter), signal, policy.callerSignal);
+    await abortableWait(rules.delayFor(retry, failure.retryAfter), signal, () =>
+      abortedError(policy.callerSignal, 'Mapped HTTP invocation'),
+    );
   }
 };
 
@@ -207,7 +203,7 @@ const runDirect = (
   requestWithRetries(materialized, context, {
     allowRetry: true,
     delayFor: (retry, retryAfter) =>
-      parseRetryAfter(retryAfter) ?? retryDelay(context.retry, retry),
+      parseRetryAfter(retryAfter) ?? retryBackoffDelay(context.retry?.backoff, retry),
   });
 
 export {
@@ -217,9 +213,7 @@ export {
   extractRemoteJobId,
   normalizeFailure,
   requestWithRetries,
-  retryDelay,
   runDirect,
-  wait,
   type ExchangeContext,
   type ExchangeOutcome,
 };

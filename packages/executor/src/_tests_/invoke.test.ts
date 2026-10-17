@@ -20,7 +20,7 @@ const request: AgentRequest = {
 };
 
 describe('invokeAgent', { timeout: 30_000 }, () => {
-  it('creates isolated retry directories beneath an explicit working-directory test seam', async () => {
+  it('gives every retry attempt a fresh working directory', async () => {
     const stateDirectory = await mkdtemp(join(tmpdir(), 'attest-marker-probe-'));
     const statePath = join(stateDirectory, 'state');
 
@@ -34,7 +34,6 @@ describe('invokeAgent', { timeout: 30_000 }, () => {
           terminationGraceMs: 100,
           timeoutMs: 8_000,
           env: { PATH: process.env.PATH ?? '', MARKER_PROBE_STATE_FILE: statePath },
-          workingDirectory: stateDirectory,
         },
       );
 

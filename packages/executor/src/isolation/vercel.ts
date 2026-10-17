@@ -200,7 +200,6 @@ const vercelSandboxIsolation = (input: VercelIsolationOptions = {}): CaseEnviron
     }
 
     return {
-      kind: 'vercel',
       exec: (script, execution = {}) =>
         lifecycle.track(async (admitted) => {
           const commandLifetime = new AbortController();

@@ -160,6 +160,4 @@ const resolveSafeHttpUrl = async (
   };
 };
 
-export { requireSameOrigin } from './same-origin.js';
-
 export { resolveSafeHttpUrl, type ResolvedHttpUrl };

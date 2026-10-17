@@ -1,15 +1,11 @@
-export { assertLoopbackUrl } from './loopback-url.js';
-
 export {
-  BackgroundAgentSession,
   startBackgroundAgent,
   type BackgroundAgentResource,
-  type BackgroundSessionOptions,
+  type BackgroundAgentSession,
 } from './background-adapter.js';
 
 export {
-  JsonlBridgeSession,
   startJsonlBridgeAgent,
   type JsonlBridgeAgentResource,
-  type JsonlBridgeSessionOptions,
+  type JsonlBridgeSession,
 } from './jsonl-bridge-adapter.js';

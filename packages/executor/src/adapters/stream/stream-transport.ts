@@ -1,4 +1,5 @@
 import type { JsonValue } from '@attest/contracts';
+import type { AgentResponseCandidate } from '../../internal/agent-response-candidate.js';
 import { parseJson } from '../../internal/json-value.js';
 import { AgentInvocationError, abortedError } from '../../errors.js';
 import { LineSplitter } from '../../internal/line-splitter.js';
@@ -8,11 +9,7 @@ import { parseRetryAfter } from '../http/retry-after.js';
 import { SseParser, type StreamEvent } from './sse-parser.js';
 import type { StreamAgentResource, StreamInvokeOptions } from './stream-adapter.js';
 import { StreamEvidence, capError, createStreamCaps } from './stream-evidence.js';
-import {
-  createTerminalExtractor,
-  type CandidateResponse,
-  type TerminalExtractor,
-} from './stream-terminal.js';
+import { createTerminalExtractor, type TerminalExtractor } from './stream-terminal.js';
 
 /** A response whose lifetime and network policy belong to the host transport. */
 type StreamHttpResponse = {
@@ -31,7 +28,7 @@ type StreamHttpTransport = (
 ) => Promise<StreamHttpResponse>;
 
 type ConsumedStream = {
-  response: CandidateResponse;
+  response: AgentResponseCandidate;
   evidence: string;
   applicationStarted: boolean;
 };
@@ -98,7 +95,7 @@ const consumeResponse = async (
   const abort = (): void => interrupt(abortedError(options.callerSignal, 'Streaming invocation'));
 
   /** Records one event and returns the terminal envelope once it arrives. */
-  const acceptEvent = (event: StreamEvent): CandidateResponse | undefined => {
+  const acceptEvent = (event: StreamEvent): AgentResponseCandidate | undefined => {
     if (event.heartbeat) {
       evidence.recordHeartbeat(event.source);
 
@@ -121,7 +118,7 @@ const consumeResponse = async (
     }
   };
 
-  const acceptLine = (line: string): CandidateResponse | undefined => {
+  const acceptLine = (line: string): AgentResponseCandidate | undefined => {
     if (sse === undefined) {
       if (line.trim().length === 0) return undefined;
 
@@ -138,7 +135,7 @@ const consumeResponse = async (
   };
 
   /** Feeds split lines in order and stops at the first terminal event. */
-  const acceptLines = (text: string, final: boolean): CandidateResponse | undefined => {
+  const acceptLines = (text: string, final: boolean): AgentResponseCandidate | undefined => {
     const split = final ? splitter.end() : splitter.push(text);
 
     for (const line of split.lines) {
@@ -162,7 +159,7 @@ const consumeResponse = async (
     }
   };
 
-  const completed = (terminal: CandidateResponse): ConsumedStream => {
+  const completed = (terminal: AgentResponseCandidate): ConsumedStream => {
     if (interruption !== undefined) throw interruption;
 
     if (signal.aborted) throw abortedError(options.callerSignal, 'Streaming invocation');
