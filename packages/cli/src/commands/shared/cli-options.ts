@@ -153,22 +153,41 @@ const recoverOutputMode = ({
     return undefined;
   }
 
-  const recovery = new Command()
-    .allowUnknownOption()
-    .exitOverride()
-    .configureOutput({ writeErr: () => undefined });
+  const hierarchy: Command[] = [];
 
-  for (const option of leaf.options.length > 0 ? leaf.options : program.options) {
-    recovery.addOption(new Option(option.flags));
+  for (let command: Command | null = leaf; command !== null; command = command.parent) {
+    hierarchy.unshift(command);
+  }
+
+  const recovery = new Command()
+    .enablePositionalOptions()
+    .exitOverride()
+    .configureOutput({ writeOut: () => undefined, writeErr: () => undefined });
+
+  let recoveredLeaf = recovery;
+
+  for (const command of hierarchy) {
+    const recovered = command === program ? recovery : new Command();
+    recovered.name(command.name()).aliases(command.aliases()).allowUnknownOption();
+    recovered.allowExcessArguments();
+
+    for (const option of command.options.length > 0 ? command.options : program.options) {
+      recovered.addOption(new Option(option.flags));
+    }
+
+    if (recovered !== recovery) recoveredLeaf.addCommand(recovered);
+    recoveredLeaf = recovered;
   }
 
   try {
-    recovery.parseOptions([...argv]);
+    recovery.parse([...argv], { from: 'user' });
   } catch (error) {
     if (!(error instanceof CommanderError)) throw error;
   }
 
-  const output = recovery.opts<{ output?: EvalOutputMode }>().output;
+  const output =
+    recoveredLeaf.opts<{ output?: EvalOutputMode }>().output ??
+    recovery.opts<{ output?: EvalOutputMode }>().output;
 
   return output === 'json' || output === 'jsonl' ? output : undefined;
 };

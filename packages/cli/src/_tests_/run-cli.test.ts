@@ -178,13 +178,16 @@ describe('runCli', () => {
 
   it.each([
     ['unknown-command', '--project', '--output=json'],
+    ['--project', '--output=json', 'schema', 'list', '--bad'],
     ['unknown-command', '--', '--output', 'json'],
   ])('respects option values and the terminator during output recovery for %j', async (...argv) => {
     const result = await runCommand(process.cwd(), argv);
 
     expect(result.exitCode).toBe(2);
     expect(result.output).toEqual([]);
-    expect(result.errors.join('')).toContain("unknown command 'unknown-command'");
+    expect(result.errors.join('')).toContain(
+      argv.includes('--bad') ? "unknown option '--bad'" : "unknown command 'unknown-command'",
+    );
   });
 
   it('wraps JSONL parser failures in one terminal event', async () => {
