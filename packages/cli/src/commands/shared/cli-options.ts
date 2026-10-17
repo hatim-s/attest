@@ -1,5 +1,5 @@
 import { COMMAND_REQUEST_SCHEMA_ID, type EvalOutputMode } from '@attest/contracts';
-import { Option, type Command } from 'commander';
+import { Command, CommanderError, Option } from 'commander';
 
 import { AttestCliError } from '../../errors/cli-error.js';
 import type { CliInteraction } from './cli-interaction.js';
@@ -134,11 +134,67 @@ const inheritCommonOptions = (program: Command, leaf: Command): void => {
   }
 };
 
-/** Finds the leaf's common `--output` value; undefined for commands without one. */
-const commonOutputMode = (program: Command, leaf: Command): string | undefined => {
-  const output = leaf.options.find(
+const commonOutputOption = (command: Command): Option | undefined =>
+  command.options.find(
     (option) => commonOptions.has(option) && option.attributeName() === 'output',
   );
+
+/** Recovers error output using only registered option arity, without running command actions. */
+const recoverOutputMode = ({
+  program,
+  leaf,
+  argv,
+}: {
+  program: Command;
+  leaf: Command;
+  argv: readonly string[];
+}): EvalOutputMode | undefined => {
+  if (commonOutputOption(leaf) === undefined && leaf !== program && leaf.commands.length === 0) {
+    return undefined;
+  }
+
+  const hierarchy: Command[] = [];
+
+  for (let command: Command | null = leaf; command !== null; command = command.parent) {
+    hierarchy.unshift(command);
+  }
+
+  const recovery = new Command()
+    .enablePositionalOptions()
+    .exitOverride()
+    .configureOutput({ writeOut: () => undefined, writeErr: () => undefined });
+
+  let recoveredLeaf = recovery;
+
+  for (const command of hierarchy) {
+    const recovered = command === program ? recovery : new Command();
+    recovered.name(command.name()).aliases(command.aliases()).allowUnknownOption();
+    recovered.allowExcessArguments();
+
+    for (const option of command.options.length > 0 ? command.options : program.options) {
+      recovered.addOption(new Option(option.flags));
+    }
+
+    if (recovered !== recovery) recoveredLeaf.addCommand(recovered);
+    recoveredLeaf = recovered;
+  }
+
+  try {
+    recovery.parse([...argv], { from: 'user' });
+  } catch (error) {
+    if (!(error instanceof CommanderError)) throw error;
+  }
+
+  const output =
+    recoveredLeaf.opts<{ output?: EvalOutputMode }>().output ??
+    recovery.opts<{ output?: EvalOutputMode }>().output;
+
+  return output === 'json' || output === 'jsonl' ? output : undefined;
+};
+
+/** Finds the leaf's common `--output` value; undefined for commands without one. */
+const commonOutputMode = (program: Command, leaf: Command): string | undefined => {
+  const output = commonOutputOption(leaf);
 
   if (output === undefined) return undefined;
   const leafValue = leaf.opts<{ output?: EvalOutputMode }>().output;
@@ -218,6 +274,7 @@ export {
   outputFormat,
   outputOption,
   projectOption,
+  recoverOutputMode,
   promptContext,
   type CommonCliOptions,
   type MutationCliOptions,
