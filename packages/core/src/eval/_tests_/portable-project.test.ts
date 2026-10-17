@@ -7,6 +7,7 @@ import {
   type PortableProjectBundle,
 } from '@attest/contracts';
 import { contentHash } from '../../store/internal/canonical-json.js';
+import { EvalResolutionError } from '../resolution-project.js';
 import { resolvePortableProject } from '../portable-project.js';
 import { resolveEvalRun } from '../eval-resolver.js';
 
@@ -114,7 +115,26 @@ describe('portable project resolution', () => {
     input.resources.project.resources.agents[0]!.content_hash = contentHash(agent);
     input.files['attest/agents/agent.json'] = JSON.stringify(agent);
     input.files['attest.project.json'] = JSON.stringify(input.resources.project);
-    expect(() => resolvePortableProject(input)).toThrow('secret reference');
+    let caught: unknown;
+
+    try {
+      resolvePortableProject(input);
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught).toBeInstanceOf(EvalResolutionError);
+
+    if (!(caught instanceof EvalResolutionError)) throw caught;
+    expect(caught.code).toBe('project_invalid');
+    expect(caught.details).toEqual({
+      issues: [
+        {
+          path: ['resources', 'agents', '0', 'transport', 'request', 'headers', 'Authorization'],
+          message: 'credential fields must use environment references',
+        },
+      ],
+    });
   });
 });
 
