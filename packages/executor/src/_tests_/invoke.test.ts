@@ -47,4 +47,33 @@ describe('invokeAgent', { timeout: 30_000 }, () => {
       await rm(stateDirectory, { recursive: true, force: true });
     }
   });
+
+  it.each([Number.NaN, Number.POSITIVE_INFINITY])(
+    'rejects %s retries before sending a request',
+    async (retries) => {
+      const controller = new AbortController();
+      let requests = 0;
+
+      // Cuts off a retry loop that never ends so the unfixed path fails instead of hanging.
+      const httpFetch = (): Promise<Response> => {
+        requests += 1;
+
+        if (requests < 6) return Promise.resolve(new Response('', { status: 500 }));
+        controller.abort();
+
+        return Promise.reject(new DOMException('Retry loop cut off.', 'AbortError'));
+      };
+
+      await expect(
+        invokeAgent({ type: 'http', url: 'https://agent.invalid/' }, request, {
+          outputCapBytes: 1_024,
+          retries,
+          timeoutMs: 1_000,
+          httpFetch,
+          signal: controller.signal,
+        }),
+      ).rejects.toThrow(/retries/u);
+      expect(requests).toBe(0);
+    },
+  );
 });

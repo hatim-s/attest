@@ -17,7 +17,8 @@
   "dependencies": {
     "@attest/contracts": "workspace:*",
     "@vercel/sandbox": "3.3.0",
-    "just-bash": "3.4.2"
+    "just-bash": "3.4.2",
+    "zod": "^4"
   },
   "scripts": {
     "build": "tsc --build tsconfig.build.json",

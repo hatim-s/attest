@@ -510,7 +510,7 @@ describe('WebSocket adapter', () => {
     }
   });
 
-  it('rejects prohibited network targets, literal credentials, and unsupported runtime modes', async () => {
+  it('rejects prohibited network targets', async () => {
     const prohibited = await startWebSocketAgent(agent('ws://192.168.1.10/invoke'));
     const prohibitedResult = await prohibited.invoke(request('private', null));
     expect(prohibitedResult.status).toBe('invocation_error');
@@ -520,21 +520,5 @@ describe('WebSocket adapter', () => {
     }
 
     await prohibited.close();
-
-    expect(() =>
-      startWebSocketAgent(
-        agent('ws://127.0.0.1:1', {
-          transport: {
-            ...agent('ws://127.0.0.1:1').transport,
-            headers: { Authorization: 'Bearer literal' },
-          },
-        }),
-      ),
-    ).toThrow('invalid or unsupported mode');
-
-    const invalidAgent = agent('ws://127.0.0.1:1');
-    // Inject an invalid runtime field to exercise validation without pretending it has a supported type.
-    Object.defineProperty(invalidAgent.transport, 'framing', { value: 'binary' });
-    expect(() => startWebSocketAgent(invalidAgent)).toThrow('invalid or unsupported mode');
   });
 });

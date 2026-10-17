@@ -5,7 +5,7 @@ import { AgentInvocationError } from '../../errors.js';
 import { startTimer } from '../../internal/elapsed.js';
 import { createFailedAttempt } from '../../internal/failed-attempt.js';
 import { createRawExcerpt } from '../../internal/raw-excerpt.js';
-import { invokeWithRetries } from '../../internal/invocation-retry.js';
+import { invokeWithRetries, retryBudgetSchema } from '../../internal/invocation-retry.js';
 import type { InvocationAttempt, InvocationDiagnostics, InvocationResult } from '../../types.js';
 import { BoundedOutputWritable, BoundedTailWritable } from './bounded-writable.js';
 import { resolveVercelSandboxCredentials } from './credentials.js';
@@ -239,6 +239,7 @@ const invokeVercelSandboxAgent = async (
   request: AgentRequest,
   options: VercelSandboxCaseOptions,
 ): Promise<InvocationResult> => {
+  const { retries } = retryBudgetSchema.parse(invocation);
   const artifacts = sandbox.artifacts ?? [];
   const { artifactRoot } = options;
 
@@ -290,7 +291,7 @@ const invokeVercelSandboxAgent = async (
     if (uploads.length > 0) await created.writeFiles(uploads, { signal: setupSignal });
     result = await invokeWithRetries(
       () => invokeSandboxAttempt(created, invocation, request, options.signal),
-      invocation.retries,
+      retries,
     );
 
     if (artifactRoot !== undefined && artifacts.length > 0) {
