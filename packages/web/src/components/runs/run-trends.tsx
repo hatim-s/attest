@@ -57,9 +57,8 @@ const RunTrends = ({ runs }: { runs: RunRecord[] }) => {
         </select>
       </label>
       <p className="empty-compact">
-        Only the {runs.length} loaded runs are included. Skipped {trends.missingSummary} without a
-        summary and {trends.emptyRuns} with zero cases. Running summaries, when present, are
-        partial.
+        Only the {runs.length} loaded runs are included. Skipped {trends.runningRuns} running,
+        {trends.missingSummary} without a summary and {trends.emptyRuns} with zero cases.
       </p>
       <div className="chart-grid">
         {trends.groups.map((group) => (

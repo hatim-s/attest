@@ -39,6 +39,7 @@ const summary = {
 const runs = [
   {
     id: 'new',
+    status: 'completed',
     createdAt: '2026-10-18T03:00:00Z',
     gitBranch: 'main',
     labels: { env: 'ci' },
@@ -46,6 +47,7 @@ const runs = [
   },
   {
     id: 'old',
+    status: 'completed',
     createdAt: '2026-10-18T01:00:00Z',
     gitBranch: 'main',
     labels: { env: 'local' },
@@ -53,22 +55,26 @@ const runs = [
   },
   {
     id: 'other',
+    status: 'completed',
     createdAt: '2026-10-18T02:00:00Z',
     gitBranch: 'feature',
     labels: { env: 'ci' },
     summary,
   },
-  { id: 'missing', createdAt: '2026-10-18T04:00:00Z', gitBranch: 'main' },
+  { status: 'running', id: 'running', createdAt: '2026-10-18T06:00:00Z' },
+  { status: 'completed', id: 'missing', createdAt: '2026-10-18T04:00:00Z', gitBranch: 'main' },
   {
     id: 'empty',
+    status: 'completed',
     createdAt: '2026-10-18T05:00:00Z',
     summary: { ...summary, totalCases: 0, passedCases: 0 },
   },
-];
+] satisfies Parameters<typeof createRunTrends>[0];
 
 it('groups branch trends chronologically and skips absent or empty summaries', () => {
   const trends = createRunTrends(runs, { kind: 'branch' });
 
+  expect(trends.runningRuns).toBe(1);
   expect(trends.missingSummary).toBe(1);
   expect(trends.emptyRuns).toBe(1);
   expect(
@@ -97,5 +103,6 @@ it('groups label trends across branches without including missing summaries', ()
     { name: 'env=ci', runs: ['other', 'new'] },
     { name: 'env=local', runs: ['old'] },
   ]);
+  expect(trends.runningRuns).toBe(1);
   expect(trends.missingSummary).toBe(1);
 });

@@ -1,6 +1,6 @@
 import type { CaseSummary, RunRecord } from '@attest/core/records';
 
-type TrendRun = Pick<RunRecord, 'id' | 'createdAt' | 'gitBranch' | 'labels' | 'summary'>;
+type TrendRun = Pick<RunRecord, 'id' | 'createdAt' | 'gitBranch' | 'labels' | 'summary' | 'status'>;
 
 type TrendPoint = { run: TrendRun; passRate: number };
 
@@ -9,12 +9,18 @@ type TrendGrouping = { kind: 'branch' } | { kind: 'label'; key: string };
 /** Loaded-page trends deliberately exclude unknown denominators instead of inventing a rate. */
 const createRunTrends = (runs: readonly TrendRun[], grouping: TrendGrouping) => {
   const groups = new Map<string, TrendPoint[]>();
+  let runningRuns = 0;
   let missingSummary = 0;
   let emptyRuns = 0;
 
   for (const run of [...runs].sort(
     (a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id),
   )) {
+    if (run.status === 'running') {
+      runningRuns += 1;
+      continue;
+    }
+
     if (run.summary === undefined) {
       missingSummary += 1;
       continue;
@@ -39,6 +45,7 @@ const createRunTrends = (runs: readonly TrendRun[], grouping: TrendGrouping) => 
     groups: [...groups]
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([name, points]) => ({ name, points })),
+    runningRuns,
     missingSummary,
     emptyRuns,
   };
