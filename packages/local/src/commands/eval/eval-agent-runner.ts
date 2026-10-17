@@ -6,10 +6,13 @@ import type { invokeVercelSandboxAgent, InvocationResult } from '@attest/executo
 import {
   EvalCaseStageError,
   type CaseExecution,
+  type CaseExecutionBase,
   type EvalCaseExecutionContext,
   type EvalCaseRunner,
   type EvalCaseRunnerResult,
 } from '@attest/runtime';
+
+import { z } from 'zod';
 
 import { LocalError } from '../../errors/index.js';
 import { assertSafeNativeAgentResource } from '../agent/authoring/resource-validation.js';
@@ -20,7 +23,11 @@ import {
   startupFailure,
   type AgentRuntime,
 } from '../agent/adapter/invoke-resolved-agent.js';
-import { redactAgentRequest, redactInvocation } from '../agent/adapter/evidence-redaction.js';
+import {
+  redactAgentRequest,
+  redactInvocation,
+  sensitiveFieldValues,
+} from '../agent/adapter/evidence-redaction.js';
 import { resolveNativeAgent } from '../agent/adapter/resolve-native-agent.js';
 import type { ResolvedEvalCaseInput } from './eval-resolver.js';
 import { createEvalMetricEvaluator } from './eval-metric-runner.js';
@@ -58,6 +65,38 @@ const appendLifecycleFailure = (
       diagnostics: { ...result.execution.diagnostics, lifecycleError },
     },
     metrics: [...result.metrics],
+  };
+};
+
+/** Builds the case shape runtime consumes from one invocation, original or redacted. */
+const caseExecutionFrom = (
+  invocation: InvocationResult,
+  base: Omit<CaseExecutionBase, 'attempts' | 'diagnostics' | 'warnings'>,
+): CaseExecution => {
+  const common = {
+    ...base,
+    attempts: invocation.attempts,
+    diagnostics: invocation.diagnostics,
+    warnings: invocation.warnings,
+  };
+
+  if (invocation.status === 'invocation_error') {
+    return { ...common, invocationError: invocation.error, outcome: invocationOutcome(invocation) };
+  }
+
+  if (invocation.report?.ok !== true) {
+    throw new LocalError(
+      'internal_error',
+      'Agent adapter returned an unvalidated successful response.',
+    );
+  }
+
+  return {
+    ...common,
+    outcome: 'completed',
+    response: invocation.report.value,
+    trace: invocation.report.value.trace,
+    warnings: invocation.report.warnings,
   };
 };
 
@@ -156,45 +195,36 @@ const createEvalCaseRunner = (
         invocation = startupFailure(error, performance.now() - started);
       }
 
-      const redacted = redactInvocation(invocation, runtime?.resolved.secrets ?? []);
-
-      const common = {
-        attempts: redacted.attempts,
+      const base = {
         caseDefinition: payload.case,
         caseId: payload.case_id,
-        diagnostics: redacted.diagnostics,
         durationMs: performance.now() - started,
         expectedMetrics: payload.metrics.map(({ metric }) => metric.id),
-        request: redactAgentRequest(request, runtime?.resolved.secrets ?? []),
         startedAt,
         suiteName: payload.test_id,
-        warnings: redacted.warnings,
       };
 
-      let execution: CaseExecution;
+      // Metrics score what the agent returned. Sensitive-name redaction would turn
+      // `{ token: "ok" }` into `[REDACTED]`, so only the redacted copy leaves this function.
+      const original = caseExecutionFrom(invocation, { ...base, request });
 
-      if (redacted.status === 'invocation_error') {
-        execution = {
-          ...common,
-          invocationError: redacted.error,
-          outcome: invocationOutcome(redacted),
-        };
-      } else if (redacted.report?.ok === true) {
-        execution = {
-          ...common,
-          outcome: 'completed',
-          response: redacted.report.value,
-          warnings: redacted.report.warnings,
-        };
+      // Field-name redaction hides these values in structured evidence. Raw excerpts, stderr and
+      // metric text quote the original, so they are redacted as secrets everywhere.
+      const secrets = [
+        ...(runtime?.resolved.secrets ?? []),
+        ...sensitiveFieldValues(
+          z.json().parse({
+            case: payload.case,
+            request,
+            response: original.outcome === 'completed' ? original.response : null,
+          }),
+        ),
+      ];
 
-        if ('trace' in redacted.report.value && redacted.report.value.trace !== undefined)
-          execution.trace = redacted.report.value.trace;
-      } else {
-        throw new LocalError(
-          'internal_error',
-          'Agent adapter returned an unvalidated successful response.',
-        );
-      }
+      let execution = caseExecutionFrom(redactInvocation(invocation, secrets), {
+        ...base,
+        request: redactAgentRequest(request, secrets),
+      });
 
       outcome = execution.outcome;
 
@@ -221,7 +251,13 @@ const createEvalCaseRunner = (
         throw new EvalCaseStageError('after_agent', execution, [], error);
       }
 
-      const metrics = await metricEvaluator.evaluate(runId, payload, execution, signal);
+      const metrics = await metricEvaluator.evaluate({
+        original,
+        payload,
+        runId,
+        secrets,
+        signal,
+      });
 
       try {
         await lifecycle.runCasePhase('after_evaluation', {

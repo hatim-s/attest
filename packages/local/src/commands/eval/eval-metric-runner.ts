@@ -26,7 +26,7 @@ import { z } from 'zod';
 import { LocalError } from '../../errors/index.js';
 import { readJsonPointer } from '../../internal/json-pointer.js';
 import { isProjectPath } from '../../project/project-path.js';
-import { redactMetricEvaluation } from '../agent/adapter/evidence-redaction.js';
+import { redactMetricEvaluation, redactProbeValue } from '../agent/adapter/evidence-redaction.js';
 import {
   resolveNativeAgent,
   resolveProcessEnvironment,
@@ -34,14 +34,17 @@ import {
 import type { ResolvedEvalMetric } from '@attest/core';
 import type { ResolvedEvalCaseInput } from './eval-resolver.js';
 
-/** Adapts the shared SQLite response cache to the judge metric cache contract. */
-const createJudgeCache = (cacheStore: CacheStore): JudgeCache => ({
+/**
+ * Adapts the shared SQLite response cache to the judge metric cache contract. The judge prompt
+ * quotes the unredacted agent output, so each entry is redacted before it is written.
+ */
+const createJudgeCache = (cacheStore: CacheStore, secrets: readonly string[]): JudgeCache => ({
   get: async (key) => {
     const entry = await cacheStore.get('judge', key);
 
     return entry === undefined ? undefined : judgeOutcomeSchema.parse(entry);
   },
-  set: (key, entry) => cacheStore.put('judge', key, entry),
+  set: (key, entry) => cacheStore.put('judge', key, redactProbeValue(entry, secrets)),
 });
 
 /** Resolves one executable metric environment at invocation time without persisting secret values. */
@@ -243,19 +246,52 @@ const applyAttachedThreshold = (
         pass: evaluation.score >= threshold,
       };
 
+type EvaluateCaseMetricsOptions = {
+  /** The unredacted case execution. It is scored and never returned. */
+  original: CaseExecution;
+  payload: ResolvedEvalCaseInput;
+  runId: string;
+  /**
+   * Values the case evidence must not show: agent secrets plus values hidden by field-name
+   * redaction. Metric evidence and judge cache entries are redacted with them and each metric's
+   * own secrets.
+   */
+  secrets: readonly string[];
+  signal: AbortSignal;
+};
+
 /** Creates the per-run metric bridge from resources to existing assertion/exec/judge engines. */
 const createEvalMetricEvaluator = (projectRoot: string, cacheStore: CacheStore) => {
-  const judgeCache = createJudgeCache(cacheStore);
   let judgeClient: ReturnType<typeof createTanstackJudgeClient> | undefined;
+  const judgeCaches = new Map<string, JudgeCache>();
 
-  /** Evaluates attached metrics in authored order while retaining each metric's own runtime policy. */
-  const evaluate = async (
-    runId: string,
-    payload: ResolvedEvalCaseInput,
-    execution: CaseExecution,
-    signal: AbortSignal,
-  ): Promise<StoredMetricEvaluation[]> => {
-    const context = caseExecutionToMetricContext(payload.case, execution);
+  /**
+   * Runtime coalesces concurrent identical judge calls per cache object, so every case with the
+   * same redaction scope shares one adapter for the whole run.
+   */
+  const judgeCacheFor = (secrets: readonly string[]): JudgeCache => {
+    const scope = JSON.stringify([...new Set(secrets)].sort());
+    const existing = judgeCaches.get(scope);
+
+    if (existing !== undefined) return existing;
+    const created = createJudgeCache(cacheStore, secrets);
+    judgeCaches.set(scope, created);
+
+    return created;
+  };
+
+  /**
+   * Evaluates attached metrics in authored order while retaining each metric's own runtime policy.
+   * Metrics see the original output, so the returned evidence is redacted after scoring.
+   */
+  const evaluate = async ({
+    original,
+    payload,
+    runId,
+    secrets: agentSecrets,
+    signal,
+  }: EvaluateCaseMetricsOptions): Promise<StoredMetricEvaluation[]> => {
+    const context = caseExecutionToMetricContext(payload.case, original);
 
     const request: AgentRequest = {
       protocol: AGENT_PROTOCOL,
@@ -302,7 +338,7 @@ const createEvalMetricEvaluator = (projectRoot: string, cacheStore: CacheStore) 
             rubric: definition.rubric,
             threshold: resolvedMetric.threshold ?? definition.threshold,
           };
-          options = { cache: judgeCache, judgeClient, signal };
+          options = { cache: judgeCacheFor(agentSecrets), judgeClient, signal };
         } else {
           const runtime = await resolveExecutableMetric(definition, projectRoot);
           secrets = runtime.secrets;
@@ -325,10 +361,10 @@ const createEvalMetricEvaluator = (projectRoot: string, cacheStore: CacheStore) 
       }
 
       evaluations.push(
-        redactMetricEvaluation(
-          applyAttachedThreshold(evaluation, resolvedMetric.threshold),
-          secrets,
-        ),
+        redactMetricEvaluation(applyAttachedThreshold(evaluation, resolvedMetric.threshold), [
+          ...agentSecrets,
+          ...secrets,
+        ]),
       );
     }
 
