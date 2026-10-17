@@ -16,12 +16,13 @@ import { redactTransportText } from './redaction.js';
 import { parseRetryAfter } from './retry-after.js';
 import type { HttpAgentResource } from './mapped-http-adapter.js';
 
-/** The successful response that ends a direct or polling exchange, with its request timing. */
-type CompletedHttpResponse = {
-  durationMs: number;
-  remoteJobId?: string | number;
-  response: HttpJsonResponse;
-};
+/**
+ * How a direct or polling exchange ended, with the timing of its last request. A failure carries
+ * that request's duration because the invocation may have spanned several requests.
+ */
+type ExchangeOutcome =
+  | { ok: true; durationMs: number; remoteJobId?: string | number; response: HttpJsonResponse }
+  | { ok: false; durationMs: number; error: AgentInvocationError };
 
 /** Shared state of one mapped exchange: retry budget, deadlines, and retained failed attempts. */
 type ExchangeContext = {
@@ -121,28 +122,12 @@ const attemptFromError = (error: AgentInvocationError, durationMs: number): Invo
     rawExcerpt: error.rawExcerpt,
   });
 
-/** Carries request-local timing through terminal error normalization without exposing it publicly. */
-const withAttemptDuration = (
-  error: AgentInvocationError,
-  durationMs: number,
-): AgentInvocationError => {
-  error.attemptDurationMs = durationMs;
-
-  return error;
-};
-
 const normalizeFailure = (
   cause: unknown,
   signal: AbortSignal,
   callerSignal?: AbortSignal,
 ): AgentInvocationError => {
-  if (cause instanceof AgentInvocationError) {
-    if (cause.code !== 'cancelled' || callerSignal?.aborted === true) return cause;
-
-    return new AgentInvocationError('timeout', 'Mapped HTTP invocation timed out.', {
-      cause: cause,
-    });
-  }
+  if (cause instanceof AgentInvocationError) return cause;
 
   if (callerSignal?.aborted === true || signal.aborted) {
     return abortedError(callerSignal, 'Mapped HTTP invocation', { cause: cause });
@@ -157,17 +142,15 @@ const statusError = (response: HttpJsonResponse): AgentInvocationError =>
     rawExcerpt: response.rawExcerpt,
   });
 
-const requireSuccessfulStatus = (response: HttpJsonResponse): void => {
-  if (response.status >= 200 && response.status < 300) return;
-  throw statusError(response);
-};
-
 type RetryRules = {
   /** Whether a retryable failure may be retried at all; submits need an idempotency key. */
   allowRetry: boolean;
   /** Delay before retry `retry`, given the failed response's Retry-After header if any. */
   delayFor: (retry: number, retryAfter: string | undefined) => number;
 };
+
+/** A failed try and what the retry rules need to decide whether to replay it. */
+type RequestFailure = { error: AgentInvocationError; retryable: boolean; retryAfter?: string };
 
 const isSuccessStatus = (status: number): boolean => status >= 200 && status < 300;
 
@@ -179,50 +162,40 @@ const requestWithRetries = async (
   request: MaterializedHttpRequest,
   context: ExchangeContext,
   rules: RetryRules,
-): Promise<{ durationMs: number; response: HttpJsonResponse }> => {
+): Promise<ExchangeOutcome> => {
   const { policy, retryAttempts, signal } = context;
   const retries = context.retry?.retries ?? 0;
 
-  const retryOrThrow = async (
-    error: AgentInvocationError,
-    durationMs: number,
-    retryable: boolean,
-    retry: number,
-    retryAfter: string | undefined,
-  ): Promise<void> => {
-    if (!rules.allowRetry || retry >= retries || !retryable) {
-      throw withAttemptDuration(error, durationMs);
-    }
-
-    retryAttempts.push(attemptFromError(error, durationMs));
-    await wait(rules.delayFor(retry, retryAfter), signal, policy.callerSignal);
-  };
-
   for (let retry = 0; ; retry += 1) {
     const attemptDuration = startTimer();
-    let response: HttpJsonResponse;
+    let failure: RequestFailure;
 
     try {
       const transport = context.requestJson ?? (await import('./http-client.js')).requestJson;
-      response = await transport(request, policy);
+      const response = await transport(request, policy);
+
+      if (isSuccessStatus(response.status)) {
+        return { ok: true, durationMs: attemptDuration(), response };
+      }
+
+      failure = {
+        error: statusError(response),
+        retryable: retryableStatus(response.status),
+        retryAfter: response.headers['retry-after'],
+      };
     } catch (error: unknown) {
       const normalized = normalizeFailure(error, signal, policy.callerSignal);
-      const retryable = retryableTransportError(normalized);
-      await retryOrThrow(normalized, attemptDuration(), retryable, retry, undefined);
-      continue;
+      failure = { error: normalized, retryable: retryableTransportError(normalized) };
     }
 
     const durationMs = attemptDuration();
 
-    if (isSuccessStatus(response.status)) return { durationMs, response };
-    const retryAfter = response.headers['retry-after'];
-    await retryOrThrow(
-      statusError(response),
-      durationMs,
-      retryableStatus(response.status),
-      retry,
-      retryAfter,
-    );
+    if (!rules.allowRetry || retry >= retries || !failure.retryable) {
+      return { ok: false, durationMs, error: failure.error };
+    }
+
+    retryAttempts.push(attemptFromError(failure.error, durationMs));
+    await wait(rules.delayFor(retry, failure.retryAfter), signal, policy.callerSignal);
   }
 };
 
@@ -230,7 +203,7 @@ const requestWithRetries = async (
 const runDirect = (
   materialized: MaterializedHttpRequest,
   context: ExchangeContext,
-): Promise<CompletedHttpResponse> =>
+): Promise<ExchangeOutcome> =>
   requestWithRetries(materialized, context, {
     allowRetry: true,
     delayFor: (retry, retryAfter) =>
@@ -244,11 +217,9 @@ export {
   extractRemoteJobId,
   normalizeFailure,
   requestWithRetries,
-  requireSuccessfulStatus,
   retryDelay,
   runDirect,
   wait,
-  withAttemptDuration,
-  type CompletedHttpResponse,
   type ExchangeContext,
+  type ExchangeOutcome,
 };

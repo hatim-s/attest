@@ -1,7 +1,7 @@
 import { parseJson } from '../../internal/json-value.js';
 import type { AgentRequest, VercelSandbox } from '@attest/contracts';
 
-import { AgentInvocationError } from '../../errors.js';
+import { AgentInvocationError, abortedError } from '../../errors.js';
 import { startTimer } from '../../internal/elapsed.js';
 import { createFailedAttempt } from '../../internal/failed-attempt.js';
 import { createRawExcerpt } from '../../internal/raw-excerpt.js';
@@ -71,14 +71,13 @@ const invokeSandboxAttempt = async (
 
   /** Classifies an SDK rejection, which leaves the remote command's state unconfirmed. */
   const interruptedError = (): AgentInvocationError => {
-    if (signal?.aborted === true) {
-      return new AgentInvocationError('cancelled', 'Sandbox agent invocation was cancelled');
+    // Cancellation outranks a cap breach, which outranks the attempt deadline.
+    if (stdout.exceeded && signal?.aborted !== true) {
+      return new AgentInvocationError('output_cap_exceeded', capMessage);
     }
 
-    if (stdout.exceeded) return new AgentInvocationError('output_cap_exceeded', capMessage);
-
-    if (attemptTimeout.aborted) {
-      return new AgentInvocationError('timeout', 'Sandbox agent invocation failed');
+    if (signal?.aborted === true || attemptTimeout.aborted) {
+      return abortedError(signal, 'Sandbox agent invocation');
     }
 
     return new AgentInvocationError('network', 'Sandbox agent invocation failed');
@@ -183,17 +182,12 @@ const setupError = (
   setupTimeout: AbortSignal,
 ): AgentInvocationError => {
   if (cause instanceof AgentInvocationError) return cause;
-  const options = { cause: cause instanceof Error ? cause : undefined };
 
-  if (callerSignal?.aborted === true) {
-    return new AgentInvocationError('cancelled', 'Vercel sandbox setup was cancelled', options);
+  if (callerSignal?.aborted === true || setupTimeout.aborted) {
+    return abortedError(callerSignal, 'Vercel sandbox setup', { cause });
   }
 
-  if (setupTimeout.aborted) {
-    return new AgentInvocationError('timeout', 'Vercel sandbox setup timed out', options);
-  }
-
-  return new AgentInvocationError('spawn_failed', 'Vercel sandbox setup failed', options);
+  return new AgentInvocationError('spawn_failed', 'Vercel sandbox setup failed', { cause });
 };
 
 /** Exports terminal artifacts; a failure is recorded beside the result instead of replacing it. */

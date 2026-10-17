@@ -2,7 +2,7 @@ import { parseJson } from './internal/json-value.js';
 import type { AgentRequest, RawExcerpt } from '@attest/contracts';
 import { createHash } from 'node:crypto';
 
-import { AgentInvocationError } from './errors.js';
+import { AgentInvocationError, abortedError } from './errors.js';
 import { startTimer } from './internal/elapsed.js';
 import { createFailedAttempt } from './internal/failed-attempt.js';
 import { appendEvidencePrefix, createRawExcerpt } from './internal/raw-excerpt.js';
@@ -118,16 +118,8 @@ const classifyFetchFailure = (cause: unknown, options: InvokeOptions): AgentInvo
     return cause;
   }
 
-  if (options.signal?.aborted) {
-    return new AgentInvocationError('cancelled', 'HTTP agent invocation was cancelled.', {
-      cause: cause,
-    });
-  }
-
-  if (isTimeoutFailure(cause)) {
-    return new AgentInvocationError('timeout', 'HTTP agent invocation timed out.', {
-      cause: cause,
-    });
+  if (options.signal?.aborted === true || isTimeoutFailure(cause)) {
+    return abortedError(options.signal, 'HTTP agent invocation', { cause });
   }
 
   // Fetch wraps DNS, connection, and reset failures differently across Node and Bun.

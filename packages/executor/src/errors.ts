@@ -11,8 +11,6 @@ type AgentInvocationErrorDetails = {
   httpStatus?: number;
   /** Bounded payload evidence captured before the failure. */
   rawExcerpt?: RawExcerpt;
-  /** Duration of the single request that failed when an invocation spans several requests. */
-  attemptDurationMs?: number;
   /** Server-requested delay parsed from Retry-After. */
   retryAfterMs?: number;
   /** A stream delivered an application event, so replaying the request could duplicate work. */
@@ -34,22 +32,35 @@ type AgentInvocationErrorOptions = ErrorOptions & AgentInvocationErrorDetails;
  */
 class AgentInvocationError extends AttestError {
   declare readonly code: InvocationErrorCode;
-  declare httpStatus?: number;
-  declare rawExcerpt?: RawExcerpt;
-  declare attemptDurationMs?: number;
-  declare retryAfterMs?: number;
-  declare applicationStarted?: boolean;
-  declare classification?: WebSocketErrorClassification;
-  declare diagnostics?: { exitCode?: number; stderrExcerpt?: string };
+  declare readonly httpStatus?: number;
+  declare readonly rawExcerpt?: RawExcerpt;
+  declare readonly retryAfterMs?: number;
+  declare readonly applicationStarted?: boolean;
+  declare readonly classification?: WebSocketErrorClassification;
+  declare readonly diagnostics?: { exitCode?: number; stderrExcerpt?: string };
 
   constructor(
     code: InvocationErrorCode,
     message: string,
     options: AgentInvocationErrorOptions = {},
   ) {
-    const { cause, ...details } = options;
-    super(code, message, 'cause' in options ? { cause } : undefined);
-    Object.assign(this, details);
+    // Error reads only `cause`, and only when the key is present.
+    super(code, message, options);
+
+    // Absent facts stay absent so logged errors show only what the transport observed.
+    if (options.httpStatus !== undefined) this.httpStatus = options.httpStatus;
+
+    if (options.rawExcerpt !== undefined) this.rawExcerpt = options.rawExcerpt;
+
+    if (options.retryAfterMs !== undefined) this.retryAfterMs = options.retryAfterMs;
+
+    if (options.applicationStarted !== undefined) {
+      this.applicationStarted = options.applicationStarted;
+    }
+
+    if (options.classification !== undefined) this.classification = options.classification;
+
+    if (options.diagnostics !== undefined) this.diagnostics = options.diagnostics;
   }
 }
 

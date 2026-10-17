@@ -94,8 +94,8 @@ class BackgroundAgentSession {
       const diagnostics = session.startupDiagnostics();
       await session.close();
 
-      if (error instanceof AgentInvocationError) error.diagnostics = diagnostics;
-      throw error;
+      if (!(error instanceof AgentInvocationError)) throw error;
+      throw new AgentInvocationError(error.code, error.message, { cause: error, diagnostics });
     }
   }
 

@@ -17,7 +17,6 @@ import {
   extractAgentResponse,
   extractRemoteJobId,
   normalizeFailure,
-  requireSuccessfulStatus,
   runDirect,
 } from './mapped-http-execution.js';
 import { runPolling } from './mapped-http-polling.js';
@@ -98,8 +97,14 @@ const invokeMappedHttpAgent = async (
         : await runPolling(transport, request, materialized, context);
 
     terminalAttemptDurationMs = completed.durationMs;
+
+    if (!completed.ok) {
+      const attempt = attemptFromError(completed.error, completed.durationMs);
+
+      return { ...attempt, attempts: [...retryAttempts, attempt] };
+    }
+
     const { response } = completed;
-    requireSuccessfulStatus(response);
 
     const remoteJobId =
       completed.remoteJobId ??
@@ -138,10 +143,7 @@ const invokeMappedHttpAgent = async (
   } catch (error: unknown) {
     const normalized = normalizeFailure(error, signal, options.signal);
 
-    const attempt = attemptFromError(
-      normalized,
-      normalized.attemptDurationMs ?? terminalAttemptDurationMs ?? invocationDuration(),
-    );
+    const attempt = attemptFromError(normalized, terminalAttemptDurationMs ?? invocationDuration());
 
     return { ...attempt, attempts: [...retryAttempts, attempt] };
   }
