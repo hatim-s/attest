@@ -7,7 +7,13 @@ export {
   type BundleManifest,
 } from './bundle-format.js';
 
-export { summarizeCaseRecord } from './case-summary.js';
+export {
+  computeCaseVerdict,
+  summarizeCaseRecord,
+  summarizeVerdicts,
+  type CaseVerdictEvidence,
+  type MetricVerdictEvidence,
+} from './case-summary.js';
 
 export { type CacheKind, type CacheStore } from './cache.js';
 

@@ -46,15 +46,16 @@ const agentRequestSchema = z
 /** Represents a validated invocation request sent to an agent transport. */
 type AgentRequest = z.infer<typeof agentRequestSchema>;
 
+/** The error an agent reports instead of an output. */
+const agentErrorSchema = z.strictObject({
+  message: z.string(),
+  code: z.string().optional(),
+});
+
 const agentResponseFields = {
   protocol: z.literal(AGENT_PROTOCOL),
   output: z.json().optional(),
-  error: z
-    .strictObject({
-      message: z.string(),
-      code: z.string().optional(),
-    })
-    .optional(),
+  error: agentErrorSchema.optional(),
   state: z.json().optional(),
   // Left unvalidated here so a malformed optional trace degrades to a warning in parseAgentResponse.
   trace: z.unknown().optional(),
@@ -93,9 +94,21 @@ type AgentSuccessResponse = Extract<AgentResponse, { output: unknown }>;
 
 type AgentErrorResponse = Extract<AgentResponse, { error: unknown }>;
 
+/**
+ * An error envelope completes the transport but carries no output, so metrics skip it and the
+ * case verdict is an error rather than a failure. Generic so a stored record, which types only the
+ * envelope's error field, reads the same rule as a live response.
+ */
+const isAgentErrorResponse = <Response extends object>(
+  response: Response,
+): response is Extract<Response, { error: object }> =>
+  'error' in response && response.error !== undefined;
+
 export {
+  agentErrorSchema,
   agentRequestSchema,
   agentResponseSchema,
+  isAgentErrorResponse,
   type AgentErrorResponse,
   type AgentRequest,
   type AgentResponse,

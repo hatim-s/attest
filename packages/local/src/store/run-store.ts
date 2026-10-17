@@ -24,7 +24,12 @@ import { createSqliteDialect } from './internal/kysely-sqlite-dialect.js';
 import { createUlid } from './internal/create-ulid.js';
 import { createLock } from './internal/promise-lock.js';
 import { toCaseRecord, toMetricEvaluation, toRunRecord } from './internal/row-mapping.js';
-import { computeCaseVerdict, computeSummary } from './internal/run-summary.js';
+import {
+  agentErroredColumn,
+  computeSummary,
+  lifecycleFailedColumn,
+  rowVerdict,
+} from './internal/run-summary.js';
 import {
   openReadonlySqliteHandle,
   openSnapshotSqliteHandle,
@@ -155,7 +160,13 @@ class SqliteRunStore implements RunStore {
 
         const cases = await database
           .selectFrom('cases')
-          .select(['id', 'outcome', 'expected_metrics_json'])
+          .select([
+            'id',
+            'outcome',
+            'expected_metrics_json',
+            lifecycleFailedColumn,
+            agentErroredColumn,
+          ])
           .where('run_id', '=', runId)
           .execute();
 
@@ -293,6 +304,8 @@ class SqliteRunStore implements RunStore {
         'started_at',
         'duration_ms',
         'expected_metrics_json',
+        lifecycleFailedColumn,
+        agentErroredColumn,
       ])
       .where('run_id', '=', runId)
       .orderBy('id')
@@ -324,7 +337,7 @@ class SqliteRunStore implements RunStore {
         caseId: row.case_id,
         suiteName: row.suite_name,
         outcome: row.outcome,
-        verdict: computeCaseVerdict(row, caseMetrics),
+        verdict: rowVerdict(row, caseMetrics),
         startedAt: row.started_at,
         durationMs: row.duration_ms,
         metricCounts: {

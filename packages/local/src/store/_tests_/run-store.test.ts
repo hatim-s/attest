@@ -38,7 +38,7 @@ interface ExecutionOptions {
   runId: string;
   caseId: string;
   expectedMetrics?: string[];
-  response?: unknown;
+  response?: Extract<StoredCaseExecution, { outcome: 'completed' }>['response'];
   trace?: Trace;
 }
 

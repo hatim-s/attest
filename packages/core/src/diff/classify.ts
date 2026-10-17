@@ -1,4 +1,4 @@
-import { computeCaseVerdict } from '../store/case-summary.js';
+import { caseRecordVerdict } from '../store/case-summary.js';
 import type { CaseRecord, CaseVerdict, StoredMetricEvaluation } from '../store/types.js';
 import type {
   CaseTransition,
@@ -19,7 +19,7 @@ type JudgedCase = {
 };
 
 const judgeCase = (record: CaseRecord | undefined): JudgedCase | undefined =>
-  record === undefined ? undefined : { record, verdict: computeCaseVerdict(record) };
+  record === undefined ? undefined : { record, verdict: caseRecordVerdict(record) };
 
 const metricsByName = (caseRecord: CaseRecord | undefined): Map<string, StoredMetricEvaluation> =>
   new Map(caseRecord?.metrics.map((metric) => [metric.metricName, metric]) ?? []);

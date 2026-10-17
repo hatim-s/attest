@@ -1,17 +1,53 @@
-import type { CaseRecord, CaseSummary, CaseVerdict, StoredMetricEvaluation } from './types.js';
+import { isAgentErrorResponse } from '@attest/contracts';
+
+import type {
+  CaseRecord,
+  CaseSummary,
+  CaseVerdict,
+  RunSummary,
+  StoredMetricEvaluation,
+} from './types.js';
 
 /**
- * Derives the case verdict from the metrics the case was configured to run, so a metric that
- * never reported counts as an error rather than silently passing.
+ * The case facts a verdict reads. Hosts derive the two flags from whatever they hold, a live
+ * execution, a stored record or a SQL row, so every host applies one rule.
  */
-const computeCaseVerdict = (record: CaseRecord): CaseVerdict => {
-  if (record.outcome !== 'completed') return 'error';
+type CaseVerdictEvidence = Pick<CaseRecord, 'outcome' | 'expectedMetrics'> & {
+  /** A lifecycle hook or sandbox step failed around the agent call. */
+  lifecycleFailed: boolean;
+  /** The agent answered with an error envelope instead of an output. */
+  agentErrored: boolean;
+};
 
-  const metrics = new Map(record.metrics.map((metric) => [metric.metricName, metric]));
+/** The metric facts a verdict reads, keeping `pass` tied to an evaluated status. */
+type MetricVerdictEvidence =
+  | Pick<Extract<StoredMetricEvaluation, { status: 'evaluated' }>, 'metricName' | 'status' | 'pass'>
+  | Pick<Extract<StoredMetricEvaluation, { status: 'error' }>, 'metricName' | 'status'>;
+
+/**
+ * Separates a failing metric from missing evidence. Infrastructure or lifecycle failure, an agent
+ * error envelope, a repeated metric name, or an expected metric that never evaluated makes the
+ * case an error; otherwise any failed expected metric fails it.
+ */
+const computeCaseVerdict = (
+  evidence: CaseVerdictEvidence,
+  metrics: readonly MetricVerdictEvidence[],
+): CaseVerdict => {
+  if (evidence.outcome !== 'completed' || evidence.lifecycleFailed || evidence.agentErrored) {
+    return 'error';
+  }
+
+  const metricsByName = new Map<string, MetricVerdictEvidence>();
+
+  for (const metric of metrics) {
+    if (metricsByName.has(metric.metricName)) return 'error';
+    metricsByName.set(metric.metricName, metric);
+  }
+
   let failed = false;
 
-  for (const metricName of record.expectedMetrics) {
-    const metric = metrics.get(metricName);
+  for (const metricName of evidence.expectedMetrics) {
+    const metric = metricsByName.get(metricName);
 
     if (metric?.status !== 'evaluated') return 'error';
     failed ||= !metric.pass;
@@ -19,6 +55,34 @@ const computeCaseVerdict = (record: CaseRecord): CaseVerdict => {
 
   return failed ? 'fail' : 'pass';
 };
+
+/** Totals verdicts and every metric error row, so runtime results and stored runs count alike. */
+const summarizeVerdicts = (
+  cases: readonly {
+    verdict: CaseVerdict;
+    metrics: readonly Pick<StoredMetricEvaluation, 'status'>[];
+  }[],
+): RunSummary => ({
+  totalCases: cases.length,
+  passedCases: cases.filter(({ verdict }) => verdict === 'pass').length,
+  failedCases: cases.filter(({ verdict }) => verdict === 'fail').length,
+  errorCases: cases.filter(({ verdict }) => verdict === 'error').length,
+  metricErrorCount: cases
+    .flatMap(({ metrics }) => metrics)
+    .filter(({ status }) => status === 'error').length,
+});
+
+/** Applies the verdict rule to a stored case, which carries its own evidence. */
+const caseRecordVerdict = (record: CaseRecord): CaseVerdict =>
+  computeCaseVerdict(
+    {
+      outcome: record.outcome,
+      expectedMetrics: record.expectedMetrics,
+      lifecycleFailed: record.diagnostics.lifecycleError !== undefined,
+      agentErrored: record.outcome === 'completed' && isAgentErrorResponse(record.response),
+    },
+    record.metrics,
+  );
 
 /** Averages evaluated scores; errored metrics have no score and are left out. */
 const averageMetricScore = (metrics: readonly StoredMetricEvaluation[]): number | undefined => {
@@ -37,7 +101,7 @@ const summarizeCaseRecord = (record: CaseRecord): CaseSummary => {
     caseId: record.caseId,
     suiteName: record.suiteName,
     outcome: record.outcome,
-    verdict: computeCaseVerdict(record),
+    verdict: caseRecordVerdict(record),
     startedAt: record.startedAt,
     durationMs: record.durationMs,
     metricCounts: {
@@ -54,4 +118,11 @@ const summarizeCaseRecord = (record: CaseRecord): CaseSummary => {
   return summary;
 };
 
-export { computeCaseVerdict, summarizeCaseRecord };
+export {
+  caseRecordVerdict,
+  computeCaseVerdict,
+  summarizeCaseRecord,
+  summarizeVerdicts,
+  type CaseVerdictEvidence,
+  type MetricVerdictEvidence,
+};

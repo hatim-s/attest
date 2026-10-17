@@ -271,6 +271,44 @@ describe('runConfiguration', () => {
     }
   }, 30_000);
 
+  it('reports a passing case whose after_case hook failed as an error in the result, stored summary and diff', async () => {
+    const root = await createEvalProject();
+    const baseline = await runEval(root, { test_ids: ['smoke'] });
+    await writeFile(join(root, 'fail-after-case.mjs'), 'process.exit(7);\n');
+    const candidate = candidateFromLoadedProject(await loadProject({ project: root }));
+    candidate.project.defaults = {
+      ...candidate.project.defaults,
+      eval: { hooks: { after_case: { argv: [process.execPath, './fail-after-case.mjs'] } } },
+    };
+    await applyProjectMutation({ candidate, projectRoot: root });
+
+    const hooked = await runEval(root, { test_ids: ['smoke'] });
+    expect(hooked.events.find(({ event }) => event === 'case_completed')?.data).toMatchObject({
+      outcome: 'completed',
+      verdict: 'error',
+    });
+    expect(hooked.events.find(({ event }) => event === 'run_completed')?.data).toMatchObject({
+      summary: { passed_cases: 0, error_cases: 1 },
+    });
+
+    const store = await openStore(join(root, '.attest', 'runs.db'));
+
+    try {
+      expect((await store.runs.getRun(hooked.runId)).summary).toMatchObject({
+        passedCases: 0,
+        errorCases: 1,
+      });
+      expect((await store.runs.listCaseSummaries(hooked.runId)).items).toMatchObject([
+        { caseId: 'capital', outcome: 'completed', verdict: 'error' },
+      ]);
+      expect((await diffRuns(store.runs, baseline.runId, hooked.runId)).transitions).toMatchObject([
+        { caseId: 'capital', baseVerdict: 'pass', candidateVerdict: 'error', kind: 'regressed' },
+      ]);
+    } finally {
+      await store.close();
+    }
+  }, 30_000);
+
   it('runs through resolver, engine, runner, store, baseline, and JUnit', async () => {
     const root = await createEvalProject();
     const junitPath = join(root, 'artifacts', 'first.xml');
