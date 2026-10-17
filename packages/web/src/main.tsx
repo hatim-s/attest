@@ -7,7 +7,8 @@ import { createApiClient } from '@attest/api/client';
 import { dashboardBootstrapSchema } from '@attest/api/contract';
 
 import { ApiClientProvider } from './api/api-client-context.js';
-import { Dashboard } from './app.js';
+import { RouterProvider, createHashHistory } from '@tanstack/react-router';
+import { createDashboardRouter } from './router.js';
 import './styles.css';
 
 declare global {
@@ -22,6 +23,8 @@ const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1, staleTime: 1_000 } },
 });
 
+const router = createDashboardRouter(createHashHistory(), { client, queryClient });
+
 const rootElement = document.querySelector('#root');
 
 if (rootElement === null) throw new Error('Dashboard root element was not found.');
@@ -30,7 +33,7 @@ createRoot(rootElement).render(
   <StrictMode>
     <ApiClientProvider client={client}>
       <QueryClientProvider client={queryClient}>
-        <Dashboard />
+        <RouterProvider router={router} />
       </QueryClientProvider>
     </ApiClientProvider>
   </StrictMode>,

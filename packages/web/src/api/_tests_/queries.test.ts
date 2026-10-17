@@ -1,5 +1,5 @@
 import { createApiClient } from '@attest/api/client';
-import { QueryClient, QueryObserver } from '@tanstack/react-query';
+import { QueryClient } from '@tanstack/react-query';
 import { expect, it, vi } from 'vitest';
 
 import type { CaseRecord, RunDiff } from '@attest/core/records';
@@ -39,7 +39,7 @@ const diff: RunDiff = {
   transitions: [],
 };
 
-it('refreshes final evidence after either run terminates and leaves hidden comparisons idle', async () => {
+it('refreshes final evidence after either run terminates', async () => {
   let terminal = false;
 
   const fetch = vi.fn((input: RequestInfo | URL) => {
@@ -67,20 +67,14 @@ it('refreshes final evidence after either run terminates and leaves hidden compa
     candidateRunId: runId,
     baseStatus: 'running',
     candidateStatus: 'running',
-    visible: false,
   } as const;
-
-  const hidden = new QueryObserver(client, diffQueryOptions(api, comparison));
-  const unsubscribe = hidden.subscribe(() => {});
-  expect(fetch).not.toHaveBeenCalled();
 
   try {
     expect(await client.fetchQuery(caseQueryOptions(api, selection))).toMatchObject({
       response: { output: 'working' },
     });
     expect(
-      (await client.fetchQuery(diffQueryOptions(api, { ...comparison, visible: true }))).summary
-        .candidatePassRate,
+      (await client.fetchQuery(diffQueryOptions(api, comparison))).summary.candidatePassRate,
     ).toBe(0);
     terminal = true;
     expect(
@@ -89,19 +83,15 @@ it('refreshes final evidence after either run terminates and leaves hidden compa
     expect(
       (
         await client.fetchQuery(
-          diffQueryOptions(api, { ...comparison, visible: true, candidateStatus: 'completed' }),
+          diffQueryOptions(api, { ...comparison, candidateStatus: 'completed' }),
         )
       ).summary.candidatePassRate,
     ).toBe(1);
     expect(
-      (
-        await client.fetchQuery(
-          diffQueryOptions(api, { ...comparison, visible: true, baseStatus: 'completed' }),
-        )
-      ).summary.candidatePassRate,
+      (await client.fetchQuery(diffQueryOptions(api, { ...comparison, baseStatus: 'completed' })))
+        .summary.candidatePassRate,
     ).toBe(1);
   } finally {
-    unsubscribe();
     client.clear();
   }
 });

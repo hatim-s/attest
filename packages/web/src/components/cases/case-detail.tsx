@@ -1,6 +1,7 @@
 import { useEffect, useRef, type ReactNode } from 'react';
 
-import type { CaseRecord, CaseSummary, StoredMetricEvaluation } from '@attest/core/records';
+import type { CaseRecord, StoredMetricEvaluation } from '@attest/core/records';
+import { caseRecordVerdict } from '@attest/core/records';
 import { formatDuration } from '../../lib/format.js';
 import { TraceWaterfall } from '../traces/trace-waterfall.js';
 import { Badge, Button, ErrorNotice, Loading } from '../shared/ui.js';
@@ -49,11 +50,12 @@ type CaseDetailProps = {
   error: unknown;
   isLoading: boolean;
   onClose: () => void;
-  selected: CaseSummary;
+  selected: { suiteName: string; caseId: string };
 };
 
 /** Side drawer with the metrics, request, response, trace, and warnings for one case. */
 const CaseDetail = ({ caseRecord, error, isLoading, onClose, selected }: CaseDetailProps) => {
+  const verdict = caseRecord === undefined ? undefined : caseRecordVerdict(caseRecord);
   const dialogRef = useRef<HTMLDialogElement>(null);
   const triggerRef = useRef(document.activeElement);
   useEffect(() => {
@@ -95,11 +97,13 @@ const CaseDetail = ({ caseRecord, error, isLoading, onClose, selected }: CaseDet
             Close
           </Button>
         </header>
-        <div className="drawer-meta">
-          <Badge tone={selected.verdict}>{selected.verdict}</Badge>
-          <span>{formatDuration(selected.durationMs)}</span>
-          <span>{selected.outcome}</span>
-        </div>
+        {caseRecord !== undefined ? (
+          <div className="drawer-meta">
+            {verdict !== undefined ? <Badge tone={verdict}>{verdict}</Badge> : null}
+            <span>{formatDuration(caseRecord.durationMs)}</span>
+            <span>{caseRecord.outcome}</span>
+          </div>
+        ) : null}
         {isLoading ? <Loading label="Loading case evidence" /> : null}
         {error !== null && error !== undefined ? <ErrorNotice error={error} /> : null}
         {caseRecord !== undefined ? (

@@ -1,4 +1,5 @@
 import { useRef } from 'react';
+import { Link } from '@tanstack/react-router';
 
 import { useVirtualizer } from '@tanstack/react-virtual';
 
@@ -11,7 +12,7 @@ type CaseTableProps = {
   hasNextPage: boolean;
   isFetchingNextPage: boolean;
   onLoadMore: () => void;
-  onSelect: (item: CaseSummary) => void;
+  runId: string;
 };
 
 const headers = ['Case', 'Suite', 'Verdict', 'Duration', 'Metrics'];
@@ -22,7 +23,7 @@ const CaseTable = ({
   hasNextPage,
   isFetchingNextPage,
   onLoadMore,
-  onSelect,
+  runId,
 }: CaseTableProps) => {
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -50,13 +51,14 @@ const CaseTable = ({
             if (item === undefined) return null;
 
             return (
-              <button
+              <Link
                 className="case-table-row"
                 key={virtualRow.key}
-                onClick={() => onSelect(item)}
+                to="/runs/$runId/cases/$suiteName/$caseId"
+                params={{ runId, suiteName: item.suiteName, caseId: item.caseId }}
+                search={(previous) => previous}
                 role="row"
                 style={{ height: virtualRow.size, transform: `translateY(${virtualRow.start}px)` }}
-                type="button"
               >
                 <span className="case-name" role="cell">
                   {item.caseId}
@@ -73,7 +75,7 @@ const CaseTable = ({
                 <span className="mono" role="cell">
                   {item.metricCounts.passed}/{item.metricCounts.expected}
                 </span>
-              </button>
+              </Link>
             );
           })}
         </div>
