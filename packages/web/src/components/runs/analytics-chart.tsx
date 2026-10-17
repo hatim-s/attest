@@ -9,11 +9,15 @@ const AnalyticsChart = ({
   values,
   measure,
   formatValue,
+  min,
+  max,
 }: {
   title: string;
   labels: string[];
   values: (number | null)[];
-  measure: 'Pass rate (%)' | 'Mean score';
+  measure: string;
+  min?: number;
+  max?: number;
   formatValue: (value: number) => string;
 }) => {
   const ref = useRef<HTMLDivElement>(null);
@@ -39,8 +43,8 @@ const AnalyticsChart = ({
       },
       yAxis: {
         ...valueAxis(palette, measure),
-        min: measure === 'Pass rate (%)' ? 0 : undefined,
-        max: measure === 'Pass rate (%)' ? 1 : undefined,
+        min,
+        max,
         axisLabel: { color: palette.muted, formatter: formatValue },
       },
       series: [
@@ -55,7 +59,7 @@ const AnalyticsChart = ({
         },
       ],
     }),
-    [labels, values, measure, formatValue],
+    [labels, values, measure, formatValue, min, max],
   );
 
   useChart(ref, option);

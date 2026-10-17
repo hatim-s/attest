@@ -19,6 +19,8 @@ const TrendChart = ({ group }: { group: ReturnType<typeof createRunTrends>['grou
     <AnalyticsChart
       title={group.name}
       measure="Pass rate (%)"
+      min={0}
+      max={1}
       formatValue={formatPercent}
       labels={labels}
       values={values}

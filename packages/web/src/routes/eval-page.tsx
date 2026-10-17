@@ -75,6 +75,8 @@ const EvalPage = () => {
                   labels={labels}
                   values={passRates}
                   measure="Pass rate (%)"
+                  min={0}
+                  max={1}
                   formatValue={formatPercent}
                 />
                 <AnalyticsChart
