@@ -1,3 +1,5 @@
+import type { z } from 'zod';
+import { runTabSchema } from '../../router.js';
 import { Link } from '@tanstack/react-router';
 import type { RunRecord } from '@attest/core/records';
 import { useApiClient } from '../../api/api-client-context.js';
@@ -12,7 +14,7 @@ const RunOverview = ({
   tab,
 }: {
   run: RunRecord;
-  tab: 'cases' | 'distributions' | 'suites' | 'compare';
+  tab: z.infer<typeof runTabSchema> | 'compare';
 }) => {
   const { mode } = useApiClient();
   const runsQuery = useRuns();
@@ -43,7 +45,7 @@ const RunOverview = ({
         </section>
       ) : null}
       <div className="tabs" role="tablist">
-        {(['cases', 'distributions', 'suites'] as const).map((id) => (
+        {runTabSchema.options.map((id) => (
           <Link
             key={id}
             to="/runs/$runId"

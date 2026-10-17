@@ -15,36 +15,40 @@ const run: RunRecord = {
 };
 
 it.each([
-  ['env%3Dtest', 'env=test'],
-  ['bad', undefined],
-])('parses search and drops invalid filters for label=%s', async (label, expectedLabel) => {
-  const client = createApiClient({
-    kind: 'snapshot',
-    snapshot: { run, cases: [], generatedAt: run.createdAt, truncated: false },
-  });
-
-  const queryClient = new QueryClient();
-
-  const history = createMemoryHistory({
-    initialEntries: [`/runs/${run.id}?tab=wrong&branch=main&label=${label}`],
-  });
-
-  const router = createDashboardRouter(history, { client, queryClient });
-  router.update({ ...router.options, isServer: false, origin: 'http://localhost' });
-
-  try {
-    await router.load();
-
-    expect(router.state.matches.at(-1)?.search).toEqual({
-      tab: 'cases',
-      branch: 'main',
-      label: expectedLabel,
+  ['env%3Dtest', 'env=test', 'wrong', 'cases'],
+  ['env%3Dtest', 'env=test', 'suites', 'suites'],
+  ['bad', undefined, 'wrong', 'cases'],
+])(
+  'parses search and drops invalid filters for label=%s',
+  async (label, expectedLabel, tab, expectedTab) => {
+    const client = createApiClient({
+      kind: 'snapshot',
+      snapshot: { run, cases: [], generatedAt: run.createdAt, truncated: false },
     });
-  } finally {
-    queryClient.clear();
-    history.destroy();
-  }
-});
+
+    const queryClient = new QueryClient();
+
+    const history = createMemoryHistory({
+      initialEntries: [`/runs/${run.id}?tab=${tab}&branch=main&label=${label}`],
+    });
+
+    const router = createDashboardRouter(history, { client, queryClient });
+    router.update({ ...router.options, isServer: false, origin: 'http://localhost' });
+
+    try {
+      await router.load();
+
+      expect(router.state.matches.at(-1)?.search).toEqual({
+        tab: expectedTab,
+        branch: 'main',
+        label: expectedLabel,
+      });
+    } finally {
+      queryClient.clear();
+      history.destroy();
+    }
+  },
+);
 
 it('encodes suite segments and restores their raw route identity', async () => {
   const client = createApiClient({

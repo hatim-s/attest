@@ -38,8 +38,10 @@ const runsSearchSchema = z.object({
     .catch(undefined),
 });
 
+const runTabSchema = z.enum(['cases', 'distributions', 'suites']);
+
 const runSearchSchema = z.object({
-  tab: z.enum(['cases', 'distributions', 'suites']).default('cases').catch('cases'),
+  tab: runTabSchema.default('cases').catch('cases'),
 });
 
 const rootRoute = createRootRouteWithContext<RouterContext>()({
@@ -160,4 +162,4 @@ declare module '@tanstack/react-router' {
   }
 }
 
-export { createDashboardRouter };
+export { createDashboardRouter, runTabSchema };
