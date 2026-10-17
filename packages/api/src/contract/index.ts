@@ -5,9 +5,22 @@ export {
   caseParamsSchema,
   diffParamsSchema,
   pageQuerySchema,
+  suiteParamsSchema,
+  suiteHistoryQuerySchema,
+  suiteHistoryRequestSchema,
+  MAX_SUITE_HISTORY_RUNS,
+  DEFAULT_SUITE_HISTORY_RUNS,
+  type SuiteHistoryQuery,
 } from './requests.js';
 
-export { apiResponses } from './responses.js';
+export {
+  apiResponses,
+  runSuitesSchema,
+  suiteHistoryPointSchema,
+  suiteHistorySchema,
+  type RunSuites,
+  type SuiteHistory,
+} from './responses.js';
 
 export {
   API_ERROR_CODES,

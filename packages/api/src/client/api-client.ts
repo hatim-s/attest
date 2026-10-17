@@ -6,6 +6,8 @@ import type {
   RunPage,
   RunRecord,
 } from '@attest/core/records';
+import type { SuiteHistoryQuery } from '../contract/requests.js';
+import type { RunSuites, SuiteHistory } from '../contract/responses.js';
 import type { DashboardBootstrap } from '../contract/bootstrap.js';
 import { createHttpClient } from './http-client.js';
 import { createSnapshotClient } from './snapshot-client.js';
@@ -29,6 +31,12 @@ type ApiClient = {
     params: { runId: string; suiteName: string; caseId: string },
     options?: RequestOptions,
   ): Promise<CaseRecord>;
+  listRunSuites(params: { runId: string }, options?: RequestOptions): Promise<RunSuites>;
+  getSuiteHistory(
+    params: { suiteName: string },
+    query: SuiteHistoryQuery,
+    options?: RequestOptions,
+  ): Promise<SuiteHistory>;
   getDiff(
     params: { baseRunId: string; candidateRunId: string },
     options?: RequestOptions,

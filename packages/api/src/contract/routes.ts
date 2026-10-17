@@ -3,6 +3,8 @@ const apiRoutes = {
   getRun: '/runs/:runId',
   listCaseSummaries: '/runs/:runId/cases',
   getCase: '/runs/:runId/cases/:suiteName/:caseId',
+  listRunSuites: '/runs/:runId/suites',
+  getSuiteHistory: '/suites/:suiteName/history',
   getDiff: '/diffs/:baseRunId/:candidateRunId',
 } as const;
 

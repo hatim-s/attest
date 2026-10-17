@@ -12,6 +12,10 @@
     "./records": {
       "types": "./dist/records/index.d.ts",
       "import": "./dist/records/index.js"
+    },
+    "./analytics": {
+      "types": "./dist/analytics/index.d.ts",
+      "import": "./dist/analytics/index.js"
     }
   },
   "dependencies": {

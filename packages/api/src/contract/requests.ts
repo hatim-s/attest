@@ -18,4 +18,34 @@ const pageQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(MAX_PAGE_LIMIT).default(DEFAULT_PAGE_LIMIT),
 });
 
-export { runParamsSchema, caseParamsSchema, diffParamsSchema, pageQuerySchema };
+const suiteParamsSchema = z.object({ suiteName: idSchema });
+
+const MAX_SUITE_HISTORY_RUNS = 50;
+
+const DEFAULT_SUITE_HISTORY_RUNS = 20;
+
+const suiteHistoryQuerySchema = z.object({
+  limit: z.coerce
+    .number()
+    .int()
+    .min(1)
+    .max(MAX_SUITE_HISTORY_RUNS)
+    .default(DEFAULT_SUITE_HISTORY_RUNS),
+});
+
+const suiteHistoryRequestSchema = suiteParamsSchema.extend(suiteHistoryQuerySchema.shape);
+
+type SuiteHistoryQuery = Partial<z.output<typeof suiteHistoryQuerySchema>>;
+
+export {
+  runParamsSchema,
+  caseParamsSchema,
+  diffParamsSchema,
+  pageQuerySchema,
+  suiteParamsSchema,
+  suiteHistoryQuerySchema,
+  suiteHistoryRequestSchema,
+  MAX_SUITE_HISTORY_RUNS,
+  DEFAULT_SUITE_HISTORY_RUNS,
+  type SuiteHistoryQuery,
+};
