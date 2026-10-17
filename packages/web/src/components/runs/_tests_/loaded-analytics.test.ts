@@ -106,3 +106,24 @@ it('groups label trends across branches without including missing summaries', ()
   expect(trends.runningRuns).toBe(1);
   expect(trends.missingSummary).toBe(1);
 });
+
+it('keeps a summarised run without the chosen label in the missing group', () => {
+  const trends = createRunTrends(
+    [
+      {
+        id: 'unlabelled',
+        status: 'completed',
+        createdAt: '2026-10-18T07:00:00Z',
+        summary,
+      },
+    ],
+    { kind: 'label', key: 'env' },
+  );
+
+  expect(
+    trends.groups.map(({ name, points }) => ({
+      name,
+      runs: points.map(({ run }) => run.id),
+    })),
+  ).toEqual([{ name: 'env=(missing)', runs: ['unlabelled'] }]);
+});
