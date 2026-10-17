@@ -1,6 +1,5 @@
 import type { RunSource } from '@attest/core';
-import { aggregateCases } from '@attest/core/analytics';
-import type { SuiteHistory } from '../contract/responses.js';
+import { toSuiteHistoryPoint, type SuiteHistory } from '../contract/responses.js';
 import { readCaseSummaries } from './read-case-summaries.js';
 
 /** Bounds history work by completed runs examined, including runs that lack this suite. */
@@ -16,33 +15,27 @@ const readSuiteHistory = async (
   do {
     const page = await source.listRuns({ cursor, limit: limit - runsExamined });
 
-    for (const run of page.items) {
+    for (const [index, run] of page.items.entries()) {
       if (run.status === 'running') continue;
       runsExamined += 1;
 
-      const summaries = (await readCaseSummaries(source, run.id)).filter(
-        (summary) => summary.suiteName === suiteName,
-      );
+      const point = toSuiteHistoryPoint(run, await readCaseSummaries(source, run.id), suiteName);
 
-      const [first, ...rest] = summaries;
+      if (point !== undefined) points.push(point);
 
-      if (first !== undefined)
-        points.push({
-          runId: run.id,
-          createdAt: run.createdAt,
-          status: run.status,
-          gitBranch: run.gitBranch,
-          gitSha: run.gitSha,
-          aggregate: aggregateCases([first, ...rest]),
-        });
-
-      if (runsExamined === limit) return { suiteName, runsExamined, points };
+      if (runsExamined === limit)
+        return {
+          suiteName,
+          runsExamined,
+          points,
+          exhausted: page.nextCursor === undefined && index === page.items.length - 1,
+        };
     }
 
     cursor = page.nextCursor;
   } while (cursor !== undefined);
 
-  return { suiteName, runsExamined, points };
+  return { suiteName, runsExamined, points, exhausted: true };
 };
 
 export { readSuiteHistory };

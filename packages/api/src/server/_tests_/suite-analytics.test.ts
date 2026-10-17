@@ -1,5 +1,10 @@
 import { StoreError, type RunSource } from '@attest/core';
-import type { CaseSummary, RunRecord } from '@attest/core/records';
+import {
+  DEFAULT_PAGE_LIMIT,
+  MAX_PAGE_LIMIT,
+  type CaseSummary,
+  type RunRecord,
+} from '@attest/core/records';
 import { Hono } from 'hono';
 import { describe, expect, it } from 'vitest';
 import { apiResponses } from '../../contract/responses.js';
@@ -47,18 +52,28 @@ const suites = new Map<string, CaseSummary[]>([
   ['last', []],
 ]);
 
-const fixture = () => {
+const fixture = (sourceRuns = runs) => {
   const caseReads: { runId: string; cursor?: string; limit?: number }[] = [];
 
   const source: RunSource = {
     listRuns: (query = {}) => {
-      const start =
-        query.cursor === undefined ? 0 : runs.findIndex((run) => run.id === query.cursor) + 1;
+      const limit = query.limit ?? DEFAULT_PAGE_LIMIT;
 
-      const items = runs.slice(start, start + Math.min(query.limit ?? 100, 2));
+      if (!Number.isInteger(limit) || limit < 1 || limit > MAX_PAGE_LIMIT)
+        throw new StoreError(
+          'INVALID_LIMIT',
+          `Page limit must be an integer from 1 to ${MAX_PAGE_LIMIT}.`,
+        );
+
+      const start =
+        query.cursor === undefined ? 0 : sourceRuns.findIndex((run) => run.id === query.cursor) + 1;
+
+      const items = sourceRuns.slice(start, start + Math.min(limit, 2));
 
       return Promise.resolve(
-        start + items.length < runs.length ? { items, nextCursor: items.at(-1)?.id } : { items },
+        start + items.length < sourceRuns.length
+          ? { items, nextCursor: items.at(-1)?.id }
+          : { items },
       );
     },
     getRun: (runId) => {
@@ -131,6 +146,7 @@ describe('suite analytics endpoints', () => {
     expect(history).toMatchObject({
       suiteName: 'a/b',
       runsExamined: 2,
+      exhausted: false,
       points: [
         {
           runId: 'new',
@@ -148,13 +164,29 @@ describe('suite analytics endpoints', () => {
       await (await app.request('/api/suites/a%2Fb/history')).json(),
     );
 
+    expect(exhausted.exhausted).toBe(true);
     expect(exhausted.runsExamined).toBe(4);
     expect(exhausted.points.map((point) => point.runId)).toEqual(['new', 'old']);
     expect(await (await app.request('/api/suites/unknown/history?limit=1')).json()).toEqual({
       suiteName: 'unknown',
       runsExamined: 1,
+      exhausted: false,
       points: [],
     });
+  });
+
+  it('distinguishes reaching the limit from exhausting the source', async () => {
+    const { app } = fixture(runs.filter((run) => run.status === 'completed'));
+
+    for (const [limit, exhausted, runsExamined] of [
+      [2, false, 2],
+      [5, true, 3],
+      [3, true, 3],
+    ] as const) {
+      const response = await app.request(`/api/suites/a%2Fb/history?limit=${limit}`);
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({ exhausted, runsExamined });
+    }
   });
 
   it('rejects invalid history limits before reading cases', async () => {

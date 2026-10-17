@@ -6,7 +6,8 @@ import {
   caseRecordSchema,
   runDiffSchema,
 } from '@attest/core/records';
-import { caseAggregateSchema, suiteAggregateSchema } from '@attest/core/analytics';
+import type { CaseSummary, RunRecord } from '@attest/core/records';
+import { aggregateCases, caseAggregateSchema, suiteAggregateSchema } from '@attest/core/analytics';
 import type { ApiRoute } from './routes.js';
 
 const runSuitesSchema = z.object({
@@ -23,8 +24,31 @@ const suiteHistoryPointSchema = z.object({
   aggregate: caseAggregateSchema,
 });
 
+type SuiteHistoryPoint = z.infer<typeof suiteHistoryPointSchema>;
+
+/** Keeps live and snapshot history points consistent as their contract evolves. */
+const toSuiteHistoryPoint = (
+  run: RunRecord,
+  summaries: readonly CaseSummary[],
+  suiteName: string,
+): SuiteHistoryPoint | undefined => {
+  const [first, ...rest] = summaries.filter((summary) => summary.suiteName === suiteName);
+
+  if (first === undefined) return undefined;
+
+  return {
+    runId: run.id,
+    createdAt: run.createdAt,
+    status: run.status,
+    gitBranch: run.gitBranch,
+    gitSha: run.gitSha,
+    aggregate: aggregateCases([first, ...rest]),
+  };
+};
+
 const suiteHistorySchema = z.object({
   suiteName: z.string().min(1),
+  exhausted: z.boolean(),
   runsExamined: z.number().int().nonnegative(),
   points: z.array(suiteHistoryPointSchema),
 });
@@ -47,6 +71,7 @@ export {
   apiResponses,
   runSuitesSchema,
   suiteHistoryPointSchema,
+  toSuiteHistoryPoint,
   suiteHistorySchema,
   type RunSuites,
   type SuiteHistory,
