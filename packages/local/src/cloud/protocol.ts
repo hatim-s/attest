@@ -94,37 +94,52 @@ const runResultSchema = z.object({
   raw_expired: z.boolean(),
 });
 
-const emptyResponseSchema = z.undefined();
+const emptyResponseSchema = z.unknown();
 
 const remoteErrorSchema = z.object({
   error: z.object({ code: z.string().regex(/^[a-z_]{1,80}$/u) }).optional(),
 });
 
-/** Preserves protocol polling outcomes without decoding error details at the caller. */
+const deviceErrorCodeSchema = z.enum([
+  'authorization_pending',
+  'slow_down',
+  'expired_token',
+  'access_denied',
+]);
+
+type RemoteErrorOutcome =
+  | { kind: 'device'; code: z.infer<typeof deviceErrorCodeSchema> }
+  | { kind: 'remote'; remoteCode: string };
+
+/** Preserves decoded device outcomes without reparsing error details at the caller. */
 class CloudRemoteError extends LocalError {
-  readonly outcome: 'authorization_pending' | 'request_failed';
   constructor(
     readonly status: number,
-    readonly remoteCode: string,
+    readonly outcome: RemoteErrorOutcome,
   ) {
+    const code = outcome.kind === 'device' ? outcome.code : outcome.remoteCode;
     super(
       status === 401 ? 'cloud_auth_required' : 'cloud_request_failed',
-      `Cloud request failed (${status}, ${remoteCode}).`,
-      { details: { status, remote_code: remoteCode } },
+      `Cloud request failed (${status}, ${code}).`,
+      { details: { status, remote_code: code } },
     );
-    this.outcome =
-      remoteCode === 'authorization_pending' ? 'authorization_pending' : 'request_failed';
   }
 }
 
-/** Keeps error bodies opaque except for the server's bounded code vocabulary. */
-// BOUNDARY: Remote failure JSON is untrusted; only the error-code schema is consumed here.
-const decodeRemoteError = (value: unknown): string => {
+/** Decodes the RFC 8628 device vocabulary and keeps other server codes opaque. */
+// BOUNDARY: Remote failure JSON is untrusted; only the error-code schemas are consumed here.
+const decodeRemoteError = (value: unknown): RemoteErrorOutcome => {
+  let remoteCode: string;
+
   try {
-    return remoteErrorSchema.parse(value).error?.code ?? 'request_failed';
+    remoteCode = remoteErrorSchema.parse(value).error?.code ?? 'request_failed';
   } catch {
-    return 'request_failed';
+    return { kind: 'remote', remoteCode: 'request_failed' };
   }
+
+  const device = deviceErrorCodeSchema.safeParse(remoteCode);
+
+  return device.success ? { kind: 'device', code: device.data } : { kind: 'remote', remoteCode };
 };
 
 export {

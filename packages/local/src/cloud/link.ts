@@ -1,4 +1,3 @@
-import { linkedProjectSchema } from './protocol.js';
 import { randomUUID } from 'node:crypto';
 import { readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
@@ -6,12 +5,13 @@ import { dirname } from 'node:path';
 import { z } from 'zod';
 
 import { LocalError } from '../errors/index.js';
-import { syncPath } from '../internal/sync-path.js';
 import { errnoCode } from '../internal/errno-code.js';
+import { syncPath } from '../internal/sync-path.js';
 import { discoverProject, type DiscoverProjectOptions } from '../project/discover-project.js';
 import { resolveContainedPath } from '../project/project-path.js';
 import { acquireProjectLock, releaseProjectLock } from '../project/transaction/project-lock.js';
 import type { CloudClient } from './client.js';
+import { linkedProjectSchema } from './protocol.js';
 
 const cloudLinkSchema = z.strictObject({
   schema: z.literal('attest.cloud-link.v1'),

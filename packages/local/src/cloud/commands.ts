@@ -1,3 +1,16 @@
+import { createHash, randomBytes } from 'node:crypto';
+import { setTimeout } from 'node:timers/promises';
+
+import { cloudRunRequestSchema, type EvalRunRequest } from '@attest/contracts';
+import { z } from 'zod';
+
+import { LocalError } from '../errors/local-error.js';
+import { createCloudClient, type CloudClient } from './client.js';
+import {
+  readCloudCredentials,
+  removeCloudCredentials,
+  writeCloudCredentials,
+} from './credentials.js';
 import {
   CloudRemoteError,
   emptyResponseSchema,
@@ -11,17 +24,6 @@ import {
   type LoginNotice,
   type CloudEventPage,
 } from './protocol.js';
-import { createHash, randomBytes } from 'node:crypto';
-import { setTimeout } from 'node:timers/promises';
-import { z } from 'zod';
-import { cloudRunRequestSchema, type EvalRunRequest } from '@attest/contracts';
-import { LocalError } from '../errors/local-error.js';
-import { createCloudClient, type CloudClient } from './client.js';
-import {
-  readCloudCredentials,
-  removeCloudCredentials,
-  writeCloudCredentials,
-} from './credentials.js';
 
 /** Rejects malformed caller input before opening a network request. */
 // BOUNDARY: Cloud command inputs are validated by the supplied Zod schema before network submission.
@@ -59,6 +61,7 @@ const loginCloud = async (options: {
     expires_in: device.expires_in,
   });
   const deadline = Date.now() + device.expires_in * 1000;
+  let interval = device.interval * 1000;
 
   while (Date.now() < deadline) {
     if (options.signal?.aborted) throw new LocalError('cancelled', 'Cloud login cancelled.');
@@ -81,16 +84,16 @@ const loginCloud = async (options: {
 
       return { base_url: client.baseUrl, authenticated: true };
     } catch (error) {
-      if (!(error instanceof CloudRemoteError) || error.outcome !== 'authorization_pending')
-        throw error;
+      if (!(error instanceof CloudRemoteError) || error.outcome.kind !== 'device') throw error;
+
+      if (error.outcome.code === 'slow_down') interval += 5_000;
+      else if (error.outcome.code !== 'authorization_pending') throw error;
     }
 
     try {
-      await setTimeout(
-        Math.min(device.interval * 1000, Math.max(0, deadline - Date.now())),
-        undefined,
-        { signal: options.signal },
-      );
+      await setTimeout(Math.min(interval, Math.max(0, deadline - Date.now())), undefined, {
+        signal: options.signal,
+      });
     } catch {
       throw new LocalError('cancelled', 'Cloud login cancelled.');
     }

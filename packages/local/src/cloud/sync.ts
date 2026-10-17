@@ -1,4 +1,3 @@
-import { revisionResponseSchema, revisionBundleSchema } from './protocol.js';
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 
@@ -23,6 +22,7 @@ import {
   serializeCloudLink,
   type CloudProjectOptions,
 } from './link.js';
+import { revisionResponseSchema, revisionBundleSchema } from './protocol.js';
 
 const byteHash = (contents: string): string => createHash('sha256').update(contents).digest('hex');
 

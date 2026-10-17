@@ -1,7 +1,8 @@
-import { z } from 'zod';
 import type { JsonValue } from '@attest/contracts';
-import { CloudRemoteError, decodeRemoteError, parseCloudEndpoint } from './protocol.js';
+import { z } from 'zod';
+
 import { LocalError } from '../errors/local-error.js';
+import { CloudRemoteError, decodeRemoteError, parseCloudEndpoint } from './protocol.js';
 
 type CloudClient = {
   readonly baseUrl: string;
@@ -137,27 +138,28 @@ const createCloudClient = (options: CloudClientOptions): CloudClient => {
       }
 
       if (!response.ok) {
-        let code = 'request_failed';
+        let outcome = decodeRemoteError(undefined);
 
         try {
-          code = decodeRemoteError(JSON.parse(await readResponseText(response)));
+          outcome = decodeRemoteError(JSON.parse(await readResponseText(response)));
         } catch {
           /* An upstream proxy may return a non-JSON failure. */
         }
 
-        throw new CloudRemoteError(response.status, code);
+        throw new CloudRemoteError(response.status, outcome);
       }
 
       if (response.status === 204) return parseCloudEndpoint(requestOptions.schema, undefined);
 
+      let value: unknown;
+
       try {
-        return parseCloudEndpoint(
-          requestOptions.schema,
-          JSON.parse(await readResponseText(response)),
-        );
+        value = JSON.parse(await readResponseText(response));
       } catch {
         throw new LocalError('cloud_request_failed', 'Cloud returned an invalid JSON response.');
       }
+
+      return parseCloudEndpoint(requestOptions.schema, value);
     },
   };
 };
