@@ -208,12 +208,13 @@ const prepareTransaction = async (
   const directory = join(transactionsRoot, `.preparing-${transactionId}`);
   const stagedDirectory = join(directory, 'staged');
   const backupDirectory = join(directory, 'backups');
-  await mkdir(stagedDirectory, { recursive: true });
-  await mkdir(backupDirectory, { recursive: true });
 
   const entries: TransactionJournalEntry[] = [];
 
   try {
+    await mkdir(stagedDirectory, { recursive: true });
+    await mkdir(backupDirectory, { recursive: true });
+
     for (const [index, change] of changes.entries()) {
       const destination = await resolveSafeProjectPath(root, change.path);
       const originalHash = await readByteHash(destination);
@@ -278,7 +279,12 @@ const prepareTransaction = async (
       journalPath: join(publishedDirectory, JOURNAL_FILE),
     };
   } catch (cause: unknown) {
-    await rm(directory, { recursive: true, force: true });
+    try {
+      await rm(directory, { recursive: true, force: true });
+    } catch {
+      // Recovery removes staging residue if cleanup also fails.
+    }
+
     throw cause;
   }
 };
@@ -493,7 +499,6 @@ const recoverProjectTransactions = async (
   const results: RecoveryResult[] = [];
 
   for (const name of names.sort()) {
-    if (/^\.(preparing|cleanup)-[a-f0-9-]{36}$/u.test(name)) continue;
     const directory = join(transactionsRoot, name);
     const metadata = await lstat(directory);
 
@@ -503,6 +508,12 @@ const recoverProjectTransactions = async (
         'Unexpected recovery artifact is not a transaction directory.',
         { path: `${TRANSACTIONS_DIRECTORY}/${name}` },
       );
+    }
+
+    if (/^\.(preparing|cleanup)-[a-f0-9-]{36}$/u.test(name)) {
+      await rm(directory, { recursive: true });
+      await syncPath(transactionsRoot);
+      continue;
     }
 
     const prepared = await readPreparedTransaction(directory);

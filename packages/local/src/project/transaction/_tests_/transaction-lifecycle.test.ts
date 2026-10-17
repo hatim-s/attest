@@ -5,13 +5,8 @@ import { join } from 'node:path';
 import { afterEach, expect, it } from 'vitest';
 
 import { acquireProjectLock, releaseProjectLock } from '../project-lock.js';
-import {
-  cleanupPreparedTransaction,
-  prepareTransaction,
-  recoverProjectTransactions,
-  writeTransactionJournal,
-} from '../transaction-journal.js';
-import { publishPreparedTransaction } from '../transactional-writer.js';
+import { prepareTransaction, recoverProjectTransactions } from '../transaction-journal.js';
+import { runPreparedTransaction } from '../transactional-writer.js';
 
 const roots: string[] = [];
 
@@ -27,19 +22,20 @@ afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
 
-it('ignores preparation interrupted before its first durable journal', async () => {
+it.each(['preparing', 'cleanup'])('removes interrupted %s residue under the lock', async (kind) => {
   const root = await createRoot();
   const lock = await acquireProjectLock(root);
 
   try {
     const interrupted = join(
       root,
-      '.attest/transactions/.preparing-00000000-0000-4000-8000-000000000000',
+      `.attest/transactions/.${kind}-00000000-0000-4000-8000-000000000000`,
     );
 
     await mkdir(join(interrupted, 'staged'), { recursive: true });
     await writeFile(join(interrupted, 'staged/0'), 'partial');
     expect(await recoverProjectTransactions(root, lock)).toEqual([]);
+    expect(await readdir(join(root, '.attest/transactions'))).toEqual([]);
 
     const prepared = await prepareTransaction(
       root,
@@ -93,18 +89,18 @@ it('retains committed bytes and recovery evidence when cleanup fails', async () 
       'after',
     );
 
-    await publishPreparedTransaction(root, prepared);
-    prepared.journal.status = 'committed';
-    await writeTransactionJournal(prepared);
     collision = join(transactionsRoot, `.cleanup-${prepared.journal.transaction_id}`);
     await mkdir(collision);
     await writeFile(join(collision, 'occupied'), 'preserve');
-    await expect(cleanupPreparedTransaction(root, prepared)).rejects.toMatchObject({
-      code: 'ENOTEMPTY',
+    await expect(
+      runPreparedTransaction({ root, prepared, verify: async () => {} }),
+    ).rejects.toMatchObject({
+      name: 'ProjectTransactionError',
+      code: 'project_transaction_failed',
+      details: { committed: true, transaction_id: prepared.journal.transaction_id },
     });
     expect(await readFile(join(root, 'attest.project.json'), 'utf8')).toBe('new');
     expect(await readFile(prepared.journalPath, 'utf8')).toContain('"committed"');
-    await rm(collision, { recursive: true });
     expect(await recoverProjectTransactions(root, lock)).toEqual([
       { action: 'completed_commit', transactionId: prepared.journal.transaction_id },
     ]);

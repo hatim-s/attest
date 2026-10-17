@@ -219,6 +219,40 @@ const rollbackAfterFailure = async (
   );
 };
 
+/** Keeps rollback before the durable commit and cleanup after it. */
+const runPreparedTransaction = async (options: {
+  root: string;
+  prepared: PreparedTransaction;
+  verify: () => Promise<void>;
+  beforePublish?: () => Promise<void> | void;
+  publishObserver?: PublishObserver;
+}): Promise<void> => {
+  const { root, prepared } = options;
+
+  try {
+    await options.beforePublish?.();
+    await publishPreparedTransaction(root, prepared, options.publishObserver);
+    await options.verify();
+    await markTransactionCommitted(prepared);
+  } catch (cause: unknown) {
+    return rollbackAfterFailure(root, prepared, cause);
+  }
+
+  try {
+    await cleanupPreparedTransaction(root, prepared);
+  } catch (cause: unknown) {
+    throw new ProjectTransactionError(
+      'project_transaction_failed',
+      'Project mutation committed, but transaction cleanup did not complete.',
+      {
+        details: { committed: true, transaction_id: prepared.journal.transaction_id },
+        hint: 'The project contains the new files. Retry recovery to finish transaction cleanup.',
+        cause,
+      },
+    );
+  }
+};
+
 /** Applies one complete candidate atomically or returns its identical write-free preview. */
 const applyProjectMutation = async (
   request: ProjectMutationRequest,
@@ -248,24 +282,22 @@ const applyProjectMutation = async (
       state.after.projectHash,
     );
 
-    try {
-      await publishPreparedTransaction(request.projectRoot, prepared, options.publishObserver);
-      const verified = await loadProject({ project: request.projectRoot });
+    await runPreparedTransaction({
+      root: request.projectRoot,
+      prepared,
+      publishObserver: options.publishObserver,
+      verify: async () => {
+        const verified = await loadProject({ project: request.projectRoot });
 
-      if (verified.projectHash !== state.after.projectHash) {
-        throw new ProjectTransactionError(
-          'project_transaction_failed',
-          'Published project hash does not match the candidate.',
-          { details: { current_hash: verified.projectHash } },
-        );
-      }
-
-      await markTransactionCommitted(prepared);
-    } catch (cause: unknown) {
-      return await rollbackAfterFailure(request.projectRoot, prepared, cause);
-    }
-
-    await cleanupPreparedTransaction(request.projectRoot, prepared);
+        if (verified.projectHash !== state.after.projectHash) {
+          throw new ProjectTransactionError(
+            'project_transaction_failed',
+            'Published project hash does not match the candidate.',
+            { details: { current_hash: verified.projectHash } },
+          );
+        }
+      },
+    });
 
     return { ...state.result, committed: true, transactionId: prepared.journal.transaction_id };
   } finally {
@@ -275,4 +307,9 @@ const applyProjectMutation = async (
   }
 };
 
-export { applyProjectMutation, createFileChanges, publishPreparedTransaction };
+export {
+  applyProjectMutation,
+  createFileChanges,
+  publishPreparedTransaction,
+  runPreparedTransaction,
+};
