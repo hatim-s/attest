@@ -20,7 +20,7 @@ const checkRelease = async (): Promise<void> => {
       .filter((file) => file.endsWith('.tgz'))
       .map((file) => join(releaseDirectory, file));
 
-    assert.equal(tarballs.length, 8, 'Expected all eight release packages.');
+    assert.equal(tarballs.length, 9, 'Expected all nine release packages.');
     execFileSync('npm', ['install', '--no-audit', '--no-fund', ...tarballs], {
       cwd: directory,
       stdio: 'inherit',
