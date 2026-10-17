@@ -1,4 +1,7 @@
 import { z } from 'zod';
+import { syncBuiltinESMExports } from 'node:module';
+import { mock as nodeMock } from 'node:test';
+import { setImmediate } from 'node:timers/promises';
 import { mkdtemp, rm, stat, symlink, chmod, realpath } from 'node:fs/promises';
 import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -10,7 +13,8 @@ import { cloudEvents, loginCloud, logoutCloud } from '../commands.js';
 const directories: string[] = [];
 
 afterEach(async () => {
-  vi.useRealTimers();
+  nodeMock.timers.reset();
+  syncBuiltinESMExports();
   vi.unstubAllGlobals();
   await Promise.all(
     directories.splice(0).map((path) => rm(path, { recursive: true, force: true })),
@@ -167,16 +171,16 @@ describe('cloud trust boundaries', () => {
       Response.json({ access_token: 'approved-token', token_type: 'Bearer', expires_in: 600 }),
     ];
 
-    const requestedAt: number[] = [];
-
     const fetcher = vi.fn<typeof fetch>(() => {
-      requestedAt.push(performance.now());
       const response = responses.shift();
 
       if (response === undefined) throw new Error('Unexpected device request.');
 
       return Promise.resolve(response);
     });
+
+    nodeMock.timers.enable({ apis: ['setTimeout', 'Date'] });
+    syncBuiltinESMExports();
 
     const login = loginCloud({
       baseUrl: 'https://cloud.example.test',
@@ -185,16 +189,31 @@ describe('cloud trust boundaries', () => {
       onDevice: () => {},
     });
 
+    await setImmediate();
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    nodeMock.timers.tick(2_999);
+    await setImmediate();
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    nodeMock.timers.tick(1);
+    await setImmediate();
+    expect(fetcher).toHaveBeenCalledTimes(3);
+    nodeMock.timers.tick(7_999);
+    await setImmediate();
+    expect(fetcher).toHaveBeenCalledTimes(3);
+    nodeMock.timers.tick(1);
+    await setImmediate();
+    expect(fetcher).toHaveBeenCalledTimes(4);
+    nodeMock.timers.tick(7_999);
+    await setImmediate();
+    expect(fetcher).toHaveBeenCalledTimes(4);
+    nodeMock.timers.tick(1);
     await expect(login).resolves.toEqual({
       base_url: 'https://cloud.example.test',
       authenticated: true,
     });
     expect(fetcher).toHaveBeenCalledTimes(5);
-    expect(requestedAt[2]! - requestedAt[1]!).toBeGreaterThanOrEqual(2_990);
-    expect(requestedAt[3]! - requestedAt[2]!).toBeGreaterThanOrEqual(7_990);
-    expect(requestedAt[4]! - requestedAt[3]!).toBeGreaterThanOrEqual(7_990);
     expect((await readCloudCredentials(path)).accessToken).toBe('approved-token');
-  }, 30_000);
+  });
 
   it.each([
     ['expired_token', 'Cloud approval code expired. Run cloud login again.'],
