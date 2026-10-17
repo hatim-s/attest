@@ -1,12 +1,13 @@
 import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { open, mkdir, readFile, unlink } from 'node:fs/promises';
+import { open, readFile, unlink } from 'node:fs/promises';
 import { hostname } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname } from 'node:path';
 import { promisify } from 'node:util';
 
 import { z } from 'zod';
 
+import { resolveContainedPath } from '../project-path.js';
 import { errnoCode } from '../../internal/errno-code.js';
 import { isProcessPresent } from '../../internal/process-presence.js';
 import { syncPath } from '../../internal/sync-path.js';
@@ -75,7 +76,14 @@ const parseLockMetadata = (raw: string): ProjectLockMetadata | undefined => {
 
 /** Classifies the project lock without mutating or stealing it. */
 const inspectProjectLock = async (root: string): Promise<ProjectLockInspection> => {
-  const path = join(root, PROJECT_LOCK_FILE);
+  const path = await resolveContainedPath(root, PROJECT_LOCK_FILE, {
+    expect: 'file',
+    problem: () =>
+      new ProjectTransactionError('project_invalid', 'Unsafe project lock path.', {
+        path: PROJECT_LOCK_FILE,
+      }),
+  });
+
   let raw: string;
 
   try {
@@ -181,8 +189,14 @@ type ProjectLockFailureDetails = {
 
 /** Acquires the project-local lock exclusively and never steals an existing owner. */
 const acquireProjectLock = async (root: string): Promise<ProjectLockHandle> => {
-  const path = join(root, PROJECT_LOCK_FILE);
-  await mkdir(dirname(path), { recursive: true });
+  const path = await resolveContainedPath(root, PROJECT_LOCK_FILE, {
+    expect: 'file',
+    createDirectories: true,
+    problem: () =>
+      new ProjectTransactionError('project_invalid', 'Unsafe project lock path.', {
+        path: PROJECT_LOCK_FILE,
+      }),
+  });
 
   const metadata: ProjectLockMetadata = {
     schema: PROJECT_LOCK_SCHEMA,
