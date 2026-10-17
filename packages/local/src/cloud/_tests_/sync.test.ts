@@ -19,7 +19,7 @@ import {
 } from '../../project/transaction/transaction-journal.js';
 import { publishPreparedTransaction } from '../../project/transaction/transactional-writer.js';
 
-import { readCloudLink, writeCloudLink, type CloudLink } from '../link.js';
+import { readCloudLink, serializeCloudLink, writeCloudLink, type CloudLink } from '../link.js';
 import { planPullChanges, pushCloudProject, pullCloudProject } from '../sync.js';
 
 const directories: string[] = [];
@@ -277,7 +277,7 @@ it.each(['changed', 'unchanged'])(
           { type: 'write', path: 'attest.project.json', contents: manifest },
         ],
         {
-          completion: { path: '.attest/cloud.json', contents: JSON.stringify(after) },
+          completion: { path: '.attest/cloud.json', contents: serializeCloudLink(after) },
         },
       );
 
