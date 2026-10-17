@@ -2,7 +2,8 @@
   "extends": "../tsconfig.base.json",
   "compilerOptions": {
     "noEmit": true,
-    "types": ["node"]
+    "types": ["node"],
+    "rootDir": ".."
   },
-  "include": ["src/**/*.ts"]
+  "include": ["src/**/*.ts", "../packages/contracts/src/_tests_/support/load-fixtures.ts"]
 }
