@@ -12,7 +12,7 @@ const SourceRun = ({ run }: { run: RunRecord }) => (
     <Link
       to="/runs/$runId"
       params={{ runId: run.id }}
-      search={(previous) => ({ ...previous, tab: 'suites' })}
+      search={({ branch, label }) => ({ branch, label, tab: 'suites' })}
       title={run.id}
     >
       run {shortId(run.id)}

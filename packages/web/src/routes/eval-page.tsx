@@ -120,7 +120,7 @@ const EvalPage = () => {
                           <Link
                             to="/runs/$runId"
                             params={{ runId: point.runId }}
-                            search={(previous) => ({ ...previous, tab: 'suites' })}
+                            search={({ branch, label }) => ({ branch, label, tab: 'suites' })}
                             title={point.runId}
                           >
                             {shortId(point.runId)}
