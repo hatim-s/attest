@@ -1,8 +1,9 @@
 import { createApiClient } from '@attest/api/client';
 import { QueryClient, QueryObserver } from '@tanstack/react-query';
-import { afterEach, expect, it, vi } from 'vitest';
+import { expect, it, vi } from 'vitest';
 
 import type { CaseRecord, RunDiff } from '@attest/core/records';
+import { caseQueryOptions, diffQueryOptions } from '../queries.js';
 
 const runId = '01ARZ3NDEKTSV4RRFFQ69G5FAV';
 
@@ -38,11 +39,6 @@ const diff: RunDiff = {
   transitions: [],
 };
 
-afterEach(() => {
-  vi.unstubAllGlobals();
-  vi.resetModules();
-});
-
 it('refreshes final evidence after either run terminates and leaves hidden comparisons idle', async () => {
   let terminal = false;
 
@@ -59,7 +55,6 @@ it('refreshes final evidence after either run terminates and leaves hidden compa
   });
 
   const api = createApiClient({ kind: 'http', baseUrl: '/api', fetch });
-  const { caseQueryOptions, diffQueryOptions } = await import('../queries.js');
 
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false, staleTime: Infinity } },

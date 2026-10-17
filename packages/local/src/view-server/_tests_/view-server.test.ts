@@ -4,12 +4,12 @@ import { get } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+import { dashboardHtml } from '@attest/web/embedded';
 import { AGENT_PROTOCOL } from '@attest/contracts';
 import type { RunStore } from '@attest/core';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { openStore } from '../../store/run-store.js';
-import { dashboardHtml } from '@attest/web/embedded';
 
 import { startViewServer } from '../start-view-server.js';
 import type { ViewServerHandle } from '../types.js';

@@ -7,6 +7,20 @@ const DEFAULT_PAGE_LIMIT = 100;
 
 const MAX_PAGE_LIMIT = 1_000;
 
+/** Keeps typed store reads and coerced HTTP queries on the same page bounds. */
+const isValidPageLimit = (limit: number): boolean =>
+  Number.isInteger(limit) && limit >= 1 && limit <= MAX_PAGE_LIMIT;
+
+const pageQuerySchema = z.object({
+  cursor: z.string().min(1).optional(),
+  limit: z
+    .number()
+    .refine(isValidPageLimit, {
+      message: `Page limit must be an integer from 1 to ${MAX_PAGE_LIMIT}.`,
+    })
+    .default(DEFAULT_PAGE_LIMIT),
+});
+
 const cursorSchema = z.string().min(1);
 
 const runPageSchema = z.object({
@@ -20,7 +34,7 @@ const caseSummaryPageSchema = z.object({
 });
 
 /** Cursors are opaque to callers; each source decides what one encodes. */
-type PageQuery = { cursor?: string; limit?: number };
+type PageQuery = z.input<typeof pageQuerySchema>;
 
 type RunPage = z.infer<typeof runPageSchema>;
 
@@ -29,6 +43,7 @@ type CaseSummaryPage = z.infer<typeof caseSummaryPageSchema>;
 export {
   DEFAULT_PAGE_LIMIT,
   MAX_PAGE_LIMIT,
+  pageQuerySchema,
   runPageSchema,
   caseSummaryPageSchema,
   type PageQuery,

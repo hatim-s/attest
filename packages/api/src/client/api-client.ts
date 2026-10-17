@@ -9,6 +9,7 @@ import type {
 import type { SuiteHistoryQuery } from '../contract/requests.js';
 import type { RunSuites, SuiteHistory } from '../contract/responses.js';
 import type { DashboardBootstrap } from '../contract/bootstrap.js';
+import type { apiRoutes, PathParams } from '../contract/routes.js';
 import { createHttpClient } from './http-client.js';
 import { createSnapshotClient } from './snapshot-client.js';
 
@@ -21,26 +22,26 @@ type ApiClientMode =
 type ApiClient = {
   mode: ApiClientMode;
   listRuns(query: PageQuery, options?: RequestOptions): Promise<RunPage>;
-  getRun(params: { runId: string }, options?: RequestOptions): Promise<RunRecord>;
+  getRun(params: PathParams<typeof apiRoutes.getRun>, options?: RequestOptions): Promise<RunRecord>;
   listCaseSummaries(
-    params: { runId: string },
+    params: PathParams<typeof apiRoutes.listCaseSummaries>,
     query: PageQuery,
     options?: RequestOptions,
   ): Promise<CaseSummaryPage>;
   getCase(
-    params: { runId: string; suiteName: string; caseId: string },
+    params: PathParams<typeof apiRoutes.getCase>,
     options?: RequestOptions,
   ): Promise<CaseRecord>;
-  listRunSuites(params: { runId: string }, options?: RequestOptions): Promise<RunSuites>;
+  listRunSuites(
+    params: PathParams<typeof apiRoutes.listRunSuites>,
+    options?: RequestOptions,
+  ): Promise<RunSuites>;
   getSuiteHistory(
-    params: { suiteName: string },
+    params: PathParams<typeof apiRoutes.getSuiteHistory>,
     query: SuiteHistoryQuery,
     options?: RequestOptions,
   ): Promise<SuiteHistory>;
-  getDiff(
-    params: { baseRunId: string; candidateRunId: string },
-    options?: RequestOptions,
-  ): Promise<RunDiff>;
+  getDiff(params: PathParams<typeof apiRoutes.getDiff>, options?: RequestOptions): Promise<RunDiff>;
 };
 
 type ApiClientConfig =

@@ -36,8 +36,8 @@ const createHttpClient = (baseUrl: string, fetchFn: typeof fetch): ApiClient => 
 
     try {
       body = JSON.parse(text);
-    } catch (error) {
-      if (!(error instanceof SyntaxError)) throw error;
+    } catch {
+      body = undefined;
     }
 
     if (!response.ok) {
