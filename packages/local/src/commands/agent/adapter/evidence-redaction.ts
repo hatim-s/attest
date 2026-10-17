@@ -1,12 +1,13 @@
-import type {
-  AgentErrorResponse,
-  AgentRequest,
-  AgentResponse,
-  ContractWarning,
-  JsonValue,
-  RawExcerpt,
-  Span,
-  Trace,
+import {
+  isJsonObject,
+  type AgentErrorResponse,
+  type AgentRequest,
+  type AgentResponse,
+  type ContractWarning,
+  type JsonValue,
+  type RawExcerpt,
+  type Span,
+  type Trace,
 } from '@attest/contracts';
 import type { StoredAttempt, StoredMetricEvaluation } from '@attest/core';
 import { AgentInvocationError, redactTransportText, type InvocationResult } from '@attest/executor';
@@ -399,6 +400,31 @@ const redactStoredAttempt = (
       };
 };
 
+/** Lists every string and number below one JSON value. */
+const jsonScalars = (value: JsonValue): string[] => {
+  if (Array.isArray(value)) return value.flatMap(jsonScalars);
+
+  if (isJsonObject(value)) return Object.values(value).flatMap(jsonScalars);
+
+  // Only strings and numbers remain once null and booleans are excluded.
+  return value === null || value === true || value === false ? [] : [String(value)];
+};
+
+/**
+ * Lists the values that sensitive-name redaction replaces with the marker. Metrics score the
+ * original output and can quote it in text (stderr, judge prompts, rationales), so text
+ * evidence must treat these values as secrets too.
+ */
+const sensitiveFieldValues = (value: JsonValue): string[] => {
+  if (Array.isArray(value)) return value.flatMap(sensitiveFieldValues);
+
+  if (!isJsonObject(value)) return [];
+
+  return Object.entries(value).flatMap(([key, entry]) =>
+    isSensitiveFieldName(key) ? jsonScalars(entry) : sensitiveFieldValues(entry),
+  );
+};
+
 /**
  * Redacts metric evidence while preserving identities and discriminants used by persistence.
  * Metrics score unredacted output and can echo it, so sensitive field names are redacted even
@@ -443,4 +469,5 @@ export {
   redactStoredAttempt,
   redactTrace,
   redactWarnings,
+  sensitiveFieldValues,
 };

@@ -12,6 +12,8 @@ import {
   type EvalCaseRunnerResult,
 } from '@attest/runtime';
 
+import { z } from 'zod';
+
 import { LocalError } from '../../errors/index.js';
 import { assertSafeNativeAgentResource } from '../agent/authoring/resource-validation.js';
 import {
@@ -21,7 +23,11 @@ import {
   startupFailure,
   type AgentRuntime,
 } from '../agent/adapter/invoke-resolved-agent.js';
-import { redactAgentRequest, redactInvocation } from '../agent/adapter/evidence-redaction.js';
+import {
+  redactAgentRequest,
+  redactInvocation,
+  sensitiveFieldValues,
+} from '../agent/adapter/evidence-redaction.js';
 import { resolveNativeAgent } from '../agent/adapter/resolve-native-agent.js';
 import type { ResolvedEvalCaseInput } from './eval-resolver.js';
 import { createEvalMetricEvaluator } from './eval-metric-runner.js';
@@ -189,8 +195,6 @@ const createEvalCaseRunner = (
         invocation = startupFailure(error, performance.now() - started);
       }
 
-      const secrets = runtime?.resolved.secrets ?? [];
-
       const base = {
         caseDefinition: payload.case,
         caseId: payload.case_id,
@@ -203,6 +207,19 @@ const createEvalCaseRunner = (
       // Metrics score what the agent returned. Sensitive-name redaction would turn
       // `{ token: "ok" }` into `[REDACTED]`, so only the redacted copy leaves this function.
       const original = caseExecutionFrom(invocation, { ...base, request });
+
+      // Field-name redaction hides these values in structured evidence. Raw excerpts, stderr and
+      // metric text quote the original, so they are redacted as secrets everywhere.
+      const secrets = [
+        ...(runtime?.resolved.secrets ?? []),
+        ...sensitiveFieldValues(
+          z.json().parse({
+            case: payload.case,
+            request,
+            response: original.outcome === 'completed' ? original.response : null,
+          }),
+        ),
+      ];
 
       let execution = caseExecutionFrom(redactInvocation(invocation, secrets), {
         ...base,

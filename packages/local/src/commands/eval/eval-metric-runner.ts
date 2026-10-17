@@ -251,7 +251,11 @@ type EvaluateCaseMetricsOptions = {
   original: CaseExecution;
   payload: ResolvedEvalCaseInput;
   runId: string;
-  /** Agent secrets, redacted from metric evidence together with each metric's own secrets. */
+  /**
+   * Values the case evidence must not show: agent secrets plus values hidden by field-name
+   * redaction. Metric evidence and judge cache entries are redacted with them and each metric's
+   * own secrets.
+   */
   secrets: readonly string[];
   signal: AbortSignal;
 };
@@ -259,6 +263,22 @@ type EvaluateCaseMetricsOptions = {
 /** Creates the per-run metric bridge from resources to existing assertion/exec/judge engines. */
 const createEvalMetricEvaluator = (projectRoot: string, cacheStore: CacheStore) => {
   let judgeClient: ReturnType<typeof createTanstackJudgeClient> | undefined;
+  const judgeCaches = new Map<string, JudgeCache>();
+
+  /**
+   * Runtime coalesces concurrent identical judge calls per cache object, so every case with the
+   * same redaction scope shares one adapter for the whole run.
+   */
+  const judgeCacheFor = (secrets: readonly string[]): JudgeCache => {
+    const scope = JSON.stringify([...new Set(secrets)].sort());
+    const existing = judgeCaches.get(scope);
+
+    if (existing !== undefined) return existing;
+    const created = createJudgeCache(cacheStore, secrets);
+    judgeCaches.set(scope, created);
+
+    return created;
+  };
 
   /**
    * Evaluates attached metrics in authored order while retaining each metric's own runtime policy.
@@ -318,7 +338,7 @@ const createEvalMetricEvaluator = (projectRoot: string, cacheStore: CacheStore) 
             rubric: definition.rubric,
             threshold: resolvedMetric.threshold ?? definition.threshold,
           };
-          options = { cache: createJudgeCache(cacheStore, agentSecrets), judgeClient, signal };
+          options = { cache: judgeCacheFor(agentSecrets), judgeClient, signal };
         } else {
           const runtime = await resolveExecutableMetric(definition, projectRoot);
           secrets = runtime.secrets;
