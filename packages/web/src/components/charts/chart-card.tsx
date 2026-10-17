@@ -1,8 +1,8 @@
 import { useRef, type ReactNode } from 'react';
-import { useChart, type ChartOption } from './use-chart.js';
+import { useChart, type CreateChartOptions } from './use-chart.js';
 
 /** Mounts with its data so the chart instance always has a container to bind to. */
-const ChartCanvas = ({ label, option }: { label: string; option: ChartOption }) => {
+const ChartCanvas = ({ label, option }: { label: string; option: CreateChartOptions }) => {
   const ref = useRef<HTMLDivElement>(null);
   useChart(ref, option);
 
@@ -14,7 +14,7 @@ type ChartCardProps = {
   detail?: ReactNode;
   /** Shown instead of the chart when there is nothing to plot, so empty axes never pass for data. */
   emptyMessage?: string;
-  option: ChartOption;
+  option: CreateChartOptions;
   /** Omitted when the page already shows the same values in its own table. */
   table?: ReactNode;
 };

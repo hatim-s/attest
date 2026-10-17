@@ -76,10 +76,10 @@ const readPalette = (): ChartPalette => {
 /** Every dashboard chart has a tooltip; applyOption supplies its theme colours. */
 type ChartOptions = EChartsCoreOption & { tooltip: TooltipComponentOption };
 
-type ChartOption = (palette: ChartPalette) => ChartOptions;
+type CreateChartOptions = (palette: ChartPalette) => ChartOptions;
 
 /** Applies the settings every dashboard chart shares, so callers describe only their own marks. */
-const applyOption = (chart: ReturnType<typeof init>, createOption: ChartOption): void => {
+const applyOption = (chart: ReturnType<typeof init>, createOption: CreateChartOptions): void => {
   const palette = readPalette();
   const option = createOption(palette);
 
@@ -104,7 +104,7 @@ const applyOption = (chart: ReturnType<typeof init>, createOption: ChartOption):
  */
 const useChart = (
   containerRef: RefObject<HTMLDivElement | null>,
-  createOption: ChartOption,
+  createOption: CreateChartOptions,
 ): void => {
   const chartRef = useRef<ReturnType<typeof init> | null>(null);
   const optionRef = useRef(createOption);
@@ -139,7 +139,7 @@ export {
   useChart,
   categoryAxis,
   valueAxis,
-  type ChartOption,
+  type CreateChartOptions,
   type ChartOptions,
   type ChartPalette,
 };
