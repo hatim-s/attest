@@ -2,13 +2,12 @@ import { z } from 'zod';
 import { isJsonObject } from '@attest/contracts';
 import { createHash } from 'node:crypto';
 
-import type { JsonValue } from '@attest/contracts';
+import type { ImportFormat, JsonValue } from '@attest/contracts';
 
 import { decodeSource } from './decode-source.js';
 import { importDiagnostic } from './import-diagnostics.js';
 import type {
   ImportDiagnostic,
-  ImportFormat,
   ImportLimits,
   ImportLocation,
   ParsedRecords,

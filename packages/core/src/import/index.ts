@@ -3,7 +3,6 @@ export { createContentCaseId } from './canonical-import.js';
 export {
   TabularImportError,
   type ImportCollisionContext,
-  type ImportFormat,
   type TabularImportResult,
 } from './import-types.js';
 

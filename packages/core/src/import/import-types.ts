@@ -1,18 +1,14 @@
 import {
   AttestError,
   type DatasetImportMapping,
+  type ImportConflictPolicy,
+  type ImportDedupePolicy,
+  type ImportFormat,
+  type ImportSyncPolicy,
   type JsonValue,
   type TestCase,
 } from '@attest/contracts';
 import type { z } from 'zod';
-
-type ImportFormat = 'csv' | 'json' | 'jsonl';
-
-type ImportDedupePolicy = 'content' | 'id' | 'key';
-
-type ImportConflictPolicy = 'error' | 'skip' | 'update';
-
-type ImportSyncPolicy = 'append' | 'upsert';
 
 /** Physical source coordinates: `line` for JSONL and CSV syntax, `row` for records. */
 interface ImportLocation {
@@ -162,7 +158,6 @@ export {
   type ImportDecision,
   type ImportDiagnostic,
   type ImportDiagnosticCode,
-  type ImportFormat,
   type ImportLimits,
   type ImportLocation,
   type NormalizedImportRow,

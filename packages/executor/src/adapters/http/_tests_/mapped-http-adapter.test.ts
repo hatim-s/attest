@@ -115,6 +115,7 @@ describe('mapped HTTP adapter', () => {
     if (result.status !== 'invocation_error') throw new Error('Expected cap error.');
     expect(result.error.code).toBe('output_cap_exceeded');
     expect(result.rawExcerpt?.truncated).toBe(true);
+    expect(result.rawExcerpt?.sha256).toMatch(/^[a-f0-9]{64}$/u);
   });
 
   it('maps a foreign error branch without retrying it as infrastructure failure', async () => {

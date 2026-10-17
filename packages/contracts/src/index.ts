@@ -83,6 +83,7 @@ export {
   isNumber,
   isBoolean,
   isJsonObject,
+  rawExcerptSchema,
 } from './project/shared.js';
 
 export type { JsonValue, RawExcerpt, SecretReference } from './project/shared.js';
@@ -150,17 +151,35 @@ export { commandRequestSchema } from './cli/command-request.js';
 
 export type { CommandRequest } from './cli/command-request.js';
 
-export { caseImportOptionsSchema } from './cli/command-request/test.js';
+export {
+  caseImportOptionsSchema,
+  importConflictPolicySchema,
+  importDedupePolicySchema,
+  importFormatSchema,
+  importSyncPolicySchema,
+} from './cli/command-request/test.js';
 
-export type { CaseImportOptions } from './cli/command-request/test.js';
+export type {
+  CaseImportOptions,
+  ImportConflictPolicy,
+  ImportDedupePolicy,
+  ImportFormat,
+  ImportSyncPolicy,
+} from './cli/command-request/test.js';
 
 export {
   caseOutcomeSchema,
+  invocationDiagnosticsSchema,
   invocationErrorCodeSchema,
   warningCodeSchema,
 } from './eval/execution.js';
 
-export type { CaseOutcome, InvocationErrorCode, WarningCode } from './eval/execution.js';
+export type {
+  CaseOutcome,
+  InvocationDiagnostics,
+  InvocationErrorCode,
+  WarningCode,
+} from './eval/execution.js';
 
 export { caseSelectionSchema } from './eval/selection.js';
 

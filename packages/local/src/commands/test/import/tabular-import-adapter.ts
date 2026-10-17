@@ -1,13 +1,12 @@
 import { createReadStream } from 'node:fs';
 import { extname, resolve } from 'node:path';
 
-import type { CaseImportOptions, TestCase } from '@attest/contracts';
+import type { CaseImportOptions, ImportFormat, TestCase } from '@attest/contracts';
 import {
   DEFAULT_IMPORT_LIMITS,
   discoverCsvHeaders,
   importTabularCases,
   TabularImportError,
-  type ImportFormat,
   type TabularImportResult,
 } from '@attest/core';
 
