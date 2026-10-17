@@ -11,11 +11,13 @@ const AnalyticsChart = ({
   labels,
   values,
   measure,
+  formatValue,
 }: {
   title: string;
   labels: string[];
   values: (number | null)[];
   measure: 'Pass rate (%)' | 'Mean score';
+  formatValue: (value: number) => string;
 }) => {
   const ref = useRef<HTMLDivElement>(null);
 
@@ -28,6 +30,8 @@ const AnalyticsChart = ({
         trigger: 'axis',
         renderMode: 'richText',
         axisPointer: { type: 'line', snap: true },
+        valueFormatter: (value: number | null) =>
+          value === null ? 'Unscored' : formatValue(value),
       },
       xAxis: {
         type: 'category',
@@ -46,9 +50,9 @@ const AnalyticsChart = ({
         type: 'value',
         name: measure,
         min: measure === 'Pass rate (%)' ? 0 : undefined,
-        max: measure === 'Pass rate (%)' ? 100 : undefined,
+        max: measure === 'Pass rate (%)' ? 1 : undefined,
         nameTextStyle: { color: palette.muted },
-        axisLabel: { color: palette.muted },
+        axisLabel: { color: palette.muted, formatter: formatValue },
         splitLine: { lineStyle: { color: palette.border } },
       },
       series: [
@@ -63,7 +67,7 @@ const AnalyticsChart = ({
         },
       ],
     }),
-    [labels, values, measure],
+    [labels, values, measure, formatValue],
   );
 
   useChart(ref, option);

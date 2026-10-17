@@ -4,6 +4,8 @@ import { AnalyticsChart } from '../components/runs/analytics-chart.js';
 import { ErrorNotice, Loading } from '../components/shared/ui.js';
 import { formatDateTime, formatPercent } from '../lib/format.js';
 
+const formatScore = (value: number) => value.toFixed(3);
+
 const route = getRouteApi('/workspace/evals/$suiteName');
 
 /** Keeps each measure on its own scale and preserves run provenance beside the charts. */
@@ -63,14 +65,16 @@ const EvalPage = () => {
                 <AnalyticsChart
                   title="Suite pass rate"
                   labels={labels}
-                  values={points.map((point) => point.aggregate.passRate * 100)}
+                  values={points.map((point) => point.aggregate.passRate)}
                   measure="Pass rate (%)"
+                  formatValue={formatPercent}
                 />
                 <AnalyticsChart
                   title="Suite mean score"
                   labels={labels}
                   values={points.map((point) => point.aggregate.meanScore)}
                   measure="Mean score"
+                  formatValue={formatScore}
                 />
               </div>
               <div className="case-table-frame analytics-table-scroll">

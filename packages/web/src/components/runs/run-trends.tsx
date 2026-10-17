@@ -40,8 +40,9 @@ const RunTrends = ({ runs }: { runs: RunRecord[] }) => {
             key={group.name}
             title={group.name}
             measure="Pass rate (%)"
+            formatValue={formatPercent}
             labels={group.points.map(({ run }) => `${run.id}\n${group.name}`)}
-            values={group.points.map(({ passRate }) => passRate * 100)}
+            values={group.points.map(({ passRate }) => passRate)}
           />
         ))}
       </div>
