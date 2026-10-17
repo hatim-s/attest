@@ -8,9 +8,7 @@ graph TD
   Local --> Runtime[runtime]
   Local --> Executor
   Local --> Core[core]
-  Local --> Api[api]
-  Api --> Core
-  Web --> Api
+  Api[api] --> Core
   Local --> Web[web embedded dashboard]
   Runtime --> Executor[executor]
   Executor --> Contracts
