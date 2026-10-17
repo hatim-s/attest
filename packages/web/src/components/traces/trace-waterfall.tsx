@@ -2,17 +2,21 @@ import { useMemo, useRef } from 'react';
 
 import { useVirtualizer } from '@tanstack/react-virtual';
 
+import type { CaseRecord } from '../../api/types.js';
+
 import { formatDuration } from '../../lib/format.js';
 import { Badge } from '../shared/ui.js';
 
+type CaseTrace = Extract<CaseRecord, { outcome: 'completed' }>['trace'];
+
 type TraceSpan = {
   endTime: number;
-  kind: string;
+  kind: NonNullable<CaseTrace>['spans'][number]['kind'];
   name: string;
   parentSpanId: string | null;
   spanId: string;
   startTime: number;
-  status: string;
+  status: NonNullable<CaseTrace>['spans'][number]['status']['code'];
 };
 
 type TraceWaterfallRow = TraceSpan & {
@@ -23,60 +27,7 @@ type TraceWaterfallRow = TraceSpan & {
 };
 
 type TraceWaterfallProps = {
-  trace: unknown;
-};
-
-/** BOUNDARY: checks untrusted stored trace objects before reading their span fields. */
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  value !== null && typeof value === 'object' && !Array.isArray(value);
-
-/** BOUNDARY: accepts only a stored JSON object for field inspection. */
-const asRecord = (value: unknown): Record<string, unknown> | undefined =>
-  isRecord(value) ? value : undefined;
-
-const isString = (value: unknown): value is string => typeof value === 'string';
-
-const TRACE_KINDS = new Set(['agent', 'llm', 'tool', 'retrieval', 'other']);
-
-/** BOUNDARY: validates stored span identifiers and timestamps before rendering a row. */
-const readTraceSpan = (candidate: unknown): TraceSpan[] => {
-  const span = asRecord(candidate);
-  // Non-string timestamps fall back to '' so Date.parse yields NaN and the span is dropped.
-  const startTime = Date.parse(isString(span?.start_time) ? span.start_time : '');
-  const endTime = Date.parse(isString(span?.end_time) ? span.end_time : '');
-
-  if (
-    !isString(span?.span_id) ||
-    !isString(span.name) ||
-    !Number.isFinite(startTime) ||
-    !Number.isFinite(endTime)
-  ) {
-    return [];
-  }
-
-  const status = asRecord(span.status)?.code;
-  const kind = isString(span.kind) && TRACE_KINDS.has(span.kind) ? span.kind : 'other';
-
-  return [
-    {
-      endTime,
-      kind,
-      name: span.name,
-      parentSpanId: isString(span.parent_span_id) ? span.parent_span_id : null,
-      spanId: span.span_id,
-      startTime,
-      status: isString(status) ? status : 'ok',
-    },
-  ];
-};
-
-/** BOUNDARY: decodes the span list of an untrusted stored trace. Reads only the stable Attest span fields needed to render an untrusted stored trace. */
-const readTraceSpans = (trace: unknown): TraceSpan[] => {
-  const spans = asRecord(trace)?.spans;
-
-  if (!Array.isArray(spans)) return [];
-
-  return spans.flatMap(readTraceSpan);
+  trace: CaseTrace;
 };
 
 type TraceWaterfallLayout = {
@@ -84,10 +35,19 @@ type TraceWaterfallLayout = {
   rows: TraceWaterfallRow[];
 };
 
-/** BOUNDARY: decodes the untrusted stored trace with readTraceSpans before computing layout.
- * Computes each span's tree depth and timeline position, plus the whole trace's duration. */
-const createTraceWaterfall = (trace: unknown): TraceWaterfallLayout => {
-  const spans = readTraceSpans(trace).sort(
+/** Keeps parent cycles finite while projecting validated spans onto one timeline. */
+const createTraceWaterfall = (trace: CaseTrace): TraceWaterfallLayout => {
+  const spans: TraceSpan[] = (trace?.spans ?? []).map((span) => ({
+    endTime: Date.parse(span.end_time),
+    kind: span.kind,
+    name: span.name,
+    parentSpanId: span.parent_span_id,
+    spanId: span.span_id,
+    startTime: Date.parse(span.start_time),
+    status: span.status.code,
+  }));
+
+  spans.sort(
     (left, right) => left.startTime - right.startTime || left.spanId.localeCompare(right.spanId),
   );
 
@@ -208,4 +168,4 @@ const TraceWaterfall = ({ trace }: TraceWaterfallProps) => {
   );
 };
 
-export { TraceWaterfall, createTraceWaterfall, readTraceSpans, type TraceWaterfallProps };
+export { TraceWaterfall, createTraceWaterfall, type TraceWaterfallProps };
