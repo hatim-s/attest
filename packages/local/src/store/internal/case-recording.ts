@@ -4,8 +4,9 @@ import {
   canonicalStringify,
   contentHash,
   StoreError,
-  parseStoredCaseExecution,
-  parseStoredMetricEvaluation,
+  parseRecord,
+  storedCaseExecutionSchema,
+  storedMetricEvaluationSchema,
   type CaseRecord,
   type StoredCaseExecution,
   type StoredMetricEvaluation,
@@ -19,14 +20,14 @@ import { toSpanAttribute } from './span-attribute.js';
 /** Aggregates execution and evaluation violations before a database transaction begins. */
 // BOUNDARY: Public store submissions are parsed with the execution and metric owner schemas before any transaction.
 const validateCaseRecordInput = (execution: unknown, evaluations: unknown) => {
-  const parsedExecution = parseStoredCaseExecution(execution);
+  const parsedExecution = parseRecord(storedCaseExecutionSchema, execution, 'execution');
   const violations = parsedExecution.ok ? [] : [...parsedExecution.violations];
   const parsedEvaluations: StoredMetricEvaluation[] = [];
 
   if (!Array.isArray(evaluations)) violations.push('evaluations must be an array');
   else
     evaluations.forEach((evaluation, index) => {
-      const parsed = parseStoredMetricEvaluation(evaluation, `evaluations[${index}]`);
+      const parsed = parseRecord(storedMetricEvaluationSchema, evaluation, `evaluations[${index}]`);
 
       if (parsed.ok) parsedEvaluations.push(parsed.value);
       else violations.push(...parsed.violations);

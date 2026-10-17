@@ -13,10 +13,7 @@ export { type CacheKind, type CacheStore } from './cache.js';
 
 export { canonicalStringify, contentHash } from './internal/canonical-json.js';
 
-export {
-  parseStoredCaseExecution,
-  parseStoredMetricEvaluation,
-} from './internal/record-validation.js';
+export { parseRecord } from './internal/record-validation.js';
 
 export { StoreError, type StoreErrorCode } from './store-error.js';
 

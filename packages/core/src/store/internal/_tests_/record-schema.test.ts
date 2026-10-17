@@ -1,7 +1,8 @@
 import { AGENT_PROTOCOL, type RawExcerpt } from '@attest/contracts';
 import { describe, expect, it } from 'vitest';
 
-import { parseCaseRecord, parseStoredCaseExecution } from '../record-validation.js';
+import { caseRecordSchema, storedCaseExecutionSchema } from '../record-schema.js';
+import { parseRecord } from '../record-validation.js';
 
 const executionWithExcerpt = (rawExcerpt: RawExcerpt) => ({
   caseId: 'capital',
@@ -24,7 +25,11 @@ const executionWithExcerpt = (rawExcerpt: RawExcerpt) => ({
 
 describe('stored attempt excerpts', () => {
   it('rejects a truncated excerpt that cannot identify the full payload', () => {
-    const parsed = parseStoredCaseExecution(executionWithExcerpt({ text: 'Par', truncated: true }));
+    const parsed = parseRecord(
+      storedCaseExecutionSchema,
+      executionWithExcerpt({ text: 'Par', truncated: true }),
+      'execution',
+    );
 
     expect(parsed).toEqual({
       ok: false,
@@ -33,8 +38,10 @@ describe('stored attempt excerpts', () => {
       ],
     });
     expect(
-      parseStoredCaseExecution(
+      parseRecord(
+        storedCaseExecutionSchema,
         executionWithExcerpt({ text: 'Par', truncated: true, sha256: 'a'.repeat(64) }),
+        'execution',
       ).ok,
     ).toBe(true);
   });
@@ -43,15 +50,19 @@ describe('stored attempt excerpts', () => {
     const historical = executionWithExcerpt({ text: 'Par', truncated: true });
     const stored = { ...historical, rowId: 'row', runId: 'run', inputHash: 'hash', metrics: [] };
 
-    expect(parseCaseRecord(stored).ok).toBe(true);
-    expect(parseStoredCaseExecution(historical).ok).toBe(false);
+    expect(parseRecord(caseRecordSchema, stored, 'case').ok).toBe(true);
+    expect(parseRecord(storedCaseExecutionSchema, historical, 'execution').ok).toBe(false);
     expect(
-      parseCaseRecord({
-        ...stored,
-        attempts: [
-          { ...stored.attempts[0], rawExcerpt: { text: 'Par', truncated: true, sha256: 'A' } },
-        ],
-      }).ok,
+      parseRecord(
+        caseRecordSchema,
+        {
+          ...stored,
+          attempts: [
+            { ...stored.attempts[0], rawExcerpt: { text: 'Par', truncated: true, sha256: 'A' } },
+          ],
+        },
+        'case',
+      ).ok,
     ).toBe(false);
   });
 });

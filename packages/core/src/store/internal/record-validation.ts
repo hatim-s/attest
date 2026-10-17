@@ -1,13 +1,6 @@
 import { isNumber } from '@attest/contracts';
 import type { z } from 'zod';
 
-import {
-  caseRecordSchema,
-  runRecordSchema,
-  storedCaseExecutionSchema,
-  storedMetricEvaluationSchema,
-} from './record-schema.js';
-
 /** Either the validated record or every structural violation, prefixed with its field path. */
 type RecordParseResult<T> = { ok: true; value: T } | { ok: false; violations: string[] };
 
@@ -18,14 +11,16 @@ const formatPath = (prefix: string, path: readonly PropertyKey[]): string =>
     prefix,
   );
 
-const formatIssue = (issue: z.core.$ZodIssue, path: string): string[] => {
-  const location = formatPath(path, issue.path);
+/** Renders zod issues as field-path violations, so an operator sees every broken field at once. */
+const formatRecordIssues = (issues: readonly z.core.$ZodIssue[], path: string): string[] =>
+  issues.flatMap((issue) => {
+    const location = formatPath(path, issue.path);
 
-  if (issue.code === 'unrecognized_keys')
-    return issue.keys.map((key) => `${location} forbids ${key}`);
+    if (issue.code === 'unrecognized_keys')
+      return issue.keys.map((key) => `${location} forbids ${key}`);
 
-  return [`${location} ${issue.message}`];
-};
+    return [`${location} ${issue.message}`];
+  });
 
 /**
  * Persisted JSON drops undefined properties, so validation does too. Without this, strict record
@@ -49,7 +44,11 @@ const withoutUndefinedProperties = (value: unknown): RecordCandidate => {
   };
 };
 
-// BOUNDARY: Imported or persisted record JSON is checked by its owner schema after omitting absent optional object fields.
+/**
+ * Validates a host's record submission against its owner schema and keeps every violation, so a
+ * store can reject the whole case before opening a transaction.
+ */
+// BOUNDARY: Store submissions are checked by their owner schema after omitting absent optional object fields.
 const parseRecord = <T>(
   schema: z.ZodType<T>,
   value: unknown,
@@ -59,35 +58,7 @@ const parseRecord = <T>(
 
   if (parsed.success) return { ok: true, value: parsed.data };
 
-  return {
-    ok: false,
-    violations: parsed.error.issues.flatMap((issue) => formatIssue(issue, path)),
-  };
+  return { ok: false, violations: formatRecordIssues(parsed.error.issues, path) };
 };
 
-/** Validates an untrusted run header, such as one read from an imported bundle. */
-// BOUNDARY: Imported run header JSON is checked against runRecordSchema.
-const parseRunRecord = (value: unknown, path = 'run') => parseRecord(runRecordSchema, value, path);
-
-/** Validates an untrusted case record, such as one read from an imported bundle. */
-// BOUNDARY: Imported case JSON is checked against caseRecordSchema.
-const parseCaseRecord = (value: unknown, path = 'case') =>
-  parseRecord(caseRecordSchema, value, path);
-
-/** Validates execution data at host persistence boundaries and retains all violations. */
-// BOUNDARY: Untrusted case execution values are normalized and checked against the stored execution schema.
-const parseStoredCaseExecution = (value: unknown, path = 'execution') =>
-  parseRecord(storedCaseExecutionSchema, value, path);
-
-/** Validates metric data at host persistence boundaries and retains all violations. */
-// BOUNDARY: Untrusted metric evaluation values are normalized and checked against the stored metric schema.
-const parseStoredMetricEvaluation = (value: unknown, path = 'evaluation') =>
-  parseRecord(storedMetricEvaluationSchema, value, path);
-
-export {
-  parseCaseRecord,
-  parseStoredCaseExecution,
-  parseStoredMetricEvaluation,
-  parseRunRecord,
-  type RecordParseResult,
-};
+export { formatRecordIssues, parseRecord, type RecordParseResult };
