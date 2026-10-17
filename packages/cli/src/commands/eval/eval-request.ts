@@ -10,8 +10,10 @@ import {
   type JsonValue,
 } from '@attest/contracts';
 import { parseDuration } from '@attest/local/agent';
+import type { Command } from 'commander';
 
 import { AttestCliError } from '../../errors/cli-error.js';
+import { authoredFieldPresence } from '../shared/cli-options.js';
 import { assertNoRequestOverlap } from '../shared/command-request.js';
 import { promptWithSignal, type PromptContext } from '../shared/required-input.js';
 
@@ -86,31 +88,20 @@ const parseEvalCancelRequest = (value: JsonValue): EvalCancelRequest => {
   return parsed.data;
 };
 
-/** Rejects run flags beside `--from-json`, using the flag spellings in the conflict list. */
-const assertNoRunFlags = (fromJson: string | undefined, fields: EvalRunRequestFields): void =>
-  assertNoRequestOverlap(
-    { fromJson },
-    {
-      '--all': fields.all,
-      '--baseline': fields.baseline,
-      '--case': fields.caseIds,
-      '--concurrency': fields.concurrency,
-      '--dataset': fields.datasetIds,
-      '--folder': fields.folders,
-      '--junit': fields.junit,
-      '--output': fields.output,
-      '--sample': fields.sample,
-      '--seed': fields.seed,
-      '--tag': fields.tags,
-      '--timeout': fields.timeout,
-      '--watch': fields.watch,
-      '<test-id>': fields.testIds,
-    },
+/** Eval request documents own output too, including a root-position output option. */
+const assertNoEvalFlags = (fromJson: string | undefined, command: Command): void => {
+  const fields = authoredFieldPresence(
+    command,
+    new Set(['from-json', 'non-interactive', 'project']),
   );
 
-/** Rejects cancel flags beside `--from-json`. */
-const assertNoCancelFlags = (fromJson: string | undefined, fields: EvalCancelRequestFields): void =>
-  assertNoRequestOverlap({ fromJson }, { '--output': fields.output, '<run-id>': fields.runId });
+  const optionNames = new Set(command.options.map((option) => option.name()));
+
+  assertNoRequestOverlap(
+    { fromJson },
+    new Set([...fields].map((name) => (optionNames.has(name) ? `--${name}` : `<${name}>`))),
+  );
+};
 
 /** Asks which tests to run; an empty answer or `all` selects every test. */
 const promptForSelection = async (
@@ -220,8 +211,7 @@ const createEvalCancelRequest = (fields: EvalCancelRequestFields): EvalCancelReq
 };
 
 export {
-  assertNoCancelFlags,
-  assertNoRunFlags,
+  assertNoEvalFlags,
   createEvalCancelRequest,
   createEvalRunRequest,
   issueDiagnostics,

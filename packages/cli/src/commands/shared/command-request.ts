@@ -3,7 +3,7 @@ import { readCommandRequest, validateCommandRequest } from '@attest/local/agent'
 import type { Command } from 'commander';
 
 import { AttestCliError } from '../../errors/cli-error.js';
-import { authoredFieldValues, type AuthoredCliValue } from './cli-options.js';
+import { authoredFieldPresence } from './cli-options.js';
 import type { CommandContext } from './command-context.js';
 
 type CommandRequestFor<TCommand extends CommandRequest['command']> = Extract<
@@ -34,37 +34,14 @@ type ReadOrBuildRequestOptions<TCommand extends CommandRequest['command']> = Omi
   options: RequestSourceFlags;
 };
 
-const supplied = (value: AuthoredCliValue): boolean =>
-  value !== undefined && value !== false && (!Array.isArray(value) || value.length > 0);
-
-type AuthoredRequestFields =
-  Readonly<Record<string, AuthoredCliValue>> | ReadonlyMap<string, AuthoredCliValue>;
-
-const isAuthoredFieldMap = (
-  fields: AuthoredRequestFields,
-): fields is ReadonlyMap<string, AuthoredCliValue> => fields instanceof Map;
-
 /**
  * Rejects flags and arguments next to `--from-json`. A request document is complete, so any
  * flag beside it would be silently ignored.
  */
-const assertNoRequestOverlap = (
-  options: RequestSourceFlags,
-  fields: AuthoredRequestFields,
-): void => {
+const assertNoRequestOverlap = (options: RequestSourceFlags, fields: ReadonlySet<string>): void => {
   if (options.fromJson === undefined) return;
 
-  const authored = new Map<string, AuthoredCliValue>(
-    isAuthoredFieldMap(fields) ? fields : Object.entries(fields),
-  );
-
-  authored.set('dry-run', options.dryRun);
-  authored.set('if-project-hash', options.ifProjectHash);
-  authored.set('yes', options.yes);
-
-  const conflicts = [...authored]
-    .flatMap(([name, value]) => (supplied(value) ? [name] : []))
-    .sort();
+  const conflicts = [...fields].sort();
 
   if (conflicts.length === 0) return;
   throw new AttestCliError('cli_usage', 'Command request sources overlap.', {
@@ -86,7 +63,7 @@ const readJsonRequest = async <TCommand extends CommandRequest['command']>({
   leaf,
   options,
 }: ReadRequestOptions<TCommand>): Promise<CommandRequestFor<TCommand>> => {
-  assertNoRequestOverlap(options, authoredFieldValues(leaf));
+  assertNoRequestOverlap(options, authoredFieldPresence(leaf));
 
   const request = await readCommandRequest(command, options.fromJson, {
     readStdin: context.interaction.readStdin,
