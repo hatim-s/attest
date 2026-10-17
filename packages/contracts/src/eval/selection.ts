@@ -1,6 +1,19 @@
 import { z } from 'zod';
 
+import { reportDuplicates } from '../internal/duplicates.js';
 import { caseFolderSchema, resourceIdSchema } from '../project/shared.js';
+
+/**
+ * A non-empty filter list that rejects repeats. A repeated value selects nothing new, so it is a
+ * typo the request should surface instead of the resolver.
+ */
+const uniqueValuesSchema = (item: z.ZodType<string>, label: string) =>
+  z
+    .array(item)
+    .nonempty()
+    .superRefine((values, context) =>
+      reportDuplicates({ values, pathFor: (index) => [index], label, context }),
+    );
 
 /** Requests a seeded sample; the resolved seed is recorded in the run's selection summary. */
 const sampleRequestSchema = z.strictObject({
@@ -10,10 +23,10 @@ const sampleRequestSchema = z.strictObject({
 
 /** Filters intersect; sampling applies once to the combined matching population. */
 const caseSelectionSchema = z.strictObject({
-  case_ids: z.array(resourceIdSchema).nonempty().optional(),
-  tags: z.array(z.string().min(1)).nonempty().optional(),
-  folders: z.array(caseFolderSchema).nonempty().optional(),
-  dataset_ids: z.array(resourceIdSchema).nonempty().optional(),
+  case_ids: uniqueValuesSchema(resourceIdSchema, 'case id').optional(),
+  tags: uniqueValuesSchema(z.string().min(1), 'tag').optional(),
+  folders: uniqueValuesSchema(caseFolderSchema, 'folder').optional(),
+  dataset_ids: uniqueValuesSchema(resourceIdSchema, 'dataset id').optional(),
   sample: sampleRequestSchema.optional(),
 });
 
@@ -38,6 +51,7 @@ type CaseSelection = z.infer<typeof caseSelectionSchema>;
 type CaseSelectionSummary = z.infer<typeof caseSelectionSummarySchema>;
 
 export {
+  uniqueValuesSchema,
   caseSelectionSchema,
   caseSelectionSummarySchema,
   type CaseSelection,

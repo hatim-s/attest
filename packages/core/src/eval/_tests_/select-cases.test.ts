@@ -80,6 +80,5 @@ describe('core case selection', () => {
     expect(() => selectCases([population[0]!, population[0]!])).toThrow(
       'Duplicate case identities',
     );
-    expect(() => selectCases(population, { tags: ['api', 'api'] })).toThrow('Duplicate selection');
   });
 });

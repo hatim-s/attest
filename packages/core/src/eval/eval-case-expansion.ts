@@ -75,20 +75,6 @@ const assertSnapshotHashes = (project: ResolutionProject): void => {
   }
 };
 
-const requireUniqueSelection = (label: string, values: readonly string[] | undefined): void => {
-  const duplicates = duplicateValues(values ?? []);
-
-  if (duplicates.length > 0) {
-    throw new EvalResolutionError(
-      'cli_usage',
-      `Duplicate ${label} selection values are not allowed.`,
-      {
-        details: { duplicates, selection: label },
-      },
-    );
-  }
-};
-
 /** Expands direct cases first, then attached dataset rows in authored attachment/row order. */
 const expandTestCases = (
   test: TestResource,
@@ -201,7 +187,6 @@ export {
   assertSnapshotHashes,
   createExecutionId,
   expandTestCases,
-  requireUniqueSelection,
   resolveMetrics,
   type ResolvedEvalMetric,
 };

@@ -20,7 +20,6 @@ import {
   assertSnapshotHashes,
   createExecutionId,
   expandTestCases,
-  requireUniqueSelection,
   resolveMetrics,
   type ResolvedEvalMetric,
 } from './eval-case-expansion.js';
@@ -103,10 +102,6 @@ const resolveEvalRun = (
       'Effective eval command metadata requires non-empty argv.',
     );
   }
-
-  requireUniqueSelection('test id', 'test_ids' in request ? request.test_ids : undefined);
-  requireUniqueSelection('case id', request.case_ids);
-  requireUniqueSelection('tag', request.tags);
 
   const testsById = new Map(project.tests.map((test) => [test.id, test]));
 
