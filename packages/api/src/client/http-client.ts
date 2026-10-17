@@ -74,6 +74,20 @@ const createHttpClient = (baseUrl: string, fetchFn: typeof fetch): ApiClient => 
       ),
     getCase: (params, options) =>
       request(apiResponses.getCase, buildPath(apiRoutes.getCase, params), undefined, options),
+    listRunSuites: (params, options) =>
+      request(
+        apiResponses.listRunSuites,
+        buildPath(apiRoutes.listRunSuites, params),
+        undefined,
+        options,
+      ),
+    getSuiteHistory: (params, query, options) =>
+      request(
+        apiResponses.getSuiteHistory,
+        buildPath(apiRoutes.getSuiteHistory, params),
+        toSearch(query),
+        options,
+      ),
     getDiff: (params, options) =>
       request(apiResponses.getDiff, buildPath(apiRoutes.getDiff, params), undefined, options),
   };

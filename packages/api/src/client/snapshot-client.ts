@@ -1,3 +1,4 @@
+import { aggregateCases, summarizeSuites } from '@attest/core/analytics';
 import { DEFAULT_PAGE_LIMIT, MAX_PAGE_LIMIT, type PageQuery } from '@attest/core/records';
 import { API_ERROR_STATUS, type ApiErrorCode } from '../contract/errors.js';
 import type { ReportSnapshot } from '../contract/snapshot.js';
@@ -78,6 +79,40 @@ const createSnapshotClient = (snapshot: ReportSnapshot): ApiClient => {
         );
 
       return Promise.resolve(found.record);
+    },
+    listRunSuites: async ({ runId }) => {
+      requireRun(runId);
+
+      return Promise.resolve({
+        runId,
+        suites: summarizeSuites(snapshot.cases.map(({ summary }) => summary)),
+      });
+    },
+    getSuiteHistory: async ({ suiteName }) => {
+      const run = snapshot.run;
+
+      if (run.status === 'running')
+        return Promise.resolve({ suiteName, runsExamined: 0, points: [] });
+
+      const [first, ...rest] = snapshot.cases
+        .map(({ summary }) => summary)
+        .filter((summary) => summary.suiteName === suiteName);
+
+      const points =
+        first === undefined
+          ? []
+          : [
+              {
+                runId: run.id,
+                createdAt: run.createdAt,
+                status: run.status,
+                gitBranch: run.gitBranch,
+                gitSha: run.gitSha,
+                aggregate: aggregateCases([first, ...rest]),
+              },
+            ];
+
+      return Promise.resolve({ suiteName, runsExamined: 1, points });
     },
     getDiff: ({ baseRunId, candidateRunId }) =>
       Promise.resolve().then(() => {
