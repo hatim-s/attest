@@ -1,7 +1,7 @@
 import { access, mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
-import { cliHelpSchema, isJsonObject, isJsonValue } from '@attest/contracts';
+import { cliHelpSchema, isJsonObject, isJsonValue, type JsonValue } from '@attest/contracts';
 import { applyProjectMutation, loadProject } from '@attest/local/project';
 import { openStore } from '@attest/local/store';
 import { describe, expect, it } from 'vitest';
@@ -13,6 +13,16 @@ import {
   temporaryDirectory,
 } from './support/cli-test-support.js';
 import { projectResources } from './support/project-fixture.js';
+
+const hasSourceDiagnostics = (
+  value: JsonValue | undefined,
+): value is { diagnostics: { source: string }[] } =>
+  value !== undefined &&
+  isJsonObject(value) &&
+  Array.isArray(value.diagnostics) &&
+  value.diagnostics.every(
+    (item): item is { source: string } => isJsonObject(item) && typeof item.source === 'string',
+  );
 
 describe('project commands', () => {
   it('initializes, shows, validates, and lists an empty project', async () => {
@@ -183,7 +193,7 @@ describe('project commands', () => {
     ]);
   });
 
-  it('lists and shows canonical resources, renders validation diagnostics', async () => {
+  it('lists and shows canonical resources, then returns aggregate validation diagnostics', async () => {
     const root = await createFixtureProject();
 
     const list = await runJson(root, ['list', 'agents']);
@@ -198,28 +208,33 @@ describe('project commands', () => {
     expect(missing.exitCode).toBe(1);
     expect(missing.document).toMatchObject({ error: { code: 'resource_not_found' } });
 
-    const path = 'attest/agents/support.json';
-    const resource: unknown = JSON.parse(await readFile(join(root, path), 'utf8'));
+    for (const path of ['attest/agents/support.json', 'attest/metrics/correct.json']) {
+      const resource: unknown = JSON.parse(await readFile(join(root, path), 'utf8'));
 
-    if (!isJsonValue(resource) || !isJsonObject(resource)) {
-      throw new Error('Expected a JSON resource object.');
+      if (!isJsonValue(resource) || !isJsonObject(resource))
+        throw new Error('Expected a JSON resource object.');
+      await writeFile(
+        join(root, path),
+        `${JSON.stringify({ ...resource, secret: 'must-not-render' })}\n`,
+      );
     }
 
-    await writeFile(
-      join(root, path),
-      `${JSON.stringify({ ...resource, secret: 'must-not-render' })}\n`,
-    );
     const validation = await runJson(root, ['project', 'validate']);
-
     expect(validation.exitCode).toBe(1);
     expect(validation.output.join('')).not.toContain('must-not-render');
-    expect(validation.document).toMatchObject({
-      ok: false,
-      error: { code: 'project_invalid' },
-    });
-    expect(validation.document).toHaveProperty(
-      'error.details.diagnostics',
-      expect.arrayContaining([expect.objectContaining({ source: path })]),
+
+    if (validation.document.ok) throw new Error('Expected project validation failure.');
+    expect(validation.document.error.code).toBe('project_invalid');
+
+    const details = validation.document.error.details;
+
+    if (!hasSourceDiagnostics(details)) throw new Error('Expected source diagnostics.');
+    const { diagnostics } = details;
+
+    const sources = diagnostics.map(({ source }) => source);
+    expect(sources).toEqual([...sources].sort());
+    expect(sources).toEqual(
+      expect.arrayContaining(['attest/agents/support.json', 'attest/metrics/correct.json']),
     );
   });
 

@@ -312,6 +312,7 @@ describe('agent commands', () => {
     expect(removed.document).toMatchObject({
       result: { warnings: ['Removed dependent tests: refund'] },
     });
+    await expect(loadProject({ project: root })).resolves.toMatchObject({ agents: [], tests: [] });
   });
 
   it('accepts common options before the namespace and rejects a repeated --output', async () => {
