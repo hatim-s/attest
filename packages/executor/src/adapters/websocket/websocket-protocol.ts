@@ -26,16 +26,13 @@ type EnvelopeFailure = {
   error: AgentInvocationError;
 };
 
-type MessageTerminal =
-  | { kind: 'error'; value: { code?: string; message: string } }
-  | { kind: 'result'; value: JsonValue };
-
-type MessageInterpretation = {
-  acknowledgement: boolean;
-  failure?: EnvelopeFailure;
-  terminal?: MessageTerminal;
-  trace?: JsonValue;
-};
+/** What one correlated message did: acknowledged or traced only, failed, or ended the request. */
+type MessageInterpretation = { acknowledgement: boolean; trace?: JsonValue } & (
+  | { kind: 'progress' }
+  | { kind: 'failure'; failure: EnvelopeFailure }
+  | { kind: 'error'; error: { code?: string; message: string } }
+  | { kind: 'result'; result: JsonValue }
+);
 
 /** Maps transport failures onto the stable WebSocket evidence vocabulary. */
 const errorClassification = (error: AgentInvocationError): WebSocketErrorClassification => {
@@ -102,15 +99,16 @@ const interpretServerMessage = (
     isDeepStrictEqual(value, acknowledgementValue),
   );
 
-  const progress: Pick<MessageInterpretation, 'acknowledgement' | 'trace'> = { acknowledgement };
+  const observed: Pick<MessageInterpretation, 'acknowledgement' | 'trace'> = { acknowledgement };
 
-  if (rawTrace !== undefined) progress.trace = rawTrace;
+  if (rawTrace !== undefined) observed.trace = rawTrace;
 
   const invalid = (
     classification: WebSocketErrorClassification,
     message: string,
   ): MessageInterpretation => ({
-    ...progress,
+    ...observed,
+    kind: 'failure',
     failure: {
       classification,
       error: new AgentInvocationError('invalid_envelope', message),
@@ -136,19 +134,14 @@ const interpretServerMessage = (
 
   if (hasError) {
     return {
-      ...progress,
-      terminal: {
-        kind: 'error',
-        value: extractRemoteError(extractedError, 'The WebSocket agent reported an error.'),
-      },
+      ...observed,
+      kind: 'error',
+      error: extractRemoteError(extractedError, 'The WebSocket agent reported an error.'),
     };
   }
 
   if (hasResult) {
-    return {
-      ...progress,
-      terminal: { kind: 'result', value: result },
-    };
+    return { ...observed, kind: 'result', result };
   }
 
   if (!acknowledgement && rawTrace === undefined) {
@@ -158,7 +151,7 @@ const interpretServerMessage = (
     );
   }
 
-  return progress;
+  return { ...observed, kind: 'progress' };
 };
 
 export {

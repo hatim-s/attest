@@ -18,6 +18,12 @@ const RECONNECTABLE = new Set<WebSocketErrorClassification>([
   'unexpected_close',
 ]);
 
+/** The shared connection: none, a handshake in flight, or open with its keepalive ping. */
+type SharedConnection =
+  | { kind: 'idle' }
+  | { kind: 'opening'; generation: number; promise: Promise<WebSocketConnection> }
+  | { kind: 'open'; generation: number; connection: WebSocketConnection; ping: NodeJS.Timeout };
+
 /**
  * Shares one connection across every case of the run, serially or multiplexed. A lost connection
  * is reopened and unacknowledged requests are replayed on it within the retry budget.
@@ -26,20 +32,15 @@ class RunScopedWebSocketSession {
   private readonly state: WebSocketSessionState;
   private readonly runSerially = createSerialQueue();
   private closePromise?: Promise<void>;
-  private connection?: WebSocketConnection;
-  private connectionPromise?: Promise<WebSocketConnection>;
+  private shared: SharedConnection = { kind: 'idle' };
+  /** Generation of the newest handshake; callbacks from older connections are ignored. */
   private connectionGeneration = 0;
-  private pingTimer?: NodeJS.Timeout;
 
   constructor(agent: WebSocketAgentResource, options: WebSocketSessionOptions) {
     this.state = new WebSocketSessionState(agent, options, {
       onRequestTimeout: (pending, error, classification) =>
         void this.retryOrSettle(pending, error, classification),
-      onRunEnd: () => {
-        clearInterval(this.pingTimer);
-        this.connection?.destroy();
-        this.connection = undefined;
-      },
+      onRunEnd: () => this.releaseOpenConnection()?.destroy(),
     });
   }
 
@@ -55,9 +56,7 @@ class RunScopedWebSocketSession {
   close(): Promise<void> {
     if (this.closePromise !== undefined) return this.closePromise;
     this.state.beginClose();
-    clearInterval(this.pingTimer);
-    const connection = this.connection;
-    this.connection = undefined;
+    const connection = this.releaseOpenConnection();
     this.closePromise = (async () => {
       if (connection === undefined) return;
       const close = await connection.close(this.state.agent.transport.close_timeout_ms);
@@ -73,7 +72,7 @@ class RunScopedWebSocketSession {
   }
 
   private dispatch(request: AgentRequest, signal?: AbortSignal): Promise<InvocationResult> {
-    if (this.state.closed) {
+    if (this.state.lifecycle.signal.aborted) {
       return Promise.resolve(this.state.closedResult(this.state.createPending(request, signal)));
     }
 
@@ -102,10 +101,20 @@ class RunScopedWebSocketSession {
     }
   }
 
-  private ensureConnection(): Promise<WebSocketConnection> {
-    if (this.connection !== undefined) return Promise.resolve(this.connection);
+  /** Leaves the open state, stopping its ping, and hands back the connection to dispose of. */
+  private releaseOpenConnection(): WebSocketConnection | undefined {
+    if (this.shared.kind !== 'open') return undefined;
+    const { connection, ping } = this.shared;
+    clearInterval(ping);
+    this.shared = { kind: 'idle' };
 
-    if (this.connectionPromise !== undefined) return this.connectionPromise;
+    return connection;
+  }
+
+  private ensureConnection(): Promise<WebSocketConnection> {
+    if (this.shared.kind === 'open') return Promise.resolve(this.shared.connection);
+
+    if (this.shared.kind === 'opening') return this.shared.promise;
     const generation = ++this.connectionGeneration;
     const { evidence, options } = this.state;
 
@@ -117,7 +126,7 @@ class RunScopedWebSocketSession {
       for (const pending of this.state.pending.values()) record(pending);
     };
 
-    this.connectionPromise = this.state
+    const promise = this.state
       .openConnection(runSignal, {
         onClose: (close) => this.connectionLost(generation, close),
         onFailure: (error) => this.connectionFailed(generation, error),
@@ -129,22 +138,31 @@ class RunScopedWebSocketSession {
       })
       .then(
         (connection) => {
-          this.connection = connection;
-          this.connectionPromise = undefined;
+          this.releaseOpenConnection();
+          this.shared = {
+            kind: 'open',
+            generation,
+            connection,
+            ping: this.startPing(connection),
+          };
           forEachPending((pending) =>
             evidence.record(pending, { classification: 'connection_opened' }),
           );
-          this.startPing(connection, generation);
 
           return connection;
         },
         (cause: unknown) => {
-          this.connectionPromise = undefined;
+          if (this.shared.kind === 'opening' && this.shared.generation === generation) {
+            this.shared = { kind: 'idle' };
+          }
+
           throw cause;
         },
       );
 
-    return this.connectionPromise;
+    this.shared = { kind: 'opening', generation, promise };
+
+    return promise;
   }
 
   private async retryOrSettle(
@@ -195,10 +213,8 @@ class RunScopedWebSocketSession {
 
   private connectionFailed(generation: number, error: AgentInvocationError): void {
     if (generation !== this.connectionGeneration) return;
-    this.connection?.destroy();
-    this.connection = undefined;
-    this.connectionPromise = undefined;
-    clearInterval(this.pingTimer);
+    this.releaseOpenConnection()?.destroy();
+    this.shared = { kind: 'idle' };
 
     for (const pending of [...this.state.pending.values()]) {
       void this.retryOrSettle(pending, error, errorClassification(error));
@@ -206,9 +222,8 @@ class RunScopedWebSocketSession {
   }
 
   private connectionLost(generation: number, close: WebSocketClose): void {
-    if (generation !== this.connectionGeneration || this.connection === undefined) return;
-    this.connection = undefined;
-    clearInterval(this.pingTimer);
+    if (this.shared.kind !== 'open' || this.shared.generation !== generation) return;
+    this.releaseOpenConnection();
 
     const error = new AgentInvocationError(
       'network',
@@ -222,10 +237,9 @@ class RunScopedWebSocketSession {
     }
   }
 
-  private startPing(connection: WebSocketConnection, generation: number): void {
-    clearInterval(this.pingTimer);
-    this.pingTimer = setInterval(() => {
-      if (generation !== this.connectionGeneration || this.connection !== connection) return;
+  private startPing(connection: WebSocketConnection): NodeJS.Timeout {
+    return setInterval(() => {
+      if (this.shared.kind !== 'open' || this.shared.connection !== connection) return;
 
       if (!connection.ping()) return;
 
