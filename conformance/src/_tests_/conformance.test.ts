@@ -35,6 +35,13 @@ const parsers = {
     const result = parseAgentResponse(input);
     const warningCodes = result.warnings.map((warning) => warning.code);
 
+    for (const warning of result.warnings) {
+      if (warning.code === 'invalid_trace') {
+        expect(warning.path).toBe('trace');
+        expect(warning.message).toContain('schema');
+      }
+    }
+
     return result.ok
       ? { ok: true, value: result.value, warningCodes }
       : { ok: false, issuePaths: result.errors.map((issue) => issue.path), warningCodes };

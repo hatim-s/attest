@@ -1,0 +1,14 @@
+{
+  "$schema": "https://turbo.build/schema.json",
+  "extends": ["//"],
+  "tasks": {
+    "test": {
+      "inputs": [
+        "src/**",
+        "package.json",
+        "$TURBO_ROOT$/packages/schemas/generated/**",
+        "$TURBO_ROOT$/conformance/fixtures/**"
+      ]
+    }
+  }
+}

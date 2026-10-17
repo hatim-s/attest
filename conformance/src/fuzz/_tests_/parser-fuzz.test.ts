@@ -40,19 +40,28 @@ const trace = traceSchema.parse(
 
 const span = trace.spans[0]!;
 
-const parsers = {
-  parseAgentRequest,
-  parseAgentResponse,
-  parseMetricRequest,
-  parseMetricResult,
-  parseTrace,
-};
+const response = parseAgentResponse(seed('agent-response', '01-valid-output-success.json'));
+
+const metricRequest = parseMetricRequest(seed('metric-request', '01-valid.json'));
+
+const metricResult = parseMetricResult(seed('metric-result', '01-valid-pass.json'));
+
+if (!response.ok || !metricRequest.ok || !metricResult.ok) throw new Error('Invalid fuzz seed');
+
+const parsers = [
+  ['parseAgentRequest', parseAgentRequest, request],
+  ['parseAgentResponse', parseAgentResponse, response.value],
+  ['parseMetricRequest', parseMetricRequest, metricRequest.value],
+  ['parseMetricResult', parseMetricResult, metricResult.value],
+  ['parseTrace', parseTrace, trace],
+] as const;
 
 const noise = fc.oneof(
   fc.jsonValue(),
   fc.anything(),
   fc.constant(Symbol('fuzz')),
   fc.constant(() => undefined),
+  fc.constantFrom('\uD800', '\uDC00', '\0', '\u202E', '\u200F', 'x'.repeat(1024 * 1024)),
 );
 
 const deepPayload = fc
@@ -67,17 +76,15 @@ const deepPayload = fc
   });
 
 describe.skipIf(process.env.FUZZ !== '1')('contract parser properties (set FUZZ=1 to run)', () => {
-  it.each(Object.entries(parsers))(
-    '%s returns a result for JSON and non-JSON input',
-    (_name, parse) => {
-      fc.assert(
-        fc.property(noise, (candidate) => {
-          expect(parse(candidate).ok).toBeTypeOf('boolean');
-        }),
-        options,
-      );
-    },
-  );
+  it.each(parsers)('%s returns a result for JSON and non-JSON input', (_name, parse, document) => {
+    fc.assert(
+      fc.property(fc.constantFrom(...Object.keys(document)), noise, (key, candidate) => {
+        expect(parse(candidate).ok).toBeTypeOf('boolean');
+        expect(parse({ ...document, [key]: candidate }).ok).toBeTypeOf('boolean');
+      }),
+      options,
+    );
+  });
 
   it('requires exactly one agent outcome for every JSON output', () => {
     const outcomes = fc.record(
@@ -94,23 +101,6 @@ describe.skipIf(process.env.FUZZ !== '1')('contract parser properties (set FUZZ=
         expect(parseAgentResponse(candidate).ok).toBe(
           Object.hasOwn(candidate, 'output') !== Object.hasOwn(candidate, 'error'),
         );
-      }),
-      options,
-    );
-  });
-
-  it('requires all or none of the multi-turn fields', () => {
-    fc.assert(
-      fc.property(fc.integer({ min: 0, max: 7 }), fc.string(), (mask, content) => {
-        const candidate = { ...request };
-
-        if (mask & 1) candidate.messages = [{ role: 'user', content }];
-
-        if (mask & 2) candidate.turn_index = 0;
-
-        if (mask & 4) candidate.conversation_id = 'conversation';
-
-        expect(parseAgentRequest(candidate).ok).toBe(mask === 0 || mask === 7);
       }),
       options,
     );
@@ -145,7 +135,7 @@ describe.skipIf(process.env.FUZZ !== '1')('contract parser properties (set FUZZ=
     );
   });
 
-  it('accepts finite metric scores and rejects non-finite scores', () => {
+  it('accepts finite metric scores', () => {
     fc.assert(
       fc.property(
         fc.double({ noNaN: true, noDefaultInfinity: true }),
@@ -156,11 +146,25 @@ describe.skipIf(process.env.FUZZ !== '1')('contract parser properties (set FUZZ=
       ),
       options,
     );
-    fc.assert(
-      fc.property(fc.constantFrom(NaN, Infinity, -Infinity), (score) => {
-        expect(parseMetricResult({ score, pass: true }).ok).toBe(false);
-      }),
-      options,
-    );
+  });
+});
+
+describe('finite protocol tables', () => {
+  it.each(Array.from({ length: 8 }, (_, mask) => mask))(
+    'requires all or none of the multi-turn fields for mask %i',
+    (mask) => {
+      const candidate = { ...request };
+
+      if (mask & 1) candidate.messages = [{ role: 'user', content: 'hello' }];
+
+      if (mask & 2) candidate.turn_index = 0;
+
+      if (mask & 4) candidate.conversation_id = 'conversation';
+      expect(parseAgentRequest(candidate).ok).toBe(mask === 0 || mask === 7);
+    },
+  );
+
+  it.each([NaN, Infinity, -Infinity])('rejects non-finite metric score %s', (score) => {
+    expect(parseMetricResult({ score, pass: true }).ok).toBe(false);
   });
 });
