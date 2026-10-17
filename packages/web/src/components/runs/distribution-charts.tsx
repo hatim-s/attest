@@ -1,7 +1,8 @@
-import { useCallback, useMemo, useRef } from 'react';
+import { useCallback, useMemo } from 'react';
 
 import type { EChartsCoreOption } from 'echarts/core';
-import { useChart, categoryAxis, valueAxis, type ChartPalette } from '../charts/use-chart.js';
+import { ChartCard } from '../charts/chart-card.js';
+import { categoryAxis, valueAxis, type ChartPalette } from '../charts/use-chart.js';
 
 import { aggregateCases } from '@attest/core/analytics';
 import type { CaseSummary } from '@attest/core/records';
@@ -35,8 +36,6 @@ const createScoreHistogram = (cases: CaseSummary[]): ScoreBin[] => {
 
 /** Renders the score histogram and verdict pie for the loaded cases. */
 const DistributionCharts = ({ cases, isLoading, totalCases }: DistributionChartsProps) => {
-  const scoreChartRef = useRef<HTMLDivElement>(null);
-  const verdictChartRef = useRef<HTMLDivElement>(null);
   const histogram = useMemo(() => createScoreHistogram(cases), [cases]);
 
   const verdicts = useMemo(() => {
@@ -49,7 +48,6 @@ const DistributionCharts = ({ cases, isLoading, totalCases }: DistributionCharts
 
   const scoreOption = useCallback(
     (palette: ChartPalette): EChartsCoreOption => ({
-      animationDuration: 250,
       grid: { left: 55, right: 16, top: 35, bottom: 55 },
       tooltip: { trigger: 'item', renderMode: 'richText' },
       xAxis: categoryAxis(
@@ -67,14 +65,12 @@ const DistributionCharts = ({ cases, isLoading, totalCases }: DistributionCharts
           type: 'bar',
         },
       ],
-      textStyle: { color: palette.text },
     }),
     [histogram],
   );
 
   const verdictOption = useCallback(
     ({ accent, danger, muted, text, warning }: ChartPalette): EChartsCoreOption => ({
-      animationDuration: 250,
       legend: { bottom: 2, textStyle: { color: muted, fontSize: 10 } },
       series: [
         {
@@ -94,9 +90,6 @@ const DistributionCharts = ({ cases, isLoading, totalCases }: DistributionCharts
     [verdicts],
   );
 
-  useChart(scoreChartRef, scoreOption);
-  useChart(verdictChartRef, verdictOption);
-
   return (
     <section className="distribution-panel" aria-label="Run distributions">
       <div className="distribution-heading">
@@ -109,18 +102,11 @@ const DistributionCharts = ({ cases, isLoading, totalCases }: DistributionCharts
         </span>
       </div>
       <div className="chart-grid">
-        <div className="chart-card">
-          <div>
-            <strong>Average metric score</strong>
-            <span>{cases.filter(({ score }) => score !== undefined).length} scored cases</span>
-          </div>
-          <div
-            aria-label="Average metric score histogram"
-            className="chart-canvas"
-            ref={scoreChartRef}
-          />
-          <details>
-            <summary>Score values</summary>
+        <ChartCard
+          title="Average metric score"
+          detail={`${cases.filter(({ score }) => score !== undefined).length} scored cases`}
+          option={scoreOption}
+          table={
             <table className="analytics-table">
               <caption>Score histogram</caption>
               <thead>
@@ -138,20 +124,13 @@ const DistributionCharts = ({ cases, isLoading, totalCases }: DistributionCharts
                 ))}
               </tbody>
             </table>
-          </details>
-        </div>
-        <div className="chart-card">
-          <div>
-            <strong>Case pass rate</strong>
-            <span>Mutually exclusive final verdicts</span>
-          </div>
-          <div
-            aria-label="Case verdict distribution"
-            className="chart-canvas"
-            ref={verdictChartRef}
-          />
-          <details>
-            <summary>Verdict values</summary>
+          }
+        />
+        <ChartCard
+          title="Case pass rate"
+          detail="Mutually exclusive final verdicts"
+          option={verdictOption}
+          table={
             <table className="analytics-table">
               <caption>Final verdict counts</caption>
               <thead>
@@ -169,8 +148,8 @@ const DistributionCharts = ({ cases, isLoading, totalCases }: DistributionCharts
                 ))}
               </tbody>
             </table>
-          </details>
-        </div>
+          }
+        />
       </div>
     </section>
   );

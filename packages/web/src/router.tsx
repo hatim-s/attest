@@ -27,6 +27,7 @@ import { RunPage } from './routes/run-page.js';
 import { CaseDrawer } from './routes/case-drawer.js';
 import { ComparePage } from './routes/compare-page.js';
 import { ErrorNotice } from './components/shared/ui.js';
+import { runTabSchema } from './components/runs/run-tabs.js';
 
 type RouterContext = { client: ApiClient; queryClient: QueryClient };
 
@@ -38,8 +39,6 @@ const runsSearchSchema = z.object({
     .optional()
     .catch(undefined),
 });
-
-const runTabSchema = z.enum(['cases', 'distributions', 'suites']);
 
 const runSearchSchema = z.object({
   tab: runTabSchema.default('cases').catch('cases'),
@@ -167,4 +166,4 @@ declare module '@tanstack/react-router' {
   }
 }
 
-export { createDashboardRouter, runTabSchema };
+export { createDashboardRouter };

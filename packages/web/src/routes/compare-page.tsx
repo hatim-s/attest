@@ -2,7 +2,8 @@ import { getRouteApi, useNavigate } from '@tanstack/react-router';
 import { useDiff, useRun, useRuns } from '../api/queries.js';
 import { DiffPanel } from '../components/cases/diff-panel.js';
 import { ErrorNotice, Loading } from '../components/shared/ui.js';
-import { RunOverview } from '../components/runs/run-overview.js';
+import { RunHeader } from '../components/runs/run-header.js';
+import { RunTabs } from '../components/runs/run-tabs.js';
 
 const route = getRouteApi('/workspace/compare/$baseRunId/$candidateRunId');
 
@@ -26,7 +27,10 @@ const ComparePage = () => {
       {candidateQuery.isLoading ? <Loading label="Loading run" /> : null}
       {candidateQuery.error !== null ? <ErrorNotice error={candidateQuery.error} /> : null}
       {candidateQuery.data !== undefined ? (
-        <RunOverview run={candidateQuery.data} tab="compare" />
+        <>
+          <RunHeader run={candidateQuery.data} />
+          <RunTabs run={candidateQuery.data} tab="compare" />
+        </>
       ) : null}
       <DiffPanel
         key={`${baseRunId}:${candidateRunId}`}

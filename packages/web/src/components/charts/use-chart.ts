@@ -65,13 +65,27 @@ const readPalette = (): ChartPalette => {
   };
 };
 
+type ChartOption = (palette: ChartPalette) => EChartsCoreOption;
+
+/** Applies the settings every dashboard chart shares, so callers describe only their own marks. */
+const applyOption = (chart: ReturnType<typeof init>, createOption: ChartOption): void => {
+  const palette = readPalette();
+
+  chart.setOption({
+    // Polling replaces options every few seconds; animating each refresh reads as data moving.
+    animation: false,
+    textStyle: { color: palette.text },
+    ...createOption(palette),
+  });
+};
+
 /**
  * Owns one ECharts instance. Resizes with its container and recolors when the dashboard
  * changes `data-theme` on the root element.
  */
 const useChart = (
   containerRef: RefObject<HTMLDivElement | null>,
-  createOption: (palette: ChartPalette) => EChartsCoreOption,
+  createOption: ChartOption,
 ): void => {
   const chartRef = useRef<ReturnType<typeof init> | null>(null);
   const optionRef = useRef(createOption);
@@ -84,11 +98,7 @@ const useChart = (
     chartRef.current = chart;
     const resizeObserver = new ResizeObserver(() => chart.resize());
     resizeObserver.observe(container);
-
-    const themeObserver = new MutationObserver(() =>
-      chart.setOption(optionRef.current(readPalette())),
-    );
-
+    const themeObserver = new MutationObserver(() => applyOption(chart, optionRef.current));
     themeObserver.observe(document.documentElement, { attributeFilter: ['data-theme'] });
 
     return () => {
@@ -101,8 +111,9 @@ const useChart = (
 
   useEffect(() => {
     optionRef.current = createOption;
-    chartRef.current?.setOption(createOption(readPalette()));
+
+    if (chartRef.current !== null) applyOption(chartRef.current, createOption);
   }, [createOption]);
 };
 
-export { useChart, categoryAxis, valueAxis, type ChartPalette };
+export { useChart, categoryAxis, valueAxis, type ChartOption, type ChartPalette };

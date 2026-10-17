@@ -843,10 +843,23 @@ select:focus-visible {
   border-radius: 13px;
   background: var(--surface);
 }
-.chart-card > div:first-child {
+.chart-card figcaption {
   display: flex;
   flex-direction: column;
   gap: 2px;
+}
+.chart-card summary {
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 11px;
+  cursor: pointer;
+}
+.chart-empty {
+  display: grid;
+  place-items: center;
+  height: 290px;
+  color: var(--muted);
+  font-size: 12px;
 }
 .chart-card strong {
   font-size: 12px;

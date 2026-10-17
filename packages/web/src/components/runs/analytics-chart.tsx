@@ -1,6 +1,7 @@
-import { useCallback, useRef } from 'react';
+import { useCallback } from 'react';
 import { type EChartsCoreOption } from 'echarts/core';
-import { useChart, categoryAxis, valueAxis, type ChartPalette } from '../charts/use-chart.js';
+import { ChartCard } from '../charts/chart-card.js';
+import { categoryAxis, valueAxis, type ChartPalette } from '../charts/use-chart.js';
 
 /** Shares chart anatomy so histories and loaded-run trends have identical scales and tooltips. */
 const AnalyticsChart = ({
@@ -20,13 +21,9 @@ const AnalyticsChart = ({
   max?: number;
   formatValue: (value: number) => string;
 }) => {
-  const ref = useRef<HTMLDivElement>(null);
-
   const option = useCallback(
     (palette: ChartPalette): EChartsCoreOption => ({
-      animation: false,
       grid: { left: 65, right: 25, top: 40, bottom: 55 },
-      textStyle: { color: palette.text },
       tooltip: {
         trigger: 'axis',
         renderMode: 'richText',
@@ -62,14 +59,7 @@ const AnalyticsChart = ({
     [labels, values, measure, formatValue, min, max],
   );
 
-  useChart(ref, option);
-
-  return (
-    <div className="chart-card">
-      <strong>{title}</strong>
-      <div ref={ref} className="chart-canvas" role="img" aria-label={title} />
-    </div>
-  );
+  return <ChartCard title={title} option={option} />;
 };
 
 export { AnalyticsChart };

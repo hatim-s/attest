@@ -1,12 +1,12 @@
-import { useCallback, useMemo, useRef } from 'react';
+import { useCallback, useMemo } from 'react';
 import type { CaseSummary } from '@attest/core/records';
 import type { EChartsCoreOption } from 'echarts/core';
 import { createDurationHistogram } from './loaded-analytics.js';
-import { useChart, categoryAxis, valueAxis, type ChartPalette } from '../charts/use-chart.js';
+import { ChartCard } from '../charts/chart-card.js';
+import { categoryAxis, valueAxis, type ChartPalette } from '../charts/use-chart.js';
 
 /** Keeps durations in milliseconds so equal-width bars represent equal elapsed intervals. */
 const DurationDistribution = ({ cases }: { cases: CaseSummary[] }) => {
-  const ref = useRef<HTMLDivElement>(null);
   const bins = useMemo(() => createDurationHistogram(cases), [cases]);
 
   const labels = useMemo(
@@ -20,9 +20,7 @@ const DurationDistribution = ({ cases }: { cases: CaseSummary[] }) => {
 
   const option = useCallback(
     (palette: ChartPalette): EChartsCoreOption => ({
-      animation: false,
       grid: { left: 55, right: 20, top: 45, bottom: 70 },
-      textStyle: { color: palette.text },
       legend: { top: 0, textStyle: { color: palette.text } },
       tooltip: { trigger: 'item', renderMode: 'richText' },
       xAxis: {
@@ -58,14 +56,11 @@ const DurationDistribution = ({ cases }: { cases: CaseSummary[] }) => {
     [bins, labels],
   );
 
-  useChart(ref, option);
-
   return (
-    <div className="chart-card">
-      <strong>Case durations by verdict</strong>
-      <div ref={ref} className="chart-canvas" role="img" aria-label="Case duration histogram" />
-      <details>
-        <summary>Duration values</summary>
+    <ChartCard
+      title="Case durations by verdict"
+      option={option}
+      table={
         <table className="analytics-table">
           <caption>
             Milliseconds. Lower bounds inclusive; upper bounds exclusive except the final bin.
@@ -89,8 +84,8 @@ const DurationDistribution = ({ cases }: { cases: CaseSummary[] }) => {
             ))}
           </tbody>
         </table>
-      </details>
-    </div>
+      }
+    />
   );
 };
 
