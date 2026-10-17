@@ -11,7 +11,6 @@ import { RunTabs } from '../components/runs/run-tabs.js';
 
 const route = getRouteApi('/workspace/runs/$runId');
 
-/** Loads one page of cases at a time; the table asks for more as the reader scrolls. */
 const RunCases = ({ run }: { run: RunRecord }) => {
   const casesQuery = useCases(run.id, run.status);
 

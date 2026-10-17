@@ -5,7 +5,6 @@ import { SuiteTable } from '../components/runs/suite-table.js';
 import { ErrorNotice, Heading, Loading } from '../components/shared/ui.js';
 import { formatDateTime, shortId } from '../lib/format.js';
 
-/** Names the run the catalog comes from and links to its suites tab. */
 const SourceRun = ({ run }: { run: RunRecord }) => (
   <>
     From{' '}

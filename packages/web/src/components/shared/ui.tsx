@@ -29,7 +29,6 @@ type HeadingProps = {
   children?: ReactNode;
 };
 
-/** Opens every page and section the same way: what kind of thing, which one, one line of context. */
 const Heading = ({ level, eyebrow, title, meta, children }: HeadingProps) => {
   const Title = level === 1 ? 'h1' : 'h2';
 
