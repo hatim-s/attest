@@ -248,7 +248,7 @@ describe('SQLite store database', () => {
       id: runId,
       status: 'running',
     });
-    await expect(reopened.runs.getCaseResults(runId)).resolves.toMatchObject([
+    expect((await reopened.runs.getRunWithCases(runId)).cases).toMatchObject([
       { caseId: 'crash-case', runId },
     ]);
   });

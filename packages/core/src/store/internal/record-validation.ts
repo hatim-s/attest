@@ -84,25 +84,7 @@ const parseStoredCaseExecution = (value: unknown, path = 'execution') =>
 const parseStoredMetricEvaluation = (value: unknown, path = 'evaluation') =>
   parseRecord(storedMetricEvaluationSchema, value, path);
 
-/** Lists violations in a case execution so a store can reject it before opening a transaction. */
-// BOUNDARY: Untrusted case execution JSON is checked against storedCaseExecutionSchema.
-const collectStoredCaseExecutionViolations = (value: unknown, path = 'execution'): string[] => {
-  const parsed = parseRecord(storedCaseExecutionSchema, value, path);
-
-  return parsed.ok ? [] : parsed.violations;
-};
-
-/** Lists violations in a metric evaluation so a store can reject it before opening a transaction. */
-// BOUNDARY: Untrusted metric evaluation JSON is checked against storedMetricEvaluationSchema.
-const collectStoredMetricEvaluationViolations = (value: unknown, path = 'evaluation'): string[] => {
-  const parsed = parseRecord(storedMetricEvaluationSchema, value, path);
-
-  return parsed.ok ? [] : parsed.violations;
-};
-
 export {
-  collectStoredCaseExecutionViolations,
-  collectStoredMetricEvaluationViolations,
   parseCaseRecord,
   parseStoredCaseExecution,
   parseStoredMetricEvaluation,

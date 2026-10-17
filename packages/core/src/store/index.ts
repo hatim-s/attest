@@ -14,8 +14,6 @@ export { type CacheKind, type CacheStore } from './cache.js';
 export { canonicalStringify, contentHash } from './internal/canonical-json.js';
 
 export {
-  collectStoredCaseExecutionViolations,
-  collectStoredMetricEvaluationViolations,
   parseStoredCaseExecution,
   parseStoredMetricEvaluation,
 } from './internal/record-validation.js';

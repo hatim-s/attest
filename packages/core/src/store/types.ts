@@ -44,7 +44,6 @@ interface RunStore {
   finalizeRun(runId: string, status: Exclude<RunStatus, 'running'>): Promise<RunRecord>;
   getRun(runId: string): Promise<RunRecord>;
   listRuns(limit?: number): Promise<RunRecord[]>;
-  getCaseResults(runId: string): Promise<CaseRecord[]>;
   getRunWithCases(runId: string): Promise<{ run: RunRecord; cases: CaseRecord[] }>;
   listCaseSummaries(
     runId: string,

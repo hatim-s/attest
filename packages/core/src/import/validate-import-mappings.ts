@@ -82,18 +82,6 @@ const validateMappingDestinations = (
       );
     }
 
-    if (path[0] === 'metrics') {
-      diagnostics.push(
-        importDiagnostic({
-          code: 'mapping_destination_renamed',
-          message: 'The metrics destination is named metric_overrides.',
-          hint: 'Map the source to metric_overrides with { metric_id } objects.',
-          sourceField: source,
-          destinationPath,
-        }),
-      );
-    }
-
     for (const [priorIndex, prior] of destinations.slice(0, index).entries()) {
       if (!overlaps(path, prior)) continue;
       diagnostics.push(
