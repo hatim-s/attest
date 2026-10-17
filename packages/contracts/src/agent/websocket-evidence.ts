@@ -32,14 +32,8 @@ const webSocketErrorClassificationSchema = z.enum([
   'duplicate_terminal_message',
   'acknowledgement_extraction_failed',
   'result_extraction_failed',
-  'error_extraction_failed',
   'trace_extraction_failed',
   'remote_error',
-  'socket_io_unsupported',
-  'graphql_subscription_unsupported',
-  'interactive_auth_unsupported',
-  'resume_unsupported',
-  'bidirectional_callback_unsupported',
   'cancelled',
 ]);
 

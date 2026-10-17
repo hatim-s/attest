@@ -193,6 +193,24 @@ describe('authored resource contracts', () => {
     );
   });
 
+  it('reports duplicate loaded dataset ids at metadata.id while aggregating other errors', () => {
+    const candidate = structuredClone(validProjectResources);
+    candidate.datasets.push(structuredClone(candidate.datasets[0]!));
+    candidate.tests[0]!.agent_id = 'missing-agent';
+    const result = projectResourcesSchema.safeParse(candidate);
+
+    expect(result.success).toBe(false);
+
+    if (!result.success) {
+      expect(result.error.issues.map(({ path }) => path)).toEqual(
+        expect.arrayContaining([
+          ['datasets', 1, 'metadata', 'id'],
+          ['tests', 0, 'agent_id'],
+        ]),
+      );
+    }
+  });
+
   it('aggregates manifest, reference, row-count, and resolved-case collision failures', () => {
     const candidate = structuredClone(validProjectResources);
     candidate.project.resources.agents[0]!.id = 'unloaded';

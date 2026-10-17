@@ -87,6 +87,7 @@ const collectCaseLifecycle = (
   };
 
   const startedIndexes = new Set<number>();
+  const startedIdentities = new Set<string>();
 
   events.slice(1, -1).forEach((event, offset) => {
     const index = offset + 1;
@@ -103,10 +104,20 @@ const collectCaseLifecycle = (
       });
     }
 
+    if (event.event === 'run_started') {
+      context.addIssue({
+        code: 'custom',
+        path: [index, 'event'],
+        message: 'run_started must occur only at stream position zero',
+      });
+
+      return;
+    }
+
     if (event.event === 'case_started') {
       const key = caseKey(event.data.test_id, event.data.case_id);
 
-      if (startedIndexes.has(event.data.configured_index) || lifecycle.openCases.has(key)) {
+      if (startedIndexes.has(event.data.configured_index) || startedIdentities.has(key)) {
         context.addIssue({
           code: 'custom',
           path: [index, 'data', 'configured_index'],
@@ -114,6 +125,7 @@ const collectCaseLifecycle = (
         });
       }
 
+      startedIdentities.add(key);
       startedIndexes.add(event.data.configured_index);
       lifecycle.openCases.set(key, event.data.configured_index);
       lifecycle.startedCount += 1;
