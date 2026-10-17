@@ -1,4 +1,20 @@
-import { realpath } from 'node:fs/promises';
+/**
+ * The local metric bridge. `attest metric test` and eval both dispatch metrics through it, so
+ * every exec metric gets the same cwd containment, secret handling and redaction.
+ *
+ * ```text
+ * metric test ──┐                     ┌─ assertion ─▶ runtime evaluateMetrics
+ *               ├─▶ evaluateMetricResource
+ * eval case ────┘   (eval also runs   └─ exec: openMetricDirectory (per-segment check + descriptor)
+ *                    judge and HTTP          ─▶ resolveMetricEnvironment (secrets)
+ *                    metrics here)           ─▶ assertMetricDirectoryIdentity (recheck at spawn)
+ *                                            ─▶ runtime evaluateMetrics (spawn in cwd)
+ *
+ * evaluation + metric secrets ─▶ caller redacts with agent and field-hidden secrets ─▶ stored
+ * ```
+ */
+import { lstat, realpath } from 'node:fs/promises';
+import type { BigIntStats } from 'node:fs';
 import { relative, resolve } from 'node:path';
 
 import {
@@ -25,6 +41,7 @@ import { z } from 'zod';
 
 import { LocalError } from '../../errors/index.js';
 import { readJsonPointer } from '../../internal/json-pointer.js';
+import { openAnchored, type AnchoredEntry } from '../../internal/open-anchored.js';
 import { resolveContainedPath } from '../../project/project-path.js';
 import { redactMetricEvaluation, redactProbeValue } from '../agent/adapter/evidence-redaction.js';
 import {
@@ -78,24 +95,64 @@ const evaluateOne = async (
   return evaluation;
 };
 
-/**
- * Resolves an exec metric cwd with the per-segment symlink check worker directories use. The
- * schema accepts `.`, `./x` and trailing slashes, so the path is normalized lexically first; it
- * already forbids `..`.
- */
-const resolveMetricCwd = async (projectRoot: string, cwd: string | undefined): Promise<string> => {
-  const projectPath = relative(projectRoot, resolve(projectRoot, cwd ?? '.'));
-
-  if (projectPath === '') return realpath(projectRoot);
-
-  return resolveContainedPath(projectRoot, projectPath, {
-    expect: 'directory',
-    problem: () =>
-      new LocalError('project_invalid', 'Metric cwd is not a safe project directory.', {
-        path: projectPath,
-        hint: 'Use a real project-contained directory without a symlink escape.',
-      }),
+const unsafeMetricDirectory = (path: string, cause?: unknown): LocalError =>
+  new LocalError('project_invalid', 'Metric cwd is not a safe project directory.', {
+    path,
+    hint: 'Use a real project-contained directory without a symlink escape.',
+    cause,
   });
+
+/**
+ * Opens an exec metric cwd after the per-segment symlink check worker directories use, keeping a
+ * descriptor so its identity can be rechecked at spawn. The schema accepts `.`, `./x` and
+ * trailing slashes, so the path is normalized lexically first; it already forbids `..`.
+ */
+const openMetricDirectory = async (
+  projectRoot: string,
+  cwd: string | undefined,
+): Promise<AnchoredEntry> => {
+  const projectPath = relative(projectRoot, resolve(projectRoot, cwd ?? '.'));
+  const root = await realpath(projectRoot);
+
+  const path =
+    projectPath === ''
+      ? root
+      : await resolveContainedPath(projectRoot, projectPath, {
+          expect: 'directory',
+          problem: () => unsafeMetricDirectory(projectPath),
+        });
+
+  try {
+    return await openAnchored(path, { kind: 'directory', root });
+  } catch (error: unknown) {
+    throw unsafeMetricDirectory(cwd ?? '.', error);
+  }
+};
+
+/**
+ * Secret resolution awaits between opening the cwd and spawning, so a swapped pathname could
+ * redirect the spawn. Rechecks the pathname against the retained descriptor just before spawn.
+ */
+const assertMetricDirectoryIdentity = async (
+  directory: AnchoredEntry,
+  cwd: string | undefined,
+): Promise<void> => {
+  let current: BigIntStats;
+
+  try {
+    current = await lstat(directory.path, { bigint: true });
+  } catch (error: unknown) {
+    throw unsafeMetricDirectory(cwd ?? '.', error);
+  }
+
+  if (
+    current.isSymbolicLink() ||
+    !current.isDirectory() ||
+    current.dev !== directory.identity.dev ||
+    current.ino !== directory.identity.ino
+  ) {
+    throw unsafeMetricDirectory(cwd ?? '.');
+  }
 };
 
 /** Resolves an exec metric's secret environment, reporting a missing secret as a metric failure. */
@@ -124,7 +181,8 @@ type EvaluateMetricResourceOptions = {
 
 /**
  * Runs one assertion or exec metric for both `attest metric test` and eval, so the definition
- * mapping, exec cwd containment and secret environment follow one rule. The caller redacts.
+ * mapping, exec cwd containment, the identity recheck and the secret environment follow one rule.
+ * The caller redacts the returned evidence.
  */
 const evaluateMetricResource = async ({
   context,
@@ -143,16 +201,22 @@ const evaluateMetricResource = async ({
     return { evaluation, secrets: [] };
   }
 
-  const cwd = await resolveMetricCwd(projectRoot, definition.cwd);
-  const { env, secrets } = await resolveMetricEnvironment(definition, projectRoot);
+  const directory = await openMetricDirectory(projectRoot, definition.cwd);
 
-  const evaluation = await evaluateOne(
-    { name: id, type: 'exec', command: definition.argv },
-    context,
-    { exec: { cwd, env, timeoutMs: definition.timeout_ms }, signal },
-  );
+  try {
+    const { env, secrets } = await resolveMetricEnvironment(definition, projectRoot);
+    await assertMetricDirectoryIdentity(directory, definition.cwd);
 
-  return { evaluation, secrets };
+    const evaluation = await evaluateOne(
+      { name: id, type: 'exec', command: definition.argv },
+      context,
+      { exec: { cwd: directory.path, env, timeoutMs: definition.timeout_ms }, signal },
+    );
+
+    return { evaluation, secrets };
+  } finally {
+    await directory.handle.close().catch(() => undefined);
+  }
 };
 
 /**
