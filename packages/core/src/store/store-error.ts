@@ -5,6 +5,7 @@ type StoreErrorCode =
   | 'SCHEMA_OUTDATED'
   | 'RUN_NOT_FOUND'
   | 'CASE_NOT_FOUND'
+  | 'PROJECT_NOT_FOUND'
   | 'INVALID_CURSOR'
   | 'INVALID_LIMIT'
   | 'RUN_FINALIZED'

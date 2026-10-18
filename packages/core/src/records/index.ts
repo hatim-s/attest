@@ -26,6 +26,13 @@ export {
 } from './page-schemas.js';
 
 export {
+  projectKeySchema,
+  projectRecordSchema,
+  type ProjectKey,
+  type ProjectRecord,
+} from './project-schemas.js';
+
+export {
   type RunRecord,
   type RunStatus,
   type RunSummary,
