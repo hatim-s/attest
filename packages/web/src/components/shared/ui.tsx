@@ -1,6 +1,6 @@
 import type { ButtonHTMLAttributes, ReactNode } from 'react';
 import { ApiError } from '@attest/api/client';
-import type { RunStartDiagnostics } from '@attest/core/records';
+import type { CliDiagnostics } from '@attest/core/records';
 
 type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
   tone?: 'primary' | 'secondary' | 'ghost';
@@ -47,7 +47,7 @@ const Heading = ({ level, eyebrow, title, meta, children }: HeadingProps) => {
 };
 
 /** What the CLI said about a run that did not start. Its message is already the notice's text. */
-const DiagnosticsList = ({ diagnostics }: { diagnostics: RunStartDiagnostics }) => (
+const DiagnosticsList = ({ diagnostics }: { diagnostics: CliDiagnostics }) => (
   <dl className="error-diagnostics">
     <dt>Code</dt>
     <dd>
