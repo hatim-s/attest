@@ -85,6 +85,22 @@ Only one transport selector may be supplied to `agent add`:
 | JSONL bridge | `--jsonl-command` | Run-scoped, correlated lines; serial or multiplexed; in-band cancellation with process fallback. |
 | HTTP stream | `--stream-url` | External SSE or JSONL stream with terminal and extraction pointers. |
 | WebSocket | `--websocket-url` | Plain `ws://` or `wss://` text JSON; per-case or per-run lifecycle. |
+| Callback | `--callback-trigger-url` | External POST or PUT trigger; callback receiver accepts a later completion. |
+
+Callback flags configure optional fetch and receiver templates:
+
+```sh
+attest agent add async-coder \
+  --callback-trigger-url https://agents.example/runs \
+  --callback-artifact-url https://agents.example/artifacts/{{artifact_id}} \
+  --callback-trace-url https://agents.example/traces/{{trace_ref}} \
+  --callback-public-url https://attest.example/callbacks \
+  --callback-port 8790 --idempotency-header Idempotency-Key
+```
+
+The trigger method defaults to POST; `--callback-trigger-method PUT` selects PUT. Trigger headers
+and query values accept repeatable `--header NAME=VALUE`, `--header-env NAME=SOURCE_ENV`, and
+`--query NAME=VALUE` options.
 
 Use `attest help agent add --output json` for the current options, conflicts, implied flags, choices,
 examples, and request schema. Environment mappings such as `--env TARGET=SOURCE_ENV` and

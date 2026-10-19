@@ -80,7 +80,24 @@ attest agent test async-coder --input '"write answer.ts"' --output json
 kill %1
 ```
 
-`attest agent add` has no callback flags yet, so author the resource as JSON and import it.
+## Author a callback agent from flags
+
+The same transport can be authored with `agent add`. These flags write the trigger, idempotency
+header, and artifact fetch template from the JSON example above:
+
+```sh
+attest agent add async-coder \
+  --callback-trigger-url http://127.0.0.1:8790/runs \
+  --callback-trigger-method POST \
+  --idempotency-header Idempotency-Key \
+  --callback-artifact-url http://127.0.0.1:8790/artifacts/{{artifact_id}} \
+  --timeout 10m --output json
+```
+
+Use `--callback-trace-url` for a `{{trace_ref}}` GET template, and `--callback-port` or
+`--callback-public-url` to configure the receiver. Trigger headers and query values use repeatable
+`--header NAME=VALUE`, `--header-env NAME=SOURCE_ENV`, and `--query NAME=VALUE` options. Callback
+authoring also has a matching `agent.add` request shape for `--from-json`.
 
 ## Prerequisites
 
