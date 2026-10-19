@@ -14,36 +14,11 @@ import {
   retryPolicySchema,
 } from '../../project/shared.js';
 
-const agentAddResourceRequestSchema = z.strictObject({
+const agentAddRequestSchema = z.strictObject({
   ...mutationEnvelopeFields,
   command: z.literal('agent.add'),
   agent: agentResourceSchema,
 });
-
-/** Encodes callback agent authoring through the same named fields exposed by `agent add`. */
-const agentAddCallbackRequestSchema = z.strictObject({
-  ...mutationEnvelopeFields,
-  command: z.literal('agent.add'),
-  agent_id: resourceIdSchema,
-  name: z.string().min(1).optional(),
-  callback_trigger_url: z.string().min(1),
-  callback_trigger_method: z.enum(['POST', 'PUT']).optional(),
-  callback_artifact_url: z.string().min(1).optional(),
-  callback_trace_url: z.string().min(1).optional(),
-  callback_public_url: z.string().min(1).optional(),
-  callback_port: z.number().int().min(0).max(65_535).optional(),
-  idempotency_header: z.string().min(1).optional(),
-  header: z.array(z.string()).optional(),
-  header_env: z.array(z.string()).optional(),
-  query: z.array(z.string()).optional(),
-  timeout: z.string().min(1).optional(),
-  trace: z.boolean().optional(),
-});
-
-const agentAddRequestSchema = z.union([
-  agentAddResourceRequestSchema,
-  agentAddCallbackRequestSchema,
-]);
 
 /** Encodes the optional asynchronous polling mapping selected during one cURL import. */
 const curlPollingImportSchema = z
@@ -114,7 +89,6 @@ const agentTestRequestSchema = z.strictObject({
 });
 
 export {
-  agentAddCallbackRequestSchema,
   agentAddRequestSchema,
   agentImportRequestSchema,
   agentRemoveRequestSchema,

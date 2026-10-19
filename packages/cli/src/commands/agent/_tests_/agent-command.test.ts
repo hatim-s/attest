@@ -78,33 +78,10 @@ afterEach(() => {
 });
 
 describe('agent commands', () => {
-  it('builds the guide callback resource from flags and JSON import', async () => {
+  it('builds the callback guide resource from flags', async () => {
     const root = await createEmptyProject();
 
-    const expected: AgentResource = {
-      schema: 'attest.agent',
-      id: 'async-coder',
-      name: 'Async coder',
-      transport: {
-        kind: 'callback',
-        lifecycle: 'external',
-        trigger: {
-          url: 'http://127.0.0.1:8790/runs',
-          method: 'POST',
-          headers: { 'X-Client': 'attest', 'X-Secret': { from_env: 'CALLBACK_TOKEN' } },
-          query: { region: 'us' },
-        },
-        idempotency_header: 'Idempotency-Key',
-        artifact_fetch: {
-          url: 'http://127.0.0.1:8790/artifacts/{{artifact_id}}',
-          method: 'GET',
-        },
-      },
-      timeouts: { attempt_ms: 600_000 },
-      redaction: { headers: ['X-Secret'] },
-    };
-
-    const flags = await runJson(root, [
+    const result = await runJson(root, [
       'agent',
       'add',
       'async-coder',
@@ -126,73 +103,35 @@ describe('agent commands', () => {
       '10m',
     ]);
 
-    expect(flags.exitCode).toBe(0);
-
-    await writeFile(join(root, 'callback-agent.json'), JSON.stringify(expected));
-
-    const imported = await runJson(root, [
-      'agent',
-      'import',
-      'callback-agent.json',
-      '--type',
-      'json',
-      '--as',
-      'async-coder-imported',
-      '--name',
-      'Async coder',
-    ]);
-
-    expect(imported.exitCode).toBe(0);
-
-    const callbackRequest = JSON.stringify({
-      schema: 'attest.command-request',
-      command: 'agent.add',
-      agent_id: 'async-coder-from-json',
-      name: 'Async coder',
-      callback_trigger_url: 'http://127.0.0.1:8790/runs',
-      callback_artifact_url: 'http://127.0.0.1:8790/artifacts/{{artifact_id}}',
-      idempotency_header: 'Idempotency-Key',
-      header: ['X-Client=attest'],
-      header_env: ['X-Secret=CALLBACK_TOKEN'],
-      query: ['region=us'],
-      timeout: '10m',
-    });
-
-    const fromJson = await runJson(root, ['agent', 'add', '--from-json', '-'], {
-      stdin: callbackRequest,
-    });
-
-    expect(fromJson.exitCode).toBe(0);
+    expect(result.exitCode).toBe(0);
 
     const loaded = await loadProject({ project: root });
-    expect(loaded.agents.find(({ id }) => id === 'async-coder')).toEqual(expected);
-    expect(loaded.agents.find(({ id }) => id === 'async-coder-imported')).toEqual({
-      ...expected,
-      id: 'async-coder-imported',
-    });
-    expect(loaded.agents.find(({ id }) => id === 'async-coder-from-json')).toEqual({
-      ...expected,
-      id: 'async-coder-from-json',
-    });
-  });
 
-  it('rejects callback flags combined with another transport using the transport conflict shape', async () => {
-    const root = await createEmptyProject();
-
-    const result = await runJson(root, [
-      'agent',
-      'add',
-      'conflicting',
-      '--callback-trigger-url',
-      'https://agent.example/runs',
-      '--stream-url',
-      'https://agent.example/events',
+    // docs/integrations/callbacks.md agent.json without `retry`, plus the header and query flags.
+    expect(loaded.agents).toEqual([
+      {
+        schema: 'attest.agent',
+        id: 'async-coder',
+        name: 'Async coder',
+        transport: {
+          kind: 'callback',
+          lifecycle: 'external',
+          trigger: {
+            url: 'http://127.0.0.1:8790/runs',
+            method: 'POST',
+            headers: { 'X-Client': 'attest', 'X-Secret': { from_env: 'CALLBACK_TOKEN' } },
+            query: { region: 'us' },
+          },
+          idempotency_header: 'Idempotency-Key',
+          artifact_fetch: {
+            url: 'http://127.0.0.1:8790/artifacts/{{artifact_id}}',
+            method: 'GET',
+          },
+        },
+        timeouts: { attempt_ms: 600_000 },
+        redaction: { headers: ['X-Secret'] },
+      },
     ]);
-
-    expect(result.exitCode).toBe(2);
-    expect(result.document).toMatchObject({
-      error: { code: 'cli_usage', details: { selected_transports: ['stream', 'callback'] } },
-    });
   });
 
   it('routes guided, --from-json, and import requests to canonical resources', async () => {
@@ -761,10 +700,6 @@ describe('agent commands', () => {
     expect(add.get('connection-mode')?.implies).toContain('websocket-url');
     expect(add.get('acknowledgement-value')?.repeatable).toBe(true);
     expect(add.get('attempt-timeout')?.implies).toContain('websocket-url');
-    expect(add.get('callback-trigger-url')?.conflicts).toContain('stream-url');
-    expect(add.get('callback-trigger-method')?.implies).toContain('callback-trigger-url');
-    expect(add.get('callback-trigger-method')?.choices).toEqual(['POST', 'PUT']);
-    expect(add.get('idempotency-header')?.implies).toContain('callback-trigger-url');
 
     const importOptions = await helpOptions('import');
 

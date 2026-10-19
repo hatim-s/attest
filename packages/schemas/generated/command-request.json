@@ -2657,135 +2657,36 @@
       "type": "object"
     },
     {
-      "anyOf": [
-        {
-          "additionalProperties": false,
-          "properties": {
-            "agent": {
-              "$ref": "#/$defs/AgentResource"
-            },
-            "command": {
-              "const": "agent.add",
-              "type": "string"
-            },
-            "dry_run": {
-              "type": "boolean"
-            },
-            "if_project_hash": {
-              "pattern": "^[a-f0-9]{64}$",
-              "type": "string"
-            },
-            "schema": {
-              "const": "attest.command-request",
-              "type": "string"
-            },
-            "yes": {
-              "type": "boolean"
-            }
-          },
-          "required": [
-            "schema",
-            "command",
-            "agent"
-          ],
-          "type": "object"
+      "additionalProperties": false,
+      "properties": {
+        "agent": {
+          "$ref": "#/$defs/AgentResource"
         },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "agent_id": {
-              "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
-              "type": "string"
-            },
-            "callback_artifact_url": {
-              "minLength": 1,
-              "type": "string"
-            },
-            "callback_port": {
-              "maximum": 65535,
-              "minimum": 0,
-              "type": "integer"
-            },
-            "callback_public_url": {
-              "minLength": 1,
-              "type": "string"
-            },
-            "callback_trace_url": {
-              "minLength": 1,
-              "type": "string"
-            },
-            "callback_trigger_method": {
-              "enum": [
-                "POST",
-                "PUT"
-              ],
-              "type": "string"
-            },
-            "callback_trigger_url": {
-              "minLength": 1,
-              "type": "string"
-            },
-            "command": {
-              "const": "agent.add",
-              "type": "string"
-            },
-            "dry_run": {
-              "type": "boolean"
-            },
-            "header": {
-              "items": {
-                "type": "string"
-              },
-              "type": "array"
-            },
-            "header_env": {
-              "items": {
-                "type": "string"
-              },
-              "type": "array"
-            },
-            "idempotency_header": {
-              "minLength": 1,
-              "type": "string"
-            },
-            "if_project_hash": {
-              "pattern": "^[a-f0-9]{64}$",
-              "type": "string"
-            },
-            "name": {
-              "minLength": 1,
-              "type": "string"
-            },
-            "query": {
-              "items": {
-                "type": "string"
-              },
-              "type": "array"
-            },
-            "schema": {
-              "const": "attest.command-request",
-              "type": "string"
-            },
-            "timeout": {
-              "minLength": 1,
-              "type": "string"
-            },
-            "trace": {
-              "type": "boolean"
-            },
-            "yes": {
-              "type": "boolean"
-            }
-          },
-          "required": [
-            "schema",
-            "command",
-            "agent_id",
-            "callback_trigger_url"
-          ],
-          "type": "object"
+        "command": {
+          "const": "agent.add",
+          "type": "string"
+        },
+        "dry_run": {
+          "type": "boolean"
+        },
+        "if_project_hash": {
+          "pattern": "^[a-f0-9]{64}$",
+          "type": "string"
+        },
+        "schema": {
+          "const": "attest.command-request",
+          "type": "string"
+        },
+        "yes": {
+          "type": "boolean"
         }
-      ]
+      },
+      "required": [
+        "schema",
+        "command",
+        "agent"
+      ],
+      "type": "object"
     },
     {
       "oneOf": [

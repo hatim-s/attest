@@ -15,7 +15,7 @@ import {
   tokenizeCommand,
 } from './input-parsers.js';
 import { schemaIssueDiagnostics } from '../../../internal/schema-issue-diagnostics.js';
-import { parseSecretBindings } from '../../shared/secret-bindings.js';
+import { parseNameValuePairs, parseSecretBindings } from '../../shared/secret-bindings.js';
 import { assertSafeNativeAgentResource } from './resource-validation.js';
 import type { AgentAddFields } from './types.js';
 
@@ -208,28 +208,6 @@ const agentAddFlagConflicts = (): Record<string, string[]> => {
 const fieldIsProvided = (value: AgentAddFields[keyof AgentAddFields]): boolean =>
   value !== undefined && (!Array.isArray(value) || value.length > 0);
 
-/** Parses repeatable NAME=VALUE mappings used by callback trigger headers and query values. */
-const parseTemplateValues = (values: readonly string[], path: '--header' | '--query') => {
-  const entries: Record<string, string> = {};
-
-  for (const value of values) {
-    const separator = value.indexOf('=');
-    const name = value.slice(0, separator).trim();
-    const content = value.slice(separator + 1).trim();
-
-    if (separator <= 0 || name.length === 0 || content.length === 0) {
-      throw new LocalError('cli_usage', `Invalid ${path}: ${value}.`, {
-        path,
-        hint: `Use NAME=VALUE for a callback trigger ${path === '--header' ? 'header' : 'query parameter'}.`,
-      });
-    }
-
-    entries[name] = content;
-  }
-
-  return entries;
-};
-
 /** Rejects every flag that the selected transport would otherwise silently discard. */
 const assertApplicableAuthoringFlags = (
   fields: AgentAddFields,
@@ -303,7 +281,7 @@ const createAgentResource = (fields: AgentAddFields): AgentResource => {
       'Select exactly one agent transport.',
       {
         path: '--argv-json',
-        hint: 'Pass one of `--argv-json`, `--native-command`, `--native-http`, `--background-command`, `--jsonl-command`, `--stream-url`, or `--websocket-url`.',
+        hint: 'Pass one of `--argv-json`, `--native-command`, `--native-http`, `--background-command`, `--jsonl-command`, `--stream-url`, `--websocket-url`, or `--callback-trigger-url`.',
         details: {
           selected_transports: selections,
         },
@@ -328,38 +306,41 @@ const createAgentResource = (fields: AgentAddFields): AgentResource => {
   let transport: AgentResource['transport'];
 
   if (fields.callbackTriggerUrl !== undefined) {
-    const listenPort = fields.callbackPort === undefined ? undefined : Number(fields.callbackPort);
+    const port = fields.callbackPort;
 
-    if (
-      listenPort !== undefined &&
-      (!Number.isInteger(listenPort) || listenPort < 0 || listenPort > 65_535)
-    ) {
+    // Number('') is 0, so the digit check keeps an empty value from selecting an ephemeral port.
+    if (port !== undefined && (!/^\d+$/u.test(port) || Number(port) > 65_535)) {
       throw new LocalError('cli_usage', 'Callback port must be an integer from 0 to 65535.', {
         path: '--callback-port',
       });
     }
 
+    const listenPort = port === undefined ? undefined : Number(port);
+
     const triggerHeaders = {
-      ...parseTemplateValues(fields.header ?? [], '--header'),
-      ...(headers.headers ?? {}),
+      ...parseNameValuePairs(
+        fields.header ?? [],
+        '--header',
+        'Use NAME=VALUE for a trigger header.',
+      ),
+      ...headers.headers,
     };
 
-    const triggerQuery = parseTemplateValues(fields.query ?? [], '--query');
-
-    const trigger: Extract<AgentResource['transport'], { kind: 'callback' }>['trigger'] = {
-      url: fields.callbackTriggerUrl,
-      method: fields.callbackTriggerMethod ?? 'POST',
-    };
-
-    if (Object.keys(triggerHeaders).length > 0) trigger.headers = triggerHeaders;
-
-    if (Object.keys(triggerQuery).length > 0) trigger.query = triggerQuery;
+    const triggerQuery = parseNameValuePairs(
+      fields.query ?? [],
+      '--query',
+      'Use NAME=VALUE for a trigger query value.',
+    );
 
     const callbackTransport: Extract<AgentResource['transport'], { kind: 'callback' }> = {
       kind: 'callback',
       lifecycle: 'external',
-      trigger,
+      trigger: { url: fields.callbackTriggerUrl, method: fields.callbackTriggerMethod ?? 'POST' },
     };
+
+    if (Object.keys(triggerHeaders).length > 0) callbackTransport.trigger.headers = triggerHeaders;
+
+    if (Object.keys(triggerQuery).length > 0) callbackTransport.trigger.query = triggerQuery;
 
     if (fields.idempotencyHeader !== undefined)
       callbackTransport.idempotency_header = fields.idempotencyHeader;

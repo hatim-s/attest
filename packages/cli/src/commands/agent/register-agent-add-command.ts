@@ -29,16 +29,9 @@ import { promptTransportFields } from './guided-agent-add.js';
 /** Fields whose flag spelling does not camel-case to the local field name. */
 type RenamedAddFields =
   | 'acknowledgementValues'
-  | 'callbackArtifactUrl'
-  | 'callbackPort'
-  | 'callbackPublicUrl'
-  | 'callbackTraceUrl'
-  | 'callbackTriggerMethod'
-  | 'callbackTriggerUrl'
   | 'agentId'
   | 'cancellationGrace'
   | 'terminalValues'
-  | 'idempotencyHeader'
   | 'webSocketLifecycle'
   | 'webSocketSubprotocol'
   | 'webSocketUrl';
@@ -46,18 +39,9 @@ type RenamedAddFields =
 type AddOptions = MutationCliOptions &
   Omit<AgentAddFields, RenamedAddFields> & {
     acknowledgementValue?: string[];
-    callbackArtifactUrl?: string;
-    callbackPort?: string;
-    callbackPublicUrl?: string;
-    callbackTraceUrl?: string;
-    callbackTriggerMethod?: 'POST' | 'PUT';
-    callbackTriggerUrl?: string;
     cancelGrace?: string;
-    idempotencyHeader?: string;
     subprotocol?: string;
     terminalValue?: string[];
-    header?: string[];
-    query?: string[];
     websocketLifecycle?: AgentAddFields['webSocketLifecycle'];
     websocketUrl?: string;
   };
@@ -108,16 +92,9 @@ const addOptionHelp = () => {
 const agentAddFields = (agentId: string | undefined, options: AddOptions) => ({
   ...options,
   acknowledgementValues: options.acknowledgementValue,
-  callbackArtifactUrl: options.callbackArtifactUrl,
-  callbackPort: options.callbackPort,
-  callbackPublicUrl: options.callbackPublicUrl,
-  callbackTraceUrl: options.callbackTraceUrl,
-  callbackTriggerMethod: options.callbackTriggerMethod,
-  callbackTriggerUrl: options.callbackTriggerUrl,
   agentId,
   cancellationGrace: options.cancelGrace,
   terminalValues: options.terminalValue,
-  idempotencyHeader: options.idempotencyHeader,
   webSocketLifecycle: options.websocketLifecycle,
   webSocketSubprotocol: options.subprotocol,
   webSocketUrl: options.websocketUrl,

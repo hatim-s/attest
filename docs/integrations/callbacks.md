@@ -82,22 +82,23 @@ kill %1
 
 ## Author a callback agent from flags
 
-The same transport can be authored with `agent add`. These flags write the trigger, idempotency
-header, and artifact fetch template from the JSON example above:
+This `agent add` call writes the same resource as `agent.json` above, without the `retry` block:
 
 ```sh
-attest agent add async-coder \
+attest agent add async-coder --name "Async coder" \
   --callback-trigger-url http://127.0.0.1:8790/runs \
-  --callback-trigger-method POST \
   --idempotency-header Idempotency-Key \
-  --callback-artifact-url http://127.0.0.1:8790/artifacts/{{artifact_id}} \
+  --callback-artifact-url 'http://127.0.0.1:8790/artifacts/{{artifact_id}}' \
   --timeout 10m --output json
 ```
 
-Use `--callback-trace-url` for a `{{trace_ref}}` GET template, and `--callback-port` or
-`--callback-public-url` to configure the receiver. Trigger headers and query values use repeatable
-`--header NAME=VALUE`, `--header-env NAME=SOURCE_ENV`, and `--query NAME=VALUE` options. Callback
-authoring also has a matching `agent.add` request shape for `--from-json`.
+`agent add` has no retry flags. Import the JSON when you want attest to retry the trigger.
+
+The trigger uses POST unless you pass `--callback-trigger-method PUT`. `--callback-trace-url` sets
+the `{{trace_ref}}` fetch template, and `--callback-port` and `--callback-public-url` set the
+receiver. `--header NAME=VALUE`, `--header-env NAME=SOURCE_ENV` and `--query NAME=VALUE` add
+trigger headers and query values, and each can repeat. Put credentials in `--header-env`: a literal
+`--header Authorization=...` fails validation.
 
 ## Prerequisites
 
