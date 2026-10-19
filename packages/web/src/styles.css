@@ -635,6 +635,14 @@ select:focus-visible,
   line-height: 1.55;
   max-height: 400px;
 }
+.artifact-preview {
+  margin-top: 12px;
+}
+.artifact-preview summary {
+  color: var(--muted);
+  font-size: 11px;
+  cursor: pointer;
+}
 .metric-list {
   display: grid;
 }

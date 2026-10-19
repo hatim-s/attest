@@ -66,3 +66,38 @@ describe('stored attempt excerpts', () => {
     ).toBe(false);
   });
 });
+
+describe('stored response artifacts', () => {
+  const artifact = {
+    kind: 'inline',
+    path: 'answer.ts',
+    media_type: 'text/typescript',
+    encoding: 'utf8',
+    content: 'export const answer = 42;',
+  };
+
+  const parseWithArtifacts = (artifacts: unknown[]) =>
+    parseRecord(
+      caseRecordSchema,
+      {
+        ...executionWithExcerpt({ text: 'Paris', truncated: false }),
+        response: { protocol: AGENT_PROTOCOL, output: 'Paris', artifacts },
+        rowId: 'row',
+        runId: 'run',
+        inputHash: 'hash',
+        metrics: [],
+      },
+      'case',
+    );
+
+  it('keeps inline artifacts and rejects references and unsafe paths', () => {
+    expect(parseWithArtifacts([artifact])).toMatchObject({
+      ok: true,
+      value: { response: { artifacts: [artifact] } },
+    });
+    expect(parseWithArtifacts([{ kind: 'reference', path: 'answer.ts', id: 'blob-1' }]).ok).toBe(
+      false,
+    );
+    expect(parseWithArtifacts([{ ...artifact, path: '../answer.ts' }]).ok).toBe(false);
+  });
+});
