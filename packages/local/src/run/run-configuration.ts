@@ -11,7 +11,6 @@ import {
   type EvalRunRequest,
 } from '@attest/contracts';
 import type { RunRecord } from '@attest/core';
-import { vercelSandboxIsolation } from '@attest/executor';
 import { executeResolvedEvalPlan, type EvalTerminalFailureFactory } from '@attest/runtime';
 import { z } from 'zod';
 
@@ -37,6 +36,7 @@ import {
   createEvalPersistenceAdapter,
 } from '../commands/eval/eval-persistence.js';
 import { resolveEvalRun } from '../commands/eval/eval-resolver.js';
+import { metricSandboxIsolation } from '../commands/eval/metric-sandbox.js';
 import { loadCommandProject } from '../commands/project/load-command-project.js';
 import { withRunNotFound } from '../commands/run-store/run-not-found.js';
 
@@ -192,11 +192,12 @@ const runConfiguration = async (
         {
           artifacts: createEvalArtifactWriter(project.root),
           baseline: createEvalBaselineAdapter(store),
-          // Each case gets one sandbox; its exec metrics run there through the case environment.
           isolation:
             metricSandbox === undefined
               ? undefined
-              : vercelSandboxIsolation({ image: metricSandbox.image }),
+              : metricSandboxIsolation(project.root, resolved.cases, {
+                  image: metricSandbox.image,
+                }),
           onEvent: (event) => queue.push(event),
           signal: AbortSignal.any([options.signal, registry.signal]),
           terminalFailure: options.terminalFailure,

@@ -73,13 +73,19 @@ metrics in a sandbox instead of on your machine, set `metric_sandbox` in the eva
 }
 ```
 
-Each case then gets one Vercel sandbox, booted from `image` when you set one and from
-`vercel/sandbox/universal` otherwise. Credentials are the ones listed in [ENV](../ENV.md). The request is written
-to `attest/metric-request.json` and the artifacts under `attest/artifacts/` in the sandbox
-workspace, and the command runs from the workspace root with the request on stdin. The metric's
-`cwd` and the host environment stay behind; only the variables in its `env` are forwarded.
-Project files are not copied, so the command must exist in the image or be self-contained, such
-as `python3 -c '...'`. HTTP and judge metrics are unaffected.
+A case with at least one exec metric then gets one Vercel sandbox, booted from `image` when you
+set one and from `vercel/sandbox/universal` otherwise; other cases get none. Credentials are the
+ones listed in [ENV](../ENV.md). The command runs from the workspace root with the request on
+stdin. The request is written to `attest/metric-request.json` and the artifacts under
+`attest/artifacts/`.
+
+Attest copies each argv entry that names a file in the project, resolved from the metric's `cwd`,
+into the workspace at the path the argv uses. `["node", "score.mjs"]` finds `score.mjs`; files that
+script imports are not copied, so bundle helpers into it or bake them into the image. The metric's
+`cwd` and the host environment stay behind; only the variables in its `env` are forwarded. The
+seeded scripts together, and the request file with every artifact inline, must each fit in 1 MiB,
+the sandbox's file limit. HTTP
+and judge metrics are unaffected.
 
 ## 5. Persist the run
 
