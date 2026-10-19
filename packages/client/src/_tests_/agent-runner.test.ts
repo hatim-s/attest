@@ -1,7 +1,12 @@
 import { AGENT_PROTOCOL, agentCompletionSchema } from '@attest/contracts';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { createAgentRunner, type AgentHandler, type RunnerFailure } from '../index.js';
+import {
+  createAgentRunner,
+  type AgentHandler,
+  type HandlerResult,
+  type RunnerFailure,
+} from '../index.js';
 import { serveAgentRunner } from '../node.js';
 import { startCompletionReceiver, type CompletionReceiver } from './support/completion-receiver.js';
 
@@ -23,7 +28,12 @@ const receiver = async (statuses: number[] = []): Promise<CompletionReceiver> =>
 
 const trigger = (
   callbackUrl: string,
-  init: { runnerUrl?: string; headers?: Record<string, string>; body?: string } = {},
+  init: {
+    runnerUrl?: string;
+    headers?: Record<string, string>;
+    body?: string;
+    token?: string;
+  } = {},
 ) =>
   new Request(init.runnerUrl ?? 'http://runner.test/', {
     method: 'POST',
@@ -35,7 +45,7 @@ const trigger = (
         run_id: RUN_ID,
         case_id: 'case-1',
         input: 'hello',
-        callback: { url: callbackUrl, token: 'secret-token' },
+        callback: { url: callbackUrl, token: init.token ?? 'secret-token' },
       }),
   });
 
@@ -133,6 +143,54 @@ describe('createAgentRunner', () => {
       error: { code: 'invalid_completion' },
     });
     expect(failures.map((failure) => failure.kind)).toEqual(['invalid_completion']);
+  });
+
+  it('runs a retried trigger once but a second registration of the same case again', async () => {
+    const completions = await receiver();
+    const tokens: string[] = [];
+    let release = (): void => undefined;
+    const released = new Promise<void>((resolve) => (release = resolve));
+
+    const runner = createAgentRunner({
+      handler: async (invocation) => {
+        tokens.push(invocation.callback.token);
+        await released;
+
+        return { output: null };
+      },
+    });
+
+    await runner.fetch(trigger(completions.url));
+    await runner.fetch(trigger(completions.url));
+    // Two tests in one run share the run and case id; only the callback token tells them apart.
+    await runner.fetch(trigger(completions.url, { token: 'other-token' }));
+    expect(runner.pending()).toBe(2);
+    release();
+    await runner.drain();
+
+    expect(tokens).toEqual(['secret-token', 'other-token']);
+    expect(completions.received.map((received) => received.authorization)).toEqual(
+      expect.arrayContaining(['Bearer secret-token', 'Bearer other-token']),
+    );
+  });
+
+  it('aborts running handlers on close, posts cancelled and refuses new triggers', async () => {
+    const completions = await receiver();
+
+    const runner = createAgentRunner({
+      handler: (_invocation, { signal }) =>
+        new Promise<HandlerResult>((_resolve, reject) => {
+          signal.addEventListener('abort', () => reject(new Error('aborted')));
+        }),
+    });
+
+    await runner.fetch(trigger(completions.url));
+    await runner.close();
+
+    expect(JSON.parse(completions.received[0]?.body ?? '')).toMatchObject({
+      error: { code: 'cancelled' },
+    });
+    expect((await runner.fetch(trigger(completions.url))).status).toBe(503);
   });
 
   it('refuses triggers it must not run', async () => {

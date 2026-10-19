@@ -166,9 +166,13 @@ const createAgentRunner = ({
     }
   };
 
-  /** Starts the invocation unless the same run and case is already running (a retried trigger). */
+  /**
+   * Starts the invocation unless a trigger with the same callback token is already running. A
+   * retried trigger repeats the token; two tests in one run can share a run and case id but never a
+   * token, so the token is the key.
+   */
   const accept = (invocation: AgentInvocation): Response => {
-    const key = `${invocation.run_id}/${invocation.case_id}`;
+    const key = invocation.callback.token;
 
     if (!inFlight.has(key)) {
       inFlight.set(

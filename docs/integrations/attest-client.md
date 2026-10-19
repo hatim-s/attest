@@ -107,8 +107,9 @@ Trigger responses:
 | `415`  | `content-type` is not `application/json`.                               |
 | `503`  | The runner is closing.                                                  |
 
-A trigger for a run and case that is still running answers `202` again without starting a
-second handler, so attest's idempotent trigger retries are safe.
+A trigger whose callback token is already running answers `202` again without starting a second
+handler, so attest's idempotent trigger retries are safe. Two tests in one run can send the same
+run and case id with different tokens; each gets its own handler.
 
 Completion delivery posts to `callback.url` with `Authorization: Bearer <callback.token>`. It
 makes up to three attempts, 250 ms and then 1 s apart, on network errors and `5xx`. Any other
