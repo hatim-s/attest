@@ -22,7 +22,7 @@ const checkRelease = async (): Promise<void> => {
       .filter((file) => file.endsWith('.tgz'))
       .map((file) => join(releaseDirectory, file));
 
-    assert.equal(tarballs.length, 9, 'Expected all nine release packages.');
+    assert.equal(tarballs.length, 10, 'Expected all ten release packages.');
     execFileSync('npm', ['install', '--no-audit', '--no-fund', ...tarballs], {
       cwd: directory,
       stdio: 'inherit',
@@ -84,12 +84,25 @@ import { cliResultSchema } from '@attest/contracts';
 import { openStore } from '@attest/local/store';
 import { startViewServer } from '@attest/local/view-server';
 import { invokeAgent } from '@attest/executor';
+import { createAgentRunner } from '@attest/client';
+import { collectArtifacts, serveAgentRunner } from '@attest/client/node';
+import { createPiHandler } from '@attest/client/pi';
 import { executeResolvedEvalPlan } from '@attest/runtime';
 import { createSingleProjectCatalog, selectCases } from '@attest/core';
 import { dashboardHtml } from '@attest/web/embedded';
 import { runCli } from '@attest/cli';
 assert.equal(typeof runCli, 'function');
 assert.equal(typeof invokeAgent, 'function');
+assert.equal(typeof collectArtifacts, 'function');
+assert.equal(typeof createPiHandler(), 'function');
+const runner = createAgentRunner({ handler: async () => ({ output: null }) });
+const served = await serveAgentRunner(runner, { port: 0 });
+try {
+  const trigger = await fetch(served.url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+  assert.equal(trigger.status, 400);
+} finally {
+  await served.close();
+}
 assert.equal(typeof executeResolvedEvalPlan, 'function');
 assert.equal(typeof selectCases, 'function');
 assert.equal(typeof cliResultSchema.parse, 'function');

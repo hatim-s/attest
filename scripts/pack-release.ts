@@ -15,6 +15,7 @@ const packageNames = [
   'core',
   'api',
   'executor',
+  'client',
   'runtime',
   'web',
   'local',
