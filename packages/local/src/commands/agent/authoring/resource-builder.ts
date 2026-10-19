@@ -15,7 +15,7 @@ import {
   tokenizeCommand,
 } from './input-parsers.js';
 import { schemaIssueDiagnostics } from '../../../internal/schema-issue-diagnostics.js';
-import { parseSecretBindings } from '../../shared/secret-bindings.js';
+import { parseNameValuePairs, parseSecretBindings } from '../../shared/secret-bindings.js';
 import { assertSafeNativeAgentResource } from './resource-validation.js';
 import type { AgentAddFields } from './types.js';
 
@@ -28,6 +28,12 @@ const AGENT_ADD_FLAGS: Readonly<Record<keyof AgentAddFields, string>> = {
   attemptTimeout: 'attempt-timeout',
   backgroundCommand: 'background-command',
   bridgeConcurrency: 'bridge-concurrency',
+  callbackArtifactUrl: 'callback-artifact-url',
+  callbackPort: 'callback-port',
+  callbackPublicUrl: 'callback-public-url',
+  callbackTraceUrl: 'callback-trace-url',
+  callbackTriggerMethod: 'callback-trigger-method',
+  callbackTriggerUrl: 'callback-trigger-url',
   cancellationGrace: 'cancel-grace',
   closeTimeout: 'close-timeout',
   connectionMode: 'connection-mode',
@@ -36,6 +42,8 @@ const AGENT_ADD_FLAGS: Readonly<Record<keyof AgentAddFields, string>> = {
   errorPointer: 'error-pointer',
   eventName: 'event-name',
   headerEnv: 'header-env',
+  header: 'header',
+  idempotencyHeader: 'idempotency-header',
   incrementalOutputMode: 'incremental-output-mode',
   incrementalOutputPointer: 'incremental-output-pointer',
   idleTimeout: 'idle-timeout',
@@ -51,6 +59,7 @@ const AGENT_ADD_FLAGS: Readonly<Record<keyof AgentAddFields, string>> = {
   readinessTcp: 'readiness-tcp',
   requestIdPointer: 'request-id-pointer',
   requestTemplate: 'request-template',
+  query: 'query',
   responsePointer: 'response-pointer',
   sandboxJson: 'sandbox-json',
   shutdownUrl: 'shutdown-url',
@@ -70,7 +79,7 @@ const AGENT_ADD_FLAGS: Readonly<Record<keyof AgentAddFields, string>> = {
 const COMMON_AUTHORING_FIELDS = new Set<keyof AgentAddFields>(['agentId', 'name', 'trace']);
 
 type TransportSelection =
-  'background' | 'jsonl' | 'native_cli' | 'native_http' | 'stream' | 'websocket';
+  'background' | 'callback' | 'jsonl' | 'native_cli' | 'native_http' | 'stream' | 'websocket';
 
 /** The flags that select a transport; exactly one may be passed. */
 const TRANSPORT_SELECTORS: readonly (readonly [keyof AgentAddFields, TransportSelection])[] = [
@@ -81,12 +90,26 @@ const TRANSPORT_SELECTORS: readonly (readonly [keyof AgentAddFields, TransportSe
   ['jsonlCommand', 'jsonl'],
   ['streamUrl', 'stream'],
   ['webSocketUrl', 'websocket'],
+  ['callbackTriggerUrl', 'callback'],
 ];
 
 const TRANSPORT_AUTHORING_FIELDS: Readonly<Record<TransportSelection, Set<keyof AgentAddFields>>> =
   {
     native_cli: new Set(['argvJson', 'nativeCommand', 'cwd', 'env', 'sandboxJson', 'timeout']),
     native_http: new Set(['nativeHttp', 'headerEnv', 'timeout']),
+    callback: new Set([
+      'callbackArtifactUrl',
+      'callbackPort',
+      'callbackPublicUrl',
+      'callbackTraceUrl',
+      'callbackTriggerMethod',
+      'callbackTriggerUrl',
+      'header',
+      'headerEnv',
+      'idempotencyHeader',
+      'query',
+      'timeout',
+    ]),
     background: new Set([
       'backgroundCommand',
       'cwd',
@@ -258,7 +281,7 @@ const createAgentResource = (fields: AgentAddFields): AgentResource => {
       'Select exactly one agent transport.',
       {
         path: '--argv-json',
-        hint: 'Pass one of `--argv-json`, `--native-command`, `--native-http`, `--background-command`, `--jsonl-command`, `--stream-url`, or `--websocket-url`.',
+        hint: 'Pass one of `--argv-json`, `--native-command`, `--native-http`, `--background-command`, `--jsonl-command`, `--stream-url`, `--websocket-url`, or `--callback-trigger-url`.',
         details: {
           selected_transports: selections,
         },
@@ -282,7 +305,63 @@ const createAgentResource = (fields: AgentAddFields): AgentResource => {
 
   let transport: AgentResource['transport'];
 
-  if (fields.nativeHttp !== undefined) {
+  if (fields.callbackTriggerUrl !== undefined) {
+    const port = fields.callbackPort;
+
+    // Number('') is 0, so the digit check keeps an empty value from selecting an ephemeral port.
+    if (port !== undefined && (!/^\d+$/u.test(port) || Number(port) > 65_535)) {
+      throw new LocalError('cli_usage', 'Callback port must be an integer from 0 to 65535.', {
+        path: '--callback-port',
+      });
+    }
+
+    const listenPort = port === undefined ? undefined : Number(port);
+
+    const triggerHeaders = {
+      ...parseNameValuePairs(
+        fields.header ?? [],
+        '--header',
+        'Use NAME=VALUE for a trigger header.',
+      ),
+      ...headers.headers,
+    };
+
+    const triggerQuery = parseNameValuePairs(
+      fields.query ?? [],
+      '--query',
+      'Use NAME=VALUE for a trigger query value.',
+    );
+
+    const callbackTransport: Extract<AgentResource['transport'], { kind: 'callback' }> = {
+      kind: 'callback',
+      lifecycle: 'external',
+      trigger: { url: fields.callbackTriggerUrl, method: fields.callbackTriggerMethod ?? 'POST' },
+    };
+
+    if (Object.keys(triggerHeaders).length > 0) callbackTransport.trigger.headers = triggerHeaders;
+
+    if (Object.keys(triggerQuery).length > 0) callbackTransport.trigger.query = triggerQuery;
+
+    if (fields.idempotencyHeader !== undefined)
+      callbackTransport.idempotency_header = fields.idempotencyHeader;
+
+    if (fields.callbackArtifactUrl !== undefined)
+      callbackTransport.artifact_fetch = { url: fields.callbackArtifactUrl, method: 'GET' };
+
+    if (fields.callbackTraceUrl !== undefined)
+      callbackTransport.trace_fetch = { url: fields.callbackTraceUrl, method: 'GET' };
+
+    if (listenPort !== undefined || fields.callbackPublicUrl !== undefined) {
+      callbackTransport.receiver = {};
+
+      if (listenPort !== undefined) callbackTransport.receiver.listen_port = listenPort;
+
+      if (fields.callbackPublicUrl !== undefined)
+        callbackTransport.receiver.public_url = fields.callbackPublicUrl;
+    }
+
+    transport = callbackTransport;
+  } else if (fields.nativeHttp !== undefined) {
     transport = {
       kind: 'http',
       lifecycle: 'external',

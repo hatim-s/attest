@@ -80,7 +80,25 @@ attest agent test async-coder --input '"write answer.ts"' --output json
 kill %1
 ```
 
-`attest agent add` has no callback flags yet, so author the resource as JSON and import it.
+## Author a callback agent from flags
+
+This `agent add` call writes the same resource as `agent.json` above, without the `retry` block:
+
+```sh
+attest agent add async-coder --name "Async coder" \
+  --callback-trigger-url http://127.0.0.1:8790/runs \
+  --idempotency-header Idempotency-Key \
+  --callback-artifact-url 'http://127.0.0.1:8790/artifacts/{{artifact_id}}' \
+  --timeout 10m --output json
+```
+
+`agent add` has no retry flags. Import the JSON when you want attest to retry the trigger.
+
+The trigger uses POST unless you pass `--callback-trigger-method PUT`. `--callback-trace-url` sets
+the `{{trace_ref}}` fetch template, and `--callback-port` and `--callback-public-url` set the
+receiver. `--header NAME=VALUE`, `--header-env NAME=SOURCE_ENV` and `--query NAME=VALUE` add
+trigger headers and query values, and each can repeat. Put credentials in `--header-env`: a literal
+`--header Authorization=...` fails validation.
 
 ## Prerequisites
 

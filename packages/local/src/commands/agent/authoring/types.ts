@@ -8,6 +8,12 @@ type AgentAddFields = {
   attemptTimeout?: string;
   backgroundCommand?: string;
   bridgeConcurrency?: 'serial' | 'multiplexed';
+  callbackArtifactUrl?: string;
+  callbackPort?: string;
+  callbackPublicUrl?: string;
+  callbackTraceUrl?: string;
+  callbackTriggerMethod?: 'POST' | 'PUT';
+  callbackTriggerUrl?: string;
   cancellationGrace?: string;
   closeTimeout?: string;
   connectionMode?: 'serial' | 'multiplexed';
@@ -16,6 +22,8 @@ type AgentAddFields = {
   errorPointer?: string;
   eventName?: string;
   headerEnv?: readonly string[];
+  header?: readonly string[];
+  idempotencyHeader?: string;
   incrementalOutputMode?: 'text' | 'array';
   incrementalOutputPointer?: string;
   idleTimeout?: string;
@@ -31,6 +39,7 @@ type AgentAddFields = {
   readinessTcp?: string;
   requestIdPointer?: string;
   requestTemplate?: string;
+  query?: readonly string[];
   responsePointer?: string;
   sandboxJson?: string;
   shutdownUrl?: string;

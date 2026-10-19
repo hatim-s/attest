@@ -55,6 +55,14 @@ const ADD_IMPLIES = new Map(
     'acknowledgement-value': ['websocket-url'],
     'attempt-timeout': ['websocket-url'],
     'close-timeout': ['websocket-url'],
+    'callback-artifact-url': ['callback-trigger-url'],
+    'callback-port': ['callback-trigger-url'],
+    'callback-public-url': ['callback-trigger-url'],
+    'callback-trace-url': ['callback-trigger-url'],
+    'callback-trigger-method': ['callback-trigger-url'],
+    'idempotency-header': ['callback-trigger-url'],
+    header: ['callback-trigger-url'],
+    query: ['callback-trigger-url'],
     'connection-mode': ['websocket-url'],
     'idle-timeout': ['websocket-url'],
     'incremental-output-mode': ['incremental-output-pointer'],
@@ -97,7 +105,9 @@ const registerAgentAddCommand = (agent: Command, context: CommandContext): void 
   const add = addMutationOptions(
     agent
       .command('add')
-      .description('Add one native, managed-process, streaming, or WebSocket agent resource.')
+      .description(
+        'Add one native, managed-process, streaming, WebSocket, or callback agent resource.',
+      )
       .argument('[agent-id]', 'agent id'),
   )
     .option('--name <name>', 'agent display name; defaults to the id')
@@ -109,6 +119,20 @@ const registerAgentAddCommand = (agent: Command, context: CommandContext): void 
     .option('--jsonl-command <command>', 'run-scoped correlated JSONL bridge command')
     .option('--stream-url <url>', 'external SSE or JSONL stream endpoint')
     .option('--websocket-url <url>', 'plain ws:// or wss:// text-JSON endpoint')
+    .option('--callback-trigger-url <url>', 'callback trigger endpoint; selects callback transport')
+    .addOption(
+      new Option('--callback-trigger-method <method>', 'callback trigger HTTP method').choices([
+        'POST',
+        'PUT',
+      ]),
+    )
+    .option('--callback-artifact-url <template>', 'GET template for {{artifact_id}}')
+    .option('--callback-trace-url <template>', 'GET template for {{trace_ref}}')
+    .option('--callback-public-url <url>', 'public callback receiver base URL')
+    .option('--callback-port <port>', 'callback receiver listen port, or 0 for an ephemeral port')
+    .option('--idempotency-header <name>', 'stable callback trigger idempotency header')
+    .option('--header <name=value>', 'callback trigger header; repeatable', collect)
+    .option('--query <name=value>', 'callback trigger query value; repeatable', collect)
     .addOption(
       new Option('--stream-framing <framing>', 'stream framing').choices(
         streamTransport.shape.framing.options,
@@ -213,6 +237,7 @@ const registerAgentAddCommand = (agent: Command, context: CommandContext): void 
       'attest agent add support --jsonl-command "node ./bridge.mjs" --bridge-concurrency multiplexed',
       'attest agent add support --stream-url https://example.com/events --stream-framing sse --terminal-pointer /type --terminal-value \'"result"\' --response-pointer /output',
       'attest agent add support --websocket-url wss://example.com/agent --header-env Authorization=AGENT_TOKEN --connection-mode multiplexed --response-pointer /output',
+      'attest agent add async-coder --callback-trigger-url https://example.com/runs --callback-artifact-url https://example.com/artifacts/{{artifact_id}}',
       'attest agent add --from-json ./agent-add.json --output json',
     ],
     options: addOptionHelp(),
