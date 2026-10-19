@@ -1,3 +1,3 @@
 export { exportRunBundle, readRunBundle } from './bundle-io.js';
 
-export { openRunStoreSnapshot, openStore } from './run-store.js';
+export { openReadonlyRunStore, openStore } from './run-store.js';
