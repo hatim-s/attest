@@ -1,4 +1,4 @@
-import { StoreError, type RunSource } from '@attest/core';
+import { createSingleProjectCatalog, StoreError, type RunSource } from '@attest/core';
 import {
   DEFAULT_PAGE_LIMIT,
   MAX_PAGE_LIMIT,
@@ -100,13 +100,19 @@ const fixture = (sourceRuns = runs) => {
     getRunWithCases: async (runId) => ({ run: await source.getRun(runId), cases: [] }),
   };
 
-  return { app: new Hono().route('/api', createApiApp({ source })), caseReads };
+  return {
+    app: new Hono().route(
+      '/api',
+      createApiApp({ catalog: createSingleProjectCatalog({ key: 'demo', name: 'Demo' }, source) }),
+    ),
+    caseReads,
+  };
 };
 
 describe('suite analytics endpoints', () => {
   it('aggregates every case page of a running run and preserves missing-run errors', async () => {
     const { app, caseReads } = fixture();
-    const response = await app.request('/api/runs/running/suites');
+    const response = await app.request('/api/projects/demo/runs/running/suites');
     expect(response.status).toBe(200);
     const body = apiResponses.listRunSuites.parse(await response.json());
     expect(body).toMatchObject({
@@ -127,12 +133,12 @@ describe('suite analytics endpoints', () => {
       { runId: 'running', cursor: '1', limit: 1000 },
       { runId: 'running', cursor: '2', limit: 1000 },
     ]);
-    const missing = await app.request('/api/runs/missing/suites');
+    const missing = await app.request('/api/projects/demo/runs/missing/suites');
     expect(missing.status).toBe(404);
     expect(await missing.json()).toEqual({
       error: { code: 'RUN_NOT_FOUND', message: 'Run missing missing.' },
     });
-    expect(await (await app.request('/api/runs/last/suites')).json()).toEqual({
+    expect(await (await app.request('/api/projects/demo/runs/last/suites')).json()).toEqual({
       runId: 'last',
       suites: [],
     });
@@ -140,7 +146,7 @@ describe('suite analytics endpoints', () => {
 
   it('skips running runs, counts absent suites toward the limit and keeps newest-first points', async () => {
     const { app, caseReads } = fixture();
-    const response = await app.request('/api/suites/a%2Fb/history?limit=2');
+    const response = await app.request('/api/projects/demo/suites/a%2Fb/history?limit=2');
     expect(response.status).toBe(200);
     const history = apiResponses.getSuiteHistory.parse(await response.json());
     expect(history).toMatchObject({
@@ -161,13 +167,15 @@ describe('suite analytics endpoints', () => {
     expect([...new Set(caseReads.map(({ runId }) => runId))]).toEqual(['absent', 'new']);
 
     const exhausted = apiResponses.getSuiteHistory.parse(
-      await (await app.request('/api/suites/a%2Fb/history')).json(),
+      await (await app.request('/api/projects/demo/suites/a%2Fb/history')).json(),
     );
 
     expect(exhausted.exhausted).toBe(true);
     expect(exhausted.runsExamined).toBe(4);
     expect(exhausted.points.map((point) => point.runId)).toEqual(['new', 'old']);
-    expect(await (await app.request('/api/suites/unknown/history?limit=1')).json()).toEqual({
+    expect(
+      await (await app.request('/api/projects/demo/suites/unknown/history?limit=1')).json(),
+    ).toEqual({
       suiteName: 'unknown',
       runsExamined: 1,
       exhausted: false,
@@ -183,7 +191,7 @@ describe('suite analytics endpoints', () => {
       [5, true, 3],
       [3, true, 3],
     ] as const) {
-      const response = await app.request(`/api/suites/a%2Fb/history?limit=${limit}`);
+      const response = await app.request(`/api/projects/demo/suites/a%2Fb/history?limit=${limit}`);
       expect(response.status).toBe(200);
       expect(await response.json()).toMatchObject({ exhausted, runsExamined });
     }
@@ -193,7 +201,7 @@ describe('suite analytics endpoints', () => {
     const { app, caseReads } = fixture();
 
     for (const limit of ['0', '51', '1.5', 'nope', '']) {
-      const response = await app.request(`/api/suites/a%2Fb/history?limit=${limit}`);
+      const response = await app.request(`/api/projects/demo/suites/a%2Fb/history?limit=${limit}`);
       expect(response.status).toBe(400);
       expect(await response.json()).toMatchObject({ error: { code: 'INVALID_REQUEST' } });
     }

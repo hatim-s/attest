@@ -1,14 +1,16 @@
 import { z } from 'zod';
-import { pageQuerySchema as corePageQuerySchema } from '@attest/core/records';
+import { pageQuerySchema as corePageQuerySchema, projectKeySchema } from '@attest/core/records';
 
 const idSchema = z.string().min(1);
 
-const runParamsSchema = z.object({ runId: idSchema });
+const projectParamsSchema = z.object({ projectKey: projectKeySchema });
 
-const caseParamsSchema = z.object({ runId: idSchema, suiteName: idSchema, caseId: idSchema });
+const runParamsSchema = projectParamsSchema.extend({ runId: idSchema });
 
-const diffParamsSchema = z
-  .object({ baseRunId: idSchema, candidateRunId: idSchema })
+const caseParamsSchema = runParamsSchema.extend({ suiteName: idSchema, caseId: idSchema });
+
+const diffParamsSchema = projectParamsSchema
+  .extend({ baseRunId: idSchema, candidateRunId: idSchema })
   .refine((params) => params.baseRunId !== params.candidateRunId, {
     message: 'baseRunId and candidateRunId must differ.',
   });
@@ -17,7 +19,7 @@ const pageQuerySchema = corePageQuerySchema.extend({
   limit: z.coerce.number().optional().pipe(corePageQuerySchema.shape.limit),
 });
 
-const suiteParamsSchema = z.object({ suiteName: idSchema });
+const suiteParamsSchema = projectParamsSchema.extend({ suiteName: idSchema });
 
 const MAX_SUITE_HISTORY_RUNS = 50;
 
@@ -37,6 +39,7 @@ const suiteHistoryRequestSchema = suiteParamsSchema.extend(suiteHistoryQuerySche
 type SuiteHistoryQuery = Partial<z.output<typeof suiteHistoryQuerySchema>>;
 
 export {
+  projectParamsSchema,
   runParamsSchema,
   caseParamsSchema,
   diffParamsSchema,

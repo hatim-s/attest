@@ -1,9 +1,18 @@
-import { StoreError, summarizeCaseRecord, type RunSource } from '@attest/core';
+import {
+  createSingleProjectCatalog,
+  StoreError,
+  summarizeCaseRecord,
+  type RunSource,
+} from '@attest/core';
 import type { CaseRecord, RunRecord } from '@attest/core/records';
 import { Hono } from 'hono';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createApiApp } from '../../server/create-api-app.js';
 import { createApiClient } from '../api-client.js';
+
+const project = { key: 'demo', name: 'Demo' };
+
+const projectKey = project.key;
 
 const run: RunRecord = {
   id: 'run',
@@ -91,7 +100,11 @@ afterEach(() => vi.unstubAllGlobals());
 
 describe('suite analytics clients', () => {
   it('round-trips aggregates and encoded suite history with its query and abort signal', async () => {
-    const app = new Hono().route('/api', createApiApp({ source }));
+    const app = new Hono().route(
+      '/api',
+      createApiApp({ catalog: createSingleProjectCatalog(project, source) }),
+    );
+
     const requests: { url: string; signal: AbortSignal | null | undefined }[] = [];
 
     const client = createApiClient({
@@ -109,7 +122,7 @@ describe('suite analytics clients', () => {
 
     const controller = new AbortController();
     expect(
-      await client.listRunSuites({ runId: run.id }, { signal: controller.signal }),
+      await client.listRunSuites({ projectKey, runId: run.id }, { signal: controller.signal }),
     ).toMatchObject({
       runId: run.id,
       suites: [
@@ -119,7 +132,7 @@ describe('suite analytics clients', () => {
     });
     expect(
       await client.getSuiteHistory(
-        { suiteName: 'a/b' },
+        { projectKey, suiteName: 'a/b' },
         { limit: 1 },
         { signal: controller.signal },
       ),
@@ -130,16 +143,16 @@ describe('suite analytics clients', () => {
       points: [point],
     });
     expect(requests).toEqual([
-      { url: '/api/runs/run/suites', signal: controller.signal },
-      { url: '/api/suites/a%2Fb/history?limit=1', signal: controller.signal },
+      { url: '/api/projects/demo/runs/run/suites', signal: controller.signal },
+      { url: '/api/projects/demo/suites/a%2Fb/history?limit=1', signal: controller.signal },
     ]);
-    expect(await client.getSuiteHistory({ suiteName: 'absent' }, {})).toEqual({
+    expect(await client.getSuiteHistory({ projectKey, suiteName: 'absent' }, {})).toEqual({
       suiteName: 'absent',
       runsExamined: 1,
       exhausted: true,
       points: [],
     });
-    await expect(client.listRunSuites({ runId: 'missing' })).rejects.toMatchObject({
+    await expect(client.listRunSuites({ projectKey, runId: 'missing' })).rejects.toMatchObject({
       status: 404,
       code: 'RUN_NOT_FOUND',
     });
@@ -152,16 +165,21 @@ describe('suite analytics clients', () => {
       fetch: () => Promise.resolve(Response.json({})),
     });
 
-    await expect(client.listRunSuites({ runId: run.id })).rejects.toMatchObject({
+    await expect(client.listRunSuites({ projectKey, runId: run.id })).rejects.toMatchObject({
       code: 'INVALID_RESPONSE',
     });
-    await expect(client.getSuiteHistory({ suiteName: 'a/b' }, {})).rejects.toMatchObject({
+    await expect(
+      client.getSuiteHistory({ projectKey, suiteName: 'a/b' }, {}),
+    ).rejects.toMatchObject({
       code: 'INVALID_RESPONSE',
     });
   });
 
   it('rejects invalid history limits with the same error in both client modes', async () => {
-    const app = new Hono().route('/api', createApiApp({ source }));
+    const app = new Hono().route(
+      '/api',
+      createApiApp({ catalog: createSingleProjectCatalog(project, source) }),
+    );
 
     const clients = [
       createApiClient({
@@ -171,19 +189,19 @@ describe('suite analytics clients', () => {
       }),
       createApiClient({
         kind: 'snapshot',
-        snapshot: { generatedAt: run.createdAt, run, cases, truncated: false },
+        snapshot: { generatedAt: run.createdAt, project, run, cases, truncated: false },
       }),
     ];
 
     for (const client of clients) {
       for (const limit of [0, 51, 1.5]) {
-        await expect(client.getSuiteHistory({ suiteName: 'a/b' }, { limit })).rejects.toMatchObject(
-          {
-            name: 'ApiError',
-            status: 400,
-            code: 'INVALID_REQUEST',
-          },
-        );
+        await expect(
+          client.getSuiteHistory({ projectKey, suiteName: 'a/b' }, { limit }),
+        ).rejects.toMatchObject({
+          name: 'ApiError',
+          status: 400,
+          code: 'INVALID_REQUEST',
+        });
       }
     }
   });
@@ -191,25 +209,33 @@ describe('suite analytics clients', () => {
   it('aggregates only embedded cases and omits running or absent suites from offline history', async () => {
     const network = vi.fn(() => Promise.reject(new Error('Snapshot touched fetch.')));
     vi.stubGlobal('fetch', network);
-    const snapshot = { generatedAt: run.createdAt, run, cases: cases.slice(0, 2), truncated: true };
+
+    const snapshot = {
+      generatedAt: run.createdAt,
+      project,
+      run,
+      cases: cases.slice(0, 2),
+      truncated: true,
+    };
+
     const client = createApiClient({ kind: 'snapshot', snapshot });
-    expect(await client.listRunSuites({ runId: run.id })).toEqual({
+    expect(await client.listRunSuites({ projectKey, runId: run.id })).toEqual({
       runId: run.id,
       suites: [{ suiteName: 'a/b', ...aggregate }],
     });
-    expect(await client.getSuiteHistory({ suiteName: 'a/b' }, { limit: 1 })).toEqual({
+    expect(await client.getSuiteHistory({ projectKey, suiteName: 'a/b' }, { limit: 1 })).toEqual({
       suiteName: 'a/b',
       runsExamined: 1,
       exhausted: true,
       points: [point],
     });
-    expect(await client.getSuiteHistory({ suiteName: 'z' }, { limit: 50 })).toEqual({
+    expect(await client.getSuiteHistory({ projectKey, suiteName: 'z' }, { limit: 50 })).toEqual({
       suiteName: 'z',
       runsExamined: 1,
       exhausted: true,
       points: [],
     });
-    await expect(client.listRunSuites({ runId: 'missing' })).rejects.toMatchObject({
+    await expect(client.listRunSuites({ projectKey, runId: 'missing' })).rejects.toMatchObject({
       status: 404,
       code: 'RUN_NOT_FOUND',
     });
@@ -219,13 +245,13 @@ describe('suite analytics clients', () => {
       snapshot: { ...snapshot, run: { ...run, status: 'running' } },
     });
 
-    expect(await running.getSuiteHistory({ suiteName: 'a/b' }, {})).toEqual({
+    expect(await running.getSuiteHistory({ projectKey, suiteName: 'a/b' }, {})).toEqual({
       suiteName: 'a/b',
       runsExamined: 0,
       exhausted: true,
       points: [],
     });
-    expect(await running.listRunSuites({ runId: run.id })).toEqual({
+    expect(await running.listRunSuites({ projectKey, runId: run.id })).toEqual({
       runId: run.id,
       suites: [{ suiteName: 'a/b', ...aggregate }],
     });

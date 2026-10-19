@@ -25,7 +25,14 @@ const settle = <T>(read: () => T): Promise<T> => Promise.resolve().then(read);
 
 /** Reads the already parsed bootstrap without making network requests from offline reports. */
 const createSnapshotClient = (snapshot: ReportSnapshot): ApiClient => {
-  const requireRun = (runId: string) => {
+  const requireProject = (projectKey: string): void => {
+    if (snapshot.project.key !== projectKey)
+      fail('PROJECT_NOT_FOUND', `Project ${projectKey} is not included in this report.`);
+  };
+
+  const requireRun = (projectKey: string, runId: string) => {
+    requireProject(projectKey);
+
     if (snapshot.run.id !== runId)
       return fail('RUN_NOT_FOUND', `Run ${runId} is not included in this report.`);
 
@@ -39,8 +46,10 @@ const createSnapshotClient = (snapshot: ReportSnapshot): ApiClient => {
       includedCases: snapshot.cases.length,
       truncated: snapshot.truncated,
     },
-    listRuns: (query) =>
+    listProjects: () => settle(() => ({ items: [snapshot.project] })),
+    listRuns: ({ projectKey }, query) =>
       settle(() => {
+        requireProject(projectKey);
         pageLimit(query);
 
         if (query.cursor === undefined) return { items: [snapshot.run] };
@@ -49,10 +58,10 @@ const createSnapshotClient = (snapshot: ReportSnapshot): ApiClient => {
 
         return fail('INVALID_CURSOR', `Run cursor ${query.cursor} is unknown.`);
       }),
-    getRun: ({ runId }) => settle(() => requireRun(runId)),
-    listCaseSummaries: ({ runId }, query) =>
+    getRun: ({ projectKey, runId }) => settle(() => requireRun(projectKey, runId)),
+    listCaseSummaries: ({ projectKey, runId }, query) =>
       settle(() => {
-        requireRun(runId);
+        requireRun(projectKey, runId);
         const limit = pageLimit(query);
 
         const index =
@@ -69,9 +78,9 @@ const createSnapshotClient = (snapshot: ReportSnapshot): ApiClient => {
           ? { items, nextCursor: page.at(-1)?.record.rowId }
           : { items };
       }),
-    getCase: ({ runId, suiteName, caseId }) =>
+    getCase: ({ projectKey, runId, suiteName, caseId }) =>
       settle(() => {
-        requireRun(runId);
+        requireRun(projectKey, runId);
 
         const found = snapshot.cases.find(
           ({ record }) => record.suiteName === suiteName && record.caseId === caseId,
@@ -85,9 +94,9 @@ const createSnapshotClient = (snapshot: ReportSnapshot): ApiClient => {
 
         return found.record;
       }),
-    listRunSuites: ({ runId }) =>
+    listRunSuites: ({ projectKey, runId }) =>
       settle(() => {
-        requireRun(runId);
+        requireRun(projectKey, runId);
 
         return {
           runId,
@@ -100,7 +109,8 @@ const createSnapshotClient = (snapshot: ReportSnapshot): ApiClient => {
 
         if (!parsed.success) return fail('INVALID_REQUEST', parsed.error.message);
 
-        const { suiteName } = parsed.data;
+        const { projectKey, suiteName } = parsed.data;
+        requireProject(projectKey);
         const run = snapshot.run;
 
         if (run.status === 'running')
@@ -119,12 +129,14 @@ const createSnapshotClient = (snapshot: ReportSnapshot): ApiClient => {
           exhausted: true,
         };
       }),
-    getDiff: ({ baseRunId, candidateRunId }) =>
+    getDiff: ({ projectKey, baseRunId, candidateRunId }) =>
       settle(() => {
+        requireProject(projectKey);
+
         if (baseRunId === candidateRunId)
           return fail('INVALID_REQUEST', 'baseRunId and candidateRunId must differ.');
-        requireRun(baseRunId);
-        requireRun(candidateRunId);
+        requireRun(projectKey, baseRunId);
+        requireRun(projectKey, candidateRunId);
 
         return fail('RUN_NOT_FOUND', 'The comparison run is not included in this report.');
       }),

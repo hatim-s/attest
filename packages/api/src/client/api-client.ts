@@ -7,7 +7,7 @@ import type {
   RunRecord,
 } from '@attest/core/records';
 import type { SuiteHistoryQuery } from '../contract/requests.js';
-import type { RunSuites, SuiteHistory } from '../contract/responses.js';
+import type { ProjectList, RunSuites, SuiteHistory } from '../contract/responses.js';
 import type { DashboardBootstrap } from '../contract/bootstrap.js';
 import type { apiRoutes, PathParams } from '../contract/routes.js';
 import { createHttpClient } from './http-client.js';
@@ -21,7 +21,12 @@ type ApiClientMode =
 
 type ApiClient = {
   mode: ApiClientMode;
-  listRuns(query: PageQuery, options?: RequestOptions): Promise<RunPage>;
+  listProjects(options?: RequestOptions): Promise<ProjectList>;
+  listRuns(
+    params: PathParams<typeof apiRoutes.listRuns>,
+    query: PageQuery,
+    options?: RequestOptions,
+  ): Promise<RunPage>;
   getRun(params: PathParams<typeof apiRoutes.getRun>, options?: RequestOptions): Promise<RunRecord>;
   listCaseSummaries(
     params: PathParams<typeof apiRoutes.listCaseSummaries>,
