@@ -26,6 +26,25 @@ type CommandMetricTransport = (
   options: MetricTransportOptions,
 ) => Promise<MetricTransportOutcome>;
 
+const MAXIMUM_STDERR_BYTES = 4 * 1024;
+
+/** Appends only the remaining stderr capacity so a single chunk cannot bypass the cap. */
+const appendStderr = (value: string, chunk: Buffer): string => {
+  const remainingBytes = MAXIMUM_STDERR_BYTES - Buffer.byteLength(value);
+
+  if (remainingBytes <= 0) {
+    return value;
+  }
+
+  return `${value}${chunk.subarray(0, remainingBytes).toString()}`;
+};
+
+/** Drops unset variables because spawners and case environments take a plain string record. */
+const definedEnvironment = (env: NodeJS.ProcessEnv): Record<string, string> =>
+  Object.fromEntries(
+    Object.entries(env).filter((entry): entry is [string, string] => entry[1] !== undefined),
+  );
+
 /** Builds the metric error for a deadline or caller cancellation, identical across transports. */
 const abortedMetricError = (reason: AbortReason, timeoutMs: number): MetricErrorInfo =>
   reason === 'timeout'
@@ -34,6 +53,8 @@ const abortedMetricError = (reason: AbortReason, timeoutMs: number): MetricError
 
 export {
   abortedMetricError,
+  appendStderr,
+  definedEnvironment,
   type MetricTransportOptions,
   type MetricTransportOutcome,
   type CommandMetricTransport,

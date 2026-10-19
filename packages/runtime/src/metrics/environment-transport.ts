@@ -3,7 +3,12 @@ import { posix } from 'node:path';
 import type { CaseEnvironment } from '@attest/executor';
 
 import { abortReasonOf, composeAbortSignal } from './internal/abort-signal.js';
-import { abortedMetricError, type CommandMetricTransport } from './internal/metric-transport.js';
+import {
+  abortedMetricError,
+  appendStderr,
+  definedEnvironment,
+  type CommandMetricTransport,
+} from './internal/metric-transport.js';
 
 /** Workspace-relative locations; the command runs from the workspace root. */
 const ARTIFACT_DIR = 'attest/artifacts';
@@ -12,14 +17,8 @@ const STAGING_DIR = 'attest/staging';
 
 const REQUEST_PATH = 'attest/metric-request.json';
 
-const MAXIMUM_STDERR_BYTES = 4 * 1024;
-
 /** Quotes one argument for `sh`; inside single quotes only `'` itself needs escaping. */
 const quote = (argument: string): string => `'${argument.replaceAll("'", `'\\''`)}'`;
-
-/** Keeps at most `maximumBytes` of UTF-8 text without splitting the cap on a character. */
-const excerpt = (text: string, maximumBytes: number): string =>
-  Buffer.from(text).subarray(0, maximumBytes).toString();
 
 /**
  * Runs command metrics inside a case environment such as a Vercel sandbox. The request goes to
@@ -32,11 +31,7 @@ const createEnvironmentMetricTransport = (environment: CaseEnvironment): Command
   return async (definition, request, options) => {
     const signal = composeAbortSignal(options.signal, options.timeoutMs);
 
-    const env = Object.fromEntries(
-      Object.entries(options.env ?? {}).filter(
-        (entry): entry is [string, string] => entry[1] !== undefined,
-      ),
-    );
+    const env = definedEnvironment(options.env ?? {});
 
     try {
       const directories = new Set([STAGING_DIR, ARTIFACT_DIR]);
@@ -57,7 +52,7 @@ const createEnvironmentMetricTransport = (environment: CaseEnvironment): Command
           error: {
             code: 'exec_spawn_failed',
             message: 'Could not prepare the metric sandbox workspace.',
-            details: { stderr: excerpt(prepared.stderr, MAXIMUM_STDERR_BYTES) },
+            details: { stderr: appendStderr('', Buffer.from(prepared.stderr)) },
           },
         };
       }
@@ -96,7 +91,7 @@ const createEnvironmentMetricTransport = (environment: CaseEnvironment): Command
             details:
               result.stderr.length === 0
                 ? undefined
-                : { stderr: excerpt(result.stderr, MAXIMUM_STDERR_BYTES) },
+                : { stderr: appendStderr('', Buffer.from(result.stderr)) },
           },
         };
       }
