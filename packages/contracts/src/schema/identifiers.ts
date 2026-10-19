@@ -4,6 +4,9 @@
 /** Identifies the agent invocation request and response envelopes. */
 const AGENT_PROTOCOL = 'attest.agent-invocation' as const;
 
+/** Identifies the completion an async agent posts back to its callback URL. */
+const AGENT_COMPLETION_PROTOCOL = 'attest.agent-completion' as const;
+
 /** Identifies trace documents described by the trace schema contract. */
 const TRACE_SCHEMA_ID = 'attest.trace' as const;
 
@@ -62,6 +65,7 @@ const WEBSOCKET_MESSAGE_PROTOCOL = 'attest.websocket-message' as const;
 const WEBSOCKET_EVIDENCE_SCHEMA_ID = 'attest.websocket-evidence' as const;
 
 export {
+  AGENT_COMPLETION_PROTOCOL,
   AGENT_PROTOCOL,
   AGENT_RESOURCE_SCHEMA_ID,
   CASE_SCHEMA_ID,

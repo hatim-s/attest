@@ -1,5 +1,5 @@
 {
-  "$comment": "Runtime-only invariants: polling needs exactly one status URL source, ordered intervals, and disjoint terminal values; sandbox destinations are unique after relative-path normalization; HTTP body_encoding requires a body, and raw bodies are strings; stream incremental output pointer and mode appear together; WebSocket timeouts nest, pointers are distinct, and authorization headers use secret references; regex checks must compile, and threshold checks need at least one comparison.",
+  "$comment": "Runtime-only invariants: polling needs exactly one status URL source, ordered intervals, and disjoint terminal values; sandbox destinations are unique after relative-path normalization; HTTP body_encoding requires a body, and raw bodies are strings; stream incremental output pointer and mode appear together; WebSocket timeouts nest, pointers are distinct, and authorization headers use secret references; callback triggers use POST or PUT without a body, and fetch templates use GET; regex checks must compile, and threshold checks need at least one comparison.",
   "$defs": {
     "AgentResource": {
       "additionalProperties": false,
@@ -23,6 +23,16 @@
         "limits": {
           "additionalProperties": false,
           "properties": {
+            "artifact_bytes": {
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991,
+              "type": "integer"
+            },
+            "artifact_count": {
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991,
+              "type": "integer"
+            },
             "event_bytes": {
               "exclusiveMinimum": 0,
               "maximum": 9007199254740991,
@@ -39,6 +49,11 @@
               "type": "integer"
             },
             "response_bytes": {
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991,
+              "type": "integer"
+            },
+            "total_artifact_bytes": {
               "exclusiveMinimum": 0,
               "maximum": 9007199254740991,
               "type": "integer"
@@ -863,6 +878,53 @@
             },
             {
               "$ref": "#/$defs/WebSocketTransport"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "artifact_fetch": {
+                  "$ref": "#/$defs/HttpRequestTemplate"
+                },
+                "idempotency_header": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "kind": {
+                  "const": "callback",
+                  "type": "string"
+                },
+                "lifecycle": {
+                  "const": "external",
+                  "type": "string"
+                },
+                "receiver": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "listen_port": {
+                      "maximum": 65535,
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "public_url": {
+                      "pattern": "^https?:\\/\\/\\S+$",
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                },
+                "trace_fetch": {
+                  "$ref": "#/$defs/HttpRequestTemplate"
+                },
+                "trigger": {
+                  "$ref": "#/$defs/HttpRequestTemplate"
+                }
+              },
+              "required": [
+                "kind",
+                "lifecycle",
+                "trigger"
+              ],
+              "type": "object"
             }
           ]
         }
@@ -2709,6 +2771,16 @@
             "limits": {
               "additionalProperties": false,
               "properties": {
+                "artifact_bytes": {
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991,
+                  "type": "integer"
+                },
+                "artifact_count": {
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991,
+                  "type": "integer"
+                },
                 "event_bytes": {
                   "exclusiveMinimum": 0,
                   "maximum": 9007199254740991,
@@ -2725,6 +2797,11 @@
                   "type": "integer"
                 },
                 "response_bytes": {
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991,
+                  "type": "integer"
+                },
+                "total_artifact_bytes": {
                   "exclusiveMinimum": 0,
                   "maximum": 9007199254740991,
                   "type": "integer"

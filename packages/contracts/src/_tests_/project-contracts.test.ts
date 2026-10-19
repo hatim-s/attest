@@ -86,6 +86,7 @@ const project: ProjectManifest = {
         after_case: { argv: ['node', 'scripts/archive-case.mjs'] },
         after_run: { argv: ['node', 'scripts/archive-run.mjs'] },
       },
+      metric_sandbox: { kind: 'vercel', image: 'node22' },
     },
   },
   resources: {
@@ -243,7 +244,7 @@ describe('authored resource contracts', () => {
 describe('eval execution defaults contract', () => {
   const execution = project.defaults?.eval;
 
-  it('accepts strict worker isolation and every lifecycle hook', () => {
+  it('accepts strict worker isolation, every lifecycle hook and a metric sandbox', () => {
     expect(execution).toBeDefined();
     expect(evalExecutionConfigSchema.safeParse(execution).success).toBe(true);
   });
@@ -260,6 +261,9 @@ describe('eval execution defaults contract', () => {
     { hooks: { before_case: { argv: [''] } } },
     { hooks: { after_case: { argv: ['node'], timeout_ms: 0 } } },
     { hooks: { after_run: { argv: ['node'], shell: true } } },
+    { metric_sandbox: { kind: 'docker' } },
+    { metric_sandbox: { kind: 'vercel', image: '' } },
+    { metric_sandbox: { kind: 'vercel', files: [] } },
   ])('rejects invalid or unknown eval execution fields in %#', (candidate) => {
     expect(evalExecutionConfigSchema.safeParse(candidate).success).toBe(false);
   });
@@ -345,6 +349,15 @@ describe('agent transport contract', () => {
       close_timeout_ms: 5_000,
       retry_boundary: 'before_acknowledgement',
       replay_after_acknowledgement: false,
+    },
+    {
+      kind: 'callback',
+      lifecycle: 'external',
+      trigger: { url: 'https://example.com/trigger', method: 'POST' },
+      idempotency_header: 'Idempotency-Key',
+      artifact_fetch: { url: 'https://example.com/artifacts/{{artifact_id}}', method: 'GET' },
+      trace_fetch: { url: 'https://example.com/traces/{{trace_ref}}', method: 'GET' },
+      receiver: { listen_port: 0, public_url: 'https://attest.example.com' },
     },
   ];
 
@@ -467,6 +480,53 @@ describe('agent transport contract', () => {
         transport: { ...polling, minimum_interval_ms: 6_000 },
       }).success,
     ).toBe(false);
+  });
+
+  it.each([
+    [{ trigger: { url: 'https://example.com/trigger', method: 'GET' } }, ['trigger', 'method']],
+    [
+      { trigger: { url: 'https://example.com/trigger', method: 'POST', body: { input: 1 } } },
+      ['trigger', 'body'],
+    ],
+    [
+      { artifact_fetch: { url: 'https://example.com/artifacts/{{artifact_id}}', method: 'POST' } },
+      ['artifact_fetch', 'method'],
+    ],
+    [
+      { trace_fetch: { url: 'https://example.com/traces/{{trace_ref}}', method: 'PUT' } },
+      ['trace_fetch', 'method'],
+    ],
+    [{ receiver: { listen_port: 65_536 } }, ['receiver', 'listen_port']],
+    [{ receiver: { public_url: 'ftp://attest.example.com' } }, ['receiver', 'public_url']],
+  ] as const)('rejects the callback transport change %j', (change, path) => {
+    const callback = transports.find((transport) => transport.kind === 'callback');
+
+    const result = agentResourceSchema.safeParse({
+      ...agent,
+      transport: { ...callback, ...change },
+    });
+
+    expect(result.success).toBe(false);
+
+    if (result.success) return;
+    expect(result.error.issues).toContainEqual(
+      expect.objectContaining({ path: ['transport', ...path] }),
+    );
+  });
+
+  it('accepts artifact limits and rejects non-positive ones', () => {
+    const limits = {
+      artifact_count: 64,
+      artifact_bytes: 4_194_304,
+      total_artifact_bytes: 16_777_216,
+    };
+
+    expect(agentResourceSchema.safeParse({ ...agent, limits }).success).toBe(true);
+
+    for (const field of Object.keys(limits))
+      expect(
+        agentResourceSchema.safeParse({ ...agent, limits: { ...limits, [field]: 0 } }).success,
+      ).toBe(false);
   });
 });
 

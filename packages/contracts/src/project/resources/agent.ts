@@ -25,6 +25,9 @@ const agentEvidenceLimitsSchema = z.strictObject({
   event_count: z.number().int().positive().optional(),
   event_bytes: z.number().int().positive().optional(),
   total_evidence_bytes: z.number().int().positive().optional(),
+  artifact_count: z.number().int().positive().optional(),
+  artifact_bytes: z.number().int().positive().optional(),
+  total_artifact_bytes: z.number().int().positive().optional(),
 });
 
 /** Marks transport locations that must be redacted before evidence persistence. */

@@ -82,6 +82,14 @@ const transports: AgentTransport[] = [
     retry_boundary: 'before_acknowledgement',
     replay_after_acknowledgement: false,
   },
+  {
+    kind: 'callback',
+    lifecycle: 'external',
+    trigger: request,
+    artifact_fetch: { url: 'https://agent.example/artifacts/{{artifact_id}}', method: 'GET' },
+    trace_fetch: { url: 'https://agent.example/traces/{{trace_ref}}', method: 'GET' },
+    receiver: { public_url: 'https://attest.example/hooks' },
+  },
   { kind: 'native_cli', lifecycle: 'per_case', argv: ['agent'] },
   {
     kind: 'jsonl_bridge',
@@ -156,7 +164,7 @@ describe('portable bundle limits and credentials', () => {
         );
       }
 
-      for (const field of ['request', 'submit', 'invoke', 'shutdown'] as const) {
+      for (const field of ['request', 'submit', 'invoke', 'shutdown', 'trigger'] as const) {
         if (!(field in transport)) continue;
 
         for (const [badRequest, issuePath, message] of [
@@ -265,6 +273,37 @@ describe('portable bundle limits and credentials', () => {
             }),
           ).success,
         ).toBe(true);
+      }
+
+      if (transport.kind === 'callback') {
+        expectIssue(
+          withTransport({
+            ...transport,
+            artifact_fetch: {
+              url: 'https://agent.example/artifacts/{{artifact_id}}',
+              method: 'GET',
+              headers: { Authorization: 'Bearer secret' },
+            },
+          }),
+          ['agents', 0, 'transport', 'artifact_fetch', 'headers', 'Authorization'],
+          'credential fields must use environment references',
+        );
+        expectIssue(
+          withTransport({
+            ...transport,
+            trace_fetch: { url: 'https://agent.example/traces?id={{trace_ref}}', method: 'GET' },
+          }),
+          ['agents', 0, 'transport', 'trace_fetch', 'url'],
+          'portable HTTP request URLs must not contain query strings',
+        );
+        expectIssue(
+          withTransport({
+            ...transport,
+            receiver: { public_url: 'https://user:pass@attest.example' },
+          }),
+          ['agents', 0, 'transport', 'receiver', 'public_url'],
+          'portable URLs must not contain credentials',
+        );
       }
 
       if (transport.kind === 'background_cli') {

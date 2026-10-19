@@ -5,6 +5,7 @@ import { CONTRACT_JSON_SCHEMAS } from '../schema/json-schema.js';
 import { loadFixtures } from './support/load-fixtures.js';
 import { compileGeneratedSchema } from './support/compile-generated-schema.js';
 import {
+  AGENT_COMPLETION_PROTOCOL,
   AGENT_PROTOCOL,
   AGENT_RESOURCE_SCHEMA_ID,
   CASE_SCHEMA_ID,
@@ -158,7 +159,85 @@ const webSocketEvidence = {
   events: [{ classification: 'connection_opened', elapsed_ms: 2 }],
 };
 
+const validCompletion = {
+  protocol: AGENT_COMPLETION_PROTOCOL,
+  run_id: '01ARZ3NDEKTSV4RRFFQ69G5FAV',
+  case_id: 'case-01',
+  output: 'Wrote answer.ts',
+  artifacts: [
+    {
+      kind: 'inline',
+      path: 'src/answer.ts',
+      media_type: 'text/typescript',
+      encoding: 'utf8',
+      content: 'export {};',
+    },
+    { kind: 'reference', path: 'shots/home.png', id: 'blob-1' },
+  ],
+};
+
+const callbackAgent = {
+  ...validAgent,
+  transport: {
+    kind: 'callback',
+    lifecycle: 'external',
+    trigger: { url: 'https://agent.example/trigger', method: 'POST' },
+  },
+};
+
 const fixtures: ConformanceFixture[] = [
+  {
+    name: 'agent completion accepts inline and reference artifacts',
+    fileName: 'agent-completion.json',
+    candidate: validCompletion,
+    valid: true,
+  },
+  {
+    name: 'agent completion rejects both output and error',
+    fileName: 'agent-completion.json',
+    candidate: { ...validCompletion, error: { message: 'failed' } },
+    valid: false,
+  },
+  {
+    name: 'agent completion rejects a trace with a trace reference',
+    fileName: 'agent-completion.json',
+    candidate: { ...validCompletion, trace: {}, trace_ref: 'trace-1' },
+    valid: false,
+  },
+  {
+    name: 'agent completion rejects a non-canonical artifact path',
+    fileName: 'agent-completion.json',
+    candidate: {
+      ...validCompletion,
+      artifacts: [{ kind: 'reference', path: 'shots//home.png', id: 'blob-1' }],
+    },
+    valid: false,
+  },
+  {
+    name: 'agent completion rejects an artifact path with a control character',
+    fileName: 'agent-completion.json',
+    candidate: {
+      ...validCompletion,
+      artifacts: [{ kind: 'reference', path: 'shots/\u0007.png', id: 'blob-1' }],
+    },
+    valid: false,
+  },
+  {
+    name: 'agent response rejects reference artifacts',
+    fileName: 'agent-response.json',
+    candidate: {
+      protocol: AGENT_PROTOCOL,
+      output: 'done',
+      artifacts: [{ kind: 'reference', path: 'shots/home.png', id: 'blob-1' }],
+    },
+    valid: false,
+  },
+  {
+    name: 'current agent accepts a callback transport',
+    fileName: 'agent.json',
+    candidate: callbackAgent,
+    valid: true,
+  },
   {
     name: 'trace rejects a missing span kind',
     fileName: 'trace.json',
@@ -462,6 +541,30 @@ const divergenceFixtures: DivergenceFixture[] = [
       },
     },
     reason: 'Destination uniqueness needs platform-independent relative-path normalization.',
+  },
+  {
+    name: 'agent rejects a callback trigger that is not POST or PUT',
+    fileName: 'agent.json',
+    candidate: {
+      ...callbackAgent,
+      transport: {
+        ...callbackAgent.transport,
+        trigger: { ...callbackAgent.transport.trigger, method: 'GET' },
+      },
+    },
+    reason: 'The trigger method rule lives in a refinement over a shared request template.',
+  },
+  {
+    name: 'agent request rejects a non-HTTP callback URL',
+    fileName: 'agent-request.json',
+    candidate: {
+      protocol: AGENT_PROTOCOL,
+      run_id: '01ARZ3NDEKTSV4RRFFQ69G5FAV',
+      case_id: 'case-01',
+      input: {},
+      callback: { url: 'ftp://attest.example/completions', token: 'secret' },
+    },
+    reason: 'JSON Schema format "uri" accepts every scheme; the http(s) rule is Zod-only.',
   },
 ];
 

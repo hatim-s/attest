@@ -16,6 +16,8 @@ const buildMetricRequest = (context: CompletedMetricContext): MetricRequest => (
   },
   output: context.execution.output,
   trace: context.execution.trace,
+  artifacts: [],
+  artifact_dir: null,
 });
 
 export { buildMetricRequest };

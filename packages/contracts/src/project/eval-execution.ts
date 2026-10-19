@@ -34,10 +34,16 @@ const evalHooksSchema = z.strictObject({
   after_run: evalHookCommandSchema.optional(),
 });
 
-/** Groups project-authored eval worker and lifecycle-hook defaults. */
+/** Runs command metrics inside a sandbox instead of on the host. */
+const metricSandboxSchema = z.discriminatedUnion('kind', [
+  z.strictObject({ kind: z.literal('vercel'), image: z.string().min(1).optional() }),
+]);
+
+/** Groups project-authored eval worker, lifecycle-hook and metric sandbox defaults. */
 const evalExecutionConfigSchema = z.strictObject({
   workers: evalWorkersSchema.optional(),
   hooks: evalHooksSchema.optional(),
+  metric_sandbox: metricSandboxSchema.optional(),
 });
 
 type EvalExecutionConfig = z.infer<typeof evalExecutionConfigSchema>;
@@ -48,14 +54,18 @@ type EvalHooks = z.infer<typeof evalHooksSchema>;
 
 type EvalWorkers = z.infer<typeof evalWorkersSchema>;
 
+type MetricSandbox = z.infer<typeof metricSandboxSchema>;
+
 export {
   evalExecutionConfigSchema,
   evalHookCommandSchema,
   evalHooksSchema,
   evalWorkerDirectorySchema,
   evalWorkersSchema,
+  metricSandboxSchema,
   type EvalExecutionConfig,
   type EvalHookCommand,
   type EvalHooks,
   type EvalWorkers,
+  type MetricSandbox,
 };

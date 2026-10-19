@@ -111,6 +111,24 @@
     ]
   },
   "properties": {
+    "callback": {
+      "additionalProperties": false,
+      "properties": {
+        "token": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "url": {
+          "format": "uri",
+          "type": "string"
+        }
+      },
+      "required": [
+        "url",
+        "token"
+      ],
+      "type": "object"
+    },
     "case_id": {
       "type": "string"
     },

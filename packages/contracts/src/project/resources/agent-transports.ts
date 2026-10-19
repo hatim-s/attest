@@ -209,6 +209,56 @@ const streamTransportSchema = z
     }
   });
 
+/**
+ * Triggers an async agent and waits for it to post an `attest.agent-completion` back. Attest sends
+ * the request envelope as the trigger body, and the fetch templates resolve reference artifacts
+ * (`{{artifact_id}}`) and trace references (`{{trace_ref}}`).
+ */
+const callbackTransportSchema = z
+  .strictObject({
+    kind: z.literal('callback'),
+    lifecycle: z.literal('external'),
+    trigger: httpRequestTemplateSchema,
+    idempotency_header: z.string().min(1).optional(),
+    artifact_fetch: httpRequestTemplateSchema.optional(),
+    trace_fetch: httpRequestTemplateSchema.optional(),
+    receiver: z
+      .strictObject({
+        // 0 binds an ephemeral port.
+        listen_port: z.number().int().min(0).max(65_535).optional(),
+        // The base URL the agent is told to post to; defaults to the loopback listener.
+        public_url: httpUrlTemplateSchema.optional(),
+      })
+      .optional(),
+  })
+  .superRefine((callback, context) => {
+    if (callback.trigger.method !== 'POST' && callback.trigger.method !== 'PUT') {
+      context.addIssue({
+        code: 'custom',
+        path: ['trigger', 'method'],
+        message: 'must be POST or PUT',
+      });
+    }
+
+    if (callback.trigger.body !== undefined) {
+      context.addIssue({
+        code: 'custom',
+        path: ['trigger', 'body'],
+        message: 'must be omitted; attest sends the request envelope as the body',
+      });
+    }
+
+    for (const field of ['artifact_fetch', 'trace_fetch'] as const) {
+      if (callback[field] !== undefined && callback[field].method !== 'GET') {
+        context.addIssue({
+          code: 'custom',
+          path: [field, 'method'],
+          message: 'must be GET',
+        });
+      }
+    }
+  });
+
 /** Encodes every supported agent transport definition. */
 const agentTransportSchema = z.discriminatedUnion('kind', [
   nativeForegroundTransportSchema,
@@ -218,6 +268,7 @@ const agentTransportSchema = z.discriminatedUnion('kind', [
   pollingTransportSchema,
   streamTransportSchema,
   webSocketTransportSchema,
+  callbackTransportSchema,
 ]);
 
 type AgentTransport = z.infer<typeof agentTransportSchema>;
