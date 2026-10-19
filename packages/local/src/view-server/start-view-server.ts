@@ -1,9 +1,5 @@
-import { mkdir } from 'node:fs/promises';
-import { dirname } from 'node:path';
-
 import { serve, type ServerType } from '@hono/node-server';
 
-import { openStore } from '../store/index.js';
 import { createViewApp } from './create-view-app.js';
 import type { StartViewServerOptions, ViewServerHandle } from './types.js';
 
@@ -12,24 +8,22 @@ const closeServer = (server: ServerType): Promise<void> =>
     server.close((error) => (error === undefined ? resolve() : reject(error)));
   });
 
-/** Opens the store and a loopback-only ephemeral server as one closeable lifecycle. */
+/** Serves the catalog on a loopback-only ephemeral port as one closeable lifecycle. */
 const startViewServer = async (options: StartViewServerOptions): Promise<ViewServerHandle> => {
-  await mkdir(dirname(options.storePath), { recursive: true });
-  const store = await openStore(options.storePath);
   let origin: string | undefined;
   let server: ServerType | undefined;
   let closePromise: Promise<void> | undefined;
-  let storeClosePromise: Promise<void> | undefined;
+  let catalogClosePromise: Promise<void> | undefined;
 
-  const closeStore = (): Promise<void> => {
-    storeClosePromise ??= store.close();
+  const closeCatalog = (): Promise<void> => {
+    catalogClosePromise ??= options.close();
 
-    return storeClosePromise;
+    return catalogClosePromise;
   };
 
   const closeHandle = (): Promise<void> => {
     if (server === undefined) return Promise.resolve();
-    closePromise ??= closeServer(server).then(closeStore);
+    closePromise ??= closeServer(server).then(closeCatalog);
 
     return closePromise;
   };
@@ -38,7 +32,7 @@ const startViewServer = async (options: StartViewServerOptions): Promise<ViewSer
     const app = createViewApp({
       allowedOrigin: () => origin,
       indexHtml: options.indexHtml,
-      source: store.runs,
+      catalog: options.catalog,
     });
 
     server = await new Promise<ServerType>((resolve, reject) => {
@@ -57,13 +51,13 @@ const startViewServer = async (options: StartViewServerOptions): Promise<ViewSer
       candidate.once('error', reject);
     });
   } catch (error: unknown) {
-    await store.close();
+    await closeCatalog();
     throw error;
   }
 
   const closed = new Promise<void>((resolve, reject) => {
     server.once('close', () => {
-      void closeStore().then(resolve, reject);
+      void closeCatalog().then(resolve, reject);
     });
     server.once('error', reject);
   });

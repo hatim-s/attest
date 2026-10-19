@@ -1,4 +1,13 @@
-import { access, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises';
+import {
+  access,
+  mkdtemp,
+  readFile,
+  readdir,
+  realpath,
+  rm,
+  symlink,
+  writeFile,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -103,6 +112,11 @@ const createEvalProject = async (options: EvalProjectOptions = {}): Promise<stri
     interactive: false,
     name: 'Eval integration',
     readStdin: () => Promise.resolve(''),
+    // The registry rejects symlinked ancestors, and macOS `tmpdir()` sits behind `/var`.
+    registryPath: join(
+      await realpath(await temporaryDirectory('attest-registry-')),
+      'projects.json',
+    ),
     workingDirectory: root,
   });
   await writeFile(join(root, 'agent.mjs'), options.agentSource ?? ECHO_AGENT);
