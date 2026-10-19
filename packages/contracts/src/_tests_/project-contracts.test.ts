@@ -86,6 +86,7 @@ const project: ProjectManifest = {
         after_case: { argv: ['node', 'scripts/archive-case.mjs'] },
         after_run: { argv: ['node', 'scripts/archive-run.mjs'] },
       },
+      metric_sandbox: { kind: 'vercel', image: 'node22' },
     },
   },
   resources: {
@@ -243,7 +244,7 @@ describe('authored resource contracts', () => {
 describe('eval execution defaults contract', () => {
   const execution = project.defaults?.eval;
 
-  it('accepts strict worker isolation and every lifecycle hook', () => {
+  it('accepts strict worker isolation, every lifecycle hook and a metric sandbox', () => {
     expect(execution).toBeDefined();
     expect(evalExecutionConfigSchema.safeParse(execution).success).toBe(true);
   });
@@ -260,6 +261,9 @@ describe('eval execution defaults contract', () => {
     { hooks: { before_case: { argv: [''] } } },
     { hooks: { after_case: { argv: ['node'], timeout_ms: 0 } } },
     { hooks: { after_run: { argv: ['node'], shell: true } } },
+    { metric_sandbox: { kind: 'docker' } },
+    { metric_sandbox: { kind: 'vercel', image: '' } },
+    { metric_sandbox: { kind: 'vercel', files: [] } },
   ])('rejects invalid or unknown eval execution fields in %#', (candidate) => {
     expect(evalExecutionConfigSchema.safeParse(candidate).success).toBe(false);
   });

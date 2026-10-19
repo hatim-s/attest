@@ -1,6 +1,24 @@
 import { describe, expect, it } from 'vitest';
 
-import { assertionCheckSchema } from '../metric/protocol.js';
+import { assertionCheckSchema, metricRequestSchema } from '../metric/protocol.js';
+import { METRIC_PROTOCOL } from '../schema/identifiers.js';
+
+const metricRequest = {
+  protocol: METRIC_PROTOCOL,
+  case: { id: 'greeting', input: {} },
+  output: 'Paris',
+  trace: null,
+  artifacts: [
+    {
+      kind: 'inline',
+      path: 'answer.ts',
+      media_type: 'text/typescript',
+      encoding: 'utf8',
+      content: 'export const answer = 42;\n',
+    },
+  ],
+  artifact_dir: '/tmp/attest-metric-abc123',
+};
 
 describe('metric schemas', () => {
   it('parses recursive assertion combinators', () => {
@@ -85,5 +103,22 @@ describe('metric schemas', () => {
     { name: 'arguments', value: { tool_calls: { arguments: [] } } },
   ])('rejects an empty $name list', ({ value }) => {
     expect(assertionCheckSchema.safeParse(value).success).toBe(false);
+  });
+});
+
+describe('metric request artifacts', () => {
+  it('accepts inline artifacts with or without a materialized directory', () => {
+    expect(metricRequestSchema.safeParse(metricRequest).success).toBe(true);
+    expect(metricRequestSchema.safeParse({ ...metricRequest, artifact_dir: null }).success).toBe(
+      true,
+    );
+  });
+
+  it.each([
+    { ...metricRequest, artifacts: undefined },
+    { ...metricRequest, artifact_dir: undefined },
+    { ...metricRequest, artifacts: [{ kind: 'reference', path: 'answer.ts', id: 'blob-1' }] },
+  ])('rejects a request without inline artifacts and a directory in %#', (candidate) => {
+    expect(metricRequestSchema.safeParse(candidate).success).toBe(false);
   });
 });

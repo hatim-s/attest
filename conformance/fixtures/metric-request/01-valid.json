@@ -10,6 +10,8 @@
       "params": { "locale": "en" }
     },
     "output": "Paris",
-    "trace": null
+    "trace": null,
+    "artifacts": [],
+    "artifact_dir": null
   }
 }

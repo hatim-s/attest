@@ -98,6 +98,66 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": {},
   "properties": {
+    "artifact_dir": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "artifacts": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "content": {
+            "type": "string"
+          },
+          "encoding": {
+            "enum": [
+              "utf8",
+              "base64"
+            ],
+            "type": "string"
+          },
+          "kind": {
+            "const": "inline",
+            "type": "string"
+          },
+          "media_type": {
+            "maxLength": 255,
+            "minLength": 1,
+            "type": "string"
+          },
+          "path": {
+            "allOf": [
+              {
+                "pattern": "^(?![A-Za-z]:)"
+              },
+              {
+                "pattern": "^(?![\\\\/])(?!(?:.*[\\\\/])?\\.\\.(?:[\\\\/]|$)).+$"
+              },
+              {
+                "pattern": "^(?!\\.{1,2}(?:\\/|(?![\\s\\S])))[^/\\\\\\p{Cc}]+(?:\\/(?!\\.{1,2}(?:\\/|(?![\\s\\S])))[^/\\\\\\p{Cc}]+)*(?![\\s\\S])"
+              }
+            ],
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "path",
+          "media_type",
+          "encoding",
+          "content"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
     "case": {
       "additionalProperties": false,
       "properties": {
@@ -319,7 +379,9 @@
     "protocol",
     "case",
     "output",
-    "trace"
+    "trace",
+    "artifacts",
+    "artifact_dir"
   ],
   "type": "object"
 }

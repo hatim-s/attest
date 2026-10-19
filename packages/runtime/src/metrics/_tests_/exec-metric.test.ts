@@ -296,6 +296,8 @@ describe('executeExecutableMetric HTTP metrics', () => {
         },
         output: 'hello',
         trace: null,
+        artifacts: [],
+        artifact_dir: null,
       });
       expect(evaluation).toMatchObject({ status: 'evaluated', score: 0.5, pass: true });
     } finally {

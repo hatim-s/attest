@@ -6,6 +6,8 @@
     "protocol": "attest.metric-evaluation",
     "case": { "id": "greeting", "input": {} },
     "output": "Paris",
-    "trace": { "schema": "attest.trace", "spans": [] }
+    "trace": { "schema": "attest.trace", "spans": [] },
+    "artifacts": [],
+    "artifact_dir": null
   }
 }

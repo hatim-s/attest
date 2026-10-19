@@ -1,5 +1,6 @@
 import { z } from 'zod';
 
+import { inlineArtifactSchema } from '../agent/artifact.js';
 import { jsonValueSchema } from '../project/shared.js';
 import {
   attributeValueSchema,
@@ -162,6 +163,9 @@ const metricRequestSchema = z.looseObject({
   case: metricCaseSchema,
   output: jsonValueSchema,
   trace: traceSchema.nullable(),
+  artifacts: z.array(inlineArtifactSchema),
+  // Where a command metric finds the artifacts as files; null when they exist only in the body.
+  artifact_dir: z.string().nullable(),
 });
 
 /** Represents one validated request to an executable metric. */

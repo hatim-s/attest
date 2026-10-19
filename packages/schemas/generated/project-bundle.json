@@ -1679,6 +1679,27 @@
                   },
                   "type": "object"
                 },
+                "metric_sandbox": {
+                  "oneOf": [
+                    {
+                      "additionalProperties": false,
+                      "properties": {
+                        "image": {
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "kind": {
+                          "const": "vercel",
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "kind"
+                      ],
+                      "type": "object"
+                    }
+                  ]
+                },
                 "workers": {
                   "additionalProperties": false,
                   "properties": {
