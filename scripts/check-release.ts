@@ -1,7 +1,7 @@
 import { isRecord, isString, parseCliResult, parseManifest } from './release-json.js';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { cp, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { cp, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -10,7 +10,10 @@ const root = fileURLToPath(new URL('../', import.meta.url));
 
 /** Installs packed releases outside the workspace and exercises their public entry points with Node. */
 const checkRelease = async (): Promise<void> => {
-  const directory = await mkdtemp(join(tmpdir(), 'attest-consumer-'));
+  // The registry rejects symlinked ancestors, and macOS `tmpdir()` sits behind the `/var` link.
+  const directory = await mkdtemp(join(await realpath(tmpdir()), 'attest-consumer-'));
+  // `attest project init` registers the project; keep that out of the developer's ~/.attest.
+  const env = { ...process.env, ATTEST_HOME: join(directory, 'attest-home') };
 
   try {
     await writeFile(join(directory, 'package.json'), '{"private":true,"type":"module"}\n');
@@ -30,7 +33,7 @@ const checkRelease = async (): Promise<void> => {
     const projectDirectory = join(directory, 'demo');
 
     const runCli = (...args: string[]): string =>
-      execFileSync(cli, args, { cwd: directory, encoding: 'utf8', timeout: 30_000 });
+      execFileSync(cli, args, { cwd: directory, encoding: 'utf8', env, timeout: 30_000 });
 
     const metadata = parseManifest(await readFile(join(root, 'packages/cli/package.json'), 'utf8'));
 
@@ -52,7 +55,7 @@ const checkRelease = async (): Promise<void> => {
     );
 
     const projectCli = (...args: string[]): string =>
-      execFileSync(cli, args, { cwd: projectDirectory, encoding: 'utf8', timeout: 30_000 });
+      execFileSync(cli, args, { cwd: projectDirectory, encoding: 'utf8', env, timeout: 30_000 });
 
     for (const args of [
       ['agent', 'add', 'support', '--argv-json', '["node","./agent.mjs"]', '--timeout', '5s'],
@@ -83,7 +86,7 @@ import { openStore } from '@attest/local/store';
 import { startViewServer } from '@attest/local/view-server';
 import { invokeAgent } from '@attest/executor';
 import { executeResolvedEvalPlan } from '@attest/runtime';
-import { selectCases } from '@attest/core';
+import { createSingleProjectCatalog, selectCases } from '@attest/core';
 import { dashboardHtml } from '@attest/web/embedded';
 import { runCli } from '@attest/cli';
 assert.equal(typeof runCli, 'function');
@@ -96,12 +99,18 @@ const schema = JSON.parse(await readFile(new URL(import.meta.resolve('@attest/sc
 assert.ok(schema.$schema);
 const store = await openStore('release-check.db');
 assert.deepEqual(await store.runs.listRuns(), { items: [] });
-await store.close();
-const server = await startViewServer({ storePath: 'release-check.db', indexHtml: dashboardHtml, port: 0 });
+const server = await startViewServer({
+  catalog: createSingleProjectCatalog({ key: 'release', name: 'Release' }, store.runs),
+  close: () => store.close(),
+  indexHtml: dashboardHtml,
+  port: 0,
+});
 try {
   const response = await fetch(server.url);
   assert.equal(response.status, 200);
   assert.ok((await response.text()).includes('window.__ATTEST_BOOTSTRAP__='));
+  const runs = await fetch(new URL('/api/projects/release/runs', server.url));
+  assert.deepEqual(await runs.json(), { items: [] });
 } finally {
   await server.close();
 }
