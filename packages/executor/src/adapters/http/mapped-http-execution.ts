@@ -1,5 +1,13 @@
+import { createHash } from 'node:crypto';
+
 import type { AgentResponseCandidate } from '../../internal/agent-response-candidate.js';
-import { AGENT_PROTOCOL, isNumber, isString, type JsonValue } from '@attest/contracts';
+import {
+  AGENT_PROTOCOL,
+  isNumber,
+  isString,
+  type AgentRequest,
+  type JsonValue,
+} from '@attest/contracts';
 
 import { AgentInvocationError, abortedError } from '../../errors.js';
 import { abortableWait } from '../../internal/abortable-wait.js';
@@ -195,6 +203,28 @@ const requestWithRetries = async (
   }
 };
 
+/**
+ * Adds the idempotency key a server uses to drop a replayed submission. The key is derived from
+ * the run and case ids, so every retry of one case sends the same value.
+ */
+const setIdempotencyHeader = (
+  headers: Record<string, string>,
+  headerName: string,
+  request: AgentRequest,
+): void => {
+  const duplicate = Object.keys(headers).some(
+    (name) => name.toLowerCase() === headerName.toLowerCase(),
+  );
+
+  if (duplicate) {
+    throw new AgentInvocationError('invalid_envelope', 'Idempotency header mapping is ambiguous.');
+  }
+
+  headers[headerName] = createHash('sha256')
+    .update(`${request.run_id}:${request.case_id}`)
+    .digest('hex');
+};
+
 /** Sends a direct request, honoring Retry-After before the authored backoff. */
 const runDirect = (
   materialized: MaterializedHttpRequest,
@@ -214,6 +244,7 @@ export {
   normalizeFailure,
   requestWithRetries,
   runDirect,
+  setIdempotencyHeader,
   type ExchangeContext,
   type ExchangeOutcome,
 };
