@@ -49,17 +49,17 @@ Runtime must not import local or CLI. A hosted worker can supply its own persist
 
 Application errors carry typed codes and context. The CLI owns terminal rendering and exit presentation. Local must not import Commander or the CLI package. Paths, locks, cancellation registries, and the SQLite driver stay here rather than leaking into core types.
 
-Local exposes focused entry points: `/agent`, `/metric`, `/test`, `/project`, `/eval`, `/runs`, `/store`, `/cloud`, and `/view-server`. Its root exports application errors and result types.
+Local exposes focused entry points: `/agent`, `/metric`, `/test`, `/project`, `/eval`, `/runs`, `/store`, `/registry`, `/cloud`, and `/view-server`. Its root exports application errors and result types. `/registry` owns the global project registry under `~/.attest`; the view server reads its catalog rather than one store path.
 
 `@attest/cli` translates flags and interactive answers into application requests. Its public entry point runs the CLI. It is not the SDK for project loading, eval execution, or persistence.
 
 ## Read API
 
-`@attest/api` owns the read contract, fetch server app, typed client and dashboard bootstrap injection. Hosts inject core's read-only `RunSource`. The package owns no storage driver, socket, authentication or tenant policy. Contract and client subpaths use browser-safe core records. The server imports core's root for comparisons and store errors, so Cloudflare Workers hosts need `nodejs_compat`.
+`@attest/api` owns the read contract, fetch server app, typed client and dashboard bootstrap injection. Hosts inject core's read-only `RunSource` through a `ProjectCatalog`, which lists projects and opens the run source of one project key. Every API route is project scoped; an unknown key fails with `PROJECT_NOT_FOUND`. The package owns no storage driver, socket, authentication or tenant policy. Contract and client subpaths use browser-safe core records. The server imports core's root for comparisons and store errors, so Cloudflare Workers hosts need `nodejs_compat`.
 
 ## Browser and artifacts
 
-`@attest/web` supplies the same dashboard for the live local server and static reports. Web imports its client from `@attest/api/client`, parses bootstrap data through `@attest/api/contract`, and imports domain types from core. Dashboard routes use hash history so file-based reports can link to runs, cases and comparisons without a server rewrite. Browser code must not import runtime, local, CLI, or Node modules. The browser-safe
+`@attest/web` supplies the same dashboard for the live local server and static reports. Web imports its client from `@attest/api/client`, parses bootstrap data through `@attest/api/contract`, and imports domain types from core. Dashboard routes use hash history so file-based reports can link to runs, cases and comparisons without a server rewrite. `/projects` indexes every project in the catalog, and the remaining routes carry the project key. Browser code must not import runtime, local, CLI, or Node modules. The browser-safe
 `@attest/core/records` entry point exposes record, summary and comparison schemas
 without importing persistence, hashing or execution code. Servers and browsers
 validate their shared response projections through these owner schemas.

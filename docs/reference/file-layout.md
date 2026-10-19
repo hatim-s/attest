@@ -130,6 +130,43 @@ reported; unrelated processes are never signalled.
 credentials live outside the project at `~/.attest/cloud/credentials.json`. Neither
 file belongs in version control. See [cloud commands](../cli/cloud.md) for sync behavior.
 
+## Global user state
+
+`~/.attest` holds everything Attest keeps per user instead of per project. Set
+`ATTEST_HOME` to use another directory; see [environment variables](../ENV.md#attest-home-directory).
+
+### Project registry
+
+`~/.attest/projects.json` lists every local project that uses Attest. It is one strict
+`attest.projects.v1` document:
+
+```json
+{
+  "schema": "attest.projects.v1",
+  "projects": [
+    {
+      "key": "workflow-code",
+      "name": "Workflow Code",
+      "root": "/Users/hatim/Projects/workflow-code",
+      "projectId": "01M2QK3J8V9WZ0F4T6XNB7H2KD",
+      "registeredAt": "2026-10-18T12:00:00.000Z"
+    }
+  ]
+}
+```
+
+`root` is the realpath of the project directory and is unique across entries. `key` is the slug of
+`name`, lowercased with every run of non-alphanumeric characters replaced by `-` and trimmed to 64
+characters, and deduped with `-2` and `-3` against keys already stored. A stored key never changes.
+`projectId` is copied from `attest.project.json` when the project has a manifest, and `registeredAt`
+is the timestamp of the first registration.
+
+The registry file is written atomically with mode `0600` inside a directory created with mode
+`0700`. A registry path with a symlinked ancestor directory is rejected. A missing file reads as an
+empty registry; a malformed one fails with the `registry_invalid` error code.
+
+See [CLI guide](../cli/index.md#project-registry-and-dashboard) for the commands that maintain it.
+
 ## Output artifacts
 
 Artifacts selected by a caller are outside the fixed authored tree:
