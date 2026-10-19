@@ -124,18 +124,22 @@ const attemptFromError = (error: AgentInvocationError, durationMs: number): Invo
     rawExcerpt: error.rawExcerpt,
   });
 
+/** Classifies an unexpected throw; `transport` names the adapter in the message. */
 const normalizeFailure = (
   cause: unknown,
-  signal: AbortSignal,
-  callerSignal?: AbortSignal,
+  context: {
+    transport: 'Mapped HTTP' | 'Callback agent';
+    signal: AbortSignal;
+    callerSignal: AbortSignal | undefined;
+  },
 ): AgentInvocationError => {
   if (cause instanceof AgentInvocationError) return cause;
 
-  if (callerSignal?.aborted === true || signal.aborted) {
-    return abortedError(callerSignal, 'Mapped HTTP invocation', { cause: cause });
+  if (context.callerSignal?.aborted === true || context.signal.aborted) {
+    return abortedError(context.callerSignal, `${context.transport} invocation`, { cause });
   }
 
-  return new AgentInvocationError('network', 'Mapped HTTP transport failed.', { cause: cause });
+  return new AgentInvocationError('network', `${context.transport} transport failed.`, { cause });
 };
 
 const statusError = (response: HttpJsonResponse): AgentInvocationError =>
@@ -186,7 +190,12 @@ const requestWithRetries = async (
         retryAfter: response.headers['retry-after'],
       };
     } catch (error: unknown) {
-      const normalized = normalizeFailure(error, signal, policy.callerSignal);
+      const normalized = normalizeFailure(error, {
+        transport: 'Mapped HTTP',
+        signal,
+        callerSignal: policy.callerSignal,
+      });
+
       failure = { error: normalized, retryable: retryableTransportError(normalized) };
     }
 

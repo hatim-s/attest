@@ -434,9 +434,11 @@ describe('callback agent adapter', () => {
       completion({ artifacts: [reference('a', 'big'), reference('b', 'big')] }),
     );
 
+    // The second fetch may only read the 36 bytes left of the total, so it stops mid-body.
     expect(overTotal.status === 'invocation_error' && overTotal.error.code).toBe(
       'output_cap_exceeded',
     );
+    expect(overTotal.status === 'invocation_error' && overTotal.error.message).toContain('36-byte');
   });
 });
 

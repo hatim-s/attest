@@ -32,9 +32,7 @@ export {
   invokeCallbackAgent,
   triggerCallbackAgent,
   type CallbackAgentResource,
-  type CallbackTriggerResult,
   type CompletionReceiver,
-  type CompletionRegistration,
 } from './adapters/callback/index.js';
 
 export { enforceArtifactLimits } from './internal/artifact-limits.js';

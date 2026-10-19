@@ -97,4 +97,4 @@ const enforceArtifactLimits = (result: InvocationResult, limits: AgentLimits): I
   }
 };
 
-export { assertArtifactManifest, assertArtifactSizes, enforceArtifactLimits };
+export { artifactByteLength, assertArtifactManifest, assertArtifactSizes, enforceArtifactLimits };

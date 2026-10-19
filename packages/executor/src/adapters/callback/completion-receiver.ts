@@ -359,9 +359,4 @@ const createLoopbackCompletionReceiver = (options: LoopbackReceiverOptions): Com
   return { register, close };
 };
 
-export {
-  createLoopbackCompletionReceiver,
-  type CompletionReceiver,
-  type CompletionRegistration,
-  type LoopbackReceiverOptions,
-};
+export { createLoopbackCompletionReceiver, type CompletionReceiver, type CompletionRegistration };

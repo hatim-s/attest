@@ -19,8 +19,13 @@ import {
   DEFAULT_IDLE_MS,
   DEFAULT_REQUEST_BYTES,
   DEFAULT_RESPONSE_BYTES,
+  DEFAULT_TOTAL_ARTIFACT_BYTES,
 } from '../../internal/agent-defaults.js';
-import { assertArtifactManifest, assertArtifactSizes } from '../../internal/artifact-limits.js';
+import {
+  artifactByteLength,
+  assertArtifactManifest,
+  assertArtifactSizes,
+} from '../../internal/artifact-limits.js';
 import { startTimer } from '../../internal/elapsed.js';
 import { parseJson } from '../../internal/json-value.js';
 import { createRawExcerpt } from '../../internal/raw-excerpt.js';
@@ -95,6 +100,14 @@ type CallbackTriggerResult =
       durationMs: number;
     }
   | InvocationResult;
+
+/** Classifies an unexpected throw under this adapter's name. */
+const callbackFailure = (
+  cause: unknown,
+  signal: AbortSignal,
+  callerSignal: AbortSignal | undefined,
+): AgentInvocationError =>
+  normalizeFailure(cause, { transport: 'Callback agent', signal, callerSignal });
 
 /** Combines the attempt deadline with the caller's and the enclosing invocation's signals. */
 const attemptSignal = (agent: CallbackAgentResource, options: CallbackSignals): AbortSignal =>
@@ -199,7 +212,7 @@ const triggerCallbackAgent = async (
       durationMs: duration(),
     };
   } catch (error: unknown) {
-    const attempt = attemptFromError(normalizeFailure(error, signal, options.signal), duration());
+    const attempt = attemptFromError(callbackFailure(error, signal, options.signal), duration());
 
     return { ...attempt, attempts: [...retryAttempts, attempt] };
   }
@@ -356,22 +369,28 @@ const completeCallbackAgent = async (
     // Count and path checks first, so an over-limit completion triggers no fetches.
     assertArtifactManifest(artifacts, agent.limits);
 
-    const artifactPolicy = clientPolicy(agent, signal, {
-      ...options,
-      responseCapBytes: agent.limits?.artifact_bytes ?? DEFAULT_ARTIFACT_BYTES,
-    });
-
+    const perArtifact = agent.limits?.artifact_bytes ?? DEFAULT_ARTIFACT_BYTES;
+    let remaining = agent.limits?.total_artifact_bytes ?? DEFAULT_TOTAL_ARTIFACT_BYTES;
     const resolved: InlineArtifact[] = [];
 
     for (const artifact of artifacts) {
-      resolved.push(
+      // Once the total is spent, the size check below reports it without fetching more.
+      if (remaining < 0) break;
+
+      // A fetch may only read what is left of the total, so references never buffer past it.
+      const inline =
         artifact.kind === 'inline'
           ? artifact
           : await resolveArtifact(agent, artifact, {
               overrides: options.artifactFetch,
-              policy: artifactPolicy,
-            }),
-      );
+              policy: clientPolicy(agent, signal, {
+                ...options,
+                responseCapBytes: Math.min(perArtifact, remaining),
+              }),
+            });
+
+      remaining -= artifactByteLength(inline);
+      resolved.push(inline);
     }
 
     assertArtifactSizes(resolved, agent.limits);
@@ -417,9 +436,7 @@ const completeCallbackAgent = async (
       warnings: report.warnings,
     };
   } catch (error: unknown) {
-    const failure = normalizeFailure(error, signal, options.signal);
-
-    return attemptFromError(failure, duration());
+    return attemptFromError(callbackFailure(error, signal, options.signal), duration());
   }
 };
 
@@ -495,7 +512,7 @@ const invokeCallbackAgent = async (
 
     return { ...attempt, attempts: [...earlierAttempts, attempt] };
   } catch (error: unknown) {
-    const failed = attemptFromError(normalizeFailure(error, signal, options.signal), duration());
+    const failed = attemptFromError(callbackFailure(error, signal, options.signal), duration());
     const attempt: InvocationAttempt = { ...failed, diagnostics };
 
     return { ...attempt, attempts: [...earlierAttempts, attempt] };
@@ -509,8 +526,4 @@ export {
   invokeCallbackAgent,
   triggerCallbackAgent,
   type CallbackAgentResource,
-  type CallbackTriggerResult,
-  type CompleteCallbackOptions,
-  type InvokeCallbackOptions,
-  type TriggerCallbackOptions,
 };
