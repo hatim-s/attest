@@ -1,6 +1,12 @@
 import { useEffect } from 'react';
 import type { ApiClient } from '@attest/api/client';
-import { queryOptions, useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query';
+import {
+  queryOptions,
+  useInfiniteQuery,
+  useQueries,
+  useQuery,
+  useQueryClient,
+} from '@tanstack/react-query';
 
 import type { RunStatus } from '@attest/core/records';
 import { useApiClient } from './api-client-context.js';
@@ -28,6 +34,13 @@ const runsQueryOptions = (client: ApiClient, projectKey: string) =>
 
 /** Keeps the sidebar current without polling file-based reports. */
 const useRuns = (projectKey: string) => useQuery(runsQueryOptions(useApiClient(), projectKey));
+
+/** One runs query per project, sharing cache entries with `useRuns`; results follow `projectKeys`. */
+const useRunsForProjects = (projectKeys: readonly string[]) => {
+  const client = useApiClient();
+
+  return useQueries({ queries: projectKeys.map((key) => runsQueryOptions(client, key)) });
+};
 
 /** Loads one run and keeps polling only while it is still executing. */
 const useRun = (projectKey: string, runId: string) => {
@@ -196,4 +209,5 @@ export {
   useDiff,
   useRun,
   useRuns,
+  useRunsForProjects,
 };
