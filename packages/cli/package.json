@@ -27,6 +27,7 @@
     "test:acceptance": "vitest run --config vitest.acceptance.config.ts"
   },
   "devDependencies": {
+    "@attest/client": "workspace:*",
     "vitest": "^3"
   },
   "files": [
