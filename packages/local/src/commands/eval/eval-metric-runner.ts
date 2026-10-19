@@ -212,15 +212,7 @@ const evaluateMetricResource = async ({
   if (environment !== undefined) {
     // The command runs in the sandbox workspace, so the host cwd and base environment stay
     // behind; only the metric's own secret variables are forwarded.
-    const { env, secrets } = await resolveMetricEnvironment(definition, projectRoot);
-
-    const forwarded = Object.fromEntries(
-      Object.keys(definition.env ?? {}).flatMap((name) => {
-        const value = env[name];
-
-        return value === undefined ? [] : [[name, value]];
-      }),
-    );
+    const { variables, secrets } = await resolveMetricEnvironment(definition, projectRoot);
 
     const evaluation = await evaluateOne(
       { name: id, type: 'exec', command: definition.argv },
@@ -228,7 +220,7 @@ const evaluateMetricResource = async ({
       {
         exec: {
           commandTransport: createEnvironmentMetricTransport(environment),
-          env: forwarded,
+          env: variables,
           timeoutMs: definition.timeout_ms,
         },
         signal,

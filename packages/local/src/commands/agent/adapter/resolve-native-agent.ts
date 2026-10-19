@@ -96,6 +96,8 @@ const resolveProcessArgv = (argv: readonly string[], cwd: string): string[] =>
 
 type ResolvedProcessEnvironment = {
   env: Record<string, string>;
+  /** Only the referenced variables, for a sandbox that must not inherit the host base. */
+  variables: Record<string, string>;
   secrets: string[];
 };
 
@@ -107,17 +109,16 @@ const resolveProcessEnvironment = async (
   references: Readonly<Record<string, SecretReference>> | undefined,
   projectRoot: string,
 ): Promise<ResolvedProcessEnvironment> => {
-  const env: ResolvedProcessEnvironment['env'] = createBaseEnvironment();
-
+  const variables: ResolvedProcessEnvironment['variables'] = {};
   const secrets: string[] = [];
 
   for (const [name, reference] of Object.entries(references ?? {})) {
     const value = await readSecretReference(reference, projectRoot);
-    env[name] = value;
+    variables[name] = value;
     secrets.push(value);
   }
 
-  return { env, secrets };
+  return { env: { ...createBaseEnvironment(), ...variables }, variables, secrets };
 };
 
 type ResolvedRequestSecrets = {
@@ -204,21 +205,13 @@ const resolveProcessAgent = async (
   transport: ProcessTransport,
   projectRoot: string,
 ): Promise<ResolvedNativeAgent> => {
-  const { env, secrets } = await resolveProcessEnvironment(transport.env, projectRoot);
+  const { env, variables, secrets } = await resolveProcessEnvironment(transport.env, projectRoot);
 
   if (transport.kind === 'native_cli' && transport.sandbox !== undefined) {
-    const sandboxEnvironment = Object.fromEntries(
-      Object.keys(transport.env ?? {}).flatMap((name) => {
-        const value = env[name];
-
-        return value === undefined ? [] : [[name, value]];
-      }),
-    );
-
     return {
       argv: [transport.argv[0]!, ...transport.argv.slice(1)],
       cwd: transport.cwd,
-      env: sandboxEnvironment,
+      env: variables,
       kind: 'vercel_sandbox',
       sandbox: transport.sandbox,
       secrets: [...secrets, ...redactedArgvValues(agent, transport.argv)],
