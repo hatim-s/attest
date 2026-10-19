@@ -1071,3 +1071,7 @@ select:focus-visible {
 .projects-table-state .error-notice {
   padding: 6px 10px;
 }
+.project-switcher {
+  max-width: 220px;
+  margin-right: 8px;
+}

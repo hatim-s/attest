@@ -1,6 +1,8 @@
-import { Link, Outlet, useLocation, useParams } from '@tanstack/react-router';
+import { Link, Outlet, useLocation, useNavigate, useParams } from '@tanstack/react-router';
 import { useEffect, useState } from 'react';
 import { useApiClient } from '../api/api-client-context.js';
+import { useProjects } from '../api/queries.js';
+import { ProjectSwitcher } from '../components/projects/project-switcher.js';
 import { Badge, Button } from '../components/shared/ui.js';
 
 type Theme = 'light' | 'dark';
@@ -24,6 +26,9 @@ const RootLayout = () => {
   const { mode } = useApiClient();
   const [theme, setTheme] = useState<Theme>(getInitialTheme);
   const { projectKey } = useParams({ strict: false });
+  const navigate = useNavigate();
+  const projects = useProjects().data ?? [];
+  const project = projects.find((item) => item.key === projectKey);
 
   // Comparisons belong to Runs even though their URL sits outside /runs.
   const section = useLocation({
@@ -47,10 +52,23 @@ const RootLayout = () => {
           <span className="brand-mark">A</span>
           <div>
             <strong>attest</strong>
-            <span>evaluations</span>
+            {/* The key stands in for the name until the catalog loads. */}
+            <span>{projectKey === undefined ? 'evaluations' : (project?.name ?? projectKey)}</span>
           </div>
         </div>
         <div className="topbar-actions">
+          <ProjectSwitcher
+            projects={projects}
+            projectKey={projectKey}
+            // Switching starts the other project fresh, so branch and label filters stay behind.
+            onSelect={(key) =>
+              void navigate(
+                key === undefined
+                  ? { to: '/projects' }
+                  : { to: '/projects/$projectKey/runs', params: { projectKey: key }, search: {} },
+              )
+            }
+          />
           {projectKey === undefined ? null : (
             <nav className="topbar-nav" aria-label="Dashboard">
               <Link
