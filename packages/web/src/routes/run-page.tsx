@@ -8,6 +8,8 @@ import { RunDistributions } from '../components/runs/run-distributions.js';
 import { ErrorNotice, Loading } from '../components/shared/ui.js';
 import { RunHeader } from '../components/runs/run-header.js';
 import { RunTabs } from '../components/runs/run-tabs.js';
+import { useApiClient } from '../api/api-client-context.js';
+import { CancelRun } from './cancel-run.js';
 
 const route = getRouteApi('/projects/$projectKey/runs/$runId');
 
@@ -61,6 +63,7 @@ const RunSuites = ({ run }: { run: RunRecord }) => {
 const RunPage = () => {
   const { projectKey, runId } = route.useParams();
   const { tab } = route.useSearch();
+  const { capabilities } = useApiClient();
   const runQuery = useRun(projectKey, runId);
   const run = runQuery.data;
 
@@ -70,7 +73,11 @@ const RunPage = () => {
       {runQuery.error !== null ? <ErrorNotice error={runQuery.error} /> : null}
       {run !== undefined ? (
         <>
-          <RunHeader run={run} />
+          <RunHeader run={run}>
+            {capabilities.control ? (
+              <CancelRun key={run.id} projectKey={projectKey} run={run} />
+            ) : null}
+          </RunHeader>
           <RunTabs run={run} tab={tab} />
           {tab === 'cases' ? <RunCases run={run} /> : null}
           {tab === 'suites' ? <RunSuites run={run} /> : null}

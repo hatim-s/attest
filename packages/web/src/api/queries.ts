@@ -219,6 +219,21 @@ const useStartRun = (projectKey: string) => {
   });
 };
 
+/** Requests cancellation, then refreshes the run and the sidebar so a new status shows at once. */
+const useCancelRun = (projectKey: string, runId: string) => {
+  const client = useApiClient();
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: () => client.cancelRun({ projectKey, runId }),
+    onSuccess: () =>
+      Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['run', projectKey, runId] }),
+        queryClient.invalidateQueries({ queryKey: ['runs', projectKey] }),
+      ]),
+  });
+};
+
 export {
   projectsQueryOptions,
   useProjects,
@@ -239,4 +254,5 @@ export {
   useRunsForProjects,
   useTests,
   useStartRun,
+  useCancelRun,
 };

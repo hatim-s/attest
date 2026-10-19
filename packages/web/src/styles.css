@@ -275,6 +275,18 @@ pre,
   letter-spacing: -0.03em;
   line-height: 1.15;
 }
+.run-header-status {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
+  max-width: 360px;
+}
+.run-header-status > .notice,
+.run-header-status > .error-notice {
+  flex-basis: 100%;
+}
 .heading-1 h1 code {
   letter-spacing: -0.04em;
 }

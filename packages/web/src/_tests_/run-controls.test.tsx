@@ -65,7 +65,7 @@ const buttonLabels = (container: HTMLElement) =>
   [...container.querySelectorAll('button')].map((button) => button.textContent);
 
 it.each([
-  [true, ['New run']],
+  [true, ['New run', 'Cancel run']],
   [false, []],
 ])(
   'shows run controls only when the host can control runs (control: %s)',
