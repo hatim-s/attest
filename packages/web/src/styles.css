@@ -933,7 +933,13 @@ select:focus-visible {
   color: var(--muted);
   font-size: 12px;
 }
+.loading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
 .loading-dot {
+  flex: none;
   width: 7px;
   height: 7px;
   border-radius: 50%;

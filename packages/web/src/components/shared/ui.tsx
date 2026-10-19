@@ -54,7 +54,8 @@ const ErrorNotice = ({ error }: { error: unknown }) => (
 /** Loading indicator announced as a status region. */
 const Loading = ({ label = 'Loading' }: { label?: string }) => (
   <div className="loading" role="status">
-    <span className="loading-dot" /> {label}
+    <span className="loading-dot" />
+    {label}
   </div>
 );
 
