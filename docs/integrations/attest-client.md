@@ -242,9 +242,10 @@ final text or error only; the runner is the way to get artifacts and a trace.
 
 ## Security
 
-- A trigger makes the handler run a prompt, and Pi has a shell tool. Keep the runner on
-  loopback (the `serveAgentRunner` default) or set `triggerToken`.
-- Triggers must be `application/json`. Browsers cannot send that cross-origin without a CORS
-  preflight, which the runner refuses, so a web page cannot trigger a local runner.
+- A trigger makes the handler run a prompt, and Pi has a shell tool. Set `triggerToken`. Binding
+  to loopback (the `serveAgentRunner` default) keeps other machines out but not a web page that
+  uses DNS rebinding to reach `127.0.0.1`.
+- Triggers must be `application/json`. A cross-origin page cannot send that without a CORS
+  preflight, and the runner answers the preflight with `405`.
 - `triggerToken` is compared in constant time. Neither token is logged.
 - Completions go wherever `callback.url` says. Only accept triggers from your attest.
