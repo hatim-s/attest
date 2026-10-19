@@ -153,6 +153,13 @@ attest view --all --no-open
 A registered project whose `.attest/runs.db` does not exist yet appears with no runs.
 Serving it does not create the store.
 
+With more than one project the dashboard opens at `/projects`, a table with one row per
+project: its root, the runs on its newest page (`100+` when more exist), its latest run, and
+the passed, failed and error counts of its latest finished run. Projects with the most recent
+run come first; projects with no runs come last. The project picker in the top bar opens
+another project or returns to the table. Opening another project drops the branch and label
+filters.
+
 ## Integration transports
 
 - [Native](../integrations/native.md)
