@@ -15,7 +15,9 @@ fixtures. Hatim still needs to decide whether these are permanent policy excepti
 
 `bun run test` builds dependencies before package tests. The cli journeys that install the packed CLI
 and replay the quickstart and documented commands run separately with `bun run test:acceptance`,
-which builds every package first.
+which builds every package first. One journey runs a callback agent end to end: the test process
+serves the `@attest/client` Pi runner over the mock Pi in `packages/client/src/_tests_/fixtures`,
+and the packed CLI evaluates it, so `@attest/client` is a dev dependency of the cli package.
 
 Packed CLI acceptance tests extract the workspace archives and copy their already-installed
 production dependency closure into a temporary runtime. They preserve each dependency's resolved
