@@ -4,7 +4,10 @@ import { resolve } from 'node:path';
 import type { AgentRequest, AgentResource } from '@attest/contracts';
 import {
   AgentInvocationError,
+  createLoopbackCompletionReceiver,
+  enforceArtifactLimits,
   invokeAgent,
+  invokeCallbackAgent,
   invokeMappedHttpAgent,
   invokeStreamingAgent,
   invokeVercelSandboxAgent,
@@ -28,7 +31,7 @@ type AgentSession = {
 
 type SessionAgent = Extract<
   ResolvedNativeAgent,
-  { kind: 'background' | 'jsonl_bridge' | 'websocket' }
+  { kind: 'background' | 'callback' | 'jsonl_bridge' | 'websocket' }
 >;
 
 /** A resolved agent ready to invoke: an open session, or a transport invoked per request. */
@@ -94,16 +97,39 @@ const startAgentRuntime = async (
           signal,
         }),
       };
+    case 'callback': {
+      // One receiver per run; it listens only while a completion is awaited.
+      const receiver = createLoopbackCompletionReceiver({
+        listenPort: resolved.agent.transport.receiver?.listen_port,
+        publicUrl: resolved.agent.transport.receiver?.public_url,
+        bodyCapBytes: resolved.agent.limits?.response_bytes ?? DEFAULT_OUTPUT_CAP_BYTES,
+      });
+
+      return {
+        kind: 'session',
+        resolved,
+        session: {
+          invoke: (request, invokeSignal) =>
+            invokeCallbackAgent(resolved.agent, request, {
+              receiver,
+              trigger: resolved.trigger,
+              artifactFetch: resolved.artifactFetch,
+              traceFetch: resolved.traceFetch,
+              secrets: resolved.secrets,
+              signal: invokeSignal,
+            }),
+          close: () => receiver.close(),
+        },
+      };
+    }
+
     default:
       return { kind: 'direct', resolved };
   }
 };
 
-/**
- * Sends one request through the transport the agent resolved to. The connection probe and the
- * eval runner share this so both enforce the same caps, retries, and sandbox bounds.
- */
-const invokeResolvedAgent = async (
+/** Sends one request through the transport the agent resolved to. */
+const dispatch = async (
   runtime: AgentRuntime,
   request: AgentRequest,
   options: InvokeResolvedAgentOptions,
@@ -184,6 +210,18 @@ const invokeResolvedAgent = async (
     }
   }
 };
+
+/**
+ * Sends one request and applies the artifact caps to whatever came back. The connection probe and
+ * the eval runner share this so both enforce the same caps, retries, and sandbox bounds; it is the
+ * one place every transport's parsed response passes through.
+ */
+const invokeResolvedAgent = async (
+  runtime: AgentRuntime,
+  request: AgentRequest,
+  options: InvokeResolvedAgentOptions,
+): Promise<InvocationResult> =>
+  enforceArtifactLimits(await dispatch(runtime, request, options), options.agent.limits);
 
 /** Converts a startup throw into one failed attempt so the failure is recorded like any other. */
 const startupFailure = (cause: unknown, durationMs: number): InvocationResult => {

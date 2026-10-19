@@ -4,6 +4,8 @@ export { evaluateMetrics, type EvaluateMetricsOptions } from './evaluate-metrics
 
 export { createEnvironmentMetricTransport } from './environment-transport.js';
 
+export { buildMetricRequest } from './internal/metric-request.js';
+
 export type { MetricContext } from './metric-evaluation.js';
 
 export type { JudgeCache } from './judge/judge-cache.js';

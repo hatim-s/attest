@@ -2,6 +2,7 @@ import type { AgentResource, JsonValue } from '@attest/contracts';
 import type { StoredCaseExecution } from '@attest/core';
 import type {
   BackgroundAgentResource,
+  CallbackAgentResource,
   HttpAgentResource,
   JsonlBridgeAgentResource,
   NativeAgentTarget,
@@ -18,6 +19,9 @@ type NativeAgentTestOptions = {
   runId?: string;
   signal?: AbortSignal;
 };
+
+/** Header and query values of one request template after its secret references were read. */
+type ResolvedRequestValues = { headers: Record<string, string>; query: Record<string, string> };
 
 type ResolvedNativeAgent =
   | {
@@ -66,6 +70,14 @@ type ResolvedNativeAgent =
       kind: 'stream';
       query: Record<string, string>;
       secrets: string[];
+    }
+  | {
+      agent: CallbackAgentResource;
+      artifactFetch?: ResolvedRequestValues;
+      kind: 'callback';
+      secrets: string[];
+      traceFetch?: ResolvedRequestValues;
+      trigger: ResolvedRequestValues;
     }
   | {
       agent: WebSocketAgentResource;

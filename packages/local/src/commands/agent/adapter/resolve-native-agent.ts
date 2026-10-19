@@ -318,10 +318,41 @@ const resolveNativeAgent = async (
       return { agent: { ...agent, transport }, kind: 'mapped_http', ...resolved };
     }
 
-    case 'callback':
-      throw new LocalError('project_invalid', 'Callback agents are not supported yet.', {
-        path: '/agent/transport/kind',
-      });
+    case 'callback': {
+      const resolveTemplate = async (request: typeof transport.trigger) => {
+        const resolved = await resolveHttpSecrets(request, projectRoot);
+        addRedactedRequestValues(agent, resolved);
+
+        return resolved;
+      };
+
+      const trigger = await resolveTemplate(transport.trigger);
+
+      const artifactFetch =
+        transport.artifact_fetch === undefined
+          ? undefined
+          : await resolveTemplate(transport.artifact_fetch);
+
+      const traceFetch =
+        transport.trace_fetch === undefined
+          ? undefined
+          : await resolveTemplate(transport.trace_fetch);
+
+      return {
+        agent: { ...agent, transport },
+        artifactFetch,
+        kind: 'callback',
+        secrets: [
+          ...new Set([
+            ...trigger.secrets,
+            ...(artifactFetch?.secrets ?? []),
+            ...(traceFetch?.secrets ?? []),
+          ]),
+        ],
+        traceFetch,
+        trigger,
+      };
+    }
 
     default:
       return transport satisfies never;
