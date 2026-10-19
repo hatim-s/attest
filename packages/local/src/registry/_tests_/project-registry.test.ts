@@ -123,6 +123,19 @@ describe('project registry', () => {
     });
   });
 
+  it('keeps both of two concurrent registrations', async () => {
+    const home = await temporaryDirectory('attest-registry-');
+    const registryPath = join(home, 'projects.json');
+    const roots = [await projectDirectory(home, 'left'), await projectDirectory(home, 'right')];
+
+    await Promise.all(roots.map((root) => registerProject({ registryPath, root })));
+
+    expect((await readRegistry(registryPath)).projects.map(({ root }) => root).sort()).toEqual(
+      roots,
+    );
+    await expect(stat(`${registryPath}.lock`)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
   it('rejects malformed registries and symlinked ancestors', async () => {
     const home = await temporaryDirectory('attest-registry-');
     const registryPath = join(home, 'projects.json');
@@ -138,8 +151,15 @@ describe('project registry', () => {
           { key: 'a', name: 'b', root: '/b', registeredAt: '2026-10-18T12:00:00.000Z' },
         ],
       }),
+      JSON.stringify({
+        schema: 'attest.projects.v1',
+        projects: [
+          { key: 'a', name: 'a', root: 'relative/a', registeredAt: '2026-10-18T12:00:00.000Z' },
+        ],
+      }),
     ]) {
-      await writeFile(registryPath, content);
+      // Private mode, so each case fails on its content and not on the file permissions.
+      await writeFile(registryPath, content, { mode: 0o600 });
       await expect(readRegistry(registryPath)).rejects.toMatchObject({ code: 'registry_invalid' });
     }
 
@@ -150,7 +170,7 @@ describe('project registry', () => {
     });
     await expect(
       registerProject({ registryPath: join(linked, 'nested', 'projects.json'), root: home }),
-    ).rejects.toMatchObject({ code: 'registry_invalid' });
+    ).rejects.toMatchObject({ code: 'registry_write_failed' });
     expect(await readFile(registryPath, 'utf8')).toContain('"a"');
   });
 });

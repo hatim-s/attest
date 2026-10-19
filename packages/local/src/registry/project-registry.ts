@@ -1,5 +1,5 @@
 import { realpath } from 'node:fs/promises';
-import { basename, resolve } from 'node:path';
+import { basename, isAbsolute, resolve } from 'node:path';
 
 import { projectKeySchema } from '@attest/core/records';
 import { z } from 'zod';
@@ -8,13 +8,14 @@ import { LocalError } from '../errors/index.js';
 import { errnoCode } from '../internal/errno-code.js';
 import { readPrivateFile, writePrivateFile } from '../internal/private-file.js';
 import { uniqueProjectKey } from './project-key.js';
+import { withRegistryLock } from './registry-lock.js';
 
 const REGISTRY_SCHEMA_ID = 'attest.projects.v1';
 
 const registryEntrySchema = z.strictObject({
   key: projectKeySchema,
   name: z.string().min(1),
-  root: z.string().min(1),
+  root: z.string().refine(isAbsolute, { message: 'Project roots must be absolute paths.' }),
   projectId: z.string().min(1).optional(),
   registeredAt: z.iso.datetime(),
 });
@@ -112,29 +113,32 @@ const resolveProjectRoot = async (root: string): Promise<string> => {
  */
 const registerProject = async (options: RegisterProjectOptions): Promise<RegistryEntry> => {
   const root = await resolveProjectRoot(options.root);
-  const registry = await readRegistry(options.registryPath);
-  const existing = registry.projects.find((entry) => entry.root === root);
 
-  if (existing !== undefined) return existing;
+  return withRegistryLock(options.registryPath, async () => {
+    const registry = await readRegistry(options.registryPath);
+    const existing = registry.projects.find((entry) => entry.root === root);
 
-  const name = options.name ?? basename(root);
+    if (existing !== undefined) return existing;
 
-  const entry: RegistryEntry = {
-    key: uniqueProjectKey(name, new Set(registry.projects.map(({ key }) => key))),
-    name,
-    root,
-    registeredAt: new Date().toISOString(),
-  };
+    const name = options.name ?? basename(root);
 
-  // Absent stays absent: the entry is also a CLI JSON result, which has no `undefined`.
-  if (options.projectId !== undefined) entry.projectId = options.projectId;
+    const entry: RegistryEntry = {
+      key: uniqueProjectKey(name, new Set(registry.projects.map(({ key }) => key))),
+      name,
+      root,
+      registeredAt: new Date().toISOString(),
+    };
 
-  await writeRegistry(options.registryPath, {
-    ...registry,
-    projects: [...registry.projects, entry],
+    // Absent stays absent: the entry is also a CLI JSON result, which has no `undefined`.
+    if (options.projectId !== undefined) entry.projectId = options.projectId;
+
+    await writeRegistry(options.registryPath, {
+      ...registry,
+      projects: [...registry.projects, entry],
+    });
+
+    return entry;
   });
-
-  return entry;
 };
 
 /**
@@ -142,31 +146,34 @@ const registerProject = async (options: RegisterProjectOptions): Promise<Registr
  * exists still matches the root it was registered with.
  */
 const unregisterProject = async (options: UnregisterProjectOptions): Promise<RegistryEntry> => {
-  const registry = await readRegistry(options.registryPath);
   const directory = resolve(options.workingDirectory, options.keyOrRoot);
   const root = await realpath(directory).catch(() => directory);
 
-  const entry =
-    registry.projects.find(({ key }) => key === options.keyOrRoot) ??
-    registry.projects.find((candidate) => candidate.root === root);
+  return withRegistryLock(options.registryPath, async () => {
+    const registry = await readRegistry(options.registryPath);
 
-  if (entry === undefined) {
-    throw new LocalError(
-      'resource_not_found',
-      `No registered project matches ${options.keyOrRoot}.`,
-      {
-        path: options.keyOrRoot,
-        hint: 'Run `attest projects list` and pass a listed key or root.',
-      },
-    );
-  }
+    const entry =
+      registry.projects.find(({ key }) => key === options.keyOrRoot) ??
+      registry.projects.find((candidate) => candidate.root === root);
 
-  await writeRegistry(options.registryPath, {
-    ...registry,
-    projects: registry.projects.filter(({ key }) => key !== entry.key),
+    if (entry === undefined) {
+      throw new LocalError(
+        'resource_not_found',
+        `No registered project matches ${options.keyOrRoot}.`,
+        {
+          path: options.keyOrRoot,
+          hint: 'Run `attest projects list` and pass a listed key or root.',
+        },
+      );
+    }
+
+    await writeRegistry(options.registryPath, {
+      ...registry,
+      projects: registry.projects.filter(({ key }) => key !== entry.key),
+    });
+
+    return entry;
   });
-
-  return entry;
 };
 
 export {
