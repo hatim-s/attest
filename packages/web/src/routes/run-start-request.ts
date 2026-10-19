@@ -55,4 +55,4 @@ const toRunStartRequest = (form: RunStartForm): RunStartRequest => {
   return request;
 };
 
-export { selectTests, toRunStartRequest, type RunStartForm };
+export { selectTests, toRunStartRequest };

@@ -28,8 +28,8 @@ const NewestRun = () => {
       <p className="eyebrow">Ready</p>
       <h1>Run your first evaluation</h1>
       <p>
-        {capabilities.control ? 'Start one with New run, or run ' : 'Run '}
-        <code>attest eval run</code>. The run shows up here as soon as it starts.
+        {capabilities.control ? 'Use New run in the sidebar, or run ' : 'Run '}
+        <code>attest eval run</code> in the project. The run shows up here as soon as it starts.
       </p>
     </div>
   );
