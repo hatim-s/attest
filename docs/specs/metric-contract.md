@@ -71,11 +71,27 @@ Executable metrics run your scoring code. The runner sends this request body:
   "protocol": "attest.metric-evaluation",
   "case": { "id": "greeting", "input": {}, "expected": {}, "params": {} },
   "output": "the agent's output",
-  "trace": { "schema": "attest.trace", "trace_id": "trace-1", "spans": [] }
+  "trace": { "schema": "attest.trace", "trace_id": "trace-1", "spans": [] },
+  "artifacts": [
+    {
+      "kind": "inline",
+      "path": "src/answer.ts",
+      "media_type": "text/typescript",
+      "encoding": "utf8",
+      "content": "export const answer = 42;\n"
+    }
+  ],
+  "artifact_dir": "/tmp/attest-metric-Xc81qa"
 }
 ```
 
 `trace` is `null` when the agent returned none. Ignore unknown request fields.
+
+`artifacts` holds the agent's [inline artifacts](./agent-contract.md#artifacts) and is `[]` when
+there are none. `artifact_dir` is the absolute directory where a command metric finds the same
+artifacts as files, each at `<artifact_dir>/<path>`. It is `null` for HTTP metrics, which get the
+artifacts only in the body. For a local command metric the directory is temporary and is removed
+once the metric finishes. A sandboxed command metric gets a path inside the sandbox workspace.
 
 A command metric (`kind: exec`) runs once per case. It reads the request on stdin and must write
 one [result](#result-shape) on stdout. A non-zero exit, malformed output, or timeout is a metric

@@ -114,13 +114,14 @@ presets where applicable.
 
 ## Agent and metric execution protocols
 
-| Document discriminator     | Generated schema                                                            | Producer to consumer                             |
-| -------------------------- | --------------------------------------------------------------------------- | ------------------------------------------------ |
-| `attest.agent-invocation`  | [agent-request.json](../../packages/schemas/generated/agent-request.json)   | Attest to a native or normalized agent adapter.  |
-| `attest.agent-invocation`  | [agent-response.json](../../packages/schemas/generated/agent-response.json) | Agent adapter back to Attest.                    |
-| `attest.metric-evaluation` | [metric-request.json](../../packages/schemas/generated/metric-request.json) | Attest to an executable or normalized metric.    |
-| `attest.metric-evaluation` | [metric-result.json](../../packages/schemas/generated/metric-result.json)   | Metric back to Attest with score/pass evidence.  |
-| `attest.trace`             | [trace.json](../../packages/schemas/generated/trace.json)                   | Normalized trace evidence used by trace metrics. |
+| Document discriminator     | Generated schema                                                                | Producer to consumer                             |
+| -------------------------- | ------------------------------------------------------------------------------- | ------------------------------------------------ |
+| `attest.agent-invocation`  | [agent-request.json](../../packages/schemas/generated/agent-request.json)       | Attest to a native or normalized agent adapter.  |
+| `attest.agent-invocation`  | [agent-response.json](../../packages/schemas/generated/agent-response.json)     | Agent adapter back to Attest.                    |
+| `attest.agent-completion`  | [agent-completion.json](../../packages/schemas/generated/agent-completion.json) | Async agent to Attest's callback URL.            |
+| `attest.metric-evaluation` | [metric-request.json](../../packages/schemas/generated/metric-request.json)     | Attest to an executable or normalized metric.    |
+| `attest.metric-evaluation` | [metric-result.json](../../packages/schemas/generated/metric-result.json)       | Metric back to Attest with score/pass evidence.  |
+| `attest.trace`             | [trace.json](../../packages/schemas/generated/trace.json)                       | Normalized trace evidence used by trace metrics. |
 
 The shared discriminator names a protocol family; request and response/result schemas remain
 separate generated files. Native processes exchange one JSON document on stdin/stdout. JSONL and
