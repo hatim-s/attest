@@ -18,6 +18,7 @@ const PROMPT_ID = 'attest-prompt';
 type PiProcessInput = {
   argv: readonly [string, ...string[]];
   cwd: string;
+  env: Record<string, string>;
   message: string;
   signal: AbortSignal;
   timeoutMs: number;
@@ -44,6 +45,7 @@ type PiProcessOutcome =
 const runPiProcess = ({
   argv,
   cwd,
+  env,
   message,
   signal,
   timeoutMs,
@@ -56,6 +58,7 @@ const runPiProcess = ({
     // detached puts Pi in its own process group, which is what makes the group kill possible.
     const child = spawn(command, args, {
       cwd,
+      env,
       stdio: ['pipe', 'pipe', 'pipe'],
       detached: true,
     });
@@ -95,9 +98,18 @@ const runPiProcess = ({
     };
 
     const onLine = (line: string): void => {
-      const record = parsePiRecord(line);
+      if (outcome !== undefined) return;
+      const parsed = parsePiRecord(line);
 
-      if (record === undefined || outcome !== undefined) return;
+      if (!parsed.ok) {
+        conclude({ kind: 'protocol_error', message: parsed.message });
+
+        return;
+      }
+
+      const record = parsed.record;
+
+      if (record === undefined) return;
       onRecord(record);
 
       if (record.type === 'agent_settled') {
@@ -151,7 +163,13 @@ const runPiProcess = ({
     child.on('close', (code, exitSignal) => {
       timers.forEach(clearTimeout);
       signal.removeEventListener('abort', onAbort);
-      resolve(outcome ?? { kind: 'exited', code, signal: exitSignal, stderr: stderr.trim() });
+
+      // stderr written just before exiting can arrive after 'exit'; 'close' has all of it.
+      resolve(
+        outcome === undefined || outcome.kind === 'exited'
+          ? { kind: 'exited', code, signal: exitSignal, stderr: stderr.trim() }
+          : outcome,
+      );
     });
 
     signal.addEventListener('abort', onAbort, { once: true });

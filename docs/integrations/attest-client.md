@@ -18,7 +18,10 @@ const triggerToken = process.env.ATTEST_TRIGGER_TOKEN;
 if (triggerToken === undefined) throw new Error('Set ATTEST_TRIGGER_TOKEN.');
 
 const runner = createAgentRunner({
-  handler: createPiHandler({ model: 'anthropic/claude-sonnet-5-5' }),
+  handler: createPiHandler({
+    model: 'anthropic/claude-sonnet-5-5',
+    env: { ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY },
+  }),
   triggerToken,
 });
 
@@ -65,8 +68,8 @@ in `packages/client/examples/`.
 ## Prerequisites
 
 - Node.js 22.15 or newer, or Bun 1.4. The root entry also runs on Cloudflare Workers.
-- For the Pi handler: `pi` on `PATH` (or pass `argv`) with provider credentials in its usual
-  environment variables. The handler never reads or prints them.
+- For the Pi handler: `pi` on `PATH` (or pass `argv`), logged in through `pi` itself or given a
+  provider key through the handler's `env` option.
 
 ## Entry points
 
@@ -180,6 +183,7 @@ createPiHandler({
   model, // passed as --model
   systemPrompt, // passed as --system-prompt
   workspace, // (invocation) => Promise<string>; default: a fresh temp dir, removed afterwards
+  env, // extra variables for Pi, such as a provider key; undefined values are left out
   timeoutMs, // default 15 minutes
 });
 ```
@@ -194,6 +198,12 @@ For each invocation the handler runs:
 with the workspace as its working directory. The isolation flags keep machine-wide extensions,
 skills and `AGENTS.md` files out of the eval. Explicit `-e <path>` arguments still load.
 
+Pi's shell runs whatever commands the prompt leads it to, so Pi does not inherit the runner's
+environment. It gets `PATH` with relative entries removed, `HOME` (where Pi keeps its login and
+settings), `TMPDIR`, `LC_ALL=C` and the `env` option. This keeps the trigger token and other
+runner secrets out of Pi's environment. It is not a sandbox: the shell can still read any file
+the runner's user can.
+
 1. The prompt is `input` when it is a string, else `input.prompt`. Anything else returns
    `error.code: "invalid_input"` without starting Pi.
 2. The handler hashes every workspace file with SHA-256.
@@ -203,16 +213,16 @@ skills and `AGENTS.md` files out of the eval. Explicit `-e <path>` arguments sti
 5. `artifacts` are the files whose hash changed or that are new, within the `collectArtifacts`
    defaults of 64 files and 4 MiB. Files past the caps become `artifact_skipped` root events.
 
-| `error.code`         | Cause                                                            |
-| -------------------- | ---------------------------------------------------------------- |
-| `pi_agent_failed`    | The last assistant message stopped with `error` or `aborted`.    |
-| `pi_no_output`       | Pi settled, or handled the prompt, with no assistant message.    |
-| `pi_prompt_rejected` | Pi answered the prompt command with `success: false`.            |
-| `pi_exited`          | Pi exited before `agent_settled`; the message has stderr's tail. |
-| `pi_spawn_failed`    | The command could not start.                                     |
-| `pi_protocol_error`  | A stdout line went over the limit.                               |
-| `timeout`            | Pi did not settle within `timeoutMs`.                            |
-| `cancelled`          | The signal aborted, or Pi settled with `aborted: true`.          |
+| `error.code`         | Cause                                                                                    |
+| -------------------- | ---------------------------------------------------------------------------------------- |
+| `pi_agent_failed`    | The last assistant message stopped with `error` or `aborted`.                            |
+| `pi_no_output`       | Pi settled, or handled the prompt, with no assistant message.                            |
+| `pi_prompt_rejected` | Pi answered the prompt command with `success: false`.                                    |
+| `pi_exited`          | Pi exited before `agent_settled`; the message has stderr's tail.                         |
+| `pi_spawn_failed`    | The command could not start.                                                             |
+| `pi_protocol_error`  | A stdout line went over the limit, or a record type the handler reads failed its schema. |
+| `timeout`            | Pi did not settle within `timeoutMs`.                                                    |
+| `cancelled`          | The signal aborted, or Pi settled with `aborted: true`.                                  |
 
 On abort or timeout the handler kills Pi's process group (SIGTERM, then SIGKILL after 2 s), so
 tool subprocesses die with it. Error completions still carry the trace and changed files.

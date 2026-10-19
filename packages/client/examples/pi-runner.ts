@@ -5,8 +5,9 @@
  *
  *   PI_MODEL=anthropic/claude-sonnet-5-5 ATTEST_TRIGGER_TOKEN=change-me bun examples/pi-runner.ts
  *
- * Pi reads provider credentials from its usual environment variables. Configure the attest trigger
- * to send `Authorization: Bearer $ATTEST_TRIGGER_TOKEN`.
+ * Pi does not inherit the runner's environment, so the provider key is passed through `env`. Pi
+ * logins kept under HOME also work. Configure the attest trigger to send
+ * `Authorization: Bearer $ATTEST_TRIGGER_TOKEN`.
  */
 import { createAgentRunner } from '@attest/client';
 import { serveAgentRunner } from '@attest/client/node';
@@ -17,7 +18,10 @@ const triggerToken = process.env.ATTEST_TRIGGER_TOKEN;
 if (triggerToken === undefined) throw new Error('Set ATTEST_TRIGGER_TOKEN.');
 
 const runner = createAgentRunner({
-  handler: createPiHandler({ model: process.env.PI_MODEL }),
+  handler: createPiHandler({
+    model: process.env.PI_MODEL,
+    env: { ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY },
+  }),
   triggerToken,
 });
 

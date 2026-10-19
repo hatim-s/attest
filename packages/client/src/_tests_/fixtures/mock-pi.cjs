@@ -12,6 +12,9 @@
  * - --mock-delay-ms=<n>: pause before each record, so tests can abort mid-run.
  * - --mock-fail: the first turn ends with a provider error and no tool call.
  * - --mock-pid-file=<path>: write this process's pid there on start.
+ * - --mock-dump-env: write this process's environment to env.json in the working directory.
+ * - --mock-exit-early: after agent_start, print to stderr and exit with code 3.
+ * - --mock-bad-final: the final assistant message has no usage, which Pi never sends.
  */
 
 const fs = process.getBuiltinModule('node:fs');
@@ -37,6 +40,10 @@ const usage = {
 let run;
 
 if (pidFile) fs.writeFileSync(pidFile, String(process.pid));
+
+if (process.argv.includes('--mock-dump-env')) {
+  fs.writeFileSync(path.join(process.cwd(), 'env.json'), JSON.stringify(process.env));
+}
 
 const emit = (record) => process.stdout.write(`${JSON.stringify(record)}\n`);
 
@@ -88,6 +95,16 @@ async function* events(prompt) {
   const user = { role: 'user', content: prompt, timestamp: Date.now() };
 
   yield { type: 'agent_start' };
+
+  if (process.argv.includes('--mock-exit-early')) {
+    // Defer so the agent_start record is written first.
+    setTimeout(() => {
+      // A synchronous write, so process.exit cannot drop it.
+      fs.writeSync(2, 'mock pi crashed\n');
+      process.exit(3);
+    });
+  }
+
   yield { type: 'turn_start' };
   yield { type: 'message_start', message: user };
   yield { type: 'message_end', message: user };
@@ -152,6 +169,7 @@ async function* events(prompt) {
     'stop',
   );
 
+  if (process.argv.includes('--mock-bad-final')) delete answer.usage;
   yield* streamAssistant(answer);
   yield { type: 'turn_end', message: answer, toolResults: [] };
   yield { type: 'agent_end', messages: [user, call, toolResult, answer], willRetry: false };

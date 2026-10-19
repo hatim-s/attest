@@ -23,10 +23,11 @@ const assistantMessageSchema = z.looseObject({
   errorMessage: z.string().optional(),
 });
 
-// User, tool result and custom messages become `null`: the handler only reads assistant ones.
+// User, tool result and custom messages become `null`: the handler only reads assistant ones. An
+// assistant message that fails its schema fails the record instead of passing as `null`.
 const messageSchema = z.union([
   assistantMessageSchema,
-  z.looseObject({ role: z.string() }).transform(() => null),
+  z.looseObject({ role: z.string().refine((role) => role !== 'assistant') }).transform(() => null),
 ]);
 
 const piRecordSchema = z.discriminatedUnion('type', [
@@ -74,17 +75,43 @@ const piRecordSchema = z.discriminatedUnion('type', [
 
 type PiRecord = z.infer<typeof piRecordSchema>;
 
+const HANDLED_TYPES: ReadonlySet<string> = new Set(
+  piRecordSchema.options.map((option) => option.shape.type.value),
+);
+
+const recordTypeSchema = z.looseObject({ type: z.string() });
+
+/** `record` is `undefined` for lines the handler does not read; `ok: false` is a broken record. */
+type ParsedLine = { ok: true; record: PiRecord | undefined } | { ok: false; message: string };
+
 type PiAssistantMessage = z.infer<typeof assistantMessageSchema>;
 
-/** Parses one stdout line. Non-JSON lines and records the handler does not read return `undefined`. */
-const parsePiRecord = (line: string): PiRecord | undefined => {
-  try {
-    const parsed = piRecordSchema.safeParse(JSON.parse(line));
+/**
+ * Parses one stdout line. Non-JSON lines and record types the handler does not read are skipped. A
+ * record of a type it reads that fails its schema is an error: skipping it could turn a failed
+ * final turn into the previous turn's text reported as success.
+ */
+const parsePiRecord = (line: string): ParsedLine => {
+  let json: unknown;
 
-    return parsed.success ? parsed.data : undefined;
+  try {
+    json = JSON.parse(line);
   } catch {
-    return undefined;
+    return { ok: true, record: undefined };
   }
+
+  const typed = recordTypeSchema.safeParse(json);
+
+  if (!typed.success || !HANDLED_TYPES.has(typed.data.type)) return { ok: true, record: undefined };
+  const parsed = piRecordSchema.safeParse(json);
+
+  if (parsed.success) return { ok: true, record: parsed.data };
+  const issue = parsed.error.issues[0];
+
+  return {
+    ok: false,
+    message: `Pi sent an unreadable ${typed.data.type} record (${issue?.path.join('.') ?? ''}: ${issue?.message ?? 'invalid'}).`,
+  };
 };
 
 // Pi tools return `{ content: [{ type: 'text', text }], details }`; an error's text is its message.

@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
+import { z } from 'zod';
 
 import type { AgentInvocation } from '../index.js';
 import { createPiHandler } from '../pi.js';
@@ -102,6 +103,49 @@ describe('createPiHandler', () => {
       code: 'error',
       message: '--mock-fail requested',
     });
+  });
+
+  it('keeps runner variables out of Pi and passes the handler env', async () => {
+    process.env.ATTEST_CLIENT_RUNNER_SECRET = 'runner-only';
+
+    try {
+      const handler = createPiHandler({
+        argv: [process.execPath, MOCK_PI, '--mock-dump-env'],
+        env: { PROVIDER_KEY: 'given', UNSET_KEY: undefined },
+      });
+
+      const result = await handler(invocation, { signal: new AbortController().signal });
+      const dumped = result.artifacts?.find((artifact) => artifact.path === 'env.json');
+      const content = dumped?.kind === 'inline' ? dumped.content : '{}';
+      const env = z.record(z.string(), z.string()).parse(JSON.parse(content));
+
+      expect(env).toMatchObject({ PROVIDER_KEY: 'given', LC_ALL: 'C' });
+      expect(env).not.toHaveProperty('ATTEST_CLIENT_RUNNER_SECRET');
+      expect(env).not.toHaveProperty('UNSET_KEY');
+      expect(env.PATH?.split(':').every((entry) => entry.startsWith('/'))).toBe(true);
+    } finally {
+      delete process.env.ATTEST_CLIENT_RUNNER_SECRET;
+    }
+  });
+
+  it('reports Pi exiting before it settles, with the stderr tail', async () => {
+    const handler = createPiHandler({ argv: [process.execPath, MOCK_PI, '--mock-exit-early'] });
+    const result = await handler(invocation, { signal: new AbortController().signal });
+
+    expect(result).toMatchObject({
+      error: {
+        code: 'pi_exited',
+        message: 'Pi exited (code 3) before the run settled. stderr: mock pi crashed',
+      },
+    });
+  });
+
+  it('fails a run whose final assistant message breaks the schema instead of using an earlier turn', async () => {
+    const handler = createPiHandler({ argv: [process.execPath, MOCK_PI, '--mock-bad-final'] });
+    const result = await handler(invocation, { signal: new AbortController().signal });
+
+    expect(result).toMatchObject({ error: { code: 'pi_protocol_error' } });
+    expect(result).not.toHaveProperty('output');
   });
 
   it('kills Pi when the invocation is aborted and still reports the trace and changed files', async () => {

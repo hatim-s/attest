@@ -1,7 +1,7 @@
 import { isJsonObject, isString, type JsonValue } from '@attest/contracts';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { delimiter, isAbsolute, join } from 'node:path';
 
 import { collectArtifacts } from '../node/collect-artifacts.js';
 import { hashFiles } from '../node/workspace-files.js';
@@ -37,8 +37,34 @@ type PiHandlerOptions = {
   systemPrompt?: string;
   /** Picks the working directory. Defaults to a fresh temporary directory, removed afterwards. */
   workspace?: (invocation: AgentInvocation) => Promise<string>;
+  /**
+   * Variables Pi gets on top of `PATH`, `HOME`, `TMPDIR` and `LC_ALL`, such as a provider API key.
+   * Undefined values are left out, so `{ KEY: process.env.KEY }` works.
+   */
+  env?: Record<string, string | undefined>;
   /** Kills Pi if it has not settled by then. Defaults to 15 minutes. */
   timeoutMs?: number;
+};
+
+type PiEnvironment = Record<string, string> & { PATH: string; LC_ALL: 'C' };
+
+/**
+ * Pi's shell runs commands the prompt chooses, so it gets only an absolute search path, a home for
+ * its own config, a temp dir, a fixed locale and the caller's `env`. Runner secrets stay out.
+ */
+const piEnvironment = (extra: Record<string, string | undefined>): PiEnvironment => {
+  const environment: PiEnvironment = {
+    PATH: (process.env.PATH ?? '').split(delimiter).filter(isAbsolute).join(delimiter),
+    LC_ALL: 'C',
+  };
+
+  const passed = { HOME: process.env.HOME, TMPDIR: process.env.TMPDIR, ...extra };
+
+  for (const [key, value] of Object.entries(passed)) {
+    if (value !== undefined) environment[key] = value;
+  }
+
+  return environment;
 };
 
 /** The prompt is the input itself when it is a string, else its string `prompt` field. */
@@ -113,8 +139,10 @@ const createPiHandler = ({
   model,
   systemPrompt,
   workspace,
+  env = {},
   timeoutMs = DEFAULT_TIMEOUT_MS,
 }: PiHandlerOptions = {}): AgentHandler => {
+  const environment = piEnvironment(env);
   const command: [string, ...string[]] = [...argv, ...PI_RPC_FLAGS];
 
   if (model !== undefined) command.push('--model', model);
@@ -147,6 +175,7 @@ const createPiHandler = ({
       const outcome = await runPiProcess({
         argv: command,
         cwd,
+        env: environment,
         message,
         signal,
         timeoutMs,
