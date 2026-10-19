@@ -1,13 +1,13 @@
 import { randomUUID } from 'node:crypto';
 import { constants } from 'node:fs';
-import { chmod, lstat, mkdir, open, rename, rm } from 'node:fs/promises';
+import { chmod, open, rename, rm } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { dirname, join, parse, resolve } from 'node:path';
+import { dirname, join } from 'node:path';
 
 import { z } from 'zod';
 
 import { LocalError } from '../errors/local-error.js';
-import { errnoCode } from '../internal/errno-code.js';
+import { assertPrivateAncestors, createPrivateAncestors } from '../internal/private-directory.js';
 import { normalizeCloudUrl } from './client.js';
 import { bearerTokenSchema } from './protocol.js';
 
@@ -19,33 +19,13 @@ type CloudCredentials = z.infer<typeof credentialSchema>;
 
 const defaultCredentialPath = (): string => join(homedir(), '.attest', 'cloud', 'credentials.json');
 
-/** Rejects symlink ancestors before using the credential directory. */
-const checkCredentialAncestors = async (path: string, create: boolean): Promise<void> => {
-  const directory = dirname(resolve(path));
-  const root = parse(directory).root;
-  let current = root;
-
-  for (const component of directory.slice(root.length).split('/')) {
-    current = join(current, component);
-
-    if (create)
-      await mkdir(current, { mode: 0o700 }).catch((cause: unknown) => {
-        if (errnoCode(cause) !== 'EEXIST') throw cause;
-      });
-    const metadata = await lstat(current);
-
-    if (!metadata.isDirectory() || metadata.isSymbolicLink())
-      throw new Error('Unsafe credential ancestor');
-  }
-};
-
 /** Reads a private credential file without following a substituted symbolic link. */
 const readCloudCredentials = async (
   path = defaultCredentialPath(),
   options: { allowExpired?: boolean } = {},
 ): Promise<CloudCredentials> => {
   try {
-    await checkCredentialAncestors(path, false);
+    await assertPrivateAncestors(path);
     const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
 
     try {
@@ -82,7 +62,7 @@ const writeCloudCredentials = async (
   const temporary = join(directory, `.credentials-${randomUUID()}`);
 
   try {
-    await checkCredentialAncestors(path, true);
+    await createPrivateAncestors(path);
     await chmod(directory, 0o700);
     const handle = await open(temporary, 'wx', 0o600);
 
@@ -93,7 +73,7 @@ const writeCloudCredentials = async (
       await handle.close();
     }
 
-    await checkCredentialAncestors(path, false);
+    await assertPrivateAncestors(path);
     await rename(temporary, path);
   } catch {
     throw new LocalError('cloud_credentials_failed', 'Could not save private cloud credentials.');
@@ -105,7 +85,7 @@ const writeCloudCredentials = async (
 /** Removes the locally stored bearer token after its cloud session has been revoked. */
 const removeCloudCredentials = async (path = defaultCredentialPath()): Promise<void> => {
   try {
-    await checkCredentialAncestors(path, false);
+    await assertPrivateAncestors(path);
     await rm(path, { force: true });
   } catch (cause: unknown) {
     throw new LocalError(

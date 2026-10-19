@@ -25,6 +25,8 @@ type LocalErrorCode =
   | 'project_recovery_required'
   | 'project_saved_cleanup_failed'
   | 'project_transaction_failed'
+  | 'registry_invalid'
+  | 'registry_write_failed'
   | 'resource_not_found'
   | 'run_failed'
   | 'trace_convert_failed';
