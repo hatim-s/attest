@@ -17,23 +17,28 @@ type ServedAgentRunner = {
   close: () => Promise<void>;
 };
 
-/** Streams a Node request body on demand, so the runner's byte cap stops reading early. */
-const toWebBody = (incoming: IncomingMessage): ReadableStream<Uint8Array> => {
-  // SAFETY: an IncomingMessage with no text encoding set yields Buffer chunks.
-  const chunks = (incoming as AsyncIterable<Buffer>)[Symbol.asyncIterator]();
+/**
+ * Streams a Node request body into a Web stream, pausing the socket while the stream is full so
+ * the runner's byte cap stops reading early.
+ */
+const toWebBody = (incoming: IncomingMessage): ReadableStream<Uint8Array> =>
+  new ReadableStream({
+    start: (controller) => {
+      incoming.on('data', (chunk: Buffer) => {
+        controller.enqueue(chunk);
 
-  return new ReadableStream({
-    pull: async (controller) => {
-      const next = await chunks.next();
-
-      if (next.done === true) controller.close();
-      else controller.enqueue(next.value);
+        if ((controller.desiredSize ?? 0) <= 0) incoming.pause();
+      });
+      incoming.on('end', () => controller.close());
+      incoming.on('error', (error) => controller.error(error));
+    },
+    pull: () => {
+      incoming.resume();
     },
     cancel: () => {
       incoming.destroy();
     },
   });
-};
 
 /** Bridges a Node request to a Web `Request`. */
 const toWebRequest = (incoming: IncomingMessage, origin: string): Request => {
@@ -104,8 +109,8 @@ const serveAgentRunner = async (
     url: origin,
     close: () =>
       new Promise<void>((resolve, reject) => {
-        server.closeAllConnections();
         server.close((error) => (error === undefined ? resolve() : reject(error)));
+        server.closeAllConnections();
       }),
   };
 };

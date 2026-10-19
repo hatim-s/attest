@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { readdir } from 'node:fs/promises';
+import { finished } from 'node:stream/promises';
 import { join } from 'node:path';
 
 // A walk this large is a repository checkout, not an agent's output; fail instead of hashing it.
@@ -43,12 +44,10 @@ const hashFiles = async (root: string): Promise<Map<string, string>> => {
 
   for (const path of await listFiles(root)) {
     const hash = createHash('sha256');
+    const stream = createReadStream(join(root, path));
 
-    // SAFETY: a file stream opened without an encoding yields Buffer chunks.
-    for await (const chunk of createReadStream(join(root, path)) as AsyncIterable<Buffer>) {
-      hash.update(chunk);
-    }
-
+    stream.on('data', (chunk) => hash.update(chunk));
+    await finished(stream);
     hashes.set(path, hash.digest('hex'));
   }
 
