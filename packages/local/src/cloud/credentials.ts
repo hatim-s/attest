@@ -1,13 +1,15 @@
-import { randomUUID } from 'node:crypto';
-import { constants } from 'node:fs';
-import { chmod, open, rename, rm } from 'node:fs/promises';
+import { rm } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
 
 import { z } from 'zod';
 
 import { LocalError } from '../errors/local-error.js';
-import { assertPrivateAncestors, createPrivateAncestors } from '../internal/private-directory.js';
+import {
+  assertPrivateAncestors,
+  readPrivateFile,
+  writePrivateFile,
+} from '../internal/private-file.js';
 import { normalizeCloudUrl } from './client.js';
 import { bearerTokenSchema } from './protocol.js';
 
@@ -25,24 +27,16 @@ const readCloudCredentials = async (
   options: { allowExpired?: boolean } = {},
 ): Promise<CloudCredentials> => {
   try {
-    await assertPrivateAncestors(path);
-    const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+    const text = await readPrivateFile(path);
 
-    try {
-      const stat = await handle.stat();
+    if (text.length > 16_384) throw new Error('Unsafe credentials');
+    const credentials = credentialSchema.parse(JSON.parse(text));
+    normalizeCloudUrl(credentials.baseUrl);
 
-      if (!stat.isFile() || (stat.mode & 0o077) !== 0 || stat.size > 16_384)
-        throw new Error('Unsafe credentials');
-      const credentials = credentialSchema.parse(JSON.parse(await handle.readFile('utf8')));
-      normalizeCloudUrl(credentials.baseUrl);
+    if (!options.allowExpired && Date.parse(credentials.expiresAt) <= Date.now())
+      throw new Error('Expired credentials');
 
-      if (!options.allowExpired && Date.parse(credentials.expiresAt) <= Date.now())
-        throw new Error('Expired credentials');
-
-      return credentials;
-    } finally {
-      await handle.close();
-    }
+    return credentials;
   } catch {
     throw new LocalError(
       'cloud_auth_required',
@@ -58,27 +52,11 @@ const writeCloudCredentials = async (
   path = defaultCredentialPath(),
 ): Promise<void> => {
   normalizeCloudUrl(credentials.baseUrl);
-  const directory = dirname(path);
-  const temporary = join(directory, `.credentials-${randomUUID()}`);
 
   try {
-    await createPrivateAncestors(path);
-    await chmod(directory, 0o700);
-    const handle = await open(temporary, 'wx', 0o600);
-
-    try {
-      await handle.writeFile(JSON.stringify(credentials));
-      await handle.sync();
-    } finally {
-      await handle.close();
-    }
-
-    await assertPrivateAncestors(path);
-    await rename(temporary, path);
+    await writePrivateFile(path, JSON.stringify(credentials));
   } catch {
     throw new LocalError('cloud_credentials_failed', 'Could not save private cloud credentials.');
-  } finally {
-    await rm(temporary, { force: true });
   }
 };
 

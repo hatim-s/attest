@@ -1,14 +1,12 @@
-import { randomUUID } from 'node:crypto';
-import { constants } from 'node:fs';
-import { chmod, open, realpath, rename, rm } from 'node:fs/promises';
-import { basename, dirname, join, resolve } from 'node:path';
+import { realpath } from 'node:fs/promises';
+import { basename, resolve } from 'node:path';
 
 import { projectKeySchema } from '@attest/core/records';
 import { z } from 'zod';
 
 import { LocalError } from '../errors/index.js';
 import { errnoCode } from '../internal/errno-code.js';
-import { assertPrivateAncestors, createPrivateAncestors } from '../internal/private-directory.js';
+import { readPrivateFile, writePrivateFile } from '../internal/private-file.js';
 import { uniqueProjectKey } from './project-key.js';
 
 const REGISTRY_SCHEMA_ID = 'attest.projects.v1';
@@ -55,26 +53,20 @@ const EMPTY_REGISTRY: ProjectRegistry = { schema: REGISTRY_SCHEMA_ID, projects: 
 const invalidRegistry = (registryPath: string, cause: unknown): LocalError =>
   new LocalError('registry_invalid', 'The project registry is unreadable or invalid.', {
     path: registryPath,
-    hint: 'The registry and its parent directories must not be symbolic links. Fix or delete the file, then register projects again with `attest projects add <dir>`.',
+    hint: 'The registry must be a private file (mode 0600) and neither it nor its parent directories may be symbolic links. Fix or delete the file, then register projects again with `attest projects add <dir>`.',
     cause,
   });
 
 /**
  * Reads the global project registry. A missing file or missing parent directory is an empty
- * registry; a symlinked ancestor, a symlinked file or malformed content is `registry_invalid`.
+ * registry; a symlinked ancestor, a symlinked or group-accessible file, or malformed content is
+ * `registry_invalid`.
  */
 const readRegistry = async (registryPath: string): Promise<ProjectRegistry> => {
   let text: string;
 
   try {
-    await assertPrivateAncestors(registryPath);
-    const handle = await open(registryPath, constants.O_RDONLY | constants.O_NOFOLLOW);
-
-    try {
-      text = await handle.readFile('utf8');
-    } finally {
-      await handle.close();
-    }
+    text = await readPrivateFile(registryPath);
   } catch (cause: unknown) {
     if (errnoCode(cause) === 'ENOENT') return EMPTY_REGISTRY;
     throw invalidRegistry(registryPath, cause);
@@ -89,31 +81,14 @@ const readRegistry = async (registryPath: string): Promise<ProjectRegistry> => {
 
 /** Replaces the registry atomically with a private temporary file and a rename. */
 const writeRegistry = async (registryPath: string, registry: ProjectRegistry): Promise<void> => {
-  const directory = dirname(registryPath);
-  const temporary = join(directory, `.projects-${randomUUID()}.tmp`);
-
   try {
-    await createPrivateAncestors(registryPath);
-    await chmod(directory, 0o700);
-    const handle = await open(temporary, 'wx', 0o600);
-
-    try {
-      await handle.writeFile(`${JSON.stringify(registry, undefined, 2)}\n`);
-      await handle.sync();
-    } finally {
-      await handle.close();
-    }
-
-    await assertPrivateAncestors(registryPath);
-    await rename(temporary, registryPath);
+    await writePrivateFile(registryPath, `${JSON.stringify(registry, undefined, 2)}\n`);
   } catch (cause: unknown) {
     throw new LocalError('registry_write_failed', 'Could not save the project registry.', {
       path: registryPath,
       hint: 'Check that the registry directory is writable and that no parent is a symbolic link, then retry.',
       cause,
     });
-  } finally {
-    await rm(temporary, { force: true });
   }
 };
 
