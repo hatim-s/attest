@@ -1,4 +1,9 @@
-import { cliFailureResultSchema } from '@attest/contracts';
+import {
+  caseSelectionSchema,
+  cliFailureResultSchema,
+  durationMillisecondsSchema,
+  testIdListSchema,
+} from '@attest/contracts';
 import { z } from 'zod';
 
 /** One authored test a dashboard run can select. Tags are the union of its cases' tags. */
@@ -10,17 +15,18 @@ const testSummarySchema = z.object({
 });
 
 /**
- * The dashboard's request to start a run. It is not the CLI's `eval.run` document: the local host
- * maps it to one and the CLI validates that document again, so ids are only checked for shape here.
+ * The dashboard's request to start a run. It is not the CLI's `eval.run` document, but the local
+ * host maps it to one field for field, so each field reuses the CLI's own rule and a request the
+ * CLI would refuse is refused here, before a process is spawned.
  */
 const runStartRequestSchema = z.strictObject({
   selection: z.union([
     z.strictObject({ all: z.literal(true) }),
-    z.strictObject({ testIds: z.array(z.string().min(1)).nonempty() }),
+    z.strictObject({ testIds: testIdListSchema }),
   ]),
-  tags: z.array(z.string().min(1)).nonempty().optional(),
+  tags: caseSelectionSchema.shape.tags,
   concurrency: z.number().int().positive().optional(),
-  timeoutMs: z.number().int().positive().optional(),
+  timeoutMs: durationMillisecondsSchema.optional(),
 });
 
 const runCancelOutcomeSchema = z.enum([

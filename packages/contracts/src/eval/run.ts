@@ -1,10 +1,6 @@
 import { z } from 'zod';
 
-import {
-  caseSelectionSchema,
-  caseSelectionSummarySchema,
-  uniqueValuesSchema,
-} from './selection.js';
+import { caseSelectionSchema, caseSelectionSummarySchema, testIdListSchema } from './selection.js';
 import {
   durationMillisecondsSchema,
   projectIdSchema,
@@ -44,7 +40,7 @@ const testScopeBranches = <OutputFields extends Record<string, z.core.$ZodType>>
   [
     z.strictObject({
       ...evalRunCommonRequestFields,
-      test_ids: uniqueValuesSchema(resourceIdSchema, 'test id'),
+      test_ids: testIdListSchema,
       ...outputFields,
     }),
     z.strictObject({ ...evalRunCommonRequestFields, all: z.literal(true), ...outputFields }),

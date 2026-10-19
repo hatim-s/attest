@@ -312,6 +312,9 @@ describe('createApiApp', () => {
         JSON.stringify({ selection: { all: true, testIds: ['smoke'] } }),
         JSON.stringify({ selection: { all: true }, concurrency: 0 }),
         JSON.stringify({ selection: { all: true }, tags: [] }),
+        JSON.stringify({ selection: { testIds: ['Smoke'] } }),
+        JSON.stringify({ selection: { testIds: ['smoke', 'smoke'] } }),
+        JSON.stringify({ selection: { all: true }, tags: ['fast', 'fast'] }),
       ]) {
         const response = await post(app, '/projects/demo/runs', body);
         expect(response.status).toBe(400);
