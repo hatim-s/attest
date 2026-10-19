@@ -6,7 +6,7 @@ import { join } from 'node:path';
 
 import { dashboardHtml } from '@attest/web/embedded';
 import { AGENT_PROTOCOL } from '@attest/contracts';
-import { createSingleProjectCatalog, type RunStore } from '@attest/core';
+import { createSingleProjectCatalog, type RunControl, type RunStore } from '@attest/core';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { openStore } from '../../store/run-store.js';
@@ -81,12 +81,16 @@ const createStoreFixture = async (): Promise<{
 };
 
 /** Serves the fixture store as the single project `demo`. */
-const startFixtureServer = async (storePath: string): Promise<ViewServerHandle> => {
+const startFixtureServer = async (
+  storePath: string,
+  control?: RunControl,
+): Promise<ViewServerHandle> => {
   const store = await openStore(storePath);
 
   const server = await startViewServer({
     catalog: createSingleProjectCatalog({ key: 'demo', name: 'Demo' }, store.runs),
     close: () => store.close(),
+    control,
     indexHtml: dashboardHtml,
   });
 
@@ -158,5 +162,65 @@ describe('view server', () => {
     expect(JSON.parse(result.body)).toEqual({
       error: { code: 'FORBIDDEN', message: 'Request origin is not allowed.' },
     });
+  });
+
+  it('lets only the dashboard origin start or cancel runs', async () => {
+    const fixture = await createStoreFixture();
+    const calls: string[] = [];
+
+    const control: RunControl = {
+      listTests: () => Promise.resolve([]),
+      startRun: (projectKey) => {
+        calls.push(`start ${projectKey}`);
+
+        return Promise.resolve({ runId: 'run-new' });
+      },
+      cancelRun: (_projectKey, runId) => {
+        calls.push(`cancel ${runId}`);
+
+        return Promise.resolve({ outcome: 'cancellation_requested' });
+      },
+    };
+
+    const server = await startFixtureServer(fixture.storePath, control);
+
+    const post = (path: string, headers: Record<string, string>) =>
+      fetch(`${server.origin}/api/projects/demo${path}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...headers },
+        body: JSON.stringify({ selection: { all: true } }),
+      });
+
+    const refusedHeaders: Record<string, string>[] = [
+      { Origin: 'http://attacker.example.test' },
+      {},
+    ];
+
+    for (const headers of refusedHeaders) {
+      for (const path of ['/runs', `/runs/${fixture.baseRunId}/cancel`]) {
+        const refused = await post(path, headers);
+        expect(refused.status).toBe(403);
+        expect(await refused.json()).toEqual({
+          error: { code: 'FORBIDDEN', message: 'Request origin is not allowed.' },
+        });
+      }
+    }
+
+    const foreignRead = await fetch(`${server.origin}/api/projects/demo/runs`, {
+      headers: { Origin: 'http://attacker.example.test' },
+    });
+
+    expect(foreignRead.status).toBe(403);
+    expect(calls).toEqual([]);
+
+    const started = await post('/runs', { Origin: server.origin });
+    expect(started.status).toBe(201);
+    expect(await started.json()).toEqual({ runId: 'run-new' });
+    const cancelled = await post(`/runs/${fixture.baseRunId}/cancel`, { Origin: server.origin });
+    expect(cancelled.status).toBe(200);
+    expect(calls).toEqual(['start demo', `cancel ${fixture.baseRunId}`]);
+    await expect(fetch(server.url).then((response) => response.text())).resolves.toContain(
+      '"capabilities":{"control":true}',
+    );
   });
 });

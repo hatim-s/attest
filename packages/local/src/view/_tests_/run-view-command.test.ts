@@ -44,7 +44,10 @@ describe('runViewCommand', () => {
         ]);
 
         expect(runsResponse.status).toBe(200);
-        await expect(dashboardResponse.text()).resolves.toContain('<div id="root"></div>');
+        const dashboard = await dashboardResponse.text();
+        expect(dashboard).toContain('<div id="root"></div>');
+        // Every served project can start runs, so the dashboard shows its run controls.
+        expect(dashboard).toContain('"capabilities":{"control":true}');
         abortController.abort();
       },
     });

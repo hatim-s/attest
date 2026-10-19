@@ -33,6 +33,7 @@ const startViewServer = async (options: StartViewServerOptions): Promise<ViewSer
       allowedOrigin: () => origin,
       indexHtml: options.indexHtml,
       catalog: options.catalog,
+      control: options.control,
     });
 
     server = await new Promise<ServerType>((resolve, reject) => {

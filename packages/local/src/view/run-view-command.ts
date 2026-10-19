@@ -1,4 +1,4 @@
-import { mkdir } from 'node:fs/promises';
+import { mkdir, stat } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 
 import { createSingleProjectCatalog } from '@attest/core';
@@ -6,6 +6,7 @@ import { dashboardHtml } from '@attest/web/embedded';
 
 import { describeStoreProject } from '../project/describe-store-project.js';
 import { createRegistryCatalog, readRegistry, type ClosableCatalog } from '../registry/index.js';
+import { createRunLauncher, type CliCommand } from '../run-control/index.js';
 import { openStore } from '../store/index.js';
 import { startViewServer, type ViewServerHandle } from '../view-server/index.js';
 
@@ -44,6 +45,24 @@ const openViewCatalog = async (
   return { ...createSingleProjectCatalog(project, store.runs), close: () => store.close() };
 };
 
+/**
+ * The CLI serving the dashboard, so runs it starts use the same version and runtime. `argv[1]`
+ * is the script the runtime executes; through the `attest` bin link it is that link, which
+ * `stat` follows. Only when it is not a file (a compiled binary) is `attest` taken from PATH.
+ */
+const resolveCliCommand = async (): Promise<CliCommand> => {
+  const script = process.argv[1];
+
+  const isFile =
+    script !== undefined &&
+    (await stat(script).then(
+      (entry) => entry.isFile(),
+      () => false,
+    ));
+
+  return isFile ? { command: process.execPath, args: [script] } : { command: 'attest', args: [] };
+};
+
 /** Starts the loopback dashboard and owns abort-driven shutdown. */
 const runViewCommand = async (options: RunViewCommandOptions): Promise<ViewServerHandle> => {
   const catalog = await openViewCatalog(options.scope, options.workingDirectory);
@@ -52,6 +71,7 @@ const runViewCommand = async (options: RunViewCommandOptions): Promise<ViewServe
     indexHtml: dashboardHtml,
     port: options.port,
     catalog,
+    control: createRunLauncher({ catalog, command: await resolveCliCommand() }),
     close: catalog.close,
   });
 
