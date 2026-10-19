@@ -46,7 +46,7 @@ const Heading = ({ level, eyebrow, title, meta, children }: HeadingProps) => {
   );
 };
 
-/** What the CLI said about a run that did not start. Its message is already the notice's text. */
+/** What the CLI or the project loader reported. Its message is already the notice's text. */
 const DiagnosticsList = ({ diagnostics }: { diagnostics: CliDiagnostics }) => (
   <dl className="error-diagnostics">
     <dt>Code</dt>
@@ -67,6 +67,16 @@ const DiagnosticsList = ({ diagnostics }: { diagnostics: CliDiagnostics }) => (
         <dd>{diagnostics.hint}</dd>
       </>
     ) : null}
+    {diagnostics.retryable !== undefined ? (
+      <>
+        <dt>Retry</dt>
+        <dd>
+          {diagnostics.retryable
+            ? 'Yes. A later attempt can succeed.'
+            : 'Not until the cause is fixed.'}
+        </dd>
+      </>
+    ) : null}
     {diagnostics.details !== undefined ? (
       <>
         <dt>Details</dt>
@@ -78,7 +88,7 @@ const DiagnosticsList = ({ diagnostics }: { diagnostics: CliDiagnostics }) => (
   </dl>
 );
 
-/** Full-width alert for a failed request, with the CLI's diagnostics when a run did not start. */
+/** Full-width alert for a failed request, with diagnostics when the API sent them. */
 const ErrorNotice = ({ error }: { error: unknown }) => (
   <div className="error-notice" role="alert">
     {error instanceof Error ? error.message : 'Something went wrong.'}
