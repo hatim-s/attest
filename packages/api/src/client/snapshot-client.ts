@@ -23,6 +23,9 @@ const pageLimit = (query: PageQuery): number => {
 /** Makes synchronous snapshot failures reject through the same promise contract as HTTP. */
 const settle = <T>(read: () => T): Promise<T> => Promise.resolve().then(read);
 
+const controlUnavailable = (): Promise<never> =>
+  settle(() => fail('CONTROL_UNAVAILABLE', 'A saved report cannot start or cancel runs.'));
+
 /** Reads the already parsed bootstrap without making network requests from offline reports. */
 const createSnapshotClient = (snapshot: ReportSnapshot): ApiClient => {
   const requireProject = (projectKey: string): void => {
@@ -46,6 +49,7 @@ const createSnapshotClient = (snapshot: ReportSnapshot): ApiClient => {
       includedCases: snapshot.cases.length,
       truncated: snapshot.truncated,
     },
+    capabilities: { control: false },
     listProjects: () => settle(() => ({ items: [snapshot.project] })),
     listRuns: ({ projectKey }, query) =>
       settle(() => {
@@ -140,6 +144,9 @@ const createSnapshotClient = (snapshot: ReportSnapshot): ApiClient => {
 
         return fail('RUN_NOT_FOUND', 'The comparison run is not included in this report.');
       }),
+    listTests: controlUnavailable,
+    startRun: controlUnavailable,
+    cancelRun: controlUnavailable,
   };
 };
 

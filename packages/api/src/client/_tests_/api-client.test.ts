@@ -3,6 +3,7 @@ import {
   diffRuns,
   StoreError,
   summarizeCaseRecord,
+  type RunControl,
   type RunSource,
 } from '@attest/core';
 import type { CaseRecord, RunRecord } from '@attest/core/records';
@@ -111,6 +112,7 @@ describe('ApiClient', () => {
     const client = createApiClient({
       kind: 'http',
       baseUrl: '/api',
+      capabilities: { control: false },
       fetch: (input, init) => {
         requests.push({
           url: input instanceof Request ? input.url : input.toString(),
@@ -162,6 +164,7 @@ describe('ApiClient', () => {
     const client = createApiClient({
       kind: 'http',
       baseUrl: '/api',
+      capabilities: { control: false },
       fetch: () => Promise.resolve(Response.json({})),
     });
 
@@ -172,6 +175,7 @@ describe('ApiClient', () => {
     const proxy = createApiClient({
       kind: 'http',
       baseUrl: '/api',
+      capabilities: { control: false },
       fetch: () =>
         Promise.resolve(
           new Response('<html>bad gateway</html>', {
@@ -189,6 +193,7 @@ describe('ApiClient', () => {
     const cancelled = createApiClient({
       kind: 'http',
       baseUrl: '/api',
+      capabilities: { control: false },
       fetch: () => Promise.reject(aborted),
     });
 
@@ -283,6 +288,68 @@ describe('ApiClient', () => {
       await expect(read()).rejects.toMatchObject({ status: 404, code: 'PROJECT_NOT_FOUND' });
     }
 
+    expect(client.capabilities).toEqual({ control: false });
+
+    for (const control of [
+      () => client.listTests({ projectKey }),
+      () => client.startRun({ projectKey }, { selection: { all: true } }),
+      () => client.cancelRun({ projectKey, runId: run.id }),
+    ]) {
+      await expect(control()).rejects.toMatchObject({ status: 501, code: 'CONTROL_UNAVAILABLE' });
+    }
+
     expect(network).not.toHaveBeenCalled();
+  });
+
+  it('sends control calls as JSON posts and keeps start diagnostics on the error', async () => {
+    const control: RunControl = {
+      listTests: () => Promise.resolve([{ id: 'smoke', name: 'Smoke', tags: [], caseCount: 1 }]),
+      startRun: (_projectKey, request) =>
+        'all' in request.selection
+          ? Promise.resolve({ runId: '01ARZ3NDEKTSV4RRFFQ69G5FAX' })
+          : Promise.reject(
+              new StoreError('RUN_START_FAILED', 'The run did not start.', {
+                details: { code: 'resource_not_found', message: 'Test nope was not found.' },
+              }),
+            ),
+      cancelRun: () => Promise.resolve({ outcome: 'already_terminal' }),
+    };
+
+    const app = new Hono().route(
+      '/api',
+      createApiApp({ catalog: createSingleProjectCatalog(project, source), control }),
+    );
+
+    const methods: string[] = [];
+
+    const client = createApiClient({
+      kind: 'http',
+      baseUrl: '/api',
+      capabilities: { control: true },
+      fetch: (input, init) => {
+        methods.push(init?.method ?? 'GET');
+
+        return Promise.resolve(app.request(input, init));
+      },
+    });
+
+    expect(client.capabilities).toEqual({ control: true });
+    expect(await client.listTests({ projectKey })).toEqual({
+      items: [{ id: 'smoke', name: 'Smoke', tags: [], caseCount: 1 }],
+    });
+    expect(await client.startRun({ projectKey }, { selection: { all: true } })).toEqual({
+      runId: '01ARZ3NDEKTSV4RRFFQ69G5FAX',
+    });
+    expect(await client.cancelRun({ projectKey, runId: '01ARZ3NDEKTSV4RRFFQ69G5FAV' })).toEqual({
+      outcome: 'already_terminal',
+    });
+    await expect(
+      client.startRun({ projectKey }, { selection: { testIds: ['nope'] } }),
+    ).rejects.toEqual(
+      new ApiError(422, 'RUN_START_FAILED', 'The run did not start.', {
+        details: { code: 'resource_not_found', message: 'Test nope was not found.' },
+      }),
+    );
+    expect(methods).toEqual(['GET', 'POST', 'POST', 'POST']);
   });
 });

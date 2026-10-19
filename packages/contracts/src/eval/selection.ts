@@ -15,6 +15,9 @@ const uniqueValuesSchema = (item: z.ZodType<string>, label: string) =>
       reportDuplicates({ values, pathFor: (index) => [index], label, context }),
     );
 
+/** The test ids one run selects, as `eval.run` and the dashboard's start request accept them. */
+const testIdListSchema = uniqueValuesSchema(resourceIdSchema, 'test id');
+
 /** Requests a seeded sample; the resolved seed is recorded in the run's selection summary. */
 const sampleRequestSchema = z.strictObject({
   count: z.number().int().positive(),
@@ -52,6 +55,7 @@ type CaseSelectionSummary = z.infer<typeof caseSelectionSummarySchema>;
 
 export {
   uniqueValuesSchema,
+  testIdListSchema,
   caseSelectionSchema,
   caseSelectionSummarySchema,
   type CaseSelection,

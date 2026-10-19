@@ -26,6 +26,7 @@ const renderAt = (projects: ProjectRecord[], path: string) => {
   const client = createApiClient({
     kind: 'http',
     baseUrl: '/api',
+    capabilities: { control: false },
     fetch: (input) => {
       const url = input instanceof Request ? input.url : input.toString();
 

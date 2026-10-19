@@ -4,14 +4,21 @@ import { createDashboardHtml } from '../create-dashboard-html.js';
 
 const html = '<html><head><script type="module">boot()</script></head></html>';
 
+const capabilities = { control: false };
+
 describe('createDashboardHtml', () => {
   it('injects the bootstrap before the deferred dashboard module', () => {
-    const result = createDashboardHtml(html, { kind: 'http', baseUrl: '/api' });
+    const result = createDashboardHtml(html, { kind: 'http', baseUrl: '/api', capabilities });
     expect(result).toContain('</script>\n    <script type="module">boot()');
-    expect(result).toContain('{"kind":"http","baseUrl":"/api"}');
+    expect(result).toContain('{"kind":"http","baseUrl":"/api","capabilities":{"control":false}}');
   });
   it('escapes script terminators and JavaScript line separators', () => {
-    const result = createDashboardHtml(html, { kind: 'http', baseUrl: '</script>\u2028\u2029' });
+    const result = createDashboardHtml(html, {
+      kind: 'http',
+      baseUrl: '</script>\u2028\u2029',
+      capabilities,
+    });
+
     expect(result).toContain(String.raw`\u003c/script>\u2028\u2029`);
     expect(result.match(/<\/script>/g)).toHaveLength(2);
   });
@@ -41,8 +48,8 @@ describe('createDashboardHtml', () => {
     expect(result.match(/<\/script>/g)).toHaveLength(2);
   });
   it('rejects HTML that cannot boot the dashboard', () => {
-    expect(() => createDashboardHtml('<html></html>', { kind: 'http', baseUrl: '/api' })).toThrow(
-      'The embedded dashboard does not contain its module script marker.',
-    );
+    expect(() =>
+      createDashboardHtml('<html></html>', { kind: 'http', baseUrl: '/api', capabilities }),
+    ).toThrow('The embedded dashboard does not contain its module script marker.');
   });
 });

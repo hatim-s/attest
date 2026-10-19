@@ -45,7 +45,7 @@ Runtime must not import local or CLI. A hosted worker can supply its own persist
 
 ## Local application
 
-`@attest/local` discovers and loads project files, applies transactional resource changes, resolves local execution configuration, records runs in SQLite, writes artifacts, and serves the dashboard on loopback. It composes core and runtime with the filesystem and database.
+`@attest/local` discovers and loads project files, applies transactional resource changes, resolves local execution configuration, records runs in SQLite, writes artifacts, and serves the dashboard on loopback. It composes core and runtime with the filesystem and database. The dashboard's `RunControl` spawns the running `attest` CLI as a detached child process for each run and cancels through the eval cancellation registry. That is a process boundary, not an import of the CLI package.
 
 Application errors carry typed codes and context. The CLI owns terminal rendering and exit presentation. Local must not import Commander or the CLI package. Paths, locks, cancellation registries, and the SQLite driver stay here rather than leaking into core types.
 
@@ -53,9 +53,9 @@ Local exposes focused entry points: `/agent`, `/metric`, `/test`, `/project`, `/
 
 `@attest/cli` translates flags and interactive answers into application requests. Its public entry point runs the CLI. It is not the SDK for project loading, eval execution, or persistence.
 
-## Read API
+## Read and run control API
 
-`@attest/api` owns the read contract, fetch server app, typed client and dashboard bootstrap injection. Hosts inject core's read-only `RunSource` through a `ProjectCatalog`, which lists projects and opens the run source of one project key. Every API route is project scoped; an unknown key fails with `PROJECT_NOT_FOUND`. The package owns no storage driver, socket, authentication or tenant policy. Contract and client subpaths use browser-safe core records. The server imports core's root for comparisons and store errors, so Cloudflare Workers hosts need `nodejs_compat`.
+`@attest/api` owns the read contract, the run control contract, fetch server app, typed client and dashboard bootstrap injection. Hosts inject core's read-only `RunSource` through a `ProjectCatalog`, which lists projects and opens the run source of one project key. A host that can run evals also injects core's `RunControl`, which lists a project's tests, starts a run and cancels one. Without it the control routes answer `CONTROL_UNAVAILABLE` and the bootstrap reports `capabilities.control: false`; the cloud host and static reports inject none. Every API route is project scoped; an unknown key fails with `PROJECT_NOT_FOUND`. The package owns no storage driver, socket, process spawning, authentication or tenant policy. Contract and client subpaths use browser-safe core records. The server imports core's root for comparisons and store errors, so Cloudflare Workers hosts need `nodejs_compat`.
 
 ## Browser and artifacts
 

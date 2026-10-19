@@ -2,7 +2,7 @@ import { StoreError, type StoreErrorCode } from '@attest/core';
 
 /** Normalizes driver failures while preserving deliberate store-domain errors and their causes. */
 const executeStoreOperation = async <Result>(
-  code: StoreErrorCode,
+  code: Extract<StoreErrorCode, 'READ_FAILED' | 'WRITE_FAILED'>,
   message: string,
   operation: () => Promise<Result>,
 ): Promise<Result> => {

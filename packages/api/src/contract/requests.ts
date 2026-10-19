@@ -1,5 +1,9 @@
 import { z } from 'zod';
-import { pageQuerySchema as corePageQuerySchema, projectKeySchema } from '@attest/core/records';
+import {
+  pageQuerySchema as corePageQuerySchema,
+  projectKeySchema,
+  runStartRequestSchema,
+} from '@attest/core/records';
 
 const idSchema = z.string().min(1);
 
@@ -49,5 +53,6 @@ export {
   suiteHistoryRequestSchema,
   MAX_SUITE_HISTORY_RUNS,
   DEFAULT_SUITE_HISTORY_RUNS,
+  runStartRequestSchema,
   type SuiteHistoryQuery,
 };

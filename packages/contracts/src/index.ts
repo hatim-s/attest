@@ -78,6 +78,7 @@ export type { MetricTestFixture } from './metric/test-fixture.js';
 
 export {
   caseFolderSchema,
+  durationMillisecondsSchema,
   isJsonValue,
   isString,
   isNumber,
@@ -182,7 +183,7 @@ export type {
   WarningCode,
 } from './eval/execution.js';
 
-export { caseSelectionSchema } from './eval/selection.js';
+export { caseSelectionSchema, testIdListSchema } from './eval/selection.js';
 
 export type { CaseSelection, CaseSelectionSummary } from './eval/selection.js';
 

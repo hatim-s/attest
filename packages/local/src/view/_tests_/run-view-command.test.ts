@@ -44,12 +44,35 @@ describe('runViewCommand', () => {
         ]);
 
         expect(runsResponse.status).toBe(200);
-        await expect(dashboardResponse.text()).resolves.toContain('<div id="root"></div>');
+        expect(await dashboardResponse.text()).toContain('<div id="root"></div>');
         abortController.abort();
       },
     });
 
     await expect(server.closed).resolves.toBeUndefined();
+  });
+
+  it.each([
+    [undefined, true],
+    ['.attest/runs.db', true],
+    ['elsewhere/runs.db', false],
+  ])('with --store %s, offers run control: %s', async (storePath, control) => {
+    const directory = await temporaryDirectory('attest-view-control-');
+    const abortController = new AbortController();
+    let dashboard = '';
+
+    await runViewCommand({
+      scope: { kind: 'store', storePath },
+      workingDirectory: directory,
+      signal: abortController.signal,
+      onReady: async ({ origin }) => {
+        dashboard = await fetch(origin).then((response) => response.text());
+        abortController.abort();
+      },
+    });
+
+    // Runs the CLI starts are recorded in `.attest/runs.db`, so only that store can show them.
+    expect(/"capabilities":\{"control":(true|false)\}/.exec(dashboard)?.[1]).toBe(String(control));
   });
 
   it('rejects a malformed registry before the server starts', async () => {

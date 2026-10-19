@@ -23,4 +23,4 @@ export {
   serializeCanonicalJsonLines,
 } from './canonical-project.js';
 
-export type { ResolvedEvalMetric } from './eval-case-expansion.js';
+export { expandTestCases, type ResolvedEvalMetric } from './eval-case-expansion.js';

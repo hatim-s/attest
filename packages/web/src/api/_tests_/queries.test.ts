@@ -54,7 +54,12 @@ it('refreshes final evidence after either run terminates', async () => {
     );
   });
 
-  const api = createApiClient({ kind: 'http', baseUrl: '/api', fetch });
+  const api = createApiClient({
+    kind: 'http',
+    baseUrl: '/api',
+    capabilities: { control: false },
+    fetch,
+  });
 
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false, staleTime: Infinity } },

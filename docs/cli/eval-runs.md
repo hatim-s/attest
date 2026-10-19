@@ -200,6 +200,57 @@ The dashboard and its read API are project scoped. Dashboard routes are `/projec
 `/projects/<key>/evals/<suite-name>`. The read API mirrors them under `/api/projects` and
 `/api/projects/<key>/runs`. An unknown key returns `PROJECT_NOT_FOUND`.
 
+## Starting and cancelling runs from the dashboard
+
+`attest view` and `attest view --all` can start and cancel eval runs in every project they serve.
+The dashboard bootstrap reports `capabilities.control: true`. A report from `attest report`
+reports `false` and cannot start anything.
+
+A dashboard run is an ordinary CLI run. The server spawns the CLI that is serving the dashboard,
+with the project root as its working directory and an `eval.run` document on stdin:
+
+```sh
+attest eval run --project <root> --non-interactive --from-json -
+```
+
+The dashboard can select every test or a list of test ids, and can add tags, a concurrency and a
+run timeout. Other `attest eval run` options, such as `--baseline` and `--junit`, stay on the
+command line. Several runs can be active in one project at once, as from a terminal.
+
+Dashboard runs read secrets from the environment of the `attest view` process: `ANTHROPIC_API_KEY`,
+`OPENAI_API_KEY`, the `VERCEL_*` sandbox credentials and every `from_env` secret reference.
+Export them in the shell before you start `attest view`. A variable exported later, in that shell
+or another one, does not reach the runs.
+
+Each run gets its own process group. Closing the dashboard tab or stopping `attest view` with
+Ctrl+C leaves it running; cancel it from its run page or with `attest eval cancel <run-id>`.
+A dashboard run writes its JSONL event stream to an unlinked file in the system temp directory,
+which takes disk space until the run exits and does not show up in `ls` or `du`.
+Dashboard cancellation goes through the same registry as `attest eval cancel`, so it also cancels
+runs started in a terminal.
+
+| Route                                           | Answer                                                                                     |
+| ----------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| `GET /api/projects/<key>/tests`                 | `{ "items": [...] }`: each test's id, name, case count and the tags its cases carry.       |
+| `POST /api/projects/<key>/runs`                 | `201 { "runId": ... }` once the run is recorded, so the run page can open straight away.   |
+| `POST /api/projects/<key>/runs/<run-id>/cancel` | `{ "outcome": ... }`: `cancellation_requested`, `already_cancelled` or `already_terminal`. |
+| Either tests or cancel, on a failing project    | `422 PROJECT_UNLOADABLE` with the loader's error document, such as `project_locked`.       |
+
+A start request selects tests and leaves every other field optional:
+
+```json
+{ "selection": { "testIds": ["smoke"] }, "tags": ["fast"], "concurrency": 2, "timeoutMs": 120000 }
+```
+
+Use `{ "selection": { "all": true } }` to run every test. A POST must send the server's own
+`Origin` header; another origin, or none, gets `403 FORBIDDEN`. Any request whose
+`Sec-Fetch-Site` header is present and is not `same-origin` or `none` gets the same answer, so
+another site cannot make a browser read from the server either. A run that does not start answers
+`422 RUN_START_FAILED` with the CLI's error document in `error.details`. A CLI that has not
+reported `run_started` after 60 seconds is stopped, SIGTERM first and SIGKILL after 5 seconds.
+When the CLI exits or is stopped without an error document, `error.details.details.output` holds
+the last lines it printed. A host that cannot run evals answers `501 CONTROL_UNAVAILABLE`.
+
 ## Agent-readable contract
 
 In JSONL, check that `sequence` values are contiguous, that exactly one `result` event ends the

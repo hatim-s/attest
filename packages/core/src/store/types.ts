@@ -1,5 +1,10 @@
 import type { PageQuery, RunPage, CaseSummaryPage } from '../records/page-schemas.js';
 import type { ProjectRecord } from '../records/project-schemas.js';
+import type {
+  RunCancelOutcome,
+  RunStartRequest,
+  TestSummary,
+} from '../records/run-control-schemas.js';
 import type { CaseSummary, CaseVerdict } from '../records/projection-schemas.js';
 import type { CacheStore } from './cache.js';
 import type {
@@ -48,6 +53,21 @@ interface ProjectCatalog {
   openProject(key: string): Promise<RunSource>;
 }
 
+/**
+ * Starts and cancels runs in one catalog project. Hosts that cannot run evals provide none.
+ * Unknown keys throw StoreError PROJECT_NOT_FOUND; a project these runs cannot reach throws
+ * CONTROL_UNAVAILABLE; a run that does not start throws RUN_START_FAILED with the diagnostics;
+ * a project that does not load, or a cancel the project refuses, throws PROJECT_UNLOADABLE with
+ * the diagnostics; cancelling an unknown run throws RUN_NOT_FOUND. Concurrent runs in one project
+ * are allowed.
+ */
+interface RunControl {
+  listTests(projectKey: string): Promise<TestSummary[]>;
+  /** Resolves once the run is recorded, so its id can be read straight away. */
+  startRun(projectKey: string, request: RunStartRequest): Promise<{ runId: string }>;
+  cancelRun(projectKey: string, runId: string): Promise<{ outcome: RunCancelOutcome }>;
+}
+
 /** Defines durable run writes; reads come from RunSource. */
 interface RunStore extends RunSource {
   createRun(metadata: RunMetadata, identity?: RunIdentity): Promise<RunRecord>;
@@ -72,6 +92,7 @@ export {
   type RunMetadata,
   type ProjectCatalog,
   type ProjectRecord,
+  type RunControl,
   type RunIdentity,
   type RunRecord,
   type RunSource,

@@ -1,15 +1,18 @@
-import type { ProjectCatalog } from '@attest/core';
+import type { ProjectCatalog, RunControl } from '@attest/core';
 
 type CreateViewAppOptions = {
   allowedOrigin: () => string | undefined;
   indexHtml: string;
   catalog: ProjectCatalog;
+  control?: RunControl;
 };
 
 type StartViewServerOptions = {
   indexHtml: string;
   port?: number;
   catalog: ProjectCatalog;
+  /** Lets the dashboard start and cancel runs; without it the dashboard only reads. */
+  control?: RunControl;
   /** Releases what the catalog opened; runs once, after the server stops accepting requests. */
   close: () => Promise<void>;
 };

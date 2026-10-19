@@ -110,6 +110,7 @@ describe('suite analytics clients', () => {
     const client = createApiClient({
       kind: 'http',
       baseUrl: '/api',
+      capabilities: { control: false },
       fetch: (input, init) => {
         requests.push({
           url: input instanceof Request ? input.url : input.toString(),
@@ -162,6 +163,7 @@ describe('suite analytics clients', () => {
     const client = createApiClient({
       kind: 'http',
       baseUrl: '/api',
+      capabilities: { control: false },
       fetch: () => Promise.resolve(Response.json({})),
     });
 
@@ -185,6 +187,7 @@ describe('suite analytics clients', () => {
       createApiClient({
         kind: 'http',
         baseUrl: '/api',
+        capabilities: { control: false },
         fetch: (input, init) => Promise.resolve(app.request(input, init)),
       }),
       createApiClient({

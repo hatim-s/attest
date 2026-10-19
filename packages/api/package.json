@@ -37,7 +37,7 @@
     "LICENSE",
     "NOTICE"
   ],
-  "description": "Read API contract, server app and typed client for Attest run data.",
+  "description": "Read and run control API contract, server app and typed client for Attest run data.",
   "license": "Apache-2.0",
   "repository": {
     "type": "git",

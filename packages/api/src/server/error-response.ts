@@ -14,6 +14,23 @@ const parseInput = <Schema extends z.ZodType>(schema: Schema, input: unknown): z
   return parsed.data;
 };
 
+/** Reads a request body once; malformed JSON fails the same way as a body the schema rejects. */
+const parseJsonBody = async <Schema extends z.ZodType>(
+  schema: Schema,
+  request: Request,
+): Promise<z.output<Schema>> => {
+  const text = await request.text();
+  let body: unknown;
+
+  try {
+    body = JSON.parse(text);
+  } catch {
+    throw new InvalidRequestError('The request body is not valid JSON.');
+  }
+
+  return parseInput(schema, body);
+};
+
 const INTERNAL_MESSAGE = 'The API could not complete the request.';
 
 const API_CODE_BY_STORE_CODE = {
@@ -32,6 +49,9 @@ const API_CODE_BY_STORE_CODE = {
   CASE_CONFLICT: 'INTERNAL_ERROR',
   WRITE_FAILED: 'INTERNAL_ERROR',
   DRIVER_MISUSE: 'INTERNAL_ERROR',
+  RUN_START_FAILED: 'RUN_START_FAILED',
+  PROJECT_UNLOADABLE: 'PROJECT_UNLOADABLE',
+  CONTROL_UNAVAILABLE: 'CONTROL_UNAVAILABLE',
 } as const satisfies Record<StoreErrorCode, ApiErrorCode>;
 
 /** Keeps source diagnostics actionable while withholding unexpected failure details. */
@@ -46,7 +66,9 @@ const toErrorEnvelope = (error: Error): ApiErrorEnvelope => {
 
   const code = API_CODE_BY_STORE_CODE[error.code];
 
-  return { error: { code, message: code === 'INTERNAL_ERROR' ? INTERNAL_MESSAGE : error.message } };
+  if (code === 'INTERNAL_ERROR') return { error: { code, message: INTERNAL_MESSAGE } };
+
+  return { error: { code, message: error.message, details: error.details } };
 };
 
-export { parseInput, toErrorEnvelope };
+export { parseInput, parseJsonBody, toErrorEnvelope };
