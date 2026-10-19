@@ -451,6 +451,11 @@ select:focus-visible,
   background: transparent;
   border-color: transparent;
 }
+.button-danger {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: var(--surface);
+}
 .badge {
   display: inline-flex;
   align-items: center;
@@ -1119,6 +1124,10 @@ select:focus-visible,
   justify-self: stretch;
   max-height: 40vh;
   overflow: auto;
+}
+.confirm-group {
+  display: flex;
+  gap: 8px;
 }
 .welcome-card {
   padding: 50px;

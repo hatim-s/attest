@@ -1,9 +1,9 @@
-import type { ButtonHTMLAttributes, ReactNode } from 'react';
+import type { ComponentProps, ReactNode } from 'react';
 import { ApiError } from '@attest/api/client';
 import type { CliDiagnostics } from '@attest/core/records';
 
-type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
-  tone?: 'primary' | 'secondary' | 'ghost';
+type ButtonProps = ComponentProps<'button'> & {
+  tone?: 'primary' | 'secondary' | 'ghost' | 'danger';
 };
 
 /** Button with tone classes. Defaults to `type="button"` so it never submits a form. */

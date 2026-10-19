@@ -9,16 +9,28 @@ const OUTCOME_MESSAGES = {
   already_terminal: 'This run had already finished.',
 } as const satisfies Record<RunCancelOutcome, string>;
 
+/** `dismissed` is idle after the reader backed out, so focus returns to the Cancel run button. */
+type CancelStep = 'idle' | 'confirming' | 'dismissed';
+
+const focusOnMount = (element: HTMLElement | null) => element?.focus();
+
 /**
  * Cancel button for a running run. The first click asks for confirmation inline instead of a
- * browser dialog; the answer stays on screen while the run winds down.
+ * browser dialog; Escape or Keep running backs out. The answer stays on screen while the run winds
+ * down.
  */
 const CancelRun = ({ projectKey, run }: { projectKey: string; run: RunRecord }) => {
   const cancelRun = useCancelRun(projectKey, run.id);
-  const [isConfirming, setConfirming] = useState(false);
+  const [step, setStep] = useState<CancelStep>('idle');
   const outcome = cancelRun.data?.outcome;
 
-  if (outcome !== undefined) return <p className="notice">{OUTCOME_MESSAGES[outcome]}</p>;
+  if (outcome !== undefined) {
+    return (
+      <p className="notice" role="status">
+        {OUTCOME_MESSAGES[outcome]}
+      </p>
+    );
+  }
 
   if (run.status !== 'running') return null;
 
@@ -32,20 +44,31 @@ const CancelRun = ({ projectKey, run }: { projectKey: string; run: RunRecord }) 
 
   return (
     <>
-      {isConfirming ? (
-        <>
-          <Button tone="ghost" onClick={() => setConfirming(false)}>
+      {step === 'confirming' ? (
+        <div
+          className="confirm-group"
+          role="group"
+          aria-label="Cancel this run?"
+          onKeyDown={(event) => {
+            if (event.key === 'Escape') setStep('dismissed');
+          }}
+        >
+          <Button ref={focusOnMount} tone="secondary" onClick={() => setStep('dismissed')}>
             Keep running
           </Button>
           <Button
-            tone="primary"
-            onClick={() => cancelRun.mutate(undefined, { onSettled: () => setConfirming(false) })}
+            tone="danger"
+            onClick={() => cancelRun.mutate(undefined, { onError: () => setStep('dismissed') })}
           >
             Confirm cancel
           </Button>
-        </>
+        </div>
       ) : (
-        <Button tone="secondary" onClick={() => setConfirming(true)}>
+        <Button
+          ref={step === 'dismissed' ? focusOnMount : undefined}
+          tone="secondary"
+          onClick={() => setStep('confirming')}
+        >
           Cancel run
         </Button>
       )}
