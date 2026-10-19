@@ -5,7 +5,7 @@ import { LocalError } from '../errors/local-error.js';
 import { cancelConfiguration } from '../run/run-configuration.js';
 import { toEvalRunDocument } from './eval-run-document.js';
 import { listProjectTests } from './list-project-tests.js';
-import { spawnEvalRun, type CliCommand } from './spawn-eval-run.js';
+import { spawnEvalRun, START_TIMEOUT_MS, type CliCommand } from './spawn-eval-run.js';
 
 type RunLauncherOptions = {
   catalog: ProjectCatalog;
@@ -63,6 +63,7 @@ const createRunLauncher = ({ catalog, command }: RunLauncherOptions): RunControl
         command,
         projectRoot: await projectRoot(projectKey),
         document: toEvalRunDocument(request),
+        startTimeoutMs: START_TIMEOUT_MS,
       }),
     cancelRun: async (projectKey, runId) => {
       const root = await projectRoot(projectKey);

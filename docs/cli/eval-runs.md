@@ -224,6 +224,8 @@ or another one, does not reach the runs.
 
 Each run gets its own process group. Closing the dashboard tab or stopping `attest view` with
 Ctrl+C leaves it running; cancel it from its run page or with `attest eval cancel <run-id>`.
+A dashboard run writes its JSONL event stream to an unlinked file in the system temp directory,
+which takes disk space until the run exits and does not show up in `ls` or `du`.
 Dashboard cancellation goes through the same registry as `attest eval cancel`, so it also cancels
 runs started in a terminal.
 
@@ -242,8 +244,10 @@ A start request selects tests and leaves every other field optional:
 
 Use `{ "selection": { "all": true } }` to run every test. A POST must send the server's own
 `Origin` header; another origin, or none, gets `403 FORBIDDEN`. A run that does not start answers
-`422 RUN_START_FAILED` with the CLI's error document in `error.details`. When the CLI exits
-without one, `error.details.details.output` holds the last lines it printed. A host that cannot
+`422 RUN_START_FAILED` with the CLI's error document in `error.details`. A CLI that has not
+reported `run_started` after 60 seconds is stopped, SIGTERM first and SIGKILL after 5 seconds.
+When the CLI exits or is stopped without an error document, `error.details.details.output` holds
+the last lines it printed. A host that cannot
 run evals answers `501 CONTROL_UNAVAILABLE`.
 
 ## Agent-readable contract

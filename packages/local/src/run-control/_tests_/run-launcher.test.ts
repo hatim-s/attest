@@ -33,6 +33,7 @@ import { runTestMutationCommand } from '../../commands/test/test-mutation-comman
 import { openStore } from '../../store/index.js';
 import { createRunLauncher } from '../create-run-launcher.js';
 import { toEvalRunDocument } from '../eval-run-document.js';
+import { spawnEvalRun } from '../spawn-eval-run.js';
 
 const fakeCli = {
   command: process.execPath,
@@ -233,6 +234,33 @@ describe('createRunLauncher', { timeout: 20_000 }, () => {
     expect(output.length).toBeLessThanOrEqual(32);
     expect(output.join('').length).toBeLessThanOrEqual(16 * 1024);
     expect(output.at(-1)?.endsWith(last)).toBe(true);
+  });
+
+  it('stops a CLI that does not report run_started in time and says what it printed', async () => {
+    const root = await temporaryRoot();
+    const request: RunStartRequest = { selection: { all: true }, tags: ['idle'] };
+
+    const failure = await captureStoreError(
+      spawnEvalRun({
+        command: fakeCli,
+        projectRoot: root,
+        document: toEvalRunDocument(request),
+        startTimeoutMs: 500,
+      }),
+    );
+
+    const message = 'The attest CLI did not report run_started within 0.5s.';
+
+    expect(failure).toMatchObject({
+      code: 'RUN_START_FAILED',
+      message,
+      details: { code: 'run_failed', message, details: { output: ['loading the project'] } },
+    });
+
+    const pid = Number(await readFile(join(root, 'pid'), 'utf8'));
+
+    // Signal 0 only checks: the stopped CLI's process is gone.
+    expect(() => process.kill(pid, 0)).toThrow(/ESRCH/);
   });
 
   it('fails to start when the CLI cannot be executed', async () => {

@@ -50,6 +50,14 @@ if (mode === 'long-line') {
   process.exit(3);
 }
 
+if (mode === 'idle') {
+  // Takes its request and then never reports a start, like a CLI stuck before run_started.
+  writeFileSync('pid', String(process.pid));
+  console.log('loading the project');
+  setInterval(() => undefined, 1000);
+  await new Promise(() => undefined);
+}
+
 if (mode === 'crash') {
   console.error('TypeError: the CLI fell over');
   process.exit(3);

@@ -1,5 +1,6 @@
 import { spawn, type ChildProcess } from 'node:child_process';
-import { mkdtemp, open, rm, type FileHandle } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
+import { open, unlink, type FileHandle } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -7,6 +8,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { evalEventSchema, type EvalRunRequest } from '@attest/contracts';
 import { StoreError } from '@attest/core';
 import type { CliDiagnostics } from '@attest/core/records';
+import { killProcessTree } from '@attest/executor';
 
 /** How to invoke the attest CLI: the executable and the arguments that come before `eval run`. */
 type CliCommand = { command: string; args: readonly string[] };
@@ -15,6 +17,8 @@ type SpawnEvalRunOptions = {
   command: CliCommand;
   projectRoot: string;
   document: EvalRunRequest;
+  /** How long the CLI has to report `run_started`; the launcher always passes START_TIMEOUT_MS. */
+  startTimeoutMs: number;
 };
 
 type ProcessEnd = { exitCode: number | null; signal: NodeJS.Signals | null } | { error: Error };
@@ -26,6 +30,15 @@ type OutputLine =
   | { kind: 'text' };
 
 const POLL_INTERVAL_MS = 25;
+
+/**
+ * Everything before `run_started` is bounded: project load, git metadata, the store and journal
+ * recovery. No hook or agent runs before it, so a start that takes a minute is stuck.
+ */
+const START_TIMEOUT_MS = 60_000;
+
+/** How long a stopped CLI gets to finalize after SIGTERM before its group is killed. */
+const STOP_GRACE_MS = 5_000;
 
 const READ_CHUNK_BYTES = 64 * 1024;
 
@@ -106,6 +119,20 @@ const createOutputReader = (log: FileHandle) => {
   };
 };
 
+/** Why the launcher stopped following a CLI that was still running. */
+type StopReason = { kind: 'timeout'; startTimeoutMs: number } | { kind: 'stdin'; error: Error };
+
+const runFailed = (
+  message: string,
+  tail: readonly string[],
+  options: { cause?: Error; hint?: string } = {},
+): StoreError =>
+  // The output can hold stacks and paths; it goes to the diagnostics, never into the message.
+  new StoreError('RUN_START_FAILED', message, {
+    cause: options.cause,
+    details: { code: 'run_failed', message, hint: options.hint, details: { output: [...tail] } },
+  });
+
 const startFailure = (
   command: CliCommand,
   end: ProcessEnd,
@@ -117,53 +144,78 @@ const startFailure = (
   }
 
   if ('error' in end) {
-    const message = `Could not run ${command.command}: ${end.error.message}`;
-
-    return new StoreError('RUN_START_FAILED', message, {
+    return runFailed(`Could not run ${command.command}: ${end.error.message}`, tail, {
       cause: end.error,
-      details: { code: 'run_failed', message },
     });
   }
 
   const status = end.signal === null ? `code ${String(end.exitCode)}` : `signal ${end.signal}`;
-  const message = `The attest CLI exited with ${status} before the run started.`;
 
-  // The output can hold stacks and paths; it goes to the diagnostics, never into the message.
-  return new StoreError('RUN_START_FAILED', message, {
-    details: { code: 'run_failed', message, details: { output: [...tail] } },
-  });
+  return runFailed(`The attest CLI exited with ${status} before the run started.`, tail);
 };
 
+const stopFailure = (reason: StopReason, tail: readonly string[]): StoreError =>
+  reason.kind === 'timeout'
+    ? runFailed(
+        `The attest CLI did not report run_started within ${String(reason.startTimeoutMs / 1000)}s.`,
+        tail,
+        { hint: 'Run attest eval run from a terminal in the project to see where it stops.' },
+      )
+    : runFailed(`Could not send the run request to the attest CLI: ${reason.error.message}`, tail, {
+        cause: reason.error,
+      });
+
+/** What has happened to the child so far; the launcher polls it with the output. */
+type ChildState = { end: ProcessEnd | undefined; stdinError: Error | undefined };
+
 /** Must be called right after spawn: a spawn failure is emitted on the next tick. */
-const watchEnd = (child: ChildProcess): Promise<ProcessEnd> =>
-  new Promise((resolve) => {
-    child.once('exit', (exitCode, signal) => resolve({ exitCode, signal }));
-    child.once('error', (error) => resolve({ error }));
+const watchChild = (child: ChildProcess): ChildState => {
+  const state: ChildState = { end: undefined, stdinError: undefined };
+
+  child.once('exit', (exitCode, signal) => {
+    state.end = { exitCode, signal };
   });
+  child.once('error', (error) => {
+    state.end = { error };
+  });
+  child.stdin?.on('error', (error) => {
+    state.stdinError = error;
+  });
+
+  return state;
+};
 
 type AwaitRunStartedOptions = {
   child: ChildProcess;
   command: CliCommand;
-  ended: Promise<ProcessEnd>;
+  state: ChildState;
   log: FileHandle;
+  startTimeoutMs: number;
 };
 
 /**
- * Follows the child's output until it reports `run_started` or exits. After the start the child
- * is released: it writes the rest of its output to a file nobody reads and outlives the server.
+ * Follows the child's output until it reports `run_started`, exits, misses the start deadline or
+ * cannot take its request. After the start the child is released: it writes the rest of its
+ * output to a file nobody reads and outlives the server. Every other outcome throws, and the
+ * caller stops a child that is still running.
  */
 const awaitRunStarted = async ({
   child,
   command,
-  ended,
+  state,
   log,
+  startTimeoutMs,
 }: AwaitRunStartedOptions): Promise<{ runId: string }> => {
   const reader = createOutputReader(log);
+  const startDeadline = Date.now() + startTimeoutMs;
+  let stdinDeadline: number | undefined;
   let failure: CliDiagnostics | undefined;
   let tail: string[] = [];
 
   for (;;) {
-    const end = await Promise.race([ended, delay(POLL_INTERVAL_MS).then(() => undefined)]);
+    await delay(POLL_INTERVAL_MS);
+    // Taken before the read, so the read after an exit sees everything the child wrote.
+    const end = state.end;
     const lines = await reader.readLines();
 
     // Read once more after the exit so the last, possibly unterminated, line is not lost.
@@ -185,6 +237,18 @@ const awaitRunStarted = async ({
     }
 
     if (end !== undefined) throw startFailure(command, end, failure, tail);
+
+    if (Date.now() >= startDeadline) throw stopFailure({ kind: 'timeout', startTimeoutMs }, tail);
+
+    if (state.stdinError !== undefined) {
+      // A CLI that exits before reading its request breaks the pipe, and its exit says why, so
+      // the child gets a grace period to exit before the broken pipe is the reason.
+      stdinDeadline ??= Date.now() + STOP_GRACE_MS;
+
+      if (Date.now() >= stdinDeadline) {
+        throw stopFailure({ kind: 'stdin', error: state.stdinError }, tail);
+      }
+    }
   }
 };
 
@@ -193,49 +257,53 @@ const awaitRunStarted = async ({
  * and resolves with the run id once the CLI has recorded the run. The CLI keeps ownership of
  * validation, signals, exit codes and the cancellation registry. Its output goes to an unlinked
  * temporary file rather than a pipe: a Node CLI dies of EPIPE when the reader of its stdout goes
- * away, and the run must survive the dashboard closing.
+ * away, and the run must survive the dashboard closing. The file stays on disk, unnamed, until
+ * the run exits.
  */
 const spawnEvalRun = async ({
   command,
   projectRoot,
   document,
+  startTimeoutMs,
 }: SpawnEvalRunOptions): Promise<{ runId: string }> => {
-  const directory = await mkdtemp(join(tmpdir(), 'attest-run-start-'));
+  const path = join(tmpdir(), `attest-run-start-${randomUUID()}.log`);
+  const log = await open(path, 'wx+', 0o600);
 
   try {
-    const log = await open(join(directory, 'output.log'), 'w+', 0o600);
+    // The child inherits the descriptor, not the name, so the name can go before it starts.
+    await unlink(path);
+
+    const child = spawn(
+      command.command,
+      [
+        ...command.args,
+        'eval',
+        'run',
+        '--project',
+        projectRoot,
+        '--non-interactive',
+        '--from-json',
+        '-',
+      ],
+      { cwd: projectRoot, env: process.env, detached: true, stdio: ['pipe', log.fd, log.fd] },
+    );
+
+    const state = watchChild(child);
+    child.stdin?.end(`${JSON.stringify(document)}\n`);
 
     try {
-      const child = spawn(
-        command.command,
-        [
-          ...command.args,
-          'eval',
-          'run',
-          '--project',
-          projectRoot,
-          '--non-interactive',
-          '--from-json',
-          '-',
-        ],
-        { cwd: projectRoot, env: process.env, detached: true, stdio: ['pipe', log.fd, log.fd] },
-      );
+      return await awaitRunStarted({ child, command, state, log, startTimeoutMs });
+    } catch (error: unknown) {
+      // SIGTERM lets the CLI finalize what it recorded; the group is killed after the grace.
+      if (child.exitCode === null && child.signalCode === null) {
+        await killProcessTree(child, { graceMs: STOP_GRACE_MS, signalProcessGroup: true });
+      }
 
-      const ended = watchEnd(child);
-
-      // The child holds its own descriptor, so the file can go now; the server keeps `log` open.
-      await rm(directory, { recursive: true, force: true });
-      // A CLI that exits before reading its request breaks this pipe; its exit says why.
-      child.stdin?.on('error', () => undefined);
-      child.stdin?.end(`${JSON.stringify(document)}\n`);
-
-      return await awaitRunStarted({ child, command, ended, log });
-    } finally {
-      await log.close();
+      throw error;
     }
   } finally {
-    await rm(directory, { recursive: true, force: true });
+    await log.close();
   }
 };
 
-export { spawnEvalRun, type CliCommand };
+export { spawnEvalRun, START_TIMEOUT_MS, type CliCommand };
