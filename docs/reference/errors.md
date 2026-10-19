@@ -61,15 +61,15 @@ details. Commander rejects bad argv with plain usage text, not JSON. Check a com
 When an agent call fails, `attest agent test --output json` returns `invocation_failed` (exit 4).
 `details.invocation_code` names the cause:
 
-| `invocation_code`     | Cause                                                                  |
-| --------------------- | ---------------------------------------------------------------------- |
-| `spawn_failed`        | The process could not start.                                           |
-| `nonzero_exit`        | The process exited with a non-zero code.                               |
-| `timeout`             | An idle or attempt deadline passed.                                    |
-| `output_cap_exceeded` | stdout, a response body, or an event exceeded its byte or count limit. |
-| `network`             | The request failed before a response arrived.                          |
-| `http_status`         | The endpoint returned a status the transport treats as failure.        |
-| `invalid_envelope`    | The output was not a valid envelope, event, or JSONL line.             |
+| `invocation_code`     | Cause                                                            |
+| --------------------- | ---------------------------------------------------------------- |
+| `spawn_failed`        | The process could not start.                                     |
+| `nonzero_exit`        | The process exited with a non-zero code.                         |
+| `timeout`             | An idle or attempt deadline passed.                              |
+| `output_cap_exceeded` | stdout, a response body, an event or artifacts exceeded a limit. |
+| `network`             | The request failed before a response arrived.                    |
+| `http_status`         | The endpoint returned a status the transport treats as failure.  |
+| `invalid_envelope`    | The output was not a valid envelope, event, or JSONL line.       |
 
 Ctrl-C or SIGTERM returns the top-level `cancelled` error with exit 130. List the installed
 grammar and catalog with `attest help agent add --output json` and `attest errors --output json`.

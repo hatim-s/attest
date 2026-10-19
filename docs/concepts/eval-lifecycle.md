@@ -41,7 +41,8 @@ evidence, timing, and extraction decision. See the
 [agent protocol](../specs/agent-contract.md) and the integration guides for
 [native](../integrations/native.md), [HTTP](../integrations/curl-and-http.md),
 [managed processes](../integrations/cli-processes.md),
-[polling and streams](../integrations/polling-and-streams.md), and
+[polling and streams](../integrations/polling-and-streams.md),
+[callbacks](../integrations/callbacks.md), and
 [WebSockets](../integrations/websockets.md).
 
 ## 4. Evaluate metrics
@@ -57,6 +58,28 @@ Metric failure and metric infrastructure failure are distinct. A completed evalu
 that fails its quality gate exits `1`; an invocation or metric infrastructure failure
 exits `4`. See the [metric protocol](../specs/metric-contract.md) and
 [metric guide](../cli/metrics.md).
+
+Executable metrics receive the agent's artifacts. A command metric finds them as files under the
+request's `artifact_dir`, a temporary directory removed when the metric finishes. To run command
+metrics in a sandbox instead of on your machine, set `metric_sandbox` in the eval defaults:
+
+```json
+{
+  "defaults": {
+    "eval": {
+      "metric_sandbox": { "kind": "vercel" }
+    }
+  }
+}
+```
+
+Each case then gets one Vercel sandbox, booted from `image` when you set one and from
+`vercel/sandbox/universal` otherwise. Credentials are the ones listed in [ENV](../ENV.md). The request is written
+to `attest/metric-request.json` and the artifacts under `attest/artifacts/` in the sandbox
+workspace, and the command runs from the workspace root with the request on stdin. The metric's
+`cwd` and the host environment stay behind; only the variables in its `env` are forwarded.
+Project files are not copied, so the command must exist in the image or be self-contained, such
+as `python3 -c '...'`. HTTP and judge metrics are unaffected.
 
 ## 5. Persist the run
 

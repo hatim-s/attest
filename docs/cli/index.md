@@ -166,6 +166,7 @@ filters.
 - [cURL and HTTP](../integrations/curl-and-http.md)
 - [Managed CLI processes](../integrations/cli-processes.md)
 - [Polling and streams](../integrations/polling-and-streams.md)
+- [Callbacks](../integrations/callbacks.md)
 - [WebSockets](../integrations/websockets.md)
 
 Each transport ultimately exchanges the
