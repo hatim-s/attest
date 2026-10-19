@@ -242,6 +242,24 @@ const assertSafeNativeAgentResource = (agent: AgentResource): void => {
     ];
 
     for (const { request, path } of templates) assertSafeHttpTemplate(request, path);
+    const publicUrl = transport.receiver?.public_url;
+
+    // The agent sends the bearer token to this URL, so it must not cross the network in clear text.
+    if (publicUrl !== undefined) {
+      const path = '/agent/transport/receiver/public_url';
+      const url = assertSafeHttpTemplate({ url: publicUrl, method: 'POST' }, path);
+
+      if (
+        publicUrl.includes('{{') ||
+        (url.protocol !== 'https:' && !isLoopbackHost(url.hostname))
+      ) {
+        throw new LocalError(
+          'project_invalid',
+          'The callback public URL must use HTTPS unless it is loopback.',
+          { path, hint: 'Use an https:// URL without placeholders.' },
+        );
+      }
+    }
 
     for (const name of agent.redaction?.headers ?? []) {
       const exists = templates.some(({ request }) =>

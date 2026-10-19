@@ -25,6 +25,7 @@ import { applyProjectMutation } from '../../../project/transaction/transactional
 import { runConfiguration } from '../../../run/run-configuration.js';
 import { openStore } from '../../../store/index.js';
 import { runAgentImportCommand } from '../../agent/import.js';
+import { assertSafeNativeAgentResource } from '../../agent/authoring/resource-validation.js';
 import { runAgentTestCommand } from '../../agent/test.js';
 import { candidateFromLoadedProject } from '../../project/load-command-project.js';
 import { runProjectInitCommand } from '../../project/project-init-command.js';
@@ -274,3 +275,23 @@ test('runs a callback agent, persists inline artifacts only, and scores them as 
     },
   });
 }, 30_000);
+
+test('refuses a clear-text public callback URL because the agent sends the token there', () => {
+  const agent = (publicUrl: string): AgentResource => ({
+    schema: AGENT_RESOURCE_SCHEMA_ID,
+    id: 'async',
+    name: 'Async',
+    transport: {
+      kind: 'callback',
+      lifecycle: 'external',
+      trigger: { url: 'https://agent.example.com/trigger', method: 'POST' },
+      receiver: { public_url: publicUrl },
+    },
+  });
+
+  expect(() => assertSafeNativeAgentResource(agent('http://hooks.example.com'))).toThrow(
+    'must use HTTPS unless it is loopback',
+  );
+  expect(() => assertSafeNativeAgentResource(agent('https://hooks.example.com'))).not.toThrow();
+  expect(() => assertSafeNativeAgentResource(agent('http://127.0.0.1:9000'))).not.toThrow();
+});

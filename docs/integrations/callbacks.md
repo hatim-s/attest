@@ -156,7 +156,8 @@ Metrics then see the artifacts in the metric request. A command metric reads the
   never logged. Attest hides it from stored evidence.
 - The local receiver binds `127.0.0.1` only. It listens while at least one case is waiting and
   stops otherwise.
-- The trigger carries the token, so a non-loopback trigger URL must use HTTPS. The
+- The trigger carries the token and the agent sends it back to `receiver.public_url`, so both
+  must use HTTPS unless they are loopback. The
   [network rules](./curl-and-http.md#security-and-redaction) for HTTP transports apply to the
   trigger and both fetch templates: no private address ranges, no cross-origin redirects, and
   `{{artifact_id}}` or `{{trace_ref}}` only in the path, query or headers.
