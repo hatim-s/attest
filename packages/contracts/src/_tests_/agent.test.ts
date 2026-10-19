@@ -87,6 +87,7 @@ describe('artifact paths', () => {
     'src\\index.ts',
     'src/./index.ts',
     'src/\u0000index.ts',
+    `${'a'.repeat(256)}.ts`,
   ])('rejects the non-canonical or escaping path %j', (path) => {
     expect(inlineArtifactSchema.safeParse({ ...inlineArtifact, path }).success).toBe(false);
   });

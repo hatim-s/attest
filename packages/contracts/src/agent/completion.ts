@@ -34,6 +34,13 @@ const agentCompletionSchema = z
     }
   });
 
-type AgentCompletion = z.infer<typeof agentCompletionSchema>;
+type AgentCompletionFields = z.infer<typeof agentCompletionSchema>;
+
+type AgentCompletionBase = Omit<AgentCompletionFields, 'output' | 'error'>;
+
+/** A validated completion narrowed on its single outcome, like `AgentResponse`. */
+type AgentCompletion =
+  | (AgentCompletionBase & Required<Pick<AgentCompletionFields, 'output'>>)
+  | (AgentCompletionBase & Required<Pick<AgentCompletionFields, 'error'>>);
 
 export { agentCompletionSchema, type AgentCompletion };

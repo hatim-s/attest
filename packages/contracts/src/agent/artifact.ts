@@ -2,8 +2,9 @@ import { z } from 'zod';
 
 import { relativePathSchema } from '../project/shared.js';
 
-// One file-name segment: no separators, no control characters, and never `.` or `..`.
-const artifactSegment = String.raw`(?!\.{1,2}(?:/|(?![\s\S])))[^/\\\p{Cc}]+`;
+// One file-name segment: no separators, no control characters, never `.` or `..`, and at most
+// 255 characters, the common filesystem name limit.
+const artifactSegment = String.raw`(?!\.{1,2}(?:/|(?![\s\S])))[^/\\\p{Cc}]{1,255}`;
 
 /**
  * Hosts write artifacts to `<dir>/<path>`, so a path must name one file in exactly one spelling.
@@ -12,7 +13,7 @@ const artifactSegment = String.raw`(?!\.{1,2}(?:/|(?![\s\S])))[^/\\\p{Cc}]+`;
  */
 const artifactPathSchema = relativePathSchema.regex(
   new RegExp(String.raw`^${artifactSegment}(?:/${artifactSegment})*(?![\s\S])`, 'u'),
-  'must be a canonical file path: forward-slash segments without `.`, `..`, empty segments, backslashes or control characters',
+  'must be a canonical file path: forward-slash segments of at most 255 characters without `.`, `..`, empty segments, backslashes or control characters',
 );
 
 /** A file an agent produced, carried in the envelope as text or base64 bytes. */
