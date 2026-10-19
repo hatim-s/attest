@@ -1,3 +1,5 @@
+import { join, resolve } from 'node:path';
+
 import type { Command } from 'commander';
 import type * as CloudAdapter from '@attest/local/cloud';
 import type * as EvalAdapter from '@attest/local/eval';
@@ -27,7 +29,29 @@ type CommandContext = {
   interaction: CliInteraction;
   io: CliIo;
   program: Command;
+  /** Global project registry file, resolved once per invocation. */
+  registryPath: string;
   workingDirectory: string;
 };
 
-export { type CliIo, type CliServices, type CommandContext };
+type RegistryPathInputs = {
+  attestHome: string | undefined;
+  homeDirectory: string;
+  workingDirectory: string;
+};
+
+/** `ATTEST_HOME` replaces `~/.attest`; the registry is `projects.json` inside it. */
+const resolveRegistryPath = ({
+  attestHome,
+  homeDirectory,
+  workingDirectory,
+}: RegistryPathInputs): string => {
+  const home =
+    attestHome === undefined || attestHome === ''
+      ? join(homeDirectory, '.attest')
+      : resolve(workingDirectory, attestHome);
+
+  return join(home, 'projects.json');
+};
+
+export { resolveRegistryPath, type CliIo, type CliServices, type CommandContext };

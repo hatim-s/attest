@@ -5,6 +5,7 @@ import {
   runTraceConvertCommand,
   runViewCommand,
   type RunViewCommandOptions,
+  type ViewScope,
   type RunReportCommandOptions,
   type RunTraceConvertCommandOptions,
 } from '@attest/local/runs';
@@ -26,8 +27,9 @@ type DiffCommandOptions = {
 };
 
 type ViewCommandOptions = Required<Pick<RunViewCommandOptions, 'port'>> & {
+  all?: boolean;
   open: boolean;
-  store: string;
+  store?: string;
 };
 
 type ReportCommandOptions = Pick<RunReportCommandOptions, 'force'> & {
@@ -56,15 +58,41 @@ const parsePort = (value: string): number => {
   return port;
 };
 
+/** `--all` serves the registry; otherwise the project store, `.attest/runs.db` by default. */
+const viewScope = (options: ViewCommandOptions, registryPath: string): ViewScope => {
+  if (options.all !== true) return { kind: 'store', storePath: options.store };
+
+  if (options.store !== undefined) {
+    throw new AttestCliError(
+      'cli_usage',
+      '`--all` serves every registered project; drop `--store`.',
+      {
+        path: '--all',
+        hint: 'Pass either `--all` or `--store <path>`, not both.',
+      },
+    );
+  }
+
+  return { kind: 'registry', registryPath };
+};
+
 /** Registers the run-store, trace, and protocol commands that sit directly under the root. */
-const registerRootCommands = ({ io, program, workingDirectory }: CommandContext): void => {
+const registerRootCommands = ({
+  io,
+  program,
+  registryPath,
+  workingDirectory,
+}: CommandContext): void => {
   program
     .command('view')
-    .description('Open the local dashboard over the project run store.')
-    .option('--store <path>', 'SQLite run store path', '.attest/runs.db')
+    .description('Open the local dashboard over the project run store or every registered project.')
+    .option('--store <path>', 'SQLite run store path (default: .attest/runs.db)')
+    .option('--all', 'serve every project in the global registry')
     .option('--port <port>', 'loopback port; 0 chooses a free port', parsePort, 0)
     .option('--no-open', 'do not launch a browser')
     .action(async (options: ViewCommandOptions) => {
+      const scope = viewScope(options, registryPath);
+
       await withProcessSignals((signal) =>
         runViewCommand({
           onReady: async ({ url }) => {
@@ -73,8 +101,8 @@ const registerRootCommands = ({ io, program, workingDirectory }: CommandContext)
             if (options.open) await openBrowser(url);
           },
           port: options.port,
+          scope,
           signal,
-          storePath: options.store,
           workingDirectory,
         }),
       );

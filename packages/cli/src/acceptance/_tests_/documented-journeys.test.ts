@@ -106,7 +106,7 @@ describe('documented journeys through the packed CLI', () => {
     }
 
     const help = await runPackedCommand(
-      packed.cliPath,
+      packed,
       ['help', 'agent', 'add', '--output', 'json'],
       packed.root,
     );
@@ -128,7 +128,7 @@ describe('documented journeys through the packed CLI', () => {
       for (const command of journey.commands) {
         const treeBefore = await snapshotTree(root);
         const argv = command.argv.map((argument) => argument.replace('$NODE', process.execPath));
-        const result = await runPackedCommand(packed.cliPath, argv, root);
+        const result = await runPackedCommand(packed, argv, root);
         await assertCommand(command, result, root, treeBefore);
       }
     }

@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
 import { constants } from 'node:fs';
-import { access, mkdir, mkdtemp, rm } from 'node:fs/promises';
+import { access, mkdir, mkdtemp, realpath, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
@@ -14,6 +14,8 @@ import { materializePackedRuntime } from './packed-runtime.js';
 type PackedCli = {
   /** Packed archive path per workspace package name. */
   archivePaths: Record<string, string>;
+  /** ATTEST_HOME for every packed command, so `attest init` never writes the real registry. */
+  attestHome: string;
   cliPath: string;
   root: string;
 };
@@ -72,7 +74,9 @@ const packPackage = async (
  * Packs each runtime workspace and copies its installed dependency closure into a clean prefix. The packages must already be built; `bun run test:acceptance` builds first.
  */
 const createPackedCli = async (): Promise<PackedCli> => {
-  const root = await mkdtemp(join(tmpdir(), 'attest-acceptance-packed-'));
+  // The registry rejects symlinked ancestors, and macOS `tmpdir()` sits behind the `/var` link.
+  const root = await mkdtemp(join(await realpath(tmpdir()), 'attest-acceptance-packed-'));
+  const attestHome = join(root, 'attest-home');
   const archiveDirectory = join(root, 'archives');
   await mkdir(archiveDirectory);
   const archivePaths: Record<string, string> = {};
@@ -95,7 +99,7 @@ const createPackedCli = async (): Promise<PackedCli> => {
 
   await access(cliPath, constants.X_OK);
 
-  return { archivePaths, cliPath, root };
+  return { archivePaths, attestHome, cliPath, root };
 };
 
 /** Vitest global setup materializes one packed CLI for every acceptance file, then removes it. */
@@ -121,7 +125,7 @@ const isPackedProcessFailure = (
 
 /** Runs the materialized CLI under Node and keeps stdout and the exit code of failed commands. */
 const runPackedCommand = async (
-  cliPath: string,
+  packed: PackedCli,
   argv: readonly string[],
   workingDirectory: string,
   timeout = 30_000,
@@ -129,8 +133,14 @@ const runPackedCommand = async (
   try {
     const { stderr, stdout } = await execFileAsync(
       process.execPath,
-      ['--no-warnings', cliPath, ...argv],
-      { cwd: workingDirectory, encoding: 'utf8', maxBuffer: 10 * 1024 * 1024, timeout },
+      ['--no-warnings', packed.cliPath, ...argv],
+      {
+        cwd: workingDirectory,
+        encoding: 'utf8',
+        env: { ...process.env, ATTEST_HOME: packed.attestHome },
+        maxBuffer: 10 * 1024 * 1024,
+        timeout,
+      },
     );
 
     return { exitCode: 0, stderr, stdout };

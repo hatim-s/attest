@@ -184,6 +184,25 @@ const CLI_ERROR_DEFINITIONS = {
       'Verify the rollback result, filesystem permissions, and free space before retrying.',
     ],
   },
+  registry_invalid: {
+    meaning: 'The global project registry could not be read.',
+    likely_causes: [
+      'projects.json was edited by hand or is not a registry file.',
+      'ATTEST_HOME or one of its parents is a symbolic link.',
+    ],
+    retryable: false,
+    exit_code: 1,
+    repairs: ['Fix or delete the registry file, then run `attest projects add <dir>` again.'],
+  },
+  registry_write_failed: {
+    meaning: 'The global project registry could not be saved.',
+    likely_causes: ['The registry directory is not writable or a parent is a symbolic link.'],
+    retryable: true,
+    exit_code: 4,
+    repairs: [
+      'Check permissions for ATTEST_HOME (default ~/.attest), then run `attest projects add <dir>`.',
+    ],
+  },
   resource_not_found: {
     meaning: 'The requested project resource or local run does not exist.',
     likely_causes: ['The id is incorrect or the resource was removed.'],

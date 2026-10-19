@@ -1,4 +1,5 @@
 import { createRequire } from 'node:module';
+import { homedir } from 'node:os';
 
 import { Command, CommanderError } from 'commander';
 
@@ -6,6 +7,7 @@ import { registerCloudCommands } from './commands/cloud/register-cloud-commands.
 import { registerEvalCommands } from './commands/eval/eval-command.js';
 import { renderEvalFailureEvent, renderEvalResultLine } from './commands/eval/eval-output.js';
 import { registerMetricCommands } from './commands/metric/register-metric-commands.js';
+import { registerProjectsCommands } from './commands/projects/register-projects-commands.js';
 import { registerProjectResourceCommands } from './commands/register-project-resource-commands.js';
 import { registerRootCommands } from './commands/register-root-commands.js';
 import {
@@ -20,7 +22,12 @@ import {
   projectOption,
   recoverOutputMode,
 } from './commands/shared/cli-options.js';
-import type { CliIo, CommandContext, CliServices } from './commands/shared/command-context.js';
+import {
+  resolveRegistryPath,
+  type CliIo,
+  type CommandContext,
+  type CliServices,
+} from './commands/shared/command-context.js';
 import { registerTestCommands } from './commands/test/registration/register-test-commands.js';
 import { CliExit, renderCliError, serializeCliError } from './errors/cli-error.js';
 import { resultCommandName, setCliCommandHelpMetadata } from './help/command-help.js';
@@ -70,6 +77,7 @@ const createProgram = (
   registerRootCommands(commandContext);
   registerCloudCommands(commandContext);
   registerProjectResourceCommands(commandContext);
+  registerProjectsCommands(commandContext);
   registerMetricCommands(commandContext);
   registerTestCommands(commandContext);
   registerEvalCommands(commandContext);
@@ -105,6 +113,7 @@ const createProgram = (
 /** Parses one CLI invocation and returns an exit code without terminating embedders or tests. */
 const runCli = async (argv: string[], options: RunCliOptions = {}): Promise<number> => {
   const io = options.io ?? defaultIo;
+  const workingDirectory = options.workingDirectory ?? process.cwd();
   // Commander's own usage errors wait until the failing command's output mode is known.
   const commanderErrors: string[] = [];
 
@@ -114,7 +123,12 @@ const runCli = async (argv: string[], options: RunCliOptions = {}): Promise<numb
       services: options.services,
       interaction: { ...createDefaultCliInteraction(), ...options.interaction },
       io,
-      workingDirectory: options.workingDirectory ?? process.cwd(),
+      registryPath: resolveRegistryPath({
+        attestHome: process.env.ATTEST_HOME,
+        homeDirectory: homedir(),
+        workingDirectory,
+      }),
+      workingDirectory,
     },
     (message) => commanderErrors.push(message),
   );

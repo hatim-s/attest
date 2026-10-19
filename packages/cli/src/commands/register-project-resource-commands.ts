@@ -53,6 +53,7 @@ const registerProjectInit = (
         prompt: context.interaction.prompt,
         projectDirectory: options.project,
         readStdin: context.interaction.readStdin,
+        registryPath: context.registryPath,
         workingDirectory: context.workingDirectory,
         yes: options.yes,
       });
