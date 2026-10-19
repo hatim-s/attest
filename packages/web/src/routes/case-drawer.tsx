@@ -2,19 +2,25 @@ import { getRouteApi, useLocation, useNavigate, useRouter } from '@tanstack/reac
 import { useCase, useRun } from '../api/queries.js';
 import { CaseDetail } from '../components/cases/case-detail.js';
 
-const route = getRouteApi('/workspace/runs/$runId/cases/$suiteName/$caseId');
+const route = getRouteApi('/projects/$projectKey/runs/$runId/cases/$suiteName/$caseId');
 
 /**
  * Loads deep-linked evidence without depending on a previously loaded case page. Closing goes
  * back when the run page opened the drawer, so Back after Close does not reopen the case.
  */
 const CaseDrawer = () => {
-  const { runId, suiteName, caseId } = route.useParams();
+  const { projectKey, runId, suiteName, caseId } = route.useParams();
   const navigate = useNavigate();
   const router = useRouter();
   const openedFromRun = useLocation({ select: (location) => location.state.caseOpenedFromRun });
-  const runQuery = useRun(runId);
-  const caseQuery = useCase({ runId, suiteName, caseId, status: runQuery.data?.status });
+  const runQuery = useRun(projectKey, runId);
+
+  const caseQuery = useCase(projectKey, {
+    runId,
+    suiteName,
+    caseId,
+    status: runQuery.data?.status,
+  });
 
   return (
     <CaseDetail
@@ -30,7 +36,11 @@ const CaseDrawer = () => {
           return;
         }
 
-        void navigate({ to: '/runs/$runId', params: { runId }, search: (previous) => previous });
+        void navigate({
+          to: '/projects/$projectKey/runs/$runId',
+          params: { projectKey, runId },
+          search: (previous) => previous,
+        });
       }}
     />
   );

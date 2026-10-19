@@ -9,10 +9,11 @@ import { ErrorNotice, Loading } from '../components/shared/ui.js';
 import { RunHeader } from '../components/runs/run-header.js';
 import { RunTabs } from '../components/runs/run-tabs.js';
 
-const route = getRouteApi('/workspace/runs/$runId');
+const route = getRouteApi('/projects/$projectKey/runs/$runId');
 
 const RunCases = ({ run }: { run: RunRecord }) => {
-  const casesQuery = useCases(run.id, run.status);
+  const { projectKey } = route.useParams();
+  const casesQuery = useCases(projectKey, run.id, run.status);
 
   const cases = useMemo(
     () => casesQuery.data?.pages.flatMap((page) => page.items) ?? [],
@@ -41,7 +42,8 @@ const RunCases = ({ run }: { run: RunRecord }) => {
 
 /** Server aggregates cover every case, so this tab never pages cases itself. */
 const RunSuites = ({ run }: { run: RunRecord }) => {
-  const suitesQuery = useRunSuites(run.id, run.status);
+  const { projectKey } = route.useParams();
+  const suitesQuery = useRunSuites(projectKey, run.id, run.status);
 
   return (
     <section className="stack" aria-label="Suites">
@@ -57,9 +59,9 @@ const RunSuites = ({ run }: { run: RunRecord }) => {
 
 /** Each tab owns its queries, so a tab the reader has not opened fetches nothing. */
 const RunPage = () => {
-  const { runId } = route.useParams();
+  const { projectKey, runId } = route.useParams();
   const { tab } = route.useSearch();
-  const runQuery = useRun(runId);
+  const runQuery = useRun(projectKey, runId);
   const run = runQuery.data;
 
   return (

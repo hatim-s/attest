@@ -2,6 +2,7 @@ import type { ApiClient } from '@attest/api/client';
 import {
   caseParamsSchema,
   diffParamsSchema,
+  projectParamsSchema,
   runParamsSchema,
   suiteParamsSchema,
   suiteHistoryQuerySchema,
@@ -17,9 +18,10 @@ import {
   type ErrorComponentProps,
 } from '@tanstack/react-router';
 import { z } from 'zod';
-import { runsQueryOptions } from './api/queries.js';
+import { projectsQueryOptions, runsQueryOptions } from './api/queries.js';
 import { EvalsPage } from './routes/evals-page.js';
 import { EvalPage } from './routes/eval-page.js';
+import { ProjectsPage } from './routes/projects-page.js';
 import { RunsLayout } from './routes/runs-layout.js';
 import { RootLayout } from './routes/root-layout.js';
 import { NewestRun } from './routes/newest-run.js';
@@ -46,46 +48,69 @@ const runSearchSchema = z.object({
 
 const rootRoute = createRootRouteWithContext<RouterContext>()({
   component: RootLayout,
-  // An unknown path matches only the root, so it borrows the workspace to keep the sidebar.
-  notFoundComponent: () => (
-    <RunsLayout>
-      <div className="empty-compact">This dashboard page does not exist.</div>
-    </RunsLayout>
-  ),
+  notFoundComponent: () => <div className="empty-compact">This dashboard page does not exist.</div>,
 });
 
+/** A catalog with one project opens it directly; any other catalog starts at the project list. */
 const indexRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/',
-  beforeLoad: () => {
-    return redirect({ to: '/runs' });
+  beforeLoad: async ({ context }) => {
+    const projects = await context.queryClient.fetchQuery(projectsQueryOptions(context.client));
+    const [only] = projects;
+
+    if (projects.length === 1 && only !== undefined) {
+      return redirect({ to: '/projects/$projectKey/runs', params: { projectKey: only.key } });
+    }
+
+    return redirect({ to: '/projects' });
   },
+});
+
+const projectsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/projects',
+  component: ProjectsPage,
 });
 
 const workspaceRoute = createRoute({
   getParentRoute: () => rootRoute,
-  id: 'workspace',
+  path: '/projects/$projectKey',
+  params: { parse: (params) => projectParamsSchema.parse(params) },
   component: RunsLayout,
   validateSearch: runsSearchSchema,
+  // An unknown key fails here, so the error notice replaces the workspace with the API message.
+  loader: ({ context, params }) =>
+    context.queryClient.ensureQueryData(runsQueryOptions(context.client, params.projectKey)),
+});
+
+const workspaceIndexRoute = createRoute({
+  getParentRoute: () => workspaceRoute,
+  path: '/',
+  beforeLoad: ({ params, search }) =>
+    redirect({ to: '/projects/$projectKey/runs', params, search }),
 });
 
 const runsRoute = createRoute({
   getParentRoute: () => workspaceRoute,
-  path: '/runs',
+  path: 'runs',
 });
 
 const runsIndexRoute = createRoute({
   getParentRoute: () => runsRoute,
   path: '/',
   component: NewestRun,
-  beforeLoad: async ({ context, search }) => {
-    const runs = await context.queryClient.fetchQuery(runsQueryOptions(context.client));
+  beforeLoad: async ({ context, params, search }) => {
+    const runs = await context.queryClient.fetchQuery(
+      runsQueryOptions(context.client, params.projectKey),
+    );
+
     const newest = runs[0];
 
     if (newest !== undefined) {
       return redirect({
-        to: '/runs/$runId',
-        params: { runId: newest.id },
+        to: '/projects/$projectKey/runs/$runId',
+        params: { projectKey: params.projectKey, runId: newest.id },
         search,
       });
     }
@@ -111,20 +136,20 @@ const caseRoute = createRoute({
 
 const compareRoute = createRoute({
   getParentRoute: () => workspaceRoute,
-  path: '/compare/$baseRunId/$candidateRunId',
+  path: 'compare/$baseRunId/$candidateRunId',
   params: { parse: (params) => diffParamsSchema.parse(params) },
   component: ComparePage,
 });
 
 const evalsRoute = createRoute({
   getParentRoute: () => workspaceRoute,
-  path: '/evals',
+  path: 'evals',
   component: EvalsPage,
 });
 
 const evalRoute = createRoute({
   getParentRoute: () => workspaceRoute,
-  path: '/evals/$suiteName',
+  path: 'evals/$suiteName',
   params: { parse: (params) => suiteParamsSchema.parse(params) },
   validateSearch: z.object({
     limit: suiteHistoryQuerySchema.shape.limit
@@ -136,7 +161,9 @@ const evalRoute = createRoute({
 
 const routeTree = rootRoute.addChildren([
   indexRoute,
+  projectsRoute,
   workspaceRoute.addChildren([
+    workspaceIndexRoute,
     runsRoute.addChildren([runsIndexRoute, runRoute.addChildren([caseRoute])]),
     compareRoute,
     evalsRoute,

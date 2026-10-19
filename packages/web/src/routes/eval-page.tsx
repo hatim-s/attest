@@ -7,14 +7,14 @@ import { formatCount, formatDateTime, formatPercent, shortId } from '../lib/form
 
 const formatScore = (value: number) => value.toFixed(3);
 
-const route = getRouteApi('/workspace/evals/$suiteName');
+const route = getRouteApi('/projects/$projectKey/evals/$suiteName');
 
 /** Keeps each measure on its own scale and preserves run provenance beside the charts. */
 const EvalPage = () => {
-  const { suiteName } = route.useParams();
+  const { projectKey, suiteName } = route.useParams();
   const { limit } = route.useSearch();
   const navigate = useNavigate();
-  const historyQuery = useSuiteHistory(suiteName, limit);
+  const historyQuery = useSuiteHistory(projectKey, suiteName, limit);
   const history = historyQuery.data;
   const points = useMemo(() => [...(history?.points ?? [])].reverse(), [history?.points]);
 
@@ -52,8 +52,8 @@ const EvalPage = () => {
             value={limit}
             onChange={(event) =>
               void navigate({
-                to: '/evals/$suiteName',
-                params: { suiteName },
+                to: '/projects/$projectKey/evals/$suiteName',
+                params: { projectKey, suiteName },
                 search: (previous) => ({ ...previous, limit: Number(event.target.value) }),
               })
             }
@@ -118,8 +118,8 @@ const EvalPage = () => {
                       <tr key={point.runId}>
                         <th scope="row">
                           <Link
-                            to="/runs/$runId"
-                            params={{ runId: point.runId }}
+                            to="/projects/$projectKey/runs/$runId"
+                            params={{ projectKey, runId: point.runId }}
                             search={({ branch, label }) => ({ branch, label, tab: 'suites' })}
                             title={point.runId}
                           >

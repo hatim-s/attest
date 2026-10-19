@@ -5,45 +5,59 @@ import { queryOptions, useInfiniteQuery, useQuery, useQueryClient } from '@tanst
 import type { RunStatus } from '@attest/core/records';
 import { useApiClient } from './api-client-context.js';
 
-/** Shares the newest-first page between the index redirect and the polling sidebar. */
-const runsQueryOptions = (client: ApiClient) =>
+/** Lists the catalog once; the `/` redirect and the projects page share it. */
+const projectsQueryOptions = (client: ApiClient) =>
   queryOptions({
-    queryKey: ['runs'],
-    queryFn: async ({ signal }) => (await client.listRuns({}, { signal })).items,
+    queryKey: ['projects'],
+    queryFn: async ({ signal }) => (await client.listProjects({ signal })).items,
+  });
+
+/** Lets the projects page reuse the catalog the `/` redirect already loaded. */
+const useProjects = () => useQuery(projectsQueryOptions(useApiClient()));
+
+/** Shares the newest-first page between the index redirect and the polling sidebar. */
+const runsQueryOptions = (client: ApiClient, projectKey: string) =>
+  queryOptions({
+    queryKey: ['runs', projectKey],
+    queryFn: async ({ signal }) => (await client.listRuns({ projectKey }, {}, { signal })).items,
     refetchInterval: client.mode.kind === 'live' ? 5_000 : false,
   });
 
 /** Keeps the sidebar current without polling file-based reports. */
-const useRuns = () => useQuery(runsQueryOptions(useApiClient()));
+const useRuns = (projectKey: string) => useQuery(runsQueryOptions(useApiClient(), projectKey));
 
 /** Loads one run and keeps polling only while it is still executing. */
-const useRun = (runId: string) => {
+const useRun = (projectKey: string, runId: string) => {
   const client = useApiClient();
 
   return useQuery({
-    queryKey: ['run', runId],
-    queryFn: ({ signal }) => client.getRun({ runId }, { signal }),
+    queryKey: ['run', projectKey, runId],
+    queryFn: ({ signal }) => client.getRun({ projectKey, runId }, { signal }),
     refetchInterval: (query) =>
       client.mode.kind === 'live' && query.state.data?.status === 'running' ? 2_000 : false,
   });
 };
 
 /** Refreshes recorded cases during execution and once more when the run finishes. */
-const useCases = (runId: string, status: RunStatus | undefined) => {
+const useCases = (projectKey: string, runId: string, status: RunStatus | undefined) => {
   const client = useApiClient();
   const queryClient = useQueryClient();
   const isLive = client.mode.kind === 'live';
   useEffect(() => {
     // The last case can arrive between the final interval and the completed run response.
     if (isLive && status !== undefined && status !== 'running') {
-      void queryClient.invalidateQueries({ queryKey: ['cases', runId] });
+      void queryClient.invalidateQueries({ queryKey: ['cases', projectKey, runId] });
     }
-  }, [isLive, queryClient, runId, status]);
+  }, [isLive, projectKey, queryClient, runId, status]);
 
   return useInfiniteQuery({
-    queryKey: ['cases', runId],
+    queryKey: ['cases', projectKey, runId],
     queryFn: ({ pageParam, signal }: { pageParam: string | undefined; signal: AbortSignal }) =>
-      client.listCaseSummaries({ runId }, { cursor: pageParam, limit: 250 }, { signal }),
+      client.listCaseSummaries(
+        { projectKey, runId },
+        { cursor: pageParam, limit: 250 },
+        { signal },
+      ),
     initialPageParam: undefined,
     getNextPageParam: (page) => page.nextCursor,
     refetchInterval: isLive && status === 'running' ? 2_000 : false,
@@ -65,21 +79,26 @@ type ComparisonSelection = {
 };
 
 /** A status change gets a fresh cache entry even after active polling has stopped. */
-const caseQueryOptions = (client: ApiClient, { runId, suiteName, caseId, status }: CaseSelection) =>
+const caseQueryOptions = (
+  client: ApiClient,
+  projectKey: string,
+  { runId, suiteName, caseId, status }: CaseSelection,
+) =>
   queryOptions({
-    queryKey: ['case', runId, suiteName, caseId, status],
-    queryFn: ({ signal }) => client.getCase({ runId, suiteName, caseId }, { signal }),
+    queryKey: ['case', projectKey, runId, suiteName, caseId, status],
+    queryFn: ({ signal }) => client.getCase({ projectKey, runId, suiteName, caseId }, { signal }),
     refetchInterval: client.mode.kind === 'live' && status === 'running' ? 2_000 : false,
   });
 
 /** Both run statuses participate so either run finishing refreshes the comparison. */
 const diffQueryOptions = (
   client: ApiClient,
+  projectKey: string,
   { baseRunId, candidateRunId, baseStatus, candidateStatus }: ComparisonSelection,
 ) =>
   queryOptions({
-    queryKey: ['diff', baseRunId, candidateRunId, baseStatus, candidateStatus],
-    queryFn: ({ signal }) => client.getDiff({ baseRunId, candidateRunId }, { signal }),
+    queryKey: ['diff', projectKey, baseRunId, candidateRunId, baseStatus, candidateStatus],
+    queryFn: ({ signal }) => client.getDiff({ projectKey, baseRunId, candidateRunId }, { signal }),
     refetchInterval:
       client.mode.kind === 'live' && (baseStatus === 'running' || candidateStatus === 'running')
         ? 2_000
@@ -87,38 +106,43 @@ const diffQueryOptions = (
   });
 
 /** Keeps the open drawer current through the final run response. */
-const useCase = (selection: CaseSelection) => useQuery(caseQueryOptions(useApiClient(), selection));
+const useCase = (projectKey: string, selection: CaseSelection) =>
+  useQuery(caseQueryOptions(useApiClient(), projectKey, selection));
 
 /** Keeps the routed comparison current while either run is executing. */
-const useDiff = (selection: ComparisonSelection) =>
-  useQuery(diffQueryOptions(useApiClient(), selection));
+const useDiff = (projectKey: string, selection: ComparisonSelection) =>
+  useQuery(diffQueryOptions(useApiClient(), projectKey, selection));
 
 /** Status is part of the cache key so completion refreshes the final suite totals. */
 const runSuitesQueryOptions = (
   client: ApiClient,
+  projectKey: string,
   runId: string | undefined,
   status: RunStatus | undefined,
 ) =>
   queryOptions({
-    queryKey: ['run-suites', runId, status],
-    queryFn: ({ signal }) => client.listRunSuites({ runId: runId ?? '' }, { signal }),
+    queryKey: ['run-suites', projectKey, runId, status],
+    queryFn: ({ signal }) => client.listRunSuites({ projectKey, runId: runId ?? '' }, { signal }),
     enabled: runId !== undefined,
     refetchInterval: client.mode.kind === 'live' && status === 'running' ? 2_000 : false,
   });
 
 /** Shares suite totals between a run and the evals index. */
-const useRunSuites = (runId: string | undefined, status: RunStatus | undefined) =>
-  useQuery(runSuitesQueryOptions(useApiClient(), runId, status));
+const useRunSuites = (
+  projectKey: string,
+  runId: string | undefined,
+  status: RunStatus | undefined,
+) => useQuery(runSuitesQueryOptions(useApiClient(), projectKey, runId, status));
 
 /** Walks past running-only pages so evals always starts from the newest finished run. */
-const newestCompletedRunQueryOptions = (client: ApiClient) =>
+const newestCompletedRunQueryOptions = (client: ApiClient, projectKey: string) =>
   queryOptions({
-    queryKey: ['newest-completed-run'],
+    queryKey: ['newest-completed-run', projectKey],
     queryFn: async ({ signal }) => {
       let cursor: string | undefined;
 
       do {
-        const page = await client.listRuns({ cursor }, { signal });
+        const page = await client.listRuns({ projectKey }, { cursor }, { signal });
         const run = page.items.find((item) => item.status !== 'running');
 
         if (run !== undefined) return run;
@@ -131,21 +155,30 @@ const newestCompletedRunQueryOptions = (client: ApiClient) =>
   });
 
 /** Refreshes the eval catalog when a new run completes. */
-const useNewestCompletedRun = () => useQuery(newestCompletedRunQueryOptions(useApiClient()));
+const useNewestCompletedRun = (projectKey: string) =>
+  useQuery(newestCompletedRunQueryOptions(useApiClient(), projectKey));
 
 /** Keeps the history limit in the cache identity and polls only live sources. */
-const suiteHistoryQueryOptions = (client: ApiClient, suiteName: string, limit: number) =>
+const suiteHistoryQueryOptions = (
+  client: ApiClient,
+  projectKey: string,
+  suiteName: string,
+  limit: number,
+) =>
   queryOptions({
-    queryKey: ['suite-history', suiteName, limit],
-    queryFn: ({ signal }) => client.getSuiteHistory({ suiteName }, { limit }, { signal }),
+    queryKey: ['suite-history', projectKey, suiteName, limit],
+    queryFn: ({ signal }) =>
+      client.getSuiteHistory({ projectKey, suiteName }, { limit }, { signal }),
     refetchInterval: client.mode.kind === 'live' ? 5_000 : false,
   });
 
 /** Lets both history charts consume a single parsed response. */
-const useSuiteHistory = (suiteName: string, limit: number) =>
-  useQuery(suiteHistoryQueryOptions(useApiClient(), suiteName, limit));
+const useSuiteHistory = (projectKey: string, suiteName: string, limit: number) =>
+  useQuery(suiteHistoryQueryOptions(useApiClient(), projectKey, suiteName, limit));
 
 export {
+  projectsQueryOptions,
+  useProjects,
   newestCompletedRunQueryOptions,
   suiteHistoryQueryOptions,
   useNewestCompletedRun,

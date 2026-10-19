@@ -1,4 +1,4 @@
-import { Link, Outlet, useLocation } from '@tanstack/react-router';
+import { Link, Outlet, useLocation, useParams } from '@tanstack/react-router';
 import { useEffect, useState } from 'react';
 import { useApiClient } from '../api/api-client-context.js';
 import { Badge, Button } from '../components/shared/ui.js';
@@ -23,10 +23,11 @@ const getInitialTheme = (): Theme => {
 const RootLayout = () => {
   const { mode } = useApiClient();
   const [theme, setTheme] = useState<Theme>(getInitialTheme);
+  const { projectKey } = useParams({ strict: false });
 
   // Comparisons belong to Runs even though their URL sits outside /runs.
   const section = useLocation({
-    select: (location) => (location.pathname.startsWith('/evals') ? 'evals' : 'runs'),
+    select: (location) => (/^\/projects\/[^/]+\/evals/.test(location.pathname) ? 'evals' : 'runs'),
   });
 
   useEffect(() => {
@@ -50,22 +51,26 @@ const RootLayout = () => {
           </div>
         </div>
         <div className="topbar-actions">
-          <nav className="topbar-nav" aria-label="Dashboard">
-            <Link
-              to="/runs"
-              search={({ branch, label }) => ({ branch, label })}
-              aria-current={section === 'runs' ? 'page' : undefined}
-            >
-              Runs
-            </Link>
-            <Link
-              to="/evals"
-              search={({ branch, label }) => ({ branch, label })}
-              aria-current={section === 'evals' ? 'page' : undefined}
-            >
-              Evals
-            </Link>
-          </nav>
+          {projectKey === undefined ? null : (
+            <nav className="topbar-nav" aria-label="Dashboard">
+              <Link
+                to="/projects/$projectKey/runs"
+                params={{ projectKey }}
+                search={({ branch, label }) => ({ branch, label })}
+                aria-current={section === 'runs' ? 'page' : undefined}
+              >
+                Runs
+              </Link>
+              <Link
+                to="/projects/$projectKey/evals"
+                params={{ projectKey }}
+                search={({ branch, label }) => ({ branch, label })}
+                aria-current={section === 'evals' ? 'page' : undefined}
+              >
+                Evals
+              </Link>
+            </nav>
+          )}
           {mode.kind === 'snapshot' ? <Badge tone="local">Static report</Badge> : null}
           <Button onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} tone="ghost">
             {theme === 'dark' ? 'Light mode' : 'Dark mode'}
