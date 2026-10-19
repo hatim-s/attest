@@ -164,6 +164,9 @@ records when the entry was registered.
 The registry file is written atomically with mode `0600` inside a directory created with mode
 `0700`. A registry path with a symlinked ancestor directory is rejected. A missing file reads as an
 empty registry; a malformed one fails with the `registry_invalid` error code.
+A registry that other users can read or write also fails with `registry_invalid`. Updates take a
+short-lived `projects.json.lock` beside the file, so two `attest init` or `attest projects add`
+calls that overlap both land.
 
 See [CLI guide](../cli/index.md#project-registry-and-dashboard) for the commands that maintain it.
 
