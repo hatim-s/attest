@@ -43,6 +43,19 @@ Registry installation becomes available after the maintainer publishes the alpha
 
 ## Packages
 
+| Package             | What it does                                                                                      |
+| ------------------- | ------------------------------------------------------------------------------------------------- |
+| `@attest/contracts` | Zod schemas and types for agent, metric, trace, project and CLI documents.                        |
+| `@attest/core`      | Run records, comparisons, case selection and trace conversion.                                    |
+| `@attest/api`       | Read and run control API, its fetch server and typed client.                                      |
+| `@attest/executor`  | Agent invocation over CLI, HTTP, streams, WebSockets and sandboxes.                               |
+| `@attest/client`    | Runner you host next to an async agent; ships a [Pi handler](docs/integrations/attest-client.md). |
+| `@attest/runtime`   | Metric evaluation and eval scheduling.                                                            |
+| `@attest/local`     | Project files, SQLite store, run control and the local dashboard server.                          |
+| `@attest/web`       | The dashboard, embedded in the CLI.                                                               |
+| `@attest/cli`       | The `attest` command.                                                                             |
+| `@attest/schemas`   | Generated JSON Schema files.                                                                      |
+
 The [architecture guide](docs/ARCHITECTURE.md) explains the dependency rules and where new code belongs. Cloud code can reuse contracts, core, executor, and runtime without importing the CLI or local application.
 
 ## Use Attest
