@@ -1,4 +1,7 @@
-/** Every run read is scoped to one catalog project; only the project list sits outside one. */
+/**
+ * Every route is scoped to one catalog project; only the project list sits outside one.
+ * `startRun` and `cancelRun` are POST routes; `startRun` shares its path with `listRuns`.
+ */
 const apiRoutes = {
   listProjects: '/projects',
   listRuns: '/projects/:projectKey/runs',
@@ -8,6 +11,9 @@ const apiRoutes = {
   listRunSuites: '/projects/:projectKey/runs/:runId/suites',
   getSuiteHistory: '/projects/:projectKey/suites/:suiteName/history',
   getDiff: '/projects/:projectKey/diffs/:baseRunId/:candidateRunId',
+  listTests: '/projects/:projectKey/tests',
+  startRun: '/projects/:projectKey/runs',
+  cancelRun: '/projects/:projectKey/runs/:runId/cancel',
 } as const;
 
 type ApiRoute = keyof typeof apiRoutes;

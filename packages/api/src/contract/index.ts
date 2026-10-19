@@ -9,6 +9,7 @@ export {
   suiteParamsSchema,
   suiteHistoryQuerySchema,
   suiteHistoryRequestSchema,
+  runStartRequestSchema,
   MAX_SUITE_HISTORY_RUNS,
   DEFAULT_SUITE_HISTORY_RUNS,
   type SuiteHistoryQuery,
@@ -21,9 +22,15 @@ export {
   runSuitesSchema,
   suiteHistoryPointSchema,
   suiteHistorySchema,
+  testListSchema,
+  runStartResponseSchema,
+  runCancelResponseSchema,
   type ProjectList,
   type RunSuites,
   type SuiteHistory,
+  type TestList,
+  type RunStartResponse,
+  type RunCancelResponse,
 } from './responses.js';
 
 export {
@@ -36,4 +43,9 @@ export {
 
 export { reportSnapshotSchema, type ReportSnapshot } from './snapshot.js';
 
-export { dashboardBootstrapSchema, type DashboardBootstrap } from './bootstrap.js';
+export {
+  apiCapabilitiesSchema,
+  dashboardBootstrapSchema,
+  type ApiCapabilities,
+  type DashboardBootstrap,
+} from './bootstrap.js';

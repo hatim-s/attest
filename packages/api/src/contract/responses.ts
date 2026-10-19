@@ -6,12 +6,20 @@ import {
   caseRecordSchema,
   runDiffSchema,
   projectRecordSchema,
+  runCancelOutcomeSchema,
+  testSummarySchema,
 } from '@attest/core/records';
 import type { CaseSummary, RunRecord } from '@attest/core/records';
 import { aggregateCases, caseAggregateSchema, suiteAggregateSchema } from '@attest/core/analytics';
 import type { ApiRoute } from './routes.js';
 
 const projectListSchema = z.object({ items: z.array(projectRecordSchema) });
+
+const testListSchema = z.object({ items: z.array(testSummarySchema) });
+
+const runStartResponseSchema = z.object({ runId: z.string().min(1) });
+
+const runCancelResponseSchema = z.object({ outcome: runCancelOutcomeSchema });
 
 const runSuitesSchema = z.object({
   runId: z.string().min(1),
@@ -58,6 +66,12 @@ const suiteHistorySchema = z.object({
 
 type ProjectList = z.infer<typeof projectListSchema>;
 
+type TestList = z.infer<typeof testListSchema>;
+
+type RunStartResponse = z.infer<typeof runStartResponseSchema>;
+
+type RunCancelResponse = z.infer<typeof runCancelResponseSchema>;
+
 type RunSuites = z.infer<typeof runSuitesSchema>;
 
 type SuiteHistory = z.infer<typeof suiteHistorySchema>;
@@ -71,6 +85,9 @@ const apiResponses = {
   listCaseSummaries: caseSummaryPageSchema,
   getCase: caseRecordSchema,
   getDiff: runDiffSchema,
+  listTests: testListSchema,
+  startRun: runStartResponseSchema,
+  cancelRun: runCancelResponseSchema,
 } as const satisfies Record<ApiRoute, z.ZodType>;
 
 export {
@@ -81,7 +98,13 @@ export {
   suiteHistoryPointSchema,
   toSuiteHistoryPoint,
   suiteHistorySchema,
+  testListSchema,
+  runStartResponseSchema,
+  runCancelResponseSchema,
   type ProjectList,
   type RunSuites,
   type SuiteHistory,
+  type TestList,
+  type RunStartResponse,
+  type RunCancelResponse,
 };

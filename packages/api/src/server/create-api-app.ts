@@ -1,4 +1,10 @@
-import { diffRuns, type ProjectCatalog, type RunSource } from '@attest/core';
+import {
+  diffRuns,
+  StoreError,
+  type ProjectCatalog,
+  type RunControl,
+  type RunSource,
+} from '@attest/core';
 import { summarizeSuites } from '@attest/core/analytics';
 import { Hono } from 'hono';
 
@@ -10,20 +16,34 @@ import {
   pageQuerySchema,
   projectParamsSchema,
   runParamsSchema,
+  runStartRequestSchema,
   suiteHistoryRequestSchema,
 } from '../contract/requests.js';
-import { parseInput, toErrorEnvelope } from './error-response.js';
+import { parseInput, parseJsonBody, toErrorEnvelope } from './error-response.js';
 
 import { readCaseSummaries } from './read-case-summaries.js';
 import { readSuiteHistory } from './read-suite-history.js';
 
-type ApiAppDeps = { catalog: ProjectCatalog };
+/** `control` is present only on hosts that can start and cancel runs, such as `attest view`. */
+type ApiAppDeps = { catalog: ProjectCatalog; control?: RunControl };
 
 type ProjectScope = { Variables: { source: RunSource } };
 
-/** Lets fetch hosts serve the same project and run reads without owning storage or host policy. */
-const createApiApp = ({ catalog }: ApiAppDeps): Hono<ProjectScope> => {
+/**
+ * Lets fetch hosts serve the same project and run reads without owning storage or host policy.
+ * Run control is the host's injected implementation; without one those routes answer
+ * CONTROL_UNAVAILABLE.
+ */
+const createApiApp = ({ catalog, control }: ApiAppDeps): Hono<ProjectScope> => {
   const app = new Hono<ProjectScope>();
+
+  const requireControl = (): RunControl => {
+    if (control === undefined) {
+      throw new StoreError('CONTROL_UNAVAILABLE', 'This host cannot start or cancel runs.');
+    }
+
+    return control;
+  };
 
   app.get(apiRoutes.listProjects, async (context) =>
     context.json({ items: await catalog.listProjects() }),
@@ -80,6 +100,25 @@ const createApiApp = ({ catalog }: ApiAppDeps): Hono<ProjectScope> => {
     });
 
     return context.json(await readSuiteHistory(context.var.source, suiteName, limit));
+  });
+  app.get(apiRoutes.listTests, async (context) => {
+    const runControl = requireControl();
+    const { projectKey } = parseInput(projectParamsSchema, context.req.param());
+
+    return context.json({ items: await runControl.listTests(projectKey) });
+  });
+  app.post(apiRoutes.startRun, async (context) => {
+    const runControl = requireControl();
+    const { projectKey } = parseInput(projectParamsSchema, context.req.param());
+    const request = await parseJsonBody(runStartRequestSchema, context.req.raw);
+
+    return context.json(await runControl.startRun(projectKey, request), 201);
+  });
+  app.post(apiRoutes.cancelRun, async (context) => {
+    const runControl = requireControl();
+    const { projectKey, runId } = parseInput(runParamsSchema, context.req.param());
+
+    return context.json(await runControl.cancelRun(projectKey, runId));
   });
 
   // Mounted Hono apps do not carry their notFound handler into the host.

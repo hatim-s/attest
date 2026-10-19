@@ -27,6 +27,7 @@ const httpClient = (projects: ProjectRecord[], runs: RunRecord[]) =>
   createApiClient({
     kind: 'http',
     baseUrl: '/api',
+    capabilities: { control: false },
     fetch: (input) => {
       const path = input instanceof Request ? input.url : input.toString();
 

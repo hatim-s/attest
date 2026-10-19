@@ -10,7 +10,12 @@ const forbidden: ApiErrorEnvelope = {
 
 /** Composes the loopback dashboard host with host-owned origin policy. */
 const createViewApp = (options: CreateViewAppOptions): Hono => {
-  const dashboardHtml = createDashboardHtml(options.indexHtml, { kind: 'http', baseUrl: '/api' });
+  const dashboardHtml = createDashboardHtml(options.indexHtml, {
+    kind: 'http',
+    baseUrl: '/api',
+    capabilities: { control: false },
+  });
+
   const app = new Hono();
 
   app.use('*', async (context, next) => {
