@@ -1053,20 +1053,12 @@ select:focus-visible {
 }
 
 .projects-table-root {
-  max-width: 340px;
+  display: block;
+  max-width: min(240px, 22vw);
   overflow: hidden;
   text-overflow: ellipsis;
   color: var(--muted);
   font-family: var(--mono);
-  font-size: 11px;
-}
-.projects-table-muted {
-  color: var(--muted);
-}
-.projects-table-latest {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
 }
 .projects-table-state {
   white-space: normal;

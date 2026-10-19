@@ -3,7 +3,7 @@ import type { UseQueryResult } from '@tanstack/react-query';
 import type { ProjectRecord, RunPage } from '@attest/core/records';
 import { useProjects, useRunsForProjects } from '../api/queries.js';
 import { Badge, ErrorNotice, Heading, Loading } from '../components/shared/ui.js';
-import { formatCount, formatDateTime, formatShortDateTime } from '../lib/format.js';
+import { formatCount, formatDateTime } from '../lib/format.js';
 import { formatPageRunCount, sortByLatestRun } from './project-rows.js';
 
 type ProjectRowProps = { project: ProjectRecord; runs: UseQueryResult<RunPage> };
@@ -14,7 +14,7 @@ const ProjectRunCells = ({ runs }: Pick<ProjectRowProps, 'runs'>) => {
 
   if (page === undefined) {
     return (
-      <td colSpan={3} className="projects-table-state">
+      <td colSpan={6} className="projects-table-state">
         {runs.error === null ? (
           <Loading label="Loading runs" />
         ) : (
@@ -30,23 +30,21 @@ const ProjectRunCells = ({ runs }: Pick<ProjectRowProps, 'runs'>) => {
   return (
     <>
       <td>{formatPageRunCount(page)}</td>
-      <td>
-        {latest === undefined ? (
-          <span className="projects-table-muted">No runs yet</span>
-        ) : (
-          <span className="projects-table-latest" title={formatDateTime(latest.createdAt)}>
-            {formatShortDateTime(latest.createdAt)}
+      {latest === undefined ? (
+        <td colSpan={2} className="muted">
+          No runs yet
+        </td>
+      ) : (
+        <>
+          <td>{formatDateTime(latest.createdAt)}</td>
+          <td>
             <Badge tone={latest.status}>{latest.status}</Badge>
-          </span>
-        )}
-      </td>
-      <td>
-        {summary === undefined ? (
-          <span className="projects-table-muted">—</span>
-        ) : (
-          `${summary.passedCases} passed · ${summary.failedCases} failed · ${formatCount(summary.errorCases, 'error')}`
-        )}
-      </td>
+          </td>
+        </>
+      )}
+      <td>{summary?.passedCases ?? '—'}</td>
+      <td>{summary?.failedCases ?? '—'}</td>
+      <td>{summary?.errorCases ?? '—'}</td>
     </>
   );
 };
@@ -58,8 +56,10 @@ const ProjectRow = ({ project, runs }: ProjectRowProps) => (
         {project.name}
       </Link>
     </th>
-    <td className="projects-table-root" title={project.root}>
-      {project.root ?? '—'}
+    <td>
+      <span className="projects-table-root" title={project.root}>
+        {project.root ?? '—'}
+      </span>
     </td>
     <ProjectRunCells runs={runs} />
   </tr>
@@ -81,14 +81,20 @@ const ProjectsTable = ({ projects }: { projects: ProjectRecord[] }) => {
 
   return (
     <div className="case-table-frame analytics-table-scroll">
-      <table className="analytics-table projects-table" aria-label="Projects">
+      <table className="analytics-table" aria-label="Projects">
+        <caption>
+          Newest activity first. Passed, failed and errors come from the newest finished run of each
+          project.
+        </caption>
         <thead>
           <tr>
-            {['Project', 'Root', 'Runs', 'Latest run', 'Latest finished run'].map((name) => (
-              <th key={name} scope="col">
-                {name}
-              </th>
-            ))}
+            {['Project', 'Root', 'Runs', 'Latest run', 'Status', 'Passed', 'Failed', 'Errors'].map(
+              (name) => (
+                <th key={name} scope="col">
+                  {name}
+                </th>
+              ),
+            )}
           </tr>
         </thead>
         <tbody>
@@ -119,7 +125,8 @@ const ProjectsPage = () => {
         {projectsQuery.error !== null ? <ErrorNotice error={projectsQuery.error} /> : null}
         {projects?.length === 0 ? (
           <div className="empty-compact">
-            No projects yet. Run <code>attest projects add &lt;dir&gt;</code> to register one.
+            No projects registered. Run <code>attest init</code> in a new project, or{' '}
+            <code>attest projects add &lt;dir&gt;</code> for one that already has a manifest.
           </div>
         ) : null}
         {projects !== undefined && projects.length > 0 ? (
