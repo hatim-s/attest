@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 import type { CaseRecord, StoredMetricEvaluation } from '@attest/core/records';
 import { caseRecordVerdict } from '@attest/core/records';
 import { formatDuration } from '../../lib/format.js';
+import { CaseArtifacts } from './case-artifacts.js';
 import { TraceWaterfall } from '../traces/trace-waterfall.js';
 import { Drawer } from '../shared/drawer.js';
 import { Badge, ErrorNotice, Loading } from '../shared/ui.js';
@@ -58,6 +59,9 @@ type CaseDetailProps = {
 const CaseDetail = ({ caseRecord, error, isLoading, onClose, selected }: CaseDetailProps) => {
   const verdict = caseRecord === undefined ? undefined : caseRecordVerdict(caseRecord);
 
+  const artifacts =
+    caseRecord?.outcome === 'completed' ? (caseRecord.response.artifacts ?? []) : [];
+
   return (
     <Drawer
       label={`Case ${selected.caseId}`}
@@ -96,6 +100,11 @@ const CaseDetail = ({ caseRecord, error, isLoading, onClose, selected }: CaseDet
               }
             />
           </DetailSection>
+          {artifacts.length > 0 ? (
+            <DetailSection label="Artifacts">
+              <CaseArtifacts artifacts={artifacts} />
+            </DetailSection>
+          ) : null}
           {caseRecord.outcome === 'completed' && caseRecord.trace !== undefined ? (
             <DetailSection label="Trace">
               <TraceWaterfall trace={caseRecord.trace} />

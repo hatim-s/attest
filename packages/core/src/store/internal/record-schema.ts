@@ -4,6 +4,7 @@ import {
   caseOutcomeSchema,
   invocationDiagnosticsSchema,
   invocationErrorCodeSchema,
+  inlineArtifactSchema,
   rawExcerptSchema,
   traceSchema,
   warningCodeSchema,
@@ -73,8 +74,12 @@ const executionBase = {
 const completedExecutionFields = {
   ...executionBase,
   outcome: z.literal('completed'),
-  // Only the error field is typed: verdicts read it, and the rest of the envelope is opaque evidence.
-  response: z.looseObject({ error: agentErrorSchema.optional() }),
+  // Only error and artifacts are typed: verdicts read error, the dashboard lists artifacts, and the
+  // rest of the envelope is opaque evidence.
+  response: z.looseObject({
+    error: agentErrorSchema.optional(),
+    artifacts: z.array(inlineArtifactSchema).optional(),
+  }),
   trace: traceSchema.optional(),
 };
 

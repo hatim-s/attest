@@ -49,3 +49,5 @@ export {
 } from '../store/types.js';
 
 export { caseRecordVerdict } from '../store/case-summary.js';
+
+export type { InlineArtifact } from '@attest/contracts';
