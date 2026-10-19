@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import { Link } from '@tanstack/react-router';
 import type { RunRecord } from '@attest/core/records';
 import { formatDateTime, formatPassRate, shortId } from '../../lib/format.js';
@@ -9,17 +10,22 @@ type RunListProps = {
   projectKey: string;
   runs: RunRecord[];
   selectedRunId?: string;
+  /** Sits beside the run count, such as the button that starts a run. */
+  action?: ReactNode;
 };
 
 /** Sidebar of recent runs. The selected run carries `aria-current="page"`. */
-const RunList = ({ error, isLoading, projectKey, runs, selectedRunId }: RunListProps) => (
+const RunList = ({ error, isLoading, projectKey, runs, selectedRunId, action }: RunListProps) => (
   <aside className="run-sidebar" aria-label="Evaluation runs">
     <div className="run-sidebar-heading">
       <div>
         <p className="eyebrow">Workspace</p>
         <h2>Recent runs</h2>
       </div>
-      <Badge>{runs.length}</Badge>
+      <div className="run-sidebar-actions">
+        <Badge>{runs.length}</Badge>
+        {action}
+      </div>
     </div>
     {isLoading ? <Loading label="Loading runs" /> : null}
     {error !== null && error !== undefined ? <ErrorNotice error={error} /> : null}

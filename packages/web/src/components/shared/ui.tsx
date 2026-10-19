@@ -1,4 +1,6 @@
 import type { ButtonHTMLAttributes, ReactNode } from 'react';
+import { ApiError } from '@attest/api/client';
+import type { RunStartDiagnostics } from '@attest/core/records';
 
 type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
   tone?: 'primary' | 'secondary' | 'ghost';
@@ -44,10 +46,45 @@ const Heading = ({ level, eyebrow, title, meta, children }: HeadingProps) => {
   );
 };
 
-/** Full-width alert for a failed query. */
+/** What the CLI said about a run that did not start. Its message is already the notice's text. */
+const DiagnosticsList = ({ diagnostics }: { diagnostics: RunStartDiagnostics }) => (
+  <dl className="error-diagnostics">
+    <dt>Code</dt>
+    <dd>
+      <code>{diagnostics.code}</code>
+    </dd>
+    {diagnostics.path !== undefined ? (
+      <>
+        <dt>Path</dt>
+        <dd>
+          <code>{diagnostics.path}</code>
+        </dd>
+      </>
+    ) : null}
+    {diagnostics.hint !== undefined ? (
+      <>
+        <dt>Hint</dt>
+        <dd>{diagnostics.hint}</dd>
+      </>
+    ) : null}
+    {diagnostics.details !== undefined ? (
+      <>
+        <dt>Details</dt>
+        <dd>
+          <pre>{JSON.stringify(diagnostics.details, null, 2)}</pre>
+        </dd>
+      </>
+    ) : null}
+  </dl>
+);
+
+/** Full-width alert for a failed request, with the CLI's diagnostics when a run did not start. */
 const ErrorNotice = ({ error }: { error: unknown }) => (
   <div className="error-notice" role="alert">
     {error instanceof Error ? error.message : 'Something went wrong.'}
+    {error instanceof ApiError && error.details !== undefined ? (
+      <DiagnosticsList diagnostics={error.details} />
+    ) : null}
   </div>
 );
 
