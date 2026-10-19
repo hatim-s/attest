@@ -56,8 +56,6 @@ type AgentRunnerOptions = {
   fetch?: typeof fetch;
   /** Receives background failures. Defaults to one line on stderr. */
   onError?: (failure: RunnerFailure) => void;
-  /** The only path that accepts triggers. Defaults to `/`. */
-  path?: string;
   /**
    * When set, a trigger must carry `Authorization: Bearer <triggerToken>`. Set it whenever the
    * runner is reachable by anything other than attest: a trigger makes the handler run a prompt.
@@ -102,7 +100,6 @@ const createAgentRunner = ({
   handler,
   fetch: fetchImpl = globalThis.fetch,
   onError = reportToStderr,
-  path = '/',
   triggerToken,
 }: AgentRunnerOptions): AgentRunner => {
   const inFlight = new Map<string, Promise<void>>();
@@ -193,7 +190,7 @@ const createAgentRunner = ({
 
   return {
     fetch: async (request) => {
-      if (new URL(request.url).pathname !== path) {
+      if (new URL(request.url).pathname !== '/') {
         return Response.json({ error: 'not_found' }, { status: 404 });
       }
 
@@ -213,7 +210,7 @@ const createAgentRunner = ({
         return Response.json({ error: 'unauthorized' }, { status: 401 });
       }
 
-      // Requiring JSON forces a CORS preflight, so a web page cannot trigger a local runner.
+      // Requiring JSON forces a CORS preflight, which gets 405, so a cross-origin page cannot post.
       if (!/^application\/json\s*(?:;|$)/iu.test(request.headers.get('content-type') ?? '')) {
         return Response.json({ error: 'unsupported_media_type' }, { status: 415 });
       }

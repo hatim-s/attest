@@ -1,8 +1,7 @@
 import type { AgentCallback } from '@attest/contracts';
 
-const DELIVERY_ATTEMPTS = 3;
-
-const RETRY_DELAYS_MS = [250, 1_000] as const;
+// Three attempts: at once, then after 250 ms, then after 1 s.
+const RETRY_DELAYS_MS = [0, 250, 1_000] as const;
 
 const ATTEMPT_TIMEOUT_MS = 30_000;
 
@@ -13,20 +12,18 @@ const sleep = (milliseconds: number): Promise<void> =>
 
 /**
  * Posts a serialized completion to the callback URL with its bearer token. Network errors and 5xx
- * answers are retried up to three attempts in total; any other non-2xx answer is final because
- * the receiver has already judged the completion (401 bad token, 409 duplicate, 413 too large).
+ * answers are retried; any other non-2xx answer is final because the receiver has already judged
+ * the completion (401 bad token, 409 duplicate, 413 too large).
  */
 const deliverCompletion = async (
   fetchImpl: typeof fetch,
   callback: AgentCallback,
   body: string,
 ): Promise<DeliveryOutcome> => {
-  let reason = 'not attempted';
+  let reason = '';
 
-  for (let attempt = 0; attempt < DELIVERY_ATTEMPTS; attempt += 1) {
-    const delay = RETRY_DELAYS_MS[attempt - 1];
-
-    if (delay !== undefined) await sleep(delay);
+  for (const delay of RETRY_DELAYS_MS) {
+    if (delay > 0) await sleep(delay);
 
     try {
       const response = await fetchImpl(callback.url, {

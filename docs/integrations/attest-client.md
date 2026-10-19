@@ -81,7 +81,6 @@ const runner = createAgentRunner({
   handler, // (invocation, { signal }) => Promise<HandlerResult>
   fetch, // optional, posts completions; defaults to globalThis.fetch
   onError, // optional, receives background failures; defaults to one stderr line
-  path, // optional, the trigger path; defaults to '/'
   triggerToken, // optional, required bearer token on triggers
 });
 
@@ -101,8 +100,8 @@ Trigger responses:
 | `202`  | Accepted. Body `{ "accepted": true, "run_id": ..., "case_id": ... }`.   |
 | `400`  | Not JSON, not an `attest.agent-invocation`, or no `callback` field.     |
 | `401`  | `triggerToken` is set and the `Authorization` header does not match it. |
-| `404`  | Any path other than `path`.                                             |
-| `405`  | Any method other than `POST` on `path`.                                 |
+| `404`  | Any path other than `/`.                                                |
+| `405`  | Any method other than `POST` on `/`.                                    |
 | `413`  | Body over 10 MiB, the executor's default request limit.                 |
 | `415`  | `content-type` is not `application/json`.                               |
 | `503`  | The runner is closing.                                                  |
