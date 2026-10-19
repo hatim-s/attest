@@ -7,7 +7,8 @@ import { errnoCode } from '../internal/errno-code.js';
 import { openReadonlyRunStore } from '../store/index.js';
 import { readRegistry, type RegistryEntry } from './project-registry.js';
 
-type RegistryCatalog = ProjectCatalog & { close: () => Promise<void> };
+/** A catalog that holds open stores; `close()` releases every one of them. */
+type ClosableCatalog = ProjectCatalog & { close: () => Promise<void> };
 
 const runNotFound = (runId: string): Promise<never> =>
   Promise.reject(new StoreError('RUN_NOT_FOUND', `Run ${runId} was not found.`));
@@ -35,7 +36,7 @@ const toProjectRecord = ({ key, name, root, projectId }: RegistryEntry) => ({
  * are never created or migrated, and stay open until `close()`; a project without a store reads
  * as empty until its first run.
  */
-const createRegistryCatalog = ({ registryPath }: { registryPath: string }): RegistryCatalog => {
+const createRegistryCatalog = ({ registryPath }: { registryPath: string }): ClosableCatalog => {
   // Keyed by root: a key removed and re-added for another directory must not reuse the handle.
   const opened = new Map<string, Promise<RunStore>>();
 
@@ -92,4 +93,4 @@ const createRegistryCatalog = ({ registryPath }: { registryPath: string }): Regi
   };
 };
 
-export { createRegistryCatalog, type RegistryCatalog };
+export { createRegistryCatalog, type ClosableCatalog };

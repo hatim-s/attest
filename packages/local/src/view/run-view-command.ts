@@ -1,10 +1,15 @@
 import { mkdir } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 
-import { createSingleProjectCatalog, type ProjectCatalog } from '@attest/core';
+import { createSingleProjectCatalog } from '@attest/core';
 import { dashboardHtml } from '@attest/web/embedded';
 
-import { createRegistryCatalog, describeStoreProject } from '../registry/index.js';
+import {
+  createRegistryCatalog,
+  describeStoreProject,
+  readRegistry,
+  type ClosableCatalog,
+} from '../registry/index.js';
 import { openStore } from '../store/index.js';
 import { startViewServer, type ViewServerHandle } from '../view-server/index.js';
 
@@ -19,20 +24,20 @@ type RunViewCommandOptions = {
   workingDirectory: string;
 };
 
-type OpenedCatalog = { catalog: ProjectCatalog; close: () => Promise<void> };
-
 /**
  * Opens the catalog for one view scope. A store scope creates the store when it is missing, as
- * `attest view` always has; a registry scope creates nothing and opens stores on first read.
+ * `attest view` always has. A registry scope creates nothing and opens stores on first read; it
+ * reads the registry once here so an unreadable file fails in the terminal before the server
+ * starts, not later as a generic API error in the browser.
  */
 const openViewCatalog = async (
   scope: ViewScope,
   workingDirectory: string,
-): Promise<OpenedCatalog> => {
+): Promise<ClosableCatalog> => {
   if (scope.kind === 'registry') {
-    const catalog = createRegistryCatalog({ registryPath: scope.registryPath });
+    await readRegistry(scope.registryPath);
 
-    return { catalog, close: catalog.close };
+    return createRegistryCatalog({ registryPath: scope.registryPath });
   }
 
   const storePath = resolve(workingDirectory, scope.storePath ?? '.attest/runs.db');
@@ -40,21 +45,18 @@ const openViewCatalog = async (
   await mkdir(dirname(storePath), { recursive: true });
   const store = await openStore(storePath);
 
-  return {
-    catalog: createSingleProjectCatalog(project, store.runs),
-    close: () => store.close(),
-  };
+  return { ...createSingleProjectCatalog(project, store.runs), close: () => store.close() };
 };
 
 /** Starts the loopback dashboard and owns abort-driven shutdown. */
 const runViewCommand = async (options: RunViewCommandOptions): Promise<ViewServerHandle> => {
-  const { catalog, close } = await openViewCatalog(options.scope, options.workingDirectory);
+  const catalog = await openViewCatalog(options.scope, options.workingDirectory);
 
   const server = await startViewServer({
     indexHtml: dashboardHtml,
     port: options.port,
     catalog,
-    close,
+    close: catalog.close,
   });
 
   const closeOnAbort = (): void => {

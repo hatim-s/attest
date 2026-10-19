@@ -10,6 +10,6 @@ export {
   type UnregisterProjectOptions,
 } from './project-registry.js';
 
-export { createRegistryCatalog, type RegistryCatalog } from './registry-catalog.js';
+export { createRegistryCatalog, type ClosableCatalog } from './registry-catalog.js';
 
 export { describeStoreProject } from './store-project.js';

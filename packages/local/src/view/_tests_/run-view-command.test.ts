@@ -1,11 +1,10 @@
-import { mkdtemp, readdir, realpath, rm } from 'node:fs/promises';
+import { mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { projectListSchema } from '@attest/api/contract';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { registerProject } from '../../registry/index.js';
 import { runViewCommand } from '../run-view-command.js';
 
 const directories: string[] = [];
@@ -53,25 +52,24 @@ describe('runViewCommand', () => {
     await expect(server.closed).resolves.toBeUndefined();
   });
 
-  it('serves every registered project without creating a store', async () => {
+  it('rejects a malformed registry before the server starts', async () => {
     const home = await temporaryDirectory('attest-view-home-');
-    const project = await temporaryDirectory('attest-view-project-');
     const registryPath = join(home, 'projects.json');
-    await registerProject({ registryPath, root: project, name: 'Fresh' });
+    await writeFile(registryPath, '{', { mode: 0o600 });
     const abortController = new AbortController();
+    let started = false;
 
-    await runViewCommand({
-      scope: { kind: 'registry', registryPath },
-      workingDirectory: home,
-      signal: abortController.signal,
-      onReady: async ({ origin }) => {
-        const runs = await fetch(`${origin}/api/projects/fresh/runs`);
-
-        expect(await runs.json()).toEqual({ items: [] });
-        abortController.abort();
-      },
-    });
-
-    expect(await readdir(project)).toEqual([]);
+    await expect(
+      runViewCommand({
+        scope: { kind: 'registry', registryPath },
+        workingDirectory: home,
+        signal: abortController.signal,
+        onReady: () => {
+          started = true;
+          abortController.abort();
+        },
+      }),
+    ).rejects.toMatchObject({ code: 'registry_invalid' });
+    expect(started).toBe(false);
   });
 });
