@@ -151,7 +151,7 @@ attest view --all --no-open
 ```
 
 A registered project whose `.attest/runs.db` does not exist yet appears with no runs.
-Serving it does not create the store; the first recorded probe or evaluation creates it.
+Serving it does not create the store.
 
 ## Integration transports
 

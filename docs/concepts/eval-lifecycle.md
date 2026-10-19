@@ -71,7 +71,8 @@ Subsequent read surfaces consume the persisted record:
 attest show run <run-id> --output json
 attest diff <base-run-id> <candidate-run-id> --format json
 attest report <run-id>
-attest view
+attest view        # this project
+attest view --all  # every registered project
 ```
 
 The [run-bundle specification](../specs/run-bundle.md) defines the portable evidence

@@ -159,7 +159,7 @@ file belongs in version control. See [cloud commands](../cli/cloud.md) for sync 
 `name`, lowercased with every run of non-alphanumeric characters replaced by `-` and trimmed to 64
 characters, and deduped with `-2` and `-3` against keys already stored. A stored key never changes.
 `projectId` is copied from `attest.project.json` when the project has a manifest, and `registeredAt`
-is the timestamp of the first registration.
+records when the entry was registered.
 
 The registry file is written atomically with mode `0600` inside a directory created with mode
 `0700`. A registry path with a symlinked ancestor directory is rejected. A missing file reads as an
