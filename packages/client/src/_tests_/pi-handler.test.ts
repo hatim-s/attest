@@ -52,6 +52,7 @@ describe('createPiHandler', () => {
 
     const result = await handler(invocation, { signal: new AbortController().signal });
 
+    // The final message_end carries a raw U+2028; only LF-only framing keeps it whole.
     expect(result).toMatchObject({ output: 'Wrote answer.ts' });
     // notes.md existed with the same bytes before the run, so only answer.ts is an artifact.
     expect(result.artifacts).toEqual([

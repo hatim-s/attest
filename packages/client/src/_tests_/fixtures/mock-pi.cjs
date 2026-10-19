@@ -142,7 +142,15 @@ async function* events(prompt) {
   yield { type: 'message_end', message: toolResult };
   yield { type: 'turn_end', message: call, toolResults: [toolResult] };
   yield { type: 'turn_start' };
-  const answer = assistant([{ type: 'text', text: 'Wrote answer.ts' }], 'stop');
+
+  // JSON.stringify leaves U+2028 raw, so a reader that splits on it (Node's readline) loses this record.
+  const answer = assistant(
+    [
+      { type: 'thinking', thinking: 'Done.\u2028Reply briefly.' },
+      { type: 'text', text: 'Wrote answer.ts' },
+    ],
+    'stop',
+  );
 
   yield* streamAssistant(answer);
   yield { type: 'turn_end', message: answer, toolResults: [] };
