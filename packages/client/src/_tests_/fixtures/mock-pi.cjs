@@ -15,6 +15,8 @@
  * - --mock-dump-env: write this process's environment to env.json in the working directory.
  * - --mock-exit-early: after agent_start, print to stderr and exit with code 3.
  * - --mock-bad-final: the final assistant message has no usage, which Pi never sends.
+ * - --mock-survivor-pid-file=<path>: start a background `sleep` with no stdio, like a tool's
+ *   `server &`, and write its pid there.
  */
 
 const fs = process.getBuiltinModule('node:fs');
@@ -40,6 +42,17 @@ const usage = {
 let run;
 
 if (pidFile) fs.writeFileSync(pidFile, String(process.pid));
+
+const survivorPidFile = flag('mock-survivor-pid-file');
+
+if (survivorPidFile) {
+  const survivor = process
+    .getBuiltinModule('node:child_process')
+    .spawn('sleep', ['30'], { stdio: 'ignore' });
+
+  survivor.unref();
+  fs.writeFileSync(survivorPidFile, String(survivor.pid));
+}
 
 if (process.argv.includes('--mock-dump-env')) {
   fs.writeFileSync(path.join(process.cwd(), 'env.json'), JSON.stringify(process.env));

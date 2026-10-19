@@ -61,9 +61,7 @@ export ATTEST_TRIGGER_AUTHORIZATION='Bearer change-me'
 attest agent import ./pi-agent.json --as pi --output json
 ```
 
-The import needs a CLI with the callback adapter; earlier builds answer `project_invalid`,
-"Callback agents are not supported yet." Runnable copies of the runner and a Pi extension live
-in `packages/client/examples/`.
+Runnable copies of the runner and a Pi extension live in `packages/client/examples/`.
 
 ## Prerequisites
 
@@ -225,7 +223,9 @@ the runner's user can.
 | `cancelled`          | The signal aborted, or Pi settled with `aborted: true`.                                  |
 
 On abort or timeout the handler kills Pi's process group (SIGTERM, then SIGKILL after 2 s), so
-tool subprocesses die with it. Error completions still carry the trace and changed files.
+tool subprocesses die with it. Once Pi exits, anything left in its group gets SIGKILL, so a
+background process a tool started does not outlive the run. Error completions still carry the
+trace and changed files.
 
 ### Trace
 

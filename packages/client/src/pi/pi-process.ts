@@ -162,6 +162,8 @@ const runPiProcess = ({
 
     child.on('close', (code, exitSignal) => {
       timers.forEach(clearTimeout);
+      // A tool's background process (a dev server, `sleep &`) must not outlive the run.
+      killGroup('SIGKILL');
       signal.removeEventListener('abort', onAbort);
 
       // stderr written just before exiting can arrive after 'exit'; 'close' has all of it.

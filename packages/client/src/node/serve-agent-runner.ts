@@ -61,7 +61,8 @@ const toWebRequest = (incoming: IncomingMessage, origin: string): Request => {
     duplex: 'half',
   };
 
-  return new Request(new URL(incoming.url ?? '/', origin), init);
+  // Concatenate rather than resolve, so a `//host/` target cannot parse as another origin.
+  return new Request(new URL(`${origin}${incoming.url ?? '/'}`), init);
 };
 
 const writeWebResponse = async (response: Response, outgoing: ServerResponse): Promise<void> => {

@@ -36,6 +36,16 @@ const invocation: AgentInvocation = {
   callback: { url: 'http://127.0.0.1:1/attest/completions/run/case', token: 'unused' },
 };
 
+const isAlive = (pid: number): boolean => {
+  try {
+    process.kill(pid, 0);
+
+    return true;
+  } catch {
+    return false;
+  }
+};
+
 const spanNamed = (spans: Span[], name: string): Span | undefined =>
   spans.find((span) => span.name === name);
 
@@ -146,6 +156,22 @@ describe('createPiHandler', () => {
 
     expect(result).toMatchObject({ error: { code: 'pi_protocol_error' } });
     expect(result).not.toHaveProperty('output');
+  });
+
+  it('kills background processes a tool left behind once Pi exits', async () => {
+    const pidFile = join(await temporaryDirectory(), 'survivor.pid');
+
+    const handler = createPiHandler({
+      argv: [process.execPath, MOCK_PI, `--mock-survivor-pid-file=${pidFile}`],
+    });
+
+    expect(await handler(invocation, { signal: new AbortController().signal })).toMatchObject({
+      output: 'Wrote answer.ts',
+    });
+    const pid = Number(await readFile(pidFile, 'utf8'));
+
+    // Signal 0 only probes; poll because the orphan is reaped asynchronously.
+    await expect.poll(() => isAlive(pid)).toBe(false);
   });
 
   it('kills Pi when the invocation is aborted and still reports the trace and changed files', async () => {

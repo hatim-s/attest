@@ -14,6 +14,9 @@ import type { ExtensionAPI } from '@earendil-works/pi-coding-agent';
 export default function attestCompletionHook(pi: ExtensionAPI): void {
   const url = process.env.ATTEST_CALLBACK_URL;
   const token = process.env.ATTEST_CALLBACK_TOKEN;
+
+  // Pi's shell inherits this environment; the agent under test must not post its own completion.
+  delete process.env.ATTEST_CALLBACK_TOKEN;
   const runId = process.env.ATTEST_RUN_ID;
   const caseId = process.env.ATTEST_CASE_ID;
 

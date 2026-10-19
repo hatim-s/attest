@@ -40,7 +40,8 @@ const deliverCompletion = async (
         signal: AbortSignal.timeout(ATTEMPT_TIMEOUT_MS),
       });
 
-      await response.body?.cancel();
+      // The answer body is unused; failing to discard it must not turn a 2xx into a retry.
+      await response.body?.cancel().catch(() => undefined);
 
       if (response.ok) return { delivered: true };
       reason = `receiver answered ${String(response.status)}`;
