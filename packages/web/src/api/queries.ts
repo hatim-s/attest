@@ -15,11 +15,14 @@ const projectsQueryOptions = (client: ApiClient) =>
 /** Lets the projects page reuse the catalog the `/` redirect already loaded. */
 const useProjects = () => useQuery(projectsQueryOptions(useApiClient()));
 
-/** Shares the newest-first page between the index redirect and the polling sidebar. */
+/**
+ * Shares the newest-first page between the index redirect, the polling sidebar and the projects
+ * index. The page keeps its cursor so callers can tell a full page from a short one.
+ */
 const runsQueryOptions = (client: ApiClient, projectKey: string) =>
   queryOptions({
     queryKey: ['runs', projectKey],
-    queryFn: async ({ signal }) => (await client.listRuns({ projectKey }, {}, { signal })).items,
+    queryFn: ({ signal }) => client.listRuns({ projectKey }, {}, { signal }),
     refetchInterval: client.mode.kind === 'live' ? 5_000 : false,
   });
 

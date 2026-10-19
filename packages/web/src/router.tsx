@@ -101,11 +101,11 @@ const runsIndexRoute = createRoute({
   path: '/',
   component: NewestRun,
   beforeLoad: async ({ context, params, search }) => {
-    const runs = await context.queryClient.fetchQuery(
+    const page = await context.queryClient.fetchQuery(
       runsQueryOptions(context.client, params.projectKey),
     );
 
-    const newest = runs[0];
+    const newest = page.items[0];
 
     if (newest !== undefined) {
       return redirect({

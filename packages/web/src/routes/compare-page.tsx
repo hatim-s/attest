@@ -39,7 +39,7 @@ const ComparePage = () => {
         diff={diffQuery.data}
         error={diffQuery.error}
         isLoading={diffQuery.isLoading}
-        runs={runsQuery.data ?? []}
+        runs={runsQuery.data?.items ?? []}
         onBaseChange={(nextBaseRunId) =>
           void navigate({
             to: '/projects/$projectKey/compare/$baseRunId/$candidateRunId',
