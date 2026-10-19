@@ -89,40 +89,46 @@ describe('createPiHandler', () => {
   });
 
   it('reports a provider failure as an error completion', async () => {
-    const handler = createPiHandler({
-      argv: [process.execPath, MOCK_PI],
-      env: { MOCK_PI_FAIL: '1' },
-    });
+    const handler = createPiHandler({ argv: [process.execPath, MOCK_PI, '--mock-fail'] });
 
     const result = await handler(invocation, { signal: new AbortController().signal });
 
     expect(result).toMatchObject({
-      error: { code: 'pi_agent_failed', message: 'MOCK_PI_FAIL requested' },
+      error: { code: 'pi_agent_failed', message: '--mock-fail requested' },
       artifacts: [],
     });
     expect(spanNamed(traceSchema.parse(result.trace).spans, 'agent.run')?.status).toEqual({
       code: 'error',
-      message: 'MOCK_PI_FAIL requested',
+      message: '--mock-fail requested',
     });
   });
 
-  it('kills Pi when the invocation is aborted', async () => {
+  it('kills Pi when the invocation is aborted and still reports the trace and changed files', async () => {
+    const workspace = await temporaryDirectory();
     const pidFile = join(await temporaryDirectory(), 'mock-pi.pid');
     const controller = new AbortController();
 
     const handler = createPiHandler({
-      argv: [process.execPath, MOCK_PI],
-      env: { MOCK_PI_DELAY_MS: '200', MOCK_PI_PID_FILE: pidFile },
+      argv: [process.execPath, MOCK_PI, '--mock-delay-ms=50', `--mock-pid-file=${pidFile}`],
+      workspace: () => Promise.resolve(workspace),
     });
 
     const pending = handler(invocation, { signal: controller.signal });
 
-    await expect.poll(() => existsSync(pidFile)).toBe(true);
+    // The write tool has run, so the abort lands mid-run with spans open.
+    await expect.poll(() => existsSync(join(workspace, 'answer.ts'))).toBe(true);
     controller.abort();
     const result = await pending;
     const pid = Number(await readFile(pidFile, 'utf8'));
 
-    expect(result).toMatchObject({ error: { code: 'cancelled' }, artifacts: [] });
+    expect(result).toMatchObject({
+      error: { code: 'cancelled' },
+      artifacts: [{ path: 'answer.ts' }],
+    });
+    expect(spanNamed(traceSchema.parse(result.trace).spans, 'agent.run')?.status).toEqual({
+      code: 'error',
+      message: 'The invocation was cancelled.',
+    });
     // Signal 0 only probes: it throws ESRCH once the process is gone.
     expect(() => process.kill(pid, 0)).toThrow(/ESRCH/u);
   });

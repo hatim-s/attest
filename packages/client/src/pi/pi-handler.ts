@@ -3,7 +3,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { collectArtifacts, type CollectArtifactsOptions } from '../node/collect-artifacts.js';
+import { collectArtifacts } from '../node/collect-artifacts.js';
 import { hashFiles } from '../node/workspace-files.js';
 import type { AgentHandler, AgentInvocation, HandlerOutcome } from '../runner/agent-runner.js';
 import { runPiProcess, type PiProcessOutcome } from './pi-process.js';
@@ -37,12 +37,8 @@ type PiHandlerOptions = {
   systemPrompt?: string;
   /** Picks the working directory. Defaults to a fresh temporary directory, removed afterwards. */
   workspace?: (invocation: AgentInvocation) => Promise<string>;
-  /** Merged over the runner's environment, for example to supply a provider API key. */
-  env?: Record<string, string>;
   /** Kills Pi if it has not settled by then. Defaults to 15 minutes. */
   timeoutMs?: number;
-  /** Bounds the changed files returned as artifacts. */
-  artifacts?: Omit<CollectArtifactsOptions, 'include'>;
 };
 
 /** The prompt is the input itself when it is a string, else its string `prompt` field. */
@@ -117,9 +113,7 @@ const createPiHandler = ({
   model,
   systemPrompt,
   workspace,
-  env,
   timeoutMs = DEFAULT_TIMEOUT_MS,
-  artifacts: artifactLimits,
 }: PiHandlerOptions = {}): AgentHandler => {
   const command: [string, ...string[]] = [...argv, ...PI_RPC_FLAGS];
 
@@ -153,7 +147,6 @@ const createPiHandler = ({
       const outcome = await runPiProcess({
         argv: command,
         cwd,
-        env: { ...process.env, ...env },
         message,
         signal,
         timeoutMs,
@@ -170,10 +163,7 @@ const createPiHandler = ({
         [...after].flatMap(([path, hash]) => (before.get(path) === hash ? [] : [path])),
       );
 
-      const collected = await collectArtifacts(cwd, {
-        ...artifactLimits,
-        include: (path) => changed.has(path),
-      });
+      const collected = await collectArtifacts(cwd, { include: (path) => changed.has(path) });
 
       for (const skipped of collected.skipped) {
         trace.note('artifact_skipped', { path: skipped.path, reason: skipped.reason });

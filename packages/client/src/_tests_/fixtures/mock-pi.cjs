@@ -8,17 +8,22 @@
  * the second answers "Wrote answer.ts". Like real Pi it reads LF-framed JSON from stdin and exits
  * when stdin closes.
  *
- * Environment:
- * - MOCK_PI_DELAY_MS: pause before each record, so tests can abort mid-run.
- * - MOCK_PI_FAIL=1: the first turn ends with a provider error and no tool call.
- * - MOCK_PI_PID_FILE: write this process's pid there on start.
+ * Flags, placed before the RPC flags the handler appends:
+ * - --mock-delay-ms=<n>: pause before each record, so tests can abort mid-run.
+ * - --mock-fail: the first turn ends with a provider error and no tool call.
+ * - --mock-pid-file=<path>: write this process's pid there on start.
  */
 
 const fs = process.getBuiltinModule('node:fs');
 
 const path = process.getBuiltinModule('node:path');
 
-const delayMs = Math.max(0, Number(process.env.MOCK_PI_DELAY_MS || 0));
+const flag = (name) =>
+  process.argv.find((arg) => arg.startsWith(`--${name}=`))?.slice(name.length + 3);
+
+const delayMs = Math.max(0, Number(flag('mock-delay-ms') || 0));
+
+const pidFile = flag('mock-pid-file');
 
 const usage = {
   input: 12,
@@ -31,8 +36,7 @@ const usage = {
 
 let run;
 
-if (process.env.MOCK_PI_PID_FILE)
-  fs.writeFileSync(process.env.MOCK_PI_PID_FILE, String(process.pid));
+if (pidFile) fs.writeFileSync(pidFile, String(process.pid));
 
 const emit = (record) => process.stdout.write(`${JSON.stringify(record)}\n`);
 
@@ -88,8 +92,8 @@ async function* events(prompt) {
   yield { type: 'message_start', message: user };
   yield { type: 'message_end', message: user };
 
-  if (process.env.MOCK_PI_FAIL === '1') {
-    const failed = assistant([], 'error', { errorMessage: 'MOCK_PI_FAIL requested' });
+  if (process.argv.includes('--mock-fail')) {
+    const failed = assistant([], 'error', { errorMessage: '--mock-fail requested' });
 
     yield* streamAssistant(failed);
     yield { type: 'turn_end', message: failed, toolResults: [] };

@@ -20,7 +20,7 @@ const MAX_PAYLOAD_CHARS = 64 * 1024;
 
 const MAX_STATUS_MESSAGE_CHARS = 1_024;
 
-type Attributes = Record<string, string | number | boolean>;
+type Attributes = NonNullable<Span['attributes']>;
 
 type SpanDraft = {
   span_id: string;
@@ -59,7 +59,10 @@ const toSpan = (draft: SpanDraft): Span => {
     start_time: new Date(draft.start).toISOString(),
     // Receipt times can step backwards with the wall clock; the schema requires end >= start.
     end_time: new Date(Math.max(draft.start, draft.end ?? draft.start)).toISOString(),
-    status: draft.error === undefined ? { code: 'ok' } : { code: 'error', message: draft.error },
+    status:
+      draft.error === undefined
+        ? { code: 'ok' }
+        : { code: 'error', message: draft.error.slice(0, MAX_STATUS_MESSAGE_CHARS) },
     attributes: draft.attributes,
   };
 
@@ -131,6 +134,21 @@ const createPiTraceBuilder = (requestModel: string | undefined): PiTraceBuilder 
     return root;
   };
 
+  const openTool = (
+    piRecord: Extract<PiRecord, { type: 'tool_execution_start' | 'tool_execution_end' }>,
+    start: number,
+  ): SpanDraft | undefined => {
+    const tool = open(`tool.${piRecord.toolName}`, 'tool', turn ?? ensureRoot(start), start);
+
+    if (tool !== undefined) {
+      tool.attributes['gen_ai.operation.name'] = 'execute_tool';
+      tool.attributes['gen_ai.tool.name'] = piRecord.toolName;
+      tool.attributes['gen_ai.tool.call.id'] = piRecord.toolCallId;
+    }
+
+    return tool;
+  };
+
   const note = (name: string, attributes: Attributes, now = Date.now()): void => {
     const target = ensureRoot(now);
 
@@ -170,10 +188,7 @@ const createPiTraceBuilder = (requestModel: string | undefined): PiTraceBuilder 
         turn.output = assistantText(message);
 
         if (message.stopReason === 'error' || message.stopReason === 'aborted') {
-          turn.error = (message.errorMessage ?? `stopReason ${message.stopReason}`).slice(
-            0,
-            MAX_STATUS_MESSAGE_CHARS,
-          );
+          turn.error = message.errorMessage ?? `stopReason ${message.stopReason}`;
         }
 
         break;
@@ -184,12 +199,9 @@ const createPiTraceBuilder = (requestModel: string | undefined): PiTraceBuilder 
         turn = undefined;
         break;
       case 'tool_execution_start': {
-        const tool = open(`tool.${piRecord.toolName}`, 'tool', turn ?? ensureRoot(now), now);
+        const tool = openTool(piRecord, now);
 
         if (tool === undefined) break;
-        tool.attributes['gen_ai.operation.name'] = 'execute_tool';
-        tool.attributes['gen_ai.tool.name'] = piRecord.toolName;
-        tool.attributes['gen_ai.tool.call.id'] = piRecord.toolCallId;
         const args = boundedJson(piRecord.args);
 
         if (args !== undefined) tool.attributes['gen_ai.tool.call.arguments'] = args;
@@ -200,27 +212,16 @@ const createPiTraceBuilder = (requestModel: string | undefined): PiTraceBuilder 
       case 'tool_execution_end': {
         // Without a paired start, Pi's monotonic durationMs gives the best available start.
         const tool =
-          tools.get(piRecord.toolCallId) ??
-          open(
-            `tool.${piRecord.toolName}`,
-            'tool',
-            turn ?? ensureRoot(now),
-            now - (piRecord.durationMs ?? 0),
-          );
+          tools.get(piRecord.toolCallId) ?? openTool(piRecord, now - (piRecord.durationMs ?? 0));
 
         if (tool === undefined) break;
         tools.delete(piRecord.toolCallId);
         tool.end = now;
-        tool.attributes['gen_ai.tool.name'] = piRecord.toolName;
-        tool.attributes['gen_ai.tool.call.id'] = piRecord.toolCallId;
 
         if (boundedJson(piRecord.result) !== undefined) tool.output = piRecord.result;
 
         if (piRecord.isError) {
-          tool.error = (toolResultText(piRecord.result) ?? 'tool failed').slice(
-            0,
-            MAX_STATUS_MESSAGE_CHARS,
-          );
+          tool.error = toolResultText(piRecord.result) ?? 'tool failed';
         }
 
         break;
@@ -264,7 +265,7 @@ const createPiTraceBuilder = (requestModel: string | undefined): PiTraceBuilder 
         draft.error ??= 'did not finish';
       }
 
-      if (failure !== undefined) root.error = failure.slice(0, MAX_STATUS_MESSAGE_CHARS);
+      if (failure !== undefined) root.error = failure;
 
       if (droppedSpans > 0) root.attributes['attest.trace.dropped_spans'] = droppedSpans;
 
@@ -273,4 +274,4 @@ const createPiTraceBuilder = (requestModel: string | undefined): PiTraceBuilder 
   };
 };
 
-export { createPiTraceBuilder, type PiTraceBuilder };
+export { createPiTraceBuilder };

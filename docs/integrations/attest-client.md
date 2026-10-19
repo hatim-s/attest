@@ -175,9 +175,7 @@ createPiHandler({
   model, // passed as --model
   systemPrompt, // passed as --system-prompt
   workspace, // (invocation) => Promise<string>; default: a fresh temp dir, removed afterwards
-  env, // merged over process.env
   timeoutMs, // default 15 minutes
-  artifacts, // { maxBytes, maxCount } for the changed files
 });
 ```
 
@@ -197,7 +195,8 @@ skills and `AGENTS.md` files out of the eval. Explicit `-e <path>` arguments sti
 3. It sends one `prompt` command and reads stdout as strict JSONL, splitting on LF only. Lines
    over 16 MiB end the run. Stdin stays open until `agent_settled`, then closes so Pi exits.
 4. `output` is the text of the last assistant `message_end`.
-5. `artifacts` are the files whose hash changed or that are new.
+5. `artifacts` are the files whose hash changed or that are new, within the `collectArtifacts`
+   defaults of 64 files and 4 MiB. Files past the caps become `artifact_skipped` root events.
 
 | `error.code`         | Cause                                                            |
 | -------------------- | ---------------------------------------------------------------- |
