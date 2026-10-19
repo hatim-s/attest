@@ -57,10 +57,10 @@ type AgentRunnerOptions = {
   /** Receives background failures. Defaults to one line on stderr. */
   onError?: (failure: RunnerFailure) => void;
   /**
-   * When set, a trigger must carry `Authorization: Bearer <triggerToken>`. Set it whenever the
-   * runner is reachable by anything other than attest: a trigger makes the handler run a prompt.
+   * Every trigger must carry `Authorization: Bearer <triggerToken>`. A trigger makes the handler
+   * run a prompt, and binding to loopback does not stop a DNS-rebinding page from reaching it.
    */
-  triggerToken?: string;
+  triggerToken: string;
 };
 
 type AgentRunner = {
@@ -70,7 +70,10 @@ type AgentRunner = {
   pending: () => number;
   /** Resolves once every accepted invocation has posted its completion or given up. */
   drain: () => Promise<void>;
-  /** Refuses new triggers with 503, aborts running handlers, then drains. */
+  /**
+   * Refuses new triggers with 503 and aborts running handlers. Each completion still pending gets
+   * one more delivery attempt, without retries, before this resolves.
+   */
   close: () => Promise<void>;
 };
 
@@ -102,6 +105,7 @@ const createAgentRunner = ({
   onError = reportToStderr,
   triggerToken,
 }: AgentRunnerOptions): AgentRunner => {
+  if (triggerToken === '') throw new Error('createAgentRunner needs a non-empty triggerToken.');
   const inFlight = new Map<string, Promise<void>>();
   const closing = new AbortController();
 
@@ -136,22 +140,35 @@ const createAgentRunner = ({
       case_id: invocation.case_id,
     };
 
+    const invalid = (message: string): string => {
+      onError({ kind: 'invalid_completion', runId: ids.run_id, caseId: ids.case_id, message });
+
+      return JSON.stringify({ ...ids, error: { code: 'invalid_completion', message } });
+    };
+
     const checked = agentCompletionSchema.safeParse({ ...ids, ...result });
 
-    if (checked.success) return JSON.stringify(checked.data);
+    if (!checked.success) {
+      return invalid(
+        checked.error.issues
+          .map((issue) => `${issue.path.join('.') || '$'}: ${issue.message}`)
+          .join('; '),
+      );
+    }
 
-    const message = checked.error.issues
-      .map((issue) => `${issue.path.join('.') || '$'}: ${issue.message}`)
-      .join('; ');
-
-    onError({ kind: 'invalid_completion', runId: ids.run_id, caseId: ids.case_id, message });
-
-    return JSON.stringify({ ...ids, error: { code: 'invalid_completion', message } });
+    // The schema leaves `trace` unvalidated, so a cycle or a bigint in it throws here.
+    try {
+      return JSON.stringify(checked.data);
+    } catch (error) {
+      return invalid(
+        `completion is not serializable: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
   };
 
   const run = async (invocation: AgentInvocation): Promise<void> => {
     const body = serializeCompletion(invocation, await settleHandler(invocation));
-    const outcome = await deliverCompletion(fetchImpl, invocation.callback, body);
+    const outcome = await deliverCompletion(fetchImpl, invocation.callback, body, closing.signal);
 
     if (!outcome.delivered) {
       onError({
@@ -174,7 +191,10 @@ const createAgentRunner = ({
     if (!inFlight.has(key)) {
       inFlight.set(
         key,
-        run(invocation).finally(() => inFlight.delete(key)),
+        run(invocation)
+          // Only a throwing onError gets here; it must not become an unhandled rejection.
+          .catch((error) => console.error('[attest-client] onError threw:', error))
+          .finally(() => inFlight.delete(key)),
       );
     }
 

@@ -12,18 +12,22 @@ const sleep = (milliseconds: number): Promise<void> =>
 
 /**
  * Posts a serialized completion to the callback URL with its bearer token. Network errors and 5xx
- * answers are retried; any other non-2xx answer is final because the receiver has already judged
- * the completion (401 bad token, 409 duplicate, 413 too large).
+ * answers are retried until `stopRetrying` aborts; any other non-2xx answer is final because the
+ * receiver has already judged the completion (401 bad token, 409 duplicate, 413 too large).
  */
 const deliverCompletion = async (
   fetchImpl: typeof fetch,
   callback: AgentCallback,
   body: string,
+  stopRetrying: AbortSignal,
 ): Promise<DeliveryOutcome> => {
   let reason = '';
 
   for (const delay of RETRY_DELAYS_MS) {
-    if (delay > 0) await sleep(delay);
+    if (delay > 0) {
+      if (stopRetrying.aborted) break;
+      await sleep(delay);
+    }
 
     try {
       const response = await fetchImpl(callback.url, {

@@ -1,4 +1,9 @@
-import { AGENT_PROTOCOL, agentCompletionSchema } from '@attest/contracts';
+import {
+  AGENT_PROTOCOL,
+  TRACE_SCHEMA_ID,
+  agentCompletionSchema,
+  type Trace,
+} from '@attest/contracts';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import {
@@ -11,6 +16,8 @@ import { serveAgentRunner } from '../node.js';
 import { startCompletionReceiver, type CompletionReceiver } from './support/completion-receiver.js';
 
 const RUN_ID = '01J9Z3K4X5Y6Z7A8B9C0D1E2F3';
+
+const TRIGGER_TOKEN = 'trigger-secret';
 
 const receivers: CompletionReceiver[] = [];
 
@@ -37,7 +44,11 @@ const trigger = (
 ) =>
   new Request(init.runnerUrl ?? 'http://runner.test/', {
     method: 'POST',
-    headers: { 'content-type': 'application/json', ...init.headers },
+    headers: {
+      authorization: `Bearer ${TRIGGER_TOKEN}`,
+      'content-type': 'application/json',
+      ...init.headers,
+    },
     body:
       init.body ??
       JSON.stringify({
@@ -55,7 +66,7 @@ const echo: AgentHandler = (invocation) =>
 describe('createAgentRunner', () => {
   it('accepts a trigger with 202 and posts the completion with the bearer token', async () => {
     const completions = await receiver();
-    const runner = createAgentRunner({ handler: echo });
+    const runner = createAgentRunner({ handler: echo, triggerToken: TRIGGER_TOKEN });
     const served = await serveAgentRunner(runner, { port: 0 });
 
     try {
@@ -85,6 +96,7 @@ describe('createAgentRunner', () => {
     const failures: RunnerFailure[] = [];
 
     const runner = createAgentRunner({
+      triggerToken: TRIGGER_TOKEN,
       handler: () => Promise.reject(new Error('model offline')),
       onError: (failure) => failures.push(failure),
     });
@@ -103,6 +115,7 @@ describe('createAgentRunner', () => {
     const failures: RunnerFailure[] = [];
 
     const runner = createAgentRunner({
+      triggerToken: TRIGGER_TOKEN,
       handler: echo,
       onError: (failure) => failures.push(failure),
     });
@@ -120,6 +133,7 @@ describe('createAgentRunner', () => {
     const failures: RunnerFailure[] = [];
 
     const runner = createAgentRunner({
+      triggerToken: TRIGGER_TOKEN,
       handler: () =>
         Promise.resolve({
           output: 'done',
@@ -152,6 +166,7 @@ describe('createAgentRunner', () => {
     const released = new Promise<void>((resolve) => (release = resolve));
 
     const runner = createAgentRunner({
+      triggerToken: TRIGGER_TOKEN,
       handler: async (invocation) => {
         tokens.push(invocation.callback.token);
         await released;
@@ -178,6 +193,7 @@ describe('createAgentRunner', () => {
     const completions = await receiver();
 
     const runner = createAgentRunner({
+      triggerToken: TRIGGER_TOKEN,
       handler: (_invocation, { signal }) =>
         new Promise<HandlerResult>((_resolve, reject) => {
           signal.addEventListener('abort', () => reject(new Error('aborted')));
@@ -193,24 +209,46 @@ describe('createAgentRunner', () => {
     expect((await runner.fetch(trigger(completions.url))).status).toBe(503);
   });
 
+  it('posts invalid_completion for a trace that cannot be serialized', async () => {
+    const completions = await receiver();
+    const failures: RunnerFailure[] = [];
+    const trace: Trace = { schema: TRACE_SCHEMA_ID, trace_id: 't', spans: [] };
+
+    trace.self = trace;
+
+    const runner = createAgentRunner({
+      triggerToken: TRIGGER_TOKEN,
+      handler: () => Promise.resolve({ output: 'done', trace }),
+      onError: (failure) => failures.push(failure),
+    });
+
+    await runner.fetch(trigger(completions.url));
+    // Before the fix this rejected inside the in-flight promise and Vitest failed the run.
+    await runner.drain();
+
+    expect(JSON.parse(completions.received[0]?.body ?? '')).toMatchObject({
+      error: { code: 'invalid_completion' },
+    });
+    expect(failures.map((failure) => failure.kind)).toEqual(['invalid_completion']);
+  });
+
   it('refuses triggers it must not run', async () => {
     const completions = await receiver();
-    const runner = createAgentRunner({ handler: echo, triggerToken: 'trigger-secret' });
-    const authorized = { authorization: 'Bearer trigger-secret' };
+    const runner = createAgentRunner({ handler: echo, triggerToken: TRIGGER_TOKEN });
 
     const statusOf = async (request: Request): Promise<number> =>
       (await runner.fetch(request)).status;
 
-    expect(await statusOf(trigger(completions.url))).toBe(401);
+    expect(await statusOf(trigger(completions.url, { headers: { authorization: '' } }))).toBe(401);
     expect(
-      await statusOf(
-        trigger(completions.url, { headers: { ...authorized, 'content-type': 'text/plain' } }),
-      ),
+      await statusOf(trigger(completions.url, { headers: { authorization: 'Bearer wrong' } })),
+    ).toBe(401);
+    expect(
+      await statusOf(trigger(completions.url, { headers: { 'content-type': 'text/plain' } })),
     ).toBe(415);
     expect(
       await statusOf(
         trigger(completions.url, {
-          headers: authorized,
           body: JSON.stringify({
             protocol: AGENT_PROTOCOL,
             run_id: RUN_ID,
@@ -220,8 +258,9 @@ describe('createAgentRunner', () => {
         }),
       ),
     ).toBe(400);
-    expect(await statusOf(new Request('http://runner.test/', { headers: authorized }))).toBe(405);
+    expect(await statusOf(new Request('http://runner.test/'))).toBe(405);
     expect(await statusOf(new Request('http://runner.test/other', { method: 'POST' }))).toBe(404);
+    expect(() => createAgentRunner({ handler: echo, triggerToken: '' })).toThrow(/triggerToken/u);
     expect(runner.pending()).toBe(0);
     expect(completions.received).toEqual([]);
   });

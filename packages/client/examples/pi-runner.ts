@@ -12,9 +12,13 @@ import { createAgentRunner } from '@attest/client';
 import { serveAgentRunner } from '@attest/client/node';
 import { createPiHandler } from '@attest/client/pi';
 
+const triggerToken = process.env.ATTEST_TRIGGER_TOKEN;
+
+if (triggerToken === undefined) throw new Error('Set ATTEST_TRIGGER_TOKEN.');
+
 const runner = createAgentRunner({
   handler: createPiHandler({ model: process.env.PI_MODEL }),
-  triggerToken: process.env.ATTEST_TRIGGER_TOKEN,
+  triggerToken,
 });
 
 const served = await serveAgentRunner(runner, { port: 8790 });

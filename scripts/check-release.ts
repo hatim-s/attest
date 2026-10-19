@@ -95,10 +95,10 @@ assert.equal(typeof runCli, 'function');
 assert.equal(typeof invokeAgent, 'function');
 assert.equal(typeof collectArtifacts, 'function');
 assert.equal(typeof createPiHandler(), 'function');
-const runner = createAgentRunner({ handler: async () => ({ output: null }) });
+const runner = createAgentRunner({ handler: async () => ({ output: null }), triggerToken: 'release-check' });
 const served = await serveAgentRunner(runner, { port: 0 });
 try {
-  const trigger = await fetch(served.url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+  const trigger = await fetch(served.url, { method: 'POST', headers: { authorization: 'Bearer release-check', 'content-type': 'application/json' }, body: '{}' });
   assert.equal(trigger.status, 400);
 } finally {
   await served.close();

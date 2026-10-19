@@ -13,9 +13,13 @@ import { createAgentRunner } from '@attest/client';
 import { serveAgentRunner } from '@attest/client/node';
 import { createPiHandler } from '@attest/client/pi';
 
+const triggerToken = process.env.ATTEST_TRIGGER_TOKEN;
+
+if (triggerToken === undefined) throw new Error('Set ATTEST_TRIGGER_TOKEN.');
+
 const runner = createAgentRunner({
   handler: createPiHandler({ model: 'anthropic/claude-sonnet-5-5' }),
-  triggerToken: process.env.ATTEST_TRIGGER_TOKEN,
+  triggerToken,
 });
 
 const served = await serveAgentRunner(runner, { port: 8790 });
@@ -81,13 +85,13 @@ const runner = createAgentRunner({
   handler, // (invocation, { signal }) => Promise<HandlerResult>
   fetch, // optional, posts completions; defaults to globalThis.fetch
   onError, // optional, receives background failures; defaults to one stderr line
-  triggerToken, // optional, required bearer token on triggers
+  triggerToken, // required, the bearer token every trigger must carry
 });
 
 runner.fetch(request); // Web-standard Request -> Response
 runner.pending(); // accepted invocations not yet delivered
 runner.drain(); // waits for every accepted invocation
-runner.close(); // 503 for new triggers, aborts handlers, then drains
+runner.close(); // 503 for new triggers, aborts handlers, one last delivery attempt each
 ```
 
 A handler returns exactly one of `output` or `error`, plus optional `artifacts` (inline or
@@ -95,16 +99,16 @@ reference), `trace`, `trace_ref` and `state`. The runner adds `protocol`, `run_i
 
 Trigger responses:
 
-| Status | When                                                                    |
-| ------ | ----------------------------------------------------------------------- |
-| `202`  | Accepted. Body `{ "accepted": true, "run_id": ..., "case_id": ... }`.   |
-| `400`  | Not JSON, not an `attest.agent-invocation`, or no `callback` field.     |
-| `401`  | `triggerToken` is set and the `Authorization` header does not match it. |
-| `404`  | Any path other than `/`.                                                |
-| `405`  | Any method other than `POST` on `/`.                                    |
-| `413`  | Body over 10 MiB, the executor's default request limit.                 |
-| `415`  | `content-type` is not `application/json`.                               |
-| `503`  | The runner is closing.                                                  |
+| Status | When                                                                  |
+| ------ | --------------------------------------------------------------------- |
+| `202`  | Accepted. Body `{ "accepted": true, "run_id": ..., "case_id": ... }`. |
+| `400`  | Not JSON, not an `attest.agent-invocation`, or no `callback` field.   |
+| `401`  | The `Authorization` header is not `Bearer <triggerToken>`.            |
+| `404`  | Any path other than `/`.                                              |
+| `405`  | Any method other than `POST` on `/`.                                  |
+| `413`  | Body over 10 MiB, the executor's default request limit.               |
+| `415`  | `content-type` is not `application/json`.                             |
+| `503`  | The runner is closing.                                                |
 
 A trigger whose callback token is already running answers `202` again without starting a second
 handler, so attest's idempotent trigger retries are safe. Two tests in one run can send the same
@@ -117,15 +121,16 @@ too large). Each attempt times out after 30 s.
 
 Failures the trigger response could no longer report go to `onError` with a `kind`:
 
-| `kind`               | What happened                                 | Completion posted                  |
-| -------------------- | --------------------------------------------- | ---------------------------------- |
-| `handler_failed`     | The handler threw.                            | `error.code: "handler_failed"`     |
-| `invalid_completion` | The result failed the completion schema.      | `error.code: "invalid_completion"` |
-| `delivery_failed`    | Every delivery attempt failed or was refused. | none                               |
+| `kind`               | What happened                                     | Completion posted                  |
+| -------------------- | ------------------------------------------------- | ---------------------------------- |
+| `handler_failed`     | The handler threw.                                | `error.code: "handler_failed"`     |
+| `invalid_completion` | The result failed the schema or `JSON.stringify`. | `error.code: "invalid_completion"` |
+| `delivery_failed`    | Every delivery attempt failed or was refused.     | none                               |
 
 A handler still running when `close()` is called sees its `signal` abort. If it throws, the
 completion carries `error.code: "cancelled"`. Attest has no remote cancellation in v1, so the
-signal only fires on `close()`.
+signal only fires on `close()`. After `close()`, each pending completion gets one more delivery
+attempt and no retries, so `close()` resolves within about 30 s.
 
 ### Other hosts
 
@@ -242,10 +247,10 @@ final text or error only; the runner is the way to get artifacts and a trace.
 
 ## Security
 
-- A trigger makes the handler run a prompt, and Pi has a shell tool. Set `triggerToken`. Binding
-  to loopback (the `serveAgentRunner` default) keeps other machines out but not a web page that
-  uses DNS rebinding to reach `127.0.0.1`.
+- A trigger makes the handler run a prompt, and Pi has a shell tool. That is why `triggerToken` is
+  required. Binding to loopback (the `serveAgentRunner` default) keeps other machines out but not
+  a web page that uses DNS rebinding to reach `127.0.0.1`.
 - Triggers must be `application/json`. A cross-origin page cannot send that without a CORS
   preflight, and the runner answers the preflight with `405`.
-- `triggerToken` is compared in constant time. Neither token is logged.
+- `triggerToken` is compared in time that depends only on its length. Neither token is logged.
 - Completions go wherever `callback.url` says. Only accept triggers from your attest.
