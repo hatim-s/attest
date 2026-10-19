@@ -187,6 +187,39 @@ export default tseslint.config(
     },
   },
   {
+    files: ['packages/client/src/**/*.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: ['@attest/*', '!@attest/contracts'],
+              message: 'Client imports only @attest/contracts.',
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
+    files: ['packages/client/src/index.ts', 'packages/client/src/runner/**/*.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: ['@attest/*', '!@attest/contracts', 'node:*', 'bun:*'],
+              message:
+                'The root @attest/client entry runs on Workers; Node code lives under /node and /pi.',
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
     files: ['packages/local/src/**/*.ts'],
     ignores: ['**/_tests_/**'],
     rules: {

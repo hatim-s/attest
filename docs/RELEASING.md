@@ -1,8 +1,9 @@
 # Alpha releases
 
 The first candidate is `0.1.0-alpha.0`. Alpha packages use the npm `alpha` tag. The
-release includes `@attest/contracts`, `@attest/core`, `@attest/executor`, `@attest/runtime`,
-`@attest/local`, `@attest/web`, `@attest/cli`, and `@attest/schemas`. Their versions move together. The web package contains the
+release includes `@attest/contracts`, `@attest/core`, `@attest/api`, `@attest/executor`,
+`@attest/client`, `@attest/runtime`, `@attest/local`, `@attest/web`, `@attest/cli`, and
+`@attest/schemas`. Their versions move together. The web package contains the
 prebuilt dashboard and does not install a frontend toolchain for CLI users.
 
 ## Prepare a candidate
@@ -30,7 +31,7 @@ bun run test:fuzz
 bun run release:check
 ```
 
-`release:check` builds the packages, regenerates JSON Schemas, and creates eight
+`release:check` builds the packages, regenerates JSON Schemas, and creates ten
 archives and their `SHA256SUMS` file in `dist/release/`. It installs those archives into a temporary npm
 project outside the workspace, then checks the installed executable, project
 initialization, a native-agent evaluation, its persisted HTML report, public imports,
@@ -50,7 +51,7 @@ CI runs the isolated install check on macOS and Linux and uploads the archives a
 
 ## Test without publishing
 
-Copy all eight archives and `SHA256SUMS` to a tester's machine. From their directory,
+Copy all ten archives and `SHA256SUMS` to a tester's machine. From their directory,
 verify the files with `shasum -a 256 -c SHA256SUMS` on macOS or
 `sha256sum -c SHA256SUMS` on Linux. In a separate project directory:
 
@@ -61,7 +62,7 @@ npx attest --version
 npx attest --help
 ```
 
-Install all eight archives together because their exact alpha versions may not yet
+Install all ten archives together because their exact alpha versions may not yet
 exist on npm. The CLI archive alone cannot satisfy unpublished sibling packages.
 
 ## Publish to npm
@@ -84,7 +85,9 @@ cd "$PUBLISH_WORKDIR"
 npm whoami
 npm publish "$RELEASE_DIR/attest-contracts-0.1.0-alpha.0.tgz" --access public --tag alpha
 npm publish "$RELEASE_DIR/attest-core-0.1.0-alpha.0.tgz" --access public --tag alpha
+npm publish "$RELEASE_DIR/attest-api-0.1.0-alpha.0.tgz" --access public --tag alpha
 npm publish "$RELEASE_DIR/attest-executor-0.1.0-alpha.0.tgz" --access public --tag alpha
+npm publish "$RELEASE_DIR/attest-client-0.1.0-alpha.0.tgz" --access public --tag alpha
 npm publish "$RELEASE_DIR/attest-runtime-0.1.0-alpha.0.tgz" --access public --tag alpha
 npm publish "$RELEASE_DIR/attest-web-0.1.0-alpha.0.tgz" --access public --tag alpha
 npm publish "$RELEASE_DIR/attest-local-0.1.0-alpha.0.tgz" --access public --tag alpha

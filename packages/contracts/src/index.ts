@@ -51,7 +51,7 @@ export type {
   AgentResponse,
 } from './agent/protocol.js';
 
-export { artifactSchema, inlineArtifactSchema } from './agent/artifact.js';
+export { artifactPathSchema, artifactSchema, inlineArtifactSchema } from './agent/artifact.js';
 
 export type { Artifact, InlineArtifact, ReferenceArtifact } from './agent/artifact.js';
 

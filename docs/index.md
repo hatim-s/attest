@@ -67,6 +67,7 @@ The [CLI index](./cli/index.md) maps every workflow to its canonical guide:
 - [Managed CLI processes](./integrations/cli-processes.md)
 - [Polling and streams](./integrations/polling-and-streams.md)
 - [WebSockets](./integrations/websockets.md)
+- [Attest client and Pi runner](./integrations/attest-client.md)
 
 All transports normalize to the same
 [`attest.agent-invocation`](./specs/agent-contract.md) runner boundary.

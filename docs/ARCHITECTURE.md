@@ -14,6 +14,7 @@ graph TD
   Local --> Web[web embedded dashboard]
   Runtime --> Executor[executor]
   Executor --> Contracts
+  Client[client] --> Contracts
   Runtime --> Core
   Core --> Contracts[contracts]
   Runtime --> Contracts
@@ -38,6 +39,8 @@ Storage interfaces describe existing operations, not a proposed cloud repository
 ## Execution
 
 `@attest/executor` invokes agents through CLI, HTTP, streaming, persistent sessions, and Vercel Sandbox. It owns invocation retries, transport deadlines, output limits, process cleanup, and case environments. It imports contracts, never runtime, core, local, or CLI. Its compiled ESM runs on Node 22+ and Bun 1.4+.
+
+`@attest/client` is the agent side of the callback transport, hosted by the consumer next to its agent. It accepts a trigger, runs a handler and posts the `attest.agent-completion`. It imports contracts and zod only, so a hosted agent never installs the evaluator. The root entry is a Web-standard `fetch` handler with no Node imports (ESLint enforces this) and runs on Node, Bun and Workers. `/node` adds the `node:http` server and workspace artifact collection; `/pi` drives `pi --mode rpc`.
 
 `@attest/runtime` evaluates metrics and schedules evaluation cases. It owns eval lifecycle hooks and case environment lifetime, and imports executor for invocation types. An `EvalCaseRunner` awaits stage callbacks between agent work and evaluation. Ordered hook arrays and injected environment factories let applications add behavior without replacing the scheduler. Runtime receives persistence and artifact behavior through the existing evaluation interfaces.
 
@@ -74,7 +77,7 @@ Authentication, tenant boundaries, queues, and object storage belong to that dep
 
 ## Checking boundaries
 
-ESLint rejects runtime/application dependencies in executor, execution and local infrastructure imports in core, local or CLI imports in runtime, CLI or Commander imports in local, and server imports in web. Workspace manifests and TypeScript references make the dependency graph explicit. Run the root build, typecheck, lint, and tests after moving an API across packages.
+ESLint rejects runtime/application dependencies in executor, any attest import other than contracts in client, Node imports in the client root entry, execution and local infrastructure imports in core, local or CLI imports in runtime, CLI or Commander imports in local, and server imports in web. Workspace manifests and TypeScript references make the dependency graph explicit. Run the root build, typecheck, lint, and tests after moving an API across packages.
 
 Executor APIs such as `invokeAgent`, transport sessions, and process cleanup are imported from `@attest/executor`. Runtime does not re-export them. Consumers using their former runtime exports must update imports and add the executor dependency. `CaseExecution` is imported from `@attest/runtime`, which assembles it from invocation results.
 
