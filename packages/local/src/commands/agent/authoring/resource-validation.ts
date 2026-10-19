@@ -1,4 +1,4 @@
-import type { AgentResource } from '@attest/contracts';
+import type { AgentResource, HttpRequestTemplate } from '@attest/contracts';
 
 import { LocalError } from '../../../errors/index.js';
 import { isSensitiveFieldName } from '../../../internal/redaction.js';
@@ -38,6 +38,32 @@ const UNSUPPORTED_LIMITS: Readonly<Record<PolicyKind, readonly LimitField[]>> = 
 
 const isLoopbackHost = (host: string): boolean =>
   host === 'localhost' || host === '::1' || host.startsWith('127.');
+
+/** Every header and query name the agent redacts must exist on one of its request templates. */
+const assertRedactionTargets = (
+  agent: AgentResource,
+  requests: readonly Pick<HttpRequestTemplate, 'headers' | 'query'>[],
+): void => {
+  for (const name of agent.redaction?.headers ?? []) {
+    const exists = requests.some(({ headers }) =>
+      Object.keys(headers ?? {}).some((header) => header.toLowerCase() === name.toLowerCase()),
+    );
+
+    if (!exists) {
+      throw new LocalError('project_invalid', 'A header redaction target does not exist.', {
+        path: `/agent/redaction/headers/${name}`,
+      });
+    }
+  }
+
+  for (const name of agent.redaction?.query ?? []) {
+    if (!requests.some(({ query }) => Object.hasOwn(query ?? {}, name))) {
+      throw new LocalError('project_invalid', 'A query redaction target does not exist.', {
+        path: `/agent/redaction/query/${name}`,
+      });
+    }
+  }
+};
 
 /** Rejects authored credentials and runtime policies outside the implemented adapter slice. */
 // BOUNDARY: Authored transport resources cross the execution boundary here; secret references, headers and credential arguments are checked before invocation.
@@ -231,17 +257,18 @@ const assertSafeNativeAgentResource = (agent: AgentResource): void => {
   }
 
   if (transport.kind === 'callback') {
-    const templates = [
-      { request: transport.trigger, path: '/agent/transport/trigger' },
-      ...(transport.artifact_fetch === undefined
-        ? []
-        : [{ request: transport.artifact_fetch, path: '/agent/transport/artifact_fetch' }]),
-      ...(transport.trace_fetch === undefined
-        ? []
-        : [{ request: transport.trace_fetch, path: '/agent/transport/trace_fetch' }]),
-    ];
+    const templates = (
+      [
+        ['trigger', transport.trigger],
+        ['artifact_fetch', transport.artifact_fetch],
+        ['trace_fetch', transport.trace_fetch],
+      ] as const
+    ).flatMap(([field, request]) => (request === undefined ? [] : [{ field, request }]));
 
-    for (const { request, path } of templates) assertSafeHttpTemplate(request, path);
+    for (const { field, request } of templates) {
+      assertSafeHttpTemplate(request, `/agent/transport/${field}`);
+    }
+
     const publicUrl = transport.receiver?.public_url;
 
     // The agent sends the bearer token to this URL, so it must not cross the network in clear text.
@@ -261,27 +288,10 @@ const assertSafeNativeAgentResource = (agent: AgentResource): void => {
       }
     }
 
-    for (const name of agent.redaction?.headers ?? []) {
-      const exists = templates.some(({ request }) =>
-        Object.keys(request.headers ?? {}).some(
-          (header) => header.toLowerCase() === name.toLowerCase(),
-        ),
-      );
-
-      if (!exists) {
-        throw new LocalError('project_invalid', 'A header redaction target does not exist.', {
-          path: `/agent/redaction/headers/${name}`,
-        });
-      }
-    }
-
-    for (const name of agent.redaction?.query ?? []) {
-      if (!templates.some(({ request }) => Object.hasOwn(request.query ?? {}, name))) {
-        throw new LocalError('project_invalid', 'A query redaction target does not exist.', {
-          path: `/agent/redaction/query/${name}`,
-        });
-      }
-    }
+    assertRedactionTargets(
+      agent,
+      templates.map(({ request }) => request),
+    );
 
     return;
   }
@@ -331,25 +341,7 @@ const assertSafeNativeAgentResource = (agent: AgentResource): void => {
     });
   }
 
-  for (const name of agent.redaction?.headers ?? []) {
-    if (
-      !Object.keys(request.headers ?? {}).some(
-        (header) => header.toLowerCase() === name.toLowerCase(),
-      )
-    ) {
-      throw new LocalError('project_invalid', 'A header redaction target does not exist.', {
-        path: `/agent/redaction/headers/${name}`,
-      });
-    }
-  }
-
-  for (const name of agent.redaction?.query ?? []) {
-    if (!Object.hasOwn(request.query ?? {}, name)) {
-      throw new LocalError('project_invalid', 'A query redaction target does not exist.', {
-        path: `/agent/redaction/query/${name}`,
-      });
-    }
-  }
+  assertRedactionTargets(agent, [request]);
 };
 
 export { assertSafeNativeAgentResource };
