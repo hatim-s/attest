@@ -1,4 +1,11 @@
-import { diffRuns, StoreError, summarizeCaseRecord, type RunSource } from '@attest/core';
+import {
+  createSingleProjectCatalog,
+  diffRuns,
+  StoreError,
+  summarizeCaseRecord,
+  type ProjectCatalog,
+  type RunSource,
+} from '@attest/core';
 import type { CaseRecord, RunRecord } from '@attest/core/records';
 import { Hono } from 'hono';
 import { describe, expect, it } from 'vitest';
@@ -70,16 +77,22 @@ const source: RunSource = {
   }),
 };
 
+const project = { key: 'demo', name: 'Demo', root: '/work/demo' };
+
+const catalogFor = (runSource: RunSource): ProjectCatalog =>
+  createSingleProjectCatalog(project, runSource);
+
 describe('createApiApp', () => {
   it('serves every source projection and comparisons when mounted', async () => {
-    const app = new Hono().route('/api', createApiApp({ source }));
+    const app = new Hono().route('/api', createApiApp({ catalog: catalogFor(source) }));
 
     const expectations = [
-      ['/runs', { items: runs }],
-      ['/runs/candidate', runs[0]],
-      ['/runs/candidate/cases', { items: cases.map(summarizeCaseRecord) }],
-      ['/runs/candidate/cases/a%2Fb/one', cases[0]],
-      ['/diffs/base/candidate', await diffRuns(source, 'base', 'candidate')],
+      ['/projects', { items: [project] }],
+      ['/projects/demo/runs', { items: runs }],
+      ['/projects/demo/runs/candidate', runs[0]],
+      ['/projects/demo/runs/candidate/cases', { items: cases.map(summarizeCaseRecord) }],
+      ['/projects/demo/runs/candidate/cases/a%2Fb/one', cases[0]],
+      ['/projects/demo/diffs/base/candidate', await diffRuns(source, 'base', 'candidate')],
     ] as const;
 
     for (const [path, body] of expectations) {
@@ -88,36 +101,68 @@ describe('createApiApp', () => {
       expect(await response.json()).toEqual(body);
     }
 
-    const missing = await app.request('/api/nope');
-    expect(missing.status).toBe(404);
-    expect(await missing.json()).toEqual({
-      error: { code: 'ROUTE_NOT_FOUND', message: 'Route not found.' },
+    for (const path of ['/api/nope', '/api/runs']) {
+      const missing = await app.request(path);
+      expect(missing.status).toBe(404);
+      expect(await missing.json()).toEqual({
+        error: { code: 'ROUTE_NOT_FOUND', message: 'Route not found.' },
+      });
+    }
+  });
+
+  it('opens the project once per request and rejects unknown or malformed keys', async () => {
+    const opened: string[] = [];
+    const single = catalogFor(source);
+
+    const app = createApiApp({
+      catalog: {
+        listProjects: () => single.listProjects(),
+        openProject: (key) => {
+          opened.push(key);
+
+          return single.openProject(key);
+        },
+      },
     });
+
+    expect((await app.request('/projects/demo/diffs/base/candidate')).status).toBe(200);
+    expect(opened).toEqual(['demo']);
+
+    const unknown = await app.request('/projects/other/runs');
+    expect(unknown.status).toBe(404);
+    expect(await unknown.json()).toEqual({
+      error: { code: 'PROJECT_NOT_FOUND', message: 'Project other is not served here.' },
+    });
+
+    const malformed = await app.request('/projects/Not_A_Key/runs');
+    expect(malformed.status).toBe(400);
+    expect(await malformed.json()).toMatchObject({ error: { code: 'INVALID_REQUEST' } });
+    expect(opened).toEqual(['demo', 'other']);
   });
 
   it('parses paging once and rejects invalid limits or equal comparison ids', async () => {
     const received: unknown[] = [];
 
     const app = createApiApp({
-      source: {
+      catalog: catalogFor({
         ...source,
         listRuns: (query) => {
           received.push(query);
 
           return Promise.resolve({ items: [] });
         },
-      },
+      }),
     });
 
-    await app.request('/runs?cursor=anchor&limit=2');
-    await app.request('/runs');
+    await app.request('/projects/demo/runs?cursor=anchor&limit=2');
+    await app.request('/projects/demo/runs');
     expect(received).toEqual([{ cursor: 'anchor', limit: 2 }, { limit: 100 }]);
 
     for (const path of [
-      '/runs?limit=0',
-      '/runs?limit=1001',
-      '/runs?limit=1.5',
-      '/diffs/base/base',
+      '/projects/demo/runs?limit=0',
+      '/projects/demo/runs?limit=1001',
+      '/projects/demo/runs?limit=1.5',
+      '/projects/demo/diffs/base/base',
     ]) {
       const response = await app.request(path);
       expect(response.status).toBe(400);
@@ -152,15 +197,15 @@ describe('createApiApp', () => {
     ],
   ] as const)('maps %s to an actionable envelope', async (error, status, code, message) => {
     const app = createApiApp({
-      source: {
+      catalog: catalogFor({
         ...source,
         listRuns: () => {
           throw error;
         },
-      },
+      }),
     });
 
-    const response = await app.request('/runs');
+    const response = await app.request('/projects/demo/runs');
     expect(response.status).toBe(status);
     expect(await response.json()).toEqual({ error: { code, message } });
   });

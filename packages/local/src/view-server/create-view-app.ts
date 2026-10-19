@@ -28,7 +28,7 @@ const createViewApp = (options: CreateViewAppOptions): Hono => {
   });
 
   app.get('/', (context) => context.html(dashboardHtml));
-  app.route('/api', createApiApp({ source: options.source }));
+  app.route('/api', createApiApp({ catalog: options.catalog }));
 
   return app;
 };

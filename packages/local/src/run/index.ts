@@ -7,4 +7,8 @@ export {
   type RunTraceConvertCommandOptions,
 } from '../trace/run-trace-convert-command.js';
 
-export { runViewCommand, type RunViewCommandOptions } from '../view/run-view-command.js';
+export {
+  runViewCommand,
+  type RunViewCommandOptions,
+  type ViewScope,
+} from '../view/run-view-command.js';

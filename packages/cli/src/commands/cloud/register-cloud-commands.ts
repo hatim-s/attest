@@ -34,6 +34,7 @@ const registerCloudCommands = ({
   program,
   io,
   workingDirectory,
+  credentialPath,
   interaction,
   services,
 }: CommandContext): void => {
@@ -69,14 +70,18 @@ const registerCloudCommands = ({
   const projectContext = async (options: CommonCliOptions) => ({
     workingDirectory,
     project: options.project,
-    client: await authenticatedCloudClient(),
+    client: await authenticatedCloudClient(credentialPath),
   });
 
   const projects = cloud.command('project').description('List or create cloud projects.');
   addCommonOptions(
     projects.command('list').description('List projects available to this account.'),
   ).action(async (options: CommonCliOptions) =>
-    output('project.list', options, await listCloudProjects(await authenticatedCloudClient())),
+    output(
+      'project.list',
+      options,
+      await listCloudProjects(await authenticatedCloudClient(credentialPath)),
+    ),
   );
   addCommonOptions(
     projects
@@ -87,7 +92,7 @@ const registerCloudCommands = ({
     output(
       'project.create',
       options,
-      await createCloudProject(await authenticatedCloudClient(), name),
+      await createCloudProject(await authenticatedCloudClient(credentialPath), name),
     ),
   );
   addCommonOptions(
@@ -98,6 +103,7 @@ const registerCloudCommands = ({
       const result = await withProcessSignals((signal) =>
         loginCloud({
           baseUrl: options.url,
+          credentialPath,
           signal,
           onDevice: ({ verification_uri, user_code }) =>
             io.error(`Approve CLI access at ${verification_uri}\nCode: ${user_code}`),
@@ -108,7 +114,9 @@ const registerCloudCommands = ({
     });
   addCommonOptions(
     cloud.command('logout').description('Revoke the cloud session and remove its local token.'),
-  ).action(async (options: CommonCliOptions) => output('logout', options, await logoutCloud()));
+  ).action(async (options: CommonCliOptions) =>
+    output('logout', options, await logoutCloud(credentialPath)),
+  );
   addCommonOptions(
     cloud
       .command('link')

@@ -1,7 +1,10 @@
+import { mkdir, stat, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
+
 import type * as CloudAdapter from '@attest/local/cloud';
 import { cliResultSchema } from '@attest/contracts';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { runCommand as executeCommand } from './support/cli-test-support.js';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { runCommand as executeCommand, temporaryDirectory } from './support/cli-test-support.js';
 
 const cloud = {
   push: vi.fn<typeof CloudAdapter.pushCloudProject>().mockResolvedValue({
@@ -57,6 +60,11 @@ const runCommand = (...[root, argv, options]: Parameters<typeof executeCommand>)
 beforeEach(() => {
   cloud.push.mockClear();
   cloud.run.mockClear();
+});
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+  vi.unstubAllGlobals();
 });
 
 describe('cloud command translation', () => {
@@ -128,5 +136,27 @@ describe('cloud command translation', () => {
 
     expect(conflict.exitCode).toBe(2);
     expect(cloud.run).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps cloud credentials under ATTEST_HOME', async () => {
+    const home = await temporaryDirectory('attest-home-');
+    vi.stubEnv('ATTEST_HOME', home);
+    const credentialPath = join(home, 'cloud', 'credentials.json');
+    await mkdir(join(home, 'cloud'), { mode: 0o700 });
+    await writeFile(
+      credentialPath,
+      JSON.stringify({
+        baseUrl: 'https://cloud.example.test',
+        accessToken: 'token',
+        expiresAt: new Date(Date.now() + 60_000).toISOString(),
+      }),
+      { mode: 0o600 },
+    );
+    vi.stubGlobal('fetch', vi.fn<typeof fetch>().mockResolvedValue(Response.json({ ok: true })));
+
+    const result = await runCommand(process.cwd(), ['cloud', 'logout', '--output', 'json']);
+
+    expect(result.exitCode).toBe(0);
+    await expect(stat(credentialPath)).rejects.toMatchObject({ code: 'ENOENT' });
   });
 });

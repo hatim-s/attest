@@ -1,15 +1,17 @@
-import type { RunSource } from '@attest/core';
+import type { ProjectCatalog } from '@attest/core';
 
 type CreateViewAppOptions = {
   allowedOrigin: () => string | undefined;
   indexHtml: string;
-  source: RunSource;
+  catalog: ProjectCatalog;
 };
 
 type StartViewServerOptions = {
   indexHtml: string;
   port?: number;
-  storePath: string;
+  catalog: ProjectCatalog;
+  /** Releases what the catalog opened; runs once, after the server stops accepting requests. */
+  close: () => Promise<void>;
 };
 
 type ViewServerHandle = {

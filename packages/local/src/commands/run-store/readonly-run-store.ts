@@ -7,7 +7,7 @@ import { StoreError, type RunStore } from '@attest/core';
 import { errnoCode } from '../../internal/errno-code.js';
 import { openAnchored } from '../../internal/open-anchored.js';
 import { LocalError } from '../../errors/index.js';
-import { openRunStoreSnapshot } from '../../store/index.js';
+import { openReadonlyRunStore } from '../../store/index.js';
 import { isProjectPath } from '../../project/project-path.js';
 import { rethrowAfterCleanup, runCleanupSteps, type CleanupStep } from './cleanup.js';
 import {
@@ -136,7 +136,7 @@ const withReadonlyRunStoreFile = async <T>(
     }
 
     snapshot = await captureRunStoreSnapshot(resolvedStore, anchor);
-    const openedStore = await openRunStoreSnapshot(snapshot.path);
+    const openedStore = await openReadonlyRunStore(snapshot.path);
     store = openedStore;
     result = await operation(openedStore);
   } catch (error: unknown) {

@@ -1,16 +1,24 @@
 import { getRouteApi, Navigate } from '@tanstack/react-router';
 import { useRuns } from '../api/queries.js';
 
-const route = getRouteApi('/workspace/runs/');
+const route = getRouteApi('/projects/$projectKey/runs/');
 
 /** Also redirects when polling discovers the first run after an empty initial load. */
 const NewestRun = () => {
-  const runsQuery = useRuns();
+  const { projectKey } = route.useParams();
+  const runsQuery = useRuns(projectKey);
   const newest = runsQuery.data?.[0];
   const search = route.useSearch();
 
   if (newest !== undefined) {
-    return <Navigate to="/runs/$runId" params={{ runId: newest.id }} search={search} replace />;
+    return (
+      <Navigate
+        to="/projects/$projectKey/runs/$runId"
+        params={{ projectKey, runId: newest.id }}
+        search={search}
+        replace
+      />
+    );
   }
 
   return (

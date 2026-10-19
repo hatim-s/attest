@@ -1,4 +1,5 @@
 import type { PageQuery, RunPage, CaseSummaryPage } from '../records/page-schemas.js';
+import type { ProjectRecord } from '../records/project-schemas.js';
 import type { CaseSummary, CaseVerdict } from '../records/projection-schemas.js';
 import type { CacheStore } from './cache.js';
 import type {
@@ -38,6 +39,15 @@ interface RunSource {
   getRunWithCases(runId: string): Promise<{ run: RunRecord; cases: CaseRecord[] }>;
 }
 
+/**
+ * Lists projects and opens their run sources. Unknown keys throw StoreError PROJECT_NOT_FOUND.
+ * Keys match /^[a-z0-9][a-z0-9-]{0,63}$/. listProjects returns keys in ascending order.
+ */
+interface ProjectCatalog {
+  listProjects(): Promise<ProjectRecord[]>;
+  openProject(key: string): Promise<RunSource>;
+}
+
 /** Defines durable run writes; reads come from RunSource. */
 interface RunStore extends RunSource {
   createRun(metadata: RunMetadata, identity?: RunIdentity): Promise<RunRecord>;
@@ -60,6 +70,8 @@ export {
   type CaseSummary,
   type CaseVerdict,
   type RunMetadata,
+  type ProjectCatalog,
+  type ProjectRecord,
   type RunIdentity,
   type RunRecord,
   type RunSource,

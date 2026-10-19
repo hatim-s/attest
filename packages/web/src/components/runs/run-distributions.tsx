@@ -1,6 +1,7 @@
 import { useEffect, useMemo } from 'react';
 import type { RunRecord } from '@attest/core/records';
 import { useCases, useRuns } from '../../api/queries.js';
+import { useProjectKey } from '../../routes/use-project-key.js';
 import { Button, ErrorNotice, Loading } from '../shared/ui.js';
 import { DistributionCharts } from './distribution-charts.js';
 import { DurationDistribution } from './duration-distribution.js';
@@ -9,8 +10,9 @@ import { RunTrends } from './run-trends.js';
 
 /** Pages through every case while open, since a histogram of the first page would misstate the run. */
 const RunDistributions = ({ run }: { run: RunRecord }) => {
-  const casesQuery = useCases(run.id, run.status);
-  const runsQuery = useRuns();
+  const projectKey = useProjectKey();
+  const casesQuery = useCases(projectKey, run.id, run.status);
+  const runsQuery = useRuns(projectKey);
 
   const cases = useMemo(
     () => casesQuery.data?.pages.flatMap((page) => page.items),

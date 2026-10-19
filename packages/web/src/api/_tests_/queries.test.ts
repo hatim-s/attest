@@ -70,26 +70,30 @@ it('refreshes final evidence after either run terminates', async () => {
   } as const;
 
   try {
-    expect(await client.fetchQuery(caseQueryOptions(api, selection))).toMatchObject({
+    expect(await client.fetchQuery(caseQueryOptions(api, 'demo', selection))).toMatchObject({
       response: { output: 'working' },
     });
     expect(
-      (await client.fetchQuery(diffQueryOptions(api, comparison))).summary.candidatePassRate,
+      (await client.fetchQuery(diffQueryOptions(api, 'demo', comparison))).summary
+        .candidatePassRate,
     ).toBe(0);
     terminal = true;
     expect(
-      await client.fetchQuery(caseQueryOptions(api, { ...selection, status: 'completed' })),
+      await client.fetchQuery(caseQueryOptions(api, 'demo', { ...selection, status: 'completed' })),
     ).toMatchObject({ response: { output: 'final' } });
     expect(
       (
         await client.fetchQuery(
-          diffQueryOptions(api, { ...comparison, candidateStatus: 'completed' }),
+          diffQueryOptions(api, 'demo', { ...comparison, candidateStatus: 'completed' }),
         )
       ).summary.candidatePassRate,
     ).toBe(1);
     expect(
-      (await client.fetchQuery(diffQueryOptions(api, { ...comparison, baseStatus: 'completed' })))
-        .summary.candidatePassRate,
+      (
+        await client.fetchQuery(
+          diffQueryOptions(api, 'demo', { ...comparison, baseStatus: 'completed' }),
+        )
+      ).summary.candidatePassRate,
     ).toBe(1);
   } finally {
     client.clear();

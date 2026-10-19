@@ -20,6 +20,7 @@ describe('createDashboardHtml', () => {
       kind: 'snapshot',
       snapshot: {
         generatedAt: '2026-10-18T00:00:00.000Z',
+        project: { key: 'demo', name: "$' $& </script>" },
         run: {
           id: 'run-one',
           schemaId: 'attest.project',

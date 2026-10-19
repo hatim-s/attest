@@ -1,16 +1,15 @@
-import type { ReactNode } from 'react';
-import { Outlet, useParams, useSearch } from '@tanstack/react-router';
+import { getRouteApi, Outlet, useParams } from '@tanstack/react-router';
 import { useRuns } from '../api/queries.js';
 import { RunList } from '../components/runs/run-list.js';
 
-/**
- * Keeps run navigation available on every page. Reads search loosely because the root
- * not-found page renders it outside the workspace route.
- */
-const RunsLayout = ({ children = <Outlet /> }: { children?: ReactNode }) => {
-  const runsQuery = useRuns();
+const route = getRouteApi('/projects/$projectKey');
+
+/** Keeps the project's run navigation available on every workspace page. */
+const RunsLayout = () => {
+  const { projectKey } = route.useParams();
+  const runsQuery = useRuns(projectKey);
   const { runId, candidateRunId } = useParams({ strict: false });
-  const { branch, label } = useSearch({ strict: false });
+  const { branch, label } = route.useSearch();
 
   const runs = (runsQuery.data ?? []).filter(
     (run) =>
@@ -24,10 +23,13 @@ const RunsLayout = ({ children = <Outlet /> }: { children?: ReactNode }) => {
       <RunList
         error={runsQuery.error}
         isLoading={runsQuery.isLoading}
+        projectKey={projectKey}
         runs={runs}
         selectedRunId={runId ?? candidateRunId}
       />
-      <main className="main-content">{children}</main>
+      <main className="main-content">
+        <Outlet />
+      </main>
     </div>
   );
 };

@@ -1,11 +1,13 @@
+/** Every run read is scoped to one catalog project; only the project list sits outside one. */
 const apiRoutes = {
-  listRuns: '/runs',
-  getRun: '/runs/:runId',
-  listCaseSummaries: '/runs/:runId/cases',
-  getCase: '/runs/:runId/cases/:suiteName/:caseId',
-  listRunSuites: '/runs/:runId/suites',
-  getSuiteHistory: '/suites/:suiteName/history',
-  getDiff: '/diffs/:baseRunId/:candidateRunId',
+  listProjects: '/projects',
+  listRuns: '/projects/:projectKey/runs',
+  getRun: '/projects/:projectKey/runs/:runId',
+  listCaseSummaries: '/projects/:projectKey/runs/:runId/cases',
+  getCase: '/projects/:projectKey/runs/:runId/cases/:suiteName/:caseId',
+  listRunSuites: '/projects/:projectKey/runs/:runId/suites',
+  getSuiteHistory: '/projects/:projectKey/suites/:suiteName/history',
+  getDiff: '/projects/:projectKey/diffs/:baseRunId/:candidateRunId',
 } as const;
 
 type ApiRoute = keyof typeof apiRoutes;

@@ -6,7 +6,7 @@ import { join } from 'node:path';
 
 import { dashboardHtml } from '@attest/web/embedded';
 import { AGENT_PROTOCOL } from '@attest/contracts';
-import type { RunStore } from '@attest/core';
+import { createSingleProjectCatalog, type RunStore } from '@attest/core';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { openStore } from '../../store/run-store.js';
@@ -80,6 +80,21 @@ const createStoreFixture = async (): Promise<{
   }
 };
 
+/** Serves the fixture store as the single project `demo`. */
+const startFixtureServer = async (storePath: string): Promise<ViewServerHandle> => {
+  const store = await openStore(storePath);
+
+  const server = await startViewServer({
+    catalog: createSingleProjectCatalog({ key: 'demo', name: 'Demo' }, store.runs),
+    close: () => store.close(),
+    indexHtml: dashboardHtml,
+  });
+
+  servers.push(server);
+
+  return server;
+};
+
 afterEach(async () => {
   await Promise.all(servers.splice(0).map(async (server) => server.close()));
   await Promise.all(
@@ -91,12 +106,7 @@ describe('view server', () => {
   it('serves run, case, and diff reads from a loopback-only origin', async () => {
     const fixture = await createStoreFixture();
 
-    const server = await startViewServer({
-      storePath: fixture.storePath,
-      indexHtml: dashboardHtml,
-    });
-
-    servers.push(server);
+    const server = await startFixtureServer(fixture.storePath);
 
     expect(server.origin).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/);
     expect(await fetch(server.url).then((response) => response.text())).toContain(
@@ -105,35 +115,32 @@ describe('view server', () => {
 
     const runs = z
       .object({ items: z.array(z.object({ id: z.string() })) })
-      .parse(await fetch(`${server.origin}/api/runs`).then((response) => response.json()));
+      .parse(
+        await fetch(`${server.origin}/api/projects/demo/runs`).then((response) => response.json()),
+      );
 
     expect(runs.items.map(({ id }) => id)).toEqual([fixture.candidateRunId, fixture.baseRunId]);
     await expect(
-      fetch(`${server.origin}/api/runs/${fixture.baseRunId}/cases/smoke/capital`).then((response) =>
-        response.json(),
-      ),
+      fetch(
+        `${server.origin}/api/projects/demo/runs/${fixture.baseRunId}/cases/smoke/capital`,
+      ).then((response) => response.json()),
     ).resolves.toMatchObject({ caseId: 'capital', metrics: [{ pass: true }] });
     await expect(
-      fetch(`${server.origin}/api/diffs/${fixture.baseRunId}/${fixture.candidateRunId}`).then(
-        (response) => response.json(),
-      ),
+      fetch(
+        `${server.origin}/api/projects/demo/diffs/${fixture.baseRunId}/${fixture.candidateRunId}`,
+      ).then((response) => response.json()),
     ).resolves.toMatchObject({ summary: { counts: { regressed: 1 } } });
   });
 
   it('rejects requests addressed to foreign hosts before exposing stored runs', async () => {
     const fixture = await createStoreFixture();
 
-    const server = await startViewServer({
-      storePath: fixture.storePath,
-      indexHtml: dashboardHtml,
-    });
-
-    servers.push(server);
+    const server = await startFixtureServer(fixture.storePath);
 
     const result = await new Promise<{ status: number | undefined; body: string }>(
       (resolve, reject) => {
         get(
-          `${server.origin}/api/runs`,
+          `${server.origin}/api/projects/demo/runs`,
           { headers: { Host: 'rebound.example.test' } },
           (response) => {
             let body = '';

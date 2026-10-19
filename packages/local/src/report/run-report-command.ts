@@ -11,6 +11,7 @@ import { LocalError } from '../errors/index.js';
 import { prepareEvalProjectFile } from '../commands/eval/eval-project-path.js';
 import { withReadonlyRunStoreFile } from '../commands/run-store/readonly-run-store.js';
 import { withRunNotFound } from '../commands/run-store/run-not-found.js';
+import { describeStoreProject } from '../project/describe-store-project.js';
 import { readBoundedRunDetails } from '../store/bounded-run-details.js';
 
 // Bound embedded HTML size and the per-case detail queries needed to generate it.
@@ -61,9 +62,12 @@ const runReportCommand = async (
 
   const cases = runWithCases.cases;
   const truncated = runWithCases.totalCaseCount > cases.length;
+  // Reports are shared beyond this machine, so the local root path stays out of them.
+  const { key, name, projectId } = await describeStoreProject(storePath);
 
   const snapshot: ReportSnapshot = {
     generatedAt: new Date().toISOString(),
+    project: { key, name, projectId },
     run: runWithCases.run,
     cases: cases.map((record) => ({ record, summary: summarizeCaseRecord(record) })),
     truncated: truncated,

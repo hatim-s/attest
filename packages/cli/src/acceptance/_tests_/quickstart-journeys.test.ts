@@ -14,7 +14,7 @@ import {
 } from '@attest/contracts';
 import { describe, expect, inject, it, onTestFinished } from 'vitest';
 
-import { runPackedCommand, type PackedCommandResult } from './packed-cli.js';
+import { runPackedCommand, type PackedCli, type PackedCommandResult } from './packed-cli.js';
 import {
   quickstartJourneys,
   type CommandExpectation,
@@ -32,13 +32,14 @@ const RUN_ID_PATTERN = /\b[0-9A-HJKMNP-TV-Z]{26}\b/u;
 
 /** Starts `attest view`, fetches the dashboard once it is ready, then stops it with SIGINT. */
 const runViewReadinessProbe = async (
-  cliPath: string,
+  packed: PackedCli,
   argv: readonly string[],
   workingDirectory: string,
   timeout: number,
 ): Promise<CommandResult> => {
-  const child = spawn(process.execPath, ['--no-warnings', cliPath, ...argv], {
+  const child = spawn(process.execPath, ['--no-warnings', packed.cliPath, ...argv], {
     cwd: workingDirectory,
+    env: { ...process.env, ATTEST_HOME: packed.attestHome },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
 
@@ -224,7 +225,7 @@ const assertCommand = async (
 
 /** Runs one actor's commands in a fresh copy of the quickstart fixture. */
 const runJourney = async (actorId: string): Promise<void> => {
-  const { cliPath } = inject('packedCli');
+  const packed = inject('packedCli');
   const journeys: Journeys = quickstartJourneys;
   const actor = journeys.actors.find(({ id }) => id === actorId);
 
@@ -244,8 +245,8 @@ const runJourney = async (actorId: string): Promise<void> => {
 
     const result =
       command.readiness_probe === 'view'
-        ? await runViewReadinessProbe(cliPath, argv, root, timeout)
-        : await runPackedCommand(cliPath, argv, root, timeout);
+        ? await runViewReadinessProbe(packed, argv, root, timeout)
+        : await runPackedCommand(packed, argv, root, timeout);
 
     runId = await assertCommand(command, result, root, before, runId);
   }

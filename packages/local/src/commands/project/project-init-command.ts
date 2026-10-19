@@ -9,6 +9,7 @@ import { errnoCode } from '../../internal/errno-code.js';
 import { LocalError } from '../../errors/index.js';
 import { loadProject } from '../../project/project-loader/index.js';
 import { prepareProjectCandidate } from '../../project/transaction/index.js';
+import { registerProject } from '../../registry/index.js';
 import { readCommandRequest } from '../shared/command-request.js';
 import type { CommandResult, ProjectInitResult } from '../shared/command-result.js';
 import { publishProjectManifest, rollbackPublishedManifest } from './manifest-publish.js';
@@ -23,6 +24,8 @@ type ProjectInitCommandOptions = {
   prompt?: (question: string) => Promise<string>;
   projectDirectory?: string;
   readStdin: () => Promise<string>;
+  /** Global project registry the initialized project joins. */
+  registryPath: string;
   workingDirectory: string;
   yes?: boolean;
 };
@@ -296,6 +299,26 @@ const runProjectInitCommand = async (
       cause: error,
       details: { staged_content_hash: hashCanonicalContent(manifest.contents) },
     });
+  }
+
+  // The manifest is verified and stays; a registry failure only needs the project added later.
+  try {
+    await registerProject({
+      registryPath: options.registryPath,
+      root: inspected.root,
+      name,
+      projectId: prepared.project.project.project_id,
+    });
+  } catch (error: unknown) {
+    throw new LocalError(
+      'registry_write_failed',
+      'The project was initialized but not registered.',
+      {
+        path: options.registryPath,
+        hint: `Run \`attest projects add ${inspected.root}\` to register it.`,
+        cause: error,
+      },
+    );
   }
 
   return {

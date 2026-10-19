@@ -25,26 +25,18 @@ const openSqliteHandle = async (path: string): Promise<SqliteHandle> => {
   }
 };
 
-/** Opens an existing database without migrations or a creating fallback. */
+/**
+ * Opens an existing database read-only, without migrations or a creating fallback. A live
+ * writer's WAL stays visible, so SQLite may add `-wal` and `-shm` sidecars beside the file.
+ */
 const openReadonlySqliteHandle = async (path: string): Promise<SqliteHandle> => {
   const handle = await openNodeSqliteHandle(path, { readOnly: true });
 
   if (handle === undefined) {
-    throw new Error('Read-only run-store inspection requires node:sqlite support.');
+    throw new Error('Read-only run-store access requires node:sqlite support.');
   }
 
   return handle;
 };
 
-/** Opens a copied database while retaining visibility of its copied WAL. */
-const openSnapshotSqliteHandle = async (path: string): Promise<SqliteHandle> => {
-  const handle = await openNodeSqliteHandle(path, { immutable: false, readOnly: true });
-
-  if (handle === undefined) {
-    throw new Error('Run-store snapshot inspection requires node:sqlite support.');
-  }
-
-  return handle;
-};
-
-export { openReadonlySqliteHandle, openSnapshotSqliteHandle, openSqliteHandle };
+export { openReadonlySqliteHandle, openSqliteHandle };

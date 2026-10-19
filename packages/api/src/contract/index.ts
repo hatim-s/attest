@@ -1,6 +1,7 @@
 export { apiRoutes, buildPath, type ApiRoute, type PathParams } from './routes.js';
 
 export {
+  projectParamsSchema,
   runParamsSchema,
   caseParamsSchema,
   diffParamsSchema,
@@ -15,9 +16,12 @@ export {
 
 export {
   apiResponses,
+  projectListSchema,
+  projectRecordSchema,
   runSuitesSchema,
   suiteHistoryPointSchema,
   suiteHistorySchema,
+  type ProjectList,
   type RunSuites,
   type SuiteHistory,
 } from './responses.js';

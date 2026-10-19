@@ -17,7 +17,7 @@ attest cloud cancel RUN_ID
 attest cloud logout
 ```
 
-Login prints an approval URL and a short code. Approve it in your signed-in browser. The CLI exchanges a PKCE device session for a revocable token, stores it in `~/.attest/cloud/credentials.json` with mode `0600`, and binds it to that cloud origin. Logout revokes the session before removing its local token. Tokens never enter project revisions or command success output.
+Login prints an approval URL and a short code. Approve it in your signed-in browser. The CLI exchanges a PKCE device session for a revocable token, stores it in `~/.attest/cloud/credentials.json` (or `<ATTEST_HOME>/cloud/credentials.json`, see [environment variables](../ENV.md#attest-home-directory)) with mode `0600`, and binds it to that cloud origin. Logout revokes the session before removing its local token. Tokens never enter project revisions or command success output.
 
 `cloud link` records the cloud origin, project ID, synchronized revision, and file hashes in `.attest/cloud.json`. It refuses to replace a link to another project. `cloud project list` lists projects available to the authenticated account.
 

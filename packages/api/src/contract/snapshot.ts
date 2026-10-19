@@ -1,8 +1,14 @@
 import { z } from 'zod';
-import { runRecordSchema, caseRecordSchema, caseSummarySchema } from '@attest/core/records';
+import {
+  runRecordSchema,
+  caseRecordSchema,
+  caseSummarySchema,
+  projectRecordSchema,
+} from '@attest/core/records';
 
 const reportSnapshotSchema = z.object({
   generatedAt: z.string(),
+  project: projectRecordSchema,
   run: runRecordSchema,
   cases: z.array(z.object({ record: caseRecordSchema, summary: caseSummarySchema })),
   truncated: z.boolean(),

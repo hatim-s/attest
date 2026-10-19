@@ -5,10 +5,13 @@ import {
   caseSummaryPageSchema,
   caseRecordSchema,
   runDiffSchema,
+  projectRecordSchema,
 } from '@attest/core/records';
 import type { CaseSummary, RunRecord } from '@attest/core/records';
 import { aggregateCases, caseAggregateSchema, suiteAggregateSchema } from '@attest/core/analytics';
 import type { ApiRoute } from './routes.js';
+
+const projectListSchema = z.object({ items: z.array(projectRecordSchema) });
 
 const runSuitesSchema = z.object({
   runId: z.string().min(1),
@@ -53,11 +56,14 @@ const suiteHistorySchema = z.object({
   points: z.array(suiteHistoryPointSchema),
 });
 
+type ProjectList = z.infer<typeof projectListSchema>;
+
 type RunSuites = z.infer<typeof runSuitesSchema>;
 
 type SuiteHistory = z.infer<typeof suiteHistorySchema>;
 
 const apiResponses = {
+  listProjects: projectListSchema,
   listRunSuites: runSuitesSchema,
   getSuiteHistory: suiteHistorySchema,
   listRuns: runPageSchema,
@@ -69,10 +75,13 @@ const apiResponses = {
 
 export {
   apiResponses,
+  projectListSchema,
+  projectRecordSchema,
   runSuitesSchema,
   suiteHistoryPointSchema,
   toSuiteHistoryPoint,
   suiteHistorySchema,
+  type ProjectList,
   type RunSuites,
   type SuiteHistory,
 };

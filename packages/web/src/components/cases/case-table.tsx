@@ -5,6 +5,7 @@ import { useVirtualizer } from '@tanstack/react-virtual';
 
 import type { CaseSummary } from '@attest/core/records';
 import { formatDuration } from '../../lib/format.js';
+import { useProjectKey } from '../../routes/use-project-key.js';
 import { Badge, Button, Loading } from '../shared/ui.js';
 
 type CaseTableProps = {
@@ -25,6 +26,7 @@ const CaseTable = ({
   onLoadMore,
   runId,
 }: CaseTableProps) => {
+  const projectKey = useProjectKey();
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const virtualizer = useVirtualizer({
@@ -70,8 +72,8 @@ const CaseTable = ({
                     {/* The link stretches over the row, so the whole row stays clickable. */}
                     <Link
                       className="case-link"
-                      to="/runs/$runId/cases/$suiteName/$caseId"
-                      params={{ runId, suiteName: item.suiteName, caseId: item.caseId }}
+                      to="/projects/$projectKey/runs/$runId/cases/$suiteName/$caseId"
+                      params={{ projectKey, runId, suiteName: item.suiteName, caseId: item.caseId }}
                       search={(previous) => previous}
                       state={{ caseOpenedFromRun: true }}
                     >

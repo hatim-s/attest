@@ -5,6 +5,7 @@ import { AnalyticsChart } from './analytics-chart.js';
 import { createRunTrends } from './loaded-analytics.js';
 import { formatCount, formatPercent, shortId } from '../../lib/format.js';
 import { Heading } from '../shared/ui.js';
+import { useProjectKey } from '../../routes/use-project-key.js';
 
 /** Keeps chart arrays stable while the run page polls unchanged results. */
 const TrendChart = ({ group }: { group: ReturnType<typeof createRunTrends>['groups'][number] }) => {
@@ -31,6 +32,7 @@ const TrendChart = ({ group }: { group: ReturnType<typeof createRunTrends>['grou
 
 /** Facets groups so branch or label identity never depends on a generated or recycled hue. */
 const RunTrends = ({ runs }: { runs: RunRecord[] }) => {
+  const projectKey = useProjectKey();
   const [labelKey, setLabelKey] = useState('');
   const keys = [...new Set(runs.flatMap((run) => Object.keys(run.labels ?? {})))].sort();
 
@@ -95,8 +97,8 @@ const RunTrends = ({ runs }: { runs: RunRecord[] }) => {
                     <th scope="row">{group.name}</th>
                     <td>
                       <Link
-                        to="/runs/$runId"
-                        params={{ runId: run.id }}
+                        to="/projects/$projectKey/runs/$runId"
+                        params={{ projectKey, runId: run.id }}
                         search={(previous) => ({ ...previous, tab: 'cases' })}
                         title={run.id}
                       >

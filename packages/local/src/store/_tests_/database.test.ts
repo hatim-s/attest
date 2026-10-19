@@ -14,7 +14,7 @@ import { openNodeSqliteHandle } from '../internal/node-sqlite-handle.js';
 import { openSqliteHandle } from '../internal/open-sqlite-handle.js';
 import type { SqliteHandle } from '../internal/sqlite-handle.js';
 import { migrateToLatest } from '../migration-runner.js';
-import { openReadonlyRunStore, openStore, openRunStoreSnapshot } from '../run-store.js';
+import { openReadonlyRunStore, openStore } from '../run-store.js';
 
 const stores: { close(): Promise<void> }[] = [];
 
@@ -150,26 +150,19 @@ describe('SQLite store database', () => {
     await expect(openStore(path)).rejects.toMatchObject({ code: 'SCHEMA_TOO_NEW' });
   });
 
-  it('inspects an existing store without changing its bytes or sidecars', async () => {
+  it('reads rows a live writer commits after the reader opened', async () => {
     const path = await temporaryDatabasePath();
     const writer = await openStore(path);
-    await writer.runs.createRun({
-      schemaId: 'attest.project',
-      configHash: 'hash',
-      configJson: '{}',
-    });
-    await writer.close();
-    const beforeBytes = await readFile(path);
-    const beforeFiles = await readdir(dirname(path));
+    stores.push(writer);
+    const metadata = { schemaId: 'attest.project', configHash: 'hash', configJson: '{}' };
+    await writer.runs.createRun(metadata);
 
     const reader = await openReadonlyRunStore(path);
     stores.push(reader);
     await expect(reader.listRuns()).resolves.toMatchObject({ items: [expect.anything()] });
-    await reader.close();
-    stores.splice(stores.indexOf(reader), 1);
 
-    expect(await readFile(path)).toEqual(beforeBytes);
-    expect(await readdir(dirname(path))).toEqual(beforeFiles);
+    await writer.runs.createRun(metadata);
+    expect((await reader.listRuns()).items).toHaveLength(2);
   });
 
   it('does not create or migrate a missing or uninitialized store', async () => {
@@ -204,7 +197,7 @@ describe('SQLite store database', () => {
     const snapshotPath = await temporaryDatabasePath();
     await copyFile(sourcePath, snapshotPath);
     await copyFile(`${sourcePath}-wal`, `${snapshotPath}-wal`);
-    const reader = await openRunStoreSnapshot(snapshotPath);
+    const reader = await openReadonlyRunStore(snapshotPath);
     stores.push(reader);
 
     await expect(reader.listRuns()).resolves.toMatchObject({ items: [{ id: run.id }] });

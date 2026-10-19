@@ -6,12 +6,13 @@ import { Badge, ErrorNotice, Loading } from '../shared/ui.js';
 type RunListProps = {
   error: unknown;
   isLoading: boolean;
+  projectKey: string;
   runs: RunRecord[];
   selectedRunId?: string;
 };
 
 /** Sidebar of recent runs. The selected run carries `aria-current="page"`. */
-const RunList = ({ error, isLoading, runs, selectedRunId }: RunListProps) => (
+const RunList = ({ error, isLoading, projectKey, runs, selectedRunId }: RunListProps) => (
   <aside className="run-sidebar" aria-label="Evaluation runs">
     <div className="run-sidebar-heading">
       <div>
@@ -33,8 +34,8 @@ const RunList = ({ error, isLoading, runs, selectedRunId }: RunListProps) => (
           aria-current={selectedRunId === run.id ? 'page' : undefined}
           className="run-list-item"
           key={run.id}
-          to="/runs/$runId"
-          params={{ runId: run.id }}
+          to="/projects/$projectKey/runs/$runId"
+          params={{ projectKey, runId: run.id }}
           search={({ branch, label }) => ({ branch, label, tab: 'cases' })}
         >
           <span className="run-list-row">

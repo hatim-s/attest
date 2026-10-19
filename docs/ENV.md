@@ -43,11 +43,22 @@ These identifiers override allowlisted host values. By default `HOME` and `TMPDI
 point inside the attempt directory, `LC_ALL` is `C`, and `PATH` contains only absolute
 host entries. Explicit allowlisting can replace these environment defaults.
 
+## Attest home directory
+
+`ATTEST_HOME` overrides the `~/.attest` directory. When it is set, Attest reads the project
+registry from `<ATTEST_HOME>/projects.json` and the cloud credentials from
+`<ATTEST_HOME>/cloud/credentials.json`. When it is unset, both live under `~/.attest`.
+Attest resolves symbolic links in `ATTEST_HOME` once at startup, so a path under a linked
+directory such as macOS `/var` works, and the directory may not exist yet. `~/.attest` is not
+resolved: if it or a parent is a symbolic link, Attest refuses to read or write files there.
+See [file layout](reference/file-layout.md#project-registry).
+
 ## Cloud credentials
 
 Cloud login takes its URL explicitly and saves credentials in
-`~/.attest/cloud/credentials.json`. The local cloud adapter defines no URL/token
-environment variable. See [cloud commands](cli/cloud.md).
+`~/.attest/cloud/credentials.json`, or under `ATTEST_HOME` when it is set. The local
+cloud adapter defines no URL/token environment variable. See
+[cloud commands](cli/cloud.md).
 
 ## Developer controls
 

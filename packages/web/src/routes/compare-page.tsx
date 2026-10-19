@@ -5,17 +5,17 @@ import { ErrorNotice, Loading } from '../components/shared/ui.js';
 import { RunHeader } from '../components/runs/run-header.js';
 import { RunTabs } from '../components/runs/run-tabs.js';
 
-const route = getRouteApi('/workspace/compare/$baseRunId/$candidateRunId');
+const route = getRouteApi('/projects/$projectKey/compare/$baseRunId/$candidateRunId');
 
 /** Makes a comparison reproducible from its baseline and candidate identities. */
 const ComparePage = () => {
-  const { baseRunId, candidateRunId } = route.useParams();
+  const { projectKey, baseRunId, candidateRunId } = route.useParams();
   const navigate = useNavigate();
-  const runsQuery = useRuns();
-  const baseQuery = useRun(baseRunId);
-  const candidateQuery = useRun(candidateRunId);
+  const runsQuery = useRuns(projectKey);
+  const baseQuery = useRun(projectKey, baseRunId);
+  const candidateQuery = useRun(projectKey, candidateRunId);
 
-  const diffQuery = useDiff({
+  const diffQuery = useDiff(projectKey, {
     baseRunId,
     candidateRunId,
     baseStatus: baseQuery.data?.status,
@@ -42,8 +42,8 @@ const ComparePage = () => {
         runs={runsQuery.data ?? []}
         onBaseChange={(nextBaseRunId) =>
           void navigate({
-            to: '/compare/$baseRunId/$candidateRunId',
-            params: { baseRunId: nextBaseRunId, candidateRunId },
+            to: '/projects/$projectKey/compare/$baseRunId/$candidateRunId',
+            params: { projectKey, baseRunId: nextBaseRunId, candidateRunId },
             search: (previous) => previous,
           })
         }

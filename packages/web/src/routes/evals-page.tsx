@@ -4,13 +4,14 @@ import { useNewestCompletedRun, useRunSuites } from '../api/queries.js';
 import { SuiteTable } from '../components/runs/suite-table.js';
 import { ErrorNotice, Heading, Loading } from '../components/shared/ui.js';
 import { formatDateTime, shortId } from '../lib/format.js';
+import { useProjectKey } from './use-project-key.js';
 
-const SourceRun = ({ run }: { run: RunRecord }) => (
+const SourceRun = ({ projectKey, run }: { projectKey: string; run: RunRecord }) => (
   <>
     From{' '}
     <Link
-      to="/runs/$runId"
-      params={{ runId: run.id }}
+      to="/projects/$projectKey/runs/$runId"
+      params={{ projectKey, runId: run.id }}
       search={({ branch, label }) => ({ branch, label, tab: 'suites' })}
       title={run.id}
     >
@@ -22,10 +23,13 @@ const SourceRun = ({ run }: { run: RunRecord }) => (
 
 /** Uses a finished run so the catalog does not fluctuate as suites start executing. */
 const EvalsPage = () => {
-  const runQuery = useNewestCompletedRun();
+  const projectKey = useProjectKey();
+  const runQuery = useNewestCompletedRun(projectKey);
   const run = runQuery.data;
-  const suitesQuery = useRunSuites(run?.id, run?.status);
-  const meta = run === null ? 'No finished runs yet.' : run && <SourceRun run={run} />;
+  const suitesQuery = useRunSuites(projectKey, run?.id, run?.status);
+
+  const meta =
+    run === null ? 'No finished runs yet.' : run && <SourceRun projectKey={projectKey} run={run} />;
 
   return (
     <section className="stack" aria-label="Evals">

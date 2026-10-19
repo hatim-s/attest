@@ -185,7 +185,20 @@ attest view --no-open --port 0
 `diff`, `report`, and `view` default to `.attest/runs.db`; pass `--store <path>` to select another
 store. `report` refuses to replace an existing artifact unless `--force` is explicit. JUnit is
 written through a verified, atomically renamed temporary file; unsafe paths and write failures use
-stable artifact error identities.
+stable artifact error identities. `report` snapshots carry the record of the project they read.
+
+## Read surfaces and routes
+
+`attest view` serves one project. `attest view --all` serves every project in the global
+registry on the same port, and cannot be combined with `--store`. See
+[project registry and dashboard](./index.md#project-registry-and-dashboard).
+
+The dashboard and its read API are project scoped. Dashboard routes are `/projects`,
+`/projects/<key>/runs`, `/projects/<key>/runs/<run-id>`,
+`/projects/<key>/runs/<run-id>/cases/<suite-name>/<case-id>`,
+`/projects/<key>/compare/<base-run-id>/<candidate-run-id>`, `/projects/<key>/evals`, and
+`/projects/<key>/evals/<suite-name>`. The read API mirrors them under `/api/projects` and
+`/api/projects/<key>/runs`. An unknown key returns `PROJECT_NOT_FOUND`.
 
 ## Agent-readable contract
 

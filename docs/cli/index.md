@@ -21,15 +21,16 @@ run database.
 
 ## Workflow map
 
-| Goal                        | Canonical guide                                 | Primary commands                                                                     |
-| --------------------------- | ----------------------------------------------- | ------------------------------------------------------------------------------------ |
-| Create or inspect a project | [Resource model](../concepts/resource-model.md) | `attest project init`, `attest project show`, `attest project validate`              |
-| Connect and probe an agent  | [Agents](./agents.md)                           | `attest agent add`, `attest agent import`, `attest agent test`                       |
-| Add cases or datasets       | [Tests and datasets](./tests-and-datasets.md)   | `attest test add`, `attest test case import`, `attest test dataset import`           |
-| Define scoring              | [Metrics](./metrics.md)                         | `attest metric add`, `attest metric import`, `attest metric test`                    |
-| Execute and inspect         | [Evaluation runs](./eval-runs.md)               | `attest eval run`, `attest eval cancel`, `attest diff`, `attest report`              |
-| Run in the cloud            | [Cloud commands](./cloud.md)                    | `attest cloud login`, `attest cloud push`, `attest cloud run`, `attest cloud events` |
-| Diagnose a failure          | [Error catalog](../reference/errors.md)         | `attest errors --output json`                                                        |
+| Goal                        | Canonical guide                                                   | Primary commands                                                                     |
+| --------------------------- | ----------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| Create or inspect a project | [Resource model](../concepts/resource-model.md)                   | `attest project init`, `attest project show`, `attest project validate`              |
+| Register projects           | [Project registry and dashboard](#project-registry-and-dashboard) | `attest projects list`, `attest projects add`, `attest projects remove`              |
+| Connect and probe an agent  | [Agents](./agents.md)                                             | `attest agent add`, `attest agent import`, `attest agent test`                       |
+| Add cases or datasets       | [Tests and datasets](./tests-and-datasets.md)                     | `attest test add`, `attest test case import`, `attest test dataset import`           |
+| Define scoring              | [Metrics](./metrics.md)                                           | `attest metric add`, `attest metric import`, `attest metric test`                    |
+| Execute and inspect         | [Evaluation runs](./eval-runs.md)                                 | `attest eval run`, `attest eval cancel`, `attest diff`, `attest report`              |
+| Run in the cloud            | [Cloud commands](./cloud.md)                                      | `attest cloud login`, `attest cloud push`, `attest cloud run`, `attest cloud events` |
+| Diagnose a failure          | [Error catalog](../reference/errors.md)                           | `attest errors --output json`                                                        |
 
 There are no plural namespace aliases. `attest init` is the only convenience alias and
 maps to `attest project init`. The removed `attest run` spelling is not accepted; use
@@ -118,6 +119,39 @@ attest errors [--output human|json]
 
 For a working end-to-end sequence, use the [quickstart](../quickstart.md). For canonical
 paths and references, use the [resource model](../concepts/resource-model.md).
+
+## Project registry and dashboard
+
+Attest keeps one global registry of the local projects that use it, and can serve every
+registered project from one dashboard process. The registry lives at
+`~/.attest/projects.json`, or under `ATTEST_HOME` when that variable is set. See
+[file layout](../reference/file-layout.md#project-registry) for the stored shape.
+
+```text
+attest projects list [--output human|json]
+attest projects add [directory] [--name <name>]
+attest projects remove <key-or-directory>
+```
+
+`attest project init` registers the project after it writes the manifest. A project that
+predates the registry joins it with `attest projects add`, which defaults to `.`. The
+manifest supplies the name and project id; without a manifest the name is the directory
+basename, and `--name <name>` overrides it. Adding a root that is already registered
+changes nothing and returns the existing entry.
+
+If the registry cannot be written, `project init` keeps the manifest it already wrote and
+reports the failure with the `attest projects add <dir>` command to run instead.
+
+`attest view` inside a project serves that one project. `attest view --all` serves every
+registered project instead, and cannot be combined with `--store`.
+
+```sh
+attest projects add ~/Projects/workflow-code --output json
+attest view --all --no-open
+```
+
+A registered project whose `.attest/runs.db` does not exist yet appears with no runs.
+Serving it does not create the store.
 
 ## Integration transports
 

@@ -23,12 +23,16 @@ export { parseRecord } from './internal/record-validation.js';
 
 export { StoreError, type StoreErrorCode } from './store-error.js';
 
+export { createSingleProjectCatalog } from './single-project-catalog.js';
+
 export {
   type AttestStore,
   type CaseRecord,
   type CaseSummary,
   type CaseVerdict,
   type RunMetadata,
+  type ProjectCatalog,
+  type ProjectRecord,
   type RunIdentity,
   type RunRecord,
   type RunStatus,

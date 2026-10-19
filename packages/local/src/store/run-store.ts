@@ -34,11 +34,7 @@ import {
   rowVerdict,
   summarizeRuns,
 } from './internal/run-summary.js';
-import {
-  openReadonlySqliteHandle,
-  openSnapshotSqliteHandle,
-  openSqliteHandle,
-} from './internal/open-sqlite-handle.js';
+import { openReadonlySqliteHandle, openSqliteHandle } from './internal/open-sqlite-handle.js';
 import type { SqliteHandle } from './internal/sqlite-handle.js';
 import { executeStoreOperation } from './internal/store-operation.js';
 import { migrateToLatest, validateReadableSchema } from './migration-runner.js';
@@ -422,7 +418,10 @@ const openStore = async (path: string): Promise<AttestStore> => {
   }
 };
 
-/** Opens an existing run store for inspection without creating or migrating any file. */
+/**
+ * Opens an existing store read-only: no migrations, no creating fallback, and a live writer's
+ * committed rows stay visible. Readers of copied snapshots and of registered projects use it.
+ */
 const openReadonlyRunStore = async (path: string): Promise<RunStore> => {
   let handle: SqliteHandle | undefined;
 
@@ -437,19 +436,4 @@ const openReadonlyRunStore = async (path: string): Promise<RunStore> => {
   }
 };
 
-/** Opens a disposable main/WAL snapshot without migrations or project-file writes. */
-const openRunStoreSnapshot = async (path: string): Promise<RunStore> => {
-  let handle: SqliteHandle | undefined;
-
-  try {
-    handle = await openSnapshotSqliteHandle(resolve(path));
-    await validateReadableSchema(handle);
-
-    return new SqliteRunStore(new Kysely<Database>({ dialect: createSqliteDialect(handle) }));
-  } catch (error) {
-    await handle?.close();
-    throw error;
-  }
-};
-
-export { createRunIdentity, openReadonlyRunStore, openRunStoreSnapshot, openStore, type RunStore };
+export { createRunIdentity, openReadonlyRunStore, openStore, type RunStore };

@@ -1,11 +1,13 @@
 import type { CaseSummary } from '@attest/core/records';
 import { Link } from '@tanstack/react-router';
 import { Badge } from '../shared/ui.js';
+import { useProjectKey } from '../../routes/use-project-key.js';
 
 type MetricErrorCasesProps = { cases: CaseSummary[]; allLoaded: boolean; runId: string };
 
 /** Links to case evidence without fetching every full record to construct a per-metric table. */
 const MetricErrorCases = ({ cases, allLoaded, runId }: MetricErrorCasesProps) => {
+  const projectKey = useProjectKey();
   const errors = cases.filter((item) => item.metricCounts.errors > 0);
 
   return (
@@ -26,8 +28,8 @@ const MetricErrorCases = ({ cases, allLoaded, runId }: MetricErrorCasesProps) =>
               <th scope="row">{item.suiteName}</th>
               <td>
                 <Link
-                  to="/runs/$runId/cases/$suiteName/$caseId"
-                  params={{ runId, suiteName: item.suiteName, caseId: item.caseId }}
+                  to="/projects/$projectKey/runs/$runId/cases/$suiteName/$caseId"
+                  params={{ projectKey, runId, suiteName: item.suiteName, caseId: item.caseId }}
                   search={{ tab: 'distributions' }}
                   state={{ caseOpenedFromRun: true }}
                 >

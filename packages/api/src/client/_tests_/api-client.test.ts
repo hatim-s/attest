@@ -1,4 +1,10 @@
-import { diffRuns, StoreError, summarizeCaseRecord, type RunSource } from '@attest/core';
+import {
+  createSingleProjectCatalog,
+  diffRuns,
+  StoreError,
+  summarizeCaseRecord,
+  type RunSource,
+} from '@attest/core';
 import type { CaseRecord, RunRecord } from '@attest/core/records';
 import { Hono } from 'hono';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -67,13 +73,25 @@ const source: RunSource = {
   }),
 };
 
+const project = { key: 'demo', name: 'Demo', root: '/work/demo', projectId: 'project-1' };
+
+const projectKey = project.key;
+
 const reads = (client: ApiClient) => [
-  () => client.listRuns({}),
-  () => client.getRun({ runId: '01ARZ3NDEKTSV4RRFFQ69G5FAV' }),
-  () => client.listCaseSummaries({ runId: '01ARZ3NDEKTSV4RRFFQ69G5FAV' }, {}),
-  () => client.getCase({ runId: '01ARZ3NDEKTSV4RRFFQ69G5FAV', suiteName: 'a/b', caseId: 'one' }),
+  () => client.listProjects(),
+  () => client.listRuns({ projectKey }, {}),
+  () => client.getRun({ projectKey, runId: '01ARZ3NDEKTSV4RRFFQ69G5FAV' }),
+  () => client.listCaseSummaries({ projectKey, runId: '01ARZ3NDEKTSV4RRFFQ69G5FAV' }, {}),
+  () =>
+    client.getCase({
+      projectKey,
+      runId: '01ARZ3NDEKTSV4RRFFQ69G5FAV',
+      suiteName: 'a/b',
+      caseId: 'one',
+    }),
   () =>
     client.getDiff({
+      projectKey,
       baseRunId: '01ARZ3NDEKTSV4RRFFQ69G5FAW',
       candidateRunId: '01ARZ3NDEKTSV4RRFFQ69G5FAV',
     }),
@@ -83,7 +101,11 @@ afterEach(() => vi.unstubAllGlobals());
 
 describe('ApiClient', () => {
   it('round-trips every HTTP route including suite slashes, query and abort signal', async () => {
-    const app = new Hono().route('/api', createApiApp({ source }));
+    const app = new Hono().route(
+      '/api',
+      createApiApp({ catalog: createSingleProjectCatalog(project, source) }),
+    );
+
     const requests: { url: string; signal: AbortSignal | null | undefined }[] = [];
 
     const client = createApiClient({
@@ -100,6 +122,7 @@ describe('ApiClient', () => {
     });
 
     const expected = [
+      { items: [project] },
       { items: runs },
       runs[0],
       { items: cases.map(summarizeCaseRecord) },
@@ -110,15 +133,24 @@ describe('ApiClient', () => {
     for (const [index, read] of reads(client).entries())
       expect(await read()).toEqual(expected[index]);
     const controller = new AbortController();
-    await client.listRuns({ cursor: 'anchor', limit: 2 }, { signal: controller.signal });
+    await client.listRuns(
+      { projectKey },
+      { cursor: 'anchor', limit: 2 },
+      { signal: controller.signal },
+    );
     expect(requests.at(-1)).toEqual({
-      url: '/api/runs?cursor=anchor&limit=2',
+      url: '/api/projects/demo/runs?cursor=anchor&limit=2',
       signal: controller.signal,
     });
     expect(requests.map(({ url }) => url)).toContain(
-      '/api/runs/01ARZ3NDEKTSV4RRFFQ69G5FAV/cases/a%2Fb/one',
+      '/api/projects/demo/runs/01ARZ3NDEKTSV4RRFFQ69G5FAV/cases/a%2Fb/one',
     );
-    await expect(client.getRun({ runId: 'missing' })).rejects.toMatchObject({
+    await expect(client.getRun({ projectKey: 'other', runId: 'missing' })).rejects.toMatchObject({
+      name: 'ApiError',
+      status: 404,
+      code: 'PROJECT_NOT_FOUND',
+    });
+    await expect(client.getRun({ projectKey, runId: 'missing' })).rejects.toMatchObject({
       name: 'ApiError',
       status: 404,
       code: 'RUN_NOT_FOUND',
@@ -149,7 +181,7 @@ describe('ApiClient', () => {
         ),
     });
 
-    await expect(proxy.listRuns({})).rejects.toEqual(
+    await expect(proxy.listRuns({ projectKey }, {})).rejects.toEqual(
       new ApiError(502, 'INVALID_RESPONSE', 'Attest API request failed (502).'),
     );
     const aborted = new DOMException('Aborted', 'AbortError');
@@ -160,7 +192,7 @@ describe('ApiClient', () => {
       fetch: () => Promise.reject(aborted),
     });
 
-    await expect(cancelled.listRuns({})).rejects.toBe(aborted);
+    await expect(cancelled.listRuns({ projectKey }, {})).rejects.toBe(aborted);
   });
 
   it('pages an offline snapshot and gives contract errors for missing identities', async () => {
@@ -174,6 +206,7 @@ describe('ApiClient', () => {
       kind: 'snapshot',
       snapshot: {
         generatedAt: '2026-10-18T00:00:00.000Z',
+        project,
         run,
         cases: cases.map((record) => ({ record, summary: summarizeCaseRecord(record) })),
         truncated: true,
@@ -186,10 +219,11 @@ describe('ApiClient', () => {
       includedCases: 2,
       truncated: true,
     });
-    expect(await client.listRuns({})).toEqual({ items: [run] });
-    expect(await client.listRuns({ cursor: run.id })).toEqual({ items: [] });
-    expect(await client.getRun({ runId: run.id })).toEqual(run);
-    const first = await client.listCaseSummaries({ runId: run.id }, { limit: 1 });
+    expect(await client.listProjects()).toEqual({ items: [project] });
+    expect(await client.listRuns({ projectKey }, {})).toEqual({ items: [run] });
+    expect(await client.listRuns({ projectKey }, { cursor: run.id })).toEqual({ items: [] });
+    expect(await client.getRun({ projectKey, runId: run.id })).toEqual(run);
+    const first = await client.listCaseSummaries({ projectKey, runId: run.id }, { limit: 1 });
     const firstCase = cases[0];
 
     if (firstCase === undefined) throw new Error('Missing fixture case.');
@@ -199,43 +233,56 @@ describe('ApiClient', () => {
     });
 
     const second = await client.listCaseSummaries(
-      { runId: run.id },
+      { projectKey, runId: run.id },
       { cursor: first.nextCursor, limit: 1 },
     );
 
     expect(second.items.map((item) => item.caseId)).toEqual(['two']);
     expect(second.nextCursor).toBeUndefined();
-    expect(await client.getCase({ runId: run.id, suiteName: 'a/b', caseId: 'two' })).toEqual(
-      cases[1],
-    );
+    expect(
+      await client.getCase({ projectKey, runId: run.id, suiteName: 'a/b', caseId: 'two' }),
+    ).toEqual(cases[1]);
 
     for (const read of [
-      () => client.listRuns({ cursor: 'unknown' }),
-      () => client.listCaseSummaries({ runId: run.id }, { cursor: 'unknown' }),
+      () => client.listRuns({ projectKey }, { cursor: 'unknown' }),
+      () => client.listCaseSummaries({ projectKey, runId: run.id }, { cursor: 'unknown' }),
     ]) {
       await expect(read()).rejects.toMatchObject({ status: 400, code: 'INVALID_CURSOR' });
     }
 
-    await expect(client.listRuns({ limit: 0 })).rejects.toMatchObject({
+    await expect(client.listRuns({ projectKey }, { limit: 0 })).rejects.toMatchObject({
       status: 400,
       code: 'INVALID_REQUEST',
     });
-    await expect(client.getRun({ runId: 'missing' })).rejects.toMatchObject({
+    await expect(client.getRun({ projectKey, runId: 'missing' })).rejects.toMatchObject({
       status: 404,
       code: 'RUN_NOT_FOUND',
     });
     await expect(
-      client.getCase({ runId: 'missing', suiteName: 'a/b', caseId: 'one' }),
+      client.getCase({ projectKey, runId: 'missing', suiteName: 'a/b', caseId: 'one' }),
     ).rejects.toMatchObject({ status: 404, code: 'RUN_NOT_FOUND' });
     await expect(
-      client.getCase({ runId: run.id, suiteName: 'a/b', caseId: 'missing' }),
+      client.getCase({ projectKey, runId: run.id, suiteName: 'a/b', caseId: 'missing' }),
     ).rejects.toMatchObject({ status: 404, code: 'CASE_NOT_FOUND' });
     await expect(
-      client.getDiff({ baseRunId: run.id, candidateRunId: run.id }),
+      client.getDiff({ projectKey, baseRunId: run.id, candidateRunId: run.id }),
     ).rejects.toMatchObject({ status: 400, code: 'INVALID_REQUEST' });
     await expect(
-      client.getDiff({ baseRunId: run.id, candidateRunId: 'missing' }),
+      client.getDiff({ projectKey, baseRunId: run.id, candidateRunId: 'missing' }),
     ).rejects.toMatchObject({ status: 404, code: 'RUN_NOT_FOUND' });
+
+    // The embedded project is the only one; every other key fails the same way as the live API.
+    for (const read of [
+      () => client.listRuns({ projectKey: 'other' }, {}),
+      () => client.getRun({ projectKey: 'other', runId: run.id }),
+      () => client.listCaseSummaries({ projectKey: 'other', runId: run.id }, {}),
+      () => client.getCase({ projectKey: 'other', runId: run.id, suiteName: 'a/b', caseId: 'one' }),
+      () => client.listRunSuites({ projectKey: 'other', runId: run.id }),
+      () => client.getSuiteHistory({ projectKey: 'other', suiteName: 'a/b' }, {}),
+    ]) {
+      await expect(read()).rejects.toMatchObject({ status: 404, code: 'PROJECT_NOT_FOUND' });
+    }
+
     expect(network).not.toHaveBeenCalled();
   });
 });

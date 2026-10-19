@@ -61,8 +61,15 @@ const createHttpClient = (baseUrl: string, fetchFn: typeof fetch): ApiClient => 
 
   return {
     mode: { kind: 'live' },
-    listRuns: (query, options) =>
-      request(apiResponses.listRuns, apiRoutes.listRuns, toSearch(query), options),
+    listProjects: (options) =>
+      request(apiResponses.listProjects, apiRoutes.listProjects, undefined, options),
+    listRuns: (params, query, options) =>
+      request(
+        apiResponses.listRuns,
+        buildPath(apiRoutes.listRuns, params),
+        toSearch(query),
+        options,
+      ),
     getRun: (params, options) =>
       request(apiResponses.getRun, buildPath(apiRoutes.getRun, params), undefined, options),
     listCaseSummaries: (params, query, options) =>
