@@ -20,9 +20,13 @@ const errorResponse: AgentResponse = {
 
 describe('caseExecutionToMetricContext', () => {
   it.each([
-    [successResponse, undefined, { outcome: 'completed', output: 'Paris', trace: null }],
+    [
+      successResponse,
+      undefined,
+      { outcome: 'completed', output: 'Paris', trace: null, artifacts: [] },
+    ],
     [errorResponse, undefined, { outcome: 'agent_error', trace: null }],
-    [successResponse, trace, { outcome: 'completed', output: 'Paris', trace }],
+    [successResponse, trace, { outcome: 'completed', output: 'Paris', trace, artifacts: [] }],
     [errorResponse, trace, { outcome: 'agent_error', trace }],
   ] as const)(
     'maps a completed %o response with trace %o',

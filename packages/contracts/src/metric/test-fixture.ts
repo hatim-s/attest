@@ -1,5 +1,6 @@
 import { z } from 'zod';
 
+import { inlineArtifactSchema } from '../agent/artifact.js';
 import { testCaseSchema } from '../project/resources/case.js';
 import { traceSchema } from '../trace/protocol.js';
 import { METRIC_TEST_FIXTURE_SCHEMA_ID } from '../schema/identifiers.js';
@@ -12,6 +13,7 @@ const metricTestFixtureSchema = z
     expected_pass: z.boolean(),
     output: z.json(),
     trace: traceSchema.nullable(),
+    artifacts: z.array(inlineArtifactSchema).optional(),
   })
   .meta({ id: 'MetricTestFixture' });
 

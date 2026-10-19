@@ -1,3 +1,5 @@
+import type { MetricRequest } from '@attest/contracts';
+
 import type { MetricErrorInfo } from '../metric-evaluation.js';
 import type { CommandMetricDefinition } from '../metric-definitions.js';
 import type { AbortReason } from './abort-signal.js';
@@ -14,10 +16,13 @@ type MetricTransportOptions = {
 /** Keeps transport errors separate from successful response text. */
 type MetricTransportOutcome = { ok: true; text: string } | { ok: false; error: MetricErrorInfo };
 
-/** Runs a command in the caller's execution environment and returns its bounded protocol output. */
+/**
+ * Runs a command in the caller's execution environment and returns its bounded protocol output.
+ * It takes the request object so it can write the artifacts as files and set `artifact_dir`.
+ */
 type CommandMetricTransport = (
   definition: CommandMetricDefinition,
-  requestBody: string,
+  request: MetricRequest,
   options: MetricTransportOptions,
 ) => Promise<MetricTransportOutcome>;
 

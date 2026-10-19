@@ -148,7 +148,9 @@ attest metric test exact --fixture ./fixture.json --output json
 ```
 
 The fixture contains a canonical case, expected verdict, arbitrary JSON output, and either an
-`attest.trace` document or `null`. A verdict mismatch is
+`attest.trace` document or `null`. An optional `artifacts` array of
+[inline artifacts](../specs/agent-contract.md#artifacts) reaches the metric exactly as an agent's
+artifacts would, so an exec metric can read them from `artifact_dir`. A verdict mismatch is
 `metric_fixture_mismatch` (exit 1). A judge, executable, or HTTP boundary failure is
 `metric_infrastructure_failed` (exit 4). `--from-json -` and `--fixture -` cannot share the same
 stdin stream.

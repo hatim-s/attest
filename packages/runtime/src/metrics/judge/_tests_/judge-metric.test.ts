@@ -18,7 +18,7 @@ const definition: JudgeMetricDefinition = {
 
 const context: CompletedMetricContext = {
   caseDefinition: { id: 'capital', input: { question: 'Capital?' }, expected: 'Paris' },
-  execution: { outcome: 'completed', output: 'Paris', trace: null },
+  execution: { outcome: 'completed', output: 'Paris', trace: null, artifacts: [] },
 };
 
 const record: JudgeRecord = {

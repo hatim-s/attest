@@ -1,7 +1,11 @@
 import type { ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
 
-import { killProcessTree, spawnInProcessGroup } from '@attest/executor';
+import type { InlineArtifact, MetricRequest } from '@attest/contracts';
+import { killProcessTree, resolveArtifactDestination, spawnInProcessGroup } from '@attest/executor';
 
 import type { MetricErrorInfo } from '../metric-evaluation.js';
 import type { CommandMetricDefinition } from '../metric-definitions.js';
@@ -78,10 +82,10 @@ const terminationError = (
 };
 
 /**
- * Invokes a CLI metric in its own process group. The metric owns the whole child tree: every
+ * Runs a CLI metric in its own process group. The metric owns the whole child tree: every
  * forced shutdown sweeps descendants through the executor before the outcome resolves.
  */
-const invokeCommandMetric = (
+const runCommand = (
   definition: CommandMetricDefinition,
   requestBody: string,
   options: MetricTransportOptions,
@@ -191,5 +195,44 @@ const invokeCommandMetric = (
     signal.addEventListener('abort', abort, { once: true });
     child.stdin?.end(requestBody);
   });
+
+/**
+ * Writes each artifact to `<directory>/<path>`. The contract already rejects absolute paths and
+ * `..` segments; resolveArtifactDestination still refuses any path that leaves the directory.
+ */
+const writeArtifacts = async (
+  directory: string,
+  artifacts: readonly InlineArtifact[],
+): Promise<void> => {
+  for (const artifact of artifacts) {
+    const destination = resolveArtifactDestination(directory, artifact.path);
+    await mkdir(dirname(destination), { recursive: true });
+    await writeFile(destination, Buffer.from(artifact.content, artifact.encoding));
+  }
+};
+
+/**
+ * Invokes a CLI metric with its artifacts as files. They are written to a fresh temporary
+ * directory named by `artifact_dir`, which is removed once the metric settles.
+ */
+const invokeCommandMetric = async (
+  definition: CommandMetricDefinition,
+  request: MetricRequest,
+  options: MetricTransportOptions,
+): Promise<MetricTransportOutcome> => {
+  const directory = await mkdtemp(join(tmpdir(), 'attest-metric-'));
+
+  try {
+    await writeArtifacts(directory, request.artifacts);
+
+    return await runCommand(
+      definition,
+      JSON.stringify({ ...request, artifact_dir: directory }),
+      options,
+    );
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+};
 
 export { invokeCommandMetric };

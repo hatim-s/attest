@@ -72,7 +72,12 @@ const runMetricTestCommand = async (
 
   const context: MetricContext = {
     caseDefinition,
-    execution: { outcome: 'completed', output: fixture.output, trace: fixture.trace },
+    execution: {
+      outcome: 'completed',
+      output: fixture.output,
+      trace: fixture.trace,
+      artifacts: fixture.artifacts ?? [],
+    },
   };
 
   const { evaluation, secrets } = await evaluateMetricResource({

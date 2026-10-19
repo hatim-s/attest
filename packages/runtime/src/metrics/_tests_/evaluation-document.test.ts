@@ -60,7 +60,12 @@ describe('buildEvaluationDocument', () => {
     expect(
       buildEvaluationDocument({
         caseDefinition,
-        execution: { outcome: 'completed', output: { answer: 'Paris' }, trace: null },
+        execution: {
+          outcome: 'completed',
+          output: { answer: 'Paris' },
+          trace: null,
+          artifacts: [],
+        },
       }),
     ).toEqual({
       input: caseDefinition.input,

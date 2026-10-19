@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it, vi } from 'vitest';
+import { z } from 'zod';
 
 import type { CompletedMetricContext } from '../metric-evaluation.js';
 import { executeExecutableMetric } from '../exec-metric.js';
@@ -18,7 +19,7 @@ const metricContext = (): CompletedMetricContext => ({
     expected: { greeting: 'hello' },
     params: { formal: false },
   },
-  execution: { outcome: 'completed', output: 'hello', trace: null },
+  execution: { outcome: 'completed', output: 'hello', trace: null, artifacts: [] },
 });
 
 /** Resolves a fixture command through the active Node executable to avoid shell-specific behavior. */
@@ -124,7 +125,7 @@ describe('executeExecutableMetric command metrics', () => {
     expect(evaluated).toMatchObject({ status: 'evaluated', score: 0.8, pass: true });
     expect(commandTransport).toHaveBeenCalledWith(
       definition,
-      expect.stringContaining('"output":"hello"'),
+      expect.objectContaining({ output: 'hello', artifacts: [], artifact_dir: null }),
       expect.objectContaining({ outputCapBytes: 1234, timeoutMs: 5000 }),
     );
     commandTransport.mockResolvedValue({ ok: true, text: '{"score":99}' });
@@ -134,6 +135,41 @@ describe('executeExecutableMetric command metrics', () => {
     });
 
     expect(malformed).toMatchObject({ status: 'error', error: { kind: 'exec_malformed_output' } });
+  });
+
+  it('writes artifacts into a temporary artifact_dir and removes it once the metric settles', async () => {
+    const context = metricContext();
+
+    context.execution.artifacts = [
+      {
+        kind: 'inline',
+        path: 'notes/a.txt',
+        media_type: 'text/plain',
+        encoding: 'utf8',
+        content: 'hello file',
+      },
+      {
+        kind: 'inline',
+        path: 'b.bin',
+        media_type: 'application/octet-stream',
+        encoding: 'base64',
+        content: Buffer.from([0xff, 0x00, 0x01]).toString('base64'),
+      },
+    ];
+
+    const evaluation = await executeExecutableMetric(
+      { name: 'artifacts', type: 'exec', command: buildFixtureCommand('read-artifacts.mjs') },
+      context,
+    );
+
+    expect(evaluation).toMatchObject({ status: 'evaluated', pass: true });
+
+    const directory = z
+      .object({ details: z.object({ artifact_dir: z.string() }) })
+      .parse(evaluation).details.artifact_dir;
+
+    expect(directory).toContain('attest-metric-');
+    await expect(access(directory)).rejects.toThrow();
   });
 
   it('normalizes a valid fixture result', async () => {

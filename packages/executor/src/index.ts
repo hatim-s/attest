@@ -2,7 +2,7 @@ export { AgentInvocationError, type InvocationErrorCode } from './errors.js';
 
 export { invokeAgent } from './invoke.js';
 
-export { invokeVercelSandboxAgent } from './adapters/sandbox/index.js';
+export { invokeVercelSandboxAgent, resolveArtifactDestination } from './adapters/sandbox/index.js';
 
 export {
   killProcessTree,

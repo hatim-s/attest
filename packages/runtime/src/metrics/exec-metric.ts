@@ -86,15 +86,15 @@ const executeExecutableMetric = async (
     timeoutMs: options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
   };
 
-  const requestBody = JSON.stringify(buildMetricRequest(context));
+  const request = buildMetricRequest(context);
 
   const outcome =
     'command' in definition
       ? await (
           options.commandTransport ??
           (await import('./internal/exec-command.js')).invokeCommandMetric
-        )(definition, requestBody, transportOptions)
-      : await invokeHttpMetric(definition, requestBody, transportOptions);
+        )(definition, request, transportOptions)
+      : await invokeHttpMetric(definition, JSON.stringify(request), transportOptions);
 
   const parsed = outcome.ok ? parseInvocationResult(outcome.text) : outcome;
   const durationMs = performance.now() - startedAt;
