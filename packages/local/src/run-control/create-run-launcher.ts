@@ -98,4 +98,4 @@ const createRunLauncher = ({ catalog, command }: RunLauncherOptions): RunControl
   };
 };
 
-export { createRunLauncher, type RunLauncherOptions };
+export { createRunLauncher };

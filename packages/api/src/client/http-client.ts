@@ -88,56 +88,62 @@ const createHttpClient = (
     mode: { kind: 'live' },
     capabilities,
     listProjects: (options) =>
-      request(apiResponses.listProjects, apiRoutes.listProjects, { method: 'GET', options }),
+      request(apiResponses.listProjects, apiRoutes.listProjects.path, {
+        method: apiRoutes.listProjects.method,
+        options,
+      }),
     listRuns: (params, query, options) =>
-      request(apiResponses.listRuns, buildPath(apiRoutes.listRuns, params), {
-        method: 'GET',
+      request(apiResponses.listRuns, buildPath(apiRoutes.listRuns.path, params), {
+        method: apiRoutes.listRuns.method,
         query: toSearch(query),
         options,
       }),
     getRun: (params, options) =>
-      request(apiResponses.getRun, buildPath(apiRoutes.getRun, params), { method: 'GET', options }),
+      request(apiResponses.getRun, buildPath(apiRoutes.getRun.path, params), {
+        method: apiRoutes.getRun.method,
+        options,
+      }),
     listCaseSummaries: (params, query, options) =>
-      request(apiResponses.listCaseSummaries, buildPath(apiRoutes.listCaseSummaries, params), {
-        method: 'GET',
+      request(apiResponses.listCaseSummaries, buildPath(apiRoutes.listCaseSummaries.path, params), {
+        method: apiRoutes.listCaseSummaries.method,
         query: toSearch(query),
         options,
       }),
     getCase: (params, options) =>
-      request(apiResponses.getCase, buildPath(apiRoutes.getCase, params), {
-        method: 'GET',
+      request(apiResponses.getCase, buildPath(apiRoutes.getCase.path, params), {
+        method: apiRoutes.getCase.method,
         options,
       }),
     listRunSuites: (params, options) =>
-      request(apiResponses.listRunSuites, buildPath(apiRoutes.listRunSuites, params), {
-        method: 'GET',
+      request(apiResponses.listRunSuites, buildPath(apiRoutes.listRunSuites.path, params), {
+        method: apiRoutes.listRunSuites.method,
         options,
       }),
     getSuiteHistory: (params, query, options) =>
-      request(apiResponses.getSuiteHistory, buildPath(apiRoutes.getSuiteHistory, params), {
-        method: 'GET',
+      request(apiResponses.getSuiteHistory, buildPath(apiRoutes.getSuiteHistory.path, params), {
+        method: apiRoutes.getSuiteHistory.method,
         query: toSearch(query),
         options,
       }),
     getDiff: (params, options) =>
-      request(apiResponses.getDiff, buildPath(apiRoutes.getDiff, params), {
-        method: 'GET',
+      request(apiResponses.getDiff, buildPath(apiRoutes.getDiff.path, params), {
+        method: apiRoutes.getDiff.method,
         options,
       }),
     listTests: (params, options) =>
-      request(apiResponses.listTests, buildPath(apiRoutes.listTests, params), {
-        method: 'GET',
+      request(apiResponses.listTests, buildPath(apiRoutes.listTests.path, params), {
+        method: apiRoutes.listTests.method,
         options,
       }),
     startRun: (params, body, options) =>
-      request(apiResponses.startRun, buildPath(apiRoutes.startRun, params), {
-        method: 'POST',
+      request(apiResponses.startRun, buildPath(apiRoutes.startRun.path, params), {
+        method: apiRoutes.startRun.method,
         body,
         options,
       }),
     cancelRun: (params, options) =>
-      request(apiResponses.cancelRun, buildPath(apiRoutes.cancelRun, params), {
-        method: 'POST',
+      request(apiResponses.cancelRun, buildPath(apiRoutes.cancelRun.path, params), {
+        method: apiRoutes.cancelRun.method,
         options,
       }),
   };

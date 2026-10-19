@@ -1,20 +1,17 @@
-/**
- * Every route is scoped to one catalog project; only the project list sits outside one.
- * `startRun` and `cancelRun` are POST routes; `startRun` shares its path with `listRuns`.
- */
+/** Every route is scoped to one catalog project; only the project list sits outside one. */
 const apiRoutes = {
-  listProjects: '/projects',
-  listRuns: '/projects/:projectKey/runs',
-  getRun: '/projects/:projectKey/runs/:runId',
-  listCaseSummaries: '/projects/:projectKey/runs/:runId/cases',
-  getCase: '/projects/:projectKey/runs/:runId/cases/:suiteName/:caseId',
-  listRunSuites: '/projects/:projectKey/runs/:runId/suites',
-  getSuiteHistory: '/projects/:projectKey/suites/:suiteName/history',
-  getDiff: '/projects/:projectKey/diffs/:baseRunId/:candidateRunId',
-  listTests: '/projects/:projectKey/tests',
-  startRun: '/projects/:projectKey/runs',
-  cancelRun: '/projects/:projectKey/runs/:runId/cancel',
-} as const;
+  listProjects: { method: 'GET', path: '/projects' },
+  listRuns: { method: 'GET', path: '/projects/:projectKey/runs' },
+  getRun: { method: 'GET', path: '/projects/:projectKey/runs/:runId' },
+  listCaseSummaries: { method: 'GET', path: '/projects/:projectKey/runs/:runId/cases' },
+  getCase: { method: 'GET', path: '/projects/:projectKey/runs/:runId/cases/:suiteName/:caseId' },
+  listRunSuites: { method: 'GET', path: '/projects/:projectKey/runs/:runId/suites' },
+  getSuiteHistory: { method: 'GET', path: '/projects/:projectKey/suites/:suiteName/history' },
+  getDiff: { method: 'GET', path: '/projects/:projectKey/diffs/:baseRunId/:candidateRunId' },
+  listTests: { method: 'GET', path: '/projects/:projectKey/tests' },
+  startRun: { method: 'POST', path: '/projects/:projectKey/runs' },
+  cancelRun: { method: 'POST', path: '/projects/:projectKey/runs/:runId/cancel' },
+} as const satisfies Record<string, { method: 'GET' | 'POST'; path: string }>;
 
 type ApiRoute = keyof typeof apiRoutes;
 

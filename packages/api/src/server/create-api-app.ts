@@ -45,27 +45,27 @@ const createApiApp = ({ catalog, control }: ApiAppDeps): Hono<ProjectScope> => {
     return control;
   };
 
-  app.get(apiRoutes.listProjects, async (context) =>
+  app.on(apiRoutes.listProjects.method, apiRoutes.listProjects.path, async (context) =>
     context.json({ items: await catalog.listProjects() }),
   );
   // Opens the project once per request; the catalog owns caching of opened sources.
-  app.use(`${apiRoutes.listProjects}/:projectKey/*`, async (context, next) => {
+  app.use(`${apiRoutes.listProjects.path}/:projectKey/*`, async (context, next) => {
     const { projectKey } = parseInput(projectParamsSchema, context.req.param());
     context.set('source', await catalog.openProject(projectKey));
     await next();
   });
 
-  app.get(apiRoutes.listRuns, async (context) =>
+  app.on(apiRoutes.listRuns.method, apiRoutes.listRuns.path, async (context) =>
     context.json(
       await context.var.source.listRuns(parseInput(pageQuerySchema, context.req.query())),
     ),
   );
-  app.get(apiRoutes.getRun, async (context) =>
+  app.on(apiRoutes.getRun.method, apiRoutes.getRun.path, async (context) =>
     context.json(
       await context.var.source.getRun(parseInput(runParamsSchema, context.req.param()).runId),
     ),
   );
-  app.get(apiRoutes.listCaseSummaries, async (context) => {
+  app.on(apiRoutes.listCaseSummaries.method, apiRoutes.listCaseSummaries.path, async (context) => {
     const { runId } = parseInput(runParamsSchema, context.req.param());
 
     return context.json(
@@ -75,17 +75,17 @@ const createApiApp = ({ catalog, control }: ApiAppDeps): Hono<ProjectScope> => {
       ),
     );
   });
-  app.get(apiRoutes.getCase, async (context) => {
+  app.on(apiRoutes.getCase.method, apiRoutes.getCase.path, async (context) => {
     const { runId, suiteName, caseId } = parseInput(caseParamsSchema, context.req.param());
 
     return context.json(await context.var.source.getCase(runId, suiteName, caseId));
   });
-  app.get(apiRoutes.getDiff, async (context) => {
+  app.on(apiRoutes.getDiff.method, apiRoutes.getDiff.path, async (context) => {
     const { baseRunId, candidateRunId } = parseInput(diffParamsSchema, context.req.param());
 
     return context.json(await diffRuns(context.var.source, baseRunId, candidateRunId));
   });
-  app.get(apiRoutes.listRunSuites, async (context) => {
+  app.on(apiRoutes.listRunSuites.method, apiRoutes.listRunSuites.path, async (context) => {
     const { runId } = parseInput(runParamsSchema, context.req.param());
 
     return context.json({
@@ -93,7 +93,7 @@ const createApiApp = ({ catalog, control }: ApiAppDeps): Hono<ProjectScope> => {
       suites: summarizeSuites(await readCaseSummaries(context.var.source, runId)),
     });
   });
-  app.get(apiRoutes.getSuiteHistory, async (context) => {
+  app.on(apiRoutes.getSuiteHistory.method, apiRoutes.getSuiteHistory.path, async (context) => {
     const { suiteName, limit } = parseInput(suiteHistoryRequestSchema, {
       ...context.req.query(),
       ...context.req.param(),
@@ -101,20 +101,20 @@ const createApiApp = ({ catalog, control }: ApiAppDeps): Hono<ProjectScope> => {
 
     return context.json(await readSuiteHistory(context.var.source, suiteName, limit));
   });
-  app.get(apiRoutes.listTests, async (context) => {
+  app.on(apiRoutes.listTests.method, apiRoutes.listTests.path, async (context) => {
     const runControl = requireControl();
     const { projectKey } = parseInput(projectParamsSchema, context.req.param());
 
     return context.json({ items: await runControl.listTests(projectKey) });
   });
-  app.post(apiRoutes.startRun, async (context) => {
+  app.on(apiRoutes.startRun.method, apiRoutes.startRun.path, async (context) => {
     const runControl = requireControl();
     const { projectKey } = parseInput(projectParamsSchema, context.req.param());
     const request = await parseJsonBody(runStartRequestSchema, context.req.raw);
 
     return context.json(await runControl.startRun(projectKey, request), 201);
   });
-  app.post(apiRoutes.cancelRun, async (context) => {
+  app.on(apiRoutes.cancelRun.method, apiRoutes.cancelRun.path, async (context) => {
     const runControl = requireControl();
     const { projectKey, runId } = parseInput(runParamsSchema, context.req.param());
 
