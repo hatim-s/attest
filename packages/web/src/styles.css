@@ -198,6 +198,11 @@ pre,
   font-size: 16px;
   margin: 2px 0 0;
 }
+.run-sidebar-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
 .eyebrow {
   color: var(--muted);
   font-size: 10px;
@@ -269,6 +274,18 @@ pre,
   font-weight: 700;
   letter-spacing: -0.03em;
   line-height: 1.15;
+}
+.run-header-status {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
+  max-width: 360px;
+}
+.run-header-status > .notice,
+.run-header-status > .error-notice {
+  flex-basis: 100%;
 }
 .heading-1 h1 code {
   letter-spacing: -0.04em;
@@ -412,7 +429,9 @@ pre,
 .tab:focus-visible,
 .topbar-nav a:focus-visible,
 .case-table-row:has(.case-link:focus-visible),
-select:focus-visible {
+select:focus-visible,
+.field input:focus-visible,
+.test-option:has(input:focus-visible) {
   outline: 3px solid color-mix(in srgb, var(--accent) 32%, transparent);
   outline-offset: 2px;
 }
@@ -431,6 +450,11 @@ select:focus-visible {
 .button-ghost {
   background: transparent;
   border-color: transparent;
+}
+.button-danger {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: var(--surface);
 }
 .badge {
   display: inline-flex;
@@ -560,6 +584,11 @@ select:focus-visible {
   border-left: 1px solid var(--border);
   box-shadow: var(--shadow);
   overflow: auto;
+  display: flex;
+  flex-direction: column;
+}
+.case-drawer > * {
+  flex-shrink: 0;
 }
 .drawer-header {
   display: flex;
@@ -931,6 +960,7 @@ select:focus-visible {
 }
 .loading,
 .error-notice,
+.notice,
 .empty-compact {
   padding: 18px;
   color: var(--muted);
@@ -954,6 +984,150 @@ select:focus-visible {
   border: 1px solid color-mix(in srgb, var(--danger) 25%, var(--border));
   background: var(--danger-soft);
   border-radius: 10px;
+}
+.notice {
+  margin: 0;
+  color: var(--warning);
+  border: 1px solid color-mix(in srgb, var(--warning) 25%, var(--border));
+  background: var(--warning-soft);
+  border-radius: 10px;
+}
+.error-diagnostics {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 6px 12px;
+  margin: 12px 0 0;
+  color: var(--text);
+}
+.error-diagnostics dt {
+  color: var(--muted);
+}
+.error-diagnostics dd {
+  margin: 0;
+  min-width: 0;
+}
+.error-diagnostics pre {
+  margin: 0;
+  overflow: auto;
+  max-height: 240px;
+  font-size: 11px;
+}
+.drawer-content > .notice {
+  margin-top: 22px;
+}
+.new-run-form {
+  flex: 1 0 auto;
+  display: flex;
+  flex-direction: column;
+}
+.new-run-form > .drawer-content {
+  flex: 1 0 auto;
+  padding-bottom: 22px;
+}
+.test-checklist {
+  margin: 0;
+  border-width: 0 0 1px;
+  min-inline-size: 0;
+}
+.test-checklist legend {
+  float: left;
+  width: 100%;
+  padding: 0;
+  margin: 0 0 12px;
+  font-size: 12px;
+  font-weight: 700;
+}
+.test-checklist legend + * {
+  clear: both;
+}
+.test-checklist-count {
+  margin-left: 6px;
+  color: var(--muted);
+  font-weight: 400;
+}
+.test-checklist-options {
+  display: grid;
+  gap: 2px;
+  max-height: min(360px, 42vh);
+  overflow: auto;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.test-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 8px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.test-option:hover {
+  background: var(--surface-muted);
+}
+.test-option input {
+  margin: 3px 0 0;
+  accent-color: var(--accent-strong);
+}
+.test-option-text {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+.test-option-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.form-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 14px;
+  border-bottom: 0;
+}
+.field {
+  display: grid;
+  align-content: start;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.field-wide {
+  grid-column: 1 / -1;
+}
+.field input {
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-muted);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+}
+.field small {
+  font-size: 11px;
+}
+.drawer-footer {
+  position: sticky;
+  bottom: 0;
+  display: grid;
+  justify-items: end;
+  gap: 12px;
+  padding: 16px 28px;
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+}
+.drawer-footer > .error-notice {
+  justify-self: stretch;
+  max-height: 40vh;
+  overflow: auto;
+}
+.confirm-group {
+  display: flex;
+  gap: 8px;
 }
 .welcome-card {
   padding: 50px;

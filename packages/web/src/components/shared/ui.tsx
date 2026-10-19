@@ -1,7 +1,9 @@
-import type { ButtonHTMLAttributes, ReactNode } from 'react';
+import type { ComponentProps, ReactNode } from 'react';
+import { ApiError } from '@attest/api/client';
+import type { CliDiagnostics } from '@attest/core/records';
 
-type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
-  tone?: 'primary' | 'secondary' | 'ghost';
+type ButtonProps = ComponentProps<'button'> & {
+  tone?: 'primary' | 'secondary' | 'ghost' | 'danger';
 };
 
 /** Button with tone classes. Defaults to `type="button"` so it never submits a form. */
@@ -44,10 +46,55 @@ const Heading = ({ level, eyebrow, title, meta, children }: HeadingProps) => {
   );
 };
 
-/** Full-width alert for a failed query. */
+/** What the CLI or the project loader reported. Its message is already the notice's text. */
+const DiagnosticsList = ({ diagnostics }: { diagnostics: CliDiagnostics }) => (
+  <dl className="error-diagnostics">
+    <dt>Code</dt>
+    <dd>
+      <code>{diagnostics.code}</code>
+    </dd>
+    {diagnostics.path !== undefined ? (
+      <>
+        <dt>Path</dt>
+        <dd>
+          <code>{diagnostics.path}</code>
+        </dd>
+      </>
+    ) : null}
+    {diagnostics.hint !== undefined ? (
+      <>
+        <dt>Hint</dt>
+        <dd>{diagnostics.hint}</dd>
+      </>
+    ) : null}
+    {diagnostics.retryable !== undefined ? (
+      <>
+        <dt>Retry</dt>
+        <dd>
+          {diagnostics.retryable
+            ? 'Yes. A later attempt can succeed.'
+            : 'Not until the cause is fixed.'}
+        </dd>
+      </>
+    ) : null}
+    {diagnostics.details !== undefined ? (
+      <>
+        <dt>Details</dt>
+        <dd>
+          <pre>{JSON.stringify(diagnostics.details, null, 2)}</pre>
+        </dd>
+      </>
+    ) : null}
+  </dl>
+);
+
+/** Full-width alert for a failed request, with diagnostics when the API sent them. */
 const ErrorNotice = ({ error }: { error: unknown }) => (
   <div className="error-notice" role="alert">
     {error instanceof Error ? error.message : 'Something went wrong.'}
+    {error instanceof ApiError && error.details !== undefined ? (
+      <DiagnosticsList diagnostics={error.details} />
+    ) : null}
   </div>
 );
 

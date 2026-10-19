@@ -3,12 +3,13 @@ import type { ApiClient } from '@attest/api/client';
 import {
   queryOptions,
   useInfiniteQuery,
+  useMutation,
   useQueries,
   useQuery,
   useQueryClient,
 } from '@tanstack/react-query';
 
-import type { RunStatus } from '@attest/core/records';
+import type { RunStartRequest, RunStatus } from '@attest/core/records';
 import { useApiClient } from './api-client-context.js';
 
 /** Lists the catalog once; the `/` redirect and the projects page share it. */
@@ -197,6 +198,42 @@ const suiteHistoryQueryOptions = (
 const useSuiteHistory = (projectKey: string, suiteName: string, limit: number) =>
   useQuery(suiteHistoryQueryOptions(useApiClient(), projectKey, suiteName, limit));
 
+/** Lists the tests a new run can select. Tests change only when someone edits the project. */
+const useTests = (projectKey: string) => {
+  const client = useApiClient();
+
+  return useQuery({
+    queryKey: ['tests', projectKey],
+    queryFn: async ({ signal }) => (await client.listTests({ projectKey }, { signal })).items,
+  });
+};
+
+/** Starts a run, then refreshes the project's runs page so the sidebar and projects table list it. */
+const useStartRun = (projectKey: string) => {
+  const client = useApiClient();
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (request: RunStartRequest) => client.startRun({ projectKey }, request),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['runs', projectKey] }),
+  });
+};
+
+/** Requests cancellation, then refreshes the run and the sidebar so a new status shows at once. */
+const useCancelRun = (projectKey: string, runId: string) => {
+  const client = useApiClient();
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: () => client.cancelRun({ projectKey, runId }),
+    onSuccess: () =>
+      Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['run', projectKey, runId] }),
+        queryClient.invalidateQueries({ queryKey: ['runs', projectKey] }),
+      ]),
+  });
+};
+
 export {
   projectsQueryOptions,
   useProjects,
@@ -215,4 +252,7 @@ export {
   useRun,
   useRuns,
   useRunsForProjects,
+  useTests,
+  useStartRun,
+  useCancelRun,
 };
