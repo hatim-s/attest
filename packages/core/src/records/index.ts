@@ -28,6 +28,17 @@ export {
 export { projectKeySchema, projectRecordSchema, type ProjectRecord } from './project-schemas.js';
 
 export {
+  testSummarySchema,
+  runStartRequestSchema,
+  runCancelOutcomeSchema,
+  runStartDiagnosticsSchema,
+  type TestSummary,
+  type RunStartRequest,
+  type RunCancelOutcome,
+  type RunStartDiagnostics,
+} from './run-control-schemas.js';
+
+export {
   type RunRecord,
   type RunStatus,
   type RunSummary,

@@ -32,6 +32,8 @@ const API_CODE_BY_STORE_CODE = {
   CASE_CONFLICT: 'INTERNAL_ERROR',
   WRITE_FAILED: 'INTERNAL_ERROR',
   DRIVER_MISUSE: 'INTERNAL_ERROR',
+  RUN_START_FAILED: 'RUN_START_FAILED',
+  CONTROL_UNAVAILABLE: 'CONTROL_UNAVAILABLE',
 } as const satisfies Record<StoreErrorCode, ApiErrorCode>;
 
 /** Keeps source diagnostics actionable while withholding unexpected failure details. */
@@ -46,7 +48,9 @@ const toErrorEnvelope = (error: Error): ApiErrorEnvelope => {
 
   const code = API_CODE_BY_STORE_CODE[error.code];
 
-  return { error: { code, message: code === 'INTERNAL_ERROR' ? INTERNAL_MESSAGE : error.message } };
+  if (code === 'INTERNAL_ERROR') return { error: { code, message: INTERNAL_MESSAGE } };
+
+  return { error: { code, message: error.message, details: error.details } };
 };
 
 export { parseInput, toErrorEnvelope };

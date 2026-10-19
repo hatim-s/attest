@@ -33,6 +33,7 @@ export {
   type RunMetadata,
   type ProjectCatalog,
   type ProjectRecord,
+  type RunControl,
   type RunIdentity,
   type RunRecord,
   type RunStatus,
