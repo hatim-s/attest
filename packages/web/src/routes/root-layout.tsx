@@ -51,8 +51,7 @@ const RootLayout = () => {
           <span className="brand-mark">A</span>
           <div>
             <strong>attest</strong>
-            {/* The key stands in for the name until the catalog loads. */}
-            <span>{projectKey === undefined ? 'evaluations' : (project?.name ?? projectKey)}</span>
+            <span>{projectKey === undefined ? 'evaluations' : project?.name}</span>
           </div>
         </div>
         <div className="topbar-actions">

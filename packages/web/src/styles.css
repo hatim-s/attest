@@ -167,6 +167,8 @@ pre,
   letter-spacing: -0.02em;
 }
 .brand div span {
+  /* Holds the line while the project name loads, so the brand does not shift. */
+  min-height: 1lh;
   color: var(--muted);
   font-size: 11px;
 }
@@ -398,7 +400,8 @@ pre,
     border-color 0.15s,
     transform 0.15s;
 }
-.button:hover:not(:disabled) {
+.button:hover:not(:disabled),
+.project-switcher:hover {
   border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
 }
 .button:active:not(:disabled) {
@@ -1072,4 +1075,8 @@ select:focus-visible {
 .project-switcher {
   max-width: 220px;
   margin-right: 8px;
+  padding: 7px 11px;
+  border-radius: 9px;
+  font-size: inherit;
+  cursor: pointer;
 }
