@@ -1,4 +1,4 @@
-import { Link, Outlet, useLocation, useNavigate, useParams } from '@tanstack/react-router';
+import { Link, Outlet, useLocation, useParams } from '@tanstack/react-router';
 import { useEffect, useState } from 'react';
 import { useApiClient } from '../api/api-client-context.js';
 import { useProjects } from '../api/queries.js';
@@ -26,7 +26,6 @@ const RootLayout = () => {
   const { mode } = useApiClient();
   const [theme, setTheme] = useState<Theme>(getInitialTheme);
   const { projectKey } = useParams({ strict: false });
-  const navigate = useNavigate();
   const projects = useProjects().data ?? [];
   const project = projects.find((item) => item.key === projectKey);
 
@@ -57,18 +56,7 @@ const RootLayout = () => {
           </div>
         </div>
         <div className="topbar-actions">
-          <ProjectSwitcher
-            projects={projects}
-            projectKey={projectKey}
-            // Switching starts the other project fresh, so branch and label filters stay behind.
-            onSelect={(key) =>
-              void navigate(
-                key === undefined
-                  ? { to: '/projects' }
-                  : { to: '/projects/$projectKey/runs', params: { projectKey: key }, search: {} },
-              )
-            }
-          />
+          <ProjectSwitcher projects={projects} projectKey={projectKey} />
           {projectKey === undefined ? null : (
             <nav className="topbar-nav" aria-label="Dashboard">
               <Link

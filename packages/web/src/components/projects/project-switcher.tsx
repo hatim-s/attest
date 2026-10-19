@@ -1,3 +1,4 @@
+import { useNavigate } from '@tanstack/react-router';
 import type { ProjectRecord } from '@attest/core/records';
 
 /** Project keys start with a letter or digit, so the empty value cannot name a project. */
@@ -7,12 +8,15 @@ type ProjectSwitcherProps = {
   projects: ProjectRecord[];
   /** The open project, or `undefined` off project pages. */
   projectKey: string | undefined;
-  /** Receives the chosen project key, or `undefined` for "All projects". */
-  onSelect: (projectKey: string | undefined) => void;
 };
 
-/** Topbar project picker. A catalog with one project has nothing to switch to, so it renders nothing. */
-const ProjectSwitcher = ({ projects, projectKey, onSelect }: ProjectSwitcherProps) => {
+/**
+ * Topbar project picker. Branch and label filters belong to the project being left, so switching
+ * opens the other project's runs without them. A catalog with one project renders nothing.
+ */
+const ProjectSwitcher = ({ projects, projectKey }: ProjectSwitcherProps) => {
+  const navigate = useNavigate();
+
   if (projects.length <= 1) return null;
 
   const selected = projects.some((project) => project.key === projectKey)
@@ -24,9 +28,15 @@ const ProjectSwitcher = ({ projects, projectKey, onSelect }: ProjectSwitcherProp
       aria-label="Project"
       className="project-switcher"
       value={selected}
-      onChange={(event) =>
-        onSelect(event.target.value === ALL_PROJECTS ? undefined : event.target.value)
-      }
+      onChange={(event) => {
+        const key = event.target.value;
+
+        void navigate(
+          key === ALL_PROJECTS
+            ? { to: '/projects' }
+            : { to: '/projects/$projectKey/runs', params: { projectKey: key }, search: {} },
+        );
+      }}
     >
       <option value={ALL_PROJECTS}>All projects</option>
       {projects.map((project) => (
