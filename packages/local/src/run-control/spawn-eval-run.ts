@@ -6,7 +6,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 
 import { evalEventSchema, type EvalRunRequest } from '@attest/contracts';
 import { StoreError } from '@attest/core';
-import type { RunStartDiagnostics } from '@attest/core/records';
+import type { CliDiagnostics } from '@attest/core/records';
 
 /** How to invoke the attest CLI: the executable and the arguments that come before `eval run`. */
 type CliCommand = { command: string; args: readonly string[] };
@@ -21,7 +21,7 @@ type ProcessEnd = { exitCode: number | null; signal: NodeJS.Signals | null } | {
 
 type OutputLine =
   | { kind: 'started'; runId: string }
-  | { kind: 'failed'; diagnostics: RunStartDiagnostics }
+  | { kind: 'failed'; diagnostics: CliDiagnostics }
   | { kind: 'event' }
   | { kind: 'text' };
 
@@ -29,8 +29,26 @@ const POLL_INTERVAL_MS = 25;
 
 const READ_CHUNK_BYTES = 64 * 1024;
 
-/** Lines of unstructured output kept to explain a CLI that crashed before reporting anything. */
-const OUTPUT_TAIL_LINES = 20;
+/**
+ * A longer unterminated line is cut here and read as text. The CLI's events are far smaller, so
+ * only output that could not be an event is cut, and a child that never ends a line stays bounded.
+ */
+const MAX_LINE_CHARACTERS = 64 * 1024;
+
+/** The unstructured output kept to explain a CLI that crashed before reporting anything. */
+const OUTPUT_TAIL_LINES = 32;
+
+const OUTPUT_TAIL_CHARACTERS = 16 * 1024;
+
+/** Keeps the last lines of output within both limits; a single long line keeps its end. */
+const appendToTail = (tail: readonly string[], line: string): string[] => {
+  const kept = [...tail, line.slice(-OUTPUT_TAIL_CHARACTERS)].slice(-OUTPUT_TAIL_LINES);
+  let characters = kept.reduce((total, entry) => total + entry.length, 0);
+
+  while (characters > OUTPUT_TAIL_CHARACTERS) characters -= kept.shift()?.length ?? 0;
+
+  return kept;
+};
 
 /** Parses one line of the child's output; anything outside the eval event vocabulary is text. */
 const classifyLine = (line: string): OutputLine => {
@@ -52,9 +70,7 @@ const classifyLine = (line: string): OutputLine => {
 
   if (event.event !== 'result' || event.data.result.ok) return { kind: 'event' };
 
-  const { code, message, path, hint, details } = event.data.result.error;
-
-  return { kind: 'failed', diagnostics: { code, message, path, hint, details } };
+  return { kind: 'failed', diagnostics: event.data.result.error };
 };
 
 /** Reads what the child appended to its output file since the previous read, one line at a time. */
@@ -78,6 +94,11 @@ const createOutputReader = (log: FileHandle) => {
         const parts = pending.split('\n');
         pending = parts.pop() ?? '';
         lines.push(...parts);
+
+        if (pending.length > MAX_LINE_CHARACTERS) {
+          lines.push(pending);
+          pending = '';
+        }
       }
     },
     /** The unterminated last line, once the child has exited and will write no more. */
@@ -88,7 +109,7 @@ const createOutputReader = (log: FileHandle) => {
 const startFailure = (
   command: CliCommand,
   end: ProcessEnd,
-  failure: RunStartDiagnostics | undefined,
+  failure: CliDiagnostics | undefined,
   tail: readonly string[],
 ): StoreError => {
   if (failure !== undefined) {
@@ -96,20 +117,21 @@ const startFailure = (
   }
 
   if ('error' in end) {
-    return new StoreError(
-      'RUN_START_FAILED',
-      `Could not run ${command.command}: ${end.error.message}`,
-      { cause: end.error },
-    );
+    const message = `Could not run ${command.command}: ${end.error.message}`;
+
+    return new StoreError('RUN_START_FAILED', message, {
+      cause: end.error,
+      details: { code: 'run_failed', message },
+    });
   }
 
   const status = end.signal === null ? `code ${String(end.exitCode)}` : `signal ${end.signal}`;
-  const output = tail.length === 0 ? '' : `\n${tail.join('\n')}`;
+  const message = `The attest CLI exited with ${status} before the run started.`;
 
-  return new StoreError(
-    'RUN_START_FAILED',
-    `The attest CLI exited with ${status} before the run started.${output}`,
-  );
+  // The output can hold stacks and paths; it goes to the diagnostics, never into the message.
+  return new StoreError('RUN_START_FAILED', message, {
+    details: { code: 'run_failed', message, details: { output: [...tail] } },
+  });
 };
 
 /** Must be called right after spawn: a spawn failure is emitted on the next tick. */
@@ -137,7 +159,7 @@ const awaitRunStarted = async ({
   log,
 }: AwaitRunStartedOptions): Promise<{ runId: string }> => {
   const reader = createOutputReader(log);
-  let failure: RunStartDiagnostics | undefined;
+  let failure: CliDiagnostics | undefined;
   let tail: string[] = [];
 
   for (;;) {
@@ -159,9 +181,7 @@ const awaitRunStarted = async ({
 
       if (output.kind === 'failed') failure = output.diagnostics;
 
-      if (output.kind === 'text' && line.trim() !== '') {
-        tail = [...tail, line].slice(-OUTPUT_TAIL_LINES);
-      }
+      if (output.kind === 'text' && line.trim() !== '') tail = appendToTail(tail, line);
     }
 
     if (end !== undefined) throw startFailure(command, end, failure, tail);

@@ -347,8 +347,7 @@ describe('ApiClient', () => {
       client.startRun({ projectKey }, { selection: { testIds: ['nope'] } }),
     ).rejects.toEqual(
       new ApiError(422, 'RUN_START_FAILED', 'The run did not start.', {
-        code: 'resource_not_found',
-        message: 'Test nope was not found.',
+        details: { code: 'resource_not_found', message: 'Test nope was not found.' },
       }),
     );
     expect(methods).toEqual(['GET', 'POST', 'POST', 'POST']);

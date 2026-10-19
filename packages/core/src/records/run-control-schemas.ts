@@ -35,8 +35,11 @@ const runCancelOutcomeSchema = z.enum([
   'already_terminal',
 ]);
 
-/** The CLI's own failure document for a run that did not start, without its retry policy. */
-const runStartDiagnosticsSchema = cliFailureResultSchema.shape.error.omit({ retryable: true });
+/**
+ * The CLI's failure document, for a run that did not start or a project that does not load. A
+ * failure the CLI reported carries its retry policy; one the host found itself leaves it unset.
+ */
+const cliDiagnosticsSchema = cliFailureResultSchema.shape.error.partial({ retryable: true });
 
 type TestSummary = z.infer<typeof testSummarySchema>;
 
@@ -44,15 +47,15 @@ type RunStartRequest = z.infer<typeof runStartRequestSchema>;
 
 type RunCancelOutcome = z.infer<typeof runCancelOutcomeSchema>;
 
-type RunStartDiagnostics = z.infer<typeof runStartDiagnosticsSchema>;
+type CliDiagnostics = z.infer<typeof cliDiagnosticsSchema>;
 
 export {
   testSummarySchema,
   runStartRequestSchema,
   runCancelOutcomeSchema,
-  runStartDiagnosticsSchema,
+  cliDiagnosticsSchema,
   type TestSummary,
   type RunStartRequest,
   type RunCancelOutcome,
-  type RunStartDiagnostics,
+  type CliDiagnostics,
 };

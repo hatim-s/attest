@@ -29,7 +29,7 @@ if (mode === 'invalid') {
       ok: false,
       command: 'eval.run',
       error: {
-        code: 'cli_usage',
+        code: 'resource_not_found',
         message: 'Test nope was not found.',
         hint: 'Run attest test list.',
         retryable: false,
@@ -37,6 +37,17 @@ if (mode === 'invalid') {
     },
   });
   process.exit(2);
+}
+
+if (mode === 'many-lines') {
+  for (let index = 0; index < 200; index += 1) console.error(`line ${String(index)}`);
+  process.exit(3);
+}
+
+if (mode === 'long-line') {
+  // Far longer than any event, and never terminated.
+  process.stderr.write(`${'y'.repeat(200 * 1024)} end`);
+  process.exit(3);
 }
 
 if (mode === 'crash') {

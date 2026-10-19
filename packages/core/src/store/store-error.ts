@@ -1,6 +1,6 @@
 import { AttestError } from '@attest/contracts';
 
-import type { RunStartDiagnostics } from '../records/run-control-schemas.js';
+import type { CliDiagnostics } from '../records/run-control-schemas.js';
 
 type StoreErrorCode =
   | 'SCHEMA_TOO_NEW'
@@ -19,19 +19,32 @@ type StoreErrorCode =
   | 'DRIVER_MISUSE'
   | 'INVALID_RECORD'
   | 'RUN_START_FAILED'
+  | 'PROJECT_UNLOADABLE'
   | 'CONTROL_UNAVAILABLE';
 
-type StoreErrorOptions = ErrorOptions & {
-  /** What the CLI reported when a run did not start; set with RUN_START_FAILED. */
-  details?: RunStartDiagnostics;
-};
+/** The codes that say what the CLI or the project loader reported, and only those. */
+type DiagnosticsCode = Extract<StoreErrorCode, 'RUN_START_FAILED' | 'PROJECT_UNLOADABLE'>;
 
 /** Identifies exceptional store failures that callers can render without parsing messages. */
 class StoreError extends AttestError {
   declare readonly code: StoreErrorCode;
-  readonly details: RunStartDiagnostics | undefined;
+  readonly details: CliDiagnostics | undefined;
 
-  constructor(code: StoreErrorCode, message: string, options?: StoreErrorOptions) {
+  constructor(
+    code: DiagnosticsCode,
+    message: string,
+    options: ErrorOptions & { details: CliDiagnostics },
+  );
+  constructor(
+    code: Exclude<StoreErrorCode, DiagnosticsCode>,
+    message: string,
+    options?: ErrorOptions,
+  );
+  constructor(
+    code: StoreErrorCode,
+    message: string,
+    options?: ErrorOptions & { details?: CliDiagnostics },
+  ) {
     super(code, message, options);
     this.details = options?.details;
   }

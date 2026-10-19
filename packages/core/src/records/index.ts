@@ -31,11 +31,11 @@ export {
   testSummarySchema,
   runStartRequestSchema,
   runCancelOutcomeSchema,
-  runStartDiagnosticsSchema,
+  cliDiagnosticsSchema,
   type TestSummary,
   type RunStartRequest,
   type RunCancelOutcome,
-  type RunStartDiagnostics,
+  type CliDiagnostics,
 } from './run-control-schemas.js';
 
 export {

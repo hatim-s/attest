@@ -57,7 +57,9 @@ interface ProjectCatalog {
  * Starts and cancels runs in one catalog project. Hosts that cannot run evals provide none.
  * Unknown keys throw StoreError PROJECT_NOT_FOUND; a project these runs cannot reach throws
  * CONTROL_UNAVAILABLE; a run that does not start throws RUN_START_FAILED with the diagnostics;
- * cancelling an unknown run throws RUN_NOT_FOUND. Concurrent runs in one project are allowed.
+ * a project that does not load, or a cancel the project refuses, throws PROJECT_UNLOADABLE with
+ * the diagnostics; cancelling an unknown run throws RUN_NOT_FOUND. Concurrent runs in one project
+ * are allowed.
  */
 interface RunControl {
   listTests(projectKey: string): Promise<TestSummary[]>;

@@ -232,6 +232,7 @@ runs started in a terminal.
 | `GET /api/projects/<key>/tests`                 | `{ "items": [...] }`: each test's id, name, case count and the tags its cases carry.       |
 | `POST /api/projects/<key>/runs`                 | `201 { "runId": ... }` once the run is recorded, so the run page can open straight away.   |
 | `POST /api/projects/<key>/runs/<run-id>/cancel` | `{ "outcome": ... }`: `cancellation_requested`, `already_cancelled` or `already_terminal`. |
+| Either tests or cancel, on a failing project    | `422 PROJECT_UNLOADABLE` with the loader's error document, such as `project_locked`.       |
 
 A start request selects tests and leaves every other field optional:
 
@@ -241,8 +242,9 @@ A start request selects tests and leaves every other field optional:
 
 Use `{ "selection": { "all": true } }` to run every test. A POST must send the server's own
 `Origin` header; another origin, or none, gets `403 FORBIDDEN`. A run that does not start answers
-`422 RUN_START_FAILED` with the CLI's error document in `error.details`. A host that cannot run
-evals answers `501 CONTROL_UNAVAILABLE`.
+`422 RUN_START_FAILED` with the CLI's error document in `error.details`. When the CLI exits
+without one, `error.details.details.output` holds the last lines it printed. A host that cannot
+run evals answers `501 CONTROL_UNAVAILABLE`.
 
 ## Agent-readable contract
 

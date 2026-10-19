@@ -5,12 +5,25 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 
 import {
+  CASE_SCHEMA_ID,
   COMMAND_REQUEST_SCHEMA_ID,
+  DATASET_SCHEMA_ID,
+  PROJECT_SCHEMA_ID,
   TEST_RESOURCE_SCHEMA_ID,
   evalRunRequestSchema,
+  projectManifestSchema,
+  type DatasetResource,
   type EvalRunRequest,
+  type ProjectManifest,
+  type TestCase,
 } from '@attest/contracts';
-import type { ProjectCatalog, ProjectRecord } from '@attest/core';
+import {
+  contentHash,
+  hashCanonicalJsonLines,
+  StoreError,
+  type ProjectCatalog,
+  type ProjectRecord,
+} from '@attest/core';
 import type { RunStartRequest } from '@attest/core/records';
 import { describe, expect, it, onTestFinished } from 'vitest';
 import { z } from 'zod';
@@ -48,6 +61,54 @@ const exists = (path: string): Promise<boolean> =>
     () => true,
     () => false,
   );
+
+/** Returns the store error an operation rejects with. */
+const captureStoreError = async (operation: Promise<unknown>): Promise<StoreError> => {
+  try {
+    await operation;
+  } catch (error: unknown) {
+    if (error instanceof StoreError) return error;
+
+    throw error;
+  }
+
+  throw new Error('Expected the operation to fail.');
+};
+
+/** Gives the fixture's `refunds` dataset two tagged rows in place of its one untagged row. */
+const writeTaggedDatasetRows = async (root: string): Promise<void> => {
+  const rows: TestCase[] = [
+    { id: 'card', input: 'card', tags: ['billing'] },
+    { id: 'late', input: 'late', tags: ['refunds', 'slow'] },
+  ];
+
+  const metadata: DatasetResource = {
+    schema: DATASET_SCHEMA_ID,
+    case_schema: CASE_SCHEMA_ID,
+    id: 'refunds',
+    name: 'Refunds',
+    case_count: rows.length,
+  };
+
+  const manifestPath = join(root, 'attest.project.json');
+  const manifest = projectManifestSchema.parse(JSON.parse(await readFile(manifestPath, 'utf8')));
+
+  const datasets = manifest.resources.datasets.map((entry) => ({
+    ...entry,
+    data_content_hash: hashCanonicalJsonLines(rows),
+    metadata_content_hash: contentHash(metadata),
+  }));
+
+  await writeFile(
+    join(root, 'attest/datasets/refunds.jsonl'),
+    `${rows.map((row) => JSON.stringify(row)).join('\n')}\n`,
+  );
+  await writeFile(join(root, 'attest/datasets/refunds.meta.json'), JSON.stringify(metadata));
+  await writeFile(
+    manifestPath,
+    JSON.stringify({ ...manifest, resources: { ...manifest.resources, datasets } }),
+  );
+};
 
 const waitFor = async (path: string): Promise<boolean> => {
   for (let attempt = 0; attempt < 200; attempt += 1) {
@@ -127,9 +188,10 @@ describe('createRunLauncher', { timeout: 20_000 }, () => {
       code: 'RUN_START_FAILED',
       message: 'Test nope was not found.',
       details: {
-        code: 'cli_usage',
+        code: 'resource_not_found',
         message: 'Test nope was not found.',
         hint: 'Run attest test list.',
+        retryable: false,
       },
     });
   });
@@ -142,10 +204,35 @@ describe('createRunLauncher', { timeout: 20_000 }, () => {
       tags: ['crash'],
     });
 
-    await expect(failure).rejects.toMatchObject({ code: 'RUN_START_FAILED', details: undefined });
-    await expect(failure).rejects.toThrow(
-      'The attest CLI exited with code 3 before the run started.\nTypeError: the CLI fell over',
+    const message = 'The attest CLI exited with code 3 before the run started.';
+
+    // The raw output stays out of the message, which the API sends as display text.
+    await expect(failure).rejects.toMatchObject({
+      code: 'RUN_START_FAILED',
+      message,
+      details: {
+        code: 'run_failed',
+        message,
+        details: { output: ['TypeError: the CLI fell over'] },
+      },
+    });
+  });
+
+  it.each([
+    ['many-lines', 'line 199'],
+    ['long-line', 'y end'],
+  ])('keeps only a bounded tail of what a CLI printing %s wrote', async (mode, last) => {
+    const root = await temporaryRoot();
+
+    const failure = await captureStoreError(
+      launcherIn(root).startRun('demo', { selection: { all: true }, tags: [mode] }),
     );
+
+    const { output } = z.object({ output: z.array(z.string()) }).parse(failure.details?.details);
+
+    expect(output.length).toBeLessThanOrEqual(32);
+    expect(output.join('').length).toBeLessThanOrEqual(16 * 1024);
+    expect(output.at(-1)?.endsWith(last)).toBe(true);
   });
 
   it('fails to start when the CLI cannot be executed', async () => {
@@ -173,6 +260,7 @@ describe('createRunLauncher', { timeout: 20_000 }, () => {
   it('lists tests with dataset rows counted as cases and the tags of every case', async () => {
     const root = await temporaryRoot();
     await writeFixtureProject(root);
+    await writeTaggedDatasetRows(root);
     await runTestMutationCommand({
       project: root,
       readImportStdin: () => {
@@ -191,7 +279,8 @@ describe('createRunLauncher', { timeout: 20_000 }, () => {
             { id: 'one', input: 'one', tags: ['fast', 'billing'] },
             { id: 'two', input: 'two', tags: ['fast'] },
           ],
-          datasets: [],
+          // Only the rows tagged `billing`, so `late` and its tags stay out of this test.
+          datasets: [{ dataset_id: 'refunds', tags: ['billing'] }],
           metrics: [],
         },
       },
@@ -201,18 +290,45 @@ describe('createRunLauncher', { timeout: 20_000 }, () => {
     const tests = await launcherIn(root).listTests('demo');
 
     expect(tests.sort((left, right) => left.id.localeCompare(right.id))).toEqual([
-      { id: 'refund', name: 'Refund', tags: [], caseCount: 1 },
-      { id: 'smoke', name: 'Smoke', tags: ['billing', 'fast'], caseCount: 2 },
+      { id: 'refund', name: 'Refund', tags: ['billing', 'refunds', 'slow'], caseCount: 2 },
+      { id: 'smoke', name: 'Smoke', tags: ['billing', 'fast'], caseCount: 3 },
     ]);
   });
 
-  it('answers RUN_START_FAILED with the loader diagnostics for a project that does not load', async () => {
+  it('lists no tests for a project that has none', async () => {
     const root = await temporaryRoot();
 
-    await expect(launcherIn(root).listTests('demo')).rejects.toMatchObject({
-      code: 'RUN_START_FAILED',
+    const manifest: ProjectManifest = {
+      schema: PROJECT_SCHEMA_ID,
+      project_id: '01ARZ3NDEKTSV4RRFFQ69G5FAV',
+      name: 'empty',
+      resources: { agents: [], tests: [], datasets: [], metrics: [] },
+    };
+
+    await writeFile(join(root, 'attest.project.json'), JSON.stringify(manifest));
+
+    expect(await launcherIn(root).listTests('demo')).toEqual([]);
+  });
+
+  it('answers PROJECT_UNLOADABLE with the loader diagnostics for a project that does not load', async () => {
+    const root = await temporaryRoot();
+    const launcher = launcherIn(root);
+
+    await expect(launcher.listTests('demo')).rejects.toMatchObject({
+      code: 'PROJECT_UNLOADABLE',
       details: { code: 'project_not_found' },
     });
+
+    await writeFile(
+      join(root, 'attest.project.json'),
+      JSON.stringify({ schema: PROJECT_SCHEMA_ID }),
+    );
+    const invalid = { code: 'PROJECT_UNLOADABLE', details: { code: 'project_invalid' } };
+
+    await expect(launcher.listTests('demo')).rejects.toMatchObject(invalid);
+    await expect(launcher.cancelRun('demo', '01ARZ3NDEKTSV4RRFFQ69G5FAV')).rejects.toMatchObject(
+      invalid,
+    );
   });
 
   it('asks the process running a run to cancel it, wherever that run was started', async () => {

@@ -13,11 +13,11 @@ type RunLauncherOptions = {
   command: CliCommand;
 };
 
-/** A project that does not load cannot start a run; say why in the CLI's own terms. */
-const toStartFailure = (error: LocalError): StoreError => {
+/** Says why the project could not be loaded or changed, in the CLI's own terms. */
+const toProjectUnloadable = (error: LocalError): StoreError => {
   const { code, message, path, hint, details } = error;
 
-  return new StoreError('RUN_START_FAILED', message, {
+  return new StoreError('PROJECT_UNLOADABLE', message, {
     cause: error,
     details: { code, message, path, hint, details },
   });
@@ -53,7 +53,7 @@ const createRunLauncher = ({ catalog, command }: RunLauncherOptions): RunControl
       try {
         return await listProjectTests(root);
       } catch (error: unknown) {
-        if (error instanceof LocalError) throw toStartFailure(error);
+        if (error instanceof LocalError) throw toProjectUnloadable(error);
 
         throw error;
       }
@@ -84,11 +84,14 @@ const createRunLauncher = ({ catalog, command }: RunLauncherOptions): RunControl
 
         return { outcome: status };
       } catch (error: unknown) {
-        if (error instanceof LocalError && error.code === 'resource_not_found') {
+        if (!(error instanceof LocalError)) throw error;
+
+        if (error.code === 'resource_not_found') {
           throw new StoreError('RUN_NOT_FOUND', error.message, { cause: error });
         }
 
-        throw error;
+        // A locked or broken project, or a run process that cannot be signalled.
+        throw toProjectUnloadable(error);
       }
     },
   };

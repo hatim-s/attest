@@ -66,12 +66,9 @@ const createHttpClient = (
     if (!response.ok) {
       const envelope = apiErrorEnvelopeSchema.safeParse(body);
       throw envelope.success
-        ? new ApiError(
-            response.status,
-            envelope.data.error.code,
-            envelope.data.error.message,
-            envelope.data.error.details,
-          )
+        ? new ApiError(response.status, envelope.data.error.code, envelope.data.error.message, {
+            details: envelope.data.error.details,
+          })
         : new ApiError(
             response.status,
             'INVALID_RESPONSE',
