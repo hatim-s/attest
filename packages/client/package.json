@@ -1,0 +1,54 @@
+{
+  "name": "@attest/client",
+  "version": "0.1.0-alpha.0",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./node": {
+      "types": "./dist/node.d.ts",
+      "import": "./dist/node.js"
+    },
+    "./pi": {
+      "types": "./dist/pi.d.ts",
+      "import": "./dist/pi.js"
+    }
+  },
+  "dependencies": {
+    "@attest/contracts": "workspace:*",
+    "zod": "^4"
+  },
+  "scripts": {
+    "build": "tsc --build tsconfig.build.json",
+    "test": "vitest run --maxWorkers=1",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "prepublishOnly": "node ../../scripts/block-source-publish.mjs"
+  },
+  "devDependencies": {
+    "vitest": "^3"
+  },
+  "files": [
+    "dist",
+    "LICENSE",
+    "NOTICE"
+  ],
+  "engines": {
+    "node": ">=22.15.0",
+    "bun": ">=1.4"
+  },
+  "license": "Apache-2.0",
+  "publishConfig": {
+    "access": "public",
+    "tag": "alpha"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hatim-s/attest.git",
+    "directory": "packages/client"
+  },
+  "description": "Runner that accepts attest callback triggers, runs an agent and posts the completion."
+}

@@ -50,6 +50,17 @@
         "vitest": "^3",
       },
     },
+    "packages/client": {
+      "name": "@attest/client",
+      "version": "0.1.0-alpha.0",
+      "dependencies": {
+        "@attest/contracts": "workspace:*",
+        "zod": "^4",
+      },
+      "devDependencies": {
+        "vitest": "^3",
+      },
+    },
     "packages/contracts": {
       "name": "@attest/contracts",
       "version": "0.1.0-alpha.0",
@@ -169,6 +180,8 @@
     "@attest/api": ["@attest/api@workspace:packages/api"],
 
     "@attest/cli": ["@attest/cli@workspace:packages/cli"],
+
+    "@attest/client": ["@attest/client@workspace:packages/client"],
 
     "@attest/conformance": ["@attest/conformance@workspace:conformance"],
 
