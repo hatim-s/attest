@@ -31,4 +31,4 @@ const readProjectIdentity = async (root: string): Promise<ProjectIdentity | unde
   );
 };
 
-export { readProjectIdentity, type ProjectIdentity };
+export { readProjectIdentity };

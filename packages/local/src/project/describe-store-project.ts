@@ -2,8 +2,8 @@ import { basename, dirname } from 'node:path';
 
 import type { ProjectRecord } from '@attest/core';
 
-import { readProjectIdentity } from '../project/read-project-identity.js';
 import { slugProjectName } from './project-key.js';
+import { readProjectIdentity } from './read-project-identity.js';
 
 /**
  * Describes the project that owns one run store, for hosts that serve a single store. A store

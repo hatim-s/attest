@@ -16,8 +16,6 @@ const projectRecordSchema = z.object({
   projectId: z.string().min(1).optional(),
 });
 
-type ProjectKey = z.infer<typeof projectKeySchema>;
-
 type ProjectRecord = z.infer<typeof projectRecordSchema>;
 
-export { projectKeySchema, projectRecordSchema, type ProjectKey, type ProjectRecord };
+export { projectKeySchema, projectRecordSchema, type ProjectRecord };

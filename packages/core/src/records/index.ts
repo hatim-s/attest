@@ -25,12 +25,7 @@ export {
   type CaseSummaryPage,
 } from './page-schemas.js';
 
-export {
-  projectKeySchema,
-  projectRecordSchema,
-  type ProjectKey,
-  type ProjectRecord,
-} from './project-schemas.js';
+export { projectKeySchema, projectRecordSchema, type ProjectRecord } from './project-schemas.js';
 
 export {
   type RunRecord,

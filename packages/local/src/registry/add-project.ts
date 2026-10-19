@@ -27,4 +27,4 @@ const addProject = async (options: AddProjectOptions): Promise<RegistryEntry> =>
   });
 };
 
-export { addProject, type AddProjectOptions };
+export { addProject };

@@ -11,7 +11,7 @@ import { LocalError } from '../errors/index.js';
 import { prepareEvalProjectFile } from '../commands/eval/eval-project-path.js';
 import { withReadonlyRunStoreFile } from '../commands/run-store/readonly-run-store.js';
 import { withRunNotFound } from '../commands/run-store/run-not-found.js';
-import { describeStoreProject } from '../registry/index.js';
+import { describeStoreProject } from '../project/describe-store-project.js';
 import { readBoundedRunDetails } from '../store/bounded-run-details.js';
 
 // Bound embedded HTML size and the per-case detail queries needed to generate it.

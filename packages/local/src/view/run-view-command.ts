@@ -4,12 +4,8 @@ import { dirname, resolve } from 'node:path';
 import { createSingleProjectCatalog } from '@attest/core';
 import { dashboardHtml } from '@attest/web/embedded';
 
-import {
-  createRegistryCatalog,
-  describeStoreProject,
-  readRegistry,
-  type ClosableCatalog,
-} from '../registry/index.js';
+import { describeStoreProject } from '../project/describe-store-project.js';
+import { createRegistryCatalog, readRegistry, type ClosableCatalog } from '../registry/index.js';
 import { openStore } from '../store/index.js';
 import { startViewServer, type ViewServerHandle } from '../view-server/index.js';
 

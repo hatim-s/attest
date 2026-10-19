@@ -3,7 +3,6 @@ const MAX_KEY_LENGTH = 64;
 /** Used when a name has no ASCII letters or digits to slug, such as a name in another script. */
 const FALLBACK_KEY = 'project';
 
-/** Lowercases `name`, turns each run of other characters into one dash and trims to 64. */
 const slugProjectName = (name: string): string => {
   const slug = name
     .toLowerCase()

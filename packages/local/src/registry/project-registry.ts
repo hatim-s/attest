@@ -7,7 +7,7 @@ import { z } from 'zod';
 import { LocalError } from '../errors/index.js';
 import { errnoCode } from '../internal/errno-code.js';
 import { readPrivateFile, writePrivateFile } from '../internal/private-file.js';
-import { uniqueProjectKey } from './project-key.js';
+import { uniqueProjectKey } from '../project/project-key.js';
 import { withRegistryLock } from './registry-lock.js';
 
 const REGISTRY_SCHEMA_ID = 'attest.projects.v1';
@@ -176,12 +176,4 @@ const unregisterProject = async (options: UnregisterProjectOptions): Promise<Reg
   });
 };
 
-export {
-  readRegistry,
-  registerProject,
-  unregisterProject,
-  type ProjectRegistry,
-  type RegisterProjectOptions,
-  type RegistryEntry,
-  type UnregisterProjectOptions,
-};
+export { readRegistry, registerProject, unregisterProject, type RegistryEntry };

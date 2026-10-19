@@ -59,5 +59,3 @@ export {
   type RunPage,
   type CaseSummaryPage,
 } from '../records/page-schemas.js';
-
-export { projectKeySchema, projectRecordSchema } from '../records/project-schemas.js';
