@@ -8,6 +8,7 @@ import type { z } from 'zod';
 import { canonicalJson } from '../internal/canonical-json.js';
 
 import { agentRequestSchema, agentResponseSchema } from '../agent/protocol.js';
+import { agentCompletionSchema } from '../agent/completion.js';
 import { agentResourceSchema } from '../project/resources/agent.js';
 import { testCaseSchema } from '../project/resources/case.js';
 import {
@@ -65,6 +66,7 @@ const agentResourceRules = [
   'HTTP body_encoding requires a body, and raw bodies are strings',
   'stream incremental output pointer and mode appear together',
   'WebSocket timeouts nest, pointers are distinct, and authorization headers use secret references',
+  'callback triggers use POST or PUT without a body, and fetch templates use GET',
 ].join('; ');
 
 const CONTRACT_JSON_SCHEMAS = new Map<string, ContractJsonSchemaDefinition>([
@@ -102,6 +104,19 @@ const CONTRACT_JSON_SCHEMAS = new Map<string, ContractJsonSchemaDefinition>([
           { required: ['output'], not: { required: ['error'] } },
           { required: ['error'], not: { required: ['output'] } },
         ],
+      },
+    },
+  ],
+  [
+    'agent-completion.json',
+    {
+      schema: agentCompletionSchema,
+      invariants: {
+        oneOf: [
+          { required: ['output'], not: { required: ['error'] } },
+          { required: ['error'], not: { required: ['output'] } },
+        ],
+        not: { required: ['trace', 'trace_ref'] },
       },
     },
   ],

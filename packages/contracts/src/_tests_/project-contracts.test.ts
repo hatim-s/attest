@@ -346,6 +346,15 @@ describe('agent transport contract', () => {
       retry_boundary: 'before_acknowledgement',
       replay_after_acknowledgement: false,
     },
+    {
+      kind: 'callback',
+      lifecycle: 'external',
+      trigger: { url: 'https://example.com/trigger', method: 'POST' },
+      idempotency_header: 'Idempotency-Key',
+      artifact_fetch: { url: 'https://example.com/artifacts/{{artifact_id}}', method: 'GET' },
+      trace_fetch: { url: 'https://example.com/traces/{{trace_ref}}', method: 'GET' },
+      receiver: { listen_port: 0, public_url: 'https://attest.example.com' },
+    },
   ];
 
   it.each(transports)('accepts the $kind transport definition', (transport) => {
@@ -467,6 +476,53 @@ describe('agent transport contract', () => {
         transport: { ...polling, minimum_interval_ms: 6_000 },
       }).success,
     ).toBe(false);
+  });
+
+  it.each([
+    [{ trigger: { url: 'https://example.com/trigger', method: 'GET' } }, ['trigger', 'method']],
+    [
+      { trigger: { url: 'https://example.com/trigger', method: 'POST', body: { input: 1 } } },
+      ['trigger', 'body'],
+    ],
+    [
+      { artifact_fetch: { url: 'https://example.com/artifacts/{{artifact_id}}', method: 'POST' } },
+      ['artifact_fetch', 'method'],
+    ],
+    [
+      { trace_fetch: { url: 'https://example.com/traces/{{trace_ref}}', method: 'PUT' } },
+      ['trace_fetch', 'method'],
+    ],
+    [{ receiver: { listen_port: 65_536 } }, ['receiver', 'listen_port']],
+    [{ receiver: { public_url: 'ftp://attest.example.com' } }, ['receiver', 'public_url']],
+  ] as const)('rejects the callback transport change %j', (change, path) => {
+    const callback = transports.find((transport) => transport.kind === 'callback');
+
+    const result = agentResourceSchema.safeParse({
+      ...agent,
+      transport: { ...callback, ...change },
+    });
+
+    expect(result.success).toBe(false);
+
+    if (result.success) return;
+    expect(result.error.issues).toContainEqual(
+      expect.objectContaining({ path: ['transport', ...path] }),
+    );
+  });
+
+  it('accepts artifact limits and rejects non-positive ones', () => {
+    const limits = {
+      artifact_count: 64,
+      artifact_bytes: 4_194_304,
+      total_artifact_bytes: 16_777_216,
+    };
+
+    expect(agentResourceSchema.safeParse({ ...agent, limits }).success).toBe(true);
+
+    for (const field of Object.keys(limits))
+      expect(
+        agentResourceSchema.safeParse({ ...agent, limits: { ...limits, [field]: 0 } }).success,
+      ).toBe(false);
   });
 });
 

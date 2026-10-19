@@ -9,7 +9,10 @@ type TimeoutField = keyof NonNullable<AgentResource['timeouts']>;
 type LimitField = keyof NonNullable<AgentResource['limits']>;
 
 /** The HTTP native envelope reuses the direct invoker, so its policy matches native_cli. */
-type PolicyKind = AgentResource['transport']['kind'] | 'http_envelope';
+type PolicyKind = Exclude<AgentResource['transport']['kind'], 'callback'> | 'http_envelope';
+
+// No adapter enforces artifact caps yet, so authoring one must fail instead of being ignored.
+const ARTIFACT_LIMITS = ['artifact_count', 'artifact_bytes', 'total_artifact_bytes'] as const;
 
 const UNSUPPORTED_TIMEOUTS: Readonly<Record<PolicyKind, readonly TimeoutField[]>> = {
   background_cli: [],
@@ -23,14 +26,26 @@ const UNSUPPORTED_TIMEOUTS: Readonly<Record<PolicyKind, readonly TimeoutField[]>
 };
 
 const UNSUPPORTED_LIMITS: Readonly<Record<PolicyKind, readonly LimitField[]>> = {
-  background_cli: ['event_count', 'event_bytes'],
-  http: ['event_count', 'event_bytes', 'total_evidence_bytes'],
-  http_envelope: ['request_bytes', 'event_count', 'event_bytes', 'total_evidence_bytes'],
-  jsonl_bridge: [],
-  native_cli: ['request_bytes', 'event_count', 'event_bytes', 'total_evidence_bytes'],
-  polling: ['event_count', 'event_bytes', 'total_evidence_bytes'],
-  stream: ['response_bytes'],
-  websocket: [],
+  background_cli: ['event_count', 'event_bytes', ...ARTIFACT_LIMITS],
+  http: ['event_count', 'event_bytes', 'total_evidence_bytes', ...ARTIFACT_LIMITS],
+  http_envelope: [
+    'request_bytes',
+    'event_count',
+    'event_bytes',
+    'total_evidence_bytes',
+    ...ARTIFACT_LIMITS,
+  ],
+  jsonl_bridge: [...ARTIFACT_LIMITS],
+  native_cli: [
+    'request_bytes',
+    'event_count',
+    'event_bytes',
+    'total_evidence_bytes',
+    ...ARTIFACT_LIMITS,
+  ],
+  polling: ['event_count', 'event_bytes', 'total_evidence_bytes', ...ARTIFACT_LIMITS],
+  stream: ['response_bytes', ...ARTIFACT_LIMITS],
+  websocket: [...ARTIFACT_LIMITS],
 };
 
 const isLoopbackHost = (host: string): boolean =>
@@ -41,6 +56,13 @@ const isLoopbackHost = (host: string): boolean =>
 const assertSafeNativeAgentResource = (agent: AgentResource): void => {
   const transport = agent.transport;
   const kind = transport.kind;
+
+  if (kind === 'callback') {
+    throw new LocalError('project_invalid', 'Callback agents are not supported yet.', {
+      path: '/agent/transport/kind',
+      hint: 'Select another transport until the callback adapter ships.',
+    });
+  }
 
   const policyKind: PolicyKind =
     kind === 'http' && transport.response_mode === 'attest_envelope' ? 'http_envelope' : kind;

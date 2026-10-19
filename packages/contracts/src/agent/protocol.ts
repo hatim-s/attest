@@ -2,12 +2,20 @@ import { z } from 'zod';
 
 import type { Trace } from '../trace/protocol.js';
 import { AGENT_PROTOCOL } from '../schema/identifiers.js';
+import { inlineArtifactSchema } from './artifact.js';
 
 const MULTI_TURN_FIELDS = ['messages', 'turn_index', 'conversation_id'] as const;
 
 const conversationMessageSchema = z.strictObject({
   role: z.enum(['user', 'assistant']),
   content: z.string(),
+});
+
+/** Where and how an async agent posts its `attest.agent-completion`; only callback runs send it. */
+const agentCallbackSchema = z.strictObject({
+  // Not z.httpUrl(): its domain-only hostname rule rejects the 127.0.0.1 loopback receiver.
+  url: z.url({ protocol: /^https?$/u }),
+  token: z.string().min(1),
 });
 
 /**
@@ -24,6 +32,7 @@ const agentRequestSchema = z
     turn_index: z.number().int().nonnegative().optional(),
     conversation_id: z.string().optional(),
     state: z.json().optional(),
+    callback: agentCallbackSchema.optional(),
   })
   .superRefine((request, context) => {
     if (MULTI_TURN_FIELDS.every((fieldName) => request[fieldName] === undefined)) {
@@ -46,6 +55,8 @@ const agentRequestSchema = z
 /** Represents a validated invocation request sent to an agent transport. */
 type AgentRequest = z.infer<typeof agentRequestSchema>;
 
+type AgentCallback = z.infer<typeof agentCallbackSchema>;
+
 /** The error an agent reports instead of an output. */
 const agentErrorSchema = z.strictObject({
   message: z.string(),
@@ -59,16 +70,20 @@ const agentResponseFields = {
   state: z.json().optional(),
   // Left unvalidated here so a malformed optional trace degrades to a warning in parseAgentResponse.
   trace: z.unknown().optional(),
+  artifacts: z.array(inlineArtifactSchema).optional(),
 };
 
 /**
- * Encodes docs/specs/agent-contract.md response envelope. Agents may add vendor fields, and a
- * response must carry exactly one terminal outcome.
+ * Requires exactly one terminal outcome. Shared by responses and completions so both envelopes
+ * report the same issue for the same mistake.
  */
-const agentResponseSchema = z.looseObject(agentResponseFields).superRefine((response, context) => {
-  const outcomeCount = ['output', 'error'].filter((field) => Object.hasOwn(response, field)).length;
+const refineSingleOutcome = (
+  envelope: { output?: unknown; error?: unknown },
+  context: z.RefinementCtx,
+): void => {
+  const outcomeCount = ['output', 'error'].filter((field) => Object.hasOwn(envelope, field)).length;
 
-  if (outcomeCount === 1 && (response.output !== undefined || response.error !== undefined)) {
+  if (outcomeCount === 1 && (envelope.output !== undefined || envelope.error !== undefined)) {
     return;
   }
 
@@ -77,7 +92,13 @@ const agentResponseSchema = z.looseObject(agentResponseFields).superRefine((resp
     path: ['output'],
     message: 'exactly one of output or error must be present',
   });
-});
+};
+
+/**
+ * Encodes docs/specs/agent-contract.md response envelope. Agents may add vendor fields, and a
+ * response must carry exactly one terminal outcome.
+ */
+const agentResponseSchema = z.looseObject(agentResponseFields).superRefine(refineSingleOutcome);
 
 type AgentResponseFields = z.output<z.ZodObject<typeof agentResponseFields>>;
 
@@ -105,10 +126,13 @@ const isAgentErrorResponse = <Response extends object>(
   'error' in response && response.error !== undefined;
 
 export {
+  agentCallbackSchema,
   agentErrorSchema,
   agentRequestSchema,
   agentResponseSchema,
   isAgentErrorResponse,
+  refineSingleOutcome,
+  type AgentCallback,
   type AgentErrorResponse,
   type AgentRequest,
   type AgentResponse,

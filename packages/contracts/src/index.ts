@@ -15,6 +15,7 @@ export {
 export type { ContractIssue, ContractWarning, ParseReport } from './schema/parse.js';
 
 export {
+  AGENT_COMPLETION_PROTOCOL,
   AGENT_PROTOCOL,
   AGENT_RESOURCE_SCHEMA_ID,
   CASE_SCHEMA_ID,
@@ -36,9 +37,27 @@ export {
   WEBSOCKET_REQUEST_PROTOCOL,
 } from './schema/identifiers.js';
 
-export { agentErrorSchema, agentRequestSchema, isAgentErrorResponse } from './agent/protocol.js';
+export {
+  agentCallbackSchema,
+  agentErrorSchema,
+  agentRequestSchema,
+  isAgentErrorResponse,
+} from './agent/protocol.js';
 
-export type { AgentErrorResponse, AgentRequest, AgentResponse } from './agent/protocol.js';
+export type {
+  AgentCallback,
+  AgentErrorResponse,
+  AgentRequest,
+  AgentResponse,
+} from './agent/protocol.js';
+
+export { artifactSchema, inlineArtifactSchema } from './agent/artifact.js';
+
+export type { Artifact, InlineArtifact, ReferenceArtifact } from './agent/artifact.js';
+
+export { agentCompletionSchema } from './agent/completion.js';
+
+export type { AgentCompletion } from './agent/completion.js';
 
 export { jsonlBridgeOutputSchema } from './agent/jsonl-bridge.js';
 

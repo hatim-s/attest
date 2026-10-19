@@ -318,6 +318,11 @@ const resolveNativeAgent = async (
       return { agent: { ...agent, transport }, kind: 'mapped_http', ...resolved };
     }
 
+    case 'callback':
+      throw new LocalError('project_invalid', 'Callback agents are not supported yet.', {
+        path: '/agent/transport/kind',
+      });
+
     default:
       return transport satisfies never;
   }

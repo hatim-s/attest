@@ -78,6 +78,18 @@ const refinePortableCredentials = (resources: ProjectResources, context: z.Refin
         if (transport.status_url_template !== undefined)
           checkUrl(transport.status_url_template, [...path, 'status_url_template']);
         break;
+      case 'callback':
+        checkRequest(transport.trigger, [...path, 'trigger']);
+
+        for (const field of ['artifact_fetch', 'trace_fetch'] as const) {
+          const request = transport[field];
+
+          if (request !== undefined) checkRequest(request, [...path, field]);
+        }
+
+        if (transport.receiver?.public_url !== undefined)
+          checkUrl(transport.receiver.public_url, [...path, 'receiver', 'public_url']);
+        break;
       case 'websocket':
         checkUrl(transport.url, [...path, 'url']);
         checkFields(transport, path);
