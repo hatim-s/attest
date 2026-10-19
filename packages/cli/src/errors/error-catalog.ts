@@ -20,7 +20,7 @@ const CLI_ERROR_DEFINITIONS = {
     likely_causes: ['The credential directory is not writable.'],
     retryable: true,
     exit_code: 4,
-    repairs: ['Check permissions for ~/.attest/cloud.'],
+    repairs: ['Check permissions for the cloud directory under ATTEST_HOME (default ~/.attest).'],
   },
   cloud_request_failed: {
     meaning: 'The cloud rejected the request.',
@@ -197,7 +197,10 @@ const CLI_ERROR_DEFINITIONS = {
   },
   registry_write_failed: {
     meaning: 'The global project registry could not be saved.',
-    likely_causes: ['The registry directory is not writable or a parent is a symbolic link.'],
+    likely_causes: [
+      'The registry directory is not writable or a parent is a symbolic link.',
+      'Another Attest command held projects.json.lock for ten seconds, or a crashed one left it behind.',
+    ],
     retryable: true,
     exit_code: 4,
     repairs: [
