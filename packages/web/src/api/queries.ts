@@ -29,7 +29,12 @@ const runsQueryOptions = (client: ApiClient, projectKey: string) =>
   queryOptions({
     queryKey: ['runs', projectKey],
     queryFn: ({ signal }) => client.listRuns({ projectKey }, {}, { signal }),
-    refetchInterval: client.mode.kind === 'live' ? 5_000 : false,
+    // An idle page still refreshes slowly, so a run started from a terminal shows up.
+    refetchInterval: (query) => {
+      if (client.mode.kind !== 'live') return false;
+
+      return query.state.data?.items.some((run) => run.status === 'running') ? 5_000 : 30_000;
+    },
   });
 
 /** Keeps the sidebar current without polling file-based reports. */
