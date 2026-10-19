@@ -194,6 +194,7 @@ describe('view server', () => {
     const refusedHeaders: Record<string, string>[] = [
       { Origin: 'http://attacker.example.test' },
       {},
+      { Origin: server.origin, 'Sec-Fetch-Site': 'cross-site' },
     ];
 
     for (const headers of refusedHeaders) {
@@ -206,12 +207,18 @@ describe('view server', () => {
       }
     }
 
-    const foreignRead = await fetch(`${server.origin}/api/projects/demo/runs`, {
-      headers: { Origin: 'http://attacker.example.test' },
-    });
+    const read = (headers: Record<string, string>) =>
+      fetch(`${server.origin}/api/projects/demo/runs`, { headers }).then(({ status }) => status);
 
-    expect(foreignRead.status).toBe(403);
+    expect(await read({ Origin: 'http://attacker.example.test' })).toBe(403);
+    // An `<img>` on another site sends no Origin, but its browser says where it came from.
+    expect(await read({ 'Sec-Fetch-Site': 'cross-site' })).toBe(403);
+    expect(await read({ 'Sec-Fetch-Site': 'same-site' })).toBe(403);
     expect(calls).toEqual([]);
+    // Clients outside a browser send neither header; the dashboard's own reads say same-origin.
+    expect(await read({})).toBe(200);
+    expect(await read({ 'Sec-Fetch-Site': 'same-origin' })).toBe(200);
+    expect(await read({ 'Sec-Fetch-Site': 'none' })).toBe(200);
 
     const started = await post('/runs', { Origin: server.origin });
     expect(started.status).toBe(201);

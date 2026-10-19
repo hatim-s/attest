@@ -243,12 +243,13 @@ A start request selects tests and leaves every other field optional:
 ```
 
 Use `{ "selection": { "all": true } }` to run every test. A POST must send the server's own
-`Origin` header; another origin, or none, gets `403 FORBIDDEN`. A run that does not start answers
+`Origin` header; another origin, or none, gets `403 FORBIDDEN`. Any request whose
+`Sec-Fetch-Site` header is present and is not `same-origin` or `none` gets the same answer, so
+another site cannot make a browser read from the server either. A run that does not start answers
 `422 RUN_START_FAILED` with the CLI's error document in `error.details`. A CLI that has not
 reported `run_started` after 60 seconds is stopped, SIGTERM first and SIGKILL after 5 seconds.
 When the CLI exits or is stopped without an error document, `error.details.details.output` holds
-the last lines it printed. A host that cannot
-run evals answers `501 CONTROL_UNAVAILABLE`.
+the last lines it printed. A host that cannot run evals answers `501 CONTROL_UNAVAILABLE`.
 
 ## Agent-readable contract
 

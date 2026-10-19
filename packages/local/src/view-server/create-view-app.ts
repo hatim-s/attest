@@ -10,14 +10,23 @@ const forbidden: ApiErrorEnvelope = {
 
 const SAFE_METHODS = new Set(['GET', 'HEAD']);
 
+/** What a browser's `Sec-Fetch-Site` may say for a request the dashboard sent or a user typed. */
+const OWN_FETCH_SITES = new Set(['same-origin', 'none']);
+
 /**
  * Allows a request only from the dashboard itself. A browser names the page that sent a POST in
  * `Origin`, including a cross-site form, so a request that can start or cancel a run must carry
- * the server's own origin; any request naming another origin is refused.
+ * the server's own origin; any request naming another origin is refused. Browsers also send
+ * `Sec-Fetch-Site` on every request, `no-cors` ones such as an `<img>` included, so a GET another
+ * site triggers is refused too. Clients that send neither header, such as curl, can still read.
  */
 const isAllowedRequest = (request: Request, allowedOrigin: string | undefined): boolean => {
   // Loopback binding alone does not stop a browser using a rebound external hostname.
   if (allowedOrigin === undefined || new URL(request.url).origin !== allowedOrigin) return false;
+
+  const site = request.headers.get('Sec-Fetch-Site');
+
+  if (site !== null && !OWN_FETCH_SITES.has(site)) return false;
 
   const origin = request.headers.get('Origin');
 
