@@ -1,6 +1,8 @@
 import { Link, Outlet, useLocation, useParams } from '@tanstack/react-router';
 import { useEffect, useState } from 'react';
 import { useApiClient } from '../api/api-client-context.js';
+import { useProjects } from '../api/queries.js';
+import { ProjectSwitcher } from '../components/projects/project-switcher.js';
 import { Badge, Button } from '../components/shared/ui.js';
 
 type Theme = 'light' | 'dark';
@@ -24,6 +26,8 @@ const RootLayout = () => {
   const { mode } = useApiClient();
   const [theme, setTheme] = useState<Theme>(getInitialTheme);
   const { projectKey } = useParams({ strict: false });
+  const projects = useProjects().data ?? [];
+  const project = projects.find((item) => item.key === projectKey);
 
   // Comparisons belong to Runs even though their URL sits outside /runs.
   const section = useLocation({
@@ -47,10 +51,11 @@ const RootLayout = () => {
           <span className="brand-mark">A</span>
           <div>
             <strong>attest</strong>
-            <span>evaluations</span>
+            <span>{projectKey === undefined ? 'evaluations' : project?.name}</span>
           </div>
         </div>
         <div className="topbar-actions">
+          <ProjectSwitcher projects={projects} projectKey={projectKey} />
           {projectKey === undefined ? null : (
             <nav className="topbar-nav" aria-label="Dashboard">
               <Link

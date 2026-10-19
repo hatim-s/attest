@@ -7,7 +7,7 @@ const route = getRouteApi('/projects/$projectKey/runs/');
 const NewestRun = () => {
   const { projectKey } = route.useParams();
   const runsQuery = useRuns(projectKey);
-  const newest = runsQuery.data?.[0];
+  const newest = runsQuery.data?.items[0];
   const search = route.useSearch();
 
   if (newest !== undefined) {

@@ -57,7 +57,7 @@ const RunDistributions = ({ run }: { run: RunRecord }) => {
       )}
       {runsQuery.error !== null ? <ErrorNotice error={runsQuery.error} /> : null}
       {runsQuery.data !== undefined ? (
-        <RunTrends runs={runsQuery.data} />
+        <RunTrends runs={runsQuery.data.items} />
       ) : runsQuery.isPending ? (
         <Loading label="Loading recent runs" />
       ) : null}

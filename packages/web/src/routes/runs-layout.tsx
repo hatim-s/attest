@@ -11,7 +11,7 @@ const RunsLayout = () => {
   const { runId, candidateRunId } = useParams({ strict: false });
   const { branch, label } = route.useSearch();
 
-  const runs = (runsQuery.data ?? []).filter(
+  const runs = (runsQuery.data?.items ?? []).filter(
     (run) =>
       (branch === undefined || run.gitBranch === branch) &&
       (label === undefined ||

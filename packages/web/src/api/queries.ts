@@ -1,6 +1,12 @@
 import { useEffect } from 'react';
 import type { ApiClient } from '@attest/api/client';
-import { queryOptions, useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query';
+import {
+  queryOptions,
+  useInfiniteQuery,
+  useQueries,
+  useQuery,
+  useQueryClient,
+} from '@tanstack/react-query';
 
 import type { RunStatus } from '@attest/core/records';
 import { useApiClient } from './api-client-context.js';
@@ -15,16 +21,31 @@ const projectsQueryOptions = (client: ApiClient) =>
 /** Lets the projects page reuse the catalog the `/` redirect already loaded. */
 const useProjects = () => useQuery(projectsQueryOptions(useApiClient()));
 
-/** Shares the newest-first page between the index redirect and the polling sidebar. */
+/**
+ * Shares the newest-first page between the index redirect, the polling sidebar and the projects
+ * index. The page keeps its cursor so callers can tell a full page from a short one.
+ */
 const runsQueryOptions = (client: ApiClient, projectKey: string) =>
   queryOptions({
     queryKey: ['runs', projectKey],
-    queryFn: async ({ signal }) => (await client.listRuns({ projectKey }, {}, { signal })).items,
-    refetchInterval: client.mode.kind === 'live' ? 5_000 : false,
+    queryFn: ({ signal }) => client.listRuns({ projectKey }, {}, { signal }),
+    // An idle page still refreshes slowly, so a run started from a terminal shows up.
+    refetchInterval: (query) => {
+      if (client.mode.kind !== 'live') return false;
+
+      return query.state.data?.items.some((run) => run.status === 'running') ? 5_000 : 30_000;
+    },
   });
 
 /** Keeps the sidebar current without polling file-based reports. */
 const useRuns = (projectKey: string) => useQuery(runsQueryOptions(useApiClient(), projectKey));
+
+/** One runs query per project, sharing cache entries with `useRuns`; results follow `projectKeys`. */
+const useRunsForProjects = (projectKeys: readonly string[]) => {
+  const client = useApiClient();
+
+  return useQueries({ queries: projectKeys.map((key) => runsQueryOptions(client, key)) });
+};
 
 /** Loads one run and keeps polling only while it is still executing. */
 const useRun = (projectKey: string, runId: string) => {
@@ -193,4 +214,5 @@ export {
   useDiff,
   useRun,
   useRuns,
+  useRunsForProjects,
 };

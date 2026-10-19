@@ -17,7 +17,7 @@ const tabLabels = { cases: 'Cases', distributions: 'Distributions', suites: 'Sui
 const RunTabs = ({ run, tab }: { run: RunRecord; tab: RunTab | 'compare' }) => {
   const projectKey = useProjectKey();
   const runsQuery = useRuns(projectKey);
-  const baseRun = runsQuery.data?.find((item) => item.id !== run.id);
+  const baseRun = runsQuery.data?.items.find((item) => item.id !== run.id);
 
   return (
     <nav className="tabs" aria-label="Run views">
