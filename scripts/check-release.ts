@@ -1,7 +1,7 @@
 import { isRecord, isString, parseCliResult, parseManifest } from './release-json.js';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { cp, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
+import { cp, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -10,8 +10,7 @@ const root = fileURLToPath(new URL('../', import.meta.url));
 
 /** Installs packed releases outside the workspace and exercises their public entry points with Node. */
 const checkRelease = async (): Promise<void> => {
-  // The registry rejects symlinked ancestors, and macOS `tmpdir()` sits behind the `/var` link.
-  const directory = await mkdtemp(join(await realpath(tmpdir()), 'attest-consumer-'));
+  const directory = await mkdtemp(join(tmpdir(), 'attest-consumer-'));
   // `attest project init` registers the project; keep that out of the developer's ~/.attest.
   const env = { ...process.env, ATTEST_HOME: join(directory, 'attest-home') };
 

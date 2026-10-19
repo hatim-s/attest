@@ -1,6 +1,4 @@
 import { rm } from 'node:fs/promises';
-import { homedir } from 'node:os';
-import { join } from 'node:path';
 
 import { z } from 'zod';
 
@@ -19,11 +17,9 @@ const credentialSchema = z
 
 type CloudCredentials = z.infer<typeof credentialSchema>;
 
-const defaultCredentialPath = (): string => join(homedir(), '.attest', 'cloud', 'credentials.json');
-
 /** Reads a private credential file without following a substituted symbolic link. */
 const readCloudCredentials = async (
-  path = defaultCredentialPath(),
+  path: string,
   options: { allowExpired?: boolean } = {},
 ): Promise<CloudCredentials> => {
   try {
@@ -49,7 +45,7 @@ const readCloudCredentials = async (
 /** Replaces credentials atomically; neither the temporary file nor the destination is public. */
 const writeCloudCredentials = async (
   credentials: CloudCredentials,
-  path = defaultCredentialPath(),
+  path: string,
 ): Promise<void> => {
   normalizeCloudUrl(credentials.baseUrl);
 
@@ -61,7 +57,7 @@ const writeCloudCredentials = async (
 };
 
 /** Removes the locally stored bearer token after its cloud session has been revoked. */
-const removeCloudCredentials = async (path = defaultCredentialPath()): Promise<void> => {
+const removeCloudCredentials = async (path: string): Promise<void> => {
   try {
     await assertPrivateAncestors(path);
     await rm(path, { force: true });

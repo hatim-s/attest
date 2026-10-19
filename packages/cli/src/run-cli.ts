@@ -23,7 +23,7 @@ import {
   recoverOutputMode,
 } from './commands/shared/cli-options.js';
 import {
-  resolveRegistryPath,
+  resolveAttestPaths,
   type CliIo,
   type CommandContext,
   type CliServices,
@@ -123,11 +123,11 @@ const runCli = async (argv: string[], options: RunCliOptions = {}): Promise<numb
       services: options.services,
       interaction: { ...createDefaultCliInteraction(), ...options.interaction },
       io,
-      registryPath: resolveRegistryPath({
+      ...(await resolveAttestPaths({
         attestHome: process.env.ATTEST_HOME,
         homeDirectory: homedir(),
         workingDirectory,
-      }),
+      })),
       workingDirectory,
     },
     (message) => commanderErrors.push(message),

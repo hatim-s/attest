@@ -1,4 +1,4 @@
-import { access, mkdir, realpath, writeFile } from 'node:fs/promises';
+import { access, mkdir, readFile, realpath, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import { loadProject } from '@attest/local/project';
@@ -12,7 +12,7 @@ afterEach(() => {
 
 /** Points ATTEST_HOME at a fresh directory for one test and returns it. */
 const useAttestHome = async (): Promise<string> => {
-  const home = await realpath(await temporaryDirectory('attest-home-'));
+  const home = await temporaryDirectory('attest-home-');
   vi.stubEnv('ATTEST_HOME', home);
 
   return home;
@@ -21,6 +21,7 @@ const useAttestHome = async (): Promise<string> => {
 describe('projects commands', () => {
   it('registers initialized projects and lists, adds and removes entries', async () => {
     await useAttestHome();
+    // The registry stores each root's realpath.
     const parent = await realpath(await temporaryDirectory('attest-projects-'));
 
     expect((await runJson(parent, ['project', 'init', 'demo', '--name', 'Demo'])).exitCode).toBe(0);
@@ -53,6 +54,18 @@ describe('projects commands', () => {
     expect((await runCommand(parent, ['projects', 'list'])).output).toEqual([
       `  plain  plain  ${join(parent, 'plain')}`,
     ]);
+  });
+
+  it('follows symbolic links in an ATTEST_HOME that does not exist yet', async () => {
+    const real = await realpath(await temporaryDirectory('attest-home-'));
+    const linked = join(await temporaryDirectory('attest-link-'), 'home');
+    await symlink(real, linked);
+    vi.stubEnv('ATTEST_HOME', join(linked, 'first-run'));
+    const parent = await temporaryDirectory('attest-projects-');
+    await mkdir(join(parent, 'plain'));
+
+    expect((await runJson(parent, ['projects', 'add', 'plain'])).exitCode).toBe(0);
+    expect(await readFile(join(real, 'first-run', 'projects.json'), 'utf8')).toContain('"plain"');
   });
 
   it('keeps the manifest when init cannot write the registry', async () => {

@@ -48,6 +48,9 @@ host entries. Explicit allowlisting can replace these environment defaults.
 `ATTEST_HOME` overrides the `~/.attest` directory. When it is set, Attest reads the project
 registry from `<ATTEST_HOME>/projects.json` and the cloud credentials from
 `<ATTEST_HOME>/cloud/credentials.json`. When it is unset, both live under `~/.attest`.
+Attest resolves symbolic links in `ATTEST_HOME` once at startup, so a path under a linked
+directory such as macOS `/var` works, and the directory may not exist yet. `~/.attest` is not
+resolved: if it or a parent is a symbolic link, Attest refuses to read or write files there.
 See [file layout](reference/file-layout.md#project-registry).
 
 ## Cloud credentials

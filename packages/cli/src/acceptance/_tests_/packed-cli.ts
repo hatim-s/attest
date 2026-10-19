@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
 import { constants } from 'node:fs';
-import { access, mkdir, mkdtemp, realpath, rm } from 'node:fs/promises';
+import { access, mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
@@ -74,8 +74,7 @@ const packPackage = async (
  * Packs each runtime workspace and copies its installed dependency closure into a clean prefix. The packages must already be built; `bun run test:acceptance` builds first.
  */
 const createPackedCli = async (): Promise<PackedCli> => {
-  // The registry rejects symlinked ancestors, and macOS `tmpdir()` sits behind the `/var` link.
-  const root = await mkdtemp(join(await realpath(tmpdir()), 'attest-acceptance-packed-'));
+  const root = await mkdtemp(join(tmpdir(), 'attest-acceptance-packed-'));
   const attestHome = join(root, 'attest-home');
   const archiveDirectory = join(root, 'archives');
   await mkdir(archiveDirectory);

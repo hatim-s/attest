@@ -39,7 +39,7 @@ const parseCloudInput = <T>(schema: z.ZodType<T>, value: unknown): T => {
 /** Exchanges a user-approved PKCE device session for a private, revocable CLI token. */
 const loginCloud = async (options: {
   baseUrl: string;
-  credentialPath?: string;
+  credentialPath: string;
   signal?: AbortSignal;
   onDevice: (notice: LoginNotice) => void;
   fetch?: typeof fetch;
@@ -116,14 +116,14 @@ const loginCloud = async (options: {
 };
 
 /** Loads only credentials tied to the configured cloud origin. */
-const authenticatedCloudClient = async (credentialPath?: string): Promise<CloudClient> => {
+const authenticatedCloudClient = async (credentialPath: string): Promise<CloudClient> => {
   const credentials = await readCloudCredentials(credentialPath);
 
   return createCloudClient({ baseUrl: credentials.baseUrl, accessToken: credentials.accessToken });
 };
 
 /** Revokes the server session before removing the local token. */
-const logoutCloud = async (credentialPath?: string): Promise<{ authenticated: false }> => {
+const logoutCloud = async (credentialPath: string): Promise<{ authenticated: false }> => {
   const credentials = await readCloudCredentials(credentialPath, { allowExpired: true });
 
   const client = createCloudClient({

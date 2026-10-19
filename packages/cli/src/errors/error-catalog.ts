@@ -188,7 +188,8 @@ const CLI_ERROR_DEFINITIONS = {
     meaning: 'The global project registry could not be read.',
     likely_causes: [
       'projects.json was edited by hand or is not a registry file.',
-      'ATTEST_HOME or one of its parents is a symbolic link.',
+      'projects.json or a directory below ATTEST_HOME (default ~/.attest) is a symbolic link.',
+      'projects.json grants access to other users; Attest writes it with mode 0600.',
     ],
     retryable: false,
     exit_code: 1,
