@@ -66,6 +66,7 @@ The [CLI index](./cli/index.md) maps every workflow to its canonical guide:
 - [cURL and HTTP](./integrations/curl-and-http.md)
 - [Managed CLI processes](./integrations/cli-processes.md)
 - [Polling and streams](./integrations/polling-and-streams.md)
+- [Callbacks](./integrations/callbacks.md)
 - [WebSockets](./integrations/websockets.md)
 - [Attest client and Pi runner](./integrations/attest-client.md)
 

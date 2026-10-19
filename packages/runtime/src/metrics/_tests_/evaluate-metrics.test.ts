@@ -8,7 +8,7 @@ import type { MetricContext } from '../metric-evaluation.js';
 
 const context: MetricContext = {
   caseDefinition: { id: 'capital', input: { question: 'Capital?' }, expected: 'Paris' },
-  execution: { outcome: 'completed', output: 'Paris', trace: null },
+  execution: { outcome: 'completed', output: 'Paris', trace: null, artifacts: [] },
 };
 
 const judgeDefinition = {

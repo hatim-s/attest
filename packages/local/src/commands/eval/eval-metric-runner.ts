@@ -20,17 +20,22 @@ import { relative, resolve } from 'node:path';
 import {
   AGENT_PROTOCOL,
   AGENT_RESOURCE_SCHEMA_ID,
-  METRIC_PROTOCOL,
   type AgentRequest,
   type JsonValue,
   type MetricDefinition,
   type MetricResource,
 } from '@attest/contracts';
 import { type CacheStore, type StoredMetricEvaluation } from '@attest/core';
-import { invokeMappedHttpAgent, type HttpAgentResource } from '@attest/executor';
 import {
+  invokeMappedHttpAgent,
+  type CaseEnvironment,
+  type HttpAgentResource,
+} from '@attest/executor';
+import {
+  buildMetricRequest,
   type CaseExecution,
   caseExecutionToMetricContext,
+  createEnvironmentMetricTransport,
   createTanstackJudgeClient,
   evaluateMetrics,
   type JudgeCache,
@@ -174,6 +179,8 @@ const resolveMetricEnvironment = async (
 type EvaluateMetricResourceOptions = {
   context: MetricContext;
   definition: Extract<MetricResource['definition'], { kind: 'assertion' | 'exec' }>;
+  /** Runs exec metrics inside this case environment instead of on the host. */
+  environment?: CaseEnvironment;
   id: string;
   projectRoot: string;
   signal?: AbortSignal;
@@ -187,6 +194,7 @@ type EvaluateMetricResourceOptions = {
 const evaluateMetricResource = async ({
   context,
   definition,
+  environment,
   id,
   projectRoot,
   signal,
@@ -199,6 +207,27 @@ const evaluateMetricResource = async ({
     );
 
     return { evaluation, secrets: [] };
+  }
+
+  if (environment !== undefined) {
+    // The command runs in the sandbox workspace, so the host cwd and base environment stay
+    // behind; only the metric's own secret variables are forwarded.
+    const { variables, secrets } = await resolveMetricEnvironment(definition, projectRoot);
+
+    const evaluation = await evaluateOne(
+      { name: id, type: 'exec', command: definition.argv },
+      context,
+      {
+        exec: {
+          commandTransport: createEnvironmentMetricTransport(environment),
+          env: variables,
+          timeoutMs: definition.timeout_ms,
+        },
+        signal,
+      },
+    );
+
+    return { evaluation, secrets };
   }
 
   const directory = await openMetricDirectory(projectRoot, definition.cwd);
@@ -285,13 +314,13 @@ const evaluateHttpMetric = async ({
     return { evaluation, secrets: [] };
   }
 
-  // Trace extensions are intentionally open, so validate their JSON shape at the HTTP boundary.
-  const metricRequest = z.json().parse({
-    protocol: METRIC_PROTOCOL,
-    case: context.caseDefinition,
-    output: context.execution.output,
-    trace: context.execution.trace,
-  });
+  // The body is the same metric request command metrics get. Trace extensions are open, so the
+  // request is checked as JSON before it becomes the mapped request's input.
+  const metricRequest = z
+    .json()
+    .parse(
+      buildMetricRequest({ caseDefinition: context.caseDefinition, execution: context.execution }),
+    );
 
   const agent: HttpAgentResource = {
     schema: AGENT_RESOURCE_SCHEMA_ID,
@@ -363,6 +392,8 @@ const applyAttachedThreshold = (
       };
 
 type EvaluateCaseMetricsOptions = {
+  /** The case environment exec metrics run in when the run sets `execution.metric_sandbox`. */
+  environment?: CaseEnvironment;
   /** The unredacted case execution. It is scored and never returned. */
   original: CaseExecution;
   payload: ResolvedEvalCaseInput;
@@ -401,6 +432,7 @@ const createEvalMetricEvaluator = (projectRoot: string, cacheStore: CacheStore) 
    * Metrics see the original output, so the returned evidence is redacted after scoring.
    */
   const evaluate = async ({
+    environment,
     original,
     payload,
     runId,
@@ -455,6 +487,7 @@ const createEvalMetricEvaluator = (projectRoot: string, cacheStore: CacheStore) 
         run = await evaluateMetricResource({
           context,
           definition,
+          environment,
           id: metric.id,
           projectRoot,
           signal,

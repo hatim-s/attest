@@ -1,4 +1,4 @@
-import type { AgentResource } from '@attest/contracts';
+import type { AgentResource, HttpRequestTemplate } from '@attest/contracts';
 
 import { LocalError } from '../../../errors/index.js';
 import { isSensitiveFieldName } from '../../../internal/redaction.js';
@@ -9,13 +9,11 @@ type TimeoutField = keyof NonNullable<AgentResource['timeouts']>;
 type LimitField = keyof NonNullable<AgentResource['limits']>;
 
 /** The HTTP native envelope reuses the direct invoker, so its policy matches native_cli. */
-type PolicyKind = Exclude<AgentResource['transport']['kind'], 'callback'> | 'http_envelope';
-
-// No adapter enforces artifact caps yet, so authoring one must fail instead of being ignored.
-const ARTIFACT_LIMITS = ['artifact_count', 'artifact_bytes', 'total_artifact_bytes'] as const;
+type PolicyKind = AgentResource['transport']['kind'] | 'http_envelope';
 
 const UNSUPPORTED_TIMEOUTS: Readonly<Record<PolicyKind, readonly TimeoutField[]>> = {
   background_cli: [],
+  callback: ['run_ms'],
   http: ['run_ms'],
   http_envelope: ['connect_ms', 'first_byte_ms', 'idle_ms', 'run_ms'],
   jsonl_bridge: ['connect_ms'],
@@ -25,44 +23,53 @@ const UNSUPPORTED_TIMEOUTS: Readonly<Record<PolicyKind, readonly TimeoutField[]>
   websocket: ['connect_ms', 'first_byte_ms', 'idle_ms', 'attempt_ms', 'run_ms'],
 };
 
+// Artifact caps apply to every transport's parsed response, so no row lists them.
 const UNSUPPORTED_LIMITS: Readonly<Record<PolicyKind, readonly LimitField[]>> = {
-  background_cli: ['event_count', 'event_bytes', ...ARTIFACT_LIMITS],
-  http: ['event_count', 'event_bytes', 'total_evidence_bytes', ...ARTIFACT_LIMITS],
-  http_envelope: [
-    'request_bytes',
-    'event_count',
-    'event_bytes',
-    'total_evidence_bytes',
-    ...ARTIFACT_LIMITS,
-  ],
-  jsonl_bridge: [...ARTIFACT_LIMITS],
-  native_cli: [
-    'request_bytes',
-    'event_count',
-    'event_bytes',
-    'total_evidence_bytes',
-    ...ARTIFACT_LIMITS,
-  ],
-  polling: ['event_count', 'event_bytes', 'total_evidence_bytes', ...ARTIFACT_LIMITS],
-  stream: ['response_bytes', ...ARTIFACT_LIMITS],
-  websocket: [...ARTIFACT_LIMITS],
+  background_cli: ['event_count', 'event_bytes'],
+  callback: ['event_count', 'event_bytes', 'total_evidence_bytes'],
+  http: ['event_count', 'event_bytes', 'total_evidence_bytes'],
+  http_envelope: ['request_bytes', 'event_count', 'event_bytes', 'total_evidence_bytes'],
+  jsonl_bridge: [],
+  native_cli: ['request_bytes', 'event_count', 'event_bytes', 'total_evidence_bytes'],
+  polling: ['event_count', 'event_bytes', 'total_evidence_bytes'],
+  stream: ['response_bytes'],
+  websocket: [],
 };
 
 const isLoopbackHost = (host: string): boolean =>
   host === 'localhost' || host === '::1' || host.startsWith('127.');
+
+/** Every header and query name the agent redacts must exist on one of its request templates. */
+const assertRedactionTargets = (
+  agent: AgentResource,
+  requests: readonly Pick<HttpRequestTemplate, 'headers' | 'query'>[],
+): void => {
+  for (const name of agent.redaction?.headers ?? []) {
+    const exists = requests.some(({ headers }) =>
+      Object.keys(headers ?? {}).some((header) => header.toLowerCase() === name.toLowerCase()),
+    );
+
+    if (!exists) {
+      throw new LocalError('project_invalid', 'A header redaction target does not exist.', {
+        path: `/agent/redaction/headers/${name}`,
+      });
+    }
+  }
+
+  for (const name of agent.redaction?.query ?? []) {
+    if (!requests.some(({ query }) => Object.hasOwn(query ?? {}, name))) {
+      throw new LocalError('project_invalid', 'A query redaction target does not exist.', {
+        path: `/agent/redaction/query/${name}`,
+      });
+    }
+  }
+};
 
 /** Rejects authored credentials and runtime policies outside the implemented adapter slice. */
 // BOUNDARY: Authored transport resources cross the execution boundary here; secret references, headers and credential arguments are checked before invocation.
 const assertSafeNativeAgentResource = (agent: AgentResource): void => {
   const transport = agent.transport;
   const kind = transport.kind;
-
-  if (kind === 'callback') {
-    throw new LocalError('project_invalid', 'Callback agents are not supported yet.', {
-      path: '/agent/transport/kind',
-      hint: 'Select another transport until the callback adapter ships.',
-    });
-  }
 
   const policyKind: PolicyKind =
     kind === 'http' && transport.response_mode === 'attest_envelope' ? 'http_envelope' : kind;
@@ -249,6 +256,46 @@ const assertSafeNativeAgentResource = (agent: AgentResource): void => {
     return;
   }
 
+  if (transport.kind === 'callback') {
+    const templates = (
+      [
+        ['trigger', transport.trigger],
+        ['artifact_fetch', transport.artifact_fetch],
+        ['trace_fetch', transport.trace_fetch],
+      ] as const
+    ).flatMap(([field, request]) => (request === undefined ? [] : [{ field, request }]));
+
+    for (const { field, request } of templates) {
+      assertSafeHttpTemplate(request, `/agent/transport/${field}`);
+    }
+
+    const publicUrl = transport.receiver?.public_url;
+
+    // The agent sends the bearer token to this URL, so it must not cross the network in clear text.
+    if (publicUrl !== undefined) {
+      const path = '/agent/transport/receiver/public_url';
+      const url = assertSafeHttpTemplate({ url: publicUrl, method: 'POST' }, path);
+
+      if (
+        publicUrl.includes('{{') ||
+        (url.protocol !== 'https:' && !isLoopbackHost(url.hostname))
+      ) {
+        throw new LocalError(
+          'project_invalid',
+          'The callback public URL must use HTTPS unless it is loopback.',
+          { path, hint: 'Use an https:// URL without placeholders.' },
+        );
+      }
+    }
+
+    assertRedactionTargets(
+      agent,
+      templates.map(({ request }) => request),
+    );
+
+    return;
+  }
+
   const request = transport.kind === 'polling' ? transport.submit : transport.request;
   const requestPath = `/agent/transport/${transport.kind === 'polling' ? 'submit' : 'request'}`;
 
@@ -294,25 +341,7 @@ const assertSafeNativeAgentResource = (agent: AgentResource): void => {
     });
   }
 
-  for (const name of agent.redaction?.headers ?? []) {
-    if (
-      !Object.keys(request.headers ?? {}).some(
-        (header) => header.toLowerCase() === name.toLowerCase(),
-      )
-    ) {
-      throw new LocalError('project_invalid', 'A header redaction target does not exist.', {
-        path: `/agent/redaction/headers/${name}`,
-      });
-    }
-  }
-
-  for (const name of agent.redaction?.query ?? []) {
-    if (!Object.hasOwn(request.query ?? {}, name)) {
-      throw new LocalError('project_invalid', 'A query redaction target does not exist.', {
-        path: `/agent/redaction/query/${name}`,
-      });
-    }
-  }
+  assertRedactionTargets(agent, [request]);
 };
 
 export { assertSafeNativeAgentResource };

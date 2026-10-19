@@ -26,6 +26,17 @@ export {
   type JsonlBridgeSession,
 } from './adapters/process/index.js';
 
+export {
+  completeCallbackAgent,
+  createLoopbackCompletionReceiver,
+  invokeCallbackAgent,
+  triggerCallbackAgent,
+  type CallbackAgentResource,
+  type CompletionReceiver,
+} from './adapters/callback/index.js';
+
+export { enforceArtifactLimits } from './internal/artifact-limits.js';
+
 export { invokeStreamingAgent, type StreamAgentResource } from './adapters/stream/index.js';
 
 export { startWebSocketAgent, type WebSocketAgentResource } from './adapters/websocket/index.js';

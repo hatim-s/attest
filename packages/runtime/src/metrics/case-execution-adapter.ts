@@ -25,7 +25,12 @@ const caseExecutionToMetricContext = (
 
   return {
     caseDefinition,
-    execution: { outcome: 'completed', output: execution.response.output, trace },
+    execution: {
+      outcome: 'completed',
+      output: execution.response.output,
+      trace,
+      artifacts: execution.response.artifacts ?? [],
+    },
   };
 };
 

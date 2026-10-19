@@ -200,10 +200,15 @@ type EvalTerminalFailureFactory = (
   message: string,
 ) => EvalFinalResultData;
 
+/** Builds one case's environment; resolving `undefined` runs that case without one. */
+type EvalCaseIsolation = (
+  context: Parameters<CaseEnvironmentFactory>[0],
+) => Promise<CaseEnvironment | undefined>;
+
 /** Injects deterministic time and optional event delivery without changing stored results. */
 type ExecuteEvalOptions<BaselineDiff = JsonValue, Payload = unknown> = {
   hooks?: readonly EvalHooks<Payload>[];
-  isolation?: CaseEnvironmentFactory;
+  isolation?: EvalCaseIsolation;
   signal?: AbortSignal;
   now?: () => string;
   onEvent?: (event: EvalEvent) => void | Promise<void>;
@@ -234,6 +239,7 @@ export {
   type EvalBaselineAdapter,
   type EvalCaseExecutionContext,
   type EvalCaseHookContext,
+  type EvalCaseIsolation,
   type EvalCaseInfrastructureFailure,
   type EvalCaseRecord,
   type EvalCaseRunner,

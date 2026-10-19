@@ -254,6 +254,56 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "properties": {
+    "artifacts": {
+      "items": {
+        "additionalProperties": false,
+        "properties": {
+          "content": {
+            "type": "string"
+          },
+          "encoding": {
+            "enum": [
+              "utf8",
+              "base64"
+            ],
+            "type": "string"
+          },
+          "kind": {
+            "const": "inline",
+            "type": "string"
+          },
+          "media_type": {
+            "maxLength": 255,
+            "minLength": 1,
+            "type": "string"
+          },
+          "path": {
+            "allOf": [
+              {
+                "pattern": "^(?![A-Za-z]:)"
+              },
+              {
+                "pattern": "^(?![\\\\/])(?!(?:.*[\\\\/])?\\.\\.(?:[\\\\/]|$)).+$"
+              },
+              {
+                "pattern": "^(?!\\.{1,2}(?:\\/|(?![\\s\\S])))[^/\\\\\\p{Cc}]{1,255}(?:\\/(?!\\.{1,2}(?:\\/|(?![\\s\\S])))[^/\\\\\\p{Cc}]{1,255})*(?![\\s\\S])"
+              }
+            ],
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "path",
+          "media_type",
+          "encoding",
+          "content"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    },
     "case": {
       "$ref": "#/$defs/TestCase"
     },

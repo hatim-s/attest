@@ -1,5 +1,13 @@
+import { createHash } from 'node:crypto';
+
 import type { AgentResponseCandidate } from '../../internal/agent-response-candidate.js';
-import { AGENT_PROTOCOL, isNumber, isString, type JsonValue } from '@attest/contracts';
+import {
+  AGENT_PROTOCOL,
+  isNumber,
+  isString,
+  type AgentRequest,
+  type JsonValue,
+} from '@attest/contracts';
 
 import { AgentInvocationError, abortedError } from '../../errors.js';
 import { abortableWait } from '../../internal/abortable-wait.js';
@@ -116,18 +124,22 @@ const attemptFromError = (error: AgentInvocationError, durationMs: number): Invo
     rawExcerpt: error.rawExcerpt,
   });
 
+/** Classifies an unexpected throw; `transport` names the adapter in the message. */
 const normalizeFailure = (
   cause: unknown,
-  signal: AbortSignal,
-  callerSignal?: AbortSignal,
+  context: {
+    transport: 'Mapped HTTP' | 'Callback agent';
+    signal: AbortSignal;
+    callerSignal: AbortSignal | undefined;
+  },
 ): AgentInvocationError => {
   if (cause instanceof AgentInvocationError) return cause;
 
-  if (callerSignal?.aborted === true || signal.aborted) {
-    return abortedError(callerSignal, 'Mapped HTTP invocation', { cause: cause });
+  if (context.callerSignal?.aborted === true || context.signal.aborted) {
+    return abortedError(context.callerSignal, `${context.transport} invocation`, { cause });
   }
 
-  return new AgentInvocationError('network', 'Mapped HTTP transport failed.', { cause: cause });
+  return new AgentInvocationError('network', `${context.transport} transport failed.`, { cause });
 };
 
 const statusError = (response: HttpJsonResponse): AgentInvocationError =>
@@ -178,7 +190,12 @@ const requestWithRetries = async (
         retryAfter: response.headers['retry-after'],
       };
     } catch (error: unknown) {
-      const normalized = normalizeFailure(error, signal, policy.callerSignal);
+      const normalized = normalizeFailure(error, {
+        transport: 'Mapped HTTP',
+        signal,
+        callerSignal: policy.callerSignal,
+      });
+
       failure = { error: normalized, retryable: retryableTransportError(normalized) };
     }
 
@@ -193,6 +210,28 @@ const requestWithRetries = async (
       abortedError(policy.callerSignal, 'Mapped HTTP invocation'),
     );
   }
+};
+
+/**
+ * Adds the idempotency key a server uses to drop a replayed submission. The key is derived from
+ * the run and case ids, so every retry of one case sends the same value.
+ */
+const setIdempotencyHeader = (
+  headers: Record<string, string>,
+  headerName: string,
+  request: AgentRequest,
+): void => {
+  const duplicate = Object.keys(headers).some(
+    (name) => name.toLowerCase() === headerName.toLowerCase(),
+  );
+
+  if (duplicate) {
+    throw new AgentInvocationError('invalid_envelope', 'Idempotency header mapping is ambiguous.');
+  }
+
+  headers[headerName] = createHash('sha256')
+    .update(`${request.run_id}:${request.case_id}`)
+    .digest('hex');
 };
 
 /** Sends a direct request, honoring Retry-After before the authored backoff. */
@@ -214,6 +253,7 @@ export {
   normalizeFailure,
   requestWithRetries,
   runDirect,
+  setIdempotencyHeader,
   type ExchangeContext,
   type ExchangeOutcome,
 };

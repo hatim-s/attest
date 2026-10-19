@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 
 import { isNumber, isString, type AgentRequest } from '@attest/contracts';
@@ -14,6 +13,7 @@ import {
   REMOTE_ERROR_FALLBACK,
   extractRemoteJobId,
   requestWithRetries,
+  setIdempotencyHeader,
   type ExchangeContext,
   type ExchangeOutcome,
 } from './mapped-http-execution.js';
@@ -137,20 +137,7 @@ const runPolling = async (
   const idempotencyHeader = transport.idempotency_header;
 
   if (idempotencyHeader !== undefined) {
-    const duplicate = Object.keys(submission.headers).find(
-      (name) => name.toLowerCase() === idempotencyHeader.toLowerCase(),
-    );
-
-    if (duplicate !== undefined) {
-      throw new AgentInvocationError(
-        'invalid_envelope',
-        'Idempotency header mapping is ambiguous.',
-      );
-    }
-
-    submission.headers[idempotencyHeader] = createHash('sha256')
-      .update(`${request.run_id}:${request.case_id}`)
-      .digest('hex');
+    setIdempotencyHeader(submission.headers, idempotencyHeader, request);
   }
 
   const pollingDelay = (retry: number, retryAfter: string | undefined): number =>

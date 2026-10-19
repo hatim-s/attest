@@ -6,6 +6,7 @@ import {
   type AgentRequest,
   type AgentResponse,
 } from '../agent/protocol.js';
+import { agentCompletionSchema, type AgentCompletion } from '../agent/completion.js';
 import { formatContractIssues, type ContractIssue } from '../internal/issues.js';
 import {
   metricRequestSchema,
@@ -106,6 +107,26 @@ const parseAgentResponse = (candidate: unknown): ParseReport<AgentResponse> => {
   return { ok: true, value: { ...response, trace: parsedTrace.value }, warnings };
 };
 
+/**
+ * Validates an async agent's completion without throwing and narrows it on its single outcome.
+ * The trace stays unvalidated; parseAgentResponse checks it once the callback adapter has built
+ * the response envelope.
+ */
+// BOUNDARY: Completion bodies posted to a callback receiver are validated against agentCompletionSchema.
+const parseAgentCompletion = (candidate: unknown): Result<AgentCompletion, ContractIssue[]> => {
+  const parsed = parseWithSchema(agentCompletionSchema, candidate);
+
+  if (!parsed.ok) return parsed;
+  const { output, error, ...fields } = parsed.value;
+
+  if (error !== undefined) return ok({ ...fields, error });
+
+  if (output !== undefined) return ok({ ...fields, output });
+
+  // The schema refinement already rejects this; the branch keeps the narrowing cast-free.
+  return err([{ path: 'output', message: 'exactly one of output or error must be present' }]);
+};
+
 /** Validates a trace document without throwing; extension fields are preserved. */
 // BOUNDARY: Untrusted trace JSON is validated against traceSchema.
 const parseTrace = (candidate: unknown): Result<Trace, ContractIssue[]> =>
@@ -122,6 +143,7 @@ const parseMetricResult = (candidate: unknown): Result<MetricResult, ContractIss
   parseWithSchema(metricResultSchema, candidate);
 
 export {
+  parseAgentCompletion,
   parseAgentRequest,
   parseAgentResponse,
   parseMetricRequest,

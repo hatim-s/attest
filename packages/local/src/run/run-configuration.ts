@@ -36,6 +36,7 @@ import {
   createEvalPersistenceAdapter,
 } from '../commands/eval/eval-persistence.js';
 import { resolveEvalRun } from '../commands/eval/eval-resolver.js';
+import { metricSandboxIsolation } from '../commands/eval/metric-sandbox.js';
 import { loadCommandProject } from '../commands/project/load-command-project.js';
 import { withRunNotFound } from '../commands/run-store/run-not-found.js';
 
@@ -179,6 +180,7 @@ const runConfiguration = async (
   };
 
   const runner = createEvalCaseRunner(project.root, store.cache, run);
+  const metricSandbox = run.effective_command.resolved.execution?.metric_sandbox;
   void (async () => {
     let canReleaseCancellationOwnership = false;
 
@@ -190,6 +192,12 @@ const runConfiguration = async (
         {
           artifacts: createEvalArtifactWriter(project.root),
           baseline: createEvalBaselineAdapter(store),
+          isolation:
+            metricSandbox === undefined
+              ? undefined
+              : metricSandboxIsolation(project.root, resolved.cases, {
+                  image: metricSandbox.image,
+                }),
           onEvent: (event) => queue.push(event),
           signal: AbortSignal.any([options.signal, registry.signal]),
           terminalFailure: options.terminalFailure,

@@ -1,10 +1,9 @@
 import type { EvalRun } from '@attest/contracts';
-import type { CaseEnvironmentFactory } from '@attest/executor';
-
 import { EvalCaseStageError, isCleanupUncertain } from './errors.js';
 import type {
   EvalCaseExecutionContext,
   EvalCaseHookContext,
+  EvalCaseIsolation,
   EvalCaseRunner,
   EvalCaseRunnerResult,
   EvalHookContexts,
@@ -74,7 +73,7 @@ const withEvalHooks = <Payload>(
   run: Readonly<EvalRun>,
   runner: EvalCaseRunner<Payload>,
   hooks: readonly EvalHooks<Payload>[],
-  isolation?: CaseEnvironmentFactory,
+  isolation?: EvalCaseIsolation,
 ): EvalCaseRunner<Payload> => {
   const cleanupFailures: unknown[] = [];
   let runSignal = new AbortController().signal;

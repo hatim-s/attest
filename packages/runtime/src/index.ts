@@ -1,5 +1,7 @@
 export {
+  buildMetricRequest,
   caseExecutionToMetricContext,
+  createEnvironmentMetricTransport,
   createTanstackJudgeClient,
   evaluateMetrics,
   judgeOutcomeSchema,

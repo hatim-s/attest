@@ -61,6 +61,11 @@ An artifact is a file the agent produced: generated code, an HTML page, a JSON r
 Any transport may return artifacts in the response envelope. Attest stores them with the response
 and passes them to executable metrics.
 
+`limits.artifact_count` (default 64), `limits.artifact_bytes` (default 4 MiB, decoded) and
+`limits.total_artifact_bytes` (default 16 MiB) cap the artifacts in one response on every
+transport. Going over a cap is an `output_cap_exceeded` invocation error. Two artifacts with the
+same `path` are an `invalid_envelope` invocation error.
+
 ```json
 {
   "kind": "inline",
@@ -139,10 +144,8 @@ agent, lets the connection go, and waits for the agent to post a completion back
 `timeouts.attempt_ms` bounds the wait for the completion, exactly like polling. Attest cannot
 cancel the remote work. `receiver.listen_port` picks the local listener port (`0`, the default,
 picks a free one). `receiver.public_url` is the base URL the agent is told to post to; it defaults
-to `http://127.0.0.1:<port>`. `limits.artifact_count`, `limits.artifact_bytes` and
-`limits.total_artifact_bytes` cap the artifacts one completion may carry.
-
-Local runs reject callback agents until the callback adapter ships.
+to `http://127.0.0.1:<port>`. The [callback guide](../integrations/callbacks.md) has a runnable
+example.
 
 ### Completion envelope
 

@@ -24,13 +24,16 @@ type HttpClientPolicy = {
   secrets: readonly string[];
 };
 
-type HttpJsonResponse = {
+/** One bounded response whose body is kept as bytes for callers that do not expect JSON. */
+type HttpResponse = {
+  body: Buffer;
   headers: Record<string, string>;
-  raw: JsonValue;
   rawExcerpt: RawExcerpt;
   status: number;
   url: URL;
 };
+
+type HttpJsonResponse = Omit<HttpResponse, 'body'> & { raw: JsonValue };
 
 /** A host-supplied transport must enforce endpoint security and the supplied limits. */
 type HttpJsonTransport = (
@@ -55,14 +58,11 @@ const normalizeHeaders = (headers: NodeJS.Dict<string | string[]>): Record<strin
 
 const isSuccessStatus = (status: number): boolean => status >= 200 && status < 300;
 
-/**
- * Reads one response body while enforcing cancellation, idle, and aggregate byte caps. Only a
- * success body is parsed as JSON; other statuses keep their text as evidence only.
- */
+/** Reads one response body while enforcing cancellation, idle, and aggregate byte caps. */
 const readResponseBody = async (
   response: IncomingMessage,
   policy: HttpClientPolicy,
-): Promise<{ raw: JsonValue; rawExcerpt: RawExcerpt }> => {
+): Promise<{ body: Buffer; rawExcerpt: RawExcerpt }> => {
   const chunks: Buffer[] = [];
   const evidence: Uint8Array[] = [];
   let byteCount = 0;
@@ -125,26 +125,19 @@ const readResponseBody = async (
     response.destroy();
   }
 
-  const text = Buffer.concat(chunks, byteCount).toString('utf8');
-  const rawExcerpt = createRawExcerpt(redactTransportText(text, policy.secrets));
+  const body = Buffer.concat(chunks, byteCount);
 
-  if (!isSuccessStatus(response.statusCode ?? 0)) return { raw: null, rawExcerpt };
-
-  try {
-    return { raw: parseJson(text), rawExcerpt };
-  } catch (error: unknown) {
-    throw new AgentInvocationError('invalid_envelope', 'Mapped HTTP response is not valid JSON.', {
-      cause: error,
-      rawExcerpt,
-    });
-  }
+  return {
+    body,
+    rawExcerpt: createRawExcerpt(redactTransportText(body.toString('utf8'), policy.secrets)),
+  };
 };
 
-/** Performs one DNS-pinned request and returns only bounded JSON evidence. */
+/** Performs one DNS-pinned request and returns its bounded body. */
 const requestOnce = async (
   request: MaterializedHttpRequest,
   policy: HttpClientPolicy,
-): Promise<HttpJsonResponse> => {
+): Promise<HttpResponse> => {
   if (policy.attemptSignal.aborted) throw abortError(policy);
 
   const resolved = await resolveSafeHttpUrl(request.url, {
@@ -179,22 +172,22 @@ const requestOnce = async (
   });
 
   const { response } = opened;
-  const { raw, rawExcerpt } = await readResponseBody(response, policy);
+  const { body, rawExcerpt } = await readResponseBody(response, policy);
 
   return {
+    body,
     headers: normalizeHeaders(response.headers),
-    raw,
     rawExcerpt,
     status: response.statusCode ?? 0,
     url: resolved.url,
   };
 };
 
-/** Follows only bounded, method-preserving, same-origin redirects. */
-const requestJson = async (
+/** Follows only bounded, method-preserving, same-origin redirects and returns the body bytes. */
+const requestHttp = async (
   request: MaterializedHttpRequest,
   policy: HttpClientPolicy,
-): Promise<HttpJsonResponse> => {
+): Promise<HttpResponse> => {
   const origin = new URL(request.url);
   let current = request;
 
@@ -220,4 +213,27 @@ const requestJson = async (
   throw new AgentInvocationError('http_status', 'Mapped HTTP redirect limit was exceeded.');
 };
 
-export { requestJson, type HttpClientPolicy, type HttpJsonResponse, type HttpJsonTransport };
+/** Sends one request like requestHttp. Only a success body is parsed as JSON; others stay evidence. */
+const requestJson: HttpJsonTransport = async (request, policy) => {
+  const { body, ...response } = await requestHttp(request, policy);
+
+  if (!isSuccessStatus(response.status)) return { ...response, raw: null };
+
+  try {
+    return { ...response, raw: parseJson(body.toString('utf8')) };
+  } catch (error: unknown) {
+    throw new AgentInvocationError('invalid_envelope', 'Mapped HTTP response is not valid JSON.', {
+      cause: error,
+      rawExcerpt: response.rawExcerpt,
+    });
+  }
+};
+
+export {
+  requestHttp,
+  requestJson,
+  type HttpClientPolicy,
+  type HttpJsonResponse,
+  type HttpJsonTransport,
+  type HttpResponse,
+};

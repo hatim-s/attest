@@ -141,7 +141,11 @@ const invokeMappedHttpAgent = async (
 
     return { ...attempt, attempts: [...retryAttempts, attempt] };
   } catch (error: unknown) {
-    const normalized = normalizeFailure(error, signal, options.signal);
+    const normalized = normalizeFailure(error, {
+      transport: 'Mapped HTTP',
+      signal,
+      callerSignal: options.signal,
+    });
 
     const attempt = attemptFromError(normalized, terminalAttemptDurationMs ?? invocationDuration());
 

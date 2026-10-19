@@ -1,4 +1,11 @@
-import type { JsonValue, MetricDefinition, MetricResult, TestCase, Trace } from '@attest/contracts';
+import type {
+  InlineArtifact,
+  JsonValue,
+  MetricDefinition,
+  MetricResult,
+  TestCase,
+  Trace,
+} from '@attest/contracts';
 import type { StoredMetricEvaluation } from '@attest/core';
 
 /** Names the stable failure classes a metric may report without parsing messages. */
@@ -19,7 +26,7 @@ type MetricErrorCode =
 
 /** Keeps metric evaluation decoupled from the richer runner result. */
 type MetricExecutionView =
-  | { outcome: 'completed'; output: JsonValue; trace: Trace | null }
+  | { outcome: 'completed'; output: JsonValue; trace: Trace | null; artifacts: InlineArtifact[] }
   | {
       outcome: 'agent_error' | 'invocation_error' | 'timeout' | 'cancelled';
       trace: Trace | null;

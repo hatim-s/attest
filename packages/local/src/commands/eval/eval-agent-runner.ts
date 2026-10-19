@@ -252,6 +252,7 @@ const createEvalCaseRunner = (
       }
 
       const metrics = await metricEvaluator.evaluate({
+        environment: context.environment,
         original,
         payload,
         runId,

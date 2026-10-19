@@ -1,6 +1,10 @@
 import type { ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
 
+import type { InlineArtifact, MetricRequest } from '@attest/contracts';
 import { killProcessTree, spawnInProcessGroup } from '@attest/executor';
 
 import type { MetricErrorInfo } from '../metric-evaluation.js';
@@ -8,11 +12,11 @@ import type { CommandMetricDefinition } from '../metric-definitions.js';
 import { abortReasonOf, composeAbortSignal } from './abort-signal.js';
 import {
   abortedMetricError,
+  appendStderr,
+  definedEnvironment,
   type MetricTransportOptions,
   type MetricTransportOutcome,
 } from './metric-transport.js';
-
-const MAXIMUM_STDERR_BYTES = 4 * 1024;
 
 const PROCESS_KILL_GRACE_MS = 2_000;
 
@@ -20,23 +24,6 @@ const PROCESS_REAP_WAIT_MS = 5_000;
 
 /** Selects the stable error returned after a forced process shutdown. */
 type TerminationReason = 'timeout' | 'cancelled' | 'output_cap';
-
-/** Appends only the remaining diagnostic capacity so a single stderr chunk cannot bypass its cap. */
-const appendExcerpt = (value: string, chunk: Buffer, maximumBytes: number): string => {
-  const remainingBytes = maximumBytes - Buffer.byteLength(value);
-
-  if (remainingBytes <= 0) {
-    return value;
-  }
-
-  return `${value}${chunk.subarray(0, remainingBytes).toString()}`;
-};
-
-/** Drops unset variables because the process-group spawner takes a plain string record. */
-const toSpawnEnvironment = (env: NodeJS.ProcessEnv): Record<string, string> =>
-  Object.fromEntries(
-    Object.entries(env).filter((entry): entry is [string, string] => entry[1] !== undefined),
-  );
 
 /** Bounds the wait for Node to observe the direct child's exit so a broken platform cannot hang a run. */
 const waitForExit = async (child: ChildProcess): Promise<boolean> => {
@@ -78,10 +65,10 @@ const terminationError = (
 };
 
 /**
- * Invokes a CLI metric in its own process group. The metric owns the whole child tree: every
+ * Runs a CLI metric in its own process group. The metric owns the whole child tree: every
  * forced shutdown sweeps descendants through the executor before the outcome resolves.
  */
-const invokeCommandMetric = (
+const runCommand = (
   definition: CommandMetricDefinition,
   requestBody: string,
   options: MetricTransportOptions,
@@ -89,7 +76,7 @@ const invokeCommandMetric = (
   new Promise((resolve) => {
     const child = spawnInProcessGroup(definition.command, {
       cwd: options.cwd ?? process.cwd(),
-      env: toSpawnEnvironment(options.env ?? process.env),
+      env: definedEnvironment(options.env ?? process.env),
     });
 
     const signal = composeAbortSignal(options.signal, options.timeoutMs);
@@ -159,7 +146,7 @@ const invokeCommandMetric = (
       stdoutChunks.push(chunk);
     });
     child.stderr?.on('data', (chunk: Buffer) => {
-      stderr = appendExcerpt(stderr, chunk, MAXIMUM_STDERR_BYTES);
+      stderr = appendStderr(stderr, chunk);
     });
     child.once('close', (exitCode) => {
       if (terminationReason !== undefined) {
@@ -191,5 +178,41 @@ const invokeCommandMetric = (
     signal.addEventListener('abort', abort, { once: true });
     child.stdin?.end(requestBody);
   });
+
+/** Writes each artifact to `<directory>/<path>`; the contract rejects absolute and `..` paths. */
+const writeArtifacts = async (
+  directory: string,
+  artifacts: readonly InlineArtifact[],
+): Promise<void> => {
+  for (const artifact of artifacts) {
+    const destination = join(directory, artifact.path);
+    await mkdir(dirname(destination), { recursive: true });
+    await writeFile(destination, Buffer.from(artifact.content, artifact.encoding));
+  }
+};
+
+/**
+ * Invokes a CLI metric with its artifacts as files. They are written to a fresh temporary
+ * directory named by `artifact_dir`, which is removed once the metric settles.
+ */
+const invokeCommandMetric = async (
+  definition: CommandMetricDefinition,
+  request: MetricRequest,
+  options: MetricTransportOptions,
+): Promise<MetricTransportOutcome> => {
+  const directory = await mkdtemp(join(tmpdir(), 'attest-metric-'));
+
+  try {
+    await writeArtifacts(directory, request.artifacts);
+
+    return await runCommand(
+      definition,
+      JSON.stringify({ ...request, artifact_dir: directory }),
+      options,
+    );
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+};
 
 export { invokeCommandMetric };
