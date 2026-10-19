@@ -1,10 +1,10 @@
 import { lstat } from 'node:fs/promises';
 import { join } from 'node:path';
 
-import { StoreError, type AttestStore, type ProjectCatalog, type RunSource } from '@attest/core';
+import { StoreError, type ProjectCatalog, type RunSource, type RunStore } from '@attest/core';
 
 import { errnoCode } from '../internal/errno-code.js';
-import { openStore } from '../store/index.js';
+import { openReadonlyRunStore } from '../store/index.js';
 import { readRegistry, type RegistryEntry } from './project-registry.js';
 
 type RegistryCatalog = ProjectCatalog & { close: () => Promise<void> };
@@ -21,17 +21,6 @@ const emptySource: RunSource = {
   getRunWithCases: runNotFound,
 };
 
-const storeExists = async (storePath: string): Promise<boolean> => {
-  try {
-    await lstat(storePath);
-
-    return true;
-  } catch (error: unknown) {
-    if (errnoCode(error) === 'ENOENT') return false;
-    throw error;
-  }
-};
-
 /** Lists the registry entry as the read API's project record. */
 const toProjectRecord = ({ key, name, root, projectId }: RegistryEntry) => ({
   key,
@@ -42,12 +31,13 @@ const toProjectRecord = ({ key, name, root, projectId }: RegistryEntry) => ({
 
 /**
  * A catalog over every registered project. The registry file is read on each call, so a project
- * added from another terminal appears without a restart. Stores open lazily on first use and
- * stay open until `close()`; a project without a store reads as empty until its first run.
+ * added from another terminal appears without a restart. Stores open read-only on first use,
+ * are never created or migrated, and stay open until `close()`; a project without a store reads
+ * as empty until its first run.
  */
 const createRegistryCatalog = ({ registryPath }: { registryPath: string }): RegistryCatalog => {
   // Keyed by root: a key removed and re-added for another directory must not reuse the handle.
-  const opened = new Map<string, Promise<AttestStore>>();
+  const opened = new Map<string, Promise<RunStore>>();
 
   const findEntry = async (key: string): Promise<RegistryEntry> => {
     const entry = (await readRegistry(registryPath)).projects.find(
@@ -69,20 +59,28 @@ const createRegistryCatalog = ({ registryPath }: { registryPath: string }): Regi
     openProject: async (key) => {
       const { root } = await findEntry(key);
       const storePath = join(root, '.attest', 'runs.db');
-
-      if (!opened.has(root) && !(await storeExists(storePath))) return emptySource;
-
-      // Checked again after the await: parallel first requests must share one handle.
+      // Checked after the await: parallel first requests must share one handle.
       let store = opened.get(root);
 
       if (store === undefined) {
-        store = openStore(storePath);
+        store = openReadonlyRunStore(storePath);
         opened.set(root, store);
         // A failed open is not cached, so the next request retries it.
         store.catch(() => opened.delete(root));
       }
 
-      return (await store).runs;
+      try {
+        return await store;
+      } catch (error: unknown) {
+        // A read-only open never creates the file, so asking after the failure cannot race it.
+        const missing = await lstat(storePath).then(
+          () => false,
+          (cause: unknown) => errnoCode(cause) === 'ENOENT',
+        );
+
+        if (missing) return emptySource;
+        throw error;
+      }
     },
     close: async () => {
       const stores = await Promise.allSettled(opened.values());

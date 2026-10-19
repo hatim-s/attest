@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readdir, realpath, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -46,6 +46,21 @@ describe('createRegistryCatalog', () => {
       code: 'RUN_NOT_FOUND',
     });
     expect(await readdir(root)).toEqual([]);
+    await catalog.close();
+  });
+
+  it('rejects a store at an older schema instead of migrating it', async () => {
+    const home = await temporaryDirectory();
+    const registryPath = join(home, 'projects.json');
+    const root = await addProject(home, registryPath, 'pinned');
+    await mkdir(join(root, '.attest'));
+    // An empty file is a valid SQLite database with no tables, so every migration is pending.
+    const storePath = join(root, '.attest', 'runs.db');
+    await writeFile(storePath, '');
+    const catalog = createRegistryCatalog({ registryPath });
+
+    await expect(catalog.openProject('pinned')).rejects.toMatchObject({ code: 'SCHEMA_OUTDATED' });
+    expect(await readFile(storePath)).toHaveLength(0);
     await catalog.close();
   });
 
