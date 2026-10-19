@@ -185,6 +185,26 @@ describe('loopback completion receiver', () => {
     await expect(registration.completion).resolves.toMatchObject({ output: 'done' });
     expect((await postCompletion(registration.url, registration.token, body)).status).toBe(409);
   });
+  it('tells apart two cases that share a run and case id by their tokens', async () => {
+    // Case ids are unique per test, so two tests in one run can wait on the same path.
+    const created = receiver();
+    const first = await created.register({ runId: RUN_ID, caseId: 'case-1' });
+    const second = await created.register({ runId: RUN_ID, caseId: 'case-1' });
+
+    expect(second.url).toBe(first.url);
+
+    const posted = await postCompletion(
+      second.url,
+      second.token,
+      JSON.stringify(completion({ output: 'second' })),
+    );
+
+    expect(posted.status).toBe(202);
+    await expect(second.completion).resolves.toMatchObject({ output: 'second' });
+
+    await postCompletion(first.url, first.token, JSON.stringify(completion({ output: 'first' })));
+    await expect(first.completion).resolves.toMatchObject({ output: 'first' });
+  });
 });
 
 describe('callback agent adapter', () => {

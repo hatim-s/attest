@@ -44,17 +44,17 @@ type LoopbackReceiverOptions = {
 };
 
 /**
- * `accepted` entries stay after release so a repeated post with the right token gets 409 instead
- * of 404, which tells the agent its first delivery landed.
+ * One registered case. Case ids are unique only within a test, so several entries can share a
+ * path; the token picks the entry. Accepted entries stay after release so a repeated post with the
+ * right token gets 409 instead of 404, which tells the agent its first delivery landed.
  */
-type Entry =
-  | {
-      state: 'pending';
-      tokenDigest: Buffer;
-      resolve: (completion: AgentCompletion) => void;
-      reject: (cause: Error) => void;
-    }
-  | { state: 'accepted'; tokenDigest: Buffer };
+type Entry = {
+  key: string;
+  tokenDigest: Buffer;
+  state: 'pending' | 'accepted';
+  resolve: (completion: AgentCompletion) => void;
+  reject: (cause: Error) => void;
+};
 
 const COMPLETION_PATH = /^\/attest\/completions\/(?<runId>[^/]+)\/(?<caseId>[^/]+)$/u;
 
@@ -110,11 +110,20 @@ const readBody = async (request: IncomingMessage, capBytes: number): Promise<str
 const isJsonContentType = (value: string | undefined): boolean =>
   value?.split(';')[0]?.trim().toLowerCase() === 'application/json';
 
-/** Compares digests so token length never shortcuts the comparison. */
-const tokenMatches = (header: string | undefined, expected: Buffer): boolean => {
+/**
+ * Finds the entry whose token the request presents. Digests are compared in constant time, so
+ * token length never shortcuts the comparison.
+ */
+const matchToken = (
+  header: string | undefined,
+  candidates: readonly Entry[],
+): Entry | undefined => {
   const presented = /^Bearer (?<token>\S+)$/u.exec(header ?? '')?.groups?.token;
 
-  return presented !== undefined && timingSafeEqual(digest(presented), expected);
+  if (presented === undefined) return undefined;
+  const presentedDigest = digest(presented);
+
+  return candidates.find((entry) => timingSafeEqual(presentedDigest, entry.tokenDigest));
 };
 
 /**
@@ -123,12 +132,12 @@ const tokenMatches = (header: string | undefined, expected: Buffer): boolean => 
  * never logged or echoed.
  */
 const createLoopbackCompletionReceiver = (options: LoopbackReceiverOptions): CompletionReceiver => {
-  const entries = new Map<string, Entry>();
+  const entries = new Set<Entry>();
   let listener: Promise<{ server: Server; base: string }> | undefined;
   let closing: Promise<void> = Promise.resolve();
 
   const pendingCount = (): number =>
-    [...entries.values()].filter((entry) => entry.state === 'pending').length;
+    [...entries].filter((entry) => entry.state === 'pending').length;
 
   const handle = async (request: IncomingMessage, response: ServerResponse): Promise<void> => {
     const key = pathKey(request.url);
@@ -145,15 +154,17 @@ const createLoopbackCompletionReceiver = (options: LoopbackReceiverOptions): Com
       return;
     }
 
-    const entry = entries.get(key);
+    const candidates = [...entries].filter((candidate) => candidate.key === key);
 
-    if (entry === undefined) {
+    if (candidates.length === 0) {
       reply(response, 404, { error: 'unknown_registration' });
 
       return;
     }
 
-    if (!tokenMatches(request.headers.authorization, entry.tokenDigest)) {
+    const entry = matchToken(request.headers.authorization, candidates);
+
+    if (entry === undefined) {
       reply(response, 401, { error: 'invalid_token' }, { 'www-authenticate': 'Bearer' });
 
       return;
@@ -211,23 +222,21 @@ const createLoopbackCompletionReceiver = (options: LoopbackReceiverOptions): Com
       return;
     }
 
-    // The body read awaited, so another post may have been accepted in the meantime.
-    const current = entries.get(key);
-
-    if (current === undefined) {
+    // The body read awaited, so the entry may have been released or completed in the meantime.
+    if (!entries.has(entry)) {
       reply(response, 404, { error: 'unknown_registration' });
 
       return;
     }
 
-    if (current.state !== 'pending') {
+    if (entry.state !== 'pending') {
       reply(response, 409, { error: 'already_completed' });
 
       return;
     }
 
-    entries.set(key, { state: 'accepted', tokenDigest: current.tokenDigest });
-    current.resolve(completion);
+    entry.state = 'accepted';
+    entry.resolve(completion);
     reply(response, 202, { accepted: true });
   };
 
@@ -286,34 +295,30 @@ const createLoopbackCompletionReceiver = (options: LoopbackReceiverOptions): Com
 
   const register: CompletionReceiver['register'] = async ({ runId, caseId, signal }) => {
     signal?.throwIfAborted();
-    const key = registrationKey(runId, caseId);
-
-    if (entries.get(key)?.state === 'pending') {
-      throw new AgentInvocationError(
-        'network',
-        `A completion for case ${caseId} is already awaited in this run.`,
-      );
-    }
-
     const token = randomBytes(32).toString('base64url');
 
-    // The executor runs synchronously, so the entry exists before register awaits anything.
+    const entry: Entry = {
+      key: registrationKey(runId, caseId),
+      tokenDigest: digest(token),
+      state: 'pending',
+      resolve: () => undefined,
+      reject: () => undefined,
+    };
+
+    // The executor runs synchronously, so the entry settles its own promise from here on.
     const promise = new Promise<AgentCompletion>((resolve, reject) => {
-      entries.set(key, { state: 'pending', tokenDigest: digest(token), resolve, reject });
+      entry.resolve = resolve;
+      entry.reject = reject;
     });
+
+    entries.add(entry);
 
     // The caller may stop awaiting after release; a later rejection must not surface as unhandled.
     promise.catch(() => undefined);
 
     /** Drops a still-pending entry, rejecting its completion, and stops an idle listener. */
     const drop = (cause: Error): void => {
-      const entry = entries.get(key);
-
-      if (entry?.state === 'pending') {
-        entries.delete(key);
-        entry.reject(cause);
-      }
-
+      if (entry.state === 'pending' && entries.delete(entry)) entry.reject(cause);
       closeIfIdle();
     };
 
@@ -343,7 +348,7 @@ const createLoopbackCompletionReceiver = (options: LoopbackReceiverOptions): Com
   };
 
   const close = async (): Promise<void> => {
-    for (const entry of entries.values()) {
+    for (const entry of entries) {
       if (entry.state === 'pending') entry.reject(new Error('Completion receiver closed.'));
     }
 
