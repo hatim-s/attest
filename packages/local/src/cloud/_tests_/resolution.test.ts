@@ -89,10 +89,10 @@ it('gets CI project identity from the token and rejects disagreeing links', asyn
   await writeCloudLink(root, link);
   const controller = new AbortController();
   controller.abort();
-  fetcher.mockImplementation(async (_url, init) => {
+  fetcher.mockImplementation((_url, init) => {
     init?.signal?.throwIfAborted();
 
-    return Response.json({ token: { id: 't', name: 'ci', project_id: 'p' } });
+    return Promise.resolve(Response.json({ token: { id: 't', name: 'ci', project_id: 'p' } }));
   });
   await expect(
     resolveCloudProject({ ...options, signal: controller.signal }),

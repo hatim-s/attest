@@ -760,14 +760,14 @@ describe('eval command grammar and terminal behavior', () => {
 it.each(['pass', 'fail'] as const)(
   'keeps the %s eval exit code and output when --push is aborted',
   async (verdict) => {
-    const pushCloudRun = vi.fn<typeof pushRun>(async ({ signal }) => {
+    const pushCloudRun = vi.fn<typeof pushRun>(({ signal }) => {
       process.emit('SIGINT');
 
       if (signal?.aborted) {
         throw new LocalError('cancelled', 'Cloud request did not complete.');
       }
 
-      return { url: 'https://cloud.test/run', unchanged: false };
+      return Promise.resolve({ url: 'https://cloud.test/run', unchanged: false });
     });
 
     const authenticatedCloudClient = vi
