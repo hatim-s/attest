@@ -21,6 +21,7 @@ const run: RunRecord = {
   configJson: '{}',
   createdAt: '2026-10-18T00:00:00.000Z',
   status: 'completed',
+  finishedAt: '2026-10-18T00:00:01.000Z',
   gitBranch: 'main',
   gitSha: 'sha',
 };
@@ -245,7 +246,7 @@ describe('suite analytics clients', () => {
 
     const running = createApiClient({
       kind: 'snapshot',
-      snapshot: { ...snapshot, run: { ...run, status: 'running' } },
+      snapshot: { ...snapshot, run: { ...run, status: 'running', finishedAt: undefined } },
     });
 
     expect(await running.getSuiteHistory({ projectKey, suiteName: 'a/b' }, {})).toEqual({

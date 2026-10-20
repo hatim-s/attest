@@ -136,31 +136,22 @@ const runMetadataSchema = z.object({
   labels: z.record(z.string(), z.string()).optional(),
 });
 
-const runRecordSchema = runMetadataSchema
-  .extend({
-    id: nonemptyStringSchema,
-    createdAt: isoTimestampSchema,
-    finishedAt: isoTimestampSchema.optional(),
-    status: z.enum(['running', 'completed', 'failed', 'cancelled']),
-    summary: summarySchema.optional(),
-  })
-  .superRefine((run, context) => {
-    if (run.status === 'running' && run.finishedAt !== undefined) {
-      context.addIssue({
-        code: 'custom',
-        path: ['finishedAt'],
-        message: 'is forbidden while running',
-      });
-    }
+const runRecordBaseSchema = runMetadataSchema.extend({
+  id: nonemptyStringSchema,
+  createdAt: isoTimestampSchema,
+  summary: summarySchema.optional(),
+});
 
-    if (run.status !== 'running' && run.finishedAt === undefined) {
-      context.addIssue({
-        code: 'custom',
-        path: ['finishedAt'],
-        message: 'is required when terminal',
-      });
-    }
-  });
+const runRecordSchema = z.discriminatedUnion('status', [
+  runRecordBaseSchema.extend({
+    status: z.literal('running'),
+    finishedAt: z.undefined().optional(),
+  }),
+  runRecordBaseSchema.extend({
+    status: z.enum(['completed', 'failed', 'cancelled']),
+    finishedAt: isoTimestampSchema,
+  }),
+]);
 
 const caseRecordFields = {
   rowId: nonemptyStringSchema,
@@ -179,6 +170,7 @@ type CaseRecord = z.infer<typeof caseRecordSchema>;
 
 type RunMetadata = z.infer<typeof runMetadataSchema>;
 
+/** Status narrows lifecycle timestamps so terminal readers can rely on finishedAt. */
 type RunRecord = z.infer<typeof runRecordSchema>;
 
 type RunSummary = z.infer<typeof summarySchema>;

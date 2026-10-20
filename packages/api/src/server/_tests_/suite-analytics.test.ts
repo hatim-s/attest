@@ -16,7 +16,7 @@ const runs: RunRecord[] = (
   ] as const
 ).map(([id, status]) => ({
   id,
-  status,
+  ...(status === 'running' ? { status } : { status, finishedAt: '2026-10-18T00:00:01.000Z' }),
   schemaId: 'attest.project',
   configHash: id,
   configJson: '{}',
