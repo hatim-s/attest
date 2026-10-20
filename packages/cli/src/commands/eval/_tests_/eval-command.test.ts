@@ -21,6 +21,7 @@ import {
   type EvalEvent,
   type EvalRunRequest,
 } from '@attest/contracts';
+import { LocalError } from '@attest/local';
 import { cancelConfiguration, runConfiguration } from '@attest/local/eval';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -754,3 +755,33 @@ describe('eval command grammar and terminal behavior', () => {
     expect(evidence.output).toContain('Result: CANCELLED (exit 130)');
   });
 });
+
+it.each(['pass', 'fail'] as const)(
+  'keeps the %s eval exit code and output when --push fails',
+  async (verdict) => {
+    const pushCloudRun = vi
+      .fn()
+      .mockRejectedValue(new LocalError('cloud_unavailable', 'Cloud request did not complete.'));
+
+    const authenticatedCloudClient = vi
+      .fn()
+      .mockResolvedValue({ baseUrl: 'https://cloud.test', request: vi.fn(), upload: vi.fn() });
+
+    run.mockResolvedValue(eventSource(completedEvents(verdict)));
+
+    const result = await executeCommand(
+      process.cwd(),
+      ['eval', 'run', '--all', '--push', '--output', 'json'],
+      { services: { ...services, cloud: { authenticatedCloudClient, pushCloudRun } } },
+    );
+
+    expect(result.exitCode).toBe(verdict === 'pass' ? 0 : 1);
+    expect(pushCloudRun).toHaveBeenCalledWith(expect.objectContaining({ runId: RUN_ID }));
+    expect(result.errors).toEqual(['cloud_unavailable: Cloud request did not complete.']);
+    expect(result.output).toHaveLength(1);
+    expect(cliResultSchema.parse(JSON.parse(result.output[0]!))).toMatchObject({
+      ok: true,
+      result: { run_id: RUN_ID, verdict },
+    });
+  },
+);

@@ -17,3 +17,8 @@ export { pushCloudProject, pullCloudProject } from './sync.js';
 
 export { pushCloudRun } from './push-run.js';
 
+export {
+  createCloudProjectToken,
+  listCloudProjectTokens,
+  revokeCloudProjectToken,
+} from './project-tokens.js';
