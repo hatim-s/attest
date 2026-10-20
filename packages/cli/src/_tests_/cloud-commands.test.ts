@@ -33,6 +33,7 @@ const services = {
     authenticatedCloudClient: () =>
       Promise.resolve({
         baseUrl: 'https://cloud.example.test',
+        upload: () => Promise.reject(new Error('Unexpected upload.')),
         request: () =>
           Promise.reject(new Error('This command fixture should not send HTTP requests.')),
       }),
@@ -147,6 +148,7 @@ describe('cloud command translation', () => {
       credentialPath,
       JSON.stringify({
         baseUrl: 'https://cloud.example.test',
+        upload: () => Promise.reject(new Error('Unexpected upload.')),
         accessToken: 'token',
         expiresAt: new Date(Date.now() + 60_000).toISOString(),
       }),

@@ -7,6 +7,10 @@ import { CloudRemoteError, decodeRemoteError, parseCloudEndpoint } from './proto
 type CloudClient = {
   readonly baseUrl: string;
   readonly credentialSource?: 'session' | 'environment';
+  upload: <T>(
+    path: string,
+    options: { schema: z.ZodType<T>; body: string; signal?: AbortSignal },
+  ) => Promise<T>;
   request: <T>(
     method: string,
     path: string,
@@ -99,75 +103,89 @@ const createCloudClient = (options: CloudClientOptions): CloudClient => {
   const baseUrl = normalizeCloudUrl(options.baseUrl);
   const fetcher = options.fetch ?? fetch;
 
+  const send = async <T>(
+    method: string,
+    path: string,
+    requestOptions: { schema: z.ZodType<T>; body?: string; signal?: AbortSignal },
+    transport: { contentType: string; timeout: number },
+  ): Promise<T> => {
+    const { body, signal } = requestOptions;
+
+    if (
+      !path.startsWith('/v1/') ||
+      path.startsWith('//') ||
+      new URL(path, baseUrl).origin !== baseUrl ||
+      !new URL(path, baseUrl).pathname.startsWith('/v1/')
+    ) {
+      throw new LocalError('cli_usage', 'Cloud request path must stay under /v1/.');
+    }
+
+    let response: Response;
+
+    try {
+      const headers = new Headers({ accept: 'application/json' });
+
+      if (body !== undefined) headers.set('content-type', transport.contentType);
+
+      if (options.accessToken !== undefined)
+        headers.set('authorization', `Bearer ${options.accessToken}`);
+      response = await fetcher(new URL(path, baseUrl), {
+        method,
+        redirect: 'error',
+        signal:
+          signal === undefined
+            ? AbortSignal.timeout(transport.timeout)
+            : AbortSignal.any([signal, AbortSignal.timeout(transport.timeout)]),
+        headers,
+        body,
+      });
+    } catch {
+      throw new LocalError(
+        signal?.aborted ? 'cancelled' : 'cloud_unavailable',
+        'Cloud request did not complete.',
+      );
+    }
+
+    if (!response.ok) {
+      let outcome = decodeRemoteError(undefined);
+
+      try {
+        outcome = decodeRemoteError(JSON.parse(await readResponseText(response)));
+      } catch {
+        /* An upstream proxy may return a non-JSON failure. */
+      }
+
+      throw new CloudRemoteError(response.status, outcome);
+    }
+
+    if (response.status === 204) return parseCloudEndpoint(requestOptions.schema, undefined);
+
+    let value: unknown;
+
+    try {
+      value = JSON.parse(await readResponseText(response));
+    } catch {
+      throw new LocalError('cloud_request_failed', 'Cloud returned an invalid JSON response.');
+    }
+
+    return parseCloudEndpoint(requestOptions.schema, value);
+  };
+
   return {
     baseUrl,
     credentialSource: options.credentialSource,
-    async request<T>(
-      method: string,
-      path: string,
-      requestOptions: { schema: z.ZodType<T>; body?: JsonValue; signal?: AbortSignal },
-    ): Promise<T> {
-      const { body, signal } = requestOptions;
-
-      if (
-        !path.startsWith('/v1/') ||
-        path.startsWith('//') ||
-        new URL(path, baseUrl).origin !== baseUrl ||
-        !new URL(path, baseUrl).pathname.startsWith('/v1/')
-      ) {
-        throw new LocalError('cli_usage', 'Cloud request path must stay under /v1/.');
-      }
-
-      let response: Response;
-
-      try {
-        const headers = new Headers({ accept: 'application/json' });
-
-        if (body !== undefined) headers.set('content-type', 'application/json');
-
-        if (options.accessToken !== undefined)
-          headers.set('authorization', `Bearer ${options.accessToken}`);
-        response = await fetcher(new URL(path, baseUrl), {
-          method,
-          redirect: 'error',
-          signal:
-            signal === undefined
-              ? AbortSignal.timeout(30_000)
-              : AbortSignal.any([signal, AbortSignal.timeout(30_000)]),
-          headers,
-          body: body === undefined ? undefined : JSON.stringify(body),
-        });
-      } catch {
-        throw new LocalError(
-          signal?.aborted ? 'cancelled' : 'cloud_unavailable',
-          'Cloud request did not complete.',
-        );
-      }
-
-      if (!response.ok) {
-        let outcome = decodeRemoteError(undefined);
-
-        try {
-          outcome = decodeRemoteError(JSON.parse(await readResponseText(response)));
-        } catch {
-          /* An upstream proxy may return a non-JSON failure. */
-        }
-
-        throw new CloudRemoteError(response.status, outcome);
-      }
-
-      if (response.status === 204) return parseCloudEndpoint(requestOptions.schema, undefined);
-
-      let value: unknown;
-
-      try {
-        value = JSON.parse(await readResponseText(response));
-      } catch {
-        throw new LocalError('cloud_request_failed', 'Cloud returned an invalid JSON response.');
-      }
-
-      return parseCloudEndpoint(requestOptions.schema, value);
-    },
+    request: (method, path, requestOptions) =>
+      send(
+        method,
+        path,
+        {
+          ...requestOptions,
+          body: requestOptions.body === undefined ? undefined : JSON.stringify(requestOptions.body),
+        },
+        { contentType: 'application/json', timeout: 30_000 },
+      ),
+    upload: (path, requestOptions) =>
+      send('POST', path, requestOptions, { contentType: 'application/x-ndjson', timeout: 120_000 }),
   };
 };
 

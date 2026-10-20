@@ -98,6 +98,35 @@ const projectTokenIdentitySchema = z.object({
   token: z.object({ id: z.string().min(1), name: z.string(), project_id: z.string().min(1) }),
 });
 
+const uploadedRunResponseSchema = z.object({
+  run: z.object({
+    id: z.string().min(1),
+    project_id: z.string().min(1),
+    status: z.enum(['completed', 'failed', 'cancelled']),
+    created_at: z.string(),
+    finished_at: z.string(),
+    git_sha: z.string().nullable(),
+    git_branch: z.string().nullable(),
+    labels: z.array(z.string()),
+    summary: z.unknown(),
+    url: z.url(),
+  }),
+  unchanged: z.boolean().optional(),
+});
+
+const projectTokenSchema = z.object({
+  id: z.string().min(1),
+  name: z.string(),
+  created_at: z.string(),
+});
+
+const createdProjectTokenSchema = z.object({
+  token: projectTokenSchema,
+  secret: bearerTokenSchema,
+});
+
+const projectTokensSchema = z.object({ tokens: z.array(projectTokenSchema) });
+
 const emptyResponseSchema = z.unknown();
 
 const remoteErrorSchema = z.object({
@@ -147,6 +176,9 @@ const decodeRemoteError = (value: unknown): RemoteErrorOutcome => {
 };
 
 export {
+  uploadedRunResponseSchema,
+  createdProjectTokenSchema,
+  projectTokensSchema,
   projectTokenIdentitySchema,
   parseCloudEndpoint,
   bearerTokenSchema,
