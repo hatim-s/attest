@@ -29,7 +29,7 @@ run database.
 | Add cases or datasets        | [Tests and datasets](./tests-and-datasets.md)                     | `attest test add`, `attest test case import`, `attest test dataset import` |
 | Define scoring               | [Metrics](./metrics.md)                                           | `attest metric add`, `attest metric import`, `attest metric test`          |
 | Execute and inspect          | [Evaluation runs](./eval-runs.md)                                 | `attest eval run`, `attest eval cancel`, `attest diff`, `attest report`    |
-| Upload and manage cloud runs | [Cloud commands](./cloud.md)                                      | `attest cloud login`, `attest cloud push-run`, `attest cloud token create` |
+| Upload and manage cloud runs | [Cloud commands](./cloud.md)                                      | `attest cloud login`, `attest cloud upload`, `attest cloud token create`   |
 | Diagnose a failure           | [Error catalog](../reference/errors.md)                           | `attest errors --output json`                                              |
 
 There are no plural namespace aliases. `attest init` is the only convenience alias and

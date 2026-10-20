@@ -23,7 +23,7 @@ import {
 } from '@attest/contracts';
 import { LocalError } from '@attest/local';
 import { cancelConfiguration, runConfiguration } from '@attest/local/eval';
-import type { pushCloudRun as pushRun } from '@attest/local/cloud';
+import type { uploadCloudRun as uploadRun } from '@attest/local/cloud';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
@@ -758,9 +758,9 @@ describe('eval command grammar and terminal behavior', () => {
 });
 
 it.each(['pass', 'fail'] as const)(
-  'keeps the %s eval exit code and output when --push is aborted',
+  'keeps the %s eval exit code and output when --upload is aborted',
   async (verdict) => {
-    const pushCloudRun = vi.fn<typeof pushRun>(({ signal }) => {
+    const uploadCloudRun = vi.fn<typeof uploadRun>(({ signal }) => {
       process.emit('SIGINT');
 
       if (signal?.aborted) {
@@ -778,12 +778,12 @@ it.each(['pass', 'fail'] as const)(
 
     const result = await executeCommand(
       process.cwd(),
-      ['eval', 'run', '--all', '--push', '--output', 'json'],
-      { services: { ...services, cloud: { authenticatedCloudClient, pushCloudRun } } },
+      ['eval', 'run', '--all', '--upload', '--output', 'json'],
+      { services: { ...services, cloud: { authenticatedCloudClient, uploadCloudRun } } },
     );
 
     expect(result.exitCode).toBe(verdict === 'pass' ? 0 : 1);
-    expect(pushCloudRun).toHaveBeenCalledWith(expect.objectContaining({ runId: RUN_ID }));
+    expect(uploadCloudRun).toHaveBeenCalledWith(expect.objectContaining({ runId: RUN_ID }));
     expect(result.errors).toEqual(['cancelled: Cloud request did not complete.']);
     expect(result.output).toHaveLength(1);
     expect(cliResultSchema.parse(JSON.parse(result.output[0]!))).toMatchObject({

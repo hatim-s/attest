@@ -5,7 +5,7 @@ import {
 } from '@attest/contracts';
 import { cancelConfiguration, readRequestDocument, runConfiguration } from '@attest/local/eval';
 import type { Command } from 'commander';
-import { authenticatedCloudClient, pushCloudRun } from '@attest/local/cloud';
+import { authenticatedCloudClient, uploadCloudRun } from '@attest/local/cloud';
 
 import {
   AttestCliError,
@@ -50,7 +50,7 @@ type EvalRunCliOptions = CommonEvalOptions &
     dataset?: string[];
     folder?: string[];
     tag?: string[];
-    push?: boolean;
+    upload?: boolean;
   };
 
 type EvalCancelCliOptions = CommonEvalOptions & Omit<EvalCancelRequestFields, 'runId'>;
@@ -97,10 +97,10 @@ const executeEvalRun = async (
     project: string | undefined;
     signal: AbortSignal;
     context: CommandContext;
-    push: boolean;
+    upload: boolean;
   },
 ): Promise<void> => {
-  const { project, signal, context, push } = options;
+  const { project, signal, context, upload } = options;
   const execute = context.services?.eval?.runConfiguration ?? runConfiguration;
 
   const source = await execute(request, {
@@ -134,11 +134,11 @@ const executeEvalRun = async (
 
   const completed = events.findLast((event) => event.event === 'run_completed');
 
-  if (push && completed?.event === 'run_completed') {
+  if (upload && completed?.event === 'run_completed') {
     try {
-      const cloud = { authenticatedCloudClient, pushCloudRun, ...context.services?.cloud };
+      const cloud = { authenticatedCloudClient, uploadCloudRun, ...context.services?.cloud };
 
-      const result = await cloud.pushCloudRun({
+      const result = await cloud.uploadCloudRun({
         client: await cloud.authenticatedCloudClient(context.credentialPath),
         workingDirectory: context.workingDirectory,
         project,
@@ -208,7 +208,7 @@ const registerEvalCommands = (context: CommandContext): void => {
     .option('--timeout <duration>', 'cap the complete eval run, such as 60s or 2m')
     .option('--baseline <run-id>', 'include a persisted diff against a prior run')
     .option('--junit <path>', 'write JUnit XML atomically')
-    .option('--push', 'upload the finished run to Attest Cloud')
+    .option('--upload', 'upload the finished run to Attest Cloud')
     .option('--watch', 'render live human progress')
     .option('--from-json <path|->', 'read one eval run request from a file or stdin')
     .addOption(commonOption(projectOption()))
@@ -238,7 +238,7 @@ const registerEvalCommands = (context: CommandContext): void => {
             project: options.project,
             signal,
             context,
-            push: options.push === true,
+            upload: options.upload === true,
           });
         } catch (error: unknown) {
           if (!signal.aborted || error instanceof CliExit) throw error;
@@ -264,7 +264,7 @@ const registerEvalCommands = (context: CommandContext): void => {
       'JSONL ends with exactly one result event and uses contiguous zero-based sequences.',
     ],
     options: {
-      push: { conflicts: ['from-json'] },
+      upload: { conflicts: ['from-json'] },
       all: { conflicts: ['test-id', 'from-json'] },
       case: { conflicts: ['from-json'] },
       tag: { conflicts: ['from-json'] },
@@ -293,7 +293,7 @@ const registerEvalCommands = (context: CommandContext): void => {
           'baseline',
           'junit',
           'watch',
-          'push',
+          'upload',
           'output',
         ],
         implies: ['non-interactive'],

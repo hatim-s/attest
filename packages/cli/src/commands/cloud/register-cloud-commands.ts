@@ -39,7 +39,7 @@ const registerCloudCommands = ({
   services,
 }: CommandContext): void => {
   const {
-    pushCloudRun,
+    uploadCloudRun,
     createCloudProjectToken,
     listCloudProjectTokens,
     revokeCloudProjectToken,
@@ -79,16 +79,16 @@ const registerCloudCommands = ({
 
   addCommonOptions(
     cloud
-      .command('push-run')
+      .command('upload')
       .description('Upload a finished local run and print its dashboard URL.')
       .argument('[run-id]'),
   ).action(async (runId: string | undefined, options: CommonCliOptions) => {
     const result = await withProcessSignals(async (signal) =>
-      pushCloudRun({ ...(await projectContext(options)), runId, signal }),
+      uploadCloudRun({ ...(await projectContext(options)), runId, signal }),
     );
 
     if ((options.output ?? 'human') === 'human') io.output(result.url);
-    else output('push-run', options, result);
+    else output('upload', options, result);
   });
 
   const tokens = cloud

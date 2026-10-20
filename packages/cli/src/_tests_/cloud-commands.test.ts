@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { runCommand as executeCommand, temporaryDirectory } from './support/cli-test-support.js';
 
 const cloud = {
-  pushRun: vi.fn<typeof CloudAdapter.pushCloudRun>().mockResolvedValue({
+  uploadRun: vi.fn<typeof CloudAdapter.uploadCloudRun>().mockResolvedValue({
     url: 'https://cloud.example.test/#/projects/project/runs/run',
     unchanged: false,
   }),
@@ -54,7 +54,7 @@ const services = {
           file_hashes: {},
         },
       }),
-    pushCloudRun: cloud.pushRun,
+    uploadCloudRun: cloud.uploadRun,
     pushCloudProject: cloud.push,
     runCloud: cloud.run,
   },
@@ -64,7 +64,7 @@ const runCommand = (...[root, argv, options]: Parameters<typeof executeCommand>)
   executeCommand(root, argv, { ...options, services });
 
 beforeEach(() => {
-  cloud.pushRun.mockClear();
+  cloud.uploadRun.mockClear();
   cloud.push.mockClear();
   cloud.run.mockClear();
 });
@@ -170,10 +170,10 @@ describe('cloud command translation', () => {
 });
 
 it('prints the uploaded dashboard URL and forwards an explicit run ID', async () => {
-  const result = await runCommand(process.cwd(), ['cloud', 'push-run', 'run']);
+  const result = await runCommand(process.cwd(), ['cloud', 'upload', 'run']);
   expect(result.exitCode).toBe(0);
   expect(result.output).toEqual(['https://cloud.example.test/#/projects/project/runs/run']);
-  expect(cloud.pushRun.mock.calls[0]?.[0]).toMatchObject({ runId: 'run' });
+  expect(cloud.uploadRun.mock.calls[0]?.[0]).toMatchObject({ runId: 'run' });
 });
 
 it.each([['create', '--name', 'ci'], ['list'], ['revoke', 'token-id']])(

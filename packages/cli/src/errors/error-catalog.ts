@@ -76,7 +76,7 @@ const CLI_ERROR_DEFINITIONS = {
     likely_causes: ['This cloud deployment only stores local results.'],
     retryable: false,
     exit_code: 4,
-    repairs: ['Run locally and use cloud push-run.'],
+    repairs: ['Run locally and use cloud upload.'],
   },
   invalid_bundle: {
     meaning: 'The cloud rejected the run bundle.',

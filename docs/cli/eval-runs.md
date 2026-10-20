@@ -40,12 +40,12 @@ orchestration is a single `result` event.
 
 ## Upload results
 
-Add `--push` to upload the finished local run to Attest Cloud. Both passing and failing
+Add `--upload` to upload the finished local run to Attest Cloud. Both passing and failing
 verdicts upload. The dashboard URL or upload error goes to stderr; stdout and the eval exit
-code stay unchanged. A failure before finalization does not upload. `--push` is a CLI flag
+code stay unchanged. A failure before finalization does not upload. `--upload` is a CLI flag
 and cannot be combined with `--from-json`.
 
-Use `attest cloud push-run RUN_ID` to retry an upload without executing the eval again.
+Use `attest cloud upload RUN_ID` to retry an upload without executing the eval again.
 See [cloud commands](cloud.md) for session setup, CI credentials, token scope, and bundle contents.
 
 ## Cleanup

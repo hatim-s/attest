@@ -24,7 +24,7 @@ const newestFinishedRun = async (store: RunStore): Promise<string> => {
 };
 
 /** Exports a read-only snapshot so uploading never migrates or modifies the project store. */
-const pushCloudRun = async (options: CloudProjectOptions & { runId?: string }) => {
+const uploadCloudRun = async (options: CloudProjectOptions & { runId?: string }) => {
   const { root, projectId } = await resolveCloudProject(options);
   let selectedRunId: string | undefined;
 
@@ -71,4 +71,4 @@ const pushCloudRun = async (options: CloudProjectOptions & { runId?: string }) =
   return { url: response.run.url, unchanged: response.unchanged ?? false };
 };
 
-export { pushCloudRun };
+export { uploadCloudRun };

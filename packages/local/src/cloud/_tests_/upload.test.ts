@@ -6,7 +6,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { openStore } from '../../store/run-store.js';
 import { createCloudClient } from '../client.js';
 import { writeCloudLink } from '../link.js';
-import { pushCloudRun } from '../push-run.js';
+import { uploadCloudRun } from '../upload.js';
 
 const directories: string[] = [];
 
@@ -17,7 +17,7 @@ afterEach(async () => {
 });
 
 it('uploads the exact bundle of the newest finished run and leaves the store unchanged', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'attest-push-run-'));
+  const root = await mkdtemp(join(tmpdir(), 'attest-upload-'));
   directories.push(root);
   await writeFile(join(root, 'attest.project.json'), '{}');
   await mkdir(join(root, '.attest'));
@@ -112,7 +112,7 @@ it('uploads the exact bundle of the newest finished run and leaves the store unc
     fetch: fetcher,
   });
 
-  expect(await pushCloudRun({ workingDirectory: root, client })).toEqual({
+  expect(await uploadCloudRun({ workingDirectory: root, client })).toEqual({
     url: 'https://cloud.test/#/projects/p/runs/01ARZ3NDEKTSV4RRFFQ69G5FAB',
     unchanged: true,
   });

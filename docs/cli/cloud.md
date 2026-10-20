@@ -11,8 +11,8 @@ Start from an existing Attest project:
 attest cloud login --url https://YOUR-CLOUD-ORIGIN
 attest cloud project create 'Support evaluation'
 attest cloud link PROJECT_ID
-attest cloud push-run RUN_ID
-attest eval run --all --push
+attest cloud upload RUN_ID
+attest eval run --all --upload
 attest cloud token create --name ci
 attest cloud token list
 attest cloud token revoke TOKEN_ID
@@ -27,12 +27,12 @@ Login prints an approval URL and a short code. Approve it in your signed-in brow
 ## Upload local results
 
 ```sh
-attest cloud push-run
-attest cloud push-run RUN_ID --output json
-attest eval run --all --push --output json
+attest cloud upload
+attest cloud upload RUN_ID --output json
+attest eval run --all --upload --output json
 ```
 
-`push-run` defaults to the newest finished run in this project's local store. It skips
+`upload` defaults to the newest finished run in this project's local store. It skips
 running records across pages. An explicit ID selects that run; the server rejects running
 runs with `run_not_finished`. Missing stores or finished runs return `resource_not_found`.
 The upload reads a snapshot without modifying or migrating the local database.
@@ -46,9 +46,9 @@ Human output is the dashboard URL. Structured output contains `url` and `unchang
 the same bundle again succeeds with `unchanged: true`. Different content for an existing run ID
 fails with `run_conflict`. These upload failures print the server message and exit non-zero.
 
-`eval run --push` uploads the run after finalization, including a run with a failing verdict.
+`eval run --upload` uploads the run after finalization, including a run with a failing verdict.
 It prints the dashboard URL or upload error to stderr and preserves the eval's exit code and
-stdout format. A failure before run completion does not trigger upload. `--push` cannot be
+stdout format. A failure before run completion does not trigger upload. `--upload` cannot be
 combined with `--from-json`.
 
 ## Project tokens and CI
@@ -70,7 +70,7 @@ In CI, set the following pair and upload a finished run:
 ```sh
 export ATTEST_CLOUD_URL=https://YOUR-CLOUD-ORIGIN
 # Set ATTEST_CLOUD_TOKEN through your CI secret manager.
-attest cloud push-run RUN_ID
+attest cloud upload RUN_ID
 ```
 
 The environment pair overrides saved credentials. Setting only one variable is an error,
