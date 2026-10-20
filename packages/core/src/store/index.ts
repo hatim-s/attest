@@ -2,6 +2,7 @@ export {
   BUNDLE_SCHEMA_ID,
   createBundle,
   createContentHasher,
+  parseBundleLine,
   verifyBundleLines,
   type BundleLine,
   type BundleManifest,

@@ -117,7 +117,8 @@ const lineFailure = (error: z.ZodError, lineNumber: number): string => {
   }
 };
 
-const parseLine = (line: string, index: number): BundleLine => {
+/** Parses one NDJSON line with bundle schemas and reports its zero-based position on failure. */
+const parseBundleLine = (line: string, index: number): BundleLine => {
   let json: unknown;
 
   try {
@@ -139,7 +140,7 @@ const parseLine = (line: string, index: number): BundleLine => {
  */
 const verifyBundleLines = (lines: string[]) => {
   if (lines.length === 0) throw corruptBundle('Run bundle is empty.');
-  const records = lines.map(parseLine);
+  const records = lines.map(parseBundleLine);
   const [header, ...body] = records;
 
   if (header?.type !== 'bundle_header') {
@@ -189,5 +190,6 @@ export {
   createContentHasher,
   type BundleLine,
   type BundleManifest,
+  parseBundleLine,
   verifyBundleLines,
 };
