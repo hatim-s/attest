@@ -56,7 +56,8 @@ See [file layout](reference/file-layout.md#project-registry).
 ## Cloud credentials
 
 Cloud login takes its URL explicitly and saves credentials in
-`~/.attest/cloud/credentials.json`, or under `ATTEST_HOME` when it is set. Set `ATTEST_CLOUD_URL` and `ATTEST_CLOUD_TOKEN` together for CI. The pair overrides
+`~/.attest/cloud/credentials.json`, or under `ATTEST_HOME` when it is set.
+Set `ATTEST_CLOUD_URL` and `ATTEST_CLOUD_TOKEN` together for CI. The pair overrides
 saved session credentials. The URL must be an HTTPS origin, or HTTP on loopback.
 An incomplete or malformed pair fails without falling back to the credentials file.
 The project token identifies its project through the server. If a local cloud link

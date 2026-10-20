@@ -32,8 +32,8 @@ attest cloud upload RUN_ID --output json
 attest eval run --all --upload --output json
 ```
 
-`upload` defaults to the newest finished run in this project's local store. It skips
-running records across pages. An explicit ID selects that run; the server rejects running
+`upload` defaults to the newest finished run in this project's local store.
+An explicit ID selects that run; the server rejects running
 runs with `run_not_finished`. Missing stores or finished runs return `resource_not_found`.
 The upload reads a snapshot without modifying or migrating the local database.
 
@@ -47,7 +47,8 @@ the same bundle again succeeds with `unchanged: true`. Different content for an 
 fails with `run_conflict`. These upload failures print the server message and exit non-zero.
 
 `eval run --upload` uploads the run after finalization, including a run with a failing verdict.
-It prints the dashboard URL or upload error to stderr and preserves the eval's exit code and
+It checks cloud credentials and project identity before starting the eval. It prints the
+dashboard URL or upload error to stderr and preserves the eval's exit code and
 stdout format. A failure before run completion does not trigger upload. `--upload` cannot be
 combined with `--from-json`.
 
