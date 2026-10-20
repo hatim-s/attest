@@ -29,6 +29,10 @@ It rejects unknown line types, malformed JSON or records, duplicate or misplaced
 footers, a missing footer, a mismatched case count, and a mismatched hash. Because the footer
 hash covers every earlier line, appending lines to a finished bundle makes it invalid.
 
+Case identity is unique inside one bundle. Two case lines with the same `suiteName` and
+`caseId`, or the same `rowId`, make the bundle invalid, and the error names the first
+duplicate. The same `caseId` in two different suites is allowed.
+
 ## Atomicity
 
 `exportRunBundle` takes a file path or a writable stream. For a path, it writes the whole bundle
