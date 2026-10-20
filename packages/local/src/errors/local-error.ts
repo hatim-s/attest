@@ -29,6 +29,12 @@ type LocalErrorCode =
   | 'registry_invalid'
   | 'registry_write_failed'
   | 'resource_not_found'
+  | 'upload_too_large'
+  | 'run_not_finished'
+  | 'run_conflict'
+  | 'token_scope'
+  | 'execution_unavailable'
+  | 'invalid_bundle'
   | 'run_failed'
   | 'trace_convert_failed';
 

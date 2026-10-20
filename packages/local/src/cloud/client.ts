@@ -106,8 +106,13 @@ const createCloudClient = (options: CloudClientOptions): CloudClient => {
   const send = async <T>(
     method: string,
     path: string,
-    requestOptions: { schema: z.ZodType<T>; body?: string; signal?: AbortSignal },
-    transport: { contentType: string; timeout: number },
+    requestOptions: {
+      schema: z.ZodType<T>;
+      body?: string;
+      signal?: AbortSignal;
+      contentType: string;
+      timeout: number;
+    },
   ): Promise<T> => {
     const { body, signal } = requestOptions;
 
@@ -125,7 +130,7 @@ const createCloudClient = (options: CloudClientOptions): CloudClient => {
     try {
       const headers = new Headers({ accept: 'application/json' });
 
-      if (body !== undefined) headers.set('content-type', transport.contentType);
+      if (body !== undefined) headers.set('content-type', requestOptions.contentType);
 
       if (options.accessToken !== undefined)
         headers.set('authorization', `Bearer ${options.accessToken}`);
@@ -134,8 +139,8 @@ const createCloudClient = (options: CloudClientOptions): CloudClient => {
         redirect: 'error',
         signal:
           signal === undefined
-            ? AbortSignal.timeout(transport.timeout)
-            : AbortSignal.any([signal, AbortSignal.timeout(transport.timeout)]),
+            ? AbortSignal.timeout(requestOptions.timeout)
+            : AbortSignal.any([signal, AbortSignal.timeout(requestOptions.timeout)]),
         headers,
         body,
       });
@@ -175,17 +180,18 @@ const createCloudClient = (options: CloudClientOptions): CloudClient => {
     baseUrl,
     credentialSource: options.credentialSource,
     request: (method, path, requestOptions) =>
-      send(
-        method,
-        path,
-        {
-          ...requestOptions,
-          body: requestOptions.body === undefined ? undefined : JSON.stringify(requestOptions.body),
-        },
-        { contentType: 'application/json', timeout: 30_000 },
-      ),
+      send(method, path, {
+        ...requestOptions,
+        contentType: 'application/json',
+        timeout: 30_000,
+        body: requestOptions.body === undefined ? undefined : JSON.stringify(requestOptions.body),
+      }),
     upload: (path, requestOptions) =>
-      send('POST', path, requestOptions, { contentType: 'application/x-ndjson', timeout: 120_000 }),
+      send('POST', path, {
+        ...requestOptions,
+        contentType: 'application/x-ndjson',
+        timeout: 120_000,
+      }),
   };
 };
 

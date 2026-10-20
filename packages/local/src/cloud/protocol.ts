@@ -107,7 +107,7 @@ const uploadedRunResponseSchema = z.object({
     finished_at: z.string(),
     git_sha: z.string().nullable(),
     git_branch: z.string().nullable(),
-    labels: z.array(z.string()),
+    labels: z.record(z.string(), z.string()).nullable(),
     summary: z.unknown(),
     url: z.url(),
   }),
@@ -129,8 +129,21 @@ const projectTokensSchema = z.object({ tokens: z.array(projectTokenSchema) });
 
 const emptyResponseSchema = z.unknown();
 
+const stage1ErrorCodes = [
+  'upload_too_large',
+  'run_not_finished',
+  'run_conflict',
+  'token_scope',
+  'execution_unavailable',
+  'invalid_bundle',
+] as const;
+
+const stage1ErrorCodeSchema = z.enum(stage1ErrorCodes);
+
 const remoteErrorSchema = z.object({
-  error: z.object({ code: z.string().regex(/^[a-z_]{1,80}$/u) }).optional(),
+  error: z
+    .object({ code: z.string().regex(/^[a-z_]{1,80}$/u), message: z.string().max(4096).optional() })
+    .optional(),
 });
 
 const deviceErrorCodeSchema = z.enum([
@@ -142,7 +155,7 @@ const deviceErrorCodeSchema = z.enum([
 
 type RemoteErrorOutcome =
   | { kind: 'device'; code: z.infer<typeof deviceErrorCodeSchema> }
-  | { kind: 'remote'; remoteCode: string };
+  | { kind: 'remote'; remoteCode: string; message?: string };
 
 /** Preserves decoded device outcomes without reparsing error details at the caller. */
 class CloudRemoteError extends LocalError {
@@ -151,9 +164,17 @@ class CloudRemoteError extends LocalError {
     readonly outcome: RemoteErrorOutcome,
   ) {
     const code = outcome.kind === 'device' ? outcome.code : outcome.remoteCode;
+    const localCode = stage1ErrorCodeSchema.safeParse(code);
+
     super(
-      status === 401 ? 'cloud_auth_required' : 'cloud_request_failed',
-      `Cloud request failed (${status}, ${code}).`,
+      status === 401
+        ? 'cloud_auth_required'
+        : localCode.success
+          ? localCode.data
+          : 'cloud_request_failed',
+      outcome.kind === 'remote' && outcome.message !== undefined
+        ? outcome.message
+        : `Cloud request failed (${status}, ${code}).`,
       { details: { status, remote_code: code } },
     );
   }
@@ -163,16 +184,22 @@ class CloudRemoteError extends LocalError {
 // BOUNDARY: Remote failure JSON is untrusted; only the error-code schemas are consumed here.
 const decodeRemoteError = (value: unknown): RemoteErrorOutcome => {
   let remoteCode: string;
+  let message: string | undefined;
 
   try {
-    remoteCode = remoteErrorSchema.parse(value).error?.code ?? 'request_failed';
+    const error = remoteErrorSchema.parse(value).error;
+    remoteCode = error?.code ?? 'request_failed';
+
+    if (stage1ErrorCodeSchema.safeParse(remoteCode).success) message = error?.message;
   } catch {
     return { kind: 'remote', remoteCode: 'request_failed' };
   }
 
   const device = deviceErrorCodeSchema.safeParse(remoteCode);
 
-  return device.success ? { kind: 'device', code: device.data } : { kind: 'remote', remoteCode };
+  return device.success
+    ? { kind: 'device', code: device.data }
+    : { kind: 'remote', remoteCode, message };
 };
 
 export {
