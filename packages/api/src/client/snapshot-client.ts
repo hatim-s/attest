@@ -1,5 +1,5 @@
 import { summarizeSuites } from '@attest/core/analytics';
-import { pageQuerySchema, type PageQuery } from '@attest/core/records';
+import { parsePageLimit, StoreError } from '@attest/core/records';
 import { API_ERROR_STATUS, type ApiErrorCode } from '../contract/errors.js';
 import { suiteHistoryRequestSchema } from '../contract/requests.js';
 import { toSuiteHistoryPoint } from '../contract/responses.js';
@@ -11,17 +11,17 @@ const fail = (code: ApiErrorCode, message: string): never => {
   throw new ApiError(API_ERROR_STATUS[code], code, message);
 };
 
-const pageLimit = (query: PageQuery): number => {
-  const parsed = pageQuerySchema.shape.limit.safeParse(query.limit);
-
-  if (!parsed.success)
-    return fail('INVALID_REQUEST', parsed.error.issues[0]?.message ?? parsed.error.message);
-
-  return parsed.data;
-};
-
 /** Makes synchronous snapshot failures reject through the same promise contract as HTTP. */
-const settle = <T>(read: () => T): Promise<T> => Promise.resolve().then(read);
+const settle = <T>(read: () => T): Promise<T> =>
+  Promise.resolve()
+    .then(read)
+    .catch((error) => {
+      if (error instanceof StoreError && error.code === 'INVALID_LIMIT') {
+        return fail('INVALID_REQUEST', error.message);
+      }
+
+      throw error;
+    });
 
 const controlUnavailable = (): Promise<never> =>
   settle(() => fail('CONTROL_UNAVAILABLE', 'A saved report cannot start or cancel runs.'));
@@ -54,7 +54,7 @@ const createSnapshotClient = (snapshot: ReportSnapshot): ApiClient => {
     listRuns: ({ projectKey }, query) =>
       settle(() => {
         requireProject(projectKey);
-        pageLimit(query);
+        parsePageLimit(query);
 
         if (query.cursor === undefined) return { items: [snapshot.run] };
 
@@ -66,7 +66,7 @@ const createSnapshotClient = (snapshot: ReportSnapshot): ApiClient => {
     listCaseSummaries: ({ projectKey, runId }, query) =>
       settle(() => {
         requireRun(projectKey, runId);
-        const limit = pageLimit(query);
+        const limit = parsePageLimit(query);
 
         const index =
           query.cursor === undefined

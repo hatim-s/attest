@@ -117,7 +117,8 @@ const lineFailure = (error: z.ZodError, lineNumber: number): string => {
   }
 };
 
-const parseLine = (line: string, index: number): BundleLine => {
+/** Parses one NDJSON record, converting its zero-based index to a line number in errors. */
+const parseBundleLine = (line: string, index: number): BundleLine => {
   let json: unknown;
 
   try {
@@ -134,12 +135,12 @@ const parseLine = (line: string, index: number): BundleLine => {
 };
 
 /**
- * Checks a bundle's structure, case count, and content hash before any record is exposed, so an
+ * Checks bundle structure, unique case identities, case count, and content hash, so an
  * importer never persists part of a truncated or tampered bundle. Throws `CORRUPT_DATA` otherwise.
  */
-const verifyBundleLines = (lines: string[]): BundleLine[] => {
+const verifyBundleLines = (lines: string[]) => {
   if (lines.length === 0) throw corruptBundle('Run bundle is empty.');
-  const records = lines.map(parseLine);
+  const records = lines.map(parseBundleLine);
   const [header, ...body] = records;
 
   if (header?.type !== 'bundle_header') {
@@ -149,6 +150,10 @@ const verifyBundleLines = (lines: string[]): BundleLine[] => {
   const footer = body.pop();
 
   if (footer?.type !== 'bundle_footer') throw corruptBundle('Run bundle is missing its footer.');
+
+  const cases: CaseRecord[] = [];
+  const identities = new Set<string>();
+  const rowIds = new Set<string>();
 
   for (const [index, record] of body.entries()) {
     if (record.type === 'bundle_footer') {
@@ -162,6 +167,22 @@ const verifyBundleLines = (lines: string[]): BundleLine[] => {
     if (record.case.runId !== header.run.id) {
       throw corruptBundle(`Run bundle case line ${index + 2} is malformed.`);
     }
+
+    const identity = JSON.stringify([record.case.suiteName, record.case.caseId]);
+
+    if (identities.has(identity)) {
+      throw corruptBundle(`Run bundle contains duplicate case ${identity}.`);
+    }
+
+    if (rowIds.has(record.case.rowId)) {
+      throw corruptBundle(
+        `Run bundle contains duplicate rowId ${JSON.stringify(record.case.rowId)}.`,
+      );
+    }
+
+    identities.add(identity);
+    rowIds.add(record.case.rowId);
+    cases.push(record.case);
   }
 
   if (footer.case_count !== body.length) {
@@ -176,7 +197,7 @@ const verifyBundleLines = (lines: string[]): BundleLine[] => {
     throw corruptBundle('Run bundle footer content hash does not match its contents.');
   }
 
-  return records;
+  return { run: header.run, cases, footer };
 };
 
 export {
@@ -185,5 +206,6 @@ export {
   createContentHasher,
   type BundleLine,
   type BundleManifest,
+  parseBundleLine,
   verifyBundleLines,
 };

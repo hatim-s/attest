@@ -6,7 +6,7 @@ import { Kysely } from 'kysely';
 
 import {
   canonicalStringify,
-  pageQuerySchema,
+  parsePageLimit,
   type PageQuery,
   type RunPage,
   type CaseSummaryPage,
@@ -213,7 +213,7 @@ class SqliteRunStore implements RunStore {
 
   /** Lists runs in deterministic newest-first order. */
   async listRuns(query: PageQuery = {}): Promise<RunPage> {
-    const limit = this.#pageLimit(query);
+    const limit = parsePageLimit(query);
 
     let select = this.#database
       .selectFrom('runs')
@@ -244,18 +244,6 @@ class SqliteRunStore implements RunStore {
     const items = pageRows.map(await this.#runRecordMapper(pageRows));
 
     return rows.length > limit ? { items, nextCursor: pageRows.at(-1)?.id } : { items };
-  }
-
-  #pageLimit(query: PageQuery): number {
-    const parsed = pageQuerySchema.shape.limit.safeParse(query.limit);
-
-    if (!parsed.success)
-      throw new StoreError(
-        'INVALID_LIMIT',
-        parsed.error.issues[0]?.message ?? parsed.error.message,
-      );
-
-    return parsed.data;
   }
 
   /** Rehydrates case blobs after the caller has established the parent run. */
@@ -309,7 +297,7 @@ class SqliteRunStore implements RunStore {
   /** Returns a row-id cursor page without selecting request, response, trace, or diagnostic blobs. */
   async listCaseSummaries(runId: string, query: PageQuery = {}): Promise<CaseSummaryPage> {
     await this.#getRunRow(runId);
-    const limit = this.#pageLimit(query);
+    const limit = parsePageLimit(query);
 
     if (query.cursor !== undefined) {
       const cursor = await this.#database

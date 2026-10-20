@@ -6,6 +6,7 @@ import { Readable, type Writable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 
 import {
+  BUNDLE_SCHEMA_ID,
   createBundle,
   StoreError,
   verifyBundleLines,
@@ -70,9 +71,13 @@ async function* readRunBundle(source: Readable | string): AsyncIterable<BundleLi
   try {
     // Integrity precedes exposure; bundles are single-run sized, while cloud-scale streaming is future work.
     for await (const line of createInterface({ input, crlfDelay: Infinity })) lines.push(line);
-    const verified = verifyBundleLines(lines);
+    const { run, cases, footer } = verifyBundleLines(lines);
 
-    for (const line of verified) yield line;
+    yield { type: 'bundle_header', schema: BUNDLE_SCHEMA_ID, run };
+
+    for (const record of cases) yield { type: 'case', case: record };
+
+    yield footer;
   } catch (error) {
     if (error instanceof StoreError) throw error;
     throw corruptBundle('Could not read run bundle.', error);

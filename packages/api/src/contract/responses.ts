@@ -29,7 +29,10 @@ const runSuitesSchema = z.object({
 const suiteHistoryPointSchema = z.object({
   runId: z.string().min(1),
   createdAt: z.string(),
-  status: runRecordSchema.shape.status,
+  status: z.union([
+    runRecordSchema.options[0].shape.status,
+    runRecordSchema.options[1].shape.status,
+  ]),
   gitBranch: z.string().optional(),
   gitSha: z.string().optional(),
   aggregate: caseAggregateSchema,

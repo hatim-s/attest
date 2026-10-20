@@ -2,6 +2,7 @@ export {
   BUNDLE_SCHEMA_ID,
   createBundle,
   createContentHasher,
+  parseBundleLine,
   verifyBundleLines,
   type BundleLine,
   type BundleManifest,
@@ -54,6 +55,7 @@ export {
 
 export {
   pageQuerySchema,
+  parsePageLimit,
   DEFAULT_PAGE_LIMIT,
   MAX_PAGE_LIMIT,
   type PageQuery,

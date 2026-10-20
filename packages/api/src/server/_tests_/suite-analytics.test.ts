@@ -1,10 +1,5 @@
 import { createSingleProjectCatalog, StoreError, type RunSource } from '@attest/core';
-import {
-  DEFAULT_PAGE_LIMIT,
-  MAX_PAGE_LIMIT,
-  type CaseSummary,
-  type RunRecord,
-} from '@attest/core/records';
+import { parsePageLimit, type CaseSummary, type RunRecord } from '@attest/core/records';
 import { Hono } from 'hono';
 import { describe, expect, it } from 'vitest';
 import { apiResponses } from '../../contract/responses.js';
@@ -21,7 +16,7 @@ const runs: RunRecord[] = (
   ] as const
 ).map(([id, status]) => ({
   id,
-  status,
+  ...(status === 'running' ? { status } : { status, finishedAt: '2026-10-18T00:00:01.000Z' }),
   schemaId: 'attest.project',
   configHash: id,
   configJson: '{}',
@@ -57,13 +52,7 @@ const fixture = (sourceRuns = runs) => {
 
   const source: RunSource = {
     listRuns: (query = {}) => {
-      const limit = query.limit ?? DEFAULT_PAGE_LIMIT;
-
-      if (!Number.isInteger(limit) || limit < 1 || limit > MAX_PAGE_LIMIT)
-        throw new StoreError(
-          'INVALID_LIMIT',
-          `Page limit must be an integer from 1 to ${MAX_PAGE_LIMIT}.`,
-        );
+      const limit = parsePageLimit(query);
 
       const start =
         query.cursor === undefined ? 0 : sourceRuns.findIndex((run) => run.id === query.cursor) + 1;

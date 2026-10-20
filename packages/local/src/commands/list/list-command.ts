@@ -23,7 +23,7 @@ const toSafeRunSummary = (run: RunRecord): RunListItem => {
     configHash: run.configHash,
   };
 
-  if (run.finishedAt !== undefined) {
+  if (run.status !== 'running') {
     assembledFields.finishedAt = run.finishedAt;
   }
 
