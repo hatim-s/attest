@@ -1,5 +1,6 @@
 import { z } from 'zod';
 
+import { StoreError } from '../store/store-error.js';
 import { runRecordSchema } from '../store/internal/record-schema.js';
 import { caseSummarySchema } from './projection-schemas.js';
 
@@ -36,6 +37,20 @@ const caseSummaryPageSchema = z.object({
 /** Cursors are opaque to callers; each source decides what one encodes. */
 type PageQuery = z.input<typeof pageQuerySchema>;
 
+/** Applies the shared store limit contract without interpreting a source-specific cursor. */
+const parsePageLimit = (query?: PageQuery): number => {
+  const parsed = pageQuerySchema.shape.limit.safeParse(query?.limit);
+
+  if (!parsed.success) {
+    throw new StoreError(
+      'INVALID_LIMIT',
+      parsed.error.issues.map((issue) => issue.message).join('; '),
+    );
+  }
+
+  return parsed.data;
+};
+
 type RunPage = z.infer<typeof runPageSchema>;
 
 type CaseSummaryPage = z.infer<typeof caseSummaryPageSchema>;
@@ -44,6 +59,7 @@ export {
   DEFAULT_PAGE_LIMIT,
   MAX_PAGE_LIMIT,
   pageQuerySchema,
+  parsePageLimit,
   runPageSchema,
   caseSummaryPageSchema,
   type PageQuery,

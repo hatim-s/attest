@@ -55,6 +55,7 @@ export {
 
 export {
   pageQuerySchema,
+  parsePageLimit,
   DEFAULT_PAGE_LIMIT,
   MAX_PAGE_LIMIT,
   type PageQuery,
