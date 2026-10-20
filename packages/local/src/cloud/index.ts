@@ -14,3 +14,11 @@ export {
 export { linkCloudProject, resolveCloudProject } from './link.js';
 
 export { pushCloudProject, pullCloudProject } from './sync.js';
+
+export { resolveCloudUploadProject, uploadCloudRun } from './upload.js';
+
+export {
+  createCloudProjectToken,
+  listCloudProjectTokens,
+  revokeCloudProjectToken,
+} from './project-tokens.js';

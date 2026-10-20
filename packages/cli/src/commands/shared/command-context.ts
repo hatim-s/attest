@@ -17,7 +17,15 @@ type CliServices = {
   cloud?: Partial<
     Pick<
       typeof CloudAdapter,
-      'authenticatedCloudClient' | 'pushCloudProject' | 'resolveCloudProject' | 'runCloud'
+      | 'authenticatedCloudClient'
+      | 'pushCloudProject'
+      | 'resolveCloudProject'
+      | 'runCloud'
+      | 'uploadCloudRun'
+      | 'resolveCloudUploadProject'
+      | 'createCloudProjectToken'
+      | 'listCloudProjectTokens'
+      | 'revokeCloudProjectToken'
     >
   >;
   eval?: Partial<Pick<typeof EvalAdapter, 'runConfiguration' | 'cancelConfiguration'>>;

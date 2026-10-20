@@ -1,4 +1,4 @@
-import { mkdir, stat, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import type * as CloudAdapter from '@attest/local/cloud';
@@ -33,6 +33,7 @@ const services = {
     authenticatedCloudClient: () =>
       Promise.resolve({
         baseUrl: 'https://cloud.example.test',
+        upload: () => Promise.reject(new Error('Unexpected upload.')),
         request: () =>
           Promise.reject(new Error('This command fixture should not send HTTP requests.')),
       }),
@@ -159,4 +160,100 @@ describe('cloud command translation', () => {
     expect(result.exitCode).toBe(0);
     await expect(stat(credentialPath)).rejects.toMatchObject({ code: 'ENOENT' });
   });
+});
+
+it.each([['create', '--name', 'ci'], ['list'], ['revoke', 'token-id']])(
+  'refuses cloud token %s with environment credentials before HTTP',
+  async (...args) => {
+    const home = await temporaryDirectory('attest-token-home-');
+    vi.stubEnv('ATTEST_HOME', home);
+    vi.stubEnv('ATTEST_CLOUD_URL', 'https://cloud.example.test');
+    vi.stubEnv('ATTEST_CLOUD_TOKEN', 'atp_ci');
+    const fetcher = vi.fn<typeof fetch>();
+    vi.stubGlobal('fetch', fetcher);
+    const result = await executeCommand(home, ['cloud', 'token', ...args, '--output', 'json']);
+    expect(result.exitCode).toBe(4);
+    expect(cliResultSchema.parse(JSON.parse(result.output[0]!))).toMatchObject({
+      ok: false,
+      error: { code: 'token_scope' },
+    });
+    expect(fetcher).not.toHaveBeenCalled();
+  },
+);
+
+it('creates, lists and revokes tokens for the linked project without saving the secret', async () => {
+  const root = await temporaryDirectory('attest-token-project-');
+  const home = await temporaryDirectory('attest-token-home-');
+  vi.stubEnv('ATTEST_HOME', home);
+  vi.stubEnv('ATTEST_CLOUD_URL', undefined);
+  vi.stubEnv('ATTEST_CLOUD_TOKEN', undefined);
+  await writeFile(join(root, 'attest.project.json'), '{}');
+  await mkdir(join(root, '.attest'));
+  await writeFile(
+    join(root, '.attest/cloud.json'),
+    JSON.stringify({
+      schema: 'attest.cloud-link.v1',
+      base_url: 'https://cloud.example.test',
+      project_id: 'p',
+      file_hashes: {},
+    }),
+  );
+  await mkdir(join(home, 'cloud'), { mode: 0o700 });
+
+  const credentials = JSON.stringify({
+    baseUrl: 'https://cloud.example.test',
+    accessToken: 'session',
+    expiresAt: new Date(Date.now() + 60000).toISOString(),
+  });
+
+  await writeFile(join(home, 'cloud/credentials.json'), credentials, { mode: 0o600 });
+  const token = { id: 't', name: 'ci', created_at: '2026-10-21T00:00:00Z' };
+  const listedToken = { ...token, revoked_at: '2026-10-21T01:00:00Z' };
+
+  const fetcher = vi
+    .fn<typeof fetch>()
+    .mockResolvedValueOnce(Response.json({ token, secret: 'atp_print-once' }, { status: 201 }))
+    .mockResolvedValueOnce(Response.json({ tokens: [listedToken] }))
+    .mockResolvedValueOnce(Response.json({ tokens: [listedToken] }))
+    .mockResolvedValueOnce(new Response(null, { status: 204 }));
+
+  vi.stubGlobal('fetch', fetcher);
+
+  const created = await executeCommand(root, [
+    'cloud',
+    'token',
+    'create',
+    '--name',
+    'ci',
+    '--output',
+    'json',
+  ]);
+
+  expect(created.exitCode).toBe(0);
+  expect(created.output.join('\n').match(/atp_print-once/gu)).toHaveLength(1);
+  const listed = await executeCommand(root, ['cloud', 'token', 'list', '--output', 'json']);
+  expect(listed.exitCode).toBe(0);
+  expect(cliResultSchema.parse(JSON.parse(listed.output[0]!))).toMatchObject({
+    ok: true,
+    result: { tokens: [listedToken] },
+  });
+  const humanList = await executeCommand(root, ['cloud', 'token', 'list']);
+  expect(humanList.exitCode).toBe(0);
+  expect(humanList.output.join('\n')).toContain(listedToken.revoked_at);
+  expect(
+    await executeCommand(root, ['cloud', 'token', 'revoke', 't', '--output', 'json']),
+  ).toMatchObject({ exitCode: 0 });
+  expect(
+    fetcher.mock.calls.map(([url, init]) => [new URL(new Request(url).url).pathname, init?.method]),
+  ).toEqual([
+    ['/v1/projects/p/tokens', 'POST'],
+    ['/v1/projects/p/tokens', 'GET'],
+    ['/v1/projects/p/tokens', 'GET'],
+    ['/v1/projects/p/tokens/t', 'DELETE'],
+  ]);
+  expect(fetcher.mock.calls[0]?.[1]?.body).toBe(JSON.stringify({ name: 'ci' }));
+  expect(new Headers(fetcher.mock.calls[0]?.[1]?.headers).get('authorization')).toBe(
+    'Bearer session',
+  );
+  expect(await readFile(join(home, 'cloud/credentials.json'), 'utf8')).toBe(credentials);
 });

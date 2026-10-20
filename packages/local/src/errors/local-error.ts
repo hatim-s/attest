@@ -2,15 +2,18 @@ import { AttestError, type JsonValue } from '@attest/contracts';
 
 type LocalErrorCode =
   | 'cancelled'
-  | 'cloud_auth_required'
-  | 'cloud_credentials_failed'
-  | 'cloud_request_failed'
-  | 'cloud_unavailable'
   | 'cli_missing_input'
   | 'cli_usage'
+  | 'cloud_auth_required'
+  | 'cloud_credentials_failed'
+  | 'cloud_credentials_invalid'
+  | 'cloud_request_failed'
+  | 'cloud_unavailable'
+  | 'execution_unavailable'
   | 'init_conflict'
   | 'init_failed'
   | 'internal_error'
+  | 'invalid_bundle'
   | 'invocation_failed'
   | 'metric_fixture_mismatch'
   | 'metric_infrastructure_failed'
@@ -28,8 +31,12 @@ type LocalErrorCode =
   | 'registry_invalid'
   | 'registry_write_failed'
   | 'resource_not_found'
+  | 'run_conflict'
   | 'run_failed'
-  | 'trace_convert_failed';
+  | 'run_not_finished'
+  | 'token_scope'
+  | 'trace_convert_failed'
+  | 'upload_too_large';
 
 type LocalErrorOptions = ErrorOptions & {
   details?: JsonValue;

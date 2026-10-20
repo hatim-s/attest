@@ -86,7 +86,10 @@ tests. Runs live in `.attest/runs.db`; keep `.attest/` out of version control. R
 and run data can contain agent inputs, outputs, and traces.
 
 Attest runs the processes and requests configured in your project. Use projects and
-agent commands you trust. Local evaluation data stays in the local store. Explicit [cloud push and run commands](docs/cli/cloud.md) send project resources and run data to the configured cloud service. Configured
+agent commands you trust. Local evaluation data stays in the local store. Use
+[`attest cloud upload RUN_ID` or `attest eval run --all --upload`](docs/cli/cloud.md)
+to upload finished local results to the hosted dashboard. Explicit cloud project
+pushes send project resources to the configured cloud service. Configured
 HTTP agents and model judges communicate with their providers. Attest sends no usage
 telemetry. See the [telemetry policy](docs/TELEMETRY.md).
 

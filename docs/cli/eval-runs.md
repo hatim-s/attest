@@ -38,6 +38,17 @@ JUnit fields, and a `verdict` of `pass` or `fail`. A failing verdict is still `o
 completions, then exactly one `run_completed` and exactly one final `result`. A failure before
 orchestration is a single `result` event.
 
+## Upload results
+
+Add `--upload` to upload the finished local run to Attest Cloud. Both passing and failing
+verdicts upload. Cloud credentials and project identity are checked before the eval starts.
+The dashboard URL or upload error goes to stderr; stdout and the eval exit
+code stay unchanged. A failure before finalization does not upload. `--upload` cannot be
+combined with `--from-json`.
+
+Use `attest cloud upload RUN_ID` to retry an upload without executing the eval again.
+See [cloud commands](cloud.md) for session setup, CI credentials, token scope, and bundle contents.
+
 ## Cleanup
 
 ```sh

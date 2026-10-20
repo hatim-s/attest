@@ -1,8 +1,14 @@
 import {
   COMMAND_REQUEST_SCHEMA_ID,
   type EvalCancelRequest,
+  type EvalEvent,
   type EvalRunRequest,
 } from '@attest/contracts';
+import {
+  authenticatedCloudClient,
+  resolveCloudUploadProject,
+  uploadCloudRun,
+} from '@attest/local/cloud';
 import { cancelConfiguration, readRequestDocument, runConfiguration } from '@attest/local/eval';
 import type { Command } from 'commander';
 
@@ -49,6 +55,7 @@ type EvalRunCliOptions = CommonEvalOptions &
     dataset?: string[];
     folder?: string[];
     tag?: string[];
+    upload?: boolean;
   };
 
 type EvalCancelCliOptions = CommonEvalOptions & Omit<EvalCancelRequestFields, 'runId'>;
@@ -91,11 +98,31 @@ const readRunRequest = async (
 /** Runs one eval, streaming progress or JSONL, and prints the final result in the chosen mode. */
 const executeEvalRun = async (
   request: EvalRunRequest,
-  project: string | undefined,
-  signal: AbortSignal,
-  context: CommandContext,
+  options: {
+    project: string | undefined;
+    signal: AbortSignal;
+    context: CommandContext;
+    upload: boolean;
+  },
 ): Promise<void> => {
+  const { project, signal, context, upload } = options;
   const execute = context.services?.eval?.runConfiguration ?? runConfiguration;
+
+  const cloud = {
+    authenticatedCloudClient,
+    resolveCloudUploadProject,
+    uploadCloudRun,
+    ...context.services?.cloud,
+  };
+
+  const uploadContext = upload
+    ? await cloud.resolveCloudUploadProject({
+        client: await cloud.authenticatedCloudClient(context.credentialPath),
+        workingDirectory: context.workingDirectory,
+        project,
+        signal,
+      })
+    : undefined;
 
   const source = await execute(request, {
     argv: context.argv,
@@ -124,6 +151,25 @@ const executeEvalRun = async (
   if (request.output === 'human') {
     if (!final.data.result.ok) context.io.error(renderCliError(final.data.result.error));
     context.io.output(renderHumanFinalResult(final.data));
+  }
+
+  const completed = events.findLast(
+    (event): event is Extract<EvalEvent, { event: 'run_completed' }> =>
+      event.event === 'run_completed',
+  );
+
+  if (uploadContext !== undefined && completed !== undefined) {
+    try {
+      const result = await cloud.uploadCloudRun({
+        ...uploadContext,
+        runId: completed.data.run_id,
+        signal,
+      });
+
+      context.io.error(result.url);
+    } catch (error) {
+      context.io.error(renderCliError(serializeCliError(error).error));
+    }
   }
 
   if (final.data.exit_code !== 0) throw new CliExit(final.data.exit_code);
@@ -182,6 +228,7 @@ const registerEvalCommands = (context: CommandContext): void => {
     .option('--timeout <duration>', 'cap the complete eval run, such as 60s or 2m')
     .option('--baseline <run-id>', 'include a persisted diff against a prior run')
     .option('--junit <path>', 'write JUnit XML atomically')
+    .option('--upload', 'upload the finished run to Attest Cloud')
     .option('--watch', 'render live human progress')
     .option('--from-json <path|->', 'read one eval run request from a file or stdin')
     .addOption(commonOption(projectOption()))
@@ -207,7 +254,12 @@ const registerEvalCommands = (context: CommandContext): void => {
             throw new AttestCliError('cancelled', 'Evaluation was cancelled before execution.');
           }
 
-          await executeEvalRun(request, options.project, signal, context);
+          await executeEvalRun(request, {
+            project: options.project,
+            signal,
+            context,
+            upload: options.upload === true,
+          });
         } catch (error: unknown) {
           if (!signal.aborted || error instanceof CliExit) throw error;
           throw new AttestCliError('cancelled', 'Evaluation was cancelled by a process signal.', {
@@ -232,6 +284,7 @@ const registerEvalCommands = (context: CommandContext): void => {
       'JSONL ends with exactly one result event and uses contiguous zero-based sequences.',
     ],
     options: {
+      upload: { conflicts: ['from-json'] },
       all: { conflicts: ['test-id', 'from-json'] },
       case: { conflicts: ['from-json'] },
       tag: { conflicts: ['from-json'] },
@@ -260,6 +313,7 @@ const registerEvalCommands = (context: CommandContext): void => {
           'baseline',
           'junit',
           'watch',
+          'upload',
           'output',
         ],
         implies: ['non-interactive'],

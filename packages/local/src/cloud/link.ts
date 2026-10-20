@@ -23,7 +23,7 @@ const cloudLinkSchema = z.strictObject({
 
 type CloudLink = z.infer<typeof cloudLinkSchema>;
 
-type CloudProjectOptions = DiscoverProjectOptions & { client: CloudClient };
+type CloudProjectOptions = DiscoverProjectOptions & { client: CloudClient; signal?: AbortSignal };
 
 /** Resolves cloud state without following project-local symlinks. */
 const cloudLinkPath = async (root: string, create = false): Promise<string> =>

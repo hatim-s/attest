@@ -108,6 +108,7 @@ const pushCloudProject = async (
   try {
     await recoverProjectTransactions(root, lock);
     const { link, projectId } = await resolveCloudProject(options);
+
     const bundle = await createCloudBundle(await loadProject({ project: root }));
     const hashes = fileHashes(bundle.files);
 

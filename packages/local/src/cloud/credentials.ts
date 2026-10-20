@@ -15,6 +15,8 @@ const credentialSchema = z
   .object({ baseUrl: z.string(), accessToken: bearerTokenSchema, expiresAt: z.string().datetime() })
   .strict();
 
+type CloudCredentialSource = 'session' | 'project_token';
+
 type CloudCredentials = z.infer<typeof credentialSchema>;
 
 /** Reads a private credential file without following a substituted symbolic link. */
@@ -56,6 +58,42 @@ const writeCloudCredentials = async (
   }
 };
 
+/** Resolves the CI pair before consulting private session state. */
+const resolveCloudCredentials = async (path: string) => {
+  const baseUrl = process.env.ATTEST_CLOUD_URL;
+  const accessToken = process.env.ATTEST_CLOUD_TOKEN;
+
+  if (baseUrl === undefined && accessToken === undefined) {
+    const credentials = await readCloudCredentials(path);
+
+    return { ...credentials, credentialSource: 'session' as const };
+  }
+
+  if (
+    baseUrl === undefined ||
+    accessToken === undefined ||
+    !bearerTokenSchema.safeParse(accessToken).success
+  ) {
+    throw new LocalError(
+      'cloud_credentials_invalid',
+      'Set ATTEST_CLOUD_URL and ATTEST_CLOUD_TOKEN together with valid values.',
+    );
+  }
+
+  try {
+    return {
+      baseUrl: normalizeCloudUrl(baseUrl),
+      accessToken,
+      credentialSource: 'project_token' as const,
+    };
+  } catch {
+    throw new LocalError(
+      'cloud_credentials_invalid',
+      'ATTEST_CLOUD_URL must be a cloud HTTPS origin or HTTP loopback origin.',
+    );
+  }
+};
+
 /** Removes the locally stored bearer token after its cloud session has been revoked. */
 const removeCloudCredentials = async (path: string): Promise<void> => {
   try {
@@ -75,4 +113,6 @@ export {
   writeCloudCredentials,
   removeCloudCredentials,
   type CloudCredentials,
+  type CloudCredentialSource,
+  resolveCloudCredentials,
 };

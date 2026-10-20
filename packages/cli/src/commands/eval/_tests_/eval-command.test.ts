@@ -21,7 +21,13 @@ import {
   type EvalEvent,
   type EvalRunRequest,
 } from '@attest/contracts';
+import { LocalError } from '@attest/local';
 import { cancelConfiguration, runConfiguration } from '@attest/local/eval';
+import type {
+  authenticatedCloudClient as cloudClient,
+  resolveCloudUploadProject as uploadProject,
+  uploadCloudRun as uploadRun,
+} from '@attest/local/cloud';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
@@ -754,3 +760,87 @@ describe('eval command grammar and terminal behavior', () => {
     expect(evidence.output).toContain('Result: CANCELLED (exit 130)');
   });
 });
+
+it.each(['pass', 'fail'] as const)(
+  'keeps the %s eval exit code and output when --upload is aborted',
+  async (verdict) => {
+    const uploadCloudRun = vi.fn<typeof uploadRun>(({ signal }) => {
+      process.emit('SIGINT');
+
+      if (signal?.aborted) {
+        throw new LocalError('cancelled', 'Cloud request did not complete.');
+      }
+
+      return Promise.resolve({ url: 'https://cloud.test/run', unchanged: false });
+    });
+
+    const authenticatedCloudClient = vi
+      .fn<typeof cloudClient>()
+      .mockResolvedValue({ baseUrl: 'https://cloud.test', request: vi.fn(), upload: vi.fn() });
+
+    const resolveCloudUploadProject = vi.fn<typeof uploadProject>().mockResolvedValue({
+      root: process.cwd(),
+      projectId: 'p',
+      client: await authenticatedCloudClient('unused'),
+      signal: undefined,
+    });
+
+    run.mockResolvedValue(eventSource(completedEvents(verdict)));
+
+    const result = await executeCommand(
+      process.cwd(),
+      ['eval', 'run', '--all', '--upload', '--output', 'json'],
+      {
+        services: {
+          ...services,
+          cloud: { authenticatedCloudClient, resolveCloudUploadProject, uploadCloudRun },
+        },
+      },
+    );
+
+    expect(result.exitCode).toBe(verdict === 'pass' ? 0 : 1);
+    expect(uploadCloudRun).toHaveBeenCalledWith(expect.objectContaining({ runId: RUN_ID }));
+    expect(result.output).toHaveLength(1);
+    expect(cliResultSchema.parse(JSON.parse(result.output[0]!))).toMatchObject({
+      ok: true,
+      result: { run_id: RUN_ID, verdict },
+    });
+  },
+);
+
+it.each(['credentials', 'project'] as const)(
+  'rejects invalid cloud %s before starting an eval with --upload',
+  async (failure) => {
+    const client = { baseUrl: 'https://cloud.test', request: vi.fn(), upload: vi.fn() };
+
+    const authenticatedCloudClient = vi.fn(() => {
+      if (failure === 'credentials')
+        return Promise.reject(
+          new LocalError('cloud_credentials_invalid', 'Invalid cloud credentials.'),
+        );
+
+      return Promise.resolve(client);
+    });
+
+    const resolveCloudUploadProject = vi.fn(() => {
+      return Promise.reject(
+        new LocalError('project_invalid', 'Project link belongs to a different cloud project.'),
+      );
+    });
+
+    const result = await executeCommand(
+      process.cwd(),
+      ['eval', 'run', '--all', '--upload', '--output', 'json'],
+      {
+        services: { ...services, cloud: { authenticatedCloudClient, resolveCloudUploadProject } },
+      },
+    );
+
+    expect(result.exitCode).toBe(failure === 'credentials' ? 2 : 1);
+    expect(run).not.toHaveBeenCalled();
+    expect(cliResultSchema.parse(JSON.parse(result.output[0]!))).toMatchObject({
+      ok: false,
+      error: { code: failure === 'credentials' ? 'cloud_credentials_invalid' : 'project_invalid' },
+    });
+  },
+);

@@ -39,6 +39,11 @@ const registerCloudCommands = ({
   services,
 }: CommandContext): void => {
   const {
+    uploadCloudRun,
+    resolveCloudUploadProject,
+    createCloudProjectToken,
+    listCloudProjectTokens,
+    revokeCloudProjectToken,
     authenticatedCloudClient,
     cloudEvents,
     listCloudProjects,
@@ -72,6 +77,52 @@ const registerCloudCommands = ({
     project: options.project,
     client: await authenticatedCloudClient(credentialPath),
   });
+
+  addCommonOptions(
+    cloud
+      .command('upload')
+      .description('Upload a finished local run and print its dashboard URL.')
+      .argument('[run-id]'),
+  ).action(async (runId: string | undefined, options: CommonCliOptions) => {
+    const result = await withProcessSignals(async (signal) =>
+      uploadCloudRun({
+        ...(await resolveCloudUploadProject({ ...(await projectContext(options)), signal })),
+        runId,
+      }),
+    );
+
+    io.output(renderResult('cloud.upload', options.output ?? 'human', result, ({ url }) => url));
+  });
+
+  const tokens = cloud
+    .command('token')
+    .description('Manage project upload tokens with a device session.');
+
+  addCommonOptions(
+    tokens
+      .command('create')
+      .description('Print a new upload token once.')
+      .requiredOption('--name <name>', 'token name'),
+  ).action(async (options: CommonCliOptions & { name: string }) =>
+    output(
+      'token.create',
+      options,
+      await createCloudProjectToken({ ...(await projectContext(options)), name: options.name }),
+    ),
+  );
+  addCommonOptions(tokens.command('list').description('List project token metadata.')).action(
+    async (options: CommonCliOptions) =>
+      output('token.list', options, await listCloudProjectTokens(await projectContext(options))),
+  );
+  addCommonOptions(
+    tokens.command('revoke').description('Revoke a project upload token.').argument('<id>'),
+  ).action(async (tokenId: string, options: CommonCliOptions) =>
+    output(
+      'token.revoke',
+      options,
+      await revokeCloudProjectToken({ ...(await projectContext(options)), tokenId }),
+    ),
+  );
 
   const projects = cloud.command('project').description('List or create cloud projects.');
   addCommonOptions(
