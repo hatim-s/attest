@@ -23,6 +23,7 @@ import {
 } from '@attest/contracts';
 import { LocalError } from '@attest/local';
 import { cancelConfiguration, runConfiguration } from '@attest/local/eval';
+import type { pushCloudRun as pushRun } from '@attest/local/cloud';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
@@ -757,11 +758,17 @@ describe('eval command grammar and terminal behavior', () => {
 });
 
 it.each(['pass', 'fail'] as const)(
-  'keeps the %s eval exit code and output when --push fails',
+  'keeps the %s eval exit code and output when --push is aborted',
   async (verdict) => {
-    const pushCloudRun = vi
-      .fn()
-      .mockRejectedValue(new LocalError('cloud_unavailable', 'Cloud request did not complete.'));
+    const pushCloudRun = vi.fn<typeof pushRun>(async ({ signal }) => {
+      process.emit('SIGINT');
+
+      if (signal?.aborted) {
+        throw new LocalError('cancelled', 'Cloud request did not complete.');
+      }
+
+      return { url: 'https://cloud.test/run', unchanged: false };
+    });
 
     const authenticatedCloudClient = vi
       .fn()
@@ -777,7 +784,7 @@ it.each(['pass', 'fail'] as const)(
 
     expect(result.exitCode).toBe(verdict === 'pass' ? 0 : 1);
     expect(pushCloudRun).toHaveBeenCalledWith(expect.objectContaining({ runId: RUN_ID }));
-    expect(result.errors).toEqual(['cloud_unavailable: Cloud request did not complete.']);
+    expect(result.errors).toEqual(['cancelled: Cloud request did not complete.']);
     expect(result.output).toHaveLength(1);
     expect(cliResultSchema.parse(JSON.parse(result.output[0]!))).toMatchObject({
       ok: true,

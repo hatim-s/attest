@@ -23,7 +23,7 @@ const cloudLinkSchema = z.strictObject({
 
 type CloudLink = z.infer<typeof cloudLinkSchema>;
 
-type CloudProjectOptions = DiscoverProjectOptions & { client: CloudClient };
+type CloudProjectOptions = DiscoverProjectOptions & { client: CloudClient; signal?: AbortSignal };
 
 /** Resolves cloud state without following project-local symlinks. */
 const cloudLinkPath = async (root: string, create = false): Promise<string> =>
@@ -89,6 +89,7 @@ const resolveCloudProject = async (options: CloudProjectOptions) => {
 
     const { token } = await options.client.request('GET', '/v1/token', {
       schema: projectTokenIdentitySchema,
+      signal: options.signal,
     });
 
     if (link !== undefined && link.project_id !== token.project_id) {

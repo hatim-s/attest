@@ -143,6 +143,7 @@ const executeEvalRun = async (
         workingDirectory: context.workingDirectory,
         project,
         runId: completed.data.run_id,
+        signal,
       });
 
       context.io.error(result.url);

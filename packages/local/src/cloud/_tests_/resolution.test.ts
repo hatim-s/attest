@@ -86,6 +86,17 @@ it('gets CI project identity from the token and rejects disagreeing links', asyn
     code: 'project_invalid',
     message: 'Project link belongs to a different cloud origin.',
   });
+  await writeCloudLink(root, link);
+  const controller = new AbortController();
+  controller.abort();
+  fetcher.mockImplementation(async (_url, init) => {
+    init?.signal?.throwIfAborted();
+
+    return Response.json({ token: { id: 't', name: 'ci', project_id: 'p' } });
+  });
+  await expect(
+    resolveCloudProject({ ...options, signal: controller.signal }),
+  ).rejects.toMatchObject({ code: 'cancelled', message: 'Cloud request did not complete.' });
   vi.stubEnv('ATTEST_CLOUD_URL', undefined);
   vi.stubEnv('ATTEST_CLOUD_TOKEN', undefined);
 });
