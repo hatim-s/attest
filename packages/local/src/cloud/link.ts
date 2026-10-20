@@ -11,7 +11,7 @@ import { discoverProject, type DiscoverProjectOptions } from '../project/discove
 import { resolveContainedPath } from '../project/project-path.js';
 import { acquireProjectLock, releaseProjectLock } from '../project/transaction/project-lock.js';
 import type { CloudClient } from './client.js';
-import { linkedProjectSchema, projectTokenIdentitySchema } from './protocol.js';
+import { linkedProjectSchema } from './protocol.js';
 
 const cloudLinkSchema = z.strictObject({
   schema: z.literal('attest.cloud-link.v1'),
@@ -81,23 +81,6 @@ const writeCloudLink = async (root: string, link: CloudLink): Promise<void> => {
 const resolveCloudProject = async (options: CloudProjectOptions) => {
   const { root } = await discoverProject(options);
   const link = await readCloudLink(root);
-
-  if (options.client.credentialSource === 'environment') {
-    if (link !== undefined && link.base_url !== options.client.baseUrl) {
-      throw new LocalError('project_invalid', 'Project link belongs to a different cloud origin.');
-    }
-
-    const { token } = await options.client.request('GET', '/v1/token', {
-      schema: projectTokenIdentitySchema,
-      signal: options.signal,
-    });
-
-    if (link !== undefined && link.project_id !== token.project_id) {
-      throw new LocalError('project_invalid', 'Project link belongs to a different cloud project.');
-    }
-
-    return { root, link, projectId: token.project_id, revisionId: link?.revision_id };
-  }
 
   if (link === undefined) {
     throw new LocalError('cli_missing_input', 'This project is not linked to Attest Cloud.', {

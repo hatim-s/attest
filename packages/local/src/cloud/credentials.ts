@@ -15,6 +15,8 @@ const credentialSchema = z
   .object({ baseUrl: z.string(), accessToken: bearerTokenSchema, expiresAt: z.string().datetime() })
   .strict();
 
+type CloudCredentialSource = 'session' | 'project_token';
+
 type CloudCredentials = z.infer<typeof credentialSchema>;
 
 /** Reads a private credential file without following a substituted symbolic link. */
@@ -64,7 +66,7 @@ const resolveCloudCredentials = async (path: string) => {
   if (baseUrl === undefined && accessToken === undefined) {
     const credentials = await readCloudCredentials(path);
 
-    return { ...credentials, source: 'session' as const };
+    return { ...credentials, credentialSource: 'session' as const };
   }
 
   if (
@@ -79,7 +81,11 @@ const resolveCloudCredentials = async (path: string) => {
   }
 
   try {
-    return { baseUrl: normalizeCloudUrl(baseUrl), accessToken, source: 'environment' as const };
+    return {
+      baseUrl: normalizeCloudUrl(baseUrl),
+      accessToken,
+      credentialSource: 'project_token' as const,
+    };
   } catch {
     throw new LocalError(
       'cloud_credentials_invalid',
@@ -107,5 +113,6 @@ export {
   writeCloudCredentials,
   removeCloudCredentials,
   type CloudCredentials,
+  type CloudCredentialSource,
   resolveCloudCredentials,
 };

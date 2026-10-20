@@ -1,12 +1,10 @@
-import { Writable } from 'node:stream';
-
-import { StoreError, type RunStore } from '@attest/core';
+import { createBundle, StoreError, type RunStore } from '@attest/core';
 
 import { withReadonlyRunStore } from '../commands/run-store/readonly-run-store.js';
 import { LocalError } from '../errors/local-error.js';
-import { exportRunBundle } from '../store/bundle-io.js';
-import { resolveCloudProject, type CloudProjectOptions } from './link.js';
-import { uploadedRunResponseSchema } from './protocol.js';
+import { discoverProject } from '../project/discover-project.js';
+import { readCloudLink, resolveCloudProject, type CloudProjectOptions } from './link.js';
+import { projectTokenIdentitySchema, uploadedRunResponseSchema } from './protocol.js';
 
 /** Uses the store's stable newest-first paging, skipping unfinished runs across pages. */
 const newestFinishedRun = async (store: RunStore): Promise<string> => {
@@ -23,52 +21,73 @@ const newestFinishedRun = async (store: RunStore): Promise<string> => {
   throw new LocalError('resource_not_found', 'This project has no finished runs to upload.');
 };
 
+/** Resolves CI token identity without making session commands accept an unlinked project. */
+const resolveCloudUploadProject = async (options: CloudProjectOptions) => {
+  if (options.client.credentialSource !== 'project_token') {
+    const { root, projectId } = await resolveCloudProject(options);
+
+    return { client: options.client, signal: options.signal, root, projectId };
+  }
+
+  const { root } = await discoverProject(options);
+  const link = await readCloudLink(root);
+
+  if (link !== undefined && link.base_url !== options.client.baseUrl) {
+    throw new LocalError('project_invalid', 'Project link belongs to a different cloud origin.');
+  }
+
+  const { token } = await options.client.request('GET', '/v1/token', {
+    schema: projectTokenIdentitySchema,
+    signal: options.signal,
+  });
+
+  if (link !== undefined && link.project_id !== token.project_id) {
+    throw new LocalError('project_invalid', 'Project link belongs to a different cloud project.');
+  }
+
+  return { client: options.client, signal: options.signal, root, projectId: token.project_id };
+};
+
 /** Exports a read-only snapshot so uploading never migrates or modifies the project store. */
-const uploadCloudRun = async (options: CloudProjectOptions & { runId?: string }) => {
-  const { root, projectId } = await resolveCloudProject(options);
-  let selectedRunId: string | undefined;
+const uploadCloudRun = async (
+  options: Awaited<ReturnType<typeof resolveCloudUploadProject>> & { runId?: string },
+) => {
+  const { root, projectId } = options;
 
-  const bundle = await withReadonlyRunStore(root, async (store) => {
-    selectedRunId = options.runId ?? (await newestFinishedRun(store));
-    const chunks: Buffer[] = [];
-
-    const destination = new Writable({
-      write(chunk: Buffer, _encoding, callback) {
-        chunks.push(chunk);
-        callback();
-      },
-    });
+  const snapshot = await withReadonlyRunStore(root, async (store) => {
+    const runId = options.runId ?? (await newestFinishedRun(store));
 
     try {
-      await exportRunBundle(store, selectedRunId, destination);
+      const aggregate = await store.getRunWithCases(runId);
+      const bundle = `${createBundle(aggregate.run, aggregate.cases).lines.join('\n')}\n`;
+
+      return { runId, bundle };
     } catch (error) {
       if (error instanceof StoreError && error.code === 'RUN_NOT_FOUND') {
-        throw new LocalError('resource_not_found', `Run ${selectedRunId} was not found.`);
+        throw new LocalError('resource_not_found', `Run ${runId} was not found.`);
       }
 
       throw error;
     }
-
-    return Buffer.concat(chunks).toString('utf8');
   });
 
-  if (bundle === undefined)
+  if (snapshot === undefined)
     throw new LocalError('resource_not_found', 'This project has no local run store.');
 
   const response = await options.client.upload(
     `/v1/projects/${encodeURIComponent(projectId)}/runs/upload`,
     {
-      body: bundle,
+      body: snapshot.bundle,
       schema: uploadedRunResponseSchema,
       signal: options.signal,
     },
   );
 
-  if (response.run.project_id !== projectId || response.run.id !== selectedRunId) {
+  if (response.run.project_id !== projectId || response.run.id !== snapshot.runId) {
     throw new LocalError('cloud_request_failed', 'Cloud returned a different project or run.');
   }
 
-  return { url: response.run.url, unchanged: response.unchanged ?? false };
+  return { url: response.run.url, unchanged: response.unchanged };
 };
 
-export { uploadCloudRun };
+export { resolveCloudUploadProject, uploadCloudRun };

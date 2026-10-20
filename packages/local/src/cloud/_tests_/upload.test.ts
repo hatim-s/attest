@@ -6,7 +6,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { openStore } from '../../store/run-store.js';
 import { createCloudClient } from '../client.js';
 import { writeCloudLink } from '../link.js';
-import { uploadCloudRun } from '../upload.js';
+import { resolveCloudUploadProject, uploadCloudRun } from '../upload.js';
 
 const directories: string[] = [];
 
@@ -32,27 +32,21 @@ it('uploads the exact bundle of the newest finished run and leaves the store unc
   let expected = '';
 
   try {
-    for (const id of [
-      'old',
-      '01ARZ3NDEKTSV4RRFFQ69G5FAB',
-      ...Array.from({ length: 101 }, (_, i) => `running-${i}`),
+    for (const { id, createdAt, finalize } of [
+      { id: 'old', createdAt: '2026-10-19T00:00:00Z', finalize: true },
+      { id: '01ARZ3NDEKTSV4RRFFQ69G5FAB', createdAt: '2026-10-20T00:00:00Z', finalize: false },
+      ...Array.from({ length: 101 }, (_, i) => ({
+        id: `running-${i}`,
+        createdAt: '2026-10-21T00:00:00Z',
+        finalize: false,
+      })),
     ]) {
       const run = await store.runs.createRun(
         { schemaId: 'attest.project', configHash: 'hash', configJson: '{}' },
-        {
-          id,
-          createdAt:
-            id === 'old'
-              ? '2026-10-19T00:00:00Z'
-              : id === '01ARZ3NDEKTSV4RRFFQ69G5FAB'
-                ? '2026-10-20T00:00:00Z'
-                : '2026-10-21T00:00:00Z',
-        },
+        { id, createdAt },
       );
 
-      if (id.startsWith('running')) continue;
-
-      if (id === 'old') await store.runs.finalizeRun(run.id, 'completed');
+      if (finalize) await store.runs.finalizeRun(run.id, 'completed');
     }
 
     await store.runs.recordCase(
@@ -92,13 +86,6 @@ it('uploads the exact bundle of the newest finished run and leaves the store unc
         run: {
           id: '01ARZ3NDEKTSV4RRFFQ69G5FAB',
           project_id: 'p',
-          status: 'completed',
-          created_at: '2026-10-20T00:00:00Z',
-          finished_at: '2026-10-20T00:00:01Z',
-          git_sha: null,
-          git_branch: null,
-          labels: {},
-          summary: {},
           url: 'https://cloud.test/#/projects/p/runs/01ARZ3NDEKTSV4RRFFQ69G5FAB',
         },
         unchanged: true,
@@ -112,7 +99,9 @@ it('uploads the exact bundle of the newest finished run and leaves the store unc
     fetch: fetcher,
   });
 
-  expect(await uploadCloudRun({ workingDirectory: root, client })).toEqual({
+  expect(
+    await uploadCloudRun(await resolveCloudUploadProject({ workingDirectory: root, client })),
+  ).toEqual({
     url: 'https://cloud.test/#/projects/p/runs/01ARZ3NDEKTSV4RRFFQ69G5FAB',
     unchanged: true,
   });
@@ -130,35 +119,3 @@ it('uploads the exact bundle of the newest finished run and leaves the store unc
   );
   expect(await readFile(path)).toEqual(before);
 });
-
-it.each([
-  [409, 'run_conflict', 'session-secret'],
-  [409, 'run_conflict', 'atp_project-secret'],
-  [422, 'run_not_finished', 'session-secret'],
-] as const)(
-  'preserves upload failure %s as a closed local error',
-  async (status, code, accessToken) => {
-    const client = createCloudClient({
-      baseUrl: 'https://cloud.test',
-      accessToken,
-      fetch: () =>
-        Promise.resolve(
-          Response.json(
-            { error: { code, message: `Upload rejected for Bearer ${accessToken}.` } },
-            { status },
-          ),
-        ),
-    });
-
-    await expect(
-      client.upload('/v1/projects/p/runs/upload', {
-        body: 'bundle',
-        schema: (await import('zod')).z.unknown(),
-      }),
-    ).rejects.toMatchObject({
-      code,
-      message: 'Upload rejected for Bearer [REDACTED].',
-      details: { status, remote_code: code },
-    });
-  },
-);

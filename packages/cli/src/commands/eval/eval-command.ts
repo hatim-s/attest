@@ -1,11 +1,16 @@
 import {
   COMMAND_REQUEST_SCHEMA_ID,
   type EvalCancelRequest,
+  type EvalEvent,
   type EvalRunRequest,
 } from '@attest/contracts';
+import {
+  authenticatedCloudClient,
+  resolveCloudUploadProject,
+  uploadCloudRun,
+} from '@attest/local/cloud';
 import { cancelConfiguration, readRequestDocument, runConfiguration } from '@attest/local/eval';
 import type { Command } from 'commander';
-import { authenticatedCloudClient, uploadCloudRun } from '@attest/local/cloud';
 
 import {
   AttestCliError,
@@ -103,6 +108,22 @@ const executeEvalRun = async (
   const { project, signal, context, upload } = options;
   const execute = context.services?.eval?.runConfiguration ?? runConfiguration;
 
+  const cloud = {
+    authenticatedCloudClient,
+    resolveCloudUploadProject,
+    uploadCloudRun,
+    ...context.services?.cloud,
+  };
+
+  const uploadContext = upload
+    ? await cloud.resolveCloudUploadProject({
+        client: await cloud.authenticatedCloudClient(context.credentialPath),
+        workingDirectory: context.workingDirectory,
+        project,
+        signal,
+      })
+    : undefined;
+
   const source = await execute(request, {
     argv: context.argv,
     project,
@@ -132,16 +153,15 @@ const executeEvalRun = async (
     context.io.output(renderHumanFinalResult(final.data));
   }
 
-  const completed = events.findLast((event) => event.event === 'run_completed');
+  const completed = events.findLast(
+    (event): event is Extract<EvalEvent, { event: 'run_completed' }> =>
+      event.event === 'run_completed',
+  );
 
-  if (upload && completed?.event === 'run_completed') {
+  if (uploadContext !== undefined && completed !== undefined) {
     try {
-      const cloud = { authenticatedCloudClient, uploadCloudRun, ...context.services?.cloud };
-
       const result = await cloud.uploadCloudRun({
-        client: await cloud.authenticatedCloudClient(context.credentialPath),
-        workingDirectory: context.workingDirectory,
-        project,
+        ...uploadContext,
         runId: completed.data.run_id,
         signal,
       });

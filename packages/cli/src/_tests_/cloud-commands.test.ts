@@ -7,10 +7,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { runCommand as executeCommand, temporaryDirectory } from './support/cli-test-support.js';
 
 const cloud = {
-  uploadRun: vi.fn<typeof CloudAdapter.uploadCloudRun>().mockResolvedValue({
-    url: 'https://cloud.example.test/#/projects/project/runs/run',
-    unchanged: false,
-  }),
   push: vi.fn<typeof CloudAdapter.pushCloudProject>().mockResolvedValue({
     project_id: 'project',
     revision_id: 'rev',
@@ -54,7 +50,6 @@ const services = {
           file_hashes: {},
         },
       }),
-    uploadCloudRun: cloud.uploadRun,
     pushCloudProject: cloud.push,
     runCloud: cloud.run,
   },
@@ -64,7 +59,6 @@ const runCommand = (...[root, argv, options]: Parameters<typeof executeCommand>)
   executeCommand(root, argv, { ...options, services });
 
 beforeEach(() => {
-  cloud.uploadRun.mockClear();
   cloud.push.mockClear();
   cloud.run.mockClear();
 });
@@ -154,7 +148,6 @@ describe('cloud command translation', () => {
       credentialPath,
       JSON.stringify({
         baseUrl: 'https://cloud.example.test',
-        upload: () => Promise.reject(new Error('Unexpected upload.')),
         accessToken: 'token',
         expiresAt: new Date(Date.now() + 60_000).toISOString(),
       }),
@@ -167,13 +160,6 @@ describe('cloud command translation', () => {
     expect(result.exitCode).toBe(0);
     await expect(stat(credentialPath)).rejects.toMatchObject({ code: 'ENOENT' });
   });
-});
-
-it('prints the uploaded dashboard URL and forwards an explicit run ID', async () => {
-  const result = await runCommand(process.cwd(), ['cloud', 'upload', 'run']);
-  expect(result.exitCode).toBe(0);
-  expect(result.output).toEqual(['https://cloud.example.test/#/projects/project/runs/run']);
-  expect(cloud.uploadRun.mock.calls[0]?.[0]).toMatchObject({ runId: 'run' });
 });
 
 it.each([['create', '--name', 'ci'], ['list'], ['revoke', 'token-id']])(
@@ -222,11 +208,13 @@ it('creates, lists and revokes tokens for the linked project without saving the 
 
   await writeFile(join(home, 'cloud/credentials.json'), credentials, { mode: 0o600 });
   const token = { id: 't', name: 'ci', created_at: '2026-10-21T00:00:00Z' };
+  const listedToken = { ...token, revoked_at: '2026-10-21T01:00:00Z' };
 
   const fetcher = vi
     .fn<typeof fetch>()
     .mockResolvedValueOnce(Response.json({ token, secret: 'atp_print-once' }, { status: 201 }))
-    .mockResolvedValueOnce(Response.json({ tokens: [token] }))
+    .mockResolvedValueOnce(Response.json({ tokens: [listedToken] }))
+    .mockResolvedValueOnce(Response.json({ tokens: [listedToken] }))
     .mockResolvedValueOnce(new Response(null, { status: 204 }));
 
   vi.stubGlobal('fetch', fetcher);
@@ -243,9 +231,15 @@ it('creates, lists and revokes tokens for the linked project without saving the 
 
   expect(created.exitCode).toBe(0);
   expect(created.output.join('\n').match(/atp_print-once/gu)).toHaveLength(1);
-  expect(await executeCommand(root, ['cloud', 'token', 'list', '--output', 'json'])).toMatchObject({
-    exitCode: 0,
+  const listed = await executeCommand(root, ['cloud', 'token', 'list', '--output', 'json']);
+  expect(listed.exitCode).toBe(0);
+  expect(cliResultSchema.parse(JSON.parse(listed.output[0]!))).toMatchObject({
+    ok: true,
+    result: { tokens: [listedToken] },
   });
+  const humanList = await executeCommand(root, ['cloud', 'token', 'list']);
+  expect(humanList.exitCode).toBe(0);
+  expect(humanList.output.join('\n')).toContain(listedToken.revoked_at);
   expect(
     await executeCommand(root, ['cloud', 'token', 'revoke', 't', '--output', 'json']),
   ).toMatchObject({ exitCode: 0 });
@@ -253,6 +247,7 @@ it('creates, lists and revokes tokens for the linked project without saving the 
     fetcher.mock.calls.map(([url, init]) => [new URL(new Request(url).url).pathname, init?.method]),
   ).toEqual([
     ['/v1/projects/p/tokens', 'POST'],
+    ['/v1/projects/p/tokens', 'GET'],
     ['/v1/projects/p/tokens', 'GET'],
     ['/v1/projects/p/tokens/t', 'DELETE'],
   ]);

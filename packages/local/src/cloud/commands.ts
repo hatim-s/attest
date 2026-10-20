@@ -120,11 +120,7 @@ const loginCloud = async (options: {
 const authenticatedCloudClient = async (credentialPath: string): Promise<CloudClient> => {
   const credentials = await resolveCloudCredentials(credentialPath);
 
-  return createCloudClient({
-    baseUrl: credentials.baseUrl,
-    accessToken: credentials.accessToken,
-    credentialSource: credentials.source,
-  });
+  return createCloudClient(credentials);
 };
 
 /** Revokes the server session before removing the local token. */

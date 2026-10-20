@@ -109,11 +109,6 @@ const pushCloudProject = async (
     await recoverProjectTransactions(root, lock);
     const { link, projectId } = await resolveCloudProject(options);
 
-    if (link === undefined)
-      throw new LocalError(
-        'cli_missing_input',
-        'Link this project before synchronizing revisions.',
-      );
     const bundle = await createCloudBundle(await loadProject({ project: root }));
     const hashes = fileHashes(bundle.files);
 
@@ -219,12 +214,6 @@ const pullCloudProject = async (options: CloudProjectOptions & { revisionId?: st
   try {
     await recoverProjectTransactions(root, lock);
     const { link, projectId } = await resolveCloudProject(options);
-
-    if (link === undefined)
-      throw new LocalError(
-        'cli_missing_input',
-        'Link this project before synchronizing revisions.',
-      );
 
     const selected =
       options.revisionId === undefined ? 'current' : encodeURIComponent(options.revisionId);

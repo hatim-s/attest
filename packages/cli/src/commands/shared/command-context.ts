@@ -22,6 +22,7 @@ type CliServices = {
       | 'resolveCloudProject'
       | 'runCloud'
       | 'uploadCloudRun'
+      | 'resolveCloudUploadProject'
       | 'createCloudProjectToken'
       | 'listCloudProjectTokens'
       | 'revokeCloudProjectToken'

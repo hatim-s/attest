@@ -15,7 +15,7 @@ export { linkCloudProject, resolveCloudProject } from './link.js';
 
 export { pushCloudProject, pullCloudProject } from './sync.js';
 
-export { uploadCloudRun } from './upload.js';
+export { resolveCloudUploadProject, uploadCloudRun } from './upload.js';
 
 export {
   createCloudProjectToken,

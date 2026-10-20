@@ -95,23 +95,16 @@ const runResultSchema = z.object({
 });
 
 const projectTokenIdentitySchema = z.object({
-  token: z.object({ id: z.string().min(1), name: z.string(), project_id: z.string().min(1) }),
+  token: z.object({ project_id: z.string().min(1) }),
 });
 
 const uploadedRunResponseSchema = z.object({
   run: z.object({
     id: z.string().min(1),
     project_id: z.string().min(1),
-    status: z.enum(['completed', 'failed', 'cancelled']),
-    created_at: z.string(),
-    finished_at: z.string(),
-    git_sha: z.string().nullable(),
-    git_branch: z.string().nullable(),
-    labels: z.record(z.string(), z.string()).nullable(),
-    summary: z.unknown(),
     url: z.url(),
   }),
-  unchanged: z.boolean().optional(),
+  unchanged: z.boolean().default(false),
 });
 
 const projectTokenSchema = z.object({
@@ -125,11 +118,13 @@ const createdProjectTokenSchema = z.object({
   secret: bearerTokenSchema,
 });
 
-const projectTokensSchema = z.object({ tokens: z.array(projectTokenSchema) });
+const projectTokensSchema = z.object({
+  tokens: z.array(projectTokenSchema.extend({ revoked_at: z.string().nullable() })),
+});
 
 const emptyResponseSchema = z.unknown();
 
-const stage1ErrorCodes = [
+const uploadErrorCodes = [
   'upload_too_large',
   'run_not_finished',
   'run_conflict',
@@ -138,11 +133,11 @@ const stage1ErrorCodes = [
   'invalid_bundle',
 ] as const;
 
-const stage1ErrorCodeSchema = z.enum(stage1ErrorCodes);
+const uploadErrorCodeSchema = z.enum(uploadErrorCodes);
 
 const remoteErrorSchema = z.object({
   error: z
-    .object({ code: z.string().regex(/^[a-z_]{1,80}$/u), message: z.string().max(4096).optional() })
+    .object({ code: z.string().regex(/^[a-z_]{1,80}$/u), message: z.string().optional() })
     .optional(),
 });
 
@@ -155,7 +150,8 @@ const deviceErrorCodeSchema = z.enum([
 
 type RemoteErrorOutcome =
   | { kind: 'device'; code: z.infer<typeof deviceErrorCodeSchema> }
-  | { kind: 'remote'; remoteCode: string; message?: string };
+  | { kind: 'known'; code: z.infer<typeof uploadErrorCodeSchema>; message: string }
+  | { kind: 'remote'; remoteCode: string };
 
 /** Preserves decoded device outcomes without reparsing error details at the caller. */
 class CloudRemoteError extends LocalError {
@@ -163,18 +159,15 @@ class CloudRemoteError extends LocalError {
     readonly status: number,
     readonly outcome: RemoteErrorOutcome,
   ) {
-    const code = outcome.kind === 'device' ? outcome.code : outcome.remoteCode;
-    const localCode = stage1ErrorCodeSchema.safeParse(code);
+    const code = outcome.kind === 'remote' ? outcome.remoteCode : outcome.code;
 
     super(
       status === 401
         ? 'cloud_auth_required'
-        : localCode.success
-          ? localCode.data
+        : outcome.kind === 'known'
+          ? outcome.code
           : 'cloud_request_failed',
-      outcome.kind === 'remote' && outcome.message !== undefined
-        ? outcome.message
-        : `Cloud request failed (${status}, ${code}).`,
+      outcome.kind === 'known' ? outcome.message : `Cloud request failed (${status}, ${code}).`,
       { details: { status, remote_code: code } },
     );
   }
@@ -183,23 +176,25 @@ class CloudRemoteError extends LocalError {
 /** Decodes the RFC 8628 device vocabulary and keeps other server codes opaque. */
 // BOUNDARY: Remote failure JSON is untrusted; only the error-code schemas are consumed here.
 const decodeRemoteError = (value: unknown): RemoteErrorOutcome => {
-  let remoteCode: string;
-  let message: string | undefined;
+  const parsed = remoteErrorSchema.safeParse(value);
 
-  try {
-    const error = remoteErrorSchema.parse(value).error;
-    remoteCode = error?.code ?? 'request_failed';
-
-    if (stage1ErrorCodeSchema.safeParse(remoteCode).success) message = error?.message;
-  } catch {
-    return { kind: 'remote', remoteCode: 'request_failed' };
-  }
-
+  if (!parsed.success) return { kind: 'remote', remoteCode: 'request_failed' };
+  const error = parsed.data.error;
+  const remoteCode = error?.code ?? 'request_failed';
   const device = deviceErrorCodeSchema.safeParse(remoteCode);
 
-  return device.success
-    ? { kind: 'device', code: device.data }
-    : { kind: 'remote', remoteCode, message };
+  if (device.success) return { kind: 'device', code: device.data };
+  const known = uploadErrorCodeSchema.safeParse(remoteCode);
+
+  if (known.success) {
+    return {
+      kind: 'known',
+      code: known.data,
+      message: error?.message?.slice(0, 4096) ?? `Cloud request failed (${remoteCode}).`,
+    };
+  }
+
+  return { kind: 'remote', remoteCode };
 };
 
 export {

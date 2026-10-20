@@ -40,6 +40,7 @@ const registerCloudCommands = ({
 }: CommandContext): void => {
   const {
     uploadCloudRun,
+    resolveCloudUploadProject,
     createCloudProjectToken,
     listCloudProjectTokens,
     revokeCloudProjectToken,
@@ -84,22 +85,18 @@ const registerCloudCommands = ({
       .argument('[run-id]'),
   ).action(async (runId: string | undefined, options: CommonCliOptions) => {
     const result = await withProcessSignals(async (signal) =>
-      uploadCloudRun({ ...(await projectContext(options)), runId, signal }),
+      uploadCloudRun({
+        ...(await resolveCloudUploadProject({ ...(await projectContext(options)), signal })),
+        runId,
+      }),
     );
 
-    if ((options.output ?? 'human') === 'human') io.output(result.url);
-    else output('upload', options, result);
+    io.output(renderResult('cloud.upload', options.output ?? 'human', result, ({ url }) => url));
   });
 
   const tokens = cloud
     .command('token')
     .description('Manage project upload tokens with a device session.');
-
-  const tokenContext = (options: CommonCliOptions) => ({
-    workingDirectory,
-    project: options.project,
-    credentialPath,
-  });
 
   addCommonOptions(
     tokens
@@ -110,12 +107,12 @@ const registerCloudCommands = ({
     output(
       'token.create',
       options,
-      await createCloudProjectToken({ ...tokenContext(options), name: options.name }),
+      await createCloudProjectToken({ ...(await projectContext(options)), name: options.name }),
     ),
   );
   addCommonOptions(tokens.command('list').description('List project token metadata.')).action(
     async (options: CommonCliOptions) =>
-      output('token.list', options, await listCloudProjectTokens(tokenContext(options))),
+      output('token.list', options, await listCloudProjectTokens(await projectContext(options))),
   );
   addCommonOptions(
     tokens.command('revoke').description('Revoke a project upload token.').argument('<id>'),
@@ -123,7 +120,7 @@ const registerCloudCommands = ({
     output(
       'token.revoke',
       options,
-      await revokeCloudProjectToken({ ...tokenContext(options), tokenId }),
+      await revokeCloudProjectToken({ ...(await projectContext(options)), tokenId }),
     ),
   );
 

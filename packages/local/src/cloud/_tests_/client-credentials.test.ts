@@ -7,6 +7,7 @@ import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createCloudClient } from '../client.js';
+import { emptyResponseSchema } from '../protocol.js';
 import { readCloudCredentials, writeCloudCredentials } from '../credentials.js';
 import { cloudEvents, loginCloud, logoutCloud } from '../commands.js';
 
@@ -352,4 +353,56 @@ describe('cloud trust boundaries', () => {
       cloudEvents({ client, projectId: 'p', runId: 'r', after: 7 }),
     ).rejects.toMatchObject({ code: 'cloud_request_failed' });
   });
+});
+
+it.each([
+  [409, 'run_conflict', 'session-secret'],
+  [409, 'run_conflict', 'atp_project-secret'],
+  [422, 'run_not_finished', 'session-secret'],
+] as const)(
+  'preserves upload failure %s as a closed local error',
+  async (status, code, accessToken) => {
+    const client = createCloudClient({
+      baseUrl: 'https://cloud.test',
+      accessToken,
+      fetch: () =>
+        Promise.resolve(
+          Response.json(
+            { error: { code, message: `Upload rejected for Bearer ${accessToken}.` } },
+            { status },
+          ),
+        ),
+    });
+
+    await expect(
+      client.upload('/v1/projects/p/runs/upload', {
+        body: 'bundle',
+        schema: emptyResponseSchema,
+      }),
+    ).rejects.toMatchObject({
+      code,
+      message: 'Upload rejected for Bearer [REDACTED].',
+      details: { status, remote_code: code },
+    });
+  },
+);
+
+it('retains a known error code when its message exceeds the display limit', async () => {
+  const client = createCloudClient({
+    baseUrl: 'https://cloud.test',
+    fetch: () =>
+      Promise.resolve(
+        Response.json(
+          { error: { code: 'run_conflict', message: 'x'.repeat(5000) } },
+          { status: 409 },
+        ),
+      ),
+  });
+
+  await expect(
+    client.upload('/v1/projects/p/runs/upload', {
+      body: 'bundle',
+      schema: emptyResponseSchema,
+    }),
+  ).rejects.toMatchObject({ code: 'run_conflict', message: 'x'.repeat(4096) });
 });

@@ -2,12 +2,14 @@ import type { JsonValue } from '@attest/contracts';
 import { redactTransportText } from '@attest/executor';
 import { z } from 'zod';
 
+import type { CloudCredentialSource } from './credentials.js';
+
 import { LocalError } from '../errors/local-error.js';
 import { CloudRemoteError, decodeRemoteError, parseCloudEndpoint } from './protocol.js';
 
 type CloudClient = {
   readonly baseUrl: string;
-  readonly credentialSource?: 'session' | 'environment';
+  readonly credentialSource?: CloudCredentialSource;
   upload: <T>(
     path: string,
     options: { schema: z.ZodType<T>; body: string; signal?: AbortSignal },
@@ -22,7 +24,7 @@ type CloudClient = {
 type CloudClientOptions = {
   baseUrl: string;
   accessToken?: string;
-  credentialSource?: 'session' | 'environment';
+  credentialSource?: CloudCredentialSource;
   fetch?: typeof fetch;
 };
 
@@ -153,15 +155,17 @@ const createCloudClient = (options: CloudClientOptions): CloudClient => {
     }
 
     if (!response.ok) {
-      let outcome = decodeRemoteError(undefined);
+      let value: unknown;
 
       try {
-        outcome = decodeRemoteError(JSON.parse(await readResponseText(response)));
+        value = JSON.parse(await readResponseText(response));
       } catch {
         /* An upstream proxy may return a non-JSON failure. */
       }
 
-      if (outcome.kind === 'remote' && outcome.message !== undefined) {
+      const outcome = decodeRemoteError(value);
+
+      if (outcome.kind === 'known') {
         outcome.message = redactTransportText(
           outcome.message,
           options.accessToken === undefined ? [] : [options.accessToken],
