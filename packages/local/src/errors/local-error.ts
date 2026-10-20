@@ -4,6 +4,7 @@ type LocalErrorCode =
   | 'cancelled'
   | 'cloud_auth_required'
   | 'cloud_credentials_failed'
+  | 'cloud_credentials_invalid'
   | 'cloud_request_failed'
   | 'cloud_unavailable'
   | 'cli_missing_input'

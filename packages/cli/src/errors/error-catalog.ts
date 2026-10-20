@@ -15,6 +15,13 @@ const CLI_ERROR_DEFINITIONS = {
     exit_code: 2,
     repairs: ['Run attest cloud login --url <cloud-origin>.'],
   },
+  cloud_credentials_invalid: {
+    meaning: 'Cloud environment credentials are invalid.',
+    likely_causes: ['The cloud URL/token pair is incomplete or malformed.'],
+    retryable: false,
+    exit_code: 2,
+    repairs: ['Set both ATTEST_CLOUD_URL and ATTEST_CLOUD_TOKEN, or unset both.'],
+  },
   cloud_credentials_failed: {
     meaning: 'Private cloud credentials could not be saved.',
     likely_causes: ['The credential directory is not writable.'],

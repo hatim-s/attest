@@ -94,6 +94,10 @@ const runResultSchema = z.object({
   raw_expired: z.boolean(),
 });
 
+const projectTokenIdentitySchema = z.object({
+  token: z.object({ id: z.string().min(1), name: z.string(), project_id: z.string().min(1) }),
+});
+
 const emptyResponseSchema = z.unknown();
 
 const remoteErrorSchema = z.object({
@@ -143,6 +147,7 @@ const decodeRemoteError = (value: unknown): RemoteErrorOutcome => {
 };
 
 export {
+  projectTokenIdentitySchema,
   parseCloudEndpoint,
   bearerTokenSchema,
   deviceSchema,

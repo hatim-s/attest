@@ -6,6 +6,7 @@ import { CloudRemoteError, decodeRemoteError, parseCloudEndpoint } from './proto
 
 type CloudClient = {
   readonly baseUrl: string;
+  readonly credentialSource?: 'session' | 'environment';
   request: <T>(
     method: string,
     path: string,
@@ -13,7 +14,12 @@ type CloudClient = {
   ) => Promise<T>;
 };
 
-type CloudClientOptions = { baseUrl: string; accessToken?: string; fetch?: typeof fetch };
+type CloudClientOptions = {
+  baseUrl: string;
+  accessToken?: string;
+  credentialSource?: 'session' | 'environment';
+  fetch?: typeof fetch;
+};
 
 /** Accepts encrypted endpoints and local development servers without embedded credentials. */
 const normalizeCloudUrl = (value: string): string => {
@@ -95,6 +101,7 @@ const createCloudClient = (options: CloudClientOptions): CloudClient => {
 
   return {
     baseUrl,
+    credentialSource: options.credentialSource,
     async request<T>(
       method: string,
       path: string,

@@ -8,6 +8,7 @@ import { LocalError } from '../errors/local-error.js';
 import { createCloudClient, type CloudClient } from './client.js';
 import {
   readCloudCredentials,
+  resolveCloudCredentials,
   removeCloudCredentials,
   writeCloudCredentials,
 } from './credentials.js';
@@ -117,9 +118,13 @@ const loginCloud = async (options: {
 
 /** Loads only credentials tied to the configured cloud origin. */
 const authenticatedCloudClient = async (credentialPath: string): Promise<CloudClient> => {
-  const credentials = await readCloudCredentials(credentialPath);
+  const credentials = await resolveCloudCredentials(credentialPath);
 
-  return createCloudClient({ baseUrl: credentials.baseUrl, accessToken: credentials.accessToken });
+  return createCloudClient({
+    baseUrl: credentials.baseUrl,
+    accessToken: credentials.accessToken,
+    credentialSource: credentials.source,
+  });
 };
 
 /** Revokes the server session before removing the local token. */
