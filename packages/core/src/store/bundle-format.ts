@@ -137,7 +137,7 @@ const parseLine = (line: string, index: number): BundleLine => {
  * Checks a bundle's structure, case count, and content hash before any record is exposed, so an
  * importer never persists part of a truncated or tampered bundle. Throws `CORRUPT_DATA` otherwise.
  */
-const verifyBundleLines = (lines: string[]): BundleLine[] => {
+const verifyBundleLines = (lines: string[]) => {
   if (lines.length === 0) throw corruptBundle('Run bundle is empty.');
   const records = lines.map(parseLine);
   const [header, ...body] = records;
@@ -149,6 +149,8 @@ const verifyBundleLines = (lines: string[]): BundleLine[] => {
   const footer = body.pop();
 
   if (footer?.type !== 'bundle_footer') throw corruptBundle('Run bundle is missing its footer.');
+
+  const cases: CaseRecord[] = [];
 
   for (const [index, record] of body.entries()) {
     if (record.type === 'bundle_footer') {
@@ -162,6 +164,8 @@ const verifyBundleLines = (lines: string[]): BundleLine[] => {
     if (record.case.runId !== header.run.id) {
       throw corruptBundle(`Run bundle case line ${index + 2} is malformed.`);
     }
+
+    cases.push(record.case);
   }
 
   if (footer.case_count !== body.length) {
@@ -176,7 +180,7 @@ const verifyBundleLines = (lines: string[]): BundleLine[] => {
     throw corruptBundle('Run bundle footer content hash does not match its contents.');
   }
 
-  return records;
+  return { run: header.run, cases, footer };
 };
 
 export {
