@@ -117,7 +117,7 @@ const lineFailure = (error: z.ZodError, lineNumber: number): string => {
   }
 };
 
-/** Parses one NDJSON line with bundle schemas and reports its zero-based position on failure. */
+/** Parses one NDJSON record, converting its zero-based index to a line number in errors. */
 const parseBundleLine = (line: string, index: number): BundleLine => {
   let json: unknown;
 
@@ -135,7 +135,7 @@ const parseBundleLine = (line: string, index: number): BundleLine => {
 };
 
 /**
- * Checks a bundle's structure, case count, and content hash before any record is exposed, so an
+ * Checks bundle structure, unique case identities, case count, and content hash, so an
  * importer never persists part of a truncated or tampered bundle. Throws `CORRUPT_DATA` otherwise.
  */
 const verifyBundleLines = (lines: string[]) => {
@@ -152,6 +152,8 @@ const verifyBundleLines = (lines: string[]) => {
   if (footer?.type !== 'bundle_footer') throw corruptBundle('Run bundle is missing its footer.');
 
   const cases: CaseRecord[] = [];
+  const identities = new Set<string>();
+  const rowIds = new Set<string>();
 
   for (const [index, record] of body.entries()) {
     if (record.type === 'bundle_footer') {
@@ -166,6 +168,20 @@ const verifyBundleLines = (lines: string[]) => {
       throw corruptBundle(`Run bundle case line ${index + 2} is malformed.`);
     }
 
+    const identity = JSON.stringify([record.case.suiteName, record.case.caseId]);
+
+    if (identities.has(identity)) {
+      throw corruptBundle(`Run bundle contains duplicate case ${identity}.`);
+    }
+
+    if (rowIds.has(record.case.rowId)) {
+      throw corruptBundle(
+        `Run bundle contains duplicate rowId ${JSON.stringify(record.case.rowId)}.`,
+      );
+    }
+
+    identities.add(identity);
+    rowIds.add(record.case.rowId);
     cases.push(record.case);
   }
 
