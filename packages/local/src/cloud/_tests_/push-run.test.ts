@@ -132,25 +132,33 @@ it('uploads the exact bundle of the newest finished run and leaves the store unc
 });
 
 it.each([
-  [409, 'run_conflict'],
-  [422, 'run_not_finished'],
-] as const)('preserves upload failure %s as a closed local error', async (status, code) => {
-  const client = createCloudClient({
-    baseUrl: 'https://cloud.test',
-    fetch: () =>
-      Promise.resolve(
-        Response.json({ error: { code, message: 'Upload rejected by server.' } }, { status }),
-      ),
-  });
+  [409, 'run_conflict', 'session-secret'],
+  [409, 'run_conflict', 'atp_project-secret'],
+  [422, 'run_not_finished', 'session-secret'],
+] as const)(
+  'preserves upload failure %s as a closed local error',
+  async (status, code, accessToken) => {
+    const client = createCloudClient({
+      baseUrl: 'https://cloud.test',
+      accessToken,
+      fetch: () =>
+        Promise.resolve(
+          Response.json(
+            { error: { code, message: `Upload rejected for Bearer ${accessToken}.` } },
+            { status },
+          ),
+        ),
+    });
 
-  await expect(
-    client.upload('/v1/projects/p/runs/upload', {
-      body: 'bundle',
-      schema: (await import('zod')).z.unknown(),
-    }),
-  ).rejects.toMatchObject({
-    code,
-    message: 'Upload rejected by server.',
-    details: { status, remote_code: code },
-  });
-});
+    await expect(
+      client.upload('/v1/projects/p/runs/upload', {
+        body: 'bundle',
+        schema: (await import('zod')).z.unknown(),
+      }),
+    ).rejects.toMatchObject({
+      code,
+      message: 'Upload rejected for Bearer [REDACTED].',
+      details: { status, remote_code: code },
+    });
+  },
+);

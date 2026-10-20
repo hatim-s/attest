@@ -1,4 +1,5 @@
 import type { JsonValue } from '@attest/contracts';
+import { redactTransportText } from '@attest/executor';
 import { z } from 'zod';
 
 import { LocalError } from '../errors/local-error.js';
@@ -158,6 +159,13 @@ const createCloudClient = (options: CloudClientOptions): CloudClient => {
         outcome = decodeRemoteError(JSON.parse(await readResponseText(response)));
       } catch {
         /* An upstream proxy may return a non-JSON failure. */
+      }
+
+      if (outcome.kind === 'remote' && outcome.message !== undefined) {
+        outcome.message = redactTransportText(
+          outcome.message,
+          options.accessToken === undefined ? [] : [options.accessToken],
+        );
       }
 
       throw new CloudRemoteError(response.status, outcome);
