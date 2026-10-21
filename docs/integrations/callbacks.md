@@ -27,29 +27,33 @@ const server = createServer(async (request, response) => {
   response.writeHead(202).end();
 
   setTimeout(async () => {
-    await fetch(invocation.callback.url, {
-      method: 'POST',
-      headers: {
-        authorization: `Bearer ${invocation.callback.token}`,
-        'content-type': 'application/json',
-      },
-      body: JSON.stringify({
-        protocol: 'attest.agent-completion',
-        run_id: invocation.run_id,
-        case_id: invocation.case_id,
-        output: 'Wrote src/answer.ts',
-        artifacts: [
-          {
-            kind: 'inline',
-            path: 'src/answer.ts',
-            media_type: 'text/typescript',
-            encoding: 'utf8',
-            content: 'export const answer = 42;\n',
-          },
-          { kind: 'reference', path: 'notes.md', id: 'notes-1' },
-        ],
-      }),
-    });
+    try {
+      await fetch(invocation.callback.url, {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${invocation.callback.token}`,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          protocol: 'attest.agent-completion',
+          run_id: invocation.run_id,
+          case_id: invocation.case_id,
+          output: 'Wrote src/answer.ts',
+          artifacts: [
+            {
+              kind: 'inline',
+              path: 'src/answer.ts',
+              media_type: 'text/typescript',
+              encoding: 'utf8',
+              content: 'export const answer = 42;\n',
+            },
+            { kind: 'reference', path: 'notes.md', id: 'notes-1' },
+          ],
+        }),
+      });
+    } catch (error) {
+      console.error('Completion delivery failed:', error);
+    }
   }, 1000);
 });
 
@@ -79,6 +83,10 @@ node agent-server.mjs &
 attest agent test async-coder --input '"write answer.ts"' --output json
 kill %1
 ```
+
+The example reports a failed completion post without stopping the agent server. A cancelled
+or timed-out evaluation may already have closed its callback receiver. For a production agent,
+retry network errors and `5xx` as described below.
 
 ## Author a callback agent from flags
 
