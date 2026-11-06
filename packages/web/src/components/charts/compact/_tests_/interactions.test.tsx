@@ -270,28 +270,10 @@ it('dense 30-run nearest-point hover works and inspection ends on controlled cha
   await settle(() => hotspot.dispatchEvent(new MouseEvent('mouseover', { bubbles: true })));
   expect(container.querySelector('.attest-chart-readout')?.textContent).toContain('Run id12');
   expect(hotspot.getAttribute('href')).toBe('#id12');
-  const navigate = vi.spyOn(globalThis.location, 'assign').mockImplementation(() => {});
-  const modified = new MouseEvent('click', { bubbles: true, cancelable: true, metaKey: true });
-  await settle(() => hotspot.dispatchEvent(modified));
-  expect(modified.defaultPrevented).toBe(false);
-  expect(navigate).not.toHaveBeenCalled();
-
-  for (const options of [{ ctrlKey: true }, { button: 1 }]) {
-    const event = new MouseEvent('click', { bubbles: true, cancelable: true, ...options });
-    await settle(() => hotspot.dispatchEvent(event));
-    expect(event.defaultPrevented).toBe(false);
-  }
-
-  await settle(() =>
-    svg.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, clientX: 180, clientY: 180 })),
-  );
   await settle(() => hotspot.dispatchEvent(new MouseEvent('mouseout', { bubbles: true })));
-  expect(container.querySelector('svg > a')).toBeNull();
+  expect(container.querySelectorAll('svg a')).toHaveLength(runs.length);
+  expect(hotspot.querySelector('.attest-chart-hit')?.getAttribute('d')).toMatch(/^M/);
   expect(container.querySelector('svg a[href="#id12"]')).toBe(hotspot);
-  await settle(() =>
-    svg.dispatchEvent(new MouseEvent('click', { bubbles: true, clientX: 180, clientY: 180 })),
-  );
-  expect(navigate).not.toHaveBeenCalled();
   await settle(() => svg.dispatchEvent(new MouseEvent('mouseout', { bubbles: true })));
   const select = container.querySelector('select')!;
   await settle(() => {
@@ -664,5 +646,156 @@ it('dense nonmouse taps use bounded day identity without mousemove and reject dr
   await pointer('pointerdown', 49, 100, 'pen');
   await pointer('pointerup', 49, 100, 'pen');
   expect(selected).toHaveBeenCalledTimes(2);
+  await settle(() => mounted.unmount());
+});
+
+it('moves focus to the staged trend action before pointer activation without changing its destination', async () => {
+  const mounted = root();
+  await settle(() =>
+    mounted.render(
+      <PassRateTrend
+        runs={[a, b, c]}
+        axis="run"
+        utcOffsetMinutes={0}
+        onAxisChange={() => {}}
+        runHref={({ id }) => `#${id}`}
+        label="Trend"
+      />,
+    ),
+  );
+  const select = container.querySelector('select')!;
+  await settle(() => {
+    select.focus();
+    select.value = 'a';
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+  const action = container.querySelector<HTMLAnchorElement>('.attest-chart-action')!;
+
+  const down = new PointerEvent('pointerdown', {
+    bubbles: true,
+    cancelable: true,
+    button: 0,
+    pointerType: 'touch',
+  });
+
+  await settle(() => action.dispatchEvent(down));
+  // Cancellation prevents the browser's click-focus default from blurring the chooser to body.
+  expect(down.defaultPrevented).toBe(true);
+  expect(document.activeElement).toBe(action);
+  expect(action.getAttribute('href')).toBe('#a');
+  await settle(() => action.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+  expect(action.getAttribute('href')).toBe('#a');
+  await settle(() => action.blur());
+  expect(action.getAttribute('href')).toBe('#c');
+  await settle(() => mounted.unmount());
+});
+
+it('commits the inspected day without relying on browser click-focus behavior', async () => {
+  const mounted = root();
+  const selected = vi.fn();
+  await settle(() =>
+    mounted.render(
+      <DailyActivity
+        days={[{ day: '2026-11-01', runCount: 1, passed: 1, failed: 0, errored: 0, skipped: 0 }]}
+        window={{ from: '2026-11-01', to: '2026-11-28', utcOffsetMinutes: 0 }}
+        onSelectDay={selected}
+      />,
+    ),
+  );
+  const select = container.querySelector('select')!;
+  await settle(() => {
+    select.focus();
+    select.value = '2026-11-01';
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+  const action = container.querySelector<HTMLButtonElement>('.attest-chart-action')!;
+  const down = new MouseEvent('mousedown', { bubbles: true, cancelable: true, button: 0 });
+  await settle(() => action.dispatchEvent(down));
+  expect(down.defaultPrevented).toBe(true);
+  expect(document.activeElement).toBe(action);
+  await settle(() => action.click());
+  expect(selected).toHaveBeenCalledExactlyOnceWith('2026-11-01');
+  await settle(() => mounted.unmount());
+});
+
+it.each(['chooser', 'action'])(
+  'returns owned daily %s focus to the inspected mark when density decreases',
+  async (owner) => {
+    const mounted = root();
+    let width = 375;
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(() =>
+      DOMRect.fromRect({ width }),
+    );
+    await settle(() =>
+      mounted.render(
+        <DailyActivity
+          days={[
+            { day: '2026-11-01', runCount: 1, passed: 1, failed: 0, errored: 0, skipped: 0 },
+            { day: '2026-11-02', runCount: 1, passed: 1, failed: 0, errored: 0, skipped: 0 },
+          ]}
+          window={{ from: '2026-11-01', to: '2026-11-28', utcOffsetMinutes: 0 }}
+          onSelectDay={() => {}}
+        />,
+      ),
+    );
+    const select = container.querySelector('select')!;
+    await settle(() => {
+      select.focus();
+      select.value = '2026-11-02';
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+
+    if (owner === 'action')
+      await settle(() =>
+        container.querySelector<HTMLButtonElement>('.attest-chart-action')!.focus(),
+      );
+    width = 1000;
+    await settle(() => resize());
+    expect(document.activeElement?.getAttribute('aria-label')).toContain('2026-11-02');
+    expect(document.activeElement?.hasAttribute('data-chart-mark')).toBe(true);
+    width = 375;
+    await settle(() => resize());
+    expect(document.activeElement).toBe(container.querySelector('select'));
+    const external = document.createElement('button');
+    document.body.append(external);
+    await settle(() => external.focus());
+    width = 1000;
+    await settle(() => resize());
+    expect(document.activeElement).toBe(external);
+    external.remove();
+    await settle(() => mounted.unmount());
+  },
+);
+
+it('explains the missing current rate without denying an earlier complete slice', async () => {
+  const mounted = root();
+
+  const incomplete: TrendRun = {
+    id: 'pending',
+    startedAt: 400,
+    state: 'running',
+    runStatus: 'running',
+    counts,
+  };
+
+  await settle(() =>
+    mounted.render(
+      <PassRateTrend
+        runs={[a, incomplete]}
+        selectedRunId="pending"
+        axis="run"
+        utcOffsetMinutes={0}
+        onAxisChange={() => {}}
+        runHref={({ id }) => `#${id}`}
+        label="Trend"
+      />,
+    ),
+  );
+  expect(container.querySelector('.attest-chart-readout')?.textContent).toContain(
+    'No pass rate for this slice',
+  );
+  expect(container.querySelector('.attest-chart-readout')?.textContent).not.toContain(
+    'No earlier complete slice',
+  );
   await settle(() => mounted.unmount());
 });

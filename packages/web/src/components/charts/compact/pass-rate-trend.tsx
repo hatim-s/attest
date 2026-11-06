@@ -4,6 +4,7 @@ import { moveChartFocus } from './chart-keyboard.js';
 import { prepareTrend, type TrendAxis, type TrendRun } from './trend-model.js';
 import {
   useChartWidth,
+  focusChartAction,
   useDenseFocus,
   nativeHitRegions,
   resolveActive,
@@ -81,37 +82,44 @@ function PassRateTrend({
   const minimum = Math.min(0.5, ...completed.map(({ rate }) => rate));
   const y = (rate: number) => 18 + ((1 - rate) / (1 - minimum)) * 150;
 
-  const markY = (point: (typeof points)[number]) => (point.rate === null ? 198 : y(point.rate));
   const hitId = useId();
 
-  const hitRegions = useMemo(
+  const centers = useMemo(
     () =>
-      nativeHitRegions(
-        points.map((point) => ({
-          x: 44 + point.x * (right - 44),
-          y: point.rate === null ? 198 : 18 + ((1 - point.rate) / (1 - minimum)) * 150,
-        })),
-      ),
+      points.map((point) => ({
+        x: 44 + point.x * (right - 44),
+        y: point.rate === null ? 198 : 18 + ((1 - point.rate) / (1 - minimum)) * 150,
+      })),
     [points, right, minimum],
   );
+
+  const hitRegions = useMemo(() => nativeHitRegions(centers), [centers]);
 
   const path = completed
     .map((point, index) => `${index ? 'L' : 'M'}${x(point.x)},${y(point.rate)}`)
     .join(' ');
 
   // Density depends only on data and width; native links keep the same DOM identity.
-  const dense = points.some((point, index) =>
-    points
+  const dense = centers.some((center, index) =>
+    centers
       .slice(0, index)
-      .some(
-        (other) =>
-          Math.abs(x(point.x) - x(other.x)) < 24 &&
-          Math.abs(
-            (point.rate === null ? 198 : y(point.rate)) -
-              (other.rate === null ? 198 : y(other.rate)),
-          ) < 24,
-      ),
+      .some((other) => Math.abs(center.x - other.x) < 24 && Math.abs(center.y - other.y) < 24),
   );
+
+  const timeLabel = active
+    ? `${calendarTime(active.run.startedAt, utcOffsetMinutes)} ${timezoneLabel(utcOffsetMinutes)}. ${active.run.runStatus}.`
+    : '';
+
+  const comparisonLabel =
+    !active || active.rate === null
+      ? 'No pass rate for this slice; comparison needs a complete slice.'
+      : active.comparison
+        ? `${active.comparison.selectionChanged ? 'Selection counts differ. ' : ''}${active.comparison.points > 0 ? '+' : ''}${active.comparison.points.toFixed(1)} pp versus prior complete slice.`
+        : 'No earlier complete slice for comparison.';
+
+  const countLabel = active
+    ? `${active.run.counts.recorded}/${active.run.counts.planned ?? 'unknown'} recorded/planned. ${active.run.counts.passed} pass, ${active.run.counts.failed} fail, ${active.run.counts.errored} error, ${active.run.counts.skipped} skipped.`
+    : '';
 
   useDenseFocus(dense, ref);
 
@@ -136,31 +144,16 @@ function PassRateTrend({
         {active ? (
           <>
             <strong>{active.rate === null ? active.run.state : percent(active.rate)}</strong>
-            <span>
-              {calendarTime(active.run.startedAt, utcOffsetMinutes)}{' '}
-              {timezoneLabel(utcOffsetMinutes)}. {active.run.runStatus}.
-            </span>
+            <span title={timeLabel}>{timeLabel}</span>
             <span
+              title={comparisonLabel}
               className={
                 active.comparison && active.comparison.points < 0 ? 'attest-chart-decline' : ''
               }
             >
-              {active.comparison ? (
-                <>
-                  {active.comparison.selectionChanged ? 'Selection counts differ. ' : ''}
-                  {active.comparison.points > 0 ? '+' : ''}
-                  {active.comparison.points.toFixed(1)} pp versus prior complete slice.
-                </>
-              ) : (
-                'No earlier complete slice for comparison.'
-              )}
+              {comparisonLabel}
             </span>
-            <span>
-              {active.run.counts.passed} pass, {active.run.counts.failed} fail,{' '}
-              {active.run.counts.errored} error, {active.run.counts.skipped} skipped.{' '}
-              {active.run.counts.recorded}/{active.run.counts.planned ?? 'unknown'}{' '}
-              recorded/planned.
-            </span>
+            <span title={countLabel}>{countLabel}</span>
             <span title={runName(active.run)}>Run {runName(active.run)}</span>
           </>
         ) : (
@@ -196,6 +189,8 @@ function PassRateTrend({
               className="attest-chart-action"
               href={runHref(action.run)}
               title={`Open run ${action.run.id}`}
+              onPointerDown={focusChartAction}
+              onMouseDown={focusChartAction}
               onFocus={() => inspection.inspect(action.run.id)}
             >
               Open run {action.run.id}
@@ -226,8 +221,7 @@ function PassRateTrend({
         <path className="attest-chart-line" d={path} />
         <line className="attest-chart-grid" x1="44" x2={right} y1="198" y2="198" />
         {points.map((point, index) => {
-          const cx = x(point.x),
-            cy = markY(point);
+          const { x: cx, y: cy } = centers[index]!;
 
           const decline = point.comparison !== null && point.comparison.points < 0;
 

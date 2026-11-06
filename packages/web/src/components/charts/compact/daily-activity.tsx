@@ -1,8 +1,9 @@
-import { useMemo, useRef, useState, type MouseEvent } from 'react';
+import { useCallback, useLayoutEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
 import { moveChartFocus } from './chart-keyboard.js';
 import { prepareActivity, type ActivityDay, type ActivityWindow } from './daily-model.js';
 import {
   useChartWidth,
+  focusChartAction,
   useDenseFocus,
   resolveActive,
   timezoneLabel,
@@ -20,7 +21,7 @@ type DailyActivityProps = {
   label?: string;
 };
 
-/** Hosts key this component by project/source/eval context.
+/** Hosts key this component by project/source/calendar-window/filter context.
  * Selecting a real calendar day lets the caller load its bounded run list.
  * The chooser stages a day; Select day commits it through onSelectDay. */
 function DailyActivity({
@@ -78,6 +79,29 @@ function DailyActivity({
   };
 
   const actionDay = resolveActive(ordered, (day) => day.day, [inspection.id, selectedDay]);
+  const departingActions = useRef(false);
+
+  const actionsRef = useCallback((node: HTMLDivElement | null) => {
+    if (!node) return;
+
+    // React detaches this ref before removing the chooser, while its focused child still exists.
+    return () => {
+      departingActions.current = node.contains(document.activeElement);
+    };
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!dense && departingActions.current && document.activeElement === document.body) {
+      const marks = Array.from(
+        ref.current?.querySelectorAll<SVGElement>('[data-chart-mark]') ?? [],
+      );
+
+      const target = marks.find((mark) => mark.dataset.day === actionDay?.day) ?? marks[0];
+      target?.focus({ preventScroll: true });
+    }
+
+    departingActions.current = false;
+  }, [dense, actionDay, ref]);
 
   const nearest = (event: MouseEvent<SVGSVGElement>) => {
     const pointer = plotPointer(event, chartWidth, 220);
@@ -105,7 +129,7 @@ function DailyActivity({
         </span>
       </div>
       {dense && (
-        <div className="attest-chart-actions" onBlur={inspection.onBlur}>
+        <div ref={actionsRef} className="attest-chart-actions" onBlur={inspection.onBlur}>
           <label className="attest-chart-chooser">
             Inspect day{' '}
             <select
@@ -132,6 +156,8 @@ function DailyActivity({
           <button
             className="attest-chart-action"
             type="button"
+            onPointerDown={focusChartAction}
+            onMouseDown={focusChartAction}
             aria-disabled={!actionDay || actionDay.runCount === 0 || actionDay.day === selectedDay}
             onFocus={() => {
               if (actionDay) inspection.inspect(actionDay.day);
@@ -239,6 +265,7 @@ function DailyActivity({
                 role={inert ? undefined : 'button'}
                 tabIndex={inert ? undefined : 0}
                 data-chart-mark={inert ? undefined : ''}
+                data-day={day.day}
                 aria-pressed={inert ? undefined : selectedDay === day.day}
                 className={`${dense ? 'attest-chart-dense-mark' : day.runCount > 0 ? 'attest-chart-mark' : 'attest-chart-static-mark'} ${active === day ? 'is-active' : ''}`}
                 aria-label={`${day.day}: ${day.runCount} ${day.runCount === 1 ? 'run' : 'runs'}, ${day.passed} passed, ${day.failed} failed, ${day.errored} errored, ${day.skipped} skipped.${day.runCount > 0 ? ' Select day.' : ' No runs to select.'}`}

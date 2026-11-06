@@ -4,6 +4,7 @@ import {
   useState,
   type FocusEvent,
   type MouseEvent,
+  type PointerEvent,
   type RefObject,
 } from 'react';
 
@@ -85,6 +86,14 @@ function useInspection(
   };
 
   return { id, inspect, onBlur };
+}
+
+/** Focus before browser click defaults can blur a chooser without identifying the action.
+ * Cancel only the press default; the following native link click remains untouched. */
+function focusChartAction(event: MouseEvent<HTMLElement> | PointerEvent<HTMLElement>) {
+  if (event.button !== 0) return;
+  event.preventDefault();
+  event.currentTarget.focus({ preventScroll: true });
 }
 
 /** Keep owned mark focus reachable when resizing replaces sparse tab stops with a chooser. */
@@ -171,6 +180,7 @@ function calendarTime(timestamp: number, utcOffsetMinutes: number) {
 
 export {
   useChartWidth,
+  focusChartAction,
   useDenseFocus,
   nativeHitRegions,
   resolveActive,

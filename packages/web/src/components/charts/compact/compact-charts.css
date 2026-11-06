@@ -34,22 +34,26 @@
   color: var(--on-ink, var(--bg, Canvas));
 }
 .attest-chart-readout {
-  height: 140px;
+  height: 186px;
   box-sizing: border-box;
   flex-shrink: 0;
   padding: 8px 0;
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-rows: 32px repeat(3, 36px) 18px;
   gap: 3px;
   font-size: 12px;
   overflow: hidden;
 }
 .attest-chart-readout > * {
-  min-height: 18px;
-  flex-shrink: 0;
+  min-width: 0;
   line-height: 18px;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
-.attest-chart-readout > [title] {
+.attest-chart-readout > :nth-child(5) {
+  display: block;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -122,7 +126,8 @@
   cursor: pointer;
 }
 .attest-chart-mark.is-active .attest-chart-hit,
-.attest-chart-dense-mark.is-active .attest-chart-hit {
+.attest-chart-dense-mark.is-active .attest-chart-hit,
+.attest-chart-native-mark.is-active .attest-chart-hit {
   fill: var(--chart-ink);
   fill-opacity: 0.055;
 }
@@ -159,7 +164,12 @@
   pointer-events: none;
 }
 .attest-chart-shortfall,
-.attest-chart-halo {
+.attest-chart-halo,
+.attest-chart-down-line,
+.attest-chart-line,
+.attest-chart-area,
+.attest-chart-grid,
+.attest-compact-chart svg text {
   pointer-events: none;
 }
 

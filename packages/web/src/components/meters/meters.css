@@ -89,6 +89,8 @@
     --meter-fail: var(--fail, #ff6a1a);
   }
   @media (prefers-color-scheme: dark) {
+    :where(:root:not([data-theme]), :root[data-theme='system'])
+      :is(.attest-meter, .attest-case-strip),
     .attest-compact[data-theme='system'] :is(.attest-meter, .attest-case-strip) {
       --meter-fail: var(--fail, #ff6a1a);
     }
