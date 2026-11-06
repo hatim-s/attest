@@ -27,4 +27,4 @@ const Tags = ({ names }: { names: readonly string[] }) => (
   </span>
 );
 
-export { Tag, Tags, tagHue };
+export { Tag, Tags };

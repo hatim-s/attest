@@ -16,8 +16,12 @@ type NavigationProps = {
   source: ShellSource;
   sources: readonly ShellSource[];
   projects: NavigationData<ShellProject>;
-  /** State for the expanded project only. Use unavailable on the project index. */
-  evals: NavigationData<ShellEval>;
+  /** Retained query data must carry its owner; null when no project is expanded. */
+  evals: {
+    sourceId: string;
+    projectKey: string;
+    state: NavigationData<ShellEval>;
+  } | null;
 
   hrefFor: (target: ShellTarget) => string;
   current: ShellTarget;
@@ -58,12 +62,15 @@ const ShellNavigation = ({
       return data.items.length === 0 ? <p className="attest-nav-note">No {noun} yet</p> : null;
 
     return (
-      <p className="attest-nav-note" role={data.status === 'loading' ? 'status' : undefined}>
+      <p className="attest-nav-note" role="status">
         {data.status === 'loading' ? `Loading ${noun}...` : data.message}
         {data.status === 'error' && data.retry && (
-          <button type="button" onClick={data.retry}>
-            Retry {noun}
-          </button>
+          <>
+            {' '}
+            <button type="button" onClick={data.retry}>
+              Retry {noun}
+            </button>
+          </>
         )}
       </p>
     );
@@ -80,12 +87,19 @@ const ShellNavigation = ({
             projects.items.map((project) => {
               const open = current.kind !== 'projects' && current.projectKey === project.key;
 
+              const projectEvals =
+                evals?.sourceId === source.id && evals.projectKey === project.key
+                  ? evals.state
+                  : undefined;
+
+              const evalNote = projectEvals && dataNote(projectEvals, 'evals');
+
               return (
                 <li key={project.key}>
                   {item(
                     { kind: 'project', sourceId: source.id, projectKey: project.key },
                     project.name,
-                    open,
+                    open && current.kind !== 'project',
                   )}
                   {open && (
                     <ul>
@@ -96,9 +110,9 @@ const ShellNavigation = ({
                           current.kind === 'project-run' || current.kind === 'project-run-case',
                         )}
                       </li>
-                      <li>{dataNote(evals, 'evals')}</li>
-                      {evals.status === 'ready' &&
-                        evals.items.map((evaluation) => {
+                      {evalNote && <li>{evalNote}</li>}
+                      {projectEvals?.status === 'ready' &&
+                        projectEvals.items.map((evaluation) => {
                           const selected =
                             !isProjectWide(current) &&
                             'evalId' in current &&

@@ -123,13 +123,6 @@ const recordableIdentity = (target: ShellTarget): RecentTarget | undefined => {
   return parsed.ok ? parsed.value : undefined;
 };
 
-/** Deep pages only, newest first, deduplicated across their full scoped identity. */
-const rememberTarget = (recents: readonly RecentTarget[], target: ShellTarget): RecentTarget[] => {
-  const identity = recordableIdentity(target);
-
-  return identity ? mergeRecents([identity], recents) : [...recents];
-};
-
 /** First occurrence wins, preserving newest storage visits before older session history. */
 const mergeRecents = (...groups: readonly (readonly RecentTarget[])[]): RecentTarget[] => {
   const entries = new Map<string, RecentTarget>();
@@ -155,14 +148,6 @@ const persistRecents = (
   } catch {
     // Privacy restrictions and quota failures must not discard session history.
   }
-};
-
-/** Project caller-owned objects before validating this explicit write boundary. */
-const writeRecents = (
-  storage: PreferenceStorage | undefined,
-  recents: readonly RecentTarget[],
-): void => {
-  persistRecents(storage, validatedRecents(recents.map(recentIdentity)));
 };
 
 /** Refresh shared history immediately before recording, outside React state updaters. */
@@ -217,8 +202,6 @@ export {
   readTheme,
   writeTheme,
   readRecents,
-  writeRecents,
-  rememberTarget,
   contextualRecents,
   type ThemeMode,
   type PreferenceStorage,

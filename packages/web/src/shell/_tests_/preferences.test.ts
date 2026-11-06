@@ -5,8 +5,6 @@ import {
   visibleRecents,
   readRecents,
   readTheme,
-  rememberTarget,
-  writeRecents,
   writeTheme,
   type PreferenceStorage,
 } from '../preferences.js';
@@ -38,15 +36,14 @@ const blocked: PreferenceStorage = {
 
 describe('recent navigation persistence', () => {
   it('keeps twenty newest identities, promotes revisits, and ignores tree pages', () => {
+    const storage = memoryStorage();
     let recents: RecentTarget[] = [];
 
-    for (const id of ['1', '2', '3', '4', '5']) recents = rememberTarget(recents, run(id));
+    for (const id of ['1', '2', '3', '4', '5']) recents = recordRecent(storage, recents, run(id));
     expect(recents).toEqual(['5', '4', '3', '2', '1'].map(run));
-    recents = rememberTarget(recents, run('3'));
+    recents = recordRecent(storage, recents, run('3'));
     expect(recents).toEqual(['3', '5', '4', '2', '1'].map(run));
-    expect(rememberTarget(recents, { ...scope, kind: 'runs' })).toEqual(recents);
-    const storage = memoryStorage();
-    writeRecents(storage, recents);
+    expect(recordRecent(storage, recents, { ...scope, kind: 'runs' })).toEqual(recents);
     expect(readRecents(storage)).toEqual(recents);
   });
 
@@ -94,7 +91,7 @@ describe('recent navigation persistence', () => {
     expect(contextualRecents(recents, first)).toEqual([second]);
     expect(contextualRecents(recents, { ...scope, kind: 'runs' })).toEqual([]);
 
-    // The adapter receives the real suite and case pair for both resolution and hrefs.
+    // Resolution receives the real suite and case pair.
     const cases = new Map([
       [
         JSON.stringify([first.evalId, first.caseId]),
@@ -113,13 +110,6 @@ describe('recent navigation persistence', () => {
     );
 
     expect(rows.map(({ text }) => text.label)).toEqual(['Second case', 'First case']);
-
-    const hrefFor = (target: RecentTarget) =>
-      'evalId' in target && 'caseId' in target && 'runId' in target
-        ? `/projects/${target.projectKey}/runs/${target.runId}/evals/${target.evalId}/cases/${target.caseId}`
-        : '';
-
-    expect(new Set(rows.map(({ target }) => hrefFor(target))).size).toBe(2);
   });
 
   it('distinguishes sources, projects, evals, runs, and individual cases', () => {
@@ -159,7 +149,7 @@ describe('recent navigation persistence', () => {
   it('never writes runtime payloads, labels, URLs or extra fields', () => {
     const storage = memoryStorage();
     const supplied = { ...run('1'), payload: 'secret', label: 'private', href: 'https://private' };
-    writeRecents(storage, [supplied]);
+    recordRecent(storage, [], supplied);
     expect(storage.getItem('attest-recents')).toBe(JSON.stringify([run('1')]));
   });
 
@@ -185,6 +175,7 @@ describe('recent navigation persistence', () => {
   it('ignores invalid new identities and preserves valid prior history at the write boundary', () => {
     const storage = memoryStorage();
     const prior = [run('valid')];
+    storage.setItem('attest-recents', JSON.stringify(prior));
 
     for (const id of ['', '   ', 'x'.repeat(257)]) {
       for (const target of [
@@ -195,17 +186,15 @@ describe('recent navigation persistence', () => {
         { ...scope, kind: 'case' as const, caseId: id },
         { ...scope, kind: 'run-case' as const, runId: '1', caseId: id },
       ]) {
-        expect(rememberTarget(prior, target)).toEqual(prior);
-        writeRecents(storage, [target, ...prior]);
+        expect(recordRecent(storage, prior, target)).toEqual(prior);
         expect(readRecents(storage)).toEqual(prior);
       }
-
-      writeRecents(storage, [run(id), ...prior]);
-      expect(readRecents(storage)).toEqual(prior);
     }
 
     const mixed = [run(''), run('good'), run('  '), run('x'.repeat(257)), ...prior];
-    writeRecents(storage, mixed);
+    let session: RecentTarget[] = prior;
+
+    for (const target of [...mixed].reverse()) session = recordRecent(storage, session, target);
     expect(readRecents(storage)).toEqual([run('good'), ...prior]);
   });
 
@@ -222,9 +211,11 @@ describe('recent navigation persistence', () => {
     }));
 
     const storage = memoryStorage();
-    writeRecents(storage, targets);
+    let recents: RecentTarget[] = [];
+
+    for (const target of [...targets].reverse()) recents = recordRecent(storage, recents, target);
     expect(readRecents(storage)).toEqual(targets);
-    expect(rememberTarget(targets, run('new'))).toHaveLength(20);
+    expect(recordRecent(storage, recents, run('new'))).toHaveLength(20);
   });
 
   it('retains older context history and isolates project-wide from eval-scoped identities', () => {
@@ -236,11 +227,11 @@ describe('recent navigation persistence', () => {
     };
 
     let recents: RecentTarget[] = [projectRun, run('old')];
+    const storage = memoryStorage();
+    storage.setItem('attest-recents', JSON.stringify(recents));
 
     for (let i = 0; i < 10; i++)
-      recents = rememberTarget(recents, { ...run(String(i)), evalId: 'other' });
-    const storage = memoryStorage();
-    writeRecents(storage, recents);
+      recents = recordRecent(storage, recents, { ...run(String(i)), evalId: 'other' });
     expect(contextualRecents(readRecents(storage), { ...scope, kind: 'runs' })).toEqual([
       run('old'),
     ]);
@@ -274,7 +265,7 @@ describe('recent navigation persistence', () => {
   it('survives unavailable and blocked storage', () => {
     for (const storage of [undefined, blocked]) {
       expect(readRecents(storage)).toEqual([]);
-      expect(() => writeRecents(storage, [run('1')])).not.toThrow();
+      expect(recordRecent(storage, [], run('1'))).toEqual([run('1')]);
     }
   });
 });

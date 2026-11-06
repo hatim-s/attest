@@ -23,13 +23,14 @@ For reports use `kind: 'report', capabilities: { control: false }`. Local and cl
 capabilities use the existing `ApiCapabilities` contract. Source IDs must be stable,
 non-secret and account/workspace scoped when applicable. Never use a token or credential
 in an identity. `projects` is required `NavigationData<ShellProject>`, reusing `ProjectRecord.key/name`.
-`evals` is required `NavigationData<ShellEval>` for the expanded project only.
-Both use `{ status: 'loading' }`, `{ status: 'error', message, retry? }`,
+`evals` carries `{ sourceId, projectKey, state: NavigationData<ShellEval> }` for the
+expanded project, or `null` on the project index. The owner must come from the query that
+produced the data. The shell ignores mismatched owners during project or source changes.
+Both data states use `{ status: 'loading' }`, `{ status: 'error', message, retry? }`,
 `{ status: 'unavailable', message }` or `{ status: 'ready', items }`.
 An empty ready list means no records. Supply an honest capability/error message and only
 provide retry when supported. Terminal states stop the loading announcement. On the
-project index, use unavailable eval state; collapsed projects need no eval request.
-Replace eval state with loading immediately when switching the expanded project.
+project index, pass `null`; collapsed projects need no eval request.
 
 `current` is the committed router location adapted to `ShellTarget`. Object memoization is optional.
 `hrefFor(target)` supplies a real destination URL for each target. `onNavigate(target)` handles ordinary primary activation; modified and middle clicks use native anchors.
@@ -84,8 +85,7 @@ so the All runs branch stays selected and recents can include sibling evals. Eva
 contexts exclude project-wide targets. Never invent an eval ID for a project-wide run.
 `hrefFor` must encode all of these identities for project-run-case destinations;
 `resolveRecent` must resolve through the real suite/case pair, matching `RunSource.getCase`.
-Old project-run-case records without eval identity are discarded individually. No migration
-is needed for this browser history. Empty, whitespace-only and over-256-character IDs are rejected.
+Empty, whitespace-only and over-256-character IDs are rejected.
 
 The shell owns its `main`; route content must not add another main landmark. The header is
 sticky and uses the approved 14px base with 13px breadcrumbs. At narrow widths only the
