@@ -2,11 +2,26 @@ import { z } from 'zod';
 import type { ApiCapabilities } from '@attest/api/contract';
 import type { ProjectRecord } from '@attest/core/records';
 
-const identity = z.string().min(1).max(256);
+const identity = z
+  .string()
+  .min(1)
+  .max(256)
+  .refine((value) => value.trim().length > 0);
 
-const scope = { sourceId: identity, projectKey: identity, evalId: identity };
+const projectScope = { sourceId: identity, projectKey: identity };
+
+const scope = { ...projectScope, evalId: identity };
 
 const recentTargetSchema = z.discriminatedUnion('kind', [
+  z.object({ ...projectScope, kind: z.literal('project-run'), runId: identity }).strict(),
+  z
+    .object({
+      ...projectScope,
+      kind: z.literal('project-run-case'),
+      runId: identity,
+      caseId: identity,
+    })
+    .strict(),
   z.object({ ...scope, kind: z.literal('run'), runId: identity }).strict(),
   z.object({ ...scope, kind: z.literal('case'), caseId: identity }).strict(),
   z.object({ ...scope, kind: z.literal('run-case'), runId: identity, caseId: identity }).strict(),
@@ -16,7 +31,7 @@ type RecentTarget = z.infer<typeof recentTargetSchema>;
 
 type ShellTarget =
   | { kind: 'projects'; sourceId: string }
-  | { kind: 'project'; sourceId: string; projectKey: string }
+  | { kind: 'project' | 'project-runs'; sourceId: string; projectKey: string }
   | { kind: 'runs' | 'cases'; sourceId: string; projectKey: string; evalId: string }
   | RecentTarget;
 
@@ -31,7 +46,7 @@ type ShellSource = {
 
 type ShellEval = { id: string; name: string };
 
-type ShellProject = Pick<ProjectRecord, 'key' | 'name'> & { evals: readonly ShellEval[] };
+type ShellProject = Pick<ProjectRecord, 'key' | 'name'> & { evals?: readonly ShellEval[] };
 
 type ShellBreadcrumb = { label: string; target: ShellTarget };
 
@@ -43,10 +58,21 @@ const targetKey = (target: ShellTarget): string => {
     case 'projects':
       return JSON.stringify([target.kind, target.sourceId]);
     case 'project':
+    case 'project-runs':
       return JSON.stringify([target.kind, target.sourceId, target.projectKey]);
     case 'runs':
     case 'cases':
       return JSON.stringify([target.kind, target.sourceId, target.projectKey, target.evalId]);
+    case 'project-run':
+      return JSON.stringify([target.kind, target.sourceId, target.projectKey, target.runId]);
+    case 'project-run-case':
+      return JSON.stringify([
+        target.kind,
+        target.sourceId,
+        target.projectKey,
+        target.runId,
+        target.caseId,
+      ]);
     case 'run':
       return JSON.stringify([
         target.kind,

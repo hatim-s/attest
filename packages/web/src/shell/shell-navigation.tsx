@@ -1,3 +1,5 @@
+import { ShellLink } from './shell-link.js';
+import { visibleRecents } from './preferences.js';
 import {
   targetKey,
   type RecentLabel,
@@ -10,7 +12,9 @@ import {
 type NavigationProps = {
   source: ShellSource;
   sources: readonly ShellSource[];
-  projects: readonly ShellProject[];
+  /** Undefined while the source catalogue is loading. */
+  projects: readonly ShellProject[] | undefined;
+  hrefFor: (target: ShellTarget) => string;
   current: ShellTarget;
   recents: readonly RecentTarget[];
   resolveRecent: (target: RecentTarget) => RecentLabel | undefined;
@@ -26,26 +30,31 @@ const ShellNavigation = ({
   current,
   recents,
   resolveRecent,
+  hrefFor,
   onNavigate,
   onSourceChange,
 }: NavigationProps) => {
-  const item = (target: ShellTarget, label: string) => (
-    <button
-      type="button"
+  const item = (target: ShellTarget, label: string, inPath = false) => (
+    <ShellLink
+      target={target}
+      hrefFor={hrefFor}
+      onNavigate={onNavigate}
       className="attest-nav-item"
-      aria-current={targetKey(target) === targetKey(current) ? 'page' : undefined}
-      onClick={() => onNavigate(target)}
+      inPath={inPath}
+      current={targetKey(target) === targetKey(current)}
     >
       {label}
-    </button>
+    </ShellLink>
   );
+
+  const recentRows = visibleRecents(recents, resolveRecent);
 
   return (
     <>
       <nav className="attest-tree" aria-label="Projects">
         <ul>
           <li>{item({ kind: 'projects', sourceId: source.id }, 'All projects')}</li>
-          {projects.map((project) => {
+          {projects?.map((project) => {
             const open = current.kind !== 'projects' && current.projectKey === project.key;
 
             return (
@@ -53,12 +62,24 @@ const ShellNavigation = ({
                 {item(
                   { kind: 'project', sourceId: source.id, projectKey: project.key },
                   project.name,
+                  open,
                 )}
                 {open && (
                   <ul>
-                    {project.evals.map((evaluation) => {
-                      const selected =
-                        current.kind !== 'project' && current.evalId === evaluation.id;
+                    <li>
+                      {item(
+                        { kind: 'project-runs', sourceId: source.id, projectKey: project.key },
+                        'All runs',
+                        current.kind === 'project-run' || current.kind === 'project-run-case',
+                      )}
+                    </li>
+                    {project.evals === undefined && (
+                      <li className="attest-nav-note" role="status">
+                        Loading evals...
+                      </li>
+                    )}
+                    {project.evals?.map((evaluation) => {
+                      const selected = 'evalId' in current && current.evalId === evaluation.id;
 
                       const scope = {
                         sourceId: source.id,
@@ -68,24 +89,37 @@ const ShellNavigation = ({
 
                       return (
                         <li key={evaluation.id}>
-                          <button
-                            type="button"
+                          <ShellLink
+                            target={{ ...scope, kind: 'runs' }}
+                            hrefFor={hrefFor}
+                            onNavigate={onNavigate}
                             className="attest-nav-item"
-                            data-in-path={selected || undefined}
-                            onClick={() => onNavigate({ ...scope, kind: 'runs' })}
+                            inPath={selected}
                           >
                             {evaluation.name}
-                          </button>
+                          </ShellLink>
                           {selected && (
                             <ul>
-                              <li>{item({ ...scope, kind: 'runs' }, 'Runs')}</li>
-                              <li>{item({ ...scope, kind: 'cases' }, 'Test cases')}</li>
+                              <li>
+                                {item(
+                                  { ...scope, kind: 'runs' },
+                                  'Runs',
+                                  current.kind === 'run' || current.kind === 'run-case',
+                                )}
+                              </li>
+                              <li>
+                                {item(
+                                  { ...scope, kind: 'cases' },
+                                  'Test cases',
+                                  current.kind === 'case',
+                                )}
+                              </li>
                             </ul>
                           )}
                         </li>
                       );
                     })}
-                    {project.evals.length === 0 && (
+                    {project.evals?.length === 0 && (
                       <li className="attest-nav-note">No evals yet</li>
                     )}
                   </ul>
@@ -94,32 +128,32 @@ const ShellNavigation = ({
             );
           })}
         </ul>
-        {projects.length === 0 && <p className="attest-nav-note">No projects yet</p>}
+        {projects === undefined && (
+          <p className="attest-nav-note" role="status">
+            Loading projects...
+          </p>
+        )}
+        {projects?.length === 0 && <p className="attest-nav-note">No projects yet</p>}
       </nav>
       <section className="attest-recents" aria-label="Recent pages">
         <h2>Recent</h2>
         <ul>
-          {recents.map((target) => {
-            const text = resolveRecent(target);
-
-            return (
-              text && (
-                <li key={targetKey(target)}>
-                  <button
-                    type="button"
-                    className="attest-nav-item"
-                    title={text.context}
-                    aria-label={`${text.label}, ${text.context}`}
-                    onClick={() => onNavigate(target)}
-                  >
-                    {text.label}
-                  </button>
-                </li>
-              )
-            );
-          })}
+          {recentRows.map(({ target, text }) => (
+            <li key={targetKey(target)}>
+              <ShellLink
+                target={target}
+                hrefFor={hrefFor}
+                onNavigate={onNavigate}
+                className="attest-nav-item"
+                title={text.context}
+                label={`${text.label}, ${text.context}`}
+              >
+                {text.label}
+              </ShellLink>
+            </li>
+          ))}
         </ul>
-        {!recents.some((target) => resolveRecent(target)) && (
+        {recentRows.length === 0 && (
           <p className="attest-nav-note">Runs and cases you open show up here.</p>
         )}
       </section>

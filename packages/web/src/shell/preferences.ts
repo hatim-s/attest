@@ -4,6 +4,7 @@ import {
   recentTargetSchema,
   targetKey,
   type RecentTarget,
+  type RecentLabel,
   type ShellTarget,
 } from './navigation.js';
 
@@ -11,11 +12,16 @@ const RECENTS_KEY = 'attest-recents';
 
 const THEME_KEY = 'attest-theme';
 
-const RECENT_LIMIT = 4;
+const RECENT_STORAGE_LIMIT = 20;
+
+const RECENT_DISPLAY_LIMIT = 4;
+
+// Five 256-character identities may each serialize as six-character JSON escapes.
+const RECENT_BYTE_LIMIT = RECENT_STORAGE_LIMIT * (5 * 256 * 6 + 128);
 
 const themeSchema = z.enum(['system', 'light', 'dark']);
 
-const recentsSchema = z.array(recentTargetSchema).max(RECENT_LIMIT);
+const recentsSchema = z.array(recentTargetSchema).max(RECENT_STORAGE_LIMIT);
 
 type ThemeMode = z.infer<typeof themeSchema>;
 
@@ -55,7 +61,7 @@ const readRecents = (storage: PreferenceStorage | undefined): RecentTarget[] => 
   try {
     const raw = storage?.getItem(RECENTS_KEY);
 
-    if (!raw || raw.length > 8192) return [];
+    if (!raw || raw.length > RECENT_BYTE_LIMIT) return [];
     const candidate: unknown = JSON.parse(raw);
     const parsed = parseWithSchema(recentsSchema, candidate);
 
@@ -72,7 +78,14 @@ const readRecents = (storage: PreferenceStorage | undefined): RecentTarget[] => 
 
 /** Reconstruct records instead of serializing caller objects that may carry extra fields. */
 const recentIdentity = (target: RecentTarget): RecentTarget => {
-  const scope = { sourceId: target.sourceId, projectKey: target.projectKey, evalId: target.evalId };
+  const projectScope = { sourceId: target.sourceId, projectKey: target.projectKey };
+
+  if (target.kind === 'project-run')
+    return { ...projectScope, kind: target.kind, runId: target.runId };
+
+  if (target.kind === 'project-run-case')
+    return { ...projectScope, kind: target.kind, runId: target.runId, caseId: target.caseId };
+  const scope = { ...projectScope, evalId: target.evalId };
 
   switch (target.kind) {
     case 'run':
@@ -86,13 +99,15 @@ const recentIdentity = (target: RecentTarget): RecentTarget => {
 
 /** Deep pages only, newest first, deduplicated across their full scoped identity. */
 const rememberTarget = (recents: readonly RecentTarget[], target: ShellTarget): RecentTarget[] => {
-  if (target.kind !== 'run' && target.kind !== 'case' && target.kind !== 'run-case')
-    return [...recents];
-  const next = recentIdentity(target);
+  if (!('runId' in target) && target.kind !== 'case') return [...recents];
+  const parsed = parseWithSchema(recentTargetSchema, recentIdentity(target));
+
+  if (!parsed.ok) return [...recents];
+  const next = parsed.value;
 
   return [next, ...recents.filter((item) => targetKey(item) !== targetKey(next))].slice(
     0,
-    RECENT_LIMIT,
+    RECENT_STORAGE_LIMIT,
   );
 };
 
@@ -104,7 +119,19 @@ const writeRecents = (
   try {
     storage?.setItem(
       RECENTS_KEY,
-      JSON.stringify(recents.slice(0, RECENT_LIMIT).map(recentIdentity)),
+      JSON.stringify(
+        recents
+          .flatMap((target) => {
+            const parsed = parseWithSchema(recentTargetSchema, recentIdentity(target));
+
+            return parsed.ok ? [parsed.value] : [];
+          })
+          .filter(
+            (item, index, all) =>
+              all.findIndex((other) => targetKey(other) === targetKey(item)) === index,
+          )
+          .slice(0, RECENT_STORAGE_LIMIT),
+      ),
     );
   } catch {
     // Recents remain usable for this session when persistence is unavailable.
@@ -116,19 +143,33 @@ const contextualRecents = (
   recents: readonly RecentTarget[],
   current: ShellTarget,
 ): RecentTarget[] =>
+  recents.filter(
+    (item) =>
+      item.sourceId === current.sourceId &&
+      (current.kind === 'projects' || item.projectKey === current.projectKey) &&
+      (current.kind === 'projects' ||
+        current.kind === 'project' ||
+        current.kind === 'project-runs' ||
+        !('evalId' in current) ||
+        ('evalId' in item && item.evalId === current.evalId)) &&
+      targetKey(item) !== targetKey(current),
+  );
+
+/** Resolve availability before limiting rows so stale entries cannot hide useful history. */
+const visibleRecents = (
+  recents: readonly RecentTarget[],
+  resolve: (target: RecentTarget) => RecentLabel | undefined,
+) =>
   recents
-    .filter(
-      (item) =>
-        item.sourceId === current.sourceId &&
-        (current.kind === 'projects' || item.projectKey === current.projectKey) &&
-        (current.kind === 'projects' ||
-          current.kind === 'project' ||
-          item.evalId === current.evalId) &&
-        targetKey(item) !== targetKey(current),
-    )
-    .slice(0, RECENT_LIMIT);
+    .flatMap((target) => {
+      const text = resolve(target);
+
+      return text ? [{ target, text }] : [];
+    })
+    .slice(0, RECENT_DISPLAY_LIMIT);
 
 export {
+  visibleRecents,
   browserStorage,
   readTheme,
   writeTheme,

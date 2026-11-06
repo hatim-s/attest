@@ -1,4 +1,5 @@
-import { useCallback, useId, useState, type ReactNode } from 'react';
+import { ShellLink } from './shell-link.js';
+import { useCallback, useEffect, useEffectEvent, useId, useState, type ReactNode } from 'react';
 import { ShellNavigation, type NavigationProps } from './shell-navigation.js';
 import { MobileNavigation } from './mobile-navigation.js';
 import type { ShellBreadcrumb } from './navigation.js';
@@ -34,34 +35,39 @@ const CompactShell = ({ breadcrumbs, children, ...navigation }: CompactShellProp
     },
   };
 
-  return (
-    <div
-      className="attest-compact"
-      data-theme={theme}
-      onKeyDown={(event) => {
-        // Single-key shortcuts leave editors, modifiers and composition alone.
-        const editable =
-          event.target instanceof Element &&
-          event.target.closest(
-            'input, textarea, select, [contenteditable]:not([contenteditable="false"]), [role="textbox"], [role="combobox"]',
-          );
+  const shortcut = useEffectEvent((event: KeyboardEvent) => {
+    // Single-key shortcuts leave editors, modifiers and composition alone.
+    const editable =
+      event.target instanceof Element &&
+      event.target.closest(
+        'input, textarea, select, [contenteditable]:not([contenteditable="false"]), [role="textbox"], [role="combobox"]',
+      );
 
-        if (
-          !event.defaultPrevented &&
-          !event.repeat &&
-          !editable &&
-          !event.altKey &&
-          !event.ctrlKey &&
-          !event.metaKey &&
-          !event.shiftKey &&
-          !event.nativeEvent.isComposing &&
-          event.key === 't'
-        ) {
-          event.preventDefault();
-          cycleTheme();
-        }
-      }}
-    >
+    if (
+      !event.defaultPrevented &&
+      !event.repeat &&
+      !editable &&
+      !event.altKey &&
+      !event.ctrlKey &&
+      !event.metaKey &&
+      !event.shiftKey &&
+      !event.isComposing &&
+      event.key === 't'
+    ) {
+      event.preventDefault();
+      cycleTheme();
+    }
+  });
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => shortcut(event);
+    document.addEventListener('keydown', onKeyDown);
+
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, []);
+
+  return (
+    <div className="attest-compact" data-theme={theme}>
       <a
         className="attest-skip"
         href={`#${mainId}`}
@@ -74,15 +80,14 @@ const CompactShell = ({ breadcrumbs, children, ...navigation }: CompactShellProp
       </a>
       <aside className="attest-sidebar" aria-label="Workspace navigation">
         <div className="attest-side-head">
-          <button
+          <ShellLink
             className="attest-wordmark"
-            type="button"
-            onClick={() =>
-              navigation.onNavigate({ kind: 'projects', sourceId: navigation.source.id })
-            }
+            hrefFor={navigation.hrefFor}
+            onNavigate={props.onNavigate}
+            target={{ kind: 'projects', sourceId: navigation.source.id }}
           >
             attest
-          </button>
+          </ShellLink>
         </div>
         <ShellNavigation {...props} />
       </aside>
@@ -101,13 +106,14 @@ const CompactShell = ({ breadcrumbs, children, ...navigation }: CompactShellProp
             <ol>
               {breadcrumbs.map((crumb, index) => (
                 <li key={index}>
-                  {index === breadcrumbs.length - 1 ? (
-                    <span aria-current="page">{crumb.label}</span>
-                  ) : (
-                    <button type="button" onClick={() => navigation.onNavigate(crumb.target)}>
-                      {crumb.label}
-                    </button>
-                  )}
+                  <ShellLink
+                    target={crumb.target}
+                    hrefFor={navigation.hrefFor}
+                    onNavigate={props.onNavigate}
+                    current={index === breadcrumbs.length - 1}
+                  >
+                    {crumb.label}
+                  </ShellLink>
                 </li>
               ))}
             </ol>
@@ -127,7 +133,19 @@ const CompactShell = ({ breadcrumbs, children, ...navigation }: CompactShellProp
         </main>
       </div>
       {drawerOpen && (
-        <MobileNavigation onClose={closeDrawer}>
+        <MobileNavigation
+          onClose={closeDrawer}
+          wordmark={
+            <ShellLink
+              className="attest-wordmark"
+              hrefFor={navigation.hrefFor}
+              onNavigate={props.onNavigate}
+              target={{ kind: 'projects', sourceId: navigation.source.id }}
+            >
+              attest
+            </ShellLink>
+          }
+        >
           <ShellNavigation {...props} />
         </MobileNavigation>
       )}

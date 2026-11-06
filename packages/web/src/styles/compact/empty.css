@@ -25,6 +25,10 @@
   overflow-wrap: anywhere;
 }
 .attest-compact .attest-empty button {
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+  border-radius: 4px;
   padding: 6px 12px;
   border: 1px solid var(--line-2);
   background: var(--bg);
