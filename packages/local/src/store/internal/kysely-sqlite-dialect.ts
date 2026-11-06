@@ -10,6 +10,7 @@ import {
   type DatabaseConnection,
   type Dialect,
   type Driver,
+  type TransactionSettings,
   type Kysely,
   type OperationNode,
   type QueryResult,
@@ -79,11 +80,12 @@ class HandleConnection implements DatabaseConnection {
 class HandleDriver implements Driver {
   readonly #connection: HandleConnection;
   readonly #handle: SqliteHandle;
-  readonly #lock = createLock();
+  readonly #lock: ReturnType<typeof createLock>;
   #releaseConnection: (() => void) | undefined;
 
-  constructor(handle: SqliteHandle) {
+  constructor(handle: SqliteHandle, lock: ReturnType<typeof createLock>) {
     this.#handle = handle;
+    this.#lock = lock;
     this.#connection = new HandleConnection(handle);
   }
 
@@ -96,8 +98,11 @@ class HandleDriver implements Driver {
     return this.#connection;
   }
 
-  async beginTransaction(): Promise<void> {
-    await this.#handle.begin();
+  async beginTransaction(
+    _connection: DatabaseConnection,
+    settings: TransactionSettings,
+  ): Promise<void> {
+    await this.#handle.begin(settings.accessMode === 'read only' ? 'read' : undefined);
   }
 
   async commitTransaction(): Promise<void> {
@@ -127,9 +132,12 @@ class HandleDriver implements Driver {
 }
 
 /** Adapts the portable handle while retaining Kysely's SQLite compiler stack. */
-const createSqliteDialect = (handle: SqliteHandle): Dialect => ({
+const createSqliteDialect = (
+  handle: SqliteHandle,
+  lock: ReturnType<typeof createLock> = createLock(),
+): Dialect => ({
   createAdapter: () => new SqliteAdapter(),
-  createDriver: () => new HandleDriver(handle),
+  createDriver: () => new HandleDriver(handle, lock),
   createIntrospector: (database: Kysely<unknown>) => new SqliteIntrospector(database),
   createQueryCompiler: () => new SqliteQueryCompiler(),
 });

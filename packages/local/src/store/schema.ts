@@ -1,3 +1,4 @@
+import type { SliceTotals, CaseVerdict } from '@attest/core';
 import type { CaseOutcome, InvocationErrorCode, SpanKind } from '@attest/contracts';
 import type { CacheKind, RunStatus, StoredMetricEvaluation } from '@attest/core';
 
@@ -35,6 +36,8 @@ interface CasesTable {
   attempts_json: string;
   expected_metrics_json: string;
   trace_json: string | null;
+  run_created_at: string;
+  verdict: CaseVerdict;
 }
 
 /** Kysely row shape for the initial schema metric_results table. */
@@ -78,7 +81,16 @@ interface ResponseCacheTable {
 }
 
 /** Defines the complete initial schema database surface consumed by Kysely. */
+interface SuiteTotalsTable extends SliceTotals {
+  run_id: string;
+  suite_name: string;
+  run_created_at: string;
+  state: 'running' | 'complete' | 'incomplete';
+}
+
 interface Database {
+  run_suite_totals: SuiteTotalsTable;
+  suite_cases: { suite_name: string; case_id: string };
   runs: RunsTable;
   cases: CasesTable;
   metric_results: MetricResultsTable;
@@ -86,4 +98,10 @@ interface Database {
   response_cache: ResponseCacheTable;
 }
 
-export { type CasesTable, type Database, type MetricResultsTable, type RunsTable };
+export {
+  type CasesTable,
+  type Database,
+  type MetricResultsTable,
+  type RunsTable,
+  type SuiteTotalsTable,
+};

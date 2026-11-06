@@ -23,18 +23,18 @@ import {
   type StoredMetricEvaluation,
 } from '@attest/core';
 
+import {
+  seedSuiteTotals,
+  finalizeSuiteTotals,
+  summarizeRuns,
+} from './internal/dashboard-totals.js';
+import { DashboardReads } from './internal/dashboard-reads.js';
 import { createCacheStore } from './cache.js';
 import { recordCaseTransaction, validateCaseRecordInput } from './internal/case-recording.js';
 import { createSqliteDialect } from './internal/kysely-sqlite-dialect.js';
 import { createUlid } from './internal/create-ulid.js';
 import { createLock } from './internal/promise-lock.js';
 import { toCaseRecord, toMetricEvaluation, toRunRecord } from './internal/row-mapping.js';
-import {
-  agentErroredColumn,
-  lifecycleFailedColumn,
-  rowVerdict,
-  summarizeRuns,
-} from './internal/run-summary.js';
 import { openReadonlySqliteHandle, openSqliteHandle } from './internal/open-sqlite-handle.js';
 import type { SqliteHandle } from './internal/sqlite-handle.js';
 import { executeStoreOperation } from './internal/store-operation.js';
@@ -92,6 +92,28 @@ class SqliteRunStore implements RunStore {
     this.#database = database;
   }
 
+  /** Each composed read uses one WAL snapshot across its bounded statements. */
+  async #dashboardRead<T>(read: (dashboard: DashboardReads) => Promise<T>): Promise<T> {
+    return this.#database
+      .transaction()
+      .setAccessMode('read only')
+      .execute((db) => read(new DashboardReads(db)));
+  }
+  getProjectOverview: RunStore['getProjectOverview'] = () =>
+    this.#dashboardRead((d) => d.getProjectOverview());
+
+  listEvals: RunStore['listEvals'] = (query) => this.#dashboardRead((d) => d.listEvals(query));
+  listEvalRuns: RunStore['listEvalRuns'] = (suite, query) =>
+    this.#dashboardRead((d) => d.listEvalRuns(suite, query));
+  getEvalCaseWindow: RunStore['getEvalCaseWindow'] = (suite, query) =>
+    this.#dashboardRead((d) => d.getEvalCaseWindow(suite, query));
+  getCaseHistory: RunStore['getCaseHistory'] = (suite, caseId, query) =>
+    this.#dashboardRead((d) => d.getCaseHistory(suite, caseId, query));
+  getActivity: RunStore['getActivity'] = (query) =>
+    this.#dashboardRead((d) => d.getActivity(query));
+  listRunSuites: RunStore['listRunSuites'] = (id) =>
+    this.#dashboardRead((d) => d.listRunSuites(id));
+
   /** Creates a running record with a UTC timestamp and ULID identity. */
   async createRun(
     metadata: RunMetadata,
@@ -105,22 +127,26 @@ class SqliteRunStore implements RunStore {
         status: 'running',
       };
 
-      await this.#database
-        .insertInto('runs')
-        .values({
-          id: record.id,
-          created_at: record.createdAt,
-          finished_at: null,
-          status: record.status,
-          schema_id: record.schemaId,
-          config_hash: record.configHash,
-          config_json: record.configJson,
-          git_sha: record.gitSha ?? null,
-          git_branch: record.gitBranch ?? null,
-          labels_json: record.labels ? canonicalStringify(record.labels) : null,
-          summary_json: null,
-        })
-        .execute();
+      await this.#database.transaction().execute(async (database) => {
+        await database
+          .insertInto('runs')
+          .values({
+            id: record.id,
+            created_at: record.createdAt,
+            finished_at: null,
+            status: record.status,
+            schema_id: record.schemaId,
+            config_hash: record.configHash,
+            config_json: record.configJson,
+            git_sha: record.gitSha ?? null,
+            git_branch: record.gitBranch ?? null,
+            labels_json: record.labels ? canonicalStringify(record.labels) : null,
+            summary_json: null,
+          })
+          .execute();
+
+        await seedSuiteTotals(database, record);
+      });
 
       return record;
     });
@@ -159,13 +185,21 @@ class SqliteRunStore implements RunStore {
           );
         }
 
+        const row = await database
+          .selectFrom('runs')
+          .selectAll()
+          .where('id', '=', runId)
+          .executeTakeFirstOrThrow();
+
+        const finishedAt = new Date().toISOString();
+        await finalizeSuiteTotals(database, { ...toRunRecord(row, undefined), status, finishedAt });
         const summaryOf = await summarizeRuns(database, [runId]);
 
         await database
           .updateTable('runs')
           .set({
             status,
-            finished_at: new Date().toISOString(),
+            finished_at: finishedAt,
             summary_json: canonicalStringify(summaryOf(runId)),
           })
           .where('id', '=', runId)
@@ -190,8 +224,7 @@ class SqliteRunStore implements RunStore {
   }
 
   /**
-   * Builds run records with totals recomputed from case rows. Runs finalized before the shared
-   * verdict rule hold stale summary_json, so no read uses it. Running runs have no totals yet.
+   * Builds run records from materialized per-eval totals. Running records omit summaries.
    */
   async #runRecordMapper(rows: RunsTable[]): Promise<(row: RunsTable) => RunRecord> {
     const terminal = rows.filter((row) => row.status !== 'running');
@@ -296,18 +329,24 @@ class SqliteRunStore implements RunStore {
   }
 
   /** Returns a row-id cursor page without selecting request, response, trace, or diagnostic blobs. */
-  async listCaseSummaries(runId: string, query: PageQuery = {}): Promise<CaseSummaryPage> {
+  async listCaseSummaries(
+    runId: string,
+    query: PageQuery & { suiteName?: string } = {},
+  ): Promise<CaseSummaryPage> {
     await this.#getRunRow(runId);
     const limit = parsePageLimit(query);
 
     if (query.cursor !== undefined) {
       const cursor = await this.#database
         .selectFrom('cases')
-        .select('run_id')
+        .select(['run_id', 'suite_name'])
         .where('id', '=', query.cursor)
         .executeTakeFirst();
 
-      if (cursor?.run_id !== runId) {
+      if (
+        cursor?.run_id !== runId ||
+        (query.suiteName !== undefined && cursor?.suite_name !== query.suiteName)
+      ) {
         throw new StoreError(
           'INVALID_CURSOR',
           `Case summary cursor ${query.cursor} does not belong to run ${runId}.`,
@@ -325,12 +364,13 @@ class SqliteRunStore implements RunStore {
         'started_at',
         'duration_ms',
         'expected_metrics_json',
-        lifecycleFailedColumn,
-        agentErroredColumn,
+        'verdict',
       ])
       .where('run_id', '=', runId)
       .orderBy('id')
       .limit(limit + 1);
+
+    if (query.suiteName !== undefined) select = select.where('suite_name', '=', query.suiteName);
 
     if (query.cursor !== undefined) select = select.where('id', '>', query.cursor);
     const rows = await select.execute();
@@ -363,7 +403,7 @@ class SqliteRunStore implements RunStore {
         caseId: row.case_id,
         suiteName: row.suite_name,
         outcome: row.outcome,
-        verdict: rowVerdict(row, caseMetrics),
+        verdict: row.verdict,
         startedAt: row.started_at,
         durationMs: row.duration_ms,
         metricCounts: {
@@ -400,7 +440,7 @@ const openStore = async (path: string): Promise<AttestStore> => {
   try {
     handle = await openSqliteHandle(resolvedPath);
     await migrateToLatest(handle);
-    const database = new Kysely<Database>({ dialect: createSqliteDialect(handle) });
+    const database = new Kysely<Database>({ dialect: createSqliteDialect(handle, lock) });
     const runs = new SqliteRunStore(database);
 
     return { runs, cache: createCacheStore(database), close: () => runs.close() };
@@ -423,7 +463,11 @@ const openReadonlyRunStore = async (path: string): Promise<RunStore> => {
     handle = await openReadonlySqliteHandle(resolve(path));
     await validateReadableSchema(handle);
 
-    return new SqliteRunStore(new Kysely<Database>({ dialect: createSqliteDialect(handle) }));
+    const key = resolve(path);
+    const lock = migrationLocks.get(key) ?? createLock();
+    migrationLocks.set(key, lock);
+
+    return new SqliteRunStore(new Kysely<Database>({ dialect: createSqliteDialect(handle, lock) }));
   } catch (error) {
     await handle?.close();
     throw error;

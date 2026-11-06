@@ -1,3 +1,12 @@
+import type {
+  EvalPage,
+  ProjectRunOverview,
+  EvalRunPage,
+  EvalCaseWindow,
+  CaseHistoryPage,
+  Activity,
+  EvalSlice,
+} from '../records/dashboard-schemas.js';
 import type { PageQuery, RunPage, CaseSummaryPage } from '../records/page-schemas.js';
 import type { ProjectRecord } from '../records/project-schemas.js';
 import type {
@@ -37,9 +46,23 @@ interface RunIdentity {
  * MAX_PAGE_LIMIT, 1,000, inclusive.
  */
 interface RunSource {
+  getProjectOverview(): Promise<ProjectRunOverview>;
+  listEvals(query?: PageQuery): Promise<EvalPage>;
+  listEvalRuns(
+    suiteName: string,
+    query?: PageQuery & { since?: string; until?: string },
+  ): Promise<EvalRunPage>;
+  getEvalCaseWindow(suiteName: string, query?: PageQuery): Promise<EvalCaseWindow>;
+  getCaseHistory(suiteName: string, caseId: string, query?: PageQuery): Promise<CaseHistoryPage>;
+  getActivity(query: { from: string; to: string }): Promise<Activity>;
+  listRunSuites(runId: string): Promise<EvalSlice[]>;
+
   listRuns(query?: PageQuery): Promise<RunPage>;
   getRun(runId: string): Promise<RunRecord>;
-  listCaseSummaries(runId: string, query?: PageQuery): Promise<CaseSummaryPage>;
+  listCaseSummaries(
+    runId: string,
+    query?: PageQuery & { suiteName?: string },
+  ): Promise<CaseSummaryPage>;
   getCase(runId: string, suiteName: string, caseId: string): Promise<CaseRecord>;
   getRunWithCases(runId: string): Promise<{ run: RunRecord; cases: CaseRecord[] }>;
 }

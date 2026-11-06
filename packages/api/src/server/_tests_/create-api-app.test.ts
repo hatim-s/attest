@@ -48,6 +48,20 @@ const cases: CaseRecord[] = [
 ];
 
 const source: RunSource = {
+  getProjectOverview: () =>
+    Promise.resolve({
+      evals: { items: [] },
+      runningRunCount: 0,
+      runningRunCountTruncated: false,
+      lastRunAt: null,
+    }),
+  listEvals: () => Promise.resolve({ items: [] }),
+  listEvalRuns: () => Promise.resolve({ items: [] }),
+  getEvalCaseWindow: () => Promise.resolve({ runs: [], items: [] }),
+  getCaseHistory: () => Promise.resolve({ items: [] }),
+  getActivity: () => Promise.resolve({ timezone: 'UTC', days: [], truncated: false }),
+  listRunSuites: () => Promise.resolve([]),
+
   listRuns: () => Promise.resolve({ items: runs }),
   getRun: (runId) => {
     const run = runs.find((run) => run.id === runId);

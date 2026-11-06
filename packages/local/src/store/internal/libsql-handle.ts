@@ -60,12 +60,12 @@ const createLibsqlHandle = (client: Client): SqliteHandle => {
 
       await client.executeMultiple(sql);
     },
-    begin: async () => {
+    begin: async (mode) => {
       if (activeTransaction) {
         throw new StoreError('DRIVER_MISUSE', 'A libsql transaction is already active.');
       }
 
-      activeTransaction = await client.transaction('write');
+      activeTransaction = await client.transaction(mode === 'read' ? 'read' : 'write');
     },
     commit: async () => {
       if (!activeTransaction) {

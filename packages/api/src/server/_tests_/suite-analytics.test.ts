@@ -52,6 +52,20 @@ const fixture = (sourceRuns = runs) => {
   const caseReads: { runId: string; cursor?: string; limit?: number }[] = [];
 
   const source: RunSource = {
+    getProjectOverview: () =>
+      Promise.resolve({
+        evals: { items: [] },
+        runningRunCount: 0,
+        runningRunCountTruncated: false,
+        lastRunAt: null,
+      }),
+    listEvals: () => Promise.resolve({ items: [] }),
+    listEvalRuns: () => Promise.resolve({ items: [] }),
+    getEvalCaseWindow: () => Promise.resolve({ runs: [], items: [] }),
+    getCaseHistory: () => Promise.resolve({ items: [] }),
+    getActivity: () => Promise.resolve({ timezone: 'UTC', days: [], truncated: false }),
+    listRunSuites: () => Promise.resolve([]),
+
     listRuns: (query = {}) => {
       const limit = parsePageLimit(query);
 

@@ -15,6 +15,19 @@ const runNotFound = (runId: string): Promise<never> =>
 
 /** Serves a project that has never recorded a run without creating its database. */
 const emptySource: RunSource = {
+  getProjectOverview: () =>
+    Promise.resolve({
+      evals: { items: [] },
+      runningRunCount: 0,
+      runningRunCountTruncated: false,
+      lastRunAt: null,
+    }),
+  listEvals: () => Promise.resolve({ items: [] }),
+  listEvalRuns: () => Promise.resolve({ items: [] }),
+  getEvalCaseWindow: () => Promise.resolve({ runs: [], items: [] }),
+  getCaseHistory: () => Promise.resolve({ items: [] }),
+  getActivity: () => Promise.resolve({ timezone: 'UTC', days: [], truncated: false }),
+  listRunSuites: runNotFound,
   listRuns: () => Promise.resolve({ items: [] }),
   getRun: runNotFound,
   listCaseSummaries: runNotFound,

@@ -54,3 +54,5 @@ export { caseRecordVerdict } from '../store/case-summary.js';
 export type { InlineArtifact } from '@attest/contracts';
 
 export { StoreError } from '../store/store-error.js';
+
+export * from './dashboard-schemas.js';

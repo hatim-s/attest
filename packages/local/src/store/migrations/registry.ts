@@ -1,3 +1,5 @@
+import { backfillDashboardTotals } from '../internal/backfill-dashboard-totals.js';
+
 /** Defines the initial database layout applied by the migration runner. */
 const initialSchemaSql = `-- This initial schema is the only supported database layout.
 CREATE TABLE runs (
@@ -165,7 +167,98 @@ CREATE INDEX idx_spans_case ON spans(case_row_id);
 CREATE INDEX idx_runs_created ON runs(created_at DESC);
 `;
 
-/** Registers the single supported initial schema consumed by the migration runner. */
-const migrations = [{ version: 1, name: 'initial', sql: initialSchemaSql }] as const;
+/** Projection rules are versioned with the schema, never repaired during reads. */
+const dashboardSchemaSql = `
+DROP TRIGGER cases_no_finalized_update;
+ALTER TABLE cases ADD COLUMN run_created_at TEXT;
+ALTER TABLE cases ADD COLUMN verdict TEXT CHECK(verdict IN ('pass','fail','error'));
+CREATE TABLE run_suite_totals (
+ run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+ suite_name TEXT NOT NULL,
+ run_created_at TEXT NOT NULL,
+ state TEXT NOT NULL CHECK(state IN ('running','complete','incomplete')),
+ planned INTEGER CHECK(planned IS NULL OR planned >= 0),
+ recorded INTEGER NOT NULL CHECK(recorded >= 0),
+ passed INTEGER NOT NULL CHECK(passed >= 0),
+ failed INTEGER NOT NULL CHECK(failed >= 0),
+ errored INTEGER NOT NULL CHECK(errored >= 0),
+ skipped INTEGER NOT NULL CHECK(skipped >= 0),
+ metricErrors INTEGER NOT NULL CHECK(metricErrors >= 0),
+ scored INTEGER NOT NULL CHECK(scored >= 0),
+ scoreSum REAL NOT NULL,
+ CHECK(recorded = passed + failed + errored + skipped),
+ CHECK(planned IS NULL OR recorded <= planned),
+ PRIMARY KEY(run_id, suite_name)
+) WITHOUT ROWID;
+CREATE TABLE suite_cases (suite_name TEXT NOT NULL, case_id TEXT NOT NULL, PRIMARY KEY(suite_name, case_id)) WITHOUT ROWID;
+CREATE INDEX idx_runs_running ON runs(id) WHERE status = 'running';
+CREATE INDEX idx_totals_suite ON run_suite_totals(suite_name, run_created_at DESC, run_id DESC);
+CREATE INDEX idx_totals_state ON run_suite_totals(suite_name, state, run_created_at DESC, run_id DESC);
+CREATE INDEX idx_totals_created ON run_suite_totals(run_created_at DESC, run_id DESC, suite_name);
+CREATE INDEX idx_cases_history ON cases(suite_name, case_id, run_created_at DESC, run_id DESC, verdict, outcome, duration_ms);
+CREATE INDEX idx_cases_window ON cases(run_id, suite_name, case_id, verdict, outcome);
+CREATE INDEX idx_cases_scoped ON cases(run_id, suite_name, id);
+DROP INDEX idx_runs_created;
+CREATE INDEX idx_runs_created ON runs(created_at DESC, id DESC);
+`;
+
+const dashboardTriggersSql = `
+CREATE TRIGGER cases_no_finalized_update
+BEFORE UPDATE ON cases
+WHEN (SELECT status FROM runs WHERE id = OLD.run_id) != 'running'
+ OR (SELECT status FROM runs WHERE id = NEW.run_id) != 'running'
+BEGIN
+ SELECT RAISE(ABORT, 'attest: finalized runs are immutable');
+END;
+CREATE TRIGGER cases_no_projection_update BEFORE UPDATE ON cases
+BEGIN
+ SELECT RAISE(ABORT, 'attest: case projections are immutable');
+END;
+CREATE TRIGGER cases_no_projection_delete BEFORE DELETE ON cases
+BEGIN
+ SELECT RAISE(ABORT, 'attest: case projections are immutable');
+END;
+CREATE TRIGGER cases_require_projection BEFORE INSERT ON cases
+WHEN NEW.verdict IS NULL OR NEW.run_created_at IS NULL
+BEGIN
+ SELECT RAISE(ABORT, 'attest: missing case projection');
+END;
+CREATE TRIGGER totals_no_finalized_insert BEFORE INSERT ON run_suite_totals
+WHEN (SELECT status FROM runs WHERE id = NEW.run_id) != 'running'
+BEGIN
+ SELECT RAISE(ABORT, 'attest: finalized runs are immutable');
+END;
+CREATE TRIGGER totals_no_finalized_update BEFORE UPDATE ON run_suite_totals
+WHEN (SELECT status FROM runs WHERE id = OLD.run_id) != 'running'
+ OR (SELECT status FROM runs WHERE id = NEW.run_id) != 'running'
+BEGIN
+ SELECT RAISE(ABORT, 'attest: finalized runs are immutable');
+END;
+CREATE TRIGGER totals_no_delete BEFORE DELETE ON run_suite_totals
+BEGIN
+ SELECT RAISE(ABORT, 'attest: totals are immutable');
+END;
+CREATE TRIGGER metrics_no_update BEFORE UPDATE ON metric_results
+WHEN (SELECT status FROM runs JOIN cases ON cases.run_id = runs.id WHERE cases.id = OLD.case_row_id) = 'running'
+BEGIN
+ SELECT RAISE(ABORT, 'attest: metric evidence is immutable');
+END;
+CREATE TRIGGER metrics_no_delete BEFORE DELETE ON metric_results
+WHEN (SELECT status FROM runs JOIN cases ON cases.run_id = runs.id WHERE cases.id = OLD.case_row_id) = 'running'
+BEGIN
+ SELECT RAISE(ABORT, 'attest: metric evidence is immutable');
+END;
+`;
+
+const migrations = [
+  { version: 1, name: 'initial', sql: initialSchemaSql },
+  {
+    version: 2,
+    name: 'dashboard-totals',
+    sql: dashboardSchemaSql,
+    backfill: backfillDashboardTotals,
+    afterSql: dashboardTriggersSql,
+  },
+] as const;
 
 export { migrations };

@@ -158,3 +158,54 @@ subprocess GC tests cover timeout-only and caller-plus-timeout paths.
 Release tooling validates the package fields it uses while preserving all other
 JSON metadata. Packed archives retain npm binary mappings, and packing verifies
 that each declared binary target is present.
+
+## Dashboard storage projections, schema v2
+
+Core owns dashboard DTO schemas in `@attest/core/records`, planned selection
+counts in `plannedSuiteCases`, and the pure slice helpers in
+`@attest/core/analytics`. RunSource adds eval pages, eval run/trend pages, stored
+case windows, case history, UTC activity and run suites. Existing analytics remain
+until the old API and web consumers are replaced.
+
+Local schema v2 freezes case verdicts and run creation order and maintains one
+totals row per run/eval in the case transaction. Identical replay returns before
+updates; conflicts and child insert failures roll back every projection.
+Finalization materializes slice state before terminal immutability takes effect.
+A complete slice needs known positive planned coverage, all planned cases recorded,
+and no errors or skipped rows. A failed multi-eval run can contain complete slices.
+Unknown legacy plans and zero-case selections remain incomplete with null pass rate.
+Over-recorded plans fail rather than hiding a negative not-run count.
+
+The eval/state/time index makes latest-complete lookup independent of incomplete
+history length. Eval discovery uses distinct-key seeks. Pages use limit plus one,
+never exact history counts. Stored case identity pages precede the ten-run outcome
+window, so at most 1,000 identities and 10,000 cells are loaded. Identities cover
+recorded cases only; authored definitions and never-run cases belong to a separate
+catalog. Activity uses UTC and visits at most 10,001 totals rows in a 92-day interval.
+It returns at most 10,000 rows' contributions and an explicit truncation flag,
+counts eval slices rather than distinct multi-eval runs, and has no DST option.
+Project overview returns a 500-eval page and at most 10,000 running run identities
+through a partial index. Its eval cursor and running-count truncation flag must
+remain visible to consumers. It never presents these lower bounds as exact totals.
+The bulk outcome query explicitly pins a covering run/case index. Otherwise
+SQLite can choose the history index and visit arbitrarily many older outcomes.
+
+Migration v1 to v2 is a single offline BEGIN IMMEDIATE transaction including
+backfill, trigger restoration and version publication. Backfill reuses the core
+case projection rule, validates persisted records and selected snapshots, and
+ignores stale v1 summary_json. A failure rolls back the whole version. It can
+hold the write lock longer than another writer's five-second busy timeout. Stop
+writers, back up the store and obtain human approval before applying to user data.
+Do not split-commit this rebuild. The existing writer open applies migrations;
+read-only registry and snapshot opens never migrate and report SCHEMA_OUTDATED.
+No user store or remote migration was applied while developing v2.
+
+Case and metric evidence updates/deletes are now rejected even during running
+runs. Deleting runs with projection rows is consequently unsupported. This prevents
+projection drift through cascading deletes. A future retention API must own an
+atomic projection rebuild/decrement policy. Changes to verdict rules need a new
+schema migration rebuilding both verdicts and totals; reads never repair them.
+Same-process handles share a path lock to avoid synchronous SQLite busy waits
+blocking another transaction's continuation. Cross-process serialization remains
+SQLite-owned. Dashboard composite reads use deferred read transactions and one
+WAL snapshot; they do not acquire writer reservations.

@@ -599,6 +599,7 @@ describe('RunStore adversarial persistence', () => {
 
     await store.recordCase(run.id, completedExecution({ runId: run.id, caseId: 'corrupt' }), []);
     const handle = await openSqliteHandle(path);
+    await handle.exec('DROP TRIGGER cases_no_projection_update');
     await handle.prepare('UPDATE cases SET request_json = ? WHERE run_id = ?').run('{', run.id);
     await handle.close();
 
@@ -636,6 +637,8 @@ describe('RunStore adversarial persistence', () => {
         .insertInto('cases')
         .values({
           id: 'raw-finalized-case',
+          verdict: 'pass',
+          run_created_at: run.createdAt,
           run_id: run.id,
           case_id: 'raw-finalized-case',
           suite_name: 'suite',
