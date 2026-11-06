@@ -3,6 +3,8 @@
 `CompactShell` imports `tokens.css` and `shell.css` explicitly. `Tag`/`Tags` and
 `EmptyState` import their own scoped styles. Render these components inside the shell.
 
+The example below lives in `src/`.
+
 ```tsx
 import { CompactShell, type CompactShellProps } from './shell/compact-shell.js';
 import { Tags } from './components/tags/tag.js';
@@ -22,7 +24,9 @@ export { DashboardFrame };
 For reports use `kind: 'report', capabilities: { control: false }`. Local and cloud
 capabilities use the existing `ApiCapabilities` contract. Source IDs must be stable,
 non-secret and account/workspace scoped when applicable. Never use a token or credential
-in an identity. `projects` is required `NavigationData<ShellProject>`, reusing `ProjectRecord.key/name`.
+in an identity. `projects` carries `{ sourceId, state: NavigationData<ShellProject> }`,
+reusing `ProjectRecord.key/name`. Data from a different source is hidden while the active
+source loads. The owner must come from the query that produced the data.
 `evals` carries `{ sourceId, projectKey, state: NavigationData<ShellEval> }` for the
 expanded project, or `null` on the project index. The owner must come from the query that
 produced the data. The shell ignores mismatched owners during project or source changes.
@@ -35,7 +39,9 @@ project index, pass `null`; collapsed projects need no eval request.
 `current` is the committed router location adapted to `ShellTarget`. Object memoization is optional.
 `hrefFor(target)` supplies a real destination URL for each target. `onNavigate(target)` handles ordinary primary activation; modified and middle clicks use native anchors.
 `onSourceChange(id)` switches the real client and navigates to a valid destination for it.
-Replace source, projects, breadcrumbs and current together. There is no combined-source view.
+Replace source, breadcrumbs and current together. Project/eval query owners are checked
+before rendering; ancestry and recent links never use a different active source.
+There is no combined-source view.
 `breadcrumbs` supplies named ancestors and ends with the current page.
 
 `resolveRecent(target)` returns `{ label, context }` from data the integration already owns,

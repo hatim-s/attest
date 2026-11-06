@@ -15,7 +15,7 @@ import {
 type NavigationProps = {
   source: ShellSource;
   sources: readonly ShellSource[];
-  projects: NavigationData<ShellProject>;
+  projects: { sourceId: string; state: NavigationData<ShellProject> };
   /** Retained query data must carry its owner; null when no project is expanded. */
   evals: {
     sourceId: string;
@@ -76,16 +76,25 @@ const ShellNavigation = ({
     );
   };
 
-  const recentRows = visibleRecents(recents, resolveRecent);
+  const projectData: NavigationData<ShellProject> =
+    projects.sourceId === source.id ? projects.state : { status: 'loading' };
+
+  const recentRows = visibleRecents(
+    recents.filter((target) => target.sourceId === source.id),
+    resolveRecent,
+  );
 
   return (
     <>
       <nav className="attest-tree" aria-label="Projects">
         <ul>
           <li>{item({ kind: 'projects', sourceId: source.id }, 'All projects')}</li>
-          {projects.status === 'ready' &&
-            projects.items.map((project) => {
-              const open = current.kind !== 'projects' && current.projectKey === project.key;
+          {projectData.status === 'ready' &&
+            projectData.items.map((project) => {
+              const open =
+                current.sourceId === source.id &&
+                current.kind !== 'projects' &&
+                current.projectKey === project.key;
 
               const projectEvals =
                 evals?.sourceId === source.id && evals.projectKey === project.key
@@ -162,7 +171,7 @@ const ShellNavigation = ({
               );
             })}
         </ul>
-        {dataNote(projects, 'projects')}
+        {dataNote(projectData, 'projects')}
       </nav>
       <section className="attest-recents" aria-label="Recent pages">
         <h2>Recent</h2>

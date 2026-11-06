@@ -162,7 +162,7 @@ describe('recent navigation persistence', () => {
       '{}',
       JSON.stringify([{ ...run('1'), token: 'secret' }]),
       JSON.stringify(Array.from({ length: 101 }, (_, i) => run(String(i)))),
-      ' '.repeat(160000),
+      JSON.stringify([run('1')]) + ' '.repeat(160000),
     ]) {
       storage.setItem('attest-recents', invalid);
       expect(readRecents(storage)).toEqual([]);
