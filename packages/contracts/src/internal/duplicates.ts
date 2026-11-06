@@ -1,11 +1,11 @@
-import type { z } from 'zod';
+import * as Schema from 'effect/Schema';
 
 type DuplicateCheck = {
   values: readonly string[];
   /** Builds the issue path for the value at `index`. */
   pathFor: (index: number) => PropertyKey[];
   label: string;
-  context: z.RefinementCtx;
+  context: Schema.FilterIssue[];
 };
 
 /**
@@ -16,10 +16,9 @@ const reportDuplicates = ({ values, pathFor, label, context }: DuplicateCheck): 
   const seen = new Set<string>();
   values.forEach((value, index) => {
     if (seen.has(value)) {
-      context.addIssue({
-        code: 'custom',
+      context.push({
         path: pathFor(index),
-        message: `duplicate ${label}: ${value}`,
+        issue: `duplicate ${label}: ${value}`,
       });
     }
 

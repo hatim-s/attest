@@ -92,7 +92,7 @@ const toArgumentHelp = (argument: Argument): CliHelp['command']['arguments'][num
   required: argument.required,
   variadic: argument.variadic,
   choices: argument.argChoices ?? [],
-  default: parseWithSchemaSync(cliHelpArgumentSchema.shape.default, argument.defaultValue ?? null),
+  default: parseWithSchemaSync(cliHelpArgumentSchema.fields.default, argument.defaultValue ?? null),
 });
 
 const optionValueName = (option: Option): string | null => {
@@ -116,7 +116,7 @@ const toOptionHelp = (
   choices: option.argChoices ?? [],
   default:
     metadata?.default ??
-    parseWithSchemaSync(cliHelpOptionSchema.shape.default, option.defaultValue ?? null),
+    parseWithSchemaSync(cliHelpOptionSchema.fields.default, option.defaultValue ?? null),
   conflicts: [...(metadata?.conflicts ?? [])],
   implies: [...(metadata?.implies ?? [])],
 });

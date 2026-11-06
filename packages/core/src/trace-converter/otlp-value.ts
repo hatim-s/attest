@@ -1,47 +1,83 @@
-import { parseWithSchema } from '@attest/contracts';
-import { z } from 'zod';
+import { looseStruct, parseWithSchema } from '@attest/contracts';
+import * as Effect from 'effect/Effect';
+import * as Option from 'effect/Option';
+import * as Schema from 'effect/Schema';
+import * as SchemaGetter from 'effect/SchemaGetter';
 
-type AttributeValue = string | number | boolean;
+const scalarSchema = Schema.Union([Schema.String, Schema.Finite, Schema.Boolean]);
 
-const DIGITS = /^-?\d+$/;
+type AttributeValue = typeof scalarSchema.Type;
 
-// OTLP JSON encodes 64-bit integers as strings; unsafe ones stay strings so no digits are lost.
-const intValueSchema = z.union([
-  z.number().refine(Number.isSafeInteger),
-  z
-    .string()
-    .regex(DIGITS)
-    .transform((value) => (Number.isSafeInteger(Number(value)) ? Number(value) : value)),
+// Unsafe OTLP integers stay strings so no digits are lost.
+const intValueSchema = Schema.Union([
+  Schema.Finite.check(Schema.makeFilter(Number.isSafeInteger)),
+  Schema.String.check(Schema.isPattern(/^-?\d+$/)).pipe(
+    Schema.decodeTo(Schema.Union([Schema.String, Schema.Finite]), {
+      decode: SchemaGetter.transform((value) =>
+        Number.isSafeInteger(Number(value)) ? Number(value) : value,
+      ),
+      encode: SchemaGetter.transform(String),
+    }),
+  ),
 ]);
 
-/** Decodes a scalar OTLP AnyValue; arrays and key-value lists are not part of Attest's attributes. */
-const anyValueSchema = z.union([
-  z.looseObject({ stringValue: z.string() }).transform((value) => value.stringValue),
-  z.looseObject({ boolValue: z.boolean() }).transform((value) => value.boolValue),
-  z.looseObject({ doubleValue: z.number().finite() }).transform((value) => value.doubleValue),
-  z.looseObject({ intValue: intValueSchema }).transform((value) => value.intValue),
-  z.looseObject({ bytesValue: z.string() }).transform((value) => value.bytesValue),
+/** Decodes only the scalar AnyValue variants Attest supports. */
+const anyValueSchema = Schema.Union([
+  looseStruct({ stringValue: Schema.String }).pipe(
+    Schema.decodeTo(Schema.String, {
+      decode: SchemaGetter.transform((v) => v.stringValue),
+      encode: SchemaGetter.transform((v) => ({ stringValue: v })),
+    }),
+  ),
+  looseStruct({ boolValue: Schema.Boolean }).pipe(
+    Schema.decodeTo(Schema.Boolean, {
+      decode: SchemaGetter.transform((v) => v.boolValue),
+      encode: SchemaGetter.transform((v) => ({ boolValue: v })),
+    }),
+  ),
+  looseStruct({ doubleValue: Schema.Finite }).pipe(
+    Schema.decodeTo(Schema.Finite, {
+      decode: SchemaGetter.transform((v) => v.doubleValue),
+      encode: SchemaGetter.transform((v) => ({ doubleValue: v })),
+    }),
+  ),
+  looseStruct({ intValue: intValueSchema }).pipe(
+    Schema.decodeTo(Schema.Union([Schema.String, Schema.Finite]), {
+      decode: SchemaGetter.transform((v) => v.intValue),
+      encode: SchemaGetter.transform((v) => ({ intValue: v })),
+    }),
+  ),
+  looseStruct({ bytesValue: Schema.String }).pipe(
+    Schema.decodeTo(Schema.String, {
+      decode: SchemaGetter.transform((v) => v.bytesValue),
+      encode: SchemaGetter.transform((v) => ({ bytesValue: v })),
+    }),
+  ),
 ]);
 
-const keyValueSchema = z.looseObject({ key: z.string(), value: anyValueSchema });
+const keyValueSchema = looseStruct({ key: Schema.String, value: anyValueSchema });
 
-/**
- * Flattens an OTLP KeyValue array into scalar attributes. Unsupported or malformed entries are
- * dropped rather than failing the export, because frameworks attach many attributes Attest ignores.
- */
-const attributesSchema = z
-  .array(z.unknown())
-  .catch([])
-  .transform((entries) => {
-    const attributes: Record<string, AttributeValue> = {};
+/** Drops malformed and unsupported attributes without failing a valid trace. */
+const attributesSchema = Schema.Array(Schema.Unknown).pipe(
+  Schema.catchDecoding(() => Effect.succeed(Option.some([]))),
+  Schema.decodeTo(Schema.Record(Schema.String, scalarSchema), {
+    decode: SchemaGetter.transform((entries) => {
+      const attributes: Record<string, AttributeValue> = {};
 
-    for (const entry of entries) {
-      const parsed = parseWithSchema(keyValueSchema, entry);
+      for (const entry of entries) {
+        const parsed = parseWithSchema(keyValueSchema, entry);
 
-      if (parsed.ok) attributes[parsed.value.key] = parsed.value.value;
-    }
+        if (parsed.ok) attributes[parsed.value.key] = parsed.value.value;
+      }
 
-    return attributes;
-  });
+      return attributes;
+    }),
+    encode: SchemaGetter.transform((attributes) =>
+      Object.entries(attributes).map(([key, value]) => ({ key, value })),
+    ),
+  }),
+  Schema.withDecodingDefault(Effect.succeed([])),
+  Schema.catchDecoding(() => Effect.succeed(Option.some({}))),
+);
 
 export { attributesSchema, type AttributeValue };

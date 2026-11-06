@@ -109,7 +109,7 @@ const registerTestDatasetCommands = (test: Command, context: CommandContext): vo
           leaf,
           options,
           build: async () => {
-            const request: Extract<CommandRequest, { command: 'test.dataset.import' }> = {
+            let request: Extract<CommandRequest, { command: 'test.dataset.import' }> = {
               ...mutationRequestFields('test.dataset.import', options),
               test_id: await requiredInput(
                 testId,
@@ -130,7 +130,7 @@ const registerTestDatasetCommands = (test: Command, context: CommandContext): vo
             };
 
             if (options.name !== undefined) {
-              request.name = options.name;
+              request = { ...request, name: options.name };
             }
 
             return request;
@@ -195,7 +195,7 @@ const registerTestDatasetCommands = (test: Command, context: CommandContext): vo
           leaf,
           options,
           build: async () => {
-            const request: Extract<CommandRequest, { command: 'test.dataset.attach' }> = {
+            let request: Extract<CommandRequest, { command: 'test.dataset.attach' }> = {
               ...mutationRequestFields('test.dataset.attach', options),
               test_id: await requiredInput(
                 testId,
@@ -210,7 +210,7 @@ const registerTestDatasetCommands = (test: Command, context: CommandContext): vo
             };
 
             if (options.tag !== undefined) {
-              request.tags = options.tag;
+              request = { ...request, tags: options.tag };
             }
 
             return request;

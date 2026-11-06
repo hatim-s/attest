@@ -1,3 +1,4 @@
+import { stripStruct, SchemaDecodeError } from '@attest/contracts';
 import { parseWithSchema } from '@attest/contracts';
 
 type CreateContentHasherResult = { add(line: string): void; digest(): string };
@@ -5,7 +6,7 @@ type CreateContentHasherResult = { add(line: string): void; digest(): string };
 type CreateBundleResult = { lines: string[]; manifest: BundleManifest };
 
 import { createHash } from 'node:crypto';
-import { z } from 'zod';
+import * as Schema from 'effect/Schema';
 
 import { canonicalStringify } from './internal/canonical-json.js';
 import { caseRecordSchema, runRecordSchema } from './internal/record-schema.js';
@@ -15,25 +16,28 @@ import type { CaseRecord, RunRecord } from './types.js';
 
 const BUNDLE_SCHEMA_ID = 'attest.bundle';
 
-const bundleLineSchema = z.discriminatedUnion('type', [
-  z.object({
-    type: z.literal('bundle_header'),
-    schema: z.literal(BUNDLE_SCHEMA_ID, {
-      error: (issue) =>
-        `Run bundle header uses unsupported schema ${JSON.stringify(issue.input)}; expected ${JSON.stringify(BUNDLE_SCHEMA_ID)}.`,
-    }),
+const bundleLineSchema = Schema.Union([
+  stripStruct({
+    type: Schema.Literal('bundle_header'),
+    schema: Schema.Unknown.check(
+      Schema.makeFilter(
+        (value) =>
+          value === BUNDLE_SCHEMA_ID ||
+          `Run bundle header uses unsupported schema ${JSON.stringify(value)}; expected ${JSON.stringify(BUNDLE_SCHEMA_ID)}.`,
+      ),
+    ).pipe(Schema.decodeTo(Schema.Literal(BUNDLE_SCHEMA_ID))),
     run: runRecordSchema,
   }),
-  z.object({ type: z.literal('case'), case: caseRecordSchema }),
-  z.object({
-    type: z.literal('bundle_footer'),
-    case_count: z.number().int().nonnegative(),
-    content_hash: z.string(),
+  stripStruct({ type: Schema.Literal('case'), case: caseRecordSchema }),
+  stripStruct({
+    type: Schema.Literal('bundle_footer'),
+    case_count: Schema.Finite.check(Schema.isInt()).check(Schema.isGreaterThanOrEqualTo(0)),
+    content_hash: Schema.String,
   }),
 ]);
 
 /** One verified NDJSON record of a run bundle: the header, a case, or the footer. */
-type BundleLine = z.infer<typeof bundleLineSchema>;
+type BundleLine = typeof bundleLineSchema.Type;
 
 /** Summarizes a completed export with its record count and content hash. */
 interface BundleManifest {
@@ -101,7 +105,7 @@ const corruptBundle = (message: string, cause?: unknown): StoreError =>
   new StoreError('CORRUPT_DATA', message, cause === undefined ? undefined : { cause });
 
 /** Names the failed record so an operator can tell a foreign schema from a damaged run or case. */
-const lineFailure = (error: z.ZodError, lineNumber: number): string => {
+const lineFailure = (error: SchemaDecodeError, lineNumber: number): string => {
   const [issue] = error.issues;
 
   switch (issue?.path[0]) {

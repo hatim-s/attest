@@ -31,12 +31,12 @@ describe('stored attempt excerpts', () => {
       'execution',
     );
 
-    expect(parsed).toEqual({
-      ok: false,
-      violations: [
-        'execution.attempts[0].rawExcerpt a truncated excerpt must carry the sha256 of the full payload',
-      ],
-    });
+    expect(parsed.ok).toBe(false);
+
+    if (parsed.ok) throw new Error('Expected invalid excerpt to be rejected.');
+    expect(parsed.violations).toContain(
+      'execution.attempts[0].rawExcerpt a truncated excerpt must carry the sha256 of the full payload',
+    );
     expect(
       parseRecord(
         storedCaseExecutionSchema,

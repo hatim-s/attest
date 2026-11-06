@@ -1,5 +1,7 @@
+import * as Effect from 'effect/Effect';
+import { stripStruct } from '@attest/contracts';
 import { parseWithSchema } from '@attest/contracts';
-import { z } from 'zod';
+import * as Schema from 'effect/Schema';
 
 import { StoreError } from '../store/store-error.js';
 import { runRecordSchema } from '../store/internal/record-schema.js';
@@ -13,34 +15,33 @@ const MAX_PAGE_LIMIT = 1_000;
 const isValidPageLimit = (limit: number): boolean =>
   Number.isInteger(limit) && limit >= 1 && limit <= MAX_PAGE_LIMIT;
 
-const pageQuerySchema = z.object({
-  cursor: z.string().min(1).optional(),
-  limit: z
-    .number()
-    .refine(isValidPageLimit, {
+const pageQuerySchema = stripStruct({
+  cursor: Schema.optional(Schema.String.check(Schema.isMinLength(1))),
+  limit: Schema.Finite.check(
+    Schema.makeFilter(isValidPageLimit, {
       message: `Page limit must be an integer from 1 to ${MAX_PAGE_LIMIT}.`,
-    })
-    .default(DEFAULT_PAGE_LIMIT),
+    }),
+  ).pipe(Schema.withDecodingDefault(Effect.succeed(DEFAULT_PAGE_LIMIT))),
 });
 
-const cursorSchema = z.string().min(1);
+const cursorSchema = Schema.String.check(Schema.isMinLength(1));
 
-const runPageSchema = z.object({
-  items: z.array(runRecordSchema),
-  nextCursor: cursorSchema.optional(),
+const runPageSchema = stripStruct({
+  items: Schema.Array(runRecordSchema),
+  nextCursor: Schema.optional(cursorSchema),
 });
 
-const caseSummaryPageSchema = z.object({
-  items: z.array(caseSummarySchema),
-  nextCursor: cursorSchema.optional(),
+const caseSummaryPageSchema = stripStruct({
+  items: Schema.Array(caseSummarySchema),
+  nextCursor: Schema.optional(cursorSchema),
 });
 
 /** Cursors are opaque to callers; each source decides what one encodes. */
-type PageQuery = z.input<typeof pageQuerySchema>;
+type PageQuery = typeof pageQuerySchema.Encoded;
 
 /** Applies the shared store limit contract without interpreting a source-specific cursor. */
 const parsePageLimit = (query?: PageQuery): number => {
-  const parsed = parseWithSchema(pageQuerySchema.shape.limit, query?.limit);
+  const parsed = parseWithSchema(pageQuerySchema.from.schema.fields.limit, query?.limit);
 
   if (!parsed.ok) {
     throw new StoreError(
@@ -52,9 +53,9 @@ const parsePageLimit = (query?: PageQuery): number => {
   return parsed.value;
 };
 
-type RunPage = z.infer<typeof runPageSchema>;
+type RunPage = typeof runPageSchema.Type;
 
-type CaseSummaryPage = z.infer<typeof caseSummaryPageSchema>;
+type CaseSummaryPage = typeof caseSummaryPageSchema.Type;
 
 export {
   DEFAULT_PAGE_LIMIT,

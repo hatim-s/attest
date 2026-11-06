@@ -1,4 +1,4 @@
-import { z } from 'zod';
+import * as Schema from 'effect/Schema';
 
 import { evalEventSchema, type EvalEvent } from './event.js';
 
@@ -26,31 +26,35 @@ const allowedExitCodes: Record<RunStatus, readonly number[]> = {
 // Test and case ids are slugs, so ':' cannot appear inside either part.
 const caseKey = (testId: string, caseId: string): string => `${testId}:${caseId}`;
 
-const reportSequenceNumbers = (events: readonly EvalEvent[], context: z.RefinementCtx): void => {
+const reportSequenceNumbers = (
+  events: readonly EvalEvent[],
+  context: Schema.FilterIssue[],
+): void => {
   events.forEach((event, index) => {
     if (event.sequence === index) {
       return;
     }
 
-    context.addIssue({
-      code: 'custom',
+    context.push({
       path: [index, 'sequence'],
-      message: `must equal zero-based stream position ${index}`,
+      issue: `must equal zero-based stream position ${index}`,
     });
   });
 };
 
-const reportResultPlacement = (events: readonly EvalEvent[], context: z.RefinementCtx): void => {
+const reportResultPlacement = (
+  events: readonly EvalEvent[],
+  context: Schema.FilterIssue[],
+): void => {
   const resultIndexes = events.flatMap((event, index) => (event.event === 'result' ? [index] : []));
 
   if (resultIndexes.length === 1 && resultIndexes[0] === events.length - 1) {
     return;
   }
 
-  context.addIssue({
-    code: 'custom',
+  context.push({
     path: [],
-    message: 'the stream must contain exactly one final result event',
+    issue: 'the stream must contain exactly one final result event',
   });
 };
 
@@ -58,7 +62,7 @@ const reportResultPlacement = (events: readonly EvalEvent[], context: z.Refineme
 const reportResultOnlyStream = (
   events: readonly EvalEvent[],
   result: Extract<EvalEvent, { event: 'result' }>,
-  context: z.RefinementCtx,
+  context: Schema.FilterIssue[],
 ): void => {
   const { exit_code, result: envelope } = result.data;
   const describesFailure = exit_code !== 0 && !(exit_code === 1 && envelope.ok);
@@ -67,17 +71,16 @@ const reportResultOnlyStream = (
     return;
   }
 
-  context.addIssue({
-    code: 'custom',
+  context.push({
     path: [0],
-    message: 'a result-only stream must describe a pre-orchestration failure',
+    issue: 'a result-only stream must describe a pre-orchestration failure',
   });
 };
 
 const collectCaseLifecycle = (
   events: readonly EvalEvent[],
   runId: string,
-  context: z.RefinementCtx,
+  context: Schema.FilterIssue[],
 ): CaseLifecycle => {
   const lifecycle: CaseLifecycle = {
     openCases: new Map(),
@@ -97,18 +100,16 @@ const collectCaseLifecycle = (
     }
 
     if (event.data.run_id !== runId) {
-      context.addIssue({
-        code: 'custom',
+      context.push({
         path: [index, 'data', 'run_id'],
-        message: 'run id drifted',
+        issue: 'run id drifted',
       });
     }
 
     if (event.event === 'run_started') {
-      context.addIssue({
-        code: 'custom',
+      context.push({
         path: [index, 'event'],
-        message: 'run_started must occur only at stream position zero',
+        issue: 'run_started must occur only at stream position zero',
       });
 
       return;
@@ -118,10 +119,9 @@ const collectCaseLifecycle = (
       const key = caseKey(event.data.test_id, event.data.case_id);
 
       if (startedIndexes.has(event.data.configured_index) || startedIdentities.has(key)) {
-        context.addIssue({
-          code: 'custom',
+        context.push({
           path: [index, 'data', 'configured_index'],
-          message: 'case starts must have unique identities and configured indexes',
+          issue: 'case starts must have unique identities and configured indexes',
         });
       }
 
@@ -140,10 +140,9 @@ const collectCaseLifecycle = (
         lifecycle.openCases.get(key) !== event.data.configured_index ||
         event.data.completion_index !== lifecycle.completedCount
       ) {
-        context.addIssue({
-          code: 'custom',
+        context.push({
           path: [index, 'data'],
-          message: 'completion must reference its start and retain observed completion order',
+          issue: 'completion must reference its start and retain observed completion order',
         });
       }
 
@@ -155,10 +154,9 @@ const collectCaseLifecycle = (
 
     if (event.event === 'run_completed') {
       if (lifecycle.completedEvent !== undefined || index !== events.length - 2) {
-        context.addIssue({
-          code: 'custom',
+        context.push({
           path: [index, 'event'],
-          message: 'run_completed must occur exactly once immediately before result',
+          issue: 'run_completed must occur exactly once immediately before result',
         });
       }
 
@@ -208,7 +206,7 @@ const reportFinalResult = (
   events: readonly EvalEvent[],
   started: RunStartedEvent,
   completed: RunCompletedEvent,
-  context: z.RefinementCtx,
+  context: Schema.FilterIssue[],
 ): void => {
   const finalEvent = events.at(-1);
 
@@ -220,10 +218,9 @@ const reportFinalResult = (
   const resultPath = [events.length - 1, 'data'];
 
   if (!allowedExitCodes[status].includes(finalEvent.data.exit_code)) {
-    context.addIssue({
-      code: 'custom',
+    context.push({
       path: [...resultPath, 'exit_code'],
-      message: `does not match terminal status ${status}`,
+      issue: `does not match terminal status ${status}`,
     });
   }
 
@@ -239,10 +236,9 @@ const reportFinalResult = (
     result.result.snapshot_hash !== started.data.snapshot_hash ||
     JSON.stringify(result.result.summary) !== JSON.stringify(summary)
   ) {
-    context.addIssue({
-      code: 'custom',
+    context.push({
       path: [...resultPath, 'result'],
-      message: 'completed result metadata must match the orchestration stream',
+      issue: 'completed result metadata must match the orchestration stream',
     });
   }
 };
@@ -251,7 +247,10 @@ const reportFinalResult = (
  * Checks the sequencing rules that per-line JSON Schema cannot express. Cases complete in
  * observed order while configured indexes keep their deterministic identity.
  */
-const validateEvalEventStream = (events: readonly EvalEvent[], context: z.RefinementCtx): void => {
+const validateEvalEventStream = (
+  events: readonly EvalEvent[],
+  context: Schema.FilterIssue[],
+): void => {
   reportSequenceNumbers(events, context);
   reportResultPlacement(events, context);
 
@@ -264,7 +263,7 @@ const validateEvalEventStream = (events: readonly EvalEvent[], context: z.Refine
   }
 
   if (first?.event !== 'run_started') {
-    context.addIssue({ code: 'custom', path: [0, 'event'], message: 'must be run_started' });
+    context.push({ path: [0, 'event'], issue: 'must be run_started' });
 
     return;
   }
@@ -273,20 +272,18 @@ const validateEvalEventStream = (events: readonly EvalEvent[], context: z.Refine
   const completed = lifecycle.completedEvent;
 
   if (completed === undefined) {
-    context.addIssue({
-      code: 'custom',
+    context.push({
       path: [],
-      message: 'orchestration must emit run_completed',
+      issue: 'orchestration must emit run_completed',
     });
 
     return;
   }
 
   if (!totalsMatch(first, completed, lifecycle)) {
-    context.addIssue({
-      code: 'custom',
+    context.push({
       path: [events.length - 2, 'data', 'summary'],
-      message: 'run totals must match the started, completed, and summarized cases',
+      issue: 'run totals must match the started, completed, and summarized cases',
     });
   }
 
@@ -294,8 +291,17 @@ const validateEvalEventStream = (events: readonly EvalEvent[], context: z.Refine
 };
 
 /** Encodes one complete `attest eval run --output jsonl` stream. */
-const evalEventStreamSchema = z.array(evalEventSchema).min(1).superRefine(validateEvalEventStream);
+const evalEventStreamSchema = Schema.Array(evalEventSchema)
+  .check(Schema.isMinLength(1))
+  .check(
+    Schema.makeFilter((value) => {
+      const issues: Schema.FilterIssue[] = [];
+      validateEvalEventStream(value, issues);
 
-type EvalEventStream = z.infer<typeof evalEventStreamSchema>;
+      return issues;
+    }),
+  );
+
+type EvalEventStream = typeof evalEventStreamSchema.Type;
 
 export { evalEventStreamSchema, type EvalEventStream };

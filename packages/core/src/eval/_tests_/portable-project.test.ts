@@ -86,12 +86,32 @@ describe('portable project resolution', () => {
     expect(run.snapshot.project_hash).toBe(project.projectHash);
   });
   it('rejects resource/source and declared hash mismatches', () => {
-    const input = bundle();
-    input.files['attest/tests/test.json'] = '{}';
+    let input = bundle();
+    input = { ...input, files: { ...input.files, ['attest/tests/test.json']: '{}' } };
     expect(() => resolvePortableProject(input)).toThrow('differs');
-    const changed = bundle();
-    changed.resources.project.resources.agents[0]!.content_hash = '0'.repeat(64);
-    changed.files['attest.project.json'] = JSON.stringify(changed.resources.project);
+    let changed = bundle();
+    changed = {
+      ...changed,
+      resources: {
+        ...changed.resources,
+        project: {
+          ...changed.resources.project,
+          resources: {
+            ...changed.resources.project.resources,
+            agents: changed.resources.project.resources.agents.map((entry, index) =>
+              index === 0 ? { ...entry, content_hash: '0'.repeat(64) } : entry,
+            ),
+          },
+        },
+      },
+    };
+    changed = {
+      ...changed,
+      files: {
+        ...changed.files,
+        ['attest.project.json']: JSON.stringify(changed.resources.project),
+      },
+    };
     expect(() => resolvePortableProject(changed)).toThrow('differs');
   });
   it.each([
@@ -101,19 +121,52 @@ describe('portable project resolution', () => {
     'attest/metrics/code/../../x.ts',
     'attest/agents/unreferenced.json',
   ])('rejects unsafe or unreferenced file %s', (path) => {
-    const input = bundle();
-    input.files[path] = 'secret';
+    let input = bundle();
+    input = { ...input, files: { ...input.files, [path]: 'secret' } };
     expect(() => resolvePortableProject(input)).toThrow();
   });
   it('rejects literal authorization before storing a revision', () => {
-    const input = bundle();
-    const agent = input.resources.agents[0]!;
+    let input = bundle();
+    let agent = input.resources.agents[0]!;
 
     if (agent.transport.kind !== 'http') throw new Error('fixture');
-    agent.transport.request.headers = { Authorization: 'Bearer secret' };
-    input.resources.project.resources.agents[0]!.content_hash = contentHash(agent);
-    input.files['attest/agents/agent.json'] = JSON.stringify(agent);
-    input.files['attest.project.json'] = JSON.stringify(input.resources.project);
+    agent = {
+      ...agent,
+      transport: {
+        ...agent.transport,
+        request: { ...agent.transport.request, headers: { Authorization: 'Bearer secret' } },
+      },
+    };
+    input = {
+      ...input,
+      resources: {
+        ...input.resources,
+        agents: input.resources.agents.map((entry, index) => (index === 0 ? agent : entry)),
+      },
+    };
+    input = {
+      ...input,
+      resources: {
+        ...input.resources,
+        project: {
+          ...input.resources.project,
+          resources: {
+            ...input.resources.project.resources,
+            agents: input.resources.project.resources.agents.map((entry, index) =>
+              index === 0 ? { ...entry, content_hash: contentHash(agent) } : entry,
+            ),
+          },
+        },
+      },
+    };
+    input = {
+      ...input,
+      files: { ...input.files, ['attest/agents/agent.json']: JSON.stringify(agent) },
+    };
+    input = {
+      ...input,
+      files: { ...input.files, ['attest.project.json']: JSON.stringify(input.resources.project) },
+    };
     expect(() => resolvePortableProject(input)).toThrow(
       // eslint-disable-next-line @typescript-eslint/no-unsafe-argument -- Vitest types asymmetric matchers as any.
       expect.objectContaining({
@@ -146,16 +199,16 @@ describe('portable metric dependencies', () => {
     ['helper.py', 'import requests'],
     ['helper.py', 'from .helper import score'],
   ])('rejects unsupported dependencies in %s', (name, source) => {
-    const input = bundle();
-    input.files[`attest/metrics/code/${name}`] = source;
+    let input = bundle();
+    input = { ...input, files: { ...input.files, [`attest/metrics/code/${name}`]: source } };
     expect(() => resolvePortableProject(input)).toThrow('self-contained');
   });
   it.each([
     ['helper.ts', "import { createHash } from 'node:crypto';"],
     ['helper.py', 'import json, math'],
   ])('allows built-ins in %s', (name, source) => {
-    const input = bundle();
-    input.files[`attest/metrics/code/${name}`] = source;
+    let input = bundle();
+    input = { ...input, files: { ...input.files, [`attest/metrics/code/${name}`]: source } };
     expect(() => resolvePortableProject(input)).not.toThrow();
   });
 });

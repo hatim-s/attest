@@ -1,158 +1,118 @@
 {
   "$comment": "Runtime-only invariants: span end_time must not precede start_time, and span ids must be unique.",
-  "$defs": {
-    "__schema0": {
-      "anyOf": [
-        {
-          "type": "string"
-        },
-        {
-          "type": "number"
-        },
-        {
-          "type": "boolean"
-        },
-        {
-          "type": "null"
-        },
-        {
-          "items": {
-            "$ref": "#/$defs/__schema0"
-          },
-          "type": "array"
-        },
-        {
-          "additionalProperties": {
-            "$ref": "#/$defs/__schema0"
-          },
-          "propertyNames": {
-            "type": "string"
-          },
-          "type": "object"
-        }
-      ]
-    },
-    "__schema1": {
-      "anyOf": [
-        {
-          "type": "string"
-        },
-        {
-          "type": "number"
-        },
-        {
-          "type": "boolean"
-        },
-        {
-          "type": "null"
-        },
-        {
-          "items": {
-            "$ref": "#/$defs/__schema1"
-          },
-          "type": "array"
-        },
-        {
-          "additionalProperties": {
-            "$ref": "#/$defs/__schema1"
-          },
-          "propertyNames": {
-            "type": "string"
-          },
-          "type": "object"
-        }
-      ]
-    }
-  },
+  "$defs": {},
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "additionalProperties": {},
+  "allOf": [
+    {
+      "additionalProperties": {},
+      "type": "object"
+    }
+  ],
   "properties": {
     "schema": {
-      "const": "attest.trace",
+      "enum": [
+        "attest.trace"
+      ],
       "type": "string"
     },
     "spans": {
       "items": {
-        "additionalProperties": {},
+        "allOf": [
+          {
+            "additionalProperties": {},
+            "type": "object"
+          }
+        ],
         "properties": {
           "attributes": {
-            "additionalProperties": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "number"
-                },
-                {
-                  "type": "boolean"
-                }
-              ]
-            },
-            "propertyNames": {
-              "type": "string"
-            },
-            "type": "object"
-          },
-          "end_time": {
-            "allOf": [
+            "anyOf": [
               {
-                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$"
+                "additionalProperties": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "boolean"
+                    }
+                  ]
+                },
+                "type": "object"
               },
               {
-                "pattern": "T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?Z$"
+                "not": {}
               }
-            ],
+            ]
+          },
+          "end_time": {
+            "format": "date-time",
             "type": "string"
           },
           "events": {
-            "items": {
-              "additionalProperties": {},
-              "properties": {
-                "attributes": {
-                  "additionalProperties": {
-                    "anyOf": [
-                      {
-                        "type": "string"
-                      },
-                      {
-                        "type": "number"
-                      },
-                      {
-                        "type": "boolean"
-                      }
-                    ]
-                  },
-                  "propertyNames": {
-                    "type": "string"
-                  },
-                  "type": "object"
-                },
-                "name": {
-                  "type": "string"
-                },
-                "time": {
+            "anyOf": [
+              {
+                "items": {
                   "allOf": [
                     {
-                      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$"
-                    },
-                    {
-                      "pattern": "T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?Z$"
+                      "additionalProperties": {},
+                      "type": "object"
                     }
                   ],
-                  "type": "string"
-                }
+                  "properties": {
+                    "attributes": {
+                      "anyOf": [
+                        {
+                          "additionalProperties": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "boolean"
+                              }
+                            ]
+                          },
+                          "type": "object"
+                        },
+                        {
+                          "not": {}
+                        }
+                      ]
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "time": {
+                      "format": "date-time",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "name",
+                    "time"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
               },
-              "required": [
-                "name",
-                "time"
-              ],
-              "type": "object"
-            },
-            "type": "array"
+              {
+                "not": {}
+              }
+            ]
           },
           "input": {
-            "$ref": "#/$defs/__schema0"
+            "anyOf": [
+              {},
+              {
+                "not": {}
+              }
+            ]
           },
           "kind": {
             "enum": [
@@ -168,7 +128,12 @@
             "type": "string"
           },
           "output": {
-            "$ref": "#/$defs/__schema1"
+            "anyOf": [
+              {},
+              {
+                "not": {}
+              }
+            ]
           },
           "parent_span_id": {
             "anyOf": [
@@ -184,18 +149,16 @@
             "type": "string"
           },
           "start_time": {
-            "allOf": [
-              {
-                "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$"
-              },
-              {
-                "pattern": "T\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?Z$"
-              }
-            ],
+            "format": "date-time",
             "type": "string"
           },
           "status": {
-            "additionalProperties": {},
+            "allOf": [
+              {
+                "additionalProperties": {},
+                "type": "object"
+              }
+            ],
             "properties": {
               "code": {
                 "enum": [
@@ -205,7 +168,14 @@
                 "type": "string"
               },
               "message": {
-                "type": "string"
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "not": {}
+                  }
+                ]
               }
             },
             "required": [

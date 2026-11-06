@@ -151,10 +151,16 @@ describe('mapped HTTP adapter', () => {
       );
     });
 
-    const agent = directAgent(fixture.origin);
+    let agent = directAgent(fixture.origin);
 
     if (agent.transport.kind !== 'http') throw new Error('Expected direct HTTP transport.');
-    agent.transport.extraction.trace_pointer = '/trace';
+    agent = {
+      ...agent,
+      transport: {
+        ...agent.transport,
+        extraction: { ...agent.transport.extraction, trace_pointer: '/trace' },
+      },
+    };
 
     const result = await invokeMappedHttpAgent(agent, request, { secrets: [secret] });
 
@@ -354,8 +360,14 @@ describe('mapped HTTP adapter', () => {
       response.end(JSON.stringify({ data: { result: 'ok' }, echo: secret, job: 'remote-7' }));
     });
 
-    const agent = directAgent(fixture.origin);
-    agent.transport.extraction.remote_job_id_pointer = '/job';
+    let agent = directAgent(fixture.origin);
+    agent = {
+      ...agent,
+      transport: {
+        ...agent.transport,
+        extraction: { ...agent.transport.extraction, remote_job_id_pointer: '/job' },
+      },
+    };
     const result = await invokeMappedHttpAgent(agent, request, { secrets: [secret] });
     expect(result.status).toBe('ok');
     expect(result.rawExcerpt?.text).toContain('[REDACTED]');
@@ -363,11 +375,23 @@ describe('mapped HTTP adapter', () => {
     expect(result.rawExcerpt?.text).not.toContain(JSON.stringify(secret).slice(1, -1));
     expect(result.diagnostics).toMatchObject({ remoteJobId: 'remote-7' });
 
-    agent.transport.extraction.remote_job_id_pointer = '/missing';
+    agent = {
+      ...agent,
+      transport: {
+        ...agent.transport,
+        extraction: { ...agent.transport.extraction, remote_job_id_pointer: '/missing' },
+      },
+    };
     expect((await invokeMappedHttpAgent(agent, request)).diagnostics).not.toHaveProperty(
       'remoteJobId',
     );
-    agent.transport.extraction.remote_job_id_pointer = '/data';
+    agent = {
+      ...agent,
+      transport: {
+        ...agent.transport,
+        extraction: { ...agent.transport.extraction, remote_job_id_pointer: '/data' },
+      },
+    };
     expect(await invokeMappedHttpAgent(agent, request)).toMatchObject({
       status: 'invocation_error',
       error: { code: 'invalid_envelope' },
@@ -391,17 +415,35 @@ describe('mapped HTTP adapter', () => {
 
     expect(cancelled).toMatchObject({ status: 'invocation_error', error: { code: 'cancelled' } });
 
-    const authority = directAgent(fixture.origin);
+    let authority = directAgent(fixture.origin);
 
     if (authority.transport.kind !== 'http') throw new Error('Expected direct HTTP transport.');
-    authority.transport.request.url = `http://{{input/question}}:${new URL(fixture.origin).port}/x`;
+    authority = {
+      ...authority,
+      transport: {
+        ...authority.transport,
+        request: {
+          ...authority.transport.request,
+          url: `http://{{input/question}}:${new URL(fixture.origin).port}/x`,
+        },
+      },
+    };
     expect((await invokeMappedHttpAgent(authority, request)).status).toBe('invocation_error');
 
-    const oversized = directAgent(fixture.origin, { limits: { request_bytes: 80 } });
+    let oversized = directAgent(fixture.origin, { limits: { request_bytes: 80 } });
 
     if (oversized.transport.kind !== 'http') throw new Error('Expected direct HTTP transport.');
-    oversized.transport.request.body = undefined;
-    oversized.transport.request.query = { large: '{{input/question}}'.repeat(30) };
+    oversized = {
+      ...oversized,
+      transport: {
+        ...oversized.transport,
+        request: {
+          ...oversized.transport.request,
+          body: undefined,
+          query: { large: '{{input/question}}'.repeat(30) },
+        },
+      },
+    };
     expect((await invokeMappedHttpAgent(oversized, request)).status).toBe('invocation_error');
     expect(requests).toBe(0);
   });
@@ -542,12 +584,21 @@ describe('mapped HTTP adapter', () => {
       });
     });
 
-    const agent = directAgent(fixture.origin);
+    let agent = directAgent(fixture.origin);
 
     if (agent.transport.kind !== 'http') throw new Error('Expected direct HTTP transport.');
-    agent.transport.request.body = 'prompt={{input/question}}&mode=fast';
-    agent.transport.request.body_encoding = 'raw';
-    agent.transport.request.headers = { 'content-type': 'application/x-www-form-urlencoded' };
+    agent = {
+      ...agent,
+      transport: {
+        ...agent.transport,
+        request: {
+          ...agent.transport.request,
+          body: 'prompt={{input/question}}&mode=fast',
+          body_encoding: 'raw',
+          headers: { 'content-type': 'application/x-www-form-urlencoded' },
+        },
+      },
+    };
     expect((await invokeMappedHttpAgent(agent, request)).status).toBe('ok');
     expect(observed).toBe('prompt=hello world&mode=fast');
   });

@@ -1,5 +1,6 @@
+import { SchemaDecodeError } from '@attest/contracts';
 import { parseWithSchema, isNumber } from '@attest/contracts';
-import type { z } from 'zod';
+import * as Schema from 'effect/Schema';
 
 /** Either the validated record or every structural violation, prefixed with its field path. */
 type RecordParseResult<T> = { ok: true; value: T } | { ok: false; violations: string[] };
@@ -11,13 +12,12 @@ const formatPath = (prefix: string, path: readonly PropertyKey[]): string =>
     prefix,
   );
 
-/** Renders zod issues as field-path violations, so an operator sees every broken field at once. */
-const formatRecordIssues = (issues: readonly z.core.$ZodIssue[], path: string): string[] =>
+/** Renders native schema issues as field-path violations, so an operator sees every broken field at once. */
+const formatRecordIssues = (issues: SchemaDecodeError['issues'], path: string): string[] =>
   issues.flatMap((issue) => {
     const location = formatPath(path, issue.path);
 
-    if (issue.code === 'unrecognized_keys')
-      return issue.keys.map((key) => `${location} forbids ${key}`);
+    if (issue.code === 'UnexpectedKey') return [`${location} is forbidden`];
 
     return [`${location} ${issue.message}`];
   });
@@ -50,7 +50,7 @@ const withoutUndefinedProperties = (value: unknown): RecordCandidate => {
  */
 // BOUNDARY: Store submissions are checked by their owner schema after omitting absent optional object fields.
 const parseRecord = <T>(
-  schema: z.ZodType<T>,
+  schema: Schema.ConstraintDecoder<T>,
   value: unknown,
   path: string,
 ): RecordParseResult<T> => {

@@ -31,8 +31,13 @@ describe('semantic project candidates', () => {
   it('rebuilds canonical manifest hashes and deterministic file bytes', async () => {
     const root = await createProject();
     const loaded = await loadProject({ project: root });
-    const candidate = candidateFromLoadedProject(loaded);
-    candidate.tests[0]!.name = 'Updated refund';
+    let candidate = candidateFromLoadedProject(loaded);
+    candidate = {
+      ...candidate,
+      tests: candidate.tests.map((entry, index) =>
+        index === 0 ? { ...candidate.tests[0]!, name: 'Updated refund' } : entry,
+      ),
+    };
 
     const first = prepareProjectCandidate(candidate);
     const second = prepareProjectCandidate(structuredClone(candidate));
@@ -51,10 +56,20 @@ describe('semantic project candidates', () => {
   it('reports field changes and reference detachments without authored values', async () => {
     const root = await createProject();
     const loaded = await loadProject({ project: root });
-    const candidate = candidateFromLoadedProject(loaded);
-    candidate.tests[0]!.name = 'Sensitive authored value';
-    candidate.tests[0]!.datasets = [];
-    candidate.datasets = [];
+    let candidate = candidateFromLoadedProject(loaded);
+    candidate = {
+      ...candidate,
+      tests: candidate.tests.map((entry, index) =>
+        index === 0 ? { ...candidate.tests[0]!, name: 'Sensitive authored value' } : entry,
+      ),
+    };
+    candidate = {
+      ...candidate,
+      tests: candidate.tests.map((entry, index) =>
+        index === 0 ? { ...candidate.tests[0]!, datasets: [] } : entry,
+      ),
+    };
+    candidate = { ...candidate, datasets: [] };
     const prepared = prepareProjectCandidate(candidate);
 
     const diff = createSemanticProjectDiff(loaded, prepared.project);

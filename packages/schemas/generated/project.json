@@ -1,429 +1,576 @@
 {
   "$comment": "Runtime-only invariants: resource paths must be canonical for their id, and resource ids must be unique per type.",
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "additionalProperties": false,
-  "properties": {
-    "defaults": {
+  "$defs": {
+    "ProjectManifest": {
       "additionalProperties": false,
       "properties": {
-        "concurrency": {
-          "exclusiveMinimum": 0,
-          "maximum": 9007199254740991,
-          "type": "integer"
+        "defaults": {
+          "anyOf": [
+            {
+              "additionalProperties": false,
+              "properties": {
+                "concurrency": {
+                  "anyOf": [
+                    {
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991,
+                      "type": "integer"
+                    },
+                    {
+                      "not": {}
+                    }
+                  ]
+                },
+                "eval": {
+                  "anyOf": [
+                    {
+                      "additionalProperties": false,
+                      "properties": {
+                        "hooks": {
+                          "anyOf": [
+                            {
+                              "additionalProperties": false,
+                              "properties": {
+                                "after_agent": {
+                                  "anyOf": [
+                                    {
+                                      "additionalProperties": false,
+                                      "properties": {
+                                        "argv": {
+                                          "items": {
+                                            "minLength": 1,
+                                            "type": "string"
+                                          },
+                                          "minItems": 1,
+                                          "type": "array"
+                                        },
+                                        "timeout_ms": {
+                                          "anyOf": [
+                                            {
+                                              "exclusiveMinimum": 0,
+                                              "maximum": 9007199254740991,
+                                              "type": "integer"
+                                            },
+                                            {
+                                              "not": {}
+                                            }
+                                          ]
+                                        }
+                                      },
+                                      "required": [
+                                        "argv"
+                                      ],
+                                      "type": "object"
+                                    },
+                                    {
+                                      "not": {}
+                                    }
+                                  ]
+                                },
+                                "after_case": {
+                                  "anyOf": [
+                                    {
+                                      "additionalProperties": false,
+                                      "properties": {
+                                        "argv": {
+                                          "items": {
+                                            "minLength": 1,
+                                            "type": "string"
+                                          },
+                                          "minItems": 1,
+                                          "type": "array"
+                                        },
+                                        "timeout_ms": {
+                                          "anyOf": [
+                                            {
+                                              "exclusiveMinimum": 0,
+                                              "maximum": 9007199254740991,
+                                              "type": "integer"
+                                            },
+                                            {
+                                              "not": {}
+                                            }
+                                          ]
+                                        }
+                                      },
+                                      "required": [
+                                        "argv"
+                                      ],
+                                      "type": "object"
+                                    },
+                                    {
+                                      "not": {}
+                                    }
+                                  ]
+                                },
+                                "after_evaluation": {
+                                  "anyOf": [
+                                    {
+                                      "additionalProperties": false,
+                                      "properties": {
+                                        "argv": {
+                                          "items": {
+                                            "minLength": 1,
+                                            "type": "string"
+                                          },
+                                          "minItems": 1,
+                                          "type": "array"
+                                        },
+                                        "timeout_ms": {
+                                          "anyOf": [
+                                            {
+                                              "exclusiveMinimum": 0,
+                                              "maximum": 9007199254740991,
+                                              "type": "integer"
+                                            },
+                                            {
+                                              "not": {}
+                                            }
+                                          ]
+                                        }
+                                      },
+                                      "required": [
+                                        "argv"
+                                      ],
+                                      "type": "object"
+                                    },
+                                    {
+                                      "not": {}
+                                    }
+                                  ]
+                                },
+                                "after_run": {
+                                  "anyOf": [
+                                    {
+                                      "additionalProperties": false,
+                                      "properties": {
+                                        "argv": {
+                                          "items": {
+                                            "minLength": 1,
+                                            "type": "string"
+                                          },
+                                          "minItems": 1,
+                                          "type": "array"
+                                        },
+                                        "timeout_ms": {
+                                          "anyOf": [
+                                            {
+                                              "exclusiveMinimum": 0,
+                                              "maximum": 9007199254740991,
+                                              "type": "integer"
+                                            },
+                                            {
+                                              "not": {}
+                                            }
+                                          ]
+                                        }
+                                      },
+                                      "required": [
+                                        "argv"
+                                      ],
+                                      "type": "object"
+                                    },
+                                    {
+                                      "not": {}
+                                    }
+                                  ]
+                                },
+                                "before_case": {
+                                  "anyOf": [
+                                    {
+                                      "additionalProperties": false,
+                                      "properties": {
+                                        "argv": {
+                                          "items": {
+                                            "minLength": 1,
+                                            "type": "string"
+                                          },
+                                          "minItems": 1,
+                                          "type": "array"
+                                        },
+                                        "timeout_ms": {
+                                          "anyOf": [
+                                            {
+                                              "exclusiveMinimum": 0,
+                                              "maximum": 9007199254740991,
+                                              "type": "integer"
+                                            },
+                                            {
+                                              "not": {}
+                                            }
+                                          ]
+                                        }
+                                      },
+                                      "required": [
+                                        "argv"
+                                      ],
+                                      "type": "object"
+                                    },
+                                    {
+                                      "not": {}
+                                    }
+                                  ]
+                                },
+                                "before_run": {
+                                  "anyOf": [
+                                    {
+                                      "additionalProperties": false,
+                                      "properties": {
+                                        "argv": {
+                                          "items": {
+                                            "minLength": 1,
+                                            "type": "string"
+                                          },
+                                          "minItems": 1,
+                                          "type": "array"
+                                        },
+                                        "timeout_ms": {
+                                          "anyOf": [
+                                            {
+                                              "exclusiveMinimum": 0,
+                                              "maximum": 9007199254740991,
+                                              "type": "integer"
+                                            },
+                                            {
+                                              "not": {}
+                                            }
+                                          ]
+                                        }
+                                      },
+                                      "required": [
+                                        "argv"
+                                      ],
+                                      "type": "object"
+                                    },
+                                    {
+                                      "not": {}
+                                    }
+                                  ]
+                                }
+                              },
+                              "type": "object"
+                            },
+                            {
+                              "not": {}
+                            }
+                          ]
+                        },
+                        "metric_sandbox": {
+                          "anyOf": [
+                            {
+                              "additionalProperties": false,
+                              "properties": {
+                                "image": {
+                                  "anyOf": [
+                                    {
+                                      "minLength": 1,
+                                      "type": "string"
+                                    },
+                                    {
+                                      "not": {}
+                                    }
+                                  ]
+                                },
+                                "kind": {
+                                  "enum": [
+                                    "vercel"
+                                  ],
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "kind"
+                              ],
+                              "type": "object"
+                            },
+                            {
+                              "not": {}
+                            }
+                          ]
+                        },
+                        "workers": {
+                          "anyOf": [
+                            {
+                              "additionalProperties": false,
+                              "properties": {
+                                "count": {
+                                  "exclusiveMinimum": 0,
+                                  "maximum": 9007199254740991,
+                                  "type": "integer"
+                                },
+                                "directory": {
+                                  "allOf": [
+                                    {
+                                      "pattern": "^(?![\\\\/])(?!(?:.*[\\\\/])?\\.\\.(?:[\\\\/]|$)).+$"
+                                    },
+                                    {
+                                      "pattern": "^(?:[^{}]|\\{(?:run_id|worker_index)\\})+$"
+                                    }
+                                  ],
+                                  "minLength": 1,
+                                  "pattern": "^(?![A-Za-z]:)",
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "count",
+                                "directory"
+                              ],
+                              "type": "object"
+                            },
+                            {
+                              "not": {}
+                            }
+                          ]
+                        }
+                      },
+                      "type": "object"
+                    },
+                    {
+                      "not": {}
+                    }
+                  ]
+                },
+                "eval_timeout_ms": {
+                  "anyOf": [
+                    {
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991,
+                      "type": "integer"
+                    },
+                    {
+                      "not": {}
+                    }
+                  ]
+                },
+                "output_cap_bytes": {
+                  "anyOf": [
+                    {
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991,
+                      "type": "integer"
+                    },
+                    {
+                      "not": {}
+                    }
+                  ]
+                }
+              },
+              "type": "object"
+            },
+            {
+              "not": {}
+            }
+          ]
         },
-        "eval": {
+        "name": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "project_id": {
+          "pattern": "^[0-9A-HJKMNP-TV-Za-hjkmnp-tv-z]{26}$",
+          "type": "string"
+        },
+        "resources": {
           "additionalProperties": false,
           "properties": {
-            "hooks": {
-              "additionalProperties": false,
-              "properties": {
-                "after_agent": {
-                  "additionalProperties": false,
-                  "properties": {
-                    "argv": {
-                      "items": {
-                        "minLength": 1,
-                        "type": "string"
-                      },
-                      "minItems": 1,
-                      "type": "array"
-                    },
-                    "timeout_ms": {
-                      "exclusiveMinimum": 0,
-                      "maximum": 9007199254740991,
-                      "type": "integer"
-                    }
+            "agents": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "content_hash": {
+                    "pattern": "^[a-f0-9]{64}$",
+                    "type": "string"
                   },
-                  "required": [
-                    "argv"
-                  ],
-                  "type": "object"
+                  "id": {
+                    "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+                    "type": "string"
+                  },
+                  "path": {
+                    "allOf": [
+                      {
+                        "pattern": "^(?![\\\\/])(?!(?:.*[\\\\/])?\\.\\.(?:[\\\\/]|$)).+$"
+                      }
+                    ],
+                    "minLength": 1,
+                    "pattern": "^(?![A-Za-z]:)",
+                    "type": "string"
+                  },
+                  "schema": {
+                    "enum": [
+                      "attest.agent"
+                    ],
+                    "type": "string"
+                  }
                 },
-                "after_case": {
-                  "additionalProperties": false,
-                  "properties": {
-                    "argv": {
-                      "items": {
-                        "minLength": 1,
-                        "type": "string"
-                      },
-                      "minItems": 1,
-                      "type": "array"
-                    },
-                    "timeout_ms": {
-                      "exclusiveMinimum": 0,
-                      "maximum": 9007199254740991,
-                      "type": "integer"
-                    }
-                  },
-                  "required": [
-                    "argv"
-                  ],
-                  "type": "object"
-                },
-                "after_evaluation": {
-                  "additionalProperties": false,
-                  "properties": {
-                    "argv": {
-                      "items": {
-                        "minLength": 1,
-                        "type": "string"
-                      },
-                      "minItems": 1,
-                      "type": "array"
-                    },
-                    "timeout_ms": {
-                      "exclusiveMinimum": 0,
-                      "maximum": 9007199254740991,
-                      "type": "integer"
-                    }
-                  },
-                  "required": [
-                    "argv"
-                  ],
-                  "type": "object"
-                },
-                "after_run": {
-                  "additionalProperties": false,
-                  "properties": {
-                    "argv": {
-                      "items": {
-                        "minLength": 1,
-                        "type": "string"
-                      },
-                      "minItems": 1,
-                      "type": "array"
-                    },
-                    "timeout_ms": {
-                      "exclusiveMinimum": 0,
-                      "maximum": 9007199254740991,
-                      "type": "integer"
-                    }
-                  },
-                  "required": [
-                    "argv"
-                  ],
-                  "type": "object"
-                },
-                "before_case": {
-                  "additionalProperties": false,
-                  "properties": {
-                    "argv": {
-                      "items": {
-                        "minLength": 1,
-                        "type": "string"
-                      },
-                      "minItems": 1,
-                      "type": "array"
-                    },
-                    "timeout_ms": {
-                      "exclusiveMinimum": 0,
-                      "maximum": 9007199254740991,
-                      "type": "integer"
-                    }
-                  },
-                  "required": [
-                    "argv"
-                  ],
-                  "type": "object"
-                },
-                "before_run": {
-                  "additionalProperties": false,
-                  "properties": {
-                    "argv": {
-                      "items": {
-                        "minLength": 1,
-                        "type": "string"
-                      },
-                      "minItems": 1,
-                      "type": "array"
-                    },
-                    "timeout_ms": {
-                      "exclusiveMinimum": 0,
-                      "maximum": 9007199254740991,
-                      "type": "integer"
-                    }
-                  },
-                  "required": [
-                    "argv"
-                  ],
-                  "type": "object"
-                }
+                "required": [
+                  "id",
+                  "path",
+                  "content_hash",
+                  "schema"
+                ],
+                "type": "object"
               },
-              "type": "object"
+              "type": "array"
             },
-            "metric_sandbox": {
-              "oneOf": [
-                {
-                  "additionalProperties": false,
-                  "properties": {
-                    "image": {
-                      "minLength": 1,
-                      "type": "string"
-                    },
-                    "kind": {
-                      "const": "vercel",
-                      "type": "string"
-                    }
+            "datasets": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "data_content_hash": {
+                    "pattern": "^[a-f0-9]{64}$",
+                    "type": "string"
                   },
-                  "required": [
-                    "kind"
-                  ],
-                  "type": "object"
-                }
-              ]
-            },
-            "workers": {
-              "additionalProperties": false,
-              "properties": {
-                "count": {
-                  "exclusiveMinimum": 0,
-                  "maximum": 9007199254740991,
-                  "type": "integer"
+                  "data_path": {
+                    "allOf": [
+                      {
+                        "pattern": "^(?![\\\\/])(?!(?:.*[\\\\/])?\\.\\.(?:[\\\\/]|$)).+$"
+                      }
+                    ],
+                    "minLength": 1,
+                    "pattern": "^(?![A-Za-z]:)",
+                    "type": "string"
+                  },
+                  "id": {
+                    "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+                    "type": "string"
+                  },
+                  "metadata_content_hash": {
+                    "pattern": "^[a-f0-9]{64}$",
+                    "type": "string"
+                  },
+                  "metadata_path": {
+                    "allOf": [
+                      {
+                        "pattern": "^(?![\\\\/])(?!(?:.*[\\\\/])?\\.\\.(?:[\\\\/]|$)).+$"
+                      }
+                    ],
+                    "minLength": 1,
+                    "pattern": "^(?![A-Za-z]:)",
+                    "type": "string"
+                  },
+                  "schema": {
+                    "enum": [
+                      "attest.dataset"
+                    ],
+                    "type": "string"
+                  }
                 },
-                "directory": {
-                  "allOf": [
-                    {
-                      "pattern": "^(?![A-Za-z]:)"
-                    },
-                    {
-                      "pattern": "^(?![\\\\/])(?!(?:.*[\\\\/])?\\.\\.(?:[\\\\/]|$)).+$"
-                    },
-                    {
-                      "pattern": "^(?:[^{}]|\\{(?:run_id|worker_index)\\})+$"
-                    }
-                  ],
-                  "minLength": 1,
-                  "type": "string"
-                }
+                "required": [
+                  "id",
+                  "schema",
+                  "data_path",
+                  "data_content_hash",
+                  "metadata_path",
+                  "metadata_content_hash"
+                ],
+                "type": "object"
               },
-              "required": [
-                "count",
-                "directory"
-              ],
-              "type": "object"
+              "type": "array"
+            },
+            "metrics": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "content_hash": {
+                    "pattern": "^[a-f0-9]{64}$",
+                    "type": "string"
+                  },
+                  "id": {
+                    "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+                    "type": "string"
+                  },
+                  "path": {
+                    "allOf": [
+                      {
+                        "pattern": "^(?![\\\\/])(?!(?:.*[\\\\/])?\\.\\.(?:[\\\\/]|$)).+$"
+                      }
+                    ],
+                    "minLength": 1,
+                    "pattern": "^(?![A-Za-z]:)",
+                    "type": "string"
+                  },
+                  "schema": {
+                    "enum": [
+                      "attest.metric"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "id",
+                  "path",
+                  "content_hash",
+                  "schema"
+                ],
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "tests": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "content_hash": {
+                    "pattern": "^[a-f0-9]{64}$",
+                    "type": "string"
+                  },
+                  "id": {
+                    "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+                    "type": "string"
+                  },
+                  "path": {
+                    "allOf": [
+                      {
+                        "pattern": "^(?![\\\\/])(?!(?:.*[\\\\/])?\\.\\.(?:[\\\\/]|$)).+$"
+                      }
+                    ],
+                    "minLength": 1,
+                    "pattern": "^(?![A-Za-z]:)",
+                    "type": "string"
+                  },
+                  "schema": {
+                    "enum": [
+                      "attest.test"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "id",
+                  "path",
+                  "content_hash",
+                  "schema"
+                ],
+                "type": "object"
+              },
+              "type": "array"
             }
           },
+          "required": [
+            "agents",
+            "tests",
+            "datasets",
+            "metrics"
+          ],
           "type": "object"
         },
-        "eval_timeout_ms": {
-          "exclusiveMinimum": 0,
-          "maximum": 9007199254740991,
-          "type": "integer"
-        },
-        "output_cap_bytes": {
-          "exclusiveMinimum": 0,
-          "maximum": 9007199254740991,
-          "type": "integer"
-        }
-      },
-      "type": "object"
-    },
-    "name": {
-      "minLength": 1,
-      "type": "string"
-    },
-    "project_id": {
-      "format": "ulid",
-      "pattern": "^[0-9A-HJKMNP-TV-Za-hjkmnp-tv-z]{26}$",
-      "type": "string"
-    },
-    "resources": {
-      "additionalProperties": false,
-      "properties": {
-        "agents": {
-          "items": {
-            "additionalProperties": false,
-            "properties": {
-              "content_hash": {
-                "pattern": "^[a-f0-9]{64}$",
-                "type": "string"
-              },
-              "id": {
-                "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
-                "type": "string"
-              },
-              "path": {
-                "allOf": [
-                  {
-                    "pattern": "^(?![A-Za-z]:)"
-                  },
-                  {
-                    "pattern": "^(?![\\\\/])(?!(?:.*[\\\\/])?\\.\\.(?:[\\\\/]|$)).+$"
-                  }
-                ],
-                "minLength": 1,
-                "type": "string"
-              },
-              "schema": {
-                "const": "attest.agent",
-                "type": "string"
-              }
-            },
-            "required": [
-              "id",
-              "path",
-              "content_hash",
-              "schema"
-            ],
-            "type": "object"
-          },
-          "type": "array"
-        },
-        "datasets": {
-          "items": {
-            "additionalProperties": false,
-            "properties": {
-              "data_content_hash": {
-                "pattern": "^[a-f0-9]{64}$",
-                "type": "string"
-              },
-              "data_path": {
-                "allOf": [
-                  {
-                    "pattern": "^(?![A-Za-z]:)"
-                  },
-                  {
-                    "pattern": "^(?![\\\\/])(?!(?:.*[\\\\/])?\\.\\.(?:[\\\\/]|$)).+$"
-                  }
-                ],
-                "minLength": 1,
-                "type": "string"
-              },
-              "id": {
-                "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
-                "type": "string"
-              },
-              "metadata_content_hash": {
-                "pattern": "^[a-f0-9]{64}$",
-                "type": "string"
-              },
-              "metadata_path": {
-                "allOf": [
-                  {
-                    "pattern": "^(?![A-Za-z]:)"
-                  },
-                  {
-                    "pattern": "^(?![\\\\/])(?!(?:.*[\\\\/])?\\.\\.(?:[\\\\/]|$)).+$"
-                  }
-                ],
-                "minLength": 1,
-                "type": "string"
-              },
-              "schema": {
-                "const": "attest.dataset",
-                "type": "string"
-              }
-            },
-            "required": [
-              "id",
-              "schema",
-              "data_path",
-              "data_content_hash",
-              "metadata_path",
-              "metadata_content_hash"
-            ],
-            "type": "object"
-          },
-          "type": "array"
-        },
-        "metrics": {
-          "items": {
-            "additionalProperties": false,
-            "properties": {
-              "content_hash": {
-                "pattern": "^[a-f0-9]{64}$",
-                "type": "string"
-              },
-              "id": {
-                "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
-                "type": "string"
-              },
-              "path": {
-                "allOf": [
-                  {
-                    "pattern": "^(?![A-Za-z]:)"
-                  },
-                  {
-                    "pattern": "^(?![\\\\/])(?!(?:.*[\\\\/])?\\.\\.(?:[\\\\/]|$)).+$"
-                  }
-                ],
-                "minLength": 1,
-                "type": "string"
-              },
-              "schema": {
-                "const": "attest.metric",
-                "type": "string"
-              }
-            },
-            "required": [
-              "id",
-              "path",
-              "content_hash",
-              "schema"
-            ],
-            "type": "object"
-          },
-          "type": "array"
-        },
-        "tests": {
-          "items": {
-            "additionalProperties": false,
-            "properties": {
-              "content_hash": {
-                "pattern": "^[a-f0-9]{64}$",
-                "type": "string"
-              },
-              "id": {
-                "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
-                "type": "string"
-              },
-              "path": {
-                "allOf": [
-                  {
-                    "pattern": "^(?![A-Za-z]:)"
-                  },
-                  {
-                    "pattern": "^(?![\\\\/])(?!(?:.*[\\\\/])?\\.\\.(?:[\\\\/]|$)).+$"
-                  }
-                ],
-                "minLength": 1,
-                "type": "string"
-              },
-              "schema": {
-                "const": "attest.test",
-                "type": "string"
-              }
-            },
-            "required": [
-              "id",
-              "path",
-              "content_hash",
-              "schema"
-            ],
-            "type": "object"
-          },
-          "type": "array"
+        "schema": {
+          "enum": [
+            "attest.project"
+          ],
+          "type": "string"
         }
       },
       "required": [
-        "agents",
-        "tests",
-        "datasets",
-        "metrics"
+        "schema",
+        "project_id",
+        "name",
+        "resources"
       ],
       "type": "object"
-    },
-    "schema": {
-      "const": "attest.project",
-      "type": "string"
     }
   },
-  "required": [
-    "schema",
-    "project_id",
-    "name",
-    "resources"
-  ],
-  "type": "object"
+  "$ref": "#/$defs/ProjectManifest",
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
 }

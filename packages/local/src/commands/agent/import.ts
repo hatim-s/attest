@@ -81,8 +81,8 @@ const runAgentImportCommand = async (
 
   assertNewId('agent', loaded.agents, agent.id);
 
-  const candidate = candidateFromLoadedProject(loaded);
-  candidate.agents.push(agent);
+  let candidate = candidateFromLoadedProject(loaded);
+  candidate = { ...candidate, agents: [...candidate.agents, agent] };
 
   return mutationResult({
     command: 'agent.import',

@@ -1,25 +1,33 @@
 import { parseWithSchema } from '@attest/contracts';
 import { StoreError, type StoreErrorCode } from '@attest/core';
-import { z } from 'zod';
+import * as Schema from 'effect/Schema';
 
 import type { ApiErrorCode, ApiErrorEnvelope } from '../contract/errors.js';
 
 class InvalidRequestError extends Error {}
 
 /** BOUNDARY: Parses untrusted request parameters once before the source receives them. */
-const parseInput = <Schema extends z.ZodType>(schema: Schema, input: unknown): z.output<Schema> => {
+const parseInput = <S extends Schema.ConstraintDecoder<unknown>>(
+  schema: S,
+  input: unknown,
+): S['Type'] => {
   const parsed = parseWithSchema(schema, input);
 
-  if (!parsed.ok) throw new InvalidRequestError(z.prettifyError(parsed.error));
+  if (!parsed.ok)
+    throw new InvalidRequestError(
+      parsed.error.issues
+        .map(({ path, message }) => `${path.map(String).join('.')}: ${message}`)
+        .join('; '),
+    );
 
   return parsed.value;
 };
 
 /** Reads a request body once; malformed JSON fails the same way as a body the schema rejects. */
-const parseJsonBody = async <Schema extends z.ZodType>(
-  schema: Schema,
+const parseJsonBody = async <S extends Schema.ConstraintDecoder<unknown>>(
+  schema: S,
   request: Request,
-): Promise<z.output<Schema>> => {
+): Promise<S['Type']> => {
   const text = await request.text();
   let body: unknown;
 

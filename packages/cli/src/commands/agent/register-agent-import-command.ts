@@ -131,14 +131,14 @@ const registerAgentImportCommand = (agent: Command, context: CommandContext): vo
       );
 
       if ((options.type ?? (/\.curl$/iu.test(importSource) ? 'curl' : 'json')) === 'json') {
-        const request: Extract<CommandRequest, { command: 'agent.import' }> = {
+        let request: Extract<CommandRequest, { command: 'agent.import' }> = {
           ...mutationRequestFields('agent.import', options),
           source: importSource,
           source_type: 'json',
           as: importId,
         };
 
-        if (options.name !== undefined) request.name = options.name;
+        if (options.name !== undefined) request = { ...request, name: options.name };
         await runImport(validateCommandRequest('agent.import', request));
 
         return;

@@ -1,12 +1,12 @@
 import { Link } from '@tanstack/react-router';
 import type { RunRecord } from '@attest/core/records';
-import { z } from 'zod';
+import * as Schema from 'effect/Schema';
 import { useRuns } from '../../api/queries.js';
 import { useProjectKey } from '../../routes/use-project-key.js';
 
-const runTabSchema = z.enum(['cases', 'distributions', 'suites']);
+const runTabSchema = Schema.Literals(['cases', 'distributions', 'suites']);
 
-type RunTab = z.infer<typeof runTabSchema>;
+type RunTab = typeof runTabSchema.Type;
 
 const tabLabels = { cases: 'Cases', distributions: 'Distributions', suites: 'Suites' } as const;
 
@@ -21,7 +21,7 @@ const RunTabs = ({ run, tab }: { run: RunRecord; tab: RunTab | 'compare' }) => {
 
   return (
     <nav className="tabs" aria-label="Run views">
-      {runTabSchema.options.map((id) => (
+      {runTabSchema.literals.map((id) => (
         <Link
           key={id}
           to="/projects/$projectKey/runs/$runId"

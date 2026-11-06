@@ -1,8 +1,9 @@
+import { stripStruct } from '@attest/contracts';
 import { parseWithSchema } from '@attest/contracts';
 import { randomUUID } from 'node:crypto';
 import { readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
-import { z } from 'zod';
+import * as Schema from 'effect/Schema';
 
 import { errnoCode } from '../../internal/errno-code.js';
 import { isProcessPresent } from '../../internal/process-presence.js';
@@ -11,13 +12,16 @@ import { prepareEvalProjectFile } from './eval-project-path.js';
 
 const EVAL_REGISTRY_DIRECTORY = join('.attest', 'eval-runs');
 
-const evalRegistryRecordSchema = z.object({
-  pid: z.number().int().positive(),
-  run_id: z.string(),
-  token: z.string().min(1),
+const evalRegistryRecordSchema = stripStruct({
+  pid: Schema.Finite.check(
+    Schema.isInt(),
+    Schema.isBetween({ minimum: Number.MIN_SAFE_INTEGER, maximum: Number.MAX_SAFE_INTEGER }),
+  ).check(Schema.isGreaterThan(0)),
+  run_id: Schema.String,
+  token: Schema.String.check(Schema.isMinLength(1)),
 });
 
-type EvalRegistryRecord = z.infer<typeof evalRegistryRecordSchema>;
+type EvalRegistryRecord = typeof evalRegistryRecordSchema.Type;
 
 type EvalRegistryHandle = {
   path: string;
@@ -27,11 +31,11 @@ type EvalRegistryHandle = {
   stopPolling: () => void;
 };
 
-const evalCancellationRequestSchema = z.object({ run_id: z.string(), token: z.string() });
+const evalCancellationRequestSchema = stripStruct({ run_id: Schema.String, token: Schema.String });
 
-type EvalCancellationRequest = z.infer<typeof evalCancellationRequestSchema>;
+type EvalCancellationRequest = typeof evalCancellationRequestSchema.Type;
 
-const registryOwnershipSchema = z.object({ token: z.string() });
+const registryOwnershipSchema = stripStruct({ token: Schema.String });
 
 const localControllers = new Map<string, { controller: AbortController; token: string }>();
 

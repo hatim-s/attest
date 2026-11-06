@@ -1,6 +1,6 @@
-import { z } from 'zod';
+import * as Schema from 'effect/Schema';
 
-import { projectManifestSchema } from './manifest.js';
+import { projectManifestSchema, collectManifestIssues } from './manifest.js';
 import { agentResourceSchema } from './resources/agent.js';
 import { testCaseSchema, type CaseMetricOverride } from './resources/case.js';
 import { datasetResourceSchema } from './resources/dataset.js';
@@ -8,12 +8,12 @@ import { metricResourceSchema } from './resources/metric.js';
 import { testResourceSchema, type TestResource } from './resources/test.js';
 import { reportDuplicates } from '../internal/duplicates.js';
 
-const loadedDatasetSchema = z.strictObject({
+const loadedDatasetSchema = Schema.Struct({
   metadata: datasetResourceSchema,
-  cases: z.array(testCaseSchema),
+  cases: Schema.Array(testCaseSchema),
 });
 
-type LoadedDataset = z.infer<typeof loadedDatasetSchema>;
+type LoadedDataset = typeof loadedDatasetSchema.Type;
 
 const resourceTypes = ['agents', 'tests', 'datasets', 'metrics'] as const;
 
@@ -30,25 +30,23 @@ const reportManifestParity = (
   manifestIds: readonly string[],
   loadedIds: readonly string[],
   resourceType: ResourceType,
-  context: z.RefinementCtx,
+  context: Schema.FilterIssue[],
 ): void => {
   const loaded = new Set(loadedIds);
   const manifest = new Set(manifestIds);
   manifestIds.forEach((id, index) => {
     if (!loaded.has(id)) {
-      context.addIssue({
-        code: 'custom',
+      context.push({
         path: ['project', 'resources', resourceType, index, 'id'],
-        message: `manifest references an unloaded ${resourceLabels[resourceType]}: ${id}`,
+        issue: `manifest references an unloaded ${resourceLabels[resourceType]}: ${id}`,
       });
     }
   });
   loadedIds.forEach((id, index) => {
     if (!manifest.has(id)) {
-      context.addIssue({
-        code: 'custom',
+      context.push({
         path: [resourceType, index, 'id'],
-        message: `resource is missing from the project manifest: ${id}`,
+        issue: `resource is missing from the project manifest: ${id}`,
       });
     }
   });
@@ -58,7 +56,7 @@ const reportManifestParity = (
 type MetricOverrideCheck = {
   overrides: readonly CaseMetricOverride[];
   path: PropertyKey[];
-  context: z.RefinementCtx;
+  context: Schema.FilterIssue[];
   metricIds: ReadonlySet<string>;
   /** When present, every known override must also be attached to the named test. */
   attachment?: { testId: string; metricIds: ReadonlySet<string> };
@@ -80,10 +78,9 @@ const reportMetricOverrides = (check: MetricOverrideCheck): void => {
 
     if (!metricIds.has(metric_id)) {
       if (reportUnknownMetric) {
-        context.addIssue({
-          code: 'custom',
+        context.push({
           path: overridePath,
-          message: `metric is not defined: ${metric_id}`,
+          issue: `metric is not defined: ${metric_id}`,
         });
       }
 
@@ -91,10 +88,9 @@ const reportMetricOverrides = (check: MetricOverrideCheck): void => {
     }
 
     if (attachment !== undefined && !attachment.metricIds.has(metric_id)) {
-      context.addIssue({
-        code: 'custom',
+      context.push({
         path: overridePath,
-        message: `metric is not attached to test ${attachment.testId}: ${metric_id}`,
+        issue: `metric is not attached to test ${attachment.testId}: ${metric_id}`,
       });
     }
   });
@@ -104,13 +100,12 @@ const reportDatasetRows = (
   dataset: LoadedDataset,
   datasetIndex: number,
   metricIds: ReadonlySet<string>,
-  context: z.RefinementCtx,
+  context: Schema.FilterIssue[],
 ): void => {
   if (dataset.metadata.case_count !== dataset.cases.length) {
-    context.addIssue({
-      code: 'custom',
+    context.push({
       path: ['datasets', datasetIndex, 'metadata', 'case_count'],
-      message: `case_count must equal loaded JSONL row count ${dataset.cases.length}`,
+      issue: `case_count must equal loaded JSONL row count ${dataset.cases.length}`,
     });
   }
 
@@ -136,7 +131,7 @@ type TestReferenceCheck = {
   agentIds: ReadonlySet<string>;
   metricIds: ReadonlySet<string>;
   datasetsById: ReadonlyMap<string, { dataset: LoadedDataset; index: number }>;
-  context: z.RefinementCtx;
+  context: Schema.FilterIssue[];
 };
 
 const reportMetricReferences = ({
@@ -156,10 +151,9 @@ const reportMetricReferences = ({
       return;
     }
 
-    context.addIssue({
-      code: 'custom',
+    context.push({
       path: ['tests', testIndex, 'metrics', metricIndex, 'metric_id'],
-      message: `metric is not defined: ${metric_id}`,
+      issue: `metric is not defined: ${metric_id}`,
     });
   });
 };
@@ -201,10 +195,9 @@ const reportResolvedCases = (check: TestReferenceCheck): void => {
     const attached = datasetsById.get(datasetAttachment.dataset_id);
 
     if (attached === undefined) {
-      context.addIssue({
-        code: 'custom',
+      context.push({
         path: attachmentPath,
-        message: `dataset is not defined: ${datasetAttachment.dataset_id}`,
+        issue: `dataset is not defined: ${datasetAttachment.dataset_id}`,
       });
 
       return;
@@ -219,10 +212,9 @@ const reportResolvedCases = (check: TestReferenceCheck): void => {
       }
 
       if (resolvedCaseIds.has(testCase.id)) {
-        context.addIssue({
-          code: 'custom',
+        context.push({
           path: attachmentPath,
-          message: `duplicate resolved case id: ${testCase.id}`,
+          issue: `duplicate resolved case id: ${testCase.id}`,
         });
       }
 
@@ -243,10 +235,9 @@ const reportTestReferences = (check: TestReferenceCheck): void => {
   const { test, testIndex, agentIds, context } = check;
 
   if (!agentIds.has(test.agent_id)) {
-    context.addIssue({
-      code: 'custom',
+    context.push({
       path: ['tests', testIndex, 'agent_id'],
-      message: `agent is not defined: ${test.agent_id}`,
+      issue: `agent is not defined: ${test.agent_id}`,
     });
   }
 
@@ -258,15 +249,18 @@ const reportTestReferences = (check: TestReferenceCheck): void => {
  * Encodes the loader-facing project snapshot and aggregates every reference invariant.
  * This is a runtime validation shape rather than another authored file format.
  */
-const projectResourcesSchema = z
-  .strictObject({
-    project: projectManifestSchema,
-    agents: z.array(agentResourceSchema),
-    tests: z.array(testResourceSchema),
-    datasets: z.array(loadedDatasetSchema),
-    metrics: z.array(metricResourceSchema),
-  })
-  .superRefine((resources, context) => {
+const projectResourcesSchema = Schema.Struct({
+  // Run manifest and resource checks together after structural decoding so neither masks the other.
+  project: projectManifestSchema.mapFields((fields) => fields),
+  agents: Schema.Array(agentResourceSchema),
+  tests: Schema.Array(testResourceSchema),
+  datasets: Schema.Array(loadedDatasetSchema),
+  metrics: Schema.Array(metricResourceSchema),
+}).check(
+  Schema.makeFilter((resources) => {
+    const context: Schema.FilterIssue[] = [];
+    context.push(...collectManifestIssues(resources.project, ['project']));
+
     const resourceIds = {
       agents: resources.agents.map(({ id }) => id),
       tests: resources.tests.map(({ id }) => id),
@@ -299,7 +293,6 @@ const projectResourcesSchema = z
     resources.datasets.forEach((dataset, datasetIndex) => {
       reportDatasetRows(dataset, datasetIndex, metricIds, context);
     });
-
     const agentIds = new Set(resourceIds.agents);
 
     const datasetsById = new Map(
@@ -309,8 +302,11 @@ const projectResourcesSchema = z
     resources.tests.forEach((test, testIndex) => {
       reportTestReferences({ test, testIndex, agentIds, metricIds, datasetsById, context });
     });
-  });
 
-type ProjectResources = z.infer<typeof projectResourcesSchema>;
+    return context;
+  }),
+);
+
+type ProjectResources = typeof projectResourcesSchema.Type;
 
 export { projectResourcesSchema, type LoadedDataset, type ProjectResources };

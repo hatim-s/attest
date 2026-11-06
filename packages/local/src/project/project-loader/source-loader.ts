@@ -2,7 +2,7 @@ import { parseWithSchemaSync, parseWithSchema } from '@attest/contracts';
 import { readFile, realpath, stat } from 'node:fs/promises';
 import { resolve } from 'node:path';
 
-import { z } from 'zod';
+import * as Schema from 'effect/Schema';
 
 import type { JsonValue } from '@attest/contracts';
 
@@ -83,7 +83,7 @@ type ParsedProjectJson = { diagnostics: ProjectDiagnostic[]; value?: JsonValue }
 
 const parseJson = (text: string, source: string, path?: string): ParsedProjectJson => {
   try {
-    return { diagnostics: [], value: parseWithSchemaSync(z.json(), JSON.parse(text)) };
+    return { diagnostics: [], value: parseWithSchemaSync(Schema.Json, JSON.parse(text)) };
   } catch {
     return {
       diagnostics: [{ code: 'json_invalid', message: 'could not parse JSON', path, source }],
@@ -93,7 +93,7 @@ const parseJson = (text: string, source: string, path?: string): ParsedProjectJs
 
 const schemaDiagnostics = (
   source: string,
-  issues: readonly z.core.$ZodIssue[],
+  issues: readonly { message: string; path: readonly PropertyKey[] }[],
   prefix: readonly PropertyKey[] = [],
 ): ProjectDiagnostic[] =>
   issues.map((issue) => ({
@@ -108,7 +108,7 @@ const loadJsonResource = async <Value>(
   root: string,
   source: string,
   expectedHash: string | undefined,
-  schema: z.ZodType<Value>,
+  schema: Schema.ConstraintDecoder<Value>,
 ): Promise<LoadedJsonResource<Value>> => {
   const loaded = await readProjectSource(root, source);
 

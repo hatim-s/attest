@@ -9,7 +9,7 @@ import { useProjectKey } from '../../routes/use-project-key.js';
 import { Badge, Button, Loading } from '../shared/ui.js';
 
 type CaseTableProps = {
-  cases: CaseSummary[];
+  cases: readonly CaseSummary[];
   hasNextPage: boolean;
   isFetchingNextPage: boolean;
   onLoadMore: () => void;

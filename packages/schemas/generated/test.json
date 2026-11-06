@@ -5,33 +5,229 @@
       "additionalProperties": false,
       "properties": {
         "expected": {
-          "$ref": "#/$defs/__schema1"
+          "anyOf": [
+            {},
+            {
+              "not": {}
+            }
+          ]
         },
         "folder": {
-          "minLength": 1,
-          "pattern": "^(?!\\.{1,2}(?:\\/|$))[^\\s/\\\\](?:[^/\\\\]*[^\\s/\\\\])?(?:\\/(?!\\.{1,2}(?:\\/|$))[^\\s/\\\\](?:[^/\\\\]*[^\\s/\\\\])?)*(?![\\s\\S])",
-          "type": "string"
+          "anyOf": [
+            {
+              "minLength": 1,
+              "pattern": "^(?!\\.{1,2}(?:\\/|$))[^\\s/\\\\](?:[^/\\\\]*[^\\s/\\\\])?(?:\\/(?!\\.{1,2}(?:\\/|$))[^\\s/\\\\](?:[^/\\\\]*[^\\s/\\\\])?)*(?![\\s\\S])",
+              "type": "string"
+            },
+            {
+              "not": {}
+            }
+          ]
         },
         "id": {
           "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
           "type": "string"
         },
-        "input": {
-          "$ref": "#/$defs/__schema0"
-        },
+        "input": {},
         "metric_overrides": {
+          "anyOf": [
+            {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "enabled": {
+                    "anyOf": [
+                      {
+                        "type": "boolean"
+                      },
+                      {
+                        "not": {}
+                      }
+                    ]
+                  },
+                  "metric_id": {
+                    "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+                    "type": "string"
+                  },
+                  "threshold": {
+                    "anyOf": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "not": {}
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "metric_id"
+                ],
+                "type": "object"
+              },
+              "type": "array"
+            },
+            {
+              "not": {}
+            }
+          ]
+        },
+        "params": {
+          "anyOf": [
+            {
+              "type": "object"
+            },
+            {
+              "not": {}
+            }
+          ]
+        },
+        "tags": {
+          "anyOf": [
+            {
+              "items": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "not": {}
+            }
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "input"
+      ],
+      "type": "object"
+    },
+    "TestResource": {
+      "additionalProperties": false,
+      "properties": {
+        "agent_id": {
+          "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+          "type": "string"
+        },
+        "cases": {
+          "items": {
+            "$ref": "#/$defs/TestCase"
+          },
+          "type": "array"
+        },
+        "datasets": {
           "items": {
             "additionalProperties": false,
             "properties": {
-              "enabled": {
-                "type": "boolean"
+              "dataset_id": {
+                "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+                "type": "string"
               },
+              "tags": {
+                "anyOf": [
+                  {
+                    "items": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  {
+                    "not": {}
+                  }
+                ]
+              }
+            },
+            "required": [
+              "dataset_id"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "defaults": {
+          "anyOf": [
+            {
+              "additionalProperties": false,
+              "properties": {
+                "concurrency": {
+                  "anyOf": [
+                    {
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991,
+                      "type": "integer"
+                    },
+                    {
+                      "not": {}
+                    }
+                  ]
+                },
+                "output_cap_bytes": {
+                  "anyOf": [
+                    {
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991,
+                      "type": "integer"
+                    },
+                    {
+                      "not": {}
+                    }
+                  ]
+                },
+                "retries": {
+                  "anyOf": [
+                    {
+                      "maximum": 9007199254740991,
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    {
+                      "not": {}
+                    }
+                  ]
+                },
+                "timeout_ms": {
+                  "anyOf": [
+                    {
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991,
+                      "type": "integer"
+                    },
+                    {
+                      "not": {}
+                    }
+                  ]
+                }
+              },
+              "type": "object"
+            },
+            {
+              "not": {}
+            }
+          ]
+        },
+        "id": {
+          "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+          "type": "string"
+        },
+        "metrics": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
               "metric_id": {
                 "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
                 "type": "string"
               },
               "threshold": {
-                "type": "number"
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "not": {}
+                  }
+                ]
               }
             },
             "required": [
@@ -41,244 +237,76 @@
           },
           "type": "array"
         },
-        "params": {
-          "additionalProperties": {
-            "$ref": "#/$defs/__schema2"
-          },
-          "propertyNames": {
-            "type": "string"
-          },
-          "type": "object"
+        "name": {
+          "minLength": 1,
+          "type": "string"
         },
-        "tags": {
-          "items": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "type": "array"
+        "pass_gate": {
+          "anyOf": [
+            {
+              "additionalProperties": false,
+              "properties": {
+                "maximum_failed_cases": {
+                  "anyOf": [
+                    {
+                      "maximum": 9007199254740991,
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    {
+                      "not": {}
+                    }
+                  ]
+                },
+                "minimum_pass_rate": {
+                  "anyOf": [
+                    {
+                      "maximum": 1,
+                      "minimum": 0,
+                      "type": "number"
+                    },
+                    {
+                      "not": {}
+                    }
+                  ]
+                },
+                "require_all_metrics": {
+                  "anyOf": [
+                    {
+                      "type": "boolean"
+                    },
+                    {
+                      "not": {}
+                    }
+                  ]
+                }
+              },
+              "type": "object"
+            },
+            {
+              "not": {}
+            }
+          ]
+        },
+        "schema": {
+          "enum": [
+            "attest.test"
+          ],
+          "type": "string"
         }
       },
       "required": [
+        "schema",
         "id",
-        "input"
+        "name",
+        "agent_id",
+        "cases",
+        "datasets",
+        "metrics"
       ],
       "type": "object"
-    },
-    "__schema0": {
-      "anyOf": [
-        {
-          "type": "string"
-        },
-        {
-          "type": "number"
-        },
-        {
-          "type": "boolean"
-        },
-        {
-          "type": "null"
-        },
-        {
-          "items": {
-            "$ref": "#/$defs/__schema0"
-          },
-          "type": "array"
-        },
-        {
-          "additionalProperties": {
-            "$ref": "#/$defs/__schema0"
-          },
-          "propertyNames": {
-            "type": "string"
-          },
-          "type": "object"
-        }
-      ]
-    },
-    "__schema1": {
-      "anyOf": [
-        {
-          "type": "string"
-        },
-        {
-          "type": "number"
-        },
-        {
-          "type": "boolean"
-        },
-        {
-          "type": "null"
-        },
-        {
-          "items": {
-            "$ref": "#/$defs/__schema1"
-          },
-          "type": "array"
-        },
-        {
-          "additionalProperties": {
-            "$ref": "#/$defs/__schema1"
-          },
-          "propertyNames": {
-            "type": "string"
-          },
-          "type": "object"
-        }
-      ]
-    },
-    "__schema2": {
-      "anyOf": [
-        {
-          "type": "string"
-        },
-        {
-          "type": "number"
-        },
-        {
-          "type": "boolean"
-        },
-        {
-          "type": "null"
-        },
-        {
-          "items": {
-            "$ref": "#/$defs/__schema2"
-          },
-          "type": "array"
-        },
-        {
-          "additionalProperties": {
-            "$ref": "#/$defs/__schema2"
-          },
-          "propertyNames": {
-            "type": "string"
-          },
-          "type": "object"
-        }
-      ]
     }
   },
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "additionalProperties": false,
-  "properties": {
-    "agent_id": {
-      "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
-      "type": "string"
-    },
-    "cases": {
-      "items": {
-        "$ref": "#/$defs/TestCase"
-      },
-      "type": "array"
-    },
-    "datasets": {
-      "items": {
-        "additionalProperties": false,
-        "properties": {
-          "dataset_id": {
-            "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
-            "type": "string"
-          },
-          "tags": {
-            "items": {
-              "minLength": 1,
-              "type": "string"
-            },
-            "type": "array"
-          }
-        },
-        "required": [
-          "dataset_id"
-        ],
-        "type": "object"
-      },
-      "type": "array"
-    },
-    "defaults": {
-      "additionalProperties": false,
-      "properties": {
-        "concurrency": {
-          "exclusiveMinimum": 0,
-          "maximum": 9007199254740991,
-          "type": "integer"
-        },
-        "output_cap_bytes": {
-          "exclusiveMinimum": 0,
-          "maximum": 9007199254740991,
-          "type": "integer"
-        },
-        "retries": {
-          "maximum": 9007199254740991,
-          "minimum": 0,
-          "type": "integer"
-        },
-        "timeout_ms": {
-          "exclusiveMinimum": 0,
-          "maximum": 9007199254740991,
-          "type": "integer"
-        }
-      },
-      "type": "object"
-    },
-    "id": {
-      "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
-      "type": "string"
-    },
-    "metrics": {
-      "items": {
-        "additionalProperties": false,
-        "properties": {
-          "metric_id": {
-            "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
-            "type": "string"
-          },
-          "threshold": {
-            "type": "number"
-          }
-        },
-        "required": [
-          "metric_id"
-        ],
-        "type": "object"
-      },
-      "type": "array"
-    },
-    "name": {
-      "minLength": 1,
-      "type": "string"
-    },
-    "pass_gate": {
-      "additionalProperties": false,
-      "properties": {
-        "maximum_failed_cases": {
-          "maximum": 9007199254740991,
-          "minimum": 0,
-          "type": "integer"
-        },
-        "minimum_pass_rate": {
-          "maximum": 1,
-          "minimum": 0,
-          "type": "number"
-        },
-        "require_all_metrics": {
-          "type": "boolean"
-        }
-      },
-      "type": "object"
-    },
-    "schema": {
-      "const": "attest.test",
-      "type": "string"
-    }
-  },
-  "required": [
-    "schema",
-    "id",
-    "name",
-    "agent_id",
-    "cases",
-    "datasets",
-    "metrics"
-  ],
-  "type": "object"
+  "$ref": "#/$defs/TestResource",
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
 }

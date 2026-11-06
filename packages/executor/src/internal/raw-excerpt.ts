@@ -19,7 +19,7 @@ const createRawExcerpt = (payload: string): RawExcerpt => {
     truncated,
   };
 
-  if (truncated) excerpt.sha256 = createHash('sha256').update(payload).digest('hex');
+  if (truncated) return { ...excerpt, sha256: createHash('sha256').update(payload).digest('hex') };
 
   return excerpt;
 };

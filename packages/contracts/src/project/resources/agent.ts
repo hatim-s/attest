@@ -1,4 +1,5 @@
-import { z } from 'zod';
+import { positiveIntegerSchema, nonnegativeIntegerSchema } from '../../schema/scalars.js';
+import * as Schema from 'effect/Schema';
 
 import { agentTransportSchema } from './agent-transports.js';
 import {
@@ -10,56 +11,54 @@ import {
 import { AGENT_RESOURCE_SCHEMA_ID } from '../../schema/identifiers.js';
 
 /** Bounds every phase of an agent attempt and its optional run-scoped lifecycle. */
-const agentTimeoutPolicySchema = z.strictObject({
-  connect_ms: durationMillisecondsSchema.optional(),
-  first_byte_ms: durationMillisecondsSchema.optional(),
-  idle_ms: durationMillisecondsSchema.optional(),
-  attempt_ms: durationMillisecondsSchema.optional(),
-  run_ms: durationMillisecondsSchema.optional(),
+const agentTimeoutPolicySchema = Schema.Struct({
+  connect_ms: Schema.optional(durationMillisecondsSchema),
+  first_byte_ms: Schema.optional(durationMillisecondsSchema),
+  idle_ms: Schema.optional(durationMillisecondsSchema),
+  attempt_ms: Schema.optional(durationMillisecondsSchema),
+  run_ms: Schema.optional(durationMillisecondsSchema),
 });
 
 /** Bounds authored requests and persisted transport evidence. */
-const agentEvidenceLimitsSchema = z.strictObject({
-  request_bytes: z.number().int().positive().optional(),
-  response_bytes: z.number().int().positive().optional(),
-  event_count: z.number().int().positive().optional(),
-  event_bytes: z.number().int().positive().optional(),
-  total_evidence_bytes: z.number().int().positive().optional(),
-  artifact_count: z.number().int().positive().optional(),
-  artifact_bytes: z.number().int().positive().optional(),
-  total_artifact_bytes: z.number().int().positive().optional(),
+const agentEvidenceLimitsSchema = Schema.Struct({
+  request_bytes: Schema.optional(positiveIntegerSchema),
+  response_bytes: Schema.optional(positiveIntegerSchema),
+  event_count: Schema.optional(positiveIntegerSchema),
+  event_bytes: Schema.optional(positiveIntegerSchema),
+  total_evidence_bytes: Schema.optional(positiveIntegerSchema),
+  artifact_count: Schema.optional(positiveIntegerSchema),
+  artifact_bytes: Schema.optional(positiveIntegerSchema),
+  total_artifact_bytes: Schema.optional(positiveIntegerSchema),
 });
 
 /** Marks transport locations that must be redacted before evidence persistence. */
-const redactionPolicySchema = z.strictObject({
-  headers: z.array(z.string().min(1)).optional(),
-  query: z.array(z.string().min(1)).optional(),
-  argv_positions: z.array(z.number().int().nonnegative()).optional(),
-  event_pointers: z.array(jsonPointerSchema).optional(),
+const redactionPolicySchema = Schema.Struct({
+  headers: Schema.optional(Schema.Array(Schema.String.check(Schema.isMinLength(1)))),
+  query: Schema.optional(Schema.Array(Schema.String.check(Schema.isMinLength(1)))),
+  argv_positions: Schema.optional(Schema.Array(nonnegativeIntegerSchema)),
+  event_pointers: Schema.optional(Schema.Array(jsonPointerSchema)),
 });
 
 /** Encodes one canonical agent resource without secret values. */
-const agentResourceSchema = z
-  .strictObject({
-    schema: z.literal(AGENT_RESOURCE_SCHEMA_ID),
-    id: resourceIdSchema,
-    name: z.string().min(1),
-    transport: agentTransportSchema,
-    timeouts: agentTimeoutPolicySchema.optional(),
-    retry: retryPolicySchema.optional(),
-    limits: agentEvidenceLimitsSchema.optional(),
-    redaction: redactionPolicySchema.optional(),
-    capabilities: z.strictObject({ trace: z.boolean() }).optional(),
-  })
-  .meta({ id: 'AgentResource' });
+const agentResourceSchema = Schema.Struct({
+  schema: Schema.Literal(AGENT_RESOURCE_SCHEMA_ID),
+  id: resourceIdSchema,
+  name: Schema.String.check(Schema.isMinLength(1)),
+  transport: agentTransportSchema,
+  timeouts: Schema.optional(agentTimeoutPolicySchema),
+  retry: Schema.optional(retryPolicySchema),
+  limits: Schema.optional(agentEvidenceLimitsSchema),
+  redaction: Schema.optional(redactionPolicySchema),
+  capabilities: Schema.optional(Schema.Struct({ trace: Schema.Boolean })),
+}).annotate({ identifier: 'AgentResource' });
 
-type AgentEvidenceLimits = z.infer<typeof agentEvidenceLimitsSchema>;
+type AgentEvidenceLimits = typeof agentEvidenceLimitsSchema.Type;
 
-type AgentResource = z.infer<typeof agentResourceSchema>;
+type AgentResource = typeof agentResourceSchema.Type;
 
-type AgentTimeoutPolicy = z.infer<typeof agentTimeoutPolicySchema>;
+type AgentTimeoutPolicy = typeof agentTimeoutPolicySchema.Type;
 
-type RedactionPolicy = z.infer<typeof redactionPolicySchema>;
+type RedactionPolicy = typeof redactionPolicySchema.Type;
 
 export {
   agentEvidenceLimitsSchema,

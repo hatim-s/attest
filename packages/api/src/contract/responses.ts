@@ -1,4 +1,5 @@
-import { z } from 'zod';
+import { stripStruct } from '@attest/contracts';
+import * as Schema from 'effect/Schema';
 import {
   runPageSchema,
   runRecordSchema,
@@ -13,32 +14,32 @@ import type { CaseSummary, RunRecord } from '@attest/core/records';
 import { aggregateCases, caseAggregateSchema, suiteAggregateSchema } from '@attest/core/analytics';
 import type { ApiRoute } from './routes.js';
 
-const projectListSchema = z.object({ items: z.array(projectRecordSchema) });
+const projectListSchema = stripStruct({ items: Schema.Array(projectRecordSchema) });
 
-const testListSchema = z.object({ items: z.array(testSummarySchema) });
+const testListSchema = stripStruct({ items: Schema.Array(testSummarySchema) });
 
-const runStartResponseSchema = z.object({ runId: z.string().min(1) });
+const runStartResponseSchema = stripStruct({ runId: Schema.String.check(Schema.isMinLength(1)) });
 
-const runCancelResponseSchema = z.object({ outcome: runCancelOutcomeSchema });
+const runCancelResponseSchema = stripStruct({ outcome: runCancelOutcomeSchema });
 
-const runSuitesSchema = z.object({
-  runId: z.string().min(1),
-  suites: z.array(suiteAggregateSchema),
+const runSuitesSchema = stripStruct({
+  runId: Schema.String.check(Schema.isMinLength(1)),
+  suites: Schema.Array(suiteAggregateSchema),
 });
 
-const suiteHistoryPointSchema = z.object({
-  runId: z.string().min(1),
-  createdAt: z.string(),
-  status: z.union([
-    runRecordSchema.options[0].shape.status,
-    runRecordSchema.options[1].shape.status,
+const suiteHistoryPointSchema = stripStruct({
+  runId: Schema.String.check(Schema.isMinLength(1)),
+  createdAt: Schema.String,
+  status: Schema.Union([
+    runRecordSchema.members[0].from.schema.fields.status,
+    runRecordSchema.members[1].from.schema.fields.status,
   ]),
-  gitBranch: z.string().optional(),
-  gitSha: z.string().optional(),
+  gitBranch: Schema.optional(Schema.String),
+  gitSha: Schema.optional(Schema.String),
   aggregate: caseAggregateSchema,
 });
 
-type SuiteHistoryPoint = z.infer<typeof suiteHistoryPointSchema>;
+type SuiteHistoryPoint = typeof suiteHistoryPointSchema.Type;
 
 /** Keeps live and snapshot history points consistent as their contract evolves. */
 const toSuiteHistoryPoint = (
@@ -60,24 +61,24 @@ const toSuiteHistoryPoint = (
   };
 };
 
-const suiteHistorySchema = z.object({
-  suiteName: z.string().min(1),
-  exhausted: z.boolean(),
-  runsExamined: z.number().int().nonnegative(),
-  points: z.array(suiteHistoryPointSchema),
+const suiteHistorySchema = stripStruct({
+  suiteName: Schema.String.check(Schema.isMinLength(1)),
+  exhausted: Schema.Boolean,
+  runsExamined: Schema.Finite.check(Schema.isInt()).check(Schema.isGreaterThanOrEqualTo(0)),
+  points: Schema.Array(suiteHistoryPointSchema),
 });
 
-type ProjectList = z.infer<typeof projectListSchema>;
+type ProjectList = typeof projectListSchema.Type;
 
-type TestList = z.infer<typeof testListSchema>;
+type TestList = typeof testListSchema.Type;
 
-type RunStartResponse = z.infer<typeof runStartResponseSchema>;
+type RunStartResponse = typeof runStartResponseSchema.Type;
 
-type RunCancelResponse = z.infer<typeof runCancelResponseSchema>;
+type RunCancelResponse = typeof runCancelResponseSchema.Type;
 
-type RunSuites = z.infer<typeof runSuitesSchema>;
+type RunSuites = typeof runSuitesSchema.Type;
 
-type SuiteHistory = z.infer<typeof suiteHistorySchema>;
+type SuiteHistory = typeof suiteHistorySchema.Type;
 
 const apiResponses = {
   listProjects: projectListSchema,
@@ -91,7 +92,7 @@ const apiResponses = {
   listTests: testListSchema,
   startRun: runStartResponseSchema,
   cancelRun: runCancelResponseSchema,
-} as const satisfies Record<ApiRoute, z.ZodType>;
+} as const satisfies Record<ApiRoute, Schema.ConstraintDecoder<unknown>>;
 
 export {
   apiResponses,

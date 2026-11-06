@@ -14,7 +14,7 @@ import { renderResult } from '../shared/command-result.js';
 type ProjectsAddOptions = CommonCliOptions & { name?: string };
 
 /** One line per project: key, name and root, in registration order. */
-const renderProjectList = (entries: RegistryEntry[]): string =>
+const renderProjectList = (entries: readonly RegistryEntry[]): string =>
   entries.length === 0
     ? 'No registered projects. Run `attest projects add <dir>` to register one.'
     : entries.map(({ key, name, root }) => `  ${key}  ${name}  ${root}`).join('\n');

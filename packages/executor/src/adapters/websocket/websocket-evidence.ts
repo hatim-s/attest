@@ -181,16 +181,17 @@ const createEvidenceRecorder = (
     if (pending.events.length >= EVIDENCE_EVENT_CAP) return;
     const excerpt = excerptOf(event.source, event.raw);
 
-    const recorded: EvidenceEvent = {
+    let recorded: EvidenceEvent = {
       classification: event.classification,
       elapsed_ms: Math.max(0, Math.round(pending.duration())),
     };
 
-    if (!CONNECTION_EVENTS.has(event.classification)) recorded.request_id = pending.requestId;
+    if (!CONNECTION_EVENTS.has(event.classification))
+      recorded = { ...recorded, request_id: pending.requestId };
 
-    if (event.bytes !== undefined) recorded.message_bytes = event.bytes;
+    if (event.bytes !== undefined) recorded = { ...recorded, message_bytes: event.bytes };
 
-    if (excerpt !== undefined) recorded.excerpt = excerpt;
+    if (excerpt !== undefined) recorded = { ...recorded, excerpt };
     pending.events.push(recorded);
   };
 
@@ -204,7 +205,7 @@ const createEvidenceRecorder = (
       events: pending.events.slice(0, EVIDENCE_EVENT_CAP),
     };
 
-    if (pending.close !== undefined) base.close = pending.close;
+    if (pending.close !== undefined) return { ...base, close: pending.close };
 
     return base;
   };

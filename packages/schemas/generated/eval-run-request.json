@@ -1,85 +1,154 @@
 {
+  "$defs": {},
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "anyOf": [
     {
       "additionalProperties": false,
       "properties": {
         "baseline_run_id": {
-          "format": "ulid",
-          "pattern": "^[0-9A-HJKMNP-TV-Za-hjkmnp-tv-z]{26}$",
-          "type": "string"
+          "anyOf": [
+            {
+              "pattern": "^[0-9A-HJKMNP-TV-Za-hjkmnp-tv-z]{26}$",
+              "type": "string"
+            },
+            {
+              "not": {}
+            }
+          ]
         },
         "case_ids": {
-          "items": {
-            "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
-            "type": "string"
-          },
-          "minItems": 1,
-          "type": "array"
+          "anyOf": [
+            {
+              "items": {
+                "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+                "type": "string"
+              },
+              "minItems": 1,
+              "type": "array"
+            },
+            {
+              "not": {}
+            }
+          ]
         },
         "command": {
-          "const": "eval.run",
+          "enum": [
+            "eval.run"
+          ],
           "type": "string"
         },
         "concurrency": {
-          "exclusiveMinimum": 0,
-          "maximum": 9007199254740991,
-          "type": "integer"
-        },
-        "dataset_ids": {
-          "items": {
-            "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
-            "type": "string"
-          },
-          "minItems": 1,
-          "type": "array"
-        },
-        "folders": {
-          "items": {
-            "minLength": 1,
-            "pattern": "^(?!\\.{1,2}(?:\\/|$))[^\\s/\\\\](?:[^/\\\\]*[^\\s/\\\\])?(?:\\/(?!\\.{1,2}(?:\\/|$))[^\\s/\\\\](?:[^/\\\\]*[^\\s/\\\\])?)*(?![\\s\\S])",
-            "type": "string"
-          },
-          "minItems": 1,
-          "type": "array"
-        },
-        "junit_path": {
-          "minLength": 1,
-          "type": "string"
-        },
-        "output": {
-          "const": "human",
-          "type": "string"
-        },
-        "sample": {
-          "additionalProperties": false,
-          "properties": {
-            "count": {
+          "anyOf": [
+            {
               "exclusiveMinimum": 0,
               "maximum": 9007199254740991,
               "type": "integer"
             },
-            "seed": {
+            {
+              "not": {}
+            }
+          ]
+        },
+        "dataset_ids": {
+          "anyOf": [
+            {
+              "items": {
+                "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+                "type": "string"
+              },
+              "minItems": 1,
+              "type": "array"
+            },
+            {
+              "not": {}
+            }
+          ]
+        },
+        "folders": {
+          "anyOf": [
+            {
+              "items": {
+                "minLength": 1,
+                "pattern": "^(?!\\.{1,2}(?:\\/|$))[^\\s/\\\\](?:[^/\\\\]*[^\\s/\\\\])?(?:\\/(?!\\.{1,2}(?:\\/|$))[^\\s/\\\\](?:[^/\\\\]*[^\\s/\\\\])?)*(?![\\s\\S])",
+                "type": "string"
+              },
+              "minItems": 1,
+              "type": "array"
+            },
+            {
+              "not": {}
+            }
+          ]
+        },
+        "junit_path": {
+          "anyOf": [
+            {
               "minLength": 1,
               "type": "string"
+            },
+            {
+              "not": {}
             }
-          },
-          "required": [
-            "count"
+          ]
+        },
+        "output": {
+          "enum": [
+            "human"
           ],
-          "type": "object"
+          "type": "string"
+        },
+        "sample": {
+          "anyOf": [
+            {
+              "additionalProperties": false,
+              "properties": {
+                "count": {
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991,
+                  "type": "integer"
+                },
+                "seed": {
+                  "anyOf": [
+                    {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    {
+                      "not": {}
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "count"
+              ],
+              "type": "object"
+            },
+            {
+              "not": {}
+            }
+          ]
         },
         "schema": {
-          "const": "attest.command-request",
+          "enum": [
+            "attest.command-request"
+          ],
           "type": "string"
         },
         "tags": {
-          "items": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "minItems": 1,
-          "type": "array"
+          "anyOf": [
+            {
+              "items": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "minItems": 1,
+              "type": "array"
+            },
+            {
+              "not": {}
+            }
+          ]
         },
         "test_ids": {
           "items": {
@@ -90,12 +159,26 @@
           "type": "array"
         },
         "timeout_ms": {
-          "exclusiveMinimum": 0,
-          "maximum": 9007199254740991,
-          "type": "integer"
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991,
+              "type": "integer"
+            },
+            {
+              "not": {}
+            }
+          ]
         },
         "watch": {
-          "type": "boolean"
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "not": {}
+            }
+          ]
         }
       },
       "required": [
@@ -110,93 +193,177 @@
       "additionalProperties": false,
       "properties": {
         "all": {
-          "const": true,
+          "enum": [
+            true
+          ],
           "type": "boolean"
         },
         "baseline_run_id": {
-          "format": "ulid",
-          "pattern": "^[0-9A-HJKMNP-TV-Za-hjkmnp-tv-z]{26}$",
-          "type": "string"
+          "anyOf": [
+            {
+              "pattern": "^[0-9A-HJKMNP-TV-Za-hjkmnp-tv-z]{26}$",
+              "type": "string"
+            },
+            {
+              "not": {}
+            }
+          ]
         },
         "case_ids": {
-          "items": {
-            "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
-            "type": "string"
-          },
-          "minItems": 1,
-          "type": "array"
+          "anyOf": [
+            {
+              "items": {
+                "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+                "type": "string"
+              },
+              "minItems": 1,
+              "type": "array"
+            },
+            {
+              "not": {}
+            }
+          ]
         },
         "command": {
-          "const": "eval.run",
+          "enum": [
+            "eval.run"
+          ],
           "type": "string"
         },
         "concurrency": {
-          "exclusiveMinimum": 0,
-          "maximum": 9007199254740991,
-          "type": "integer"
-        },
-        "dataset_ids": {
-          "items": {
-            "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
-            "type": "string"
-          },
-          "minItems": 1,
-          "type": "array"
-        },
-        "folders": {
-          "items": {
-            "minLength": 1,
-            "pattern": "^(?!\\.{1,2}(?:\\/|$))[^\\s/\\\\](?:[^/\\\\]*[^\\s/\\\\])?(?:\\/(?!\\.{1,2}(?:\\/|$))[^\\s/\\\\](?:[^/\\\\]*[^\\s/\\\\])?)*(?![\\s\\S])",
-            "type": "string"
-          },
-          "minItems": 1,
-          "type": "array"
-        },
-        "junit_path": {
-          "minLength": 1,
-          "type": "string"
-        },
-        "output": {
-          "const": "human",
-          "type": "string"
-        },
-        "sample": {
-          "additionalProperties": false,
-          "properties": {
-            "count": {
+          "anyOf": [
+            {
               "exclusiveMinimum": 0,
               "maximum": 9007199254740991,
               "type": "integer"
             },
-            "seed": {
+            {
+              "not": {}
+            }
+          ]
+        },
+        "dataset_ids": {
+          "anyOf": [
+            {
+              "items": {
+                "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+                "type": "string"
+              },
+              "minItems": 1,
+              "type": "array"
+            },
+            {
+              "not": {}
+            }
+          ]
+        },
+        "folders": {
+          "anyOf": [
+            {
+              "items": {
+                "minLength": 1,
+                "pattern": "^(?!\\.{1,2}(?:\\/|$))[^\\s/\\\\](?:[^/\\\\]*[^\\s/\\\\])?(?:\\/(?!\\.{1,2}(?:\\/|$))[^\\s/\\\\](?:[^/\\\\]*[^\\s/\\\\])?)*(?![\\s\\S])",
+                "type": "string"
+              },
+              "minItems": 1,
+              "type": "array"
+            },
+            {
+              "not": {}
+            }
+          ]
+        },
+        "junit_path": {
+          "anyOf": [
+            {
               "minLength": 1,
               "type": "string"
+            },
+            {
+              "not": {}
             }
-          },
-          "required": [
-            "count"
+          ]
+        },
+        "output": {
+          "enum": [
+            "human"
           ],
-          "type": "object"
+          "type": "string"
+        },
+        "sample": {
+          "anyOf": [
+            {
+              "additionalProperties": false,
+              "properties": {
+                "count": {
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991,
+                  "type": "integer"
+                },
+                "seed": {
+                  "anyOf": [
+                    {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    {
+                      "not": {}
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "count"
+              ],
+              "type": "object"
+            },
+            {
+              "not": {}
+            }
+          ]
         },
         "schema": {
-          "const": "attest.command-request",
+          "enum": [
+            "attest.command-request"
+          ],
           "type": "string"
         },
         "tags": {
-          "items": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "minItems": 1,
-          "type": "array"
+          "anyOf": [
+            {
+              "items": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "minItems": 1,
+              "type": "array"
+            },
+            {
+              "not": {}
+            }
+          ]
         },
         "timeout_ms": {
-          "exclusiveMinimum": 0,
-          "maximum": 9007199254740991,
-          "type": "integer"
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991,
+              "type": "integer"
+            },
+            {
+              "not": {}
+            }
+          ]
         },
         "watch": {
-          "type": "boolean"
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "not": {}
+            }
+          ]
         }
       },
       "required": [
@@ -211,47 +378,90 @@
       "additionalProperties": false,
       "properties": {
         "baseline_run_id": {
-          "format": "ulid",
-          "pattern": "^[0-9A-HJKMNP-TV-Za-hjkmnp-tv-z]{26}$",
-          "type": "string"
+          "anyOf": [
+            {
+              "pattern": "^[0-9A-HJKMNP-TV-Za-hjkmnp-tv-z]{26}$",
+              "type": "string"
+            },
+            {
+              "not": {}
+            }
+          ]
         },
         "case_ids": {
-          "items": {
-            "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
-            "type": "string"
-          },
-          "minItems": 1,
-          "type": "array"
+          "anyOf": [
+            {
+              "items": {
+                "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+                "type": "string"
+              },
+              "minItems": 1,
+              "type": "array"
+            },
+            {
+              "not": {}
+            }
+          ]
         },
         "command": {
-          "const": "eval.run",
+          "enum": [
+            "eval.run"
+          ],
           "type": "string"
         },
         "concurrency": {
-          "exclusiveMinimum": 0,
-          "maximum": 9007199254740991,
-          "type": "integer"
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991,
+              "type": "integer"
+            },
+            {
+              "not": {}
+            }
+          ]
         },
         "dataset_ids": {
-          "items": {
-            "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
-            "type": "string"
-          },
-          "minItems": 1,
-          "type": "array"
+          "anyOf": [
+            {
+              "items": {
+                "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+                "type": "string"
+              },
+              "minItems": 1,
+              "type": "array"
+            },
+            {
+              "not": {}
+            }
+          ]
         },
         "folders": {
-          "items": {
-            "minLength": 1,
-            "pattern": "^(?!\\.{1,2}(?:\\/|$))[^\\s/\\\\](?:[^/\\\\]*[^\\s/\\\\])?(?:\\/(?!\\.{1,2}(?:\\/|$))[^\\s/\\\\](?:[^/\\\\]*[^\\s/\\\\])?)*(?![\\s\\S])",
-            "type": "string"
-          },
-          "minItems": 1,
-          "type": "array"
+          "anyOf": [
+            {
+              "items": {
+                "minLength": 1,
+                "pattern": "^(?!\\.{1,2}(?:\\/|$))[^\\s/\\\\](?:[^/\\\\]*[^\\s/\\\\])?(?:\\/(?!\\.{1,2}(?:\\/|$))[^\\s/\\\\](?:[^/\\\\]*[^\\s/\\\\])?)*(?![\\s\\S])",
+                "type": "string"
+              },
+              "minItems": 1,
+              "type": "array"
+            },
+            {
+              "not": {}
+            }
+          ]
         },
         "junit_path": {
-          "minLength": 1,
-          "type": "string"
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "not": {}
+            }
+          ]
         },
         "output": {
           "enum": [
@@ -261,34 +471,57 @@
           "type": "string"
         },
         "sample": {
-          "additionalProperties": false,
-          "properties": {
-            "count": {
-              "exclusiveMinimum": 0,
-              "maximum": 9007199254740991,
-              "type": "integer"
+          "anyOf": [
+            {
+              "additionalProperties": false,
+              "properties": {
+                "count": {
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991,
+                  "type": "integer"
+                },
+                "seed": {
+                  "anyOf": [
+                    {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    {
+                      "not": {}
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "count"
+              ],
+              "type": "object"
             },
-            "seed": {
-              "minLength": 1,
-              "type": "string"
+            {
+              "not": {}
             }
-          },
-          "required": [
-            "count"
-          ],
-          "type": "object"
+          ]
         },
         "schema": {
-          "const": "attest.command-request",
+          "enum": [
+            "attest.command-request"
+          ],
           "type": "string"
         },
         "tags": {
-          "items": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "minItems": 1,
-          "type": "array"
+          "anyOf": [
+            {
+              "items": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "minItems": 1,
+              "type": "array"
+            },
+            {
+              "not": {}
+            }
+          ]
         },
         "test_ids": {
           "items": {
@@ -299,9 +532,16 @@
           "type": "array"
         },
         "timeout_ms": {
-          "exclusiveMinimum": 0,
-          "maximum": 9007199254740991,
-          "type": "integer"
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991,
+              "type": "integer"
+            },
+            {
+              "not": {}
+            }
+          ]
         }
       },
       "required": [
@@ -316,51 +556,96 @@
       "additionalProperties": false,
       "properties": {
         "all": {
-          "const": true,
+          "enum": [
+            true
+          ],
           "type": "boolean"
         },
         "baseline_run_id": {
-          "format": "ulid",
-          "pattern": "^[0-9A-HJKMNP-TV-Za-hjkmnp-tv-z]{26}$",
-          "type": "string"
+          "anyOf": [
+            {
+              "pattern": "^[0-9A-HJKMNP-TV-Za-hjkmnp-tv-z]{26}$",
+              "type": "string"
+            },
+            {
+              "not": {}
+            }
+          ]
         },
         "case_ids": {
-          "items": {
-            "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
-            "type": "string"
-          },
-          "minItems": 1,
-          "type": "array"
+          "anyOf": [
+            {
+              "items": {
+                "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+                "type": "string"
+              },
+              "minItems": 1,
+              "type": "array"
+            },
+            {
+              "not": {}
+            }
+          ]
         },
         "command": {
-          "const": "eval.run",
+          "enum": [
+            "eval.run"
+          ],
           "type": "string"
         },
         "concurrency": {
-          "exclusiveMinimum": 0,
-          "maximum": 9007199254740991,
-          "type": "integer"
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991,
+              "type": "integer"
+            },
+            {
+              "not": {}
+            }
+          ]
         },
         "dataset_ids": {
-          "items": {
-            "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
-            "type": "string"
-          },
-          "minItems": 1,
-          "type": "array"
+          "anyOf": [
+            {
+              "items": {
+                "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+                "type": "string"
+              },
+              "minItems": 1,
+              "type": "array"
+            },
+            {
+              "not": {}
+            }
+          ]
         },
         "folders": {
-          "items": {
-            "minLength": 1,
-            "pattern": "^(?!\\.{1,2}(?:\\/|$))[^\\s/\\\\](?:[^/\\\\]*[^\\s/\\\\])?(?:\\/(?!\\.{1,2}(?:\\/|$))[^\\s/\\\\](?:[^/\\\\]*[^\\s/\\\\])?)*(?![\\s\\S])",
-            "type": "string"
-          },
-          "minItems": 1,
-          "type": "array"
+          "anyOf": [
+            {
+              "items": {
+                "minLength": 1,
+                "pattern": "^(?!\\.{1,2}(?:\\/|$))[^\\s/\\\\](?:[^/\\\\]*[^\\s/\\\\])?(?:\\/(?!\\.{1,2}(?:\\/|$))[^\\s/\\\\](?:[^/\\\\]*[^\\s/\\\\])?)*(?![\\s\\S])",
+                "type": "string"
+              },
+              "minItems": 1,
+              "type": "array"
+            },
+            {
+              "not": {}
+            }
+          ]
         },
         "junit_path": {
-          "minLength": 1,
-          "type": "string"
+          "anyOf": [
+            {
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "not": {}
+            }
+          ]
         },
         "output": {
           "enum": [
@@ -370,39 +655,69 @@
           "type": "string"
         },
         "sample": {
-          "additionalProperties": false,
-          "properties": {
-            "count": {
+          "anyOf": [
+            {
+              "additionalProperties": false,
+              "properties": {
+                "count": {
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991,
+                  "type": "integer"
+                },
+                "seed": {
+                  "anyOf": [
+                    {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    {
+                      "not": {}
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "count"
+              ],
+              "type": "object"
+            },
+            {
+              "not": {}
+            }
+          ]
+        },
+        "schema": {
+          "enum": [
+            "attest.command-request"
+          ],
+          "type": "string"
+        },
+        "tags": {
+          "anyOf": [
+            {
+              "items": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "minItems": 1,
+              "type": "array"
+            },
+            {
+              "not": {}
+            }
+          ]
+        },
+        "timeout_ms": {
+          "anyOf": [
+            {
               "exclusiveMinimum": 0,
               "maximum": 9007199254740991,
               "type": "integer"
             },
-            "seed": {
-              "minLength": 1,
-              "type": "string"
+            {
+              "not": {}
             }
-          },
-          "required": [
-            "count"
-          ],
-          "type": "object"
-        },
-        "schema": {
-          "const": "attest.command-request",
-          "type": "string"
-        },
-        "tags": {
-          "items": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "minItems": 1,
-          "type": "array"
-        },
-        "timeout_ms": {
-          "exclusiveMinimum": 0,
-          "maximum": 9007199254740991,
-          "type": "integer"
+          ]
         }
       },
       "required": [

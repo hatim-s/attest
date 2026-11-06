@@ -1,7 +1,7 @@
 # @attest/client
 
 Host this next to an async agent. It accepts attest's `callback` trigger, answers `202`, runs your
-handler and posts the `attest.agent-completion` back. Depends only on `@attest/contracts` and zod.
+handler and posts the `attest.agent-completion` back. Depends only on `@attest/contracts` and Effect.
 
 ```ts
 import { createAgentRunner } from '@attest/client';

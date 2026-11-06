@@ -20,17 +20,17 @@ const createEvalPersistenceAdapter = (
   store: AttestStore,
 ): EvalPersistenceAdapter<ResolvedEvalCaseInput> => ({
   createRun: async (run) => {
-    const labels: NonNullable<Parameters<AttestStore['runs']['createRun']>[0]['labels']> = {
+    let labels: NonNullable<Parameters<AttestStore['runs']['createRun']>[0]['labels']> = {
       kind: 'eval',
       snapshot_hash: run.snapshot_hash,
     };
 
     if (run.snapshot.selection !== undefined) {
-      labels.selection_total = String(run.snapshot.selection.total_cases);
-      labels.selection_selected = String(run.snapshot.selection.selected_cases);
+      labels = { ...labels, selection_total: String(run.snapshot.selection.total_cases) };
+      labels = { ...labels, selection_selected: String(run.snapshot.selection.selected_cases) };
     }
 
-    const createdRun: Parameters<AttestStore['runs']['createRun']>[0] = {
+    let createdRun: Parameters<AttestStore['runs']['createRun']>[0] = {
       schemaId: EVAL_RUN_SCHEMA_ID,
       configHash: run.snapshot_hash,
       configJson: JSON.stringify(run),
@@ -38,11 +38,11 @@ const createEvalPersistenceAdapter = (
     };
 
     if (run.git?.commit !== undefined) {
-      createdRun.gitSha = run.git.commit;
+      createdRun = { ...createdRun, gitSha: run.git.commit };
     }
 
     if (run.git?.branch !== undefined) {
-      createdRun.gitBranch = run.git.branch;
+      createdRun = { ...createdRun, gitBranch: run.git.branch };
     }
 
     await store.runs.createRun(createdRun, { id: run.run_id, createdAt: run.created_at });
@@ -58,7 +58,7 @@ const createEvalPersistenceAdapter = (
 
     const payload = record.resolved_case.payload;
 
-    const request: AgentRequest = {
+    let request: AgentRequest = {
       protocol: AGENT_PROTOCOL,
       run_id: runId,
       case_id: payload.case_id,
@@ -66,7 +66,7 @@ const createEvalPersistenceAdapter = (
     };
 
     if (payload.case.params !== undefined) {
-      request.params = payload.case.params;
+      request = { ...request, params: payload.case.params };
     }
 
     const skippedExecution: StoredCaseExecution = {

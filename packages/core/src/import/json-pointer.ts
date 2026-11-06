@@ -11,10 +11,13 @@ const escapePointerSegment = (segment: PropertyKey): string =>
 const toPointer = (segments: readonly PropertyKey[]): string =>
   segments.map((segment) => `/${escapePointerSegment(segment)}`).join('');
 
+/** Preserves the readonly JSON element type through array narrowing. */
+const isJsonArray = (value: JsonValue): value is readonly JsonValue[] => Array.isArray(value);
+
 const ARRAY_INDEX = /^(?:0|[1-9][0-9]*)$/u;
 
 const childValue = (current: JsonValue, segment: string): PointerResolution => {
-  if (Array.isArray(current)) {
+  if (isJsonArray(current)) {
     if (!ARRAY_INDEX.test(segment)) return { found: false };
     const index = Number(segment);
 
@@ -47,4 +50,4 @@ const resolveJsonPointer = (value: JsonValue, pointer: string): PointerResolutio
   return { found: true, value: current };
 };
 
-export { resolveJsonPointer, toPointer };
+export { resolveJsonPointer, toPointer, isJsonArray };

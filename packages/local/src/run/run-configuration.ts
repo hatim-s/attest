@@ -13,7 +13,6 @@ import {
 } from '@attest/contracts';
 import type { RunRecord } from '@attest/core';
 import { executeResolvedEvalPlan, type EvalTerminalFailureFactory } from '@attest/runtime';
-import { z } from 'zod';
 
 import { withReadonlyRunStoreFile } from '../commands/run-store/readonly-run-store.js';
 import { runCleanupSteps } from '../commands/run-store/cleanup.js';
@@ -89,13 +88,13 @@ const readGitMetadata = async (projectRoot: string): Promise<EvalRun['git'] | un
   ]);
 
   {
-    const assembledFields: EvalRun['git'] | undefined = {
+    let assembledFields: EvalRun['git'] | undefined = {
       commit,
       dirty: status !== undefined && status.length > 0,
     };
 
     if (branch !== undefined) {
-      assembledFields.branch = branch;
+      assembledFields = { ...assembledFields, branch: branch };
     }
 
     return assembledFields;
@@ -133,7 +132,7 @@ const runConfiguration = async (
   const identity = createRunIdentity();
   const git = await readGitMetadata(project.root);
 
-  const runCandidate: z.input<typeof evalRunSchema> = {
+  let runCandidate: typeof evalRunSchema.Encoded = {
     schema: EVAL_RUN_SCHEMA_ID,
     run_id: identity.id,
     created_at: identity.createdAt,
@@ -142,7 +141,7 @@ const runConfiguration = async (
     effective_command: resolved.effectiveCommand,
   };
 
-  if (git !== undefined) runCandidate.git = git;
+  if (git !== undefined) runCandidate = { ...runCandidate, git: git };
   const run = parseWithSchemaSync(evalRunSchema, runCandidate);
 
   const configuredStorePath = join('.attest', 'runs.db');

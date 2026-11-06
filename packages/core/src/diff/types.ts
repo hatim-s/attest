@@ -1,9 +1,10 @@
-import { z } from 'zod';
+import { stripStruct } from '@attest/contracts';
+import * as Schema from 'effect/Schema';
 
 import { caseVerdictSchema } from '../records/projection-schemas.js';
 
 /** Exhaustive transition classification for a case across two runs. */
-const caseTransitionKindSchema = z.enum([
+const caseTransitionKindSchema = Schema.Literals([
   'added',
   'removed',
   'fixed',
@@ -12,59 +13,59 @@ const caseTransitionKindSchema = z.enum([
   'still_failing',
 ]);
 
-const metricDeltaSchema = z.object({
-  metricName: z.string(),
-  baseScore: z.number().optional(),
-  candidateScore: z.number().optional(),
-  delta: z.number().optional(),
-  passTransition: z.enum(['unchanged', 'gained', 'lost']),
+const metricDeltaSchema = stripStruct({
+  metricName: Schema.String,
+  baseScore: Schema.optional(Schema.Finite),
+  candidateScore: Schema.optional(Schema.Finite),
+  delta: Schema.optional(Schema.Finite),
+  passTransition: Schema.Literals(['unchanged', 'gained', 'lost']),
 });
 
-const caseTransitionSchema = z.object({
-  suiteName: z.string(),
-  caseId: z.string(),
+const caseTransitionSchema = stripStruct({
+  suiteName: Schema.String,
+  caseId: Schema.String,
   kind: caseTransitionKindSchema,
   // Marks a comparable pass/fail verdict flip whose metric scores are indistinguishable.
-  flakiness: z.literal('suspected').optional(),
-  baseVerdict: caseVerdictSchema.optional(),
-  candidateVerdict: caseVerdictSchema.optional(),
-  metricDeltas: z.array(metricDeltaSchema),
+  flakiness: Schema.optional(Schema.Literal('suspected')),
+  baseVerdict: Schema.optional(caseVerdictSchema),
+  candidateVerdict: Schema.optional(caseVerdictSchema),
+  metricDeltas: Schema.Array(metricDeltaSchema),
 });
 
-const diffSummarySchema = z.object({
-  baseRunId: z.string(),
-  candidateRunId: z.string(),
-  baseConfigHash: z.string(),
-  candidateConfigHash: z.string(),
-  counts: z.record(caseTransitionKindSchema, z.number()),
-  flakySuspectCount: z.number(),
-  basePassRate: z.number(),
-  candidatePassRate: z.number(),
+const diffSummarySchema = stripStruct({
+  baseRunId: Schema.String,
+  candidateRunId: Schema.String,
+  baseConfigHash: Schema.String,
+  candidateConfigHash: Schema.String,
+  counts: Schema.Record(caseTransitionKindSchema, Schema.Finite),
+  flakySuspectCount: Schema.Finite,
+  basePassRate: Schema.Finite,
+  candidatePassRate: Schema.Finite,
   // Partial runs compare only shared recorded identities; unmatched cases are coverage differences.
-  coverage: z
-    .object({
-      sharedCases: z.number(),
-      baseOnlyCases: z.number(),
-      candidateOnlyCases: z.number(),
-    })
-    .optional(),
+  coverage: Schema.optional(
+    stripStruct({
+      sharedCases: Schema.Finite,
+      baseOnlyCases: Schema.Finite,
+      candidateOnlyCases: Schema.Finite,
+    }),
+  ),
 });
 
 /** Validates the complete run comparison projection without importing comparison or storage code. */
-const runDiffSchema = z.object({
+const runDiffSchema = stripStruct({
   summary: diffSummarySchema,
-  transitions: z.array(caseTransitionSchema),
+  transitions: Schema.Array(caseTransitionSchema),
 });
 
-type CaseTransitionKind = z.infer<typeof caseTransitionKindSchema>;
+type CaseTransitionKind = typeof caseTransitionKindSchema.Type;
 
-type MetricDelta = z.infer<typeof metricDeltaSchema>;
+type MetricDelta = typeof metricDeltaSchema.Type;
 
-type CaseTransition = z.infer<typeof caseTransitionSchema>;
+type CaseTransition = typeof caseTransitionSchema.Type;
 
-type DiffSummary = z.infer<typeof diffSummarySchema>;
+type DiffSummary = typeof diffSummarySchema.Type;
 
-type RunDiff = z.infer<typeof runDiffSchema>;
+type RunDiff = typeof runDiffSchema.Type;
 
 /** Identifies the two runs being compared and whether only shared cases count. */
 interface RunComparison {

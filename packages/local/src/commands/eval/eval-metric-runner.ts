@@ -13,6 +13,7 @@
  * evaluation + metric secrets ─▶ caller redacts with agent and field-hidden secrets ─▶ stored
  * ```
  */
+import { stripStruct } from '@attest/contracts';
 import { lstat, realpath } from 'node:fs/promises';
 import type { BigIntStats } from 'node:fs';
 import { relative, resolve } from 'node:path';
@@ -44,7 +45,7 @@ import {
   judgeOutcomeSchema,
   type MetricContext,
 } from '@attest/runtime';
-import { z } from 'zod';
+import * as Schema from 'effect/Schema';
 
 import { LocalError } from '../../errors/index.js';
 import { readJsonPointer } from '../../internal/json-pointer.js';
@@ -77,11 +78,11 @@ type HttpMetricDefinition = Extract<MetricResource['definition'], { kind: 'http'
 /** A metric evaluation before redaction, with the secret values its evidence may contain. */
 type MetricRun = { evaluation: StoredMetricEvaluation; secrets: readonly string[] };
 
-const httpMetricResultSchema = z.object({
-  score: z.number(),
-  pass: z.boolean(),
-  rationale: z.string().optional(),
-  details: z.json().optional(),
+const httpMetricResultSchema = stripStruct({
+  score: Schema.Finite,
+  pass: Schema.Boolean,
+  rationale: Schema.optional(Schema.String),
+  details: Schema.optional(Schema.Json),
 });
 
 /** Runs one runtime metric definition and returns its single evaluation. */
@@ -203,7 +204,7 @@ const evaluateMetricResource = async ({
 }: EvaluateMetricResourceOptions): Promise<MetricRun> => {
   if (definition.kind === 'assertion') {
     const evaluation = await evaluateOne(
-      { name: id, type: 'assertion', assert: definition.assertions },
+      { name: id, type: 'assertion', assert: [...definition.assertions] },
       context,
       { signal },
     );
@@ -217,7 +218,7 @@ const evaluateMetricResource = async ({
     const { variables, secrets } = await resolveMetricEnvironment(definition, projectRoot);
 
     const evaluation = await evaluateOne(
-      { name: id, type: 'exec', command: definition.argv },
+      { name: id, type: 'exec', command: [...definition.argv] },
       context,
       {
         exec: {
@@ -239,7 +240,7 @@ const evaluateMetricResource = async ({
     await assertMetricDirectoryIdentity(directory, definition.cwd);
 
     const evaluation = await evaluateOne(
-      { name: id, type: 'exec', command: definition.argv },
+      { name: id, type: 'exec', command: [...definition.argv] },
       context,
       { exec: { cwd: directory.path, env, timeoutMs: definition.timeout_ms }, signal },
     );
@@ -319,7 +320,7 @@ const evaluateHttpMetric = async ({
   // The body is the same metric request command metrics get. Trace extensions are open, so the
   // request is checked as JSON before it becomes the mapped request's input.
   const metricRequest = parseWithSchemaSync(
-    z.json(),
+    Schema.Json,
     buildMetricRequest({ caseDefinition: context.caseDefinition, execution: context.execution }),
   );
 
@@ -442,7 +443,7 @@ const createEvalMetricEvaluator = (projectRoot: string, cacheStore: CacheStore) 
   }: EvaluateCaseMetricsOptions): Promise<StoredMetricEvaluation[]> => {
     const context = caseExecutionToMetricContext(payload.case, original);
 
-    const request: AgentRequest = {
+    let request: AgentRequest = {
       protocol: AGENT_PROTOCOL,
       run_id: runId,
       case_id: payload.case_id,
@@ -450,7 +451,7 @@ const createEvalMetricEvaluator = (projectRoot: string, cacheStore: CacheStore) 
     };
 
     if (payload.case.params !== undefined) {
-      request.params = payload.case.params;
+      request = { ...request, params: payload.case.params };
     }
 
     const evaluations: StoredMetricEvaluation[] = [];

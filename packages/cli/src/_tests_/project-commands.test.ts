@@ -28,7 +28,8 @@ const hasSourceDiagnostics = (
   isJsonObject(value) &&
   Array.isArray(value.diagnostics) &&
   value.diagnostics.every(
-    (item): item is { source: string } => isJsonObject(item) && typeof item.source === 'string',
+    (item: JsonValue): item is { source: string } =>
+      isJsonObject(item) && typeof item.source === 'string',
   );
 
 describe('project commands', () => {
@@ -249,30 +250,46 @@ describe('project commands', () => {
 
   it('redacts authored transport credentials from human and JSON resource output', async () => {
     const root = await createFixtureProject();
-    const candidate = projectResources(await loadProject({ project: root }));
-    candidate.agents[0]!.transport = {
-      kind: 'http',
-      lifecycle: 'external',
-      response_mode: 'mapped',
-      request: {
-        url: 'https://user:authored-url-password@example.test/invoke?token=authored-url-token',
-        method: 'POST',
-        headers: { Authorization: 'Bearer authored-agent-secret' },
-        query: { api_key: 'authored-query-secret' },
-      },
-      extraction: { result_pointer: '/result' },
+    let candidate = projectResources(await loadProject({ project: root }));
+    candidate = {
+      ...candidate,
+      agents: candidate.agents.map((entry, index) =>
+        index === 0
+          ? {
+              ...candidate.agents[0]!,
+              transport: {
+                kind: 'http',
+                lifecycle: 'external',
+                response_mode: 'mapped',
+                request: {
+                  url: 'https://user:authored-url-password@example.test/invoke?token=authored-url-token',
+                  method: 'POST',
+                  headers: { Authorization: 'Bearer authored-agent-secret' },
+                  query: { api_key: 'authored-query-secret' },
+                },
+                extraction: { result_pointer: '/result' },
+              },
+            }
+          : entry,
+      ),
     };
-    candidate.agents.push({
-      ...structuredClone(candidate.agents[0]!),
-      id: 'worker',
-      name: 'Worker',
-      transport: {
-        kind: 'native_cli',
-        lifecycle: 'per_case',
-        argv: ['node', 'authored-argv-secret'],
-      },
-      redaction: { argv_positions: [1] },
-    });
+    candidate = {
+      ...candidate,
+      agents: [
+        ...candidate.agents,
+        {
+          ...structuredClone(candidate.agents[0]!),
+          id: 'worker',
+          name: 'Worker',
+          transport: {
+            kind: 'native_cli',
+            lifecycle: 'per_case',
+            argv: ['node', 'authored-argv-secret'],
+          },
+          redaction: { argv_positions: [1] },
+        },
+      ],
+    };
     await applyProjectMutation({ candidate, projectRoot: root });
 
     const human = await runCommand(root, ['show', 'agent', 'support']);

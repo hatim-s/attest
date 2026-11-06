@@ -61,11 +61,20 @@ describe('HTTP streaming adapter', () => {
       response.end('data: {"type":"result","chunk":"lo","token":"stream-secret"}\n\n');
     });
 
-    const configured = agent(origin, 'sse');
-    configured.transport.incremental_output_pointer = '/chunk';
-    configured.transport.incremental_output_mode = 'text';
-    configured.transport.result_pointer = '/missing';
-    configured.redaction = { event_pointers: ['/token'] };
+    let configured = agent(origin, 'sse');
+    configured = {
+      ...configured,
+      transport: { ...configured.transport, incremental_output_pointer: '/chunk' },
+    };
+    configured = {
+      ...configured,
+      transport: { ...configured.transport, incremental_output_mode: 'text' },
+    };
+    configured = {
+      ...configured,
+      transport: { ...configured.transport, result_pointer: '/missing' },
+    };
+    configured = { ...configured, redaction: { event_pointers: ['/token'] } };
     const result = await invokeStreamingAgent(configured, request);
     expect(result.status).toBe('ok');
 
@@ -89,8 +98,14 @@ describe('HTTP streaming adapter', () => {
 
     const completed = await invokeStreamingAgent(agent(origin, 'jsonl'), request);
     expect(completed.status).toBe('ok');
-    const missing = agent(origin, 'jsonl');
-    missing.transport.request.url = `${origin}/missing`;
+    let missing = agent(origin, 'jsonl');
+    missing = {
+      ...missing,
+      transport: {
+        ...missing.transport,
+        request: { ...missing.transport.request, url: `${origin}/missing` },
+      },
+    };
     const failed = await invokeStreamingAgent(missing, request);
     expect(failed.status).toBe('invocation_error');
 

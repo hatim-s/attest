@@ -34,7 +34,9 @@ const registerMetricAddCommand = (metric: Command, context: CommandContext): voi
     .argument('[metric-id]', 'metric id')
     .option('--name <name>', 'metric display name; defaults to the id')
     .addOption(
-      new Option('--preset <preset>', 'stable metric preset').choices(metricPresetIdSchema.options),
+      new Option('--preset <preset>', 'stable metric preset').choices(
+        metricPresetIdSchema.literals,
+      ),
     )
     .option('--assert-json <json>', 'complete assertion check; repeatable', collect)
     .option('--path <path>', 'assertion evidence path; alone authors exists')
@@ -50,7 +52,7 @@ const registerMetricAddCommand = (metric: Command, context: CommandContext): voi
     .option('--tool <name>', 'tool name for tool-called')
     .addOption(
       new Option('--tool-status <status>', 'tool status').choices(
-        spanStatusSchema.shape.code.options,
+        spanStatusSchema.schema.fields.code.literals,
       ),
     )
     .option('--count <integer>', 'tool-call or span count')
@@ -58,11 +60,11 @@ const registerMetricAddCommand = (metric: Command, context: CommandContext): voi
     .option('--arg-equals <path=json>', 'tool argument equals matcher; repeatable', collect)
     .option('--arg-contains <path=json>', 'tool argument contains matcher; repeatable', collect)
     .option('--arg-exists <path>', 'tool argument exists matcher; repeatable', collect)
-    .addOption(new Option('--span-kind <kind>', 'trace span kind').choices(spanKindSchema.options))
+    .addOption(new Option('--span-kind <kind>', 'trace span kind').choices(spanKindSchema.literals))
     .option('--span-name <name>', 'trace span name')
     .addOption(
       new Option('--span-status <status>', 'trace span status').choices(
-        spanFilterSchema.shape.status.unwrap().options,
+        spanFilterSchema.fields.status.schema.members[0].literals,
       ),
     )
     .option('--attribute <name=json>', 'trace span attribute matcher; repeatable', collect)
@@ -77,7 +79,7 @@ const registerMetricAddCommand = (metric: Command, context: CommandContext): voi
     .option('--url <url>', 'HTTP metric URL')
     .addOption(
       new Option('--http-method <method>', 'HTTP metric method').choices(
-        httpRequestTemplateSchema.shape.method.options,
+        httpRequestTemplateSchema.fields.method.literals,
       ),
     )
     .option('--header-env <header=source-env>', 'HTTP header secret reference', collect)

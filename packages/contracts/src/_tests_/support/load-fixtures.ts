@@ -1,31 +1,33 @@
 import { parseWithSchemaSync } from '@attest/contracts';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { z } from 'zod';
+import * as Schema from 'effect/Schema';
 
 const fixtureFields = {
-  description: z.string().min(1),
-  input: z.json(),
-  preserve_paths: z.array(z.string()).optional(),
-  absent_paths: z.array(z.string()).optional(),
+  description: Schema.String.check(Schema.isMinLength(1)),
+  input: Schema.Json,
+  preserve_paths: Schema.optional(Schema.Array(Schema.String)),
+  absent_paths: Schema.optional(Schema.Array(Schema.String)),
 };
 
-const fixtureEnvelopeSchema = z.discriminatedUnion('expect', [
-  z.strictObject({ ...fixtureFields, expect: z.literal('valid') }),
-  z.strictObject({
+const fixtureEnvelopeSchema = Schema.Union([
+  Schema.Struct({ ...fixtureFields, expect: Schema.Literal('valid') }),
+  Schema.Struct({
     ...fixtureFields,
-    expect: z.literal('invalid'),
-    issue_paths: z.array(z.string()).nonempty(),
-    json_schema_valid: z.literal(true).optional(),
+    expect: Schema.Literal('invalid'),
+    issue_paths: Schema.Array(Schema.String).check(Schema.isMinLength(1)),
+    json_schema_valid: Schema.optional(Schema.Literal(true)),
   }),
-  z.strictObject({
+  Schema.Struct({
     ...fixtureFields,
-    expect: z.literal('valid-with-warnings'),
-    warning_codes: z.array(z.enum(['unknown_field', 'invalid_trace'])).nonempty(),
+    expect: Schema.Literal('valid-with-warnings'),
+    warning_codes: Schema.Array(Schema.Literals(['unknown_field', 'invalid_trace'])).check(
+      Schema.isMinLength(1),
+    ),
   }),
 ]);
 
-type FixtureEnvelope = z.infer<typeof fixtureEnvelopeSchema>;
+type FixtureEnvelope = typeof fixtureEnvelopeSchema.Type;
 
 type LoadedFixture = { contract: string; name: string; envelope: FixtureEnvelope };
 

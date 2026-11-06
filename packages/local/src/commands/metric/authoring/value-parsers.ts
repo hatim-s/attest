@@ -6,7 +6,7 @@ import {
   type SecretReference,
   type ToolArgumentMatcher,
 } from '@attest/contracts';
-import { z } from 'zod';
+import * as Schema from 'effect/Schema';
 
 import { LocalError } from '../../../errors/index.js';
 import { schemaIssueDiagnostics } from '../../../internal/schema-issue-diagnostics.js';
@@ -30,7 +30,7 @@ const parseChoice = <const Choice extends string>(
   choices: readonly [Choice, ...Choice[]],
   path: string,
 ): Choice => {
-  const parsed = parseWithSchema(z.enum(choices), value);
+  const parsed = parseWithSchema(Schema.Literals(choices), value);
 
   if (!parsed.ok) {
     throw new LocalError('cli_usage', `${path} must be one of ${choices.join(', ')}.`, { path });

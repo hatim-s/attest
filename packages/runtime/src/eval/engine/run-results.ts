@@ -39,7 +39,7 @@ const completedResult = (run: Readonly<EvalRun>, summary: EvalRunSummary): EvalF
     warnings: [],
   };
 
-  const additions: Pick<EvalRun['snapshot'], 'selection'> &
+  let additions: Pick<EvalRun['snapshot'], 'selection'> &
     Pick<EvalRun['effective_command']['resolved'], 'baseline_run_id' | 'junit_path'> = {};
 
   const payload = {
@@ -49,13 +49,14 @@ const completedResult = (run: Readonly<EvalRun>, summary: EvalRunSummary): EvalF
     summary,
   };
 
-  if (run.snapshot.selection !== undefined) additions.selection = run.snapshot.selection;
+  if (run.snapshot.selection !== undefined)
+    additions = { ...additions, selection: run.snapshot.selection };
 
   if (run.effective_command.resolved.baseline_run_id !== undefined)
-    additions.baseline_run_id = run.effective_command.resolved.baseline_run_id;
+    additions = { ...additions, baseline_run_id: run.effective_command.resolved.baseline_run_id };
 
   if (run.effective_command.resolved.junit_path !== undefined)
-    additions.junit_path = run.effective_command.resolved.junit_path;
+    additions = { ...additions, junit_path: run.effective_command.resolved.junit_path };
 
   return verdict === 'pass'
     ? {

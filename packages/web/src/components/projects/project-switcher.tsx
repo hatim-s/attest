@@ -5,7 +5,7 @@ import type { ProjectRecord } from '@attest/core/records';
 const ALL_PROJECTS = '';
 
 type ProjectSwitcherProps = {
-  projects: ProjectRecord[];
+  projects: readonly ProjectRecord[];
   /** The open project, or `undefined` off project pages. */
   projectKey: string | undefined;
 };

@@ -51,6 +51,11 @@ const coreForbidden = [
 // Exact file paths only. New roots need a concrete lifecycle owner.
 const effectRoots = [
   {
+    file: 'packages/contracts/src/schema/parse.ts',
+    operations: ['Effect.runSyncExit'],
+    owner: 'public synchronous schema decoding boundary',
+  },
+  {
     file: 'packages/contracts/src/_tests_/schema-decoding.test.ts',
     operations: ['Effect.runSync'],
     owner: 'contracts decoder invariant tests',
@@ -108,13 +113,44 @@ export default tseslint.config(
     ],
     rules: { 'anti-slop/effect-boundaries': ['error', { browser: true }] },
   },
+  {
+    files: ['packages/core/src/records/page-schemas.ts'],
+    rules: {
+      'anti-slop/effect-boundaries': [
+        'error',
+        {
+          dataOnly: true,
+          browser: true,
+          schemaConstructionModules: ['Effect'],
+        },
+      ],
+    },
+  },
+  {
+    files: ['packages/api/src/contract/requests.ts'],
+    rules: {
+      'anti-slop/effect-boundaries': [
+        'error',
+        {
+          dataOnly: true,
+          browser: true,
+          schemaConstructionModules: ['Effect', 'SchemaGetter'],
+        },
+      ],
+    },
+  },
   ...effectExecutionBlocks,
   {
     files: ['conformance/src/**/*.ts'],
     languageOptions: { parserOptions: { project: './conformance/tsconfig.json' } },
   },
   {
-    files: ['packages/contracts/src/schema/parse.ts', 'packages/contracts/src/project/shared.ts'],
+    files: [
+      'packages/contracts/src/schema/parse.ts',
+      'packages/contracts/src/project/shared.ts',
+      // Typecheck-only upstream API probe, removed with its workspace in S10.
+      'tools/effect-probe/src/probe.ts',
+    ],
     rules: { 'anti-slop/schema-decoding': 'off' },
   },
   {

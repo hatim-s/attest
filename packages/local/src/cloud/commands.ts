@@ -2,7 +2,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { setTimeout } from 'node:timers/promises';
 
 import { parseWithSchema, cloudRunRequestSchema, type EvalRunRequest } from '@attest/contracts';
-import { z } from 'zod';
+import * as Schema from 'effect/Schema';
 
 import { LocalError } from '../errors/local-error.js';
 import { createCloudClient, type CloudClient } from './client.js';
@@ -27,8 +27,8 @@ import {
 } from './protocol.js';
 
 /** Rejects malformed caller input before opening a network request. */
-// BOUNDARY: Cloud command inputs are validated by the supplied Zod schema before network submission.
-const parseCloudInput = <T>(schema: z.ZodType<T>, value: unknown): T => {
+// BOUNDARY: Cloud command inputs are validated by the supplied native schema before network submission.
+const parseCloudInput = <T>(schema: Schema.ConstraintDecoder<T>, value: unknown): T => {
   const parsed = parseWithSchema(schema, value);
 
   if (!parsed.ok) throw new LocalError('cli_usage', 'Cloud request does not match the protocol.');
@@ -152,7 +152,7 @@ const runCloud = async (options: {
   revisionId: string;
   request: EvalRunRequest;
   idempotencyKey: string;
-}): Promise<z.infer<typeof runResponseSchema>> =>
+}): Promise<typeof runResponseSchema.Type> =>
   await options.client.request('POST', `${cloudProjectPath(options.projectId)}/runs`, {
     schema: runResponseSchema,
     body: parseCloudInput(cloudRunRequestSchema, {
@@ -203,7 +203,10 @@ const createCloudProject = async (client: CloudClient, name: string) =>
   await client.request('POST', '/v1/projects', {
     schema: projectResponseSchema,
     body: {
-      name: parseCloudInput(z.string().min(1).max(128), name),
+      name: parseCloudInput(
+        Schema.String.check(Schema.isMinLength(1)).check(Schema.isMaxLength(128)),
+        name,
+      ),
     },
   });
 

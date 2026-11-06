@@ -319,7 +319,8 @@ describe('CLI test, case, dataset, and import authoring', { timeout: 20_000 }, (
     expect(imported.exitCode).toBe(1);
     const rendered = imported.errors.join('\n');
     expect(rendered).toContain('row 2, source parameters, destination /tags');
-    expect(rendered).toContain('invalid_type');
+    expect(rendered).toContain('MissingKey');
+    expect(rendered).toContain('AnyOf');
     expect(rendered).not.toContain('private-prompt');
   });
 

@@ -66,7 +66,7 @@ const ProjectRow = ({ project, runs }: ProjectRowProps) => (
 );
 
 /** One row per project from its newest runs page, so a slow or failing store holds up only its row. */
-const ProjectsTable = ({ projects }: { projects: ProjectRecord[] }) => {
+const ProjectsTable = ({ projects }: { projects: readonly ProjectRecord[] }) => {
   const runQueries = useRunsForProjects(projects.map((project) => project.key));
 
   const rows = sortByLatestRun(

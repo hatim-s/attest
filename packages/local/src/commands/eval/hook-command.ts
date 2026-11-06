@@ -9,7 +9,7 @@ import { LocalError } from '../../errors/index.js';
 
 const HOOK_TERMINATION_GRACE_MS = 1_000;
 
-type HookCommand = { argv: string[]; timeout_ms?: number };
+type HookCommand = { argv: readonly string[]; timeout_ms?: number };
 
 type HookPhase =
   'after_agent' | 'after_evaluation' | 'after_case' | 'after_run' | 'before_case' | 'before_run';

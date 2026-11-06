@@ -1,3 +1,4 @@
+import { stripStruct } from '@attest/contracts';
 import { createServer } from 'node:http';
 import { mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -15,7 +16,7 @@ import {
 import { type CacheStore } from '@attest/core';
 import { type CaseExecution, type ResolvedEvalCase } from '@attest/runtime';
 import { afterEach, expect, onTestFinished, test, vi } from 'vitest';
-import { z } from 'zod';
+import * as Schema from 'effect/Schema';
 
 import { REDACTED } from '../../../internal/redaction.js';
 import { openStore } from '../../../store/index.js';
@@ -98,7 +99,7 @@ const startJudgeProvider = async (): Promise<{ requests: string[] }> => {
   });
 
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
-  const { port } = parseWithSchemaSync(z.object({ port: z.number() }), server.address());
+  const { port } = parseWithSchemaSync(stripStruct({ port: Schema.Finite }), server.address());
   vi.stubEnv('OPENAI_API_KEY', 'judge-test-key');
   vi.stubEnv('OPENAI_BASE_URL', `http://127.0.0.1:${port}/v1`);
   onTestFinished(() => {
@@ -121,8 +122,14 @@ const createRoot = async (token: string): Promise<string> => {
 
 const readRun = async () => {
   const fixture = await readFile(new URL('./fixtures/eval-run.json', import.meta.url), 'utf8');
-  const run = parseWithSchemaSync(evalRunSchema, JSON.parse(fixture));
-  delete run.effective_command.resolved.execution;
+  let run = parseWithSchemaSync(evalRunSchema, JSON.parse(fixture));
+  run = {
+    ...run,
+    effective_command: {
+      ...run.effective_command,
+      resolved: { ...run.effective_command.resolved, execution: undefined },
+    },
+  };
 
   return run;
 };
@@ -267,11 +274,11 @@ test('a field-redacted output value never reaches stored metric text or the judg
     expect(stored).toMatchObject([{ response: { output: { token: REDACTED } } }]);
 
     const [echo, judge] = stored[0]?.metrics ?? [];
-    const { stderr } = parseWithSchemaSync(z.object({ stderr: z.string() }), echo?.details);
+    const { stderr } = parseWithSchemaSync(stripStruct({ stderr: Schema.String }), echo?.details);
     expect(stderr).toContain(`"token":"${REDACTED}"`);
     expect(judge?.rationale).toContain(REDACTED);
 
-    const { key } = parseWithSchemaSync(z.object({ key: z.string() }), judge?.judgeIo);
+    const { key } = parseWithSchemaSync(stripStruct({ key: Schema.String }), judge?.judgeIo);
     const cached = await store.cache.get('judge', key);
     expect(cached).toBeDefined();
 

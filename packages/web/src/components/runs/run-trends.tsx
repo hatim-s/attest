@@ -31,7 +31,7 @@ const TrendChart = ({ group }: { group: ReturnType<typeof createRunTrends>['grou
 };
 
 /** Facets groups so branch or label identity never depends on a generated or recycled hue. */
-const RunTrends = ({ runs }: { runs: RunRecord[] }) => {
+const RunTrends = ({ runs }: { runs: readonly RunRecord[] }) => {
   const projectKey = useProjectKey();
   const [labelKey, setLabelKey] = useState('');
   const keys = [...new Set(runs.flatMap((run) => Object.keys(run.labels ?? {})))].sort();

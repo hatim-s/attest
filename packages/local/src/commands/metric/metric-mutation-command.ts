@@ -69,36 +69,39 @@ const rewriteMetricReferences = (
   project: ProjectResources,
   from: string,
   to: string | undefined,
-): void => {
-  for (const test of project.tests) {
-    test.metrics =
-      to === undefined
-        ? test.metrics.filter(({ metric_id: id }) => id !== from)
-        : test.metrics.map((reference) =>
-            reference.metric_id === from ? { ...reference, metric_id: to } : reference,
-          );
-    test.cases.forEach((testCase) => {
-      if (testCase.metric_overrides === undefined) return;
-      testCase.metric_overrides =
-        to === undefined
-          ? testCase.metric_overrides.filter(({ metric_id: id }) => id !== from)
-          : testCase.metric_overrides.map((override) =>
-              override.metric_id === from ? { ...override, metric_id: to } : override,
-            );
-    });
-  }
+): ProjectResources => {
+  const rewriteCases = (cases: ProjectResources['tests'][number]['cases']) =>
+    cases.map((testCase) => {
+      if (testCase.metric_overrides === undefined) return testCase;
 
-  project.datasets.forEach((dataset) =>
-    dataset.cases.forEach((testCase) => {
-      if (testCase.metric_overrides === undefined) return;
-      testCase.metric_overrides =
+      return {
+        ...testCase,
+        metric_overrides:
+          to === undefined
+            ? testCase.metric_overrides.filter(({ metric_id }) => metric_id !== from)
+            : testCase.metric_overrides.map((override) =>
+                override.metric_id === from ? { ...override, metric_id: to } : override,
+              ),
+      };
+    });
+
+  return {
+    ...project,
+    tests: project.tests.map((test) => ({
+      ...test,
+      metrics:
         to === undefined
-          ? testCase.metric_overrides.filter(({ metric_id: id }) => id !== from)
-          : testCase.metric_overrides.map((override) =>
-              override.metric_id === from ? { ...override, metric_id: to } : override,
-            );
-    }),
-  );
+          ? test.metrics.filter(({ metric_id }) => metric_id !== from)
+          : test.metrics.map((reference) =>
+              reference.metric_id === from ? { ...reference, metric_id: to } : reference,
+            ),
+      cases: rewriteCases(test.cases),
+    })),
+    datasets: project.datasets.map((dataset) => ({
+      ...dataset,
+      cases: rewriteCases(dataset.cases),
+    })),
+  };
 };
 
 /** Builds and cross-validates the complete project candidate before transactional publication. */
@@ -107,13 +110,13 @@ const buildMetricMutation = async (
   request: MetricAuthoringRequest,
   options: MetricMutationCommandOptions,
 ): Promise<MutationBuildResult> => {
-  const candidate = candidateFromLoadedProject(loaded);
+  let candidate = candidateFromLoadedProject(loaded);
 
   switch (request.command) {
     case 'metric.add':
       assertSafeMetricResource(request.metric);
       assertNewId('metric', candidate.metrics, request.metric.id);
-      candidate.metrics.push(request.metric);
+      candidate = { ...candidate, metrics: [...candidate.metrics, request.metric] };
 
       return { candidate, metric: request.metric };
     case 'metric.import': {
@@ -127,16 +130,22 @@ const buildMetricMutation = async (
         options.readStdin,
       );
 
-      candidate.metrics.push(metric);
+      candidate = { ...candidate, metrics: [...candidate.metrics, metric] };
 
       return { candidate, metric };
     }
 
     case 'metric.rename': {
-      const metric = findResource('metric', candidate.metrics, request.metric_id);
+      let metric = findResource('metric', candidate.metrics, request.metric_id);
       assertNewId('metric', candidate.metrics, request.new_id);
-      metric.id = request.new_id;
-      rewriteMetricReferences(candidate, request.metric_id, request.new_id);
+      metric = { ...metric, id: request.new_id };
+      candidate = {
+        ...candidate,
+        metrics: candidate.metrics.map((entry) =>
+          entry.id === request.metric_id ? metric : entry,
+        ),
+      };
+      candidate = rewriteMetricReferences(candidate, request.metric_id, request.new_id);
 
       return {
         candidate,
@@ -157,9 +166,13 @@ const buildMetricMutation = async (
         });
       }
 
-      candidate.metrics = candidate.metrics.filter(({ id }) => id !== request.metric_id);
+      candidate = {
+        ...candidate,
+        metrics: candidate.metrics.filter(({ id }) => id !== request.metric_id),
+      };
 
-      if (request.detach === true) rewriteMetricReferences(candidate, request.metric_id, undefined);
+      if (request.detach === true)
+        candidate = rewriteMetricReferences(candidate, request.metric_id, undefined);
 
       return {
         candidate,

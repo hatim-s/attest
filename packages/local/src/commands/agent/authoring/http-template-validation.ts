@@ -1,13 +1,14 @@
+import { isJsonArray } from '../../../internal/json-array.js';
 import type { AgentResource, JsonValue } from '@attest/contracts';
 
 import { LocalError } from '../../../errors/index.js';
 import { isSensitiveFieldName } from '../../../internal/redaction.js';
 
 const isJsonObject = (value: JsonValue): value is { [key: string]: JsonValue } =>
-  value !== null && typeof value === 'object' && !Array.isArray(value);
+  value !== null && typeof value === 'object' && !isJsonArray(value);
 
 const findSensitiveBodyField = (value: JsonValue, path = ''): string | undefined => {
-  if (Array.isArray(value)) {
+  if (isJsonArray(value)) {
     for (let index = 0; index < value.length; index += 1) {
       const found = findSensitiveBodyField(value[index]!, `${path}/${String(index)}`);
 

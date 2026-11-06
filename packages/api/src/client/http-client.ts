@@ -1,5 +1,5 @@
 import { parseWithSchema } from '@attest/contracts';
-import { z } from 'zod';
+import * as Schema from 'effect/Schema';
 import type { PageQuery, RunStartRequest } from '@attest/core/records';
 import type { ApiCapabilities } from '../contract/bootstrap.js';
 import { apiErrorEnvelopeSchema } from '../contract/errors.js';
@@ -45,11 +45,11 @@ const createHttpClient = (
   capabilities: ApiCapabilities,
   fetchFn: typeof fetch,
 ): ApiClient => {
-  const request = async <Schema extends z.ZodType>(
-    schema: Schema,
+  const request = async <S extends Schema.ConstraintDecoder<unknown>>(
+    schema: S,
     path: string,
     call: ApiCall,
-  ): Promise<z.output<Schema>> => {
+  ): Promise<S['Type']> => {
     const query = call.method === 'GET' ? call.query : undefined;
     const search = query === undefined || query.size === 0 ? '' : `?${query.toString()}`;
 
@@ -80,7 +80,13 @@ const createHttpClient = (
     const parsed = parseWithSchema(schema, body);
 
     if (!parsed.ok)
-      throw new ApiError(response.status, 'INVALID_RESPONSE', z.prettifyError(parsed.error));
+      throw new ApiError(
+        response.status,
+        'INVALID_RESPONSE',
+        parsed.error.issues
+          .map(({ path, message }) => `${path.map(String).join('.')}: ${message}`)
+          .join('; '),
+      );
 
     return parsed.value;
   };

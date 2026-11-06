@@ -29,7 +29,7 @@ const caseExecutionToMetricContext = (
       outcome: 'completed',
       output: execution.response.output,
       trace,
-      artifacts: execution.response.artifacts ?? [],
+      artifacts: [...(execution.response.artifacts ?? [])],
     },
   };
 };

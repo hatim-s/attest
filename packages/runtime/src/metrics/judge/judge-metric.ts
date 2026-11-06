@@ -1,5 +1,5 @@
 import { parseWithSchemaSync } from '@attest/contracts';
-import { z } from 'zod';
+import * as Schema from 'effect/Schema';
 import { performance } from 'node:perf_hooks';
 
 import type { JsonValue } from '@attest/contracts';
@@ -37,7 +37,7 @@ type EvaluateJudgeMetricOptions = {
  */
 // BOUNDARY: Judge evidence is canonicalized and checked as JSON before persistence.
 const toJson = (value: unknown): JsonValue =>
-  parseWithSchemaSync(z.json(), JSON.parse(canonicalStringify(value)));
+  parseWithSchemaSync(Schema.Json, JSON.parse(canonicalStringify(value)));
 
 /** Scores one outcome identically for live and cached verdicts, keeping token usage as evidence. */
 const judgeEvaluation = (

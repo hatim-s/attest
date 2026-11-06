@@ -87,7 +87,10 @@ const extractAgentResponse = (
     };
 
     if (extractedError.code !== undefined && response.error !== undefined) {
-      response.error.code = redactTransportText(extractedError.code, secrets);
+      response.error = {
+        ...response.error,
+        code: redactTransportText(extractedError.code, secrets),
+      };
     }
 
     if (trace !== undefined) response.trace = redactExtractedJson(trace, secrets);

@@ -1,43 +1,43 @@
-import { z } from 'zod';
+import * as Schema from 'effect/Schema';
 
 import { mutationEnvelopeFields, requestSchemaField } from './envelope.js';
 import { metricResourceSchema } from '../../project/resources/metric.js';
 import { resourceIdSchema } from '../../project/shared.js';
 
-const metricAddRequestSchema = z.strictObject({
+const metricAddRequestSchema = Schema.Struct({
   ...mutationEnvelopeFields,
-  command: z.literal('metric.add'),
+  command: Schema.Literal('metric.add'),
   metric: metricResourceSchema,
 });
 
-const metricImportRequestSchema = z.strictObject({
+const metricImportRequestSchema = Schema.Struct({
   ...mutationEnvelopeFields,
-  command: z.literal('metric.import'),
-  source: z.string().min(1),
-  source_type: z.literal('json'),
+  command: Schema.Literal('metric.import'),
+  source: Schema.String.check(Schema.isMinLength(1)),
+  source_type: Schema.Literal('json'),
   as: resourceIdSchema,
-  name: z.string().min(1).optional(),
+  name: Schema.optional(Schema.String.check(Schema.isMinLength(1))),
 });
 
-const metricTestRequestSchema = z.strictObject({
+const metricTestRequestSchema = Schema.Struct({
   ...requestSchemaField,
-  command: z.literal('metric.test'),
+  command: Schema.Literal('metric.test'),
   metric_id: resourceIdSchema,
-  fixture: z.string().min(1),
+  fixture: Schema.String.check(Schema.isMinLength(1)),
 });
 
-const metricRenameRequestSchema = z.strictObject({
+const metricRenameRequestSchema = Schema.Struct({
   ...mutationEnvelopeFields,
-  command: z.literal('metric.rename'),
+  command: Schema.Literal('metric.rename'),
   metric_id: resourceIdSchema,
   new_id: resourceIdSchema,
 });
 
-const metricRemoveRequestSchema = z.strictObject({
+const metricRemoveRequestSchema = Schema.Struct({
   ...mutationEnvelopeFields,
-  command: z.literal('metric.remove'),
+  command: Schema.Literal('metric.remove'),
   metric_id: resourceIdSchema,
-  detach: z.boolean().optional(),
+  detach: Schema.optional(Schema.Boolean),
 });
 
 export {

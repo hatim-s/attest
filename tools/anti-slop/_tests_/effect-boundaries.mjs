@@ -10,6 +10,14 @@ const error = { messageId: 'boundary' };
 tester.run('Effect execution and import ownership', effectBoundariesRule, {
   valid: [
     {
+      code: "import * as Effect from 'effect/Effect'; Effect.succeed(100);",
+      options: [{ dataOnly: true, schemaConstructionModules: ['Effect'] }],
+    },
+    {
+      code: "import { SchemaGetter } from 'effect'; SchemaGetter.transform(Number);",
+      options: [{ dataOnly: true, schemaConstructionModules: ['SchemaGetter'] }],
+    },
+    {
       code: "import { Stream } from 'effect';\n// EFFECT-BRIDGE(S9a)\nStream.toReadableStream(stream);",
       options: [{ operations: ['Stream.toReadableStream'], removalSlice: 'S9a' }],
     },
@@ -40,6 +48,16 @@ tester.run('Effect execution and import ownership', effectBoundariesRule, {
     "import { Effect } from 'effect'; function f(Effect) { Effect.runPromise(job); }",
   ],
   invalid: [
+    {
+      code: "import * as Effect from 'effect/Effect'; Effect.runSync(job);",
+      options: [{ dataOnly: true, schemaConstructionModules: ['Effect'] }],
+      errors: [error],
+    },
+    {
+      code: "import * as SchemaGetter from 'effect/SchemaGetter';",
+      options: [{ dataOnly: true, schemaConstructionModules: ['Effect'] }],
+      errors: [error],
+    },
     { code: "import { NodeRuntime } from '@effect/platform-node';", errors: [error] },
     { code: "export * from '@effect/platform';", errors: [error] },
     { code: "require('@effect/platform-bun');", errors: [error] },
@@ -219,3 +237,15 @@ for (const entry of [...effectRoots, ...effectMigrationBridges]) {
   );
 }
 console.log('Effect import, execution, flat-config and bridge ledger checks passed.');
+
+// Construction imports are approved only at their concrete schema owners.
+for (const [file, modules] of [
+  ['packages/core/src/records/page-schemas.ts', ['Effect']],
+  ['packages/api/src/contract/requests.ts', ['Effect', 'SchemaGetter']],
+  ['packages/core/src/records/probe.ts', undefined],
+]) {
+  const config = await eslint.calculateConfigForFile(file);
+  const options = config.rules['anti-slop/effect-boundaries'][1];
+  assert.deepEqual(options.schemaConstructionModules, modules, file);
+  assert.equal(options.operations, undefined, file);
+}

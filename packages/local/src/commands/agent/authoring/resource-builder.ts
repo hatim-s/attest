@@ -333,32 +333,53 @@ const createAgentResource = (fields: AgentAddFields): AgentResource => {
       'Use NAME=VALUE for a trigger query value.',
     );
 
-    const callbackTransport: Extract<AgentResource['transport'], { kind: 'callback' }> = {
+    let callbackTransport: Extract<AgentResource['transport'], { kind: 'callback' }> = {
       kind: 'callback',
       lifecycle: 'external',
       trigger: { url: fields.callbackTriggerUrl, method: fields.callbackTriggerMethod ?? 'POST' },
     };
 
-    if (Object.keys(triggerHeaders).length > 0) callbackTransport.trigger.headers = triggerHeaders;
+    if (Object.keys(triggerHeaders).length > 0)
+      callbackTransport = {
+        ...callbackTransport,
+        trigger: { ...callbackTransport.trigger, headers: triggerHeaders },
+      };
 
-    if (Object.keys(triggerQuery).length > 0) callbackTransport.trigger.query = triggerQuery;
+    if (Object.keys(triggerQuery).length > 0)
+      callbackTransport = {
+        ...callbackTransport,
+        trigger: { ...callbackTransport.trigger, query: triggerQuery },
+      };
 
     if (fields.idempotencyHeader !== undefined)
-      callbackTransport.idempotency_header = fields.idempotencyHeader;
+      callbackTransport = { ...callbackTransport, idempotency_header: fields.idempotencyHeader };
 
     if (fields.callbackArtifactUrl !== undefined)
-      callbackTransport.artifact_fetch = { url: fields.callbackArtifactUrl, method: 'GET' };
+      callbackTransport = {
+        ...callbackTransport,
+        artifact_fetch: { url: fields.callbackArtifactUrl, method: 'GET' },
+      };
 
     if (fields.callbackTraceUrl !== undefined)
-      callbackTransport.trace_fetch = { url: fields.callbackTraceUrl, method: 'GET' };
+      callbackTransport = {
+        ...callbackTransport,
+        trace_fetch: { url: fields.callbackTraceUrl, method: 'GET' },
+      };
 
     if (listenPort !== undefined || fields.callbackPublicUrl !== undefined) {
-      callbackTransport.receiver = {};
+      callbackTransport = { ...callbackTransport, receiver: {} };
 
-      if (listenPort !== undefined) callbackTransport.receiver.listen_port = listenPort;
+      if (listenPort !== undefined)
+        callbackTransport = {
+          ...callbackTransport,
+          receiver: { ...callbackTransport.receiver, listen_port: listenPort },
+        };
 
       if (fields.callbackPublicUrl !== undefined)
-        callbackTransport.receiver.public_url = fields.callbackPublicUrl;
+        callbackTransport = {
+          ...callbackTransport,
+          receiver: { ...callbackTransport.receiver, public_url: fields.callbackPublicUrl },
+        };
     }
 
     transport = callbackTransport;
@@ -408,14 +429,22 @@ const createAgentResource = (fields: AgentAddFields): AgentResource => {
       stop_timeout_ms: parseDuration(fields.stopTimeout ?? '5s', '--stop-timeout'),
     };
 
-    if (fields.cwd !== undefined) transport.cwd = fields.cwd;
+    if (fields.cwd !== undefined) transport = { ...transport, cwd: fields.cwd };
 
-    if (fields.errorPointer !== undefined) transport.extraction.error_pointer = fields.errorPointer;
+    if (fields.errorPointer !== undefined)
+      transport = {
+        ...transport,
+        extraction: { ...transport.extraction, error_pointer: fields.errorPointer },
+      };
 
-    if (fields.tracePointer !== undefined) transport.extraction.trace_pointer = fields.tracePointer;
+    if (fields.tracePointer !== undefined)
+      transport = {
+        ...transport,
+        extraction: { ...transport.extraction, trace_pointer: fields.tracePointer },
+      };
 
     if (fields.shutdownUrl !== undefined)
-      transport.shutdown = { url: fields.shutdownUrl, method: 'POST' };
+      transport = { ...transport, shutdown: { url: fields.shutdownUrl, method: 'POST' } };
   } else if (fields.jsonlCommand !== undefined) {
     transport = {
       kind: 'jsonl_bridge',
@@ -426,7 +455,7 @@ const createAgentResource = (fields: AgentAddFields): AgentResource => {
       cancellation_grace_ms: parseDuration(fields.cancellationGrace ?? '1s', '--cancel-grace'),
     };
 
-    if (fields.cwd !== undefined) transport.cwd = fields.cwd;
+    if (fields.cwd !== undefined) transport = { ...transport, cwd: fields.cwd };
   } else if (fields.streamUrl !== undefined) {
     transport = {
       kind: 'stream',
@@ -443,15 +472,17 @@ const createAgentResource = (fields: AgentAddFields): AgentResource => {
       result_pointer: fields.responsePointer ?? '/output',
     };
 
-    if (fields.eventName !== undefined) transport.event_name = fields.eventName;
+    if (fields.eventName !== undefined) transport = { ...transport, event_name: fields.eventName };
 
-    if (fields.errorPointer !== undefined) transport.error_pointer = fields.errorPointer;
+    if (fields.errorPointer !== undefined)
+      transport = { ...transport, error_pointer: fields.errorPointer };
 
-    if (fields.tracePointer !== undefined) transport.trace_pointer = fields.tracePointer;
+    if (fields.tracePointer !== undefined)
+      transport = { ...transport, trace_pointer: fields.tracePointer };
 
     if (fields.incrementalOutputPointer !== undefined) {
-      transport.incremental_output_pointer = fields.incrementalOutputPointer;
-      transport.incremental_output_mode = fields.incrementalOutputMode ?? 'text';
+      transport = { ...transport, incremental_output_pointer: fields.incrementalOutputPointer };
+      transport = { ...transport, incremental_output_mode: fields.incrementalOutputMode ?? 'text' };
     }
   } else if (fields.webSocketUrl !== undefined) {
     const lifecycle = fields.webSocketLifecycle ?? 'per_run';
@@ -484,9 +515,10 @@ const createAgentResource = (fields: AgentAddFields): AgentResource => {
     };
 
     if (fields.webSocketSubprotocol !== undefined)
-      transport.subprotocol = fields.webSocketSubprotocol;
+      transport = { ...transport, subprotocol: fields.webSocketSubprotocol };
 
-    if (fields.tracePointer !== undefined) transport.trace_pointer = fields.tracePointer;
+    if (fields.tracePointer !== undefined)
+      transport = { ...transport, trace_pointer: fields.tracePointer };
   } else {
     transport = {
       kind: 'native_cli' as const,
@@ -498,25 +530,29 @@ const createAgentResource = (fields: AgentAddFields): AgentResource => {
       ...processEnvironment,
     };
 
-    if (fields.cwd !== undefined) transport.cwd = fields.cwd;
+    if (fields.cwd !== undefined) transport = { ...transport, cwd: fields.cwd };
 
-    if (fields.sandboxJson !== undefined) transport.sandbox = parseSandboxJson(fields.sandboxJson);
+    if (fields.sandboxJson !== undefined)
+      transport = { ...transport, sandbox: parseSandboxJson(fields.sandboxJson) };
   }
 
-  const resource: AgentResource = {
+  let resource: AgentResource = {
     schema: AGENT_RESOURCE_SCHEMA_ID,
     id: fields.agentId,
     name,
     transport,
   };
 
-  if (timeout !== undefined) resource.timeouts = { attempt_ms: timeout };
+  if (timeout !== undefined) resource = { ...resource, timeouts: { attempt_ms: timeout } };
 
-  if (fields.trace !== undefined) resource.capabilities = { trace: fields.trace };
+  if (fields.trace !== undefined) resource = { ...resource, capabilities: { trace: fields.trace } };
 
   if (fields.headerEnv !== undefined && fields.headerEnv.length > 0) {
-    resource.redaction = {
-      headers: fields.headerEnv.map((binding) => binding.slice(0, binding.indexOf('='))),
+    resource = {
+      ...resource,
+      redaction: {
+        headers: fields.headerEnv.map((binding) => binding.slice(0, binding.indexOf('='))),
+      },
     };
   }
 

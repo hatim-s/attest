@@ -1,3 +1,5 @@
+import { stripStruct } from '@attest/contracts';
+import { utcTimestampSchema } from '../../internal/utc-timestamp.js';
 import { parseWithSchemaSync } from '@attest/contracts';
 import { createHash, randomUUID } from 'node:crypto';
 import {
@@ -14,7 +16,7 @@ import {
 } from 'node:fs/promises';
 import { basename, dirname, join, relative } from 'node:path';
 
-import { z } from 'zod';
+import * as Schema from 'effect/Schema';
 
 import { resolveContainedPath } from '../project-path.js';
 import { errnoCode } from '../../internal/errno-code.js';
@@ -32,65 +34,71 @@ const JOURNAL_FILE = 'journal.json';
 type TransactionFileChange =
   { contents: string; path: string; type: 'write' } | { path: string; type: 'remove' };
 
-const canonicalPathSchema = z
-  .string()
-  .refine(
+const canonicalPathSchema = Schema.String.check(
+  Schema.makeFilter(
     (path) =>
       path.length > 0 &&
       !path.includes('\\') &&
       !path.includes('\0') &&
       path.split('/').every((segment) => segment !== '' && segment !== '.' && segment !== '..'),
-  );
-
-const authoredPathSchema = canonicalPathSchema.refine(
-  (path) => path === 'attest.project.json' || path.startsWith('attest/'),
+  ),
 );
 
-const hashSchema = z.string().regex(/^[a-f0-9]{64}$/u);
+const authoredPathSchema = canonicalPathSchema.check(
+  Schema.makeFilter((path) => path === 'attest.project.json' || path.startsWith('attest/')),
+);
 
-const originalSchema = z.union([
-  z.object({ original_hash: z.null(), backup_path: z.null() }),
-  z.object({ original_hash: hashSchema, backup_path: z.string().regex(/^backups\/[0-9]+$/u) }),
-]);
+const hashSchema = Schema.String.check(Schema.isPattern(/^[a-f0-9]{64}$/u));
 
-const transactionJournalEntrySchema = z.intersection(
-  z.discriminatedUnion('type', [
-    z.object({
-      type: z.literal('write'),
+const originalFields = [
+  { original_hash: Schema.Null, backup_path: Schema.Null },
+  {
+    original_hash: hashSchema,
+    backup_path: Schema.String.check(Schema.isPattern(/^backups\/[0-9]+$/u)),
+  },
+] as const;
+
+// Each branch decodes the combined fields, retaining the intersection's strip policy.
+const transactionJournalEntrySchema = Schema.Union(
+  originalFields.flatMap((original) => [
+    stripStruct({
+      ...original,
+      type: Schema.Literal('write'),
       path: authoredPathSchema,
-      staged_path: z.string().regex(/^staged\/[0-9]+$/u),
+      staged_path: Schema.String.check(Schema.isPattern(/^staged\/[0-9]+$/u)),
       next_hash: hashSchema,
     }),
-    z.object({
-      type: z.literal('remove'),
+    stripStruct({
+      ...original,
+      type: Schema.Literal('remove'),
       path: authoredPathSchema,
-      staged_path: z.null(),
-      next_hash: z.null(),
+      staged_path: Schema.Null,
+      next_hash: Schema.Null,
     }),
   ]),
-  originalSchema,
 );
 
-const transactionJournalSchema = z
-  .object({
-    completion: z
-      .object({
-        path: z.literal('.attest/cloud.json'),
-        original_hash: hashSchema.nullable(),
-        next_hash: hashSchema,
-      })
-      .optional(),
-    created_at: z.iso.datetime(),
-    created_directories: z.array(
-      canonicalPathSchema.refine((path) => path === 'attest' || path.startsWith('attest/')),
+const transactionJournalSchema = stripStruct({
+  completion: Schema.optional(
+    stripStruct({
+      path: Schema.Literal('.attest/cloud.json'),
+      original_hash: Schema.NullOr(hashSchema),
+      next_hash: hashSchema,
+    }),
+  ),
+  created_at: utcTimestampSchema,
+  created_directories: Schema.Array(
+    canonicalPathSchema.check(
+      Schema.makeFilter((path) => path === 'attest' || path.startsWith('attest/')),
     ),
-    entries: z.array(transactionJournalEntrySchema).min(1),
-    manifest_path: z.literal('attest.project.json'),
-    schema: z.literal(TRANSACTION_JOURNAL_SCHEMA),
-    status: z.enum(['committed', 'prepared', 'publishing', 'rolled_back', 'rolling_back']),
-    transaction_id: z.uuid(),
-  })
-  .refine((journal) => {
+  ),
+  entries: Schema.Array(transactionJournalEntrySchema).check(Schema.isMinLength(1)),
+  manifest_path: Schema.Literal('attest.project.json'),
+  schema: Schema.Literal(TRANSACTION_JOURNAL_SCHEMA),
+  status: Schema.Literals(['committed', 'prepared', 'publishing', 'rolled_back', 'rolling_back']),
+  transaction_id: Schema.String.check(Schema.isUUID()),
+}).check(
+  Schema.makeFilter((journal) => {
     const paths = journal.entries.map(({ path }) => path);
 
     return (
@@ -109,11 +117,12 @@ const transactionJournalSchema = z
           (entry.type === 'remove' || entry.staged_path === `staged/${index}`),
       )
     );
-  });
+  }),
+);
 
-type TransactionJournalEntry = z.infer<typeof transactionJournalEntrySchema>;
+type TransactionJournalEntry = typeof transactionJournalEntrySchema.Type;
 
-type TransactionJournal = z.infer<typeof transactionJournalSchema>;
+type TransactionJournal = typeof transactionJournalSchema.Type;
 
 type PreparedTransaction = {
   directory: string;
@@ -257,7 +266,7 @@ const prepareTransaction = async (
       );
     }
 
-    const journal: TransactionJournal = {
+    let journal: TransactionJournal = {
       schema: TRANSACTION_JOURNAL_SCHEMA,
       transaction_id: transactionId,
       created_at: new Date().toISOString(),
@@ -277,10 +286,13 @@ const prepareTransaction = async (
           new ProjectTransactionError('project_invalid', 'Unsafe transaction completion path.'),
       });
 
-      journal.completion = {
-        path: options.completion.path,
-        original_hash: await readByteHash(destination),
-        next_hash: hashBytes(options.completion.contents),
+      journal = {
+        ...journal,
+        completion: {
+          path: options.completion.path,
+          original_hash: await readByteHash(destination),
+          next_hash: hashBytes(options.completion.contents),
+        },
       };
       await writeFile(join(directory, 'completion'), options.completion.contents, { mode: 0o600 });
       await syncWrittenFile(join(directory, 'completion'));
@@ -314,7 +326,9 @@ const parseTransactionJournal = (raw: string, directory: string): TransactionJou
 
   try {
     return parseWithSchemaSync(
-      transactionJournalSchema.refine((journal) => journal.transaction_id === basename(directory)),
+      transactionJournalSchema.check(
+        Schema.makeFilter((journal) => journal.transaction_id === basename(directory)),
+      ),
       JSON.parse(raw),
     );
   } catch (cause: unknown) {
@@ -426,7 +440,7 @@ const rollbackPreparedTransaction = async (
   root: string,
   prepared: PreparedTransaction,
 ): Promise<void> => {
-  prepared.journal.status = 'rolling_back';
+  prepared.journal = { ...prepared.journal, status: 'rolling_back' };
   await writeTransactionJournal(prepared);
 
   for (const entry of [...prepared.journal.entries].reverse()) {
@@ -472,7 +486,7 @@ const rollbackPreparedTransaction = async (
 
   await ensureExpectedState(root, prepared, 'original');
   await removeCreatedDirectories(root, prepared.journal.created_directories);
-  prepared.journal.status = 'rolled_back';
+  prepared.journal = { ...prepared.journal, status: 'rolled_back' };
   await writeTransactionJournal(prepared);
 };
 
@@ -614,7 +628,7 @@ const recoverProjectTransactions = async (
       (!unchangedManifest || prepared.journal.status === 'committed')
     ) {
       await ensureExpectedState(root, prepared, 'next');
-      prepared.journal.status = 'committed';
+      prepared.journal = { ...prepared.journal, status: 'committed' };
       await writeTransactionJournal(prepared);
       await completePreparedTransaction(root, prepared);
       await cleanupPreparedTransaction(root, prepared);

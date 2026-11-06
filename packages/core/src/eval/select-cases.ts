@@ -121,13 +121,13 @@ const selectCases = <T extends SelectableCase>(
     cases = matched.filter((candidate) => selected.has(identity(candidate)));
   }
 
-  const summary: CaseSelectionSummary = {
+  let summary: CaseSelectionSummary = {
     total_cases: candidates.length,
     matched_cases: matched.length,
     selected_cases: cases.length,
   };
 
-  if (sample !== undefined) summary.sample = sample;
+  if (sample !== undefined) summary = { ...summary, sample };
 
   return { cases, summary };
 };

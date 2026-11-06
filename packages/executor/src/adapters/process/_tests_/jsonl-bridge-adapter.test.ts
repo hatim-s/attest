@@ -147,8 +147,12 @@ describe('JSONL bridge adapter', () => {
   });
 
   it('falls back to process termination when cancellation is ignored', async () => {
-    const quickFallback = agent();
-    quickFallback.transport.cancellation_grace_ms = 100;
+    const original = agent();
+
+    const quickFallback = {
+      ...original,
+      transport: { ...original.transport, cancellation_grace_ms: 100 },
+    };
 
     const session = await startJsonlBridgeAgent(quickFallback, {
       cwd: process.cwd(),

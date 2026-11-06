@@ -57,17 +57,17 @@ const runMetricTestCommand = async (
     };
   }
 
-  const caseDefinition: MetricContext['caseDefinition'] = {
+  let caseDefinition: MetricContext['caseDefinition'] = {
     id: fixture.case.id,
     input: fixture.case.input,
   };
 
   if (fixture.case.expected !== undefined) {
-    caseDefinition.expected = fixture.case.expected;
+    caseDefinition = { ...caseDefinition, expected: fixture.case.expected };
   }
 
   if (fixture.case.params !== undefined) {
-    caseDefinition.params = fixture.case.params;
+    caseDefinition = { ...caseDefinition, params: fixture.case.params };
   }
 
   const context: MetricContext = {
@@ -76,7 +76,7 @@ const runMetricTestCommand = async (
       outcome: 'completed',
       output: fixture.output,
       trace: fixture.trace,
-      artifacts: fixture.artifacts ?? [],
+      artifacts: [...(fixture.artifacts ?? [])],
     },
   };
 

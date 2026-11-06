@@ -86,7 +86,7 @@ const expectFixtureOutcome = (envelope: FixtureEnvelope, result: FixtureParseRes
     expect(result.ok).toBe(false);
 
     if (result.ok) return;
-    expect(result.issuePaths).toEqual(expect.arrayContaining(envelope.issue_paths));
+    expect(result.issuePaths).toEqual(expect.arrayContaining([...envelope.issue_paths]));
 
     return;
   }

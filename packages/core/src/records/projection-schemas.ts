@@ -1,28 +1,29 @@
+import { stripStruct } from '@attest/contracts';
 import { caseOutcomeSchema } from '@attest/contracts';
-import { z } from 'zod';
+import * as Schema from 'effect/Schema';
 
 /** Case-level verdict derived from invocation and metric outcomes. */
-const caseVerdictSchema = z.enum(['pass', 'fail', 'error']);
+const caseVerdictSchema = Schema.Literals(['pass', 'fail', 'error']);
 
 /** Validates the blob-free case projection shared by servers, report artifacts and browsers. */
-const caseSummarySchema = z.object({
-  caseId: z.string(),
-  suiteName: z.string(),
+const caseSummarySchema = stripStruct({
+  caseId: Schema.String,
+  suiteName: Schema.String,
   outcome: caseOutcomeSchema,
   verdict: caseVerdictSchema,
-  startedAt: z.string(),
-  durationMs: z.number(),
-  score: z.number().optional(),
-  metricCounts: z.object({
-    expected: z.number(),
-    evaluated: z.number(),
-    passed: z.number(),
-    errors: z.number(),
+  startedAt: Schema.String,
+  durationMs: Schema.Finite,
+  score: Schema.optional(Schema.Finite),
+  metricCounts: stripStruct({
+    expected: Schema.Finite,
+    evaluated: Schema.Finite,
+    passed: Schema.Finite,
+    errors: Schema.Finite,
   }),
 });
 
-type CaseVerdict = z.infer<typeof caseVerdictSchema>;
+type CaseVerdict = typeof caseVerdictSchema.Type;
 
-type CaseSummary = z.infer<typeof caseSummarySchema>;
+type CaseSummary = typeof caseSummarySchema.Type;
 
 export { caseSummarySchema, caseVerdictSchema, type CaseSummary, type CaseVerdict };

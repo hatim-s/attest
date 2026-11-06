@@ -1,3 +1,6 @@
+import * as Effect from 'effect/Effect';
+import * as Option from 'effect/Option';
+import { stripStruct, SchemaDecodeError } from '@attest/contracts';
 import { parseWithSchemaSync } from '@attest/contracts';
 import type { ApiClient } from '@attest/api/client';
 import {
@@ -18,7 +21,7 @@ import {
   type RouterHistory,
   type ErrorComponentProps,
 } from '@tanstack/react-router';
-import { z } from 'zod';
+import * as Schema from 'effect/Schema';
 import { projectsQueryOptions, runsQueryOptions } from './api/queries.js';
 import { EvalsPage } from './routes/evals-page.js';
 import { EvalPage } from './routes/eval-page.js';
@@ -34,17 +37,19 @@ import { runTabSchema } from './components/runs/run-tabs.js';
 
 type RouterContext = { client: ApiClient; queryClient: QueryClient };
 
-const runsSearchSchema = z.object({
-  branch: z.string().min(1).optional().catch(undefined),
-  label: z
-    .string()
-    .regex(/^[^=]+=.+$/)
-    .optional()
-    .catch(undefined),
+const runsSearchSchema = stripStruct({
+  branch: Schema.optional(Schema.String.check(Schema.isMinLength(1))).pipe(
+    Schema.catchDecoding(() => Effect.succeed(Option.some(undefined))),
+  ),
+  label: Schema.optional(Schema.String.check(Schema.isPattern(/^[^=]+=.+$/))).pipe(
+    Schema.catchDecoding(() => Effect.succeed(Option.some(undefined))),
+  ),
 });
 
-const runSearchSchema = z.object({
-  tab: runTabSchema.default('cases').catch('cases'),
+const runSearchSchema = stripStruct({
+  tab: runTabSchema
+    .pipe(Schema.withDecodingDefault(Effect.succeed('cases')))
+    .pipe(Schema.catchDecoding(() => Effect.succeed(Option.some('cases')))),
 });
 
 const rootRoute = createRootRouteWithContext<RouterContext>()({
@@ -79,7 +84,9 @@ const workspaceRoute = createRoute({
   path: '/projects/$projectKey',
   params: { parse: (params) => parseWithSchemaSync(projectParamsSchema, params) },
   component: RunsLayout,
-  validateSearch: runsSearchSchema,
+  validateSearch: Schema.toStandardSchemaV1(runsSearchSchema, {
+    parseOptions: { onExcessProperty: 'error', errors: 'all' },
+  }),
   // An unknown key fails here, so the error notice replaces the workspace with the API message.
   loader: ({ context, params }) =>
     context.queryClient.ensureQueryData(runsQueryOptions(context.client, params.projectKey)),
@@ -122,7 +129,9 @@ const runRoute = createRoute({
   getParentRoute: () => runsRoute,
   path: '$runId',
   params: { parse: (params) => parseWithSchemaSync(runParamsSchema, params) },
-  validateSearch: runSearchSchema,
+  validateSearch: Schema.toStandardSchemaV1(runSearchSchema, {
+    parseOptions: { onExcessProperty: 'error', errors: 'all' },
+  }),
   component: RunPage,
 });
 
@@ -131,7 +140,13 @@ const caseRoute = createRoute({
   path: 'cases/$suiteName/$caseId',
   params: {
     parse: (params) =>
-      parseWithSchemaSync(caseParamsSchema.pick({ suiteName: true, caseId: true }), params),
+      parseWithSchemaSync(
+        stripStruct({
+          suiteName: caseParamsSchema.from.schema.fields.suiteName,
+          caseId: caseParamsSchema.from.schema.fields.caseId,
+        }),
+        params,
+      ),
   },
   component: CaseDrawer,
 });
@@ -153,11 +168,14 @@ const evalRoute = createRoute({
   getParentRoute: () => workspaceRoute,
   path: 'evals/$suiteName',
   params: { parse: (params) => parseWithSchemaSync(suiteParamsSchema, params) },
-  validateSearch: z.object({
-    limit: suiteHistoryQuerySchema.shape.limit
-      .default(DEFAULT_SUITE_HISTORY_RUNS)
-      .catch(DEFAULT_SUITE_HISTORY_RUNS),
-  }),
+  validateSearch: Schema.toStandardSchemaV1(
+    stripStruct({
+      limit: suiteHistoryQuerySchema.from.schema.fields.limit
+        .pipe(Schema.withDecodingDefault(Effect.succeed(DEFAULT_SUITE_HISTORY_RUNS)))
+        .pipe(Schema.catchDecoding(() => Effect.succeed(Option.some(DEFAULT_SUITE_HISTORY_RUNS)))),
+    }),
+    { parseOptions: { onExcessProperty: 'error', errors: 'all' } },
+  ),
   component: EvalPage,
 });
 
@@ -182,7 +200,7 @@ const createDashboardRouter = (history: RouterHistory, context: RouterContext) =
     defaultErrorComponent: ({ error }: ErrorComponentProps) => (
       <ErrorNotice
         error={
-          error instanceof Error && error.cause instanceof z.ZodError
+          error instanceof Error && error.cause instanceof SchemaDecodeError
             ? new Error(
                 `Invalid dashboard URL. ${error.cause.issues.map((issue) => issue.message).join(' ')}`,
               )

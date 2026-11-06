@@ -1,4 +1,5 @@
-import { z } from 'zod';
+import { stripStruct } from '@attest/contracts';
+import * as Schema from 'effect/Schema';
 import { contentHash } from '@attest/core';
 import { createHash } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
@@ -222,9 +223,9 @@ describe('cloud revision synchronization', () => {
       fetch: async (_url, init) => {
         if (init?.method === 'POST') {
           const body = parseWithSchemaSync(
-            z.object({
+            stripStruct({
               bundle: portableProjectBundleSchema,
-              parent_revision_id: z.string().nullable(),
+              parent_revision_id: Schema.NullOr(Schema.String),
             }),
             await new Response(init.body).json(),
           );
@@ -239,9 +240,21 @@ describe('cloud revision synchronization', () => {
           );
         }
 
-        const remote = structuredClone(uploaded!);
-        remote.resources.project.name = 'Remote';
-        remote.files['attest.project.json'] = JSON.stringify(remote.resources.project, null, 2);
+        let remote = structuredClone(uploaded!);
+        remote = {
+          ...remote,
+          resources: {
+            ...remote.resources,
+            project: { ...remote.resources.project, name: 'Remote' },
+          },
+        };
+        remote = {
+          ...remote,
+          files: {
+            ...remote.files,
+            ['attest.project.json']: JSON.stringify(remote.resources.project, null, 2),
+          },
+        };
 
         return Promise.resolve(
           Response.json({
@@ -337,7 +350,7 @@ it.each(['changed', 'unchanged'])(
     const lock = await acquireProjectLock(root);
 
     try {
-      const transaction = await prepareTransaction(
+      let transaction = await prepareTransaction(
         root,
         [
           { type: 'write', path: 'attest/code.ts', contents: 'new code' },
@@ -349,7 +362,7 @@ it.each(['changed', 'unchanged'])(
       );
 
       await publishPreparedTransaction(root, transaction);
-      transaction.journal.status = 'committed';
+      transaction = { ...transaction, journal: { ...transaction.journal, status: 'committed' } };
       await writeTransactionJournal(transaction);
       expect(await readCloudLink(root)).toEqual(before);
       expect(await recoverProjectTransactions(root, lock)).toEqual([

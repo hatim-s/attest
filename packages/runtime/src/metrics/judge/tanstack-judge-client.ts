@@ -107,8 +107,10 @@ const totalUsage = (attempts: readonly JudgeAttempt[]): JudgeUsage | undefined =
     }
 
     total ??= { inputTokens: 0, outputTokens: 0 };
-    total.inputTokens += usage.inputTokens ?? 0;
-    total.outputTokens += usage.outputTokens ?? 0;
+    total = {
+      inputTokens: total.inputTokens + (usage.inputTokens ?? 0),
+      outputTokens: total.outputTokens + (usage.outputTokens ?? 0),
+    };
   }
 
   return total;

@@ -1,5 +1,5 @@
 import { parseWithSchemaSync, parseWithSchema } from '../schema/parse.js';
-import { z } from 'zod';
+import * as Schema from 'effect/Schema';
 import type { JsonValue } from '../project/shared.js';
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
@@ -19,7 +19,7 @@ const fixturesDirectory = resolve(import.meta.dirname, 'fixtures');
 /** Reads one committed JSON golden without weakening its unknown boundary. */
 const readJsonFixture = async (relativePath: string): Promise<JsonValue> =>
   parseWithSchemaSync(
-    z.json(),
+    Schema.Json,
     JSON.parse(await readFile(resolve(fixturesDirectory, relativePath), 'utf8')),
   );
 
@@ -28,7 +28,7 @@ const readJsonlFixture = async (relativePath: string): Promise<JsonValue[]> =>
   (await readFile(resolve(fixturesDirectory, relativePath), 'utf8'))
     .trimEnd()
     .split('\n')
-    .map((line) => parseWithSchemaSync(z.json(), JSON.parse(line)));
+    .map((line) => parseWithSchemaSync(Schema.Json, JSON.parse(line)));
 
 const structuredTestRequest = {
   schema: 'attest.command-request',

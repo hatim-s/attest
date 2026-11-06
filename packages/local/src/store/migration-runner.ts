@@ -1,5 +1,6 @@
+import { stripStruct } from '@attest/contracts';
 import { parseWithSchemaSync } from '@attest/contracts';
-import { z } from 'zod';
+import * as Schema from 'effect/Schema';
 import { StoreError } from '@attest/core';
 
 import type { SqliteHandle } from './internal/sqlite-handle.js';
@@ -15,7 +16,7 @@ const createMigrationTableSql = `
 
 const readAppliedVersions = async (handle: SqliteHandle): Promise<number[]> => {
   const rows = parseWithSchemaSync(
-    z.array(z.object({ version: z.number() })),
+    Schema.Array(stripStruct({ version: Schema.Finite })),
     await handle.prepare('SELECT version FROM schema_migrations ORDER BY version').all(),
   );
 

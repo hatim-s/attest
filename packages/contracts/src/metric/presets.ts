@@ -1,9 +1,9 @@
-import { z } from 'zod';
+import * as Schema from 'effect/Schema';
 
 import { metricResourceSchema } from '../project/resources/metric.js';
 import { METRIC_PRESET_SCHEMA_ID } from '../schema/identifiers.js';
 
-const metricPresetIdSchema = z.enum([
+const metricPresetIdSchema = Schema.Literals([
   'output-equals',
   'output-contains',
   'output-schema',
@@ -17,19 +17,19 @@ const metricPresetIdSchema = z.enum([
 ]);
 
 /** Encodes one stable, inspectable starting point used by metric authoring wizards. */
-const metricPresetSchema = z.strictObject({
-  schema: z.literal(METRIC_PRESET_SCHEMA_ID),
+const metricPresetSchema = Schema.Struct({
+  schema: Schema.Literal(METRIC_PRESET_SCHEMA_ID),
   id: metricPresetIdSchema,
-  name: z.string().min(1),
-  description: z.string().min(1),
-  required_inputs: z.array(z.string().min(1)),
-  configurable_fields: z.array(z.string().min(1)),
-  definition: metricResourceSchema.shape.definition,
+  name: Schema.String.check(Schema.isMinLength(1)),
+  description: Schema.String.check(Schema.isMinLength(1)),
+  required_inputs: Schema.Array(Schema.String.check(Schema.isMinLength(1))),
+  configurable_fields: Schema.Array(Schema.String.check(Schema.isMinLength(1))),
+  definition: metricResourceSchema.fields.definition,
 });
 
-type MetricPreset = z.infer<typeof metricPresetSchema>;
+type MetricPreset = typeof metricPresetSchema.Type;
 
-type MetricPresetId = z.infer<typeof metricPresetIdSchema>;
+type MetricPresetId = typeof metricPresetIdSchema.Type;
 
 /** Built-in metric starting points shown by `attest metric add`. */
 const METRIC_PRESETS = [

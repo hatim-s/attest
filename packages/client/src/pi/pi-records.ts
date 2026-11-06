@@ -1,6 +1,8 @@
+import * as SchemaGetter from 'effect/SchemaGetter';
+import { looseStruct } from '@attest/contracts';
 import { parseWithSchema } from '@attest/contracts';
 import type { JsonValue } from '@attest/contracts';
-import { z } from 'zod';
+import * as Schema from 'effect/Schema';
 
 /**
  * The Pi RPC stdout records the handler consumes, as documented in Pi 1.3's `docs/json.md` and
@@ -9,83 +11,93 @@ import { z } from 'zod';
  * fail the union and are dropped by `parsePiRecord`.
  */
 
-const usageSchema = z.looseObject({ input: z.number(), output: z.number() });
+const usageSchema = looseStruct({ input: Schema.Finite, output: Schema.Finite });
 
 // Text, thinking and tool call blocks; only text blocks carry `text`.
-const contentBlockSchema = z.looseObject({ type: z.string(), text: z.string().optional() });
+const contentBlockSchema = looseStruct({
+  type: Schema.String,
+  text: Schema.optional(Schema.String),
+});
 
-const assistantMessageSchema = z.looseObject({
-  role: z.literal('assistant'),
-  content: z.array(contentBlockSchema),
-  model: z.string(),
-  responseModel: z.string().optional(),
+const assistantMessageSchema = looseStruct({
+  role: Schema.Literal('assistant'),
+  content: Schema.Array(contentBlockSchema),
+  model: Schema.String,
+  responseModel: Schema.optional(Schema.String),
   usage: usageSchema,
-  stopReason: z.string(),
-  errorMessage: z.string().optional(),
+  stopReason: Schema.String,
+  errorMessage: Schema.optional(Schema.String),
 });
 
 // User, tool result and custom messages become `null`: the handler only reads assistant ones. An
 // assistant message that fails its schema fails the record instead of passing as `null`.
-const messageSchema = z.union([
+const messageSchema = Schema.Union([
   assistantMessageSchema,
-  z.looseObject({ role: z.string().refine((role) => role !== 'assistant') }).transform(() => null),
+  looseStruct({
+    role: Schema.String.check(Schema.makeFilter((role) => role !== 'assistant')),
+  }).pipe(
+    Schema.decodeTo(Schema.Null, {
+      decode: SchemaGetter.transform(() => null),
+      encode: SchemaGetter.forbiddenEncoding,
+    }),
+  ),
 ]);
 
-const piRecordSchema = z.discriminatedUnion('type', [
-  z.looseObject({
-    type: z.literal('response'),
-    id: z.string().optional(),
-    command: z.string(),
-    success: z.boolean(),
-    error: z.string().optional(),
-    data: z.looseObject({ disposition: z.string().optional() }).optional(),
+const piRecordSchema = Schema.Union([
+  looseStruct({
+    type: Schema.Literal('response'),
+    id: Schema.optional(Schema.String),
+    command: Schema.String,
+    success: Schema.Boolean,
+    error: Schema.optional(Schema.String),
+    data: Schema.optional(looseStruct({ disposition: Schema.optional(Schema.String) })),
   }),
-  z.looseObject({ type: z.literal('agent_start') }),
-  z.looseObject({ type: z.literal('agent_settled'), aborted: z.boolean() }),
-  z.looseObject({ type: z.literal('turn_start') }),
-  z.looseObject({ type: z.literal('turn_end') }),
-  z.looseObject({ type: z.literal('message_end'), message: messageSchema }),
-  z.looseObject({
-    type: z.literal('tool_execution_start'),
-    toolCallId: z.string(),
-    toolName: z.string(),
-    args: z.json(),
+  looseStruct({ type: Schema.Literal('agent_start') }),
+  looseStruct({ type: Schema.Literal('agent_settled'), aborted: Schema.Boolean }),
+  looseStruct({ type: Schema.Literal('turn_start') }),
+  looseStruct({ type: Schema.Literal('turn_end') }),
+  looseStruct({ type: Schema.Literal('message_end'), message: messageSchema }),
+  looseStruct({
+    type: Schema.Literal('tool_execution_start'),
+    toolCallId: Schema.String,
+    toolName: Schema.String,
+    args: Schema.Json,
   }),
-  z.looseObject({
-    type: z.literal('tool_execution_end'),
-    toolCallId: z.string(),
-    toolName: z.string(),
-    result: z.json(),
-    isError: z.boolean(),
-    durationMs: z.number().optional(),
+  looseStruct({
+    type: Schema.Literal('tool_execution_end'),
+    toolCallId: Schema.String,
+    toolName: Schema.String,
+    result: Schema.Json,
+    isError: Schema.Boolean,
+    durationMs: Schema.optional(Schema.Finite),
   }),
-  z.looseObject({
-    type: z.literal('auto_retry_start'),
-    attempt: z.number(),
-    maxAttempts: z.number(),
-    delayMs: z.number(),
-    errorMessage: z.string(),
+  looseStruct({
+    type: Schema.Literal('auto_retry_start'),
+    attempt: Schema.Finite,
+    maxAttempts: Schema.Finite,
+    delayMs: Schema.Finite,
+    errorMessage: Schema.String,
   }),
-  z.looseObject({
-    type: z.literal('auto_retry_end'),
-    success: z.boolean(),
-    attempt: z.number(),
-    finalError: z.string().optional(),
+  looseStruct({
+    type: Schema.Literal('auto_retry_end'),
+    success: Schema.Boolean,
+    attempt: Schema.Finite,
+    finalError: Schema.optional(Schema.String),
   }),
 ]);
 
-type PiRecord = z.infer<typeof piRecordSchema>;
+type PiRecord = typeof piRecordSchema.Type;
 
 const HANDLED_TYPES: ReadonlySet<string> = new Set(
-  piRecordSchema.options.map((option) => option.shape.type.value),
+  piRecordSchema.members.map((option) => option.schema.fields.type.literal),
 );
 
-const recordTypeSchema = z.looseObject({ type: z.string() });
+const recordTypeSchema = looseStruct({ type: Schema.String });
 
 /** `record` is `undefined` for lines the handler does not read; `ok: false` is a broken record. */
 type ParsedLine = { ok: true; record: PiRecord | undefined } | { ok: false; message: string };
 
-type PiAssistantMessage = z.infer<typeof assistantMessageSchema>;
+type PiAssistantMessage = typeof assistantMessageSchema.Type;
 
 /**
  * Parses one stdout line. Non-JSON lines and record types the handler does not read are skipped. A
@@ -111,12 +123,12 @@ const parsePiRecord = (line: string): ParsedLine => {
 
   return {
     ok: false,
-    message: `Pi sent an unreadable ${typed.value.type} record (${issue?.path.join('.') ?? ''}: ${issue?.message ?? 'invalid'}).`,
+    message: `Pi sent an unreadable ${typed.value.type} record (${issue?.path.map(String).join('.') ?? ''}: ${issue?.message ?? 'invalid'}).`,
   };
 };
 
 // Pi tools return `{ content: [{ type: 'text', text }], details }`; an error's text is its message.
-const toolResultSchema = z.looseObject({ content: z.array(contentBlockSchema) });
+const toolResultSchema = looseStruct({ content: Schema.Array(contentBlockSchema) });
 
 /** The first text block of a tool result, or `undefined` when the result has another form. */
 const toolResultText = (result: JsonValue): string | undefined => {

@@ -20,13 +20,19 @@ const runAgentRenameCommand = async (
 
   assertNewId('agent', loaded.agents, request.new_id);
 
-  const candidate = candidateFromLoadedProject(loaded);
-  candidate.agents = candidate.agents.map((agent) =>
-    agent.id === current.id ? { ...agent, id: request.new_id } : agent,
-  );
-  candidate.tests = candidate.tests.map((test) =>
-    test.agent_id === current.id ? { ...test, agent_id: request.new_id } : test,
-  );
+  let candidate = candidateFromLoadedProject(loaded);
+  candidate = {
+    ...candidate,
+    agents: candidate.agents.map((agent) =>
+      agent.id === current.id ? { ...agent, id: request.new_id } : agent,
+    ),
+  };
+  candidate = {
+    ...candidate,
+    tests: candidate.tests.map((test) =>
+      test.agent_id === current.id ? { ...test, agent_id: request.new_id } : test,
+    ),
+  };
 
   return mutationResult({
     command: 'agent.rename',

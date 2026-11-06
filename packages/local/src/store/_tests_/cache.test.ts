@@ -1,9 +1,10 @@
+import { stripStruct } from '@attest/contracts';
 import { parseWithSchemaSync } from '@attest/contracts';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { z } from 'zod';
+import * as Schema from 'effect/Schema';
 import type { AttestStore } from '@attest/core';
 import { afterEach, describe, expect, it } from 'vitest';
 
@@ -28,7 +29,7 @@ const readLastUsedAt = async (path: string, requestHash: string): Promise<string
   const handle = await openSqliteHandle(path);
 
   const [row] = parseWithSchemaSync(
-    z.array(z.object({ last_used_at: z.string() })),
+    Schema.Array(stripStruct({ last_used_at: Schema.String })),
     await handle
       .prepare('SELECT last_used_at FROM response_cache WHERE cache_key = ?')
       .all(requestHash),

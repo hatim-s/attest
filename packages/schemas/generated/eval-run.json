@@ -1,11 +1,11 @@
 {
   "$comment": "Runtime-only invariants: selection counts satisfy selected_cases <= matched_cases <= total_cases, and selection.selected_cases equals the selected case count.",
+  "$defs": {},
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "properties": {
     "created_at": {
       "format": "date-time",
-      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
       "type": "string"
     },
     "effective_command": {
@@ -19,13 +19,19 @@
           "type": "array"
         },
         "command_path": {
+          "maxItems": 2,
+          "minItems": 2,
           "prefixItems": [
             {
-              "const": "eval",
+              "enum": [
+                "eval"
+              ],
               "type": "string"
             },
             {
-              "const": "run",
+              "enum": [
+                "run"
+              ],
               "type": "string"
             }
           ],
@@ -37,81 +43,149 @@
               "additionalProperties": false,
               "properties": {
                 "baseline_run_id": {
-                  "format": "ulid",
-                  "pattern": "^[0-9A-HJKMNP-TV-Za-hjkmnp-tv-z]{26}$",
-                  "type": "string"
+                  "anyOf": [
+                    {
+                      "pattern": "^[0-9A-HJKMNP-TV-Za-hjkmnp-tv-z]{26}$",
+                      "type": "string"
+                    },
+                    {
+                      "not": {}
+                    }
+                  ]
                 },
                 "case_ids": {
-                  "items": {
-                    "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
-                    "type": "string"
-                  },
-                  "minItems": 1,
-                  "type": "array"
+                  "anyOf": [
+                    {
+                      "items": {
+                        "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+                        "type": "string"
+                      },
+                      "minItems": 1,
+                      "type": "array"
+                    },
+                    {
+                      "not": {}
+                    }
+                  ]
                 },
                 "command": {
-                  "const": "eval.run",
+                  "enum": [
+                    "eval.run"
+                  ],
                   "type": "string"
                 },
                 "concurrency": {
-                  "exclusiveMinimum": 0,
-                  "maximum": 9007199254740991,
-                  "type": "integer"
-                },
-                "dataset_ids": {
-                  "items": {
-                    "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
-                    "type": "string"
-                  },
-                  "minItems": 1,
-                  "type": "array"
-                },
-                "folders": {
-                  "items": {
-                    "minLength": 1,
-                    "pattern": "^(?!\\.{1,2}(?:\\/|$))[^\\s/\\\\](?:[^/\\\\]*[^\\s/\\\\])?(?:\\/(?!\\.{1,2}(?:\\/|$))[^\\s/\\\\](?:[^/\\\\]*[^\\s/\\\\])?)*(?![\\s\\S])",
-                    "type": "string"
-                  },
-                  "minItems": 1,
-                  "type": "array"
-                },
-                "junit_path": {
-                  "minLength": 1,
-                  "type": "string"
-                },
-                "output": {
-                  "const": "human",
-                  "type": "string"
-                },
-                "sample": {
-                  "additionalProperties": false,
-                  "properties": {
-                    "count": {
+                  "anyOf": [
+                    {
                       "exclusiveMinimum": 0,
                       "maximum": 9007199254740991,
                       "type": "integer"
                     },
-                    "seed": {
+                    {
+                      "not": {}
+                    }
+                  ]
+                },
+                "dataset_ids": {
+                  "anyOf": [
+                    {
+                      "items": {
+                        "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+                        "type": "string"
+                      },
+                      "minItems": 1,
+                      "type": "array"
+                    },
+                    {
+                      "not": {}
+                    }
+                  ]
+                },
+                "folders": {
+                  "anyOf": [
+                    {
+                      "items": {
+                        "minLength": 1,
+                        "pattern": "^(?!\\.{1,2}(?:\\/|$))[^\\s/\\\\](?:[^/\\\\]*[^\\s/\\\\])?(?:\\/(?!\\.{1,2}(?:\\/|$))[^\\s/\\\\](?:[^/\\\\]*[^\\s/\\\\])?)*(?![\\s\\S])",
+                        "type": "string"
+                      },
+                      "minItems": 1,
+                      "type": "array"
+                    },
+                    {
+                      "not": {}
+                    }
+                  ]
+                },
+                "junit_path": {
+                  "anyOf": [
+                    {
                       "minLength": 1,
                       "type": "string"
+                    },
+                    {
+                      "not": {}
                     }
-                  },
-                  "required": [
-                    "count"
+                  ]
+                },
+                "output": {
+                  "enum": [
+                    "human"
                   ],
-                  "type": "object"
+                  "type": "string"
+                },
+                "sample": {
+                  "anyOf": [
+                    {
+                      "additionalProperties": false,
+                      "properties": {
+                        "count": {
+                          "exclusiveMinimum": 0,
+                          "maximum": 9007199254740991,
+                          "type": "integer"
+                        },
+                        "seed": {
+                          "anyOf": [
+                            {
+                              "minLength": 1,
+                              "type": "string"
+                            },
+                            {
+                              "not": {}
+                            }
+                          ]
+                        }
+                      },
+                      "required": [
+                        "count"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "not": {}
+                    }
+                  ]
                 },
                 "schema": {
-                  "const": "attest.command-request",
+                  "enum": [
+                    "attest.command-request"
+                  ],
                   "type": "string"
                 },
                 "tags": {
-                  "items": {
-                    "minLength": 1,
-                    "type": "string"
-                  },
-                  "minItems": 1,
-                  "type": "array"
+                  "anyOf": [
+                    {
+                      "items": {
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "minItems": 1,
+                      "type": "array"
+                    },
+                    {
+                      "not": {}
+                    }
+                  ]
                 },
                 "test_ids": {
                   "items": {
@@ -122,12 +196,26 @@
                   "type": "array"
                 },
                 "timeout_ms": {
-                  "exclusiveMinimum": 0,
-                  "maximum": 9007199254740991,
-                  "type": "integer"
+                  "anyOf": [
+                    {
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991,
+                      "type": "integer"
+                    },
+                    {
+                      "not": {}
+                    }
+                  ]
                 },
                 "watch": {
-                  "type": "boolean"
+                  "anyOf": [
+                    {
+                      "type": "boolean"
+                    },
+                    {
+                      "not": {}
+                    }
+                  ]
                 }
               },
               "required": [
@@ -142,93 +230,177 @@
               "additionalProperties": false,
               "properties": {
                 "all": {
-                  "const": true,
+                  "enum": [
+                    true
+                  ],
                   "type": "boolean"
                 },
                 "baseline_run_id": {
-                  "format": "ulid",
-                  "pattern": "^[0-9A-HJKMNP-TV-Za-hjkmnp-tv-z]{26}$",
-                  "type": "string"
+                  "anyOf": [
+                    {
+                      "pattern": "^[0-9A-HJKMNP-TV-Za-hjkmnp-tv-z]{26}$",
+                      "type": "string"
+                    },
+                    {
+                      "not": {}
+                    }
+                  ]
                 },
                 "case_ids": {
-                  "items": {
-                    "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
-                    "type": "string"
-                  },
-                  "minItems": 1,
-                  "type": "array"
+                  "anyOf": [
+                    {
+                      "items": {
+                        "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+                        "type": "string"
+                      },
+                      "minItems": 1,
+                      "type": "array"
+                    },
+                    {
+                      "not": {}
+                    }
+                  ]
                 },
                 "command": {
-                  "const": "eval.run",
+                  "enum": [
+                    "eval.run"
+                  ],
                   "type": "string"
                 },
                 "concurrency": {
-                  "exclusiveMinimum": 0,
-                  "maximum": 9007199254740991,
-                  "type": "integer"
-                },
-                "dataset_ids": {
-                  "items": {
-                    "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
-                    "type": "string"
-                  },
-                  "minItems": 1,
-                  "type": "array"
-                },
-                "folders": {
-                  "items": {
-                    "minLength": 1,
-                    "pattern": "^(?!\\.{1,2}(?:\\/|$))[^\\s/\\\\](?:[^/\\\\]*[^\\s/\\\\])?(?:\\/(?!\\.{1,2}(?:\\/|$))[^\\s/\\\\](?:[^/\\\\]*[^\\s/\\\\])?)*(?![\\s\\S])",
-                    "type": "string"
-                  },
-                  "minItems": 1,
-                  "type": "array"
-                },
-                "junit_path": {
-                  "minLength": 1,
-                  "type": "string"
-                },
-                "output": {
-                  "const": "human",
-                  "type": "string"
-                },
-                "sample": {
-                  "additionalProperties": false,
-                  "properties": {
-                    "count": {
+                  "anyOf": [
+                    {
                       "exclusiveMinimum": 0,
                       "maximum": 9007199254740991,
                       "type": "integer"
                     },
-                    "seed": {
+                    {
+                      "not": {}
+                    }
+                  ]
+                },
+                "dataset_ids": {
+                  "anyOf": [
+                    {
+                      "items": {
+                        "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+                        "type": "string"
+                      },
+                      "minItems": 1,
+                      "type": "array"
+                    },
+                    {
+                      "not": {}
+                    }
+                  ]
+                },
+                "folders": {
+                  "anyOf": [
+                    {
+                      "items": {
+                        "minLength": 1,
+                        "pattern": "^(?!\\.{1,2}(?:\\/|$))[^\\s/\\\\](?:[^/\\\\]*[^\\s/\\\\])?(?:\\/(?!\\.{1,2}(?:\\/|$))[^\\s/\\\\](?:[^/\\\\]*[^\\s/\\\\])?)*(?![\\s\\S])",
+                        "type": "string"
+                      },
+                      "minItems": 1,
+                      "type": "array"
+                    },
+                    {
+                      "not": {}
+                    }
+                  ]
+                },
+                "junit_path": {
+                  "anyOf": [
+                    {
                       "minLength": 1,
                       "type": "string"
+                    },
+                    {
+                      "not": {}
                     }
-                  },
-                  "required": [
-                    "count"
+                  ]
+                },
+                "output": {
+                  "enum": [
+                    "human"
                   ],
-                  "type": "object"
+                  "type": "string"
+                },
+                "sample": {
+                  "anyOf": [
+                    {
+                      "additionalProperties": false,
+                      "properties": {
+                        "count": {
+                          "exclusiveMinimum": 0,
+                          "maximum": 9007199254740991,
+                          "type": "integer"
+                        },
+                        "seed": {
+                          "anyOf": [
+                            {
+                              "minLength": 1,
+                              "type": "string"
+                            },
+                            {
+                              "not": {}
+                            }
+                          ]
+                        }
+                      },
+                      "required": [
+                        "count"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "not": {}
+                    }
+                  ]
                 },
                 "schema": {
-                  "const": "attest.command-request",
+                  "enum": [
+                    "attest.command-request"
+                  ],
                   "type": "string"
                 },
                 "tags": {
-                  "items": {
-                    "minLength": 1,
-                    "type": "string"
-                  },
-                  "minItems": 1,
-                  "type": "array"
+                  "anyOf": [
+                    {
+                      "items": {
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "minItems": 1,
+                      "type": "array"
+                    },
+                    {
+                      "not": {}
+                    }
+                  ]
                 },
                 "timeout_ms": {
-                  "exclusiveMinimum": 0,
-                  "maximum": 9007199254740991,
-                  "type": "integer"
+                  "anyOf": [
+                    {
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991,
+                      "type": "integer"
+                    },
+                    {
+                      "not": {}
+                    }
+                  ]
                 },
                 "watch": {
-                  "type": "boolean"
+                  "anyOf": [
+                    {
+                      "type": "boolean"
+                    },
+                    {
+                      "not": {}
+                    }
+                  ]
                 }
               },
               "required": [
@@ -243,47 +415,90 @@
               "additionalProperties": false,
               "properties": {
                 "baseline_run_id": {
-                  "format": "ulid",
-                  "pattern": "^[0-9A-HJKMNP-TV-Za-hjkmnp-tv-z]{26}$",
-                  "type": "string"
+                  "anyOf": [
+                    {
+                      "pattern": "^[0-9A-HJKMNP-TV-Za-hjkmnp-tv-z]{26}$",
+                      "type": "string"
+                    },
+                    {
+                      "not": {}
+                    }
+                  ]
                 },
                 "case_ids": {
-                  "items": {
-                    "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
-                    "type": "string"
-                  },
-                  "minItems": 1,
-                  "type": "array"
+                  "anyOf": [
+                    {
+                      "items": {
+                        "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+                        "type": "string"
+                      },
+                      "minItems": 1,
+                      "type": "array"
+                    },
+                    {
+                      "not": {}
+                    }
+                  ]
                 },
                 "command": {
-                  "const": "eval.run",
+                  "enum": [
+                    "eval.run"
+                  ],
                   "type": "string"
                 },
                 "concurrency": {
-                  "exclusiveMinimum": 0,
-                  "maximum": 9007199254740991,
-                  "type": "integer"
+                  "anyOf": [
+                    {
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991,
+                      "type": "integer"
+                    },
+                    {
+                      "not": {}
+                    }
+                  ]
                 },
                 "dataset_ids": {
-                  "items": {
-                    "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
-                    "type": "string"
-                  },
-                  "minItems": 1,
-                  "type": "array"
+                  "anyOf": [
+                    {
+                      "items": {
+                        "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+                        "type": "string"
+                      },
+                      "minItems": 1,
+                      "type": "array"
+                    },
+                    {
+                      "not": {}
+                    }
+                  ]
                 },
                 "folders": {
-                  "items": {
-                    "minLength": 1,
-                    "pattern": "^(?!\\.{1,2}(?:\\/|$))[^\\s/\\\\](?:[^/\\\\]*[^\\s/\\\\])?(?:\\/(?!\\.{1,2}(?:\\/|$))[^\\s/\\\\](?:[^/\\\\]*[^\\s/\\\\])?)*(?![\\s\\S])",
-                    "type": "string"
-                  },
-                  "minItems": 1,
-                  "type": "array"
+                  "anyOf": [
+                    {
+                      "items": {
+                        "minLength": 1,
+                        "pattern": "^(?!\\.{1,2}(?:\\/|$))[^\\s/\\\\](?:[^/\\\\]*[^\\s/\\\\])?(?:\\/(?!\\.{1,2}(?:\\/|$))[^\\s/\\\\](?:[^/\\\\]*[^\\s/\\\\])?)*(?![\\s\\S])",
+                        "type": "string"
+                      },
+                      "minItems": 1,
+                      "type": "array"
+                    },
+                    {
+                      "not": {}
+                    }
+                  ]
                 },
                 "junit_path": {
-                  "minLength": 1,
-                  "type": "string"
+                  "anyOf": [
+                    {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    {
+                      "not": {}
+                    }
+                  ]
                 },
                 "output": {
                   "enum": [
@@ -293,34 +508,57 @@
                   "type": "string"
                 },
                 "sample": {
-                  "additionalProperties": false,
-                  "properties": {
-                    "count": {
-                      "exclusiveMinimum": 0,
-                      "maximum": 9007199254740991,
-                      "type": "integer"
+                  "anyOf": [
+                    {
+                      "additionalProperties": false,
+                      "properties": {
+                        "count": {
+                          "exclusiveMinimum": 0,
+                          "maximum": 9007199254740991,
+                          "type": "integer"
+                        },
+                        "seed": {
+                          "anyOf": [
+                            {
+                              "minLength": 1,
+                              "type": "string"
+                            },
+                            {
+                              "not": {}
+                            }
+                          ]
+                        }
+                      },
+                      "required": [
+                        "count"
+                      ],
+                      "type": "object"
                     },
-                    "seed": {
-                      "minLength": 1,
-                      "type": "string"
+                    {
+                      "not": {}
                     }
-                  },
-                  "required": [
-                    "count"
-                  ],
-                  "type": "object"
+                  ]
                 },
                 "schema": {
-                  "const": "attest.command-request",
+                  "enum": [
+                    "attest.command-request"
+                  ],
                   "type": "string"
                 },
                 "tags": {
-                  "items": {
-                    "minLength": 1,
-                    "type": "string"
-                  },
-                  "minItems": 1,
-                  "type": "array"
+                  "anyOf": [
+                    {
+                      "items": {
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "minItems": 1,
+                      "type": "array"
+                    },
+                    {
+                      "not": {}
+                    }
+                  ]
                 },
                 "test_ids": {
                   "items": {
@@ -331,9 +569,16 @@
                   "type": "array"
                 },
                 "timeout_ms": {
-                  "exclusiveMinimum": 0,
-                  "maximum": 9007199254740991,
-                  "type": "integer"
+                  "anyOf": [
+                    {
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991,
+                      "type": "integer"
+                    },
+                    {
+                      "not": {}
+                    }
+                  ]
                 }
               },
               "required": [
@@ -348,51 +593,96 @@
               "additionalProperties": false,
               "properties": {
                 "all": {
-                  "const": true,
+                  "enum": [
+                    true
+                  ],
                   "type": "boolean"
                 },
                 "baseline_run_id": {
-                  "format": "ulid",
-                  "pattern": "^[0-9A-HJKMNP-TV-Za-hjkmnp-tv-z]{26}$",
-                  "type": "string"
+                  "anyOf": [
+                    {
+                      "pattern": "^[0-9A-HJKMNP-TV-Za-hjkmnp-tv-z]{26}$",
+                      "type": "string"
+                    },
+                    {
+                      "not": {}
+                    }
+                  ]
                 },
                 "case_ids": {
-                  "items": {
-                    "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
-                    "type": "string"
-                  },
-                  "minItems": 1,
-                  "type": "array"
+                  "anyOf": [
+                    {
+                      "items": {
+                        "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+                        "type": "string"
+                      },
+                      "minItems": 1,
+                      "type": "array"
+                    },
+                    {
+                      "not": {}
+                    }
+                  ]
                 },
                 "command": {
-                  "const": "eval.run",
+                  "enum": [
+                    "eval.run"
+                  ],
                   "type": "string"
                 },
                 "concurrency": {
-                  "exclusiveMinimum": 0,
-                  "maximum": 9007199254740991,
-                  "type": "integer"
+                  "anyOf": [
+                    {
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991,
+                      "type": "integer"
+                    },
+                    {
+                      "not": {}
+                    }
+                  ]
                 },
                 "dataset_ids": {
-                  "items": {
-                    "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
-                    "type": "string"
-                  },
-                  "minItems": 1,
-                  "type": "array"
+                  "anyOf": [
+                    {
+                      "items": {
+                        "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+                        "type": "string"
+                      },
+                      "minItems": 1,
+                      "type": "array"
+                    },
+                    {
+                      "not": {}
+                    }
+                  ]
                 },
                 "folders": {
-                  "items": {
-                    "minLength": 1,
-                    "pattern": "^(?!\\.{1,2}(?:\\/|$))[^\\s/\\\\](?:[^/\\\\]*[^\\s/\\\\])?(?:\\/(?!\\.{1,2}(?:\\/|$))[^\\s/\\\\](?:[^/\\\\]*[^\\s/\\\\])?)*(?![\\s\\S])",
-                    "type": "string"
-                  },
-                  "minItems": 1,
-                  "type": "array"
+                  "anyOf": [
+                    {
+                      "items": {
+                        "minLength": 1,
+                        "pattern": "^(?!\\.{1,2}(?:\\/|$))[^\\s/\\\\](?:[^/\\\\]*[^\\s/\\\\])?(?:\\/(?!\\.{1,2}(?:\\/|$))[^\\s/\\\\](?:[^/\\\\]*[^\\s/\\\\])?)*(?![\\s\\S])",
+                        "type": "string"
+                      },
+                      "minItems": 1,
+                      "type": "array"
+                    },
+                    {
+                      "not": {}
+                    }
+                  ]
                 },
                 "junit_path": {
-                  "minLength": 1,
-                  "type": "string"
+                  "anyOf": [
+                    {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    {
+                      "not": {}
+                    }
+                  ]
                 },
                 "output": {
                   "enum": [
@@ -402,39 +692,69 @@
                   "type": "string"
                 },
                 "sample": {
-                  "additionalProperties": false,
-                  "properties": {
-                    "count": {
+                  "anyOf": [
+                    {
+                      "additionalProperties": false,
+                      "properties": {
+                        "count": {
+                          "exclusiveMinimum": 0,
+                          "maximum": 9007199254740991,
+                          "type": "integer"
+                        },
+                        "seed": {
+                          "anyOf": [
+                            {
+                              "minLength": 1,
+                              "type": "string"
+                            },
+                            {
+                              "not": {}
+                            }
+                          ]
+                        }
+                      },
+                      "required": [
+                        "count"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "not": {}
+                    }
+                  ]
+                },
+                "schema": {
+                  "enum": [
+                    "attest.command-request"
+                  ],
+                  "type": "string"
+                },
+                "tags": {
+                  "anyOf": [
+                    {
+                      "items": {
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "minItems": 1,
+                      "type": "array"
+                    },
+                    {
+                      "not": {}
+                    }
+                  ]
+                },
+                "timeout_ms": {
+                  "anyOf": [
+                    {
                       "exclusiveMinimum": 0,
                       "maximum": 9007199254740991,
                       "type": "integer"
                     },
-                    "seed": {
-                      "minLength": 1,
-                      "type": "string"
+                    {
+                      "not": {}
                     }
-                  },
-                  "required": [
-                    "count"
-                  ],
-                  "type": "object"
-                },
-                "schema": {
-                  "const": "attest.command-request",
-                  "type": "string"
-                },
-                "tags": {
-                  "items": {
-                    "minLength": 1,
-                    "type": "string"
-                  },
-                  "minItems": 1,
-                  "type": "array"
-                },
-                "timeout_ms": {
-                  "exclusiveMinimum": 0,
-                  "maximum": 9007199254740991,
-                  "type": "integer"
+                  ]
                 }
               },
               "required": [
@@ -451,9 +771,15 @@
           "additionalProperties": false,
           "properties": {
             "baseline_run_id": {
-              "format": "ulid",
-              "pattern": "^[0-9A-HJKMNP-TV-Za-hjkmnp-tv-z]{26}$",
-              "type": "string"
+              "anyOf": [
+                {
+                  "pattern": "^[0-9A-HJKMNP-TV-Za-hjkmnp-tv-z]{26}$",
+                  "type": "string"
+                },
+                {
+                  "not": {}
+                }
+              ]
             },
             "concurrency": {
               "exclusiveMinimum": 0,
@@ -461,203 +787,325 @@
               "type": "integer"
             },
             "execution": {
-              "additionalProperties": false,
-              "properties": {
-                "hooks": {
+              "anyOf": [
+                {
                   "additionalProperties": false,
                   "properties": {
-                    "after_agent": {
-                      "additionalProperties": false,
-                      "properties": {
-                        "argv": {
-                          "items": {
-                            "minLength": 1,
-                            "type": "string"
+                    "hooks": {
+                      "anyOf": [
+                        {
+                          "additionalProperties": false,
+                          "properties": {
+                            "after_agent": {
+                              "anyOf": [
+                                {
+                                  "additionalProperties": false,
+                                  "properties": {
+                                    "argv": {
+                                      "items": {
+                                        "minLength": 1,
+                                        "type": "string"
+                                      },
+                                      "minItems": 1,
+                                      "type": "array"
+                                    },
+                                    "timeout_ms": {
+                                      "anyOf": [
+                                        {
+                                          "exclusiveMinimum": 0,
+                                          "maximum": 9007199254740991,
+                                          "type": "integer"
+                                        },
+                                        {
+                                          "not": {}
+                                        }
+                                      ]
+                                    }
+                                  },
+                                  "required": [
+                                    "argv"
+                                  ],
+                                  "type": "object"
+                                },
+                                {
+                                  "not": {}
+                                }
+                              ]
+                            },
+                            "after_case": {
+                              "anyOf": [
+                                {
+                                  "additionalProperties": false,
+                                  "properties": {
+                                    "argv": {
+                                      "items": {
+                                        "minLength": 1,
+                                        "type": "string"
+                                      },
+                                      "minItems": 1,
+                                      "type": "array"
+                                    },
+                                    "timeout_ms": {
+                                      "anyOf": [
+                                        {
+                                          "exclusiveMinimum": 0,
+                                          "maximum": 9007199254740991,
+                                          "type": "integer"
+                                        },
+                                        {
+                                          "not": {}
+                                        }
+                                      ]
+                                    }
+                                  },
+                                  "required": [
+                                    "argv"
+                                  ],
+                                  "type": "object"
+                                },
+                                {
+                                  "not": {}
+                                }
+                              ]
+                            },
+                            "after_evaluation": {
+                              "anyOf": [
+                                {
+                                  "additionalProperties": false,
+                                  "properties": {
+                                    "argv": {
+                                      "items": {
+                                        "minLength": 1,
+                                        "type": "string"
+                                      },
+                                      "minItems": 1,
+                                      "type": "array"
+                                    },
+                                    "timeout_ms": {
+                                      "anyOf": [
+                                        {
+                                          "exclusiveMinimum": 0,
+                                          "maximum": 9007199254740991,
+                                          "type": "integer"
+                                        },
+                                        {
+                                          "not": {}
+                                        }
+                                      ]
+                                    }
+                                  },
+                                  "required": [
+                                    "argv"
+                                  ],
+                                  "type": "object"
+                                },
+                                {
+                                  "not": {}
+                                }
+                              ]
+                            },
+                            "after_run": {
+                              "anyOf": [
+                                {
+                                  "additionalProperties": false,
+                                  "properties": {
+                                    "argv": {
+                                      "items": {
+                                        "minLength": 1,
+                                        "type": "string"
+                                      },
+                                      "minItems": 1,
+                                      "type": "array"
+                                    },
+                                    "timeout_ms": {
+                                      "anyOf": [
+                                        {
+                                          "exclusiveMinimum": 0,
+                                          "maximum": 9007199254740991,
+                                          "type": "integer"
+                                        },
+                                        {
+                                          "not": {}
+                                        }
+                                      ]
+                                    }
+                                  },
+                                  "required": [
+                                    "argv"
+                                  ],
+                                  "type": "object"
+                                },
+                                {
+                                  "not": {}
+                                }
+                              ]
+                            },
+                            "before_case": {
+                              "anyOf": [
+                                {
+                                  "additionalProperties": false,
+                                  "properties": {
+                                    "argv": {
+                                      "items": {
+                                        "minLength": 1,
+                                        "type": "string"
+                                      },
+                                      "minItems": 1,
+                                      "type": "array"
+                                    },
+                                    "timeout_ms": {
+                                      "anyOf": [
+                                        {
+                                          "exclusiveMinimum": 0,
+                                          "maximum": 9007199254740991,
+                                          "type": "integer"
+                                        },
+                                        {
+                                          "not": {}
+                                        }
+                                      ]
+                                    }
+                                  },
+                                  "required": [
+                                    "argv"
+                                  ],
+                                  "type": "object"
+                                },
+                                {
+                                  "not": {}
+                                }
+                              ]
+                            },
+                            "before_run": {
+                              "anyOf": [
+                                {
+                                  "additionalProperties": false,
+                                  "properties": {
+                                    "argv": {
+                                      "items": {
+                                        "minLength": 1,
+                                        "type": "string"
+                                      },
+                                      "minItems": 1,
+                                      "type": "array"
+                                    },
+                                    "timeout_ms": {
+                                      "anyOf": [
+                                        {
+                                          "exclusiveMinimum": 0,
+                                          "maximum": 9007199254740991,
+                                          "type": "integer"
+                                        },
+                                        {
+                                          "not": {}
+                                        }
+                                      ]
+                                    }
+                                  },
+                                  "required": [
+                                    "argv"
+                                  ],
+                                  "type": "object"
+                                },
+                                {
+                                  "not": {}
+                                }
+                              ]
+                            }
                           },
-                          "minItems": 1,
-                          "type": "array"
+                          "type": "object"
                         },
-                        "timeout_ms": {
-                          "exclusiveMinimum": 0,
-                          "maximum": 9007199254740991,
-                          "type": "integer"
+                        {
+                          "not": {}
                         }
-                      },
-                      "required": [
-                        "argv"
-                      ],
-                      "type": "object"
+                      ]
                     },
-                    "after_case": {
-                      "additionalProperties": false,
-                      "properties": {
-                        "argv": {
-                          "items": {
-                            "minLength": 1,
-                            "type": "string"
+                    "metric_sandbox": {
+                      "anyOf": [
+                        {
+                          "additionalProperties": false,
+                          "properties": {
+                            "image": {
+                              "anyOf": [
+                                {
+                                  "minLength": 1,
+                                  "type": "string"
+                                },
+                                {
+                                  "not": {}
+                                }
+                              ]
+                            },
+                            "kind": {
+                              "enum": [
+                                "vercel"
+                              ],
+                              "type": "string"
+                            }
                           },
-                          "minItems": 1,
-                          "type": "array"
+                          "required": [
+                            "kind"
+                          ],
+                          "type": "object"
                         },
-                        "timeout_ms": {
-                          "exclusiveMinimum": 0,
-                          "maximum": 9007199254740991,
-                          "type": "integer"
+                        {
+                          "not": {}
                         }
-                      },
-                      "required": [
-                        "argv"
-                      ],
-                      "type": "object"
+                      ]
                     },
-                    "after_evaluation": {
-                      "additionalProperties": false,
-                      "properties": {
-                        "argv": {
-                          "items": {
-                            "minLength": 1,
-                            "type": "string"
+                    "workers": {
+                      "anyOf": [
+                        {
+                          "additionalProperties": false,
+                          "properties": {
+                            "count": {
+                              "exclusiveMinimum": 0,
+                              "maximum": 9007199254740991,
+                              "type": "integer"
+                            },
+                            "directory": {
+                              "allOf": [
+                                {
+                                  "pattern": "^(?![\\\\/])(?!(?:.*[\\\\/])?\\.\\.(?:[\\\\/]|$)).+$"
+                                },
+                                {
+                                  "pattern": "^(?:[^{}]|\\{(?:run_id|worker_index)\\})+$"
+                                }
+                              ],
+                              "minLength": 1,
+                              "pattern": "^(?![A-Za-z]:)",
+                              "type": "string"
+                            }
                           },
-                          "minItems": 1,
-                          "type": "array"
+                          "required": [
+                            "count",
+                            "directory"
+                          ],
+                          "type": "object"
                         },
-                        "timeout_ms": {
-                          "exclusiveMinimum": 0,
-                          "maximum": 9007199254740991,
-                          "type": "integer"
+                        {
+                          "not": {}
                         }
-                      },
-                      "required": [
-                        "argv"
-                      ],
-                      "type": "object"
-                    },
-                    "after_run": {
-                      "additionalProperties": false,
-                      "properties": {
-                        "argv": {
-                          "items": {
-                            "minLength": 1,
-                            "type": "string"
-                          },
-                          "minItems": 1,
-                          "type": "array"
-                        },
-                        "timeout_ms": {
-                          "exclusiveMinimum": 0,
-                          "maximum": 9007199254740991,
-                          "type": "integer"
-                        }
-                      },
-                      "required": [
-                        "argv"
-                      ],
-                      "type": "object"
-                    },
-                    "before_case": {
-                      "additionalProperties": false,
-                      "properties": {
-                        "argv": {
-                          "items": {
-                            "minLength": 1,
-                            "type": "string"
-                          },
-                          "minItems": 1,
-                          "type": "array"
-                        },
-                        "timeout_ms": {
-                          "exclusiveMinimum": 0,
-                          "maximum": 9007199254740991,
-                          "type": "integer"
-                        }
-                      },
-                      "required": [
-                        "argv"
-                      ],
-                      "type": "object"
-                    },
-                    "before_run": {
-                      "additionalProperties": false,
-                      "properties": {
-                        "argv": {
-                          "items": {
-                            "minLength": 1,
-                            "type": "string"
-                          },
-                          "minItems": 1,
-                          "type": "array"
-                        },
-                        "timeout_ms": {
-                          "exclusiveMinimum": 0,
-                          "maximum": 9007199254740991,
-                          "type": "integer"
-                        }
-                      },
-                      "required": [
-                        "argv"
-                      ],
-                      "type": "object"
+                      ]
                     }
                   },
                   "type": "object"
                 },
-                "metric_sandbox": {
-                  "oneOf": [
-                    {
-                      "additionalProperties": false,
-                      "properties": {
-                        "image": {
-                          "minLength": 1,
-                          "type": "string"
-                        },
-                        "kind": {
-                          "const": "vercel",
-                          "type": "string"
-                        }
-                      },
-                      "required": [
-                        "kind"
-                      ],
-                      "type": "object"
-                    }
-                  ]
-                },
-                "workers": {
-                  "additionalProperties": false,
-                  "properties": {
-                    "count": {
-                      "exclusiveMinimum": 0,
-                      "maximum": 9007199254740991,
-                      "type": "integer"
-                    },
-                    "directory": {
-                      "allOf": [
-                        {
-                          "pattern": "^(?![A-Za-z]:)"
-                        },
-                        {
-                          "pattern": "^(?![\\\\/])(?!(?:.*[\\\\/])?\\.\\.(?:[\\\\/]|$)).+$"
-                        },
-                        {
-                          "pattern": "^(?:[^{}]|\\{(?:run_id|worker_index)\\})+$"
-                        }
-                      ],
-                      "minLength": 1,
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "count",
-                    "directory"
-                  ],
-                  "type": "object"
+                {
+                  "not": {}
                 }
-              },
-              "type": "object"
+              ]
             },
             "junit_path": {
-              "minLength": 1,
-              "type": "string"
+              "anyOf": [
+                {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "not": {}
+                }
+              ]
             },
             "output": {
               "enum": [
@@ -694,33 +1142,48 @@
       "type": "object"
     },
     "git": {
-      "additionalProperties": false,
-      "properties": {
-        "branch": {
-          "minLength": 1,
-          "type": "string"
+      "anyOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "branch": {
+              "anyOf": [
+                {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "not": {}
+                }
+              ]
+            },
+            "commit": {
+              "pattern": "^[a-f0-9]{7,64}$",
+              "type": "string"
+            },
+            "dirty": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "commit",
+            "dirty"
+          ],
+          "type": "object"
         },
-        "commit": {
-          "pattern": "^[a-f0-9]{7,64}$",
-          "type": "string"
-        },
-        "dirty": {
-          "type": "boolean"
+        {
+          "not": {}
         }
-      },
-      "required": [
-        "commit",
-        "dirty"
-      ],
-      "type": "object"
+      ]
     },
     "run_id": {
-      "format": "ulid",
       "pattern": "^[0-9A-HJKMNP-TV-Za-hjkmnp-tv-z]{26}$",
       "type": "string"
     },
     "schema": {
-      "const": "attest.eval-run",
+      "enum": [
+        "attest.eval-run"
+      ],
       "type": "string"
     },
     "snapshot": {
@@ -731,7 +1194,6 @@
           "type": "string"
         },
         "project_id": {
-          "format": "ulid",
           "pattern": "^[0-9A-HJKMNP-TV-Za-hjkmnp-tv-z]{26}$",
           "type": "string"
         },
@@ -850,12 +1312,14 @@
                 "type": "integer"
               },
               "source": {
-                "oneOf": [
+                "anyOf": [
                   {
                     "additionalProperties": false,
                     "properties": {
                       "kind": {
-                        "const": "direct",
+                        "enum": [
+                          "direct"
+                        ],
                         "type": "string"
                       }
                     },
@@ -872,7 +1336,9 @@
                         "type": "string"
                       },
                       "kind": {
-                        "const": "dataset",
+                        "enum": [
+                          "dataset"
+                        ],
                         "type": "string"
                       }
                     },
@@ -908,54 +1374,70 @@
           "type": "array"
         },
         "selection": {
-          "additionalProperties": false,
-          "properties": {
-            "matched_cases": {
-              "maximum": 9007199254740991,
-              "minimum": 0,
-              "type": "integer"
-            },
-            "sample": {
+          "anyOf": [
+            {
               "additionalProperties": false,
               "properties": {
-                "algorithm": {
-                  "const": "hash-rank-v1",
-                  "type": "string"
-                },
-                "count": {
-                  "exclusiveMinimum": 0,
+                "matched_cases": {
                   "maximum": 9007199254740991,
+                  "minimum": 0,
                   "type": "integer"
                 },
-                "seed": {
-                  "minLength": 1,
-                  "type": "string"
+                "sample": {
+                  "anyOf": [
+                    {
+                      "additionalProperties": false,
+                      "properties": {
+                        "algorithm": {
+                          "enum": [
+                            "hash-rank-v1"
+                          ],
+                          "type": "string"
+                        },
+                        "count": {
+                          "exclusiveMinimum": 0,
+                          "maximum": 9007199254740991,
+                          "type": "integer"
+                        },
+                        "seed": {
+                          "minLength": 1,
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "count",
+                        "seed",
+                        "algorithm"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "not": {}
+                    }
+                  ]
+                },
+                "selected_cases": {
+                  "maximum": 9007199254740991,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "total_cases": {
+                  "maximum": 9007199254740991,
+                  "minimum": 0,
+                  "type": "integer"
                 }
               },
               "required": [
-                "count",
-                "seed",
-                "algorithm"
+                "total_cases",
+                "matched_cases",
+                "selected_cases"
               ],
               "type": "object"
             },
-            "selected_cases": {
-              "maximum": 9007199254740991,
-              "minimum": 0,
-              "type": "integer"
-            },
-            "total_cases": {
-              "maximum": 9007199254740991,
-              "minimum": 0,
-              "type": "integer"
+            {
+              "not": {}
             }
-          },
-          "required": [
-            "total_cases",
-            "matched_cases",
-            "selected_cases"
-          ],
-          "type": "object"
+          ]
         }
       },
       "required": [

@@ -1,3 +1,4 @@
+import { stripStruct } from '@attest/contracts';
 import { createServer, type IncomingMessage } from 'node:http';
 import { mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -19,7 +20,7 @@ import {
   type EvalFinalResultData,
 } from '@attest/contracts';
 import { afterEach, expect, onTestFinished, test, vi } from 'vitest';
-import { z } from 'zod';
+import * as Schema from 'effect/Schema';
 
 import { loadProject } from '../../../project/project-loader/index.js';
 import { applyProjectMutation } from '../../../project/transaction/transactional-writer.js';
@@ -110,7 +111,7 @@ const startMockAgent = async (): Promise<string> => {
   });
 
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
-  const { port } = parseWithSchemaSync(z.object({ port: z.number() }), server.address());
+  const { port } = parseWithSchemaSync(stripStruct({ port: Schema.Finite }), server.address());
   onTestFinished(() => {
     server.closeAllConnections();
     server.close();
@@ -173,23 +174,35 @@ const createCallbackProject = async (origin: string): Promise<string> => {
     workingDirectory: root,
   });
 
-  const candidate = candidateFromLoadedProject(await loadProject({ project: root }));
+  let candidate = candidateFromLoadedProject(await loadProject({ project: root }));
 
-  candidate.metrics.push({
-    schema: METRIC_RESOURCE_SCHEMA_ID,
-    id: 'files',
-    name: 'files',
-    definition: { kind: 'exec', argv: [process.execPath, 'score.mjs'] },
-  });
-  candidate.tests.push({
-    schema: TEST_RESOURCE_SCHEMA_ID,
-    id: 'smoke',
-    name: 'smoke',
-    agent_id: 'coder',
-    cases: [{ id: 'write-file', input: 'write answer.ts' }],
-    datasets: [],
-    metrics: [{ metric_id: 'files' }],
-  });
+  candidate = {
+    ...candidate,
+    metrics: [
+      ...candidate.metrics,
+      {
+        schema: METRIC_RESOURCE_SCHEMA_ID,
+        id: 'files',
+        name: 'files',
+        definition: { kind: 'exec', argv: [process.execPath, 'score.mjs'] },
+      },
+    ],
+  };
+  candidate = {
+    ...candidate,
+    tests: [
+      ...candidate.tests,
+      {
+        schema: TEST_RESOURCE_SCHEMA_ID,
+        id: 'smoke',
+        name: 'smoke',
+        agent_id: 'coder',
+        cases: [{ id: 'write-file', input: 'write answer.ts' }],
+        datasets: [],
+        metrics: [{ metric_id: 'files' }],
+      },
+    ],
+  };
   await applyProjectMutation({ candidate, projectRoot: root });
 
   return root;

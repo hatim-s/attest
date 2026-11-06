@@ -9,6 +9,7 @@ import {
   type EvalOutputMode,
   type EvalRunRequest,
   type JsonValue,
+  type SchemaDiagnostic,
 } from '@attest/contracts';
 import { parseDuration } from '@attest/local/agent';
 import type { Command } from 'commander';
@@ -27,7 +28,7 @@ type EvalRunRequestFields = Partial<Pick<EvalRunRequest, 'tags' | 'folders' | 'o
   junit?: EvalRunRequest['junit_path'];
   sample?: string;
   seed?: string;
-  testIds?: Extract<EvalRunRequest, { test_ids: string[] }>['test_ids'];
+  testIds?: Extract<EvalRunRequest, { test_ids: readonly string[] }>['test_ids'];
   timeout?: string;
   watch?: Extract<EvalRunRequest, { output: 'human' }>['watch'];
 };
@@ -36,7 +37,7 @@ type EvalRunRequestFields = Partial<Pick<EvalRunRequest, 'tags' | 'folders' | 'o
 type EvalRunRequestDraft = Pick<EvalRunRequest, 'schema' | 'command' | 'output'> &
   Partial<Omit<EvalRunRequest, 'schema' | 'command' | 'output'>> & {
     all?: Extract<EvalRunRequest, { all: true }>['all'];
-    test_ids?: Extract<EvalRunRequest, { test_ids: string[] }>['test_ids'];
+    test_ids?: Extract<EvalRunRequest, { test_ids: readonly string[] }>['test_ids'];
     watch?: Extract<EvalRunRequest, { output: 'human' }>['watch'];
   };
 
@@ -44,10 +45,8 @@ type EvalCancelRequestFields = Partial<Pick<EvalCancelRequest, 'output'>> & {
   runId?: EvalCancelRequest['run_id'];
 };
 
-type SchemaIssue = { message: string; path: readonly PropertyKey[] };
-
 /** Lists schema issues with JSON Pointer-style paths for the error `details`. */
-const issueDiagnostics = (issues: readonly SchemaIssue[]): JsonValue =>
+const issueDiagnostics = (issues: readonly SchemaDiagnostic[]): JsonValue =>
   issues.map(({ message, path }) => ({ message, path: `/${path.map(String).join('/')}` }));
 
 /** Reads the `output` a request document asks for, even when the rest of it is invalid. */
@@ -62,7 +61,8 @@ const requestedOutput = (document: JsonValue): EvalOutputMode | undefined => {
 };
 
 /** Validates one eval run request from flags or `--from-json` through the published schema. */
-const parseEvalRunRequest = (value: JsonValue): EvalRunRequest => {
+// BOUNDARY: CLI drafts and decoded JSON documents are checked together by the native request schema.
+const parseEvalRunRequest = (value: unknown): EvalRunRequest => {
   const parsed = parseWithSchema(evalRunRequestSchema, value);
 
   if (!parsed.ok) {
@@ -107,7 +107,7 @@ const assertNoEvalFlags = (fromJson: string | undefined, command: Command): void
 /** Asks which tests to run; an empty answer or `all` selects every test. */
 const promptForSelection = async (
   context: PromptContext,
-): Promise<{ all: true } | { test_ids: string[] }> => {
+): Promise<{ all: true } | { test_ids: readonly string[] }> => {
   const question = 'Test ids (space-separated) or all [all]: ';
   const answer = (await promptWithSignal(context.prompt, question, context.signal)).trim();
 
@@ -145,7 +145,7 @@ const createEvalRunRequest = async (
     });
   }
 
-  let selection: { all: true } | { test_ids: string[] };
+  let selection: { all: true } | { test_ids: readonly string[] };
 
   if (fields.all === true) selection = { all: true };
   else if (testIds.length > 0) selection = { test_ids: [...testIds] };
@@ -157,35 +157,38 @@ const createEvalRunRequest = async (
     });
   }
 
-  const request: EvalRunRequestDraft = {
+  let request: EvalRunRequestDraft = {
     schema: COMMAND_REQUEST_SCHEMA_ID,
     command: 'eval.run',
     ...selection,
     output,
   };
 
-  if (fields.caseIds !== undefined) request.case_ids = [...fields.caseIds];
+  if (fields.caseIds !== undefined) request = { ...request, case_ids: [...fields.caseIds] };
 
-  if (fields.tags !== undefined) request.tags = [...fields.tags];
+  if (fields.tags !== undefined) request = { ...request, tags: [...fields.tags] };
 
-  if (fields.folders !== undefined) request.folders = [...fields.folders];
+  if (fields.folders !== undefined) request = { ...request, folders: [...fields.folders] };
 
-  if (fields.datasetIds !== undefined) request.dataset_ids = [...fields.datasetIds];
+  if (fields.datasetIds !== undefined)
+    request = { ...request, dataset_ids: [...fields.datasetIds] };
 
   if (fields.sample !== undefined) {
-    const sample: NonNullable<EvalRunRequest['sample']> = { count: Number(fields.sample) };
+    let sample: NonNullable<EvalRunRequest['sample']> = { count: Number(fields.sample) };
 
-    if (fields.seed !== undefined) sample.seed = fields.seed;
-    request.sample = sample;
+    if (fields.seed !== undefined) sample = { ...sample, seed: fields.seed };
+    request = { ...request, sample: sample };
   }
 
-  if (fields.concurrency !== undefined) request.concurrency = Number(fields.concurrency);
+  if (fields.concurrency !== undefined)
+    request = { ...request, concurrency: Number(fields.concurrency) };
 
-  if (fields.timeout !== undefined) request.timeout_ms = parseDuration(fields.timeout);
+  if (fields.timeout !== undefined)
+    request = { ...request, timeout_ms: parseDuration(fields.timeout) };
 
-  if (fields.baseline !== undefined) request.baseline_run_id = fields.baseline;
+  if (fields.baseline !== undefined) request = { ...request, baseline_run_id: fields.baseline };
 
-  if (fields.junit !== undefined) request.junit_path = fields.junit;
+  if (fields.junit !== undefined) request = { ...request, junit_path: fields.junit };
 
   if (fields.watch !== undefined) request.watch = fields.watch;
 

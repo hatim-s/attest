@@ -121,33 +121,47 @@ const createEvalProject = async (options: EvalProjectOptions = {}): Promise<stri
     workingDirectory: root,
   });
   await writeFile(join(root, 'agent.mjs'), options.agentSource ?? ECHO_AGENT);
-  const candidate = candidateFromLoadedProject(await loadProject({ project: root }));
-  candidate.agents.push({
-    schema: AGENT_RESOURCE_SCHEMA_ID,
-    id: 'support',
-    name: 'support',
-    transport: {
-      kind: 'native_cli',
-      lifecycle: 'per_case',
-      argv: [process.execPath, './agent.mjs'],
-    },
-  });
-  candidate.metrics.push(
-    {
-      schema: METRIC_RESOURCE_SCHEMA_ID,
-      id: 'exact',
-      name: 'exact',
-      definition: {
-        kind: 'assertion',
-        assertions: [{ equals: { path: '$.output', value: 'Paris' } }],
+  let candidate = candidateFromLoadedProject(await loadProject({ project: root }));
+  candidate = {
+    ...candidate,
+    agents: [
+      ...candidate.agents,
+      {
+        schema: AGENT_RESOURCE_SCHEMA_ID,
+        id: 'support',
+        name: 'support',
+        transport: {
+          kind: 'native_cli',
+          lifecycle: 'per_case',
+          argv: [process.execPath, './agent.mjs'],
+        },
       },
-    },
-    ...(options.metrics ?? []),
-  );
-  candidate.tests.push(
-    testResource('smoke', 'exact', [{ id: 'capital', input: 'Paris' }]),
-    ...(options.tests ?? []),
-  );
+    ],
+  };
+  candidate = {
+    ...candidate,
+    metrics: [
+      ...candidate.metrics,
+      {
+        schema: METRIC_RESOURCE_SCHEMA_ID,
+        id: 'exact',
+        name: 'exact',
+        definition: {
+          kind: 'assertion',
+          assertions: [{ equals: { path: '$.output', value: 'Paris' } }],
+        },
+      },
+      ...(options.metrics ?? []),
+    ],
+  };
+  candidate = {
+    ...candidate,
+    tests: [
+      ...candidate.tests,
+      testResource('smoke', 'exact', [{ id: 'capital', input: 'Paris' }]),
+      ...(options.tests ?? []),
+    ],
+  };
   await applyProjectMutation({ candidate, projectRoot: root });
 
   return root;
@@ -234,8 +248,15 @@ describe('runConfiguration', () => {
 
     const root = await createEvalProject();
     const loaded = await loadProject({ project: root });
-    const candidate = candidateFromLoadedProject(loaded);
-    candidate.tests[0]!.cases.push(...sampled);
+    let candidate = candidateFromLoadedProject(loaded);
+    candidate = {
+      ...candidate,
+      tests: candidate.tests.map((entry, index) =>
+        index === 0
+          ? { ...candidate.tests[0]!, cases: [...candidate.tests[0]!.cases, ...sampled] }
+          : entry,
+      ),
+    };
     await applyProjectMutation({ candidate, projectRoot: root });
 
     const baseline = await runEval(root, { test_ids: ['smoke'] });
@@ -295,10 +316,16 @@ describe('runConfiguration', () => {
     const root = await createEvalProject();
     const baseline = await runEval(root, { test_ids: ['smoke'] });
     await writeFile(join(root, 'fail-after-case.mjs'), 'process.exit(7);\n');
-    const candidate = candidateFromLoadedProject(await loadProject({ project: root }));
-    candidate.project.defaults = {
-      ...candidate.project.defaults,
-      eval: { hooks: { after_case: { argv: [process.execPath, './fail-after-case.mjs'] } } },
+    let candidate = candidateFromLoadedProject(await loadProject({ project: root }));
+    candidate = {
+      ...candidate,
+      project: {
+        ...candidate.project,
+        defaults: {
+          ...candidate.project.defaults,
+          eval: { hooks: { after_case: { argv: [process.execPath, './fail-after-case.mjs'] } } },
+        },
+      },
     };
     await applyProjectMutation({ candidate, projectRoot: root });
 

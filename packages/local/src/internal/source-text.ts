@@ -2,7 +2,7 @@ import { parseWithSchemaSync } from '@attest/contracts';
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 
-import { z } from 'zod';
+import * as Schema from 'effect/Schema';
 
 import type { JsonValue } from '@attest/contracts';
 
@@ -41,7 +41,7 @@ const readSourceText = async (source: string, options: ReadSourceTextOptions): P
 /** Parses one JSON document; the error never echoes the text because it may hold secrets. */
 const parseJsonText = (text: string, options: ParseJsonTextOptions): JsonValue => {
   try {
-    return parseWithSchemaSync(z.json(), JSON.parse(text));
+    return parseWithSchemaSync(Schema.Json, JSON.parse(text));
   } catch (error: unknown) {
     throw new LocalError('cli_usage', `${options.path} is not valid JSON.`, {
       path: options.path,

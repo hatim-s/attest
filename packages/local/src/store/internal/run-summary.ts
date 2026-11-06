@@ -1,6 +1,6 @@
 import { parseWithSchemaSync } from '@attest/contracts';
 import { sql, type Kysely } from 'kysely';
-import { z } from 'zod';
+import * as Schema from 'effect/Schema';
 
 import type { CasesTable, Database, MetricResultsTable } from '../schema.js';
 import {
@@ -44,7 +44,7 @@ const rowVerdict = (caseRow: SummaryCase, metrics: readonly SummaryMetric[]): Ca
     {
       outcome: caseRow.outcome,
       expectedMetrics: parseWithSchemaSync(
-        z.array(z.string()),
+        Schema.Array(Schema.String),
         parseJson(caseRow.expected_metrics_json) ?? [],
       ),
       lifecycleFailed: caseRow.lifecycle_failed === 1,

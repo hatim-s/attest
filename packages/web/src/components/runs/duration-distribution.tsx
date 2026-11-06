@@ -27,7 +27,7 @@ const DurationDistribution = ({
   cases,
   allLoaded,
 }: {
-  cases: CaseSummary[];
+  cases: readonly CaseSummary[];
   allLoaded: boolean;
 }) => {
   const bins = useMemo(() => createDurationHistogram(cases), [cases]);

@@ -31,9 +31,15 @@ const runAgentRemoveCommand = async (
     });
   }
 
-  const candidate = candidateFromLoadedProject(loaded);
-  candidate.agents = candidate.agents.filter(({ id }) => id !== request.agent_id);
-  candidate.tests = candidate.tests.filter(({ agent_id: agentId }) => agentId !== request.agent_id);
+  let candidate = candidateFromLoadedProject(loaded);
+  candidate = {
+    ...candidate,
+    agents: candidate.agents.filter(({ id }) => id !== request.agent_id),
+  };
+  candidate = {
+    ...candidate,
+    tests: candidate.tests.filter(({ agent_id: agentId }) => agentId !== request.agent_id),
+  };
 
   const warnings =
     dependentTests.length === 0

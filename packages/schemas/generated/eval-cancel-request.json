@@ -1,9 +1,12 @@
 {
+  "$defs": {},
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "properties": {
     "command": {
-      "const": "eval.cancel",
+      "enum": [
+        "eval.cancel"
+      ],
       "type": "string"
     },
     "output": {
@@ -14,12 +17,13 @@
       "type": "string"
     },
     "run_id": {
-      "format": "ulid",
       "pattern": "^[0-9A-HJKMNP-TV-Za-hjkmnp-tv-z]{26}$",
       "type": "string"
     },
     "schema": {
-      "const": "attest.command-request",
+      "enum": [
+        "attest.command-request"
+      ],
       "type": "string"
     }
   },

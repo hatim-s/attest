@@ -92,10 +92,20 @@ describe('transactional project writer', () => {
     const commitRoot = await createProject();
     const loadedDry = await loadProject({ project: dryRoot });
     const loadedCommit = await loadProject({ project: commitRoot });
-    const dryCandidate = candidateFromLoadedProject(loadedDry);
-    const commitCandidate = candidateFromLoadedProject(loadedCommit);
-    dryCandidate.tests[0]!.name = 'Updated refund';
-    commitCandidate.tests[0]!.name = 'Updated refund';
+    let dryCandidate = candidateFromLoadedProject(loadedDry);
+    let commitCandidate = candidateFromLoadedProject(loadedCommit);
+    dryCandidate = {
+      ...dryCandidate,
+      tests: dryCandidate.tests.map((entry, index) =>
+        index === 0 ? { ...dryCandidate.tests[0]!, name: 'Updated refund' } : entry,
+      ),
+    };
+    commitCandidate = {
+      ...commitCandidate,
+      tests: commitCandidate.tests.map((entry, index) =>
+        index === 0 ? { ...commitCandidate.tests[0]!, name: 'Updated refund' } : entry,
+      ),
+    };
     const before = await snapshotProjectFiles(dryRoot);
 
     const preview = await applyProjectMutation({
@@ -122,8 +132,8 @@ describe('transactional project writer', () => {
   it('fails an optimistic hash mismatch before any transaction artifact is created', async () => {
     const root = await createProject();
     const loaded = await loadProject({ project: root });
-    const candidate = candidateFromLoadedProject(loaded);
-    candidate.project.name = 'Changed';
+    let candidate = candidateFromLoadedProject(loaded);
+    candidate = { ...candidate, project: { ...candidate.project, name: 'Changed' } };
     const before = await snapshotProjectFiles(root);
     let failure: unknown;
 
@@ -147,9 +157,19 @@ describe('transactional project writer', () => {
   it('publishes multiple resources with canonical bytes and a verified manifest commit point', async () => {
     const root = await createProject();
     const loaded = await loadProject({ project: root });
-    const candidate = candidateFromLoadedProject(loaded);
-    candidate.agents[0]!.name = 'Updated support';
-    candidate.metrics[0]!.name = 'Updated correctness';
+    let candidate = candidateFromLoadedProject(loaded);
+    candidate = {
+      ...candidate,
+      agents: candidate.agents.map((entry, index) =>
+        index === 0 ? { ...candidate.agents[0]!, name: 'Updated support' } : entry,
+      ),
+    };
+    candidate = {
+      ...candidate,
+      metrics: candidate.metrics.map((entry, index) =>
+        index === 0 ? { ...candidate.metrics[0]!, name: 'Updated correctness' } : entry,
+      ),
+    };
 
     const result = await applyProjectMutation({ candidate, projectRoot: root });
     const verified = await loadProject({ project: root });
@@ -168,9 +188,19 @@ describe('transactional project writer', () => {
   it('rolls back every published path when a later publish step fails', async () => {
     const root = await createProject();
     const loaded = await loadProject({ project: root });
-    const candidate = candidateFromLoadedProject(loaded);
-    candidate.agents[0]!.name = 'Will roll back';
-    candidate.metrics[0]!.name = 'Will also roll back';
+    let candidate = candidateFromLoadedProject(loaded);
+    candidate = {
+      ...candidate,
+      agents: candidate.agents.map((entry, index) =>
+        index === 0 ? { ...candidate.agents[0]!, name: 'Will roll back' } : entry,
+      ),
+    };
+    candidate = {
+      ...candidate,
+      metrics: candidate.metrics.map((entry, index) =>
+        index === 0 ? { ...candidate.metrics[0]!, name: 'Will also roll back' } : entry,
+      ),
+    };
     const changes = createFileChanges(loaded, prepareProjectCandidate(candidate));
     const lock = await acquireProjectLock(root);
 
@@ -200,9 +230,19 @@ describe('transactional project writer', () => {
   it('rolls an interrupted pre-manifest publish back from its recovery journal', async () => {
     const root = await createProject();
     const loaded = await loadProject({ project: root });
-    const candidate = candidateFromLoadedProject(loaded);
-    candidate.agents[0]!.name = 'Interrupted';
-    candidate.metrics[0]!.name = 'Interrupted';
+    let candidate = candidateFromLoadedProject(loaded);
+    candidate = {
+      ...candidate,
+      agents: candidate.agents.map((entry, index) =>
+        index === 0 ? { ...candidate.agents[0]!, name: 'Interrupted' } : entry,
+      ),
+    };
+    candidate = {
+      ...candidate,
+      metrics: candidate.metrics.map((entry, index) =>
+        index === 0 ? { ...candidate.metrics[0]!, name: 'Interrupted' } : entry,
+      ),
+    };
     const preparedCandidate = prepareProjectCandidate(candidate);
     const changes = createFileChanges(loaded, preparedCandidate);
     const lock = await acquireProjectLock(root);
@@ -227,8 +267,13 @@ describe('transactional project writer', () => {
   it('completes cleanup when recovery finds the new manifest commit point', async () => {
     const root = await createProject();
     const loaded = await loadProject({ project: root });
-    const candidate = candidateFromLoadedProject(loaded);
-    candidate.agents[0]!.name = 'Committed before crash';
+    let candidate = candidateFromLoadedProject(loaded);
+    candidate = {
+      ...candidate,
+      agents: candidate.agents.map((entry, index) =>
+        index === 0 ? { ...candidate.agents[0]!, name: 'Committed before crash' } : entry,
+      ),
+    };
     const preparedCandidate = prepareProjectCandidate(candidate);
     const changes = createFileChanges(loaded, preparedCandidate);
     const lock = await acquireProjectLock(root);
@@ -253,9 +298,19 @@ describe('transactional project writer', () => {
   it('preserves an external edit and leaves the journal when recovery cannot prove ownership', async () => {
     const root = await createProject();
     const loaded = await loadProject({ project: root });
-    const candidate = candidateFromLoadedProject(loaded);
-    candidate.agents[0]!.name = 'Interrupted';
-    candidate.metrics[0]!.name = 'Interrupted';
+    let candidate = candidateFromLoadedProject(loaded);
+    candidate = {
+      ...candidate,
+      agents: candidate.agents.map((entry, index) =>
+        index === 0 ? { ...candidate.agents[0]!, name: 'Interrupted' } : entry,
+      ),
+    };
+    candidate = {
+      ...candidate,
+      metrics: candidate.metrics.map((entry, index) =>
+        index === 0 ? { ...candidate.metrics[0]!, name: 'Interrupted' } : entry,
+      ),
+    };
     const preparedCandidate = prepareProjectCandidate(candidate);
     const changes = createFileChanges(loaded, preparedCandidate);
     const lock = await acquireProjectLock(root);

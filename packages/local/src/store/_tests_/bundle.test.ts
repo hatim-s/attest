@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { Readable, Writable } from 'node:stream';
 import { setTimeout as delay } from 'node:timers/promises';
 
-import { z } from 'zod';
+import * as Schema from 'effect/Schema';
 import { parseWithSchemaSync, AGENT_PROTOCOL, type JsonValue } from '@attest/contracts';
 import {
   BUNDLE_SCHEMA_ID,
@@ -17,7 +17,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { exportRunBundle, readRunBundle } from '../bundle-io.js';
 import { openStore } from '../run-store.js';
 
-const fixtureRecordSchema = z.record(z.string(), z.json());
+const fixtureRecordSchema = Schema.Record(Schema.String, Schema.Json);
 
 const stores: RunStore[] = [];
 
@@ -268,10 +268,16 @@ describe('run bundles', () => {
     [
       'malformed evaluated metric',
       (_header: Record<string, JsonValue>, caseLine: Record<string, JsonValue>) => {
-        const caseRecord = parseWithSchemaSync(fixtureRecordSchema, caseLine.case);
-        const metrics = parseWithSchemaSync(z.array(fixtureRecordSchema), caseRecord.metrics);
-        delete metrics[0]?.pass;
-        caseRecord.metrics = metrics;
+        let caseRecord = parseWithSchemaSync(fixtureRecordSchema, caseLine.case);
+        let metrics = parseWithSchemaSync(Schema.Array(fixtureRecordSchema), caseRecord.metrics);
+        metrics = metrics.map((metric, index) => {
+          const entry = Object.fromEntries(
+            Object.entries(metric).filter(([key]) => key !== 'pass'),
+          );
+
+          return index === 0 ? entry : metric;
+        });
+        caseRecord = { ...caseRecord, metrics: metrics };
         caseLine.case = caseRecord;
       },
       'Run bundle case line 2 is malformed.',

@@ -80,7 +80,7 @@ const checkRelease = async (): Promise<void> => {
       join(directory, 'verify.mjs'),
       `import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { cliResultSchema } from '@attest/contracts';
+import { cliResultSchema, parseWithSchema } from '@attest/contracts';
 import { openStore } from '@attest/local/store';
 import { startViewServer } from '@attest/local/view-server';
 import { invokeAgent } from '@attest/executor';
@@ -105,7 +105,7 @@ try {
 }
 assert.equal(typeof executeResolvedEvalPlan, 'function');
 assert.equal(typeof selectCases, 'function');
-assert.equal(typeof cliResultSchema.parse, 'function');
+assert.equal(parseWithSchema(cliResultSchema, {}).ok, false);
 assert.ok(dashboardHtml.includes('<html'));
 const schema = JSON.parse(await readFile(new URL(import.meta.resolve('@attest/schemas/generated/project.json')), 'utf8'));
 assert.ok(schema.$schema);

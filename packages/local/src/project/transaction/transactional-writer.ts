@@ -111,7 +111,7 @@ const publishPreparedTransaction = async (
     );
   }
 
-  prepared.journal.status = 'publishing';
+  prepared.journal = { ...prepared.journal, status: 'publishing' };
   await writeTransactionJournal(prepared);
   await createMissingDirectories(root, prepared);
 
@@ -143,7 +143,7 @@ const publishPreparedTransaction = async (
 
 /** Marks a verified transaction committed before its recoverable artifacts are removed. */
 const markTransactionCommitted = async (prepared: PreparedTransaction): Promise<void> => {
-  prepared.journal.status = 'committed';
+  prepared.journal = { ...prepared.journal, status: 'committed' };
   await writeTransactionJournal(prepared);
 };
 

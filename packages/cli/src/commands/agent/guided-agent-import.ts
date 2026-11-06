@@ -1,3 +1,4 @@
+import { isJsonObject } from '@attest/contracts';
 import { LocalError } from '@attest/local';
 import {
   CURL_MAPPING_DIAGNOSTICS,
@@ -175,7 +176,7 @@ const isCurlMappingError = (cause: unknown): cause is LocalError => {
   if (!(cause instanceof LocalError)) return false;
   const details = cause.details;
 
-  if (details === null || typeof details !== 'object' || Array.isArray(details)) return false;
+  if (!isJsonObject(details)) return false;
   const diagnostics = details.diagnostics;
 
   return (

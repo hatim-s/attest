@@ -34,7 +34,7 @@ const registerMetricImportCommand = (metric: Command, context: CommandContext): 
         leaf,
         options,
         build: async () => {
-          const request: Extract<CommandRequest, { command: 'metric.import' }> = {
+          let request: Extract<CommandRequest, { command: 'metric.import' }> = {
             ...mutationRequestFields('metric.import', options),
             source: await requiredInput(
               source,
@@ -50,7 +50,7 @@ const registerMetricImportCommand = (metric: Command, context: CommandContext): 
           };
 
           if (options.name !== undefined) {
-            request.name = options.name;
+            request = { ...request, name: options.name };
           }
 
           return request;

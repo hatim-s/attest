@@ -1,4 +1,5 @@
-import { z } from 'zod';
+import { nonnegativeIntegerSchema, timestampSchema } from '../schema/scalars.js';
+import * as Schema from 'effect/Schema';
 
 import { metricPresetSchema } from '../metric/presets.js';
 import { jsonValueSchema, sha256Schema } from '../project/shared.js';
@@ -9,157 +10,164 @@ import {
   CLI_RESULT_SCHEMA_ID,
 } from '../schema/identifiers.js';
 
-const cliCommandSchema = z
-  .string()
-  .regex(/^[a-z][a-z0-9-]*(?:\.[a-z][a-z0-9-]*)*$/, 'must be a dotted lowercase command path');
+const cliCommandSchema = Schema.String.check(
+  Schema.isPattern(/^[a-z][a-z0-9-]*(?:\.[a-z][a-z0-9-]*)*$/, {
+    message: 'must be a dotted lowercase command path',
+  }),
+);
 
-const cliPathSchema = z.string().min(1);
+const cliPathSchema = Schema.String.check(Schema.isMinLength(1));
 
 const cliFailureExitCodes = [1, 2, 3, 4, 130] as const;
 
-const cliFailureExitCodeSchema = z.literal(cliFailureExitCodes);
+const cliFailureExitCodeSchema = Schema.Literals(cliFailureExitCodes);
 
-const cliExitCodeSchema = z.literal([0, ...cliFailureExitCodes]);
+const cliExitCodeSchema = Schema.Literals([0, ...cliFailureExitCodes]);
 
 /** Carries a stable non-fatal diagnostic alongside a successful result. */
-const cliWarningSchema = z.strictObject({
-  code: z.string().min(1),
-  message: z.string().min(1),
-  path: cliPathSchema.optional(),
-  details: jsonValueSchema.optional(),
+const cliWarningSchema = Schema.Struct({
+  code: Schema.String.check(Schema.isMinLength(1)),
+  message: Schema.String.check(Schema.isMinLength(1)),
+  path: Schema.optional(cliPathSchema),
+  details: Schema.optional(jsonValueSchema),
 });
 
 /** Carries the stable failure identity and repair data exposed to CLI callers. */
-const cliErrorSchema = z.strictObject({
-  code: z.string().min(1),
-  message: z.string().min(1),
-  path: cliPathSchema.optional(),
-  hint: z.string().min(1).optional(),
-  retryable: z.boolean(),
-  details: jsonValueSchema.optional(),
+const cliErrorSchema = Schema.Struct({
+  code: Schema.String.check(Schema.isMinLength(1)),
+  message: Schema.String.check(Schema.isMinLength(1)),
+  path: Schema.optional(cliPathSchema),
+  hint: Schema.optional(Schema.String.check(Schema.isMinLength(1))),
+  retryable: Schema.Boolean,
+  details: Schema.optional(jsonValueSchema),
 });
 
-const cliSuccessResultSchema = z.strictObject({
-  schema: z.literal(CLI_RESULT_SCHEMA_ID),
-  ok: z.literal(true),
+const cliSuccessResultSchema = Schema.Struct({
+  schema: Schema.Literal(CLI_RESULT_SCHEMA_ID),
+  ok: Schema.Literal(true),
   command: cliCommandSchema,
-  project_hash_before: sha256Schema.nullable(),
-  project_hash_after: sha256Schema.nullable(),
+  project_hash_before: Schema.NullOr(sha256Schema),
+  project_hash_after: Schema.NullOr(sha256Schema),
   result: jsonValueSchema,
-  warnings: z.array(cliWarningSchema),
+  warnings: Schema.Array(cliWarningSchema),
 });
 
-const cliFailureResultSchema = z.strictObject({
-  schema: z.literal(CLI_RESULT_SCHEMA_ID),
-  ok: z.literal(false),
+const cliFailureResultSchema = Schema.Struct({
+  schema: Schema.Literal(CLI_RESULT_SCHEMA_ID),
+  ok: Schema.Literal(false),
   command: cliCommandSchema,
   error: cliErrorSchema,
 });
 
 /** Defines the one-document response emitted by every non-streaming machine command. */
-const cliResultSchema = z.discriminatedUnion('ok', [
-  cliSuccessResultSchema,
-  cliFailureResultSchema,
-]);
+const cliResultSchema = Schema.Union([cliSuccessResultSchema, cliFailureResultSchema]);
 
 /** Defines one deterministic line in a CLI JSONL stream. */
-const cliEventSchema = z.strictObject({
-  schema: z.literal(CLI_EVENT_SCHEMA_ID),
-  sequence: z.number().int().nonnegative(),
-  time: z.iso.datetime({ offset: true }),
-  event: z.string().regex(/^[a-z][a-z0-9_]*$/, 'must be a lowercase event name'),
+const cliEventSchema = Schema.Struct({
+  schema: Schema.Literal(CLI_EVENT_SCHEMA_ID),
+  sequence: nonnegativeIntegerSchema,
+  time: timestampSchema,
+  event: Schema.String.check(
+    Schema.isPattern(/^[a-z][a-z0-9_]*$/, { message: 'must be a lowercase event name' }),
+  ),
   data: jsonValueSchema,
 });
 
-const cliHelpArgumentSchema = z.strictObject({
-  name: z.string().min(1),
-  usage: z.string().min(1),
-  description: z.string(),
-  required: z.boolean(),
-  variadic: z.boolean(),
-  choices: z.array(jsonValueSchema),
-  default: jsonValueSchema.nullable(),
+const cliHelpArgumentSchema = Schema.Struct({
+  name: Schema.String.check(Schema.isMinLength(1)),
+  usage: Schema.String.check(Schema.isMinLength(1)),
+  description: Schema.String,
+  required: Schema.Boolean,
+  variadic: Schema.Boolean,
+  choices: Schema.Array(jsonValueSchema),
+  default: Schema.NullOr(jsonValueSchema),
 });
 
-const cliHelpOptionSchema = z.strictObject({
-  name: z.string().min(1),
-  flags: z.string().min(1),
-  description: z.string(),
-  value_name: z.string().min(1).nullable(),
-  required: z.boolean(),
-  repeatable: z.boolean(),
-  choices: z.array(jsonValueSchema),
-  default: jsonValueSchema.nullable(),
-  conflicts: z.array(z.string().min(1)),
-  implies: z.array(z.string().min(1)),
+const cliHelpOptionSchema = Schema.Struct({
+  name: Schema.String.check(Schema.isMinLength(1)),
+  flags: Schema.String.check(Schema.isMinLength(1)),
+  description: Schema.String,
+  value_name: Schema.NullOr(Schema.String.check(Schema.isMinLength(1))),
+  required: Schema.Boolean,
+  repeatable: Schema.Boolean,
+  choices: Schema.Array(jsonValueSchema),
+  default: Schema.NullOr(jsonValueSchema),
+  conflicts: Schema.Array(Schema.String.check(Schema.isMinLength(1))),
+  implies: Schema.Array(Schema.String.check(Schema.isMinLength(1))),
 });
 
 /** Recursively describes one command and every currently registered child command. */
-const cliHelpCommandSchema = z.strictObject({
-  path: z.array(z.string().min(1)),
-  name: z.string().min(1),
-  summary: z.string(),
-  usage: z.string().min(1),
-  arguments: z.array(cliHelpArgumentSchema),
-  options: z.array(cliHelpOptionSchema),
-  get subcommands(): z.ZodArray<typeof cliHelpCommandSchema> {
-    return z.array(cliHelpCommandSchema);
-  },
-  aliases: z.array(z.string().min(1)),
-  alias_for: cliCommandSchema.nullable(),
-  request_schema: z.string().min(1).nullable(),
-  examples: z.array(z.string().min(1)),
-  constraints: z.array(z.string().min(1)),
-  presets: z.array(metricPresetSchema).optional(),
+const cliHelpCommandFields = {
+  path: Schema.Array(Schema.String.check(Schema.isMinLength(1))),
+  name: Schema.String.check(Schema.isMinLength(1)),
+  summary: Schema.String,
+  usage: Schema.String.check(Schema.isMinLength(1)),
+  arguments: Schema.Array(cliHelpArgumentSchema),
+  options: Schema.Array(cliHelpOptionSchema),
+  aliases: Schema.Array(Schema.String.check(Schema.isMinLength(1))),
+  alias_for: Schema.NullOr(cliCommandSchema),
+  request_schema: Schema.NullOr(Schema.String.check(Schema.isMinLength(1))),
+  examples: Schema.Array(Schema.String.check(Schema.isMinLength(1))),
+  constraints: Schema.Array(Schema.String.check(Schema.isMinLength(1))),
+  presets: Schema.optional(Schema.Array(metricPresetSchema)),
+};
+
+type CliHelpCommandNode = Schema.Struct.Type<typeof cliHelpCommandFields> & {
+  readonly subcommands: readonly CliHelpCommandNode[];
+};
+
+const cliHelpCommandSchema: Schema.Codec<CliHelpCommandNode> = Schema.Struct({
+  ...cliHelpCommandFields,
+  subcommands: Schema.Array(Schema.suspend(() => cliHelpCommandSchema)),
 });
 
 /** Defines the command tree carried by a successful help result. */
-const cliHelpSchema = z.strictObject({
-  schema: z.literal(CLI_HELP_SCHEMA_ID),
+const cliHelpSchema = Schema.Struct({
+  schema: Schema.Literal(CLI_HELP_SCHEMA_ID),
   command: cliHelpCommandSchema,
 });
 
 /** Defines one stable catalog entry including the repair and process-status contract. */
-const cliErrorDefinitionSchema = z.strictObject({
-  code: z.string().min(1),
-  meaning: z.string().min(1),
-  likely_causes: z.array(z.string().min(1)),
-  retryable: z.boolean(),
+const cliErrorDefinitionSchema = Schema.Struct({
+  code: Schema.String.check(Schema.isMinLength(1)),
+  meaning: Schema.String.check(Schema.isMinLength(1)),
+  likely_causes: Schema.Array(Schema.String.check(Schema.isMinLength(1))),
+  retryable: Schema.Boolean,
   exit_code: cliFailureExitCodeSchema,
-  repairs: z.array(z.string().min(1)),
+  repairs: Schema.Array(Schema.String.check(Schema.isMinLength(1))),
 });
 
 /** Defines the error registry returned by `attest errors`. */
-const cliErrorCatalogSchema = z.strictObject({
-  schema: z.literal(CLI_ERROR_CATALOG_SCHEMA_ID),
-  errors: z.array(cliErrorDefinitionSchema),
+const cliErrorCatalogSchema = Schema.Struct({
+  schema: Schema.Literal(CLI_ERROR_CATALOG_SCHEMA_ID),
+  errors: Schema.Array(cliErrorDefinitionSchema),
 });
 
-type CliError = z.infer<typeof cliErrorSchema>;
+type CliError = typeof cliErrorSchema.Type;
 
-type CliErrorCatalog = z.infer<typeof cliErrorCatalogSchema>;
+type CliErrorCatalog = typeof cliErrorCatalogSchema.Type;
 
-type CliErrorDefinition = z.infer<typeof cliErrorDefinitionSchema>;
+type CliErrorDefinition = typeof cliErrorDefinitionSchema.Type;
 
-type CliEvent = z.infer<typeof cliEventSchema>;
+type CliEvent = typeof cliEventSchema.Type;
 
-type CliExitCode = z.infer<typeof cliExitCodeSchema>;
+type CliExitCode = typeof cliExitCodeSchema.Type;
 
-type CliFailureResult = z.infer<typeof cliFailureResultSchema>;
+type CliFailureResult = typeof cliFailureResultSchema.Type;
 
-type CliHelp = z.infer<typeof cliHelpSchema>;
+type CliHelp = typeof cliHelpSchema.Type;
 
-type CliHelpArgument = z.infer<typeof cliHelpArgumentSchema>;
+type CliHelpArgument = typeof cliHelpArgumentSchema.Type;
 
-type CliHelpCommand = z.infer<typeof cliHelpCommandSchema>;
+type CliHelpCommand = typeof cliHelpCommandSchema.Type;
 
-type CliHelpOption = z.infer<typeof cliHelpOptionSchema>;
+type CliHelpOption = typeof cliHelpOptionSchema.Type;
 
-type CliResult = z.infer<typeof cliResultSchema>;
+type CliResult = typeof cliResultSchema.Type;
 
-type CliSuccessResult = z.infer<typeof cliSuccessResultSchema>;
+type CliSuccessResult = typeof cliSuccessResultSchema.Type;
 
-type CliWarning = z.infer<typeof cliWarningSchema>;
+type CliWarning = typeof cliWarningSchema.Type;
 
 export {
   cliCommandSchema,

@@ -48,12 +48,12 @@ const runTestCaseListCommand = async (
 
   const items = test.cases.map(
     ({ id, tags, folder }): TestCaseListResult['items'][number] & { folder?: string } => {
-      const assembledFields: TestCaseListResult['items'][number] & { folder?: string } = {
+      let assembledFields: TestCaseListResult['items'][number] & { folder?: string } = {
         id,
       };
 
       if (tags !== undefined) {
-        assembledFields.tags = tags;
+        assembledFields = { ...assembledFields, tags: tags };
       }
 
       if (folder !== undefined) {

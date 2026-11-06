@@ -1,48 +1,17 @@
 {
-  "$defs": {
-    "__schema0": {
-      "anyOf": [
-        {
-          "type": "string"
-        },
-        {
-          "type": "number"
-        },
-        {
-          "type": "boolean"
-        },
-        {
-          "type": "null"
-        },
-        {
-          "items": {
-            "$ref": "#/$defs/__schema0"
-          },
-          "type": "array"
-        },
-        {
-          "additionalProperties": {
-            "$ref": "#/$defs/__schema0"
-          },
-          "propertyNames": {
-            "type": "string"
-          },
-          "type": "object"
-        }
-      ]
-    }
-  },
+  "$defs": {},
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "oneOf": [
+  "anyOf": [
     {
       "additionalProperties": false,
       "properties": {
         "command": {
-          "pattern": "^[a-z][a-z0-9-]*(?:\\.[a-z][a-z0-9-]*)*$",
           "type": "string"
         },
         "ok": {
-          "const": true,
+          "enum": [
+            true
+          ],
           "type": "boolean"
         },
         "project_hash_after": {
@@ -67,11 +36,11 @@
             }
           ]
         },
-        "result": {
-          "$ref": "#/$defs/__schema0"
-        },
+        "result": {},
         "schema": {
-          "const": "attest.cli-result",
+          "enum": [
+            "attest.cli-result"
+          ],
           "type": "string"
         },
         "warnings": {
@@ -83,15 +52,27 @@
                 "type": "string"
               },
               "details": {
-                "$ref": "#/$defs/__schema0"
+                "anyOf": [
+                  {},
+                  {
+                    "not": {}
+                  }
+                ]
               },
               "message": {
                 "minLength": 1,
                 "type": "string"
               },
               "path": {
-                "minLength": 1,
-                "type": "string"
+                "anyOf": [
+                  {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  {
+                    "not": {}
+                  }
+                ]
               }
             },
             "required": [
@@ -118,7 +99,6 @@
       "additionalProperties": false,
       "properties": {
         "command": {
-          "pattern": "^[a-z][a-z0-9-]*(?:\\.[a-z][a-z0-9-]*)*$",
           "type": "string"
         },
         "error": {
@@ -129,19 +109,38 @@
               "type": "string"
             },
             "details": {
-              "$ref": "#/$defs/__schema0"
+              "anyOf": [
+                {},
+                {
+                  "not": {}
+                }
+              ]
             },
             "hint": {
-              "minLength": 1,
-              "type": "string"
+              "anyOf": [
+                {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "not": {}
+                }
+              ]
             },
             "message": {
               "minLength": 1,
               "type": "string"
             },
             "path": {
-              "minLength": 1,
-              "type": "string"
+              "anyOf": [
+                {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "not": {}
+                }
+              ]
             },
             "retryable": {
               "type": "boolean"
@@ -155,11 +154,15 @@
           "type": "object"
         },
         "ok": {
-          "const": false,
+          "enum": [
+            false
+          ],
           "type": "boolean"
         },
         "schema": {
-          "const": "attest.cli-result",
+          "enum": [
+            "attest.cli-result"
+          ],
           "type": "string"
         }
       },

@@ -1,6 +1,6 @@
 import { parseWithSchemaSync } from '@attest/contracts';
 import type { JsonValue, ProjectResources } from '@attest/contracts';
-import { z } from 'zod';
+import * as Schema from 'effect/Schema';
 
 import { LocalError } from '../../errors/index.js';
 import type { LoadedProject } from '../../project/project-loader/index.js';
@@ -87,7 +87,7 @@ const mutationResult = async ({
         throw new LocalError('cli_usage', 'This destructive mutation requires confirmation.', {
           path: '--yes',
           hint: 'Review `--dry-run --output json`, then pass `--yes` to apply the exact cascade.',
-          details: { operations: parseWithSchemaSync(z.json(), preview.diff.operations) },
+          details: { operations: parseWithSchemaSync(Schema.Json, preview.diff.operations) },
         });
       }
     },

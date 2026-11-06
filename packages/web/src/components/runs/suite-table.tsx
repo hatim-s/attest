@@ -4,7 +4,7 @@ import { formatDuration, formatPercent } from '../../lib/format.js';
 import { useProjectKey } from '../../routes/use-project-key.js';
 
 /** Keeps server aggregates intact so every suite view uses the same definitions. */
-const SuiteTable = ({ suites }: { suites: SuiteAggregate[] }) => {
+const SuiteTable = ({ suites }: { suites: readonly SuiteAggregate[] }) => {
   const projectKey = useProjectKey();
 
   return (

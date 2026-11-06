@@ -1,9 +1,10 @@
+import { utcTimestampSchema } from '../internal/utc-timestamp.js';
 import { parseWithSchemaSync } from '@attest/contracts';
 import { realpath } from 'node:fs/promises';
 import { basename, isAbsolute, resolve } from 'node:path';
 
 import { projectKeySchema } from '@attest/core/records';
-import { z } from 'zod';
+import * as Schema from 'effect/Schema';
 
 import { LocalError } from '../errors/index.js';
 import { errnoCode } from '../internal/errno-code.js';
@@ -13,29 +14,31 @@ import { withRegistryLock } from './registry-lock.js';
 
 const REGISTRY_SCHEMA_ID = 'attest.projects.v1';
 
-const registryEntrySchema = z.strictObject({
+const registryEntrySchema = Schema.Struct({
   key: projectKeySchema,
-  name: z.string().min(1),
-  root: z.string().refine(isAbsolute, { message: 'Project roots must be absolute paths.' }),
-  projectId: z.string().min(1).optional(),
-  registeredAt: z.iso.datetime(),
+  name: Schema.String.check(Schema.isMinLength(1)),
+  root: Schema.String.check(
+    Schema.makeFilter(isAbsolute, { message: 'Project roots must be absolute paths.' }),
+  ),
+  projectId: Schema.optional(Schema.String.check(Schema.isMinLength(1))),
+  registeredAt: utcTimestampSchema,
 });
 
-const registrySchema = z
-  .strictObject({
-    schema: z.literal(REGISTRY_SCHEMA_ID),
-    projects: z.array(registryEntrySchema),
-  })
-  .refine(
+const registrySchema = Schema.Struct({
+  schema: Schema.Literal(REGISTRY_SCHEMA_ID),
+  projects: Schema.Array(registryEntrySchema),
+}).check(
+  Schema.makeFilter(
     ({ projects }) =>
       new Set(projects.map(({ key }) => key)).size === projects.length &&
       new Set(projects.map(({ root }) => root)).size === projects.length,
     { message: 'Registry keys and roots must be unique.' },
-  );
+  ),
+);
 
-type ProjectRegistry = z.infer<typeof registrySchema>;
+type ProjectRegistry = typeof registrySchema.Type;
 
-type RegistryEntry = z.infer<typeof registryEntrySchema>;
+type RegistryEntry = typeof registryEntrySchema.Type;
 
 type RegisterProjectOptions = {
   registryPath: string;
@@ -123,7 +126,7 @@ const registerProject = async (options: RegisterProjectOptions): Promise<Registr
 
     const name = options.name ?? basename(root);
 
-    const entry: RegistryEntry = {
+    let entry: RegistryEntry = {
       key: uniqueProjectKey(name, new Set(registry.projects.map(({ key }) => key))),
       name,
       root,
@@ -131,7 +134,7 @@ const registerProject = async (options: RegisterProjectOptions): Promise<Registr
     };
 
     // Absent stays absent: the entry is also a CLI JSON result, which has no `undefined`.
-    if (options.projectId !== undefined) entry.projectId = options.projectId;
+    if (options.projectId !== undefined) entry = { ...entry, projectId: options.projectId };
 
     await writeRegistry(options.registryPath, {
       ...registry,

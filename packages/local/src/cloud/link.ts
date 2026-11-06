@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 
-import { z } from 'zod';
+import * as Schema from 'effect/Schema';
 
 import { LocalError } from '../errors/index.js';
 import { errnoCode } from '../internal/errno-code.js';
@@ -14,15 +14,18 @@ import { acquireProjectLock, releaseProjectLock } from '../project/transaction/p
 import type { CloudClient } from './client.js';
 import { linkedProjectSchema } from './protocol.js';
 
-const cloudLinkSchema = z.strictObject({
-  schema: z.literal('attest.cloud-link.v1'),
-  base_url: z.string().url(),
-  project_id: z.string().min(1),
-  revision_id: z.string().min(1).optional(),
-  file_hashes: z.record(z.string(), z.string().regex(/^[a-f0-9]{64}$/)),
+const cloudLinkSchema = Schema.Struct({
+  schema: Schema.Literal('attest.cloud-link.v1'),
+  base_url: Schema.String.check(Schema.makeFilter((value) => URL.canParse(value))),
+  project_id: Schema.String.check(Schema.isMinLength(1)),
+  revision_id: Schema.optional(Schema.String.check(Schema.isMinLength(1))),
+  file_hashes: Schema.Record(
+    Schema.String,
+    Schema.String.check(Schema.isPattern(/^[a-f0-9]{64}$/)),
+  ),
 });
 
-type CloudLink = z.infer<typeof cloudLinkSchema>;
+type CloudLink = typeof cloudLinkSchema.Type;
 
 type CloudProjectOptions = DiscoverProjectOptions & { client: CloudClient; signal?: AbortSignal };
 

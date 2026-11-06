@@ -165,6 +165,11 @@ const effectBoundariesRule = {
         type: 'object',
         properties: {
           dataOnly: { type: 'boolean' },
+          schemaConstructionModules: {
+            type: 'array',
+            items: { enum: ['Effect', 'SchemaGetter'] },
+            uniqueItems: true,
+          },
           browser: { type: 'boolean' },
           operations: { type: 'array', items: { type: 'string' } },
           removalSlice: { type: 'string' },
@@ -176,6 +181,7 @@ const effectBoundariesRule = {
   },
   create(context) {
     const options = context.options[0] ?? {};
+    const allowedDataModules = new Set([...dataModules, ...(options.schemaConstructionModules ?? [])]);
     const bindings = [];
     const used = new Set();
     const taggedComments = new Set();
@@ -202,7 +208,7 @@ const effectBoundariesRule = {
       }
       if (value !== 'effect' && !value.startsWith('effect/')) return;
       const module = value === 'effect' ? null : value.slice(7);
-      if (module !== null && !(options.dataOnly ? dataModules : coreModules).has(module)) {
+      if (module !== null && !(options.dataOnly ? allowedDataModules : coreModules).has(module)) {
         report(node, 'Only approved Effect core modules are allowed.');
       }
       if (node.type !== 'ImportDeclaration') {
@@ -214,10 +220,10 @@ const effectBoundariesRule = {
       }
       for (const specifier of node.specifiers) {
         const name = specifier.imported?.name ?? specifier.imported?.value;
-        if (module === null && options.dataOnly && !dataModules.has(name))
+        if (module === null && options.dataOnly && !allowedDataModules.has(name))
           report(
             specifier,
-            'Data-only entries import only Schema, SchemaIssue, SchemaAST and JsonSchema.',
+            'Data-only entries import schema modules and explicitly approved construction dependencies only.',
           );
         if (name && execution(module, name)) {
           const operation = `${module}.${name}`;
@@ -275,7 +281,7 @@ const effectBoundariesRule = {
         return;
       }
       if (module === 'root') {
-        if (options.dataOnly && !dataModules.has(name))
+        if (options.dataOnly && !allowedDataModules.has(name))
           report(parent, 'Data-only entries cannot access this Effect module.');
         inspectReference(parent, name);
       } else if (execution(module, name)) checkExecution(parent, `${module}.${name}`);

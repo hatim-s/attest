@@ -1,7 +1,8 @@
+import { utcTimestampSchema } from '../internal/utc-timestamp.js';
 import { parseWithSchemaSync, parseWithSchema } from '@attest/contracts';
 import { rm } from 'node:fs/promises';
 
-import { z } from 'zod';
+import * as Schema from 'effect/Schema';
 
 import { LocalError } from '../errors/local-error.js';
 import {
@@ -12,13 +13,15 @@ import {
 import { normalizeCloudUrl } from './client.js';
 import { bearerTokenSchema } from './protocol.js';
 
-const credentialSchema = z
-  .object({ baseUrl: z.string(), accessToken: bearerTokenSchema, expiresAt: z.string().datetime() })
-  .strict();
+const credentialSchema = Schema.Struct({
+  baseUrl: Schema.String,
+  accessToken: bearerTokenSchema,
+  expiresAt: utcTimestampSchema,
+});
 
 type CloudCredentialSource = 'session' | 'project_token';
 
-type CloudCredentials = z.infer<typeof credentialSchema>;
+type CloudCredentials = typeof credentialSchema.Type;
 
 /** Reads a private credential file without following a substituted symbolic link. */
 const readCloudCredentials = async (

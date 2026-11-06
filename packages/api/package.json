@@ -22,7 +22,7 @@
     "@attest/contracts": "workspace:*",
     "@attest/core": "workspace:*",
     "hono": "^4.13.0",
-    "zod": "^4"
+    "effect": "4.1.2"
   },
   "scripts": {
     "build": "tsc --build tsconfig.build.json",

@@ -1,3 +1,4 @@
+import { stripStruct } from '@attest/contracts';
 import { renameSync, symlinkSync } from 'node:fs';
 import { access, mkdir, mkdtemp, rm, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -13,7 +14,7 @@ import {
   type MetricTestFixture,
 } from '@attest/contracts';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
-import { z } from 'zod';
+import * as Schema from 'effect/Schema';
 
 import { writeFixtureProject } from '../../../_tests_/support/project-transaction.js';
 import { REDACTED } from '../../../internal/redaction.js';
@@ -23,8 +24,8 @@ import { runMetricTestCommand } from '../metric-test-command.js';
 const EXEC_FIXTURE = fileURLToPath(new URL('./fixtures/result-metric.cjs', import.meta.url));
 
 /** The child reports its sorted env keys; macOS adds `__CF_*` keys to every process. */
-const envKeysSchema = z.object({
-  details: z.object({ env_keys: z.array(z.string()) }),
+const envKeysSchema = stripStruct({
+  details: stripStruct({ env_keys: Schema.Array(Schema.String) }),
 });
 
 const temporaryDirectory = async (prefix: string): Promise<string> => {

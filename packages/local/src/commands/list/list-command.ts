@@ -15,7 +15,7 @@ type ListCommandOptions = {
 
 /** Removes the persisted config document from generic run inspection output. */
 const toSafeRunSummary = (run: RunRecord): RunListItem => {
-  const assembledFields: RunListItem = {
+  let assembledFields: RunListItem = {
     id: run.id,
     createdAt: run.createdAt,
     status: run.status,
@@ -24,28 +24,31 @@ const toSafeRunSummary = (run: RunRecord): RunListItem => {
   };
 
   if (run.status !== 'running') {
-    assembledFields.finishedAt = run.finishedAt;
+    assembledFields = { ...assembledFields, finishedAt: run.finishedAt };
   }
 
   if (run.gitSha !== undefined) {
-    assembledFields.gitSha = run.gitSha;
+    assembledFields = { ...assembledFields, gitSha: run.gitSha };
   }
 
   if (run.gitBranch !== undefined) {
-    assembledFields.gitBranch = run.gitBranch;
+    assembledFields = { ...assembledFields, gitBranch: run.gitBranch };
   }
 
   if (run.labels !== undefined) {
-    assembledFields.labels = run.labels;
+    assembledFields = { ...assembledFields, labels: run.labels };
   }
 
   if (run.summary !== undefined) {
-    assembledFields.summary = {
-      totalCases: run.summary.totalCases,
-      passedCases: run.summary.passedCases,
-      failedCases: run.summary.failedCases,
-      errorCases: run.summary.errorCases,
-      metricErrorCount: run.summary.metricErrorCount,
+    assembledFields = {
+      ...assembledFields,
+      summary: {
+        totalCases: run.summary.totalCases,
+        passedCases: run.summary.passedCases,
+        failedCases: run.summary.failedCases,
+        errorCases: run.summary.errorCases,
+        metricErrorCount: run.summary.metricErrorCount,
+      },
     };
   }
 

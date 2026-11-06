@@ -72,7 +72,7 @@ const registerMetricLifecycleCommands = (metric: Command, context: CommandContex
         leaf,
         options,
         build: async () => {
-          const request: Extract<CommandRequest, { command: 'metric.remove' }> = {
+          let request: Extract<CommandRequest, { command: 'metric.remove' }> = {
             ...mutationRequestFields('metric.remove', options),
             metric_id: await requiredInput(
               metricId,
@@ -82,7 +82,7 @@ const registerMetricLifecycleCommands = (metric: Command, context: CommandContex
           };
 
           if (options.detach !== undefined) {
-            request.detach = options.detach;
+            request = { ...request, detach: options.detach };
           }
 
           return request;

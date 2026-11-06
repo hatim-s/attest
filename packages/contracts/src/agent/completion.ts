@@ -1,4 +1,5 @@
-import { z } from 'zod';
+import { ulidSchema } from '../schema/scalars.js';
+import * as Schema from 'effect/Schema';
 
 import { AGENT_COMPLETION_PROTOCOL } from '../schema/identifiers.js';
 import { agentErrorSchema, refineSingleOutcome } from './protocol.js';
@@ -9,32 +10,36 @@ import { artifactSchema } from './artifact.js';
  * callback adapter resolves `trace_ref` and reference artifacts, then hands the parser an ordinary
  * response envelope, so no other transport sees this shape.
  */
-const agentCompletionSchema = z
-  .strictObject({
-    protocol: z.literal(AGENT_COMPLETION_PROTOCOL),
-    run_id: z.ulid(),
-    case_id: z.string(),
-    output: z.json().optional(),
-    error: agentErrorSchema.optional(),
-    state: z.json().optional(),
-    // Left unvalidated so a malformed trace degrades to a warning in parseAgentResponse.
-    trace: z.unknown().optional(),
-    trace_ref: z.string().min(1).max(256).optional(),
-    artifacts: z.array(artifactSchema).optional(),
-  })
-  .superRefine((completion, context) => {
+const agentCompletionSchema = Schema.Struct({
+  protocol: Schema.Literal(AGENT_COMPLETION_PROTOCOL),
+  run_id: ulidSchema,
+  case_id: Schema.String,
+  output: Schema.optional(Schema.Json),
+  error: Schema.optional(agentErrorSchema),
+  state: Schema.optional(Schema.Json),
+  // Left unvalidated so a malformed trace degrades to a warning in parseAgentResponse.
+  trace: Schema.optional(Schema.Unknown),
+  trace_ref: Schema.optional(
+    Schema.String.check(Schema.isMinLength(1)).check(Schema.isMaxLength(256)),
+  ),
+  artifacts: Schema.optional(Schema.Array(artifactSchema)),
+}).check(
+  Schema.makeFilter((completion) => {
+    const context: Schema.FilterIssue[] = [];
     refineSingleOutcome(completion, context);
 
     if (completion.trace !== undefined && completion.trace_ref !== undefined) {
-      context.addIssue({
-        code: 'custom',
+      context.push({
         path: ['trace_ref'],
-        message: 'trace and trace_ref are mutually exclusive',
+        issue: 'trace and trace_ref are mutually exclusive',
       });
     }
-  });
 
-type AgentCompletionFields = z.infer<typeof agentCompletionSchema>;
+    return context;
+  }),
+);
+
+type AgentCompletionFields = typeof agentCompletionSchema.Type;
 
 type AgentCompletionBase = Omit<AgentCompletionFields, 'output' | 'error'>;
 

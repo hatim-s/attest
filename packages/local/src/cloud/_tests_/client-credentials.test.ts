@@ -1,5 +1,6 @@
+import { stripStruct } from '@attest/contracts';
 import { parseWithSchemaSync } from '@attest/contracts';
-import { z } from 'zod';
+import * as Schema from 'effect/Schema';
 import { syncBuiltinESMExports } from 'node:module';
 import { mock as nodeMock } from 'node:test';
 import { setImmediate } from 'node:timers/promises';
@@ -43,17 +44,17 @@ describe('cloud trust boundaries', () => {
     });
 
     await expect(
-      client.request('GET', '//other.example.test/v1/session', { schema: z.unknown() }),
+      client.request('GET', '//other.example.test/v1/session', { schema: Schema.Unknown }),
     ).rejects.toMatchObject({
       code: 'cli_usage',
     });
     await expect(
-      client.request('GET', '/v1/../../secrets', { schema: z.unknown() }),
+      client.request('GET', '/v1/../../secrets', { schema: Schema.Unknown }),
     ).rejects.toMatchObject({
       code: 'cli_usage',
     });
     expect(fetcher).not.toHaveBeenCalled();
-    await client.request('GET', '/v1/session', { schema: z.unknown() });
+    await client.request('GET', '/v1/session', { schema: Schema.Unknown });
     expect(fetcher.mock.calls[0]?.[1]).toMatchObject({
       redirect: 'error',
     });
@@ -74,7 +75,7 @@ describe('cloud trust boundaries', () => {
     });
 
     await expect(
-      client.request('GET', '/v1/session', { schema: z.unknown() }),
+      client.request('GET', '/v1/session', { schema: Schema.Unknown }),
     ).rejects.toMatchObject({
       code: 'cloud_request_failed',
       message: 'Cloud request failed (403, quota_exceeded).',
@@ -89,7 +90,7 @@ describe('cloud trust boundaries', () => {
     });
 
     await expect(
-      client.request('GET', '/v1/session', { schema: z.unknown() }),
+      client.request('GET', '/v1/session', { schema: Schema.Unknown }),
     ).rejects.toMatchObject({
       code: 'cloud_request_failed',
       message: 'Cloud returned an invalid JSON response.',
@@ -146,12 +147,12 @@ describe('cloud trust boundaries', () => {
     expect((await readCloudCredentials(path)).accessToken).toBe('private-token');
 
     const start = parseWithSchemaSync(
-      z.object({ code_challenge: z.string() }),
+      stripStruct({ code_challenge: Schema.String }),
       await new Response(fetcher.mock.calls[0]![1]!.body).json(),
     );
 
     const token = parseWithSchemaSync(
-      z.object({ code_verifier: z.string() }),
+      stripStruct({ code_verifier: Schema.String }),
       await new Response(fetcher.mock.calls[1]![1]!.body).json(),
     );
 
@@ -264,7 +265,7 @@ describe('cloud trust boundaries', () => {
     });
 
     await expect(
-      client.request('GET', '/v1/session', { schema: z.object({ id: z.string() }) }),
+      client.request('GET', '/v1/session', { schema: stripStruct({ id: Schema.String }) }),
     ).rejects.toMatchObject({
       code: 'cloud_request_failed',
       message: 'Cloud returned a response that does not match the protocol.',

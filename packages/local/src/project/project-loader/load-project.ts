@@ -7,7 +7,7 @@ import {
   projectResourcesSchema,
   testResourceSchema,
 } from '@attest/contracts';
-import type { z } from 'zod';
+import * as Schema from 'effect/Schema';
 
 import { hashProjectManifest } from '@attest/core';
 import {
@@ -75,7 +75,7 @@ const loadJsonResources = async <Value>(
     | ProjectManifest['resources']['agents']
     | ProjectManifest['resources']['tests']
     | ProjectManifest['resources']['metrics'],
-  schema: z.ZodType<Value>,
+  schema: Schema.ConstraintDecoder<Value>,
 ): Promise<LoadedJsonResource<Value>[]> => {
   const loads: LoadedJsonResource<Value>[] = [];
 

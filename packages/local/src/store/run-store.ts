@@ -1,5 +1,5 @@
 import { parseWithSchemaSync } from '@attest/contracts';
-import { z } from 'zod';
+import * as Schema from 'effect/Schema';
 
 import { resolve } from 'node:path';
 
@@ -353,13 +353,13 @@ class SqliteRunStore implements RunStore {
       const caseMetrics = metricsByCase.get(row.id) ?? [];
 
       const expected = parseWithSchemaSync(
-        z.array(z.string()),
+        Schema.Array(Schema.String),
         JSON.parse(row.expected_metrics_json),
       );
 
       const score = averageMetricScore(caseMetrics);
 
-      const item: CaseSummary = {
+      let item: CaseSummary = {
         caseId: row.case_id,
         suiteName: row.suite_name,
         outcome: row.outcome,
@@ -375,7 +375,7 @@ class SqliteRunStore implements RunStore {
         },
       };
 
-      if (score !== undefined) item.score = score;
+      if (score !== undefined) item = { ...item, score: score };
 
       return item;
     });

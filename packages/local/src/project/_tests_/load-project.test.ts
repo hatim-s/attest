@@ -197,7 +197,7 @@ describe('loadProject', () => {
 
   it('aggregates malformed, missing, duplicate, and reference failures by source', async () => {
     const root = await createTemporaryDirectory();
-    const manifest = await writeValidProject(root);
+    let manifest = await writeValidProject(root);
 
     const invalidTest: TestResource = {
       ...test,
@@ -213,7 +213,17 @@ describe('loadProject', () => {
     await writeProjectFile(root, 'attest/agents/support.json', '{"token":"DO-NOT-LEAK"');
     await writeProjectFile(root, 'attest/tests/refund.json', JSON.stringify(invalidTest));
     await unlink(join(root, 'attest/metrics/correct.json'));
-    manifest.resources.tests[0]!.content_hash = contentHash(invalidTest);
+    manifest = {
+      ...manifest,
+      resources: {
+        ...manifest.resources,
+        tests: manifest.resources.tests.map((entry, index) =>
+          index === 0
+            ? { ...manifest.resources.tests[0]!, content_hash: contentHash(invalidTest) }
+            : entry,
+        ),
+      },
+    };
     await writeProjectFile(root, 'attest.project.json', JSON.stringify(manifest));
 
     let failure: unknown;
@@ -263,8 +273,16 @@ describe('loadProject', () => {
 
   it('rejects manifest traversal before reading outside the project', async () => {
     const root = await createTemporaryDirectory();
-    const manifest = await writeValidProject(root);
-    manifest.resources.agents[0]!.path = '../outside.json';
+    let manifest = await writeValidProject(root);
+    manifest = {
+      ...manifest,
+      resources: {
+        ...manifest.resources,
+        agents: manifest.resources.agents.map((entry, index) =>
+          index === 0 ? { ...manifest.resources.agents[0]!, path: '../outside.json' } : entry,
+        ),
+      },
+    };
     await writeProjectFile(root, 'attest.project.json', JSON.stringify(manifest));
 
     const failure = await captureProjectFailure(() => loadProject({ project: root }));

@@ -1,4 +1,4 @@
-import type { z } from 'zod';
+import type * as JsonSchema from 'effect/JsonSchema';
 import type { JsonValue } from '../project/shared.js';
 
 const isJsonObject = (value: JsonValue): value is Record<string, JsonValue> =>
@@ -11,9 +11,7 @@ const sortObjectKeys = (_key: string, value: JsonValue): JsonValue =>
     : value;
 
 /** Serializes JSON so insertion order does not affect equality or output. */
-const canonicalJson = (
-  value: JsonValue | z.core.JSONSchema.BaseSchema,
-  indentation?: number,
-): string => JSON.stringify(value, sortObjectKeys, indentation);
+const canonicalJson = (value: JsonValue | JsonSchema.JsonSchema, indentation?: number): string =>
+  JSON.stringify(value, sortObjectKeys, indentation);
 
 export { canonicalJson };

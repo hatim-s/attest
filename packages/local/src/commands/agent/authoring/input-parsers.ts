@@ -1,3 +1,4 @@
+import { isJsonObject } from '@attest/contracts';
 import {
   parseWithSchema,
   vercelSandboxSchema,
@@ -5,7 +6,7 @@ import {
   type VercelSandbox,
 } from '@attest/contracts';
 
-import { z } from 'zod';
+import * as Schema from 'effect/Schema';
 
 import { LocalError } from '../../../errors/index.js';
 import { schemaIssueDiagnostics } from '../../../internal/schema-issue-diagnostics.js';
@@ -13,7 +14,7 @@ import { parseJsonText } from '../../../internal/source-text.js';
 import { ShellWordsError, splitShellWords } from '../shell-words.js';
 
 /** Tokenizes a convenience command string into argv without expansion or shell execution. */
-const tokenizeCommand = (value: string): string[] => {
+const tokenizeCommand = (value: string): readonly string[] => {
   let argv: string[];
 
   try {
@@ -37,13 +38,13 @@ const tokenizeCommand = (value: string): string[] => {
 };
 
 /** Parses an unambiguous JSON argv array. */
-const parseArgvJson = (value: string): string[] => {
+const parseArgvJson = (value: string): readonly string[] => {
   const parsed = parseJsonText(value, {
     path: '--argv-json',
     hint: 'Pass a JSON array of strings.',
   });
 
-  const argv = parseWithSchema(z.array(z.string()).nonempty(), parsed);
+  const argv = parseWithSchema(Schema.Array(Schema.String).check(Schema.isMinLength(1)), parsed);
 
   if (!argv.ok) {
     throw new LocalError('cli_usage', '`--argv-json` must be a non-empty string array.', {
@@ -110,7 +111,7 @@ const parseRequestTemplate = (value: string): Record<string, JsonValue> => {
     hint: 'Pass one JSON object containing exactly one `{{request_id}}` value.',
   });
 
-  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+  if (!isJsonObject(parsed)) {
     throw new LocalError('cli_usage', '`--request-template` must be a JSON object.', {
       path: '--request-template',
       hint: 'Example: `{"request_id":"{{request_id}}","request":"{{request}}"}`.',

@@ -140,7 +140,7 @@ const interruptAfterFirstPublish = async (
   const [first] = prepared.journal.entries;
 
   if (first?.type !== 'write') throw new Error('Expected a staged write first.');
-  prepared.journal.status = 'publishing';
+  prepared.journal = { ...prepared.journal, status: 'publishing' };
   await writeTransactionJournal(prepared);
   await rename(join(prepared.directory, first.staged_path), join(root, first.path));
 };

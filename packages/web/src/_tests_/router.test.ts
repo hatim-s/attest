@@ -23,7 +23,7 @@ const snapshotClient = () =>
   });
 
 /** Answers `/api/projects` with `projects` and every runs page with `runs`. */
-const httpClient = (projects: ProjectRecord[], runs: RunRecord[]) =>
+const httpClient = (projects: readonly ProjectRecord[], runs: readonly RunRecord[]) =>
   createApiClient({
     kind: 'http',
     baseUrl: '/api',

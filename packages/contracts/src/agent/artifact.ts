@@ -1,4 +1,4 @@
-import { z } from 'zod';
+import * as Schema from 'effect/Schema';
 
 import { relativePathSchema } from '../project/shared.js';
 
@@ -11,39 +11,43 @@ const artifactSegment = String.raw`(?!\.{1,2}(?:/|(?![\s\S])))[^/\\\p{Cc}]{1,255
  * relativePathSchema already rejects empty, absolute and `..` paths; this also rejects `.`,
  * `./a`, `a//b`, `a/` and backslashes, which name a directory or alias another artifact's file.
  */
-const artifactPathSchema = relativePathSchema.regex(
-  new RegExp(String.raw`^${artifactSegment}(?:/${artifactSegment})*(?![\s\S])`, 'u'),
-  'must be a canonical file path: forward-slash segments of at most 255 characters without `.`, `..`, empty segments, backslashes or control characters',
+const artifactPathSchema = relativePathSchema.check(
+  Schema.isPattern(
+    new RegExp(String.raw`^${artifactSegment}(?:/${artifactSegment})*(?![\s\S])`, 'u'),
+    {
+      message:
+        'must be a canonical file path: forward-slash segments of at most 255 characters without `.`, `..`, empty segments, backslashes or control characters',
+    },
+  ),
 );
 
 /** A file an agent produced, carried in the envelope as text or base64 bytes. */
-const inlineArtifactSchema = z.strictObject({
-  kind: z.literal('inline'),
+const inlineArtifactSchema = Schema.Struct({
+  kind: Schema.Literal('inline'),
   path: artifactPathSchema,
-  media_type: z.string().min(1).max(255),
-  encoding: z.enum(['utf8', 'base64']),
-  content: z.string(),
+  media_type: Schema.String.check(Schema.isMinLength(1)).check(Schema.isMaxLength(255)),
+  encoding: Schema.Literals(['utf8', 'base64']),
+  content: Schema.String,
 });
 
 /** A file an agent produced but did not inline; the callback transport fetches it by `id`. */
-const referenceArtifactSchema = z.strictObject({
-  kind: z.literal('reference'),
+const referenceArtifactSchema = Schema.Struct({
+  kind: Schema.Literal('reference'),
   path: artifactPathSchema,
-  media_type: z.string().min(1).max(255).optional(),
-  id: z.string().min(1).max(256),
+  media_type: Schema.optional(
+    Schema.String.check(Schema.isMinLength(1)).check(Schema.isMaxLength(255)),
+  ),
+  id: Schema.String.check(Schema.isMinLength(1)).check(Schema.isMaxLength(256)),
 });
 
 /** Any artifact a completion may carry; responses and metric requests accept inline ones only. */
-const artifactSchema = z.discriminatedUnion('kind', [
-  inlineArtifactSchema,
-  referenceArtifactSchema,
-]);
+const artifactSchema = Schema.Union([inlineArtifactSchema, referenceArtifactSchema]);
 
-type Artifact = z.infer<typeof artifactSchema>;
+type Artifact = typeof artifactSchema.Type;
 
-type InlineArtifact = z.infer<typeof inlineArtifactSchema>;
+type InlineArtifact = typeof inlineArtifactSchema.Type;
 
-type ReferenceArtifact = z.infer<typeof referenceArtifactSchema>;
+type ReferenceArtifact = typeof referenceArtifactSchema.Type;
 
 export {
   artifactPathSchema,

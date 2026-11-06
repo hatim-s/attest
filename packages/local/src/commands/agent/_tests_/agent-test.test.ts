@@ -72,10 +72,13 @@ describe('agent test command', () => {
     process.env.ATTEST_SOURCE_SECRET = 'literal-super-secret';
     const argvSecret = 's3cr3t-value';
     const echo = `process.stdin.resume(); process.stdin.on('end', () => process.stdout.write(JSON.stringify({ protocol: 'attest.agent-invocation', output: { value: process.env.ATTEST_ECHO_VALUE, argv: process.argv.slice(1) } })));`;
-    const success = nativeAgent('success', echo, { redaction: { argv_positions: [3] } });
+    let success = nativeAgent('success', echo, { redaction: { argv_positions: [3] } });
 
     if (success.transport.kind !== 'native_cli') throw new Error('Expected a native agent.');
-    success.transport.argv.push(argvSecret);
+    success = {
+      ...success,
+      transport: { ...success.transport, argv: [...success.transport.argv, argvSecret] },
+    };
     await addAgent(root, success);
     await addAgent(
       root,

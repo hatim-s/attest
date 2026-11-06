@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
-import { z } from 'zod';
+import * as Schema from 'effect/Schema';
 
 import type { AgentInvocation } from '../index.js';
 import { createPiHandler } from '../pi.js';
@@ -46,7 +46,7 @@ const isAlive = (pid: number): boolean => {
   }
 };
 
-const spanNamed = (spans: Span[], name: string): Span | undefined =>
+const spanNamed = (spans: readonly Span[], name: string): Span | undefined =>
   spans.find((span) => span.name === name);
 
 describe('createPiHandler', () => {
@@ -129,7 +129,11 @@ describe('createPiHandler', () => {
       const result = await handler(invocation, { signal: new AbortController().signal });
       const dumped = result.artifacts?.find((artifact) => artifact.path === 'env.json');
       const content = dumped?.kind === 'inline' ? dumped.content : '{}';
-      const env = parseWithSchemaSync(z.record(z.string(), z.string()), JSON.parse(content));
+
+      const env = parseWithSchemaSync(
+        Schema.Record(Schema.String, Schema.String),
+        JSON.parse(content),
+      );
 
       expect(env).toMatchObject({ PROVIDER_KEY: 'given', LC_ALL: 'C' });
       expect(env).not.toHaveProperty('ATTEST_CLIENT_RUNNER_SECRET');

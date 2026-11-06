@@ -116,12 +116,13 @@ const redactAttributes = (
 
 /** Redacts optional span status text while retaining the status code and extension fields. */
 const redactSpanStatus = (status: Span['status'], secrets: readonly string[]): Span['status'] => {
-  const redacted: Span['status'] = {
+  let redacted: Span['status'] = {
     ...redactExtensions(status, STATUS_FIELDS, secrets),
     code: status.code,
   };
 
-  if (status.message !== undefined) redacted.message = redactTransportText(status.message, secrets);
+  if (status.message !== undefined)
+    redacted = { ...redacted, message: redactTransportText(status.message, secrets) };
 
   return redacted;
 };
@@ -132,7 +133,7 @@ const redactTrace = (trace: Trace, secrets: readonly string[]): Trace => ({
   schema: trace.schema,
   trace_id: trace.trace_id,
   spans: trace.spans.map((span): Span => {
-    const redacted: Span = {
+    let redacted: Span = {
       ...redactExtensions(span, SPAN_FIELDS, secrets),
       span_id: span.span_id,
       parent_span_id: span.parent_span_id,
@@ -144,30 +145,36 @@ const redactTrace = (trace: Trace, secrets: readonly string[]): Trace => ({
     };
 
     if (!(span.attributes === undefined)) {
-      redacted.attributes = redactAttributes(span.attributes, secrets);
+      redacted = { ...redacted, attributes: redactAttributes(span.attributes, secrets) };
     }
 
     if (!(span.events === undefined)) {
-      redacted.events = span.events.map((event) => {
-        const redactedEvent: NonNullable<Span['events']>[number] = {
-          ...redactExtensions(event, EVENT_FIELDS, secrets),
-          name: redactTransportText(event.name, secrets),
-          time: event.time,
-        };
+      redacted = {
+        ...redacted,
+        events: span.events.map((event) => {
+          let redactedEvent: NonNullable<Span['events']>[number] = {
+            ...redactExtensions(event, EVENT_FIELDS, secrets),
+            name: redactTransportText(event.name, secrets),
+            time: event.time,
+          };
 
-        if (event.attributes !== undefined)
-          redactedEvent.attributes = redactAttributes(event.attributes, secrets);
+          if (event.attributes !== undefined)
+            redactedEvent = {
+              ...redactedEvent,
+              attributes: redactAttributes(event.attributes, secrets),
+            };
 
-        return redactedEvent;
-      });
+          return redactedEvent;
+        }),
+      };
     }
 
     if (!(span.input === undefined)) {
-      redacted.input = redactProbeValue(span.input, secrets);
+      redacted = { ...redacted, input: redactProbeValue(span.input, secrets) };
     }
 
     if (!(span.output === undefined)) {
-      redacted.output = redactProbeValue(span.output, secrets);
+      redacted = { ...redacted, output: redactProbeValue(span.output, secrets) };
     }
 
     return redacted;
@@ -176,7 +183,7 @@ const redactTrace = (trace: Trace, secrets: readonly string[]): Trace => ({
 
 /** Redacts caller data while retaining request identity and multi-turn structure. */
 const redactAgentRequest = (request: AgentRequest, secrets: readonly string[]): AgentRequest => {
-  const redacted: AgentRequest = {
+  let redacted: AgentRequest = {
     ...redactExtensions(request, REQUEST_FIELDS, secrets),
     protocol: request.protocol,
     run_id: request.run_id,
@@ -185,31 +192,37 @@ const redactAgentRequest = (request: AgentRequest, secrets: readonly string[]): 
   };
 
   if (!(request.params === undefined)) {
-    redacted.params = Object.fromEntries(
-      Object.entries(request.params).map(([key, value]) => [
-        key,
-        isSensitiveFieldName(key) ? REDACTED : redactProbeValue(value, secrets),
-      ]),
-    );
+    redacted = {
+      ...redacted,
+      params: Object.fromEntries(
+        Object.entries(request.params).map(([key, value]) => [
+          key,
+          isSensitiveFieldName(key) ? REDACTED : redactProbeValue(value, secrets),
+        ]),
+      ),
+    };
   }
 
   if (!(request.messages === undefined)) {
-    redacted.messages = request.messages.map((message) => ({
-      role: message.role,
-      content: redactTransportText(message.content, secrets),
-    }));
+    redacted = {
+      ...redacted,
+      messages: request.messages.map((message) => ({
+        role: message.role,
+        content: redactTransportText(message.content, secrets),
+      })),
+    };
   }
 
   if (!(request.turn_index === undefined)) {
-    redacted.turn_index = request.turn_index;
+    redacted = { ...redacted, turn_index: request.turn_index };
   }
 
   if (!(request.conversation_id === undefined)) {
-    redacted.conversation_id = request.conversation_id;
+    redacted = { ...redacted, conversation_id: request.conversation_id };
   }
 
   if (!(request.state === undefined)) {
-    redacted.state = redactProbeValue(request.state, secrets);
+    redacted = { ...redacted, state: redactProbeValue(request.state, secrets) };
   }
 
   return redacted;
@@ -220,12 +233,13 @@ const redactAgentResponse = (
   response: AgentResponse,
   secrets: readonly string[],
 ): AgentResponse => {
-  const common: ResponseCommon = {
+  let common: ResponseCommon = {
     ...redactExtensions(response, RESPONSE_FIELDS, secrets),
     protocol: response.protocol,
   };
 
-  if (response.state !== undefined) common.state = redactProbeValue(response.state, secrets);
+  if (response.state !== undefined)
+    common = { ...common, state: redactProbeValue(response.state, secrets) };
 
   if (response.trace !== undefined) common.trace = redactTrace(response.trace, secrets);
 
@@ -233,11 +247,11 @@ const redactAgentResponse = (
     return { ...common, output: redactProbeValue(response.output, secrets) };
   }
 
-  const error: AgentErrorResponse['error'] = {
+  let error: AgentErrorResponse['error'] = {
     message: redactTransportText(response.error.message, secrets),
   };
 
-  if (response.error.code !== undefined) error.code = response.error.code;
+  if (response.error.code !== undefined) error = { ...error, code: response.error.code };
 
   return { ...common, error };
 };
@@ -299,13 +313,13 @@ const redactWarnings = (
   }));
 
 const redactRawExcerpt = (excerpt: RawExcerpt, secrets: readonly string[]): RawExcerpt => {
-  const redacted: RawExcerpt = {
+  let redacted: RawExcerpt = {
     text: redactTransportText(excerpt.text, secrets),
     truncated: excerpt.truncated,
   };
 
   if (!(excerpt.sha256 === undefined)) {
-    redacted.sha256 = excerpt.sha256;
+    redacted = { ...redacted, sha256: excerpt.sha256 };
   }
 
   return redacted;
@@ -381,13 +395,13 @@ const redactStoredAttempt = (
 ): StoredAttempt => {
   const redacted = redactAttempt(attempt, secrets);
 
-  const common: StoredAttemptCommon = {
+  let common: StoredAttemptCommon = {
     diagnostics: redacted.diagnostics,
     durationMs: redacted.durationMs,
     warnings: redacted.warnings,
   };
 
-  if (redacted.rawExcerpt !== undefined) common.rawExcerpt = redacted.rawExcerpt;
+  if (redacted.rawExcerpt !== undefined) common = { ...common, rawExcerpt: redacted.rawExcerpt };
 
   return redacted.status === 'ok'
     ? { ...common, status: 'ok' }

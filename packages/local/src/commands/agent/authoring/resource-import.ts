@@ -255,7 +255,7 @@ const createImportedCurlAgentResource = async (
           ...request.polling,
         };
 
-  const candidate: AgentResource = {
+  let candidate: AgentResource = {
     schema: AGENT_RESOURCE_SCHEMA_ID,
     id: request.as,
     name: request.name?.trim() || request.as,
@@ -263,27 +263,27 @@ const createImportedCurlAgentResource = async (
   };
 
   if (request.timeouts !== undefined) {
-    candidate.timeouts = request.timeouts;
+    candidate = { ...candidate, timeouts: request.timeouts };
   }
 
   if (request.retry !== undefined) {
-    candidate.retry = request.retry;
+    candidate = { ...candidate, retry: request.retry };
   }
 
   if (request.limits !== undefined) {
-    candidate.limits = request.limits;
+    candidate = { ...candidate, limits: request.limits };
   }
 
   const headerNames = Object.keys(request.header_env ?? {});
   const queryNames = Object.keys(request.query_env ?? {});
 
   if (headerNames.length + queryNames.length > 0) {
-    const redaction: NonNullable<AgentResource['redaction']> = {};
+    let redaction: NonNullable<AgentResource['redaction']> = {};
 
-    if (request.header_env !== undefined) redaction.headers = headerNames;
+    if (request.header_env !== undefined) redaction = { ...redaction, headers: headerNames };
 
-    if (request.query_env !== undefined) redaction.query = queryNames;
-    candidate.redaction = redaction;
+    if (request.query_env !== undefined) redaction = { ...redaction, query: queryNames };
+    candidate = { ...candidate, redaction: redaction };
   }
 
   const parsed = parseWithSchema(agentResourceSchema, candidate);

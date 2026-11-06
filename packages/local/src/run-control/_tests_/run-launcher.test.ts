@@ -1,3 +1,4 @@
+import { stripStruct } from '@attest/contracts';
 import { access, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -28,7 +29,7 @@ import {
 } from '@attest/core';
 import type { RunStartRequest } from '@attest/core/records';
 import { describe, expect, it, onTestFinished } from 'vitest';
-import { z } from 'zod';
+import * as Schema from 'effect/Schema';
 
 import { writeFixtureProject } from '../../_tests_/support/project-transaction.js';
 import { runTestMutationCommand } from '../../commands/test/test-mutation-command.js';
@@ -42,7 +43,7 @@ const fakeCli = {
   args: [fileURLToPath(new URL('fixtures/fake-attest-cli.mjs', import.meta.url))],
 };
 
-const receivedSchema = z.object({ argv: z.array(z.string()), document: z.unknown() });
+const receivedSchema = stripStruct({ argv: Schema.Array(Schema.String), document: Schema.Unknown });
 
 const temporaryRoot = async (): Promise<string> => {
   const root = await mkdtemp(join(await realpath(tmpdir()), 'attest-run-launcher-'));
@@ -237,7 +238,7 @@ describe('createRunLauncher', { timeout: 20_000 }, () => {
     );
 
     const { output } = parseWithSchemaSync(
-      z.object({ output: z.array(z.string()) }),
+      stripStruct({ output: Schema.Array(Schema.String) }),
       failure.details?.details,
     );
 

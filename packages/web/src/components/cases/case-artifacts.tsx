@@ -19,7 +19,7 @@ const artifactBytes = ({ content, encoding }: InlineArtifact): number => {
  * Lists the files an agent returned with their size, and previews small utf8 files. Base64 and
  * large files show their size only.
  */
-const CaseArtifacts = ({ artifacts }: { artifacts: InlineArtifact[] }) => {
+const CaseArtifacts = ({ artifacts }: { artifacts: readonly InlineArtifact[] }) => {
   const sized = artifacts.map((artifact) => ({ artifact, bytes: artifactBytes(artifact) }));
 
   return (

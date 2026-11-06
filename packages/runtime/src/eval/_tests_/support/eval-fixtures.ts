@@ -53,7 +53,7 @@ const createPlan = (
   const baselineRunId = options.baseline === true ? BASELINE_RUN_ID : undefined;
   const junitPath = options.junit === true ? 'artifacts/results.xml' : undefined;
 
-  const run: EvalRun = {
+  let run: EvalRun = {
     ...structuredClone(baseRun),
     snapshot: {
       ...structuredClone(baseRun.snapshot),
@@ -62,22 +62,28 @@ const createPlan = (
     },
   };
 
-  run.effective_command.resolved = {
-    concurrency,
-    timeout_ms: options.timeoutMs ?? 60_000,
-    output: 'jsonl',
-    watch: false,
-    baseline_run_id: baselineRunId,
-    junit_path: junitPath,
-    execution:
-      options.workers === undefined
-        ? undefined
-        : {
-            workers: {
-              count: options.workers,
-              directory: '.attest/runs/{run_id}/workers/{worker_index}',
-            },
-          },
+  run = {
+    ...run,
+    effective_command: {
+      ...run.effective_command,
+      resolved: {
+        concurrency,
+        timeout_ms: options.timeoutMs ?? 60_000,
+        output: 'jsonl',
+        watch: false,
+        baseline_run_id: baselineRunId,
+        junit_path: junitPath,
+        execution:
+          options.workers === undefined
+            ? undefined
+            : {
+                workers: {
+                  count: options.workers,
+                  directory: '.attest/runs/{run_id}/workers/{worker_index}',
+                },
+              },
+      },
+    },
   };
 
   return {

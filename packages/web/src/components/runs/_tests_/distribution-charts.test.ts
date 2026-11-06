@@ -4,7 +4,7 @@ import type { CaseSummary } from '@attest/core/records';
 import { createScoreHistogram } from '../distribution-charts.js';
 
 const createCase = (caseId: string, score?: number): CaseSummary => {
-  const summary: CaseSummary = {
+  let summary: CaseSummary = {
     caseId,
     suiteName: 'suite',
     outcome: 'completed',
@@ -14,7 +14,7 @@ const createCase = (caseId: string, score?: number): CaseSummary => {
     metricCounts: { expected: 1, evaluated: 1, passed: 1, errors: 0 },
   };
 
-  if (score !== undefined) summary.score = score;
+  if (score !== undefined) summary = { ...summary, score: score };
 
   return summary;
 };

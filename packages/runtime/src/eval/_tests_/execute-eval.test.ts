@@ -24,12 +24,21 @@ describe('executeResolvedEvalPlan', () => {
   it.each([false, true])(
     'returns a failed result when the start event exceeds its cap, with finalization failure %s',
     async (finalizationFails) => {
-      const plan = createPlan(['case-zero']);
-      plan.run.snapshot.selection = {
-        total_cases: 1,
-        matched_cases: 1,
-        selected_cases: 1,
-        sample: { count: 1, seed: 'x'.repeat(20_000), algorithm: 'hash-rank-v1' },
+      let plan = createPlan(['case-zero']);
+      plan = {
+        ...plan,
+        run: {
+          ...plan.run,
+          snapshot: {
+            ...plan.run.snapshot,
+            selection: {
+              total_cases: 1,
+              matched_cases: 1,
+              selected_cases: 1,
+              sample: { count: 1, seed: 'x'.repeat(20_000), algorithm: 'hash-rank-v1' },
+            },
+          },
+        },
       };
       expect(parseWithSchema(evalRunSchema, plan.run).ok).toBe(true);
       const persistence = createPersistence();

@@ -413,6 +413,26 @@ describe('portable bundle limits and credentials', () => {
       );
   });
 
+  it('aggregates authored file count and byte-budget diagnostics', () => {
+    const result = parseWithSchema(portableProjectBundleSchema, {
+      ...emptyBundle,
+      files: filesOf(101, 'x'.repeat(60_000)),
+    });
+
+    expect(result.ok).toBe(false);
+
+    if (result.ok) throw new Error('Expected bundle limits to reject');
+    expect(result.error.issues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ path: ['files'], message: 'at most 100 files are allowed' }),
+        expect.objectContaining({
+          path: ['files'],
+          message: 'bundle files must total at most 5 MiB',
+        }),
+      ]),
+    );
+  });
+
   it('agrees with generated schema on the file count boundary', () => {
     const validate = compileGeneratedSchema('project-bundle.json');
 

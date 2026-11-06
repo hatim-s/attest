@@ -64,7 +64,7 @@ const redactRequestTemplates = (value: unknown): void => {
 };
 
 /** Returns the argv a process transport launches, or undefined for network transports. */
-const processArgv = (transport: AgentResource['transport']): string[] | undefined => {
+const processArgv = (transport: AgentResource['transport']): readonly string[] | undefined => {
   switch (transport.kind) {
     case 'background_cli':
       return transport.start_argv;
@@ -78,13 +78,20 @@ const processArgv = (transport: AgentResource['transport']): string[] | undefine
 
 /** Produces a display-only agent clone with declared process arguments and HTTP literals hidden. */
 const redactAgentResource = (resource: AgentResource): JsonValue => {
-  const redacted = structuredClone(resource);
+  let redacted = structuredClone(resource);
   redactRequestTemplates(redacted);
   const positions = new Set(redacted.redaction?.argv_positions ?? []);
   const argv = processArgv(redacted.transport);
-  argv?.forEach((_, index) => {
-    if (positions.has(index)) argv[index] = REDACTED;
-  });
+
+  if (argv !== undefined) {
+    const masked = argv.map((value, index) => (positions.has(index) ? REDACTED : value));
+    const transport = redacted.transport;
+
+    if (transport.kind === 'background_cli')
+      redacted = { ...redacted, transport: { ...transport, start_argv: masked } };
+    else if (transport.kind === 'native_cli' || transport.kind === 'jsonl_bridge')
+      redacted = { ...redacted, transport: { ...transport, argv: masked } };
+  }
 
   return redacted;
 };

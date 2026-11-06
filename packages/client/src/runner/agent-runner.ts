@@ -152,7 +152,7 @@ const createAgentRunner = ({
     if (!checked.ok) {
       return invalid(
         checked.error.issues
-          .map((issue) => `${issue.path.join('.') || '$'}: ${issue.message}`)
+          .map((issue) => `${issue.path.map(String).join('.') || '$'}: ${issue.message}`)
           .join('; '),
       );
     }

@@ -1,4 +1,5 @@
-import { z } from 'zod';
+import { stripStruct } from '@attest/contracts';
+import * as Schema from 'effect/Schema';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { get } from 'node:http';
 import { tmpdir } from 'node:os';
@@ -118,7 +119,7 @@ describe('view server', () => {
     );
 
     const runs = parseWithSchemaSync(
-      z.object({ items: z.array(z.object({ id: z.string() })) }),
+      stripStruct({ items: Schema.Array(stripStruct({ id: Schema.String })) }),
       await fetch(`${server.origin}/api/projects/demo/runs`).then((response) => response.json()),
     );
 

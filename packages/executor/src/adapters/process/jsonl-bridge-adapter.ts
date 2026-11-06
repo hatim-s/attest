@@ -55,7 +55,7 @@ type PendingInvocation = {
   timeoutTimer: NodeJS.Timeout;
 };
 
-type ParsedOutput = { output: ReturnType<typeof jsonlBridgeOutputSchema.parse>; raw: JsonValue };
+type ParsedOutput = { output: typeof jsonlBridgeOutputSchema.Type; raw: JsonValue };
 
 const capError = (message: string): AgentInvocationError =>
   new AgentInvocationError('output_cap_exceeded', message);

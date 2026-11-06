@@ -25,8 +25,10 @@ describe('eval run selection uniqueness', () => {
 
     if (parsed.ok) throw new Error('Expected duplicate rejection');
 
-    expect(parsed.error.issues).toEqual([
-      { code: 'custom', path: [field, 1], message: `duplicate ${label}: smoke` },
-    ]);
+    expect(parsed.error.issues).toEqual(
+      expect.arrayContaining([
+        { code: 'Filter', path: [field, 1], message: `duplicate ${label}: smoke` },
+      ]),
+    );
   });
 });

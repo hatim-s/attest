@@ -1,5 +1,6 @@
 import { parseWithSchemaSync } from '@attest/contracts';
-import { z } from 'zod';
+import * as Schema from 'effect/Schema';
+import * as Effect from 'effect/Effect';
 
 import { BoundedOutputWritable } from '../adapters/sandbox/bounded-writable.js';
 import {
@@ -20,31 +21,34 @@ import { normalizeWorkspacePath } from './workspace-path.js';
  * cleanup bound that throws after creation would leave the VM running, so every bound is checked
  * here before a VM exists.
  */
-const timerMsSchema = z.int().positive().max(2_147_483_647);
+const timerMsSchema = Schema.Int.check(
+  Schema.isGreaterThan(0),
+  Schema.isLessThanOrEqualTo(2_147_483_647),
+);
 
-/** Programmatic options never pass through contracts, so this schema is their only parse. */
-const vercelIsolationOptionsSchema = z.strictObject({
-  image: z.string().optional(),
-  timeoutMs: timerMsSchema.default(600_000),
-  commandTimeoutMs: timerMsSchema.default(60_000),
-  /** Defaults to commandTimeoutMs. */
-  finalizationTimeoutMs: timerMsSchema.optional(),
-  cleanupTimeoutMs: timerMsSchema.default(DEFAULT_CLEANUP_TIMEOUT_MS),
-  outputBytes: z
-    .int()
-    .positive()
-    .default(1024 * 1024),
-  files: z.record(z.string(), z.string()).default({}),
-  env: z.record(z.string(), z.string()).optional(),
-  /**
-   * Passed through as typed. A non-function factory throws at the creation call, before any VM
-   * exists, and credential resolution parses the env at case start.
-   */
-  sandboxFactory: z.custom<VercelSandboxFactory>().optional(),
-  credentialEnv: z.custom<NodeJS.ProcessEnv>().optional(),
+/** Validates serializable controls before allocating a VM. */
+const vercelIsolationOptionsSchema = Schema.Struct({
+  image: Schema.optional(Schema.String),
+  timeoutMs: timerMsSchema.pipe(Schema.withDecodingDefault(Effect.succeed(600_000))),
+  commandTimeoutMs: timerMsSchema.pipe(Schema.withDecodingDefault(Effect.succeed(60_000))),
+  finalizationTimeoutMs: Schema.optional(timerMsSchema),
+  cleanupTimeoutMs: timerMsSchema.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_CLEANUP_TIMEOUT_MS)),
+  ),
+  outputBytes: Schema.Int.check(Schema.isGreaterThan(0)).pipe(
+    Schema.withDecodingDefault(Effect.succeed(1024 * 1024)),
+  ),
+  files: Schema.Record(Schema.String, Schema.String).pipe(
+    Schema.withDecodingDefault(Effect.succeed({})),
+  ),
+  env: Schema.optional(Schema.Record(Schema.String, Schema.String)),
 });
 
-type VercelIsolationOptions = z.input<typeof vercelIsolationOptionsSchema>;
+/** Programmatic dependencies are already typed; only data controls need decoding. */
+type VercelIsolationOptions = typeof vercelIsolationOptionsSchema.Encoded & {
+  sandboxFactory?: VercelSandboxFactory;
+  credentialEnv?: NodeJS.ProcessEnv;
+};
 
 /**
  * A VM that could not be confirmed stopped. Runtime reads `cleanupConfirmed` to stop reusing the
@@ -79,18 +83,19 @@ const resolveSeedFiles = (
 
 /** Keeps a fresh VM alive across case hooks, agent tools, evaluation, and bounded final hooks. */
 const vercelSandboxIsolation = (input: VercelIsolationOptions = {}): CaseEnvironmentFactory => {
-  const options = parseWithSchemaSync(vercelIsolationOptionsSchema, input);
+  const { sandboxFactory, credentialEnv, ...controls } = input;
+  const options = parseWithSchemaSync(vercelIsolationOptionsSchema, controls);
   const { commandTimeoutMs, cleanupTimeoutMs, outputBytes: cap } = options;
   const finalizationTimeoutMs = options.finalizationTimeoutMs ?? commandTimeoutMs;
 
   return async ({ signal }) => {
     signal.throwIfAborted();
-    const credentials = resolveVercelSandboxCredentials(options.credentialEnv ?? process.env);
+    const credentials = resolveVercelSandboxCredentials(credentialEnv ?? process.env);
     const files = resolveSeedFiles(options.files, cap);
 
     const sdk = await createCaseSandbox({
       credentials,
-      factory: options.sandboxFactory,
+      factory: sandboxFactory,
       image: options.image,
       timeoutMs: options.timeoutMs,
       signal: AbortSignal.any([signal, AbortSignal.timeout(commandTimeoutMs)]),

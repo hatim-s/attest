@@ -298,18 +298,19 @@ const resolveEvalRun = (
     })),
   });
 
-  const resolved: EvalRunEffectiveCommand['resolved'] = {
+  let resolved: EvalRunEffectiveCommand['resolved'] = {
     concurrency,
     timeout_ms: timeoutMs,
     output: request.output,
     watch: 'watch' in request ? (request.watch ?? false) : false,
   };
 
-  if (execution !== undefined) resolved.execution = execution;
+  if (execution !== undefined) resolved = { ...resolved, execution };
 
-  if (request.baseline_run_id !== undefined) resolved.baseline_run_id = request.baseline_run_id;
+  if (request.baseline_run_id !== undefined)
+    resolved = { ...resolved, baseline_run_id: request.baseline_run_id };
 
-  if (request.junit_path !== undefined) resolved.junit_path = request.junit_path;
+  if (request.junit_path !== undefined) resolved = { ...resolved, junit_path: request.junit_path };
 
   const effectiveCommand = parseWithSchemaSync(evalRunEffectiveCommandSchema, {
     command_path: ['eval', 'run'],

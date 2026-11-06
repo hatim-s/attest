@@ -44,13 +44,13 @@ const toRunStartRequest = (form: RunStartForm): RunStartRequest => {
 
   const concurrency = optionalNumber(form.concurrency);
   const timeoutSeconds = optionalNumber(form.timeoutSeconds);
-  const request: RunStartRequest = { selection: form.selection };
+  let request: RunStartRequest = { selection: form.selection };
 
-  if (firstTag !== undefined) request.tags = [firstTag, ...otherTags];
+  if (firstTag !== undefined) request = { ...request, tags: [firstTag, ...otherTags] };
 
-  if (concurrency !== undefined) request.concurrency = concurrency;
+  if (concurrency !== undefined) request = { ...request, concurrency };
 
-  if (timeoutSeconds !== undefined) request.timeoutMs = timeoutSeconds * 1000;
+  if (timeoutSeconds !== undefined) request = { ...request, timeoutMs: timeoutSeconds * 1000 };
 
   return request;
 };

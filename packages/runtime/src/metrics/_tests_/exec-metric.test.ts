@@ -1,3 +1,4 @@
+import { stripStruct } from '@attest/contracts';
 import { parseWithSchemaSync, isString } from '@attest/contracts';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { access, mkdtemp, readFile, rm } from 'node:fs/promises';
@@ -6,7 +7,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it, vi } from 'vitest';
-import { z } from 'zod';
+import * as Schema from 'effect/Schema';
 
 import type { CompletedMetricContext } from '../metric-evaluation.js';
 import { executeExecutableMetric } from '../exec-metric.js';
@@ -165,7 +166,7 @@ describe('executeExecutableMetric command metrics', () => {
     expect(evaluation).toMatchObject({ status: 'evaluated', pass: true });
 
     const directory = parseWithSchemaSync(
-      z.object({ details: z.object({ artifact_dir: z.string() }) }),
+      stripStruct({ details: stripStruct({ artifact_dir: Schema.String }) }),
       evaluation,
     ).details.artifact_dir;
 

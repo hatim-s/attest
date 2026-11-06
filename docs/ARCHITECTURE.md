@@ -29,7 +29,7 @@ graph TD
 
 ## Domain and protocols
 
-`@attest/contracts` defines the versioned data exchanged with agents, metrics, projects, and machine clients. Zod schemas own these types. Validate untyped input when it enters the system; typed application code should use the resulting discriminated unions directly.
+`@attest/contracts` defines the versioned data exchanged with agents, metrics, projects, and machine clients. Native Effect 4.1.2 schemas own these types. Validate untyped input when it enters the system; typed application code should use the resulting discriminated unions directly.
 
 `@attest/core` owns run records and storage interfaces, comparison rules, tabular import transformations, trace conversion, and case selection. The core `selectCases` function applies case/tag/folder/dataset
 filters and seeded sampling before runtime scheduling. Contracts own selection schemas; local
@@ -42,7 +42,7 @@ Storage interfaces describe existing operations, not a proposed cloud repository
 
 `@attest/executor` invokes agents through CLI, HTTP, streaming, persistent sessions, and Vercel Sandbox. It owns invocation retries, transport deadlines, output limits, process cleanup, and case environments. It imports contracts, never runtime, core, local, or CLI. Its compiled ESM runs on Node 22+ and Bun 1.4+.
 
-`@attest/client` is the agent side of the callback transport, hosted by the consumer next to its agent. It accepts a trigger, runs a handler and posts the `attest.agent-completion`. It imports contracts and zod directly; contracts also loads the portable Effect module for decoding. It never imports evaluator packages, so hosted agents do not install them. The root entry is a Web-standard `fetch` handler with no Node imports (ESLint enforces this) and runs on Node, Bun and Workers. `/node` adds the `node:http` server and workspace artifact collection; `/pi` drives `pi --mode rpc`.
+`@attest/client` is the agent side of the callback transport, hosted by the consumer next to its agent. It accepts a trigger, runs a handler and posts the `attest.agent-completion`. It imports contracts and portable Effect modules directly. It never imports evaluator packages, so hosted agents do not install them. The root entry is a Web-standard `fetch` handler with no Node imports (ESLint enforces this) and runs on Node, Bun and Workers. `/node` adds the `node:http` server and workspace artifact collection; `/pi` drives `pi --mode rpc`.
 
 `@attest/runtime` evaluates metrics and schedules evaluation cases. It owns eval lifecycle hooks and case environment lifetime, and imports executor for invocation types. An `EvalCaseRunner` awaits stage callbacks between agent work and evaluation. Ordered hook arrays and injected environment factories let applications add behavior without replacing the scheduler. Runtime receives persistence and artifact behavior through the existing evaluation interfaces.
 

@@ -1,5 +1,6 @@
+import { safeIntegerSchema } from '../../schema/scalars.js';
 import { isString } from '../shared.js';
-import { z } from 'zod';
+import * as Schema from 'effect/Schema';
 
 import {
   durationMillisecondsSchema,
@@ -11,67 +12,71 @@ import {
 import { reportDuplicates } from '../../internal/duplicates.js';
 import { webSocketTransportSchema } from '../../agent/websocket-contract.js';
 
-const httpUrlTemplateSchema = z
-  .string()
-  .regex(/^https?:\/\/\S+$/u, 'must be an HTTP or HTTPS URL template');
+const httpUrlTemplateSchema = Schema.String.check(
+  Schema.isPattern(/^https?:\/\/\S+$/u, { message: 'must be an HTTP or HTTPS URL template' }),
+);
 
-const templateValueSchema = z.union([z.string(), secretReferenceSchema]);
+const templateValueSchema = Schema.Union([Schema.String, secretReferenceSchema]);
 
 /** Builds a foreign HTTP request before normalization at the runner boundary. */
-const httpRequestTemplateSchema = z
-  .strictObject({
-    url: httpUrlTemplateSchema,
-    method: z.enum(['GET', 'POST', 'PUT', 'PATCH', 'DELETE']),
-    headers: z.record(z.string(), templateValueSchema).optional(),
-    query: z.record(z.string(), templateValueSchema).optional(),
-    body: z.json().optional(),
-    body_encoding: z.enum(['json', 'raw']).optional(),
-  })
-  .superRefine((request, context) => {
-    if (request.body_encoding === 'raw' && !isString(request.body)) {
-      context.addIssue({
-        code: 'custom',
-        path: ['body'],
-        message: 'must be a string when body_encoding is raw',
-      });
-    }
+const httpRequestTemplateSchema = Schema.Struct({
+  url: httpUrlTemplateSchema,
+  method: Schema.Literals(['GET', 'POST', 'PUT', 'PATCH', 'DELETE']),
+  headers: Schema.optional(Schema.Record(Schema.String, templateValueSchema)),
+  query: Schema.optional(Schema.Record(Schema.String, templateValueSchema)),
+  body: Schema.optional(Schema.Json),
+  body_encoding: Schema.optional(Schema.Literals(['json', 'raw'])),
+})
+  .check(
+    Schema.makeFilter((request) => {
+      const context: Schema.FilterIssue[] = [];
 
-    if (request.body === undefined && request.body_encoding !== undefined) {
-      context.addIssue({
-        code: 'custom',
-        path: ['body_encoding'],
-        message: 'requires a body',
-      });
-    }
-  })
-  .meta({ id: 'HttpRequestTemplate' });
+      if (request.body_encoding === 'raw' && !isString(request.body)) {
+        context.push({
+          path: ['body'],
+          issue: 'must be a string when body_encoding is raw',
+        });
+      }
+
+      if (request.body === undefined && request.body_encoding !== undefined) {
+        context.push({
+          path: ['body_encoding'],
+          issue: 'requires a body',
+        });
+      }
+
+      return context;
+    }),
+  )
+  .annotate({ identifier: 'HttpRequestTemplate' });
 
 /** Extracts a normalized agent outcome from a foreign response or terminal event. */
-const responseExtractionSchema = z
-  .strictObject({
-    result_pointer: jsonPointerSchema,
-    error_pointer: jsonPointerSchema.optional(),
-    trace_pointer: jsonPointerSchema.optional(),
-    remote_job_id_pointer: jsonPointerSchema.optional(),
-  })
-  .meta({ id: 'ResponseExtraction' });
+const responseExtractionSchema = Schema.Struct({
+  result_pointer: jsonPointerSchema,
+  error_pointer: Schema.optional(jsonPointerSchema),
+  trace_pointer: Schema.optional(jsonPointerSchema),
+  remote_job_id_pointer: Schema.optional(jsonPointerSchema),
+}).annotate({ identifier: 'ResponseExtraction' });
 
-const processEnvironmentSchema = z.record(z.string(), secretReferenceSchema);
+const processEnvironmentSchema = Schema.Record(Schema.String, secretReferenceSchema);
 
-const literalRelativePathSchema = relativePathSchema.regex(
-  /^[^*?\[\]{}]+$/u,
-  'must not contain glob metacharacters',
+const literalRelativePathSchema = relativePathSchema.check(
+  Schema.isPattern(/^[^*?\[\]{}]+$/u, { message: 'must not contain glob metacharacters' }),
 );
 
 /** Uploads one project file into a Vercel sandbox before agent invocation. */
-const vercelSandboxFileSchema = z.strictObject({
+const vercelSandboxFileSchema = Schema.Struct({
   source: literalRelativePathSchema,
   destination: literalRelativePathSchema,
-  mode: z.number().int().min(0).max(0o777).optional(),
+  mode: Schema.optional(
+    safeIntegerSchema
+      .check(Schema.isGreaterThanOrEqualTo(0))
+      .check(Schema.isLessThanOrEqualTo(0o777)),
+  ),
 });
 
 /** Copies one sandbox artifact back into the project after agent invocation. */
-const vercelSandboxArtifactSchema = z.strictObject({
+const vercelSandboxArtifactSchema = Schema.Struct({
   source: literalRelativePathSchema,
   destination: literalRelativePathSchema,
 });
@@ -85,16 +90,15 @@ const canonicalRelativePath = (path: string): string =>
     .join('/');
 
 /** Configures an isolated Vercel sandbox for one native CLI case. */
-const vercelSandboxSchema = z
-  .strictObject({
-    kind: z.literal('vercel'),
-    image: z.string().min(1).optional(),
-    files: z.array(vercelSandboxFileSchema),
-    artifacts: z.array(vercelSandboxArtifactSchema).optional(),
-    artifact_directory: relativePathSchema.optional(),
-  })
-  .superRefine((sandbox, context) => {
-    // Aliased destinations would overwrite sandbox files or host artifacts.
+const vercelSandboxSchema = Schema.Struct({
+  kind: Schema.Literal('vercel'),
+  image: Schema.optional(Schema.String.check(Schema.isMinLength(1))),
+  files: Schema.Array(vercelSandboxFileSchema),
+  artifacts: Schema.optional(Schema.Array(vercelSandboxArtifactSchema)),
+  artifact_directory: Schema.optional(relativePathSchema),
+}).check(
+  Schema.makeFilter((sandbox) => {
+    const context: Schema.FilterIssue[] = []; // Aliased destinations would overwrite sandbox files or host artifacts.
     reportDuplicates({
       values: sandbox.files.map(({ destination }) => canonicalRelativePath(destination)),
       pathFor: (index) => ['files', index, 'destination'],
@@ -109,158 +113,179 @@ const vercelSandboxSchema = z
       label: 'artifact destination',
       context,
     });
-  });
 
-const nativeForegroundTransportSchema = z.strictObject({
-  kind: z.literal('native_cli'),
-  lifecycle: z.literal('per_case'),
-  argv: z.array(z.string()).nonempty(),
-  cwd: relativePathSchema.optional(),
-  env: processEnvironmentSchema.optional(),
-  sandbox: vercelSandboxSchema.optional(),
+    return context;
+  }),
+);
+
+const nativeForegroundTransportSchema = Schema.Struct({
+  kind: Schema.Literal('native_cli'),
+  lifecycle: Schema.Literal('per_case'),
+  argv: Schema.Array(Schema.String).check(Schema.isMinLength(1)),
+  cwd: Schema.optional(relativePathSchema),
+  env: Schema.optional(processEnvironmentSchema),
+  sandbox: Schema.optional(vercelSandboxSchema),
 });
 
-const backgroundReadinessSchema = z.discriminatedUnion('kind', [
-  z.strictObject({ kind: z.literal('http'), url: httpUrlTemplateSchema }),
-  z.strictObject({
-    kind: z.literal('tcp'),
-    host: z.string().min(1),
-    port: z.number().int().min(1).max(65_535),
+const backgroundReadinessSchema = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal('http'), url: httpUrlTemplateSchema }),
+  Schema.Struct({
+    kind: Schema.Literal('tcp'),
+    host: Schema.String.check(Schema.isMinLength(1)),
+    port: safeIntegerSchema
+      .check(Schema.isGreaterThanOrEqualTo(1))
+      .check(Schema.isLessThanOrEqualTo(65_535)),
   }),
-  z.strictObject({ kind: z.literal('stderr'), pattern: z.string().min(1).max(512) }),
+  Schema.Struct({
+    kind: Schema.Literal('stderr'),
+    pattern: Schema.String.check(Schema.isMinLength(1)).check(Schema.isMaxLength(512)),
+  }),
 ]);
 
-const nativeBackgroundTransportSchema = z.strictObject({
-  kind: z.literal('background_cli'),
-  lifecycle: z.literal('per_run'),
-  start_argv: z.array(z.string()).nonempty(),
-  cwd: relativePathSchema.optional(),
-  env: processEnvironmentSchema.optional(),
+const nativeBackgroundTransportSchema = Schema.Struct({
+  kind: Schema.Literal('background_cli'),
+  lifecycle: Schema.Literal('per_run'),
+  start_argv: Schema.Array(Schema.String).check(Schema.isMinLength(1)),
+  cwd: Schema.optional(relativePathSchema),
+  env: Schema.optional(processEnvironmentSchema),
   readiness: backgroundReadinessSchema,
   invoke: httpRequestTemplateSchema,
   extraction: responseExtractionSchema,
-  shutdown: httpRequestTemplateSchema.optional(),
+  shutdown: Schema.optional(httpRequestTemplateSchema),
   stop_timeout_ms: durationMillisecondsSchema,
 });
 
-const jsonlBridgeTransportSchema = z.strictObject({
-  kind: z.literal('jsonl_bridge'),
-  lifecycle: z.literal('per_run'),
-  argv: z.array(z.string()).nonempty(),
-  cwd: relativePathSchema.optional(),
-  env: processEnvironmentSchema.optional(),
-  concurrency: z.enum(['serial', 'multiplexed']),
+const jsonlBridgeTransportSchema = Schema.Struct({
+  kind: Schema.Literal('jsonl_bridge'),
+  lifecycle: Schema.Literal('per_run'),
+  argv: Schema.Array(Schema.String).check(Schema.isMinLength(1)),
+  cwd: Schema.optional(relativePathSchema),
+  env: Schema.optional(processEnvironmentSchema),
+  concurrency: Schema.Literals(['serial', 'multiplexed']),
   cancellation_grace_ms: durationMillisecondsSchema,
 });
 
-const httpTransportSchema = z.strictObject({
-  kind: z.literal('http'),
-  lifecycle: z.literal('external'),
-  response_mode: z.enum(['attest_envelope', 'mapped']),
+const httpTransportSchema = Schema.Struct({
+  kind: Schema.Literal('http'),
+  lifecycle: Schema.Literal('external'),
+  response_mode: Schema.Literals(['attest_envelope', 'mapped']),
   request: httpRequestTemplateSchema,
   extraction: responseExtractionSchema,
 });
 
-const pollingTransportSchema = z
-  .strictObject({
-    kind: z.literal('polling'),
-    lifecycle: z.literal('external'),
-    submit: httpRequestTemplateSchema,
-    idempotency_header: z.string().min(1).optional(),
-    job_id_pointer: jsonPointerSchema,
-    status_url_pointer: jsonPointerSchema.optional(),
-    status_url_template: httpUrlTemplateSchema.optional(),
-    status_pointer: jsonPointerSchema,
-    success_values: z.array(z.json()).nonempty(),
-    failure_values: z.array(z.json()).nonempty(),
-    extraction: responseExtractionSchema,
-    minimum_interval_ms: durationMillisecondsSchema,
-    maximum_interval_ms: durationMillisecondsSchema,
-  })
-  .superRefine(refinePollingSchedule);
+const pollingTransportSchema = Schema.Struct({
+  kind: Schema.Literal('polling'),
+  lifecycle: Schema.Literal('external'),
+  submit: httpRequestTemplateSchema,
+  idempotency_header: Schema.optional(Schema.String.check(Schema.isMinLength(1))),
+  job_id_pointer: jsonPointerSchema,
+  status_url_pointer: Schema.optional(jsonPointerSchema),
+  status_url_template: Schema.optional(httpUrlTemplateSchema),
+  status_pointer: jsonPointerSchema,
+  success_values: Schema.Array(Schema.Json).check(Schema.isMinLength(1)),
+  failure_values: Schema.Array(Schema.Json).check(Schema.isMinLength(1)),
+  extraction: responseExtractionSchema,
+  minimum_interval_ms: durationMillisecondsSchema,
+  maximum_interval_ms: durationMillisecondsSchema,
+}).check(
+  Schema.makeFilter((value) => {
+    const issues: Schema.FilterIssue[] = [];
+    refinePollingSchedule(value, issues);
 
-const streamTransportSchema = z
-  .strictObject({
-    kind: z.literal('stream'),
-    lifecycle: z.literal('external'),
-    framing: z.enum(['sse', 'jsonl']),
-    request: httpRequestTemplateSchema,
-    event_name: z.string().min(1).optional(),
-    event_data_pointer: jsonPointerSchema.optional(),
-    terminal_pointer: jsonPointerSchema,
-    terminal_values: z.array(z.json()).nonempty(),
-    result_pointer: jsonPointerSchema,
-    error_pointer: jsonPointerSchema.optional(),
-    trace_pointer: jsonPointerSchema.optional(),
-    incremental_output_pointer: jsonPointerSchema.optional(),
-    incremental_output_mode: z.enum(['text', 'array']).optional(),
-    heartbeat_resets_application_idle: z.boolean().optional(),
-  })
-  .superRefine((stream, context) => {
+    return issues;
+  }),
+);
+
+const streamTransportSchema = Schema.Struct({
+  kind: Schema.Literal('stream'),
+  lifecycle: Schema.Literal('external'),
+  framing: Schema.Literals(['sse', 'jsonl']),
+  request: httpRequestTemplateSchema,
+  event_name: Schema.optional(Schema.String.check(Schema.isMinLength(1))),
+  event_data_pointer: Schema.optional(jsonPointerSchema),
+  terminal_pointer: jsonPointerSchema,
+  terminal_values: Schema.Array(Schema.Json).check(Schema.isMinLength(1)),
+  result_pointer: jsonPointerSchema,
+  error_pointer: Schema.optional(jsonPointerSchema),
+  trace_pointer: Schema.optional(jsonPointerSchema),
+  incremental_output_pointer: Schema.optional(jsonPointerSchema),
+  incremental_output_mode: Schema.optional(Schema.Literals(['text', 'array'])),
+  heartbeat_resets_application_idle: Schema.optional(Schema.Boolean),
+}).check(
+  Schema.makeFilter((stream) => {
+    const context: Schema.FilterIssue[] = [];
+
     if (
       (stream.incremental_output_pointer === undefined) !==
       (stream.incremental_output_mode === undefined)
     ) {
-      context.addIssue({
-        code: 'custom',
+      context.push({
         path: ['incremental_output_mode'],
-        message: 'must be provided together with incremental_output_pointer',
+        issue: 'must be provided together with incremental_output_pointer',
       });
     }
-  });
+
+    return context;
+  }),
+);
 
 /**
  * Triggers an async agent and waits for it to post an `attest.agent-completion` back. Attest sends
  * the request envelope as the trigger body, and the fetch templates resolve reference artifacts
  * (`{{artifact_id}}`) and trace references (`{{trace_ref}}`).
  */
-const callbackTransportSchema = z
-  .strictObject({
-    kind: z.literal('callback'),
-    lifecycle: z.literal('external'),
-    trigger: httpRequestTemplateSchema,
-    idempotency_header: z.string().min(1).optional(),
-    artifact_fetch: httpRequestTemplateSchema.optional(),
-    trace_fetch: httpRequestTemplateSchema.optional(),
-    receiver: z
-      .strictObject({
-        // 0 binds an ephemeral port.
-        listen_port: z.number().int().min(0).max(65_535).optional(),
-        // The base URL the agent is told to post to; defaults to the loopback listener.
-        public_url: httpUrlTemplateSchema.optional(),
-      })
-      .optional(),
-  })
-  .superRefine((callback, context) => {
+const callbackTransportSchema = Schema.Struct({
+  kind: Schema.Literal('callback'),
+  lifecycle: Schema.Literal('external'),
+  trigger: httpRequestTemplateSchema,
+  idempotency_header: Schema.optional(Schema.String.check(Schema.isMinLength(1))),
+  artifact_fetch: Schema.optional(httpRequestTemplateSchema),
+  trace_fetch: Schema.optional(httpRequestTemplateSchema),
+  receiver: Schema.optional(
+    Schema.Struct({
+      // 0 binds an ephemeral port.
+      listen_port: Schema.optional(
+        safeIntegerSchema
+          .check(Schema.isGreaterThanOrEqualTo(0))
+          .check(Schema.isLessThanOrEqualTo(65_535)),
+      ),
+      // The base URL the agent is told to post to; defaults to the loopback listener.
+      public_url: Schema.optional(httpUrlTemplateSchema),
+    }),
+  ),
+}).check(
+  Schema.makeFilter((callback) => {
+    const context: Schema.FilterIssue[] = [];
+
     if (callback.trigger.method !== 'POST' && callback.trigger.method !== 'PUT') {
-      context.addIssue({
-        code: 'custom',
+      context.push({
         path: ['trigger', 'method'],
-        message: 'must be POST or PUT',
+        issue: 'must be POST or PUT',
       });
     }
 
     if (callback.trigger.body !== undefined) {
-      context.addIssue({
-        code: 'custom',
+      context.push({
         path: ['trigger', 'body'],
-        message: 'must be omitted; attest sends the request envelope as the body',
+        issue: 'must be omitted; attest sends the request envelope as the body',
       });
     }
 
     for (const field of ['artifact_fetch', 'trace_fetch'] as const) {
       if (callback[field] !== undefined && callback[field].method !== 'GET') {
-        context.addIssue({
-          code: 'custom',
+        context.push({
           path: [field, 'method'],
-          message: 'must be GET',
+          issue: 'must be GET',
         });
       }
     }
-  });
+
+    return context;
+  }),
+);
 
 /** Encodes every supported agent transport definition. */
-const agentTransportSchema = z.discriminatedUnion('kind', [
+const agentTransportSchema = Schema.Union([
   nativeForegroundTransportSchema,
   nativeBackgroundTransportSchema,
   jsonlBridgeTransportSchema,
@@ -271,13 +296,13 @@ const agentTransportSchema = z.discriminatedUnion('kind', [
   callbackTransportSchema,
 ]);
 
-type AgentTransport = z.infer<typeof agentTransportSchema>;
+type AgentTransport = typeof agentTransportSchema.Type;
 
-type HttpRequestTemplate = z.infer<typeof httpRequestTemplateSchema>;
+type HttpRequestTemplate = typeof httpRequestTemplateSchema.Type;
 
-type ResponseExtraction = z.infer<typeof responseExtractionSchema>;
+type ResponseExtraction = typeof responseExtractionSchema.Type;
 
-type VercelSandbox = z.infer<typeof vercelSandboxSchema>;
+type VercelSandbox = typeof vercelSandboxSchema.Type;
 
 export {
   agentTransportSchema,

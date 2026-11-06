@@ -8,7 +8,7 @@ import {
   type MetricResource,
   type ToolArgumentMatcher,
 } from '@attest/contracts';
-import { z } from 'zod';
+import * as Schema from 'effect/Schema';
 
 import { LocalError } from '../../../errors/index.js';
 import { schemaIssueDiagnostics } from '../../../internal/schema-issue-diagnostics.js';
@@ -71,9 +71,9 @@ const AUTHORED_FIELD_FLAGS: Readonly<Partial<Record<keyof MetricAddFields, strin
   value: '--value',
 };
 
-const jsonSchemaSchema = z.union([z.boolean(), z.record(z.string(), z.json())]);
+const jsonSchemaSchema = Schema.Union([Schema.Boolean, Schema.Record(Schema.String, Schema.Json)]);
 
-const parseJsonSchema = (value: string): z.infer<typeof jsonSchemaSchema> => {
+const parseJsonSchema = (value: string): typeof jsonSchemaSchema.Type => {
   const parsed = parseWithSchema(
     jsonSchemaSchema,
     parseJsonText(value, { path: '--json-schema', hint: 'Pass a JSON Schema object or boolean.' }),
@@ -218,17 +218,20 @@ const buildAssertionDefinition = async (
         ...(fields.argExists ?? []).map((argumentPath) => ({ exists: { path: argumentPath } })),
       ];
 
-      const toolCalls: Extract<LeafAssertionCheck, { tool_calls: object }>['tool_calls'] = {
+      let toolCalls: Extract<LeafAssertionCheck, { tool_calls: object }>['tool_calls'] = {
         name: requireValue(fields.tool, '--tool'),
       };
 
       if (fields.toolStatus !== undefined)
-        toolCalls.status = parseChoice(fields.toolStatus, ['ok', 'error'], '--tool-status');
+        toolCalls = {
+          ...toolCalls,
+          status: parseChoice(fields.toolStatus, ['ok', 'error'], '--tool-status'),
+        };
 
       if (fields.count !== undefined)
-        toolCalls.count = parseNonnegativeInteger(fields.count, '--count');
+        toolCalls = { ...toolCalls, count: parseNonnegativeInteger(fields.count, '--count') };
 
-      if (argumentsList.length > 0) toolCalls.arguments = argumentsList;
+      if (argumentsList.length > 0) toolCalls = { ...toolCalls, arguments: argumentsList };
 
       return { kind: 'assertion', assertions: [{ tool_calls: toolCalls }] };
     }
@@ -253,25 +256,28 @@ const buildAssertionDefinition = async (
     case 'trace-span': {
       const attributes = parseAttributes(fields.attribute);
 
-      const filter: SpanFilter = {};
+      let filter: SpanFilter = {};
 
       if (fields.spanKind !== undefined)
-        filter.kind = parseChoice(fields.spanKind, SPAN_KINDS, '--span-kind');
+        filter = { ...filter, kind: parseChoice(fields.spanKind, SPAN_KINDS, '--span-kind') };
 
-      if (fields.spanName !== undefined) filter.name = fields.spanName;
+      if (fields.spanName !== undefined) filter = { ...filter, name: fields.spanName };
 
       if (fields.spanStatus !== undefined)
-        filter.status = parseChoice(fields.spanStatus, ['ok', 'error'], '--span-status');
+        filter = {
+          ...filter,
+          status: parseChoice(fields.spanStatus, ['ok', 'error'], '--span-status'),
+        };
 
-      if (attributes !== undefined) filter.attributes = attributes;
+      if (attributes !== undefined) filter = { ...filter, attributes: attributes };
 
-      const spans: Extract<LeafAssertionCheck, { spans: object }>['spans'] = {
+      let spans: Extract<LeafAssertionCheck, { spans: object }>['spans'] = {
         count: fields.count === undefined ? 1 : parseNonnegativeInteger(fields.count, '--count'),
       };
 
-      if (Object.keys(filter).length > 0) spans.filter = filter;
+      if (Object.keys(filter).length > 0) spans = { ...spans, filter: filter };
 
-      if (fields.order !== undefined) spans.order = [...fields.order];
+      if (fields.order !== undefined) spans = { ...spans, order: [...fields.order] };
 
       return { kind: 'assertion', assertions: [{ spans }] };
     }
@@ -319,11 +325,12 @@ const createMetricResource = async (fields: MetricAddFields): Promise<MetricReso
       argv: parseArgvJson(requireValue(fields.argvJson, '--argv-json')),
     };
 
-    if (fields.cwd !== undefined) definition.cwd = fields.cwd;
+    if (fields.cwd !== undefined) definition = { ...definition, cwd: fields.cwd };
 
-    if (env !== undefined) definition.env = env;
+    if (env !== undefined) definition = { ...definition, env: env };
 
-    if (fields.timeout !== undefined) definition.timeout_ms = parseDuration(fields.timeout);
+    if (fields.timeout !== undefined)
+      definition = { ...definition, timeout_ms: parseDuration(fields.timeout) };
   } else if (fields.preset === 'http') {
     assertOnlyFields(
       fields,
@@ -355,20 +362,32 @@ const createMetricResource = async (fields: MetricAddFields): Promise<MetricReso
       },
     };
 
-    if (headers !== undefined) definition.request.headers = headers;
+    if (headers !== undefined)
+      definition = { ...definition, request: { ...definition.request, headers: headers } };
 
-    if (query !== undefined) definition.request.query = query;
+    if (query !== undefined)
+      definition = { ...definition, request: { ...definition.request, query: query } };
 
     if (fields.bodyJson !== undefined)
-      definition.request.body = parseJsonValue(fields.bodyJson, '--body-json');
+      definition = {
+        ...definition,
+        request: { ...definition.request, body: parseJsonValue(fields.bodyJson, '--body-json') },
+      };
 
     if (fields.rationalePointer !== undefined)
-      definition.extraction.rationale_pointer = fields.rationalePointer;
+      definition = {
+        ...definition,
+        extraction: { ...definition.extraction, rationale_pointer: fields.rationalePointer },
+      };
 
     if (fields.detailsPointer !== undefined)
-      definition.extraction.details_pointer = fields.detailsPointer;
+      definition = {
+        ...definition,
+        extraction: { ...definition.extraction, details_pointer: fields.detailsPointer },
+      };
 
-    if (fields.timeout !== undefined) definition.timeout_ms = parseDuration(fields.timeout);
+    if (fields.timeout !== undefined)
+      definition = { ...definition, timeout_ms: parseDuration(fields.timeout) };
   } else if (fields.preset !== undefined) {
     assertOnlyFields(fields, ASSERTION_PRESET_FIELDS[fields.preset]);
     definition = await buildAssertionDefinition(fields);
@@ -380,27 +399,31 @@ const createMetricResource = async (fields: MetricAddFields): Promise<MetricReso
     if (thresholds.length > 0) {
       assertOnlyFields(fields, allowedFields('gt', 'gte', 'lt', 'lte', 'path'));
 
-      const threshold: Extract<LeafAssertionCheck, { threshold: object }>['threshold'] = {
+      let threshold: Extract<LeafAssertionCheck, { threshold: object }>['threshold'] = {
         path: fields.path ?? '$.output',
       };
 
-      if (fields.lt !== undefined) threshold.lt = parseFiniteNumber(fields.lt, '--lt');
+      if (fields.lt !== undefined)
+        threshold = { ...threshold, lt: parseFiniteNumber(fields.lt, '--lt') };
 
-      if (fields.lte !== undefined) threshold.lte = parseFiniteNumber(fields.lte, '--lte');
+      if (fields.lte !== undefined)
+        threshold = { ...threshold, lte: parseFiniteNumber(fields.lte, '--lte') };
 
-      if (fields.gt !== undefined) threshold.gt = parseFiniteNumber(fields.gt, '--gt');
+      if (fields.gt !== undefined)
+        threshold = { ...threshold, gt: parseFiniteNumber(fields.gt, '--gt') };
 
-      if (fields.gte !== undefined) threshold.gte = parseFiniteNumber(fields.gte, '--gte');
+      if (fields.gte !== undefined)
+        threshold = { ...threshold, gte: parseFiniteNumber(fields.gte, '--gte') };
       definition = { kind: 'assertion', assertions: [{ threshold }] };
     } else if (fields.pattern !== undefined) {
       assertOnlyFields(fields, allowedFields('flags', 'path', 'pattern'));
 
-      const regex: Extract<LeafAssertionCheck, { regex: object }>['regex'] = {
+      let regex: Extract<LeafAssertionCheck, { regex: object }>['regex'] = {
         path: fields.path ?? '$.output',
         pattern: fields.pattern,
       };
 
-      if (fields.flags !== undefined) regex.flags = fields.flags;
+      if (fields.flags !== undefined) regex = { ...regex, flags: fields.flags };
       definition = { kind: 'assertion', assertions: [{ regex }] };
     } else if (fields.path !== undefined) {
       assertOnlyFields(fields, allowedFields('path'));

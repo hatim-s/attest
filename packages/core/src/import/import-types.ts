@@ -1,3 +1,4 @@
+import { SchemaDecodeError } from '@attest/contracts';
 import {
   AttestError,
   type DatasetImportMapping,
@@ -8,7 +9,6 @@ import {
   type JsonValue,
   type TestCase,
 } from '@attest/contracts';
-import type { z } from 'zod';
 
 /** Physical source coordinates: `line` for JSONL and CSV syntax, `row` for records. */
 interface ImportLocation {
@@ -16,7 +16,7 @@ interface ImportLocation {
   row?: number;
 }
 
-/** Every diagnostic the import engine emits, plus the Zod issue codes from case validation. */
+/** Every diagnostic the import engine emits, plus the native schema issue codes from case validation. */
 type ImportDiagnosticCode =
   | 'csv_column_count'
   | 'csv_header_missing'
@@ -45,7 +45,7 @@ type ImportDiagnosticCode =
   | 'source_key_missing'
   | 'source_pointer_required'
   | 'upsert_identity_required'
-  | z.core.$ZodIssue['code'];
+  | SchemaDecodeError['issues'][number]['code'];
 
 /** One import problem located by source field and destination, never by authored value. */
 type ImportDiagnostic = ImportLocation & {

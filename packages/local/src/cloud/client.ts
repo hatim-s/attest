@@ -1,6 +1,6 @@
 import type { JsonValue } from '@attest/contracts';
 import { redactTransportText } from '@attest/executor';
-import { z } from 'zod';
+import * as Schema from 'effect/Schema';
 
 import type { CloudCredentialSource } from './credentials.js';
 
@@ -12,12 +12,12 @@ type CloudClient = {
   readonly credentialSource?: CloudCredentialSource;
   upload: <T>(
     path: string,
-    options: { schema: z.ZodType<T>; body: string; signal?: AbortSignal },
+    options: { schema: Schema.ConstraintDecoder<T>; body: string; signal?: AbortSignal },
   ) => Promise<T>;
   request: <T>(
     method: string,
     path: string,
-    options: { schema: z.ZodType<T>; body?: JsonValue; signal?: AbortSignal },
+    options: { schema: Schema.ConstraintDecoder<T>; body?: JsonValue; signal?: AbortSignal },
   ) => Promise<T>;
 };
 
@@ -110,7 +110,7 @@ const createCloudClient = (options: CloudClientOptions): CloudClient => {
     method: string,
     path: string,
     requestOptions: {
-      schema: z.ZodType<T>;
+      schema: Schema.ConstraintDecoder<T>;
       body?: string;
       signal?: AbortSignal;
       contentType: string;

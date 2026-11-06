@@ -56,7 +56,7 @@ const registerAgentTestCommand = (agent: Command, context: CommandContext): void
           leaf,
           options,
           build: async () => {
-            const request: Extract<CommandRequest, { command: 'agent.test' }> = {
+            let request: Extract<CommandRequest, { command: 'agent.test' }> = {
               schema: COMMAND_REQUEST_SCHEMA_ID,
               command: 'agent.test',
               agent_id: await requiredInput(
@@ -73,7 +73,7 @@ const registerAgentTestCommand = (agent: Command, context: CommandContext): void
             };
 
             if (options.record !== undefined) {
-              request.record = options.record;
+              request = { ...request, record: options.record };
             }
 
             return request;

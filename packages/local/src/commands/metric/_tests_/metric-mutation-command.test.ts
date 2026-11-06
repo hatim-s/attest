@@ -70,13 +70,43 @@ describe('runMetricMutationCommand', () => {
   it('renames every reference and removes a referenced metric only with detach', async () => {
     const root = await createProject();
     const loaded = await loadProject({ project: root });
-    const candidate = candidateFromLoadedProject(loaded);
-    candidate.tests[0]!.cases.push({
-      id: 'direct',
-      input: {},
-      metric_overrides: [{ metric_id: 'correct', threshold: 0.75 }],
-    });
-    candidate.datasets[0]!.cases[0]!.metric_overrides = [{ metric_id: 'correct' }];
+    let candidate = candidateFromLoadedProject(loaded);
+    candidate = {
+      ...candidate,
+      tests: candidate.tests.map((entry, index) =>
+        index === 0
+          ? {
+              ...candidate.tests[0]!,
+              cases: [
+                ...candidate.tests[0]!.cases,
+                {
+                  id: 'direct',
+                  input: {},
+                  metric_overrides: [{ metric_id: 'correct', threshold: 0.75 }],
+                },
+              ],
+            }
+          : entry,
+      ),
+    };
+    candidate = {
+      ...candidate,
+      datasets: candidate.datasets.map((entry, index) =>
+        index === 0
+          ? {
+              ...candidate.datasets[0]!,
+              cases: candidate.datasets[0]!.cases.map((entry, index) =>
+                index === 0
+                  ? {
+                      ...candidate.datasets[0]!.cases[0]!,
+                      metric_overrides: [{ metric_id: 'correct' }],
+                    }
+                  : entry,
+              ),
+            }
+          : entry,
+      ),
+    };
     await applyProjectMutation({
       candidate,
       expectedProjectHash: loaded.projectHash,

@@ -82,7 +82,7 @@ const cancellationSuccess = () =>
   });
 
 /** Builds a fully valid stream with completion order intentionally different from configured order. */
-const completedEvents = (verdict: 'fail' | 'pass' = 'pass'): EvalEvent[] => {
+const completedEvents = (verdict: 'fail' | 'pass' = 'pass'): readonly EvalEvent[] => {
   const summary = {
     total_cases: 2,
     passed_cases: verdict === 'pass' ? 2 : 1,
@@ -186,7 +186,7 @@ const completedEvents = (verdict: 'fail' | 'pass' = 'pass'): EvalEvent[] => {
 };
 
 /** Builds one catalog-shaped terminal infrastructure failure for renderer parity checks. */
-const failedEvents = (): EvalEvent[] =>
+const failedEvents = (): readonly EvalEvent[] =>
   parseWithSchemaSync(evalEventStreamSchema, [
     {
       schema: CLI_EVENT_SCHEMA_ID,
@@ -578,11 +578,22 @@ describe('eval output and sequencing', () => {
   });
 
   it('validates terminal metadata before publishing a JSONL success', async () => {
-    const events = completedEvents();
+    let events = completedEvents();
     const final = events.at(-1)!;
 
     if (final.event !== 'result' || !final.data.result.ok) throw new Error('Expected success.');
-    final.data.result.result.snapshot_hash = 'b'.repeat(64);
+    const success = final.data.result;
+    events = events.map((event) =>
+      event === final
+        ? parseWithSchemaSync(evalEventSchema, {
+            ...final,
+            data: {
+              ...final.data,
+              result: { ...success, result: { ...success.result, snapshot_hash: 'b'.repeat(64) } },
+            },
+          })
+        : event,
+    );
     run.mockResolvedValue(eventSource(events));
     const harness = await parse(['eval', 'run', 'refund', '--output', 'jsonl']);
 
@@ -597,7 +608,7 @@ describe('eval output and sequencing', () => {
   });
 
   it('turns a sequence violation into one stable machine failure', async () => {
-    const invalid = completedEvents();
+    const invalid = [...completedEvents()];
     invalid[1] = { ...invalid[1]!, sequence: 7 };
     run.mockResolvedValue(eventSource(invalid));
     const harness = await parse(['eval', 'run', 'refund', '--output', 'json']);

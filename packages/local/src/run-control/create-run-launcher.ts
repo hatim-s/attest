@@ -72,7 +72,7 @@ const createRunLauncher = ({ catalog, command }: RunLauncherOptions): RunControl
     cancelRun: async (projectKey, runId) => {
       const root = await projectRoot(projectKey);
       // Run ids name registry files; anything but a run id cannot name a run.
-      const parsed = parseWithSchema(evalCancelRequestSchema.shape.run_id, runId);
+      const parsed = parseWithSchema(evalCancelRequestSchema.fields.run_id, runId);
 
       if (!parsed.ok) throw new StoreError('RUN_NOT_FOUND', `Run ${runId} was not found.`);
 

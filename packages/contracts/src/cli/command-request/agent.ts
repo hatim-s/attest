@@ -1,4 +1,5 @@
-import { z } from 'zod';
+import { positiveIntegerSchema } from '../../schema/scalars.js';
+import * as Schema from 'effect/Schema';
 
 import { mutationEnvelopeFields, requestSchemaField } from './envelope.js';
 import {
@@ -14,78 +15,87 @@ import {
   retryPolicySchema,
 } from '../../project/shared.js';
 
-const agentAddRequestSchema = z.strictObject({
+const agentAddRequestSchema = Schema.Struct({
   ...mutationEnvelopeFields,
-  command: z.literal('agent.add'),
+  command: Schema.Literal('agent.add'),
   agent: agentResourceSchema,
 });
 
 /** Encodes the optional asynchronous polling mapping selected during one cURL import. */
-const curlPollingImportSchema = z
-  .strictObject({
-    idempotency_header: z.string().min(1).optional(),
-    job_id_pointer: jsonPointerSchema,
-    status_url_pointer: jsonPointerSchema.optional(),
-    status_url_template: z.string().min(1).optional(),
-    status_pointer: jsonPointerSchema,
-    success_values: z.array(z.json()).nonempty(),
-    failure_values: z.array(z.json()).nonempty(),
-    minimum_interval_ms: z.number().int().positive(),
-    maximum_interval_ms: z.number().int().positive(),
-  })
-  .superRefine(refinePollingSchedule);
+const curlPollingImportSchema = Schema.Struct({
+  idempotency_header: Schema.optional(Schema.String.check(Schema.isMinLength(1))),
+  job_id_pointer: jsonPointerSchema,
+  status_url_pointer: Schema.optional(jsonPointerSchema),
+  status_url_template: Schema.optional(Schema.String.check(Schema.isMinLength(1))),
+  status_pointer: jsonPointerSchema,
+  success_values: Schema.Array(Schema.Json).check(Schema.isMinLength(1)),
+  failure_values: Schema.Array(Schema.Json).check(Schema.isMinLength(1)),
+  minimum_interval_ms: positiveIntegerSchema,
+  maximum_interval_ms: positiveIntegerSchema,
+}).check(
+  Schema.makeFilter((value) => {
+    const issues: Schema.FilterIssue[] = [];
+    refinePollingSchedule(value, issues);
+
+    return issues;
+  }),
+);
 
 const agentImportFields = {
   ...mutationEnvelopeFields,
-  command: z.literal('agent.import'),
-  source: z.string().min(1),
+  command: Schema.Literal('agent.import'),
+  source: Schema.String.check(Schema.isMinLength(1)),
   as: resourceIdSchema,
-  name: z.string().min(1).optional(),
+  name: Schema.optional(Schema.String.check(Schema.isMinLength(1))),
 };
 
-const agentImportRequestSchema = z.discriminatedUnion('source_type', [
-  z.strictObject({ ...agentImportFields, source_type: z.literal('json') }),
-  z.strictObject({
+const agentImportRequestSchema = Schema.Union([
+  Schema.Struct({ ...agentImportFields, source_type: Schema.Literal('json') }),
+  Schema.Struct({
     ...agentImportFields,
-    source_type: z.literal('curl'),
-    placeholders: z
-      .array(
-        z.strictObject({
+    source_type: Schema.Literal('curl'),
+    placeholders: Schema.optional(
+      Schema.Array(
+        Schema.Struct({
           target_pointer: jsonPointerSchema,
           input_pointer: jsonPointerSchema,
         }),
-      )
-      .optional(),
-    header_env: z.record(z.string(), z.string().min(1)).optional(),
-    query_env: z.record(z.string(), z.string().min(1)).optional(),
+      ),
+    ),
+    header_env: Schema.optional(
+      Schema.Record(Schema.String, Schema.String.check(Schema.isMinLength(1))),
+    ),
+    query_env: Schema.optional(
+      Schema.Record(Schema.String, Schema.String.check(Schema.isMinLength(1))),
+    ),
     extraction: responseExtractionSchema,
-    polling: curlPollingImportSchema.optional(),
-    timeouts: agentTimeoutPolicySchema.optional(),
-    retry: retryPolicySchema.optional(),
-    limits: agentEvidenceLimitsSchema.optional(),
+    polling: Schema.optional(curlPollingImportSchema),
+    timeouts: Schema.optional(agentTimeoutPolicySchema),
+    retry: Schema.optional(retryPolicySchema),
+    limits: Schema.optional(agentEvidenceLimitsSchema),
   }),
 ]);
 
-const agentRenameRequestSchema = z.strictObject({
+const agentRenameRequestSchema = Schema.Struct({
   ...mutationEnvelopeFields,
-  command: z.literal('agent.rename'),
+  command: Schema.Literal('agent.rename'),
   agent_id: resourceIdSchema,
   new_id: resourceIdSchema,
 });
 
-const agentRemoveRequestSchema = z.strictObject({
+const agentRemoveRequestSchema = Schema.Struct({
   ...mutationEnvelopeFields,
-  command: z.literal('agent.remove'),
+  command: Schema.Literal('agent.remove'),
   agent_id: resourceIdSchema,
-  detach: z.boolean().optional(),
+  detach: Schema.optional(Schema.Boolean),
 });
 
-const agentTestRequestSchema = z.strictObject({
+const agentTestRequestSchema = Schema.Struct({
   ...requestSchemaField,
-  command: z.literal('agent.test'),
+  command: Schema.Literal('agent.test'),
   agent_id: resourceIdSchema,
-  input: z.json(),
-  record: z.boolean().optional(),
+  input: Schema.Json,
+  record: Schema.optional(Schema.Boolean),
 });
 
 export {

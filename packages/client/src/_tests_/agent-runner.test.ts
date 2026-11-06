@@ -217,7 +217,7 @@ describe('createAgentRunner', () => {
   it('posts invalid_completion for a trace that cannot be serialized', async () => {
     const completions = await receiver();
     const failures: RunnerFailure[] = [];
-    const trace: Trace = { schema: TRACE_SCHEMA_ID, trace_id: 't', spans: [] };
+    const trace: Trace & { self?: Trace } = { schema: TRACE_SCHEMA_ID, trace_id: 't', spans: [] };
 
     trace.self = trace;
 

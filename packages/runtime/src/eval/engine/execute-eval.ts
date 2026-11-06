@@ -166,7 +166,7 @@ const executeResolvedEvalPlan = async <Payload, BaselineDiff = unknown>(
   const collector = createEventCollector(now, options.onEvent);
 
   try {
-    const data: Extract<EvalEvent, { event: 'run_started' }>['data'] = {
+    let data: Extract<EvalEvent, { event: 'run_started' }>['data'] = {
       run_id: run.run_id,
       snapshot_hash: run.snapshot_hash,
       total_cases: plan.cases.length,
@@ -174,7 +174,7 @@ const executeResolvedEvalPlan = async <Payload, BaselineDiff = unknown>(
       timeout_ms: run.effective_command.resolved.timeout_ms,
     };
 
-    if (run.snapshot.selection !== undefined) data.selection = run.snapshot.selection;
+    if (run.snapshot.selection !== undefined) data = { ...data, selection: run.snapshot.selection };
     await collector.emit({ event: 'run_started', data });
   } catch (error: unknown) {
     const failure = await preOrchestrationFailure<Payload, BaselineDiff>(run, {

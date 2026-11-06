@@ -1,3 +1,4 @@
+import { stripStruct } from '@attest/contracts';
 import { parseWithSchema } from '@attest/contracts';
 import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
@@ -6,7 +7,7 @@ import { hostname } from 'node:os';
 import { dirname } from 'node:path';
 import { promisify } from 'node:util';
 
-import { z } from 'zod';
+import * as Schema from 'effect/Schema';
 
 import { resolveContainedPath } from '../project-path.js';
 import { errnoCode } from '../../internal/errno-code.js';
@@ -21,16 +22,19 @@ const PROJECT_LOCK_SCHEMA = 'attest.project-lock';
 const execFileAsync = promisify(execFile);
 
 /** The lock file's contents: who owns the project mutation lock and how to prove it is stale. */
-const projectLockSchema = z.object({
-  created_at: z.string(),
-  hostname: z.string(),
-  owner_token: z.string(),
-  pid: z.number().int().positive(),
-  process_start_identity: z.string().nullable(),
-  schema: z.literal(PROJECT_LOCK_SCHEMA),
+const projectLockSchema = stripStruct({
+  created_at: Schema.String,
+  hostname: Schema.String,
+  owner_token: Schema.String,
+  pid: Schema.Finite.check(
+    Schema.isInt(),
+    Schema.isBetween({ minimum: Number.MIN_SAFE_INTEGER, maximum: Number.MAX_SAFE_INTEGER }),
+  ).check(Schema.isGreaterThan(0)),
+  process_start_identity: Schema.NullOr(Schema.String),
+  schema: Schema.Literal(PROJECT_LOCK_SCHEMA),
 });
 
-type ProjectLockMetadata = z.infer<typeof projectLockSchema>;
+type ProjectLockMetadata = typeof projectLockSchema.Type;
 
 type ProjectLockInspection =
   | { state: 'absent' }
@@ -185,7 +189,7 @@ const throwForExistingLock = (
 type ProjectLockFailureDetails = {
   lock_state: Exclude<ProjectLockInspection, { state: 'absent' }>['state'];
   reason: Exclude<ProjectLockInspection, { state: 'absent' }>['reason'];
-  lock?: z.infer<typeof projectLockSchema>;
+  lock?: typeof projectLockSchema.Type;
 };
 
 /** Acquires the project-local lock exclusively and never steals an existing owner. */

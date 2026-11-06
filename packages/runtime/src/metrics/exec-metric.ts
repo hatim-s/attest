@@ -30,7 +30,7 @@ type ExecMetricOptions = {
   timeoutMs?: number;
 };
 
-/** Makes parser diagnostics renderable and diffable without relying on Zod's internal issue objects. */
+/** Makes parser diagnostics renderable and diffable from the public contract diagnostics. */
 const describeContractIssues = (issues: ContractIssue[]): MetricErrorInfo['details'] => ({
   issues: issues.map((issue) => ({ path: issue.path, message: issue.message })),
 });

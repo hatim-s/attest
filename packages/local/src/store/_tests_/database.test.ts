@@ -1,3 +1,4 @@
+import { stripStruct } from '@attest/contracts';
 import { parseWithSchema, parseWithSchemaSync } from '@attest/contracts';
 import { copyFile, mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -5,7 +6,7 @@ import { dirname, join } from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
-import { z } from 'zod';
+import * as Schema from 'effect/Schema';
 import { Kysely } from 'kysely';
 import { afterEach, describe, expect, it } from 'vitest';
 
@@ -63,7 +64,7 @@ const expectMutationReturning = async (handle: SqliteHandle): Promise<void> => {
 };
 
 const isLibsqlUnavailable = (cause: unknown): boolean => {
-  const parsed = parseWithSchema(z.object({ code: z.string().optional() }), cause);
+  const parsed = parseWithSchema(stripStruct({ code: Schema.optional(Schema.String) }), cause);
   const code = parsed.ok ? parsed.value.code : undefined;
 
   return code === 'ERR_MODULE_NOT_FOUND' || code === 'ERR_DLOPEN_FAILED';
@@ -291,7 +292,7 @@ describe('SQLite store database', () => {
     expect(await handle.prepare('SELECT id FROM transaction_items').all()).toEqual([{ id: 1 }]);
     expect(
       parseWithSchemaSync(
-        z.object({ journal_mode: z.string() }),
+        stripStruct({ journal_mode: Schema.String }),
         (await handle.prepare('PRAGMA journal_mode').all())[0],
       ).journal_mode,
     ).toBe('wal');

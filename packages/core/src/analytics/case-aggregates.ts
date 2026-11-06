@@ -1,23 +1,32 @@
-import { z } from 'zod';
+import { stripStruct } from '@attest/contracts';
+import * as Schema from 'effect/Schema';
 import type { CaseSummary } from '../records/projection-schemas.js';
 
-const count = z.number().int().nonnegative();
+const count = Schema.Finite.check(Schema.isInt()).check(Schema.isGreaterThanOrEqualTo(0));
 
-const caseAggregateSchema = z.object({
-  caseCount: z.number().int().positive(),
-  verdicts: z.object({ pass: count, fail: count, error: count }),
-  passRate: z.number().min(0).max(1),
+const caseAggregateSchema = stripStruct({
+  caseCount: Schema.Finite.check(Schema.isInt()).check(Schema.isGreaterThan(0)),
+  verdicts: stripStruct({ pass: count, fail: count, error: count }),
+  passRate: Schema.Finite.check(Schema.isGreaterThanOrEqualTo(0)).check(
+    Schema.isLessThanOrEqualTo(1),
+  ),
   scoredCaseCount: count,
-  meanScore: z.number().nullable(),
-  durationMs: z.object({ p50: z.number().nonnegative(), p95: z.number().nonnegative() }),
+  meanScore: Schema.NullOr(Schema.Finite),
+  durationMs: stripStruct({
+    p50: Schema.Finite.check(Schema.isGreaterThanOrEqualTo(0)),
+    p95: Schema.Finite.check(Schema.isGreaterThanOrEqualTo(0)),
+  }),
   metricErrorCount: count,
 });
 
-const suiteAggregateSchema = caseAggregateSchema.extend({ suiteName: z.string().min(1) });
+const suiteAggregateSchema = stripStruct({
+  ...caseAggregateSchema.from.schema.fields,
+  suiteName: Schema.String.check(Schema.isMinLength(1)),
+});
 
-type CaseAggregate = z.infer<typeof caseAggregateSchema>;
+type CaseAggregate = typeof caseAggregateSchema.Type;
 
-type SuiteAggregate = z.infer<typeof suiteAggregateSchema>;
+type SuiteAggregate = typeof suiteAggregateSchema.Type;
 
 type NonEmpty<T> = readonly [T, ...T[]];
 

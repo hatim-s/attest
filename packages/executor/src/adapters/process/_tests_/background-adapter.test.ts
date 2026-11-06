@@ -139,13 +139,22 @@ describe('background process adapter', () => {
   it('classifies the run deadline as timeout and still cleans up the service', async () => {
     const port = await freePort();
 
-    const configured = agent(port, {
+    let configured = agent(port, {
       kind: 'http',
       url: `http://127.0.0.1:${String(port)}/ready`,
     });
 
-    configured.transport.start_argv.push('slow');
-    configured.timeouts = { connect_ms: 2_000, attempt_ms: 3_000, run_ms: 1_000 };
+    configured = {
+      ...configured,
+      transport: {
+        ...configured.transport,
+        start_argv: [...configured.transport.start_argv, 'slow'],
+      },
+    };
+    configured = {
+      ...configured,
+      timeouts: { connect_ms: 2_000, attempt_ms: 3_000, run_ms: 1_000 },
+    };
 
     const session = await startBackgroundAgent(configured, {
       cwd: process.cwd(),
@@ -161,8 +170,14 @@ describe('background process adapter', () => {
 
   it('reports stderr-readiness exit immediately with bounded startup evidence', async () => {
     const port = await freePort();
-    const configured = agent(port, { kind: 'stderr', pattern: 'NEVER' });
-    configured.transport.start_argv.push('exit-before-ready');
+    let configured = agent(port, { kind: 'stderr', pattern: 'NEVER' });
+    configured = {
+      ...configured,
+      transport: {
+        ...configured.transport,
+        start_argv: [...configured.transport.start_argv, 'exit-before-ready'],
+      },
+    };
     const started = Date.now();
 
     const failure: unknown = await startBackgroundAgent(configured, {
@@ -183,8 +198,14 @@ describe('background process adapter', () => {
 
   it('preserves caller cancellation while waiting for stderr readiness', async () => {
     const port = await freePort();
-    const configured = agent(port, { kind: 'stderr', pattern: 'NEVER' });
-    configured.transport.start_argv.push('silent');
+    let configured = agent(port, { kind: 'stderr', pattern: 'NEVER' });
+    configured = {
+      ...configured,
+      transport: {
+        ...configured.transport,
+        start_argv: [...configured.transport.start_argv, 'silent'],
+      },
+    };
     const controller = new AbortController();
 
     const startup = startBackgroundAgent(configured, {
@@ -221,13 +242,25 @@ describe('background process adapter', () => {
       response.writeHead(204).end();
     });
 
-    const configured = agent(processPort, {
+    let configured = agent(processPort, {
       kind: 'stderr',
       pattern: `READY ${String(processPort)}`,
     });
 
-    configured.transport.invoke.url = `${invokeServer.url}/invoke`;
-    configured.transport.shutdown = { method: 'POST', url: `${shutdownServer.url}/shutdown` };
+    configured = {
+      ...configured,
+      transport: {
+        ...configured.transport,
+        invoke: { ...configured.transport.invoke, url: `${invokeServer.url}/invoke` },
+      },
+    };
+    configured = {
+      ...configured,
+      transport: {
+        ...configured.transport,
+        shutdown: { method: 'POST', url: `${shutdownServer.url}/shutdown` },
+      },
+    };
 
     try {
       const session = await startBackgroundAgent(configured, {
@@ -255,12 +288,18 @@ describe('background process adapter', () => {
   it('terminates descendants retained before graceful parent shutdown', async () => {
     const port = await freePort();
 
-    const configured = agent(port, {
+    let configured = agent(port, {
       kind: 'stderr',
       pattern: `READY ${String(port)}`,
     });
 
-    configured.transport.start_argv.push('reparent-descendant');
+    configured = {
+      ...configured,
+      transport: {
+        ...configured.transport,
+        start_argv: [...configured.transport.start_argv, 'reparent-descendant'],
+      },
+    };
 
     const session = await startBackgroundAgent(configured, {
       cwd: process.cwd(),

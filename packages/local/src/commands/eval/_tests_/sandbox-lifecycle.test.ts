@@ -1,4 +1,4 @@
-import { z } from 'zod';
+import * as Schema from 'effect/Schema';
 
 import { mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -34,10 +34,24 @@ const cache: CacheStore = { get: () => Promise.resolve(undefined), put: () => Pr
 /** Uses a copy of the canonical contracts run fixture while setting only the lifecycle configuration under test. */
 const createRun = async (execution: EvalRun['effective_command']['resolved']['execution']) => {
   const fixture = await readFile(new URL('./fixtures/eval-run.json', import.meta.url), 'utf8');
-  const run = parseWithSchemaSync(evalRunSchema, JSON.parse(fixture));
+  let run = parseWithSchemaSync(evalRunSchema, JSON.parse(fixture));
 
-  if (execution === undefined) delete run.effective_command.resolved.execution;
-  else run.effective_command.resolved.execution = execution;
+  if (execution === undefined)
+    run = {
+      ...run,
+      effective_command: {
+        ...run.effective_command,
+        resolved: { ...run.effective_command.resolved, execution: undefined },
+      },
+    };
+  else
+    run = {
+      ...run,
+      effective_command: {
+        ...run.effective_command,
+        resolved: { ...run.effective_command.resolved, execution: execution },
+      },
+    };
 
   return run;
 };
@@ -171,7 +185,9 @@ describe('sandbox eval lifecycle integration', () => {
     const stages = (await readFile(join(root, 'stages.jsonl'), 'utf8'))
       .trim()
       .split('\n')
-      .map((line) => parseWithSchemaSync(z.record(z.string(), z.string()), JSON.parse(line)));
+      .map((line) =>
+        parseWithSchemaSync(Schema.Record(Schema.String, Schema.String), JSON.parse(line)),
+      );
 
     const resolvedRoot = await realpath(root);
 

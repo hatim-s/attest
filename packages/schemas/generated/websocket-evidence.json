@@ -1,29 +1,38 @@
 {
   "$comment": "Runtime-only invariants: a truncated excerpt carries the sha256 of the full payload.",
+  "$defs": {},
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "oneOf": [
+  "anyOf": [
     {
       "additionalProperties": false,
       "properties": {
         "acknowledgement": {
-          "oneOf": [
+          "anyOf": [
             {
               "additionalProperties": false,
               "properties": {
                 "reconnect": {
-                  "const": "allowed",
+                  "enum": [
+                    "allowed"
+                  ],
                   "type": "string"
                 },
                 "replay": {
-                  "const": "allowed",
+                  "enum": [
+                    "allowed"
+                  ],
                   "type": "string"
                 },
                 "retry": {
-                  "const": "allowed",
+                  "enum": [
+                    "allowed"
+                  ],
                   "type": "string"
                 },
                 "state": {
-                  "const": "not_acknowledged",
+                  "enum": [
+                    "not_acknowledged"
+                  ],
                   "type": "string"
                 }
               },
@@ -39,19 +48,27 @@
               "additionalProperties": false,
               "properties": {
                 "reconnect": {
-                  "const": "forbidden",
+                  "enum": [
+                    "forbidden"
+                  ],
                   "type": "string"
                 },
                 "replay": {
-                  "const": "forbidden",
+                  "enum": [
+                    "forbidden"
+                  ],
                   "type": "string"
                 },
                 "retry": {
-                  "const": "forbidden",
+                  "enum": [
+                    "forbidden"
+                  ],
                   "type": "string"
                 },
                 "state": {
-                  "const": "acknowledged",
+                  "enum": [
+                    "acknowledged"
+                  ],
                   "type": "string"
                 }
               },
@@ -66,25 +83,46 @@
           ]
         },
         "close": {
-          "additionalProperties": false,
-          "properties": {
-            "clean": {
-              "type": "boolean"
+          "anyOf": [
+            {
+              "additionalProperties": false,
+              "properties": {
+                "clean": {
+                  "type": "boolean"
+                },
+                "code": {
+                  "anyOf": [
+                    {
+                      "maximum": 4999,
+                      "minimum": 1000,
+                      "type": "integer"
+                    },
+                    {
+                      "not": {}
+                    }
+                  ]
+                },
+                "reason": {
+                  "anyOf": [
+                    {
+                      "maxLength": 123,
+                      "type": "string"
+                    },
+                    {
+                      "not": {}
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "clean"
+              ],
+              "type": "object"
             },
-            "code": {
-              "maximum": 4999,
-              "minimum": 1000,
-              "type": "integer"
-            },
-            "reason": {
-              "maxLength": 123,
-              "type": "string"
+            {
+              "not": {}
             }
-          },
-          "required": [
-            "clean"
-          ],
-          "type": "object"
+          ]
         },
         "connection_mode": {
           "enum": [
@@ -119,36 +157,64 @@
                 "type": "integer"
               },
               "excerpt": {
-                "additionalProperties": false,
-                "properties": {
-                  "sha256": {
-                    "pattern": "^[a-f0-9]{64}$",
-                    "type": "string"
+                "anyOf": [
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "sha256": {
+                        "anyOf": [
+                          {
+                            "pattern": "^[a-f0-9]{64}$",
+                            "type": "string"
+                          },
+                          {
+                            "not": {}
+                          }
+                        ]
+                      },
+                      "text": {
+                        "maxLength": 4096,
+                        "type": "string"
+                      },
+                      "truncated": {
+                        "type": "boolean"
+                      }
+                    },
+                    "required": [
+                      "text",
+                      "truncated"
+                    ],
+                    "type": "object"
                   },
-                  "text": {
-                    "maxLength": 4096,
-                    "type": "string"
-                  },
-                  "truncated": {
-                    "type": "boolean"
+                  {
+                    "not": {}
                   }
-                },
-                "required": [
-                  "text",
-                  "truncated"
-                ],
-                "type": "object"
+                ]
               },
               "message_bytes": {
-                "maximum": 9007199254740991,
-                "minimum": 0,
-                "type": "integer"
+                "anyOf": [
+                  {
+                    "maximum": 9007199254740991,
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  {
+                    "not": {}
+                  }
+                ]
               },
               "request_id": {
-                "maxLength": 128,
-                "minLength": 1,
-                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
-                "type": "string"
+                "anyOf": [
+                  {
+                    "maxLength": 128,
+                    "minLength": 1,
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+                    "type": "string"
+                  },
+                  {
+                    "not": {}
+                  }
+                ]
               }
             },
             "required": [
@@ -168,7 +234,9 @@
           "type": "string"
         },
         "outcome": {
-          "const": "completed",
+          "enum": [
+            "completed"
+          ],
           "type": "string"
         },
         "request_id": {
@@ -178,7 +246,9 @@
           "type": "string"
         },
         "schema": {
-          "const": "attest.websocket-evidence",
+          "enum": [
+            "attest.websocket-evidence"
+          ],
           "type": "string"
         }
       },
@@ -197,24 +267,32 @@
       "additionalProperties": false,
       "properties": {
         "acknowledgement": {
-          "oneOf": [
+          "anyOf": [
             {
               "additionalProperties": false,
               "properties": {
                 "reconnect": {
-                  "const": "allowed",
+                  "enum": [
+                    "allowed"
+                  ],
                   "type": "string"
                 },
                 "replay": {
-                  "const": "allowed",
+                  "enum": [
+                    "allowed"
+                  ],
                   "type": "string"
                 },
                 "retry": {
-                  "const": "allowed",
+                  "enum": [
+                    "allowed"
+                  ],
                   "type": "string"
                 },
                 "state": {
-                  "const": "not_acknowledged",
+                  "enum": [
+                    "not_acknowledged"
+                  ],
                   "type": "string"
                 }
               },
@@ -230,19 +308,27 @@
               "additionalProperties": false,
               "properties": {
                 "reconnect": {
-                  "const": "forbidden",
+                  "enum": [
+                    "forbidden"
+                  ],
                   "type": "string"
                 },
                 "replay": {
-                  "const": "forbidden",
+                  "enum": [
+                    "forbidden"
+                  ],
                   "type": "string"
                 },
                 "retry": {
-                  "const": "forbidden",
+                  "enum": [
+                    "forbidden"
+                  ],
                   "type": "string"
                 },
                 "state": {
-                  "const": "acknowledged",
+                  "enum": [
+                    "acknowledged"
+                  ],
                   "type": "string"
                 }
               },
@@ -257,25 +343,46 @@
           ]
         },
         "close": {
-          "additionalProperties": false,
-          "properties": {
-            "clean": {
-              "type": "boolean"
+          "anyOf": [
+            {
+              "additionalProperties": false,
+              "properties": {
+                "clean": {
+                  "type": "boolean"
+                },
+                "code": {
+                  "anyOf": [
+                    {
+                      "maximum": 4999,
+                      "minimum": 1000,
+                      "type": "integer"
+                    },
+                    {
+                      "not": {}
+                    }
+                  ]
+                },
+                "reason": {
+                  "anyOf": [
+                    {
+                      "maxLength": 123,
+                      "type": "string"
+                    },
+                    {
+                      "not": {}
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "clean"
+              ],
+              "type": "object"
             },
-            "code": {
-              "maximum": 4999,
-              "minimum": 1000,
-              "type": "integer"
-            },
-            "reason": {
-              "maxLength": 123,
-              "type": "string"
+            {
+              "not": {}
             }
-          },
-          "required": [
-            "clean"
-          ],
-          "type": "object"
+          ]
         },
         "connection_mode": {
           "enum": [
@@ -331,36 +438,64 @@
                 "type": "integer"
               },
               "excerpt": {
-                "additionalProperties": false,
-                "properties": {
-                  "sha256": {
-                    "pattern": "^[a-f0-9]{64}$",
-                    "type": "string"
+                "anyOf": [
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "sha256": {
+                        "anyOf": [
+                          {
+                            "pattern": "^[a-f0-9]{64}$",
+                            "type": "string"
+                          },
+                          {
+                            "not": {}
+                          }
+                        ]
+                      },
+                      "text": {
+                        "maxLength": 4096,
+                        "type": "string"
+                      },
+                      "truncated": {
+                        "type": "boolean"
+                      }
+                    },
+                    "required": [
+                      "text",
+                      "truncated"
+                    ],
+                    "type": "object"
                   },
-                  "text": {
-                    "maxLength": 4096,
-                    "type": "string"
-                  },
-                  "truncated": {
-                    "type": "boolean"
+                  {
+                    "not": {}
                   }
-                },
-                "required": [
-                  "text",
-                  "truncated"
-                ],
-                "type": "object"
+                ]
               },
               "message_bytes": {
-                "maximum": 9007199254740991,
-                "minimum": 0,
-                "type": "integer"
+                "anyOf": [
+                  {
+                    "maximum": 9007199254740991,
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  {
+                    "not": {}
+                  }
+                ]
               },
               "request_id": {
-                "maxLength": 128,
-                "minLength": 1,
-                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
-                "type": "string"
+                "anyOf": [
+                  {
+                    "maxLength": 128,
+                    "minLength": 1,
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+                    "type": "string"
+                  },
+                  {
+                    "not": {}
+                  }
+                ]
               }
             },
             "required": [
@@ -380,7 +515,9 @@
           "type": "string"
         },
         "outcome": {
-          "const": "failed",
+          "enum": [
+            "failed"
+          ],
           "type": "string"
         },
         "request_id": {
@@ -390,7 +527,9 @@
           "type": "string"
         },
         "schema": {
-          "const": "attest.websocket-evidence",
+          "enum": [
+            "attest.websocket-evidence"
+          ],
           "type": "string"
         }
       },
@@ -410,24 +549,32 @@
       "additionalProperties": false,
       "properties": {
         "acknowledgement": {
-          "oneOf": [
+          "anyOf": [
             {
               "additionalProperties": false,
               "properties": {
                 "reconnect": {
-                  "const": "allowed",
+                  "enum": [
+                    "allowed"
+                  ],
                   "type": "string"
                 },
                 "replay": {
-                  "const": "allowed",
+                  "enum": [
+                    "allowed"
+                  ],
                   "type": "string"
                 },
                 "retry": {
-                  "const": "allowed",
+                  "enum": [
+                    "allowed"
+                  ],
                   "type": "string"
                 },
                 "state": {
-                  "const": "not_acknowledged",
+                  "enum": [
+                    "not_acknowledged"
+                  ],
                   "type": "string"
                 }
               },
@@ -443,19 +590,27 @@
               "additionalProperties": false,
               "properties": {
                 "reconnect": {
-                  "const": "forbidden",
+                  "enum": [
+                    "forbidden"
+                  ],
                   "type": "string"
                 },
                 "replay": {
-                  "const": "forbidden",
+                  "enum": [
+                    "forbidden"
+                  ],
                   "type": "string"
                 },
                 "retry": {
-                  "const": "forbidden",
+                  "enum": [
+                    "forbidden"
+                  ],
                   "type": "string"
                 },
                 "state": {
-                  "const": "acknowledged",
+                  "enum": [
+                    "acknowledged"
+                  ],
                   "type": "string"
                 }
               },
@@ -470,25 +625,46 @@
           ]
         },
         "close": {
-          "additionalProperties": false,
-          "properties": {
-            "clean": {
-              "type": "boolean"
+          "anyOf": [
+            {
+              "additionalProperties": false,
+              "properties": {
+                "clean": {
+                  "type": "boolean"
+                },
+                "code": {
+                  "anyOf": [
+                    {
+                      "maximum": 4999,
+                      "minimum": 1000,
+                      "type": "integer"
+                    },
+                    {
+                      "not": {}
+                    }
+                  ]
+                },
+                "reason": {
+                  "anyOf": [
+                    {
+                      "maxLength": 123,
+                      "type": "string"
+                    },
+                    {
+                      "not": {}
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "clean"
+              ],
+              "type": "object"
             },
-            "code": {
-              "maximum": 4999,
-              "minimum": 1000,
-              "type": "integer"
-            },
-            "reason": {
-              "maxLength": 123,
-              "type": "string"
+            {
+              "not": {}
             }
-          },
-          "required": [
-            "clean"
-          ],
-          "type": "object"
+          ]
         },
         "connection_mode": {
           "enum": [
@@ -498,7 +674,9 @@
           "type": "string"
         },
         "error_classification": {
-          "const": "cancelled",
+          "enum": [
+            "cancelled"
+          ],
           "type": "string"
         },
         "events": {
@@ -527,36 +705,64 @@
                 "type": "integer"
               },
               "excerpt": {
-                "additionalProperties": false,
-                "properties": {
-                  "sha256": {
-                    "pattern": "^[a-f0-9]{64}$",
-                    "type": "string"
+                "anyOf": [
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "sha256": {
+                        "anyOf": [
+                          {
+                            "pattern": "^[a-f0-9]{64}$",
+                            "type": "string"
+                          },
+                          {
+                            "not": {}
+                          }
+                        ]
+                      },
+                      "text": {
+                        "maxLength": 4096,
+                        "type": "string"
+                      },
+                      "truncated": {
+                        "type": "boolean"
+                      }
+                    },
+                    "required": [
+                      "text",
+                      "truncated"
+                    ],
+                    "type": "object"
                   },
-                  "text": {
-                    "maxLength": 4096,
-                    "type": "string"
-                  },
-                  "truncated": {
-                    "type": "boolean"
+                  {
+                    "not": {}
                   }
-                },
-                "required": [
-                  "text",
-                  "truncated"
-                ],
-                "type": "object"
+                ]
               },
               "message_bytes": {
-                "maximum": 9007199254740991,
-                "minimum": 0,
-                "type": "integer"
+                "anyOf": [
+                  {
+                    "maximum": 9007199254740991,
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  {
+                    "not": {}
+                  }
+                ]
               },
               "request_id": {
-                "maxLength": 128,
-                "minLength": 1,
-                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
-                "type": "string"
+                "anyOf": [
+                  {
+                    "maxLength": 128,
+                    "minLength": 1,
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$",
+                    "type": "string"
+                  },
+                  {
+                    "not": {}
+                  }
+                ]
               }
             },
             "required": [
@@ -576,7 +782,9 @@
           "type": "string"
         },
         "outcome": {
-          "const": "cancelled",
+          "enum": [
+            "cancelled"
+          ],
           "type": "string"
         },
         "request_id": {
@@ -586,7 +794,9 @@
           "type": "string"
         },
         "schema": {
-          "const": "attest.websocket-evidence",
+          "enum": [
+            "attest.websocket-evidence"
+          ],
           "type": "string"
         }
       },

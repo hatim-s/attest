@@ -85,7 +85,7 @@ const registerAgentLifecycleCommands = (agent: Command, context: CommandContext)
         leaf,
         options,
         build: async () => {
-          const request: Extract<CommandRequest, { command: 'agent.remove' }> = {
+          let request: Extract<CommandRequest, { command: 'agent.remove' }> = {
             ...mutationRequestFields('agent.remove', options),
             agent_id: await requiredInput(
               agentId,
@@ -95,7 +95,7 @@ const registerAgentLifecycleCommands = (agent: Command, context: CommandContext)
           };
 
           if (options.detach !== undefined) {
-            request.detach = options.detach;
+            request = { ...request, detach: options.detach };
           }
 
           return request;

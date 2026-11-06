@@ -17,7 +17,7 @@ import {
   type EvalCaseRunnerResult,
 } from '@attest/runtime';
 
-import { z } from 'zod';
+import * as Schema from 'effect/Schema';
 
 import { LocalError } from '../../errors/index.js';
 import { assertSafeNativeAgentResource } from '../agent/authoring/resource-validation.js';
@@ -169,7 +169,7 @@ const createEvalCaseRunner = (
         signal,
       });
 
-      const request: AgentRequest = {
+      let request: AgentRequest = {
         protocol: AGENT_PROTOCOL,
         run_id: runId,
         case_id: payload.case_id,
@@ -177,7 +177,7 @@ const createEvalCaseRunner = (
       };
 
       if (payload.case.params !== undefined) {
-        request.params = payload.case.params;
+        request = { ...request, params: payload.case.params };
       }
 
       const startedAt = new Date().toISOString();
@@ -218,7 +218,7 @@ const createEvalCaseRunner = (
       const secrets = [
         ...(runtime?.resolved.secrets ?? []),
         ...sensitiveFieldValues(
-          parseWithSchemaSync(z.json(), {
+          parseWithSchemaSync(Schema.Json, {
             case: payload.case,
             request,
             response: original.outcome === 'completed' ? original.response : null,

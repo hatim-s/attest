@@ -74,8 +74,8 @@ describe('agent mutation confirmation', () => {
   it('rejects a write that lands between loading the project and previewing the mutation', async () => {
     const root = await createAgentProject();
     const loaded = await loadCommandProject({ project: root, workingDirectory: root });
-    const candidate = candidateFromLoadedProject(loaded);
-    candidate.agents.push(agent('stale'));
+    let candidate = candidateFromLoadedProject(loaded);
+    candidate = { ...candidate, agents: [...candidate.agents, agent('stale')] };
     await addAgent(root, agent('racer'));
 
     const commit = mutationResult({

@@ -8,7 +8,7 @@ const readSuiteHistory = async (
   suiteName: string,
   limit: number,
 ): Promise<SuiteHistory> => {
-  const points: SuiteHistory['points'] = [];
+  const points: SuiteHistory['points'][number][] = [];
   let runsExamined = 0;
   let cursor: string | undefined;
 

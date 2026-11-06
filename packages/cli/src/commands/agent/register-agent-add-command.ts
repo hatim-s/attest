@@ -46,7 +46,7 @@ type AddOptions = MutationCliOptions &
     websocketUrl?: string;
   };
 
-const [, , bridgeTransport, , , streamTransport] = agentTransportSchema.options;
+const [, , bridgeTransport, , , streamTransport] = agentTransportSchema.members;
 
 /** Help-only hints: these WebSocket and stream flags take effect only with the flag they imply. */
 const ADD_IMPLIES = new Map(
@@ -135,22 +135,22 @@ const registerAgentAddCommand = (agent: Command, context: CommandContext): void 
     .option('--query <name=value>', 'callback trigger query value; repeatable', collect)
     .addOption(
       new Option('--stream-framing <framing>', 'stream framing').choices(
-        streamTransport.shape.framing.options,
+        streamTransport.fields.framing.literals,
       ),
     )
     .addOption(
       new Option('--bridge-concurrency <mode>', 'JSONL bridge concurrency').choices(
-        bridgeTransport.shape.concurrency.options,
+        bridgeTransport.fields.concurrency.literals,
       ),
     )
     .addOption(
       new Option('--websocket-lifecycle <lifecycle>', 'WebSocket connection lifecycle').choices(
-        webSocketTransportSchema.shape.lifecycle.options,
+        webSocketTransportSchema.fields.lifecycle.literals,
       ),
     )
     .addOption(
       new Option('--connection-mode <mode>', 'WebSocket request concurrency').choices(
-        webSocketConnectionModeSchema.options,
+        webSocketConnectionModeSchema.literals,
       ),
     )
     .option('--subprotocol <token>', 'one plain WebSocket subprotocol token')
@@ -179,7 +179,7 @@ const registerAgentAddCommand = (agent: Command, context: CommandContext): void 
     .option('--incremental-output-pointer <pointer>', 'stream incremental output JSON Pointer')
     .addOption(
       new Option('--incremental-output-mode <mode>', 'stream accumulation mode').choices(
-        streamTransport.shape.incremental_output_mode.unwrap().options,
+        streamTransport.fields.incremental_output_mode.schema.members[0].literals,
       ),
     )
     .option('--env <target=source>', 'environment secret reference', collect)

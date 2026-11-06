@@ -21,8 +21,8 @@ const runAgentAddCommand = async (
 
   assertNewId('agent', loaded.agents, request.agent.id);
 
-  const candidate = candidateFromLoadedProject(loaded);
-  candidate.agents.push(request.agent);
+  let candidate = candidateFromLoadedProject(loaded);
+  candidate = { ...candidate, agents: [...candidate.agents, request.agent] };
 
   return mutationResult({
     command: 'agent.add',
