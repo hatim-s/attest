@@ -1,4 +1,11 @@
-import { useLayoutEffect, useRef, useState, type FocusEvent, type MouseEvent } from 'react';
+import {
+  useLayoutEffect,
+  useRef,
+  useState,
+  type FocusEvent,
+  type MouseEvent,
+  type RefObject,
+} from 'react';
 
 /** Measure the chart's own column so SVG units remain CSS pixels after resizing. */
 function useChartWidth() {
@@ -80,6 +87,65 @@ function useInspection(
   return { id, inspect, onBlur };
 }
 
+/** Keep owned mark focus reachable when resizing replaces sparse tab stops with a chooser. */
+function useDenseFocus(dense: boolean, ref: RefObject<HTMLElement | null>) {
+  useLayoutEffect(() => {
+    const section = ref.current;
+
+    if (dense && section?.querySelector('svg')?.contains(document.activeElement))
+      section.querySelector('select')?.focus({ preventScroll: true });
+  }, [dense, ref]);
+}
+
+/** Partition bounded native hit squares by nearest mark. Equal coordinates belong to the first
+ * identity; the chooser keeps every collision reachable without moving any data point. */
+function nativeHitRegions(centers: readonly { x: number; y: number }[]) {
+  return centers.map((center, index) => {
+    let polygon = [
+      { x: center.x - 24, y: center.y - 24 },
+      { x: center.x + 24, y: center.y - 24 },
+      { x: center.x + 24, y: center.y + 24 },
+      { x: center.x - 24, y: center.y + 24 },
+    ];
+
+    for (const [otherIndex, other] of centers.entries()) {
+      if (index === otherIndex) continue;
+
+      const dx = other.x - center.x,
+        dy = other.y - center.y;
+
+      if (dx === 0 && dy === 0) {
+        if (otherIndex < index) return '';
+        continue;
+      }
+
+      const boundary = (other.x ** 2 + other.y ** 2 - center.x ** 2 - center.y ** 2) / 2;
+      const distance = (point: { x: number; y: number }) => point.x * dx + point.y * dy - boundary;
+      const clipped: typeof polygon = [];
+
+      for (const [i, start] of polygon.entries()) {
+        const end = polygon[(i + 1) % polygon.length]!;
+
+        const a = distance(start),
+          b = distance(end);
+
+        if (a <= 0) clipped.push(start);
+
+        if (a <= 0 !== b <= 0) {
+          const t = a / (a - b);
+          clipped.push({ x: start.x + t * (end.x - start.x), y: start.y + t * (end.y - start.y) });
+        }
+      }
+
+      polygon = clipped;
+
+      if (!polygon.length) break;
+    }
+
+    return polygon.length ? `M${polygon.map(({ x, y }) => `${x},${y}`).join(' L')} Z` : '';
+  });
+}
+
 /** Convert pointer coordinates into the responsive SVG's unchanged coordinate space. */
 function plotPointer(event: MouseEvent<SVGSVGElement>, width: number, height: number) {
   const bounds = event.currentTarget.getBoundingClientRect();
@@ -105,6 +171,8 @@ function calendarTime(timestamp: number, utcOffsetMinutes: number) {
 
 export {
   useChartWidth,
+  useDenseFocus,
+  nativeHitRegions,
   resolveActive,
   calendarDate,
   calendarTime,

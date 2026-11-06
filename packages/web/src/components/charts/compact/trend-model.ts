@@ -2,6 +2,7 @@ import type { RunStatus } from '@attest/core/records';
 import type { VerdictCounts } from '../../meters/proportions.js';
 
 /** Mapper input: at most 200 eval slices from one source-aware query window.
+ * Mapper owns unique IDs, finite epoch timestamps, and finite rates in [0, 1].
  * startedAt uses epoch milliseconds. Complete slices carry the supplied per-eval rate;
  * aggregate counts never imply actual case identities or known full coverage.
  * The integration owner exposes server truncation and decodes DTOs before mapping. */

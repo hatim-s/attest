@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { act } from 'react';
+import { act, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { DailyActivity } from '../daily-activity.js';
@@ -97,9 +97,9 @@ it('resolves stale hover and focus separately, keeps selection, and disconnects 
   await settle(() => mounted.render(render([a, b, c])));
   const mark = container.querySelector('svg a');
   await settle(() => mark?.dispatchEvent(new MouseEvent('mouseover', { bubbles: true })));
-  expect(container.querySelector('.attest-chart-readout')?.textContent).toContain('Run a,');
+  expect(container.querySelector('.attest-chart-readout')?.textContent).toContain('Run a');
   await settle(() => mounted.render(render([b, c])));
-  expect(container.querySelector('.attest-chart-readout')?.textContent).toContain('Run b,');
+  expect(container.querySelector('.attest-chart-readout')?.textContent).toContain('Run b');
   expect(container.querySelector('.attest-chart-selection')).not.toBeNull();
   width = 375;
   await settle(() => resize());
@@ -138,7 +138,8 @@ it('offers every dense identity including rail slices with real links at unchang
     ),
   );
   expect(container.querySelectorAll('option')).toHaveLength(200);
-  expect(container.querySelectorAll('svg a')).toHaveLength(0);
+  expect(container.querySelectorAll('svg a[tabindex="-1"]')).toHaveLength(200);
+  expect(container.querySelectorAll('option')[1]?.textContent).toContain('1970-01-01 00:00:00.100');
   const select = container.querySelector('select')!;
   await settle(() => {
     select.value = '1';
@@ -231,9 +232,9 @@ it('dense 28-day slots at 500px retain pointer selection and a chooser with exac
   const pointer = { bubbles: true, clientX: 44 + ((478 - 44) / 28) * 7.5, clientY: 100 };
   await settle(() => svg.dispatchEvent(new MouseEvent('mousemove', pointer)));
   expect(container.querySelector('.attest-chart-readout')?.textContent).toContain('2026-11-08');
-  expect(container.querySelector<HTMLButtonElement>('.attest-chart-actions button')?.disabled).toBe(
-    true,
-  );
+  expect(
+    container.querySelector('.attest-chart-actions button')?.getAttribute('aria-disabled'),
+  ).toBe('true');
   await settle(() => svg.dispatchEvent(new MouseEvent('click', pointer)));
   expect(onSelectDay).toHaveBeenCalledWith('2026-11-08');
   expect(container.querySelectorAll('option')).toHaveLength(29);
@@ -263,23 +264,30 @@ it('dense 30-run nearest-point hover works and inspection ends on controlled cha
   vi.spyOn(svg, 'getBoundingClientRect').mockReturnValue(
     DOMRect.fromRect({ width: 375, height: 230 }),
   );
-  await settle(() =>
-    svg.dispatchEvent(
-      new MouseEvent('mousemove', { bubbles: true, clientX: 44 + (309 * 12) / 29, clientY: 78 }),
-    ),
-  );
-  expect(container.querySelector('.attest-chart-readout')?.textContent).toContain('Run id12,');
-  const hotspot = container.querySelector('.attest-chart-hotspot')!;
+  const hotspot = container.querySelector('svg a[href="#id12"]')!;
+  const first = container.querySelector<SVGElement>('svg a[href="#id0"]')!;
+  await settle(() => first.focus());
+  await settle(() => hotspot.dispatchEvent(new MouseEvent('mouseover', { bubbles: true })));
+  expect(container.querySelector('.attest-chart-readout')?.textContent).toContain('Run id12');
   expect(hotspot.getAttribute('href')).toBe('#id12');
   const navigate = vi.spyOn(globalThis.location, 'assign').mockImplementation(() => {});
   const modified = new MouseEvent('click', { bubbles: true, cancelable: true, metaKey: true });
   await settle(() => hotspot.dispatchEvent(modified));
   expect(modified.defaultPrevented).toBe(false);
   expect(navigate).not.toHaveBeenCalled();
+
+  for (const options of [{ ctrlKey: true }, { button: 1 }]) {
+    const event = new MouseEvent('click', { bubbles: true, cancelable: true, ...options });
+    await settle(() => hotspot.dispatchEvent(event));
+    expect(event.defaultPrevented).toBe(false);
+  }
+
   await settle(() =>
     svg.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, clientX: 180, clientY: 180 })),
   );
-  expect(container.querySelector('.attest-chart-hotspot')).toBeNull();
+  await settle(() => hotspot.dispatchEvent(new MouseEvent('mouseout', { bubbles: true })));
+  expect(container.querySelector('svg > a')).toBeNull();
+  expect(container.querySelector('svg a[href="#id12"]')).toBe(hotspot);
   await settle(() =>
     svg.dispatchEvent(new MouseEvent('click', { bubbles: true, clientX: 180, clientY: 180 })),
   );
@@ -350,9 +358,9 @@ it('daily inspection survives movement to its action and clears on selection and
     '2026-11-02',
   );
   await settle(() => mounted.render(render(undefined, '2026-11-02')));
-  expect(container.querySelector<HTMLButtonElement>('.attest-chart-actions button')?.disabled).toBe(
-    true,
-  );
+  expect(
+    container.querySelector('.attest-chart-actions button')?.getAttribute('aria-disabled'),
+  ).toBe('true');
   await settle(() => mounted.unmount());
 });
 
@@ -429,29 +437,6 @@ it('keeps a focused run action and chooser fixed across hover and appended polli
   await settle(() => mounted.unmount());
 });
 
-it('keeps the daily action mounted when sparse mark focus leaves and does not repeat selection', async () => {
-  const mounted = root();
-  await settle(() =>
-    mounted.render(
-      <DailyActivity
-        days={[{ day: '2026-11-01', runCount: 1, passed: 1, failed: 0, errored: 0, skipped: 0 }]}
-        window={{ from: '2026-11-01', to: '2026-11-02', utcOffsetMinutes: 0 }}
-        selectedDay="2026-11-01"
-        onSelectDay={() => {}}
-      />,
-    ),
-  );
-  const action = container.querySelector<HTMLButtonElement>('.attest-chart-actions button')!;
-  expect(action).not.toBeNull();
-  expect(action.disabled).toBe(true);
-  const mark = container.querySelector<SVGElement>('[data-chart-mark]')!;
-  await settle(() => mark.focus());
-  await settle(() => mark.blur());
-  expect(container.querySelector('.attest-chart-actions button')).toBe(action);
-  expect(action.disabled).toBe(true);
-  await settle(() => mounted.unmount());
-});
-
 it('pins a default action on focus and expires inspection on removal, departure, axis or offset changes', async () => {
   const mounted = root();
 
@@ -492,5 +477,192 @@ it('pins a default action on focus and expires inspection on removal, departure,
   await inspectA();
   await settle(() => mounted.render(render([a, b, c], 'date', 330)));
   expect(action.getAttribute('href')).toBe('#c');
+  await settle(() => mounted.unmount());
+});
+
+it('pins the displayed default when the chooser receives focus without a value change', async () => {
+  const mounted = root();
+
+  const render = (runs: TrendRun[]) => (
+    <PassRateTrend
+      runs={runs}
+      axis="run"
+      utcOffsetMinutes={0}
+      onAxisChange={() => {}}
+      runHref={({ id }) => `#${id}`}
+      label="Trend"
+    />
+  );
+
+  await settle(() => mounted.render(render([a, b, c])));
+  const select = container.querySelector('select')!;
+  await settle(() => select.focus());
+  await settle(() => mounted.render(render([a, b, c, run('d', 400)])));
+  expect(select.value).toBe('c');
+  expect(container.querySelector('.attest-chart-action')?.getAttribute('href')).toBe('#c');
+  await settle(() => mounted.unmount());
+});
+
+it('commits daily selection once across real controlled updates and retains action focus', async () => {
+  const mounted = root();
+  const selected = vi.fn();
+
+  function Host() {
+    const [selectedDay, setSelectedDay] = useState<string>();
+
+    return (
+      <DailyActivity
+        days={[{ day: '2026-11-01', runCount: 1, passed: 1, failed: 0, errored: 0, skipped: 0 }]}
+        window={{ from: '2026-11-01', to: '2026-11-28', utcOffsetMinutes: 0 }}
+        selectedDay={selectedDay}
+        onSelectDay={(day) => {
+          selected(day);
+          setSelectedDay(day);
+        }}
+      />
+    );
+  }
+
+  await settle(() => mounted.render(<Host />));
+  const select = container.querySelector('select')!;
+  await settle(() => {
+    select.focus();
+    select.value = '2026-11-01';
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+  const action = container.querySelector<HTMLButtonElement>('.attest-chart-action')!;
+  await settle(() => action.focus());
+  await settle(() => action.click());
+  expect(action.disabled).toBe(false);
+  expect(action.getAttribute('aria-disabled')).toBe('true');
+  expect(document.activeElement).toBe(action);
+  await settle(() => action.click());
+  const svg = container.querySelector('svg')!;
+  vi.spyOn(svg, 'getBoundingClientRect').mockReturnValue(
+    DOMRect.fromRect({ width: 375, height: 220 }),
+  );
+  await settle(() =>
+    svg.dispatchEvent(new MouseEvent('click', { bubbles: true, clientX: 49, clientY: 100 })),
+  );
+  expect(selected).toHaveBeenCalledTimes(1);
+  await settle(() => mounted.unmount());
+});
+
+it('sparse daily click, Enter and Space do not repeat controlled selection', async () => {
+  const mounted = root();
+  const selected = vi.fn();
+
+  function Host() {
+    const [selectedDay, setSelectedDay] = useState<string>();
+
+    return (
+      <DailyActivity
+        days={[{ day: '2026-11-01', runCount: 1, passed: 1, failed: 0, errored: 0, skipped: 0 }]}
+        window={{ from: '2026-11-01', to: '2026-11-02', utcOffsetMinutes: 0 }}
+        selectedDay={selectedDay}
+        onSelectDay={(day) => {
+          selected(day);
+          setSelectedDay(day);
+        }}
+      />
+    );
+  }
+
+  await settle(() => mounted.render(<Host />));
+  const mark = container.querySelector('[data-chart-mark]')!;
+  await settle(() => mark.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+
+  for (const key of ['Enter', ' '])
+    await settle(() => mark.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true })));
+  await settle(() => mark.dispatchEvent(new MouseEvent('click', { bubbles: true })));
+  expect(selected).toHaveBeenCalledTimes(1);
+  expect(container.querySelector('.attest-chart-actions')).toBeNull();
+  await settle(() => mounted.unmount());
+});
+
+it('transfers owned sparse focus into the dense chooser on resize without stealing external focus', async () => {
+  const mounted = root();
+  let width = 1000;
+  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(() =>
+    DOMRect.fromRect({ width }),
+  );
+  const runs = Array.from({ length: 30 }, (_, i) => run(`id${i}`, i * 1000));
+  await settle(() =>
+    mounted.render(
+      <PassRateTrend
+        runs={runs}
+        axis="run"
+        utcOffsetMinutes={0}
+        onAxisChange={() => {}}
+        runHref={({ id }) => `#${id}`}
+        label="Trend"
+      />,
+    ),
+  );
+  const mark = container.querySelector<SVGElement>('[data-chart-mark]')!;
+  await settle(() => mark.focus());
+  width = 375;
+  await settle(() => resize());
+  expect(document.activeElement).toBe(container.querySelector('select'));
+  expect(container.querySelector('svg a')).toBe(mark);
+  const external = document.createElement('button');
+  document.body.append(external);
+  await settle(() => external.focus());
+  width = 1000;
+  await settle(() => resize());
+  width = 375;
+  await settle(() => resize());
+  expect(document.activeElement).toBe(external);
+  external.remove();
+  await settle(() => mounted.unmount());
+});
+
+it('dense nonmouse taps use bounded day identity without mousemove and reject drags', async () => {
+  const mounted = root();
+  const selected = vi.fn();
+  await settle(() =>
+    mounted.render(
+      <DailyActivity
+        days={[{ day: '2026-11-01', runCount: 1, passed: 1, failed: 0, errored: 0, skipped: 0 }]}
+        window={{ from: '2026-11-01', to: '2026-11-28', utcOffsetMinutes: 0 }}
+        onSelectDay={selected}
+      />,
+    ),
+  );
+  const svg = container.querySelector('svg')!;
+  vi.spyOn(svg, 'getBoundingClientRect').mockReturnValue(
+    DOMRect.fromRect({ width: 375, height: 220 }),
+  );
+
+  const pointer = async (type: string, x: number, y: number, pointerType = 'touch') =>
+    settle(() =>
+      svg.dispatchEvent(
+        new PointerEvent(type, {
+          bubbles: true,
+          clientX: x,
+          clientY: y,
+          pointerId: 1,
+          pointerType,
+        }),
+      ),
+    );
+
+  await pointer('pointerdown', 49, 100);
+  await pointer('pointerup', 49, 100);
+  expect(selected).toHaveBeenCalledExactlyOnceWith('2026-11-01');
+  await settle(() =>
+    svg.dispatchEvent(new MouseEvent('click', { bubbles: true, clientX: 49, clientY: 100 })),
+  );
+  expect(selected).toHaveBeenCalledTimes(1);
+  await pointer('pointerdown', 49, 100, 'pen');
+  await pointer('pointermove', 90, 100, 'pen');
+  await pointer('pointerup', 49, 100, 'pen');
+  expect(selected).toHaveBeenCalledTimes(1);
+  await pointer('pointerdown', 49, 215);
+  await pointer('pointerup', 49, 215);
+  expect(selected).toHaveBeenCalledTimes(1);
+  await pointer('pointerdown', 49, 100, 'pen');
+  await pointer('pointerup', 49, 100, 'pen');
+  expect(selected).toHaveBeenCalledTimes(2);
   await settle(() => mounted.unmount());
 });

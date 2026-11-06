@@ -1,15 +1,16 @@
-import { useMemo, useState, type MouseEvent } from 'react';
+import { useId, useMemo, useState } from 'react';
 import { countsLabel } from '../../meters/proportions.js';
 import { moveChartFocus } from './chart-keyboard.js';
 import { prepareTrend, type TrendAxis, type TrendRun } from './trend-model.js';
 import {
   useChartWidth,
+  useDenseFocus,
+  nativeHitRegions,
   resolveActive,
   calendarDate,
   calendarTime,
   timezoneLabel,
   useInspection,
-  plotPointer,
   axisIdentity,
 } from './chart-layout.js';
 import './compact-charts.css';
@@ -25,6 +26,13 @@ type PassRateTrendProps = {
   selectedRunId?: string;
   label: string;
 };
+
+/** Keep full canonical identity and optional display label consistent across inspection controls. */
+function runName(run: TrendRun) {
+  return run.label && run.label !== run.id && run.label !== `Run ${run.id}`
+    ? `${run.id}, ${run.label}`
+    : run.id;
+}
 
 const percent = (rate: number) => `${(rate * 100).toFixed(1)}%`;
 
@@ -67,18 +75,31 @@ function PassRateTrend({
     completed.at(-1) ??
     points.at(-1);
 
-  const pointerTarget = resolveActive(points, ({ run }) => run.id, [focused, hovered]);
   const selected = points.find(({ run }) => run.id === selectedRunId);
   const right = Math.max(68, width - 22);
   const x = (value: number) => 44 + value * (right - 44);
   const minimum = Math.min(0.5, ...completed.map(({ rate }) => rate));
   const y = (rate: number) => 18 + ((1 - rate) / (1 - minimum)) * 150;
 
+  const markY = (point: (typeof points)[number]) => (point.rate === null ? 198 : y(point.rate));
+  const hitId = useId();
+
+  const hitRegions = useMemo(
+    () =>
+      nativeHitRegions(
+        points.map((point) => ({
+          x: 44 + point.x * (right - 44),
+          y: point.rate === null ? 198 : 18 + ((1 - point.rate) / (1 - minimum)) * 150,
+        })),
+      ),
+    [points, right, minimum],
+  );
+
   const path = completed
     .map((point, index) => `${index ? 'L' : 'M'}${x(point.x)},${y(point.rate)}`)
     .join(' ');
 
-  // Dense marks keep true coordinates; one plot target finds the nearest point.
+  // Density depends only on data and width; native links keep the same DOM identity.
   const dense = points.some((point, index) =>
     points
       .slice(0, index)
@@ -92,26 +113,7 @@ function PassRateTrend({
       ),
   );
 
-  const nearest = (event: MouseEvent<SVGSVGElement>) => {
-    const pointer = plotPointer(event, width, 230);
-
-    if (pointer.x < 32 || pointer.x > right + 12 || pointer.y < 6 || pointer.y > 210)
-      return undefined;
-
-    const hit = points.reduce<(typeof points)[number] | undefined>((best, point) => {
-      const distance = (item: (typeof points)[number]) =>
-        Math.hypot(x(item.x) - pointer.x, (item.rate === null ? 198 : y(item.rate)) - pointer.y);
-
-      return !best || distance(point) < distance(best) ? point : best;
-    }, undefined);
-
-    return hit &&
-      Math.hypot(x(hit.x) - pointer.x, (hit.rate === null ? 198 : y(hit.rate)) - pointer.y) <= 24
-      ? hit
-      : undefined;
-  };
-
-  const Mark = dense ? 'g' : 'a';
+  useDenseFocus(dense, ref);
 
   return (
     <section ref={ref} className="attest-compact-chart" aria-label={label}>
@@ -135,35 +137,31 @@ function PassRateTrend({
           <>
             <strong>{active.rate === null ? active.run.state : percent(active.rate)}</strong>
             <span>
-              Run {active.run.id}
-              {active.run.label &&
-              active.run.label !== active.run.id &&
-              active.run.label !== `Run ${active.run.id}`
-                ? `, ${active.run.label}`
-                : ''}
-              , {calendarTime(active.run.startedAt, utcOffsetMinutes)}{' '}
-              {timezoneLabel(utcOffsetMinutes)}. Run status {active.run.runStatus}.
+              {calendarTime(active.run.startedAt, utcOffsetMinutes)}{' '}
+              {timezoneLabel(utcOffsetMinutes)}. {active.run.runStatus}.
+            </span>
+            <span
+              className={
+                active.comparison && active.comparison.points < 0 ? 'attest-chart-decline' : ''
+              }
+            >
+              {active.comparison ? (
+                <>
+                  {active.comparison.selectionChanged ? 'Selection counts differ. ' : ''}
+                  {active.comparison.points > 0 ? '+' : ''}
+                  {active.comparison.points.toFixed(1)} pp versus prior complete slice.
+                </>
+              ) : (
+                'No earlier complete slice for comparison.'
+              )}
             </span>
             <span>
-              {countsLabel(active.run.counts)}.{' '}
-              {active.run.counts.planned === null
-                ? `${active.run.counts.recorded} recorded; planned count unknown.`
-                : `${active.run.counts.recorded} recorded of ${active.run.counts.planned} planned.`}
-              {active.rate === null
-                ? ' No pass rate.'
-                : ' Supplied pass rate for this complete eval slice.'}
+              {active.run.counts.passed} pass, {active.run.counts.failed} fail,{' '}
+              {active.run.counts.errored} error, {active.run.counts.skipped} skipped.{' '}
+              {active.run.counts.recorded}/{active.run.counts.planned ?? 'unknown'}{' '}
+              recorded/planned.
             </span>
-            {active.comparison ? (
-              <span className={active.comparison.points < 0 ? 'attest-chart-decline' : ''}>
-                {active.comparison.points > 0 ? '+' : ''}
-                {active.comparison.points.toFixed(1)} percentage points versus{' '}
-                {active.comparison.previousId}.
-                {active.comparison.selectionChanged ? ' Selection counts differ.' : ''} Rate changes
-                do not establish case regressions.
-              </span>
-            ) : (
-              <span aria-hidden="true">&nbsp;</span>
-            )}
+            <span title={runName(active.run)}>Run {runName(active.run)}</span>
           </>
         ) : (
           <span>No eval slices in this window.</span>
@@ -175,6 +173,9 @@ function PassRateTrend({
             Inspect run{' '}
             <select
               value={action?.run.id ?? ''}
+              onFocus={() => {
+                if (action) inspection.inspect(action.run.id);
+              }}
               onChange={(event) => {
                 setHovered(null);
                 inspection.inspect(event.target.value);
@@ -182,7 +183,8 @@ function PassRateTrend({
             >
               {points.map(({ run }) => (
                 <option key={run.id} value={run.id}>
-                  {run.id} · {run.state} ·{' '}
+                  {calendarTime(run.startedAt, utcOffsetMinutes)} {timezoneLabel(utcOffsetMinutes)}{' '}
+                  · {runName(run)} · {run.state}, run {run.runStatus} ·{' '}
                   {run.state === 'complete' ? percent(run.passRate) : 'no rate'} ·{' '}
                   {countsLabel(run.counts)}
                 </option>
@@ -203,7 +205,6 @@ function PassRateTrend({
       )}
       <svg
         viewBox={`0 0 ${width} 230`}
-        onMouseMove={dense ? (event) => setHovered(nearest(event)?.run.id ?? null) : undefined}
         onMouseLeave={() => setHovered(null)}
         role="group"
         aria-label={`${label}. Complete slices on the line; other slices on the lower rail.`}
@@ -226,7 +227,7 @@ function PassRateTrend({
         <line className="attest-chart-grid" x1="44" x2={right} y1="198" y2="198" />
         {points.map((point, index) => {
           const cx = x(point.x),
-            cy = point.rate === null ? 198 : y(point.rate);
+            cy = markY(point);
 
           const decline = point.comparison !== null && point.comparison.points < 0;
 
@@ -241,24 +242,44 @@ function PassRateTrend({
                   d={`M${x(previous.x)},${y(previous.rate)} L${cx},${cy}`}
                 />
               )}
-              <Mark
-                href={dense ? undefined : runHref(point.run)}
+              <a
+                href={runHref(point.run)}
+                tabIndex={dense ? -1 : undefined}
                 data-chart-mark={dense ? undefined : ''}
                 onKeyDown={dense ? undefined : moveChartFocus}
                 aria-hidden={dense || undefined}
                 aria-label={
                   dense
                     ? undefined
-                    : `Run ${point.run.id}${point.run.label && point.run.label !== point.run.id && point.run.label !== `Run ${point.run.id}` ? `, ${point.run.label}` : ''}, ${calendarTime(point.run.startedAt, utcOffsetMinutes)} ${timezoneLabel(utcOffsetMinutes)}, slice ${point.run.state}, run ${point.run.runStatus}, ${point.rate === null ? 'no pass rate' : percent(point.rate)}, ${countsLabel(point.run.counts)}. Open run.`
+                    : `Run ${runName(point.run)}, ${calendarTime(point.run.startedAt, utcOffsetMinutes)} ${timezoneLabel(utcOffsetMinutes)}, slice ${point.run.state}, run ${point.run.runStatus}, ${point.rate === null ? 'no pass rate' : percent(point.rate)}, ${countsLabel(point.run.counts)}. Open run.`
                 }
-                onMouseEnter={dense ? undefined : () => setHovered(point.run.id)}
+                onMouseEnter={() => setHovered(point.run.id)}
                 onMouseLeave={() => setHovered(null)}
-                onFocus={dense ? undefined : () => setFocused(point.run.id)}
+                onFocus={() => setFocused(point.run.id)}
                 onBlur={() => setFocused(null)}
-                className={`${dense ? 'attest-chart-dense-mark' : 'attest-chart-mark'} ${active === point ? 'is-active' : ''}`}
+                className={`${dense ? 'attest-chart-native-mark' : 'attest-chart-mark'} ${active === point ? 'is-active' : ''}`}
               >
                 <title>{point.run.id}</title>
-                <rect className="attest-chart-hit" x={cx - 12} y={cy - 12} width="24" height="24" />
+                {dense ? (
+                  <>
+                    <clipPath id={`${hitId}-${index}`}>
+                      <circle cx={cx} cy={cy} r="24" />
+                    </clipPath>
+                    <path
+                      className="attest-chart-hit"
+                      d={hitRegions[index]}
+                      clipPath={`url(#${hitId}-${index})`}
+                    />
+                  </>
+                ) : (
+                  <rect
+                    className="attest-chart-hit"
+                    x={cx - 12}
+                    y={cy - 12}
+                    width="24"
+                    height="24"
+                  />
+                )}
                 {point.rate !== null && point.run.counts.failed + point.run.counts.errored > 0 && (
                   <rect
                     className="attest-chart-shortfall"
@@ -279,7 +300,7 @@ function PassRateTrend({
                     r="4"
                   />
                 )}
-              </Mark>
+              </a>
               {(index === 0 || (index === points.length - 1 && point.x !== points[0]?.x)) && (
                 <text x={cx} y="225" textAnchor={index === 0 ? 'start' : 'end'}>
                   {axis === 'run'
@@ -290,23 +311,6 @@ function PassRateTrend({
             </g>
           );
         })}
-        {dense && pointerTarget && (
-          <a
-            href={runHref(pointerTarget.run)}
-            tabIndex={-1}
-            aria-hidden="true"
-            className="attest-chart-hotspot"
-            onFocus={() => setFocused(pointerTarget.run.id)}
-            onBlur={() => setFocused(null)}
-          >
-            <circle
-              cx={x(pointerTarget.x)}
-              cy={pointerTarget.rate === null ? 198 : y(pointerTarget.rate)}
-              r="24"
-              fill="transparent"
-            />
-          </a>
-        )}
         {selected && (
           <circle
             className="attest-chart-selection"
@@ -333,6 +337,7 @@ function PassRateTrend({
           {completed.some((point) => point.comparison && point.comparison.points < 0) &&
             '▼: lower pass rate. '}
           {selected && 'Selected run: dashed ring. '}
+          Rate changes do not establish case regressions.{' '}
           {dense &&
             'Overlapping marks: use Inspect run to access every identity at its exact timestamp.'}
         </p>

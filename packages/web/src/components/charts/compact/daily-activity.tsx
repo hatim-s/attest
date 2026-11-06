@@ -1,8 +1,9 @@
-import { useMemo, useState, type MouseEvent } from 'react';
+import { useMemo, useRef, useState, type MouseEvent } from 'react';
 import { moveChartFocus } from './chart-keyboard.js';
 import { prepareActivity, type ActivityDay, type ActivityWindow } from './daily-model.js';
 import {
   useChartWidth,
+  useDenseFocus,
   resolveActive,
   timezoneLabel,
   useInspection,
@@ -34,6 +35,15 @@ function DailyActivity({
     [days, window],
   );
 
+  // Keep compatibility clicks from activating the same touch/pen gesture twice.
+  const gesture = useRef<{
+    id: number;
+    x: number;
+    y: number;
+    nonmouse: boolean;
+    moved: boolean;
+  } | null>(null);
+
   const [hovered, setHovered] = useState<string | null>(null);
   const [focused, setFocused] = useState<string | null>(null);
 
@@ -60,6 +70,13 @@ function DailyActivity({
   const width = Math.min(14, slot * 0.6);
 
   const dense = slot < 24;
+  useDenseFocus(dense, ref);
+
+  /** One guard owns every activation path, including controlled host updates. */
+  const selectDay = (day: ActivityDay) => {
+    if (day.runCount > 0 && day.day !== selectedDay) onSelectDay(day.day);
+  };
+
   const actionDay = resolveActive(ordered, (day) => day.day, [inspection.id, selectedDay]);
 
   const nearest = (event: MouseEvent<SVGSVGElement>) => {
@@ -87,12 +104,15 @@ function DailyActivity({
           skipped. Skipped cases are excluded from bars.
         </span>
       </div>
-      <div className="attest-chart-actions" onBlur={inspection.onBlur}>
-        {dense && (
+      {dense && (
+        <div className="attest-chart-actions" onBlur={inspection.onBlur}>
           <label className="attest-chart-chooser">
             Inspect day{' '}
             <select
               value={actionDay?.day ?? ''}
+              onFocus={() => {
+                if (actionDay) inspection.inspect(actionDay.day);
+              }}
               onChange={(event) => {
                 setHovered(null);
                 inspection.inspect(event.target.value);
@@ -109,33 +129,78 @@ function DailyActivity({
               ))}
             </select>
           </label>
-        )}
-        <button
-          className="attest-chart-action"
-          type="button"
-          disabled={!actionDay || actionDay.runCount === 0 || actionDay.day === selectedDay}
-          onFocus={() => {
-            if (actionDay) inspection.inspect(actionDay.day);
-          }}
-          onClick={() => {
-            if (actionDay) onSelectDay(actionDay.day);
-          }}
-        >
-          {actionDay && actionDay.runCount > 0
-            ? `${actionDay.day === selectedDay ? 'Selected day' : 'Select day'} ${actionDay.day}`
-            : 'Choose a day to select'}
-        </button>
-      </div>
+          <button
+            className="attest-chart-action"
+            type="button"
+            aria-disabled={!actionDay || actionDay.runCount === 0 || actionDay.day === selectedDay}
+            onFocus={() => {
+              if (actionDay) inspection.inspect(actionDay.day);
+            }}
+            onClick={() => {
+              if (actionDay) selectDay(actionDay);
+            }}
+          >
+            {actionDay && actionDay.runCount > 0
+              ? `${actionDay.day === selectedDay ? 'Selected day' : 'Select day'} ${actionDay.day}`
+              : 'Choose a day to select'}
+          </button>
+        </div>
+      )}
       <svg
         viewBox={`0 0 ${chartWidth} 220`}
         onMouseMove={dense ? (event) => setHovered(nearest(event)?.day ?? null) : undefined}
         onMouseLeave={() => setHovered(null)}
+        onPointerDown={
+          dense
+            ? (event) => {
+                gesture.current = {
+                  id: event.pointerId,
+                  x: event.clientX,
+                  y: event.clientY,
+                  nonmouse: event.pointerType !== 'mouse',
+                  moved: false,
+                };
+              }
+            : undefined
+        }
+        onPointerMove={
+          dense
+            ? (event) => {
+                const start = gesture.current;
+
+                if (start && Math.hypot(event.clientX - start.x, event.clientY - start.y) > 8)
+                  start.moved = true;
+              }
+            : undefined
+        }
+        onPointerCancel={() => {
+          gesture.current = null;
+        }}
+        onPointerUp={
+          dense
+            ? (event) => {
+                const start = gesture.current;
+
+                if (
+                  start?.nonmouse &&
+                  !start.moved &&
+                  start.id === event.pointerId &&
+                  Math.hypot(event.clientX - start.x, event.clientY - start.y) <= 8
+                ) {
+                  const day = nearest(event);
+
+                  if (day) selectDay(day);
+                }
+              }
+            : undefined
+        }
         onClick={
           dense
             ? (event) => {
+                if (gesture.current?.nonmouse || gesture.current?.moved) return;
                 const day = nearest(event);
 
-                if (day && day.runCount > 0) onSelectDay(day.day);
+                if (day) selectDay(day);
               }
             : undefined
         }
@@ -165,24 +230,25 @@ function DailyActivity({
         )}
         {ordered.map((day, index) => {
           const cx = 44 + slot * (index + 0.5);
+          const inert = dense || day.runCount === 0;
 
           return (
             <g key={day.day}>
               <g
                 aria-hidden={dense || undefined}
-                role={dense || day.runCount === 0 ? undefined : 'button'}
-                tabIndex={dense || day.runCount === 0 ? undefined : 0}
-                data-chart-mark={dense || day.runCount === 0 ? undefined : ''}
-                aria-pressed={dense || day.runCount === 0 ? undefined : selectedDay === day.day}
+                role={inert ? undefined : 'button'}
+                tabIndex={inert ? undefined : 0}
+                data-chart-mark={inert ? undefined : ''}
+                aria-pressed={inert ? undefined : selectedDay === day.day}
                 className={`${dense ? 'attest-chart-dense-mark' : day.runCount > 0 ? 'attest-chart-mark' : 'attest-chart-static-mark'} ${active === day ? 'is-active' : ''}`}
                 aria-label={`${day.day}: ${day.runCount} ${day.runCount === 1 ? 'run' : 'runs'}, ${day.passed} passed, ${day.failed} failed, ${day.errored} errored, ${day.skipped} skipped.${day.runCount > 0 ? ' Select day.' : ' No runs to select.'}`}
-                onClick={dense || day.runCount === 0 ? undefined : () => onSelectDay(day.day)}
+                onClick={inert ? undefined : () => selectDay(day)}
                 onKeyDown={(event) => {
                   moveChartFocus(event);
 
-                  if (!dense && day.runCount > 0 && (event.key === 'Enter' || event.key === ' ')) {
+                  if (!inert && (event.key === 'Enter' || event.key === ' ')) {
                     event.preventDefault();
-                    onSelectDay(day.day);
+                    selectDay(day);
                   }
                 }}
                 onMouseEnter={dense ? undefined : () => setHovered(day.day)}

@@ -2,7 +2,6 @@
 .attest-case-strip {
   --meter-ink: var(--ink, var(--text, CanvasText));
   --meter-fail: var(--fail, #ff5c00);
-  --meter-fail: var(--fail, light-dark(#ff5c00, #ff6a1a));
   display: inline-flex;
   align-items: center;
   gap: 2px;
@@ -93,5 +92,12 @@
     .attest-compact[data-theme='system'] :is(.attest-meter, .attest-case-strip) {
       --meter-fail: var(--fail, #ff6a1a);
     }
+  }
+}
+
+@supports (color: light-dark(white, black)) {
+  .attest-meter,
+  .attest-case-strip {
+    --meter-fail: var(--fail, light-dark(#ff5c00, #ff6a1a));
   }
 }

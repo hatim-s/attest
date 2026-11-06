@@ -1,9 +1,8 @@
 .attest-compact-chart {
   --chart-ink: var(--ink, var(--text, CanvasText));
   --chart-fail: var(--fail, #ff5c00);
-  --chart-fail: var(--fail, light-dark(#ff5c00, #ff6a1a));
   --chart-fail-soft: var(--fail-soft, #ffc29c);
-  --chart-fail-soft: var(--fail-soft, light-dark(#ffc29c, #9a4619));
+  --chart-decline: var(--fail-text, #9a4619);
   --chart-line: var(--line, var(--border, GrayText));
   color: var(--chart-ink);
   min-width: 0;
@@ -35,10 +34,10 @@
   color: var(--on-ink, var(--bg, Canvas));
 }
 .attest-chart-readout {
-  height: 128px;
+  height: 140px;
   box-sizing: border-box;
   flex-shrink: 0;
-  padding: 12px 0;
+  padding: 8px 0;
   display: flex;
   flex-direction: column;
   gap: 3px;
@@ -46,11 +45,14 @@
   overflow: hidden;
 }
 .attest-chart-readout > * {
+  min-height: 18px;
+  flex-shrink: 0;
+  line-height: 18px;
+}
+.attest-chart-readout > [title] {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  flex-shrink: 0;
-  line-height: 18px;
 }
 .attest-chart-readout strong {
   font-size: 26px;
@@ -133,7 +135,7 @@
   outline-offset: 2px;
 }
 .attest-chart-decline {
-  color: var(--fail-text, light-dark(#9a4619, #ffc29c));
+  color: var(--chart-decline);
 }
 .attest-chart-key {
   font-size: 11px;
@@ -156,113 +158,75 @@
   stroke-dasharray: 3 2;
   pointer-events: none;
 }
-.attest-chart-chooser {
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  gap: 8px;
-  font-size: 12px;
-  margin-bottom: 8px;
-}
-.attest-chart-chooser label {
-  min-width: 0;
-}
-.attest-chart-chooser select {
-  max-width: 100%;
-  min-height: 32px;
-  color: inherit;
-  background: var(--bg, Canvas);
-  font: inherit;
-}
-.attest-chart-chooser a {
-  color: inherit;
-  min-height: 24px;
-  display: inline-flex;
-  align-items: center;
-}
-
 .attest-chart-shortfall,
 .attest-chart-halo {
   pointer-events: none;
 }
 
-/* Older engines retain explicit colors; current hosts supply the scoped color-scheme. */
-@supports not (color: light-dark(white, black)) {
-  :where(:root[data-theme='dark']) .attest-compact-chart {
+/* Explicit scoped colors also cover engines without light-dark(). */
+:where(:root[data-theme='dark']) .attest-compact-chart,
+.attest-compact[data-theme='dark'] .attest-compact-chart {
+  --chart-fail: var(--fail, #ff6a1a);
+  --chart-fail-soft: var(--fail-soft, #9a4619);
+  --chart-decline: var(--fail-text, #ffc29c);
+}
+.attest-compact[data-theme='light'] .attest-compact-chart {
+  --chart-fail: var(--fail, #ff5c00);
+  --chart-fail-soft: var(--fail-soft, #ffc29c);
+  --chart-decline: var(--fail-text, #9a4619);
+}
+@media (prefers-color-scheme: dark) {
+  :where(:root:not([data-theme]), :root[data-theme='system']) .attest-compact-chart,
+  .attest-compact[data-theme='system'] .attest-compact-chart {
     --chart-fail: var(--fail, #ff6a1a);
     --chart-fail-soft: var(--fail-soft, #9a4619);
+    --chart-decline: var(--fail-text, #ffc29c);
   }
-  :where(:root[data-theme='light']) .attest-compact-chart {
-    --chart-fail: var(--fail, #ff5c00);
-    --chart-fail-soft: var(--fail-soft, #ffc29c);
-  }
-  .attest-compact[data-theme='dark'] .attest-compact-chart {
-    --chart-fail: var(--fail, #ff6a1a);
-    --chart-fail-soft: var(--fail-soft, #9a4619);
-  }
-  .attest-compact[data-theme='light'] .attest-compact-chart {
-    --chart-fail: var(--fail, #ff5c00);
-    --chart-fail-soft: var(--fail-soft, #ffc29c);
-  }
-  @media (prefers-color-scheme: dark) {
-    .attest-compact[data-theme='system'] .attest-compact-chart {
-      --chart-fail: var(--fail, #ff6a1a);
-      --chart-fail-soft: var(--fail-soft, #9a4619);
-    }
+}
+@supports (color: light-dark(white, black)) {
+  .attest-compact-chart {
+    --chart-fail: var(--fail, light-dark(#ff5c00, #ff6a1a));
+    --chart-fail-soft: var(--fail-soft, light-dark(#ffc29c, #9a4619));
+    --chart-decline: var(--fail-text, light-dark(#9a4619, #ffc29c));
   }
 }
 .attest-chart-day-selection {
   fill: var(--chart-ink);
   stroke: none;
 }
-.attest-chart-actions {
-  display: grid;
-  grid-template-rows: 58px 36px;
-  gap: 8px;
-  margin-bottom: 8px;
-}
-.attest-chart-hotspot {
-  cursor: pointer;
-}
-.attest-chart-dense-mark {
-  pointer-events: none;
-}
-.attest-chart-static-mark {
-  cursor: default;
-}
-.attest-chart-chooser select {
-  width: 100%;
-}
-
-.attest-chart-chooser label {
-  max-width: 100%;
-}
-.attest-chart-chooser a {
-  max-width: 100%;
-  overflow: hidden;
-}
-
-/* Reserve the same two control rows across inspection, selection and blur. */
+.attest-chart-actions,
 .attest-compact-chart > .attest-chart-chooser {
-  height: 102px;
-  box-sizing: border-box;
   display: grid;
-  grid-template-rows: 58px 36px;
+  grid-template-columns: minmax(0, 1fr) minmax(72px, 0.6fr);
+  align-items: end;
+  gap: 8px;
+  height: 58px;
+  margin-bottom: 8px;
+  font-size: 12px;
 }
 .attest-chart-chooser label,
 .attest-chart-actions > label {
   display: grid;
   grid-template-rows: 18px 36px;
   gap: 4px;
-  margin: 0;
   min-width: 0;
 }
-.attest-chart-actions > button {
-  grid-row: 2;
+.attest-chart-dense-mark {
+  pointer-events: none;
+}
+.attest-chart-native-mark {
+  cursor: pointer;
+}
+.attest-chart-native-mark > :not(.attest-chart-hit) {
+  pointer-events: none;
+}
+.attest-chart-static-mark {
+  cursor: default;
 }
 .attest-compact-chart .attest-chart-action,
 .attest-chart-chooser select {
   box-sizing: border-box;
+  width: 100%;
   border: 1px solid var(--chart-line);
   border-radius: 4px;
   padding: 6px 10px;
@@ -283,10 +247,10 @@
   text-decoration: underline;
   cursor: pointer;
 }
-.attest-chart-action:hover:not(:disabled) {
+.attest-chart-action:hover:not([aria-disabled='true']) {
   background: var(--chart-line);
 }
-.attest-chart-action:disabled {
+.attest-chart-action[aria-disabled='true'] {
   cursor: default;
   text-decoration: none;
   color: var(--muted, GrayText);

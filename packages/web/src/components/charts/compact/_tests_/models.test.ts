@@ -1,3 +1,4 @@
+import { nativeHitRegions } from '../chart-layout.js';
 import { describe, expect, it } from 'vitest';
 import { prepareTrend, passRate, TREND_LIMIT, type TrendRun } from '../trend-model.js';
 import { prepareActivity, ACTIVITY_LIMIT, type ActivityDay } from '../daily-model.js';
@@ -145,4 +146,37 @@ it('fills sparse calendar gaps in the declared offset and bounds inclusive bucke
       RangeError,
     );
   expect(passRate({ ...complete, passRate: 0.123 })).toBe(0.123);
+});
+
+it('partitions native hit regions by nearest identity within bounded mark squares', () => {
+  const centers = [
+    { x: 44, y: 78 },
+    { x: 54, y: 78 },
+    { x: 54, y: 88 },
+    { x: 54, y: 88 },
+    { x: 353, y: 198 },
+  ];
+
+  const regions = nativeHitRegions(centers);
+  expect(regions[3]).toBe('');
+
+  for (const [i, path] of regions.entries()) {
+    if (i === 3) continue;
+    const center = centers[i]!;
+    const vertices = [...path.matchAll(/(-?[\d.]+),(-?[\d.]+)/g)];
+    expect(vertices.length).toBeGreaterThanOrEqual(3);
+
+    for (const vertex of vertices) {
+      const x = Number(vertex[1]),
+        y = Number(vertex[2]);
+
+      expect(Math.abs(x - center.x)).toBeLessThanOrEqual(24);
+      expect(Math.abs(y - center.y)).toBeLessThanOrEqual(24);
+
+      for (const other of centers)
+        expect(Math.hypot(x - center.x, y - center.y)).toBeLessThanOrEqual(
+          Math.hypot(x - other.x, y - other.y) + 1e-9,
+        );
+    }
+  }
 });
