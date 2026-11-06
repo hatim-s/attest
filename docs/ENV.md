@@ -65,6 +65,9 @@ exists, its origin and project ID must agree. See [cloud commands](cli/cloud.md)
 
 ## Developer controls
 
+The CI lint step sets `NODE_OPTIONS=--max-old-space-size=4096` so Node has enough
+heap for ESLint's TypeScript programs. The setting applies only to that step.
+
 `FUZZ=1` enables conformance fuzz tests. `FUZZ_ITERATIONS` overrides their iteration
 count. The `test:fuzz` script enables `FUZZ` itself. Telemetry opt-outs described in
 [the telemetry policy](TELEMETRY.md) are requirements for a future change, not current switches.
