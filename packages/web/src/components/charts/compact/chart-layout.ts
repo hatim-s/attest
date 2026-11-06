@@ -45,7 +45,11 @@ function timezoneLabel(utcOffsetMinutes: number) {
 }
 
 /** Inspection survives Tab to the associated action, but ends on departure or new controlled data. */
-function useInspection(selection: string | undefined, windowKey: string) {
+function useInspection(
+  selection: string | undefined,
+  windowKey: string,
+  identities: readonly string[],
+) {
   const [inspection, setInspection] = useState<{
     id: string;
     selection: string | undefined;
@@ -53,6 +57,10 @@ function useInspection(selection: string | undefined, windowKey: string) {
   }>();
 
   useLayoutEffect(() => setInspection(undefined), [selection, windowKey]);
+
+  useLayoutEffect(() => {
+    if (inspection && !identities.includes(inspection.id)) setInspection(undefined);
+  }, [identities, inspection]);
 
   const id =
     inspection?.selection === selection && inspection?.windowKey === windowKey

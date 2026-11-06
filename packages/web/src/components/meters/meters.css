@@ -1,7 +1,8 @@
 .attest-meter,
 .attest-case-strip {
   --meter-ink: var(--ink, var(--text, CanvasText));
-  --meter-fail: var(--fail, #c45a2a);
+  --meter-fail: var(--fail, #ff5c00);
+  --meter-fail: var(--fail, light-dark(#ff5c00, #ff6a1a));
   display: inline-flex;
   align-items: center;
   gap: 2px;
@@ -81,4 +82,16 @@
 .attest-strip-key {
   flex-basis: 100%;
   font-size: 11px;
+}
+
+@supports not (color: light-dark(white, black)) {
+  :where(:root[data-theme='dark']) :is(.attest-meter, .attest-case-strip),
+  .attest-compact[data-theme='dark'] :is(.attest-meter, .attest-case-strip) {
+    --meter-fail: var(--fail, #ff6a1a);
+  }
+  @media (prefers-color-scheme: dark) {
+    .attest-compact[data-theme='system'] :is(.attest-meter, .attest-case-strip) {
+      --meter-fail: var(--fail, #ff6a1a);
+    }
+  }
 }

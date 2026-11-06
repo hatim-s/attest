@@ -19,7 +19,7 @@ function ProportionMeter({ counts, label }: ProportionMeterProps) {
           <i key={`${kind}-${index}`} className={`attest-meter-mark ${kind}`} aria-hidden="true" />
         )),
       )}
-      {counts.notRun === null && (
+      {counts.notRun === null && !segments.every(({ slots }) => slots === 0) && (
         <span className="attest-meter-unknown">
           ? <span>remainder unknown</span>
         </span>

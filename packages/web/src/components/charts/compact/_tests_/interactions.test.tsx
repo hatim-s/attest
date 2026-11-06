@@ -231,7 +231,9 @@ it('dense 28-day slots at 500px retain pointer selection and a chooser with exac
   const pointer = { bubbles: true, clientX: 44 + ((478 - 44) / 28) * 7.5, clientY: 100 };
   await settle(() => svg.dispatchEvent(new MouseEvent('mousemove', pointer)));
   expect(container.querySelector('.attest-chart-readout')?.textContent).toContain('2026-11-08');
-  expect(container.querySelector('.attest-chart-actions button')).toBeNull();
+  expect(container.querySelector<HTMLButtonElement>('.attest-chart-actions button')?.disabled).toBe(
+    true,
+  );
   await settle(() => svg.dispatchEvent(new MouseEvent('click', pointer)));
   expect(onSelectDay).toHaveBeenCalledWith('2026-11-08');
   expect(container.querySelectorAll('option')).toHaveLength(29);
@@ -267,14 +269,22 @@ it('dense 30-run nearest-point hover works and inspection ends on controlled cha
     ),
   );
   expect(container.querySelector('.attest-chart-readout')?.textContent).toContain('Run id12,');
-  await settle(() => svg.dispatchEvent(new MouseEvent('mouseout', { bubbles: true })));
+  const hotspot = container.querySelector('.attest-chart-hotspot')!;
+  expect(hotspot.getAttribute('href')).toBe('#id12');
   const navigate = vi.spyOn(globalThis.location, 'assign').mockImplementation(() => {});
+  const modified = new MouseEvent('click', { bubbles: true, cancelable: true, metaKey: true });
+  await settle(() => hotspot.dispatchEvent(modified));
+  expect(modified.defaultPrevented).toBe(false);
+  expect(navigate).not.toHaveBeenCalled();
   await settle(() =>
-    svg.dispatchEvent(
-      new MouseEvent('click', { bubbles: true, clientX: 44 + (309 * 12) / 29, clientY: 78 }),
-    ),
+    svg.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, clientX: 180, clientY: 180 })),
   );
-  expect(navigate).toHaveBeenCalledWith('#id12');
+  expect(container.querySelector('.attest-chart-hotspot')).toBeNull();
+  await settle(() =>
+    svg.dispatchEvent(new MouseEvent('click', { bubbles: true, clientX: 180, clientY: 180 })),
+  );
+  expect(navigate).not.toHaveBeenCalled();
+  await settle(() => svg.dispatchEvent(new MouseEvent('mouseout', { bubbles: true })));
   const select = container.querySelector('select')!;
   await settle(() => {
     select.focus();
@@ -340,7 +350,9 @@ it('daily inspection survives movement to its action and clears on selection and
     '2026-11-02',
   );
   await settle(() => mounted.render(render(undefined, '2026-11-02')));
-  expect(container.querySelector('.attest-chart-actions button')).toBeNull();
+  expect(container.querySelector<HTMLButtonElement>('.attest-chart-actions button')?.disabled).toBe(
+    true,
+  );
   await settle(() => mounted.unmount());
 });
 
@@ -378,5 +390,107 @@ it('updates equal daily maxima across mounted frames without duplicate keys or s
   expect(ticks()).toEqual(['0']);
   expect(container.querySelector('svg')?.textContent).toContain('No activity in this window');
   expect(errors).not.toHaveBeenCalled();
+  await settle(() => mounted.unmount());
+});
+
+it('keeps a focused run action and chooser fixed across hover and appended polling data', async () => {
+  const mounted = root();
+
+  const render = (runs: TrendRun[]) => (
+    <PassRateTrend
+      runs={runs}
+      axis="run"
+      utcOffsetMinutes={0}
+      onAxisChange={() => {}}
+      runHref={({ id }) => `#${id}`}
+      label="Trend"
+    />
+  );
+
+  await settle(() => mounted.render(render([a, b, c])));
+  const select = container.querySelector('select')!;
+  await settle(() => {
+    select.focus();
+    select.value = 'a';
+    select.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+  const action = container.querySelector<HTMLAnchorElement>('.attest-chart-chooser a')!;
+  await settle(() => action.focus());
+  await settle(() => mounted.render(render([a, b, c, run('d', 400)])));
+  expect(document.activeElement).toBe(action);
+  expect(action.getAttribute('href')).toBe('#a');
+  await settle(() =>
+    container
+      .querySelectorAll('svg a')[2]
+      ?.dispatchEvent(new MouseEvent('mouseover', { bubbles: true })),
+  );
+  expect(action.getAttribute('href')).toBe('#a');
+  expect(select.value).toBe('a');
+  await settle(() => mounted.unmount());
+});
+
+it('keeps the daily action mounted when sparse mark focus leaves and does not repeat selection', async () => {
+  const mounted = root();
+  await settle(() =>
+    mounted.render(
+      <DailyActivity
+        days={[{ day: '2026-11-01', runCount: 1, passed: 1, failed: 0, errored: 0, skipped: 0 }]}
+        window={{ from: '2026-11-01', to: '2026-11-02', utcOffsetMinutes: 0 }}
+        selectedDay="2026-11-01"
+        onSelectDay={() => {}}
+      />,
+    ),
+  );
+  const action = container.querySelector<HTMLButtonElement>('.attest-chart-actions button')!;
+  expect(action).not.toBeNull();
+  expect(action.disabled).toBe(true);
+  const mark = container.querySelector<SVGElement>('[data-chart-mark]')!;
+  await settle(() => mark.focus());
+  await settle(() => mark.blur());
+  expect(container.querySelector('.attest-chart-actions button')).toBe(action);
+  expect(action.disabled).toBe(true);
+  await settle(() => mounted.unmount());
+});
+
+it('pins a default action on focus and expires inspection on removal, departure, axis or offset changes', async () => {
+  const mounted = root();
+
+  const render = (runs: TrendRun[], axis: 'run' | 'date' = 'run', offset = 0) => (
+    <PassRateTrend
+      runs={runs}
+      axis={axis}
+      utcOffsetMinutes={offset}
+      onAxisChange={() => {}}
+      runHref={({ id }) => `#${id}`}
+      label="Trend"
+    />
+  );
+
+  await settle(() => mounted.render(render([a, b])));
+  const action = container.querySelector<HTMLAnchorElement>('.attest-chart-action')!;
+  await settle(() => action.focus());
+  await settle(() => mounted.render(render([a, b, c])));
+  expect(action.getAttribute('href')).toBe('#b');
+  await settle(() => action.blur());
+  expect(action.getAttribute('href')).toBe('#c');
+  const select = container.querySelector('select')!;
+
+  const inspectA = async () =>
+    settle(() => {
+      select.focus();
+      select.value = 'a';
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+
+  await inspectA();
+  await settle(() => mounted.render(render([b, c])));
+  await settle(() => mounted.render(render([a, b, c])));
+  expect(action.getAttribute('href')).toBe('#c');
+  await inspectA();
+  await settle(() => mounted.render(render([a, b, c], 'date')));
+  expect(action.getAttribute('href')).toBe('#c');
+  await inspectA();
+  await settle(() => mounted.render(render([a, b, c], 'date', 330)));
+  expect(action.getAttribute('href')).toBe('#c');
   await settle(() => mounted.unmount());
 });

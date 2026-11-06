@@ -19,7 +19,9 @@ type DailyActivityProps = {
   label?: string;
 };
 
-/** Selecting a real calendar day lets the caller load its bounded run list. */
+/** Hosts key this component by project/source/eval context.
+ * Selecting a real calendar day lets the caller load its bounded run list.
+ * The chooser stages a day; Select day commits it through onSelectDay. */
 function DailyActivity({
   days,
   window,
@@ -37,7 +39,8 @@ function DailyActivity({
 
   const inspection = useInspection(
     selectedDay,
-    `${window.from}:${window.to}:${window.utcOffsetMinutes}`,
+    `${label}:${window.from}:${window.to}:${window.utcOffsetMinutes}`,
+    ordered.filter((day) => day.runCount > 0).map((day) => day.day),
   );
 
   const { ref, width: chartWidth } = useChartWidth();
@@ -57,7 +60,7 @@ function DailyActivity({
   const width = Math.min(14, slot * 0.6);
 
   const dense = slot < 24;
-  const actionDay = resolveActive(ordered, (day) => day.day, [focused, inspection.id, selectedDay]);
+  const actionDay = resolveActive(ordered, (day) => day.day, [inspection.id, selectedDay]);
 
   const nearest = (event: MouseEvent<SVGSVGElement>) => {
     const pointer = plotPointer(event, chartWidth, 220);
@@ -89,7 +92,7 @@ function DailyActivity({
           <label className="attest-chart-chooser">
             Inspect day{' '}
             <select
-              value={active?.day ?? ''}
+              value={actionDay?.day ?? ''}
               onChange={(event) => {
                 setHovered(null);
                 inspection.inspect(event.target.value);
@@ -99,7 +102,7 @@ function DailyActivity({
                 Choose a day
               </option>
               {ordered.map((day) => (
-                <option key={day.day} value={day.day}>
+                <option key={day.day} value={day.day} disabled={day.runCount === 0}>
                   {day.day}: {day.runCount} {day.runCount === 1 ? 'run' : 'runs'}, {day.passed}{' '}
                   passed, {day.failed} failed, {day.errored} errored, {day.skipped} skipped
                 </option>
@@ -107,11 +110,21 @@ function DailyActivity({
             </select>
           </label>
         )}
-        {actionDay && actionDay.runCount > 0 && (
-          <button type="button" onClick={() => onSelectDay(actionDay.day)}>
-            View runs for {actionDay.day}
-          </button>
-        )}
+        <button
+          className="attest-chart-action"
+          type="button"
+          disabled={!actionDay || actionDay.runCount === 0 || actionDay.day === selectedDay}
+          onFocus={() => {
+            if (actionDay) inspection.inspect(actionDay.day);
+          }}
+          onClick={() => {
+            if (actionDay) onSelectDay(actionDay.day);
+          }}
+        >
+          {actionDay && actionDay.runCount > 0
+            ? `${actionDay.day === selectedDay ? 'Selected day' : 'Select day'} ${actionDay.day}`
+            : 'Choose a day to select'}
+        </button>
       </div>
       <svg
         viewBox={`0 0 ${chartWidth} 220`}
@@ -126,7 +139,12 @@ function DailyActivity({
               }
             : undefined
         }
-        style={{ cursor: dense && active && active.runCount > 0 ? 'pointer' : undefined }}
+        style={{
+          cursor:
+            dense && ordered.some((day) => day.day === hovered && day.runCount > 0)
+              ? 'pointer'
+              : undefined,
+        }}
         role="group"
         aria-label={`${label}. Passed above zero; failed and errored below zero, on the same count scale.`}
       >
@@ -156,7 +174,7 @@ function DailyActivity({
                 tabIndex={dense || day.runCount === 0 ? undefined : 0}
                 data-chart-mark={dense || day.runCount === 0 ? undefined : ''}
                 aria-pressed={dense || day.runCount === 0 ? undefined : selectedDay === day.day}
-                className={`${!dense && day.runCount > 0 ? 'attest-chart-mark' : 'attest-chart-static-mark'} ${active === day ? 'is-active' : ''}`}
+                className={`${dense ? 'attest-chart-dense-mark' : day.runCount > 0 ? 'attest-chart-mark' : 'attest-chart-static-mark'} ${active === day ? 'is-active' : ''}`}
                 aria-label={`${day.day}: ${day.runCount} ${day.runCount === 1 ? 'run' : 'runs'}, ${day.passed} passed, ${day.failed} failed, ${day.errored} errored, ${day.skipped} skipped.${day.runCount > 0 ? ' Select day.' : ' No runs to select.'}`}
                 onClick={dense || day.runCount === 0 ? undefined : () => onSelectDay(day.day)}
                 onKeyDown={(event) => {
@@ -216,7 +234,7 @@ function DailyActivity({
           );
         })}
         {totals.runCount === 0 && (
-          <text x={chartWidth / 2} y="100" textAnchor="middle">
+          <text className="attest-chart-empty" x={chartWidth / 2} y="100" textAnchor="middle">
             No activity in this window
           </text>
         )}

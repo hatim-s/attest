@@ -1,8 +1,9 @@
 .attest-compact-chart {
   --chart-ink: var(--ink, var(--text, CanvasText));
-  --chart-fail: var(--fail, #c45a2a);
-  --chart-fail-soft: #ffc29c;
-  --chart-fail-soft: light-dark(#ffc29c, #9a4619);
+  --chart-fail: var(--fail, #ff5c00);
+  --chart-fail: var(--fail, light-dark(#ff5c00, #ff6a1a));
+  --chart-fail-soft: var(--fail-soft, #ffc29c);
+  --chart-fail-soft: var(--fail-soft, light-dark(#ffc29c, #9a4619));
   --chart-line: var(--line, var(--border, GrayText));
   color: var(--chart-ink);
   min-width: 0;
@@ -34,13 +35,22 @@
   color: var(--on-ink, var(--bg, Canvas));
 }
 .attest-chart-readout {
-  min-height: 116px;
+  height: 128px;
+  box-sizing: border-box;
+  flex-shrink: 0;
   padding: 12px 0;
   display: flex;
   flex-direction: column;
   gap: 3px;
   font-size: 12px;
-  overflow-wrap: anywhere;
+  overflow: hidden;
+}
+.attest-chart-readout > * {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex-shrink: 0;
+  line-height: 18px;
 }
 .attest-chart-readout strong {
   font-size: 26px;
@@ -109,7 +119,8 @@
 .attest-chart-mark {
   cursor: pointer;
 }
-.attest-chart-mark.is-active .attest-chart-hit {
+.attest-chart-mark.is-active .attest-chart-hit,
+.attest-chart-dense-mark.is-active .attest-chart-hit {
   fill: var(--chart-ink);
   fill-opacity: 0.055;
 }
@@ -122,7 +133,7 @@
   outline-offset: 2px;
 }
 .attest-chart-decline {
-  color: var(--fail-text, var(--danger, CanvasText));
+  color: var(--fail-text, light-dark(#9a4619, #ffc29c));
 }
 .attest-chart-key {
   font-size: 11px;
@@ -147,8 +158,8 @@
 }
 .attest-chart-chooser {
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
+  flex-direction: column;
+  align-items: stretch;
   gap: 8px;
   font-size: 12px;
   margin-bottom: 8px;
@@ -178,20 +189,25 @@
 /* Older engines retain explicit colors; current hosts supply the scoped color-scheme. */
 @supports not (color: light-dark(white, black)) {
   :where(:root[data-theme='dark']) .attest-compact-chart {
-    --chart-fail-soft: #9a4619;
+    --chart-fail: var(--fail, #ff6a1a);
+    --chart-fail-soft: var(--fail-soft, #9a4619);
   }
   :where(:root[data-theme='light']) .attest-compact-chart {
-    --chart-fail-soft: #ffc29c;
+    --chart-fail: var(--fail, #ff5c00);
+    --chart-fail-soft: var(--fail-soft, #ffc29c);
   }
   .attest-compact[data-theme='dark'] .attest-compact-chart {
-    --chart-fail-soft: #9a4619;
+    --chart-fail: var(--fail, #ff6a1a);
+    --chart-fail-soft: var(--fail-soft, #9a4619);
   }
   .attest-compact[data-theme='light'] .attest-compact-chart {
-    --chart-fail-soft: #ffc29c;
+    --chart-fail: var(--fail, #ff5c00);
+    --chart-fail-soft: var(--fail-soft, #ffc29c);
   }
   @media (prefers-color-scheme: dark) {
     .attest-compact[data-theme='system'] .attest-compact-chart {
-      --chart-fail-soft: #9a4619;
+      --chart-fail: var(--fail, #ff6a1a);
+      --chart-fail-soft: var(--fail-soft, #9a4619);
     }
   }
 }
@@ -200,9 +216,12 @@
   stroke: none;
 }
 .attest-chart-actions {
-  min-height: 38px;
+  display: grid;
+  grid-template-rows: 58px 36px;
+  gap: 8px;
+  margin-bottom: 8px;
 }
-.attest-chart-dense {
+.attest-chart-hotspot {
   cursor: pointer;
 }
 .attest-chart-dense-mark {
@@ -220,5 +239,66 @@
 }
 .attest-chart-chooser a {
   max-width: 100%;
-  overflow-wrap: anywhere;
+  overflow: hidden;
+}
+
+/* Reserve the same two control rows across inspection, selection and blur. */
+.attest-compact-chart > .attest-chart-chooser {
+  height: 102px;
+  box-sizing: border-box;
+  display: grid;
+  grid-template-rows: 58px 36px;
+}
+.attest-chart-chooser label,
+.attest-chart-actions > label {
+  display: grid;
+  grid-template-rows: 18px 36px;
+  gap: 4px;
+  margin: 0;
+  min-width: 0;
+}
+.attest-chart-actions > button {
+  grid-row: 2;
+}
+.attest-compact-chart .attest-chart-action,
+.attest-chart-chooser select {
+  box-sizing: border-box;
+  border: 1px solid var(--chart-line);
+  border-radius: 4px;
+  padding: 6px 10px;
+  background: var(--bg, Canvas);
+  color: inherit;
+  font: inherit;
+  min-width: 0;
+  min-height: 36px;
+}
+.attest-compact-chart .attest-chart-action {
+  display: block;
+  font-size: 12px;
+  line-height: 22px;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.attest-chart-action:hover:not(:disabled) {
+  background: var(--chart-line);
+}
+.attest-chart-action:disabled {
+  cursor: default;
+  text-decoration: none;
+  color: var(--muted, GrayText);
+}
+.attest-chart-action:focus-visible,
+.attest-chart-chooser select:focus-visible {
+  outline: 2px solid var(--chart-ink);
+  outline-offset: 2px;
+}
+.attest-compact-chart svg .attest-chart-empty {
+  paint-order: stroke;
+  stroke: var(--bg, Canvas);
+  stroke-width: 5px;
+  stroke-linejoin: round;
 }
