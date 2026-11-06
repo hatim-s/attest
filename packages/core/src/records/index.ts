@@ -55,4 +55,23 @@ export type { InlineArtifact } from '@attest/contracts';
 
 export { StoreError } from '../store/store-error.js';
 
-export * from './dashboard-schemas.js';
+export {
+  sliceTotalsSchema,
+  evalSliceSchema,
+  evalSummarySchema,
+  evalPageSchema,
+  projectRunOverviewSchema,
+  evalRunPageSchema,
+  caseHistoryPageSchema,
+  evalCaseWindowSchema,
+  activitySchema,
+  type SliceTotals,
+  type EvalSlice,
+  type EvalPage,
+  type EvalSummary,
+  type ProjectRunOverview,
+  type EvalRunPage,
+  type CaseHistoryPage,
+  type EvalCaseWindow,
+  type Activity,
+} from './dashboard-schemas.js';

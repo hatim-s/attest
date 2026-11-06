@@ -92,6 +92,8 @@ const activityDaySchema = z.object({
 });
 
 const activitySchema = z.object({
+  coveredFrom: z.string(),
+  coveredTo: z.string(),
   timezone: z.literal('UTC'),
   days: z.array(activityDaySchema),
   truncated: z.boolean(),

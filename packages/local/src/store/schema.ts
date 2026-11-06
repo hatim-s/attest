@@ -4,6 +4,7 @@ import type { CacheKind, RunStatus, StoredMetricEvaluation } from '@attest/core'
 
 /** Kysely row shape for the initial schema runs table. */
 interface RunsTable {
+  created_order: string;
   id: string;
   created_at: string;
   finished_at: string | null;
@@ -19,6 +20,7 @@ interface RunsTable {
 
 /** Kysely row shape for the initial schema cases table. */
 interface CasesTable {
+  is_eval: number;
   id: string;
   run_id: string;
   case_id: string;
@@ -82,6 +84,7 @@ interface ResponseCacheTable {
 
 /** Defines the complete initial schema database surface consumed by Kysely. */
 interface SuiteTotalsTable extends SliceTotals {
+  is_eval: number;
   run_id: string;
   suite_name: string;
   run_created_at: string;
@@ -89,6 +92,7 @@ interface SuiteTotalsTable extends SliceTotals {
 }
 
 interface Database {
+  eval_suites: { suite_name: string };
   run_suite_totals: SuiteTotalsTable;
   suite_cases: { suite_name: string; case_id: string };
   runs: RunsTable;

@@ -173,16 +173,16 @@ updates; conflicts and child insert failures roll back every projection.
 Finalization materializes slice state before terminal immutability takes effect.
 A complete slice needs known positive planned coverage, all planned cases recorded,
 and no errors or skipped rows. A failed multi-eval run can contain complete slices.
-Unknown legacy plans and zero-case selections remain incomplete with null pass rate.
+Unknown historical plans remain incomplete with null pass rate and unknown failing state. Zero-selected eval slices are omitted. Only attest.eval-run schema identities enter eval discovery, windows, history and activity; generic run suites and summaries retain probe and legacy evidence.
 Over-recorded plans fail rather than hiding a negative not-run count.
 
 The eval/state/time index makes latest-complete lookup independent of incomplete
-history length. Eval discovery uses distinct-key seeks. Pages use limit plus one,
+history length. Eval discovery pages a persisted eval catalog and uses indexed correlated latest/state seeks in one statement. Metadata hydration is batched with one JSON parameter. Pages use limit plus one,
 never exact history counts. Stored case identity pages precede the ten-run outcome
-window, so at most 1,000 identities and 10,000 cells are loaded. Identities cover
+window, so each page loads at most 1,000 identities and 10,000 cells. An opaque, bounded cursor carries the original ten run identities across pages; all recorded identities remain pageable. Null cells indicate absent evidence, not a selected case. Identities cover
 recorded cases only; authored definitions and never-run cases belong to a separate
 catalog. Activity uses UTC and visits at most 10,001 totals rows in a 92-day interval.
-It returns at most 10,000 rows' contributions and an explicit truncation flag,
+It returns at most 10,000 rows' contributions and an explicit truncation flag. When truncated it drops the entire boundary UTC day, including timestamp ties. Activity.coveredFrom and coveredTo identify the exact covered interval; clients must not fill older days as zero. It
 counts eval slices rather than distinct multi-eval runs, and has no DST option.
 Project overview returns a 500-eval page and at most 10,000 running run identities
 through a partial index. Its eval cursor and running-count truncation flag must
@@ -192,7 +192,7 @@ SQLite can choose the history index and visit arbitrarily many older outcomes.
 
 Migration v1 to v2 is a single offline BEGIN IMMEDIATE transaction including
 backfill, trigger restoration and version publication. Backfill reuses the core
-case projection rule, validates persisted records and selected snapshots, and
+case projection rule, validates persisted records and decodes only historical plan fields, and
 ignores stale v1 summary_json. A failure rolls back the whole version. It can
 hold the write lock longer than another writer's five-second busy timeout. Stop
 writers, back up the store and obtain human approval before applying to user data.
@@ -209,3 +209,27 @@ Same-process handles share a path lock to avoid synchronous SQLite busy waits
 blocking another transaction's continuation. Cross-process serialization remains
 SQLite-owned. Dashboard composite reads use deferred read transactions and one
 WAL snapshot; they do not acquire writer reservations.
+
+Dashboard migration corrections preserve historical config/evidence JSON and original run
+creation timestamps. Canonical UTC `created_order` on runs and `run_created_at` on
+case/totals projections own indexed ordering. Live timestamps and query bounds accept
+valid ISO timestamps with offsets and normalize to milliseconds in UTC. Bounds are
+since-inclusive and until-exclusive. Backfill ignores today's effective command schema;
+missing or unrecognized plan fields produce unknown coverage. Repeated historical tags
+or test ids do not block migration. Contradictory case identities and known over-plan
+records fail with typed CORRUPT_DATA identifying the run and suite. Secondary indexes
+are built after backfill inside the same atomic transaction, before trigger restoration
+and version publication.
+
+Writer `openStore` currently migrates implicitly. Readonly opens reject v1. This is
+not an implemented offline migration UX: a migration host must still obtain explicit
+human approval, stop writers, back up the store, run the writer migration in an offline
+window and verify readiness before reopening readers. No CLI command or guided host
+integration is provided by this ownership chunk. Large stores can exceed busy_timeout;
+real-store migration requires approval and an offline window. The v2 schema here is
+unreleased; earlier disposable v2 fixtures must be recreated rather than reopened.
+
+These measurements and JSON batching describe the local SQLite adapter. D1 needs its
+own adapter and execution evidence under its 100-bound-parameter constraint; local
+1,000-element IN queries are not evidence for that host. Dashboard bulk identity and
+metadata queries use JSON parameters rather than one parameter per item.

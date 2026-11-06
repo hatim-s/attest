@@ -639,6 +639,7 @@ describe('RunStore adversarial persistence', () => {
           id: 'raw-finalized-case',
           verdict: 'pass',
           run_created_at: run.createdAt,
+          is_eval: 0,
           run_id: run.id,
           case_id: 'raw-finalized-case',
           suite_name: 'suite',

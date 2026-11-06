@@ -1,5 +1,5 @@
 import type { SliceTotals, EvalSlice, EvalPage } from '../records/dashboard-schemas.js';
-import type { RunRecord, CaseSummary } from '../store/types.js';
+import type { RunRecord, CaseSummary, RunSummary } from '../store/types.js';
 
 /** Creates fresh counters for one selected eval, including a known empty selection. */
 const emptySliceTotals = (planned: number | null): SliceTotals => ({
@@ -12,6 +12,24 @@ const emptySliceTotals = (planned: number | null): SliceTotals => ({
   metricErrors: 0,
   scored: 0,
   scoreSum: 0,
+});
+
+/** Fresh empty run summary shared by projection consumers. */
+const emptyRunSummary = (): RunSummary => ({
+  totalCases: 0,
+  passedCases: 0,
+  failedCases: 0,
+  errorCases: 0,
+  metricErrorCount: 0,
+});
+
+/** Run errors include skipped cases; eval coverage retains the distinction. */
+const addSliceToRunSummary = (summary: RunSummary, totals: SliceTotals): RunSummary => ({
+  totalCases: summary.totalCases + totals.recorded,
+  passedCases: summary.passedCases + totals.passed,
+  failedCases: summary.failedCases + totals.failed,
+  errorCases: summary.errorCases + totals.errored + totals.skipped,
+  metricErrorCount: summary.metricErrorCount + totals.metricErrors,
 });
 
 /** Adds one case projection using the same rule for snapshots, migration and live writes. */
@@ -98,11 +116,16 @@ const summarizeEvalSlices = (
     latest,
     latestComplete,
     latestTerminal: terminal,
-    failing: terminal === null ? null : terminal.state !== 'complete' || terminal.counts.failed > 0,
+    failing:
+      terminal === null || terminal.counts.planned === null
+        ? null
+        : terminal.state !== 'complete' || terminal.counts.failed > 0,
   };
 };
 
 export {
+  emptyRunSummary,
+  addSliceToRunSummary,
   summarizeEvalSlices,
   emptySliceTotals,
   addCaseToTotals,

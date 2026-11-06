@@ -170,12 +170,16 @@ CREATE INDEX idx_runs_created ON runs(created_at DESC);
 /** Projection rules are versioned with the schema, never repaired during reads. */
 const dashboardSchemaSql = `
 DROP TRIGGER cases_no_finalized_update;
+DROP TRIGGER runs_no_terminal_update;
+ALTER TABLE runs ADD COLUMN created_order TEXT;
 ALTER TABLE cases ADD COLUMN run_created_at TEXT;
+ALTER TABLE cases ADD COLUMN is_eval INTEGER;
 ALTER TABLE cases ADD COLUMN verdict TEXT CHECK(verdict IN ('pass','fail','error'));
 CREATE TABLE run_suite_totals (
  run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
  suite_name TEXT NOT NULL,
  run_created_at TEXT NOT NULL,
+ is_eval INTEGER NOT NULL,
  state TEXT NOT NULL CHECK(state IN ('running','complete','incomplete')),
  planned INTEGER CHECK(planned IS NULL OR planned >= 0),
  recorded INTEGER NOT NULL CHECK(recorded >= 0),
@@ -190,19 +194,27 @@ CREATE TABLE run_suite_totals (
  CHECK(planned IS NULL OR recorded <= planned),
  PRIMARY KEY(run_id, suite_name)
 ) WITHOUT ROWID;
+CREATE TABLE eval_suites (suite_name TEXT PRIMARY KEY) WITHOUT ROWID;
 CREATE TABLE suite_cases (suite_name TEXT NOT NULL, case_id TEXT NOT NULL, PRIMARY KEY(suite_name, case_id)) WITHOUT ROWID;
-CREATE INDEX idx_runs_running ON runs(id) WHERE status = 'running';
-CREATE INDEX idx_totals_suite ON run_suite_totals(suite_name, run_created_at DESC, run_id DESC);
-CREATE INDEX idx_totals_state ON run_suite_totals(suite_name, state, run_created_at DESC, run_id DESC);
-CREATE INDEX idx_totals_created ON run_suite_totals(run_created_at DESC, run_id DESC, suite_name);
-CREATE INDEX idx_cases_history ON cases(suite_name, case_id, run_created_at DESC, run_id DESC, verdict, outcome, duration_ms);
-CREATE INDEX idx_cases_window ON cases(run_id, suite_name, case_id, verdict, outcome);
-CREATE INDEX idx_cases_scoped ON cases(run_id, suite_name, id);
-DROP INDEX idx_runs_created;
-CREATE INDEX idx_runs_created ON runs(created_at DESC, id DESC);
+
 `;
 
 const dashboardTriggersSql = `
+CREATE TRIGGER runs_no_terminal_update BEFORE UPDATE ON runs
+WHEN OLD.status != 'running'
+BEGIN
+ SELECT RAISE(ABORT, 'attest: finalized runs are immutable');
+END;
+CREATE INDEX idx_runs_running ON runs(schema_id, id) WHERE status = 'running';
+CREATE INDEX idx_totals_eval ON run_suite_totals(suite_name, is_eval, run_created_at DESC, run_id DESC);
+CREATE INDEX idx_totals_suite ON run_suite_totals(suite_name, run_created_at DESC, run_id DESC);
+CREATE INDEX idx_totals_state ON run_suite_totals(suite_name, is_eval, state, run_created_at DESC, run_id DESC);
+CREATE INDEX idx_totals_created ON run_suite_totals(is_eval, run_created_at DESC, run_id DESC, suite_name);
+CREATE INDEX idx_cases_history ON cases(suite_name, case_id, is_eval, run_created_at DESC, run_id DESC, verdict, outcome, duration_ms);
+CREATE INDEX idx_cases_window ON cases(run_id, suite_name, case_id, verdict, outcome);
+CREATE INDEX idx_cases_scoped ON cases(run_id, suite_name, id);
+DROP INDEX idx_runs_created;
+CREATE INDEX idx_runs_created ON runs(created_order DESC, id DESC);
 CREATE TRIGGER cases_no_finalized_update
 BEFORE UPDATE ON cases
 WHEN (SELECT status FROM runs WHERE id = OLD.run_id) != 'running'
@@ -219,7 +231,7 @@ BEGIN
  SELECT RAISE(ABORT, 'attest: case projections are immutable');
 END;
 CREATE TRIGGER cases_require_projection BEFORE INSERT ON cases
-WHEN NEW.verdict IS NULL OR NEW.run_created_at IS NULL
+WHEN NEW.verdict IS NULL OR NEW.run_created_at IS NULL OR NEW.is_eval IS NULL
 BEGIN
  SELECT RAISE(ABORT, 'attest: missing case projection');
 END;

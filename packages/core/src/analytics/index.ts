@@ -8,6 +8,8 @@ export {
 } from './case-aggregates.js';
 
 export {
+  emptyRunSummary,
+  addSliceToRunSummary,
   summarizeEvalSlices,
   emptySliceTotals,
   addCaseToTotals,

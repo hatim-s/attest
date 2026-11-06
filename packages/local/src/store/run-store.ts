@@ -1,3 +1,4 @@
+import { canonicalTime } from './internal/dashboard-boundary.js';
 import { parseWithSchemaSync } from '@attest/contracts';
 import { z } from 'zod';
 
@@ -123,7 +124,7 @@ class SqliteRunStore implements RunStore {
       const record: RunRecord = {
         ...metadata,
         id: identity.id,
-        createdAt: identity.createdAt,
+        createdAt: canonicalTime(identity.createdAt, 'INVALID_RECORD'),
         status: 'running',
       };
 
@@ -133,6 +134,7 @@ class SqliteRunStore implements RunStore {
           .values({
             id: record.id,
             created_at: record.createdAt,
+            created_order: record.createdAt,
             finished_at: null,
             status: record.status,
             schema_id: record.schemaId,
@@ -252,14 +254,14 @@ class SqliteRunStore implements RunStore {
     let select = this.#database
       .selectFrom('runs')
       .selectAll()
-      .orderBy('created_at', 'desc')
+      .orderBy('created_order', 'desc')
       .orderBy('id', 'desc')
       .limit(limit + 1);
 
     if (query.cursor !== undefined) {
       const anchor = await this.#database
         .selectFrom('runs')
-        .select(['created_at', 'id'])
+        .select(['created_order', 'id'])
         .where('id', '=', query.cursor)
         .executeTakeFirst();
 
@@ -267,8 +269,8 @@ class SqliteRunStore implements RunStore {
         throw new StoreError('INVALID_CURSOR', `Run cursor ${query.cursor} is unknown.`);
       select = select.where((eb) =>
         eb.or([
-          eb('created_at', '<', anchor.created_at),
-          eb.and([eb('created_at', '=', anchor.created_at), eb('id', '<', anchor.id)]),
+          eb('created_order', '<', anchor.created_order),
+          eb.and([eb('created_order', '=', anchor.created_order), eb('id', '<', anchor.id)]),
         ]),
       );
     }

@@ -1,5 +1,8 @@
+import { EVAL_RUN_SCHEMA_ID } from '@attest/contracts';
+import { canonicalTime } from './dashboard-boundary.js';
 import type { Transaction } from 'kysely';
 
+import { summarizeCaseRecord } from '@attest/core';
 import {
   canonicalStringify,
   contentHash,
@@ -12,7 +15,7 @@ import {
   type StoredMetricEvaluation,
 } from '@attest/core';
 
-import { incrementSuiteTotals, summarizeCaseRecord } from './dashboard-totals.js';
+import { incrementSuiteTotals } from './dashboard-totals.js';
 import type { Database } from '../schema.js';
 import { toCaseRecord, toMetricEvaluation } from './row-mapping.js';
 import { createUlid } from './create-ulid.js';
@@ -114,7 +117,7 @@ const recordCaseTransaction = async (
 ): Promise<void> => {
   const run = await database
     .selectFrom('runs')
-    .select(['status', 'created_at'])
+    .select(['status', 'created_at', 'schema_id'])
     .where('id', '=', runId)
     .executeTakeFirst();
 
@@ -154,7 +157,8 @@ const recordCaseTransaction = async (
     .insertInto('cases')
     .values({
       id: caseRowId,
-      run_created_at: run.created_at,
+      is_eval: Number(run.schema_id === EVAL_RUN_SCHEMA_ID),
+      run_created_at: canonicalTime(run.created_at, 'CORRUPT_DATA'),
       verdict: summary.verdict,
       run_id: runId,
       case_id: execution.caseId,

@@ -1,23 +1,42 @@
+import { EVAL_RUN_SCHEMA_ID } from '@attest/contracts';
+import { canonicalTime, historicalPlan } from './dashboard-boundary.js';
 import { sql, type Kysely } from 'kysely';
-import { addCaseToTotals, emptySliceTotals, toEvalSlice } from '@attest/core/analytics';
+import {
+  emptyRunSummary,
+  addSliceToRunSummary,
+  addCaseToTotals,
+  emptySliceTotals,
+  toEvalSlice,
+} from '@attest/core/analytics';
 import {
   plannedSuiteCases,
-  summarizeCaseRecord,
+  StoreError,
   type RunRecord,
   type CaseSummary,
   type RunSummary,
 } from '@attest/core';
 import type { Database } from '../schema.js';
 
-/** Seeds zero rows so selected evals without a recorded case remain visible. */
-const seedSuiteTotals = async (db: Kysely<Database>, run: RunRecord): Promise<void> => {
-  for (const [suiteName, planned] of plannedSuiteCases(run.schemaId, run.configJson) ?? []) {
+/** Seeds participating evals; empty selections do not create slices. */
+const seedSuiteTotals = async (
+  db: Kysely<Database>,
+  run: RunRecord,
+  plan = plannedSuiteCases(run.schemaId, run.configJson),
+): Promise<void> => {
+  for (const [suiteName, planned] of plan ?? []) {
+    if (planned === 0) continue;
+    await db
+      .insertInto('eval_suites')
+      .values({ suite_name: suiteName })
+      .onConflict((oc) => oc.doNothing())
+      .execute();
     await db
       .insertInto('run_suite_totals')
       .values({
         run_id: run.id,
         suite_name: suiteName,
-        run_created_at: run.createdAt,
+        run_created_at: canonicalTime(run.createdAt, 'CORRUPT_DATA'),
+        is_eval: Number(run.schemaId === EVAL_RUN_SCHEMA_ID),
         state: 'running',
         ...emptySliceTotals(planned),
       })
@@ -32,18 +51,52 @@ const incrementSuiteTotals = async (
   createdAt: string,
   summary: CaseSummary,
 ): Promise<void> => {
-  await db
-    .insertInto('suite_cases')
-    .values({ suite_name: summary.suiteName, case_id: summary.caseId })
-    .onConflict((oc) => oc.doNothing())
-    .execute();
+  const run = await db
+    .selectFrom('runs')
+    .select(['schema_id', 'config_json'])
+    .where('id', '=', runId)
+    .executeTakeFirstOrThrow();
+
+  const previous = await db
+    .selectFrom('run_suite_totals')
+    .select(['planned', 'recorded'])
+    .where('run_id', '=', runId)
+    .where('suite_name', '=', summary.suiteName)
+    .executeTakeFirst();
+
+  // Empty selected suites have no totals row, but their known zero still forbids evidence.
+  const planned =
+    previous === undefined && run.schema_id === EVAL_RUN_SCHEMA_ID
+      ? historicalPlan(run.config_json, runId)?.get(summary.suiteName)
+      : previous?.planned;
+
+  if (planned !== null && planned !== undefined && (previous?.recorded ?? 0) >= planned)
+    throw new StoreError(
+      'CORRUPT_DATA',
+      `Recorded cases exceed plan in run ${runId}, suite ${summary.suiteName}.`,
+    );
+
+  if (run.schema_id === EVAL_RUN_SCHEMA_ID)
+    await db
+      .insertInto('eval_suites')
+      .values({ suite_name: summary.suiteName })
+      .onConflict((oc) => oc.doNothing())
+      .execute();
+
+  if (run.schema_id === EVAL_RUN_SCHEMA_ID)
+    await db
+      .insertInto('suite_cases')
+      .values({ suite_name: summary.suiteName, case_id: summary.caseId })
+      .onConflict((oc) => oc.doNothing())
+      .execute();
   const delta = addCaseToTotals(emptySliceTotals(null), summary);
   await db
     .insertInto('run_suite_totals')
     .values({
       run_id: runId,
       suite_name: summary.suiteName,
-      run_created_at: createdAt,
+      run_created_at: canonicalTime(createdAt, 'CORRUPT_DATA'),
+      is_eval: Number(run.schema_id === EVAL_RUN_SCHEMA_ID),
       state: 'running',
       ...delta,
     })
@@ -94,36 +147,10 @@ const summarizeRuns = async (
   const sums = new Map<string, RunSummary>();
 
   for (const row of rows) {
-    const sum = sums.get(row.run_id) ?? {
-      totalCases: 0,
-      passedCases: 0,
-      failedCases: 0,
-      errorCases: 0,
-      metricErrorCount: 0,
-    };
-
-    sum.totalCases += row.recorded;
-    sum.passedCases += row.passed;
-    sum.failedCases += row.failed;
-    sum.errorCases += row.errored + row.skipped;
-    sum.metricErrorCount += row.metricErrors;
-    sums.set(row.run_id, sum);
+    sums.set(row.run_id, addSliceToRunSummary(sums.get(row.run_id) ?? emptyRunSummary(), row));
   }
 
-  return (id) =>
-    sums.get(id) ?? {
-      totalCases: 0,
-      passedCases: 0,
-      failedCases: 0,
-      errorCases: 0,
-      metricErrorCount: 0,
-    };
+  return (id) => sums.get(id) ?? emptyRunSummary();
 };
 
-export {
-  seedSuiteTotals,
-  incrementSuiteTotals,
-  finalizeSuiteTotals,
-  summarizeRuns,
-  summarizeCaseRecord,
-};
+export { seedSuiteTotals, incrementSuiteTotals, finalizeSuiteTotals, summarizeRuns };

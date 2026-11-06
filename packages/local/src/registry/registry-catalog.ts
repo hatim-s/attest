@@ -26,7 +26,14 @@ const emptySource: RunSource = {
   listEvalRuns: () => Promise.resolve({ items: [] }),
   getEvalCaseWindow: () => Promise.resolve({ runs: [], items: [] }),
   getCaseHistory: () => Promise.resolve({ items: [] }),
-  getActivity: () => Promise.resolve({ timezone: 'UTC', days: [], truncated: false }),
+  getActivity: ({ from, to }) =>
+    Promise.resolve({
+      coveredFrom: from,
+      coveredTo: to,
+      timezone: 'UTC',
+      days: [],
+      truncated: false,
+    }),
   listRunSuites: runNotFound,
   listRuns: () => Promise.resolve({ items: [] }),
   getRun: runNotFound,
