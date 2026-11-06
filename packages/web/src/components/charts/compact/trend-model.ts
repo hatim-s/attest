@@ -8,7 +8,7 @@ type TrendRun = {
   label: string;
   runStatus: RunStatus;
   counts: VerdictCounts & { planned: number | null; recorded: number };
-} & ({ state: 'complete' } | { state: 'running' | 'incomplete' });
+} & ({ state: 'complete'; passRate: number } | { state: 'running' | 'incomplete' });
 
 type TrendAxis = 'run' | 'date';
 
@@ -16,9 +16,7 @@ const TREND_LIMIT = 200;
 
 /** The complete slice uses its recorded denominator, independent of run-wide status. */
 function passRate(run: TrendRun) {
-  return run.state === 'complete' && run.counts.recorded > 0
-    ? run.counts.passed / run.counts.recorded
-    : null;
+  return run.state === 'complete' ? run.passRate : null;
 }
 
 /** Sort a bounded server window, resolving timestamp ties by real run identity. */

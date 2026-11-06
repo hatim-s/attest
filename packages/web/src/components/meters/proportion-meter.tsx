@@ -19,6 +19,11 @@ function ProportionMeter({ counts, label }: ProportionMeterProps) {
           <i key={`${kind}-${index}`} className={`attest-meter-mark ${kind}`} aria-hidden="true" />
         )),
       )}
+      {counts.notRun === null && (
+        <span className="attest-meter-unknown">
+          ? <span>remainder unknown</span>
+        </span>
+      )}
       {segments.every(({ slots }) => slots === 0) && (
         <span aria-hidden="true">
           {counts.notRun === null ? 'No recorded cases; not-run count unknown' : 'No cases'}

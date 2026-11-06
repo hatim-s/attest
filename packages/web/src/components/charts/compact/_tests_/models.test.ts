@@ -8,8 +8,11 @@ const complete = {
   startedAt: 100,
   runStatus: 'completed',
   state: 'complete',
+  passRate: 0.8,
   counts: { planned: 10, recorded: 10, passed: 8, failed: 2, errored: 0, skipped: 0, notRun: 0 },
 } satisfies TrendRun;
+
+const window = { from: '2026-11-05', to: '2026-11-06', utcOffsetMinutes: 330 };
 
 const day = {
   day: '2026-11-06',
@@ -35,18 +38,16 @@ describe('eval slice trend', () => {
     expect(prepareTrend([evalB], 'run')[0]?.rate).toBe(0.8);
   });
 
-  it('keeps running/incomplete slices and zero denominators off the line', () => {
+  it('keeps running/incomplete slices off the line', () => {
     expect(passRate({ ...complete, state: 'running' })).toBeNull();
     expect(passRate({ ...complete, state: 'incomplete', runStatus: 'cancelled' })).toBeNull();
-    expect(
-      passRate({ ...complete, counts: { ...complete.counts, recorded: 0, passed: 0 } }),
-    ).toBeNull();
   });
 
   it('preserves unknown plans and compares recorded rates without claiming case regressions', () => {
     const smaller = {
       ...complete,
       id: 'b',
+      passRate: 0.6,
       startedAt: 200,
       counts: { ...complete.counts, planned: null, notRun: null, recorded: 5, passed: 3 },
     } satisfies TrendRun;
@@ -94,10 +95,10 @@ describe('eval slice trend', () => {
 
 describe('daily activity', () => {
   it('orders days and keeps skipped counts separate from the shared diverging scale', () => {
-    const activity = prepareActivity([
-      day,
-      { ...day, day: '2026-11-05', passed: 2, failed: 3, errored: 2, skipped: 20 },
-    ]);
+    const activity = prepareActivity(
+      [day, { ...day, day: '2026-11-05', passed: 2, failed: 3, errored: 2, skipped: 20 }],
+      window,
+    );
 
     expect(activity.ordered.map(({ day }) => day)).toEqual(['2026-11-05', '2026-11-06']);
     expect(activity.up).toBe(8);
@@ -112,10 +113,36 @@ describe('daily activity', () => {
   });
 
   it('supports empty/single windows and enforces a bounded summary input', () => {
-    expect(prepareActivity([]).totals.runCount).toBe(0);
-    expect(prepareActivity([day]).ordered).toEqual([day]);
-    expect(() => prepareActivity(Array.from({ length: ACTIVITY_LIMIT + 1 }, () => day))).toThrow(
-      'Activity window exceeds 92 days',
-    );
+    expect(prepareActivity([], window).totals.runCount).toBe(0);
+    expect(prepareActivity([day], { ...window, from: day.day }).ordered).toEqual([day]);
+    expect(() =>
+      prepareActivity(
+        Array.from({ length: ACTIVITY_LIMIT + 1 }, () => day),
+        window,
+      ),
+    ).toThrow('Activity window exceeds 92 days');
   });
+});
+
+it('fills sparse calendar gaps in the declared offset and bounds inclusive buckets', () => {
+  const filled = prepareActivity([day], {
+    from: '2026-11-04',
+    to: '2026-11-06',
+    utcOffsetMinutes: 330,
+  });
+
+  expect(filled.ordered.map(({ day, runCount }) => [day, runCount])).toEqual([
+    ['2026-11-04', 0],
+    ['2026-11-05', 0],
+    ['2026-11-06', 2],
+  ]);
+  expect(
+    prepareActivity([], { from: '2026-01-01', to: '2026-04-02', utcOffsetMinutes: -480 }).ordered,
+  ).toHaveLength(92);
+
+  for (const to of ['2026-04-03', 'invalid', '2025-12-31', '2026-02-30'])
+    expect(() => prepareActivity([], { from: '2026-01-01', to, utcOffsetMinutes: 0 })).toThrow(
+      RangeError,
+    );
+  expect(passRate({ ...complete, passRate: 0.123 })).toBe(0.123);
 });

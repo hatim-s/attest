@@ -20,18 +20,25 @@ const METER_SLOTS = 40;
 
 /** Largest remainders conserve the fixed slot budget; ties use verdict order. */
 function allocateSlots(counts: VerdictCounts) {
-  const total = segmentOrder.reduce((sum, kind) => sum + (counts[countKeys[kind]] ?? 0), 0);
+  const values = segmentOrder.map((kind) => counts[countKeys[kind]] ?? 0);
 
-  if (total === 0) return segmentOrder.map((kind) => ({ kind, slots: 0 }));
+  if (values.some((value) => !Number.isSafeInteger(value) || value < 0))
+    throw new RangeError('Meter counts must be nonnegative safe integers');
+  const total = values.reduce((sum, value) => sum + BigInt(value), 0n);
+
+  if (total === 0n) return segmentOrder.map((kind) => ({ kind, slots: 0 }));
 
   const shares = segmentOrder.map((kind, index) => {
-    const exact = ((counts[countKeys[kind]] ?? 0) / total) * METER_SLOTS;
+    const numerator = BigInt(counts[countKeys[kind]] ?? 0) * BigInt(METER_SLOTS);
 
-    return { kind, index, slots: Math.floor(exact), remainder: exact % 1 };
+    return { kind, index, slots: Number(numerator / total), remainder: numerator % total };
   });
 
   const remaining = METER_SLOTS - shares.reduce((sum, share) => sum + share.slots, 0);
-  const ranked = [...shares].sort((a, b) => b.remainder - a.remainder || a.index - b.index);
+
+  const ranked = [...shares].sort((a, b) =>
+    a.remainder === b.remainder ? a.index - b.index : a.remainder > b.remainder ? -1 : 1,
+  );
 
   for (const share of ranked.slice(0, remaining)) share.slots += 1;
 

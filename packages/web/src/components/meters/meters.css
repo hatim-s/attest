@@ -1,7 +1,7 @@
 .attest-meter,
 .attest-case-strip {
   --meter-ink: var(--ink, var(--text, CanvasText));
-  --meter-fail: var(--fail, var(--danger, CanvasText));
+  --meter-fail: var(--fail, #c45a2a);
   display: inline-flex;
   align-items: center;
   gap: 2px;
@@ -11,6 +11,7 @@
 }
 .attest-meter {
   width: 180px;
+  flex-wrap: wrap;
 }
 .attest-case-strip {
   flex-wrap: wrap;
@@ -23,9 +24,9 @@
   background: var(--meter-ink);
 }
 .attest-case-strip .attest-meter-mark {
-  flex: 0 0 7px;
+  flex: 0 0 12px;
+  height: 24px;
 }
-.attest-meter-mark.failed,
 .attest-meter-mark.fail {
   background: var(--meter-fail);
 }
@@ -48,4 +49,21 @@
     animation: none;
     transition: none;
   }
+}
+
+.attest-meter-unknown {
+  flex-basis: 100%;
+  font-size: 11px;
+}
+.attest-case-strip .attest-meter-mark.fail {
+  border-top: 4px solid var(--meter-ink);
+  box-sizing: border-box;
+}
+.attest-case-strip .attest-meter-mark.error {
+  border-top: 4px double var(--meter-fail);
+  box-sizing: border-box;
+}
+.attest-case-strip .attest-meter-mark.not-run:focus-visible {
+  outline: 2px solid var(--meter-ink);
+  outline-offset: 3px;
 }

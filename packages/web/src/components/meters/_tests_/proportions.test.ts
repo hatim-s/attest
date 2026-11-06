@@ -58,3 +58,21 @@ describe('aggregate slots', () => {
     }
   });
 });
+
+it('uses exact rational ties across unequal counts and the full safe integer domain', () => {
+  expect(
+    allocateSlots({ passed: 1, failed: 4, errored: 1, skipped: 0, notRun: 0 }).map(
+      ({ slots }) => slots,
+    ),
+  ).toEqual([7, 27, 0, 0, 6]);
+  expect(
+    allocateSlots({
+      passed: Number.MAX_SAFE_INTEGER,
+      failed: Number.MAX_SAFE_INTEGER,
+      errored: Number.MAX_SAFE_INTEGER,
+      skipped: 0,
+      notRun: null,
+    }).map(({ slots }) => slots),
+  ).toEqual([14, 13, 0, 0, 13]);
+  expect(() => allocateSlots({ ...empty, passed: Infinity })).toThrow(RangeError);
+});

@@ -1,6 +1,6 @@
 .attest-compact-chart {
   --chart-ink: var(--ink, var(--text, CanvasText));
-  --chart-fail: var(--fail, var(--danger, CanvasText));
+  --chart-fail: var(--fail, #c45a2a);
   --chart-fail-soft: var(--fail-soft, var(--danger-soft, GrayText));
   --chart-line: var(--line, var(--border, GrayText));
   color: var(--chart-ink);
@@ -21,6 +21,7 @@
   gap: 8px;
 }
 .attest-chart-heading button {
+  background: var(--bg, Canvas);
   font: inherit;
   color: inherit;
   padding: 5px 9px;
@@ -87,12 +88,11 @@
   stroke: var(--chart-ink);
   stroke-width: 2;
 }
-.attest-chart-point.rail-cancelled {
+.attest-chart-point.rail-incomplete {
   fill: var(--bg, Canvas);
   stroke: var(--muted, GrayText);
   stroke-width: 2;
 }
-.attest-chart-point.rail-failed,
 .attest-chart-triangle,
 .attest-chart-bar-fail {
   fill: var(--chart-fail);
@@ -128,14 +128,6 @@
   color: var(--muted, GrayText);
   margin: 8px 0 0;
 }
-@media (max-width: 480px) {
-  .attest-chart-readout {
-    min-height: 145px;
-  }
-  .attest-compact-chart svg {
-    min-height: 145px;
-  }
-}
 @media (prefers-reduced-motion: reduce) {
   .attest-compact-chart *,
   .attest-compact-chart *::before,
@@ -143,4 +135,41 @@
     animation: none;
     transition: none;
   }
+}
+
+.attest-chart-selection {
+  fill: none;
+  stroke: var(--chart-ink);
+  stroke-width: 2;
+  stroke-dasharray: 3 2;
+  pointer-events: none;
+}
+.attest-chart-chooser {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  margin-bottom: 8px;
+}
+.attest-chart-chooser label {
+  min-width: 0;
+}
+.attest-chart-chooser select {
+  max-width: 100%;
+  min-height: 32px;
+  color: inherit;
+  background: var(--bg, Canvas);
+  font: inherit;
+}
+.attest-chart-chooser a {
+  color: inherit;
+  min-height: 24px;
+  display: inline-flex;
+  align-items: center;
+}
+
+.attest-chart-shortfall,
+.attest-chart-halo {
+  pointer-events: none;
 }
