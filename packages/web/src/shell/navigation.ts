@@ -1,0 +1,137 @@
+import { z } from 'zod';
+import type { ApiCapabilities } from '@attest/api/contract';
+import type { ProjectRecord } from '@attest/core/records';
+
+const identity = z
+  .string()
+  .min(1)
+  .max(256)
+  .refine((value) => value.trim().length > 0);
+
+const projectScope = { sourceId: identity, projectKey: identity };
+
+const scope = { ...projectScope, evalId: identity };
+
+const recentTargetSchema = z.discriminatedUnion('kind', [
+  z.object({ ...projectScope, kind: z.literal('project-run'), runId: identity }).strict(),
+  z
+    .object({
+      ...scope,
+      kind: z.literal('project-run-case'),
+      runId: identity,
+      caseId: identity,
+    })
+    .strict(),
+  z.object({ ...scope, kind: z.literal('run'), runId: identity }).strict(),
+  z.object({ ...scope, kind: z.literal('case'), caseId: identity }).strict(),
+  z.object({ ...scope, kind: z.literal('run-case'), runId: identity, caseId: identity }).strict(),
+]);
+
+type RecentTarget = z.infer<typeof recentTargetSchema>;
+
+type ShellTarget =
+  | { kind: 'projects'; sourceId: string }
+  | { kind: 'project' | 'project-runs'; sourceId: string; projectKey: string }
+  | { kind: 'runs' | 'cases'; sourceId: string; projectKey: string; evalId: string }
+  | RecentTarget;
+
+type ShellSource = {
+  /** Stable non-secret identity. Include account/workspace scope when applicable. */
+  id: string;
+  label: string;
+} & (
+  | { kind: 'local' | 'cloud'; capabilities: ApiCapabilities }
+  | { kind: 'report'; capabilities: { control: false } }
+);
+
+type ShellEval = { id: string; name: string };
+
+/** Load only the expanded project's evals; terminal states never announce loading. */
+type NavigationData<T> =
+  | { status: 'loading' }
+  | { status: 'error'; message: string; retry?: () => void }
+  | { status: 'unavailable'; message: string }
+  | { status: 'ready'; items: readonly T[] };
+
+type ShellProject = Pick<ProjectRecord, 'key' | 'name'>;
+
+type ShellBreadcrumb = { label: string; target: ShellTarget };
+
+type RecentLabel = { label: string; context: string };
+
+/** Tuple encoding keeps delimiters in opaque domain identifiers unambiguous. */
+const targetKey = (target: ShellTarget): string => {
+  switch (target.kind) {
+    case 'projects':
+      return JSON.stringify([target.kind, target.sourceId]);
+    case 'project':
+    case 'project-runs':
+      return JSON.stringify([target.kind, target.sourceId, target.projectKey]);
+    case 'runs':
+    case 'cases':
+      return JSON.stringify([target.kind, target.sourceId, target.projectKey, target.evalId]);
+    case 'project-run':
+      return JSON.stringify([target.kind, target.sourceId, target.projectKey, target.runId]);
+    case 'project-run-case':
+      return JSON.stringify([
+        target.kind,
+        target.sourceId,
+        target.projectKey,
+        target.evalId,
+        target.runId,
+        target.caseId,
+      ]);
+    case 'run':
+      return JSON.stringify([
+        target.kind,
+        target.sourceId,
+        target.projectKey,
+        target.evalId,
+        target.runId,
+      ]);
+    case 'case':
+      return JSON.stringify([
+        target.kind,
+        target.sourceId,
+        target.projectKey,
+        target.evalId,
+        target.caseId,
+      ]);
+    case 'run-case':
+      return JSON.stringify([
+        target.kind,
+        target.sourceId,
+        target.projectKey,
+        target.evalId,
+        target.runId,
+        target.caseId,
+      ]);
+  }
+};
+
+/** Navigation scope stays project-wide even when a case needs its suite identity. */
+const isProjectWide = (target: ShellTarget) =>
+  target.kind === 'projects' ||
+  target.kind === 'project' ||
+  target.kind === 'project-runs' ||
+  target.kind === 'project-run' ||
+  target.kind === 'project-run-case';
+
+/** Only deep locations belong in recent history. */
+const isRecordableTarget = (target: ShellTarget): target is RecentTarget =>
+  'runId' in target || target.kind === 'case';
+
+export {
+  isProjectWide,
+  isRecordableTarget,
+  recentTargetSchema,
+  targetKey,
+  type RecentTarget,
+  type ShellTarget,
+  type ShellSource,
+  type ShellProject,
+  type ShellEval,
+  type NavigationData,
+  type ShellBreadcrumb,
+  type RecentLabel,
+};

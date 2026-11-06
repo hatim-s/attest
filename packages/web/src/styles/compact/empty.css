@@ -1,0 +1,35 @@
+.attest-compact .attest-empty {
+  padding: 40px 24px;
+  border: 1px dashed var(--line-2);
+  border-radius: 6px;
+  text-align: center;
+  background: var(--panel);
+}
+.attest-empty-title {
+  font: 600 18px/1.4 var(--tight);
+  margin: 0 0 8px;
+  color: var(--ink);
+}
+.attest-empty-description {
+  color: var(--muted);
+  max-width: 56ch;
+  margin: 0 auto 16px;
+}
+.attest-empty-command {
+  font: 12px/1.5 var(--mono);
+  overflow-x: auto;
+  padding: 8px 12px;
+  margin: 12px auto;
+  max-width: 100%;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.attest-compact .attest-empty-action {
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+  border-radius: 4px;
+  padding: 6px 12px;
+  border: 1px solid var(--line-2);
+  background: var(--bg);
+}
