@@ -1,5 +1,5 @@
 import { EVAL_RUN_SCHEMA_ID } from '@attest/contracts';
-import { canonicalTime, historicalPlan } from './dashboard-boundary.js';
+import { canonicalTime } from './dashboard-boundary.js';
 import { sql, type Kysely } from 'kysely';
 import {
   emptyRunSummary,
@@ -8,22 +8,31 @@ import {
   emptySliceTotals,
   toEvalSlice,
 } from '@attest/core/analytics';
-import {
-  plannedSuiteCases,
-  StoreError,
-  type RunRecord,
-  type CaseSummary,
-  type RunSummary,
-} from '@attest/core';
+import { StoreError, type RunRecord, type CaseSummary, type RunSummary } from '@attest/core';
 import type { Database } from '../schema.js';
 
 /** Seeds participating evals; empty selections do not create slices. */
 const seedSuiteTotals = async (
   db: Kysely<Database>,
   run: RunRecord,
-  plan = plannedSuiteCases(run.schemaId, run.configJson),
+  plan: ReadonlyMap<string, ReadonlySet<string>> | null,
 ): Promise<void> => {
-  for (const [suiteName, planned] of plan ?? []) {
+  for (const [suiteName, cases] of plan ?? []) {
+    const identities = [...cases];
+
+    for (let offset = 0; offset < identities.length; offset += 100) {
+      await db
+        .insertInto('run_selected_cases')
+        .values(
+          identities
+            .slice(offset, offset + 100)
+            .map((caseId) => ({ run_id: run.id, suite_name: suiteName, case_id: caseId })),
+        )
+        .execute();
+    }
+
+    const planned = cases.size;
+
     if (planned === 0) continue;
     await db
       .insertInto('eval_suites')
@@ -42,6 +51,10 @@ const seedSuiteTotals = async (
       })
       .execute();
   }
+
+  // Seal only after inserting identities; the surrounding transaction publishes both together.
+  if (plan !== null)
+    await db.updateTable('runs').set({ selection_known: 1 }).where('id', '=', run.id).execute();
 };
 
 /** Updates only on actual insert, in the caller's case transaction. */
@@ -50,10 +63,11 @@ const incrementSuiteTotals = async (
   runId: string,
   createdAt: string,
   summary: CaseSummary,
+  errorCode: 'INVALID_RECORD' | 'CORRUPT_DATA' = 'INVALID_RECORD',
 ): Promise<void> => {
   const run = await db
     .selectFrom('runs')
-    .select(['schema_id', 'config_json'])
+    .select(['schema_id', 'selection_known'])
     .where('id', '=', runId)
     .executeTakeFirstOrThrow();
 
@@ -64,16 +78,30 @@ const incrementSuiteTotals = async (
     .where('suite_name', '=', summary.suiteName)
     .executeTakeFirst();
 
-  // Empty selected suites have no totals row, but their known zero still forbids evidence.
-  const planned =
-    previous === undefined && run.schema_id === EVAL_RUN_SCHEMA_ID
-      ? historicalPlan(run.config_json, runId)?.get(summary.suiteName)
-      : previous?.planned;
+  if (run.selection_known === 1) {
+    const selected = await db
+      .selectFrom('run_selected_cases')
+      .select('case_id')
+      .where('run_id', '=', runId)
+      .where('suite_name', '=', summary.suiteName)
+      .where('case_id', '=', summary.caseId)
+      .executeTakeFirst();
 
-  if (planned !== null && planned !== undefined && (previous?.recorded ?? 0) >= planned)
+    if (!selected)
+      throw new StoreError(
+        errorCode,
+        `Unselected evidence in run ${runId}, suite ${summary.suiteName}, case ${summary.caseId}.`,
+      );
+  }
+
+  if (
+    previous?.planned !== null &&
+    previous?.planned !== undefined &&
+    previous.recorded >= previous.planned
+  )
     throw new StoreError(
       'CORRUPT_DATA',
-      `Recorded cases exceed plan in run ${runId}, suite ${summary.suiteName}.`,
+      `Recorded cases exceed plan in run ${runId}, suite ${summary.suiteName}, case ${summary.caseId}.`,
     );
 
   if (run.schema_id === EVAL_RUN_SCHEMA_ID)

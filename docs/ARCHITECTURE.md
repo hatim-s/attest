@@ -162,7 +162,7 @@ that each declared binary target is present.
 ## Dashboard storage projections, schema v2
 
 Core owns dashboard DTO schemas in `@attest/core/records`, planned selection
-counts in `plannedSuiteCases`, and the pure slice helpers in
+identity derivation in `deriveSelectedCases` and strict live decoding in `plannedCaseSelection`, and the pure slice helpers in
 `@attest/core/analytics`. RunSource adds eval pages, eval run/trend pages, stored
 case windows, case history, UTC activity and run suites. Existing analytics remain
 until the old API and web consumers are replaced.
@@ -212,12 +212,10 @@ WAL snapshot; they do not acquire writer reservations.
 
 Dashboard migration corrections preserve historical config/evidence JSON and original run
 creation timestamps. Canonical UTC `created_order` on runs and `run_created_at` on
-case/totals projections own indexed ordering. Live timestamps and query bounds accept
-valid ISO timestamps with offsets and normalize to milliseconds in UTC. Bounds are
+case/totals projections own indexed ordering. RunRecord.createdAt and runs.created_at preserve the original live or historical timestamp, including offsets and fractional precision. Dashboard slice timestamps and query bounds use UTC milliseconds for the same instant. Clients join by run ID, never timestamp text. Bounds are
 since-inclusive and until-exclusive. Backfill ignores today's effective command schema;
 missing or unrecognized plan fields produce unknown coverage. Repeated historical tags
-or test ids do not block migration. Contradictory case identities and known over-plan
-records fail with typed CORRUPT_DATA identifying the run and suite. Secondary indexes
+or test ids do not block migration. Contradictory case identities and evidence outside a known selection fail with typed CORRUPT_DATA identifying the run, suite and case. Secondary indexes
 are built after backfill inside the same atomic transaction, before trigger restoration
 and version publication.
 
@@ -231,5 +229,15 @@ unreleased; earlier disposable v2 fixtures must be recreated rather than reopene
 
 These measurements and JSON batching describe the local SQLite adapter. D1 needs its
 own adapter and execution evidence under its 100-bound-parameter constraint; local
-1,000-element IN queries are not evidence for that host. Dashboard bulk identity and
-metadata queries use JSON parameters rather than one parameter per item.
+1,000-element IN queries are not evidence for that host. Dashboard metadata hydration and case-window outcome batches use JSON parameters rather than one parameter per item. Other local IN lists are not D1 execution proof. Project overview lastRunAt is the newest eval slice timestamp, not the newest run across all schemas.
+
+Known selection is frozen atomically with run creation or v1 backfill. The runs.selection_known
+marker distinguishes known empty selection from genuinely unknown historical coverage.
+run_selected_cases has a primary key on run, suite and case; each new evidence write checks
+that key without parsing config JSON or scanning the plan. Core derives counts and membership
+from the same identities. Foreign suites, wrong cases and known zero participation reject live
+writes as INVALID_RECORD and migration evidence as contextual CORRUPT_DATA. The case transaction
+rolls back all evidence and projections. Identical stored replay still succeeds after finalization.
+Invalid live configs reject before transactions; stored corruption remains CORRUPT_DATA.
+Case-window cursor decoding catches only token failures. Database and hydration failures keep
+their original classification. Empty registry activity uses the same bounds parser as SQLite.

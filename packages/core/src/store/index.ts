@@ -63,7 +63,7 @@ export {
   type CaseSummaryPage,
 } from '../records/page-schemas.js';
 
-export { plannedSuiteCases } from './planned-cases.js';
+export { deriveSelectedCases, plannedCaseSelection, plannedSuiteCases } from './planned-cases.js';
 
 export {
   sliceTotalsSchema,

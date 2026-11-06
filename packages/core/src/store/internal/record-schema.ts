@@ -138,7 +138,7 @@ const runMetadataSchema = z.object({
 
 const runRecordBaseSchema = runMetadataSchema.extend({
   id: nonemptyStringSchema,
-  createdAt: isoTimestampSchema,
+  createdAt: z.iso.datetime({ offset: true }),
   summary: summarySchema.optional(),
 });
 

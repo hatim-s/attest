@@ -14,5 +14,4 @@ export {
   emptySliceTotals,
   addCaseToTotals,
   toEvalSlice,
-  sliceFromCaseSummaries,
 } from './eval-slice.js';

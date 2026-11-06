@@ -8,6 +8,7 @@ import { Kysely } from 'kysely';
 
 import {
   canonicalStringify,
+  plannedCaseSelection,
   parsePageLimit,
   type PageQuery,
   type RunPage,
@@ -120,11 +121,23 @@ class SqliteRunStore implements RunStore {
     metadata: RunMetadata,
     identity: RunIdentity = createRunIdentity(),
   ): Promise<RunRecord> {
+    let plan;
+
+    try {
+      plan = plannedCaseSelection(metadata.schemaId, metadata.configJson);
+    } catch (cause) {
+      throw new StoreError('INVALID_RECORD', `Invalid selection config for run ${identity.id}.`, {
+        cause,
+      });
+    }
+
+    const createdOrder = canonicalTime(identity.createdAt, 'INVALID_RECORD');
+
     return executeStoreOperation('WRITE_FAILED', 'Could not create the run.', async () => {
       const record: RunRecord = {
         ...metadata,
         id: identity.id,
-        createdAt: canonicalTime(identity.createdAt, 'INVALID_RECORD'),
+        createdAt: identity.createdAt,
         status: 'running',
       };
 
@@ -134,7 +147,8 @@ class SqliteRunStore implements RunStore {
           .values({
             id: record.id,
             created_at: record.createdAt,
-            created_order: record.createdAt,
+            created_order: createdOrder,
+            selection_known: 0,
             finished_at: null,
             status: record.status,
             schema_id: record.schemaId,
@@ -147,7 +161,7 @@ class SqliteRunStore implements RunStore {
           })
           .execute();
 
-        await seedSuiteTotals(database, record);
+        await seedSuiteTotals(database, record, plan);
       });
 
       return record;

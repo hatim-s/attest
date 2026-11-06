@@ -3,6 +3,7 @@ import { join } from 'node:path';
 
 import { StoreError, type ProjectCatalog, type RunSource, type RunStore } from '@attest/core';
 
+import { activityBounds } from '../store/internal/dashboard-boundary.js';
 import { errnoCode } from '../internal/errno-code.js';
 import { openReadonlyRunStore } from '../store/index.js';
 import { readRegistry, type RegistryEntry } from './project-registry.js';
@@ -26,13 +27,17 @@ const emptySource: RunSource = {
   listEvalRuns: () => Promise.resolve({ items: [] }),
   getEvalCaseWindow: () => Promise.resolve({ runs: [], items: [] }),
   getCaseHistory: () => Promise.resolve({ items: [] }),
-  getActivity: ({ from, to }) =>
-    Promise.resolve({
-      coveredFrom: from,
-      coveredTo: to,
-      timezone: 'UTC',
-      days: [],
-      truncated: false,
+  getActivity: (query) =>
+    Promise.resolve().then(() => {
+      const { from, to } = activityBounds(query);
+
+      return {
+        coveredFrom: from,
+        coveredTo: to,
+        timezone: 'UTC' as const,
+        days: [],
+        truncated: false,
+      };
     }),
   listRunSuites: runNotFound,
   listRuns: () => Promise.resolve({ items: [] }),

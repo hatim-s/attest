@@ -172,6 +172,11 @@ const dashboardSchemaSql = `
 DROP TRIGGER cases_no_finalized_update;
 DROP TRIGGER runs_no_terminal_update;
 ALTER TABLE runs ADD COLUMN created_order TEXT;
+ALTER TABLE runs ADD COLUMN selection_known INTEGER NOT NULL DEFAULT 0 CHECK(selection_known IN (0,1));
+CREATE TABLE run_selected_cases (
+ run_id TEXT NOT NULL REFERENCES runs(id), suite_name TEXT NOT NULL, case_id TEXT NOT NULL,
+ PRIMARY KEY(run_id, suite_name, case_id)
+) WITHOUT ROWID;
 ALTER TABLE cases ADD COLUMN run_created_at TEXT;
 ALTER TABLE cases ADD COLUMN is_eval INTEGER;
 ALTER TABLE cases ADD COLUMN verdict TEXT CHECK(verdict IN ('pass','fail','error'));
@@ -200,6 +205,17 @@ CREATE TABLE suite_cases (suite_name TEXT NOT NULL, case_id TEXT NOT NULL, PRIMA
 `;
 
 const dashboardTriggersSql = `
+CREATE TRIGGER selections_no_update BEFORE UPDATE ON run_selected_cases
+BEGIN SELECT RAISE(ABORT, 'attest: selection is immutable'); END;
+CREATE TRIGGER selections_no_delete BEFORE DELETE ON run_selected_cases
+BEGIN SELECT RAISE(ABORT, 'attest: selection is immutable'); END;
+CREATE TRIGGER selections_no_insert BEFORE INSERT ON run_selected_cases
+WHEN (SELECT status FROM runs WHERE id = NEW.run_id) != 'running'
+ OR (SELECT selection_known FROM runs WHERE id = NEW.run_id) = 1
+BEGIN SELECT RAISE(ABORT, 'attest: selection is immutable'); END;
+CREATE TRIGGER runs_no_selection_update BEFORE UPDATE OF selection_known ON runs
+WHEN OLD.selection_known = 1 OR NEW.selection_known != 1
+BEGIN SELECT RAISE(ABORT, 'attest: selection is immutable'); END;
 CREATE TRIGGER runs_no_terminal_update BEFORE UPDATE ON runs
 WHEN OLD.status != 'running'
 BEGIN
@@ -207,7 +223,6 @@ BEGIN
 END;
 CREATE INDEX idx_runs_running ON runs(schema_id, id) WHERE status = 'running';
 CREATE INDEX idx_totals_eval ON run_suite_totals(suite_name, is_eval, run_created_at DESC, run_id DESC);
-CREATE INDEX idx_totals_suite ON run_suite_totals(suite_name, run_created_at DESC, run_id DESC);
 CREATE INDEX idx_totals_state ON run_suite_totals(suite_name, is_eval, state, run_created_at DESC, run_id DESC);
 CREATE INDEX idx_totals_created ON run_suite_totals(is_eval, run_created_at DESC, run_id DESC, suite_name);
 CREATE INDEX idx_cases_history ON cases(suite_name, case_id, is_eval, run_created_at DESC, run_id DESC, verdict, outcome, duration_ms);

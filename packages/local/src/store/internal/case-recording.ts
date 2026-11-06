@@ -2,9 +2,9 @@ import { EVAL_RUN_SCHEMA_ID } from '@attest/contracts';
 import { canonicalTime } from './dashboard-boundary.js';
 import type { Transaction } from 'kysely';
 
-import { summarizeCaseRecord } from '@attest/core';
 import {
   canonicalStringify,
+  summarizeCaseRecord,
   contentHash,
   StoreError,
   parseRecord,

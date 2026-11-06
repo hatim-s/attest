@@ -1,9 +1,15 @@
-import type { SliceTotals, CaseVerdict } from '@attest/core';
 import type { CaseOutcome, InvocationErrorCode, SpanKind } from '@attest/contracts';
-import type { CacheKind, RunStatus, StoredMetricEvaluation } from '@attest/core';
+import type {
+  SliceTotals,
+  CaseVerdict,
+  CacheKind,
+  RunStatus,
+  StoredMetricEvaluation,
+} from '@attest/core';
 
 /** Kysely row shape for the initial schema runs table. */
 interface RunsTable {
+  selection_known: number;
   created_order: string;
   id: string;
   created_at: string;
@@ -92,6 +98,7 @@ interface SuiteTotalsTable extends SliceTotals {
 }
 
 interface Database {
+  run_selected_cases: { run_id: string; suite_name: string; case_id: string };
   eval_suites: { suite_name: string };
   run_suite_totals: SuiteTotalsTable;
   suite_cases: { suite_name: string; case_id: string };

@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { parseWithSchemaSync } from '@attest/contracts';
-import { StoreError } from '@attest/core';
+import { StoreError, deriveSelectedCases } from '@attest/core';
 
 const historicalPlanSchema = z.object({
   snapshot: z.object({
@@ -28,7 +28,10 @@ const canonicalTime = (
 };
 
 /** Historical coverage depends only on selection identity, never today's command schema. */
-const historicalPlan = (json: string, runId: string): ReadonlyMap<string, number> | null => {
+const historicalPlan = (
+  json: string,
+  runId: string,
+): ReadonlyMap<string, ReadonlySet<string>> | null => {
   let value: unknown;
 
   try {
@@ -45,22 +48,26 @@ const historicalPlan = (json: string, runId: string): ReadonlyMap<string, number
     return null;
   }
 
-  const counts = new Map(snapshot.selected_test_ids.map((id) => [id, 0]));
-  const seen = new Set<string>();
-
-  for (const row of snapshot.selected_cases) {
-    const key = JSON.stringify([row.test_id, row.case_id]);
-
-    if (!counts.has(row.test_id) || seen.has(key))
-      throw new StoreError(
-        'CORRUPT_DATA',
-        `Contradictory selection in run ${runId}, suite ${row.test_id}.`,
-      );
-    seen.add(key);
-    counts.set(row.test_id, (counts.get(row.test_id) ?? 0) + 1);
+  try {
+    return deriveSelectedCases(snapshot);
+  } catch (cause) {
+    throw new StoreError(
+      'CORRUPT_DATA',
+      `Contradictory selection in run ${runId}: ${String(cause)}`,
+      { cause },
+    );
   }
-
-  return counts;
 };
 
-export { canonicalTime, historicalPlan };
+/** Shared activity bounds for persisted and empty registry sources. */
+const activityBounds = (query: { from: string; to: string }) => {
+  const from = canonicalTime(query.from, 'INVALID_LIMIT');
+  const to = canonicalTime(query.to, 'INVALID_LIMIT');
+
+  if (to <= from || Date.parse(to) - Date.parse(from) > 92 * 86400000)
+    throw new StoreError('INVALID_LIMIT', 'Activity requires an interval of at most 92 days.');
+
+  return { from, to };
+};
+
+export { canonicalTime, historicalPlan, activityBounds };

@@ -1,8 +1,7 @@
 import { sql, type Kysely } from 'kysely';
-import { EVAL_RUN_SCHEMA_ID } from '@attest/contracts';
+import { EVAL_RUN_SCHEMA_ID, parseWithSchemaSync } from '@attest/contracts';
 import { z } from 'zod';
-import { canonicalTime } from './dashboard-boundary.js';
-import { parseWithSchemaSync } from '@attest/contracts';
+import { canonicalTime, activityBounds } from './dashboard-boundary.js';
 import { summarizeEvalSlices, toEvalSlice } from '@attest/core/analytics';
 import {
   StoreError,
@@ -56,7 +55,7 @@ class DashboardReads {
     };
   }
 
-  /** One JSON parameter keeps local batches within D1's separate 100-parameter budget too. */
+  /** Batches dashboard metadata with one JSON parameter; other local reads have separate limits. */
   private async slices(rows: SuiteTotalsTable[]): Promise<EvalSlice[]> {
     if (rows.length === 0) return [];
     const ids = JSON.stringify([...new Set(rows.map((row) => row.run_id))]);
@@ -91,7 +90,11 @@ class DashboardReads {
         row.suite_name,
       );
     } catch (cause) {
-      throw new StoreError('CORRUPT_DATA', 'Invalid stored dashboard totals.', { cause });
+      throw new StoreError(
+        'CORRUPT_DATA',
+        `Invalid stored dashboard totals in run ${row.run_id}, suite ${row.suite_name}.`,
+        { cause },
+      );
     }
   }
 
@@ -207,43 +210,44 @@ class DashboardReads {
     let runs: EvalSlice[];
 
     if (query.cursor !== undefined) {
+      let token;
+
       try {
         if (query.cursor.length > 8192) throw new Error('Cursor too large');
 
-        const token = parseWithSchemaSync(
+        token = parseWithSchemaSync(
           z.object({ suite: z.string(), after: z.string(), runs: z.array(z.string()).max(10) }),
           JSON.parse(Buffer.from(query.cursor, 'base64url').toString()),
         );
 
         if (token.suite !== suiteName) throw new Error('Foreign suite');
         after = token.after;
-
-        const rows = await this.#db
-          .selectFrom('run_suite_totals')
-          .selectAll()
-          .where('suite_name', '=', suiteName)
-          .where('is_eval', '=', 1)
-          .where(
-            sql<boolean>`run_id IN (SELECT value FROM json_each(${JSON.stringify(token.runs)}))`,
-          )
-          .execute();
-
-        const byId = new Map((await this.slices(rows)).map((row) => [row.runId, row]));
-
-        if (byId.size !== token.runs.length) throw new Error('Unknown run');
-        runs = token.runs.map((id) => byId.get(id)!);
-
-        const anchor = await this.#db
-          .selectFrom('suite_cases')
-          .select('case_id')
-          .where('suite_name', '=', suiteName)
-          .where('case_id', '=', after)
-          .executeTakeFirst();
-
-        if (!anchor) throw new Error('Unknown case');
       } catch (cause) {
         throw new StoreError('INVALID_CURSOR', 'Invalid case window cursor.', { cause });
       }
+
+      const rows = await this.#db
+        .selectFrom('run_suite_totals')
+        .selectAll()
+        .where('suite_name', '=', suiteName)
+        .where('is_eval', '=', 1)
+        .where(sql<boolean>`run_id IN (SELECT value FROM json_each(${JSON.stringify(token.runs)}))`)
+        .execute();
+
+      const byId = new Map((await this.slices(rows)).map((row) => [row.runId, row]));
+
+      if (byId.size !== token.runs.length)
+        throw new StoreError('INVALID_CURSOR', 'Unknown run in case window cursor.');
+      runs = token.runs.map((id) => byId.get(id)!);
+
+      const anchor = await this.#db
+        .selectFrom('suite_cases')
+        .select('case_id')
+        .where('suite_name', '=', suiteName)
+        .where('case_id', '=', after)
+        .executeTakeFirst();
+
+      if (!anchor) throw new StoreError('INVALID_CURSOR', 'Unknown case in case window cursor.');
     } else runs = (await this.listEvalRuns(suiteName, { limit: 10 })).items;
 
     const rows = await this.#db
@@ -359,11 +363,9 @@ class DashboardReads {
 
   /** UTC buckets over at most 10,000 recent slices. Dense intervals report truncation explicitly. */
   async getActivity(query: { from: string; to: string }): Promise<Activity> {
-    const from = Date.parse(canonicalTime(query.from, 'INVALID_LIMIT'));
-    const to = Date.parse(canonicalTime(query.to, 'INVALID_LIMIT'));
-
-    if (!Number.isFinite(from) || !Number.isFinite(to) || to <= from || to - from > 92 * 86400000)
-      throw new StoreError('INVALID_LIMIT', 'Activity requires an interval of at most 92 days.');
+    const bounds = activityBounds(query);
+    const from = Date.parse(bounds.from);
+    const to = Date.parse(bounds.to);
 
     const rows = await this.#db
       .selectFrom('run_suite_totals')

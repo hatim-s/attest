@@ -83,21 +83,6 @@ const toEvalSlice = (
     : { ...common, state: run.status === 'running' ? 'running' : 'incomplete', passRate: null };
 };
 
-/** Reuses slice semantics for an already loaded static report, without store dependencies. */
-const sliceFromCaseSummaries = (
-  run: RunRecord,
-  summaries: readonly CaseSummary[],
-  suiteName: string,
-  planned: number | null,
-): EvalSlice =>
-  toEvalSlice(
-    summaries
-      .filter((row) => row.suiteName === suiteName)
-      .reduce(addCaseToTotals, emptySliceTotals(planned)),
-    run,
-    suiteName,
-  );
-
 /** Keeps a running slice separate from the last terminal verdict used by overview badges. */
 const summarizeEvalSlices = (
   latest: EvalSlice,
@@ -130,5 +115,4 @@ export {
   emptySliceTotals,
   addCaseToTotals,
   toEvalSlice,
-  sliceFromCaseSummaries,
 };

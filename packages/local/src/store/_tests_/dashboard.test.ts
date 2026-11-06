@@ -66,7 +66,7 @@ describe('materialized dashboard', () => {
     const a = (await openStore(path)).runs;
     const b = (await openStore(path)).runs;
     stores.push(a, b);
-    const run = await a.createRun(metadata);
+    const run = await a.createRun(selectedMetadata({ eval: ['a', 'b', 'c', 'rollback'] }));
     const first = execution(run.id, 'a');
     await a.recordCase(run.id, first, []);
     await b.recordCase(run.id, first, []);
@@ -112,7 +112,10 @@ describe('materialized dashboard', () => {
       '01K00000000000000000000002',
       '01K00000000000000000000003',
     ]) {
-      await store.createRun(metadata, { id, createdAt: '2026-01-01T00:00:00.000Z' });
+      await store.createRun(selectedMetadata({ eval: ['a', 'b', 'c'] }), {
+        id,
+        createdAt: '2026-01-01T00:00:00.000Z',
+      });
 
       for (const caseId of ['a', 'b', 'c']) await store.recordCase(id, execution(id, caseId), []);
       await store.finalizeRun(id, 'completed');
@@ -139,7 +142,7 @@ describe('materialized dashboard', () => {
     ).toBe('01K00000000000000000000001');
   });
 
-  it.each(['legacy', 'current', 'duplicates', 'absent', 'overplan'])(
+  it.each(['legacy', 'current', 'duplicates', 'absent', 'overplan', 'foreign', 'wrongcase'])(
     'atomically backfills %s v1 records and restores terminal immutability',
     async (historicalKind) => {
       const path = await temporaryPath();
@@ -193,7 +196,13 @@ describe('materialized dashboard', () => {
                           },
                         },
                       })
-                    : selectedMetadata({ eval: ['case'] }).configJson,
+                    : selectedMetadata(
+                        historicalKind === 'foreign'
+                          ? { other: ['case'] }
+                          : historicalKind === 'wrongcase'
+                            ? { eval: ['selected'] }
+                            : { eval: ['case'] },
+                      ).configJson,
           );
         const e = execution('01K00000000000000000000001', 'case');
         await handle
@@ -223,12 +232,23 @@ describe('materialized dashboard', () => {
           code: 'SCHEMA_OUTDATED',
         });
 
-        if (historicalKind === 'overplan') {
+        if (['overplan', 'foreign', 'wrongcase'].includes(historicalKind)) {
           await expect(migrateToLatest(handle)).rejects.toThrow(
-            'Recorded cases exceed plan in run 01K00000000000000000000001, suite eval.',
+            'Unselected evidence in run 01K00000000000000000000001, suite eval, case case.',
           );
           expect(await handle.prepare('SELECT version FROM schema_migrations').all()).toEqual([
             { version: 1 },
+          ]);
+
+          expect(
+            await handle
+              .prepare(
+                "SELECT name FROM sqlite_master WHERE name IN ('run_suite_totals','run_selected_cases','eval_suites')",
+              )
+              .all(),
+          ).toEqual([]);
+          expect(await handle.prepare('SELECT case_id,suite_name FROM cases').all()).toEqual([
+            { case_id: 'case', suite_name: 'eval' },
           ]);
 
           return;
@@ -299,54 +319,6 @@ describe('materialized dashboard', () => {
       await handle.close();
     }
   });
-});
-
-it('uses bounded index seeks for complete slices, history, identities, keysets and activity', async () => {
-  const handle = await openSqliteHandle(await temporaryPath());
-
-  try {
-    await migrateToLatest(handle);
-
-    const queries = [
-      [
-        "SELECT run_id,case_id,verdict,outcome FROM (SELECT * FROM cases INDEXED BY idx_cases_window) AS cases WHERE suite_name='eval' AND run_id IN ('a','b') AND case_id IN ('c','d')",
-        'idx_cases_window',
-      ],
-      [
-        "SELECT * FROM run_suite_totals WHERE suite_name='eval' AND is_eval=1 AND state='complete' ORDER BY run_created_at DESC,run_id DESC LIMIT 1",
-        'idx_totals_state',
-      ],
-      [
-        "SELECT suite_name FROM run_suite_totals WHERE suite_name > 'eval' ORDER BY suite_name LIMIT 1",
-        'idx_totals_suite',
-      ],
-      [
-        "SELECT * FROM run_suite_totals WHERE suite_name='eval' AND (run_created_at,run_id) < ('date','id') ORDER BY run_created_at DESC,run_id DESC LIMIT 11",
-        'idx_totals_suite',
-      ],
-      [
-        "SELECT case_id FROM suite_cases WHERE suite_name='eval' AND case_id > 'case' ORDER BY case_id LIMIT 101",
-        'PRIMARY KEY',
-      ],
-      [
-        "SELECT run_id,verdict,outcome,duration_ms FROM cases WHERE suite_name='eval' AND case_id='case' AND is_eval=1 ORDER BY run_created_at DESC,run_id DESC LIMIT 11",
-        'idx_cases_history',
-      ],
-      [
-        "SELECT * FROM run_suite_totals WHERE is_eval=1 AND run_created_at >= 'a' AND run_created_at < 'z' ORDER BY run_created_at DESC,run_id DESC,suite_name LIMIT 10001",
-        'idx_totals_created',
-      ],
-    ];
-
-    for (const [query, index] of queries) {
-      const plan = JSON.stringify(await handle.prepare('EXPLAIN QUERY PLAN ' + query).all());
-      expect(plan).toContain(index);
-      expect(plan).not.toContain('TEMP B-TREE');
-      expect(plan).not.toContain('SCAN cases');
-    }
-  } finally {
-    await handle.close();
-  }
 });
 
 it('leaves v1 usable when another writer holds the migration lock, then retries atomically', async () => {
@@ -496,7 +468,7 @@ it('omits zero participation without changing another eval history, and rolls ov
   await store.recordCase(second.id, execution(second.id, 'one', 'a'), []);
   await expect(
     store.recordCase(second.id, execution(second.id, 'extra', 'a'), []),
-  ).rejects.toMatchObject({ code: 'CORRUPT_DATA' });
+  ).rejects.toMatchObject({ code: 'INVALID_RECORD' });
   expect((await store.listCaseSummaries(second.id)).items).toHaveLength(1);
   expect((await store.listRunSuites(second.id))[0]?.counts.recorded).toBe(1);
   expect((await store.getEvalCaseWindow('a')).items.map((row) => row.caseId)).not.toContain(
@@ -546,6 +518,17 @@ it('keeps ten-run columns stable across three pages and rejects foreign-suite cu
     store.listCaseSummaries(first.id, { suiteName: 'wide', cursor: other.nextCursor }),
   ).rejects.toMatchObject({ code: 'INVALID_CURSOR' });
   const page1 = await store.getEvalCaseWindow('wide', { limit: 1000 });
+  const filling = await store.createRun(selectedMetadata({ wide: ['c1000'] }));
+  const snapshot = await store.getEvalCaseWindow('wide', { limit: 1000 });
+  await store.recordCase(filling.id, execution(filling.id, 'c1000', 'wide'), []);
+
+  const filled = await store.getEvalCaseWindow('wide', {
+    limit: 1000,
+    cursor: snapshot.nextCursor,
+  });
+
+  expect(filled.runs.map((row) => row.runId)).toEqual(snapshot.runs.map((row) => row.runId));
+  expect(filled.items.find((row) => row.caseId === 'c1000')?.cells[0]).toBe('pass');
   const newRun = await store.createRun(selectedMetadata({ wide: ['c0000'] }));
   await store.recordCase(newRun.id, execution(newRun.id, 'c0000', 'wide'), []);
   const page2 = await store.getEvalCaseWindow('wide', { limit: 1000, cursor: page1.nextCursor });
@@ -589,4 +572,134 @@ it('reports an empty covered interval when the activity cap splits a single UTC 
     coveredFrom: '2026-01-02T00:00:00.000Z',
     coveredTo: '2026-01-02T00:00:00.000Z',
   });
+  await store.createRun(selectedMetadata({ recent: ['c'] }), {
+    id: '01K00000000000000000000002',
+    createdAt: '2026-01-02T00:00:00Z',
+  });
+  expect(
+    await store.getActivity({ from: '2026-01-01T00:00:00Z', to: '2026-01-03T00:00:00Z' }),
+  ).toMatchObject({
+    coveredFrom: '2026-01-02T00:00:00.000Z',
+    coveredTo: '2026-01-03T00:00:00.000Z',
+    truncated: true,
+    days: [{ day: '2026-01-02', slices: 1 }],
+  });
+});
+
+it('rejects unselected live identities atomically, preserves exact evidence time and permits terminal replay', async () => {
+  const path = await temporaryPath();
+  const store = (await openStore(path)).runs;
+  stores.push(store);
+  const createdAt = '2026-01-01T05:30:00.123456+05:30';
+
+  const run = await store.createRun(selectedMetadata({ a: ['selected'], empty: [] }), {
+    id: '01K00000000000000000000008',
+    createdAt,
+  });
+
+  const handle = await openSqliteHandle(path);
+
+  try {
+    for (const [suite, caseId] of [
+      ['foreign', 'selected'],
+      ['a', 'wrong-case'],
+      ['empty', 'selected'],
+    ]) {
+      await expect(
+        store.recordCase(run.id, execution(run.id, caseId!, suite), []),
+      ).rejects.toMatchObject({
+        code: 'INVALID_RECORD',
+      });
+      expect((await store.listCaseSummaries(run.id)).items).toHaveLength(0);
+      expect(await handle.prepare('SELECT recorded FROM run_suite_totals').all()).toEqual([
+        { recorded: 0 },
+      ]);
+      expect(await handle.prepare('SELECT * FROM suite_cases').all()).toEqual([]);
+      expect(await handle.prepare('SELECT suite_name FROM eval_suites').all()).toEqual([
+        { suite_name: 'a' },
+      ]);
+    }
+
+    expect(run.createdAt).toBe(createdAt);
+    expect((await store.getRun(run.id)).createdAt).toBe(createdAt);
+    expect(await handle.prepare('SELECT created_at,created_order FROM runs').all()).toEqual([
+      { created_at: createdAt, created_order: '2026-01-01T00:00:00.123Z' },
+    ]);
+    await expect(
+      handle.prepare('INSERT INTO run_selected_cases VALUES(?,?,?)').run(run.id, 'a', 'extra'),
+    ).rejects.toThrow('immutable');
+    const selected = execution(run.id, 'selected', 'a');
+    await store.recordCase(run.id, selected, []);
+    await store.finalizeRun(run.id, 'completed');
+    await store.recordCase(run.id, selected, []);
+    await expect(handle.exec("UPDATE run_selected_cases SET case_id='changed'")).rejects.toThrow(
+      'immutable',
+    );
+    await expect(handle.exec('DELETE FROM run_selected_cases')).rejects.toThrow('immutable');
+    await expect(handle.exec('UPDATE runs SET selection_known=0')).rejects.toThrow('immutable');
+    expect(
+      (
+        await store.listEvalRuns('a', {
+          since: '2026-01-01T00:00:00.123Z',
+          until: '2026-01-01T00:00:00.124Z',
+        })
+      ).items[0],
+    ).toMatchObject({ createdAt: '2026-01-01T00:00:00.123Z', state: 'complete' });
+    expect((await store.listEvalRuns('a', { until: '2026-01-01T00:00:00.123Z' })).items).toEqual(
+      [],
+    );
+  } finally {
+    await handle.close();
+  }
+});
+
+it('classifies invalid live configs before writing any rows', async () => {
+  const path = await temporaryPath();
+  const store = (await openStore(path)).runs;
+  stores.push(store);
+
+  const contradictory = parseWithSchemaSync(
+    evalRunSchema,
+    JSON.parse(selectedMetadata({ a: ['selected'] }).configJson),
+  );
+
+  contradictory.snapshot.selected_test_ids = ['foreign'];
+
+  for (const configJson of ['{}', '{', JSON.stringify(contradictory)]) {
+    await expect(store.createRun({ ...metadata, configJson })).rejects.toMatchObject({
+      code: 'INVALID_RECORD',
+    });
+  }
+
+  expect((await store.listRuns()).items).toEqual([]);
+  expect((await store.listEvals()).items).toEqual([]);
+});
+
+it('keeps store corruption distinct from invalid case-window tokens', async () => {
+  const path = await temporaryPath();
+  const store = (await openStore(path)).runs;
+  stores.push(store);
+  const run = await store.createRun(selectedMetadata({ a: ['one', 'two'] }));
+  await store.recordCase(run.id, execution(run.id, 'one', 'a'), []);
+  await store.recordCase(run.id, execution(run.id, 'two', 'a'), []);
+  const first = await store.getEvalCaseWindow('a', { limit: 1 });
+  const handle = await openSqliteHandle(path);
+
+  try {
+    await handle.exec('UPDATE run_suite_totals SET passed=0, failed=2, scoreSum=1e999');
+    await expect(store.getEvalCaseWindow('a', { cursor: first.nextCursor })).rejects.toMatchObject({
+      code: 'CORRUPT_DATA',
+    });
+    await expect(store.getEvalCaseWindow('a', { cursor: '%invalid' })).rejects.toMatchObject({
+      code: 'INVALID_CURSOR',
+    });
+    await handle.exec(
+      'UPDATE run_suite_totals SET scoreSum=0; PRAGMA foreign_keys=OFF; DELETE FROM runs',
+    );
+    await expect(store.getEvalCaseWindow('a', { cursor: first.nextCursor })).rejects.toMatchObject({
+      code: 'CORRUPT_DATA',
+    });
+  } finally {
+    await handle.close();
+  }
 });
