@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 
-import { evalEventSchema, type EvalRunRequest } from '@attest/contracts';
+import { parseWithSchema, evalEventSchema, type EvalRunRequest } from '@attest/contracts';
 import { StoreError } from '@attest/core';
 import type { CliDiagnostics } from '@attest/core/records';
 import { killProcessTree } from '@attest/executor';
@@ -73,11 +73,11 @@ const classifyLine = (line: string): OutputLine => {
     return { kind: 'text' };
   }
 
-  const parsed = evalEventSchema.safeParse(value);
+  const parsed = parseWithSchema(evalEventSchema, value);
 
-  if (!parsed.success) return { kind: 'text' };
+  if (!parsed.ok) return { kind: 'text' };
 
-  const event = parsed.data;
+  const event = parsed.value;
 
   if (event.event === 'run_started') return { kind: 'started', runId: event.data.run_id };
 

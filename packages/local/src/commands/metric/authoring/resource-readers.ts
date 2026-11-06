@@ -1,4 +1,5 @@
 import {
+  parseWithSchema,
   commandRequestSchema,
   metricResourceSchema,
   metricTestFixtureSchema,
@@ -27,21 +28,21 @@ const readImportedMetricResource = async (
     hint: 'Provide one canonical metric resource or metric.add request.',
   });
 
-  const request = commandRequestSchema.safeParse(value);
+  const request = parseWithSchema(commandRequestSchema, value);
 
   const candidate =
-    request.success && request.data.command === 'metric.add' ? request.data.metric : value;
+    request.ok && request.value.command === 'metric.add' ? request.value.metric : value;
 
-  const parsed = metricResourceSchema.safeParse(candidate);
+  const parsed = parseWithSchema(metricResourceSchema, candidate);
 
-  if (!parsed.success) {
+  if (!parsed.ok) {
     throw new LocalError('cli_usage', 'Imported metric JSON does not match its schema.', {
       path: '<path|->',
       details: { diagnostics: schemaIssueDiagnostics(parsed.error.issues) },
     });
   }
 
-  const resource = { ...parsed.data, id: metricId, name: name?.trim() || parsed.data.name };
+  const resource = { ...parsed.value, id: metricId, name: name?.trim() || parsed.value.name };
   assertSafeMetricResource(resource);
 
   return resource;
@@ -60,16 +61,16 @@ const readMetricTestFixture = async (
     hint: 'Provide one attest.metric-test-fixture document.',
   });
 
-  const parsed = metricTestFixtureSchema.safeParse(value);
+  const parsed = parseWithSchema(metricTestFixtureSchema, value);
 
-  if (!parsed.success) {
+  if (!parsed.ok) {
     throw new LocalError('project_invalid', 'The local metric fixture does not match its schema.', {
       path: '--fixture',
       details: { diagnostics: schemaIssueDiagnostics(parsed.error.issues) },
     });
   }
 
-  return parsed.data;
+  return parsed.value;
 };
 
 export { readImportedMetricResource, readMetricTestFixture };

@@ -1,3 +1,4 @@
+import { parseWithSchemaSync, parseWithSchema } from '@attest/contracts';
 import { readFile, realpath, stat } from 'node:fs/promises';
 import { resolve } from 'node:path';
 
@@ -82,7 +83,7 @@ type ParsedProjectJson = { diagnostics: ProjectDiagnostic[]; value?: JsonValue }
 
 const parseJson = (text: string, source: string, path?: string): ParsedProjectJson => {
   try {
-    return { diagnostics: [], value: z.json().parse(JSON.parse(text)) };
+    return { diagnostics: [], value: parseWithSchemaSync(z.json(), JSON.parse(text)) };
   } catch {
     return {
       diagnostics: [{ code: 'json_invalid', message: 'could not parse JSON', path, source }],
@@ -127,15 +128,15 @@ const loadJsonResource = async <Value>(
     });
   }
 
-  const validated = schema.safeParse(parsed.value);
+  const validated = parseWithSchema(schema, parsed.value);
 
-  if (!validated.success) {
+  if (!validated.ok) {
     diagnostics.push(...schemaDiagnostics(source, validated.error.issues));
 
     return { diagnostics, hash, source };
   }
 
-  return { diagnostics, hash, source, value: validated.data };
+  return { diagnostics, hash, source, value: validated.value };
 };
 
 export { loadJsonResource, parseJson, readProjectSource, schemaDiagnostics };

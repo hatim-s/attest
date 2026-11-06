@@ -7,6 +7,7 @@ import { join } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 import {
+  parseWithSchemaSync,
   PROJECT_SCHEMA_ID,
   AGENT_RESOURCE_SCHEMA_ID,
   portableProjectBundleSchema,
@@ -220,12 +221,13 @@ describe('cloud revision synchronization', () => {
       baseUrl: 'https://cloud.example',
       fetch: async (_url, init) => {
         if (init?.method === 'POST') {
-          const body = z
-            .object({
+          const body = parseWithSchemaSync(
+            z.object({
               bundle: portableProjectBundleSchema,
               parent_revision_id: z.string().nullable(),
-            })
-            .parse(await new Response(init.body).json());
+            }),
+            await new Response(init.body).json(),
+          );
 
           expect(body.parent_revision_id).toBe(uploaded === undefined ? null : 'revision-1');
           uploaded = body.bundle;

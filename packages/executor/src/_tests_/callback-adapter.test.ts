@@ -1,6 +1,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 
 import {
+  parseWithSchemaSync,
   AGENT_COMPLETION_PROTOCOL,
   AGENT_PROTOCOL,
   AGENT_RESOURCE_SCHEMA_ID,
@@ -115,7 +116,7 @@ const startAsyncAgent = async (options: {
       const path = new URL(incoming.url ?? '/', 'http://x').pathname;
 
       if (path === '/trigger') {
-        const body = agentRequestSchema.parse(parseJson(await readBody(incoming)));
+        const body = parseWithSchemaSync(agentRequestSchema, parseJson(await readBody(incoming)));
         triggers.push({ body, headers: incoming.headers });
         const status = options.triggerStatus?.() ?? 202;
         response.writeHead(status).end();

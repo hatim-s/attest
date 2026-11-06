@@ -1,3 +1,4 @@
+import { parseWithSchemaSync } from '@attest/contracts';
 import type { ApiClient } from '@attest/api/client';
 import {
   caseParamsSchema,
@@ -76,7 +77,7 @@ const projectsRoute = createRoute({
 const workspaceRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: '/projects/$projectKey',
-  params: { parse: (params) => projectParamsSchema.parse(params) },
+  params: { parse: (params) => parseWithSchemaSync(projectParamsSchema, params) },
   component: RunsLayout,
   validateSearch: runsSearchSchema,
   // An unknown key fails here, so the error notice replaces the workspace with the API message.
@@ -120,7 +121,7 @@ const runsIndexRoute = createRoute({
 const runRoute = createRoute({
   getParentRoute: () => runsRoute,
   path: '$runId',
-  params: { parse: (params) => runParamsSchema.parse(params) },
+  params: { parse: (params) => parseWithSchemaSync(runParamsSchema, params) },
   validateSearch: runSearchSchema,
   component: RunPage,
 });
@@ -129,7 +130,8 @@ const caseRoute = createRoute({
   getParentRoute: () => runRoute,
   path: 'cases/$suiteName/$caseId',
   params: {
-    parse: (params) => caseParamsSchema.pick({ suiteName: true, caseId: true }).parse(params),
+    parse: (params) =>
+      parseWithSchemaSync(caseParamsSchema.pick({ suiteName: true, caseId: true }), params),
   },
   component: CaseDrawer,
 });
@@ -137,7 +139,7 @@ const caseRoute = createRoute({
 const compareRoute = createRoute({
   getParentRoute: () => workspaceRoute,
   path: 'compare/$baseRunId/$candidateRunId',
-  params: { parse: (params) => diffParamsSchema.parse(params) },
+  params: { parse: (params) => parseWithSchemaSync(diffParamsSchema, params) },
   component: ComparePage,
 });
 
@@ -150,7 +152,7 @@ const evalsRoute = createRoute({
 const evalRoute = createRoute({
   getParentRoute: () => workspaceRoute,
   path: 'evals/$suiteName',
-  params: { parse: (params) => suiteParamsSchema.parse(params) },
+  params: { parse: (params) => parseWithSchemaSync(suiteParamsSchema, params) },
   validateSearch: z.object({
     limit: suiteHistoryQuerySchema.shape.limit
       .default(DEFAULT_SUITE_HISTORY_RUNS)

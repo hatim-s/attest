@@ -49,31 +49,37 @@ const coreForbidden = [
 ];
 
 // Exact file paths only. New roots need a concrete lifecycle owner.
-const effectRoots = [];
+const effectRoots = [
+  {
+    file: 'packages/contracts/src/_tests_/schema-decoding.test.ts',
+    operations: ['Effect.runSync'],
+    owner: 'contracts decoder invariant tests',
+  },
+];
 
 // Each entry: { file, operations, removalSlice, owner }. Removed in S10.
 const effectMigrationBridges = [];
 
-const effectExecutionBlocks = [...effectRoots, ...effectMigrationBridges].map(
-  ({ file, operations, removalSlice }) => {
-    const dataOnly =
-      /^(packages\/core\/src\/(records|analytics)\/|packages\/api\/src\/contract\/)/.test(file);
+const effectExecutionBlock = ({ file, operations, removalSlice }) => {
+  const dataOnly =
+    /^(packages\/core\/src\/(records|analytics)\/|packages\/api\/src\/contract\/)/.test(file);
 
-    const browser =
-      dataOnly ||
-      /^(packages\/api\/src\/client\/|packages\/web\/src\/|packages\/client\/src\/(index\.ts$|runner\/))/.test(
-        file,
-      );
+  const browser =
+    dataOnly ||
+    /^(packages\/api\/src\/client\/|packages\/web\/src\/|packages\/client\/src\/(index\.ts$|runner\/))/.test(
+      file,
+    );
 
-    const options = { operations, dataOnly, browser };
+  const options = { operations, dataOnly, browser };
 
-    if (removalSlice) options.removalSlice = removalSlice;
+  if (removalSlice) options.removalSlice = removalSlice;
 
-    return { files: [file], rules: { 'anti-slop/effect-boundaries': ['error', options] } };
-  },
-);
+  return { files: [file], rules: { 'anti-slop/effect-boundaries': ['error', options] } };
+};
 
-export { effectRoots, effectMigrationBridges };
+const effectExecutionBlocks = [...effectRoots, ...effectMigrationBridges].map(effectExecutionBlock);
+
+export { effectRoots, effectMigrationBridges, effectExecutionBlock };
 
 export default tseslint.config(
   ...antiSlopConfig,
@@ -103,6 +109,18 @@ export default tseslint.config(
     rules: { 'anti-slop/effect-boundaries': ['error', { browser: true }] },
   },
   ...effectExecutionBlocks,
+  {
+    files: ['conformance/src/**/*.ts'],
+    languageOptions: { parserOptions: { project: './conformance/tsconfig.json' } },
+  },
+  {
+    files: ['packages/contracts/src/schema/parse.ts', 'packages/contracts/src/project/shared.ts'],
+    rules: { 'anti-slop/schema-decoding': 'off' },
+  },
+  {
+    files: ['scripts/**/*.ts', 'packages/web/scripts/**/*.ts', 'packages/web/vite.config.ts'],
+    languageOptions: { parserOptions: { project: './scripts/tsconfig.json' } },
+  },
   {
     files: ['packages/*/src/**/*.{ts,tsx}'],
     extends: [tseslint.configs.recommendedTypeChecked],
@@ -178,7 +196,8 @@ export default tseslint.config(
           patterns: [
             {
               group: [...apiForbidden, 'hono', 'hono/*', '../server/*', '../host/*'],
-              message: 'Contract and client import zod, browser-safe core entries and each other.',
+              message:
+                'Contract and client use browser-safe contracts, core entries and each other.',
             },
           ],
         },

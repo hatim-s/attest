@@ -1,4 +1,4 @@
-import { AGENT_PROTOCOL, traceSchema, type Span } from '@attest/contracts';
+import { parseWithSchemaSync, AGENT_PROTOCOL, traceSchema, type Span } from '@attest/contracts';
 import { existsSync } from 'node:fs';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -76,7 +76,7 @@ describe('createPiHandler', () => {
       },
     ]);
 
-    const trace = traceSchema.parse(result.trace);
+    const trace = parseWithSchemaSync(traceSchema, result.trace);
     const root = spanNamed(trace.spans, 'agent.run');
     const tool = spanNamed(trace.spans, 'tool.write');
     const turns = trace.spans.filter((span) => span.kind === 'llm');
@@ -109,7 +109,9 @@ describe('createPiHandler', () => {
       error: { code: 'pi_agent_failed', message: '--mock-fail requested' },
       artifacts: [],
     });
-    expect(spanNamed(traceSchema.parse(result.trace).spans, 'agent.run')?.status).toEqual({
+    expect(
+      spanNamed(parseWithSchemaSync(traceSchema, result.trace).spans, 'agent.run')?.status,
+    ).toEqual({
       code: 'error',
       message: '--mock-fail requested',
     });
@@ -127,7 +129,7 @@ describe('createPiHandler', () => {
       const result = await handler(invocation, { signal: new AbortController().signal });
       const dumped = result.artifacts?.find((artifact) => artifact.path === 'env.json');
       const content = dumped?.kind === 'inline' ? dumped.content : '{}';
-      const env = z.record(z.string(), z.string()).parse(JSON.parse(content));
+      const env = parseWithSchemaSync(z.record(z.string(), z.string()), JSON.parse(content));
 
       expect(env).toMatchObject({ PROVIDER_KEY: 'given', LC_ALL: 'C' });
       expect(env).not.toHaveProperty('ATTEST_CLIENT_RUNNER_SECRET');
@@ -196,7 +198,9 @@ describe('createPiHandler', () => {
       error: { code: 'cancelled' },
       artifacts: [{ path: 'answer.ts' }],
     });
-    expect(spanNamed(traceSchema.parse(result.trace).spans, 'agent.run')?.status).toEqual({
+    expect(
+      spanNamed(parseWithSchemaSync(traceSchema, result.trace).spans, 'agent.run')?.status,
+    ).toEqual({
       code: 'error',
       message: 'The invocation was cancelled.',
     });

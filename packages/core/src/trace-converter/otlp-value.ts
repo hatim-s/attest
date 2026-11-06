@@ -1,3 +1,4 @@
+import { parseWithSchema } from '@attest/contracts';
 import { z } from 'zod';
 
 type AttributeValue = string | number | boolean;
@@ -35,9 +36,9 @@ const attributesSchema = z
     const attributes: Record<string, AttributeValue> = {};
 
     for (const entry of entries) {
-      const parsed = keyValueSchema.safeParse(entry);
+      const parsed = parseWithSchema(keyValueSchema, entry);
 
-      if (parsed.success) attributes[parsed.data.key] = parsed.data.value;
+      if (parsed.ok) attributes[parsed.value.key] = parsed.value.value;
     }
 
     return attributes;

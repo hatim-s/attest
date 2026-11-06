@@ -1,4 +1,5 @@
 import {
+  parseWithSchemaSync,
   CLI_ERROR_CATALOG_SCHEMA_ID,
   cliErrorCatalogSchema,
   type CliErrorCatalog,
@@ -291,7 +292,7 @@ const getCliErrorDefinition = (code: CliErrorCode): CliErrorDefinition => ({
 
 /** Builds the registry printed by `attest errors`, in the alphabetical order it is authored in. */
 const createCliErrorCatalog = (): CliErrorCatalog =>
-  cliErrorCatalogSchema.parse({
+  parseWithSchemaSync(cliErrorCatalogSchema, {
     schema: CLI_ERROR_CATALOG_SCHEMA_ID,
     errors: Object.entries(CLI_ERROR_DEFINITIONS).map(([code, definition]) => ({
       code,

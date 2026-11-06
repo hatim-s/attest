@@ -1,4 +1,5 @@
 import {
+  parseWithSchemaSync,
   agentRequestSchema,
   parseAgentRequest,
   parseAgentResponse,
@@ -30,11 +31,13 @@ const seed = (contract: string, name: string) => {
   return fixture.envelope.input;
 };
 
-const request = agentRequestSchema.parse(
+const request = parseWithSchemaSync(
+  agentRequestSchema,
   seed('agent-request', '01-valid-minimal-single-turn.json'),
 );
 
-const trace = traceSchema.parse(
+const trace = parseWithSchemaSync(
+  traceSchema,
   seed('trace', '02-valid-nested-spans-events-and-gen-ai-attributes.json'),
 );
 

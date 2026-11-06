@@ -3,7 +3,7 @@ type CaseIdentityResult = { id: string; source: NormalizedImportRow['identitySou
 type NormalizeRecordResult = { diagnostics: ImportDiagnostic[]; row?: NormalizedImportRow };
 
 import { z } from 'zod';
-import { isJsonObject } from '@attest/contracts';
+import { parseWithSchemaSync, parseWithSchema, isJsonObject } from '@attest/contracts';
 import { isString } from '@attest/contracts';
 import {
   CASE_SCHEMA_ID,
@@ -71,7 +71,7 @@ const parseStructuredCsvFields = (
     if (!isString(cell)) continue;
 
     try {
-      value[source] = z.json().parse(JSON.parse(cell));
+      value[source] = parseWithSchemaSync(z.json(), JSON.parse(cell));
     } catch {
       diagnostics.push(
         importDiagnostic({
@@ -236,9 +236,9 @@ const normalizeRecord = (
 
   const candidate = mapRecord(value, record, request, diagnostics);
   const sourceKey = resolveSourceKey(value, record, request, diagnostics);
-  const parsed = importedCaseSchema.safeParse(candidate);
+  const parsed = parseWithSchema(importedCaseSchema, candidate);
 
-  if (!parsed.success) {
+  if (!parsed.ok) {
     diagnostics.push(...schemaDiagnostics(parsed.error.issues, request.mappings ?? [], record));
 
     return { diagnostics };
@@ -246,7 +246,7 @@ const normalizeRecord = (
 
   if (diagnostics.length > 0) return { diagnostics };
 
-  const { id: explicitId, ...content } = parsed.data;
+  const { id: explicitId, ...content } = parsed.value;
   const identity = caseIdentity(content, explicitId, sourceKey);
   const testCase = { ...content, id: identity.id };
 

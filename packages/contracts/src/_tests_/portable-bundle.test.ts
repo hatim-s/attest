@@ -1,3 +1,4 @@
+import { parseWithSchema } from '../schema/parse.js';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -132,10 +133,10 @@ const expectIssue = (
   path: (string | number)[],
   message: string,
 ) => {
-  const result = portableProjectBundleSchema.safeParse(candidate);
-  expect(result.success).toBe(false);
+  const result = parseWithSchema(portableProjectBundleSchema, candidate);
+  expect(result.ok).toBe(false);
 
-  if (!result.success)
+  if (!result.ok)
     expect(result.error.issues).toContainEqual(
       expect.objectContaining({ path: ['resources', ...path], message }),
     );
@@ -145,7 +146,7 @@ describe('portable bundle limits and credentials', () => {
   it.each(transports)(
     'accepts environment-backed $kind transport and rejects local secrets',
     (transport) => {
-      expect(portableProjectBundleSchema.safeParse(withTransport(transport)).success).toBe(true);
+      expect(parseWithSchema(portableProjectBundleSchema, withTransport(transport)).ok).toBe(true);
 
       if (
         transport.kind === 'native_cli' ||
@@ -153,9 +154,10 @@ describe('portable bundle limits and credentials', () => {
         transport.kind === 'background_cli'
       ) {
         expect(
-          portableProjectBundleSchema.safeParse(
+          parseWithSchema(
+            portableProjectBundleSchema,
             withTransport({ ...transport, env: { TOKEN: { from_env: 'TOKEN' } } }),
-          ).success,
+          ).ok,
         ).toBe(true);
         expectIssue(
           withTransport({ ...transport, env: { TOKEN: { from_file: 'token.txt' } } }),
@@ -205,12 +207,13 @@ describe('portable bundle limits and credentials', () => {
             message,
           );
         expect(
-          portableProjectBundleSchema.safeParse(
+          parseWithSchema(
+            portableProjectBundleSchema,
             withTransport({
               ...transport,
               [field]: { ...request, headers: { Authorization: { from_env: 'TOKEN' } } },
             }),
-          ).success,
+          ).ok,
         ).toBe(true);
       }
 
@@ -246,12 +249,13 @@ describe('portable bundle limits and credentials', () => {
         for (const query of ['model=gpt-realtime', 'max_tokens=100', 'page_token={{job_token}}'])
           expect
             .soft(
-              portableProjectBundleSchema.safeParse(
+              parseWithSchema(
+                portableProjectBundleSchema,
                 withTransport({
                   ...transport,
                   url: `wss://api.openai.com/v1/realtime?${query}`,
                 }),
-              ).success,
+              ).ok,
             )
             .toBe(true);
       }
@@ -266,12 +270,13 @@ describe('portable bundle limits and credentials', () => {
           'portable URLs must not contain credentials',
         );
         expect(
-          portableProjectBundleSchema.safeParse(
+          parseWithSchema(
+            portableProjectBundleSchema,
             withTransport({
               ...transport,
               status_url_template: 'https://agent.example/jobs?id={{job_id}}',
             }),
-          ).success,
+          ).ok,
         ).toBe(true);
       }
 
@@ -316,12 +321,13 @@ describe('portable bundle limits and credentials', () => {
           'portable URLs must not contain credentials',
         );
         expect(
-          portableProjectBundleSchema.safeParse(
+          parseWithSchema(
+            portableProjectBundleSchema,
             withTransport({
               ...transport,
               readiness: { kind: 'http', url: 'http://localhost/ready?probe=health' },
             }),
-          ).success,
+          ).ok,
         ).toBe(true);
       }
     },
@@ -353,9 +359,10 @@ describe('portable bundle limits and credentials', () => {
     });
 
     expect(
-      portableProjectBundleSchema.safeParse(
+      parseWithSchema(
+        portableProjectBundleSchema,
         withMetric({ kind: 'exec', argv: ['metric'], env: { TOKEN: { from_env: 'TOKEN' } } }),
-      ).success,
+      ).ok,
     ).toBe(true);
     expectIssue(
       withMetric({ kind: 'exec', argv: ['metric'], env: { TOKEN: { from_file: 'token.txt' } } }),
@@ -363,13 +370,14 @@ describe('portable bundle limits and credentials', () => {
       'portable secrets must use environment references',
     );
     expect(
-      portableProjectBundleSchema.safeParse(
+      parseWithSchema(
+        portableProjectBundleSchema,
         withMetric({
           kind: 'http',
           request: { ...request, headers: { Authorization: { from_env: 'TOKEN' } } },
           extraction: { score_pointer: '/score', pass_pointer: '/pass' },
         }),
-      ).success,
+      ).ok,
     ).toBe(true);
 
     for (const [badRequest, path, message] of [
@@ -413,7 +421,7 @@ describe('portable bundle limits and credentials', () => {
       [101, false],
     ] as const) {
       const candidate = { ...emptyBundle, files: filesOf(count, '') };
-      expect(portableProjectBundleSchema.safeParse(candidate).success).toBe(valid);
+      expect(parseWithSchema(portableProjectBundleSchema, candidate).ok).toBe(valid);
       expect(validate(candidate)).toBe(valid);
     }
   });
@@ -439,29 +447,29 @@ describe('portable bundle limits and credentials', () => {
     ],
   ])('keeps %s as a runtime-only check', (_name, files, path, message) => {
     const candidate = { ...emptyBundle, files };
-    const result = portableProjectBundleSchema.safeParse(candidate);
-    expect(result.success).toBe(false);
+    const result = parseWithSchema(portableProjectBundleSchema, candidate);
+    expect(result.ok).toBe(false);
 
-    if (!result.success)
+    if (!result.ok)
       expect(result.error.issues).toContainEqual(expect.objectContaining({ path, message }));
     expect(compileGeneratedSchema('project-bundle.json')(candidate)).toBe(true);
   });
 
   it('leaves serialized escaping limits to the upload request owner', () => {
     expect(
-      portableProjectBundleSchema.safeParse({
+      parseWithSchema(portableProjectBundleSchema, {
         ...emptyBundle,
         files: filesOf(5, '\n'.repeat(600_000)),
-      }).success,
+      }).ok,
     ).toBe(true);
   });
 
   it('accepts exactly 1 MiB of multibyte file text', () => {
     expect(
-      portableProjectBundleSchema.safeParse({
+      parseWithSchema(portableProjectBundleSchema, {
         ...emptyBundle,
         files: filesOf(1, 'é'.repeat(524_288)),
-      }).success,
+      }).ok,
     ).toBe(true);
   });
 });

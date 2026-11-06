@@ -1,3 +1,4 @@
+import { parseWithSchemaSync } from '@attest/contracts';
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 
@@ -17,7 +18,9 @@ declare global {
   }
 }
 
-const client = createApiClient(dashboardBootstrapSchema.parse(window.__ATTEST_BOOTSTRAP__));
+const client = createApiClient(
+  parseWithSchemaSync(dashboardBootstrapSchema, window.__ATTEST_BOOTSTRAP__),
+);
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1, staleTime: 1_000 } },

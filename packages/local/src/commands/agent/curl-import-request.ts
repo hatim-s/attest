@@ -1,4 +1,4 @@
-import { commandRequestSchema } from '@attest/contracts';
+import { parseWithSchema, commandRequestSchema } from '@attest/contracts';
 
 import { LocalError } from '../../errors/index.js';
 import { schemaIssueDiagnostics } from '../../internal/schema-issue-diagnostics.js';
@@ -259,21 +259,21 @@ const createCurlImportRequest = (fields: CurlImportFields): CurlImportRequest =>
 
   if (options.yes !== undefined) candidate.yes = options.yes;
 
-  const parsed = commandRequestSchema.safeParse(candidate);
+  const parsed = parseWithSchema(commandRequestSchema, candidate);
 
   if (
-    !parsed.success ||
-    parsed.data.command !== 'agent.import' ||
-    parsed.data.source_type !== 'curl'
+    !parsed.ok ||
+    parsed.value.command !== 'agent.import' ||
+    parsed.value.source_type !== 'curl'
   ) {
     throw new LocalError('cli_usage', 'cURL import flags are incomplete or inconsistent.', {
       path: '--type',
       hint: 'Provide extraction pointers and every required polling field.',
-      details: { diagnostics: parsed.success ? [] : schemaIssueDiagnostics(parsed.error.issues) },
+      details: { diagnostics: parsed.ok ? [] : schemaIssueDiagnostics(parsed.error.issues) },
     });
   }
 
-  return parsed.data;
+  return parsed.value;
 };
 
 /**

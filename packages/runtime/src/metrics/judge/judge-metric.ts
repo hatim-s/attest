@@ -1,3 +1,4 @@
+import { parseWithSchemaSync } from '@attest/contracts';
 import { z } from 'zod';
 import { performance } from 'node:perf_hooks';
 
@@ -35,7 +36,8 @@ type EvaluateJudgeMetricOptions = {
  * the store's JSON schema rejects, and hooks must not mutate provider-owned objects.
  */
 // BOUNDARY: Judge evidence is canonicalized and checked as JSON before persistence.
-const toJson = (value: unknown): JsonValue => z.json().parse(JSON.parse(canonicalStringify(value)));
+const toJson = (value: unknown): JsonValue =>
+  parseWithSchemaSync(z.json(), JSON.parse(canonicalStringify(value)));
 
 /** Scores one outcome identically for live and cached verdicts, keeping token usage as evidence. */
 const judgeEvaluation = (

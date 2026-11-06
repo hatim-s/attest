@@ -1,3 +1,4 @@
+import { parseWithSchemaSync } from '@attest/contracts';
 import { parseJson } from '../../internal/json-value.js';
 import type { AgentRequest, VercelSandbox } from '@attest/contracts';
 
@@ -216,7 +217,7 @@ const invokeVercelSandboxAgent = async (
   request: AgentRequest,
   options: VercelSandboxCaseOptions,
 ): Promise<InvocationResult> => {
-  const { retries } = retryBudgetSchema.parse(invocation);
+  const { retries } = parseWithSchemaSync(retryBudgetSchema, invocation);
   const artifacts = sandbox.artifacts ?? [];
   const { artifactRoot } = options;
 

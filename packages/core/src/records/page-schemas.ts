@@ -1,3 +1,4 @@
+import { parseWithSchema } from '@attest/contracts';
 import { z } from 'zod';
 
 import { StoreError } from '../store/store-error.js';
@@ -39,16 +40,16 @@ type PageQuery = z.input<typeof pageQuerySchema>;
 
 /** Applies the shared store limit contract without interpreting a source-specific cursor. */
 const parsePageLimit = (query?: PageQuery): number => {
-  const parsed = pageQuerySchema.shape.limit.safeParse(query?.limit);
+  const parsed = parseWithSchema(pageQuerySchema.shape.limit, query?.limit);
 
-  if (!parsed.success) {
+  if (!parsed.ok) {
     throw new StoreError(
       'INVALID_LIMIT',
       parsed.error.issues.map((issue) => issue.message).join('; '),
     );
   }
 
-  return parsed.data;
+  return parsed.value;
 };
 
 type RunPage = z.infer<typeof runPageSchema>;

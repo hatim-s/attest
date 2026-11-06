@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { promisify } from 'node:util';
 
 import {
+  parseWithSchemaSync,
   EVAL_RUN_SCHEMA_ID,
   evalRunSchema,
   type EvalCancelRequest,
@@ -142,7 +143,7 @@ const runConfiguration = async (
   };
 
   if (git !== undefined) runCandidate.git = git;
-  const run = evalRunSchema.parse(runCandidate);
+  const run = parseWithSchemaSync(evalRunSchema, runCandidate);
 
   const configuredStorePath = join('.attest', 'runs.db');
 

@@ -1,7 +1,13 @@
 import { access, mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
-import { cliHelpSchema, isJsonObject, isJsonValue, type JsonValue } from '@attest/contracts';
+import {
+  parseWithSchemaSync,
+  cliHelpSchema,
+  isJsonObject,
+  isJsonValue,
+  type JsonValue,
+} from '@attest/contracts';
 import { DEFAULT_PAGE_LIMIT } from '@attest/core/records';
 import { applyProjectMutation, loadProject } from '@attest/local/project';
 import { openStore } from '@attest/local/store';
@@ -105,7 +111,9 @@ describe('project commands', () => {
     const help = await runJson(parent, ['help', 'init']);
 
     if (!help.document.ok) throw new Error('Expected init help.');
-    expect(cliHelpSchema.parse(help.document.result).command.alias_for).toBe('project.init');
+    expect(parseWithSchemaSync(cliHelpSchema, help.document.result).command.alias_for).toBe(
+      'project.init',
+    );
   });
 
   it('reports an expected-project-hash conflict without writing', async () => {
@@ -183,7 +191,7 @@ describe('project commands', () => {
     const help = await runJson(parent, ['help', 'project', 'init']);
 
     if (!help.document.ok) throw new Error('Expected project init help.');
-    const { options } = cliHelpSchema.parse(help.document.result).command;
+    const { options } = parseWithSchemaSync(cliHelpSchema, help.document.result).command;
     expect(options.find(({ name }) => name === 'from-json')?.conflicts).toEqual([
       'directory',
       'project',

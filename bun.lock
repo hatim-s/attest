@@ -26,6 +26,7 @@
       "name": "@attest/api",
       "version": "0.1.0-alpha.0",
       "dependencies": {
+        "@attest/contracts": "workspace:*",
         "@attest/core": "workspace:*",
         "hono": "^4.13.0",
         "zod": "^4",
@@ -66,6 +67,7 @@
       "name": "@attest/contracts",
       "version": "0.1.0-alpha.0",
       "dependencies": {
+        "effect": "4.1.2",
         "zod": "^4",
       },
       "devDependencies": {
@@ -155,6 +157,7 @@
       "version": "0.1.0-alpha.0",
       "devDependencies": {
         "@attest/api": "workspace:*",
+        "@attest/contracts": "workspace:*",
         "@attest/core": "workspace:*",
         "@tanstack/react-query": "^5.101.4",
         "@tanstack/react-router": "^1.170.45",

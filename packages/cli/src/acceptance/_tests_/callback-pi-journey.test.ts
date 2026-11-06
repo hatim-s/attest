@@ -8,6 +8,7 @@ import { createAgentRunner } from '@attest/client';
 import { serveAgentRunner } from '@attest/client/node';
 import { createPiHandler } from '@attest/client/pi';
 import {
+  parseWithSchemaSync,
   AGENT_RESOURCE_SCHEMA_ID,
   cliResultSchema,
   evalFinalResultDataSchema,
@@ -62,7 +63,7 @@ const runOk = async (packed: PackedCli, argv: readonly string[], root: string): 
   const result = await runPackedCommand(packed, argv, root);
 
   expect(result.exitCode, `${argv.join(' ')}: ${result.stderr || result.stdout}`).toBe(0);
-  expect(cliResultSchema.parse(JSON.parse(result.stdout)).ok).toBe(true);
+  expect(parseWithSchemaSync(cliResultSchema, JSON.parse(result.stdout)).ok).toBe(true);
 };
 
 /** Starts `attest view` on a free loopback port and returns its API origin and a stop function. */
@@ -186,7 +187,7 @@ const runCallbackJourney = async (mockPiFlags: readonly string[]): Promise<Journ
 
     const printed: unknown = JSON.parse(run.stdout);
 
-    const evaluation = evalFinalResultDataSchema.parse({
+    const evaluation = parseWithSchemaSync(evalFinalResultDataSchema, {
       exit_code: run.exitCode,
       result: printed,
     });
@@ -196,7 +197,8 @@ const runCallbackJourney = async (mockPiFlags: readonly string[]): Promise<Journ
     stopView = view.stop;
 
     // A failed run prints no run id, so read the only run back from the store.
-    const [stored, ...others] = runPageSchema.parse(
+    const [stored, ...others] = parseWithSchemaSync(
+      runPageSchema,
       await (await fetchOk(`${view.api}/runs`)).json(),
     ).items;
 
@@ -205,11 +207,16 @@ const runCallbackJourney = async (mockPiFlags: readonly string[]): Promise<Journ
     if (stored === undefined) throw new Error('The eval run was not persisted.');
 
     const casesUrl = `${view.api}/runs/${stored.id}/cases`;
-    const [summary] = caseSummaryPageSchema.parse(await (await fetchOk(casesUrl)).json()).items;
+
+    const [summary] = parseWithSchemaSync(
+      caseSummaryPageSchema,
+      await (await fetchOk(casesUrl)).json(),
+    ).items;
 
     if (summary === undefined) throw new Error('The eval run persisted no case.');
 
-    const record = caseRecordSchema.parse(
+    const record = parseWithSchemaSync(
+      caseRecordSchema,
       await (await fetchOk(`${casesUrl}/${TEST_ID}/${CASE_ID}`)).json(),
     );
 

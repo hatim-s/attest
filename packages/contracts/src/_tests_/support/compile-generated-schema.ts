@@ -1,3 +1,4 @@
+import { parseWithSchemaSync } from '../../schema/parse.js';
 import { z } from 'zod';
 import * as formatsModule from 'ajv-formats';
 import { Ajv2020, type ValidateFunction } from 'ajv/dist/2020.js';
@@ -22,7 +23,10 @@ const compileGeneratedSchema = (fileName: string): ValidateFunction => {
   }
 
   const validator = ajv.compile(
-    z.record(z.string(), z.json()).parse(JSON.parse(serializeContractSchema(fileName))),
+    parseWithSchemaSync(
+      z.record(z.string(), z.json()),
+      JSON.parse(serializeContractSchema(fileName)),
+    ),
   );
 
   validators.set(fileName, validator);

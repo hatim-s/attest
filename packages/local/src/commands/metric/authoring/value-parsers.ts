@@ -1,4 +1,5 @@
 import {
+  parseWithSchema,
   assertionCheckSchema,
   type AssertionCheck,
   type JsonValue,
@@ -29,13 +30,13 @@ const parseChoice = <const Choice extends string>(
   choices: readonly [Choice, ...Choice[]],
   path: string,
 ): Choice => {
-  const parsed = z.enum(choices).safeParse(value);
+  const parsed = parseWithSchema(z.enum(choices), value);
 
-  if (!parsed.success) {
+  if (!parsed.ok) {
     throw new LocalError('cli_usage', `${path} must be one of ${choices.join(', ')}.`, { path });
   }
 
-  return parsed.data;
+  return parsed.value;
 };
 
 const parseNonnegativeInteger = (value: string, path: string): number => {
@@ -113,18 +114,19 @@ const parseAttributes = (
 
 const parseAssertionJson = (values: readonly string[]): AssertionCheck[] =>
   values.map((value, index) => {
-    const parsed = assertionCheckSchema.safeParse(
+    const parsed = parseWithSchema(
+      assertionCheckSchema,
       parseJsonText(value, { path: '--assert-json', hint: 'Pass one assertion check object.' }),
     );
 
-    if (!parsed.success) {
+    if (!parsed.ok) {
       throw new LocalError('cli_usage', 'An assertion does not match the metric contract.', {
         path: `--assert-json[${index}]`,
         details: { diagnostics: schemaIssueDiagnostics(parsed.error.issues) },
       });
     }
 
-    return parsed.data;
+    return parsed.value;
   });
 
 const requireValue = (value: string | undefined, path: string): string => {

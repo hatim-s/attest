@@ -1,3 +1,4 @@
+import { parseWithSchemaSync } from '@attest/contracts';
 import { sql, type Kysely } from 'kysely';
 import { z } from 'zod';
 
@@ -42,7 +43,10 @@ const rowVerdict = (caseRow: SummaryCase, metrics: readonly SummaryMetric[]): Ca
   computeCaseVerdict(
     {
       outcome: caseRow.outcome,
-      expectedMetrics: z.array(z.string()).parse(parseJson(caseRow.expected_metrics_json) ?? []),
+      expectedMetrics: parseWithSchemaSync(
+        z.array(z.string()),
+        parseJson(caseRow.expected_metrics_json) ?? [],
+      ),
       lifecycleFailed: caseRow.lifecycle_failed === 1,
       agentErrored: caseRow.agent_errored === 1,
     },

@@ -1,3 +1,4 @@
+import { parseWithSchemaSync } from '@attest/contracts';
 import type { AgentRequest } from '@attest/contracts';
 
 import { invokeCliAgent } from './cli-invoker.js';
@@ -26,7 +27,7 @@ const invokeAgent = async (
   request: AgentRequest,
   options: InvokeAgentOptions,
 ): Promise<InvocationResult> => {
-  const { retries } = retryBudgetSchema.parse(options);
+  const { retries } = parseWithSchemaSync(retryBudgetSchema, options);
 
   return invokeWithRetries(() => invokeOnce(target, request, options), retries);
 };

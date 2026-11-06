@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import {
+  parseWithSchemaSync,
   CASE_SCHEMA_ID,
   COMMAND_REQUEST_SCHEMA_ID,
   DATASET_SCHEMA_ID,
@@ -329,7 +330,8 @@ describe('runTestMutationCommand', { timeout: 20_000 }, () => {
     expect(committed.projectHashAfter).toBe(first.projectHashAfter);
     expect(committed.result.operations).toEqual(first.result.operations);
 
-    const metadata = datasetResourceSchema.parse(
+    const metadata = parseWithSchemaSync(
+      datasetResourceSchema,
       JSON.parse(await readFile(join(root, 'attest/datasets/stable.meta.json'), 'utf8')),
     );
 
@@ -337,7 +339,8 @@ describe('runTestMutationCommand', { timeout: 20_000 }, () => {
     expect(importedAt).toBeGreaterThanOrEqual(beforeCommit);
     expect(importedAt).toBeLessThanOrEqual(afterCommit);
 
-    const manifest = projectManifestSchema.parse(
+    const manifest = parseWithSchemaSync(
+      projectManifestSchema,
       JSON.parse(await readFile(join(root, 'attest.project.json'), 'utf8')),
     );
 

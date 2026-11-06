@@ -1,3 +1,4 @@
+import { parseWithSchemaSync } from '@attest/contracts';
 import { realpath } from 'node:fs/promises';
 import { basename, isAbsolute, resolve } from 'node:path';
 
@@ -74,7 +75,7 @@ const readRegistry = async (registryPath: string): Promise<ProjectRegistry> => {
   }
 
   try {
-    return registrySchema.parse(JSON.parse(text));
+    return parseWithSchemaSync(registrySchema, JSON.parse(text));
   } catch (cause: unknown) {
     throw invalidRegistry(registryPath, cause);
   }

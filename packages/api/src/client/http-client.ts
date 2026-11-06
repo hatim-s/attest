@@ -1,3 +1,4 @@
+import { parseWithSchema } from '@attest/contracts';
 import { z } from 'zod';
 import type { PageQuery, RunStartRequest } from '@attest/core/records';
 import type { ApiCapabilities } from '../contract/bootstrap.js';
@@ -64,10 +65,10 @@ const createHttpClient = (
     }
 
     if (!response.ok) {
-      const envelope = apiErrorEnvelopeSchema.safeParse(body);
-      throw envelope.success
-        ? new ApiError(response.status, envelope.data.error.code, envelope.data.error.message, {
-            details: envelope.data.error.details,
+      const envelope = parseWithSchema(apiErrorEnvelopeSchema, body);
+      throw envelope.ok
+        ? new ApiError(response.status, envelope.value.error.code, envelope.value.error.message, {
+            details: envelope.value.error.details,
           })
         : new ApiError(
             response.status,
@@ -76,12 +77,12 @@ const createHttpClient = (
           );
     }
 
-    const parsed = schema.safeParse(body);
+    const parsed = parseWithSchema(schema, body);
 
-    if (!parsed.success)
+    if (!parsed.ok)
       throw new ApiError(response.status, 'INVALID_RESPONSE', z.prettifyError(parsed.error));
 
-    return parsed.data;
+    return parsed.value;
   };
 
   return {

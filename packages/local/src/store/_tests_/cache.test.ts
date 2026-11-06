@@ -1,3 +1,4 @@
+import { parseWithSchemaSync } from '@attest/contracts';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -26,13 +27,12 @@ const openTemporaryStore = async (): Promise<{ path: string; store: AttestStore 
 const readLastUsedAt = async (path: string, requestHash: string): Promise<string> => {
   const handle = await openSqliteHandle(path);
 
-  const [row] = z
-    .array(z.object({ last_used_at: z.string() }))
-    .parse(
-      await handle
-        .prepare('SELECT last_used_at FROM response_cache WHERE cache_key = ?')
-        .all(requestHash),
-    );
+  const [row] = parseWithSchemaSync(
+    z.array(z.object({ last_used_at: z.string() })),
+    await handle
+      .prepare('SELECT last_used_at FROM response_cache WHERE cache_key = ?')
+      .all(requestHash),
+  );
 
   await handle.close();
 

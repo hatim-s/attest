@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 
 import {
+  parseWithSchema,
   PORTABLE_MAX_UPLOAD_BYTES,
   portableProjectBundleSchema,
   type PortableProjectBundle,
@@ -80,22 +81,22 @@ const createCloudBundle = async (project: LoadedProject): Promise<PortableProjec
 
   const { agents, datasets, metrics, tests } = project;
 
-  const parsed = portableProjectBundleSchema.safeParse({
+  const parsed = parseWithSchema(portableProjectBundleSchema, {
     schema: 'attest.project-bundle.v1',
     resources: { agents, datasets, metrics, tests, project: project.project },
     files,
   });
 
-  if (!parsed.success) {
+  if (!parsed.ok) {
     throw new LocalError('project_invalid', 'Project cannot be uploaded as a cloud revision.', {
       details: { diagnostics: schemaIssueDiagnostics(parsed.error.issues) },
       hint: 'Keep custom metric code under attest/metrics/code and remove secrets from authored files.',
     });
   }
 
-  resolvePortableProject(parsed.data);
+  resolvePortableProject(parsed.value);
 
-  return parsed.data;
+  return parsed.value;
 };
 
 /** Uploads an immutable revision after explicit acknowledgement that its authored files contain no secrets. */

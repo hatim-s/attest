@@ -12,6 +12,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import {
+  parseWithSchemaSync,
   AGENT_RESOURCE_SCHEMA_ID,
   CLI_RESULT_SCHEMA_ID,
   COMMAND_REQUEST_SCHEMA_ID,
@@ -91,7 +92,7 @@ const testResource = (id: string, metricId: string, cases: TestCase[]): TestReso
 
 /** Builds the failure envelope the CLI would build, from contract schemas only. */
 const terminalFailure = (code: 'cancelled' | 'run_failed', message: string): EvalFinalResultData =>
-  evalFinalResultDataSchema.parse({
+  parseWithSchemaSync(evalFinalResultDataSchema, {
     exit_code: code === 'cancelled' ? 130 : 4,
     result: {
       schema: CLI_RESULT_SCHEMA_ID,
@@ -157,7 +158,7 @@ const startEval = async (
   selection: Partial<EvalRunRequest>,
 ): Promise<AsyncIterable<EvalEvent>> =>
   runConfiguration(
-    evalRunRequestSchema.parse({
+    parseWithSchemaSync(evalRunRequestSchema, {
       schema: COMMAND_REQUEST_SCHEMA_ID,
       command: 'eval.run',
       output: 'json',
@@ -264,7 +265,12 @@ describe('runConfiguration', () => {
 
     try {
       const stored = await store.runs.getRunWithCases(selected.runId);
-      const snapshot = evalRunSchema.parse(JSON.parse(stored.run.configJson)).snapshot;
+
+      const snapshot = parseWithSchemaSync(
+        evalRunSchema,
+        JSON.parse(stored.run.configJson),
+      ).snapshot;
+
       expect(stored.cases).toHaveLength(25);
       expect(snapshot.selected_cases.map(({ case_id }) => case_id).sort()).toEqual(
         stored.cases.map(({ caseId }) => caseId).sort(),
@@ -355,7 +361,7 @@ describe('runConfiguration', () => {
 
     try {
       const firstRun = await store.runs.getRun(first.runId);
-      const persistedEval = evalRunSchema.parse(JSON.parse(firstRun.configJson));
+      const persistedEval = parseWithSchemaSync(evalRunSchema, JSON.parse(firstRun.configJson));
       expect(firstRun).toMatchObject({
         status: 'completed',
         schemaId: EVAL_RUN_SCHEMA_ID,

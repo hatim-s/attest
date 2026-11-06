@@ -1,3 +1,4 @@
+import { parseWithSchema } from '../schema/parse.js';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -95,75 +96,75 @@ const validEvidence: WebSocketAttemptEvidence = {
 
 describe('WebSocket authored resource contract', () => {
   it('accepts run-scoped serial or multiplexed connections and serial per-case connections', () => {
-    expect(webSocketTransportSchema.safeParse(validTransport).success).toBe(true);
+    expect(parseWithSchema(webSocketTransportSchema, validTransport).ok).toBe(true);
     expect(
-      webSocketTransportSchema.safeParse({
+      parseWithSchema(webSocketTransportSchema, {
         ...validTransport,
         lifecycle: 'per_run',
         connection_mode: 'serial',
-      }).success,
+      }).ok,
     ).toBe(true);
     expect(
-      webSocketTransportSchema.safeParse({
+      parseWithSchema(webSocketTransportSchema, {
         ...validTransport,
         lifecycle: 'per_case',
         connection_mode: 'serial',
-      }).success,
+      }).ok,
     ).toBe(true);
   });
 
   it('rejects multiplexing per-case connections and inconsistent timing bounds', () => {
     expect(
-      webSocketTransportSchema.safeParse({ ...validTransport, lifecycle: 'per_case' }).success,
+      parseWithSchema(webSocketTransportSchema, { ...validTransport, lifecycle: 'per_case' }).ok,
     ).toBe(false);
     expect(
-      webSocketTransportSchema.safeParse({ ...validTransport, open_timeout_ms: 60_001 }).success,
+      parseWithSchema(webSocketTransportSchema, { ...validTransport, open_timeout_ms: 60_001 }).ok,
     ).toBe(false);
     expect(
-      webSocketTransportSchema.safeParse({
+      parseWithSchema(webSocketTransportSchema, {
         ...validTransport,
         ping_interval_ms: validTransport.message_idle_timeout_ms,
-      }).success,
+      }).ok,
     ).toBe(false);
   });
 
   it('requires distinct non-root correlation, acknowledgement, and extraction pointers', () => {
     expect(
-      webSocketTransportSchema.safeParse({ ...validTransport, request_id_pointer: '' }).success,
+      parseWithSchema(webSocketTransportSchema, { ...validTransport, request_id_pointer: '' }).ok,
     ).toBe(false);
     expect(
-      webSocketTransportSchema.safeParse({
+      parseWithSchema(webSocketTransportSchema, {
         ...validTransport,
         acknowledgement_pointer: validTransport.request_id_pointer,
-      }).success,
+      }).ok,
     ).toBe(false);
     expect(
-      webSocketTransportSchema.safeParse({
+      parseWithSchema(webSocketTransportSchema, {
         ...validTransport,
         request_template: { type: 'invoke' },
-      }).success,
+      }).ok,
     ).toBe(false);
     expect(
-      webSocketTransportSchema.safeParse({
+      parseWithSchema(webSocketTransportSchema, {
         ...validTransport,
         request_template: { first: '{{request_id}}', second: '{{request_id}}' },
-      }).success,
+      }).ok,
     ).toBe(false);
   });
 
   it('accepts environment-backed headers and rejects literal authorization or cookies', () => {
-    expect(webSocketTransportSchema.safeParse(validTransport).success).toBe(true);
+    expect(parseWithSchema(webSocketTransportSchema, validTransport).ok).toBe(true);
     expect(
-      webSocketTransportSchema.safeParse({
+      parseWithSchema(webSocketTransportSchema, {
         ...validTransport,
         headers: { Authorization: 'Bearer secret' },
-      }).success,
+      }).ok,
     ).toBe(false);
     expect(
-      webSocketTransportSchema.safeParse({
+      parseWithSchema(webSocketTransportSchema, {
         ...validTransport,
         headers: { Cookie: { from_env: 'SESSION_COOKIE' } },
-      }).success,
+      }).ok,
     ).toBe(false);
   });
 
@@ -172,82 +173,82 @@ describe('WebSocket authored resource contract', () => {
     ['Socket.IO endpoints', { url: 'wss://agent.example.test/socket.io/?EIO=4' }],
     ['GraphQL subscriptions', { subprotocol: 'graphql-transport-ws' }],
   ])('rejects unsupported %s configuration', (_name, unsupported) => {
-    expect(webSocketTransportSchema.safeParse({ ...validTransport, ...unsupported }).success).toBe(
-      false,
-    );
+    expect(
+      parseWithSchema(webSocketTransportSchema, { ...validTransport, ...unsupported }).ok,
+    ).toBe(false);
   });
 });
 
 describe('WebSocket normalized request and message protocol', () => {
   it('accepts bounded correlated requests and every normalized message kind', () => {
-    expect(webSocketInvocationRequestSchema.safeParse(validRequest).success).toBe(true);
+    expect(parseWithSchema(webSocketInvocationRequestSchema, validRequest).ok).toBe(true);
 
     for (const type of ['acknowledgement', 'result', 'error', 'trace'] as const) {
       expect(
-        webSocketCorrelatedMessageSchema.safeParse({
+        parseWithSchema(webSocketCorrelatedMessageSchema, {
           protocol: WEBSOCKET_MESSAGE_PROTOCOL,
           type,
           request_id: validRequest.request_id,
           value: type,
-        }).success,
+        }).ok,
       ).toBe(true);
     }
   });
 
   it('rejects missing, oversized, and unsafe correlation ids', () => {
-    expect(requestIdSchema.safeParse('').success).toBe(false);
-    expect(requestIdSchema.safeParse('a'.repeat(129)).success).toBe(false);
-    expect(requestIdSchema.safeParse('case id').success).toBe(false);
+    expect(parseWithSchema(requestIdSchema, '').ok).toBe(false);
+    expect(parseWithSchema(requestIdSchema, 'a'.repeat(129)).ok).toBe(false);
+    expect(parseWithSchema(requestIdSchema, 'case id').ok).toBe(false);
     expect(
-      webSocketCorrelatedMessageSchema.safeParse({
+      parseWithSchema(webSocketCorrelatedMessageSchema, {
         protocol: WEBSOCKET_MESSAGE_PROTOCOL,
         type: 'result',
         value: 'done',
-      }).success,
+      }).ok,
     ).toBe(false);
   });
 });
 
 describe('WebSocket attempt evidence contract', () => {
   it('accepts bounded completed evidence', () => {
-    expect(webSocketAttemptEvidenceSchema.safeParse(validEvidence).success).toBe(true);
+    expect(parseWithSchema(webSocketAttemptEvidenceSchema, validEvidence).ok).toBe(true);
   });
 
   it('allows retry/reconnect/replay only before acknowledgement', () => {
     expect(
-      webSocketAttemptEvidenceSchema.safeParse({
+      parseWithSchema(webSocketAttemptEvidenceSchema, {
         ...validEvidence,
         acknowledgement: unacknowledged,
-      }).success,
+      }).ok,
     ).toBe(true);
     expect(
-      webSocketAttemptEvidenceSchema.safeParse({
+      parseWithSchema(webSocketAttemptEvidenceSchema, {
         ...validEvidence,
         acknowledgement: { ...acknowledged, retry: 'allowed' },
-      }).success,
+      }).ok,
     ).toBe(false);
     expect(
-      webSocketAttemptEvidenceSchema.safeParse({
+      parseWithSchema(webSocketAttemptEvidenceSchema, {
         ...validEvidence,
         acknowledgement: { ...acknowledged, replay: 'allowed' },
-      }).success,
+      }).ok,
     ).toBe(false);
   });
 
   it('requires stable errors for failed evidence and bounded, digest-backed excerpts', () => {
     expect(
-      webSocketAttemptEvidenceSchema.safeParse({
+      parseWithSchema(webSocketAttemptEvidenceSchema, {
         ...validEvidence,
         outcome: 'failed',
         error_classification: 'binary_frame_unsupported',
         acknowledgement: unacknowledged,
-      }).success,
+      }).ok,
     ).toBe(true);
     expect(
-      webSocketAttemptEvidenceSchema.safeParse({ ...validEvidence, outcome: 'failed' }).success,
+      parseWithSchema(webSocketAttemptEvidenceSchema, { ...validEvidence, outcome: 'failed' }).ok,
     ).toBe(false);
     expect(
-      webSocketAttemptEvidenceSchema.safeParse({
+      parseWithSchema(webSocketAttemptEvidenceSchema, {
         ...validEvidence,
         events: [
           {
@@ -256,7 +257,7 @@ describe('WebSocket attempt evidence contract', () => {
             excerpt: { text: 'truncated', truncated: true },
           },
         ],
-      }).success,
+      }).ok,
     ).toBe(false);
   });
 });

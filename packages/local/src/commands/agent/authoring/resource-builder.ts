@@ -1,4 +1,5 @@
 import {
+  parseWithSchema,
   AGENT_RESOURCE_SCHEMA_ID,
   agentResourceSchema,
   type AgentResource,
@@ -519,17 +520,17 @@ const createAgentResource = (fields: AgentAddFields): AgentResource => {
     };
   }
 
-  const parsed = agentResourceSchema.safeParse(resource);
+  const parsed = parseWithSchema(agentResourceSchema, resource);
 
-  if (!parsed.success) {
+  if (!parsed.ok) {
     throw new LocalError('cli_usage', 'Agent values do not match the resource schema.', {
       details: { diagnostics: schemaIssueDiagnostics(parsed.error.issues) },
     });
   }
 
-  assertSafeNativeAgentResource(parsed.data);
+  assertSafeNativeAgentResource(parsed.value);
 
-  return parsed.data;
+  return parsed.value;
 };
 
 export { AGENT_ADD_FLAGS, agentAddFlagConflicts, createAgentResource };

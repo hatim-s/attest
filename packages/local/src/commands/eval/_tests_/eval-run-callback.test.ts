@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import {
+  parseWithSchemaSync,
   AGENT_COMPLETION_PROTOCOL,
   AGENT_RESOURCE_SCHEMA_ID,
   CLI_RESULT_SCHEMA_ID,
@@ -78,7 +79,7 @@ const startMockAgent = async (): Promise<string> => {
         return;
       }
 
-      const request = agentRequestSchema.parse(JSON.parse(await readBody(incoming)));
+      const request = parseWithSchemaSync(agentRequestSchema, JSON.parse(await readBody(incoming)));
       response.writeHead(202).end();
 
       if (request.callback === undefined) return;
@@ -109,7 +110,7 @@ const startMockAgent = async (): Promise<string> => {
   });
 
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
-  const { port } = z.object({ port: z.number() }).parse(server.address());
+  const { port } = parseWithSchemaSync(z.object({ port: z.number() }), server.address());
   onTestFinished(() => {
     server.closeAllConnections();
     server.close();
@@ -119,7 +120,7 @@ const startMockAgent = async (): Promise<string> => {
 };
 
 const terminalFailure = (code: 'cancelled' | 'run_failed', message: string): EvalFinalResultData =>
-  evalFinalResultDataSchema.parse({
+  parseWithSchemaSync(evalFinalResultDataSchema, {
     exit_code: code === 'cancelled' ? 130 : 4,
     result: {
       schema: CLI_RESULT_SCHEMA_ID,
@@ -208,7 +209,7 @@ test('runs a callback agent, persists inline artifacts only, and scores them as 
   const events: EvalEvent[] = [];
 
   const stream = await runConfiguration(
-    evalRunRequestSchema.parse({
+    parseWithSchemaSync(evalRunRequestSchema, {
       schema: COMMAND_REQUEST_SCHEMA_ID,
       command: 'eval.run',
       output: 'json',

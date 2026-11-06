@@ -1,3 +1,4 @@
+import { parseWithSchemaSync } from '@attest/contracts';
 import { z } from 'zod';
 import { readFile } from 'node:fs/promises';
 
@@ -11,9 +12,10 @@ interface OtlpFixture {
 
 /** Loads one checked-in sanitized framework export as converter input. */
 const loadFixture = async (name: string): Promise<OtlpFixture> =>
-  z
-    .object({ resourceSpans: z.array(z.unknown()) })
-    .parse(JSON.parse(await readFile(new URL(`./fixtures/${name}`, import.meta.url), 'utf8')));
+  parseWithSchemaSync(
+    z.object({ resourceSpans: z.array(z.unknown()) }),
+    JSON.parse(await readFile(new URL(`./fixtures/${name}`, import.meta.url), 'utf8')),
+  );
 
 describe('convertOtlpJson', () => {
   it('normalizes a Vercel AI SDK export into agent, llm, and tool spans', async () => {

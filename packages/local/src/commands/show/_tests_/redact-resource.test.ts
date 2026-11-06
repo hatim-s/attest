@@ -1,4 +1,5 @@
 import {
+  parseWithSchemaSync,
   AGENT_RESOURCE_SCHEMA_ID,
   METRIC_RESOURCE_SCHEMA_ID,
   agentResourceSchema,
@@ -14,7 +15,7 @@ const credentialUrl = (label: string, scheme = 'https'): string =>
 
 /** Parses first so every redaction case is proven valid under the authored schema. */
 const validAgent = (id: string, transport: AgentResource['transport']): AgentResource =>
-  agentResourceSchema.parse({
+  parseWithSchemaSync(agentResourceSchema, {
     schema: AGENT_RESOURCE_SCHEMA_ID,
     id,
     name: id,
@@ -93,7 +94,7 @@ describe('resource output URL redaction', () => {
   });
 
   it('redacts schema-valid HTTP metric URL credentials', () => {
-    const metric = metricResourceSchema.parse({
+    const metric = parseWithSchemaSync(metricResourceSchema, {
       schema: METRIC_RESOURCE_SCHEMA_ID,
       id: 'remote-metric',
       name: 'Remote metric',

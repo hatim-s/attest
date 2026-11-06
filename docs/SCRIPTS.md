@@ -3,19 +3,19 @@
 Run workspace commands from the repository root. To run one package script, use
 `bun run --cwd packages/<package> <script>`.
 
-| Script             | Root behavior                                                                                                 |
-| ------------------ | ------------------------------------------------------------------------------------------------------------- |
-| `build`            | Builds packages in dependency order through Turborepo.                                                        |
-| `typecheck`        | Builds dependencies, checks package source, and checks release scripts.                                       |
-| `lint`             | Checks TypeScript, TSX, and package import boundaries with ESLint.                                            |
-| `lint:fix`         | Applies available ESLint fixes.                                                                               |
-| `test:lint-rules`  | Runs local lint rule suites, Effect import/execution ownership and bridge ledger checks, also required in CI. |
-| `test`             | Runs package tests serially to isolate process fixtures.                                                      |
-| `test:acceptance`  | Builds every package, then runs the CLI packed-install journeys.                                              |
-| `test:portability` | Runs the compiled executor and runtime checks on Node and Bun. Build first.                                   |
-| `generate:schemas` | Regenerates JSON schemas from contracts.                                                                      |
-| `format:check`     | Checks repository formatting with Prettier.                                                                   |
-| `format`           | Formats repository files with Prettier.                                                                       |
+| Script             | Root behavior                                                                                                                                 |
+| ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `build`            | Builds packages in dependency order through Turborepo.                                                                                        |
+| `typecheck`        | Builds dependencies, checks package source, and checks release scripts.                                                                       |
+| `lint`             | Checks TypeScript, TSX, and package import boundaries with ESLint.                                                                            |
+| `lint:fix`         | Applies available ESLint fixes.                                                                                                               |
+| `test:lint-rules`  | Runs local lint rule suites, typed schema decoder ownership, Effect import/execution ownership and bridge ledger checks, also required in CI. |
+| `test`             | Runs package tests serially to isolate process fixtures.                                                                                      |
+| `test:acceptance`  | Builds every package, then runs the CLI packed-install journeys.                                                                              |
+| `test:portability` | Runs the compiled executor and runtime checks on Node and Bun. Build first.                                                                   |
+| `generate:schemas` | Regenerates JSON schemas from contracts.                                                                                                      |
+| `format:check`     | Checks repository formatting with Prettier.                                                                                                   |
+| `format`           | Formats repository files with Prettier.                                                                                                       |
 
 ## Application packages
 

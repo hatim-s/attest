@@ -1,5 +1,10 @@
 import { z } from 'zod';
-import { portableProjectBundleSchema, type PortableProjectBundle } from '@attest/contracts';
+import {
+  parseWithSchema,
+  parseWithSchemaSync,
+  portableProjectBundleSchema,
+  type PortableProjectBundle,
+} from '@attest/contracts';
 
 import { validatePortableMetricSource } from './portable-metric-source.js';
 
@@ -10,9 +15,9 @@ import { EvalResolutionError, type ResolutionProject } from './resolution-projec
 /** Validates source/resource parity and computes the same snapshot hashes as the local loader. */
 // BOUNDARY: Uploaded portable project bundles are schema checked and their authored files and resource hashes are verified.
 const resolvePortableProject = (input: PortableProjectBundle): ResolutionProject => {
-  const parsed = portableProjectBundleSchema.safeParse(input);
+  const parsed = parseWithSchema(portableProjectBundleSchema, input);
 
-  if (!parsed.success) {
+  if (!parsed.ok) {
     throw new EvalResolutionError('project_invalid', 'Invalid portable project bundle.', {
       details: {
         issues: parsed.error.issues.map(({ path, message }) => ({
@@ -23,7 +28,7 @@ const resolvePortableProject = (input: PortableProjectBundle): ResolutionProject
     });
   }
 
-  const { resources, files } = parsed.data;
+  const { resources, files } = parsed.value;
   const allowedFiles = new Set(['attest.project.json']);
 
   // BOUNDARY: Authored bundle files are decoded and compared to their resolved resource data and expected content hash.
@@ -93,7 +98,7 @@ const resolvePortableProject = (input: PortableProjectBundle): ResolutionProject
           rows = source
             .split(/\r?\n/u)
             .filter((line) => line.trim())
-            .map((line) => z.json().parse(JSON.parse(line)));
+            .map((line) => parseWithSchemaSync(z.json(), JSON.parse(line)));
         } catch {
           throw new EvalResolutionError('project_invalid', `Invalid JSONL in ${entry.data_path}.`);
         }

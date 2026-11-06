@@ -34,6 +34,15 @@ const bracket = Effect.acquireUseRelease(Effect.succeed('resource'), Effect.succ
   Effect.fail('cleanup' as const),
 );
 
+const bracketError: Effect.Effect<string, 'cleanup', never> = bracket;
+
+// @ts-expect-error acquireUseRelease must retain the release error in E.
+const bracketWithoutError: Effect.Effect<string, never, never> = bracket;
+
+// acquireRelease finalizers cannot report expected operational failures.
+// @ts-expect-error A fallible release must use acquireUseRelease.
+Effect.acquireRelease(Effect.succeed('resource'), () => Effect.fail('cleanup' as const));
+
 const scoped = Effect.gen(function* () {
   const scope = yield* Effect.scope;
   const fiber = yield* Effect.forkIn(foreign, scope);
@@ -60,5 +69,7 @@ export {
   document,
   foreign,
   bracket,
+  bracketError,
+  bracketWithoutError,
   scoped,
 };

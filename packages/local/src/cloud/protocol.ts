@@ -1,4 +1,8 @@
-import { portableProjectBundleSchema } from '@attest/contracts';
+import {
+  parseWithSchemaSync,
+  parseWithSchema,
+  portableProjectBundleSchema,
+} from '@attest/contracts';
 import { z } from 'zod';
 
 import { LocalError } from '../errors/local-error.js';
@@ -9,7 +13,7 @@ const bearerTokenSchema = z.string().regex(/^[\x21-\x7e]+$/u);
 // BOUNDARY: Decoded cloud responses are untrusted; each endpoint schema owns their validation.
 const parseCloudEndpoint = <T>(schema: z.ZodType<T>, value: unknown): T => {
   try {
-    return schema.parse(value);
+    return parseWithSchemaSync(schema, value);
   } catch {
     throw new LocalError(
       'cloud_request_failed',
@@ -176,20 +180,20 @@ class CloudRemoteError extends LocalError {
 /** Decodes the RFC 8628 device vocabulary and keeps other server codes opaque. */
 // BOUNDARY: Remote failure JSON is untrusted; only the error-code schemas are consumed here.
 const decodeRemoteError = (value: unknown): RemoteErrorOutcome => {
-  const parsed = remoteErrorSchema.safeParse(value);
+  const parsed = parseWithSchema(remoteErrorSchema, value);
 
-  if (!parsed.success) return { kind: 'remote', remoteCode: 'request_failed' };
-  const error = parsed.data.error;
+  if (!parsed.ok) return { kind: 'remote', remoteCode: 'request_failed' };
+  const error = parsed.value.error;
   const remoteCode = error?.code ?? 'request_failed';
-  const device = deviceErrorCodeSchema.safeParse(remoteCode);
+  const device = parseWithSchema(deviceErrorCodeSchema, remoteCode);
 
-  if (device.success) return { kind: 'device', code: device.data };
-  const known = uploadErrorCodeSchema.safeParse(remoteCode);
+  if (device.ok) return { kind: 'device', code: device.value };
+  const known = parseWithSchema(uploadErrorCodeSchema, remoteCode);
 
-  if (known.success) {
+  if (known.ok) {
     return {
       kind: 'known',
-      code: known.data,
+      code: known.value,
       message: error?.message?.slice(0, 4096) ?? `Cloud request failed (${remoteCode}).`,
     };
   }

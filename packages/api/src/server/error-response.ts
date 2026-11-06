@@ -1,3 +1,4 @@
+import { parseWithSchema } from '@attest/contracts';
 import { StoreError, type StoreErrorCode } from '@attest/core';
 import { z } from 'zod';
 
@@ -7,11 +8,11 @@ class InvalidRequestError extends Error {}
 
 /** BOUNDARY: Parses untrusted request parameters once before the source receives them. */
 const parseInput = <Schema extends z.ZodType>(schema: Schema, input: unknown): z.output<Schema> => {
-  const parsed = schema.safeParse(input);
+  const parsed = parseWithSchema(schema, input);
 
-  if (!parsed.success) throw new InvalidRequestError(z.prettifyError(parsed.error));
+  if (!parsed.ok) throw new InvalidRequestError(z.prettifyError(parsed.error));
 
-  return parsed.data;
+  return parsed.value;
 };
 
 /** Reads a request body once; malformed JSON fails the same way as a body the schema rejects. */

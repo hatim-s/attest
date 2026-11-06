@@ -1,3 +1,4 @@
+import { parseWithSchemaSync } from '@attest/contracts';
 import type { Kysely } from 'kysely';
 import type { JsonValue } from '@attest/contracts';
 import { z } from 'zod';
@@ -42,7 +43,7 @@ class SqliteCacheStore implements CacheStore {
           .execute();
 
         try {
-          return z.json().parse(JSON.parse(row.payload_json));
+          return parseWithSchemaSync(z.json(), JSON.parse(row.payload_json));
         } catch (error) {
           throw new StoreError('CORRUPT_DATA', 'Cached response JSON could not be rehydrated.', {
             cause: error,

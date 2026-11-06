@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { ESLint } from 'eslint';
 import { RuleTester } from './runtime.mjs';
 import { coreModules, effectBoundariesRule } from '../rules/effect-boundaries.mjs';
-import { effectRoots, effectMigrationBridges } from '../../../eslint.config.mjs';
+import { effectRoots, effectMigrationBridges, effectExecutionBlock } from '../../../eslint.config.mjs';
 
 const tester = new RuleTester();
 const error = { messageId: 'boundary' };
@@ -40,6 +40,11 @@ tester.run('Effect execution and import ownership', effectBoundariesRule, {
     "import { Effect } from 'effect'; function f(Effect) { Effect.runPromise(job); }",
   ],
   invalid: [
+    { code: "import { NodeRuntime } from '@effect/platform-node';", errors: [error] },
+    { code: "export * from '@effect/platform';", errors: [error] },
+    { code: "require('@effect/platform-bun');", errors: [error] },
+    { code: "import(modulePath);", errors: [error] },
+    { code: "require(modulePath);", errors: [error] },
     { code: '// EFFECT-BRIDGE(S2\nfoo();', errors: [error] },
     {
       code: "import { Effect } from 'effect';\n// EFFECT-BRIDGE(S2\nEffect.runPromise(job);",
@@ -147,6 +152,23 @@ tester.run('Effect execution and import ownership', effectBoundariesRule, {
     },
   ],
 });
+
+// Synthetic entries exercise the production ledger mapper even when ledgers are empty.
+for (const [file, dataOnly, browser] of [
+  ['packages/core/src/records/probe.ts', true, true],
+  ['packages/core/src/analytics/probe.ts', true, true],
+  ['packages/api/src/contract/probe.ts', true, true],
+  ['packages/api/src/client/probe.ts', false, true],
+  ['packages/web/src/probe.tsx', false, true],
+  ['packages/client/src/runner/probe.ts', false, true],
+  ['packages/client/src/index.ts', false, true],
+  ['packages/local/src/probe.ts', false, false],
+]) {
+  const block = effectExecutionBlock({ file, operations: ['Effect.runPromise'], removalSlice: 'S2' });
+  assert.deepEqual(block.rules['anti-slop/effect-boundaries'][1], {
+    operations: ['Effect.runPromise'], dataOnly, browser, removalSlice: 'S2',
+  });
+}
 
 // Check actual flat-config routing, including tests, rather than just rule options.
 const eslint = new ESLint();

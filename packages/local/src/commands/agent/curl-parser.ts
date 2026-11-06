@@ -1,3 +1,4 @@
+import { parseWithSchemaSync } from '@attest/contracts';
 import { z } from 'zod';
 import type { HttpRequestTemplate, JsonValue, SecretReference } from '@attest/contracts';
 
@@ -309,7 +310,7 @@ const parseCurlCommand = (source: string, options: CurlParserOptions = {}): Pars
 
     if (!formEncoded) {
       try {
-        parsedJson = z.json().parse(JSON.parse(rawBody));
+        parsedJson = parseWithSchemaSync(z.json(), JSON.parse(rawBody));
       } catch {
         parsedJson = undefined;
       }

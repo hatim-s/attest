@@ -1,4 +1,4 @@
-import { artifactPathSchema, type InlineArtifact } from '@attest/contracts';
+import { parseWithSchema, artifactPathSchema, type InlineArtifact } from '@attest/contracts';
 import { readFile, stat } from 'node:fs/promises';
 import { extname, join } from 'node:path';
 
@@ -102,7 +102,7 @@ const collectArtifacts = async (
   for (const path of await listFiles(root)) {
     if (!include(path)) continue;
 
-    if (!artifactPathSchema.safeParse(path).success) {
+    if (!parseWithSchema(artifactPathSchema, path).ok) {
       skipped.push({ path, reason: 'invalid_path' });
       continue;
     }

@@ -1,3 +1,4 @@
+import { parseWithSchemaSync, parseWithSchema } from '../schema/parse.js';
 import { z } from 'zod';
 import type { JsonValue } from '../project/shared.js';
 import { readFile } from 'node:fs/promises';
@@ -17,14 +18,17 @@ const fixturesDirectory = resolve(import.meta.dirname, 'fixtures');
 
 /** Reads one committed JSON golden without weakening its unknown boundary. */
 const readJsonFixture = async (relativePath: string): Promise<JsonValue> =>
-  z.json().parse(JSON.parse(await readFile(resolve(fixturesDirectory, relativePath), 'utf8')));
+  parseWithSchemaSync(
+    z.json(),
+    JSON.parse(await readFile(resolve(fixturesDirectory, relativePath), 'utf8')),
+  );
 
 /** Reads a JSONL golden while preserving the line order asserted by the event-stream contract. */
 const readJsonlFixture = async (relativePath: string): Promise<JsonValue[]> =>
   (await readFile(resolve(fixturesDirectory, relativePath), 'utf8'))
     .trimEnd()
     .split('\n')
-    .map((line) => z.json().parse(JSON.parse(line)));
+    .map((line) => parseWithSchemaSync(z.json(), JSON.parse(line)));
 
 const structuredTestRequest = {
   schema: 'attest.command-request',
@@ -52,64 +56,64 @@ const failedResult = {
 
 describe('eval run request contract', () => {
   it('accepts exact test/case/tag selection and every execution/output field', () => {
-    expect(evalRunRequestSchema.safeParse(structuredTestRequest).success).toBe(true);
-    expect(commandRequestSchema.safeParse(structuredTestRequest).success).toBe(true);
+    expect(parseWithSchema(evalRunRequestSchema, structuredTestRequest).ok).toBe(true);
+    expect(parseWithSchema(commandRequestSchema, structuredTestRequest).ok).toBe(true);
   });
 
   it('accepts all-selection and human watch while excluding watch from machine output', () => {
     expect(
-      evalRunRequestSchema.safeParse({
+      parseWithSchema(evalRunRequestSchema, {
         schema: 'attest.command-request',
         command: 'eval.run',
         all: true,
         output: 'human',
         watch: true,
-      }).success,
+      }).ok,
     ).toBe(true);
     expect(
-      evalRunRequestSchema.safeParse({
+      parseWithSchema(evalRunRequestSchema, {
         schema: 'attest.command-request',
         command: 'eval.run',
         all: true,
         output: 'json',
         watch: true,
-      }).success,
+      }).ok,
     ).toBe(false);
   });
 
   it('rejects missing or ambiguous selection and unknown fields', () => {
     expect(
-      evalRunRequestSchema.safeParse({
+      parseWithSchema(evalRunRequestSchema, {
         schema: 'attest.command-request',
         command: 'eval.run',
         output: 'json',
-      }).success,
+      }).ok,
     ).toBe(false);
     expect(
-      evalRunRequestSchema.safeParse({
+      parseWithSchema(evalRunRequestSchema, {
         ...structuredTestRequest,
         all: true,
-      }).success,
+      }).ok,
     ).toBe(false);
     expect(
-      evalRunRequestSchema.safeParse({
+      parseWithSchema(evalRunRequestSchema, {
         ...structuredTestRequest,
         config_path: 'attest.config.ts',
         suites: ['unknown-suite'],
-      }).success,
+      }).ok,
     ).toBe(false);
     expect(
-      commandRequestSchema.safeParse({ ...structuredTestRequest, command: 'run' }).success,
+      parseWithSchema(commandRequestSchema, { ...structuredTestRequest, command: 'run' }).ok,
     ).toBe(false);
     expect(
-      commandRequestSchema.safeParse({ ...structuredTestRequest, command: 'eval.add' }).success,
+      parseWithSchema(commandRequestSchema, { ...structuredTestRequest, command: 'eval.add' }).ok,
     ).toBe(false);
   });
 
   it('keeps the committed request golden aligned with runtime and generated schemas', async () => {
     const request = await readJsonFixture('eval-run/request.json');
 
-    expect(evalRunRequestSchema.safeParse(request).success).toBe(true);
+    expect(parseWithSchema(evalRunRequestSchema, request).ok).toBe(true);
     expect(compileGeneratedSchema('eval-run-request.json')(request)).toBe(true);
     expect(compileGeneratedSchema('command-request.json')(request)).toBe(true);
   });
@@ -118,7 +122,7 @@ describe('eval run request contract', () => {
 describe('immutable eval run metadata contract', () => {
   it('freezes resource hashes, selection order, snapshot hash, and effective command', async () => {
     const fixture = await readJsonFixture('eval-run/eval-run.json');
-    const parsed = evalRunSchema.parse(fixture);
+    const parsed = parseWithSchemaSync(evalRunSchema, fixture);
 
     expect(parsed.snapshot.selected_cases.map(({ configured_index }) => configured_index)).toEqual([
       0, 1,
@@ -140,20 +144,20 @@ describe('immutable eval run metadata contract', () => {
   });
 
   it('rejects top-level run spelling and mutable or unknown snapshot metadata', async () => {
-    const run = evalRunSchema.parse(await readJsonFixture('eval-run/eval-run.json'));
+    const run = parseWithSchemaSync(evalRunSchema, await readJsonFixture('eval-run/eval-run.json'));
 
     expect(
-      evalRunSchema.safeParse({
+      parseWithSchema(evalRunSchema, {
         ...run,
         effective_command: { ...run.effective_command, command_path: ['run'] },
-      }).success,
+      }).ok,
     ).toBe(false);
-    expect(evalRunSchema.safeParse({ ...run, status: 'running' }).success).toBe(false);
+    expect(parseWithSchema(evalRunSchema, { ...run, status: 'running' }).ok).toBe(false);
     expect(
-      evalRunSchema.safeParse({
+      parseWithSchema(evalRunSchema, {
         ...run,
         snapshot: { ...run.snapshot, config_path: 'attest.config.ts' },
-      }).success,
+      }).ok,
     ).toBe(false);
   });
 });
@@ -161,19 +165,23 @@ describe('immutable eval run metadata contract', () => {
 describe('eval event conformance and sequencing', () => {
   it('accepts actual completion order while retaining configured case indexes', async () => {
     const events = await readJsonlFixture('eval-run/events.jsonl');
-    const stream = evalEventStreamSchema.parse(events);
+    const stream = parseWithSchemaSync(evalEventStreamSchema, events);
     const completed = stream.filter((event) => event.event === 'case_completed');
 
     expect(completed.map(({ data }) => data.configured_index)).toEqual([1, 0]);
     expect(completed.map(({ data }) => data.completion_index)).toEqual([0, 1]);
     expect(stream.at(-1)?.event).toBe('result');
-    expect(events.every((event) => cliEventSchema.safeParse(event).success)).toBe(true);
+    expect(events.every((event) => parseWithSchema(cliEventSchema, event).ok)).toBe(true);
     const validateGeneratedEvent = compileGeneratedSchema('eval-event.json');
     events.forEach((event) => expect(validateGeneratedEvent(event)).toBe(true));
   });
 
   it('rejects nondeterministic sequence, duplicate configured indexes, and a non-final result', async () => {
-    const events = evalEventStreamSchema.parse(await readJsonlFixture('eval-run/events.jsonl'));
+    const events = parseWithSchemaSync(
+      evalEventStreamSchema,
+      await readJsonlFixture('eval-run/events.jsonl'),
+    );
+
     const badSequence = events.map((event) => ({ ...event }));
     badSequence[3] = { ...badSequence[3]!, sequence: 9 };
     const duplicateStartIndex = events.map((event) => ({ ...event }));
@@ -185,24 +193,27 @@ describe('eval event conformance and sequencing', () => {
       data: { ...secondStart.data, configured_index: 0 },
     };
 
-    expect(evalEventStreamSchema.safeParse(badSequence).success).toBe(false);
-    expect(evalEventStreamSchema.safeParse(duplicateStartIndex).success).toBe(false);
-    expect(evalEventStreamSchema.safeParse(events.slice(0, -1)).success).toBe(false);
+    expect(parseWithSchema(evalEventStreamSchema, badSequence).ok).toBe(false);
+    expect(parseWithSchema(evalEventStreamSchema, duplicateStartIndex).ok).toBe(false);
+    expect(parseWithSchema(evalEventStreamSchema, events.slice(0, -1)).ok).toBe(false);
   });
 
   it('rejects a second run_started inside an otherwise valid stream', async () => {
-    const events = evalEventStreamSchema.parse(await readJsonlFixture('eval-run/events.jsonl'));
+    const events = parseWithSchemaSync(
+      evalEventStreamSchema,
+      await readJsonlFixture('eval-run/events.jsonl'),
+    );
 
     const candidate = [events[0]!, events[0]!, ...events.slice(1)].map((event, sequence) => ({
       ...event,
       sequence,
     }));
 
-    const result = evalEventStreamSchema.safeParse(candidate);
+    const result = parseWithSchema(evalEventStreamSchema, candidate);
 
-    expect(result.success).toBe(false);
+    expect(result.ok).toBe(false);
 
-    if (!result.success)
+    if (!result.ok)
       expect(result.error.issues).toContainEqual(
         expect.objectContaining({
           path: [1, 'event'],
@@ -212,7 +223,10 @@ describe('eval event conformance and sequencing', () => {
   });
 
   it('rejects restarting a completed case identity at a fresh configured index', async () => {
-    const events = evalEventStreamSchema.parse(await readJsonlFixture('eval-run/events.jsonl'));
+    const events = parseWithSchemaSync(
+      evalEventStreamSchema,
+      await readJsonlFixture('eval-run/events.jsonl'),
+    );
 
     const [
       started,
@@ -256,11 +270,11 @@ describe('eval event conformance and sequencing', () => {
       resultEvent!,
     ].map((event, sequence) => ({ ...event, sequence }));
 
-    const result = evalEventStreamSchema.safeParse(candidate);
+    const result = parseWithSchema(evalEventStreamSchema, candidate);
 
-    expect(result.success).toBe(false);
+    expect(result.ok).toBe(false);
 
-    if (!result.success)
+    if (!result.ok)
       expect(result.error.issues).toContainEqual(
         expect.objectContaining({
           path: [3, 'data', 'configured_index'],
@@ -270,7 +284,11 @@ describe('eval event conformance and sequencing', () => {
   });
 
   it('freezes the complete 0/1/2/3/4/130 exit-code matrix and shared final result envelope', async () => {
-    const events = evalEventStreamSchema.parse(await readJsonlFixture('eval-run/events.jsonl'));
+    const events = parseWithSchemaSync(
+      evalEventStreamSchema,
+      await readJsonlFixture('eval-run/events.jsonl'),
+    );
+
     const resultEvent = events.at(-1);
 
     if (resultEvent?.event !== 'result') throw new Error('Golden final result event drifted.');
@@ -284,17 +302,17 @@ describe('eval event conformance and sequencing', () => {
     };
 
     expect(
-      evalFinalResultDataSchema.safeParse({ exit_code: 0, result: passingSuccess }).success,
+      parseWithSchema(evalFinalResultDataSchema, { exit_code: 0, result: passingSuccess }).ok,
     ).toBe(true);
     expect(
-      evalFinalResultDataSchema.safeParse({ exit_code: 1, result: failingSuccess }).success,
+      parseWithSchema(evalFinalResultDataSchema, { exit_code: 1, result: failingSuccess }).ok,
     ).toBe(true);
 
     for (const exit_code of [1, 2, 3, 4, 130] as const) {
       const data = { exit_code, result: failedResult };
-      expect(evalFinalResultDataSchema.safeParse(data).success).toBe(true);
+      expect(parseWithSchema(evalFinalResultDataSchema, data).ok).toBe(true);
       expect(
-        evalEventStreamSchema.safeParse([
+        parseWithSchema(evalEventStreamSchema, [
           {
             schema: 'attest.cli-event',
             sequence: 0,
@@ -302,14 +320,14 @@ describe('eval event conformance and sequencing', () => {
             event: 'result',
             data,
           },
-        ]).success,
+        ]).ok,
       ).toBe(true);
     }
 
     expect(
-      evalFinalResultDataSchema.safeParse({ exit_code: 0, result: failedResult }).success,
+      parseWithSchema(evalFinalResultDataSchema, { exit_code: 0, result: failedResult }).ok,
     ).toBe(false);
-    expect(cliResultSchema.safeParse(failingSuccess).success).toBe(true);
+    expect(parseWithSchema(cliResultSchema, failingSuccess).ok).toBe(true);
   });
 });
 
@@ -318,10 +336,10 @@ describe('eval cancellation contract', () => {
     const request = await readJsonFixture('eval-cancel/request.json');
     const result = await readJsonFixture('eval-cancel/result.json');
 
-    expect(evalCancelRequestSchema.safeParse(request).success).toBe(true);
-    expect(commandRequestSchema.safeParse(request).success).toBe(true);
-    expect(evalCancelResultSchema.safeParse(result).success).toBe(true);
-    expect(cliResultSchema.safeParse(result).success).toBe(true);
+    expect(parseWithSchema(evalCancelRequestSchema, request).ok).toBe(true);
+    expect(parseWithSchema(commandRequestSchema, request).ok).toBe(true);
+    expect(parseWithSchema(evalCancelResultSchema, result).ok).toBe(true);
+    expect(parseWithSchema(cliResultSchema, result).ok).toBe(true);
     expect(compileGeneratedSchema('eval-cancel-request.json')(request)).toBe(true);
     expect(compileGeneratedSchema('eval-cancel-result.json')(result)).toBe(true);
   });

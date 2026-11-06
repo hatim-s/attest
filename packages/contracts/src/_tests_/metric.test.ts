@@ -1,3 +1,4 @@
+import { parseWithSchema } from '../schema/parse.js';
 import { describe, expect, it } from 'vitest';
 
 import { assertionCheckSchema, metricRequestSchema } from '../metric/protocol.js';
@@ -34,39 +35,45 @@ describe('metric schemas', () => {
       ],
     };
 
-    expect(assertionCheckSchema.safeParse(check).success).toBe(true);
+    expect(parseWithSchema(assertionCheckSchema, check).ok).toBe(true);
   });
 
   it('validates JSON paths, JSON Schema booleans, and regular expressions', () => {
-    expect(assertionCheckSchema.safeParse({ exists: { path: '$.a.b[0]' } }).success).toBe(true);
-    expect(assertionCheckSchema.safeParse({ exists: { path: '$..a' } }).success).toBe(false);
-    expect(assertionCheckSchema.safeParse({ exists: { path: '$.items[*]' } }).success).toBe(false);
-    expect(assertionCheckSchema.safeParse({ exists: { path: '$[' } }).success).toBe(false);
+    expect(parseWithSchema(assertionCheckSchema, { exists: { path: '$.a.b[0]' } }).ok).toBe(true);
+    expect(parseWithSchema(assertionCheckSchema, { exists: { path: '$..a' } }).ok).toBe(false);
+    expect(parseWithSchema(assertionCheckSchema, { exists: { path: '$.items[*]' } }).ok).toBe(
+      false,
+    );
+    expect(parseWithSchema(assertionCheckSchema, { exists: { path: '$[' } }).ok).toBe(false);
     expect(
-      assertionCheckSchema.safeParse({ json_schema: { path: '$.value', schema: true } }).success,
+      parseWithSchema(assertionCheckSchema, { json_schema: { path: '$.value', schema: true } }).ok,
     ).toBe(true);
     expect(
-      assertionCheckSchema.safeParse({
+      parseWithSchema(assertionCheckSchema, {
         regex: { path: '$.value', pattern: 'capital', flags: 'i' },
-      }).success,
+      }).ok,
     ).toBe(true);
     expect(
-      assertionCheckSchema.safeParse({ regex: { path: '$.value', pattern: 'capital', flags: 'x' } })
-        .success,
+      parseWithSchema(assertionCheckSchema, {
+        regex: { path: '$.value', pattern: 'capital', flags: 'x' },
+      }).ok,
     ).toBe(false);
     expect(
-      assertionCheckSchema.safeParse({ regex: { path: '$.value', pattern: '[', flags: 'i' } })
-        .success,
+      parseWithSchema(assertionCheckSchema, {
+        regex: { path: '$.value', pattern: '[', flags: 'i' },
+      }).ok,
     ).toBe(false);
   });
 
   it('requires at least one threshold comparison', () => {
-    expect(assertionCheckSchema.safeParse({ threshold: { path: '$.score' } }).success).toBe(false);
+    expect(parseWithSchema(assertionCheckSchema, { threshold: { path: '$.score' } }).ok).toBe(
+      false,
+    );
   });
 
   it('accepts tool argument matchers and stable span filters', () => {
     expect(
-      assertionCheckSchema.safeParse({
+      parseWithSchema(assertionCheckSchema, {
         tool_calls: {
           name: 'search',
           arguments: [
@@ -75,10 +82,10 @@ describe('metric schemas', () => {
             { exists: { path: '$.query' } },
           ],
         },
-      }).success,
+      }).ok,
     ).toBe(true);
     expect(
-      assertionCheckSchema.safeParse({
+      parseWithSchema(assertionCheckSchema, {
         spans: {
           filter: {
             kind: 'tool',
@@ -88,12 +95,12 @@ describe('metric schemas', () => {
           count: 1,
           order: ['tool.search'],
         },
-      }).success,
+      }).ok,
     ).toBe(true);
     expect(
-      assertionCheckSchema.safeParse({
+      parseWithSchema(assertionCheckSchema, {
         tool_calls: { arguments: [{ equals: { path: '$.*', value: 5 } }] },
-      }).success,
+      }).ok,
     ).toBe(false);
   });
 
@@ -102,14 +109,14 @@ describe('metric schemas', () => {
     { name: 'any', value: { any: [] } },
     { name: 'arguments', value: { tool_calls: { arguments: [] } } },
   ])('rejects an empty $name list', ({ value }) => {
-    expect(assertionCheckSchema.safeParse(value).success).toBe(false);
+    expect(parseWithSchema(assertionCheckSchema, value).ok).toBe(false);
   });
 });
 
 describe('metric request artifacts', () => {
   it('accepts inline artifacts with or without a materialized directory', () => {
-    expect(metricRequestSchema.safeParse(metricRequest).success).toBe(true);
-    expect(metricRequestSchema.safeParse({ ...metricRequest, artifact_dir: null }).success).toBe(
+    expect(parseWithSchema(metricRequestSchema, metricRequest).ok).toBe(true);
+    expect(parseWithSchema(metricRequestSchema, { ...metricRequest, artifact_dir: null }).ok).toBe(
       true,
     );
   });
@@ -119,6 +126,6 @@ describe('metric request artifacts', () => {
     { ...metricRequest, artifact_dir: undefined },
     { ...metricRequest, artifacts: [{ kind: 'reference', path: 'answer.ts', id: 'blob-1' }] },
   ])('rejects a request without inline artifacts and a directory in %#', (candidate) => {
-    expect(metricRequestSchema.safeParse(candidate).success).toBe(false);
+    expect(parseWithSchema(metricRequestSchema, candidate).ok).toBe(false);
   });
 });

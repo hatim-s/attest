@@ -1,4 +1,5 @@
 import {
+  parseWithSchemaSync,
   evalRunEffectiveCommandSchema,
   evalRunSnapshotSchema,
   type AgentResource,
@@ -265,7 +266,7 @@ const resolveEvalRun = (
 
   const selectedMetrics = project.metrics.filter(({ id }) => selectedMetricIds.has(id)).sort(byId);
 
-  const snapshot = evalRunSnapshotSchema.parse({
+  const snapshot = parseWithSchemaSync(evalRunSnapshotSchema, {
     project_id: project.project.project_id,
     project_hash: project.projectHash,
     resource_hashes: {
@@ -310,7 +311,7 @@ const resolveEvalRun = (
 
   if (request.junit_path !== undefined) resolved.junit_path = request.junit_path;
 
-  const effectiveCommand = evalRunEffectiveCommandSchema.parse({
+  const effectiveCommand = parseWithSchemaSync(evalRunEffectiveCommandSchema, {
     command_path: ['eval', 'run'],
     argv: [...options.argv],
     request,

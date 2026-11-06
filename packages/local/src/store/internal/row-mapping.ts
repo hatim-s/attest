@@ -1,3 +1,4 @@
+import { parseWithSchema, parseWithSchemaSync } from '@attest/contracts';
 import { z } from 'zod';
 import type { JsonValue } from '@attest/contracts';
 import {
@@ -15,14 +16,14 @@ import type { CasesTable, MetricResultsTable, RunsTable } from '../schema.js';
 
 // BOUNDARY: Rehydrated SQL JSON is checked against its complete owner record schema.
 const parseStored = <T>(schema: z.ZodType<T>, value: unknown): T => {
-  const parsed = schema.safeParse(value);
+  const parsed = parseWithSchema(schema, value);
 
-  if (!parsed.success)
+  if (!parsed.ok)
     throw new StoreError('CORRUPT_DATA', 'Stored record violates its schema.', {
       cause: parsed.error,
     });
 
-  return parsed.data;
+  return parsed.value;
 };
 
 const parseJson = (serialized: string | null): JsonValue | undefined => {
@@ -31,7 +32,7 @@ const parseJson = (serialized: string | null): JsonValue | undefined => {
   }
 
   try {
-    return z.json().parse(JSON.parse(serialized));
+    return parseWithSchemaSync(z.json(), JSON.parse(serialized));
   } catch (error) {
     throw new StoreError('CORRUPT_DATA', 'Stored JSON could not be rehydrated.', { cause: error });
   }

@@ -1,3 +1,4 @@
+import { parseWithSchema } from '@attest/contracts';
 import { randomUUID } from 'node:crypto';
 import { readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
@@ -85,11 +86,12 @@ const registerEvalRun = async (projectRoot: string, runId: string): Promise<Eval
     if (stopped || controller.signal.aborted) return;
 
     try {
-      const request = evalCancellationRequestSchema.safeParse(
+      const request = parseWithSchema(
+        evalCancellationRequestSchema,
         JSON.parse(await readFile(requestPath, 'utf8')),
       );
 
-      if (request.success && request.data.run_id === runId && request.data.token === record.token) {
+      if (request.ok && request.value.run_id === runId && request.value.token === record.token) {
         controller.abort(new Error(`Eval run ${runId} was cancelled.`));
 
         return;
@@ -130,11 +132,12 @@ const unregisterEvalRun = async (handle: EvalRegistryHandle): Promise<void> => {
   handle.stopPolling();
 
   try {
-    const current = registryOwnershipSchema.safeParse(
+    const current = parseWithSchema(
+      registryOwnershipSchema,
       JSON.parse(await readFile(handle.path, 'utf8')),
     );
 
-    if (current.success && current.data.token === handle.record.token) {
+    if (current.ok && current.value.token === handle.record.token) {
       await Promise.all([
         unlink(handle.path),
         unlink(handle.requestPath).catch((cause: unknown) => {
@@ -157,9 +160,9 @@ const detachEvalRun = (handle: EvalRegistryHandle): void => handle.stopPolling()
 
 // BOUNDARY: Cancellation registry JSON is untrusted disk input; validate every record field before checking process ownership.
 const parseRegistryRecord = (value: unknown, runId: string): EvalRegistryRecord | undefined => {
-  const parsed = evalRegistryRecordSchema.safeParse(value);
+  const parsed = parseWithSchema(evalRegistryRecordSchema, value);
 
-  return parsed.success && parsed.data.run_id === runId ? parsed.data : undefined;
+  return parsed.ok && parsed.value.run_id === runId ? parsed.value : undefined;
 };
 
 /** Publishes one authenticated run-scoped request without signalling unrelated process work. */

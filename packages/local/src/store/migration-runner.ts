@@ -1,3 +1,4 @@
+import { parseWithSchemaSync } from '@attest/contracts';
 import { z } from 'zod';
 import { StoreError } from '@attest/core';
 
@@ -13,9 +14,10 @@ const createMigrationTableSql = `
 `;
 
 const readAppliedVersions = async (handle: SqliteHandle): Promise<number[]> => {
-  const rows = z
-    .array(z.object({ version: z.number() }))
-    .parse(await handle.prepare('SELECT version FROM schema_migrations ORDER BY version').all());
+  const rows = parseWithSchemaSync(
+    z.array(z.object({ version: z.number() })),
+    await handle.prepare('SELECT version FROM schema_migrations ORDER BY version').all(),
+  );
 
   return rows.map((row) => Number(row.version));
 };

@@ -1,4 +1,5 @@
 import {
+  parseWithSchema,
   projectResourcesSchema,
   type AgentResource,
   type JsonValue,
@@ -148,9 +149,9 @@ const prepareProjectCandidate = (candidate: ProjectResources): PreparedProjectCa
   }
 
   const project: ProjectResources = { agents, datasets, metrics, project: manifest, tests };
-  const validated = projectResourcesSchema.safeParse(project);
+  const validated = parseWithSchema(projectResourcesSchema, project);
 
-  if (!validated.success) {
+  if (!validated.ok) {
     throw new ProjectTransactionError(
       'project_invalid',
       `Candidate project validation failed with ${validated.error.issues.length} diagnostic(s).`,
@@ -163,17 +164,17 @@ const prepareProjectCandidate = (candidate: ProjectResources): PreparedProjectCa
   }
 
   const projectHash = hashProjectManifest(
-    validated.data.project,
-    validated.data.datasets.map(({ metadata }) => metadata),
+    validated.value.project,
+    validated.value.datasets.map(({ metadata }) => metadata),
   );
 
   files.set('attest.project.json', {
-    canonicalHash: contentHash(validated.data.project),
-    contents: renderCanonicalJsonFile(validated.data.project),
+    canonicalHash: contentHash(validated.value.project),
+    contents: renderCanonicalJsonFile(validated.value.project),
     path: 'attest.project.json',
   });
 
-  return { files, project: validated.data, projectHash };
+  return { files, project: validated.value, projectHash };
 };
 
 export { prepareProjectCandidate, type PreparedProjectCandidate };

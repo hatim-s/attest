@@ -163,3 +163,36 @@ files, stale operations and unmatched tags. Neither tests nor browser entries ge
 a general execution exception.
 
 Execution ownership also covers Runtime.makeRunMain, FiberSet/FiberMap/FiberHandle runtime and runtimePromise, and Stream.toReadableStream* / toAsyncIterable*. These APIs require exact operation ledger entries just like Effect.run*. A root keeps its ManagedRuntime value in its own file and never passes it to other modules; the lint rule does not track runtime instance methods across module boundaries.
+
+## Public decoder, S1.0
+
+`@attest/contracts` exports `parseWithSchema(schema, candidate)` returning the
+public Attest `Result`, `parseWithSchemaEffect(schema, candidate)` returning a
+native `Effect` with validation failures in E, and
+`parseWithSchemaSync(schema, candidate)` for intentional synchronous throws.
+Output types follow the schema, including transforms and generic schemas.
+External consumers, including the future attest-cloud migration, must use these
+exports instead of invoking schema parsing methods. No private repository was changed.
+
+S1.0 retains Zod definitions and native ZodError diagnostics in the generic
+decoder. Consumers currently render raw issue codes, array paths, prettified
+errors, messages and causes, so replacing those would change public behavior.
+`formatContractIssues` is the shared issue projection seam. Existing protocol
+parsers retain their `ContractIssue[]` errors and `ParseReport` warnings, including
+invalid optional trace handling. S1a replaces decoder internals and issue
+projection with native Schema and explicit error/all options. Caller routing is
+already complete. S1a also changes the public decoder error type and migrates every raw diagnostic consumer; its error projection must preserve public issue paths and authored messages. Exceptions thrown by user refinements remain exceptions; in
+an Effect they are defects rather than validation failures. Defaults and catch
+behavior remain schema-owned.
+
+Typed lint rejects Zod decoding method references, including inline and imported
+schemas, outside `schema/parse.ts`. The existing `isJsonValue` type guard in
+`project/shared.ts` is an intrinsic schema owner and stays there to avoid a cycle
+through the protocol decoder. Other parse methods, such as JSON, Date, Commander
+and router parameter adapters, are unaffected.
+
+Platform and companion `@effect/*` imports require an architecture decision.
+Computed import and require paths are banned repo-wide so lint can check import
+boundaries. Literal imports of non-Effect modules remain permitted subject to
+existing package restrictions. This is the explicit policy for the existing
+fail-closed dynamic-loading rule.

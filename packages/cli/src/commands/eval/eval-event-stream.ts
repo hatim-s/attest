@@ -1,4 +1,6 @@
 import {
+  parseWithSchemaSync,
+  parseWithSchema,
   CLI_EVENT_SCHEMA_ID,
   evalEventSchema,
   evalEventStreamSchema,
@@ -32,7 +34,7 @@ const evalEvent = (
   data: EvalEvent['data'],
   now: Clock,
 ): EvalEvent =>
-  evalEventSchema.parse({
+  parseWithSchemaSync(evalEventSchema, {
     schema: CLI_EVENT_SCHEMA_ID,
     sequence,
     time: now().toISOString(),
@@ -67,9 +69,9 @@ const recoverFailedJsonlStream = (
   cause: unknown,
   now: Clock,
 ): EvalEventStream => {
-  const alreadyComplete = evalEventStreamSchema.safeParse(events);
+  const alreadyComplete = parseWithSchema(evalEventStreamSchema, events);
 
-  if (alreadyComplete.success) return alreadyComplete.data;
+  if (alreadyComplete.ok) return alreadyComplete.value;
   const started = events[0];
 
   if (started?.event !== 'run_started') throw cause;
@@ -130,14 +132,14 @@ const recoverFailedJsonlStream = (
     }),
   );
 
-  const result = evalFinalResultDataSchema.parse({
+  const result = parseWithSchemaSync(evalFinalResultDataSchema, {
     exit_code: failure.exitCode,
     result: createCliFailureResult('eval.run', failure.error),
   });
 
   recovered.push(evalEvent(recovered.length, 'result', result, now));
 
-  return evalEventStreamSchema.parse(recovered);
+  return parseWithSchemaSync(evalEventStreamSchema, recovered);
 };
 
 /**
@@ -159,7 +161,7 @@ const collectEvalEvents = async (
 
   try {
     for await (const value of source) {
-      const event = evalEventSchema.parse(value);
+      const event = parseWithSchemaSync(evalEventSchema, value);
 
       if (event.sequence !== events.length) {
         throw new AttestCliError('run_failed', 'Eval event sequence is not deterministic.', {
@@ -180,18 +182,18 @@ const collectEvalEvents = async (
       }
     }
 
-    const parsed = evalEventStreamSchema.safeParse(events);
+    const parsed = parseWithSchema(evalEventStreamSchema, events);
 
-    if (!parsed.success) {
+    if (!parsed.ok) {
       throw new AttestCliError('run_failed', 'Eval event stream is out of order or incomplete.', {
         hint: 'Repair dispatcher event ordering and terminal result metadata.',
         details: { diagnostics: issueDiagnostics(parsed.error.issues) },
       });
     }
 
-    if (options.streamJsonl) parsed.data.slice(printed).forEach(print);
+    if (options.streamJsonl) parsed.value.slice(printed).forEach(print);
 
-    return parsed.data;
+    return parsed.value;
   } catch (error: unknown) {
     if (!options.streamJsonl || events.length === 0) throw error;
     const recovered = recoverFailedJsonlStream(events, error, options.now);

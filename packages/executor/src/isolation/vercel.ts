@@ -1,3 +1,4 @@
+import { parseWithSchemaSync } from '@attest/contracts';
 import { z } from 'zod';
 
 import { BoundedOutputWritable } from '../adapters/sandbox/bounded-writable.js';
@@ -78,7 +79,7 @@ const resolveSeedFiles = (
 
 /** Keeps a fresh VM alive across case hooks, agent tools, evaluation, and bounded final hooks. */
 const vercelSandboxIsolation = (input: VercelIsolationOptions = {}): CaseEnvironmentFactory => {
-  const options = vercelIsolationOptionsSchema.parse(input);
+  const options = parseWithSchemaSync(vercelIsolationOptionsSchema, input);
   const { commandTimeoutMs, cleanupTimeoutMs, outputBytes: cap } = options;
   const finalizationTimeoutMs = options.finalizationTimeoutMs ?? commandTimeoutMs;
 

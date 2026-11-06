@@ -1,3 +1,4 @@
+import { parseWithSchema } from '@attest/contracts';
 import { summarizeSuites } from '@attest/core/analytics';
 import { parsePageLimit, StoreError } from '@attest/core/records';
 import { API_ERROR_STATUS, type ApiErrorCode } from '../contract/errors.js';
@@ -109,11 +110,11 @@ const createSnapshotClient = (snapshot: ReportSnapshot): ApiClient => {
       }),
     getSuiteHistory: (params, query) =>
       settle(() => {
-        const parsed = suiteHistoryRequestSchema.safeParse({ ...params, ...query });
+        const parsed = parseWithSchema(suiteHistoryRequestSchema, { ...params, ...query });
 
-        if (!parsed.success) return fail('INVALID_REQUEST', parsed.error.message);
+        if (!parsed.ok) return fail('INVALID_REQUEST', parsed.error.message);
 
-        const { projectKey, suiteName } = parsed.data;
+        const { projectKey, suiteName } = parsed.value;
         requireProject(projectKey);
         const run = snapshot.run;
 

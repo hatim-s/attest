@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { parseTrace } from '../schema/parse.js';
+import { parseWithSchema, parseTrace } from '../schema/parse.js';
 import { traceSchema } from '../trace/protocol.js';
 import { TRACE_SCHEMA_ID } from '../schema/identifiers.js';
 
@@ -32,11 +32,11 @@ describe('traceSchema', () => {
   ])('rejects an invalid $field at its source path', ({ field, value, path }) => {
     const trace = { ...traceFixture, spans: [{ ...traceFixture.spans[0], [field]: value }] };
 
-    const result = traceSchema.safeParse(trace);
+    const result = parseWithSchema(traceSchema, trace);
 
-    expect(result.success).toBe(false);
+    expect(result.ok).toBe(false);
 
-    if (result.success) {
+    if (result.ok) {
       return;
     }
 

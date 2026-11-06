@@ -1,4 +1,4 @@
-import { isNumber } from '@attest/contracts';
+import { parseWithSchema, isNumber } from '@attest/contracts';
 import type { z } from 'zod';
 
 /** Either the validated record or every structural violation, prefixed with its field path. */
@@ -54,9 +54,9 @@ const parseRecord = <T>(
   value: unknown,
   path: string,
 ): RecordParseResult<T> => {
-  const parsed = schema.safeParse(withoutUndefinedProperties(value).value);
+  const parsed = parseWithSchema(schema, withoutUndefinedProperties(value).value);
 
-  if (parsed.success) return { ok: true, value: parsed.data };
+  if (parsed.ok) return { ok: true, value: parsed.value };
 
   return { ok: false, violations: formatRecordIssues(parsed.error.issues, path) };
 };

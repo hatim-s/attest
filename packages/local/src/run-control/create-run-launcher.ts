@@ -1,4 +1,8 @@
-import { COMMAND_REQUEST_SCHEMA_ID, evalCancelRequestSchema } from '@attest/contracts';
+import {
+  parseWithSchema,
+  COMMAND_REQUEST_SCHEMA_ID,
+  evalCancelRequestSchema,
+} from '@attest/contracts';
 import { StoreError, type ProjectCatalog, type RunControl } from '@attest/core';
 
 import { LocalError } from '../errors/local-error.js';
@@ -68,16 +72,16 @@ const createRunLauncher = ({ catalog, command }: RunLauncherOptions): RunControl
     cancelRun: async (projectKey, runId) => {
       const root = await projectRoot(projectKey);
       // Run ids name registry files; anything but a run id cannot name a run.
-      const parsed = evalCancelRequestSchema.shape.run_id.safeParse(runId);
+      const parsed = parseWithSchema(evalCancelRequestSchema.shape.run_id, runId);
 
-      if (!parsed.success) throw new StoreError('RUN_NOT_FOUND', `Run ${runId} was not found.`);
+      if (!parsed.ok) throw new StoreError('RUN_NOT_FOUND', `Run ${runId} was not found.`);
 
       try {
         const { status } = await cancelConfiguration(
           {
             schema: COMMAND_REQUEST_SCHEMA_ID,
             command: 'eval.cancel',
-            run_id: parsed.data,
+            run_id: parsed.value,
             output: 'json',
           },
           { project: root, workingDirectory: root },

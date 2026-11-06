@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import {
+  parseWithSchemaSync,
   AGENT_PROTOCOL,
   AGENT_RESOURCE_SCHEMA_ID,
   METRIC_RESOURCE_SCHEMA_ID,
@@ -97,7 +98,7 @@ const startJudgeProvider = async (): Promise<{ requests: string[] }> => {
   });
 
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
-  const { port } = z.object({ port: z.number() }).parse(server.address());
+  const { port } = parseWithSchemaSync(z.object({ port: z.number() }), server.address());
   vi.stubEnv('OPENAI_API_KEY', 'judge-test-key');
   vi.stubEnv('OPENAI_BASE_URL', `http://127.0.0.1:${port}/v1`);
   onTestFinished(() => {
@@ -120,7 +121,7 @@ const createRoot = async (token: string): Promise<string> => {
 
 const readRun = async () => {
   const fixture = await readFile(new URL('./fixtures/eval-run.json', import.meta.url), 'utf8');
-  const run = evalRunSchema.parse(JSON.parse(fixture));
+  const run = parseWithSchemaSync(evalRunSchema, JSON.parse(fixture));
   delete run.effective_command.resolved.execution;
 
   return run;
@@ -266,11 +267,11 @@ test('a field-redacted output value never reaches stored metric text or the judg
     expect(stored).toMatchObject([{ response: { output: { token: REDACTED } } }]);
 
     const [echo, judge] = stored[0]?.metrics ?? [];
-    const { stderr } = z.object({ stderr: z.string() }).parse(echo?.details);
+    const { stderr } = parseWithSchemaSync(z.object({ stderr: z.string() }), echo?.details);
     expect(stderr).toContain(`"token":"${REDACTED}"`);
     expect(judge?.rationale).toContain(REDACTED);
 
-    const { key } = z.object({ key: z.string() }).parse(judge?.judgeIo);
+    const { key } = parseWithSchemaSync(z.object({ key: z.string() }), judge?.judgeIo);
     const cached = await store.cache.get('judge', key);
     expect(cached).toBeDefined();
 

@@ -1,4 +1,4 @@
-import { isNumber, isString } from '@attest/contracts';
+import { parseWithSchema, isNumber, isString } from '@attest/contracts';
 import {
   traceSchema,
   type JsonValue,
@@ -63,9 +63,9 @@ const parseJsonAttribute = (value: AttributeValue): JsonValue => {
     return value;
   }
 
-  const parsed = jsonValueSchema.safeParse(decoded);
+  const parsed = parseWithSchema(jsonValueSchema, decoded);
 
-  return parsed.success ? parsed.data : value;
+  return parsed.ok ? parsed.value : value;
 };
 
 const firstAttribute = (
@@ -194,16 +194,16 @@ const scopeAttributes = (scopeSpans: OtlpScopeSpans, resourceAttributes: Attribu
 };
 
 const toTrace = (traceId: string, spans: Span[]): Trace => {
-  const parsed = traceSchema.safeParse({ schema: 'attest.trace', trace_id: traceId, spans });
+  const parsed = parseWithSchema(traceSchema, { schema: 'attest.trace', trace_id: traceId, spans });
 
-  if (!parsed.success) {
+  if (!parsed.ok) {
     throw new TraceConversionError(
       'invalid_otlp_json',
       `Converted trace ${traceId} is invalid: ${formatIssues(parsed.error.issues)}`,
     );
   }
 
-  return parsed.data;
+  return parsed.value;
 };
 
 /**
@@ -212,9 +212,9 @@ const toTrace = (traceId: string, spans: Span[]): Trace => {
  */
 // BOUNDARY: External OTLP JSON is decoded by the OTLP schema and mapped into validated Attest trace fields.
 const convertOtlpJson = (candidate: unknown): Trace[] => {
-  const parsed = otlpExportSchema.safeParse(candidate);
+  const parsed = parseWithSchema(otlpExportSchema, candidate);
 
-  if (!parsed.success) {
+  if (!parsed.ok) {
     throw new TraceConversionError(
       'invalid_otlp_json',
       `OTLP JSON is invalid: ${formatIssues(parsed.error.issues)}`,
@@ -223,7 +223,7 @@ const convertOtlpJson = (candidate: unknown): Trace[] => {
 
   const spansByTrace = new Map<string, Span[]>();
 
-  for (const resourceSpans of parsed.data.resourceSpans) {
+  for (const resourceSpans of parsed.value.resourceSpans) {
     for (const scopeSpans of resourceSpans.scopeSpans) {
       const inherited = scopeAttributes(scopeSpans, resourceSpans.resource.attributes);
 

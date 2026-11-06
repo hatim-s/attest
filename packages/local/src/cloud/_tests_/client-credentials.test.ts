@@ -1,3 +1,4 @@
+import { parseWithSchemaSync } from '@attest/contracts';
 import { z } from 'zod';
 import { syncBuiltinESMExports } from 'node:module';
 import { mock as nodeMock } from 'node:test';
@@ -144,13 +145,15 @@ describe('cloud trust boundaries', () => {
     expect(JSON.stringify({ result, notices })).not.toContain('private-');
     expect((await readCloudCredentials(path)).accessToken).toBe('private-token');
 
-    const start = z
-      .object({ code_challenge: z.string() })
-      .parse(await new Response(fetcher.mock.calls[0]![1]!.body).json());
+    const start = parseWithSchemaSync(
+      z.object({ code_challenge: z.string() }),
+      await new Response(fetcher.mock.calls[0]![1]!.body).json(),
+    );
 
-    const token = z
-      .object({ code_verifier: z.string() })
-      .parse(await new Response(fetcher.mock.calls[1]![1]!.body).json());
+    const token = parseWithSchemaSync(
+      z.object({ code_verifier: z.string() }),
+      await new Response(fetcher.mock.calls[1]![1]!.body).json(),
+    );
 
     expect(start.code_challenge).not.toBe(token.code_verifier);
   });

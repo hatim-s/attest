@@ -1,3 +1,4 @@
+import { parseWithSchemaSync } from '@attest/contracts';
 import { z } from 'zod';
 import type { ProjectResources, JsonValue } from '@attest/contracts';
 
@@ -187,7 +188,7 @@ const RESOURCE_VALUES = {
   agent: (project: ProjectResources) => project.agents,
   dataset: (project: ProjectResources) =>
     project.datasets.map(({ cases, metadata }) => ({
-      ...z.record(z.string(), z.json()).parse(datasetMetadataForHash(metadata)),
+      ...parseWithSchemaSync(z.record(z.string(), z.json()), datasetMetadataForHash(metadata)),
       id: metadata.id,
       cases,
     })),
@@ -201,10 +202,10 @@ const valuesByKind = (
 ): ReadonlyMap<string, ResourceValue> => {
   // Every resource is a validated JSON object with a string id.
   const values = RESOURCE_VALUES[kind](project).map((value) =>
-    z
-      .record(z.string(), z.json())
-      .and(z.object({ id: z.string() }))
-      .parse(JSON.parse(canonicalStringify(value))),
+    parseWithSchemaSync(
+      z.record(z.string(), z.json()).and(z.object({ id: z.string() })),
+      JSON.parse(canonicalStringify(value)),
+    ),
   );
 
   return new Map(values.map((value) => [value.id, value]));
