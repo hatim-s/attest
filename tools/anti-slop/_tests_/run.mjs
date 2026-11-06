@@ -17,3 +17,5 @@ import "./no-widen-then-assert.mjs";
 import "./require-readable-spacing.mjs";
 import "./require-safety-comment-for-type-assertion.mjs";
 import "./documented-boundaries.mjs";
+
+import "./effect-boundaries.mjs";

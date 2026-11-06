@@ -7,6 +7,7 @@ The 18 generic rules, shared helpers, and ESLint Stylistic vendor files are
 ported from `src/` to `tools/anti-slop/`. Both MIT licenses are preserved.
 
 Local changes:
+
 - TypeScript is emitted as readable ESM JavaScript for direct Node/ESLint loading.
 - Oxlint `defineRule` and `eslintCompatPlugin` wrappers are removed.
 - `createOnce` becomes ESLint `create`, allocating state per file.
@@ -14,7 +15,9 @@ Local changes:
 - The flat config enables every generic rule at error severity and ignores
   the vendored plugin and agent tooling.
 
-Effect rules are not enabled because these projects do not directly depend on Effect.
+Upstream Effect rules were not ported. Attest adds its own `effect-boundaries` rule
+for core imports, execution roots and temporary migration bridge ownership.
+Its invariant suite lives in `_tests_/effect-boundaries.mjs`; it is not upstream code.
 Oxlint's native `oxc/no-accumulating-spread` is not part of this ESLint plugin.
 Existing source findings are fixed as part of this lint adoption.
 

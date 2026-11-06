@@ -3,19 +3,19 @@
 Run workspace commands from the repository root. To run one package script, use
 `bun run --cwd packages/<package> <script>`.
 
-| Script             | Root behavior                                                                            |
-| ------------------ | ---------------------------------------------------------------------------------------- |
-| `build`            | Builds packages in dependency order through Turborepo.                                   |
-| `typecheck`        | Builds dependencies, checks package source, and checks release scripts.                  |
-| `lint`             | Checks TypeScript, TSX, and package import boundaries with ESLint.                       |
-| `lint:fix`         | Applies available ESLint fixes.                                                          |
-| `test:lint-rules`  | Runs vendored anti-slop rule suites and documented-boundary checks, also required in CI. |
-| `test`             | Runs package tests serially to isolate process fixtures.                                 |
-| `test:acceptance`  | Builds every package, then runs the CLI packed-install journeys.                         |
-| `test:portability` | Runs the compiled executor and runtime checks on Node and Bun. Build first.              |
-| `generate:schemas` | Regenerates JSON schemas from contracts.                                                 |
-| `format:check`     | Checks repository formatting with Prettier.                                              |
-| `format`           | Formats repository files with Prettier.                                                  |
+| Script             | Root behavior                                                                                                 |
+| ------------------ | ------------------------------------------------------------------------------------------------------------- |
+| `build`            | Builds packages in dependency order through Turborepo.                                                        |
+| `typecheck`        | Builds dependencies, checks package source, and checks release scripts.                                       |
+| `lint`             | Checks TypeScript, TSX, and package import boundaries with ESLint.                                            |
+| `lint:fix`         | Applies available ESLint fixes.                                                                               |
+| `test:lint-rules`  | Runs local lint rule suites, Effect import/execution ownership and bridge ledger checks, also required in CI. |
+| `test`             | Runs package tests serially to isolate process fixtures.                                                      |
+| `test:acceptance`  | Builds every package, then runs the CLI packed-install journeys.                                              |
+| `test:portability` | Runs the compiled executor and runtime checks on Node and Bun. Build first.                                   |
+| `generate:schemas` | Regenerates JSON schemas from contracts.                                                                      |
+| `format:check`     | Checks repository formatting with Prettier.                                                                   |
+| `format`           | Formats repository files with Prettier.                                                                       |
 
 ## Application packages
 
@@ -66,3 +66,10 @@ Runtime also provides `test:node` and `test:bun`. They run the same compiled eva
 | `typecheck:scripts` | root                 | Checks release packaging, consumer verification, and web build/config inputs with Node types.                                                |
 | `test:fuzz`         | root                 | Builds contracts and runs uncached conformance parser fuzzing.                                                                               |
 | `prepublishOnly`    | ten release packages | Rejects workspace publication. Publish the reviewed archives instead.                                                                        |
+
+## Temporary Effect probe
+
+`bun run typecheck:effect-probe` checks the installed Effect 4.1.2 APIs without
+executing them. The `@attest/effect-probe` workspace also participates in root
+`typecheck` through Turbo. It is the only S0 Effect dependency owner and is removed
+in S10 together with its script and lock entries. It has no execution root.

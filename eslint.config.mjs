@@ -48,6 +48,33 @@ const coreForbidden = [
   '@tanstack/ai*',
 ];
 
+// Exact file paths only. New roots need a concrete lifecycle owner.
+const effectRoots = [];
+
+// Each entry: { file, operations, removalSlice, owner }. Removed in S10.
+const effectMigrationBridges = [];
+
+const effectExecutionBlocks = [...effectRoots, ...effectMigrationBridges].map(
+  ({ file, operations, removalSlice }) => {
+    const dataOnly =
+      /^(packages\/core\/src\/(records|analytics)\/|packages\/api\/src\/contract\/)/.test(file);
+
+    const browser =
+      dataOnly ||
+      /^(packages\/api\/src\/client\/|packages\/web\/src\/|packages\/client\/src\/(index\.ts$|runner\/))/.test(
+        file,
+      );
+
+    const options = { operations, dataOnly, browser };
+
+    if (removalSlice) options.removalSlice = removalSlice;
+
+    return { files: [file], rules: { 'anti-slop/effect-boundaries': ['error', options] } };
+  },
+);
+
+export { effectRoots, effectMigrationBridges };
+
 export default tseslint.config(
   ...antiSlopConfig,
   {
@@ -56,11 +83,26 @@ export default tseslint.config(
       '**/.turbo/**',
       '**/node_modules/**',
       '**/coverage/**',
+      '.notes/**',
       'conformance/fixtures/**',
       '**/.logs/**',
     ],
   },
   tseslint.configs.recommended,
+  {
+    files: ['packages/core/src/{records,analytics}/**/*.ts', 'packages/api/src/contract/**/*.ts'],
+    rules: { 'anti-slop/effect-boundaries': ['error', { dataOnly: true, browser: true }] },
+  },
+  {
+    files: [
+      'packages/api/src/client/**/*.ts',
+      'packages/web/src/**/*.{ts,tsx}',
+      'packages/client/src/index.ts',
+      'packages/client/src/runner/**/*.ts',
+    ],
+    rules: { 'anti-slop/effect-boundaries': ['error', { browser: true }] },
+  },
+  ...effectExecutionBlocks,
   {
     files: ['packages/*/src/**/*.{ts,tsx}'],
     extends: [tseslint.configs.recommendedTypeChecked],

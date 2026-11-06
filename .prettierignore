@@ -13,3 +13,6 @@ packages/schemas/generated/*.json
 packages/site/index.html
 
 tools/anti-slop/
+
+# Local evidence is not repository source.
+.notes/

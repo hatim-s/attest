@@ -1,3 +1,4 @@
+import { effectBoundariesRule } from './rules/effect-boundaries.mjs';
 import { noArrayFilterMapRule } from "./rules/no-array-filter-map.mjs";
 import { noReduceAccumulatorCopyRule } from "./rules/no-reduce-accumulator-copy.mjs";
 import { noChainedTypeAssertionsRule } from "./rules/no-chained-type-assertions.mjs";
@@ -19,6 +20,7 @@ import { requireSafetyCommentForTypeAssertionRule } from "./rules/require-safety
 const antiSlopPlugin = {
   meta: { name: "anti-slop" },
   rules: {
+    "effect-boundaries": effectBoundariesRule,
     "no-array-filter-map": noArrayFilterMapRule,
     "no-reduce-accumulator-copy": noReduceAccumulatorCopyRule,
     "no-chained-type-assertions": noChainedTypeAssertionsRule,
