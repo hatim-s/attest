@@ -1,7 +1,8 @@
 .attest-compact-chart {
   --chart-ink: var(--ink, var(--text, CanvasText));
   --chart-fail: var(--fail, #c45a2a);
-  --chart-fail-soft: var(--fail-soft, var(--danger-soft, GrayText));
+  --chart-fail-soft: #ffc29c;
+  --chart-fail-soft: light-dark(#ffc29c, #9a4619);
   --chart-line: var(--line, var(--border, GrayText));
   color: var(--chart-ink);
   min-width: 0;
@@ -172,4 +173,52 @@
 .attest-chart-shortfall,
 .attest-chart-halo {
   pointer-events: none;
+}
+
+/* Older engines retain explicit colors; current hosts supply the scoped color-scheme. */
+@supports not (color: light-dark(white, black)) {
+  :where(:root[data-theme='dark']) .attest-compact-chart {
+    --chart-fail-soft: #9a4619;
+  }
+  :where(:root[data-theme='light']) .attest-compact-chart {
+    --chart-fail-soft: #ffc29c;
+  }
+  .attest-compact[data-theme='dark'] .attest-compact-chart {
+    --chart-fail-soft: #9a4619;
+  }
+  .attest-compact[data-theme='light'] .attest-compact-chart {
+    --chart-fail-soft: #ffc29c;
+  }
+  @media (prefers-color-scheme: dark) {
+    .attest-compact[data-theme='system'] .attest-compact-chart {
+      --chart-fail-soft: #9a4619;
+    }
+  }
+}
+.attest-chart-day-selection {
+  fill: var(--chart-ink);
+  stroke: none;
+}
+.attest-chart-actions {
+  min-height: 38px;
+}
+.attest-chart-dense {
+  cursor: pointer;
+}
+.attest-chart-dense-mark {
+  pointer-events: none;
+}
+.attest-chart-static-mark {
+  cursor: default;
+}
+.attest-chart-chooser select {
+  width: 100%;
+}
+
+.attest-chart-chooser label {
+  max-width: 100%;
+}
+.attest-chart-chooser a {
+  max-width: 100%;
+  overflow-wrap: anywhere;
 }

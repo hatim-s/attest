@@ -1,5 +1,5 @@
 type ActivityDay = {
-  /** Calendar day in the timezone chosen by the API caller, YYYY-MM-DD. */
+  /** Backend-owned calendar bucket, YYYY-MM-DD. Production activity buckets are UTC. */
   day: string;
   runCount: number;
   passed: number;
@@ -8,6 +8,8 @@ type ActivityDay = {
   skipped: number;
 };
 
+/** Inclusive 1–92 day window. Offset labels a fixed-offset source, never a DST timezone.
+ * The production mapper must use offset 0 for backend UTC activity buckets. */
 type ActivityWindow = { from: string; to: string; utcOffsetMinutes: number };
 
 const ACTIVITY_LIMIT = 92;
@@ -55,8 +57,8 @@ function prepareActivity(days: readonly ActivityDay[], window: ActivityWindow) {
     return supplied.get(day) ?? { day, runCount: 0, passed: 0, failed: 0, errored: 0, skipped: 0 };
   });
 
-  const up = Math.max(1, ...ordered.map((day) => day.passed));
-  const down = Math.max(1, ...ordered.map((day) => day.failed + day.errored));
+  const up = Math.max(0, ...ordered.map((day) => day.passed));
+  const down = Math.max(0, ...ordered.map((day) => day.failed + day.errored));
 
   const totals = ordered.reduce(
     (sum, day) => ({

@@ -1,5 +1,6 @@
-import { useLayoutEffect, useRef, useState } from 'react';
+import { useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react';
 import type { CaseVerdict } from '@attest/core/records';
+import { arrowIndex } from '../charts/compact/chart-keyboard.js';
 import './meters.css';
 
 type CaseStripRecord = { id: string; label: string } & (
@@ -15,12 +16,16 @@ function CaseStrip({ records, label }: CaseStripProps) {
   const visible = records.slice(0, EXACT_STRIP_LIMIT);
   const root = useRef<HTMLSpanElement>(null);
   const ownsFocus = useRef(false);
+  const pendingRecovery = useRef(false);
+  const nodes = useRef(new Map<string, HTMLAnchorElement>());
   const [focusedId, setFocusedId] = useState<string>();
   const activeId = visible.find((record) => record.id === focusedId)?.id ?? visible[0]?.id;
   useLayoutEffect(() => {
-    if (ownsFocus.current && focusedId !== activeId)
+    // Ref detachment observes focus before React removes a node. An explicit blur revokes it.
+    if (pendingRecovery.current && ownsFocus.current && document.activeElement === document.body)
       root.current?.querySelector<HTMLElement>('[tabindex="0"]')?.focus();
-  }, [activeId, focusedId]);
+    pendingRecovery.current = false;
+  });
 
   return (
     <span
@@ -33,8 +38,8 @@ function CaseStrip({ records, label }: CaseStripProps) {
       }}
       onBlur={(event) => {
         if (
-          event.relatedTarget instanceof Node &&
-          !event.currentTarget.contains(event.relatedTarget)
+          !event.currentTarget.contains(event.relatedTarget) &&
+          (event.relatedTarget !== null || !pendingRecovery.current)
         )
           ownsFocus.current = false;
       }}
@@ -46,7 +51,7 @@ function CaseStrip({ records, label }: CaseStripProps) {
           'aria-label': `${record.label}: ${record.verdict}${record.verdict === 'not-run' ? ', no recorded result' : ''}`,
           title: `${record.label}: ${record.verdict}`,
           onFocus: () => setFocusedId(record.id),
-          onKeyDown: (event: React.KeyboardEvent<HTMLElement>) => {
+          onKeyDown: (event: KeyboardEvent<HTMLElement>) => {
             if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
             event.preventDefault();
 
@@ -56,26 +61,36 @@ function CaseStrip({ records, label }: CaseStripProps) {
 
             const index = marks.indexOf(event.currentTarget);
 
-            const next =
-              event.key === 'Home'
-                ? 0
-                : event.key === 'End'
-                  ? marks.length - 1
-                  : Math.max(
-                      0,
-                      Math.min(marks.length - 1, index + (event.key === 'ArrowRight' ? 1 : -1)),
-                    );
+            const next = arrowIndex(event.key, index, marks.length);
 
             marks[next]?.focus();
           },
         };
 
-        return record.verdict === 'not-run' ? (
-          <span key={record.id} {...props} />
-        ) : (
-          <a key={record.id} href={record.href} {...props} />
+        return (
+          <a
+            key={record.id}
+            ref={(node) => {
+              const previous = nodes.current.get(record.id);
+
+              if (!node && previous === document.activeElement && ownsFocus.current)
+                pendingRecovery.current = true;
+
+              if (node) nodes.current.set(record.id, node);
+              else nodes.current.delete(record.id);
+            }}
+            href={record.verdict === 'not-run' ? undefined : record.href}
+            role={record.verdict === 'not-run' ? 'img' : undefined}
+            {...props}
+          />
         );
       })}
+      {records.length > 0 && (
+        <span className="attest-strip-key">
+          Solid: passed. Capped orange: failed. Outline: error. Striped: skipped result. Dotted: no
+          recorded result.
+        </span>
+      )}
       {records.length === 0 && <span>No records</span>}
       {records.length > EXACT_STRIP_LIMIT && (
         <span>

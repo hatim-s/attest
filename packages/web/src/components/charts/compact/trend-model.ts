@@ -1,11 +1,16 @@
 import type { RunStatus } from '@attest/core/records';
 import type { VerdictCounts } from '../../meters/proportions.js';
 
+/** Mapper input: at most 200 eval slices from one source-aware query window.
+ * startedAt uses epoch milliseconds. Complete slices carry the supplied per-eval rate;
+ * aggregate counts never imply actual case identities or known full coverage.
+ * The integration owner exposes server truncation and decodes DTOs before mapping. */
 type TrendRun = {
   id: string;
   /** Epoch milliseconds, mapped from the decoded API timestamp. */
   startedAt: number;
-  label: string;
+  /** Optional human label or branch, separate from the canonical run ID. */
+  label?: string;
   runStatus: RunStatus;
   counts: VerdictCounts & { planned: number | null; recorded: number };
 } & ({ state: 'complete'; passRate: number } | { state: 'running' | 'incomplete' });
