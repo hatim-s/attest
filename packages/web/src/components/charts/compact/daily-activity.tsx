@@ -111,6 +111,9 @@ function DailyActivity({
     return ordered[Math.floor((pointer.x - 44) / slot)];
   };
 
+  const dayLabel = `${active?.day ?? 'Window total'}, ${counts.runCount} ${counts.runCount === 1 ? 'run' : 'runs'}. ${timezoneLabel(window.utcOffsetMinutes)}.`;
+  const countLabel = `${counts.passed} passed, ${counts.failed} failed, ${counts.errored} errored, ${counts.skipped} skipped. Skipped cases are excluded from bars.`;
+
   return (
     <section ref={ref} className="attest-compact-chart" aria-label={label}>
       <h3>{label}</h3>
@@ -119,14 +122,8 @@ function DailyActivity({
           {counts.passed + counts.failed + counts.errored}{' '}
           {counts.passed + counts.failed + counts.errored === 1 ? 'case' : 'cases'} ran
         </strong>
-        <span>
-          {active?.day ?? 'Window total'}, {counts.runCount}{' '}
-          {counts.runCount === 1 ? 'run' : 'runs'}. {timezoneLabel(window.utcOffsetMinutes)}.
-        </span>
-        <span>
-          {counts.passed} passed, {counts.failed} failed, {counts.errored} errored, {counts.skipped}{' '}
-          skipped. Skipped cases are excluded from bars.
-        </span>
+        <span title={dayLabel}>{dayLabel}</span>
+        <span title={countLabel}>{countLabel}</span>
       </div>
       {dense && (
         <div ref={actionsRef} className="attest-chart-actions" onBlur={inspection.onBlur}>
@@ -135,7 +132,10 @@ function DailyActivity({
             <select
               value={actionDay?.day ?? ''}
               onFocus={() => {
-                if (actionDay) inspection.inspect(actionDay.day);
+                const next =
+                  ordered.find((day) => day.day === focused && day.runCount > 0) ?? actionDay;
+
+                if (next) inspection.inspect(next.day);
               }}
               onChange={(event) => {
                 setHovered(null);

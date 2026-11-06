@@ -52,7 +52,7 @@
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
 }
-.attest-chart-readout > :nth-child(5) {
+.attest-chart-readout > .attest-chart-identity {
   display: block;
   white-space: nowrap;
   overflow: hidden;

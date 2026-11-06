@@ -154,7 +154,9 @@ function PassRateTrend({
               {comparisonLabel}
             </span>
             <span title={countLabel}>{countLabel}</span>
-            <span title={runName(active.run)}>Run {runName(active.run)}</span>
+            <span className="attest-chart-identity" title={runName(active.run)}>
+              Run {runName(active.run)}
+            </span>
           </>
         ) : (
           <span>No eval slices in this window.</span>
@@ -167,7 +169,10 @@ function PassRateTrend({
             <select
               value={action?.run.id ?? ''}
               onFocus={() => {
-                if (action) inspection.inspect(action.run.id);
+                // A density transition carries the mark being inspected into this chooser.
+                const next = resolveActive(points, ({ run }) => run.id, [focused]) ?? action;
+
+                if (next) inspection.inspect(next.run.id);
               }}
               onChange={(event) => {
                 setHovered(null);

@@ -587,6 +587,9 @@ it('transfers owned sparse focus into the dense chooser on resize without steali
   await settle(() => resize());
   expect(document.activeElement).toBe(container.querySelector('select'));
   expect(container.querySelector('svg a')).toBe(mark);
+  expect(container.querySelector('select')?.value).toBe('id0');
+  expect(container.querySelector('.attest-chart-action')?.getAttribute('href')).toBe('#id0');
+  expect(container.querySelector('.attest-chart-readout')?.textContent).toContain('Run id0');
   const external = document.createElement('button');
   document.body.append(external);
   await settle(() => external.focus());
@@ -797,5 +800,89 @@ it('explains the missing current rate without denying an earlier complete slice'
   expect(container.querySelector('.attest-chart-readout')?.textContent).not.toContain(
     'No earlier complete slice',
   );
+  await settle(() => mounted.unmount());
+});
+
+it.each(['trend', 'daily'])(
+  'keeps staged %s inspection during window blur but clears it on actual departure',
+  async (chart) => {
+    const mounted = root();
+    const selected = vi.fn();
+    await settle(() =>
+      mounted.render(
+        chart === 'trend' ? (
+          <PassRateTrend
+            runs={[a, b, c]}
+            axis="run"
+            utcOffsetMinutes={0}
+            onAxisChange={() => {}}
+            runHref={({ id }) => `#${id}`}
+            label="Trend"
+          />
+        ) : (
+          <DailyActivity
+            days={[
+              { day: '2026-11-02', runCount: 1, passed: 1, failed: 0, errored: 0, skipped: 0 },
+            ]}
+            window={{ from: '2026-11-01', to: '2026-11-28', utcOffsetMinutes: 0 }}
+            onSelectDay={selected}
+          />
+        ),
+      ),
+    );
+    const id = chart === 'trend' ? 'a' : '2026-11-02';
+    const select = container.querySelector('select')!;
+    await settle(() => {
+      select.focus();
+      select.value = id;
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await settle(() =>
+      select.dispatchEvent(new FocusEvent('focusout', { bubbles: true, relatedTarget: null })),
+    );
+    expect(document.activeElement).toBe(select);
+    expect(select.value).toBe(id);
+    const action = container.querySelector<HTMLElement>('.attest-chart-action')!;
+
+    if (chart === 'trend') expect(action.getAttribute('href')).toBe('#a');
+    else expect(action.getAttribute('aria-disabled')).toBe('false');
+    await settle(() => select.blur());
+    expect(document.activeElement).toBe(document.body);
+    expect(select.value).toBe(chart === 'trend' ? 'c' : '');
+    await settle(() => mounted.unmount());
+  },
+);
+
+it('transfers a sparse daily mark identity to the new chooser and its action', async () => {
+  const mounted = root();
+  let width = 1000;
+  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(() =>
+    DOMRect.fromRect({ width }),
+  );
+  const selected = vi.fn();
+  await settle(() =>
+    mounted.render(
+      <DailyActivity
+        days={[
+          { day: '2026-11-01', runCount: 1, passed: 1, failed: 0, errored: 0, skipped: 0 },
+          { day: '2026-11-02', runCount: 1, passed: 1, failed: 0, errored: 0, skipped: 0 },
+        ]}
+        window={{ from: '2026-11-01', to: '2026-11-28', utcOffsetMinutes: 0 }}
+        onSelectDay={selected}
+      />,
+    ),
+  );
+  const mark = container.querySelector<SVGElement>('[data-chart-mark][data-day="2026-11-02"]')!;
+  await settle(() => mark.focus());
+  width = 375;
+  await settle(() => resize());
+  const select = container.querySelector('select')!;
+  expect(document.activeElement).toBe(select);
+  expect(select.value).toBe('2026-11-02');
+  expect(container.querySelector('.attest-chart-readout')?.textContent).toContain('2026-11-02');
+  const action = container.querySelector<HTMLButtonElement>('.attest-chart-action')!;
+  expect(action.getAttribute('aria-disabled')).toBe('false');
+  await settle(() => action.click());
+  expect(selected).toHaveBeenCalledExactlyOnceWith('2026-11-02');
   await settle(() => mounted.unmount());
 });

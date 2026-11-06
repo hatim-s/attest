@@ -78,6 +78,10 @@ function useInspection(
   const inspect = (id: string) => setInspection({ id, selection, windowKey });
 
   const onBlur = (event: FocusEvent<HTMLElement>) => {
+    // Window deactivation can emit blur while the chooser still owns document focus.
+    if (event.relatedTarget === null && event.currentTarget.contains(document.activeElement))
+      return;
+
     if (
       !(event.relatedTarget instanceof Node) ||
       !event.currentTarget.contains(event.relatedTarget)

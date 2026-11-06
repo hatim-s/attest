@@ -84,6 +84,9 @@
 }
 
 @supports not (color: light-dark(white, black)) {
+  .attest-compact[data-theme='light'] :is(.attest-meter, .attest-case-strip) {
+    --meter-fail: var(--fail, #ff5c00);
+  }
   :where(:root[data-theme='dark']) :is(.attest-meter, .attest-case-strip),
   .attest-compact[data-theme='dark'] :is(.attest-meter, .attest-case-strip) {
     --meter-fail: var(--fail, #ff6a1a);
