@@ -1,3 +1,4 @@
+import { parseWithSchema } from '@attest/contracts';
 import { randomUUID } from 'node:crypto';
 import { readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
@@ -37,11 +38,11 @@ const cloudLinkPath = async (root: string, create = false): Promise<string> =>
 const readCloudLink = async (root: string): Promise<CloudLink | undefined> => {
   try {
     const raw = await readFile(await cloudLinkPath(root), 'utf8');
-    const parsed = cloudLinkSchema.safeParse(JSON.parse(raw));
+    const parsed = parseWithSchema(cloudLinkSchema, JSON.parse(raw));
 
-    if (!parsed.success) throw new Error('Invalid link');
+    if (!parsed.ok) throw new Error('Invalid link');
 
-    return parsed.data;
+    return parsed.value;
   } catch (error: unknown) {
     if (errnoCode(error) === 'ENOENT') return undefined;
 

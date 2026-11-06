@@ -1,4 +1,5 @@
 import {
+  parseWithSchemaSync,
   evalFinalResultDataSchema,
   type CliExitCode,
   type EvalFinalResultData,
@@ -10,7 +11,7 @@ import { evalEvent, serializeEvalEvent } from './eval-event-stream.js';
 
 /** Wraps a failure as the final data of a failed `eval.run`. */
 const failedRunResult = (failure: SerializedCliFailure): EvalFinalResultData =>
-  evalFinalResultDataSchema.parse({
+  parseWithSchemaSync(evalFinalResultDataSchema, {
     exit_code: failure.exitCode,
     result: createCliFailureResult('eval.run', failure.error),
   });

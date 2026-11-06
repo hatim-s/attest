@@ -5,6 +5,10 @@ export type { Result } from './result.js';
 export { CONTRACT_JSON_SCHEMAS, serializeContractSchema } from './schema/json-schema.js';
 
 export {
+  parseWithSchema,
+  parseWithSchemaEffect,
+  parseWithSchemaSync,
+  formatContractIssues,
   parseAgentCompletion,
   parseAgentRequest,
   parseAgentResponse,

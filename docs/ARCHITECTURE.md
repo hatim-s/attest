@@ -9,7 +9,9 @@ graph TD
   Local --> Executor
   Local --> Core[core]
   Local --> Api[api]
+  Api --> Contracts
   Api --> Core
+  Web --> Contracts
   Web --> Api
   Local --> Web[web embedded dashboard]
   Runtime --> Executor[executor]
@@ -40,7 +42,7 @@ Storage interfaces describe existing operations, not a proposed cloud repository
 
 `@attest/executor` invokes agents through CLI, HTTP, streaming, persistent sessions, and Vercel Sandbox. It owns invocation retries, transport deadlines, output limits, process cleanup, and case environments. It imports contracts, never runtime, core, local, or CLI. Its compiled ESM runs on Node 22+ and Bun 1.4+.
 
-`@attest/client` is the agent side of the callback transport, hosted by the consumer next to its agent. It accepts a trigger, runs a handler and posts the `attest.agent-completion`. It imports contracts and zod only, so a hosted agent never installs the evaluator. The root entry is a Web-standard `fetch` handler with no Node imports (ESLint enforces this) and runs on Node, Bun and Workers. `/node` adds the `node:http` server and workspace artifact collection; `/pi` drives `pi --mode rpc`.
+`@attest/client` is the agent side of the callback transport, hosted by the consumer next to its agent. It accepts a trigger, runs a handler and posts the `attest.agent-completion`. It imports contracts and zod directly; contracts also loads the portable Effect module for decoding. It never imports evaluator packages, so hosted agents do not install them. The root entry is a Web-standard `fetch` handler with no Node imports (ESLint enforces this) and runs on Node, Bun and Workers. `/node` adds the `node:http` server and workspace artifact collection; `/pi` drives `pi --mode rpc`.
 
 `@attest/runtime` evaluates metrics and schedules evaluation cases. It owns eval lifecycle hooks and case environment lifetime, and imports executor for invocation types. An `EvalCaseRunner` awaits stage callbacks between agent work and evaluation. Ordered hook arrays and injected environment factories let applications add behavior without replacing the scheduler. Runtime receives persistence and artifact behavior through the existing evaluation interfaces.
 
@@ -58,7 +60,7 @@ Local exposes focused entry points: `/agent`, `/metric`, `/test`, `/project`, `/
 
 ## Read and run control API
 
-`@attest/api` owns the read contract, the run control contract, fetch server app, typed client and dashboard bootstrap injection. Hosts inject core's read-only `RunSource` through a `ProjectCatalog`, which lists projects and opens the run source of one project key. A host that can run evals also injects core's `RunControl`, which lists a project's tests, starts a run and cancels one. Without it the control routes answer `CONTROL_UNAVAILABLE` and the bootstrap reports `capabilities.control: false`; the cloud host and static reports inject none. Every API route is project scoped; an unknown key fails with `PROJECT_NOT_FOUND`. The package owns no storage driver, socket, process spawning, authentication or tenant policy. Contract and client subpaths use browser-safe core records. The server imports core's root for comparisons and store errors, so Cloudflare Workers hosts need `nodejs_compat`.
+`@attest/api` owns the read contract, the run control contract, fetch server app, typed client and dashboard bootstrap injection. Hosts inject core's read-only `RunSource` through a `ProjectCatalog`, which lists projects and opens the run source of one project key. A host that can run evals also injects core's `RunControl`, which lists a project's tests, starts a run and cancels one. Without it the control routes answer `CONTROL_UNAVAILABLE` and the bootstrap reports `capabilities.control: false`; the cloud host and static reports inject none. Every API route is project scoped; an unknown key fails with `PROJECT_NOT_FOUND`. API and web import the public decoder directly from browser-safe `@attest/contracts`. The package owns no storage driver, socket, process spawning, authentication or tenant policy. Contract and client subpaths use browser-safe core records. The server imports core's root for comparisons and store errors, so Cloudflare Workers hosts need `nodejs_compat`.
 
 ## Browser and artifacts
 

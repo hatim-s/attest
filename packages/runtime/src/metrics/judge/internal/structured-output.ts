@@ -1,3 +1,4 @@
+import { parseWithSchema, parseWithSchemaSync } from '@attest/contracts';
 import type { JsonValue } from '@attest/contracts';
 import {
   chat,
@@ -47,7 +48,7 @@ type StructuredChatExecutor = (request: StructuredChatRequest) => Promise<JsonVa
 // BOUNDARY: SDK thrown values may carry a structured-output failure code.
 const isUnparseableResponse = (cause: unknown): boolean =>
   cause instanceof StandardSchemaValidationError ||
-  unparseableResponseSchema.safeParse(cause).success;
+  parseWithSchema(unparseableResponseSchema, cause).ok;
 
 /** Captures one attempt's provider bytes and token deltas without exposing SDK objects to persistence. */
 const createRecordMiddleware = (observation: JudgeAttemptObservation): ChatMiddleware => ({
@@ -57,10 +58,10 @@ const createRecordMiddleware = (observation: JudgeAttemptObservation): ChatMiddl
       return;
     }
 
-    const complete = structuredOutputCompleteSchema.safeParse(chunk);
+    const complete = parseWithSchema(structuredOutputCompleteSchema, chunk);
 
-    if (complete.success) {
-      observation.rawResponse = complete.data.value.raw;
+    if (complete.ok) {
+      observation.rawResponse = complete.value.value.raw;
     }
   },
   onUsage: (_context, providerUsage) => {
@@ -93,7 +94,7 @@ const executeStructuredChat: StructuredChatExecutor = async (request) => {
       debug: false,
     });
 
-    return z.json().parse(response);
+    return parseWithSchemaSync(z.json(), response);
   } finally {
     request.signal.removeEventListener('abort', forwardAbort);
   }

@@ -1,4 +1,5 @@
 import {
+  parseWithSchemaSync,
   AGENT_RESOURCE_SCHEMA_ID,
   COMMAND_REQUEST_SCHEMA_ID,
   evalRunRequestSchema,
@@ -190,7 +191,7 @@ const createProject = (): ResolutionProject => {
 };
 
 const request = (fields: Partial<EvalRunRequest> = {}): EvalRunRequest =>
-  evalRunRequestSchema.parse({
+  parseWithSchemaSync(evalRunRequestSchema, {
     schema: COMMAND_REQUEST_SCHEMA_ID,
     command: 'eval.run',
     test_ids: ['alpha'],

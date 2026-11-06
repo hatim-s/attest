@@ -1,7 +1,7 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { setTimeout } from 'node:timers/promises';
 
-import { cloudRunRequestSchema, type EvalRunRequest } from '@attest/contracts';
+import { parseWithSchema, cloudRunRequestSchema, type EvalRunRequest } from '@attest/contracts';
 import { z } from 'zod';
 
 import { LocalError } from '../errors/local-error.js';
@@ -29,12 +29,11 @@ import {
 /** Rejects malformed caller input before opening a network request. */
 // BOUNDARY: Cloud command inputs are validated by the supplied Zod schema before network submission.
 const parseCloudInput = <T>(schema: z.ZodType<T>, value: unknown): T => {
-  const parsed = schema.safeParse(value);
+  const parsed = parseWithSchema(schema, value);
 
-  if (!parsed.success)
-    throw new LocalError('cli_usage', 'Cloud request does not match the protocol.');
+  if (!parsed.ok) throw new LocalError('cli_usage', 'Cloud request does not match the protocol.');
 
-  return parsed.data;
+  return parsed.value;
 };
 
 /** Exchanges a user-approved PKCE device session for a private, revocable CLI token. */

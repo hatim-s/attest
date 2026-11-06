@@ -1,4 +1,9 @@
-import { EVAL_RUN_SCHEMA_ID, evalRunSchema, type EvalRun } from '@attest/contracts';
+import {
+  parseWithSchemaSync,
+  EVAL_RUN_SCHEMA_ID,
+  evalRunSchema,
+  type EvalRun,
+} from '@attest/contracts';
 
 import { canonicalStringify } from '../store/internal/canonical-json.js';
 import { StoreError } from '../store/store-error.js';
@@ -27,7 +32,7 @@ const evalScope = (run: RunRecord): EvalScope | undefined => {
   let snapshot: EvalRun['snapshot'];
 
   try {
-    snapshot = evalRunSchema.parse(JSON.parse(run.configJson)).snapshot;
+    snapshot = parseWithSchemaSync(evalRunSchema, JSON.parse(run.configJson)).snapshot;
   } catch (error) {
     throw new StoreError('CORRUPT_DATA', `Run ${run.id} has an unreadable eval configuration.`, {
       cause: error,

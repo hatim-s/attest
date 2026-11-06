@@ -1,3 +1,5 @@
+import { parseWithSchema } from '@attest/contracts';
+
 type CreateContentHasherResult = { add(line: string): void; digest(): string };
 
 type CreateBundleResult = { lines: string[]; manifest: BundleManifest };
@@ -127,11 +129,11 @@ const parseBundleLine = (line: string, index: number): BundleLine => {
     throw corruptBundle(`Run bundle line ${index + 1} contains invalid JSON.`, error);
   }
 
-  const parsed = bundleLineSchema.safeParse(json);
+  const parsed = parseWithSchema(bundleLineSchema, json);
 
-  if (!parsed.success) throw corruptBundle(lineFailure(parsed.error, index + 1), parsed.error);
+  if (!parsed.ok) throw corruptBundle(lineFailure(parsed.error, index + 1), parsed.error);
 
-  return parsed.data;
+  return parsed.value;
 };
 
 /**

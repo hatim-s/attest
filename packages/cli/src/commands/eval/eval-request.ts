@@ -1,4 +1,5 @@
 import {
+  parseWithSchema,
   COMMAND_REQUEST_SCHEMA_ID,
   isJsonObject,
   evalCancelRequestSchema,
@@ -55,37 +56,37 @@ const requestedOutput = (document: JsonValue): EvalOutputMode | undefined => {
     return undefined;
   }
 
-  const parsed = evalOutputModeSchema.safeParse(document.output);
+  const parsed = parseWithSchema(evalOutputModeSchema, document.output);
 
-  return parsed.success ? parsed.data : undefined;
+  return parsed.ok ? parsed.value : undefined;
 };
 
 /** Validates one eval run request from flags or `--from-json` through the published schema. */
 const parseEvalRunRequest = (value: JsonValue): EvalRunRequest => {
-  const parsed = evalRunRequestSchema.safeParse(value);
+  const parsed = parseWithSchema(evalRunRequestSchema, value);
 
-  if (!parsed.success) {
+  if (!parsed.ok) {
     throw new AttestCliError('cli_usage', 'The eval run request does not match its schema.', {
       hint: 'Run `attest help eval run --output json` and repair every diagnostic.',
       details: { diagnostics: issueDiagnostics(parsed.error.issues) },
     });
   }
 
-  return parsed.data;
+  return parsed.value;
 };
 
 /** Validates one eval cancel request from flags or `--from-json` through the published schema. */
 const parseEvalCancelRequest = (value: JsonValue): EvalCancelRequest => {
-  const parsed = evalCancelRequestSchema.safeParse(value);
+  const parsed = parseWithSchema(evalCancelRequestSchema, value);
 
-  if (!parsed.success) {
+  if (!parsed.ok) {
     throw new AttestCliError('cli_usage', 'The eval cancel request does not match its schema.', {
       hint: 'Run `attest help eval cancel --output json` and repair every diagnostic.',
       details: { diagnostics: issueDiagnostics(parsed.error.issues) },
     });
   }
 
-  return parsed.data;
+  return parsed.value;
 };
 
 /** Eval request documents own output too, including a root-position output option. */

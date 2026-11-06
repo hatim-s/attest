@@ -1,4 +1,5 @@
 import {
+  parseWithSchemaSync,
   COMMAND_REQUEST_SCHEMA_ID,
   CLI_HELP_SCHEMA_ID,
   cliHelpArgumentSchema,
@@ -91,7 +92,7 @@ const toArgumentHelp = (argument: Argument): CliHelp['command']['arguments'][num
   required: argument.required,
   variadic: argument.variadic,
   choices: argument.argChoices ?? [],
-  default: cliHelpArgumentSchema.shape.default.parse(argument.defaultValue ?? null),
+  default: parseWithSchemaSync(cliHelpArgumentSchema.shape.default, argument.defaultValue ?? null),
 });
 
 const optionValueName = (option: Option): string | null => {
@@ -114,7 +115,8 @@ const toOptionHelp = (
   repeatable: option.variadic || option.parseArg === collect,
   choices: option.argChoices ?? [],
   default:
-    metadata?.default ?? cliHelpOptionSchema.shape.default.parse(option.defaultValue ?? null),
+    metadata?.default ??
+    parseWithSchemaSync(cliHelpOptionSchema.shape.default, option.defaultValue ?? null),
   conflicts: [...(metadata?.conflicts ?? [])],
   implies: [...(metadata?.implies ?? [])],
 });
@@ -188,7 +190,7 @@ const resultCommandName = (command: Command): string =>
 
 /** Builds a validated machine-readable tree for the selected registered command path. */
 const createCliHelp = (program: Command, path: readonly string[] = []): CliHelp =>
-  cliHelpSchema.parse({
+  parseWithSchemaSync(cliHelpSchema, {
     schema: CLI_HELP_SCHEMA_ID,
     command: toCommandHelp(findCommand(program, path)),
   });

@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { dashboardHtml } from '@attest/web/embedded';
-import { AGENT_PROTOCOL } from '@attest/contracts';
+import { parseWithSchemaSync, AGENT_PROTOCOL } from '@attest/contracts';
 import { createSingleProjectCatalog, type RunControl, type RunStore } from '@attest/core';
 import { afterEach, describe, expect, it } from 'vitest';
 
@@ -117,11 +117,10 @@ describe('view server', () => {
       'window.__ATTEST_BOOTSTRAP__=',
     );
 
-    const runs = z
-      .object({ items: z.array(z.object({ id: z.string() })) })
-      .parse(
-        await fetch(`${server.origin}/api/projects/demo/runs`).then((response) => response.json()),
-      );
+    const runs = parseWithSchemaSync(
+      z.object({ items: z.array(z.object({ id: z.string() })) }),
+      await fetch(`${server.origin}/api/projects/demo/runs`).then((response) => response.json()),
+    );
 
     expect(runs.items.map(({ id }) => id)).toEqual([fixture.candidateRunId, fixture.baseRunId]);
     await expect(

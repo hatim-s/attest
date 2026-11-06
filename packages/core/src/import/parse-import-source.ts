@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { isJsonObject } from '@attest/contracts';
+import { parseWithSchemaSync, isJsonObject } from '@attest/contracts';
 import { createHash } from 'node:crypto';
 
 import type { ImportFormat, JsonValue } from '@attest/contracts';
@@ -62,7 +62,7 @@ const parseJsonSource = (
   let document: JsonValue;
 
   try {
-    document = z.json().parse(JSON.parse(text));
+    document = parseWithSchemaSync(z.json(), JSON.parse(text));
   } catch {
     return fail(
       importDiagnostic({
@@ -123,7 +123,7 @@ const parseJsonlSource = (text: string, maxRows: number): ParsedRecords => {
     let value: JsonValue;
 
     try {
-      value = z.json().parse(JSON.parse(line));
+      value = parseWithSchemaSync(z.json(), JSON.parse(line));
     } catch {
       diagnostics.push(
         importDiagnostic({

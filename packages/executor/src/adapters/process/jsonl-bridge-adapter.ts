@@ -2,6 +2,7 @@ import { parseJson } from '../../internal/json-value.js';
 import { StringDecoder } from 'node:string_decoder';
 
 import {
+  parseWithSchema,
   jsonlBridgeOutputSchema,
   parseAgentResponse,
   type AgentRequest,
@@ -281,16 +282,16 @@ class JsonlBridgeSession {
       );
     }
 
-    const parsed = jsonlBridgeOutputSchema.safeParse(raw);
+    const parsed = parseWithSchema(jsonlBridgeOutputSchema, raw);
 
-    if (!parsed.success) {
+    if (!parsed.ok) {
       return new AgentInvocationError(
         'invalid_envelope',
         'JSONL bridge emitted an invalid output envelope.',
       );
     }
 
-    return { output: parsed.data, raw };
+    return { output: parsed.value, raw };
   }
 
   private consumeLine(line: string): void {

@@ -2,6 +2,7 @@ import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import {
+  parseWithSchemaSync,
   COMMAND_REQUEST_SCHEMA_ID,
   TEST_RESOURCE_SCHEMA_ID,
   cliHelpSchema,
@@ -105,7 +106,7 @@ describe('CLI test, case, dataset, and import authoring', { timeout: 20_000 }, (
     const help = await runJson(root, ['help', 'test', 'case', 'import']);
 
     if (!help.document.ok) throw new Error('Expected structured import help.');
-    const { command } = cliHelpSchema.parse(help.document.result);
+    const { command } = parseWithSchemaSync(cliHelpSchema, help.document.result);
     expect(command.path).toEqual(['test', 'case', 'import']);
     expect(command.request_schema).toBe(COMMAND_REQUEST_SCHEMA_ID);
 
@@ -193,7 +194,7 @@ describe('CLI test, case, dataset, and import authoring', { timeout: 20_000 }, (
 
     expect(listed.exitCode).toBe(0);
     expect(listed.errors).toEqual([]);
-    expect(cliResultSchema.parse(JSON.parse(listed.output[0] ?? ''))).toMatchObject({
+    expect(parseWithSchemaSync(cliResultSchema, JSON.parse(listed.output[0] ?? ''))).toMatchObject({
       ok: true,
       command: 'test.list',
     });
@@ -208,11 +209,13 @@ describe('CLI test, case, dataset, and import authoring', { timeout: 20_000 }, (
     ]);
 
     expect(missing.exitCode).toBe(1);
-    expect(cliResultSchema.parse(JSON.parse(missing.output[0] ?? ''))).toMatchObject({
-      ok: false,
-      command: 'test.dataset.attach',
-      error: { hint: 'Run `attest list datasets` to inspect available ids.' },
-    });
+    expect(parseWithSchemaSync(cliResultSchema, JSON.parse(missing.output[0] ?? ''))).toMatchObject(
+      {
+        ok: false,
+        command: 'test.dataset.attach',
+        error: { hint: 'Run `attest list datasets` to inspect available ids.' },
+      },
+    );
   });
 
   it('previews removals without confirmation and treats a guided no as a clean no-op', async () => {

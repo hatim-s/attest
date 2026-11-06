@@ -2,7 +2,7 @@ import { lstat, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:f
 import { tmpdir } from 'node:os';
 import { dirname, join, relative, sep } from 'node:path';
 
-import { cliResultSchema, isJsonObject } from '@attest/contracts';
+import { parseWithSchemaSync, cliResultSchema, isJsonObject } from '@attest/contracts';
 import { describe, expect, inject, it, onTestFinished } from 'vitest';
 
 import { REPOSITORY_ROOT, runPackedCommand } from './packed-cli.js';
@@ -41,7 +41,7 @@ const assertCommand = async (
   const label = expectation.display;
   expect(result.exitCode, label).toBe(expectation.exit_code);
   expect(result.stderr, label).toBe('');
-  const document = cliResultSchema.parse(JSON.parse(result.stdout.trim()));
+  const document = parseWithSchemaSync(cliResultSchema, JSON.parse(result.stdout.trim()));
   expect(document, label).toMatchObject({ ok: expectation.ok, command: expectation.command });
 
   if (expectation.error_code !== undefined) {
@@ -113,7 +113,7 @@ describe('documented journeys through the packed CLI', () => {
 
     expect(help.exitCode, help.stderr || help.stdout).toBe(0);
     expect(help.stderr).toBe('');
-    expect(cliResultSchema.parse(JSON.parse(help.stdout))).toMatchObject({
+    expect(parseWithSchemaSync(cliResultSchema, JSON.parse(help.stdout))).toMatchObject({
       ok: true,
       command: 'help',
     });

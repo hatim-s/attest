@@ -1,4 +1,4 @@
-import { evalEventStreamSchema } from '@attest/contracts';
+import { parseWithSchema, evalEventStreamSchema } from '@attest/contracts';
 import { describe, expect, it, vi } from 'vitest';
 
 import { deferred, type Deferred } from '../../_tests_/support/deferred.js';
@@ -121,7 +121,7 @@ describe('case scheduling', () => {
       exit_code: 1,
       summary: { total_cases: 3, passed_cases: 2, failed_cases: 1, error_cases: 0 },
     });
-    expect(evalEventStreamSchema.safeParse(result.events).success).toBe(true);
+    expect(parseWithSchema(evalEventStreamSchema, result.events).ok).toBe(true);
   });
 
   it('runs balanced contiguous batches concurrently and each worker batch sequentially', async () => {

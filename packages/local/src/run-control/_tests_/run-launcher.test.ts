@@ -5,6 +5,8 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 
 import {
+  parseWithSchemaSync,
+  parseWithSchema,
   CASE_SCHEMA_ID,
   COMMAND_REQUEST_SCHEMA_ID,
   DATASET_SCHEMA_ID,
@@ -92,7 +94,11 @@ const writeTaggedDatasetRows = async (root: string): Promise<void> => {
   };
 
   const manifestPath = join(root, 'attest.project.json');
-  const manifest = projectManifestSchema.parse(JSON.parse(await readFile(manifestPath, 'utf8')));
+
+  const manifest = parseWithSchemaSync(
+    projectManifestSchema,
+    JSON.parse(await readFile(manifestPath, 'utf8')),
+  );
 
   const datasets = manifest.resources.datasets.map((entry) => ({
     ...entry,
@@ -148,7 +154,7 @@ describe('toEvalRunDocument', () => {
     const document = toEvalRunDocument(request);
 
     expect(JSON.parse(JSON.stringify(document))).toEqual(expected);
-    expect(evalRunRequestSchema.safeParse(document).success).toBe(true);
+    expect(parseWithSchema(evalRunRequestSchema, document).ok).toBe(true);
   });
 });
 
@@ -163,7 +169,8 @@ describe('createRunLauncher', { timeout: 20_000 }, () => {
     // The fake CLI writes `finished` only after its output outlasts the launcher's reading.
     expect(await exists(join(root, 'finished'))).toBe(false);
 
-    const received = receivedSchema.parse(
+    const received = parseWithSchemaSync(
+      receivedSchema,
       JSON.parse(await readFile(join(root, 'received.json'), 'utf8')),
     );
 
@@ -229,7 +236,10 @@ describe('createRunLauncher', { timeout: 20_000 }, () => {
       launcherIn(root).startRun('demo', { selection: { all: true }, tags: [mode] }),
     );
 
-    const { output } = z.object({ output: z.array(z.string()) }).parse(failure.details?.details);
+    const { output } = parseWithSchemaSync(
+      z.object({ output: z.array(z.string()) }),
+      failure.details?.details,
+    );
 
     expect(output.length).toBeLessThanOrEqual(32);
     expect(output.join('').length).toBeLessThanOrEqual(16 * 1024);

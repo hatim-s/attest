@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import {
+  parseWithSchemaSync,
   cliErrorCatalogSchema,
   cliHelpSchema,
   cliResultSchema,
@@ -98,15 +99,17 @@ type PrintedResult = { document?: CliResult; runId?: string };
 
 /** Reads JSON, the JSONL `result` and `run_started` events, or the run id in human text. */
 const readPrintedResult = (expectation: CommandExpectation, stdout: string): PrintedResult => {
-  if (expectation.output === 'json') return { document: cliResultSchema.parse(JSON.parse(stdout)) };
+  if (expectation.output === 'json')
+    return { document: parseWithSchemaSync(cliResultSchema, JSON.parse(stdout)) };
 
   if (expectation.output === 'human') return { runId: RUN_ID_PATTERN.exec(stdout)?.[0] };
 
-  const events = evalEventStreamSchema.parse(
+  const events = parseWithSchemaSync(
+    evalEventStreamSchema,
     stdout
       .trim()
       .split('\n')
-      .map((line) => evalEventSchema.parse(JSON.parse(line))),
+      .map((line) => parseWithSchemaSync(evalEventSchema, JSON.parse(line))),
   );
 
   const [started] = events;
@@ -159,13 +162,13 @@ const assertCommand = async (
       }
 
       if (expectation.catalog_error_code !== undefined) {
-        const catalog = cliErrorCatalogSchema.parse(document.result);
+        const catalog = parseWithSchemaSync(cliErrorCatalogSchema, document.result);
         const entry = catalog.errors.find(({ code }) => code === expectation.catalog_error_code);
         expect(entry?.repairs.length, label).toBeGreaterThan(0);
       }
 
       if (expectation.help_usage !== undefined) {
-        const { command } = cliHelpSchema.parse(document.result);
+        const { command } = parseWithSchemaSync(cliHelpSchema, document.result);
         expect(command.usage, label).toBe(expectation.help_usage);
         expect(
           command.arguments.map(({ name }) => name),

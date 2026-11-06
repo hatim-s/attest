@@ -1,4 +1,9 @@
-import { vercelSandboxSchema, type JsonValue, type VercelSandbox } from '@attest/contracts';
+import {
+  parseWithSchema,
+  vercelSandboxSchema,
+  type JsonValue,
+  type VercelSandbox,
+} from '@attest/contracts';
 
 import { z } from 'zod';
 
@@ -38,16 +43,16 @@ const parseArgvJson = (value: string): string[] => {
     hint: 'Pass a JSON array of strings.',
   });
 
-  const argv = z.array(z.string()).nonempty().safeParse(parsed);
+  const argv = parseWithSchema(z.array(z.string()).nonempty(), parsed);
 
-  if (!argv.success) {
+  if (!argv.ok) {
     throw new LocalError('cli_usage', '`--argv-json` must be a non-empty string array.', {
       path: '--argv-json',
       hint: 'Pass a JSON array containing at least one string.',
     });
   }
 
-  return argv.data;
+  return argv.value;
 };
 
 /** Parses and validates one Vercel sandbox definition. */
@@ -57,9 +62,9 @@ const parseSandboxJson = (value: string): VercelSandbox => {
     hint: 'Pass one Vercel sandbox JSON object.',
   });
 
-  const sandbox = vercelSandboxSchema.safeParse(parsed);
+  const sandbox = parseWithSchema(vercelSandboxSchema, parsed);
 
-  if (!sandbox.success) {
+  if (!sandbox.ok) {
     throw new LocalError('cli_usage', '`--sandbox-json` does not match the sandbox schema.', {
       path: '--sandbox-json',
       hint: 'Pass kind, files, and optional image, artifacts, or artifact_directory fields.',
@@ -67,7 +72,7 @@ const parseSandboxJson = (value: string): VercelSandbox => {
     });
   }
 
-  return sandbox.data;
+  return sandbox.value;
 };
 
 /** Parses a positive duration expressed as milliseconds, seconds, or minutes. */

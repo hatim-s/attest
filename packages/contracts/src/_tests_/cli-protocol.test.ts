@@ -1,3 +1,4 @@
+import { parseWithSchema } from '../schema/parse.js';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -76,9 +77,9 @@ describe('CLI protocol contracts', () => {
       },
     };
 
-    expect(cliResultSchema.safeParse(success).success).toBe(true);
-    expect(cliResultSchema.safeParse(failure).success).toBe(true);
-    expect(cliResultSchema.safeParse({ ...success, extra: true }).success).toBe(false);
+    expect(parseWithSchema(cliResultSchema, success).ok).toBe(true);
+    expect(parseWithSchema(cliResultSchema, failure).ok).toBe(true);
+    expect(parseWithSchema(cliResultSchema, { ...success, extra: true }).ok).toBe(false);
   });
 
   it('accepts deterministic event fields and rejects invalid sequence data', () => {
@@ -90,29 +91,29 @@ describe('CLI protocol contracts', () => {
       data: { case_id: 'refund-basic' },
     };
 
-    expect(cliEventSchema.safeParse(event).success).toBe(true);
-    expect(cliEventSchema.safeParse({ ...event, sequence: -1 }).success).toBe(false);
-    expect(cliEventSchema.safeParse({ ...event, event: 'CaseStarted' }).success).toBe(false);
+    expect(parseWithSchema(cliEventSchema, event).ok).toBe(true);
+    expect(parseWithSchema(cliEventSchema, { ...event, sequence: -1 }).ok).toBe(false);
+    expect(parseWithSchema(cliEventSchema, { ...event, event: 'CaseStarted' }).ok).toBe(false);
   });
 
   it('requires every machine-help required field', () => {
     const help = { schema: CLI_HELP_SCHEMA_ID, command: helpCommand };
 
-    expect(cliHelpSchema.safeParse(help).success).toBe(true);
+    expect(parseWithSchema(cliHelpSchema, help).ok).toBe(true);
     expect(
-      cliHelpSchema.safeParse({
+      parseWithSchema(cliHelpSchema, {
         ...help,
         command: { ...helpCommand, request_schema: undefined },
-      }).success,
+      }).ok,
     ).toBe(false);
     expect(
-      cliHelpSchema.safeParse({
+      parseWithSchema(cliHelpSchema, {
         ...help,
         command: {
           ...helpCommand,
           options: [{ ...helpCommand.options[0], conflicts: undefined }],
         },
-      }).success,
+      }).ok,
     ).toBe(false);
   });
 
@@ -131,12 +132,12 @@ describe('CLI protocol contracts', () => {
       ],
     };
 
-    expect(cliErrorCatalogSchema.safeParse(catalog).success).toBe(true);
+    expect(parseWithSchema(cliErrorCatalogSchema, catalog).ok).toBe(true);
     expect(
-      cliErrorCatalogSchema.safeParse({
+      parseWithSchema(cliErrorCatalogSchema, {
         ...catalog,
         errors: [{ ...catalog.errors[0], exit_code: 0 }],
-      }).success,
+      }).ok,
     ).toBe(false);
   });
 });

@@ -19,3 +19,5 @@ import "./require-safety-comment-for-type-assertion.mjs";
 import "./documented-boundaries.mjs";
 
 import "./effect-boundaries.mjs";
+
+await import('./schema-decoding.mjs');

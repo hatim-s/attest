@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import {
+  parseWithSchemaSync,
   AGENT_PROTOCOL,
   isJsonObject,
   cliHelpSchema,
@@ -667,7 +668,7 @@ describe('agent commands', () => {
       const help = await runJson(root, ['help', 'agent', command]);
 
       if (!help.document.ok) throw new Error(`Expected agent ${command} help.`);
-      const { options } = cliHelpSchema.parse(help.document.result).command;
+      const { options } = parseWithSchemaSync(cliHelpSchema, help.document.result).command;
 
       return new Map(options.map((option) => [option.name, option]));
     };

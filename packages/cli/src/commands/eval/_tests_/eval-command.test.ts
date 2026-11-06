@@ -5,6 +5,7 @@ import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 
 import {
+  parseWithSchemaSync,
   CLI_EVENT_SCHEMA_ID,
   CLI_RESULT_SCHEMA_ID,
   COMMAND_REQUEST_SCHEMA_ID,
@@ -70,7 +71,7 @@ const runCli = (...[argv, options]: Parameters<typeof executeCli>) =>
   executeCli(argv, { ...options, services });
 
 const cancellationSuccess = () =>
-  evalCancelResultSchema.parse({
+  parseWithSchemaSync(evalCancelResultSchema, {
     schema: CLI_RESULT_SCHEMA_ID,
     ok: true,
     command: 'eval.cancel',
@@ -92,7 +93,7 @@ const completedEvents = (verdict: 'fail' | 'pass' = 'pass'): EvalEvent[] => {
 
   const exitCode = verdict === 'pass' ? 0 : 1;
 
-  return evalEventStreamSchema.parse([
+  return parseWithSchemaSync(evalEventStreamSchema, [
     {
       schema: CLI_EVENT_SCHEMA_ID,
       sequence: 0,
@@ -186,7 +187,7 @@ const completedEvents = (verdict: 'fail' | 'pass' = 'pass'): EvalEvent[] => {
 
 /** Builds one catalog-shaped terminal infrastructure failure for renderer parity checks. */
 const failedEvents = (): EvalEvent[] =>
-  evalEventStreamSchema.parse([
+  parseWithSchemaSync(evalEventStreamSchema, [
     {
       schema: CLI_EVENT_SCHEMA_ID,
       sequence: 0,
@@ -319,7 +320,7 @@ describe('eval request normalization', () => {
     expect(run.mock.calls[0]?.[1].signal).toBeInstanceOf(AbortSignal);
     expect(harness.exitCode).toBe(1);
     expect(harness.output).toHaveLength(1);
-    expect(cliResultSchema.parse(JSON.parse(harness.output[0]!))).toMatchObject({
+    expect(parseWithSchemaSync(cliResultSchema, JSON.parse(harness.output[0]!))).toMatchObject({
       ok: true,
       command: 'eval.run',
       result: { verdict: 'fail' },
@@ -341,8 +342,9 @@ describe('eval request normalization', () => {
 
     expect(run.mock.calls[0]?.[0]).toEqual(request);
 
-    const stream = evalEventStreamSchema.parse(
-      harness.output.map((line) => evalEventSchema.parse(JSON.parse(line))),
+    const stream = parseWithSchemaSync(
+      evalEventStreamSchema,
+      harness.output.map((line) => parseWithSchemaSync(evalEventSchema, JSON.parse(line))),
     );
 
     expect(stream).toHaveLength(7);
@@ -398,7 +400,7 @@ describe('eval errors and no-write preflight', () => {
     expect(run).not.toHaveBeenCalled();
     expect(harness.exitCode).toBe(2);
     expect(harness.errors).toEqual([]);
-    expect(cliResultSchema.parse(JSON.parse(harness.output[0]!))).toMatchObject({
+    expect(parseWithSchemaSync(cliResultSchema, JSON.parse(harness.output[0]!))).toMatchObject({
       ok: false,
       command: 'eval.run',
       error: { code, message },
@@ -417,7 +419,7 @@ describe('eval errors and no-write preflight', () => {
       'json',
     ]);
 
-    const failure = cliResultSchema.parse(JSON.parse(harness.output[0]!));
+    const failure = parseWithSchemaSync(cliResultSchema, JSON.parse(harness.output[0]!));
     expect(failure).toMatchObject({
       ok: false,
       error: {
@@ -452,7 +454,9 @@ describe('eval errors and no-write preflight', () => {
     });
 
     expect(harness.output).toHaveLength(1);
-    expect(evalEventStreamSchema.parse([JSON.parse(harness.output[0]!)])[0]).toMatchObject({
+    expect(
+      parseWithSchemaSync(evalEventStreamSchema, [JSON.parse(harness.output[0]!)])[0],
+    ).toMatchObject({
       sequence: 0,
       event: 'result',
       data: { exit_code: 2, result: { ok: false, command: 'eval.run' } },
@@ -518,8 +522,9 @@ describe('eval output and sequencing', () => {
     release?.();
     await parsing;
 
-    const stream = evalEventStreamSchema.parse(
-      output.map((line) => evalEventSchema.parse(JSON.parse(line))),
+    const stream = parseWithSchemaSync(
+      evalEventStreamSchema,
+      output.map((line) => parseWithSchemaSync(evalEventSchema, JSON.parse(line))),
     );
 
     expect(stream.map(({ sequence }) => sequence)).toEqual([0, 1, 2, 3, 4, 5, 6]);
@@ -543,8 +548,9 @@ describe('eval output and sequencing', () => {
 
     const harness = await parse(['eval', 'run', 'refund', '--output', 'jsonl']);
 
-    const stream = evalEventStreamSchema.parse(
-      harness.output.map((line) => evalEventSchema.parse(JSON.parse(line))),
+    const stream = parseWithSchemaSync(
+      evalEventStreamSchema,
+      harness.output.map((line) => parseWithSchemaSync(evalEventSchema, JSON.parse(line))),
     );
 
     expect(stream.map(({ sequence }) => sequence)).toEqual([0, 1, 2]);
@@ -561,8 +567,9 @@ describe('eval output and sequencing', () => {
     run.mockResolvedValue(eventSource(completedEvents().slice(0, length)));
     const harness = await parse(['eval', 'run', 'refund', '--output', 'jsonl']);
 
-    const stream = evalEventStreamSchema.parse(
-      harness.output.map((line) => evalEventSchema.parse(JSON.parse(line))),
+    const stream = parseWithSchemaSync(
+      evalEventStreamSchema,
+      harness.output.map((line) => parseWithSchemaSync(evalEventSchema, JSON.parse(line))),
     );
 
     expect(stream.at(-1)).toMatchObject({ event: 'result', data: { exit_code: 4 } });
@@ -579,8 +586,9 @@ describe('eval output and sequencing', () => {
     run.mockResolvedValue(eventSource(events));
     const harness = await parse(['eval', 'run', 'refund', '--output', 'jsonl']);
 
-    const stream = evalEventStreamSchema.parse(
-      harness.output.map((line) => evalEventSchema.parse(JSON.parse(line))),
+    const stream = parseWithSchemaSync(
+      evalEventStreamSchema,
+      harness.output.map((line) => parseWithSchemaSync(evalEventSchema, JSON.parse(line))),
     );
 
     expect(stream.filter(({ event }) => event === 'result')).toHaveLength(1);
@@ -596,7 +604,7 @@ describe('eval output and sequencing', () => {
 
     expect(harness.exitCode).toBe(4);
     expect(harness.output).toHaveLength(1);
-    expect(cliResultSchema.parse(JSON.parse(harness.output[0]!))).toMatchObject({
+    expect(parseWithSchemaSync(cliResultSchema, JSON.parse(harness.output[0]!))).toMatchObject({
       ok: false,
       command: 'eval.run',
       error: { code: 'run_failed', path: '/events/1/sequence' },
@@ -625,7 +633,7 @@ describe('eval cancellation command', () => {
       },
       { project: '/tmp/demo', workingDirectory: process.cwd() },
     );
-    expect(evalCancelResultSchema.parse(JSON.parse(harness.output[0]!))).toEqual(
+    expect(parseWithSchemaSync(evalCancelResultSchema, JSON.parse(harness.output[0]!))).toEqual(
       cancellationSuccess(),
     );
     expect(harness.exitCode).toBe(0);
@@ -651,7 +659,7 @@ describe('eval cancellation command', () => {
   it('rejects missing and overlapping run ids before cancellation dispatch', async () => {
     const missing = await parse(['eval', 'cancel', '--output', 'json']);
     expect(missing.exitCode).toBe(2);
-    expect(cliResultSchema.parse(JSON.parse(missing.output[0]!))).toMatchObject({
+    expect(parseWithSchemaSync(cliResultSchema, JSON.parse(missing.output[0]!))).toMatchObject({
       error: { code: 'cli_missing_input' },
     });
 
@@ -665,7 +673,7 @@ describe('eval cancellation command', () => {
       'json',
     ]);
 
-    expect(cliResultSchema.parse(JSON.parse(overlapping.output[0]!))).toMatchObject({
+    expect(parseWithSchemaSync(cliResultSchema, JSON.parse(overlapping.output[0]!))).toMatchObject({
       error: {
         code: 'cli_usage',
         details: { conflicting_fields: ['--output', '<run-id>'] },
@@ -702,18 +710,18 @@ const parsePtyEvidence = (text: string) => {
 describe('eval command grammar and terminal behavior', () => {
   it('publishes structured help metadata without registering a top-level run alias', async () => {
     const root = await parse(['help', '--output', 'json']);
-    const rootHelp = cliResultSchema.parse(JSON.parse(root.output[0]!));
+    const rootHelp = parseWithSchemaSync(cliResultSchema, JSON.parse(root.output[0]!));
 
     if (!rootHelp.ok) throw new Error('Expected root help.');
-    const subcommands = cliHelpSchema.parse(rootHelp.result).command.subcommands;
+    const subcommands = parseWithSchemaSync(cliHelpSchema, rootHelp.result).command.subcommands;
     expect(subcommands.some(({ name }) => name === 'eval')).toBe(true);
     expect(subcommands.some(({ name }) => name === 'run')).toBe(false);
 
     const harness = await parse(['help', 'eval', 'run', '--output', 'json']);
-    const document = cliResultSchema.parse(JSON.parse(harness.output[0]!));
+    const document = parseWithSchemaSync(cliResultSchema, JSON.parse(harness.output[0]!));
 
     if (!document.ok) throw new Error('Expected eval run help.');
-    const help = cliHelpSchema.parse(document.result);
+    const help = parseWithSchemaSync(cliHelpSchema, document.result);
     expect(help.command).toMatchObject({
       path: ['eval', 'run'],
       request_schema: COMMAND_REQUEST_SCHEMA_ID,
@@ -801,7 +809,7 @@ it.each(['pass', 'fail'] as const)(
     expect(result.exitCode).toBe(verdict === 'pass' ? 0 : 1);
     expect(uploadCloudRun).toHaveBeenCalledWith(expect.objectContaining({ runId: RUN_ID }));
     expect(result.output).toHaveLength(1);
-    expect(cliResultSchema.parse(JSON.parse(result.output[0]!))).toMatchObject({
+    expect(parseWithSchemaSync(cliResultSchema, JSON.parse(result.output[0]!))).toMatchObject({
       ok: true,
       result: { run_id: RUN_ID, verdict },
     });
@@ -838,7 +846,7 @@ it.each(['credentials', 'project'] as const)(
 
     expect(result.exitCode).toBe(failure === 'credentials' ? 2 : 1);
     expect(run).not.toHaveBeenCalled();
-    expect(cliResultSchema.parse(JSON.parse(result.output[0]!))).toMatchObject({
+    expect(parseWithSchemaSync(cliResultSchema, JSON.parse(result.output[0]!))).toMatchObject({
       ok: false,
       error: { code: failure === 'credentials' ? 'cloud_credentials_invalid' : 'project_invalid' },
     });

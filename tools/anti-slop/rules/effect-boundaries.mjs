@@ -196,6 +196,10 @@ const effectBoundariesRule = {
       if (typeof value !== 'string') return;
       if (options.browser && (/^(node:|bun:)/.test(value) || builtinModules.includes(value)))
         report(node, 'Browser entries cannot import runtime built-ins.');
+      if (value.startsWith('@effect/')) {
+        report(node, 'Platform and companion Effect packages need an architecture decision.');
+        return;
+      }
       if (value !== 'effect' && !value.startsWith('effect/')) return;
       const module = value === 'effect' ? null : value.slice(7);
       if (module !== null && !(options.dataOnly ? dataModules : coreModules).has(module)) {
@@ -282,7 +286,7 @@ const effectBoundariesRule = {
       ExportAllDeclaration: checkImport,
       ImportExpression(node) {
         if (node.source.type !== 'Literal')
-          report(node, 'Dynamic module paths hide import boundaries.');
+          report(node, 'Computed import paths are banned repo-wide so import boundaries can be checked.');
         else checkImport(node);
       },
       CallExpression(node) {
@@ -294,8 +298,10 @@ const effectBoundariesRule = {
             (/^(node:|bun:)/.test(value) || builtinModules.includes(value))
           )
             report(node, 'Browser entries cannot require runtime built-ins.');
-          if (typeof value !== 'string' || value === 'effect' || value.startsWith('effect/'))
-            report(node, 'Use static imports for Effect ownership.');
+          if (typeof value !== 'string' || value === 'effect' || value.startsWith('effect/') || value.startsWith('@effect/'))
+            report(node, typeof value !== 'string'
+              ? 'Computed require paths are banned repo-wide so import boundaries can be checked.'
+              : 'Use static imports for Effect ownership; companion packages need an architecture decision.');
         }
       },
       'Program:exit'(program) {

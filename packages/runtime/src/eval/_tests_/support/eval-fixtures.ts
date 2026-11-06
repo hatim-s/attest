@@ -1,4 +1,4 @@
-import { isString } from '@attest/contracts';
+import { parseWithSchemaSync, isString } from '@attest/contracts';
 import type { CaseExecution } from '../../types.js';
 import { readFileSync } from 'node:fs';
 
@@ -19,7 +19,8 @@ const RUN_ID = '01ARZ3NDEKTSV4RRFFQ69G5FAV';
 
 const BASELINE_RUN_ID = '01ARZ3NDEKTSV4RRFFQ69G5FAA';
 
-const baseRun = evalRunSchema.parse(
+const baseRun = parseWithSchemaSync(
+  evalRunSchema,
   JSON.parse(readFileSync(new URL('../fixtures/eval-run.json', import.meta.url), 'utf8')),
 );
 

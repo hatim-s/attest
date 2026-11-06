@@ -1,4 +1,5 @@
 import {
+  parseWithSchema,
   agentResourceSchema,
   type ProjectManifest,
   metricResourceSchema,
@@ -144,7 +145,7 @@ const loadProject = async (options: DiscoverProjectOptions = {}): Promise<Loaded
     tests: testLoads.flatMap(({ source, value }) => (value === undefined ? [] : [source])),
   };
 
-  const validated = projectResourcesSchema.safeParse({
+  const validated = parseWithSchema(projectResourcesSchema, {
     agents,
     datasets,
     metrics,
@@ -152,7 +153,7 @@ const loadProject = async (options: DiscoverProjectOptions = {}): Promise<Loaded
     tests,
   });
 
-  if (!validated.success) {
+  if (!validated.ok) {
     diagnostics.push(
       ...validated.error.issues.map((issue) => {
         const source = sourceForProjectIssue(issue.path, sources);
@@ -167,7 +168,7 @@ const loadProject = async (options: DiscoverProjectOptions = {}): Promise<Loaded
     );
   }
 
-  if (diagnostics.length > 0 || !validated.success) {
+  if (diagnostics.length > 0 || !validated.ok) {
     throw new ProjectLoadError(
       'project_invalid',
       `Project validation failed with ${diagnostics.length} diagnostic(s).`,
@@ -189,13 +190,13 @@ const loadProject = async (options: DiscoverProjectOptions = {}): Promise<Loaded
   };
 
   return {
-    ...validated.data,
+    ...validated.value,
     contentHashes,
     manifestPath: discovered.manifestPath,
     // Integrity hashes bind every persisted byte; the project projection excludes import time.
     projectHash: hashProjectManifest(
-      validated.data.project,
-      validated.data.datasets.map(({ metadata }) => metadata),
+      validated.value.project,
+      validated.value.datasets.map(({ metadata }) => metadata),
     ),
     root: discovered.root,
   };

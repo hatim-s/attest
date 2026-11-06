@@ -1,4 +1,5 @@
 import {
+  parseWithSchema,
   COMMAND_REQUEST_SCHEMA_ID,
   commandRequestSchema,
   type CommandRequest,
@@ -30,9 +31,9 @@ const parseCommandRequest = <TCommand extends CommandRequest['command']>(
   value: unknown,
   path: string | undefined,
 ): CommandRequestFor<TCommand> => {
-  const parsed = commandRequestSchema.safeParse(value);
+  const parsed = parseWithSchema(commandRequestSchema, value);
 
-  if (!parsed.success) {
+  if (!parsed.ok) {
     throw new LocalError('cli_usage', 'The command request does not match its schema.', {
       path,
       hint: `Run \`attest help ${command.replaceAll('.', ' ')} --output json\` and repair the input.`,
@@ -40,7 +41,7 @@ const parseCommandRequest = <TCommand extends CommandRequest['command']>(
     });
   }
 
-  if (parsed.data.command !== command) {
+  if (parsed.value.command !== command) {
     throw new LocalError('cli_usage', 'The command request targets another command.', {
       path: '/command',
       hint: `Set \`command\` to \`${command}\`.`,
@@ -48,7 +49,7 @@ const parseCommandRequest = <TCommand extends CommandRequest['command']>(
   }
 
   // SAFETY: The complete request schema passed and its command discriminant equals the generic command argument above.
-  return parsed.data as CommandRequestFor<TCommand>;
+  return parsed.value as CommandRequestFor<TCommand>;
 };
 
 /**

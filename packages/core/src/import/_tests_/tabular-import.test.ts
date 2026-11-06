@@ -1,4 +1,4 @@
-import { testCaseSchema } from '@attest/contracts';
+import { parseWithSchemaSync, testCaseSchema } from '@attest/contracts';
 import { z } from 'zod';
 import { readFileSync } from 'node:fs';
 
@@ -40,9 +40,10 @@ const diagnosticsFrom = (callback: () => void): readonly ImportDiagnostic[] => {
 };
 
 describe('tabular import golden formats', () => {
-  const expected = z
-    .array(testCaseSchema)
-    .parse(JSON.parse(new TextDecoder().decode(fixture('mapped.golden.json'))));
+  const expected = parseWithSchemaSync(
+    z.array(testCaseSchema),
+    JSON.parse(new TextDecoder().decode(fixture('mapped.golden.json'))),
+  );
 
   it.each([
     ['csv', 'mapped.csv'],

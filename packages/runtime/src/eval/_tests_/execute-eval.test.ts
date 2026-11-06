@@ -1,4 +1,4 @@
-import { evalEventStreamSchema, evalRunSchema } from '@attest/contracts';
+import { parseWithSchema, evalEventStreamSchema, evalRunSchema } from '@attest/contracts';
 import { describe, expect, it, vi } from 'vitest';
 
 import { deferred } from '../../_tests_/support/deferred.js';
@@ -31,7 +31,7 @@ describe('executeResolvedEvalPlan', () => {
         selected_cases: 1,
         sample: { count: 1, seed: 'x'.repeat(20_000), algorithm: 'hash-rank-v1' },
       };
-      expect(evalRunSchema.safeParse(plan.run).success).toBe(true);
+      expect(parseWithSchema(evalRunSchema, plan.run).ok).toBe(true);
       const persistence = createPersistence();
 
       if (finalizationFails) {
@@ -57,7 +57,7 @@ describe('executeResolvedEvalPlan', () => {
       expect(persistence.finalizeRun).toHaveBeenCalledWith(RUN_ID, 'failed', result.summary);
       expect(beforeRun).not.toHaveBeenCalled();
       expect(executeCase).not.toHaveBeenCalled();
-      expect(evalEventStreamSchema.safeParse(result.events).success).toBe(true);
+      expect(parseWithSchema(evalEventStreamSchema, result.events).ok).toBe(true);
     },
   );
 
@@ -129,7 +129,7 @@ describe('executeResolvedEvalPlan', () => {
     expect(result).toMatchObject({ status: 'cancelled', exit_code: 130 });
     expect(result.cases).toHaveLength(3);
     expect(cleanup).toHaveBeenCalledOnce();
-    expect(evalEventStreamSchema.safeParse(result.events).success).toBe(true);
+    expect(parseWithSchema(evalEventStreamSchema, result.events).ok).toBe(true);
   });
 
   it.each([
@@ -181,7 +181,7 @@ describe('executeResolvedEvalPlan', () => {
       can_release_cancellation_ownership: false,
     });
     expect(persistence.finalizeRun).toHaveBeenLastCalledWith(RUN_ID, 'failed', result.summary);
-    expect(evalEventStreamSchema.safeParse(result.events).success).toBe(true);
+    expect(parseWithSchema(evalEventStreamSchema, result.events).ok).toBe(true);
   });
 
   it('fails and retains cancellation ownership when any case record is not durable', async () => {
@@ -262,7 +262,7 @@ describe('executeResolvedEvalPlan', () => {
       'executed',
       'infrastructure_error',
     ]);
-    expect(evalEventStreamSchema.safeParse(result.events).success).toBe(true);
+    expect(parseWithSchema(evalEventStreamSchema, result.events).ok).toBe(true);
   });
 
   it('keeps runner failure details in case evidence and out of the public terminal result', async () => {
@@ -364,6 +364,6 @@ describe('executeResolvedEvalPlan', () => {
     expect(result.events.filter(({ event }) => event === 'result')).toHaveLength(1);
     expect(result.events.at(-1)).toMatchObject({ event: 'result', data: { exit_code: 4 } });
     expect(persistence.finalizeRun).toHaveBeenCalledWith(RUN_ID, 'failed', result.summary);
-    expect(evalEventStreamSchema.safeParse(result.events).success).toBe(true);
+    expect(parseWithSchema(evalEventStreamSchema, result.events).ok).toBe(true);
   });
 });

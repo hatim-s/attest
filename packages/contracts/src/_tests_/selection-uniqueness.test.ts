@@ -1,3 +1,4 @@
+import { parseWithSchema } from '../schema/parse.js';
 import { describe, expect, it } from 'vitest';
 
 import { evalRunRequestSchema } from '../eval/run.js';
@@ -17,9 +18,14 @@ describe('eval run selection uniqueness', () => {
     ['folders', 'folder'],
     ['dataset_ids', 'dataset id'],
   ])('rejects a repeated %s value at its index', (field, label) => {
-    const parsed = evalRunRequestSchema.safeParse({ ...request, [field]: ['smoke', 'smoke'] });
+    const parsed = parseWithSchema(evalRunRequestSchema, {
+      ...request,
+      [field]: ['smoke', 'smoke'],
+    });
 
-    expect(parsed.error?.issues).toEqual([
+    if (parsed.ok) throw new Error('Expected duplicate rejection');
+
+    expect(parsed.error.issues).toEqual([
       { code: 'custom', path: [field, 1], message: `duplicate ${label}: smoke` },
     ]);
   });

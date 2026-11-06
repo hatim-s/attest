@@ -1,3 +1,4 @@
+import { parseWithSchema } from '../schema/parse.js';
 import { describe, expect, it } from 'vitest';
 import type { z } from 'zod';
 
@@ -594,7 +595,7 @@ describe('Zod and generated JSON Schema conformance', () => {
     ['billing\n', false],
   ])('agrees on case folder %j', (folder, valid) => {
     const candidate = { ...validCase, folder };
-    expect(getZodSchema('case.json').safeParse(candidate).success).toBe(valid);
+    expect(parseWithSchema(getZodSchema('case.json'), candidate).ok).toBe(valid);
     expect(compileGeneratedSchema('case.json')(candidate)).toBe(valid);
   });
 
@@ -607,13 +608,13 @@ describe('Zod and generated JSON Schema conformance', () => {
       const generatedValid =
         envelope.expect === 'invalid' ? envelope.json_schema_valid === true : true;
 
-      expect(getZodSchema(fileName).safeParse(envelope.input).success).toBe(valid);
+      expect(parseWithSchema(getZodSchema(fileName), envelope.input).ok).toBe(valid);
       expect(compileGeneratedSchema(fileName)(envelope.input)).toBe(generatedValid);
     },
   );
 
   it.each(fixtures)('$name', ({ fileName, candidate, valid }) => {
-    const zodValid = getZodSchema(fileName).safeParse(candidate).success;
+    const zodValid = parseWithSchema(getZodSchema(fileName), candidate).ok;
     const jsonSchemaValid = compileGeneratedSchema(fileName)(candidate);
 
     expect(zodValid).toBe(valid);
@@ -624,7 +625,7 @@ describe('Zod and generated JSON Schema conformance', () => {
     '$name is a runtime-only check',
     ({ fileName, candidate, reason }) => {
       expect(reason).not.toBe('');
-      expect(getZodSchema(fileName).safeParse(candidate).success).toBe(false);
+      expect(parseWithSchema(getZodSchema(fileName), candidate).ok).toBe(false);
       expect(compileGeneratedSchema(fileName)(candidate)).toBe(true);
     },
   );

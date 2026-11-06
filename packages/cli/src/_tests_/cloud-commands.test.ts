@@ -2,7 +2,7 @@ import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import type * as CloudAdapter from '@attest/local/cloud';
-import { cliResultSchema } from '@attest/contracts';
+import { parseWithSchemaSync, cliResultSchema } from '@attest/contracts';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { runCommand as executeCommand, temporaryDirectory } from './support/cli-test-support.js';
 
@@ -119,7 +119,7 @@ describe('cloud command translation', () => {
       },
     });
     expect(result.output).toHaveLength(1);
-    expect(cliResultSchema.parse(JSON.parse(result.output[0]!))).toMatchObject({
+    expect(parseWithSchemaSync(cliResultSchema, JSON.parse(result.output[0]!))).toMatchObject({
       ok: true,
       command: 'cloud.run',
       result: { idempotency_key: 'retry-key', run: { id: 'run' } },
@@ -173,7 +173,7 @@ it.each([['create', '--name', 'ci'], ['list'], ['revoke', 'token-id']])(
     vi.stubGlobal('fetch', fetcher);
     const result = await executeCommand(home, ['cloud', 'token', ...args, '--output', 'json']);
     expect(result.exitCode).toBe(4);
-    expect(cliResultSchema.parse(JSON.parse(result.output[0]!))).toMatchObject({
+    expect(parseWithSchemaSync(cliResultSchema, JSON.parse(result.output[0]!))).toMatchObject({
       ok: false,
       error: { code: 'token_scope' },
     });
@@ -233,7 +233,7 @@ it('creates, lists and revokes tokens for the linked project without saving the 
   expect(created.output.join('\n').match(/atp_print-once/gu)).toHaveLength(1);
   const listed = await executeCommand(root, ['cloud', 'token', 'list', '--output', 'json']);
   expect(listed.exitCode).toBe(0);
-  expect(cliResultSchema.parse(JSON.parse(listed.output[0]!))).toMatchObject({
+  expect(parseWithSchemaSync(cliResultSchema, JSON.parse(listed.output[0]!))).toMatchObject({
     ok: true,
     result: { tokens: [listedToken] },
   });

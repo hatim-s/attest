@@ -1,6 +1,7 @@
 import { isAbsolute, resolve } from 'node:path';
 
 import {
+  parseWithSchema,
   AGENT_RESOURCE_SCHEMA_ID,
   agentResourceSchema,
   type AgentResource,
@@ -96,16 +97,16 @@ const readImportedAgentResource = async (
     : await readSourceText(source, { path: 'source', readStdin, workingDirectory });
 
   const value = parseJsonText(text, { path: 'source' });
-  const parsed = agentResourceSchema.safeParse(value);
+  const parsed = parseWithSchema(agentResourceSchema, value);
 
-  if (!parsed.success) {
+  if (!parsed.ok) {
     throw new LocalError('cli_usage', 'Imported agent JSON does not match its schema.', {
       path: 'source',
       details: { diagnostics: schemaIssueDiagnostics(parsed.error.issues) },
     });
   }
 
-  const resource = { ...parsed.data, id: agentId, name: name?.trim() || parsed.data.name };
+  const resource = { ...parsed.value, id: agentId, name: name?.trim() || parsed.value.name };
   assertSafeNativeAgentResource(resource);
 
   return resource;
@@ -285,18 +286,18 @@ const createImportedCurlAgentResource = async (
     candidate.redaction = redaction;
   }
 
-  const parsed = agentResourceSchema.safeParse(candidate);
+  const parsed = parseWithSchema(agentResourceSchema, candidate);
 
-  if (!parsed.success) {
+  if (!parsed.ok) {
     throw new LocalError('cli_usage', 'The cURL mapping does not match the agent schema.', {
       path: 'source',
       details: { diagnostics: schemaIssueDiagnostics(parsed.error.issues) },
     });
   }
 
-  assertSafeNativeAgentResource(parsed.data);
+  assertSafeNativeAgentResource(parsed.value);
 
-  return { agent: parsed.data, preview: parsedCurl.preview };
+  return { agent: parsed.value, preview: parsedCurl.preview };
 };
 
 export { createImportedCurlAgentResource, readCurlDocument, readImportedAgentResource };

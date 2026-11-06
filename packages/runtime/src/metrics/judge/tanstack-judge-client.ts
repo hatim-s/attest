@@ -1,3 +1,4 @@
+import { parseWithSchema } from '@attest/contracts';
 import type { AnyTextAdapter } from '@tanstack/ai';
 import {
   anthropicText,
@@ -209,13 +210,13 @@ const scoreWithTanStack = async ({
       continue;
     }
 
-    const verdict = judgeResponseSchema.safeParse(rawResponse);
+    const verdict = parseWithSchema(judgeResponseSchema, rawResponse);
     const rawEvidence = observation.rawResponse ?? JSON.stringify(rawResponse);
 
-    if (verdict.success) {
+    if (verdict.ok) {
       recordAttempt(attempts, observation, rawEvidence);
 
-      return { verdict: verdict.data, record: buildJudgeRecord(request, attempts) };
+      return { verdict: verdict.value, record: buildJudgeRecord(request, attempts) };
     }
 
     recordAttempt(attempts, observation, rawEvidence, verdict.error.message);

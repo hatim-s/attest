@@ -1,3 +1,4 @@
+import { parseWithSchemaSync } from '@attest/contracts';
 import { createSingleProjectCatalog, StoreError, type RunSource } from '@attest/core';
 import { parsePageLimit, type CaseSummary, type RunRecord } from '@attest/core/records';
 import { Hono } from 'hono';
@@ -103,7 +104,7 @@ describe('suite analytics endpoints', () => {
     const { app, caseReads } = fixture();
     const response = await app.request('/api/projects/demo/runs/running/suites');
     expect(response.status).toBe(200);
-    const body = apiResponses.listRunSuites.parse(await response.json());
+    const body = parseWithSchemaSync(apiResponses.listRunSuites, await response.json());
     expect(body).toMatchObject({
       runId: 'running',
       suites: [
@@ -137,7 +138,7 @@ describe('suite analytics endpoints', () => {
     const { app, caseReads } = fixture();
     const response = await app.request('/api/projects/demo/suites/a%2Fb/history?limit=2');
     expect(response.status).toBe(200);
-    const history = apiResponses.getSuiteHistory.parse(await response.json());
+    const history = parseWithSchemaSync(apiResponses.getSuiteHistory, await response.json());
     expect(history).toMatchObject({
       suiteName: 'a/b',
       runsExamined: 2,
@@ -155,7 +156,8 @@ describe('suite analytics endpoints', () => {
     expect(history.points).toHaveLength(1);
     expect([...new Set(caseReads.map(({ runId }) => runId))]).toEqual(['absent', 'new']);
 
-    const exhausted = apiResponses.getSuiteHistory.parse(
+    const exhausted = parseWithSchemaSync(
+      apiResponses.getSuiteHistory,
       await (await app.request('/api/projects/demo/suites/a%2Fb/history')).json(),
     );
 

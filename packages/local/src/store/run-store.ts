@@ -1,3 +1,4 @@
+import { parseWithSchemaSync } from '@attest/contracts';
 import { z } from 'zod';
 
 import { resolve } from 'node:path';
@@ -350,7 +351,12 @@ class SqliteRunStore implements RunStore {
 
     const items = pageRows.map((row) => {
       const caseMetrics = metricsByCase.get(row.id) ?? [];
-      const expected = z.array(z.string()).parse(JSON.parse(row.expected_metrics_json));
+
+      const expected = parseWithSchemaSync(
+        z.array(z.string()),
+        JSON.parse(row.expected_metrics_json),
+      );
+
       const score = averageMetricScore(caseMetrics);
 
       const item: CaseSummary = {

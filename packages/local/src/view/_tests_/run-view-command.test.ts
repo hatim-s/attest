@@ -1,3 +1,4 @@
+import { parseWithSchemaSync } from '@attest/contracts';
 import { mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -32,7 +33,8 @@ describe('runViewCommand', () => {
       workingDirectory: directory,
       signal: abortController.signal,
       onReady: async ({ origin }) => {
-        const projects = projectListSchema.parse(
+        const projects = parseWithSchemaSync(
+          projectListSchema,
           await fetch(`${origin}/api/projects`).then((response) => response.json()),
         );
 

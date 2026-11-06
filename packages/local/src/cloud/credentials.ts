@@ -1,3 +1,4 @@
+import { parseWithSchemaSync, parseWithSchema } from '@attest/contracts';
 import { rm } from 'node:fs/promises';
 
 import { z } from 'zod';
@@ -28,7 +29,7 @@ const readCloudCredentials = async (
     const text = await readPrivateFile(path);
 
     if (text.length > 16_384) throw new Error('Unsafe credentials');
-    const credentials = credentialSchema.parse(JSON.parse(text));
+    const credentials = parseWithSchemaSync(credentialSchema, JSON.parse(text));
     normalizeCloudUrl(credentials.baseUrl);
 
     if (!options.allowExpired && Date.parse(credentials.expiresAt) <= Date.now())
@@ -72,7 +73,7 @@ const resolveCloudCredentials = async (path: string) => {
   if (
     baseUrl === undefined ||
     accessToken === undefined ||
-    !bearerTokenSchema.safeParse(accessToken).success
+    !parseWithSchema(bearerTokenSchema, accessToken).ok
   ) {
     throw new LocalError(
       'cloud_credentials_invalid',

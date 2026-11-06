@@ -5,7 +5,7 @@ import { Readable, Writable } from 'node:stream';
 import { setTimeout as delay } from 'node:timers/promises';
 
 import { z } from 'zod';
-import { AGENT_PROTOCOL, type JsonValue } from '@attest/contracts';
+import { parseWithSchemaSync, AGENT_PROTOCOL, type JsonValue } from '@attest/contracts';
 import {
   BUNDLE_SCHEMA_ID,
   canonicalStringify,
@@ -75,8 +75,8 @@ const mutateAndRehashBundle = async (
   mutate: (header: Record<string, JsonValue>, caseLine: Record<string, JsonValue>) => void,
 ): Promise<Readable> => {
   const originalLines = (await readFile(destination, 'utf8')).trimEnd().split('\n');
-  const header = fixtureRecordSchema.parse(JSON.parse(originalLines[0] ?? ''));
-  const caseLine = fixtureRecordSchema.parse(JSON.parse(originalLines[1] ?? ''));
+  const header = parseWithSchemaSync(fixtureRecordSchema, JSON.parse(originalLines[0] ?? ''));
+  const caseLine = parseWithSchemaSync(fixtureRecordSchema, JSON.parse(originalLines[1] ?? ''));
   mutate(header, caseLine);
   const contentLines = [canonicalStringify(header), canonicalStringify(caseLine)];
   const hasher = createContentHasher();
@@ -231,36 +231,45 @@ describe('run bundles', () => {
     [
       'invalid run status',
       (header: Record<string, JsonValue>) => {
-        header.run = { ...fixtureRecordSchema.parse(header.run), status: 'other' };
+        header.run = { ...parseWithSchemaSync(fixtureRecordSchema, header.run), status: 'other' };
       },
       'Run bundle header contains a malformed run: header.run.status',
     ],
     [
       'invalid run timestamp',
       (header: Record<string, JsonValue>) => {
-        header.run = { ...fixtureRecordSchema.parse(header.run), finishedAt: 'yesterday' };
+        header.run = {
+          ...parseWithSchemaSync(fixtureRecordSchema, header.run),
+          finishedAt: 'yesterday',
+        };
       },
       'Run bundle header contains a malformed run: header.run.finishedAt',
     ],
     [
       'foreign case run id',
       (_header: Record<string, JsonValue>, caseLine: Record<string, JsonValue>) => {
-        caseLine.case = { ...fixtureRecordSchema.parse(caseLine.case), runId: 'other-run' };
+        caseLine.case = {
+          ...parseWithSchemaSync(fixtureRecordSchema, caseLine.case),
+          runId: 'other-run',
+        };
       },
       'Run bundle case line 2 is malformed.',
     ],
     [
       'completed case error field',
       (_header: Record<string, JsonValue>, caseLine: Record<string, JsonValue>) => {
-        caseLine.case = { ...fixtureRecordSchema.parse(caseLine.case), errorMessage: 'forbidden' };
+        caseLine.case = {
+          ...parseWithSchemaSync(fixtureRecordSchema, caseLine.case),
+          errorMessage: 'forbidden',
+        };
       },
       'Run bundle case line 2 is malformed.',
     ],
     [
       'malformed evaluated metric',
       (_header: Record<string, JsonValue>, caseLine: Record<string, JsonValue>) => {
-        const caseRecord = fixtureRecordSchema.parse(caseLine.case);
-        const metrics = z.array(fixtureRecordSchema).parse(caseRecord.metrics);
+        const caseRecord = parseWithSchemaSync(fixtureRecordSchema, caseLine.case);
+        const metrics = parseWithSchemaSync(z.array(fixtureRecordSchema), caseRecord.metrics);
         delete metrics[0]?.pass;
         caseRecord.metrics = metrics;
         caseLine.case = caseRecord;

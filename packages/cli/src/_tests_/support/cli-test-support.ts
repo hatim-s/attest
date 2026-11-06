@@ -2,7 +2,7 @@ import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { cliResultSchema, type CliResult } from '@attest/contracts';
+import { parseWithSchemaSync, cliResultSchema, type CliResult } from '@attest/contracts';
 import { expect, onTestFinished } from 'vitest';
 
 import type { CliInteraction } from '../../commands/shared/cli-interaction.js';
@@ -88,7 +88,10 @@ const runJson = async (
   expect(run.errors).toEqual([]);
   expect(run.output).toHaveLength(1);
 
-  return { ...run, document: cliResultSchema.parse(JSON.parse(run.output[0] ?? '')) };
+  return {
+    ...run,
+    document: parseWithSchemaSync(cliResultSchema, JSON.parse(run.output[0] ?? '')),
+  };
 };
 
 /** Reads every file below `root` as base64, keyed by sorted `/`-separated relative paths. */

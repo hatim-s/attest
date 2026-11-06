@@ -19,6 +19,7 @@
     }
   },
   "dependencies": {
+    "@attest/contracts": "workspace:*",
     "@attest/core": "workspace:*",
     "hono": "^4.13.0",
     "zod": "^4"

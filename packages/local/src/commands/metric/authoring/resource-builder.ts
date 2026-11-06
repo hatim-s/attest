@@ -1,4 +1,5 @@
 import {
+  parseWithSchema,
   METRIC_RESOURCE_SCHEMA_ID,
   metricResourceSchema,
   type LeafAssertionCheck,
@@ -73,18 +74,19 @@ const AUTHORED_FIELD_FLAGS: Readonly<Partial<Record<keyof MetricAddFields, strin
 const jsonSchemaSchema = z.union([z.boolean(), z.record(z.string(), z.json())]);
 
 const parseJsonSchema = (value: string): z.infer<typeof jsonSchemaSchema> => {
-  const parsed = jsonSchemaSchema.safeParse(
+  const parsed = parseWithSchema(
+    jsonSchemaSchema,
     parseJsonText(value, { path: '--json-schema', hint: 'Pass a JSON Schema object or boolean.' }),
   );
 
-  if (!parsed.success) {
+  if (!parsed.ok) {
     throw new LocalError('cli_usage', 'JSON Schema must be an object or boolean.', {
       path: '--json-schema',
       details: { diagnostics: schemaIssueDiagnostics(parsed.error.issues) },
     });
   }
 
-  return parsed.data;
+  return parsed.value;
 };
 
 /** Rejects every supplied flag that the selected authoring route would otherwise ignore. */
@@ -411,22 +413,22 @@ const createMetricResource = async (fields: MetricAddFields): Promise<MetricReso
     }
   }
 
-  const parsed = metricResourceSchema.safeParse({
+  const parsed = parseWithSchema(metricResourceSchema, {
     schema: METRIC_RESOURCE_SCHEMA_ID,
     id: fields.metricId,
     name: fields.name?.trim() || fields.metricId,
     definition,
   });
 
-  if (!parsed.success) {
+  if (!parsed.ok) {
     throw new LocalError('cli_usage', 'Metric values do not match the resource schema.', {
       details: { diagnostics: schemaIssueDiagnostics(parsed.error.issues) },
     });
   }
 
-  assertSafeMetricResource(parsed.data);
+  assertSafeMetricResource(parsed.value);
 
-  return parsed.data;
+  return parsed.value;
 };
 
 export { createMetricResource };

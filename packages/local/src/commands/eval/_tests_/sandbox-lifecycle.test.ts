@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import {
+  parseWithSchemaSync,
   AGENT_PROTOCOL,
   AGENT_RESOURCE_SCHEMA_ID,
   TEST_RESOURCE_SCHEMA_ID,
@@ -33,7 +34,7 @@ const cache: CacheStore = { get: () => Promise.resolve(undefined), put: () => Pr
 /** Uses a copy of the canonical contracts run fixture while setting only the lifecycle configuration under test. */
 const createRun = async (execution: EvalRun['effective_command']['resolved']['execution']) => {
   const fixture = await readFile(new URL('./fixtures/eval-run.json', import.meta.url), 'utf8');
-  const run = evalRunSchema.parse(JSON.parse(fixture));
+  const run = parseWithSchemaSync(evalRunSchema, JSON.parse(fixture));
 
   if (execution === undefined) delete run.effective_command.resolved.execution;
   else run.effective_command.resolved.execution = execution;
@@ -170,7 +171,7 @@ describe('sandbox eval lifecycle integration', () => {
     const stages = (await readFile(join(root, 'stages.jsonl'), 'utf8'))
       .trim()
       .split('\n')
-      .map((line) => z.record(z.string(), z.string()).parse(JSON.parse(line)));
+      .map((line) => parseWithSchemaSync(z.record(z.string(), z.string()), JSON.parse(line)));
 
     const resolvedRoot = await realpath(root);
 

@@ -1,3 +1,4 @@
+import { parseWithSchemaSync } from '@attest/contracts';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
@@ -48,7 +49,10 @@ const loadFixtures = (): LoadedFixture[] =>
             return {
               contract: directory.name,
               name: file.name,
-              envelope: fixtureEnvelopeSchema.parse(JSON.parse(readFileSync(path, 'utf8'))),
+              envelope: parseWithSchemaSync(
+                fixtureEnvelopeSchema,
+                JSON.parse(readFileSync(path, 'utf8')),
+              ),
             };
           } catch (error) {
             throw new Error(`Invalid conformance fixture: ${path}`, { cause: error });

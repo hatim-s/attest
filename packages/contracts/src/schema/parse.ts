@@ -1,4 +1,5 @@
-import type { z } from 'zod';
+import * as Effect from 'effect/Effect';
+import { z } from 'zod';
 
 import {
   agentRequestSchema,
@@ -30,18 +31,42 @@ type ParseReport<T> =
   | { ok: true; value: T; warnings: ContractWarning[] }
   | { ok: false; errors: ContractIssue[]; warnings: ContractWarning[] };
 
+/** Decodes an owner schema into the public Result while preserving native validation details. */
 // BOUNDARY: Untyped transport payloads are checked by the supplied owner schema before returning its domain type.
-const parseWithSchema = <T>(
-  schema: z.ZodType<T>,
+const parseWithSchema = <Schema extends z.ZodType>(
+  schema: Schema,
   candidate: unknown,
-): Result<T, ContractIssue[]> => {
-  const parsed = schema.safeParse(candidate);
+): Result<z.output<Schema>, z.ZodError<z.output<Schema>>> => {
+  const parsed = z.safeParse(schema, candidate);
 
-  if (!parsed.success) {
-    return err(formatContractIssues(parsed.error.issues));
-  }
+  return parsed.success ? ok(parsed.data) : err(parsed.error);
+};
 
-  return ok(parsed.data);
+/** Decodes lazily, placing validation failures in the native Effect error channel. */
+// BOUNDARY: The supplied owner schema validates untrusted input when the Effect executes.
+const parseWithSchemaEffect = <Schema extends z.ZodType>(
+  schema: Schema,
+  candidate: unknown,
+): Effect.Effect<z.output<Schema>, z.ZodError<z.output<Schema>>> =>
+  Effect.suspend(() => {
+    const result = parseWithSchema(schema, candidate);
+
+    return result.ok ? Effect.succeed(result.value) : Effect.fail(result.error);
+  });
+
+/** Preserves synchronous schema exceptions at intentional throwing boundaries. */
+// BOUNDARY: The supplied owner schema validates untrusted input and retains its native thrown error.
+const parseWithSchemaSync = <Schema extends z.ZodType>(
+  schema: Schema,
+  candidate: unknown,
+): z.output<Schema> => z.parse(schema, candidate);
+
+/** Keeps protocol parsers' existing dependency-free diagnostics. */
+// BOUNDARY: Protocol inputs pass through the shared decoder before issue projection.
+const parseContract = <T>(schema: z.ZodType<T>, candidate: unknown): Result<T, ContractIssue[]> => {
+  const result = parseWithSchema(schema, candidate);
+
+  return result.ok ? result : err(formatContractIssues(result.error.issues));
 };
 
 // BOUNDARY: Agent transport response objects are inspected only to report fields outside the response schema.
@@ -70,7 +95,7 @@ const reportInvalidTrace = (issues: ContractIssue[]): ContractWarning => ({
  */
 // BOUNDARY: Agent transport request JSON is validated against agentRequestSchema.
 const parseAgentRequest = (candidate: unknown): Result<AgentRequest, ContractIssue[]> =>
-  parseWithSchema(agentRequestSchema, candidate);
+  parseContract(agentRequestSchema, candidate);
 
 /**
  * Validates an agent response without throwing. The trace is optional evidence, so a malformed
@@ -79,13 +104,13 @@ const parseAgentRequest = (candidate: unknown): Result<AgentRequest, ContractIss
 // BOUNDARY: Agent transport response JSON is validated; invalid optional trace evidence is reported and discarded.
 const parseAgentResponse = (candidate: unknown): ParseReport<AgentResponse> => {
   const warnings = reportUnknownAgentResponseFields(candidate);
-  const parsed = agentResponseSchema.safeParse(candidate);
+  const parsed = parseContract(agentResponseSchema, candidate);
 
-  if (!parsed.success) {
-    return { ok: false, errors: formatContractIssues(parsed.error.issues), warnings };
+  if (!parsed.ok) {
+    return { ok: false, errors: parsed.error, warnings };
   }
 
-  const { trace, ...fields } = parsed.data;
+  const { trace, ...fields } = parsed.value;
   // The schema refinement guarantees exactly one of output or error.
   // SAFETY: agentResponseSchema enforces exactly one output or error and trace is optional in AgentResponse.
   const response = fields as AgentResponse;
@@ -114,7 +139,7 @@ const parseAgentResponse = (candidate: unknown): ParseReport<AgentResponse> => {
  */
 // BOUNDARY: Completion bodies posted to a callback receiver are validated against agentCompletionSchema.
 const parseAgentCompletion = (candidate: unknown): Result<AgentCompletion, ContractIssue[]> => {
-  const parsed = parseWithSchema(agentCompletionSchema, candidate);
+  const parsed = parseContract(agentCompletionSchema, candidate);
 
   if (!parsed.ok) return parsed;
   const { output, error, ...fields } = parsed.value;
@@ -130,19 +155,23 @@ const parseAgentCompletion = (candidate: unknown): Result<AgentCompletion, Contr
 /** Validates a trace document without throwing; extension fields are preserved. */
 // BOUNDARY: Untrusted trace JSON is validated against traceSchema.
 const parseTrace = (candidate: unknown): Result<Trace, ContractIssue[]> =>
-  parseWithSchema(traceSchema, candidate);
+  parseContract(traceSchema, candidate);
 
 /** Validates an executable metric request without throwing. */
 // BOUNDARY: Metric transport request JSON is validated against metricRequestSchema.
 const parseMetricRequest = (candidate: unknown): Result<MetricRequest, ContractIssue[]> =>
-  parseWithSchema(metricRequestSchema, candidate);
+  parseContract(metricRequestSchema, candidate);
 
 /** Validates a metric result envelope without throwing. */
 // BOUNDARY: Metric transport result JSON is validated against metricResultSchema.
 const parseMetricResult = (candidate: unknown): Result<MetricResult, ContractIssue[]> =>
-  parseWithSchema(metricResultSchema, candidate);
+  parseContract(metricResultSchema, candidate);
 
 export {
+  parseWithSchema,
+  parseWithSchemaEffect,
+  parseWithSchemaSync,
+  formatContractIssues,
   parseAgentCompletion,
   parseAgentRequest,
   parseAgentResponse,

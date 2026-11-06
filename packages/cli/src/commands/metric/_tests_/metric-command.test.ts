@@ -2,6 +2,7 @@ import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import {
+  parseWithSchemaSync,
   COMMAND_REQUEST_SCHEMA_ID,
   METRIC_PRESETS,
   METRIC_RESOURCE_SCHEMA_ID,
@@ -346,7 +347,7 @@ describe('metric commands', { timeout: 30_000 }, () => {
     const help = await runJson(root, ['help', 'metric', 'add']);
 
     if (!help.document.ok) throw new Error('Expected metric help success.');
-    const { command } = cliHelpSchema.parse(help.document.result);
+    const { command } = parseWithSchemaSync(cliHelpSchema, help.document.result);
     expect(command.path).toEqual(['metric', 'add']);
     expect(command.request_schema).toBe(COMMAND_REQUEST_SCHEMA_ID);
     expect(command.presets).toEqual(METRIC_PRESETS);
@@ -384,7 +385,9 @@ describe('metric commands', { timeout: 30_000 }, () => {
 
     if (!metricHelp.document.ok) throw new Error('Expected metric help success.');
     expect(
-      cliHelpSchema.parse(metricHelp.document.result).command.subcommands.map(({ name }) => name),
+      parseWithSchemaSync(cliHelpSchema, metricHelp.document.result).command.subcommands.map(
+        ({ name }) => name,
+      ),
     ).toEqual(['add', 'import', 'remove', 'rename', 'test']);
   });
 });

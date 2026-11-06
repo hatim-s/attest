@@ -1,4 +1,4 @@
-import { isString } from '@attest/contracts';
+import { parseWithSchemaSync, isString } from '@attest/contracts';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { access, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -164,9 +164,10 @@ describe('executeExecutableMetric command metrics', () => {
 
     expect(evaluation).toMatchObject({ status: 'evaluated', pass: true });
 
-    const directory = z
-      .object({ details: z.object({ artifact_dir: z.string() }) })
-      .parse(evaluation).details.artifact_dir;
+    const directory = parseWithSchemaSync(
+      z.object({ details: z.object({ artifact_dir: z.string() }) }),
+      evaluation,
+    ).details.artifact_dir;
 
     expect(directory).toContain('attest-metric-');
     await expect(access(directory)).rejects.toThrow();

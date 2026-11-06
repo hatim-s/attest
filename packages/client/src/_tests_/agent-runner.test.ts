@@ -1,4 +1,5 @@
 import {
+  parseWithSchemaSync,
   AGENT_PROTOCOL,
   TRACE_SCHEMA_ID,
   agentCompletionSchema,
@@ -81,7 +82,11 @@ describe('createAgentRunner', () => {
 
     expect(completions.received).toHaveLength(1);
     expect(completions.received[0]?.authorization).toBe('Bearer secret-token');
-    const completion = agentCompletionSchema.parse(JSON.parse(completions.received[0]?.body ?? ''));
+
+    const completion = parseWithSchemaSync(
+      agentCompletionSchema,
+      JSON.parse(completions.received[0]?.body ?? ''),
+    );
 
     expect(completion).toEqual({
       protocol: 'attest.agent-completion',

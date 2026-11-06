@@ -1,3 +1,4 @@
+import { parseWithSchemaSync } from '@attest/contracts';
 import { createHash, randomUUID } from 'node:crypto';
 import {
   copyFile,
@@ -312,9 +313,10 @@ const parseTransactionJournal = (raw: string, directory: string): TransactionJou
   const path = relative(dirname(dirname(directory)), directory);
 
   try {
-    return transactionJournalSchema
-      .refine((journal) => journal.transaction_id === basename(directory))
-      .parse(JSON.parse(raw));
+    return parseWithSchemaSync(
+      transactionJournalSchema.refine((journal) => journal.transaction_id === basename(directory)),
+      JSON.parse(raw),
+    );
   } catch (cause: unknown) {
     throw new ProjectTransactionError(
       'project_recovery_required',

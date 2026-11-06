@@ -1,4 +1,5 @@
 import {
+  parseWithSchemaSync,
   CLI_RESULT_SCHEMA_ID,
   cliFailureResultSchema,
   cliSuccessResultSchema,
@@ -21,7 +22,7 @@ const createCliSuccessResult = (
   result: unknown,
   options: CliResultOptions = {},
 ): CliSuccessResult =>
-  cliSuccessResultSchema.parse({
+  parseWithSchemaSync(cliSuccessResultSchema, {
     schema: CLI_RESULT_SCHEMA_ID,
     ok: true,
     command,
@@ -33,7 +34,7 @@ const createCliSuccessResult = (
 
 /** Builds a validated failure document from an already sanitized CLI error. */
 const createCliFailureResult = (command: string, error: CliError): CliFailureResult =>
-  cliFailureResultSchema.parse({
+  parseWithSchemaSync(cliFailureResultSchema, {
     schema: CLI_RESULT_SCHEMA_ID,
     ok: false,
     command,

@@ -1,3 +1,4 @@
+import { parseWithSchemaSync } from '@attest/contracts';
 import { z } from 'zod';
 import type { AssertionCheck, Trace } from '@attest/contracts';
 import fc from 'fast-check';
@@ -325,9 +326,12 @@ describe('evaluateAssertionMetric', () => {
     expect(result.score).toBe(2 / 3);
     expect(result.pass).toBe(false);
 
-    const checks = z
-      .object({ checks: z.array(z.object({ passed: z.boolean(), reason: z.string().optional() })) })
-      .parse(result.details);
+    const checks = parseWithSchemaSync(
+      z.object({
+        checks: z.array(z.object({ passed: z.boolean(), reason: z.string().optional() })),
+      }),
+      result.details,
+    );
 
     expect(checks.checks.map(({ passed }) => passed)).toEqual([true, false, true]);
     expect(checks.checks[1]?.reason).toBeTypeOf('string');

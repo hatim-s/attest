@@ -18,6 +18,8 @@ import type { BigIntStats } from 'node:fs';
 import { relative, resolve } from 'node:path';
 
 import {
+  parseWithSchemaSync,
+  parseWithSchema,
   AGENT_PROTOCOL,
   AGENT_RESOURCE_SCHEMA_ID,
   type AgentRequest,
@@ -63,7 +65,7 @@ const createJudgeCache = (cacheStore: CacheStore, secrets: readonly string[]): J
   get: async (key) => {
     const entry = await cacheStore.get('judge', key);
 
-    return entry === undefined ? undefined : judgeOutcomeSchema.parse(entry);
+    return entry === undefined ? undefined : parseWithSchemaSync(judgeOutcomeSchema, entry);
   },
   set: (key, entry) => cacheStore.put('judge', key, redactProbeValue(entry, secrets)),
 });
@@ -262,14 +264,14 @@ const extractHttpMetricResult = (
   const read = (pointer: string | undefined) =>
     pointer === undefined ? undefined : readJsonPointer(output, pointer);
 
-  const result = httpMetricResultSchema.safeParse({
+  const result = parseWithSchema(httpMetricResultSchema, {
     score: read(definition.extraction.score_pointer),
     pass: read(definition.extraction.pass_pointer),
     rationale: read(definition.extraction.rationale_pointer),
     details: read(definition.extraction.details_pointer),
   });
 
-  if (!result.success) {
+  if (!result.ok) {
     return {
       metricName: metricId,
       kind: 'exec',
@@ -282,7 +284,7 @@ const extractHttpMetricResult = (
     };
   }
 
-  return { metricName: metricId, kind: 'exec', status: 'evaluated', durationMs, ...result.data };
+  return { metricName: metricId, kind: 'exec', status: 'evaluated', durationMs, ...result.value };
 };
 
 type EvaluateHttpMetricOptions = {
@@ -316,11 +318,10 @@ const evaluateHttpMetric = async ({
 
   // The body is the same metric request command metrics get. Trace extensions are open, so the
   // request is checked as JSON before it becomes the mapped request's input.
-  const metricRequest = z
-    .json()
-    .parse(
-      buildMetricRequest({ caseDefinition: context.caseDefinition, execution: context.execution }),
-    );
+  const metricRequest = parseWithSchemaSync(
+    z.json(),
+    buildMetricRequest({ caseDefinition: context.caseDefinition, execution: context.execution }),
+  );
 
   const agent: HttpAgentResource = {
     schema: AGENT_RESOURCE_SCHEMA_ID,

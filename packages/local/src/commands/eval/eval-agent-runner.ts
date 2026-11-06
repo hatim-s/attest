@@ -1,6 +1,11 @@
 import { performance } from 'node:perf_hooks';
 
-import { AGENT_PROTOCOL, type AgentRequest, type EvalRun } from '@attest/contracts';
+import {
+  parseWithSchemaSync,
+  AGENT_PROTOCOL,
+  type AgentRequest,
+  type EvalRun,
+} from '@attest/contracts';
 import { type CacheStore } from '@attest/core';
 import type { invokeVercelSandboxAgent, InvocationResult } from '@attest/executor';
 import {
@@ -213,7 +218,7 @@ const createEvalCaseRunner = (
       const secrets = [
         ...(runtime?.resolved.secrets ?? []),
         ...sensitiveFieldValues(
-          z.json().parse({
+          parseWithSchemaSync(z.json(), {
             case: payload.case,
             request,
             response: original.outcome === 'completed' ? original.response : null,

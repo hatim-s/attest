@@ -2,6 +2,7 @@ import { mkdir, readFile, realpath, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import {
+  parseWithSchemaSync,
   cliErrorCatalogSchema,
   cliHelpSchema,
   cliResultSchema,
@@ -34,7 +35,7 @@ describe('runCli', () => {
     expect(help.document).toMatchObject({ ok: true, command: 'help', warnings: [] });
 
     if (!help.document.ok) throw new Error('Expected help success.');
-    const { command } = cliHelpSchema.parse(help.document.result);
+    const { command } = parseWithSchemaSync(cliHelpSchema, help.document.result);
 
     expect(command).toMatchObject({
       path: ['trace', 'convert'],
@@ -81,7 +82,7 @@ describe('runCli', () => {
     expect(errors.document).toMatchObject({ ok: true, command: 'errors' });
 
     if (!errors.document.ok) throw new Error('Expected the errors command to succeed.');
-    const catalog = cliErrorCatalogSchema.parse(errors.document.result);
+    const catalog = parseWithSchemaSync(cliErrorCatalogSchema, errors.document.result);
     expect(catalog.errors.find(({ code }) => code === 'cli_usage')).toMatchObject({
       exit_code: 2,
       retryable: false,
@@ -121,7 +122,7 @@ describe('runCli', () => {
     expect(exitCode).toBe(2);
     expect(errors).toEqual([]);
     expect(output).toHaveLength(1);
-    expect(cliResultSchema.parse(JSON.parse(output[0]!))).toMatchObject({
+    expect(parseWithSchemaSync(cliResultSchema, JSON.parse(output[0]!))).toMatchObject({
       ok: false,
       error: { code: 'cli_usage', retryable: false },
     });
@@ -152,8 +153,9 @@ describe('runCli', () => {
     expect(exitCode).toBe(2);
     expect(errors).toEqual([]);
 
-    const stream = evalEventStreamSchema.parse(
-      output.map((line) => evalEventSchema.parse(JSON.parse(line))),
+    const stream = parseWithSchemaSync(
+      evalEventStreamSchema,
+      output.map((line) => parseWithSchemaSync(evalEventSchema, JSON.parse(line))),
     );
 
     expect(stream).toHaveLength(1);
@@ -334,7 +336,7 @@ describe('runCli', () => {
     const help = await runJson(process.cwd(), ['help']);
 
     if (!help.document.ok) throw new Error('Expected help success.');
-    const { command } = cliHelpSchema.parse(help.document.result);
+    const { command } = parseWithSchemaSync(cliHelpSchema, help.document.result);
 
     expect(command.options.map(({ name }) => name)).toEqual(
       expect.arrayContaining(['output', 'project', 'non-interactive']),

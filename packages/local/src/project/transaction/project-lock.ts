@@ -1,3 +1,4 @@
+import { parseWithSchema } from '@attest/contracts';
 import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { open, readFile, unlink } from 'node:fs/promises';
@@ -69,9 +70,9 @@ const parseLockMetadata = (raw: string): ProjectLockMetadata | undefined => {
     return undefined;
   }
 
-  const parsed = projectLockSchema.safeParse(value);
+  const parsed = parseWithSchema(projectLockSchema, value);
 
-  return parsed.success ? parsed.data : undefined;
+  return parsed.ok ? parsed.value : undefined;
 };
 
 /** Classifies the project lock without mutating or stealing it. */

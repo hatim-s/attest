@@ -17,6 +17,7 @@ Local changes:
 
 Upstream Effect rules were not ported. Attest adds its own `effect-boundaries` rule
 for core imports, execution roots and temporary migration bridge ownership.
+Attest also owns the typed `schema-decoding` rule and its `_tests_/schema-decoding.mjs` suite. It restricts Zod execution methods to the contracts decoder and intrinsic JSON schema guard, while allowing unrelated parsing methods.
 Its invariant suite lives in `_tests_/effect-boundaries.mjs`; it is not upstream code.
 Oxlint's native `oxc/no-accumulating-spread` is not part of this ESLint plugin.
 Existing source findings are fixed as part of this lint adoption.

@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import {
+  parseWithSchemaSync,
   COMMAND_REQUEST_SCHEMA_ID,
   METRIC_RESOURCE_SCHEMA_ID,
   METRIC_TEST_FIXTURE_SCHEMA_ID,
@@ -78,7 +79,9 @@ const testMetric = (root: string, metricId: string, document = fixture('Paris', 
 
 // BOUNDARY: The fixture metric process returns untrusted execution details; envKeysSchema validates the emitted key list.
 const envKeys = (evaluation: unknown): string[] =>
-  envKeysSchema.parse(evaluation).details.env_keys.filter((name) => !name.startsWith('__CF_'));
+  parseWithSchemaSync(envKeysSchema, evaluation).details.env_keys.filter(
+    (name) => !name.startsWith('__CF_'),
+  );
 
 describe('runMetricTestCommand', () => {
   it('evaluates assertions deterministically and reports expected_pass mismatches', async () => {

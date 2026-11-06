@@ -8,7 +8,7 @@ import {
 } from '../agent/protocol.js';
 import { agentCompletionSchema } from '../agent/completion.js';
 import { inlineArtifactSchema } from '../agent/artifact.js';
-import { parseAgentResponse } from '../schema/parse.js';
+import { parseWithSchema, parseAgentResponse } from '../schema/parse.js';
 import { AGENT_COMPLETION_PROTOCOL, AGENT_PROTOCOL } from '../schema/identifiers.js';
 
 const request = {
@@ -70,7 +70,7 @@ describe('artifact paths', () => {
   it.each(['answer.ts', 'src/index.ts', '.hidden/config.json', 'notes/...', 'a b/c d.txt'])(
     'accepts the canonical file path %j',
     (path) => {
-      expect(inlineArtifactSchema.safeParse({ ...inlineArtifact, path }).success).toBe(true);
+      expect(parseWithSchema(inlineArtifactSchema, { ...inlineArtifact, path }).ok).toBe(true);
     },
   );
 
@@ -89,7 +89,7 @@ describe('artifact paths', () => {
     'src/\u0000index.ts',
     `${'a'.repeat(256)}.ts`,
   ])('rejects the non-canonical or escaping path %j', (path) => {
-    expect(inlineArtifactSchema.safeParse({ ...inlineArtifact, path }).success).toBe(false);
+    expect(parseWithSchema(inlineArtifactSchema, { ...inlineArtifact, path }).ok).toBe(false);
   });
 });
 
@@ -122,7 +122,7 @@ describe('agent envelopes with artifacts and callbacks', () => {
     { url: 'https://attest.example/attest/completions/run/case', token: 'secret' },
     { url: 'http://127.0.0.1:4100/attest/completions/run/case', token: 'secret' },
   ])('accepts the callback $url', (callback) => {
-    expect(agentRequestSchema.safeParse({ ...request, callback }).success).toBe(true);
+    expect(parseWithSchema(agentRequestSchema, { ...request, callback }).ok).toBe(true);
   });
 
   it.each([
@@ -131,7 +131,7 @@ describe('agent envelopes with artifacts and callbacks', () => {
     { url: 'https://attest.example/completions', token: '' },
     { url: 'https://attest.example/completions', token: 'secret', extra: true },
   ])('rejects the callback %j', (callback) => {
-    expect(agentRequestSchema.safeParse({ ...request, callback }).success).toBe(false);
+    expect(parseWithSchema(agentRequestSchema, { ...request, callback }).ok).toBe(false);
   });
 });
 
@@ -145,14 +145,14 @@ describe('agentCompletionSchema', () => {
 
   it('accepts inline and reference artifacts with a trace reference', () => {
     expect(
-      agentCompletionSchema.safeParse({
+      parseWithSchema(agentCompletionSchema, {
         ...completion,
         trace_ref: 'trace-1',
         artifacts: [
           inlineArtifact,
           { kind: 'reference', path: 'shots/home.png', media_type: 'image/png', id: 'blob-1' },
         ],
-      }).success,
+      }).ok,
     ).toBe(true);
   });
 
@@ -160,7 +160,11 @@ describe('agentCompletionSchema', () => {
     { name: 'both outcomes', candidate: { ...completion, error: { message: 'failed' } } },
     { name: 'no outcome', candidate: { ...completion, output: undefined } },
   ])('rejects $name', ({ candidate }) => {
-    expect(agentCompletionSchema.safeParse(candidate).error?.issues).toContainEqual(
+    const parsed = parseWithSchema(agentCompletionSchema, candidate);
+
+    if (parsed.ok) throw new Error('Expected invalid completion');
+
+    expect(parsed.error.issues).toContainEqual(
       expect.objectContaining({
         path: ['output'],
         message: 'exactly one of output or error must be present',
@@ -169,13 +173,15 @@ describe('agentCompletionSchema', () => {
   });
 
   it('rejects an inline trace together with a trace reference', () => {
-    const result = agentCompletionSchema.safeParse({
+    const result = parseWithSchema(agentCompletionSchema, {
       ...completion,
       trace: {},
       trace_ref: 'trace-1',
     });
 
-    expect(result.error?.issues).toContainEqual(
+    if (result.ok) throw new Error('Expected invalid completion');
+
+    expect(result.error.issues).toContainEqual(
       expect.objectContaining({
         path: ['trace_ref'],
         message: 'trace and trace_ref are mutually exclusive',
@@ -190,6 +196,6 @@ describe('agentCompletionSchema', () => {
     { ...completion, trace_ref: '' },
     { ...completion, artifacts: [{ kind: 'reference', path: 'a.png', id: '' }] },
   ])('rejects the malformed completion %#', (candidate) => {
-    expect(agentCompletionSchema.safeParse(candidate).success).toBe(false);
+    expect(parseWithSchema(agentCompletionSchema, candidate).ok).toBe(false);
   });
 });

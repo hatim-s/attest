@@ -1,6 +1,11 @@
 import assert from 'node:assert/strict';
 
-import { cliResultSchema, isJsonValue, type JsonValue } from '../packages/contracts/src/index.js';
+import {
+  parseWithSchemaSync,
+  cliResultSchema,
+  isJsonValue,
+  type JsonValue,
+} from '../packages/contracts/src/index.js';
 
 type Manifest = {
   name: string;
@@ -110,6 +115,6 @@ const parsePackedArchives = (source: string): PackedArchive[] => {
 };
 
 /** Reads the CLI's versioned result envelope during release verification. */
-const parseCliResult = (source: string) => cliResultSchema.parse(JSON.parse(source));
+const parseCliResult = (source: string) => parseWithSchemaSync(cliResultSchema, JSON.parse(source));
 
 export { isRecord, isString, parseCliResult, parseManifest, parsePackedArchives, type Manifest };

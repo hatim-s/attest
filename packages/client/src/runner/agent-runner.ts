@@ -1,4 +1,5 @@
 import {
+  parseWithSchema,
   AGENT_COMPLETION_PROTOCOL,
   agentCompletionSchema,
   parseAgentRequest,
@@ -146,9 +147,9 @@ const createAgentRunner = ({
       return JSON.stringify({ ...ids, error: { code: 'invalid_completion', message } });
     };
 
-    const checked = agentCompletionSchema.safeParse({ ...ids, ...result });
+    const checked = parseWithSchema(agentCompletionSchema, { ...ids, ...result });
 
-    if (!checked.success) {
+    if (!checked.ok) {
       return invalid(
         checked.error.issues
           .map((issue) => `${issue.path.join('.') || '$'}: ${issue.message}`)
@@ -158,7 +159,7 @@ const createAgentRunner = ({
 
     // The schema leaves `trace` unvalidated, so a cycle or a bigint in it throws here.
     try {
-      return JSON.stringify(checked.data);
+      return JSON.stringify(checked.value);
     } catch (error) {
       return invalid(
         `completion is not serializable: ${error instanceof Error ? error.message : String(error)}`,

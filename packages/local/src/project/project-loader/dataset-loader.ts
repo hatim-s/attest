@@ -1,4 +1,5 @@
 import {
+  parseWithSchema,
   datasetResourceSchema,
   testCaseSchema,
   type ProjectManifest,
@@ -48,9 +49,9 @@ const loadDataset = async (
 
     if (parsed.value === undefined) return;
     canonicalRecords.push(parsed.value);
-    const validated = testCaseSchema.safeParse(parsed.value);
+    const validated = parseWithSchema(testCaseSchema, parsed.value);
 
-    if (!validated.success) {
+    if (!validated.ok) {
       diagnostics.push(
         ...schemaDiagnostics(entry.data_path, validated.error.issues, [`line ${lineNumber}`]),
       );
@@ -58,7 +59,7 @@ const loadDataset = async (
       return;
     }
 
-    cases.push(validated.data);
+    cases.push(validated.value);
   });
 
   const dataHash = hashCanonicalJsonLines(canonicalRecords);

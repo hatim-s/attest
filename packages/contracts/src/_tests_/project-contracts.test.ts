@@ -1,3 +1,4 @@
+import { parseWithSchema } from '../schema/parse.js';
 import { describe, expect, it } from 'vitest';
 
 import { agentResourceSchema, type AgentResource } from '../project/resources/agent.js';
@@ -137,7 +138,7 @@ const validProjectResources = {
 
 describe('authored resource contracts', () => {
   it('accepts one complete, strictly typed project snapshot', () => {
-    expect(projectResourcesSchema.safeParse(validProjectResources).success).toBe(true);
+    expect(parseWithSchema(projectResourcesSchema, validProjectResources).ok).toBe(true);
   });
 
   it.each([
@@ -148,18 +149,18 @@ describe('authored resource contracts', () => {
     ['dataset', datasetResourceSchema, dataset],
     ['metric', metricResourceSchema, metric],
   ])('rejects unknown fields in the %s contract', (_name, schema, value) => {
-    expect(schema.safeParse({ ...value, unexpected: true }).success).toBe(false);
+    expect(parseWithSchema(schema, { ...value, unexpected: true }).ok).toBe(false);
   });
 
   it('requires canonical project resource paths', () => {
     const candidate = structuredClone(project);
     candidate.resources.agents[0]!.path = 'agents/support.json';
 
-    const result = projectManifestSchema.safeParse(candidate);
+    const result = parseWithSchema(projectManifestSchema, candidate);
 
-    expect(result.success).toBe(false);
+    expect(result.ok).toBe(false);
 
-    if (result.success) {
+    if (result.ok) {
       return;
     }
 
@@ -172,8 +173,8 @@ describe('authored resource contracts', () => {
   it.each(['C:\\secret', 'C:/secret', 'C:secret'])(
     'rejects the Windows drive-qualified relative path %s',
     (path) => {
-      expect(relativePathSchema.safeParse(path).success).toBe(false);
-      expect(relativePathSchema.safeParse('secrets/token.txt').success).toBe(true);
+      expect(parseWithSchema(relativePathSchema, path).ok).toBe(false);
+      expect(parseWithSchema(relativePathSchema, 'secrets/token.txt').ok).toBe(true);
     },
   );
 
@@ -181,11 +182,11 @@ describe('authored resource contracts', () => {
     const candidate = structuredClone(project);
     candidate.resources.agents.push(structuredClone(candidate.resources.agents[0]!));
 
-    const result = projectManifestSchema.safeParse(candidate);
+    const result = parseWithSchema(projectManifestSchema, candidate);
 
-    expect(result.success).toBe(false);
+    expect(result.ok).toBe(false);
 
-    if (result.success) {
+    if (result.ok) {
       return;
     }
 
@@ -198,11 +199,11 @@ describe('authored resource contracts', () => {
     const candidate = structuredClone(validProjectResources);
     candidate.datasets.push(structuredClone(candidate.datasets[0]!));
     candidate.tests[0]!.agent_id = 'missing-agent';
-    const result = projectResourcesSchema.safeParse(candidate);
+    const result = parseWithSchema(projectResourcesSchema, candidate);
 
-    expect(result.success).toBe(false);
+    expect(result.ok).toBe(false);
 
-    if (!result.success) {
+    if (!result.ok) {
       expect(result.error.issues.map(({ path }) => path)).toEqual(
         expect.arrayContaining([
           ['datasets', 1, 'metadata', 'id'],
@@ -220,11 +221,11 @@ describe('authored resource contracts', () => {
     candidate.tests[0]!.cases.push(structuredClone(testCase));
     candidate.datasets[0]!.metadata.case_count = 2;
 
-    const result = projectResourcesSchema.safeParse(candidate);
+    const result = parseWithSchema(projectResourcesSchema, candidate);
 
-    expect(result.success).toBe(false);
+    expect(result.ok).toBe(false);
 
-    if (result.success) {
+    if (result.ok) {
       return;
     }
 
@@ -246,7 +247,7 @@ describe('eval execution defaults contract', () => {
 
   it('accepts strict worker isolation, every lifecycle hook and a metric sandbox', () => {
     expect(execution).toBeDefined();
-    expect(evalExecutionConfigSchema.safeParse(execution).success).toBe(true);
+    expect(parseWithSchema(evalExecutionConfigSchema, execution).ok).toBe(true);
   });
 
   it.each([
@@ -265,7 +266,7 @@ describe('eval execution defaults contract', () => {
     { metric_sandbox: { kind: 'vercel', image: '' } },
     { metric_sandbox: { kind: 'vercel', files: [] } },
   ])('rejects invalid or unknown eval execution fields in %#', (candidate) => {
-    expect(evalExecutionConfigSchema.safeParse(candidate).success).toBe(false);
+    expect(parseWithSchema(evalExecutionConfigSchema, candidate).ok).toBe(false);
   });
 });
 
@@ -362,7 +363,7 @@ describe('agent transport contract', () => {
   ];
 
   it.each(transports)('accepts the $kind transport definition', (transport) => {
-    expect(agentResourceSchema.safeParse({ ...agent, transport }).success).toBe(true);
+    expect(parseWithSchema(agentResourceSchema, { ...agent, transport }).ok).toBe(true);
   });
 
   it('accepts a Vercel sandbox without uploads', () => {
@@ -373,7 +374,7 @@ describe('agent transport contract', () => {
       sandbox: { kind: 'vercel', files: [], artifacts: [] },
     };
 
-    expect(agentResourceSchema.safeParse({ ...agent, transport }).success).toBe(true);
+    expect(parseWithSchema(agentResourceSchema, { ...agent, transport }).ok).toBe(true);
   });
 
   it.each([
@@ -406,7 +407,7 @@ describe('agent transport contract', () => {
       sandbox,
     };
 
-    expect(agentResourceSchema.safeParse({ ...agent, transport }).success).toBe(false);
+    expect(parseWithSchema(agentResourceSchema, { ...agent, transport }).ok).toBe(false);
   });
 
   it.each([
@@ -433,10 +434,10 @@ describe('agent transport contract', () => {
       sandbox,
     };
 
-    const result = agentResourceSchema.safeParse({ ...agent, transport });
-    expect(result.success).toBe(false);
+    const result = parseWithSchema(agentResourceSchema, { ...agent, transport });
+    expect(result.ok).toBe(false);
 
-    if (result.success) return;
+    if (result.ok) return;
     expect(result.error.issues).toContainEqual(
       expect.objectContaining({ path: ['transport', 'sandbox', list, 1, 'destination'] }),
     );
@@ -444,10 +445,10 @@ describe('agent transport contract', () => {
 
   it('accepts RFC 6901 redaction pointers to prototype-named JSON keys', () => {
     expect(
-      agentResourceSchema.safeParse({
+      parseWithSchema(agentResourceSchema, {
         ...agent,
         redaction: { event_pointers: ['/constructor', '/prototype', '/__proto__'] },
-      }).success,
+      }).ok,
     ).toBe(true);
   });
 
@@ -457,28 +458,28 @@ describe('agent transport contract', () => {
 
     if (polling?.kind !== 'polling') throw new Error('Expected polling fixture.');
     expect(
-      agentResourceSchema.safeParse({
+      parseWithSchema(agentResourceSchema, {
         ...agent,
         transport: { ...polling, status_url_template: undefined },
-      }).success,
+      }).ok,
     ).toBe(false);
     expect(
-      agentResourceSchema.safeParse({
+      parseWithSchema(agentResourceSchema, {
         ...agent,
         transport: { ...polling, status_url_pointer: '/url' },
-      }).success,
+      }).ok,
     ).toBe(false);
     expect(
-      agentResourceSchema.safeParse({
+      parseWithSchema(agentResourceSchema, {
         ...agent,
         transport: { ...polling, failure_values: ['done'] },
-      }).success,
+      }).ok,
     ).toBe(false);
     expect(
-      agentResourceSchema.safeParse({
+      parseWithSchema(agentResourceSchema, {
         ...agent,
         transport: { ...polling, minimum_interval_ms: 6_000 },
-      }).success,
+      }).ok,
     ).toBe(false);
   });
 
@@ -501,14 +502,14 @@ describe('agent transport contract', () => {
   ] as const)('rejects the callback transport change %j', (change, path) => {
     const callback = transports.find((transport) => transport.kind === 'callback');
 
-    const result = agentResourceSchema.safeParse({
+    const result = parseWithSchema(agentResourceSchema, {
       ...agent,
       transport: { ...callback, ...change },
     });
 
-    expect(result.success).toBe(false);
+    expect(result.ok).toBe(false);
 
-    if (result.success) return;
+    if (result.ok) return;
     expect(result.error.issues).toContainEqual(
       expect.objectContaining({ path: ['transport', ...path] }),
     );
@@ -521,11 +522,11 @@ describe('agent transport contract', () => {
       total_artifact_bytes: 16_777_216,
     };
 
-    expect(agentResourceSchema.safeParse({ ...agent, limits }).success).toBe(true);
+    expect(parseWithSchema(agentResourceSchema, { ...agent, limits }).ok).toBe(true);
 
     for (const field of Object.keys(limits))
       expect(
-        agentResourceSchema.safeParse({ ...agent, limits: { ...limits, [field]: 0 } }).success,
+        parseWithSchema(agentResourceSchema, { ...agent, limits: { ...limits, [field]: 0 } }).ok,
       ).toBe(false);
   });
 });
@@ -547,18 +548,18 @@ describe('command request contract', () => {
   ];
 
   it.each(requests)('accepts the $command normalized request', (request) => {
-    expect(commandRequestSchema.safeParse(request).success).toBe(true);
+    expect(parseWithSchema(commandRequestSchema, request).ok).toBe(true);
   });
 
   it('rejects unknown commands and command-specific extra fields', () => {
-    expect(commandRequestSchema.safeParse({ ...base, command: 'eval.add' }).success).toBe(false);
+    expect(parseWithSchema(commandRequestSchema, { ...base, command: 'eval.add' }).ok).toBe(false);
     expect(
-      commandRequestSchema.safeParse({
+      parseWithSchema(commandRequestSchema, {
         ...base,
         command: 'test.remove',
         test_id: test.id,
         detach: true,
-      }).success,
+      }).ok,
     ).toBe(false);
   });
 
@@ -571,9 +572,9 @@ describe('command request contract', () => {
       import: { format: 'jsonl' },
     };
 
-    expect(commandRequestSchema.safeParse(request).success).toBe(true);
+    expect(parseWithSchema(commandRequestSchema, request).ok).toBe(true);
     expect(
-      commandRequestSchema.safeParse({
+      parseWithSchema(commandRequestSchema, {
         ...request,
         import: {
           format: 'csv',
@@ -587,19 +588,19 @@ describe('command request contract', () => {
           on_conflict: 'update',
           sync: 'upsert',
         },
-      }).success,
+      }).ok,
     ).toBe(true);
     expect(
-      commandRequestSchema.safeParse({
+      parseWithSchema(commandRequestSchema, {
         ...request,
         import: { format: 'jsonl', destructive_replace: true },
-      }).success,
+      }).ok,
     ).toBe(false);
     expect(
-      commandRequestSchema.safeParse({
+      parseWithSchema(commandRequestSchema, {
         ...request,
         import: { mapping: [{ destination: 'unsupported', source: '/value' }] },
-      }).success,
+      }).ok,
     ).toBe(false);
   });
 
@@ -628,18 +629,18 @@ describe('command request contract', () => {
       limits: { request_bytes: 10_000, response_bytes: 20_000 },
     };
 
-    expect(commandRequestSchema.safeParse(request).success).toBe(true);
+    expect(parseWithSchema(commandRequestSchema, request).ok).toBe(true);
     expect(
-      commandRequestSchema.safeParse({
+      parseWithSchema(commandRequestSchema, {
         ...request,
         polling: { ...request.polling, status_url_pointer: '/url' },
-      }).success,
+      }).ok,
     ).toBe(false);
     expect(
-      commandRequestSchema.safeParse({
+      parseWithSchema(commandRequestSchema, {
         ...request,
         polling: { ...request.polling, minimum_interval_ms: 2_000 },
-      }).success,
+      }).ok,
     ).toBe(false);
   });
 
@@ -651,13 +652,15 @@ describe('command request contract', () => {
       dataset: emptyDataset,
     };
 
-    expect(commandRequestSchema.safeParse(request).success).toBe(true);
+    expect(parseWithSchema(commandRequestSchema, request).ok).toBe(true);
     expect(
-      commandRequestSchema.safeParse({ ...request, dataset: { ...emptyDataset, case_count: 1 } })
-        .success,
+      parseWithSchema(commandRequestSchema, {
+        ...request,
+        dataset: { ...emptyDataset, case_count: 1 },
+      }).ok,
     ).toBe(false);
     expect(
-      commandRequestSchema.safeParse({
+      parseWithSchema(commandRequestSchema, {
         ...request,
         dataset: {
           ...emptyDataset,
@@ -669,8 +672,8 @@ describe('command request contract', () => {
             counts: { read: 0, inserted: 0, updated: 0, skipped: 0 },
           },
         },
-      }).success,
+      }).ok,
     ).toBe(false);
-    expect(datasetResourceSchema.safeParse(dataset).success).toBe(true);
+    expect(parseWithSchema(datasetResourceSchema, dataset).ok).toBe(true);
   });
 });

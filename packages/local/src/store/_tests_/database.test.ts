@@ -1,3 +1,4 @@
+import { parseWithSchema, parseWithSchemaSync } from '@attest/contracts';
 import { copyFile, mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -62,8 +63,8 @@ const expectMutationReturning = async (handle: SqliteHandle): Promise<void> => {
 };
 
 const isLibsqlUnavailable = (cause: unknown): boolean => {
-  const parsed = z.object({ code: z.string().optional() }).safeParse(cause);
-  const code = parsed.success ? parsed.data.code : undefined;
+  const parsed = parseWithSchema(z.object({ code: z.string().optional() }), cause);
+  const code = parsed.ok ? parsed.value.code : undefined;
 
   return code === 'ERR_MODULE_NOT_FOUND' || code === 'ERR_DLOPEN_FAILED';
 };
@@ -289,9 +290,10 @@ describe('SQLite store database', () => {
     await handle.rollback();
     expect(await handle.prepare('SELECT id FROM transaction_items').all()).toEqual([{ id: 1 }]);
     expect(
-      z
-        .object({ journal_mode: z.string() })
-        .parse((await handle.prepare('PRAGMA journal_mode').all())[0]).journal_mode,
+      parseWithSchemaSync(
+        z.object({ journal_mode: z.string() }),
+        (await handle.prepare('PRAGMA journal_mode').all())[0],
+      ).journal_mode,
     ).toBe('wal');
     await expectMutationReturning(handle);
   });

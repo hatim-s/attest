@@ -1,4 +1,5 @@
 import {
+  parseWithSchemaSync,
   agentRequestSchema,
   isJsonObject,
   isString,
@@ -135,7 +136,7 @@ class TestWebSocketPeer {
             throw new Error('Invalid client frame');
           this.onMessage(this, {
             request_id: value.request_id,
-            request: agentRequestSchema.parse(value.request),
+            request: parseWithSchemaSync(agentRequestSchema, value.request),
           });
         } catch {
           // Malformed client frames must not crash the Vitest worker.

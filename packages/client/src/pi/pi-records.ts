@@ -1,3 +1,4 @@
+import { parseWithSchema } from '@attest/contracts';
 import type { JsonValue } from '@attest/contracts';
 import { z } from 'zod';
 
@@ -100,17 +101,17 @@ const parsePiRecord = (line: string): ParsedLine => {
     return { ok: true, record: undefined };
   }
 
-  const typed = recordTypeSchema.safeParse(json);
+  const typed = parseWithSchema(recordTypeSchema, json);
 
-  if (!typed.success || !HANDLED_TYPES.has(typed.data.type)) return { ok: true, record: undefined };
-  const parsed = piRecordSchema.safeParse(json);
+  if (!typed.ok || !HANDLED_TYPES.has(typed.value.type)) return { ok: true, record: undefined };
+  const parsed = parseWithSchema(piRecordSchema, json);
 
-  if (parsed.success) return { ok: true, record: parsed.data };
+  if (parsed.ok) return { ok: true, record: parsed.value };
   const issue = parsed.error.issues[0];
 
   return {
     ok: false,
-    message: `Pi sent an unreadable ${typed.data.type} record (${issue?.path.join('.') ?? ''}: ${issue?.message ?? 'invalid'}).`,
+    message: `Pi sent an unreadable ${typed.value.type} record (${issue?.path.join('.') ?? ''}: ${issue?.message ?? 'invalid'}).`,
   };
 };
 
@@ -119,10 +120,10 @@ const toolResultSchema = z.looseObject({ content: z.array(contentBlockSchema) })
 
 /** The first text block of a tool result, or `undefined` when the result has another form. */
 const toolResultText = (result: JsonValue): string | undefined => {
-  const parsed = toolResultSchema.safeParse(result);
+  const parsed = parseWithSchema(toolResultSchema, result);
 
-  return parsed.success
-    ? parsed.data.content.find((block) => block.text !== undefined)?.text
+  return parsed.ok
+    ? parsed.value.content.find((block) => block.text !== undefined)?.text
     : undefined;
 };
 
