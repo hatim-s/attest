@@ -9,10 +9,10 @@ const MobileNavigation = ({ children, onClose, wordmark }: MobileNavigationProps
     const opener = document.activeElement;
     const dialog = dialogRef.current;
     dialog?.showModal();
-    const breakpoint = window.matchMedia('(width > 960px)');
+    const breakpoint = window.matchMedia('(max-width: 960px)');
 
     const closeOnDesktop = () => {
-      if (breakpoint.matches) onClose();
+      if (!breakpoint.matches) onClose();
     };
 
     breakpoint.addEventListener('change', closeOnDesktop);
@@ -25,7 +25,7 @@ const MobileNavigation = ({ children, onClose, wordmark }: MobileNavigationProps
       document.body.style.overflow = previousOverflow;
       dialog?.close();
 
-      if (breakpoint.matches) {
+      if (!breakpoint.matches) {
         document.querySelector<HTMLElement>('.attest-sidebar .attest-wordmark')?.focus();
       } else if (opener instanceof HTMLElement && opener.isConnected) {
         opener.focus();

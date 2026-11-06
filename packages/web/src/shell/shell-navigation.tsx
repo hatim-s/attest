@@ -4,7 +4,10 @@ import {
   targetKey,
   type RecentLabel,
   type RecentTarget,
+  isProjectWide,
   type ShellProject,
+  type ShellEval,
+  type NavigationData,
   type ShellSource,
   type ShellTarget,
 } from './navigation.js';
@@ -12,8 +15,10 @@ import {
 type NavigationProps = {
   source: ShellSource;
   sources: readonly ShellSource[];
-  /** Undefined while the source catalogue is loading. */
-  projects: readonly ShellProject[] | undefined;
+  projects: NavigationData<ShellProject>;
+  /** State for the expanded project only. Use unavailable on the project index. */
+  evals: NavigationData<ShellEval>;
+
   hrefFor: (target: ShellTarget) => string;
   current: ShellTarget;
   recents: readonly RecentTarget[];
@@ -27,6 +32,7 @@ const ShellNavigation = ({
   source,
   sources,
   projects,
+  evals,
   current,
   recents,
   resolveRecent,
@@ -47,6 +53,22 @@ const ShellNavigation = ({
     </ShellLink>
   );
 
+  const dataNote = <T,>(data: NavigationData<T>, noun: string) => {
+    if (data.status === 'ready')
+      return data.items.length === 0 ? <p className="attest-nav-note">No {noun} yet</p> : null;
+
+    return (
+      <p className="attest-nav-note" role={data.status === 'loading' ? 'status' : undefined}>
+        {data.status === 'loading' ? `Loading ${noun}...` : data.message}
+        {data.status === 'error' && data.retry && (
+          <button type="button" onClick={data.retry}>
+            Retry {noun}
+          </button>
+        )}
+      </p>
+    );
+  };
+
   const recentRows = visibleRecents(recents, resolveRecent);
 
   return (
@@ -54,86 +76,79 @@ const ShellNavigation = ({
       <nav className="attest-tree" aria-label="Projects">
         <ul>
           <li>{item({ kind: 'projects', sourceId: source.id }, 'All projects')}</li>
-          {projects?.map((project) => {
-            const open = current.kind !== 'projects' && current.projectKey === project.key;
+          {projects.status === 'ready' &&
+            projects.items.map((project) => {
+              const open = current.kind !== 'projects' && current.projectKey === project.key;
 
-            return (
-              <li key={project.key}>
-                {item(
-                  { kind: 'project', sourceId: source.id, projectKey: project.key },
-                  project.name,
-                  open,
-                )}
-                {open && (
-                  <ul>
-                    <li>
-                      {item(
-                        { kind: 'project-runs', sourceId: source.id, projectKey: project.key },
-                        'All runs',
-                        current.kind === 'project-run' || current.kind === 'project-run-case',
-                      )}
-                    </li>
-                    {project.evals === undefined && (
-                      <li className="attest-nav-note" role="status">
-                        Loading evals...
+              return (
+                <li key={project.key}>
+                  {item(
+                    { kind: 'project', sourceId: source.id, projectKey: project.key },
+                    project.name,
+                    open,
+                  )}
+                  {open && (
+                    <ul>
+                      <li>
+                        {item(
+                          { kind: 'project-runs', sourceId: source.id, projectKey: project.key },
+                          'All runs',
+                          current.kind === 'project-run' || current.kind === 'project-run-case',
+                        )}
                       </li>
-                    )}
-                    {project.evals?.map((evaluation) => {
-                      const selected = 'evalId' in current && current.evalId === evaluation.id;
+                      <li>{dataNote(evals, 'evals')}</li>
+                      {evals.status === 'ready' &&
+                        evals.items.map((evaluation) => {
+                          const selected =
+                            !isProjectWide(current) &&
+                            'evalId' in current &&
+                            current.evalId === evaluation.id;
 
-                      const scope = {
-                        sourceId: source.id,
-                        projectKey: project.key,
-                        evalId: evaluation.id,
-                      };
+                          const scope = {
+                            sourceId: source.id,
+                            projectKey: project.key,
+                            evalId: evaluation.id,
+                          };
 
-                      return (
-                        <li key={evaluation.id}>
-                          <ShellLink
-                            target={{ ...scope, kind: 'runs' }}
-                            hrefFor={hrefFor}
-                            onNavigate={onNavigate}
-                            className="attest-nav-item"
-                            inPath={selected}
-                          >
-                            {evaluation.name}
-                          </ShellLink>
-                          {selected && (
-                            <ul>
-                              <li>
-                                {item(
-                                  { ...scope, kind: 'runs' },
-                                  'Runs',
-                                  current.kind === 'run' || current.kind === 'run-case',
-                                )}
-                              </li>
-                              <li>
-                                {item(
-                                  { ...scope, kind: 'cases' },
-                                  'Test cases',
-                                  current.kind === 'case',
-                                )}
-                              </li>
-                            </ul>
-                          )}
-                        </li>
-                      );
-                    })}
-                    {project.evals?.length === 0 && (
-                      <li className="attest-nav-note">No evals yet</li>
-                    )}
-                  </ul>
-                )}
-              </li>
-            );
-          })}
+                          return (
+                            <li key={evaluation.id}>
+                              <ShellLink
+                                target={{ ...scope, kind: 'runs' }}
+                                hrefFor={hrefFor}
+                                onNavigate={onNavigate}
+                                className="attest-nav-item"
+                                inPath={selected}
+                              >
+                                {evaluation.name}
+                              </ShellLink>
+                              {selected && (
+                                <ul>
+                                  <li>
+                                    {item(
+                                      { ...scope, kind: 'runs' },
+                                      'Runs',
+                                      current.kind === 'run' || current.kind === 'run-case',
+                                    )}
+                                  </li>
+                                  <li>
+                                    {item(
+                                      { ...scope, kind: 'cases' },
+                                      'Test cases',
+                                      current.kind === 'case',
+                                    )}
+                                  </li>
+                                </ul>
+                              )}
+                            </li>
+                          );
+                        })}
+                    </ul>
+                  )}
+                </li>
+              );
+            })}
         </ul>
-        {projects === undefined && (
-          <p className="attest-nav-note" role="status">
-            Loading projects...
-          </p>
-        )}
-        {projects?.length === 0 && <p className="attest-nav-note">No projects yet</p>}
+        {dataNote(projects, 'projects')}
       </nav>
       <section className="attest-recents" aria-label="Recent pages">
         <h2>Recent</h2>

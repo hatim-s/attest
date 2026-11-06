@@ -4,9 +4,9 @@ const hues = ['blue', 'teal', 'violet', 'moss', 'plum', 'steel', 'cyan'] as cons
 
 /** Stable name-based colours, independent of row order or filter selection. */
 const tagHue = (name: string) => {
-  let hash = 0;
+  let hash = 2166136261;
 
-  for (const character of name) hash = (Math.imul(hash, 31) + character.charCodeAt(0)) >>> 0;
+  for (const character of name) hash = Math.imul(hash ^ character.charCodeAt(0), 16777619) >>> 0;
 
   return hues[hash % hues.length] ?? 'blue';
 };

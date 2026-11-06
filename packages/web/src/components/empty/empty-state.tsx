@@ -17,15 +17,17 @@ const EmptyState = ({ title, description, action, command, children }: EmptyStat
 
   return (
     <section className="attest-empty" aria-labelledby={titleId}>
-      <h2 id={titleId}>{title}</h2>
-      <p>{description}</p>
+      <h2 className="attest-empty-title" id={titleId}>
+        {title}
+      </h2>
+      <p className="attest-empty-description">{description}</p>
       {command && (
-        <pre>
+        <pre className="attest-empty-command">
           <code>{command}</code>
         </pre>
       )}
       {action && (
-        <button type="button" onClick={action.onAction}>
+        <button className="attest-empty-action" type="button" onClick={action.onAction}>
           {action.label}
         </button>
       )}

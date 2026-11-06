@@ -25,14 +25,18 @@
   --span-run: light-dark(#9a9a9a, #6e6e73);
   --area: light-dark(rgba(0, 0, 0, 0.06), rgba(244, 244, 242, 0.07));
   --grid: light-dark(#ededed, #1e1e21);
-  --dot-bg: radial-gradient(circle, #e3e3e3 1px, transparent 1.2px) 0 0 / 12px 12px;
+  --dot-bg: radial-gradient(circle, light-dark(#e3e3e3, #26262a) 1px, transparent 1.2px) 0 0 / 12px
+    12px;
   --tip-bg: light-dark(#000000, #1c1c1f);
   --tip-fg: light-dark(#ffffff, #f4f4f2);
   --tip-dim: light-dark(#cfcfcf, #b4b4ba);
   --tip-faint: light-dark(#a8a8a8, #8a8a92);
   --tip-hot: light-dark(#ffb27f, #ff9a5c);
   --tip-edge: light-dark(transparent, #37373b);
-  --shadow: 0 8px 28px rgba(0, 0, 0, 0.12), 0 0 0 1px rgba(0, 0, 0, 0.06);
+  --shadow:
+    0 var(--shadow-y, 8px) var(--shadow-blur, 28px)
+      light-dark(rgba(0, 0, 0, 0.12), rgba(0, 0, 0, 0.55)),
+    0 0 0 1px light-dark(rgba(0, 0, 0, 0.06), #2a2a2e);
   --scrim: light-dark(rgba(0, 0, 0, 0.25), rgba(0, 0, 0, 0.55));
   --jk: light-dark(#555555, #a2a2ab);
   --jn: light-dark(#1f4fa3, #8fb4ff);
@@ -59,15 +63,15 @@
 }
 .attest-compact[data-theme='dark'] {
   color-scheme: dark;
-  --dot-bg: radial-gradient(circle, #26262a 1px, transparent 1.2px) 0 0 / 12px 12px;
-  --shadow: 0 10px 32px rgba(0, 0, 0, 0.55), 0 0 0 1px #2a2a2e;
+  --shadow-y: 10px;
+  --shadow-blur: 32px;
 }
 .attest-compact[data-theme='system'] {
   color-scheme: light dark;
 }
 @media (prefers-color-scheme: dark) {
   .attest-compact[data-theme='system'] {
-    --dot-bg: radial-gradient(circle, #26262a 1px, transparent 1.2px) 0 0 / 12px 12px;
-    --shadow: 0 10px 32px rgba(0, 0, 0, 0.55), 0 0 0 1px #2a2a2e;
+    --shadow-y: 10px;
+    --shadow-blur: 32px;
   }
 }

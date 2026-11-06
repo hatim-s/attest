@@ -2,7 +2,6 @@
 
 `CompactShell` imports `tokens.css` and `shell.css` explicitly. `Tag`/`Tags` and
 `EmptyState` import their own scoped styles. Render these components inside the shell.
-No entry, router, query client, API, global stylesheet or dependency changes are included.
 
 ```tsx
 import { CompactShell, type CompactShellProps } from './shell/compact-shell.js';
@@ -23,8 +22,14 @@ export { DashboardFrame };
 For reports use `kind: 'report', capabilities: { control: false }`. Local and cloud
 capabilities use the existing `ApiCapabilities` contract. Source IDs must be stable,
 non-secret and account/workspace scoped when applicable. Never use a token or credential
-in an identity. `projects` is undefined while the source catalog loads, then contains project names with eval IDs/names supplied
-by the eventual API adapter. It reuses `ProjectRecord.key/name`; no API shapes are assumed.
+in an identity. `projects` is required `NavigationData<ShellProject>`, reusing `ProjectRecord.key/name`.
+`evals` is required `NavigationData<ShellEval>` for the expanded project only.
+Both use `{ status: 'loading' }`, `{ status: 'error', message, retry? }`,
+`{ status: 'unavailable', message }` or `{ status: 'ready', items }`.
+An empty ready list means no records. Supply an honest capability/error message and only
+provide retry when supported. Terminal states stop the loading announcement. On the
+project index, use unavailable eval state; collapsed projects need no eval request.
+Replace eval state with loading immediately when switching the expanded project.
 
 `current` is the committed router location adapted to `ShellTarget`. Object memoization is optional.
 `hrefFor(target)` supplies a real destination URL for each target. `onNavigate(target)` handles ordinary primary activation; modified and middle clicks use native anchors.
@@ -38,7 +43,10 @@ row. Context belongs in the tooltip/accessibility name, e.g. eval name and run i
 A recent is scoped by source, project and eval where selected, excludes the open page,
 and distinguishes every run/case combination. Storage retains at most twenty identities
 across all contexts under `attest-recents`. Context and availability filtering precede the four-row display cap. Names, URLs, timestamps, payloads and auth never
-enter this store. Blocked or malformed storage falls back to in-memory state.
+enter this store. Each read bounds the outer payload and isolates malformed entries, preserving valid ones.
+Recording merges fresh storage with session history before promoting the current target.
+Blocked storage retains session history. This reduces stale-tab overwrites; localStorage
+provides no atomic transaction for simultaneous cross-tab writes.
 
 Theme cycles system/light/dark, persists under `attest-theme`, and applies `data-theme`
 to `.attest-compact` only. CSS media queries keep system mode live as OS settings change.
@@ -69,12 +77,24 @@ only offer New run when host control and authored cases permit it. No endpoint i
 ## Target and loading contracts
 
 Eval targets (`runs`, `cases`, `run`, `case`, `run-case`) always carry a nonempty eval ID.
-Project-wide and multi-eval runs use `project-runs`, `project-run` or `project-run-case`,
-which carry no eval ID. Recents retain this distinction and an eval context never includes
-project-wide run entries. Adapters must supply real source/project/run identities; empty
-IDs are rejected at persistence, as are whitespace-only IDs and IDs over 256 characters.
+Project-wide and multi-eval runs use `project-runs`, `project-run` or `project-run-case`.
+`project-run-case` requires the real `evalId` plus `runId` and `caseId`: cases are identified
+by suite and case, even inside a project-wide run. Its navigation context stays project-wide,
+so the All runs branch stays selected and recents can include sibling evals. Eval-scoped
+contexts exclude project-wide targets. Never invent an eval ID for a project-wide run.
+`hrefFor` must encode all of these identities for project-run-case destinations;
+`resolveRecent` must resolve through the real suite/case pair, matching `RunSource.getCase`.
+Old project-run-case records without eval identity are discarded individually. No migration
+is needed for this browser history. Empty, whitespace-only and over-256-character IDs are rejected.
 
-`ShellProject.evals` is undefined while its list is loading, and an empty array means the
-loaded list is empty. Only the open project's eval list is rendered or needs fetching.
-The shell performs no fetches. Loaders own failures and may render their error state as
-content. The shell owns its `main`; route content must not add another main landmark.
+The shell owns its `main`; route content must not add another main landmark. The header is
+sticky and uses the approved 14px base with 13px breadcrumbs. At narrow widths only the
+last ancestor and current crumb remain. Font family tokens match the mock, but the host
+must supply Inter, Inter Tight and IBM Plex Mono for exact font fidelity. No font fetch is
+performed by these components.
+
+Integration owners must remove the legacy root theme owner, scope chart theme observation
+to the shell and system media query, and handle document/body/scrollbar theme styling.
+They also own real router hrefs and DTO adapters. Keep these responsibilities out of the
+foundation components. EmptyState styles only its built-in title, description, command and
+action; arbitrary children, including primary and danger Buttons, retain caller styles.

@@ -105,7 +105,16 @@ const CompactShell = ({ breadcrumbs, children, ...navigation }: CompactShellProp
           <nav className="attest-breadcrumbs" aria-label="Breadcrumb">
             <ol>
               {breadcrumbs.map((crumb, index) => (
-                <li key={index}>
+                <li
+                  key={index}
+                  className={
+                    index < breadcrumbs.length - 2
+                      ? 'attest-crumb-far'
+                      : index === breadcrumbs.length - 2
+                        ? 'attest-crumb-near'
+                        : undefined
+                  }
+                >
                   <ShellLink
                     target={crumb.target}
                     hrefFor={navigation.hrefFor}

@@ -5,17 +5,17 @@
   text-align: center;
   background: var(--panel);
 }
-.attest-empty h2 {
+.attest-empty-title {
   font: 600 18px/1.4 var(--tight);
   margin: 0 0 8px;
   color: var(--ink);
 }
-.attest-empty p {
+.attest-empty-description {
   color: var(--muted);
   max-width: 56ch;
   margin: 0 auto 16px;
 }
-.attest-empty pre {
+.attest-empty-command {
   font: 12px/1.5 var(--mono);
   overflow-x: auto;
   padding: 8px 12px;
@@ -24,7 +24,7 @@
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
-.attest-compact .attest-empty button {
+.attest-compact .attest-empty-action {
   cursor: pointer;
   font: inherit;
   color: inherit;

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  recordRecent,
   contextualRecents,
   visibleRecents,
   readRecents,
@@ -47,6 +48,78 @@ describe('recent navigation persistence', () => {
     const storage = memoryStorage();
     writeRecents(storage, recents);
     expect(readRecents(storage)).toEqual(recents);
+  });
+
+  it('merges visits recorded by a stale tab and keeps history with blocked storage', () => {
+    const storage = memoryStorage();
+    const stale = recordRecent(storage, [], run('a'));
+    recordRecent(storage, stale, run('b'));
+    const merged = recordRecent(storage, stale, run('c'));
+    expect(merged).toEqual(['c', 'b', 'a'].map(run));
+    expect(readRecents(storage)).toEqual(merged);
+    expect(recordRecent(blocked, merged, run('d'))).toEqual(['d', 'c', 'b', 'a'].map(run));
+  });
+
+  it('isolates malformed entries and retains twenty unique valid identities in order', () => {
+    const storage = memoryStorage();
+    storage.setItem(
+      'attest-recents',
+      JSON.stringify([
+        null,
+        run('a'),
+        { ...run('bad'), secret: 'private' },
+        run('a'),
+        ...Array.from({ length: 25 }, (_, i) => run(String(i))),
+      ]),
+    );
+    expect(readRecents(storage)).toEqual([
+      run('a'),
+      ...Array.from({ length: 19 }, (_, i) => run(String(i))),
+    ]);
+  });
+
+  it('keeps two suites with case-1 distinct inside the same project-wide run', () => {
+    const first: RecentTarget = {
+      ...scope,
+      kind: 'project-run-case',
+      runId: 'multi',
+      caseId: 'case-1',
+    };
+
+    const second: RecentTarget = { ...first, evalId: 'eval-two' };
+    const storage = memoryStorage();
+    const recents = recordRecent(storage, recordRecent(storage, [], first), second);
+    expect(readRecents(storage)).toEqual([second, first]);
+    expect(targetKey(first)).not.toBe(targetKey(second));
+    expect(contextualRecents(recents, first)).toEqual([second]);
+    expect(contextualRecents(recents, { ...scope, kind: 'runs' })).toEqual([]);
+
+    // The adapter receives the real suite and case pair for both resolution and hrefs.
+    const cases = new Map([
+      [
+        JSON.stringify([first.evalId, first.caseId]),
+        { label: 'First case', context: 'First eval' },
+      ],
+      [
+        JSON.stringify([second.evalId, second.caseId]),
+        { label: 'Second case', context: 'Second eval' },
+      ],
+    ]);
+
+    const rows = visibleRecents(readRecents(storage), (target) =>
+      'evalId' in target && 'caseId' in target
+        ? cases.get(JSON.stringify([target.evalId, target.caseId]))
+        : undefined,
+    );
+
+    expect(rows.map(({ text }) => text.label)).toEqual(['Second case', 'First case']);
+
+    const hrefFor = (target: RecentTarget) =>
+      'evalId' in target && 'caseId' in target && 'runId' in target
+        ? `/projects/${target.projectKey}/runs/${target.runId}/evals/${target.evalId}/cases/${target.caseId}`
+        : '';
+
+    expect(new Set(rows.map(({ target }) => hrefFor(target))).size).toBe(2);
   });
 
   it('distinguishes sources, projects, evals, runs, and individual cases', () => {
@@ -98,7 +171,7 @@ describe('recent navigation persistence', () => {
       'null',
       '{}',
       JSON.stringify([{ ...run('1'), token: 'secret' }]),
-      JSON.stringify(Array.from({ length: 21 }, (_, i) => run(String(i)))),
+      JSON.stringify(Array.from({ length: 101 }, (_, i) => run(String(i)))),
       ' '.repeat(160000),
     ]) {
       storage.setItem('attest-recents', invalid);

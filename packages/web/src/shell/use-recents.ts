@@ -1,12 +1,6 @@
 import { useEffect, useEffectEvent, useRef, useState } from 'react';
 import { targetKey, type ShellTarget } from './navigation.js';
-import {
-  browserStorage,
-  contextualRecents,
-  readRecents,
-  rememberTarget,
-  writeRecents,
-} from './preferences.js';
+import { browserStorage, contextualRecents, readRecents, recordRecent } from './preferences.js';
 
 /** Record committed deep locations once per semantic navigation, outside React updaters. */
 const useRecents = (current: ShellTarget) => {
@@ -19,19 +13,10 @@ const useRecents = (current: ShellTarget) => {
     if (lastRecorded.current === key) return;
     lastRecorded.current = key;
 
-    if (
-      current.kind === 'projects' ||
-      current.kind === 'project' ||
-      current.kind === 'project-runs' ||
-      current.kind === 'runs' ||
-      current.kind === 'cases'
-    )
-      return;
-    const next = rememberTarget(latest.current, current);
+    const next = recordRecent(browserStorage(), latest.current, current);
 
     if (JSON.stringify(next) === JSON.stringify(latest.current)) return;
     latest.current = next;
-    writeRecents(browserStorage(), next);
     setRecents(next);
   });
 

@@ -16,7 +16,7 @@ const recentTargetSchema = z.discriminatedUnion('kind', [
   z.object({ ...projectScope, kind: z.literal('project-run'), runId: identity }).strict(),
   z
     .object({
-      ...projectScope,
+      ...scope,
       kind: z.literal('project-run-case'),
       runId: identity,
       caseId: identity,
@@ -46,7 +46,14 @@ type ShellSource = {
 
 type ShellEval = { id: string; name: string };
 
-type ShellProject = Pick<ProjectRecord, 'key' | 'name'> & { evals?: readonly ShellEval[] };
+/** Load only the expanded project's evals; terminal states never announce loading. */
+type NavigationData<T> =
+  | { status: 'loading' }
+  | { status: 'error'; message: string; retry?: () => void }
+  | { status: 'unavailable'; message: string }
+  | { status: 'ready'; items: readonly T[] };
+
+type ShellProject = Pick<ProjectRecord, 'key' | 'name'>;
 
 type ShellBreadcrumb = { label: string; target: ShellTarget };
 
@@ -70,6 +77,7 @@ const targetKey = (target: ShellTarget): string => {
         target.kind,
         target.sourceId,
         target.projectKey,
+        target.evalId,
         target.runId,
         target.caseId,
       ]);
@@ -101,13 +109,29 @@ const targetKey = (target: ShellTarget): string => {
   }
 };
 
+/** Navigation scope stays project-wide even when a case needs its suite identity. */
+const isProjectWide = (target: ShellTarget) =>
+  target.kind === 'projects' ||
+  target.kind === 'project' ||
+  target.kind === 'project-runs' ||
+  target.kind === 'project-run' ||
+  target.kind === 'project-run-case';
+
+/** Only deep locations belong in recent history. */
+const isRecordableTarget = (target: ShellTarget): target is RecentTarget =>
+  'runId' in target || target.kind === 'case';
+
 export {
+  isProjectWide,
+  isRecordableTarget,
   recentTargetSchema,
   targetKey,
   type RecentTarget,
   type ShellTarget,
   type ShellSource,
   type ShellProject,
+  type ShellEval,
+  type NavigationData,
   type ShellBreadcrumb,
   type RecentLabel,
 };

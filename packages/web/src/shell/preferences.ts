@@ -2,6 +2,8 @@ import { parseWithSchema } from '@attest/contracts';
 import { z } from 'zod';
 import {
   recentTargetSchema,
+  isProjectWide,
+  isRecordableTarget,
   targetKey,
   type RecentTarget,
   type RecentLabel,
@@ -21,7 +23,7 @@ const RECENT_BYTE_LIMIT = RECENT_STORAGE_LIMIT * (5 * 256 * 6 + 128);
 
 const themeSchema = z.enum(['system', 'light', 'dark']);
 
-const recentsSchema = z.array(recentTargetSchema).max(RECENT_STORAGE_LIMIT);
+const recentsSchema = z.array(z.unknown()).max(100);
 
 type ThemeMode = z.infer<typeof themeSchema>;
 
@@ -65,12 +67,7 @@ const readRecents = (storage: PreferenceStorage | undefined): RecentTarget[] => 
     const candidate: unknown = JSON.parse(raw);
     const parsed = parseWithSchema(recentsSchema, candidate);
 
-    return parsed.ok
-      ? parsed.value.filter(
-          (item, index, all) =>
-            all.findIndex((other) => targetKey(other) === targetKey(item)) === index,
-        )
-      : [];
+    return parsed.ok ? validatedRecents(parsed.value) : [];
   } catch {
     return [];
   }
@@ -83,8 +80,6 @@ const recentIdentity = (target: RecentTarget): RecentTarget => {
   if (target.kind === 'project-run')
     return { ...projectScope, kind: target.kind, runId: target.runId };
 
-  if (target.kind === 'project-run-case')
-    return { ...projectScope, kind: target.kind, runId: target.runId, caseId: target.caseId };
   const scope = { ...projectScope, evalId: target.evalId };
 
   switch (target.kind) {
@@ -92,50 +87,97 @@ const recentIdentity = (target: RecentTarget): RecentTarget => {
       return { ...scope, kind: target.kind, runId: target.runId };
     case 'case':
       return { ...scope, kind: target.kind, caseId: target.caseId };
+    case 'project-run-case':
     case 'run-case':
       return { ...scope, kind: target.kind, runId: target.runId, caseId: target.caseId };
   }
 };
 
-/** Deep pages only, newest first, deduplicated across their full scoped identity. */
-const rememberTarget = (recents: readonly RecentTarget[], target: ShellTarget): RecentTarget[] => {
-  if (!('runId' in target) && target.kind !== 'case') return [...recents];
-  const parsed = parseWithSchema(recentTargetSchema, recentIdentity(target));
+/** Validate each untrusted entry independently, then deduplicate and cap the valid history. */
+const validatedRecents = (candidates: readonly unknown[]): RecentTarget[] => {
+  const result: RecentTarget[] = [];
+  const seen = new Set<string>();
 
-  if (!parsed.ok) return [...recents];
-  const next = parsed.value;
+  for (const candidate of candidates) {
+    const parsed = parseWithSchema(recentTargetSchema, candidate);
 
-  return [next, ...recents.filter((item) => targetKey(item) !== targetKey(next))].slice(
-    0,
-    RECENT_STORAGE_LIMIT,
-  );
+    if (!parsed.ok) continue;
+    const target = parsed.value;
+    const key = targetKey(target);
+
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(target);
+
+    if (result.length === RECENT_STORAGE_LIMIT) break;
+  }
+
+  return result;
 };
 
-/** Persist only bounded navigation identities and tolerate quota or privacy restrictions. */
+/** Check new route identities once before they enter validated history. */
+const recordableIdentity = (target: ShellTarget): RecentTarget | undefined => {
+  if (!isRecordableTarget(target)) return undefined;
+  const parsed = parseWithSchema(recentTargetSchema, recentIdentity(target));
+
+  return parsed.ok ? parsed.value : undefined;
+};
+
+/** Deep pages only, newest first, deduplicated across their full scoped identity. */
+const rememberTarget = (recents: readonly RecentTarget[], target: ShellTarget): RecentTarget[] => {
+  const identity = recordableIdentity(target);
+
+  return identity ? mergeRecents([identity], recents) : [...recents];
+};
+
+/** First occurrence wins, preserving newest storage visits before older session history. */
+const mergeRecents = (...groups: readonly (readonly RecentTarget[])[]): RecentTarget[] => {
+  const entries = new Map<string, RecentTarget>();
+
+  for (const group of groups) {
+    for (const target of group) {
+      const key = targetKey(target);
+
+      if (!entries.has(key)) entries.set(key, target);
+    }
+  }
+
+  return [...entries.values()].slice(0, RECENT_STORAGE_LIMIT);
+};
+
+/** Persistence failure leaves the caller's session history intact. */
+const persistRecents = (
+  storage: PreferenceStorage | undefined,
+  recents: readonly RecentTarget[],
+) => {
+  try {
+    storage?.setItem(RECENTS_KEY, JSON.stringify(recents));
+  } catch {
+    // Privacy restrictions and quota failures must not discard session history.
+  }
+};
+
+/** Project caller-owned objects before validating this explicit write boundary. */
 const writeRecents = (
   storage: PreferenceStorage | undefined,
   recents: readonly RecentTarget[],
 ): void => {
-  try {
-    storage?.setItem(
-      RECENTS_KEY,
-      JSON.stringify(
-        recents
-          .flatMap((target) => {
-            const parsed = parseWithSchema(recentTargetSchema, recentIdentity(target));
+  persistRecents(storage, validatedRecents(recents.map(recentIdentity)));
+};
 
-            return parsed.ok ? [parsed.value] : [];
-          })
-          .filter(
-            (item, index, all) =>
-              all.findIndex((other) => targetKey(other) === targetKey(item)) === index,
-          )
-          .slice(0, RECENT_STORAGE_LIMIT),
-      ),
-    );
-  } catch {
-    // Recents remain usable for this session when persistence is unavailable.
-  }
+/** Refresh shared history immediately before recording, outside React state updaters. */
+const recordRecent = (
+  storage: PreferenceStorage | undefined,
+  session: readonly RecentTarget[],
+  target: ShellTarget,
+): RecentTarget[] => {
+  const identity = recordableIdentity(target);
+
+  if (!identity) return [...session];
+  const next = mergeRecents([identity], readRecents(storage), session);
+  persistRecents(storage, next);
+
+  return next;
 };
 
 /** Keep the current source and optional project/eval context, excluding the open page. */
@@ -147,11 +189,11 @@ const contextualRecents = (
     (item) =>
       item.sourceId === current.sourceId &&
       (current.kind === 'projects' || item.projectKey === current.projectKey) &&
-      (current.kind === 'projects' ||
-        current.kind === 'project' ||
-        current.kind === 'project-runs' ||
-        !('evalId' in current) ||
-        ('evalId' in item && item.evalId === current.evalId)) &&
+      (isProjectWide(current) ||
+        ('evalId' in current &&
+          !isProjectWide(item) &&
+          'evalId' in item &&
+          item.evalId === current.evalId)) &&
       targetKey(item) !== targetKey(current),
   );
 
@@ -169,6 +211,7 @@ const visibleRecents = (
     .slice(0, RECENT_DISPLAY_LIMIT);
 
 export {
+  recordRecent,
   visibleRecents,
   browserStorage,
   readTheme,
