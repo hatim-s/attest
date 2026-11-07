@@ -26,3 +26,5 @@ export type {
 } from './internal/metric-transport.js';
 
 export { judgeOutcomeSchema, type JudgeOutcome } from './judge/judge-outcome-schema.js';
+
+export { MetricCleanupError } from './internal/operation.js';

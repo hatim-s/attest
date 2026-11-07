@@ -1,3 +1,5 @@
+import { valueFromExit } from '../../internal/effect-exit.js';
+import * as Effect from 'effect/Effect';
 import { performance } from 'node:perf_hooks';
 
 import {
@@ -256,14 +258,17 @@ const createEvalCaseRunner = (
         throw new EvalCaseStageError('after_agent', execution, [], error);
       }
 
-      const metrics = await metricEvaluator.evaluate({
-        environment: context.environment,
-        original,
-        payload,
-        runId,
-        secrets,
-        signal,
-      });
+      const metrics = await // EFFECT-BRIDGE(S7b): native metric caller.
+      Effect.runPromiseExit(
+        metricEvaluator.evaluate({
+          environment: context.environment,
+          original,
+          payload,
+          runId,
+          secrets,
+          signal,
+        }),
+      ).then(valueFromExit);
 
       try {
         await lifecycle.runCasePhase('after_evaluation', {

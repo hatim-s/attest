@@ -1,3 +1,5 @@
+import * as Effect from 'effect/Effect';
+import { foreign, ownOperation, withRelease } from '../../internal/operation.js';
 import { stripStruct } from '@attest/contracts';
 import { parseWithSchema, parseWithSchemaSync } from '@attest/contracts';
 import type { JsonValue } from '@attest/contracts';
@@ -68,7 +70,7 @@ type StructuredChatRequest = {
 };
 
 /** Executes one schema-constrained chat call; injected by tests to avoid provider network calls. */
-type StructuredChatExecutor = (request: StructuredChatRequest) => Promise<JsonValue>;
+type StructuredChatExecutor = (request: StructuredChatRequest) => Effect.Effect<JsonValue, Error>;
 
 /** Identifies SDK structured-output failures the metric contract permits retrying exactly once. */
 // BOUNDARY: SDK thrown values may carry a structured-output failure code.
@@ -98,33 +100,40 @@ const createRecordMiddleware = (observation: JudgeAttemptObservation): ChatMiddl
 });
 
 /** Runs the real TanStack structured chat, forwarding the caller's signal to the SDK's controller. */
-const executeStructuredChat: StructuredChatExecutor = async (request) => {
-  const abortController = new AbortController();
-  const forwardAbort = (): void => abortController.abort(request.signal.reason);
+const executeStructuredChat: StructuredChatExecutor = (request) =>
+  ownOperation((cancelled) =>
+    Effect.gen(function* () {
+      const abortController = new AbortController();
+      const signal = AbortSignal.any([cancelled, request.signal]);
+      const forwardAbort = (): void => abortController.abort(signal.reason);
 
-  if (request.signal.aborted) {
-    forwardAbort();
-  }
+      if (signal.aborted) {
+        forwardAbort();
+      }
 
-  request.signal.addEventListener('abort', forwardAbort, { once: true });
+      signal.addEventListener('abort', forwardAbort, { once: true });
 
-  try {
-    const response = await chat({
-      adapter: request.adapter,
-      systemPrompts: [request.system],
-      messages: [{ role: 'user', content: request.user }],
-      outputSchema: judgeOutputSchema,
-      stream: false,
-      abortController,
-      middleware: [createRecordMiddleware(request.observation)],
-      debug: false,
-    });
+      return yield* withRelease(
+        Effect.gen(function* () {
+          const response = yield* foreign(() =>
+            chat({
+              adapter: request.adapter,
+              systemPrompts: [request.system],
+              messages: [{ role: 'user', content: request.user }],
+              outputSchema: judgeOutputSchema,
+              stream: false,
+              abortController,
+              middleware: [createRecordMiddleware(request.observation)],
+              debug: false,
+            }),
+          );
 
-    return parseWithSchemaSync(Schema.Json, response);
-  } finally {
-    request.signal.removeEventListener('abort', forwardAbort);
-  }
-};
+          return parseWithSchemaSync(Schema.Json, response);
+        }),
+        Effect.sync(() => signal.removeEventListener('abort', forwardAbort)),
+      );
+    }),
+  );
 
 export {
   executeStructuredChat,

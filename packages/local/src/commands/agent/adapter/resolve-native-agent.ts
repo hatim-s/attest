@@ -1,78 +1,18 @@
+import {
+  createBaseEnvironment,
+  resolveProcessEnvironment,
+  resolveHttpSecrets,
+} from './metric-secrets.js';
 import { valueFromExit } from '../../../internal/effect-exit.js';
 import * as Effect from 'effect/Effect';
 import { realpath } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { delimiter, isAbsolute, resolve } from 'node:path';
+import { isAbsolute, resolve } from 'node:path';
 
-import type { AgentResource, SecretReference } from '@attest/contracts';
+import type { AgentResource } from '@attest/contracts';
 
 import { LocalError } from '../../../errors/index.js';
-import { openAnchored, type AnchoredEntry } from '../../../internal/open-anchored.js';
 import { isProjectPath } from '../../../project/project-path.js';
 import type { ResolvedNativeAgent } from './types.js';
-
-/** Reads a secret reference at invocation time without returning its source path or value. */
-const readSecretReference = async (
-  reference: SecretReference,
-  projectRoot: string,
-): Promise<string> => {
-  if ('from_env' in reference) {
-    const value = process.env[reference.from_env];
-
-    if (value === undefined) {
-      throw new LocalError('invocation_failed', 'A referenced environment secret is missing.', {
-        path: reference.from_env,
-        hint: 'Set the referenced environment variable and retry the connection test.',
-      });
-    }
-
-    return value;
-  }
-
-  const candidate = resolve(projectRoot, reference.from_file);
-
-  if (!isProjectPath(projectRoot, candidate)) {
-    throw new LocalError('invocation_failed', 'A secret file is outside the project.', {
-      path: reference.from_file,
-      hint: 'Use a project-contained secret file or an environment reference.',
-    });
-  }
-
-  let entry: AnchoredEntry | undefined;
-
-  try {
-    // EFFECT-BRIDGE(S7b)
-    const opened = await Effect.runPromiseExit(
-      openAnchored(candidate, { kind: 'file', root: projectRoot }),
-    ).then((exit) => valueFromExit(exit));
-
-    entry = opened;
-
-    if ((opened.identity.mode & 0o077n) !== 0n) {
-      throw new Error('secret file must not be readable by group or others');
-    }
-
-    return await opened.handle.readFile('utf8');
-  } catch (error: unknown) {
-    throw new LocalError('invocation_failed', 'A referenced secret file is unavailable.', {
-      path: reference.from_file,
-      hint: 'Use a project-contained regular file with group/world permissions removed.',
-      cause: error,
-    });
-  } finally {
-    await entry?.handle.close().catch(() => undefined);
-  }
-};
-
-/** Builds the minimum safe inherited environment used by the hardened native CLI invoker. */
-const createBaseEnvironment = () => ({
-  PATH: (process.env.PATH ?? '')
-    .split(delimiter)
-    .filter((entry) => isAbsolute(entry))
-    .join(delimiter),
-  LC_ALL: 'C',
-  TMPDIR: tmpdir(),
-});
 
 /** Resolves an authored cwd through realpath and rejects symlink escapes from the project. */
 const resolveProcessCwd = async (projectRoot: string, cwd = '.'): Promise<string> => {
@@ -101,79 +41,11 @@ const resolveProcessArgv = (argv: readonly string[], cwd: string): string[] =>
       : resolve(cwd, argument),
   );
 
-type ResolvedProcessEnvironment = {
-  env: Record<string, string>;
-  /** Only the referenced variables, for a sandbox that must not inherit the host base. */
-  variables: Record<string, string>;
-  secrets: string[];
-};
-
-/**
- * Builds a child process environment from the hardened base plus secret references read at
- * invocation time. Returns the secret values too so every evidence path can redact them.
- */
-const resolveProcessEnvironment = async (
-  references: Readonly<Record<string, SecretReference>> | undefined,
-  projectRoot: string,
-): Promise<ResolvedProcessEnvironment> => {
-  const variables: ResolvedProcessEnvironment['variables'] = {};
-  const secrets: string[] = [];
-
-  for (const [name, reference] of Object.entries(references ?? {})) {
-    const value = await readSecretReference(reference, projectRoot);
-    variables[name] = value;
-    secrets.push(value);
-  }
-
-  return { env: { ...createBaseEnvironment(), ...variables }, variables, secrets };
-};
-
-type ResolvedRequestSecrets = {
-  headers: Record<string, string>;
-  query: Record<string, string>;
-  secrets: string[];
-};
-
-/** Distinguishes a literal header/query value from its authored secret reference. */
-const isLiteralRequestValue = (value: string | SecretReference): value is string =>
-  typeof value === 'string';
-
-/** Resolves one request template's secret references without changing the authored resource. */
-const resolveHttpSecrets = async (
-  request: {
-    headers?: Record<string, string | SecretReference>;
-    query?: Record<string, string | SecretReference>;
-  },
-  projectRoot: string,
-): Promise<ResolvedRequestSecrets> => {
-  const resolveValues = async (
-    values: Record<string, string | SecretReference> | undefined,
-    secrets: string[],
-  ): Promise<Record<string, string>> => {
-    const resolved: Record<string, string> = {};
-
-    for (const [name, value] of Object.entries(values ?? {})) {
-      if (isLiteralRequestValue(value)) {
-        resolved[name] = value;
-        continue;
-      }
-
-      resolved[name] = await readSecretReference(value, projectRoot);
-      secrets.push(resolved[name]);
-    }
-
-    return resolved;
-  };
-
-  const secrets: string[] = [];
-  const headers = await resolveValues(request.headers, secrets);
-  const query = await resolveValues(request.query, secrets);
-
-  return { headers, query, secrets };
-};
-
 /** Adds literal header and query values the agent marks for redaction to its secret list. */
-const addRedactedRequestValues = (agent: AgentResource, resolved: ResolvedRequestSecrets): void => {
+const addRedactedRequestValues = (
+  agent: AgentResource,
+  resolved: Effect.Success<ReturnType<typeof resolveHttpSecrets>>,
+): void => {
   const redactedHeaders = new Set(agent.redaction?.headers?.map((name) => name.toLowerCase()));
 
   for (const [name, value] of Object.entries(resolved.headers)) {
@@ -212,7 +84,11 @@ const resolveProcessAgent = async (
   transport: ProcessTransport,
   projectRoot: string,
 ): Promise<ResolvedNativeAgent> => {
-  const { env, variables, secrets } = await resolveProcessEnvironment(transport.env, projectRoot);
+  const { env, variables, secrets } =
+    await // EFFECT-BRIDGE(S7b): native secret resolution from the agent configuration parent.
+    Effect.runPromiseExit(resolveProcessEnvironment(transport.env, projectRoot)).then(
+      valueFromExit,
+    );
 
   if (transport.kind === 'native_cli' && transport.sandbox !== undefined) {
     return {
@@ -249,12 +125,17 @@ const resolveProcessAgent = async (
     };
   }
 
-  const invoke = await resolveHttpSecrets(transport.invoke, projectRoot);
+  const invoke =
+    await // EFFECT-BRIDGE(S7b): native secret resolution from the agent configuration parent.
+    Effect.runPromiseExit(resolveHttpSecrets(transport.invoke, projectRoot)).then(valueFromExit);
 
   const shutdown =
     transport.shutdown === undefined
       ? { headers: {}, query: {}, secrets: [] }
-      : await resolveHttpSecrets(transport.shutdown, projectRoot);
+      : await // EFFECT-BRIDGE(S7b): native secret resolution from the agent configuration parent.
+        Effect.runPromiseExit(resolveHttpSecrets(transport.shutdown, projectRoot)).then(
+          valueFromExit,
+        );
 
   return {
     agent: { ...agent, transport: { ...transport, start_argv: argv } },
@@ -282,7 +163,12 @@ const resolveNativeAgent = async (
     case 'jsonl_bridge':
       return resolveProcessAgent(agent, transport, projectRoot);
     case 'websocket': {
-      const resolved = await resolveHttpSecrets({ headers: transport.headers }, projectRoot);
+      const resolved =
+        await // EFFECT-BRIDGE(S7b): native secret resolution from the agent configuration parent.
+        Effect.runPromiseExit(resolveHttpSecrets({ headers: transport.headers }, projectRoot)).then(
+          valueFromExit,
+        );
+
       addRedactedRequestValues(agent, resolved);
 
       return {
@@ -294,7 +180,12 @@ const resolveNativeAgent = async (
     }
 
     case 'stream': {
-      const resolved = await resolveHttpSecrets(transport.request, projectRoot);
+      const resolved =
+        await // EFFECT-BRIDGE(S7b): native secret resolution from the agent configuration parent.
+        Effect.runPromiseExit(resolveHttpSecrets(transport.request, projectRoot)).then(
+          valueFromExit,
+        );
+
       addRedactedRequestValues(agent, resolved);
 
       return { agent: { ...agent, transport }, kind: 'stream', ...resolved };
@@ -303,7 +194,11 @@ const resolveNativeAgent = async (
     case 'http':
     case 'polling': {
       const request = transport.kind === 'polling' ? transport.submit : transport.request;
-      const resolved = await resolveHttpSecrets(request, projectRoot);
+
+      const resolved =
+        await // EFFECT-BRIDGE(S7b): native secret resolution from the agent configuration parent.
+        Effect.runPromiseExit(resolveHttpSecrets(request, projectRoot)).then(valueFromExit);
+
       addRedactedRequestValues(agent, resolved);
 
       if (transport.kind === 'http' && transport.response_mode === 'attest_envelope') {
@@ -320,7 +215,10 @@ const resolveNativeAgent = async (
 
     case 'callback': {
       const resolveTemplate = async (request: typeof transport.trigger) => {
-        const resolved = await resolveHttpSecrets(request, projectRoot);
+        const resolved =
+          await // EFFECT-BRIDGE(S7b): native secret resolution from the agent configuration parent.
+          Effect.runPromiseExit(resolveHttpSecrets(request, projectRoot)).then(valueFromExit);
+
         addRedactedRequestValues(agent, resolved);
 
         return resolved;

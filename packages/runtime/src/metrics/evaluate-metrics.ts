@@ -1,3 +1,6 @@
+import { getEnvironmentCleanupCause } from '@attest/executor';
+import { mustPropagateMetricCause } from './internal/operation.js';
+import * as Effect from 'effect/Effect';
 import { performance } from 'node:perf_hooks';
 
 import type { MetricDefinition } from '@attest/contracts';
@@ -28,84 +31,98 @@ type EvaluateMetricsOptions = {
 };
 
 /** Dispatches one definition by kind; only called once the case has scoreable output. */
-const evaluateMetric = async (
+const evaluateMetric = (
   definition: MetricDefinition,
   context: CompletedMetricContext,
   options: EvaluateMetricsOptions,
-): Promise<StoredMetricEvaluation> => {
-  if (definition.type === 'assertion') {
-    const result = evaluateAssertionMetric(definition, buildEvaluationDocument(context));
+): Effect.Effect<StoredMetricEvaluation, Error> =>
+  Effect.gen(function* () {
+    if (definition.type === 'assertion') {
+      const result = yield* Effect.try({
+        try: () => evaluateAssertionMetric(definition, buildEvaluationDocument(context)),
+        catch: (cause) => {
+          // Authored regex and schema configuration failures are metric diagnostics. Other throws are defects.
+          if (cause instanceof SyntaxError || cause instanceof AttestMetricError) return cause;
+          throw cause;
+        },
+      });
 
-    return evaluatedMetric(definition, result, 0);
-  }
+      return evaluatedMetric(definition, result, 0);
+    }
 
-  if (definition.type === 'exec') {
-    return executeExecutableMetric(definition, context, {
-      ...options.exec,
+    if (definition.type === 'exec') {
+      return yield* executeExecutableMetric(definition, context, {
+        ...options.exec,
+        signal: options.signal,
+      });
+    }
+
+    if (options.judgeClient === undefined) {
+      return metricError(
+        definition,
+        {
+          code: 'judge_provider_error',
+          message:
+            'Judge metric requires a configured judgeClient; create one with createTanstackJudgeClient().',
+        },
+        0,
+      );
+    }
+
+    return yield* evaluateJudgeMetric(definition, context, {
+      client: options.judgeClient,
+      cache: options.cache,
+      timeoutMs: options.judgeTimeoutMs,
       signal: options.signal,
     });
-  }
-
-  if (options.judgeClient === undefined) {
-    return metricError(
-      definition,
-      {
-        code: 'judge_provider_error',
-        message:
-          'Judge metric requires a configured judgeClient; create one with createTanstackJudgeClient().',
-      },
-      0,
-    );
-  }
-
-  return evaluateJudgeMetric(definition, context, {
-    client: options.judgeClient,
-    cache: options.cache,
-    timeoutMs: options.judgeTimeoutMs,
-    signal: options.signal,
   });
-};
 
 /**
  * Evaluates a case's metrics sequentially in definition order. Determinism wins over per-case latency;
  * parallelism belongs to the runner's case-level pool where ordering stays observable.
  */
-const evaluateMetrics = async (
+const evaluateMetrics = (
   definitions: MetricDefinition[],
   context: MetricContext,
   options: EvaluateMetricsOptions = {},
-): Promise<StoredMetricEvaluation[]> => {
-  const { execution } = context;
+): Effect.Effect<StoredMetricEvaluation[], Error> =>
+  Effect.gen(function* () {
+    const { execution } = context;
 
-  if (execution.outcome !== 'completed') {
-    return definitions.map((definition) => skippedNoOutput(definition, execution));
-  }
+    if (execution.outcome !== 'completed') {
+      return definitions.map((definition) => skippedNoOutput(definition, execution));
+    }
 
-  const completed = { caseDefinition: context.caseDefinition, execution };
-  const evaluations: StoredMetricEvaluation[] = [];
+    const completed = { caseDefinition: context.caseDefinition, execution };
+    const evaluations: StoredMetricEvaluation[] = [];
 
-  for (const definition of definitions) {
-    const startedAt = performance.now();
+    for (const definition of definitions) {
+      const startedAt = performance.now();
 
-    try {
-      evaluations.push(await evaluateMetric(definition, completed, options));
-    } catch (error: unknown) {
-      const known = error instanceof AttestMetricError ? error : undefined;
+      const evaluation = yield* evaluateMetric(definition, completed, options).pipe(
+        Effect.catchCause((cause) =>
+          Effect.gen(function* () {
+            if (mustPropagateMetricCause(cause) || getEnvironmentCleanupCause(cause) !== undefined)
+              return yield* Effect.failCause(cause);
+            const error = yield* Effect.flip(Effect.failCause(cause));
 
-      const message =
-        error instanceof Error ? error.message : 'Metric evaluation threw an unknown error.';
-
-      evaluations.push(
-        metricError(
-          definition,
-          { code: known?.code ?? 'internal_error', message, details: known?.details },
-          performance.now() - startedAt,
+            return metricError(
+              definition,
+              {
+                code: error instanceof AttestMetricError ? error.code : 'internal_error',
+                message: error.message,
+                details: error instanceof AttestMetricError ? error.details : undefined,
+              },
+              performance.now() - startedAt,
+            );
+          }),
         ),
       );
-    }
-  }
 
-  return evaluations;
-};
+      evaluations.push(evaluation);
+    }
+
+    return evaluations;
+  });
 
 export { evaluateMetrics, type EvaluateMetricsOptions };

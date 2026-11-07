@@ -74,10 +74,8 @@ describe('createEnvironmentMetricTransport', () => {
       Promise.resolve({ stdout: '{"score":1,"pass":true}', stderr: '', exitCode: 0 }),
     );
 
-    const outcome = await createEnvironmentMetricTransport(fake.environment)(
-      definition,
-      request,
-      options,
+    const outcome = await Effect.runPromise(
+      createEnvironmentMetricTransport(fake.environment)(definition, request, options),
     );
 
     expect(outcome).toEqual({ ok: true, text: '{"score":1,"pass":true}' });
@@ -105,7 +103,9 @@ describe('createEnvironmentMetricTransport', () => {
     );
 
     expect(
-      await createEnvironmentMetricTransport(failing.environment)(definition, request, options),
+      await Effect.runPromise(
+        createEnvironmentMetricTransport(failing.environment)(definition, request, options),
+      ),
     ).toEqual({
       ok: false,
       error: {
@@ -120,7 +120,9 @@ describe('createEnvironmentMetricTransport', () => {
     );
 
     expect(
-      await createEnvironmentMetricTransport(noisy.environment)(definition, request, options),
+      await Effect.runPromise(
+        createEnvironmentMetricTransport(noisy.environment)(definition, request, options),
+      ),
     ).toMatchObject({ ok: false, error: { code: 'exec_malformed_output' } });
 
     const controller = new AbortController();
@@ -134,10 +136,12 @@ describe('createEnvironmentMetricTransport', () => {
     );
 
     expect(
-      await createEnvironmentMetricTransport(hanging.environment)(definition, request, {
-        ...options,
-        signal: controller.signal,
-      }),
+      await Effect.runPromise(
+        createEnvironmentMetricTransport(hanging.environment)(definition, request, {
+          ...options,
+          signal: controller.signal,
+        }),
+      ),
     ).toMatchObject({ ok: false, error: { code: 'metric_cancelled' } });
   });
 });

@@ -1,3 +1,5 @@
+import { mustPropagateMetricCause } from '../internal/operation.js';
+import * as Effect from 'effect/Effect';
 import { parseWithSchemaSync } from '@attest/contracts';
 import * as Schema from 'effect/Schema';
 import { performance } from 'node:perf_hooks';
@@ -84,56 +86,70 @@ const judgeFailure = (cause: unknown, signal: AbortSignal | undefined): MetricEr
  * Evaluates one judge rubric while keeping provider faults distinct
  * from genuine failing scores. Full prompt/response evidence is retained for completed and attempted calls.
  */
-const evaluateJudgeMetric = async (
+const evaluateJudgeMetric = (
   definition: JudgeMetricDefinition,
   context: CompletedMetricContext,
   options: EvaluateJudgeMetricOptions,
-): Promise<StoredMetricEvaluation> => {
-  const startedAt = performance.now();
-  const document = buildEvaluationDocument(context);
+): Effect.Effect<StoredMetricEvaluation, Error> =>
+  Effect.gen(function* () {
+    const startedAt = performance.now();
+    const document = buildEvaluationDocument(context);
 
-  const request: JudgeRequest = {
-    model: definition.model,
-    rubric: definition.rubric,
-    document: {
-      input: document.input,
-      output: document.output,
-      expected: document.expected,
-      traceSummary: summarizeTraceForJudge(document.trace),
-    },
-  };
+    const request: JudgeRequest = {
+      model: definition.model,
+      rubric: definition.rubric,
+      document: {
+        input: document.input,
+        output: document.output,
+        expected: document.expected,
+        traceSummary: summarizeTraceForJudge(document.trace),
+      },
+    };
 
-  const scope = {
-    client: options.client,
-    signal: options.signal,
-    timeoutMs: options.timeoutMs ?? DEFAULT_JUDGE_TIMEOUT_MS,
-  };
+    const scope = {
+      client: options.client,
+      signal: options.signal,
+      timeoutMs: options.timeoutMs ?? DEFAULT_JUDGE_TIMEOUT_MS,
+    };
 
-  try {
-    options.signal?.throwIfAborted();
+    return yield* Effect.gen(function* () {
+      if (options.signal?.aborted)
+        return yield* Effect.fail(new Error('Judge evaluation was cancelled.'));
 
-    if (options.cache === undefined) {
-      const outcome = await options.client.scoreRubric(request, scope);
+      if (options.cache === undefined) {
+        const outcome = yield* options.client.scoreRubric(request, scope);
 
-      return judgeEvaluation(
-        definition,
-        outcome,
-        toJson(outcome.record),
-        performance.now() - startedAt,
+        return judgeEvaluation(
+          definition,
+          outcome,
+          toJson(outcome.record),
+          performance.now() - startedAt,
+        );
+      }
+
+      const { outcome, source, key } = yield* resolveThroughJudgeCache(
+        options.cache,
+        request,
+        scope,
       );
-    }
 
-    const { outcome, source, key } = await resolveThroughJudgeCache(options.cache, request, scope);
-    const judgeIo = toJson({ ...outcome.record, cache: source, key });
+      const judgeIo = toJson({ ...outcome.record, cache: source, key });
 
-    return judgeEvaluation(definition, outcome, judgeIo, performance.now() - startedAt);
-  } catch (error: unknown) {
-    return metricError(
-      definition,
-      judgeFailure(error, options.signal),
-      performance.now() - startedAt,
+      return judgeEvaluation(definition, outcome, judgeIo, performance.now() - startedAt);
+    }).pipe(
+      Effect.catchCause((cause) =>
+        Effect.gen(function* () {
+          if (mustPropagateMetricCause(cause)) return yield* Effect.failCause(cause);
+          const error = yield* Effect.flip(Effect.failCause(cause));
+
+          return metricError(
+            definition,
+            judgeFailure(error, options.signal),
+            performance.now() - startedAt,
+          );
+        }),
+      ),
     );
-  }
-};
+  });
 
 export { evaluateJudgeMetric };

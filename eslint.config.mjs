@@ -56,6 +56,51 @@ const effectRoots = [
     owner: 'Node and Bun native environment portability fixture root',
   },
   {
+    file: 'packages/local/src/commands/agent/adapter/_tests_/metric-secrets.test.ts',
+    operations: ['Effect.runPromiseExit'],
+    owner: 'S6 secret descriptor and cleanup evidence invariant fixture',
+  },
+  {
+    file: 'packages/runtime/src/metrics/_tests_/metrics-portability.check.mjs',
+    operations: ['Effect.runPromise', 'Effect.runPromiseExit'],
+    owner: 'S6 Node and Bun native metric invariant root',
+  },
+  {
+    file: 'packages/runtime/src/metrics/_tests_/native-lifetime.test.ts',
+    operations: ['Effect.runPromise', 'Effect.runPromiseExit'],
+    owner: 'S6 native lifetime invariant fixture',
+  },
+  {
+    file: 'packages/runtime/src/metrics/_tests_/environment-transport.test.ts',
+    operations: ['Effect.runPromise'],
+    owner: 'S6 metric fixture execution root',
+  },
+  {
+    file: 'packages/runtime/src/metrics/_tests_/evaluate-metrics.test.ts',
+    operations: ['Effect.runPromiseExit'],
+    owner: 'S6 metric fixture execution root',
+  },
+  {
+    file: 'packages/runtime/src/metrics/_tests_/exec-metric.test.ts',
+    operations: ['Effect.runPromiseExit'],
+    owner: 'S6 metric fixture execution root',
+  },
+  {
+    file: 'packages/runtime/src/metrics/judge/_tests_/judge-metric.test.ts',
+    operations: ['Effect.runPromiseExit'],
+    owner: 'S6 metric fixture execution root',
+  },
+  {
+    file: 'packages/runtime/src/metrics/judge/_tests_/tanstack-judge-client.test.ts',
+    operations: ['Effect.runPromiseExit'],
+    owner: 'S6 metric fixture execution root',
+  },
+  {
+    file: 'packages/local/src/commands/eval/_tests_/scoring-redaction.test.ts',
+    operations: ['Effect.runPromiseExit'],
+    owner: 'S6 metric fixture execution root',
+  },
+  {
     file: 'packages/executor/src/isolation/_tests_/operation.test.ts',
     operations: ['Effect.runPromise', 'Effect.runPromiseExit'],
     owner: 'Native environment lifetime invariant fixture root',
@@ -345,17 +390,14 @@ const effectRoots = [
 // Each file declares its operations and per-operation removal slices in bridges. Removed in S10.
 const effectMigrationBridges = [
   {
-    file: 'packages/runtime/src/metrics/environment-transport.ts',
+    file: 'packages/local/src/commands/eval/eval-agent-runner.ts',
     operations: ['Effect.runPromiseExit'],
-    owner: 'Promise environment caller until S6',
+    owner: 'Promise parent of native S6 metrics',
     bridges: [
-      {
-        operation: 'Effect.runPromiseExit',
-        removalSlice: 'S6',
-        owner: 'S6 native caller migration',
-      },
+      { operation: 'Effect.runPromiseExit', removalSlice: 'S7b', owner: 'S7b parent lifetime' },
     ],
   },
+
   {
     file: 'packages/runtime/src/eval/hooks.ts',
     operations: ['Effect.runPromiseExit'],
@@ -417,14 +459,7 @@ const effectMigrationBridges = [
       },
     ],
   },
-  {
-    file: 'packages/runtime/src/metrics/internal/exec-command.ts',
-    operations: ['Effect.runPromise'],
-    owner: 'metric command termination',
-    bridges: [
-      { operation: 'Effect.runPromise', removalSlice: 'S6', owner: 'metric command termination' },
-    ],
-  },
+
   {
     file: 'packages/local/src/commands/eval/hook-command.ts',
     operations: ['Effect.runPromise'],
@@ -554,18 +589,7 @@ const effectMigrationBridges = [
       },
     ],
   },
-  {
-    file: 'packages/local/src/commands/eval/eval-metric-runner.ts',
-    operations: ['Effect.runPromiseExit'],
-    owner: 'unmigrated Promise parent of Phase A project operations',
-    bridges: [
-      {
-        operation: 'Effect.runPromiseExit',
-        removalSlice: 'S6',
-        owner: 'declared migration owner',
-      },
-    ],
-  },
+
   {
     file: 'packages/local/src/commands/eval/eval-lifecycle.ts',
     operations: ['Effect.runPromiseExit'],

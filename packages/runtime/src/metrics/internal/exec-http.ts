@@ -1,4 +1,4 @@
-import type { MetricErrorInfo } from '../metric-evaluation.js';
+import * as Effect from 'effect/Effect';
 import type { HttpMetricDefinition } from '../metric-definitions.js';
 import { abortReasonOf, composeAbortSignal } from './abort-signal.js';
 import {
@@ -6,117 +6,134 @@ import {
   type MetricTransportOptions,
   type MetricTransportOutcome,
 } from './metric-transport.js';
+import {
+  foreign,
+  ownOperation,
+  withRelease,
+  mustPropagateMetricCause,
+  releaseAll,
+} from './operation.js';
 
-/** Reads at most the configured bytes; leaving the loop early cancels the network stream. */
-const readCappedResponseBody = async (
-  body: ReadableStream<Uint8Array>,
-  outputCapBytes: number,
-): Promise<MetricTransportOutcome> => {
-  const chunks: Buffer[] = [];
-  let receivedBytes = 0;
-
-  for await (const chunk of body) {
-    receivedBytes += chunk.byteLength;
-
-    if (receivedBytes > outputCapBytes) {
-      return {
-        ok: false,
-        error: {
-          code: 'exec_malformed_output',
-          message: `Metric HTTP response exceeded the ${outputCapBytes}-byte limit.`,
-        },
-      };
-    }
-
-    chunks.push(Buffer.from(chunk));
-  }
-
-  return { ok: true, text: Buffer.concat(chunks).toString() };
-};
-
-/** Rejects non-HTTP schemes at runtime even when a trusted schema admitted a future URL scheme. */
-const parseHttpUrl = (
-  value: string,
-): { ok: true; url: URL } | { ok: false; error: MetricErrorInfo } => {
-  if (!URL.canParse(value)) {
-    return {
-      ok: false,
-      error: {
-        code: 'http_request_failed',
-        message: `Metric HTTP URL must be a valid http:// or https:// URL; received "${value}".`,
-      },
-    };
-  }
-
-  const url = new URL(value);
-
-  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
-    return {
-      ok: false,
-      error: {
-        code: 'http_request_failed',
-        message: `Metric HTTP URL must use http: or https:, not ${url.protocol}`,
-      },
-    };
-  }
-
-  return { ok: true, url };
-};
-
-/** Posts one metric envelope through the HTTP boundary with capped streaming and owned cancellation. */
-const invokeHttpMetric = async (
+/** Posts once and owns the response reader until cancellation and release are observed. */
+const invokeHttpMetric = (
   definition: HttpMetricDefinition,
   requestBody: string,
   options: MetricTransportOptions,
-): Promise<MetricTransportOutcome> => {
-  const parsed = parseHttpUrl(definition.url);
+): Effect.Effect<MetricTransportOutcome, Error> =>
+  ownOperation((cancelled) =>
+    Effect.gen(function* () {
+      if (!URL.canParse(definition.url))
+        return {
+          ok: false,
+          error: {
+            code: 'http_request_failed',
+            message: `Metric HTTP URL must be a valid http:// or https:// URL; received "${definition.url}".`,
+          },
+        };
+      const url = new URL(definition.url);
 
-  if (!parsed.ok) {
-    return parsed;
-  }
+      if (url.protocol !== 'http:' && url.protocol !== 'https:')
+        return {
+          ok: false,
+          error: {
+            code: 'http_request_failed',
+            message: `Metric HTTP URL must use http: or https:, not ${url.protocol}`,
+          },
+        };
 
-  const signal = composeAbortSignal(options.signal, options.timeoutMs);
+      const signal = composeAbortSignal(
+        AbortSignal.any([cancelled, ...(options.signal ? [options.signal] : [])]),
+        options.timeoutMs,
+      );
 
-  try {
-    const response = await fetch(parsed.url, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: requestBody,
-      signal,
-    });
+      return yield* Effect.gen(function* () {
+        const response = yield* foreign(() =>
+          fetch(url, {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: requestBody,
+            signal,
+          }),
+        );
 
-    if (response.status !== 200) {
-      // Cancellation is cleanup; the status error below stays authoritative even if it fails.
-      await response.body?.cancel().catch(() => undefined);
+        if (response.body === null)
+          return response.status === 200
+            ? { ok: true as const, text: '' }
+            : {
+                ok: false as const,
+                error: {
+                  code: 'http_bad_status' as const,
+                  message: `Metric HTTP endpoint returned ${response.status}, expected 200.`,
+                  details: { status: response.status },
+                },
+              };
+        const reader = response.body.getReader();
+        let readFailed = false;
 
-      return {
-        ok: false,
-        error: {
-          code: 'http_bad_status',
-          message: `Metric HTTP endpoint returned ${response.status}, expected 200.`,
-          details: { status: response.status },
-        },
-      };
-    }
+        return yield* withRelease(
+          Effect.gen(function* () {
+            if (response.status !== 200)
+              return {
+                ok: false as const,
+                error: {
+                  code: 'http_bad_status' as const,
+                  message: `Metric HTTP endpoint returned ${response.status}, expected 200.`,
+                  details: { status: response.status },
+                },
+              };
+            const chunks: Buffer[] = [];
+            let received = 0;
 
-    if (response.body === null) {
-      return { ok: true, text: '' };
-    }
+            while (true) {
+              const next = yield* foreign(() => reader.read()).pipe(
+                Effect.tapError(() =>
+                  Effect.sync(() => {
+                    readFailed = true;
+                  }),
+                ),
+              );
 
-    return await readCappedResponseBody(response.body, options.outputCapBytes);
-  } catch (error: unknown) {
-    if (signal.aborted) {
-      return { ok: false, error: abortedMetricError(abortReasonOf(signal), options.timeoutMs) };
-    }
+              if (next.done) break;
+              received += next.value.byteLength;
 
-    return {
-      ok: false,
-      error: {
-        code: 'http_request_failed',
-        message: `Could not call metric HTTP endpoint: ${error instanceof Error ? error.message : 'unknown error'}`,
-      },
-    };
-  }
-};
+              if (received > options.outputCapBytes)
+                return {
+                  ok: false as const,
+                  error: {
+                    code: 'exec_malformed_output' as const,
+                    message: `Metric HTTP response exceeded the ${options.outputCapBytes}-byte limit.`,
+                  },
+                };
+              chunks.push(Buffer.from(next.value));
+            }
+
+            return { ok: true as const, text: Buffer.concat(chunks).toString() };
+          }),
+          releaseAll([
+            // An errored stream has already released its source; cancel would only repeat the read error.
+            Effect.suspend(() => (readFailed ? Effect.void : foreign(() => reader.cancel()))),
+            Effect.sync(() => reader.releaseLock()),
+          ]),
+        );
+      }).pipe(
+        Effect.catchCause((cause) =>
+          Effect.gen(function* () {
+            if (mustPropagateMetricCause(cause)) return yield* Effect.failCause(cause);
+            const error = yield* Effect.flip(Effect.failCause(cause));
+
+            return {
+              ok: false,
+              error: signal.aborted
+                ? abortedMetricError(abortReasonOf(signal), options.timeoutMs)
+                : {
+                    code: 'http_request_failed',
+                    message: `Could not call metric HTTP endpoint: ${error.message}`,
+                  },
+            } satisfies MetricTransportOutcome;
+          }),
+        ),
+      );
+    }),
+  );
 
 export { invokeHttpMetric };

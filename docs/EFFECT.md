@@ -536,4 +536,57 @@ when projecting artifact or VM-stop failure into invocation diagnostics. The
 original command error now remains primary when both command and stop fail, with
 the stop Cause attached internally; older callers expecting an AggregateError for
 that combination must consume the original Error instead. Runtime Promise callers
-use declared S7a forward bridges; the metric environment transport uses S6 bridges.
+use declared S7a forward bridges; metric transports now compose environment Effects directly.
+
+## S6 native metrics
+
+Executable and aggregate metric evaluation, command transports, judge clients and judge caches
+return native Effects. Assertions, evaluation documents, JSON decoding algorithms, scoring and
+canonical cache hashes remain synchronous. This is an intentional TypeScript API break, with no
+Promise facade. Case environments use the S5 native contract directly.
+
+Metric cancellation signals and deadlines remain evidence inputs. Native interruption signals the
+resource owner and joins its Exit before propagating interruption. Process cleanup is memoized;
+stdout and stderr remain bounded. HTTP readers cancel live streams and always release their
+lock. After a read rejects, the stream is already errored; cancel would repeat the same error,
+so the transport records the read failure and continues evaluating later metrics.
+Every required release is attempted and its Exit retained. Primary failures, defects and interruption
+keep their Cause and cleanup annotations. Cleanup failure after successful work fails with a
+MetricCleanupError carrying completed evidence. It cannot become a scored failure.
+
+The local judge adapter composes S2 CacheStore operations directly. In-flight identical calls
+share a Deferred only within the same cache, client, signal and timeout scope. The owner publishes
+its complete Exit as data after removing the slot. A waiter interrupted by its own caller stops
+waiting; an uninterrupted waiter whose owner was interrupted acquires a new call only when the
+owner's cleanup succeeded. Failed cleanup, including a joined operation's retained Exit, propagates
+without another provider call. Environment failures retain executor-owned cleanup receipts through
+both transport and aggregate evaluation; later metrics do not run after unconfirmed VM cleanup.
+Typed advisory cache write failures do not invalidate
+a completed verdict; defects and interruption still propagate. TanStack structured output retains
+the strict verdict decoder and exactly one malformed-output retry.
+
+The remaining Promise eval caller bridges metric evaluation under S7b; the metric command caller
+uses S8b. Agent configuration bridges native secret resolution under S7b. These bridges retain
+full Causes at the existing valueFromExit boundary. Runtime scheduler and application lifetimes
+remain for S7 and later slices. This snapshot includes the independently approved S5 r3 resource
+repairs; combined integration and later slices remain pending.
+
+Aggregate metric evaluation preserves environment and metric cleanup failures, including their
+completed evidence, and stops before the next metric. A mixed Cause containing a defect or
+interruption never enters judge retry classification. Cleanup annotations retain every primary
+branch's release evidence before appending outer cleanup. Secret reads discard a successfully
+read value if closing its descriptor fails; only the cleanup Cause enters the error chain because
+failed resolution cannot register that value for redaction.
+
+```mermaid
+flowchart TD
+  A[Case metrics in definition order] --> B[Assertion, executable transport or judge]
+  B --> C{Native Exit}
+  C -->|Operational metric result| D[Record evaluation and advance]
+  C -->|Cleanup failure, defect or interruption| E[Preserve full Cause and stop]
+  B --> F[Judge cache and matching in-flight call]
+  F --> G{Owner Exit shared as data}
+  G -->|Success| H[Cache verdict and recalculate threshold]
+  G -->|Owner interrupted, waiter still active| F
+  G -->|Failure or defect| E
+```

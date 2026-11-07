@@ -35,6 +35,32 @@ class EnvironmentOperationEvidence extends Context.Service<
   { exit: Exit.Exit<unknown, Error> }
 >()('attest/EnvironmentOperationEvidence') {}
 
+/** Reads release failures without exposing environment annotation keys to consumers. */
+const getEnvironmentCleanupCause = (
+  cause: Cause.Cause<unknown>,
+): Cause.Cause<unknown> | undefined => {
+  const releases = cause.reasons.flatMap((reason) => {
+    const annotations = Cause.reasonAnnotations(reason);
+    const cleanup = Context.getOrUndefined(annotations, EnvironmentCleanupDiagnostics)?.cause;
+    const completed = Context.getOrUndefined(annotations, EnvironmentOperationEvidence)?.exit;
+
+    const retained =
+      completed !== undefined && Exit.isFailure(completed)
+        ? getEnvironmentCleanupCause(completed.cause)
+        : undefined;
+
+    return [
+      ...(cleanup?.reasons ?? []),
+      ...(reason._tag === 'Fail' && reason.error instanceof EnvironmentCleanupError
+        ? reason.error.cleanupCause.reasons
+        : []),
+      ...(retained?.reasons ?? []),
+    ];
+  });
+
+  return releases.length === 0 ? undefined : Cause.fromReasons(releases);
+};
+
 /** Turns fiber cancellation into an owner input and joins evidence before returning interruption. */
 const ownOperation = <A>(
   operation: (signal: AbortSignal) => Effect.Effect<A, Error>,
@@ -107,4 +133,5 @@ export {
   EnvironmentCleanupError,
   EnvironmentCleanupDiagnostics,
   EnvironmentOperationEvidence,
+  getEnvironmentCleanupCause,
 };

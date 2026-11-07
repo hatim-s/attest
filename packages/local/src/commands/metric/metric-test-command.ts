@@ -36,9 +36,7 @@ const runMetricTestCommand = async (
   options: MetricTestCommandOptions,
 ): Promise<CommandResult<'metric-test', MetricTestResult>> => {
   // EFFECT-BRIDGE(S8b)
-  const loaded = await Effect.runPromiseExit(loadCommandProject(options)).then((exit) =>
-    valueFromExit(exit),
-  );
+  const loaded = await Effect.runPromiseExit(loadCommandProject(options)).then(valueFromExit);
 
   const metric = findResource('metric', loaded.metrics, options.metricId ?? '');
 
@@ -86,13 +84,16 @@ const runMetricTestCommand = async (
     },
   };
 
-  const { evaluation, secrets } = await evaluateMetricResource({
-    context,
-    definition: metric.definition,
-    id: metric.id,
-    projectRoot: loaded.root,
-    signal: options.signal,
-  });
+  const { evaluation, secrets } = await // EFFECT-BRIDGE(S8b): native metric caller.
+  Effect.runPromiseExit(
+    evaluateMetricResource({
+      context,
+      definition: metric.definition,
+      id: metric.id,
+      projectRoot: loaded.root,
+      signal: options.signal,
+    }),
+  ).then(valueFromExit);
 
   const redacted = redactProbeValue(withoutDuration(evaluation), secrets);
 

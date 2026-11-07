@@ -1,3 +1,8 @@
+import { mustPropagateMetricCause, hasMetricCleanupFailure } from '../internal/operation.js';
+import * as Cause from 'effect/Cause';
+import * as Exit from 'effect/Exit';
+import * as Effect from 'effect/Effect';
+import * as Deferred from 'effect/Deferred';
 import { createHash } from 'node:crypto';
 
 import { canonicalStringify } from '@attest/core';
@@ -11,19 +16,18 @@ import { buildJudgePrompt, JUDGE_PROMPT_VERSION, JUDGE_REQUEST_PARAMS } from './
  * the judge inputs have not changed.
  */
 interface JudgeCache {
-  get(key: string): Promise<JudgeOutcome | undefined>;
-  set(key: string, outcome: JudgeOutcome): Promise<void>;
+  get(key: string): Effect.Effect<JudgeOutcome | undefined, Error>;
+  set(key: string, outcome: JudgeOutcome): Effect.Effect<void, Error>;
 }
 
 /** The provider settings a shared in-flight call must match before another caller may join it. */
 type JudgeCallScope = { client: JudgeClient; signal: AbortSignal | undefined; timeoutMs: number };
 
-/** How a cached judge call was served; recorded in judge evidence. */
-type JudgeCacheSource = 'hit' | 'miss' | 'coalesced';
-
 type CachedJudgeCall = { outcome: JudgeOutcome; source: 'hit' | 'miss' };
 
-type InFlightJudgeCall = JudgeCallScope & { promise: Promise<CachedJudgeCall> };
+type InFlightJudgeCall = JudgeCallScope & {
+  result: Deferred.Deferred<Exit.Exit<CachedJudgeCall, Error>>;
+};
 
 // Keyed by cache instance: a local run owns one cache, so only concurrent cases of that run can
 // share a provider call, and only when they render a byte-identical prompt.
@@ -47,83 +51,99 @@ const computeJudgeCacheKey = (request: JudgeRequest): string => {
 };
 
 /** Reads the cache, calls the provider on a miss, and stores the verdict. */
-const callThroughCache = async (
+const callThroughCache = Effect.fn('callThroughCache')(function* (
   cache: JudgeCache,
   key: string,
   request: JudgeRequest,
   scope: JudgeCallScope,
-): Promise<CachedJudgeCall> => {
-  scope.signal?.throwIfAborted();
-  const cached = await cache.get(key);
-  scope.signal?.throwIfAborted();
+) {
+  if (scope.signal?.aborted)
+    return yield* Effect.fail(new Error('Judge evaluation was cancelled.'));
+  const cached = yield* cache.get(key);
 
-  if (cached !== undefined) {
-    return { outcome: cached, source: 'hit' };
-  }
+  if (scope.signal?.aborted)
+    return yield* Effect.fail(new Error('Judge evaluation was cancelled.'));
 
-  const outcome = await scope.client.scoreRubric(request, {
+  if (cached !== undefined) return { outcome: cached, source: 'hit' as const };
+
+  const outcome = yield* scope.client.scoreRubric(request, {
     timeoutMs: scope.timeoutMs,
     signal: scope.signal,
   });
 
-  scope.signal?.throwIfAborted();
+  if (scope.signal?.aborted)
+    return yield* Effect.fail(new Error('Judge evaluation was cancelled.'));
+  // A storage failure cannot invalidate a completed verdict. Defects and interruption still propagate.
+  yield* cache
+    .set(key, outcome)
+    .pipe(
+      Effect.catchCause((cause) =>
+        mustPropagateMetricCause(cause) ? Effect.failCause(cause) : Effect.void,
+      ),
+    );
 
-  try {
-    await cache.set(key, outcome);
-  } catch {
-    // Cache persistence is advisory: a completed provider verdict remains the source of truth for this run.
-  }
+  return { outcome, source: 'miss' as const };
+});
 
-  return { outcome, source: 'miss' };
-};
-
-/**
- * Resolves a judge request through the cache. Concurrent cases of one run that render the same
- * prompt join the first caller's in-flight provider call instead of paying for a duplicate.
- */
-const resolveThroughJudgeCache = async (
+/** Shares a call only within the same cache, provider and cancellation scope. The owner publishes its full Exit. */
+const resolveThroughJudgeCache = Effect.fn('resolveThroughJudgeCache')(function* (
   cache: JudgeCache,
   request: JudgeRequest,
   scope: JudgeCallScope,
-): Promise<{ outcome: JudgeOutcome; source: JudgeCacheSource; key: string }> => {
+) {
   const key = computeJudgeCacheKey(request);
-  let inFlightCalls = inFlightCallsByCache.get(cache);
+  let calls = inFlightCallsByCache.get(cache);
 
-  if (inFlightCalls === undefined) {
-    inFlightCalls = new Map();
-    inFlightCallsByCache.set(cache, inFlightCalls);
+  if (calls === undefined) {
+    calls = new Map();
+    inFlightCallsByCache.set(cache, calls);
   }
 
-  const inFlight = inFlightCalls.get(key);
+  for (;;) {
+    const existing = calls.get(key);
 
-  if (
-    inFlight !== undefined &&
-    inFlight.client === scope.client &&
-    inFlight.signal === scope.signal &&
-    inFlight.timeoutMs === scope.timeoutMs
-  ) {
-    const shared = await inFlight.promise;
+    if (
+      existing !== undefined &&
+      existing.client === scope.client &&
+      existing.signal === scope.signal &&
+      existing.timeoutMs === scope.timeoutMs
+    ) {
+      // The owner's Exit is data. Interrupting this waiter still interrupts only its own await.
+      const settled = yield* Deferred.await(existing.result);
 
-    return { outcome: shared.outcome, source: shared.source === 'hit' ? 'hit' : 'coalesced', key };
+      if (
+        Exit.isFailure(settled) &&
+        Cause.hasInterruptsOnly(settled.cause) &&
+        !hasMetricCleanupFailure(settled.cause)
+      )
+        continue;
+      const shared = yield* settled;
+
+      return {
+        outcome: shared.outcome,
+        source: shared.source === 'hit' ? ('hit' as const) : ('coalesced' as const),
+        key,
+      };
+    }
+
+    if (existing !== undefined)
+      return { ...(yield* callThroughCache(cache, key, request, scope)), key };
+
+    return yield* Effect.uninterruptibleMask((restore) =>
+      Effect.gen(function* () {
+        const result = yield* Deferred.make<Exit.Exit<CachedJudgeCall, Error>>();
+        const call = { ...scope, result };
+        calls.set(key, call);
+        const exit = yield* Effect.exit(restore(callThroughCache(cache, key, request, scope)));
+
+        // Retire before waking waiters, so an interrupted owner cannot be selected again.
+        if (calls.get(key) === call) calls.delete(key);
+        yield* Deferred.succeed(result, exit);
+
+        return { ...(yield* exit), key };
+      }),
+    );
   }
-
-  const promise = callThroughCache(cache, key, request, scope);
-
-  if (inFlight === undefined) {
-    const call = { ...scope, promise };
-
-    const release = (): void => {
-      if (inFlightCalls.get(key) === call) inFlightCalls.delete(key);
-    };
-
-    inFlightCalls.set(key, call);
-    // Detached on purpose: callers await the call promise itself; this only frees the slot.
-    void promise.then(release, release);
-  }
-
-  const resolved = await promise;
-
-  return { ...resolved, key };
-};
+});
 
 export { resolveThroughJudgeCache, type JudgeCache };

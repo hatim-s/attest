@@ -1,3 +1,6 @@
+import { valueFromExit } from '../../../internal/effect-exit.js';
+import { foreign } from '../../internal/operation.js';
+import * as Effect from 'effect/Effect';
 import { describe, expect, it } from 'vitest';
 
 import { deferred } from '../../../_tests_/support/deferred.js';
@@ -47,12 +50,13 @@ const verdict = (score: number): JudgeOutcome => ({
 const scriptedClient = (scripts: Array<JudgeOutcome | Error>): JudgeClient & { calls: number } => {
   const client = {
     calls: 0,
-    scoreRubric: () => {
-      client.calls += 1;
-      const script = scripts.shift() ?? new Error('No scripted judge outcome remains.');
+    scoreRubric: () =>
+      foreign(() => {
+        client.calls += 1;
+        const script = scripts.shift() ?? new Error('No scripted judge outcome remains.');
 
-      return script instanceof Error ? Promise.reject(script) : Promise.resolve(script);
-    },
+        return script instanceof Error ? Promise.reject(script) : Promise.resolve(script);
+      }),
   };
 
   return client;
@@ -65,22 +69,24 @@ const memoryCache = (options: { failFirstRead?: boolean; failWrites?: boolean } 
   const cache: JudgeCache & { reads: number; writes: number } = {
     reads: 0,
     writes: 0,
-    get: (key) => {
-      cache.reads += 1;
+    get: (key) =>
+      foreign(() => {
+        cache.reads += 1;
 
-      if (options.failFirstRead === true && cache.reads === 1) {
-        return Promise.reject(new Error('cache offline'));
-      }
+        if (options.failFirstRead === true && cache.reads === 1) {
+          return Promise.reject(new Error('cache offline'));
+        }
 
-      return Promise.resolve(entries.get(key));
-    },
-    set: (key, outcome) => {
-      if (options.failWrites === true) return Promise.reject(new Error('cache offline'));
-      cache.writes += 1;
-      entries.set(key, outcome);
+        return Promise.resolve(entries.get(key));
+      }),
+    set: (key, outcome) =>
+      foreign(() => {
+        if (options.failWrites === true) return Promise.reject(new Error('cache offline'));
+        cache.writes += 1;
+        entries.set(key, outcome);
 
-      return Promise.resolve();
-    },
+        return Promise.resolve();
+      }),
   };
 
   return cache;
@@ -101,7 +107,11 @@ describe('evaluateJudgeMetric', () => {
       { verdict: { score: 0.5, rationale: 'At the boundary.' }, record: retryRecord },
     ]);
 
-    await expect(evaluateJudgeMetric(definition, context, { client })).resolves.toMatchObject({
+    await expect(
+      Effect.runPromiseExit(evaluateJudgeMetric(definition, context, { client })).then(
+        valueFromExit,
+      ),
+    ).resolves.toMatchObject({
       status: 'evaluated',
       score: 0.5,
       pass: true,
@@ -112,9 +122,11 @@ describe('evaluateJudgeMetric', () => {
   });
 
   it('honors an explicit threshold without inventing a passing score', async () => {
-    const evaluation = await evaluateJudgeMetric({ ...definition, threshold: 0.8 }, context, {
-      client: scriptedClient([verdict(0.7)]),
-    });
+    const evaluation = await Effect.runPromiseExit(
+      evaluateJudgeMetric({ ...definition, threshold: 0.8 }, context, {
+        client: scriptedClient([verdict(0.7)]),
+      }),
+    ).then(valueFromExit);
 
     expect(evaluation).toMatchObject({ status: 'evaluated', score: 0.7, pass: false });
   });
@@ -123,8 +135,13 @@ describe('evaluateJudgeMetric', () => {
     const client = scriptedClient([verdict(1)]);
     const cache = memoryCache();
 
-    const seeded = await evaluateJudgeMetric(definition, context, { client, cache });
-    const cached = await evaluateJudgeMetric(definition, context, { client, cache });
+    const seeded = await Effect.runPromiseExit(
+      evaluateJudgeMetric(definition, context, { client, cache }),
+    ).then(valueFromExit);
+
+    const cached = await Effect.runPromiseExit(
+      evaluateJudgeMetric(definition, context, { client, cache }),
+    ).then(valueFromExit);
 
     expect(client.calls).toBe(1);
     expect(seeded).toMatchObject({ status: 'evaluated', judgeIo: { cache: 'miss' } });
@@ -136,21 +153,24 @@ describe('evaluateJudgeMetric', () => {
 
     const client: JudgeClient & { calls: number } = {
       calls: 0,
-      scoreRubric: () => {
-        client.calls += 1;
+      scoreRubric: () =>
+        foreign(() => {
+          client.calls += 1;
 
-        return provider.promise;
-      },
+          return provider.promise;
+        }),
     };
 
     const cache = memoryCache();
 
     const pending = Array.from({ length: 32 }, (_, index) =>
-      evaluateJudgeMetric(
-        { ...definition, name: `correctness-${index}`, threshold: index === 0 ? 0.8 : 0.6 },
-        context,
-        { client, cache },
-      ),
+      Effect.runPromiseExit(
+        evaluateJudgeMetric(
+          { ...definition, name: `correctness-${index}`, threshold: index === 0 ? 0.8 : 0.6 },
+          context,
+          { client, cache },
+        ),
+      ).then(valueFromExit),
     );
 
     await Promise.resolve();
@@ -173,8 +193,12 @@ describe('evaluateJudgeMetric', () => {
     const client = scriptedClient([verdict(0.7), verdict(0.7)]);
 
     const evaluations = await Promise.all([
-      evaluateJudgeMetric(definition, context, { client }),
-      evaluateJudgeMetric(definition, context, { client }),
+      Effect.runPromiseExit(evaluateJudgeMetric(definition, context, { client })).then(
+        valueFromExit,
+      ),
+      Effect.runPromiseExit(evaluateJudgeMetric(definition, context, { client })).then(
+        valueFromExit,
+      ),
     ]);
 
     expect(client.calls).toBe(2);
@@ -189,11 +213,12 @@ describe('evaluateJudgeMetric', () => {
     let calls = 0;
 
     const createClient = (): JudgeClient => ({
-      scoreRubric: () => {
-        calls += 1;
+      scoreRubric: () =>
+        foreign(() => {
+          calls += 1;
 
-        return provider.promise;
-      },
+          return provider.promise;
+        }),
     });
 
     const client = createClient();
@@ -206,7 +231,9 @@ describe('evaluateJudgeMetric', () => {
       { client, cache: memoryCache(), signal, timeoutMs: 100 },
       { client, cache, signal: new AbortController().signal, timeoutMs: 100 },
       { client, cache, signal, timeoutMs: 200 },
-    ].map((options) => evaluateJudgeMetric(definition, context, options));
+    ].map((options) =>
+      Effect.runPromiseExit(evaluateJudgeMetric(definition, context, options)).then(valueFromExit),
+    );
 
     await Promise.resolve();
     provider.resolve(verdict(0.7));
@@ -220,22 +247,27 @@ describe('evaluateJudgeMetric', () => {
     let calls = 0;
 
     const client: JudgeClient = {
-      scoreRubric: (_request, options) => {
-        calls += 1;
+      scoreRubric: (_request, options) =>
+        foreign(() => {
+          calls += 1;
 
-        return new Promise((_resolve, reject) => {
-          options?.signal?.addEventListener('abort', () => reject(new Error('aborted')), {
-            once: true,
+          return new Promise((_resolve, reject) => {
+            options?.signal?.addEventListener('abort', () => reject(new Error('aborted')), {
+              once: true,
+            });
           });
-        });
-      },
+        }),
     };
 
     const cache = memoryCache();
 
     const pending = [
-      evaluateJudgeMetric(definition, context, { client, cache, signal: controller.signal }),
-      evaluateJudgeMetric(definition, context, { client, cache, signal: controller.signal }),
+      Effect.runPromiseExit(
+        evaluateJudgeMetric(definition, context, { client, cache, signal: controller.signal }),
+      ).then(valueFromExit),
+      Effect.runPromiseExit(
+        evaluateJudgeMetric(definition, context, { client, cache, signal: controller.signal }),
+      ).then(valueFromExit),
     ];
 
     await Promise.resolve();
@@ -256,17 +288,22 @@ describe('evaluateJudgeMetric', () => {
   it('does not cache a failed provider call and retries it later', async () => {
     const firstCall = deferred<JudgeOutcome>();
     const client = scriptedClient([]);
-    client.scoreRubric = () => {
-      client.calls += 1;
+    client.scoreRubric = () =>
+      foreign(() => {
+        client.calls += 1;
 
-      return client.calls === 1 ? firstCall.promise : Promise.resolve(verdict(0.7));
-    };
+        return client.calls === 1 ? firstCall.promise : Promise.resolve(verdict(0.7));
+      });
 
     const cache = memoryCache();
 
     const failures = [
-      evaluateJudgeMetric(definition, context, { client, cache }),
-      evaluateJudgeMetric(definition, context, { client, cache }),
+      Effect.runPromiseExit(evaluateJudgeMetric(definition, context, { client, cache })).then(
+        valueFromExit,
+      ),
+      Effect.runPromiseExit(evaluateJudgeMetric(definition, context, { client, cache })).then(
+        valueFromExit,
+      ),
     ];
 
     await Promise.resolve();
@@ -279,7 +316,9 @@ describe('evaluateJudgeMetric', () => {
     expect(cache.writes).toBe(0);
 
     await expect(
-      evaluateJudgeMetric(definition, context, { client, cache }),
+      Effect.runPromiseExit(evaluateJudgeMetric(definition, context, { client, cache })).then(
+        valueFromExit,
+      ),
     ).resolves.toMatchObject({ status: 'evaluated', judgeIo: { cache: 'miss' } });
     expect(client.calls).toBe(2);
     expect(cache.writes).toBe(1);
@@ -290,8 +329,12 @@ describe('evaluateJudgeMetric', () => {
     const cache = memoryCache({ failFirstRead: true });
 
     const failures = await Promise.all([
-      evaluateJudgeMetric(definition, context, { client, cache }),
-      evaluateJudgeMetric(definition, context, { client, cache }),
+      Effect.runPromiseExit(evaluateJudgeMetric(definition, context, { client, cache })).then(
+        valueFromExit,
+      ),
+      Effect.runPromiseExit(evaluateJudgeMetric(definition, context, { client, cache })).then(
+        valueFromExit,
+      ),
     ]);
 
     expect(cache.reads).toBe(1);
@@ -302,7 +345,9 @@ describe('evaluateJudgeMetric', () => {
     }
 
     await expect(
-      evaluateJudgeMetric(definition, context, { client, cache }),
+      Effect.runPromiseExit(evaluateJudgeMetric(definition, context, { client, cache })).then(
+        valueFromExit,
+      ),
     ).resolves.toMatchObject({ status: 'evaluated', judgeIo: { cache: 'miss' } });
   });
 
@@ -310,7 +355,9 @@ describe('evaluateJudgeMetric', () => {
     const cache = memoryCache({ failWrites: true });
 
     await expect(
-      evaluateJudgeMetric(definition, context, { client: scriptedClient([verdict(0.7)]), cache }),
+      Effect.runPromiseExit(
+        evaluateJudgeMetric(definition, context, { client: scriptedClient([verdict(0.7)]), cache }),
+      ).then(valueFromExit),
     ).resolves.toMatchObject({ status: 'evaluated', judgeIo: { cache: 'miss' } });
   });
 
@@ -320,7 +367,9 @@ describe('evaluateJudgeMetric', () => {
   ] as const)('keeps the %s code and its judge record without a score', async (code, message) => {
     const client = scriptedClient([new AttestMetricError(code, message, { details: record })]);
 
-    const evaluation = await evaluateJudgeMetric(definition, context, { client });
+    const evaluation = await Effect.runPromiseExit(
+      evaluateJudgeMetric(definition, context, { client }),
+    ).then(valueFromExit);
 
     expect(evaluation).toMatchObject({
       status: 'error',
@@ -335,10 +384,12 @@ describe('evaluateJudgeMetric', () => {
     const controller = new AbortController();
     controller.abort();
 
-    const evaluation = await evaluateJudgeMetric(definition, context, {
-      client,
-      signal: controller.signal,
-    });
+    const evaluation = await Effect.runPromiseExit(
+      evaluateJudgeMetric(definition, context, {
+        client,
+        signal: controller.signal,
+      }),
+    ).then(valueFromExit);
 
     expect(evaluation).toMatchObject({ status: 'error', error: { kind: 'metric_cancelled' } });
     expect(client.calls).toBe(0);

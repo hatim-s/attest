@@ -5,6 +5,7 @@ export {
   createTanstackJudgeClient,
   evaluateMetrics,
   judgeOutcomeSchema,
+  MetricCleanupError,
   type CommandMetricTransport,
   type EvaluateMetricsOptions,
   type ExecMetricOptions,

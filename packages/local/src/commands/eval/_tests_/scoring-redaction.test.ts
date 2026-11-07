@@ -1,3 +1,4 @@
+import { valueFromExit } from '../../../internal/effect-exit.js';
 import * as Effect from 'effect/Effect';
 import { stripStruct } from '@attest/contracts';
 import { createServer } from 'node:http';
@@ -320,8 +321,8 @@ test('concurrent identical judge cases share one provider call', async () => {
   const options = { original, payload, runId: run.run_id, secrets: [], signal };
 
   const [first, second] = await Promise.all([
-    evaluator.evaluate(options),
-    evaluator.evaluate(options),
+    Effect.runPromiseExit(evaluator.evaluate(options)).then(valueFromExit),
+    Effect.runPromiseExit(evaluator.evaluate(options)).then(valueFromExit),
   ]);
 
   expect(provider.requests).toHaveLength(1);
