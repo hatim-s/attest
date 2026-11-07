@@ -42,7 +42,7 @@ const registerProjectsCommands = ({
 
   projects
     .command('add')
-    .description('Register a project directory so `attest view --all` serves it.')
+    .description('Register a project directory so `attest web --all` serves it.')
     .argument('[directory]', 'project directory', '.')
     .option('--name <name>', 'display name; defaults to the manifest name or directory name')
     .addOption(commonOption(outputOption()))
@@ -83,7 +83,7 @@ const registerProjectsCommands = ({
     });
 
   setCliCommandHelpMetadata(projects, {
-    examples: ['attest projects add .', 'attest projects list --output json', 'attest view --all'],
+    examples: ['attest projects add .', 'attest projects list --output json', 'attest web --all'],
   });
 };
 

@@ -41,6 +41,10 @@ example in that directory so `npx` can find the local installation. The
 [release guide](docs/RELEASING.md) covers producing and checking these archives.
 Registry installation becomes available after the maintainer publishes the alpha.
 
+Run `attest web` from a project to open its local dashboard. Use `attest web --all`
+to serve every registered project, or `attest web --no-open` to print the URL without
+launching a browser.
+
 ## Packages
 
 | Package             | What it does                                                                                      |

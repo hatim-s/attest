@@ -85,7 +85,7 @@ and [evaluation lifecycle](./concepts/eval-lifecycle.md) for those boundaries.
 
 - Run `attest list runs --output json` and inspect a returned id with
   `attest show run <run-id> --output json`.
-- Open the local dashboard with `attest view --no-open`, then open its printed URL
+- Open the local dashboard with `attest web --no-open`, then open its printed URL
   in your browser. Stop the server with Ctrl+C.
 - [Connect other agent transports](./cli/agents.md).
 - [Import CSV, JSON, or JSONL tests and datasets](./cli/tests-and-datasets.md).

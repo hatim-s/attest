@@ -57,7 +57,7 @@ output, add `--non-interactive`.
 
 The artifact commands have separate output options. `diff --format json` emits a raw
 diff document. `report --output <path>` and `trace convert --output <path>` select files;
-without a path, `trace convert` prints the raw trace document. `view` prints its local
+without a path, `trace convert` prints the raw trace document. `web` prints its local
 URL and stays running. The root `--output json` flag does not change these commands.
 `--help` and `--version` retain terminal text; use `attest help --output json` for discovery.
 
@@ -142,12 +142,14 @@ changes nothing and returns the existing entry.
 If the registry cannot be written, `project init` keeps the manifest it already wrote and
 reports the failure with the `attest projects add <dir>` command to run instead.
 
-`attest view` inside a project serves that one project. `attest view --all` serves every
+`attest web` opens the local dashboard.
+
+`attest web` inside a project serves that one project. `attest web --all` serves every
 registered project instead, and cannot be combined with `--store`.
 
 ```sh
 attest projects add ~/Projects/workflow-code --output json
-attest view --all --no-open
+attest web --all --no-open
 ```
 
 A registered project whose `.attest/runs.db` does not exist yet appears with no runs.

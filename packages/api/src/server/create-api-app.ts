@@ -24,7 +24,7 @@ import { parseInput, parseJsonBody, toErrorEnvelope } from './error-response.js'
 import { readCaseSummaries } from './read-case-summaries.js';
 import { readSuiteHistory } from './read-suite-history.js';
 
-/** `control` is present only on hosts that can start and cancel runs, such as `attest view`. */
+/** `control` is present only on hosts that can start and cancel runs, such as `attest web`. */
 type ApiAppDeps = { catalog: ProjectCatalog; control?: RunControl };
 
 type ProjectScope = { Variables: { source: RunSource } };
