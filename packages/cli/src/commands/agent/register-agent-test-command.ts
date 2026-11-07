@@ -1,3 +1,5 @@
+import * as Effect from 'effect/Effect';
+import { valueFromExit } from '@attest/local';
 import type { CommandRequest } from '@attest/contracts';
 import { COMMAND_REQUEST_SCHEMA_ID } from '@attest/contracts';
 import { readAgentTestInput, runAgentTestCommand } from '@attest/local/agent';
@@ -64,12 +66,15 @@ const registerAgentTestCommand = (agent: Command, context: CommandContext): void
                 { path: '<agent-id>', question: 'Agent id: ' },
                 { interactive, prompt: context.interaction.prompt, signal },
               ),
-              input: await readAgentTestInput({
-                input: options.input,
-                inputFile: options.inputFile,
-                readStdin: context.interaction.readStdin,
-                workingDirectory: context.workingDirectory,
-              }),
+              input: await // EFFECT-BRIDGE(S9b)
+              Effect.runPromiseExit(
+                readAgentTestInput({
+                  input: options.input,
+                  inputFile: options.inputFile,
+                  readStdin: context.interaction.readStdin,
+                  workingDirectory: context.workingDirectory,
+                }).pipe(Effect.provideContext(context.evalContext)),
+              ).then(valueFromExit),
             };
 
             if (options.record !== undefined) {
@@ -80,14 +85,17 @@ const registerAgentTestCommand = (agent: Command, context: CommandContext): void
           },
         });
 
-        const result = await runAgentTestCommand({
-          onProgress: (message) => context.io.error(message),
-          project: options.project,
-          request,
-          signal,
-          watch: options.watch,
-          workingDirectory: context.workingDirectory,
-        });
+        const result = await // EFFECT-BRIDGE(S9b)
+        Effect.runPromiseExit(
+          runAgentTestCommand({
+            onProgress: (message) => context.io.error(message),
+            project: options.project,
+            request,
+            signal,
+            watch: options.watch,
+            workingDirectory: context.workingDirectory,
+          }).pipe(Effect.provideContext(context.evalContext)),
+        ).then(valueFromExit);
 
         context.io.output(renderCommandResult('agent.test', outputFormat(options), result));
       });

@@ -1,4 +1,5 @@
-import { valueFromExit } from '../../internal/effect-exit.js';
+import * as Exit from 'effect/Exit';
+import { finishWithRelease } from '../agent/adapter/lifecycle-cause.js';
 import * as Effect from 'effect/Effect';
 import { lstat, mkdir, realpath, rmdir } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
@@ -145,207 +146,237 @@ const emptyProject = (projectId: string, name: string): ProjectResources => ({
   tests: [],
 });
 
+/** Adapts individual filesystem and terminal operations without running an Effect runtime. */
+const initCall = <A>(operation: () => Promise<A>) =>
+  Effect.tryPromise({
+    try: operation,
+    catch: (cause) =>
+      cause instanceof LocalError
+        ? cause
+        : new LocalError('init_failed', 'Could not initialize the Attest project.', { cause }),
+  });
+
 /** Initializes one canonical project from flags, stdin, or a guided TTY prompt. */
-const runProjectInitCommand = async (
-  options: ProjectInitCommandOptions,
-): Promise<CommandResult<'project-init', ProjectInitResult>> => {
-  assertUnambiguousInitSources(options);
+const runProjectInitCommand = Effect.fn('runProjectInitCommand')(
+  function* (
+    options: ProjectInitCommandOptions,
+  ): Effect.fn.Return<CommandResult<'project-init', ProjectInitResult>, Error> {
+    try {
+      assertUnambiguousInitSources(options);
 
-  const request =
-    options.fromJson === undefined
-      ? undefined
-      : await // EFFECT-BRIDGE(S8b)
-        Effect.runPromiseExit(
-          readCommandRequest('project.init', options.fromJson, {
-            readStdin: options.readStdin,
-            workingDirectory: options.workingDirectory,
-          }),
-        ).then((exit) => valueFromExit(exit));
+      const request =
+        options.fromJson === undefined
+          ? undefined
+          : yield* readCommandRequest('project.init', options.fromJson, {
+              readStdin: options.readStdin,
+              workingDirectory: options.workingDirectory,
+            });
 
-  const requestedDirectory =
-    options.directory ?? options.projectDirectory ?? request?.directory ?? '.';
+      const requestedDirectory =
+        options.directory ?? options.projectDirectory ?? request?.directory ?? '.';
 
-  const inspected = await inspectTargetDirectory(
-    resolve(options.workingDirectory, requestedDirectory),
-  );
+      const inspected = yield* initCall(() =>
+        inspectTargetDirectory(resolve(options.workingDirectory, requestedDirectory)),
+      );
 
-  const defaultName = basename(inspected.root);
-  let name = options.name ?? request?.name;
+      const defaultName = basename(inspected.root);
+      let name = options.name ?? request?.name;
 
-  if (name === undefined && options.interactive) {
-    if (options.prompt === undefined) {
-      throw new LocalError('cli_missing_input', 'Interactive input is unavailable.', {
-        path: '--name',
-        hint: 'Pass `--name <name>` or a complete `--from-json` request.',
-      });
-    }
+      if (name === undefined && options.interactive) {
+        if (options.prompt === undefined) {
+          throw new LocalError('cli_missing_input', 'Interactive input is unavailable.', {
+            path: '--name',
+            hint: 'Pass `--name <name>` or a complete `--from-json` request.',
+          });
+        }
 
-    name = (await options.prompt(`Project name [${defaultName}]: `)).trim() || defaultName;
-  }
-
-  name = (name ?? defaultName).trim();
-
-  if (name.length === 0) {
-    throw new LocalError('cli_missing_input', 'Project name cannot be empty.', {
-      path: '--name',
-      hint: 'Pass a non-empty project display name.',
-    });
-  }
-
-  const dryRun = options.dryRun ?? request?.dry_run ?? false;
-  const expectedProjectHash = options.expectedProjectHash ?? request?.if_project_hash;
-
-  if (expectedProjectHash !== undefined) {
-    throw new LocalError('project_changed', 'The initialization target has no project hash.', {
-      path: '--if-project-hash',
-      hint: 'Remove the stale expected hash and initialize an unclaimed directory.',
-      details: { current_hash: null, expected_hash: expectedProjectHash },
-    });
-  }
-
-  if (inspected.exists) {
-    await assertUninitialized(inspected.root);
-  }
-
-  const prepared = prepareProjectCandidate(emptyProject(ulid(), name));
-  const manifest = prepared.files.get('attest.project.json');
-
-  if (manifest === undefined) {
-    throw new LocalError('internal_error', 'The project candidate omitted its manifest.');
-  }
-
-  const result: ProjectInitResult = {
-    committed: !dryRun,
-    dry_run: dryRun,
-    project: {
-      id: prepared.project.project.project_id,
-      name: prepared.project.project.name,
-      root: inspected.root,
-    },
-    operations: [
-      {
-        op: 'add',
-        resource: { id: prepared.project.project.project_id, type: 'project' },
-        changes: [],
-        new_content_hash: prepared.projectHash,
-        references_added: [],
-        references_removed: [],
-      },
-    ],
-  };
-
-  if (dryRun) {
-    return {
-      operation: 'project-init',
-      projectHashBefore: null,
-      projectHashAfter: prepared.projectHash,
-      result,
-    };
-  }
-
-  let createdDirectory = false;
-  let published = false;
-
-  try {
-    if (!inspected.exists) {
-      await mkdir(inspected.root);
-      createdDirectory = true;
-    }
-
-    await assertUninitialized(inspected.root);
-    await // EFFECT-BRIDGE(S8b)
-    Effect.runPromiseExit(publishProjectManifest(inspected.root, manifest.contents)).then((exit) =>
-      valueFromExit(exit),
-    );
-    published = true;
-
-    const loaded = await // EFFECT-BRIDGE(S8b)
-    Effect.runPromiseExit(loadProject({ project: inspected.root })).then((exit) =>
-      valueFromExit(exit),
-    );
-
-    if (loaded.projectHash !== prepared.projectHash) {
-      throw new LocalError('init_failed', 'Published project verification failed.', {
-        details: { current_hash: loaded.projectHash, expected_hash: prepared.projectHash },
-      });
-    }
-  } catch (error: unknown) {
-    if (published) {
-      try {
-        await // EFFECT-BRIDGE(S8b)
-        Effect.runPromiseExit(rollbackPublishedManifest(inspected.root, manifest.contents)).then(
-          (exit) => valueFromExit(exit),
-        );
-      } catch (rollbackError: unknown) {
-        throw new LocalError(
-          'project_recovery_required',
-          'Initialization failed and the published manifest could not be rolled back.',
-          {
-            path: join(inspected.root, 'attest.project.json'),
-            hint: 'Preserve the manifest and reconcile it before retrying.',
-            cause: rollbackError,
-          },
-        );
+        const prompt = options.prompt;
+        name =
+          (yield* initCall(() => prompt(`Project name [${defaultName}]: `))).trim() || defaultName;
       }
-    }
 
-    if (createdDirectory) {
-      try {
-        await rmdir(inspected.root);
-      } catch (cleanupError: unknown) {
-        throw new LocalError(
-          'project_recovery_required',
-          'Initialization failed and the new target directory could not be removed.',
-          {
-            path: inspected.root,
-            hint: 'Preserve and inspect the target directory before retrying.',
-            cause: cleanupError,
-          },
-        );
+      name = (name ?? defaultName).trim();
+
+      if (name.length === 0) {
+        throw new LocalError('cli_missing_input', 'Project name cannot be empty.', {
+          path: '--name',
+          hint: 'Pass a non-empty project display name.',
+        });
       }
-    }
 
-    if (error instanceof LocalError) {
+      const dryRun = options.dryRun ?? request?.dry_run ?? false;
+      const expectedProjectHash = options.expectedProjectHash ?? request?.if_project_hash;
+
+      if (expectedProjectHash !== undefined) {
+        throw new LocalError('project_changed', 'The initialization target has no project hash.', {
+          path: '--if-project-hash',
+          hint: 'Remove the stale expected hash and initialize an unclaimed directory.',
+          details: { current_hash: null, expected_hash: expectedProjectHash },
+        });
+      }
+
+      if (inspected.exists) {
+        yield* initCall(() => assertUninitialized(inspected.root));
+      }
+
+      const prepared = prepareProjectCandidate(emptyProject(ulid(), name));
+      const manifest = prepared.files.get('attest.project.json');
+
+      if (manifest === undefined) {
+        throw new LocalError('internal_error', 'The project candidate omitted its manifest.');
+      }
+
+      const result: ProjectInitResult = {
+        committed: !dryRun,
+        dry_run: dryRun,
+        project: {
+          id: prepared.project.project.project_id,
+          name: prepared.project.project.name,
+          root: inspected.root,
+        },
+        operations: [
+          {
+            op: 'add',
+            resource: { id: prepared.project.project.project_id, type: 'project' },
+            changes: [],
+            new_content_hash: prepared.projectHash,
+            references_added: [],
+            references_removed: [],
+          },
+        ],
+      };
+
+      if (dryRun) {
+        return {
+          operation: 'project-init',
+          projectHashBefore: null,
+          projectHashAfter: prepared.projectHash,
+          result,
+        };
+      }
+
+      yield* Effect.uninterruptibleMask((restore) =>
+        Effect.gen(function* () {
+          let createdDirectory = false;
+          let published = false;
+
+          const primary = yield* Effect.exit(
+            Effect.gen(function* () {
+              if (!inspected.exists) {
+                yield* initCall(() => mkdir(inspected.root));
+                createdDirectory = true;
+              }
+
+              yield* initCall(() => assertUninitialized(inspected.root));
+              yield* publishProjectManifest(inspected.root, manifest.contents).pipe(
+                Effect.mapError((cause) =>
+                  cause instanceof LocalError
+                    ? cause
+                    : new LocalError('init_failed', 'Could not initialize the Attest project.', {
+                        path: inspected.root,
+                        hint: 'Check the target permissions and retry in an uninitialized directory.',
+                        cause,
+                        details: { staged_content_hash: hashCanonicalContent(manifest.contents) },
+                      }),
+                ),
+              );
+              published = true;
+              const loaded = yield* restore(loadProject({ project: inspected.root }));
+
+              if (loaded.projectHash !== prepared.projectHash)
+                return yield* Effect.fail(
+                  new LocalError('init_failed', 'Published project verification failed.', {
+                    details: {
+                      current_hash: loaded.projectHash,
+                      expected_hash: prepared.projectHash,
+                    },
+                  }),
+                );
+              // Registration is the commit fence. A pending interruption cannot leave an unregistered manifest.
+              yield* registerProject({
+                registryPath: options.registryPath,
+                root: inspected.root,
+                name: prepared.project.project.name,
+                projectId: prepared.project.project.project_id,
+              }).pipe(
+                Effect.mapError(
+                  (cause) =>
+                    new LocalError(
+                      'registry_write_failed',
+                      'The project was initialized but not registered.',
+                      {
+                        path: options.registryPath,
+                        hint: `Run \`attest projects add ${inspected.root}\` to register it.`,
+                        cause,
+                      },
+                    ),
+                ),
+              );
+            }),
+          );
+
+          if (Exit.isSuccess(primary)) return;
+          const releases: Exit.Exit<void, LocalError>[] = [];
+
+          if (published)
+            releases.push(
+              yield* Effect.exit(
+                rollbackPublishedManifest(inspected.root, manifest.contents).pipe(
+                  Effect.mapError(
+                    (cause) =>
+                      new LocalError(
+                        'project_recovery_required',
+                        'Initialization failed and the published manifest could not be rolled back.',
+                        {
+                          path: join(inspected.root, 'attest.project.json'),
+                          hint: 'Preserve the manifest and reconcile it before retrying.',
+                          cause,
+                        },
+                      ),
+                  ),
+                ),
+              ),
+            );
+
+          if (createdDirectory)
+            releases.push(
+              yield* Effect.exit(
+                Effect.tryPromise({
+                  try: () => rmdir(inspected.root),
+                  catch: (cause) =>
+                    new LocalError(
+                      'project_recovery_required',
+                      'Initialization failed and the new target directory could not be removed.',
+                      {
+                        path: inspected.root,
+                        hint: 'Preserve and inspect the target directory before retrying.',
+                        cause,
+                      },
+                    ),
+                }),
+              ),
+            );
+
+          return yield* finishWithRelease(primary, releases);
+        }),
+      );
+
+      return {
+        operation: 'project-init',
+        projectHashBefore: null,
+        projectHashAfter: prepared.projectHash,
+        result,
+      };
+    } catch (error) {
+      if (error instanceof LocalError) return yield* Effect.fail(error);
       throw error;
     }
-
-    throw new LocalError('init_failed', 'Could not initialize the Attest project.', {
-      path: inspected.root,
-      hint: 'Check the target permissions and retry in an uninitialized directory.',
-      cause: error,
-      details: { staged_content_hash: hashCanonicalContent(manifest.contents) },
-    });
-  }
-
-  // The manifest is verified and stays; a registry failure only needs the project added later.
-  try {
-    await // EFFECT-BRIDGE(S8b)
-    Effect.runPromiseExit(
-      registerProject({
-        registryPath: options.registryPath,
-        root: inspected.root,
-        name,
-        projectId: prepared.project.project.project_id,
-      }),
-    ).then(valueFromExit);
-  } catch (error: unknown) {
-    throw new LocalError(
-      'registry_write_failed',
-      'The project was initialized but not registered.',
-      {
-        path: options.registryPath,
-        hint: `Run \`attest projects add ${inspected.root}\` to register it.`,
-        cause: error,
-      },
-    );
-  }
-
-  return {
-    operation: 'project-init',
-    projectHashBefore: null,
-    projectHashAfter: prepared.projectHash,
-    result,
-  };
-};
+  },
+  Effect.mapError((error) =>
+    error instanceof LocalError
+      ? error
+      : new LocalError('internal_error', error.message, { cause: error }),
+  ),
+);
 
 export { runProjectInitCommand, type ProjectInitCommandOptions };

@@ -121,18 +121,20 @@ const terminalFailure = (code: 'cancelled' | 'run_failed', message: string): Eva
  */
 const createEvalProject = async (options: EvalProjectOptions = {}): Promise<string> => {
   const root = await temporaryDirectory('attest-run-configuration-');
-  await runProjectInitCommand({
-    directory: '.',
-    interactive: false,
-    name: 'Eval integration',
-    readStdin: () => Promise.resolve(''),
-    // The registry rejects symlinked ancestors, and macOS `tmpdir()` sits behind `/var`.
-    registryPath: join(
-      await realpath(await temporaryDirectory('attest-registry-')),
-      'projects.json',
-    ),
-    workingDirectory: root,
-  });
+  await Effect.runPromiseExit(
+    runProjectInitCommand({
+      directory: '.',
+      interactive: false,
+      name: 'Eval integration',
+      readStdin: () => Promise.resolve(''),
+      // The registry rejects symlinked ancestors, and macOS `tmpdir()` sits behind `/var`.
+      registryPath: join(
+        await realpath(await temporaryDirectory('attest-registry-')),
+        'projects.json',
+      ),
+      workingDirectory: root,
+    }),
+  ).then(valueFromExit);
   await writeFile(join(root, 'agent.mjs'), options.agentSource ?? ECHO_AGENT);
 
   let candidate = candidateFromLoadedProject(

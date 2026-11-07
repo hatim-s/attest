@@ -74,13 +74,15 @@ const addMetric = (root: string, metric: MetricResource) =>
   ).then((exit) => valueFromExit(exit));
 
 const testMetric = (root: string, metricId: string, document = fixture('Paris', true)) =>
-  runMetricTestCommand({
-    fixture: '-',
-    metricId,
-    project: root,
-    readStdin: () => Promise.resolve(JSON.stringify(document)),
-    workingDirectory: root,
-  });
+  Effect.runPromiseExit(
+    runMetricTestCommand({
+      fixture: '-',
+      metricId,
+      project: root,
+      readStdin: () => Promise.resolve(JSON.stringify(document)),
+      workingDirectory: root,
+    }),
+  ).then(valueFromExit);
 
 // BOUNDARY: The fixture metric process returns untrusted execution details; envKeysSchema validates the emitted key list.
 const envKeys = (evaluation: unknown): string[] =>

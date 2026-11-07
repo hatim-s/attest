@@ -774,12 +774,17 @@ precedence, with cleanup diagnostics attached as `CommandCleanup`. cURL body rea
 existing anchored descriptor owner. Manifest publication masks pending filesystem operations,
 attempts every cleanup, and rolls back its exact no-overwrite publication on failure.
 
-Execution-test and initialization coordinators remain Promise parents for phase B. The committed
-native metric evaluation and S8c registry forward bridges remain intact. Phase B will compose
-their native interfaces after S7 integration and remove the remaining S8b forward bridges.
-Remaining Promise CLI actions and guided metric loading use exact-file S9b bridges. Test
-runners are permanent execution roots. These staging bridges do not establish completion of
-the CLI application lifetime migration.
+Agent and metric tests, probe input reads, and project initialization now return native Effects.
+Probe execution callbacks return Effects too. Agent sessions and sandboxes close before the probe
+store finalizes its run and closes. Interruption finalizes a recorded probe as cancelled. Init
+publishes and verifies its manifest before native registry registration. Verification, interruption,
+or registration failure rolls back the exact published bytes and removes a newly created directory.
+Registration is the masked commit fence. A registry failure now rolls back the manifest rather than
+leaving an unregistered project behind. Dry runs still write nothing.
+
+The direct Commander callers use the captured CLI application context through exact-file S9b
+adapters, matching the integrated S7 eval boundary. Other Promise CLI actions and guided metric
+loading remain owned by S9b. No S8b execution bridges remain.
 
 ## S9a native dashboard operations
 

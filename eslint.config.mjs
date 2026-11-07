@@ -51,6 +51,22 @@ const coreForbidden = [
 // Exact file paths only. New roots need a concrete lifecycle owner.
 const effectRoots = [
   {
+    file: 'packages/local/src/commands/project/_tests_/project-init-command.test.ts',
+    operations: ['Effect.runPromise', 'Effect.runPromiseExit'],
+    owner: 'native command invariant test root',
+  },
+  {
+    file: 'packages/local/src/commands/agent/_tests_/agent-test-lifetime.test.ts',
+    operations: ['Effect.runPromise'],
+    owner: 'native command invariant test root',
+  },
+  {
+    file: 'packages/local/src/commands/agent/_tests_/agent-test.test.ts',
+    operations: ['Effect.runPromiseExit'],
+    owner: 'native command invariant test root',
+  },
+
+  {
     file: 'packages/web/src/api/queries.ts',
     operations: ['Effect.runPromise'],
     owner: 'TanStack query and mutation callback roots',
@@ -562,50 +578,38 @@ const effectRoots = [
 // Each file declares its operations and per-operation removal slices in bridges. Removed in S10.
 const effectMigrationBridges = [
   {
+    file: 'packages/cli/src/commands/metric/register-metric-test-command.ts',
+    operations: ['Effect.runPromiseExit'],
+    owner: 'Commander caller of native test operations',
+    bridges: [
+      {
+        operation: 'Effect.runPromiseExit',
+        removalSlice: 'S9b',
+        owner: 'CLI application migration',
+      },
+    ],
+  },
+  {
+    file: 'packages/cli/src/commands/agent/register-agent-test-command.ts',
+    operations: ['Effect.runPromiseExit'],
+    owner: 'Commander caller of native test operations',
+    bridges: [
+      {
+        operation: 'Effect.runPromiseExit',
+        removalSlice: 'S9b',
+        owner: 'CLI application migration',
+      },
+    ],
+  },
+  {
     file: 'packages/local/src/internal/promise-store-owner.ts',
     operations: ['Effect.runPromiseExit'],
     owner: 'temporary owner handshake for later Promise application lifetimes',
     bridges: [
       {
         operation: 'Effect.runPromiseExit',
-        removalSlice: 'S8b',
-        owner: 'remaining agent probe and test fixture owners',
-      },
-    ],
-  },
-  {
-    file: 'packages/local/src/commands/project/project-init-command.ts',
-    operations: ['Effect.runPromiseExit'],
-    owner: 'unmigrated Promise parent of Phase A project operations',
-    bridges: [
-      {
-        operation: 'Effect.runPromiseExit',
-        removalSlice: 'S8b',
-        owner: 'declared migration owner',
-      },
-    ],
-  },
-  {
-    file: 'packages/local/src/commands/agent/test.ts',
-    operations: ['Effect.runPromiseExit'],
-    owner: 'temporary Promise parent of native S1c file operations',
-    bridges: [
-      {
-        operation: 'Effect.runPromiseExit',
-        removalSlice: 'S8b',
-        owner: 'declared migration owner',
-      },
-    ],
-  },
-  {
-    file: 'packages/local/src/commands/metric/metric-test-command.ts',
-    operations: ['Effect.runPromiseExit'],
-    owner: 'Promise caller of native local operations',
-    bridges: [
-      {
-        operation: 'Effect.runPromiseExit',
-        removalSlice: 'S8b',
-        owner: 'declared migration owner',
+        removalSlice: 'S9a',
+        owner: 'view server and catalog lifetime',
       },
     ],
   },
@@ -762,18 +766,6 @@ const effectMigrationBridges = [
         operation: 'Effect.runPromiseExit',
         removalSlice: 'S9b',
         owner: 'declared command migration owner',
-      },
-    ],
-  },
-  {
-    file: 'packages/local/src/commands/agent/adapter/test-native-agent.ts',
-    operations: ['Effect.runPromiseExit'],
-    owner: 'Promise probe parent of native adapters',
-    bridges: [
-      {
-        operation: 'Effect.runPromiseExit',
-        removalSlice: 'S8b',
-        owner: 'native agent connection probe',
       },
     ],
   },

@@ -1,3 +1,5 @@
+import { valueFromExit } from '../../../internal/effect-exit.js';
+import * as Effect from 'effect/Effect';
 import {
   CliCleanupError,
   ProcessCleanupError,
@@ -44,17 +46,19 @@ const nativeAgent = (
 });
 
 const probe = (root: string, agentId: string, signal?: AbortSignal) =>
-  runAgentTestCommand({
-    project: root,
-    request: {
-      schema: COMMAND_REQUEST_SCHEMA_ID,
-      command: 'agent.test',
-      agent_id: agentId,
-      input: {},
-    },
-    signal,
-    workingDirectory: root,
-  });
+  Effect.runPromiseExit(
+    runAgentTestCommand({
+      project: root,
+      request: {
+        schema: COMMAND_REQUEST_SCHEMA_ID,
+        command: 'agent.test',
+        agent_id: agentId,
+        input: {},
+      },
+      signal,
+      workingDirectory: root,
+    }),
+  ).then(valueFromExit);
 
 const HANG = 'process.stdin.resume(); setInterval(() => undefined, 1000);';
 
@@ -227,16 +231,17 @@ it('records CLI cleanup failure with completed attempt evidence', async () => {
     process.env.ATTEST_SOURCE_SECRET = 'unused';
     vi.stubEnv('PATH', directory);
     await expect(
-      testNativeAgentConnection({
-        agent: configured,
-        input: {},
-        projectRoot: root,
-        onExecution: (execution) => {
-          recorded.push(execution);
-
-          return Promise.resolve();
-        },
-      }),
+      Effect.runPromiseExit(
+        testNativeAgentConnection({
+          agent: configured,
+          input: {},
+          projectRoot: root,
+          onExecution: (execution) =>
+            Effect.sync(() => {
+              recorded.push(execution);
+            }),
+        }),
+      ).then(valueFromExit),
     ).rejects.toMatchObject({
       code: 'invocation_failed',
       message: 'Agent connection test failed: CLI cleanup could not be confirmed.',

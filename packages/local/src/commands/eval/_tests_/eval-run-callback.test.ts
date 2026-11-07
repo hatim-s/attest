@@ -138,14 +138,16 @@ const terminalFailure = (code: 'cancelled' | 'run_failed', message: string): Eva
 const createCallbackProject = async (origin: string): Promise<string> => {
   const root = await temporaryDirectory('attest-eval-callback-');
 
-  await runProjectInitCommand({
-    directory: '.',
-    interactive: false,
-    name: 'Callback eval',
-    readStdin: () => Promise.resolve(''),
-    registryPath: join(await temporaryDirectory('attest-registry-'), 'projects.json'),
-    workingDirectory: root,
-  });
+  await Effect.runPromiseExit(
+    runProjectInitCommand({
+      directory: '.',
+      interactive: false,
+      name: 'Callback eval',
+      readStdin: () => Promise.resolve(''),
+      registryPath: join(await temporaryDirectory('attest-registry-'), 'projects.json'),
+      workingDirectory: root,
+    }),
+  ).then(valueFromExit);
 
   const agent: AgentResource = {
     schema: AGENT_RESOURCE_SCHEMA_ID,
@@ -280,16 +282,18 @@ test('runs a callback agent, persists inline artifacts only, and scores them as 
   }
 
   // `attest agent test` reuses the same session runtime for a callback agent.
-  const probe = await runAgentTestCommand({
-    project: root,
-    request: {
-      schema: COMMAND_REQUEST_SCHEMA_ID,
-      command: 'agent.test',
-      agent_id: 'coder',
-      input: 'probe',
-    },
-    workingDirectory: root,
-  });
+  const probe = await Effect.runPromiseExit(
+    runAgentTestCommand({
+      project: root,
+      request: {
+        schema: COMMAND_REQUEST_SCHEMA_ID,
+        command: 'agent.test',
+        agent_id: 'coder',
+        input: 'probe',
+      },
+      workingDirectory: root,
+    }),
+  ).then(valueFromExit);
 
   expect(probe).toMatchObject({
     result: {

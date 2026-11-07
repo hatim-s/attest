@@ -1,3 +1,5 @@
+import * as Effect from 'effect/Effect';
+import { valueFromExit } from '@attest/local';
 import { COMMAND_REQUEST_SCHEMA_ID } from '@attest/contracts';
 import { runMetricTestCommand, type MetricTestCommandOptions } from '@attest/local/metric';
 import type { Command } from 'commander';
@@ -54,14 +56,17 @@ const registerMetricTestCommand = (metric: Command, context: CommandContext): vo
       });
 
       const result = await withProcessSignals((signal) =>
-        runMetricTestCommand({
-          fixture: request.fixture,
-          metricId: request.metric_id,
-          project: options.project,
-          readStdin: context.interaction.readStdin,
-          signal,
-          workingDirectory: context.workingDirectory,
-        }),
+        // EFFECT-BRIDGE(S9b)
+        Effect.runPromiseExit(
+          runMetricTestCommand({
+            fixture: request.fixture,
+            metricId: request.metric_id,
+            project: options.project,
+            readStdin: context.interaction.readStdin,
+            signal,
+            workingDirectory: context.workingDirectory,
+          }).pipe(Effect.provideContext(context.evalContext)),
+        ).then(valueFromExit),
       );
 
       context.io.output(renderCommandResult('metric.test', outputFormat(options), result));
