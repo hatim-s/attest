@@ -48,7 +48,13 @@ export {
   type StreamAgentResource,
 } from './adapters/stream/index.js';
 
-export { startWebSocketAgent, type WebSocketAgentResource } from './adapters/websocket/index.js';
+export {
+  startWebSocketAgent,
+  WebSocketCleanupError,
+  withWebSocketAgent,
+  type WebSocketAgentSession,
+  type WebSocketAgentResource,
+} from './adapters/websocket/index.js';
 
 export {
   type InvocationResult,

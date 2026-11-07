@@ -85,3 +85,11 @@ return Effects. `CallbackCleanupError` retains a completed invocation when clean
 fails, including earlier attempts and bounded evidence. These TypeScript changes
 do not change trigger or completion wire messages. Custom hosted receivers must
 implement the native contract; no Promise compatibility layer is provided.
+
+WebSocket session APIs return native Effects. `startWebSocketAgent` requires a
+Scope; keep it alive until all invocations join and `close` completes. Prefer
+`withWebSocketAgent(agent, options, use)` for one complete session lifetime.
+`WebSocketCleanupError.result` retains completed case evidence after a per-case
+close failure. A request is never replayed after a socket write, even if the peer
+has not acknowledged it. Known pre-dispatch opening failures retain their retry
+attempts. This is stricter than the authored acknowledgement retry ceiling.

@@ -1,8 +1,23 @@
+import * as Effect from 'effect/Effect';
+import * as Exit from 'effect/Exit';
 import { Duplex } from 'node:stream';
 
 import { describe, expect, it } from 'vitest';
 
 import { WebSocketConnection, type WebSocketConnectionCallbacks } from '../websocket-connection.js';
+
+/** Executes the native socket operation at the foreign test root. */
+const run = async <A, E>(effect: Effect.Effect<A, E>): Promise<A> => {
+  const exit = await Effect.runPromiseExit(effect);
+
+  if (Exit.isSuccess(exit)) return exit.value;
+
+  for (const reason of exit.cause.reasons) {
+    if (reason._tag === 'Fail' && reason.error instanceof Error) throw reason.error;
+  }
+
+  throw new Error('Native operation failed.', { cause: exit.cause });
+};
 
 /** Provides deterministic writable backpressure and direct server-frame injection. */
 class ControlledSocket extends Duplex {
@@ -131,8 +146,8 @@ describe('WebSocket connection bounds', () => {
       maximumPendingWriteBytes: 1_024,
     });
 
-    const first = connection.sendText('a'.repeat(64));
-    const second = connection.sendText('b'.repeat(32));
+    const first = run(connection.sendText('a'.repeat(64)));
+    const second = run(connection.sendText('b'.repeat(32)));
     await advance();
     expect(serializedSocket.writes).toHaveLength(1);
     serializedSocket.releaseWrite();
@@ -154,7 +169,7 @@ describe('WebSocket connection bounds', () => {
     });
 
     const controller = new AbortController();
-    const cancelledWrite = cancellable.sendText('c'.repeat(64), controller.signal);
+    const cancelledWrite = run(cancellable.sendText('c'.repeat(64), controller.signal));
     await advance();
     expect(cancellationSocket.writes).toHaveLength(1);
     controller.abort();
@@ -171,9 +186,9 @@ describe('WebSocket connection bounds', () => {
       maximumPendingWriteBytes: 1_024,
     });
 
-    const interruptedWrite = closing.sendText('d'.repeat(64));
+    const interruptedWrite = run(closing.sendText('d'.repeat(64)));
     await advance();
-    const close = closing.close(10);
+    const close = run(closing.close(10));
     await expect(interruptedWrite).rejects.toMatchObject({ code: 'cancelled' });
     await expect(close).resolves.toEqual({ clean: false });
     expect(closingSocket.destroyed).toBe(true);

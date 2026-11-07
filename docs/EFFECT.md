@@ -297,7 +297,7 @@ runtime. Missing or failed acknowledgement remains unconfirmed. Local socket
 close is resource evidence, not proof of remote completion or rollback.
 
 S4a removes `legacy-stream-fetch.ts` and the callback and stream execution bridges.
-WebSocket and managed-process callers retain their S4b/S4c removal owners; they
+Managed-process callers retain their S4c removal owner; they
 do not turn native JSON operations back into Promises.
 The sandbox attempt and retry callback compose natively while its surrounding VM
 lifecycle remains the S5 owner. No S3 execution bridge remains.
@@ -406,3 +406,76 @@ remain defects. These are deliberate TypeScript API changes; callback wire
 messages and persisted case formats do not change. Hosted custom receivers and
 stream transports must implement the native contracts. Private attest-cloud and
 workerd compatibility are not established by the local Node/Bun checks.
+
+### Native WebSocket sessions, S4b
+
+`startWebSocketAgent` now returns an Effect requiring Scope. Session `invoke` and
+`close` return Effects; invalid templated URLs fail in E when evaluated instead of
+throwing during construction. This is a deliberate TypeScript API break. Use
+`withWebSocketAgent(agent, options, use)` to keep the session alive for the whole
+operation and apply primary-Cause precedence after release. Lower-level scoped
+owners call `close` explicitly and inspect its Exit; `releaseExit()` also retains
+the scope fallback release receipt. Close stops admission and joins accepted
+invocations before its owner releases the acquisition scope.
+
+Only opening failures known to precede application dispatch can retry. Each such
+failure retains its own attempt evidence. A socket write prohibits replay even
+without an acknowledgement, and rejected upgrade responses prohibit retry while
+bounded resource release is observed. This narrows the authored
+`before_acknowledgement` ceiling. The existing acknowledgement evidence fields
+still describe that authored ceiling; `applicationStarted` on failures records the
+stricter runtime prohibition and does not prove remote execution. Wire schemas,
+protocol IDs, canonical hashes and public error codes remain unchanged.
+
+A per-case close failure returns `WebSocketCleanupError` retaining the completed
+`InvocationResult` and cleanup Cause. Primary failures, defects and interruption
+retain their Cause with cleanup annotations. The S7b local forward boundary keeps
+a Scope across Promise calls, stops admission, joins those calls, then disposes
+the scope. Its known cleanup-error projection preserves previous attempts and
+terminal diagnostics, excerpts and warnings without replay. Callback, stream and
+process lifetimes remain owned by their separate migration slices.
+
+WebSocket admission installs its completion finalizer while masked, then restores
+interruption for invocation. Every drain wait detaches its listeners on success,
+close, cancellation and native interruption. Opening failures keep their full
+Cause as a non-enumerable internal receipt on the recorded error, including when
+a case deadline settled first. Each invocation owns its recorded error and last
+attempt; a shared run failure is never mutated to attach a sibling's receipt.
+Native interruption remembers the abandoned request ID in the bounded ignored
+set, so a late reply cannot fail healthy siblings on the shared connection.
+Nested cleanup appends every release failure.
+The upgrade's dispatch evidence prohibits replay regardless of which timer wins.
+A per-case cancellation after opening still uses the existing unclean-close
+policy and may report `close_timeout` after attest destroys the socket; refining
+that classification remains follow-up work.
+
+```mermaid
+sequenceDiagram
+    participant Owner
+    participant Session
+    participant Transport
+    Owner->>Session: Acquire in Scope
+    Owner->>Session: Invoke
+    Session->>Session: Admit and register join while masked
+    Session->>Transport: Open and send with interruption restored
+    Transport-->>Session: Terminal evidence and opening Cause
+    Session->>Transport: Bounded release
+    Session-->>Owner: Result or primary Cause with cleanup
+    Owner->>Session: Close
+    Session->>Session: Stop admission and join accepted calls
+    Session-->>Owner: Memoized release Exit
+    Owner->>Session: Release Scope
+```
+
+```mermaid
+flowchart TD
+    Open[Observe opening Exit] --> Native{Defect or interruption?}
+    Native -->|Yes| Cause[Propagate original Cause]
+    Native -->|No| Evidence[Keep typed error and cleanup receipt]
+    Evidence --> Unsafe{Dispatch uncertain or release unconfirmed?}
+    Unsafe -->|Yes| Stop[Record without replay]
+    Unsafe -->|No| Retry{Retryable code and budget remain?}
+    Retry -->|Yes| Backoff[Wait with caller cancellation]
+    Backoff --> Open
+    Retry -->|No| Stop
+```

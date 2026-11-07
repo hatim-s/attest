@@ -1,3 +1,4 @@
+import { startWebSocketSession } from './websocket-session.js';
 import type { CaseExecution } from '@attest/runtime';
 import * as Effect from 'effect/Effect';
 import { valueFromExit } from '../../../internal/effect-exit.js';
@@ -9,6 +10,7 @@ import {
   CliCleanupError,
   CallbackCleanupError,
   StreamCleanupError,
+  WebSocketCleanupError,
   enforceArtifactLimits,
   invokeAgent,
   invokeMappedHttpAgent,
@@ -16,7 +18,6 @@ import {
   invokeVercelSandboxAgent,
   startBackgroundAgent,
   startJsonlBridgeAgent,
-  startWebSocketAgent,
   type InvocationResult,
 } from '@attest/executor';
 
@@ -95,7 +96,7 @@ const startAgentRuntime = async (
       return {
         kind: 'session',
         resolved,
-        session: await startWebSocketAgent(resolved.agent, {
+        session: await startWebSocketSession(resolved.agent, {
           headers: resolved.headers,
           secrets: resolved.secrets,
           signal,
@@ -229,7 +230,11 @@ const invokeResolvedAgent = async (
   try {
     return enforceArtifactLimits(await dispatch(runtime, request, options), options.agent.limits);
   } catch (cause: unknown) {
-    if (cause instanceof CallbackCleanupError || cause instanceof StreamCleanupError)
+    if (
+      cause instanceof CallbackCleanupError ||
+      cause instanceof StreamCleanupError ||
+      cause instanceof WebSocketCleanupError
+    )
       return enforceArtifactLimits(
         startupFailure(cause, cause.result.durationMs),
         options.agent.limits,
@@ -240,7 +245,11 @@ const invokeResolvedAgent = async (
 
 /** Projects operational startup or completed-attempt cleanup failures into recordable evidence. */
 const startupFailure = (cause: unknown, durationMs: number): InvocationResult => {
-  if (cause instanceof CallbackCleanupError || cause instanceof StreamCleanupError) {
+  if (
+    cause instanceof CallbackCleanupError ||
+    cause instanceof StreamCleanupError ||
+    cause instanceof WebSocketCleanupError
+  ) {
     const completed = cause.result;
     const primary = completed.status === 'invocation_error' ? completed.error : undefined;
 
@@ -251,11 +260,14 @@ const startupFailure = (cause: unknown, durationMs: number): InvocationResult =>
 
     const attempt = {
       status: 'invocation_error' as const,
-      error: new AgentInvocationError(
-        primary?.code ?? 'network',
-        primary === undefined ? message : `${primary.message} ${message}`,
-        { cause, applicationStarted: true },
-      ),
+      error:
+        cause instanceof WebSocketCleanupError
+          ? cause
+          : new AgentInvocationError(
+              primary?.code ?? 'network',
+              primary === undefined ? message : `${primary.message} ${message}`,
+              { cause, applicationStarted: true },
+            ),
       diagnostics: completed.diagnostics,
       durationMs: completed.durationMs,
       rawExcerpt: completed.rawExcerpt,

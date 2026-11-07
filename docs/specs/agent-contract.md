@@ -210,3 +210,11 @@ reports each one as a warning.
 A CLI attempt cannot be retried when descendant observations or final verification are unavailable, or known descendants remain alive. The completed attempt is retained in a typed cleanup failure. An empty PID list alone does not confirm cleanup: an unavailable `ps` observation can produce no identities while an escaped descendant still runs. Identity checks remain mandatory before signalling; uncertainty never authorizes killing an arbitrary PID or a group whose direct child is no longer owned.
 
 CLI execution requires a `ps` implementation supporting the requested process identity fields, including `lstart` (macOS `ps` or a compatible Linux procps installation). Hosts without it fail CLI cleanup verification; an empty observation is not substituted for the missing tool.
+
+WebSocket invocation retries stop once a socket write is admitted, even before
+acknowledgement. Missing acknowledgement does not prove that the peer did not
+execute the request. Only known pre-dispatch opening failures can retry; rejected
+upgrade responses and unconfirmed cleanup prohibit reuse. Existing acknowledgement
+evidence permissions describe the authored ceiling, while runtime dispatch and
+cleanup facts can impose a stricter prohibition. Local socket close does not prove
+remote rollback or exactly-once execution.

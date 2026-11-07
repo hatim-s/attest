@@ -30,6 +30,7 @@ type EvidenceEvent = WebSocketAttemptEvidence['events'][number];
 /** Mutable state for one request while it crosses attempts and connections. */
 type PendingInvocation = {
   acknowledged: boolean;
+  dispatched: boolean;
   attemptTimer?: NodeJS.Timeout;
   attempts: InvocationAttempt[];
   callerAbort?: () => void;
@@ -70,6 +71,7 @@ const createPendingInvocation = (
   signal?: AbortSignal,
 ): PendingInvocation => ({
   acknowledged: false,
+  dispatched: false,
   attempts: [],
   duration: startTimer(),
   events: [],
@@ -225,10 +227,19 @@ const createEvidenceRecorder = (
     createRawExcerpt(redactTransportText(JSON.stringify(evidence), secrets));
 
   const failureAttempt: EvidenceRecorder['failureAttempt'] = (pending, error, classification) =>
-    createFailedAttempt(error, {
-      durationMs: pending.duration(),
-      rawExcerpt: evidenceExcerpt(failureEvidence(pending, classification)),
-    });
+    createFailedAttempt(
+      pending.dispatched
+        ? new AgentInvocationError(error.code, error.message, {
+            cause: error,
+            classification: error.classification,
+            applicationStarted: true,
+          })
+        : error,
+      {
+        durationMs: pending.duration(),
+        rawExcerpt: evidenceExcerpt(failureEvidence(pending, classification)),
+      },
+    );
 
   return {
     countMessage: (pending, bytes) => {

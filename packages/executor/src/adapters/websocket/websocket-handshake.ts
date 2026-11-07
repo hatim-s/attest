@@ -1,5 +1,7 @@
 import * as Effect from 'effect/Effect';
 import { createHash, randomBytes } from 'node:crypto';
+import type { IncomingMessage } from 'node:http';
+import { withWebSocketRelease } from './websocket-lifetime.js';
 import type { Duplex } from 'node:stream';
 
 import { AgentInvocationError, abortedError } from '../../errors.js';
@@ -32,18 +34,20 @@ type WebSocketUpgrade = {
 const WEBSOCKET_GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11';
 
 /** Opens a DNS-pinned RFC 6455 socket and validates the complete upgrade response. */
-const openWebSocketHandshake = async (
+const openWebSocketHandshake = Effect.fn('openWebSocketHandshake')(function* (
   options: OpenWebSocketHandshakeOptions,
-): Promise<WebSocketUpgrade> => {
+) {
   let webSocketUrl: URL;
 
   try {
     webSocketUrl = new URL(options.url);
   } catch (cause: unknown) {
-    throw new AgentInvocationError('network', 'WebSocket URL is invalid.', {
-      cause,
-      classification: 'connection_failed',
-    });
+    return yield* Effect.fail(
+      new AgentInvocationError('network', 'WebSocket URL is invalid.', {
+        cause,
+        classification: 'connection_failed',
+      }),
+    );
   }
 
   if (
@@ -52,30 +56,31 @@ const openWebSocketHandshake = async (
     webSocketUrl.password.length > 0 ||
     webSocketUrl.hash.length > 0
   ) {
-    throw new AgentInvocationError(
-      'network',
-      'WebSocket URL must use WS(S) without credentials or a fragment.',
-      { classification: 'connection_failed' },
+    return yield* Effect.fail(
+      new AgentInvocationError(
+        'network',
+        'WebSocket URL must use WS(S) without credentials or a fragment.',
+        { classification: 'connection_failed' },
+      ),
     );
   }
 
   const httpUrl = new URL(webSocketUrl);
   httpUrl.protocol = webSocketUrl.protocol === 'wss:' ? 'https:' : 'http:';
 
-  // EFFECT-BRIDGE(S4b): Promise protocol owner executes this native HTTP leaf until S4b.
-  const resolved = await Effect.runPromise(
-    resolveSafeHttpUrl(httpUrl.toString(), {
-      timeoutMs: options.openTimeoutMs,
-      signal: options.signal,
-      callerSignal: options.callerSignal,
-    }),
-  );
+  const resolved = yield* resolveSafeHttpUrl(httpUrl.toString(), {
+    timeoutMs: options.openTimeoutMs,
+    signal: options.signal,
+    callerSignal: options.callerSignal,
+  });
 
   if (options.secrets.length > 0 && webSocketUrl.protocol !== 'wss:' && !resolved.loopback) {
-    throw new AgentInvocationError(
-      'network',
-      'WebSocket secrets require WSS except on explicit loopback endpoints.',
-      { classification: 'connection_failed' },
+    return yield* Effect.fail(
+      new AgentInvocationError(
+        'network',
+        'WebSocket secrets require WSS except on explicit loopback endpoints.',
+        { classification: 'connection_failed' },
+      ),
     );
   }
 
@@ -92,38 +97,37 @@ const openWebSocketHandshake = async (
 
   if (options.subprotocol !== undefined) headers['sec-websocket-protocol'] = options.subprotocol;
 
-  // EFFECT-BRIDGE(S4b): Promise protocol owner executes this native HTTP leaf until S4b.
-  const opened = await Effect.runPromise(
-    openPinnedRequest(resolved, {
-      method: 'GET',
-      allowUpgrade: true,
-      headers,
-      signal: options.signal,
-      firstByteTimeoutMs: options.openTimeoutMs,
-      errors: {
-        aborted: () =>
-          abortedError(options.callerSignal, 'WebSocket opening', {
-            classification: 'open_timeout',
-          }),
-        firstByteTimeout: () =>
-          new AgentInvocationError('timeout', 'WebSocket opening timed out.', {
-            classification: 'open_timeout',
-          }),
-        failed: (cause) =>
-          new AgentInvocationError('network', 'WebSocket connection failed.', {
-            cause,
-            classification: 'connection_failed',
-          }),
-      },
-    }),
-  );
+  const opened = yield* openPinnedRequest(resolved, {
+    method: 'GET',
+    allowUpgrade: true,
+    headers,
+    signal: options.signal,
+    firstByteTimeoutMs: options.openTimeoutMs,
+    errors: {
+      aborted: () =>
+        abortedError(options.callerSignal, 'WebSocket opening', {
+          classification: 'open_timeout',
+        }),
+      firstByteTimeout: () =>
+        new AgentInvocationError('timeout', 'WebSocket opening timed out.', {
+          classification: 'open_timeout',
+        }),
+      failed: (cause) =>
+        new AgentInvocationError('network', 'WebSocket connection failed.', {
+          cause,
+          classification: 'connection_failed',
+        }),
+    },
+  });
 
   if (opened.kind === 'response') {
-    opened.response.resume();
-    throw new AgentInvocationError(
-      'network',
-      `WebSocket handshake returned status ${String(opened.response.statusCode ?? 0)}.`,
-      { classification: 'handshake_failed' },
+    return yield* rejectHandshake(
+      opened.response,
+      new AgentInvocationError(
+        'network',
+        `WebSocket handshake returned status ${String(opened.response.statusCode ?? 0)}.`,
+        { classification: 'handshake_failed', applicationStarted: true },
+      ),
     );
   }
 
@@ -137,13 +141,31 @@ const openWebSocketHandshake = async (
     selectedProtocol === options.subprotocol;
 
   if (!accepted) {
-    socket.destroy();
-    throw new AgentInvocationError('network', 'WebSocket handshake was rejected.', {
-      classification: 'handshake_failed',
-    });
+    return yield* rejectHandshake(
+      socket,
+      new AgentInvocationError('network', 'WebSocket handshake was rejected.', {
+        classification: 'handshake_failed',
+        applicationStarted: true,
+      }),
+    );
   }
 
-  return { head, socket };
-};
+  return { head, socket } satisfies WebSocketUpgrade;
+});
+
+/** Retains the handshake error while observing bounded release of the rejected resource. */
+const rejectHandshake = (resource: Duplex | IncomingMessage, error: AgentInvocationError) =>
+  withWebSocketRelease(
+    Effect.fail(error),
+    Effect.callback<void>((resume) => {
+      const closed = (): void => resume(Effect.void);
+      resource.once('close', closed);
+      resource.destroy();
+
+      if (resource.closed) closed();
+
+      return Effect.sync(() => resource.off('close', closed));
+    }).pipe(Effect.interruptible, Effect.timeout(100)),
+  );
 
 export { openWebSocketHandshake };

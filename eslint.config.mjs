@@ -51,6 +51,16 @@ const coreForbidden = [
 // Exact file paths only. New roots need a concrete lifecycle owner.
 const effectRoots = [
   {
+    file: 'packages/executor/src/adapters/websocket/_tests_/websocket-connection.test.ts',
+    operations: ['Effect.runPromiseExit'],
+    owner: 'WebSocket socket invariant test root',
+  },
+  {
+    file: 'packages/executor/src/adapters/websocket/_tests_/websocket-adapter.test.ts',
+    operations: ['Effect.runPromiseExit', 'Effect.runFork'],
+    owner: 'WebSocket invariant test root',
+  },
+  {
     file: 'packages/executor/src/_tests_/callback-adapter.test.ts',
     operations: ['Effect.runPromise'],
     owner: 'native callback lifecycle and authentication test root',
@@ -300,6 +310,18 @@ const effectRoots = [
 // Each file declares its operations and per-operation removal slices in bridges. Removed in S10.
 const effectMigrationBridges = [
   {
+    file: 'packages/local/src/commands/agent/adapter/websocket-session.ts',
+    operations: ['Effect.runPromiseExit'],
+    owner: 'local WebSocket run lifetime',
+    bridges: [
+      {
+        operation: 'Effect.runPromiseExit',
+        removalSlice: 'S7b',
+        owner: 'local WebSocket run lifetime',
+      },
+    ],
+  },
+  {
     file: 'packages/local/src/commands/agent/adapter/callback-session.ts',
     operations: ['Effect.runPromiseExit'],
     owner: 'local callback session owns its receiver scope and joins accepted invocations',
@@ -332,18 +354,6 @@ const effectMigrationBridges = [
         operation: 'Effect.runPromiseExit',
         removalSlice: 'S7b',
         owner: 'local agent dispatch awaits native executor evidence',
-      },
-    ],
-  },
-  {
-    file: 'packages/executor/src/adapters/websocket/websocket-handshake.ts',
-    operations: ['Effect.runPromise'],
-    owner: 'Promise WebSocket handshake HTTP leaf closure',
-    bridges: [
-      {
-        operation: 'Effect.runPromise',
-        removalSlice: 'S4b',
-        owner: 'Promise WebSocket handshake HTTP leaf closure',
       },
     ],
   },

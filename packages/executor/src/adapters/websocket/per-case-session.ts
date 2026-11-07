@@ -1,162 +1,202 @@
 import type { AgentRequest } from '@attest/contracts';
+import type * as Cause from 'effect/Cause';
+import * as Exit from 'effect/Exit';
+import * as Deferred from 'effect/Deferred';
+import * as Effect from 'effect/Effect';
 
 import { AgentInvocationError } from '../../errors.js';
-import { abortableWait } from '../../internal/abortable-wait.js';
 import { retryBackoffDelay } from '../../internal/retry-backoff.js';
 import type { InvocationAttempt, InvocationResult } from '../../types.js';
 import type { WebSocketConnection } from './websocket-connection.js';
+import { clearPendingTimers, type PendingInvocation } from './websocket-evidence.js';
 import {
-  clearPendingTimers,
-  createPendingInvocation,
-  type PendingInvocation,
-} from './websocket-evidence.js';
+  withWebSocketRelease,
+  retainWebSocketOpeningCause,
+  retainWebSocketOpeningResult,
+  WebSocketCleanupError,
+  waitForWebSocketRetry,
+} from './websocket-lifetime.js';
 import { errorClassification, type WebSocketAgentResource } from './websocket-protocol.js';
 import { WebSocketSessionState, type WebSocketSessionOptions } from './websocket-session-state.js';
 
-/** Waits for retry backoff while keeping caller cancellation immediate. */
-const waitForRetry = (delayMs: number, signal: AbortSignal | undefined): Promise<void> =>
-  abortableWait(
-    delayMs,
-    signal,
-    () => new AgentInvocationError('cancelled', 'WebSocket retry was cancelled.'),
-  );
-
-/**
- * Opens a fresh connection for every case and closes it once the case settles. A failed attempt
- * that was never acknowledged is retried on a new connection.
- */
+/** Owns each case socket until its result and bounded release have both been observed. */
 class PerCaseWebSocketSession {
   private readonly state: WebSocketSessionState;
 
   constructor(agent: WebSocketAgentResource, options: WebSocketSessionOptions) {
     this.state = new WebSocketSessionState(agent, options, {
-      // Each attempt owns its connection, so a deadline ends the attempt; invoke decides retries.
       onRequestTimeout: (pending, error, classification) =>
         this.state.settleFailure(pending, error, classification),
       onRunEnd: () => undefined,
     });
   }
 
-  async invoke(request: AgentRequest, signal?: AbortSignal): Promise<InvocationResult> {
-    const { agent } = this.state;
-    const attempts: InvocationAttempt[] = [];
+  /** Runs one isolated request. Uncertain dispatch is never replayed. */
+  invoke(
+    request: AgentRequest,
+    signal?: AbortSignal,
+  ): Effect.Effect<InvocationResult, AgentInvocationError> {
+    return Effect.gen({ self: this }, function* () {
+      const attempts: InvocationAttempt[] = [];
 
-    for (let retry = 0; ; retry += 1) {
-      const pending = this.state.createPending(request, signal);
-      const result = await this.runAttempt(pending);
+      for (let retry = 0; ; retry++) {
+        const pending = this.state.createPending(request, signal);
 
-      // Acknowledged work may already be running remotely, so it is never replayed.
-      const retryable =
-        result.status === 'invocation_error' &&
-        !pending.acknowledged &&
-        retry < (agent.retry?.retries ?? 0) &&
-        (result.error.code === 'network' || result.error.code === 'timeout');
+        const result = yield* this.runAttempt(pending).pipe(
+          Effect.catch((error) => {
+            if (!(error instanceof WebSocketCleanupError)) return Effect.fail(error);
 
-      if (!retryable) return { ...result, attempts: [...attempts, ...result.attempts] };
-      attempts.push(...result.attempts);
-
-      try {
-        await waitForRetry(retryBackoffDelay(agent.retry?.backoff, retry), signal);
-      } catch (error: unknown) {
-        // The interrupted wait is recorded against the last attempt's request id.
-        return this.state.evidence.failureResult(
-          createPendingInvocation(request, pending.requestId, () => undefined, signal),
-          error instanceof AgentInvocationError ? error : result.error,
-          'cancelled',
-          attempts,
+            // Cleanup ends retrying, but earlier refused opens still belong to this invocation.
+            return Effect.fail(
+              new WebSocketCleanupError(
+                { ...error.result, attempts: [...attempts, ...error.result.attempts] },
+                error.cleanupCause,
+              ),
+            );
+          }),
         );
-      }
-    }
-  }
 
-  /** Ends the session and cancels outstanding cases; their connections close themselves. */
-  close(): Promise<void> {
-    this.state.beginClose();
+        const combined = { ...result, attempts: [...attempts, ...result.attempts] };
 
-    return Promise.resolve();
-  }
+        if (
+          result.status !== 'invocation_error' ||
+          pending.dispatched ||
+          pending.acknowledged ||
+          result.error.applicationStarted === true ||
+          (result.error.code !== 'network' && result.error.code !== 'timeout') ||
+          this.state.lifecycle.signal.aborted ||
+          retry >= (this.state.agent.retry?.retries ?? 0)
+        )
+          return combined;
+        attempts.push(...result.attempts);
 
-  /** Runs one request on its own connection, including the close handshake. */
-  private async runAttempt(pending: PendingInvocation): Promise<InvocationResult> {
-    const { agent, evidence } = this.state;
-    const { requestId, signal } = pending;
+        const retrySignal = AbortSignal.any([
+          this.state.lifecycle.signal,
+          ...(signal === undefined ? [] : [signal]),
+        ]);
 
-    if (this.state.lifecycle.signal.aborted) return this.state.closedResult(pending);
+        yield* waitForWebSocketRetry(
+          retryBackoffDelay(this.state.agent.retry?.backoff, retry),
+          retrySignal,
+        );
 
-    const result = new Promise<InvocationResult>((resolve) => {
-      pending.resolve = resolve;
-    });
-
-    let connection: WebSocketConnection | undefined;
-    const attemptController = new AbortController();
-
-    const attemptSignal = AbortSignal.any([
-      attemptController.signal,
-      this.state.lifecycle.signal,
-      ...(signal === undefined ? [] : [signal]),
-    ]);
-
-    const lose = (error: AgentInvocationError): void =>
-      this.state.settleFailure(pending, error, errorClassification(error));
-
-    this.state.arm(pending);
-
-    try {
-      connection = await this.state.openConnection(attemptSignal, {
-        onClose: (close) => {
-          evidence.recordClose(pending, close);
-          lose(
-            new AgentInvocationError('network', 'WebSocket closed before a terminal response.', {
-              classification: 'unexpected_close',
-            }),
+        if (retrySignal.aborted)
+          return this.state.evidence.failureResult(
+            this.state.createPending(request, signal),
+            new AgentInvocationError('cancelled', 'WebSocket retry was cancelled.'),
+            'cancelled',
+            attempts,
           );
-        },
-        onFailure: lose,
-        onPong: () => evidence.record(pending, { classification: 'pong_received' }),
-        onText: (text, bytes) => this.state.consumeMessage(text, bytes, new Set([requestId])),
+      }
+    });
+  }
+
+  /** Stops admission; the session owner joins all invocations before releasing its scope. */
+  close(): Effect.Effect<void> {
+    return Effect.sync(() => this.state.beginClose());
+  }
+
+  /** Converts socket observations into case evidence before running release. */
+  private runAttempt(
+    pending: PendingInvocation,
+  ): Effect.Effect<InvocationResult, AgentInvocationError> {
+    return Effect.suspend(() => {
+      const { agent, evidence } = this.state;
+
+      if (this.state.lifecycle.signal.aborted || this.state.options.signal?.aborted === true)
+        return Effect.succeed(this.state.closedResult(pending));
+      const terminal = Deferred.makeUnsafe<InvocationResult>();
+      const controller = new AbortController();
+      pending.resolve = (result) => {
+        controller.abort();
+        Deferred.doneUnsafe(terminal, Effect.succeed(result));
+      };
+
+      const signal = AbortSignal.any([
+        controller.signal,
+        this.state.lifecycle.signal,
+        ...(pending.signal === undefined ? [] : [pending.signal]),
+      ]);
+
+      let connection: WebSocketConnection | undefined;
+      let openingCause: Cause.Cause<AgentInvocationError> | undefined;
+
+      const lose = (error: AgentInvocationError): void =>
+        this.state.settleFailure(pending, error, errorClassification(error));
+
+      const primary = Effect.gen({ self: this }, function* () {
+        this.state.arm(pending);
+
+        const opened = yield* Effect.exit(
+          this.state.openConnection(signal, {
+            onClose: (close) => {
+              evidence.recordClose(pending, close);
+              lose(
+                new AgentInvocationError(
+                  'network',
+                  'WebSocket closed before a terminal response.',
+                  { classification: 'unexpected_close' },
+                ),
+              );
+            },
+            onFailure: lose,
+            onPong: () => evidence.record(pending, { classification: 'pong_received' }),
+            onText: (text, bytes) =>
+              this.state.consumeMessage(text, bytes, new Set([pending.requestId])),
+          }),
+        );
+
+        if (Exit.isFailure(opened)) {
+          // flip extracts only typed failures; native defects and interruption still propagate.
+          openingCause = opened.cause;
+
+          const error = retainWebSocketOpeningCause(
+            yield* Effect.flip(Effect.failCause(opened.cause)),
+            openingCause,
+          );
+
+          pending.dispatched ||= error.applicationStarted === true;
+          lose(error);
+        } else {
+          connection = opened.value;
+          pending.connection = connection;
+
+          if (this.state.pending.has(pending.requestId) && !signal.aborted) {
+            evidence.record(pending, { classification: 'connection_opened' });
+            yield* this.state
+              .send(pending, connection, signal)
+              .pipe(Effect.catch((error) => Effect.sync(() => lose(error))));
+          } else connection.destroy();
+        }
+
+        const result = yield* Deferred.await(terminal);
+
+        return retainWebSocketOpeningResult(result, openingCause);
       });
 
-      // Closing a session can settle the invocation while an HTTP upgrade is still racing.
-      // attemptSignal follows the session lifecycle, so this also covers a closed session.
-      if (attemptSignal.aborted || !this.state.pending.has(requestId)) {
-        connection.destroy();
+      const release = Effect.gen({ self: this }, function* () {
+        controller.abort();
+        this.state.pending.delete(pending.requestId);
+        clearPendingTimers(pending);
 
-        return await result;
-      }
+        if (connection === undefined) return;
+        const close = yield* connection.close(agent.transport.close_timeout_ms);
+        evidence.recordClose(pending, close);
 
-      pending.connection = connection;
-      evidence.record(pending, { classification: 'connection_opened' });
-      await this.state.send(pending, connection, attemptSignal);
-      const terminal = await result;
-      const close = await connection.close(agent.transport.close_timeout_ms);
-      evidence.recordClose(pending, close);
+        if (!close.clean)
+          return yield* Effect.fail(
+            new AgentInvocationError('timeout', 'WebSocket close handshake timed out.', {
+              classification: 'close_timeout',
+            }),
+          );
+      });
 
-      if (!close.clean && terminal.status === 'ok') {
-        return evidence.failureResult(
-          pending,
-          new AgentInvocationError('timeout', 'WebSocket close handshake timed out.', {
-            classification: 'close_timeout',
-          }),
-          'close_timeout',
-          terminal.attempts.slice(0, -1),
-        );
-      }
-
-      return terminal;
-    } catch (error: unknown) {
-      lose(
-        error instanceof AgentInvocationError
-          ? error
-          : new AgentInvocationError('network', 'WebSocket connection failed.', { cause: error }),
+      return withWebSocketRelease(
+        primary,
+        release,
+        (result, cause) => new WebSocketCleanupError(result, cause),
       );
-
-      return await result;
-    } finally {
-      attemptController.abort();
-      connection?.destroy();
-      this.state.pending.delete(requestId);
-      clearPendingTimers(pending);
-    }
+    });
   }
 }
 

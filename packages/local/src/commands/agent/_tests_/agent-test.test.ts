@@ -2,9 +2,11 @@ import {
   CliCleanupError,
   CallbackCleanupError,
   StreamCleanupError,
+  WebSocketCleanupError,
   AgentInvocationError,
   type InvocationAttempt,
 } from '@attest/executor';
+import * as Cause from 'effect/Cause';
 import { startupFailure } from '../adapter/invoke-resolved-agent.js';
 import { redactInvocation } from '../adapter/evidence-redaction.js';
 import { mkdtemp, readFile, writeFile, rm, realpath } from 'node:fs/promises';
@@ -301,7 +303,7 @@ it.each(['ok', 'invocation_error'] as const)(
   },
 );
 
-it.each(['callback', 'stream'] as const)(
+it.each(['callback', 'stream', 'websocket'] as const)(
   'records completed %s evidence and earlier attempts when cleanup fails',
   (kind) => {
     const earlier: InvocationAttempt = {
@@ -323,10 +325,16 @@ it.each(['callback', 'stream'] as const)(
 
     const CleanupError = kind === 'callback' ? CallbackCleanupError : StreamCleanupError;
 
-    const cleanup = new CleanupError(
-      new AgentInvocationError('network', 'HTTP cleanup was not confirmed.'),
-      { ...terminal, attempts: [earlier, terminal] },
-    );
+    const cleanup =
+      kind === 'websocket'
+        ? new WebSocketCleanupError(
+            { ...terminal, attempts: [earlier, terminal] },
+            Cause.die(new Error('Socket close failed.')),
+          )
+        : new CleanupError(new AgentInvocationError('network', 'HTTP cleanup was not confirmed.'), {
+            ...terminal,
+            attempts: [earlier, terminal],
+          });
 
     const projected = startupFailure(cleanup, 99);
     expect(projected).toMatchObject({ error: { applicationStarted: true } });
@@ -337,11 +345,13 @@ it.each(['callback', 'stream'] as const)(
       diagnostics: { httpStatus: 202 },
       rawExcerpt: terminal.rawExcerpt,
       error: {
-        code: 'network',
+        code: kind === 'websocket' ? 'timeout' : 'network',
         message:
-          kind === 'callback'
-            ? 'Callback cleanup could not be confirmed.'
-            : 'Streaming cleanup could not be confirmed.',
+          kind === 'websocket'
+            ? 'WebSocket close handshake could not be confirmed.'
+            : kind === 'callback'
+              ? 'Callback cleanup could not be confirmed.'
+              : 'Streaming cleanup could not be confirmed.',
       },
       attempts: [
         { diagnostics: { httpStatus: 503 } },
@@ -354,3 +364,34 @@ it.each(['callback', 'stream'] as const)(
     });
   },
 );
+
+it('preserves a failed WebSocket primary and its warnings during cleanup projection', () => {
+  const terminal: InvocationAttempt = {
+    status: 'invocation_error',
+    error: new AgentInvocationError('cancelled', 'Caller cancelled.'),
+    diagnostics: { httpStatus: 101 },
+    durationMs: 17,
+    rawExcerpt: { text: 'retained socket evidence', truncated: false },
+    warnings: [{ code: 'unknown_field', path: '$.extra', message: 'Retained warning.' }],
+  };
+
+  const cleanup = new WebSocketCleanupError(
+    { ...terminal, attempts: [terminal] },
+    Cause.die(new Error('Socket release failed.')),
+  );
+
+  const projected = startupFailure(cleanup, 99);
+  expect(projected).toMatchObject({
+    status: 'invocation_error',
+    error: { code: 'cancelled', applicationStarted: true },
+    diagnostics: terminal.diagnostics,
+    durationMs: 17,
+    rawExcerpt: terminal.rawExcerpt,
+    warnings: terminal.warnings,
+    attempts: [{ warnings: terminal.warnings, durationMs: 17 }],
+  });
+
+  if (projected.status !== 'invocation_error') throw new Error('Expected failed evidence.');
+  expect(projected.error).toBe(cleanup);
+  expect(projected.error.message).toContain('Caller cancelled.');
+});
