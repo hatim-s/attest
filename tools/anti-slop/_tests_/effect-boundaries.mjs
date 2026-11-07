@@ -273,8 +273,10 @@ tester.run('Mixed bridge owners retain per-execution enforcement', effectBoundar
     { code: mixedCode.replace('EFFECT-BRIDGE(S2)', 'EFFECT-BRIDGE(S2'), options: mixedOptions, errors: [error, error, error] },
   ],
 });
-const mixedRegistry = await eslint.calculateConfigForFile('packages/local/src/registry/project-registry.ts');
-assert.deepEqual(
-  mixedRegistry.rules['anti-slop/effect-boundaries'][1].bridges.map(({ removalSlice }) => removalSlice),
-  ['S8c'],
+const nativeRegistry = await eslint.calculateConfigForFile('packages/local/src/registry/project-registry.ts');
+assert.equal(nativeRegistry.rules['anti-slop/effect-boundaries'][1], undefined);
+const [registryExecution] = await eslint.lintText(
+  "import * as Effect from 'effect/Effect'; Effect.runPromise(Effect.void);",
+  { filePath: 'packages/local/src/registry/project-registry.ts' },
 );
+assert.ok(registryExecution.messages.some(({ ruleId }) => ruleId === 'anti-slop/effect-boundaries'));

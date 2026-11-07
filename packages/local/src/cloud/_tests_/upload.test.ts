@@ -1,3 +1,5 @@
+import { valueFromExit } from '../../internal/effect-exit.js';
+import * as Effect from 'effect/Effect';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -21,12 +23,14 @@ it('uploads the exact bundle of the newest finished run and leaves the store unc
   directories.push(root);
   await writeFile(join(root, 'attest.project.json'), '{}');
   await mkdir(join(root, '.attest'));
-  await writeCloudLink(root, {
-    schema: 'attest.cloud-link.v1',
-    base_url: 'https://cloud.test',
-    project_id: 'p',
-    file_hashes: {},
-  });
+  await Effect.runPromiseExit(
+    writeCloudLink(root, {
+      schema: 'attest.cloud-link.v1',
+      base_url: 'https://cloud.test',
+      project_id: 'p',
+      file_hashes: {},
+    }),
+  ).then(valueFromExit);
   const path = join(root, '.attest/runs.db');
   const store = await openStore(path);
   let expected = '';
@@ -104,7 +108,13 @@ it('uploads the exact bundle of the newest finished run and leaves the store unc
   });
 
   expect(
-    await uploadCloudRun(await resolveCloudUploadProject({ workingDirectory: root, client })),
+    await Effect.runPromiseExit(
+      uploadCloudRun(
+        await Effect.runPromiseExit(
+          resolveCloudUploadProject({ workingDirectory: root, client }),
+        ).then(valueFromExit),
+      ),
+    ).then(valueFromExit),
   ).toEqual({
     url: 'https://cloud.test/#/projects/p/runs/01ARZ3NDEKTSV4RRFFQ69G5FAB',
     unchanged: true,

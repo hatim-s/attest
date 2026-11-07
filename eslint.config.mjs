@@ -151,6 +151,57 @@ const effectRoots = [
     owner: 'process fixture scope and invocation execution',
   },
   {
+    file: 'packages/local/src/internal/_tests_/operation-cleanup.test.ts',
+    operations: ['Effect.runPromiseExit'],
+    owner: 'S8c release Exit invariant fixtures',
+  },
+  {
+    file: 'packages/cli/src/commands/eval/eval-command.ts',
+    operations: ['Effect.runPromiseExit'],
+    owner: 'Promise CLI parent of native cloud operations',
+    bridges: [
+      { operation: 'Effect.runPromiseExit', removalSlice: 'S9b', owner: 'S9b CLI composition' },
+    ],
+  },
+  {
+    file: 'packages/cli/src/commands/cloud/register-cloud-commands.ts',
+    operations: ['Effect.runPromiseExit'],
+    owner: 'Promise CLI parent of native cloud operations',
+    bridges: [
+      { operation: 'Effect.runPromiseExit', removalSlice: 'S9b', owner: 'S9b CLI composition' },
+    ],
+  },
+  {
+    file: 'packages/cli/src/commands/eval/_tests_/eval-command.test.ts',
+    operations: ['Effect.runPromise'],
+    owner: 'S8c fixture execution root',
+  },
+  {
+    file: 'packages/local/src/registry/_tests_/registry-catalog.test.ts',
+    operations: ['Effect.runPromiseExit'],
+    owner: 'S8c fixture execution root',
+  },
+  {
+    file: 'packages/local/src/registry/_tests_/project-registry.test.ts',
+    operations: ['Effect.runPromiseExit'],
+    owner: 'S8c fixture execution root',
+  },
+  {
+    file: 'packages/local/src/cloud/_tests_/upload.test.ts',
+    operations: ['Effect.runPromiseExit'],
+    owner: 'S8c fixture execution root',
+  },
+  {
+    file: 'packages/local/src/cloud/_tests_/resolution.test.ts',
+    operations: ['Effect.runPromiseExit'],
+    owner: 'S8c fixture execution root',
+  },
+  {
+    file: 'packages/local/src/cloud/_tests_/client-credentials.test.ts',
+    operations: ['Effect.runPromiseExit'],
+    owner: 'S8c fixture execution root',
+  },
+  {
     file: 'packages/executor/src/_tests_/portability.check.mjs',
     operations: ['Effect.runPromise'],
     owner: 'Node and Bun native executor portability process roots',
@@ -530,54 +581,6 @@ const effectMigrationBridges = [
     ],
   },
   {
-    file: 'packages/local/src/cloud/link.ts',
-    operations: ['Effect.runPromiseExit'],
-    owner: 'unmigrated Promise parent of Phase A project operations',
-    bridges: [
-      {
-        operation: 'Effect.runPromiseExit',
-        removalSlice: 'S8c',
-        owner: 'declared migration owner',
-      },
-    ],
-  },
-  {
-    file: 'packages/local/src/cloud/sync.ts',
-    operations: ['Effect.runPromiseExit'],
-    owner: 'unmigrated Promise parent of Phase A project operations',
-    bridges: [
-      {
-        operation: 'Effect.runPromiseExit',
-        removalSlice: 'S8c',
-        owner: 'declared migration owner',
-      },
-    ],
-  },
-  {
-    file: 'packages/local/src/cloud/upload.ts',
-    operations: ['Effect.runPromiseExit'],
-    owner: 'unmigrated Promise parent of Phase A project operations',
-    bridges: [
-      {
-        operation: 'Effect.runPromiseExit',
-        removalSlice: 'S8c',
-        owner: 'declared migration owner',
-      },
-    ],
-  },
-  {
-    file: 'packages/local/src/registry/add-project.ts',
-    operations: ['Effect.runPromiseExit'],
-    owner: 'unmigrated Promise parent of Phase A project operations',
-    bridges: [
-      {
-        operation: 'Effect.runPromiseExit',
-        removalSlice: 'S8c',
-        owner: 'declared migration owner',
-      },
-    ],
-  },
-  {
     file: 'packages/local/src/commands/project/project-init-command.ts',
     operations: ['Effect.runPromiseExit'],
     owner: 'unmigrated Promise parent of Phase A project operations',
@@ -663,18 +666,6 @@ const effectMigrationBridges = [
     ],
   },
   {
-    file: 'packages/local/src/cloud/credentials.ts',
-    operations: ['Effect.runPromiseExit'],
-    owner: 'temporary Promise parent of native S1c file operations',
-    bridges: [
-      {
-        operation: 'Effect.runPromiseExit',
-        removalSlice: 'S8c',
-        owner: 'foreign command or registry write parent',
-      },
-    ],
-  },
-  {
     file: 'packages/local/src/commands/agent/authoring/resource-import.ts',
     operations: ['Effect.runPromiseExit'],
     owner: 'temporary Promise parent of native S1c file operations',
@@ -730,30 +721,6 @@ const effectMigrationBridges = [
       {
         operation: 'Effect.runPromiseExit',
         removalSlice: 'S8b',
-        owner: 'foreign command or registry write parent',
-      },
-    ],
-  },
-  {
-    file: 'packages/local/src/registry/project-registry.ts',
-    operations: ['Effect.runPromiseExit'],
-    owner: 'temporary Promise parent of native S1c file operations',
-    bridges: [
-      {
-        operation: 'Effect.runPromiseExit',
-        removalSlice: 'S8c',
-        owner: 'foreign command or registry write parent',
-      },
-    ],
-  },
-  {
-    file: 'packages/local/src/registry/registry-lock.ts',
-    operations: ['Effect.runPromiseExit'],
-    owner: 'temporary Promise parent of native S1c file operations',
-    bridges: [
-      {
-        operation: 'Effect.runPromiseExit',
-        removalSlice: 'S8c',
         owner: 'foreign command or registry write parent',
       },
     ],

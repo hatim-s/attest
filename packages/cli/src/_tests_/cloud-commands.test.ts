@@ -1,44 +1,48 @@
+import * as Effect from 'effect/Effect';
 import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-
 import type * as CloudAdapter from '@attest/local/cloud';
 import { parseWithSchemaSync, cliResultSchema } from '@attest/contracts';
+import { contentHash } from '@attest/core';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { runCommand as executeCommand, temporaryDirectory } from './support/cli-test-support.js';
 
 const cloud = {
-  push: vi.fn<typeof CloudAdapter.pushCloudProject>().mockResolvedValue({
-    project_id: 'project',
-    revision_id: 'rev',
-    file_count: 0,
-  }),
-  run: vi.fn<typeof CloudAdapter.runCloud>().mockResolvedValue({
-    run: {
-      id: 'run',
+  push: vi.fn<typeof CloudAdapter.pushCloudProject>().mockReturnValue(
+    Effect.succeed({
       project_id: 'project',
-      revision_id: 'revision',
-      status: 'queued',
-      created_at: '2026-08-08T10:00:00.000Z',
-      started_at: null,
-      finished_at: null,
-      cancel_requested: false,
-      raw_expires_at: null,
-      error_code: null,
-    },
-  }),
+      revision_id: 'rev',
+      file_count: 0,
+    }),
+  ),
+  run: vi.fn<typeof CloudAdapter.runCloud>().mockReturnValue(
+    Effect.succeed({
+      run: {
+        id: 'run',
+        project_id: 'project',
+        revision_id: 'revision',
+        status: 'queued',
+        created_at: '2026-08-08T10:00:00.000Z',
+        started_at: null,
+        finished_at: null,
+        cancel_requested: false,
+        raw_expires_at: null,
+        error_code: null,
+      },
+    }),
+  ),
 };
 
 const services = {
   cloud: {
     authenticatedCloudClient: () =>
-      Promise.resolve({
+      Effect.succeed({
         baseUrl: 'https://cloud.example.test',
-        upload: () => Promise.reject(new Error('Unexpected upload.')),
-        request: () =>
-          Promise.reject(new Error('This command fixture should not send HTTP requests.')),
+        upload: () => Effect.die(new Error('Unexpected upload.')),
+        request: () => Effect.die(new Error('This command fixture should not send HTTP requests.')),
       }),
     resolveCloudProject: () =>
-      Promise.resolve({
+      Effect.succeed({
         root: process.cwd(),
         projectId: 'project',
         revisionId: 'revision',
@@ -69,6 +73,71 @@ afterEach(() => {
 });
 
 describe('cloud command translation', () => {
+  it('reports a nonportable metric as project_invalid before sending a cloud push', async () => {
+    const root = await temporaryDirectory('attest-cloud-invalid-metric-');
+    const home = await temporaryDirectory('attest-cloud-invalid-home-');
+    vi.stubEnv('ATTEST_HOME', home);
+    vi.stubEnv('ATTEST_CLOUD_URL', 'https://cloud.example.test');
+    vi.stubEnv('ATTEST_CLOUD_TOKEN', 'atp_fixture');
+
+    const metric = {
+      schema: 'attest.metric',
+      id: 'custom',
+      name: 'Custom',
+      definition: { kind: 'exec', argv: ['./score'] },
+    };
+
+    await mkdir(join(root, 'attest/metrics'), { recursive: true });
+    await writeFile(join(root, 'attest/metrics/custom.json'), JSON.stringify(metric));
+    await writeFile(
+      join(root, 'attest.project.json'),
+      JSON.stringify({
+        schema: 'attest.project',
+        project_id: '01ARZ3NDEKTSV4RRFFQ69G5FAB',
+        name: 'Local',
+        resources: {
+          agents: [],
+          tests: [],
+          datasets: [],
+          metrics: [
+            {
+              id: metric.id,
+              schema: metric.schema,
+              path: 'attest/metrics/custom.json',
+              content_hash: contentHash(metric),
+            },
+          ],
+        },
+      }),
+    );
+    await mkdir(join(root, '.attest'));
+    await writeFile(
+      join(root, '.attest/cloud.json'),
+      JSON.stringify({
+        schema: 'attest.cloud-link.v1',
+        base_url: 'https://cloud.example.test',
+        project_id: 'project',
+        file_hashes: {},
+      }),
+    );
+    const fetcher = vi.fn<typeof fetch>();
+    vi.stubGlobal('fetch', fetcher);
+
+    const result = await executeCommand(root, [
+      'cloud',
+      'push',
+      '--no-secrets',
+      '--output',
+      'json',
+    ]);
+
+    expect(result.exitCode).toBe(1);
+    expect(parseWithSchemaSync(cliResultSchema, JSON.parse(result.output[0]!))).toMatchObject({
+      ok: false,
+      error: { code: 'project_invalid', message: 'Metric custom needs a script entrypoint.' },
+    });
+    expect(fetcher).not.toHaveBeenCalled();
+  });
   it('requires the explicit --no-secrets flag to acknowledge a changed upload', async () => {
     const implicit = await runCommand(process.cwd(), ['cloud', 'push', '--output', 'json']);
     expect(implicit.exitCode).toBe(0);
@@ -85,7 +154,6 @@ describe('cloud command translation', () => {
     expect(explicit.exitCode).toBe(0);
     expect(cloud.push.mock.calls[1]?.[0]).toMatchObject({ acknowledgeNoSecrets: true });
   });
-
   it('uses the eval selection contract, linked revision, and retained retry key', async () => {
     const result = await runCommand(process.cwd(), [
       'cloud',
@@ -138,7 +206,6 @@ describe('cloud command translation', () => {
     expect(conflict.exitCode).toBe(2);
     expect(cloud.run).toHaveBeenCalledTimes(1);
   });
-
   it('keeps cloud credentials under ATTEST_HOME', async () => {
     const home = await temporaryDirectory('attest-home-');
     vi.stubEnv('ATTEST_HOME', home);
@@ -149,14 +216,12 @@ describe('cloud command translation', () => {
       JSON.stringify({
         baseUrl: 'https://cloud.example.test',
         accessToken: 'token',
-        expiresAt: new Date(Date.now() + 60_000).toISOString(),
+        expiresAt: new Date(Date.now() + 60000).toISOString(),
       }),
       { mode: 0o600 },
     );
     vi.stubGlobal('fetch', vi.fn<typeof fetch>().mockResolvedValue(Response.json({ ok: true })));
-
     const result = await runCommand(process.cwd(), ['cloud', 'logout', '--output', 'json']);
-
     expect(result.exitCode).toBe(0);
     await expect(stat(credentialPath)).rejects.toMatchObject({ code: 'ENOENT' });
   });

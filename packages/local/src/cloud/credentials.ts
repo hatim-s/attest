@@ -1,11 +1,9 @@
+import { anchoredCall } from '../internal/open-anchored.js';
 import * as Effect from 'effect/Effect';
-import { valueFromExit } from '../internal/effect-exit.js';
 import { utcTimestampSchema } from '../internal/utc-timestamp.js';
 import { parseWithSchemaSync, parseWithSchema } from '@attest/contracts';
 import { rm } from 'node:fs/promises';
-
 import * as Schema from 'effect/Schema';
-
 import { LocalError } from '../errors/local-error.js';
 import {
   assertPrivateAncestors,
@@ -26,57 +24,85 @@ type CloudCredentialSource = 'session' | 'project_token';
 type CloudCredentials = typeof credentialSchema.Type;
 
 /** Reads a private credential file without following a substituted symbolic link. */
-const readCloudCredentials = async (
+const readCloudCredentials = Effect.fn('readCloudCredentials')(function* (
   path: string,
-  options: { allowExpired?: boolean } = {},
-): Promise<CloudCredentials> => {
-  try {
-    // EFFECT-BRIDGE(S8c)
-    const text = await Effect.runPromiseExit(readPrivateFile(path)).then((exit) =>
-      valueFromExit(exit),
-    );
+  options: {
+    allowExpired?: boolean;
+  } = {},
+) {
+  return yield* Effect.gen(function* () {
+    const text = yield* readPrivateFile(path);
 
-    if (text.length > 16_384) throw new Error('Unsafe credentials');
-    const credentials = parseWithSchemaSync(credentialSchema, JSON.parse(text));
-    normalizeCloudUrl(credentials.baseUrl);
+    if (text.length > 16384) return yield* Effect.fail(new Error('Unsafe credentials'));
+
+    const credentials = yield* Effect.try({
+      try: () => {
+        const parsed = parseWithSchemaSync(credentialSchema, JSON.parse(text));
+        normalizeCloudUrl(parsed.baseUrl);
+
+        return parsed;
+      },
+      catch: (cause) =>
+        new LocalError(
+          'cloud_auth_required',
+          'Cloud credentials are missing, expired, or unsafe.',
+          { cause },
+        ),
+    });
 
     if (!options.allowExpired && Date.parse(credentials.expiresAt) <= Date.now())
-      throw new Error('Expired credentials');
+      return yield* Effect.fail(new Error('Expired credentials'));
 
     return credentials;
-  } catch {
-    throw new LocalError(
-      'cloud_auth_required',
-      'Cloud credentials are missing, expired, or unsafe.',
-      { hint: 'Run attest cloud login --url <cloud-origin>.' },
-    );
-  }
-};
+  }).pipe(
+    Effect.catch(() =>
+      Effect.gen(function* () {
+        return yield* Effect.fail(
+          new LocalError(
+            'cloud_auth_required',
+            'Cloud credentials are missing, expired, or unsafe.',
+            { hint: 'Run attest cloud login --url <cloud-origin>.' },
+          ),
+        );
+      }),
+    ),
+  );
+});
 
 /** Replaces credentials atomically; neither the temporary file nor the destination is public. */
-const writeCloudCredentials = async (
+const writeCloudCredentials = Effect.fn('writeCloudCredentials')(function* (
   credentials: CloudCredentials,
   path: string,
-): Promise<void> => {
-  normalizeCloudUrl(credentials.baseUrl);
+) {
+  yield* Effect.try({
+    try: () => normalizeCloudUrl(credentials.baseUrl),
+    catch: (cause) => cause,
+  }).pipe(
+    Effect.catch((cause) => (cause instanceof LocalError ? Effect.fail(cause) : Effect.die(cause))),
+  );
 
-  try {
-    // EFFECT-BRIDGE(S8c)
-    await Effect.runPromiseExit(writePrivateFile(path, JSON.stringify(credentials))).then(
-      valueFromExit,
-    );
-  } catch {
-    throw new LocalError('cloud_credentials_failed', 'Could not save private cloud credentials.');
-  }
-};
+  return yield* Effect.gen(function* () {
+    yield* writePrivateFile(path, JSON.stringify(credentials));
+  }).pipe(
+    Effect.catch((cause) =>
+      Effect.gen(function* () {
+        return yield* Effect.fail(
+          new LocalError('cloud_credentials_failed', 'Could not save private cloud credentials.', {
+            cause,
+          }),
+        );
+      }),
+    ),
+  );
+});
 
 /** Resolves the CI pair before consulting private session state. */
-const resolveCloudCredentials = async (path: string) => {
+const resolveCloudCredentials = Effect.fn('resolveCloudCredentials')(function* (path: string) {
   const baseUrl = process.env.ATTEST_CLOUD_URL;
   const accessToken = process.env.ATTEST_CLOUD_TOKEN;
 
   if (baseUrl === undefined && accessToken === undefined) {
-    const credentials = await readCloudCredentials(path);
+    const credentials = yield* readCloudCredentials(path);
 
     return { ...credentials, credentialSource: 'session' as const };
   }
@@ -86,9 +112,11 @@ const resolveCloudCredentials = async (path: string) => {
     accessToken === undefined ||
     !parseWithSchema(bearerTokenSchema, accessToken).ok
   ) {
-    throw new LocalError(
-      'cloud_credentials_invalid',
-      'Set ATTEST_CLOUD_URL and ATTEST_CLOUD_TOKEN together with valid values.',
+    return yield* Effect.fail(
+      new LocalError(
+        'cloud_credentials_invalid',
+        'Set ATTEST_CLOUD_URL and ATTEST_CLOUD_TOKEN together with valid values.',
+      ),
     );
   }
 
@@ -99,27 +127,34 @@ const resolveCloudCredentials = async (path: string) => {
       credentialSource: 'project_token' as const,
     };
   } catch {
-    throw new LocalError(
-      'cloud_credentials_invalid',
-      'ATTEST_CLOUD_URL must be a cloud HTTPS origin or HTTP loopback origin.',
+    return yield* Effect.fail(
+      new LocalError(
+        'cloud_credentials_invalid',
+        'ATTEST_CLOUD_URL must be a cloud HTTPS origin or HTTP loopback origin.',
+      ),
     );
   }
-};
+});
 
 /** Removes the locally stored bearer token after its cloud session has been revoked. */
-const removeCloudCredentials = async (path: string): Promise<void> => {
-  try {
-    // EFFECT-BRIDGE(S8c)
-    await Effect.runPromiseExit(assertPrivateAncestors(path)).then((exit) => valueFromExit(exit));
-    await rm(path, { force: true });
-  } catch (cause: unknown) {
-    throw new LocalError(
-      'cloud_credentials_failed',
-      'Could not remove private cloud credentials.',
-      { cause },
-    );
-  }
-};
+const removeCloudCredentials = Effect.fn('removeCloudCredentials')(function* (path: string) {
+  return yield* Effect.gen(function* () {
+    yield* assertPrivateAncestors(path);
+    yield* anchoredCall('rm', 'cloud/registry', () => rm(path, { force: true }));
+  }).pipe(
+    Effect.catch((cause) =>
+      Effect.gen(function* () {
+        return yield* Effect.fail(
+          new LocalError(
+            'cloud_credentials_failed',
+            'Could not remove private cloud credentials.',
+            { cause },
+          ),
+        );
+      }),
+    ),
+  );
+});
 
 export {
   readCloudCredentials,

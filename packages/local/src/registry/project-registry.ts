@@ -1,13 +1,11 @@
+import { anchoredCall } from '../internal/open-anchored.js';
 import * as Effect from 'effect/Effect';
-import { valueFromExit } from '../internal/effect-exit.js';
 import { utcTimestampSchema } from '../internal/utc-timestamp.js';
 import { parseWithSchemaSync } from '@attest/contracts';
 import { realpath } from 'node:fs/promises';
 import { basename, isAbsolute, resolve } from 'node:path';
-
 import { projectKeySchema } from '@attest/core/records';
 import * as Schema from 'effect/Schema';
-
 import { LocalError } from '../errors/index.js';
 import { errnoCode } from '../internal/errno-code.js';
 import { readPrivateFile, writePrivateFile } from '../internal/private-file.js';
@@ -87,109 +85,125 @@ const readRegistry = Effect.fn('readRegistry')(function* (registryPath: string) 
 });
 
 /** Replaces the registry atomically with a private temporary file and a rename. */
-const writeRegistry = async (registryPath: string, registry: ProjectRegistry): Promise<void> => {
-  try {
-    // EFFECT-BRIDGE(S8c)
-    await Effect.runPromiseExit(
-      writePrivateFile(registryPath, `${JSON.stringify(registry, undefined, 2)}\n`),
-    ).then((exit) => valueFromExit(exit));
-  } catch (cause: unknown) {
-    throw new LocalError('registry_write_failed', 'Could not save the project registry.', {
-      path: registryPath,
-      hint: 'Check that the registry directory is writable and that no parent is a symbolic link, then retry.',
-      cause,
-    });
-  }
-};
+const writeRegistry = Effect.fn('writeRegistry')(function* (
+  registryPath: string,
+  registry: ProjectRegistry,
+) {
+  return yield* Effect.gen(function* () {
+    yield* writePrivateFile(registryPath, `${JSON.stringify(registry, undefined, 2)}\n`);
+  }).pipe(
+    Effect.catch((cause) =>
+      Effect.gen(function* () {
+        return yield* Effect.fail(
+          new LocalError('registry_write_failed', 'Could not save the project registry.', {
+            path: registryPath,
+            hint: 'Check that the registry directory is writable and that no parent is a symbolic link, then retry.',
+            cause,
+          }),
+        );
+      }),
+    ),
+  );
+});
 
 /** Resolves an existing project directory to the realpath the registry stores. */
-const resolveProjectRoot = async (root: string): Promise<string> => {
-  try {
-    return await realpath(root);
-  } catch (cause: unknown) {
-    throw new LocalError('project_read_failed', 'The project directory does not exist.', {
-      path: root,
-      hint: 'Pass an existing project directory.',
-      cause,
-    });
-  }
-};
+const resolveProjectRoot = Effect.fn('resolveProjectRoot')(function* (root: string) {
+  return yield* Effect.gen(function* () {
+    return yield* anchoredCall('realpath', 'cloud/registry', () => realpath(root));
+  }).pipe(
+    Effect.catch((cause) =>
+      Effect.gen(function* () {
+        return yield* Effect.fail(
+          new LocalError('project_read_failed', 'The project directory does not exist.', {
+            path: root,
+            hint: 'Pass an existing project directory.',
+            cause,
+          }),
+        );
+      }),
+    ),
+  );
+});
 
 /**
  * Adds a project root to the registry. Registering a root that is already present returns the
  * stored entry unchanged, including its name and key. New keys are the slug of the name,
  * deduplicated against existing keys. The name defaults to the directory basename.
  */
-const registerProject = async (options: RegisterProjectOptions): Promise<RegistryEntry> => {
-  const root = await resolveProjectRoot(options.root);
+const registerProject = Effect.fn('registerProject')(function* (options: RegisterProjectOptions) {
+  const root = yield* resolveProjectRoot(options.root);
 
-  return withRegistryLock(options.registryPath, async () => {
-    // EFFECT-BRIDGE(S8c)
-    const registry = await Effect.runPromiseExit(readRegistry(options.registryPath)).then(
-      valueFromExit,
-    );
+  return yield* withRegistryLock(
+    options.registryPath,
+    Effect.fn(function* () {
+      const registry = yield* readRegistry(options.registryPath);
+      const existing = registry.projects.find((entry) => entry.root === root);
 
-    const existing = registry.projects.find((entry) => entry.root === root);
+      if (existing !== undefined) return existing;
+      const name = options.name ?? basename(root);
 
-    if (existing !== undefined) return existing;
+      let entry: RegistryEntry = {
+        key: uniqueProjectKey(name, new Set(registry.projects.map(({ key }) => key))),
+        name,
+        root,
+        registeredAt: new Date().toISOString(),
+      };
 
-    const name = options.name ?? basename(root);
+      // Absent stays absent: the entry is also a CLI JSON result, which has no `undefined`.
+      if (options.projectId !== undefined) entry = { ...entry, projectId: options.projectId };
+      yield* writeRegistry(options.registryPath, {
+        ...registry,
+        projects: [...registry.projects, entry],
+      });
 
-    let entry: RegistryEntry = {
-      key: uniqueProjectKey(name, new Set(registry.projects.map(({ key }) => key))),
-      name,
-      root,
-      registeredAt: new Date().toISOString(),
-    };
-
-    // Absent stays absent: the entry is also a CLI JSON result, which has no `undefined`.
-    if (options.projectId !== undefined) entry = { ...entry, projectId: options.projectId };
-
-    await writeRegistry(options.registryPath, {
-      ...registry,
-      projects: [...registry.projects, entry],
-    });
-
-    return entry;
-  });
-};
+      return entry;
+    }),
+  );
+});
 
 /**
  * Removes one entry, matched by key first and then by directory. A directory that no longer
  * exists still matches the root it was registered with.
  */
-const unregisterProject = async (options: UnregisterProjectOptions): Promise<RegistryEntry> => {
+const unregisterProject = Effect.fn('unregisterProject')(function* (
+  options: UnregisterProjectOptions,
+) {
   const directory = resolve(options.workingDirectory, options.keyOrRoot);
-  const root = await realpath(directory).catch(() => directory);
 
-  return withRegistryLock(options.registryPath, async () => {
-    // EFFECT-BRIDGE(S8c)
-    const registry = await Effect.runPromiseExit(readRegistry(options.registryPath)).then(
-      valueFromExit,
-    );
+  const root = yield* anchoredCall('realpath', directory, () => realpath(directory)).pipe(
+    Effect.catch(() => Effect.succeed(directory)),
+  );
 
-    const entry =
-      registry.projects.find(({ key }) => key === options.keyOrRoot) ??
-      registry.projects.find((candidate) => candidate.root === root);
+  return yield* withRegistryLock(
+    options.registryPath,
+    Effect.fn(function* () {
+      const registry = yield* readRegistry(options.registryPath);
 
-    if (entry === undefined) {
-      throw new LocalError(
-        'resource_not_found',
-        `No registered project matches ${options.keyOrRoot}.`,
-        {
-          path: options.keyOrRoot,
-          hint: 'Run `attest projects list` and pass a listed key or root.',
-        },
-      );
-    }
+      const entry =
+        registry.projects.find(({ key }) => key === options.keyOrRoot) ??
+        registry.projects.find((candidate) => candidate.root === root);
 
-    await writeRegistry(options.registryPath, {
-      ...registry,
-      projects: registry.projects.filter(({ key }) => key !== entry.key),
-    });
+      if (entry === undefined) {
+        return yield* Effect.fail(
+          new LocalError(
+            'resource_not_found',
+            `No registered project matches ${options.keyOrRoot}.`,
+            {
+              path: options.keyOrRoot,
+              hint: 'Run `attest projects list` and pass a listed key or root.',
+            },
+          ),
+        );
+      }
 
-    return entry;
-  });
-};
+      yield* writeRegistry(options.registryPath, {
+        ...registry,
+        projects: registry.projects.filter(({ key }) => key !== entry.key),
+      });
+
+      return entry;
+    }),
+  );
+});
 
 export { readRegistry, registerProject, unregisterProject, type RegistryEntry };

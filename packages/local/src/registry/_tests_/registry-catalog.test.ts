@@ -1,10 +1,10 @@
+import { valueFromExit } from '../../internal/effect-exit.js';
+import * as Effect from 'effect/Effect';
 import { openTestCatalog } from '../../store/_tests_/b1-fixture.js';
 import { mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-
 import { afterEach, describe, expect, it } from 'vitest';
-
 import { openTestStore as openStore, run as executeB1 } from '../../store/_tests_/b1-fixture.js';
 import { registerProject, readRegistry } from '../index.js';
 
@@ -27,7 +27,7 @@ const temporaryDirectory = async (): Promise<string> => {
 const addProject = async (home: string, registryPath: string, name: string): Promise<string> => {
   const root = join(home, name);
   await mkdir(root);
-  await registerProject({ registryPath, root });
+  await Effect.runPromiseExit(registerProject({ registryPath, root })).then(valueFromExit);
 
   return root;
 };
@@ -38,9 +38,7 @@ describe('createRegistryCatalog', () => {
     const registryPath = join(home, 'projects.json');
     const root = await addProject(home, registryPath, 'fresh');
     const catalog = await openTestCatalog({ registryPath });
-
     const source = await executeB1(catalog.openProject('fresh'));
-
     expect(await executeB1(source.listRuns({}))).toEqual({ items: [] });
     await expect(executeB1(source.getRun('missing'))).rejects.toMatchObject({
       code: 'RUN_NOT_FOUND',
@@ -51,7 +49,6 @@ describe('createRegistryCatalog', () => {
     expect(await readdir(root)).toEqual([]);
     await catalog.close();
   });
-
   it('rejects a store at an older schema instead of migrating it', async () => {
     const home = await temporaryDirectory();
     const registryPath = join(home, 'projects.json');
@@ -61,14 +58,12 @@ describe('createRegistryCatalog', () => {
     const storePath = join(root, '.attest', 'runs.db');
     await writeFile(storePath, '');
     const catalog = await openTestCatalog({ registryPath });
-
     await expect(executeB1(catalog.openProject('pinned'))).rejects.toMatchObject({
       code: 'SCHEMA_OUTDATED',
     });
     expect(await readFile(storePath)).toHaveLength(0);
     await catalog.close();
   });
-
   it('serves runs from an existing store and lists projects added after it started', async () => {
     const home = await temporaryDirectory();
     const registryPath = join(home, 'projects.json');
@@ -94,13 +89,11 @@ describe('createRegistryCatalog', () => {
     ]);
 
     expect(first).toBe(second);
-
     expect(
       (await executeB1((await executeB1(catalog.openProject('zeta'))).listRuns({}))).items.map(
         ({ id }) => id,
       ),
     ).toEqual([run.id]);
-
     await addProject(home, registryPath, 'alpha');
     expect((await executeB1(catalog.listProjects())).map(({ key }) => key)).toEqual([
       'alpha',

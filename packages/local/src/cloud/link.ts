@@ -1,12 +1,11 @@
-import { valueFromExit } from '../internal/effect-exit.js';
+import { type AnchoredFileFailure, anchoredCall } from '../internal/open-anchored.js';
+import { withOperationCleanup } from '../internal/operation-cleanup.js';
 import * as Effect from 'effect/Effect';
 import { parseWithSchema } from '@attest/contracts';
 import { randomUUID } from 'node:crypto';
 import { readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
-
 import * as Schema from 'effect/Schema';
-
 import { LocalError } from '../errors/index.js';
 import { errnoCode } from '../internal/errno-code.js';
 import { syncPath } from '../internal/sync-path.js';
@@ -29,142 +28,177 @@ const cloudLinkSchema = Schema.Struct({
 
 type CloudLink = typeof cloudLinkSchema.Type;
 
-type CloudProjectOptions = DiscoverProjectOptions & { client: CloudClient; signal?: AbortSignal };
+type CloudProjectOptions = DiscoverProjectOptions & {
+  client: CloudClient;
+  signal?: AbortSignal;
+};
 
 /** Resolves cloud state without following project-local symlinks. */
-const cloudLinkPath = async (root: string, create = false): Promise<string> =>
-  // EFFECT-BRIDGE(S8c)
-  Effect.runPromiseExit(
-    resolveContainedPath(root, '.attest/cloud.json', {
-      createDirectories: create,
-      expect: 'file',
-      problem: () => new LocalError('project_invalid', 'Cloud link path is unsafe.'),
-    }),
-  ).then((exit) => valueFromExit(exit));
+const cloudLinkPath = Effect.fn('cloudLinkPath')(function* (
+  root: string,
+  create: boolean = false,
+): Effect.fn.Return<string, LocalError | AnchoredFileFailure> {
+  return yield* resolveContainedPath(root, '.attest/cloud.json', {
+    createDirectories: create,
+    expect: 'file',
+    problem: (): LocalError => new LocalError('project_invalid', 'Cloud link path is unsafe.'),
+  });
+});
 
 /** Reads the origin-bound project link, rejecting malformed state rather than resetting it. */
-const readCloudLink = async (root: string): Promise<CloudLink | undefined> => {
-  try {
-    const raw = await readFile(await cloudLinkPath(root), 'utf8');
-    const parsed = parseWithSchema(cloudLinkSchema, JSON.parse(raw));
+const readCloudLink = Effect.fn('readCloudLink')(function* (root: string) {
+  return yield* Effect.gen(function* () {
+    const path = yield* cloudLinkPath(root);
+    const raw = yield* anchoredCall('readFile', path, () => readFile(path, 'utf8'));
 
-    if (!parsed.ok) throw new Error('Invalid link');
+    const value = yield* Effect.try({
+      // BOUNDARY: Link file JSON is decoded by cloudLinkSchema immediately below.
+      try: () => {
+        const value: unknown = JSON.parse(raw);
+
+        return value;
+      },
+      catch: (cause) =>
+        new LocalError('project_invalid', 'Cloud link is unreadable or invalid.', { cause }),
+    });
+
+    const parsed = parseWithSchema(cloudLinkSchema, value);
+
+    if (!parsed.ok) return yield* Effect.fail(new Error('Invalid link'));
 
     return parsed.value;
-  } catch (error: unknown) {
-    if (errnoCode(error) === 'ENOENT') return undefined;
+  }).pipe(
+    Effect.catch((error) =>
+      Effect.gen(function* () {
+        if (errnoCode(error) === 'ENOENT') return undefined;
 
-    if (error instanceof LocalError) throw error;
-    throw new LocalError('project_invalid', 'Cloud link is unreadable or invalid.', {
-      path: '.attest/cloud.json',
-      cause: error,
-    });
-  }
-};
+        if (error instanceof LocalError) return yield* Effect.fail(error);
+
+        return yield* Effect.fail(
+          new LocalError('project_invalid', 'Cloud link is unreadable or invalid.', {
+            path: '.attest/cloud.json',
+            cause: error,
+          }),
+        );
+      }),
+    ),
+  );
+});
 
 /** Keeps direct writes and recoverable completion byte-identical. */
 const serializeCloudLink = (link: CloudLink): string => `${JSON.stringify(link, null, 2)}\n`;
 
 /** Atomically saves project identity and the exact last synchronized file hashes. */
-const writeCloudLink = async (root: string, link: CloudLink): Promise<void> => {
-  const path = await cloudLinkPath(root, true);
+const writeCloudLink = Effect.fn('writeCloudLink')(function* (root: string, link: CloudLink) {
+  const path = yield* cloudLinkPath(root, true);
   const temporary = `${path}.${randomUUID()}.tmp`;
 
-  try {
-    await writeFile(temporary, serializeCloudLink(link), {
-      flag: 'wx',
-      mode: 0o600,
-    });
-    // EFFECT-BRIDGE(S8c)
-    await Effect.runPromiseExit(syncPath(temporary)).then((exit) => valueFromExit(exit));
-    await cloudLinkPath(root);
-    await rename(temporary, path);
-    // EFFECT-BRIDGE(S8c)
-    await Effect.runPromiseExit(syncPath(dirname(path))).then((exit) => valueFromExit(exit));
-  } finally {
-    await unlink(temporary).catch((cause: unknown) => {
-      if (errnoCode(cause) !== 'ENOENT') throw cause;
-    });
-  }
-};
+  return yield* withOperationCleanup(
+    Effect.gen(function* () {
+      yield* anchoredCall('writeFile', 'cloud/registry', () =>
+        writeFile(temporary, serializeCloudLink(link), {
+          flag: 'wx',
+          mode: 0o600,
+        }),
+      );
+      yield* syncPath(temporary);
+      yield* cloudLinkPath(root);
+      yield* anchoredCall('rename', 'cloud/registry', () => rename(temporary, path));
+      yield* syncPath(dirname(path));
+    }),
+    Effect.gen(function* () {
+      yield* anchoredCall('unlink', temporary, () => unlink(temporary)).pipe(
+        Effect.catch((cause) => (errnoCode(cause) === 'ENOENT' ? Effect.void : Effect.fail(cause))),
+      );
+    }),
+    'project_saved_cleanup_failed',
+  );
+}, Effect.uninterruptible);
 
 /** Resolves a linked project and prevents credentials for another origin from being used. */
-const resolveCloudProject = async (options: CloudProjectOptions) => {
-  // EFFECT-BRIDGE(S8c)
-  const { root } = await Effect.runPromiseExit(discoverProject(options)).then((exit) =>
-    valueFromExit(exit),
-  );
-
-  const link = await readCloudLink(root);
+const resolveCloudProject = Effect.fn('resolveCloudProject')(function* (
+  options: CloudProjectOptions,
+) {
+  const { root } = yield* discoverProject(options);
+  const link = yield* readCloudLink(root);
 
   if (link === undefined) {
-    throw new LocalError('cli_missing_input', 'This project is not linked to Attest Cloud.', {
-      hint: 'Run attest cloud link <project-id> first.',
-    });
+    return yield* Effect.fail(
+      new LocalError('cli_missing_input', 'This project is not linked to Attest Cloud.', {
+        hint: 'Run attest cloud link <project-id> first.',
+      }),
+    );
   }
 
   if (link.base_url !== options.client.baseUrl) {
-    throw new LocalError('project_invalid', 'Project link belongs to a different cloud origin.', {
-      hint: 'Log in to the linked origin or explicitly link this project again.',
-    });
+    return yield* Effect.fail(
+      new LocalError('project_invalid', 'Project link belongs to a different cloud origin.', {
+        hint: 'Log in to the linked origin or explicitly link this project again.',
+      }),
+    );
   }
 
   return { root, link, projectId: link.project_id, revisionId: link.revision_id };
-};
+});
 
 /** Links an existing cloud project without claiming the local files match a revision. */
-const linkCloudProject = async (options: CloudProjectOptions & { projectId: string }) => {
-  // EFFECT-BRIDGE(S8c)
-  const { root } = await Effect.runPromiseExit(discoverProject(options)).then((exit) =>
-    valueFromExit(exit),
-  );
+const linkCloudProject = Effect.fn('linkCloudProject')(function* (
+  options: CloudProjectOptions & {
+    projectId: string;
+  },
+) {
+  const { root } = yield* discoverProject(options);
 
-  const response = await options.client.request(
+  const response = yield* options.client.request(
     'GET',
     `/v1/projects/${encodeURIComponent(options.projectId)}`,
     { schema: linkedProjectSchema },
   );
 
   if (response.project.id !== options.projectId) {
-    throw new LocalError('cloud_request_failed', 'Cloud returned a different or invalid project.');
+    return yield* Effect.fail(
+      new LocalError('cloud_request_failed', 'Cloud returned a different or invalid project.'),
+    );
   }
 
-  // EFFECT-BRIDGE(S8c)
-  const lock = await Effect.runPromiseExit(acquireProjectLock(root)).then((exit) =>
-    valueFromExit(exit),
+  const lock = yield* acquireProjectLock(root);
+
+  return yield* withOperationCleanup(
+    Effect.gen(function* () {
+      const current = yield* readCloudLink(root);
+
+      if (
+        current !== undefined &&
+        (current.project_id !== options.projectId || current.base_url !== options.client.baseUrl)
+      ) {
+        return yield* Effect.fail(
+          new LocalError(
+            'project_changed',
+            'This directory is already linked to another cloud project.',
+            {
+              hint: 'Use a separate project directory to avoid replacing synchronization history.',
+            },
+          ),
+        );
+      }
+
+      const link: CloudLink = current ?? {
+        schema: 'attest.cloud-link.v1',
+        base_url: options.client.baseUrl,
+        project_id: options.projectId,
+        file_hashes: {},
+      };
+
+      yield* writeCloudLink(root, link);
+
+      return { project_id: link.project_id, revision_id: link.revision_id ?? null };
+    }),
+    Effect.gen(function* () {
+      yield* releaseProjectLock(lock);
+    }),
+    'project_saved_cleanup_failed',
   );
-
-  try {
-    const current = await readCloudLink(root);
-
-    if (
-      current !== undefined &&
-      (current.project_id !== options.projectId || current.base_url !== options.client.baseUrl)
-    ) {
-      throw new LocalError(
-        'project_changed',
-        'This directory is already linked to another cloud project.',
-        {
-          hint: 'Use a separate project directory to avoid replacing synchronization history.',
-        },
-      );
-    }
-
-    const link: CloudLink = current ?? {
-      schema: 'attest.cloud-link.v1',
-      base_url: options.client.baseUrl,
-      project_id: options.projectId,
-      file_hashes: {},
-    };
-
-    await writeCloudLink(root, link);
-
-    return { project_id: link.project_id, revision_id: link.revision_id ?? null };
-  } finally {
-    // EFFECT-BRIDGE(S8c)
-    await Effect.runPromiseExit(releaseProjectLock(lock)).then((exit) => valueFromExit(exit));
-  }
-};
+}, Effect.uninterruptible);
 
 export {
   linkCloudProject,

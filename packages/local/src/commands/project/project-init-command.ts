@@ -2,11 +2,9 @@ import { valueFromExit } from '../../internal/effect-exit.js';
 import * as Effect from 'effect/Effect';
 import { lstat, mkdir, realpath, rmdir } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
-
 import { PROJECT_SCHEMA_ID, type ProjectResources } from '@attest/contracts';
 import { hashCanonicalContent } from '@attest/core';
 import { ulid } from 'ulid';
-
 import { errnoCode } from '../../internal/errno-code.js';
 import { LocalError } from '../../errors/index.js';
 import { loadProject } from '../../project/project-loader/index.js';
@@ -67,7 +65,10 @@ const assertUnambiguousInitSources = (options: ProjectInitCommandOptions): void 
 
 const inspectTargetDirectory = async (
   targetDirectory: string,
-): Promise<{ exists: boolean; root: string }> => {
+): Promise<{
+  exists: boolean;
+  root: string;
+}> => {
   try {
     const metadata = await lstat(targetDirectory);
 
@@ -309,12 +310,15 @@ const runProjectInitCommand = async (
 
   // The manifest is verified and stays; a registry failure only needs the project added later.
   try {
-    await registerProject({
-      registryPath: options.registryPath,
-      root: inspected.root,
-      name,
-      projectId: prepared.project.project.project_id,
-    });
+    await // EFFECT-BRIDGE(S8b)
+    Effect.runPromiseExit(
+      registerProject({
+        registryPath: options.registryPath,
+        root: inspected.root,
+        name,
+        projectId: prepared.project.project.project_id,
+      }),
+    ).then(valueFromExit);
   } catch (error: unknown) {
     throw new LocalError(
       'registry_write_failed',

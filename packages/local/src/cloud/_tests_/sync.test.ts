@@ -1,13 +1,16 @@
 import { valueFromExit } from '../../internal/effect-exit.js';
 import * as Effect from 'effect/Effect';
+import * as Cause from 'effect/Cause';
+import * as Exit from 'effect/Exit';
 import { stripStruct } from '@attest/contracts';
 import * as Schema from 'effect/Schema';
-import { contentHash } from '@attest/core';
+import { contentHash, EvalResolutionError } from '@attest/core';
+import { LocalError } from '../../errors/local-error.js';
+import { loadProject } from '../../project/project-loader/index.js';
 import { createHash } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-
 import { afterEach, describe, expect, it } from 'vitest';
 import {
   parseWithSchemaSync,
@@ -25,9 +28,8 @@ import {
 } from '../../project/transaction/transaction-journal.js';
 import { interruptAfterFirstPublish } from '../../_tests_/support/project-transaction.js';
 import { publishPreparedTransaction } from '../../project/transaction/transactional-writer.js';
-
 import { readCloudLink, serializeCloudLink, writeCloudLink, type CloudLink } from '../link.js';
-import { planPullChanges, pushCloudProject, pullCloudProject } from '../sync.js';
+import { createCloudBundle, planPullChanges, pushCloudProject, pullCloudProject } from '../sync.js';
 
 const directories: string[] = [];
 
@@ -53,38 +55,41 @@ describe('cloud pull conflict planning', () => {
     await writeFile(join(root, 'attest/edited.json'), 'local edit');
     await writeFile(join(root, 'attest/new.json'), 'untracked local');
     await expect(
-      planPullChanges(
-        root,
-        {
-          'attest/edited.json': hash('base'),
-          'attest/deleted.json': hash('base'),
-        },
-        {
-          'attest/edited.json': 'remote',
-          'attest/deleted.json': 'remote',
-          'attest/new.json': 'remote',
-        },
-      ),
+      Effect.runPromiseExit(
+        planPullChanges(
+          root,
+          {
+            'attest/edited.json': hash('base'),
+            'attest/deleted.json': hash('base'),
+          },
+          {
+            'attest/edited.json': 'remote',
+            'attest/deleted.json': 'remote',
+            'attest/new.json': 'remote',
+          },
+        ),
+      ).then(valueFromExit),
     ).rejects.toMatchObject({
       code: 'project_changed',
       details: { conflicts: ['attest/edited.json', 'attest/deleted.json', 'attest/new.json'] },
     });
     expect(await readFile(join(root, 'attest/edited.json'), 'utf8')).toBe('local edit');
   });
-
   it('plans removals and updates from the synchronized base with the manifest last', async () => {
     const root = await createDirectory();
     await writeFile(join(root, 'attest/old.json'), 'old');
     await writeFile(join(root, 'attest.project.json'), 'manifest');
 
-    const changes = await planPullChanges(
-      root,
-      {
-        'attest/old.json': hash('old'),
-        'attest.project.json': hash('manifest'),
-      },
-      { 'attest.project.json': 'new manifest', 'attest/new.json': 'new' },
-    );
+    const changes = await Effect.runPromiseExit(
+      planPullChanges(
+        root,
+        {
+          'attest/old.json': hash('old'),
+          'attest.project.json': hash('manifest'),
+        },
+        { 'attest.project.json': 'new manifest', 'attest/new.json': 'new' },
+      ),
+    ).then(valueFromExit);
 
     expect(changes).toEqual([
       { path: 'attest/new.json', type: 'write', contents: 'new' },
@@ -92,16 +97,23 @@ describe('cloud pull conflict planning', () => {
       { path: 'attest.project.json', type: 'write', contents: 'new manifest' },
     ]);
   });
-
   it('allows already identical remote files but rejects symlinks and paths outside authored resources', async () => {
     const root = await createDirectory();
     await writeFile(join(root, 'attest/same.json'), 'same');
-    expect(await planPullChanges(root, {}, { 'attest/same.json': 'same' })).toEqual([]);
+    expect(
+      await Effect.runPromiseExit(planPullChanges(root, {}, { 'attest/same.json': 'same' })).then(
+        valueFromExit,
+      ),
+    ).toEqual([]);
     await symlink(join(root, 'attest/same.json'), join(root, 'attest/link.json'));
-    await expect(planPullChanges(root, {}, { 'attest/link.json': 'remote' })).rejects.toMatchObject(
-      { code: 'project_invalid' },
-    );
-    await expect(planPullChanges(root, {}, { '.env': 'remote' })).rejects.toMatchObject({
+    await expect(
+      Effect.runPromiseExit(planPullChanges(root, {}, { 'attest/link.json': 'remote' })).then(
+        valueFromExit,
+      ),
+    ).rejects.toMatchObject({ code: 'project_invalid' });
+    await expect(
+      Effect.runPromiseExit(planPullChanges(root, {}, { '.env': 'remote' })).then(valueFromExit),
+    ).rejects.toMatchObject({
       code: 'project_invalid',
     });
   });
@@ -119,21 +131,164 @@ describe('cloud link state', () => {
       file_hashes: { 'attest/test.json': hash('test') },
     };
 
-    await writeCloudLink(root, link);
-    expect(await readCloudLink(root)).toEqual(link);
+    await Effect.runPromiseExit(writeCloudLink(root, link)).then(valueFromExit);
+    expect(await Effect.runPromiseExit(readCloudLink(root)).then(valueFromExit)).toEqual(link);
     await writeFile(join(root, '.attest/cloud.json'), '{}');
-    await expect(readCloudLink(root)).rejects.toMatchObject({ code: 'project_invalid' });
+    await expect(
+      Effect.runPromiseExit(readCloudLink(root)).then(valueFromExit),
+    ).rejects.toMatchObject({ code: 'project_invalid' });
   });
-
   it('refuses cloud state beneath a symlink', async () => {
     const root = await createDirectory();
     const outside = await createDirectory();
     await symlink(outside, join(root, '.attest'));
-    await expect(readCloudLink(root)).rejects.toMatchObject({ code: 'project_invalid' });
+    await expect(
+      Effect.runPromiseExit(readCloudLink(root)).then(valueFromExit),
+    ).rejects.toMatchObject({ code: 'project_invalid' });
   });
 });
 
 describe('cloud revision synchronization', () => {
+  it('rejects a missing metric entrypoint as a typed validation failure before dispatch', async () => {
+    const root = await createDirectory();
+
+    const metric = {
+      schema: 'attest.metric',
+      id: 'custom',
+      name: 'Custom',
+      definition: { kind: 'exec', argv: ['./score'] },
+    };
+
+    await mkdir(join(root, 'attest/metrics'));
+    await writeFile(join(root, 'attest/metrics/custom.json'), JSON.stringify(metric));
+    await writeFile(
+      join(root, 'attest.project.json'),
+      JSON.stringify({
+        schema: PROJECT_SCHEMA_ID,
+        project_id: '01ARZ3NDEKTSV4RRFFQ69G5FAB',
+        name: 'Local',
+        resources: {
+          agents: [],
+          tests: [],
+          datasets: [],
+          metrics: [
+            {
+              id: metric.id,
+              schema: metric.schema,
+              path: 'attest/metrics/custom.json',
+              content_hash: contentHash(metric),
+            },
+          ],
+        },
+      }),
+    );
+    await Effect.runPromiseExit(
+      writeCloudLink(root, {
+        schema: 'attest.cloud-link.v1',
+        base_url: 'https://cloud.example',
+        project_id: 'project-1',
+        file_hashes: {},
+      }),
+    ).then(valueFromExit);
+    let dispatches = 0;
+
+    const client = createCloudClient({
+      baseUrl: 'https://cloud.example',
+      fetch: () => {
+        dispatches++;
+
+        return Promise.reject(new Error('Unexpected dispatch'));
+      },
+    });
+
+    const exit = await Effect.runPromiseExit(
+      pushCloudProject({ workingDirectory: root, client, acknowledgeNoSecrets: true }),
+    );
+
+    expect(Exit.isFailure(exit)).toBe(true);
+
+    if (!Exit.isFailure(exit)) return;
+    expect(Cause.hasDies(exit.cause)).toBe(false);
+    expect(exit.cause.reasons.map((reason) => reason._tag)).toEqual(['Fail']);
+    expect(exit.cause.reasons.find(Cause.isFailReason)?.error).toBeInstanceOf(LocalError);
+    expect(() => valueFromExit(exit)).toThrow('Metric custom needs a script entrypoint.');
+    expect(exit.cause.reasons[0]).toMatchObject({ error: { code: 'project_invalid' } });
+    expect(dispatches).toBe(0);
+    await expect(readFile(join(root, '.attest/project.lock'))).rejects.toMatchObject({
+      code: 'ENOENT',
+    });
+  });
+  it.each(['push', 'pull'] as const)(
+    'keeps %s bundle source mismatches in the typed error channel',
+    async (direction) => {
+      const root = await createDirectory();
+
+      const manifest = {
+        schema: PROJECT_SCHEMA_ID,
+        project_id: '01ARZ3NDEKTSV4RRFFQ69G5FAB',
+        name: 'Local',
+        resources: { agents: [], tests: [], datasets: [], metrics: [] },
+      };
+
+      await writeFile(join(root, 'attest.project.json'), JSON.stringify(manifest));
+
+      const project = await Effect.runPromiseExit(loadProject({ project: root })).then(
+        valueFromExit,
+      );
+
+      const mismatched = JSON.stringify({ ...manifest, name: 'Different' });
+
+      await Effect.runPromiseExit(
+        writeCloudLink(root, {
+          schema: 'attest.cloud-link.v1',
+          base_url: 'https://cloud.example',
+          project_id: 'project-1',
+          file_hashes: {},
+        }),
+      ).then(valueFromExit);
+
+      const client = createCloudClient({
+        baseUrl: 'https://cloud.example',
+        fetch: () =>
+          Promise.resolve(
+            Response.json({
+              revision: { id: 'revision-1', project_id: 'project-1', created_at: '2026-10-01' },
+              bundle: {
+                schema: 'attest.project-bundle.v1',
+                resources: { project: manifest, agents: [], tests: [], datasets: [], metrics: [] },
+                files: { 'attest.project.json': mismatched },
+              },
+            }),
+          ),
+      });
+
+      if (direction === 'push') await writeFile(join(root, 'attest.project.json'), mismatched);
+      const before = await readFile(join(root, 'attest.project.json'), 'utf8');
+
+      const exit =
+        direction === 'push'
+          ? await Effect.runPromiseExit(createCloudBundle(project).pipe(Effect.asVoid))
+          : await Effect.runPromiseExit(
+              pullCloudProject({ workingDirectory: root, client }).pipe(Effect.asVoid),
+            );
+
+      expect(Exit.isFailure(exit)).toBe(true);
+
+      if (!Exit.isFailure(exit)) return;
+      expect(Cause.hasDies(exit.cause)).toBe(false);
+      expect(exit.cause.reasons.map((reason) => reason._tag)).toEqual(['Fail']);
+      expect(exit.cause.reasons.find(Cause.isFailReason)?.error).toBeInstanceOf(
+        EvalResolutionError,
+      );
+      expect(exit.cause.reasons[0]).toMatchObject({
+        error: {
+          code: 'project_invalid',
+          message: 'Bundle resource or hash differs from attest.project.json.',
+        },
+      });
+      expect(await readFile(join(root, 'attest.project.json'), 'utf8')).toBe(before);
+    },
+  );
   it('preserves the rejected portable credential field path in upload diagnostics', async () => {
     const root = await createDirectory();
     await mkdir(join(root, 'attest/agents'));
@@ -172,12 +327,14 @@ describe('cloud revision synchronization', () => {
       }),
     );
     await writeFile(join(root, 'attest/agents/support.json'), JSON.stringify(agent));
-    await writeCloudLink(root, {
-      schema: 'attest.cloud-link.v1',
-      base_url: 'https://cloud.example',
-      project_id: 'project-1',
-      file_hashes: {},
-    });
+    await Effect.runPromiseExit(
+      writeCloudLink(root, {
+        schema: 'attest.cloud-link.v1',
+        base_url: 'https://cloud.example',
+        project_id: 'project-1',
+        file_hashes: {},
+      }),
+    ).then(valueFromExit);
 
     const client = createCloudClient({
       baseUrl: 'https://cloud.example',
@@ -185,7 +342,9 @@ describe('cloud revision synchronization', () => {
     });
 
     await expect(
-      pushCloudProject({ workingDirectory: root, client, acknowledgeNoSecrets: true }),
+      Effect.runPromiseExit(
+        pushCloudProject({ workingDirectory: root, client, acknowledgeNoSecrets: true }),
+      ).then(valueFromExit),
     ).rejects.toMatchObject({
       code: 'project_invalid',
       details: {
@@ -198,7 +357,6 @@ describe('cloud revision synchronization', () => {
       },
     });
   });
-
   it('uploads only referenced files and pulls exact bytes through the project journal', async () => {
     const root = await createDirectory();
 
@@ -212,12 +370,14 @@ describe('cloud revision synchronization', () => {
     await writeFile(join(root, 'attest.project.json'), JSON.stringify(manifest));
     await writeFile(join(root, '.env'), 'SECRET=never-upload');
     await writeFile(join(root, 'attest/unreferenced.json'), 'private-data');
-    await writeCloudLink(root, {
-      schema: 'attest.cloud-link.v1',
-      base_url: 'https://cloud.example',
-      project_id: 'project-1',
-      file_hashes: {},
-    });
+    await Effect.runPromiseExit(
+      writeCloudLink(root, {
+        schema: 'attest.cloud-link.v1',
+        base_url: 'https://cloud.example',
+        project_id: 'project-1',
+        file_hashes: {},
+      }),
+    ).then(valueFromExit);
     let uploaded: PortableProjectBundle | undefined;
 
     const client = createCloudClient({
@@ -267,20 +427,36 @@ describe('cloud revision synchronization', () => {
       },
     });
 
-    await expect(pushCloudProject({ workingDirectory: root, client })).rejects.toMatchObject({
+    await expect(
+      Effect.runPromiseExit(pushCloudProject({ workingDirectory: root, client })).then(
+        valueFromExit,
+      ),
+    ).rejects.toMatchObject({
       code: 'cli_usage',
     });
-    await pushCloudProject({ workingDirectory: root, client, acknowledgeNoSecrets: true });
+    await Effect.runPromiseExit(
+      pushCloudProject({ workingDirectory: root, client, acknowledgeNoSecrets: true }),
+    ).then(valueFromExit);
     expect(Object.keys(uploaded!.files)).toEqual(['attest.project.json']);
-    await pushCloudProject({ workingDirectory: root, client });
-    await pullCloudProject({ workingDirectory: root, client });
+    await Effect.runPromiseExit(pushCloudProject({ workingDirectory: root, client })).then(
+      valueFromExit,
+    );
+    await Effect.runPromiseExit(pullCloudProject({ workingDirectory: root, client })).then(
+      valueFromExit,
+    );
     expect(JSON.parse(await readFile(join(root, 'attest.project.json'), 'utf8'))).toMatchObject({
       name: 'Remote',
     });
     expect(await readFile(join(root, '.env'), 'utf8')).toBe('SECRET=never-upload');
-    expect((await readCloudLink(root))?.revision_id).toBe('revision-2');
+    expect(
+      (await Effect.runPromiseExit(readCloudLink(root)).then(valueFromExit))?.revision_id,
+    ).toBe('revision-2');
     await writeFile(join(root, 'attest.project.json'), 'local unsaved edit');
-    await expect(pullCloudProject({ workingDirectory: root, client })).rejects.toMatchObject({
+    await expect(
+      Effect.runPromiseExit(pullCloudProject({ workingDirectory: root, client })).then(
+        valueFromExit,
+      ),
+    ).rejects.toMatchObject({
       code: 'project_changed',
     });
     expect(await readFile(join(root, 'attest.project.json'), 'utf8')).toBe('local unsaved edit');
@@ -357,7 +533,7 @@ it.each(['changed', 'unchanged'])(
       file_hashes: { 'attest.project.json': hash(manifest), 'attest/code.ts': hash('new code') },
     };
 
-    await writeCloudLink(root, before);
+    await Effect.runPromiseExit(writeCloudLink(root, before)).then(valueFromExit);
 
     const lock = await Effect.runPromiseExit(acquireProjectLock(root)).then((exit) =>
       valueFromExit(exit),
@@ -384,7 +560,7 @@ it.each(['changed', 'unchanged'])(
       await Effect.runPromiseExit(writeTransactionJournal(transaction)).then((exit) =>
         valueFromExit(exit),
       );
-      expect(await readCloudLink(root)).toEqual(before);
+      expect(await Effect.runPromiseExit(readCloudLink(root)).then(valueFromExit)).toEqual(before);
       expect(
         await Effect.runPromiseExit(recoverProjectTransactions(root, lock)).then((exit) =>
           valueFromExit(exit),
@@ -392,13 +568,15 @@ it.each(['changed', 'unchanged'])(
       ).toEqual([
         { action: 'completed_commit', transactionId: transaction.journal.transaction_id },
       ]);
-      expect(await readCloudLink(root)).toEqual(after);
+      expect(await Effect.runPromiseExit(readCloudLink(root)).then(valueFromExit)).toEqual(after);
       expect(await readFile(join(root, 'attest/code.ts'), 'utf8')).toBe('new code');
       expect(
-        await planPullChanges(root, after.file_hashes, {
-          'attest.project.json': manifest,
-          'attest/code.ts': 'third revision',
-        }),
+        await Effect.runPromiseExit(
+          planPullChanges(root, after.file_hashes, {
+            'attest.project.json': manifest,
+            'attest/code.ts': 'third revision',
+          }),
+        ).then(valueFromExit),
       ).toContainEqual({ type: 'write', path: 'attest/code.ts', contents: 'third revision' });
     } finally {
       await Effect.runPromiseExit(releaseProjectLock(lock)).then((exit) => valueFromExit(exit));

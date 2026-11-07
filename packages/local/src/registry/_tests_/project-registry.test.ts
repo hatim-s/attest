@@ -1,10 +1,10 @@
+import { valueFromExit } from '../../internal/effect-exit.js';
+import * as Effect from 'effect/Effect';
 import { run as executeB1 } from '../../store/_tests_/b1-fixture.js';
 import { mkdir, mkdtemp, readFile, realpath, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-
 import { afterEach, describe, expect, it } from 'vitest';
-
 import { addProject, readRegistry, registerProject, unregisterProject } from '../index.js';
 
 const directories: string[] = [];
@@ -34,14 +34,15 @@ describe('project registry', () => {
   it('reads a missing registry as empty and writes a private file on first registration', async () => {
     const home = await temporaryDirectory('attest-registry-');
     const registryPath = join(home, 'attest', 'projects.json');
-
     expect(await executeB1(readRegistry(registryPath))).toEqual({
       schema: 'attest.projects.v1',
       projects: [],
     });
-
     const root = await projectDirectory(home, 'workflow');
-    const entry = await registerProject({ registryPath, root, projectId: '01PROJECT' });
+
+    const entry = await Effect.runPromiseExit(
+      registerProject({ registryPath, root, projectId: '01PROJECT' }),
+    ).then(valueFromExit);
 
     expect(entry).toMatchObject({
       key: 'workflow',
@@ -56,7 +57,6 @@ describe('project registry', () => {
     expect((await stat(registryPath)).mode & 0o777).toBe(0o600);
     expect((await stat(join(home, 'attest'))).mode & 0o777).toBe(0o700);
   });
-
   it('slugs names, dedupes keys and keeps the first registration of a root', async () => {
     const home = await temporaryDirectory('attest-registry-');
     const registryPath = join(home, 'projects.json');
@@ -65,9 +65,15 @@ describe('project registry', () => {
     const third = await projectDirectory(home, 'three');
 
     const registered = [
-      await registerProject({ registryPath, root: first, name: '  My Agent: Evals! ' }),
-      await registerProject({ registryPath, root: second, name: 'my agent evals' }),
-      await registerProject({ registryPath, root: third, name: 'MY-AGENT-EVALS' }),
+      await Effect.runPromiseExit(
+        registerProject({ registryPath, root: first, name: '  My Agent: Evals! ' }),
+      ).then(valueFromExit),
+      await Effect.runPromiseExit(
+        registerProject({ registryPath, root: second, name: 'my agent evals' }),
+      ).then(valueFromExit),
+      await Effect.runPromiseExit(
+        registerProject({ registryPath, root: third, name: 'MY-AGENT-EVALS' }),
+      ).then(valueFromExit),
     ];
 
     expect(registered.map(({ key }) => key)).toEqual([
@@ -75,32 +81,42 @@ describe('project registry', () => {
       'my-agent-evals-2',
       'my-agent-evals-3',
     ]);
-
     // The same directory through a symlink is the same root; neither name nor key changes.
     const alias = join(home, 'alias');
     await symlink(first, alias);
-    expect(await registerProject({ registryPath, root: alias, name: 'Renamed' })).toEqual(
-      registered[0],
-    );
+    expect(
+      await Effect.runPromiseExit(
+        registerProject({ registryPath, root: alias, name: 'Renamed' }),
+      ).then(valueFromExit),
+    ).toEqual(registered[0]);
     expect((await executeB1(readRegistry(registryPath))).projects).toHaveLength(3);
   });
-
   it('removes an entry by key or by directory', async () => {
     const home = await temporaryDirectory('attest-registry-');
     const registryPath = join(home, 'projects.json');
-    const first = await registerProject({ registryPath, root: await projectDirectory(home, 'a') });
-    const second = await registerProject({ registryPath, root: await projectDirectory(home, 'b') });
 
-    await unregisterProject({ registryPath, keyOrRoot: 'a', workingDirectory: home });
-    await unregisterProject({ registryPath, keyOrRoot: './b', workingDirectory: home });
+    const first = await Effect.runPromiseExit(
+      registerProject({ registryPath, root: await projectDirectory(home, 'a') }),
+    ).then(valueFromExit);
 
+    const second = await Effect.runPromiseExit(
+      registerProject({ registryPath, root: await projectDirectory(home, 'b') }),
+    ).then(valueFromExit);
+
+    await Effect.runPromiseExit(
+      unregisterProject({ registryPath, keyOrRoot: 'a', workingDirectory: home }),
+    ).then(valueFromExit);
+    await Effect.runPromiseExit(
+      unregisterProject({ registryPath, keyOrRoot: './b', workingDirectory: home }),
+    ).then(valueFromExit);
     expect((await executeB1(readRegistry(registryPath))).projects).toEqual([]);
     expect([first.key, second.key]).toEqual(['a', 'b']);
     await expect(
-      unregisterProject({ registryPath, keyOrRoot: 'a', workingDirectory: home }),
+      Effect.runPromiseExit(
+        unregisterProject({ registryPath, keyOrRoot: 'a', workingDirectory: home }),
+      ).then(valueFromExit),
     ).rejects.toMatchObject({ code: 'resource_not_found' });
   });
-
   it('takes name and id from a manifest when adding a directory', async () => {
     const home = await temporaryDirectory('attest-registry-');
     const registryPath = join(home, 'projects.json');
@@ -114,29 +130,30 @@ describe('project registry', () => {
         resources: { agents: [], datasets: [], metrics: [], tests: [] },
       }),
     );
-
     expect(
-      await addProject({ registryPath, directory: 'checkout', workingDirectory: home }),
+      await Effect.runPromiseExit(
+        addProject({ registryPath, directory: 'checkout', workingDirectory: home }),
+      ).then(valueFromExit),
     ).toMatchObject({
       key: 'support-bot',
       name: 'Support Bot',
       projectId: '01ARZ3NDEKTSV4RRFFQ69G5FAV',
     });
   });
-
   it('keeps both of two concurrent registrations', async () => {
     const home = await temporaryDirectory('attest-registry-');
     const registryPath = join(home, 'projects.json');
     const roots = [await projectDirectory(home, 'left'), await projectDirectory(home, 'right')];
-
-    await Promise.all(roots.map((root) => registerProject({ registryPath, root })));
-
+    await Promise.all(
+      roots.map((root) =>
+        Effect.runPromiseExit(registerProject({ registryPath, root })).then(valueFromExit),
+      ),
+    );
     expect(
       (await executeB1(readRegistry(registryPath))).projects.map(({ root }) => root).sort(),
     ).toEqual(roots);
     await expect(stat(`${registryPath}.lock`)).rejects.toMatchObject({ code: 'ENOENT' });
   });
-
   it('rejects malformed registries and symlinked ancestors', async () => {
     const home = await temporaryDirectory('attest-registry-');
     const registryPath = join(home, 'projects.json');
@@ -172,7 +189,9 @@ describe('project registry', () => {
       code: 'registry_invalid',
     });
     await expect(
-      registerProject({ registryPath: join(linked, 'nested', 'projects.json'), root: home }),
+      Effect.runPromiseExit(
+        registerProject({ registryPath: join(linked, 'nested', 'projects.json'), root: home }),
+      ).then(valueFromExit),
     ).rejects.toMatchObject({ code: 'registry_write_failed' });
     expect(await readFile(registryPath, 'utf8')).toContain('"a"');
   });

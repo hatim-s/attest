@@ -1,3 +1,5 @@
+import { valueFromExit } from '../../internal/effect-exit.js';
+import * as Effect from 'effect/Effect';
 import { mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -21,27 +23,35 @@ it('resolves the environment pair ahead of a session and rejects incomplete cred
   const root = await mkdtemp(join(await realpath(tmpdir()), 'attest-resolution-'));
   directories.push(root);
   const path = join(root, 'private', 'credentials.json');
-  await writeCloudCredentials(
-    {
-      baseUrl: 'https://session.test',
-      accessToken: 'session',
-      expiresAt: new Date(Date.now() + 60000).toISOString(),
-    },
-    path,
-  );
+  await Effect.runPromiseExit(
+    writeCloudCredentials(
+      {
+        baseUrl: 'https://session.test',
+        accessToken: 'session',
+        expiresAt: new Date(Date.now() + 60000).toISOString(),
+      },
+      path,
+    ),
+  ).then(valueFromExit);
   vi.stubEnv('ATTEST_CLOUD_URL', undefined);
   vi.stubEnv('ATTEST_CLOUD_TOKEN', undefined);
-  expect((await authenticatedCloudClient(path)).baseUrl).toBe('https://session.test');
+  expect(
+    (await Effect.runPromiseExit(authenticatedCloudClient(path)).then(valueFromExit)).baseUrl,
+  ).toBe('https://session.test');
   vi.stubEnv('ATTEST_CLOUD_URL', 'https://ci.test');
-  await expect(authenticatedCloudClient(path)).rejects.toMatchObject({
+  await expect(
+    Effect.runPromiseExit(authenticatedCloudClient(path)).then(valueFromExit),
+  ).rejects.toMatchObject({
     code: 'cloud_credentials_invalid',
   });
   vi.stubEnv('ATTEST_CLOUD_TOKEN', 'atp_ci');
-  const client = await authenticatedCloudClient(path);
+  const client = await Effect.runPromiseExit(authenticatedCloudClient(path)).then(valueFromExit);
   expect(client.baseUrl).toBe('https://ci.test');
   expect(client.credentialSource).toBe('project_token');
   vi.stubEnv('ATTEST_CLOUD_URL', undefined);
-  await expect(authenticatedCloudClient(path)).rejects.toMatchObject({
+  await expect(
+    Effect.runPromiseExit(authenticatedCloudClient(path)).then(valueFromExit),
+  ).rejects.toMatchObject({
     code: 'cloud_credentials_invalid',
   });
 });
@@ -60,9 +70,15 @@ it('gets CI project identity from the token and rejects disagreeing links', asyn
     );
 
   vi.stubGlobal('fetch', fetcher);
-  const client = await authenticatedCloudClient(join(root, 'absent'));
+
+  const client = await Effect.runPromiseExit(authenticatedCloudClient(join(root, 'absent'))).then(
+    valueFromExit,
+  );
+
   const options = { workingDirectory: root, client };
-  expect(await resolveCloudUploadProject(options)).toMatchObject({ projectId: 'p' });
+  expect(
+    await Effect.runPromiseExit(resolveCloudUploadProject(options)).then(valueFromExit),
+  ).toMatchObject({ projectId: 'p' });
   expect(new Request(fetcher.mock.calls[0]![0]).url).toBe('https://ci.test/v1/token');
   expect(new Headers(fetcher.mock.calls[0]![1]?.headers).get('authorization')).toBe(
     'Bearer atp_ci',
@@ -75,19 +91,29 @@ it('gets CI project identity from the token and rejects disagreeing links', asyn
     file_hashes: {},
   };
 
-  await writeCloudLink(root, link);
-  expect(await resolveCloudUploadProject(options)).toMatchObject({ projectId: 'p' });
-  await writeCloudLink(root, { ...link, project_id: 'other' });
-  await expect(resolveCloudUploadProject(options)).rejects.toMatchObject({
+  await Effect.runPromiseExit(writeCloudLink(root, link)).then(valueFromExit);
+  expect(
+    await Effect.runPromiseExit(resolveCloudUploadProject(options)).then(valueFromExit),
+  ).toMatchObject({ projectId: 'p' });
+  await Effect.runPromiseExit(writeCloudLink(root, { ...link, project_id: 'other' })).then(
+    valueFromExit,
+  );
+  await expect(
+    Effect.runPromiseExit(resolveCloudUploadProject(options)).then(valueFromExit),
+  ).rejects.toMatchObject({
     code: 'project_invalid',
     message: 'Project link belongs to a different cloud project.',
   });
-  await writeCloudLink(root, { ...link, base_url: 'https://other.test' });
-  await expect(resolveCloudUploadProject(options)).rejects.toMatchObject({
+  await Effect.runPromiseExit(
+    writeCloudLink(root, { ...link, base_url: 'https://other.test' }),
+  ).then(valueFromExit);
+  await expect(
+    Effect.runPromiseExit(resolveCloudUploadProject(options)).then(valueFromExit),
+  ).rejects.toMatchObject({
     code: 'project_invalid',
     message: 'Project link belongs to a different cloud origin.',
   });
-  await writeCloudLink(root, link);
+  await Effect.runPromiseExit(writeCloudLink(root, link)).then(valueFromExit);
   const controller = new AbortController();
   controller.abort();
   fetcher.mockImplementation((_url, init) => {
@@ -96,6 +122,8 @@ it('gets CI project identity from the token and rejects disagreeing links', asyn
     return Promise.resolve(Response.json({ token: { id: 't', name: 'ci', project_id: 'p' } }));
   });
   await expect(
-    resolveCloudUploadProject({ ...options, signal: controller.signal }),
+    Effect.runPromiseExit(
+      resolveCloudUploadProject({ ...options, signal: controller.signal }),
+    ).then(valueFromExit),
   ).rejects.toMatchObject({ code: 'cancelled', message: 'Cloud request did not complete.' });
 });

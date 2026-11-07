@@ -1,9 +1,9 @@
+import * as Effect from 'effect/Effect';
 import { execFile } from 'node:child_process';
 import { mkdir, readdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
-
 import {
   parseWithSchemaSync,
   CLI_EVENT_SCHEMA_ID,
@@ -30,7 +30,6 @@ import type {
   uploadCloudRun as uploadRun,
 } from '@attest/local/cloud';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-
 import {
   createFixtureProject,
   nonInteractive,
@@ -104,7 +103,7 @@ const completedEvents = (verdict: 'fail' | 'pass' = 'pass'): readonly EvalEvent[
         snapshot_hash: SNAPSHOT_HASH,
         total_cases: 2,
         concurrency: 2,
-        timeout_ms: 60_000,
+        timeout_ms: 60000,
       },
     },
     {
@@ -198,7 +197,7 @@ const failedEvents = (): readonly EvalEvent[] =>
         snapshot_hash: SNAPSHOT_HASH,
         total_cases: 0,
         concurrency: 1,
-        timeout_ms: 60_000,
+        timeout_ms: 60000,
       },
     },
     {
@@ -312,7 +311,7 @@ describe('eval request normalization', () => {
       dataset_ids: ['shared'],
       sample: { count: 25, seed: 'review' },
       concurrency: 2,
-      timeout_ms: 60_000,
+      timeout_ms: 60000,
       baseline_run_id: BASELINE_ID,
       junit_path: 'artifacts/eval.xml',
       output: 'json',
@@ -326,7 +325,6 @@ describe('eval request normalization', () => {
       result: { verdict: 'fail' },
     });
   });
-
   it('normalizes a complete stdin JSON request without mixing flag values', async () => {
     const request: EvalRunRequest = {
       schema: COMMAND_REQUEST_SCHEMA_ID,
@@ -350,11 +348,9 @@ describe('eval request normalization', () => {
     expect(stream).toHaveLength(7);
     expect(stream.at(-1)).toMatchObject({ event: 'result' });
   });
-
   it('uses the TTY wizard only to supply a missing selection before schema validation', async () => {
     const prompt = vi.fn<CliInteraction['prompt']>(() => Promise.resolve('refund returns'));
     await parse(['eval', 'run'], { inputIsTTY: true, outputIsTTY: true, prompt });
-
     expect(prompt.mock.calls[0]?.[0]).toBe('Test ids (space-separated) or all [all]: ');
     expect(prompt.mock.calls[0]?.[1]?.signal).toBeInstanceOf(AbortSignal);
     expect(run.mock.calls[0]?.[0]).toMatchObject({
@@ -363,11 +359,9 @@ describe('eval request normalization', () => {
       test_ids: ['refund', 'returns'],
     });
   });
-
   it('selects every test when the wizard answer is empty', async () => {
     const prompt = vi.fn<CliInteraction['prompt']>(() => Promise.resolve(''));
     await parse(['eval', 'run'], { inputIsTTY: true, outputIsTTY: true, prompt });
-
     expect(run.mock.calls[0]?.[0]).toEqual({
       schema: COMMAND_REQUEST_SCHEMA_ID,
       command: 'eval.run',
@@ -396,7 +390,6 @@ describe('eval errors and no-write preflight', () => {
     },
   ])('emits stable $code for $message', async ({ argv, code, message }) => {
     const harness = await parse(argv);
-
     expect(run).not.toHaveBeenCalled();
     expect(harness.exitCode).toBe(2);
     expect(harness.errors).toEqual([]);
@@ -406,7 +399,6 @@ describe('eval errors and no-write preflight', () => {
       error: { code, message },
     });
   });
-
   it('reports deterministic JSON-source conflicts before dispatch', async () => {
     const harness = await parse([
       'eval',
@@ -429,16 +421,13 @@ describe('eval errors and no-write preflight', () => {
     });
     expect(run).not.toHaveBeenCalled();
   });
-
   it('does not create files or dispatch when validation fails', async () => {
     const root = await temporaryDirectory('attest-eval-no-write-');
     const harness = await parse(['eval', 'run', '--non-interactive'], {}, root);
-
     expect(harness.exitCode).toBe(2);
     expect(run).not.toHaveBeenCalled();
     expect(await readdir(root)).toEqual([]);
   });
-
   it('uses a structured mode observed inside an invalid JSON request', async () => {
     const harness = await parse(['eval', 'run', '--from-json', '-'], {
       readStdin: () =>
@@ -479,10 +468,8 @@ describe('eval output and sequencing', () => {
       if (output !== 'human') expect(serialized).toContain('"retryable":true');
     }
   });
-
   it('renders watch progress live only for human output and retains one final result line', async () => {
     const harness = await parse(['eval', 'run', 'refund', '--watch']);
-
     expect(harness.errors).toEqual([]);
     expect(harness.output.slice(0, 3)).toEqual([
       `Run ${RUN_ID} started: 2 cases, concurrency 2.`,
@@ -495,7 +482,6 @@ describe('eval output and sequencing', () => {
     expect(harness.output.at(-1)).not.toContain('\n  attest diff\n');
     expect(harness.output.at(-1)?.split('\n').at(-1)).toBe('Result: PASS (exit 0)');
   });
-
   it('streams validated JSONL live and preserves completion order', async () => {
     let release: (() => void) | undefined;
 
@@ -536,7 +522,6 @@ describe('eval output and sequencing', () => {
     ]);
     expect(stream.at(-1)).toMatchObject({ event: 'result', data: { exit_code: 0 } });
   });
-
   it('finishes a live JSONL prefix contiguously when its event source throws', async () => {
     const events = async function* (): AsyncGenerator<EvalEvent> {
       yield completedEvents()[0]!;
@@ -545,7 +530,6 @@ describe('eval output and sequencing', () => {
     };
 
     run.mockResolvedValue(events());
-
     const harness = await parse(['eval', 'run', 'refund', '--output', 'jsonl']);
 
     const stream = parseWithSchemaSync(
@@ -562,7 +546,6 @@ describe('eval output and sequencing', () => {
     expect(stream.at(-1)).toMatchObject({ event: 'result', data: { exit_code: 4 } });
     expect(harness.exitCode).toBe(4);
   });
-
   it.each([1, 3, 6])('repairs a JSONL source that ends after %i events', async (length) => {
     run.mockResolvedValue(eventSource(completedEvents().slice(0, length)));
     const harness = await parse(['eval', 'run', 'refund', '--output', 'jsonl']);
@@ -576,7 +559,6 @@ describe('eval output and sequencing', () => {
     expect(stream.filter(({ event }) => event === 'result')).toHaveLength(1);
     expect(harness.exitCode).toBe(4);
   });
-
   it('validates terminal metadata before publishing a JSONL success', async () => {
     let events = completedEvents();
     const final = events.at(-1)!;
@@ -606,13 +588,11 @@ describe('eval output and sequencing', () => {
     expect(stream.at(-1)).toMatchObject({ event: 'result', data: { exit_code: 4 } });
     expect(harness.exitCode).toBe(4);
   });
-
   it('turns a sequence violation into one stable machine failure', async () => {
     const invalid = [...completedEvents()];
     invalid[1] = { ...invalid[1]!, sequence: 7 };
     run.mockResolvedValue(eventSource(invalid));
     const harness = await parse(['eval', 'run', 'refund', '--output', 'json']);
-
     expect(harness.exitCode).toBe(4);
     expect(harness.output).toHaveLength(1);
     expect(parseWithSchemaSync(cliResultSchema, JSON.parse(harness.output[0]!))).toMatchObject({
@@ -649,7 +629,6 @@ describe('eval cancellation command', () => {
     );
     expect(harness.exitCode).toBe(0);
   });
-
   it('accepts one complete cancellation request from JSON', async () => {
     const root = await temporaryDirectory('attest-eval-cancel-json-');
     await writeFile(
@@ -662,11 +641,9 @@ describe('eval cancellation command', () => {
       }),
     );
     const harness = await parse(['eval', 'cancel', '--from-json', 'cancel.json'], {}, root);
-
     expect(cancel.mock.calls[0]?.[0]).toMatchObject({ command: 'eval.cancel', run_id: RUN_ID });
     expect(harness.output).toEqual([`Run ${RUN_ID}: cancellation requested.`]);
   });
-
   it('rejects missing and overlapping run ids before cancellation dispatch', async () => {
     const missing = await parse(['eval', 'cancel', '--output', 'json']);
     expect(missing.exitCode).toBe(2);
@@ -727,7 +704,6 @@ describe('eval command grammar and terminal behavior', () => {
     const subcommands = parseWithSchemaSync(cliHelpSchema, rootHelp.result).command.subcommands;
     expect(subcommands.some(({ name }) => name === 'eval')).toBe(true);
     expect(subcommands.some(({ name }) => name === 'run')).toBe(false);
-
     const harness = await parse(['help', 'eval', 'run', '--output', 'json']);
     const document = parseWithSchemaSync(cliResultSchema, JSON.parse(harness.output[0]!));
 
@@ -749,7 +725,6 @@ describe('eval command grammar and terminal behavior', () => {
     ]);
     expect(help.command.constraints).toContain('--watch is available only with human output.');
   });
-
   it('returns 130 and restores terminal modes after SIGINT in the real wizard PTY', async () => {
     const root = await createFixtureProject();
     // The agent never answers, so the run is still in flight when the driver sends SIGINT.
@@ -764,13 +739,11 @@ describe('eval command grammar and terminal behavior', () => {
     const { stderr, stdout } = await execFileAsync(
       'python3',
       [PTY_DRIVER, JSON.stringify(steps), 'bun', PTY_CHILD, root],
-      { timeout: 20_000 },
+      { timeout: 20000 },
     );
 
     expect(stderr).toBe('');
-
     const evidence = parsePtyEvidence(stdout);
-
     expect(evidence).toMatchObject({
       exit_code: 130,
       steps_seen: [true, true],
@@ -790,19 +763,23 @@ it.each(['pass', 'fail'] as const)(
         throw new LocalError('cancelled', 'Cloud request did not complete.');
       }
 
-      return Promise.resolve({ url: 'https://cloud.test/run', unchanged: false });
+      return Effect.succeed({ url: 'https://cloud.test/run', unchanged: false });
     });
 
     const authenticatedCloudClient = vi
       .fn<typeof cloudClient>()
-      .mockResolvedValue({ baseUrl: 'https://cloud.test', request: vi.fn(), upload: vi.fn() });
+      .mockReturnValue(
+        Effect.succeed({ baseUrl: 'https://cloud.test', request: vi.fn(), upload: vi.fn() }),
+      );
 
-    const resolveCloudUploadProject = vi.fn<typeof uploadProject>().mockResolvedValue({
-      root: process.cwd(),
-      projectId: 'p',
-      client: await authenticatedCloudClient('unused'),
-      signal: undefined,
-    });
+    const resolveCloudUploadProject = vi.fn<typeof uploadProject>().mockReturnValue(
+      Effect.succeed({
+        root: process.cwd(),
+        projectId: 'p',
+        client: await Effect.runPromise(authenticatedCloudClient('unused')),
+        signal: undefined,
+      }),
+    );
 
     run.mockResolvedValue(eventSource(completedEvents(verdict)));
 
@@ -834,15 +811,15 @@ it.each(['credentials', 'project'] as const)(
 
     const authenticatedCloudClient = vi.fn(() => {
       if (failure === 'credentials')
-        return Promise.reject(
+        return Effect.fail(
           new LocalError('cloud_credentials_invalid', 'Invalid cloud credentials.'),
         );
 
-      return Promise.resolve(client);
+      return Effect.succeed(client);
     });
 
     const resolveCloudUploadProject = vi.fn(() => {
-      return Promise.reject(
+      return Effect.fail(
         new LocalError('project_invalid', 'Project link belongs to a different cloud project.'),
       );
     });

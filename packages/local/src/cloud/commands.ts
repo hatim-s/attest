@@ -1,9 +1,13 @@
+import { withOperationCleanup } from '../internal/operation-cleanup.js';
+import * as Effect from 'effect/Effect';
 import { createHash, randomBytes } from 'node:crypto';
-import { setTimeout } from 'node:timers/promises';
 
-import { parseWithSchema, cloudRunRequestSchema, type EvalRunRequest } from '@attest/contracts';
+import {
+  parseWithSchemaEffect,
+  cloudRunRequestSchema,
+  type EvalRunRequest,
+} from '@attest/contracts';
 import * as Schema from 'effect/Schema';
-
 import { LocalError } from '../errors/local-error.js';
 import { createCloudClient, type CloudClient } from './client.js';
 import {
@@ -28,33 +32,64 @@ import {
 
 /** Rejects malformed caller input before opening a network request. */
 // BOUNDARY: Cloud command inputs are validated by the supplied native schema before network submission.
-const parseCloudInput = <T>(schema: Schema.ConstraintDecoder<T>, value: unknown): T => {
-  const parsed = parseWithSchema(schema, value);
+const parseCloudInput = <T>(schema: Schema.ConstraintDecoder<T>, value: unknown) =>
+  parseWithSchemaEffect(schema, value).pipe(
+    Effect.mapError(
+      () => new LocalError('cli_usage', 'Cloud request does not match the protocol.'),
+    ),
+  );
 
-  if (!parsed.ok) throw new LocalError('cli_usage', 'Cloud request does not match the protocol.');
+/** Races only the polling delay against business cancellation, retaining listener release. */
+const waitForCloudPoll = Effect.fn('waitForCloudPoll')(function* (
+  milliseconds: number,
+  signal?: AbortSignal,
+) {
+  if (signal === undefined) return yield* Effect.sleep(milliseconds);
+  let cancel: (() => void) | undefined;
 
-  return parsed.value;
-};
+  return yield* withOperationCleanup(
+    Effect.raceFirst(
+      Effect.sleep(milliseconds),
+      Effect.callback<void, LocalError>((resume) => {
+        cancel = () => resume(Effect.fail(new LocalError('cancelled', 'Cloud login cancelled.')));
+        signal.addEventListener('abort', cancel, { once: true });
+
+        if (signal.aborted) cancel();
+      }),
+    ),
+    Effect.sync(() => {
+      if (cancel !== undefined) signal.removeEventListener('abort', cancel);
+    }),
+  );
+});
 
 /** Exchanges a user-approved PKCE device session for a private, revocable CLI token. */
-const loginCloud = async (options: {
+const loginCloud = Effect.fn('loginCloud')(function* (options: {
   baseUrl: string;
   credentialPath: string;
   signal?: AbortSignal;
   onDevice: (notice: LoginNotice) => void;
   fetch?: typeof fetch;
-}): Promise<{ base_url: string; authenticated: true }> => {
-  const client = createCloudClient({ baseUrl: options.baseUrl, fetch: options.fetch });
+}) {
+  const client = yield* Effect.try({
+    try: () => createCloudClient({ baseUrl: options.baseUrl, fetch: options.fetch }),
+    catch: (cause) => cause,
+  }).pipe(
+    Effect.catch((cause) => (cause instanceof LocalError ? Effect.fail(cause) : Effect.die(cause))),
+  );
+
   const verifier = randomBytes(32).toString('base64url');
 
-  const device = await client.request('POST', '/v1/auth/device', {
+  const device = yield* client.request('POST', '/v1/auth/device', {
     schema: deviceSchema,
     body: { code_challenge: createHash('sha256').update(verifier).digest('base64url') },
     signal: options.signal,
   });
 
   if (new URL(device.verification_uri).origin !== client.baseUrl)
-    throw new LocalError('cloud_request_failed', 'Cloud approval URL points to another origin.');
+    return yield* Effect.fail(
+      new LocalError('cloud_request_failed', 'Cloud approval URL points to another origin.'),
+    );
   options.onDevice({
     user_code: device.user_code,
     verification_uri: device.verification_uri,
@@ -64,16 +99,17 @@ const loginCloud = async (options: {
   let interval = device.interval * 1000;
 
   while (Date.now() < deadline) {
-    if (options.signal?.aborted) throw new LocalError('cancelled', 'Cloud login cancelled.');
+    if (options.signal?.aborted)
+      return yield* Effect.fail(new LocalError('cancelled', 'Cloud login cancelled.'));
 
-    try {
-      const token = await client.request('POST', '/v1/auth/device/token', {
+    const loggedIn = yield* Effect.gen(function* () {
+      const token = yield* client.request('POST', '/v1/auth/device/token', {
         schema: tokenSchema,
         body: { device_code: device.device_code, code_verifier: verifier },
         signal: options.signal,
       });
 
-      await writeCloudCredentials(
+      yield* writeCloudCredentials(
         {
           baseUrl: client.baseUrl,
           accessToken: token.access_token,
@@ -82,100 +118,115 @@ const loginCloud = async (options: {
         options.credentialPath,
       );
 
-      return { base_url: client.baseUrl, authenticated: true };
-    } catch (error) {
-      if (!(error instanceof CloudRemoteError) || error.outcome.kind !== 'device') throw error;
+      return { base_url: client.baseUrl, authenticated: true as const };
+    }).pipe(
+      Effect.catch((error) =>
+        Effect.gen(function* () {
+          if (!(error instanceof CloudRemoteError) || error.outcome.kind !== 'device')
+            return yield* Effect.fail(error);
 
-      if (error.outcome.code === 'slow_down') interval += 5_000;
-      else if (error.outcome.code === 'expired_token') {
-        throw new LocalError(
-          'cloud_auth_required',
-          'Cloud approval code expired. Run attest cloud login again.',
-        );
-      } else if (error.outcome.code === 'access_denied') {
-        throw new LocalError(
-          'cloud_auth_required',
-          'Cloud login was denied. Run attest cloud login again.',
-        );
-      }
-    }
+          if (error.outcome.code === 'slow_down') interval += 5000;
+          else if (error.outcome.code === 'expired_token') {
+            return yield* Effect.fail(
+              new LocalError(
+                'cloud_auth_required',
+                'Cloud approval code expired. Run attest cloud login again.',
+              ),
+            );
+          } else if (error.outcome.code === 'access_denied') {
+            return yield* Effect.fail(
+              new LocalError(
+                'cloud_auth_required',
+                'Cloud login was denied. Run attest cloud login again.',
+              ),
+            );
+          }
+        }),
+      ),
+    );
 
-    try {
-      await setTimeout(Math.min(interval, Math.max(0, deadline - Date.now())), undefined, {
-        signal: options.signal,
-      });
-    } catch {
-      throw new LocalError('cancelled', 'Cloud login cancelled.');
-    }
+    if (loggedIn !== undefined) return loggedIn;
+    yield* waitForCloudPoll(Math.min(interval, Math.max(0, deadline - Date.now())), options.signal);
   }
 
-  throw new LocalError(
-    'cloud_auth_required',
-    'Cloud approval code expired. Run attest cloud login again.',
+  return yield* Effect.fail(
+    new LocalError(
+      'cloud_auth_required',
+      'Cloud approval code expired. Run attest cloud login again.',
+    ),
   );
-};
+});
 
 /** Loads only credentials tied to the configured cloud origin. */
-const authenticatedCloudClient = async (credentialPath: string): Promise<CloudClient> => {
-  const credentials = await resolveCloudCredentials(credentialPath);
+const authenticatedCloudClient = Effect.fn('authenticatedCloudClient')(function* (
+  credentialPath: string,
+) {
+  const credentials = yield* resolveCloudCredentials(credentialPath);
 
   return createCloudClient(credentials);
-};
+});
 
 /** Revokes the server session before removing the local token. */
-const logoutCloud = async (credentialPath: string): Promise<{ authenticated: false }> => {
-  const credentials = await readCloudCredentials(credentialPath, { allowExpired: true });
+const logoutCloud = Effect.fn('logoutCloud')(function* (credentialPath: string) {
+  const credentials = yield* readCloudCredentials(credentialPath, { allowExpired: true });
 
   const client = createCloudClient({
     baseUrl: credentials.baseUrl,
     accessToken: credentials.accessToken,
   });
 
-  try {
-    await client.request('DELETE', '/v1/auth/session', { schema: emptyResponseSchema });
-  } catch (error) {
-    if (!(error instanceof LocalError) || error.code !== 'cloud_auth_required') throw error;
-  }
-
-  await removeCloudCredentials(credentialPath);
+  yield* Effect.gen(function* () {
+    yield* client.request('DELETE', '/v1/auth/session', { schema: emptyResponseSchema });
+  }).pipe(
+    Effect.catch((error) =>
+      Effect.gen(function* () {
+        if (!(error instanceof LocalError) || error.code !== 'cloud_auth_required')
+          return yield* Effect.fail(error);
+      }),
+    ),
+  );
+  yield* removeCloudCredentials(credentialPath);
 
   return { authenticated: false };
-};
+});
 
 const cloudProjectPath = (projectId: string): string =>
   `/v1/projects/${encodeURIComponent(projectId)}`;
 
 /** Submits the existing eval request against an immutable uploaded revision. */
-const runCloud = async (options: {
+const runCloud = Effect.fn('runCloud')(function* (options: {
   client: CloudClient;
   projectId: string;
   revisionId: string;
   request: EvalRunRequest;
   idempotencyKey: string;
-}): Promise<typeof runResponseSchema.Type> =>
-  await options.client.request('POST', `${cloudProjectPath(options.projectId)}/runs`, {
+}) {
+  return yield* options.client.request('POST', `${cloudProjectPath(options.projectId)}/runs`, {
     schema: runResponseSchema,
-    body: parseCloudInput(cloudRunRequestSchema, {
+    body: yield* parseCloudInput(cloudRunRequestSchema, {
       revision_id: options.revisionId,
       request: options.request,
       idempotency_key: options.idempotencyKey,
     }),
   });
+});
 
 /** Reads persisted event pages after the caller's cursor; reconnecting never resubmits a run. */
-const cloudEvents = async (options: {
+const cloudEvents = Effect.fn('cloudEvents')(function* (options: {
   client: CloudClient;
   projectId: string;
   runId: string;
   after?: number;
   signal?: AbortSignal;
-}): Promise<CloudEventPage> => {
+}) {
   const after = options.after ?? 0;
 
   if (!Number.isSafeInteger(after) || after < 0)
-    throw new LocalError('cli_usage', 'Event cursor must be a non-negative integer.');
+    return yield* Effect.fail(
+      new LocalError('cli_usage', 'Event cursor must be a non-negative integer.'),
+    );
 
-  const page = await options.client.request(
+  const page = yield* options.client.request(
     'GET',
     `${cloudProjectPath(options.projectId)}/runs/${encodeURIComponent(options.runId)}/events?after=${after}`,
     { schema: eventPageSchema, signal: options.signal },
@@ -189,48 +240,74 @@ const cloudEvents = async (options: {
         event.sequence > page.next_cursor,
     )
   )
-    throw new LocalError('cloud_request_failed', 'Cloud event page has an invalid cursor order.');
+    return yield* Effect.fail(
+      new LocalError('cloud_request_failed', 'Cloud event page has an invalid cursor order.'),
+    );
 
   return page;
-};
+});
 
 /** Lists the current account's cloud projects. */
-const listCloudProjects = async (client: CloudClient) =>
-  await client.request('GET', '/v1/projects', { schema: projectsResponseSchema });
+const listCloudProjects = Effect.fn('listCloudProjects')(function* (client: CloudClient) {
+  return yield* client.request('GET', '/v1/projects', { schema: projectsResponseSchema });
+});
 
 /** Creates an account-owned project without changing the local link. */
-const createCloudProject = async (client: CloudClient, name: string) =>
-  await client.request('POST', '/v1/projects', {
+const createCloudProject = Effect.fn('createCloudProject')(function* (
+  client: CloudClient,
+  name: string,
+) {
+  return yield* client.request('POST', '/v1/projects', {
     schema: projectResponseSchema,
     body: {
-      name: parseCloudInput(
+      name: yield* parseCloudInput(
         Schema.String.check(Schema.isMinLength(1)).check(Schema.isMaxLength(128)),
         name,
       ),
     },
   });
+});
 
 /** Reads the authoritative lifecycle state of a previously submitted run. */
-const getCloudRun = async (client: CloudClient, projectId: string, runId: string) =>
-  await client.request('GET', `${cloudProjectPath(projectId)}/runs/${encodeURIComponent(runId)}`, {
-    schema: runResponseSchema,
-  });
+const getCloudRun = Effect.fn('getCloudRun')(function* (
+  client: CloudClient,
+  projectId: string,
+  runId: string,
+) {
+  return yield* client.request(
+    'GET',
+    `${cloudProjectPath(projectId)}/runs/${encodeURIComponent(runId)}`,
+    {
+      schema: runResponseSchema,
+    },
+  );
+});
 
 /** Requests cancellation of the existing run without replaying agent work. */
-const cancelCloudRun = async (client: CloudClient, projectId: string, runId: string) =>
-  await client.request(
+const cancelCloudRun = Effect.fn('cancelCloudRun')(function* (
+  client: CloudClient,
+  projectId: string,
+  runId: string,
+) {
+  return yield* client.request(
     'POST',
     `${cloudProjectPath(projectId)}/runs/${encodeURIComponent(runId)}/cancel`,
     { schema: runResponseSchema },
   );
+});
 
 /** Returns durable summary data and the server's raw-evidence expiration flag. */
-const getCloudRunResult = async (client: CloudClient, projectId: string, runId: string) =>
-  await client.request(
+const getCloudRunResult = Effect.fn('getCloudRunResult')(function* (
+  client: CloudClient,
+  projectId: string,
+  runId: string,
+) {
+  return yield* client.request(
     'GET',
     `${cloudProjectPath(projectId)}/runs/${encodeURIComponent(runId)}/result`,
     { schema: runResultSchema },
   );
+});
 
 export {
   listCloudProjects,

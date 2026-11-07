@@ -1,3 +1,5 @@
+import { readExitValue } from '../../errors/read-exit-value.js';
+import * as Effect from 'effect/Effect';
 import {
   COMMAND_REQUEST_SCHEMA_ID,
   type EvalCancelRequest,
@@ -11,7 +13,6 @@ import {
 } from '@attest/local/cloud';
 import { cancelConfiguration, readRequestDocument, runConfiguration } from '@attest/local/eval';
 import type { Command } from 'commander';
-
 import {
   AttestCliError,
   CliExit,
@@ -67,7 +68,10 @@ const REQUEST_DOCUMENT_HINT = `Provide one ${COMMAND_REQUEST_SCHEMA_ID} document
  * becomes the command's output first, so even an invalid document fails in the mode it asked for.
  */
 const readRunRequest = async (
-  fields: EvalRunRequestFields & { fromJson?: string; nonInteractive?: boolean },
+  fields: EvalRunRequestFields & {
+    fromJson?: string;
+    nonInteractive?: boolean;
+  },
   command: Command,
   signal: AbortSignal,
   context: CommandContext,
@@ -116,12 +120,18 @@ const executeEvalRun = async (
   };
 
   const uploadContext = upload
-    ? await cloud.resolveCloudUploadProject({
-        client: await cloud.authenticatedCloudClient(context.credentialPath),
-        workingDirectory: context.workingDirectory,
-        project,
-        signal,
-      })
+    ? await // EFFECT-BRIDGE(S9b)
+      Effect.runPromiseExit(
+        cloud.resolveCloudUploadProject({
+          client: await // EFFECT-BRIDGE(S9b)
+          Effect.runPromiseExit(cloud.authenticatedCloudClient(context.credentialPath)).then(
+            readExitValue,
+          ),
+          workingDirectory: context.workingDirectory,
+          project,
+          signal,
+        }),
+      ).then(readExitValue)
     : undefined;
 
   const source = await execute(request, {
@@ -154,17 +164,26 @@ const executeEvalRun = async (
   }
 
   const completed = events.findLast(
-    (event): event is Extract<EvalEvent, { event: 'run_completed' }> =>
-      event.event === 'run_completed',
+    (
+      event,
+    ): event is Extract<
+      EvalEvent,
+      {
+        event: 'run_completed';
+      }
+    > => event.event === 'run_completed',
   );
 
   if (uploadContext !== undefined && completed !== undefined) {
     try {
-      const result = await cloud.uploadCloudRun({
-        ...uploadContext,
-        runId: completed.data.run_id,
-        signal,
-      });
+      const result = await // EFFECT-BRIDGE(S9b)
+      Effect.runPromiseExit(
+        cloud.uploadCloudRun({
+          ...uploadContext,
+          runId: completed.data.run_id,
+          signal,
+        }),
+      ).then(readExitValue);
 
       context.io.error(result.url);
     } catch (error) {
@@ -333,7 +352,6 @@ const registerEvalCommands = (context: CommandContext): void => {
     )
     .action(async (runId: string | undefined, options: EvalCancelCliOptions, command: Command) => {
       const request = await readCancelRequest(runId, options, command, context);
-
       const cancel = context.services?.eval?.cancelConfiguration ?? cancelConfiguration;
 
       const result = await cancel(request, {

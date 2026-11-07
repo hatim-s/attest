@@ -590,3 +590,34 @@ flowchart TD
   G -->|Owner interrupted, waiter still active| F
   G -->|Failure or defect| E
 ```
+
+## S8c cloud and registry API migration
+
+Local cloud requests, credentials, links, revisions, uploads, token management and
+registry writes now return native Effects. `CloudClient.request` and `upload`
+return `Effect<T, LocalError>`. Injected clients and command test services must
+return Effects too. The private attest-cloud test imports of these public local
+APIs must adopt the new signatures. That private host was not edited or verified.
+Registry catalog reads retain their S2 API.
+
+HTTP requests dispatch once. Caller cancellation and the existing deadlines abort
+the owned controller; accepted requests join the foreign fetch and body operation
+before releasing local ownership. An implementation that ignores abort can delay
+shutdown indefinitely. An unknown response never authorizes automatic replay or
+proves remote rollback. Dry runs, wire formats, full bundle bytes, registry file
+modes, synchronization hash fences and manifest-last publication are unchanged.
+
+Release failures retain the complete primary Exit internally. A primary failure,
+defect or interruption stays primary with release diagnostics attached. A release
+failure after success is a typed failure with the completed value retained in its
+cause; callers must not repeat a completed mutation because only cleanup failed.
+Temporary CLI composition bridges belong to S9b, and the project-init bridge to
+S8b. No Promise compatibility API is retained.
+
+After successful link/sync publication, failed release reports
+`project_saved_cleanup_failed` with `committed: true`. Registry release failure
+reports `registry_write_failed`. HTTP body release failure reports
+`cloud_request_failed`. These cleanup diagnostics are deliberate behavior changes
+under R1 through R3; primary public failure codes take precedence. Cloud body
+cancellation has a one-second acknowledgement bound. Expiry retains unconfirmed
+cleanup and does not imply remote completion.
