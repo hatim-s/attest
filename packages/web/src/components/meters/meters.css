@@ -1,0 +1,108 @@
+.attest-meter,
+.attest-case-strip {
+  --meter-ink: var(--ink, var(--text, CanvasText));
+  --meter-fail: var(--fail, #ff5c00);
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  max-width: 100%;
+  color: var(--meter-ink);
+  font: inherit;
+}
+.attest-meter {
+  width: 180px;
+  flex-wrap: wrap;
+}
+.attest-case-strip {
+  flex-wrap: wrap;
+}
+.attest-meter-mark {
+  display: block;
+  flex: 1 1 0;
+  min-width: 0;
+  height: 16px;
+  background: var(--meter-ink);
+}
+.attest-case-strip .attest-meter-mark {
+  flex: 0 0 12px;
+  height: 24px;
+}
+.attest-meter-mark.fail {
+  background: var(--meter-fail);
+}
+.attest-meter-mark.error {
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px var(--meter-fail);
+}
+.attest-meter-mark.skipped {
+  background: repeating-linear-gradient(135deg, transparent 0 2px, var(--muted, GrayText) 2px 3px);
+}
+.attest-case-strip a:focus-visible {
+  outline: 2px solid var(--meter-ink);
+  outline-offset: 3px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .attest-meter *,
+  .attest-case-strip * {
+    animation: none;
+    transition: none;
+  }
+}
+
+.attest-meter-unknown {
+  flex-basis: 100%;
+  font-size: 11px;
+}
+.attest-case-strip .attest-meter-mark.fail {
+  border-top: 4px solid var(--meter-ink);
+  box-sizing: border-box;
+}
+.attest-case-strip .attest-meter-mark.error {
+  border-top: 4px double var(--meter-fail);
+  box-sizing: border-box;
+}
+.attest-case-strip .attest-meter-mark.not-run:focus-visible {
+  outline: 2px solid var(--meter-ink);
+  outline-offset: 3px;
+}
+
+.attest-meter-mark.notRun,
+.attest-meter-mark.not-run {
+  background: transparent;
+  border: 1px dotted var(--muted, GrayText);
+  box-sizing: border-box;
+}
+.attest-case-strip a[href] {
+  cursor: pointer;
+}
+.attest-case-strip a:not([href]) {
+  cursor: default;
+}
+.attest-strip-key {
+  flex-basis: 100%;
+  font-size: 11px;
+}
+
+@supports not (color: light-dark(white, black)) {
+  .attest-compact[data-theme='light'] :is(.attest-meter, .attest-case-strip) {
+    --meter-fail: var(--fail, #ff5c00);
+  }
+  :where(:root[data-theme='dark']) :is(.attest-meter, .attest-case-strip),
+  .attest-compact[data-theme='dark'] :is(.attest-meter, .attest-case-strip) {
+    --meter-fail: var(--fail, #ff6a1a);
+  }
+  @media (prefers-color-scheme: dark) {
+    :where(:root:not([data-theme]), :root[data-theme='system'])
+      :is(.attest-meter, .attest-case-strip),
+    .attest-compact[data-theme='system'] :is(.attest-meter, .attest-case-strip) {
+      --meter-fail: var(--fail, #ff6a1a);
+    }
+  }
+}
+
+@supports (color: light-dark(white, black)) {
+  .attest-meter,
+  .attest-case-strip {
+    --meter-fail: var(--fail, light-dark(#ff5c00, #ff6a1a));
+  }
+}
