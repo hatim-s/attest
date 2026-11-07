@@ -247,3 +247,25 @@ Core owns the projection schemas, exact selected-case derivation and synchronous
 RunSource exposes native Effect reads with StoreError failures; a dashboard query shares one
 SQLite read snapshot across its statements. The `attest web` command composes this catalog and
 run control under the CLI application scope. Migration SQL and driver callbacks stay in local.
+
+## Native Effect ownership
+
+Operations return native Effect 4.1.2 programs with tagged errors. Pure domain
+algorithms remain synchronous. Core storage and run-control contracts describe
+Effect operations without importing local infrastructure. Executor owns transport
+and process resources; runtime owns scheduling, metrics and case lifecycle. Local
+composes those operations with project transactions, cancellation and persistence.
+See [EFFECT.md](EFFECT.md) for cancellation and cleanup precedence.
+
+The CLI runs one application program and captures its services before handing
+commands to Commander. Its application scope joins admitted eval runs before store
+release. `withStoreScope` owns concrete SQLite handles; stores and catalogs expose
+native operations with captured dependencies. A returned event source or HTTP
+request does not own an accepted run's lifetime.
+
+API handlers, dashboard query callbacks and agent-client host callbacks execute
+Effects only at the files and operations declared in ESLint's `effectRoots`.
+The permanent boundary rule rejects execution elsewhere. The portable client owns
+accepted handlers through runner shutdown; its Node and Pi integrations stay in
+separate entry points. Foreign callbacks adapt individual operations at their host
+boundary. Internal operations never create per-method runtimes.
