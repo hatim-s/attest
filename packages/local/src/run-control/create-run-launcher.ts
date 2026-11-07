@@ -20,12 +20,7 @@ type RunLauncherOptions = {
 };
 
 /** Says why the project could not be loaded or changed, in the CLI's own terms. */
-const toProjectUnloadable = (error: Error): StoreError => {
-  if (!(error instanceof LocalError))
-    return new StoreError('PROJECT_UNLOADABLE', 'The project could not be loaded or changed.', {
-      cause: error,
-      details: { code: 'internal_error', message: 'The project could not be loaded or changed.' },
-    });
+const toProjectUnloadable = (error: LocalError): StoreError => {
   const { code, message, path, hint, details } = error;
 
   return new StoreError('PROJECT_UNLOADABLE', message, {
@@ -33,6 +28,13 @@ const toProjectUnloadable = (error: Error): StoreError => {
     details: { code, message, path, hint, details },
   });
 };
+
+/**
+ * Maps a LocalError to `PROJECT_UNLOADABLE`. Any other failure is unexpected and becomes a defect,
+ * so the API answers 500 `INTERNAL_ERROR` as the Promise launcher did.
+ */
+const failProjectUnloadable = (error: Error): Effect.Effect<never, StoreError> =>
+  error instanceof LocalError ? Effect.fail(toProjectUnloadable(error)) : Effect.die(error);
 
 /**
  * Starts runs by spawning the attest CLI in the project root and cancels them through the
@@ -68,7 +70,7 @@ const createRunLauncher = Effect.fn('createRunLauncher')(function* ({
     listTests: Effect.fn('launcher.listTests')(function* (projectKey) {
       const root = yield* projectRoot(projectKey);
 
-      return yield* listProjectTests(root).pipe(Effect.mapError(toProjectUnloadable));
+      return yield* listProjectTests(root).pipe(Effect.catch(failProjectUnloadable));
     }),
     startRun: Effect.fn('launcher.startRun')(function* (projectKey, request) {
       const root = yield* projectRoot(projectKey);
@@ -98,10 +100,10 @@ const createRunLauncher = Effect.fn('createRunLauncher')(function* ({
         { project: root, workingDirectory: root },
       ).pipe(
         Effect.provideService(CancellationRegistry, cancellationRegistry),
-        Effect.mapError((error) =>
+        Effect.catch((error) =>
           error instanceof LocalError && error.code === 'resource_not_found'
-            ? new StoreError('RUN_NOT_FOUND', error.message, { cause: error })
-            : toProjectUnloadable(error),
+            ? Effect.fail(new StoreError('RUN_NOT_FOUND', error.message, { cause: error }))
+            : failProjectUnloadable(error),
         ),
       );
 
