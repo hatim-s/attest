@@ -7,4 +7,4 @@ export {
   type RegistryEntry,
 } from './project-registry.js';
 
-export { createRegistryCatalog, type ClosableCatalog } from './registry-catalog.js';
+export { createRegistryCatalog } from './registry-catalog.js';

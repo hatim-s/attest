@@ -1,3 +1,4 @@
+import * as Effect from 'effect/Effect';
 import type { EvalEvent } from '@attest/contracts';
 
 type PendingRead = {
@@ -12,6 +13,11 @@ class EvalEventQueue implements AsyncIterable<EvalEvent>, AsyncIterator<EvalEven
   #closed = false;
   #failure: Error | undefined;
   #iterated = false;
+
+  /** Native producer boundary; the iterator below is the foreign Promise consumer boundary. */
+  offer(event: EvalEvent): Effect.Effect<void> {
+    return Effect.sync(() => this.push(event));
+  }
 
   /** Delivers one validated event immediately or retains it until the CLI asks for the next line. */
   push(event: EvalEvent): void {

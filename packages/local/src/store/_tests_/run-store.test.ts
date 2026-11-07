@@ -1,3 +1,6 @@
+import { run as runEffect, openFixture } from './store-fixture.js';
+import * as Effect from 'effect/Effect';
+import { valueFromExit } from '../../internal/effect-exit.js';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -10,19 +13,20 @@ import { Kysely } from 'kysely';
 
 import { createSqliteDialect } from '../internal/kysely-sqlite-dialect.js';
 import { openSqliteHandle } from '../internal/open-sqlite-handle.js';
-import { openStore, type RunStore } from '../run-store.js';
+import type { RunStore } from '../run-store.js';
 import type { Database } from '../schema.js';
 
-const stores: RunStore[] = [];
+const stores: { close(): Promise<void> }[] = [];
 
 const directories: string[] = [];
 
 const openTemporaryStore = async (): Promise<{ path: string; store: RunStore }> => {
   const directory = await mkdtemp(join(tmpdir(), 'attest-run-store-'));
   const path = join(directory, 'runs.db');
-  const store = (await openStore(path)).runs;
+  const fixture = await openFixture(path);
+  const store = fixture.store.runs;
   directories.push(directory);
-  stores.push(store);
+  stores.push(fixture);
 
   return { path, store };
 };
@@ -109,9 +113,11 @@ describe('RunStore', () => {
     const { store } = await openTemporaryStore();
 
     for (const id of ['a', 'c', 'b']) {
-      await store.createRun(
-        { schemaId: 'attest.project', configHash: 'hash', configJson: '{}' },
-        { id, createdAt: '2026-10-18T00:00:00.000Z' },
+      await runEffect(
+        store.createRun(
+          { schemaId: 'attest.project', configHash: 'hash', configJson: '{}' },
+          { id, createdAt: '2026-10-18T00:00:00.000Z' },
+        ),
       );
     }
 
@@ -119,25 +125,27 @@ describe('RunStore', () => {
     let cursor: string | undefined;
 
     do {
-      const page = await store.listRuns({ cursor, limit: 1 });
+      const page = await runEffect(store.listRuns({ cursor, limit: 1 }));
       ids.push(...page.items.map((run) => run.id));
       cursor = page.nextCursor;
     } while (cursor !== undefined && ids.length < 4);
 
     expect(ids).toEqual(['c', 'b', 'a']);
-    await expect(store.listRuns({ cursor: 'unknown' })).rejects.toMatchObject({
+    await expect(runEffect(store.listRuns({ cursor: 'unknown' }))).rejects.toMatchObject({
       code: 'INVALID_CURSOR',
     });
   });
   it('round-trips runner diagnostics, attempts, warnings, expected metrics, response, and trace', async () => {
     const { store } = await openTemporaryStore();
 
-    const run = await store.createRun({
-      schemaId: 'attest.project',
-      configHash: 'hash',
-      configJson: '{}',
-      labels: { environment: 'test' },
-    });
+    const run = await runEffect(
+      store.createRun({
+        schemaId: 'attest.project',
+        configHash: 'hash',
+        configJson: '{}',
+        labels: { environment: 'test' },
+      }),
+    );
 
     const execution: StoredCaseExecution = {
       ...completedExecution({
@@ -163,9 +171,9 @@ describe('RunStore', () => {
 
     const metric = evaluatedMetric('quality', true);
 
-    await store.recordCase(run.id, execution, [metric]);
-    const finalized = await store.finalizeRun(run.id, 'completed');
-    const stored = await store.getCase(run.id, 'suite', 'round-trip');
+    await runEffect(store.recordCase(run.id, execution, [metric]));
+    const finalized = await runEffect(store.finalizeRun(run.id, 'completed'));
+    const stored = await runEffect(store.getCase(run.id, 'suite', 'round-trip'));
 
     expect(stored).toMatchObject({ ...execution, runId: run.id, metrics: [metric] });
     expect(finalized.summary).toEqual({
@@ -180,11 +188,13 @@ describe('RunStore', () => {
   it('requires the execution discriminant and required collection fields before writing', async () => {
     const { store } = await openTemporaryStore();
 
-    const run = await store.createRun({
-      schemaId: 'attest.project',
-      configHash: 'hash',
-      configJson: '{}',
-    });
+    const run = await runEffect(
+      store.createRun({
+        schemaId: 'attest.project',
+        configHash: 'hash',
+        configJson: '{}',
+      }),
+    );
 
     const valid = completedExecution({ runId: run.id, caseId: 'invalid' });
 
@@ -203,75 +213,87 @@ describe('RunStore', () => {
     ];
 
     for (const invalid of matrix) {
-      await expect(store.recordCase(run.id, invalid, [])).rejects.toMatchObject({
+      await expect(runEffect(store.recordCase(run.id, invalid, []))).rejects.toMatchObject({
         code: 'INVALID_RECORD',
       });
     }
 
-    expect((await store.getRunWithCases(run.id)).cases).toEqual([]);
-    await expect(store.recordCase(run.id, valid, [])).resolves.toBeUndefined();
+    expect((await runEffect(store.getRunWithCases(run.id))).cases).toEqual([]);
+    await expect(runEffect(store.recordCase(run.id, valid, []))).resolves.toBeUndefined();
   });
 
   it('classifies missing expected rows as error and ignores extra rows for verdict semantics', async () => {
     const { store } = await openTemporaryStore();
 
-    const run = await store.createRun({
-      schemaId: 'attest.project',
-      configHash: 'hash',
-      configJson: '{}',
-    });
-
-    await store.recordCase(
-      run.id,
-      completedExecution({ runId: run.id, caseId: 'pass', expectedMetrics: ['expected'] }),
-      [evaluatedMetric('expected', true), evaluatedMetric('extra', false)],
-    );
-    await store.recordCase(
-      run.id,
-      completedExecution({ runId: run.id, caseId: 'missing', expectedMetrics: ['absent'] }),
-      [],
-    );
-    await store.recordCase(
-      run.id,
-      {
-        caseId: 'timeout',
-        suiteName: 'suite',
-        outcome: 'timeout',
-        errorCode: 'timeout',
-        errorMessage: 'late',
-        startedAt: '2026-08-06T00:00:00.000Z',
-        durationMs: 10,
-        request: request(run.id, 'timeout'),
-        warnings: [],
-        diagnostics: {},
-        attempts: [],
-        expectedMetrics: [],
-      },
-      [],
+    const run = await runEffect(
+      store.createRun({
+        schemaId: 'attest.project',
+        configHash: 'hash',
+        configJson: '{}',
+      }),
     );
 
-    const finalized = await store.finalizeRun(run.id, 'failed');
+    await runEffect(
+      store.recordCase(
+        run.id,
+        completedExecution({ runId: run.id, caseId: 'pass', expectedMetrics: ['expected'] }),
+        [evaluatedMetric('expected', true), evaluatedMetric('extra', false)],
+      ),
+    );
+    await runEffect(
+      store.recordCase(
+        run.id,
+        completedExecution({ runId: run.id, caseId: 'missing', expectedMetrics: ['absent'] }),
+        [],
+      ),
+    );
+    await runEffect(
+      store.recordCase(
+        run.id,
+        {
+          caseId: 'timeout',
+          suiteName: 'suite',
+          outcome: 'timeout',
+          errorCode: 'timeout',
+          errorMessage: 'late',
+          startedAt: '2026-08-06T00:00:00.000Z',
+          durationMs: 10,
+          request: request(run.id, 'timeout'),
+          warnings: [],
+          diagnostics: {},
+          attempts: [],
+          expectedMetrics: [],
+        },
+        [],
+      ),
+    );
+
+    const finalized = await runEffect(store.finalizeRun(run.id, 'failed'));
     expect(finalized.summary).toMatchObject({ passedCases: 1, failedCases: 0, errorCases: 2 });
   });
 
   it('recomputes the totals of a run finalized before the shared verdict rule', async () => {
     const { path, store } = await openTemporaryStore();
 
-    const run = await store.createRun({
-      schemaId: 'attest.project',
-      configHash: 'hash',
-      configJson: '{}',
-    });
-
-    await store.recordCase(
-      run.id,
-      {
-        ...completedExecution({ runId: run.id, caseId: 'hooked', expectedMetrics: ['quality'] }),
-        diagnostics: { lifecycleError: 'after_case exited 7' },
-      },
-      [evaluatedMetric('quality', true)],
+    const run = await runEffect(
+      store.createRun({
+        schemaId: 'attest.project',
+        configHash: 'hash',
+        configJson: '{}',
+      }),
     );
-    await store.finalizeRun(run.id, 'completed');
+
+    await runEffect(
+      store.recordCase(
+        run.id,
+        {
+          ...completedExecution({ runId: run.id, caseId: 'hooked', expectedMetrics: ['quality'] }),
+          diagnostics: { lifecycleError: 'after_case exited 7' },
+        },
+        [evaluatedMetric('quality', true)],
+      ),
+    );
+    await runEffect(store.finalizeRun(run.id, 'completed'));
 
     // The old rule ignored lifecycle errors, so older databases hold a passing summary here.
     const stale = JSON.stringify({
@@ -282,47 +304,51 @@ describe('RunStore', () => {
       metricErrorCount: 0,
     });
 
-    const handle = await openSqliteHandle(path);
+    const handle = valueFromExit(await Effect.runPromiseExit(openSqliteHandle(path)));
     await handle.exec('DROP TRIGGER runs_no_terminal_update');
     await handle.prepare('UPDATE runs SET summary_json = ? WHERE id = ?').run(stale, run.id);
     await handle.close();
 
     const recomputed = { totalCases: 1, passedCases: 0, errorCases: 1 };
-    expect((await store.getRun(run.id)).summary).toMatchObject(recomputed);
-    expect((await store.listRuns()).items[0]?.summary).toMatchObject(recomputed);
-    expect((await store.listCaseSummaries(run.id)).items[0]?.verdict).toBe('error');
+    expect((await runEffect(store.getRun(run.id))).summary).toMatchObject(recomputed);
+    expect((await runEffect(store.listRuns())).items[0]?.summary).toMatchObject(recomputed);
+    expect((await runEffect(store.listCaseSummaries(run.id))).items[0]?.verdict).toBe('error');
   });
 
   it('accepts identical case replay and rejects a changed natural-key payload', async () => {
     const { store } = await openTemporaryStore();
 
-    const run = await store.createRun({
-      schemaId: 'attest.project',
-      configHash: 'hash',
-      configJson: '{}',
-    });
+    const run = await runEffect(
+      store.createRun({
+        schemaId: 'attest.project',
+        configHash: 'hash',
+        configJson: '{}',
+      }),
+    );
 
     const execution = completedExecution({ runId: run.id, caseId: 'retry' });
-    await store.recordCase(run.id, execution, []);
-    await expect(store.recordCase(run.id, execution, [])).resolves.toBeUndefined();
+    await runEffect(store.recordCase(run.id, execution, []));
+    await expect(runEffect(store.recordCase(run.id, execution, []))).resolves.toBeUndefined();
     await expect(
-      store.recordCase(run.id, { ...execution, durationMs: 11 }, []),
+      runEffect(store.recordCase(run.id, { ...execution, durationMs: 11 }, [])),
     ).rejects.toMatchObject({ code: 'CASE_CONFLICT' });
-    expect((await store.getRunWithCases(run.id)).cases).toHaveLength(1);
+    expect((await runEffect(store.getRunWithCases(run.id))).cases).toHaveLength(1);
   });
 
   it('returns the existing finalization for same-status retry and rejects a different status', async () => {
     const { store } = await openTemporaryStore();
 
-    const run = await store.createRun({
-      schemaId: 'attest.project',
-      configHash: 'hash',
-      configJson: '{}',
-    });
+    const run = await runEffect(
+      store.createRun({
+        schemaId: 'attest.project',
+        configHash: 'hash',
+        configJson: '{}',
+      }),
+    );
 
-    const first = await store.finalizeRun(run.id, 'completed');
-    await expect(store.finalizeRun(run.id, 'completed')).resolves.toEqual(first);
-    await expect(store.finalizeRun(run.id, 'failed')).rejects.toMatchObject({
+    const first = await runEffect(store.finalizeRun(run.id, 'completed'));
+    await expect(runEffect(store.finalizeRun(run.id, 'completed'))).resolves.toEqual(first);
+    await expect(runEffect(store.finalizeRun(run.id, 'failed'))).rejects.toMatchObject({
       code: 'RUN_FINALIZED',
     });
   });
@@ -330,30 +356,41 @@ describe('RunStore', () => {
   it('paginates stable blob-free summaries and resolves single-case absence distinctly', async () => {
     const { store } = await openTemporaryStore();
 
-    const run = await store.createRun({
-      schemaId: 'attest.project',
-      configHash: 'hash',
-      configJson: '{}',
-    });
+    const run = await runEffect(
+      store.createRun({
+        schemaId: 'attest.project',
+        configHash: 'hash',
+        configJson: '{}',
+      }),
+    );
 
     for (const caseId of ['one', 'two', 'three', 'four', 'five', 'six', 'seven']) {
-      await store.recordCase(
-        run.id,
-        completedExecution({
-          runId: run.id,
-          caseId,
-          expectedMetrics: caseId === 'three' ? ['missing'] : ['quality'],
-          response: { output: caseId },
-          trace,
-        }),
-        caseId === 'three' ? [] : [evaluatedMetric('quality', caseId !== 'two')],
+      await runEffect(
+        store.recordCase(
+          run.id,
+          completedExecution({
+            runId: run.id,
+            caseId,
+            expectedMetrics: caseId === 'three' ? ['missing'] : ['quality'],
+            response: { output: caseId },
+            trace,
+          }),
+          caseId === 'three' ? [] : [evaluatedMetric('quality', caseId !== 'two')],
+        ),
       );
     }
 
-    const first = await store.listCaseSummaries(run.id, { limit: 3 });
-    const firstRetry = await store.listCaseSummaries(run.id, { limit: 3 });
-    const second = await store.listCaseSummaries(run.id, { limit: 3, cursor: first.nextCursor });
-    const third = await store.listCaseSummaries(run.id, { limit: 3, cursor: second.nextCursor });
+    const first = await runEffect(store.listCaseSummaries(run.id, { limit: 3 }));
+    const firstRetry = await runEffect(store.listCaseSummaries(run.id, { limit: 3 }));
+
+    const second = await runEffect(
+      store.listCaseSummaries(run.id, { limit: 3, cursor: first.nextCursor }),
+    );
+
+    const third = await runEffect(
+      store.listCaseSummaries(run.id, { limit: 3, cursor: second.nextCursor }),
+    );
+
     expect(first).toEqual(firstRetry);
     expect(first.items).toHaveLength(3);
     expect(second.items).toHaveLength(3);
@@ -388,11 +425,13 @@ describe('RunStore', () => {
       expect(summary).not.toHaveProperty('trace');
     }
 
-    await expect(store.getCase(run.id, 'suite', 'one')).resolves.toMatchObject({ caseId: 'one' });
-    await expect(store.getCase(run.id, 'suite', 'missing')).rejects.toMatchObject({
+    await expect(runEffect(store.getCase(run.id, 'suite', 'one'))).resolves.toMatchObject({
+      caseId: 'one',
+    });
+    await expect(runEffect(store.getCase(run.id, 'suite', 'missing'))).rejects.toMatchObject({
       code: 'CASE_NOT_FOUND',
     });
-    await expect(store.getCase('missing-run', 'suite', 'one')).rejects.toMatchObject({
+    await expect(runEffect(store.getCase('missing-run', 'suite', 'one'))).rejects.toMatchObject({
       code: 'RUN_NOT_FOUND',
     });
   });
@@ -400,33 +439,43 @@ describe('RunStore', () => {
   it('rejects unknown and foreign summary cursors plus invalid limits', async () => {
     const { store } = await openTemporaryStore();
 
-    const firstRun = await store.createRun({
-      schemaId: 'attest.project',
-      configHash: 'hash',
-      configJson: '{}',
-    });
-
-    const secondRun = await store.createRun({
-      schemaId: 'attest.project',
-      configHash: 'hash',
-      configJson: '{}',
-    });
-
-    for (const caseId of ['one', 'two']) {
-      await store.recordCase(secondRun.id, completedExecution({ runId: secondRun.id, caseId }), []);
-    }
-
-    const foreignCursor = (await store.listCaseSummaries(secondRun.id, { limit: 1 })).nextCursor;
-    expect(foreignCursor).toBeDefined();
-    await expect(
-      store.listCaseSummaries(firstRun.id, { cursor: foreignCursor }),
-    ).rejects.toMatchObject({ code: 'INVALID_CURSOR' });
-    await expect(store.listCaseSummaries(firstRun.id, { cursor: 'unknown' })).rejects.toMatchObject(
-      { code: 'INVALID_CURSOR' },
+    const firstRun = await runEffect(
+      store.createRun({
+        schemaId: 'attest.project',
+        configHash: 'hash',
+        configJson: '{}',
+      }),
     );
 
+    const secondRun = await runEffect(
+      store.createRun({
+        schemaId: 'attest.project',
+        configHash: 'hash',
+        configJson: '{}',
+      }),
+    );
+
+    for (const caseId of ['one', 'two']) {
+      await runEffect(
+        store.recordCase(secondRun.id, completedExecution({ runId: secondRun.id, caseId }), []),
+      );
+    }
+
+    const foreignCursor = (await runEffect(store.listCaseSummaries(secondRun.id, { limit: 1 })))
+      .nextCursor;
+
+    expect(foreignCursor).toBeDefined();
+    await expect(
+      runEffect(store.listCaseSummaries(firstRun.id, { cursor: foreignCursor })),
+    ).rejects.toMatchObject({ code: 'INVALID_CURSOR' });
+    await expect(
+      runEffect(store.listCaseSummaries(firstRun.id, { cursor: 'unknown' })),
+    ).rejects.toMatchObject({ code: 'INVALID_CURSOR' });
+
     for (const limit of [0, -1, 1.5, 1_001]) {
-      await expect(store.listCaseSummaries(firstRun.id, { limit })).rejects.toMatchObject({
+      await expect(
+        runEffect(store.listCaseSummaries(firstRun.id, { limit })),
+      ).rejects.toMatchObject({
         code: 'INVALID_LIMIT',
       });
     }
@@ -437,11 +486,13 @@ describe('RunStore adversarial persistence', () => {
   it('treats explicitly undefined forbidden fields like omitted JSON properties', async () => {
     const { store } = await openTemporaryStore();
 
-    const run = await store.createRun({
-      schemaId: 'attest.project',
-      configHash: 'hash',
-      configJson: '{}',
-    });
+    const run = await runEffect(
+      store.createRun({
+        schemaId: 'attest.project',
+        configHash: 'hash',
+        configJson: '{}',
+      }),
+    );
 
     const completed = {
       ...completedExecution({ runId: run.id, caseId: 'completed-with-undefined' }),
@@ -486,19 +537,21 @@ describe('RunStore adversarial persistence', () => {
       pass: undefined,
     };
 
-    await store.recordCase(run.id, completed, [evaluated]);
-    await store.recordCase(run.id, failed, [errored]);
-    expect((await store.getRunWithCases(run.id)).cases).toHaveLength(2);
+    await runEffect(store.recordCase(run.id, completed, [evaluated]));
+    await runEffect(store.recordCase(run.id, failed, [errored]));
+    expect((await runEffect(store.getRunWithCases(run.id))).cases).toHaveLength(2);
   });
 
   it('aggregates all execution and evaluation violations before persistence', async () => {
     const { store } = await openTemporaryStore();
 
-    const run = await store.createRun({
-      schemaId: 'attest.project',
-      configHash: 'hash',
-      configJson: '{}',
-    });
+    const run = await runEffect(
+      store.createRun({
+        schemaId: 'attest.project',
+        configHash: 'hash',
+        configJson: '{}',
+      }),
+    );
 
     const invalid = {
       ...completedExecution({ runId: run.id, caseId: 'invalid' }),
@@ -522,7 +575,9 @@ describe('RunStore adversarial persistence', () => {
       { metricName: 'error', kind: 'judge', status: 'error', error: { message: '', kind: 1 } },
     ];
 
-    const failure = await captureRejection(store.recordCase(run.id, invalid, evaluations));
+    const failure = await captureRejection(
+      runEffect(store.recordCase(run.id, invalid, evaluations)),
+    );
 
     expect(failure).toMatchObject({ code: 'INVALID_RECORD' });
     expect(failure).toHaveProperty('message', expect.stringContaining('caseId'));
@@ -535,43 +590,57 @@ describe('RunStore adversarial persistence', () => {
     expect(failure).toHaveProperty('message', expect.stringContaining('trace'));
     expect(failure).toHaveProperty('message', expect.stringContaining('evaluations[0]'));
     expect(failure).toHaveProperty('message', expect.stringContaining('evaluations[1]'));
-    expect((await store.getRunWithCases(run.id)).cases).toEqual([]);
+    expect((await runEffect(store.getRunWithCases(run.id))).cases).toEqual([]);
   });
 
   it('serializes five concurrent case transactions without losing writes', async () => {
     const { store } = await openTemporaryStore();
 
-    const run = await store.createRun({
-      schemaId: 'attest.project',
-      configHash: 'hash',
-      configJson: '{}',
-    });
+    const run = await runEffect(
+      store.createRun({
+        schemaId: 'attest.project',
+        configHash: 'hash',
+        configJson: '{}',
+      }),
+    );
 
     await Promise.all(
       Array.from({ length: 5 }, (_, index) => {
         const caseId = `concurrent-${index}`;
 
-        return store.recordCase(
-          run.id,
-          { ...completedExecution({ runId: run.id, caseId: caseId }), durationMs: index },
-          [{ metricName: 'quality', kind: 'assertion', status: 'evaluated', score: 1, pass: true }],
+        return runEffect(
+          store.recordCase(
+            run.id,
+            { ...completedExecution({ runId: run.id, caseId: caseId }), durationMs: index },
+            [
+              {
+                metricName: 'quality',
+                kind: 'assertion',
+                status: 'evaluated',
+                score: 1,
+                pass: true,
+              },
+            ],
+          ),
         );
       }),
     );
 
     expect(
-      (await store.getRunWithCases(run.id)).cases.map((record) => record.caseId).sort(),
+      (await runEffect(store.getRunWithCases(run.id))).cases.map((record) => record.caseId).sort(),
     ).toEqual(['concurrent-0', 'concurrent-1', 'concurrent-2', 'concurrent-3', 'concurrent-4']);
   });
 
   it('rolls back the whole case and wraps a duplicate child-row failure', async () => {
     const { store } = await openTemporaryStore();
 
-    const run = await store.createRun({
-      schemaId: 'attest.project',
-      configHash: 'hash',
-      configJson: '{}',
-    });
+    const run = await runEffect(
+      store.createRun({
+        schemaId: 'attest.project',
+        configHash: 'hash',
+        configJson: '{}',
+      }),
+    );
 
     const execution = completedExecution({ runId: run.id, caseId: 'rolled-back' });
 
@@ -580,30 +649,37 @@ describe('RunStore adversarial persistence', () => {
       { metricName: 'duplicate', kind: 'assertion', status: 'evaluated', score: 0, pass: false },
     ];
 
-    const failure = await captureRejection(store.recordCase(run.id, execution, duplicateMetrics));
+    const failure = await captureRejection(
+      runEffect(store.recordCase(run.id, execution, duplicateMetrics)),
+    );
+
     expect(failure).toMatchObject({ code: 'WRITE_FAILED' });
     expect(failure).toBeInstanceOf(StoreError);
 
     if (failure instanceof StoreError) expect(failure.cause).toBeDefined();
-    expect((await store.getRunWithCases(run.id)).cases).toEqual([]);
+    expect((await runEffect(store.getRunWithCases(run.id))).cases).toEqual([]);
   });
 
   it('reports malformed persisted JSON as CORRUPT_DATA with its parse cause', async () => {
     const { path, store } = await openTemporaryStore();
 
-    const run = await store.createRun({
-      schemaId: 'attest.project',
-      configHash: 'hash',
-      configJson: '{}',
-    });
+    const run = await runEffect(
+      store.createRun({
+        schemaId: 'attest.project',
+        configHash: 'hash',
+        configJson: '{}',
+      }),
+    );
 
-    await store.recordCase(run.id, completedExecution({ runId: run.id, caseId: 'corrupt' }), []);
-    const handle = await openSqliteHandle(path);
+    await runEffect(
+      store.recordCase(run.id, completedExecution({ runId: run.id, caseId: 'corrupt' }), []),
+    );
+    const handle = valueFromExit(await Effect.runPromiseExit(openSqliteHandle(path)));
     await handle.exec('DROP TRIGGER cases_no_projection_update');
     await handle.prepare('UPDATE cases SET request_json = ? WHERE run_id = ?').run('{', run.id);
     await handle.close();
 
-    const failure = await captureRejection(store.getRunWithCases(run.id));
+    const failure = await captureRejection(runEffect(store.getRunWithCases(run.id)));
     expect(failure).toMatchObject({ code: 'CORRUPT_DATA' });
     expect(failure).toBeInstanceOf(StoreError);
 
@@ -613,18 +689,22 @@ describe('RunStore adversarial persistence', () => {
   it('blocks raw Kysely mutations after a run is finalized', async () => {
     const { path, store } = await openTemporaryStore();
 
-    const run = await store.createRun({
-      schemaId: 'attest.project',
-      configHash: 'hash',
-      configJson: '{}',
-    });
+    const run = await runEffect(
+      store.createRun({
+        schemaId: 'attest.project',
+        configHash: 'hash',
+        configJson: '{}',
+      }),
+    );
 
-    await store.recordCase(run.id, completedExecution({ runId: run.id, caseId: 'immutable' }), [
-      { metricName: 'quality', kind: 'assertion', status: 'evaluated', score: 1, pass: true },
-    ]);
-    await store.finalizeRun(run.id, 'completed');
+    await runEffect(
+      store.recordCase(run.id, completedExecution({ runId: run.id, caseId: 'immutable' }), [
+        { metricName: 'quality', kind: 'assertion', status: 'evaluated', score: 1, pass: true },
+      ]),
+    );
+    await runEffect(store.finalizeRun(run.id, 'completed'));
 
-    const handle = await openSqliteHandle(path);
+    const handle = valueFromExit(await Effect.runPromiseExit(openSqliteHandle(path)));
     const database = new Kysely<Database>({ dialect: createSqliteDialect(handle) });
     await expect(
       database.updateTable('runs').set({ summary_json: '{}' }).where('id', '=', run.id).execute(),

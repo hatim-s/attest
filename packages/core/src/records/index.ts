@@ -74,4 +74,5 @@ export {
   type CaseHistoryPage,
   type EvalCaseWindow,
   type Activity,
+  indexedTimestampSchema,
 } from './dashboard-schemas.js';

@@ -1,6 +1,9 @@
+import { openProcessSession } from './support/retained-process.js';
 import { AgentInvocationError } from '../../../errors.js';
 import { createServer as createNetServer } from 'node:net';
-import { resolve } from 'node:path';
+import { resolve, join } from 'node:path';
+import { mkdtemp, writeFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 
 import {
   AGENT_PROTOCOL,
@@ -10,10 +13,17 @@ import {
   isString,
   type AgentRequest,
 } from '@attest/contracts';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { startLoopbackServer } from '../../../_tests_/support/loopback-server.js';
-import { startBackgroundAgent, type BackgroundAgentResource } from '../background-adapter.js';
+import {
+  startBackgroundAgent as nativeStart,
+  type BackgroundAgentResource,
+} from '../background-adapter.js';
+
+/** Retains the native process scope for each existing lifecycle fixture. */
+const startBackgroundAgent = (...args: Parameters<typeof nativeStart>) =>
+  openProcessSession(nativeStart(...args));
 
 const fixture = resolve(import.meta.dirname, '../../../_tests_/fixtures/background-agent.cjs');
 
@@ -139,13 +149,22 @@ describe('background process adapter', () => {
   it('classifies the run deadline as timeout and still cleans up the service', async () => {
     const port = await freePort();
 
-    const configured = agent(port, {
+    let configured = agent(port, {
       kind: 'http',
       url: `http://127.0.0.1:${String(port)}/ready`,
     });
 
-    configured.transport.start_argv.push('slow');
-    configured.timeouts = { connect_ms: 2_000, attempt_ms: 3_000, run_ms: 1_000 };
+    configured = {
+      ...configured,
+      transport: {
+        ...configured.transport,
+        start_argv: [...configured.transport.start_argv, 'slow'],
+      },
+    };
+    configured = {
+      ...configured,
+      timeouts: { connect_ms: 2_000, attempt_ms: 3_000, run_ms: 1_000 },
+    };
 
     const session = await startBackgroundAgent(configured, {
       cwd: process.cwd(),
@@ -161,8 +180,14 @@ describe('background process adapter', () => {
 
   it('reports stderr-readiness exit immediately with bounded startup evidence', async () => {
     const port = await freePort();
-    const configured = agent(port, { kind: 'stderr', pattern: 'NEVER' });
-    configured.transport.start_argv.push('exit-before-ready');
+    let configured = agent(port, { kind: 'stderr', pattern: 'NEVER' });
+    configured = {
+      ...configured,
+      transport: {
+        ...configured.transport,
+        start_argv: [...configured.transport.start_argv, 'exit-before-ready'],
+      },
+    };
     const started = Date.now();
 
     const failure: unknown = await startBackgroundAgent(configured, {
@@ -183,8 +208,14 @@ describe('background process adapter', () => {
 
   it('preserves caller cancellation while waiting for stderr readiness', async () => {
     const port = await freePort();
-    const configured = agent(port, { kind: 'stderr', pattern: 'NEVER' });
-    configured.transport.start_argv.push('silent');
+    let configured = agent(port, { kind: 'stderr', pattern: 'NEVER' });
+    configured = {
+      ...configured,
+      transport: {
+        ...configured.transport,
+        start_argv: [...configured.transport.start_argv, 'silent'],
+      },
+    };
     const controller = new AbortController();
 
     const startup = startBackgroundAgent(configured, {
@@ -221,13 +252,25 @@ describe('background process adapter', () => {
       response.writeHead(204).end();
     });
 
-    const configured = agent(processPort, {
+    let configured = agent(processPort, {
       kind: 'stderr',
       pattern: `READY ${String(processPort)}`,
     });
 
-    configured.transport.invoke.url = `${invokeServer.url}/invoke`;
-    configured.transport.shutdown = { method: 'POST', url: `${shutdownServer.url}/shutdown` };
+    configured = {
+      ...configured,
+      transport: {
+        ...configured.transport,
+        invoke: { ...configured.transport.invoke, url: `${invokeServer.url}/invoke` },
+      },
+    };
+    configured = {
+      ...configured,
+      transport: {
+        ...configured.transport,
+        shutdown: { method: 'POST', url: `${shutdownServer.url}/shutdown` },
+      },
+    };
 
     try {
       const session = await startBackgroundAgent(configured, {
@@ -255,12 +298,18 @@ describe('background process adapter', () => {
   it('terminates descendants retained before graceful parent shutdown', async () => {
     const port = await freePort();
 
-    const configured = agent(port, {
+    let configured = agent(port, {
       kind: 'stderr',
       pattern: `READY ${String(port)}`,
     });
 
-    configured.transport.start_argv.push('reparent-descendant');
+    configured = {
+      ...configured,
+      transport: {
+        ...configured.transport,
+        start_argv: [...configured.transport.start_argv, 'reparent-descendant'],
+      },
+    };
 
     const session = await startBackgroundAgent(configured, {
       cwd: process.cwd(),
@@ -292,3 +341,40 @@ describe('background process adapter', () => {
       .toBe(false);
   });
 });
+
+it.each(['cancelled', 'timeout'] as const)(
+  'keeps startup %s primary when background cleanup is unconfirmed',
+  async (code) => {
+    const directory = await mkdtemp(join(tmpdir(), 'attest-background-cleanup-'));
+    await writeFile(join(directory, 'ps'), '#!/bin/sh\nexit 2\n', { mode: 0o755 });
+    const controller = new AbortController();
+    const configured = agent(await freePort(), { kind: 'stderr', pattern: 'NEVER_READY' });
+
+    try {
+      vi.stubEnv('PATH', directory);
+
+      const startup = startBackgroundAgent(
+        {
+          ...configured,
+          timeouts: { connect_ms: 30 },
+          transport: {
+            ...configured.transport,
+            start_argv: [process.execPath, '-e', 'setInterval(() => {}, 1000)'],
+            shutdown: undefined,
+            stop_timeout_ms: 0,
+          },
+        },
+        { cwd: directory, env: { PATH: directory }, signal: controller.signal },
+      );
+
+      if (code === 'cancelled') controller.abort();
+      await expect(startup).rejects.toMatchObject({
+        code,
+        cause: { cleanupFailure: { code: 'network' } },
+      });
+    } finally {
+      vi.unstubAllEnvs();
+      await rm(directory, { recursive: true, force: true });
+    }
+  },
+);

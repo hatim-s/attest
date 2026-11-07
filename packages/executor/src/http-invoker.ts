@@ -1,142 +1,22 @@
-import { parseJson } from './internal/json-value.js';
-import type { AgentRequest, RawExcerpt } from '@attest/contracts';
-import { createHash } from 'node:crypto';
+import * as Effect from 'effect/Effect';
+import * as Cause from 'effect/Cause';
+import * as Exit from 'effect/Exit';
+import * as Option from 'effect/Option';
+import { readWebJson } from './adapters/http/web-response-body.js';
+import { openGuardedResponse } from './adapters/http/guarded-response.js';
+import { withHttpSignal, withHttpCleanup } from './adapters/http/http-effects.js';
+import type { AgentRequest } from '@attest/contracts';
 
 import { AgentInvocationError, abortedError } from './errors.js';
 import { startTimer } from './internal/elapsed.js';
 import { createFailedAttempt } from './internal/failed-attempt.js';
 import { invokeWithRetries } from './internal/invocation-retry.js';
-import { appendEvidencePrefix, createRawExcerpt } from './internal/raw-excerpt.js';
 import type {
   InvocationAttempt,
   InvocationResult,
   InvokeOptions,
   NativeAgentTarget,
 } from './types.js';
-
-const HTTP_SUCCESS_STATUS = 200;
-
-/** Cancels an abandoned body; a failed cancellation cannot change the failure already classified. */
-const swallowCancel = async (cancellation: Promise<void> | undefined): Promise<void> => {
-  try {
-    await cancellation;
-  } catch {
-    // The transport outcome is already decided.
-  }
-};
-
-type CappedJson =
-  | { ok: true; raw: unknown; rawExcerpt: RawExcerpt }
-  | { ok: false; error: AgentInvocationError; rawExcerpt?: RawExcerpt };
-
-/** Creates cap evidence that is always marked truncated and hashes every byte received so far. */
-const createCappedRawExcerpt = (
-  evidenceChunks: readonly Uint8Array[],
-  evidenceByteCount: number,
-  digest: string,
-): RawExcerpt => ({
-  ...createRawExcerpt(Buffer.concat(evidenceChunks, evidenceByteCount).toString('utf8')),
-  truncated: true,
-  sha256: digest,
-});
-
-const readCappedJson = async (response: Response, outputCapBytes: number): Promise<CappedJson> => {
-  const reader = response.body?.getReader();
-
-  if (reader === undefined) {
-    return {
-      ok: false,
-      error: new AgentInvocationError(
-        'invalid_envelope',
-        'HTTP agent response body is not valid JSON.',
-      ),
-    };
-  }
-
-  const chunks: Uint8Array[] = [];
-  const evidenceChunks: Uint8Array[] = [];
-  const payloadHash = createHash('sha256');
-  let byteCount = 0;
-  let evidenceByteCount = 0;
-
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-
-      if (done) {
-        break;
-      }
-
-      byteCount += value.byteLength;
-      payloadHash.update(value);
-      evidenceByteCount = appendEvidencePrefix(evidenceChunks, evidenceByteCount, value);
-
-      if (byteCount > outputCapBytes) {
-        // Cancel immediately so an unbounded response is not fully downloaded before rejection.
-        await swallowCancel(reader.cancel());
-
-        return {
-          ok: false,
-          error: new AgentInvocationError(
-            'output_cap_exceeded',
-            `HTTP agent response exceeds the ${outputCapBytes}-byte output cap.`,
-          ),
-          rawExcerpt: createCappedRawExcerpt(
-            evidenceChunks,
-            evidenceByteCount,
-            payloadHash.digest('hex'),
-          ),
-        };
-      }
-
-      chunks.push(value);
-    }
-  } finally {
-    reader.releaseLock();
-  }
-
-  const payload = Buffer.concat(chunks).toString('utf8');
-  const rawExcerpt = createRawExcerpt(payload);
-
-  try {
-    return { ok: true, raw: parseJson(payload), rawExcerpt };
-  } catch (error) {
-    return {
-      ok: false,
-      error: new AgentInvocationError(
-        'invalid_envelope',
-        'HTTP agent response body is not valid JSON.',
-        { cause: error },
-      ),
-      rawExcerpt,
-    };
-  }
-};
-
-const isTimeoutFailure = (cause: unknown): boolean =>
-  cause instanceof DOMException && cause.name === 'TimeoutError';
-
-const fetchFailureMessage = (cause: unknown): string =>
-  cause instanceof Error ? cause.message : 'unknown transport failure';
-
-const classifyFetchFailure = (cause: unknown, options: InvokeOptions): AgentInvocationError => {
-  if (cause instanceof AgentInvocationError) {
-    return cause;
-  }
-
-  if (options.signal?.aborted === true || isTimeoutFailure(cause)) {
-    return abortedError(options.signal, 'HTTP agent invocation', { cause });
-  }
-
-  // Fetch wraps DNS, connection, and reset failures differently across Node and Bun.
-  return new AgentInvocationError(
-    'network',
-    `HTTP agent request failed: ${fetchFailureMessage(cause)}.`,
-    {
-      cause: cause,
-    },
-  );
-};
 
 /**
  * Invokes an HTTP agent once so the runner can apply the contract's retry policy separately.
@@ -146,73 +26,113 @@ const classifyFetchFailure = (cause: unknown, options: InvokeOptions): AgentInvo
  * Redirects are deliberately not followed: every 3xx is a terminal `http_status` error and is
  * never retried, preventing request envelopes from being forwarded to an unconfigured endpoint.
  */
-const invokeHttpAgent = async (
+const invokeHttpAgent = Effect.fn('http.invokeAttempt')(function* (
   target: Extract<NativeAgentTarget, { type: 'http' }>,
   request: AgentRequest,
   options: InvokeOptions,
-): Promise<InvocationAttempt> => {
+): Effect.fn.Return<InvocationAttempt, AgentInvocationError> {
   const duration = startTimer();
-  const timeoutSignal = AbortSignal.timeout(options.timeoutMs);
 
-  // One combined signal lets either the caller or deadline stop the underlying request.
-  const signal =
-    options.signal === undefined ? timeoutSignal : AbortSignal.any([options.signal, timeoutSignal]);
+  return yield* withHttpSignal(options.timeoutMs, [options.signal], (signal) =>
+    Effect.gen(function* () {
+      let httpStatus: number | undefined;
 
-  let httpStatus: number | undefined;
+      const operation = Effect.gen(function* () {
+        const opened = yield* openGuardedResponse(
+          options.httpFetch ?? fetch,
+          {
+            url: target.url,
+            method: 'POST',
+            headers: { 'content-type': 'application/json', ...options.httpHeaders },
+            body: JSON.stringify(request),
+          },
+          signal,
+          options.timeoutMs,
+        ).pipe(
+          Effect.mapError((error) =>
+            signal.aborted
+              ? abortedError(options.signal, 'HTTP agent invocation', {
+                  cause: error,
+                  applicationStarted: error.applicationStarted,
+                })
+              : error,
+          ),
+        );
 
-  try {
-    const response = await (options.httpFetch ?? fetch)(target.url, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', ...options.httpHeaders },
-      body: JSON.stringify(request),
-      redirect: 'manual',
-      signal,
-    });
+        const { response } = opened;
 
-    httpStatus = response.status;
+        return yield* withHttpCleanup(
+          Effect.gen(function* () {
+            httpStatus = response.status;
 
-    if (response.status !== HTTP_SUCCESS_STATUS) {
-      // Status is authoritative at header receipt; body size and read failures cannot reclassify it.
-      void swallowCancel(response.body?.cancel());
+            if (response.status !== 200) {
+              // Status is authoritative at header receipt; body size and read failures cannot reclassify it.
+              const cancellation = yield* Effect.exit(
+                Effect.tryPromise({
+                  try: () => response.body?.cancel() ?? Promise.resolve(),
+                  catch: (cause) => cause,
+                }).pipe(Effect.interruptible, Effect.timeoutOption(100)),
+              );
 
-      return createFailedAttempt(
-        new AgentInvocationError('http_status', `HTTP agent returned status ${response.status}.`),
-        { diagnostics: { httpStatus: response.status }, durationMs: duration() },
-      );
-    }
+              // An errored stream rejects cancel with its stored error but is already closed.
+              // A missing acknowledgement or interrupted release still prohibits another request.
+              const unconfirmed = Exit.isSuccess(cancellation)
+                ? Option.isNone(cancellation.value)
+                : Cause.hasInterrupts(cancellation.cause) || Cause.hasDies(cancellation.cause);
 
-    const parsed = await readCappedJson(response, options.outputCapBytes);
+              return yield* Effect.fail(
+                new AgentInvocationError(
+                  'http_status',
+                  `HTTP agent returned status ${response.status}.`,
+                  { applicationStarted: unconfirmed, cause: { bodyCancellation: cancellation } },
+                ),
+              );
+            }
 
-    if (!parsed.ok) {
-      return createFailedAttempt(parsed.error, {
-        diagnostics: { httpStatus: response.status },
-        durationMs: duration(),
-        rawExcerpt: parsed.rawExcerpt,
+            const parsed = yield* readWebJson(response, {
+              attemptSignal: signal,
+              callerSignal: options.signal,
+              connectTimeoutMs: options.timeoutMs,
+              firstByteTimeoutMs: options.timeoutMs,
+              responseBodyTimeoutMs: options.timeoutMs,
+              responseCapBytes: options.outputCapBytes,
+              secrets: [],
+            });
+
+            return {
+              status: 'ok' as const,
+              raw: parsed.raw,
+              diagnostics: { httpStatus: response.status },
+              durationMs: duration(),
+              rawExcerpt: parsed.rawExcerpt,
+              warnings: [],
+            };
+          }),
+          [Effect.sync(opened.release)],
+        );
       });
-    }
 
-    return {
-      status: 'ok',
-      raw: parsed.raw,
-      diagnostics: { httpStatus: response.status },
-      durationMs: duration(),
-      rawExcerpt: parsed.rawExcerpt,
-      warnings: [],
-    };
-  } catch (error) {
-    return createFailedAttempt(classifyFetchFailure(error, options), {
-      diagnostics: httpStatus === undefined ? {} : { httpStatus },
-      durationMs: duration(),
-    });
-  }
-};
+      return yield* operation.pipe(
+        Effect.catch((error) =>
+          Effect.succeed(
+            createFailedAttempt(error, {
+              diagnostics: httpStatus === undefined ? {} : { httpStatus },
+              durationMs: duration(),
+              rawExcerpt: error.rawExcerpt,
+            }),
+          ),
+        ),
+      );
+    }),
+  );
+});
 
 /** Invokes and validates one native HTTP request without retrying interrupted remote work. */
 const invokeNativeHttpAgent = (
   target: Extract<NativeAgentTarget, { type: 'http' }>,
   request: AgentRequest,
   options: InvokeOptions,
-): Promise<InvocationResult> =>
+): Effect.Effect<InvocationResult, AgentInvocationError> =>
   invokeWithRetries(() => invokeHttpAgent(target, request, options), 0);
 
 export { invokeHttpAgent, invokeNativeHttpAgent };

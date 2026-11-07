@@ -96,15 +96,21 @@ describe('classifyRuns', () => {
   });
 
   it('returns metric deltas over the metric-name union in name order', () => {
-    const base = caseRecord('pass');
-    base.metrics = [
-      { metricName: 'zeta', kind: 'assertion', status: 'evaluated', score: 0.8, pass: true },
-    ];
-    const candidate = caseRecord('pass');
-    candidate.metrics = [
-      { metricName: 'alpha', kind: 'assertion', status: 'evaluated', score: 0.4, pass: false },
-      { metricName: 'zeta', kind: 'assertion', status: 'evaluated', score: 0.9, pass: true },
-    ];
+    let base = caseRecord('pass');
+    base = {
+      ...base,
+      metrics: [
+        { metricName: 'zeta', kind: 'assertion', status: 'evaluated', score: 0.8, pass: true },
+      ],
+    };
+    let candidate = caseRecord('pass');
+    candidate = {
+      ...candidate,
+      metrics: [
+        { metricName: 'alpha', kind: 'assertion', status: 'evaluated', score: 0.4, pass: false },
+        { metricName: 'zeta', kind: 'assertion', status: 'evaluated', score: 0.9, pass: true },
+      ],
+    };
 
     const { metricDeltas } = classifyPair(base, candidate);
     expect(metricDeltas).toMatchObject([
@@ -158,18 +164,24 @@ describe('classifyRuns', () => {
 
   it('does not annotate one-sided metrics, but annotates comparable fixed and regressed verdicts', () => {
     const base = caseRecord('pass', { score: 0.5, inputHash: 'input' });
-    const candidate = caseRecord('fail', { score: 0.5, inputHash: 'input' });
+    let candidate = caseRecord('fail', { score: 0.5, inputHash: 'input' });
     expect(classifyPair(base, candidate)).toMatchObject({
       kind: 'regressed',
       flakiness: 'suspected',
     });
-    candidate.metrics.push({
-      metricName: 'safety',
-      kind: 'assertion',
-      status: 'evaluated',
-      score: 0,
-      pass: false,
-    });
+    candidate = {
+      ...candidate,
+      metrics: [
+        ...candidate.metrics,
+        {
+          metricName: 'safety',
+          kind: 'assertion',
+          status: 'evaluated',
+          score: 0,
+          pass: false,
+        },
+      ],
+    };
     expect(classifyPair(base, candidate)).toMatchObject({
       kind: 'regressed',
       flakiness: undefined,

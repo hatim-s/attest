@@ -1,3 +1,6 @@
+import * as Exit from 'effect/Exit';
+import * as Cause from 'effect/Cause';
+import * as Effect from 'effect/Effect';
 import type { CommandRequest } from '@attest/contracts';
 import {
   createCurlImportRequest,
@@ -84,97 +87,119 @@ const registerAgentImportCommand = (agent: Command, context: CommandContext): vo
     .option('--response-cap-bytes <bytes>', 'maximum response body bytes')
     .option('--retries <count>', 'safe transport retry count')
     .option('--retry-delay <duration>', 'fixed transport retry delay')
-    .action(async (source: string | undefined, options: ImportOptions, command: Command) => {
-      const interactive = isInteractive(options, context.interaction, options.fromJson);
-      const prompt = { interactive, prompt: context.interaction.prompt };
+    .action((source: string | undefined, options: ImportOptions, command: Command) =>
+      context.submit(
+        Effect.gen(function* () {
+          const interactive = isInteractive(options, context.interaction, options.fromJson);
+          const prompt = { interactive, prompt: context.interaction.prompt };
 
-      const runImport = async (
-        request: Parameters<typeof runAgentImportCommand>[0]['request'],
-        sourceText?: string,
-      ): Promise<void> => {
-        const result = await runAgentImportCommand({
-          interactive,
-          project: options.project,
-          prompt: context.interaction.prompt,
-          readStdin: context.interaction.readStdin,
-          request,
-          sourceText,
-          workingDirectory: context.workingDirectory,
-        });
+          const runImport = (
+            request: Parameters<typeof runAgentImportCommand>[0]['request'],
+            sourceText?: string,
+          ) =>
+            Effect.gen(function* () {
+              const result = yield* runAgentImportCommand({
+                interactive,
+                project: options.project,
+                prompt: context.interaction.prompt,
+                readStdin: context.interaction.readStdin,
+                request,
+                sourceText,
+                workingDirectory: context.workingDirectory,
+              });
 
-        context.io.output(renderCommandResult('agent.import', outputFormat(options), result));
-      };
+              context.io.output(renderCommandResult('agent.import', outputFormat(options), result));
+            });
 
-      if (options.fromJson !== undefined) {
-        await runImport(
-          await readJsonRequest({
-            command: 'agent.import',
-            context,
-            leaf: command,
-            options: { ...options, fromJson: options.fromJson },
-          }),
-        );
+          if (options.fromJson !== undefined) {
+            yield* runImport(
+              yield* readJsonRequest({
+                command: 'agent.import',
+                context,
+                leaf: command,
+                options: { ...options, fromJson: options.fromJson },
+              }),
+            );
 
-        return;
-      }
-
-      const importSource = await requiredInput(
-        source,
-        { path: '<path|url|->', question: 'Agent import source: ' },
-        prompt,
-      );
-
-      const importId = await requiredInput(
-        options.as,
-        { path: '--as', question: 'Imported agent id: ' },
-        prompt,
-      );
-
-      if ((options.type ?? (/\.curl$/iu.test(importSource) ? 'curl' : 'json')) === 'json') {
-        const request: Extract<CommandRequest, { command: 'agent.import' }> = {
-          ...mutationRequestFields('agent.import', options),
-          source: importSource,
-          source_type: 'json',
-          as: importId,
-        };
-
-        if (options.name !== undefined) request.name = options.name;
-        await runImport(validateCommandRequest('agent.import', request));
-
-        return;
-      }
-
-      const curlSource = await readCurlDocument(
-        importSource,
-        context.workingDirectory,
-        context.interaction.readStdin,
-      );
-
-      let fields: CurlImportFields = await promptCurlImportFields(
-        {
-          ...options,
-          agentId: importId,
-          expectedProjectHash: options.ifProjectHash,
-          source: importSource,
-        },
-        curlSource,
-        prompt,
-      );
-
-      for (let attempt = 1; ; attempt += 1) {
-        try {
-          await runImport(createCurlImportRequest(fields), curlSource);
-
-          return;
-        } catch (error: unknown) {
-          if (!interactive || attempt === MAX_IMPORT_ATTEMPTS || !isCurlMappingError(error)) {
-            throw error;
+            return;
           }
 
-          fields = { ...fields, mapBody: await promptBodyMappings(prompt) };
-        }
-      }
-    });
+          const importSource = yield* Effect.tryPromise({
+            try: () =>
+              requiredInput(
+                source,
+                { path: '<path|url|->', question: 'Agent import source: ' },
+                prompt,
+              ),
+            catch: (cause) => cause,
+          });
+
+          const importId = yield* Effect.tryPromise({
+            try: () =>
+              requiredInput(options.as, { path: '--as', question: 'Imported agent id: ' }, prompt),
+            catch: (cause) => cause,
+          });
+
+          if ((options.type ?? (/\.curl$/iu.test(importSource) ? 'curl' : 'json')) === 'json') {
+            let request: Extract<CommandRequest, { command: 'agent.import' }> = {
+              ...mutationRequestFields('agent.import', options),
+              source: importSource,
+              source_type: 'json',
+              as: importId,
+            };
+
+            if (options.name !== undefined) request = { ...request, name: options.name };
+            yield* runImport(validateCommandRequest('agent.import', request));
+
+            return;
+          }
+
+          const curlSource = yield* readCurlDocument(
+            importSource,
+            context.workingDirectory,
+            context.interaction.readStdin,
+          );
+
+          let fields: CurlImportFields = yield* Effect.tryPromise({
+            try: () =>
+              promptCurlImportFields(
+                {
+                  ...options,
+                  agentId: importId,
+                  expectedProjectHash: options.ifProjectHash,
+                  source: importSource,
+                },
+                curlSource,
+                prompt,
+              ),
+            catch: (cause) => cause,
+          });
+
+          for (let attempt = 1; ; attempt += 1) {
+            const attempted = yield* Effect.exit(
+              Effect.gen(function* () {
+                yield* runImport(createCurlImportRequest(fields), curlSource);
+              }),
+            );
+
+            if (Exit.isSuccess(attempted)) return;
+            const error = Cause.squash(attempted.cause);
+
+            if (!interactive || attempt === MAX_IMPORT_ATTEMPTS || !isCurlMappingError(error)) {
+              return yield* Effect.failCause(attempted.cause);
+            }
+
+            fields = {
+              ...fields,
+              mapBody: yield* Effect.tryPromise({
+                try: () => promptBodyMappings(prompt),
+                catch: (cause) => cause,
+              }),
+            };
+          }
+        }),
+      ),
+    );
 
   setMutationHelp(importCommand, {
     examples: [

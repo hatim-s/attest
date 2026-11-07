@@ -6,7 +6,7 @@
       "properties": {
         "all": {
           "items": {
-            "$ref": "#/$defs/__schema2"
+            "$ref": "#/$defs/Suspend_"
           },
           "minItems": 1,
           "type": "array"
@@ -22,7 +22,7 @@
       "properties": {
         "any": {
           "items": {
-            "$ref": "#/$defs/__schema2"
+            "$ref": "#/$defs/Suspend_"
           },
           "minItems": 1,
           "type": "array"
@@ -37,23 +37,35 @@
       "additionalProperties": false,
       "properties": {
         "body": {
-          "$ref": "#/$defs/__schema3"
+          "anyOf": [
+            {},
+            {
+              "not": {}
+            }
+          ]
         },
         "body_encoding": {
-          "enum": [
-            "json",
-            "raw"
-          ],
-          "type": "string"
+          "anyOf": [
+            {
+              "enum": [
+                "json",
+                "raw"
+              ],
+              "type": "string"
+            },
+            {
+              "not": {}
+            }
+          ]
         },
         "headers": {
-          "additionalProperties": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
+          "anyOf": [
+            {
+              "additionalProperties": {
                 "anyOf": [
+                  {
+                    "type": "string"
+                  },
                   {
                     "additionalProperties": false,
                     "properties": {
@@ -73,13 +85,11 @@
                       "from_file": {
                         "allOf": [
                           {
-                            "pattern": "^(?![A-Za-z]:)"
-                          },
-                          {
                             "pattern": "^(?![\\\\/])(?!(?:.*[\\\\/])?\\.\\.(?:[\\\\/]|$)).+$"
                           }
                         ],
                         "minLength": 1,
+                        "pattern": "^(?![A-Za-z]:)",
                         "type": "string"
                       }
                     },
@@ -89,13 +99,13 @@
                     "type": "object"
                   }
                 ]
-              }
-            ]
-          },
-          "propertyNames": {
-            "type": "string"
-          },
-          "type": "object"
+              },
+              "type": "object"
+            },
+            {
+              "not": {}
+            }
+          ]
         },
         "method": {
           "enum": [
@@ -108,13 +118,13 @@
           "type": "string"
         },
         "query": {
-          "additionalProperties": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
+          "anyOf": [
+            {
+              "additionalProperties": {
                 "anyOf": [
+                  {
+                    "type": "string"
+                  },
                   {
                     "additionalProperties": false,
                     "properties": {
@@ -134,13 +144,11 @@
                       "from_file": {
                         "allOf": [
                           {
-                            "pattern": "^(?![A-Za-z]:)"
-                          },
-                          {
                             "pattern": "^(?![\\\\/])(?!(?:.*[\\\\/])?\\.\\.(?:[\\\\/]|$)).+$"
                           }
                         ],
                         "minLength": 1,
+                        "pattern": "^(?![A-Za-z]:)",
                         "type": "string"
                       }
                     },
@@ -150,13 +158,13 @@
                     "type": "object"
                   }
                 ]
-              }
-            ]
-          },
-          "propertyNames": {
-            "type": "string"
-          },
-          "type": "object"
+              },
+              "type": "object"
+            },
+            {
+              "not": {}
+            }
+          ]
         },
         "url": {
           "pattern": "^https?:\\/\\/\\S+$",
@@ -169,38 +177,12 @@
       ],
       "type": "object"
     },
-    "Threshold": {
-      "additionalProperties": false,
-      "properties": {
-        "gt": {
-          "type": "number"
-        },
-        "gte": {
-          "type": "number"
-        },
-        "lt": {
-          "type": "number"
-        },
-        "lte": {
-          "type": "number"
-        },
-        "path": {
-          "pattern": "^\\$(?:\\.[A-Za-z_][A-Za-z0-9_]*|\\[\\d+\\])*$",
-          "type": "string"
-        }
-      },
-      "required": [
-        "path"
-      ],
-      "type": "object"
-    },
-    "__schema0": {
+    "Objects_": {
       "additionalProperties": false,
       "properties": {
         "alias_for": {
           "anyOf": [
             {
-              "pattern": "^[a-z][a-z0-9-]*(?:\\.[a-z][a-z0-9-]*)*$",
               "type": "string"
             },
             {
@@ -220,16 +202,11 @@
             "additionalProperties": false,
             "properties": {
               "choices": {
-                "items": {
-                  "$ref": "#/$defs/__schema1"
-                },
                 "type": "array"
               },
               "default": {
                 "anyOf": [
-                  {
-                    "$ref": "#/$defs/__schema1"
-                  },
+                  {},
                   {
                     "type": "null"
                   }
@@ -289,9 +266,6 @@
             "additionalProperties": false,
             "properties": {
               "choices": {
-                "items": {
-                  "$ref": "#/$defs/__schema1"
-                },
                 "type": "array"
               },
               "conflicts": {
@@ -303,9 +277,7 @@
               },
               "default": {
                 "anyOf": [
-                  {
-                    "$ref": "#/$defs/__schema1"
-                  },
+                  {},
                   {
                     "type": "null"
                   }
@@ -371,328 +343,389 @@
           "type": "array"
         },
         "presets": {
-          "items": {
-            "additionalProperties": false,
-            "properties": {
-              "configurable_fields": {
-                "items": {
-                  "minLength": 1,
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              "definition": {
-                "oneOf": [
-                  {
-                    "additionalProperties": false,
-                    "properties": {
-                      "assertions": {
-                        "items": {
-                          "$ref": "#/$defs/__schema2"
-                        },
-                        "minItems": 1,
-                        "type": "array"
-                      },
-                      "kind": {
-                        "const": "assertion",
-                        "type": "string"
-                      }
+          "anyOf": [
+            {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "configurable_fields": {
+                    "items": {
+                      "minLength": 1,
+                      "type": "string"
                     },
-                    "required": [
-                      "kind",
-                      "assertions"
-                    ],
-                    "type": "object"
+                    "type": "array"
                   },
-                  {
-                    "additionalProperties": false,
-                    "properties": {
-                      "kind": {
-                        "const": "judge",
-                        "type": "string"
-                      },
-                      "model": {
-                        "minLength": 1,
-                        "type": "string"
-                      },
-                      "rubric": {
-                        "minLength": 1,
-                        "type": "string"
-                      },
-                      "threshold": {
-                        "type": "number"
-                      }
-                    },
-                    "required": [
-                      "kind",
-                      "model",
-                      "rubric",
-                      "threshold"
-                    ],
-                    "type": "object"
-                  },
-                  {
-                    "additionalProperties": false,
-                    "properties": {
-                      "argv": {
-                        "items": {
-                          "type": "string"
-                        },
-                        "minItems": 1,
-                        "type": "array"
-                      },
-                      "cwd": {
-                        "allOf": [
-                          {
-                            "pattern": "^(?![A-Za-z]:)"
-                          },
-                          {
-                            "pattern": "^(?![\\\\/])(?!(?:.*[\\\\/])?\\.\\.(?:[\\\\/]|$)).+$"
-                          }
-                        ],
-                        "minLength": 1,
-                        "type": "string"
-                      },
-                      "env": {
-                        "additionalProperties": {
-                          "anyOf": [
-                            {
-                              "additionalProperties": false,
-                              "properties": {
-                                "from_env": {
-                                  "minLength": 1,
-                                  "type": "string"
-                                }
-                              },
-                              "required": [
-                                "from_env"
-                              ],
-                              "type": "object"
-                            },
-                            {
-                              "additionalProperties": false,
-                              "properties": {
-                                "from_file": {
-                                  "allOf": [
-                                    {
-                                      "pattern": "^(?![A-Za-z]:)"
-                                    },
-                                    {
-                                      "pattern": "^(?![\\\\/])(?!(?:.*[\\\\/])?\\.\\.(?:[\\\\/]|$)).+$"
-                                    }
-                                  ],
-                                  "minLength": 1,
-                                  "type": "string"
-                                }
-                              },
-                              "required": [
-                                "from_file"
-                              ],
-                              "type": "object"
-                            }
-                          ]
-                        },
-                        "propertyNames": {
-                          "type": "string"
-                        },
-                        "type": "object"
-                      },
-                      "kind": {
-                        "const": "exec",
-                        "type": "string"
-                      },
-                      "timeout_ms": {
-                        "exclusiveMinimum": 0,
-                        "maximum": 9007199254740991,
-                        "type": "integer"
-                      }
-                    },
-                    "required": [
-                      "kind",
-                      "argv"
-                    ],
-                    "type": "object"
-                  },
-                  {
-                    "additionalProperties": false,
-                    "properties": {
-                      "extraction": {
+                  "definition": {
+                    "anyOf": [
+                      {
                         "additionalProperties": false,
                         "properties": {
-                          "details_pointer": {
-                            "pattern": "^(?:\\/(?:[^~/]|~[01])*)*$",
-                            "type": "string"
+                          "assertions": {
+                            "items": {
+                              "$ref": "#/$defs/Suspend_"
+                            },
+                            "minItems": 1,
+                            "type": "array"
                           },
-                          "pass_pointer": {
-                            "pattern": "^(?:\\/(?:[^~/]|~[01])*)*$",
-                            "type": "string"
-                          },
-                          "rationale_pointer": {
-                            "pattern": "^(?:\\/(?:[^~/]|~[01])*)*$",
-                            "type": "string"
-                          },
-                          "score_pointer": {
-                            "pattern": "^(?:\\/(?:[^~/]|~[01])*)*$",
+                          "kind": {
+                            "enum": [
+                              "assertion"
+                            ],
                             "type": "string"
                           }
                         },
                         "required": [
-                          "score_pointer",
-                          "pass_pointer"
+                          "kind",
+                          "assertions"
                         ],
                         "type": "object"
                       },
-                      "kind": {
-                        "const": "http",
-                        "type": "string"
-                      },
-                      "request": {
-                        "$ref": "#/$defs/HttpRequestTemplate"
-                      },
-                      "retry": {
+                      {
                         "additionalProperties": false,
                         "properties": {
-                          "backoff": {
-                            "oneOf": [
+                          "kind": {
+                            "enum": [
+                              "judge"
+                            ],
+                            "type": "string"
+                          },
+                          "model": {
+                            "minLength": 1,
+                            "type": "string"
+                          },
+                          "rubric": {
+                            "minLength": 1,
+                            "type": "string"
+                          },
+                          "threshold": {
+                            "type": "number"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "model",
+                          "rubric",
+                          "threshold"
+                        ],
+                        "type": "object"
+                      },
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "argv": {
+                            "items": {
+                              "type": "string"
+                            },
+                            "minItems": 1,
+                            "type": "array"
+                          },
+                          "cwd": {
+                            "anyOf": [
                               {
-                                "additionalProperties": false,
-                                "properties": {
-                                  "kind": {
-                                    "const": "none",
-                                    "type": "string"
+                                "allOf": [
+                                  {
+                                    "pattern": "^(?![\\\\/])(?!(?:.*[\\\\/])?\\.\\.(?:[\\\\/]|$)).+$"
                                   }
-                                },
-                                "required": [
-                                  "kind"
                                 ],
-                                "type": "object"
+                                "minLength": 1,
+                                "pattern": "^(?![A-Za-z]:)",
+                                "type": "string"
                               },
                               {
-                                "additionalProperties": false,
-                                "properties": {
-                                  "delay_ms": {
-                                    "exclusiveMinimum": 0,
-                                    "maximum": 9007199254740991,
-                                    "type": "integer"
-                                  },
-                                  "kind": {
-                                    "const": "fixed",
-                                    "type": "string"
-                                  }
-                                },
-                                "required": [
-                                  "kind",
-                                  "delay_ms"
-                                ],
-                                "type": "object"
-                              },
-                              {
-                                "additionalProperties": false,
-                                "properties": {
-                                  "initial_delay_ms": {
-                                    "exclusiveMinimum": 0,
-                                    "maximum": 9007199254740991,
-                                    "type": "integer"
-                                  },
-                                  "jitter_seed": {
-                                    "maximum": 9007199254740991,
-                                    "minimum": 0,
-                                    "type": "integer"
-                                  },
-                                  "kind": {
-                                    "const": "exponential",
-                                    "type": "string"
-                                  },
-                                  "maximum_delay_ms": {
-                                    "exclusiveMinimum": 0,
-                                    "maximum": 9007199254740991,
-                                    "type": "integer"
-                                  }
-                                },
-                                "required": [
-                                  "kind",
-                                  "initial_delay_ms",
-                                  "maximum_delay_ms",
-                                  "jitter_seed"
-                                ],
-                                "type": "object"
+                                "not": {}
                               }
                             ]
                           },
-                          "retries": {
-                            "maximum": 9007199254740991,
-                            "minimum": 0,
-                            "type": "integer"
+                          "env": {
+                            "anyOf": [
+                              {
+                                "additionalProperties": {
+                                  "anyOf": [
+                                    {
+                                      "additionalProperties": false,
+                                      "properties": {
+                                        "from_env": {
+                                          "minLength": 1,
+                                          "type": "string"
+                                        }
+                                      },
+                                      "required": [
+                                        "from_env"
+                                      ],
+                                      "type": "object"
+                                    },
+                                    {
+                                      "additionalProperties": false,
+                                      "properties": {
+                                        "from_file": {
+                                          "allOf": [
+                                            {
+                                              "pattern": "^(?![\\\\/])(?!(?:.*[\\\\/])?\\.\\.(?:[\\\\/]|$)).+$"
+                                            }
+                                          ],
+                                          "minLength": 1,
+                                          "pattern": "^(?![A-Za-z]:)",
+                                          "type": "string"
+                                        }
+                                      },
+                                      "required": [
+                                        "from_file"
+                                      ],
+                                      "type": "object"
+                                    }
+                                  ]
+                                },
+                                "type": "object"
+                              },
+                              {
+                                "not": {}
+                              }
+                            ]
+                          },
+                          "kind": {
+                            "enum": [
+                              "exec"
+                            ],
+                            "type": "string"
+                          },
+                          "timeout_ms": {
+                            "anyOf": [
+                              {
+                                "exclusiveMinimum": 0,
+                                "maximum": 9007199254740991,
+                                "type": "integer"
+                              },
+                              {
+                                "not": {}
+                              }
+                            ]
                           }
                         },
                         "required": [
-                          "retries",
-                          "backoff"
+                          "kind",
+                          "argv"
                         ],
                         "type": "object"
                       },
-                      "timeout_ms": {
-                        "exclusiveMinimum": 0,
-                        "maximum": 9007199254740991,
-                        "type": "integer"
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "extraction": {
+                            "additionalProperties": false,
+                            "properties": {
+                              "details_pointer": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "not": {}
+                                  }
+                                ]
+                              },
+                              "pass_pointer": {
+                                "type": "string"
+                              },
+                              "rationale_pointer": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "not": {}
+                                  }
+                                ]
+                              },
+                              "score_pointer": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "score_pointer",
+                              "pass_pointer"
+                            ],
+                            "type": "object"
+                          },
+                          "kind": {
+                            "enum": [
+                              "http"
+                            ],
+                            "type": "string"
+                          },
+                          "request": {
+                            "$ref": "#/$defs/HttpRequestTemplate"
+                          },
+                          "retry": {
+                            "anyOf": [
+                              {
+                                "additionalProperties": false,
+                                "properties": {
+                                  "backoff": {
+                                    "anyOf": [
+                                      {
+                                        "additionalProperties": false,
+                                        "properties": {
+                                          "kind": {
+                                            "enum": [
+                                              "none"
+                                            ],
+                                            "type": "string"
+                                          }
+                                        },
+                                        "required": [
+                                          "kind"
+                                        ],
+                                        "type": "object"
+                                      },
+                                      {
+                                        "additionalProperties": false,
+                                        "properties": {
+                                          "delay_ms": {
+                                            "exclusiveMinimum": 0,
+                                            "maximum": 9007199254740991,
+                                            "type": "integer"
+                                          },
+                                          "kind": {
+                                            "enum": [
+                                              "fixed"
+                                            ],
+                                            "type": "string"
+                                          }
+                                        },
+                                        "required": [
+                                          "kind",
+                                          "delay_ms"
+                                        ],
+                                        "type": "object"
+                                      },
+                                      {
+                                        "additionalProperties": false,
+                                        "properties": {
+                                          "initial_delay_ms": {
+                                            "exclusiveMinimum": 0,
+                                            "maximum": 9007199254740991,
+                                            "type": "integer"
+                                          },
+                                          "jitter_seed": {
+                                            "maximum": 9007199254740991,
+                                            "minimum": 0,
+                                            "type": "integer"
+                                          },
+                                          "kind": {
+                                            "enum": [
+                                              "exponential"
+                                            ],
+                                            "type": "string"
+                                          },
+                                          "maximum_delay_ms": {
+                                            "exclusiveMinimum": 0,
+                                            "maximum": 9007199254740991,
+                                            "type": "integer"
+                                          }
+                                        },
+                                        "required": [
+                                          "kind",
+                                          "initial_delay_ms",
+                                          "maximum_delay_ms",
+                                          "jitter_seed"
+                                        ],
+                                        "type": "object"
+                                      }
+                                    ]
+                                  },
+                                  "retries": {
+                                    "maximum": 9007199254740991,
+                                    "minimum": 0,
+                                    "type": "integer"
+                                  }
+                                },
+                                "required": [
+                                  "retries",
+                                  "backoff"
+                                ],
+                                "type": "object"
+                              },
+                              {
+                                "not": {}
+                              }
+                            ]
+                          },
+                          "timeout_ms": {
+                            "anyOf": [
+                              {
+                                "exclusiveMinimum": 0,
+                                "maximum": 9007199254740991,
+                                "type": "integer"
+                              },
+                              {
+                                "not": {}
+                              }
+                            ]
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "request",
+                          "extraction"
+                        ],
+                        "type": "object"
                       }
-                    },
-                    "required": [
-                      "kind",
-                      "request",
-                      "extraction"
+                    ]
+                  },
+                  "description": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "id": {
+                    "enum": [
+                      "output-equals",
+                      "output-contains",
+                      "output-schema",
+                      "judge-rubric",
+                      "command",
+                      "http",
+                      "tool-called",
+                      "tool-order",
+                      "no-tool-errors",
+                      "trace-span"
                     ],
-                    "type": "object"
+                    "type": "string"
+                  },
+                  "name": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "required_inputs": {
+                    "items": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "schema": {
+                    "enum": [
+                      "attest.metric-preset"
+                    ],
+                    "type": "string"
                   }
-                ]
-              },
-              "description": {
-                "minLength": 1,
-                "type": "string"
-              },
-              "id": {
-                "enum": [
-                  "output-equals",
-                  "output-contains",
-                  "output-schema",
-                  "judge-rubric",
-                  "command",
-                  "http",
-                  "tool-called",
-                  "tool-order",
-                  "no-tool-errors",
-                  "trace-span"
-                ],
-                "type": "string"
-              },
-              "name": {
-                "minLength": 1,
-                "type": "string"
-              },
-              "required_inputs": {
-                "items": {
-                  "minLength": 1,
-                  "type": "string"
                 },
-                "type": "array"
+                "required": [
+                  "schema",
+                  "id",
+                  "name",
+                  "description",
+                  "required_inputs",
+                  "configurable_fields",
+                  "definition"
+                ],
+                "type": "object"
               },
-              "schema": {
-                "const": "attest.metric-preset",
-                "type": "string"
-              }
+              "type": "array"
             },
-            "required": [
-              "schema",
-              "id",
-              "name",
-              "description",
-              "required_inputs",
-              "configurable_fields",
-              "definition"
-            ],
-            "type": "object"
-          },
-          "type": "array"
+            {
+              "not": {}
+            }
+          ]
         },
         "request_schema": {
           "anyOf": [
@@ -707,7 +740,7 @@
         },
         "subcommands": {
           "items": {
-            "$ref": "#/$defs/__schema0"
+            "$ref": "#/$defs/Objects_"
           },
           "type": "array"
         },
@@ -726,212 +759,172 @@
         "usage",
         "arguments",
         "options",
-        "subcommands",
         "aliases",
         "alias_for",
         "request_schema",
         "examples",
-        "constraints"
+        "constraints",
+        "subcommands"
       ],
       "type": "object"
     },
-    "__schema1": {
+    "Suspend_": {
       "anyOf": [
         {
-          "type": "string"
-        },
-        {
-          "type": "number"
-        },
-        {
-          "type": "boolean"
-        },
-        {
-          "type": "null"
-        },
-        {
-          "items": {
-            "$ref": "#/$defs/__schema1"
+          "additionalProperties": false,
+          "properties": {
+            "equals": {
+              "additionalProperties": false,
+              "properties": {
+                "path": {
+                  "type": "string"
+                },
+                "value": {}
+              },
+              "required": [
+                "path",
+                "value"
+              ],
+              "type": "object"
+            }
           },
-          "type": "array"
-        },
-        {
-          "additionalProperties": {
-            "$ref": "#/$defs/__schema1"
-          },
-          "propertyNames": {
-            "type": "string"
-          },
+          "required": [
+            "equals"
+          ],
           "type": "object"
-        }
-      ]
-    },
-    "__schema2": {
-      "anyOf": [
+        },
         {
-          "anyOf": [
-            {
+          "additionalProperties": false,
+          "properties": {
+            "contains": {
               "additionalProperties": false,
               "properties": {
-                "equals": {
-                  "additionalProperties": false,
-                  "properties": {
-                    "path": {
-                      "pattern": "^\\$(?:\\.[A-Za-z_][A-Za-z0-9_]*|\\[\\d+\\])*$",
+                "path": {
+                  "type": "string"
+                },
+                "value": {}
+              },
+              "required": [
+                "path",
+                "value"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "contains"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "regex": {
+              "additionalProperties": false,
+              "properties": {
+                "flags": {
+                  "anyOf": [
+                    {
                       "type": "string"
                     },
-                    "value": {
-                      "$ref": "#/$defs/__schema1"
+                    {
+                      "not": {}
                     }
-                  },
-                  "required": [
-                    "path",
-                    "value"
-                  ],
-                  "type": "object"
+                  ]
+                },
+                "path": {
+                  "type": "string"
+                },
+                "pattern": {
+                  "type": "string"
                 }
               },
               "required": [
-                "equals"
+                "path",
+                "pattern"
               ],
               "type": "object"
-            },
-            {
+            }
+          },
+          "required": [
+            "regex"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "json_schema": {
               "additionalProperties": false,
               "properties": {
-                "contains": {
-                  "additionalProperties": false,
-                  "properties": {
-                    "path": {
-                      "pattern": "^\\$(?:\\.[A-Za-z_][A-Za-z0-9_]*|\\[\\d+\\])*$",
-                      "type": "string"
+                "path": {
+                  "type": "string"
+                },
+                "schema": {
+                  "anyOf": [
+                    {
+                      "type": "boolean"
                     },
-                    "value": {
-                      "$ref": "#/$defs/__schema1"
+                    {
+                      "type": "object"
                     }
-                  },
-                  "required": [
-                    "path",
-                    "value"
-                  ],
-                  "type": "object"
+                  ]
                 }
               },
               "required": [
-                "contains"
+                "path",
+                "schema"
               ],
               "type": "object"
-            },
-            {
+            }
+          },
+          "required": [
+            "json_schema"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "threshold": {
+              "$ref": "#/$defs/Threshold"
+            }
+          },
+          "required": [
+            "threshold"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "exists": {
               "additionalProperties": false,
               "properties": {
-                "regex": {
-                  "additionalProperties": false,
-                  "properties": {
-                    "flags": {
-                      "pattern": "^[dimsuv]*$",
-                      "type": "string"
-                    },
-                    "path": {
-                      "pattern": "^\\$(?:\\.[A-Za-z_][A-Za-z0-9_]*|\\[\\d+\\])*$",
-                      "type": "string"
-                    },
-                    "pattern": {
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "path",
-                    "pattern"
-                  ],
-                  "type": "object"
+                "path": {
+                  "type": "string"
                 }
               },
               "required": [
-                "regex"
+                "path"
               ],
               "type": "object"
-            },
-            {
+            }
+          },
+          "required": [
+            "exists"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "tool_calls": {
               "additionalProperties": false,
               "properties": {
-                "json_schema": {
-                  "additionalProperties": false,
-                  "properties": {
-                    "path": {
-                      "pattern": "^\\$(?:\\.[A-Za-z_][A-Za-z0-9_]*|\\[\\d+\\])*$",
-                      "type": "string"
-                    },
-                    "schema": {
-                      "anyOf": [
-                        {
-                          "type": "boolean"
-                        },
-                        {
-                          "additionalProperties": {
-                            "$ref": "#/$defs/__schema1"
-                          },
-                          "propertyNames": {
-                            "type": "string"
-                          },
-                          "type": "object"
-                        }
-                      ]
-                    }
-                  },
-                  "required": [
-                    "path",
-                    "schema"
-                  ],
-                  "type": "object"
-                }
-              },
-              "required": [
-                "json_schema"
-              ],
-              "type": "object"
-            },
-            {
-              "additionalProperties": false,
-              "properties": {
-                "threshold": {
-                  "$ref": "#/$defs/Threshold"
-                }
-              },
-              "required": [
-                "threshold"
-              ],
-              "type": "object"
-            },
-            {
-              "additionalProperties": false,
-              "properties": {
-                "exists": {
-                  "additionalProperties": false,
-                  "properties": {
-                    "path": {
-                      "pattern": "^\\$(?:\\.[A-Za-z_][A-Za-z0-9_]*|\\[\\d+\\])*$",
-                      "type": "string"
-                    }
-                  },
-                  "required": [
-                    "path"
-                  ],
-                  "type": "object"
-                }
-              },
-              "required": [
-                "exists"
-              ],
-              "type": "object"
-            },
-            {
-              "additionalProperties": false,
-              "properties": {
-                "tool_calls": {
-                  "additionalProperties": false,
-                  "properties": {
-                    "arguments": {
+                "arguments": {
+                  "anyOf": [
+                    {
                       "items": {
                         "anyOf": [
                           {
@@ -941,12 +934,9 @@
                                 "additionalProperties": false,
                                 "properties": {
                                   "path": {
-                                    "pattern": "^\\$(?:\\.[A-Za-z_][A-Za-z0-9_]*|\\[\\d+\\])*$",
                                     "type": "string"
                                   },
-                                  "value": {
-                                    "$ref": "#/$defs/__schema1"
-                                  }
+                                  "value": {}
                                 },
                                 "required": [
                                   "path",
@@ -967,12 +957,9 @@
                                 "additionalProperties": false,
                                 "properties": {
                                   "path": {
-                                    "pattern": "^\\$(?:\\.[A-Za-z_][A-Za-z0-9_]*|\\[\\d+\\])*$",
                                     "type": "string"
                                   },
-                                  "value": {
-                                    "$ref": "#/$defs/__schema1"
-                                  }
+                                  "value": {}
                                 },
                                 "required": [
                                   "path",
@@ -993,7 +980,6 @@
                                 "additionalProperties": false,
                                 "properties": {
                                   "path": {
-                                    "pattern": "^\\$(?:\\.[A-Za-z_][A-Za-z0-9_]*|\\[\\d+\\])*$",
                                     "type": "string"
                                   }
                                 },
@@ -1013,108 +999,185 @@
                       "minItems": 1,
                       "type": "array"
                     },
-                    "count": {
+                    {
+                      "not": {}
+                    }
+                  ]
+                },
+                "count": {
+                  "anyOf": [
+                    {
                       "maximum": 9007199254740991,
                       "minimum": 0,
                       "type": "integer"
                     },
-                    "name": {
+                    {
+                      "not": {}
+                    }
+                  ]
+                },
+                "name": {
+                  "anyOf": [
+                    {
                       "type": "string"
                     },
-                    "order": {
+                    {
+                      "not": {}
+                    }
+                  ]
+                },
+                "order": {
+                  "anyOf": [
+                    {
                       "items": {
                         "type": "string"
                       },
                       "type": "array"
                     },
-                    "status": {
+                    {
+                      "not": {}
+                    }
+                  ]
+                },
+                "status": {
+                  "anyOf": [
+                    {
                       "enum": [
                         "ok",
                         "error"
                       ],
                       "type": "string"
+                    },
+                    {
+                      "not": {}
                     }
-                  },
-                  "type": "object"
+                  ]
                 }
               },
-              "required": [
-                "tool_calls"
-              ],
               "type": "object"
-            },
-            {
+            }
+          },
+          "required": [
+            "tool_calls"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "spans": {
               "additionalProperties": false,
               "properties": {
-                "spans": {
-                  "additionalProperties": false,
-                  "properties": {
-                    "count": {
+                "count": {
+                  "anyOf": [
+                    {
                       "maximum": 9007199254740991,
                       "minimum": 0,
                       "type": "integer"
                     },
-                    "filter": {
+                    {
+                      "not": {}
+                    }
+                  ]
+                },
+                "filter": {
+                  "anyOf": [
+                    {
                       "additionalProperties": false,
                       "properties": {
                         "attributes": {
-                          "additionalProperties": {
-                            "anyOf": [
-                              {
-                                "type": "string"
+                          "anyOf": [
+                            {
+                              "additionalProperties": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "number"
+                                  },
+                                  {
+                                    "type": "boolean"
+                                  }
+                                ]
                               },
-                              {
-                                "type": "number"
-                              },
-                              {
-                                "type": "boolean"
-                              }
-                            ]
-                          },
-                          "propertyNames": {
-                            "type": "string"
-                          },
-                          "type": "object"
+                              "type": "object"
+                            },
+                            {
+                              "not": {}
+                            }
+                          ]
                         },
                         "kind": {
-                          "enum": [
-                            "agent",
-                            "llm",
-                            "tool",
-                            "retrieval",
-                            "other"
-                          ],
-                          "type": "string"
+                          "anyOf": [
+                            {
+                              "enum": [
+                                "agent",
+                                "llm",
+                                "tool",
+                                "retrieval",
+                                "other"
+                              ],
+                              "type": "string"
+                            },
+                            {
+                              "not": {}
+                            }
+                          ]
                         },
                         "name": {
-                          "type": "string"
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "not": {}
+                            }
+                          ]
                         },
                         "status": {
-                          "enum": [
-                            "ok",
-                            "error"
-                          ],
-                          "type": "string"
+                          "anyOf": [
+                            {
+                              "enum": [
+                                "ok",
+                                "error"
+                              ],
+                              "type": "string"
+                            },
+                            {
+                              "not": {}
+                            }
+                          ]
                         }
                       },
                       "type": "object"
                     },
-                    "order": {
+                    {
+                      "not": {}
+                    }
+                  ]
+                },
+                "order": {
+                  "anyOf": [
+                    {
                       "items": {
                         "type": "string"
                       },
                       "type": "array"
+                    },
+                    {
+                      "not": {}
                     }
-                  },
-                  "type": "object"
+                  ]
                 }
               },
-              "required": [
-                "spans"
-              ],
               "type": "object"
             }
-          ]
+          },
+          "required": [
+            "spans"
+          ],
+          "type": "object"
         },
         {
           "$ref": "#/$defs/AllAssertionCheck"
@@ -1126,7 +1189,7 @@
           "additionalProperties": false,
           "properties": {
             "not": {
-              "$ref": "#/$defs/__schema2"
+              "$ref": "#/$defs/Suspend_"
             }
           },
           "required": [
@@ -1136,46 +1199,69 @@
         }
       ]
     },
-    "__schema3": {
-      "anyOf": [
-        {
+    "Threshold": {
+      "additionalProperties": false,
+      "properties": {
+        "gt": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "not": {}
+            }
+          ]
+        },
+        "gte": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "not": {}
+            }
+          ]
+        },
+        "lt": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "not": {}
+            }
+          ]
+        },
+        "lte": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "not": {}
+            }
+          ]
+        },
+        "path": {
           "type": "string"
-        },
-        {
-          "type": "number"
-        },
-        {
-          "type": "boolean"
-        },
-        {
-          "type": "null"
-        },
-        {
-          "items": {
-            "$ref": "#/$defs/__schema3"
-          },
-          "type": "array"
-        },
-        {
-          "additionalProperties": {
-            "$ref": "#/$defs/__schema3"
-          },
-          "propertyNames": {
-            "type": "string"
-          },
-          "type": "object"
         }
-      ]
+      },
+      "required": [
+        "path"
+      ],
+      "type": "object"
     }
   },
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "properties": {
     "command": {
-      "$ref": "#/$defs/__schema0"
+      "$ref": "#/$defs/Objects_"
     },
     "schema": {
-      "const": "attest.cli-help",
+      "enum": [
+        "attest.cli-help"
+      ],
       "type": "string"
     }
   },

@@ -1,3 +1,12 @@
+import { open, type FileHandle } from 'node:fs/promises';
+import { vi } from 'vitest';
+import * as Exit from 'effect/Exit';
+import * as Context from 'effect/Context';
+import * as Cause from 'effect/Cause';
+import { CancellationRegistry } from '../../commands/eval/eval-cancellation.js';
+import { valueFromExit } from '../../internal/effect-exit.js';
+import * as Effect from 'effect/Effect';
+import { stripStruct } from '@attest/contracts';
 import { access, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -28,11 +37,11 @@ import {
 } from '@attest/core';
 import type { RunStartRequest } from '@attest/core/records';
 import { describe, expect, it, onTestFinished } from 'vitest';
-import { z } from 'zod';
+import * as Schema from 'effect/Schema';
 
 import { writeFixtureProject } from '../../_tests_/support/project-transaction.js';
 import { runTestMutationCommand } from '../../commands/test/test-mutation-command.js';
-import { openStore } from '../../store/index.js';
+import { openTestStore as openStore, run as executeB2 } from '../../store/_tests_/b1-fixture.js';
 import { createRunLauncher } from '../create-run-launcher.js';
 import { toEvalRunDocument } from '../eval-run-document.js';
 import { spawnEvalRun } from '../spawn-eval-run.js';
@@ -42,7 +51,7 @@ const fakeCli = {
   args: [fileURLToPath(new URL('fixtures/fake-attest-cli.mjs', import.meta.url))],
 };
 
-const receivedSchema = z.object({ argv: z.array(z.string()), document: z.unknown() });
+const receivedSchema = stripStruct({ argv: Schema.Array(Schema.String), document: Schema.Unknown });
 
 const temporaryRoot = async (): Promise<string> => {
   const root = await mkdtemp(join(await realpath(tmpdir()), 'attest-run-launcher-'));
@@ -52,12 +61,16 @@ const temporaryRoot = async (): Promise<string> => {
 };
 
 const catalogOf = (projects: ProjectRecord[]): ProjectCatalog => ({
-  listProjects: () => Promise.resolve(projects),
-  openProject: () => Promise.reject(new Error('The launcher must not open run sources.')),
+  listProjects: () => Effect.succeed(projects),
+  openProject: () => Effect.die(new Error('The launcher must not open run sources.')),
 });
 
 const launcherIn = (root: string, command = fakeCli) =>
-  createRunLauncher({ catalog: catalogOf([{ key: 'demo', name: 'Demo', root }]), command });
+  Effect.runSync(
+    createRunLauncher({ catalog: catalogOf([{ key: 'demo', name: 'Demo', root }]), command }).pipe(
+      Effect.provideService(CancellationRegistry, new Map()),
+    ),
+  );
 
 const exists = (path: string): Promise<boolean> =>
   access(path).then(
@@ -163,7 +176,9 @@ describe('createRunLauncher', { timeout: 20_000 }, () => {
     const root = await temporaryRoot();
     const request: RunStartRequest = { selection: { testIds: ['smoke'] }, tags: ['slow'] };
 
-    expect(await launcherIn(root).startRun('demo', request)).toEqual({
+    expect(
+      await Effect.runPromiseExit(launcherIn(root).startRun('demo', request)).then(valueFromExit),
+    ).toEqual({
       runId: '01ARZ3NDEKTSV4RRFFQ69G5FAV',
     });
     // The fake CLI writes `finished` only after its output outlasts the launcher's reading.
@@ -191,7 +206,9 @@ describe('createRunLauncher', { timeout: 20_000 }, () => {
     const root = await temporaryRoot();
 
     await expect(
-      launcherIn(root).startRun('demo', { selection: { all: true }, tags: ['invalid'] }),
+      Effect.runPromiseExit(
+        launcherIn(root).startRun('demo', { selection: { all: true }, tags: ['invalid'] }),
+      ).then(valueFromExit),
     ).rejects.toMatchObject({
       code: 'RUN_START_FAILED',
       message: 'Test nope was not found.',
@@ -207,10 +224,12 @@ describe('createRunLauncher', { timeout: 20_000 }, () => {
   it('reports the output of a CLI that exits without a result document', async () => {
     const root = await temporaryRoot();
 
-    const failure = launcherIn(root).startRun('demo', {
-      selection: { all: true },
-      tags: ['crash'],
-    });
+    const failure = Effect.runPromiseExit(
+      launcherIn(root).startRun('demo', {
+        selection: { all: true },
+        tags: ['crash'],
+      }),
+    ).then(valueFromExit);
 
     const message = 'The attest CLI exited with code 3 before the run started.';
 
@@ -233,11 +252,13 @@ describe('createRunLauncher', { timeout: 20_000 }, () => {
     const root = await temporaryRoot();
 
     const failure = await captureStoreError(
-      launcherIn(root).startRun('demo', { selection: { all: true }, tags: [mode] }),
+      Effect.runPromiseExit(
+        launcherIn(root).startRun('demo', { selection: { all: true }, tags: [mode] }),
+      ).then(valueFromExit),
     );
 
     const { output } = parseWithSchemaSync(
-      z.object({ output: z.array(z.string()) }),
+      stripStruct({ output: Schema.Array(Schema.String) }),
       failure.details?.details,
     );
 
@@ -251,12 +272,14 @@ describe('createRunLauncher', { timeout: 20_000 }, () => {
     const request: RunStartRequest = { selection: { all: true }, tags: ['idle'] };
 
     const failure = await captureStoreError(
-      spawnEvalRun({
-        command: fakeCli,
-        projectRoot: root,
-        document: toEvalRunDocument(request),
-        startTimeoutMs: 500,
-      }),
+      Effect.runPromiseExit(
+        spawnEvalRun({
+          command: fakeCli,
+          projectRoot: root,
+          document: toEvalRunDocument(request),
+          startTimeoutMs: 500,
+        }),
+      ).then(valueFromExit),
     );
 
     const message = 'The attest CLI did not report run_started within 0.5s.';
@@ -277,55 +300,69 @@ describe('createRunLauncher', { timeout: 20_000 }, () => {
     const root = await temporaryRoot();
     const launcher = launcherIn(root, { command: join(root, 'missing-attest'), args: [] });
 
-    const failure = launcher.startRun('demo', { selection: { all: true } });
+    const failure = Effect.runPromiseExit(
+      launcher.startRun('demo', { selection: { all: true } }),
+    ).then(valueFromExit);
 
     await expect(failure).rejects.toMatchObject({ code: 'RUN_START_FAILED' });
     await expect(failure).rejects.toThrow(`Could not run ${join(root, 'missing-attest')}`);
   });
 
   it('refuses projects it cannot reach before spawning anything', async () => {
-    const launcher = createRunLauncher({
-      catalog: catalogOf([{ key: 'hosted', name: 'Hosted' }]),
-      command: { command: '/bin/false', args: [] },
-    });
+    const launcher = Effect.runSync(
+      createRunLauncher({
+        catalog: catalogOf([{ key: 'hosted', name: 'Hosted' }]),
+        command: { command: '/bin/false', args: [] },
+      }).pipe(Effect.provideService(CancellationRegistry, new Map())),
+    );
 
-    await expect(launcher.startRun('hosted', { selection: { all: true } })).rejects.toMatchObject({
+    await expect(
+      Effect.runPromiseExit(launcher.startRun('hosted', { selection: { all: true } })).then(
+        valueFromExit,
+      ),
+    ).rejects.toMatchObject({
       code: 'CONTROL_UNAVAILABLE',
     });
-    await expect(launcher.listTests('other')).rejects.toMatchObject({ code: 'PROJECT_NOT_FOUND' });
+    await expect(
+      Effect.runPromiseExit(launcher.listTests('other')).then(valueFromExit),
+    ).rejects.toMatchObject({ code: 'PROJECT_NOT_FOUND' });
   });
 
   it('lists tests with dataset rows counted as cases and the tags of every case', async () => {
     const root = await temporaryRoot();
     await writeFixtureProject(root);
     await writeTaggedDatasetRows(root);
-    await runTestMutationCommand({
-      project: root,
-      readImportStdin: () => {
-        throw new Error('stdin must not be read');
-      },
-      readStdin: () => Promise.reject(new Error('stdin must not be read')),
-      request: {
-        schema: COMMAND_REQUEST_SCHEMA_ID,
-        command: 'test.add',
-        test: {
-          schema: TEST_RESOURCE_SCHEMA_ID,
-          id: 'smoke',
-          name: 'Smoke',
-          agent_id: 'support',
-          cases: [
-            { id: 'one', input: 'one', tags: ['fast', 'billing'] },
-            { id: 'two', input: 'two', tags: ['fast'] },
-          ],
-          // Only the rows tagged `billing`, so `late` and its tags stay out of this test.
-          datasets: [{ dataset_id: 'refunds', tags: ['billing'] }],
-          metrics: [],
+    await Effect.runPromiseExit(
+      runTestMutationCommand({
+        project: root,
+        readImportStdin: () => {
+          throw new Error('stdin must not be read');
         },
-      },
-      workingDirectory: root,
-    });
+        readStdin: () => Promise.reject(new Error('stdin must not be read')),
+        request: {
+          schema: COMMAND_REQUEST_SCHEMA_ID,
+          command: 'test.add',
+          test: {
+            schema: TEST_RESOURCE_SCHEMA_ID,
+            id: 'smoke',
+            name: 'Smoke',
+            agent_id: 'support',
+            cases: [
+              { id: 'one', input: 'one', tags: ['fast', 'billing'] },
+              { id: 'two', input: 'two', tags: ['fast'] },
+            ],
+            // Only the rows tagged `billing`, so `late` and its tags stay out of this test.
+            datasets: [{ dataset_id: 'refunds', tags: ['billing'] }],
+            metrics: [],
+          },
+        },
+        workingDirectory: root,
+      }),
+    ).then((exit) => valueFromExit(exit));
 
-    const tests = await launcherIn(root).listTests('demo');
+    const tests = await Effect.runPromiseExit(launcherIn(root).listTests('demo')).then(
+      valueFromExit,
+    );
 
     expect(tests.sort((left, right) => left.id.localeCompare(right.id))).toEqual([
       { id: 'refund', name: 'Refund', tags: ['billing', 'refunds', 'slow'], caseCount: 2 },
@@ -345,14 +382,18 @@ describe('createRunLauncher', { timeout: 20_000 }, () => {
 
     await writeFile(join(root, 'attest.project.json'), JSON.stringify(manifest));
 
-    expect(await launcherIn(root).listTests('demo')).toEqual([]);
+    expect(
+      await Effect.runPromiseExit(launcherIn(root).listTests('demo')).then(valueFromExit),
+    ).toEqual([]);
   });
 
   it('answers PROJECT_UNLOADABLE with the loader diagnostics for a project that does not load', async () => {
     const root = await temporaryRoot();
     const launcher = launcherIn(root);
 
-    await expect(launcher.listTests('demo')).rejects.toMatchObject({
+    await expect(
+      Effect.runPromiseExit(launcher.listTests('demo')).then(valueFromExit),
+    ).rejects.toMatchObject({
       code: 'PROJECT_UNLOADABLE',
       details: { code: 'project_not_found' },
     });
@@ -363,10 +404,14 @@ describe('createRunLauncher', { timeout: 20_000 }, () => {
     );
     const invalid = { code: 'PROJECT_UNLOADABLE', details: { code: 'project_invalid' } };
 
-    await expect(launcher.listTests('demo')).rejects.toMatchObject(invalid);
-    await expect(launcher.cancelRun('demo', '01ARZ3NDEKTSV4RRFFQ69G5FAV')).rejects.toMatchObject(
-      invalid,
-    );
+    await expect(
+      Effect.runPromiseExit(launcher.listTests('demo')).then(valueFromExit),
+    ).rejects.toMatchObject(invalid);
+    await expect(
+      Effect.runPromiseExit(launcher.cancelRun('demo', '01ARZ3NDEKTSV4RRFFQ69G5FAV')).then(
+        valueFromExit,
+      ),
+    ).rejects.toMatchObject(invalid);
   });
 
   it('asks the process running a run to cancel it, wherever that run was started', async () => {
@@ -381,7 +426,9 @@ describe('createRunLauncher', { timeout: 20_000 }, () => {
       JSON.stringify({ pid: process.ppid, run_id: runId, token: 'terminal-run' }),
     );
 
-    expect(await launcherIn(root).cancelRun('demo', runId)).toEqual({
+    expect(
+      await Effect.runPromiseExit(launcherIn(root).cancelRun('demo', runId)).then(valueFromExit),
+    ).toEqual({
       outcome: 'cancellation_requested',
     });
     expect(JSON.parse(await readFile(join(registry, `${runId}.cancel.json`), 'utf8'))).toEqual({
@@ -396,24 +443,111 @@ describe('createRunLauncher', { timeout: 20_000 }, () => {
     await mkdir(join(root, '.attest'));
     const store = await openStore(join(root, '.attest', 'runs.db'));
     const metadata = { schemaId: 'attest.project', configHash: 'hash', configJson: '{}' };
-    const completed = await store.runs.createRun(metadata);
-    const cancelled = await store.runs.createRun(metadata);
-    await store.runs.finalizeRun(completed.id, 'completed');
-    await store.runs.finalizeRun(cancelled.id, 'cancelled');
+    const completed = await executeB2(store.runs.createRun(metadata));
+    const cancelled = await executeB2(store.runs.createRun(metadata));
+    await executeB2(store.runs.finalizeRun(completed.id, 'completed'));
+    await executeB2(store.runs.finalizeRun(cancelled.id, 'cancelled'));
     await store.close();
     const launcher = launcherIn(root);
 
-    expect(await launcher.cancelRun('demo', completed.id)).toEqual({
+    expect(
+      await Effect.runPromiseExit(launcher.cancelRun('demo', completed.id)).then(valueFromExit),
+    ).toEqual({
       outcome: 'already_terminal',
     });
-    expect(await launcher.cancelRun('demo', cancelled.id)).toEqual({
+    expect(
+      await Effect.runPromiseExit(launcher.cancelRun('demo', cancelled.id)).then(valueFromExit),
+    ).toEqual({
       outcome: 'already_cancelled',
     });
 
     for (const runId of ['01ARZ3NDEKTSV4RRFFQ69G5FAZ', '../../../escape']) {
-      await expect(launcher.cancelRun('demo', runId)).rejects.toMatchObject({
+      await expect(
+        Effect.runPromiseExit(launcher.cancelRun('demo', runId)).then(valueFromExit),
+      ).rejects.toMatchObject({
         code: 'RUN_NOT_FOUND',
       });
     }
   });
+});
+
+it('retains unconfirmed timeout cleanup with the owned child receipt and never relaunches', async () => {
+  const { OperationReleases } = await import('../../internal/operation-cleanup.js');
+  const { killProcessTree } = await import('@attest/executor');
+  const root = await temporaryRoot();
+  let stops = 0;
+
+  const outcome = await Effect.runPromiseExit(
+    spawnEvalRun({
+      command: fakeCli,
+      projectRoot: root,
+      document: toEvalRunDocument({ selection: { all: true }, tags: ['idle'] }),
+      startTimeoutMs: 100,
+      stopChild: (child, options) =>
+        killProcessTree(child, options).pipe(
+          Effect.map((receipt) => {
+            stops++;
+
+            return { ...receipt, cleanupConfirmed: false };
+          }),
+        ),
+    }),
+  );
+
+  expect(stops).toBe(1);
+  expect(Exit.isFailure(outcome)).toBe(true);
+
+  if (!Exit.isFailure(outcome)) throw new Error('Expected a failed start.');
+  expect(() => valueFromExit(outcome)).toThrow('did not report run_started');
+  const releases = Context.getOrUndefined(Cause.annotations(outcome.cause), OperationReleases);
+  expect(releases).toHaveLength(3);
+  const cleanup = releases?.[0];
+  expect(cleanup !== undefined && Exit.isFailure(cleanup)).toBe(true);
+
+  if (cleanup !== undefined && Exit.isFailure(cleanup)) {
+    const reason = cleanup.cause.reasons[0];
+    expect(reason !== undefined && Cause.isFailReason(reason)).toBe(true);
+
+    if (reason !== undefined && Cause.isFailReason(reason)) {
+      expect(reason.error.message).toContain('may still be running');
+      expect(reason.error.cause).toMatchObject({ receipt: { cleanupConfirmed: false } });
+    }
+  }
+});
+
+it('returns the live run id when closing the startup log fails after admission', async () => {
+  const root = await temporaryRoot();
+  const probe = await open(root, 'r');
+  // SAFETY: Node owns this descriptor; the shared prototype is used only to inject a real close failure.
+  const prototype = Object.getPrototypeOf(probe) as FileHandle;
+  await probe.close();
+  let injected = false;
+
+  const spy = vi.spyOn(prototype, 'read').mockImplementation(function (this: FileHandle, ...args) {
+    spy.mockRestore();
+    const close = this.close.bind(this);
+    this.close = async () => {
+      await close();
+      injected = true;
+      throw new Error('lost close acknowledgement');
+    };
+
+    return this.read(...args);
+  });
+
+  try {
+    const result = await Effect.runPromiseExit(
+      spawnEvalRun({
+        command: fakeCli,
+        projectRoot: root,
+        document: toEvalRunDocument({ selection: { all: true } }),
+        startTimeoutMs: 5000,
+      }),
+    ).then(valueFromExit);
+
+    expect(result).toEqual({ runId: '01ARZ3NDEKTSV4RRFFQ69G5FAV' });
+    expect(injected).toBe(true);
+  } finally {
+    spy.mockRestore();
+  }
 });

@@ -1,18 +1,46 @@
-import { parseWithSchema } from '@attest/contracts';
+import * as Effect from 'effect/Effect';
+import * as Exit from 'effect/Exit';
+import * as Cause from 'effect/Cause';
+import * as Context from 'effect/Context';
+import * as Schema from 'effect/Schema';
+import { stripStruct, parseWithSchema } from '@attest/contracts';
 import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { open, readFile, unlink } from 'node:fs/promises';
+import { open, unlink, realpath, lstat } from 'node:fs/promises';
 import { hostname } from 'node:os';
 import { dirname } from 'node:path';
 import { promisify } from 'node:util';
-
-import { z } from 'zod';
-
 import { resolveContainedPath } from '../project-path.js';
-import { errnoCode } from '../../internal/errno-code.js';
 import { isProcessPresent } from '../../internal/process-presence.js';
 import { syncPath } from '../../internal/sync-path.js';
+import {
+  anchoredCall,
+  withAnchored,
+  AnchoredCleanup,
+  type AnchoredFileFailure,
+  type AnchoredCleanupFailure,
+} from '../../internal/open-anchored.js';
 import { ProjectTransactionError } from './project-transaction-error.js';
+
+type ProjectLockFailure = AnchoredFileFailure | AnchoredCleanupFailure | ProjectTransactionError;
+
+/** Per-operation diagnostic annotation, retaining release uncertainty on primary Causes. */
+class ProjectLockCleanup extends Context.Service<ProjectLockCleanup, Cause.Cause<Error>>()(
+  'attest/ProjectLockCleanup',
+) {}
+
+/** Accumulates nested cleanup evidence instead of replacing an earlier diagnostic. */
+const annotateProjectCleanup = <E>(primary: Cause.Cause<E>, cleanup: Cause.Cause<Error>) =>
+  Cause.annotate(
+    primary,
+    Context.make(
+      ProjectLockCleanup,
+      Cause.combine(
+        Context.getOrUndefined(Cause.annotations(primary), ProjectLockCleanup) ?? Cause.empty,
+        cleanup,
+      ),
+    ),
+  );
 
 const PROJECT_LOCK_FILE = '.attest/project.lock';
 
@@ -21,16 +49,19 @@ const PROJECT_LOCK_SCHEMA = 'attest.project-lock';
 const execFileAsync = promisify(execFile);
 
 /** The lock file's contents: who owns the project mutation lock and how to prove it is stale. */
-const projectLockSchema = z.object({
-  created_at: z.string(),
-  hostname: z.string(),
-  owner_token: z.string(),
-  pid: z.number().int().positive(),
-  process_start_identity: z.string().nullable(),
-  schema: z.literal(PROJECT_LOCK_SCHEMA),
+const projectLockSchema = stripStruct({
+  created_at: Schema.String,
+  hostname: Schema.String,
+  owner_token: Schema.String,
+  pid: Schema.Finite.check(
+    Schema.isInt(),
+    Schema.isBetween({ minimum: Number.MIN_SAFE_INTEGER, maximum: Number.MAX_SAFE_INTEGER }),
+  ).check(Schema.isGreaterThan(0)),
+  process_start_identity: Schema.NullOr(Schema.String),
+  schema: Schema.Literal(PROJECT_LOCK_SCHEMA),
 });
 
-type ProjectLockMetadata = z.infer<typeof projectLockSchema>;
+type ProjectLockMetadata = typeof projectLockSchema.Type;
 
 type ProjectLockInspection =
   | { state: 'absent' }
@@ -44,22 +75,20 @@ type ProjectLockInspection =
 
 type ProjectLockHandle = {
   metadata: ProjectLockMetadata;
+  identity: { dev: bigint; ino: bigint };
   path: string;
   root: string;
 };
 
-/** Reads the kernel-observed start identity used to detect PID reuse on macOS and Linux. */
-const getProcessStartIdentity = async (pid: number): Promise<string | null> => {
-  try {
-    const { stdout } = await execFileAsync('ps', ['-o', 'lstart=', '-p', String(pid)], {
-      encoding: 'utf8',
-    });
-
-    return stdout.trim() || null;
-  } catch {
-    return null;
-  }
-};
+/** Reads the kernel-observed start identity; unavailable ps does not prove absence. */
+const getProcessStartIdentity = Effect.fn('getProcessStartIdentity')(function* (pid: number) {
+  return yield* anchoredCall('ps', String(pid), () =>
+    execFileAsync('ps', ['-o', 'lstart=', '-p', String(pid)], { encoding: 'utf8' }),
+  ).pipe(
+    Effect.map(({ stdout }) => stdout.trim() || null),
+    Effect.catch(() => Effect.succeed(null)),
+  );
+});
 
 const parseLockMetadata = (raw: string): ProjectLockMetadata | undefined => {
   let value: unknown;
@@ -75,9 +104,11 @@ const parseLockMetadata = (raw: string): ProjectLockMetadata | undefined => {
   return parsed.ok ? parsed.value : undefined;
 };
 
-/** Classifies the project lock without mutating or stealing it. */
-const inspectProjectLock = async (root: string): Promise<ProjectLockInspection> => {
-  const path = await resolveContainedPath(root, PROJECT_LOCK_FILE, {
+/** Inspects an anchored inode and never steals an existing lock. */
+const inspectProjectLock = Effect.fn('inspectProjectLock')(function* (
+  root: string,
+): Effect.fn.Return<ProjectLockInspection, ProjectLockFailure> {
+  const path = yield* resolveContainedPath(root, PROJECT_LOCK_FILE, {
     expect: 'file',
     problem: () =>
       new ProjectTransactionError('project_invalid', 'Unsafe project lock path.', {
@@ -85,67 +116,88 @@ const inspectProjectLock = async (root: string): Promise<ProjectLockInspection> 
       }),
   });
 
-  let raw: string;
+  const resolvedRoot = yield* anchoredCall('realpath', root, () => realpath(root));
 
-  try {
-    raw = await readFile(path, 'utf8');
-  } catch (error: unknown) {
-    if (errnoCode(error) === 'ENOENT') {
+  const read = yield* Effect.exit(
+    withAnchored(path, { kind: 'file', root: resolvedRoot }, ({ handle }) =>
+      anchoredCall('readFile', path, () => handle.readFile('utf8')),
+    ),
+  );
+
+  if (Exit.isFailure(read)) {
+    const reason = read.cause.reasons.find(Cause.isFailReason);
+    const cleanup = Context.getOrUndefined(Cause.annotations(read.cause), AnchoredCleanup);
+
+    if (
+      !Cause.hasDies(read.cause) &&
+      !Cause.hasInterrupts(read.cause) &&
+      cleanup === undefined &&
+      reason &&
+      'code' in reason.error &&
+      reason.error.code === 'ENOENT'
+    )
       return { state: 'absent' };
-    }
 
-    throw new ProjectTransactionError('project_locked', 'Could not inspect the project lock.', {
-      path: PROJECT_LOCK_FILE,
-      details: { lock_state: 'unreadable' },
-      cause: error,
-    });
+    return yield* Effect.failCause(
+      Cause.map(
+        read.cause,
+        (cause) =>
+          new ProjectTransactionError('project_locked', 'Could not inspect the project lock.', {
+            path: PROJECT_LOCK_FILE,
+            details: { lock_state: 'unreadable' },
+            cause,
+          }),
+      ),
+    );
   }
 
+  const raw = read.value;
   const metadata = parseLockMetadata(raw);
 
-  if (metadata === undefined) {
+  if (metadata === undefined)
     return { raw, reason: 'lock metadata is malformed', state: 'invalid' };
-  }
 
-  if (metadata.hostname !== hostname()) {
+  if (metadata.hostname !== hostname())
     return {
       metadata,
       raw,
       reason: 'lock belongs to another hostname and cannot be proven stale locally',
       state: 'unknown',
     };
-  }
 
-  if (!isProcessPresent(metadata.pid)) {
-    return { metadata, raw, reason: 'owner process no longer exists', state: 'stale' };
-  }
+  const present = yield* isProcessPresent(metadata.pid).pipe(
+    Effect.mapError(
+      (cause) =>
+        new ProjectTransactionError('project_locked', 'Could not inspect project lock owner.', {
+          cause,
+        }),
+    ),
+  );
 
-  if (metadata.process_start_identity === null) {
+  if (!present) return { metadata, raw, reason: 'owner process no longer exists', state: 'stale' };
+
+  if (metadata.process_start_identity === null)
     return {
       metadata,
       raw,
       reason: 'owner PID is live; start identity was unavailable when the lock was created',
       state: 'live',
     };
-  }
+  const identity = yield* getProcessStartIdentity(metadata.pid);
 
-  const currentIdentity = await getProcessStartIdentity(metadata.pid);
-
-  if (currentIdentity === null) {
+  if (identity === null)
     return {
       metadata,
       raw,
       reason: 'owner PID is live; current start identity cannot be inspected',
       state: 'live',
     };
-  }
 
-  if (currentIdentity !== metadata.process_start_identity) {
+  if (identity !== metadata.process_start_identity)
     return { metadata, raw, reason: 'owner PID was reused by another process', state: 'stale' };
-  }
 
   return { metadata, raw, reason: 'owner process and start identity are live', state: 'live' };
-};
+});
 
 /** Rejects a command because another owner holds the lock; a stale lock is never stolen. */
 const throwForExistingLock = (
@@ -185,12 +237,14 @@ const throwForExistingLock = (
 type ProjectLockFailureDetails = {
   lock_state: Exclude<ProjectLockInspection, { state: 'absent' }>['state'];
   reason: Exclude<ProjectLockInspection, { state: 'absent' }>['reason'];
-  lock?: z.infer<typeof projectLockSchema>;
+  lock?: typeof projectLockSchema.Type;
 };
 
-/** Acquires the project-local lock exclusively and never steals an existing owner. */
-const acquireProjectLock = async (root: string): Promise<ProjectLockHandle> => {
-  const path = await resolveContainedPath(root, PROJECT_LOCK_FILE, {
+/** Creates and durably writes an exclusive lock, closing immediately after initialization. */
+const acquireProjectLock = Effect.fn('acquireProjectLock')(function* (
+  root: string,
+): Effect.fn.Return<ProjectLockHandle, ProjectLockFailure> {
+  const path = yield* resolveContainedPath(root, PROJECT_LOCK_FILE, {
     expect: 'file',
     createDirectories: true,
     problem: () =>
@@ -203,67 +257,180 @@ const acquireProjectLock = async (root: string): Promise<ProjectLockHandle> => {
     schema: PROJECT_LOCK_SCHEMA,
     owner_token: randomUUID(),
     pid: process.pid,
-    process_start_identity: await getProcessStartIdentity(process.pid),
+    process_start_identity: yield* getProcessStartIdentity(process.pid),
     hostname: hostname(),
     created_at: new Date().toISOString(),
   };
 
-  let handle;
+  const opened = yield* Effect.result(anchoredCall('open', path, () => open(path, 'wx', 0o600)));
 
-  try {
-    handle = await open(path, 'wx', 0o600);
-  } catch (error: unknown) {
-    if (errnoCode(error) === 'EEXIST') {
-      const inspection = await inspectProjectLock(root);
+  if (opened._tag === 'Failure') {
+    if (opened.failure.code === 'EEXIST') {
+      const inspection = yield* inspectProjectLock(root);
 
-      if (inspection.state === 'absent') {
-        // The owner released between open and inspection; a fresh retry is safe.
-        return acquireProjectLock(root);
-      }
+      if (inspection.state === 'absent') return yield* acquireProjectLock(root);
 
-      return throwForExistingLock(inspection);
+      return yield* Effect.try({
+        try: () => throwForExistingLock(inspection),
+        catch: (cause) =>
+          cause instanceof ProjectTransactionError
+            ? cause
+            : new ProjectTransactionError('project_locked', 'Could not classify lock.', { cause }),
+      });
     }
 
-    throw new ProjectTransactionError(
-      'project_transaction_failed',
-      'Could not create project lock.',
-      {
+    return yield* Effect.fail(
+      new ProjectTransactionError('project_transaction_failed', 'Could not create project lock.', {
         path: PROJECT_LOCK_FILE,
-        cause: error,
-      },
+        cause: opened.failure,
+      }),
     );
   }
 
-  try {
-    await handle.writeFile(`${JSON.stringify(metadata)}\n`, 'utf8');
-    await handle.sync();
-  } finally {
-    await handle.close();
+  let identity: { dev: bigint; ino: bigint } | undefined;
+  let closed: Exit.Exit<unknown, ProjectLockFailure> = Exit.void;
+
+  const initialized = yield* Effect.exit(
+    Effect.acquireUseRelease(
+      Effect.succeed(opened.success),
+      (handle) =>
+        Effect.gen(function* () {
+          identity = yield* anchoredCall('fstat', path, () => handle.stat({ bigint: true }));
+          yield* anchoredCall('writeFile', path, () =>
+            handle.writeFile(`${JSON.stringify(metadata)}\n`, 'utf8'),
+          );
+          yield* anchoredCall('fsync', path, () => handle.sync());
+        }),
+      (handle) =>
+        Effect.gen(function* () {
+          closed = yield* Effect.exit(anchoredCall('close', path, () => handle.close()));
+        }),
+    ),
+  );
+
+  const publication = yield* Effect.exit(
+    Effect.gen(function* () {
+      yield* initialized;
+
+      if (Exit.isFailure(closed))
+        return yield* Effect.fail(
+          new ProjectTransactionError(
+            'project_transaction_failed',
+            'Could not close project lock.',
+            { cause: closed.cause },
+          ),
+        );
+      yield* syncPath(dirname(path));
+    }),
+  );
+
+  if (Exit.isFailure(publication)) {
+    // Only remove the exclusive inode created here, even if initialization never wrote a token.
+    const removed = yield* Effect.exit(
+      Effect.gen(function* () {
+        if (identity === undefined)
+          return yield* Effect.fail(
+            new ProjectTransactionError(
+              'project_locked',
+              'Lock identity could not be confirmed for cleanup.',
+            ),
+          );
+        const current = yield* anchoredCall('lstat', path, () => lstat(path, { bigint: true }));
+
+        if (current.dev !== identity.dev || current.ino !== identity.ino)
+          return yield* Effect.fail(
+            new ProjectTransactionError(
+              'project_locked',
+              'Lock identity changed during acquisition.',
+            ),
+          );
+        yield* anchoredCall('unlink', path, () => unlink(path));
+        yield* syncPath(dirname(path));
+      }),
+    );
+
+    let cause = publication.cause;
+
+    if (Exit.isFailure(closed)) cause = annotateProjectCleanup(cause, closed.cause);
+
+    if (Exit.isFailure(removed)) cause = annotateProjectCleanup(cause, removed.cause);
+
+    return yield* Effect.failCause(cause);
   }
 
-  await syncPath(dirname(path));
+  if (identity === undefined)
+    return yield* Effect.fail(
+      new ProjectTransactionError('project_locked', 'Lock identity unavailable.'),
+    );
 
-  return { metadata, path, root };
-};
+  return { metadata, identity, path, root };
+}, Effect.uninterruptible);
 
-/** Releases a lock only when its on-disk owner token still belongs to this handle. */
-const releaseProjectLock = async (lock: ProjectLockHandle): Promise<void> => {
-  const inspection = await inspectProjectLock(lock.root);
+/** Releases only the current token; a replacement owner is never deliberately removed. */
+const releaseProjectLock = Effect.fn('releaseProjectLock')(function* (lock: ProjectLockHandle) {
+  const inspection = yield* inspectProjectLock(lock.root);
 
   if (
     inspection.state === 'absent' ||
     inspection.state === 'invalid' ||
     inspection.metadata.owner_token !== lock.metadata.owner_token
   ) {
-    throw new ProjectTransactionError('project_locked', 'Project lock ownership changed.', {
-      path: PROJECT_LOCK_FILE,
-      details: { lock_state: inspection.state },
-    });
+    return yield* Effect.fail(
+      new ProjectTransactionError('project_locked', 'Project lock ownership changed.', {
+        path: PROJECT_LOCK_FILE,
+        details: { lock_state: inspection.state },
+      }),
+    );
   }
 
-  await unlink(lock.path);
-  await syncPath(dirname(lock.path));
-};
+  const identity = yield* anchoredCall('lstat', lock.path, () =>
+    lstat(lock.path, { bigint: true }),
+  );
+
+  if (identity.dev !== lock.identity.dev || identity.ino !== lock.identity.ino)
+    return yield* Effect.fail(
+      new ProjectTransactionError('project_locked', 'Project lock inode changed.'),
+    );
+  yield* anchoredCall('unlink', lock.path, () => unlink(lock.path));
+  yield* syncPath(dirname(lock.path));
+}, Effect.uninterruptible);
+
+/** Registers lock release immediately and preserves primary failure, defect and interruption. */
+const withProjectLock = Effect.fn('withProjectLock')(function* <A, E extends Error>(
+  root: string,
+  use: (lock: ProjectLockHandle) => Effect.Effect<A, E>,
+  evidence: (value: A) => Record<string, string | boolean> = () => ({}),
+) {
+  let cleanup: Exit.Exit<unknown, Error> = Exit.void;
+
+  const primary = yield* Effect.exit(
+    Effect.acquireUseRelease(
+      acquireProjectLock(root),
+      (lock) => Effect.suspend(() => use(lock)),
+      (lock) =>
+        Effect.gen(function* () {
+          cleanup = yield* Effect.exit(releaseProjectLock(lock));
+        }),
+    ),
+  );
+
+  if (Exit.isFailure(cleanup)) {
+    if (Exit.isFailure(primary))
+      return yield* Effect.failCause(annotateProjectCleanup(primary.cause, cleanup.cause));
+
+    const details = evidence(primary.value);
+
+    return yield* Effect.fail(
+      new ProjectTransactionError(
+        details.committed === true ? 'project_saved_cleanup_failed' : 'project_transaction_failed',
+        'Project operation completed but lock release failed.',
+        { details: { ...details, lock_released: false }, cause: cleanup.cause },
+      ),
+    );
+  }
+
+  return yield* primary;
+}, Effect.uninterruptible);
 
 export {
   PROJECT_LOCK_FILE,
@@ -271,6 +438,9 @@ export {
   acquireProjectLock,
   inspectProjectLock,
   releaseProjectLock,
+  withProjectLock,
+  ProjectLockCleanup,
+  annotateProjectCleanup,
   throwForExistingLock,
   type ProjectLockHandle,
   type ProjectLockMetadata,

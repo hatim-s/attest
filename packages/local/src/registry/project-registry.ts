@@ -1,10 +1,11 @@
+import { anchoredCall } from '../internal/open-anchored.js';
+import * as Effect from 'effect/Effect';
+import { utcTimestampSchema } from '../internal/utc-timestamp.js';
 import { parseWithSchemaSync } from '@attest/contracts';
 import { realpath } from 'node:fs/promises';
 import { basename, isAbsolute, resolve } from 'node:path';
-
 import { projectKeySchema } from '@attest/core/records';
-import { z } from 'zod';
-
+import * as Schema from 'effect/Schema';
 import { LocalError } from '../errors/index.js';
 import { errnoCode } from '../internal/errno-code.js';
 import { readPrivateFile, writePrivateFile } from '../internal/private-file.js';
@@ -13,29 +14,31 @@ import { withRegistryLock } from './registry-lock.js';
 
 const REGISTRY_SCHEMA_ID = 'attest.projects.v1';
 
-const registryEntrySchema = z.strictObject({
+const registryEntrySchema = Schema.Struct({
   key: projectKeySchema,
-  name: z.string().min(1),
-  root: z.string().refine(isAbsolute, { message: 'Project roots must be absolute paths.' }),
-  projectId: z.string().min(1).optional(),
-  registeredAt: z.iso.datetime(),
+  name: Schema.String.check(Schema.isMinLength(1)),
+  root: Schema.String.check(
+    Schema.makeFilter(isAbsolute, { message: 'Project roots must be absolute paths.' }),
+  ),
+  projectId: Schema.optional(Schema.String.check(Schema.isMinLength(1))),
+  registeredAt: utcTimestampSchema,
 });
 
-const registrySchema = z
-  .strictObject({
-    schema: z.literal(REGISTRY_SCHEMA_ID),
-    projects: z.array(registryEntrySchema),
-  })
-  .refine(
+const registrySchema = Schema.Struct({
+  schema: Schema.Literal(REGISTRY_SCHEMA_ID),
+  projects: Schema.Array(registryEntrySchema),
+}).check(
+  Schema.makeFilter(
     ({ projects }) =>
       new Set(projects.map(({ key }) => key)).size === projects.length &&
       new Set(projects.map(({ root }) => root)).size === projects.length,
     { message: 'Registry keys and roots must be unique.' },
-  );
+  ),
+);
 
-type ProjectRegistry = z.infer<typeof registrySchema>;
+type ProjectRegistry = typeof registrySchema.Type;
 
-type RegistryEntry = z.infer<typeof registryEntrySchema>;
+type RegistryEntry = typeof registryEntrySchema.Type;
 
 type RegisterProjectOptions = {
   registryPath: string;
@@ -64,117 +67,143 @@ const invalidRegistry = (registryPath: string, cause: unknown): LocalError =>
  * registry; a symlinked ancestor, a symlinked or group-accessible file, or malformed content is
  * `registry_invalid`.
  */
-const readRegistry = async (registryPath: string): Promise<ProjectRegistry> => {
-  let text: string;
+const readRegistry = Effect.fn('readRegistry')(function* (registryPath: string) {
+  const text = yield* readPrivateFile(registryPath).pipe(
+    Effect.catch((cause) =>
+      errnoCode(cause) === 'ENOENT'
+        ? Effect.succeed(undefined)
+        : Effect.fail(invalidRegistry(registryPath, cause)),
+    ),
+  );
 
-  try {
-    text = await readPrivateFile(registryPath);
-  } catch (cause: unknown) {
-    if (errnoCode(cause) === 'ENOENT') return EMPTY_REGISTRY;
-    throw invalidRegistry(registryPath, cause);
-  }
+  if (text === undefined) return EMPTY_REGISTRY;
 
-  try {
-    return parseWithSchemaSync(registrySchema, JSON.parse(text));
-  } catch (cause: unknown) {
-    throw invalidRegistry(registryPath, cause);
-  }
-};
+  return yield* Effect.try({
+    try: () => parseWithSchemaSync(registrySchema, JSON.parse(text)),
+    catch: (cause) => invalidRegistry(registryPath, cause),
+  });
+});
 
 /** Replaces the registry atomically with a private temporary file and a rename. */
-const writeRegistry = async (registryPath: string, registry: ProjectRegistry): Promise<void> => {
-  try {
-    await writePrivateFile(registryPath, `${JSON.stringify(registry, undefined, 2)}\n`);
-  } catch (cause: unknown) {
-    throw new LocalError('registry_write_failed', 'Could not save the project registry.', {
-      path: registryPath,
-      hint: 'Check that the registry directory is writable and that no parent is a symbolic link, then retry.',
-      cause,
-    });
-  }
-};
+const writeRegistry = Effect.fn('writeRegistry')(function* (
+  registryPath: string,
+  registry: ProjectRegistry,
+) {
+  return yield* Effect.gen(function* () {
+    yield* writePrivateFile(registryPath, `${JSON.stringify(registry, undefined, 2)}\n`);
+  }).pipe(
+    Effect.catch((cause) =>
+      Effect.gen(function* () {
+        return yield* Effect.fail(
+          new LocalError('registry_write_failed', 'Could not save the project registry.', {
+            path: registryPath,
+            hint: 'Check that the registry directory is writable and that no parent is a symbolic link, then retry.',
+            cause,
+          }),
+        );
+      }),
+    ),
+  );
+});
 
 /** Resolves an existing project directory to the realpath the registry stores. */
-const resolveProjectRoot = async (root: string): Promise<string> => {
-  try {
-    return await realpath(root);
-  } catch (cause: unknown) {
-    throw new LocalError('project_read_failed', 'The project directory does not exist.', {
-      path: root,
-      hint: 'Pass an existing project directory.',
-      cause,
-    });
-  }
-};
+const resolveProjectRoot = Effect.fn('resolveProjectRoot')(function* (root: string) {
+  return yield* Effect.gen(function* () {
+    return yield* anchoredCall('realpath', 'cloud/registry', () => realpath(root));
+  }).pipe(
+    Effect.catch((cause) =>
+      Effect.gen(function* () {
+        return yield* Effect.fail(
+          new LocalError('project_read_failed', 'The project directory does not exist.', {
+            path: root,
+            hint: 'Pass an existing project directory.',
+            cause,
+          }),
+        );
+      }),
+    ),
+  );
+});
 
 /**
  * Adds a project root to the registry. Registering a root that is already present returns the
  * stored entry unchanged, including its name and key. New keys are the slug of the name,
  * deduplicated against existing keys. The name defaults to the directory basename.
  */
-const registerProject = async (options: RegisterProjectOptions): Promise<RegistryEntry> => {
-  const root = await resolveProjectRoot(options.root);
+const registerProject = Effect.fn('registerProject')(function* (options: RegisterProjectOptions) {
+  const root = yield* resolveProjectRoot(options.root);
 
-  return withRegistryLock(options.registryPath, async () => {
-    const registry = await readRegistry(options.registryPath);
-    const existing = registry.projects.find((entry) => entry.root === root);
+  return yield* withRegistryLock(
+    options.registryPath,
+    Effect.fn(function* () {
+      const registry = yield* readRegistry(options.registryPath);
+      const existing = registry.projects.find((entry) => entry.root === root);
 
-    if (existing !== undefined) return existing;
+      if (existing !== undefined) return existing;
+      const name = options.name ?? basename(root);
 
-    const name = options.name ?? basename(root);
+      let entry: RegistryEntry = {
+        key: uniqueProjectKey(name, new Set(registry.projects.map(({ key }) => key))),
+        name,
+        root,
+        registeredAt: new Date().toISOString(),
+      };
 
-    const entry: RegistryEntry = {
-      key: uniqueProjectKey(name, new Set(registry.projects.map(({ key }) => key))),
-      name,
-      root,
-      registeredAt: new Date().toISOString(),
-    };
+      // Absent stays absent: the entry is also a CLI JSON result, which has no `undefined`.
+      if (options.projectId !== undefined) entry = { ...entry, projectId: options.projectId };
+      yield* writeRegistry(options.registryPath, {
+        ...registry,
+        projects: [...registry.projects, entry],
+      });
 
-    // Absent stays absent: the entry is also a CLI JSON result, which has no `undefined`.
-    if (options.projectId !== undefined) entry.projectId = options.projectId;
-
-    await writeRegistry(options.registryPath, {
-      ...registry,
-      projects: [...registry.projects, entry],
-    });
-
-    return entry;
-  });
-};
+      return entry;
+    }),
+  );
+});
 
 /**
  * Removes one entry, matched by key first and then by directory. A directory that no longer
  * exists still matches the root it was registered with.
  */
-const unregisterProject = async (options: UnregisterProjectOptions): Promise<RegistryEntry> => {
+const unregisterProject = Effect.fn('unregisterProject')(function* (
+  options: UnregisterProjectOptions,
+) {
   const directory = resolve(options.workingDirectory, options.keyOrRoot);
-  const root = await realpath(directory).catch(() => directory);
 
-  return withRegistryLock(options.registryPath, async () => {
-    const registry = await readRegistry(options.registryPath);
+  const root = yield* anchoredCall('realpath', directory, () => realpath(directory)).pipe(
+    Effect.catch(() => Effect.succeed(directory)),
+  );
 
-    const entry =
-      registry.projects.find(({ key }) => key === options.keyOrRoot) ??
-      registry.projects.find((candidate) => candidate.root === root);
+  return yield* withRegistryLock(
+    options.registryPath,
+    Effect.fn(function* () {
+      const registry = yield* readRegistry(options.registryPath);
 
-    if (entry === undefined) {
-      throw new LocalError(
-        'resource_not_found',
-        `No registered project matches ${options.keyOrRoot}.`,
-        {
-          path: options.keyOrRoot,
-          hint: 'Run `attest projects list` and pass a listed key or root.',
-        },
-      );
-    }
+      const entry =
+        registry.projects.find(({ key }) => key === options.keyOrRoot) ??
+        registry.projects.find((candidate) => candidate.root === root);
 
-    await writeRegistry(options.registryPath, {
-      ...registry,
-      projects: registry.projects.filter(({ key }) => key !== entry.key),
-    });
+      if (entry === undefined) {
+        return yield* Effect.fail(
+          new LocalError(
+            'resource_not_found',
+            `No registered project matches ${options.keyOrRoot}.`,
+            {
+              path: options.keyOrRoot,
+              hint: 'Run `attest projects list` and pass a listed key or root.',
+            },
+          ),
+        );
+      }
 
-    return entry;
-  });
-};
+      yield* writeRegistry(options.registryPath, {
+        ...registry,
+        projects: registry.projects.filter(({ key }) => key !== entry.key),
+      });
+
+      return entry;
+    }),
+  );
+});
 
 export { readRegistry, registerProject, unregisterProject, type RegistryEntry };

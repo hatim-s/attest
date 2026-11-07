@@ -4,7 +4,7 @@ import { expect, it } from 'vitest';
 import { plannedSuiteCases } from '../planned-cases.js';
 
 it('parses public snapshots, preserves selected zero counts, and rejects contradictory identities', () => {
-  const fixture = parseWithSchemaSync(
+  let fixture = parseWithSchemaSync(
     evalRunSchema,
     JSON.parse(
       readFileSync(
@@ -18,9 +18,21 @@ it('parses public snapshots, preserves selected zero counts, and rejects contrad
   );
 
   expect(plannedSuiteCases(EVAL_RUN_SCHEMA_ID, JSON.stringify(fixture))?.get('refund')).toBe(2);
-  fixture.snapshot.selected_test_ids.push('empty');
+  fixture = {
+    ...fixture,
+    snapshot: {
+      ...fixture.snapshot,
+      selected_test_ids: [...fixture.snapshot.selected_test_ids, 'empty'],
+    },
+  };
   expect(plannedSuiteCases(EVAL_RUN_SCHEMA_ID, JSON.stringify(fixture))?.get('empty')).toBe(0);
-  fixture.snapshot.selected_cases.push(fixture.snapshot.selected_cases[0]!);
+  fixture = {
+    ...fixture,
+    snapshot: {
+      ...fixture.snapshot,
+      selected_cases: [...fixture.snapshot.selected_cases, fixture.snapshot.selected_cases[0]!],
+    },
+  };
   expect(() => plannedSuiteCases(EVAL_RUN_SCHEMA_ID, JSON.stringify(fixture))).toThrow(
     'identities',
   );

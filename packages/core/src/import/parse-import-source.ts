@@ -1,4 +1,4 @@
-import { z } from 'zod';
+import * as Schema from 'effect/Schema';
 import { parseWithSchemaSync, isJsonObject } from '@attest/contracts';
 import { createHash } from 'node:crypto';
 
@@ -13,7 +13,7 @@ import type {
   ParsedRecords,
   SourceRecord,
 } from './import-types.js';
-import { resolveJsonPointer } from './json-pointer.js';
+import { resolveJsonPointer, isJsonArray } from './json-pointer.js';
 import { parseCsvSource } from './parse-csv.js';
 
 interface ParsedImportSource extends ParsedRecords {
@@ -62,7 +62,7 @@ const parseJsonSource = (
   let document: JsonValue;
 
   try {
-    document = parseWithSchemaSync(z.json(), JSON.parse(text));
+    document = parseWithSchemaSync(Schema.Json, JSON.parse(text));
   } catch {
     return fail(
       importDiagnostic({
@@ -85,7 +85,7 @@ const parseJsonSource = (
     );
   }
 
-  if (!Array.isArray(selected.value)) {
+  if (!isJsonArray(selected.value)) {
     return fail(
       importDiagnostic({
         code: 'records_not_array',
@@ -123,7 +123,7 @@ const parseJsonlSource = (text: string, maxRows: number): ParsedRecords => {
     let value: JsonValue;
 
     try {
-      value = parseWithSchemaSync(z.json(), JSON.parse(line));
+      value = parseWithSchemaSync(Schema.Json, JSON.parse(line));
     } catch {
       diagnostics.push(
         importDiagnostic({

@@ -1,90 +1,35 @@
+import {
+  createBaseEnvironment,
+  resolveProcessEnvironment,
+  resolveHttpSecrets,
+} from './metric-secrets.js';
+import * as Effect from 'effect/Effect';
 import { realpath } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { delimiter, isAbsolute, resolve } from 'node:path';
+import { isAbsolute, resolve } from 'node:path';
 
-import type { AgentResource, SecretReference } from '@attest/contracts';
+import type { AgentResource } from '@attest/contracts';
 
 import { LocalError } from '../../../errors/index.js';
-import { openAnchored, type AnchoredEntry } from '../../../internal/open-anchored.js';
 import { isProjectPath } from '../../../project/project-path.js';
 import type { ResolvedNativeAgent } from './types.js';
 
-/** Reads a secret reference at invocation time without returning its source path or value. */
-const readSecretReference = async (
-  reference: SecretReference,
-  projectRoot: string,
-): Promise<string> => {
-  if ('from_env' in reference) {
-    const value = process.env[reference.from_env];
-
-    if (value === undefined) {
-      throw new LocalError('invocation_failed', 'A referenced environment secret is missing.', {
-        path: reference.from_env,
-        hint: 'Set the referenced environment variable and retry the connection test.',
-      });
-    }
-
-    return value;
-  }
-
-  const candidate = resolve(projectRoot, reference.from_file);
-
-  if (!isProjectPath(projectRoot, candidate)) {
-    throw new LocalError('invocation_failed', 'A secret file is outside the project.', {
-      path: reference.from_file,
-      hint: 'Use a project-contained secret file or an environment reference.',
-    });
-  }
-
-  let entry: AnchoredEntry | undefined;
-
-  try {
-    entry = await openAnchored(candidate, { kind: 'file', root: projectRoot });
-
-    if ((entry.identity.mode & 0o077n) !== 0n) {
-      throw new Error('secret file must not be readable by group or others');
-    }
-
-    return await entry.handle.readFile('utf8');
-  } catch (error: unknown) {
-    throw new LocalError('invocation_failed', 'A referenced secret file is unavailable.', {
-      path: reference.from_file,
-      hint: 'Use a project-contained regular file with group/world permissions removed.',
-      cause: error,
-    });
-  } finally {
-    await entry?.handle.close().catch(() => undefined);
-  }
-};
-
-/** Builds the minimum safe inherited environment used by the hardened native CLI invoker. */
-const createBaseEnvironment = () => ({
-  PATH: (process.env.PATH ?? '')
-    .split(delimiter)
-    .filter((entry) => isAbsolute(entry))
-    .join(delimiter),
-  LC_ALL: 'C',
-  TMPDIR: tmpdir(),
-});
-
 /** Resolves an authored cwd through realpath and rejects symlink escapes from the project. */
-const resolveProcessCwd = async (projectRoot: string, cwd = '.'): Promise<string> => {
-  const candidate = resolve(projectRoot, cwd);
+const resolveProcessCwd = (projectRoot: string, cwd = '.') =>
+  Effect.tryPromise({
+    try: async () => {
+      const resolved = await realpath(resolve(projectRoot, cwd));
 
-  try {
-    const resolved = await realpath(candidate);
+      if (!isProjectPath(projectRoot, resolved)) throw new Error('cwd escapes project');
 
-    if (!isProjectPath(projectRoot, resolved)) throw new Error('cwd escapes project');
-
-    return resolved;
-  } catch (error: unknown) {
-    throw new LocalError('invocation_failed', 'The managed process cwd is unavailable.', {
-      path: cwd,
-      hint: 'Use an existing project-contained directory without symlink traversal.',
-      cause: error,
-    });
-  }
-};
+      return resolved;
+    },
+    catch: (cause) =>
+      new LocalError('invocation_failed', 'The managed process cwd is unavailable.', {
+        path: cwd,
+        hint: 'Use an existing project-contained directory without symlink traversal.',
+        cause,
+      }),
+  });
 
 /** Resolves only explicit relative argv paths against the authored cwd; no shell parsing occurs. */
 const resolveProcessArgv = (argv: readonly string[], cwd: string): string[] =>
@@ -94,79 +39,11 @@ const resolveProcessArgv = (argv: readonly string[], cwd: string): string[] =>
       : resolve(cwd, argument),
   );
 
-type ResolvedProcessEnvironment = {
-  env: Record<string, string>;
-  /** Only the referenced variables, for a sandbox that must not inherit the host base. */
-  variables: Record<string, string>;
-  secrets: string[];
-};
-
-/**
- * Builds a child process environment from the hardened base plus secret references read at
- * invocation time. Returns the secret values too so every evidence path can redact them.
- */
-const resolveProcessEnvironment = async (
-  references: Readonly<Record<string, SecretReference>> | undefined,
-  projectRoot: string,
-): Promise<ResolvedProcessEnvironment> => {
-  const variables: ResolvedProcessEnvironment['variables'] = {};
-  const secrets: string[] = [];
-
-  for (const [name, reference] of Object.entries(references ?? {})) {
-    const value = await readSecretReference(reference, projectRoot);
-    variables[name] = value;
-    secrets.push(value);
-  }
-
-  return { env: { ...createBaseEnvironment(), ...variables }, variables, secrets };
-};
-
-type ResolvedRequestSecrets = {
-  headers: Record<string, string>;
-  query: Record<string, string>;
-  secrets: string[];
-};
-
-/** Distinguishes a literal header/query value from its authored secret reference. */
-const isLiteralRequestValue = (value: string | SecretReference): value is string =>
-  typeof value === 'string';
-
-/** Resolves one request template's secret references without changing the authored resource. */
-const resolveHttpSecrets = async (
-  request: {
-    headers?: Record<string, string | SecretReference>;
-    query?: Record<string, string | SecretReference>;
-  },
-  projectRoot: string,
-): Promise<ResolvedRequestSecrets> => {
-  const resolveValues = async (
-    values: Record<string, string | SecretReference> | undefined,
-    secrets: string[],
-  ): Promise<Record<string, string>> => {
-    const resolved: Record<string, string> = {};
-
-    for (const [name, value] of Object.entries(values ?? {})) {
-      if (isLiteralRequestValue(value)) {
-        resolved[name] = value;
-        continue;
-      }
-
-      resolved[name] = await readSecretReference(value, projectRoot);
-      secrets.push(resolved[name]);
-    }
-
-    return resolved;
-  };
-
-  const secrets: string[] = [];
-  const headers = await resolveValues(request.headers, secrets);
-  const query = await resolveValues(request.query, secrets);
-
-  return { headers, query, secrets };
-};
-
 /** Adds literal header and query values the agent marks for redaction to its secret list. */
-const addRedactedRequestValues = (agent: AgentResource, resolved: ResolvedRequestSecrets): void => {
+const addRedactedRequestValues = (
+  agent: AgentResource,
+  resolved: Effect.Success<ReturnType<typeof resolveHttpSecrets>>,
+): void => {
   const redactedHeaders = new Set(agent.redaction?.headers?.map((name) => name.toLowerCase()));
 
   for (const [name, value] of Object.entries(resolved.headers)) {
@@ -200,12 +77,12 @@ type ProcessTransport = Extract<
 >;
 
 /** Resolves a process-based transport: environment, cwd, argv, and redacted argv values. */
-const resolveProcessAgent = async (
+const resolveProcessAgent = Effect.fn('resolveProcessAgent')(function* (
   agent: AgentResource,
   transport: ProcessTransport,
   projectRoot: string,
-): Promise<ResolvedNativeAgent> => {
-  const { env, variables, secrets } = await resolveProcessEnvironment(transport.env, projectRoot);
+): Effect.fn.Return<ResolvedNativeAgent, Error> {
+  const { env, variables, secrets } = yield* resolveProcessEnvironment(transport.env, projectRoot);
 
   if (transport.kind === 'native_cli' && transport.sandbox !== undefined) {
     return {
@@ -218,7 +95,7 @@ const resolveProcessAgent = async (
     };
   }
 
-  const cwd = await resolveProcessCwd(projectRoot, transport.cwd);
+  const cwd = yield* resolveProcessCwd(projectRoot, transport.cwd);
   const authoredArgv = transport.kind === 'background_cli' ? transport.start_argv : transport.argv;
   const argv = resolveProcessArgv(authoredArgv, cwd);
   const processSecrets = [...secrets, ...redactedArgvValues(agent, argv)];
@@ -242,12 +119,12 @@ const resolveProcessAgent = async (
     };
   }
 
-  const invoke = await resolveHttpSecrets(transport.invoke, projectRoot);
+  const invoke = yield* resolveHttpSecrets(transport.invoke, projectRoot);
 
   const shutdown =
     transport.shutdown === undefined
       ? { headers: {}, query: {}, secrets: [] }
-      : await resolveHttpSecrets(transport.shutdown, projectRoot);
+      : yield* resolveHttpSecrets(transport.shutdown, projectRoot);
 
   return {
     agent: { ...agent, transport: { ...transport, start_argv: argv } },
@@ -260,22 +137,23 @@ const resolveProcessAgent = async (
     shutdownHeaders: shutdown.headers,
     shutdownQuery: shutdown.query,
   };
-};
+});
 
 /** Resolves runtime-only secret references into an ephemeral native transport target. */
-const resolveNativeAgent = async (
+const resolveNativeAgent = Effect.fn('resolveNativeAgent')(function* (
   agent: AgentResource,
   projectRoot: string,
-): Promise<ResolvedNativeAgent> => {
+): Effect.fn.Return<ResolvedNativeAgent, Error> {
   const transport = agent.transport;
 
   switch (transport.kind) {
     case 'native_cli':
     case 'background_cli':
     case 'jsonl_bridge':
-      return resolveProcessAgent(agent, transport, projectRoot);
+      return yield* resolveProcessAgent(agent, transport, projectRoot);
     case 'websocket': {
-      const resolved = await resolveHttpSecrets({ headers: transport.headers }, projectRoot);
+      const resolved = yield* resolveHttpSecrets({ headers: transport.headers }, projectRoot);
+
       addRedactedRequestValues(agent, resolved);
 
       return {
@@ -287,7 +165,8 @@ const resolveNativeAgent = async (
     }
 
     case 'stream': {
-      const resolved = await resolveHttpSecrets(transport.request, projectRoot);
+      const resolved = yield* resolveHttpSecrets(transport.request, projectRoot);
+
       addRedactedRequestValues(agent, resolved);
 
       return { agent: { ...agent, transport }, kind: 'stream', ...resolved };
@@ -296,7 +175,9 @@ const resolveNativeAgent = async (
     case 'http':
     case 'polling': {
       const request = transport.kind === 'polling' ? transport.submit : transport.request;
-      const resolved = await resolveHttpSecrets(request, projectRoot);
+
+      const resolved = yield* resolveHttpSecrets(request, projectRoot);
+
       addRedactedRequestValues(agent, resolved);
 
       if (transport.kind === 'http' && transport.response_mode === 'attest_envelope') {
@@ -312,24 +193,27 @@ const resolveNativeAgent = async (
     }
 
     case 'callback': {
-      const resolveTemplate = async (request: typeof transport.trigger) => {
-        const resolved = await resolveHttpSecrets(request, projectRoot);
+      const resolveTemplate = Effect.fn('resolveTemplate')(function* (
+        request: typeof transport.trigger,
+      ) {
+        const resolved = yield* resolveHttpSecrets(request, projectRoot);
+
         addRedactedRequestValues(agent, resolved);
 
         return resolved;
-      };
+      });
 
-      const trigger = await resolveTemplate(transport.trigger);
+      const trigger = yield* resolveTemplate(transport.trigger);
 
       const artifactFetch =
         transport.artifact_fetch === undefined
           ? undefined
-          : await resolveTemplate(transport.artifact_fetch);
+          : yield* resolveTemplate(transport.artifact_fetch);
 
       const traceFetch =
         transport.trace_fetch === undefined
           ? undefined
-          : await resolveTemplate(transport.trace_fetch);
+          : yield* resolveTemplate(transport.trace_fetch);
 
       return {
         agent: { ...agent, transport },
@@ -350,6 +234,6 @@ const resolveNativeAgent = async (
     default:
       return transport satisfies never;
   }
-};
+});
 
 export { createBaseEnvironment, resolveHttpSecrets, resolveNativeAgent, resolveProcessEnvironment };

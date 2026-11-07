@@ -1,3 +1,4 @@
+import * as Effect from 'effect/Effect';
 import type { JsonValue } from '@attest/contracts';
 import { validateCommandRequest } from '@attest/local/agent';
 import { parseJsonFlag, runTestCaseListCommand, runTestCaseShowCommand } from '@attest/local/test';
@@ -65,52 +66,61 @@ const registerTestCaseCommands = (test: Command, context: CommandContext): void 
     .option('--params <json>', 'optional params object JSON')
     .option('--folder <folder>', 'logical case folder, such as billing/refunds')
     .option('--tag <tag>', 'case tag', collect)
-    .action(async (testId: string | undefined, options: CaseAddOptions, leaf: Command) => {
-      const prompt = promptContext(options, context.interaction);
+    .action((testId: string | undefined, options: CaseAddOptions, leaf: Command) =>
+      context.submit(
+        Effect.gen(function* () {
+          const prompt = promptContext(options, context.interaction);
 
-      const request = await readOrBuildRequest({
-        command: 'test.case.add',
-        context,
-        leaf,
-        options,
-        build: async () => {
-          const inputText = await requiredInput(
-            options.input,
-            { path: '--input', question: 'Case input JSON: ' },
-            prompt,
-          );
+          const request = yield* readOrBuildRequest({
+            command: 'test.case.add',
+            context,
+            leaf,
+            options,
+            build: () =>
+              Effect.gen(function* () {
+                const inputText = yield* Effect.tryPromise({
+                  try: () =>
+                    requiredInput(
+                      options.input,
+                      { path: '--input', question: 'Case input JSON: ' },
+                      prompt,
+                    ),
+                  catch: (cause) => cause,
+                });
 
-          const input = parseJsonFlag(inputText, '--input');
+                const input = parseJsonFlag(inputText, '--input');
 
-          if (input === undefined) throw new Error('Required input JSON was not parsed.');
-          const authoredCase: AuthoredCaseDraft = { input };
+                if (input === undefined) throw new Error('Required input JSON was not parsed.');
+                const authoredCase: AuthoredCaseDraft = { input };
 
-          if (options.id !== undefined) authoredCase.id = options.id;
+                if (options.id !== undefined) authoredCase.id = options.id;
 
-          if (options.expected !== undefined)
-            authoredCase.expected = parseJsonFlag(options.expected, '--expected');
+                if (options.expected !== undefined)
+                  authoredCase.expected = parseJsonFlag(options.expected, '--expected');
 
-          if (options.params !== undefined)
-            authoredCase.params = parseJsonFlag(options.params, '--params');
+                if (options.params !== undefined)
+                  authoredCase.params = parseJsonFlag(options.params, '--params');
 
-          if (options.tag !== undefined) authoredCase.tags = options.tag;
+                if (options.tag !== undefined) authoredCase.tags = options.tag;
 
-          if (options.folder !== undefined) authoredCase.folder = options.folder;
+                if (options.folder !== undefined) authoredCase.folder = options.folder;
 
-          return validateCommandRequest('test.case.add', {
-            ...mutationRequestFields('test.case.add', options),
-            test_id: await requiredInput(
-              testId,
-              { path: '<test-id>', question: 'Test id: ' },
-              prompt,
-            ),
-            case: authoredCase,
+                return validateCommandRequest('test.case.add', {
+                  ...mutationRequestFields('test.case.add', options),
+                  test_id: yield* Effect.tryPromise({
+                    try: () =>
+                      requiredInput(testId, { path: '<test-id>', question: 'Test id: ' }, prompt),
+                    catch: (cause) => cause,
+                  }),
+                  case: authoredCase,
+                });
+              }),
           });
-        },
-      });
 
-      await runTestMutation(request, options, context);
-    });
+          yield* runTestMutation(request, options, context);
+        }),
+      ),
+    );
 
   setMutationHelp(caseAdd, {
     examples: ['attest test case add smoke --input \'{"question":"ping"}\''],
@@ -122,43 +132,53 @@ const registerTestCaseCommands = (test: Command, context: CommandContext): void 
     .argument('[test-id]', 'test id')
     .argument('[source]', 'CSV/JSON/JSONL path or -')
     .action(
-      async (
+      (
         testId: string | undefined,
         source: string | undefined,
         options: ImportCliOptions,
         leaf: Command,
-      ) => {
-        const prompt = promptContext(options, context.interaction);
+      ) =>
+        context.submit(
+          Effect.gen(function* () {
+            const prompt = promptContext(options, context.interaction);
 
-        const request = await readOrBuildRequest({
-          command: 'test.case.import',
-          context,
-          leaf,
-          options,
-          build: async () => ({
-            ...mutationRequestFields('test.case.import', options),
-            test_id: await requiredInput(
-              testId,
-              { path: '<test-id>', question: 'Test id: ' },
-              prompt,
-            ),
-            source: await requiredInput(
-              source,
-              { path: '<source>', question: 'CSV/JSON/JSONL source: ' },
-              prompt,
-            ),
-            import: importRequestFields(options),
+            const request = yield* readOrBuildRequest({
+              command: 'test.case.import',
+              context,
+              leaf,
+              options,
+              build: () =>
+                Effect.gen(function* () {
+                  return {
+                    ...mutationRequestFields('test.case.import', options),
+                    test_id: yield* Effect.tryPromise({
+                      try: () =>
+                        requiredInput(testId, { path: '<test-id>', question: 'Test id: ' }, prompt),
+                      catch: (cause) => cause,
+                    }),
+                    source: yield* Effect.tryPromise({
+                      try: () =>
+                        requiredInput(
+                          source,
+                          { path: '<source>', question: 'CSV/JSON/JSONL source: ' },
+                          prompt,
+                        ),
+                      catch: (cause) => cause,
+                    }),
+                    import: importRequestFields(options),
+                  };
+                }),
+            });
+
+            if (prompt.interactive && request.yes !== true && request.dry_run !== true) {
+              yield* runGuidedImport(request, options, context);
+
+              return;
+            }
+
+            yield* runTestMutation(request, options, context);
           }),
-        });
-
-        if (prompt.interactive && request.yes !== true && request.dry_run !== true) {
-          await runGuidedImport(request, options, context);
-
-          return;
-        }
-
-        await runTestMutation(request, options, context);
-      },
+        ),
     );
 
   setMutationHelp(caseImport, {
@@ -174,50 +194,58 @@ const registerTestCaseCommands = (test: Command, context: CommandContext): void 
 
   addCommonOptions(testCase.command('list').description('List direct cases.'))
     .argument('[test-id]', 'test id')
-    .action(async (testId: string | undefined, options: CommonCliOptions) => {
-      const id = await requiredInput(
-        testId,
-        { path: '<test-id>', question: 'Test id: ' },
-        promptContext(options, context.interaction),
-      );
+    .action((testId: string | undefined, options: CommonCliOptions) =>
+      context.submit(
+        Effect.gen(function* () {
+          const id = yield* Effect.tryPromise({
+            try: () =>
+              requiredInput(
+                testId,
+                { path: '<test-id>', question: 'Test id: ' },
+                promptContext(options, context.interaction),
+              ),
+            catch: (cause) => cause,
+          });
 
-      const result = await runTestCaseListCommand({
-        project: options.project,
-        testId: id,
-        workingDirectory: context.workingDirectory,
-      });
+          const result = yield* runTestCaseListCommand({
+            project: options.project,
+            testId: id,
+            workingDirectory: context.workingDirectory,
+          });
 
-      context.io.output(renderCommandResult('test.case.list', outputFormat(options), result));
-    });
+          context.io.output(renderCommandResult('test.case.list', outputFormat(options), result));
+        }),
+      ),
+    );
 
   addCommonOptions(testCase.command('show').description('Show one direct case.'))
     .argument('[test-id]', 'test id')
     .argument('[case-id]', 'direct case id')
-    .action(
-      async (testId: string | undefined, caseId: string | undefined, options: CommonCliOptions) => {
-        const prompt = promptContext(options, context.interaction);
+    .action((testId: string | undefined, caseId: string | undefined, options: CommonCliOptions) =>
+      context.submit(
+        Effect.gen(function* () {
+          const prompt = promptContext(options, context.interaction);
 
-        const resolvedTestId = await requiredInput(
-          testId,
-          { path: '<test-id>', question: 'Test id: ' },
-          prompt,
-        );
+          const resolvedTestId = yield* Effect.tryPromise({
+            try: () => requiredInput(testId, { path: '<test-id>', question: 'Test id: ' }, prompt),
+            catch: (cause) => cause,
+          });
 
-        const resolvedCaseId = await requiredInput(
-          caseId,
-          { path: '<case-id>', question: 'Case id: ' },
-          prompt,
-        );
+          const resolvedCaseId = yield* Effect.tryPromise({
+            try: () => requiredInput(caseId, { path: '<case-id>', question: 'Case id: ' }, prompt),
+            catch: (cause) => cause,
+          });
 
-        const result = await runTestCaseShowCommand({
-          caseId: resolvedCaseId,
-          project: options.project,
-          testId: resolvedTestId,
-          workingDirectory: context.workingDirectory,
-        });
+          const result = yield* runTestCaseShowCommand({
+            caseId: resolvedCaseId,
+            project: options.project,
+            testId: resolvedTestId,
+            workingDirectory: context.workingDirectory,
+          });
 
-        context.io.output(renderCommandResult('test.case.show', outputFormat(options), result));
-      },
+          context.io.output(renderCommandResult('test.case.show', outputFormat(options), result));
+        }),
+      ),
     );
 
   const caseRename = addMutationOptions(
@@ -227,42 +255,52 @@ const registerTestCaseCommands = (test: Command, context: CommandContext): void 
     .argument('[case-id]', 'direct case id')
     .argument('[new-id]', 'new direct case id')
     .action(
-      async (
+      (
         testId: string | undefined,
         caseId: string | undefined,
         newId: string | undefined,
         options: MutationCliOptions,
         leaf: Command,
-      ) => {
-        const prompt = promptContext(options, context.interaction);
+      ) =>
+        context.submit(
+          Effect.gen(function* () {
+            const prompt = promptContext(options, context.interaction);
 
-        const request = await readOrBuildRequest({
-          command: 'test.case.rename',
-          context,
-          leaf,
-          options,
-          build: async () => ({
-            ...mutationRequestFields('test.case.rename', options),
-            test_id: await requiredInput(
-              testId,
-              { path: '<test-id>', question: 'Test id: ' },
-              prompt,
-            ),
-            case_id: await requiredInput(
-              caseId,
-              { path: '<case-id>', question: 'Case id: ' },
-              prompt,
-            ),
-            new_id: await requiredInput(
-              newId,
-              { path: '<new-id>', question: 'New case id: ' },
-              prompt,
-            ),
+            const request = yield* readOrBuildRequest({
+              command: 'test.case.rename',
+              context,
+              leaf,
+              options,
+              build: () =>
+                Effect.gen(function* () {
+                  return {
+                    ...mutationRequestFields('test.case.rename', options),
+                    test_id: yield* Effect.tryPromise({
+                      try: () =>
+                        requiredInput(testId, { path: '<test-id>', question: 'Test id: ' }, prompt),
+                      catch: (cause) => cause,
+                    }),
+                    case_id: yield* Effect.tryPromise({
+                      try: () =>
+                        requiredInput(caseId, { path: '<case-id>', question: 'Case id: ' }, prompt),
+                      catch: (cause) => cause,
+                    }),
+                    new_id: yield* Effect.tryPromise({
+                      try: () =>
+                        requiredInput(
+                          newId,
+                          { path: '<new-id>', question: 'New case id: ' },
+                          prompt,
+                        ),
+                      catch: (cause) => cause,
+                    }),
+                  };
+                }),
+            });
+
+            yield* runTestMutation(request, options, context);
           }),
-        });
-
-        await runTestMutation(request, options, context);
-      },
+        ),
     );
 
   setMutationHelp(caseRename, {
@@ -275,37 +313,49 @@ const registerTestCaseCommands = (test: Command, context: CommandContext): void 
     .argument('[test-id]', 'test id')
     .argument('[case-id]', 'direct case id')
     .action(
-      async (
+      (
         testId: string | undefined,
         caseId: string | undefined,
         options: MutationCliOptions,
         leaf: Command,
-      ) => {
-        const prompt = promptContext(options, context.interaction);
+      ) =>
+        context.submit(
+          Effect.gen(function* () {
+            const prompt = promptContext(options, context.interaction);
 
-        const request = await readOrBuildRequest({
-          command: 'test.case.remove',
-          context,
-          leaf,
-          options,
-          build: async () => ({
-            ...mutationRequestFields('test.case.remove', options),
-            test_id: await requiredInput(
-              testId,
-              { path: '<test-id>', question: 'Test id: ' },
-              prompt,
-            ),
-            case_id: await requiredInput(
-              caseId,
-              { path: '<case-id>', question: 'Case id: ' },
-              prompt,
-            ),
+            const request = yield* readOrBuildRequest({
+              command: 'test.case.remove',
+              context,
+              leaf,
+              options,
+              build: () =>
+                Effect.gen(function* () {
+                  return {
+                    ...mutationRequestFields('test.case.remove', options),
+                    test_id: yield* Effect.tryPromise({
+                      try: () =>
+                        requiredInput(testId, { path: '<test-id>', question: 'Test id: ' }, prompt),
+                      catch: (cause) => cause,
+                    }),
+                    case_id: yield* Effect.tryPromise({
+                      try: () =>
+                        requiredInput(caseId, { path: '<case-id>', question: 'Case id: ' }, prompt),
+                      catch: (cause) => cause,
+                    }),
+                  };
+                }),
+            });
+
+            if (
+              !(yield* Effect.tryPromise({
+                try: () => confirmRemoval(request, `case ${request.case_id}`, options, context),
+                catch: (cause) => cause,
+              }))
+            )
+              return;
+            yield* runTestMutation(request, options, context);
           }),
-        });
-
-        if (!(await confirmRemoval(request, `case ${request.case_id}`, options, context))) return;
-        await runTestMutation(request, options, context);
-      },
+        ),
     );
 
   setMutationHelp(caseRemove, {

@@ -1,5 +1,6 @@
 import { AttestError, type CliError, type CliExitCode, type JsonValue } from '@attest/contracts';
 import { LocalError } from '@attest/local';
+import { StoreError } from '@attest/core';
 import { CommanderError } from 'commander';
 
 import { getCliErrorDefinition, type CliErrorCode } from './error-catalog.js';
@@ -80,7 +81,9 @@ const serializeCliError = (cause: unknown): SerializedCliFailure => {
   }
 
   const definition = getCliErrorDefinition('internal_error');
-  const applicationCause = cause instanceof AttestError ? cause : undefined;
+
+  const applicationCause =
+    cause instanceof AttestError || cause instanceof StoreError ? cause : undefined;
 
   return {
     error: {

@@ -1,3 +1,4 @@
+import { isJsonArray } from '../../../internal/json-array.js';
 import type { JsonValue, MetricResource } from '@attest/contracts';
 
 import { LocalError } from '../../../errors/index.js';
@@ -112,7 +113,7 @@ const assertSafeMetricResource = (metric: MetricResource): void => {
       continue;
     }
 
-    if (Array.isArray(current.value)) {
+    if (isJsonArray(current.value)) {
       current.value.forEach((value, index) =>
         pending.push({ path: `${current.path}/${index}`, value }),
       );

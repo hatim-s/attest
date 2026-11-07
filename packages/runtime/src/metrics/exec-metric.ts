@@ -1,3 +1,4 @@
+import * as Effect from 'effect/Effect';
 import { performance } from 'node:perf_hooks';
 
 import { parseMetricResult, type ContractIssue, type MetricResult } from '@attest/contracts';
@@ -30,7 +31,7 @@ type ExecMetricOptions = {
   timeoutMs?: number;
 };
 
-/** Makes parser diagnostics renderable and diffable without relying on Zod's internal issue objects. */
+/** Makes parser diagnostics renderable and diffable from the public contract diagnostics. */
 const describeContractIssues = (issues: ContractIssue[]): MetricErrorInfo['details'] => ({
   issues: issues.map((issue) => ({ path: issue.path, message: issue.message })),
 });
@@ -73,37 +74,38 @@ const parseInvocationResult = (
  * Runs one executable metric and normalizes either transport through the shared metric result contract.
  * Invocation faults remain diagnostics so a transport failure never masquerades as a genuine score.
  */
-const executeExecutableMetric = async (
+const executeExecutableMetric = (
   definition: ExecMetricDefinition,
   context: CompletedMetricContext,
   options: ExecMetricOptions = {},
-): Promise<StoredMetricEvaluation> => {
-  const startedAt = performance.now();
+): Effect.Effect<StoredMetricEvaluation, Error> =>
+  Effect.gen(function* () {
+    const startedAt = performance.now();
 
-  const transportOptions = {
-    ...options,
-    outputCapBytes: options.outputCapBytes ?? DEFAULT_OUTPUT_CAP_BYTES,
-    timeoutMs: options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
-  };
+    const transportOptions = {
+      ...options,
+      outputCapBytes: options.outputCapBytes ?? DEFAULT_OUTPUT_CAP_BYTES,
+      timeoutMs: options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+    };
 
-  const request = buildMetricRequest(context);
+    const request = buildMetricRequest(context);
 
-  const outcome =
-    'command' in definition
-      ? await (
-          options.commandTransport ??
-          (await import('./internal/exec-command.js')).invokeCommandMetric
-        )(definition, request, transportOptions)
-      : await invokeHttpMetric(definition, JSON.stringify(request), transportOptions);
+    const outcome =
+      'command' in definition
+        ? yield* (
+            options.commandTransport ??
+            (yield* Effect.promise(() => import('./internal/exec-command.js'))).invokeCommandMetric
+          )(definition, request, transportOptions)
+        : yield* invokeHttpMetric(definition, JSON.stringify(request), transportOptions);
 
-  const parsed = outcome.ok ? parseInvocationResult(outcome.text) : outcome;
-  const durationMs = performance.now() - startedAt;
+    const parsed = outcome.ok ? parseInvocationResult(outcome.text) : outcome;
+    const durationMs = performance.now() - startedAt;
 
-  if (!parsed.ok) {
-    return metricError(definition, parsed.error, durationMs);
-  }
+    if (!parsed.ok) {
+      return metricError(definition, parsed.error, durationMs);
+    }
 
-  return evaluatedMetric(definition, parsed.result, durationMs);
-};
+    return evaluatedMetric(definition, parsed.result, durationMs);
+  });
 
 export { executeExecutableMetric, type ExecMetricOptions };

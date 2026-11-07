@@ -1,3 +1,4 @@
+import { SchemaDecodeError } from '@attest/contracts';
 import { parseWithSchema, isNumber, isString } from '@attest/contracts';
 import {
   traceSchema,
@@ -6,7 +7,7 @@ import {
   type SpanKind,
   type Trace,
 } from '@attest/contracts';
-import { z } from 'zod';
+import * as Schema from 'effect/Schema';
 
 import { otlpExportSchema, type OtlpScopeSpans, type OtlpSpan } from './otlp-schema.js';
 import type { AttributeValue } from './otlp-value.js';
@@ -37,7 +38,7 @@ const OUTPUT_ATTRIBUTES = {
   other: ['output.value', 'outputs', 'ai.response.text'],
 };
 
-const formatIssues = (issues: readonly z.core.$ZodIssue[]): string =>
+const formatIssues = (issues: SchemaDecodeError['issues']): string =>
   issues
     .map(({ message, path }) => {
       const location = path.reduce<string>(
@@ -50,7 +51,7 @@ const formatIssues = (issues: readonly z.core.$ZodIssue[]): string =>
     })
     .join('; ');
 
-const jsonValueSchema = z.json();
+const jsonValueSchema = Schema.Json;
 
 /** Decodes JSON-encoded attribute strings; anything else, including `1e999`, stays a string. */
 const parseJsonAttribute = (value: AttributeValue): JsonValue => {
@@ -143,9 +144,12 @@ const convertEvents = (events: OtlpSpan['events']): Span['events'] => {
   if (events === undefined || events.length === 0) return undefined;
 
   return events.map(({ name, timeUnixNano, attributes }) => {
-    const event: NonNullable<Span['events']>[number] = { name, time: timeUnixNano };
+    let event: NonNullable<Span['events']>[number] = {
+      name,
+      time: timeUnixNano,
+    };
 
-    if (Object.keys(attributes).length > 0) event.attributes = attributes;
+    if (Object.keys(attributes).length > 0) event = { ...event, attributes };
 
     return event;
   });
@@ -160,7 +164,7 @@ const convertSpan = (span: OtlpSpan, inheritedAttributes: Attributes): Span => {
   const input = firstAttribute(attributes, INPUT_ATTRIBUTES[attributeGroup]);
   const output = firstAttribute(attributes, OUTPUT_ATTRIBUTES[attributeGroup]);
 
-  const result: Span = {
+  let result: Span = {
     span_id: span.spanId,
     parent_span_id: span.parentSpanId,
     name: span.name,
@@ -170,13 +174,13 @@ const convertSpan = (span: OtlpSpan, inheritedAttributes: Attributes): Span => {
     status: mapStatus(span.status),
   };
 
-  if (Object.keys(attributes).length > 0) result.attributes = attributes;
+  if (Object.keys(attributes).length > 0) result = { ...result, attributes };
 
-  if (events !== undefined) result.events = events;
+  if (events !== undefined) result = { ...result, events };
 
-  if (input !== undefined) result.input = parseJsonAttribute(input);
+  if (input !== undefined) result = { ...result, input: parseJsonAttribute(input) };
 
-  if (output !== undefined) result.output = parseJsonAttribute(output);
+  if (output !== undefined) result = { ...result, output: parseJsonAttribute(output) };
 
   return result;
 };

@@ -1,185 +1,131 @@
 {
   "$comment": "Runtime-only invariants: messages, turn_index, and conversation_id must appear together in the agent request.",
-  "$defs": {
-    "__schema0": {
-      "anyOf": [
-        {
-          "type": "string"
-        },
-        {
-          "type": "number"
-        },
-        {
-          "type": "boolean"
-        },
-        {
-          "type": "null"
-        },
-        {
-          "items": {
-            "$ref": "#/$defs/__schema0"
-          },
-          "type": "array"
-        },
-        {
-          "additionalProperties": {
-            "$ref": "#/$defs/__schema0"
-          },
-          "propertyNames": {
-            "type": "string"
-          },
-          "type": "object"
-        }
-      ]
-    },
-    "__schema1": {
-      "anyOf": [
-        {
-          "type": "string"
-        },
-        {
-          "type": "number"
-        },
-        {
-          "type": "boolean"
-        },
-        {
-          "type": "null"
-        },
-        {
-          "items": {
-            "$ref": "#/$defs/__schema1"
-          },
-          "type": "array"
-        },
-        {
-          "additionalProperties": {
-            "$ref": "#/$defs/__schema1"
-          },
-          "propertyNames": {
-            "type": "string"
-          },
-          "type": "object"
-        }
-      ]
-    },
-    "__schema2": {
-      "anyOf": [
-        {
-          "type": "string"
-        },
-        {
-          "type": "number"
-        },
-        {
-          "type": "boolean"
-        },
-        {
-          "type": "null"
-        },
-        {
-          "items": {
-            "$ref": "#/$defs/__schema2"
-          },
-          "type": "array"
-        },
-        {
-          "additionalProperties": {
-            "$ref": "#/$defs/__schema2"
-          },
-          "propertyNames": {
-            "type": "string"
-          },
-          "type": "object"
-        }
-      ]
-    }
-  },
+  "$defs": {},
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "properties": {
     "protocol": {
-      "const": "attest.websocket-request",
+      "enum": [
+        "attest.websocket-request"
+      ],
       "type": "string"
     },
     "request": {
-      "additionalProperties": {},
+      "allOf": [
+        {
+          "additionalProperties": {},
+          "type": "object"
+        }
+      ],
       "properties": {
         "callback": {
-          "additionalProperties": false,
-          "properties": {
-            "token": {
-              "minLength": 1,
-              "type": "string"
+          "anyOf": [
+            {
+              "additionalProperties": false,
+              "properties": {
+                "token": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "url": {
+                  "format": "uri",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "url",
+                "token"
+              ],
+              "type": "object"
             },
-            "url": {
-              "format": "uri",
-              "type": "string"
+            {
+              "not": {}
             }
-          },
-          "required": [
-            "url",
-            "token"
-          ],
-          "type": "object"
+          ]
         },
         "case_id": {
           "type": "string"
         },
         "conversation_id": {
-          "type": "string"
-        },
-        "input": {
-          "$ref": "#/$defs/__schema0"
-        },
-        "messages": {
-          "items": {
-            "additionalProperties": false,
-            "properties": {
-              "content": {
-                "type": "string"
-              },
-              "role": {
-                "enum": [
-                  "user",
-                  "assistant"
-                ],
-                "type": "string"
-              }
+          "anyOf": [
+            {
+              "type": "string"
             },
-            "required": [
-              "role",
-              "content"
-            ],
-            "type": "object"
-          },
-          "type": "array"
+            {
+              "not": {}
+            }
+          ]
+        },
+        "input": {},
+        "messages": {
+          "anyOf": [
+            {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "content": {
+                    "type": "string"
+                  },
+                  "role": {
+                    "enum": [
+                      "user",
+                      "assistant"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "role",
+                  "content"
+                ],
+                "type": "object"
+              },
+              "type": "array"
+            },
+            {
+              "not": {}
+            }
+          ]
         },
         "params": {
-          "additionalProperties": {
-            "$ref": "#/$defs/__schema1"
-          },
-          "propertyNames": {
-            "type": "string"
-          },
-          "type": "object"
+          "anyOf": [
+            {
+              "type": "object"
+            },
+            {
+              "not": {}
+            }
+          ]
         },
         "protocol": {
-          "const": "attest.agent-invocation",
+          "enum": [
+            "attest.agent-invocation"
+          ],
           "type": "string"
         },
         "run_id": {
-          "format": "ulid",
           "pattern": "^[0-9A-HJKMNP-TV-Za-hjkmnp-tv-z]{26}$",
           "type": "string"
         },
         "state": {
-          "$ref": "#/$defs/__schema2"
+          "anyOf": [
+            {},
+            {
+              "not": {}
+            }
+          ]
         },
         "turn_index": {
-          "maximum": 9007199254740991,
-          "minimum": 0,
-          "type": "integer"
+          "anyOf": [
+            {
+              "maximum": 9007199254740991,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "not": {}
+            }
+          ]
         }
       },
       "required": [

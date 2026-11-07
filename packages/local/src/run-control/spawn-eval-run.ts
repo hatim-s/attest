@@ -1,9 +1,11 @@
+import * as Effect from 'effect/Effect';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { open, unlink, type FileHandle } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { setTimeout as delay } from 'node:timers/promises';
+import * as Exit from 'effect/Exit';
+import { finishOperation } from '../internal/operation-cleanup.js';
 
 import { parseWithSchema, evalEventSchema, type EvalRunRequest } from '@attest/contracts';
 import { StoreError } from '@attest/core';
@@ -19,6 +21,8 @@ type SpawnEvalRunOptions = {
   document: EvalRunRequest;
   /** How long the CLI has to report `run_started`; the launcher always passes START_TIMEOUT_MS. */
   startTimeoutMs: number;
+  /** Tests may lose cleanup acknowledgement after stopping their own child. */
+  stopChild?: typeof killProcessTree;
 };
 
 type ProcessEnd = { exitCode: number | null; signal: NodeJS.Signals | null } | { error: Error };
@@ -92,28 +96,32 @@ const createOutputReader = (log: FileHandle) => {
   const buffer = Buffer.alloc(READ_CHUNK_BYTES);
   let position = 0;
   let pending = '';
+  let drained = false;
 
   return {
-    readLines: async (): Promise<string[]> => {
+    readLines: Effect.fn('runOutput.readLines')(function* () {
       const lines: string[] = [];
 
-      for (;;) {
-        const { bytesRead } = await log.read(buffer, 0, buffer.length, position);
+      const { bytesRead } = yield* launchIO(() => log.read(buffer, 0, buffer.length, position));
 
-        if (bytesRead === 0) return lines;
+      drained = bytesRead < buffer.length;
 
-        position += bytesRead;
-        pending += decoder.decode(buffer.subarray(0, bytesRead), { stream: true });
-        const parts = pending.split('\n');
-        pending = parts.pop() ?? '';
-        lines.push(...parts);
+      if (bytesRead === 0) return lines;
 
-        if (pending.length > MAX_LINE_CHARACTERS) {
-          lines.push(pending);
-          pending = '';
-        }
+      position += bytesRead;
+      pending += decoder.decode(buffer.subarray(0, bytesRead), { stream: true });
+      const parts = pending.split('\n');
+      pending = parts.pop() ?? '';
+      lines.push(...parts);
+
+      if (pending.length > MAX_LINE_CHARACTERS) {
+        lines.push(pending);
+        pending = '';
       }
-    },
+
+      return lines;
+    }),
+    drained: () => drained,
     /** The unterminated last line, once the child has exited and will write no more. */
     rest: (): string => pending + decoder.decode(),
   };
@@ -199,13 +207,13 @@ type AwaitRunStartedOptions = {
  * output to a file nobody reads and outlives the server. Every other outcome throws, and the
  * caller stops a child that is still running.
  */
-const awaitRunStarted = async ({
+const awaitRunStarted = Effect.fn('awaitRunStarted')(function* ({
   child,
   command,
   state,
   log,
   startTimeoutMs,
-}: AwaitRunStartedOptions): Promise<{ runId: string }> => {
+}: AwaitRunStartedOptions) {
   const reader = createOutputReader(log);
   const startDeadline = Date.now() + startTimeoutMs;
   let stdinDeadline: number | undefined;
@@ -213,13 +221,13 @@ const awaitRunStarted = async ({
   let tail: string[] = [];
 
   for (;;) {
-    await delay(POLL_INTERVAL_MS);
+    yield* Effect.sleep(POLL_INTERVAL_MS);
     // Taken before the read, so the read after an exit sees everything the child wrote.
     const end = state.end;
-    const lines = await reader.readLines();
+    const lines = yield* reader.readLines();
 
     // Read once more after the exit so the last, possibly unterminated, line is not lost.
-    if (end !== undefined) lines.push(reader.rest());
+    if (end !== undefined && reader.drained()) lines.push(reader.rest());
 
     for (const line of lines) {
       const output = classifyLine(line);
@@ -236,9 +244,11 @@ const awaitRunStarted = async ({
       if (output.kind === 'text' && line.trim() !== '') tail = appendToTail(tail, line);
     }
 
-    if (end !== undefined) throw startFailure(command, end, failure, tail);
+    if (end !== undefined && reader.drained())
+      return yield* Effect.fail(startFailure(command, end, failure, tail));
 
-    if (Date.now() >= startDeadline) throw stopFailure({ kind: 'timeout', startTimeoutMs }, tail);
+    if (Date.now() >= startDeadline)
+      return yield* Effect.fail(stopFailure({ kind: 'timeout', startTimeoutMs }, tail));
 
     if (state.stdinError !== undefined) {
       // A CLI that exits before reading its request breaks the pipe, and its exit says why, so
@@ -246,11 +256,21 @@ const awaitRunStarted = async ({
       stdinDeadline ??= Date.now() + STOP_GRACE_MS;
 
       if (Date.now() >= stdinDeadline) {
-        throw stopFailure({ kind: 'stdin', error: state.stdinError }, tail);
+        return yield* Effect.fail(stopFailure({ kind: 'stdin', error: state.stdinError }, tail));
       }
     }
   }
-};
+});
+
+/** Joins one foreign filesystem operation before releasing its descriptor. */
+const launchIO = <A>(operation: () => Promise<A>) =>
+  Effect.tryPromise({
+    try: operation,
+    catch: (cause) =>
+      runFailed('Could not observe the attest CLI output.', [], {
+        cause: cause instanceof Error ? cause : new Error('Output operation failed.', { cause }),
+      }),
+  });
 
 /**
  * Starts `attest eval run` in the project as a detached process with the server's environment
@@ -260,50 +280,105 @@ const awaitRunStarted = async ({
  * away, and the run must survive the dashboard closing. The file stays on disk, unnamed, until
  * the run exits.
  */
-const spawnEvalRun = async ({
+const spawnEvalRun = Effect.fn('spawnEvalRun')(function* ({
   command,
   projectRoot,
   document,
   startTimeoutMs,
-}: SpawnEvalRunOptions): Promise<{ runId: string }> => {
+  stopChild = killProcessTree,
+}: SpawnEvalRunOptions) {
   const path = join(tmpdir(), `attest-run-start-${randomUUID()}.log`);
-  const log = await open(path, 'wx+', 0o600);
+  const log = yield* launchIO(() => open(path, 'wx+', 0o600));
+  let child: ChildProcess | undefined;
 
-  try {
-    // The child inherits the descriptor, not the name, so the name can go before it starts.
-    await unlink(path);
+  const primary = yield* Effect.exit(
+    Effect.gen(function* () {
+      yield* launchIO(() => unlink(path));
+      child = yield* Effect.try({
+        try: () =>
+          spawn(
+            command.command,
+            [
+              ...command.args,
+              'eval',
+              'run',
+              '--project',
+              projectRoot,
+              '--non-interactive',
+              '--from-json',
+              '-',
+            ],
+            { cwd: projectRoot, env: process.env, detached: true, stdio: ['pipe', log.fd, log.fd] },
+          ),
+        catch: (cause) =>
+          runFailed('Could not start the attest CLI.', [], {
+            cause: cause instanceof Error ? cause : new Error('Spawn failed.', { cause }),
+          }),
+      });
+      const state = watchChild(child);
+      child.stdin?.end(`${JSON.stringify(document)}\n`);
 
-    const child = spawn(
-      command.command,
-      [
-        ...command.args,
-        'eval',
-        'run',
-        '--project',
-        projectRoot,
-        '--non-interactive',
-        '--from-json',
-        '-',
-      ],
-      { cwd: projectRoot, env: process.env, detached: true, stdio: ['pipe', log.fd, log.fd] },
+      return yield* awaitRunStarted({ child, command, state, log, startTimeoutMs });
+    }),
+  );
+
+  const releases: Exit.Exit<unknown, Error>[] = [];
+
+  if (
+    Exit.isFailure(primary) &&
+    child !== undefined &&
+    child.exitCode === null &&
+    child.signalCode === null
+  ) {
+    const ownedChild = child;
+    releases.push(
+      yield* Effect.exit(
+        Effect.gen(function* () {
+          const receipt = yield* stopChild(ownedChild, {
+            graceMs: STOP_GRACE_MS,
+            signalProcessGroup: true,
+          });
+
+          if (
+            !receipt.cleanupConfirmed ||
+            (ownedChild.exitCode === null && ownedChild.signalCode === null)
+          )
+            return yield* Effect.fail(
+              new StoreError(
+                'RUN_START_FAILED',
+                'Run start failed and the child may still be running. Do not retry launch.',
+                {
+                  cause: { child: ownedChild, receipt },
+                  details: { code: 'run_failed', message: 'Run cleanup is unconfirmed.' },
+                },
+              ),
+            );
+        }),
+      ),
     );
-
-    const state = watchChild(child);
-    child.stdin?.end(`${JSON.stringify(document)}\n`);
-
-    try {
-      return await awaitRunStarted({ child, command, state, log, startTimeoutMs });
-    } catch (error: unknown) {
-      // SIGTERM lets the CLI finalize what it recorded; the group is killed after the grace.
-      if (child.exitCode === null && child.signalCode === null) {
-        await killProcessTree(child, { graceMs: STOP_GRACE_MS, signalProcessGroup: true });
-      }
-
-      throw error;
-    }
-  } finally {
-    await log.close();
   }
-};
+
+  releases.push(yield* Effect.exit(launchIO(() => log.close())));
+  // Unlink may have failed before spawn. Always attempt removal without replacing the primary.
+  releases.push(
+    yield* Effect.exit(
+      launchIO(() =>
+        unlink(path).catch((error: NodeJS.ErrnoException) => {
+          if (!(error instanceof Error && 'code' in error && error.code === 'ENOENT')) throw error;
+        }),
+      ),
+    ),
+  );
+
+  if (Exit.isSuccess(primary)) return primary.value;
+
+  return yield* finishOperation(primary, releases).pipe(
+    Effect.mapError((cause) =>
+      cause instanceof StoreError
+        ? cause
+        : runFailed('Could not release run startup resources.', [], { cause }),
+    ),
+  );
+}, Effect.uninterruptible);
 
 export { spawnEvalRun, START_TIMEOUT_MS, type CliCommand };

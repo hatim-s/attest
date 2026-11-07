@@ -1,3 +1,5 @@
+import { valueFromExit } from '@attest/local';
+import * as Effect from 'effect/Effect';
 import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
@@ -88,7 +90,10 @@ describe('metric commands', { timeout: 30_000 }, () => {
 
     expect(composition.exitCode).toBe(0);
 
-    const loaded = await loadProject({ project: root });
+    const loaded = await Effect.runPromiseExit(loadProject({ project: root })).then((exit) =>
+      valueFromExit(exit),
+    );
+
     expect(loaded.metrics.find(({ id }) => id === 'equals')?.definition).toEqual({
       kind: 'assertion',
       assertions: [{ equals: { path: '$.output', value: 'Paris' } }],
@@ -217,7 +222,11 @@ describe('metric commands', { timeout: 30_000 }, () => {
     expect(judge.exitCode).toBe(0);
 
     const definitions = new Map(
-      (await loadProject({ project: root })).metrics.map(({ id, definition }) => [id, definition]),
+      (
+        await Effect.runPromiseExit(loadProject({ project: root })).then((exit) =>
+          valueFromExit(exit),
+        )
+      ).metrics.map(({ id, definition }) => [id, definition]),
     );
 
     expect(definitions.get('guided')).toEqual({

@@ -1,6 +1,8 @@
 import type { BashOptions } from 'just-bash';
 
-import { createSerialQueue } from '../internal/serial-queue.js';
+import * as Effect from 'effect/Effect';
+import * as Semaphore from 'effect/Semaphore';
+import { foreign } from './operation.js';
 import { createEnvironmentLifecycle } from './environment-lifecycle.js';
 import type { CaseEnvironmentFactory } from './types.js';
 import {
@@ -21,16 +23,28 @@ type JustBashIsolationOptions = {
 };
 
 /** Creates a fresh virtual filesystem per case without host files, network, or custom host commands. */
-const justBashIsolation =
-  (options: JustBashIsolationOptions = {}): CaseEnvironmentFactory =>
-  async ({ signal }) => {
-    signal.throwIfAborted();
+const justBashIsolation = (options: JustBashIsolationOptions = {}): CaseEnvironmentFactory =>
+  Effect.fn(function* ({ signal }) {
+    if (signal.aborted)
+      return yield* Effect.fail(
+        signal.reason instanceof Error ? signal.reason : new Error('Case acquisition aborted.'),
+      );
     // The portable build avoids Node-only global patching and exposes no host command adapters.
-    const { Bash } = await import('just-bash/browser');
-    signal.throwIfAborted();
+    const { Bash } = yield* foreign(() => import('just-bash/browser'));
+
+    if (signal.aborted)
+      return yield* Effect.fail(
+        signal.reason instanceof Error ? signal.reason : new Error('Case acquisition aborted.'),
+      );
+
+    const files = yield* Effect.try({
+      try: () => resolveJustBashFiles(options.files ?? {}),
+      catch: (cause) =>
+        cause instanceof Error ? cause : new Error('Invalid seed files.', { cause }),
+    });
 
     const shell = new Bash({
-      files: resolveJustBashFiles(options.files ?? {}),
+      files,
       env: { ...options.env },
       cwd: options.cwd ?? JUST_BASH_WORKSPACE,
       executionLimitProfile: 'hardened',
@@ -49,18 +63,29 @@ const justBashIsolation =
 
     // just-bash owns mutable interpreter state. Serialize tool calls within a case while allowing
     // separate case environments to execute concurrently.
-    const runSerially = createSerialQueue();
+    const serial = yield* Semaphore.make(1);
 
-    const enqueue = <Value>(operation: (admitted: AbortSignal) => Promise<Value>): Promise<Value> =>
+    const enqueue = <Value>(operation: (admitted: AbortSignal) => Promise<Value>) =>
       lifecycle.track((admitted) =>
-        runSerially(() => {
-          admitted.throwIfAborted();
+        serial.withPermits(1)(
+          Effect.gen(function* () {
+            const value = yield* foreign(() => {
+              admitted.throwIfAborted();
 
-          return operation(admitted);
-        }),
+              return operation(admitted);
+            });
+
+            if (admitted.aborted)
+              return yield* Effect.fail(
+                admitted.reason instanceof Error
+                  ? admitted.reason
+                  : new Error('Case operation aborted.'),
+              );
+
+            return value;
+          }),
+        ),
       );
-
-    let disposal: Promise<void> | undefined;
 
     return {
       exec: (script, execution = {}) =>
@@ -74,12 +99,9 @@ const justBashIsolation =
       writeFile: (path, contents) =>
         enqueue(() => shell.writeFile(resolveJustBashPath(path), contents)),
       beginFinalization: lifecycle.beginFinalization,
-      dispose: () => {
-        disposal ??= lifecycle.close(new Error('Case environment disposed.'));
-
-        return disposal;
-      },
+      dispose: () =>
+        Effect.uninterruptible(lifecycle.close(new Error('Case environment disposed.'))),
     };
-  };
+  });
 
 export { justBashIsolation, type JustBashIsolationOptions };

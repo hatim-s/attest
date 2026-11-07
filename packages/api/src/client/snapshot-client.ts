@@ -1,3 +1,4 @@
+import * as Effect from 'effect/Effect';
 import { parseWithSchema } from '@attest/contracts';
 import { summarizeSuites } from '@attest/core/analytics';
 import { parsePageLimit, StoreError } from '@attest/core/records';
@@ -12,20 +13,27 @@ const fail = (code: ApiErrorCode, message: string): never => {
   throw new ApiError(API_ERROR_STATUS[code], code, message);
 };
 
-/** Makes synchronous snapshot failures reject through the same promise contract as HTTP. */
-const settle = <T>(read: () => T): Promise<T> =>
-  Promise.resolve()
-    .then(read)
-    .catch((error) => {
-      if (error instanceof StoreError && error.code === 'INVALID_LIMIT') {
-        return fail('INVALID_REQUEST', error.message);
-      }
+/** Evaluates pure snapshot algorithms only when the native operation runs. */
+const settle = <T>(read: () => T) =>
+  Effect.try({
+    try: read,
+    catch: (error) => {
+      if (error instanceof StoreError && error.code === 'INVALID_LIMIT')
+        return new ApiError(API_ERROR_STATUS.INVALID_REQUEST, 'INVALID_REQUEST', error.message);
 
+      if (error instanceof ApiError) return error;
       throw error;
-    });
+    },
+  });
 
-const controlUnavailable = (): Promise<never> =>
-  settle(() => fail('CONTROL_UNAVAILABLE', 'A saved report cannot start or cancel runs.'));
+const controlUnavailable = () =>
+  Effect.fail(
+    new ApiError(
+      API_ERROR_STATUS.CONTROL_UNAVAILABLE,
+      'CONTROL_UNAVAILABLE',
+      'A saved report cannot start or cancel runs.',
+    ),
+  );
 
 /** Reads the already parsed bootstrap without making network requests from offline reports. */
 const createSnapshotClient = (snapshot: ReportSnapshot): ApiClient => {

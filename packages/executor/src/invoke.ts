@@ -1,35 +1,37 @@
-import { parseWithSchemaSync } from '@attest/contracts';
-import type { AgentRequest } from '@attest/contracts';
+import { parseWithSchemaEffect } from '@attest/contracts';
+import type { AgentRequest, SchemaDecodeError } from '@attest/contracts';
+import * as Effect from 'effect/Effect';
 
 import { invokeCliAgent } from './cli-invoker.js';
 import { invokeHttpAgent } from './http-invoker.js';
 import { invokeWithRetries, retryBudgetSchema } from './internal/invocation-retry.js';
-import type {
-  InvocationAttempt,
-  InvocationResult,
-  InvokeAgentOptions,
-  NativeAgentTarget,
-} from './types.js';
+import type { InvocationResult, InvokeAgentOptions, NativeAgentTarget } from './types.js';
 
-const invokeOnce = (
+type InvocationFailure =
+  | SchemaDecodeError
+  | Effect.Error<ReturnType<typeof invokeCliAgent>>
+  | Effect.Error<ReturnType<typeof invokeHttpAgent>>;
+
+/** Composes the selected native attempt without hiding infrastructure or cleanup failures. */
+const invokeOnce = Effect.fn('invokeOnce')(function* (
   target: NativeAgentTarget,
   request: AgentRequest,
   options: InvokeAgentOptions,
-): Promise<InvocationAttempt> => {
-  if (target.type === 'cli') return invokeCliAgent(target, request, options);
+) {
+  if (target.type === 'cli') return yield* invokeCliAgent(target, request, options);
 
-  return invokeHttpAgent(target, request, options);
-};
+  return yield* invokeHttpAgent(target, request, options);
+});
 
 /** Dispatches one target and retains every validated retry attempt for deterministic recording. */
-const invokeAgent = async (
+const invokeAgent = Effect.fn('invokeAgent')(function* (
   target: NativeAgentTarget,
   request: AgentRequest,
   options: InvokeAgentOptions,
-): Promise<InvocationResult> => {
-  const { retries } = parseWithSchemaSync(retryBudgetSchema, options);
+): Effect.fn.Return<InvocationResult, InvocationFailure> {
+  const { retries } = yield* parseWithSchemaEffect(retryBudgetSchema, options);
 
-  return invokeWithRetries(() => invokeOnce(target, request, options), retries);
-};
+  return yield* invokeWithRetries(() => invokeOnce(target, request, options), retries);
+});
 
 export { invokeAgent };

@@ -153,6 +153,9 @@ completion envelope. In short:
    case as an `http_status` invocation error. A `5xx`, `408` or `429` is retried within
    `retry.retries`, but only when `idempotency_header` is set: attest then sends the same
    SHA-256 key of the run and case ids on every try, so your service can drop a duplicate.
+   This permission does not override unknown dispatch or unconfirmed cleanup. A timeout or
+   reset after possible dispatch, or a failed response-body observation, stops trigger retries
+   even with an idempotency header.
 2. Your service posts the completion to `callback.url` with `Authorization: Bearer <token>` and
    `Content-Type: application/json`. The receiver answers:
 

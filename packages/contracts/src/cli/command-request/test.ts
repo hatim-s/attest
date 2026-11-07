@@ -1,4 +1,5 @@
-import { z } from 'zod';
+import * as Struct from 'effect/Struct';
+import * as Schema from 'effect/Schema';
 
 import { mutationEnvelopeFields } from './envelope.js';
 import { testCaseSchema } from '../../project/resources/case.js';
@@ -10,153 +11,155 @@ import { testResourceSchema } from '../../project/resources/test.js';
 import { jsonPointerSchema, resourceIdSchema } from '../../project/shared.js';
 
 /** Accepts an optional id at the authoring boundary so every input route can generate one. */
-const authoringTestCaseSchema = testCaseSchema
-  .omit({ id: true })
-  .extend({ id: resourceIdSchema.optional() });
-
-const importFormatSchema = z.enum(['csv', 'json', 'jsonl']);
-
-const importDedupePolicySchema = z.enum(['id', 'key', 'content']);
-
-const importConflictPolicySchema = z.enum(['error', 'skip', 'update']);
-
-const importSyncPolicySchema = z.enum(['append', 'upsert']);
-
-/** Encodes the complete deterministic CSV/JSON/JSONL import policy shared by case and dataset imports. */
-const caseImportOptionsSchema = z.strictObject({
-  format: importFormatSchema.optional(),
-  mapping: z.array(datasetImportMappingSchema).optional(),
-  parse_json: z.array(z.string().min(1)).optional(),
-  records_pointer: jsonPointerSchema.optional(),
-  key: z.string().min(1).optional(),
-  dedupe: importDedupePolicySchema.optional(),
-  on_conflict: importConflictPolicySchema.optional(),
-  sync: importSyncPolicySchema.optional(),
+const authoringTestCaseSchema = Schema.Struct({
+  ...Struct.omit(testCaseSchema.fields, ['id']),
+  id: Schema.optional(resourceIdSchema),
 });
 
-const testAddRequestSchema = z.strictObject({
+const importFormatSchema = Schema.Literals(['csv', 'json', 'jsonl']);
+
+const importDedupePolicySchema = Schema.Literals(['id', 'key', 'content']);
+
+const importConflictPolicySchema = Schema.Literals(['error', 'skip', 'update']);
+
+const importSyncPolicySchema = Schema.Literals(['append', 'upsert']);
+
+/** Encodes the complete deterministic CSV/JSON/JSONL import policy shared by case and dataset imports. */
+const caseImportOptionsSchema = Schema.Struct({
+  format: Schema.optional(importFormatSchema),
+  mapping: Schema.optional(Schema.Array(datasetImportMappingSchema)),
+  parse_json: Schema.optional(Schema.Array(Schema.String.check(Schema.isMinLength(1)))),
+  records_pointer: Schema.optional(jsonPointerSchema),
+  key: Schema.optional(Schema.String.check(Schema.isMinLength(1))),
+  dedupe: Schema.optional(importDedupePolicySchema),
+  on_conflict: Schema.optional(importConflictPolicySchema),
+  sync: Schema.optional(importSyncPolicySchema),
+});
+
+const testAddRequestSchema = Schema.Struct({
   ...mutationEnvelopeFields,
-  command: z.literal('test.add'),
+  command: Schema.Literal('test.add'),
   test: testResourceSchema,
 });
 
-const testCaseAddRequestSchema = z.strictObject({
+const testCaseAddRequestSchema = Schema.Struct({
   ...mutationEnvelopeFields,
-  command: z.literal('test.case.add'),
+  command: Schema.Literal('test.case.add'),
   test_id: resourceIdSchema,
   case: authoringTestCaseSchema,
 });
 
-const testCaseImportRequestSchema = z.strictObject({
+const testCaseImportRequestSchema = Schema.Struct({
   ...mutationEnvelopeFields,
-  command: z.literal('test.case.import'),
+  command: Schema.Literal('test.case.import'),
   test_id: resourceIdSchema,
-  source: z.string().min(1),
+  source: Schema.String.check(Schema.isMinLength(1)),
   import: caseImportOptionsSchema,
 });
 
-const testCaseRenameRequestSchema = z.strictObject({
+const testCaseRenameRequestSchema = Schema.Struct({
   ...mutationEnvelopeFields,
-  command: z.literal('test.case.rename'),
+  command: Schema.Literal('test.case.rename'),
   test_id: resourceIdSchema,
   case_id: resourceIdSchema,
   new_id: resourceIdSchema,
 });
 
-const testCaseRemoveRequestSchema = z.strictObject({
+const testCaseRemoveRequestSchema = Schema.Struct({
   ...mutationEnvelopeFields,
-  command: z.literal('test.case.remove'),
+  command: Schema.Literal('test.case.remove'),
   test_id: resourceIdSchema,
   case_id: resourceIdSchema,
 });
 
 /** Accepts only the empty native dataset shape that `test dataset add` can author. */
-const testDatasetAddResourceSchema = datasetResourceSchema
-  .omit({ case_count: true, provenance: true })
-  .extend({ case_count: z.literal(0) });
+const testDatasetAddResourceSchema = Schema.Struct({
+  ...Struct.omit(datasetResourceSchema.fields, ['case_count', 'provenance']),
+  case_count: Schema.Literal(0),
+});
 
-const testDatasetAddRequestSchema = z.strictObject({
+const testDatasetAddRequestSchema = Schema.Struct({
   ...mutationEnvelopeFields,
-  command: z.literal('test.dataset.add'),
+  command: Schema.Literal('test.dataset.add'),
   test_id: resourceIdSchema,
   dataset: testDatasetAddResourceSchema,
 });
 
-const testDatasetImportRequestSchema = z.strictObject({
+const testDatasetImportRequestSchema = Schema.Struct({
   ...mutationEnvelopeFields,
-  command: z.literal('test.dataset.import'),
+  command: Schema.Literal('test.dataset.import'),
   test_id: resourceIdSchema,
-  source: z.string().min(1),
+  source: Schema.String.check(Schema.isMinLength(1)),
   as: resourceIdSchema,
-  name: z.string().min(1).optional(),
+  name: Schema.optional(Schema.String.check(Schema.isMinLength(1))),
   import: caseImportOptionsSchema,
 });
 
-const testDatasetAttachRequestSchema = z.strictObject({
+const testDatasetAttachRequestSchema = Schema.Struct({
   ...mutationEnvelopeFields,
-  command: z.literal('test.dataset.attach'),
+  command: Schema.Literal('test.dataset.attach'),
   test_id: resourceIdSchema,
   dataset_id: resourceIdSchema,
-  tags: z.array(z.string().min(1)).optional(),
+  tags: Schema.optional(Schema.Array(Schema.String.check(Schema.isMinLength(1)))),
 });
 
-const testDatasetDetachRequestSchema = z.strictObject({
+const testDatasetDetachRequestSchema = Schema.Struct({
   ...mutationEnvelopeFields,
-  command: z.literal('test.dataset.detach'),
+  command: Schema.Literal('test.dataset.detach'),
   test_id: resourceIdSchema,
   dataset_id: resourceIdSchema,
 });
 
-const testDatasetRenameRequestSchema = z.strictObject({
+const testDatasetRenameRequestSchema = Schema.Struct({
   ...mutationEnvelopeFields,
-  command: z.literal('test.dataset.rename'),
+  command: Schema.Literal('test.dataset.rename'),
   dataset_id: resourceIdSchema,
   new_id: resourceIdSchema,
 });
 
-const testDatasetRemoveRequestSchema = z.strictObject({
+const testDatasetRemoveRequestSchema = Schema.Struct({
   ...mutationEnvelopeFields,
-  command: z.literal('test.dataset.remove'),
+  command: Schema.Literal('test.dataset.remove'),
   dataset_id: resourceIdSchema,
 });
 
-const testMetricAttachRequestSchema = z.strictObject({
+const testMetricAttachRequestSchema = Schema.Struct({
   ...mutationEnvelopeFields,
-  command: z.literal('test.metric.attach'),
+  command: Schema.Literal('test.metric.attach'),
   test_id: resourceIdSchema,
   metric_id: resourceIdSchema,
-  threshold: z.number().finite().optional(),
+  threshold: Schema.optional(Schema.Finite.check(Schema.isFinite())),
 });
 
-const testMetricDetachRequestSchema = z.strictObject({
+const testMetricDetachRequestSchema = Schema.Struct({
   ...mutationEnvelopeFields,
-  command: z.literal('test.metric.detach'),
+  command: Schema.Literal('test.metric.detach'),
   test_id: resourceIdSchema,
   metric_id: resourceIdSchema,
 });
 
-const testRenameRequestSchema = z.strictObject({
+const testRenameRequestSchema = Schema.Struct({
   ...mutationEnvelopeFields,
-  command: z.literal('test.rename'),
+  command: Schema.Literal('test.rename'),
   test_id: resourceIdSchema,
   new_id: resourceIdSchema,
 });
 
-const testRemoveRequestSchema = z.strictObject({
+const testRemoveRequestSchema = Schema.Struct({
   ...mutationEnvelopeFields,
-  command: z.literal('test.remove'),
+  command: Schema.Literal('test.remove'),
   test_id: resourceIdSchema,
 });
 
-type CaseImportOptions = z.infer<typeof caseImportOptionsSchema>;
+type CaseImportOptions = typeof caseImportOptionsSchema.Type;
 
-type ImportFormat = z.infer<typeof importFormatSchema>;
+type ImportFormat = typeof importFormatSchema.Type;
 
-type ImportDedupePolicy = z.infer<typeof importDedupePolicySchema>;
+type ImportDedupePolicy = typeof importDedupePolicySchema.Type;
 
-type ImportConflictPolicy = z.infer<typeof importConflictPolicySchema>;
+type ImportConflictPolicy = typeof importConflictPolicySchema.Type;
 
-type ImportSyncPolicy = z.infer<typeof importSyncPolicySchema>;
+type ImportSyncPolicy = typeof importSyncPolicySchema.Type;
 
 export {
   caseImportOptionsSchema,

@@ -1,42 +1,44 @@
-import { z } from 'zod';
+import * as Schema from 'effect/Schema';
 
 import { cliFailureResultSchema, cliSuccessResultSchema } from '../cli/protocol.js';
 import { evalRunIdSchema } from './run.js';
 import { COMMAND_REQUEST_SCHEMA_ID } from '../schema/identifiers.js';
 
 /** Encodes the only JSON request accepted by `attest eval cancel`. */
-const evalCancelRequestSchema = z.strictObject({
-  schema: z.literal(COMMAND_REQUEST_SCHEMA_ID),
-  command: z.literal('eval.cancel'),
+const evalCancelRequestSchema = Schema.Struct({
+  schema: Schema.Literal(COMMAND_REQUEST_SCHEMA_ID),
+  command: Schema.Literal('eval.cancel'),
   run_id: evalRunIdSchema,
-  output: z.enum(['human', 'json']),
+  output: Schema.Literals(['human', 'json']),
 });
 
-const evalCancelResultPayloadSchema = z.strictObject({
+const evalCancelResultPayloadSchema = Schema.Struct({
   run_id: evalRunIdSchema,
-  status: z.enum(['cancellation_requested', 'already_cancelled', 'already_terminal']),
+  status: Schema.Literals(['cancellation_requested', 'already_cancelled', 'already_terminal']),
 });
 
-const evalCancelSuccessResultSchema = cliSuccessResultSchema.extend({
-  command: z.literal('eval.cancel'),
+const evalCancelSuccessResultSchema = Schema.Struct({
+  ...cliSuccessResultSchema.fields,
+  command: Schema.Literal('eval.cancel'),
   result: evalCancelResultPayloadSchema,
 });
 
-const evalCancelFailureResultSchema = cliFailureResultSchema.extend({
-  command: z.literal('eval.cancel'),
+const evalCancelFailureResultSchema = Schema.Struct({
+  ...cliFailureResultSchema.fields,
+  command: Schema.Literal('eval.cancel'),
 });
 
 /** Narrows the shared CLI result envelope to cancellation-specific success data. */
-const evalCancelResultSchema = z.union([
+const evalCancelResultSchema = Schema.Union([
   evalCancelSuccessResultSchema,
   evalCancelFailureResultSchema,
 ]);
 
-type EvalCancelRequest = z.infer<typeof evalCancelRequestSchema>;
+type EvalCancelRequest = typeof evalCancelRequestSchema.Type;
 
-type EvalCancelResult = z.infer<typeof evalCancelResultSchema>;
+type EvalCancelResult = typeof evalCancelResultSchema.Type;
 
-type EvalCancelResultPayload = z.infer<typeof evalCancelResultPayloadSchema>;
+type EvalCancelResultPayload = typeof evalCancelResultPayloadSchema.Type;
 
 export {
   evalCancelRequestSchema,

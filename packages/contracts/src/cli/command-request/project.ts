@@ -1,18 +1,18 @@
-import { z } from 'zod';
+import * as Schema from 'effect/Schema';
 
 import { mutationEnvelopeFields } from './envelope.js';
 
-const projectInitRequestSchema = z.strictObject({
+const projectInitRequestSchema = Schema.Struct({
   ...mutationEnvelopeFields,
-  command: z.literal('project.init'),
-  directory: z.string().min(1).optional(),
-  name: z.string().min(1).optional(),
+  command: Schema.Literal('project.init'),
+  directory: Schema.optional(Schema.String.check(Schema.isMinLength(1))),
+  name: Schema.optional(Schema.String.check(Schema.isMinLength(1))),
 });
 
-const projectUnlockRequestSchema = z.strictObject({
+const projectUnlockRequestSchema = Schema.Struct({
   ...mutationEnvelopeFields,
-  command: z.literal('project.unlock'),
-  stale: z.literal(true),
+  command: Schema.Literal('project.unlock'),
+  stale: Schema.Literal(true),
 });
 
 export { projectInitRequestSchema, projectUnlockRequestSchema };

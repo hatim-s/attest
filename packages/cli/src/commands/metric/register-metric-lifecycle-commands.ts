@@ -1,3 +1,4 @@
+import * as Effect from 'effect/Effect';
 import type { CommandRequest } from '@attest/contracts';
 import type { Command } from 'commander';
 
@@ -23,37 +24,51 @@ const registerMetricLifecycleCommands = (metric: Command, context: CommandContex
     .argument('[metric-id]', 'current metric id')
     .argument('[new-id]', 'new metric id')
     .action(
-      async (
+      (
         metricId: string | undefined,
         newId: string | undefined,
         options: MutationCliOptions,
         leaf: Command,
-      ) => {
-        const interactive = isInteractive(options, context.interaction, options.fromJson);
-        const prompt = { interactive, prompt: context.interaction.prompt };
+      ) =>
+        context.submit(
+          Effect.gen(function* () {
+            const interactive = isInteractive(options, context.interaction, options.fromJson);
+            const prompt = { interactive, prompt: context.interaction.prompt };
 
-        const request = await readOrBuildRequest({
-          command: 'metric.rename',
-          context,
-          leaf,
-          options,
-          build: async () => ({
-            ...mutationRequestFields('metric.rename', options),
-            metric_id: await requiredInput(
-              metricId,
-              { path: '<metric-id>', question: 'Metric id: ' },
-              prompt,
-            ),
-            new_id: await requiredInput(
-              newId,
-              { path: '<new-id>', question: 'New metric id: ' },
-              prompt,
-            ),
+            const request = yield* readOrBuildRequest({
+              command: 'metric.rename',
+              context,
+              leaf,
+              options,
+              build: () =>
+                Effect.gen(function* () {
+                  return {
+                    ...mutationRequestFields('metric.rename', options),
+                    metric_id: yield* Effect.tryPromise({
+                      try: () =>
+                        requiredInput(
+                          metricId,
+                          { path: '<metric-id>', question: 'Metric id: ' },
+                          prompt,
+                        ),
+                      catch: (cause) => cause,
+                    }),
+                    new_id: yield* Effect.tryPromise({
+                      try: () =>
+                        requiredInput(
+                          newId,
+                          { path: '<new-id>', question: 'New metric id: ' },
+                          prompt,
+                        ),
+                      catch: (cause) => cause,
+                    }),
+                  };
+                }),
+            });
+
+            yield* runMetricMutation(request, options, interactive, context);
           }),
-        });
-
-        await runMetricMutation(request, options, interactive, context);
-      },
+        ),
     );
 
   setMutationHelp(rename, { examples: ['attest metric rename correct correctness'] });
@@ -63,34 +78,43 @@ const registerMetricLifecycleCommands = (metric: Command, context: CommandContex
   )
     .argument('[metric-id]', 'metric id')
     .option('--detach', 'remove every test and case reference atomically')
-    .action(async (metricId: string | undefined, options: RemoveOptions, leaf: Command) => {
-      const interactive = isInteractive(options, context.interaction, options.fromJson);
+    .action((metricId: string | undefined, options: RemoveOptions, leaf: Command) =>
+      context.submit(
+        Effect.gen(function* () {
+          const interactive = isInteractive(options, context.interaction, options.fromJson);
 
-      const request = await readOrBuildRequest({
-        command: 'metric.remove',
-        context,
-        leaf,
-        options,
-        build: async () => {
-          const request: Extract<CommandRequest, { command: 'metric.remove' }> = {
-            ...mutationRequestFields('metric.remove', options),
-            metric_id: await requiredInput(
-              metricId,
-              { path: '<metric-id>', question: 'Metric id: ' },
-              { interactive, prompt: context.interaction.prompt },
-            ),
-          };
+          const request = yield* readOrBuildRequest({
+            command: 'metric.remove',
+            context,
+            leaf,
+            options,
+            build: () =>
+              Effect.gen(function* () {
+                let request: Extract<CommandRequest, { command: 'metric.remove' }> = {
+                  ...mutationRequestFields('metric.remove', options),
+                  metric_id: yield* Effect.tryPromise({
+                    try: () =>
+                      requiredInput(
+                        metricId,
+                        { path: '<metric-id>', question: 'Metric id: ' },
+                        { interactive, prompt: context.interaction.prompt },
+                      ),
+                    catch: (cause) => cause,
+                  }),
+                };
 
-          if (options.detach !== undefined) {
-            request.detach = options.detach;
-          }
+                if (options.detach !== undefined) {
+                  request = { ...request, detach: options.detach };
+                }
 
-          return request;
-        },
-      });
+                return request;
+              }),
+          });
 
-      await runMetricMutation(request, options, interactive, context);
-    });
+          yield* runMetricMutation(request, options, interactive, context);
+        }),
+      ),
+    );
 
   setMutationHelp(remove, { examples: ['attest metric remove correct --dry-run'] });
 };

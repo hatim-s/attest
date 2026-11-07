@@ -1,5 +1,5 @@
 import { parseWithSchema } from '@attest/contracts';
-import { z } from 'zod';
+import * as Schema from 'effect/Schema';
 import {
   recentTargetSchema,
   isProjectWide,
@@ -21,11 +21,11 @@ const RECENT_DISPLAY_LIMIT = 4;
 // Five 256-character identities may each serialize as six-character JSON escapes.
 const RECENT_BYTE_LIMIT = RECENT_STORAGE_LIMIT * (5 * 256 * 6 + 128);
 
-const themeSchema = z.enum(['system', 'light', 'dark']);
+const themeSchema = Schema.Literals(['system', 'light', 'dark']);
 
-const recentsSchema = z.array(z.unknown()).max(100);
+const recentsSchema = Schema.Array(Schema.Unknown).check(Schema.isMaxLength(100));
 
-type ThemeMode = z.infer<typeof themeSchema>;
+type ThemeMode = typeof themeSchema.Type;
 
 type PreferenceStorage = Pick<Storage, 'getItem' | 'setItem'>;
 

@@ -1,3 +1,4 @@
+import type * as Effect from 'effect/Effect';
 import type {
   CaseRecord,
   CaseSummaryPage,
@@ -18,6 +19,7 @@ import type {
 } from '../contract/responses.js';
 import type { ApiCapabilities, DashboardBootstrap } from '../contract/bootstrap.js';
 import type { apiRoutes, PathParams } from '../contract/routes.js';
+import type { ApiError } from './api-error.js';
 import { createHttpClient } from './http-client.js';
 import { createSnapshotClient } from './snapshot-client.js';
 
@@ -31,51 +33,51 @@ type ApiClient = {
   mode: ApiClientMode;
   /** Hide run controls when `control` is false; those calls reject with CONTROL_UNAVAILABLE. */
   capabilities: ApiCapabilities;
-  listProjects(options?: RequestOptions): Promise<ProjectList>;
+  listProjects(options?: RequestOptions): Effect.Effect<ProjectList, ApiError | Error>;
   listRuns(
     params: PathParams<typeof apiRoutes.listRuns.path>,
     query: PageQuery,
     options?: RequestOptions,
-  ): Promise<RunPage>;
+  ): Effect.Effect<RunPage, ApiError | Error>;
   getRun(
     params: PathParams<typeof apiRoutes.getRun.path>,
     options?: RequestOptions,
-  ): Promise<RunRecord>;
+  ): Effect.Effect<RunRecord, ApiError | Error>;
   listCaseSummaries(
     params: PathParams<typeof apiRoutes.listCaseSummaries.path>,
     query: PageQuery,
     options?: RequestOptions,
-  ): Promise<CaseSummaryPage>;
+  ): Effect.Effect<CaseSummaryPage, ApiError | Error>;
   getCase(
     params: PathParams<typeof apiRoutes.getCase.path>,
     options?: RequestOptions,
-  ): Promise<CaseRecord>;
+  ): Effect.Effect<CaseRecord, ApiError | Error>;
   listRunSuites(
     params: PathParams<typeof apiRoutes.listRunSuites.path>,
     options?: RequestOptions,
-  ): Promise<RunSuites>;
+  ): Effect.Effect<RunSuites, ApiError | Error>;
   getSuiteHistory(
     params: PathParams<typeof apiRoutes.getSuiteHistory.path>,
     query: SuiteHistoryQuery,
     options?: RequestOptions,
-  ): Promise<SuiteHistory>;
+  ): Effect.Effect<SuiteHistory, ApiError | Error>;
   getDiff(
     params: PathParams<typeof apiRoutes.getDiff.path>,
     options?: RequestOptions,
-  ): Promise<RunDiff>;
+  ): Effect.Effect<RunDiff, ApiError | Error>;
   listTests(
     params: PathParams<typeof apiRoutes.listTests.path>,
     options?: RequestOptions,
-  ): Promise<TestList>;
+  ): Effect.Effect<TestList, ApiError | Error>;
   startRun(
     params: PathParams<typeof apiRoutes.startRun.path>,
     request: RunStartRequest,
     options?: RequestOptions,
-  ): Promise<RunStartResponse>;
+  ): Effect.Effect<RunStartResponse, ApiError | Error>;
   cancelRun(
     params: PathParams<typeof apiRoutes.cancelRun.path>,
     options?: RequestOptions,
-  ): Promise<RunCancelResponse>;
+  ): Effect.Effect<RunCancelResponse, ApiError | Error>;
 };
 
 type ApiClientConfig =

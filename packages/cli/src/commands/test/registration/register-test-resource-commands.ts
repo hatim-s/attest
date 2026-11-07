@@ -1,3 +1,4 @@
+import * as Effect from 'effect/Effect';
 import { TEST_RESOURCE_SCHEMA_ID } from '@attest/contracts';
 import { runTestListCommand, runTestShowCommand } from '@attest/local/test';
 import type { Command } from 'commander';
@@ -33,47 +34,56 @@ const registerTestResourceCommands = (test: Command, context: CommandContext): v
     .option('--agent <agent-id>', 'existing agent id')
     .option('--name <name>', 'test display name')
     .option('--metric <metric-id>', 'attached metric id', collect)
-    .action(async (testId: string | undefined, options: TestAddOptions, leaf: Command) => {
-      const prompt = {
-        interactive: isInteractive(options, context.interaction, options.fromJson),
-        prompt: context.interaction.prompt,
-      };
-
-      const request = await readOrBuildRequest({
-        command: 'test.add',
-        context,
-        leaf,
-        options,
-        build: async () => {
-          const id = await requiredInput(
-            testId,
-            { path: '<test-id>', question: 'Test id: ' },
-            prompt,
-          );
-
-          const agentId = await requiredInput(
-            options.agent,
-            { path: '--agent', question: 'Existing agent id: ' },
-            prompt,
-          );
-
-          return {
-            ...mutationRequestFields('test.add', options),
-            test: {
-              schema: TEST_RESOURCE_SCHEMA_ID,
-              id,
-              name: options.name?.trim() || id,
-              agent_id: agentId,
-              cases: [],
-              datasets: [],
-              metrics: (options.metric ?? []).map((metric_id) => ({ metric_id })),
-            },
+    .action((testId: string | undefined, options: TestAddOptions, leaf: Command) =>
+      context.submit(
+        Effect.gen(function* () {
+          const prompt = {
+            interactive: isInteractive(options, context.interaction, options.fromJson),
+            prompt: context.interaction.prompt,
           };
-        },
-      });
 
-      await runTestMutation(request, options, context);
-    });
+          const request = yield* readOrBuildRequest({
+            command: 'test.add',
+            context,
+            leaf,
+            options,
+            build: () =>
+              Effect.gen(function* () {
+                const id = yield* Effect.tryPromise({
+                  try: () =>
+                    requiredInput(testId, { path: '<test-id>', question: 'Test id: ' }, prompt),
+                  catch: (cause) => cause,
+                });
+
+                const agentId = yield* Effect.tryPromise({
+                  try: () =>
+                    requiredInput(
+                      options.agent,
+                      { path: '--agent', question: 'Existing agent id: ' },
+                      prompt,
+                    ),
+                  catch: (cause) => cause,
+                });
+
+                return {
+                  ...mutationRequestFields('test.add', options),
+                  test: {
+                    schema: TEST_RESOURCE_SCHEMA_ID,
+                    id,
+                    name: options.name?.trim() || id,
+                    agent_id: agentId,
+                    cases: [],
+                    datasets: [],
+                    metrics: (options.metric ?? []).map((metric_id) => ({ metric_id })),
+                  },
+                };
+              }),
+          });
+
+          yield* runTestMutation(request, options, context);
+        }),
+      ),
+    );
 
   setMutationHelp(add, {
     examples: [
@@ -83,102 +93,148 @@ const registerTestResourceCommands = (test: Command, context: CommandContext): v
   });
 
   addCommonOptions(test.command('list').description('List tests.')).action(
-    async (options: CommonCliOptions) => {
-      const result = await runTestListCommand({
-        project: options.project,
-        workingDirectory: context.workingDirectory,
-      });
+    (options: CommonCliOptions) =>
+      context.submit(
+        Effect.gen(function* () {
+          const result = yield* runTestListCommand({
+            project: options.project,
+            workingDirectory: context.workingDirectory,
+          });
 
-      context.io.output(renderCommandResult('test.list', outputFormat(options), result));
-    },
+          context.io.output(renderCommandResult('test.list', outputFormat(options), result));
+        }),
+      ),
   );
 
   addCommonOptions(test.command('show').description('Show one test.'))
     .argument('[test-id]', 'test id')
-    .action(async (testId: string | undefined, options: CommonCliOptions) => {
-      const id = await requiredInput(
-        testId,
-        { path: '<test-id>', question: 'Test id: ' },
-        {
-          interactive: isInteractive(options, context.interaction),
-          prompt: context.interaction.prompt,
-        },
-      );
+    .action((testId: string | undefined, options: CommonCliOptions) =>
+      context.submit(
+        Effect.gen(function* () {
+          const id = yield* Effect.tryPromise({
+            try: () =>
+              requiredInput(
+                testId,
+                { path: '<test-id>', question: 'Test id: ' },
+                {
+                  interactive: isInteractive(options, context.interaction),
+                  prompt: context.interaction.prompt,
+                },
+              ),
+            catch: (cause) => cause,
+          });
 
-      const result = await runTestShowCommand({
-        project: options.project,
-        testId: id,
-        workingDirectory: context.workingDirectory,
-      });
+          const result = yield* runTestShowCommand({
+            project: options.project,
+            testId: id,
+            workingDirectory: context.workingDirectory,
+          });
 
-      context.io.output(renderCommandResult('test.show', outputFormat(options), result));
-    });
+          context.io.output(renderCommandResult('test.show', outputFormat(options), result));
+        }),
+      ),
+    );
 
   const rename = addMutationOptions(test.command('rename').description('Rename one test.'))
     .argument('[test-id]', 'current test id')
     .argument('[new-id]', 'new test id')
     .action(
-      async (
+      (
         testId: string | undefined,
         newId: string | undefined,
         options: MutationCliOptions,
         leaf: Command,
-      ) => {
-        const prompt = {
-          interactive: isInteractive(options, context.interaction, options.fromJson),
-          prompt: context.interaction.prompt,
-        };
+      ) =>
+        context.submit(
+          Effect.gen(function* () {
+            const prompt = {
+              interactive: isInteractive(options, context.interaction, options.fromJson),
+              prompt: context.interaction.prompt,
+            };
 
-        const request = await readOrBuildRequest({
-          command: 'test.rename',
-          context,
-          leaf,
-          options,
-          build: async () => ({
-            ...mutationRequestFields('test.rename', options),
-            test_id: await requiredInput(
-              testId,
-              { path: '<test-id>', question: 'Current test id: ' },
-              prompt,
-            ),
-            new_id: await requiredInput(
-              newId,
-              { path: '<new-id>', question: 'New test id: ' },
-              prompt,
-            ),
+            const request = yield* readOrBuildRequest({
+              command: 'test.rename',
+              context,
+              leaf,
+              options,
+              build: () =>
+                Effect.gen(function* () {
+                  return {
+                    ...mutationRequestFields('test.rename', options),
+                    test_id: yield* Effect.tryPromise({
+                      try: () =>
+                        requiredInput(
+                          testId,
+                          { path: '<test-id>', question: 'Current test id: ' },
+                          prompt,
+                        ),
+                      catch: (cause) => cause,
+                    }),
+                    new_id: yield* Effect.tryPromise({
+                      try: () =>
+                        requiredInput(
+                          newId,
+                          { path: '<new-id>', question: 'New test id: ' },
+                          prompt,
+                        ),
+                      catch: (cause) => cause,
+                    }),
+                  };
+                }),
+            });
+
+            yield* runTestMutation(request, options, context);
           }),
-        });
-
-        await runTestMutation(request, options, context);
-      },
+        ),
     );
 
   setMutationHelp(rename, { examples: ['attest test rename smoke smoke-renamed --dry-run'] });
 
   const remove = addMutationOptions(test.command('remove').description('Remove one test.'))
     .argument('[test-id]', 'test id')
-    .action(async (testId: string | undefined, options: MutationCliOptions, leaf: Command) => {
-      const request = await readOrBuildRequest({
-        command: 'test.remove',
-        context,
-        leaf,
-        options,
-        build: async () => ({
-          ...mutationRequestFields('test.remove', options),
-          test_id: await requiredInput(
-            testId,
-            { path: '<test-id>', question: 'Test id: ' },
-            {
-              interactive: isInteractive(options, context.interaction, options.fromJson),
-              prompt: context.interaction.prompt,
-            },
-          ),
-        }),
-      });
+    .action((testId: string | undefined, options: MutationCliOptions, leaf: Command) =>
+      context.submit(
+        Effect.gen(function* () {
+          const request = yield* readOrBuildRequest({
+            command: 'test.remove',
+            context,
+            leaf,
+            options,
+            build: () =>
+              Effect.gen(function* () {
+                return {
+                  ...mutationRequestFields('test.remove', options),
+                  test_id: yield* Effect.tryPromise({
+                    try: () =>
+                      requiredInput(
+                        testId,
+                        { path: '<test-id>', question: 'Test id: ' },
+                        {
+                          interactive: isInteractive(
+                            options,
+                            context.interaction,
+                            options.fromJson,
+                          ),
+                          prompt: context.interaction.prompt,
+                        },
+                      ),
+                    catch: (cause) => cause,
+                  }),
+                };
+              }),
+          });
 
-      if (!(await confirmRemoval(request, `test ${request.test_id}`, options, context))) return;
-      await runTestMutation(request, options, context);
-    });
+          if (
+            !(yield* Effect.tryPromise({
+              try: () => confirmRemoval(request, `test ${request.test_id}`, options, context),
+              catch: (cause) => cause,
+            }))
+          )
+            return;
+          yield* runTestMutation(request, options, context);
+        }),
+      ),
+    );
 
   setMutationHelp(remove, { examples: ['attest test remove smoke --yes'] });
 };

@@ -20,7 +20,9 @@ const MAX_PAYLOAD_CHARS = 64 * 1024;
 
 const MAX_STATUS_MESSAGE_CHARS = 1_024;
 
-type Attributes = NonNullable<Span['attributes']>;
+type Attributes = {
+  -readonly [K in keyof NonNullable<Span['attributes']>]: NonNullable<Span['attributes']>[K];
+};
 
 type SpanDraft = {
   span_id: string;
@@ -51,7 +53,7 @@ const boundedJson = (value: JsonValue): string | undefined => {
 };
 
 const toSpan = (draft: SpanDraft): Span => {
-  const span: Span = {
+  let span: Span = {
     span_id: draft.span_id,
     parent_span_id: draft.parent_span_id,
     name: draft.name,
@@ -67,14 +69,17 @@ const toSpan = (draft: SpanDraft): Span => {
   };
 
   if (draft.events.length > 0) {
-    span.events = draft.events.map((event) => ({
-      name: event.name,
-      time: new Date(event.time).toISOString(),
-      attributes: event.attributes,
-    }));
+    span = {
+      ...span,
+      events: draft.events.map((event) => ({
+        name: event.name,
+        time: new Date(event.time).toISOString(),
+        attributes: event.attributes,
+      })),
+    };
   }
 
-  if (draft.output !== undefined) span.output = draft.output;
+  if (draft.output !== undefined) span = { ...span, output: draft.output };
 
   return span;
 };

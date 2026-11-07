@@ -1,4 +1,5 @@
-import { z } from 'zod';
+import { positiveIntegerSchema } from '../schema/scalars.js';
+import * as Schema from 'effect/Schema';
 
 import { evalExecutionConfigSchema } from './eval-execution.js';
 import {
@@ -17,106 +18,122 @@ import {
 } from '../schema/identifiers.js';
 import { reportDuplicates } from '../internal/duplicates.js';
 
-const authoredResourceManifestEntrySchema = z.strictObject({
+const authoredResourceManifestEntrySchema = Schema.Struct({
   id: resourceIdSchema,
   path: relativePathSchema,
   content_hash: sha256Schema,
 });
 
-const agentManifestEntrySchema = authoredResourceManifestEntrySchema.extend({
-  schema: z.literal(AGENT_RESOURCE_SCHEMA_ID),
+const agentManifestEntrySchema = Schema.Struct({
+  ...authoredResourceManifestEntrySchema.fields,
+  schema: Schema.Literal(AGENT_RESOURCE_SCHEMA_ID),
 });
 
-const testManifestEntrySchema = authoredResourceManifestEntrySchema.extend({
-  schema: z.literal(TEST_RESOURCE_SCHEMA_ID),
+const testManifestEntrySchema = Schema.Struct({
+  ...authoredResourceManifestEntrySchema.fields,
+  schema: Schema.Literal(TEST_RESOURCE_SCHEMA_ID),
 });
 
-const metricManifestEntrySchema = authoredResourceManifestEntrySchema.extend({
-  schema: z.literal(METRIC_RESOURCE_SCHEMA_ID),
+const metricManifestEntrySchema = Schema.Struct({
+  ...authoredResourceManifestEntrySchema.fields,
+  schema: Schema.Literal(METRIC_RESOURCE_SCHEMA_ID),
 });
 
-const datasetManifestEntrySchema = z.strictObject({
+const datasetManifestEntrySchema = Schema.Struct({
   id: resourceIdSchema,
-  schema: z.literal(DATASET_SCHEMA_ID),
+  schema: Schema.Literal(DATASET_SCHEMA_ID),
   data_path: relativePathSchema,
   data_content_hash: sha256Schema,
   metadata_path: relativePathSchema,
   metadata_content_hash: sha256Schema,
 });
 
-const projectDefaultsSchema = z.strictObject({
-  concurrency: z.number().int().positive().optional(),
-  output_cap_bytes: z.number().int().positive().optional(),
-  eval_timeout_ms: durationMillisecondsSchema.optional(),
-  eval: evalExecutionConfigSchema.optional(),
+const projectDefaultsSchema = Schema.Struct({
+  concurrency: Schema.optional(positiveIntegerSchema),
+  output_cap_bytes: Schema.optional(positiveIntegerSchema),
+  eval_timeout_ms: Schema.optional(durationMillisecondsSchema),
+  eval: Schema.optional(evalExecutionConfigSchema),
 });
 
 /** Reports a path when a manifest entry does not use the canonical inspectable layout. */
 const reportNonCanonicalManifestPath = (
   actual: string,
   expected: string,
-  context: z.RefinementCtx,
+  context: Schema.FilterIssue[],
   path: PropertyKey[],
 ): void => {
   if (actual === expected) {
     return;
   }
 
-  context.addIssue({ code: 'custom', path, message: `must equal canonical path ${expected}` });
+  context.push({ path, issue: `must equal canonical path ${expected}` });
 };
 
 /** Encodes the generated project index at attest.project.json. */
-const projectManifestSchema = z
-  .strictObject({
-    schema: z.literal(PROJECT_SCHEMA_ID),
-    project_id: projectIdSchema,
-    name: z.string().min(1),
-    defaults: projectDefaultsSchema.optional(),
-    resources: z.strictObject({
-      agents: z.array(agentManifestEntrySchema),
-      tests: z.array(testManifestEntrySchema),
-      datasets: z.array(datasetManifestEntrySchema),
-      metrics: z.array(metricManifestEntrySchema),
-    }),
-  })
-  .superRefine((project, context) => {
-    for (const resourceType of ['agents', 'tests', 'datasets', 'metrics'] as const) {
-      reportDuplicates({
-        values: project.resources[resourceType].map(({ id }) => id),
-        pathFor: (index) => ['resources', resourceType, index, 'id'],
-        label: 'manifest resource id',
-        context,
-      });
-    }
+const projectManifestStructure = Schema.Struct({
+  schema: Schema.Literal(PROJECT_SCHEMA_ID),
+  project_id: projectIdSchema,
+  name: Schema.String.check(Schema.isMinLength(1)),
+  defaults: Schema.optional(projectDefaultsSchema),
+  resources: Schema.Struct({
+    agents: Schema.Array(agentManifestEntrySchema),
+    tests: Schema.Array(testManifestEntrySchema),
+    datasets: Schema.Array(datasetManifestEntrySchema),
+    metrics: Schema.Array(metricManifestEntrySchema),
+  }),
+});
 
-    for (const resourceType of ['agents', 'tests', 'metrics'] as const) {
-      project.resources[resourceType].forEach((entry, index) => {
-        reportNonCanonicalManifestPath(
-          entry.path,
-          `attest/${resourceType}/${entry.id}.json`,
-          context,
-          ['resources', resourceType, index, 'path'],
-        );
-      });
-    }
+/** Collects manifest invariants after structural decoding, optionally under a containing path. */
+const collectManifestIssues = (
+  project: typeof projectManifestStructure.Type,
+  prefix: readonly PropertyKey[] = [],
+): Schema.FilterIssue[] => {
+  const context: Schema.FilterIssue[] = [];
 
-    project.resources.datasets.forEach((entry, index) => {
+  for (const resourceType of ['agents', 'tests', 'datasets', 'metrics'] as const) {
+    reportDuplicates({
+      values: project.resources[resourceType].map(({ id }) => id),
+      pathFor: (index) => [...prefix, 'resources', resourceType, index, 'id'],
+      label: 'manifest resource id',
+      context,
+    });
+  }
+
+  for (const resourceType of ['agents', 'tests', 'metrics'] as const) {
+    project.resources[resourceType].forEach((entry, index) => {
       reportNonCanonicalManifestPath(
-        entry.data_path,
-        `attest/datasets/${entry.id}.jsonl`,
+        entry.path,
+        `attest/${resourceType}/${entry.id}.json`,
         context,
-        ['resources', 'datasets', index, 'data_path'],
-      );
-      reportNonCanonicalManifestPath(
-        entry.metadata_path,
-        `attest/datasets/${entry.id}.meta.json`,
-        context,
-        ['resources', 'datasets', index, 'metadata_path'],
+        [...prefix, 'resources', resourceType, index, 'path'],
       );
     });
-  })
-  .meta({ id: 'ProjectManifest' });
+  }
 
-type ProjectManifest = z.infer<typeof projectManifestSchema>;
+  project.resources.datasets.forEach((entry, index) => {
+    reportNonCanonicalManifestPath(entry.data_path, `attest/datasets/${entry.id}.jsonl`, context, [
+      ...prefix,
+      'resources',
+      'datasets',
+      index,
+      'data_path',
+    ]);
+    reportNonCanonicalManifestPath(
+      entry.metadata_path,
+      `attest/datasets/${entry.id}.meta.json`,
+      context,
+      [...prefix, 'resources', 'datasets', index, 'metadata_path'],
+    );
+  });
 
-export { projectManifestSchema, type ProjectManifest };
+  return context;
+};
+
+/** Validates the generated project index and its resource identities and paths. */
+const projectManifestSchema = projectManifestStructure
+  .check(Schema.makeFilter((project) => collectManifestIssues(project)))
+  .annotate({ identifier: 'ProjectManifest' });
+
+type ProjectManifest = typeof projectManifestSchema.Type;
+
+export { projectManifestSchema, collectManifestIssues, type ProjectManifest };

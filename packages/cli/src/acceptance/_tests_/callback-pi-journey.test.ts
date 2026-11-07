@@ -1,3 +1,4 @@
+import { Effect, Exit, Scope } from 'effect';
 import { spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
@@ -138,12 +139,23 @@ const runCallbackJourney = async (mockPiFlags: readonly string[]): Promise<Journ
   const packed: PackedCli = { ...inject('packedCli'), attestHome };
   const triggerToken = randomBytes(32).toString('base64url');
 
-  const runner = createAgentRunner({
-    handler: createPiHandler({ argv: [process.execPath, MOCK_PI, ...mockPiFlags] }),
-    triggerToken,
-  });
+  const owner = await Effect.runPromise(Scope.make());
 
-  const served = await serveAgentRunner(runner, { port: 0 });
+  const runner = await Effect.runPromise(
+    Effect.provideService(
+      createAgentRunner({
+        handler: createPiHandler({ argv: [process.execPath, MOCK_PI, ...mockPiFlags] }),
+        triggerToken,
+      }),
+      Scope.Scope,
+      owner,
+    ),
+  );
+
+  const served = await Effect.runPromise(
+    Effect.provideService(serveAgentRunner(runner, { port: 0 }), Scope.Scope, owner),
+  );
+
   let stopView: (() => Promise<void>) | undefined;
 
   try {
@@ -224,8 +236,9 @@ const runCallbackJourney = async (mockPiFlags: readonly string[]): Promise<Journ
   } finally {
     vi.unstubAllEnvs();
     await stopView?.();
-    await runner.close();
-    await served.close();
+    await Effect.runPromise(runner.close());
+    await Effect.runPromise(served.close());
+    await Effect.runPromise(Scope.close(owner, Exit.void));
     await rm(root, { force: true, recursive: true });
     await rm(attestHome, { force: true, recursive: true });
   }

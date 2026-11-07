@@ -1,3 +1,4 @@
+import * as Effect from 'effect/Effect';
 import {
   parseWithSchema,
   assertionCheckSchema,
@@ -6,7 +7,7 @@ import {
   type SecretReference,
   type ToolArgumentMatcher,
 } from '@attest/contracts';
-import { z } from 'zod';
+import * as Schema from 'effect/Schema';
 
 import { LocalError } from '../../../errors/index.js';
 import { schemaIssueDiagnostics } from '../../../internal/schema-issue-diagnostics.js';
@@ -30,7 +31,7 @@ const parseChoice = <const Choice extends string>(
   choices: readonly [Choice, ...Choice[]],
   path: string,
 ): Choice => {
-  const parsed = parseWithSchema(z.enum(choices), value);
+  const parsed = parseWithSchema(Schema.Literals(choices), value);
 
   if (!parsed.ok) {
     throw new LocalError('cli_usage', `${path} must be one of ${choices.join(', ')}.`, { path });
@@ -137,37 +138,42 @@ const requireValue = (value: string | undefined, path: string): string => {
   });
 };
 
-const readExclusiveText = async (
+const readExclusiveText = Effect.fn('readExclusiveText')(function* (
   literal: string | undefined,
   source: string | undefined,
   literalPath: string,
   sourcePath: string,
   fields: MetricAddFields,
-): Promise<string> => {
-  if (literal !== undefined && source !== undefined) {
-    throw new LocalError('cli_usage', 'Metric text input sources overlap.', {
+) {
+  try {
+    if (literal !== undefined && source !== undefined) {
+      throw new LocalError('cli_usage', 'Metric text input sources overlap.', {
+        path: literalPath,
+        hint: `Pass either ${literalPath} or ${sourcePath}.`,
+      });
+    }
+
+    if (literal?.trim()) return literal.trim();
+
+    if (source !== undefined) {
+      const text = yield* readSourceText(source, {
+        path: sourcePath,
+        readStdin: fields.readStdin,
+        workingDirectory: fields.workingDirectory,
+      });
+
+      if (text.trim()) return text;
+    }
+
+    throw new LocalError('cli_missing_input', `Required metric input ${literalPath} is missing.`, {
       path: literalPath,
-      hint: `Pass either ${literalPath} or ${sourcePath}.`,
+      hint: `Pass ${literalPath} or ${sourcePath}.`,
     });
+  } catch (error) {
+    if (error instanceof LocalError) return yield* Effect.fail(error);
+    throw error;
   }
-
-  if (literal?.trim()) return literal.trim();
-
-  if (source !== undefined) {
-    const text = await readSourceText(source, {
-      path: sourcePath,
-      readStdin: fields.readStdin,
-      workingDirectory: fields.workingDirectory,
-    });
-
-    if (text.trim()) return text;
-  }
-
-  throw new LocalError('cli_missing_input', `Required metric input ${literalPath} is missing.`, {
-    path: literalPath,
-    hint: `Pass ${literalPath} or ${sourcePath}.`,
-  });
-};
+});
 
 export {
   parseAssertionJson,

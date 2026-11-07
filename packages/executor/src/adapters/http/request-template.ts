@@ -9,7 +9,7 @@ import {
 } from '@attest/contracts';
 
 import { AgentInvocationError } from '../../errors.js';
-import { parseJson } from '../../internal/json-value.js';
+import { parseJson, isJsonArray } from '../../internal/json-value.js';
 import { readJsonPointer } from './json-pointer.js';
 
 type ResolvedHttpRequestTemplate = Omit<HttpRequestTemplate, 'headers' | 'query'> & {
@@ -123,7 +123,7 @@ const mapBodyValue = (value: JsonValue, request: AgentRequest | undefined): Json
     return interpolateText(value, request, false);
   }
 
-  if (Array.isArray(value)) return value.map((entry) => mapBodyValue(entry, request));
+  if (isJsonArray(value)) return value.map((entry) => mapBodyValue(entry, request));
 
   if (isJsonObject(value)) {
     return Object.fromEntries(

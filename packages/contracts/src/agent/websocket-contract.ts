@@ -1,5 +1,5 @@
 import { isString, type JsonValue } from '../project/shared.js';
-import { z } from 'zod';
+import * as Schema from 'effect/Schema';
 
 import { agentRequestSchema } from './protocol.js';
 import {
@@ -13,43 +13,49 @@ import { WEBSOCKET_MESSAGE_PROTOCOL, WEBSOCKET_REQUEST_PROTOCOL } from '../schem
 // RFC 9110 token characters, shared by header names and subprotocol names.
 const httpTokenPattern = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/u;
 
-const webSocketLifecycleSchema = z.enum(['per_case', 'per_run']);
+const webSocketLifecycleSchema = Schema.Literals(['per_case', 'per_run']);
 
-const webSocketConnectionModeSchema = z.enum(['serial', 'multiplexed']);
+const webSocketConnectionModeSchema = Schema.Literals(['serial', 'multiplexed']);
 
-const webSocketJsonPointerSchema = jsonPointerSchema.refine(
-  (pointer) => pointer !== '',
-  'must address a field rather than the whole message',
+const webSocketJsonPointerSchema = jsonPointerSchema.check(
+  Schema.makeFilter((pointer) =>
+    pointer !== '' ? undefined : 'must address a field rather than the whole message',
+  ),
 );
 
-const webSocketUrlTemplateSchema = z
-  .string()
-  .regex(/^wss?:\/\/\S+$/u, 'must be a WebSocket URL template')
-  .refine(
-    (url) => !/(?:^|\/)socket\.io(?:\/|\?|$)|[?&]EIO=/iu.test(url),
-    'Socket.IO endpoints are unsupported; configure a plain WebSocket endpoint',
+const webSocketUrlTemplateSchema = Schema.String.check(
+  Schema.isPattern(/^wss?:\/\/\S+$/u, { message: 'must be a WebSocket URL template' }),
+).check(
+  Schema.makeFilter((url) =>
+    !/(?:^|\/)socket\.io(?:\/|\?|$)|[?&]EIO=/iu.test(url)
+      ? undefined
+      : 'Socket.IO endpoints are unsupported; configure a plain WebSocket endpoint',
+  ),
+);
+
+const webSocketHeaderNameSchema = Schema.String.check(Schema.isMinLength(1)).check(
+  Schema.isPattern(httpTokenPattern, { message: 'must be an HTTP header name' }),
+);
+
+const webSocketHeaderValueSchema = Schema.Union([Schema.String, secretReferenceSchema]);
+
+const webSocketSubprotocolSchema = Schema.String.check(Schema.isMinLength(1))
+  .check(Schema.isMaxLength(123))
+  .check(Schema.isPattern(httpTokenPattern, { message: 'must be one WebSocket subprotocol token' }))
+  .check(
+    Schema.makeFilter((protocol) =>
+      !['graphql-ws', 'graphql-transport-ws', 'socket.io'].includes(protocol.toLowerCase())
+        ? undefined
+        : 'Socket.IO and GraphQL subscription subprotocols are unsupported',
+    ),
   );
 
-const webSocketHeaderNameSchema = z
-  .string()
-  .min(1)
-  .regex(httpTokenPattern, 'must be an HTTP header name');
-
-const webSocketHeaderValueSchema = z.union([z.string(), secretReferenceSchema]);
-
-const webSocketSubprotocolSchema = z
-  .string()
-  .min(1)
-  .max(123)
-  .regex(httpTokenPattern, 'must be one WebSocket subprotocol token')
-  .refine(
-    (protocol) =>
-      !['graphql-ws', 'graphql-transport-ws', 'socket.io'].includes(protocol.toLowerCase()),
-    'Socket.IO and GraphQL subscription subprotocols are unsupported',
-  );
-
-const isJsonContainer = (value: JsonValue): value is Record<string, JsonValue> | JsonValue[] =>
+const isJsonContainer = (
+  value: JsonValue,
+): value is Record<string, JsonValue> | readonly JsonValue[] =>
   value !== null && typeof value === 'object';
+
+const isJsonArray = (value: JsonValue): value is readonly JsonValue[] => Array.isArray(value);
 
 /** Counts exact correlation slots without interpreting any other authored template syntax. */
 const countRequestIdSlots = (value: JsonValue): number => {
@@ -57,7 +63,7 @@ const countRequestIdSlots = (value: JsonValue): number => {
     return 1;
   }
 
-  if (Array.isArray(value)) {
+  if (isJsonArray(value)) {
     return value.reduce<number>((count, item) => count + countRequestIdSlots(item), 0);
   }
 
@@ -68,149 +74,151 @@ const countRequestIdSlots = (value: JsonValue): number => {
   return Object.values(value).reduce<number>((count, item) => count + countRequestIdSlots(item), 0);
 };
 
-const webSocketRequestTemplateSchema = z
-  .record(z.string(), z.json())
-  .superRefine((template, context) => {
+const webSocketRequestTemplateSchema = Schema.Record(Schema.String, Schema.Json).check(
+  Schema.makeFilter((template) => {
+    const context: Schema.FilterIssue[] = [];
+
     if (countRequestIdSlots(template) !== 1) {
-      context.addIssue({
-        code: 'custom',
-        message: 'must contain exactly one {{request_id}} correlation slot',
+      context.push({
+        path: [],
+        issue: 'must contain exactly one {{request_id}} correlation slot',
       });
     }
-  });
+
+    return context;
+  }),
+);
 
 /**
  * Authored WebSocket transport. Retries are allowed only before the server acknowledges the
  * request.
  */
-const webSocketTransportSchema = z
-  .strictObject({
-    kind: z.literal('websocket'),
-    lifecycle: webSocketLifecycleSchema,
-    connection_mode: webSocketConnectionModeSchema,
-    framing: z.literal('text_json'),
-    url: webSocketUrlTemplateSchema,
-    headers: z.record(webSocketHeaderNameSchema, webSocketHeaderValueSchema).optional(),
-    subprotocol: webSocketSubprotocolSchema.optional(),
-    request_template: webSocketRequestTemplateSchema,
-    request_id_pointer: webSocketJsonPointerSchema,
-    acknowledgement_pointer: webSocketJsonPointerSchema,
-    acknowledgement_values: z.array(z.json()).nonempty(),
-    result_pointer: webSocketJsonPointerSchema,
-    error_pointer: webSocketJsonPointerSchema,
-    trace_pointer: webSocketJsonPointerSchema.optional(),
-    open_timeout_ms: durationMillisecondsSchema,
-    message_idle_timeout_ms: durationMillisecondsSchema,
-    attempt_timeout_ms: durationMillisecondsSchema,
-    ping_interval_ms: durationMillisecondsSchema,
-    close_timeout_ms: durationMillisecondsSchema,
-    retry_boundary: z.literal('before_acknowledgement'),
-    replay_after_acknowledgement: z.literal(false),
-  })
-  .superRefine((transport, context) => {
-    if (transport.lifecycle === 'per_case' && transport.connection_mode !== 'serial') {
-      context.addIssue({
-        code: 'custom',
-        path: ['connection_mode'],
-        message: 'per_case connections are serial; multiplexing requires lifecycle per_run',
-      });
-    }
+const webSocketTransportSchema = Schema.Struct({
+  kind: Schema.Literal('websocket'),
+  lifecycle: webSocketLifecycleSchema,
+  connection_mode: webSocketConnectionModeSchema,
+  framing: Schema.Literal('text_json'),
+  url: webSocketUrlTemplateSchema,
+  headers: Schema.optional(Schema.Record(webSocketHeaderNameSchema, webSocketHeaderValueSchema)),
+  subprotocol: Schema.optional(webSocketSubprotocolSchema),
+  request_template: webSocketRequestTemplateSchema,
+  request_id_pointer: webSocketJsonPointerSchema,
+  acknowledgement_pointer: webSocketJsonPointerSchema,
+  acknowledgement_values: Schema.Array(Schema.Json).check(Schema.isMinLength(1)),
+  result_pointer: webSocketJsonPointerSchema,
+  error_pointer: webSocketJsonPointerSchema,
+  trace_pointer: Schema.optional(webSocketJsonPointerSchema),
+  open_timeout_ms: durationMillisecondsSchema,
+  message_idle_timeout_ms: durationMillisecondsSchema,
+  attempt_timeout_ms: durationMillisecondsSchema,
+  ping_interval_ms: durationMillisecondsSchema,
+  close_timeout_ms: durationMillisecondsSchema,
+  retry_boundary: Schema.Literal('before_acknowledgement'),
+  replay_after_acknowledgement: Schema.Literal(false),
+})
+  .check(
+    Schema.makeFilter((transport) => {
+      const context: Schema.FilterIssue[] = [];
 
-    if (transport.open_timeout_ms > transport.attempt_timeout_ms) {
-      context.addIssue({
-        code: 'custom',
-        path: ['open_timeout_ms'],
-        message: 'must not exceed attempt_timeout_ms',
-      });
-    }
-
-    if (transport.message_idle_timeout_ms > transport.attempt_timeout_ms) {
-      context.addIssue({
-        code: 'custom',
-        path: ['message_idle_timeout_ms'],
-        message: 'must not exceed attempt_timeout_ms',
-      });
-    }
-
-    if (transport.ping_interval_ms >= transport.message_idle_timeout_ms) {
-      context.addIssue({
-        code: 'custom',
-        path: ['ping_interval_ms'],
-        message: 'must be less than message_idle_timeout_ms',
-      });
-    }
-
-    const pointers = [
-      ['request_id_pointer', transport.request_id_pointer],
-      ['acknowledgement_pointer', transport.acknowledgement_pointer],
-      ['result_pointer', transport.result_pointer],
-      ['error_pointer', transport.error_pointer],
-      ...(transport.trace_pointer === undefined
-        ? []
-        : ([['trace_pointer', transport.trace_pointer]] as const)),
-    ] as const;
-
-    const firstPathByPointer = new Map<string, string>();
-
-    for (const [path, pointer] of pointers) {
-      const firstPath = firstPathByPointer.get(pointer);
-
-      if (firstPath !== undefined) {
-        context.addIssue({
-          code: 'custom',
-          path: [path],
-          message: `must not reuse ${firstPath}`,
-        });
-      } else {
-        firstPathByPointer.set(pointer, path);
-      }
-    }
-
-    for (const [name, value] of Object.entries(transport.headers ?? {})) {
-      const normalizedName = name.toLowerCase();
-
-      if (normalizedName === 'cookie') {
-        context.addIssue({
-          code: 'custom',
-          path: ['headers', name],
-          message: 'cookies are unsupported',
+      if (transport.lifecycle === 'per_case' && transport.connection_mode !== 'serial') {
+        context.push({
+          path: ['connection_mode'],
+          issue: 'per_case connections are serial; multiplexing requires lifecycle per_run',
         });
       }
 
-      if (
-        (normalizedName === 'authorization' || normalizedName === 'proxy-authorization') &&
-        isString(value)
-      ) {
-        context.addIssue({
-          code: 'custom',
-          path: ['headers', name],
-          message: 'literal authorization is unsupported; use a secret reference',
+      if (transport.open_timeout_ms > transport.attempt_timeout_ms) {
+        context.push({
+          path: ['open_timeout_ms'],
+          issue: 'must not exceed attempt_timeout_ms',
         });
       }
-    }
-  })
-  .meta({ id: 'WebSocketTransport' });
+
+      if (transport.message_idle_timeout_ms > transport.attempt_timeout_ms) {
+        context.push({
+          path: ['message_idle_timeout_ms'],
+          issue: 'must not exceed attempt_timeout_ms',
+        });
+      }
+
+      if (transport.ping_interval_ms >= transport.message_idle_timeout_ms) {
+        context.push({
+          path: ['ping_interval_ms'],
+          issue: 'must be less than message_idle_timeout_ms',
+        });
+      }
+
+      const pointers = [
+        ['request_id_pointer', transport.request_id_pointer],
+        ['acknowledgement_pointer', transport.acknowledgement_pointer],
+        ['result_pointer', transport.result_pointer],
+        ['error_pointer', transport.error_pointer],
+        ...(transport.trace_pointer === undefined
+          ? []
+          : ([['trace_pointer', transport.trace_pointer]] as const)),
+      ] as const;
+
+      const firstPathByPointer = new Map<string, string>();
+
+      for (const [path, pointer] of pointers) {
+        const firstPath = firstPathByPointer.get(pointer);
+
+        if (firstPath !== undefined) {
+          context.push({
+            path: [path],
+            issue: `must not reuse ${firstPath}`,
+          });
+        } else {
+          firstPathByPointer.set(pointer, path);
+        }
+      }
+
+      for (const [name, value] of Object.entries(transport.headers ?? {})) {
+        const normalizedName = name.toLowerCase();
+
+        if (normalizedName === 'cookie') {
+          context.push({
+            path: ['headers', name],
+            issue: 'cookies are unsupported',
+          });
+        }
+
+        if (
+          (normalizedName === 'authorization' || normalizedName === 'proxy-authorization') &&
+          isString(value)
+        ) {
+          context.push({
+            path: ['headers', name],
+            issue: 'literal authorization is unsupported; use a secret reference',
+          });
+        }
+      }
+
+      return context;
+    }),
+  )
+  .annotate({ identifier: 'WebSocketTransport' });
 
 /** Normalizes one adapter invocation before the authored request template is rendered. */
-const webSocketInvocationRequestSchema = z.strictObject({
-  protocol: z.literal(WEBSOCKET_REQUEST_PROTOCOL),
+const webSocketInvocationRequestSchema = Schema.Struct({
+  protocol: Schema.Literal(WEBSOCKET_REQUEST_PROTOCOL),
   request_id: requestIdSchema,
   request: agentRequestSchema,
 });
 
 /** Classifies a correlated text-JSON message after configured pointer extraction. */
-const webSocketCorrelatedMessageSchema = z.strictObject({
-  protocol: z.literal(WEBSOCKET_MESSAGE_PROTOCOL),
-  type: z.enum(['acknowledgement', 'result', 'error', 'trace']),
+const webSocketCorrelatedMessageSchema = Schema.Struct({
+  protocol: Schema.Literal(WEBSOCKET_MESSAGE_PROTOCOL),
+  type: Schema.Literals(['acknowledgement', 'result', 'error', 'trace']),
   request_id: requestIdSchema,
-  value: z.json(),
+  value: Schema.Json,
 });
 
-type WebSocketCorrelatedMessage = z.infer<typeof webSocketCorrelatedMessageSchema>;
+type WebSocketCorrelatedMessage = typeof webSocketCorrelatedMessageSchema.Type;
 
-type WebSocketInvocationRequest = z.infer<typeof webSocketInvocationRequestSchema>;
+type WebSocketInvocationRequest = typeof webSocketInvocationRequestSchema.Type;
 
-type WebSocketTransport = z.infer<typeof webSocketTransportSchema>;
+type WebSocketTransport = typeof webSocketTransportSchema.Type;
 
 export {
   webSocketConnectionModeSchema,

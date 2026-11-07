@@ -1,4 +1,5 @@
 export {
+  CallbackCleanupError,
   completeCallbackAgent,
   invokeCallbackAgent,
   triggerCallbackAgent,

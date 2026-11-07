@@ -1,3 +1,5 @@
+import { valueFromExit } from '../../../internal/effect-exit.js';
+import * as Effect from 'effect/Effect';
 import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -52,15 +54,17 @@ const writeSource = async (root: string, name: string, contents: string): Promis
 };
 
 const mutate = (root: string, request: TestAuthoringCommand) =>
-  runTestMutationCommand({
-    project: root,
-    readImportStdin: () => {
-      throw new Error('stdin must not be read');
-    },
-    readStdin: () => Promise.reject(new Error('stdin must not be read')),
-    request,
-    workingDirectory: root,
-  });
+  Effect.runPromiseExit(
+    runTestMutationCommand({
+      project: root,
+      readImportStdin: () => {
+        throw new Error('stdin must not be read');
+      },
+      readStdin: () => Promise.reject(new Error('stdin must not be read')),
+      request,
+      workingDirectory: root,
+    }),
+  ).then((exit) => valueFromExit(exit));
 
 const addTest = (root: string, id: string) =>
   mutate(root, {
@@ -157,7 +161,10 @@ describe('runTestMutationCommand', { timeout: 20_000 }, () => {
       new_id: 'native-renamed',
     });
 
-    const loaded = await loadProject({ project: root });
+    const loaded = await Effect.runPromiseExit(loadProject({ project: root })).then((exit) =>
+      valueFromExit(exit),
+    );
+
     const directId = loaded.tests.find(({ id }) => id === 'direct')?.cases[0]?.id;
     expect(directId).toBeDefined();
     expect(
@@ -214,7 +221,10 @@ describe('runTestMutationCommand', { timeout: 20_000 }, () => {
       tags: ['smoke'],
     });
 
-    const loaded = await loadProject({ project: root });
+    const loaded = await Effect.runPromiseExit(loadProject({ project: root })).then((exit) =>
+      valueFromExit(exit),
+    );
+
     expect(loaded.datasets.find(({ metadata }) => metadata.id === 'empty')?.cases).toEqual([]);
     expect(loaded.tests[0]?.cases).toEqual([]);
     expect(loaded.tests[0]?.datasets).toEqual([
@@ -365,18 +375,22 @@ describe('runTestMutationCommand', { timeout: 20_000 }, () => {
     await writeFile(source, 'external_id,prompt\none,old\ntwo,preserved\n');
     await importDataset(root, target, upsert);
 
-    const initial = (await loadProject({ project: root })).datasets.find(
-      ({ metadata }) => metadata.id === 'incremental',
-    )?.cases;
+    const initial = (
+      await Effect.runPromiseExit(loadProject({ project: root })).then((exit) =>
+        valueFromExit(exit),
+      )
+    ).datasets.find(({ metadata }) => metadata.id === 'incremental')?.cases;
 
     await writeFile(source, 'external_id,prompt\none,new\nthree,added\n');
     const updated = await importDataset(root, target, upsert);
     const counts = { inserted: 1, read: 2, skipped: 0, updated: 1 };
     expect(updated.result).toMatchObject({ imported_case_count: 2, import: { counts } });
 
-    const dataset = (await loadProject({ project: root })).datasets.find(
-      ({ metadata }) => metadata.id === 'incremental',
-    );
+    const dataset = (
+      await Effect.runPromiseExit(loadProject({ project: root })).then((exit) =>
+        valueFromExit(exit),
+      )
+    ).datasets.find(({ metadata }) => metadata.id === 'incremental');
 
     expect(dataset?.cases).toEqual([
       { id: initial?.[0]?.id, input: 'new' },
@@ -466,10 +480,14 @@ describe('runTestMutationCommand', { timeout: 20_000 }, () => {
     const secret = 'super-secret-auth-token';
     const requestPath = await writeSource(root, 'request.json', `{not-json:${secret}}`);
 
-    const error: unknown = await readCommandRequest('test.add', requestPath, {
-      readStdin: () => Promise.reject(new Error('stdin must not be read')),
-      workingDirectory: root,
-    }).catch((cause: unknown) => cause);
+    const error: unknown = await Effect.runPromiseExit(
+      readCommandRequest('test.add', requestPath, {
+        readStdin: () => Promise.reject(new Error('stdin must not be read')),
+        workingDirectory: root,
+      }),
+    )
+      .then((exit) => valueFromExit(exit))
+      .catch((cause: unknown) => cause);
 
     if (!(error instanceof LocalError)) throw new Error('Expected a LocalError.');
     expect(error.code).toBe('cli_usage');

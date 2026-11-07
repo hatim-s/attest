@@ -1,70 +1,13 @@
 {
-  "$defs": {
-    "__schema0": {
-      "anyOf": [
-        {
-          "type": "string"
-        },
-        {
-          "type": "number"
-        },
-        {
-          "type": "boolean"
-        },
-        {
-          "type": "null"
-        },
-        {
-          "items": {
-            "$ref": "#/$defs/__schema0"
-          },
-          "type": "array"
-        },
-        {
-          "additionalProperties": {
-            "$ref": "#/$defs/__schema0"
-          },
-          "propertyNames": {
-            "type": "string"
-          },
-          "type": "object"
-        }
-      ]
-    },
-    "__schema1": {
-      "anyOf": [
-        {
-          "type": "string"
-        },
-        {
-          "type": "number"
-        },
-        {
-          "type": "boolean"
-        },
-        {
-          "type": "null"
-        },
-        {
-          "items": {
-            "$ref": "#/$defs/__schema1"
-          },
-          "type": "array"
-        },
-        {
-          "additionalProperties": {
-            "$ref": "#/$defs/__schema1"
-          },
-          "propertyNames": {
-            "type": "string"
-          },
-          "type": "object"
-        }
-      ]
-    }
-  },
+  "$defs": {},
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": true,
+  "allOf": [
+    {
+      "additionalProperties": {},
+      "type": "object"
+    }
+  ],
   "oneOf": [
     {
       "not": {
@@ -89,81 +32,121 @@
   ],
   "properties": {
     "artifacts": {
-      "items": {
-        "additionalProperties": false,
-        "properties": {
-          "content": {
-            "type": "string"
-          },
-          "encoding": {
-            "enum": [
-              "utf8",
-              "base64"
-            ],
-            "type": "string"
-          },
-          "kind": {
-            "const": "inline",
-            "type": "string"
-          },
-          "media_type": {
-            "maxLength": 255,
-            "minLength": 1,
-            "type": "string"
-          },
-          "path": {
-            "allOf": [
-              {
-                "pattern": "^(?![A-Za-z]:)"
+      "anyOf": [
+        {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "content": {
+                "type": "string"
               },
-              {
-                "pattern": "^(?![\\\\/])(?!(?:.*[\\\\/])?\\.\\.(?:[\\\\/]|$)).+$"
+              "encoding": {
+                "enum": [
+                  "utf8",
+                  "base64"
+                ],
+                "type": "string"
               },
-              {
-                "pattern": "^(?!\\.{1,2}(?:\\/|(?![\\s\\S])))[^/\\\\\\p{Cc}]{1,255}(?:\\/(?!\\.{1,2}(?:\\/|(?![\\s\\S])))[^/\\\\\\p{Cc}]{1,255})*(?![\\s\\S])"
+              "kind": {
+                "enum": [
+                  "inline"
+                ],
+                "type": "string"
+              },
+              "media_type": {
+                "maxLength": 255,
+                "minLength": 1,
+                "type": "string"
+              },
+              "path": {
+                "allOf": [
+                  {
+                    "pattern": "^(?![\\\\/])(?!(?:.*[\\\\/])?\\.\\.(?:[\\\\/]|$)).+$"
+                  },
+                  {
+                    "pattern": "^(?!\\.{1,2}(?:\\/|(?![\\s\\S])))[^/\\\\\\p{Cc}]{1,255}(?:\\/(?!\\.{1,2}(?:\\/|(?![\\s\\S])))[^/\\\\\\p{Cc}]{1,255})*(?![\\s\\S])"
+                  }
+                ],
+                "minLength": 1,
+                "pattern": "^(?![A-Za-z]:)",
+                "type": "string"
               }
+            },
+            "required": [
+              "kind",
+              "path",
+              "media_type",
+              "encoding",
+              "content"
             ],
-            "minLength": 1,
-            "type": "string"
-          }
+            "type": "object"
+          },
+          "type": "array"
         },
-        "required": [
-          "kind",
-          "path",
-          "media_type",
-          "encoding",
-          "content"
-        ],
-        "type": "object"
-      },
-      "type": "array"
+        {
+          "not": {}
+        }
+      ]
     },
     "error": {
-      "additionalProperties": false,
-      "properties": {
-        "code": {
-          "type": "string"
+      "anyOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "code": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "not": {}
+                }
+              ]
+            },
+            "message": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "message"
+          ],
+          "type": "object"
         },
-        "message": {
-          "type": "string"
+        {
+          "not": {}
         }
-      },
-      "required": [
-        "message"
-      ],
-      "type": "object"
+      ]
     },
     "output": {
-      "$ref": "#/$defs/__schema0"
+      "anyOf": [
+        {},
+        {
+          "not": {}
+        }
+      ]
     },
     "protocol": {
-      "const": "attest.agent-invocation",
+      "enum": [
+        "attest.agent-invocation"
+      ],
       "type": "string"
     },
     "state": {
-      "$ref": "#/$defs/__schema1"
+      "anyOf": [
+        {},
+        {
+          "not": {}
+        }
+      ]
     },
-    "trace": {}
+    "trace": {
+      "anyOf": [
+        {},
+        {
+          "not": {}
+        }
+      ]
+    }
   },
   "required": [
     "protocol"

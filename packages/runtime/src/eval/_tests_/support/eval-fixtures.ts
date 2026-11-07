@@ -1,12 +1,11 @@
+import * as Effect from 'effect/Effect';
 import { parseWithSchemaSync, isString } from '@attest/contracts';
 import type { CaseExecution } from '../../types.js';
 import { readFileSync } from 'node:fs';
-
 import { evalRunSchema, type EvalRun } from '@attest/contracts';
 import type { StoredMetricEvaluation } from '@attest/core';
 import { AgentInvocationError } from '@attest/executor';
 import { vi } from 'vitest';
-
 import type {
   EvalCaseRunner,
   EvalCaseRunnerResult,
@@ -24,7 +23,11 @@ const baseRun = parseWithSchemaSync(
   JSON.parse(readFileSync(new URL('../fixtures/eval-run.json', import.meta.url), 'utf8')),
 );
 
-type CaseSpec = { caseId: string; testId?: string; testConcurrency?: number };
+type CaseSpec = {
+  caseId: string;
+  testId?: string;
+  testConcurrency?: number;
+};
 
 type PlanOptions = {
   baseline?: boolean;
@@ -53,7 +56,7 @@ const createPlan = (
   const baselineRunId = options.baseline === true ? BASELINE_RUN_ID : undefined;
   const junitPath = options.junit === true ? 'artifacts/results.xml' : undefined;
 
-  const run: EvalRun = {
+  let run: EvalRun = {
     ...structuredClone(baseRun),
     snapshot: {
       ...structuredClone(baseRun.snapshot),
@@ -62,22 +65,28 @@ const createPlan = (
     },
   };
 
-  run.effective_command.resolved = {
-    concurrency,
-    timeout_ms: options.timeoutMs ?? 60_000,
-    output: 'jsonl',
-    watch: false,
-    baseline_run_id: baselineRunId,
-    junit_path: junitPath,
-    execution:
-      options.workers === undefined
-        ? undefined
-        : {
-            workers: {
-              count: options.workers,
-              directory: '.attest/runs/{run_id}/workers/{worker_index}',
-            },
-          },
+  run = {
+    ...run,
+    effective_command: {
+      ...run.effective_command,
+      resolved: {
+        concurrency,
+        timeout_ms: options.timeoutMs ?? 60000,
+        output: 'jsonl',
+        watch: false,
+        baseline_run_id: baselineRunId,
+        junit_path: junitPath,
+        execution:
+          options.workers === undefined
+            ? undefined
+            : {
+                workers: {
+                  count: options.workers,
+                  directory: '.attest/runs/{run_id}/workers/{worker_index}',
+                },
+              },
+      },
+    },
   };
 
   return {
@@ -200,15 +209,15 @@ const errorMetric = (name = 'correct'): StoredMetricEvaluation => ({
 const createPersistence = () => {
   const createRun = vi
     .fn<EvalPersistenceAdapter<string>['createRun']>()
-    .mockResolvedValue(undefined);
+    .mockReturnValue(Effect.void);
 
   const recordCase = vi
     .fn<EvalPersistenceAdapter<string>['recordCase']>()
-    .mockResolvedValue(undefined);
+    .mockReturnValue(Effect.void);
 
   const finalizeRun = vi
     .fn<EvalPersistenceAdapter<string>['finalizeRun']>()
-    .mockResolvedValue(undefined);
+    .mockReturnValue(Effect.void);
 
   const adapter: EvalPersistenceAdapter<string> = { createRun, recordCase, finalizeRun };
 
@@ -216,19 +225,20 @@ const createPersistence = () => {
 };
 
 /** A runner case that waits for its signal to abort, then reports a cancelled invocation. */
-const waitForAbort: EvalCaseRunner<string>['executeCase'] = async (
-  _runId,
-  resolvedCase,
-  signal,
-) => {
-  if (!signal.aborted) {
-    await new Promise<void>((resolve) =>
-      signal.addEventListener('abort', () => resolve(), { once: true }),
-    );
-  }
+const waitForAbort: EvalCaseRunner<string>['executeCase'] = (_runId, resolvedCase, signal) =>
+  Effect.gen(function* () {
+    if (!signal.aborted) {
+      yield* Effect.tryPromise({
+        try: () =>
+          new Promise<void>((resolve) =>
+            signal.addEventListener('abort', () => resolve(), { once: true }),
+          ),
+        catch: (error) => (error instanceof Error ? error : new Error(String(error))),
+      });
+    }
 
-  return failedExecution(resolvedCase, 'cancelled');
-};
+    return failedExecution(resolvedCase, 'cancelled');
+  });
 
 export {
   BASELINE_RUN_ID,

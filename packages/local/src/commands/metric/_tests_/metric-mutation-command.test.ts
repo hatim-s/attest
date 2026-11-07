@@ -1,3 +1,5 @@
+import { valueFromExit } from '../../../internal/effect-exit.js';
+import * as Effect from 'effect/Effect';
 import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -30,13 +32,15 @@ const createProject = async (): Promise<string> => {
 const schema = COMMAND_REQUEST_SCHEMA_ID;
 
 const mutate = (root: string, request: MetricAuthoringRequest, stdin = '') =>
-  runMetricMutationCommand({
-    interactive: false,
-    project: root,
-    readStdin: () => Promise.resolve(stdin),
-    request,
-    workingDirectory: root,
-  });
+  Effect.runPromiseExit(
+    runMetricMutationCommand({
+      interactive: false,
+      project: root,
+      readStdin: () => Promise.resolve(stdin),
+      request,
+      workingDirectory: root,
+    }),
+  ).then((exit) => valueFromExit(exit));
 
 /** Resolves to the rejection reason, or undefined when the mutation succeeds. */
 const rejection = async <T>(attempt: Promise<T>): Promise<Error | undefined> => {
@@ -69,19 +73,55 @@ const snapshotFiles = async (root: string): Promise<Record<string, string>> => {
 describe('runMetricMutationCommand', () => {
   it('renames every reference and removes a referenced metric only with detach', async () => {
     const root = await createProject();
-    const loaded = await loadProject({ project: root });
-    const candidate = candidateFromLoadedProject(loaded);
-    candidate.tests[0]!.cases.push({
-      id: 'direct',
-      input: {},
-      metric_overrides: [{ metric_id: 'correct', threshold: 0.75 }],
-    });
-    candidate.datasets[0]!.cases[0]!.metric_overrides = [{ metric_id: 'correct' }];
-    await applyProjectMutation({
-      candidate,
-      expectedProjectHash: loaded.projectHash,
-      projectRoot: root,
-    });
+
+    const loaded = await Effect.runPromiseExit(loadProject({ project: root })).then((exit) =>
+      valueFromExit(exit),
+    );
+
+    let candidate = candidateFromLoadedProject(loaded);
+    candidate = {
+      ...candidate,
+      tests: candidate.tests.map((entry, index) =>
+        index === 0
+          ? {
+              ...candidate.tests[0]!,
+              cases: [
+                ...candidate.tests[0]!.cases,
+                {
+                  id: 'direct',
+                  input: {},
+                  metric_overrides: [{ metric_id: 'correct', threshold: 0.75 }],
+                },
+              ],
+            }
+          : entry,
+      ),
+    };
+    candidate = {
+      ...candidate,
+      datasets: candidate.datasets.map((entry, index) =>
+        index === 0
+          ? {
+              ...candidate.datasets[0]!,
+              cases: candidate.datasets[0]!.cases.map((entry, index) =>
+                index === 0
+                  ? {
+                      ...candidate.datasets[0]!.cases[0]!,
+                      metric_overrides: [{ metric_id: 'correct' }],
+                    }
+                  : entry,
+              ),
+            }
+          : entry,
+      ),
+    };
+    await Effect.runPromiseExit(
+      applyProjectMutation({
+        candidate,
+        expectedProjectHash: loaded.projectHash,
+        projectRoot: root,
+      }),
+    ).then((exit) => valueFromExit(exit));
 
     await expect(
       mutate(root, { schema, command: 'metric.remove', metric_id: 'correct', yes: true }),
@@ -102,7 +142,11 @@ describe('runMetricMutationCommand', () => {
       metric_id: 'correct',
       new_id: 'correctness',
     });
-    const renamed = await loadProject({ project: root });
+
+    const renamed = await Effect.runPromiseExit(loadProject({ project: root })).then((exit) =>
+      valueFromExit(exit),
+    );
+
     expect(renamed.tests[0]?.metrics[0]?.metric_id).toBe('correctness');
     expect(renamed.tests[0]?.cases[0]?.metric_overrides?.[0]?.metric_id).toBe('correctness');
     expect(renamed.datasets[0]?.cases[0]?.metric_overrides?.[0]?.metric_id).toBe('correctness');
@@ -121,7 +165,11 @@ describe('runMetricMutationCommand', () => {
         message: 'Detached 3 metric references before removal.',
       },
     ]);
-    const detached = await loadProject({ project: root });
+
+    const detached = await Effect.runPromiseExit(loadProject({ project: root })).then((exit) =>
+      valueFromExit(exit),
+    );
+
     expect(detached.metrics).toEqual([]);
     expect(detached.tests[0]?.metrics).toEqual([]);
     expect(detached.tests[0]?.cases[0]?.metric_overrides).toEqual([]);
@@ -157,14 +205,16 @@ describe('runMetricMutationCommand', () => {
 
     const errors = [
       await rejection(
-        createMetricResource({
-          metricId: 'flag-secret',
-          preset: 'http',
-          url: 'https://metric.example/evaluate',
-          bodyJson: JSON.stringify({ accessToken: secrets[0] }),
-          readStdin: () => Promise.resolve(''),
-          workingDirectory: root,
-        }),
+        Effect.runPromiseExit(
+          createMetricResource({
+            metricId: 'flag-secret',
+            preset: 'http',
+            url: 'https://metric.example/evaluate',
+            bodyJson: JSON.stringify({ accessToken: secrets[0] }),
+            readStdin: () => Promise.resolve(''),
+            workingDirectory: root,
+          }),
+        ).then((exit) => valueFromExit(exit)),
       ),
       await rejection(
         mutate(
@@ -202,14 +252,16 @@ describe('runMetricMutationCommand', () => {
   it('builds executable and HTTP metrics with secret references from flag fields', async () => {
     const fields = { readStdin: () => Promise.resolve(''), workingDirectory: tmpdir() };
 
-    const exec = await createMetricResource({
-      ...fields,
-      metricId: 'exec',
-      preset: 'command',
-      argvJson: JSON.stringify(['metric']),
-      env: ['METRIC_SECRET=ATTEST_METRIC_SOURCE_SECRET'],
-      timeout: '5s',
-    });
+    const exec = await Effect.runPromiseExit(
+      createMetricResource({
+        ...fields,
+        metricId: 'exec',
+        preset: 'command',
+        argvJson: JSON.stringify(['metric']),
+        env: ['METRIC_SECRET=ATTEST_METRIC_SOURCE_SECRET'],
+        timeout: '5s',
+      }),
+    ).then((exit) => valueFromExit(exit));
 
     expect(exec.definition).toEqual({
       kind: 'exec',
@@ -218,15 +270,17 @@ describe('runMetricMutationCommand', () => {
       timeout_ms: 5_000,
     });
 
-    const http = await createMetricResource({
-      ...fields,
-      metricId: 'http',
-      preset: 'http',
-      url: 'https://metric.example/evaluate',
-      headerEnv: ['Authorization=ATTEST_METRIC_SOURCE_SECRET'],
-      scorePointer: '/verdict/score',
-      passPointer: '/verdict/pass',
-    });
+    const http = await Effect.runPromiseExit(
+      createMetricResource({
+        ...fields,
+        metricId: 'http',
+        preset: 'http',
+        url: 'https://metric.example/evaluate',
+        headerEnv: ['Authorization=ATTEST_METRIC_SOURCE_SECRET'],
+        scorePointer: '/verdict/score',
+        passPointer: '/verdict/pass',
+      }),
+    ).then((exit) => valueFromExit(exit));
 
     expect(http.definition).toMatchObject({
       kind: 'http',

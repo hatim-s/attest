@@ -1,3 +1,6 @@
+import { valueFromExit } from '../../../internal/effect-exit.js';
+import * as Effect from 'effect/Effect';
+import { stripStruct } from '@attest/contracts';
 import { renameSync, symlinkSync } from 'node:fs';
 import { access, mkdir, mkdtemp, rm, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -13,7 +16,7 @@ import {
   type MetricTestFixture,
 } from '@attest/contracts';
 import { describe, expect, it, onTestFinished, vi } from 'vitest';
-import { z } from 'zod';
+import * as Schema from 'effect/Schema';
 
 import { writeFixtureProject } from '../../../_tests_/support/project-transaction.js';
 import { REDACTED } from '../../../internal/redaction.js';
@@ -23,8 +26,8 @@ import { runMetricTestCommand } from '../metric-test-command.js';
 const EXEC_FIXTURE = fileURLToPath(new URL('./fixtures/result-metric.cjs', import.meta.url));
 
 /** The child reports its sorted env keys; macOS adds `__CF_*` keys to every process. */
-const envKeysSchema = z.object({
-  details: z.object({ env_keys: z.array(z.string()) }),
+const envKeysSchema = stripStruct({
+  details: stripStruct({ env_keys: Schema.Array(Schema.String) }),
 });
 
 const temporaryDirectory = async (prefix: string): Promise<string> => {
@@ -60,22 +63,26 @@ const execMetric = (
 });
 
 const addMetric = (root: string, metric: MetricResource) =>
-  runMetricMutationCommand({
-    interactive: false,
-    project: root,
-    readStdin: () => Promise.reject(new Error('stdin must not be read')),
-    request: { schema: COMMAND_REQUEST_SCHEMA_ID, command: 'metric.add', metric },
-    workingDirectory: root,
-  });
+  Effect.runPromiseExit(
+    runMetricMutationCommand({
+      interactive: false,
+      project: root,
+      readStdin: () => Promise.reject(new Error('stdin must not be read')),
+      request: { schema: COMMAND_REQUEST_SCHEMA_ID, command: 'metric.add', metric },
+      workingDirectory: root,
+    }),
+  ).then((exit) => valueFromExit(exit));
 
 const testMetric = (root: string, metricId: string, document = fixture('Paris', true)) =>
-  runMetricTestCommand({
-    fixture: '-',
-    metricId,
-    project: root,
-    readStdin: () => Promise.resolve(JSON.stringify(document)),
-    workingDirectory: root,
-  });
+  Effect.runPromiseExit(
+    runMetricTestCommand({
+      fixture: '-',
+      metricId,
+      project: root,
+      readStdin: () => Promise.resolve(JSON.stringify(document)),
+      workingDirectory: root,
+    }),
+  ).then(valueFromExit);
 
 // BOUNDARY: The fixture metric process returns untrusted execution details; envKeysSchema validates the emitted key list.
 const envKeys = (evaluation: unknown): string[] =>

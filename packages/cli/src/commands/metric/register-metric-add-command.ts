@@ -1,3 +1,4 @@
+import * as Effect from 'effect/Effect';
 import {
   METRIC_PRESETS,
   httpRequestTemplateSchema,
@@ -34,7 +35,9 @@ const registerMetricAddCommand = (metric: Command, context: CommandContext): voi
     .argument('[metric-id]', 'metric id')
     .option('--name <name>', 'metric display name; defaults to the id')
     .addOption(
-      new Option('--preset <preset>', 'stable metric preset').choices(metricPresetIdSchema.options),
+      new Option('--preset <preset>', 'stable metric preset').choices(
+        metricPresetIdSchema.literals,
+      ),
     )
     .option('--assert-json <json>', 'complete assertion check; repeatable', collect)
     .option('--path <path>', 'assertion evidence path; alone authors exists')
@@ -50,7 +53,7 @@ const registerMetricAddCommand = (metric: Command, context: CommandContext): voi
     .option('--tool <name>', 'tool name for tool-called')
     .addOption(
       new Option('--tool-status <status>', 'tool status').choices(
-        spanStatusSchema.shape.code.options,
+        spanStatusSchema.schema.fields.code.literals,
       ),
     )
     .option('--count <integer>', 'tool-call or span count')
@@ -58,11 +61,11 @@ const registerMetricAddCommand = (metric: Command, context: CommandContext): voi
     .option('--arg-equals <path=json>', 'tool argument equals matcher; repeatable', collect)
     .option('--arg-contains <path=json>', 'tool argument contains matcher; repeatable', collect)
     .option('--arg-exists <path>', 'tool argument exists matcher; repeatable', collect)
-    .addOption(new Option('--span-kind <kind>', 'trace span kind').choices(spanKindSchema.options))
+    .addOption(new Option('--span-kind <kind>', 'trace span kind').choices(spanKindSchema.literals))
     .option('--span-name <name>', 'trace span name')
     .addOption(
       new Option('--span-status <status>', 'trace span status').choices(
-        spanFilterSchema.shape.status.unwrap().options,
+        spanFilterSchema.fields.status.schema.members[0].literals,
       ),
     )
     .option('--attribute <name=json>', 'trace span attribute matcher; repeatable', collect)
@@ -77,7 +80,7 @@ const registerMetricAddCommand = (metric: Command, context: CommandContext): voi
     .option('--url <url>', 'HTTP metric URL')
     .addOption(
       new Option('--http-method <method>', 'HTTP metric method').choices(
-        httpRequestTemplateSchema.shape.method.options,
+        httpRequestTemplateSchema.fields.method.literals,
       ),
     )
     .option('--header-env <header=source-env>', 'HTTP header secret reference', collect)
@@ -87,37 +90,46 @@ const registerMetricAddCommand = (metric: Command, context: CommandContext): voi
     .option('--pass-pointer <pointer>', 'HTTP result pass pointer; defaults to /pass')
     .option('--rationale-pointer <pointer>', 'HTTP result rationale pointer')
     .option('--details-pointer <pointer>', 'HTTP result details pointer')
-    .action(async (metricId: string | undefined, options: MetricAddOptions, leaf: Command) => {
-      const interactive = isInteractive(options, context.interaction, options.fromJson);
+    .action((metricId: string | undefined, options: MetricAddOptions, leaf: Command) =>
+      context.submit(
+        Effect.gen(function* () {
+          const interactive = isInteractive(options, context.interaction, options.fromJson);
 
-      const request = await readOrBuildRequest({
-        command: 'metric.add',
-        context,
-        leaf,
-        options,
-        build: async () => {
-          const id = await requiredInput(
-            metricId,
-            { path: '<metric-id>', question: 'Metric id: ' },
-            { interactive, prompt: context.interaction.prompt },
-          );
+          const request = yield* readOrBuildRequest({
+            command: 'metric.add',
+            context,
+            leaf,
+            options,
+            build: () =>
+              Effect.gen(function* () {
+                const id = yield* Effect.tryPromise({
+                  try: () =>
+                    requiredInput(
+                      metricId,
+                      { path: '<metric-id>', question: 'Metric id: ' },
+                      { interactive, prompt: context.interaction.prompt },
+                    ),
+                  catch: (cause) => cause,
+                });
 
-          const selected = await selectGuidedMetricFields(options, interactive, context);
-          const guided = await fillGuidedMetricFields(selected, interactive, context);
+                const selected = yield* selectGuidedMetricFields(options, interactive, context);
+                const guided = yield* fillGuidedMetricFields(selected, interactive, context);
 
-          const resource = await createMetricResource({
-            ...guided,
-            metricId: id,
-            readStdin: context.interaction.readStdin,
-            workingDirectory: context.workingDirectory,
+                const resource = yield* createMetricResource({
+                  ...guided,
+                  metricId: id,
+                  readStdin: context.interaction.readStdin,
+                  workingDirectory: context.workingDirectory,
+                });
+
+                return { ...mutationRequestFields('metric.add', options), metric: resource };
+              }),
           });
 
-          return { ...mutationRequestFields('metric.add', options), metric: resource };
-        },
-      });
-
-      await runMetricMutation(request, options, interactive, context);
-    });
+          yield* runMetricMutation(request, options, interactive, context);
+        }),
+      ),
+    );
 
   setMutationHelp(add, {
     examples: [

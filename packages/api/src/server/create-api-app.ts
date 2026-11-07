@@ -6,6 +6,7 @@ import {
   type RunSource,
 } from '@attest/core';
 import { summarizeSuites } from '@attest/core/analytics';
+import * as Effect from 'effect/Effect';
 import { Hono } from 'hono';
 
 import { apiRoutes } from '../contract/routes.js';
@@ -19,7 +20,7 @@ import {
   runStartRequestSchema,
   suiteHistoryRequestSchema,
 } from '../contract/requests.js';
-import { parseInput, parseJsonBody, toErrorEnvelope } from './error-response.js';
+import { parseInput, parseJsonBody, toErrorEnvelope, readExitValue } from './error-response.js';
 
 import { readCaseSummaries } from './read-case-summaries.js';
 import { readSuiteHistory } from './read-suite-history.js';
@@ -46,51 +47,95 @@ const createApiApp = ({ catalog, control }: ApiAppDeps): Hono<ProjectScope> => {
   };
 
   app.on(apiRoutes.listProjects.method, apiRoutes.listProjects.path, async (context) =>
-    context.json({ items: await catalog.listProjects() }),
+    context.json({
+      items: readExitValue(
+        await Effect.runPromiseExit(catalog.listProjects(), { signal: context.req.raw.signal }),
+      ),
+    }),
   );
   // Opens the project once per request; the catalog owns caching of opened sources.
   app.use(`${apiRoutes.listProjects.path}/:projectKey/*`, async (context, next) => {
     const { projectKey } = parseInput(projectParamsSchema, context.req.param());
-    context.set('source', await catalog.openProject(projectKey));
+    context.set(
+      'source',
+      readExitValue(
+        await Effect.runPromiseExit(catalog.openProject(projectKey), {
+          signal: context.req.raw.signal,
+        }),
+      ),
+    );
     await next();
   });
 
   app.on(apiRoutes.listRuns.method, apiRoutes.listRuns.path, async (context) =>
     context.json(
-      await context.var.source.listRuns(parseInput(pageQuerySchema, context.req.query())),
+      readExitValue(
+        await Effect.runPromiseExit(
+          context.var.source.listRuns(parseInput(pageQuerySchema, context.req.query())),
+          { signal: context.req.raw.signal },
+        ),
+      ),
     ),
   );
   app.on(apiRoutes.getRun.method, apiRoutes.getRun.path, async (context) =>
     context.json(
-      await context.var.source.getRun(parseInput(runParamsSchema, context.req.param()).runId),
+      readExitValue(
+        await Effect.runPromiseExit(
+          context.var.source.getRun(parseInput(runParamsSchema, context.req.param()).runId),
+          { signal: context.req.raw.signal },
+        ),
+      ),
     ),
   );
   app.on(apiRoutes.listCaseSummaries.method, apiRoutes.listCaseSummaries.path, async (context) => {
     const { runId } = parseInput(runParamsSchema, context.req.param());
 
     return context.json(
-      await context.var.source.listCaseSummaries(
-        runId,
-        parseInput(pageQuerySchema, context.req.query()),
+      readExitValue(
+        await Effect.runPromiseExit(
+          context.var.source.listCaseSummaries(
+            runId,
+            parseInput(pageQuerySchema, context.req.query()),
+          ),
+          { signal: context.req.raw.signal },
+        ),
       ),
     );
   });
   app.on(apiRoutes.getCase.method, apiRoutes.getCase.path, async (context) => {
     const { runId, suiteName, caseId } = parseInput(caseParamsSchema, context.req.param());
 
-    return context.json(await context.var.source.getCase(runId, suiteName, caseId));
+    return context.json(
+      readExitValue(
+        await Effect.runPromiseExit(context.var.source.getCase(runId, suiteName, caseId), {
+          signal: context.req.raw.signal,
+        }),
+      ),
+    );
   });
   app.on(apiRoutes.getDiff.method, apiRoutes.getDiff.path, async (context) => {
     const { baseRunId, candidateRunId } = parseInput(diffParamsSchema, context.req.param());
 
-    return context.json(await diffRuns(context.var.source, baseRunId, candidateRunId));
+    return context.json(
+      readExitValue(
+        await Effect.runPromiseExit(diffRuns(context.var.source, baseRunId, candidateRunId), {
+          signal: context.req.raw.signal,
+        }),
+      ),
+    );
   });
   app.on(apiRoutes.listRunSuites.method, apiRoutes.listRunSuites.path, async (context) => {
     const { runId } = parseInput(runParamsSchema, context.req.param());
 
     return context.json({
       runId,
-      suites: summarizeSuites(await readCaseSummaries(context.var.source, runId)),
+      suites: summarizeSuites(
+        readExitValue(
+          await Effect.runPromiseExit(readCaseSummaries(context.var.source, runId), {
+            signal: context.req.raw.signal,
+          }),
+        ),
+      ),
     });
   });
   app.on(apiRoutes.getSuiteHistory.method, apiRoutes.getSuiteHistory.path, async (context) => {
@@ -99,26 +144,47 @@ const createApiApp = ({ catalog, control }: ApiAppDeps): Hono<ProjectScope> => {
       ...context.req.param(),
     });
 
-    return context.json(await readSuiteHistory(context.var.source, suiteName, limit));
+    return context.json(
+      readExitValue(
+        await Effect.runPromiseExit(readSuiteHistory(context.var.source, suiteName, limit), {
+          signal: context.req.raw.signal,
+        }),
+      ),
+    );
   });
   app.on(apiRoutes.listTests.method, apiRoutes.listTests.path, async (context) => {
     const runControl = requireControl();
     const { projectKey } = parseInput(projectParamsSchema, context.req.param());
 
-    return context.json({ items: await runControl.listTests(projectKey) });
+    return context.json({
+      items: readExitValue(
+        await Effect.runPromiseExit(runControl.listTests(projectKey), {
+          signal: context.req.raw.signal,
+        }),
+      ),
+    });
   });
   app.on(apiRoutes.startRun.method, apiRoutes.startRun.path, async (context) => {
     const runControl = requireControl();
     const { projectKey } = parseInput(projectParamsSchema, context.req.param());
     const request = await parseJsonBody(runStartRequestSchema, context.req.raw);
 
-    return context.json(await runControl.startRun(projectKey, request), 201);
+    return context.json(
+      readExitValue(await Effect.runPromiseExit(runControl.startRun(projectKey, request))),
+      201,
+    );
   });
   app.on(apiRoutes.cancelRun.method, apiRoutes.cancelRun.path, async (context) => {
     const runControl = requireControl();
     const { projectKey, runId } = parseInput(runParamsSchema, context.req.param());
 
-    return context.json(await runControl.cancelRun(projectKey, runId));
+    return context.json(
+      readExitValue(
+        await Effect.runPromiseExit(runControl.cancelRun(projectKey, runId), {
+          signal: context.req.raw.signal,
+        }),
+      ),
+    );
   });
 
   // Mounted Hono apps do not carry their notFound handler into the host.

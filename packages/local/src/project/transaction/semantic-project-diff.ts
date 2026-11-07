@@ -1,5 +1,6 @@
+import { isJsonArray } from '../../internal/json-array.js';
 import { parseWithSchemaSync } from '@attest/contracts';
-import { z } from 'zod';
+import * as Schema from 'effect/Schema';
 import type { ProjectResources, JsonValue } from '@attest/contracts';
 
 import { contentHash, canonicalStringify, datasetMetadataForHash } from '@attest/core';
@@ -87,7 +88,7 @@ const diffJsonFields = (before: JsonValue, after: JsonValue, path = ''): Semanti
     return [];
   }
 
-  if (Array.isArray(before) && Array.isArray(after)) {
+  if (isJsonArray(before) && isJsonArray(after)) {
     const identityChanges = diffIdentityArray(before, after, path);
 
     if (identityChanges !== undefined) return identityChanges;
@@ -188,7 +189,10 @@ const RESOURCE_VALUES = {
   agent: (project: ProjectResources) => project.agents,
   dataset: (project: ProjectResources) =>
     project.datasets.map(({ cases, metadata }) => ({
-      ...parseWithSchemaSync(z.record(z.string(), z.json()), datasetMetadataForHash(metadata)),
+      ...parseWithSchemaSync(
+        Schema.Record(Schema.String, Schema.Json),
+        datasetMetadataForHash(metadata),
+      ),
       id: metadata.id,
       cases,
     })),
@@ -203,7 +207,9 @@ const valuesByKind = (
   // Every resource is a validated JSON object with a string id.
   const values = RESOURCE_VALUES[kind](project).map((value) =>
     parseWithSchemaSync(
-      z.record(z.string(), z.json()).and(z.object({ id: z.string() })),
+      Schema.StructWithRest(Schema.Struct({ id: Schema.String }), [
+        Schema.Record(Schema.String, Schema.Json),
+      ]),
       JSON.parse(canonicalStringify(value)),
     ),
   );
@@ -337,24 +343,24 @@ const createSemanticProjectDiff = (
     }
   }
 
-  const oldProjectMetadata: JsonValue = {
+  let oldProjectMetadata: JsonValue = {
     schema: before.project.schema,
     project_id: before.project.project_id,
     name: before.project.name,
   };
 
   if (!(before.project.defaults === undefined)) {
-    oldProjectMetadata.defaults = before.project.defaults;
+    oldProjectMetadata = { ...oldProjectMetadata, defaults: before.project.defaults };
   }
 
-  const newProjectMetadata: JsonValue = {
+  let newProjectMetadata: JsonValue = {
     schema: after.project.schema,
     project_id: after.project.project_id,
     name: after.project.name,
   };
 
   if (!(after.project.defaults === undefined)) {
-    newProjectMetadata.defaults = after.project.defaults;
+    newProjectMetadata = { ...newProjectMetadata, defaults: after.project.defaults };
   }
 
   if (contentHash(oldProjectMetadata) !== contentHash(newProjectMetadata)) {

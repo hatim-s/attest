@@ -1,3 +1,4 @@
+import { isJsonArray } from '../../internal/json-value.js';
 import { isJsonObject, type JsonValue } from '@attest/contracts';
 
 /** Decodes one RFC 6901 reference token after the pointer grammar has been validated. */
@@ -23,7 +24,7 @@ const readJsonPointer = (
   let current: JsonValue | undefined = document;
 
   for (const token of splitJsonPointer(pointer)) {
-    if (Array.isArray(current)) {
+    if (isJsonArray(current)) {
       if (!/^(?:0|[1-9]\d*)$/u.test(token)) return undefined;
       current = current[Number(token)];
       continue;

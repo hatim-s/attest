@@ -1,3 +1,4 @@
+import type * as Effect from 'effect/Effect';
 import type { MetricRequest } from '@attest/contracts';
 
 import type { MetricErrorInfo } from '../metric-evaluation.js';
@@ -24,7 +25,7 @@ type CommandMetricTransport = (
   definition: CommandMetricDefinition,
   request: MetricRequest,
   options: MetricTransportOptions,
-) => Promise<MetricTransportOutcome>;
+) => Effect.Effect<MetricTransportOutcome, Error>;
 
 const MAXIMUM_STDERR_BYTES = 4 * 1024;
 

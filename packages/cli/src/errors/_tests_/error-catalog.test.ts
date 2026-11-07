@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { StoreError } from '@attest/core';
 
 import { AttestCliError, renderCliError, serializeCliError } from '../cli-error.js';
 
@@ -42,5 +43,19 @@ describe('CLI error contracts', () => {
       },
       exitCode: 4,
     });
+  });
+});
+
+it('retains the safe public store code after native error migration', () => {
+  const failure = serializeCliError(new StoreError('READ_FAILED', 'sensitive database detail'));
+  expect(failure).toEqual({
+    error: {
+      code: 'internal_error',
+      message: 'The command failed with an unclassified Attest error.',
+      hint: 'Retry with the latest Attest version and report the stable error details.',
+      retryable: false,
+      details: { cause_code: 'READ_FAILED' },
+    },
+    exitCode: 4,
   });
 });

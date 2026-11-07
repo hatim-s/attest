@@ -1,3 +1,5 @@
+import * as Effect from 'effect/Effect';
+import * as Semaphore from 'effect/Semaphore';
 import type { Duplex } from 'node:stream';
 
 import { AgentInvocationError } from '../../errors.js';
@@ -55,11 +57,11 @@ type ConnectionState =
 class WebSocketConnection {
   private state: ConnectionState = { kind: 'open' };
   /** Settles when the socket closes, with the details of the close handshake. */
-  private readonly closed: Promise<WebSocketClose>;
+  private readonly closeObservers = new Set<(close: WebSocketClose) => void>();
   private readonly frameDecoder: WebSocketFrameDecoder;
   private pendingWriteBytes = 0;
   private readonly writeController = new AbortController();
-  private writeTail: Promise<void> = Promise.resolve();
+  private readonly writes = Semaphore.makeUnsafe(1);
 
   private readonly socket: Duplex;
   private readonly callbacks: WebSocketConnectionCallbacks;
@@ -89,41 +91,47 @@ class WebSocketConnection {
         new AgentInvocationError('network', 'WebSocket connection failed.', { cause: error }),
       ),
     );
-    this.closed = new Promise((resolve) => socket.once('close', () => resolve(this.finishClose())));
+    socket.once('close', () => {
+      const close = this.finishClose();
+
+      for (const observe of this.closeObservers) observe(close);
+      this.closeObservers.clear();
+    });
 
     if (initialData.byteLength > 0) this.frameDecoder.accept(initialData);
   }
 
   /** Serializes one bounded text-JSON message and waits for socket backpressure to clear. */
-  async sendText(text: string, signal?: AbortSignal): Promise<void> {
-    const payload = Buffer.from(text, 'utf8');
+  sendText(text: string, signal?: AbortSignal): Effect.Effect<void, AgentInvocationError> {
+    return Effect.suspend(() => {
+      const payload = Buffer.from(text, 'utf8');
 
-    if (this.pendingWriteBytes + payload.byteLength > this.maximumPendingWriteBytes) {
-      throw new AgentInvocationError(
-        'output_cap_exceeded',
-        `WebSocket pending writes exceed the ${this.maximumPendingWriteBytes}-byte request cap.`,
-      );
-    }
+      if (this.pendingWriteBytes + payload.byteLength > this.maximumPendingWriteBytes) {
+        return Effect.fail(
+          new AgentInvocationError(
+            'output_cap_exceeded',
+            `WebSocket pending writes exceed the ${this.maximumPendingWriteBytes}-byte request cap.`,
+          ),
+        );
+      }
 
-    this.pendingWriteBytes += payload.byteLength;
+      this.pendingWriteBytes += payload.byteLength;
 
-    const writeSignal =
-      signal === undefined
-        ? this.writeController.signal
-        : AbortSignal.any([signal, this.writeController.signal]);
+      const writeSignal =
+        signal === undefined
+          ? this.writeController.signal
+          : AbortSignal.any([signal, this.writeController.signal]);
 
-    const operation = this.writeTail.then(() =>
-      this.writeFrame(encodeWebSocketFrame(0x1, payload), writeSignal),
-    );
-
-    // A rejected write must not poison later queue bookkeeping or become an unhandled rejection.
-    this.writeTail = operation.catch(() => undefined);
-
-    try {
-      await operation;
-    } finally {
-      this.pendingWriteBytes -= payload.byteLength;
-    }
+      return this.writes
+        .withPermit(this.writeFrame(encodeWebSocketFrame(0x1, payload), writeSignal))
+        .pipe(
+          Effect.ensuring(
+            Effect.sync(() => {
+              this.pendingWriteBytes -= payload.byteLength;
+            }),
+          ),
+        );
+    });
   }
 
   /** Sends a protocol ping without altering application-idle state. */
@@ -132,34 +140,46 @@ class WebSocketConnection {
   }
 
   /** Performs a bounded close handshake and destroys sockets that do not cooperate. */
-  async close(timeoutMs: number): Promise<WebSocketClose> {
-    if (this.state.kind === 'received' || this.state.kind === 'closed') return this.state.close;
+  close(timeoutMs: number): Effect.Effect<WebSocketClose> {
+    return Effect.callback((resume) => {
+      if (this.state.kind === 'closed') {
+        resume(Effect.succeed(this.state.close));
 
-    this.writeController.abort();
+        return;
+      }
 
-    if (this.state.kind === 'open' && !this.socket.destroyed) {
-      this.state = { kind: 'closing' };
-      const reason = Buffer.from('complete', 'utf8');
-      const payload = Buffer.allocUnsafe(2 + reason.byteLength);
-      payload.writeUInt16BE(1_000, 0);
-      reason.copy(payload, 2);
-      this.socket.write(encodeWebSocketFrame(0x8, payload));
-    }
+      this.writeController.abort();
 
-    let timer: NodeJS.Timeout | undefined;
+      let destroyedTimer: NodeJS.Timeout | undefined;
 
-    const timeout = new Promise<WebSocketClose>((resolve) => {
-      timer = setTimeout(() => {
+      const observe = (close: WebSocketClose): void => {
+        clearTimeout(timer);
+        clearTimeout(destroyedTimer);
+        this.closeObservers.delete(observe);
+        resume(Effect.succeed(close));
+      };
+
+      const timer = setTimeout(() => {
         this.socket.destroy();
-        resolve({ clean: false });
+        // A missing close edge is unconfirmed release, never permission to reuse.
+        destroyedTimer = setTimeout(() => observe({ clean: false }), timeoutMs);
       }, timeoutMs);
+
+      this.closeObservers.add(observe);
+
+      if (this.state.kind === 'open' && !this.socket.destroyed) {
+        this.state = { kind: 'closing' };
+        const payload = Buffer.alloc(2);
+        payload.writeUInt16BE(1_000, 0);
+        this.socket.write(encodeWebSocketFrame(0x8, payload));
+      }
+
+      return Effect.sync(() => {
+        clearTimeout(timer);
+        clearTimeout(destroyedTimer);
+        this.closeObservers.delete(observe);
+      });
     });
-
-    const completed = await Promise.race([this.closed, timeout]);
-
-    if (timer !== undefined) clearTimeout(timer);
-
-    return completed;
   }
 
   /** Immediately releases the socket when a run is cancelled or a protocol violation occurs. */
@@ -169,54 +189,53 @@ class WebSocketConnection {
   }
 
   /** Writes a queued application frame only when the stream can accept more bytes. */
-  private async writeFrame(frame: Buffer, signal: AbortSignal): Promise<void> {
-    if (signal.aborted) {
-      throw new AgentInvocationError('cancelled', 'WebSocket write was cancelled.');
-    }
+  private writeFrame(
+    frame: Buffer,
+    signal: AbortSignal,
+  ): Effect.Effect<void, AgentInvocationError> {
+    return Effect.gen({ self: this }, function* () {
+      if (signal.aborted)
+        return yield* Effect.fail(
+          new AgentInvocationError('cancelled', 'WebSocket write was cancelled.'),
+        );
 
-    if (!this.writable()) {
-      throw new AgentInvocationError('network', 'WebSocket connection is not writable.');
-    }
+      if (!this.writable())
+        return yield* Effect.fail(
+          new AgentInvocationError('network', 'WebSocket connection is not writable.'),
+        );
 
-    if (this.socket.writableNeedDrain) await this.waitForDrain(signal);
+      if (this.socket.writableNeedDrain) yield* this.waitForDrain(signal);
 
-    if (!this.socket.write(frame)) await this.waitForDrain(signal);
+      if (!this.socket.write(frame)) yield* this.waitForDrain(signal);
+    });
   }
 
-  /** Waits for one drain edge while close, cancellation, and transport loss stay interruptible. */
-  private waitForDrain(signal: AbortSignal): Promise<void> {
-    if (signal.aborted) {
-      return Promise.reject(
-        new AgentInvocationError('cancelled', 'WebSocket write was cancelled.'),
-      );
-    }
+  /** Observes the foreign socket drain edge and detaches every listener on exit. */
+  private waitForDrain(signal: AbortSignal): Effect.Effect<void, AgentInvocationError> {
+    return Effect.callback((resume) => {
+      const settle = (result: Effect.Effect<void, AgentInvocationError>): void => {
+        detach();
+        resume(result);
+      };
 
-    if (this.socket.destroyed) {
-      return Promise.reject(
-        new AgentInvocationError('network', 'WebSocket connection closed during a write.'),
-      );
-    }
+      const drained = (): void => settle(Effect.void);
 
-    return new Promise<void>((resolve, reject) => {
-      const cleanup = (): void => {
+      const closed = (): void =>
+        settle(
+          Effect.fail(
+            new AgentInvocationError('network', 'WebSocket connection closed during a write.'),
+          ),
+        );
+
+      const aborted = (): void =>
+        settle(
+          Effect.fail(new AgentInvocationError('cancelled', 'WebSocket write was cancelled.')),
+        );
+
+      const detach = (): void => {
         this.socket.off('drain', drained);
         this.socket.off('close', closed);
         signal.removeEventListener('abort', aborted);
-      };
-
-      const drained = (): void => {
-        cleanup();
-        resolve();
-      };
-
-      const closed = (): void => {
-        cleanup();
-        reject(new AgentInvocationError('network', 'WebSocket connection closed during a write.'));
-      };
-
-      const aborted = (): void => {
-        cleanup();
-        reject(new AgentInvocationError('cancelled', 'WebSocket write was cancelled.'));
       };
 
       this.socket.once('drain', drained);
@@ -224,6 +243,9 @@ class WebSocketConnection {
       signal.addEventListener('abort', aborted, { once: true });
 
       if (signal.aborted) aborted();
+      else if (this.socket.destroyed) closed();
+
+      return Effect.sync(detach);
     });
   }
 
@@ -289,8 +311,8 @@ class WebSocketConnection {
 }
 
 /** Opens a DNS-pinned RFC 6455 connection after validating the URL and handshake. */
-const openWebSocket = async (options: OpenWebSocketOptions): Promise<WebSocketConnection> => {
-  const { head, socket } = await openWebSocketHandshake(options);
+const openWebSocket = Effect.fn('openWebSocket')(function* (options: OpenWebSocketOptions) {
+  const { head, socket } = yield* openWebSocketHandshake(options);
 
   return new WebSocketConnection({
     socket,
@@ -299,7 +321,7 @@ const openWebSocket = async (options: OpenWebSocketOptions): Promise<WebSocketCo
     maximumMessageBytes: options.maximumMessageBytes,
     maximumPendingWriteBytes: options.maximumPendingWriteBytes,
   });
-};
+});
 
 export {
   WebSocketConnection,

@@ -1,3 +1,5 @@
+import * as Effect from 'effect/Effect';
+// EFFECT-ROOT: owned stream fixture execution.
 import type { IncomingMessage, ServerResponse } from 'node:http';
 
 import { AGENT_PROTOCOL, AGENT_RESOURCE_SCHEMA_ID, type AgentRequest } from '@attest/contracts';
@@ -8,6 +10,7 @@ import {
   type LoopbackServer,
 } from '../../../_tests_/support/loopback-server.js';
 import { invokeStreamingAgent, type StreamAgentResource } from '../stream-adapter.js';
+import { makeStreamReader } from '../stream-reader.js';
 
 const servers: LoopbackServer[] = [];
 
@@ -53,6 +56,33 @@ const agent = (
 });
 
 describe('HTTP streaming adapter', () => {
+  it('does not replay a reset after successful headers before the first event', async () => {
+    let calls = 0;
+
+    const origin = await listen((_request, response) => {
+      calls += 1;
+      response.writeHead(200, { 'content-type': 'application/x-ndjson' });
+      response.flushHeaders();
+
+      if (calls === 1) setTimeout(() => response.destroy(), 20);
+      else response.end('{"type":"result","output":"done"}\n');
+    });
+
+    const result = await Effect.runPromise(
+      invokeStreamingAgent(
+        agent(origin, 'jsonl', { retry: { retries: 1, backoff: { kind: 'none' } } }),
+        request,
+      ),
+    );
+
+    expect(calls).toBe(1);
+    expect(result).toMatchObject({
+      status: 'invocation_error',
+      error: { code: 'network', applicationStarted: true },
+    });
+    expect(result.attempts).toHaveLength(1);
+  });
+
   it('extracts terminal SSE after heartbeats and accumulates explicit text chunks', async () => {
     const origin = await listen((_request, response) => {
       response.setHeader('content-type', 'text/event-stream');
@@ -61,12 +91,21 @@ describe('HTTP streaming adapter', () => {
       response.end('data: {"type":"result","chunk":"lo","token":"stream-secret"}\n\n');
     });
 
-    const configured = agent(origin, 'sse');
-    configured.transport.incremental_output_pointer = '/chunk';
-    configured.transport.incremental_output_mode = 'text';
-    configured.transport.result_pointer = '/missing';
-    configured.redaction = { event_pointers: ['/token'] };
-    const result = await invokeStreamingAgent(configured, request);
+    let configured = agent(origin, 'sse');
+    configured = {
+      ...configured,
+      transport: { ...configured.transport, incremental_output_pointer: '/chunk' },
+    };
+    configured = {
+      ...configured,
+      transport: { ...configured.transport, incremental_output_mode: 'text' },
+    };
+    configured = {
+      ...configured,
+      transport: { ...configured.transport, result_pointer: '/missing' },
+    };
+    configured = { ...configured, redaction: { event_pointers: ['/token'] } };
+    const result = await Effect.runPromise(invokeStreamingAgent(configured, request));
     expect(result.status).toBe('ok');
 
     if (result.status === 'ok' && result.report?.ok && 'output' in result.report.value) {
@@ -87,11 +126,20 @@ describe('HTTP streaming adapter', () => {
       );
     });
 
-    const completed = await invokeStreamingAgent(agent(origin, 'jsonl'), request);
+    const completed = await Effect.runPromise(
+      invokeStreamingAgent(agent(origin, 'jsonl'), request),
+    );
+
     expect(completed.status).toBe('ok');
-    const missing = agent(origin, 'jsonl');
-    missing.transport.request.url = `${origin}/missing`;
-    const failed = await invokeStreamingAgent(missing, request);
+    let missing = agent(origin, 'jsonl');
+    missing = {
+      ...missing,
+      transport: {
+        ...missing.transport,
+        request: { ...missing.transport.request, url: `${origin}/missing` },
+      },
+    };
+    const failed = await Effect.runPromise(invokeStreamingAgent(missing, request));
     expect(failed.status).toBe('invocation_error');
 
     if (failed.status === 'invocation_error') expect(failed.error.code).toBe('invalid_envelope');
@@ -104,7 +152,7 @@ describe('HTTP streaming adapter', () => {
     });
 
     const capped = agent(origin, 'jsonl', { limits: { event_bytes: 8 } });
-    const capResult = await invokeStreamingAgent(capped, request);
+    const capResult = await Effect.runPromise(invokeStreamingAgent(capped, request));
     expect(capResult.status).toBe('invocation_error');
 
     if (capResult.status === 'invocation_error')
@@ -112,9 +160,11 @@ describe('HTTP streaming adapter', () => {
 
     const controller = new AbortController();
 
-    const pending = invokeStreamingAgent(agent(origin, 'jsonl'), request, {
-      signal: controller.signal,
-    });
+    const pending = Effect.runPromise(
+      invokeStreamingAgent(agent(origin, 'jsonl'), request, {
+        signal: controller.signal,
+      }),
+    );
 
     controller.abort();
     const cancelled = await pending;
@@ -123,7 +173,7 @@ describe('HTTP streaming adapter', () => {
     if (cancelled.status === 'invocation_error') expect(cancelled.error.code).toBe('cancelled');
   });
 
-  it('retries only before the first application event', async () => {
+  it('does not replay uncertain dispatch or work that delivered an application event', async () => {
     let calls = 0;
 
     const origin = await listen((_request, response) => {
@@ -143,8 +193,14 @@ describe('HTTP streaming adapter', () => {
       retry: { retries: 1, backoff: { kind: 'none' } },
     });
 
-    expect((await invokeStreamingAgent(configured, request)).status).toBe('ok');
-    expect(calls).toBe(2);
+    const uncertain = await Effect.runPromise(invokeStreamingAgent(configured, request));
+
+    expect(uncertain).toMatchObject({
+      status: 'invocation_error',
+      error: { code: 'network', applicationStarted: true },
+    });
+    expect(uncertain.attempts).toHaveLength(1);
+    expect(calls).toBe(1);
 
     calls = 0;
 
@@ -159,7 +215,9 @@ describe('HTTP streaming adapter', () => {
       retry: { retries: 1, backoff: { kind: 'none' } },
     });
 
-    expect((await invokeStreamingAgent(started, request)).status).toBe('invocation_error');
+    expect((await Effect.runPromise(invokeStreamingAgent(started, request))).status).toBe(
+      'invocation_error',
+    );
     expect(calls).toBe(1);
   });
 
@@ -183,7 +241,7 @@ describe('HTTP streaming adapter', () => {
         setImmediate(() => response.end(bytes.subarray(split)));
       });
 
-      const result = await invokeStreamingAgent(agent(origin, framing), request);
+      const result = await Effect.runPromise(invokeStreamingAgent(agent(origin, framing), request));
       expect(result.status).toBe('ok');
 
       if (result.status === 'ok' && result.report?.ok && 'output' in result.report.value) {
@@ -201,7 +259,10 @@ describe('HTTP streaming adapter', () => {
         );
       });
 
-      const malformed = await invokeStreamingAgent(agent(malformedOrigin, 'jsonl'), request);
+      const malformed = await Effect.runPromise(
+        invokeStreamingAgent(agent(malformedOrigin, 'jsonl'), request),
+      );
+
       expect(malformed.status).toBe('invocation_error');
 
       if (malformed.status === 'invocation_error') {
@@ -228,7 +289,7 @@ describe('HTTP streaming adapter', () => {
       timeouts: { attempt_ms: 100, idle_ms: 100, run_ms: 500 },
     });
 
-    const result = await invokeStreamingAgent(configured, request);
+    const result = await Effect.runPromise(invokeStreamingAgent(configured, request));
     expect(result.status).toBe('ok');
     expect(result.attempts).toHaveLength(2);
     expect(calls).toBe(2);
@@ -259,7 +320,7 @@ describe('HTTP streaming adapter', () => {
     });
 
     const started = Date.now();
-    expect((await invokeStreamingAgent(configured, request)).status).toBe('ok');
+    expect((await Effect.runPromise(invokeStreamingAgent(configured, request))).status).toBe('ok');
     expect(Date.now() - started).toBeLessThan(1_000);
     expect(calls).toBe(2);
 
@@ -275,7 +336,55 @@ describe('HTTP streaming adapter', () => {
       retry: { retries: 1, backoff: { kind: 'none' } },
     });
 
-    expect((await invokeStreamingAgent(unbounded, request)).status).toBe('invocation_error');
+    expect((await Effect.runPromise(invokeStreamingAgent(unbounded, request))).status).toBe(
+      'invocation_error',
+    );
     expect(unboundedCalls).toBe(1);
+  });
+});
+
+/** Foreign reads can outlive observation, so release must join the accepted Promise. */
+describe('accepted stream reads', () => {
+  it('joins a late read after its observer times out without invoking it again', async () => {
+    let calls = 0;
+    let settled = false;
+
+    const owner = makeStreamReader(() => {
+      calls += 1;
+
+      return new Promise<IteratorResult<Uint8Array>>((resolve) => {
+        setTimeout(() => {
+          settled = true;
+          resolve({ done: true, value: undefined });
+        }, 30);
+      });
+    });
+
+    const observed = await Effect.runPromise(Effect.result(owner.read.pipe(Effect.timeout(5))));
+
+    expect(observed._tag).toBe('Failure');
+    await Effect.runPromise(owner.awaitRead);
+    expect(settled).toBe(true);
+    expect(calls).toBe(1);
+  });
+
+  it('reports an unjoined foreign read as cleanup uncertainty', async () => {
+    const owner = makeStreamReader(() => new Promise<IteratorResult<Uint8Array>>(() => {}));
+
+    await Effect.runPromise(Effect.result(owner.read.pipe(Effect.timeout(5))));
+    const joined = await Effect.runPromise(Effect.result(owner.awaitRead));
+
+    expect(joined._tag).toBe('Failure');
+  });
+
+  it('treats rejected read settlement as joined while preserving its primary read failure', async () => {
+    const owner = makeStreamReader(() => Promise.reject(new Error('foreign read rejection')));
+    const observed = await Effect.runPromise(Effect.result(owner.read));
+
+    expect(observed._tag).toBe('Failure');
+
+    if (observed._tag === 'Failure')
+      expect(observed.failure.message).toBe('Streaming body failed.');
+    await Effect.runPromise(owner.awaitRead);
   });
 });

@@ -1,9 +1,21 @@
-import { resolve } from 'node:path';
+import { openProcessSession } from './support/retained-process.js';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { resolve, join } from 'node:path';
+import { mkdtemp, writeFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 
 import { AGENT_PROTOCOL, AGENT_RESOURCE_SCHEMA_ID, type AgentRequest } from '@attest/contracts';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
-import { startJsonlBridgeAgent, type JsonlBridgeAgentResource } from '../jsonl-bridge-adapter.js';
+import {
+  startJsonlBridgeAgent as nativeStart,
+  type JsonlBridgeAgentResource,
+} from '../jsonl-bridge-adapter.js';
+
+/** Retains the native process scope for each existing lifecycle fixture. */
+const startJsonlBridgeAgent = (...args: Parameters<typeof nativeStart>) =>
+  openProcessSession(nativeStart(...args));
 
 const fixture = resolve(import.meta.dirname, '../../../_tests_/fixtures/jsonl-bridge-agent.cjs');
 
@@ -147,8 +159,12 @@ describe('JSONL bridge adapter', () => {
   });
 
   it('falls back to process termination when cancellation is ignored', async () => {
-    const quickFallback = agent();
-    quickFallback.transport.cancellation_grace_ms = 100;
+    const original = agent();
+
+    const quickFallback = {
+      ...original,
+      transport: { ...original.transport, cancellation_grace_ms: 100 },
+    };
 
     const session = await startJsonlBridgeAgent(quickFallback, {
       cwd: process.cwd(),
@@ -215,4 +231,62 @@ describe('JSONL bridge adapter', () => {
     if (terminal.status === 'invocation_error') expect(terminal.error.code).toBe('timeout');
     await session.close();
   });
+});
+
+it('handles automatic cleanup rejection before close observes it', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'attest-jsonl-cleanup-'));
+  await writeFile(join(directory, 'ps'), '#!/bin/sh\nexit 2\n', { mode: 0o755 });
+
+  const moduleUrl = new URL('../jsonl-bridge-adapter.ts', import.meta.url).href;
+
+  const configured = agent();
+
+  const program = `
+    import assert from 'node:assert/strict';
+    import { startJsonlBridgeAgent as nativeStart } from ${JSON.stringify(moduleUrl)};
+    import { openProcessSession } from ${JSON.stringify(new URL('./support/retained-process.ts', import.meta.url).href)};
+    const startJsonlBridgeAgent = (...args) => openProcessSession(nativeStart(...args));
+    process.env.PATH = ${JSON.stringify(directory)};
+    const configured = ${JSON.stringify(configured)};
+    configured.transport.argv = [process.execPath, '-e', 'setTimeout(() => process.exit(0), 100)'];
+    const session = await startJsonlBridgeAgent(configured, { cwd: ${JSON.stringify(directory)}, env: { PATH: ${JSON.stringify(directory)} }, terminationGraceMs: 0 });
+    await new Promise(resolve => setTimeout(resolve, 700));
+    await assert.rejects(session.close(), { code: 'network', message: 'Managed process cleanup could not be confirmed.' });
+    console.log('cleanup rejection observed by close');
+  `;
+
+  try {
+    // Bun loads current TypeScript in a separate process with its normal rejection policy.
+    const { stdout } = await promisify(execFile)('bun', ['--eval', program], { timeout: 5000 });
+
+    expect(stdout).toContain('cleanup rejection observed by close');
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+it('keeps startup cancellation primary when bridge cleanup is unconfirmed', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'attest-jsonl-cancel-'));
+  await writeFile(join(directory, 'ps'), '#!/bin/sh\nexit 2\n', { mode: 0o755 });
+  const controller = new AbortController();
+
+  try {
+    vi.stubEnv('PATH', directory);
+
+    const startup = startJsonlBridgeAgent(agent(), {
+      cwd: directory,
+      env: { PATH: directory },
+      signal: controller.signal,
+      terminationGraceMs: 0,
+    });
+
+    controller.abort();
+    await expect(startup).rejects.toMatchObject({
+      code: 'cancelled',
+      cause: { cleanupFailure: { code: 'network' } },
+    });
+  } finally {
+    vi.unstubAllEnvs();
+    await rm(directory, { recursive: true, force: true });
+  }
 });

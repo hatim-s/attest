@@ -1,3 +1,6 @@
+import * as Cause from 'effect/Cause';
+import * as Effect from 'effect/Effect';
+import { finishWithRelease } from './lifecycle-cause.js';
 import {
   AGENT_PROTOCOL,
   type AgentRequest,
@@ -68,135 +71,168 @@ const invocationAttempts = (attempts: InvocationResult['attempts']): JsonValue =
   });
 
 /** Runs one supported adapter probe and returns only bounded, redacted evidence. */
-const testNativeAgentConnection = async (
+const testNativeAgentConnection = Effect.fn('testNativeAgentConnection')(function* (
   options: NativeAgentTestOptions,
-): Promise<NativeAgentConnectionResult> => {
-  assertSafeNativeAgentResource(options.agent);
-  options.onProgress?.(`Testing agent ${options.agent.id}...`);
-  const resolved = await resolveNativeAgent(options.agent, options.projectRoot);
-
-  const request: AgentRequest = {
-    protocol: AGENT_PROTOCOL,
-    run_id: options.runId ?? CONNECTION_TEST_RUN_ID,
-    case_id: 'connection-test',
-    input: options.input,
-  };
-
-  if (
-    resolved.kind === 'vercel_sandbox' &&
-    (resolved.sandbox.artifacts?.length ?? 0) > 0 &&
-    resolved.sandbox.artifact_directory === undefined
-  ) {
-    throw new LocalError(
-      'project_invalid',
-      'Sandbox artifacts require artifact_directory outside an eval worker.',
-      { path: `/agents/${options.agent.id}/transport/sandbox/artifact_directory` },
-    );
-  }
-
-  const startedAt = new Date().toISOString();
-  const managedStartupStarted = performance.now();
-  let invocation: InvocationResult;
-
+) {
   try {
-    const runtime = await startAgentRuntime(resolved, options.signal);
+    assertSafeNativeAgentResource(options.agent);
+    options.onProgress?.(`Testing agent ${options.agent.id}...`);
 
-    try {
-      invocation = await invokeResolvedAgent(runtime, request, {
-        agent: options.agent,
-        attemptTimeoutMs: options.agent.timeouts?.attempt_ms ?? DEFAULT_TIMEOUT_MS,
-        projectRoot: options.projectRoot,
-        sandboxArtifactSegment: 'connection-test',
-        signal: options.signal,
-      });
-    } finally {
-      if (runtime.kind === 'session') await runtime.session.close();
+    const resolved = yield* resolveNativeAgent(options.agent, options.projectRoot);
+
+    const request: AgentRequest = {
+      protocol: AGENT_PROTOCOL,
+      run_id: options.runId ?? CONNECTION_TEST_RUN_ID,
+      case_id: 'connection-test',
+      input: options.input,
+    };
+
+    if (
+      resolved.kind === 'vercel_sandbox' &&
+      (resolved.sandbox.artifacts?.length ?? 0) > 0 &&
+      resolved.sandbox.artifact_directory === undefined
+    ) {
+      throw new LocalError(
+        'project_invalid',
+        'Sandbox artifacts require artifact_directory outside an eval worker.',
+        { path: `/agents/${options.agent.id}/transport/sandbox/artifact_directory` },
+      );
     }
-  } catch (error: unknown) {
-    // A managed session's lifecycle failure is probe evidence; any other throw propagates.
-    const managedSession =
-      resolved.kind === 'background' ||
-      resolved.kind === 'jsonl_bridge' ||
-      resolved.kind === 'websocket';
 
-    if (!(error instanceof AgentInvocationError) || !managedSession) throw error;
-    invocation = startupFailure(error, performance.now() - managedStartupStarted);
-  }
+    const startedAt = new Date().toISOString();
+    const managedStartupStarted = performance.now();
 
-  if (invocation.status === 'invocation_error') {
-    const code = invocation.error.code === 'cancelled' ? 'cancelled' : 'invocation_failed';
-    await options.onExecution?.({
+    const invocation = yield* Effect.catchCause(
+      Effect.scoped(
+        Effect.gen(function* () {
+          const runtime = yield* startAgentRuntime(resolved, options.signal);
+
+          return yield* Effect.uninterruptibleMask((restore) =>
+            Effect.gen(function* () {
+              const primary = yield* Effect.exit(
+                restore(
+                  invokeResolvedAgent(runtime, request, {
+                    agent: options.agent,
+                    attemptTimeoutMs: options.agent.timeouts?.attempt_ms ?? DEFAULT_TIMEOUT_MS,
+                    projectRoot: options.projectRoot,
+                    sandboxArtifactSegment: 'connection-test',
+                    signal: options.signal,
+                  }),
+                ),
+              );
+
+              const release = yield* Effect.exit(
+                runtime.kind === 'session' ? runtime.session.close() : Effect.void,
+              );
+
+              return yield* finishWithRelease(primary, [release]);
+            }),
+          );
+        }),
+      ),
+      (cause) => {
+        // Base projected the first ordinary failure even when session close also failed.
+        const reason = cause.reasons[0];
+
+        const error =
+          !Cause.hasDies(cause) &&
+          !Cause.hasInterrupts(cause) &&
+          reason !== undefined &&
+          Cause.isFailReason(reason)
+            ? reason.error
+            : undefined;
+
+        const managedSession =
+          resolved.kind === 'background' ||
+          resolved.kind === 'jsonl_bridge' ||
+          resolved.kind === 'websocket';
+
+        return error instanceof AgentInvocationError && managedSession
+          ? Effect.succeed(startupFailure(error, performance.now() - managedStartupStarted))
+          : Effect.failCause(cause);
+      },
+    );
+
+    if (invocation.status === 'invocation_error') {
+      const code = invocation.error.code === 'cancelled' ? 'cancelled' : 'invocation_failed';
+      yield* options.onExecution?.({
+        attempts: invocation.attempts.map((attempt) =>
+          redactStoredAttempt(attempt, resolved.secrets),
+        ),
+        caseId: request.case_id,
+        diagnostics: redactInvocationDiagnostics(invocation.diagnostics, resolved.secrets),
+        durationMs: invocation.durationMs,
+        errorCode: invocation.error.code,
+        errorMessage: redactTransportText(invocation.error.message, resolved.secrets),
+        expectedMetrics: [],
+        outcome: invocationOutcome(invocation),
+        request: redactAgentRequest(request, resolved.secrets),
+        startedAt,
+        suiteName: `agent:${options.agent.id}`,
+        warnings: redactWarnings(invocation.warnings, resolved.secrets),
+      }) ?? Effect.void;
+      throw new LocalError(
+        code,
+        `Agent connection test failed: ${redactTransportText(invocation.error.message, resolved.secrets)}`,
+        {
+          hint:
+            code === 'cancelled'
+              ? 'Retry when cancellation is no longer required.'
+              : 'Repair the agent mapping or transport and retry `attest agent test`.',
+          details: redactProbeValue(
+            {
+              attempt_count: invocation.attempts.length,
+              attempts: invocationAttempts(invocation.attempts),
+              diagnostics: invocation.diagnostics,
+              invocation_code: invocation.error.code,
+              raw_excerpt: invocation.rawExcerpt,
+            },
+            resolved.secrets,
+          ),
+        },
+      );
+    }
+
+    if (invocation.report === undefined || !invocation.report.ok) {
+      throw new LocalError('internal_error', 'The adapter omitted its parse report.');
+    }
+
+    yield* options.onExecution?.({
       attempts: invocation.attempts.map((attempt) =>
         redactStoredAttempt(attempt, resolved.secrets),
       ),
       caseId: request.case_id,
       diagnostics: redactInvocationDiagnostics(invocation.diagnostics, resolved.secrets),
       durationMs: invocation.durationMs,
-      errorCode: invocation.error.code,
-      errorMessage: redactTransportText(invocation.error.message, resolved.secrets),
       expectedMetrics: [],
-      outcome: invocationOutcome(invocation),
+      outcome: 'completed',
       request: redactAgentRequest(request, resolved.secrets),
+      response: redactAgentResponse(invocation.report.value, resolved.secrets),
       startedAt,
       suiteName: `agent:${options.agent.id}`,
+      trace:
+        invocation.report.value.trace === undefined
+          ? undefined
+          : redactTrace(invocation.report.value.trace, resolved.secrets),
       warnings: redactWarnings(invocation.warnings, resolved.secrets),
-    });
-    throw new LocalError(
-      code,
-      `Agent connection test failed: ${redactTransportText(invocation.error.message, resolved.secrets)}`,
-      {
-        hint:
-          code === 'cancelled'
-            ? 'Retry when cancellation is no longer required.'
-            : 'Repair the agent mapping or transport and retry `attest agent test`.',
-        details: redactProbeValue(
-          {
-            attempt_count: invocation.attempts.length,
-            attempts: invocationAttempts(invocation.attempts),
-            diagnostics: invocation.diagnostics,
-            invocation_code: invocation.error.code,
-            raw_excerpt: invocation.rawExcerpt,
-          },
-          resolved.secrets,
-        ),
-      },
-    );
+    }) ?? Effect.void;
+
+    const result: NativeAgentConnectionResult = {
+      agent_id: redactTransportText(options.agent.id, resolved.secrets),
+      attempt_count: invocation.attempts.length,
+      attempts: redactProbeValue(invocationAttempts(invocation.attempts), resolved.secrets),
+      response: redactProbeValue(invocation.report.value, resolved.secrets),
+      transport: options.agent.transport.kind,
+      warnings: redactProbeValue(invocation.report.warnings, resolved.secrets),
+    };
+
+    options.onProgress?.(`Agent ${options.agent.id} completed.`);
+
+    return result;
+  } catch (error) {
+    if (error instanceof LocalError) return yield* Effect.fail(error);
+    throw error;
   }
-
-  if (invocation.report === undefined || !invocation.report.ok) {
-    throw new LocalError('internal_error', 'The adapter omitted its parse report.');
-  }
-
-  await options.onExecution?.({
-    attempts: invocation.attempts.map((attempt) => redactStoredAttempt(attempt, resolved.secrets)),
-    caseId: request.case_id,
-    diagnostics: redactInvocationDiagnostics(invocation.diagnostics, resolved.secrets),
-    durationMs: invocation.durationMs,
-    expectedMetrics: [],
-    outcome: 'completed',
-    request: redactAgentRequest(request, resolved.secrets),
-    response: redactAgentResponse(invocation.report.value, resolved.secrets),
-    startedAt,
-    suiteName: `agent:${options.agent.id}`,
-    trace:
-      invocation.report.value.trace === undefined
-        ? undefined
-        : redactTrace(invocation.report.value.trace, resolved.secrets),
-    warnings: redactWarnings(invocation.warnings, resolved.secrets),
-  });
-
-  const result: NativeAgentConnectionResult = {
-    agent_id: redactTransportText(options.agent.id, resolved.secrets),
-    attempt_count: invocation.attempts.length,
-    attempts: redactProbeValue(invocationAttempts(invocation.attempts), resolved.secrets),
-    response: redactProbeValue(invocation.report.value, resolved.secrets),
-    transport: options.agent.transport.kind,
-    warnings: redactProbeValue(invocation.report.warnings, resolved.secrets),
-  };
-
-  options.onProgress?.(`Agent ${options.agent.id} completed.`);
-
-  return result;
-};
+});
 
 export { testNativeAgentConnection, type NativeAgentConnectionResult };

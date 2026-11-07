@@ -1,8 +1,10 @@
+import { SchemaDecodeError } from '@attest/contracts';
+
 type CaseIdentityResult = { id: string; source: NormalizedImportRow['identitySource'] };
 
 type NormalizeRecordResult = { diagnostics: ImportDiagnostic[]; row?: NormalizedImportRow };
 
-import { z } from 'zod';
+import * as Schema from 'effect/Schema';
 import { parseWithSchemaSync, parseWithSchema, isJsonObject } from '@attest/contracts';
 import { isString } from '@attest/contracts';
 import {
@@ -33,7 +35,10 @@ import { destinationPointer, splitDestination } from './validate-import-mappings
 type JsonObject = SourceRecord['value'];
 
 /** The id is optional here because unkeyed rows get a content-derived id after validation. */
-const importedCaseSchema = testCaseSchema.partial({ id: true });
+const importedCaseSchema = Schema.Struct({
+  ...testCaseSchema.fields,
+  id: Schema.optional(testCaseSchema.fields.id),
+});
 
 /** CSV sources name a header; JSON sources are pointers into the record. */
 const sourceValue = (record: JsonObject, source: string, format: ImportFormat) => {
@@ -71,7 +76,7 @@ const parseStructuredCsvFields = (
     if (!isString(cell)) continue;
 
     try {
-      value[source] = parseWithSchemaSync(z.json(), JSON.parse(cell));
+      value[source] = parseWithSchemaSync(Schema.Json, JSON.parse(cell));
     } catch {
       diagnostics.push(
         importDiagnostic({
@@ -111,7 +116,7 @@ const assignDestination = (target: JsonObject, destination: string, value: JsonV
 
 /** Attributes each validation issue to the most specific mapping that wrote its destination. */
 const schemaDiagnostics = (
-  issues: readonly z.core.$ZodIssue[],
+  issues: SchemaDecodeError['issues'],
   mappings: readonly DatasetImportMapping[],
   record: SourceRecord,
 ): ImportDiagnostic[] => {
@@ -120,10 +125,7 @@ const schemaDiagnostics = (
     .toSorted((left, right) => right.destination.length - left.destination.length);
 
   return issues.flatMap((issue) => {
-    const paths =
-      issue.code === 'unrecognized_keys'
-        ? issue.keys.map((key) => [...issue.path, key])
-        : [issue.path];
+    const paths = [issue.path];
 
     return paths
       .map(toPointer)

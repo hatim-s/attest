@@ -8,7 +8,7 @@ type RunListProps = {
   error: unknown;
   isLoading: boolean;
   projectKey: string;
-  runs: RunRecord[];
+  runs: readonly RunRecord[];
   selectedRunId?: string;
   /** Sits beside the run count, such as the button that starts a run. */
   action?: ReactNode;

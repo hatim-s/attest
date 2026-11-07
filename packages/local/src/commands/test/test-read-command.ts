@@ -1,7 +1,7 @@
+import { LocalError } from '../../errors/index.js';
+import * as Effect from 'effect/Effect';
 import type {
   CommandResult,
-  ResourceListResult,
-  ResourceShowResult,
   TestCaseListResult,
   TestCaseShowResult,
 } from '../shared/command-result.js';
@@ -20,75 +20,105 @@ type TestReadCommandOptions = {
 };
 
 /** Performs reference validation before a destructive dataset confirmation prompt. */
-const runTestDatasetRemovePreflight = async (
+const runTestDatasetRemovePreflight = Effect.fn('runTestDatasetRemovePreflight')(function* (
   options: TestReadCommandOptions & { datasetId: string },
-): Promise<void> => {
-  const loaded = await loadCommandProject(options);
-  assertDatasetRemovable(loaded, options.datasetId);
-};
+) {
+  try {
+    const loaded = yield* loadCommandProject(options);
+
+    assertDatasetRemovable(loaded, options.datasetId);
+  } catch (error) {
+    if (error instanceof LocalError) return yield* Effect.fail(error);
+    throw error;
+  }
+});
 
 /** Lists canonical tests using the same deterministic summary as the generic read surface. */
-const runTestListCommand = async (
+const runTestListCommand = Effect.fn('runTestListCommand')(function* (
   options: TestReadCommandOptions,
-): Promise<CommandResult<'list', ResourceListResult>> =>
-  runListCommand({ ...options, resourceType: 'tests' });
+) {
+  try {
+    return yield* runListCommand({ ...options, resourceType: 'tests' });
+  } catch (error) {
+    if (error instanceof LocalError) return yield* Effect.fail(error);
+    throw error;
+  }
+});
 
 /** Shows one canonical test using the same validated generic read surface. */
-const runTestShowCommand = async (
+const runTestShowCommand = Effect.fn('runTestShowCommand')(function* (
   options: TestReadCommandOptions & { testId: string },
-): Promise<CommandResult<'show', ResourceShowResult>> =>
-  runShowCommand({ ...options, id: options.testId, resourceType: 'test' });
+) {
+  try {
+    return yield* runShowCommand({ ...options, id: options.testId, resourceType: 'test' });
+  } catch (error) {
+    if (error instanceof LocalError) return yield* Effect.fail(error);
+    throw error;
+  }
+});
 
 /** Lists direct cases only; attached dataset rows remain visible through dataset inspection. */
-const runTestCaseListCommand = async (
+const runTestCaseListCommand = Effect.fn('runTestCaseListCommand')(function* (
   options: TestReadCommandOptions & { testId: string },
-): Promise<CommandResult<'test-case-list', TestCaseListResult>> => {
-  const loaded = await loadCommandProject(options);
-  const test = findResource('test', loaded.tests, options.testId);
+) {
+  try {
+    const loaded = yield* loadCommandProject(options);
 
-  const items = test.cases.map(
-    ({ id, tags, folder }): TestCaseListResult['items'][number] & { folder?: string } => {
-      const assembledFields: TestCaseListResult['items'][number] & { folder?: string } = {
-        id,
-      };
+    const test = findResource('test', loaded.tests, options.testId);
 
-      if (tags !== undefined) {
-        assembledFields.tags = tags;
-      }
+    const items = test.cases.map(
+      ({ id, tags, folder }): TestCaseListResult['items'][number] & { folder?: string } => {
+        let assembledFields: TestCaseListResult['items'][number] & { folder?: string } = {
+          id,
+        };
 
-      if (folder !== undefined) {
-        assembledFields.folder = folder;
-      }
+        if (tags !== undefined) {
+          assembledFields = { ...assembledFields, tags: tags };
+        }
 
-      return assembledFields;
-    },
-  );
+        if (folder !== undefined) {
+          assembledFields.folder = folder;
+        }
 
-  return {
-    operation: 'test-case-list',
-    projectHashBefore: loaded.projectHash,
-    projectHashAfter: loaded.projectHash,
-    result: { test_id: test.id, items },
-  };
-};
+        return assembledFields;
+      },
+    );
+
+    return {
+      operation: 'test-case-list' as const,
+      projectHashBefore: loaded.projectHash,
+      projectHashAfter: loaded.projectHash,
+      result: { test_id: test.id, items },
+    } satisfies CommandResult<'test-case-list', TestCaseListResult>;
+  } catch (error) {
+    if (error instanceof LocalError) return yield* Effect.fail(error);
+    throw error;
+  }
+});
 
 /** Shows one direct case without resolving or copying attached dataset rows. */
-const runTestCaseShowCommand = async (
+const runTestCaseShowCommand = Effect.fn('runTestCaseShowCommand')(function* (
   options: TestReadCommandOptions & { caseId: string; testId: string },
-): Promise<CommandResult<'test-case-show', TestCaseShowResult>> => {
-  const loaded = await loadCommandProject(options);
-  const test = findResource('test', loaded.tests, options.testId);
-  const testCase = test.cases.find(({ id }) => id === options.caseId);
+) {
+  try {
+    const loaded = yield* loadCommandProject(options);
 
-  if (testCase === undefined) throw missingResource('case', options.caseId);
+    const test = findResource('test', loaded.tests, options.testId);
+    const testCase = test.cases.find(({ id }) => id === options.caseId);
 
-  return {
-    operation: 'test-case-show',
-    projectHashBefore: loaded.projectHash,
-    projectHashAfter: loaded.projectHash,
-    result: { test_id: test.id, case: testCase },
-  };
-};
+    if (testCase === undefined) throw missingResource('case', options.caseId);
+
+    return {
+      operation: 'test-case-show' as const,
+      projectHashBefore: loaded.projectHash,
+      projectHashAfter: loaded.projectHash,
+      result: { test_id: test.id, case: testCase },
+    } satisfies CommandResult<'test-case-show', TestCaseShowResult>;
+  } catch (error) {
+    if (error instanceof LocalError) return yield* Effect.fail(error);
+    throw error;
+  }
+});
 
 export {
   runTestCaseListCommand,

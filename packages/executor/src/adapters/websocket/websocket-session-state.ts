@@ -1,3 +1,4 @@
+import * as Effect from 'effect/Effect';
 import type { AgentResponseCandidate } from '../../internal/agent-response-candidate.js';
 import {
   AGENT_PROTOCOL,
@@ -74,6 +75,8 @@ class WebSocketSessionState {
   private readonly secrets: readonly string[];
   private readonly runTimer?: NodeJS.Timeout;
   private sequence = 0;
+  private readonly runAbort = (): void =>
+    this.failRun(new AgentInvocationError('cancelled', 'WebSocket run was cancelled.'));
 
   constructor(
     readonly agent: WebSocketAgentResource,
@@ -92,11 +95,7 @@ class WebSocketSessionState {
       );
     }
 
-    options.signal?.addEventListener(
-      'abort',
-      () => this.failRun(new AgentInvocationError('cancelled', 'WebSocket run was cancelled.')),
-      { once: true },
-    );
+    options.signal?.addEventListener('abort', this.runAbort, { once: true });
   }
 
   /** Creates the state for a new request with a fresh bounded correlation id. */
@@ -126,7 +125,7 @@ class WebSocketSessionState {
   openConnection(
     signal: AbortSignal,
     callbacks: WebSocketConnectionCallbacks,
-  ): Promise<WebSocketConnection> {
+  ): Effect.Effect<WebSocketConnection, AgentInvocationError> {
     const { transport } = this.agent;
 
     const options: Parameters<typeof openWebSocket>[0] = {
@@ -146,20 +145,32 @@ class WebSocketSessionState {
     return openWebSocket(options);
   }
 
-  async send(
+  send(
     pending: PendingInvocation,
     connection: WebSocketConnection,
     signal: AbortSignal | undefined,
-  ): Promise<void> {
-    const text = materializeRequest(this.agent, pending.request, pending.requestId);
-    await connection.sendText(text, signal);
+  ): Effect.Effect<void, AgentInvocationError> {
+    return Effect.gen({ self: this }, function* () {
+      let text: string;
 
-    if (!this.pending.has(pending.requestId)) return;
-    this.evidence.record(pending, {
-      classification: 'request_sent',
-      bytes: Buffer.byteLength(text),
+      try {
+        text = materializeRequest(this.agent, pending.request, pending.requestId);
+      } catch (cause) {
+        return yield* cause instanceof AgentInvocationError
+          ? Effect.fail(cause)
+          : Effect.die(cause);
+      }
+
+      pending.dispatched = true;
+      yield* connection.sendText(text, signal);
+
+      if (!this.pending.has(pending.requestId)) return;
+      this.evidence.record(pending, {
+        classification: 'request_sent',
+        bytes: Buffer.byteLength(text),
+      });
+      this.resetIdle(pending);
     });
-    this.resetIdle(pending);
   }
 
   /** Tracks a request and starts its attempt deadline and caller cancellation. */
@@ -281,6 +292,12 @@ class WebSocketSessionState {
     pending.resolve(this.evidence.failureResult(pending, error, classification, pending.attempts));
   }
 
+  /** Ignores late replies after native interruption without changing completed-request detection. */
+  abandon(pending: PendingInvocation): void {
+    if (this.pending.delete(pending.requestId)) remember(this.ignored, pending.requestId);
+    clearPendingTimers(pending);
+  }
+
   /** Ends the run: every outstanding request fails and the session stops admitting work. */
   failRun(error: AgentInvocationError, classification = errorClassification(error)): void {
     if (this.lifecycle.signal.aborted) return;
@@ -300,6 +317,7 @@ class WebSocketSessionState {
     classification: WebSocketErrorClassification,
   ): void {
     clearTimeout(this.runTimer);
+    this.options.signal?.removeEventListener('abort', this.runAbort);
 
     for (const pending of [...this.pending.values()]) {
       this.settleFailure(pending, error, classification);

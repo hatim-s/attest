@@ -1,3 +1,6 @@
+import { valueFromExit } from '../../../internal/effect-exit.js';
+import { foreign } from '../../internal/operation.js';
+import * as Effect from 'effect/Effect';
 import type { JsonValue } from '@attest/contracts';
 import { StandardSchemaValidationError } from '@tanstack/ai';
 import { describe, expect, it } from 'vitest';
@@ -23,13 +26,13 @@ const scriptedExecutor = (scripts: (JsonValue | Error)[]): StructuredChatExecuto
     if (script instanceof Error) {
       chatRequest.observation.rawResponse = `error:${script.message}`;
 
-      return Promise.reject(script);
+      return Effect.fail(script);
     }
 
     if (script === undefined) throw new Error('The judge requested an unscripted response.');
     chatRequest.observation.rawResponse = JSON.stringify(script);
 
-    return Promise.resolve(script);
+    return Effect.succeed(script);
   };
 };
 
@@ -42,12 +45,26 @@ const score = (executeChat: StructuredChatExecutor, callOptions?: JudgeCallOptio
 
 /** Never settles until the composed signal aborts, as a provider call would. */
 const pendingUntilAbort: StructuredChatExecutor = (chatRequest) =>
-  new Promise((_resolve, reject) => {
-    chatRequest.observation.rawResponse = 'partial provider bytes';
-    chatRequest.signal.addEventListener('abort', () => reject(new Error('aborted provider call')), {
-      once: true,
-    });
-  });
+  foreign(
+    () =>
+      new Promise((_resolve, reject) => {
+        chatRequest.observation.rawResponse = 'partial provider bytes';
+
+        if (chatRequest.signal.aborted) {
+          reject(new Error('aborted provider call'));
+
+          return;
+        }
+
+        chatRequest.signal.addEventListener(
+          'abort',
+          () => reject(new Error('aborted provider call')),
+          {
+            once: true,
+          },
+        );
+      }),
+  );
 
 describe('createTanstackJudgeClient', () => {
   it.each(['model-only', '/model', 'openai/', 'unsupported/model'])(
@@ -55,14 +72,18 @@ describe('createTanstackJudgeClient', () => {
     async (model) => {
       const client = createTanstackJudgeClient({ executeChat: scriptedExecutor([]) });
 
-      await expect(client.scoreRubric({ ...request, model })).rejects.toMatchObject({
+      await expect(
+        Effect.runPromiseExit(client.scoreRubric({ ...request, model })).then(valueFromExit),
+      ).rejects.toMatchObject({
         code: 'judge_provider_error',
       });
     },
   );
 
   it('returns a valid first response with one recorded attempt', async () => {
-    const outcome = await score(scriptedExecutor([{ score: 1, rationale: 'Correct.' }]));
+    const outcome = await Effect.runPromiseExit(
+      score(scriptedExecutor([{ score: 1, rationale: 'Correct.' }])),
+    ).then(valueFromExit);
 
     expect(outcome.verdict).toEqual({ score: 1, rationale: 'Correct.' });
     expect(outcome.record.attempts).toHaveLength(1);
@@ -76,16 +97,16 @@ describe('createTanstackJudgeClient', () => {
   it('records both malformed attempts on judge_unparseable_response', async () => {
     const execute = scriptedExecutor([malformed('first'), malformed('second')]);
 
-    await expect(score(execute)).rejects.toMatchObject({
+    await expect(Effect.runPromiseExit(score(execute)).then(valueFromExit)).rejects.toMatchObject({
       code: 'judge_unparseable_response',
       details: { attempts: [{ error: 'first' }, { error: 'second' }] },
     });
   });
 
   it('recovers from malformed output and retains both attempts', async () => {
-    const outcome = await score(
-      scriptedExecutor([malformed('first'), { score: 0.75, rationale: 'Recovered.' }]),
-    );
+    const outcome = await Effect.runPromiseExit(
+      score(scriptedExecutor([malformed('first'), { score: 0.75, rationale: 'Recovered.' }])),
+    ).then(valueFromExit);
 
     expect(outcome.verdict).toEqual({ score: 0.75, rationale: 'Recovered.' });
     expect(outcome.record.attempts).toHaveLength(2);
@@ -94,7 +115,9 @@ describe('createTanstackJudgeClient', () => {
 
   it('retains the attempted record when the provider fails', async () => {
     await expect(
-      score(scriptedExecutor([new Error('provider unavailable')])),
+      Effect.runPromiseExit(score(scriptedExecutor([new Error('provider unavailable')]))).then(
+        valueFromExit,
+      ),
     ).rejects.toMatchObject({
       code: 'judge_provider_error',
       details: {
@@ -105,7 +128,11 @@ describe('createTanstackJudgeClient', () => {
 
   it('maps mid-call caller abort to metric_cancelled with the attempted record', async () => {
     const controller = new AbortController();
-    const scoring = score(pendingUntilAbort, { signal: controller.signal });
+
+    const scoring = Effect.runPromiseExit(
+      score(pendingUntilAbort, { signal: controller.signal }),
+    ).then(valueFromExit);
+
     controller.abort(new Error('caller cancelled'));
 
     await expect(scoring).rejects.toMatchObject({
@@ -119,7 +146,11 @@ describe('createTanstackJudgeClient', () => {
 
   it('maps a deadline abort to judge_provider_error with the attempted record', async () => {
     const controller = new AbortController();
-    const scoring = score(pendingUntilAbort, { signal: controller.signal, timeoutMs: 60_000 });
+
+    const scoring = Effect.runPromiseExit(
+      score(pendingUntilAbort, { signal: controller.signal, timeoutMs: 60_000 }),
+    ).then(valueFromExit);
+
     controller.abort(new DOMException('deadline reached', 'TimeoutError'));
 
     await expect(scoring).rejects.toMatchObject({

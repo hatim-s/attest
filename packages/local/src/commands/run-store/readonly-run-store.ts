@@ -1,4 +1,4 @@
-import type { BigIntStats } from 'node:fs';
+import * as Effect from 'effect/Effect';
 import { lstat, realpath, type FileHandle } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 
@@ -7,9 +7,10 @@ import { StoreError, type RunStore } from '@attest/core';
 import { errnoCode } from '../../internal/errno-code.js';
 import { openAnchored } from '../../internal/open-anchored.js';
 import { LocalError } from '../../errors/index.js';
-import { openReadonlyRunStore } from '../../store/index.js';
+import { openReadonlyRunStore, withStoreScope } from '../../store/index.js';
 import { isProjectPath } from '../../project/project-path.js';
-import { rethrowAfterCleanup, runCleanupSteps, type CleanupStep } from './cleanup.js';
+import { withReadCleanup } from './cleanup.js';
+import { storeCall } from '../../store/internal/store-effect.js';
 import {
   captureRunStoreSnapshot,
   removeRunStoreSnapshot,
@@ -50,114 +51,119 @@ const toSafeStoreError = (cause: unknown, path: string): LocalError => {
   );
 };
 
-/** Opens and anchors one run-store inode for an immutable read operation. */
-const withReadonlyRunStoreFile = async <T>(
+/** Opens an anchored snapshot and closes its database before removing copied data. */
+const withReadonlyRunStoreFile = <T, E, R>(
   storePath: string,
-  operation: (store: RunStore) => Promise<T>,
+  operation: (store: RunStore) => Effect.Effect<T, E, R>,
   options: ReadonlyRunStoreFileOptions = {},
-): Promise<T | undefined> => {
-  const storeDirectory = dirname(storePath);
-  let directoryMetadata: BigIntStats;
-  let storeMetadata: BigIntStats;
+) =>
+  Effect.gen(function* () {
+    const storeDirectory = dirname(storePath);
 
-  try {
-    directoryMetadata = await lstat(storeDirectory, { bigint: true });
-    storeMetadata = await lstat(storePath, { bigint: true });
-  } catch (error: unknown) {
-    if (errnoCode(error) === 'ENOENT') return undefined;
-    throw toSafeStoreError(error, storePath);
-  }
+    const metadata = yield* Effect.tryPromise({
+      try: () => lstat(storeDirectory, { bigint: true }),
+      catch: (cause) => cause,
+    }).pipe(
+      Effect.catch((cause) =>
+        errnoCode(cause) === 'ENOENT'
+          ? Effect.succeed(undefined)
+          : Effect.fail(toSafeStoreError(cause, storePath)),
+      ),
+    );
 
-  if (
-    !directoryMetadata.isDirectory() ||
-    directoryMetadata.isSymbolicLink() ||
-    !storeMetadata.isFile() ||
-    storeMetadata.isSymbolicLink()
-  ) {
-    throw unsafeStore(storePath);
-  }
+    if (metadata === undefined) return undefined;
 
-  let resolvedDirectory: string;
-  let resolvedStore: string;
-  let resolvedContainmentRoot: string | undefined;
+    const storeMetadata = yield* Effect.tryPromise({
+      try: () => lstat(storePath, { bigint: true }),
+      catch: (cause) => cause,
+    }).pipe(
+      Effect.catch((cause) =>
+        errnoCode(cause) === 'ENOENT'
+          ? Effect.succeed(undefined)
+          : Effect.fail(toSafeStoreError(cause, storePath)),
+      ),
+    );
 
-  try {
-    [resolvedContainmentRoot, resolvedDirectory, resolvedStore] = await Promise.all([
-      options.containmentRoot === undefined
-        ? Promise.resolve(undefined)
-        : realpath(options.containmentRoot),
-      realpath(storeDirectory),
-      realpath(storePath),
-    ]);
-  } catch (error: unknown) {
-    throw toSafeStoreError(error, storePath);
-  }
+    if (storeMetadata === undefined) return undefined;
 
-  if (
-    (resolvedContainmentRoot !== undefined &&
-      !isProjectPath(resolvedContainmentRoot, resolvedDirectory)) ||
-    dirname(resolvedStore) !== resolvedDirectory
-  ) {
-    throw unsafeStore(storePath);
-  }
-
-  let anchor: FileHandle | undefined;
-  let store: RunStore | undefined;
-  let snapshot: RunStoreSnapshot | undefined;
-
-  // Cleanup must not short-circuit: later steps remove copied data and release the source anchor.
-  const cleanupSteps = (): CleanupStep[] => {
-    const [openedStore, capturedSnapshot, openedAnchor] = [store, snapshot, anchor];
-    const steps: CleanupStep[] = [];
-
-    if (openedStore !== undefined) steps.push(async () => openedStore.close());
-
-    if (capturedSnapshot !== undefined) {
-      steps.push(async () => removeRunStoreSnapshot(capturedSnapshot));
-    }
-
-    if (openedAnchor !== undefined) steps.push(async () => openedAnchor.close());
-
-    return steps;
-  };
-
-  let result: T;
-
-  try {
-    const anchored = await openAnchored(resolvedStore, { kind: 'file', root: resolvedDirectory });
-    anchor = anchored.handle;
-
-    // The anchor must be the inode inspected before containment checks, not a later swap.
     if (
-      anchored.identity.dev !== storeMetadata.dev ||
-      anchored.identity.ino !== storeMetadata.ino
-    ) {
-      throw unsafeStore(storePath);
-    }
+      !metadata.isDirectory() ||
+      metadata.isSymbolicLink() ||
+      !storeMetadata.isFile() ||
+      storeMetadata.isSymbolicLink()
+    )
+      return yield* Effect.fail(unsafeStore(storePath));
 
-    snapshot = await captureRunStoreSnapshot(resolvedStore, anchor);
-    const openedStore = await openReadonlyRunStore(snapshot.path);
-    store = openedStore;
-    result = await operation(openedStore);
-  } catch (error: unknown) {
-    const failure =
-      error instanceof StoreError && error.code === 'RUN_NOT_FOUND'
-        ? error
-        : toSafeStoreError(error, storePath);
+    const [resolvedDirectory, resolvedStore, resolvedRoot] = yield* Effect.all(
+      [
+        storeCall('READ_FAILED', 'Could not resolve store directory.', () =>
+          realpath(storeDirectory),
+        ),
+        storeCall('READ_FAILED', 'Could not resolve store path.', () => realpath(storePath)),
+        options.containmentRoot === undefined
+          ? Effect.succeed(undefined)
+          : storeCall('READ_FAILED', 'Could not resolve containment root.', () =>
+              realpath(options.containmentRoot!),
+            ),
+      ],
+      { concurrency: 3 },
+    );
 
-    return rethrowAfterCleanup(failure, cleanupSteps());
-  }
+    if (
+      (resolvedRoot !== undefined && !isProjectPath(resolvedRoot, resolvedDirectory)) ||
+      dirname(resolvedStore) !== resolvedDirectory
+    )
+      return yield* Effect.fail(unsafeStore(storePath));
+    let anchor: FileHandle | undefined;
+    let snapshot: RunStoreSnapshot | undefined;
 
-  await runCleanupSteps(cleanupSteps());
+    return yield* withReadCleanup(
+      Effect.gen(function* () {
+        const anchored = yield* openAnchored(resolvedStore, {
+          kind: 'file',
+          root: resolvedDirectory,
+        });
 
-  return result;
-};
+        anchor = anchored.handle;
 
-/** Reads the conventional project-local store through the anchored snapshot path. */
-const withReadonlyRunStore = async <T>(
+        if (
+          anchored.identity.dev !== storeMetadata.dev ||
+          anchored.identity.ino !== storeMetadata.ino
+        )
+          return yield* Effect.fail(unsafeStore(storePath));
+        snapshot = yield* captureRunStoreSnapshot(resolvedStore, anchor);
+        const captured = snapshot;
+
+        return yield* withStoreScope((owner) =>
+          Effect.gen(function* () {
+            const store = yield* openReadonlyRunStore(captured.path, owner);
+
+            return yield* operation(store);
+          }),
+        );
+      }),
+      () => [
+        ...(snapshot === undefined ? [] : [removeRunStoreSnapshot(snapshot)]),
+        ...(anchor === undefined
+          ? []
+          : [
+              storeCall('READ_FAILED', 'Could not close source descriptor.', () => anchor!.close()),
+            ]),
+      ],
+    );
+  }).pipe(
+    Effect.mapError((cause) =>
+      cause instanceof StoreError && cause.code === 'RUN_NOT_FOUND'
+        ? cause
+        : toSafeStoreError(cause, storePath),
+    ),
+  );
+
+/** Reads the conventional project store, preserving absence as undefined. */
+const withReadonlyRunStore = <T, E, R>(
   root: string,
-  operation: (store: RunStore) => Promise<T>,
-): Promise<T | undefined> =>
+  operation: (store: RunStore) => Effect.Effect<T, E, R>,
+) =>
   withReadonlyRunStoreFile(join(root, RUN_STORE_DIRECTORY, RUN_STORE_FILE), operation, {
     containmentRoot: root,
   });

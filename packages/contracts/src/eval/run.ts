@@ -1,4 +1,10 @@
-import { z } from 'zod';
+import {
+  ulidSchema,
+  positiveIntegerSchema,
+  nonnegativeIntegerSchema,
+  timestampSchema,
+} from '../schema/scalars.js';
+import * as Schema from 'effect/Schema';
 
 import { caseSelectionSchema, caseSelectionSummarySchema, testIdListSchema } from './selection.js';
 import {
@@ -10,144 +16,146 @@ import {
 import { evalExecutionConfigSchema } from '../project/eval-execution.js';
 import { COMMAND_REQUEST_SCHEMA_ID, EVAL_RUN_SCHEMA_ID } from '../schema/identifiers.js';
 
-const evalOutputModeSchema = z.enum(['human', 'json', 'jsonl']);
+const evalOutputModeSchema = Schema.Literals(['human', 'json', 'jsonl']);
 
-const evalRunIdSchema = z.ulid();
+const evalRunIdSchema = ulidSchema;
 
 const evalRunCommonRequestFields = {
-  schema: z.literal(COMMAND_REQUEST_SCHEMA_ID),
-  command: z.literal('eval.run'),
-  ...caseSelectionSchema.shape,
-  concurrency: z.number().int().positive().optional(),
-  timeout_ms: durationMillisecondsSchema.optional(),
-  baseline_run_id: evalRunIdSchema.optional(),
-  junit_path: z.string().min(1).optional(),
+  schema: Schema.Literal(COMMAND_REQUEST_SCHEMA_ID),
+  command: Schema.Literal('eval.run'),
+  ...caseSelectionSchema.fields,
+  concurrency: Schema.optional(positiveIntegerSchema),
+  timeout_ms: Schema.optional(durationMillisecondsSchema),
+  baseline_run_id: Schema.optional(evalRunIdSchema),
+  junit_path: Schema.optional(Schema.String.check(Schema.isMinLength(1))),
 };
 
 const humanOutputFields = {
-  output: z.literal('human'),
-  watch: z.boolean().optional(),
+  output: Schema.Literal('human'),
+  watch: Schema.optional(Schema.Boolean),
 };
 
 const structuredOutputFields = {
-  output: z.enum(['json', 'jsonl']),
+  output: Schema.Literals(['json', 'jsonl']),
 };
 
 /** Builds the explicit-tests and all-tests request branches for one output mode. */
-const testScopeBranches = <OutputFields extends Record<string, z.core.$ZodType>>(
-  outputFields: OutputFields,
-) =>
+const testScopeBranches = <OutputFields extends Schema.Struct.Fields>(outputFields: OutputFields) =>
   [
-    z.strictObject({
+    Schema.Struct({
       ...evalRunCommonRequestFields,
       test_ids: testIdListSchema,
       ...outputFields,
     }),
-    z.strictObject({ ...evalRunCommonRequestFields, all: z.literal(true), ...outputFields }),
+    Schema.Struct({ ...evalRunCommonRequestFields, all: Schema.Literal(true), ...outputFields }),
   ] as const;
 
 /**
  * Encodes the normalized `attest eval run` request produced by flags or JSON input.
  * Strict branches make test/all selection exclusive and keep watch out of structured output.
  */
-const evalRunRequestSchema = z.union([
+const evalRunRequestSchema = Schema.Union([
   ...testScopeBranches(humanOutputFields),
   ...testScopeBranches(structuredOutputFields),
 ]);
 
-const authoredResourceHashSchema = z.strictObject({
+const authoredResourceHashSchema = Schema.Struct({
   id: resourceIdSchema,
   content_hash: sha256Schema,
 });
 
-const datasetResourceHashSchema = z.strictObject({
+const datasetResourceHashSchema = Schema.Struct({
   id: resourceIdSchema,
   data_content_hash: sha256Schema,
   metadata_content_hash: sha256Schema,
 });
 
-const selectedCaseSourceSchema = z.discriminatedUnion('kind', [
-  z.strictObject({ kind: z.literal('direct') }),
-  z.strictObject({ kind: z.literal('dataset'), dataset_id: resourceIdSchema }),
+const selectedCaseSourceSchema = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal('direct') }),
+  Schema.Struct({ kind: Schema.Literal('dataset'), dataset_id: resourceIdSchema }),
 ]);
 
 /** Preserves configured order independently from concurrent completion order. */
-const evalRunSelectedCaseSchema = z.strictObject({
-  configured_index: z.number().int().nonnegative(),
+const evalRunSelectedCaseSchema = Schema.Struct({
+  configured_index: nonnegativeIntegerSchema,
   test_id: resourceIdSchema,
   case_id: resourceIdSchema,
   source: selectedCaseSourceSchema,
 });
 
 /** Freezes every content address and selected identity resolved before execution begins. */
-const evalRunSnapshotSchema = z
-  .strictObject({
-    project_id: projectIdSchema,
-    project_hash: sha256Schema,
-    resource_hashes: z.strictObject({
-      agents: z.array(authoredResourceHashSchema),
-      tests: z.array(authoredResourceHashSchema),
-      datasets: z.array(datasetResourceHashSchema),
-      metrics: z.array(authoredResourceHashSchema),
-    }),
-    selected_test_ids: z.array(resourceIdSchema).nonempty(),
-    selected_cases: z.array(evalRunSelectedCaseSchema),
-    selection: caseSelectionSummarySchema.optional(),
-  })
-  .refine(
-    (snapshot) =>
-      snapshot.selection === undefined ||
-      snapshot.selection.selected_cases === snapshot.selected_cases.length,
-    'Selection coverage must match the selected case list.',
-  );
+const evalRunSnapshotSchema = Schema.Struct({
+  project_id: projectIdSchema,
+  project_hash: sha256Schema,
+  resource_hashes: Schema.Struct({
+    agents: Schema.Array(authoredResourceHashSchema),
+    tests: Schema.Array(authoredResourceHashSchema),
+    datasets: Schema.Array(datasetResourceHashSchema),
+    metrics: Schema.Array(authoredResourceHashSchema),
+  }),
+  selected_test_ids: Schema.Array(resourceIdSchema).check(Schema.isMinLength(1)),
+  selected_cases: Schema.Array(evalRunSelectedCaseSchema),
+  selection: Schema.optional(caseSelectionSummarySchema),
+}).check(
+  Schema.makeFilter((snapshot) =>
+    snapshot.selection === undefined ||
+    snapshot.selection.selected_cases === snapshot.selected_cases.length
+      ? undefined
+      : 'Selection coverage must match the selected case list.',
+  ),
+);
 
 /** Records the caller spelling and fully resolved execution values used for the immutable run. */
-const evalRunEffectiveCommandSchema = z.strictObject({
-  command_path: z.tuple([z.literal('eval'), z.literal('run')]),
-  argv: z.array(z.string()).nonempty(),
+const evalRunEffectiveCommandSchema = Schema.Struct({
+  command_path: Schema.Tuple([Schema.Literal('eval'), Schema.Literal('run')]),
+  argv: Schema.Array(Schema.String).check(Schema.isMinLength(1)),
   request: evalRunRequestSchema,
-  resolved: z.strictObject({
-    concurrency: z.number().int().positive(),
+  resolved: Schema.Struct({
+    concurrency: positiveIntegerSchema,
     timeout_ms: durationMillisecondsSchema,
     output: evalOutputModeSchema,
-    watch: z.boolean(),
-    execution: evalExecutionConfigSchema.optional(),
-    baseline_run_id: evalRunIdSchema.optional(),
-    junit_path: z.string().min(1).optional(),
+    watch: Schema.Boolean,
+    execution: Schema.optional(evalExecutionConfigSchema),
+    baseline_run_id: Schema.optional(evalRunIdSchema),
+    junit_path: Schema.optional(Schema.String.check(Schema.isMinLength(1))),
   }),
 });
 
-const evalRunGitMetadataSchema = z.strictObject({
-  commit: z.string().regex(/^[a-f0-9]{7,64}$/u, 'must be a lowercase hexadecimal Git object id'),
-  branch: z.string().min(1).optional(),
-  dirty: z.boolean(),
+const evalRunGitMetadataSchema = Schema.Struct({
+  commit: Schema.String.check(
+    Schema.isPattern(/^[a-f0-9]{7,64}$/u, {
+      message: 'must be a lowercase hexadecimal Git object id',
+    }),
+  ),
+  branch: Schema.optional(Schema.String.check(Schema.isMinLength(1))),
+  dirty: Schema.Boolean,
 });
 
 /**
  * Defines the immutable metadata persisted when an eval run is created.
  * Mutable lifecycle state and case results remain in the run store rather than changing this snapshot.
  */
-const evalRunSchema = z.strictObject({
-  schema: z.literal(EVAL_RUN_SCHEMA_ID),
+const evalRunSchema = Schema.Struct({
+  schema: Schema.Literal(EVAL_RUN_SCHEMA_ID),
   run_id: evalRunIdSchema,
-  created_at: z.iso.datetime({ offset: true }),
+  created_at: timestampSchema,
   snapshot_hash: sha256Schema,
   snapshot: evalRunSnapshotSchema,
   effective_command: evalRunEffectiveCommandSchema,
-  git: evalRunGitMetadataSchema.optional(),
+  git: Schema.optional(evalRunGitMetadataSchema),
 });
 
-type EvalOutputMode = z.infer<typeof evalOutputModeSchema>;
+type EvalOutputMode = typeof evalOutputModeSchema.Type;
 
-type EvalRun = z.infer<typeof evalRunSchema>;
+type EvalRun = typeof evalRunSchema.Type;
 
-type EvalRunEffectiveCommand = z.infer<typeof evalRunEffectiveCommandSchema>;
+type EvalRunEffectiveCommand = typeof evalRunEffectiveCommandSchema.Type;
 
-type EvalRunRequest = z.infer<typeof evalRunRequestSchema>;
+type EvalRunRequest = typeof evalRunRequestSchema.Type;
 
-type EvalRunSelectedCase = z.infer<typeof evalRunSelectedCaseSchema>;
+type EvalRunSelectedCase = typeof evalRunSelectedCaseSchema.Type;
 
-type EvalRunSnapshot = z.infer<typeof evalRunSnapshotSchema>;
+type EvalRunSnapshot = typeof evalRunSnapshotSchema.Type;
 
 export {
   evalOutputModeSchema,

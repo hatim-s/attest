@@ -1,3 +1,6 @@
+import * as Effect from 'effect/Effect';
+import { foreign, ownOperation, withRelease } from '../../internal/operation.js';
+import { stripStruct } from '@attest/contracts';
 import { parseWithSchema, parseWithSchemaSync } from '@attest/contracts';
 import type { JsonValue } from '@attest/contracts';
 import {
@@ -6,22 +9,47 @@ import {
   type AnyTextAdapter,
   type ChatMiddleware,
 } from '@tanstack/ai';
-import { z } from 'zod';
+import * as Schema from 'effect/Schema';
 
 import { judgeResponseSchema } from '../rubric-prompt.js';
 
+/** Adapts the verdict owner for SDK validation and provider JSON Schema generation. */
+const nativeJudgeOutputSchema = Schema.toStandardJSONSchemaV1(
+  Schema.toStandardSchemaV1(judgeResponseSchema, {
+    parseOptions: { onExcessProperty: 'error', errors: 'all' },
+  }),
+);
+
+// Effect's Standard JSON Schema converter defaults to allowing excess keys. The verdict has
+// only scalar fields, so closing its root aligns provider JSON with the strict owner decoder.
+const judgeOutputSchema = {
+  '~standard': {
+    ...nativeJudgeOutputSchema['~standard'],
+    jsonSchema: {
+      input: (options) => ({
+        ...nativeJudgeOutputSchema['~standard'].jsonSchema.input(options),
+        additionalProperties: false,
+      }),
+      output: (options) => ({
+        ...nativeJudgeOutputSchema['~standard'].jsonSchema.output(options),
+        additionalProperties: false,
+      }),
+    } satisfies (typeof nativeJudgeOutputSchema)['~standard']['jsonSchema'],
+  },
+};
+
 /** SDK finalization errors for structured output the provider returned but that failed to parse. */
-const unparseableResponseSchema = z.object({
-  code: z.enum([
+const unparseableResponseSchema = stripStruct({
+  code: Schema.Literals([
     'structured-output-parse-failed',
     'structured-output-validation-failed',
     'structured-output-missing-result',
   ]),
 });
 
-const structuredOutputCompleteSchema = z.object({
-  name: z.literal('structured-output.complete'),
-  value: z.object({ raw: z.string() }),
+const structuredOutputCompleteSchema = stripStruct({
+  name: Schema.Literal('structured-output.complete'),
+  value: stripStruct({ raw: Schema.String }),
 });
 
 /** Captures one provider attempt without conflating its evidence with an earlier structured-output retry. */
@@ -42,7 +70,7 @@ type StructuredChatRequest = {
 };
 
 /** Executes one schema-constrained chat call; injected by tests to avoid provider network calls. */
-type StructuredChatExecutor = (request: StructuredChatRequest) => Promise<JsonValue>;
+type StructuredChatExecutor = (request: StructuredChatRequest) => Effect.Effect<JsonValue, Error>;
 
 /** Identifies SDK structured-output failures the metric contract permits retrying exactly once. */
 // BOUNDARY: SDK thrown values may carry a structured-output failure code.
@@ -72,36 +100,44 @@ const createRecordMiddleware = (observation: JudgeAttemptObservation): ChatMiddl
 });
 
 /** Runs the real TanStack structured chat, forwarding the caller's signal to the SDK's controller. */
-const executeStructuredChat: StructuredChatExecutor = async (request) => {
-  const abortController = new AbortController();
-  const forwardAbort = (): void => abortController.abort(request.signal.reason);
+const executeStructuredChat: StructuredChatExecutor = (request) =>
+  ownOperation((cancelled) =>
+    Effect.gen(function* () {
+      const abortController = new AbortController();
+      const signal = AbortSignal.any([cancelled, request.signal]);
+      const forwardAbort = (): void => abortController.abort(signal.reason);
 
-  if (request.signal.aborted) {
-    forwardAbort();
-  }
+      if (signal.aborted) {
+        forwardAbort();
+      }
 
-  request.signal.addEventListener('abort', forwardAbort, { once: true });
+      signal.addEventListener('abort', forwardAbort, { once: true });
 
-  try {
-    const response = await chat({
-      adapter: request.adapter,
-      systemPrompts: [request.system],
-      messages: [{ role: 'user', content: request.user }],
-      outputSchema: judgeResponseSchema,
-      stream: false,
-      abortController,
-      middleware: [createRecordMiddleware(request.observation)],
-      debug: false,
-    });
+      return yield* withRelease(
+        Effect.gen(function* () {
+          const response = yield* foreign(() =>
+            chat({
+              adapter: request.adapter,
+              systemPrompts: [request.system],
+              messages: [{ role: 'user', content: request.user }],
+              outputSchema: judgeOutputSchema,
+              stream: false,
+              abortController,
+              middleware: [createRecordMiddleware(request.observation)],
+              debug: false,
+            }),
+          );
 
-    return parseWithSchemaSync(z.json(), response);
-  } finally {
-    request.signal.removeEventListener('abort', forwardAbort);
-  }
-};
+          return parseWithSchemaSync(Schema.Json, response);
+        }),
+        Effect.sync(() => signal.removeEventListener('abort', forwardAbort)),
+      );
+    }),
+  );
 
 export {
   executeStructuredChat,
+  judgeOutputSchema,
   isUnparseableResponse,
   type JudgeAttemptObservation,
   type StructuredChatExecutor,

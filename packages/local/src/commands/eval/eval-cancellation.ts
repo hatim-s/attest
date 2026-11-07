@@ -1,8 +1,14 @@
+import { finishWithRelease } from '../agent/adapter/lifecycle-cause.js';
+import * as Context from 'effect/Context';
+import * as Fiber from 'effect/Fiber';
+import type * as Scope from 'effect/Scope';
+import * as Effect from 'effect/Effect';
+import { stripStruct } from '@attest/contracts';
 import { parseWithSchema } from '@attest/contracts';
 import { randomUUID } from 'node:crypto';
 import { readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
-import { z } from 'zod';
+import * as Schema from 'effect/Schema';
 
 import { errnoCode } from '../../internal/errno-code.js';
 import { isProcessPresent } from '../../internal/process-presence.js';
@@ -11,35 +17,82 @@ import { prepareEvalProjectFile } from './eval-project-path.js';
 
 const EVAL_REGISTRY_DIRECTORY = join('.attest', 'eval-runs');
 
-const evalRegistryRecordSchema = z.object({
-  pid: z.number().int().positive(),
-  run_id: z.string(),
-  token: z.string().min(1),
+const evalRegistryRecordSchema = stripStruct({
+  pid: Schema.Finite.check(
+    Schema.isInt(),
+    Schema.isBetween({ minimum: Number.MIN_SAFE_INTEGER, maximum: Number.MAX_SAFE_INTEGER }),
+  ).check(Schema.isGreaterThan(0)),
+  run_id: Schema.String,
+  token: Schema.String.check(Schema.isMinLength(1)),
 });
 
-type EvalRegistryRecord = z.infer<typeof evalRegistryRecordSchema>;
+type EvalRegistryRecord = typeof evalRegistryRecordSchema.Type;
 
 type EvalRegistryHandle = {
   path: string;
   requestPath: string;
   record: EvalRegistryRecord;
   signal: AbortSignal;
-  stopPolling: () => void;
+  stopPolling: Effect.Effect<void>;
 };
 
-const evalCancellationRequestSchema = z.object({ run_id: z.string(), token: z.string() });
+const evalCancellationRequestSchema = stripStruct({ run_id: Schema.String, token: Schema.String });
 
-type EvalCancellationRequest = z.infer<typeof evalCancellationRequestSchema>;
+type EvalCancellationRequest = typeof evalCancellationRequestSchema.Type;
 
-const registryOwnershipSchema = z.object({ token: z.string() });
+const registryOwnershipSchema = stripStruct({ token: Schema.String });
 
-const localControllers = new Map<string, { controller: AbortController; token: string }>();
+/** One registry is provided by the process composition root and shared by all run requests. */
+class CancellationRegistry extends Context.Service<
+  CancellationRegistry,
+  Map<string, { controller: AbortController; token: string }>
+>()('attest/CancellationRegistry') {}
+
+/** Joins one filesystem operation before cancellation can release its ownership. */
+const registryIO = <A>(operation: () => Promise<A>) =>
+  Effect.uninterruptible(
+    Effect.tryPromise({
+      try: operation,
+      catch: (cause) =>
+        new LocalError('run_failed', 'Eval cancellation registry operation failed.', { cause }),
+    }),
+  );
+
+/** Publishes and cleans the exclusively created stage while retaining every release Exit. */
+const publishRegistryFile = (temporaryPath: string, path: string, contents: string) =>
+  Effect.uninterruptible(
+    Effect.gen(function* () {
+      let created = false;
+
+      const primary = yield* Effect.exit(
+        Effect.gen(function* () {
+          yield* registryIO(() =>
+            writeFile(temporaryPath, contents, { encoding: 'utf8', flag: 'wx', mode: 0o600 }),
+          );
+          created = true;
+          yield* registryIO(() => rename(temporaryPath, path));
+          created = false;
+        }),
+      );
+
+      const cleanup = yield* Effect.exit(
+        created ? registryIO(() => unlink(temporaryPath)) : Effect.void,
+      );
+
+      return yield* finishWithRelease(primary, [cleanup]);
+    }),
+  );
 
 const registryKey = (projectRoot: string, runId: string): string => `${projectRoot}\0${runId}`;
 
 /** Publishes one atomic active-run record that can be safely addressed by a separate CLI process. */
-const registerEvalRun = async (projectRoot: string, runId: string): Promise<EvalRegistryHandle> => {
-  const path = await prepareEvalProjectFile(
+const registerEvalRun = Effect.fn('registerEvalRun')(function* (
+  projectRoot: string,
+  runId: string,
+): Effect.fn.Return<EvalRegistryHandle, Error, CancellationRegistry | Scope.Scope> {
+  const localControllers = yield* CancellationRegistry;
+
+  const path = yield* prepareEvalProjectFile(
     projectRoot,
     join(EVAL_REGISTRY_DIRECTORY, `${runId}.json`),
     {
@@ -60,103 +113,86 @@ const registerEvalRun = async (projectRoot: string, runId: string): Promise<Eval
   const requestPath = join(directory, `${runId}.cancel.json`);
   const temporaryPath = join(directory, `.${runId}.${record.token}.tmp`);
 
-  try {
-    await writeFile(temporaryPath, `${JSON.stringify(record)}\n`, {
-      encoding: 'utf8',
-      flag: 'wx',
-      mode: 0o600,
-    });
-    await rename(temporaryPath, path);
-  } catch (error: unknown) {
-    await unlink(temporaryPath).catch(() => undefined);
-    throw new LocalError('run_failed', 'Could not publish the eval cancellation registry.', {
-      path: EVAL_REGISTRY_DIRECTORY,
-      cause: error,
-    });
-  }
+  yield* publishRegistryFile(temporaryPath, path, `${JSON.stringify(record)}\n`).pipe(
+    Effect.mapError(
+      (error) =>
+        new LocalError('run_failed', 'Could not publish the eval cancellation registry.', {
+          path: EVAL_REGISTRY_DIRECTORY,
+          cause: error.cause,
+        }),
+    ),
+  );
 
   const controller = new AbortController();
   const key = registryKey(projectRoot, runId);
   localControllers.set(key, { controller, token: record.token });
-  let timer: NodeJS.Timeout | undefined;
-  let stopped = false;
 
-  /** Polls only this run's authenticated request file for cross-process cancellation. */
-  const poll = async (): Promise<void> => {
-    if (stopped || controller.signal.aborted) return;
+  const poll = Effect.gen(function* () {
+    while (!controller.signal.aborted) {
+      yield* Effect.sleep(25);
 
-    try {
-      const request = parseWithSchema(
-        evalCancellationRequestSchema,
-        JSON.parse(await readFile(requestPath, 'utf8')),
+      const contents = yield* registryIO(() => readFile(requestPath, 'utf8')).pipe(
+        Effect.orElseSucceed(() => undefined),
       );
 
-      if (request.ok && request.value.run_id === runId && request.value.token === record.token) {
+      if (contents === undefined) continue;
+
+      const parsed = yield* Effect.try(() =>
+        parseWithSchema(evalCancellationRequestSchema, JSON.parse(contents)),
+      ).pipe(Effect.orElseSucceed(() => undefined));
+
+      if (parsed?.ok && parsed.value.run_id === runId && parsed.value.token === record.token)
         controller.abort(new Error(`Eval run ${runId} was cancelled.`));
-
-        return;
-      }
-    } catch {
-      // A missing or malformed request cannot authenticate, so leave the owned run active.
     }
+  });
 
-    schedulePoll();
-  };
-
-  const schedulePoll = (): void => {
-    // Detached on purpose: poll handles its own failures and reschedules itself.
-    timer = setTimeout(() => void poll(), 25);
-    timer.unref();
-  };
-
-  schedulePoll();
+  const fiber = yield* Effect.forkScoped(Effect.interruptible(poll));
 
   return {
     path,
     requestPath,
     record,
     signal: controller.signal,
-    stopPolling: () => {
-      stopped = true;
-
-      if (timer !== undefined) clearTimeout(timer);
+    stopPolling: Effect.gen(function* () {
+      yield* Fiber.interrupt(fiber);
       const local = localControllers.get(key);
 
       if (local?.token === record.token) localControllers.delete(key);
-    },
+    }),
   };
-};
+}, Effect.uninterruptible);
 
 /** Removes only the registry generation owned by this run, tolerating an already-cleaned record. */
-const unregisterEvalRun = async (handle: EvalRegistryHandle): Promise<void> => {
-  handle.stopPolling();
+const unregisterEvalRun = Effect.fn('unregisterEvalRun')(function* (handle: EvalRegistryHandle) {
+  yield* handle.stopPolling;
 
-  try {
-    const current = parseWithSchema(
-      registryOwnershipSchema,
-      JSON.parse(await readFile(handle.path, 'utf8')),
-    );
+  const contents = yield* registryIO(() => readFile(handle.path, 'utf8')).pipe(
+    Effect.catchIf(
+      (error) => errnoCode(error.cause) === 'ENOENT',
+      () => Effect.succeed(undefined),
+    ),
+  );
 
-    if (current.ok && current.value.token === handle.record.token) {
-      await Promise.all([
-        unlink(handle.path),
-        unlink(handle.requestPath).catch((cause: unknown) => {
-          if (errnoCode(cause) !== 'ENOENT') throw cause;
-        }),
-      ]);
-    }
-  } catch (error: unknown) {
-    if (errnoCode(error) !== 'ENOENT') {
-      throw new LocalError('run_failed', 'Could not clean the eval cancellation registry.', {
-        path: EVAL_REGISTRY_DIRECTORY,
-        cause: error,
-      });
-    }
-  }
-};
+  if (contents === undefined) return;
+
+  const current = yield* Effect.try({
+    try: () => parseWithSchema(registryOwnershipSchema, JSON.parse(contents)),
+    catch: (cause) =>
+      new LocalError('run_failed', 'Could not read eval registry ownership.', { cause }),
+  });
+
+  if (!current.ok || current.value.token !== handle.record.token) return;
+  yield* registryIO(() => unlink(handle.path));
+  yield* registryIO(() => unlink(handle.requestPath)).pipe(
+    Effect.catchIf(
+      (error) => errnoCode(error.cause) === 'ENOENT',
+      () => Effect.void,
+    ),
+  );
+}, Effect.uninterruptible);
 
 /** Releases in-process cancellation resources while retaining uncertain durable ownership. */
-const detachEvalRun = (handle: EvalRegistryHandle): void => handle.stopPolling();
+const detachEvalRun = (handle: EvalRegistryHandle): Effect.Effect<void> => handle.stopPolling;
 
 // BOUNDARY: Cancellation registry JSON is untrusted disk input; validate every record field before checking process ownership.
 const parseRegistryRecord = (value: unknown, runId: string): EvalRegistryRecord | undefined => {
@@ -166,11 +202,13 @@ const parseRegistryRecord = (value: unknown, runId: string): EvalRegistryRecord 
 };
 
 /** Publishes one authenticated run-scoped request without signalling unrelated process work. */
-const signalRegisteredEvalRun = async (
+const signalRegisteredEvalRun = Effect.fn('signalRegisteredEvalRun')(function* (
   projectRoot: string,
   runId: string,
-): Promise<'cancellation_requested' | 'not_active'> => {
-  const path = await prepareEvalProjectFile(
+): Effect.fn.Return<'cancellation_requested' | 'not_active', Error, CancellationRegistry> {
+  const localControllers = yield* CancellationRegistry;
+
+  const path = yield* prepareEvalProjectFile(
     projectRoot,
     join(EVAL_REGISTRY_DIRECTORY, `${runId}.json`),
     {
@@ -179,18 +217,29 @@ const signalRegisteredEvalRun = async (
     },
   );
 
-  let record: EvalRegistryRecord | undefined;
+  const contents = yield* registryIO(() => readFile(path, 'utf8')).pipe(
+    Effect.orElseSucceed(() => undefined),
+  );
 
-  try {
-    record = parseRegistryRecord(JSON.parse(await readFile(path, 'utf8')), runId);
-  } catch (error: unknown) {
-    if (errnoCode(error) === 'ENOENT') return 'not_active';
-  }
+  if (contents === undefined) return 'not_active';
+
+  const record = yield* Effect.try(() => parseRegistryRecord(JSON.parse(contents), runId)).pipe(
+    Effect.orElseSucceed(() => undefined),
+  );
 
   if (record === undefined) return 'not_active';
 
-  if (!isProcessPresent(record.pid)) {
-    await unlink(path).catch(() => undefined);
+  if (!(yield* isProcessPresent(record.pid))) {
+    // Reconcile only the generation observed above, never a newly published replacement.
+    const current = yield* registryIO(() => readFile(path, 'utf8')).pipe(
+      Effect.flatMap((contents) =>
+        Effect.try(() => parseRegistryRecord(JSON.parse(contents), runId)),
+      ),
+      Effect.orElseSucceed(() => undefined),
+    );
+
+    if (current?.token === record.token)
+      yield* registryIO(() => unlink(path)).pipe(Effect.orElseSucceed(() => undefined));
 
     return 'not_active';
   }
@@ -206,22 +255,19 @@ const signalRegisteredEvalRun = async (
   const requestPath = join(dirname(path), `${runId}.cancel.json`);
   const temporaryPath = `${requestPath}.${randomUUID()}.tmp`;
 
-  try {
-    await writeFile(
-      temporaryPath,
-      `${JSON.stringify({ run_id: runId, token: record.token } satisfies EvalCancellationRequest)}\n`,
-      { encoding: 'utf8', flag: 'wx', mode: 0o600 },
-    );
-    await rename(temporaryPath, requestPath);
+  yield* publishRegistryFile(
+    temporaryPath,
+    requestPath,
+    `${JSON.stringify({ run_id: runId, token: record.token } satisfies EvalCancellationRequest)}\n`,
+  );
 
-    return 'cancellation_requested';
-  } catch (error: unknown) {
-    await unlink(temporaryPath).catch(() => undefined);
-    throw new LocalError('run_failed', 'Could not signal the active eval process.', {
-      path: runId,
-      cause: error,
-    });
-  }
+  return 'cancellation_requested';
+}, Effect.uninterruptible);
+
+export {
+  CancellationRegistry,
+  detachEvalRun,
+  registerEvalRun,
+  signalRegisteredEvalRun,
+  unregisterEvalRun,
 };
-
-export { detachEvalRun, registerEvalRun, signalRegisteredEvalRun, unregisterEvalRun };

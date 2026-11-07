@@ -1,3 +1,5 @@
+import { valueFromExit } from '../../../internal/effect-exit.js';
+import * as Effect from 'effect/Effect';
 import { symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
@@ -16,19 +18,21 @@ const noStdin = (): Promise<string> => Promise.reject(new Error('stdin must not 
 const importAgent = (
   root: string,
   request: Parameters<typeof runAgentImportCommand>[0]['request'],
-): ReturnType<typeof runAgentImportCommand> =>
-  runAgentImportCommand({
-    interactive: false,
-    project: root,
-    readStdin: noStdin,
-    request,
-    workingDirectory: root,
-  });
+): Promise<Effect.Success<ReturnType<typeof runAgentImportCommand>>> =>
+  Effect.runPromiseExit(
+    runAgentImportCommand({
+      interactive: false,
+      project: root,
+      readStdin: noStdin,
+      request,
+      workingDirectory: root,
+    }),
+  ).then((exit) => valueFromExit(exit));
 
 const importCurl = (
   root: string,
   fields: Omit<CurlImportFields, 'responsePointer'> & { responsePointer?: string },
-): ReturnType<typeof runAgentImportCommand> =>
+): Promise<Effect.Success<ReturnType<typeof runAgentImportCommand>>> =>
   importAgent(root, createCurlImportRequest({ responsePointer: '', ...fields }));
 
 const importJson = (root: string, source: string, as: string) =>
@@ -113,7 +117,11 @@ describe('agent import', () => {
       request: { headers: { Authorization: '[from_env:ATTEST_CURL_POLLING_SECRET]' } },
     });
     expect(JSON.stringify(imported)).not.toContain(secret);
-    const loaded = await loadProject({ project: root });
+
+    const loaded = await Effect.runPromiseExit(loadProject({ project: root })).then((exit) =>
+      valueFromExit(exit),
+    );
+
     expect(loaded.agents.find(({ id }) => id === 'polling-curl')?.transport).toMatchObject({
       kind: 'polling',
       submit: {
@@ -135,7 +143,11 @@ describe('agent import', () => {
     await writeFile(join(root, 'file.curl'), 'curl https://agent.example --data @request.json');
     await importCurl(root, { agentId: 'file-body', source: 'file.curl' });
     expect(
-      (await loadProject({ project: root })).agents.find(({ id }) => id === 'file-body'),
+      (
+        await Effect.runPromiseExit(loadProject({ project: root })).then((exit) =>
+          valueFromExit(exit),
+        )
+      ).agents.find(({ id }) => id === 'file-body'),
     ).toMatchObject({
       transport: { request: { body: { prompt: 'hello' }, body_encoding: 'json' } },
     });
@@ -182,7 +194,13 @@ describe('agent import', () => {
       ),
     );
     await importJson(root, 'https://catalog.example/agent.json', 'remote');
-    expect((await loadProject({ project: root })).agents.map(({ id }) => id)).toContain('remote');
+    expect(
+      (
+        await Effect.runPromiseExit(loadProject({ project: root })).then((exit) =>
+          valueFromExit(exit),
+        )
+      ).agents.map(({ id }) => id),
+    ).toContain('remote');
 
     const redirected = await rejection(
       importJson(root, 'https://catalog.example/redirect', 'redirected'),

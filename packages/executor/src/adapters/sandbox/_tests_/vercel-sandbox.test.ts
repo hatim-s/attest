@@ -1,4 +1,13 @@
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import * as Cause from 'effect/Cause';
+import * as Context from 'effect/Context';
+import {
+  EnvironmentCleanupDiagnostics,
+  EnvironmentCleanupError,
+} from '../../../isolation/operation.js';
+import { run } from '../../../_tests_/support/run-effect.js';
+import { AgentInvocationError } from '../../../errors.js';
+import { createHash } from 'node:crypto';
+import { mkdtemp, open, readFile, rm, writeFile, type FileHandle } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Readable } from 'node:stream';
@@ -55,6 +64,173 @@ afterEach(async () => {
 });
 
 describe('Vercel sandbox lifecycle', () => {
+  it('retains upload descriptor cleanup failure before invoking the agent', async () => {
+    const projectRoot = await createTemporaryDirectory();
+    const source = join(projectRoot, 'input.txt');
+    await writeFile(source, 'input');
+    const sample = await open(source, 'r');
+    // SAFETY: This is the prototype of a real FileHandle; only its stat method is intercepted.
+    const prototype = Object.getPrototypeOf(sample) as FileHandle;
+    await sample.close();
+    const releases: (() => Promise<void>)[] = [];
+    const closeFailure = new Error('Upload descriptor close failed.');
+
+    const reading = vi.spyOn(prototype, 'stat').mockImplementationOnce(function (
+      this: FileHandle,
+      options,
+    ) {
+      reading.mockRestore();
+      const close = this.close.bind(this);
+      releases.push(close);
+      this.close = () => Promise.reject(closeFailure);
+
+      return this.stat(options);
+    });
+
+    const sdk = {
+      runCommand: vi.fn(() => Promise.resolve({ exitCode: 0 })),
+      writeFiles: vi.fn(() => Promise.resolve()),
+      readFile: vi.fn(),
+      stop: vi.fn(() => Promise.resolve()),
+    } satisfies VercelSandboxSdk;
+
+    try {
+      const result = await run(
+        invokeVercelSandboxAgent(
+          { kind: 'vercel', files: [{ source: 'input.txt', destination: 'input.txt' }] },
+          INVOCATION,
+          REQUEST,
+          {
+            projectRoot,
+            credentialEnv: { VERCEL_OIDC_TOKEN: 'test-token' },
+            sandboxFactory: createSdkFactory(sdk),
+          },
+        ),
+      );
+
+      expect(result).toMatchObject({
+        status: 'invocation_error',
+        error: { code: 'spawn_failed' },
+        diagnostics: { sandboxError: 'Vercel sandbox setup failed' },
+      });
+
+      if (result.status !== 'invocation_error') throw new Error('Expected setup failure');
+      const error = result.error.cause;
+      expect(error).toBeInstanceOf(EnvironmentCleanupError);
+
+      if (!(error instanceof EnvironmentCleanupError)) throw new Error('Expected cleanup evidence');
+      expect(error.cleanupCause.reasons.find(Cause.isFailReason)?.error).toBe(closeFailure);
+      expect(sdk.runCommand).not.toHaveBeenCalled();
+      expect(sdk.writeFiles).not.toHaveBeenCalled();
+      expect(sdk.stop).toHaveBeenCalledOnce();
+    } finally {
+      reading.mockRestore();
+
+      for (const release of releases) await release();
+    }
+  });
+  it.each([
+    ['completed', false],
+    ['completed', true],
+    ['failed', false],
+    ['failed', true],
+  ] as const)(
+    'retains artifact cleanup after an agent %s and stop failure=%s',
+    async (outcome, stopFails) => {
+      const projectRoot = await createTemporaryDirectory();
+      const destroyFailure = new Error('Artifact stream destruction failed.');
+      const stopFailure = new Error('VM stop failed.');
+      const stream = Readable.from([Buffer.alloc(2048)], { autoDestroy: false });
+
+      const destruction = vi.spyOn(stream, 'destroy').mockImplementation(() => {
+        throw destroyFailure;
+      });
+
+      const sdk = {
+        runCommand: vi.fn(
+          (command: { cmd: string; args: string[]; stdout?: NodeJS.WritableStream }) => {
+            if (command.cmd === 'test')
+              return Promise.resolve({ exitCode: command.args[0] === '-L' ? 1 : 0 });
+
+            if (command.cmd === 'mkdir') return Promise.resolve({ exitCode: 0 });
+
+            if (command.stdout && outcome === 'completed') writeSuccess(command.stdout);
+
+            return Promise.resolve({ exitCode: outcome === 'completed' ? 0 : 1 });
+          },
+        ),
+        writeFiles: vi.fn(() => Promise.resolve()),
+        readFile: vi.fn(() => Promise.resolve(stream)),
+        stop: vi.fn(() => (stopFails ? Promise.reject(stopFailure) : Promise.resolve())),
+      } satisfies VercelSandboxSdk;
+
+      try {
+        const result = await run(
+          invokeVercelSandboxAgent(
+            {
+              kind: 'vercel',
+              files: [],
+              artifacts: [{ source: 'result.txt', destination: 'result.txt' }],
+            },
+            INVOCATION,
+            REQUEST,
+            {
+              projectRoot,
+              artifactRoot: join(projectRoot, 'out'),
+              credentialEnv: { VERCEL_OIDC_TOKEN: 'test-token' },
+              sandboxFactory: createSdkFactory(sdk),
+            },
+          ),
+        );
+
+        if (result.status !== 'invocation_error')
+          throw new Error('Expected retained terminal failure.');
+        expect(result.error.code).toBe(
+          outcome === 'completed' ? 'output_cap_exceeded' : 'nonzero_exit',
+        );
+
+        const artifactError: unknown =
+          outcome === 'completed'
+            ? result.error
+            : Object.getOwnPropertyDescriptor(result.error, 'sandboxPostRunError')?.value;
+
+        expect(artifactError).toBeInstanceOf(AgentInvocationError);
+
+        if (!(artifactError instanceof AgentInvocationError))
+          throw new Error('Expected artifact failure.');
+        expect(artifactError.code).toBe('output_cap_exceeded');
+        const cause: unknown = Object.getOwnPropertyDescriptor(artifactError, 'effectCause')?.value;
+
+        if (!Cause.isCause(cause)) throw new Error('Artifact failure lost its Cause.');
+
+        const cleanup = Context.getOrUndefined(
+          Cause.annotations(cause),
+          EnvironmentCleanupDiagnostics,
+        );
+
+        expect(cleanup?.cause.reasons.find(Cause.isDieReason)?.defect).toBe(destroyFailure);
+
+        if (stopFails) {
+          const stopped: unknown = Object.getOwnPropertyDescriptor(
+            result.error,
+            'sandboxCleanupCause',
+          )?.value;
+
+          if (!Cause.isCause(stopped)) throw new Error('VM cleanup lost its Cause.');
+          expect(stopped.reasons.find(Cause.isFailReason)?.error).toBe(stopFailure);
+          expect(result.diagnostics.sandboxCleanupConfirmed).toBe(false);
+        }
+
+        expect(sdk.stop).toHaveBeenCalledOnce();
+        expect(destruction).toHaveBeenCalledOnce();
+        expect(JSON.stringify(result)).not.toContain(destroyFailure.message);
+      } finally {
+        destruction.mockRestore();
+        stream.destroy();
+      }
+    },
+  );
+
   it('reuses one sandbox across retries, exports terminal artifacts, then stops it', async () => {
     const projectRoot = await createTemporaryDirectory();
     const artifactRoot = join(projectRoot, 'artifacts');
@@ -93,20 +269,22 @@ describe('Vercel sandbox lifecycle', () => {
 
     const factory = createSdkFactory(sdk);
 
-    const result = await invokeVercelSandboxAgent(
-      {
-        kind: 'vercel',
-        files: [],
-        artifacts: [{ source: 'result.txt', destination: 'case/result.txt' }],
-      },
-      { ...INVOCATION, retries: 1 },
-      REQUEST,
-      {
-        projectRoot,
-        artifactRoot,
-        credentialEnv: { VERCEL_OIDC_TOKEN: 'test-token' },
-        sandboxFactory: factory,
-      },
+    const result = await run(
+      invokeVercelSandboxAgent(
+        {
+          kind: 'vercel',
+          files: [],
+          artifacts: [{ source: 'result.txt', destination: 'case/result.txt' }],
+        },
+        { ...INVOCATION, retries: 1 },
+        REQUEST,
+        {
+          projectRoot,
+          artifactRoot,
+          credentialEnv: { VERCEL_OIDC_TOKEN: 'test-token' },
+          sandboxFactory: factory,
+        },
+      ),
     );
 
     expect(factory).toHaveBeenCalledOnce();
@@ -145,19 +323,21 @@ describe('Vercel sandbox lifecycle', () => {
 
     const factory = createSdkFactory(sdk);
 
-    const result = await invokeVercelSandboxAgent(
-      {
-        kind: 'vercel',
-        files: [{ source: 'agent.mjs', destination: 'agent.mjs' }],
-        artifacts: [],
-      },
-      INVOCATION,
-      REQUEST,
-      {
-        projectRoot,
-        credentialEnv: { VERCEL_OIDC_TOKEN: 'test-token' },
-        sandboxFactory: factory,
-      },
+    const result = await run(
+      invokeVercelSandboxAgent(
+        {
+          kind: 'vercel',
+          files: [{ source: 'agent.mjs', destination: 'agent.mjs' }],
+          artifacts: [],
+        },
+        INVOCATION,
+        REQUEST,
+        {
+          projectRoot,
+          credentialEnv: { VERCEL_OIDC_TOKEN: 'test-token' },
+          sandboxFactory: factory,
+        },
+      ),
     );
 
     expect(result).toMatchObject({ status: 'invocation_error', error: { code: 'spawn_failed' } });
@@ -172,11 +352,18 @@ describe('Vercel sandbox lifecycle', () => {
     const factory = vi.fn<VercelSandboxFactory>();
 
     await expect(
-      invokeVercelSandboxAgent({ kind: 'vercel', files: [], artifacts: [] }, INVOCATION, REQUEST, {
-        projectRoot,
-        credentialEnv: {},
-        sandboxFactory: factory,
-      }),
+      run(
+        invokeVercelSandboxAgent(
+          { kind: 'vercel', files: [], artifacts: [] },
+          INVOCATION,
+          REQUEST,
+          {
+            projectRoot,
+            credentialEnv: {},
+            sandboxFactory: factory,
+          },
+        ),
+      ),
     ).rejects.toMatchObject({ code: 'spawn_failed' });
     expect(factory).not.toHaveBeenCalled();
   });
@@ -252,11 +439,13 @@ describe('Vercel sandbox lifecycle', () => {
 
       if (terminal === 'cancelled') options.signal = controller.signal;
 
-      const result = await invokeVercelSandboxAgent(
-        { kind: 'vercel', files: [], artifacts: [] },
-        { ...INVOCATION, attemptTimeoutMs, responseBytes, retries: 2 },
-        REQUEST,
-        options,
+      const result = await run(
+        invokeVercelSandboxAgent(
+          { kind: 'vercel', files: [], artifacts: [] },
+          { ...INVOCATION, attemptTimeoutMs, responseBytes, retries: 2 },
+          REQUEST,
+          options,
+        ),
       );
 
       expect(result).toMatchObject({ status: 'invocation_error', error: { code: terminal } });
@@ -284,20 +473,18 @@ describe('Vercel sandbox lifecycle', () => {
 
     const factory = createSdkFactory(sdk);
 
-    const result = await invokeVercelSandboxAgent(
-      { kind: 'vercel', files: [], artifacts: [] },
-      INVOCATION,
-      REQUEST,
-      {
+    const result = await run(
+      invokeVercelSandboxAgent({ kind: 'vercel', files: [], artifacts: [] }, INVOCATION, REQUEST, {
         projectRoot,
         credentialEnv: { VERCEL_OIDC_TOKEN: 'test-token' },
         sandboxFactory: factory,
-      },
+      }),
     );
 
     expect(result).toMatchObject({
       status: 'invocation_error',
       diagnostics: { sandboxCleanupConfirmed: false },
+      attempts: [{ status: 'ok' }, { status: 'invocation_error' }],
     });
   });
 
@@ -318,17 +505,196 @@ describe('Vercel sandbox lifecycle', () => {
 
     const factory = createSdkFactory(sdk);
 
-    const result = await invokeVercelSandboxAgent(
-      { kind: 'vercel', files: [], artifacts: [] },
-      INVOCATION,
-      REQUEST,
-      {
+    const result = await run(
+      invokeVercelSandboxAgent({ kind: 'vercel', files: [], artifacts: [] }, INVOCATION, REQUEST, {
         projectRoot,
         credentialEnv: { VERCEL_OIDC_TOKEN: 'test-token' },
         sandboxFactory: factory,
-      },
+      }),
     );
 
     expect(result).toMatchObject({ status: 'invocation_error', error: { code: expected } });
+  });
+
+  it('retains capped stdout hash and stderr when remote completion is unconfirmed', async () => {
+    const projectRoot = await createTemporaryDirectory();
+    const output = 'x'.repeat(512);
+
+    const sdk = {
+      writeFiles: vi.fn(() => Promise.resolve()),
+      runCommand: vi.fn(
+        (command: {
+          cmd: string;
+          stdout?: NodeJS.WritableStream;
+          stderr?: NodeJS.WritableStream;
+        }) => {
+          if (command.cmd === 'mkdir') return Promise.resolve({ exitCode: 0 });
+          command.stdout!.write(output);
+          command.stderr!.write('remote command diagnostic');
+
+          return Promise.reject(new Error('lost acknowledgement'));
+        },
+      ),
+      readFile: vi.fn(),
+      stop: vi.fn(() => Promise.resolve()),
+    } satisfies VercelSandboxSdk;
+
+    const result = await run(
+      invokeVercelSandboxAgent(
+        { kind: 'vercel', files: [], artifacts: [] },
+        { ...INVOCATION, responseBytes: 256, retries: 2 },
+        REQUEST,
+        {
+          projectRoot,
+          credentialEnv: { VERCEL_OIDC_TOKEN: 'test-token' },
+          sandboxFactory: createSdkFactory(sdk),
+        },
+      ),
+    );
+
+    expect(result).toMatchObject({
+      status: 'invocation_error',
+      error: { code: 'output_cap_exceeded' },
+      diagnostics: {
+        sandboxCompletionConfirmed: false,
+        stderrExcerpt: 'remote command diagnostic',
+      },
+      rawExcerpt: {
+        text: 'x'.repeat(256),
+        truncated: true,
+        sha256: createHash('sha256').update(output).digest('hex'),
+      },
+    });
+    expect(result.attempts).toHaveLength(1);
+    expect(sdk.runCommand).toHaveBeenCalledTimes(2);
+    expect(sdk.stop).toHaveBeenCalledOnce();
+  });
+
+  it('gives caller cancellation precedence over a confirmed cap breach', async () => {
+    const projectRoot = await createTemporaryDirectory();
+    const controller = new AbortController();
+
+    const sdk = {
+      writeFiles: vi.fn(() => Promise.resolve()),
+      runCommand: vi.fn((command: { cmd: string; stdout?: NodeJS.WritableStream }) => {
+        if (command.cmd === 'mkdir') return Promise.resolve({ exitCode: 0 });
+        command.stdout!.write('x'.repeat(512));
+        controller.abort();
+
+        return Promise.resolve({ exitCode: 0 });
+      }),
+      readFile: vi.fn(),
+      stop: vi.fn(() => Promise.resolve()),
+    } satisfies VercelSandboxSdk;
+
+    const result = await run(
+      invokeVercelSandboxAgent(
+        { kind: 'vercel', files: [], artifacts: [] },
+        { ...INVOCATION, responseBytes: 256, retries: 2 },
+        REQUEST,
+        {
+          projectRoot,
+          signal: controller.signal,
+          credentialEnv: { VERCEL_OIDC_TOKEN: 'test-token' },
+          sandboxFactory: createSdkFactory(sdk),
+        },
+      ),
+    );
+
+    expect(result).toMatchObject({ status: 'invocation_error', error: { code: 'cancelled' } });
+    expect(result.attempts).toHaveLength(1);
+    expect(sdk.stop).toHaveBeenCalledOnce();
+  });
+
+  it('preserves a native defect through the S5 edge and still joins sandbox stop', async () => {
+    const projectRoot = await createTemporaryDirectory();
+    const defect = new Error('request serialization invariant');
+    const cleanup = new Error('sandbox stop acknowledgement lost');
+    const request = { ...REQUEST };
+    Object.defineProperty(request, 'input', {
+      enumerable: true,
+      get: () => {
+        throw defect;
+      },
+    });
+
+    const sdk = {
+      writeFiles: vi.fn(() => Promise.resolve()),
+      runCommand: vi.fn(() => Promise.resolve({ exitCode: 0 })),
+      readFile: vi.fn(),
+      stop: vi.fn(() => Promise.reject(cleanup)),
+    } satisfies VercelSandboxSdk;
+
+    const invocation = run(
+      invokeVercelSandboxAgent(
+        { kind: 'vercel', files: [], artifacts: [] },
+        { ...INVOCATION, retries: 2 },
+        request,
+        {
+          projectRoot,
+          credentialEnv: { VERCEL_OIDC_TOKEN: 'test-token' },
+          sandboxFactory: createSdkFactory(sdk),
+        },
+      ),
+    );
+
+    await expect(invocation).rejects.toHaveProperty('effectCause.reasons.0.defect', defect);
+    const failure = await invocation.catch((error: { effectCause: Cause.Cause<Error> }) => error);
+
+    if (!('effectCause' in failure)) throw new Error('Expected a native failure Cause');
+
+    const release = Context.getOrUndefined(
+      Cause.annotations(failure.effectCause),
+      EnvironmentCleanupDiagnostics,
+    );
+
+    expect(release?.cause.reasons[0]).toMatchObject({ _tag: 'Fail', error: cleanup });
+    expect(sdk.writeFiles).not.toHaveBeenCalled();
+    expect(sdk.runCommand).toHaveBeenCalledOnce();
+    expect(sdk.stop).toHaveBeenCalledOnce();
+  });
+
+  it('retains successful evidence when native listener release defects', async () => {
+    const projectRoot = await createTemporaryDirectory();
+    const controller = new AbortController();
+    const defect = new Error('listener release failed');
+    Object.defineProperty(controller.signal, 'removeEventListener', {
+      value: () => {
+        throw defect;
+      },
+    });
+
+    const sdk = {
+      writeFiles: vi.fn(() => Promise.resolve()),
+      runCommand: vi.fn((command: { cmd: string; stdout?: NodeJS.WritableStream }) => {
+        if (command.cmd !== 'mkdir') writeSuccess(command.stdout!);
+
+        return Promise.resolve({ exitCode: 0 });
+      }),
+      readFile: vi.fn(),
+      stop: vi.fn(() => Promise.resolve()),
+    } satisfies VercelSandboxSdk;
+
+    const invocation = run(
+      invokeVercelSandboxAgent(
+        { kind: 'vercel', files: [], artifacts: [] },
+        { ...INVOCATION, retries: 2 },
+        REQUEST,
+        {
+          projectRoot,
+          signal: controller.signal,
+          credentialEnv: { VERCEL_OIDC_TOKEN: 'test-token' },
+          sandboxFactory: createSdkFactory(sdk),
+        },
+      ),
+    );
+
+    await expect(invocation).rejects.toMatchObject({
+      _tag: 'SandboxAttemptCleanupError',
+      attempt: { status: 'ok' },
+    });
+    await expect(invocation).rejects.toHaveProperty('cleanupCause.reasons.0.defect', defect);
+    expect(sdk.runCommand).toHaveBeenCalledTimes(2);
+    expect(sdk.stop).toHaveBeenCalledOnce();
   });
 });

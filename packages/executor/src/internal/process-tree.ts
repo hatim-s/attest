@@ -1,7 +1,18 @@
 import { type ChildProcess, spawn } from 'node:child_process';
-import { setTimeout as wait } from 'node:timers/promises';
+import * as Cause from 'effect/Cause';
+import * as Context from 'effect/Context';
+import * as Deferred from 'effect/Deferred';
+import * as Exit from 'effect/Exit';
+import * as Effect from 'effect/Effect';
+import * as Option from 'effect/Option';
 
 import { errnoCode } from './errno-code.js';
+
+/** Retains a failed ps release without replacing the observation's primary Cause. */
+class ProcessObservationCleanup extends Context.Service<
+  ProcessObservationCleanup,
+  Cause.Cause<never>
+>()('attest/executor/ProcessObservationCleanup') {}
 
 const PROCESS_EXIT_POLL_INTERVAL_MS = 25;
 
@@ -14,6 +25,12 @@ type ProcessIdentity = {
   startedAt: string;
   command: string;
 };
+
+/** Separates an unavailable observation from an observed empty descendant set. */
+type ProcessSnapshot = { identities: ProcessIdentity[]; available: boolean };
+
+/** Cleanup is confirmed only when observation succeeded and no known descendant survives. */
+type ProcessCleanup = { unreapedProcessIds: number[]; cleanupConfirmed: boolean };
 
 type ProcessRow = ProcessIdentity & { parentProcessId: number };
 
@@ -41,8 +58,8 @@ const processIds = (identities: readonly ProcessIdentity[]): number[] =>
   identities.map(({ processId }) => processId);
 
 /** Waits until the poll interval, the grace deadline, or the sweep deadline, whichever is first. */
-const waitForNextPoll = (graceDeadline: number, sweepDeadline: number): Promise<void> =>
-  wait(
+const waitForNextPoll = (graceDeadline: number, sweepDeadline: number): Effect.Effect<void> =>
+  Effect.sleep(
     Math.min(
       PROCESS_EXIT_POLL_INTERVAL_MS,
       Math.max(0, graceDeadline - Date.now()),
@@ -72,56 +89,85 @@ const isProcessGroupAlive = (processId: number): boolean => {
  * Runs one bounded ps query. A wedged ps must never stall agent termination, so expiry kills the
  * snapshot child and deliberately degrades cleanup to process-group-only best effort.
  */
-const readProcessListing = async (
+const readProcessListing = Effect.fn('process.readListing')(function* (
   argumentsList: readonly string[],
   deadline = Date.now() + PROCESS_SNAPSHOT_TIMEOUT_MS,
   options: { emptyWhenNoMatch?: boolean } = {},
-): Promise<string | undefined> => {
-  const timeoutMs = Math.min(PROCESS_SNAPSHOT_TIMEOUT_MS, deadline - Date.now());
+): Effect.fn.Return<string | undefined> {
+  return yield* Effect.uninterruptibleMask((restore) =>
+    Effect.gen(function* () {
+      const timeoutMs = Math.min(PROCESS_SNAPSHOT_TIMEOUT_MS, deadline - Date.now());
 
-  if (timeoutMs <= 0) {
-    return undefined;
-  }
+      if (timeoutMs <= 0) return undefined;
 
-  let processSnapshot: ChildProcess;
+      const spawned = yield* Effect.try({
+        try: () => spawn('ps', [...argumentsList], { stdio: ['ignore', 'pipe', 'ignore'] }),
+        catch: () => undefined,
+      }).pipe(Effect.result);
 
-  try {
-    processSnapshot = spawn('ps', [...argumentsList], { stdio: ['ignore', 'pipe', 'ignore'] });
-  } catch {
-    // Sandboxes and exhausted hosts may reject ps synchronously; containment safely degrades.
-    return undefined;
-  }
+      if (spawned._tag === 'Failure') return undefined;
+      const snapshot = spawned.success;
+      const chunks: Buffer[] = [];
+      const completion = Deferred.makeUnsafe<string | undefined>();
+      const closed = Deferred.makeUnsafe<void>();
 
-  const standardOutputChunks: Buffer[] = [];
-  let timedOut = false;
-  processSnapshot.stdout?.on('data', (chunk: Buffer) => standardOutputChunks.push(chunk));
+      const data = (chunk: Buffer): void => {
+        chunks.push(chunk);
+      };
 
-  return await new Promise<string | undefined>((resolve) => {
-    const timeout = setTimeout(() => {
-      timedOut = true;
-      processSnapshot.kill('SIGKILL');
-    }, timeoutMs);
+      const error = (): void => {
+        Deferred.doneUnsafe(completion, Effect.succeed(undefined));
+      };
 
-    processSnapshot.once('error', () => {
-      clearTimeout(timeout);
-      resolve(undefined);
-    });
-    processSnapshot.once('close', (exitCode) => {
-      clearTimeout(timeout);
-      const output = Buffer.concat(standardOutputChunks).toString('utf8');
-      // `ps -p` exits 1 with no rows when none of the queried pids exist: every process is gone.
-      const noMatch = options.emptyWhenNoMatch === true && exitCode === 1 && output.trim() === '';
+      const close = (code: number | null): void => {
+        const output = Buffer.concat(chunks).toString('utf8');
+        const noMatch = options.emptyWhenNoMatch === true && code === 1 && output.trim() === '';
+        Deferred.doneUnsafe(completion, Effect.succeed(code === 0 || noMatch ? output : undefined));
+        Deferred.doneUnsafe(closed, Effect.void);
+      };
 
-      if (timedOut || (exitCode !== 0 && !noMatch)) {
-        resolve(undefined);
+      snapshot.stdout?.on('data', data);
+      snapshot.once('error', error);
+      snapshot.once('close', close);
 
-        return;
+      // Only ps observation is bounded. Termination evidence is never raced or discarded.
+      const primary = yield* Effect.exit(
+        restore(Effect.timeoutOption(Effect.interruptible(Deferred.await(completion)), timeoutMs)),
+      );
+
+      const cleanup = yield* Effect.exit(
+        Effect.gen(function* () {
+          if (snapshot.exitCode === null && snapshot.signalCode === null) snapshot.kill('SIGKILL');
+
+          // Joining is bounded by the sweep's remaining budget. Missing close means unavailable evidence.
+          const joined = yield* Effect.timeoutOption(
+            Effect.interruptible(Deferred.await(closed)),
+            Math.max(0, Math.min(100, deadline - Date.now())),
+          );
+
+          snapshot.stdout?.off('data', data);
+          snapshot.stdout?.destroy();
+
+          return Option.isSome(joined);
+        }),
+      );
+
+      if (Exit.isFailure(primary)) {
+        if (Exit.isFailure(cleanup)) {
+          return yield* Effect.failCause(
+            Cause.annotate(primary.cause, Context.make(ProcessObservationCleanup, cleanup.cause)),
+          );
+        }
+
+        return yield* Effect.failCause(primary.cause);
       }
 
-      resolve(output);
-    });
-  });
-};
+      if (Exit.isFailure(cleanup) || !cleanup.value) return undefined;
+
+      return Option.getOrUndefined(primary.value);
+    }),
+  );
+});
 
 const parseProcessRows = (snapshotText: string): ProcessRow[] => {
   return snapshotText.split('\n').flatMap((line) => {
@@ -188,15 +234,24 @@ const parseProcessSnapshot = (snapshotText: string, rootProcessId: number): Proc
   return descendants;
 };
 
-const readProcessSnapshot = async (deadline?: number): Promise<string | undefined> => {
-  return readProcessListing(['-Ao', 'pid=,ppid=,lstart=,comm='], deadline);
-};
+/** Reads a bounded process table for identity-checked descendant discovery. */
+const readProcessSnapshot = Effect.fn('process.readProcessSnapshot')(function* (
+  deadline?: number,
+): Effect.fn.Return<string | undefined> {
+  return yield* readProcessListing(['-Ao', 'pid=,ppid=,lstart=,comm='], deadline);
+});
 
-const listDescendantProcesses = async (rootProcessId: number): Promise<ProcessIdentity[]> => {
-  const snapshotText = await readProcessSnapshot();
+/** Observes descendants without interpreting an unavailable listing as an empty process tree. */
+const listDescendantProcesses = Effect.fn('process.listDescendantProcesses')(function* (
+  rootProcessId: number,
+): Effect.fn.Return<ProcessSnapshot> {
+  const snapshotText = yield* readProcessSnapshot();
 
-  return snapshotText === undefined ? [] : parseProcessSnapshot(snapshotText, rootProcessId);
-};
+  return {
+    identities: snapshotText === undefined ? [] : parseProcessSnapshot(snapshotText, rootProcessId),
+    available: snapshotText !== undefined,
+  };
+});
 
 /** Parses the output of one batched identity query. */
 const parseIdentitySnapshot = (snapshotText: string): ProcessIdentity[] => {
@@ -226,17 +281,18 @@ const mergeIdentities = (
   }
 };
 
-const readMatchingIdentities = async (
+/** Revalidates pid, start time and command before any descendant signal. */
+const readMatchingIdentities = Effect.fn('process.readMatchingIdentities')(function* (
   identities: readonly ProcessIdentity[],
   deadline: number,
-): Promise<ProcessIdentity[] | undefined> => {
+): Effect.fn.Return<ProcessIdentity[] | undefined> {
   if (identities.length === 0) {
     return [];
   }
 
   const queriedIds = [...new Set(processIds(identities))];
 
-  const snapshotText = await readProcessListing(
+  const snapshotText = yield* readProcessListing(
     ['-o', 'pid=,lstart=,comm=', '-p', queriedIds.join(',')],
     deadline,
     { emptyWhenNoMatch: true },
@@ -255,14 +311,15 @@ const readMatchingIdentities = async (
 
     return current?.startedAt === identity.startedAt && current.command === identity.command;
   });
-};
+});
 
-const discoverDescendants = async (
+/** Finds descendants of the owned root and every previously tracked child. */
+const discoverDescendants = Effect.fn('process.discoverDescendants')(function* (
   rootProcessId: number,
   knownIdentities: readonly ProcessIdentity[],
   deadline: number,
-): Promise<ProcessIdentity[] | undefined> => {
-  const snapshotText = await readProcessSnapshot(deadline);
+): Effect.fn.Return<ProcessIdentity[] | undefined> {
+  const snapshotText = yield* readProcessSnapshot(deadline);
 
   if (snapshotText === undefined) {
     return undefined;
@@ -271,17 +328,18 @@ const discoverDescendants = async (
   const roots = [rootProcessId, ...knownIdentities.map(({ processId }) => processId)];
 
   return roots.flatMap((processId) => parseProcessSnapshot(snapshotText, processId));
-};
+});
 
-const waitThroughTerminationGrace = async (
+/** Observes new descendants during grace and signals only revalidated identities. */
+const waitThroughTerminationGrace = Effect.fn('process.waitThroughTerminationGrace')(function* (
   rootProcessId: number,
   identitiesByKey: Map<string, ProcessIdentity>,
   graceDeadline: number,
   sweepDeadline: number,
-): Promise<boolean> => {
+): Effect.fn.Return<boolean> {
   while (Date.now() < graceDeadline && Date.now() < sweepDeadline) {
     const identities = [...identitiesByKey.values()];
-    const discovered = await discoverDescendants(rootProcessId, identities, sweepDeadline);
+    const discovered = yield* discoverDescendants(rootProcessId, identities, sweepDeadline);
 
     if (discovered === undefined) {
       return false;
@@ -293,7 +351,7 @@ const waitThroughTerminationGrace = async (
 
     mergeIdentities(identitiesByKey, newIdentities);
 
-    const survivors = await readMatchingIdentities([...identitiesByKey.values()], sweepDeadline);
+    const survivors = yield* readMatchingIdentities([...identitiesByKey.values()], sweepDeadline);
 
     if (survivors === undefined) {
       return false;
@@ -311,35 +369,40 @@ const waitThroughTerminationGrace = async (
       return true;
     }
 
-    await waitForNextPoll(graceDeadline, sweepDeadline);
+    yield* waitForNextPoll(graceDeadline, sweepDeadline);
   }
 
   return true;
-};
+});
 
 /**
  * Re-reads identities until none survive or `pollDeadline` passes. `complete` is false when ps
  * became unavailable mid-poll; `survivors` then holds the last identities known to be alive.
  */
-const pollSurvivors = async (
+const pollSurvivors = Effect.fn('process.pollSurvivors')(function* (
   identities: readonly ProcessIdentity[],
   pollDeadline: number,
   sweepDeadline: number,
-): Promise<{ survivors: ProcessIdentity[]; complete: boolean }> => {
-  let survivors = await readMatchingIdentities(identities, sweepDeadline);
+): Effect.fn.Return<{ survivors: ProcessIdentity[]; complete: boolean }> {
+  const initial = yield* readMatchingIdentities(identities, sweepDeadline);
 
-  if (survivors === undefined) return { survivors: [...identities], complete: false };
+  if (initial === undefined) return { survivors: [...identities], complete: false };
+  let survivors: ProcessIdentity[] = initial;
 
   while (survivors.length > 0 && Date.now() < pollDeadline) {
-    await waitForNextPoll(pollDeadline, sweepDeadline);
-    const next = await readMatchingIdentities(survivors, sweepDeadline);
+    yield* waitForNextPoll(pollDeadline, sweepDeadline);
+
+    const next: ProcessIdentity[] | undefined = yield* readMatchingIdentities(
+      survivors,
+      sweepDeadline,
+    );
 
     if (next === undefined) return { survivors, complete: false };
     survivors = next;
   }
 
   return { survivors, complete: true };
-};
+});
 
 const isDirectChildAlive = (child: ChildProcess): boolean => {
   return child.exitCode === null && child.signalCode === null;
@@ -374,20 +437,28 @@ const spawnInProcessGroup = (
  * same-second same-command reuse and check-to-kill races remain possible. Verified survivors and
  * candidates left when the five-second sweep deadline expires are returned for diagnostics.
  */
-const killProcessTree = async (
+const killProcessTree = Effect.fn('process.killProcessTree')(function* (
   child: ChildProcess,
   options: {
     graceMs: number;
     initialDescendants?: readonly ProcessIdentity[];
+    /** A failed earlier snapshot cannot be repaired after descendants may have reparented. */
+    initialObservationAvailable?: boolean;
     /** Whether the direct child is still owned and live, allowing process-group signalling. */
     signalProcessGroup: boolean;
   },
-): Promise<number[]> => {
+): Effect.fn.Return<ProcessCleanup> {
   const rootProcessId = child.pid;
 
   if (rootProcessId === undefined) {
-    return [];
+    return { unreapedProcessIds: [], cleanupConfirmed: true };
   }
+
+  const result = (identities: readonly ProcessIdentity[], available = true): ProcessCleanup => ({
+    unreapedProcessIds: processIds(identities),
+    cleanupConfirmed:
+      available && options.initialObservationAvailable !== false && identities.length === 0,
+  });
 
   const killGroupIfAlive = (): void => {
     if (isDirectChildAlive(child)) sendSignal(-rootProcessId, 'SIGKILL');
@@ -400,7 +471,7 @@ const killProcessTree = async (
   let discoveryAvailable = true;
 
   if (options.signalProcessGroup) {
-    const latestDescendants = await discoverDescendants(rootProcessId, [], sweepDeadline);
+    const latestDescendants = yield* discoverDescendants(rootProcessId, [], sweepDeadline);
 
     if (latestDescendants !== undefined) {
       mergeIdentities(identitiesByKey, latestDescendants);
@@ -414,24 +485,24 @@ const killProcessTree = async (
   const identities = [...identitiesByKey.values()];
 
   if (!discoveryAvailable) {
-    await wait(Math.max(0, graceDeadline - Date.now()));
+    yield* Effect.sleep(Math.max(0, graceDeadline - Date.now()));
     killGroupIfAlive();
 
-    return processIds(identities);
+    return result(identities, false);
   }
 
-  const termMatches = await readMatchingIdentities(identities, sweepDeadline);
+  const termMatches = yield* readMatchingIdentities(identities, sweepDeadline);
 
   if (termMatches === undefined) {
     if (options.signalProcessGroup) killGroupIfAlive();
 
-    return processIds(identities);
+    return result(identities, false);
   }
 
   signalIdentities(termMatches, 'SIGTERM');
 
   if (options.signalProcessGroup) {
-    const snapshotsAvailable = await waitThroughTerminationGrace(
+    const snapshotsAvailable = yield* waitThroughTerminationGrace(
       rootProcessId,
       identitiesByKey,
       graceDeadline,
@@ -440,24 +511,24 @@ const killProcessTree = async (
 
     killGroupIfAlive();
 
-    if (!snapshotsAvailable) return processIds([...identitiesByKey.values()]);
+    if (!snapshotsAvailable) return result([...identitiesByKey.values()], false);
   } else {
-    const normalExit = await pollSurvivors(termMatches, graceDeadline, sweepDeadline);
+    const normalExit = yield* pollSurvivors(termMatches, graceDeadline, sweepDeadline);
 
-    if (!normalExit.complete) return processIds(termMatches);
+    if (!normalExit.complete) return result(termMatches, false);
     identitiesByKey.clear();
     mergeIdentities(identitiesByKey, normalExit.survivors);
   }
 
   const killCandidates = [...identitiesByKey.values()];
-  const killMatches = await readMatchingIdentities(killCandidates, sweepDeadline);
+  const killMatches = yield* readMatchingIdentities(killCandidates, sweepDeadline);
 
-  if (killMatches === undefined) return processIds(killCandidates);
+  if (killMatches === undefined) return result(killCandidates, false);
   signalIdentities(killMatches, 'SIGKILL');
-  const verified = await pollSurvivors(killMatches, sweepDeadline, sweepDeadline);
+  const verified = yield* pollSurvivors(killMatches, sweepDeadline, sweepDeadline);
 
-  return processIds(verified.survivors);
-};
+  return result(verified.survivors, verified.complete);
+}, Effect.uninterruptible);
 
 export {
   identityKey,
@@ -467,4 +538,6 @@ export {
   parseProcessSnapshot,
   spawnInProcessGroup,
   type ProcessIdentity,
+  type ProcessSnapshot,
+  type ProcessCleanup,
 };

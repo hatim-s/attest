@@ -1,3 +1,4 @@
+import * as Effect from 'effect/Effect';
 import {
   parseWithSchema,
   agentResourceSchema,
@@ -7,7 +8,7 @@ import {
   projectResourcesSchema,
   testResourceSchema,
 } from '@attest/contracts';
-import type { z } from 'zod';
+import * as Schema from 'effect/Schema';
 
 import { hashProjectManifest } from '@attest/core';
 import {
@@ -69,28 +70,35 @@ const sourceForProjectIssue = (
 };
 
 /** Loads each manifest entry in order; failures stay in each result's diagnostics. */
-const loadJsonResources = async <Value>(
+const loadJsonResources = Effect.fn('loadJsonResources')(function* <Value>(
   root: string,
   entries:
     | ProjectManifest['resources']['agents']
     | ProjectManifest['resources']['tests']
     | ProjectManifest['resources']['metrics'],
-  schema: z.ZodType<Value>,
-): Promise<LoadedJsonResource<Value>[]> => {
+  schema: Schema.ConstraintDecoder<Value>,
+) {
   const loads: LoadedJsonResource<Value>[] = [];
 
   for (const entry of entries) {
-    loads.push(await loadJsonResource(root, entry.path, entry.content_hash, schema));
+    loads.push(yield* loadJsonResource(root, entry.path, entry.content_hash, schema));
   }
 
   return loads;
-};
+});
 
 /** Loads the complete project read model and rejects aggregate source-safe diagnostics. */
-const loadProject = async (options: DiscoverProjectOptions = {}): Promise<LoadedProject> => {
-  const discovered = await discoverProject(options);
+const loadProject = Effect.fn('loadProject')(function* (
+  options: DiscoverProjectOptions = {},
+): Effect.fn.Return<
+  LoadedProject,
+  | import('../../internal/open-anchored.js').AnchoredCleanupFailure
+  | import('../../internal/open-anchored.js').AnchoredFileFailure
+  | ProjectLoadError
+> {
+  const discovered = yield* discoverProject(options);
 
-  const manifest = await loadJsonResource(
+  const manifest = yield* loadJsonResource(
     discovered.root,
     PROJECT_MANIFEST_FILE,
     undefined,
@@ -98,29 +106,31 @@ const loadProject = async (options: DiscoverProjectOptions = {}): Promise<Loaded
   );
 
   if (manifest.value === undefined || manifest.hash === undefined) {
-    throw new ProjectLoadError(
-      'project_invalid',
-      `Project manifest validation failed with ${manifest.diagnostics.length} diagnostic(s).`,
-      manifest.diagnostics,
+    return yield* Effect.fail(
+      new ProjectLoadError(
+        'project_invalid',
+        `Project manifest validation failed with ${manifest.diagnostics.length} diagnostic(s).`,
+        manifest.diagnostics,
+      ),
     );
   }
 
   const { resources } = manifest.value;
 
-  const agentLoads = await loadJsonResources(
+  const agentLoads = yield* loadJsonResources(
     discovered.root,
     resources.agents,
     agentResourceSchema,
   );
 
-  const testLoads = await loadJsonResources(discovered.root, resources.tests, testResourceSchema);
+  const testLoads = yield* loadJsonResources(discovered.root, resources.tests, testResourceSchema);
   const datasetLoads: LoadedDatasetResource[] = [];
 
   for (const entry of resources.datasets) {
-    datasetLoads.push(await loadDataset(discovered.root, entry));
+    datasetLoads.push(yield* loadDataset(discovered.root, entry));
   }
 
-  const metricLoads = await loadJsonResources(
+  const metricLoads = yield* loadJsonResources(
     discovered.root,
     resources.metrics,
     metricResourceSchema,
@@ -169,10 +179,12 @@ const loadProject = async (options: DiscoverProjectOptions = {}): Promise<Loaded
   }
 
   if (diagnostics.length > 0 || !validated.ok) {
-    throw new ProjectLoadError(
-      'project_invalid',
-      `Project validation failed with ${diagnostics.length} diagnostic(s).`,
-      diagnostics,
+    return yield* Effect.fail(
+      new ProjectLoadError(
+        'project_invalid',
+        `Project validation failed with ${diagnostics.length} diagnostic(s).`,
+        diagnostics,
+      ),
     );
   }
 
@@ -200,6 +212,6 @@ const loadProject = async (options: DiscoverProjectOptions = {}): Promise<Loaded
     ),
     root: discovered.root,
   };
-};
+});
 
 export { loadProject };

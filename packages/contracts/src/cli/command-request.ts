@@ -1,4 +1,4 @@
-import { z } from 'zod';
+import * as Schema from 'effect/Schema';
 
 import {
   agentAddRequestSchema,
@@ -36,7 +36,7 @@ import { evalCancelRequestSchema } from '../eval/cancel.js';
 import { evalRunRequestSchema } from '../eval/run.js';
 
 /** Encodes every normalized project-authoring request accepted through --from-json. */
-const commandRequestSchema = z.union([
+const commandRequestSchema = Schema.Union([
   projectInitRequestSchema,
   projectUnlockRequestSchema,
   agentAddRequestSchema,
@@ -68,6 +68,6 @@ const commandRequestSchema = z.union([
   evalCancelRequestSchema,
 ]);
 
-type CommandRequest = z.infer<typeof commandRequestSchema>;
+type CommandRequest = typeof commandRequestSchema.Type;
 
 export { commandRequestSchema, type CommandRequest };

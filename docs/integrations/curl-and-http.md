@@ -118,7 +118,7 @@ Unsupported or unsafe flags are reported together before any project write. This
 
 Ctrl-C aborts DNS, connect, response, retry waits, and body reads. The CLI returns `cancelled` with exit code `130`. The whole request is also bounded by `--attempt-timeout`.
 
-Retries cover safe transport failures and retryable HTTP statuses; agent-reported errors are results and are not retried. Use `--retries 0` for a non-idempotent direct endpoint unless the endpoint itself makes duplicate requests safe.
+Retries cover known pre-dispatch transport failures and fully observed retryable HTTP responses; agent-reported errors are results and are not retried. A timeout or reset after possible dispatch, failed body observation, or unconfirmed cleanup prevents replay, even when an idempotency header is configured. Use `--retries 0` for a non-idempotent direct endpoint unless the endpoint itself makes duplicate requests safe.
 
 See [Agent transport failures](../reference/errors.md#agent-transport-failures) for the
 `details.invocation_code` values.

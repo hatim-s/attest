@@ -1,9 +1,7 @@
-import {
-  COMMAND_REQUEST_SCHEMA_ID,
-  type EvalCancelRequest,
-  type EvalEvent,
-  type EvalRunRequest,
-} from '@attest/contracts';
+import * as Effect from 'effect/Effect';
+import * as Cause from 'effect/Cause';
+import * as Exit from 'effect/Exit';
+import { COMMAND_REQUEST_SCHEMA_ID, type EvalEvent, type EvalRunRequest } from '@attest/contracts';
 import {
   authenticatedCloudClient,
   resolveCloudUploadProject,
@@ -11,12 +9,12 @@ import {
 } from '@attest/local/cloud';
 import { cancelConfiguration, readRequestDocument, runConfiguration } from '@attest/local/eval';
 import type { Command } from 'commander';
-
 import {
   AttestCliError,
   CliExit,
   renderCliError,
   serializeCliError,
+  type SerializedCliFailure,
 } from '../../errors/cli-error.js';
 import { setCliCommandHelpMetadata } from '../../help/command-help.js';
 import { createCliSuccessResult, serializeCliResult } from '../../output/cli-protocol.js';
@@ -29,7 +27,6 @@ import {
   projectOption,
 } from '../shared/cli-options.js';
 import type { CommandContext } from '../shared/command-context.js';
-import { withProcessSignals } from '../shared/process-signals.js';
 import { collectEvalEvents } from './eval-event-stream.js';
 import { failedRunResult, renderHumanFinalResult } from './eval-output.js';
 import {
@@ -66,37 +63,45 @@ const REQUEST_DOCUMENT_HINT = `Provide one ${COMMAND_REQUEST_SCHEMA_ID} document
  * Builds the run request from flags, or reads it from `--from-json`. A document's own `output`
  * becomes the command's output first, so even an invalid document fails in the mode it asked for.
  */
-const readRunRequest = async (
-  fields: EvalRunRequestFields & { fromJson?: string; nonInteractive?: boolean },
+const readRunRequest = (
+  fields: EvalRunRequestFields & {
+    fromJson?: string;
+    nonInteractive?: boolean;
+  },
   command: Command,
   signal: AbortSignal,
   context: CommandContext,
-): Promise<EvalRunRequest> => {
-  if (fields.fromJson === undefined) {
-    return createEvalRunRequest(fields, {
-      interactive: isInteractive(fields, context.interaction),
-      prompt: context.interaction.prompt,
-      signal,
+) =>
+  Effect.gen(function* () {
+    if (fields.fromJson === undefined) {
+      return yield* Effect.tryPromise({
+        try: () =>
+          createEvalRunRequest(fields, {
+            interactive: isInteractive(fields, context.interaction),
+            prompt: context.interaction.prompt,
+            signal,
+          }),
+        catch: (cause) => cause,
+      });
+    }
+
+    assertNoEvalFlags(fields.fromJson, command);
+
+    const document = yield* readRequestDocument(fields.fromJson, {
+      hint: REQUEST_DOCUMENT_HINT,
+      readStdin: context.interaction.readStdin,
+      workingDirectory: context.workingDirectory,
     });
-  }
 
-  assertNoEvalFlags(fields.fromJson, command);
+    const output = requestedOutput(document);
 
-  const document = await readRequestDocument(fields.fromJson, {
-    hint: REQUEST_DOCUMENT_HINT,
-    readStdin: context.interaction.readStdin,
-    workingDirectory: context.workingDirectory,
+    if (output !== undefined) command.setOptionValueWithSource('output', output, 'config');
+
+    return parseEvalRunRequest(document);
   });
 
-  const output = requestedOutput(document);
-
-  if (output !== undefined) command.setOptionValueWithSource('output', output, 'config');
-
-  return parseEvalRunRequest(document);
-};
-
 /** Runs one eval, streaming progress or JSONL, and prints the final result in the chosen mode. */
-const executeEvalRun = async (
+const executeEvalRun = (
   request: EvalRunRequest,
   options: {
     project: string | undefined;
@@ -104,107 +109,140 @@ const executeEvalRun = async (
     context: CommandContext;
     upload: boolean;
   },
-): Promise<void> => {
-  const { project, signal, context, upload } = options;
-  const execute = context.services?.eval?.runConfiguration ?? runConfiguration;
+) =>
+  Effect.gen(function* () {
+    const { project, signal, context, upload } = options;
+    const execute = context.services?.eval?.runConfiguration ?? runConfiguration;
 
-  const cloud = {
-    authenticatedCloudClient,
-    resolveCloudUploadProject,
-    uploadCloudRun,
-    ...context.services?.cloud,
-  };
+    const cloud = {
+      authenticatedCloudClient,
+      resolveCloudUploadProject,
+      uploadCloudRun,
+      ...context.services?.cloud,
+    };
 
-  const uploadContext = upload
-    ? await cloud.resolveCloudUploadProject({
-        client: await cloud.authenticatedCloudClient(context.credentialPath),
-        workingDirectory: context.workingDirectory,
-        project,
-        signal,
-      })
-    : undefined;
+    const uploadContext = upload
+      ? yield* cloud.resolveCloudUploadProject({
+          client: yield* cloud.authenticatedCloudClient(context.credentialPath),
+          workingDirectory: context.workingDirectory,
+          project,
+          signal,
+        })
+      : undefined;
 
-  const source = await execute(request, {
-    argv: context.argv,
-    project,
-    signal,
-    terminalFailure: (code, message) =>
-      failedRunResult(serializeCliError(new AttestCliError(code, message))),
-    workingDirectory: context.workingDirectory,
-  });
+    const source = yield* execute(request, {
+      argv: context.argv,
+      project,
+      signal,
+      terminalFailure: (code, message) =>
+        failedRunResult(serializeCliError(new AttestCliError(code, message))),
+      workingDirectory: context.workingDirectory,
+    }).pipe(Effect.provideContext(context.evalContext));
 
-  const events = await collectEvalEvents(source, {
-    io: context.io,
-    now: () => new Date(),
-    streamJsonl: request.output === 'jsonl',
-    watch: request.output === 'human' && request.watch === true,
-  });
+    let uploadNotice: string | undefined;
+    let publishTerminal: (failure?: SerializedCliFailure) => void = () => {};
 
-  const final = events.at(-1);
+    const events = yield* collectEvalEvents(source, {
+      deferTerminal: (publish) => {
+        publishTerminal = publish;
+      },
+      io: context.io,
+      now: () => new Date(),
+      streamJsonl: request.output === 'jsonl',
+      watch: request.output === 'human' && request.watch === true,
+    });
 
-  if (final?.event !== 'result') {
-    throw new AttestCliError('run_failed', 'Eval stream did not produce a final result.');
-  }
+    const final = events.at(-1);
 
-  if (request.output === 'json') context.io.output(serializeCliResult(final.data.result));
-
-  if (request.output === 'human') {
-    if (!final.data.result.ok) context.io.error(renderCliError(final.data.result.error));
-    context.io.output(renderHumanFinalResult(final.data));
-  }
-
-  const completed = events.findLast(
-    (event): event is Extract<EvalEvent, { event: 'run_completed' }> =>
-      event.event === 'run_completed',
-  );
-
-  if (uploadContext !== undefined && completed !== undefined) {
-    try {
-      const result = await cloud.uploadCloudRun({
-        ...uploadContext,
-        runId: completed.data.run_id,
-        signal,
-      });
-
-      context.io.error(result.url);
-    } catch (error) {
-      context.io.error(renderCliError(serializeCliError(error).error));
+    if (final?.event !== 'result') {
+      return yield* Effect.fail(
+        new AttestCliError('run_failed', 'Eval stream did not produce a final result.'),
+      );
     }
-  }
 
-  if (final.data.exit_code !== 0) throw new CliExit(final.data.exit_code);
-};
+    context.complete((failure) => {
+      // A terminal infrastructure failure stays primary; pass/fail/cancel outcomes may still
+      // become cleanup failures when the application closes its shared store.
+      const primaryFailed = !final.data.result.ok && final.data.result.error.code !== 'cancelled';
+      const cleanupFailure = primaryFailed ? undefined : failure;
+      publishTerminal(cleanupFailure);
+      const result = cleanupFailure === undefined ? final.data : failedRunResult(cleanupFailure);
+
+      if (request.output === 'json') context.io.output(serializeCliResult(result.result));
+
+      if (request.output === 'human') {
+        if (!result.result.ok) context.io.error(renderCliError(result.result.error));
+        context.io.output(renderHumanFinalResult(result));
+      }
+
+      if (uploadNotice !== undefined) context.io.error(uploadNotice);
+
+      return result.exit_code;
+    });
+
+    const completed = events.findLast(
+      (
+        event,
+      ): event is Extract<
+        EvalEvent,
+        {
+          event: 'run_completed';
+        }
+      > => event.event === 'run_completed',
+    );
+
+    if (uploadContext !== undefined && completed !== undefined) {
+      const uploaded = yield* Effect.exit(
+        Effect.suspend(() =>
+          cloud.uploadCloudRun({
+            ...uploadContext,
+            runId: completed.data.run_id,
+            signal,
+          }),
+        ),
+      );
+
+      if (Exit.isSuccess(uploaded)) uploadNotice = uploaded.value.url;
+      else {
+        if (Cause.hasInterrupts(uploaded.cause)) return yield* Effect.failCause(uploaded.cause);
+        uploadNotice = renderCliError(serializeCliError(Cause.squash(uploaded.cause)).error);
+      }
+    }
+
+    if (final.data.exit_code !== 0) throw new CliExit(final.data.exit_code);
+  });
 
 /**
  * Builds the cancel request from flags, or reads it from `--from-json`. A document's own
  * `output` becomes the command's output before validation, as for `eval run`.
  */
-const readCancelRequest = async (
+const readCancelRequest = (
   runId: string | undefined,
   options: EvalCancelCliOptions,
   command: Command,
   context: CommandContext,
-): Promise<EvalCancelRequest> => {
-  if (options.fromJson === undefined) {
-    return createEvalCancelRequest({ output: options.output, runId });
-  }
+) =>
+  Effect.gen(function* () {
+    if (options.fromJson === undefined) {
+      return createEvalCancelRequest({ output: options.output, runId });
+    }
 
-  assertNoEvalFlags(options.fromJson, command);
+    assertNoEvalFlags(options.fromJson, command);
 
-  const document = await readRequestDocument(options.fromJson, {
-    hint: REQUEST_DOCUMENT_HINT,
-    readStdin: context.interaction.readStdin,
-    workingDirectory: context.workingDirectory,
+    const document = yield* readRequestDocument(options.fromJson, {
+      hint: REQUEST_DOCUMENT_HINT,
+      readStdin: context.interaction.readStdin,
+      workingDirectory: context.workingDirectory,
+    });
+
+    const output = requestedOutput(document);
+
+    if (output === 'human' || output === 'json') {
+      command.setOptionValueWithSource('output', output, 'config');
+    }
+
+    return parseEvalCancelRequest(document);
   });
-
-  const output = requestedOutput(document);
-
-  if (output === 'human' || output === 'json') {
-    command.setOptionValueWithSource('output', output, 'config');
-  }
-
-  return parseEvalCancelRequest(document);
-};
 
 /** Registers `eval run` and `eval cancel`, which call the local eval runner directly. */
 const registerEvalCommands = (context: CommandContext): void => {
@@ -236,38 +274,40 @@ const registerEvalCommands = (context: CommandContext): void => {
     .addOption(
       commonOption(nonInteractiveOption('disable prompts and fail when selection is missing')),
     )
-    .action(async (testIds: string[], options: EvalRunCliOptions, command: Command) => {
-      const fields = {
-        ...options,
-        caseIds: options.case,
-        datasetIds: options.dataset,
-        folders: options.folder,
-        tags: options.tag,
-        testIds,
-      };
+    .action((testIds: string[], options: EvalRunCliOptions, command: Command) =>
+      context.submit(
+        Effect.gen(function* () {
+          const fields = {
+            ...options,
+            caseIds: options.case,
+            datasetIds: options.dataset,
+            folders: options.folder,
+            tags: options.tag,
+            testIds,
+          };
 
-      await withProcessSignals(async (signal) => {
-        try {
-          const request = await readRunRequest(fields, command, signal, context);
+          const signal = context.signal;
+          const request = yield* readRunRequest(fields, command, signal, context);
 
           if (signal.aborted) {
-            throw new AttestCliError('cancelled', 'Evaluation was cancelled before execution.');
+            return yield* Effect.fail(
+              new AttestCliError('cancelled', 'Evaluation was cancelled before execution.'),
+            );
           }
 
-          await executeEvalRun(request, {
+          yield* executeEvalRun(request, {
             project: options.project,
             signal,
             context,
             upload: options.upload === true,
           });
-        } catch (error: unknown) {
-          if (!signal.aborted || error instanceof CliExit) throw error;
-          throw new AttestCliError('cancelled', 'Evaluation was cancelled by a process signal.', {
-            cause: error,
-          });
-        }
-      });
-    });
+        }),
+        {
+          cancellation: 'owned',
+          cancellationMessage: 'Evaluation was cancelled by a process signal.',
+        },
+      ),
+    );
 
   setCliCommandHelpMetadata(run, {
     requestSchema: COMMAND_REQUEST_SCHEMA_ID,
@@ -331,30 +371,33 @@ const registerEvalCommands = (context: CommandContext): void => {
     .addOption(
       commonOption(nonInteractiveOption('disable prompts and fail when the run id is missing')),
     )
-    .action(async (runId: string | undefined, options: EvalCancelCliOptions, command: Command) => {
-      const request = await readCancelRequest(runId, options, command, context);
+    .action((runId: string | undefined, options: EvalCancelCliOptions, command: Command) =>
+      context.submit(
+        Effect.gen(function* () {
+          const request = yield* readCancelRequest(runId, options, command, context);
+          const cancel = context.services?.eval?.cancelConfiguration ?? cancelConfiguration;
 
-      const cancel = context.services?.eval?.cancelConfiguration ?? cancelConfiguration;
+          const result = yield* cancel(request, {
+            project: options.project,
+            workingDirectory: context.workingDirectory,
+          }).pipe(Effect.provideContext(context.evalContext));
 
-      const result = await cancel(request, {
-        project: options.project,
-        workingDirectory: context.workingDirectory,
-      });
+          if (request.output === 'json') {
+            const document = createCliSuccessResult(
+              'eval.cancel',
+              { run_id: result.runId, status: result.status },
+              { projectHashBefore: result.projectHash, projectHashAfter: result.projectHash },
+            );
 
-      if (request.output === 'json') {
-        const document = createCliSuccessResult(
-          'eval.cancel',
-          { run_id: result.runId, status: result.status },
-          { projectHashBefore: result.projectHash, projectHashAfter: result.projectHash },
-        );
+            context.io.output(serializeCliResult(document));
 
-        context.io.output(serializeCliResult(document));
+            return;
+          }
 
-        return;
-      }
-
-      context.io.output(`Run ${result.runId}: ${result.status.replaceAll('_', ' ')}.`);
-    });
+          context.io.output(`Run ${result.runId}: ${result.status.replaceAll('_', ' ')}.`);
+        }),
+      ),
+    );
 
   setCliCommandHelpMetadata(cancel, {
     requestSchema: COMMAND_REQUEST_SCHEMA_ID,

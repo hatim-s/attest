@@ -78,10 +78,11 @@ const checkRelease = async (): Promise<void> => {
     // Resolve only installed packages. This catches workspace symlink and missing asset mistakes.
     await writeFile(
       join(directory, 'verify.mjs'),
-      `import assert from 'node:assert/strict';
+      `import { Effect } from 'effect';
+import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { cliResultSchema } from '@attest/contracts';
-import { openStore } from '@attest/local/store';
+import { cliResultSchema, parseWithSchema } from '@attest/contracts';
+import { openStore, withStoreScope } from '@attest/local/store';
 import { startViewServer } from '@attest/local/view-server';
 import { invokeAgent } from '@attest/executor';
 import { createAgentRunner } from '@attest/client';
@@ -95,37 +96,40 @@ assert.equal(typeof runCli, 'function');
 assert.equal(typeof invokeAgent, 'function');
 assert.equal(typeof collectArtifacts, 'function');
 assert.equal(typeof createPiHandler(), 'function');
-const runner = createAgentRunner({ handler: async () => ({ output: null }), triggerToken: 'release-check' });
-const served = await serveAgentRunner(runner, { port: 0 });
-try {
+await Effect.runPromise(Effect.scoped(Effect.gen(function* () {
+const runner = yield* createAgentRunner({ handler: () => Effect.succeed({ output: null }), triggerToken: 'release-check' });
+const served = yield* serveAgentRunner(runner, { port: 0 });
+yield* Effect.promise(async () => {
   const trigger = await fetch(served.url, { method: 'POST', headers: { authorization: 'Bearer release-check', 'content-type': 'application/json' }, body: '{}' });
   assert.equal(trigger.status, 400);
-} finally {
-  await served.close();
-}
+});
+yield* runner.close();
+})));
 assert.equal(typeof executeResolvedEvalPlan, 'function');
 assert.equal(typeof selectCases, 'function');
-assert.equal(typeof cliResultSchema.parse, 'function');
+assert.equal(parseWithSchema(cliResultSchema, {}).ok, false);
 assert.ok(dashboardHtml.includes('<html'));
 const schema = JSON.parse(await readFile(new URL(import.meta.resolve('@attest/schemas/generated/project.json')), 'utf8'));
 assert.ok(schema.$schema);
-const store = await openStore('release-check.db');
-assert.deepEqual(await store.runs.listRuns(), { items: [] });
-const server = await startViewServer({
-  catalog: createSingleProjectCatalog({ key: 'release', name: 'Release' }, store.runs),
-  close: () => store.close(),
-  indexHtml: dashboardHtml,
-  port: 0,
-});
-try {
-  const response = await fetch(server.url);
-  assert.equal(response.status, 200);
-  assert.ok((await response.text()).includes('window.__ATTEST_BOOTSTRAP__='));
-  const runs = await fetch(new URL('/api/projects/release/runs', server.url));
-  assert.deepEqual(await runs.json(), { items: [] });
-} finally {
-  await server.close();
-}
+await Effect.runPromise(withStoreScope((owner) => Effect.scoped(Effect.gen(function* () {
+  const store = yield* openStore('release-check.db', owner);
+  assert.deepEqual(yield* store.runs.listRuns(), { items: [] });
+  const server = yield* startViewServer({
+    catalog: createSingleProjectCatalog({ key: 'release', name: 'Release' }, store.runs),
+    close: () => Effect.void,
+    indexHtml: dashboardHtml,
+    port: 0,
+  });
+  try {
+    const response = yield* Effect.promise(() => fetch(server.url));
+    assert.equal(response.status, 200);
+    assert.ok((yield* Effect.promise(() => response.text())).includes('window.__ATTEST_BOOTSTRAP__='));
+    const runs = yield* Effect.promise(() => fetch(new URL('/api/projects/release/runs', server.url)));
+    assert.deepEqual(yield* Effect.promise(() => runs.json()), { items: [] });
+  } finally {
+    yield* server.close();
+  }
+}))));
 `,
     );
     execFileSync('node', ['verify.mjs'], {

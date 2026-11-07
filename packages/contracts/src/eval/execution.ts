@@ -1,17 +1,24 @@
-import { z } from 'zod';
+import { safeIntegerSchema, positiveIntegerSchema } from '../schema/scalars.js';
+import { stripStruct } from '../schema/objects.js';
+import * as Schema from 'effect/Schema';
 
 /**
  * Terminal classification of one executed case. The runner produces it and the store persists
  * it, so both read the same enum.
  */
-const caseOutcomeSchema = z.enum(['completed', 'invocation_error', 'timeout', 'cancelled']);
+const caseOutcomeSchema = Schema.Literals([
+  'completed',
+  'invocation_error',
+  'timeout',
+  'cancelled',
+]);
 
 /**
  * Every way an agent invocation can fail before producing an evaluable envelope
  * (docs/specs/agent-contract.md, execution semantics). The store persists these values verbatim,
  * so they are append-only within a contract version.
  */
-const invocationErrorCodeSchema = z.enum([
+const invocationErrorCodeSchema = Schema.Literals([
   'spawn_failed',
   'timeout',
   'output_cap_exceeded',
@@ -23,31 +30,33 @@ const invocationErrorCodeSchema = z.enum([
 ]);
 
 /** Recoverable problems reported alongside a successfully parsed agent response. */
-const warningCodeSchema = z.enum(['unknown_field', 'invalid_trace']);
+const warningCodeSchema = Schema.Literals(['unknown_field', 'invalid_trace']);
 
 /**
  * Transport metadata recorded per invocation attempt and per case. Free-text failures are capped
  * so a hostile hook or sandbox cannot grow a stored record without bound.
  */
-const invocationDiagnosticsSchema = z.object({
-  stderrExcerpt: z.string().optional(),
-  exitCode: z.number().int().optional(),
-  httpStatus: z.number().int().optional(),
-  remoteJobId: z.union([z.string(), z.number().finite()]).optional(),
-  unreapedProcessIds: z.array(z.number().int().positive()).optional(),
-  lifecycleError: z.string().max(4096).optional(),
-  sandboxError: z.string().max(4096).optional(),
-  sandboxCleanupConfirmed: z.boolean().optional(),
-  sandboxCompletionConfirmed: z.boolean().optional(),
+const invocationDiagnosticsSchema = stripStruct({
+  stderrExcerpt: Schema.optional(Schema.String),
+  exitCode: Schema.optional(safeIntegerSchema),
+  httpStatus: Schema.optional(safeIntegerSchema),
+  remoteJobId: Schema.optional(
+    Schema.Union([Schema.String, Schema.Finite.check(Schema.isFinite())]),
+  ),
+  unreapedProcessIds: Schema.optional(Schema.Array(positiveIntegerSchema)),
+  lifecycleError: Schema.optional(Schema.String.check(Schema.isMaxLength(4096))),
+  sandboxError: Schema.optional(Schema.String.check(Schema.isMaxLength(4096))),
+  sandboxCleanupConfirmed: Schema.optional(Schema.Boolean),
+  sandboxCompletionConfirmed: Schema.optional(Schema.Boolean),
 });
 
-type CaseOutcome = z.infer<typeof caseOutcomeSchema>;
+type CaseOutcome = typeof caseOutcomeSchema.Type;
 
-type InvocationDiagnostics = z.infer<typeof invocationDiagnosticsSchema>;
+type InvocationDiagnostics = typeof invocationDiagnosticsSchema.Type;
 
-type InvocationErrorCode = z.infer<typeof invocationErrorCodeSchema>;
+type InvocationErrorCode = typeof invocationErrorCodeSchema.Type;
 
-type WarningCode = z.infer<typeof warningCodeSchema>;
+type WarningCode = typeof warningCodeSchema.Type;
 
 export {
   caseOutcomeSchema,

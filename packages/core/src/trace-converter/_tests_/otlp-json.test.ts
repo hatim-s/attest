@@ -1,5 +1,6 @@
+import { stripStruct } from '@attest/contracts';
 import { parseWithSchemaSync } from '@attest/contracts';
-import { z } from 'zod';
+import * as Schema from 'effect/Schema';
 import { readFile } from 'node:fs/promises';
 
 import { describe, expect, it } from 'vitest';
@@ -7,17 +8,53 @@ import { describe, expect, it } from 'vitest';
 import { convertOtlpJson, selectConvertedTrace } from '../otlp-json.js';
 
 interface OtlpFixture {
-  resourceSpans: unknown[];
+  resourceSpans: readonly unknown[];
 }
 
 /** Loads one checked-in sanitized framework export as converter input. */
 const loadFixture = async (name: string): Promise<OtlpFixture> =>
   parseWithSchemaSync(
-    z.object({ resourceSpans: z.array(z.unknown()) }),
+    stripStruct({ resourceSpans: Schema.Array(Schema.Unknown) }),
     JSON.parse(await readFile(new URL(`./fixtures/${name}`, import.meta.url), 'utf8')),
   );
 
 describe('convertOtlpJson', () => {
+  it.each([
+    {},
+    { parentSpanId: undefined },
+    { attributes: null },
+    { attributes: {} },
+    { events: [{ name: 'event', timeUnixNano: '1000000000', attributes: null }] },
+    { events: [{ name: 'event', timeUnixNano: '1000000000', attributes: {} }] },
+  ])('accepts root spans and degrades malformed attributes: %j', (extra) => {
+    const [trace] = convertOtlpJson({
+      resourceSpans: [
+        {
+          scopeSpans: [
+            {
+              spans: [
+                {
+                  traceId: 'a'.repeat(32),
+                  spanId: 'b'.repeat(16),
+                  name: 'root',
+                  startTimeUnixNano: '1000000000',
+                  endTimeUnixNano: '2000000000',
+                  ...extra,
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+
+    expect(trace?.spans).toHaveLength(1);
+    expect(trace?.spans[0]?.parent_span_id).toBeNull();
+    expect(trace?.spans[0]?.attributes).toBeUndefined();
+
+    if ('events' in extra) expect(trace?.spans[0]?.events?.[0]?.attributes).toBeUndefined();
+  });
+
   it('normalizes a Vercel AI SDK export into agent, llm, and tool spans', async () => {
     const [trace] = convertOtlpJson(await loadFixture('vercel-ai-sdk.otlp.json'));
 
@@ -80,3 +117,21 @@ describe('convertOtlpJson', () => {
     ).toThrowError(/spans\[0\]\.traceId: must be a 32-character hex string/);
   });
 });
+
+it.each(['invalid', '-1', '1.5', '9'.repeat(60)])(
+  'rejects malformed OTLP timestamp %s with authored diagnostics',
+  async (timestamp) => {
+    const fixture = await loadFixture('vercel-ai-sdk.otlp.json');
+
+    // Keep vendor fields and replace only the timestamp in an existing valid span.
+    const text = JSON.stringify(fixture).replace(
+      /"startTimeUnixNano":"\d+"/,
+      `"startTimeUnixNano":"${timestamp}"`,
+    );
+
+    expect(text).not.toBe(JSON.stringify(fixture));
+    expect(() => convertOtlpJson(JSON.parse(text))).toThrow(
+      /must be an unsigned nanosecond timestamp|is outside the Date range/,
+    );
+  },
+);

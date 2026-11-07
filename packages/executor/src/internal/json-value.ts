@@ -9,4 +9,8 @@ const parseJson = (source: string): JsonValue => {
   return value;
 };
 
-export { parseJson };
+/** Preserves readonly JSON element types when narrowing an array. */
+const isJsonArray = (value: JsonValue | undefined): value is readonly JsonValue[] =>
+  Array.isArray(value);
+
+export { parseJson, isJsonArray };

@@ -1,40 +1,8 @@
 {
   "$comment": "Runtime-only invariants: selection counts satisfy selected_cases <= matched_cases <= total_cases; sequencing across a stream is checked by the stream parser.",
-  "$defs": {
-    "__schema0": {
-      "anyOf": [
-        {
-          "type": "string"
-        },
-        {
-          "type": "number"
-        },
-        {
-          "type": "boolean"
-        },
-        {
-          "type": "null"
-        },
-        {
-          "items": {
-            "$ref": "#/$defs/__schema0"
-          },
-          "type": "array"
-        },
-        {
-          "additionalProperties": {
-            "$ref": "#/$defs/__schema0"
-          },
-          "propertyNames": {
-            "type": "string"
-          },
-          "type": "object"
-        }
-      ]
-    }
-  },
+  "$defs": {},
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "oneOf": [
+  "anyOf": [
     {
       "additionalProperties": false,
       "properties": {
@@ -47,59 +15,74 @@
               "type": "integer"
             },
             "run_id": {
-              "format": "ulid",
               "pattern": "^[0-9A-HJKMNP-TV-Za-hjkmnp-tv-z]{26}$",
               "type": "string"
             },
             "selection": {
-              "additionalProperties": false,
-              "properties": {
-                "matched_cases": {
-                  "maximum": 9007199254740991,
-                  "minimum": 0,
-                  "type": "integer"
-                },
-                "sample": {
+              "anyOf": [
+                {
                   "additionalProperties": false,
                   "properties": {
-                    "algorithm": {
-                      "const": "hash-rank-v1",
-                      "type": "string"
-                    },
-                    "count": {
-                      "exclusiveMinimum": 0,
+                    "matched_cases": {
                       "maximum": 9007199254740991,
+                      "minimum": 0,
                       "type": "integer"
                     },
-                    "seed": {
-                      "minLength": 1,
-                      "type": "string"
+                    "sample": {
+                      "anyOf": [
+                        {
+                          "additionalProperties": false,
+                          "properties": {
+                            "algorithm": {
+                              "enum": [
+                                "hash-rank-v1"
+                              ],
+                              "type": "string"
+                            },
+                            "count": {
+                              "exclusiveMinimum": 0,
+                              "maximum": 9007199254740991,
+                              "type": "integer"
+                            },
+                            "seed": {
+                              "minLength": 1,
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "count",
+                            "seed",
+                            "algorithm"
+                          ],
+                          "type": "object"
+                        },
+                        {
+                          "not": {}
+                        }
+                      ]
+                    },
+                    "selected_cases": {
+                      "maximum": 9007199254740991,
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "total_cases": {
+                      "maximum": 9007199254740991,
+                      "minimum": 0,
+                      "type": "integer"
                     }
                   },
                   "required": [
-                    "count",
-                    "seed",
-                    "algorithm"
+                    "total_cases",
+                    "matched_cases",
+                    "selected_cases"
                   ],
                   "type": "object"
                 },
-                "selected_cases": {
-                  "maximum": 9007199254740991,
-                  "minimum": 0,
-                  "type": "integer"
-                },
-                "total_cases": {
-                  "maximum": 9007199254740991,
-                  "minimum": 0,
-                  "type": "integer"
+                {
+                  "not": {}
                 }
-              },
-              "required": [
-                "total_cases",
-                "matched_cases",
-                "selected_cases"
-              ],
-              "type": "object"
+              ]
             },
             "snapshot_hash": {
               "pattern": "^[a-f0-9]{64}$",
@@ -126,11 +109,15 @@
           "type": "object"
         },
         "event": {
-          "const": "run_started",
+          "enum": [
+            "run_started"
+          ],
           "type": "string"
         },
         "schema": {
-          "const": "attest.cli-event",
+          "enum": [
+            "attest.cli-event"
+          ],
           "type": "string"
         },
         "sequence": {
@@ -140,7 +127,6 @@
         },
         "time": {
           "format": "date-time",
-          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
           "type": "string"
         }
       },
@@ -169,7 +155,6 @@
               "type": "integer"
             },
             "run_id": {
-              "format": "ulid",
               "pattern": "^[0-9A-HJKMNP-TV-Za-hjkmnp-tv-z]{26}$",
               "type": "string"
             },
@@ -187,11 +172,15 @@
           "type": "object"
         },
         "event": {
-          "const": "case_started",
+          "enum": [
+            "case_started"
+          ],
           "type": "string"
         },
         "schema": {
-          "const": "attest.cli-event",
+          "enum": [
+            "attest.cli-event"
+          ],
           "type": "string"
         },
         "sequence": {
@@ -201,7 +190,6 @@
         },
         "time": {
           "format": "date-time",
-          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
           "type": "string"
         }
       },
@@ -244,7 +232,6 @@
               "type": "string"
             },
             "run_id": {
-              "format": "ulid",
               "pattern": "^[0-9A-HJKMNP-TV-Za-hjkmnp-tv-z]{26}$",
               "type": "string"
             },
@@ -273,11 +260,15 @@
           "type": "object"
         },
         "event": {
-          "const": "case_completed",
+          "enum": [
+            "case_completed"
+          ],
           "type": "string"
         },
         "schema": {
-          "const": "attest.cli-event",
+          "enum": [
+            "attest.cli-event"
+          ],
           "type": "string"
         },
         "sequence": {
@@ -287,7 +278,6 @@
         },
         "time": {
           "format": "date-time",
-          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
           "type": "string"
         }
       },
@@ -307,7 +297,6 @@
           "additionalProperties": false,
           "properties": {
             "run_id": {
-              "format": "ulid",
               "pattern": "^[0-9A-HJKMNP-TV-Za-hjkmnp-tv-z]{26}$",
               "type": "string"
             },
@@ -366,11 +355,15 @@
           "type": "object"
         },
         "event": {
-          "const": "run_completed",
+          "enum": [
+            "run_completed"
+          ],
           "type": "string"
         },
         "schema": {
-          "const": "attest.cli-event",
+          "enum": [
+            "attest.cli-event"
+          ],
           "type": "string"
         },
         "sequence": {
@@ -380,7 +373,6 @@
         },
         "time": {
           "format": "date-time",
-          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
           "type": "string"
         }
       },
@@ -402,18 +394,24 @@
               "additionalProperties": false,
               "properties": {
                 "exit_code": {
-                  "const": 0,
+                  "enum": [
+                    0
+                  ],
                   "type": "number"
                 },
                 "result": {
                   "additionalProperties": false,
                   "properties": {
                     "command": {
-                      "const": "eval.run",
+                      "enum": [
+                        "eval.run"
+                      ],
                       "type": "string"
                     },
                     "ok": {
-                      "const": true,
+                      "enum": [
+                        true
+                      ],
                       "type": "boolean"
                     },
                     "project_hash_after": {
@@ -442,75 +440,105 @@
                       "additionalProperties": false,
                       "properties": {
                         "baseline_run_id": {
-                          "format": "ulid",
-                          "pattern": "^[0-9A-HJKMNP-TV-Za-hjkmnp-tv-z]{26}$",
-                          "type": "string"
+                          "anyOf": [
+                            {
+                              "pattern": "^[0-9A-HJKMNP-TV-Za-hjkmnp-tv-z]{26}$",
+                              "type": "string"
+                            },
+                            {
+                              "not": {}
+                            }
+                          ]
                         },
                         "junit_path": {
-                          "minLength": 1,
-                          "type": "string"
+                          "anyOf": [
+                            {
+                              "minLength": 1,
+                              "type": "string"
+                            },
+                            {
+                              "not": {}
+                            }
+                          ]
                         },
                         "run_id": {
-                          "format": "ulid",
                           "pattern": "^[0-9A-HJKMNP-TV-Za-hjkmnp-tv-z]{26}$",
                           "type": "string"
                         },
                         "selection": {
-                          "additionalProperties": false,
-                          "properties": {
-                            "matched_cases": {
-                              "maximum": 9007199254740991,
-                              "minimum": 0,
-                              "type": "integer"
-                            },
-                            "sample": {
+                          "anyOf": [
+                            {
                               "additionalProperties": false,
                               "properties": {
-                                "algorithm": {
-                                  "const": "hash-rank-v1",
-                                  "type": "string"
-                                },
-                                "count": {
-                                  "exclusiveMinimum": 0,
+                                "matched_cases": {
                                   "maximum": 9007199254740991,
+                                  "minimum": 0,
                                   "type": "integer"
                                 },
-                                "seed": {
-                                  "minLength": 1,
-                                  "type": "string"
+                                "sample": {
+                                  "anyOf": [
+                                    {
+                                      "additionalProperties": false,
+                                      "properties": {
+                                        "algorithm": {
+                                          "enum": [
+                                            "hash-rank-v1"
+                                          ],
+                                          "type": "string"
+                                        },
+                                        "count": {
+                                          "exclusiveMinimum": 0,
+                                          "maximum": 9007199254740991,
+                                          "type": "integer"
+                                        },
+                                        "seed": {
+                                          "minLength": 1,
+                                          "type": "string"
+                                        }
+                                      },
+                                      "required": [
+                                        "count",
+                                        "seed",
+                                        "algorithm"
+                                      ],
+                                      "type": "object"
+                                    },
+                                    {
+                                      "not": {}
+                                    }
+                                  ]
+                                },
+                                "selected_cases": {
+                                  "maximum": 9007199254740991,
+                                  "minimum": 0,
+                                  "type": "integer"
+                                },
+                                "total_cases": {
+                                  "maximum": 9007199254740991,
+                                  "minimum": 0,
+                                  "type": "integer"
                                 }
                               },
                               "required": [
-                                "count",
-                                "seed",
-                                "algorithm"
+                                "total_cases",
+                                "matched_cases",
+                                "selected_cases"
                               ],
                               "type": "object"
                             },
-                            "selected_cases": {
-                              "maximum": 9007199254740991,
-                              "minimum": 0,
-                              "type": "integer"
-                            },
-                            "total_cases": {
-                              "maximum": 9007199254740991,
-                              "minimum": 0,
-                              "type": "integer"
+                            {
+                              "not": {}
                             }
-                          },
-                          "required": [
-                            "total_cases",
-                            "matched_cases",
-                            "selected_cases"
-                          ],
-                          "type": "object"
+                          ]
                         },
                         "snapshot_hash": {
                           "pattern": "^[a-f0-9]{64}$",
                           "type": "string"
                         },
                         "status": {
-                          "const": "completed",
+                          "enum": [
+                            "completed"
+                          ],
                           "type": "string"
                         },
                         "summary": {
@@ -552,7 +580,9 @@
                           "type": "object"
                         },
                         "verdict": {
-                          "const": "pass",
+                          "enum": [
+                            "pass"
+                          ],
                           "type": "string"
                         }
                       },
@@ -566,7 +596,9 @@
                       "type": "object"
                     },
                     "schema": {
-                      "const": "attest.cli-result",
+                      "enum": [
+                        "attest.cli-result"
+                      ],
                       "type": "string"
                     },
                     "warnings": {
@@ -578,15 +610,27 @@
                             "type": "string"
                           },
                           "details": {
-                            "$ref": "#/$defs/__schema0"
+                            "anyOf": [
+                              {},
+                              {
+                                "not": {}
+                              }
+                            ]
                           },
                           "message": {
                             "minLength": 1,
                             "type": "string"
                           },
                           "path": {
-                            "minLength": 1,
-                            "type": "string"
+                            "anyOf": [
+                              {
+                                "minLength": 1,
+                                "type": "string"
+                              },
+                              {
+                                "not": {}
+                              }
+                            ]
                           }
                         },
                         "required": [
@@ -620,18 +664,24 @@
               "additionalProperties": false,
               "properties": {
                 "exit_code": {
-                  "const": 1,
+                  "enum": [
+                    1
+                  ],
                   "type": "number"
                 },
                 "result": {
                   "additionalProperties": false,
                   "properties": {
                     "command": {
-                      "const": "eval.run",
+                      "enum": [
+                        "eval.run"
+                      ],
                       "type": "string"
                     },
                     "ok": {
-                      "const": true,
+                      "enum": [
+                        true
+                      ],
                       "type": "boolean"
                     },
                     "project_hash_after": {
@@ -660,75 +710,105 @@
                       "additionalProperties": false,
                       "properties": {
                         "baseline_run_id": {
-                          "format": "ulid",
-                          "pattern": "^[0-9A-HJKMNP-TV-Za-hjkmnp-tv-z]{26}$",
-                          "type": "string"
+                          "anyOf": [
+                            {
+                              "pattern": "^[0-9A-HJKMNP-TV-Za-hjkmnp-tv-z]{26}$",
+                              "type": "string"
+                            },
+                            {
+                              "not": {}
+                            }
+                          ]
                         },
                         "junit_path": {
-                          "minLength": 1,
-                          "type": "string"
+                          "anyOf": [
+                            {
+                              "minLength": 1,
+                              "type": "string"
+                            },
+                            {
+                              "not": {}
+                            }
+                          ]
                         },
                         "run_id": {
-                          "format": "ulid",
                           "pattern": "^[0-9A-HJKMNP-TV-Za-hjkmnp-tv-z]{26}$",
                           "type": "string"
                         },
                         "selection": {
-                          "additionalProperties": false,
-                          "properties": {
-                            "matched_cases": {
-                              "maximum": 9007199254740991,
-                              "minimum": 0,
-                              "type": "integer"
-                            },
-                            "sample": {
+                          "anyOf": [
+                            {
                               "additionalProperties": false,
                               "properties": {
-                                "algorithm": {
-                                  "const": "hash-rank-v1",
-                                  "type": "string"
-                                },
-                                "count": {
-                                  "exclusiveMinimum": 0,
+                                "matched_cases": {
                                   "maximum": 9007199254740991,
+                                  "minimum": 0,
                                   "type": "integer"
                                 },
-                                "seed": {
-                                  "minLength": 1,
-                                  "type": "string"
+                                "sample": {
+                                  "anyOf": [
+                                    {
+                                      "additionalProperties": false,
+                                      "properties": {
+                                        "algorithm": {
+                                          "enum": [
+                                            "hash-rank-v1"
+                                          ],
+                                          "type": "string"
+                                        },
+                                        "count": {
+                                          "exclusiveMinimum": 0,
+                                          "maximum": 9007199254740991,
+                                          "type": "integer"
+                                        },
+                                        "seed": {
+                                          "minLength": 1,
+                                          "type": "string"
+                                        }
+                                      },
+                                      "required": [
+                                        "count",
+                                        "seed",
+                                        "algorithm"
+                                      ],
+                                      "type": "object"
+                                    },
+                                    {
+                                      "not": {}
+                                    }
+                                  ]
+                                },
+                                "selected_cases": {
+                                  "maximum": 9007199254740991,
+                                  "minimum": 0,
+                                  "type": "integer"
+                                },
+                                "total_cases": {
+                                  "maximum": 9007199254740991,
+                                  "minimum": 0,
+                                  "type": "integer"
                                 }
                               },
                               "required": [
-                                "count",
-                                "seed",
-                                "algorithm"
+                                "total_cases",
+                                "matched_cases",
+                                "selected_cases"
                               ],
                               "type": "object"
                             },
-                            "selected_cases": {
-                              "maximum": 9007199254740991,
-                              "minimum": 0,
-                              "type": "integer"
-                            },
-                            "total_cases": {
-                              "maximum": 9007199254740991,
-                              "minimum": 0,
-                              "type": "integer"
+                            {
+                              "not": {}
                             }
-                          },
-                          "required": [
-                            "total_cases",
-                            "matched_cases",
-                            "selected_cases"
-                          ],
-                          "type": "object"
+                          ]
                         },
                         "snapshot_hash": {
                           "pattern": "^[a-f0-9]{64}$",
                           "type": "string"
                         },
                         "status": {
-                          "const": "completed",
+                          "enum": [
+                            "completed"
+                          ],
                           "type": "string"
                         },
                         "summary": {
@@ -770,7 +850,9 @@
                           "type": "object"
                         },
                         "verdict": {
-                          "const": "fail",
+                          "enum": [
+                            "fail"
+                          ],
                           "type": "string"
                         }
                       },
@@ -784,7 +866,9 @@
                       "type": "object"
                     },
                     "schema": {
-                      "const": "attest.cli-result",
+                      "enum": [
+                        "attest.cli-result"
+                      ],
                       "type": "string"
                     },
                     "warnings": {
@@ -796,15 +880,27 @@
                             "type": "string"
                           },
                           "details": {
-                            "$ref": "#/$defs/__schema0"
+                            "anyOf": [
+                              {},
+                              {
+                                "not": {}
+                              }
+                            ]
                           },
                           "message": {
                             "minLength": 1,
                             "type": "string"
                           },
                           "path": {
-                            "minLength": 1,
-                            "type": "string"
+                            "anyOf": [
+                              {
+                                "minLength": 1,
+                                "type": "string"
+                              },
+                              {
+                                "not": {}
+                              }
+                            ]
                           }
                         },
                         "required": [
@@ -851,7 +947,9 @@
                   "additionalProperties": false,
                   "properties": {
                     "command": {
-                      "const": "eval.run",
+                      "enum": [
+                        "eval.run"
+                      ],
                       "type": "string"
                     },
                     "error": {
@@ -862,19 +960,38 @@
                           "type": "string"
                         },
                         "details": {
-                          "$ref": "#/$defs/__schema0"
+                          "anyOf": [
+                            {},
+                            {
+                              "not": {}
+                            }
+                          ]
                         },
                         "hint": {
-                          "minLength": 1,
-                          "type": "string"
+                          "anyOf": [
+                            {
+                              "minLength": 1,
+                              "type": "string"
+                            },
+                            {
+                              "not": {}
+                            }
+                          ]
                         },
                         "message": {
                           "minLength": 1,
                           "type": "string"
                         },
                         "path": {
-                          "minLength": 1,
-                          "type": "string"
+                          "anyOf": [
+                            {
+                              "minLength": 1,
+                              "type": "string"
+                            },
+                            {
+                              "not": {}
+                            }
+                          ]
                         },
                         "retryable": {
                           "type": "boolean"
@@ -888,11 +1005,15 @@
                       "type": "object"
                     },
                     "ok": {
-                      "const": false,
+                      "enum": [
+                        false
+                      ],
                       "type": "boolean"
                     },
                     "schema": {
-                      "const": "attest.cli-result",
+                      "enum": [
+                        "attest.cli-result"
+                      ],
                       "type": "string"
                     }
                   },
@@ -914,11 +1035,15 @@
           ]
         },
         "event": {
-          "const": "result",
+          "enum": [
+            "result"
+          ],
           "type": "string"
         },
         "schema": {
-          "const": "attest.cli-event",
+          "enum": [
+            "attest.cli-event"
+          ],
           "type": "string"
         },
         "sequence": {
@@ -928,7 +1053,6 @@
         },
         "time": {
           "format": "date-time",
-          "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z|([+-](?:[01]\\d|2[0-3]):[0-5]\\d)))$",
           "type": "string"
         }
       },

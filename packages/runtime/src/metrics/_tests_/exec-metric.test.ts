@@ -1,3 +1,9 @@
+import { invokeHttpMetric } from '../internal/exec-http.js';
+import { valueFromExit } from '../../internal/effect-exit.js';
+import * as Effect from 'effect/Effect';
+import * as Exit from 'effect/Exit';
+import { evaluateMetrics } from '../evaluate-metrics.js';
+import { stripStruct } from '@attest/contracts';
 import { parseWithSchemaSync, isString } from '@attest/contracts';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { access, mkdtemp, readFile, rm } from 'node:fs/promises';
@@ -6,7 +12,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it, vi } from 'vitest';
-import { z } from 'zod';
+import * as Schema from 'effect/Schema';
 
 import type { CompletedMetricContext } from '../metric-evaluation.js';
 import { executeExecutableMetric } from '../exec-metric.js';
@@ -90,6 +96,55 @@ const closeServer = async (server: Server): Promise<void> =>
     server.close((error) => (error === undefined ? resolve() : reject(error))),
   );
 
+it.each([
+  ['deadline', 'exec_timeout'],
+  ['cancel', 'metric_cancelled'],
+  ['reset', 'http_request_failed'],
+] as const)('records a mid-body HTTP %s and continues metric evaluation', async (mode, code) => {
+  const controller = new AbortController();
+  let sentBody = false;
+
+  const { server, url } = await startMetricServer((_request, response) => {
+    response.writeHead(200, { 'content-type': 'application/json' });
+    response.write('{"score":');
+    sentBody = true;
+
+    if (mode !== 'deadline') {
+      const timer = setTimeout(() => {
+        if (mode === 'cancel') controller.abort();
+        else response.destroy();
+      }, 50);
+
+      response.once('close', () => clearTimeout(timer));
+    }
+  });
+
+  try {
+    const exit = await Effect.runPromiseExit(
+      evaluateMetrics(
+        [
+          { name: 'http', type: 'exec', url },
+          { name: 'after', type: 'assertion', assert: [{ exists: { path: '$.output' } }] },
+        ],
+        metricContext(),
+        { signal: controller.signal, exec: { timeoutMs: mode === 'deadline' ? 300 : 2000 } },
+      ),
+    );
+
+    expect(sentBody).toBe(true);
+
+    if (Exit.isFailure(exit))
+      throw new Error('Body failure escaped metric evidence.', { cause: exit.cause });
+    expect(exit.value).toHaveLength(2);
+    expect(exit.value[0]).toMatchObject({ status: 'error', error: { kind: code } });
+    expect(exit.value[1]).toMatchObject({ metricName: 'after', status: 'evaluated' });
+  } finally {
+    const closed = closeServer(server);
+    server.closeAllConnections();
+    await closed;
+  }
+});
+
 /** Checks a PID without mutating it; ESRCH means the direct child has been reaped. */
 const isProcessAlive = (processIdentifier: number): boolean => {
   try {
@@ -104,7 +159,7 @@ const isProcessAlive = (processIdentifier: number): boolean => {
 describe('executeExecutableMetric command metrics', () => {
   it('validates isolated command transport output through the shared result contract', async () => {
     const commandTransport = vi.fn(() =>
-      Promise.resolve({
+      Effect.succeed({
         ok: true as const,
         text: JSON.stringify({ score: 0.8, pass: true }),
       }),
@@ -116,11 +171,13 @@ describe('executeExecutableMetric command metrics', () => {
       command: ['python', 'metric.py'],
     };
 
-    const evaluated = await executeExecutableMetric(definition, metricContext(), {
-      commandTransport,
-      outputCapBytes: 1234,
-      timeoutMs: 5000,
-    });
+    const evaluated = await Effect.runPromiseExit(
+      executeExecutableMetric(definition, metricContext(), {
+        commandTransport,
+        outputCapBytes: 1234,
+        timeoutMs: 5000,
+      }),
+    ).then(valueFromExit);
 
     expect(evaluated).toMatchObject({ status: 'evaluated', score: 0.8, pass: true });
     expect(commandTransport).toHaveBeenCalledWith(
@@ -128,11 +185,13 @@ describe('executeExecutableMetric command metrics', () => {
       expect.objectContaining({ output: 'hello', artifacts: [], artifact_dir: null }),
       expect.objectContaining({ outputCapBytes: 1234, timeoutMs: 5000 }),
     );
-    commandTransport.mockResolvedValue({ ok: true, text: '{"score":99}' });
+    commandTransport.mockReturnValue(Effect.succeed({ ok: true, text: '{"score":99}' }));
 
-    const malformed = await executeExecutableMetric(definition, metricContext(), {
-      commandTransport,
-    });
+    const malformed = await Effect.runPromiseExit(
+      executeExecutableMetric(definition, metricContext(), {
+        commandTransport,
+      }),
+    ).then(valueFromExit);
 
     expect(malformed).toMatchObject({ status: 'error', error: { kind: 'exec_malformed_output' } });
   });
@@ -157,15 +216,17 @@ describe('executeExecutableMetric command metrics', () => {
       },
     ];
 
-    const evaluation = await executeExecutableMetric(
-      { name: 'artifacts', type: 'exec', command: buildFixtureCommand('read-artifacts.mjs') },
-      context,
-    );
+    const evaluation = await Effect.runPromiseExit(
+      executeExecutableMetric(
+        { name: 'artifacts', type: 'exec', command: buildFixtureCommand('read-artifacts.mjs') },
+        context,
+      ),
+    ).then(valueFromExit);
 
     expect(evaluation).toMatchObject({ status: 'evaluated', pass: true });
 
     const directory = parseWithSchemaSync(
-      z.object({ details: z.object({ artifact_dir: z.string() }) }),
+      stripStruct({ details: stripStruct({ artifact_dir: Schema.String }) }),
       evaluation,
     ).details.artifact_dir;
 
@@ -174,10 +235,12 @@ describe('executeExecutableMetric command metrics', () => {
   });
 
   it('normalizes a valid fixture result', async () => {
-    const evaluation = await executeExecutableMetric(
-      { name: 'fixture', type: 'exec', command: buildFixtureCommand('result.mjs') },
-      metricContext(),
-    );
+    const evaluation = await Effect.runPromiseExit(
+      executeExecutableMetric(
+        { name: 'fixture', type: 'exec', command: buildFixtureCommand('result.mjs') },
+        metricContext(),
+      ),
+    ).then(valueFromExit);
 
     expect(evaluation).toMatchObject({
       metricName: 'fixture',
@@ -189,10 +252,12 @@ describe('executeExecutableMetric command metrics', () => {
   });
 
   it('records non-zero exits with bounded stderr diagnostics', async () => {
-    const evaluation = await executeExecutableMetric(
-      { name: 'fixture', type: 'exec', command: conformanceAgentCommand('nonzero-exit') },
-      metricContext(),
-    );
+    const evaluation = await Effect.runPromiseExit(
+      executeExecutableMetric(
+        { name: 'fixture', type: 'exec', command: conformanceAgentCommand('nonzero-exit') },
+        metricContext(),
+      ),
+    ).then(valueFromExit);
 
     expect(evaluation).toMatchObject({
       status: 'error',
@@ -201,10 +266,12 @@ describe('executeExecutableMetric command metrics', () => {
   });
 
   it('records canonical malformed JSON output as malformed', async () => {
-    const evaluation = await executeExecutableMetric(
-      { name: 'fixture', type: 'exec', command: conformanceAgentCommand('malformed-json') },
-      metricContext(),
-    );
+    const evaluation = await Effect.runPromiseExit(
+      executeExecutableMetric(
+        { name: 'fixture', type: 'exec', command: conformanceAgentCommand('malformed-json') },
+        metricContext(),
+      ),
+    ).then(valueFromExit);
 
     expect(evaluation.status).toBe('error');
 
@@ -215,11 +282,13 @@ describe('executeExecutableMetric command metrics', () => {
   });
 
   it('uses the shared output cap option for command stdout', async () => {
-    const evaluation = await executeExecutableMetric(
-      { name: 'capped', type: 'exec', command: conformanceAgentCommand('huge-output') },
-      metricContext(),
-      { outputCapBytes: 512 },
-    );
+    const evaluation = await Effect.runPromiseExit(
+      executeExecutableMetric(
+        { name: 'capped', type: 'exec', command: conformanceAgentCommand('huge-output') },
+        metricContext(),
+        { outputCapBytes: 512 },
+      ),
+    ).then(valueFromExit);
 
     expect(evaluation.status).toBe('error');
 
@@ -230,10 +299,12 @@ describe('executeExecutableMetric command metrics', () => {
   });
 
   it('records contract issue paths for a JSON result with missing fields', async () => {
-    const evaluation = await executeExecutableMetric(
-      { name: 'fixture', type: 'exec', command: buildFixtureCommand('invalid-result.mjs') },
-      metricContext(),
-    );
+    const evaluation = await Effect.runPromiseExit(
+      executeExecutableMetric(
+        { name: 'fixture', type: 'exec', command: buildFixtureCommand('invalid-result.mjs') },
+        metricContext(),
+      ),
+    ).then(valueFromExit);
 
     expect(evaluation.status).toBe('error');
 
@@ -244,10 +315,12 @@ describe('executeExecutableMetric command metrics', () => {
   });
 
   it('records a missing command without rejecting the evaluation', async () => {
-    const evaluation = await executeExecutableMetric(
-      { name: 'missing', type: 'exec', command: ['attest-missing-metric-command'] },
-      metricContext(),
-    );
+    const evaluation = await Effect.runPromiseExit(
+      executeExecutableMetric(
+        { name: 'missing', type: 'exec', command: ['attest-missing-metric-command'] },
+        metricContext(),
+      ),
+    ).then(valueFromExit);
 
     expect(evaluation).toMatchObject({ status: 'error', error: { kind: 'exec_spawn_failed' } });
   });
@@ -258,15 +331,17 @@ describe('executeExecutableMetric command metrics', () => {
     const processIdentifierPath = join(directory, 'process-id');
 
     try {
-      const evaluation = await executeExecutableMetric(
-        {
-          name: 'term-resistant',
-          type: 'exec',
-          command: buildFixtureCommand('term-resistant.mjs', processIdentifierPath, markerPath),
-        },
-        metricContext(),
-        { timeoutMs: 1_000 },
-      );
+      const evaluation = await Effect.runPromiseExit(
+        executeExecutableMetric(
+          {
+            name: 'term-resistant',
+            type: 'exec',
+            command: buildFixtureCommand('term-resistant.mjs', processIdentifierPath, markerPath),
+          },
+          metricContext(),
+          { timeoutMs: 1_000 },
+        ),
+      ).then(valueFromExit);
 
       const processIdentifier = Number(await readFile(processIdentifierPath, 'utf8'));
 
@@ -286,15 +361,17 @@ describe('executeExecutableMetric command metrics', () => {
     setTimeout(() => controller.abort(), 50);
 
     try {
-      const evaluation = await executeExecutableMetric(
-        {
-          name: 'cancelled',
-          type: 'exec',
-          command: buildFixtureCommand('sleep-with-child.mjs', join(directory, 'unused')),
-        },
-        metricContext(),
-        { signal: controller.signal },
-      );
+      const evaluation = await Effect.runPromiseExit(
+        executeExecutableMetric(
+          {
+            name: 'cancelled',
+            type: 'exec',
+            command: buildFixtureCommand('sleep-with-child.mjs', join(directory, 'unused')),
+          },
+          metricContext(),
+          { signal: controller.signal },
+        ),
+      ).then(valueFromExit);
 
       expect(evaluation).toMatchObject({
         status: 'error',
@@ -318,10 +395,9 @@ describe('executeExecutableMetric HTTP metrics', () => {
     });
 
     try {
-      const evaluation = await executeExecutableMetric(
-        { name: 'http', type: 'exec', url },
-        metricContext(),
-      );
+      const evaluation = await Effect.runPromiseExit(
+        executeExecutableMetric({ name: 'http', type: 'exec', url }, metricContext()),
+      ).then(valueFromExit);
 
       expect(JSON.parse(requestBody)).toEqual({
         protocol: 'attest.metric-evaluation',
@@ -346,11 +422,11 @@ describe('executeExecutableMetric HTTP metrics', () => {
     const { server, url, progress } = await startChunkedServer(200, 'x'.repeat(256));
 
     try {
-      const evaluation = await executeExecutableMetric(
-        { name: 'http-capped', type: 'exec', url },
-        metricContext(),
-        { outputCapBytes: 512 },
-      );
+      const evaluation = await Effect.runPromiseExit(
+        executeExecutableMetric({ name: 'http-capped', type: 'exec', url }, metricContext(), {
+          outputCapBytes: 512,
+        }),
+      ).then(valueFromExit);
 
       await vi.waitFor(() => expect(progress.responseClosed).toBe(true));
 
@@ -369,10 +445,9 @@ describe('executeExecutableMetric HTTP metrics', () => {
     const { server, url, progress } = await startChunkedServer(503, 'unneeded diagnostics');
 
     try {
-      const evaluation = await executeExecutableMetric(
-        { name: 'http-status', type: 'exec', url },
-        metricContext(),
-      );
+      const evaluation = await Effect.runPromiseExit(
+        executeExecutableMetric({ name: 'http-status', type: 'exec', url }, metricContext()),
+      ).then(valueFromExit);
 
       await vi.waitFor(() => expect(progress.responseClosed).toBe(true));
 
@@ -389,10 +464,9 @@ describe('executeExecutableMetric HTTP metrics', () => {
     });
 
     try {
-      const evaluation = await executeExecutableMetric(
-        { name: 'http', type: 'exec', url },
-        metricContext(),
-      );
+      const evaluation = await Effect.runPromiseExit(
+        executeExecutableMetric({ name: 'http', type: 'exec', url }, metricContext()),
+      ).then(valueFromExit);
 
       expect(evaluation).toMatchObject({
         status: 'error',
@@ -404,10 +478,12 @@ describe('executeExecutableMetric HTTP metrics', () => {
   });
 
   it('rejects non-HTTP URL schemes before invoking fetch', async () => {
-    const evaluation = await executeExecutableMetric(
-      { name: 'unsafe-scheme', type: 'exec', url: 'ftp://metrics.example/result' },
-      metricContext(),
-    );
+    const evaluation = await Effect.runPromiseExit(
+      executeExecutableMetric(
+        { name: 'unsafe-scheme', type: 'exec', url: 'ftp://metrics.example/result' },
+        metricContext(),
+      ),
+    ).then(valueFromExit);
 
     expect(evaluation.status).toBe('error');
 
@@ -421,11 +497,63 @@ describe('executeExecutableMetric HTTP metrics', () => {
     const { server, url } = await startMetricServer((_request, response) => response.end());
     await closeServer(server);
 
-    const evaluation = await executeExecutableMetric(
-      { name: 'refused', type: 'exec', url },
-      metricContext(),
-    );
+    const evaluation = await Effect.runPromiseExit(
+      executeExecutableMetric({ name: 'refused', type: 'exec', url }, metricContext()),
+    ).then(valueFromExit);
 
     expect(evaluation).toMatchObject({ status: 'error', error: { kind: 'http_request_failed' } });
+  });
+});
+
+it('keeps a non-200 status when its response body has already errored', async () => {
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.error(new Error('reset'));
+    },
+  });
+
+  const stub = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(body, { status: 503 }));
+
+  try {
+    const result = await Effect.runPromiseExit(
+      invokeHttpMetric({ name: 'http', type: 'exec', url: 'http://localhost' }, '{}', {
+        timeoutMs: 1000,
+        outputCapBytes: 1024,
+      }),
+    ).then(valueFromExit);
+
+    expect(result).toMatchObject({
+      ok: false,
+      error: { code: 'http_bad_status', details: { status: 503 } },
+    });
+    expect(body.locked).toBe(false);
+  } finally {
+    stub.mockRestore();
+  }
+});
+
+it('observes a closed metric stdin pipe without an uncaught error', async () => {
+  const context = metricContext();
+  context.execution.output = 'x'.repeat(2 * 1024 * 1024);
+
+  const result = await Effect.runPromiseExit(
+    executeExecutableMetric(
+      {
+        name: 'pipe',
+        type: 'exec',
+        command: [
+          process.execPath,
+          '-e',
+          'process.stdin.destroy(); setTimeout(() => process.exit(7), 25)',
+        ],
+      },
+      context,
+    ),
+  ).then(valueFromExit);
+
+  expect(result).toMatchObject({
+    metricName: 'pipe',
+    status: 'error',
+    error: { kind: 'exec_spawn_failed' },
   });
 });

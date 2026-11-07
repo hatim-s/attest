@@ -1,10 +1,11 @@
-import { z } from 'zod';
+import { safeIntegerSchema, nonnegativeIntegerSchema } from '../schema/scalars.js';
+import * as Schema from 'effect/Schema';
 
 import { webSocketConnectionModeSchema, webSocketLifecycleSchema } from './websocket-contract.js';
 import { rawExcerptSchema, requestIdSchema } from '../project/shared.js';
 import { WEBSOCKET_EVIDENCE_SCHEMA_ID } from '../schema/identifiers.js';
 
-const webSocketEvidenceClassificationSchema = z.enum([
+const webSocketEvidenceClassificationSchema = Schema.Literals([
   'connection_opened',
   'request_sent',
   'acknowledgement_received',
@@ -18,7 +19,7 @@ const webSocketEvidenceClassificationSchema = z.enum([
   'connection_closed',
 ]);
 
-const webSocketErrorClassificationSchema = z.enum([
+const webSocketErrorClassificationSchema = Schema.Literals([
   'open_timeout',
   'message_idle_timeout',
   'attempt_timeout',
@@ -37,69 +38,73 @@ const webSocketErrorClassificationSchema = z.enum([
   'cancelled',
 ]);
 
-const webSocketAcknowledgementEvidenceSchema = z.discriminatedUnion('state', [
-  z.strictObject({
-    state: z.literal('not_acknowledged'),
-    retry: z.literal('allowed'),
-    reconnect: z.literal('allowed'),
-    replay: z.literal('allowed'),
+const webSocketAcknowledgementEvidenceSchema = Schema.Union([
+  Schema.Struct({
+    state: Schema.Literal('not_acknowledged'),
+    retry: Schema.Literal('allowed'),
+    reconnect: Schema.Literal('allowed'),
+    replay: Schema.Literal('allowed'),
   }),
-  z.strictObject({
-    state: z.literal('acknowledged'),
-    retry: z.literal('forbidden'),
-    reconnect: z.literal('forbidden'),
-    replay: z.literal('forbidden'),
+  Schema.Struct({
+    state: Schema.Literal('acknowledged'),
+    retry: Schema.Literal('forbidden'),
+    reconnect: Schema.Literal('forbidden'),
+    replay: Schema.Literal('forbidden'),
   }),
 ]);
 
-const webSocketEvidenceEventSchema = z.strictObject({
+const webSocketEvidenceEventSchema = Schema.Struct({
   classification: webSocketEvidenceClassificationSchema,
-  elapsed_ms: z.number().int().nonnegative(),
-  request_id: requestIdSchema.optional(),
-  message_bytes: z.number().int().nonnegative().optional(),
-  excerpt: rawExcerptSchema.optional(),
+  elapsed_ms: nonnegativeIntegerSchema,
+  request_id: Schema.optional(requestIdSchema),
+  message_bytes: Schema.optional(nonnegativeIntegerSchema),
+  excerpt: Schema.optional(rawExcerptSchema),
 });
 
-const webSocketCloseEvidenceSchema = z.strictObject({
-  code: z.number().int().min(1_000).max(4_999).optional(),
-  reason: z.string().max(123).optional(),
-  clean: z.boolean(),
+const webSocketCloseEvidenceSchema = Schema.Struct({
+  code: Schema.optional(
+    safeIntegerSchema
+      .check(Schema.isGreaterThanOrEqualTo(1_000))
+      .check(Schema.isLessThanOrEqualTo(4_999)),
+  ),
+  reason: Schema.optional(Schema.String.check(Schema.isMaxLength(123))),
+  clean: Schema.Boolean,
 });
 
 const webSocketEvidenceBaseFields = {
-  schema: z.literal(WEBSOCKET_EVIDENCE_SCHEMA_ID),
+  schema: Schema.Literal(WEBSOCKET_EVIDENCE_SCHEMA_ID),
   request_id: requestIdSchema,
   lifecycle: webSocketLifecycleSchema,
   connection_mode: webSocketConnectionModeSchema,
   acknowledgement: webSocketAcknowledgementEvidenceSchema,
-  events: z.array(webSocketEvidenceEventSchema).max(1_024),
-  close: webSocketCloseEvidenceSchema.optional(),
+  events: Schema.Array(webSocketEvidenceEventSchema).check(Schema.isMaxLength(1_024)),
+  close: Schema.optional(webSocketCloseEvidenceSchema),
 };
 
 /**
  * Persists bounded/redacted WebSocket decisions with a stable terminal classification.
  * Acknowledgement state makes the no-replay boundary machine-checkable on every attempt.
  */
-const webSocketAttemptEvidenceSchema = z.discriminatedUnion('outcome', [
-  z.strictObject({
+const webSocketAttemptEvidenceSchema = Schema.Union([
+  Schema.Struct({
     ...webSocketEvidenceBaseFields,
-    outcome: z.literal('completed'),
+    outcome: Schema.Literal('completed'),
   }),
-  z.strictObject({
+  Schema.Struct({
     ...webSocketEvidenceBaseFields,
-    outcome: z.literal('failed'),
+    outcome: Schema.Literal('failed'),
     error_classification: webSocketErrorClassificationSchema,
   }),
-  z.strictObject({
+  Schema.Struct({
     ...webSocketEvidenceBaseFields,
-    outcome: z.literal('cancelled'),
-    error_classification: z.literal('cancelled'),
+    outcome: Schema.Literal('cancelled'),
+    error_classification: Schema.Literal('cancelled'),
   }),
 ]);
 
-type WebSocketAttemptEvidence = z.infer<typeof webSocketAttemptEvidenceSchema>;
+type WebSocketAttemptEvidence = typeof webSocketAttemptEvidenceSchema.Type;
 
-type WebSocketErrorClassification = z.infer<typeof webSocketErrorClassificationSchema>;
+type WebSocketErrorClassification = typeof webSocketErrorClassificationSchema.Type;
 
 export {
   webSocketAttemptEvidenceSchema,

@@ -3,7 +3,7 @@ import { Link } from '@tanstack/react-router';
 import { Badge } from '../shared/ui.js';
 import { useProjectKey } from '../../routes/use-project-key.js';
 
-type MetricErrorCasesProps = { cases: CaseSummary[]; allLoaded: boolean; runId: string };
+type MetricErrorCasesProps = { cases: readonly CaseSummary[]; allLoaded: boolean; runId: string };
 
 /** Links to case evidence without fetching every full record to construct a per-metric table. */
 const MetricErrorCases = ({ cases, allLoaded, runId }: MetricErrorCasesProps) => {

@@ -1,13 +1,17 @@
+import * as Effect from 'effect/Effect';
 import { mkdir, stat } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 
-import { createSingleProjectCatalog, type RunControl } from '@attest/core';
+import { createSingleProjectCatalog, type RunControl, type ProjectCatalog } from '@attest/core';
 import { dashboardHtml } from '@attest/web/embedded';
 
 import { describeStoreProject } from '../project/describe-store-project.js';
-import { createRegistryCatalog, readRegistry, type ClosableCatalog } from '../registry/index.js';
+import { createRegistryCatalog, readRegistry } from '../registry/index.js';
 import { createRunLauncher, type CliCommand } from '../run-control/index.js';
-import { openStore } from '../store/index.js';
+import { openStore, type StoreScope } from '../store/index.js';
+import { withStoreScope } from '../store/index.js';
+import { finishOperation } from '../internal/operation-cleanup.js';
+import { CancellationRegistry } from '../commands/eval/eval-cancellation.js';
 import { startViewServer, type ViewServerHandle } from '../view-server/index.js';
 
 /** What the dashboard serves: one project's store, or every project in the registry. */
@@ -22,7 +26,7 @@ type RunViewCommandOptions = {
 };
 
 /** The served catalog, and the run control for it when dashboard runs land in what it serves. */
-type ViewCatalog = { catalog: ClosableCatalog; control: RunControl | undefined };
+type ViewCatalog = { catalog: ProjectCatalog; control: RunControl | undefined };
 
 /**
  * Opens the catalog for one view scope. A store scope creates the store when it is missing, as
@@ -30,36 +34,36 @@ type ViewCatalog = { catalog: ClosableCatalog; control: RunControl | undefined }
  * reads the registry once here so an unreadable file fails in the terminal before the server
  * starts, not later as a generic API error in the browser.
  */
-const openViewCatalog = async (
+const openViewCatalog = Effect.fn('openViewCatalog')(function* (
   scope: ViewScope,
   workingDirectory: string,
   command: CliCommand,
-): Promise<ViewCatalog> => {
+  owner: StoreScope,
+) {
   if (scope.kind === 'registry') {
-    await readRegistry(scope.registryPath);
-    const catalog = createRegistryCatalog({ registryPath: scope.registryPath });
+    yield* readRegistry(scope.registryPath);
+    const catalog = createRegistryCatalog({ registryPath: scope.registryPath }, owner);
 
-    // Registered stores are always `<root>/.attest/runs.db`, where the CLI records runs.
-    return { catalog, control: createRunLauncher({ catalog, command }) };
+    return { catalog, control: yield* createRunLauncher({ catalog, command }) };
   }
 
   const storePath = resolve(workingDirectory, scope.storePath ?? '.attest/runs.db');
-  const project = await describeStoreProject(storePath);
-  await mkdir(dirname(storePath), { recursive: true });
-  const store = await openStore(storePath);
+  const project = yield* describeStoreProject(storePath);
+  yield* Effect.tryPromise({
+    try: () => mkdir(dirname(storePath), { recursive: true }),
+    catch: (cause) => new Error('Could not create view store directory.', { cause }),
+  });
+  const store = yield* openStore(storePath, owner);
+  const catalog = createSingleProjectCatalog(project, store.runs);
 
-  const catalog = {
-    ...createSingleProjectCatalog(project, store.runs),
-    close: () => store.close(),
-  };
-
-  // The CLI records a run in `<root>/.attest/runs.db`; from any other store, a started run
-  // would land where this dashboard does not look, so the dashboard only reads.
   const ownStore =
     project.root !== undefined && storePath === join(project.root, '.attest', 'runs.db');
 
-  return { catalog, control: ownStore ? createRunLauncher({ catalog, command }) : undefined };
-};
+  return {
+    catalog,
+    control: ownStore ? yield* createRunLauncher({ catalog, command }) : undefined,
+  } satisfies ViewCatalog;
+});
 
 /**
  * The CLI serving the dashboard, so runs it starts use the same version and runtime. `argv[1]`
@@ -68,59 +72,96 @@ const openViewCatalog = async (
  * the server loaded. A program that embeds `runCli` is `argv[1]` itself, so that program is what
  * runs. Only when `argv[1]` is not a file (a compiled binary) is `attest` taken from PATH.
  */
-const resolveCliCommand = async (): Promise<CliCommand> => {
+const resolveCliCommand = Effect.fn('resolveCliCommand')(function* () {
   const script = process.argv[1];
 
   const isFile =
     script !== undefined &&
-    (await stat(script).then(
-      (entry) => entry.isFile(),
-      () => false,
+    (yield* Effect.tryPromise({ try: () => stat(script), catch: () => false as const }).pipe(
+      Effect.map((entry) => entry.isFile()),
+      Effect.catch(() => Effect.succeed(false)),
     ));
 
   return isFile
     ? { command: process.execPath, args: [...process.execArgv, script] }
     : { command: 'attest', args: [] };
-};
+});
 
 /** Starts the loopback dashboard and owns abort-driven shutdown. */
-const runViewCommand = async (options: RunViewCommandOptions): Promise<ViewServerHandle> => {
-  const { catalog, control } = await openViewCatalog(
-    options.scope,
-    options.workingDirectory,
-    await resolveCliCommand(),
-  );
+const runViewCommand = Effect.fn('runViewCommand')(function* (options: RunViewCommandOptions) {
+  const command = yield* resolveCliCommand();
 
-  const server = await startViewServer({
-    indexHtml: dashboardHtml,
-    port: options.port,
-    catalog,
-    control,
-    close: catalog.close,
-  });
+  return yield* withStoreScope((owner) =>
+    Effect.scoped(
+      Effect.uninterruptibleMask((restore) =>
+        Effect.gen(function* () {
+          const { catalog, control } = yield* openViewCatalog(
+            options.scope,
+            options.workingDirectory,
+            command,
+            owner,
+          );
 
-  const closeOnAbort = (): void => {
-    void server.close();
-  };
+          const server = yield* startViewServer({
+            indexHtml: dashboardHtml,
+            port: options.port,
+            catalog,
+            control,
+            close: () => Effect.void,
+          });
 
-  options.signal?.addEventListener('abort', closeOnAbort, { once: true });
+          const primary = yield* Effect.exit(
+            restore(
+              Effect.gen(function* () {
+                if (options.onReady !== undefined)
+                  yield* Effect.raceFirst(
+                    Effect.tryPromise({
+                      try: () => Promise.resolve(options.onReady?.(server)),
+                      catch: (cause) =>
+                        cause instanceof Error
+                          ? cause
+                          : new Error('View readiness callback failed.', { cause }),
+                    }),
+                    options.signal === undefined
+                      ? Effect.never
+                      : Effect.callback<void>((resume) => {
+                          const abort = () => resume(Effect.void);
+                          options.signal?.addEventListener('abort', abort, { once: true });
 
-  try {
-    await options.onReady?.(server);
+                          if (options.signal?.aborted) abort();
 
-    if (options.signal?.aborted === true) {
-      await server.close();
-    }
+                          return Effect.sync(() =>
+                            options.signal?.removeEventListener('abort', abort),
+                          );
+                        }).pipe(Effect.andThen(server.close()), Effect.andThen(Effect.never)),
+                  );
 
-    await server.closed;
+                if (options.signal?.aborted) return;
 
-    return server;
-  } catch (error: unknown) {
-    await server.close();
-    throw error;
-  } finally {
-    options.signal?.removeEventListener('abort', closeOnAbort);
-  }
-};
+                if (options.signal === undefined) return yield* server.closed;
+                yield* Effect.raceFirst(
+                  server.closed,
+                  Effect.callback<void>((resume) => {
+                    const abort = () => resume(Effect.void);
+                    options.signal?.addEventListener('abort', abort, { once: true });
+
+                    if (options.signal?.aborted) abort();
+
+                    return Effect.sync(() => options.signal?.removeEventListener('abort', abort));
+                  }),
+                );
+              }),
+            ),
+          );
+
+          const release = yield* Effect.exit(server.close());
+          yield* finishOperation(primary, [release]);
+
+          return server;
+        }),
+      ),
+    ),
+  ).pipe(Effect.provideService(CancellationRegistry, new Map()));
+});
 
 export { runViewCommand, type RunViewCommandOptions, type ViewScope };

@@ -1,3 +1,4 @@
+import * as Effect from 'effect/Effect';
 import {
   CASE_SCHEMA_ID,
   DATASET_SCHEMA_ID,
@@ -62,255 +63,357 @@ type MutationBuildResult = {
 };
 
 /** Builds the complete candidate for one test/case/dataset command before any write occurs. */
-const buildMutation = async (
+const buildMutation = Effect.fn('buildMutation')(function* (
   loaded: LoadedProject,
   request: TestAuthoringCommand,
   options: TestMutationCommandOptions,
-): Promise<MutationBuildResult> => {
-  const candidate = candidateFromLoadedProject(loaded);
+) {
+  try {
+    let candidate = candidateFromLoadedProject(loaded);
 
-  switch (request.command) {
-    case 'test.add': {
-      assertNewId('test', candidate.tests, request.test.id);
-      candidate.tests.push(request.test);
+    switch (request.command) {
+      case 'test.add': {
+        assertNewId('test', candidate.tests, request.test.id);
+        candidate = { ...candidate, tests: [...candidate.tests, request.test] };
 
-      return { candidate, resource: { id: request.test.id, type: 'test' } };
-    }
-
-    case 'test.rename': {
-      const test = findResource('test', candidate.tests, request.test_id);
-      assertNewId('test', candidate.tests, request.new_id);
-      test.id = request.new_id;
-
-      return {
-        candidate,
-        renames: [{ from: request.test_id, to: request.new_id, type: 'test' }],
-        resource: { id: request.new_id, type: 'test' },
-      };
-    }
-
-    case 'test.remove': {
-      findResource('test', candidate.tests, request.test_id);
-      candidate.tests = candidate.tests.filter(({ id }) => id !== request.test_id);
-
-      return { candidate, resource: { id: request.test_id, type: 'test' } };
-    }
-
-    case 'test.case.add': {
-      const test = findResource('test', candidate.tests, request.test_id);
-      const testCase = caseWithGeneratedId(request.case);
-      test.cases.push(testCase);
-
-      return { candidate, resource: { id: testCase.id, type: 'test_case' } };
-    }
-
-    case 'test.case.import': {
-      const test = findResource('test', candidate.tests, request.test_id);
-
-      const imported = await runTabularImportAdapter({
-        // Cases outside the direct import target that already resolve into its test.
-        collisionContexts: [{ cases: attachmentCases(candidate, test) }],
-        existingCases: test.cases,
-        importOptions: request.import,
-        preparedSource: options.preparedImportSource,
-        readImportStdin: options.readImportStdin,
-        source: request.source,
-        workingDirectory: options.workingDirectory,
-      });
-
-      test.cases = imported.cases;
-
-      const warnings: CliWarning[] =
-        imported.counts.read > 100
-          ? [
-              {
-                code: 'direct_case_count_high',
-                message: 'More than 100 direct cases were imported; prefer an attached dataset.',
-              },
-            ]
-          : [];
-
-      return {
-        candidate,
-        importedCaseCount: imported.counts.inserted + imported.counts.updated,
-        importResult: imported,
-        resource: { id: request.test_id, type: 'test' },
-        warnings,
-      };
-    }
-
-    case 'test.case.rename': {
-      const test = findResource('test', candidate.tests, request.test_id);
-      const testCase = test.cases.find(({ id }) => id === request.case_id);
-
-      if (testCase === undefined) throw missingResource('case', request.case_id);
-      testCase.id = request.new_id;
-
-      return { candidate, resource: { id: request.new_id, type: 'test_case' } };
-    }
-
-    case 'test.case.remove': {
-      const test = findResource('test', candidate.tests, request.test_id);
-
-      if (!test.cases.some(({ id }) => id === request.case_id)) {
-        throw missingResource('case', request.case_id);
+        return {
+          candidate,
+          resource: { id: request.test.id, type: 'test' as const },
+        } satisfies MutationBuildResult;
       }
 
-      test.cases = test.cases.filter(({ id }) => id !== request.case_id);
+      case 'test.rename': {
+        let test = findResource('test', candidate.tests, request.test_id);
+        assertNewId('test', candidate.tests, request.new_id);
+        test = { ...test, id: request.new_id };
+        candidate = {
+          ...candidate,
+          tests: candidate.tests.map((entry) => (entry.id === request.test_id ? test : entry)),
+        };
 
-      return { candidate, resource: { id: request.case_id, type: 'test_case' } };
-    }
-
-    case 'test.dataset.add': {
-      const test = findResource('test', candidate.tests, request.test_id);
-      assertNewId(
-        'dataset',
-        candidate.datasets.map(({ metadata }) => metadata),
-        request.dataset.id,
-      );
-      candidate.datasets.push({ cases: [], metadata: request.dataset });
-      test.datasets.push({ dataset_id: request.dataset.id });
-
-      return { candidate, resource: { id: request.dataset.id, type: 'dataset' } };
-    }
-
-    case 'test.dataset.import': {
-      const test = findResource('test', candidate.tests, request.test_id);
-      const existing = candidate.datasets.find(({ metadata }) => metadata.id === request.as);
-      const affectedTests = attachedDatasetTests(candidate, request.as);
-      const consumerTests = [...new Set([...affectedTests, request.test_id])].sort();
-
-      if (existing !== undefined && request.import.sync !== 'upsert') {
-        throw new LocalError(
-          'project_invalid',
-          `Dataset ${request.as} already exists; import will not silently replace it.`,
-          {
-            path: '--sync',
-            hint: 'Pass --sync upsert to select explicit dataset update semantics.',
-            details: { affected_tests: consumerTests },
-          },
-        );
+        return {
+          candidate,
+          renames: [{ from: request.test_id, to: request.new_id, type: 'test' as const }],
+          resource: { id: request.new_id, type: 'test' as const },
+        } satisfies MutationBuildResult;
       }
 
-      if (
-        existing !== undefined &&
-        affectedTests.some((id) => id !== request.test_id) &&
-        request.dry_run !== true &&
-        request.yes !== true
-      ) {
-        throw new LocalError('cli_missing_input', 'Shared dataset updates require confirmation.', {
-          path: '--yes',
-          hint: 'Preview with --dry-run, then pass --yes to update every affected test.',
-          details: { affected_tests: consumerTests },
+      case 'test.remove': {
+        findResource('test', candidate.tests, request.test_id);
+        candidate = {
+          ...candidate,
+          tests: candidate.tests.filter(({ id }) => id !== request.test_id),
+        };
+
+        return {
+          candidate,
+          resource: { id: request.test_id, type: 'test' as const },
+        } satisfies MutationBuildResult;
+      }
+
+      case 'test.case.add': {
+        let test = findResource('test', candidate.tests, request.test_id);
+        const testCase = caseWithGeneratedId(request.case);
+        test = { ...test, cases: [...test.cases, testCase] };
+        candidate = {
+          ...candidate,
+          tests: candidate.tests.map((entry) => (entry.id === request.test_id ? test : entry)),
+        };
+
+        return {
+          candidate,
+          resource: { id: testCase.id, type: 'test_case' as const },
+        } satisfies MutationBuildResult;
+      }
+
+      case 'test.case.import': {
+        let test = findResource('test', candidate.tests, request.test_id);
+
+        const imported = yield* runTabularImportAdapter({
+          // Cases outside the direct import target that already resolve into its test.
+          collisionContexts: [{ cases: attachmentCases(candidate, test) }],
+          existingCases: test.cases,
+          importOptions: request.import,
+          preparedSource: options.preparedImportSource,
+          readImportStdin: options.readImportStdin,
+          source: request.source,
+          workingDirectory: options.workingDirectory,
         });
+
+        test = { ...test, cases: imported.cases };
+        candidate = {
+          ...candidate,
+          tests: candidate.tests.map((entry) => (entry.id === request.test_id ? test : entry)),
+        };
+
+        const warnings: CliWarning[] =
+          imported.counts.read > 100
+            ? [
+                {
+                  code: 'direct_case_count_high',
+                  message: 'More than 100 direct cases were imported; prefer an attached dataset.',
+                },
+              ]
+            : [];
+
+        return {
+          candidate,
+          importedCaseCount: imported.counts.inserted + imported.counts.updated,
+          importResult: imported,
+          resource: { id: request.test_id, type: 'test' as const },
+          warnings,
+        } satisfies MutationBuildResult;
       }
 
-      const imported = await runTabularImportAdapter({
-        collisionContexts: datasetImportCollisionContexts(candidate, request.as, request.test_id),
-        existingCases: existing?.cases,
-        importOptions: request.import,
-        preparedSource: options.preparedImportSource,
-        readImportStdin: options.readImportStdin,
-        source: request.source,
-        workingDirectory: options.workingDirectory,
-      });
+      case 'test.case.rename': {
+        let test = findResource('test', candidate.tests, request.test_id);
+        let testCase = test.cases.find(({ id }) => id === request.case_id);
 
-      const provenance: NonNullable<
-        ProjectResources['datasets'][number]['metadata']['provenance']
-      > = {
-        source_type: imported.format,
-        mapping: request.import.mapping ?? [],
-        imported_at: new Date().toISOString(),
-        source_content_hash: imported.sourceHash,
-        counts: imported.counts,
-      };
+        if (testCase === undefined) throw missingResource('case', request.case_id);
+        testCase = { ...testCase, id: request.new_id };
+        test = {
+          ...test,
+          cases: test.cases.map((entry) => (entry.id === request.case_id ? testCase : entry)),
+        };
+        candidate = {
+          ...candidate,
+          tests: candidate.tests.map((entry) => (entry.id === request.test_id ? test : entry)),
+        };
 
-      if (request.import.key !== undefined) {
-        provenance.key_field = request.import.key;
+        return {
+          candidate,
+          resource: { id: request.new_id, type: 'test_case' as const },
+        } satisfies MutationBuildResult;
       }
 
-      const importedDataset = {
-        cases: imported.cases,
-        metadata: {
-          schema: DATASET_SCHEMA_ID,
-          case_schema: CASE_SCHEMA_ID,
-          id: request.as,
-          name: request.name ?? existing?.metadata.name ?? request.as,
-          case_count: imported.cases.length,
-          provenance: provenance,
-        },
-      };
+      case 'test.case.remove': {
+        let test = findResource('test', candidate.tests, request.test_id);
 
-      if (existing === undefined) candidate.datasets.push(importedDataset);
-      else Object.assign(existing, importedDataset);
+        if (!test.cases.some(({ id }) => id === request.case_id)) {
+          throw missingResource('case', request.case_id);
+        }
 
-      if (!test.datasets.some(({ dataset_id }) => dataset_id === request.as)) {
-        test.datasets.push({ dataset_id: request.as });
+        test = { ...test, cases: test.cases.filter(({ id }) => id !== request.case_id) };
+        candidate = {
+          ...candidate,
+          tests: candidate.tests.map((entry) => (entry.id === request.test_id ? test : entry)),
+        };
+
+        return {
+          candidate,
+          resource: { id: request.case_id, type: 'test_case' as const },
+        } satisfies MutationBuildResult;
       }
 
-      return {
-        affectedTests:
-          existing !== undefined && consumerTests.length > 1 ? consumerTests : undefined,
-        candidate,
-        importedCaseCount: imported.counts.inserted + imported.counts.updated,
-        importResult: imported,
-        resource: { id: request.as, type: 'dataset' },
-      };
-    }
+      case 'test.dataset.add': {
+        let test = findResource('test', candidate.tests, request.test_id);
+        assertNewId(
+          'dataset',
+          candidate.datasets.map(({ metadata }) => metadata),
+          request.dataset.id,
+        );
+        candidate = {
+          ...candidate,
+          datasets: [...candidate.datasets, { cases: [], metadata: request.dataset }],
+        };
+        test = { ...test, datasets: [...test.datasets, { dataset_id: request.dataset.id }] };
+        candidate = {
+          ...candidate,
+          tests: candidate.tests.map((entry) => (entry.id === request.test_id ? test : entry)),
+        };
 
-    case 'test.dataset.attach': {
-      const test = findResource('test', candidate.tests, request.test_id);
-      findDataset(candidate, request.dataset_id);
-      const attachment: (typeof test.datasets)[number] = { dataset_id: request.dataset_id };
-
-      if (request.tags !== undefined) attachment.tags = request.tags;
-      test.datasets.push(attachment);
-
-      return { candidate, resource: { id: request.dataset_id, type: 'dataset' } };
-    }
-
-    case 'test.dataset.detach': {
-      const test = findResource('test', candidate.tests, request.test_id);
-
-      if (!test.datasets.some(({ dataset_id }) => dataset_id === request.dataset_id)) {
-        throw missingResource('dataset', request.dataset_id);
+        return {
+          candidate,
+          resource: { id: request.dataset.id, type: 'dataset' as const },
+        } satisfies MutationBuildResult;
       }
 
-      test.datasets = test.datasets.filter(({ dataset_id }) => dataset_id !== request.dataset_id);
+      case 'test.dataset.import': {
+        let test = findResource('test', candidate.tests, request.test_id);
+        const existing = candidate.datasets.find(({ metadata }) => metadata.id === request.as);
+        const affectedTests = attachedDatasetTests(candidate, request.as);
+        const consumerTests = [...new Set([...affectedTests, request.test_id])].sort();
 
-      return { candidate, resource: { id: request.dataset_id, type: 'dataset' } };
+        if (existing !== undefined && request.import.sync !== 'upsert') {
+          throw new LocalError(
+            'project_invalid',
+            `Dataset ${request.as} already exists; import will not silently replace it.`,
+            {
+              path: '--sync',
+              hint: 'Pass --sync upsert to select explicit dataset update semantics.',
+              details: { affected_tests: consumerTests },
+            },
+          );
+        }
+
+        if (
+          existing !== undefined &&
+          affectedTests.some((id) => id !== request.test_id) &&
+          request.dry_run !== true &&
+          request.yes !== true
+        ) {
+          throw new LocalError(
+            'cli_missing_input',
+            'Shared dataset updates require confirmation.',
+            {
+              path: '--yes',
+              hint: 'Preview with --dry-run, then pass --yes to update every affected test.',
+              details: { affected_tests: consumerTests },
+            },
+          );
+        }
+
+        const imported = yield* runTabularImportAdapter({
+          collisionContexts: datasetImportCollisionContexts(candidate, request.as, request.test_id),
+          existingCases: existing?.cases,
+          importOptions: request.import,
+          preparedSource: options.preparedImportSource,
+          readImportStdin: options.readImportStdin,
+          source: request.source,
+          workingDirectory: options.workingDirectory,
+        });
+
+        let provenance: NonNullable<
+          ProjectResources['datasets'][number]['metadata']['provenance']
+        > = {
+          source_type: imported.format,
+          mapping: request.import.mapping ?? [],
+          imported_at: new Date().toISOString(),
+          source_content_hash: imported.sourceHash,
+          counts: imported.counts,
+        };
+
+        if (request.import.key !== undefined) {
+          provenance = { ...provenance, key_field: request.import.key };
+        }
+
+        const importedDataset = {
+          cases: imported.cases,
+          metadata: {
+            schema: DATASET_SCHEMA_ID,
+            case_schema: CASE_SCHEMA_ID,
+            id: request.as,
+            name: request.name ?? existing?.metadata.name ?? request.as,
+            case_count: imported.cases.length,
+            provenance: provenance,
+          },
+        };
+
+        if (existing === undefined)
+          candidate = { ...candidate, datasets: [...candidate.datasets, importedDataset] };
+        else
+          candidate = {
+            ...candidate,
+            datasets: candidate.datasets.map((entry) =>
+              entry === existing ? importedDataset : entry,
+            ),
+          };
+
+        if (!test.datasets.some(({ dataset_id }) => dataset_id === request.as)) {
+          test = { ...test, datasets: [...test.datasets, { dataset_id: request.as }] };
+          candidate = {
+            ...candidate,
+            tests: candidate.tests.map((entry) => (entry.id === request.test_id ? test : entry)),
+          };
+        }
+
+        return {
+          affectedTests:
+            existing !== undefined && consumerTests.length > 1 ? consumerTests : undefined,
+          candidate,
+          importedCaseCount: imported.counts.inserted + imported.counts.updated,
+          importResult: imported,
+          resource: { id: request.as, type: 'dataset' as const },
+        } satisfies MutationBuildResult;
+      }
+
+      case 'test.dataset.attach': {
+        let test = findResource('test', candidate.tests, request.test_id);
+        findDataset(candidate, request.dataset_id);
+        let attachment: (typeof test.datasets)[number] = { dataset_id: request.dataset_id };
+
+        if (request.tags !== undefined) attachment = { ...attachment, tags: request.tags };
+        test = { ...test, datasets: [...test.datasets, attachment] };
+        candidate = {
+          ...candidate,
+          tests: candidate.tests.map((entry) => (entry.id === request.test_id ? test : entry)),
+        };
+
+        return {
+          candidate,
+          resource: { id: request.dataset_id, type: 'dataset' as const },
+        } satisfies MutationBuildResult;
+      }
+
+      case 'test.dataset.detach': {
+        let test = findResource('test', candidate.tests, request.test_id);
+
+        if (!test.datasets.some(({ dataset_id }) => dataset_id === request.dataset_id)) {
+          throw missingResource('dataset', request.dataset_id);
+        }
+
+        test = {
+          ...test,
+          datasets: test.datasets.filter(({ dataset_id }) => dataset_id !== request.dataset_id),
+        };
+        candidate = {
+          ...candidate,
+          tests: candidate.tests.map((entry) => (entry.id === request.test_id ? test : entry)),
+        };
+
+        return {
+          candidate,
+          resource: { id: request.dataset_id, type: 'dataset' as const },
+        } satisfies MutationBuildResult;
+      }
+
+      case 'test.dataset.rename': {
+        let dataset = findDataset(candidate, request.dataset_id);
+        assertNewId(
+          'dataset',
+          candidate.datasets.map(({ metadata }) => metadata),
+          request.new_id,
+        );
+        dataset = { ...dataset, metadata: { ...dataset.metadata, id: request.new_id } };
+        candidate = {
+          ...candidate,
+          datasets: candidate.datasets.map((entry) =>
+            entry.metadata.id === request.dataset_id ? dataset : entry,
+          ),
+          tests: candidate.tests.map((test) => ({
+            ...test,
+            datasets: test.datasets.map((attachment) =>
+              attachment.dataset_id === request.dataset_id
+                ? { ...attachment, dataset_id: request.new_id }
+                : attachment,
+            ),
+          })),
+        };
+
+        return {
+          candidate,
+          renames: [{ from: request.dataset_id, to: request.new_id, type: 'dataset' as const }],
+          resource: { id: request.new_id, type: 'dataset' as const },
+        } satisfies MutationBuildResult;
+      }
+
+      case 'test.dataset.remove': {
+        assertDatasetRemovable(candidate, request.dataset_id);
+        candidate = {
+          ...candidate,
+          datasets: candidate.datasets.filter(({ metadata }) => metadata.id !== request.dataset_id),
+        };
+
+        return {
+          candidate,
+          resource: { id: request.dataset_id, type: 'dataset' as const },
+        } satisfies MutationBuildResult;
+      }
     }
-
-    case 'test.dataset.rename': {
-      const dataset = findDataset(candidate, request.dataset_id);
-      assertNewId(
-        'dataset',
-        candidate.datasets.map(({ metadata }) => metadata),
-        request.new_id,
-      );
-      dataset.metadata.id = request.new_id;
-      candidate.tests.forEach((test) =>
-        test.datasets.forEach((attachment) => {
-          if (attachment.dataset_id === request.dataset_id) attachment.dataset_id = request.new_id;
-        }),
-      );
-
-      return {
-        candidate,
-        renames: [{ from: request.dataset_id, to: request.new_id, type: 'dataset' }],
-        resource: { id: request.new_id, type: 'dataset' },
-      };
-    }
-
-    case 'test.dataset.remove': {
-      assertDatasetRemovable(candidate, request.dataset_id);
-      candidate.datasets = candidate.datasets.filter(
-        ({ metadata }) => metadata.id !== request.dataset_id,
-      );
-
-      return { candidate, resource: { id: request.dataset_id, type: 'dataset' } };
-    }
+  } catch (error) {
+    if (error instanceof LocalError) return yield* Effect.fail(error);
+    throw error;
   }
-};
+});
 
 export { buildMutation, type TestAuthoringCommand, type TestMutationCommandOptions };

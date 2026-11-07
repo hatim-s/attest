@@ -1,88 +1,116 @@
-import { z } from 'zod';
+import * as SchemaGetter from 'effect/SchemaGetter';
+import * as Effect from 'effect/Effect';
+import * as Option from 'effect/Option';
+import { looseStruct } from '@attest/contracts';
+import * as Schema from 'effect/Schema';
 
 import { attributesSchema } from './otlp-value.js';
 
+/** Normalizes validated hexadecimal identifiers without changing their width. */
 const hexIdSchema = (length: number) =>
-  z
-    .string()
-    .regex(new RegExp(`^[a-fA-F0-9]{${length}}$`), `must be a ${length}-character hex string`)
-    .transform((value) => value.toLowerCase());
+  Schema.String.check(
+    Schema.isPattern(new RegExp(`^[a-fA-F0-9]{${length}}$`), {
+      message: `must be a ${length}-character hex string`,
+    }),
+  ).pipe(
+    Schema.decodeTo(Schema.String, {
+      decode: SchemaGetter.transform((value) => value.toLowerCase()),
+      encode: SchemaGetter.passthrough(),
+    }),
+  );
 
-/** Converts nanoseconds to the RFC 3339 millisecond precision Attest traces use. */
-const timestampSchema = z.union([z.string(), z.number()]).transform((value, context) => {
-  if (!/^\d+$/.test(String(value))) {
-    context.addIssue({ code: 'custom', message: 'must be an unsigned nanosecond timestamp' });
+/** Converts validated nanoseconds to RFC 3339 millisecond precision. */
+const timestampSchema = Schema.Union([Schema.String, Schema.Finite])
+  .check(
+    Schema.makeFilter((value) => {
+      // All-errors decoding evaluates sibling checks, so guard BigInt in this same filter.
+      if (!/^\d+$/.test(String(value))) return 'must be an unsigned nanosecond timestamp';
 
-    return z.NEVER;
-  }
+      if (Number.isNaN(new Date(Number(BigInt(value) / 1_000_000n)).getTime()))
+        return 'is outside the Date range';
 
-  // Values beyond the Date range become NaN here, including ones too large for a safe integer.
-  const timestamp = new Date(Number(BigInt(value) / 1_000_000n));
+      return true;
+    }),
+  )
+  .pipe(
+    Schema.decodeTo(Schema.String, {
+      decode: SchemaGetter.transform((value) =>
+        new Date(Number(BigInt(value) / 1_000_000n)).toISOString(),
+      ),
+      encode: SchemaGetter.transform((value) => String(BigInt(Date.parse(value)) * 1_000_000n)),
+    }),
+  );
 
-  if (Number.isNaN(timestamp.getTime())) {
-    context.addIssue({ code: 'custom', message: 'is outside the Date range' });
+const parentSpanIdSchema = Schema.Union([Schema.Literal(''), hexIdSchema(16)]).pipe(
+  Schema.decodeTo(Schema.NullOr(Schema.String), {
+    decode: SchemaGetter.transform((value) => (value === '' ? null : value)),
+    encode: SchemaGetter.transform((value) => value ?? ''),
+  }),
+  Schema.withDecodingDefault(Effect.succeed('')),
+);
 
-    return z.NEVER;
-  }
+const statusSchema = Schema.optional(
+  looseStruct({
+    code: Schema.Unknown,
+    message: Schema.optional(Schema.String).pipe(
+      Schema.catchDecoding(() => Effect.succeed(Option.some(undefined))),
+    ),
+  }),
+).pipe(Schema.catchDecoding(() => Effect.succeed(Option.some(undefined))));
 
-  return timestamp.toISOString();
-});
-
-const parentSpanIdSchema = z
-  .union([z.literal(''), hexIdSchema(16)])
-  .optional()
-  .transform((value) => (value === undefined || value === '' ? null : value));
-
-const statusSchema = z
-  .looseObject({ code: z.unknown(), message: z.string().optional().catch(undefined) })
-  .optional()
-  .catch(undefined);
-
-const eventSchema = z.looseObject({
-  name: z.string().min(1),
+const eventSchema = looseStruct({
+  name: Schema.String.check(Schema.isMinLength(1)),
   timeUnixNano: timestampSchema,
   attributes: attributesSchema,
 });
 
-const otlpSpanSchema = z.looseObject({
+const otlpSpanSchema = looseStruct({
   traceId: hexIdSchema(32),
   spanId: hexIdSchema(16),
   parentSpanId: parentSpanIdSchema,
-  name: z.string().min(1),
+  name: Schema.String.check(Schema.isMinLength(1)),
   startTimeUnixNano: timestampSchema,
   endTimeUnixNano: timestampSchema,
   attributes: attributesSchema,
-  events: z.array(eventSchema).optional(),
+  events: Schema.optional(Schema.Array(eventSchema)),
   status: statusSchema,
 });
 
-const scopeSchema = z
-  .looseObject({
-    name: z.string().optional().catch(undefined),
-    version: z.string().optional().catch(undefined),
-  })
-  .optional()
-  .catch(undefined);
+const scopeSchema = Schema.optional(
+  looseStruct({
+    name: Schema.optional(Schema.String).pipe(
+      Schema.catchDecoding(() => Effect.succeed(Option.some(undefined))),
+    ),
+    version: Schema.optional(Schema.String).pipe(
+      Schema.catchDecoding(() => Effect.succeed(Option.some(undefined))),
+    ),
+  }),
+).pipe(Schema.catchDecoding(() => Effect.succeed(Option.some(undefined))));
 
 /**
  * Accepts the subset of an OTLP/HTTP JSON trace export that Attest converts. Objects stay loose
  * because exporters add vendor fields; attribute and scope metadata degrade instead of failing.
  */
-const otlpExportSchema = z.looseObject({
-  resourceSpans: z.array(
-    z.looseObject({
-      resource: z.looseObject({ attributes: attributesSchema }).catch({ attributes: {} }),
-      scopeSpans: z.array(z.looseObject({ scope: scopeSchema, spans: z.array(otlpSpanSchema) })),
+const otlpExportSchema = looseStruct({
+  resourceSpans: Schema.Array(
+    looseStruct({
+      resource: looseStruct({ attributes: attributesSchema }).pipe(
+        Schema.catchDecoding(() => Effect.succeed(Option.some({ attributes: {} }))),
+        Schema.withDecodingDefault(Effect.succeed({ attributes: [] })),
+      ),
+      scopeSpans: Schema.Array(
+        looseStruct({ scope: scopeSchema, spans: Schema.Array(otlpSpanSchema) }),
+      ),
     }),
   ),
 });
 
-type OtlpExport = z.infer<typeof otlpExportSchema>;
+type OtlpExport = typeof otlpExportSchema.Type;
 
 type OtlpResourceSpans = OtlpExport['resourceSpans'][number];
 
 type OtlpScopeSpans = OtlpResourceSpans['scopeSpans'][number];
 
-type OtlpSpan = z.infer<typeof otlpSpanSchema>;
+type OtlpSpan = typeof otlpSpanSchema.Type;
 
 export { otlpExportSchema, type OtlpScopeSpans, type OtlpSpan };

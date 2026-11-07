@@ -25,14 +25,28 @@ const promptOnTerminal: CliPrompt = async (question, options) => {
   }
 };
 
+/** Closes a pending process input read when the application receives cancellation. */
+const processInput = async function* (signal?: AbortSignal): AsyncIterable<Uint8Array> {
+  const abort = () => process.stdin.destroy(new DOMException('Input cancelled.', 'AbortError'));
+
+  if (signal?.aborted) throw new DOMException('Input cancelled.', 'AbortError');
+  signal?.addEventListener('abort', abort, { once: true });
+
+  try {
+    yield* process.stdin;
+  } finally {
+    signal?.removeEventListener('abort', abort);
+  }
+};
+
 /** Creates the process-backed interaction used by the production CLI. */
-const createDefaultCliInteraction = (): CliInteraction => ({
+const createDefaultCliInteraction = (signal?: AbortSignal): CliInteraction => ({
   ci: process.env.CI === 'true',
   inputIsTTY: process.stdin.isTTY === true,
   outputIsTTY: process.stdout.isTTY === true,
   prompt: promptOnTerminal,
-  readImportStdin: () => process.stdin,
-  readStdin: () => text(process.stdin),
+  readImportStdin: () => processInput(signal),
+  readStdin: () => text(processInput(signal)),
 });
 
 export { createDefaultCliInteraction, type CliInteraction, type CliPrompt };

@@ -1,3 +1,4 @@
+import * as Effect from 'effect/Effect';
 import { parseWithSchemaSync } from '@attest/contracts';
 import { createSingleProjectCatalog, StoreError, type RunSource } from '@attest/core';
 import { parsePageLimit, type CaseSummary, type RunRecord } from '@attest/core/records';
@@ -53,62 +54,74 @@ const fixture = (sourceRuns = runs) => {
 
   const source: RunSource = {
     getProjectOverview: () =>
-      Promise.resolve({
+      Effect.succeed({
         evals: { items: [] },
         runningRunCount: 0,
         runningRunCountTruncated: false,
         lastRunAt: null,
       }),
-    listEvals: () => Promise.resolve({ items: [] }),
-    listEvalRuns: () => Promise.resolve({ items: [] }),
-    getEvalCaseWindow: () => Promise.resolve({ runs: [], items: [] }),
-    getCaseHistory: () => Promise.resolve({ items: [] }),
+    listEvals: () => Effect.succeed({ items: [] }),
+    listEvalRuns: () => Effect.succeed({ items: [] }),
+    getEvalCaseWindow: () => Effect.succeed({ runs: [], items: [] }),
+    getCaseHistory: () => Effect.succeed({ items: [] }),
     getActivity: () =>
-      Promise.resolve({
+      Effect.succeed({
         coveredFrom: '2026-01-01T00:00:00.000Z',
         coveredTo: '2026-01-02T00:00:00.000Z',
         timezone: 'UTC',
         days: [],
         truncated: false,
       }),
-    listRunSuites: () => Promise.resolve([]),
+    listRunSuites: () => Effect.succeed([]),
 
-    listRuns: (query = {}) => {
-      const limit = parsePageLimit(query);
+    listRuns: (query = {}) =>
+      Effect.gen(function* () {
+        const limit = parsePageLimit(query);
 
-      const start =
-        query.cursor === undefined ? 0 : sourceRuns.findIndex((run) => run.id === query.cursor) + 1;
+        const start =
+          query.cursor === undefined
+            ? 0
+            : sourceRuns.findIndex((run) => run.id === query.cursor) + 1;
 
-      const items = sourceRuns.slice(start, start + Math.min(limit, 2));
+        const items = sourceRuns.slice(start, start + Math.min(limit, 2));
 
-      return Promise.resolve(
-        start + items.length < sourceRuns.length
-          ? { items, nextCursor: items.at(-1)?.id }
-          : { items },
-      );
-    },
-    getRun: (runId) => {
-      const run = runs.find((run) => run.id === runId);
+        return yield* Effect.succeed(
+          start + items.length < sourceRuns.length
+            ? { items, nextCursor: items.at(-1)?.id }
+            : { items },
+        );
+      }),
+    getRun: (runId) =>
+      Effect.gen(function* () {
+        const run = runs.find((run) => run.id === runId);
 
-      if (run === undefined) throw new StoreError('RUN_NOT_FOUND', `Run ${runId} missing.`);
+        if (run === undefined)
+          return yield* Effect.fail(new StoreError('RUN_NOT_FOUND', `Run ${runId} missing.`));
 
-      return Promise.resolve(run);
-    },
-    listCaseSummaries: async (runId, query = {}) => {
-      await source.getRun(runId);
-      caseReads.push({ runId, ...query });
-      const items = suites.get(runId) ?? [];
-      const start = query.cursor === undefined ? 0 : Number(query.cursor);
-      const page = items.slice(start, start + 1);
+        return yield* Effect.succeed(run);
+      }),
+    listCaseSummaries: (runId, query = {}) =>
+      Effect.gen(function* () {
+        yield* source.getRun(runId);
+        caseReads.push({ runId, ...query });
+        const items = suites.get(runId) ?? [];
+        const start = query.cursor === undefined ? 0 : Number(query.cursor);
+        const page = items.slice(start, start + 1);
 
-      return start + 1 < items.length
-        ? { items: page, nextCursor: String(start + 1) }
-        : { items: page };
-    },
-    getCase: () => {
-      throw new StoreError('CASE_NOT_FOUND', 'No case blobs in this fixture.');
-    },
-    getRunWithCases: async (runId) => ({ run: await source.getRun(runId), cases: [] }),
+        return start + 1 < items.length
+          ? { items: page, nextCursor: String(start + 1) }
+          : { items: page };
+      }),
+    getCase: () =>
+      Effect.gen(function* () {
+        return yield* Effect.fail(
+          new StoreError('CASE_NOT_FOUND', 'No case blobs in this fixture.'),
+        );
+      }),
+    getRunWithCases: (runId) =>
+      Effect.gen(function* () {
+        return { run: yield* source.getRun(runId), cases: [] };
+      }),
   };
 
   return {

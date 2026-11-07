@@ -1,3 +1,4 @@
+import { isJsonArray } from '../../internal/json-value.js';
 import { isJsonObject, type JsonValue } from '@attest/contracts';
 
 import { readJsonPointer, splitJsonPointer } from './json-pointer.js';
@@ -38,13 +39,35 @@ const redactTransportText = (value: string, secrets: readonly string[]): string 
     .sort((left, right) => right.length - left.length)
     .reduce((redacted, secret) => redacted.replaceAll(secret, REDACTED), value);
 
+/** Copies the path to an existing redaction target without mutating decoded JSON. */
+const replaceEvidenceValue = (value: JsonValue, tokens: readonly string[]): JsonValue => {
+  const [head, ...tail] = tokens;
+
+  if (head === undefined) return REDACTED;
+
+  if (isJsonArray(value))
+    return value.map((item, index) =>
+      String(index) === head ? replaceEvidenceValue(item, tail) : item,
+    );
+
+  if (isJsonObject(value))
+    return Object.fromEntries(
+      Object.entries(value).map(([key, item]) => [
+        key,
+        key === head ? replaceEvidenceValue(item, tail) : item,
+      ]),
+    );
+
+  return value;
+};
+
 /** Replaces the values that authored pointers reach in one event, then redacts runtime secrets. */
 const redactEventEvidence = (
   value: JsonValue,
   pointers: readonly string[],
   secrets: readonly string[],
 ): string => {
-  const redacted = structuredClone(value);
+  let redacted = value;
 
   for (const pointer of pointers) {
     const leaf = splitJsonPointer(pointer).pop();
@@ -54,10 +77,7 @@ const redactEventEvidence = (
 
     // Only a value the pointer already reaches is replaced, so redaction never adds keys.
     if (readJsonPointer(redacted, pointer) === undefined) continue;
-    const parent = readJsonPointer(redacted, pointer.slice(0, pointer.lastIndexOf('/')));
-
-    if (Array.isArray(parent)) parent[Number(leaf)] = REDACTED;
-    else if (isJsonObject(parent)) parent[leaf] = REDACTED;
+    redacted = replaceEvidenceValue(redacted, splitJsonPointer(pointer));
   }
 
   return redactTransportText(JSON.stringify(redacted), secrets);

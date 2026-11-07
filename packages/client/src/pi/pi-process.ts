@@ -1,19 +1,8 @@
-import { spawn } from 'node:child_process';
-
+import { Cause, Deferred, Effect, Exit } from 'effect';
+import { execFile, spawn } from 'node:child_process';
+import { withCleanup } from '../runner/lifetime.js';
 import { createLineFramer } from './line-framer.js';
 import { parsePiRecord, type PiRecord } from './pi-records.js';
-
-// One record can carry a whole tool result or final message; anything larger is not Pi.
-const MAX_LINE_BYTES = 16 * 1024 * 1024;
-
-const STDERR_TAIL_CHARS = 8 * 1024;
-
-// After stdin closes Pi disposes its runtime; this long it may take before it is signalled.
-const SHUTDOWN_GRACE_MS = 5_000;
-
-const KILL_GRACE_MS = 2_000;
-
-const PROMPT_ID = 'attest-prompt';
 
 type PiProcessInput = {
   argv: readonly [string, ...string[]];
@@ -25,7 +14,6 @@ type PiProcessInput = {
   onRecord: (record: PiRecord) => void;
 };
 
-/** How one Pi run ended. Every outcome is reported only after the process has exited. */
 type PiProcessOutcome =
   | { kind: 'settled'; aborted: boolean }
   | { kind: 'handled' }
@@ -36,148 +24,206 @@ type PiProcessOutcome =
   | { kind: 'timeout' }
   | { kind: 'cancelled' };
 
-/**
- * Runs one prompt through `pi --mode rpc`. Stdin stays open until `agent_settled`, because Pi
- * treats stdin EOF as a shutdown request. A settled run shuts down by closing stdin; every other
- * ending (abort, timeout, protocol violation, rejected prompt) kills Pi's whole process group so
- * tool subprocesses such as `bash` children die with it.
- */
-const runPiProcess = ({
-  argv,
-  cwd,
-  env,
-  message,
-  signal,
-  timeoutMs,
-  onRecord,
-}: PiProcessInput): Promise<PiProcessOutcome> => {
-  if (signal.aborted) return Promise.resolve({ kind: 'cancelled' });
-  const [command, ...args] = argv;
+/** Owns one process group. Callback leaves publish observations; native flow owns deadlines and teardown. */
+const runPiProcess = ({ argv, cwd, env, message, signal, timeoutMs, onRecord }: PiProcessInput) =>
+  Effect.uninterruptibleMask((restore) =>
+    Effect.gen(function* () {
+      if (signal.aborted) return { kind: 'cancelled' } as const;
+      const terminal = yield* Deferred.make<PiProcessOutcome>();
+      const closed = yield* Deferred.make<void>();
+      const [command, ...args] = argv;
 
-  return new Promise((resolve) => {
-    // detached puts Pi in its own process group, which is what makes the group kill possible.
-    const child = spawn(command, args, {
-      cwd,
-      env,
-      stdio: ['pipe', 'pipe', 'pipe'],
-      detached: true,
-    });
+      const child = yield* Effect.try({
+        try: () =>
+          spawn(command, args, { cwd, env, stdio: ['pipe', 'pipe', 'pipe'], detached: true }),
+        catch: (cause) => new Error('Pi spawn failed.', { cause }),
+      });
 
-    const framer = createLineFramer(MAX_LINE_BYTES);
-    const timers: NodeJS.Timeout[] = [];
-    let stderr = '';
-    let outcome: PiProcessOutcome | undefined;
+      let concluded = false;
 
-    const killGroup = (killSignal: NodeJS.Signals): void => {
-      if (child.pid === undefined) return;
+      const publish = (outcome: PiProcessOutcome) => {
+        if (concluded) return;
+        concluded = true;
+        Deferred.doneUnsafe(terminal, Effect.succeed(outcome));
+      };
 
-      try {
-        process.kill(-child.pid, killSignal);
-      } catch {
-        // ESRCH: the group is already gone.
-      }
-    };
+      const framer = createLineFramer(16 * 1024 * 1024);
+      let stderr = '';
 
-    const onAbort = (): void => conclude({ kind: 'cancelled' });
+      const abort = () => {
+        publish({ kind: 'cancelled' });
+      };
 
-    /** Records the first terminal outcome and starts shutting Pi down; later ones are ignored. */
-    const conclude = (result: PiProcessOutcome): void => {
-      if (outcome !== undefined) return;
-      outcome = result;
-      signal.removeEventListener('abort', onAbort);
-      timers.forEach(clearTimeout);
+      signal.addEventListener('abort', abort, { once: true });
 
-      if (result.kind === 'settled' || result.kind === 'handled') {
-        child.stdin.end();
-        timers.push(setTimeout(() => killGroup('SIGTERM'), SHUTDOWN_GRACE_MS));
-        timers.push(setTimeout(() => killGroup('SIGKILL'), SHUTDOWN_GRACE_MS + KILL_GRACE_MS));
-      } else {
-        killGroup('SIGTERM');
-        timers.push(setTimeout(() => killGroup('SIGKILL'), KILL_GRACE_MS));
-      }
-    };
+      if (signal.aborted) abort();
+      child.stdout.on('data', (chunk: Buffer) => {
+        if (concluded) return;
+        const lines = framer.push(chunk);
 
-    const onLine = (line: string): void => {
-      if (outcome !== undefined) return;
-      const parsed = parsePiRecord(line);
+        if (lines === undefined) {
+          publish({
+            kind: 'protocol_error',
+            message: 'Pi wrote a stdout line over 16777216 bytes.',
+          });
 
-      if (!parsed.ok) {
-        conclude({ kind: 'protocol_error', message: parsed.message });
-
-        return;
-      }
-
-      const record = parsed.record;
-
-      if (record === undefined) return;
-      onRecord(record);
-
-      if (record.type === 'agent_settled') {
-        conclude({ kind: 'settled', aborted: record.aborted });
-      } else if (record.type === 'response' && record.id === PROMPT_ID) {
-        if (!record.success) {
-          conclude({ kind: 'rejected', message: record.error ?? 'Pi rejected the prompt.' });
-        } else if (record.data?.disposition === 'handled') {
-          // No run starts for a handled prompt, so no agent_settled follows.
-          conclude({ kind: 'handled' });
+          return;
         }
-      }
-    };
 
-    child.stdout.on('data', (chunk: Buffer) => {
-      const lines = framer.push(chunk);
+        for (const line of lines) {
+          if (concluded) return;
+          const parsed = parsePiRecord(line);
 
-      if (lines === undefined) {
-        conclude({
-          kind: 'protocol_error',
-          message: `Pi wrote a stdout line over ${String(MAX_LINE_BYTES)} bytes.`,
+          if (!parsed.ok) {
+            publish({ kind: 'protocol_error', message: parsed.message });
+
+            return;
+          }
+
+          const record = parsed.record;
+
+          if (record === undefined) continue;
+
+          try {
+            onRecord(record);
+          } catch (defect) {
+            Deferred.doneUnsafe(terminal, Effect.die(defect));
+
+            return;
+          }
+
+          if (record.type === 'agent_settled')
+            publish({ kind: 'settled', aborted: record.aborted });
+
+          if (record.type === 'response' && record.id === 'attest-prompt') {
+            if (!record.success)
+              publish({ kind: 'rejected', message: record.error ?? 'Pi rejected the prompt.' });
+            else if (record.data?.disposition === 'handled') publish({ kind: 'handled' });
+          }
+        }
+      });
+      child.stderr.on('data', (chunk: Buffer) => {
+        stderr = (stderr + chunk.toString('utf8')).slice(-8192);
+      });
+      child.stdin.on('error', () => undefined);
+      child.on('error', (error) => {
+        publish({ kind: 'spawn_failed', message: error.message });
+      });
+      child.on('exit', (code, exitSignal) => {
+        publish({ kind: 'exited', code, signal: exitSignal, stderr: stderr.trim() });
+      });
+      child.on('close', () => {
+        Deferred.doneUnsafe(closed, Effect.void);
+      });
+
+      /** ESRCH confirms absence; other failures must remain cleanup evidence. */
+      const kill = (killSignal: NodeJS.Signals) =>
+        Effect.try({
+          try: () => {
+            if (child.pid === undefined) return;
+
+            try {
+              process.kill(-child.pid, killSignal);
+            } catch (error) {
+              if (!(error instanceof Error && 'code' in error && error.code === 'ESRCH'))
+                throw error;
+            }
+          },
+          catch: (cause) => new Error('Pi process-group termination failed.', { cause }),
         });
 
-        return;
-      }
+      const cleanup = Effect.gen(function* () {
+        const killed = yield* Effect.exit(kill('SIGKILL'));
+        const joined = yield* Effect.exit(Deferred.await(closed).pipe(Effect.timeout(2_000)));
+        signal.removeEventListener('abort', abort);
+        child.stdin.destroy();
+        child.stdout.destroy();
+        child.stderr.destroy();
 
-      lines.forEach(onLine);
-    });
+        const verified = yield* Effect.exit(
+          Effect.gen(function* () {
+            if (child.pid === undefined) return;
 
-    child.stderr.on('data', (chunk: Buffer) => {
-      stderr = (stderr + chunk.toString('utf8')).slice(-STDERR_TAIL_CHARS);
-    });
+            for (let probe = 0; probe < 10; probe++) {
+              const rows = yield* Effect.tryPromise({
+                try: () =>
+                  new Promise<string>((resolve, reject) => {
+                    execFile(
+                      'ps',
+                      ['-axo', 'pgid=,stat='],
+                      { timeout: 1_000, killSignal: 'SIGKILL', maxBuffer: 1024 * 1024 },
+                      (error, stdout) =>
+                        error === null
+                          ? resolve(stdout)
+                          : reject(new Error('Pi group snapshot failed.', { cause: error })),
+                    );
+                  }),
+                catch: (cause) => new Error('Pi process-group verification failed.', { cause }),
+              });
 
-    // EPIPE after Pi exits is reported through the exit outcome instead.
-    child.stdin.on('error', () => undefined);
+              if (rows.trim() === '')
+                return yield* Effect.fail(new Error('Pi process-group snapshot was empty.'));
 
-    child.on('error', (error) => {
-      if (child.pid !== undefined) return;
-      outcome ??= { kind: 'spawn_failed', message: error.message };
-      timers.forEach(clearTimeout);
-      signal.removeEventListener('abort', onAbort);
-      resolve(outcome);
-    });
+              // A zombie has exited and cannot execute tools. Signal 0 alone still finds it.
+              let live = false;
 
-    // Pi exiting early must not wait on 'close': a tool subprocess holding stdout open would delay
-    // it until the timeout. Concluding kills the rest of the group, which releases the pipes.
-    child.on('exit', (code, exitSignal) => {
-      conclude({ kind: 'exited', code, signal: exitSignal, stderr: stderr.trim() });
-    });
+              for (const row of rows.trim().split('\n')) {
+                const [group, state, ...extra] = row.trim().split(/\s+/u);
 
-    child.on('close', (code, exitSignal) => {
-      timers.forEach(clearTimeout);
-      // A tool's background process (a dev server, `sleep &`) must not outlive the run.
-      killGroup('SIGKILL');
-      signal.removeEventListener('abort', onAbort);
+                if (
+                  group === undefined ||
+                  !/^\d+$/u.test(group) ||
+                  state === undefined ||
+                  extra.length > 0
+                )
+                  return yield* Effect.fail(new Error('Pi process-group snapshot was malformed.'));
 
-      // stderr written just before exiting can arrive after 'exit'; 'close' has all of it.
-      resolve(
-        outcome === undefined || outcome.kind === 'exited'
-          ? { kind: 'exited', code, signal: exitSignal, stderr: stderr.trim() }
-          : outcome,
+                if (Number(group) === child.pid && !state.startsWith('Z')) live = true;
+              }
+
+              if (!live) return;
+              yield* Effect.sleep(25);
+            }
+
+            return yield* Effect.fail(new Error('Pi process-group cleanup unconfirmed.'));
+          }),
+        );
+
+        const failures = [killed, joined, verified].flatMap((exit) =>
+          Exit.isFailure(exit) ? [exit.cause] : [],
+        );
+
+        if (failures.length > 0) return yield* Effect.failCause(failures.reduce(Cause.combine));
+      });
+
+      return yield* withCleanup(
+        restore(
+          Effect.gen(function* () {
+            child.stdin.write(
+              `${JSON.stringify({ id: 'attest-prompt', type: 'prompt', message })}\n`,
+            );
+            const observed = yield* Deferred.await(terminal).pipe(Effect.timeoutOption(timeoutMs));
+
+            const outcome =
+              observed._tag === 'None' ? ({ kind: 'timeout' } as const) : observed.value;
+
+            if (outcome.kind === 'settled' || outcome.kind === 'handled') {
+              child.stdin.end();
+              const grace = yield* Deferred.await(closed).pipe(Effect.timeoutOption(5_000));
+
+              if (grace._tag === 'Some') return outcome;
+            }
+
+            yield* kill('SIGTERM');
+            yield* Deferred.await(closed).pipe(Effect.timeoutOption(2_000));
+
+            return outcome;
+          }),
+        ),
+        cleanup,
+        3_000,
       );
-    });
-
-    signal.addEventListener('abort', onAbort, { once: true });
-    timers.push(setTimeout(() => conclude({ kind: 'timeout' }), timeoutMs));
-    child.stdin.write(`${JSON.stringify({ id: PROMPT_ID, type: 'prompt', message })}\n`);
-  });
-};
+    }),
+  );
 
 export { runPiProcess, type PiProcessOutcome };

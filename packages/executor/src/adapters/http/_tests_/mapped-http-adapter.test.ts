@@ -1,3 +1,5 @@
+import * as Effect from 'effect/Effect';
+// EFFECT-ROOT: owned HTTP fixture execution.
 import { parseJson } from '../../../internal/json-value.js';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 
@@ -81,7 +83,10 @@ describe('mapped HTTP adapter', () => {
       });
     });
 
-    const result = await invokeMappedHttpAgent(directAgent(fixture.origin), request);
+    const result = await Effect.runPromise(
+      invokeMappedHttpAgent(directAgent(fixture.origin), request),
+    );
+
     expect(result.status).toBe('ok');
 
     if (result.status !== 'ok') throw result.error;
@@ -105,9 +110,11 @@ describe('mapped HTTP adapter', () => {
       response.end(JSON.stringify({ data: { result: 'x'.repeat(2_000) } }));
     });
 
-    const result = await invokeMappedHttpAgent(
-      directAgent(fixture.origin, { limits: { response_bytes: 128 } }),
-      request,
+    const result = await Effect.runPromise(
+      invokeMappedHttpAgent(
+        directAgent(fixture.origin, { limits: { response_bytes: 128 } }),
+        request,
+      ),
     );
 
     expect(result.status).toBe('invocation_error');
@@ -124,7 +131,10 @@ describe('mapped HTTP adapter', () => {
       response.end(JSON.stringify({ error: { message: 'agent declined', code: 'DECLINED' } }));
     });
 
-    const result = await invokeMappedHttpAgent(directAgent(fixture.origin), request);
+    const result = await Effect.runPromise(
+      invokeMappedHttpAgent(directAgent(fixture.origin), request),
+    );
+
     expect(result.status).toBe('ok');
 
     if (result.status !== 'ok' || result.report?.ok !== true) {
@@ -151,12 +161,20 @@ describe('mapped HTTP adapter', () => {
       );
     });
 
-    const agent = directAgent(fixture.origin);
+    let agent = directAgent(fixture.origin);
 
     if (agent.transport.kind !== 'http') throw new Error('Expected direct HTTP transport.');
-    agent.transport.extraction.trace_pointer = '/trace';
+    agent = {
+      ...agent,
+      transport: {
+        ...agent.transport,
+        extraction: { ...agent.transport.extraction, trace_pointer: '/trace' },
+      },
+    };
 
-    const result = await invokeMappedHttpAgent(agent, request, { secrets: [secret] });
+    const result = await Effect.runPromise(
+      invokeMappedHttpAgent(agent, request, { secrets: [secret] }),
+    );
 
     expect(result.status).toBe('ok');
     expect(JSON.stringify(result)).not.toContain(secret);
@@ -218,7 +236,7 @@ describe('mapped HTTP adapter', () => {
       timeouts: { attempt_ms: 2_000 },
     };
 
-    const result = await invokeMappedHttpAgent(agent, request);
+    const result = await Effect.runPromise(invokeMappedHttpAgent(agent, request));
     expect(result.status).toBe('ok');
     expect(result.attempts.map(({ status }) => status)).toEqual(['invocation_error', 'ok']);
     expect(submissions).toBe(2);
@@ -256,7 +274,7 @@ describe('mapped HTTP adapter', () => {
       },
     };
 
-    const result = await invokeMappedHttpAgent(agent, request);
+    const result = await Effect.runPromise(invokeMappedHttpAgent(agent, request));
     expect(result.status).toBe('invocation_error');
     expect(submissions).toBe(1);
   });
@@ -290,12 +308,11 @@ describe('mapped HTTP adapter', () => {
       },
     });
 
-    const rejected = await invokeMappedHttpAgent(makeAgent(true), request);
+    const rejected = await Effect.runPromise(invokeMappedHttpAgent(makeAgent(true), request));
     expect(rejected.status).toBe('invocation_error');
 
-    const timedOut = await invokeMappedHttpAgent(
-      { ...makeAgent(false), timeouts: { attempt_ms: 10 } },
-      request,
+    const timedOut = await Effect.runPromise(
+      invokeMappedHttpAgent({ ...makeAgent(false), timeouts: { attempt_ms: 10 } }, request),
     );
 
     expect(timedOut.status).toBe('invocation_error');
@@ -305,9 +322,11 @@ describe('mapped HTTP adapter', () => {
     const controller = new AbortController();
     setTimeout(() => controller.abort(), 10);
 
-    const cancelled = await invokeMappedHttpAgent(makeAgent(false), request, {
-      signal: controller.signal,
-    });
+    const cancelled = await Effect.runPromise(
+      invokeMappedHttpAgent(makeAgent(false), request, {
+        signal: controller.signal,
+      }),
+    );
 
     expect(cancelled.status).toBe('invocation_error');
 
@@ -334,15 +353,22 @@ describe('mapped HTTP adapter', () => {
       response.end(JSON.stringify({ data: { result: 'ok' } }));
     });
 
-    expect((await invokeMappedHttpAgent(directAgent(fixture.origin), request)).status).toBe('ok');
+    expect(
+      (await Effect.runPromise(invokeMappedHttpAgent(directAgent(fixture.origin), request))).status,
+    ).toBe('ok');
 
-    const foreignResult = await invokeMappedHttpAgent(directAgent(fixture.origin), request, {
-      headers: { 'x-mode': 'foreign' },
-    });
+    const foreignResult = await Effect.runPromise(
+      invokeMappedHttpAgent(directAgent(fixture.origin), request, {
+        headers: { 'x-mode': 'foreign' },
+      }),
+    );
 
     expect(foreignResult.status).toBe('invocation_error');
 
-    const prohibited = await invokeMappedHttpAgent(directAgent('http://169.254.169.254'), request);
+    const prohibited = await Effect.runPromise(
+      invokeMappedHttpAgent(directAgent('http://169.254.169.254'), request),
+    );
+
     expect(prohibited.status).toBe('invocation_error');
   });
 
@@ -354,21 +380,43 @@ describe('mapped HTTP adapter', () => {
       response.end(JSON.stringify({ data: { result: 'ok' }, echo: secret, job: 'remote-7' }));
     });
 
-    const agent = directAgent(fixture.origin);
-    agent.transport.extraction.remote_job_id_pointer = '/job';
-    const result = await invokeMappedHttpAgent(agent, request, { secrets: [secret] });
+    let agent = directAgent(fixture.origin);
+    agent = {
+      ...agent,
+      transport: {
+        ...agent.transport,
+        extraction: { ...agent.transport.extraction, remote_job_id_pointer: '/job' },
+      },
+    };
+
+    const result = await Effect.runPromise(
+      invokeMappedHttpAgent(agent, request, { secrets: [secret] }),
+    );
+
     expect(result.status).toBe('ok');
     expect(result.rawExcerpt?.text).toContain('[REDACTED]');
     expect(result.rawExcerpt?.text).not.toContain(secret);
     expect(result.rawExcerpt?.text).not.toContain(JSON.stringify(secret).slice(1, -1));
     expect(result.diagnostics).toMatchObject({ remoteJobId: 'remote-7' });
 
-    agent.transport.extraction.remote_job_id_pointer = '/missing';
-    expect((await invokeMappedHttpAgent(agent, request)).diagnostics).not.toHaveProperty(
-      'remoteJobId',
-    );
-    agent.transport.extraction.remote_job_id_pointer = '/data';
-    expect(await invokeMappedHttpAgent(agent, request)).toMatchObject({
+    agent = {
+      ...agent,
+      transport: {
+        ...agent.transport,
+        extraction: { ...agent.transport.extraction, remote_job_id_pointer: '/missing' },
+      },
+    };
+    expect(
+      (await Effect.runPromise(invokeMappedHttpAgent(agent, request))).diagnostics,
+    ).not.toHaveProperty('remoteJobId');
+    agent = {
+      ...agent,
+      transport: {
+        ...agent.transport,
+        extraction: { ...agent.transport.extraction, remote_job_id_pointer: '/data' },
+      },
+    };
+    expect(await Effect.runPromise(invokeMappedHttpAgent(agent, request))).toMatchObject({
       status: 'invocation_error',
       error: { code: 'invalid_envelope' },
     });
@@ -385,24 +433,48 @@ describe('mapped HTTP adapter', () => {
     const controller = new AbortController();
     controller.abort();
 
-    const cancelled = await invokeMappedHttpAgent(directAgent(fixture.origin), request, {
-      signal: controller.signal,
-    });
+    const cancelled = await Effect.runPromise(
+      invokeMappedHttpAgent(directAgent(fixture.origin), request, {
+        signal: controller.signal,
+      }),
+    );
 
     expect(cancelled).toMatchObject({ status: 'invocation_error', error: { code: 'cancelled' } });
 
-    const authority = directAgent(fixture.origin);
+    let authority = directAgent(fixture.origin);
 
     if (authority.transport.kind !== 'http') throw new Error('Expected direct HTTP transport.');
-    authority.transport.request.url = `http://{{input/question}}:${new URL(fixture.origin).port}/x`;
-    expect((await invokeMappedHttpAgent(authority, request)).status).toBe('invocation_error');
+    authority = {
+      ...authority,
+      transport: {
+        ...authority.transport,
+        request: {
+          ...authority.transport.request,
+          url: `http://{{input/question}}:${new URL(fixture.origin).port}/x`,
+        },
+      },
+    };
+    expect((await Effect.runPromise(invokeMappedHttpAgent(authority, request))).status).toBe(
+      'invocation_error',
+    );
 
-    const oversized = directAgent(fixture.origin, { limits: { request_bytes: 80 } });
+    let oversized = directAgent(fixture.origin, { limits: { request_bytes: 80 } });
 
     if (oversized.transport.kind !== 'http') throw new Error('Expected direct HTTP transport.');
-    oversized.transport.request.body = undefined;
-    oversized.transport.request.query = { large: '{{input/question}}'.repeat(30) };
-    expect((await invokeMappedHttpAgent(oversized, request)).status).toBe('invocation_error');
+    oversized = {
+      ...oversized,
+      transport: {
+        ...oversized.transport,
+        request: {
+          ...oversized.transport.request,
+          body: undefined,
+          query: { large: '{{input/question}}'.repeat(30) },
+        },
+      },
+    };
+    expect((await Effect.runPromise(invokeMappedHttpAgent(oversized, request))).status).toBe(
+      'invocation_error',
+    );
     expect(requests).toBe(0);
   });
 
@@ -422,9 +494,11 @@ describe('mapped HTTP adapter', () => {
       }, 20);
     });
 
-    const capped = await invokeMappedHttpAgent(
-      directAgent(fixture.origin, { limits: { response_bytes: 64 } }),
-      request,
+    const capped = await Effect.runPromise(
+      invokeMappedHttpAgent(
+        directAgent(fixture.origin, { limits: { response_bytes: 64 } }),
+        request,
+      ),
     );
 
     expect(capped).toMatchObject({
@@ -435,12 +509,14 @@ describe('mapped HTTP adapter', () => {
     requests = 0;
     const retryStartedAt = performance.now();
 
-    const retried = await invokeMappedHttpAgent(
-      directAgent(fixture.origin, {
-        retry: { retries: 1, backoff: { kind: 'fixed', delay_ms: 200 } },
-        limits: { response_bytes: 1_024 },
-      }),
-      request,
+    const retried = await Effect.runPromise(
+      invokeMappedHttpAgent(
+        directAgent(fixture.origin, {
+          retry: { retries: 1, backoff: { kind: 'fixed', delay_ms: 200 } },
+          limits: { response_bytes: 1_024 },
+        }),
+        request,
+      ),
     );
 
     const retryElapsedMs = performance.now() - retryStartedAt;
@@ -468,9 +544,11 @@ describe('mapped HTTP adapter', () => {
     });
 
     try {
-      const stalled = await invokeMappedHttpAgent(
-        directAgent(fixture.origin, { timeouts: { idle_ms: 25, attempt_ms: 500 } }),
-        request,
+      const stalled = await Effect.runPromise(
+        invokeMappedHttpAgent(
+          directAgent(fixture.origin, { timeouts: { idle_ms: 25, attempt_ms: 500 } }),
+          request,
+        ),
       );
 
       expect(stalled).toMatchObject({
@@ -521,7 +599,7 @@ describe('mapped HTTP adapter', () => {
       },
     };
 
-    const failed = await invokeMappedHttpAgent(poller, request);
+    const failed = await Effect.runPromise(invokeMappedHttpAgent(poller, request));
     expect(failed).toMatchObject({
       status: 'invocation_error',
       error: { message: 'provider failed' },
@@ -542,13 +620,22 @@ describe('mapped HTTP adapter', () => {
       });
     });
 
-    const agent = directAgent(fixture.origin);
+    let agent = directAgent(fixture.origin);
 
     if (agent.transport.kind !== 'http') throw new Error('Expected direct HTTP transport.');
-    agent.transport.request.body = 'prompt={{input/question}}&mode=fast';
-    agent.transport.request.body_encoding = 'raw';
-    agent.transport.request.headers = { 'content-type': 'application/x-www-form-urlencoded' };
-    expect((await invokeMappedHttpAgent(agent, request)).status).toBe('ok');
+    agent = {
+      ...agent,
+      transport: {
+        ...agent.transport,
+        request: {
+          ...agent.transport.request,
+          body: 'prompt={{input/question}}&mode=fast',
+          body_encoding: 'raw',
+          headers: { 'content-type': 'application/x-www-form-urlencoded' },
+        },
+      },
+    };
+    expect((await Effect.runPromise(invokeMappedHttpAgent(agent, request))).status).toBe('ok');
     expect(observed).toBe('prompt=hello world&mode=fast');
   });
 });

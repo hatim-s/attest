@@ -1,5 +1,6 @@
 import * as Effect from 'effect/Effect';
-import { z } from 'zod';
+import * as Schema from 'effect/Schema';
+import * as Cause from 'effect/Cause';
 
 import {
   agentRequestSchema,
@@ -8,7 +9,7 @@ import {
   type AgentResponse,
 } from '../agent/protocol.js';
 import { agentCompletionSchema, type AgentCompletion } from '../agent/completion.js';
-import { formatContractIssues, type ContractIssue } from '../internal/issues.js';
+import { SchemaDecodeError, formatContractIssues, type ContractIssue } from '../internal/issues.js';
 import {
   metricRequestSchema,
   metricResultSchema,
@@ -33,37 +34,48 @@ type ParseReport<T> =
 
 /** Decodes an owner schema into the public Result while preserving native validation details. */
 // BOUNDARY: Untyped transport payloads are checked by the supplied owner schema before returning its domain type.
-const parseWithSchema = <Schema extends z.ZodType>(
-  schema: Schema,
+const parseWithSchema = <S extends Schema.ConstraintDecoder<unknown>>(
+  schema: S,
   candidate: unknown,
-): Result<z.output<Schema>, z.ZodError<z.output<Schema>>> => {
-  const parsed = z.safeParse(schema, candidate);
+): Result<S['Type'], SchemaDecodeError> => {
+  const parsed = Effect.runSyncExit(Effect.result(parseWithSchemaEffect(schema, candidate)));
 
-  return parsed.success ? ok(parsed.data) : err(parsed.error);
+  if (parsed._tag === 'Failure') throw Cause.squash(parsed.cause);
+
+  return parsed.value._tag === 'Success' ? ok(parsed.value.success) : err(parsed.value.failure);
 };
 
-/** Decodes lazily, placing validation failures in the native Effect error channel. */
-// BOUNDARY: The supplied owner schema validates untrusted input when the Effect executes.
-const parseWithSchemaEffect = <Schema extends z.ZodType>(
-  schema: Schema,
+/** Suspends user refinements so thrown exceptions remain defects at execution time. */
+// BOUNDARY: The owner schema validates unknown transport input only when the Effect executes.
+const parseWithSchemaEffect = <S extends Schema.ConstraintDecoder<unknown, unknown>>(
+  schema: S,
   candidate: unknown,
-): Effect.Effect<z.output<Schema>, z.ZodError<z.output<Schema>>> =>
-  Effect.suspend(() => {
-    const result = parseWithSchema(schema, candidate);
+): Effect.Effect<S['Type'], SchemaDecodeError, S['DecodingServices']> =>
+  Effect.suspend(() =>
+    Schema.decodeUnknownEffect(schema, { onExcessProperty: 'error', errors: 'all' })(
+      candidate,
+    ).pipe(Effect.mapError((cause) => new SchemaDecodeError(cause))),
+  );
 
-    return result.ok ? Effect.succeed(result.value) : Effect.fail(result.error);
-  });
-
-/** Preserves synchronous schema exceptions at intentional throwing boundaries. */
-// BOUNDARY: The supplied owner schema validates untrusted input and retains its native thrown error.
-const parseWithSchemaSync = <Schema extends z.ZodType>(
-  schema: Schema,
+/** Throws the same diagnostic error used by the nonthrowing boundaries. */
+// BOUNDARY: The owner schema validates unknown input before returning its inferred domain type.
+const parseWithSchemaSync = <S extends Schema.ConstraintDecoder<unknown>>(
+  schema: S,
   candidate: unknown,
-): z.output<Schema> => z.parse(schema, candidate);
+): S['Type'] => {
+  const result = parseWithSchema(schema, candidate);
+
+  if (!result.ok) throw result.error;
+
+  return result.value;
+};
 
 /** Keeps protocol parsers' existing dependency-free diagnostics. */
 // BOUNDARY: Protocol inputs pass through the shared decoder before issue projection.
-const parseContract = <T>(schema: z.ZodType<T>, candidate: unknown): Result<T, ContractIssue[]> => {
+const parseContract = <S extends Schema.ConstraintDecoder<unknown>>(
+  schema: S,
+  candidate: unknown,
+): Result<S['Type'], ContractIssue[]> => {
   const result = parseWithSchema(schema, candidate);
 
   return result.ok ? result : err(formatContractIssues(result.error.issues));
@@ -76,7 +88,7 @@ const reportUnknownAgentResponseFields = (candidate: unknown): ContractWarning[]
   }
 
   return Object.keys(candidate)
-    .filter((fieldName) => !Object.hasOwn(agentResponseSchema.shape, fieldName))
+    .filter((fieldName) => !Object.hasOwn(agentResponseSchema.schema.fields, fieldName))
     .map((fieldName) => ({
       path: fieldName,
       message: `unknown top-level response field preserved: ${fieldName}`,
@@ -168,6 +180,7 @@ const parseMetricResult = (candidate: unknown): Result<MetricResult, ContractIss
   parseContract(metricResultSchema, candidate);
 
 export {
+  SchemaDecodeError,
   parseWithSchema,
   parseWithSchemaEffect,
   parseWithSchemaSync,

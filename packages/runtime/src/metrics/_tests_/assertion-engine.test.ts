@@ -1,5 +1,6 @@
+import { stripStruct } from '@attest/contracts';
 import { parseWithSchemaSync } from '@attest/contracts';
-import { z } from 'zod';
+import * as Schema from 'effect/Schema';
 import type { AssertionCheck, Trace } from '@attest/contracts';
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
@@ -327,8 +328,10 @@ describe('evaluateAssertionMetric', () => {
     expect(result.pass).toBe(false);
 
     const checks = parseWithSchemaSync(
-      z.object({
-        checks: z.array(z.object({ passed: z.boolean(), reason: z.string().optional() })),
+      stripStruct({
+        checks: Schema.Array(
+          stripStruct({ passed: Schema.Boolean, reason: Schema.optional(Schema.String) }),
+        ),
       }),
       result.details,
     );

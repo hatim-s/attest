@@ -1,5 +1,6 @@
+import * as Effect from 'effect/Effect';
 import { parseWithSchema } from '@attest/contracts';
-import { z } from 'zod';
+import * as Schema from 'effect/Schema';
 import type { PageQuery, RunStartRequest } from '@attest/core/records';
 import type { ApiCapabilities } from '../contract/bootstrap.js';
 import { apiErrorEnvelopeSchema } from '../contract/errors.js';
@@ -7,6 +8,7 @@ import { apiResponses } from '../contract/responses.js';
 import { apiRoutes, buildPath } from '../contract/routes.js';
 import type { ApiClient, RequestOptions } from './api-client.js';
 import { ApiError } from './api-error.js';
+import { observeRequest } from './request-observation.js';
 
 /** One call to the API. Only starting a run posts a body. */
 type ApiCall =
@@ -45,45 +47,77 @@ const createHttpClient = (
   capabilities: ApiCapabilities,
   fetchFn: typeof fetch,
 ): ApiClient => {
-  const request = async <Schema extends z.ZodType>(
-    schema: Schema,
+  const request = <S extends Schema.ConstraintDecoder<unknown>>(
+    schema: S,
     path: string,
     call: ApiCall,
-  ): Promise<z.output<Schema>> => {
-    const query = call.method === 'GET' ? call.query : undefined;
-    const search = query === undefined || query.size === 0 ? '' : `?${query.toString()}`;
+  ): Effect.Effect<S['Type'], Error> =>
+    Effect.gen(function* () {
+      const query = call.method === 'GET' ? call.query : undefined;
+      const search = query === undefined || query.size === 0 ? '' : `?${query.toString()}`;
 
-    const response = await fetchFn(`${baseUrl}${path}${search}`, toRequestInit(call));
+      const controller = new AbortController();
 
-    const text = await response.text();
-    let body: unknown;
+      const signal =
+        call.options?.signal === undefined
+          ? controller.signal
+          : AbortSignal.any([controller.signal, call.options.signal]);
 
-    try {
-      body = JSON.parse(text);
-    } catch {
-      body = undefined;
-    }
+      const response = yield* observeRequest(
+        () => fetchFn(`${baseUrl}${path}${search}`, { ...toRequestInit(call), signal }),
+        () => controller.abort(),
+        (late) => late.body?.cancel() ?? Promise.resolve(),
+      );
 
-    if (!response.ok) {
-      const envelope = parseWithSchema(apiErrorEnvelopeSchema, body);
-      throw envelope.ok
-        ? new ApiError(response.status, envelope.value.error.code, envelope.value.error.message, {
-            details: envelope.value.error.details,
-          })
-        : new ApiError(
+      const text = yield* observeRequest(
+        () => response.text(),
+        () => controller.abort(),
+      );
+
+      let body: unknown;
+
+      try {
+        body = JSON.parse(text);
+      } catch {
+        body = undefined;
+      }
+
+      if (!response.ok) {
+        const envelope = parseWithSchema(apiErrorEnvelopeSchema, body);
+
+        return yield* Effect.fail(
+          envelope.ok
+            ? new ApiError(
+                response.status,
+                envelope.value.error.code,
+                envelope.value.error.message,
+                {
+                  details: envelope.value.error.details,
+                },
+              )
+            : new ApiError(
+                response.status,
+                'INVALID_RESPONSE',
+                `Attest API request failed (${response.status}).`,
+              ),
+        );
+      }
+
+      const parsed = parseWithSchema(schema, body);
+
+      if (!parsed.ok)
+        return yield* Effect.fail(
+          new ApiError(
             response.status,
             'INVALID_RESPONSE',
-            `Attest API request failed (${response.status}).`,
-          );
-    }
+            parsed.error.issues
+              .map(({ path, message }) => `${path.map(String).join('.')}: ${message}`)
+              .join('; '),
+          ),
+        );
 
-    const parsed = parseWithSchema(schema, body);
-
-    if (!parsed.ok)
-      throw new ApiError(response.status, 'INVALID_RESPONSE', z.prettifyError(parsed.error));
-
-    return parsed.value;
-  };
+      return parsed.value;
+    });
 
   return {
     mode: { kind: 'live' },

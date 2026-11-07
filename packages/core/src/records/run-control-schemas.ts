@@ -1,17 +1,18 @@
+import { stripStruct } from '@attest/contracts';
 import {
   caseSelectionSchema,
   cliFailureResultSchema,
   durationMillisecondsSchema,
   testIdListSchema,
 } from '@attest/contracts';
-import { z } from 'zod';
+import * as Schema from 'effect/Schema';
 
 /** One authored test a dashboard run can select. Tags are the union of its cases' tags. */
-const testSummarySchema = z.object({
-  id: z.string().min(1),
-  name: z.string().min(1),
-  tags: z.array(z.string().min(1)),
-  caseCount: z.number().int().nonnegative(),
+const testSummarySchema = stripStruct({
+  id: Schema.String.check(Schema.isMinLength(1)),
+  name: Schema.String.check(Schema.isMinLength(1)),
+  tags: Schema.Array(Schema.String.check(Schema.isMinLength(1))),
+  caseCount: Schema.Finite.check(Schema.isInt()).check(Schema.isGreaterThanOrEqualTo(0)),
 });
 
 /**
@@ -19,17 +20,17 @@ const testSummarySchema = z.object({
  * host maps it to one field for field, so each field reuses the CLI's own rule and a request the
  * CLI would refuse is refused here, before a process is spawned.
  */
-const runStartRequestSchema = z.strictObject({
-  selection: z.union([
-    z.strictObject({ all: z.literal(true) }),
-    z.strictObject({ testIds: testIdListSchema }),
+const runStartRequestSchema = Schema.Struct({
+  selection: Schema.Union([
+    Schema.Struct({ all: Schema.Literal(true) }),
+    Schema.Struct({ testIds: testIdListSchema }),
   ]),
-  tags: caseSelectionSchema.shape.tags,
-  concurrency: z.number().int().positive().optional(),
-  timeoutMs: durationMillisecondsSchema.optional(),
+  tags: caseSelectionSchema.fields.tags,
+  concurrency: Schema.optional(Schema.Finite.check(Schema.isInt()).check(Schema.isGreaterThan(0))),
+  timeoutMs: Schema.optional(durationMillisecondsSchema),
 });
 
-const runCancelOutcomeSchema = z.enum([
+const runCancelOutcomeSchema = Schema.Literals([
   'cancellation_requested',
   'already_cancelled',
   'already_terminal',
@@ -39,15 +40,18 @@ const runCancelOutcomeSchema = z.enum([
  * The CLI's failure document, for a run that did not start or a project that does not load. A
  * failure the CLI reported carries its retry policy; one the host found itself leaves it unset.
  */
-const cliDiagnosticsSchema = cliFailureResultSchema.shape.error.partial({ retryable: true });
+const cliDiagnosticsSchema = Schema.Struct({
+  ...cliFailureResultSchema.fields.error.fields,
+  retryable: Schema.optional(cliFailureResultSchema.fields.error.fields.retryable),
+});
 
-type TestSummary = z.infer<typeof testSummarySchema>;
+type TestSummary = typeof testSummarySchema.Type;
 
-type RunStartRequest = z.infer<typeof runStartRequestSchema>;
+type RunStartRequest = typeof runStartRequestSchema.Type;
 
-type RunCancelOutcome = z.infer<typeof runCancelOutcomeSchema>;
+type RunCancelOutcome = typeof runCancelOutcomeSchema.Type;
 
-type CliDiagnostics = z.infer<typeof cliDiagnosticsSchema>;
+type CliDiagnostics = typeof cliDiagnosticsSchema.Type;
 
 export {
   testSummarySchema,

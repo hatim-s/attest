@@ -1,3 +1,22 @@
+import { valueFromExit } from '../../../internal/effect-exit.js';
+import * as Effect from 'effect/Effect';
+import {
+  CliCleanupError,
+  ProcessCleanupError,
+  CallbackCleanupError,
+  StreamCleanupError,
+  WebSocketCleanupError,
+  AgentInvocationError,
+  type InvocationAttempt,
+} from '@attest/executor';
+import * as Cause from 'effect/Cause';
+import { startupFailure } from '../adapter/invoke-resolved-agent.js';
+import { redactInvocation } from '../adapter/evidence-redaction.js';
+import { mkdtemp, readFile, writeFile, rm, realpath } from 'node:fs/promises';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+import type { StoredCaseExecution } from '@attest/core';
+import { testNativeAgentConnection } from '../adapter/test-native-agent.js';
 import { COMMAND_REQUEST_SCHEMA_ID, type AgentResource } from '@attest/contracts';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -27,17 +46,19 @@ const nativeAgent = (
 });
 
 const probe = (root: string, agentId: string, signal?: AbortSignal) =>
-  runAgentTestCommand({
-    project: root,
-    request: {
-      schema: COMMAND_REQUEST_SCHEMA_ID,
-      command: 'agent.test',
-      agent_id: agentId,
-      input: {},
-    },
-    signal,
-    workingDirectory: root,
-  });
+  Effect.runPromiseExit(
+    runAgentTestCommand({
+      project: root,
+      request: {
+        schema: COMMAND_REQUEST_SCHEMA_ID,
+        command: 'agent.test',
+        agent_id: agentId,
+        input: {},
+      },
+      signal,
+      workingDirectory: root,
+    }),
+  ).then(valueFromExit);
 
 const HANG = 'process.stdin.resume(); setInterval(() => undefined, 1000);';
 
@@ -72,10 +93,13 @@ describe('agent test command', () => {
     process.env.ATTEST_SOURCE_SECRET = 'literal-super-secret';
     const argvSecret = 's3cr3t-value';
     const echo = `process.stdin.resume(); process.stdin.on('end', () => process.stdout.write(JSON.stringify({ protocol: 'attest.agent-invocation', output: { value: process.env.ATTEST_ECHO_VALUE, argv: process.argv.slice(1) } })));`;
-    const success = nativeAgent('success', echo, { redaction: { argv_positions: [3] } });
+    let success = nativeAgent('success', echo, { redaction: { argv_positions: [3] } });
 
     if (success.transport.kind !== 'native_cli') throw new Error('Expected a native agent.');
-    success.transport.argv.push(argvSecret);
+    success = {
+      ...success,
+      transport: { ...success.transport, argv: [...success.transport.argv, argvSecret] },
+    };
     await addAgent(root, success);
     await addAgent(
       root,
@@ -180,3 +204,235 @@ describe('agent test command', () => {
     });
   });
 });
+
+it('records CLI cleanup failure with completed attempt evidence', async () => {
+  const root = await realpath(await createAgentProject());
+  const directory = await mkdtemp(join(tmpdir(), 'attest-recorded-cleanup-'));
+  const pidFile = join(directory, 'owned-pids');
+  await writeFile(join(directory, 'ps'), '#!/bin/sh\nexit 2\n', { mode: 0o755 });
+  await writeFile(pidFile, '');
+
+  const configured = nativeAgent(
+    'cleanup',
+    `
+    const { spawn } = require('node:child_process');
+    const fs = require('node:fs');
+    const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { detached: true, stdio: 'ignore' });
+    fs.appendFileSync(${JSON.stringify(pidFile)}, child.pid + '\\n');
+    child.unref();
+    setTimeout(() => process.stdout.write(JSON.stringify({ protocol: 'attest.agent-invocation', output: 'completed' })), 150);
+  `,
+    { retry: { retries: 1, backoff: { kind: 'none' } } },
+  );
+
+  const recorded: StoredCaseExecution[] = [];
+
+  try {
+    process.env.ATTEST_SOURCE_SECRET = 'unused';
+    vi.stubEnv('PATH', directory);
+    await expect(
+      Effect.runPromiseExit(
+        testNativeAgentConnection({
+          agent: configured,
+          input: {},
+          projectRoot: root,
+          onExecution: (execution) =>
+            Effect.sync(() => {
+              recorded.push(execution);
+            }),
+        }),
+      ).then(valueFromExit),
+    ).rejects.toMatchObject({
+      code: 'invocation_failed',
+      message: 'Agent connection test failed: CLI cleanup could not be confirmed.',
+    });
+    expect(recorded).toHaveLength(1);
+    expect(recorded[0]).toMatchObject({
+      outcome: 'invocation_error',
+      errorCode: 'network',
+      errorMessage: 'CLI cleanup could not be confirmed.',
+      diagnostics: { exitCode: 0 },
+      attempts: [
+        {
+          status: 'invocation_error',
+          diagnostics: { exitCode: 0 },
+        },
+      ],
+    });
+    expect(recorded[0]?.attempts?.[0]?.rawExcerpt?.text).toContain('completed');
+    expect((await readFile(pidFile, 'utf8')).trim().split('\n')).toHaveLength(1);
+  } finally {
+    vi.unstubAllEnvs();
+
+    for (const value of (await readFile(pidFile, 'utf8')).trim().split('\n').filter(Boolean)) {
+      try {
+        process.kill(Number(value), 'SIGKILL');
+      } catch {
+        /* The owned fixture may already have exited. */
+      }
+    }
+
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+it.each(['ok', 'invocation_error'] as const)(
+  'preserves survivor evidence when projecting %s CLI cleanup failure',
+  (status) => {
+    const evidence = {
+      diagnostics: { exitCode: 0, unreapedProcessIds: [424242] },
+      durationMs: 12,
+      warnings: [],
+      rawExcerpt: { text: 'completed bytes', truncated: false, sha256: 'a'.repeat(64) },
+    };
+
+    const attempt: InvocationAttempt =
+      status === 'ok'
+        ? { ...evidence, status, raw: { output: 'completed' } }
+        : { ...evidence, status, error: new AgentInvocationError('timeout', 'CLI timed out.') };
+
+    const cleanup = new CliCleanupError({ causes: [], attempt });
+    const projected = startupFailure(cleanup, 100);
+    expect(projected).toMatchObject({ error: { applicationStarted: true } });
+    const result = redactInvocation(projected, []);
+    expect(result).toMatchObject({
+      status: 'invocation_error',
+      diagnostics: evidence.diagnostics,
+      durationMs: 12,
+      rawExcerpt: evidence.rawExcerpt,
+      error: { code: status === 'ok' ? 'network' : 'timeout' },
+      attempts: [{ diagnostics: evidence.diagnostics, rawExcerpt: evidence.rawExcerpt }],
+    });
+
+    if (result.status === 'invocation_error')
+      expect(result.error.message).toContain('CLI cleanup could not be confirmed.');
+  },
+);
+
+it.each(['callback', 'stream', 'websocket'] as const)(
+  'records completed %s evidence and earlier attempts when cleanup fails',
+  (kind) => {
+    const earlier: InvocationAttempt = {
+      status: 'invocation_error',
+      error: new AgentInvocationError('http_status', 'Trigger returned 503.', { httpStatus: 503 }),
+      diagnostics: { httpStatus: 503 },
+      durationMs: 3,
+      warnings: [],
+    };
+
+    const terminal: InvocationAttempt = {
+      status: 'ok',
+      raw: { output: 'completed' },
+      diagnostics: { httpStatus: 202 },
+      durationMs: 12,
+      rawExcerpt: { text: 'completed bytes', truncated: false, sha256: 'b'.repeat(64) },
+      warnings: [],
+    };
+
+    const CleanupError = kind === 'callback' ? CallbackCleanupError : StreamCleanupError;
+
+    const cleanup =
+      kind === 'websocket'
+        ? new WebSocketCleanupError(
+            { ...terminal, attempts: [earlier, terminal] },
+            Cause.die(new Error('Socket close failed.')),
+          )
+        : new CleanupError(new AgentInvocationError('network', 'HTTP cleanup was not confirmed.'), {
+            ...terminal,
+            attempts: [earlier, terminal],
+          });
+
+    const projected = startupFailure(cleanup, 99);
+    expect(projected).toMatchObject({ error: { applicationStarted: true } });
+    const result = redactInvocation(projected, []);
+    expect(result).toMatchObject({
+      status: 'invocation_error',
+      durationMs: 12,
+      diagnostics: { httpStatus: 202 },
+      rawExcerpt: terminal.rawExcerpt,
+      error: {
+        code: kind === 'websocket' ? 'timeout' : 'network',
+        message:
+          kind === 'websocket'
+            ? 'WebSocket close handshake could not be confirmed.'
+            : kind === 'callback'
+              ? 'Callback cleanup could not be confirmed.'
+              : 'Streaming cleanup could not be confirmed.',
+      },
+      attempts: [
+        { diagnostics: { httpStatus: 503 } },
+        {
+          status: 'invocation_error',
+          diagnostics: { httpStatus: 202 },
+          rawExcerpt: terminal.rawExcerpt,
+        },
+      ],
+    });
+  },
+);
+
+it('preserves a failed WebSocket primary and its warnings during cleanup projection', () => {
+  const terminal: InvocationAttempt = {
+    status: 'invocation_error',
+    error: new AgentInvocationError('cancelled', 'Caller cancelled.'),
+    diagnostics: { httpStatus: 101 },
+    durationMs: 17,
+    rawExcerpt: { text: 'retained socket evidence', truncated: false },
+    warnings: [{ code: 'unknown_field', path: '$.extra', message: 'Retained warning.' }],
+  };
+
+  const cleanup = new WebSocketCleanupError(
+    { ...terminal, attempts: [terminal] },
+    Cause.die(new Error('Socket release failed.')),
+  );
+
+  const projected = startupFailure(cleanup, 99);
+  expect(projected).toMatchObject({
+    status: 'invocation_error',
+    error: { code: 'cancelled', applicationStarted: true },
+    diagnostics: terminal.diagnostics,
+    durationMs: 17,
+    rawExcerpt: terminal.rawExcerpt,
+    warnings: terminal.warnings,
+    attempts: [{ warnings: terminal.warnings, durationMs: 17 }],
+  });
+
+  if (projected.status !== 'invocation_error') throw new Error('Expected failed evidence.');
+  expect(projected.error).toBe(cleanup);
+  expect(projected.error.message).toContain('Caller cancelled.');
+});
+
+it.each(['ok', 'invocation_error'] as const)(
+  'retains completed process evidence and earlier attempts after %s cleanup failure',
+  (status) => {
+    const earlier: InvocationAttempt = {
+      status: 'invocation_error',
+      error: new AgentInvocationError('network', 'Earlier attempt'),
+      diagnostics: { httpStatus: 503 },
+      durationMs: 1,
+      warnings: [],
+    };
+
+    const evidence = {
+      diagnostics: { exitCode: 0 },
+      durationMs: 12,
+      warnings: [],
+      rawExcerpt: { text: 'completed bytes', truncated: false, sha256: 'a'.repeat(64) },
+    };
+
+    const terminal: InvocationAttempt =
+      status === 'ok'
+        ? { ...evidence, status, raw: { output: 'completed' } }
+        : { ...evidence, status, error: new AgentInvocationError('timeout', 'Primary timeout') };
+
+    const completed = { ...terminal, attempts: [earlier, terminal] };
+    const projected = startupFailure(new ProcessCleanupError([], completed), 100);
+    expect(projected).toMatchObject({
+      status: 'invocation_error',
+      error: { code: status === 'ok' ? 'network' : 'timeout', applicationStarted: true },
+      ...evidence,
+    });
+    expect(projected.attempts[0]).toBe(earlier);
+    expect(projected.attempts[1]).toMatchObject({ status: 'invocation_error', ...evidence });
+  },
+);

@@ -1,198 +1,281 @@
-# Effect v4 in Attest
+# Effect in Attest
 
-This guide governs the native Effect v4 migration. Claude Opus approved the architecture on 2026-11-06. Package ownership remains as documented in ARCHITECTURE.md; each implementation slice requires independent Sol, Claude Opus and Muse review before landing.
+Attest uses Effect 4.1.2 for operations and resource lifetime. Package ownership is
+specified in [ARCHITECTURE.md](ARCHITECTURE.md). The installed Effect source is the
+reference for API signatures. Do not mix v3 platform packages into this version.
 
-## Provenance
+## Operations and composition
 
-Adapted on 2026-11-06 from Hatim's consolidated guide, `/Users/hatim.shakir/.planloft/docs/loopy/loopy-effect-v4-patterns.md`, titled "Loopy Effect v4 coding patterns and architecture". Source SHA-256 at port time is `a2113f0aa664e128fea41f5e95cb6b3c7a31420a2871c30e201c451cadaa9b8b`. That guide identifies its research base as Loopy `33b50f26af0ae6205b5ac123f1e1a898fc9fce78` and supersedes its first proposal.
+An operation that reads files, stores records, invokes agents, evaluates remote
+metrics, waits or schedules work returns `Effect.Effect<A, E, R>`. Expected failures
+belong in `E`; dependencies remain in `R` until the application supplies them.
+Pure selection, seeded sampling, comparison, analytics, hashing, normalization and
+import transformations stay synchronous.
 
-The retained corpus is `/Users/hatim.shakir/projects/loopy/effect-v4`, a symlink to `effect-v4-evidence-d5e4905`. `ARCHIVE.md` identifies the merged snapshot as `d5e4905340d05e7b4870f1ac5ce51d97b63374ee`. It is an evidence archive, not an active Git checkout. Relevant inputs are:
+Capture dependencies once in an `Effect.gen` constructor and use named `Effect.fn`
+operations. Use `Context.Service` for replaceable application dependencies such as
+stores and cancellation registries. Infer implementation shapes where practical.
+Host contracts such as `RunSource` declare concrete operation and error types.
+Avoid a service per helper or forwarding classes that add no ownership.
 
-- `research/effect-v4/sol-sources.md` and `terra-sources.md`, with author pins and version limits.
-- `research/effect-v4/deep/modules/findings.md`, for operation construction and transaction ownership.
-- `research/effect-v4/deep/lifetimes/findings.md`, for interruption, cleanup and uncertain completion.
-- `research/effect-v4/deep/contracts/findings.md`, for schema and transport behavior.
-- `research/effect-v4/deep/probes/findings.md` and its installed `node_modules/effect/src`, for exact 4.1.2 signatures and bounded probe evidence.
-- `.notes/effect-v4/coordination.md` and `contracts/migration.md`, for implementation lessons. Loopy's old delegation and review policy does not apply to Attest.
+Use `Layer.effect` for effectful construction and `Layer.succeed` for constructed
+values. Reuse layer objects within an application build. Separate builds acquire
+separate resources; `Layer.fresh` does not repair incorrect provisioning.
 
-The third-party `sources/mattpocock--course-video-manager/docs/EFFECT_STANDARDS.md` is a v3 research input, not Hatim's guide. Matt's sampled code resolves to v3; Julius's gh-file-drop to v4 RC.109; Ben Davis's token-tracker to 4.0.2. They inform design, not 4.1.2 syntax. The consolidated guide reports 16 isolated probe tests and 52 assertions. Those are inherited Loopy evidence, not fresh Attest acceptance.
+Wrap individual foreign SDK, fetch, filesystem or driver calls in
+`Effect.tryPromise`. Do not wrap a whole Promise coordinator or turn native
+operations back into Promise helpers. Foreign callbacks can return Promises at
+the host boundary. Application code composes operations with `yield*`.
 
-Target `effect` exactly `4.1.2`. The retained official source identifies [commit 506eef143bcc1750ce58920aac1e45da7265d103](https://github.com/Effect-TS/effect/tree/506eef143bcc1750ce58920aac1e45da7265d103). Installed probe source also reports 4.1.2 but differs in layout from the cached GitHub source. Verify the installed Attest distribution and lock integrity before implementation. Do not infer byte equality from matching versions. Verify peer requirements before adding any platform packages. Do not mix v3 platform packages into v4.
+## Execution roots
 
-Loopy-specific graph language, atomic apply/outbox, Durable Object leases, daemon architecture and reviewer assignments have been removed. Attest keeps its own contracts, project journal, run records and package boundaries.
+`effectRoots` in `eslint.config.mjs` declares the exact files, execution operations
+and owners allowed to run Effects. The boundary rule rejects execution elsewhere,
+including aliases and hidden namespace access. It also rejects unused declared
+operations. Tests have explicit roots too.
 
-## What becomes Effect
+The CLI root runs the application once. Hono request handlers, TanStack query and
+mutation callbacks, client fetch handlers and Node listener callbacks run native
+programs at their declared host boundaries. A request root does not own detached
+work admitted by the application. Any runtime for repeated callbacks must have
+one explicit disposer. Never create a runtime per store method.
 
-An operation that reads files, stores records, invokes an agent, evaluates a remote metric, waits, schedules concurrent work or owns a resource returns `Effect.Effect<A, E, R>`. Expected operational failures belong in `E`. Required services belong in `R` until the composition root supplies them.
+Only approved Effect core modules are allowed. Platform and companion imports
+require an architecture decision. Data-only core `/records`, core `/analytics`
+and API `/contract` entries use Schema, SchemaIssue, SchemaAST and JsonSchema.
+Two exact schema owners also use construction dependencies: core
+`records/page-schemas.ts` uses Effect; API `contract/requests.ts` uses Effect and
+SchemaGetter. These exceptions do not permit executing Effects.
 
-Pure case selection, seeded sampling, comparison classification, import transformations, analytics, canonicalization, assertions and result normalization remain synchronous. The I/O coordinator in `diffRuns` becomes Effect; the comparison algorithm does not. Synchronous hashes stay explicit in server-only owners. Do not make every function an Effect to satisfy a search count.
-
-Replace owned async orchestration with generators and native concurrency. `Effect.tryPromise` wraps actual foreign SDK, fetch or driver calls, not an entire old Promise implementation. Delete the replaced path in the same slice. Keep a Promise only at an identified foreign boundary such as Hono, Commander, React's client adapter, the consumer's agent handler or an SDK callback.
-
-## Operation modules and composition
-
-Use Context.Service keys at composition roots for replaceable dependencies such as stores, catalogs and cancellation registries, not for every operation module. Infer the service shape from its constructor using `Effect.Success<typeof makeOperations>` where practical. Contracts that admit host implementations, such as `RunSource`, need explicit operation signatures with concrete error unions.
-
-Capture dependencies once in an `Effect.gen` constructor. Use named `Effect.fn` operations for meaningful operations. Do not add a service per helper, one forwarding class per package, a global service locator or a parallel repository framework.
-
-`Layer.effect(Key, make)` constructs an effectful service and scopes its acquisition. `Layer.succeed(Key, implementation)` supplies an already constructed value. Reuse the same database layer object within the application build. Two objects with one key can open two databases; separate runtime builds also acquire separately. `Layer.fresh` is not a fix for broken provisioning.
-
-The CLI invocation owns one application scope. The local server owns its catalog, opened stores and listener until shutdown. Each evaluation owns worker environments and invocation sessions. Each HTTP request owns response reads and readers, but must not own a detached run admitted by `RunControl.startRun`. The agent client owns accepted invocations until drain/close. Static reports have no run-control layer.
-
-Run Effects only at these entry points in the completed migration. During staging, an unmigrated Promise parent may call an Effect leaf through a lint-ledgered temporary bridge; the reverse direction is forbidden. A managed runtime, when needed for repeated foreign callbacks, has one explicit disposer. Do not call `runPromise` inside an already migrated Effect operation or create a runtime per database method.
+Browser entries reject Node and Bun built-ins. API `/client`, web and the portable
+agent client may use portable core Effect modules. Executor `/http` must not
+eagerly import process or sandbox implementations. Process support still requires
+a process-capable host. Server packages support Node 22.15+ and Bun 1.4+.
 
 ## Errors and outcomes
 
-Use `Data.TaggedError("Tag")<Fields>` for internal errors, or `Schema.TaggedError<Self>()("Tag", fields)` when the error itself needs a schema. Use tagged errors for failures that prevent an operation from delivering. Preserve the original cause and safe operation context. A persisted failed case, agent-reported failure, metric score and requested cancellation response remain domain data. They are not automatically Effect failures.
+Use `Data.TaggedError` for internal errors and `Schema.TaggedError` when the error
+needs a schema. Keep expected operational errors separate from defects and
+interruption. Persisted failed cases, agent-reported failures, metric scores and
+requested cancellation responses are domain outcomes, not automatically failures.
 
-Keep invocation transport failures, metric failures, storage failures, project rejection, cleanup uncertainty and malformed input distinguishable. Preserve existing public error codes through exhaustive edge mappings. Never branch on message strings, use blanket `orDie`, or turn failed reads into missing records, empty lists or successful cancellation.
+Preserve original causes and safe context. Map public codes exhaustively at the
+edge. Never classify errors by message text, use blanket `orDie`, or turn failed
+reads into missing records or empty lists. A disconnect, user cancellation and a
+deadline are different inputs even if each can interrupt a fiber.
 
-Broken invariants are defects. Interruption is a runtime cause. User cancellation, deadline expiry and transport disconnect are distinct events, even when all interrupt fibers. Do not translate every interrupted request into a persisted cancelled run.
+Keep the full `Cause` internally. Inspect reason tags and `Cause.hasInterrupts`,
+never `Cause.pretty`. Credentials, owner tokens, raw Causes and database details
+must not enter public responses or logs.
 
-Retain complete `Cause` information internally. Inspect reason tags and `Cause.hasInterrupts`; do not parse `Cause.pretty`. Define how a primary failure and cleanup failure determine the public result. Preserve invocation evidence and cleanup confirmation alongside that result. Owner tokens, credentials, raw Causes and database details must not enter public JSON or logs.
+## Resources, cancellation and cleanup
 
-## Resource ownership and cancellation
+Register release immediately after acquisition with Scope or an owned bracket.
+Stop admission and join dependent fibers before closing their stores, sockets,
+environments or processes. Use Deferred for one-time handshakes and queues or
+generations for repeated events. Bound concurrency, queues and foreign reads.
 
-Register release immediately after acquisition. Stop and join dependent fibers before closing their process, socket, environment or store. Use `Deferred` for a one-time handshake and `Queue` or generation tracking for repeated completions. Bound concurrency and queues explicitly. Queue capacity does not replace per-test caps, worker affinity or output limits.
+Cleanup follows the owner's result policy:
 
-The inspected installed signatures distinguish two brackets:
+1. Ordinary finalizers have no typed failure channel. They capture every failed
+   release, including defects, in an owner-local receipt. They attempt all cleanup
+   steps and do not throw or call `orDie`.
+2. A primary typed failure stays primary. Interruption stays interruption. Both
+   retain cleanup Causes internally. After primary success, failed cleanup becomes
+   a typed error retaining the completed value or explicit completion flags. A
+   close failure never authorizes replay of a successful mutation.
+3. Primary defects stay defects. Public edges select the internal error code and
+   retain redacted diagnostics. Capturing cleanup cannot turn a defect into success.
+
+Project rollback is a compensating durable mutation. Failed restoration or journal
+cleanup reports `project_recovery_required` with transaction identity and both
+Causes. Confirmed restoration preserves the domain error or maps the foreign
+failure to `project_transaction_failed`. Defects and interruption keep their Cause.
+A fallible bracket release must inspect the primary Exit and fail only after
+success; otherwise capture release failures and choose the result afterward.
+
+Mask accepted acquisition/publication steps and release where required to settle
+ownership. Keep normal work interruptible. A bound around uncooperative foreign
+cleanup needs interruptible observation inside masked release. Timeout means
+cleanup is unconfirmed, not that a process stopped. Preserve process-tree identity,
+signal grace and descendant verification. Never reuse uncertain environments.
+
+Business cancellation requests abort through the owner's controller. Join admitted
+work, final hooks, accepted evidence and cleanup before returning. Observation
+ending does not prove a foreign operation stopped. Unknown dispatch or cleanup
+prohibits replay. Keep late-response receipts when foreign completion can arrive
+after bounded observation.
+
+## Schemas and parsing
+
+Contracts own protocol schemas; core owns stored record and dashboard projection
+schemas. Decode untyped input once through the shared contracts parser. Typed
+application code trusts the decoded union. `tools/anti-slop` enforces decoder
+ownership. Direct Schema decoder references, legacy Zod decoding and hidden
+dynamic imports must not bypass it.
+
+Preserve strip versus strict unknown-key handling, defaults, coercion, nullability,
+refinements, issue paths, wire identifiers and canonical hashes. Keep internal
+`_tag` fields out of public envelopes. Generated JSON schemas use Draft 2020-12;
+the exact generated-content check guards published artifacts. AJV handles
+user-supplied JSON Schema metrics. Foreign Standard Schema adapters and schema
+construction transformations remain allowed.
+
+## Stores and local state
+
+`@attest/local/store` exports `withStoreScope`, `openStore`,
+`openReadonlyRunStore` and the opaque `StoreScope` type. Constructors capture the
+owner and return Effects without an ambient Scope requirement. Store and catalog
+methods require no services. There is no public store `close()`.
 
 ```ts
-// Simplified signature shapes, not an additional Attest API.
-acquireRelease(acquire, release /* returns Effect<unknown, never, R2> */);
-// Acquisition adds Scope to the required environment.
-acquireUseRelease(acquire, use, release /* may fail with E3 */);
-// Returns Effect<A, E | E2 | E3, R | R2 | R3>.
+const program = withStoreScope((owner) =>
+  Effect.gen(function* () {
+    const store = yield* openStore(path, owner);
+    return yield* store.runs.listRuns();
+  }),
+);
 ```
 
-Cleanup follows these rules rather than Effect's default cause combination:
+The callback must remain alive through all store work. Returning a listener,
+catalog or event source closes its stores; escaped methods fail. One owner shares
+successful opens for a resolved path. Mixing readonly and writable modes fails.
+Separate owners acquire separately. Failed acquisition closes immediately and is
+not cached. Readonly opens never create or migrate a database.
 
-- R1. Ordinary release/finalizer effects have `E = never` and capture cleanup failures, including foreign defects, as owned `CleanupFailure` diagnostics. They never throw or use `orDie`. Store diagnostics in the operation's result or its own Ref, with no global collector.
-- R2. Choose the result from the primary Exit and recorded cleanup. A primary typed failure remains the public failure. A primary interruption remains interruption. Both retain cleanup diagnostics internally. After primary success, cleanup failure becomes the operation's typed error carrying success evidence, or explicit domain flags. Examples are `project_saved_cleanup_failed` with `committed: true` and transaction identity, or false cleanup/completion/ownership-release flags. A store close failure after a successful read still fails the operation.
-- R3. Primary defects stay defects. Edges map them to the internal error code and retain a redacted Cause. Inspect reason tags and `Cause.hasInterrupts`, never rendered Cause text. Capturing a cleanup defect must not turn a primary defect into success.
+The owner masks accepted database operations and waits for their foreign Promises
+before closing. It joins database work, not arbitrary application fibers. A host
+must stop and join its own readers and runs first. Uncooperative driver calls can
+delay shutdown. Failed close after success returns StoreError `WRITE_FAILED` with
+the primary Exit and cleanup Causes. Earlier failure retains its Cause with
+StoreCleanup diagnostics.
 
-A fallible `acquireUseRelease` release is permitted only when it inspects the primary Exit and can fail solely after primary success, such as post-commit project cleanup. Otherwise use R1. Register cleanup immediately after acquisition and attempt every required cleanup step.
+Local owns Kysely transactions, migrations, path locks and SQLite drivers. Reads
+share one controlled snapshot across statements. An Effect resource bracket owns the
+read connection independently of BEGIN, COMMIT and ROLLBACK, so a failed command still
+releases the shared path lock, and a failed commit attempts rollback. Only acquisition and
+cleanup are masked; the read itself stays interruptible. Commit or rollback settles
+before store release. Node uses DatabaseSync statement finalization. Bun owns and
+finalizes each single-use prepared statement after its query, including failed queries,
+and releases any remaining statements before strict close and disables persistent
+WAL sidecars so a final writable connection can remove them. A closing writable handle also
+tries rollback-journal mode without waiting on other connections, allowing an
+immediate standalone readonly copy on macOS. A busy connection keeps WAL mode.
+It does not delete sidecars while other connections need them. Libsql remains
+the writable fallback.
 
-Bound uncooperative foreign cleanup with `Effect.timeoutOption(Effect.interruptible(cleanup), bound)` inside masked release. Capture its entire outcome into diagnostics. A timeout means cleanup is unconfirmed; it does not prove a process or sandbox stopped. Preserve process-tree termination, signal grace and descendant verification. Never reuse an environment with unconfirmed cleanup.
+Resource authoring, registry and cloud operations return Effects. Pure builders,
+cURL parsing and reference rewrites remain synchronous. Mutation confirmations
+return Effects. Dry runs return before confirmation. Project transactions retain
+the loaded-hash commit guard and manifest-last publication. Init verification is
+the commit point; later registry failure preserves the verified project. Bounded
+input iterators and response readers release after validation failures too.
 
-Cancellation and deadlines are business inputs. Represent each request as an `Effect<void>` backed by a Deferred. The owner keeps resources in an outer bracket, races only observation against cancellation/deadline, performs kill or close in normal flow, then returns cancelled or timeout evidence. `Effect.timeout`, `timeoutOption` and `raceFirst` must not surround operations that produce attempt, metric or case evidence. They may bound pure waits or cleanup. Observation must not interrupt a sibling case or discard its eventual evidence.
+Cloud requests dispatch once and join accepted foreign work before releasing
+ownership. Opaque responses do not prove rollback or authorize replay. Failed
+post-publication release reports `project_saved_cleanup_failed` with committed
+evidence. Registry and HTTP cleanup keep their own typed failures and primary
+failure precedence. Wire formats and full-bundle identity remain owner contracts.
 
-Reserve fiber interruption for teardown and shutdown. The first CLI SIGINT/SIGTERM completes business cancellation instead of interrupting the application root. Preserve once-only listeners so a second signal can terminate the process. Foreign SDKs receive the signal allocated by `tryPromise` with an ordinary declared `(signal) => ...` parameter, not rest/default parameters. Consume response bodies in the cancellable foreign operation. Remove owned AbortSignal.any composition and its retention helper only when the last consumer migrates, and update the architecture note in that slice.
+## Executor and runtime
 
-`tryPromise` aborts and resumes on interruption without joining the foreign Promise. It does not prove completion or rollback. Reconcile uncertain writes by identity before any allowed retry.
+Executor owns invocation, transport deadlines, retries, process trees, sessions,
+sandboxes and case environments. Native operations retain attempt evidence as
+values; setup and cleanup can fail through tagged errors. `HttpJsonTransport`
+returns Effects; guarded fetch remains a foreign Promise boundary.
 
-Eval registry release uses the run's Exit. Unregister only when `Exit.isSuccess(exit)` and `exit.value.can_release_cancellation_ownership` are true, with the matching generation. Otherwise detach the poller and retain ownership evidence. Acquire the store before publishing the registry so registry release runs before store closure. Cancellation acknowledgement means requested, not stopped. Keep cancellation requests scoped to the run, never signal arbitrary work by PID alone.
+`applicationStarted` conservatively prohibits replay. Unknown dispatch, header
+timeouts and failed cleanup do not authorize another request. Confirmed status
+responses retain their retry classification. Streaming 2xx body failure is not
+retried. Mapped body observation failure prohibits replay even for polling GETs or
+idempotency keys. Late bodies release through their foreign callback and update
+the retained receipt.
 
-The eval run forks into the CLI application scope with `forkIn`, not as a child of the action that returns its event queue. Join it before root disposal. A process-root CancellationRegistry service replaces the module-global controller map. Its run-local poller uses `forkScoped` with a 25 ms spaced schedule. Client invocations live in a runner-owned FiberSet, never the triggering request. Closing signals cancellation, allows bounded completion delivery/drain, then interrupts remaining work.
+Stream framing, UTF-8 decoding and terminal extraction stay pure. A streaming
+response admits one foreign read at a time; close cancels, joins accepted reads
+and releases reader/header resources. Process cleanup carries observation
+availability and unreaped identities, so an empty later PID list cannot erase
+prior uncertainty. Cleanup errors retain the completed attempt and prohibit retry.
 
-Detached dashboard admission is not tied to the HTTP request signal. It is uninterruptible but bounded by the existing start timeout plus stop grace. Preserve kill-tree verification and report an unconfirmed child explicitly. Never retry admission automatically. A new client request has a new run identity.
+Runtime owns metric evaluation, scheduling and eval lifecycle. The run owner holds
+case runners through final hooks and environment release. Persistence and artifact
+behavior come from injected interfaces. Defects and mixed Causes propagate after
+draining and finalization; ordinary errors retain lifecycle evidence. Failed
+persistence or cleanup prevents releasing durable cancellation ownership.
 
-## Persistence and project transactions
+The local eval application owns the CancellationRegistry, store owner and admitted
+run fibers. Events do not own run lifetime. Cancellation publication and unregister
+are masked and generation checked. A stale poller cannot cancel a newer run.
+Uncertain completion detaches polling and retains durable ownership.
 
-Core owns native Effect storage contracts. Methods capture dependencies at construction and return Effect with `R = never`. Remove `close()` from RunStore and AttestStore; scoped constructors own closure. ProjectCatalog owns its opened readonly stores, and openProject exposes no Scope requirement. Do not cache failed opens. If RcMap is used, prove failed-open eviction with a gated test. Local owns SQLite/Kysely/libsql adapters, migrations, driver choice and closure. Retain readonly opens with no creating fallback. Keep row validation and transactional writes at the adapter boundary.
+## CLI, API and dashboard
 
-Inspect each driver's transaction contract separately. A synchronous SQL callback must finish synchronous SQL before returning; returning an Effect does not run it in the transaction. Wrap that whole foreign operation once. An asynchronous libsql/Kysely transaction must commit or roll back before releasing its connection. Do not copy Loopy's synchronous driver recipe onto all Attest drivers. Do not nest a runtime inside a transaction callback.
+Commander actions submit one native program through `CommandContext.submit`.
+`run-cli.ts` captures application services at the CLI boundary; `runCli` retains
+its process-facing `Promise<number>` API. One process signal reaches prompts and
+operations. Ordinary commands interrupt and join their resources. Commands that join
+their own work (eval, agent test, metric test) pass `{ cancellation: 'owned' }` to
+`submit`; the root then maps any failure after the signal to the `cancelled` envelope,
+exit 130. Eval uses business cancellation to finish accepted evidence and its terminal
+JSONL sequence. Web passes `{ cancellation: 'shutdown' }` to join shutdown while
+preserving any failure's original error code, including failures after a signal.
 
-Store mutations wrap the complete Kysely transaction Promise in Effect.uninterruptible so a transaction cannot outlive handle closure. Its callback remains Kysely code, with no nested Effect runtime. Preserve StoreError and map other failures to WRITE_FAILED. Reads may remain interruptible. Registry publication/unregister and project journal commits are also uninterruptible.
+The CLI propagates command failure to the eval application before joining runs.
+Signal listeners cover that join and store release. Terminal eval output waits
+for application release. An earlier command or infrastructure error keeps its
+catalog identity and exit code if release fails. Otherwise release failure replaces
+a successful, failed-verdict or cancelled outcome with a catalogued CLI failure.
+Completed eval upload failure remains advisory.
 
-Keep network calls and notification publication outside a database transaction. Preserve atomic case recording and aggregate updates. A lost commit acknowledgement is uncertain, not proof of rollback. Only recordCase may replay identical input bytes through its existing hash check. Preserve same-status finalize acknowledgement; never blindly retry createRun or finalizeRun.
+API owns contracts, fetch routing, typed client and dashboard bootstrap, without
+storage drivers or process policy. RunSource, ProjectCatalog and RunControl
+operations return Effects. Dashboard reads include eval pages, trends, case windows,
+history, activity and suites. Pure projections stay in core. Hono request roots
+apply request signals except to detached run admission. TanStack callbacks execute
+client Effects at their declared roots. Opaque mutation failure is not retried.
 
-Project changes retain lock ownership, expected-hash checking, staged journals, path rechecks, fsync and manifest-last publication. Dry-run remains write-free, including lock creation and journal recovery. Preserve the distinction between rolled-back failure, recovery required, and `project_saved_cleanup_failed` with `committed: true`. Do not repeat the mutation when only cleanup failed.
+The local launcher captures cancellation services once and starts detached CLI
+processes. Accepted starts outlive the HTTP request. `startViewServer` requires
+Scope; close stops admission and joins listener and accepted callbacks before
+catalog release. The view command keeps StoreScope outside server lifetime.
+Static reports supply no run control. The canonical dashboard command is `attest web`.
 
-## Schema and wire policy
+## Agent client
 
-Use native Effect Schema as the owner and infer decoded/encoded types. No Zod-shaped facade and no permanent duplicate schema declarations. Convert all callers of an owned schema in the same compiling slice, including JSON Schema generation, CLI inputs, SQL rows and browser bootstrap consumers.
+Client handlers return Effects. `createAgentRunner` and the Node listener require
+Scope. Prefer `withAgentRunner(options, use)` for typed lifetime results. Low-level
+scoped constructors retain release receipts; explicitly close before disposal when
+shutdown failure must reach the caller's error channel.
 
-Export the contracts-owned decoder publicly from @attest/contracts in Result, Effect-error and synchronous throwing forms. These are the supported decoders for Attest schemas, including external consumers. The web router uses the sync-throwing form. S1.0 introduces these forms over the existing Zod owner with no behavior change; S1a replaces the implementation with native Effect Schema. Validate unknown input once through this owner and options `{ onExcessProperty: "error", errors: "all" }`. Ban direct Schema decode calls elsewhere by lint, except explicitly owned synchronous throwing edges routed through that decoder. Preserve public Attest Result and ParseReport pure-parser shapes; native Effect Result remains internal. Effect operations fail through E rather than returning the public Result envelope.
+Accepted invocations belong to the runner's FiberSet, independently of trigger
+request lifetime. Admission allows 64 active handlers and 10,000 retained tokens.
+The receipt limit evicts the oldest terminal receipt, never active work. Retained
+tokens are not replayed; an evicted token can be admitted as new work.
 
-Contracts owns three struct constructors. Strict uses Schema.Struct. Loose uses StructWithRest with a string-to-unknown record to preserve extra keys. Strip decodes the loose representation into a plain struct, dropping extras. Map existing strict/loose/strip schemas one for one, including nested combinations. A tightening is a behavior change, never an incidental migration default. Prove these constructors against the installed 4.1.2 distribution before converting owners.
+Shutdown stops admission, signals cooperative cancellation for three seconds,
+then interrupts remaining work. Drain observes for 35 seconds; explicit close
+interrupts outstanding work. Receipts retain handler, delivery and shutdown Exits.
+Completion delivery retries confirmed 5xx up to three attempts with 250 ms and
+one-second delays. Opaque rejection, timeout or failed cleanup prohibits replay.
+Confirmed 2xx remains delivered even if body release fails. Late responses update
+the same receipt. Pi workspace removal joins its filesystem operation. Foreign
+Promise interruption alone does not establish remote cancellation.
 
-Map Zod optional to Schema.optional by default, preserving explicit undefined. Use optionalKey only when key presence matters. Preserve Object.hasOwn-based outcome rules. Accept readonly decoded types explicitly and rewrite mutation sites to construct values; parameters accept readonly arrays. Use mutableKey only where a foreign API requires mutation. Audit defaults, null, coercion, finite/integer checks, recursive JSON and refinements.
+The root client entry stays Web-standard. `/node` owns HTTP/process integration
+and `/pi` owns Pi integration. Browser-safe imports do not establish a hosted
+Workers deployment or private host acceptance.
 
-Replace the issue formatter with SchemaIssue formatting based on makeFormatterStandardSchemaV1 paths. Preserve `$` for root, dot joins and one issue path per unexpected key. Multi-path refinements use makeFilter returning path/issue arrays; agent-request fixture 04 must still report both turn_index and conversation_id. Authored refinement messages stay identical. Built-in display messages may change, with no message-based branching. Unknown-field warnings read the inner struct fields, and invalid optional trace still degrades to warnings.
+## Verification and security
 
-Preserve protocol identifiers, public codes, field names, canonical hashes, project identity, selection counts, exactly-one output/error, callback trace/trace_ref exclusion and cursor semantics. Keep internal `_tag` out of public envelopes. Canonical bytes after decoding must match base fixtures.
+Keep loopback binding, origin checks, callback tokens, duplicate keys, secret
+references, redaction, body limits, pinned destinations and anchored paths.
+Portable-source checks are preflight, not sandbox proof. Tests use isolated homes,
+projects, stores and loopback port zero, without real credentials or user data.
 
-Generate with toJsonSchemaDocument using `onExcessProperty: "error"`. Assemble dialect, root schema and definitions as `$defs` before existing invariant overlays. Keep Draft 2020-12, filenames, `$id` and overlay comments. Compare accepted/rejected fixture verdicts under AJV using both old and new artifacts as S1a evidence. The permanent exact generated-content check remains. Keyword placement, definitions names and equivalent representation may change; changed validation verdicts, lost required/excess-property rules or loosened constraints must be restored with annotations/overlays. No unreviewed wire break is permitted. AJV remains for user-supplied JSON Schema metrics.
-
-S1.0 first centralizes schema decoding while still on Zod without changing behavior. S1a swaps the shared schema/composition closure atomically. S1b migrates private schemas per package. Check installed TanStack AI types before replacing the judge schema: use Effect-derived JSON Schema/Standard Schema if supported; otherwise retain its single Zod schema as a documented foreign SDK owner, with no duplicate schema. Web router params retain intentional synchronous throws through the decode owner, and validateSearch uses Standard Schema with explicit catch-to-default parity.
-
-Public TypeScript operation APIs intentionally change to Effect. Update all repository consumers and document the break. Persisted data and agent/cloud wire formats need a concrete migration decision before changing. Backward compatibility shims are not the default.
-
-## HTTP, streams and portability
-
-Keep Hono and Commander at the first migration boundary. Native operations do not require replacing the web framework or CLI parser. Do not adopt HttpApi in this migration. Hono handlers run native operations with the request signal, except detached admission. The CLI owns one ManagedRuntime with one disposer.
-
-Stream adapters retain incremental framing across arbitrary chunks, UTF-8 handling, caps, deadlines, terminal rules and raw evidence hashes. Scope reader cancellation and socket/session closure. Preserve event ordering, configured versus completion indices and run terminal event precedence. A Stream conversion does not itself prove backpressure, reconnect or delivery semantics.
-
-Keep `@attest/core/records`, `/analytics`, API `/contract` and `/client` browser safe. `@attest/client` root remains Web-standard and imports no Node code or evaluator runtime; `/node` and `/pi` own process integration. Executor `/http` must not eagerly load process or sandbox implementations. Its documented hosted use still requires `nodejs_compat`.
-
-Allow core `effect` imports only. Ban platform subpaths `effect/http`, `http-api`, `sql`, `process`, `cli`, `rpc`, `socket`, `cluster`, `workflow`, `ai`, `persistence` and `workers`. Only data-only entries core/records, core/analytics and api/contract are restricted to effect, effect/Schema, effect/SchemaIssue, effect/SchemaAST and effect/JsonSchema, plus explicitly documented core modules proven necessary by S0. api/client, web and the client root may import portable core Effect modules. All browser entries ban platform subpaths and Node built-ins. Record bundle sizes at S1a, S9a and S9c.
-
-Track permanent execution roots in the `effectRoots` ESLint block and temporary forward bridges in `effectMigrationBridges`. Ban Effect.run* and ManagedRuntime.make elsewhere. Every temporary bridge carries an adjacent EFFECT-BRIDGE(Sx) tag and a ledger owner/removal slice. The lint-rules gate checks tags against listed files in both directions. S10 removes the temporary block and the typecheck-only tools/effect-probe workspace.
-
-Server packages support Node 22.15+ and Bun 1.4+. Choose portable core Effect APIs first. Do not add Bun-only SQL/process implementations as defaults for Node. S0 measures node:sqlite import support, readonly opening of an existing fixture and rejection of a missing fixture without creating it on Bun 1.4; retain the explicit readonly error if unsupported. Keep Kysely, node:sqlite and libsql rather than switching SQL drivers. Existing process support does not become Worker-compatible through Effect. S1a records web bundle size before/after and updates the client dependency documentation from Zod to Effect. S9c measures the Workers client bundle. The consumer handler/fetch API stays Promise as a foreign boundary. Browser builds catch platform imports.
-
-## Security and validation
-
-Retain loopback binding, origin checks, callback tokens and duplicate admission keys, secret-reference resolution, redaction, bounded bodies/artifacts, pinned HTTP destinations and host-owned DNS/tenant policy. Retain path anchoring and symlink defenses, isolated child environments and argv-based hooks. Portable-source static checks remain preflight, never sandbox proof. Cloud full-bundle identity includes source bytes; local manifest hash does not substitute for revision identity.
-
-Use isolated temporary projects, homes, stores and loopback port 0. Never use personal registries, real credentials, production databases, providers or deployments as migration fixtures. Mock evidence is not hosted acceptance.
-
-Each slice must compile with its callers, satisfy lint/format and pass owned invariant tests. Test resource ordering, cancellation, rollback, schema conversion and durable uncertainty where they can fail. Keep tests in `_tests_`; avoid forwarding-wrapper tests. Run the root build, typecheck, lint, format and tests, plus affected schema, portability and CLI acceptance gates. Update `docs/SCRIPTS.md` for script changes and `docs/ENV.md` for environment or binding changes.
-
-Before implementation, Claude Opus must approve the architecture. Every implemented slice then needs separate Sol, Claude Opus and OpenCode Muse Spark 1.3 Contributor approvals on a frozen exact diff. Any fix invalidates affected approvals until re-reviewed. No merge onto main with missing approval. Reviewer availability must be verified without substituting models silently. The local `PLAN.md` records ownership, gates and open decisions.
-
-## S0 tooling ownership
-
-`tools/effect-probe/src/probe.ts` is a typecheck-only consumer of exactly Effect
-4.1.2. S10 deletes the workspace, root probe script and dependency entries. It does
-not execute effects and needs no execution exception. No production roots or
-bridges are declared in S0.
-
-The local `effect-boundaries` lint rule freezes the installed root module export
-list as its core allowlist. Nested and platform subpaths are rejected. Data-only
-entries use exactly Schema, SchemaIssue, SchemaAST and JsonSchema, including named
-imports from the root. No additional data modules were needed. Execution method
-references, including named imports and aliases, require a declared operation in
-an exact-file root or bridge entry. Namespace escapes and dynamic Effect loading
-are rejected to keep ownership visible. Bridge entries carry `file`, `operations`,
-`owner` and `removalSlice`; each operation reference needs an adjacent matching
-`EFFECT-BRIDGE(Sx)` comment. The lint-rules gate checks config routing, declaration
-files, stale operations and unmatched tags. Neither tests nor browser entries get
-a general execution exception.
-
-Execution ownership also covers Runtime.makeRunMain, FiberSet/FiberMap/FiberHandle runtime and runtimePromise, and Stream.toReadableStream* / toAsyncIterable*. These APIs require exact operation ledger entries just like Effect.run*. A root keeps its ManagedRuntime value in its own file and never passes it to other modules; the lint rule does not track runtime instance methods across module boundaries.
-
-## Public decoder, S1.0
-
-`@attest/contracts` exports `parseWithSchema(schema, candidate)` returning the
-public Attest `Result`, `parseWithSchemaEffect(schema, candidate)` returning a
-native `Effect` with validation failures in E, and
-`parseWithSchemaSync(schema, candidate)` for intentional synchronous throws.
-Output types follow the schema, including transforms and generic schemas.
-External consumers, including the future attest-cloud migration, must use these
-exports instead of invoking schema parsing methods. No private repository was changed.
-
-S1.0 retains Zod definitions and native ZodError diagnostics in the generic
-decoder. Consumers currently render raw issue codes, array paths, prettified
-errors, messages and causes, so replacing those would change public behavior.
-`formatContractIssues` is the shared issue projection seam. Existing protocol
-parsers retain their `ContractIssue[]` errors and `ParseReport` warnings, including
-invalid optional trace handling. S1a replaces decoder internals and issue
-projection with native Schema and explicit error/all options. Caller routing is
-already complete. S1a also changes the public decoder error type and migrates every raw diagnostic consumer; its error projection must preserve public issue paths and authored messages. Exceptions thrown by user refinements remain exceptions; in
-an Effect they are defects rather than validation failures. Defaults and catch
-behavior remain schema-owned.
-
-Typed lint rejects Zod decoding method references, including inline and imported
-schemas, outside `schema/parse.ts`. The existing `isJsonValue` type guard in
-`project/shared.ts` is an intrinsic schema owner and stays there to avoid a cycle
-through the protocol decoder. Other parse methods, such as JSON, Date, Commander
-and router parameter adapters, are unaffected.
-
-Platform and companion `@effect/*` imports require an architecture decision.
-Computed import and require paths are banned repo-wide so lint can check import
-boundaries. Literal imports of non-Effect modules remain permitted subject to
-existing package restrictions. This is the explicit policy for the existing
-fail-closed dynamic-loading rule.
+Run build, typecheck, lint, format and tests after operation changes. Add targeted
+invariants for changed cancellation, resource ordering, rollback and cleanup
+precedence. Run packed acceptance for local/CLI changes and portability for
+executor/runtime changes. Keep tests together in `_tests_`. Document script
+changes in SCRIPTS.md and environment changes in ENV.md. Stored data or wire
+changes need an explicit migration decision; native operation signatures do not
+justify changing their representations.

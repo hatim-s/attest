@@ -1,9 +1,38 @@
-import { z } from 'zod';
+import * as Schema from 'effect/Schema';
+import { stripStruct } from '@attest/contracts';
 
-const count = z.number().int().nonnegative();
+/** ISO evidence timestamps allow offsets and arbitrary fractional precision without rounding bytes. */
+const indexedTimestampSchema = Schema.String.check(
+  Schema.makeFilter(
+    (value) => {
+      const match =
+        /^(\d{4})-(\d{2})-(\d{2})T([01]\d|2[0-3]):([0-5]\d)(?::([0-5]\d)(?:\.\d+)?)?(?:Z|[+-](?:[01]\d|2[0-3]):[0-5]\d)$/u.exec(
+          value,
+        );
 
-const sliceTotalsSchema = z.object({
-  planned: count.nullable(),
+      if (!match) return false;
+      const year = Number(match[1]);
+      const month = Number(match[2]);
+      const day = Number(match[3]);
+      const leap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+      const days = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+
+      return (
+        month >= 1 &&
+        month <= 12 &&
+        day >= 1 &&
+        day <= days[month - 1]! &&
+        Number.isFinite(Date.parse(value))
+      );
+    },
+    { message: 'must be an ISO timestamp' },
+  ),
+);
+
+const count = Schema.Finite.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0));
+
+const sliceTotalsSchema = stripStruct({
+  planned: Schema.NullOr(count),
   recorded: count,
   passed: count,
   failed: count,
@@ -11,79 +40,87 @@ const sliceTotalsSchema = z.object({
   skipped: count,
   metricErrors: count,
   scored: count,
-  scoreSum: z.number().finite(),
+  scoreSum: Schema.Finite,
 });
 
-const runStatusSchema = z.enum(['running', 'completed', 'failed', 'cancelled']);
+const runStatusSchema = Schema.Literals(['running', 'completed', 'failed', 'cancelled']);
 
 const sliceBase = {
-  runId: z.string(),
-  suiteName: z.string(),
-  createdAt: z.string(),
-  finishedAt: z.string().nullable(),
+  runId: Schema.String,
+  suiteName: Schema.String,
+  createdAt: Schema.String,
+  finishedAt: Schema.NullOr(Schema.String),
   runStatus: runStatusSchema,
-  gitBranch: z.string().nullable(),
-  gitSha: z.string().nullable(),
-  counts: sliceTotalsSchema.extend({ notRun: count.nullable() }),
-  meanScore: z.number().nullable(),
+  gitBranch: Schema.NullOr(Schema.String),
+  gitSha: Schema.NullOr(Schema.String),
+  counts: stripStruct({ ...sliceTotalsSchema.from.schema.fields, notRun: Schema.NullOr(count) }),
+  meanScore: Schema.NullOr(Schema.Finite),
 };
 
-const evalSliceSchema = z.discriminatedUnion('state', [
-  z.object({ ...sliceBase, state: z.literal('complete'), passRate: z.number().min(0).max(1) }),
-  z.object({ ...sliceBase, state: z.enum(['running', 'incomplete']), passRate: z.null() }),
+const evalSliceSchema = Schema.Union([
+  stripStruct({
+    ...sliceBase,
+    state: Schema.Literal('complete'),
+    passRate: Schema.Finite.check(Schema.isBetween({ minimum: 0, maximum: 1 })),
+  }),
+  stripStruct({
+    ...sliceBase,
+    state: Schema.Literals(['running', 'incomplete']),
+    passRate: Schema.Null,
+  }),
 ]);
 
-const evalSummarySchema = z.object({
-  suiteName: z.string(),
+const evalSummarySchema = stripStruct({
+  suiteName: Schema.String,
   latest: evalSliceSchema,
-  latestComplete: evalSliceSchema.nullable(),
-  latestTerminal: evalSliceSchema.nullable(),
-  failing: z.boolean().nullable(),
+  latestComplete: Schema.NullOr(evalSliceSchema),
+  latestTerminal: Schema.NullOr(evalSliceSchema),
+  failing: Schema.NullOr(Schema.Boolean),
 });
 
-const evalPageSchema = z.object({
-  items: z.array(evalSummarySchema),
-  nextCursor: z.string().optional(),
+const evalPageSchema = stripStruct({
+  items: Schema.Array(evalSummarySchema),
+  nextCursor: Schema.optional(Schema.String),
 });
 
-const projectRunOverviewSchema = z.object({
+const projectRunOverviewSchema = stripStruct({
   evals: evalPageSchema,
   runningRunCount: count,
-  runningRunCountTruncated: z.boolean(),
-  lastRunAt: z.string().nullable(),
+  runningRunCountTruncated: Schema.Boolean,
+  lastRunAt: Schema.NullOr(Schema.String),
 });
 
-const evalRunPageSchema = z.object({
-  items: z.array(evalSliceSchema),
-  nextCursor: z.string().optional(),
+const evalRunPageSchema = stripStruct({
+  items: Schema.Array(evalSliceSchema),
+  nextCursor: Schema.optional(Schema.String),
 });
 
-const historyCellSchema = z.object({
-  runId: z.string(),
-  createdAt: z.string(),
+const historyCellSchema = stripStruct({
+  runId: Schema.String,
+  createdAt: Schema.String,
   runStatus: runStatusSchema,
-  cell: z.enum(['pass', 'fail', 'error', 'skipped']),
-  durationMs: z.number().nonnegative(),
+  cell: Schema.Literals(['pass', 'fail', 'error', 'skipped']),
+  durationMs: Schema.Finite.check(Schema.isGreaterThanOrEqualTo(0)),
 });
 
-const caseHistoryPageSchema = z.object({
-  items: z.array(historyCellSchema),
-  nextCursor: z.string().optional(),
+const caseHistoryPageSchema = stripStruct({
+  items: Schema.Array(historyCellSchema),
+  nextCursor: Schema.optional(Schema.String),
 });
 
-const evalCaseWindowSchema = z.object({
-  runs: z.array(evalSliceSchema),
-  items: z.array(
-    z.object({
-      caseId: z.string(),
-      cells: z.array(historyCellSchema.shape.cell.nullable()),
+const evalCaseWindowSchema = stripStruct({
+  runs: Schema.Array(evalSliceSchema),
+  items: Schema.Array(
+    stripStruct({
+      caseId: Schema.String,
+      cells: Schema.Array(Schema.NullOr(historyCellSchema.from.schema.fields.cell)),
     }),
   ),
-  nextCursor: z.string().optional(),
+  nextCursor: Schema.optional(Schema.String),
 });
 
-const activityDaySchema = z.object({
-  day: z.string(),
+const activityDaySchema = stripStruct({
+  day: Schema.String,
   slices: count,
   passed: count,
   failed: count,
@@ -91,33 +128,34 @@ const activityDaySchema = z.object({
   skipped: count,
 });
 
-const activitySchema = z.object({
-  coveredFrom: z.string(),
-  coveredTo: z.string(),
-  timezone: z.literal('UTC'),
-  days: z.array(activityDaySchema),
-  truncated: z.boolean(),
+const activitySchema = stripStruct({
+  coveredFrom: Schema.String,
+  coveredTo: Schema.String,
+  timezone: Schema.Literal('UTC'),
+  days: Schema.Array(activityDaySchema),
+  truncated: Schema.Boolean,
 });
 
-type SliceTotals = z.infer<typeof sliceTotalsSchema>;
+type SliceTotals = typeof sliceTotalsSchema.Type;
 
-type EvalSlice = z.infer<typeof evalSliceSchema>;
+type EvalSlice = typeof evalSliceSchema.Type;
 
-type EvalSummary = z.infer<typeof evalSummarySchema>;
+type EvalSummary = typeof evalSummarySchema.Type;
 
-type ProjectRunOverview = z.infer<typeof projectRunOverviewSchema>;
+type ProjectRunOverview = typeof projectRunOverviewSchema.Type;
 
-type EvalPage = z.infer<typeof evalPageSchema>;
+type EvalPage = typeof evalPageSchema.Type;
 
-type EvalRunPage = z.infer<typeof evalRunPageSchema>;
+type EvalRunPage = typeof evalRunPageSchema.Type;
 
-type CaseHistoryPage = z.infer<typeof caseHistoryPageSchema>;
+type CaseHistoryPage = typeof caseHistoryPageSchema.Type;
 
-type EvalCaseWindow = z.infer<typeof evalCaseWindowSchema>;
+type EvalCaseWindow = typeof evalCaseWindowSchema.Type;
 
-type Activity = z.infer<typeof activitySchema>;
+type Activity = typeof activitySchema.Type;
 
 export {
+  indexedTimestampSchema,
   sliceTotalsSchema,
   evalSliceSchema,
   evalSummarySchema,

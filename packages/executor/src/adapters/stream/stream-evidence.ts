@@ -30,11 +30,10 @@ const capError = (message: string): AgentInvocationError =>
 
 /**
  * Counts accepted events against the caps and keeps their redacted text as attempt evidence.
- * Once an application event arrives the request may have side effects, so it is never replayed.
+ * The transport already prohibits replay after successful headers, even before any event.
  */
 class StreamEvidence {
   text = '';
-  applicationStarted = false;
   private eventCount = 0;
 
   constructor(
@@ -54,7 +53,6 @@ class StreamEvidence {
     this.count(source);
     const pointers = this.agent.redaction?.event_pointers ?? [];
     this.text += `${redactEventEvidence(raw, pointers, this.secrets)}\n`;
-    this.applicationStarted = true;
   }
 
   private count(source: string): void {

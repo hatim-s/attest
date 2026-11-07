@@ -1,3 +1,7 @@
+import { evalApplicationFixture } from '../../../run/_tests_/eval-application-fixture.js';
+import { valueFromExit } from '../../../internal/effect-exit.js';
+import * as Effect from 'effect/Effect';
+import { stripStruct } from '@attest/contracts';
 import { createServer, type IncomingMessage } from 'node:http';
 import { mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -19,12 +23,12 @@ import {
   type EvalFinalResultData,
 } from '@attest/contracts';
 import { afterEach, expect, onTestFinished, test, vi } from 'vitest';
-import { z } from 'zod';
+import * as Schema from 'effect/Schema';
 
 import { loadProject } from '../../../project/project-loader/index.js';
 import { applyProjectMutation } from '../../../project/transaction/transactional-writer.js';
 import { runConfiguration } from '../../../run/run-configuration.js';
-import { openStore } from '../../../store/index.js';
+import { openTestStore as openStore, run as executeB2 } from '../../../store/_tests_/b1-fixture.js';
 import { runAgentImportCommand } from '../../agent/import.js';
 import { assertSafeNativeAgentResource } from '../../agent/authoring/resource-validation.js';
 import { runAgentTestCommand } from '../../agent/test.js';
@@ -110,7 +114,7 @@ const startMockAgent = async (): Promise<string> => {
   });
 
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
-  const { port } = parseWithSchemaSync(z.object({ port: z.number() }), server.address());
+  const { port } = parseWithSchemaSync(stripStruct({ port: Schema.Finite }), server.address());
   onTestFinished(() => {
     server.closeAllConnections();
     server.close();
@@ -134,14 +138,16 @@ const terminalFailure = (code: 'cancelled' | 'run_failed', message: string): Eva
 const createCallbackProject = async (origin: string): Promise<string> => {
   const root = await temporaryDirectory('attest-eval-callback-');
 
-  await runProjectInitCommand({
-    directory: '.',
-    interactive: false,
-    name: 'Callback eval',
-    readStdin: () => Promise.resolve(''),
-    registryPath: join(await temporaryDirectory('attest-registry-'), 'projects.json'),
-    workingDirectory: root,
-  });
+  await Effect.runPromiseExit(
+    runProjectInitCommand({
+      directory: '.',
+      interactive: false,
+      name: 'Callback eval',
+      readStdin: () => Promise.resolve(''),
+      registryPath: join(await temporaryDirectory('attest-registry-'), 'projects.json'),
+      workingDirectory: root,
+    }),
+  ).then(valueFromExit);
 
   const agent: AgentResource = {
     schema: AGENT_RESOURCE_SCHEMA_ID,
@@ -159,38 +165,56 @@ const createCallbackProject = async (origin: string): Promise<string> => {
   await writeFile(join(root, 'agent.json'), JSON.stringify(agent));
   await writeFile(join(root, 'score.mjs'), SCORE_METRIC);
 
-  await runAgentImportCommand({
-    interactive: false,
-    project: root,
-    readStdin: () => Promise.reject(new Error('stdin must not be read')),
-    request: {
-      schema: COMMAND_REQUEST_SCHEMA_ID,
-      command: 'agent.import',
-      source: 'agent.json',
-      source_type: 'json',
-      as: 'coder',
-    },
-    workingDirectory: root,
-  });
+  await Effect.runPromiseExit(
+    runAgentImportCommand({
+      interactive: false,
+      project: root,
+      readStdin: () => Promise.reject(new Error('stdin must not be read')),
+      request: {
+        schema: COMMAND_REQUEST_SCHEMA_ID,
+        command: 'agent.import',
+        source: 'agent.json',
+        source_type: 'json',
+        as: 'coder',
+      },
+      workingDirectory: root,
+    }),
+  ).then((exit) => valueFromExit(exit));
 
-  const candidate = candidateFromLoadedProject(await loadProject({ project: root }));
+  let candidate = candidateFromLoadedProject(
+    await Effect.runPromiseExit(loadProject({ project: root })).then((exit) => valueFromExit(exit)),
+  );
 
-  candidate.metrics.push({
-    schema: METRIC_RESOURCE_SCHEMA_ID,
-    id: 'files',
-    name: 'files',
-    definition: { kind: 'exec', argv: [process.execPath, 'score.mjs'] },
-  });
-  candidate.tests.push({
-    schema: TEST_RESOURCE_SCHEMA_ID,
-    id: 'smoke',
-    name: 'smoke',
-    agent_id: 'coder',
-    cases: [{ id: 'write-file', input: 'write answer.ts' }],
-    datasets: [],
-    metrics: [{ metric_id: 'files' }],
-  });
-  await applyProjectMutation({ candidate, projectRoot: root });
+  candidate = {
+    ...candidate,
+    metrics: [
+      ...candidate.metrics,
+      {
+        schema: METRIC_RESOURCE_SCHEMA_ID,
+        id: 'files',
+        name: 'files',
+        definition: { kind: 'exec', argv: [process.execPath, 'score.mjs'] },
+      },
+    ],
+  };
+  candidate = {
+    ...candidate,
+    tests: [
+      ...candidate.tests,
+      {
+        schema: TEST_RESOURCE_SCHEMA_ID,
+        id: 'smoke',
+        name: 'smoke',
+        agent_id: 'coder',
+        cases: [{ id: 'write-file', input: 'write answer.ts' }],
+        datasets: [],
+        metrics: [{ metric_id: 'files' }],
+      },
+    ],
+  };
+  await Effect.runPromiseExit(applyProjectMutation({ candidate, projectRoot: root })).then((exit) =>
+    valueFromExit(exit),
+  );
 
   return root;
 };
@@ -208,19 +232,21 @@ test('runs a callback agent, persists inline artifacts only, and scores them as 
 
   const events: EvalEvent[] = [];
 
-  const stream = await runConfiguration(
-    parseWithSchemaSync(evalRunRequestSchema, {
-      schema: COMMAND_REQUEST_SCHEMA_ID,
-      command: 'eval.run',
-      output: 'json',
-      test_ids: ['smoke'],
-    }),
-    {
-      argv: ['eval', 'run'],
-      signal: new AbortController().signal,
-      terminalFailure,
-      workingDirectory: root,
-    },
+  const stream = await evalApplicationFixture(
+    runConfiguration(
+      parseWithSchemaSync(evalRunRequestSchema, {
+        schema: COMMAND_REQUEST_SCHEMA_ID,
+        command: 'eval.run',
+        output: 'json',
+        test_ids: ['smoke'],
+      }),
+      {
+        argv: ['eval', 'run'],
+        signal: new AbortController().signal,
+        terminalFailure,
+        workingDirectory: root,
+      },
+    ),
   );
 
   for await (const event of stream) events.push(event);
@@ -231,7 +257,7 @@ test('runs a callback agent, persists inline artifacts only, and scores them as 
   const store = await openStore(join(root, '.attest', 'runs.db'));
 
   try {
-    const { cases } = await store.runs.getRunWithCases(started.data.run_id);
+    const { cases } = await executeB2(store.runs.getRunWithCases(started.data.run_id));
 
     expect(cases).toHaveLength(1);
     expect(cases[0]).toMatchObject({
@@ -256,16 +282,18 @@ test('runs a callback agent, persists inline artifacts only, and scores them as 
   }
 
   // `attest agent test` reuses the same session runtime for a callback agent.
-  const probe = await runAgentTestCommand({
-    project: root,
-    request: {
-      schema: COMMAND_REQUEST_SCHEMA_ID,
-      command: 'agent.test',
-      agent_id: 'coder',
-      input: 'probe',
-    },
-    workingDirectory: root,
-  });
+  const probe = await Effect.runPromiseExit(
+    runAgentTestCommand({
+      project: root,
+      request: {
+        schema: COMMAND_REQUEST_SCHEMA_ID,
+        command: 'agent.test',
+        agent_id: 'coder',
+        input: 'probe',
+      },
+      workingDirectory: root,
+    }),
+  ).then(valueFromExit);
 
   expect(probe).toMatchObject({
     result: {

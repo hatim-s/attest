@@ -1,5 +1,5 @@
 import { parseWithSchemaSync, testCaseSchema } from '@attest/contracts';
-import { z } from 'zod';
+import * as Schema from 'effect/Schema';
 import { readFileSync } from 'node:fs';
 
 import type { DatasetImportMapping, TestCase } from '@attest/contracts';
@@ -41,7 +41,7 @@ const diagnosticsFrom = (callback: () => void): readonly ImportDiagnostic[] => {
 
 describe('tabular import golden formats', () => {
   const expected = parseWithSchemaSync(
-    z.array(testCaseSchema),
+    Schema.Array(testCaseSchema),
     JSON.parse(new TextDecoder().decode(fixture('mapped.golden.json'))),
   );
 
@@ -87,7 +87,7 @@ describe('tabular import validation and identity', () => {
 
     expect(diagnostics.map(({ code, line }) => ({ code, line }))).toEqual([
       { code: 'invalid_json', line: 2 },
-      { code: 'invalid_union', line: 3 },
+      { code: 'MissingKey', line: 3 },
       { code: 'invalid_json', line: 4 },
     ]);
   });

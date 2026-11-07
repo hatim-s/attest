@@ -1,6 +1,6 @@
 type BuildJudgePromptResult = { system: string; user: string };
 
-import { z } from 'zod';
+import * as Schema from 'effect/Schema';
 
 import type { JsonValue, Trace } from '@attest/contracts';
 import { canonicalStringify } from '@attest/core';
@@ -25,9 +25,9 @@ const JUDGE_REQUEST_PARAMS = {
 } as const satisfies Record<string, JsonValue>;
 
 /** Constrains the provider response while allowing every finite score. */
-const judgeResponseSchema = z.strictObject({
-  score: z.number().finite(),
-  rationale: z.string(),
+const judgeResponseSchema = Schema.Struct({
+  score: Schema.Finite,
+  rationale: Schema.String,
 });
 
 /** Renders one prompt block with sorted keys so logically equal evidence produces identical bytes. */

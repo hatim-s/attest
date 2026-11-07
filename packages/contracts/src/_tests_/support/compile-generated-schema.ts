@@ -1,5 +1,5 @@
 import { parseWithSchemaSync } from '../../schema/parse.js';
-import { z } from 'zod';
+import * as Schema from 'effect/Schema';
 import * as formatsModule from 'ajv-formats';
 import { Ajv2020, type ValidateFunction } from 'ajv/dist/2020.js';
 
@@ -9,7 +9,7 @@ const ajv = new Ajv2020({ allErrors: true, strict: false });
 
 formatsModule.default.default(ajv);
 
-// Same alphabet as z.ulid(): Crockford base32, either case.
+// Wire identifiers use Crockford base32, either case.
 ajv.addFormat('ulid', /^[0-9A-HJKMNP-TV-Za-hjkmnp-tv-z]{26}$/u);
 
 const validators = new Map<string, ValidateFunction>();
@@ -24,7 +24,7 @@ const compileGeneratedSchema = (fileName: string): ValidateFunction => {
 
   const validator = ajv.compile(
     parseWithSchemaSync(
-      z.record(z.string(), z.json()),
+      Schema.Record(Schema.String, Schema.Json),
       JSON.parse(serializeContractSchema(fileName)),
     ),
   );

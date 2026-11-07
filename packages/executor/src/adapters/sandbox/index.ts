@@ -1,1 +1,5 @@
-export { invokeVercelSandboxAgent } from './vercel-sandbox-adapter.js';
+export {
+  invokeVercelSandboxAgent,
+  isSandboxAttemptCleanupError,
+  SandboxAttemptCleanupError,
+} from './vercel-sandbox-adapter.js';

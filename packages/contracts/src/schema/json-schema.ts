@@ -1,9 +1,12 @@
 import {
   portableProjectBundleSchema,
+  PORTABLE_MAX_FILES,
   cloudRunRequestSchema,
   cloudQueueMessageSchema,
 } from '../cloud/project-bundle.js';
-import type { z } from 'zod';
+import * as Schema from 'effect/Schema';
+import * as SchemaRepresentation from 'effect/SchemaRepresentation';
+import type * as JsonSchema from 'effect/JsonSchema';
 
 import { canonicalJson } from '../internal/canonical-json.js';
 
@@ -36,10 +39,10 @@ import {
 } from '../agent/websocket-contract.js';
 import { webSocketAttemptEvidenceSchema } from '../agent/websocket-evidence.js';
 
-type JsonSchemaFragment = z.core.JSONSchema.BaseSchema;
+type JsonSchemaFragment = JsonSchema.JsonSchema;
 
 type ContractJsonSchemaDefinition = {
-  schema: z.ZodType;
+  schema: Schema.ConstraintDecoder<unknown>;
   /** Keywords overlaid on the generated schema, including a $comment for runtime-only rules. */
   invariants?: JsonSchemaFragment;
 };
@@ -74,9 +77,13 @@ const CONTRACT_JSON_SCHEMAS = new Map<string, ContractJsonSchemaDefinition>([
     'project-bundle.json',
     {
       schema: portableProjectBundleSchema,
-      invariants: runtimeOnly(
-        `file text limits follow files.$comment; portable URLs exclude credentials, HTTP request URLs exclude query strings, credential fields and process environments use environment references; project resource references, duplicate identities, and manifest parity follow projectResourcesSchema; ${agentResourceRules}; ${assertionRules}; source file parity and hashes require resolvePortableProject`,
-      ),
+      invariants: {
+        ...runtimeOnly(
+          `files contain no NUL and use at most 1 MiB per file and 5 MiB total decoded UTF-8 bytes; portable URLs exclude credentials, HTTP request URLs exclude query strings, credential fields and process environments use environment references; project resource references, duplicate identities, and manifest parity follow projectResourcesSchema; ${agentResourceRules}; ${assertionRules}; source file parity and hashes require resolvePortableProject`,
+        ),
+        // Encoding erases the aggregate refinement when child schemas transform values.
+        allOf: [{ properties: { files: { maxProperties: PORTABLE_MAX_FILES } } }],
+      },
     },
   ],
   ['cloud-run-request.json', { schema: cloudRunRequestSchema }],
@@ -204,6 +211,52 @@ const CONTRACT_JSON_SCHEMAS = new Map<string, ContractJsonSchemaDefinition>([
   ],
 ]);
 
+/** Excludes JavaScript undefined from JSON without turning optional values into nullable values. */
+const jsonWireDocument = (schema: Schema.Constraint): SchemaRepresentation.Document => {
+  const document = Schema.toRepresentation(Schema.toEncoded(schema));
+
+  const visit = (
+    node: SchemaRepresentation.Representation,
+  ): SchemaRepresentation.Representation => {
+    switch (node._tag) {
+      case 'Undefined':
+      case 'Void':
+        return { ...node, _tag: 'Never' };
+      case 'Union':
+        return { ...node, types: node.types.map(visit) };
+      case 'Suspend':
+        return { ...node, thunk: visit(node.thunk) };
+      case 'Arrays':
+        return {
+          ...node,
+          elements: node.elements.map((element) => ({ ...element, type: visit(element.type) })),
+          rest: node.rest.map(visit),
+        };
+      case 'Objects':
+        return {
+          ...node,
+          propertySignatures: node.propertySignatures.map((property) => ({
+            ...property,
+            type: visit(property.type),
+          })),
+          indexSignatures: node.indexSignatures.map((index) => ({
+            parameter: visit(index.parameter),
+            type: visit(index.type),
+          })),
+        };
+      default:
+        return node;
+    }
+  };
+
+  return {
+    representation: visit(document.representation),
+    references: Object.fromEntries(
+      Object.entries(document.references).map(([key, value]) => [key, visit(value)]),
+    ),
+  };
+};
+
 /** Serializes one registered contract as deterministic Draft 2020-12 JSON Schema. */
 const serializeContractSchema = (fileName: string): string => {
   const definition = CONTRACT_JSON_SCHEMAS.get(fileName);
@@ -212,10 +265,15 @@ const serializeContractSchema = (fileName: string): string => {
     throw new Error(`Unknown contract JSON Schema file: ${fileName}`);
   }
 
-  const generated = definition.schema.toJSONSchema({
-    target: 'draft-2020-12',
-    unrepresentable: 'any',
+  const document = SchemaRepresentation.toJsonSchemaDocument(jsonWireDocument(definition.schema), {
+    onExcessProperty: 'error',
   });
+
+  const generated = {
+    $schema: 'https://json-schema.org/draft/2020-12/schema',
+    ...document.schema,
+    $defs: document.definitions,
+  };
 
   const merged = { ...generated, ...definition.invariants };
 

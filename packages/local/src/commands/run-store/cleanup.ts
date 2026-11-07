@@ -1,33 +1,52 @@
-type CleanupStep = () => Promise<void>;
+import * as Cause from 'effect/Cause';
+import * as Effect from 'effect/Effect';
+import * as Exit from 'effect/Exit';
+import { StoreError } from '@attest/core';
+import { finishStoreCleanup } from '../../store/internal/store-effect.js';
 
-/**
- * Attempts every cleanup step even after one fails, so a failed close never leaves copied data
- * or an open descriptor behind, then throws the first cleanup failure.
- */
-const runCleanupSteps = async (steps: readonly CleanupStep[]): Promise<void> => {
-  const failures: unknown[] = [];
+type CleanupStep = Effect.Effect<unknown, unknown>;
+
+/** Attempts all releases and retains every failed Exit, including defects. */
+const runCleanupSteps = Effect.fn('runCleanupSteps')(function* (steps: readonly CleanupStep[]) {
+  let result: Exit.Exit<void, StoreError> = Exit.void;
 
   for (const step of steps) {
-    try {
-      await step();
-    } catch (error: unknown) {
-      failures.push(error);
+    const exit = yield* Effect.exit(step);
+
+    if (Exit.isFailure(exit)) {
+      const failure = Cause.fail(
+        new StoreError('READ_FAILED', 'Read resource cleanup failed.', { cause: exit.cause }),
+      );
+
+      result = Exit.isFailure(result)
+        ? Exit.failCause(Cause.combine(result.cause, failure))
+        : Exit.failCause(failure);
     }
   }
 
-  if (failures.length > 0) throw failures[0];
-};
+  return yield* result;
+});
 
-/**
- * Attempts every cleanup step after a primary failure and rethrows that primary failure. Cleanup
- * failures are dropped because the primary failure explains why the operation stopped.
- */
-const rethrowAfterCleanup = async (
-  cause: unknown,
-  steps: readonly CleanupStep[],
-): Promise<never> => {
-  await runCleanupSteps(steps).catch(() => undefined);
-  throw cause;
-};
+/** Masks acquisition and cleanup so foreign descriptor work settles before dependent release. */
+const withReadCleanup = <A, E, R>(
+  use: Effect.Effect<A, E, R>,
+  steps: () => readonly CleanupStep[],
+) =>
+  Effect.uninterruptible(
+    Effect.gen(function* () {
+      const primary = yield* Effect.exit(use);
+      const cleanup = yield* Effect.exit(runCleanupSteps(steps()));
 
-export { rethrowAfterCleanup, runCleanupSteps, type CleanupStep };
+      if (Exit.isSuccess(primary) && Exit.isFailure(cleanup)) {
+        return yield* Effect.fail(
+          new StoreError('READ_FAILED', 'Read work completed but cleanup failed.', {
+            cause: { primary, cleanup: cleanup.cause },
+          }),
+        );
+      }
+
+      return yield* finishStoreCleanup(primary, cleanup);
+    }),
+  );
+
+export { runCleanupSteps, withReadCleanup, type CleanupStep };

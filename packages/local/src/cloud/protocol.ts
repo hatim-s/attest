@@ -1,132 +1,131 @@
-import {
-  parseWithSchemaSync,
-  parseWithSchema,
-  portableProjectBundleSchema,
-} from '@attest/contracts';
-import { z } from 'zod';
+import * as Effect from 'effect/Effect';
+import { stripStruct } from '@attest/contracts';
+import { parseWithSchema, portableProjectBundleSchema } from '@attest/contracts';
+import * as Schema from 'effect/Schema';
 
 import { LocalError } from '../errors/local-error.js';
 
-const bearerTokenSchema = z.string().regex(/^[\x21-\x7e]+$/u);
+const bearerTokenSchema = Schema.String.check(Schema.isPattern(/^[\x21-\x7e]+$/u));
 
-/** Keeps endpoint failures free of raw response values. */
-// BOUNDARY: Decoded cloud responses are untrusted; each endpoint schema owns their validation.
-const parseCloudEndpoint = <T>(schema: z.ZodType<T>, value: unknown): T => {
-  try {
-    return parseWithSchemaSync(schema, value);
-  } catch {
-    throw new LocalError(
-      'cloud_request_failed',
-      'Cloud returned a response that does not match the protocol.',
-    );
-  }
-};
-
-const deviceSchema = z.object({
-  device_code: z.string().min(1),
-  user_code: z.string().min(1),
-  verification_uri: z.url(),
-  expires_in: z.number().positive().max(3600),
-  interval: z.number().positive().max(60),
+const deviceSchema = stripStruct({
+  device_code: Schema.String.check(Schema.isMinLength(1)),
+  user_code: Schema.String.check(Schema.isMinLength(1)),
+  verification_uri: Schema.String.check(Schema.makeFilter((value) => URL.canParse(value))),
+  expires_in: Schema.Finite.check(Schema.isGreaterThan(0)).check(Schema.isLessThanOrEqualTo(3600)),
+  interval: Schema.Finite.check(Schema.isGreaterThan(0)).check(Schema.isLessThanOrEqualTo(60)),
 });
 
-const tokenSchema = z.object({
+const tokenSchema = stripStruct({
   access_token: bearerTokenSchema,
-  token_type: z.literal('Bearer'),
-  expires_in: z
-    .number()
-    .positive()
-    .max(366 * 24 * 60 * 60),
+  token_type: Schema.Literal('Bearer'),
+  expires_in: Schema.Finite.check(Schema.isGreaterThan(0)).check(
+    Schema.isLessThanOrEqualTo(366 * 24 * 60 * 60),
+  ),
 });
 
-type LoginNotice = Pick<
-  z.infer<typeof deviceSchema>,
-  'user_code' | 'verification_uri' | 'expires_in'
->;
+type LoginNotice = Pick<typeof deviceSchema.Type, 'user_code' | 'verification_uri' | 'expires_in'>;
 
-const eventPageSchema = z.object({
-  events: z.array(
-    z.object({
-      sequence: z.number().int().nonnegative(),
-      time: z.string(),
-      event: z.string(),
-      data: z.unknown(),
+const eventPageSchema = stripStruct({
+  events: Schema.Array(
+    stripStruct({
+      sequence: Schema.Finite.check(
+        Schema.isInt(),
+        Schema.isBetween({ minimum: Number.MIN_SAFE_INTEGER, maximum: Number.MAX_SAFE_INTEGER }),
+      ).check(Schema.isGreaterThanOrEqualTo(0)),
+      time: Schema.String,
+      event: Schema.String,
+      data: Schema.Unknown,
     }),
   ),
-  next_cursor: z.number().int().nonnegative(),
+  next_cursor: Schema.Finite.check(
+    Schema.isInt(),
+    Schema.isBetween({ minimum: Number.MIN_SAFE_INTEGER, maximum: Number.MAX_SAFE_INTEGER }),
+  ).check(Schema.isGreaterThanOrEqualTo(0)),
 });
 
-type CloudEventPage = z.infer<typeof eventPageSchema>;
+type CloudEventPage = typeof eventPageSchema.Type;
 
-const projectSchema = z.object({ id: z.string(), name: z.string(), created_at: z.string() });
-
-const runSchema = z.object({
-  id: z.string(),
-  project_id: z.string(),
-  revision_id: z.string(),
-  status: z.enum(['queued', 'running', 'succeeded', 'failed', 'cancelled', 'interrupted']),
-  created_at: z.string(),
-  started_at: z.string().nullable(),
-  finished_at: z.string().nullable(),
-  cancel_requested: z.boolean(),
-  raw_expires_at: z.string().nullable(),
-  error_code: z.string().nullable(),
+const projectSchema = stripStruct({
+  id: Schema.String,
+  name: Schema.String,
+  created_at: Schema.String,
 });
 
-const runResponseSchema = z.object({ run: runSchema });
-
-const revisionSchema = z.object({
-  id: z.string().min(1),
-  project_id: z.string().min(1),
-  created_at: z.string(),
+const runSchema = stripStruct({
+  id: Schema.String,
+  project_id: Schema.String,
+  revision_id: Schema.String,
+  status: Schema.Literals(['queued', 'running', 'succeeded', 'failed', 'cancelled', 'interrupted']),
+  created_at: Schema.String,
+  started_at: Schema.NullOr(Schema.String),
+  finished_at: Schema.NullOr(Schema.String),
+  cancel_requested: Schema.Boolean,
+  raw_expires_at: Schema.NullOr(Schema.String),
+  error_code: Schema.NullOr(Schema.String),
 });
 
-const revisionResponseSchema = z.object({ revision: revisionSchema });
+const runResponseSchema = stripStruct({ run: runSchema });
 
-const revisionBundleSchema = revisionResponseSchema.extend({ bundle: portableProjectBundleSchema });
+const revisionSchema = stripStruct({
+  id: Schema.String.check(Schema.isMinLength(1)),
+  project_id: Schema.String.check(Schema.isMinLength(1)),
+  created_at: Schema.String,
+});
 
-const projectsResponseSchema = z.object({ projects: z.array(projectSchema) });
+const revisionResponseSchema = stripStruct({ revision: revisionSchema });
 
-const projectResponseSchema = z.object({ project: projectSchema });
+const revisionBundleSchema = stripStruct({
+  ...revisionResponseSchema.from.schema.fields,
+  ...{ bundle: portableProjectBundleSchema },
+});
 
-const linkedProjectSchema = z.object({ project: z.object({ id: z.string() }) });
+const projectsResponseSchema = stripStruct({ projects: Schema.Array(projectSchema) });
 
-const runResultSchema = z.object({
+const projectResponseSchema = stripStruct({ project: projectSchema });
+
+const linkedProjectSchema = stripStruct({ project: stripStruct({ id: Schema.String }) });
+
+const runResultSchema = stripStruct({
   run: runSchema,
-  summary: z.unknown(),
-  raw: z.unknown(),
-  raw_expired: z.boolean(),
+  summary: Schema.Unknown,
+  raw: Schema.Unknown,
+  raw_expired: Schema.Boolean,
 });
 
-const projectTokenIdentitySchema = z.object({
-  token: z.object({ project_id: z.string().min(1) }),
+const projectTokenIdentitySchema = stripStruct({
+  token: stripStruct({ project_id: Schema.String.check(Schema.isMinLength(1)) }),
 });
 
-const uploadedRunResponseSchema = z.object({
-  run: z.object({
-    id: z.string().min(1),
-    project_id: z.string().min(1),
-    url: z.url(),
+const uploadedRunResponseSchema = stripStruct({
+  run: stripStruct({
+    id: Schema.String.check(Schema.isMinLength(1)),
+    project_id: Schema.String.check(Schema.isMinLength(1)),
+    url: Schema.String.check(Schema.makeFilter((value) => URL.canParse(value))),
   }),
-  unchanged: z.boolean().default(false),
+  unchanged: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
 });
 
-const projectTokenSchema = z.object({
-  id: z.string().min(1),
-  name: z.string(),
-  created_at: z.string(),
+const projectTokenSchema = stripStruct({
+  id: Schema.String.check(Schema.isMinLength(1)),
+  name: Schema.String,
+  created_at: Schema.String,
 });
 
-const createdProjectTokenSchema = z.object({
+const createdProjectTokenSchema = stripStruct({
   token: projectTokenSchema,
   secret: bearerTokenSchema,
 });
 
-const projectTokensSchema = z.object({
-  tokens: z.array(projectTokenSchema.extend({ revoked_at: z.string().nullable() })),
+const projectTokensSchema = stripStruct({
+  tokens: Schema.Array(
+    stripStruct({
+      ...projectTokenSchema.from.schema.fields,
+      ...{ revoked_at: Schema.NullOr(Schema.String) },
+    }),
+  ),
 });
 
-const emptyResponseSchema = z.unknown();
+const emptyResponseSchema = Schema.Unknown;
 
 const uploadErrorCodes = [
   'upload_too_large',
@@ -137,15 +136,18 @@ const uploadErrorCodes = [
   'invalid_bundle',
 ] as const;
 
-const uploadErrorCodeSchema = z.enum(uploadErrorCodes);
+const uploadErrorCodeSchema = Schema.Literals(uploadErrorCodes);
 
-const remoteErrorSchema = z.object({
-  error: z
-    .object({ code: z.string().regex(/^[a-z_]{1,80}$/u), message: z.string().optional() })
-    .optional(),
+const remoteErrorSchema = stripStruct({
+  error: Schema.optional(
+    stripStruct({
+      code: Schema.String.check(Schema.isPattern(/^[a-z_]{1,80}$/u)),
+      message: Schema.optional(Schema.String),
+    }),
+  ),
 });
 
-const deviceErrorCodeSchema = z.enum([
+const deviceErrorCodeSchema = Schema.Literals([
   'authorization_pending',
   'slow_down',
   'expired_token',
@@ -153,8 +155,8 @@ const deviceErrorCodeSchema = z.enum([
 ]);
 
 type RemoteErrorOutcome =
-  | { kind: 'device'; code: z.infer<typeof deviceErrorCodeSchema> }
-  | { kind: 'known'; code: z.infer<typeof uploadErrorCodeSchema>; message: string }
+  | { kind: 'device'; code: typeof deviceErrorCodeSchema.Type }
+  | { kind: 'known'; code: typeof uploadErrorCodeSchema.Type; message: string }
   | { kind: 'remote'; remoteCode: string };
 
 /** Preserves decoded device outcomes without reparsing error details at the caller. */
@@ -206,7 +208,6 @@ export {
   createdProjectTokenSchema,
   projectTokensSchema,
   projectTokenIdentitySchema,
-  parseCloudEndpoint,
   bearerTokenSchema,
   deviceSchema,
   tokenSchema,

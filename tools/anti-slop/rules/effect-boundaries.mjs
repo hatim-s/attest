@@ -156,7 +156,7 @@ const execution = (module, name) =>
   (module === 'Stream' && /^to(ReadableStream|AsyncIterable)/.test(name));
 const memberName = (node) => (node.computed ? node.property.value : node.property.name);
 
-/** Enforce imports and execution ownership before any application slice adopts Effect. */
+/** Enforce imports and execution ownership at declared application roots. */
 const effectBoundariesRule = {
   meta: {
     type: 'problem',
@@ -165,9 +165,13 @@ const effectBoundariesRule = {
         type: 'object',
         properties: {
           dataOnly: { type: 'boolean' },
+          schemaConstructionModules: {
+            type: 'array',
+            items: { enum: ['Effect', 'SchemaGetter'] },
+            uniqueItems: true,
+          },
           browser: { type: 'boolean' },
           operations: { type: 'array', items: { type: 'string' } },
-          removalSlice: { type: 'string' },
         },
         additionalProperties: false,
       },
@@ -176,19 +180,10 @@ const effectBoundariesRule = {
   },
   create(context) {
     const options = context.options[0] ?? {};
+    const allowedDataModules = new Set([...dataModules, ...(options.schemaConstructionModules ?? [])]);
     const bindings = [];
     const used = new Set();
-    const taggedComments = new Set();
     const source = context.sourceCode;
-    const bridgeComments = source
-      .getAllComments()
-      .map((comment) => ({
-        comment,
-        slices: [...comment.value.matchAll(/EFFECT-BRIDGE\(([^)]*)(?:\)|$)/g)].map(
-          (match) => (match[0].endsWith(')') ? match[1] : null),
-        ),
-      }))
-      .filter(({ slices }) => slices.length > 0);
     const report = (node, reason) =>
       context.report({ node, messageId: 'boundary', data: { reason } });
     function checkImport(node) {
@@ -202,7 +197,7 @@ const effectBoundariesRule = {
       }
       if (value !== 'effect' && !value.startsWith('effect/')) return;
       const module = value === 'effect' ? null : value.slice(7);
-      if (module !== null && !(options.dataOnly ? dataModules : coreModules).has(module)) {
+      if (module !== null && !(options.dataOnly ? allowedDataModules : coreModules).has(module)) {
         report(node, 'Only approved Effect core modules are allowed.');
       }
       if (node.type !== 'ImportDeclaration') {
@@ -214,10 +209,10 @@ const effectBoundariesRule = {
       }
       for (const specifier of node.specifiers) {
         const name = specifier.imported?.name ?? specifier.imported?.value;
-        if (module === null && options.dataOnly && !dataModules.has(name))
+        if (module === null && options.dataOnly && !allowedDataModules.has(name))
           report(
             specifier,
-            'Data-only entries import only Schema, SchemaIssue, SchemaAST and JsonSchema.',
+            'Data-only entries import schema modules and explicitly approved construction dependencies only.',
           );
         if (name && execution(module, name)) {
           const operation = `${module}.${name}`;
@@ -233,24 +228,14 @@ const effectBoundariesRule = {
     }
     function checkExecution(node, operation) {
       if (!options.operations?.includes(operation)) {
-        report(node, `Execute ${operation} only in a declared Effect root or migration bridge.`);
+        report(node, `Execute ${operation} only in a declared Effect root.`);
         return;
       }
       if (node.parent.type !== 'CallExpression' || node.parent.callee !== node) {
-        report(node, 'Invoke execution APIs directly so bridge tags identify the execution site.');
+        report(node, 'Invoke execution APIs directly at their declared root.');
         return;
       }
       used.add(operation);
-      if (options.removalSlice) {
-        const adjacent = bridgeComments.filter(
-          ({ comment, slices }) =>
-            comment.loc.end.line === node.loc.start.line - 1 &&
-            slices.includes(options.removalSlice),
-        );
-        if (adjacent.length === 0)
-          report(node, 'Bridge execution needs an adjacent matching EFFECT-BRIDGE(Sx) tag.');
-        for (const { comment } of adjacent) taggedComments.add(comment);
-      }
     }
     function inspectReference(identifier, module) {
       const parent = identifier.parent;
@@ -275,7 +260,7 @@ const effectBoundariesRule = {
         return;
       }
       if (module === 'root') {
-        if (options.dataOnly && !dataModules.has(name))
+        if (options.dataOnly && !allowedDataModules.has(name))
           report(parent, 'Data-only entries cannot access this Effect module.');
         inspectReference(parent, name);
       } else if (execution(module, name)) checkExecution(parent, `${module}.${name}`);
@@ -314,15 +299,7 @@ const effectBoundariesRule = {
         }
         for (const operation of options.operations ?? []) {
           if (!used.has(operation))
-            report(program, `Unused execution ledger operation: ${operation}.`);
-        }
-        for (const { comment, slices } of bridgeComments) {
-          for (const slice of slices) {
-            if (!options.removalSlice || slice !== options.removalSlice)
-              report(comment, 'Bridge tag has no matching migration ledger entry.');
-            else if (!taggedComments.has(comment))
-              report(comment, 'Bridge tag has no adjacent execution operation.');
-          }
+            report(program, `Unused execution root operation: ${operation}.`);
         }
       },
     };

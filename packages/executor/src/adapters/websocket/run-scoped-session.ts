@@ -1,252 +1,254 @@
-import type { AgentRequest, WebSocketErrorClassification } from '@attest/contracts';
+import type { AgentRequest } from '@attest/contracts';
+import type * as Cause from 'effect/Cause';
+import * as Exit from 'effect/Exit';
+import * as Deferred from 'effect/Deferred';
+import * as Effect from 'effect/Effect';
+import * as Semaphore from 'effect/Semaphore';
 
 import { AgentInvocationError } from '../../errors.js';
-import { abortableWait } from '../../internal/abortable-wait.js';
 import { retryBackoffDelay } from '../../internal/retry-backoff.js';
-import { createSerialQueue } from '../../internal/serial-queue.js';
 import type { InvocationResult } from '../../types.js';
-import type { WebSocketClose, WebSocketConnection } from './websocket-connection.js';
-import { beginRetry, type PendingInvocation } from './websocket-evidence.js';
+import type { WebSocketConnection } from './websocket-connection.js';
+import {
+  waitForWebSocketRetry,
+  retainWebSocketOpeningCause,
+  retainWebSocketOpeningResult,
+} from './websocket-lifetime.js';
+import { beginRetry } from './websocket-evidence.js';
 import { errorClassification, type WebSocketAgentResource } from './websocket-protocol.js';
 import { WebSocketSessionState, type WebSocketSessionOptions } from './websocket-session-state.js';
 
-/** Connection failures a request may be replayed after, provided it was never acknowledged. */
-const RECONNECTABLE = new Set<WebSocketErrorClassification>([
-  'connection_failed',
-  'handshake_failed',
-  'open_timeout',
-  'unexpected_close',
-]);
-
-/** The shared connection: none, a handshake in flight, or open with its keepalive ping. */
-type SharedConnection =
-  | { kind: 'idle' }
-  | { kind: 'opening'; generation: number; promise: Promise<WebSocketConnection> }
-  | { kind: 'open'; generation: number; connection: WebSocketConnection; ping: NodeJS.Timeout };
-
-/**
- * Shares one connection across every case of the run, serially or multiplexed. A lost connection
- * is reopened and unacknowledged requests are replayed on it within the retry budget.
- */
+/** Shares one generation of a socket while each invocation owns its own terminal observation. */
 class RunScopedWebSocketSession {
   private readonly state: WebSocketSessionState;
-  private readonly runSerially = createSerialQueue();
-  private closePromise?: Promise<void>;
-  private shared: SharedConnection = { kind: 'idle' };
-  /** Generation of the newest handshake; callbacks from older connections are ignored. */
-  private connectionGeneration = 0;
+  private readonly opening = Semaphore.makeUnsafe(1);
+  private readonly serial = Semaphore.makeUnsafe(1);
+  private connection?: WebSocketConnection;
+  private ping?: NodeJS.Timeout;
+  private generation = 0;
 
   constructor(agent: WebSocketAgentResource, options: WebSocketSessionOptions) {
     this.state = new WebSocketSessionState(agent, options, {
       onRequestTimeout: (pending, error, classification) =>
-        void this.retryOrSettle(pending, error, classification),
-      onRunEnd: () => this.releaseOpenConnection()?.destroy(),
+        this.state.settleFailure(pending, error, classification),
+      onRunEnd: () => this.connection?.destroy(),
     });
   }
 
-  invoke(request: AgentRequest, signal?: AbortSignal): Promise<InvocationResult> {
-    if (this.state.agent.transport.connection_mode === 'multiplexed') {
-      return this.dispatch(request, signal);
-    }
+  /** Serial mode queues admission; multiplexed mode keeps sibling cancellation independent. */
+  invoke(
+    request: AgentRequest,
+    signal?: AbortSignal,
+  ): Effect.Effect<InvocationResult, AgentInvocationError> {
+    const invocation = this.dispatch(request, signal);
 
-    return this.runSerially(() => this.dispatch(request, signal));
+    return this.state.agent.transport.connection_mode === 'multiplexed'
+      ? invocation
+      : this.serial.withPermit(invocation);
   }
 
-  /** Ends the run-scoped lifecycle and guarantees bounded socket cleanup. */
-  close(): Promise<void> {
-    if (this.closePromise !== undefined) return this.closePromise;
-    this.state.beginClose();
-    const connection = this.releaseOpenConnection();
-    this.closePromise = (async () => {
-      if (connection === undefined) return;
-      const close = await connection.close(this.state.agent.transport.close_timeout_ms);
+  /** Stops admission, joins any handshake, and observes bounded socket release. */
+  close(): Effect.Effect<void, AgentInvocationError> {
+    return Effect.gen({ self: this }, function* () {
+      this.state.beginClose();
+      yield* this.opening.withPermit(
+        Effect.gen({ self: this }, function* () {
+          clearInterval(this.ping);
+          const connection = this.connection;
+          this.connection = undefined;
 
-      if (!close.clean) {
-        throw new AgentInvocationError('timeout', 'WebSocket close handshake timed out.', {
-          classification: 'close_timeout',
-        });
-      }
-    })();
+          if (connection === undefined) return;
+          const close = yield* connection.close(this.state.agent.transport.close_timeout_ms);
 
-    return this.closePromise;
-  }
-
-  private dispatch(request: AgentRequest, signal?: AbortSignal): Promise<InvocationResult> {
-    if (this.state.lifecycle.signal.aborted) {
-      return Promise.resolve(this.state.closedResult(this.state.createPending(request, signal)));
-    }
-
-    return new Promise<InvocationResult>((resolve) => {
-      const pending = this.state.createPending(request, signal, resolve);
-      this.state.arm(pending);
-      void this.sendOnConnection(pending);
+          if (!close.clean)
+            return yield* Effect.fail(
+              new AgentInvocationError('timeout', 'WebSocket close handshake timed out.', {
+                classification: 'close_timeout',
+              }),
+            );
+        }),
+      );
     });
   }
 
-  private async sendOnConnection(pending: PendingInvocation): Promise<void> {
-    try {
-      const connection = await this.ensureConnection();
+  /** Only known opening failures can retry; a socket write prohibits replay even without ack. */
+  private dispatch(
+    request: AgentRequest,
+    signal?: AbortSignal,
+  ): Effect.Effect<InvocationResult, AgentInvocationError> {
+    return Effect.gen({ self: this }, function* () {
+      const pending = this.state.createPending(request, signal);
 
-      if (!this.state.pending.has(pending.requestId)) return;
-      await this.state.send(pending, connection, pending.signal);
-    } catch (error: unknown) {
-      if (!this.state.pending.has(pending.requestId)) return;
+      if (this.state.lifecycle.signal.aborted || this.state.options.signal?.aborted === true)
+        return this.state.closedResult(pending);
+      const terminal = Deferred.makeUnsafe<InvocationResult>();
+      const writeController = new AbortController();
 
-      const normalized =
-        error instanceof AgentInvocationError
-          ? error
-          : new AgentInvocationError('network', 'WebSocket connection failed.', { cause: error });
+      const writeSignal = AbortSignal.any([
+        writeController.signal,
+        this.state.lifecycle.signal,
+        ...(signal === undefined ? [] : [signal]),
+      ]);
 
-      await this.retryOrSettle(pending, normalized, errorClassification(normalized));
-    }
-  }
+      pending.resolve = (result) => {
+        writeController.abort();
+        Deferred.doneUnsafe(terminal, Effect.succeed(result));
+      };
 
-  /** Leaves the open state, stopping its ping, and hands back the connection to dispose of. */
-  private releaseOpenConnection(): WebSocketConnection | undefined {
-    if (this.shared.kind !== 'open') return undefined;
-    const { connection, ping } = this.shared;
-    clearInterval(ping);
-    this.shared = { kind: 'idle' };
+      let openingCause: Cause.Cause<AgentInvocationError> | undefined;
 
-    return connection;
-  }
+      const work = Effect.gen({ self: this }, function* () {
+        this.state.arm(pending);
 
-  private ensureConnection(): Promise<WebSocketConnection> {
-    if (this.shared.kind === 'open') return Promise.resolve(this.shared.connection);
+        for (let retry = 0; ; retry++) {
+          const opened = yield* Effect.exit(this.ensureConnection());
 
-    if (this.shared.kind === 'opening') return this.shared.promise;
-    const generation = ++this.connectionGeneration;
-    const { evidence, options } = this.state;
+          if (Exit.isSuccess(opened)) {
+            openingCause = undefined;
 
-    const runSignal = AbortSignal.any(
-      [options.signal, this.state.lifecycle.signal].filter((signal) => signal !== undefined),
-    );
+            if (this.state.pending.has(pending.requestId)) {
+              yield* this.state
+                .send(pending, opened.value, writeSignal)
+                .pipe(
+                  Effect.catch((error) =>
+                    Effect.sync(() =>
+                      this.state.settleFailure(pending, error, errorClassification(error)),
+                    ),
+                  ),
+                );
+            }
 
-    const forEachPending = (record: (pending: PendingInvocation) => void): void => {
-      for (const pending of this.state.pending.values()) record(pending);
-    };
-
-    const promise = this.state
-      .openConnection(runSignal, {
-        onClose: (close) => this.connectionLost(generation, close),
-        onFailure: (error) => this.connectionFailed(generation, error),
-        onPong: () =>
-          forEachPending((pending) =>
-            evidence.record(pending, { classification: 'pong_received' }),
-          ),
-        onText: (text, bytes) => this.state.consumeMessage(text, bytes),
-      })
-      .then(
-        (connection) => {
-          this.releaseOpenConnection();
-          this.shared = {
-            kind: 'open',
-            generation,
-            connection,
-            ping: this.startPing(connection),
-          };
-          forEachPending((pending) =>
-            evidence.record(pending, { classification: 'connection_opened' }),
-          );
-
-          return connection;
-        },
-        (cause: unknown) => {
-          if (this.shared.kind === 'opening' && this.shared.generation === generation) {
-            this.shared = { kind: 'idle' };
+            break;
           }
 
-          throw cause;
-        },
-      );
+          openingCause = opened.cause;
 
-    this.shared = { kind: 'opening', generation, promise };
+          const error = retainWebSocketOpeningCause(
+            yield* Effect.flip(Effect.failCause(opened.cause)),
+            openingCause,
+          );
 
-    return promise;
+          pending.dispatched ||= error.applicationStarted === true;
+
+          if (!this.state.pending.has(pending.requestId)) break;
+
+          if (
+            retry >= (this.state.agent.retry?.retries ?? 0) ||
+            error.applicationStarted === true ||
+            (error.code !== 'network' && error.code !== 'timeout')
+          ) {
+            this.state.settleFailure(pending, error, errorClassification(error));
+            break;
+          }
+
+          pending.attempts.push(
+            this.state.evidence.failureAttempt(pending, error, errorClassification(error)),
+          );
+          beginRetry(pending);
+          this.state.evidence.record(pending, { classification: 'retry_scheduled' });
+
+          const retrySignal = AbortSignal.any([
+            this.state.lifecycle.signal,
+            ...(signal === undefined ? [] : [signal]),
+          ]);
+
+          yield* Effect.raceFirst(
+            waitForWebSocketRetry(
+              retryBackoffDelay(this.state.agent.retry?.backoff, retry),
+              retrySignal,
+            ),
+            Deferred.await(terminal),
+          );
+
+          if (!this.state.pending.has(pending.requestId)) break;
+
+          if (retrySignal.aborted) {
+            this.state.settleFailure(
+              pending,
+              new AgentInvocationError('cancelled', 'WebSocket retry was cancelled.'),
+              'cancelled',
+            );
+            break;
+          }
+
+          this.state.arm(pending);
+        }
+
+        const result = yield* Deferred.await(terminal);
+
+        return retainWebSocketOpeningResult(result, openingCause);
+      });
+
+      return yield* work.pipe(Effect.ensuring(Effect.sync(() => this.state.abandon(pending))));
+    });
   }
 
-  private async retryOrSettle(
-    pending: PendingInvocation,
-    error: AgentInvocationError,
-    classification: WebSocketErrorClassification,
-  ): Promise<void> {
-    const { agent, evidence } = this.state;
+  /** Serializes connection acquisition so concurrent cases cannot create competing generations. */
+  private ensureConnection(): Effect.Effect<WebSocketConnection, AgentInvocationError> {
+    return this.opening.withPermit(
+      Effect.gen({ self: this }, function* () {
+        if (this.connection !== undefined) return this.connection;
 
-    if (!this.state.pending.has(pending.requestId)) return;
+        if (this.state.lifecycle.signal.aborted)
+          return yield* Effect.fail(
+            new AgentInvocationError('cancelled', 'WebSocket session is closed.'),
+          );
+        const generation = ++this.generation;
 
-    const retryable =
-      !pending.acknowledged &&
-      pending.retriesUsed < (agent.retry?.retries ?? 0) &&
-      (error.code === 'network' || error.code === 'timeout') &&
-      RECONNECTABLE.has(classification);
+        const lost = (error: AgentInvocationError): void => {
+          if (generation !== this.generation) return;
+          clearInterval(this.ping);
+          this.connection?.destroy();
+          this.connection = undefined;
 
-    if (!retryable) {
-      this.state.settleFailure(pending, error, classification);
+          for (const pending of [...this.state.pending.values()])
+            this.state.settleFailure(pending, error, errorClassification(error));
+        };
 
-      return;
-    }
+        const connection = yield* this.state.openConnection(this.state.lifecycle.signal, {
+          onClose: (close) => {
+            if (generation !== this.generation) return;
 
-    pending.attempts.push(evidence.failureAttempt(pending, error, classification));
-    pending.retriesUsed += 1;
-    beginRetry(pending);
-    evidence.record(pending, { classification: 'retry_scheduled' });
+            for (const pending of this.state.pending.values())
+              this.state.evidence.recordClose(pending, close);
+            lost(
+              new AgentInvocationError(
+                'network',
+                'WebSocket disconnected before requests settled.',
+                { classification: 'unexpected_close' },
+              ),
+            );
+          },
+          onFailure: (error) => this.state.failRun(error, errorClassification(error)),
+          onPong: () => {
+            for (const pending of this.state.pending.values())
+              this.state.evidence.record(pending, { classification: 'pong_received' });
+          },
+          onText: (text, bytes) => this.state.consumeMessage(text, bytes),
+        });
 
-    try {
-      await abortableWait(
-        retryBackoffDelay(agent.retry?.backoff, pending.retriesUsed - 1),
-        pending.signal ?? this.state.options.signal,
-        () => new AgentInvocationError('cancelled', 'WebSocket retry was cancelled.'),
-      );
+        this.connection = connection;
 
-      if (!this.state.pending.has(pending.requestId)) return;
-      evidence.record(pending, { classification: 'reconnect_started' });
-      this.state.arm(pending);
-      await this.sendOnConnection(pending);
-    } catch (waitError: unknown) {
-      this.state.settleFailure(
-        pending,
-        waitError instanceof AgentInvocationError ? waitError : error,
-        'cancelled',
-      );
-    }
-  }
+        if (this.state.lifecycle.signal.aborted) {
+          connection.destroy();
 
-  private connectionFailed(generation: number, error: AgentInvocationError): void {
-    if (generation !== this.connectionGeneration) return;
-    this.releaseOpenConnection()?.destroy();
-    this.shared = { kind: 'idle' };
+          return yield* Effect.fail(
+            new AgentInvocationError('cancelled', 'WebSocket session is closed.'),
+          );
+        }
 
-    for (const pending of [...this.state.pending.values()]) {
-      void this.retryOrSettle(pending, error, errorClassification(error));
-    }
-  }
+        for (const pending of this.state.pending.values())
+          this.state.evidence.record(pending, { classification: 'connection_opened' });
+        this.ping = setInterval(() => {
+          if (!connection.ping()) return;
 
-  private connectionLost(generation: number, close: WebSocketClose): void {
-    if (this.shared.kind !== 'open' || this.shared.generation !== generation) return;
-    this.releaseOpenConnection();
+          for (const pending of this.state.pending.values())
+            this.state.evidence.record(pending, { classification: 'ping_sent' });
+        }, this.state.agent.transport.ping_interval_ms);
 
-    const error = new AgentInvocationError(
-      'network',
-      'WebSocket disconnected before requests settled.',
-      { classification: 'unexpected_close' },
+        return connection;
+      }),
     );
-
-    for (const pending of [...this.state.pending.values()]) {
-      this.state.evidence.recordClose(pending, close);
-      void this.retryOrSettle(pending, error, 'unexpected_close');
-    }
-  }
-
-  private startPing(connection: WebSocketConnection): NodeJS.Timeout {
-    return setInterval(() => {
-      if (this.shared.kind !== 'open' || this.shared.connection !== connection) return;
-
-      if (!connection.ping()) return;
-
-      for (const pending of this.state.pending.values()) {
-        this.state.evidence.record(pending, { classification: 'ping_sent' });
-      }
-    }, this.state.agent.transport.ping_interval_ms);
   }
 }
 

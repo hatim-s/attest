@@ -24,8 +24,9 @@ const startLoopbackServer = async (handler: RequestListener): Promise<LoopbackSe
   return {
     close: () =>
       new Promise<void>((resolve, reject) => {
-        server.closeAllConnections();
+        // Register shutdown before Bun's forced connection close also stops its listener.
         server.close((error) => (error === undefined ? resolve() : reject(error)));
+        server.closeAllConnections();
       }),
     server,
     url: `http://127.0.0.1:${String(address.port)}`,

@@ -1,6 +1,6 @@
 import { parseWithSchema } from '../schema/parse.js';
 import { describe, expect, it } from 'vitest';
-import type { z } from 'zod';
+import * as Schema from 'effect/Schema';
 
 import { CONTRACT_JSON_SCHEMAS } from '../schema/json-schema.js';
 import { loadFixtures } from './support/load-fixtures.js';
@@ -33,7 +33,7 @@ type ConformanceFixture = {
   valid: boolean;
 };
 
-/** A candidate Zod rejects but Draft 2020-12 cannot, with the reason the check is runtime-only. */
+/** A candidate Effect rejects but Draft 2020-12 cannot, with the reason the check is runtime-only. */
 type DivergenceFixture = {
   name: string;
   fileName: string;
@@ -565,21 +565,21 @@ const divergenceFixtures: DivergenceFixture[] = [
       input: {},
       callback: { url: 'ftp://attest.example/completions', token: 'secret' },
     },
-    reason: 'JSON Schema format "uri" accepts every scheme; the http(s) rule is Zod-only.',
+    reason: 'JSON Schema format "uri" accepts every scheme; the http(s) rule is runtime-only.',
   },
 ];
 
-const getZodSchema = (fileName: string): z.ZodType => {
+const getOwnerSchema = (fileName: string): Schema.ConstraintDecoder<unknown> => {
   const definition = CONTRACT_JSON_SCHEMAS.get(fileName);
 
   if (definition === undefined) {
-    throw new Error(`Missing Zod schema for ${fileName}`);
+    throw new Error(`Missing owner schema for ${fileName}`);
   }
 
   return definition.schema;
 };
 
-describe('Zod and generated JSON Schema conformance', () => {
+describe('Effect and generated JSON Schema conformance', () => {
   it.each([
     ['billing/refunds', true],
     ['billing group/refunds', true],
@@ -595,7 +595,7 @@ describe('Zod and generated JSON Schema conformance', () => {
     ['billing\n', false],
   ])('agrees on case folder %j', (folder, valid) => {
     const candidate = { ...validCase, folder };
-    expect(parseWithSchema(getZodSchema('case.json'), candidate).ok).toBe(valid);
+    expect(parseWithSchema(getOwnerSchema('case.json'), candidate).ok).toBe(valid);
     expect(compileGeneratedSchema('case.json')(candidate)).toBe(valid);
   });
 
@@ -608,16 +608,16 @@ describe('Zod and generated JSON Schema conformance', () => {
       const generatedValid =
         envelope.expect === 'invalid' ? envelope.json_schema_valid === true : true;
 
-      expect(parseWithSchema(getZodSchema(fileName), envelope.input).ok).toBe(valid);
+      expect(parseWithSchema(getOwnerSchema(fileName), envelope.input).ok).toBe(valid);
       expect(compileGeneratedSchema(fileName)(envelope.input)).toBe(generatedValid);
     },
   );
 
   it.each(fixtures)('$name', ({ fileName, candidate, valid }) => {
-    const zodValid = parseWithSchema(getZodSchema(fileName), candidate).ok;
+    const ownerValid = parseWithSchema(getOwnerSchema(fileName), candidate).ok;
     const jsonSchemaValid = compileGeneratedSchema(fileName)(candidate);
 
-    expect(zodValid).toBe(valid);
+    expect(ownerValid).toBe(valid);
     expect(jsonSchemaValid).toBe(valid);
   });
 
@@ -625,7 +625,7 @@ describe('Zod and generated JSON Schema conformance', () => {
     '$name is a runtime-only check',
     ({ fileName, candidate, reason }) => {
       expect(reason).not.toBe('');
-      expect(parseWithSchema(getZodSchema(fileName), candidate).ok).toBe(false);
+      expect(parseWithSchema(getOwnerSchema(fileName), candidate).ok).toBe(false);
       expect(compileGeneratedSchema(fileName)(candidate)).toBe(true);
     },
   );

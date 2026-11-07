@@ -1,10 +1,11 @@
+import * as Effect from 'effect/Effect';
 import { METRIC_PROTOCOL, type MetricRequest } from '@attest/contracts';
 import type { CaseEnvironment } from '@attest/executor';
 import { describe, expect, it } from 'vitest';
 
 import { createEnvironmentMetricTransport } from '../environment-transport.js';
 
-type ExecResult = Awaited<ReturnType<CaseEnvironment['exec']>>;
+type ExecResult = Effect.Success<ReturnType<CaseEnvironment['exec']>>;
 
 /**
  * Records every write and script, answers `pwd` with a fixed workspace and returns the canned
@@ -19,17 +20,21 @@ const fakeEnvironment = (command: (script: string) => Promise<ExecResult>) => {
       scripts.push({ script, env: options?.env });
 
       return script.endsWith('pwd')
-        ? Promise.resolve({ stdout: '/vercel/sandbox/workspace\n', stderr: '', exitCode: 0 })
-        : command(script);
+        ? Effect.succeed({ stdout: '/vercel/sandbox/workspace\n', stderr: '', exitCode: 0 })
+        : Effect.tryPromise({
+            try: () => command(script),
+            catch: (cause) =>
+              cause instanceof Error ? cause : new Error('fake command failed', { cause }),
+          });
     },
-    readFile: () => Promise.reject(new Error('not used')),
+    readFile: () => Effect.fail(new Error('not used')),
     writeFile: (path, contents) => {
       writes.set(path, contents);
 
-      return Promise.resolve();
+      return Effect.void;
     },
-    beginFinalization: () => Promise.resolve(),
-    dispose: () => Promise.resolve(),
+    beginFinalization: () => Effect.void,
+    dispose: () => Effect.void,
   };
 
   return { environment, writes, scripts };
@@ -69,10 +74,8 @@ describe('createEnvironmentMetricTransport', () => {
       Promise.resolve({ stdout: '{"score":1,"pass":true}', stderr: '', exitCode: 0 }),
     );
 
-    const outcome = await createEnvironmentMetricTransport(fake.environment)(
-      definition,
-      request,
-      options,
+    const outcome = await Effect.runPromise(
+      createEnvironmentMetricTransport(fake.environment)(definition, request, options),
     );
 
     expect(outcome).toEqual({ ok: true, text: '{"score":1,"pass":true}' });
@@ -100,7 +103,9 @@ describe('createEnvironmentMetricTransport', () => {
     );
 
     expect(
-      await createEnvironmentMetricTransport(failing.environment)(definition, request, options),
+      await Effect.runPromise(
+        createEnvironmentMetricTransport(failing.environment)(definition, request, options),
+      ),
     ).toEqual({
       ok: false,
       error: {
@@ -115,7 +120,9 @@ describe('createEnvironmentMetricTransport', () => {
     );
 
     expect(
-      await createEnvironmentMetricTransport(noisy.environment)(definition, request, options),
+      await Effect.runPromise(
+        createEnvironmentMetricTransport(noisy.environment)(definition, request, options),
+      ),
     ).toMatchObject({ ok: false, error: { code: 'exec_malformed_output' } });
 
     const controller = new AbortController();
@@ -129,10 +136,12 @@ describe('createEnvironmentMetricTransport', () => {
     );
 
     expect(
-      await createEnvironmentMetricTransport(hanging.environment)(definition, request, {
-        ...options,
-        signal: controller.signal,
-      }),
+      await Effect.runPromise(
+        createEnvironmentMetricTransport(hanging.environment)(definition, request, {
+          ...options,
+          signal: controller.signal,
+        }),
+      ),
     ).toMatchObject({ ok: false, error: { code: 'metric_cancelled' } });
   });
 });

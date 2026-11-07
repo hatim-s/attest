@@ -21,7 +21,7 @@ type ImportCliOptions = MutationCliOptions & {
   sync?: ImportPolicy['sync'];
 };
 
-const IMPORT_POLICY = caseImportOptionsSchema.shape;
+const IMPORT_POLICY = caseImportOptionsSchema.fields;
 
 /** Help defaults local applies when the import policy leaves them out. */
 const IMPORT_OPTION_HELP = {
@@ -34,7 +34,7 @@ const addImportOptions = (command: Command): Command =>
   addMutationOptions(command)
     .addOption(
       new Option('--format <format>', 'stdin or explicit import format').choices(
-        IMPORT_POLICY.format.unwrap().options,
+        IMPORT_POLICY.format.schema.members[0].literals,
       ),
     )
     .option('--map <destination=source>', 'explicit field mapping; repeatable', collect)
@@ -43,17 +43,17 @@ const addImportOptions = (command: Command): Command =>
     .option('--key <source>', 'stable source key for incremental imports')
     .addOption(
       new Option('--dedupe <basis>', 'within-import dedupe basis').choices(
-        IMPORT_POLICY.dedupe.unwrap().options,
+        IMPORT_POLICY.dedupe.schema.members[0].literals,
       ),
     )
     .addOption(
       new Option('--on-conflict <policy>', 'existing-case conflict policy').choices(
-        IMPORT_POLICY.on_conflict.unwrap().options,
+        IMPORT_POLICY.on_conflict.schema.members[0].literals,
       ),
     )
     .addOption(
       new Option('--sync <policy>', 'incremental import policy').choices(
-        IMPORT_POLICY.sync.unwrap().options,
+        IMPORT_POLICY.sync.schema.members[0].literals,
       ),
     );
 
@@ -73,23 +73,24 @@ const parseMapping = (value: string): DatasetImportMapping => {
 
 /** Maps the import flags onto the request's `import` policy. */
 const importRequestFields = (options: ImportCliOptions): ImportPolicy => {
-  const policy: ImportPolicy = {};
+  let policy: ImportPolicy = {};
 
-  if (options.format !== undefined) policy.format = options.format;
+  if (options.format !== undefined) policy = { ...policy, format: options.format };
 
-  if (options.map !== undefined) policy.mapping = options.map.map(parseMapping);
+  if (options.map !== undefined) policy = { ...policy, mapping: options.map.map(parseMapping) };
 
-  if (options.parseJson !== undefined) policy.parse_json = options.parseJson;
+  if (options.parseJson !== undefined) policy = { ...policy, parse_json: options.parseJson };
 
-  if (options.recordsPointer !== undefined) policy.records_pointer = options.recordsPointer;
+  if (options.recordsPointer !== undefined)
+    policy = { ...policy, records_pointer: options.recordsPointer };
 
-  if (options.key !== undefined) policy.key = options.key;
+  if (options.key !== undefined) policy = { ...policy, key: options.key };
 
-  if (options.dedupe !== undefined) policy.dedupe = options.dedupe;
+  if (options.dedupe !== undefined) policy = { ...policy, dedupe: options.dedupe };
 
-  if (options.onConflict !== undefined) policy.on_conflict = options.onConflict;
+  if (options.onConflict !== undefined) policy = { ...policy, on_conflict: options.onConflict };
 
-  if (options.sync !== undefined) policy.sync = options.sync;
+  if (options.sync !== undefined) policy = { ...policy, sync: options.sync };
 
   return policy;
 };

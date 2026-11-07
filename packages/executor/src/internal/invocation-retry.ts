@@ -1,17 +1,36 @@
+import * as Cause from 'effect/Cause';
+import * as Context from 'effect/Context';
+import * as Exit from 'effect/Exit';
+import { stripStruct } from '@attest/contracts';
 import { parseAgentResponse, type ContractIssue } from '@attest/contracts';
-import { z } from 'zod';
+import * as Effect from 'effect/Effect';
+import * as Schema from 'effect/Schema';
 
 import { AgentInvocationError } from '../errors.js';
 import { createRawExcerpt } from './raw-excerpt.js';
 import type { InvocationAttempt, InvocationDiagnostics, InvocationResult } from '../types.js';
 
-type InvocationAttemptFactory = (attemptIndex: number) => Promise<InvocationAttempt>;
+/** Captures completed retries on the failed Cause without changing shared error objects. */
+class InvocationPriorAttempts extends Context.Service<
+  InvocationPriorAttempts,
+  readonly InvocationAttempt[]
+>()('attest/InvocationPriorAttempts') {}
+
+/** Inspects native retry evidence; this receipt is not a transport or persisted field. */
+const getInvocationPriorAttempts = <E>(cause: Cause.Cause<E>): readonly InvocationAttempt[] =>
+  Context.getOrUndefined(Cause.annotations(cause), InvocationPriorAttempts) ?? [];
+
+type InvocationAttemptFactory<E = never, R = never> = (
+  attemptIndex: number,
+) => Effect.Effect<InvocationAttempt, E, R>;
 
 /**
  * Public entries take a raw retry count that never passed through `retryPolicySchema`. A NaN or
  * Infinity count would never end the retry loop, so entries parse it before any transport work.
  */
-const retryBudgetSchema = z.object({ retries: z.int().nonnegative() });
+const retryBudgetSchema = stripStruct({
+  retries: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+});
 
 const withAttemptEvidence = (attempt: InvocationAttempt): InvocationAttempt => {
   if (attempt.rawExcerpt !== undefined) return attempt;
@@ -58,6 +77,8 @@ const isRetryableInvocationError = (
 ): boolean => {
   if (diagnostics.sandboxCompletionConfirmed === false) return false;
 
+  if (error.applicationStarted === true) return false;
+
   if (error.code === 'cancelled') return false;
 
   if (error.code !== 'http_status') return true;
@@ -66,15 +87,30 @@ const isRetryableInvocationError = (
 };
 
 /** Runs transport attempts under the common validation, evidence, and retry rules. */
-const invokeWithRetries = async (
-  invokeOnce: InvocationAttemptFactory,
+const invokeWithRetries = Effect.fn('invokeWithRetries')(function* <E, R>(
+  invokeOnce: InvocationAttemptFactory<E, R>,
   retries: number,
-): Promise<InvocationResult> => {
+): Effect.fn.Return<InvocationResult, E, R> {
   const attempts: InvocationAttempt[] = [];
   let attemptIndex = 0;
 
   for (;;) {
-    const transportAttempt = withAttemptEvidence(await invokeOnce(attemptIndex));
+    const exit = yield* Effect.exit(invokeOnce(attemptIndex));
+
+    if (Exit.isFailure(exit)) {
+      return yield* Effect.failCause(
+        Cause.annotate(
+          exit.cause,
+          Context.make(
+            InvocationPriorAttempts,
+            Object.freeze([...attempts, ...getInvocationPriorAttempts(exit.cause)]),
+          ),
+          { overwrite: true },
+        ),
+      );
+    }
+
+    const transportAttempt = withAttemptEvidence(exit.value);
 
     const attempt =
       transportAttempt.status === 'ok'
@@ -94,6 +130,11 @@ const invokeWithRetries = async (
 
     attemptIndex += 1;
   }
-};
+});
 
-export { invokeWithRetries, retryBudgetSchema, type InvocationAttemptFactory };
+export {
+  getInvocationPriorAttempts,
+  invokeWithRetries,
+  retryBudgetSchema,
+  type InvocationAttemptFactory,
+};

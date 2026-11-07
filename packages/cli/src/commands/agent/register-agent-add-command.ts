@@ -1,3 +1,4 @@
+import * as Effect from 'effect/Effect';
 import {
   agentTransportSchema,
   webSocketConnectionModeSchema,
@@ -46,7 +47,7 @@ type AddOptions = MutationCliOptions &
     websocketUrl?: string;
   };
 
-const [, , bridgeTransport, , , streamTransport] = agentTransportSchema.options;
+const [, , bridgeTransport, , , streamTransport] = agentTransportSchema.members;
 
 /** Help-only hints: these WebSocket and stream flags take effect only with the flag they imply. */
 const ADD_IMPLIES = new Map(
@@ -135,22 +136,22 @@ const registerAgentAddCommand = (agent: Command, context: CommandContext): void 
     .option('--query <name=value>', 'callback trigger query value; repeatable', collect)
     .addOption(
       new Option('--stream-framing <framing>', 'stream framing').choices(
-        streamTransport.shape.framing.options,
+        streamTransport.fields.framing.literals,
       ),
     )
     .addOption(
       new Option('--bridge-concurrency <mode>', 'JSONL bridge concurrency').choices(
-        bridgeTransport.shape.concurrency.options,
+        bridgeTransport.fields.concurrency.literals,
       ),
     )
     .addOption(
       new Option('--websocket-lifecycle <lifecycle>', 'WebSocket connection lifecycle').choices(
-        webSocketTransportSchema.shape.lifecycle.options,
+        webSocketTransportSchema.fields.lifecycle.literals,
       ),
     )
     .addOption(
       new Option('--connection-mode <mode>', 'WebSocket request concurrency').choices(
-        webSocketConnectionModeSchema.options,
+        webSocketConnectionModeSchema.literals,
       ),
     )
     .option('--subprotocol <token>', 'one plain WebSocket subprotocol token')
@@ -179,7 +180,7 @@ const registerAgentAddCommand = (agent: Command, context: CommandContext): void 
     .option('--incremental-output-pointer <pointer>', 'stream incremental output JSON Pointer')
     .addOption(
       new Option('--incremental-output-mode <mode>', 'stream accumulation mode').choices(
-        streamTransport.shape.incremental_output_mode.unwrap().options,
+        streamTransport.fields.incremental_output_mode.schema.members[0].literals,
       ),
     )
     .option('--env <target=source>', 'environment secret reference', collect)
@@ -191,42 +192,50 @@ const registerAgentAddCommand = (agent: Command, context: CommandContext): void 
     .option('--ping-interval <duration>', 'WebSocket ping interval')
     .option('--close-timeout <duration>', 'WebSocket graceful close timeout')
     .option('--trace', 'declare trace support')
-    .action(async (agentId: string | undefined, options: AddOptions, leaf: Command) => {
-      const fields = agentAddFields(agentId, options);
-      const interactive = isInteractive(options, context.interaction, options.fromJson);
-      const prompt = { interactive, prompt: context.interaction.prompt };
+    .action((agentId: string | undefined, options: AddOptions, leaf: Command) =>
+      context.submit(
+        Effect.gen(function* () {
+          const fields = agentAddFields(agentId, options);
+          const interactive = isInteractive(options, context.interaction, options.fromJson);
+          const prompt = { interactive, prompt: context.interaction.prompt };
 
-      const request = await readOrBuildRequest({
-        command: 'agent.add',
-        context,
-        leaf,
-        options,
-        build: async () => {
-          const id = await requiredInput(
-            agentId,
-            { path: '<agent-id>', question: 'Agent id: ' },
-            prompt,
-          );
+          const request = yield* readOrBuildRequest({
+            command: 'agent.add',
+            context,
+            leaf,
+            options,
+            build: () =>
+              Effect.gen(function* () {
+                const id = yield* Effect.tryPromise({
+                  try: () =>
+                    requiredInput(agentId, { path: '<agent-id>', question: 'Agent id: ' }, prompt),
+                  catch: (cause) => cause,
+                });
 
-          const guided = await promptTransportFields({ ...fields, agentId: id }, prompt);
+                const guided = yield* Effect.tryPromise({
+                  try: () => promptTransportFields({ ...fields, agentId: id }, prompt),
+                  catch: (cause) => cause,
+                });
 
-          return {
-            ...mutationRequestFields('agent.add', options),
-            agent: createAgentResource(guided),
-          };
-        },
-      });
+                return {
+                  ...mutationRequestFields('agent.add', options),
+                  agent: createAgentResource(guided),
+                };
+              }),
+          });
 
-      const result = await runAgentAddCommand({
-        interactive,
-        project: options.project,
-        prompt: context.interaction.prompt,
-        request,
-        workingDirectory: context.workingDirectory,
-      });
+          const result = yield* runAgentAddCommand({
+            interactive,
+            project: options.project,
+            prompt: context.interaction.prompt,
+            request,
+            workingDirectory: context.workingDirectory,
+          });
 
-      context.io.output(renderCommandResult('agent.add', outputFormat(options), result));
-    });
+          context.io.output(renderCommandResult('agent.add', outputFormat(options), result));
+        }),
+      ),
+    );
 
   setMutationHelp(add, {
     examples: [

@@ -13,7 +13,7 @@ const extractRemoteError = (
   if (!isJsonObject(value) || !isString(value.message)) return { message: fallbackMessage };
   const result: AgentErrorResponse['error'] = { message: value.message };
 
-  if (isString(value.code)) result.code = value.code;
+  if (isString(value.code)) return { ...result, code: value.code };
 
   return result;
 };

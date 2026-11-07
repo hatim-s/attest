@@ -1,3 +1,4 @@
+import * as Effect from 'effect/Effect';
 import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -79,10 +80,11 @@ test('boots a sandbox only for cases with an exec metric and seeds the scripts t
     },
   );
 
-  expect(await isolation(context(0))).toBeUndefined();
+  expect(await Effect.runPromise(isolation(context(0)))).toBeUndefined();
 
-  const environment = await isolation(context(1));
-  await environment?.dispose();
+  const environment = await Effect.runPromise(isolation(context(1)));
+
+  if (environment) await Effect.runPromise(environment.dispose());
 
   expect(seeded).toEqual([
     [

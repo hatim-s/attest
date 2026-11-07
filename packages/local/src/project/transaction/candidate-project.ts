@@ -132,7 +132,7 @@ const prepareProjectCandidate = (candidate: ProjectResources): PreparedProjectCa
     content_hash: addJsonResource(files, `attest/metrics/${metric.id}.json`, metric),
   }));
 
-  const manifest: ProjectManifest = {
+  let manifest: ProjectManifest = {
     schema: candidate.project.schema,
     project_id: candidate.project.project_id,
     name: candidate.project.name,
@@ -145,7 +145,7 @@ const prepareProjectCandidate = (candidate: ProjectResources): PreparedProjectCa
   };
 
   if (!(candidate.project.defaults === undefined)) {
-    manifest.defaults = candidate.project.defaults;
+    manifest = { ...manifest, defaults: candidate.project.defaults };
   }
 
   const project: ProjectResources = { agents, datasets, metrics, project: manifest, tests };

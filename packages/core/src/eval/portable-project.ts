@@ -1,4 +1,4 @@
-import { z } from 'zod';
+import * as Schema from 'effect/Schema';
 import {
   parseWithSchema,
   parseWithSchemaSync,
@@ -98,7 +98,7 @@ const resolvePortableProject = (input: PortableProjectBundle): ResolutionProject
           rows = source
             .split(/\r?\n/u)
             .filter((line) => line.trim())
-            .map((line) => parseWithSchemaSync(z.json(), JSON.parse(line)));
+            .map((line) => parseWithSchemaSync(Schema.Json, JSON.parse(line)));
         } catch {
           throw new EvalResolutionError('project_invalid', `Invalid JSONL in ${entry.data_path}.`);
         }

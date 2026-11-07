@@ -1,33 +1,31 @@
-import { z } from 'zod';
+import * as Schema from 'effect/Schema';
 import type { ApiCapabilities } from '@attest/api/contract';
 import type { ProjectRecord } from '@attest/core/records';
 
-const identity = z
-  .string()
-  .min(1)
-  .max(256)
-  .refine((value) => value.trim().length > 0);
+const identity = Schema.String.check(
+  Schema.isMinLength(1),
+  Schema.isMaxLength(256),
+  Schema.makeFilter((value) => value.trim().length > 0),
+);
 
 const projectScope = { sourceId: identity, projectKey: identity };
 
 const scope = { ...projectScope, evalId: identity };
 
-const recentTargetSchema = z.discriminatedUnion('kind', [
-  z.object({ ...projectScope, kind: z.literal('project-run'), runId: identity }).strict(),
-  z
-    .object({
-      ...scope,
-      kind: z.literal('project-run-case'),
-      runId: identity,
-      caseId: identity,
-    })
-    .strict(),
-  z.object({ ...scope, kind: z.literal('run'), runId: identity }).strict(),
-  z.object({ ...scope, kind: z.literal('case'), caseId: identity }).strict(),
-  z.object({ ...scope, kind: z.literal('run-case'), runId: identity, caseId: identity }).strict(),
+const recentTargetSchema = Schema.Union([
+  Schema.Struct({ ...projectScope, kind: Schema.Literal('project-run'), runId: identity }),
+  Schema.Struct({
+    ...scope,
+    kind: Schema.Literal('project-run-case'),
+    runId: identity,
+    caseId: identity,
+  }),
+  Schema.Struct({ ...scope, kind: Schema.Literal('run'), runId: identity }),
+  Schema.Struct({ ...scope, kind: Schema.Literal('case'), caseId: identity }),
+  Schema.Struct({ ...scope, kind: Schema.Literal('run-case'), runId: identity, caseId: identity }),
 ]);
 
-type RecentTarget = z.infer<typeof recentTargetSchema>;
+type RecentTarget = typeof recentTargetSchema.Type;
 
 type ShellTarget =
   | { kind: 'projects'; sourceId: string }

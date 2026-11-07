@@ -1,3 +1,16 @@
+import * as Deferred from 'effect/Deferred';
+import * as Fiber from 'effect/Fiber';
+import * as Cause from 'effect/Cause';
+import * as Context from 'effect/Context';
+import {
+  EvalApplicationCompletion,
+  applicationStore,
+} from '../../commands/eval/eval-application.js';
+import { evalApplicationFixture } from './eval-application-fixture.js';
+import { withEvalApplication } from '../../commands/eval/eval-application.js';
+import { createClient } from '@libsql/client';
+import { valueFromExit } from '../../internal/effect-exit.js';
+import * as Effect from 'effect/Effect';
 import {
   access,
   mkdtemp,
@@ -37,7 +50,7 @@ import { runProjectInitCommand } from '../../commands/project/project-init-comma
 import { REDACTED } from '../../internal/redaction.js';
 import { loadProject } from '../../project/project-loader/index.js';
 import { applyProjectMutation } from '../../project/transaction/transactional-writer.js';
-import { openStore } from '../../store/index.js';
+import { openTestStore as openStore, run as executeB2 } from '../../store/_tests_/b1-fixture.js';
 import { cancelConfiguration, runConfiguration } from '../run-configuration.js';
 
 type EvalProjectOptions = {
@@ -108,47 +121,69 @@ const terminalFailure = (code: 'cancelled' | 'run_failed', message: string): Eva
  */
 const createEvalProject = async (options: EvalProjectOptions = {}): Promise<string> => {
   const root = await temporaryDirectory('attest-run-configuration-');
-  await runProjectInitCommand({
-    directory: '.',
-    interactive: false,
-    name: 'Eval integration',
-    readStdin: () => Promise.resolve(''),
-    // The registry rejects symlinked ancestors, and macOS `tmpdir()` sits behind `/var`.
-    registryPath: join(
-      await realpath(await temporaryDirectory('attest-registry-')),
-      'projects.json',
-    ),
-    workingDirectory: root,
-  });
+  await Effect.runPromiseExit(
+    runProjectInitCommand({
+      directory: '.',
+      interactive: false,
+      name: 'Eval integration',
+      readStdin: () => Promise.resolve(''),
+      // The registry rejects symlinked ancestors, and macOS `tmpdir()` sits behind `/var`.
+      registryPath: join(
+        await realpath(await temporaryDirectory('attest-registry-')),
+        'projects.json',
+      ),
+      workingDirectory: root,
+    }),
+  ).then(valueFromExit);
   await writeFile(join(root, 'agent.mjs'), options.agentSource ?? ECHO_AGENT);
-  const candidate = candidateFromLoadedProject(await loadProject({ project: root }));
-  candidate.agents.push({
-    schema: AGENT_RESOURCE_SCHEMA_ID,
-    id: 'support',
-    name: 'support',
-    transport: {
-      kind: 'native_cli',
-      lifecycle: 'per_case',
-      argv: [process.execPath, './agent.mjs'],
-    },
-  });
-  candidate.metrics.push(
-    {
-      schema: METRIC_RESOURCE_SCHEMA_ID,
-      id: 'exact',
-      name: 'exact',
-      definition: {
-        kind: 'assertion',
-        assertions: [{ equals: { path: '$.output', value: 'Paris' } }],
+
+  let candidate = candidateFromLoadedProject(
+    await Effect.runPromiseExit(loadProject({ project: root })).then((exit) => valueFromExit(exit)),
+  );
+
+  candidate = {
+    ...candidate,
+    agents: [
+      ...candidate.agents,
+      {
+        schema: AGENT_RESOURCE_SCHEMA_ID,
+        id: 'support',
+        name: 'support',
+        transport: {
+          kind: 'native_cli',
+          lifecycle: 'per_case',
+          argv: [process.execPath, './agent.mjs'],
+        },
       },
-    },
-    ...(options.metrics ?? []),
+    ],
+  };
+  candidate = {
+    ...candidate,
+    metrics: [
+      ...candidate.metrics,
+      {
+        schema: METRIC_RESOURCE_SCHEMA_ID,
+        id: 'exact',
+        name: 'exact',
+        definition: {
+          kind: 'assertion',
+          assertions: [{ equals: { path: '$.output', value: 'Paris' } }],
+        },
+      },
+      ...(options.metrics ?? []),
+    ],
+  };
+  candidate = {
+    ...candidate,
+    tests: [
+      ...candidate.tests,
+      testResource('smoke', 'exact', [{ id: 'capital', input: 'Paris' }]),
+      ...(options.tests ?? []),
+    ],
+  };
+  await Effect.runPromiseExit(applyProjectMutation({ candidate, projectRoot: root })).then((exit) =>
+    valueFromExit(exit),
   );
-  candidate.tests.push(
-    testResource('smoke', 'exact', [{ id: 'capital', input: 'Paris' }]),
-    ...(options.tests ?? []),
-  );
-  await applyProjectMutation({ candidate, projectRoot: root });
 
   return root;
 };
@@ -157,19 +192,21 @@ const startEval = async (
   root: string,
   selection: Partial<EvalRunRequest>,
 ): Promise<AsyncIterable<EvalEvent>> =>
-  runConfiguration(
-    parseWithSchemaSync(evalRunRequestSchema, {
-      schema: COMMAND_REQUEST_SCHEMA_ID,
-      command: 'eval.run',
-      output: 'json',
-      ...selection,
-    }),
-    {
-      argv: ['eval', 'run'],
-      signal: new AbortController().signal,
-      terminalFailure,
-      workingDirectory: root,
-    },
+  evalApplicationFixture(
+    runConfiguration(
+      parseWithSchemaSync(evalRunRequestSchema, {
+        schema: COMMAND_REQUEST_SCHEMA_ID,
+        command: 'eval.run',
+        output: 'json',
+        ...selection,
+      }),
+      {
+        argv: ['eval', 'run'],
+        signal: new AbortController().signal,
+        terminalFailure,
+        workingDirectory: root,
+      },
+    ),
   );
 
 /** Drains an eval stream and returns its run id and final result. */
@@ -210,7 +247,7 @@ describe('runConfiguration', () => {
     const store = await openStore(join(root, '.attest', 'runs.db'));
 
     try {
-      const diff = await diffRuns(store.runs, all.runId, smoke.runId);
+      const diff = await executeB2(diffRuns(store.runs, all.runId, smoke.runId));
       expect(diff.summary.coverage).toEqual({
         sharedCases: 1,
         baseOnlyCases: 1,
@@ -224,7 +261,8 @@ describe('runConfiguration', () => {
   });
 
   it('executes and persists only sampled folder/tag matches and compares their shared baseline cases', async () => {
-    const sampled = Array.from({ length: 100 }, (_, index): TestCase => ({
+    // Each case launches a real agent process. Twelve cases still exercise filtering and sampling.
+    const sampled = Array.from({ length: 12 }, (_, index): TestCase => ({
       id: `sample-${index}`,
       input: 'Paris',
       params: { index },
@@ -233,10 +271,23 @@ describe('runConfiguration', () => {
     }));
 
     const root = await createEvalProject();
-    const loaded = await loadProject({ project: root });
-    const candidate = candidateFromLoadedProject(loaded);
-    candidate.tests[0]!.cases.push(...sampled);
-    await applyProjectMutation({ candidate, projectRoot: root });
+
+    const loaded = await Effect.runPromiseExit(loadProject({ project: root })).then((exit) =>
+      valueFromExit(exit),
+    );
+
+    let candidate = candidateFromLoadedProject(loaded);
+    candidate = {
+      ...candidate,
+      tests: candidate.tests.map((entry, index) =>
+        index === 0
+          ? { ...candidate.tests[0]!, cases: [...candidate.tests[0]!.cases, ...sampled] }
+          : entry,
+      ),
+    };
+    await Effect.runPromiseExit(applyProjectMutation({ candidate, projectRoot: root })).then(
+      (exit) => valueFromExit(exit),
+    );
 
     const baseline = await runEval(root, { test_ids: ['smoke'] });
 
@@ -244,7 +295,7 @@ describe('runConfiguration', () => {
       test_ids: ['smoke'],
       folders: ['billing'],
       tags: ['smoke'],
-      sample: { count: 25, seed: 'integration' },
+      sample: { count: 3, seed: 'integration' },
       baseline_run_id: baseline.runId,
     });
 
@@ -252,40 +303,40 @@ describe('runConfiguration', () => {
 
     if (started?.event !== 'run_started') throw new Error('Expected sampled run start.');
     expect(started.data.selection).toMatchObject({
-      total_cases: 101,
-      matched_cases: 50,
-      selected_cases: 25,
+      total_cases: 13,
+      matched_cases: 6,
+      selected_cases: 3,
     });
-    expect(selected.events.filter((event) => event.event === 'case_started')).toHaveLength(25);
+    expect(selected.events.filter((event) => event.event === 'case_started')).toHaveLength(3);
     expect(selected.final).toMatchObject({
-      result: { result: { selection: started.data.selection, summary: { total_cases: 25 } } },
+      result: { result: { selection: started.data.selection, summary: { total_cases: 3 } } },
     });
 
     const store = await openStore(join(root, '.attest', 'runs.db'));
 
     try {
-      const stored = await store.runs.getRunWithCases(selected.runId);
+      const stored = await executeB2(store.runs.getRunWithCases(selected.runId));
 
       const snapshot = parseWithSchemaSync(
         evalRunSchema,
         JSON.parse(stored.run.configJson),
       ).snapshot;
 
-      expect(stored.cases).toHaveLength(25);
+      expect(stored.cases).toHaveLength(3);
       expect(snapshot.selected_cases.map(({ case_id }) => case_id).sort()).toEqual(
         stored.cases.map(({ caseId }) => caseId).sort(),
       );
       expect(
         stored.cases.every(({ caseId }) => Number(caseId.replace('sample-', '')) % 2 === 0),
       ).toBe(true);
-      const diff = await diffRuns(store.runs, baseline.runId, selected.runId);
+      const diff = await executeB2(diffRuns(store.runs, baseline.runId, selected.runId));
       expect(diff.summary.coverage).toEqual({
-        sharedCases: 25,
-        baseOnlyCases: 76,
+        sharedCases: 3,
+        baseOnlyCases: 10,
         candidateOnlyCases: 0,
       });
       expect(diff.summary.counts.removed).toBe(0);
-      expect(diff.transitions).toHaveLength(25);
+      expect(diff.transitions).toHaveLength(3);
     } finally {
       await store.close();
     }
@@ -295,12 +346,26 @@ describe('runConfiguration', () => {
     const root = await createEvalProject();
     const baseline = await runEval(root, { test_ids: ['smoke'] });
     await writeFile(join(root, 'fail-after-case.mjs'), 'process.exit(7);\n');
-    const candidate = candidateFromLoadedProject(await loadProject({ project: root }));
-    candidate.project.defaults = {
-      ...candidate.project.defaults,
-      eval: { hooks: { after_case: { argv: [process.execPath, './fail-after-case.mjs'] } } },
+
+    let candidate = candidateFromLoadedProject(
+      await Effect.runPromiseExit(loadProject({ project: root })).then((exit) =>
+        valueFromExit(exit),
+      ),
+    );
+
+    candidate = {
+      ...candidate,
+      project: {
+        ...candidate.project,
+        defaults: {
+          ...candidate.project.defaults,
+          eval: { hooks: { after_case: { argv: [process.execPath, './fail-after-case.mjs'] } } },
+        },
+      },
     };
-    await applyProjectMutation({ candidate, projectRoot: root });
+    await Effect.runPromiseExit(applyProjectMutation({ candidate, projectRoot: root })).then(
+      (exit) => valueFromExit(exit),
+    );
 
     const hooked = await runEval(root, { test_ids: ['smoke'] });
     expect(hooked.events.find(({ event }) => event === 'case_completed')?.data).toMatchObject({
@@ -314,14 +379,16 @@ describe('runConfiguration', () => {
     const store = await openStore(join(root, '.attest', 'runs.db'));
 
     try {
-      expect((await store.runs.getRun(hooked.runId)).summary).toMatchObject({
+      expect((await executeB2(store.runs.getRun(hooked.runId))).summary).toMatchObject({
         passedCases: 0,
         errorCases: 1,
       });
-      expect((await store.runs.listCaseSummaries(hooked.runId)).items).toMatchObject([
+      expect((await executeB2(store.runs.listCaseSummaries(hooked.runId))).items).toMatchObject([
         { caseId: 'capital', outcome: 'completed', verdict: 'error' },
       ]);
-      expect((await diffRuns(store.runs, baseline.runId, hooked.runId)).transitions).toMatchObject([
+      expect(
+        (await executeB2(diffRuns(store.runs, baseline.runId, hooked.runId))).transitions,
+      ).toMatchObject([
         { caseId: 'capital', baseVerdict: 'pass', candidateVerdict: 'error', kind: 'regressed' },
       ]);
     } finally {
@@ -360,7 +427,7 @@ describe('runConfiguration', () => {
     const store = await openStore(join(root, '.attest', 'runs.db'));
 
     try {
-      const firstRun = await store.runs.getRun(first.runId);
+      const firstRun = await executeB2(store.runs.getRun(first.runId));
       const persistedEval = parseWithSchemaSync(evalRunSchema, JSON.parse(firstRun.configJson));
       expect(firstRun).toMatchObject({
         status: 'completed',
@@ -373,8 +440,8 @@ describe('runConfiguration', () => {
         created_at: firstRun.createdAt,
         effective_command: { request: { command: 'eval.run', test_ids: ['smoke'] } },
       });
-      expect((await store.runs.getRun(second.runId)).status).toBe('completed');
-      expect((await store.runs.getRunWithCases(firstRun.id)).cases).toMatchObject([
+      expect((await executeB2(store.runs.getRun(second.runId))).status).toBe('completed');
+      expect((await executeB2(store.runs.getRunWithCases(firstRun.id))).cases).toMatchObject([
         {
           suiteName: 'smoke',
           caseId: 'capital',
@@ -509,8 +576,14 @@ describe('runConfiguration', () => {
     const store = await openStore(join(root, '.attest', 'runs.db'));
 
     try {
-      const passedEvidence = JSON.stringify((await store.runs.getRunWithCases(passed.runId)).cases);
-      const failedEvidence = JSON.stringify((await store.runs.getRunWithCases(failed.runId)).cases);
+      const passedEvidence = JSON.stringify(
+        (await executeB2(store.runs.getRunWithCases(passed.runId))).cases,
+      );
+
+      const failedEvidence = JSON.stringify(
+        (await executeB2(store.runs.getRunWithCases(failed.runId))).cases,
+      );
+
       expect(passedEvidence).toContain('retained');
 
       for (const evidence of [passedEvidence, failedEvidence]) {
@@ -552,15 +625,19 @@ describe('runConfiguration', () => {
     if (firstRunId === undefined) throw new Error('Expected a registered eval run.');
 
     await expect(
-      cancelConfiguration(
-        {
-          schema: COMMAND_REQUEST_SCHEMA_ID,
-          command: 'eval.cancel',
-          run_id: firstRunId,
-          output: 'json',
-        },
-        { workingDirectory: project },
-      ),
+      Effect.runPromiseExit(
+        withEvalApplication(
+          cancelConfiguration(
+            {
+              schema: COMMAND_REQUEST_SCHEMA_ID,
+              command: 'eval.cancel',
+              run_id: firstRunId,
+              output: 'json',
+            },
+            { workingDirectory: project },
+          ),
+        ),
+      ).then(valueFromExit),
     ).resolves.toMatchObject({ runId: firstRunId, status: 'cancellation_requested' });
 
     await writeFile(releasePath, 'release');
@@ -574,4 +651,140 @@ describe('runConfiguration', () => {
     expect(completed?.final).toMatchObject({ exit_code: 0, result: { ok: true } });
     expect(await readdir(join(project, '.attest', 'eval-runs'))).toEqual([]);
   }, 15_000);
+  it('retains cancellation ownership after failed durable finalization while closing its store', async () => {
+    const root = await createEvalProject();
+    const databasePath = join(root, '.attest', 'runs.db');
+    const setup = await openStore(databasePath);
+    await setup.close();
+    const driver = createClient({ url: `file:${databasePath}` });
+
+    try {
+      await driver.execute(
+        "CREATE TRIGGER reject_finalization BEFORE UPDATE OF status ON runs BEGIN SELECT RAISE(ABORT, 'finalization fixture'); END",
+      );
+    } finally {
+      driver.close();
+    }
+
+    const outcome = await runEval(root, { test_ids: ['smoke'] });
+    expect(outcome.final.result.ok).toBe(false);
+    expect(await readdir(join(root, '.attest', 'eval-runs'))).toContain(`${outcome.runId}.json`);
+    expect((await readdir(root)).filter((name) => name.endsWith('.opening'))).toEqual([]);
+    const store = await openStore(databasePath);
+
+    try {
+      await expect(executeB2(store.runs.getRun(outcome.runId))).resolves.toMatchObject({
+        status: 'running',
+      });
+    } finally {
+      await store.close();
+    }
+  }, 15_000);
+});
+
+it('keeps an eval alive after its action scope returns and joins it before database release', async () => {
+  const root = await createEvalProject();
+  let source: AsyncIterable<EvalEvent> | undefined;
+  await Effect.runPromiseExit(
+    withEvalApplication(
+      Effect.gen(function* () {
+        const first = yield* applicationStore(root);
+        expect(yield* applicationStore(root)).toBe(first);
+        source = yield* Effect.scoped(
+          runConfiguration(
+            parseWithSchemaSync(evalRunRequestSchema, {
+              schema: COMMAND_REQUEST_SCHEMA_ID,
+              command: 'eval.run',
+              output: 'json',
+              all: true,
+            }),
+            {
+              argv: ['eval', 'run'],
+              signal: new AbortController().signal,
+              terminalFailure,
+              workingDirectory: root,
+            },
+          ),
+        );
+        // The action returns without consuming progress. The application still owns the run.
+      }),
+    ),
+  ).then(valueFromExit);
+
+  if (source === undefined) throw new Error('Expected an event source.');
+  const outcome = await collectEval(source);
+  const store = await openStore(join(root, '.attest', 'runs.db'));
+
+  try {
+    expect(await executeB2(store.runs.getRun(outcome.runId))).toMatchObject({
+      status: 'completed',
+    });
+    expect(await readdir(join(root, '.attest', 'eval-runs'))).toEqual([]);
+  } finally {
+    await store.close();
+  }
+});
+
+it('native root interruption cancels as input and joins evidence before propagating interruption', async () => {
+  const root = await createEvalProject({
+    agentSource: ECHO_AGENT.replace(
+      'const request = JSON.parse(source);',
+      'const request = JSON.parse(source); await new Promise(resolve => setTimeout(resolve, 10000));',
+    ),
+  });
+
+  await Effect.runPromiseExit(
+    Effect.scoped(
+      Effect.gen(function* () {
+        const ready = yield* Deferred.make<AsyncIterable<EvalEvent>>();
+
+        const fiber = yield* Effect.forkScoped(
+          withEvalApplication(
+            Effect.gen(function* () {
+              const source = yield* runConfiguration(
+                parseWithSchemaSync(evalRunRequestSchema, {
+                  schema: COMMAND_REQUEST_SCHEMA_ID,
+                  command: 'eval.run',
+                  output: 'json',
+                  all: true,
+                }),
+                {
+                  argv: ['eval', 'run'],
+                  signal: new AbortController().signal,
+                  terminalFailure,
+                  workingDirectory: root,
+                },
+              );
+
+              yield* Deferred.succeed(ready, source);
+              yield* Effect.never;
+            }),
+          ),
+        );
+
+        const source = yield* Deferred.await(ready);
+        yield* Effect.sleep(100);
+        yield* Fiber.interrupt(fiber);
+        const exit = yield* Fiber.await(fiber);
+        expect(exit._tag).toBe('Failure');
+
+        if (exit._tag === 'Failure') {
+          expect(Cause.hasInterrupts(exit.cause)).toBe(true);
+          expect(
+            Context.getOrUndefined(Cause.annotations(exit.cause), EvalApplicationCompletion),
+          ).toHaveLength(1);
+        }
+
+        const outcome = yield* Effect.promise(() => collectEval(source));
+        expect(outcome.final).toMatchObject({
+          exit_code: 130,
+          result: { ok: false, error: { code: 'cancelled' } },
+        });
+        expect(outcome.events.some((event) => event.event === 'case_completed')).toBe(true);
+        expect(yield* Effect.promise(() => readdir(join(root, '.attest', 'eval-runs')))).toEqual(
+          [],
+        );
+      }),
+    ),
+  ).then(valueFromExit);
 });

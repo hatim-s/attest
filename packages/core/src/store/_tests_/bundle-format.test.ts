@@ -1,7 +1,7 @@
 import { AGENT_PROTOCOL } from '@attest/contracts';
 import { expect, it } from 'vitest';
 
-import { createBundle, verifyBundleLines } from '../bundle-format.js';
+import { createBundle, verifyBundleLines, parseBundleLine } from '../bundle-format.js';
 import { StoreError } from '../store-error.js';
 import type { CaseRecord, RunRecord } from '../types.js';
 
@@ -44,4 +44,16 @@ it('rejects the first duplicate case identity or row ID even when the bundle has
       new StoreError('CORRUPT_DATA', message),
     );
   }
+});
+
+it('keeps bundle corruption diagnostics attached to the identified record type', () => {
+  expect(() =>
+    parseBundleLine(JSON.stringify({ type: 'bundle_header', schema: 'foreign', run }), 0),
+  ).toThrow('Run bundle header uses unsupported schema "foreign"; expected "attest.bundle".');
+  expect(() =>
+    parseBundleLine(JSON.stringify({ type: 'case', case: { ...record, durationMs: -1 } }), 1),
+  ).toThrow('Run bundle case line 2 is malformed.');
+  expect(() =>
+    parseBundleLine(JSON.stringify({ type: 'bundle_footer', case_count: -1, content_hash: '' }), 2),
+  ).toThrow('Run bundle footer is malformed.');
 });

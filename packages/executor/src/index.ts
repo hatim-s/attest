@@ -2,13 +2,21 @@ export { AgentInvocationError, type InvocationErrorCode } from './errors.js';
 
 export { invokeAgent } from './invoke.js';
 
-export { invokeVercelSandboxAgent } from './adapters/sandbox/index.js';
+export { CliCleanupError } from './cli-invoker.js';
+
+export {
+  invokeVercelSandboxAgent,
+  isSandboxAttemptCleanupError,
+  SandboxAttemptCleanupError,
+} from './adapters/sandbox/index.js';
 
 export {
   killProcessTree,
   listDescendantProcesses,
   spawnInProcessGroup,
   type ProcessIdentity,
+  type ProcessSnapshot,
+  type ProcessCleanup,
 } from './internal/process-tree.js';
 
 export {
@@ -18,6 +26,7 @@ export {
 } from './adapters/http/index.js';
 
 export {
+  ProcessCleanupError,
   startBackgroundAgent,
   startJsonlBridgeAgent,
   type BackgroundAgentResource,
@@ -27,6 +36,7 @@ export {
 } from './adapters/process/index.js';
 
 export {
+  CallbackCleanupError,
   completeCallbackAgent,
   createLoopbackCompletionReceiver,
   invokeCallbackAgent,
@@ -37,9 +47,19 @@ export {
 
 export { enforceArtifactLimits } from './internal/artifact-limits.js';
 
-export { invokeStreamingAgent, type StreamAgentResource } from './adapters/stream/index.js';
+export {
+  StreamCleanupError,
+  invokeStreamingAgent,
+  type StreamAgentResource,
+} from './adapters/stream/index.js';
 
-export { startWebSocketAgent, type WebSocketAgentResource } from './adapters/websocket/index.js';
+export {
+  startWebSocketAgent,
+  WebSocketCleanupError,
+  withWebSocketAgent,
+  type WebSocketAgentSession,
+  type WebSocketAgentResource,
+} from './adapters/websocket/index.js';
 
 export {
   type InvocationResult,
@@ -53,3 +73,7 @@ export { justBashIsolation } from './isolation/just-bash.js';
 export { type CaseEnvironment, type CaseEnvironmentFactory } from './isolation/types.js';
 
 export { vercelSandboxIsolation } from './isolation/vercel.js';
+
+export { EnvironmentCleanupError, getEnvironmentCleanupCause } from './isolation/operation.js';
+
+export { getInvocationPriorAttempts } from './internal/invocation-retry.js';

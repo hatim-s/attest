@@ -1,25 +1,26 @@
-import type { RunSource } from '@attest/core';
+import * as Effect from 'effect/Effect';
+import type { RunSource, StoreError } from '@attest/core';
 import { toSuiteHistoryPoint, type SuiteHistory } from '../contract/responses.js';
 import { readCaseSummaries } from './read-case-summaries.js';
 
 /** Bounds history work by completed runs examined, including runs that lack this suite. */
-const readSuiteHistory = async (
+const readSuiteHistory = Effect.fn('readSuiteHistory')(function* (
   source: RunSource,
   suiteName: string,
   limit: number,
-): Promise<SuiteHistory> => {
-  const points: SuiteHistory['points'] = [];
+): Effect.fn.Return<SuiteHistory, StoreError> {
+  const points: SuiteHistory['points'][number][] = [];
   let runsExamined = 0;
   let cursor: string | undefined;
 
   do {
-    const page = await source.listRuns({ cursor, limit: limit - runsExamined });
+    const page = yield* source.listRuns({ cursor, limit: limit - runsExamined });
 
     for (const [index, run] of page.items.entries()) {
       if (run.status === 'running') continue;
       runsExamined += 1;
 
-      const point = toSuiteHistoryPoint(run, await readCaseSummaries(source, run.id), suiteName);
+      const point = toSuiteHistoryPoint(run, yield* readCaseSummaries(source, run.id), suiteName);
 
       if (point !== undefined) points.push(point);
 
@@ -36,6 +37,6 @@ const readSuiteHistory = async (
   } while (cursor !== undefined);
 
   return { suiteName, runsExamined, points, exhausted: true };
-};
+});
 
 export { readSuiteHistory };

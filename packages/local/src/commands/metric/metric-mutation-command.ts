@@ -1,3 +1,5 @@
+import { promptEffect } from '../shared/prompt-effect.js';
+import * as Effect from 'effect/Effect';
 import type { CommandRequest, MetricResource, ProjectResources } from '@attest/contracts';
 
 import { LocalError } from '../../errors/index.js';
@@ -69,109 +71,127 @@ const rewriteMetricReferences = (
   project: ProjectResources,
   from: string,
   to: string | undefined,
-): void => {
-  for (const test of project.tests) {
-    test.metrics =
-      to === undefined
-        ? test.metrics.filter(({ metric_id: id }) => id !== from)
-        : test.metrics.map((reference) =>
-            reference.metric_id === from ? { ...reference, metric_id: to } : reference,
-          );
-    test.cases.forEach((testCase) => {
-      if (testCase.metric_overrides === undefined) return;
-      testCase.metric_overrides =
-        to === undefined
-          ? testCase.metric_overrides.filter(({ metric_id: id }) => id !== from)
-          : testCase.metric_overrides.map((override) =>
-              override.metric_id === from ? { ...override, metric_id: to } : override,
-            );
-    });
-  }
+): ProjectResources => {
+  const rewriteCases = (cases: ProjectResources['tests'][number]['cases']) =>
+    cases.map((testCase) => {
+      if (testCase.metric_overrides === undefined) return testCase;
 
-  project.datasets.forEach((dataset) =>
-    dataset.cases.forEach((testCase) => {
-      if (testCase.metric_overrides === undefined) return;
-      testCase.metric_overrides =
+      return {
+        ...testCase,
+        metric_overrides:
+          to === undefined
+            ? testCase.metric_overrides.filter(({ metric_id }) => metric_id !== from)
+            : testCase.metric_overrides.map((override) =>
+                override.metric_id === from ? { ...override, metric_id: to } : override,
+              ),
+      };
+    });
+
+  return {
+    ...project,
+    tests: project.tests.map((test) => ({
+      ...test,
+      metrics:
         to === undefined
-          ? testCase.metric_overrides.filter(({ metric_id: id }) => id !== from)
-          : testCase.metric_overrides.map((override) =>
-              override.metric_id === from ? { ...override, metric_id: to } : override,
-            );
-    }),
-  );
+          ? test.metrics.filter(({ metric_id }) => metric_id !== from)
+          : test.metrics.map((reference) =>
+              reference.metric_id === from ? { ...reference, metric_id: to } : reference,
+            ),
+      cases: rewriteCases(test.cases),
+    })),
+    datasets: project.datasets.map((dataset) => ({
+      ...dataset,
+      cases: rewriteCases(dataset.cases),
+    })),
+  };
 };
 
 /** Builds and cross-validates the complete project candidate before transactional publication. */
-const buildMetricMutation = async (
+const buildMetricMutation = Effect.fn('buildMetricMutation')(function* (
   loaded: LoadedProject,
   request: MetricAuthoringRequest,
   options: MetricMutationCommandOptions,
-): Promise<MutationBuildResult> => {
-  const candidate = candidateFromLoadedProject(loaded);
+) {
+  try {
+    let candidate = candidateFromLoadedProject(loaded);
 
-  switch (request.command) {
-    case 'metric.add':
-      assertSafeMetricResource(request.metric);
-      assertNewId('metric', candidate.metrics, request.metric.id);
-      candidate.metrics.push(request.metric);
+    switch (request.command) {
+      case 'metric.add':
+        assertSafeMetricResource(request.metric);
+        assertNewId('metric', candidate.metrics, request.metric.id);
+        candidate = { ...candidate, metrics: [...candidate.metrics, request.metric] };
 
-      return { candidate, metric: request.metric };
-    case 'metric.import': {
-      assertNewId('metric', candidate.metrics, request.as);
+        return { candidate, metric: request.metric } satisfies MutationBuildResult;
+      case 'metric.import': {
+        assertNewId('metric', candidate.metrics, request.as);
 
-      const metric = await readImportedMetricResource(
-        request.source,
-        request.as,
-        request.name,
-        options.workingDirectory,
-        options.readStdin,
-      );
+        const metric = yield* readImportedMetricResource(
+          request.source,
+          request.as,
+          request.name,
+          options.workingDirectory,
+          options.readStdin,
+        );
 
-      candidate.metrics.push(metric);
+        candidate = { ...candidate, metrics: [...candidate.metrics, metric] };
 
-      return { candidate, metric };
-    }
-
-    case 'metric.rename': {
-      const metric = findResource('metric', candidate.metrics, request.metric_id);
-      assertNewId('metric', candidate.metrics, request.new_id);
-      metric.id = request.new_id;
-      rewriteMetricReferences(candidate, request.metric_id, request.new_id);
-
-      return {
-        candidate,
-        metric,
-        renames: [{ from: request.metric_id, to: request.new_id, type: 'metric' }],
-      };
-    }
-
-    case 'metric.remove': {
-      const metric = findResource('metric', candidate.metrics, request.metric_id);
-      const references = metricReferencePaths(candidate, request.metric_id);
-
-      if (references.length > 0 && request.detach !== true) {
-        throw new LocalError('project_invalid', 'Referenced metrics cannot be removed.', {
-          path: request.metric_id,
-          hint: 'Detach the metric from every test and case, or pass `--detach` explicitly.',
-          details: { reference_paths: references },
-        });
+        return { candidate, metric } satisfies MutationBuildResult;
       }
 
-      candidate.metrics = candidate.metrics.filter(({ id }) => id !== request.metric_id);
+      case 'metric.rename': {
+        let metric = findResource('metric', candidate.metrics, request.metric_id);
+        assertNewId('metric', candidate.metrics, request.new_id);
+        metric = { ...metric, id: request.new_id };
+        candidate = {
+          ...candidate,
+          metrics: candidate.metrics.map((entry) =>
+            entry.id === request.metric_id ? metric : entry,
+          ),
+        };
+        candidate = rewriteMetricReferences(candidate, request.metric_id, request.new_id);
 
-      if (request.detach === true) rewriteMetricReferences(candidate, request.metric_id, undefined);
+        return {
+          candidate,
+          metric,
+          renames: [{ from: request.metric_id, to: request.new_id, type: 'metric' as const }],
+        } satisfies MutationBuildResult;
+      }
 
-      return {
-        candidate,
-        metric,
-        warnings:
-          references.length === 0
-            ? undefined
-            : [`Detached ${references.length} metric references before removal.`],
-      };
+      case 'metric.remove': {
+        const metric = findResource('metric', candidate.metrics, request.metric_id);
+        const references = metricReferencePaths(candidate, request.metric_id);
+
+        if (references.length > 0 && request.detach !== true) {
+          throw new LocalError('project_invalid', 'Referenced metrics cannot be removed.', {
+            path: request.metric_id,
+            hint: 'Detach the metric from every test and case, or pass `--detach` explicitly.',
+            details: { reference_paths: references },
+          });
+        }
+
+        candidate = {
+          ...candidate,
+          metrics: candidate.metrics.filter(({ id }) => id !== request.metric_id),
+        };
+
+        if (request.detach === true)
+          candidate = rewriteMetricReferences(candidate, request.metric_id, undefined);
+
+        return {
+          candidate,
+          metric,
+          warnings:
+            references.length === 0
+              ? undefined
+              : [`Detached ${references.length} metric references before removal.`],
+        } satisfies MutationBuildResult;
+      }
     }
+  } catch (error) {
+    if (error instanceof LocalError) return yield* Effect.fail(error);
+    throw error;
   }
-};
+});
 
 const renderOperations = (operations: readonly SemanticProjectOperation[]): string =>
   operations
@@ -183,75 +203,85 @@ const renderOperations = (operations: readonly SemanticProjectOperation[]): stri
     .join('\n');
 
 /** Applies the shared preview-confirm-publish pipeline with the observed hash as commit guard. */
-const runMetricMutationCommand = async (
+const runMetricMutationCommand = Effect.fn('runMetricMutationCommand')(function* (
   options: MetricMutationCommandOptions,
-): Promise<CommandResult<'mutation', MutationResult>> => {
-  // Dry-run must not acquire a write-capable reader lock or recover transaction journals.
-  const loaded =
-    options.request.dry_run === true
-      ? await loadProject({ project: options.project, workingDirectory: options.workingDirectory })
-      : await loadCommandProject({
+) {
+  try {
+    // Dry-run must not acquire a write-capable reader lock or recover transaction journals.
+    const loaded = yield* options.request.dry_run === true
+      ? loadProject({ project: options.project, workingDirectory: options.workingDirectory })
+      : loadCommandProject({
           project: options.project,
           workingDirectory: options.workingDirectory,
         });
 
-  const built = await buildMetricMutation(loaded, options.request, options);
+    const built = yield* buildMetricMutation(loaded, options.request, options);
 
-  const mutationOptions = {
-    candidate: built.candidate,
-    expectedProjectHash: options.request.if_project_hash ?? loaded.projectHash,
-    projectRoot: loaded.root,
-    renames: built.renames,
-    warnings: built.warnings,
-  };
+    const mutationOptions = {
+      candidate: built.candidate,
+      expectedProjectHash: options.request.if_project_hash ?? loaded.projectHash,
+      projectRoot: loaded.root,
+      renames: built.renames,
+      warnings: built.warnings,
+    };
 
-  const destructive = options.request.command === 'metric.remove';
+    const destructive = options.request.command === 'metric.remove';
 
-  const mutation = await executeProjectMutation({
-    dryRun: options.request.dry_run === true,
-    mutation: mutationOptions,
-    confirm: async (preview) => {
-      if (options.request.yes === true) return;
+    const mutation = yield* executeProjectMutation({
+      dryRun: options.request.dry_run === true,
+      mutation: mutationOptions,
+      confirm: (preview) =>
+        Effect.gen(function* () {
+          try {
+            if (options.request.yes === true) return;
 
-      if (options.interactive && options.prompt !== undefined) {
-        const resourcePreview = destructive
-          ? `Remove metric ${built.metric.id}`
-          : JSON.stringify(redactMetricResource(built.metric), undefined, 2);
+            if (options.interactive && options.prompt !== undefined) {
+              const resourcePreview = destructive
+                ? `Remove metric ${built.metric.id}`
+                : JSON.stringify(redactMetricResource(built.metric), undefined, 2);
 
-        const answer = (
-          await options.prompt(
-            `${resourcePreview}\nSemantic diff:\n${renderOperations(preview.diff.operations)}\nApply these changes? [y/N]: `,
-          )
-        )
-          .trim()
-          .toLowerCase();
+              const answer = (yield* promptEffect(() =>
+                options.prompt!(
+                  `${resourcePreview}\nSemantic diff:\n${renderOperations(preview.diff.operations)}\nApply these changes? [y/N]: `,
+                ),
+              ))
+                .trim()
+                .toLowerCase();
 
-        if (answer !== 'y' && answer !== 'yes') {
-          throw new LocalError('cancelled', 'Metric mutation was not confirmed.');
-        }
-      } else if (destructive) {
-        throw new LocalError('cli_missing_input', 'Metric removal requires confirmation.', {
-          path: '--yes',
-          hint: 'Pass --yes, set `yes: true`, or preview with --dry-run.',
-        });
-      }
-    },
-  });
+              if (answer !== 'y' && answer !== 'yes') {
+                throw new LocalError('cancelled', 'Metric mutation was not confirmed.');
+              }
+            } else if (destructive) {
+              throw new LocalError('cli_missing_input', 'Metric removal requires confirmation.', {
+                path: '--yes',
+                hint: 'Pass --yes, set `yes: true`, or preview with --dry-run.',
+              });
+            }
+          } catch (error) {
+            if (error instanceof LocalError) return yield* Effect.fail(error);
+            throw error;
+          }
+        }),
+    });
 
-  const dryRun = options.request.dry_run === true;
+    const dryRun = options.request.dry_run === true;
 
-  return {
-    operation: 'mutation',
-    projectHashBefore: mutation.projectHashBefore,
-    projectHashAfter: mutation.projectHashAfter,
-    result: {
-      committed: mutation.committed,
-      dry_run: dryRun,
-      resource: { id: built.metric.id, type: 'metric' },
-      operations: mutation.diff.operations,
-    },
-    warnings: built.warnings?.map((message) => ({ code: 'metric_references_detached', message })),
-  };
-};
+    return {
+      operation: 'mutation' as const,
+      projectHashBefore: mutation.projectHashBefore,
+      projectHashAfter: mutation.projectHashAfter,
+      result: {
+        committed: mutation.committed,
+        dry_run: dryRun,
+        resource: { id: built.metric.id, type: 'metric' as const },
+        operations: mutation.diff.operations,
+      },
+      warnings: built.warnings?.map((message) => ({ code: 'metric_references_detached', message })),
+    } satisfies CommandResult<'mutation', MutationResult>;
+  } catch (error) {
+    if (error instanceof LocalError) return yield* Effect.fail(error);
+    throw error;
+  }
+});
 
 export { runMetricMutationCommand, type MetricAuthoringRequest, type MetricMutationCommandOptions };

@@ -1,3 +1,4 @@
+import * as Effect from 'effect/Effect';
 import { COMMAND_REQUEST_SCHEMA_ID } from '@attest/contracts';
 import {
   runListCommand,
@@ -42,24 +43,28 @@ const registerProjectInit = (
   addMutationOptions(command)
     .argument('[directory]', 'target project directory')
     .option('--name <name>', 'project display name; defaults to the directory name')
-    .action(async (directory: string | undefined, options: ProjectInitCliOptions) => {
-      const result = await runProjectInitCommand({
-        directory,
-        dryRun: options.dryRun,
-        expectedProjectHash: options.ifProjectHash,
-        fromJson: options.fromJson,
-        interactive: isInteractive(options, context.interaction, options.fromJson),
-        name: options.name,
-        prompt: context.interaction.prompt,
-        projectDirectory: options.project,
-        readStdin: context.interaction.readStdin,
-        registryPath: context.registryPath,
-        workingDirectory: context.workingDirectory,
-        yes: options.yes,
-      });
+    .action((directory: string | undefined, options: ProjectInitCliOptions) =>
+      context.submit(
+        Effect.gen(function* () {
+          const result = yield* runProjectInitCommand({
+            directory,
+            dryRun: options.dryRun,
+            expectedProjectHash: options.ifProjectHash,
+            fromJson: options.fromJson,
+            interactive: isInteractive(options, context.interaction, options.fromJson),
+            name: options.name,
+            prompt: context.interaction.prompt,
+            projectDirectory: options.project,
+            readStdin: context.interaction.readStdin,
+            registryPath: context.registryPath,
+            workingDirectory: context.workingDirectory,
+            yes: options.yes,
+          });
 
-      context.io.output(renderCommandResult('project.init', outputFormat(options), result));
-    });
+          context.io.output(renderCommandResult('project.init', outputFormat(options), result));
+        }),
+      ),
+    );
   setCliCommandHelpMetadata(command, {
     aliasFor,
     examples: [
@@ -116,14 +121,19 @@ const registerProjectResourceCommands = (context: CommandContext): void => {
 
   for (const { description, name, run } of inspections) {
     addCommonOptions(project.command(name).description(description)).action(
-      async (options: CommonCliOptions) => {
-        const result = await run({
-          project: options.project,
-          workingDirectory: context.workingDirectory,
-        });
+      (options: CommonCliOptions) =>
+        context.submit(
+          Effect.gen(function* () {
+            const result = yield* run({
+              project: options.project,
+              workingDirectory: context.workingDirectory,
+            });
 
-        context.io.output(renderCommandResult(`project.${name}`, outputFormat(options), result));
-      },
+            context.io.output(
+              renderCommandResult(`project.${name}`, outputFormat(options), result),
+            );
+          }),
+        ),
     );
   }
 
@@ -141,15 +151,19 @@ const registerProjectResourceCommands = (context: CommandContext): void => {
         'runs',
       ]),
     )
-    .action(async (resourceType: ListResourceType, options: CommonCliOptions) => {
-      const result = await runListCommand({
-        project: options.project,
-        resourceType,
-        workingDirectory: context.workingDirectory,
-      });
+    .action((resourceType: ListResourceType, options: CommonCliOptions) =>
+      context.submit(
+        Effect.gen(function* () {
+          const result = yield* runListCommand({
+            project: options.project,
+            resourceType,
+            workingDirectory: context.workingDirectory,
+          });
 
-      context.io.output(renderCommandResult('list', outputFormat(options), result));
-    });
+          context.io.output(renderCommandResult('list', outputFormat(options), result));
+        }),
+      ),
+    );
 
   addCommonOptions(context.program.command('show').description('Show one project resource.'))
     .addArgument(
@@ -162,16 +176,20 @@ const registerProjectResourceCommands = (context: CommandContext): void => {
       ]),
     )
     .argument('<id>', 'resource id')
-    .action(async (resourceType: ShowResourceType, id: string, options: CommonCliOptions) => {
-      const result = await runShowCommand({
-        id,
-        project: options.project,
-        resourceType,
-        workingDirectory: context.workingDirectory,
-      });
+    .action((resourceType: ShowResourceType, id: string, options: CommonCliOptions) =>
+      context.submit(
+        Effect.gen(function* () {
+          const result = yield* runShowCommand({
+            id,
+            project: options.project,
+            resourceType,
+            workingDirectory: context.workingDirectory,
+          });
 
-      context.io.output(renderCommandResult('show', outputFormat(options), result));
-    });
+          context.io.output(renderCommandResult('show', outputFormat(options), result));
+        }),
+      ),
+    );
 
   const schema = context.program
     .command('schema')

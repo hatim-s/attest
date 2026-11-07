@@ -153,8 +153,15 @@ describe('authored resource contracts', () => {
   });
 
   it('requires canonical project resource paths', () => {
-    const candidate = structuredClone(project);
-    candidate.resources.agents[0]!.path = 'agents/support.json';
+    const candidate = {
+      ...project,
+      resources: {
+        ...project.resources,
+        agents: project.resources.agents.map((entry, index) =>
+          index === 0 ? { ...entry, path: 'agents/support.json' } : entry,
+        ),
+      },
+    };
 
     const result = parseWithSchema(projectManifestSchema, candidate);
 
@@ -179,8 +186,13 @@ describe('authored resource contracts', () => {
   );
 
   it('rejects duplicate generated manifest ids before loading resources', () => {
-    const candidate = structuredClone(project);
-    candidate.resources.agents.push(structuredClone(candidate.resources.agents[0]!));
+    const candidate = {
+      ...project,
+      resources: {
+        ...project.resources,
+        agents: [...project.resources.agents, project.resources.agents[0]!],
+      },
+    };
 
     const result = parseWithSchema(projectManifestSchema, candidate);
 
@@ -196,9 +208,14 @@ describe('authored resource contracts', () => {
   });
 
   it('reports duplicate loaded dataset ids at metadata.id while aggregating other errors', () => {
-    const candidate = structuredClone(validProjectResources);
-    candidate.datasets.push(structuredClone(candidate.datasets[0]!));
-    candidate.tests[0]!.agent_id = 'missing-agent';
+    const candidate = {
+      ...validProjectResources,
+      datasets: [...validProjectResources.datasets, validProjectResources.datasets[0]!],
+      tests: validProjectResources.tests.map((entry, index) =>
+        index === 0 ? { ...entry, agent_id: 'missing-agent' } : entry,
+      ),
+    };
+
     const result = parseWithSchema(projectResourcesSchema, candidate);
 
     expect(result.ok).toBe(false);
@@ -214,12 +231,33 @@ describe('authored resource contracts', () => {
   });
 
   it('aggregates manifest, reference, row-count, and resolved-case collision failures', () => {
-    const candidate = structuredClone(validProjectResources);
-    candidate.project.resources.agents[0]!.id = 'unloaded';
-    candidate.tests[0]!.agent_id = 'missing-agent';
-    candidate.tests[0]!.metrics[0]!.metric_id = 'missing-metric';
-    candidate.tests[0]!.cases.push(structuredClone(testCase));
-    candidate.datasets[0]!.metadata.case_count = 2;
+    const candidate = {
+      ...validProjectResources,
+      project: {
+        ...validProjectResources.project,
+        resources: {
+          ...validProjectResources.project.resources,
+          agents: validProjectResources.project.resources.agents.map((entry, index) =>
+            index === 0 ? { ...entry, id: 'unloaded' } : entry,
+          ),
+        },
+      },
+      tests: validProjectResources.tests.map((entry, index) =>
+        index === 0
+          ? {
+              ...entry,
+              agent_id: 'missing-agent',
+              metrics: entry.metrics.map((metric, metricIndex) =>
+                metricIndex === 0 ? { ...metric, metric_id: 'missing-metric' } : metric,
+              ),
+              cases: [...entry.cases, testCase],
+            }
+          : entry,
+      ),
+      datasets: validProjectResources.datasets.map((entry, index) =>
+        index === 0 ? { ...entry, metadata: { ...entry.metadata, case_count: 2 } } : entry,
+      ),
+    };
 
     const result = parseWithSchema(projectResourcesSchema, candidate);
 

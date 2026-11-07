@@ -5,7 +5,7 @@ import type { Span, SpanFilter, Trace } from '@attest/contracts';
 import type { CheckEvaluation, LeafCheck } from './leaf-check.js';
 
 /** Orders spans by start instant, keeping document order for equal or unparseable timestamps. */
-const orderSpans = (spans: Span[]): Span[] =>
+const orderSpans = (spans: readonly Span[]): Span[] =>
   spans
     .map((span, index) => ({ span, index, startedAt: Date.parse(span.start_time) }))
     .sort((left, right) => {

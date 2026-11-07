@@ -1,11 +1,16 @@
+import { run as runEffect, openFixture, openReadonlyFixture } from './store-fixture.js';
+import { withStoreScope } from '../internal/store-scope.js';
+import * as Effect from 'effect/Effect';
+import { valueFromExit } from '../../internal/effect-exit.js';
+import { stripStruct } from '@attest/contracts';
 import { parseWithSchema, parseWithSchemaSync } from '@attest/contracts';
-import { copyFile, mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
+import { copyFile, mkdtemp, readFile, readdir, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
-import { spawn } from 'node:child_process';
+import { basename, delimiter, dirname, join } from 'node:path';
+import { execFileSync, spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
-import { z } from 'zod';
+import * as Schema from 'effect/Schema';
 import { Kysely } from 'kysely';
 import { afterEach, describe, expect, it } from 'vitest';
 
@@ -63,10 +68,28 @@ const expectMutationReturning = async (handle: SqliteHandle): Promise<void> => {
 };
 
 const isLibsqlUnavailable = (cause: unknown): boolean => {
-  const parsed = parseWithSchema(z.object({ code: z.string().optional() }), cause);
+  const parsed = parseWithSchema(stripStruct({ code: Schema.optional(Schema.String) }), cause);
   const code = parsed.ok ? parsed.value.code : undefined;
 
   return code === 'ERR_MODULE_NOT_FOUND' || code === 'ERR_DLOPEN_FAILED';
+};
+
+/**
+ * Finds a real Node binary. Under `bun --bun`, a `bun-node-*` directory at the front of PATH holds a
+ * `node` shim that runs Bun, so it is skipped.
+ */
+const nodeBinary = (): string => {
+  if (process.versions.bun === undefined) return process.execPath;
+
+  const path = (process.env.PATH ?? '')
+    .split(delimiter)
+    .filter((directory) => !basename(directory).startsWith('bun-node'))
+    .join(delimiter);
+
+  return execFileSync('which', ['node'], {
+    encoding: 'utf8',
+    env: { ...process.env, PATH: path },
+  }).trim();
 };
 
 /** Runs a Node subprocess and resolves with its intentional crash exit code. */
@@ -78,7 +101,8 @@ const runCrashWriter = async (
 
   return new Promise((resolveExit, reject) => {
     const child = spawn(
-      process.execPath,
+      // These loader flags belong to Node; Bun otherwise runs the loader as the entrypoint.
+      nodeBinary(),
       ['--experimental-strip-types', '--experimental-loader', loaderPath, writerPath, databasePath],
       { cwd: dirname(databasePath) },
     );
@@ -114,14 +138,43 @@ afterEach(async () => {
 });
 
 describe('SQLite store database', () => {
+  it('checkpoints on scope close before copying an immediate readonly snapshot', async () => {
+    for (let iteration = 0; iteration < 50; iteration++) {
+      const path = await temporaryDatabasePath();
+      await runEffect(withStoreScope((owner) => openStore(path, owner)));
+      const snapshot = `${path}.snapshot-${iteration}`;
+      expect((await stat(path)).size).toBeGreaterThan(4096);
+      await copyFile(path, snapshot);
+
+      expect((await readdir(dirname(path))).sort()).toEqual([
+        'runs.db',
+        `runs.db.snapshot-${iteration}`,
+      ]);
+
+      await runEffect(withStoreScope((owner) => openReadonlyRunStore(snapshot, owner)));
+    }
+  });
+
+  it('keeps live readers usable when a writer closes before the last connection', async () => {
+    const path = await temporaryDatabasePath();
+    const writer = await openFixture(path);
+    stores.push(writer);
+    const readerFixture = await openReadonlyFixture(path);
+    stores.push(readerFixture);
+    await runEffect(readerFixture.store.listRuns());
+    await writer.close();
+    expect((await runEffect(readerFixture.store.listRuns())).items).toEqual([]);
+    await readerFixture.close();
+  });
+
   it('applies migrations idempotently across reopen', async () => {
     const path = await temporaryDatabasePath();
-    const first = await openStore(path);
+    const first = await openFixture(path);
     await first.close();
 
-    const second = await openStore(path);
+    const second = await openFixture(path);
     stores.push(second);
-    const handle = await openSqliteHandle(path);
+    const handle = valueFromExit(await Effect.runPromiseExit(openSqliteHandle(path)));
     const rows = await handle.prepare('SELECT version, name FROM schema_migrations').all();
     await handle.close();
 
@@ -133,10 +186,10 @@ describe('SQLite store database', () => {
 
   it('serializes concurrent open and migration for one resolved path', async () => {
     const path = await temporaryDatabasePath();
-    const [first, second] = await Promise.all([openStore(path), openStore(path)]);
+    const [first, second] = await Promise.all([openFixture(path), openFixture(path)]);
     stores.push(first, second);
 
-    const handle = await openSqliteHandle(path);
+    const handle = valueFromExit(await Effect.runPromiseExit(openSqliteHandle(path)));
     const rows = await handle.prepare('SELECT version FROM schema_migrations').all();
     await handle.close();
     expect(rows).toEqual([{ version: 1 }, { version: 2 }]);
@@ -144,34 +197,42 @@ describe('SQLite store database', () => {
 
   it('rejects a schema version newer than this attest build', async () => {
     const path = await temporaryDatabasePath();
-    const handle = await openSqliteHandle(path);
-    await migrateToLatest(handle);
+    const handle = valueFromExit(await Effect.runPromiseExit(openSqliteHandle(path)));
+    valueFromExit(await Effect.runPromiseExit(migrateToLatest(handle)));
     await handle
       .prepare('INSERT INTO schema_migrations (version, name, applied_at) VALUES (?, ?, ?)')
       .run(999, 'future', '2026-08-06T00:00:00.000Z');
     await handle.close();
 
-    await expect(openStore(path)).rejects.toMatchObject({ code: 'SCHEMA_TOO_NEW' });
+    await expect(
+      runEffect(withStoreScope((owner) => openStore(path, owner))),
+    ).rejects.toMatchObject({ code: 'SCHEMA_TOO_NEW' });
   });
 
   it('reads rows a live writer commits after the reader opened', async () => {
     const path = await temporaryDatabasePath();
-    const writer = await openStore(path);
-    stores.push(writer);
+    const writerFixture = await openFixture(path);
+    const writer = writerFixture.store;
+    stores.push(writerFixture);
     const metadata = { schemaId: 'attest.project', configHash: 'hash', configJson: '{}' };
-    await writer.runs.createRun(metadata);
+    await runEffect(writer.runs.createRun(metadata));
 
-    const reader = await openReadonlyRunStore(path);
-    stores.push(reader);
-    await expect(reader.listRuns()).resolves.toMatchObject({ items: [expect.anything()] });
+    const readerFixture = await openReadonlyFixture(path);
+    const reader = readerFixture.store;
+    stores.push(readerFixture);
+    await expect(runEffect(reader.listRuns())).resolves.toMatchObject({
+      items: [expect.anything()],
+    });
 
-    await writer.runs.createRun(metadata);
-    expect((await reader.listRuns()).items).toHaveLength(2);
+    await runEffect(writer.runs.createRun(metadata));
+    expect((await runEffect(reader.listRuns())).items).toHaveLength(2);
   });
 
   it('does not create or migrate a missing or uninitialized store', async () => {
     const missingPath = await temporaryDatabasePath();
-    await expect(openReadonlyRunStore(missingPath)).rejects.toThrow();
+    await expect(
+      runEffect(withStoreScope((owner) => openReadonlyRunStore(missingPath, owner))),
+    ).rejects.toThrow();
     await expect(readFile(missingPath)).rejects.toMatchObject({ code: 'ENOENT' });
 
     const emptyPath = await temporaryDatabasePath();
@@ -179,7 +240,9 @@ describe('SQLite store database', () => {
     expect(handle).toBeDefined();
     await handle?.close();
     const beforeBytes = await readFile(emptyPath);
-    await expect(openReadonlyRunStore(emptyPath)).rejects.toMatchObject({
+    await expect(
+      runEffect(withStoreScope((owner) => openReadonlyRunStore(emptyPath, owner))),
+    ).rejects.toMatchObject({
       code: 'SCHEMA_OUTDATED',
     });
     expect(await readFile(emptyPath)).toEqual(beforeBytes);
@@ -187,29 +250,33 @@ describe('SQLite store database', () => {
 
   it('reads committed rows from a copied WAL while the source writer remains open', async () => {
     const sourcePath = await temporaryDatabasePath();
-    const writer = await openStore(sourcePath);
-    stores.push(writer);
+    const writerFixture = await openFixture(sourcePath);
+    const writer = writerFixture.store;
+    stores.push(writerFixture);
 
-    const run = await writer.runs.createRun({
-      schemaId: 'attest.project',
-      configHash: 'committed-in-wal',
-      configJson: '{}',
-    });
+    const run = await runEffect(
+      writer.runs.createRun({
+        schemaId: 'attest.project',
+        configHash: 'committed-in-wal',
+        configJson: '{}',
+      }),
+    );
 
     expect(await readdir(dirname(sourcePath))).toContain('runs.db-wal');
 
     const snapshotPath = await temporaryDatabasePath();
     await copyFile(sourcePath, snapshotPath);
     await copyFile(`${sourcePath}-wal`, `${snapshotPath}-wal`);
-    const reader = await openReadonlyRunStore(snapshotPath);
-    stores.push(reader);
+    const readerFixture = await openReadonlyFixture(snapshotPath);
+    const reader = readerFixture.store;
+    stores.push(readerFixture);
 
-    await expect(reader.listRuns()).resolves.toMatchObject({ items: [{ id: run.id }] });
+    await expect(runEffect(reader.listRuns())).resolves.toMatchObject({ items: [{ id: run.id }] });
   });
 
   it('rolls back all schema changes when a migration fails partway', async () => {
     const path = await temporaryDatabasePath();
-    const handle = await openSqliteHandle(path);
+    const handle = valueFromExit(await Effect.runPromiseExit(openSqliteHandle(path)));
 
     const failingHandle: SqliteHandle = {
       ...handle,
@@ -222,7 +289,13 @@ describe('SQLite store database', () => {
       },
     };
 
-    await expect(migrateToLatest(failingHandle)).rejects.toThrow('injected migration failure');
+    const failed = await Effect.runPromiseExit(migrateToLatest(failingHandle));
+    expect(() => valueFromExit(failed)).toThrow('Could not apply the schema migration.');
+
+    if (failed._tag === 'Failure')
+      expect(failed.cause.reasons[0]).toMatchObject({
+        error: { cause: new Error('injected migration failure') },
+      });
     expect(
       await handle
         .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'runs'")
@@ -239,13 +312,14 @@ describe('SQLite store database', () => {
     expect(result.standardError).not.toContain('Error');
     const runId = result.standardOutput;
 
-    const reopened = await openStore(path);
-    stores.push(reopened);
-    await expect(reopened.runs.getRun(runId)).resolves.toMatchObject({
+    const reopenedFixture = await openFixture(path);
+    const reopened = reopenedFixture.store;
+    stores.push(reopenedFixture);
+    await expect(runEffect(reopened.runs.getRun(runId))).resolves.toMatchObject({
       id: runId,
       status: 'running',
     });
-    expect((await reopened.runs.getRunWithCases(runId)).cases).toMatchObject([
+    expect((await runEffect(reopened.runs.getRunWithCases(runId))).cases).toMatchObject([
       { caseId: 'crash-case', runId },
     ]);
   });
@@ -280,7 +354,7 @@ describe('SQLite store database', () => {
     }
 
     await handle.exec('PRAGMA journal_mode=WAL');
-    await migrateToLatest(handle);
+    valueFromExit(await Effect.runPromiseExit(migrateToLatest(handle)));
     expect(await handle.prepare('SELECT version FROM schema_migrations').all()).toEqual([
       { version: 1 },
       { version: 2 },
@@ -295,7 +369,7 @@ describe('SQLite store database', () => {
     expect(await handle.prepare('SELECT id FROM transaction_items').all()).toEqual([{ id: 1 }]);
     expect(
       parseWithSchemaSync(
-        z.object({ journal_mode: z.string() }),
+        stripStruct({ journal_mode: Schema.String }),
         (await handle.prepare('PRAGMA journal_mode').all())[0],
       ).journal_mode,
     ).toBe('wal');

@@ -54,7 +54,7 @@ const metricOutcomeColumns = (evaluation: StoredMetricEvaluation) => {
 
 const executionHash = (
   execution: StoredCaseExecution,
-  evaluations: StoredMetricEvaluation[],
+  evaluations: readonly StoredMetricEvaluation[],
 ): string => contentHash({ execution, evaluations });
 
 const toExecution = (record: CaseRecord): StoredCaseExecution => {
@@ -113,7 +113,7 @@ const recordCaseTransaction = async (
   database: Transaction<Database>,
   runId: string,
   execution: StoredCaseExecution,
-  evaluations: StoredMetricEvaluation[],
+  evaluations: readonly StoredMetricEvaluation[],
 ): Promise<void> => {
   const run = await database
     .selectFrom('runs')

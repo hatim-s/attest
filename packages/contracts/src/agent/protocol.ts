@@ -1,4 +1,6 @@
-import { z } from 'zod';
+import { ulidSchema, nonnegativeIntegerSchema, httpUrlSchema } from '../schema/scalars.js';
+import { looseStruct } from '../schema/objects.js';
+import * as Schema from 'effect/Schema';
 
 import type { Trace } from '../trace/protocol.js';
 import { AGENT_PROTOCOL } from '../schema/identifiers.js';
@@ -6,37 +8,38 @@ import { inlineArtifactSchema } from './artifact.js';
 
 const MULTI_TURN_FIELDS = ['messages', 'turn_index', 'conversation_id'] as const;
 
-const conversationMessageSchema = z.strictObject({
-  role: z.enum(['user', 'assistant']),
-  content: z.string(),
+const conversationMessageSchema = Schema.Struct({
+  role: Schema.Literals(['user', 'assistant']),
+  content: Schema.String,
 });
 
 /** Where and how an async agent posts its `attest.agent-completion`; only callback runs send it. */
-const agentCallbackSchema = z.strictObject({
-  // Not z.httpUrl(): its domain-only hostname rule rejects the 127.0.0.1 loopback receiver.
-  url: z.url({ protocol: /^https?$/u }),
-  token: z.string().min(1),
+const agentCallbackSchema = Schema.Struct({
+  // Callback receivers may use loopback IP addresses.
+  url: httpUrlSchema,
+  token: Schema.String.check(Schema.isMinLength(1)),
 });
 
 /**
  * Encodes docs/specs/agent-contract.md request envelope and accepts additive request fields.
  */
-const agentRequestSchema = z
-  .looseObject({
-    protocol: z.literal(AGENT_PROTOCOL),
-    run_id: z.ulid(),
-    case_id: z.string(),
-    input: z.json(),
-    params: z.record(z.string(), z.json()).optional(),
-    messages: z.array(conversationMessageSchema).optional(),
-    turn_index: z.number().int().nonnegative().optional(),
-    conversation_id: z.string().optional(),
-    state: z.json().optional(),
-    callback: agentCallbackSchema.optional(),
-  })
-  .superRefine((request, context) => {
+const agentRequestSchema = looseStruct({
+  protocol: Schema.Literal(AGENT_PROTOCOL),
+  run_id: ulidSchema,
+  case_id: Schema.String,
+  input: Schema.Json,
+  params: Schema.optional(Schema.Record(Schema.String, Schema.Json)),
+  messages: Schema.optional(Schema.Array(conversationMessageSchema)),
+  turn_index: Schema.optional(nonnegativeIntegerSchema),
+  conversation_id: Schema.optional(Schema.String),
+  state: Schema.optional(Schema.Json),
+  callback: Schema.optional(agentCallbackSchema),
+}).check(
+  Schema.makeFilter((request) => {
+    const context: Schema.FilterIssue[] = [];
+
     if (MULTI_TURN_FIELDS.every((fieldName) => request[fieldName] === undefined)) {
-      return;
+      return context;
     }
 
     for (const fieldName of MULTI_TURN_FIELDS) {
@@ -44,33 +47,35 @@ const agentRequestSchema = z
         continue;
       }
 
-      context.addIssue({
-        code: 'custom',
+      context.push({
         path: [fieldName],
-        message: 'required for multi-turn requests',
+        issue: 'required for multi-turn requests',
       });
     }
-  });
+
+    return context;
+  }),
+);
 
 /** Represents a validated invocation request sent to an agent transport. */
-type AgentRequest = z.infer<typeof agentRequestSchema>;
+type AgentRequest = typeof agentRequestSchema.Type;
 
-type AgentCallback = z.infer<typeof agentCallbackSchema>;
+type AgentCallback = typeof agentCallbackSchema.Type;
 
 /** The error an agent reports instead of an output. */
-const agentErrorSchema = z.strictObject({
-  message: z.string(),
-  code: z.string().optional(),
+const agentErrorSchema = Schema.Struct({
+  message: Schema.String,
+  code: Schema.optional(Schema.String),
 });
 
 const agentResponseFields = {
-  protocol: z.literal(AGENT_PROTOCOL),
-  output: z.json().optional(),
-  error: agentErrorSchema.optional(),
-  state: z.json().optional(),
+  protocol: Schema.Literal(AGENT_PROTOCOL),
+  output: Schema.optional(Schema.Json),
+  error: Schema.optional(agentErrorSchema),
+  state: Schema.optional(Schema.Json),
   // Left unvalidated here so a malformed optional trace degrades to a warning in parseAgentResponse.
-  trace: z.unknown().optional(),
-  artifacts: z.array(inlineArtifactSchema).optional(),
+  trace: Schema.optional(Schema.Unknown),
+  artifacts: Schema.optional(Schema.Array(inlineArtifactSchema)),
 };
 
 /**
@@ -79,7 +84,7 @@ const agentResponseFields = {
  */
 const refineSingleOutcome = (
   envelope: { output?: unknown; error?: unknown },
-  context: z.RefinementCtx,
+  context: Schema.FilterIssue[],
 ): void => {
   const outcomeCount = ['output', 'error'].filter((field) => Object.hasOwn(envelope, field)).length;
 
@@ -87,10 +92,9 @@ const refineSingleOutcome = (
     return;
   }
 
-  context.addIssue({
-    code: 'custom',
+  context.push({
     path: ['output'],
-    message: 'exactly one of output or error must be present',
+    issue: 'exactly one of output or error must be present',
   });
 };
 
@@ -98,9 +102,16 @@ const refineSingleOutcome = (
  * Encodes docs/specs/agent-contract.md response envelope. Agents may add vendor fields, and a
  * response must carry exactly one terminal outcome.
  */
-const agentResponseSchema = z.looseObject(agentResponseFields).superRefine(refineSingleOutcome);
+const agentResponseSchema = looseStruct(agentResponseFields).check(
+  Schema.makeFilter((value) => {
+    const issues: Schema.FilterIssue[] = [];
+    refineSingleOutcome(value, issues);
 
-type AgentResponseFields = z.output<z.ZodObject<typeof agentResponseFields>>;
+    return issues;
+  }),
+);
+
+type AgentResponseFields = Schema.Struct.Type<typeof agentResponseFields>;
 
 type AgentResponseBase = Omit<AgentResponseFields, 'output' | 'error' | 'trace'> & {
   trace?: Trace;

@@ -1,5 +1,6 @@
+import { stripStruct } from '@attest/contracts';
 import { cliDiagnosticsSchema } from '@attest/core/records';
-import { z } from 'zod';
+import * as Schema from 'effect/Schema';
 
 const API_ERROR_CODES = [
   'INVALID_REQUEST',
@@ -16,20 +17,20 @@ const API_ERROR_CODES = [
   'INTERNAL_ERROR',
 ] as const;
 
-const apiErrorCodeSchema = z.enum(API_ERROR_CODES);
+const apiErrorCodeSchema = Schema.Literals(API_ERROR_CODES);
 
-const apiErrorEnvelopeSchema = z.object({
-  error: z.object({
+const apiErrorEnvelopeSchema = stripStruct({
+  error: stripStruct({
     code: apiErrorCodeSchema,
-    message: z.string(),
+    message: Schema.String,
     /** What the CLI or the project loader reported, for RUN_START_FAILED and PROJECT_UNLOADABLE. */
-    details: cliDiagnosticsSchema.optional(),
+    details: Schema.optional(cliDiagnosticsSchema),
   }),
 });
 
-type ApiErrorCode = z.infer<typeof apiErrorCodeSchema>;
+type ApiErrorCode = typeof apiErrorCodeSchema.Type;
 
-type ApiErrorEnvelope = z.infer<typeof apiErrorEnvelopeSchema>;
+type ApiErrorEnvelope = typeof apiErrorEnvelopeSchema.Type;
 
 const API_ERROR_STATUS = {
   INVALID_REQUEST: 400,

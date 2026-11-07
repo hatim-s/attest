@@ -1,3 +1,4 @@
+import { Effect } from 'effect';
 import { parseWithSchemaSync, AGENT_PROTOCOL, traceSchema, type Span } from '@attest/contracts';
 import { existsSync } from 'node:fs';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
@@ -5,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
-import { z } from 'zod';
+import * as Schema from 'effect/Schema';
 
 import type { AgentInvocation } from '../index.js';
 import { createPiHandler } from '../pi.js';
@@ -46,7 +47,7 @@ const isAlive = (pid: number): boolean => {
   }
 };
 
-const spanNamed = (spans: Span[], name: string): Span | undefined =>
+const spanNamed = (spans: readonly Span[], name: string): Span | undefined =>
   spans.find((span) => span.name === name);
 
 describe('createPiHandler', () => {
@@ -58,10 +59,12 @@ describe('createPiHandler', () => {
     const handler = createPiHandler({
       argv: [process.execPath, MOCK_PI],
       model: 'mock/pi-1',
-      workspace: () => Promise.resolve(workspace),
+      workspace: () => Effect.succeed(workspace),
     });
 
-    const result = await handler(invocation, { signal: new AbortController().signal });
+    const result = await Effect.runPromise(
+      handler(invocation, { signal: new AbortController().signal }),
+    );
 
     // The final message_end carries a raw U+2028; only LF-only framing keeps it whole.
     expect(result).toMatchObject({ output: 'Wrote answer.ts' });
@@ -103,7 +106,9 @@ describe('createPiHandler', () => {
   it('reports a provider failure as an error completion', async () => {
     const handler = createPiHandler({ argv: [process.execPath, MOCK_PI, '--mock-fail'] });
 
-    const result = await handler(invocation, { signal: new AbortController().signal });
+    const result = await Effect.runPromise(
+      handler(invocation, { signal: new AbortController().signal }),
+    );
 
     expect(result).toMatchObject({
       error: { code: 'pi_agent_failed', message: '--mock-fail requested' },
@@ -126,10 +131,17 @@ describe('createPiHandler', () => {
         env: { PROVIDER_KEY: 'given', UNSET_KEY: undefined },
       });
 
-      const result = await handler(invocation, { signal: new AbortController().signal });
+      const result = await Effect.runPromise(
+        handler(invocation, { signal: new AbortController().signal }),
+      );
+
       const dumped = result.artifacts?.find((artifact) => artifact.path === 'env.json');
       const content = dumped?.kind === 'inline' ? dumped.content : '{}';
-      const env = parseWithSchemaSync(z.record(z.string(), z.string()), JSON.parse(content));
+
+      const env = parseWithSchemaSync(
+        Schema.Record(Schema.String, Schema.String),
+        JSON.parse(content),
+      );
 
       expect(env).toMatchObject({ PROVIDER_KEY: 'given', LC_ALL: 'C' });
       expect(env).not.toHaveProperty('ATTEST_CLIENT_RUNNER_SECRET');
@@ -142,7 +154,10 @@ describe('createPiHandler', () => {
 
   it('reports Pi exiting before it settles, with the stderr tail', async () => {
     const handler = createPiHandler({ argv: [process.execPath, MOCK_PI, '--mock-exit-early'] });
-    const result = await handler(invocation, { signal: new AbortController().signal });
+
+    const result = await Effect.runPromise(
+      handler(invocation, { signal: new AbortController().signal }),
+    );
 
     expect(result).toMatchObject({
       error: {
@@ -154,7 +169,10 @@ describe('createPiHandler', () => {
 
   it('fails a run whose final assistant message breaks the schema instead of using an earlier turn', async () => {
     const handler = createPiHandler({ argv: [process.execPath, MOCK_PI, '--mock-bad-final'] });
-    const result = await handler(invocation, { signal: new AbortController().signal });
+
+    const result = await Effect.runPromise(
+      handler(invocation, { signal: new AbortController().signal }),
+    );
 
     expect(result).toMatchObject({ error: { code: 'pi_protocol_error' } });
     expect(result).not.toHaveProperty('output');
@@ -167,7 +185,9 @@ describe('createPiHandler', () => {
       argv: [process.execPath, MOCK_PI, `--mock-survivor-pid-file=${pidFile}`],
     });
 
-    expect(await handler(invocation, { signal: new AbortController().signal })).toMatchObject({
+    expect(
+      await Effect.runPromise(handler(invocation, { signal: new AbortController().signal })),
+    ).toMatchObject({
       output: 'Wrote answer.ts',
     });
     const pid = Number(await readFile(pidFile, 'utf8'));
@@ -183,10 +203,10 @@ describe('createPiHandler', () => {
 
     const handler = createPiHandler({
       argv: [process.execPath, MOCK_PI, '--mock-delay-ms=50', `--mock-pid-file=${pidFile}`],
-      workspace: () => Promise.resolve(workspace),
+      workspace: () => Effect.succeed(workspace),
     });
 
-    const pending = handler(invocation, { signal: controller.signal });
+    const pending = Effect.runPromise(handler(invocation, { signal: controller.signal }));
 
     // The write tool has run, so the abort lands mid-run with spans open.
     await expect.poll(() => existsSync(join(workspace, 'answer.ts'))).toBe(true);

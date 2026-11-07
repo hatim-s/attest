@@ -103,16 +103,15 @@ const computeMetricDeltas = (
     const baseScore = scoreOf(baseMetric);
     const candidateScore = scoreOf(candidateMetric);
 
-    const metricDelta: MetricDelta = {
+    let metricDelta: MetricDelta = {
       metricName,
       baseScore,
       candidateScore,
       passTransition: computePassTransition(baseMetric, candidateMetric),
     };
 
-    if (baseScore !== undefined && candidateScore !== undefined) {
-      metricDelta.delta = candidateScore - baseScore;
-    }
+    if (baseScore !== undefined && candidateScore !== undefined)
+      metricDelta = { ...metricDelta, delta: candidateScore - baseScore };
 
     return metricDelta;
   });
@@ -229,7 +228,7 @@ const classifyRuns = (
     }
   }
 
-  const summary: DiffSummary = {
+  let summary: DiffSummary = {
     baseRunId: comparison.baseRunId,
     candidateRunId: comparison.candidateRunId,
     baseConfigHash: comparison.baseConfigHash,
@@ -240,9 +239,11 @@ const classifyRuns = (
     candidatePassRate: passRate(totals.candidatePassed, totals.candidate),
   };
 
-  if (comparison.sharedOnly === true) {
-    summary.coverage = { sharedCases: transitions.length, baseOnlyCases, candidateOnlyCases };
-  }
+  if (comparison.sharedOnly === true)
+    summary = {
+      ...summary,
+      ...{ coverage: { sharedCases: transitions.length, baseOnlyCases, candidateOnlyCases } },
+    };
 
   return { summary, transitions };
 };

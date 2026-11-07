@@ -1,3 +1,4 @@
+import type * as Effect from 'effect/Effect';
 import type { AgentResource, JsonValue } from '@attest/contracts';
 import type { StoredCaseExecution } from '@attest/core';
 import type {
@@ -14,7 +15,7 @@ type NativeAgentTestOptions = {
   agent: AgentResource;
   input: JsonValue;
   onProgress?: (message: string) => void;
-  onExecution?: (execution: StoredCaseExecution) => Promise<void>;
+  onExecution?: (execution: StoredCaseExecution) => Effect.Effect<void, Error>;
   projectRoot: string;
   runId?: string;
   signal?: AbortSignal;

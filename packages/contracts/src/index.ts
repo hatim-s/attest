@@ -5,6 +5,7 @@ export type { Result } from './result.js';
 export { CONTRACT_JSON_SCHEMAS, serializeContractSchema } from './schema/json-schema.js';
 
 export {
+  SchemaDecodeError,
   parseWithSchema,
   parseWithSchemaEffect,
   parseWithSchemaSync,
@@ -252,3 +253,7 @@ export type {
   CloudRunRequest,
   CloudQueueMessage,
 } from './cloud/project-bundle.js';
+
+export { looseStruct, stripStruct } from './schema/objects.js';
+
+export type { SchemaDiagnostic } from './internal/issues.js';

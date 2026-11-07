@@ -1,3 +1,5 @@
+import { readExitValue } from '../error-response.js';
+import * as Effect from 'effect/Effect';
 import {
   createSingleProjectCatalog,
   diffRuns,
@@ -49,54 +51,61 @@ const cases: CaseRecord[] = [
 
 const source: RunSource = {
   getProjectOverview: () =>
-    Promise.resolve({
+    Effect.succeed({
       evals: { items: [] },
       runningRunCount: 0,
       runningRunCountTruncated: false,
       lastRunAt: null,
     }),
-  listEvals: () => Promise.resolve({ items: [] }),
-  listEvalRuns: () => Promise.resolve({ items: [] }),
-  getEvalCaseWindow: () => Promise.resolve({ runs: [], items: [] }),
-  getCaseHistory: () => Promise.resolve({ items: [] }),
+  listEvals: () => Effect.succeed({ items: [] }),
+  listEvalRuns: () => Effect.succeed({ items: [] }),
+  getEvalCaseWindow: () => Effect.succeed({ runs: [], items: [] }),
+  getCaseHistory: () => Effect.succeed({ items: [] }),
   getActivity: () =>
-    Promise.resolve({
+    Effect.succeed({
       coveredFrom: '2026-01-01T00:00:00.000Z',
       coveredTo: '2026-01-02T00:00:00.000Z',
       timezone: 'UTC',
       days: [],
       truncated: false,
     }),
-  listRunSuites: () => Promise.resolve([]),
+  listRunSuites: () => Effect.succeed([]),
 
-  listRuns: () => Promise.resolve({ items: runs }),
-  getRun: (runId) => {
-    const run = runs.find((run) => run.id === runId);
+  listRuns: () => Effect.succeed({ items: runs }),
+  getRun: (runId) =>
+    Effect.gen(function* () {
+      const run = runs.find((run) => run.id === runId);
 
-    if (run === undefined) throw new StoreError('RUN_NOT_FOUND', `Run ${runId} missing.`);
+      if (run === undefined)
+        return yield* Effect.fail(new StoreError('RUN_NOT_FOUND', `Run ${runId} missing.`));
 
-    return Promise.resolve(run);
-  },
+      return yield* Effect.succeed(run);
+    }),
   listCaseSummaries: (runId) =>
-    Promise.resolve({
+    Effect.succeed({
       items: cases.flatMap((record) =>
         record.runId === runId ? [summarizeCaseRecord(record)] : [],
       ),
     }),
-  getCase: (runId, suiteName, caseId) => {
-    const record = cases.find(
-      (record) =>
-        record.runId === runId && record.suiteName === suiteName && record.caseId === caseId,
-    );
+  getCase: (runId, suiteName, caseId) =>
+    Effect.gen(function* () {
+      const record = cases.find(
+        (record) =>
+          record.runId === runId && record.suiteName === suiteName && record.caseId === caseId,
+      );
 
-    if (record === undefined) throw new StoreError('CASE_NOT_FOUND', 'Case missing.');
+      if (record === undefined)
+        return yield* Effect.fail(new StoreError('CASE_NOT_FOUND', 'Case missing.'));
 
-    return Promise.resolve(record);
-  },
-  getRunWithCases: async (runId) => ({
-    run: await source.getRun(runId),
-    cases: cases.filter((record) => record.runId === runId),
-  }),
+      return yield* Effect.succeed(record);
+    }),
+  getRunWithCases: (runId) =>
+    Effect.gen(function* () {
+      return {
+        run: yield* source.getRun(runId),
+        cases: cases.filter((record) => record.runId === runId),
+      };
+    }),
 };
 
 const project = { key: 'demo', name: 'Demo', root: '/work/demo' };
@@ -114,7 +123,10 @@ describe('createApiApp', () => {
       ['/projects/demo/runs/candidate', runs[0]],
       ['/projects/demo/runs/candidate/cases', { items: cases.map(summarizeCaseRecord) }],
       ['/projects/demo/runs/candidate/cases/a%2Fb/one', cases[0]],
-      ['/projects/demo/diffs/base/candidate', await diffRuns(source, 'base', 'candidate')],
+      [
+        '/projects/demo/diffs/base/candidate',
+        readExitValue(await Effect.runPromiseExit(diffRuns(source, 'base', 'candidate'))),
+      ],
     ] as const;
 
     for (const [path, body] of expectations) {
@@ -168,11 +180,12 @@ describe('createApiApp', () => {
     const app = createApiApp({
       catalog: catalogFor({
         ...source,
-        listRuns: (query) => {
-          received.push(query);
+        listRuns: (query) =>
+          Effect.gen(function* () {
+            received.push(query);
 
-          return Promise.resolve({ items: [] });
-        },
+            return yield* Effect.succeed({ items: [] });
+          }),
       }),
     });
 
@@ -221,15 +234,73 @@ describe('createApiApp', () => {
     const app = createApiApp({
       catalog: catalogFor({
         ...source,
-        listRuns: () => {
-          throw error;
-        },
+        listRuns: () =>
+          Effect.gen(function* () {
+            return yield* error instanceof StoreError ? Effect.fail(error) : Effect.die(error);
+          }),
       }),
     });
 
     const response = await app.request('/projects/demo/runs');
     expect(response.status).toBe(status);
     expect(await response.json()).toEqual({ error: { code, message } });
+  });
+
+  it('keeps a StoreError defect internal rather than projecting it as a missing run', async () => {
+    const app = createApiApp({
+      catalog: catalogFor({
+        ...source,
+        listRuns: () => Effect.die(new StoreError('RUN_NOT_FOUND', 'private defect')),
+      }),
+    });
+
+    const response = await app.request('/projects/demo/runs');
+    expect(response.status).toBe(500);
+    expect(await response.json()).toEqual({
+      error: { code: 'INTERNAL_ERROR', message: 'The API could not complete the request.' },
+    });
+  });
+
+  it('interrupts a request read without ending the shared catalog lifetime', async () => {
+    let notifyStarted = () => {};
+
+    const started = new Promise<void>((resolve) => {
+      notifyStarted = resolve;
+    });
+
+    let interrupted = false;
+    let reads = 0;
+
+    const app = createApiApp({
+      catalog: catalogFor({
+        ...source,
+        listRuns: () => {
+          reads += 1;
+
+          if (reads > 1) return source.listRuns();
+
+          return Effect.gen(function* () {
+            notifyStarted();
+
+            return yield* Effect.never;
+          }).pipe(
+            Effect.ensuring(
+              Effect.sync(() => {
+                interrupted = true;
+              }),
+            ),
+          );
+        },
+      }),
+    });
+
+    const controller = new AbortController();
+    const response = app.request('/projects/demo/runs', { signal: controller.signal });
+    await started;
+    controller.abort();
+    expect((await response).status).toBe(500);
+    expect(interrupted).toBe(true);
+    expect((await app.request('/projects/demo/runs')).status).toBe(200);
   });
 
   describe('run control', () => {
@@ -251,7 +322,7 @@ describe('createApiApp', () => {
 
       const control: RunControl = {
         listTests: () =>
-          Promise.resolve([{ id: 'smoke', name: 'Smoke', tags: ['fast'], caseCount: 2 }]),
+          Effect.succeed([{ id: 'smoke', name: 'Smoke', tags: ['fast'], caseCount: 2 }]),
         startRun: (projectKey, request) => {
           started.push({ projectKey, request });
 
@@ -261,14 +332,14 @@ describe('createApiApp', () => {
             });
           }
 
-          return Promise.resolve({ runId: 'run-new' });
+          return Effect.succeed({ runId: 'run-new' });
         },
         cancelRun: (_projectKey, runId) => {
           cancelled.push(runId);
 
           if (runId === 'missing') throw new StoreError('RUN_NOT_FOUND', 'Run missing.');
 
-          return Promise.resolve({ outcome: 'cancellation_requested' });
+          return Effect.succeed({ outcome: 'cancellation_requested' });
         },
       };
 
@@ -380,4 +451,45 @@ describe('createApiApp', () => {
       expect(started).toEqual([]);
     });
   });
+});
+
+it('joins one admitted start after request disconnect without replaying it', async () => {
+  let enter = () => {};
+
+  let finish = () => {};
+
+  let starts = 0;
+
+  const entered = new Promise<void>((resolve) => {
+    enter = resolve;
+  });
+
+  const control: RunControl = {
+    listTests: () => Effect.succeed([]),
+    cancelRun: () => Effect.succeed({ outcome: 'already_terminal' }),
+    startRun: () =>
+      Effect.callback<{ runId: string }>((resume) => {
+        starts++;
+        enter();
+        finish = () => resume(Effect.succeed({ runId: 'detached-run' }));
+      }),
+  };
+
+  const app = createApiApp({ catalog: catalogFor(source), control });
+  const controller = new AbortController();
+
+  const pending = app.request('/projects/demo/runs', {
+    method: 'POST',
+    signal: controller.signal,
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ selection: { all: true } }),
+  });
+
+  await entered;
+  controller.abort();
+  finish();
+  const response = await pending;
+  expect(response.status).toBe(201);
+  expect(await response.json()).toEqual({ runId: 'detached-run' });
+  expect(starts).toBe(1);
 });

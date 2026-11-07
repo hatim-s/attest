@@ -88,27 +88,42 @@ const refreshHashes = (project: ResolutionProject): ResolutionProject => {
     ]),
   );
 
-  project.project.resources.agents.forEach((entry) => {
-    entry.content_hash = agentHashes[entry.id]!;
-  });
-  project.project.resources.tests.forEach((entry) => {
-    entry.content_hash = testHashes[entry.id]!;
-  });
-  project.project.resources.metrics.forEach((entry) => {
-    entry.content_hash = metricHashes[entry.id]!;
-  });
-  project.project.resources.datasets.forEach((entry) => {
-    entry.data_content_hash = datasetHashes[entry.id]!.data;
-    entry.metadata_content_hash = datasetHashes[entry.id]!.metadata;
-  });
-  project.contentHashes = {
-    agents: agentHashes,
-    datasets: datasetHashes,
-    manifest: contentHash(project.project),
-    metrics: metricHashes,
-    tests: testHashes,
+  project = {
+    ...project,
+    project: {
+      ...project.project,
+      resources: {
+        agents: project.project.resources.agents.map((entry) => ({
+          ...entry,
+          content_hash: agentHashes[entry.id]!,
+        })),
+        tests: project.project.resources.tests.map((entry) => ({
+          ...entry,
+          content_hash: testHashes[entry.id]!,
+        })),
+        metrics: project.project.resources.metrics.map((entry) => ({
+          ...entry,
+          content_hash: metricHashes[entry.id]!,
+        })),
+        datasets: project.project.resources.datasets.map((entry) => ({
+          ...entry,
+          data_content_hash: datasetHashes[entry.id]!.data,
+          metadata_content_hash: datasetHashes[entry.id]!.metadata,
+        })),
+      },
+    },
   };
-  project.projectHash = contentHash(project.project);
+  project = {
+    ...project,
+    contentHashes: {
+      agents: agentHashes,
+      datasets: datasetHashes,
+      manifest: contentHash(project.project),
+      metrics: metricHashes,
+      tests: testHashes,
+    },
+  };
+  project = { ...project, projectHash: contentHash(project.project) };
 
   return project;
 };
@@ -216,16 +231,32 @@ const captureResolutionError = (operation: () => void): EvalResolutionError => {
 
 describe('eval resolver', () => {
   it('rejects shared session agents when local worker directories are configured', () => {
-    const project = createProject();
-    project.project.defaults = {
-      eval: { workers: { count: 4, directory: 'workers/{run_id}/{worker_index}' } },
+    let project = createProject();
+    project = {
+      ...project,
+      project: {
+        ...project.project,
+        defaults: {
+          eval: { workers: { count: 4, directory: 'workers/{run_id}/{worker_index}' } },
+        },
+      },
     };
-    project.agents[0]!.transport = {
-      kind: 'jsonl_bridge',
-      lifecycle: 'per_run',
-      argv: ['node', './agent.mjs'],
-      concurrency: 'multiplexed',
-      cancellation_grace_ms: 1000,
+    project = {
+      ...project,
+      agents: project.agents.map((entry, index) =>
+        index === 0
+          ? {
+              ...entry,
+              transport: {
+                kind: 'jsonl_bridge',
+                lifecycle: 'per_run',
+                argv: ['node', './agent.mjs'],
+                concurrency: 'multiplexed',
+                cancellation_grace_ms: 1000,
+              },
+            }
+          : entry,
+      ),
     };
     expect(() => resolveEvalRun(refreshHashes(project), request(), options)).toThrow(
       'Eval worker directories require native_cli agents.',
@@ -312,7 +343,7 @@ describe('eval resolver', () => {
   });
 
   it('resolves all tests plus command, project, test, and built-in execution defaults', () => {
-    const project = createProject();
+    let project = createProject();
 
     const allRequest = {
       schema: COMMAND_REQUEST_SCHEMA_ID,
@@ -353,7 +384,7 @@ describe('eval resolver', () => {
     });
     expect(projectDefaults.selectedTests[0]?.concurrency).toBe(2);
 
-    delete project.project.defaults;
+    project = { ...project, project: { ...project.project, defaults: undefined } };
     const builtIns = resolveEvalRun(project, request(), options);
     expect(builtIns.effectiveCommand.resolved).toMatchObject({
       concurrency: 4,
@@ -364,13 +395,25 @@ describe('eval resolver', () => {
   it('keeps generated execution ids stable when a case moves into a dataset', () => {
     const directProject = createProject();
     const before = resolveEvalRun(directProject, request({ case_ids: ['direct-smoke'] }), options);
-    const movedProject = structuredClone(directProject);
+    let movedProject = structuredClone(directProject);
     const movedTest = movedProject.tests.find(({ id }) => id === 'alpha')!;
-    const movedCase = movedTest.cases.shift()!;
+    const movedCase = movedTest.cases[0]!;
     const dataset = movedProject.datasets[0]!;
-    dataset.cases.unshift(movedCase);
-    dataset.metadata.case_count = dataset.cases.length;
-    refreshHashes(movedProject);
+    movedProject = refreshHashes({
+      ...movedProject,
+      tests: movedProject.tests.map((test) =>
+        test === movedTest ? { ...test, cases: test.cases.slice(1) } : test,
+      ),
+      datasets: movedProject.datasets.map((entry) =>
+        entry === dataset
+          ? {
+              ...entry,
+              cases: [movedCase, ...entry.cases],
+              metadata: { ...entry.metadata, case_count: entry.cases.length + 1 },
+            }
+          : entry,
+      ),
+    });
     const after = resolveEvalRun(movedProject, request({ case_ids: ['direct-smoke'] }), options);
 
     expect(after.cases[0]?.execution_id).toBe(before.cases[0]?.execution_id);
@@ -379,8 +422,13 @@ describe('eval resolver', () => {
   });
 
   it('rejects duplicate resolved case ids deterministically', () => {
-    const duplicateCase = createProject();
-    duplicateCase.tests[0]!.cases.push(structuredClone(duplicateCase.tests[0]!.cases[0]!));
+    let duplicateCase = createProject();
+    duplicateCase = {
+      ...duplicateCase,
+      tests: duplicateCase.tests.map((test, index) =>
+        index === 0 ? { ...test, cases: [...test.cases, structuredClone(test.cases[0]!)] } : test,
+      ),
+    };
 
     const caseError = captureResolutionError(() =>
       resolveEvalRun(duplicateCase, request(), options),
@@ -390,22 +438,28 @@ describe('eval resolver', () => {
   });
 
   it('rejects missing agents, metrics, tests, cases, and hash coverage before execution', () => {
-    const missingAgent = createProject();
-    missingAgent.agents = missingAgent.agents.filter(({ id }) => id !== 'support');
+    let missingAgent = createProject();
+    missingAgent = {
+      ...missingAgent,
+      agents: missingAgent.agents.filter(({ id }) => id !== 'support'),
+    };
     expect(
       captureResolutionError(() => resolveEvalRun(missingAgent, request(), options)).code,
     ).toBe('project_invalid');
 
-    const missingMetric = createProject();
-    missingMetric.metrics = [];
+    let missingMetric = createProject();
+    missingMetric = { ...missingMetric, metrics: [] };
     expect(
       captureResolutionError(() => resolveEvalRun(missingMetric, request(), options)).code,
     ).toBe('project_invalid');
 
-    const missingHash = createProject();
+    let missingHash = createProject();
     const testHashes = { ...missingHash.contentHashes.tests };
     delete testHashes.alpha;
-    missingHash.contentHashes = { ...missingHash.contentHashes, tests: testHashes };
+    missingHash = {
+      ...missingHash,
+      contentHashes: { ...missingHash.contentHashes, tests: testHashes },
+    };
     expect(captureResolutionError(() => resolveEvalRun(missingHash, request(), options)).code).toBe(
       'project_invalid',
     );
@@ -426,10 +480,16 @@ describe('eval resolver', () => {
   });
 
   it('reports empty all/tag selections without creating an empty snapshot', () => {
-    const emptyProject = createProject();
-    emptyProject.tests = [];
-    emptyProject.project.resources.tests = [];
-    emptyProject.contentHashes = { ...emptyProject.contentHashes, tests: {} };
+    let emptyProject = createProject();
+    emptyProject = { ...emptyProject, tests: [] };
+    emptyProject = {
+      ...emptyProject,
+      project: {
+        ...emptyProject.project,
+        resources: { ...emptyProject.project.resources, tests: [] },
+      },
+    };
+    emptyProject = { ...emptyProject, contentHashes: { ...emptyProject.contentHashes, tests: {} } };
 
     const allRequest = {
       schema: COMMAND_REQUEST_SCHEMA_ID,
@@ -452,11 +512,11 @@ describe('eval resolver', () => {
 
   it('is order-stable across non-semantic loaded collection reordering', () => {
     const firstProject = createProject();
-    const reordered = structuredClone(firstProject);
-    reordered.agents.reverse();
-    reordered.datasets.reverse();
-    reordered.metrics.reverse();
-    reordered.tests.reverse();
+    let reordered = structuredClone(firstProject);
+    reordered = { ...reordered, agents: reordered.agents.toReversed() };
+    reordered = { ...reordered, datasets: reordered.datasets.toReversed() };
+    reordered = { ...reordered, metrics: reordered.metrics.toReversed() };
+    reordered = { ...reordered, tests: reordered.tests.toReversed() };
 
     const first = resolveEvalRun(firstProject, request(), options);
     const second = resolveEvalRun(reordered, request(), options);
@@ -465,8 +525,8 @@ describe('eval resolver', () => {
 
   it('binds snapshot hashes to the current project hash and rejects stale callers', () => {
     const firstProject = createProject();
-    const changedProject = structuredClone(firstProject);
-    changedProject.projectHash = 'f'.repeat(64);
+    let changedProject = structuredClone(firstProject);
+    changedProject = { ...changedProject, projectHash: 'f'.repeat(64) };
     const first = resolveEvalRun(firstProject, request(), options);
     const changed = resolveEvalRun(changedProject, request(), options);
 

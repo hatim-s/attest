@@ -1,3 +1,4 @@
+import type * as Effect from 'effect/Effect';
 import type {
   AgentRequest,
   AgentResponse,
@@ -110,11 +111,11 @@ type EvalCaseExecutionContext = {
   /** Identifies the stable worker directory or transient concurrency slot assigned to this case. */
   workerIndex: number;
   environment?: CaseEnvironment;
-  afterAgent?(execution: CaseExecution): Promise<void>;
+  afterAgent?(execution: CaseExecution): Effect.Effect<void, Error>;
   afterEvaluation?(
     execution: CaseExecution,
     metrics: readonly StoredMetricEvaluation[],
-  ): Promise<void>;
+  ): Effect.Effect<void, Error>;
 };
 
 /** One case's evidence; lifecycle failures live in `execution.diagnostics.lifecycleError`. */
@@ -124,15 +125,19 @@ type EvalCaseRunnerResult = {
 };
 
 type EvalCaseRunner<Payload = unknown> = {
-  beforeRun?(runId: string, signal: AbortSignal): Promise<void>;
+  beforeRun?(runId: string, signal: AbortSignal): Effect.Effect<void, Error>;
   executeCase(
     runId: string,
     resolvedCase: ResolvedEvalCase<Payload>,
     signal: AbortSignal,
     context: EvalCaseExecutionContext,
-  ): Promise<EvalCaseRunnerResult>;
-  cleanup?(runId: string): Promise<void>;
-  afterRun?(runId: string, status: EvalRunStatus, summary: EvalRunSummary): Promise<void>;
+  ): Effect.Effect<EvalCaseRunnerResult, Error>;
+  cleanup?(runId: string): Effect.Effect<void, Error>;
+  afterRun?(
+    runId: string,
+    status: EvalRunStatus,
+    summary: EvalRunSummary,
+  ): Effect.Effect<void, Error>;
 };
 
 type EvalRunHookContext = {
@@ -162,7 +167,7 @@ type EvalHookContexts<Payload> = {
 type EvalHooks<Payload = unknown> = {
   [Stage in keyof EvalHookContexts<Payload>]?: (
     context: EvalHookContexts<Payload>[Stage],
-  ) => void | Promise<void>;
+  ) => Effect.Effect<void, Error>;
 };
 
 /**
@@ -170,14 +175,21 @@ type EvalHooks<Payload = unknown> = {
  * The engine never opens a database or imports the old configuration model directly.
  */
 type EvalPersistenceAdapter<Payload = unknown> = {
-  createRun(run: Readonly<EvalRun>): Promise<void>;
-  recordCase(runId: string, record: EvalCaseRecord<Payload>): Promise<void>;
-  finalizeRun(runId: string, status: EvalRunStatus, summary: EvalRunSummary): Promise<void>;
+  createRun(run: Readonly<EvalRun>): Effect.Effect<void, Error>;
+  recordCase(runId: string, record: EvalCaseRecord<Payload>): Effect.Effect<void, Error>;
+  finalizeRun(
+    runId: string,
+    status: EvalRunStatus,
+    summary: EvalRunSummary,
+  ): Effect.Effect<void, Error>;
 };
 
 /** Computes a persisted comparison after the candidate cases have been recorded. */
 type EvalBaselineAdapter<BaselineDiff = JsonValue> = {
-  diffRuns(input: { baselineRunId: string; candidateRunId: string }): Promise<BaselineDiff>;
+  diffRuns(input: {
+    baselineRunId: string;
+    candidateRunId: string;
+  }): Effect.Effect<BaselineDiff, Error>;
 };
 
 /** Carries deterministic JUnit bytes and their integrity hash to an atomic writer. */
@@ -189,7 +201,7 @@ type EvalJUnitPayload = {
 
 /** Keeps filesystem publication outside the engine while requiring atomic replacement semantics. */
 type EvalArtifactWriter = {
-  writeJUnitAtomically(path: string, payload: EvalJUnitPayload): Promise<void>;
+  writeJUnitAtomically(path: string, payload: EvalJUnitPayload): Effect.Effect<void, Error>;
 };
 
 type EvalTerminalErrorCode = 'cancelled' | 'run_failed';
@@ -203,7 +215,7 @@ type EvalTerminalFailureFactory = (
 /** Builds one case's environment; resolving `undefined` runs that case without one. */
 type EvalCaseIsolation = (
   context: Parameters<CaseEnvironmentFactory>[0],
-) => Promise<CaseEnvironment | undefined>;
+) => Effect.Effect<CaseEnvironment | undefined, Error>;
 
 /** Injects deterministic time and optional event delivery without changing stored results. */
 type ExecuteEvalOptions<BaselineDiff = JsonValue, Payload = unknown> = {
@@ -211,7 +223,7 @@ type ExecuteEvalOptions<BaselineDiff = JsonValue, Payload = unknown> = {
   isolation?: EvalCaseIsolation;
   signal?: AbortSignal;
   now?: () => string;
-  onEvent?: (event: EvalEvent) => void | Promise<void>;
+  onEvent?: (event: EvalEvent) => Effect.Effect<void, Error>;
   baseline?: EvalBaselineAdapter<BaselineDiff>;
   artifacts?: EvalArtifactWriter;
   terminalFailure?: EvalTerminalFailureFactory;

@@ -1,23 +1,32 @@
+import { isSandboxAttemptCleanupError, startWebSocketAgent } from '@attest/executor';
 import type { CaseExecution } from '@attest/runtime';
+import * as Effect from 'effect/Effect';
+import type * as Cause from 'effect/Cause';
+import { recoverOrdinary } from './lifecycle-cause.js';
+import type * as Scope from 'effect/Scope';
 import { resolve } from 'node:path';
 
 import type { AgentRequest, AgentResource } from '@attest/contracts';
 import {
+  getInvocationPriorAttempts,
   AgentInvocationError,
-  createLoopbackCompletionReceiver,
+  CliCleanupError,
+  ProcessCleanupError,
+  CallbackCleanupError,
+  StreamCleanupError,
+  WebSocketCleanupError,
   enforceArtifactLimits,
   invokeAgent,
-  invokeCallbackAgent,
   invokeMappedHttpAgent,
   invokeStreamingAgent,
   invokeVercelSandboxAgent,
   startBackgroundAgent,
   startJsonlBridgeAgent,
-  startWebSocketAgent,
   type InvocationResult,
 } from '@attest/executor';
 
 import type { ResolvedNativeAgent } from './types.js';
+import { startCallbackSession } from './callback-session.js';
 
 const DEFAULT_OUTPUT_CAP_BYTES = 10 * 1024 * 1024;
 
@@ -25,8 +34,8 @@ const DEFAULT_OUTPUT_CAP_BYTES = 10 * 1024 * 1024;
 const SANDBOX_OVERHEAD_MS = 60_000;
 
 type AgentSession = {
-  close(): Promise<void>;
-  invoke(request: AgentRequest, signal?: AbortSignal): Promise<InvocationResult>;
+  close(): Effect.Effect<void, Error>;
+  invoke(request: AgentRequest, signal?: AbortSignal): Effect.Effect<InvocationResult, Error>;
 };
 
 type SessionAgent = Extract<
@@ -56,16 +65,16 @@ type InvokeResolvedAgentOptions = {
  * Opens the run-scoped session for transports that keep a process or connection alive between
  * requests; other transports are invoked fresh per request.
  */
-const startAgentRuntime = async (
+const startAgentRuntime = Effect.fn('startAgentRuntime')(function* (
   resolved: ResolvedNativeAgent,
   signal?: AbortSignal,
-): Promise<AgentRuntime> => {
+): Effect.fn.Return<AgentRuntime, Error, Scope.Scope> {
   switch (resolved.kind) {
     case 'background':
       return {
         kind: 'session',
         resolved,
-        session: await startBackgroundAgent(resolved.agent, {
+        session: yield* startBackgroundAgent(resolved.agent, {
           cwd: resolved.cwd,
           env: resolved.env,
           invokeHeaders: resolved.invokeHeaders,
@@ -80,7 +89,7 @@ const startAgentRuntime = async (
       return {
         kind: 'session',
         resolved,
-        session: await startJsonlBridgeAgent(resolved.agent, {
+        session: yield* startJsonlBridgeAgent(resolved.agent, {
           cwd: resolved.cwd,
           env: resolved.env,
           secrets: resolved.secrets,
@@ -91,50 +100,27 @@ const startAgentRuntime = async (
       return {
         kind: 'session',
         resolved,
-        session: await startWebSocketAgent(resolved.agent, {
+        session: yield* startWebSocketAgent(resolved.agent, {
           headers: resolved.headers,
           secrets: resolved.secrets,
           signal,
         }),
       };
-    case 'callback': {
-      // One receiver per run; it listens only while a completion is awaited.
-      const receiver = createLoopbackCompletionReceiver({
-        listenPort: resolved.agent.transport.receiver?.listen_port,
-        publicUrl: resolved.agent.transport.receiver?.public_url,
-        bodyCapBytes: resolved.agent.limits?.response_bytes ?? DEFAULT_OUTPUT_CAP_BYTES,
-      });
-
-      return {
-        kind: 'session',
-        resolved,
-        session: {
-          invoke: (request, invokeSignal) =>
-            invokeCallbackAgent(resolved.agent, request, {
-              receiver,
-              trigger: resolved.trigger,
-              artifactFetch: resolved.artifactFetch,
-              traceFetch: resolved.traceFetch,
-              secrets: resolved.secrets,
-              signal: invokeSignal,
-            }),
-          close: () => receiver.close(),
-        },
-      };
-    }
+    case 'callback':
+      return { kind: 'session', resolved, session: yield* startCallbackSession(resolved) };
 
     default:
       return { kind: 'direct', resolved };
   }
-};
+});
 
 /** Sends one request through the transport the agent resolved to. */
-const dispatch = async (
+const dispatch = Effect.fn('dispatch')(function* (
   runtime: AgentRuntime,
   request: AgentRequest,
   options: InvokeResolvedAgentOptions,
-): Promise<InvocationResult> => {
-  if (runtime.kind === 'session') return runtime.session.invoke(request, options.signal);
+): Effect.fn.Return<InvocationResult, Error> {
+  if (runtime.kind === 'session') return yield* runtime.session.invoke(request, options.signal);
   const { resolved } = runtime;
   const responseBytes = options.agent.limits?.response_bytes ?? DEFAULT_OUTPUT_CAP_BYTES;
   const retries = options.agent.retry?.retries ?? 0;
@@ -175,23 +161,27 @@ const dispatch = async (
 
       if (options.signal !== undefined) execution.signal = options.signal;
 
-      return invokeSandbox(resolved.sandbox, invocation, request, execution);
+      return yield* invokeSandbox(resolved.sandbox, invocation, request, execution);
     }
 
-    case 'stream':
-      return invokeStreamingAgent(resolved.agent, request, {
+    case 'stream': {
+      return yield* invokeStreamingAgent(resolved.agent, request, {
         headers: resolved.headers,
         query: resolved.query,
         secrets: resolved.secrets,
         signal: options.signal,
       });
-    case 'mapped_http':
-      return invokeMappedHttpAgent(resolved.agent, request, {
+    }
+
+    case 'mapped_http': {
+      return yield* invokeMappedHttpAgent(resolved.agent, request, {
         headers: resolved.headers,
         query: resolved.query,
         secrets: resolved.secrets,
         signal: options.signal,
       });
+    }
+
     case 'direct': {
       const invocation: Parameters<typeof invokeAgent>[2] = {
         env: resolved.env,
@@ -206,25 +196,139 @@ const dispatch = async (
         invocation.workingDirectory = options.workerDirectory;
       }
 
-      return invokeAgent(resolved.target, request, invocation);
+      return yield* recoverOrdinary(
+        invokeAgent(resolved.target, request, invocation),
+        (cause, fullCause) =>
+          cause instanceof CliCleanupError && cause.attempt !== undefined
+            ? Effect.succeed(startupFailure(cause, cause.attempt.durationMs, fullCause))
+            : Effect.failCause(fullCause),
+      );
     }
   }
-};
+});
 
 /**
  * Sends one request and applies the artifact caps to whatever came back. The connection probe and
  * the eval runner share this so both enforce the same caps, retries, and sandbox bounds; it is the
  * one place every transport's parsed response passes through.
  */
-const invokeResolvedAgent = async (
+const invokeResolvedAgent = (
   runtime: AgentRuntime,
   request: AgentRequest,
   options: InvokeResolvedAgentOptions,
-): Promise<InvocationResult> =>
-  enforceArtifactLimits(await dispatch(runtime, request, options), options.agent.limits);
+): Effect.Effect<InvocationResult, Error> =>
+  Effect.map(
+    recoverOrdinary(dispatch(runtime, request, options), (cause, fullCause) =>
+      cause instanceof CallbackCleanupError ||
+      cause instanceof StreamCleanupError ||
+      cause instanceof WebSocketCleanupError
+        ? Effect.succeed(startupFailure(cause, cause.result.durationMs))
+        : Effect.failCause(fullCause),
+    ),
+    (result) => enforceArtifactLimits(result, options.agent.limits),
+  );
 
-/** Converts a startup throw into one failed attempt so the failure is recorded like any other. */
-const startupFailure = (cause: unknown, durationMs: number): InvocationResult => {
+/** Projects operational startup or completed-attempt cleanup failures into recordable evidence. */
+const startupFailure = (
+  cause: unknown,
+  durationMs: number,
+  fullCause?: Cause.Cause<Error>,
+): InvocationResult => {
+  const prior = fullCause === undefined ? [] : getInvocationPriorAttempts(fullCause);
+
+  if (isSandboxAttemptCleanupError(cause)) {
+    const completed = cause.attempt;
+
+    const attempt = {
+      status: 'invocation_error' as const,
+      error: new AgentInvocationError(
+        completed.status === 'invocation_error' ? completed.error.code : 'network',
+        'Vercel sandbox cleanup was not confirmed.',
+        { cause, applicationStarted: true },
+      ),
+      diagnostics: { ...completed.diagnostics, sandboxCleanupConfirmed: false },
+      durationMs: completed.durationMs,
+      rawExcerpt: completed.rawExcerpt,
+      warnings: completed.warnings,
+    };
+
+    return { ...attempt, attempts: [...prior, attempt] };
+  }
+
+  if (cause instanceof ProcessCleanupError && cause.completed !== undefined) {
+    const completed = cause.completed;
+
+    const error = new AgentInvocationError(
+      completed.status === 'invocation_error' ? completed.error.code : cause.code,
+      completed.status === 'invocation_error' ? completed.error.message : cause.message,
+      { cause, applicationStarted: true },
+    );
+
+    const failed = {
+      status: 'invocation_error' as const,
+      error,
+      diagnostics: completed.diagnostics,
+      durationMs: completed.durationMs,
+      rawExcerpt: completed.rawExcerpt,
+      warnings: completed.warnings,
+    };
+
+    return { ...failed, attempts: [...completed.attempts.slice(0, -1), failed] };
+  }
+
+  if (
+    cause instanceof CallbackCleanupError ||
+    cause instanceof StreamCleanupError ||
+    cause instanceof WebSocketCleanupError
+  ) {
+    const completed = cause.result;
+    const primary = completed.status === 'invocation_error' ? completed.error : undefined;
+
+    const message =
+      cause instanceof CallbackCleanupError
+        ? 'Callback cleanup could not be confirmed.'
+        : 'Streaming cleanup could not be confirmed.';
+
+    const attempt = {
+      status: 'invocation_error' as const,
+      error:
+        cause instanceof WebSocketCleanupError
+          ? cause
+          : new AgentInvocationError(
+              primary?.code ?? 'network',
+              primary === undefined ? message : `${primary.message} ${message}`,
+              { cause, applicationStarted: true },
+            ),
+      diagnostics: completed.diagnostics,
+      durationMs: completed.durationMs,
+      rawExcerpt: completed.rawExcerpt,
+      warnings: completed.warnings,
+    };
+
+    return { ...attempt, attempts: [...completed.attempts.slice(0, -1), attempt] };
+  }
+
+  if (cause instanceof CliCleanupError && cause.attempt !== undefined) {
+    const completed = cause.attempt;
+    const primary = completed.status === 'invocation_error' ? completed.error : undefined;
+    const message = 'CLI cleanup could not be confirmed.';
+
+    const attempt = {
+      status: 'invocation_error' as const,
+      error: new AgentInvocationError(
+        primary?.code ?? 'network',
+        primary === undefined ? message : `${primary.message} ${message}`,
+        { cause, applicationStarted: true },
+      ),
+      diagnostics: completed.diagnostics,
+      durationMs: completed.durationMs,
+      rawExcerpt: completed.rawExcerpt,
+      warnings: completed.warnings,
+    };
+
+    return { ...attempt, attempts: [...prior, attempt] };
+  }
+
   const invocationError =
     cause instanceof AgentInvocationError
       ? cause
@@ -242,7 +346,7 @@ const startupFailure = (cause: unknown, durationMs: number): InvocationResult =>
     warnings: [],
   };
 
-  return { ...attempt, attempts: [attempt] };
+  return { ...attempt, attempts: [...prior, attempt] };
 };
 
 /** Maps a failed invocation to the case outcome recorded for it. */

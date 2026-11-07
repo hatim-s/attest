@@ -1,5 +1,5 @@
 import { parseWithSchemaSync } from '@attest/contracts';
-import { z } from 'zod';
+import * as Schema from 'effect/Schema';
 import type { HttpRequestTemplate, JsonValue, SecretReference } from '@attest/contracts';
 
 import { isSensitiveFieldName } from '../../internal/redaction.js';
@@ -310,7 +310,7 @@ const parseCurlCommand = (source: string, options: CurlParserOptions = {}): Pars
 
     if (!formEncoded) {
       try {
-        parsedJson = parseWithSchemaSync(z.json(), JSON.parse(rawBody));
+        parsedJson = parseWithSchemaSync(Schema.Json, JSON.parse(rawBody));
       } catch {
         parsedJson = undefined;
       }
@@ -323,7 +323,7 @@ const parseCurlCommand = (source: string, options: CurlParserOptions = {}): Pars
       body = parsedJson;
       assertNoSensitiveBodyFields(body);
 
-      for (const mapping of options.placeholders ?? []) applyPlaceholder(body, mapping);
+      for (const mapping of options.placeholders ?? []) body = applyPlaceholder(body, mapping);
       bodyEncoding = 'json';
     } else if (formEncoded) {
       body = mapFormBody(rawBody, options.placeholders ?? []);
@@ -350,25 +350,25 @@ const parseCurlCommand = (source: string, options: CurlParserOptions = {}): Pars
 
   const resolvedMethod = method ?? (body === undefined ? 'GET' : 'POST');
 
-  const request: HttpRequestTemplate = {
+  let request: HttpRequestTemplate = {
     url: url.toString(),
     method: resolvedMethod,
   };
 
   if (!(Object.keys(headers).length === 0)) {
-    request.headers = headers;
+    request = { ...request, headers: headers };
   }
 
   if (!(Object.keys(query).length === 0)) {
-    request.query = query;
+    request = { ...request, query: query };
   }
 
   if (body !== undefined) {
-    request.body = body;
+    request = { ...request, body: body };
   }
 
   if (bodyEncoding !== undefined) {
-    request.body_encoding = bodyEncoding;
+    request = { ...request, body_encoding: bodyEncoding };
   }
 
   const redactTemplateValue = (value: string | SecretReference): string => {

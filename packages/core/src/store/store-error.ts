@@ -1,4 +1,4 @@
-import { AttestError } from '@attest/contracts';
+import * as Data from 'effect/Data';
 
 import type { CliDiagnostics } from '../records/run-control-schemas.js';
 
@@ -26,10 +26,12 @@ type StoreErrorCode =
 type DiagnosticsCode = Extract<StoreErrorCode, 'RUN_START_FAILED' | 'PROJECT_UNLOADABLE'>;
 
 /** Identifies exceptional store failures that callers can render without parsing messages. */
-class StoreError extends AttestError {
-  declare readonly code: StoreErrorCode;
-  readonly details: CliDiagnostics | undefined;
-
+class StoreError extends Data.TaggedError('StoreError')<{
+  code: StoreErrorCode;
+  message: string;
+  cause?: unknown;
+  details?: CliDiagnostics;
+}> {
   constructor(
     code: DiagnosticsCode,
     message: string,
@@ -45,8 +47,7 @@ class StoreError extends AttestError {
     message: string,
     options?: ErrorOptions & { details?: CliDiagnostics },
   ) {
-    super(code, message, options);
-    this.details = options?.details;
+    super({ code, message, ...options });
   }
 }
 

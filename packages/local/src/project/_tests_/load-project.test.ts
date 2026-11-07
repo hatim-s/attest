@@ -1,4 +1,6 @@
-import { mkdir, mkdtemp, rm, symlink, unlink, writeFile } from 'node:fs/promises';
+import { valueFromExit } from '../../internal/effect-exit.js';
+import * as Effect from 'effect/Effect';
+import { mkdir, mkdtemp, realpath, rm, symlink, unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
@@ -21,6 +23,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { contentHash, hashCanonicalJsonLines } from '@attest/core';
 
 import { loadProject } from '../project-loader/index.js';
+import { readProjectSource } from '../project-loader/source-loader.js';
 import { ProjectLoadError } from '../project-errors.js';
 
 const temporaryDirectories: string[] = [];
@@ -183,8 +186,13 @@ describe('loadProject', () => {
     const nested = join(compactRoot, 'src', 'nested');
     await mkdir(nested, { recursive: true });
 
-    const compact = await loadProject({ workingDirectory: nested });
-    const pretty = await loadProject({ project: prettyRoot });
+    const compact = await Effect.runPromiseExit(loadProject({ workingDirectory: nested })).then(
+      (exit) => valueFromExit(exit),
+    );
+
+    const pretty = await Effect.runPromiseExit(loadProject({ project: prettyRoot })).then((exit) =>
+      valueFromExit(exit),
+    );
 
     expect(compact.datasets[0]?.cases).toEqual([testCase]);
     expect(compact.contentHashes.datasets.refunds).toEqual({
@@ -197,7 +205,7 @@ describe('loadProject', () => {
 
   it('aggregates malformed, missing, duplicate, and reference failures by source', async () => {
     const root = await createTemporaryDirectory();
-    const manifest = await writeValidProject(root);
+    let manifest = await writeValidProject(root);
 
     const invalidTest: TestResource = {
       ...test,
@@ -213,13 +221,25 @@ describe('loadProject', () => {
     await writeProjectFile(root, 'attest/agents/support.json', '{"token":"DO-NOT-LEAK"');
     await writeProjectFile(root, 'attest/tests/refund.json', JSON.stringify(invalidTest));
     await unlink(join(root, 'attest/metrics/correct.json'));
-    manifest.resources.tests[0]!.content_hash = contentHash(invalidTest);
+    manifest = {
+      ...manifest,
+      resources: {
+        ...manifest.resources,
+        tests: manifest.resources.tests.map((entry, index) =>
+          index === 0
+            ? { ...manifest.resources.tests[0]!, content_hash: contentHash(invalidTest) }
+            : entry,
+        ),
+      },
+    };
     await writeProjectFile(root, 'attest.project.json', JSON.stringify(manifest));
 
     let failure: unknown;
 
     try {
-      await loadProject({ project: root });
+      await Effect.runPromiseExit(loadProject({ project: root })).then((exit) =>
+        valueFromExit(exit),
+      );
     } catch (error: unknown) {
       failure = error;
     }
@@ -251,7 +271,9 @@ describe('loadProject', () => {
       JSON.stringify({ schema: 'not-attest-project', resources: {} }),
     );
 
-    const failure = await captureProjectFailure(() => loadProject({ project: root }));
+    const failure = await captureProjectFailure(() =>
+      Effect.runPromiseExit(loadProject({ project: root })).then((exit) => valueFromExit(exit)),
+    );
 
     expect(failure.code).toBe('project_invalid');
     expect(failure.diagnostics).toEqual(
@@ -263,11 +285,21 @@ describe('loadProject', () => {
 
   it('rejects manifest traversal before reading outside the project', async () => {
     const root = await createTemporaryDirectory();
-    const manifest = await writeValidProject(root);
-    manifest.resources.agents[0]!.path = '../outside.json';
+    let manifest = await writeValidProject(root);
+    manifest = {
+      ...manifest,
+      resources: {
+        ...manifest.resources,
+        agents: manifest.resources.agents.map((entry, index) =>
+          index === 0 ? { ...manifest.resources.agents[0]!, path: '../outside.json' } : entry,
+        ),
+      },
+    };
     await writeProjectFile(root, 'attest.project.json', JSON.stringify(manifest));
 
-    const failure = await captureProjectFailure(() => loadProject({ project: root }));
+    const failure = await captureProjectFailure(() =>
+      Effect.runPromiseExit(loadProject({ project: root })).then((exit) => valueFromExit(exit)),
+    );
 
     expect(failure.code).toBe('project_invalid');
     expect(failure.diagnostics).toEqual(
@@ -287,7 +319,9 @@ describe('loadProject', () => {
     await unlink(agentPath);
     await symlink(outsidePath, agentPath);
 
-    const failure = await captureProjectFailure(() => loadProject({ project: root }));
+    const failure = await captureProjectFailure(() =>
+      Effect.runPromiseExit(loadProject({ project: root })).then((exit) => valueFromExit(exit)),
+    );
 
     expect(failure.diagnostics).toEqual(
       expect.arrayContaining([
@@ -308,7 +342,9 @@ describe('loadProject', () => {
     let failure: unknown;
 
     try {
-      await loadProject({ project: root });
+      await Effect.runPromiseExit(loadProject({ project: root })).then((exit) =>
+        valueFromExit(exit),
+      );
     } catch (error: unknown) {
       failure = error;
     }
@@ -344,7 +380,9 @@ describe('loadProject', () => {
       JSON.stringify({ ...metric, name: 'Changed' }),
     );
 
-    const failure = await captureProjectFailure(() => loadProject({ project: root }));
+    const failure = await captureProjectFailure(() =>
+      Effect.runPromiseExit(loadProject({ project: root })).then((exit) => valueFromExit(exit)),
+    );
 
     expect(failure.diagnostics).toEqual(
       expect.arrayContaining([
@@ -354,5 +392,24 @@ describe('loadProject', () => {
         }),
       ]),
     );
+  });
+});
+
+it('reports an authored directory as a non-file source', async () => {
+  const root = await realpath(await createTemporaryDirectory());
+  await mkdir(join(root, 'authored.json'));
+
+  const result = valueFromExit(
+    await Effect.runPromiseExit(readProjectSource(root, 'authored.json')),
+  );
+
+  expect(result).toEqual({
+    diagnostics: [
+      {
+        code: 'source_unreadable',
+        message: 'authored path is not a regular file',
+        source: 'authored.json',
+      },
+    ],
   });
 });

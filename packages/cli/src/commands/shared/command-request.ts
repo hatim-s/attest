@@ -1,3 +1,4 @@
+import * as Effect from 'effect/Effect';
 import type { CommandRequest } from '@attest/contracts';
 import { readCommandRequest, validateCommandRequest } from '@attest/local/agent';
 import type { Command } from 'commander';
@@ -30,7 +31,7 @@ type ReadOrBuildRequestOptions<TCommand extends CommandRequest['command']> = Omi
   ReadRequestOptions<TCommand>,
   'options'
 > & {
-  build: () => Promise<CommandRequestFor<TCommand>>;
+  build: () => Effect.Effect<CommandRequestFor<TCommand>, unknown>;
   options: RequestSourceFlags;
 };
 
@@ -57,47 +58,47 @@ const requestReadsStdin = (request: CommandRequest): boolean =>
   ('fixture' in request && request.fixture === '-');
 
 /** Reads the `--from-json` request after rejecting authored flags and a doubly used stdin. */
-const readJsonRequest = async <TCommand extends CommandRequest['command']>({
+const readJsonRequest = <TCommand extends CommandRequest['command']>({
   command,
   context,
   leaf,
   options,
-}: ReadRequestOptions<TCommand>): Promise<CommandRequestFor<TCommand>> => {
-  assertNoRequestOverlap(options, authoredFieldPresence(leaf));
+}: ReadRequestOptions<TCommand>) =>
+  Effect.gen(function* () {
+    assertNoRequestOverlap(options, authoredFieldPresence(leaf));
 
-  const request = await readCommandRequest(command, options.fromJson, {
-    readStdin: context.interaction.readStdin,
-    workingDirectory: context.workingDirectory,
+    const request = yield* readCommandRequest(command, options.fromJson, {
+      readStdin: context.interaction.readStdin,
+      workingDirectory: context.workingDirectory,
+    });
+
+    if (options.fromJson === '-' && requestReadsStdin(request)) {
+      return yield* Effect.fail(
+        new AttestCliError('cli_usage', 'The command request and its source cannot share stdin.', {
+          path: '--from-json',
+          hint: 'Put either the command request or the source it reads in a file.',
+        }),
+      );
+    }
+
+    return request;
   });
-
-  if (options.fromJson === '-' && requestReadsStdin(request)) {
-    throw new AttestCliError(
-      'cli_usage',
-      'The command request and its source cannot share stdin.',
-      {
-        path: '--from-json',
-        hint: 'Put either the command request or the source it reads in a file.',
-      },
-    );
-  }
-
-  return request;
-};
 
 /**
  * Returns the `--from-json` request, or validates the one built from flags, through the same
  * published schema. Both routes reach the local command with one shape.
  */
-const readOrBuildRequest = async <TCommand extends CommandRequest['command']>({
+const readOrBuildRequest = <TCommand extends CommandRequest['command']>({
   build,
   options,
   ...read
-}: ReadOrBuildRequestOptions<TCommand>): Promise<CommandRequestFor<TCommand>> => {
-  const { fromJson } = options;
+}: ReadOrBuildRequestOptions<TCommand>) =>
+  Effect.gen(function* () {
+    const { fromJson } = options;
 
-  if (fromJson === undefined) return validateCommandRequest(read.command, await build());
+    if (fromJson === undefined) return validateCommandRequest(read.command, yield* build());
 
-  return readJsonRequest({ ...read, options: { ...options, fromJson } });
-};
+    return yield* readJsonRequest({ ...read, options: { ...options, fromJson } });
+  });
 
 export { assertNoRequestOverlap, readJsonRequest, readOrBuildRequest };

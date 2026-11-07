@@ -1,4 +1,9 @@
-import { z } from 'zod';
+import {
+  positiveIntegerSchema,
+  nonnegativeIntegerSchema,
+  timestampSchema,
+} from '../schema/scalars.js';
+import * as Schema from 'effect/Schema';
 
 import { cliFailureResultSchema, cliSuccessResultSchema } from '../cli/protocol.js';
 import { caseOutcomeSchema } from './execution.js';
@@ -7,64 +12,64 @@ import { caseSelectionSummarySchema } from './selection.js';
 import { resourceIdSchema, sha256Schema } from '../project/shared.js';
 import { CLI_EVENT_SCHEMA_ID } from '../schema/identifiers.js';
 
-const evalRunSummarySchema = z.strictObject({
-  total_cases: z.number().int().nonnegative(),
-  passed_cases: z.number().int().nonnegative(),
-  failed_cases: z.number().int().nonnegative(),
-  error_cases: z.number().int().nonnegative(),
-  metric_error_count: z.number().int().nonnegative(),
+const evalRunSummarySchema = Schema.Struct({
+  total_cases: nonnegativeIntegerSchema,
+  passed_cases: nonnegativeIntegerSchema,
+  failed_cases: nonnegativeIntegerSchema,
+  error_cases: nonnegativeIntegerSchema,
+  metric_error_count: nonnegativeIntegerSchema,
 });
 
 const evalEventBaseFields = {
-  schema: z.literal(CLI_EVENT_SCHEMA_ID),
-  sequence: z.number().int().nonnegative(),
-  time: z.iso.datetime({ offset: true }),
+  schema: Schema.Literal(CLI_EVENT_SCHEMA_ID),
+  sequence: nonnegativeIntegerSchema,
+  time: timestampSchema,
 };
 
-const evalRunStartedEventSchema = z.strictObject({
+const evalRunStartedEventSchema = Schema.Struct({
   ...evalEventBaseFields,
-  event: z.literal('run_started'),
-  data: z.strictObject({
+  event: Schema.Literal('run_started'),
+  data: Schema.Struct({
     run_id: evalRunIdSchema,
     snapshot_hash: sha256Schema,
-    selection: caseSelectionSummarySchema.optional(),
-    total_cases: z.number().int().nonnegative(),
-    concurrency: z.number().int().positive(),
-    timeout_ms: z.number().int().positive(),
+    selection: Schema.optional(caseSelectionSummarySchema),
+    total_cases: nonnegativeIntegerSchema,
+    concurrency: positiveIntegerSchema,
+    timeout_ms: positiveIntegerSchema,
   }),
 });
 
-const evalCaseStartedEventSchema = z.strictObject({
+const evalCaseStartedEventSchema = Schema.Struct({
   ...evalEventBaseFields,
-  event: z.literal('case_started'),
-  data: z.strictObject({
+  event: Schema.Literal('case_started'),
+  data: Schema.Struct({
     run_id: evalRunIdSchema,
     test_id: resourceIdSchema,
     case_id: resourceIdSchema,
-    configured_index: z.number().int().nonnegative(),
+    configured_index: nonnegativeIntegerSchema,
   }),
 });
 
-const evalCaseCompletedEventSchema = z.strictObject({
+const evalCaseCompletedEventSchema = Schema.Struct({
   ...evalEventBaseFields,
-  event: z.literal('case_completed'),
-  data: z.strictObject({
+  event: Schema.Literal('case_completed'),
+  data: Schema.Struct({
     run_id: evalRunIdSchema,
     test_id: resourceIdSchema,
     case_id: resourceIdSchema,
-    configured_index: z.number().int().nonnegative(),
-    completion_index: z.number().int().nonnegative(),
+    configured_index: nonnegativeIntegerSchema,
+    completion_index: nonnegativeIntegerSchema,
     outcome: caseOutcomeSchema,
-    verdict: z.enum(['pass', 'fail', 'error']),
+    verdict: Schema.Literals(['pass', 'fail', 'error']),
   }),
 });
 
-const evalRunCompletedEventSchema = z.strictObject({
+const evalRunCompletedEventSchema = Schema.Struct({
   ...evalEventBaseFields,
-  event: z.literal('run_completed'),
-  data: z.strictObject({
+  event: Schema.Literal('run_completed'),
+  data: Schema.Struct({
     run_id: evalRunIdSchema,
-    status: z.enum(['completed', 'failed', 'cancelled']),
+    status: Schema.Literals(['completed', 'failed', 'cancelled']),
     summary: evalRunSummarySchema,
   }),
 });
@@ -72,43 +77,49 @@ const evalRunCompletedEventSchema = z.strictObject({
 const evalRunResultPayloadFields = {
   run_id: evalRunIdSchema,
   snapshot_hash: sha256Schema,
-  status: z.literal('completed'),
+  status: Schema.Literal('completed'),
   summary: evalRunSummarySchema,
-  selection: caseSelectionSummarySchema.optional(),
-  baseline_run_id: evalRunIdSchema.optional(),
-  junit_path: z.string().min(1).optional(),
+  selection: Schema.optional(caseSelectionSummarySchema),
+  baseline_run_id: Schema.optional(evalRunIdSchema),
+  junit_path: Schema.optional(Schema.String.check(Schema.isMinLength(1))),
 };
 
-const passingEvalRunResultSchema = cliSuccessResultSchema.extend({
-  command: z.literal('eval.run'),
-  result: z.strictObject({ ...evalRunResultPayloadFields, verdict: z.literal('pass') }),
+const passingEvalRunResultSchema = Schema.Struct({
+  ...cliSuccessResultSchema.fields,
+  command: Schema.Literal('eval.run'),
+  result: Schema.Struct({ ...evalRunResultPayloadFields, verdict: Schema.Literal('pass') }),
 });
 
-const failingEvalRunResultSchema = cliSuccessResultSchema.extend({
-  command: z.literal('eval.run'),
-  result: z.strictObject({ ...evalRunResultPayloadFields, verdict: z.literal('fail') }),
+const failingEvalRunResultSchema = Schema.Struct({
+  ...cliSuccessResultSchema.fields,
+  command: Schema.Literal('eval.run'),
+  result: Schema.Struct({ ...evalRunResultPayloadFields, verdict: Schema.Literal('fail') }),
 });
 
-const failedEvalRunResultSchema = cliFailureResultSchema.extend({
-  command: z.literal('eval.run'),
+const failedEvalRunResultSchema = Schema.Struct({
+  ...cliFailureResultSchema.fields,
+  command: Schema.Literal('eval.run'),
 });
 
 /** Binds every stable process exit to the shared result-envelope variant. */
-const evalFinalResultDataSchema = z.union([
-  z.strictObject({ exit_code: z.literal(0), result: passingEvalRunResultSchema }),
-  z.strictObject({ exit_code: z.literal(1), result: failingEvalRunResultSchema }),
+const evalFinalResultDataSchema = Schema.Union([
+  Schema.Struct({ exit_code: Schema.Literal(0), result: passingEvalRunResultSchema }),
+  Schema.Struct({ exit_code: Schema.Literal(1), result: failingEvalRunResultSchema }),
   // Exit 1 also covers user-data validation that fails before an eval run is created.
-  z.strictObject({ exit_code: z.literal([1, 2, 3, 4, 130]), result: failedEvalRunResultSchema }),
+  Schema.Struct({
+    exit_code: Schema.Literals([1, 2, 3, 4, 130]),
+    result: failedEvalRunResultSchema,
+  }),
 ]);
 
-const evalResultEventSchema = z.strictObject({
+const evalResultEventSchema = Schema.Struct({
   ...evalEventBaseFields,
-  event: z.literal('result'),
+  event: Schema.Literal('result'),
   data: evalFinalResultDataSchema,
 });
 
 /** Narrows `attest.cli-event` to the append-only eval orchestration vocabulary. */
-const evalEventSchema = z.discriminatedUnion('event', [
+const evalEventSchema = Schema.Union([
   evalRunStartedEventSchema,
   evalCaseStartedEventSchema,
   evalCaseCompletedEventSchema,
@@ -116,11 +127,11 @@ const evalEventSchema = z.discriminatedUnion('event', [
   evalResultEventSchema,
 ]);
 
-type EvalEvent = z.infer<typeof evalEventSchema>;
+type EvalEvent = typeof evalEventSchema.Type;
 
-type EvalFinalResultData = z.infer<typeof evalFinalResultDataSchema>;
+type EvalFinalResultData = typeof evalFinalResultDataSchema.Type;
 
-type EvalRunSummary = z.infer<typeof evalRunSummarySchema>;
+type EvalRunSummary = typeof evalRunSummarySchema.Type;
 
 export {
   evalCaseCompletedEventSchema,

@@ -1,4 +1,4 @@
-import { z } from 'zod';
+import * as Schema from 'effect/Schema';
 
 import { refinePortableCredentials } from './portable-credentials.js';
 
@@ -14,44 +14,37 @@ const PORTABLE_MAX_TOTAL_FILE_BYTES = 5_242_880;
 /** Caps the complete serialized HTTP upload request, including its revision envelope. */
 const PORTABLE_MAX_UPLOAD_BYTES = 5_242_880;
 
-const portableFilePathSchema = z
-  .string()
-  .max(240)
-  .regex(
+const portableFilePathSchema = Schema.String.check(Schema.isMaxLength(240)).check(
+  Schema.isPattern(
     /^(?:attest\.project\.json|attest\/(?!.*(?:^|\/)\.)[a-zA-Z0-9_-]+(?:\/[a-zA-Z0-9_-]+)*\/[a-zA-Z0-9_-]+\.(?:meta\.json|json|jsonl|ts|py))$/u,
-    'must be a canonical authored resource or metric source path below attest/',
-  );
+    { message: 'must be a canonical authored resource or metric source path below attest/' },
+  ),
+);
 
 /** Carries existing authored resources and their UTF-8 source files across hosts. */
-const portableProjectBundleSchema = z
-  .strictObject({
-    schema: z.literal('attest.project-bundle.v1'),
-    resources: projectResourcesSchema,
-    files: z
-      .record(
-        portableFilePathSchema,
-        z
-          .string()
-          .refine(
-            (value) =>
-              !value.includes('\0') &&
-              new TextEncoder().encode(value).byteLength <= PORTABLE_MAX_FILE_BYTES,
-            `must be UTF-8 text without NUL bytes and at most ${PORTABLE_MAX_FILE_BYTES / 1024 ** 2} MiB`,
-          ),
-      )
-      .meta({
-        maxProperties: PORTABLE_MAX_FILES,
-        $comment: `Runtime-only invariants: files contain no NUL and use at most ${PORTABLE_MAX_FILE_BYTES / 1024 ** 2} MiB per file and ${PORTABLE_MAX_TOTAL_FILE_BYTES / 1024 ** 2} MiB total decoded UTF-8 bytes.`,
-      }),
-  })
-  .superRefine(({ files, resources }, context) => {
+const portableProjectBundleSchema = Schema.Struct({
+  schema: Schema.Literal('attest.project-bundle.v1'),
+  resources: projectResourcesSchema,
+  files: Schema.Record(
+    portableFilePathSchema,
+    Schema.String.check(
+      Schema.makeFilter((value) =>
+        !value.includes('\0') &&
+        new TextEncoder().encode(value).byteLength <= PORTABLE_MAX_FILE_BYTES
+          ? undefined
+          : `must be UTF-8 text without NUL bytes and at most ${PORTABLE_MAX_FILE_BYTES / 1024 ** 2} MiB`,
+      ),
+    ),
+  ),
+}).check(
+  Schema.makeFilter(({ files, resources }) => {
+    const context: Schema.FilterIssue[] = [];
     refinePortableCredentials(resources, context);
 
     if (Object.keys(files).length > PORTABLE_MAX_FILES)
-      context.addIssue({
-        code: 'custom',
+      context.push({
         path: ['files'],
-        message: `at most ${PORTABLE_MAX_FILES} files are allowed`,
+        issue: `at most ${PORTABLE_MAX_FILES} files are allowed`,
       });
 
     if (
@@ -60,31 +53,36 @@ const portableProjectBundleSchema = z
         0,
       ) > PORTABLE_MAX_TOTAL_FILE_BYTES
     )
-      context.addIssue({
-        code: 'custom',
+      context.push({
         path: ['files'],
-        message: `bundle files must total at most ${PORTABLE_MAX_TOTAL_FILE_BYTES / 1024 ** 2} MiB`,
+        issue: `bundle files must total at most ${PORTABLE_MAX_TOTAL_FILE_BYTES / 1024 ** 2} MiB`,
       });
-  });
+
+    return context;
+  }),
+);
 
 /** Submits an immutable revision using the existing evaluation selection contract. */
-const cloudRunRequestSchema = z.strictObject({
-  revision_id: z.string().min(1).max(128),
+const cloudRunRequestSchema = Schema.Struct({
+  revision_id: Schema.String.check(Schema.isMinLength(1)).check(Schema.isMaxLength(128)),
   request: evalRunRequestSchema,
-  idempotency_key: z.string().min(1).max(128),
+  idempotency_key: Schema.String.check(Schema.isMinLength(1)).check(Schema.isMaxLength(128)),
 });
 
 /** Queue delivery carries identity only; workers load the authoritative persisted job. */
-const cloudQueueMessageSchema = z.strictObject({ run_id: z.string().min(1).max(128) });
+const cloudQueueMessageSchema = Schema.Struct({
+  run_id: Schema.String.check(Schema.isMinLength(1)).check(Schema.isMaxLength(128)),
+});
 
-type PortableProjectBundle = z.infer<typeof portableProjectBundleSchema>;
+type PortableProjectBundle = typeof portableProjectBundleSchema.Type;
 
-type CloudRunRequest = z.infer<typeof cloudRunRequestSchema>;
+type CloudRunRequest = typeof cloudRunRequestSchema.Type;
 
-type CloudQueueMessage = z.infer<typeof cloudQueueMessageSchema>;
+type CloudQueueMessage = typeof cloudQueueMessageSchema.Type;
 
 export {
   PORTABLE_MAX_UPLOAD_BYTES,
+  PORTABLE_MAX_FILES,
   portableProjectBundleSchema,
   cloudRunRequestSchema,
   cloudQueueMessageSchema,

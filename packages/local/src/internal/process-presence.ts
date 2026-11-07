@@ -1,17 +1,33 @@
+import * as Data from 'effect/Data';
+import * as Effect from 'effect/Effect';
+
 import { errnoCode } from './errno-code.js';
 
-/**
- * Checks whether a pid is alive with signal 0, which delivers nothing. EPERM still proves the
- * process exists even though this user cannot signal it.
- */
-const isProcessPresent = (pid: number): boolean => {
-  try {
-    process.kill(pid, 0);
+/** Retains unexpected signal-zero failures rather than declaring a live owner stale. */
+class ProcessPresenceFailure extends Data.TaggedError('ProcessPresenceFailure')<{
+  pid: number;
+  code?: string;
+  cause: unknown;
+}> {}
 
-    return true;
-  } catch (error: unknown) {
-    return errnoCode(error) === 'EPERM';
-  }
-};
+/** Checks existence without delivering a signal; EPERM proves existence and ESRCH absence. */
+const isProcessPresent = Effect.fn('isProcessPresent')(function* (pid: number) {
+  return yield* Effect.try({
+    try: () => {
+      process.kill(pid, 0);
 
-export { isProcessPresent };
+      return true;
+    },
+    catch: (cause) => new ProcessPresenceFailure({ pid, code: errnoCode(cause), cause }),
+  }).pipe(
+    Effect.catch((error) => {
+      if (error.code === 'EPERM') return Effect.succeed(true);
+
+      if (error.code === 'ESRCH') return Effect.succeed(false);
+
+      return Effect.fail(error);
+    }),
+  );
+});
+
+export { isProcessPresent, ProcessPresenceFailure };

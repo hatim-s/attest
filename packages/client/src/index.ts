@@ -1,11 +1,15 @@
-export { createAgentRunner } from './runner/agent-runner.js';
-
-export type {
-  AgentHandler,
-  AgentInvocation,
-  AgentRunner,
-  AgentRunnerOptions,
-  HandlerContext,
-  HandlerResult,
-  RunnerFailure,
+export {
+  createAgentRunner,
+  withAgentRunner,
+  ClientCleanup,
+  ClientCleanupError,
+  type AgentHandler,
+  type AgentInvocation,
+  type AgentRunner,
+  type AgentRunnerOptions,
+  type InvocationReceipt,
+  type HandlerContext,
+  type HandlerOutcome,
+  type HandlerResult,
+  type RunnerFailure,
 } from './runner/agent-runner.js';

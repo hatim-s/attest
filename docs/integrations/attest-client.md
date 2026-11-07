@@ -8,26 +8,45 @@ handler ships with it, so a `pi` coding agent can be evaluated without writing g
 ## Copy-paste example
 
 ```ts
-// runner.ts
+import { Effect } from 'effect';
 import { createAgentRunner } from '@attest/client';
 import { serveAgentRunner } from '@attest/client/node';
 import { createPiHandler } from '@attest/client/pi';
 
-const triggerToken = process.env.ATTEST_TRIGGER_TOKEN;
+/** Owns the listener and accepted invocations until an operator requests shutdown. */
+const program = Effect.scoped(
+  Effect.gen(function* () {
+    const triggerToken = process.env.ATTEST_TRIGGER_TOKEN;
 
-if (triggerToken === undefined) throw new Error('Set ATTEST_TRIGGER_TOKEN.');
+    if (triggerToken === undefined)
+      return yield* Effect.fail(new Error('Set ATTEST_TRIGGER_TOKEN.'));
 
-const runner = createAgentRunner({
-  handler: createPiHandler({
-    model: 'anthropic/claude-sonnet-5-5',
-    env: { ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY },
+    const runner = yield* createAgentRunner({
+      handler: createPiHandler({
+        model: process.env.PI_MODEL,
+        env: { ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY },
+      }),
+      triggerToken,
+    });
+
+    const served = yield* serveAgentRunner(runner, { port: 8790 });
+    console.log(`Pi runner listening on ${served.url}`);
+    yield* Effect.callback<void>((resume) => {
+      const stop = () => resume(Effect.void);
+      process.once('SIGINT', stop);
+      process.once('SIGTERM', stop);
+
+      return Effect.sync(() => {
+        process.removeListener('SIGINT', stop);
+        process.removeListener('SIGTERM', stop);
+      });
+    });
+    yield* served.close();
+    yield* runner.close();
   }),
-  triggerToken,
-});
+);
 
-const served = await serveAgentRunner(runner, { port: 8790 });
-
-console.log(`listening on ${served.url}`);
+await Effect.runPromise(program);
 ```
 
 ```sh
@@ -65,9 +84,12 @@ Runnable copies of the runner and a Pi extension live in `packages/client/exampl
 
 ## Prerequisites
 
-- Node.js 22.15 or newer, or Bun 1.4. The root entry also runs on Cloudflare Workers.
+- Node.js 22.15 or newer, or Bun 1.4. The root entry uses Web-standard APIs and bundles for Workers; the host owns deployment lifetime.
 - For the Pi handler: `pi` on `PATH` (or pass `argv`), logged in through `pi` itself or given a
   provider key through the handler's `env` option.
+- For Pi process cleanup: `ps` on `PATH` with support for `-axo pgid=,stat=`. On Linux, install
+  procps. If `ps` is missing or unsupported, cleanup cannot be verified and the runner reports
+  `handler_failed`, even when Pi completed successfully.
 
 ## Entry points
 
@@ -82,17 +104,19 @@ The root entry imports no Node modules, and lint enforces that.
 ## Runner contract
 
 ```ts
-const runner = createAgentRunner({
-  handler, // (invocation, { signal }) => Promise<HandlerResult>
-  fetch, // optional, posts completions; defaults to globalThis.fetch
-  onError, // optional, receives background failures; defaults to one stderr line
-  triggerToken, // required, the bearer token every trigger must carry
-});
-
-runner.fetch(request); // Web-standard Request -> Response
-runner.pending(); // accepted invocations not yet delivered
-runner.drain(); // waits for every accepted invocation
-runner.close(); // 503 for new triggers, aborts handlers, one last delivery attempt each
+const program = Effect.scoped(
+  Effect.gen(function* () {
+    const runner = yield* createAgentRunner({
+      handler: (invocation) => Effect.succeed({ output: invocation.input }),
+      triggerToken: 'change-me',
+    });
+    // Requests return Effects. The host supplies their execution root.
+    const response = yield* runner.fetch(request);
+    yield* runner.drain();
+    yield* runner.close();
+    return response;
+  }),
+);
 ```
 
 A handler returns exactly one of `output` or `error`, plus optional `artifacts` (inline or
@@ -111,49 +135,56 @@ Trigger responses:
 | `415`  | `content-type` is not `application/json`.                             |
 | `503`  | The runner is closing.                                                |
 
-A trigger whose callback token is already running answers `202` again without starting a second
+A trigger whose callback token was already admitted answers `202` again without starting a second
 handler, so attest's idempotent trigger retries are safe. Two tests in one run can send the same
 run and case id with different tokens; each gets its own handler.
 
 Completion delivery posts to `callback.url` with `Authorization: Bearer <callback.token>`. It
-makes up to three attempts, 250 ms and then 1 s apart, on network errors and `5xx`. Any other
+makes up to three attempts, 250 ms and then 1 s apart, on confirmed `5xx` responses only. Any other
 non-`2xx` is final: attest has already judged the completion (`401`, `409` duplicate, `413`
 too large). Each attempt times out after 30 s.
 
 Failures the trigger response could no longer report go to `onError` with a `kind`:
 
-| `kind`               | What happened                                     | Completion posted                  |
-| -------------------- | ------------------------------------------------- | ---------------------------------- |
-| `handler_failed`     | The handler threw.                                | `error.code: "handler_failed"`     |
-| `invalid_completion` | The result failed the schema or `JSON.stringify`. | `error.code: "invalid_completion"` |
-| `delivery_failed`    | Every delivery attempt failed or was refused.     | none                               |
+| `kind`               | What happened                                       | Completion posted                  |
+| -------------------- | --------------------------------------------------- | ---------------------------------- |
+| `handler_failed`     | The handler failed through its typed error channel. | `error.code: "handler_failed"`     |
+| `invalid_completion` | The result failed the schema or `JSON.stringify`.   | `error.code: "invalid_completion"` |
+| `delivery_failed`    | Every delivery attempt failed or was refused.       | none                               |
 
-A handler still running when `close()` is called sees its `signal` abort. If it throws, the
-completion carries `error.code: "cancelled"`. Attest has no remote cancellation in v1, so the
-signal only fires on `close()`. After `close()`, each pending completion gets one more delivery
-attempt and no retries, so `close()` resolves within about 30 s.
+Closing aborts the handler context signal, allows three seconds for a cooperative terminal result,
+then interrupts remaining handlers. Delivery already in flight may use its 30 second attempt bound.
+Drain observes accepted fibers for at most 35 seconds and fails if work remains. Close then interrupts
+remaining fibers. Terminal Exits and delivery cleanup Causes remain in `runner.receipts`, an internal
+in-memory diagnostic map that contains tokens and must never be logged or serialized.
+Defects remain defects and do not become `handler_failed` completions. Wrap foreign operations
+with `Effect.tryPromise` to classify expected failures. `Effect.promise` turns every rejection into
+a defect. Drain and close report failures from all receipts still retained, including earlier calls.
+Scope shutdown evidence is in `runner.shutdown`, separate from invocation tokens.
 
-### Other hosts
+Admission allows 64 concurrent invocations and retains at most 10,000 token receipts. When full,
+the oldest completed receipt is evicted; active work is never evicted. Active capacity exhaustion
+returns 503. An evicted token is accepted as a new invocation. A retained token never runs a handler
+again, even after failed or unconfirmed delivery. Opaque fetch rejection or timeout ends delivery without retry because
+remote acceptance is unknown. A confirmed 2xx remains delivered even if body cleanup fails; cleanup
+Causes remain in the receipt. A failed cleanup after 5xx also stops retries.
 
-`runner.fetch` is a plain `fetch(Request): Promise<Response>`:
+## Bun and Workers hosts
 
-```ts
-Bun.serve({ port: 8790, fetch: runner.fetch });
-```
+`withAgentRunner(options, use)` brackets use and shutdown and preserves the primary Cause. Prefer it
+when the complete lifetime needs a typed error result. Workspace removal is joined until it settles.
+Runner close uses its own drain bound without a shorter outer cleanup timeout. Low-level constructors
+retain cleanup receipts; explicitly call `close()` before scope disposal to observe shutdown failure
+through E.
 
-On Workers, keep the isolate alive until the completion is posted:
-
-```ts
-export default {
-  fetch: (request: Request, env: unknown, context: ExecutionContext) => {
-    const response = runner.fetch(request);
-
-    context.waitUntil(response.then(() => runner.drain()));
-
-    return response;
-  },
-};
-```
+The native API deliberately replaces Promise handler and operation signatures. Handlers return
+`Effect.Effect<HandlerResult, Error>`; constructors require an explicit Scope. A host must retain
+that scope across all requests and close admission and drain before disposal. Never run
+`Effect.scoped(createAgentRunner(...))` and return the handle: its owner would already be closed.
+At the host callback, run `runner.fetch(request)` through the host's Effect execution root. Bun's
+server callback and a Worker's fetch callback are foreign roots. Workers also need host-managed
+lifetime extension for accepted work. Bundle compatibility alone does not prove a Workers deployment
+or private-host lifetime policy.
 
 ## Artifacts
 
@@ -162,7 +193,7 @@ artifacts with forward-slash paths relative to it, sorted by path. Valid UTF-8 i
 `utf8`; anything else as `base64`. The media type comes from the file extension, defaulting to
 `application/octet-stream`.
 
-It returns `{ artifacts, skipped }`. A file lands in `skipped` with a `reason`:
+It returns an Effect succeeding with `{ artifacts, skipped }`. A file lands in `skipped` with a `reason`:
 
 - `invalid_path`: the name fails the artifact path rules, for example a backslash, a control
   character or a segment over 255 characters.
@@ -171,7 +202,7 @@ It returns `{ artifacts, skipped }`. A file lands in `skipped` with a `reason`:
   under the default 10 MiB response cap).
 
 Symlinks are skipped, so a link cannot pull a file from outside `root`. `.git` and
-`node_modules` directories are not walked. A tree with more than 10,000 files throws.
+`node_modules` directories are not walked. A tree with more than 10,000 files fails through the typed error channel.
 
 ## Pi handler
 
@@ -180,7 +211,7 @@ createPiHandler({
   argv, // default ['pi']; extra arguments such as '-e', './extension.ts' go here
   model, // passed as --model
   systemPrompt, // passed as --system-prompt
-  workspace, // (invocation) => Promise<string>; default: a fresh temp dir, removed afterwards
+  workspace, // (invocation) => Effect.Effect<string, Error>; default: a fresh temp dir, removed afterwards
   env, // extra variables for Pi, such as a provider key; undefined values are left out
   timeoutMs, // default 15 minutes
 });

@@ -1,3 +1,4 @@
+import * as Effect from 'effect/Effect';
 import type { CommandRequest } from '@attest/contracts';
 import { COMMAND_REQUEST_SCHEMA_ID } from '@attest/contracts';
 import { readAgentTestInput, runAgentTestCommand } from '@attest/local/agent';
@@ -14,7 +15,6 @@ import {
 import type { CommandContext } from '../shared/command-context.js';
 import { readOrBuildRequest } from '../shared/command-request.js';
 import { renderCommandResult } from '../shared/command-result.js';
-import { withProcessSignals } from '../shared/process-signals.js';
 import { requiredInput } from '../shared/required-input.js';
 
 type TestOptions = CommonCliOptions & {
@@ -40,58 +40,70 @@ const registerAgentTestCommand = (agent: Command, context: CommandContext): void
     .option('--from-json <path|->', 'read one agent.test request')
     .option('--record', 'persist this probe as an eval run')
     .option('--watch', 'show human transport progress')
-    .action(async (agentId: string | undefined, options: TestOptions, leaf: Command) => {
-      const interactive = isInteractive(options, context.interaction, options.fromJson);
+    .action((agentId: string | undefined, options: TestOptions, leaf: Command) =>
+      context.submit(
+        Effect.gen(function* () {
+          const interactive = isInteractive(options, context.interaction, options.fromJson);
 
-      if (options.watch === true && !interactive) {
-        throw new AttestCliError('cli_usage', '--watch requires an interactive human terminal.', {
-          path: '--watch',
-        });
-      }
-
-      await withProcessSignals(async (signal) => {
-        const request = await readOrBuildRequest({
-          command: 'agent.test',
-          context,
-          leaf,
-          options,
-          build: async () => {
-            const request: Extract<CommandRequest, { command: 'agent.test' }> = {
-              schema: COMMAND_REQUEST_SCHEMA_ID,
-              command: 'agent.test',
-              agent_id: await requiredInput(
-                agentId,
-                { path: '<agent-id>', question: 'Agent id: ' },
-                { interactive, prompt: context.interaction.prompt, signal },
-              ),
-              input: await readAgentTestInput({
-                input: options.input,
-                inputFile: options.inputFile,
-                readStdin: context.interaction.readStdin,
-                workingDirectory: context.workingDirectory,
+          if (options.watch === true && !interactive) {
+            return yield* Effect.fail(
+              new AttestCliError('cli_usage', '--watch requires an interactive human terminal.', {
+                path: '--watch',
               }),
-            };
+            );
+          }
 
-            if (options.record !== undefined) {
-              request.record = options.record;
-            }
+          const signal = context.signal;
 
-            return request;
-          },
-        });
+          const request = yield* readOrBuildRequest({
+            command: 'agent.test',
+            context,
+            leaf,
+            options,
+            build: () =>
+              Effect.gen(function* () {
+                let request: Extract<CommandRequest, { command: 'agent.test' }> = {
+                  schema: COMMAND_REQUEST_SCHEMA_ID,
+                  command: 'agent.test',
+                  agent_id: yield* Effect.tryPromise({
+                    try: () =>
+                      requiredInput(
+                        agentId,
+                        { path: '<agent-id>', question: 'Agent id: ' },
+                        { interactive, prompt: context.interaction.prompt, signal },
+                      ),
+                    catch: (cause) => cause,
+                  }),
+                  input: yield* readAgentTestInput({
+                    input: options.input,
+                    inputFile: options.inputFile,
+                    readStdin: context.interaction.readStdin,
+                    workingDirectory: context.workingDirectory,
+                  }),
+                };
 
-        const result = await runAgentTestCommand({
-          onProgress: (message) => context.io.error(message),
-          project: options.project,
-          request,
-          signal,
-          watch: options.watch,
-          workingDirectory: context.workingDirectory,
-        });
+                if (options.record !== undefined) {
+                  request = { ...request, record: options.record };
+                }
 
-        context.io.output(renderCommandResult('agent.test', outputFormat(options), result));
-      });
-    });
+                return request;
+              }),
+          });
+
+          const result = yield* runAgentTestCommand({
+            onProgress: (message) => context.io.error(message),
+            project: options.project,
+            request,
+            signal,
+            watch: options.watch,
+            workingDirectory: context.workingDirectory,
+          });
+
+          context.io.output(renderCommandResult('agent.test', outputFormat(options), result));
+        }),
+        { cancellation: 'owned' },
+      ),
+    );
 
   setCliCommandHelpMetadata(test, {
     examples: [

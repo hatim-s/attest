@@ -14,7 +14,7 @@ import { Heading } from '../shared/ui.js';
 import type { CaseSummary } from '@attest/core/records';
 
 type DistributionChartsProps = {
-  cases: CaseSummary[];
+  cases: readonly CaseSummary[];
   /** False while later pages are outstanding, when zero counts say nothing about the run. */
   allLoaded: boolean;
   isLoading: boolean;
@@ -29,7 +29,7 @@ type ScoreBin = {
 const SCORE_LABELS = ['0–0.2', '0.2–0.4', '0.4–0.6', '0.6–0.8', '0.8–1.0'];
 
 /** Buckets average case scores into fifths. Cases without a numeric score are skipped. */
-const createScoreHistogram = (cases: CaseSummary[]): ScoreBin[] => {
+const createScoreHistogram = (cases: readonly CaseSummary[]): ScoreBin[] => {
   const counts = SCORE_LABELS.map(() => 0);
 
   for (const { score } of cases) {

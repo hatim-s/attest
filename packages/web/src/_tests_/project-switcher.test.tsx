@@ -22,7 +22,7 @@ const demo: ProjectRecord = { key: 'demo', name: 'Demo' };
 const other: ProjectRecord = { key: 'other', name: 'Other' };
 
 /** Mounts the dashboard at `path`. Only `demo` has a run, so `other` stops at its runs index. */
-const renderAt = (projects: ProjectRecord[], path: string) => {
+const renderAt = (projects: readonly ProjectRecord[], path: string) => {
   const client = createApiClient({
     kind: 'http',
     baseUrl: '/api',

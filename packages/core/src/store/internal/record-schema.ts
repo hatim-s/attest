@@ -1,7 +1,7 @@
+import { stripStruct, looseStruct } from '@attest/contracts';
 import {
   agentErrorSchema,
   agentRequestSchema,
-  caseOutcomeSchema,
   invocationDiagnosticsSchema,
   invocationErrorCodeSchema,
   inlineArtifactSchema,
@@ -10,42 +10,43 @@ import {
   warningCodeSchema,
   type RawExcerpt,
 } from '@attest/contracts';
-import { z } from 'zod';
+import * as Schema from 'effect/Schema';
+import { indexedTimestampSchema } from '../../records/dashboard-schemas.js';
 
-const isoTimestampSchema = z
-  .string()
-  .refine(
+const isoTimestampSchema = Schema.String.check(
+  Schema.makeFilter(
     (value) =>
       /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/u.test(value) &&
       Number.isFinite(Date.parse(value)),
-    'must be an ISO timestamp',
-  );
+    { message: 'must be an ISO timestamp' },
+  ),
+);
 
-const nonemptyStringSchema = z.string().min(1);
+const nonemptyStringSchema = Schema.String.check(Schema.isMinLength(1));
 
-const durationSchema = z.number().finite().nonnegative();
+const durationSchema = Schema.Finite.check(Schema.isGreaterThanOrEqualTo(0));
 
-const warningSchema = z.object({
-  path: z.string(),
-  message: z.string(),
+const warningSchema = stripStruct({
+  path: Schema.String,
+  message: Schema.String,
   code: warningCodeSchema,
 });
 
-const attemptSchemaFor = (rawExcerpt: z.ZodType<RawExcerpt>) => {
+const attemptSchemaFor = (rawExcerpt: Schema.ConstraintDecoder<RawExcerpt>) => {
   const attemptBase = {
     diagnostics: invocationDiagnosticsSchema,
     durationMs: durationSchema,
-    rawExcerpt: rawExcerpt.optional(),
-    warnings: z.array(warningSchema),
+    rawExcerpt: Schema.optional(rawExcerpt),
+    warnings: Schema.Array(warningSchema),
   };
 
-  return z.discriminatedUnion('status', [
-    z.strictObject({ ...attemptBase, status: z.literal('ok') }),
-    z.strictObject({
+  return Schema.Union([
+    Schema.Struct({ ...attemptBase, status: Schema.Literal('ok') }),
+    Schema.Struct({
       ...attemptBase,
-      status: z.literal('invocation_error'),
+      status: Schema.Literal('invocation_error'),
       errorCode: invocationErrorCodeSchema,
-      errorMessage: z.string(),
+      errorMessage: Schema.String,
     }),
   ]);
 };
@@ -57,7 +58,7 @@ const storedAttemptSchema = attemptSchemaFor(rawExcerptSchema);
 // the dropped bytes cannot be rebuilt from the prefix. Dropping only the truncation refine admits
 // that one shape so those runs stay readable; writes keep the strict schema. Remove this once the
 // alpha databases written before that commit are gone.
-const recordedAttemptSchema = attemptSchemaFor(z.strictObject(rawExcerptSchema.shape));
+const recordedAttemptSchema = attemptSchemaFor(Schema.Struct(rawExcerptSchema.fields));
 
 const executionBase = {
   caseId: nonemptyStringSchema,
@@ -65,90 +66,93 @@ const executionBase = {
   request: agentRequestSchema,
   startedAt: isoTimestampSchema,
   durationMs: durationSchema,
-  warnings: z.array(warningSchema),
+  warnings: Schema.Array(warningSchema),
   diagnostics: invocationDiagnosticsSchema,
-  attempts: z.array(storedAttemptSchema),
-  expectedMetrics: z.array(z.string()),
+  attempts: Schema.Array(storedAttemptSchema),
+  expectedMetrics: Schema.Array(Schema.String),
 };
 
 const completedExecutionFields = {
   ...executionBase,
-  outcome: z.literal('completed'),
+  outcome: Schema.Literal('completed'),
   // Only error and artifacts are typed: verdicts read error, the dashboard lists artifacts, and the
   // rest of the envelope is opaque evidence.
-  response: z.looseObject({
-    error: agentErrorSchema.optional(),
-    artifacts: z.array(inlineArtifactSchema).optional(),
+  response: looseStruct({
+    error: Schema.optional(agentErrorSchema),
+    artifacts: Schema.optional(Schema.Array(inlineArtifactSchema)),
   }),
-  trace: traceSchema.optional(),
+  trace: Schema.optional(traceSchema),
 };
 
 const failedExecutionFields = {
   ...executionBase,
-  outcome: caseOutcomeSchema.exclude(['completed']),
+  outcome: Schema.Literals(['invocation_error', 'timeout', 'cancelled']),
   errorCode: invocationErrorCodeSchema,
-  errorMessage: z.string(),
+  errorMessage: Schema.String,
 };
 
 // Strict branches reject fields that belong to the other outcome, such as a response on a timeout.
-const storedCaseExecutionSchema = z.discriminatedUnion('outcome', [
-  z.strictObject(completedExecutionFields),
-  z.strictObject(failedExecutionFields),
+const storedCaseExecutionSchema = Schema.Union([
+  Schema.Struct(completedExecutionFields),
+  Schema.Struct(failedExecutionFields),
 ]);
 
 const metricBase = {
   metricName: nonemptyStringSchema,
-  kind: z.enum(['assertion', 'exec', 'judge']),
-  rationale: z.string().optional(),
-  details: z.json().optional(),
-  judgeIo: z.json().optional(),
-  durationMs: durationSchema.optional(),
+  kind: Schema.Literals(['assertion', 'exec', 'judge']),
+  rationale: Schema.optional(Schema.String),
+  details: Schema.optional(Schema.Json),
+  judgeIo: Schema.optional(Schema.Json),
+  durationMs: Schema.optional(durationSchema),
 };
 
-const storedMetricEvaluationSchema = z.discriminatedUnion('status', [
-  z.strictObject({
+const storedMetricEvaluationSchema = Schema.Union([
+  Schema.Struct({
     ...metricBase,
-    status: z.literal('evaluated'),
-    score: z.number().finite(),
-    pass: z.boolean(),
+    status: Schema.Literal('evaluated'),
+    score: Schema.Finite,
+    pass: Schema.Boolean,
   }),
-  z.strictObject({
+  Schema.Struct({
     ...metricBase,
-    status: z.literal('error'),
-    error: z.object({ message: nonemptyStringSchema, kind: nonemptyStringSchema }),
+    status: Schema.Literal('error'),
+    error: stripStruct({ message: nonemptyStringSchema, kind: nonemptyStringSchema }),
   }),
 ]);
 
-const summarySchema = z.object({
-  totalCases: z.number().int().nonnegative(),
-  passedCases: z.number().int().nonnegative(),
-  failedCases: z.number().int().nonnegative(),
-  errorCases: z.number().int().nonnegative(),
-  metricErrorCount: z.number().int().nonnegative(),
+const summarySchema = stripStruct({
+  totalCases: Schema.Finite.check(Schema.isInt()).check(Schema.isGreaterThanOrEqualTo(0)),
+  passedCases: Schema.Finite.check(Schema.isInt()).check(Schema.isGreaterThanOrEqualTo(0)),
+  failedCases: Schema.Finite.check(Schema.isInt()).check(Schema.isGreaterThanOrEqualTo(0)),
+  errorCases: Schema.Finite.check(Schema.isInt()).check(Schema.isGreaterThanOrEqualTo(0)),
+  metricErrorCount: Schema.Finite.check(Schema.isInt()).check(Schema.isGreaterThanOrEqualTo(0)),
 });
 
-const runMetadataSchema = z.object({
+const runMetadataSchema = stripStruct({
   schemaId: nonemptyStringSchema,
   configHash: nonemptyStringSchema,
-  configJson: z.string(),
-  gitSha: z.string().optional(),
-  gitBranch: z.string().optional(),
-  labels: z.record(z.string(), z.string()).optional(),
+  configJson: Schema.String,
+  gitSha: Schema.optional(Schema.String),
+  gitBranch: Schema.optional(Schema.String),
+  labels: Schema.optional(Schema.Record(Schema.String, Schema.String)),
 });
 
-const runRecordBaseSchema = runMetadataSchema.extend({
+const runRecordBaseSchema = stripStruct({
+  ...runMetadataSchema.from.schema.fields,
   id: nonemptyStringSchema,
-  createdAt: z.iso.datetime({ offset: true }),
-  summary: summarySchema.optional(),
+  createdAt: indexedTimestampSchema,
+  summary: Schema.optional(summarySchema),
 });
 
-const runRecordSchema = z.discriminatedUnion('status', [
-  runRecordBaseSchema.extend({
-    status: z.literal('running'),
-    finishedAt: z.undefined().optional(),
+const runRecordSchema = Schema.Union([
+  stripStruct({
+    ...runRecordBaseSchema.from.schema.fields,
+    status: Schema.Literal('running'),
+    finishedAt: Schema.optional(Schema.Undefined),
   }),
-  runRecordBaseSchema.extend({
-    status: z.enum(['completed', 'failed', 'cancelled']),
+  stripStruct({
+    ...runRecordBaseSchema.from.schema.fields,
+    status: Schema.Literals(['completed', 'failed', 'cancelled']),
     finishedAt: isoTimestampSchema,
   }),
 ]);
@@ -157,29 +161,29 @@ const caseRecordFields = {
   rowId: nonemptyStringSchema,
   runId: nonemptyStringSchema,
   inputHash: nonemptyStringSchema,
-  attempts: z.array(recordedAttemptSchema),
-  metrics: z.array(storedMetricEvaluationSchema),
+  attempts: Schema.Array(recordedAttemptSchema),
+  metrics: Schema.Array(storedMetricEvaluationSchema),
 };
 
-const caseRecordSchema = z.discriminatedUnion('outcome', [
-  z.strictObject({ ...completedExecutionFields, ...caseRecordFields }),
-  z.strictObject({ ...failedExecutionFields, ...caseRecordFields }),
+const caseRecordSchema = Schema.Union([
+  Schema.Struct({ ...completedExecutionFields, ...caseRecordFields }),
+  Schema.Struct({ ...failedExecutionFields, ...caseRecordFields }),
 ]);
 
-type CaseRecord = z.infer<typeof caseRecordSchema>;
+type CaseRecord = typeof caseRecordSchema.Type;
 
-type RunMetadata = z.infer<typeof runMetadataSchema>;
+type RunMetadata = typeof runMetadataSchema.Type;
 
 /** Status narrows lifecycle timestamps so terminal readers can rely on finishedAt. */
-type RunRecord = z.infer<typeof runRecordSchema>;
+type RunRecord = typeof runRecordSchema.Type;
 
-type RunSummary = z.infer<typeof summarySchema>;
+type RunSummary = typeof summarySchema.Type;
 
-type StoredAttempt = z.infer<typeof storedAttemptSchema>;
+type StoredAttempt = typeof storedAttemptSchema.Type;
 
-type StoredCaseExecution = z.infer<typeof storedCaseExecutionSchema>;
+type StoredCaseExecution = typeof storedCaseExecutionSchema.Type;
 
-type StoredMetricEvaluation = z.infer<typeof storedMetricEvaluationSchema>;
+type StoredMetricEvaluation = typeof storedMetricEvaluationSchema.Type;
 
 export {
   caseRecordSchema,

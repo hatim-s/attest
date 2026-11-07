@@ -1,5 +1,5 @@
 import { parseWithSchema, parseWithSchemaSync } from '@attest/contracts';
-import { z } from 'zod';
+import * as Schema from 'effect/Schema';
 import type { JsonValue } from '@attest/contracts';
 import {
   StoreError,
@@ -15,7 +15,7 @@ import {
 import type { CasesTable, MetricResultsTable, RunsTable } from '../schema.js';
 
 // BOUNDARY: Rehydrated SQL JSON is checked against its complete owner record schema.
-const parseStored = <T>(schema: z.ZodType<T>, value: unknown): T => {
+const parseStored = <T>(schema: Schema.ConstraintDecoder<T>, value: unknown): T => {
   const parsed = parseWithSchema(schema, value);
 
   if (!parsed.ok)
@@ -32,7 +32,7 @@ const parseJson = (serialized: string | null): JsonValue | undefined => {
   }
 
   try {
-    return parseWithSchemaSync(z.json(), JSON.parse(serialized));
+    return parseWithSchemaSync(Schema.Json, JSON.parse(serialized));
   } catch (error) {
     throw new StoreError('CORRUPT_DATA', 'Stored JSON could not be rehydrated.', { cause: error });
   }
@@ -107,7 +107,7 @@ const toMetricEvaluation = (row: MetricResultRow): StoredMetricEvaluation => {
 };
 
 /** Restores a discriminated public case and its metric evidence from initial schema rows. */
-const toCaseRecord = (row: CasesTable, metrics: StoredMetricEvaluation[]): CaseRecord => {
+const toCaseRecord = (row: CasesTable, metrics: readonly StoredMetricEvaluation[]): CaseRecord => {
   const shared = {
     rowId: row.id,
     runId: row.run_id,

@@ -17,7 +17,7 @@ type DiffPanelProps = {
   error: unknown;
   isLoading: boolean;
   onBaseChange: (runId: string) => void;
-  runs: RunRecord[];
+  runs: readonly RunRecord[];
 };
 
 const transitionTone = (kind: CaseTransitionKind): string => {
@@ -33,7 +33,7 @@ type VerdictMatrix = Record<CaseVerdict, Record<CaseVerdict, number>>;
 const verdicts: CaseVerdict[] = ['pass', 'fail', 'error'];
 
 /** Counts comparable cases into the complete baseline-to-candidate verdict matrix. */
-const createVerdictMatrix = (transitions: CaseTransition[]): VerdictMatrix => {
+const createVerdictMatrix = (transitions: readonly CaseTransition[]): VerdictMatrix => {
   const matrix: VerdictMatrix = {
     pass: { pass: 0, fail: 0, error: 0 },
     fail: { pass: 0, fail: 0, error: 0 },

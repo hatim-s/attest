@@ -1,3 +1,4 @@
+import type * as Effect from 'effect/Effect';
 import type { JsonValue } from '@attest/contracts';
 
 import type { JudgeOutcome } from './judge-outcome-schema.js';
@@ -22,7 +23,10 @@ type JudgeCallOptions = { signal?: AbortSignal; timeoutMs?: number };
  * (TanStack AI today) without touching metric semantics.
  */
 interface JudgeClient {
-  scoreRubric(request: JudgeRequest, options?: JudgeCallOptions): Promise<JudgeOutcome>;
+  scoreRubric(
+    request: JudgeRequest,
+    options?: JudgeCallOptions,
+  ): Effect.Effect<JudgeOutcome, Error>;
 }
 
 export { type JudgeCallOptions, type JudgeClient, type JudgeRequest };

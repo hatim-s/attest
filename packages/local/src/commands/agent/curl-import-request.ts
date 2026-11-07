@@ -153,7 +153,7 @@ const createCurlImportRequest = (fields: CurlImportFields): CurlImportRequest =>
     });
   }
 
-  const candidate: CurlImportCandidate = {
+  let candidate: CurlImportCandidate = {
     schema: 'attest.command-request',
     command: 'agent.import',
     source: fields.source,
@@ -162,25 +162,43 @@ const createCurlImportRequest = (fields: CurlImportFields): CurlImportRequest =>
     extraction: { result_pointer: fields.responsePointer },
   };
 
-  if (fields.name !== undefined) candidate.name = fields.name;
+  if (fields.name !== undefined) candidate = { ...candidate, name: fields.name };
 
-  if (options.mapBody !== undefined) candidate.placeholders = parseBodyMappings(options.mapBody);
+  if (options.mapBody !== undefined)
+    candidate = { ...candidate, placeholders: parseBodyMappings(options.mapBody) };
 
   if (options.headerEnv !== undefined)
-    candidate.header_env = parseEnvironmentBindings(options.headerEnv, '--header-env');
+    candidate = {
+      ...candidate,
+      header_env: parseEnvironmentBindings(options.headerEnv, '--header-env'),
+    };
 
   if (options.queryEnv !== undefined)
-    candidate.query_env = parseEnvironmentBindings(options.queryEnv, '--query-env');
+    candidate = {
+      ...candidate,
+      query_env: parseEnvironmentBindings(options.queryEnv, '--query-env'),
+    };
 
-  if (options.errorPointer !== undefined) candidate.extraction.error_pointer = options.errorPointer;
+  if (options.errorPointer !== undefined)
+    candidate = {
+      ...candidate,
+      extraction: { ...candidate.extraction, error_pointer: options.errorPointer },
+    };
 
-  if (options.tracePointer !== undefined) candidate.extraction.trace_pointer = options.tracePointer;
+  if (options.tracePointer !== undefined)
+    candidate = {
+      ...candidate,
+      extraction: { ...candidate.extraction, trace_pointer: options.tracePointer },
+    };
 
   if (options.remoteJobIdPointer !== undefined)
-    candidate.extraction.remote_job_id_pointer = options.remoteJobIdPointer;
+    candidate = {
+      ...candidate,
+      extraction: { ...candidate.extraction, remote_job_id_pointer: options.remoteJobIdPointer },
+    };
 
   if (pollingSelected) {
-    const polling: NonNullable<CurlImportCandidate['polling']> = {
+    let polling: NonNullable<CurlImportCandidate['polling']> = {
       job_id_pointer: options.pollJobIdPointer,
       status_pointer: options.pollStatusPointer,
       success_values: successes,
@@ -196,13 +214,13 @@ const createCurlImportRequest = (fields: CurlImportFields): CurlImportRequest =>
     };
 
     if (options.pollStatusUrlPointer !== undefined)
-      polling.status_url_pointer = options.pollStatusUrlPointer;
+      polling = { ...polling, status_url_pointer: options.pollStatusUrlPointer };
 
     if (options.pollStatusUrlTemplate !== undefined)
-      polling.status_url_template = options.pollStatusUrlTemplate;
+      polling = { ...polling, status_url_template: options.pollStatusUrlTemplate };
 
     if (options.idempotencyHeader !== undefined)
-      polling.idempotency_header = options.idempotencyHeader;
+      polling = { ...polling, idempotency_header: options.idempotencyHeader };
     candidate.polling = polling;
   }
 
@@ -214,50 +232,68 @@ const createCurlImportRequest = (fields: CurlImportFields): CurlImportRequest =>
       options.attemptTimeout,
     ].every((value) => value === undefined)
   ) {
-    const timeouts: NonNullable<CurlImportRequest['timeouts']> = {};
+    let timeouts: NonNullable<CurlImportRequest['timeouts']> = {};
 
     if (options.connectTimeout !== undefined)
-      timeouts.connect_ms = parseDuration(options.connectTimeout, '--connect-timeout');
+      timeouts = {
+        ...timeouts,
+        connect_ms: parseDuration(options.connectTimeout, '--connect-timeout'),
+      };
 
     if (options.firstByteTimeout !== undefined)
-      timeouts.first_byte_ms = parseDuration(options.firstByteTimeout, '--first-byte-timeout');
+      timeouts = {
+        ...timeouts,
+        first_byte_ms: parseDuration(options.firstByteTimeout, '--first-byte-timeout'),
+      };
 
     if (options.bodyTimeout !== undefined)
-      timeouts.idle_ms = parseDuration(options.bodyTimeout, '--body-timeout');
+      timeouts = { ...timeouts, idle_ms: parseDuration(options.bodyTimeout, '--body-timeout') };
 
     if (options.attemptTimeout !== undefined)
-      timeouts.attempt_ms = parseDuration(options.attemptTimeout, '--attempt-timeout');
-    candidate.timeouts = timeouts;
+      timeouts = {
+        ...timeouts,
+        attempt_ms: parseDuration(options.attemptTimeout, '--attempt-timeout'),
+      };
+    candidate = { ...candidate, timeouts: timeouts };
   }
 
   if (retries !== undefined)
-    candidate.retry = {
-      retries,
-      backoff:
-        retryDelay === undefined ? { kind: 'none' } : { kind: 'fixed', delay_ms: retryDelay },
+    candidate = {
+      ...candidate,
+      retry: {
+        retries,
+        backoff:
+          retryDelay === undefined ? { kind: 'none' } : { kind: 'fixed', delay_ms: retryDelay },
+      },
     };
 
   if (options.requestCapBytes !== undefined || options.responseCapBytes !== undefined) {
-    const limits: NonNullable<CurlImportRequest['limits']> = {};
+    let limits: NonNullable<CurlImportRequest['limits']> = {};
 
     if (options.requestCapBytes !== undefined)
-      limits.request_bytes = parseInteger(options.requestCapBytes, '--request-cap-bytes', {
-        min: 1,
-      });
+      limits = {
+        ...limits,
+        request_bytes: parseInteger(options.requestCapBytes, '--request-cap-bytes', {
+          min: 1,
+        }),
+      };
 
     if (options.responseCapBytes !== undefined)
-      limits.response_bytes = parseInteger(options.responseCapBytes, '--response-cap-bytes', {
-        min: 1,
-      });
-    candidate.limits = limits;
+      limits = {
+        ...limits,
+        response_bytes: parseInteger(options.responseCapBytes, '--response-cap-bytes', {
+          min: 1,
+        }),
+      };
+    candidate = { ...candidate, limits: limits };
   }
 
-  if (options.dryRun !== undefined) candidate.dry_run = options.dryRun;
+  if (options.dryRun !== undefined) candidate = { ...candidate, dry_run: options.dryRun };
 
   if (options.expectedProjectHash !== undefined)
-    candidate.if_project_hash = options.expectedProjectHash;
+    candidate = { ...candidate, if_project_hash: options.expectedProjectHash };
 
-  if (options.yes !== undefined) candidate.yes = options.yes;
+  if (options.yes !== undefined) candidate = { ...candidate, yes: options.yes };
 
   const parsed = parseWithSchema(commandRequestSchema, candidate);
 

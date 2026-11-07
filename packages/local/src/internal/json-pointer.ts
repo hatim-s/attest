@@ -4,7 +4,7 @@ import { isJsonValue, type JsonValue } from '@attest/contracts';
 const escapeJsonPointerSegment = (segment: PropertyKey): string =>
   String(segment).replaceAll('~', '~0').replaceAll('/', '~1');
 
-/** Builds an RFC 6901 pointer from a zod issue path or any key list; the root is `''`. */
+/** Builds an RFC 6901 pointer from a schema issue path or any key list; the root is `''`. */
 const toJsonPointer = (path: readonly PropertyKey[]): string =>
   path.length === 0 ? '' : `/${path.map(escapeJsonPointerSegment).join('/')}`;
 

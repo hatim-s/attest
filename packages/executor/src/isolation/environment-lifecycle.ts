@@ -1,132 +1,118 @@
+import * as Semaphore from 'effect/Semaphore';
+import { ownOperation } from './operation.js';
+import * as Deferred from 'effect/Deferred';
+import * as Effect from 'effect/Effect';
+
 type EnvironmentLifecycleOptions = {
-  /** The case run signal; run-phase operations stop when it aborts. */
   signal: AbortSignal;
-  /** Separate deadline for work admitted after `beginFinalization`. */
   finalizationTimeoutMs: number;
-  /** Error reported once the environment is poisoned; only environments that can poison set it. */
   poisonedError?: () => Error;
 };
 
-type EnvironmentLifecycle = {
-  /** Admits an operation in the current phase and tracks it until it settles. */
-  track: <Value>(operation: (admitted: AbortSignal) => Promise<Value>) => Promise<Value>;
-  /** Cancels and drains run work, then opens the finalization deadline. */
-  beginFinalization: () => Promise<void>;
-  /** Refuses all later work and aborts admitted work because the backing state is unknown. */
-  poison: (cause: unknown) => void;
-  /** Refuses all later work, aborts both phases, and resolves once admitted work settles. */
-  close: (reason: Error) => Promise<void>;
-};
+type Phase = 'run' | 'transitioning' | 'finalizing' | 'poisoned' | 'disposed';
 
-type Phase =
-  | { kind: 'run' }
-  | { kind: 'transitioning' }
-  | { kind: 'finalizing'; signal: AbortSignal }
-  | { kind: 'poisoned' }
-  | { kind: 'disposed' };
-
-const disposedError = (): Error => new Error('Case environment has been disposed.');
-
-/**
- * Tracks the phases every case environment shares: run work, a drained transition, bounded
- * final-hook work, and disposal. Environments that talk to a VM can also be poisoned.
- */
-const createEnvironmentLifecycle = (options: EnvironmentLifecycleOptions): EnvironmentLifecycle => {
+/** Owns operation admission and drains every admitted operation before phase transitions. */
+const createEnvironmentLifecycle = (options: EnvironmentLifecycleOptions) => {
   const runLifetime = new AbortController();
   const finalizationLifetime = new AbortController();
-  const pending = new Set<Promise<unknown>>();
+  const transitionLock = Semaphore.makeUnsafe(1);
+  const pending = new Set<Deferred.Deferred<void>>();
+  let phase: Phase = 'run';
+  let finalSignal: AbortSignal | undefined;
 
-  const poisonedError =
-    options.poisonedError ?? ((): Error => new Error('Case environment has been poisoned.'));
+  const stateError = (): Error | undefined => {
+    if (phase === 'disposed') return new Error('Case environment has been disposed.');
 
-  let phase: Phase = { kind: 'run' };
-  let transition: Promise<void> | undefined;
-  // Read through a call so control-flow narrowing cannot survive the awaits below.
-  const currentPhase = (): Phase => phase;
+    if (phase === 'poisoned')
+      return options.poisonedError?.() ?? new Error('Case environment has been poisoned.');
 
-  const admissionSignal = (): AbortSignal => {
-    const current = currentPhase();
+    if (phase === 'transitioning') return new Error('Case environment finalization is starting.');
 
-    if (current.kind === 'disposed') throw disposedError();
-
-    if (current.kind === 'poisoned') throw poisonedError();
-
-    if (current.kind === 'transitioning') {
-      throw new Error('Case environment finalization is starting.');
-    }
-
-    const admitted =
-      current.kind === 'run'
-        ? AbortSignal.any([options.signal, runLifetime.signal])
-        : current.signal;
-
-    admitted.throwIfAborted();
-
-    return admitted;
+    return undefined;
   };
 
-  const track = <Value>(operation: (admitted: AbortSignal) => Promise<Value>): Promise<Value> => {
-    const admitted = admissionSignal();
-
-    const task = Promise.resolve().then(() => {
-      admitted.throwIfAborted();
-
-      return operation(admitted);
+  const drain = Effect.fn('environment.drain')(function* () {
+    yield* Effect.forEach([...pending], (done) => Deferred.await(done), {
+      concurrency: 'unbounded',
     });
+  });
 
-    pending.add(task);
+  const track = <A>(
+    operation: (signal: AbortSignal) => Effect.Effect<A, Error>,
+  ): Effect.Effect<A, Error> =>
+    Effect.uninterruptibleMask((restore) =>
+      Effect.gen(function* () {
+        const error = stateError();
 
-    const forget = (): void => {
-      pending.delete(task);
-    };
+        if (error) return yield* Effect.fail(error);
+        const admitted = finalSignal ?? AbortSignal.any([options.signal, runLifetime.signal]);
+        const done = yield* Deferred.make<void>();
+        pending.add(done);
 
-    void task.then(forget, forget);
+        return yield* Effect.ensuring(
+          restore(
+            ownOperation((cancelled) =>
+              Effect.gen(function* () {
+                const signal = AbortSignal.any([cancelled, admitted]);
 
-    return task;
-  };
+                if (signal.aborted)
+                  return yield* Effect.fail(
+                    signal.reason instanceof Error
+                      ? signal.reason
+                      : new Error('Case operation aborted.'),
+                  );
 
-  const beginFinalization = (): Promise<void> => {
-    const current = currentPhase();
+                return yield* operation(signal);
+              }),
+            ),
+          ),
+          Effect.gen(function* () {
+            pending.delete(done);
+            yield* Deferred.succeed(done, undefined);
+          }),
+        );
+      }),
+    );
 
-    if (current.kind === 'disposed') return Promise.reject(disposedError());
+  const beginFinalization = Effect.fn('environment.beginFinalization')(function* () {
+    const error = stateError();
 
-    if (current.kind === 'poisoned') return Promise.reject(poisonedError());
-    transition ??= (async () => {
-      phase = { kind: 'transitioning' };
-      runLifetime.abort(new Error('Case run operations cancelled for finalization.'));
-      await Promise.allSettled([...pending]);
-      const drained = currentPhase();
+    if (error) return yield* Effect.fail(error);
 
-      if (drained.kind === 'poisoned') throw poisonedError();
+    if (phase === 'finalizing') return;
+    phase = 'transitioning';
+    runLifetime.abort(new Error('Case run operations cancelled for finalization.'));
+    yield* drain();
 
-      if (drained.kind === 'disposed') throw disposedError();
-      phase = {
-        kind: 'finalizing',
-        signal: AbortSignal.any([
-          finalizationLifetime.signal,
-          AbortSignal.timeout(options.finalizationTimeoutMs),
-        ]),
-      };
-    })();
-
-    return transition;
-  };
+    // Poison or disposal may have won while the admitted work drained.
+    if (phase !== 'transitioning')
+      return yield* Effect.fail(stateError() ?? new Error('Case phase changed.'));
+    finalSignal = AbortSignal.any([
+      finalizationLifetime.signal,
+      AbortSignal.timeout(options.finalizationTimeoutMs),
+    ]);
+    phase = 'finalizing';
+  });
 
   return {
     track,
-    beginFinalization,
-    poison: (reason) => {
-      if (currentPhase().kind !== 'disposed') phase = { kind: 'poisoned' };
+    beginFinalization: () =>
+      Effect.uninterruptible(transitionLock.withPermits(1)(beginFinalization())),
+    poison: (reason: Error): void => {
+      if (phase !== 'disposed') phase = 'poisoned';
       runLifetime.abort(reason);
       finalizationLifetime.abort(reason);
     },
-    close: async (reason) => {
-      phase = { kind: 'disposed' };
-      runLifetime.abort(reason);
-      finalizationLifetime.abort(reason);
-      await Promise.allSettled([...pending]);
-    },
+    close: (reason: Error) =>
+      Effect.gen(function* () {
+        phase = 'disposed';
+        runLifetime.abort(reason);
+        finalizationLifetime.abort(reason);
+        yield* drain();
+      }),
   };
 };
+
+type EnvironmentLifecycle = ReturnType<typeof createEnvironmentLifecycle>;
 
 export { createEnvironmentLifecycle, type EnvironmentLifecycle };

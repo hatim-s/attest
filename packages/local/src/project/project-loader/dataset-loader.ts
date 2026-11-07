@@ -1,3 +1,4 @@
+import * as Effect from 'effect/Effect';
 import {
   parseWithSchema,
   datasetResourceSchema,
@@ -17,18 +18,22 @@ import {
 import type { LoadedDatasetResource } from './types.js';
 
 /** Loads an ordered JSONL dataset and preserves physical line context for every row failure. */
-const loadDataset = async (
+const loadDataset = Effect.fn('loadDataset')(function* (
   root: string,
   entry: ProjectManifest['resources']['datasets'][number],
-): Promise<LoadedDatasetResource> => {
-  const metadata = await loadJsonResource(
+): Effect.fn.Return<
+  LoadedDatasetResource,
+  | import('../../internal/open-anchored.js').AnchoredCleanupFailure
+  | import('../../internal/open-anchored.js').AnchoredFileFailure
+> {
+  const metadata = yield* loadJsonResource(
     root,
     entry.metadata_path,
     entry.metadata_content_hash,
     datasetResourceSchema,
   );
 
-  const loadedData = await readProjectSource(root, entry.data_path);
+  const loadedData = yield* readProjectSource(root, entry.data_path);
   const diagnostics = [...metadata.diagnostics, ...loadedData.diagnostics];
   const cases: TestCase[] = [];
   const canonicalRecords: JsonValue[] = [];
@@ -82,6 +87,6 @@ const loadDataset = async (
         ? undefined
         : { cases, metadata: metadata.value },
   };
-};
+});
 
 export { loadDataset };

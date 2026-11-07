@@ -1,4 +1,5 @@
-import { z } from 'zod';
+import { stripStruct } from '@attest/contracts';
+import * as Schema from 'effect/Schema';
 import {
   runRecordSchema,
   caseRecordSchema,
@@ -6,14 +7,14 @@ import {
   projectRecordSchema,
 } from '@attest/core/records';
 
-const reportSnapshotSchema = z.object({
-  generatedAt: z.string(),
+const reportSnapshotSchema = stripStruct({
+  generatedAt: Schema.String,
   project: projectRecordSchema,
   run: runRecordSchema,
-  cases: z.array(z.object({ record: caseRecordSchema, summary: caseSummarySchema })),
-  truncated: z.boolean(),
+  cases: Schema.Array(stripStruct({ record: caseRecordSchema, summary: caseSummarySchema })),
+  truncated: Schema.Boolean,
 });
 
-type ReportSnapshot = z.infer<typeof reportSnapshotSchema>;
+type ReportSnapshot = typeof reportSnapshotSchema.Type;
 
 export { reportSnapshotSchema, type ReportSnapshot };

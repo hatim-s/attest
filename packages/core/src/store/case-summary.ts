@@ -97,7 +97,7 @@ const averageMetricScore = (metrics: readonly StoredMetricEvaluation[]): number 
 const summarizeCaseRecord = (record: CaseRecord): CaseSummary => {
   const score = averageMetricScore(record.metrics);
 
-  const summary: CaseSummary = {
+  let summary: CaseSummary = {
     caseId: record.caseId,
     suiteName: record.suiteName,
     outcome: record.outcome,
@@ -113,7 +113,7 @@ const summarizeCaseRecord = (record: CaseRecord): CaseSummary => {
     },
   };
 
-  if (score !== undefined) summary.score = score;
+  if (score !== undefined) summary = { ...summary, score };
 
   return summary;
 };

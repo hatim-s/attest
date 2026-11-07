@@ -1,14 +1,16 @@
+import * as Effect from 'effect/Effect';
+import * as Cause from 'effect/Cause';
+import * as Exit from 'effect/Exit';
+import { finishWithRelease } from './adapter/lifecycle-cause.js';
 import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 
 import type { JsonValue } from '@attest/contracts';
-import type { StoredCaseExecution } from '@attest/core';
 
 import { LocalError } from '../../errors/index.js';
 import { parseJsonText, readSourceText } from '../../internal/source-text.js';
-import { openStore } from '../../store/index.js';
+import { openStore, withStoreScope } from '../../store/index.js';
 import { loadCommandProject } from '../project/load-command-project.js';
-import type { AgentTestResult, CommandResult } from '../shared/command-result.js';
 import type { ReadInput } from './authoring/types.js';
 import { testNativeAgentConnection } from './adapter/test-native-agent.js';
 import { findResource } from '../shared/resource-lookup.js';
@@ -22,110 +24,135 @@ type AgentTestInputOptions = {
 };
 
 /** Reads the probe input from `--input` or `--input-file`; with neither, the input is `{}`. */
-const readAgentTestInput = async (options: AgentTestInputOptions): Promise<JsonValue> => {
-  if (options.input !== undefined && options.inputFile !== undefined) {
-    throw new LocalError('cli_usage', 'Agent test input sources overlap.', {
-      path: '--input',
-      hint: 'Pass either `--input` or `--input-file`, not both.',
-    });
+const readAgentTestInput = Effect.fn('readAgentTestInput')(function* (
+  options: AgentTestInputOptions,
+): Effect.fn.Return<JsonValue, LocalError> {
+  try {
+    if (options.input !== undefined && options.inputFile !== undefined) {
+      return yield* Effect.fail(
+        new LocalError('cli_usage', 'Agent test input sources overlap.', {
+          path: '--input',
+          hint: 'Pass either `--input` or `--input-file`, not both.',
+        }),
+      );
+    }
+
+    const hint = 'Pass any valid JSON scalar, array, or object.';
+
+    if (options.inputFile !== undefined) {
+      const text = yield* readSourceText(options.inputFile, {
+        path: '--input-file',
+        readStdin: options.readStdin,
+        workingDirectory: options.workingDirectory,
+      });
+
+      return parseJsonText(text, { path: '--input-file', hint });
+    }
+
+    return options.input === undefined
+      ? {}
+      : parseJsonText(options.input, { path: '--input', hint });
+  } catch (error) {
+    if (error instanceof LocalError) return yield* Effect.fail(error);
+    throw error;
   }
+});
 
-  const hint = 'Pass any valid JSON scalar, array, or object.';
+/** Probes one adapter, finalizing recorded evidence before the store owner closes. */
+const runAgentTestCommand = Effect.fn('runAgentTestCommand')(function* (
+  options: AgentTestCommandOptions,
+) {
+  try {
+    const { request } = options;
 
-  if (options.inputFile !== undefined) {
-    const text = await readSourceText(options.inputFile, {
-      path: '--input-file',
-      readStdin: options.readStdin,
+    const loaded = yield* loadCommandProject({
+      project: options.project,
       workingDirectory: options.workingDirectory,
     });
 
-    return parseJsonText(text, { path: '--input-file', hint });
-  }
+    const agent = findResource('agent', loaded.agents, request.agent_id);
 
-  if (options.input === undefined) return {};
+    const probe = (recording?: {
+      runId: string;
+      record: NonNullable<Parameters<typeof testNativeAgentConnection>[0]['onExecution']>;
+    }) =>
+      testNativeAgentConnection({
+        agent,
+        input: request.input,
+        onExecution: recording?.record,
+        onProgress: options.watch === true ? options.onProgress : undefined,
+        projectRoot: loaded.root,
+        runId: recording?.runId,
+        signal: options.signal,
+      });
 
-  return parseJsonText(options.input, { path: '--input', hint });
-};
+    const result =
+      request.record !== true
+        ? yield* probe()
+        : yield* withStoreScope((owner) =>
+            Effect.gen(function* () {
+              yield* Effect.tryPromise({
+                try: () => mkdir(join(loaded.root, '.attest'), { recursive: true }),
+                catch: (cause) => (cause instanceof Error ? cause : new Error(String(cause))),
+              });
+              const store = yield* openStore(join(loaded.root, '.attest', 'runs.db'), owner);
 
-type ProbeRecording = {
-  finish: (status: 'cancelled' | 'completed' | 'failed') => Promise<void>;
-  record: (execution: StoredCaseExecution) => Promise<void>;
-  runId: string;
-};
+              return yield* Effect.uninterruptibleMask((restore) =>
+                Effect.gen(function* () {
+                  const run = yield* store.runs.createRun({
+                    schemaId: 'attest.agent-test',
+                    configHash: loaded.projectHash,
+                    configJson: JSON.stringify({
+                      agent_id: agent.id,
+                      project_hash: loaded.projectHash,
+                    }),
+                    labels: { agent_id: agent.id, kind: 'agent-probe' },
+                  });
 
-/** Opens the project run store and one run that captures a single probe case. */
-const startProbeRecording = async (
-  root: string,
-  agentId: string,
-  projectHash: string,
-): Promise<ProbeRecording> => {
-  await mkdir(join(root, '.attest'), { recursive: true });
-  const store = await openStore(join(root, '.attest', 'runs.db'));
+                  const primary = yield* Effect.exit(
+                    restore(
+                      probe({
+                        runId: run.id,
+                        record: (execution) => store.runs.recordCase(run.id, execution, []),
+                      }),
+                    ),
+                  );
 
-  const run = await store.runs.createRun({
-    schemaId: 'attest.agent-test',
-    configHash: projectHash,
-    configJson: JSON.stringify({ agent_id: agentId, project_hash: projectHash }),
-    labels: { agent_id: agentId, kind: 'agent-probe' },
-  });
+                  const cancelled =
+                    Exit.isFailure(primary) &&
+                    (Cause.hasInterrupts(primary.cause) ||
+                      primary.cause.reasons.some(
+                        (reason) =>
+                          Cause.isFailReason(reason) &&
+                          reason.error instanceof LocalError &&
+                          reason.error.code === 'cancelled',
+                      ));
 
-  return {
-    finish: async (status) => {
-      try {
-        await store.runs.finalizeRun(run.id, status);
-      } finally {
-        await store.close();
-      }
-    },
-    record: (execution) => store.runs.recordCase(run.id, execution, []),
-    runId: run.id,
-  };
-};
+                  const release = yield* Effect.exit(
+                    store.runs.finalizeRun(
+                      run.id,
+                      Exit.isSuccess(primary) ? 'completed' : cancelled ? 'cancelled' : 'failed',
+                    ),
+                  );
 
-/** Probes one supported adapter without project writes and records one case only when requested. */
-const runAgentTestCommand = async (
-  options: AgentTestCommandOptions,
-): Promise<CommandResult<'agent-test', AgentTestResult>> => {
-  const { request } = options;
+                  const value = yield* finishWithRelease(primary, [release]);
 
-  const loaded = await loadCommandProject({
-    project: options.project,
-    workingDirectory: options.workingDirectory,
-  });
+                  return { ...value, recorded_run_id: run.id };
+                }),
+              );
+            }),
+          );
 
-  const agent = findResource('agent', loaded.agents, request.agent_id);
-
-  const recording =
-    request.record === true
-      ? await startProbeRecording(loaded.root, agent.id, loaded.projectHash)
-      : undefined;
-
-  let result: Awaited<ReturnType<typeof testNativeAgentConnection>>;
-
-  try {
-    result = await testNativeAgentConnection({
-      agent,
-      input: request.input,
-      onExecution: recording?.record,
-      onProgress: options.watch === true ? options.onProgress : undefined,
-      projectRoot: loaded.root,
-      runId: recording?.runId,
-      signal: options.signal,
-    });
-  } catch (error: unknown) {
-    const cancelled = error instanceof LocalError && error.code === 'cancelled';
-    await recording?.finish(cancelled ? 'cancelled' : 'failed');
+    return {
+      operation: 'agent-test' as const,
+      projectHashAfter: loaded.projectHash,
+      projectHashBefore: loaded.projectHash,
+      result,
+    };
+  } catch (error) {
+    if (error instanceof LocalError) return yield* Effect.fail(error);
     throw error;
   }
-
-  await recording?.finish('completed');
-
-  return {
-    operation: 'agent-test',
-    projectHashAfter: loaded.projectHash,
-    projectHashBefore: loaded.projectHash,
-    result: recording === undefined ? result : { ...result, recorded_run_id: recording.runId },
-  };
-};
+});
 
 export { readAgentTestInput, runAgentTestCommand };

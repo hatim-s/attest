@@ -1,11 +1,13 @@
-import { z } from 'zod';
+import { indexedTimestampSchema } from '@attest/core/records';
+import * as Schema from 'effect/Schema';
+import { stripStruct } from '@attest/contracts';
 import { parseWithSchemaSync } from '@attest/contracts';
 import { StoreError, deriveSelectedCases } from '@attest/core';
 
-const historicalPlanSchema = z.object({
-  snapshot: z.object({
-    selected_test_ids: z.array(z.string()),
-    selected_cases: z.array(z.object({ test_id: z.string(), case_id: z.string() })),
+const historicalPlanSchema = stripStruct({
+  snapshot: stripStruct({
+    selected_test_ids: Schema.Array(Schema.String),
+    selected_cases: Schema.Array(stripStruct({ test_id: Schema.String, case_id: Schema.String })),
   }),
 });
 
@@ -15,7 +17,7 @@ const canonicalTime = (
   code: 'INVALID_RECORD' | 'CORRUPT_DATA' | 'INVALID_LIMIT',
 ): string => {
   try {
-    parseWithSchemaSync(z.iso.datetime({ offset: true }), value);
+    parseWithSchemaSync(indexedTimestampSchema, value);
   } catch (cause) {
     throw new StoreError(code, `Invalid timestamp: ${value}`, { cause });
   }

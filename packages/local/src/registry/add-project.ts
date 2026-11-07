@@ -1,7 +1,7 @@
+import * as Effect from 'effect/Effect';
 import { resolve } from 'node:path';
-
 import { readProjectIdentity } from '../project/read-project-identity.js';
-import { registerProject, type RegistryEntry } from './project-registry.js';
+import { registerProject } from './project-registry.js';
 
 type AddProjectOptions = {
   registryPath: string;
@@ -15,16 +15,16 @@ type AddProjectOptions = {
  * when there is one; `name` overrides the manifest name, and a directory without a manifest is
  * named after its basename.
  */
-const addProject = async (options: AddProjectOptions): Promise<RegistryEntry> => {
+const addProject = Effect.fn('addProject')(function* (options: AddProjectOptions) {
   const root = resolve(options.workingDirectory, options.directory);
-  const identity = await readProjectIdentity(root);
+  const identity = yield* readProjectIdentity(root);
 
-  return registerProject({
+  return yield* registerProject({
     registryPath: options.registryPath,
     root,
     name: options.name ?? identity?.name,
     projectId: identity?.projectId,
   });
-};
+});
 
 export { addProject };

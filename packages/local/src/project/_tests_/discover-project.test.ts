@@ -1,3 +1,5 @@
+import { valueFromExit } from '../../internal/effect-exit.js';
+import * as Effect from 'effect/Effect';
 import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -30,7 +32,11 @@ describe('discoverProject', () => {
     await mkdir(nested, { recursive: true });
     await writeFile(join(root, 'attest.project.json'), '{}');
 
-    await expect(discoverProject({ workingDirectory: nested })).resolves.toEqual({
+    await expect(
+      Effect.runPromiseExit(discoverProject({ workingDirectory: nested })).then((exit) =>
+        valueFromExit(exit),
+      ),
+    ).resolves.toEqual({
       manifestPath: join(root, 'attest.project.json'),
       root,
     });
@@ -44,11 +50,17 @@ describe('discoverProject', () => {
     await writeFile(join(outer, 'attest.project.json'), '{}');
     await writeFile(join(worktree, '.git'), 'gitdir: /not/read/by-discovery\n');
 
-    await expect(discoverProject({ workingDirectory: nested })).rejects.toMatchObject({
+    await expect(
+      Effect.runPromiseExit(discoverProject({ workingDirectory: nested })).then((exit) =>
+        valueFromExit(exit),
+      ),
+    ).rejects.toMatchObject({
       code: 'project_not_found',
     });
     await expect(
-      discoverProject({ project: outer, workingDirectory: nested }),
+      Effect.runPromiseExit(discoverProject({ project: outer, workingDirectory: nested })).then(
+        (exit) => valueFromExit(exit),
+      ),
     ).resolves.toMatchObject({ root: outer });
   });
 
@@ -59,7 +71,9 @@ describe('discoverProject', () => {
     await writeFile(join(root, 'attest.project.json'), '{}');
 
     await expect(
-      discoverProject({ project: nested, workingDirectory: root }),
+      Effect.runPromiseExit(discoverProject({ project: nested, workingDirectory: root })).then(
+        (exit) => valueFromExit(exit),
+      ),
     ).rejects.toMatchObject({ code: 'project_not_found' });
   });
 });

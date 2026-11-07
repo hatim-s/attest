@@ -20,7 +20,7 @@
   },
   "dependencies": {
     "@attest/contracts": "workspace:*",
-    "zod": "^4"
+    "effect": "4.1.2"
   },
   "scripts": {
     "build": "tsc --build tsconfig.build.json",

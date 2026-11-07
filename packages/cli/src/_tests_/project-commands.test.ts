@@ -1,3 +1,5 @@
+import { valueFromExit } from '@attest/local';
+import * as Effect from 'effect/Effect';
 import { access, mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
@@ -10,7 +12,7 @@ import {
 } from '@attest/contracts';
 import { DEFAULT_PAGE_LIMIT } from '@attest/core/records';
 import { applyProjectMutation, loadProject } from '@attest/local/project';
-import { openStore } from '@attest/local/store';
+import { openStore, withStoreScope } from '@attest/local/store';
 import { describe, expect, it } from 'vitest';
 
 import {
@@ -28,7 +30,8 @@ const hasSourceDiagnostics = (
   isJsonObject(value) &&
   Array.isArray(value.diagnostics) &&
   value.diagnostics.every(
-    (item): item is { source: string } => isJsonObject(item) && typeof item.source === 'string',
+    (item: JsonValue): item is { source: string } =>
+      isJsonObject(item) && typeof item.source === 'string',
   );
 
 describe('project commands', () => {
@@ -46,7 +49,11 @@ describe('project commands', () => {
 
     if (!init.document.ok) throw new Error('Expected project.init success.');
     const projectRoot = join(parent, 'demo');
-    const loaded = await loadProject({ project: projectRoot });
+
+    const loaded = await Effect.runPromiseExit(loadProject({ project: projectRoot })).then((exit) =>
+      valueFromExit(exit),
+    );
+
     expect(init.document.project_hash_after).toBe(loaded.projectHash);
 
     for (const argv of [
@@ -73,12 +80,20 @@ describe('project commands', () => {
       },
     });
     expect(questions).toEqual(['Project name [guided]: ']);
-    await expect(loadProject({ project: join(parent, 'guided') })).resolves.toMatchObject({
+    await expect(
+      Effect.runPromiseExit(loadProject({ project: join(parent, 'guided') })).then((exit) =>
+        valueFromExit(exit),
+      ),
+    ).resolves.toMatchObject({
       project: { name: 'Guided Project' },
     });
 
     await runCommand(parent, ['project', 'init', 'automatic']);
-    await expect(loadProject({ project: join(parent, 'automatic') })).resolves.toMatchObject({
+    await expect(
+      Effect.runPromiseExit(loadProject({ project: join(parent, 'automatic') })).then((exit) =>
+        valueFromExit(exit),
+      ),
+    ).resolves.toMatchObject({
       project: { name: 'automatic' },
     });
   });
@@ -249,31 +264,55 @@ describe('project commands', () => {
 
   it('redacts authored transport credentials from human and JSON resource output', async () => {
     const root = await createFixtureProject();
-    const candidate = projectResources(await loadProject({ project: root }));
-    candidate.agents[0]!.transport = {
-      kind: 'http',
-      lifecycle: 'external',
-      response_mode: 'mapped',
-      request: {
-        url: 'https://user:authored-url-password@example.test/invoke?token=authored-url-token',
-        method: 'POST',
-        headers: { Authorization: 'Bearer authored-agent-secret' },
-        query: { api_key: 'authored-query-secret' },
-      },
-      extraction: { result_pointer: '/result' },
+
+    let candidate = projectResources(
+      await Effect.runPromiseExit(loadProject({ project: root })).then((exit) =>
+        valueFromExit(exit),
+      ),
+    );
+
+    candidate = {
+      ...candidate,
+      agents: candidate.agents.map((entry, index) =>
+        index === 0
+          ? {
+              ...candidate.agents[0]!,
+              transport: {
+                kind: 'http',
+                lifecycle: 'external',
+                response_mode: 'mapped',
+                request: {
+                  url: 'https://user:authored-url-password@example.test/invoke?token=authored-url-token',
+                  method: 'POST',
+                  headers: { Authorization: 'Bearer authored-agent-secret' },
+                  query: { api_key: 'authored-query-secret' },
+                },
+                extraction: { result_pointer: '/result' },
+              },
+            }
+          : entry,
+      ),
     };
-    candidate.agents.push({
-      ...structuredClone(candidate.agents[0]!),
-      id: 'worker',
-      name: 'Worker',
-      transport: {
-        kind: 'native_cli',
-        lifecycle: 'per_case',
-        argv: ['node', 'authored-argv-secret'],
-      },
-      redaction: { argv_positions: [1] },
-    });
-    await applyProjectMutation({ candidate, projectRoot: root });
+    candidate = {
+      ...candidate,
+      agents: [
+        ...candidate.agents,
+        {
+          ...structuredClone(candidate.agents[0]!),
+          id: 'worker',
+          name: 'Worker',
+          transport: {
+            kind: 'native_cli',
+            lifecycle: 'per_case',
+            argv: ['node', 'authored-argv-secret'],
+          },
+          redaction: { argv_positions: [1] },
+        },
+      ],
+    };
+    await Effect.runPromiseExit(applyProjectMutation({ candidate, projectRoot: root })).then(
+      (exit) => valueFromExit(exit),
+    );
 
     const human = await runCommand(root, ['show', 'agent', 'support']);
     const json = await runJson(root, ['show', 'agent', 'worker']);
@@ -289,22 +328,26 @@ describe('project commands', () => {
   it('lists runs beyond the first page', async () => {
     const root = await createFixtureProject();
     await mkdir(join(root, '.attest'));
-    const store = await openStore(join(root, '.attest', 'runs.db'));
     const ids: string[] = [];
+    valueFromExit(
+      await Effect.runPromiseExit(
+        withStoreScope((owner) =>
+          Effect.gen(function* () {
+            const store = yield* openStore(join(root, '.attest', 'runs.db'), owner);
 
-    try {
-      for (let index = 0; index <= DEFAULT_PAGE_LIMIT; index += 1) {
-        const run = await store.runs.createRun({
-          schemaId: 'attest.project',
-          configHash: 'hash',
-          configJson: '{}',
-        });
+            for (let index = 0; index <= DEFAULT_PAGE_LIMIT; index += 1) {
+              const run = yield* store.runs.createRun({
+                schemaId: 'attest.project',
+                configHash: 'hash',
+                configJson: '{}',
+              });
 
-        ids.push(run.id);
-      }
-    } finally {
-      await store.close();
-    }
+              ids.push(run.id);
+            }
+          }),
+        ),
+      ),
+    );
 
     const listed = await runJson(root, ['list', 'runs']);
     expect(listed.exitCode).toBe(0);
@@ -321,15 +364,22 @@ describe('project commands', () => {
 
     const storePath = join(root, '.attest', 'runs.db');
     await mkdir(join(root, '.attest'));
-    const store = await openStore(storePath);
 
-    const run = await store.runs.createRun({
-      schemaId: 'attest.project',
-      configHash: 'safe-hash',
-      configJson: '{"secret":"must-not-render"}',
-    });
+    const run = valueFromExit(
+      await Effect.runPromiseExit(
+        withStoreScope((owner) =>
+          Effect.gen(function* () {
+            const store = yield* openStore(storePath, owner);
 
-    await store.close();
+            return yield* store.runs.createRun({
+              schemaId: 'attest.project',
+              configHash: 'safe-hash',
+              configJson: '{"secret":"must-not-render"}',
+            });
+          }),
+        ),
+      ),
+    );
 
     const show = await runJson(root, ['show', 'run', run.id]);
     expect(show.exitCode).toBe(0);

@@ -1,34 +1,32 @@
+import * as Effect from 'effect/Effect';
 import { lstat } from 'node:fs/promises';
 import { join } from 'node:path';
 
-import { StoreError, type ProjectCatalog, type RunSource, type RunStore } from '@attest/core';
+import { StoreError, type ProjectCatalog, type RunSource } from '@attest/core';
 
+import { storeDecode } from '../store/internal/store-effect.js';
 import { activityBounds } from '../store/internal/dashboard-boundary.js';
 import { errnoCode } from '../internal/errno-code.js';
-import { openReadonlyRunStore } from '../store/index.js';
+import { openReadonlyRunStore, type StoreScope } from '../store/index.js';
 import { readRegistry, type RegistryEntry } from './project-registry.js';
 
-/** A catalog that holds open stores; `close()` releases every one of them. */
-type ClosableCatalog = ProjectCatalog & { close: () => Promise<void> };
+const runNotFound = (runId: string) =>
+  Effect.fail(new StoreError('RUN_NOT_FOUND', `Run ${runId} was not found.`));
 
-const runNotFound = (runId: string): Promise<never> =>
-  Promise.reject(new StoreError('RUN_NOT_FOUND', `Run ${runId} was not found.`));
-
-/** Serves a project that has never recorded a run without creating its database. */
 const emptySource: RunSource = {
   getProjectOverview: () =>
-    Promise.resolve({
+    Effect.succeed({
       evals: { items: [] },
       runningRunCount: 0,
       runningRunCountTruncated: false,
       lastRunAt: null,
     }),
-  listEvals: () => Promise.resolve({ items: [] }),
-  listEvalRuns: () => Promise.resolve({ items: [] }),
-  getEvalCaseWindow: () => Promise.resolve({ runs: [], items: [] }),
-  getCaseHistory: () => Promise.resolve({ items: [] }),
+  listEvals: () => Effect.succeed({ items: [] }),
+  listEvalRuns: () => Effect.succeed({ items: [] }),
+  getEvalCaseWindow: () => Effect.succeed({ runs: [], items: [] }),
+  getCaseHistory: () => Effect.succeed({ items: [] }),
   getActivity: (query) =>
-    Promise.resolve().then(() => {
+    storeDecode('Invalid activity interval.', () => {
       const { from, to } = activityBounds(query);
 
       return {
@@ -40,14 +38,13 @@ const emptySource: RunSource = {
       };
     }),
   listRunSuites: runNotFound,
-  listRuns: () => Promise.resolve({ items: [] }),
+  listRuns: () => Effect.succeed({ items: [] }),
   getRun: runNotFound,
   listCaseSummaries: runNotFound,
   getCase: runNotFound,
   getRunWithCases: runNotFound,
 };
 
-/** Lists the registry entry as the read API's project record. */
 const toProjectRecord = ({ key, name, root, projectId }: RegistryEntry) => ({
   key,
   name,
@@ -55,67 +52,54 @@ const toProjectRecord = ({ key, name, root, projectId }: RegistryEntry) => ({
   projectId,
 });
 
-/**
- * A catalog over every registered project. The registry file is read on each call, so a project
- * added from another terminal appears without a restart. Stores open read-only on first use,
- * are never created or migrated, and stay open until `close()`; a project without a store reads
- * as empty until its first run.
- */
-const createRegistryCatalog = ({ registryPath }: { registryPath: string }): ClosableCatalog => {
-  // Keyed by root: a key removed and re-added for another directory must not reuse the handle.
-  const opened = new Map<string, Promise<RunStore>>();
-
-  const findEntry = async (key: string): Promise<RegistryEntry> => {
-    const entry = (await readRegistry(registryPath)).projects.find(
-      (candidate) => candidate.key === key,
-    );
-
-    if (entry === undefined) {
-      throw new StoreError('PROJECT_NOT_FOUND', `Project ${key} is not registered.`);
-    }
-
-    return entry;
-  };
+/** Reads the registry afresh while the supplied owner caches successful readonly opens by path. */
+const createRegistryCatalog = (
+  { registryPath }: { registryPath: string },
+  owner: StoreScope,
+): ProjectCatalog => {
+  const registry = () =>
+    owner
+      .run(readRegistry(registryPath))
+      .pipe(
+        Effect.mapError(
+          (cause) =>
+            new StoreError('READ_FAILED', 'The project registry could not be read.', { cause }),
+        ),
+      );
 
   return {
-    listProjects: async () =>
-      (await readRegistry(registryPath)).projects
+    listProjects: Effect.fn('catalog.listProjects')(function* () {
+      return (yield* registry()).projects
         .map(toProjectRecord)
-        .sort((left, right) => left.key.localeCompare(right.key)),
-    openProject: async (key) => {
-      const { root } = await findEntry(key);
-      const storePath = join(root, '.attest', 'runs.db');
-      // Checked after the await: parallel first requests must share one handle.
-      let store = opened.get(root);
+        .sort((left, right) => left.key.localeCompare(right.key));
+    }),
+    openProject: Effect.fn('catalog.openProject')(function* (key) {
+      const entry = (yield* registry()).projects.find((candidate) => candidate.key === key);
 
-      if (store === undefined) {
-        store = openReadonlyRunStore(storePath);
-        opened.set(root, store);
-        // A failed open is not cached, so the next request retries it.
-        store.catch(() => opened.delete(root));
-      }
-
-      try {
-        return await store;
-      } catch (error: unknown) {
-        // A read-only open never creates the file, so asking after the failure cannot race it.
-        const missing = await lstat(storePath).then(
-          () => false,
-          (cause: unknown) => errnoCode(cause) === 'ENOENT',
+      if (entry === undefined)
+        return yield* Effect.fail(
+          new StoreError('PROJECT_NOT_FOUND', `Project ${key} is not registered.`),
         );
+      const path = join(entry.root, '.attest', 'runs.db');
 
-        if (missing) return emptySource;
-        throw error;
-      }
-    },
-    close: async () => {
-      const stores = await Promise.allSettled(opened.values());
-      opened.clear();
-      await Promise.all(
-        stores.flatMap((result) => (result.status === 'fulfilled' ? [result.value.close()] : [])),
+      // Only absence observed before opening is empty. Failed opens retain schema and release evidence.
+      const exists = yield* Effect.tryPromise({
+        try: () => lstat(path),
+        catch: (cause) => cause,
+      }).pipe(
+        Effect.map(() => true),
+        Effect.catch((cause) =>
+          errnoCode(cause) === 'ENOENT'
+            ? Effect.succeed(false)
+            : Effect.fail(
+                new StoreError('READ_FAILED', 'Could not inspect the project store.', { cause }),
+              ),
+        ),
       );
-    },
+
+      return exists ? yield* openReadonlyRunStore(path, owner) : emptySource;
+    }),
   };
 };
 
-export { createRegistryCatalog, type ClosableCatalog };
+export { createRegistryCatalog };

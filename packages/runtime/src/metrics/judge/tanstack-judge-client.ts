@@ -1,3 +1,6 @@
+import * as Effect from 'effect/Effect';
+import * as Exit from 'effect/Exit';
+import { ownOperation, mustPropagateMetricCause } from '../internal/operation.js';
 import { parseWithSchema } from '@attest/contracts';
 import type { AnyTextAdapter } from '@tanstack/ai';
 import {
@@ -107,8 +110,10 @@ const totalUsage = (attempts: readonly JudgeAttempt[]): JudgeUsage | undefined =
     }
 
     total ??= { inputTokens: 0, outputTokens: 0 };
-    total.inputTokens += usage.inputTokens ?? 0;
-    total.outputTokens += usage.outputTokens ?? 0;
+    total = {
+      inputTokens: total.inputTokens + (usage.inputTokens ?? 0),
+      outputTokens: total.outputTokens + (usage.outputTokens ?? 0),
+    };
   }
 
   return total;
@@ -167,67 +172,91 @@ const classifyProviderFailure = (
 };
 
 /** Runs the structured chat, retrying malformed structured output exactly once. */
-const scoreWithTanStack = async ({
+const scoreWithTanStack = ({
   adapter,
   request,
   callOptions,
   executeChat,
-}: ScoreRequest): Promise<JudgeOutcome> => {
-  const prompt = buildJudgePrompt(request);
-  const signal = composeAbortSignal(callOptions.signal, callOptions.timeoutMs);
-  const attempts: JudgeAttempt[] = [];
+}: ScoreRequest): Effect.Effect<JudgeOutcome, Error> =>
+  ownOperation((cancelled) =>
+    Effect.gen(function* () {
+      const prompt = buildJudgePrompt(request);
 
-  for (let attempt = 1; attempt <= MAXIMUM_STRUCTURED_OUTPUT_ATTEMPTS; attempt += 1) {
-    const observation: JudgeAttemptObservation = {
-      inputTokens: 0,
-      outputTokens: 0,
-      usageObserved: false,
-      rawResponse: undefined,
-    };
+      const signal = composeAbortSignal(
+        AbortSignal.any([cancelled, ...(callOptions.signal ? [callOptions.signal] : [])]),
+        callOptions.timeoutMs,
+      );
 
-    let rawResponse: unknown;
+      const attempts: JudgeAttempt[] = [];
 
-    try {
-      rawResponse = await executeChat({
-        adapter,
-        system: prompt.system,
-        user: prompt.user,
-        signal,
-        observation,
-      });
-    } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : String(error);
-      recordAttempt(attempts, observation, observation.rawResponse ?? { error: message }, message);
-      const failure = classifyProviderFailure(error, signal, callOptions.timeoutMs);
+      for (let attempt = 1; attempt <= MAXIMUM_STRUCTURED_OUTPUT_ATTEMPTS; attempt += 1) {
+        const observation: JudgeAttemptObservation = {
+          inputTokens: 0,
+          outputTokens: 0,
+          usageObserved: false,
+          rawResponse: undefined,
+        };
 
-      if (failure !== undefined) {
-        throw new AttestMetricError(failure.code, failure.message, {
-          cause: error,
-          details: buildJudgeRecord(request, attempts),
-        });
+        const called = yield* Effect.exit(
+          executeChat({
+            adapter,
+            system: prompt.system,
+            user: prompt.user,
+            signal,
+            observation,
+          }),
+        );
+
+        if (Exit.isFailure(called)) {
+          // A typed branch must not hide another branch's defect or interruption.
+          if (mustPropagateMetricCause(called.cause)) return yield* Effect.failCause(called.cause);
+          const error = called.cause.reasons.find((reason) => reason._tag === 'Fail');
+
+          if (error === undefined) return yield* Effect.failCause(called.cause);
+          const cause = error.error;
+
+          const message = cause instanceof Error ? cause.message : String(cause);
+          recordAttempt(
+            attempts,
+            observation,
+            observation.rawResponse ?? { error: message },
+            message,
+          );
+          const failure = classifyProviderFailure(cause, signal, callOptions.timeoutMs);
+
+          if (failure !== undefined)
+            return yield* Effect.fail(
+              new AttestMetricError(failure.code, failure.message, {
+                cause,
+                details: buildJudgeRecord(request, attempts),
+              }),
+            );
+          continue;
+        }
+
+        const rawResponse = called.value;
+
+        const verdict = parseWithSchema(judgeResponseSchema, rawResponse);
+        const rawEvidence = observation.rawResponse ?? JSON.stringify(rawResponse);
+
+        if (verdict.ok) {
+          recordAttempt(attempts, observation, rawEvidence);
+
+          return { verdict: verdict.value, record: buildJudgeRecord(request, attempts) };
+        }
+
+        recordAttempt(attempts, observation, rawEvidence, verdict.error.message);
       }
 
-      continue;
-    }
-
-    const verdict = parseWithSchema(judgeResponseSchema, rawResponse);
-    const rawEvidence = observation.rawResponse ?? JSON.stringify(rawResponse);
-
-    if (verdict.ok) {
-      recordAttempt(attempts, observation, rawEvidence);
-
-      return { verdict: verdict.value, record: buildJudgeRecord(request, attempts) };
-    }
-
-    recordAttempt(attempts, observation, rawEvidence, verdict.error.message);
-  }
-
-  throw new AttestMetricError(
-    'judge_unparseable_response',
-    'Judge response remained unparseable after one retry.',
-    { details: buildJudgeRecord(request, attempts) },
+      return yield* Effect.fail(
+        new AttestMetricError(
+          'judge_unparseable_response',
+          'Judge response remained unparseable after one retry.',
+          { details: buildJudgeRecord(request, attempts) },
+        ),
+      );
+    }),
   );
-};
 
 /**
  * Creates the TanStack AI implementation of the SDK-free JudgeClient boundary.
@@ -237,11 +266,15 @@ const createTanstackJudgeClient = (options: TanstackJudgeClientOptions = {}): Ju
   const executeChat = options.executeChat ?? executeStructuredChat;
 
   return {
-    scoreRubric: async (request, callOptions = {}) => {
-      const adapter = selectAdapter(parseJudgeModel(request.model), options);
+    scoreRubric: (request, callOptions = {}) =>
+      Effect.gen(function* () {
+        const adapter = yield* Effect.try({
+          try: () => selectAdapter(parseJudgeModel(request.model), options),
+          catch: (cause) => (cause instanceof Error ? cause : new Error(String(cause))),
+        });
 
-      return scoreWithTanStack({ adapter, request, callOptions, executeChat });
-    },
+        return yield* scoreWithTanStack({ adapter, request, callOptions, executeChat });
+      }),
   };
 };
 

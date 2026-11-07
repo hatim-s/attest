@@ -1,4 +1,4 @@
-import type { z } from 'zod';
+import * as Schema from 'effect/Schema';
 
 import type { ProjectResources } from '../project/resources-snapshot.js';
 import type { HttpRequestTemplate } from '../project/resources/agent-transports.js';
@@ -8,9 +8,12 @@ const credentialKey =
   /(?:^|[-_])(?:authorization|cookie|secret|password|api[-_]?key)(?:$|[-_])|^token$/iu;
 
 /** Portable revisions cannot depend on local files or persist credentials in transport fields. */
-const refinePortableCredentials = (resources: ProjectResources, context: z.RefinementCtx): void => {
+const refinePortableCredentials = (
+  resources: ProjectResources,
+  context: Schema.FilterIssue[],
+): void => {
   const report = (path: (string | number)[], message: string) =>
-    context.addIssue({ code: 'custom', path: ['resources', ...path], message });
+    context.push({ path: ['resources', ...path], issue: message });
 
   const checkUrl = (value: string, path: (string | number)[]) => {
     let url: URL;

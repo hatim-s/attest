@@ -1,3 +1,5 @@
+import * as Effect from 'effect/Effect';
+import { httpSync, withHttpSignal } from './http-effects.js';
 import { parseAgentResponse, type AgentRequest, type AgentResource } from '@attest/contracts';
 
 import { AgentInvocationError, abortedError } from '../../errors.js';
@@ -16,7 +18,6 @@ import {
   attemptFromError,
   extractAgentResponse,
   extractRemoteJobId,
-  normalizeFailure,
   runDirect,
 } from './mapped-http-execution.js';
 import { runPolling } from './mapped-http-polling.js';
@@ -43,114 +44,131 @@ type MappedHttpInvokeOptions = {
 };
 
 /** Invokes a direct or polling mapped HTTP resource as one bounded Attest attempt. */
-const invokeMappedHttpAgent = async (
+const invokeMappedHttpAgent = Effect.fn('http.invokeMapped')(function* (
   agent: HttpAgentResource,
   request: AgentRequest,
   options: MappedHttpInvokeOptions = {},
-): Promise<InvocationResult> => {
+): Effect.fn.Return<InvocationResult, AgentInvocationError> {
   const invocationDuration = startTimer();
 
-  const signal = AbortSignal.any(
-    [
-      AbortSignal.timeout(agent.timeouts?.attempt_ms ?? DEFAULT_ATTEMPT_MS),
-      options.signal,
-      options.deadlineSignal,
-    ].filter((candidate) => candidate !== undefined),
+  return yield* withHttpSignal(
+    agent.timeouts?.attempt_ms ?? DEFAULT_ATTEMPT_MS,
+    [options.signal, options.deadlineSignal],
+    (signal) =>
+      Effect.gen(function* () {
+        const policy = {
+          attemptSignal: signal,
+          callerSignal: options.signal,
+          connectTimeoutMs: agent.timeouts?.connect_ms ?? DEFAULT_CONNECT_MS,
+          firstByteTimeoutMs: agent.timeouts?.first_byte_ms ?? DEFAULT_FIRST_BYTE_MS,
+          responseBodyTimeoutMs: agent.timeouts?.idle_ms ?? DEFAULT_IDLE_MS,
+          responseCapBytes: agent.limits?.response_bytes ?? DEFAULT_RESPONSE_BYTES,
+          secrets: options.secrets ?? [],
+        };
+
+        const retryAttempts: InvocationAttempt[] = [];
+        let terminalAttemptDurationMs: number | undefined;
+
+        const operation = Effect.gen(function* () {
+          if (signal.aborted)
+            return yield* Effect.fail(abortedError(options.signal, 'Mapped HTTP invocation'));
+
+          const requestTemplate =
+            agent.transport.kind === 'http' ? agent.transport.request : agent.transport.submit;
+
+          const materialized = yield* httpSync(() =>
+            materializeHttpRequest(
+              resolveRequestTemplate(requestTemplate, options),
+              request,
+              agent.limits?.request_bytes ?? DEFAULT_REQUEST_BYTES,
+            ),
+          );
+
+          const retry =
+            options.retries === undefined
+              ? agent.retry
+              : {
+                  backoff: agent.retry?.backoff ?? { kind: 'none' as const },
+                  retries: options.retries,
+                };
+
+          const context = {
+            retry,
+            policy,
+            signal,
+            retryAttempts,
+            requestJson: options.requestJson,
+          };
+
+          const { transport } = agent;
+
+          const completed =
+            transport.kind === 'http'
+              ? yield* runDirect(materialized, context)
+              : yield* runPolling(transport, request, materialized, context);
+
+          terminalAttemptDurationMs = completed.durationMs;
+
+          if (!completed.ok) {
+            const attempt = attemptFromError(completed.error, completed.durationMs);
+
+            return { ...attempt, attempts: [...retryAttempts, attempt] };
+          }
+
+          const { response } = completed;
+
+          const remoteJobId =
+            completed.remoteJobId ??
+            (yield* httpSync(() =>
+              extractRemoteJobId(response.raw, agent.transport.extraction.remote_job_id_pointer),
+            ));
+
+          const normalized = yield* httpSync(() =>
+            extractAgentResponse(response.raw, agent.transport.extraction, options.secrets ?? []),
+          );
+
+          const report = parseAgentResponse(normalized);
+
+          if (!report.ok) {
+            return yield* Effect.fail(
+              new AgentInvocationError(
+                'invalid_envelope',
+                'Mapped HTTP extraction is not a valid agent response.',
+              ),
+            );
+          }
+
+          const attempt: InvocationAttempt = {
+            status: 'ok',
+            raw: normalized,
+            report,
+            diagnostics: {
+              httpStatus: response.status,
+            },
+            durationMs: completed.durationMs,
+            rawExcerpt: response.rawExcerpt,
+            warnings: report.warnings,
+          };
+
+          if (remoteJobId !== undefined) attempt.diagnostics.remoteJobId = remoteJobId;
+
+          return { ...attempt, attempts: [...retryAttempts, attempt] };
+        });
+
+        return yield* operation.pipe(
+          Effect.catch((normalized) =>
+            Effect.sync(() => {
+              const attempt = attemptFromError(
+                normalized,
+                terminalAttemptDurationMs ?? invocationDuration(),
+              );
+
+              return { ...attempt, attempts: [...retryAttempts, attempt] };
+            }),
+          ),
+        );
+      }),
   );
-
-  const policy = {
-    attemptSignal: signal,
-    callerSignal: options.signal,
-    connectTimeoutMs: agent.timeouts?.connect_ms ?? DEFAULT_CONNECT_MS,
-    firstByteTimeoutMs: agent.timeouts?.first_byte_ms ?? DEFAULT_FIRST_BYTE_MS,
-    responseBodyTimeoutMs: agent.timeouts?.idle_ms ?? DEFAULT_IDLE_MS,
-    responseCapBytes: agent.limits?.response_bytes ?? DEFAULT_RESPONSE_BYTES,
-    secrets: options.secrets ?? [],
-  };
-
-  const retryAttempts: InvocationAttempt[] = [];
-  let terminalAttemptDurationMs: number | undefined;
-
-  try {
-    if (signal.aborted) throw abortedError(options.signal, 'Mapped HTTP invocation');
-
-    const requestTemplate =
-      agent.transport.kind === 'http' ? agent.transport.request : agent.transport.submit;
-
-    const materialized = materializeHttpRequest(
-      resolveRequestTemplate(requestTemplate, options),
-      request,
-      agent.limits?.request_bytes ?? DEFAULT_REQUEST_BYTES,
-    );
-
-    const retry =
-      options.retries === undefined
-        ? agent.retry
-        : { backoff: agent.retry?.backoff ?? { kind: 'none' as const }, retries: options.retries };
-
-    const context = { retry, policy, signal, retryAttempts, requestJson: options.requestJson };
-    const { transport } = agent;
-
-    const completed =
-      transport.kind === 'http'
-        ? await runDirect(materialized, context)
-        : await runPolling(transport, request, materialized, context);
-
-    terminalAttemptDurationMs = completed.durationMs;
-
-    if (!completed.ok) {
-      const attempt = attemptFromError(completed.error, completed.durationMs);
-
-      return { ...attempt, attempts: [...retryAttempts, attempt] };
-    }
-
-    const { response } = completed;
-
-    const remoteJobId =
-      completed.remoteJobId ??
-      extractRemoteJobId(response.raw, agent.transport.extraction.remote_job_id_pointer);
-
-    const normalized = extractAgentResponse(
-      response.raw,
-      agent.transport.extraction,
-      options.secrets ?? [],
-    );
-
-    const report = parseAgentResponse(normalized);
-
-    if (!report.ok) {
-      throw new AgentInvocationError(
-        'invalid_envelope',
-        'Mapped HTTP extraction is not a valid agent response.',
-      );
-    }
-
-    const attempt: InvocationAttempt = {
-      status: 'ok',
-      raw: normalized,
-      report,
-      diagnostics: {
-        httpStatus: response.status,
-      },
-      durationMs: completed.durationMs,
-      rawExcerpt: response.rawExcerpt,
-      warnings: report.warnings,
-    };
-
-    if (remoteJobId !== undefined) attempt.diagnostics.remoteJobId = remoteJobId;
-
-    return { ...attempt, attempts: [...retryAttempts, attempt] };
-  } catch (error: unknown) {
-    const normalized = normalizeFailure(error, {
-      transport: 'Mapped HTTP',
-      signal,
-      callerSignal: options.signal,
-    });
-
-    const attempt = attemptFromError(normalized, terminalAttemptDurationMs ?? invocationDuration());
-
-    return { ...attempt, attempts: [...retryAttempts, attempt] };
-  }
-};
+});
 
 export { invokeMappedHttpAgent, type HttpAgentResource, type MappedHttpInvokeOptions };

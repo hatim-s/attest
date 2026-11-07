@@ -1,3 +1,5 @@
+import { valueFromExit } from '../../../internal/effect-exit.js';
+import * as Effect from 'effect/Effect';
 import { execFileSync } from 'node:child_process';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -35,22 +37,24 @@ describe('eval hook commands', () => {
     const childProcessIdPath = join(directory, 'child.pid');
 
     await expect(
-      runHookCommand({
-        command: {
-          argv: [
-            '/bin/sh',
-            '-c',
-            'sleep 30 & echo $! > "$1"; wait',
-            'attest-hook',
-            childProcessIdPath,
-          ],
-          timeout_ms: 3_000,
-        },
-        cwd: directory,
-        env: { PATH: process.env.PATH ?? '' },
-        phase: 'before_run',
-        timeoutMs: 1_000,
-      }),
+      runNative(
+        runHookCommand({
+          command: {
+            argv: [
+              '/bin/sh',
+              '-c',
+              'sleep 30 & echo $! > "$1"; wait',
+              'attest-hook',
+              childProcessIdPath,
+            ],
+            timeout_ms: 3_000,
+          },
+          cwd: directory,
+          env: { PATH: process.env.PATH ?? '' },
+          phase: 'before_run',
+          timeoutMs: 1_000,
+        }),
+      ),
     ).rejects.toThrow('Eval before_run hook timed out.');
 
     const childProcessId = Number(await readFile(childProcessIdPath, 'utf8'));
@@ -59,20 +63,26 @@ describe('eval hook commands', () => {
 
   test('does not include argv or inherited output in a nonzero-exit error', async () => {
     await expect(
-      runHookCommand({
-        command: {
-          argv: [
-            process.execPath,
-            '-e',
-            "process.stderr.write('secret-output'); process.exit(7)",
-            'secret-argv',
-          ],
-        },
-        cwd: process.cwd(),
-        env: { PATH: process.env.PATH ?? '' },
-        phase: 'after_case',
-        timeoutMs: 1_000,
-      }),
+      runNative(
+        runHookCommand({
+          command: {
+            argv: [
+              process.execPath,
+              '-e',
+              "process.stderr.write('secret-output'); process.exit(7)",
+              'secret-argv',
+            ],
+          },
+          cwd: process.cwd(),
+          env: { PATH: process.env.PATH ?? '' },
+          phase: 'after_case',
+          timeoutMs: 1_000,
+        }),
+      ),
     ).rejects.toThrow('Eval after_case hook exited with code 7.');
   });
 });
+
+/** Executes native test operations without converting production owners back to Promises. */
+const runNative = async <A, E extends Error>(operation: Effect.Effect<A, E>) =>
+  valueFromExit(await Effect.runPromiseExit(operation));

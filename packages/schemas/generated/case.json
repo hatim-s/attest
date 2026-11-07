@@ -1,159 +1,108 @@
 {
   "$defs": {
-    "__schema0": {
-      "anyOf": [
-        {
+    "TestCase": {
+      "additionalProperties": false,
+      "properties": {
+        "expected": {
+          "anyOf": [
+            {},
+            {
+              "not": {}
+            }
+          ]
+        },
+        "folder": {
+          "anyOf": [
+            {
+              "minLength": 1,
+              "pattern": "^(?!\\.{1,2}(?:\\/|$))[^\\s/\\\\](?:[^/\\\\]*[^\\s/\\\\])?(?:\\/(?!\\.{1,2}(?:\\/|$))[^\\s/\\\\](?:[^/\\\\]*[^\\s/\\\\])?)*(?![\\s\\S])",
+              "type": "string"
+            },
+            {
+              "not": {}
+            }
+          ]
+        },
+        "id": {
+          "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
           "type": "string"
         },
-        {
-          "type": "number"
+        "input": {},
+        "metric_overrides": {
+          "anyOf": [
+            {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "enabled": {
+                    "anyOf": [
+                      {
+                        "type": "boolean"
+                      },
+                      {
+                        "not": {}
+                      }
+                    ]
+                  },
+                  "metric_id": {
+                    "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
+                    "type": "string"
+                  },
+                  "threshold": {
+                    "anyOf": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "not": {}
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "metric_id"
+                ],
+                "type": "object"
+              },
+              "type": "array"
+            },
+            {
+              "not": {}
+            }
+          ]
         },
-        {
-          "type": "boolean"
+        "params": {
+          "anyOf": [
+            {
+              "type": "object"
+            },
+            {
+              "not": {}
+            }
+          ]
         },
-        {
-          "type": "null"
-        },
-        {
-          "items": {
-            "$ref": "#/$defs/__schema0"
-          },
-          "type": "array"
-        },
-        {
-          "additionalProperties": {
-            "$ref": "#/$defs/__schema0"
-          },
-          "propertyNames": {
-            "type": "string"
-          },
-          "type": "object"
+        "tags": {
+          "anyOf": [
+            {
+              "items": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "not": {}
+            }
+          ]
         }
-      ]
-    },
-    "__schema1": {
-      "anyOf": [
-        {
-          "type": "string"
-        },
-        {
-          "type": "number"
-        },
-        {
-          "type": "boolean"
-        },
-        {
-          "type": "null"
-        },
-        {
-          "items": {
-            "$ref": "#/$defs/__schema1"
-          },
-          "type": "array"
-        },
-        {
-          "additionalProperties": {
-            "$ref": "#/$defs/__schema1"
-          },
-          "propertyNames": {
-            "type": "string"
-          },
-          "type": "object"
-        }
-      ]
-    },
-    "__schema2": {
-      "anyOf": [
-        {
-          "type": "string"
-        },
-        {
-          "type": "number"
-        },
-        {
-          "type": "boolean"
-        },
-        {
-          "type": "null"
-        },
-        {
-          "items": {
-            "$ref": "#/$defs/__schema2"
-          },
-          "type": "array"
-        },
-        {
-          "additionalProperties": {
-            "$ref": "#/$defs/__schema2"
-          },
-          "propertyNames": {
-            "type": "string"
-          },
-          "type": "object"
-        }
-      ]
-    }
-  },
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "additionalProperties": false,
-  "properties": {
-    "expected": {
-      "$ref": "#/$defs/__schema1"
-    },
-    "folder": {
-      "minLength": 1,
-      "pattern": "^(?!\\.{1,2}(?:\\/|$))[^\\s/\\\\](?:[^/\\\\]*[^\\s/\\\\])?(?:\\/(?!\\.{1,2}(?:\\/|$))[^\\s/\\\\](?:[^/\\\\]*[^\\s/\\\\])?)*(?![\\s\\S])",
-      "type": "string"
-    },
-    "id": {
-      "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
-      "type": "string"
-    },
-    "input": {
-      "$ref": "#/$defs/__schema0"
-    },
-    "metric_overrides": {
-      "items": {
-        "additionalProperties": false,
-        "properties": {
-          "enabled": {
-            "type": "boolean"
-          },
-          "metric_id": {
-            "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
-            "type": "string"
-          },
-          "threshold": {
-            "type": "number"
-          }
-        },
-        "required": [
-          "metric_id"
-        ],
-        "type": "object"
       },
-      "type": "array"
-    },
-    "params": {
-      "additionalProperties": {
-        "$ref": "#/$defs/__schema2"
-      },
-      "propertyNames": {
-        "type": "string"
-      },
+      "required": [
+        "id",
+        "input"
+      ],
       "type": "object"
-    },
-    "tags": {
-      "items": {
-        "minLength": 1,
-        "type": "string"
-      },
-      "type": "array"
     }
   },
-  "required": [
-    "id",
-    "input"
-  ],
-  "type": "object"
+  "$ref": "#/$defs/TestCase",
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
 }

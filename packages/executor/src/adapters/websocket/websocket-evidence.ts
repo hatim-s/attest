@@ -30,6 +30,7 @@ type EvidenceEvent = WebSocketAttemptEvidence['events'][number];
 /** Mutable state for one request while it crosses attempts and connections. */
 type PendingInvocation = {
   acknowledged: boolean;
+  dispatched: boolean;
   attemptTimer?: NodeJS.Timeout;
   attempts: InvocationAttempt[];
   callerAbort?: () => void;
@@ -70,6 +71,7 @@ const createPendingInvocation = (
   signal?: AbortSignal,
 ): PendingInvocation => ({
   acknowledged: false,
+  dispatched: false,
   attempts: [],
   duration: startTimer(),
   events: [],
@@ -181,16 +183,17 @@ const createEvidenceRecorder = (
     if (pending.events.length >= EVIDENCE_EVENT_CAP) return;
     const excerpt = excerptOf(event.source, event.raw);
 
-    const recorded: EvidenceEvent = {
+    let recorded: EvidenceEvent = {
       classification: event.classification,
       elapsed_ms: Math.max(0, Math.round(pending.duration())),
     };
 
-    if (!CONNECTION_EVENTS.has(event.classification)) recorded.request_id = pending.requestId;
+    if (!CONNECTION_EVENTS.has(event.classification))
+      recorded = { ...recorded, request_id: pending.requestId };
 
-    if (event.bytes !== undefined) recorded.message_bytes = event.bytes;
+    if (event.bytes !== undefined) recorded = { ...recorded, message_bytes: event.bytes };
 
-    if (excerpt !== undefined) recorded.excerpt = excerpt;
+    if (excerpt !== undefined) recorded = { ...recorded, excerpt };
     pending.events.push(recorded);
   };
 
@@ -204,7 +207,7 @@ const createEvidenceRecorder = (
       events: pending.events.slice(0, EVIDENCE_EVENT_CAP),
     };
 
-    if (pending.close !== undefined) base.close = pending.close;
+    if (pending.close !== undefined) return { ...base, close: pending.close };
 
     return base;
   };
@@ -224,10 +227,19 @@ const createEvidenceRecorder = (
     createRawExcerpt(redactTransportText(JSON.stringify(evidence), secrets));
 
   const failureAttempt: EvidenceRecorder['failureAttempt'] = (pending, error, classification) =>
-    createFailedAttempt(error, {
-      durationMs: pending.duration(),
-      rawExcerpt: evidenceExcerpt(failureEvidence(pending, classification)),
-    });
+    createFailedAttempt(
+      pending.dispatched
+        ? new AgentInvocationError(error.code, error.message, {
+            cause: error,
+            classification: error.classification,
+            applicationStarted: true,
+          })
+        : error,
+      {
+        durationMs: pending.duration(),
+        rawExcerpt: evidenceExcerpt(failureEvidence(pending, classification)),
+      },
+    );
 
   return {
     countMessage: (pending, bytes) => {

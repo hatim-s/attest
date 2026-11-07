@@ -1,3 +1,5 @@
+import type * as Effect from 'effect/Effect';
+import type * as Exit from 'effect/Exit';
 import type { ProjectCatalog, RunControl } from '@attest/core';
 
 type CreateViewAppOptions = {
@@ -14,12 +16,12 @@ type StartViewServerOptions = {
   /** Lets the dashboard start and cancel runs; without it the dashboard only reads. */
   control?: RunControl;
   /** Releases what the catalog opened; runs once, after the server stops accepting requests. */
-  close: () => Promise<void>;
+  close: (primary: Exit.Exit<void, Error>) => Effect.Effect<void, Error>;
 };
 
 type ViewServerHandle = {
-  close: () => Promise<void>;
-  closed: Promise<void>;
+  close: (primary?: Exit.Exit<void, Error>) => Effect.Effect<void, Error>;
+  closed: Effect.Effect<void, Error>;
   origin: string;
   url: string;
 };

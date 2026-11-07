@@ -1,3 +1,5 @@
+import { valueFromExit } from '../../internal/effect-exit.js';
+import * as Effect from 'effect/Effect';
 import { fileURLToPath } from 'node:url';
 
 import type { MetricDefinition } from '@attest/contracts';
@@ -32,7 +34,9 @@ describe('evaluateMetrics', () => {
       { name: 'judge-third', type: 'judge', ...judgeDefinition },
     ];
 
-    const evaluations = await evaluateMetrics(definitions, context);
+    const evaluations = await Effect.runPromiseExit(evaluateMetrics(definitions, context)).then(
+      valueFromExit,
+    );
 
     expect(evaluations.map((evaluation) => evaluation.metricName)).toEqual([
       'assert-first',
@@ -62,10 +66,12 @@ describe('evaluateMetrics', () => {
       { name: 'judge', type: 'judge', ...judgeDefinition },
     ];
 
-    const evaluations = await evaluateMetrics(definitions, {
-      ...context,
-      execution: { outcome: 'invocation_error', trace: null },
-    });
+    const evaluations = await Effect.runPromiseExit(
+      evaluateMetrics(definitions, {
+        ...context,
+        execution: { outcome: 'invocation_error', trace: null },
+      }),
+    ).then(valueFromExit);
 
     expect(evaluations).toHaveLength(3);
 
@@ -75,10 +81,12 @@ describe('evaluateMetrics', () => {
   });
 
   it('explains an agent-error skip differently from a missing-output skip', async () => {
-    const [evaluation] = await evaluateMetrics(
-      [{ name: 'answer-exists', type: 'assertion', assert: [{ exists: { path: '$.output' } }] }],
-      { ...context, execution: { outcome: 'agent_error', trace: null } },
-    );
+    const [evaluation] = await Effect.runPromiseExit(
+      evaluateMetrics(
+        [{ name: 'answer-exists', type: 'assertion', assert: [{ exists: { path: '$.output' } }] }],
+        { ...context, execution: { outcome: 'agent_error', trace: null } },
+      ),
+    ).then(valueFromExit);
 
     expect(evaluation).toMatchObject({ status: 'error', error: { kind: 'skipped_no_output' } });
     expect(evaluation?.status === 'error' && evaluation.error.message).toContain('error envelope');
@@ -98,7 +106,9 @@ describe('evaluateMetrics', () => {
       },
     ];
 
-    const evaluations = await evaluateMetrics(definitions, context);
+    const evaluations = await Effect.runPromiseExit(evaluateMetrics(definitions, context)).then(
+      valueFromExit,
+    );
 
     expect(evaluations).toMatchObject([
       { metricName: 'invalid-regex', status: 'error', error: { kind: 'internal_error' } },
@@ -107,23 +117,25 @@ describe('evaluateMetrics', () => {
   });
 
   it('maps invalid JSON Schema configuration to its typed metric error', async () => {
-    const evaluations = await evaluateMetrics(
-      [
-        {
-          name: 'invalid-schema',
-          type: 'assertion',
-          assert: [
-            {
-              json_schema: {
-                path: '$.output',
-                schema: { type: 'not-a-json-schema-type' },
+    const evaluations = await Effect.runPromiseExit(
+      evaluateMetrics(
+        [
+          {
+            name: 'invalid-schema',
+            type: 'assertion',
+            assert: [
+              {
+                json_schema: {
+                  path: '$.output',
+                  schema: { type: 'not-a-json-schema-type' },
+                },
               },
-            },
-          ],
-        },
-      ],
-      context,
-    );
+            ],
+          },
+        ],
+        context,
+      ),
+    ).then(valueFromExit);
 
     expect(evaluations).toMatchObject([
       { status: 'error', error: { kind: 'invalid_json_schema' } },
