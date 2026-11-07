@@ -1,3 +1,4 @@
+import { SandboxAttemptCleanupError } from '@attest/executor';
 import * as Cause from 'effect/Cause';
 import * as Scope from 'effect/Scope';
 import * as Exit from 'effect/Exit';
@@ -514,8 +515,7 @@ test('projects private sandbox cleanup evidence without serializing the original
 
   const cleanupCause = Cause.die(new Error('cleanup defect'));
 
-  const error = Object.assign(new Error('private-cleanup-secret'), {
-    _tag: 'SandboxAttemptCleanupError',
+  const error = new SandboxAttemptCleanupError({
     attempt,
     cleanupCause,
   });
@@ -535,8 +535,9 @@ test('projects private sandbox cleanup evidence without serializing the original
   expect(result.execution.attempts[0]?.durationMs).toBe(17);
   expect(JSON.stringify(result)).not.toContain('private-cleanup-secret');
   expect(
-    Object.getOwnPropertyDescriptor(result.execution, 'localInvocationEvidence')?.enumerable,
-  ).toBe(false);
+    Object.getOwnPropertyDescriptor(result.execution, 'localInvocationEvidence'),
+  ).toBeUndefined();
+  expect(Object.getOwnPropertyDescriptor(result, 'localInvocationEvidence')).toBeUndefined();
   const release = await Effect.runPromiseExit(runner.cleanup?.(run.run_id) ?? Effect.void);
   expect(Exit.isFailure(release)).toBe(true);
 

@@ -1,3 +1,4 @@
+import { isSandboxAttemptCleanupError } from '@attest/executor';
 import * as Fiber from 'effect/Fiber';
 import * as Scope from 'effect/Scope';
 import * as Exit from 'effect/Exit';
@@ -15,7 +16,6 @@ import {
 import { type CacheStore } from '@attest/core';
 import {
   CliCleanupError,
-  type InvocationAttempt,
   type invokeVercelSandboxAgent,
   type InvocationResult,
 } from '@attest/executor';
@@ -236,24 +236,14 @@ const createEvalCaseRunner = Effect.fn('createEvalCaseRunner')(function* (
                     ...sensitiveFieldValues(parseWithSchemaSync(Schema.Json, cause.attempt.raw)),
                   );
 
-                if (
-                  cause instanceof Error &&
-                  '_tag' in cause &&
-                  cause._tag === 'SandboxAttemptCleanupError' &&
-                  'cleanupCause' in cause
-                ) {
-                  // SAFETY: the executor's private tagged error owns this native cleanup Cause.
-                  sandboxReleaseCauses.push(cause.cleanupCause as Cause.Cause<Error>);
+                if (isSandboxAttemptCleanupError(cause)) {
+                  sandboxReleaseCauses.push(cause.cleanupCause);
+                  const completed = cause.attempt;
 
-                  if ('attempt' in cause) {
-                    // SAFETY: the same private executor tag owns its completed typed attempt.
-                    const completed = cause.attempt as InvocationAttempt;
-
-                    if (completed.status === 'ok')
-                      cleanupSecrets.push(
-                        ...sensitiveFieldValues(parseWithSchemaSync(Schema.Json, completed.raw)),
-                      );
-                  }
+                  if (completed.status === 'ok')
+                    cleanupSecrets.push(
+                      ...sensitiveFieldValues(parseWithSchemaSync(Schema.Json, completed.raw)),
+                    );
                 }
               }
 
@@ -302,8 +292,6 @@ const createEvalCaseRunner = Effect.fn('createEvalCaseRunner')(function* (
                 execution = uncertainCleanup.execution;
               }
 
-              Object.defineProperty(execution, 'localInvocationEvidence', { value: invocation });
-
               yield* recoverOrdinary(
                 Effect.gen(function* () {
                   yield* lifecycle.runCasePhase('after_agent', {
@@ -346,9 +334,6 @@ const createEvalCaseRunner = Effect.fn('createEvalCaseRunner')(function* (
                 execution,
                 metrics,
               };
-
-              // Internal raw cleanup receipts never enter JSON or the persisted record mapper.
-              Object.defineProperty(result, 'localInvocationEvidence', { value: invocation });
 
               return result;
             }),

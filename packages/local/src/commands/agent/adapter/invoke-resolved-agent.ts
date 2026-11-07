@@ -1,5 +1,4 @@
-import { openProcessSession } from './process-session.js';
-import { startWebSocketSession } from './websocket-session.js';
+import { isSandboxAttemptCleanupError, startWebSocketAgent } from '@attest/executor';
 import type { CaseExecution } from '@attest/runtime';
 import * as Effect from 'effect/Effect';
 import type * as Cause from 'effect/Cause';
@@ -24,7 +23,6 @@ import {
   startBackgroundAgent,
   startJsonlBridgeAgent,
   type InvocationResult,
-  type InvocationAttempt,
 } from '@attest/executor';
 
 import type { ResolvedNativeAgent } from './types.js';
@@ -76,37 +74,33 @@ const startAgentRuntime = Effect.fn('startAgentRuntime')(function* (
       return {
         kind: 'session',
         resolved,
-        session: yield* openProcessSession(
-          startBackgroundAgent(resolved.agent, {
-            cwd: resolved.cwd,
-            env: resolved.env,
-            invokeHeaders: resolved.invokeHeaders,
-            invokeQuery: resolved.invokeQuery,
-            secrets: resolved.secrets,
-            shutdownHeaders: resolved.shutdownHeaders,
-            shutdownQuery: resolved.shutdownQuery,
-            signal,
-          }),
-        ),
+        session: yield* startBackgroundAgent(resolved.agent, {
+          cwd: resolved.cwd,
+          env: resolved.env,
+          invokeHeaders: resolved.invokeHeaders,
+          invokeQuery: resolved.invokeQuery,
+          secrets: resolved.secrets,
+          shutdownHeaders: resolved.shutdownHeaders,
+          shutdownQuery: resolved.shutdownQuery,
+          signal,
+        }),
       };
     case 'jsonl_bridge':
       return {
         kind: 'session',
         resolved,
-        session: yield* openProcessSession(
-          startJsonlBridgeAgent(resolved.agent, {
-            cwd: resolved.cwd,
-            env: resolved.env,
-            secrets: resolved.secrets,
-            signal,
-          }),
-        ),
+        session: yield* startJsonlBridgeAgent(resolved.agent, {
+          cwd: resolved.cwd,
+          env: resolved.env,
+          secrets: resolved.secrets,
+          signal,
+        }),
       };
     case 'websocket':
       return {
         kind: 'session',
         resolved,
-        session: yield* startWebSocketSession(resolved.agent, {
+        session: yield* startWebSocketAgent(resolved.agent, {
           headers: resolved.headers,
           secrets: resolved.secrets,
           signal,
@@ -242,15 +236,8 @@ const startupFailure = (
 ): InvocationResult => {
   const prior = fullCause === undefined ? [] : getInvocationPriorAttempts(fullCause);
 
-  // The executor keeps this error private. Its tag is the boundary for completed sandbox evidence.
-  if (
-    cause instanceof Error &&
-    '_tag' in cause &&
-    cause._tag === 'SandboxAttemptCleanupError' &&
-    'attempt' in cause
-  ) {
-    // SAFETY: this executor-owned tag uniquely identifies its typed completed invocation attempt.
-    const completed = cause.attempt as InvocationAttempt;
+  if (isSandboxAttemptCleanupError(cause)) {
+    const completed = cause.attempt;
 
     const attempt = {
       status: 'invocation_error' as const,

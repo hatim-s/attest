@@ -560,4 +560,8 @@ const invokeVercelSandboxAgent = Effect.fn('invokeVercelSandboxAgent')(function*
   );
 });
 
-export { invokeVercelSandboxAgent };
+/** Identifies executor-owned completed sandbox attempts without exposing tag-string casts. */
+const isSandboxAttemptCleanupError = (error: unknown): error is SandboxAttemptCleanupError =>
+  error instanceof SandboxAttemptCleanupError;
+
+export { invokeVercelSandboxAgent, isSandboxAttemptCleanupError, SandboxAttemptCleanupError };

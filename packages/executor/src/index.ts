@@ -4,7 +4,11 @@ export { invokeAgent } from './invoke.js';
 
 export { CliCleanupError } from './cli-invoker.js';
 
-export { invokeVercelSandboxAgent } from './adapters/sandbox/index.js';
+export {
+  invokeVercelSandboxAgent,
+  isSandboxAttemptCleanupError,
+  SandboxAttemptCleanupError,
+} from './adapters/sandbox/index.js';
 
 export {
   killProcessTree,
