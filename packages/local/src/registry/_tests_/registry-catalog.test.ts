@@ -45,6 +45,20 @@ describe('createRegistryCatalog', () => {
     await expect(source.listCaseSummaries('missing', {})).rejects.toMatchObject({
       code: 'RUN_NOT_FOUND',
     });
+    expect(
+      await source.getActivity({ from: '2026-01-01T05:30:00+05:30', to: '2026-01-02T00:00:00Z' }),
+    ).toMatchObject({
+      coveredFrom: '2026-01-01T00:00:00.000Z',
+      coveredTo: '2026-01-02T00:00:00.000Z',
+      days: [],
+    });
+
+    for (const query of [
+      { from: 'bad', to: '2026-01-02T00:00:00Z' },
+      { from: '2026-01-02T00:00:00Z', to: '2026-01-01T00:00:00Z' },
+      { from: '2026-01-01T00:00:00Z', to: '2026-05-01T00:00:00Z' },
+    ])
+      await expect(source.getActivity(query)).rejects.toMatchObject({ code: 'INVALID_LIMIT' });
     expect(await readdir(root)).toEqual([]);
     await catalog.close();
   });

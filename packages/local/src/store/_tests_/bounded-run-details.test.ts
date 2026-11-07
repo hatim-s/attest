@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { AGENT_PROTOCOL } from '@attest/contracts';
-import { Kysely } from 'kysely';
+import { Kysely, sql } from 'kysely';
 import { expect, it } from 'vitest';
 
 import { readBoundedRunDetails } from '../bounded-run-details.js';
@@ -49,6 +49,7 @@ it('counts omitted cases without hydrating their corrupt detail blobs', async ()
     }
 
     const first = (await store.runs.listCaseSummaries(run.id, { limit: 1 })).items[0]!;
+    await sql`DROP TRIGGER cases_no_projection_update`.execute(database);
     await database
       .updateTable('cases')
       .set({ request_json: 'not JSON' })

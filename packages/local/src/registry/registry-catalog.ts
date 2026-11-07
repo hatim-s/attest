@@ -3,6 +3,7 @@ import { join } from 'node:path';
 
 import { StoreError, type ProjectCatalog, type RunSource, type RunStore } from '@attest/core';
 
+import { activityBounds } from '../store/internal/dashboard-boundary.js';
 import { errnoCode } from '../internal/errno-code.js';
 import { openReadonlyRunStore } from '../store/index.js';
 import { readRegistry, type RegistryEntry } from './project-registry.js';
@@ -15,6 +16,30 @@ const runNotFound = (runId: string): Promise<never> =>
 
 /** Serves a project that has never recorded a run without creating its database. */
 const emptySource: RunSource = {
+  getProjectOverview: () =>
+    Promise.resolve({
+      evals: { items: [] },
+      runningRunCount: 0,
+      runningRunCountTruncated: false,
+      lastRunAt: null,
+    }),
+  listEvals: () => Promise.resolve({ items: [] }),
+  listEvalRuns: () => Promise.resolve({ items: [] }),
+  getEvalCaseWindow: () => Promise.resolve({ runs: [], items: [] }),
+  getCaseHistory: () => Promise.resolve({ items: [] }),
+  getActivity: (query) =>
+    Promise.resolve().then(() => {
+      const { from, to } = activityBounds(query);
+
+      return {
+        coveredFrom: from,
+        coveredTo: to,
+        timezone: 'UTC' as const,
+        days: [],
+        truncated: false,
+      };
+    }),
+  listRunSuites: runNotFound,
   listRuns: () => Promise.resolve({ items: [] }),
   getRun: runNotFound,
   listCaseSummaries: runNotFound,

@@ -80,8 +80,18 @@ const migrateToLatest = async (handle: SqliteHandle): Promise<void> => {
       // Another opener may have applied this version before our SQLite write lock was acquired.
       const lockedAppliedVersions = await readAppliedVersions(handle);
 
+      if ((lockedAppliedVersions.at(-1) ?? 0) > latestKnownVersion)
+        throw new StoreError(
+          'SCHEMA_TOO_NEW',
+          'A newer writer migrated this store; upgrade attest.',
+        );
+
       if (!lockedAppliedVersions.includes(migration.version)) {
         await handle.exec(migration.sql);
+
+        if ('backfill' in migration) await migration.backfill(handle);
+
+        if ('afterSql' in migration) await handle.exec(migration.afterSql);
         await handle
           .prepare('INSERT INTO schema_migrations (version, name, applied_at) VALUES (?, ?, ?)')
           .run(migration.version, migration.name, new Date().toISOString());

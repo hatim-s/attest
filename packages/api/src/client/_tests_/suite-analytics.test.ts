@@ -71,6 +71,27 @@ const point = {
 };
 
 const source: RunSource = {
+  getProjectOverview: () =>
+    Promise.resolve({
+      evals: { items: [] },
+      runningRunCount: 0,
+      runningRunCountTruncated: false,
+      lastRunAt: null,
+    }),
+  listEvals: () => Promise.resolve({ items: [] }),
+  listEvalRuns: () => Promise.resolve({ items: [] }),
+  getEvalCaseWindow: () => Promise.resolve({ runs: [], items: [] }),
+  getCaseHistory: () => Promise.resolve({ items: [] }),
+  getActivity: () =>
+    Promise.resolve({
+      coveredFrom: '2026-01-01T00:00:00.000Z',
+      coveredTo: '2026-01-02T00:00:00.000Z',
+      timezone: 'UTC',
+      days: [],
+      truncated: false,
+    }),
+  listRunSuites: () => Promise.resolve([]),
+
   listRuns: (query) => Promise.resolve({ items: query?.cursor === undefined ? [run] : [] }),
   getRun: (runId) => {
     if (runId !== run.id) throw new StoreError('RUN_NOT_FOUND', 'Run missing.');

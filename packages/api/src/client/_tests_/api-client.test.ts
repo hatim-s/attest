@@ -49,6 +49,27 @@ const cases: CaseRecord[] = ['one', 'two'].map((caseId) => ({
 }));
 
 const source: RunSource = {
+  getProjectOverview: () =>
+    Promise.resolve({
+      evals: { items: [] },
+      runningRunCount: 0,
+      runningRunCountTruncated: false,
+      lastRunAt: null,
+    }),
+  listEvals: () => Promise.resolve({ items: [] }),
+  listEvalRuns: () => Promise.resolve({ items: [] }),
+  getEvalCaseWindow: () => Promise.resolve({ runs: [], items: [] }),
+  getCaseHistory: () => Promise.resolve({ items: [] }),
+  getActivity: () =>
+    Promise.resolve({
+      coveredFrom: '2026-01-01T00:00:00.000Z',
+      coveredTo: '2026-01-02T00:00:00.000Z',
+      timezone: 'UTC',
+      days: [],
+      truncated: false,
+    }),
+  listRunSuites: () => Promise.resolve([]),
+
   listRuns: () => Promise.resolve({ items: runs }),
   getRun: (runId) => {
     const run = runs.find((run) => run.id === runId);

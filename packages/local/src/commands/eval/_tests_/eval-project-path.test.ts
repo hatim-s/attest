@@ -47,7 +47,7 @@ describe('openEvalProjectStore', () => {
       const run = await store.runs.createRun({
         configHash: 'sha256:boundary',
         configJson: '{}',
-        schemaId: 'attest.eval-run',
+        schemaId: 'legacy',
       });
 
       runId = run.id;

@@ -180,6 +180,15 @@ const runAndRecord = async (
   resolvedCase: ResolvedEvalCase<ResolvedEvalCaseInput>,
 ) => {
   const run = await readRun();
+  run.snapshot.selected_test_ids = [resolvedCase.test_id];
+  run.snapshot.selected_cases = [
+    {
+      configured_index: resolvedCase.configured_index,
+      test_id: resolvedCase.test_id,
+      case_id: resolvedCase.case_id,
+      source: resolvedCase.source,
+    },
+  ];
   const runner = createEvalCaseRunner(root, store.cache, run);
 
   const result = await runner.executeCase(run.run_id, resolvedCase, new AbortController().signal, {
