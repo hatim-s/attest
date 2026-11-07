@@ -7,10 +7,10 @@ import type { AgentRequest, AgentResource } from '@attest/contracts';
 import {
   AgentInvocationError,
   CliCleanupError,
-  createLoopbackCompletionReceiver,
+  CallbackCleanupError,
+  StreamCleanupError,
   enforceArtifactLimits,
   invokeAgent,
-  invokeCallbackAgent,
   invokeMappedHttpAgent,
   invokeStreamingAgent,
   invokeVercelSandboxAgent,
@@ -21,6 +21,7 @@ import {
 } from '@attest/executor';
 
 import type { ResolvedNativeAgent } from './types.js';
+import { startCallbackSession } from './callback-session.js';
 
 const DEFAULT_OUTPUT_CAP_BYTES = 10 * 1024 * 1024;
 
@@ -100,31 +101,8 @@ const startAgentRuntime = async (
           signal,
         }),
       };
-    case 'callback': {
-      // One receiver per run; it listens only while a completion is awaited.
-      const receiver = createLoopbackCompletionReceiver({
-        listenPort: resolved.agent.transport.receiver?.listen_port,
-        publicUrl: resolved.agent.transport.receiver?.public_url,
-        bodyCapBytes: resolved.agent.limits?.response_bytes ?? DEFAULT_OUTPUT_CAP_BYTES,
-      });
-
-      return {
-        kind: 'session',
-        resolved,
-        session: {
-          invoke: (request, invokeSignal) =>
-            invokeCallbackAgent(resolved.agent, request, {
-              receiver,
-              trigger: resolved.trigger,
-              artifactFetch: resolved.artifactFetch,
-              traceFetch: resolved.traceFetch,
-              secrets: resolved.secrets,
-              signal: invokeSignal,
-            }),
-          close: () => receiver.close(),
-        },
-      };
-    }
+    case 'callback':
+      return { kind: 'session', resolved, session: await startCallbackSession(resolved) };
 
     default:
       return { kind: 'direct', resolved };
@@ -181,13 +159,20 @@ const dispatch = async (
       return invokeSandbox(resolved.sandbox, invocation, request, execution);
     }
 
-    case 'stream':
-      return invokeStreamingAgent(resolved.agent, request, {
-        headers: resolved.headers,
-        query: resolved.query,
-        secrets: resolved.secrets,
-        signal: options.signal,
-      });
+    case 'stream': {
+      // EFFECT-BRIDGE(S7b)
+      const exit = await Effect.runPromiseExit(
+        invokeStreamingAgent(resolved.agent, request, {
+          headers: resolved.headers,
+          query: resolved.query,
+          secrets: resolved.secrets,
+          signal: options.signal,
+        }),
+      );
+
+      return valueFromExit(exit);
+    }
+
     case 'mapped_http': {
       // EFFECT-BRIDGE(S7b)
       const exit = await Effect.runPromiseExit(
@@ -240,11 +225,46 @@ const invokeResolvedAgent = async (
   runtime: AgentRuntime,
   request: AgentRequest,
   options: InvokeResolvedAgentOptions,
-): Promise<InvocationResult> =>
-  enforceArtifactLimits(await dispatch(runtime, request, options), options.agent.limits);
+): Promise<InvocationResult> => {
+  try {
+    return enforceArtifactLimits(await dispatch(runtime, request, options), options.agent.limits);
+  } catch (cause: unknown) {
+    if (cause instanceof CallbackCleanupError || cause instanceof StreamCleanupError)
+      return enforceArtifactLimits(
+        startupFailure(cause, cause.result.durationMs),
+        options.agent.limits,
+      );
+    throw cause;
+  }
+};
 
 /** Projects operational startup or completed-attempt cleanup failures into recordable evidence. */
 const startupFailure = (cause: unknown, durationMs: number): InvocationResult => {
+  if (cause instanceof CallbackCleanupError || cause instanceof StreamCleanupError) {
+    const completed = cause.result;
+    const primary = completed.status === 'invocation_error' ? completed.error : undefined;
+
+    const message =
+      cause instanceof CallbackCleanupError
+        ? 'Callback cleanup could not be confirmed.'
+        : 'Streaming cleanup could not be confirmed.';
+
+    const attempt = {
+      status: 'invocation_error' as const,
+      error: new AgentInvocationError(
+        primary?.code ?? 'network',
+        primary === undefined ? message : `${primary.message} ${message}`,
+        { cause, applicationStarted: true },
+      ),
+      diagnostics: completed.diagnostics,
+      durationMs: completed.durationMs,
+      rawExcerpt: completed.rawExcerpt,
+      warnings: completed.warnings,
+    };
+
+    return { ...attempt, attempts: [...completed.attempts.slice(0, -1), attempt] };
+  }
+
   if (cause instanceof CliCleanupError && cause.attempt !== undefined) {
     const completed = cause.attempt;
     const primary = completed.status === 'invocation_error' ? completed.error : undefined;

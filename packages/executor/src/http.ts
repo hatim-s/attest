@@ -9,6 +9,7 @@ export {
 } from './adapters/http/mapped-http-adapter.js';
 
 export {
+  StreamCleanupError,
   invokeStreamingAgent,
   type StreamAgentResource,
   type StreamInvokeOptions,

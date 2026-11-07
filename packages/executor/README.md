@@ -44,9 +44,44 @@ The shared adapters retain request mapping, terminal extraction, contract
 validation, evidence limits, idle deadlines and cancellation. Without injected
 transports, local callers retain DNS-pinned Node HTTP behavior.
 
+The invocation operations return Effect values. A custom `StreamHttpTransport`
+returns an Effect of `{ status, headers, read, close }`; `read` admits one chunk
+read and `close` must stop the body, join accepted reads and confirm release.
+Both are Effects. The old Promise/AsyncIterable/cancel stream contract is removed.
+The foreign `guardedFetch` function itself still returns a Promise.
+`StreamCleanupError` retains the completed invocation if its outer signal cleanup
+fails. Body cleanup failures retain terminal status and bounded evidence on the
+failed attempt; neither condition permits replay.
+
+S4a changes stream retry behavior: a body failure after successful 2xx headers
+is never retried, even if no event arrived. A connection reset or idle timeout
+does not prove the agent stopped its work.
+
 The fetch adapter does not validate or pin DNS. The caller's `guardedFetch` must
 enforce endpoint policy on every request, including polling and same-origin
 redirects, and honor the supplied cancellation signal. Fetch has no separate TCP connection
 phase, so these adapters use `first_byte_ms` for the header deadline. The host
 must enforce `connect_ms` when its networking API supports that phase. Passing global fetch
 without a guard is suitable only for trusted local endpoints.
+
+## Callback receiver lifetime
+
+`createLoopbackCompletionReceiver` returns an Effect requiring a Scope. Keep the
+scope open across all callback invocations. Receiver `register` and `close`, and
+each registration's `completion` and `release`, are native Effects. Stop admission
+and join accepted invocations before closing the receiver and disposing its scope.
+Explicit close reports cleanup failure; the scope fallback captures it and the
+concrete receiver exposes the retained Exit through `cleanup` after disposal.
+
+The loopback receiver has 16 request workers and room for 128 queued requests.
+Excess requests receive `503` with `internal_error`. Each accepted request has a
+30-second lifetime including queue time; incoming data does not extend it. Close
+is terminal, so construct a new scoped receiver for a later session.
+Closing before an acknowledged completion reaches its waiting invocation can
+fail that invocation; join admitted invocations before closing.
+
+`invokeCallbackAgent`, `triggerCallbackAgent` and `completeCallbackAgent` also
+return Effects. `CallbackCleanupError` retains a completed invocation when cleanup
+fails, including earlier attempts and bounded evidence. These TypeScript changes
+do not change trigger or completion wire messages. Custom hosted receivers must
+implement the native contract; no Promise compatibility layer is provided.

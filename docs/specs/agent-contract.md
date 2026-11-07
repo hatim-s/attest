@@ -106,6 +106,7 @@ The runner spawns your command once per invocation:
 - Redirects are not followed; any `3xx` is a terminal **invocation error**.
 - Any other status, malformed body, or network failure is an **invocation error**. Confirmed `5xx` statuses and known pre-dispatch network failures are eligible for up to `retry.retries` retries. The runner does not retry `4xx`, caller cancellation, unconfirmed cleanup, or a request that may have reached the agent when its completion is unknown. A timeout or connection reset does not prove the remote work stopped.
 - The same no-replay rule applies to streaming HTTP header acquisition. A peer reset after possible dispatch cannot be retried merely because no application event arrived. Guarded host transports must report pre-dispatch error codes accurately; an opaque rejection is treated as unknown dispatch.
+- Since the S4a Effect migration, a streaming body failure after successful `2xx` headers is never retried, even before the first event. This includes a connection reset or idle timeout; neither proves the remote work stopped.
 - A direct HTTP status remains authoritative if an already-errored body rejects cancellation; the cancellation diagnostic is retained. A cancellation that never acknowledges still prohibits replay. Mapped HTTP consumes bounded body evidence before status handling, so a failed body observation can prevent a status retry.
 - Your endpoint receives up to the run's concurrency limit of requests at once.
 

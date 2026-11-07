@@ -1,4 +1,10 @@
-import { CliCleanupError, AgentInvocationError, type InvocationAttempt } from '@attest/executor';
+import {
+  CliCleanupError,
+  CallbackCleanupError,
+  StreamCleanupError,
+  AgentInvocationError,
+  type InvocationAttempt,
+} from '@attest/executor';
 import { startupFailure } from '../adapter/invoke-resolved-agent.js';
 import { redactInvocation } from '../adapter/evidence-redaction.js';
 import { mkdtemp, readFile, writeFile, rm, realpath } from 'node:fs/promises';
@@ -292,5 +298,59 @@ it.each(['ok', 'invocation_error'] as const)(
 
     if (result.status === 'invocation_error')
       expect(result.error.message).toContain('CLI cleanup could not be confirmed.');
+  },
+);
+
+it.each(['callback', 'stream'] as const)(
+  'records completed %s evidence and earlier attempts when cleanup fails',
+  (kind) => {
+    const earlier: InvocationAttempt = {
+      status: 'invocation_error',
+      error: new AgentInvocationError('http_status', 'Trigger returned 503.', { httpStatus: 503 }),
+      diagnostics: { httpStatus: 503 },
+      durationMs: 3,
+      warnings: [],
+    };
+
+    const terminal: InvocationAttempt = {
+      status: 'ok',
+      raw: { output: 'completed' },
+      diagnostics: { httpStatus: 202 },
+      durationMs: 12,
+      rawExcerpt: { text: 'completed bytes', truncated: false, sha256: 'b'.repeat(64) },
+      warnings: [],
+    };
+
+    const CleanupError = kind === 'callback' ? CallbackCleanupError : StreamCleanupError;
+
+    const cleanup = new CleanupError(
+      new AgentInvocationError('network', 'HTTP cleanup was not confirmed.'),
+      { ...terminal, attempts: [earlier, terminal] },
+    );
+
+    const projected = startupFailure(cleanup, 99);
+    expect(projected).toMatchObject({ error: { applicationStarted: true } });
+    const result = redactInvocation(projected, []);
+    expect(result).toMatchObject({
+      status: 'invocation_error',
+      durationMs: 12,
+      diagnostics: { httpStatus: 202 },
+      rawExcerpt: terminal.rawExcerpt,
+      error: {
+        code: 'network',
+        message:
+          kind === 'callback'
+            ? 'Callback cleanup could not be confirmed.'
+            : 'Streaming cleanup could not be confirmed.',
+      },
+      attempts: [
+        { diagnostics: { httpStatus: 503 } },
+        {
+          status: 'invocation_error',
+          diagnostics: { httpStatus: 202 },
+          rawExcerpt: terminal.rawExcerpt,
+        },
+      ],
+    });
   },
 );

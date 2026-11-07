@@ -296,10 +296,9 @@ body and updates the retained internal receipt without starting another Effect
 runtime. Missing or failed acknowledgement remains unconfirmed. Local socket
 close is resource evidence, not proof of remote completion or rollback.
 
-The temporary `legacy-stream-fetch.ts` owns the existing Promise/AsyncIterable
-stream body contract until S4a. Its declared bridge acquires native guarded
-headers. Callback, stream, WebSocket and managed-process callers retain explicit
-S4 removal owners; they do not turn native JSON operations back into Promises.
+S4a removes `legacy-stream-fetch.ts` and the callback and stream execution bridges.
+WebSocket and managed-process callers retain their S4b/S4c removal owners; they
+do not turn native JSON operations back into Promises.
 The sandbox attempt and retry callback compose natively while its surrounding VM
 lifecycle remains the S5 owner. No S3 execution bridge remains.
 
@@ -346,3 +345,64 @@ flowchart TD
   G -->|Yes| H[Prohibit replay]
   G -->|No| I[Apply status and envelope retry rules]
 ```
+
+## Stream and callback ownership
+
+`invokeStreamingAgent`, `invokeCallbackAgent`, `triggerCallbackAgent` and
+`completeCallbackAgent` return native Effects. Stream framing, UTF-8 decoding,
+terminal extraction and evidence formatting remain pure. `StreamHttpTransport`
+returns an Effect of a single-consumer response with `read` and `close` Effects.
+Each read admits one foreign read; close cancels the body, joins accepted reads
+and releases its reader/header resources. A cancellation notification alone does
+not confirm cleanup. Bounded observations retain uncertainty and prohibit replay.
+`createFetchHttpTransports` remains a pure constructor around a foreign guarded
+fetch; its JSON operation is unchanged. There is no legacy stream execution bridge.
+
+S4a also changes stream retry behavior: a body failure after successful 2xx
+headers is never retried, even before the first event. Receiving headers proves
+the request reached the agent; a reset or idle timeout does not prove its work
+stopped. Header acquisition is masked during teardown and may wait for the
+configured connect and first-byte deadlines before release.
+
+```mermaid
+flowchart TD
+  A[Acquire stream headers] --> B[Read loop with deadline and cancellation observations]
+  B --> C[Capture terminal evidence or primary failure]
+  C --> D[Cancel body and join accepted read]
+  D --> E[Release reader lock and headers]
+  E --> F[Select result with cleanup evidence; no replay after 2xx headers]
+```
+
+`createLoopbackCompletionReceiver` requires a Scope. Its register, completion,
+release and close operations are native Effects. Keep that scope for the whole
+session, including every admitted invocation. The receiver starts its listener
+lazily, serializes startup and idle shutdown, and uses scoped workers to consume
+Node request observations. Node callbacks publish to a bounded queue; they do not
+execute Effects. Close is terminal and retains its first Exit. The scope fallback
+captures cleanup instead of throwing; the concrete receiver's `cleanup` Effect
+observes that retained Exit after scope disposal. Hosts should explicitly close
+and inspect failure before disposing the scope.
+
+```mermaid
+flowchart TD
+  A[Register under lock and lazily listen] --> B[Node request callback]
+  B --> C[Bounded queue]
+  C --> D[Scoped worker validates and handles request]
+  D --> E[Deliver completion and release registration]
+  E --> F[Idle listener shutdown]
+  A --> G[Terminal close]
+  G --> H[Stop admission, settle entries, join workers and listener]
+```
+
+The temporary local S7b owner stops admission, joins accepted invocation Exits,
+then closes the receiver and its retained scope. Construction failure closes the
+scope with its actual Exit. Scope disposal cannot replace a primary failure.
+`CallbackCleanupError` retains a full completed invocation if registration or
+signal cleanup fails. `StreamCleanupError` does the same for outer stream signal
+cleanup; per-attempt cleanup retains terminal diagnostics, excerpts and warnings.
+Local recording preserves earlier attempts, diagnostics, excerpt, duration and
+warnings while marking the terminal attempt failed. Defects
+remain defects. These are deliberate TypeScript API changes; callback wire
+messages and persisted case formats do not change. Hosted custom receivers and
+stream transports must implement the native contracts. Private attest-cloud and
+workerd compatibility are not established by the local Node/Bun checks.

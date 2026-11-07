@@ -1,4 +1,5 @@
 import * as Effect from 'effect/Effect';
+import * as Cause from 'effect/Cause';
 // EFFECT-ROOT: owned HTTP fixture execution.
 import { AGENT_PROTOCOL, AGENT_RESOURCE_SCHEMA_ID, type AgentRequest } from '@attest/contracts';
 import { describe, expect, it, vi } from 'vitest';
@@ -131,10 +132,12 @@ describe('host HTTP transports', () => {
 
       const transports = createFetchHttpTransports(() => Promise.resolve(live.response));
 
-      const result = await invokeStreamingAgent(streaming(framing), request, {
-        ...transports,
-        retries: 0,
-      });
+      const result = await Effect.runPromise(
+        invokeStreamingAgent(streaming(framing), request, {
+          ...transports,
+          retries: 0,
+        }),
+      );
 
       expect(result.status === 'ok' && result.report?.ok && result.report.value).toMatchObject({
         output: 'ok',
@@ -158,10 +161,12 @@ describe('host HTTP transports', () => {
     const idle = liveResponse('{"type":"delta"}\n', 'application/x-ndjson');
     const idleFetch = vi.fn(() => Promise.resolve(idle.response));
 
-    const timeout = await invokeStreamingAgent(streaming('jsonl'), request, {
-      ...createFetchHttpTransports(idleFetch),
-      retries: 0,
-    });
+    const timeout = await Effect.runPromise(
+      invokeStreamingAgent(streaming('jsonl'), request, {
+        ...createFetchHttpTransports(idleFetch),
+        retries: 0,
+      }),
+    );
 
     expect(timeout.status === 'invocation_error' && timeout.error.code).toBe('timeout');
     expect(idle.cancelled).toHaveBeenCalledOnce();
@@ -200,11 +205,13 @@ describe('host HTTP transports', () => {
         }),
     );
 
-    const result = await invokeStreamingAgent(streaming('jsonl'), request, {
-      ...createFetchHttpTransports(guardedFetch),
-      signal: controller.signal,
-      retries: 0,
-    });
+    const result = await Effect.runPromise(
+      invokeStreamingAgent(streaming('jsonl'), request, {
+        ...createFetchHttpTransports(guardedFetch),
+        signal: controller.signal,
+        retries: 0,
+      }),
+    );
 
     expect(result.status === 'invocation_error' && result.error.code).toBe('cancelled');
     expect(guardedFetch).toHaveBeenCalledOnce();
@@ -286,10 +293,12 @@ describe('host HTTP transports', () => {
                 retries: 0,
               }),
             )
-          : invokeStreamingAgent({ ...streaming('jsonl'), timeouts }, request, {
-              ...transports,
-              retries: 0,
-            });
+          : Effect.runPromise(
+              invokeStreamingAgent({ ...streaming('jsonl'), timeouts }, request, {
+                ...transports,
+                retries: 0,
+              }),
+            );
       };
 
       const completed = await invoke(200);
@@ -313,11 +322,13 @@ describe('host HTTP transports', () => {
       const timer = reason === 'caller' ? setTimeout(() => controller.abort(), 10) : undefined;
 
       try {
-        const result = await invokeStreamingAgent(configured, request, {
-          ...createFetchHttpTransports(() => Promise.resolve(live.response)),
-          retries: 0,
-          signal: controller.signal,
-        });
+        const result = await Effect.runPromise(
+          invokeStreamingAgent(configured, request, {
+            ...createFetchHttpTransports(() => Promise.resolve(live.response)),
+            retries: 0,
+            signal: controller.signal,
+          }),
+        );
 
         expect(result.status === 'invocation_error' && result.error.code).toBe(
           reason === 'idle' ? 'timeout' : 'cancelled',
@@ -446,4 +457,354 @@ it('keeps a bodyless guarded success invalid and prohibits replay', async () => 
     error: { code: 'invalid_envelope', applicationStarted: true },
   });
   expect(guarded).toHaveBeenCalledOnce();
+});
+
+describe('native stream ownership', () => {
+  it('retains terminal evidence when cancellation rejects, without replay', async () => {
+    const failure = new Error('cancel rejected');
+
+    const fetch = vi.fn(() =>
+      Promise.resolve(
+        new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              controller.enqueue(new TextEncoder().encode('{"type":"done","output":"retained"}\n'));
+            },
+            cancel() {
+              return Promise.reject(failure);
+            },
+          }),
+        ),
+      ),
+    );
+
+    const result = await Effect.runPromise(
+      invokeStreamingAgent(streaming('jsonl'), request, createFetchHttpTransports(fetch)),
+    );
+
+    expect(result.status).toBe('invocation_error');
+    expect(result.diagnostics.httpStatus).toBe(200);
+    expect(result.attempts).toHaveLength(1);
+    expect(fetch).toHaveBeenCalledOnce();
+
+    if (result.status === 'invocation_error') {
+      expect(result.error.code).toBe('network');
+      expect(result.error.cause).toMatchObject({ success: { response: { output: 'retained' } } });
+      expect(result.rawExcerpt?.text).toContain('retained');
+    }
+  });
+
+  it('bounds unacknowledged cancellation and prohibits replay', async () => {
+    const fetch = vi.fn(() =>
+      Promise.resolve(
+        new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              controller.enqueue(new TextEncoder().encode('{"type":"done","output":"retained"}\n'));
+            },
+            cancel() {
+              return new Promise<void>(() => {});
+            },
+          }),
+        ),
+      ),
+    );
+
+    const started = Date.now();
+
+    const result = await Effect.runPromise(
+      invokeStreamingAgent(streaming('jsonl'), request, createFetchHttpTransports(fetch)),
+    );
+
+    expect(result.status).toBe('invocation_error');
+    expect(result.attempts).toHaveLength(1);
+    expect(fetch).toHaveBeenCalledOnce();
+    expect(Date.now() - started).toBeLessThan(1000);
+  });
+
+  it('keeps a status failure primary when release also fails', async () => {
+    const result = await Effect.runPromise(
+      invokeStreamingAgent(streaming('jsonl'), request, {
+        requestStream: () =>
+          Effect.succeed({
+            status: 503,
+            headers: {},
+            read: Effect.never,
+            close: Effect.die('release defect'),
+          }),
+      }),
+    );
+
+    expect(result.status).toBe('invocation_error');
+
+    if (result.status === 'invocation_error') {
+      expect(result.error.code).toBe('http_status');
+      expect(result.error.applicationStarted).toBe(true);
+    }
+
+    expect(result.attempts).toHaveLength(1);
+  });
+
+  it('keeps primary defects and still closes the response', async () => {
+    let closed = false;
+    const defect = new Error('read defect');
+
+    const outcome = await Effect.runPromiseExit(
+      invokeStreamingAgent(streaming('jsonl'), request, {
+        requestStream: () =>
+          Effect.succeed({
+            status: 200,
+            headers: {},
+            read: Effect.die(defect),
+            close: Effect.sync(() => {
+              closed = true;
+            }),
+          }),
+      }),
+    );
+
+    expect(closed).toBe(true);
+    expect(outcome._tag).toBe('Failure');
+
+    if (outcome._tag === 'Failure')
+      expect(
+        outcome.cause.reasons.some((reason) => reason._tag === 'Die' && reason.defect === defect),
+      ).toBe(true);
+  });
+
+  it('returns attempt timeout evidence while another invocation survives', async () => {
+    const stalled = invokeStreamingAgent(
+      { ...streaming('jsonl'), timeouts: { attempt_ms: 20, idle_ms: 500 } },
+      request,
+      {
+        requestStream: () =>
+          Effect.succeed({ status: 200, headers: {}, read: Effect.never, close: Effect.void }),
+      },
+    );
+
+    const live = liveResponse('{"type":"done","output":"sibling"}\n', 'application/x-ndjson');
+
+    const [failed, success] = await Effect.runPromise(
+      Effect.all(
+        [
+          stalled,
+          invokeStreamingAgent(
+            streaming('jsonl'),
+            request,
+            createFetchHttpTransports(() => Promise.resolve(live.response)),
+          ),
+        ],
+        { concurrency: 2 },
+      ),
+    );
+
+    expect(failed.status === 'invocation_error' && failed.error.code).toBe('timeout');
+    expect(success.status).toBe('ok');
+    expect(live.cancelled).toHaveBeenCalledOnce();
+  });
+
+  it.each([false, true])(
+    'keeps the application idle clock independent of heartbeats, reset=%s',
+    async (reset) => {
+      let reads = 0;
+      const configured = streaming('sse');
+
+      const result = await Effect.runPromise(
+        invokeStreamingAgent(
+          {
+            ...configured,
+            timeouts: { attempt_ms: 1000, idle_ms: 35 },
+            transport: { ...configured.transport, heartbeat_resets_application_idle: reset },
+          },
+          request,
+          {
+            requestStream: () =>
+              Effect.succeed({
+                status: 200,
+                headers: { 'content-type': 'text/event-stream' },
+                read: Effect.sleep(15).pipe(
+                  Effect.map(() => ({
+                    done: false,
+                    value: new TextEncoder().encode(
+                      ++reads < 5 ? ': heartbeat\n\n' : 'data: {"type":"done","output":"ok"}\n\n',
+                    ),
+                  })),
+                ),
+                close: Effect.void,
+              }),
+          },
+        ),
+      );
+
+      expect(result.status).toBe(reset ? 'ok' : 'invocation_error');
+
+      if (result.status === 'invocation_error')
+        expect(result.error.message).toBe('Streaming application became idle.');
+    },
+  );
+
+  it('releases a late header response and never redispatches', async () => {
+    const cancelled = vi.fn();
+
+    const fetch = vi.fn(
+      () =>
+        new Promise<Response>((resolve) =>
+          setTimeout(() => resolve(new Response(new ReadableStream({ cancel: cancelled }))), 35),
+        ),
+    );
+
+    const result = await Effect.runPromise(
+      invokeStreamingAgent(
+        { ...streaming('jsonl'), timeouts: { first_byte_ms: 5, attempt_ms: 1000 } },
+        request,
+        createFetchHttpTransports(fetch),
+      ),
+    );
+
+    expect(result.status === 'invocation_error' && result.error.code).toBe('timeout');
+    expect(cancelled).toHaveBeenCalledOnce();
+    expect(fetch).toHaveBeenCalledOnce();
+  });
+
+  it('releases a pending reader on caller cancellation and preserves cancellation evidence', async () => {
+    const controller = new AbortController();
+    const cancelled = vi.fn();
+
+    const fetch = () =>
+      Promise.resolve(
+        new Response(
+          new ReadableStream({
+            pull() {
+              controller.abort();
+            },
+            cancel: cancelled,
+          }),
+        ),
+      );
+
+    const result = await Effect.runPromise(
+      invokeStreamingAgent(streaming('jsonl'), request, {
+        ...createFetchHttpTransports(fetch),
+        signal: controller.signal,
+      }),
+    );
+
+    expect(result.status === 'invocation_error' && result.error.code).toBe('cancelled');
+    expect(cancelled).toHaveBeenCalledOnce();
+  });
+
+  it('closes after runtime interruption without manufacturing a cancelled attempt', async () => {
+    let closed = false;
+
+    const result = await Effect.runPromiseExit(
+      invokeStreamingAgent(streaming('jsonl'), request, {
+        requestStream: () =>
+          Effect.succeed({
+            status: 200,
+            headers: {},
+            read: Effect.interrupt,
+            close: Effect.sync(() => {
+              closed = true;
+            }),
+          }),
+      }),
+    );
+
+    expect(closed).toBe(true);
+    expect(result._tag).toBe('Failure');
+
+    if (result._tag === 'Failure') expect(Cause.hasInterrupts(result.cause)).toBe(true);
+  });
+});
+
+describe('native incremental framing limits', () => {
+  it.each(['sse', 'jsonl'] as const)(
+    'accepts every-byte splits and stops before EOF for %s',
+    async (framing) => {
+      const payload = '{"type":"done","output":"💥"}';
+
+      const bytes = new TextEncoder().encode(
+        framing === 'sse' ? `data: ${payload}\n\n` : `${payload}\n`,
+      );
+
+      let offset = 0;
+      let closed = false;
+
+      const result = await Effect.runPromise(
+        invokeStreamingAgent(streaming(framing), request, {
+          requestStream: () =>
+            Effect.succeed({
+              status: 200,
+              headers: { 'content-type': 'text/event-stream' },
+              read: Effect.suspend(() =>
+                offset < bytes.length
+                  ? Effect.succeed({ done: false, value: bytes.slice(offset, ++offset) })
+                  : Effect.never,
+              ),
+              close: Effect.sync(() => {
+                closed = true;
+              }),
+            }),
+        }),
+      );
+
+      expect(result.status === 'ok' && result.report?.ok && result.report.value).toMatchObject({
+        output: '💥',
+      });
+      expect(closed).toBe(true);
+    },
+  );
+
+  it.each([
+    { limits: { event_count: 1 }, source: '{"type":"delta"}\n{"type":"done","output":"no"}\n' },
+    { limits: { total_evidence_bytes: 8 }, source: '{"type":"done","output":"no"}\n' },
+  ])('enforces authored evidence caps before accepting a terminal', async ({ limits, source }) => {
+    const live = liveResponse(source, 'application/x-ndjson');
+
+    const result = await Effect.runPromise(
+      invokeStreamingAgent(
+        { ...streaming('jsonl'), limits },
+        request,
+        createFetchHttpTransports(() => Promise.resolve(live.response)),
+      ),
+    );
+
+    expect(result.status === 'invocation_error' && result.error.code).toBe('output_cap_exceeded');
+    expect(live.cancelled).toHaveBeenCalledOnce();
+    expect(result.attempts).toHaveLength(1);
+  });
+});
+
+it('retains completed stream evidence when signal cleanup fails', async () => {
+  const controller = new AbortController();
+
+  const remove = vi.spyOn(controller.signal, 'removeEventListener').mockImplementation(() => {
+    throw new Error('listener release failed');
+  });
+
+  const guarded = vi.fn(() =>
+    Promise.resolve(liveResponse('{"type":"done","output":"done"}\n', 'application/json').response),
+  );
+
+  try {
+    const exit = await Effect.runPromiseExit(
+      invokeStreamingAgent(streaming('jsonl'), request, {
+        ...createFetchHttpTransports(guarded),
+        signal: controller.signal,
+      }),
+    );
+
+    expect(exit._tag).toBe('Failure');
+
+    if (exit._tag !== 'Failure') throw new Error('Expected cleanup failure.');
+    const reason = exit.cause.reasons.find((value) => value._tag === 'Fail');
+    expect(reason?._tag === 'Fail' && reason.error).toMatchObject({
+      applicationStarted: true,
+      result: { status: 'ok', diagnostics: { httpStatus: 200 }, attempts: [{ status: 'ok' }] },
+    });
+    expect(guarded).toHaveBeenCalledOnce();
+  } finally {
+    remove.mockRestore();
+    controller.abort();
+  }
 });

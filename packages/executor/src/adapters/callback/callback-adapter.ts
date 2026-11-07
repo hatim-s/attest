@@ -11,6 +11,7 @@ import {
 } from '@attest/contracts';
 
 import { AgentInvocationError, abortedError } from '../../errors.js';
+import { httpSync, withHttpSignal, withHttpCleanup } from '../http/http-effects.js';
 import type { AgentResponseCandidate } from '../../internal/agent-response-candidate.js';
 import {
   DEFAULT_ARTIFACT_BYTES,
@@ -55,6 +56,21 @@ import {
 } from '../http/request-template.js';
 import { parseRetryAfter } from '../http/retry-after.js';
 import type { CompletionReceiver, CompletionRegistration } from './completion-receiver.js';
+
+/** Retains the complete invocation when releasing its callback registration or signal fails. */
+class CallbackCleanupError extends AgentInvocationError {
+  constructor(
+    readonly cleanupError: AgentInvocationError,
+    readonly result: InvocationResult,
+  ) {
+    super(cleanupError.code, cleanupError.message, {
+      cause: cleanupError.cause,
+      applicationStarted: true,
+      httpStatus: cleanupError.httpStatus,
+      rawExcerpt: cleanupError.rawExcerpt,
+    });
+  }
+}
 
 /** An async agent that is triggered over HTTP and posts its completion back to attest. */
 type CallbackAgentResource = AgentResource & {
@@ -110,16 +126,6 @@ const callbackFailure = (
 ): AgentInvocationError =>
   normalizeFailure(cause, { transport: 'Callback agent', signal, callerSignal });
 
-/** Combines the attempt deadline with the caller's and the enclosing invocation's signals. */
-const attemptSignal = (agent: CallbackAgentResource, options: CallbackSignals): AbortSignal =>
-  AbortSignal.any(
-    [
-      AbortSignal.timeout(agent.timeouts?.attempt_ms ?? DEFAULT_ATTEMPT_MS),
-      options.signal,
-      options.deadlineSignal,
-    ].filter((candidate) => candidate !== undefined),
-  );
-
 const clientPolicy = (
   agent: CallbackAgentResource,
   signal: AbortSignal,
@@ -154,75 +160,101 @@ const discardBody: HttpJsonTransport = Effect.fn('callback.discardBody')(
  * Any 2xx means the agent accepted the work. Retryable failures are replayed only when the agent
  * names an idempotency header, because a replayed trigger can start the work twice.
  */
-const triggerCallbackAgent = async (
+const triggerCallbackAgent = Effect.fn('callback.triggerCallbackAgent')(function* (
   agent: CallbackAgentResource,
   request: AgentRequest,
   options: TriggerCallbackOptions,
-): Promise<CallbackTriggerResult> => {
+): Effect.fn.Return<CallbackTriggerResult, AgentInvocationError> {
   const duration = startTimer();
-  const signal = attemptSignal(agent, options);
-  const { url, token } = options.registration;
-  const secrets = [...(options.secrets ?? []), token];
   const retryAttempts: InvocationAttempt[] = [];
-  const { transport } = agent;
 
-  try {
-    if (signal.aborted) throw abortedError(options.signal, 'Callback agent trigger');
+  return yield* withHttpSignal(
+    agent.timeouts?.attempt_ms ?? DEFAULT_ATTEMPT_MS,
+    [options.signal, options.deadlineSignal],
+    (signal) =>
+      Effect.gen(function* () {
+        const { url, token } = options.registration;
+        const secrets = [...(options.secrets ?? []), token];
+        const { transport } = agent;
 
-    // `{{request}}` maps the whole envelope, so the request cap also covers the body.
-    const template: HttpRequestTemplate = {
-      ...transport.trigger,
-      body: '{{request}}',
-      body_encoding: 'json',
-    };
+        try {
+          if (signal.aborted) throw abortedError(options.signal, 'Callback agent trigger');
 
-    const materialized = materializeHttpRequest(
-      resolveRequestTemplate(template, options),
-      { ...request, callback: { url, token } },
-      agent.limits?.request_bytes ?? DEFAULT_REQUEST_BYTES,
-    );
+          // `{{request}}` maps the whole envelope, so the request cap also covers the body.
+          const template: HttpRequestTemplate = {
+            ...transport.trigger,
+            body: '{{request}}',
+            body_encoding: 'json',
+          };
 
-    if (transport.idempotency_header !== undefined) {
-      setIdempotencyHeader(materialized.headers, transport.idempotency_header, request);
-    }
+          const materialized = yield* httpSync(() =>
+            materializeHttpRequest(
+              resolveRequestTemplate(template, options),
+              { ...request, callback: { url, token } },
+              agent.limits?.request_bytes ?? DEFAULT_REQUEST_BYTES,
+            ),
+          );
 
-    const policy = clientPolicy(agent, signal, {
-      ...options,
-      secrets,
-      responseCapBytes: agent.limits?.response_bytes ?? DEFAULT_RESPONSE_BYTES,
-    });
+          const idempotencyHeader = transport.idempotency_header;
 
-    // EFFECT-BRIDGE(S4a): Promise protocol owner executes this native HTTP leaf until S4a.
-    const sent = await Effect.runPromise(
-      requestWithRetries(
-        materialized,
-        { retry: agent.retry, policy, signal, retryAttempts, requestJson: discardBody },
-        {
-          allowRetry: transport.idempotency_header !== undefined,
-          delayFor: (retry, retryAfter) =>
-            parseRetryAfter(retryAfter) ?? retryBackoffDelay(agent.retry?.backoff, retry),
-        },
+          if (idempotencyHeader !== undefined) {
+            yield* httpSync(() =>
+              setIdempotencyHeader(materialized.headers, idempotencyHeader, request),
+            );
+          }
+
+          const policy = clientPolicy(agent, signal, {
+            ...options,
+            secrets,
+            responseCapBytes: agent.limits?.response_bytes ?? DEFAULT_RESPONSE_BYTES,
+          });
+
+          const sent = yield* requestWithRetries(
+            materialized,
+            { retry: agent.retry, policy, signal, retryAttempts, requestJson: discardBody },
+            {
+              allowRetry: transport.idempotency_header !== undefined,
+              delayFor: (retry, retryAfter) =>
+                parseRetryAfter(retryAfter) ?? retryBackoffDelay(agent.retry?.backoff, retry),
+            },
+          );
+
+          if (!sent.ok) {
+            const attempt = attemptFromError(sent.error, sent.durationMs);
+
+            return { ...attempt, attempts: [...retryAttempts, attempt] };
+          }
+
+          return {
+            status: 'triggered' as const,
+            attempts: retryAttempts,
+            diagnostics: { httpStatus: sent.response.status },
+            durationMs: duration(),
+          };
+        } catch (error: unknown) {
+          if (!(error instanceof AgentInvocationError)) throw error;
+
+          const attempt = attemptFromError(
+            callbackFailure(error, signal, options.signal),
+            duration(),
+          );
+
+          return { ...attempt, attempts: [...retryAttempts, attempt] };
+        }
+      }).pipe(
+        Effect.catch((error) =>
+          Effect.sync(() => {
+            const attempt = attemptFromError(
+              callbackFailure(error, signal, options.signal),
+              duration(),
+            );
+
+            return { ...attempt, attempts: [...retryAttempts, attempt] };
+          }),
+        ),
       ),
-    );
-
-    if (!sent.ok) {
-      const attempt = attemptFromError(sent.error, sent.durationMs);
-
-      return { ...attempt, attempts: [...retryAttempts, attempt] };
-    }
-
-    return {
-      status: 'triggered',
-      attempts: retryAttempts,
-      diagnostics: { httpStatus: sent.response.status },
-      durationMs: duration(),
-    };
-  } catch (error: unknown) {
-    const attempt = attemptFromError(callbackFailure(error, signal, options.signal), duration());
-
-    return { ...attempt, attempts: [...retryAttempts, attempt] };
-  }
-};
+  );
+});
 
 /**
  * Substitutes one fetch placeholder. The URL value is percent-encoded and may only appear in the
@@ -262,38 +294,46 @@ type ReferenceFetch = {
 };
 
 /** GETs one referenced artifact or trace through the same egress rules as every HTTP agent. */
-const fetchReference = async (agent: CallbackAgentResource, reference: ReferenceFetch) => {
+const fetchReference = Effect.fn('callback.fetchReference')(function* (
+  agent: CallbackAgentResource,
+  reference: ReferenceFetch,
+): Effect.fn.Return<HttpResponse, AgentInvocationError> {
   if (reference.template === undefined) {
-    throw new AgentInvocationError(
-      'invalid_envelope',
-      `The completion holds a reference, but the agent defines no ${reference.field} template.`,
+    return yield* Effect.fail(
+      new AgentInvocationError(
+        'invalid_envelope',
+        `The completion holds a reference, but the agent defines no ${reference.field} template.`,
+      ),
     );
   }
 
-  const materialized = materializeStaticRequest(
-    fillPlaceholder(
-      resolveRequestTemplate(reference.template, reference.overrides ?? {}),
-      reference.placeholder,
-      reference.value,
+  const template = reference.template;
+
+  const materialized = yield* httpSync(() =>
+    materializeStaticRequest(
+      fillPlaceholder(
+        resolveRequestTemplate(template, reference.overrides ?? {}),
+        reference.placeholder,
+        reference.value,
+      ),
+      agent.limits?.request_bytes ?? DEFAULT_REQUEST_BYTES,
     ),
-    agent.limits?.request_bytes ?? DEFAULT_REQUEST_BYTES,
   );
 
-  // EFFECT-BRIDGE(S4a): Promise protocol owner executes this native HTTP leaf until S4a.
-  const response: HttpResponse = await Effect.runPromise(
-    requestHttp(materialized, reference.policy),
-  );
+  const response = yield* requestHttp(materialized, reference.policy);
 
   if (response.status < 200 || response.status >= 300) {
-    throw new AgentInvocationError(
-      'http_status',
-      `Callback ${reference.field} returned status ${response.status}.`,
-      { httpStatus: response.status, rawExcerpt: response.rawExcerpt },
+    return yield* Effect.fail(
+      new AgentInvocationError(
+        'http_status',
+        `Callback ${reference.field} returned status ${response.status}.`,
+        { httpStatus: response.status, rawExcerpt: response.rawExcerpt },
+      ),
     );
   }
 
   return response;
-};
+});
 
 const UTF8 = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
 
@@ -306,12 +346,12 @@ const encodeArtifactBytes = (bytes: Buffer): Pick<InlineArtifact, 'encoding' | '
   }
 };
 
-const resolveArtifact = async (
+const resolveArtifact = Effect.fn('callback.resolveArtifact')(function* (
   agent: CallbackAgentResource,
   artifact: ReferenceArtifact,
   fetch: Pick<ReferenceFetch, 'overrides' | 'policy'>,
-): Promise<InlineArtifact> => {
-  const response = await fetchReference(agent, {
+): Effect.fn.Return<InlineArtifact, AgentInvocationError> {
+  const response = yield* fetchReference(agent, {
     ...fetch,
     template: agent.transport.artifact_fetch,
     placeholder: '{{artifact_id}}',
@@ -329,14 +369,14 @@ const resolveArtifact = async (
       (contentType === undefined || contentType === '' ? 'application/octet-stream' : contentType),
     ...encodeArtifactBytes(response.body),
   };
-};
+});
 
-const resolveTrace = async (
+const resolveTrace = Effect.fn('callback.resolveTrace')(function* (
   agent: CallbackAgentResource,
   traceRef: string,
   fetch: Pick<ReferenceFetch, 'overrides' | 'policy'>,
-) => {
-  const response = await fetchReference(agent, {
+) {
+  const response = yield* fetchReference(agent, {
     ...fetch,
     template: agent.transport.trace_fetch,
     placeholder: '{{trace_ref}}',
@@ -347,190 +387,243 @@ const resolveTrace = async (
   try {
     return parseJson(response.body.toString('utf8'));
   } catch (error: unknown) {
-    throw new AgentInvocationError(
-      'invalid_envelope',
-      'Callback trace_fetch did not return JSON.',
-      {
+    return yield* Effect.fail(
+      new AgentInvocationError('invalid_envelope', 'Callback trace_fetch did not return JSON.', {
         cause: error,
         rawExcerpt: response.rawExcerpt,
-      },
+      }),
     );
   }
-};
+});
 
 /**
  * Turns a completion into one attempt holding an ordinary response envelope: reference artifacts
  * and `trace_ref` are fetched, the artifact caps are enforced, and the envelope is parsed.
  */
-const completeCallbackAgent = async (
+const completeCallbackAgent = Effect.fn('callback.completeCallbackAgent')(function* (
   agent: CallbackAgentResource,
   completion: AgentCompletion,
   options: CompleteCallbackOptions = {},
-): Promise<InvocationAttempt> => {
+): Effect.fn.Return<InvocationAttempt, AgentInvocationError> {
   const duration = startTimer();
-  const signal = attemptSignal(agent, options);
-  const secrets = options.secrets ?? [];
-  const rawExcerpt = createRawExcerpt(redactTransportText(JSON.stringify(completion), secrets));
 
-  try {
-    if (signal.aborted) throw abortedError(options.signal, 'Callback agent completion');
-    const artifacts = completion.artifacts ?? [];
-    // Count and path checks first, so an over-limit completion triggers no fetches.
-    assertArtifactManifest(artifacts, agent.limits);
+  return yield* withHttpSignal(
+    agent.timeouts?.attempt_ms ?? DEFAULT_ATTEMPT_MS,
+    [options.signal, options.deadlineSignal],
+    (signal) =>
+      Effect.gen(function* () {
+        const secrets = options.secrets ?? [];
 
-    const perArtifact = agent.limits?.artifact_bytes ?? DEFAULT_ARTIFACT_BYTES;
-    let remaining = agent.limits?.total_artifact_bytes ?? DEFAULT_TOTAL_ARTIFACT_BYTES;
-    const resolved: InlineArtifact[] = [];
+        const rawExcerpt = createRawExcerpt(
+          redactTransportText(JSON.stringify(completion), secrets),
+        );
 
-    for (const artifact of artifacts) {
-      // Once the total is spent, the size check below reports it without fetching more.
-      if (remaining < 0) break;
+        try {
+          if (signal.aborted) throw abortedError(options.signal, 'Callback agent completion');
+          const artifacts = completion.artifacts ?? [];
+          // Count and path checks first, so an over-limit completion triggers no fetches.
+          yield* httpSync(() => assertArtifactManifest(artifacts, agent.limits));
 
-      // A fetch may only read what is left of the total, so references never buffer past it.
-      const inline =
-        artifact.kind === 'inline'
-          ? artifact
-          : await resolveArtifact(agent, artifact, {
-              overrides: options.artifactFetch,
-              policy: clientPolicy(agent, signal, {
-                ...options,
-                responseCapBytes: Math.min(perArtifact, remaining),
-              }),
-            });
+          const perArtifact = agent.limits?.artifact_bytes ?? DEFAULT_ARTIFACT_BYTES;
+          let remaining = agent.limits?.total_artifact_bytes ?? DEFAULT_TOTAL_ARTIFACT_BYTES;
+          const resolved: InlineArtifact[] = [];
 
-      remaining -= artifactByteLength(inline);
-      resolved.push(inline);
-    }
+          for (const artifact of artifacts) {
+            // Once the total is spent, the size check below reports it without fetching more.
+            if (remaining < 0) break;
 
-    assertArtifactSizes(resolved, agent.limits);
+            // A fetch may only read what is left of the total, so references never buffer past it.
+            const inline =
+              artifact.kind === 'inline'
+                ? artifact
+                : yield* resolveArtifact(agent, artifact, {
+                    overrides: options.artifactFetch,
+                    policy: clientPolicy(agent, signal, {
+                      ...options,
+                      responseCapBytes: Math.min(perArtifact, remaining),
+                    }),
+                  });
 
-    const trace =
-      completion.trace_ref === undefined
-        ? completion.trace
-        : await resolveTrace(agent, completion.trace_ref, {
-            overrides: options.traceFetch,
-            policy: clientPolicy(agent, signal, {
-              ...options,
-              responseCapBytes: agent.limits?.response_bytes ?? DEFAULT_RESPONSE_BYTES,
-            }),
-          });
+            remaining -= artifactByteLength(inline);
+            resolved.push(inline);
+          }
 
-    const envelope: AgentResponseCandidate =
-      'error' in completion
-        ? { protocol: AGENT_PROTOCOL, error: completion.error }
-        : { protocol: AGENT_PROTOCOL, output: completion.output };
+          yield* httpSync(() => assertArtifactSizes(resolved, agent.limits));
 
-    if (completion.state !== undefined) envelope.state = completion.state;
+          const trace =
+            completion.trace_ref === undefined
+              ? completion.trace
+              : yield* resolveTrace(agent, completion.trace_ref, {
+                  overrides: options.traceFetch,
+                  policy: clientPolicy(agent, signal, {
+                    ...options,
+                    responseCapBytes: agent.limits?.response_bytes ?? DEFAULT_RESPONSE_BYTES,
+                  }),
+                });
 
-    if (trace !== undefined) envelope.trace = trace;
+          const envelope: AgentResponseCandidate =
+            'error' in completion
+              ? { protocol: AGENT_PROTOCOL, error: completion.error }
+              : { protocol: AGENT_PROTOCOL, output: completion.output };
 
-    if (resolved.length > 0) envelope.artifacts = resolved;
-    const report = parseAgentResponse(envelope);
+          if (completion.state !== undefined) envelope.state = completion.state;
 
-    if (!report.ok) {
-      throw new AgentInvocationError(
-        'invalid_envelope',
-        'Callback completion is not a valid agent response.',
-        { rawExcerpt },
-      );
-    }
+          if (trace !== undefined) envelope.trace = trace;
 
-    return {
-      status: 'ok',
-      raw: envelope,
-      report,
-      diagnostics: {},
-      durationMs: duration(),
-      rawExcerpt,
-      warnings: report.warnings,
-    };
-  } catch (error: unknown) {
-    return attemptFromError(callbackFailure(error, signal, options.signal), duration());
-  }
-};
+          if (resolved.length > 0) envelope.artifacts = resolved;
+          const report = parseAgentResponse(envelope);
 
-/** Waits for the posted completion, classifying an abort as `timeout` or `cancelled`. */
-const awaitCompletion = async (
-  registration: CompletionRegistration,
-  signal: AbortSignal,
-  callerSignal: AbortSignal | undefined,
-): Promise<AgentCompletion> => {
-  try {
-    return await registration.completion;
-  } catch (cause: unknown) {
-    if (signal.aborted) throw abortedError(callerSignal, 'Callback agent completion', { cause });
-    throw new AgentInvocationError(
-      'network',
-      'The completion receiver stopped before the agent posted its completion.',
-      { cause },
-    );
-  }
-};
+          if (!report.ok) {
+            return yield* Effect.fail(
+              new AgentInvocationError(
+                'invalid_envelope',
+                'Callback completion is not a valid agent response.',
+                { rawExcerpt },
+              ),
+            );
+          }
 
-/**
- * Runs one callback invocation in-process: register a callback URL, send the trigger, wait for the
- * completion under `timeouts.attempt_ms`, then resolve it. The registration is always released.
- */
-const invokeCallbackAgent = async (
+          return {
+            status: 'ok' as const,
+            raw: envelope,
+            report,
+            diagnostics: {},
+            durationMs: duration(),
+            rawExcerpt,
+            warnings: report.warnings,
+          };
+        } catch (error: unknown) {
+          if (!(error instanceof AgentInvocationError)) throw error;
+
+          return attemptFromError(callbackFailure(error, signal, options.signal), duration());
+        }
+      }).pipe(
+        Effect.catch((error) =>
+          Effect.succeed(
+            attemptFromError(callbackFailure(error, signal, options.signal), duration()),
+          ),
+        ),
+      ),
+  );
+});
+
+/** Owns one registration until its trigger and completion evidence have joined. */
+const invokeCallbackAgent = Effect.fn('callback.invoke')(function* (
   agent: CallbackAgentResource,
   request: AgentRequest,
   options: InvokeCallbackOptions,
-): Promise<InvocationResult> => {
+) {
   const duration = startTimer();
-  const deadline = AbortSignal.timeout(agent.timeouts?.attempt_ms ?? DEFAULT_ATTEMPT_MS);
+  let completedResult: InvocationResult | undefined;
 
-  const signal = AbortSignal.any(
-    [deadline, options.signal].filter((candidate) => candidate !== undefined),
+  return yield* withHttpSignal(
+    agent.timeouts?.attempt_ms ?? DEFAULT_ATTEMPT_MS,
+    [options.signal],
+    (signal) =>
+      Effect.uninterruptibleMask((restore) =>
+        Effect.gen(function* () {
+          const shared = {
+            secrets: options.secrets,
+            signal: options.signal,
+            deadlineSignal: signal,
+          };
+
+          let earlierAttempts: InvocationAttempt[] = [];
+          let diagnostics: InvocationDiagnostics = {};
+
+          const registered = yield* Effect.result(
+            options.receiver.register({
+              runId: request.run_id,
+              caseId: request.case_id,
+              signal,
+            }),
+          );
+
+          if (registered._tag === 'Failure') {
+            const attempt = attemptFromError(
+              signal.aborted
+                ? abortedError(options.signal, 'Callback agent registration', {
+                    cause: registered.failure,
+                  })
+                : registered.failure,
+              duration(),
+            );
+
+            completedResult = { ...attempt, attempts: [attempt] };
+
+            return completedResult;
+          }
+
+          const registration = registered.success;
+
+          return yield* withHttpCleanup(
+            restore(
+              Effect.gen(function* () {
+                const triggered = yield* triggerCallbackAgent(agent, request, {
+                  ...options.trigger,
+                  ...shared,
+                  registration,
+                });
+
+                if (triggered.status !== 'triggered') return triggered;
+                earlierAttempts = triggered.attempts;
+                diagnostics = triggered.diagnostics;
+
+                const completion = yield* registration.completion.pipe(
+                  Effect.mapError((cause) =>
+                    signal.aborted
+                      ? abortedError(options.signal, 'Callback agent completion', { cause })
+                      : cause,
+                  ),
+                );
+
+                const completed = yield* completeCallbackAgent(agent, completion, {
+                  ...shared,
+                  secrets: [...(options.secrets ?? []), registration.token],
+                  artifactFetch: options.artifactFetch,
+                  traceFetch: options.traceFetch,
+                });
+
+                const attempt: InvocationAttempt = {
+                  ...completed,
+                  diagnostics: { ...completed.diagnostics, ...diagnostics },
+                  durationMs: duration(),
+                };
+
+                return { ...attempt, attempts: [...earlierAttempts, attempt] };
+              }).pipe(
+                Effect.catch((error) =>
+                  Effect.sync(() => {
+                    const failed = attemptFromError(
+                      callbackFailure(error, signal, options.signal),
+                      duration(),
+                    );
+
+                    const attempt: InvocationAttempt = { ...failed, diagnostics };
+
+                    return { ...attempt, attempts: [...earlierAttempts, attempt] };
+                  }),
+                ),
+                Effect.tap((result) =>
+                  Effect.sync(() => {
+                    completedResult = result;
+                  }),
+                ),
+              ),
+            ),
+            [registration.release()],
+          );
+        }),
+      ),
+  ).pipe(
+    Effect.mapError((error) =>
+      completedResult === undefined ? error : new CallbackCleanupError(error, completedResult),
+    ),
   );
-
-  const shared = { secrets: options.secrets, signal: options.signal, deadlineSignal: deadline };
-  let registration: CompletionRegistration | undefined;
-  let earlierAttempts: InvocationAttempt[] = [];
-  let diagnostics: InvocationDiagnostics = {};
-
-  try {
-    registration = await options.receiver.register({
-      runId: request.run_id,
-      caseId: request.case_id,
-      signal,
-    });
-
-    const triggered = await triggerCallbackAgent(agent, request, {
-      ...options.trigger,
-      ...shared,
-      registration,
-    });
-
-    if (triggered.status !== 'triggered') return triggered;
-    earlierAttempts = triggered.attempts;
-    diagnostics = triggered.diagnostics;
-
-    const completion = await awaitCompletion(registration, signal, options.signal);
-
-    const completed = await completeCallbackAgent(agent, completion, {
-      ...shared,
-      artifactFetch: options.artifactFetch,
-      traceFetch: options.traceFetch,
-    });
-
-    const attempt: InvocationAttempt = {
-      ...completed,
-      diagnostics: { ...completed.diagnostics, ...diagnostics },
-      durationMs: duration(),
-    };
-
-    return { ...attempt, attempts: [...earlierAttempts, attempt] };
-  } catch (error: unknown) {
-    const failed = attemptFromError(callbackFailure(error, signal, options.signal), duration());
-    const attempt: InvocationAttempt = { ...failed, diagnostics };
-
-    return { ...attempt, attempts: [...earlierAttempts, attempt] };
-  } finally {
-    registration?.release();
-  }
-};
+});
 
 export {
+  CallbackCleanupError,
   completeCallbackAgent,
   invokeCallbackAgent,
   triggerCallbackAgent,

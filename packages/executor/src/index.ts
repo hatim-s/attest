@@ -31,6 +31,7 @@ export {
 } from './adapters/process/index.js';
 
 export {
+  CallbackCleanupError,
   completeCallbackAgent,
   createLoopbackCompletionReceiver,
   invokeCallbackAgent,
@@ -41,7 +42,11 @@ export {
 
 export { enforceArtifactLimits } from './internal/artifact-limits.js';
 
-export { invokeStreamingAgent, type StreamAgentResource } from './adapters/stream/index.js';
+export {
+  StreamCleanupError,
+  invokeStreamingAgent,
+  type StreamAgentResource,
+} from './adapters/stream/index.js';
 
 export { startWebSocketAgent, type WebSocketAgentResource } from './adapters/websocket/index.js';
 

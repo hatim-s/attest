@@ -1,3 +1,5 @@
+import * as Effect from 'effect/Effect';
+import { awaitAbort, httpSync, withHttpCleanup } from '../http/http-effects.js';
 import type { JsonValue } from '@attest/contracts';
 import type { AgentResponseCandidate } from '../../internal/agent-response-candidate.js';
 import { parseJson } from '../../internal/json-value.js';
@@ -15,8 +17,10 @@ import { createTerminalExtractor, type TerminalExtractor } from './stream-termin
 type StreamHttpResponse = {
   status: number;
   headers: Record<string, string>;
-  body: AsyncIterable<Uint8Array>;
-  cancel: () => void;
+  /** Reads one chunk. The owner must close even after EOF, failure or interruption. */
+  read: Effect.Effect<IteratorResult<Uint8Array>, AgentInvocationError>;
+  /** Completes only after confirmed release, or fails with retained cleanup evidence. */
+  close: Effect.Effect<void, unknown>;
 };
 
 /** Opens a guarded HTTP stream without changing Attest framing or terminal extraction. */
@@ -25,7 +29,7 @@ type StreamHttpTransport = (
   request: MaterializedHttpRequest,
   signal: AbortSignal,
   options: StreamInvokeOptions,
-) => Promise<StreamHttpResponse>;
+) => Effect.Effect<StreamHttpResponse, AgentInvocationError>;
 
 type ConsumedStream = {
   response: AgentResponseCandidate;
@@ -54,10 +58,10 @@ const parseEventData = (source: string, framing: 'sse' | 'jsonl'): JsonValue => 
 };
 
 /** Reads one HTTP stream with separate transport/application idle clocks and hard event caps. */
-const consumeResponse = async (
+const consumeResponse = Effect.fn('stream.consume')(function* (
   response: StreamHttpResponse,
   options: ConsumeOptions,
-): Promise<ConsumedStream> => {
+) {
   const { agent, signal } = options;
   const { framing } = agent.transport;
   const caps = createStreamCaps(agent);
@@ -66,56 +70,24 @@ const consumeResponse = async (
   const splitter = new LineSplitter(caps.eventBytes);
   const decoder = new TextDecoder('utf-8', { fatal: true });
   let totalBytes = 0;
-  let interruption: AgentInvocationError | undefined;
-  let transportIdle: NodeJS.Timeout | undefined;
-  let applicationIdle: NodeJS.Timeout | undefined;
-
-  // Destroying the response ends the read loop; `interruption` records why it was stopped.
-  const interrupt = (error: AgentInvocationError): void => {
-    interruption ??= error;
-    response.cancel();
-  };
-
-  const resetTransportIdle = (): void => {
-    clearTimeout(transportIdle);
-    transportIdle = setTimeout(
-      () => interrupt(new AgentInvocationError('timeout', 'Streaming transport became idle.')),
-      caps.idleMs,
-    );
-  };
-
-  const resetApplicationIdle = (): void => {
-    clearTimeout(applicationIdle);
-    applicationIdle = setTimeout(
-      () => interrupt(new AgentInvocationError('timeout', 'Streaming application became idle.')),
-      caps.idleMs,
-    );
-  };
-
-  const abort = (): void => interrupt(abortedError(options.callerSignal, 'Streaming invocation'));
+  let transportAt = Date.now();
+  let applicationAt = transportAt;
 
   /** Records one event and returns the terminal envelope once it arrives. */
   const acceptEvent = (event: StreamEvent): AgentResponseCandidate | undefined => {
     if (event.heartbeat) {
       evidence.recordHeartbeat(event.source);
 
-      if (agent.transport.heartbeat_resets_application_idle === true) resetApplicationIdle();
+      if (agent.transport.heartbeat_resets_application_idle === true) applicationAt = Date.now();
 
       return undefined;
     }
 
     const raw = parseEventData(event.source, framing);
     evidence.recordEvent(event.source, raw);
-    resetApplicationIdle();
+    applicationAt = Date.now();
 
-    try {
-      return options.extractTerminal(raw, event.eventName);
-    } catch (error: unknown) {
-      if (error instanceof AgentInvocationError) throw error;
-      throw new AgentInvocationError('invalid_envelope', 'Streaming event could not be decoded.', {
-        cause: error,
-      });
-    }
+    return options.extractTerminal(raw, event.eventName);
   };
 
   const acceptLine = (line: string): AgentResponseCandidate | undefined => {
@@ -160,8 +132,6 @@ const consumeResponse = async (
   };
 
   const completed = (terminal: AgentResponseCandidate): ConsumedStream => {
-    if (interruption !== undefined) throw interruption;
-
     if (signal.aborted) throw abortedError(options.callerSignal, 'Streaming invocation');
 
     return {
@@ -171,57 +141,79 @@ const consumeResponse = async (
     };
   };
 
-  signal.addEventListener('abort', abort, { once: true });
-  resetTransportIdle();
-  resetApplicationIdle();
+  const primary = Effect.gen(function* () {
+    for (;;) {
+      if (signal.aborted)
+        return yield* Effect.fail(abortedError(options.callerSignal, 'Streaming invocation'));
+      const now = Date.now();
+      const transportRemaining = caps.idleMs - (now - transportAt);
+      const applicationRemaining = caps.idleMs - (now - applicationAt);
+      const applicationFirst = applicationRemaining <= transportRemaining;
+      const remaining = Math.max(0, Math.min(transportRemaining, applicationRemaining));
 
-  if (signal.aborted) abort();
+      const item = yield* Effect.raceFirst(
+        response.read.pipe(
+          Effect.timeoutOrElse({
+            duration: remaining,
+            orElse: () =>
+              Effect.fail(
+                new AgentInvocationError(
+                  'timeout',
+                  applicationFirst
+                    ? 'Streaming application became idle.'
+                    : 'Streaming transport became idle.',
+                ),
+              ),
+          }),
+        ),
+        awaitAbort(signal).pipe(
+          Effect.andThen(() =>
+            Effect.fail(abortedError(options.callerSignal, 'Streaming invocation')),
+          ),
+        ),
+      );
 
-  try {
-    for await (const chunk of response.body) {
-      resetTransportIdle();
+      if (signal.aborted)
+        return yield* Effect.fail(abortedError(options.callerSignal, 'Streaming invocation'));
+
+      if (item.done) break;
+      transportAt = Date.now();
+      const chunk = item.value;
       totalBytes += chunk.byteLength;
 
-      if (totalBytes > caps.totalBytes) {
-        throw capError('Streaming response exceeds its aggregate evidence cap.');
-      }
+      if (totalBytes > caps.totalBytes)
+        return yield* Effect.fail(
+          capError('Streaming response exceeds its aggregate evidence cap.'),
+        );
+      const terminal = yield* httpSync(() => acceptLines(decode(chunk), false));
 
-      const terminal = acceptLines(decode(chunk), false);
-
-      if (terminal !== undefined) return completed(terminal);
+      if (terminal !== undefined) return yield* httpSync(() => completed(terminal));
     }
 
-    // Cancellation may close a fetch reader cleanly. It must not flush buffered terminal data.
-    if (interruption !== undefined) throw interruption;
+    const terminal = yield* httpSync(() => acceptLines(decode(), false) ?? acceptLines('', true));
 
-    if (signal.aborted) throw abortedError(options.callerSignal, 'Streaming invocation');
-    const trailing = decode();
-    const terminal = acceptLines(trailing, false) ?? acceptLines('', true);
+    if (terminal !== undefined) return yield* httpSync(() => completed(terminal));
 
-    if (terminal !== undefined) return completed(terminal);
-    throw new AgentInvocationError(
-      'invalid_envelope',
-      'Streaming response closed without a terminal result.',
+    return yield* Effect.fail(
+      new AgentInvocationError(
+        'invalid_envelope',
+        'Streaming response closed without a terminal result.',
+      ),
     );
-  } catch (error: unknown) {
-    const failure =
-      interruption ??
-      (error instanceof AgentInvocationError
-        ? error
-        : new AgentInvocationError('network', 'Streaming response failed.', { cause: error }));
+  });
 
-    throw new AgentInvocationError(failure.code, failure.message, {
-      cause: failure,
-      applicationStarted: evidence.applicationStarted,
-      rawExcerpt: createRawExcerpt(evidence.text),
-    });
-  } finally {
-    clearTimeout(transportIdle);
-    clearTimeout(applicationIdle);
-    signal.removeEventListener('abort', abort);
-    response.cancel();
-  }
-};
+  return yield* primary.pipe(
+    Effect.mapError(
+      (failure) =>
+        new AgentInvocationError(failure.code, failure.message, {
+          cause: failure,
+          // A read failure cannot establish that dispatch did not reach the peer.
+          applicationStarted: true,
+          rawExcerpt: createRawExcerpt(evidence.text),
+        }),
+    ),
+  );
+});
 
 const contentType = (response: StreamHttpResponse): string | undefined =>
   String(response.headers['content-type'] ?? '')
@@ -230,41 +222,90 @@ const contentType = (response: StreamHttpResponse): string | undefined =>
     .toLowerCase();
 
 /** Performs one DNS-pinned stream request and returns only after terminal extraction. */
-const streamOnce = async (
+const streamOnce = Effect.fn('stream.once')(function* (
   agent: StreamAgentResource,
   materialized: MaterializedHttpRequest,
   signal: AbortSignal,
   options: StreamInvokeOptions,
-): Promise<ConsumedStream & { status: number }> => {
-  const open = options.requestStream ?? (await import('./node-stream-request.js')).openNodeStream;
-  const response = await open(agent, materialized, signal, options);
-  const { status } = response;
+) {
+  const open =
+    options.requestStream ??
+    (yield* Effect.promise(() => import('./node-stream-request.js'))).openNodeStream;
 
-  if (status < 200 || status >= 300) {
-    response.cancel();
-    throw new AgentInvocationError('http_status', `Streaming HTTP returned status ${status}.`, {
-      httpStatus: status,
-      retryAfterMs: parseRetryAfter(response.headers['retry-after']),
-    });
-  }
+  return yield* Effect.uninterruptibleMask((restore) =>
+    Effect.gen(function* () {
+      const response = yield* open(agent, materialized, signal, options).pipe(
+        Effect.mapError((error) =>
+          signal.aborted
+            ? abortedError(options.signal, 'Streaming invocation', {
+                cause: error,
+                applicationStarted: error.applicationStarted,
+                rawExcerpt: error.rawExcerpt,
+              })
+            : error,
+        ),
+      );
 
-  if (agent.transport.framing === 'sse' && contentType(response) !== 'text/event-stream') {
-    response.cancel();
-    throw new AgentInvocationError(
-      'invalid_envelope',
-      'SSE response must use the text/event-stream content type.',
-    );
-  }
+      const { status } = response;
+      let completed: (ConsumedStream & { status: number }) | undefined;
 
-  const consumed = await consumeResponse(response, {
-    agent,
-    signal,
-    callerSignal: options.signal,
-    secrets: options.secrets ?? [],
-    extractTerminal: createTerminalExtractor(agent),
-  });
+      return yield* withHttpCleanup(
+        restore(
+          Effect.gen(function* () {
+            if (status < 200 || status >= 300) {
+              return yield* Effect.fail(
+                new AgentInvocationError(
+                  'http_status',
+                  `Streaming HTTP returned status ${status}.`,
+                  {
+                    httpStatus: status,
+                    retryAfterMs: parseRetryAfter(response.headers['retry-after']),
+                  },
+                ),
+              );
+            }
 
-  return { ...consumed, status };
-};
+            if (
+              agent.transport.framing === 'sse' &&
+              contentType(response) !== 'text/event-stream'
+            ) {
+              return yield* Effect.fail(
+                new AgentInvocationError(
+                  'invalid_envelope',
+                  'SSE response must use the text/event-stream content type.',
+                ),
+              );
+            }
+
+            const consumed = yield* consumeResponse(response, {
+              agent,
+              signal,
+              callerSignal: options.signal,
+              secrets: options.secrets ?? [],
+              extractTerminal: createTerminalExtractor(agent),
+            });
+
+            completed = { ...consumed, status };
+
+            return completed;
+          }),
+        ),
+        [response.close],
+      ).pipe(
+        Effect.mapError((error) => {
+          // Cleanup after a terminal keeps its redacted evidence alongside the release Cause.
+          return completed === undefined
+            ? error
+            : new AgentInvocationError(error.code, error.message, {
+                ...error,
+                cause: error.cause,
+                rawExcerpt: createRawExcerpt(completed.evidence),
+                httpStatus: completed.status,
+              });
+        }),
+      );
+    }),
+  );
+});
 
 export { streamOnce, type StreamHttpTransport, type StreamHttpResponse };

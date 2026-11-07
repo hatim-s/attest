@@ -51,6 +51,16 @@ const coreForbidden = [
 // Exact file paths only. New roots need a concrete lifecycle owner.
 const effectRoots = [
   {
+    file: 'packages/executor/src/_tests_/callback-adapter.test.ts',
+    operations: ['Effect.runPromise'],
+    owner: 'native callback lifecycle and authentication test root',
+  },
+  {
+    file: 'packages/executor/src/adapters/stream/_tests_/stream-adapter.test.ts',
+    operations: ['Effect.runPromise'],
+    owner: 'native stream framing and lifecycle invariant test root',
+  },
+  {
     file: 'packages/executor/src/_tests_/portability.check.mjs',
     operations: ['Effect.runPromise'],
     owner: 'Node and Bun native executor portability process roots',
@@ -62,7 +72,7 @@ const effectRoots = [
   },
   {
     file: 'packages/executor/src/_tests_/http-transports.test.ts',
-    operations: ['Effect.runPromise'],
+    operations: ['Effect.runPromise', 'Effect.runPromiseExit'],
     owner: 'owned HTTP, transport and cleanup fixture execution',
   },
   {
@@ -290,6 +300,18 @@ const effectRoots = [
 // Each file declares its operations and per-operation removal slices in bridges. Removed in S10.
 const effectMigrationBridges = [
   {
+    file: 'packages/local/src/commands/agent/adapter/callback-session.ts',
+    operations: ['Effect.runPromiseExit'],
+    owner: 'local callback session owns its receiver scope and joins accepted invocations',
+    bridges: [
+      {
+        operation: 'Effect.runPromiseExit',
+        removalSlice: 'S7b',
+        owner: 'native local invocation session ownership',
+      },
+    ],
+  },
+  {
     file: 'packages/executor/src/adapters/process/background-adapter.ts',
     operations: ['Effect.runPromise'],
     owner: 'background process lifecycle invokes native mapped HTTP',
@@ -314,30 +336,6 @@ const effectMigrationBridges = [
     ],
   },
   {
-    file: 'packages/executor/src/adapters/callback/callback-adapter.ts',
-    operations: ['Effect.runPromise'],
-    owner: 'Promise callback protocol HTTP leaf closure',
-    bridges: [
-      {
-        operation: 'Effect.runPromise',
-        removalSlice: 'S4a',
-        owner: 'Promise callback protocol HTTP leaf closure',
-      },
-    ],
-  },
-  {
-    file: 'packages/executor/src/adapters/stream/node-stream-request.ts',
-    operations: ['Effect.runPromise'],
-    owner: 'Promise stream HTTP leaf closure',
-    bridges: [
-      {
-        operation: 'Effect.runPromise',
-        removalSlice: 'S4a',
-        owner: 'Promise stream HTTP leaf closure',
-      },
-    ],
-  },
-  {
     file: 'packages/executor/src/adapters/websocket/websocket-handshake.ts',
     operations: ['Effect.runPromise'],
     owner: 'Promise WebSocket handshake HTTP leaf closure',
@@ -346,18 +344,6 @@ const effectMigrationBridges = [
         operation: 'Effect.runPromise',
         removalSlice: 'S4b',
         owner: 'Promise WebSocket handshake HTTP leaf closure',
-      },
-    ],
-  },
-  {
-    file: 'packages/executor/src/adapters/http/legacy-stream-fetch.ts',
-    operations: ['Effect.runPromise'],
-    owner: 'Promise async stream body owner acquiring native guarded headers',
-    bridges: [
-      {
-        operation: 'Effect.runPromise',
-        removalSlice: 'S4a',
-        owner: 'Promise async stream body owner acquiring native guarded headers',
       },
     ],
   },

@@ -5,7 +5,7 @@ import type { StreamHttpTransport } from '../stream/stream-transport.js';
 import type { HttpJsonTransport } from './http-client.js';
 import { httpSync, withHttpCleanup } from './http-effects.js';
 import { openGuardedResponse, type GuardedHttpFetch } from './guarded-response.js';
-import { openFetchResponse } from './legacy-stream-fetch.js';
+import { openWebStream } from '../stream/web-stream-request.js';
 import { readWebJson } from './web-response-body.js';
 import { requireSameOrigin } from './same-origin.js';
 
@@ -67,7 +67,7 @@ const createFetchHttpTransports = (guardedFetch: GuardedHttpFetch) => {
   });
 
   const requestStream: StreamHttpTransport = (agent, request, signal) =>
-    openFetchResponse(
+    openWebStream(
       guardedFetch,
       request,
       signal,
