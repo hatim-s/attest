@@ -798,3 +798,22 @@ failure therefore reaches the store owner before release. Cleanup receipts retai
 release; primary typed failures, defects and interruption keep their Cause classification.
 The PromiseStoreOwner helper remains for the separate S8b consumers. These are deliberate
 TypeScript API breaks; wire schemas, status codes, and the detached CLI protocol are unchanged.
+
+## main-merge dashboard projections and web command
+
+The local `main` merge retains native `RunSource`, `RunStore`, `ProjectCatalog` and API client
+operations. The new `getProjectOverview`, `listEvals`, `listEvalRuns`, `getEvalCaseWindow`,
+`getCaseHistory`, `getActivity` and `listRunSuites` methods return `Effect<A, StoreError>` with
+no required services. Dashboard reads hold one controlled Kysely read transaction across all
+statements. Commit or rollback is joined before the store owner can close, and cleanup failure
+retains the primary Cause through `finishStoreCleanup`.
+
+Projection writes and migration backfills retain SQL-only Kysely/driver callbacks inside the
+masked native transaction owner. They do not execute an Effect runtime. Version 2 SQL, selected
+case membership, immutable evidence timestamps, UTC index ordering and stored projections match
+main. Planned-case derivation and eval-slice analytics remain pure synchronous functions.
+Dashboard and shell preference schemas use Effect Schema with main's strip/strict behavior.
+Public stored and HTTP shapes remain unchanged; hosts implementing RunSource must implement the
+seven new native methods. The canonical dashboard CLI command is `attest web`, including
+`--all`, `--store`, `--port` and `--no-open`. Commander, Hono and TanStack callbacks retain their
+existing execution-root ownership. No migration bridge is added.

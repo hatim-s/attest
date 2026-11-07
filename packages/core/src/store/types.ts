@@ -1,5 +1,14 @@
 import type * as Effect from 'effect/Effect';
 import type { StoreError } from './store-error.js';
+import type {
+  EvalPage,
+  ProjectRunOverview,
+  EvalRunPage,
+  EvalCaseWindow,
+  CaseHistoryPage,
+  Activity,
+  EvalSlice,
+} from '../records/dashboard-schemas.js';
 import type { PageQuery, RunPage, CaseSummaryPage } from '../records/page-schemas.js';
 import type { ProjectRecord } from '../records/project-schemas.js';
 import type {
@@ -39,9 +48,30 @@ interface RunIdentity {
  * MAX_PAGE_LIMIT, 1,000, inclusive.
  */
 interface RunSource {
+  getProjectOverview(): Effect.Effect<ProjectRunOverview, StoreError>;
+  listEvals(query?: PageQuery): Effect.Effect<EvalPage, StoreError>;
+  listEvalRuns(
+    suiteName: string,
+    query?: PageQuery & { since?: string; until?: string },
+  ): Effect.Effect<EvalRunPage, StoreError>;
+  getEvalCaseWindow(
+    suiteName: string,
+    query?: PageQuery,
+  ): Effect.Effect<EvalCaseWindow, StoreError>;
+  getCaseHistory(
+    suiteName: string,
+    caseId: string,
+    query?: PageQuery,
+  ): Effect.Effect<CaseHistoryPage, StoreError>;
+  getActivity(query: { from: string; to: string }): Effect.Effect<Activity, StoreError>;
+  listRunSuites(runId: string): Effect.Effect<EvalSlice[], StoreError>;
+
   listRuns(query?: PageQuery): Effect.Effect<RunPage, StoreError>;
   getRun(runId: string): Effect.Effect<RunRecord, StoreError>;
-  listCaseSummaries(runId: string, query?: PageQuery): Effect.Effect<CaseSummaryPage, StoreError>;
+  listCaseSummaries(
+    runId: string,
+    query?: PageQuery & { suiteName?: string },
+  ): Effect.Effect<CaseSummaryPage, StoreError>;
   getCase(runId: string, suiteName: string, caseId: string): Effect.Effect<CaseRecord, StoreError>;
   getRunWithCases(
     runId: string,

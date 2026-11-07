@@ -1,7 +1,12 @@
-import * as Exit from 'effect/Exit';
-import * as Effect from 'effect/Effect';
+import { createLock } from './internal/promise-lock.js';
+import { canonicalTime } from './internal/dashboard-boundary.js';
 import { parseWithSchemaSync } from '@attest/contracts';
 import * as Schema from 'effect/Schema';
+import * as Effect from 'effect/Effect';
+import * as Exit from 'effect/Exit';
+import * as Semaphore from 'effect/Semaphore';
+import { StoreScope } from './internal/store-scope.js';
+import { storeCall, storeDecode, finishStoreCleanup } from './internal/store-effect.js';
 
 import { resolve } from 'node:path';
 
@@ -9,6 +14,7 @@ import { Kysely } from 'kysely';
 
 import {
   canonicalStringify,
+  plannedCaseSelection,
   parsePageLimit,
   type PageQuery,
   StoreError,
@@ -22,24 +28,24 @@ import {
   type StoredMetricEvaluation,
 } from '@attest/core';
 
-import { StoreScope } from './internal/store-scope.js';
+import {
+  seedSuiteTotals,
+  finalizeSuiteTotals,
+  summarizeRuns,
+} from './internal/dashboard-totals.js';
+import { DashboardReads } from './internal/dashboard-reads.js';
 import { createCacheStore } from './cache.js';
 import { recordCaseTransaction, validateCaseRecordInput } from './internal/case-recording.js';
 import { createSqliteDialect } from './internal/kysely-sqlite-dialect.js';
 import { createUlid } from './internal/create-ulid.js';
-import * as Semaphore from 'effect/Semaphore';
-import { finishStoreCleanup, storeCall, storeDecode } from './internal/store-effect.js';
+
 import { toCaseRecord, toMetricEvaluation, toRunRecord } from './internal/row-mapping.js';
-import {
-  agentErroredColumn,
-  lifecycleFailedColumn,
-  rowVerdict,
-  runSummaryQueries,
-  summarizeRunRows,
-} from './internal/run-summary.js';
 import { openReadonlySqliteHandle, openSqliteHandle } from './internal/open-sqlite-handle.js';
+
 import { migrateToLatest, validateReadableSchema } from './migration-runner.js';
 import type { Database, MetricResultsTable, RunsTable } from './schema.js';
+
+const databaseLocks = new Map<string, ReturnType<typeof createLock>>();
 
 const migrationLocks = new Map<string, Semaphore.Semaphore>();
 
@@ -92,6 +98,46 @@ class SqliteRunStore implements RunStore {
     this.#database = database;
   }
 
+  /** Each composed read uses one WAL snapshot across its bounded statements. */
+  #dashboardRead = <T>(read: (dashboard: DashboardReads) => Effect.Effect<T, StoreError>) =>
+    Effect.uninterruptible(
+      Effect.gen(
+        function* (this: SqliteRunStore) {
+          const transaction = yield* storeCall(
+            'READ_FAILED',
+            'Could not start dashboard snapshot.',
+            () => this.#database.startTransaction().setAccessMode('read only').execute(),
+          );
+
+          const primary = yield* Effect.exit(read(new DashboardReads(transaction)));
+
+          const cleanup = yield* Effect.exit(
+            storeCall('READ_FAILED', 'Could not release dashboard snapshot.', () =>
+              Exit.isSuccess(primary)
+                ? transaction.commit().execute()
+                : transaction.rollback().execute(),
+            ),
+          );
+
+          return yield* finishStoreCleanup(primary, cleanup);
+        }.bind(this),
+      ),
+    );
+  getProjectOverview: RunStore['getProjectOverview'] = () =>
+    this.#dashboardRead((d) => d.getProjectOverview());
+
+  listEvals: RunStore['listEvals'] = (query) => this.#dashboardRead((d) => d.listEvals(query));
+  listEvalRuns: RunStore['listEvalRuns'] = (suite, query) =>
+    this.#dashboardRead((d) => d.listEvalRuns(suite, query));
+  getEvalCaseWindow: RunStore['getEvalCaseWindow'] = (suite, query) =>
+    this.#dashboardRead((d) => d.getEvalCaseWindow(suite, query));
+  getCaseHistory: RunStore['getCaseHistory'] = (suite, caseId, query) =>
+    this.#dashboardRead((d) => d.getCaseHistory(suite, caseId, query));
+  getActivity: RunStore['getActivity'] = (query) =>
+    this.#dashboardRead((d) => d.getActivity(query));
+  listRunSuites: RunStore['listRunSuites'] = (id) =>
+    this.#dashboardRead((d) => d.listRunSuites(id));
+
   /** Creates a running record with a UTC timestamp and ULID identity. */
   createRun = Effect.fn('SqliteRunStore.createRun')(
     function* (
@@ -99,59 +145,81 @@ class SqliteRunStore implements RunStore {
       metadata: RunMetadata,
       identity: RunIdentity = createRunIdentity(),
     ) {
-      const record: RunRecord = {
-        ...metadata,
-        id: identity.id,
-        createdAt: identity.createdAt,
-        status: 'running',
-      };
+      let plan;
 
-      yield* storeCall('WRITE_FAILED', 'Store operation failed.', () =>
-        this.#database
-          .insertInto('runs')
-          .values({
-            id: record.id,
-            created_at: record.createdAt,
-            finished_at: null,
-            status: record.status,
-            schema_id: record.schemaId,
-            config_hash: record.configHash,
-            config_json: record.configJson,
-            git_sha: record.gitSha ?? null,
-            git_branch: record.gitBranch ?? null,
-            labels_json: record.labels ? canonicalStringify(record.labels) : null,
-            summary_json: null,
-          })
-          .execute(),
+      try {
+        plan = plannedCaseSelection(metadata.schemaId, metadata.configJson);
+      } catch (cause) {
+        return yield* Effect.fail(
+          new StoreError('INVALID_RECORD', `Invalid selection config for run ${identity.id}.`, {
+            cause,
+          }),
+        );
+      }
+
+      const createdOrder = yield* storeDecode('Could not decode store data.', () =>
+        canonicalTime(identity.createdAt, 'INVALID_RECORD'),
       );
 
-      return record;
+      return yield* storeCall('WRITE_FAILED', 'Could not create the run.', async () => {
+        const record: RunRecord = {
+          ...metadata,
+          id: identity.id,
+          createdAt: identity.createdAt,
+          status: 'running',
+        };
+
+        await this.#database.transaction().execute(async (database) => {
+          await database
+            .insertInto('runs')
+            .values({
+              id: record.id,
+              created_at: record.createdAt,
+              created_order: createdOrder,
+              selection_known: 0,
+              finished_at: null,
+              status: record.status,
+              schema_id: record.schemaId,
+              config_hash: record.configHash,
+              config_json: record.configJson,
+              git_sha: record.gitSha ?? null,
+              git_branch: record.gitBranch ?? null,
+              labels_json: record.labels ? canonicalStringify(record.labels) : null,
+              summary_json: null,
+            })
+            .execute();
+
+          await seedSuiteTotals(database, record, plan);
+        });
+
+        return record;
+      }).pipe(Effect.uninterruptible);
     }.bind(this),
   );
 
   /** Atomically persists one runtime-validated case and all of its child evidence. */
   // BOUNDARY: Untrusted execution and metric submissions are decoded with store owner schemas before persistence.
   recordCase = Effect.fn('SqliteRunStore.recordCase')(
-    // BOUNDARY: Untrusted case submissions are decoded before their transaction.
+    // BOUNDARY: Store submissions are decoded before opening the write transaction.
     function* (this: SqliteRunStore, runId: string, execution: unknown, evaluations: unknown) {
       const parsed = yield* storeDecode('Invalid case record.', () =>
         validateCaseRecordInput(execution, evaluations),
       );
 
-      yield* storeCall('WRITE_FAILED', 'Could not record the case.', () =>
+      yield* storeCall('WRITE_FAILED', 'Could not record the case.', async () =>
         this.#database
           .transaction()
           .execute((database) =>
             recordCaseTransaction(database, runId, parsed.execution, parsed.evaluations),
           ),
-      );
+      ).pipe(Effect.uninterruptible);
     }.bind(this),
   );
 
   /** Finalizes once; same-status calls return the stored record for retry-safe acknowledgement. */
   finalizeRun = Effect.fn('SqliteRunStore.finalizeRun')(
     function* (this: SqliteRunStore, runId: string, status: Exclude<RunStatus, 'running'>) {
-      yield* storeCall('WRITE_FAILED', 'Could not finalize the run.', () =>
+      yield* storeCall('WRITE_FAILED', 'Could not finalize the run.', async () =>
         this.#database.transaction().execute(async (database) => {
           const run = await database
             .selectFrom('runs')
@@ -169,24 +237,31 @@ class SqliteRunStore implements RunStore {
             );
           }
 
-          const queries = runSummaryQueries(database, [runId]);
+          const row = await database
+            .selectFrom('runs')
+            .selectAll()
+            .where('id', '=', runId)
+            .executeTakeFirstOrThrow();
 
-          const summaryOf = summarizeRunRows(
-            await queries.cases.execute(),
-            await queries.metrics.execute(),
-          );
+          const finishedAt = new Date().toISOString();
+          await finalizeSuiteTotals(database, {
+            ...toRunRecord(row, undefined),
+            status,
+            finishedAt,
+          });
+          const summaryOf = await summarizeRuns(database, [runId]);
 
           await database
             .updateTable('runs')
             .set({
               status,
-              finished_at: new Date().toISOString(),
+              finished_at: finishedAt,
               summary_json: canonicalStringify(summaryOf(runId)),
             })
             .where('id', '=', runId)
             .execute();
         }),
-      );
+      ).pipe(Effect.uninterruptible);
 
       return yield* this.getRun(runId);
     }.bind(this),
@@ -207,33 +282,18 @@ class SqliteRunStore implements RunStore {
   );
 
   /**
-   * Builds run records with totals recomputed from case rows. Runs finalized before the shared
-   * verdict rule hold stale summary_json, so no read uses it. Running runs have no totals yet.
+   * Builds run records from materialized per-eval totals. Running records omit summaries.
    */
   #runRecordMapper = Effect.fn('SqliteRunStore.#runRecordMapper')(
     function* (this: SqliteRunStore, rows: RunsTable[]) {
       const terminal = rows.filter((row) => row.status !== 'running');
 
-      const queries = runSummaryQueries(
-        this.#database,
-        terminal.map((row) => row.id),
+      const summaryOf = yield* storeCall('READ_FAILED', 'Could not read the store.', () =>
+        summarizeRuns(
+          this.#database,
+          terminal.map((row) => row.id),
+        ),
       );
-
-      const cases =
-        terminal.length === 0
-          ? []
-          : yield* storeCall('READ_FAILED', 'Could not read run summary cases.', () =>
-              queries.cases.execute(),
-            );
-
-      const metrics =
-        terminal.length === 0
-          ? []
-          : yield* storeCall('READ_FAILED', 'Could not read run summary metrics.', () =>
-              queries.metrics.execute(),
-            );
-
-      const summaryOf = summarizeRunRows(cases, metrics);
 
       return (row: RunsTable) =>
         toRunRecord(row, row.status === 'running' ? undefined : summaryOf(row.id));
@@ -246,30 +306,30 @@ class SqliteRunStore implements RunStore {
       const row = yield* this.#getRunRow(runId);
       const toRecord = yield* this.#runRecordMapper([row]);
 
-      return yield* storeDecode('Could not decode run.', () => toRecord(row));
+      return yield* storeDecode('Could not decode store data.', () => toRecord(row));
     }.bind(this),
   );
 
   /** Lists runs in deterministic newest-first order. */
   listRuns = Effect.fn('SqliteRunStore.listRuns')(
     function* (this: SqliteRunStore, query: PageQuery = {}) {
-      const limit = yield* storeDecode('Invalid page query.', () => parsePageLimit(query));
+      const limit = yield* storeDecode('Could not decode store data.', () => parsePageLimit(query));
 
       let select = this.#database
         .selectFrom('runs')
         .selectAll()
-        .orderBy('created_at', 'desc')
+        .orderBy('created_order', 'desc')
         .orderBy('id', 'desc')
         .limit(limit + 1);
 
       if (query.cursor !== undefined) {
-        const cursor = query.cursor;
+        const cursorId = query.cursor;
 
         const anchor = yield* storeCall('READ_FAILED', 'Could not read the store.', () =>
           this.#database
             .selectFrom('runs')
-            .select(['created_at', 'id'])
-            .where('id', '=', cursor)
+            .select(['created_order', 'id'])
+            .where('id', '=', cursorId)
             .executeTakeFirst(),
         );
 
@@ -279,13 +339,13 @@ class SqliteRunStore implements RunStore {
           );
         select = select.where((eb) =>
           eb.or([
-            eb('created_at', '<', anchor.created_at),
-            eb.and([eb('created_at', '=', anchor.created_at), eb('id', '<', anchor.id)]),
+            eb('created_order', '<', anchor.created_order),
+            eb.and([eb('created_order', '=', anchor.created_order), eb('id', '<', anchor.id)]),
           ]),
         );
       }
 
-      const rows = yield* storeCall('READ_FAILED', 'Store operation failed.', () =>
+      const rows = yield* storeCall('READ_FAILED', 'Could not read the store.', () =>
         select.execute(),
       );
 
@@ -309,7 +369,7 @@ class SqliteRunStore implements RunStore {
           .execute(),
       );
 
-      const rawMetrics = yield* storeCall('READ_FAILED', 'Store operation failed.', () =>
+      const rawMetrics = yield* storeCall('READ_FAILED', 'Could not read metrics.', () =>
         loadMetrics(
           this.#database,
           cases.map((row) => row.id),
@@ -358,11 +418,11 @@ class SqliteRunStore implements RunStore {
           ),
         );
 
-      const metrics = yield* storeCall('READ_FAILED', 'Store operation failed.', () =>
+      const metrics = yield* storeCall('READ_FAILED', 'Could not read the store.', () =>
         loadMetrics(this.#database, [row.id]),
       );
 
-      return yield* storeDecode('Could not decode case.', () =>
+      return yield* storeDecode('Could not decode store data.', () =>
         toCaseRecord(row, metrics.map(toMetricEvaluation)),
       );
     }.bind(this),
@@ -370,9 +430,13 @@ class SqliteRunStore implements RunStore {
 
   /** Returns a row-id cursor page without selecting request, response, trace, or diagnostic blobs. */
   listCaseSummaries = Effect.fn('SqliteRunStore.listCaseSummaries')(
-    function* (this: SqliteRunStore, runId: string, query: PageQuery = {}) {
+    function* (
+      this: SqliteRunStore,
+      runId: string,
+      query: PageQuery & { suiteName?: string } = {},
+    ) {
       yield* this.#getRunRow(runId);
-      const limit = yield* storeDecode('Invalid page query.', () => parsePageLimit(query));
+      const limit = yield* storeDecode('Could not decode store data.', () => parsePageLimit(query));
 
       if (query.cursor !== undefined) {
         const cursorId = query.cursor;
@@ -380,12 +444,15 @@ class SqliteRunStore implements RunStore {
         const cursor = yield* storeCall('READ_FAILED', 'Could not read the store.', () =>
           this.#database
             .selectFrom('cases')
-            .select('run_id')
+            .select(['run_id', 'suite_name'])
             .where('id', '=', cursorId)
             .executeTakeFirst(),
         );
 
-        if (cursor?.run_id !== runId) {
+        if (
+          cursor?.run_id !== runId ||
+          (query.suiteName !== undefined && cursor?.suite_name !== query.suiteName)
+        ) {
           return yield* Effect.fail(
             new StoreError(
               'INVALID_CURSOR',
@@ -405,22 +472,23 @@ class SqliteRunStore implements RunStore {
           'started_at',
           'duration_ms',
           'expected_metrics_json',
-          lifecycleFailedColumn,
-          agentErroredColumn,
+          'verdict',
         ])
         .where('run_id', '=', runId)
         .orderBy('id')
         .limit(limit + 1);
 
+      if (query.suiteName !== undefined) select = select.where('suite_name', '=', query.suiteName);
+
       if (query.cursor !== undefined) select = select.where('id', '>', query.cursor);
 
-      const rows = yield* storeCall('READ_FAILED', 'Store operation failed.', () =>
+      const rows = yield* storeCall('READ_FAILED', 'Could not read the store.', () =>
         select.execute(),
       );
 
       const pageRows = rows.slice(0, limit);
 
-      const metrics = yield* storeCall('READ_FAILED', 'Store operation failed.', () =>
+      const metrics = yield* storeCall('READ_FAILED', 'Could not read the store.', () =>
         loadMetrics(
           this.#database,
           pageRows.map((row) => row.id),
@@ -450,7 +518,7 @@ class SqliteRunStore implements RunStore {
             caseId: row.case_id,
             suiteName: row.suite_name,
             outcome: row.outcome,
-            verdict: rowVerdict(row, caseMetrics),
+            verdict: row.verdict,
             startedAt: row.started_at,
             durationMs: row.duration_ms,
             metricCounts: {
@@ -463,7 +531,7 @@ class SqliteRunStore implements RunStore {
             },
           };
 
-          if (score !== undefined) item = { ...item, score: score };
+          if (score !== undefined) item = { ...item, score };
 
           return item;
         }),
@@ -479,6 +547,13 @@ const makeRuns = (database: Kysely<Database>, owner: StoreScope): RunStore => {
   const runs = new SqliteRunStore(database);
 
   return {
+    getProjectOverview: (...args) => owner.run(runs.getProjectOverview(...args)),
+    listEvals: (...args) => owner.run(runs.listEvals(...args)),
+    listEvalRuns: (...args) => owner.run(runs.listEvalRuns(...args)),
+    getEvalCaseWindow: (...args) => owner.run(runs.getEvalCaseWindow(...args)),
+    getCaseHistory: (...args) => owner.run(runs.getCaseHistory(...args)),
+    getActivity: (...args) => owner.run(runs.getActivity(...args)),
+    listRunSuites: (...args) => owner.run(runs.listRunSuites(...args)),
     createRun: (...args) => owner.run(runs.createRun(...args)),
     recordCase: (...args) => owner.run(runs.recordCase(...args)),
     finalizeRun: (...args) => owner.run(runs.finalizeRun(...args)),
@@ -501,7 +576,13 @@ const acquireStore = (path: string, owner: StoreScope, mode: 'write' | 'readonly
       Effect.gen(function* () {
         yield* mode === 'write' ? migrateToLatest(handle) : validateReadableSchema(handle);
 
-        const database = new Kysely<Database>({ dialect: createSqliteDialect(handle) });
+        const connectionLock = databaseLocks.get(path) ?? createLock();
+        databaseLocks.set(path, connectionLock);
+
+        const database = new Kysely<Database>({
+          dialect: createSqliteDialect(handle, connectionLock),
+        });
+
         // Kysely skips driver destruction until initialized, but this handle is already open.
         yield* storeCall('READ_FAILED', 'Could not initialize the store connection.', () =>
           database.connection().execute(() => Promise.resolve()),

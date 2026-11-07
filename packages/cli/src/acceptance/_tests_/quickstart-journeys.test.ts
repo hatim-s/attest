@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { access, cp, mkdtemp, readFile, rm } from 'node:fs/promises';
+import { access, cp, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -31,16 +31,36 @@ const FIXTURE_ROOT = fileURLToPath(new URL('./fixtures/quickstart', import.meta.
 
 const RUN_ID_PATTERN = /\b[0-9A-HJKMNP-TV-Z]{26}\b/u;
 
-/** Starts `attest view`, fetches the dashboard once it is ready, then stops it with SIGINT. */
-const runViewReadinessProbe = async (
+/** Fetches the dashboard after readiness and verifies browser suppression and SIGINT shutdown. */
+const runWebReadinessProbe = async (
   packed: PackedCli,
   argv: readonly string[],
   workingDirectory: string,
   timeout: number,
 ): Promise<CommandResult> => {
+  const browserBin = await mkdtemp(join(tmpdir(), 'attest-browser-probe-'));
+  onTestFinished(() => rm(browserBin, { force: true, recursive: true }));
+  const browserMarker = join(browserBin, 'opened');
+
+  // Catch an accidental browser launch without opening a real browser on the test machine.
+  for (const opener of ['open', 'xdg-open']) {
+    await writeFile(
+      join(browserBin, opener),
+      '#!/bin/sh\nprintf opened > "$ATTEST_BROWSER_PROBE"\n',
+      {
+        mode: 0o755,
+      },
+    );
+  }
+
   const child = spawn(process.execPath, ['--no-warnings', packed.cliPath, ...argv], {
     cwd: workingDirectory,
-    env: { ...process.env, ATTEST_HOME: packed.attestHome },
+    env: {
+      ...process.env,
+      ATTEST_HOME: packed.attestHome,
+      ATTEST_BROWSER_PROBE: browserMarker,
+      PATH: `${browserBin}:${process.env.PATH ?? ''}`,
+    },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
 
@@ -53,7 +73,10 @@ const runViewReadinessProbe = async (
   child.stderr.on('data', (chunk: string) => {
     stderr += chunk;
   });
-  const exited = new Promise<void>((resolve) => child.once('exit', () => resolve()));
+
+  const exited = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve) =>
+    child.once('exit', (code, signal) => resolve({ code, signal })),
+  );
 
   const readinessUrl = await new Promise<string>((resolveReadiness, rejectReadiness) => {
     const timer = setTimeout(() => {
@@ -72,7 +95,7 @@ const runViewReadinessProbe = async (
     });
     child.stdout.on('data', (chunk: string) => {
       stdout += chunk;
-      const match = /Attest view: (http:\/\/127\.0\.0\.1:\d+\/)/u.exec(stdout);
+      const match = /Attest web: (http:\/\/127\.0\.0\.1:\d+\/)/u.exec(stdout);
 
       if (match?.[1] === undefined || ready) return;
       ready = true;
@@ -89,8 +112,11 @@ const runViewReadinessProbe = async (
   } finally {
     child.kill('SIGINT');
     const forceStop = setTimeout(() => child.kill('SIGKILL'), 5_000);
-    await exited;
+    const exit = await exited;
     clearTimeout(forceStop);
+    expect(exit).toEqual({ code: 0, signal: null });
+    await expect(access(browserMarker)).rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(fetch(readinessUrl, { signal: AbortSignal.timeout(2_000) })).rejects.toThrow();
   }
 };
 
@@ -197,7 +223,7 @@ const assertCommand = async (
     expect(result.stdout, `${label}: ${required}`).toContain(materialize(required, runId));
   }
 
-  if (expectation.readiness_probe === 'view') {
+  if (expectation.readiness_probe === 'web') {
     expect(result.readiness?.url, label).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/$/u);
     expect(result.readiness?.status, label).toBe(200);
     expect(result.readiness?.body, label).toContain('<!doctype html>');
@@ -247,8 +273,8 @@ const runJourney = async (actorId: string): Promise<void> => {
     const timeout = journeys.per_command_timeout_ms;
 
     const result =
-      command.readiness_probe === 'view'
-        ? await runViewReadinessProbe(packed, argv, root, timeout)
+      command.readiness_probe === 'web'
+        ? await runWebReadinessProbe(packed, argv, root, timeout)
         : await runPackedCommand(packed, argv, root, timeout);
 
     runId = await assertCommand(command, result, root, before, runId);
@@ -262,6 +288,32 @@ const runJourney = async (actorId: string): Promise<void> => {
 };
 
 describe('quickstart journeys through the packed CLI', () => {
+  it.each([
+    { command: 'web', scope: 'store' },
+    { command: 'web', scope: 'all' },
+  ])(
+    'serves the dashboard with $command/$scope and stops on SIGINT',
+    async ({ command, scope }) => {
+      const root = await mkdtemp(join(tmpdir(), 'attest-web-'));
+      onTestFinished(() => rm(root, { force: true, recursive: true }));
+      const flags = scope === 'all' ? ['--all'] : ['--store', 'custom.db'];
+
+      const result = await runWebReadinessProbe(
+        inject('packedCli'),
+        [command, ...flags, '--port', '0', '--no-open'],
+        root,
+        30_000,
+      );
+
+      expect(result.stderr).toBe('');
+      expect(result.readiness?.status).toBe(200);
+      expect(result.readiness?.body).toContain('<!doctype html>');
+
+      if (scope === 'store') await expect(access(join(root, 'custom.db'))).resolves.toBeUndefined();
+      await expect(access(join(root, '.attest'))).rejects.toMatchObject({ code: 'ENOENT' });
+    },
+  );
+
   it('completes the human copy-paste journey', () => runJourney('human-copy-paste'), 360_000);
 
   it(

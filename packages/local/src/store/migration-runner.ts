@@ -101,10 +101,25 @@ const migrateToLatest = Effect.fn('store.migrateToLatest')(function* (handle: Sq
         // Recheck under the SQLite write lock, since another opener may have migrated first.
         const lockedAppliedVersions = yield* readAppliedVersions(handle);
 
+        if ((lockedAppliedVersions.at(-1) ?? 0) > latestKnownVersion)
+          return yield* Effect.fail(
+            new StoreError('SCHEMA_TOO_NEW', 'A newer writer migrated this store; upgrade attest.'),
+          );
+
         if (!lockedAppliedVersions.includes(migration.version)) {
           yield* storeCall('WRITE_FAILED', 'Could not apply the schema migration.', () =>
             handle.exec(migration.sql),
           );
+
+          if ('backfill' in migration)
+            yield* storeCall('WRITE_FAILED', 'Could not backfill dashboard totals.', () =>
+              migration.backfill(handle),
+            );
+
+          if ('afterSql' in migration)
+            yield* storeCall('WRITE_FAILED', 'Could not create dashboard indexes.', () =>
+              handle.exec(migration.afterSql),
+            );
           yield* storeCall('WRITE_FAILED', 'Could not record the schema migration.', () =>
             handle
               .prepare('INSERT INTO schema_migrations (version, name, applied_at) VALUES (?, ?, ?)')

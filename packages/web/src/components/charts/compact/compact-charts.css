@@ -1,0 +1,278 @@
+.attest-compact-chart {
+  --chart-ink: var(--ink, var(--text, CanvasText));
+  --chart-fail: var(--fail, #ff5c00);
+  --chart-fail-soft: var(--fail-soft, #ffc29c);
+  --chart-decline: var(--fail-text, #9a4619);
+  --chart-line: var(--line, var(--border, GrayText));
+  color: var(--chart-ink);
+  min-width: 0;
+  width: 100%;
+  font-family: inherit;
+}
+.attest-compact-chart h3 {
+  font-size: 15px;
+  font-weight: 600;
+  margin: 0;
+}
+.attest-chart-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.attest-chart-heading button {
+  background: var(--bg, Canvas);
+  font: inherit;
+  color: inherit;
+  padding: 5px 9px;
+  border: 1px solid var(--chart-line);
+  cursor: pointer;
+}
+.attest-chart-heading button[aria-pressed='true'] {
+  background: var(--chart-ink);
+  color: var(--on-ink, var(--bg, Canvas));
+}
+.attest-chart-readout {
+  height: 186px;
+  box-sizing: border-box;
+  flex-shrink: 0;
+  padding: 8px 0;
+  display: grid;
+  grid-template-rows: 32px repeat(3, 36px) 18px;
+  gap: 3px;
+  font-size: 12px;
+  overflow: hidden;
+}
+.attest-chart-readout > * {
+  min-width: 0;
+  line-height: 18px;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+.attest-chart-readout > .attest-chart-identity {
+  display: block;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.attest-chart-readout strong {
+  font-size: 26px;
+  font-weight: 600;
+  line-height: 1.2;
+}
+.attest-compact-chart svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  overflow: visible;
+}
+.attest-compact-chart svg text {
+  fill: var(--muted, GrayText);
+  font:
+    11px system-ui,
+    sans-serif;
+}
+.attest-chart-grid {
+  stroke: var(--chart-line);
+  stroke-width: 1;
+}
+.attest-chart-line {
+  fill: none;
+  stroke: var(--chart-ink);
+  stroke-width: 2;
+}
+.attest-chart-area {
+  fill: var(--chart-ink);
+  opacity: 0.04;
+}
+.attest-chart-down-line {
+  fill: none;
+  stroke: var(--chart-fail);
+  stroke-width: 2;
+}
+.attest-chart-shortfall {
+  fill: var(--chart-fail-soft);
+}
+.attest-chart-point,
+.attest-chart-bar-pass {
+  fill: var(--chart-ink);
+}
+.attest-chart-point.rail-running {
+  fill: var(--bg, Canvas);
+  stroke: var(--chart-ink);
+  stroke-width: 2;
+}
+.attest-chart-point.rail-incomplete {
+  fill: var(--bg, Canvas);
+  stroke: var(--muted, GrayText);
+  stroke-width: 2;
+}
+.attest-chart-triangle,
+.attest-chart-bar-fail {
+  fill: var(--chart-fail);
+}
+.attest-chart-halo {
+  fill: none;
+  stroke: var(--chart-ink);
+  stroke-width: 1;
+}
+.attest-chart-hit {
+  fill: transparent;
+}
+.attest-chart-mark {
+  cursor: pointer;
+}
+.attest-chart-mark.is-active .attest-chart-hit,
+.attest-chart-dense-mark.is-active .attest-chart-hit,
+.attest-chart-native-mark.is-active .attest-chart-hit {
+  fill: var(--chart-ink);
+  fill-opacity: 0.055;
+}
+.attest-chart-mark:focus-visible {
+  outline: 2px solid var(--chart-ink);
+  outline-offset: 2px;
+}
+.attest-chart-heading button:focus-visible {
+  outline: 2px solid var(--chart-ink);
+  outline-offset: 2px;
+}
+.attest-chart-decline {
+  color: var(--chart-decline);
+}
+.attest-chart-key {
+  font-size: 11px;
+  color: var(--muted, GrayText);
+  margin: 8px 0 0;
+}
+@media (prefers-reduced-motion: reduce) {
+  .attest-compact-chart *,
+  .attest-compact-chart *::before,
+  .attest-compact-chart *::after {
+    animation: none;
+    transition: none;
+  }
+}
+
+.attest-chart-selection {
+  fill: none;
+  stroke: var(--chart-ink);
+  stroke-width: 2;
+  stroke-dasharray: 3 2;
+  pointer-events: none;
+}
+.attest-chart-shortfall,
+.attest-chart-halo,
+.attest-chart-down-line,
+.attest-chart-line,
+.attest-chart-area,
+.attest-chart-grid,
+.attest-compact-chart svg text {
+  pointer-events: none;
+}
+
+/* Explicit scoped colors also cover engines without light-dark(). */
+:where(:root[data-theme='dark']) .attest-compact-chart,
+.attest-compact[data-theme='dark'] .attest-compact-chart {
+  --chart-fail: var(--fail, #ff6a1a);
+  --chart-fail-soft: var(--fail-soft, #9a4619);
+  --chart-decline: var(--fail-text, #ffc29c);
+}
+.attest-compact[data-theme='light'] .attest-compact-chart {
+  --chart-fail: var(--fail, #ff5c00);
+  --chart-fail-soft: var(--fail-soft, #ffc29c);
+  --chart-decline: var(--fail-text, #9a4619);
+}
+@media (prefers-color-scheme: dark) {
+  :where(:root:not([data-theme]), :root[data-theme='system']) .attest-compact-chart,
+  .attest-compact[data-theme='system'] .attest-compact-chart {
+    --chart-fail: var(--fail, #ff6a1a);
+    --chart-fail-soft: var(--fail-soft, #9a4619);
+    --chart-decline: var(--fail-text, #ffc29c);
+  }
+}
+@supports (color: light-dark(white, black)) {
+  .attest-compact-chart {
+    --chart-fail: var(--fail, light-dark(#ff5c00, #ff6a1a));
+    --chart-fail-soft: var(--fail-soft, light-dark(#ffc29c, #9a4619));
+    --chart-decline: var(--fail-text, light-dark(#9a4619, #ffc29c));
+  }
+}
+.attest-chart-day-selection {
+  fill: var(--chart-ink);
+  stroke: none;
+}
+.attest-chart-actions,
+.attest-compact-chart > .attest-chart-chooser {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(72px, 0.6fr);
+  align-items: end;
+  gap: 8px;
+  height: 58px;
+  margin-bottom: 8px;
+  font-size: 12px;
+}
+.attest-chart-chooser label,
+.attest-chart-actions > label {
+  display: grid;
+  grid-template-rows: 18px 36px;
+  gap: 4px;
+  min-width: 0;
+}
+.attest-chart-dense-mark {
+  pointer-events: none;
+}
+.attest-chart-native-mark {
+  cursor: pointer;
+}
+.attest-chart-native-mark > :not(.attest-chart-hit) {
+  pointer-events: none;
+}
+.attest-chart-static-mark {
+  cursor: default;
+}
+.attest-compact-chart .attest-chart-action,
+.attest-chart-chooser select {
+  box-sizing: border-box;
+  width: 100%;
+  border: 1px solid var(--chart-line);
+  border-radius: 4px;
+  padding: 6px 10px;
+  background: var(--bg, Canvas);
+  color: inherit;
+  font: inherit;
+  min-width: 0;
+  min-height: 36px;
+}
+.attest-compact-chart .attest-chart-action {
+  display: block;
+  font-size: 12px;
+  line-height: 22px;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.attest-chart-action:hover:not([aria-disabled='true']) {
+  background: var(--chart-line);
+}
+.attest-chart-action[aria-disabled='true'] {
+  cursor: default;
+  text-decoration: none;
+  color: var(--muted, GrayText);
+}
+.attest-chart-action:focus-visible,
+.attest-chart-chooser select:focus-visible {
+  outline: 2px solid var(--chart-ink);
+  outline-offset: 2px;
+}
+.attest-compact-chart svg .attest-chart-empty {
+  paint-order: stroke;
+  stroke: var(--bg, Canvas);
+  stroke-width: 5px;
+  stroke-linejoin: round;
+}

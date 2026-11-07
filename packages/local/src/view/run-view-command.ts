@@ -30,7 +30,7 @@ type ViewCatalog = { catalog: ProjectCatalog; control: RunControl | undefined };
 
 /**
  * Opens the catalog for one view scope. A store scope creates the store when it is missing, as
- * `attest view` always has. A registry scope creates nothing and opens stores on first read; it
+ * the dashboard always has. A registry scope creates nothing and opens stores on first read; it
  * reads the registry once here so an unreadable file fails in the terminal before the server
  * starts, not later as a generic API error in the browser.
  */

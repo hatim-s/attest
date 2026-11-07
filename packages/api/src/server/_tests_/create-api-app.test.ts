@@ -50,6 +50,27 @@ const cases: CaseRecord[] = [
 ];
 
 const source: RunSource = {
+  getProjectOverview: () =>
+    Effect.succeed({
+      evals: { items: [] },
+      runningRunCount: 0,
+      runningRunCountTruncated: false,
+      lastRunAt: null,
+    }),
+  listEvals: () => Effect.succeed({ items: [] }),
+  listEvalRuns: () => Effect.succeed({ items: [] }),
+  getEvalCaseWindow: () => Effect.succeed({ runs: [], items: [] }),
+  getCaseHistory: () => Effect.succeed({ items: [] }),
+  getActivity: () =>
+    Effect.succeed({
+      coveredFrom: '2026-01-01T00:00:00.000Z',
+      coveredTo: '2026-01-02T00:00:00.000Z',
+      timezone: 'UTC',
+      days: [],
+      truncated: false,
+    }),
+  listRunSuites: () => Effect.succeed([]),
+
   listRuns: () => Effect.succeed({ items: runs }),
   getRun: (runId) =>
     Effect.gen(function* () {

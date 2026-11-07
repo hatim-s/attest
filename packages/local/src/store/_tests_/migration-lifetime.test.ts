@@ -100,7 +100,7 @@ describe('migration lifetime', () => {
     expect(events).toEqual(['committing']);
     releaseCommit();
     await result;
-    expect(events).toEqual(['committing', 'committed', 'closed']);
+    expect(events).toEqual(['committing', 'committed', 'committing', 'committed', 'closed']);
   });
 
   it('surfaces failed cleanup after success and preserves primary defects', async () => {

@@ -192,7 +192,24 @@ const runAndRecord = async (
   store: Awaited<ReturnType<typeof openStore>>,
   resolvedCase: ResolvedEvalCase<ResolvedEvalCaseInput>,
 ) => {
-  const run = await readRun();
+  const inputRun = await readRun();
+
+  const run = {
+    ...inputRun,
+    snapshot: {
+      ...inputRun.snapshot,
+      selected_test_ids: [resolvedCase.test_id],
+      selected_cases: [
+        {
+          configured_index: resolvedCase.configured_index,
+          test_id: resolvedCase.test_id,
+          case_id: resolvedCase.case_id,
+          source: resolvedCase.source,
+        },
+      ],
+    },
+  };
+
   const runner = await acquireNative(createEvalCaseRunner(root, store.cache, run));
 
   const result = await runNative(

@@ -1,0 +1,182 @@
+import { nativeHitRegions } from '../chart-layout.js';
+import { describe, expect, it } from 'vitest';
+import { prepareTrend, passRate, TREND_LIMIT, type TrendRun } from '../trend-model.js';
+import { prepareActivity, ACTIVITY_LIMIT, type ActivityDay } from '../daily-model.js';
+
+const complete = {
+  id: 'a',
+  label: 'a',
+  startedAt: 100,
+  runStatus: 'completed',
+  state: 'complete',
+  passRate: 0.8,
+  counts: { planned: 10, recorded: 10, passed: 8, failed: 2, errored: 0, skipped: 0, notRun: 0 },
+} satisfies TrendRun;
+
+const window = { from: '2026-11-05', to: '2026-11-06', utcOffsetMinutes: 330 };
+
+const day = {
+  day: '2026-11-06',
+  runCount: 2,
+  passed: 8,
+  failed: 1,
+  errored: 1,
+  skipped: 2,
+} satisfies ActivityDay;
+
+describe('eval slice trend', () => {
+  it('plots a complete eval B when eval A caused the overall run to fail', () => {
+    const evalB = { ...complete, runStatus: 'failed' } satisfies TrendRun;
+
+    const evalA = {
+      ...evalB,
+      state: 'incomplete',
+      counts: { ...complete.counts, passed: 7, errored: 1 },
+    } satisfies TrendRun;
+
+    expect(passRate(evalB)).toBe(0.8);
+    expect(passRate(evalA)).toBeNull();
+    expect(prepareTrend([evalB], 'run')[0]?.rate).toBe(0.8);
+  });
+
+  it('keeps running/incomplete slices off the line', () => {
+    expect(passRate({ ...complete, state: 'running' })).toBeNull();
+    expect(passRate({ ...complete, state: 'incomplete', runStatus: 'cancelled' })).toBeNull();
+  });
+
+  it('preserves unknown plans and compares recorded rates without claiming case regressions', () => {
+    const smaller = {
+      ...complete,
+      id: 'b',
+      passRate: 0.6,
+      startedAt: 200,
+      counts: { ...complete.counts, planned: null, notRun: null, recorded: 5, passed: 3 },
+    } satisfies TrendRun;
+
+    const points = prepareTrend(
+      [smaller, { ...complete, id: 'rail', startedAt: 150, state: 'incomplete' }, complete],
+      'run',
+    );
+
+    expect(points.map((point) => point.run.id)).toEqual(['a', 'rail', 'b']);
+    expect(points[2]?.rate).toBe(0.6);
+    expect(points[2]?.comparison?.previousId).toBe('a');
+    expect(points[2]?.comparison?.points).toBeCloseTo(-20);
+    expect(points[2]?.comparison?.selectionChanged).toBe(true);
+    expect(points[2]?.run.counts.notRun).toBeNull();
+  });
+
+  it('orders timestamp ties by identity and places singleton and date points deterministically', () => {
+    expect(prepareTrend([], 'date')).toEqual([]);
+    expect(prepareTrend([complete], 'run')[0]?.x).toBe(0.5);
+    expect(prepareTrend([complete, { ...complete, id: 'z' }], 'date').map(({ x }) => x)).toEqual([
+      0.5, 0.5,
+    ]);
+    expect(
+      prepareTrend([{ ...complete, id: 'z' }, complete], 'date').map(({ run }) => run.id),
+    ).toEqual(['a', 'z']);
+    expect(
+      prepareTrend(
+        [
+          { ...complete, id: 'b', startedAt: 200 },
+          complete,
+          { ...complete, id: 'c', startedAt: 500 },
+        ],
+        'date',
+      ).map(({ x }) => x),
+    ).toEqual([0, 0.25, 1]);
+    expect(() =>
+      prepareTrend(
+        Array.from({ length: TREND_LIMIT + 1 }, () => complete),
+        'run',
+      ),
+    ).toThrow('Trend window exceeds 200 slices');
+  });
+});
+
+describe('daily activity', () => {
+  it('orders days and keeps skipped counts separate from the shared diverging scale', () => {
+    const activity = prepareActivity(
+      [day, { ...day, day: '2026-11-05', passed: 2, failed: 3, errored: 2, skipped: 20 }],
+      window,
+    );
+
+    expect(activity.ordered.map(({ day }) => day)).toEqual(['2026-11-05', '2026-11-06']);
+    expect(activity.up).toBe(8);
+    expect(activity.down).toBe(5);
+    expect(activity.totals).toEqual({
+      runCount: 4,
+      passed: 10,
+      failed: 4,
+      errored: 3,
+      skipped: 22,
+    });
+  });
+
+  it('supports empty/single windows and enforces a bounded summary input', () => {
+    expect(prepareActivity([], window).totals.runCount).toBe(0);
+    expect(prepareActivity([day], { ...window, from: day.day }).ordered).toEqual([day]);
+    expect(() =>
+      prepareActivity(
+        Array.from({ length: ACTIVITY_LIMIT + 1 }, () => day),
+        window,
+      ),
+    ).toThrow('Activity window exceeds 92 days');
+  });
+});
+
+it('fills sparse calendar gaps in the declared offset and bounds inclusive buckets', () => {
+  const filled = prepareActivity([day], {
+    from: '2026-11-04',
+    to: '2026-11-06',
+    utcOffsetMinutes: 330,
+  });
+
+  expect(filled.ordered.map(({ day, runCount }) => [day, runCount])).toEqual([
+    ['2026-11-04', 0],
+    ['2026-11-05', 0],
+    ['2026-11-06', 2],
+  ]);
+  expect(
+    prepareActivity([], { from: '2026-01-01', to: '2026-04-02', utcOffsetMinutes: -480 }).ordered,
+  ).toHaveLength(92);
+
+  for (const to of ['2026-04-03', 'invalid', '2025-12-31', '2026-02-30'])
+    expect(() => prepareActivity([], { from: '2026-01-01', to, utcOffsetMinutes: 0 })).toThrow(
+      RangeError,
+    );
+  expect(passRate({ ...complete, passRate: 0.123 })).toBe(0.123);
+});
+
+it('partitions native hit regions by nearest identity within bounded mark squares', () => {
+  const centers = [
+    { x: 44, y: 78 },
+    { x: 54, y: 78 },
+    { x: 54, y: 88 },
+    { x: 54, y: 88 },
+    { x: 353, y: 198 },
+  ];
+
+  const regions = nativeHitRegions(centers);
+  expect(regions[3]).toBe('');
+
+  for (const [i, path] of regions.entries()) {
+    if (i === 3) continue;
+    const center = centers[i]!;
+    const vertices = [...path.matchAll(/(-?[\d.]+),(-?[\d.]+)/g)];
+    expect(vertices.length).toBeGreaterThanOrEqual(3);
+
+    for (const vertex of vertices) {
+      const x = Number(vertex[1]),
+        y = Number(vertex[2]);
+
+      expect(Math.abs(x - center.x)).toBeLessThanOrEqual(24);
+      expect(Math.abs(y - center.y)).toBeLessThanOrEqual(24);
+
+      for (const other of centers)
+        expect(Math.hypot(x - center.x, y - center.y)).toBeLessThanOrEqual(
+          Math.hypot(x - other.x, y - other.y) + 1e-9,
+        );
+    }
+  }
+});

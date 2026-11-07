@@ -67,14 +67,14 @@ const runOk = async (packed: PackedCli, argv: readonly string[], root: string): 
   expect(parseWithSchemaSync(cliResultSchema, JSON.parse(result.stdout)).ok).toBe(true);
 };
 
-/** Starts `attest view` on a free loopback port and returns its API origin and a stop function. */
+/** Starts `attest web` on a free loopback port and returns its API origin and a stop function. */
 const startView = async (
   packed: PackedCli,
   root: string,
 ): Promise<{ api: string; stop: () => Promise<void> }> => {
   const child = spawn(
     process.execPath,
-    ['--no-warnings', packed.cliPath, 'view', '--no-open', '--port', '0'],
+    ['--no-warnings', packed.cliPath, 'web', '--no-open', '--port', '0'],
     {
       cwd: root,
       env: { ...process.env, ATTEST_HOME: packed.attestHome },
@@ -95,15 +95,15 @@ const startView = async (
   child.stdout.setEncoding('utf8');
 
   const origin = new Promise<string>((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error('attest view did not start in 30s.')), 30_000);
+    const timer = setTimeout(() => reject(new Error('attest web did not start in 30s.')), 30_000);
 
     child.once('exit', (code) => {
       clearTimeout(timer);
-      reject(new Error(`attest view exited with ${String(code)} before it was ready.`));
+      reject(new Error(`attest web exited with ${String(code)} before it was ready.`));
     });
     child.stdout.on('data', (chunk: string) => {
       stdout += chunk;
-      const match = /Attest view: (http:\/\/127\.0\.0\.1:\d+)\//u.exec(stdout);
+      const match = /Attest web: (http:\/\/127\.0\.0\.1:\d+)\//u.exec(stdout);
 
       if (match?.[1] === undefined) return;
       clearTimeout(timer);

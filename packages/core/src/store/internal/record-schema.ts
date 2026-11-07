@@ -11,6 +11,7 @@ import {
   type RawExcerpt,
 } from '@attest/contracts';
 import * as Schema from 'effect/Schema';
+import { indexedTimestampSchema } from '../../records/dashboard-schemas.js';
 
 const isoTimestampSchema = Schema.String.check(
   Schema.makeFilter(
@@ -139,7 +140,7 @@ const runMetadataSchema = stripStruct({
 const runRecordBaseSchema = stripStruct({
   ...runMetadataSchema.from.schema.fields,
   id: nonemptyStringSchema,
-  createdAt: isoTimestampSchema,
+  createdAt: indexedTimestampSchema,
   summary: Schema.optional(summarySchema),
 });
 

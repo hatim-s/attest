@@ -131,7 +131,10 @@ describe('SQLite store database', () => {
     const rows = await handle.prepare('SELECT version, name FROM schema_migrations').all();
     await handle.close();
 
-    expect(rows).toEqual([{ version: 1, name: 'initial' }]);
+    expect(rows).toEqual([
+      { version: 1, name: 'initial' },
+      { version: 2, name: 'dashboard-totals' },
+    ]);
   });
 
   it('serializes concurrent open and migration for one resolved path', async () => {
@@ -142,7 +145,7 @@ describe('SQLite store database', () => {
     const handle = valueFromExit(await Effect.runPromiseExit(openSqliteHandle(path)));
     const rows = await handle.prepare('SELECT version FROM schema_migrations').all();
     await handle.close();
-    expect(rows).toEqual([{ version: 1 }]);
+    expect(rows).toEqual([{ version: 1 }, { version: 2 }]);
   });
 
   it('rejects a schema version newer than this attest build', async () => {
@@ -307,6 +310,7 @@ describe('SQLite store database', () => {
     valueFromExit(await Effect.runPromiseExit(migrateToLatest(handle)));
     expect(await handle.prepare('SELECT version FROM schema_migrations').all()).toEqual([
       { version: 1 },
+      { version: 2 },
     ]);
     await handle.exec('CREATE TABLE transaction_items (id INTEGER PRIMARY KEY)');
     await handle.begin();

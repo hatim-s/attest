@@ -10,7 +10,7 @@ interface SqliteStatement {
 interface SqliteHandle {
   prepare(sql: string): SqliteStatement;
   exec(sql: string): Promise<void>;
-  begin(): Promise<void>;
+  begin(mode?: 'read'): Promise<void>;
   commit(): Promise<void>;
   rollback(): Promise<void>;
   close(): Promise<void>;

@@ -91,7 +91,7 @@ file, including that timestamp.
 create `runs.db-wal` and `runs.db-shm` while open. Eval persistence records immutable run metadata,
 case attempts, raw normalized evidence, metric evaluations, lifecycle state, and summary.
 
-`attest eval run`, `attest agent test --record`, `attest diff`, `attest report`, and `attest view`
+`attest eval run`, `attest agent test --record`, `attest diff`, `attest report`, and `attest web`
 use this store. The read surfaces accept `--store <path>`; the eval writer is project-local and
 validates that `.attest` and the database are not unsafe symlink escapes.
 
@@ -179,7 +179,7 @@ Artifacts selected by a caller are outside the fixed authored tree:
   replace it without `--force`.
 - `attest trace convert <input> --output <path>` writes normalized `attest.trace` JSON and
   also refuses replacement without `--force`.
-- `attest view` serves a read snapshot; it does not author project resources.
+- `attest web` serves a read snapshot; it does not author project resources.
 
 These paths are not added to `attest.project.json` and do not affect the project hash.
 

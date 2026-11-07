@@ -333,10 +333,12 @@ describe('view server', () => {
 
       if (Exit.isFailure(outcome)) {
         expect(outcome.cause.reasons[0]).toMatchObject({ error: { code: 'EADDRINUSE' } });
+
         const receipts = Context.getOrUndefined(
           Cause.annotations(outcome.cause),
           OperationReleases,
         );
+
         expect(receipts).toHaveLength(1);
         expect(receipts?.[0]).toEqual(Exit.fail(cleanup));
         expect(Cause.hasDies(outcome.cause)).toBe(false);

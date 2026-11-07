@@ -29,7 +29,8 @@ const openNodeSqliteHandle = async (
       };
     },
     exec: (sql) => Promise.resolve().then(() => database.exec(sql)),
-    begin: () => Promise.resolve().then(() => database.exec('BEGIN IMMEDIATE')),
+    begin: (mode) =>
+      Promise.resolve().then(() => database.exec(mode === 'read' ? 'BEGIN' : 'BEGIN IMMEDIATE')),
     commit: () => Promise.resolve().then(() => database.exec('COMMIT')),
     rollback: () => Promise.resolve().then(() => database.exec('ROLLBACK')),
     close: () => Promise.resolve().then(() => database.close()),
