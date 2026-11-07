@@ -808,9 +808,11 @@ protocol are unchanged. The integrated S8b lane removes the unused PromiseStoreO
 The local `main` merge retains native `RunSource`, `RunStore`, `ProjectCatalog` and API client
 operations. The new `getProjectOverview`, `listEvals`, `listEvalRuns`, `getEvalCaseWindow`,
 `getCaseHistory`, `getActivity` and `listRunSuites` methods return `Effect<A, StoreError>` with
-no required services. Dashboard reads hold one controlled Kysely read transaction across all
-statements. Commit or rollback is joined before the store owner can close, and cleanup failure
-retains the primary Cause through `finishStoreCleanup`.
+no required services. Dashboard reads hold one Kysely read transaction across all statements. An Effect resource
+bracket owns the connection independently of BEGIN, COMMIT and ROLLBACK, so a failed command
+still releases the shared path lock. Failed commits attempt rollback. Acquisition and cleanup
+are masked, while the read body remains interruptible. Commit or rollback is joined before the
+store owner can close, and cleanup failure retains the primary Cause through `finishStoreCleanup`.
 
 Projection writes and migration backfills retain SQL-only Kysely/driver callbacks inside the
 masked native transaction owner. They do not execute an Effect runtime. Version 2 SQL, selected

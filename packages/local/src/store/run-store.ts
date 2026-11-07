@@ -100,26 +100,90 @@ class SqliteRunStore implements RunStore {
 
   /** Each composed read uses one WAL snapshot across its bounded statements. */
   #dashboardRead = <T>(read: (dashboard: DashboardReads) => Effect.Effect<T, StoreError>) =>
-    Effect.uninterruptible(
+    Effect.uninterruptibleMask((restore) =>
       Effect.gen(
         function* (this: SqliteRunStore) {
-          const transaction = yield* storeCall(
-            'READ_FAILED',
-            'Could not start dashboard snapshot.',
-            () => this.#database.startTransaction().setAccessMode('read only').execute(),
-          );
+          let connectionCleanup: Exit.Exit<void, StoreError> = Exit.void;
 
-          const primary = yield* Effect.exit(read(new DashboardReads(transaction)));
+          const primary = yield* Effect.exit(
+            restore(
+              Effect.acquireUseRelease(
+                storeCall('READ_FAILED', 'Could not start dashboard snapshot.', async () => {
+                  let publish: (database: Kysely<Database>) => void = () => {};
 
-          const cleanup = yield* Effect.exit(
-            storeCall('READ_FAILED', 'Could not release dashboard snapshot.', () =>
-              Exit.isSuccess(primary)
-                ? transaction.commit().execute()
-                : transaction.rollback().execute(),
+                  let reject: (cause: unknown) => void = () => {};
+
+                  const ready = new Promise<Kysely<Database>>((resolve, fail) => {
+                    publish = resolve;
+                    reject = fail;
+                  });
+
+                  let release = () => {};
+
+                  const released = new Promise<void>((resolve) => {
+                    release = resolve;
+                  });
+
+                  // The callback owns the driver connection independently of transaction commands.
+                  const finished = this.#database.connection().execute(async (database) => {
+                    publish(database);
+                    await released;
+                  });
+
+                  void finished.catch(reject);
+                  const database = await ready;
+
+                  return { database, release, finished };
+                }),
+                ({ database }) =>
+                  Effect.uninterruptibleMask(() =>
+                    Effect.gen(function* () {
+                      const transaction = yield* storeCall(
+                        'READ_FAILED',
+                        'Could not start dashboard snapshot.',
+                        () => database.startTransaction().setAccessMode('read only').execute(),
+                      );
+
+                      const primary = yield* Effect.exit(
+                        Effect.interruptible(read(new DashboardReads(transaction))),
+                      );
+
+                      const cleanup = yield* Effect.exit(
+                        storeCall('READ_FAILED', 'Could not release dashboard snapshot.', () =>
+                          Exit.isSuccess(primary)
+                            ? transaction.commit().execute()
+                            : transaction.rollback().execute(),
+                        ),
+                      );
+
+                      if (Exit.isSuccess(primary) && Exit.isFailure(cleanup)) {
+                        const rollback = yield* Effect.exit(
+                          storeCall('READ_FAILED', 'Could not release dashboard snapshot.', () =>
+                            transaction.rollback().execute(),
+                          ),
+                        );
+
+                        return yield* finishStoreCleanup(Exit.failCause(cleanup.cause), rollback);
+                      }
+
+                      return yield* finishStoreCleanup(primary, cleanup);
+                    }),
+                  ),
+                ({ release, finished }) =>
+                  Effect.gen(function* () {
+                    connectionCleanup = yield* Effect.exit(
+                      storeCall('READ_FAILED', 'Could not release dashboard snapshot.', () => {
+                        release();
+
+                        return finished;
+                      }),
+                    );
+                  }),
+              ),
             ),
           );
 
-          return yield* finishStoreCleanup(primary, cleanup);
+          return yield* finishStoreCleanup(primary, connectionCleanup);
         }.bind(this),
       ),
     );

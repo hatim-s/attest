@@ -1,9 +1,11 @@
+import * as Effect from 'effect/Effect';
+import * as sqliteHandles from '../internal/open-sqlite-handle.js';
 import { readFileSync } from 'node:fs';
 import { mkdtemp, rm, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { AGENT_PROTOCOL, evalRunSchema, parseWithSchemaSync } from '@attest/contracts';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { type StoredCaseExecution } from '@attest/core';
 import { run as runEffect, openFixture, openReadonlyFixture } from './store-fixture.js';
 
@@ -785,3 +787,51 @@ it('keeps store corruption distinct from invalid case-window tokens', async () =
     await handle.close();
   }
 });
+
+it.each(['begin', 'commit'] as const)(
+  'releases the shared path lock after a dashboard %s failure',
+  async (failing) => {
+    const path = await temporaryPath();
+    const writer = await openStore(path);
+    const handle = await runEffect(sqliteHandles.openReadonlySqliteHandle(path));
+    let fail = true;
+    const injected = new Error(`SQLITE_IOERR on ${failing}`);
+
+    const wrapped = {
+      ...handle,
+      [failing]: (...args: Parameters<typeof handle.begin>) => {
+        if (fail) {
+          fail = false;
+
+          return Promise.reject(injected);
+        }
+
+        return handle[failing](...args);
+      },
+    };
+
+    const spy = vi
+      .spyOn(sqliteHandles, 'openReadonlySqliteHandle')
+      .mockReturnValue(Effect.succeed(wrapped));
+
+    let reader;
+
+    try {
+      reader = await openReadonlyRunStore(path);
+    } finally {
+      spy.mockRestore();
+    }
+
+    await expect(runEffect(reader.getProjectOverview())).rejects.toMatchObject({
+      code: 'READ_FAILED',
+      cause: injected,
+    });
+    await expect(
+      runEffect(writer.runs.listRuns().pipe(Effect.timeout('500 millis'))),
+    ).resolves.toEqual({ items: [] });
+    await expect(
+      runEffect(reader.getProjectOverview().pipe(Effect.timeout('500 millis'))),
+    ).resolves.toMatchObject({ runningRunCount: 0 });
+  },
+  2_000,
+);
