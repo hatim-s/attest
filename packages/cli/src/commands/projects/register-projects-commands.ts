@@ -1,5 +1,4 @@
 import * as Effect from 'effect/Effect';
-import { readExitValue } from '../../errors/read-exit-value.js';
 import {
   addProject,
   readRegistry,
@@ -27,6 +26,7 @@ const registerProjectsCommands = ({
   io,
   program,
   registryPath,
+  submit,
   workingDirectory,
 }: CommandContext): void => {
   const projects = program
@@ -37,57 +37,65 @@ const registerProjectsCommands = ({
     .command('list')
     .description('List registered projects.')
     .addOption(commonOption(outputOption()))
-    .action(async (options: CommonCliOptions) => {
-      const { projects: entries } = readExitValue(
-        await Effect.runPromiseExit(readRegistry(registryPath)),
-      );
+    .action((options: CommonCliOptions) =>
+      submit(
+        Effect.gen(function* () {
+          const { projects: entries } = yield* readRegistry(registryPath);
 
-      io.output(renderResult('projects.list', outputFormat(options), entries, renderProjectList));
-    });
+          io.output(
+            renderResult('projects.list', outputFormat(options), entries, renderProjectList),
+          );
+        }),
+      ),
+    );
   projects
     .command('add')
     .description('Register a project directory so `attest web --all` serves it.')
     .argument('[directory]', 'project directory', '.')
     .option('--name <name>', 'display name; defaults to the manifest name or directory name')
     .addOption(commonOption(outputOption()))
-    .action(async (directory: string, options: ProjectsAddOptions) => {
-      const entry = await Effect.runPromiseExit(
-        addProject({
-          registryPath,
-          directory,
-          name: options.name,
-          workingDirectory,
-        }),
-      ).then(readExitValue);
+    .action((directory: string, options: ProjectsAddOptions) =>
+      submit(
+        Effect.gen(function* () {
+          const entry = yield* addProject({
+            registryPath,
+            directory,
+            name: options.name,
+            workingDirectory,
+          });
 
-      io.output(
-        renderResult(
-          'projects.add',
-          outputFormat(options),
-          entry,
-          ({ key, name, root }) => `Registered ${name} as ${key} (${root}).`,
-        ),
-      );
-    });
+          io.output(
+            renderResult(
+              'projects.add',
+              outputFormat(options),
+              entry,
+              ({ key, name, root }) => `Registered ${name} as ${key} (${root}).`,
+            ),
+          );
+        }),
+      ),
+    );
   projects
     .command('remove')
     .description('Remove a project from the registry; its files stay untouched.')
     .argument('<key-or-dir>', 'registered key or project directory')
     .addOption(commonOption(outputOption()))
-    .action(async (keyOrRoot: string, options: CommonCliOptions) => {
-      const entry = await Effect.runPromiseExit(
-        unregisterProject({ registryPath, keyOrRoot, workingDirectory }),
-      ).then(readExitValue);
+    .action((keyOrRoot: string, options: CommonCliOptions) =>
+      submit(
+        Effect.gen(function* () {
+          const entry = yield* unregisterProject({ registryPath, keyOrRoot, workingDirectory });
 
-      io.output(
-        renderResult(
-          'projects.remove',
-          outputFormat(options),
-          entry,
-          ({ key, root }) => `Removed ${key} (${root}).`,
-        ),
-      );
-    });
+          io.output(
+            renderResult(
+              'projects.remove',
+              outputFormat(options),
+              entry,
+              ({ key, root }) => `Removed ${key} (${root}).`,
+            ),
+          );
+        }),
+      ),
+    );
   setCliCommandHelpMetadata(projects, {
     examples: ['attest projects add .', 'attest projects list --output json', 'attest web --all'],
   });

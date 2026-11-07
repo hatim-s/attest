@@ -1,5 +1,4 @@
 import * as Effect from 'effect/Effect';
-import { readExitValue } from '../errors/read-exit-value.js';
 import { diffToJson } from '@attest/core';
 import {
   compareLocalRuns,
@@ -21,7 +20,6 @@ import { openBrowser } from '../view/open-browser.js';
 import { commonOption, outputOption } from './shared/cli-options.js';
 import type { CommandContext } from './shared/command-context.js';
 import { renderResult } from './shared/command-result.js';
-import { withProcessSignals } from './shared/process-signals.js';
 
 type DiffCommandOptions = {
   format: 'human' | 'json';
@@ -83,6 +81,8 @@ const registerRootCommands = ({
   io,
   program,
   registryPath,
+  signal,
+  submit,
   workingDirectory,
 }: CommandContext): void => {
   program
@@ -92,26 +92,23 @@ const registerRootCommands = ({
     .option('--all', 'serve every project in the global registry')
     .option('--port <port>', 'loopback port; 0 chooses a free port', parsePort, 0)
     .option('--no-open', 'do not launch a browser')
-    .action(async (options: ViewCommandOptions) => {
-      const scope = viewScope(options, registryPath);
-
-      await withProcessSignals((signal) =>
-        // Commander owns the native view execution root.
-        Effect.runPromiseExit(
-          runViewCommand({
+    .action((options: ViewCommandOptions) =>
+      submit(
+        Effect.gen(function* () {
+          yield* runViewCommand({
             onReady: async ({ url }) => {
               io.output(`Attest web: ${url}\nPress Ctrl+C to stop.`);
 
               if (options.open) await openBrowser(url);
             },
             port: options.port,
-            scope,
+            scope: viewScope(options, registryPath),
             signal,
             workingDirectory,
-          }),
-        ).then(readExitValue),
-      );
-    });
+          });
+        }),
+      ),
+    );
 
   program
     .command('report')
@@ -120,27 +117,27 @@ const registerRootCommands = ({
     .option('--store <path>', 'SQLite run store path', '.attest/runs.db')
     .option('-o, --output <path>', 'HTML output path')
     .option('--force', 'replace an existing report')
-    .action(async (runId: string, options: ReportCommandOptions) => {
-      const result = readExitValue(
-        await Effect.runPromiseExit(
-          runReportCommand({
+    .action((runId: string, options: ReportCommandOptions) =>
+      submit(
+        Effect.gen(function* () {
+          const result = yield* runReportCommand({
             force: options.force,
             outputPath: options.output,
             runId,
             storePath: options.store,
             workingDirectory,
-          }),
-        ),
-      );
+          });
 
-      io.output(`Wrote ${result.caseCount}-case report to ${result.outputPath}`);
+          io.output(`Wrote ${result.caseCount}-case report to ${result.outputPath}`);
 
-      if (result.truncated) {
-        io.error(
-          `report_truncated: Included the first ${result.caseCount} of ${result.totalCaseCount} cases.`,
-        );
-      }
-    });
+          if (result.truncated) {
+            io.error(
+              `report_truncated: Included the first ${result.caseCount} of ${result.totalCaseCount} cases.`,
+            );
+          }
+        }),
+      ),
+    );
 
   program
     .command('trace')
@@ -151,25 +148,25 @@ const registerRootCommands = ({
     .option('--trace-id <trace-id>', 'trace id to select from a multi-trace export')
     .option('-o, --output <path>', 'Attest trace output path')
     .option('--force', 'replace an existing output file')
-    .action(async (inputPath: string, options: TraceConvertCommandOptions) => {
-      const result = readExitValue(
-        await Effect.runPromiseExit(
-          runTraceConvertCommand({
+    .action((inputPath: string, options: TraceConvertCommandOptions) =>
+      submit(
+        Effect.gen(function* () {
+          const result = yield* runTraceConvertCommand({
             force: options.force,
             inputPath,
             outputPath: options.output,
             traceId: options.traceId,
             workingDirectory,
-          }),
-        ),
-      );
+          });
 
-      io.output(
-        result.outputPath === undefined
-          ? result.json
-          : `Wrote ${result.spanCount}-span trace ${result.traceId} to ${result.outputPath}`,
-      );
-    });
+          io.output(
+            result.outputPath === undefined
+              ? result.json
+              : `Wrote ${result.spanCount}-span trace ${result.traceId} to ${result.outputPath}`,
+          );
+        }),
+      ),
+    );
 
   program
     .command('diff')
@@ -182,30 +179,39 @@ const registerRootCommands = ({
         .choices(['human', 'json'])
         .default('human'),
     )
-    .action(async (baseRunId: string, candidateRunId: string, options: DiffCommandOptions) => {
-      const diff = readExitValue(
-        await Effect.runPromiseExit(
-          compareLocalRuns({
+    .action((baseRunId: string, candidateRunId: string, options: DiffCommandOptions) =>
+      submit(
+        Effect.gen(function* () {
+          const diff = yield* compareLocalRuns({
             baseRunId,
             candidateRunId,
             storePath: options.store,
             workingDirectory,
-          }),
-        ),
-      );
+          });
 
-      io.output(options.format === 'json' ? diffToJson(diff) : renderDiffSummary(diff));
-    });
+          io.output(options.format === 'json' ? diffToJson(diff) : renderDiffSummary(diff));
+        }),
+      ),
+    );
 
   const help = program
     .command('help [command...]')
     .description('Show human or machine-readable help for a registered command path.')
     .addOption(commonOption(outputOption('help output format').default('human')))
-    .action((commandPath: string[], options: ProtocolCommandOptions) => {
-      io.output(
-        renderResult('help', options.output, createCliHelp(program, commandPath), renderCliHelp),
-      );
-    });
+    .action((commandPath: string[], options: ProtocolCommandOptions) =>
+      submit(
+        Effect.sync(() => {
+          io.output(
+            renderResult(
+              'help',
+              options.output,
+              createCliHelp(program, commandPath),
+              renderCliHelp,
+            ),
+          );
+        }),
+      ),
+    );
 
   setCliCommandHelpMetadata(help, {
     examples: ['attest help test case import --output json'],
@@ -216,11 +222,15 @@ const registerRootCommands = ({
     .command('errors')
     .description('List stable CLI error identities, exit codes, and repairs.')
     .addOption(commonOption(outputOption('error catalog output format').default('human')))
-    .action((options: ProtocolCommandOptions) => {
-      io.output(
-        renderResult('errors', options.output, createCliErrorCatalog(), renderCliErrorCatalog),
-      );
-    });
+    .action((options: ProtocolCommandOptions) =>
+      submit(
+        Effect.sync(() => {
+          io.output(
+            renderResult('errors', options.output, createCliErrorCatalog(), renderCliErrorCatalog),
+          );
+        }),
+      ),
+    );
 
   setCliCommandHelpMetadata(errors, {
     examples: ['attest errors --output json'],

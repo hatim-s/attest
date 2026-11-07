@@ -826,6 +826,7 @@ content hash. Rollback or directory-removal failure reports `project_recovery_re
 the primary verification failure, with both Causes retained. Agent and metric command error
 channels preserve dependency failures for CLI redaction and `cause_code` classification.
 Rejected init prompts likewise reach the CLI serializer unchanged.
+
 ## S9b native CLI application programs
 
 Commander actions submit one Effect through `CommandContext.submit`; `run-cli.ts` executes
@@ -859,3 +860,12 @@ The application aborts those runs through their owned controllers, preserving ev
 and the earlier command Cause. Signal listeners span the application join and store release.
 `CliExit` keeps its selected exit code and deferred terminal publisher. Eval cancel composes
 its native result directly, as eval run does; upload failure remains advisory.
+
+## Assembled main CLI commands
+
+The merged `web`, `projects`, `report`, `trace convert`, `diff`, `help` and `errors` actions
+submit one native program to the shared CLI application root. Web uses the root's process signal;
+its scoped server and store are joined before application disposal. Registry and run-store errors
+reach the shared serializer without a command-local runtime. Eval output remains pure rendering.
+The temporary bridge ledger is empty and retained for S10 removal. No wire or storage API changes
+are introduced by this integration.

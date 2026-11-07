@@ -299,16 +299,6 @@ const effectRoots = [
     owner: 'API comparison fixture test root',
   },
   {
-    file: 'packages/cli/src/commands/register-root-commands.ts',
-    operations: ['Effect.runPromiseExit'],
-    owner: 'Commander view, report, trace convert and diff action roots',
-  },
-  {
-    file: 'packages/cli/src/commands/projects/register-projects-commands.ts',
-    operations: ['Effect.runPromiseExit'],
-    owner: 'Commander projects list action root',
-  },
-  {
     file: 'packages/cli/src/_tests_/run-cli.test.ts',
     operations: ['Effect.runPromiseExit'],
     owner: 'CLI scoped persisted report and diff fixture root',

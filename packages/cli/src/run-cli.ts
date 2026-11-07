@@ -269,10 +269,10 @@ const runCliApplication = (
         return Effect.sync(() => signal.removeEventListener('abort', abort));
       });
 
-      // Eval and the two S8b probes own business cancellation and join their terminal evidence.
+      // Eval and probes join terminal evidence; web joins its normal signal-driven shutdown.
       const command = resultCommandName(failingCommand());
 
-      const execution = ['eval.run', 'agent.test', 'metric.test'].includes(command)
+      const execution = ['eval.run', 'agent.test', 'metric.test', 'web'].includes(command)
         ? selected
         : selected === undefined
           ? undefined
