@@ -1,28 +1,11 @@
 import * as Effect from 'effect/Effect';
 import { stripStruct } from '@attest/contracts';
-import {
-  parseWithSchemaSync,
-  parseWithSchema,
-  portableProjectBundleSchema,
-} from '@attest/contracts';
+import { parseWithSchema, portableProjectBundleSchema } from '@attest/contracts';
 import * as Schema from 'effect/Schema';
 
 import { LocalError } from '../errors/local-error.js';
 
 const bearerTokenSchema = Schema.String.check(Schema.isPattern(/^[\x21-\x7e]+$/u));
-
-/** Keeps endpoint failures free of raw response values. */
-// BOUNDARY: Decoded cloud responses are untrusted; each endpoint schema owns their validation.
-const parseCloudEndpoint = <T>(schema: Schema.ConstraintDecoder<T>, value: unknown): T => {
-  try {
-    return parseWithSchemaSync(schema, value);
-  } catch {
-    throw new LocalError(
-      'cloud_request_failed',
-      'Cloud returned a response that does not match the protocol.',
-    );
-  }
-};
 
 const deviceSchema = stripStruct({
   device_code: Schema.String.check(Schema.isMinLength(1)),
@@ -225,7 +208,6 @@ export {
   createdProjectTokenSchema,
   projectTokensSchema,
   projectTokenIdentitySchema,
-  parseCloudEndpoint,
   bearerTokenSchema,
   deviceSchema,
   tokenSchema,

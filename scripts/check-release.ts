@@ -100,12 +100,8 @@ await Effect.runPromise(Effect.scoped(Effect.gen(function* () {
 const runner = yield* createAgentRunner({ handler: () => Effect.succeed({ output: null }), triggerToken: 'release-check' });
 const served = yield* serveAgentRunner(runner, { port: 0 });
 yield* Effect.promise(async () => {
-try {
   const trigger = await fetch(served.url, { method: 'POST', headers: { authorization: 'Bearer release-check', 'content-type': 'application/json' }, body: '{}' });
   assert.equal(trigger.status, 400);
-} finally {
-  // The outer scope owns listener and runner disposal.
-}
 });
 yield* runner.close();
 })));

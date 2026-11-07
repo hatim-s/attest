@@ -1,6 +1,6 @@
 import * as Effect from 'effect/Effect';
 import * as Exit from 'effect/Exit';
-import { observe, ordinaryError, withEvidence } from '../lifecycle.js';
+import { observe, ordinaryError } from '../lifecycle.js';
 import {
   CLI_EVENT_SCHEMA_ID,
   CLI_RESULT_SCHEMA_ID,
@@ -122,7 +122,7 @@ const preOrchestrationFailure = <Payload, BaselineDiff>(
     const delivery = yield* observe(() => failure.onEvent?.(event) ?? Effect.void);
 
     if (Exit.isFailure(delivery) && ordinaryError(delivery.cause) === undefined)
-      return yield* Effect.failCause(withEvidence(delivery.cause, []));
+      return yield* Effect.failCause(delivery.cause);
 
     return {
       run,

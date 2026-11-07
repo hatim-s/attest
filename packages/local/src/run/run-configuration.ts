@@ -174,7 +174,6 @@ const runConfiguration = Effect.fn('runConfiguration')(function* (
 
   const metricSandbox = run.effective_command.resolved.execution?.metric_sandbox;
   const controller = new AbortController();
-  const cancellation = yield* CancellationRegistry;
 
   const task = Effect.scoped(
     Effect.gen(function* () {
@@ -209,7 +208,7 @@ const runConfiguration = Effect.fn('runConfiguration')(function* (
 
       return yield* finishWithRelease(primary, [release]);
     }),
-  ).pipe(Effect.provideService(CancellationRegistry, cancellation), Effect.asVoid);
+  ).pipe(Effect.asVoid);
 
   // Scope closure waits for this evidence owner; business cancellation is supplied by signal.
   const fiber = yield* Effect.forkIn(

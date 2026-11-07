@@ -216,10 +216,9 @@ const withEvalHooks = <Payload>(
               [...(Exit.isFailure(primary) ? [primary.cause] : []), ...releases],
             );
 
-          if (Exit.isFailure(primary))
-            return yield* Effect.failCause(withEvidence(primary.cause, releases));
-
-          return yield* Effect.die(new Error('Missing case result.'));
+          return yield* Exit.isFailure(primary)
+            ? Effect.failCause(withEvidence(primary.cause, releases))
+            : primary;
         }),
       ),
     cleanup: (runId) =>

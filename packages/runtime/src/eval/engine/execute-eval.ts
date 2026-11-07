@@ -190,7 +190,6 @@ const executeOwned = <Payload, BaselineDiff>(
       const fatal = all.find((c) => ordinaryError(c) === undefined);
 
       if (fatal) return yield* Effect.failCause(withEvidence(all[0] ?? fatal, all, failed));
-      Object.defineProperty(failed, 'lifecycleCauses', { value: all });
 
       return failed;
     }
@@ -212,7 +211,6 @@ const executeOwned = <Payload, BaselineDiff>(
     yield* attempt(
       () =>
         Effect.gen(function* () {
-          if (Exit.isFailure(started)) return;
           yield* Effect.suspend(() => runner.beforeRun?.(run.run_id, signal) ?? Effect.void);
 
           const state = yield* executeCases(
@@ -372,7 +370,6 @@ const executeOwned = <Payload, BaselineDiff>(
     const fatal = causes.find((c) => ordinaryError(c) === undefined);
 
     if (fatal) return yield* Effect.failCause(withEvidence(causes[0] ?? fatal, causes, result));
-    Object.defineProperty(result, 'lifecycleCauses', { value: causes });
 
     return result;
   });

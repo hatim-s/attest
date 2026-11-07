@@ -34,7 +34,6 @@ const capError = (message: string): AgentInvocationError =>
  */
 class StreamEvidence {
   text = '';
-  applicationStarted = false;
   private eventCount = 0;
 
   constructor(
@@ -54,7 +53,6 @@ class StreamEvidence {
     this.count(source);
     const pointers = this.agent.redaction?.event_pointers ?? [];
     this.text += `${redactEventEvidence(raw, pointers, this.secrets)}\n`;
-    this.applicationStarted = true;
   }
 
   private count(source: string): void {

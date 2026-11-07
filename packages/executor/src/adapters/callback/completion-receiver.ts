@@ -561,7 +561,7 @@ const createLoopbackCompletionReceiver = Effect.fn('callback.makeReceiver')(func
             Effect.sync(() => entries.clear()),
             stopServer(),
             Fiber.interrupt(idleWorker),
-            ...backgroundCleanup.map((outcome) => outcome),
+            ...backgroundCleanup,
             ...workers.map((worker) =>
               Fiber.interrupt(worker).pipe(
                 Effect.andThen(Fiber.await(worker)),

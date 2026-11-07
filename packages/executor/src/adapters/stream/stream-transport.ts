@@ -34,7 +34,6 @@ type StreamHttpTransport = (
 type ConsumedStream = {
   response: AgentResponseCandidate;
   evidence: string;
-  applicationStarted: boolean;
 };
 
 type ConsumeOptions = {
@@ -137,7 +136,6 @@ const consumeResponse = Effect.fn('stream.consume')(function* (
     return {
       response: terminal,
       evidence: evidence.text,
-      applicationStarted: evidence.applicationStarted,
     };
   };
 
